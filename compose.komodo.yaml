@@ -1,0 +1,50 @@
+services:
+  nas-file-center-api:
+    image: kerwinjhc/nas-file-center:latest
+    container_name: nas-file-center-api
+    volumes:
+      - /tmp/zfsv3/nvme13/15246330601/data/NasFileCenter:/config
+      - /tmp/zfsv3/sata11/15246330601/data:/data:ro
+    networks:
+      - nginx_network
+    ports:
+      - "8089:8080"
+    environment:
+      - CONFIG_DIR=/config
+      - DATA_MOUNT=/data
+      - ALLOWED_ROOTS=/data
+      - QUARANTINE_ROOT=/data/.nas-file-center-trash
+      - ALLOW_MUTATION=false
+      - ALLOW_DELETE=false
+      - PROTECT_LAST_FILE=true
+      - FCLONES_BINARY=/usr/local/bin/fclones
+      - MTIME_REFRESH_DELAY_SECONDS=2
+    restart: unless-stopped
+
+  nas-file-center-worker:
+    image: kerwinjhc/nas-file-center:latest
+    container_name: nas-file-center-worker
+    command:
+      - python
+      - -m
+      - app.worker
+    volumes:
+      - /tmp/zfsv3/nvme13/15246330601/data/NasFileCenter:/config
+      - /tmp/zfsv3/sata11/15246330601/data:/data:ro
+    networks:
+      - nginx_network
+    environment:
+      - CONFIG_DIR=/config
+      - DATA_MOUNT=/data
+      - ALLOWED_ROOTS=/data
+      - QUARANTINE_ROOT=/data/.nas-file-center-trash
+      - ALLOW_MUTATION=false
+      - ALLOW_DELETE=false
+      - PROTECT_LAST_FILE=true
+      - FCLONES_BINARY=/usr/local/bin/fclones
+      - MTIME_REFRESH_DELAY_SECONDS=2
+    restart: unless-stopped
+
+networks:
+  nginx_network:
+    external: true

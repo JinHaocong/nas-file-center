@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from sqlalchemy import BigInteger, Boolean, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+from app.dbtypes import FilesystemId
+
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -61,8 +63,8 @@ class DuplicateFile(Base):
     top_level_dir: Mapped[str] = mapped_column(Text)
     size: Mapped[int] = mapped_column(BigInteger)
     mtime_ns: Mapped[int] = mapped_column(BigInteger, default=0)
-    device: Mapped[int] = mapped_column(BigInteger, default=0)
-    inode: Mapped[int] = mapped_column(BigInteger, default=0)
+    device: Mapped[int] = mapped_column(FilesystemId(), default=0)
+    inode: Mapped[int] = mapped_column(FilesystemId(), default=0)
 
     group: Mapped[DuplicateGroup] = relationship(back_populates="files")
 
@@ -93,11 +95,11 @@ class PlanItem(Base):
     expected_size: Mapped[int] = mapped_column(BigInteger)
     discovery_hash: Mapped[str] = mapped_column(String(256))
     verification_hash: Mapped[str | None] = mapped_column(String(128))
-    expected_keep_device: Mapped[int] = mapped_column(BigInteger, default=0)
-    expected_keep_inode: Mapped[int] = mapped_column(BigInteger, default=0)
+    expected_keep_device: Mapped[int] = mapped_column(FilesystemId(), default=0)
+    expected_keep_inode: Mapped[int] = mapped_column(FilesystemId(), default=0)
     expected_keep_mtime_ns: Mapped[int] = mapped_column(BigInteger, default=0)
-    expected_delete_device: Mapped[int] = mapped_column(BigInteger, default=0)
-    expected_delete_inode: Mapped[int] = mapped_column(BigInteger, default=0)
+    expected_delete_device: Mapped[int] = mapped_column(FilesystemId(), default=0)
+    expected_delete_inode: Mapped[int] = mapped_column(FilesystemId(), default=0)
     expected_delete_mtime_ns: Mapped[int] = mapped_column(BigInteger, default=0)
     state: Mapped[str] = mapped_column(String(32), default="planned", index=True)
     reason: Mapped[str | None] = mapped_column(Text)
@@ -141,8 +143,8 @@ class IndexedPath(Base):
     suffix: Mapped[str] = mapped_column(String(255), default="")
     size: Mapped[int] = mapped_column(BigInteger, default=0)
     mtime_ns: Mapped[int] = mapped_column(BigInteger, default=0)
-    device: Mapped[int] = mapped_column(BigInteger, default=0)
-    inode: Mapped[int] = mapped_column(BigInteger, default=0)
+    device: Mapped[int] = mapped_column(FilesystemId(), default=0)
+    inode: Mapped[int] = mapped_column(FilesystemId(), default=0)
     is_dir: Mapped[bool] = mapped_column(Boolean, default=False)
     first_seen_at: Mapped[datetime] = mapped_column(default=utcnow)
     last_seen_at: Mapped[datetime] = mapped_column(default=utcnow)
@@ -178,8 +180,8 @@ class BatchPlanItem(Base):
     keep_path: Mapped[str | None] = mapped_column(Text)
     expected_size: Mapped[int] = mapped_column(BigInteger, default=0)
     expected_mtime_ns: Mapped[int] = mapped_column(BigInteger, default=0)
-    expected_device: Mapped[int] = mapped_column(BigInteger, default=0)
-    expected_inode: Mapped[int] = mapped_column(BigInteger, default=0)
+    expected_device: Mapped[int] = mapped_column(FilesystemId(), default=0)
+    expected_inode: Mapped[int] = mapped_column(FilesystemId(), default=0)
     expected_hash: Mapped[str | None] = mapped_column(String(128))
     state: Mapped[str] = mapped_column(String(32), default="planned", index=True)
     reason: Mapped[str | None] = mapped_column(Text)

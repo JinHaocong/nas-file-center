@@ -30,7 +30,146 @@ class FileCenterService:
         self.engine, self.SessionLocal = create_engine_and_session(settings.database_path)
         init_db(self.engine)
 
+    def dashboard_summary(self) -> dict:
+        with self.SessionLocal() as session:
+            latest_completed = session.scalar(
+                select(ScanJob).where(ScanJob.status == "completed").order_by(ScanJob.id.desc()).limit(1)
+            )
+            return {
+                "indexed_files": session.scalar(select(func.count(IndexedPath.id)).where(IndexedPath.is_dir.is_(False))) or 0,
+                "indexed_folders": session.scalar(select(func.count(IndexedPath.id)).where(IndexedPath.is_dir.is_(True))) or 0,
+                "scan_count": session.scalar(select(func.count(ScanJob.id))) or 0,
+                "plan_count": session.scalar(select(func.count(BatchPlan.id))) or 0,
+                "duplicate_group_count": session.scalar(select(func.count(DuplicateGroup.id))) or 0,
+                "queued_or_running_jobs": session.scalar(
+                    select(func.count(WorkJob.id)).where(WorkJob.status.in_(["queued", "running"]))
+                ) or 0,
+                "latest_reclaimable_bytes": latest_completed.reclaimable_bytes if latest_completed else 0,
+            }
 
+    def list_scans(self, *, limit: int = 100) -> list[dict]:
+        limit = max(1, min(int(limit), 500))
+        with self.SessionLocal() as session:
+            rows = list(session.scalars(select(ScanJob).order_by(ScanJob.id.desc()).limit(limit)))
+            return [{
+                "id": row.id,
+                "name": row.name,
+                "mode": row.mode,
+                "roots": json.loads(row.roots_json or "[]"),
+                "status": row.status,
+                "total_groups": row.total_groups,
+                "total_files_in_groups": row.total_files_in_groups,
+                "reclaimable_bytes": row.reclaimable_bytes,
+                "error": row.error_text,
+                "created_at": row.created_at,
+            } for row in rows]
+
+    def scan_groups(self, scan_job_id: int, *, limit: int = 200) -> list[dict]:
+        limit = max(1, min(int(limit), 1000))
+        with self.SessionLocal() as session:
+            if session.get(ScanJob, scan_job_id) is None:
+                raise KeyError(scan_job_id)
+            groups = list(session.scalars(
+                select(DuplicateGroup)
+                .where(DuplicateGroup.scan_job_id == scan_job_id)
+                .order_by(DuplicateGroup.file_size.desc(), DuplicateGroup.id)
+                .limit(limit)
+            ))
+            result = []
+            for group in groups:
+                files = list(session.scalars(
+                    select(DuplicateFile).where(DuplicateFile.group_id == group.id).order_by(DuplicateFile.root_id, DuplicateFile.relative_path)
+                ))
+                result.append({
+                    "id": group.id,
+                    "content_hash": group.content_hash,
+                    "file_size": group.file_size,
+                    "member_count": group.member_count,
+                    "reclaimable_bytes": group.file_size * max(group.member_count - 1, 0),
+                    "members": [{
+                        "id": file.id,
+                        "root_id": file.root_id,
+                        "path": file.absolute_path,
+                        "relative_path": file.relative_path,
+                        "top_level_dir": file.top_level_dir,
+                        "size": file.size,
+                        "mtime_ns": file.mtime_ns,
+                    } for file in files],
+                })
+            return result
+
+    def list_plans(self, *, limit: int = 100) -> list[dict]:
+        limit = max(1, min(int(limit), 500))
+        with self.SessionLocal() as session:
+            rows = list(session.scalars(select(BatchPlan).order_by(BatchPlan.id.desc()).limit(limit)))
+            return [{
+                "id": row.id,
+                "name": row.name,
+                "kind": row.kind,
+                "status": row.status,
+                "expected_changes": row.expected_changes,
+                "expected_reclaim_bytes": row.expected_reclaim_bytes,
+                "metadata": json.loads(row.metadata_json or "{}"),
+                "created_at": row.created_at,
+            } for row in rows]
+
+    def list_work_jobs(self, *, limit: int = 100) -> list[dict]:
+        limit = max(1, min(int(limit), 500))
+        with self.SessionLocal() as session:
+            rows = list(session.scalars(select(WorkJob).order_by(WorkJob.id.desc()).limit(limit)))
+            return [{
+                "id": row.id,
+                "kind": row.kind,
+                "status": row.status,
+                "progress_current": row.progress_current,
+                "progress_total": row.progress_total,
+                "state": json.loads(row.state_json or "{}"),
+                "error": row.error_text,
+                "created_at": row.created_at,
+                "started_at": row.started_at,
+                "finished_at": row.finished_at,
+            } for row in rows]
+
+    def list_audit_events(self, *, limit: int = 200) -> list[dict]:
+        limit = max(1, min(int(limit), 1000))
+        with self.SessionLocal() as session:
+            rows = list(session.scalars(select(AuditEvent).order_by(AuditEvent.id.desc()).limit(limit)))
+            result = []
+            for row in rows:
+                try:
+                    details = json.loads(row.details_json or "{}")
+                except json.JSONDecodeError:
+                    details = {"raw": row.details_json}
+                result.append({
+                    "id": row.id,
+                    "timestamp": row.timestamp,
+                    "operation": row.operation,
+                    "path": row.path,
+                    "result": row.result,
+                    "details": details,
+                })
+            return result
+
+    def list_index_roots(self, *, limit: int = 100) -> list[dict]:
+        limit = max(1, min(int(limit), 500))
+        with self.SessionLocal() as session:
+            rows = session.execute(
+                select(
+                    IndexedPath.root_key,
+                    func.sum(func.iif(IndexedPath.is_dir.is_(False), 1, 0)).label("files"),
+                    func.sum(func.iif(IndexedPath.is_dir.is_(True), 1, 0)).label("folders"),
+                    func.max(IndexedPath.last_seen_at).label("last_seen_at"),
+                )
+                .group_by(IndexedPath.root_key)
+                .order_by(IndexedPath.root_key)
+                .limit(limit)
+            ).all()
+            return [{
+                "root": row.root_key,
+                "files": int(row.files or 0),
+                "folders": int(row.folders or 0),
+                "last_seen_at": row.last_seen_at,
+            } for row in rows]
 
     def reindex_root(self, root: str, *, batch_size: int = 1000) -> dict:
         safe_root = require_allowed_path(root, self.settings.allowed_roots)

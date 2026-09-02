@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from pathlib import Path
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
+from fastapi.staticfiles import StaticFiles
+
+from app.ui import router as ui_router
 
 from app.batch.rename import RenameRule
 from app.config import Settings, get_settings
@@ -76,7 +79,7 @@ class PlanCreateRequest(BaseModel):
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     service = FileCenterService(settings)
-    app = FastAPI(title="NAS File Center", version="0.1.0")
+    app = FastAPI(title="NAS File Center", version="0.2.0")
     app.state.service = service
     app.state.settings = settings
 
@@ -89,18 +92,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "allowed_roots": [str(p) for p in settings.allowed_roots],
         }
 
-    @app.get("/", response_class=HTMLResponse)
-    def dashboard():
-        mode = "EXECUTE" if settings.allow_mutation else "SAFE / PREVIEW"
-        delete = "enabled" if settings.allow_delete else "disabled"
-        roots = "".join(f"<li><code>{root}</code></li>" for root in settings.allowed_roots)
-        return f"""<!doctype html><html><head><meta charset='utf-8'><title>NAS File Center</title>
-        <style>body{{font-family:system-ui;max-width:900px;margin:40px auto;padding:0 20px}}code{{background:#eee;padding:2px 5px}}.card{{border:1px solid #ddd;border-radius:12px;padding:18px;margin:14px 0}}</style></head>
-        <body><h1>NAS File Center</h1><div class='card'><b>Mode:</b> {mode}<br><b>Permanent delete:</b> {delete}</div>
-        <div class='card'><h3>Allowed roots</h3><ul>{roots}</ul></div>
-        <div class='card'><h3>API</h3><p><a href='/docs'>Open API / Swagger</a></p></div></body></html>"""
-
-
+    app.mount("/static", StaticFiles(directory=str(Path(__file__).resolve().parent / "static")), name="static")
+    app.include_router(ui_router)
 
     @app.post("/api/indexes")
     def create_index(request: IndexCreateRequest):

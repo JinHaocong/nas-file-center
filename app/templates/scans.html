@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block page_title %}扫描去重{% endblock %}
+{% block page_subtitle %}创建 fclones 精确扫描；默认只发现重复，不执行删除{% endblock %}
+{% block content %}
+<div class="row g-4">
+  <div class="col-xl-5"><div class="card panel-card sticky-xl-top sticky-panel"><div class="card-header"><h2 class="h5 mb-0">新建扫描</h2></div><div class="card-body">
+    <form method="post" action="/ui/scans">
+      <div class="mb-3"><label class="form-label">任务名称</label><input class="form-control" name="name" required value="{{ form.name if form else '' }}" placeholder="例如：百度1 vs 百度2"></div>
+      <div class="mb-3"><label class="form-label">根目录 <span class="text-muted">（每行一个）</span></label><textarea class="form-control font-monospace" name="roots_text" rows="6" required placeholder="/data/A&#10;/data/B">{{ form.roots_text if form else '' }}</textarea><div class="form-text">容器内路径统一从 /data 开始。</div></div>
+      <div class="form-check form-switch mb-3"><input class="form-check-input" type="checkbox" name="isolate" id="isolate" checked><label class="form-check-label" for="isolate">仅匹配不同根目录之间的重复（isolate）</label></div>
+      <div class="row g-2"><div class="col-md-6"><label class="form-label">最小文件大小</label><input class="form-control" name="min_size" placeholder="例如 1M"></div><div class="col-md-6"><label class="form-label">名称匹配</label><input class="form-control" name="name_patterns_text" placeholder="可留空"></div></div>
+      <div class="mt-3"><label class="form-label">排除模式 <span class="text-muted">（每行一个）</span></label><textarea class="form-control" name="exclude_patterns_text" rows="2" placeholder="*.tmp"></textarea></div>
+      <button class="btn btn-primary w-100 mt-4"><i class="bi bi-search"></i> 加入扫描队列</button>
+    </form>
+  </div></div></div>
+  <div class="col-xl-7"><div class="card panel-card"><div class="card-header"><h2 class="h5 mb-0">扫描历史</h2></div><div class="table-responsive"><table class="table table-hover align-middle mb-0"><thead><tr><th>扫描</th><th>状态</th><th class="text-end">重复组</th><th class="text-end">可释放</th></tr></thead><tbody>
+    {% for scan in scans %}<tr><td><a href="/ui/scans/{{ scan.id }}" class="fw-semibold text-decoration-none">{{ scan.name }}</a><div class="small text-muted">#{{ scan.id }} · {{ scan.roots|length }} 个根目录</div></td><td><span class="badge {{ status_class(scan.status) }}">{{ status_zh(scan.status) }}</span></td><td class="text-end">{{ scan.total_groups }}</td><td class="text-end">{{ format_bytes(scan.reclaimable_bytes) }}</td></tr>{% else %}<tr><td colspan="4" class="empty-cell">还没有扫描记录</td></tr>{% endfor %}
+  </tbody></table></div></div></div>
+</div>
+{% endblock %}

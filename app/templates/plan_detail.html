@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block page_title %}计划 #{{ plan.id }}{% endblock %}
+{% block page_subtitle %}{{ plan.name }} · {{ plan.kind }}{% endblock %}
+{% block content %}
+<div class="card panel-card mb-4"><div class="card-body d-flex flex-wrap align-items-center gap-3"><div><div class="text-muted small">当前状态</div><span class="badge {{ status_class(plan.status) }} fs-6">{{ status_zh(plan.status) }}</span></div><div class="vr d-none d-md-block"></div><div><div class="text-muted small">计划项</div><strong class="fs-5">{{ plan['items']|length }}</strong></div><div class="ms-auto d-flex gap-2 flex-wrap">
+{% if plan.status == 'draft' %}<form method="post" action="/ui/plans/{{ plan.id }}/freeze" data-confirm="冻结后将锁定本次计划内容，确认继续？"><button class="btn btn-primary"><i class="bi bi-snow"></i> Freeze 冻结计划</button></form>{% endif %}
+{% if plan.status in ['frozen','partial','ready'] %}<form method="post" action="/ui/plans/{{ plan.id }}/validate"><button class="btn btn-outline-primary"><i class="bi bi-shield-check"></i> 校验</button></form>{% endif %}
+<form method="post" action="/ui/plans/{{ plan.id }}/execute" data-confirm="将按计划执行文件操作。请确认已审阅所有计划项。"><button class="btn btn-danger" data-action="execute" {{ 'disabled' if safe_mode or plan.status not in ['frozen','ready','partial'] else '' }}><i class="bi bi-play-fill"></i> 执行</button></form>
+</div></div></div>
+{% if safe_mode %}<div class="alert alert-success"><i class="bi bi-lock-fill me-2"></i><strong>只读安全模式</strong>：当前 Compose 挂载/环境配置禁止修改，执行按钮已锁定。</div>{% endif %}
+<div class="card panel-card"><div class="card-header"><h2 class="h5 mb-0">计划明细</h2></div><div class="table-responsive"><table class="table table-hover align-middle mb-0"><thead><tr><th>#</th><th>操作</th><th>源</th><th>目标 / 保留</th><th>状态</th></tr></thead><tbody>{% for item in plan['items'] %}<tr><td>{{ item.sequence }}</td><td><span class="badge bg-light text-dark border">{{ item.operation }}</span></td><td class="font-monospace small text-break">{{ item.source }}</td><td class="font-monospace small text-break">{% if item.target %}<div><span class="text-muted">→</span> {{ item.target }}</div>{% endif %}{% if item.keep %}<div><span class="text-success">保留</span> {{ item.keep }}</div>{% endif %}</td><td><span class="badge {{ status_class(item.state) }}">{{ status_zh(item.state) }}</span>{% if item.reason %}<div class="small text-muted mt-1">{{ item.reason }}</div>{% endif %}</td></tr>{% endfor %}</tbody></table></div></div>
+{% endblock %}

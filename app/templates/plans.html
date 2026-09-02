@@ -1,0 +1,4 @@
+{% extends "base.html" %}
+{% block page_title %}执行计划{% endblock %}
+{% block page_subtitle %}所有修改先形成可审阅、可冻结、可校验的计划{% endblock %}
+{% block content %}<div class="card panel-card"><div class="table-responsive"><table class="table table-hover align-middle mb-0"><thead><tr><th>计划</th><th>类型</th><th>状态</th><th class="text-end">变更数</th><th class="text-end">预计释放</th></tr></thead><tbody>{% for plan in plans %}<tr><td><a href="/ui/plans/{{ plan.id }}" class="fw-semibold text-decoration-none">{{ plan.name }}</a><div class="small text-muted">#{{ plan.id }}</div></td><td><code>{{ plan.kind }}</code></td><td><span class="badge {{ status_class(plan.status) }}">{{ status_zh(plan.status) }}</span></td><td class="text-end">{{ plan.expected_changes }}</td><td class="text-end">{{ format_bytes(plan.expected_reclaim_bytes) }}</td></tr>{% else %}<tr><td colspan="5" class="empty-cell">暂无计划</td></tr>{% endfor %}</tbody></table></div></div>{% endblock %}
