@@ -1,0 +1,7 @@
+{
+  "header": {"version": "0.35.0"},
+  "groups": [
+    {"file_len": 4, "file_hash": "abc123", "files": ["/data/A/foo.txt", "/data/B/foo.txt"]},
+    {"size": 7, "hash": "def456", "paths": ["/data/A/二.txt", "/data/B/二.txt", "/data/B/三.txt"]}
+  ]
+}

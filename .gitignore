@@ -1,0 +1,8 @@
+.worktrees/
+__pycache__/
+.pytest_cache/
+.venv/
+config/
+.env
+*.zip
+dist/

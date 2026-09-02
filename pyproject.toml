@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nas-dedupe-center"
+version = "0.1.0"
+description = "Safe NAS duplicate-file planning and execution around fclones"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.116,<1",
+  "uvicorn[standard]>=0.35,<1",
+  "sqlalchemy>=2.0.43,<3",
+  "pydantic-settings>=2.10,<3",
+  "jinja2>=3.1,<4",
+  "python-multipart>=0.0.20,<1",
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest>=8.4,<9",
+  "httpx>=0.28,<1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
