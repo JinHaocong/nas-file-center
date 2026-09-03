@@ -3,29 +3,15 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import heapq
 import json
+import math
 import os
 from pathlib import Path
 import re
+import time
 from uuid import uuid4
 
 
-def natural_sort_key(s: str) -> tuple:
-    """Split string into digits and non-digits for natural alphanumeric sorting."""
-    tokens = re.split(r"(\d+)", s.casefold())
-    return tuple((0, int(token)) if token.isdigit() else (1, token) for token in tokens)
-
-
-class _MaxHeapCandidate:
-    __slots__ = ("sort_key", "val")
-
-    def __init__(self, sort_key: tuple, val: tuple):
-        self.sort_key = sort_key
-        self.val = val
-
-    def __lt__(self, other: _MaxHeapCandidate) -> bool:
-        # Inverted comparison so heapq functions as a max-heap:
-        # the element with the largest sort_key sits at heap[0].
-        return self.sort_key > other.sort_key
+from app.utils.sorting import _MaxHeapCandidate, natural_sort_key
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -47,13 +33,23 @@ from app.models import (
     DuplicateGroup,
     FavoritePath,
     IndexedPath,
+    OrganizerProfile,
     RecentPath,
     ScanJob,
     WorkJob,
     utcnow,
 )
-from app.path_safety import require_allowed_path
-from app.organizers.shaonv import build_stat_rename_proposals, shaonv_stat_name
+from app.path_safety import require_allowed_path, validate_mutation_destination
+from app.organizers.engine import generate_organizer_proposals
+from app.organizers.planner import plan_organizer_operations
+from app.organizers.templates import (
+    ALLOWED_RENAME_VARS,
+    ALLOWED_STATISTICS_VARS,
+    sanitize_extensions,
+    validate_and_normalize_extensions,
+    validate_cleanup_patterns,
+    validate_template,
+)
 from app.planning.engine import CandidateFile, CandidateGroup, generate_plan
 
 
@@ -70,6 +66,7 @@ class FileCenterService:
             initial_admin_username=settings.initial_admin_username,
             initial_admin_password=settings.initial_admin_password,
         )
+        self._preview_snapshots: dict[str, dict[str, Any]] = {}
 
     def dashboard_summary(self) -> dict:
         with self.SessionLocal() as session:
@@ -622,33 +619,6 @@ class FileCenterService:
         ]
 
 
-    def shaonv_preview(self, root: str) -> list[dict]:
-        safe_root = require_allowed_path(root, self.settings.allowed_roots)
-        if not safe_root.is_dir():
-            raise ValueError(f"Not a directory: {safe_root}")
-        items = []
-        target_names: set[str] = set()
-        source_names = {p.name for p in safe_root.iterdir() if p.is_dir() and not p.is_symlink()}
-
-        for source in sorted((p for p in safe_root.iterdir() if p.is_dir() and not p.is_symlink()), key=lambda p: p.name):
-            stats = collect_tree_stats(source)
-            target = source.with_name(shaonv_stat_name(source.name, stats))
-            if target.name in target_names:
-                raise RenameCollisionError(f"Duplicate target: {target}")
-            if target.exists() and target.name not in source_names and target != source:
-                raise RenameCollisionError(f"Target already exists: {target}")
-            target_names.add(target.name)
-            items.append({
-                "source": str(source),
-                "target": str(target),
-                "images": stats.images,
-                "videos": stats.videos,
-                "total_bytes": stats.total_bytes,
-                "has_suspicious_tag": "[存疑]" in source.name,
-                "changed": (target != source),
-            })
-        return items
-
     def rename_preview(self, paths: list[str], rule: RenameRule) -> list[dict]:
         sources = [require_allowed_path(path, self.settings.allowed_roots) for path in paths]
         sources.sort(key=str)
@@ -703,21 +673,45 @@ class FileCenterService:
                 })
         return results
 
-    def create_plan(self, *, name: str, kind: str, items: list[dict]) -> BatchPlan:
+    def create_plan(self, *, name: str, kind: str, items: list[dict], metadata: dict | None = None) -> BatchPlan:
         with self.SessionLocal() as session:
-            plan = BatchPlan(name=name, kind=kind, status="draft", expected_changes=len(items), metadata_json="{}")
+            plan = BatchPlan(
+                name=name,
+                kind=kind,
+                status="draft",
+                expected_changes=len(items),
+                metadata_json=json.dumps(metadata or {}, ensure_ascii=False),
+            )
             session.add(plan)
             session.flush()
+
+            # Track planned target paths from renames/moves within this plan
+            planned_targets: set[str] = {
+                str(validate_mutation_destination(raw["target"], self.settings.allowed_roots))
+                for raw in items
+                if raw.get("operation") in {"rename", "move"} and raw.get("target")
+            }
+
             for sequence, raw in enumerate(items, 1):
                 source = require_allowed_path(raw["source"], self.settings.allowed_roots)
-                if not source.exists():
+                is_valid_source = (
+                    source.exists()
+                    or str(source) in planned_targets
+                    or any(source.is_relative_to(Path(t)) for t in planned_targets)
+                )
+                if not is_valid_source:
                     raise ValueError(f"Source does not exist: {source}")
                 target = raw.get("target")
                 keep = raw.get("keep")
                 protected_dir = raw.get("protected_dir")
-                target_path = str(require_allowed_path(target, self.settings.allowed_roots)) if target else None
+                if target and raw.get("operation") in {"rename", "move"}:
+                    target_path = str(validate_mutation_destination(target, self.settings.allowed_roots))
+                elif target:
+                    target_path = str(require_allowed_path(target, self.settings.allowed_roots))
+                else:
+                    target_path = None
                 keep_path = str(require_allowed_path(keep, self.settings.allowed_roots)) if keep else None
-                metadata = {"protected_dir": str(require_allowed_path(protected_dir, self.settings.allowed_roots))} if protected_dir else {}
+                item_metadata = {"protected_dir": str(require_allowed_path(protected_dir, self.settings.allowed_roots))} if protected_dir else {}
                 session.add(BatchPlanItem(
                     plan_id=plan.id,
                     sequence=raw.get("sequence", sequence),
@@ -731,7 +725,7 @@ class FileCenterService:
                     expected_device=int(raw.get("expected_device", 0) or 0),
                     expected_inode=int(raw.get("expected_inode", 0) or 0),
                     state="planned",
-                    metadata_json=json.dumps(metadata, ensure_ascii=False),
+                    metadata_json=json.dumps(item_metadata, ensure_ascii=False),
                 ))
             session.commit()
             session.refresh(plan)
@@ -758,6 +752,10 @@ class FileCenterService:
                 raise ValueError(f"Plan must be validated before execution (status must be 'ready' or 'partial'), current status={plan.status}")
             plan.status = "executing"
             session.commit()
+
+            plan_meta = json.loads(plan.metadata_json or "{}")
+            is_organizer = plan_meta.get("is_organizer", False)
+            mtime_delay = float(plan_meta.get("mtime_delay_seconds", 0) or 0)
 
             rows = list(session.scalars(select(BatchPlanItem).where(BatchPlanItem.plan_id == plan_id).order_by(BatchPlanItem.sequence)))
             output = []
@@ -792,6 +790,9 @@ class FileCenterService:
                     quarantine_root=self.settings.quarantine_root,
                     plan_id=str(plan_id),
                 )
+                if is_organizer and row.operation == "touch" and result.state == "completed" and mtime_delay > 0:
+                    time.sleep(mtime_delay)
+
                 row.state = result.state
                 row.reason = result.reason
                 if result.result_path is not None:
@@ -1149,3 +1150,521 @@ class FileCenterService:
                 session.commit()
 
         return self.list_recent_paths(user_id, limit=20)
+
+    # =========================================================================
+    # Organizer Profiles Service Methods
+    # =========================================================================
+
+    @staticmethod
+    def _serialize_organizer_profile(profile: OrganizerProfile) -> dict[str, Any]:
+        return {
+            "id": profile.id,
+            "user_id": profile.user_id,
+            "slug": profile.slug,
+            "builtin_version": profile.builtin_version,
+            "name": profile.name,
+            "description": profile.description,
+            "root": profile.root,
+            "recursive": bool(profile.recursive),
+            "image_extensions": json.loads(profile.image_extensions or "[]"),
+            "video_extensions": json.loads(profile.video_extensions or "[]"),
+            "rename_template": profile.rename_template,
+            "statistics_template": profile.statistics_template,
+            "preserve_tags": json.loads(profile.preserve_tags or "[]"),
+            "cleanup_patterns": json.loads(profile.cleanup_patterns or "[]"),
+            "numbering_mode": profile.numbering_mode,
+            "numbering_start": profile.numbering_start,
+            "numbering_padding": profile.numbering_padding,
+            "mtime_mode": profile.mtime_mode,
+            "mtime_delay_seconds": profile.mtime_delay_seconds,
+            "is_builtin": bool(profile.is_builtin),
+            "created_at": profile.created_at.isoformat() if profile.created_at else None,
+            "updated_at": profile.updated_at.isoformat() if profile.updated_at else None,
+        }
+
+    def _validate_profile_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        name = str(payload.get("name") or "").strip()
+        if not name:
+            raise ValueError("方案名称不能为空")
+
+        root = payload.get("root")
+        if root and str(root).strip():
+            safe_root = require_allowed_path(str(root).strip(), self.settings.allowed_roots)
+            clean_root = str(safe_root)
+        else:
+            clean_root = None
+
+        if "image_extensions" in payload and payload["image_extensions"] is not None:
+            image_extensions = validate_and_normalize_extensions(payload["image_extensions"], "image_extensions")
+        else:
+            image_extensions = ["jpg", "jpeg", "png", "webp"]
+
+        if "video_extensions" in payload and payload["video_extensions"] is not None:
+            video_extensions = validate_and_normalize_extensions(payload["video_extensions"], "video_extensions")
+        else:
+            video_extensions = ["mp4", "mov", "mkv"]
+
+        rename_template = str(payload.get("rename_template") or "{name}").strip()
+        r_errors = validate_template(rename_template, ALLOWED_RENAME_VARS)
+        if r_errors:
+            raise ValueError(r_errors[0])
+
+        statistics_template = str(payload.get("statistics_template") or "[{images}P {videos}V {size}]").strip()
+        s_errors = validate_template(statistics_template, ALLOWED_STATISTICS_VARS)
+        if s_errors:
+            raise ValueError(s_errors[0])
+
+        cleanup_patterns = payload.get("cleanup_patterns") if "cleanup_patterns" in payload and payload["cleanup_patterns"] is not None else []
+        if not isinstance(cleanup_patterns, list):
+            raise ValueError("cleanup_patterns 必须为列表")
+        c_errors = validate_cleanup_patterns(cleanup_patterns)
+        if c_errors:
+            raise ValueError(c_errors[0])
+
+        preserve_tags = payload.get("preserve_tags") if "preserve_tags" in payload and payload["preserve_tags"] is not None else []
+        if not isinstance(preserve_tags, list):
+            raise ValueError("preserve_tags 必须为列表")
+        clean_tags = [str(t).strip() for t in preserve_tags if str(t).strip()][:20]
+
+        numbering_mode = str(payload.get("numbering_mode") or "none").strip()
+        if numbering_mode not in {"none", "sequential"}:
+            raise ValueError("numbering_mode 只支持 'none' 或 'sequential'")
+
+        try:
+            numbering_start = max(0, int(payload.get("numbering_start", 1)))
+        except (ValueError, TypeError):
+            numbering_start = 1
+
+        try:
+            numbering_padding = min(10, max(1, int(payload.get("numbering_padding", 3))))
+        except (ValueError, TypeError):
+            numbering_padding = 3
+
+        mtime_mode = str(payload.get("mtime_mode") or "none").strip()
+        if mtime_mode not in {"none", "ordered"}:
+            raise ValueError("mtime_mode 只支持 'none' 或 'ordered'")
+
+        raw_mtime_delay = payload.get("mtime_delay_seconds", 2.0)
+        if raw_mtime_delay is None:
+            raw_mtime_delay = 2.0
+        try:
+            val = float(raw_mtime_delay)
+            if not math.isfinite(val):
+                raise ValueError("mtime_delay_seconds 必须为有限数值")
+            if val < 0.0 or val > 60.0:
+                raise ValueError(f"mtime_delay_seconds 必须在 0 到 60 秒之间，当前值: {val}")
+            mtime_delay_seconds = val
+        except (ValueError, TypeError) as exc:
+            raise ValueError(f"无效的 mtime_delay_seconds (必须在 0 到 60 之间): {exc}") from exc
+
+        return {
+            "name": name,
+            "description": str(payload.get("description") or "").strip() or None,
+            "root": clean_root,
+            "recursive": bool(payload.get("recursive", False)),
+            "image_extensions": json.dumps(image_extensions),
+            "video_extensions": json.dumps(video_extensions),
+            "rename_template": rename_template,
+            "statistics_template": statistics_template,
+            "preserve_tags": json.dumps(clean_tags),
+            "cleanup_patterns": json.dumps(cleanup_patterns),
+            "numbering_mode": numbering_mode,
+            "numbering_start": numbering_start,
+            "numbering_padding": numbering_padding,
+            "mtime_mode": mtime_mode,
+            "mtime_delay_seconds": mtime_delay_seconds,
+        }
+
+    def list_organizer_profiles(
+        self,
+        user_id: int,
+        page: int = 1,
+        page_size: int = 50,
+        search: str | None = None,
+    ) -> tuple[list[dict[str, Any]], int]:
+        with self.SessionLocal() as session:
+            query = select(OrganizerProfile).where(
+                (OrganizerProfile.user_id == user_id) | (OrganizerProfile.is_builtin.is_(True))
+            )
+            if search and search.strip():
+                kw = f"%{search.strip()}%"
+                query = query.where(
+                    OrganizerProfile.name.ilike(kw) | OrganizerProfile.description.ilike(kw)
+                )
+
+            total = session.scalar(select(func.count()).select_from(query.subquery())) or 0
+
+            # Sort builtin first, then user profiles by updated_at desc, then name
+            query = query.order_by(
+                OrganizerProfile.is_builtin.desc(),
+                OrganizerProfile.updated_at.desc(),
+                OrganizerProfile.name.asc(),
+            )
+            offset = max(0, (page - 1) * page_size)
+            profiles = list(session.scalars(query.offset(offset).limit(page_size)))
+            return [self._serialize_organizer_profile(p) for p in profiles], total
+
+    def get_organizer_profile(self, profile_id: int, user_id: int) -> dict[str, Any] | None:
+        with self.SessionLocal() as session:
+            profile = session.get(OrganizerProfile, profile_id)
+            if not profile:
+                return None
+            if not profile.is_builtin and profile.user_id != user_id:
+                raise PermissionError("无权访问其他用户的方案")
+            return self._serialize_organizer_profile(profile)
+
+    def create_organizer_profile(self, user_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+        validated = self._validate_profile_payload(payload)
+        now = utcnow()
+        with self.SessionLocal() as session:
+            profile = OrganizerProfile(
+                user_id=user_id,
+                slug=None,
+                builtin_version=None,
+                is_builtin=False,
+                created_at=now,
+                updated_at=now,
+                **validated,
+            )
+            session.add(profile)
+            session.commit()
+            session.refresh(profile)
+            return self._serialize_organizer_profile(profile)
+
+    def update_organizer_profile(self, profile_id: int, user_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+        with self.SessionLocal() as session:
+            profile = session.get(OrganizerProfile, profile_id)
+            if not profile:
+                raise ValueError(f"方案不存在 (id={profile_id})")
+            if profile.is_builtin:
+                raise ValueError("系统内置方案禁止直接修改配置，请使用复制功能创建个人副本")
+            if profile.user_id != user_id:
+                raise PermissionError("无权修改其他用户的方案")
+
+            validated = self._validate_profile_payload(payload)
+            for k, v in validated.items():
+                setattr(profile, k, v)
+            profile.updated_at = utcnow()
+            session.commit()
+            session.refresh(profile)
+            return self._serialize_organizer_profile(profile)
+
+    def delete_organizer_profile(self, profile_id: int, user_id: int) -> None:
+        with self.SessionLocal() as session:
+            profile = session.get(OrganizerProfile, profile_id)
+            if not profile:
+                raise ValueError(f"方案不存在 (id={profile_id})")
+            if profile.is_builtin:
+                raise ValueError("系统内置方案禁止删除")
+            if profile.user_id != user_id:
+                raise PermissionError("无权删除其他用户的方案")
+            session.delete(profile)
+            session.commit()
+
+    def clone_organizer_profile(self, profile_id: int, user_id: int) -> dict[str, Any]:
+        with self.SessionLocal() as session:
+            profile = session.get(OrganizerProfile, profile_id)
+            if not profile:
+                raise ValueError(f"方案不存在 (id={profile_id})")
+            if not profile.is_builtin and profile.user_id != user_id:
+                raise PermissionError("无权访问该方案")
+
+            existing_names = set(
+                session.scalars(
+                    select(OrganizerProfile.name).where(OrganizerProfile.user_id == user_id)
+                ).all()
+            )
+
+            base_name = profile.name
+            clone_name = f"{base_name} - 副本"
+            if clone_name in existing_names:
+                idx = 2
+                while f"{base_name} - 副本 {idx}" in existing_names:
+                    idx += 1
+                clone_name = f"{base_name} - 副本 {idx}"
+
+            now = utcnow()
+            cloned = OrganizerProfile(
+                user_id=user_id,
+                slug=None,
+                builtin_version=None,
+                is_builtin=False,
+                name=clone_name,
+                description=profile.description,
+                root=profile.root,
+                recursive=profile.recursive,
+                image_extensions=profile.image_extensions,
+                video_extensions=profile.video_extensions,
+                rename_template=profile.rename_template,
+                statistics_template=profile.statistics_template,
+                preserve_tags=profile.preserve_tags,
+                cleanup_patterns=profile.cleanup_patterns,
+                numbering_mode=profile.numbering_mode,
+                numbering_start=profile.numbering_start,
+                numbering_padding=profile.numbering_padding,
+                mtime_mode=profile.mtime_mode,
+                mtime_delay_seconds=profile.mtime_delay_seconds,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(cloned)
+            session.commit()
+            session.refresh(cloned)
+            return self._serialize_organizer_profile(cloned)
+
+    def export_organizer_profile(self, profile_id: int, user_id: int) -> dict[str, Any]:
+        with self.SessionLocal() as session:
+            profile = session.get(OrganizerProfile, profile_id)
+            if not profile:
+                raise ValueError(f"方案不存在 (id={profile_id})")
+            if not profile.is_builtin and profile.user_id != user_id:
+                raise PermissionError("无权导出该方案")
+
+            return {
+                "schema_version": 1,
+                "profile": {
+                    "name": profile.name,
+                    "description": profile.description,
+                    "root": profile.root,
+                    "recursive": bool(profile.recursive),
+                    "image_extensions": json.loads(profile.image_extensions or "[]"),
+                    "video_extensions": json.loads(profile.video_extensions or "[]"),
+                    "rename_template": profile.rename_template,
+                    "statistics_template": profile.statistics_template,
+                    "preserve_tags": json.loads(profile.preserve_tags or "[]"),
+                    "cleanup_patterns": json.loads(profile.cleanup_patterns or "[]"),
+                    "numbering_mode": profile.numbering_mode,
+                    "numbering_start": profile.numbering_start,
+                    "numbering_padding": profile.numbering_padding,
+                    "mtime_mode": profile.mtime_mode,
+                    "mtime_delay_seconds": profile.mtime_delay_seconds,
+                },
+            }
+
+    def import_organizer_profile(self, user_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise ValueError("导入格式无效")
+
+        if payload.get("schema_version") != 1:
+            raise ValueError(f"不支持的 Schema 版本: {payload.get('schema_version')}，仅支持版本 1")
+
+        extra_top_level = set(payload.keys()) - {"schema_version", "profile"}
+        if extra_top_level:
+            raise ValueError(f"导入数据包含未知顶层字段: {', '.join(sorted(extra_top_level))}")
+
+        p_data = payload.get("profile")
+        if not isinstance(p_data, dict):
+            raise ValueError("导入缺少有效的 'profile' 对象")
+
+        forbidden_keys = {"id", "user_id", "is_builtin", "slug", "builtin_version", "created_at", "updated_at"}
+        found_forbidden = forbidden_keys.intersection(p_data.keys())
+        if found_forbidden:
+            raise ValueError(f"导入配置包含禁止字段: {', '.join(sorted(found_forbidden))}")
+
+        allowed_keys = {
+            "name",
+            "description",
+            "root",
+            "recursive",
+            "image_extensions",
+            "video_extensions",
+            "rename_template",
+            "statistics_template",
+            "preserve_tags",
+            "cleanup_patterns",
+            "numbering_mode",
+            "numbering_start",
+            "numbering_padding",
+            "mtime_mode",
+            "mtime_delay_seconds",
+        }
+        unknown_keys = set(p_data.keys()) - allowed_keys
+        if unknown_keys:
+            raise ValueError(f"导入配置包含未知字段: {', '.join(sorted(unknown_keys))}")
+
+        validated = self._validate_profile_payload(p_data)
+
+        # Disambiguate name if already exists
+        with self.SessionLocal() as session:
+            existing_names = set(
+                session.scalars(
+                    select(OrganizerProfile.name).where(OrganizerProfile.user_id == user_id)
+                ).all()
+            )
+            name = validated["name"]
+            if name in existing_names:
+                idx = 2
+                while f"{name} - 导入 {idx}" in existing_names:
+                    idx += 1
+                validated["name"] = f"{name} - 导入 {idx}"
+
+            now = utcnow()
+            imported = OrganizerProfile(
+                user_id=user_id,
+                slug=None,
+                builtin_version=None,
+                is_builtin=False,
+                created_at=now,
+                updated_at=now,
+                **validated,
+            )
+            session.add(imported)
+            session.commit()
+            session.refresh(imported)
+            return self._serialize_organizer_profile(imported)
+
+    def preview_organizer_profile(
+        self,
+        profile_id: int,
+        user_id: int,
+        root_override: str | None = None,
+        page: int = 1,
+        page_size: int = 100,
+        only_changed: bool = False,
+        only_conflicts: bool = False,
+        snapshot_id: str | None = None,
+    ) -> dict[str, Any]:
+        with self.SessionLocal() as session:
+            profile = session.get(OrganizerProfile, profile_id)
+            if not profile:
+                raise ValueError(f"方案不存在 (id={profile_id})")
+            if not profile.is_builtin and profile.user_id != user_id:
+                raise PermissionError("无权访问该方案")
+
+            target_root = (root_override or profile.root or "").strip()
+            if not target_root:
+                raise ValueError("未指定整理根目录，请在请求或配置中提供 root")
+
+            safe_root = require_allowed_path(target_root, self.settings.allowed_roots)
+
+            now = time.time()
+            # Clean expired snapshots (> 600s)
+            expired_keys = [k for k, v in self._preview_snapshots.items() if now - v.get("created_at", 0) > 600]
+            for k in expired_keys:
+                self._preview_snapshots.pop(k, None)
+
+            cached = self._preview_snapshots.get(snapshot_id) if snapshot_id else None
+            if cached and cached.get("profile_id") == profile.id and cached.get("root") == str(safe_root):
+                summary = cached["summary"]
+                proposals = cached["proposals"]
+                active_snapshot_id = snapshot_id
+            else:
+                image_extensions = json.loads(profile.image_extensions or "[]")
+                video_extensions = json.loads(profile.video_extensions or "[]")
+                preserve_tags = json.loads(profile.preserve_tags or "[]")
+                cleanup_patterns = json.loads(profile.cleanup_patterns or "[]")
+
+                summary, proposals = generate_organizer_proposals(
+                    safe_root,
+                    allowed_roots=self.settings.allowed_roots,
+                    image_extensions=image_extensions,
+                    video_extensions=video_extensions,
+                    rename_template=profile.rename_template,
+                    statistics_template=profile.statistics_template,
+                    preserve_tags=preserve_tags,
+                    cleanup_patterns=cleanup_patterns,
+                    numbering_mode=profile.numbering_mode,
+                    numbering_start=profile.numbering_start,
+                    numbering_padding=profile.numbering_padding,
+                    mtime_mode=profile.mtime_mode,
+                    mtime_delay_seconds=profile.mtime_delay_seconds,
+                    recursive=profile.recursive,
+                )
+                active_snapshot_id = uuid4().hex
+                self._preview_snapshots[active_snapshot_id] = {
+                    "created_at": now,
+                    "profile_id": profile.id,
+                    "root": str(safe_root),
+                    "summary": summary,
+                    "proposals": proposals,
+                }
+
+            # Filtering
+            filtered = proposals
+            if only_changed:
+                filtered = [p for p in filtered if p.changed]
+            if only_conflicts:
+                filtered = [p for p in filtered if p.conflict]
+
+            total = len(filtered)
+            start = max(0, (page - 1) * page_size)
+            end = start + page_size
+            page_proposals = filtered[start:end]
+
+            return {
+                "snapshot_id": active_snapshot_id,
+                "profile_id": profile.id,
+                "profile_name": profile.name,
+                "root": str(safe_root),
+                "summary": summary,
+                "proposals": [p.to_dict() for p in page_proposals],
+                "page": page,
+                "page_size": page_size,
+                "total": total,
+            }
+
+    def create_organizer_plan(
+        self,
+        profile_id: int,
+        user_id: int,
+        root_override: str | None = None,
+        include_touch: bool = True,
+    ) -> BatchPlan:
+        with self.SessionLocal() as session:
+            profile = session.get(OrganizerProfile, profile_id)
+            if not profile:
+                raise ValueError(f"方案不存在 (id={profile_id})")
+            if not profile.is_builtin and profile.user_id != user_id:
+                raise PermissionError("无权访问该方案")
+
+            target_root = (root_override or profile.root or "").strip()
+            if not target_root:
+                raise ValueError("未指定整理根目录，请在请求或配置中提供 root")
+
+            safe_root = require_allowed_path(target_root, self.settings.allowed_roots)
+
+            image_extensions = json.loads(profile.image_extensions or "[]")
+            video_extensions = json.loads(profile.video_extensions or "[]")
+            preserve_tags = json.loads(profile.preserve_tags or "[]")
+            cleanup_patterns = json.loads(profile.cleanup_patterns or "[]")
+
+            summary, proposals = generate_organizer_proposals(
+                safe_root,
+                allowed_roots=self.settings.allowed_roots,
+                image_extensions=image_extensions,
+                video_extensions=video_extensions,
+                rename_template=profile.rename_template,
+                statistics_template=profile.statistics_template,
+                preserve_tags=preserve_tags,
+                cleanup_patterns=cleanup_patterns,
+                numbering_mode=profile.numbering_mode,
+                numbering_start=profile.numbering_start,
+                numbering_padding=profile.numbering_padding,
+                mtime_mode=profile.mtime_mode,
+                mtime_delay_seconds=profile.mtime_delay_seconds,
+                recursive=profile.recursive,
+            )
+
+            if summary["conflicts"] > 0:
+                conflict_reasons = [p.conflict_reason for p in proposals if p.conflict and p.conflict_reason]
+                raise ValueError(f"存在 {summary['conflicts']} 个冲突项，禁止生成计划: {'; '.join(conflict_reasons[:3])}")
+
+            items, cycle_sources = plan_organizer_operations(
+                proposals,
+                include_touch=include_touch,
+                mtime_mode=profile.mtime_mode,
+            )
+            if cycle_sources:
+                raise ValueError(f"检测到循环重命名依赖，禁止生成计划: {', '.join(sorted(cycle_sources))}")
+
+            if not items:
+                raise ValueError("当前没有需要执行的操作")
+
+            plan_kind = f"organizer-{profile.slug or profile.id}"
+            plan_name = f"整理计划 - {profile.name}"
+            metadata = {
+                "is_organizer": True,
+                "organizer_profile_id": profile.id,
+                "mtime_delay_seconds": profile.mtime_delay_seconds,
+            }
+            return self.create_plan(name=plan_name, kind=plan_kind, items=items, metadata=metadata)

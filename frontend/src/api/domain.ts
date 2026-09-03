@@ -4,7 +4,6 @@ import {
   DashboardSummary,
   DuplicateGroup,
   IndexRoot,
-  OrganizerProposal,
   PaginatedResponse,
   Plan,
   PlanItem,
@@ -95,10 +94,6 @@ export const batchApi = {
     normalize_pattern?: string | null;
     normalize_replacement?: string;
   }) => api.post<{ groups: any[]; count: number }>('/api/path-match/preview', payload),
-};
-
-export const organizerApi = {
-  previewShaonv: (root: string) => api.post<{ items: OrganizerProposal[] }>('/api/organizers/shaonv/preview', { root }),
 };
 
 export const tasksApi = {

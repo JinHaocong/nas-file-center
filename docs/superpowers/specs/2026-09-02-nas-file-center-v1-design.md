@@ -44,7 +44,7 @@ Required variables:
 - `{name}`
 - `{index}`
 
-The existing 少女映画 convention is a profile using a template equivalent to:
+The existing MediaCollection convention is a profile using a template equivalent to:
 
 `{name} [{images}P {videos}V {size}]`
 
@@ -208,7 +208,7 @@ Data is mounted beneath `/data`.
 - `app/planning/`: duplicate keep policies
 - `app/batch/`: generic mutation plan builders (rename/move/touch/quarantine/flatten)
 - `app/execution/`: preflight checks and guarded mutations
-- `app/organizers/`: optional domain profiles such as 少女映画
+- `app/organizers/`: optional domain profiles such as MediaCollection
 - `app/web/`: HTTP/UI
 
 No organizer code may be imported by the generic scanner/planner/executor modules.
@@ -237,4 +237,4 @@ V1 is acceptable when:
 - plans persist item states and can resume
 - every mutation is audited
 - Docker Compose defaults dataset mounts to read-only
-- the 少女映画 profile can reproduce the P/V/size suffix and ordered mtime workflow used manually previously
+- the MediaCollection profile can reproduce the P/V/size suffix and ordered mtime workflow used manually previously

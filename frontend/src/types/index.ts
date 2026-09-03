@@ -185,3 +185,70 @@ export interface RecentPath {
   last_used_at: string;
   exists: boolean;
 }
+
+export interface OrganizerProfile {
+  id: number;
+  user_id: number | null;
+  slug: string | null;
+  builtin_version: number | null;
+  name: string;
+  description: string | null;
+  root: string | null;
+  recursive: boolean;
+  image_extensions: string[];
+  video_extensions: string[];
+  rename_template: string;
+  statistics_template: string;
+  preserve_tags: string[];
+  cleanup_patterns: string[];
+  numbering_mode: 'none' | 'sequential';
+  numbering_start: number;
+  numbering_padding: number;
+  mtime_mode: 'none' | 'ordered';
+  mtime_delay_seconds: number;
+  is_builtin: boolean;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface OrganizerProposal {
+  source: string;
+  target: string;
+  images: number;
+  videos: number;
+  files: number;
+  folders: number;
+  total_bytes: number;
+  preserved_tags: string[];
+  has_suspicious_tag: boolean;
+  changed: boolean;
+  conflict: boolean;
+  conflict_reason: string | null;
+  expected_mtime_order: number | null;
+}
+
+export interface OrganizerPreviewSummary {
+  total_directories: number;
+  changed_directories: number;
+  conflicts: number;
+  total_bytes: number;
+}
+
+export interface OrganizerPreviewResponse {
+  snapshot_id?: string;
+  profile_id: number;
+  profile_name: string;
+  root: string;
+  summary: OrganizerPreviewSummary;
+  proposals: OrganizerProposal[];
+  page: number;
+  page_size: number;
+  total: number;
+}
+
+export interface OrganizerProfileListResponse {
+  items: OrganizerProfile[];
+  total: number;
+  page: number;
+  page_size: number;
+}

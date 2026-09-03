@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a Docker-deployable NAS duplicate-file management service that uses fclones for read-only discovery and a thin Python safety layer for planning, SHA-256 validation, guarded deletion, audit logging, and the optional 少女映画 organizer profile.
+**Goal:** Build a Docker-deployable NAS duplicate-file management service that uses fclones for read-only discovery and a thin Python safety layer for planning, SHA-256 validation, guarded deletion, audit logging, and the optional MediaCollection organizer profile.
 
 **Architecture:** A single FastAPI service invokes fclones as a subprocess and stores completed scan reports plus imported duplicate groups in SQLite. Planning and destructive execution are separate modules; frozen plans are independently verified before deletion, and organizer behavior is isolated from generic dedupe behavior.
 
@@ -99,11 +99,11 @@
 - [ ] **Step 4: Run tests and verify GREEN.**
 - [ ] **Step 5: Commit execution safety.**
 
-### Task 5: 少女映画 organizer profile
+### Task 5: MediaCollection organizer profile
 
 **Files:**
 - Create: `app/organizers/__init__.py`
-- Create: `app/organizers/shaonv.py`
+- Create: `app/organizers/organizer.py`
 - Create: `tests/test_organizer.py`
 
 **Interfaces:**

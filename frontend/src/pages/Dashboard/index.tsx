@@ -261,7 +261,7 @@ export const DashboardPage: React.FC = () => {
               </Card>
               <Card
                 type="inner"
-                title="少女映画 Organizer"
+                title="Organizer 目录整理"
                 extra={<Button type="link" onClick={() => navigate('/organizer')}>整理 &gt;</Button>}
               >
                 按真实照片/视频统计自动重命名并规范目录结构。

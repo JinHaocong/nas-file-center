@@ -65,8 +65,8 @@ def test_match_same_relative_path_across_roots():
 def test_match_basename_and_regex_normalized_path():
     from app.indexing.matcher import match_entries
     entries = [
-        E("A", "001 少女映画 A/a.jpg"),
-        E("B", "999 少女映画 A/a.jpg"),
+        E("A", "001 PhotoAlbum A/a.jpg"),
+        E("B", "999 PhotoAlbum A/a.jpg"),
         E("B", "x/a.jpg"),
     ]
     basename = match_entries(entries, mode="basename")
@@ -78,5 +78,5 @@ def test_match_basename_and_regex_normalized_path():
         normalize_pattern=r"^\d{3} ",
         normalize_replacement="",
     )
-    assert "少女映画 A/a.jpg" in normalized
-    assert len(normalized["少女映画 A/a.jpg"]) == 2
+    assert "PhotoAlbum A/a.jpg" in normalized
+    assert len(normalized["PhotoAlbum A/a.jpg"]) == 2

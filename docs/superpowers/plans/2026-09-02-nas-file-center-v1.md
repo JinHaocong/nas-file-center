@@ -90,9 +90,9 @@
 - [ ] Implement mutation executor with `os.replace`/`os.unlink`/`os.utime`, never shell commands.
 - [ ] Verify GREEN and full suite.
 
-### Task 7: 少女映画 organizer profile
+### Task 7: MediaCollection organizer profile
 
-**Files:** Create `app/organizers/__init__.py`, `app/organizers/shaonv.py`, `tests/test_organizer.py`.
+**Files:** Create `app/organizers/__init__.py`, `app/organizers/organizer.py`, `tests/test_organizer.py`.
 
 **Interfaces:** Profile composes generic stats/rename/touch functions; it does not own mutation primitives.
 

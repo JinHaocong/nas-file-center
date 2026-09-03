@@ -18,19 +18,19 @@ def test_collect_tree_stats_counts_media_and_bytes(tmp_path):
 
 def test_strip_repeated_stat_suffix_preserves_semantic_brackets():
     from app.batch.stats import strip_trailing_stat_suffixes
-    name = "112 少女映画 未分类视频[存疑] [5V 461.07MB] [0P 5V 461.1MB]"
-    assert strip_trailing_stat_suffixes(name) == "112 少女映画 未分类视频[存疑]"
+    name = "112 Album Special [5V 461.07MB] [0P 5V 461.1MB]"
+    assert strip_trailing_stat_suffixes(name) == "112 Album Special"
 
 
 def test_render_stat_name_supports_template_variables():
     from app.batch.stats import TreeStats, render_stat_name
     stats = TreeStats(images=40, videos=2, files=42, folders=0, total_bytes=1024**3)
     result = render_stat_name(
-        "112 少女映画 银狼 [80P 2V 807.9MB]",
+        "112 Album Silver [80P 2V 807.9MB]",
         stats,
         template="{name} [{images}P {videos}V {size}]",
     )
-    assert result == "112 少女映画 银狼 [40P 2V 1.00GB]"
+    assert result == "112 Album Silver [40P 2V 1.00GB]"
 
 
 def test_build_rename_plan_regex_prefix_numbering_and_parent(tmp_path):

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from typing import Any
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.auth.dependencies import get_current_user
 from app.batch.rename import RenameRule
@@ -38,8 +38,60 @@ class DedupePlanRequest(BaseModel):
     relative_path_priority_patterns: list[str] | None = None
 
 
-class OrganizerPreviewRequest(BaseModel):
-    root: str
+class OrganizerProfileCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    description: str | None = None
+    root: str | None = None
+    recursive: bool = False
+    image_extensions: list[str] | None = None
+    video_extensions: list[str] | None = None
+    rename_template: str = "{name}"
+    statistics_template: str = "[{images}P {videos}V {size}]"
+    preserve_tags: list[str] | None = None
+    cleanup_patterns: list[str] | None = None
+    numbering_mode: str = "none"
+    numbering_start: int = 1
+    numbering_padding: int = 3
+    mtime_mode: str = "none"
+    mtime_delay_seconds: float = Field(default=2.0, ge=0.0, le=60.0)
+
+
+class OrganizerProfileUpdateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    description: str | None = None
+    root: str | None = None
+    recursive: bool = False
+    image_extensions: list[str] | None = None
+    video_extensions: list[str] | None = None
+    rename_template: str = "{name}"
+    statistics_template: str = "[{images}P {videos}V {size}]"
+    preserve_tags: list[str] | None = None
+    cleanup_patterns: list[str] | None = None
+    numbering_mode: str = "none"
+    numbering_start: int = 1
+    numbering_padding: int = 3
+    mtime_mode: str = "none"
+    mtime_delay_seconds: float = Field(default=2.0, ge=0.0, le=60.0)
+
+
+class OrganizerProfilePreviewRequest(BaseModel):
+    root: str | None = None
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=100, ge=1, le=1000)
+    only_changed: bool = False
+    only_conflicts: bool = False
+    snapshot_id: str | None = None
+
+
+class OrganizerProfilePlanRequest(BaseModel):
+    root: str | None = None
+    include_touch: bool = True
+
+
+class OrganizerProfileImportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    schema_version: int = 1
+    profile: dict[str, Any]
 
 
 class PathMatchRequest(BaseModel):
@@ -298,12 +350,180 @@ def work_job_detail(request: Request, work_job_id: int):
         raise HTTPException(404, "work job not found") from exc
 
 
-# Previews
-@router.post("/organizers/shaonv/preview")
-def shaonv_preview(request: Request, payload: OrganizerPreviewRequest):
+# =========================================================================
+# Organizer Profiles Endpoints
+# =========================================================================
+
+@router.get("/organizer-profiles")
+def list_organizer_profiles(
+    request: Request,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    search: str | None = None,
+    current_user: User = Depends(get_current_user),
+):
+    items, total = request.app.state.service.list_organizer_profiles(
+        user_id=current_user.id,
+        page=page,
+        page_size=page_size,
+        search=search,
+    )
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+
+@router.post("/organizer-profiles")
+def create_organizer_profile(
+    request: Request,
+    payload: OrganizerProfileCreateRequest,
+    current_user: User = Depends(get_current_user),
+):
     try:
-        return {"items": request.app.state.service.shaonv_preview(payload.root)}
-    except (ValueError, OSError) as exc:
+        profile = request.app.state.service.create_organizer_profile(
+            user_id=current_user.id,
+            payload=payload.model_dump(),
+        )
+        return profile
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.get("/organizer-profiles/{profile_id}")
+def get_organizer_profile(
+    request: Request,
+    profile_id: int,
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        profile = request.app.state.service.get_organizer_profile(profile_id, current_user.id)
+        if not profile:
+            raise HTTPException(404, "方案不存在")
+        return profile
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+
+
+@router.put("/organizer-profiles/{profile_id}")
+def update_organizer_profile(
+    request: Request,
+    profile_id: int,
+    payload: OrganizerProfileUpdateRequest,
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        profile = request.app.state.service.update_organizer_profile(
+            profile_id=profile_id,
+            user_id=current_user.id,
+            payload=payload.model_dump(),
+        )
+        return profile
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.delete("/organizer-profiles/{profile_id}")
+def delete_organizer_profile(
+    request: Request,
+    profile_id: int,
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        request.app.state.service.delete_organizer_profile(profile_id, current_user.id)
+        return {"success": True}
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/organizer-profiles/{profile_id}/clone")
+def clone_organizer_profile(
+    request: Request,
+    profile_id: int,
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        cloned = request.app.state.service.clone_organizer_profile(profile_id, current_user.id)
+        return cloned
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.get("/organizer-profiles/{profile_id}/export")
+def export_organizer_profile(
+    request: Request,
+    profile_id: int,
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        return request.app.state.service.export_organizer_profile(profile_id, current_user.id)
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/organizer-profiles/import")
+def import_organizer_profile(
+    request: Request,
+    payload: OrganizerProfileImportRequest,
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        imported = request.app.state.service.import_organizer_profile(
+            user_id=current_user.id,
+            payload=payload.model_dump(),
+        )
+        return imported
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/organizer-profiles/{profile_id}/preview")
+def preview_organizer_profile(
+    request: Request,
+    profile_id: int,
+    payload: OrganizerProfilePreviewRequest = Body(default_factory=OrganizerProfilePreviewRequest),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        return request.app.state.service.preview_organizer_profile(
+            profile_id=profile_id,
+            user_id=current_user.id,
+            root_override=payload.root,
+            page=payload.page,
+            page_size=payload.page_size,
+            only_changed=payload.only_changed,
+            only_conflicts=payload.only_conflicts,
+            snapshot_id=payload.snapshot_id,
+        )
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/organizer-profiles/{profile_id}/plan")
+def create_organizer_plan(
+    request: Request,
+    profile_id: int,
+    payload: OrganizerProfilePlanRequest = Body(default_factory=OrganizerProfilePlanRequest),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        plan = request.app.state.service.create_organizer_plan(
+            profile_id=profile_id,
+            user_id=current_user.id,
+            root_override=payload.root,
+            include_touch=payload.include_touch,
+        )
+        return {"id": plan.id, "name": plan.name, "kind": plan.kind, "status": plan.status}
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
 

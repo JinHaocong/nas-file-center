@@ -67,7 +67,7 @@ def test_list_filesystem_success(tmp_path: Path):
     # Create subdirectories and files
     (data_dir / "Download").mkdir()
     (data_dir / "Photos").mkdir()
-    (data_dir / "少女映画").mkdir()
+    (data_dir / "相册归档").mkdir()
     (data_dir / "Special #1 [2026]").mkdir()
     (data_dir / "test.txt").write_text("hello")
 
@@ -83,7 +83,7 @@ def test_list_filesystem_success(tmp_path: Path):
     names = [item["name"] for item in data["items"]]
     assert "Download" in names
     assert "Photos" in names
-    assert "少女映画" in names
+    assert "相册归档" in names
     assert "Special #1 [2026]" in names
     assert "test.txt" not in names  # directories_only=True by default
 
@@ -94,9 +94,9 @@ def test_list_filesystem_success(tmp_path: Path):
     assert "test.txt" in all_names
 
     # 3. List Chinese subdirectory
-    resp_cn = client.get(f"/api/filesystem/list?path={data_dir / '少女映画'}")
+    resp_cn = client.get(f"/api/filesystem/list?path={data_dir / '相册归档'}")
     assert resp_cn.status_code == 200
-    assert resp_cn.json()["path"] == str((data_dir / "少女映画").resolve())
+    assert resp_cn.json()["path"] == str((data_dir / "相册归档").resolve())
     assert resp_cn.json()["parent"] == str(data_dir.resolve())
 
 

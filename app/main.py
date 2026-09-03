@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import math
 from pathlib import Path
+from typing import Any
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -12,6 +15,18 @@ from app.auth.rate_limiter import LoginRateLimiter
 from app.auth.router import router as auth_router
 from app.config import Settings, get_settings
 from app.service import FileCenterService
+
+
+def _sanitize_validation_errors(obj: Any) -> Any:
+    if isinstance(obj, float):
+        if not math.isfinite(obj):
+            return str(obj)
+        return obj
+    if isinstance(obj, dict):
+        return {k: _sanitize_validation_errors(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_validation_errors(v) for v in obj]
+    return obj
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -28,6 +43,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         openapi_url=None,
     )
     app.state.service = service
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        sanitized = _sanitize_validation_errors(exc.errors())
+        return JSONResponse(status_code=422, content={"detail": sanitized})
     app.state.settings = settings
     app.state.rate_limiter = rate_limiter
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nas-dedupe-center"
-version = "0.3.2.dev1"
+version = "0.3.2.dev2"
 description = "Safe NAS duplicate-file planning and execution around fclones"
 requires-python = ">=3.12"
 dependencies = [
@@ -15,6 +15,7 @@ dependencies = [
   "jinja2>=3.1,<4",
   "python-multipart>=0.0.20,<1",
   "argon2-cffi>=23.1.0",
+  "regex>=2024.5.15",
 ]
 
 [project.optional-dependencies]

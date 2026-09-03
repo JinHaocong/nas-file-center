@@ -3,14 +3,15 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import fcntl
+import json
 from pathlib import Path
 import sqlite3
 
-from sqlalchemy import Engine, create_engine, event, func, inspect, select
+from sqlalchemy import Engine, create_engine, delete, event, func, inspect, select
 from sqlalchemy.orm import sessionmaker
 
 from app.auth.password import hash_password
-from app.models import Base, User
+from app.models import Base, OrganizerProfile, User
 
 
 @contextmanager
@@ -88,7 +89,7 @@ def init_db(
         existing_tables = set(inspector.get_table_names())
 
         # If migrating an existing database (has tables) that lacks any required table, backup first
-        required_tables = {"users", "sessions", "favorite_paths", "recent_paths"}
+        required_tables = {"users", "sessions", "favorite_paths", "recent_paths", "organizer_profiles"}
         if existing_tables and not required_tables.issubset(existing_tables):
             if db_path and backups_dir:
                 backup_database(db_path, backups_dir)
@@ -96,12 +97,22 @@ def init_db(
         # Create all newly defined tables / columns / indexes
         Base.metadata.create_all(engine)
 
+        SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, future=True)
+
+        # Ensure no builtin profiles exist; organizer profiles count starts at 0
+        with SessionLocal() as session:
+            session.execute(
+                delete(OrganizerProfile).where(
+                    OrganizerProfile.is_builtin == True,
+                )
+            )
+            session.commit()
+
         # Handle initial admin user creation if users table is empty
         if initial_admin_username and initial_admin_password:
             username_clean = initial_admin_username.strip()
             password_clean = initial_admin_password.strip()
             if username_clean and password_clean:
-                SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, future=True)
                 with SessionLocal() as session:
                     user_count = session.scalar(select(func.count(User.id))) or 0
                     if user_count == 0:

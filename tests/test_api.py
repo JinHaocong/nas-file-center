@@ -97,15 +97,6 @@ def test_scan_enqueue_and_detail_api(tmp_path):
     assert detail.json()["mode"] == "isolate"
 
 
-def test_shaonv_preview_api(tmp_path):
-    client, data = make_client(tmp_path)
-    root = data / "少女映画"; root.mkdir()
-    folder = root / "001 少女映画 A [9P 1GB]"; folder.mkdir()
-    (folder / "a.jpg").write_bytes(b"x")
-    preview = client.post("/api/organizers/shaonv/preview", json={"root":str(root)})
-    assert preview.status_code == 200
-    assert preview.json()["items"][0]["target"].endswith("001 少女映画 A [1P 0.0MB]")
-
 
 def test_index_enqueue_api(tmp_path):
     client, data = make_client(tmp_path)

@@ -292,7 +292,7 @@ Post-processing is plugin-like and optional.
 
 A generic dedupe scan never renames folders or touches timestamps unless an organizer profile is explicitly selected.
 
-### `少女映画` profile
+### `MediaCollection` profile
 
 Features:
 
@@ -493,7 +493,7 @@ nas-dedupe-center/
       executor.py
     organizers/
       base.py
-      shaonv.py
+      organizer.py
     web/
       routes.py
       templates/
@@ -518,7 +518,7 @@ V1 is complete when it can safely demonstrate the following on NAS data:
 8. Independently SHA-256 validate all candidates.
 9. In read-write + ALLOW_DELETE mode, execute only validated items.
 10. Produce a complete audit log.
-11. Run the `少女映画` organizer in preview mode and apply mode.
+11. Run the `MediaCollection` organizer in preview mode and apply mode.
 12. Recount P/V/size and perform ordered mtime refresh without changing file count.
 
 ## 23. Key implementation decision

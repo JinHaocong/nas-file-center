@@ -23,3 +23,35 @@ def require_allowed_path(path: Path | str, roots: Iterable[Path | str]) -> Path:
     if not any(resolved == root or resolved.is_relative_to(root) for root in allowed):
         raise UnsafePathError(f"Path is outside configured roots: {path}")
     return resolved
+
+
+def validate_mutation_destination(path: Path | str, roots: Iterable[Path | str]) -> Path:
+    """
+    Validate mutation destination (e.g. rename/move target).
+    - Checks if the lexical path itself is already an existing symlink (rejects early).
+    - Checks that parent directory resolves within ALLOWED_ROOTS.
+    - Checks that filename is non-empty, contains no illegal characters, and does not exceed NAME_MAX.
+    - Preserves lexical target under resolved parent without resolving to existing symlink targets.
+    """
+    import os
+    p = Path(path).expanduser()
+    if p.is_symlink():
+        raise ValueError(f"目标路径已存在同名符号链接 (symlink): {path}")
+
+    parent_resolved = require_allowed_path(p.parent, roots)
+    filename = p.name
+    if not filename or any(c in filename for c in "/\0"):
+        raise ValueError(f"非法目标文件名: {filename}")
+
+    try:
+        name_bytes = len(os.fsencode(filename))
+        try:
+            name_max = os.pathconf(parent_resolved, "PC_NAME_MAX")
+        except (OSError, AttributeError, ValueError):
+            name_max = 255
+        if name_bytes > name_max:
+            raise ValueError(f"目标目录名称超过文件系统限制 ({name_bytes} bytes > {name_max} bytes)")
+    except OSError as exc:
+        raise ValueError(f"目标名称过长或无效: {exc}") from exc
+
+    return parent_resolved / filename

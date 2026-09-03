@@ -54,9 +54,9 @@ def _create_test_app(tmp_path: Path):
 
 def test_favorite_paths_crud_and_validation(tmp_path: Path):
     app, data_dir = _create_test_app(tmp_path)
-    target_dir1 = data_dir / "Download" / "少女映画"
+    target_dir1 = data_dir / "Download" / "Photos"
     target_dir1.mkdir(parents=True)
-    target_dir2 = data_dir / "Photos"
+    target_dir2 = data_dir / "Wallpapers"
     target_dir2.mkdir()
 
     client = TestClient(app)
@@ -72,18 +72,18 @@ def test_favorite_paths_crud_and_validation(tmp_path: Path):
     # 2. Add valid favorite
     add_resp = client.post(
         "/api/filesystem/favorites",
-        json={"path": str(target_dir1), "label": "少女映画专用"},
+        json={"path": str(target_dir1), "label": "下载照片"},
     )
     assert add_resp.status_code == 200
     fav1 = add_resp.json()
     assert fav1["path"] == str(target_dir1.resolve())
-    assert fav1["label"] == "少女映画专用"
+    assert fav1["label"] == "下载照片"
     assert fav1["exists"] is True
 
     # 3. Add second favorite
     client.post(
         "/api/filesystem/favorites",
-        json={"path": str(target_dir2), "label": "相册目录"},
+        json={"path": str(target_dir2), "label": "壁纸目录"},
     )
 
     # 4. List favorites
@@ -91,8 +91,8 @@ def test_favorite_paths_crud_and_validation(tmp_path: Path):
     assert list_resp.status_code == 200
     items = list_resp.json()["items"]
     assert len(items) == 2
-    assert items[0]["label"] == "少女映画专用"
-    assert items[1]["label"] == "相册目录"
+    assert items[0]["label"] == "下载照片"
+    assert items[1]["label"] == "壁纸目录"
 
     # 5. Add favorite outside ALLOWED_ROOTS -> 400
     bad_resp = client.post("/api/filesystem/favorites", json={"path": "/etc"})
@@ -110,7 +110,7 @@ def test_favorite_paths_crud_and_validation(tmp_path: Path):
     # Verify deleted
     after_del = client.get("/api/filesystem/favorites").json()["items"]
     assert len(after_del) == 1
-    assert after_del[0]["label"] == "相册目录"
+    assert after_del[0]["label"] == "壁纸目录"
 
 
 def test_favorite_paths_user_isolation(tmp_path: Path):

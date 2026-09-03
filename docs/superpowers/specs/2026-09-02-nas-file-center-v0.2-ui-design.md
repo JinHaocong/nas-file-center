@@ -15,7 +15,7 @@ v0.2 includes:
 - Dedupe-plan creation with balanced, newest, oldest, first-root, path-priority, and relative-path-priority policies.
 - Plan lifecycle UI: draft -> freeze -> validate -> execute, with execute disabled when mutation is disabled.
 - Batch rename preview UI.
-- 少女映画 P/V/size organizer preview UI.
+- MediaCollection P/V/size organizer preview UI.
 - Persistent index enqueue and path-match preview UI.
 - Work-job, audit-log, and settings pages.
 - No external CDN dependency; assets are shipped inside the image so the UI works on a LAN/offline NAS.
@@ -48,7 +48,7 @@ This compatibility type is used for device/inode fields in duplicate records, in
 - `/ui/plans` plan list
 - `/ui/plans/{id}` plan details and lifecycle actions
 - `/ui/rename` batch rename preview
-- `/ui/organizer` 少女映画 organizer preview
+- `/ui/organizer` MediaCollection organizer preview
 - `/ui/indexes` persistent index
 - `/ui/path-match` direct path matching preview
 - `/ui/batch` generic batch-plan creation

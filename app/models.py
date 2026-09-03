@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import BigInteger, Boolean, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from app.dbtypes import FilesystemId
@@ -220,6 +220,7 @@ class User(Base):
     sessions: Mapped[list["Session"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     favorite_paths: Mapped[list["FavoritePath"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     recent_paths: Mapped[list["RecentPath"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    organizer_profiles: Mapped[list["OrganizerProfile"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class Session(Base):
@@ -269,3 +270,42 @@ class RecentPath(Base):
     last_used_at: Mapped[datetime] = mapped_column(default=utcnow)
 
     user: Mapped[User] = relationship(back_populates="recent_paths")
+
+
+class OrganizerProfile(Base):
+    __tablename__ = "organizer_profiles"
+    __table_args__ = (
+        Index("ix_organizer_profiles_user", "user_id"),
+        Index("ix_organizer_profiles_builtin", "is_builtin"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    slug: Mapped[str | None] = mapped_column(String(64), unique=True, index=True, nullable=True)
+    builtin_version: Mapped[int | None] = mapped_column(Integer, default=1, nullable=True)
+    name: Mapped[str] = mapped_column(String(255), index=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    root: Mapped[str | None] = mapped_column(Text, nullable=True)
+    recursive: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    image_extensions: Mapped[str] = mapped_column(Text, default="[]")
+    video_extensions: Mapped[str] = mapped_column(Text, default="[]")
+
+    rename_template: Mapped[str] = mapped_column(String(500), default="{name} {statistics}")
+    statistics_template: Mapped[str] = mapped_column(String(500), default="[{images}P{?videos: {videos}V} {size}]")
+
+    preserve_tags: Mapped[str] = mapped_column(Text, default="[]")
+    cleanup_patterns: Mapped[str] = mapped_column(Text, default="[]")
+
+    numbering_mode: Mapped[str] = mapped_column(String(32), default="none")
+    numbering_start: Mapped[int] = mapped_column(Integer, default=1)
+    numbering_padding: Mapped[int] = mapped_column(Integer, default=3)
+
+    mtime_mode: Mapped[str] = mapped_column(String(32), default="none")
+    mtime_delay_seconds: Mapped[float] = mapped_column(Float, default=2.0)
+
+    is_builtin: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
+
+    user: Mapped[User | None] = relationship(back_populates="organizer_profiles")
