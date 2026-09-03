@@ -30,7 +30,7 @@ def test_render_stat_name_supports_template_variables():
         stats,
         template="{name} [{images}P {videos}V {size}]",
     )
-    assert result == "112 Album Silver [40P 2V 1.00GB]"
+    assert result == "112 Album Silver [40P 2V 1.00 GB]"
 
 
 def test_build_rename_plan_regex_prefix_numbering_and_parent(tmp_path):

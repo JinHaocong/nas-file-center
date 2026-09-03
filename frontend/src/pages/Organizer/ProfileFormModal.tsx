@@ -20,6 +20,7 @@ import { InfoCircleOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { OrganizerProfile } from '../../types';
 import { DirectoryPicker } from '../../components/DirectoryPicker';
 import { renderTemplate } from '../../utils/templateRenderer';
+import { formatBytes } from '../../utils/format';
 
 const { Text } = Typography;
 
@@ -102,7 +103,7 @@ export const ProfileFormModal: React.FC<ProfileFormModalProps> = ({
   const previewExample = useMemo(() => {
     const mockImages = 120;
     const mockVideos = 3;
-    const mockSize = '8.42GB';
+    const mockSize = formatBytes(9040842752);
     const mockName = '示例目录名称';
     const mockFiles = 123;
     const mockFolders = 0;

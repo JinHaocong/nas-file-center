@@ -147,9 +147,9 @@ def test_recursive_nested_rename(tmp_path: Path):
 
     # Assert old paths no longer exist, new paths exist
     assert not parent.exists()
-    new_parent = root / "Parent [1P 0.0MB]"
+    new_parent = root / "Parent [1P 5 B]"
     assert new_parent.exists()
-    new_child = new_parent / "Child [1P 0.0MB]"
+    new_child = new_parent / "Child [1P 5 B]"
     assert new_child.exists()
     assert (new_child / "img.jpg").exists()
 
@@ -459,10 +459,10 @@ def test_recursive_four_level_rename_and_touch_completed(tmp_path: Path):
     assert exec_data["status"] == "completed"
 
     # Verify all 4 levels are renamed and exist under their final paths
-    final_a = root / "A [1P 0.0MB]"
-    final_b = final_a / "B [1P 0.0MB]"
-    final_c = final_b / "C [1P 0.0MB]"
-    final_d = final_c / "D [1P 0.0MB]"
+    final_a = root / "A [1P 5 B]"
+    final_b = final_a / "B [1P 5 B]"
+    final_c = final_b / "C [1P 5 B]"
+    final_d = final_c / "D [1P 5 B]"
     assert final_a.exists()
     assert final_b.exists()
     assert final_c.exists()
@@ -865,3 +865,82 @@ def test_mtime_delay_finite_range_validation(tmp_path: Path):
         },
     )
     assert resp_ok2.status_code == 200
+
+
+# 26. Fixed4 Test: Size Formatting Consistency (format_size & formatBytes)
+def test_organizer_size_formatting_consistency(tmp_path: Path):
+    from app.batch.stats import format_size
+
+    # Unit boundary verification
+    assert format_size(0) == "0 B"
+    assert format_size(128) == "128 B"
+    assert format_size(1023) == "1023 B"
+    assert format_size(1024) == "1.00 KB"
+    assert format_size(3072) == "3.00 KB"
+    assert format_size(4224) == "4.13 KB"
+    assert format_size(7296) == "7.13 KB"
+    assert format_size(1024**2) == "1.00 MB"
+    assert format_size(int(1.25 * 1024**2)) == "1.25 MB"
+    assert format_size(1024**3) == "1.00 GB"
+    assert format_size(int(2.5 * 1024**3)) == "2.50 GB"
+    assert format_size(int(1.1 * 1024**4)) == "1.10 TB"
+
+    # End-to-End user scenario verification
+    client, data, settings = _get_client(tmp_path)
+    root = data / "SizeConsistencyTest"
+    root.mkdir()
+
+    # Album 2: photo1.jpg (1024 B), video1.mp4 (2048 B) -> 3072 B (3.00 KB)
+    alb2 = root / "Album 2 [old]"
+    alb2.mkdir()
+    (alb2 / "photo1.jpg").write_bytes(b"p" * 1024)
+    (alb2 / "video1.mp4").write_bytes(b"v" * 2048)
+
+    # Album 10: photo2.jpg (4096 B), note.txt (128 B) -> 4224 B (4.13 KB)
+    alb10 = root / "Album 10 [old]"
+    alb10.mkdir()
+    (alb10 / "photo2.jpg").write_bytes(b"p" * 4096)
+    (alb10 / "note.txt").write_bytes(b"n" * 128)
+
+    create_resp = client.post(
+        "/api/organizer-profiles",
+        json={
+            "name": "Size Consistency Profile",
+            "root": str(root),
+            "numbering_mode": "sequential",
+            "numbering_start": 1,
+            "numbering_padding": 3,
+            "cleanup_patterns": [r"\s+\[old\]$"],
+            "statistics_template": "[{images}P{?videos: {videos}V} {size}]",
+            "rename_template": "{index} {name} {statistics}",
+        },
+    )
+    assert create_resp.status_code == 200
+    profile_id = create_resp.json()["id"]
+
+    prev_resp = client.post(f"/api/organizer-profiles/{profile_id}/preview")
+    assert prev_resp.status_code == 200
+    res_data = prev_resp.json()
+
+    # Summary unique total bytes: 3072 + 4224 = 7296 (7.13 KB)
+    summary = res_data["summary"]
+    assert summary["total_bytes"] == 7296
+    assert summary["conflicts"] == 0
+    assert summary["changed_directories"] == 2
+
+    proposals = res_data["proposals"]
+    assert len(proposals) == 2
+
+    # Album 2
+    p_alb2 = next(p for p in proposals if "Album 2" in p["source"])
+    assert p_alb2["total_bytes"] == 3072
+    assert p_alb2["images"] == 1
+    assert p_alb2["videos"] == 1
+    assert Path(p_alb2["target"]).name == "001 Album 2 [1P 1V 3.00 KB]"
+
+    # Album 10
+    p_alb10 = next(p for p in proposals if "Album 10" in p["source"])
+    assert p_alb10["total_bytes"] == 4224
+    assert p_alb10["images"] == 1
+    assert p_alb10["videos"] == 0
+    assert Path(p_alb10["target"]).name == "002 Album 10 [1P 4.13 KB]"
