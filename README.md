@@ -124,7 +124,7 @@ networks:
 
 ---
 
-## 2. 从 v0.2 升级到 v0.3.1 步骤
+## 2. 从旧版本 (v0.2 / v0.3.1) 升级到 v0.3.2 步骤
 
 1. 在构建机器构建 `linux/amd64` 镜像并推送：
    ```bash
@@ -194,7 +194,7 @@ npm run build
 ```bash
 docker buildx build \
   --platform linux/amd64 \
-  -t nas-file-center:v0.3.1-fixed2 \
+  -t nas-file-center:v0.3.2 \
   --load \
   .
 ```

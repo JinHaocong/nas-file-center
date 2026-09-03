@@ -147,7 +147,7 @@ export const LoginPage: React.FC = () => {
 
       <div style={{ marginTop: 24, textAlign: 'center' }}>
         <Text type="secondary" style={{ fontSize: 12 }}>
-          NAS File Center v0.3.1 • 极空间 / Zoraxy / Docker
+          NAS File Center v0.3.2 • 极空间 / Zoraxy / Docker
         </Text>
       </div>
     </div>
