@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import { plansApi } from '../../api/domain';
 import { useTitle } from '../../hooks/useTitle';
 import { splitLines } from '../../utils/format';
+import { DirectoryPicker } from '../../components/DirectoryPicker';
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
@@ -34,9 +35,14 @@ export const BatchPage: React.FC = () => {
       const op = values.operation;
 
       if (op === 'quarantine' || op === 'touch') {
-        const paths = splitLines(values.paths_text);
+        let paths: string[] = [];
+        if (Array.isArray(values.paths)) {
+          paths = values.paths.filter(Boolean);
+        } else if (typeof values.paths === 'string') {
+          paths = splitLines(values.paths);
+        }
         if (paths.length === 0) {
-          message.error('请至少输入一个文件路径');
+          message.error('请至少选择或输入一个文件或目录路径');
           return;
         }
         paths.forEach((p) => {
@@ -124,11 +130,12 @@ export const BatchPage: React.FC = () => {
 
           {(operation === 'quarantine' || operation === 'touch') && (
             <Form.Item
-              name="paths_text"
-              label="文件或目录绝对路径清单（每行一个路径）"
-              rules={[{ required: true, message: '请输入路径清单' }]}
+              name="paths"
+              label="文件或目录绝对路径清单"
+              rules={[{ required: true, message: '请选择或输入路径清单' }]}
+              extra="支持可视化选择目录或高级手动输入"
             >
-              <TextArea rows={5} placeholder="/data/Download/temp1.zip&#10;/data/Download/temp2.zip" />
+              <DirectoryPicker multiple placeholder="点击选择或添加目录或路径..." />
             </Form.Item>
           )}
 
@@ -140,21 +147,20 @@ export const BatchPage: React.FC = () => {
             >
               <TextArea
                 rows={5}
-                placeholder="/data/Download/old.mp4 -> /data/Media/new.mp4&#10;/data/A/file.txt -> /data/B/file.txt"
+                placeholder="/data/DiskA/file1.txt -> /data/DiskB/file1.txt&#10;/data/DiskA/file2.txt -> /data/DiskB/file2.txt"
               />
             </Form.Item>
           )}
 
-          <Form.Item>
-            <Button
-              type="primary"
-              icon={<ScheduleOutlined />}
-              onClick={handleGeneratePlan}
-              loading={planMutation.isPending}
-            >
-              生成 Dry Run 处理计划
-            </Button>
-          </Form.Item>
+          <Button
+            type="primary"
+            icon={<ScheduleOutlined />}
+            onClick={handleGeneratePlan}
+            loading={planMutation.isPending}
+            style={{ marginTop: 8 }}
+          >
+            生成批量处理 Plan
+          </Button>
         </Form>
       </Card>
     </div>

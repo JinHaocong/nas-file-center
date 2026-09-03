@@ -6,9 +6,9 @@ import { useNavigate } from 'react-router-dom';
 import { batchApi, plansApi } from '../../api/domain';
 import { useTitle } from '../../hooks/useTitle';
 import { splitLines } from '../../utils/format';
+import { DirectoryPicker } from '../../components/DirectoryPicker';
 
 const { Title, Text } = Typography;
-const { TextArea } = Input;
 
 export const PathMatchPage: React.FC = () => {
   useTitle('路径匹配');
@@ -42,9 +42,14 @@ export const PathMatchPage: React.FC = () => {
   const handlePreview = async () => {
     try {
       const values = await form.validateFields();
-      const roots = splitLines(values.roots_text);
+      let roots: string[] = [];
+      if (Array.isArray(values.roots)) {
+        roots = values.roots.filter(Boolean);
+      } else if (typeof values.roots === 'string') {
+        roots = splitLines(values.roots);
+      }
       if (roots.length < 2) {
-        message.error('路径匹配至少需要输入 2 个根目录进行比对');
+        message.error('路径匹配至少需要选择或输入 2 个根目录进行比对');
         return;
       }
       matchMutation.mutate({
@@ -128,11 +133,12 @@ export const PathMatchPage: React.FC = () => {
           initialValues={{ mode: 'relative-path', normalize_replacement: '' }}
         >
           <Form.Item
-            name="roots_text"
-            label="比对根目录（每行一个路径，至少 2 个）"
-            rules={[{ required: true, message: '请输入比对根目录' }]}
+            name="roots"
+            label="比对根目录（至少 2 个）"
+            rules={[{ required: true, message: '请至少选择 2 个比对根目录' }]}
+            extra="支持可视化选择目录或高级手动输入，路径必须在 ALLOWED_ROOTS 白名单内"
           >
-            <TextArea rows={3} placeholder="/data/NasA&#10;/data/NasB" />
+            <DirectoryPicker multiple placeholder="点击选择或添加待比对根目录 (至少2个)..." />
           </Form.Item>
 
           <Form.Item name="mode" label="匹配模式">
@@ -181,11 +187,12 @@ export const PathMatchPage: React.FC = () => {
             </Button>
             {groups && groups.length > 0 && (
               <Button
+                type="dashed"
                 icon={<ScheduleOutlined />}
                 onClick={handleGeneratePlan}
                 loading={planMutation.isPending}
               >
-                生成隔离去重计划
+                生成去重 Plan (#{groups.length} 组)
               </Button>
             )}
           </Space>
@@ -193,7 +200,11 @@ export const PathMatchPage: React.FC = () => {
       </Card>
 
       {groups && (
-        <Card title={`匹配结果 (${groups.length} 组)`} bordered={false} style={{ borderRadius: 12 }}>
+        <Card
+          bordered={false}
+          style={{ borderRadius: 12 }}
+          title={`比对结果 (共发现 ${groups.length} 组重复匹配)`}
+        >
           <Table
             dataSource={groups}
             columns={columns}

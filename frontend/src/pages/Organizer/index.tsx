@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Card, Form, Input, Button, Typography, Space, Table, Tag, message } from 'antd';
+import { Card, Form, Button, Typography, Space, Table, Tag, message } from 'antd';
 import { EyeOutlined, ScheduleOutlined, ArrowRightOutlined } from '@ant-design/icons';
 import { useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
@@ -7,6 +7,7 @@ import { organizerApi, plansApi } from '../../api/domain';
 import { useTitle } from '../../hooks/useTitle';
 import { formatBytes } from '../../utils/format';
 import { OrganizerProposal } from '../../types';
+import { DirectoryPicker } from '../../components/DirectoryPicker';
 
 const { Title, Text } = Typography;
 
@@ -131,9 +132,10 @@ export const OrganizerPage: React.FC = () => {
             name="root"
             label="整理目标根目录"
             tooltip="例如：/data/Download/少女映画/百度网盘1（更新）"
-            rules={[{ required: true, message: '请输入整理根目录' }]}
+            rules={[{ required: true, message: '请选择或输入整理根目录' }]}
+            extra="支持可视化选择目录或高级手动输入，路径必须在 ALLOWED_ROOTS 白名单内"
           >
-            <Input placeholder="/data/..." />
+            <DirectoryPicker multiple={false} placeholder="点击选择整理根目录..." />
           </Form.Item>
 
           <Space>
@@ -143,16 +145,16 @@ export const OrganizerPage: React.FC = () => {
               onClick={handlePreview}
               loading={previewMutation.isPending}
             >
-              扫描统计并预览
+              生成整理预览
             </Button>
             {proposals && proposals.length > 0 && (
               <Button
+                type="dashed"
                 icon={<ScheduleOutlined />}
                 onClick={handleGeneratePlan}
                 loading={planMutation.isPending}
-                type="dashed"
               >
-                生成改名计划
+                生成重命名 Plan
               </Button>
             )}
           </Space>
@@ -161,9 +163,9 @@ export const OrganizerPage: React.FC = () => {
 
       {proposals && (
         <Card
-          title={`整理预览比对 (${proposals.length} 项)`}
           bordered={false}
           style={{ borderRadius: 12 }}
+          title={`整理提议清单 (共 ${proposals.length} 个子目录)`}
         >
           <Table
             dataSource={proposals}

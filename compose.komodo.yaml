@@ -18,8 +18,8 @@ services:
       - FCLONES_BINARY=/usr/local/bin/fclones
       - MTIME_REFRESH_DELAY_SECONDS=2
       - SESSION_COOKIE_SECURE=true
-      - INITIAL_ADMIN_USERNAME=${INITIAL_ADMIN_USERNAME:-}
-      - INITIAL_ADMIN_PASSWORD=${INITIAL_ADMIN_PASSWORD:-}
+      - INITIAL_ADMIN_USERNAME=[[INITIAL_ADMIN_USERNAME]]
+      - INITIAL_ADMIN_PASSWORD=[[INITIAL_ADMIN_PASSWORD]]
     healthcheck:
       test: ["CMD-SHELL", "python3 -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8080/health\")' || exit 1"]
       interval: 10s

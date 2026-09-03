@@ -87,8 +87,9 @@ def init_db(
         inspector = inspect(engine)
         existing_tables = set(inspector.get_table_names())
 
-        # If migrating an existing database (has tables) that lacks 'users' table, backup first
-        if existing_tables and "users" not in existing_tables:
+        # If migrating an existing database (has tables) that lacks any required table, backup first
+        required_tables = {"users", "sessions", "favorite_paths", "recent_paths"}
+        if existing_tables and not required_tables.issubset(existing_tables):
             if db_path and backups_dir:
                 backup_database(db_path, backups_dir)
 

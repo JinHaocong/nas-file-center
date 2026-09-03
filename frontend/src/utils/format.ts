@@ -17,7 +17,12 @@ export function formatBytes(bytes: number | null | undefined): string {
 
 export function formatDateTime(dateStr: string | null | undefined): string {
   if (!dateStr) return '-';
-  const d = dayjs(dateStr);
+  let s = String(dateStr).trim();
+  // Ensure UTC parsing when timezone is absent so browser converts to local timezone (e.g. UTC+8)
+  if (!s.endsWith('Z') && !s.includes('+') && !s.includes('GMT')) {
+    s = s.replace(' ', 'T') + 'Z';
+  }
+  const d = dayjs(s);
   if (!d.isValid()) return String(dateStr);
   return d.format('YYYY-MM-DD HH:mm:ss');
 }

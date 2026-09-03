@@ -1,9 +1,31 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import heapq
 import json
-from uuid import uuid4
+import os
 from pathlib import Path
+import re
+from uuid import uuid4
+
+
+def natural_sort_key(s: str) -> tuple:
+    """Split string into digits and non-digits for natural alphanumeric sorting."""
+    tokens = re.split(r"(\d+)", s.casefold())
+    return tuple((0, int(token)) if token.isdigit() else (1, token) for token in tokens)
+
+
+class _MaxHeapCandidate:
+    __slots__ = ("sort_key", "val")
+
+    def __init__(self, sort_key: tuple, val: tuple):
+        self.sort_key = sort_key
+        self.val = val
+
+    def __lt__(self, other: _MaxHeapCandidate) -> bool:
+        # Inverted comparison so heapq functions as a max-heap:
+        # the element with the largest sort_key sits at heap[0].
+        return self.sort_key > other.sort_key
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -17,7 +39,19 @@ from app.execution.executor import execute_item
 from app.execution.verifier import verify_duplicate_pair
 from app.indexing.indexer import IndexedEntry, iter_root, scan_root
 from app.indexing.matcher import match_entries
-from app.models import AuditEvent, BatchPlan, BatchPlanItem, DuplicateFile, DuplicateGroup, IndexedPath, ScanJob, WorkJob, utcnow
+from app.models import (
+    AuditEvent,
+    BatchPlan,
+    BatchPlanItem,
+    DuplicateFile,
+    DuplicateGroup,
+    FavoritePath,
+    IndexedPath,
+    RecentPath,
+    ScanJob,
+    WorkJob,
+    utcnow,
+)
 from app.path_safety import require_allowed_path
 from app.organizers.shaonv import build_stat_rename_proposals, shaonv_stat_name
 from app.planning.engine import CandidateFile, CandidateGroup, generate_plan
@@ -846,3 +880,272 @@ class FileCenterService:
             "page": detail["page"],
             "page_size": detail["page_size"],
         }
+
+    # ==================== Filesystem Browser API ====================
+
+    def list_directory(
+        self,
+        path: str | None = None,
+        *,
+        directories_only: bool = True,
+        page: int = 1,
+        page_size: int = 100,
+        search: str | None = None,
+    ) -> dict:
+        if not path or not path.strip():
+            target_path = self.settings.allowed_roots[0]
+        else:
+            target_path = Path(path.strip())
+
+        safe_path = require_allowed_path(target_path, self.settings.allowed_roots)
+
+        if not safe_path.exists():
+            raise FileNotFoundError(f"Path does not exist: {safe_path}")
+        if not safe_path.is_dir():
+            raise ValueError(f"Path is not a directory: {safe_path}")
+
+        # Compute parent path if parent is still inside ALLOWED_ROOTS and not identical
+        parent_str: str | None = None
+        if safe_path.parent != safe_path:
+            try:
+                parent_safe = require_allowed_path(safe_path.parent, self.settings.allowed_roots)
+                # If safe_path was already at one of the allowed roots, do not allow going above it
+                if safe_path not in self.settings.allowed_roots:
+                    parent_str = str(parent_safe)
+            except ValueError:
+                parent_str = None
+
+        search_clean = search.strip().lower() if search and search.strip() else None
+
+        page = max(1, int(page))
+        page_size = max(1, min(int(page_size), 500))
+        start = (page - 1) * page_size
+        end = start + page_size
+        limit = end
+
+        heap: list[_MaxHeapCandidate] = []
+        total = 0
+
+        try:
+            with os.scandir(safe_path) as it:
+                for entry in it:
+                    name = entry.name
+                    if search_clean and search_clean not in name.lower():
+                        continue
+
+                    try:
+                        is_symlink = entry.is_symlink()
+                        if is_symlink:
+                            # Symlink destination security check
+                            try:
+                                resolved = Path(entry.path).resolve()
+                                require_allowed_path(resolved, self.settings.allowed_roots)
+                            except (ValueError, RuntimeError):
+                                continue
+
+                        is_directory = entry.is_dir(follow_symlinks=True)
+                    except OSError:
+                        continue
+
+                    if directories_only and not is_directory:
+                        continue
+
+                    total += 1
+                    type_rank = 0 if is_directory else 1
+                    sort_key = (type_rank, natural_sort_key(name), name)
+                    cand = _MaxHeapCandidate(sort_key, (name, entry.path, is_directory))
+
+                    if len(heap) < limit:
+                        heapq.heappush(heap, cand)
+                    elif cand.sort_key < heap[0].sort_key:
+                        heapq.heapreplace(heap, cand)
+        except PermissionError as exc:
+            raise PermissionError(f"Permission denied accessing directory: {safe_path}") from exc
+
+        # Sort the bounded top candidates (at most limit items) in ascending natural order
+        top_candidates = sorted(heap, key=lambda c: c.sort_key)
+        page_candidates = [c.val for c in top_candidates[start:end]]
+        has_more = end < total
+
+        # Only construct full item dicts with stat calls for the requested page slice
+        items: list[dict] = []
+        for name, entry_path, is_dir in page_candidates:
+            size: int | None = None
+            mtime_ns: int = 0
+            try:
+                st = os.stat(entry_path, follow_symlinks=False)
+                size = st.st_size if not is_dir else None
+                mtime_ns = st.st_mtime_ns
+            except OSError:
+                size = None
+                mtime_ns = 0
+
+            items.append({
+                "name": name,
+                "path": entry_path,
+                "type": "directory" if is_dir else "file",
+                "size": size,
+                "mtime_ns": mtime_ns,
+            })
+
+        return {
+            "path": str(safe_path),
+            "parent": parent_str,
+            "items": items,
+            "page": page,
+            "page_size": page_size,
+            "total": total,
+            "has_more": has_more,
+            "allowed_roots": [str(r) for r in self.settings.allowed_roots],
+        }
+
+    # ==================== Favorite Paths API ====================
+
+    def list_favorites(self, user_id: int) -> list[dict]:
+        with self.SessionLocal() as session:
+            rows = list(
+                session.scalars(
+                    select(FavoritePath)
+                    .where(FavoritePath.user_id == user_id)
+                    .order_by(FavoritePath.position.asc(), FavoritePath.created_at.asc())
+                )
+            )
+            results = []
+            for r in rows:
+                p = Path(r.path)
+                try:
+                    safe = require_allowed_path(p, self.settings.allowed_roots)
+                    exists = safe.exists() and safe.is_dir()
+                except ValueError:
+                    exists = False
+
+                results.append({
+                    "id": r.id,
+                    "path": r.path,
+                    "label": r.label or p.name,
+                    "position": r.position,
+                    "exists": exists,
+                    "created_at": r.created_at,
+                    "updated_at": r.updated_at,
+                })
+            return results
+
+    def add_favorite(self, user_id: int, path: str, label: str | None = None) -> dict:
+        safe = require_allowed_path(path, self.settings.allowed_roots)
+        if not safe.exists():
+            raise FileNotFoundError(f"Path does not exist: {safe}")
+        if not safe.is_dir():
+            raise ValueError(f"Path is not a directory: {safe}")
+
+        str_path = str(safe)
+        with self.SessionLocal() as session:
+            fav = session.scalar(
+                select(FavoritePath).where(FavoritePath.user_id == user_id, FavoritePath.path == str_path)
+            )
+            now = utcnow()
+            if fav:
+                if label is not None:
+                    fav.label = label.strip() or safe.name
+                fav.updated_at = now
+            else:
+                max_pos = session.scalar(
+                    select(func.coalesce(func.max(FavoritePath.position), 0)).where(FavoritePath.user_id == user_id)
+                ) or 0
+                fav = FavoritePath(
+                    user_id=user_id,
+                    path=str_path,
+                    label=(label.strip() if label else None) or safe.name,
+                    position=max_pos + 1,
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(fav)
+            session.commit()
+            session.refresh(fav)
+            return {
+                "id": fav.id,
+                "path": fav.path,
+                "label": fav.label,
+                "position": fav.position,
+                "exists": True,
+                "created_at": fav.created_at,
+                "updated_at": fav.updated_at,
+            }
+
+    def delete_favorite(self, user_id: int, favorite_id: int) -> bool:
+        with self.SessionLocal() as session:
+            fav = session.get(FavoritePath, favorite_id)
+            if fav is None or fav.user_id != user_id:
+                raise KeyError(f"Favorite #{favorite_id} not found")
+            session.delete(fav)
+            session.commit()
+            return True
+
+    # ==================== Recent Paths API ====================
+
+    def list_recent_paths(self, user_id: int, limit: int = 20) -> list[dict]:
+        with self.SessionLocal() as session:
+            rows = list(
+                session.scalars(
+                    select(RecentPath)
+                    .where(RecentPath.user_id == user_id)
+                    .order_by(RecentPath.last_used_at.desc())
+                    .limit(limit)
+                )
+            )
+            results = []
+            for r in rows:
+                p = Path(r.path)
+                try:
+                    safe = require_allowed_path(p, self.settings.allowed_roots)
+                    exists = safe.exists() and safe.is_dir()
+                except ValueError:
+                    exists = False
+
+                if exists:
+                    results.append({
+                        "id": r.id,
+                        "path": r.path,
+                        "last_used_at": r.last_used_at,
+                        "exists": True,
+                    })
+            return results
+
+    def record_recent_paths(self, user_id: int, paths: list[str]) -> list[dict]:
+        now = utcnow()
+        with self.SessionLocal() as session:
+            for raw in paths:
+                if not raw or not raw.strip():
+                    continue
+                try:
+                    safe = require_allowed_path(raw.strip(), self.settings.allowed_roots)
+                    if not safe.exists() or not safe.is_dir():
+                        continue
+                except ValueError:
+                    continue
+
+                str_path = str(safe)
+                rec = session.scalar(
+                    select(RecentPath).where(RecentPath.user_id == user_id, RecentPath.path == str_path)
+                )
+                if rec:
+                    rec.last_used_at = now
+                else:
+                    session.add(RecentPath(user_id=user_id, path=str_path, last_used_at=now))
+
+            session.commit()
+
+            # Keep only the latest 20 recent paths per user
+            all_recent = list(
+                session.scalars(
+                    select(RecentPath)
+                    .where(RecentPath.user_id == user_id)
+                    .order_by(RecentPath.last_used_at.desc())
+                )
+            )
+            if len(all_recent) > 20:
+                for excess in all_recent[20:]:
+                    session.delete(excess)
+                session.commit()
+
+        return self.list_recent_paths(user_id, limit=20)

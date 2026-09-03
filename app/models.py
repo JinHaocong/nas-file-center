@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import BigInteger, Boolean, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import BigInteger, Boolean, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from app.dbtypes import FilesystemId
@@ -218,6 +218,8 @@ class User(Base):
     last_login_at: Mapped[datetime | None]
 
     sessions: Mapped[list["Session"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    favorite_paths: Mapped[list["FavoritePath"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    recent_paths: Mapped[list["RecentPath"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class Session(Base):
@@ -234,3 +236,36 @@ class Session(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(index=True)
 
     user: Mapped[User] = relationship(back_populates="sessions")
+
+
+class FavoritePath(Base):
+    __tablename__ = "favorite_paths"
+    __table_args__ = (
+        UniqueConstraint("user_id", "path", name="uq_user_favorite_path"),
+        Index("ix_favorite_paths_user_pos", "user_id", "position"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    path: Mapped[str] = mapped_column(Text)
+    label: Mapped[str | None] = mapped_column(String(255))
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
+
+    user: Mapped[User] = relationship(back_populates="favorite_paths")
+
+
+class RecentPath(Base):
+    __tablename__ = "recent_paths"
+    __table_args__ = (
+        UniqueConstraint("user_id", "path", name="uq_user_recent_path"),
+        Index("ix_recent_paths_user_time", "user_id", "last_used_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    path: Mapped[str] = mapped_column(Text)
+    last_used_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+    user: Mapped[User] = relationship(back_populates="recent_paths")

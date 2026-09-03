@@ -6,10 +6,10 @@ export const STATUS_MAP: Record<string, { label: string; color: string }> = {
   draft: { label: '草稿', color: 'default' },
   frozen: { label: '已冻结', color: 'cyan' },
   validating: { label: '校验中', color: 'processing' },
-  ready: { label: '可执行', color: 'success' },
+  ready: { label: '已就绪 (校验通过)', color: 'success' },
   partial: { label: '部分完成', color: 'warning' },
   executing: { label: '执行中', color: 'processing' },
-  planned: { label: '计划中', color: 'default' },
+  planned: { label: '待校验', color: 'default' },
   validated: { label: '已校验', color: 'success' },
   skipped: { label: '已跳过', color: 'warning' },
 };

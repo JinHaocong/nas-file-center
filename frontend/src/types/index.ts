@@ -149,3 +149,39 @@ export interface OrganizerProposal {
   has_suspicious_tag: boolean;
   changed: boolean;
 }
+
+export interface DirectoryItem {
+  name: string;
+  path: string;
+  type: 'directory' | 'file' | 'symlink';
+  size?: number | null;
+  mtime_ns?: number;
+}
+
+export interface DirectoryListResponse {
+  path: string;
+  parent?: string | null;
+  items: DirectoryItem[];
+  page: number;
+  page_size: number;
+  total: number;
+  has_more: boolean;
+  allowed_roots: string[];
+}
+
+export interface FavoritePath {
+  id: number;
+  path: string;
+  label?: string | null;
+  position: number;
+  exists: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RecentPath {
+  id: number;
+  path: string;
+  last_used_at: string;
+  exists: boolean;
+}

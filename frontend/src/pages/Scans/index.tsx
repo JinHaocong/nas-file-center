@@ -20,6 +20,8 @@ import { useTitle } from '../../hooks/useTitle';
 import { formatBytes, formatDateTime } from '../../utils/format';
 import { STATUS_MAP } from '../../utils/constants';
 
+import { DirectoryPicker } from '../../components/DirectoryPicker';
+
 const { Title, Text } = Typography;
 const { TextArea } = Input;
 
@@ -45,10 +47,12 @@ export const ScansPage: React.FC = () => {
 
   const createScanMutation = useMutation({
     mutationFn: (values: any) => {
-      const roots = values.roots_text
-        .split('\n')
-        .map((s: string) => s.trim())
-        .filter(Boolean);
+      let roots: string[] = [];
+      if (Array.isArray(values.roots)) {
+        roots = values.roots.filter(Boolean);
+      } else if (typeof values.roots === 'string') {
+        roots = values.roots.split('\n').map((s: string) => s.trim()).filter(Boolean);
+      }
       return scansApi.createScan({
         name: values.name,
         roots,
@@ -204,12 +208,12 @@ export const ScansPage: React.FC = () => {
           </Form.Item>
 
           <Form.Item
-            name="roots_text"
-            label="待扫描根目录 (每行一个绝对路径)"
-            rules={[{ required: true, message: '请至少输入一个待扫描路径' }]}
-            extra="路径必须在 ALLOWED_ROOTS 白名单内，例如 /data/Download"
+            name="roots"
+            label="待扫描根目录"
+            rules={[{ required: true, message: '请至少选择或输入一个待扫描路径' }]}
+            extra="支持可视化选择目录或高级手动输入，路径必须在 ALLOWED_ROOTS 白名单内"
           >
-            <TextArea rows={4} placeholder="/data/DiskA&#10;/data/DiskB" />
+            <DirectoryPicker multiple placeholder="点击选择或添加待扫描目录..." />
           </Form.Item>
 
           <Form.Item

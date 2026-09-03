@@ -76,6 +76,96 @@ class PlanCreateRequest(BaseModel):
     items: list[PlanItemInput] = Field(min_length=1)
 
 
+class FavoriteCreateRequest(BaseModel):
+    path: str = Field(min_length=1)
+    label: str | None = None
+
+
+class RecentRecordRequest(BaseModel):
+    paths: list[str] = Field(min_length=1)
+
+
+# Filesystem Browser & Path Management
+@router.get("/filesystem/list")
+def list_filesystem(
+    request: Request,
+    path: str | None = None,
+    directories_only: bool = True,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=100, ge=1, le=500),
+    search: str | None = None,
+):
+    try:
+        return request.app.state.service.list_directory(
+            path=path,
+            directories_only=directories_only,
+            page=page,
+            page_size=page_size,
+            search=search,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+
+
+@router.get("/filesystem/favorites")
+def list_favorites(request: Request, current_user: User = Depends(get_current_user)):
+    return {"items": request.app.state.service.list_favorites(current_user.id)}
+
+
+@router.post("/filesystem/favorites")
+def add_favorite(
+    request: Request,
+    payload: FavoriteCreateRequest,
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        fav = request.app.state.service.add_favorite(
+            current_user.id,
+            path=payload.path,
+            label=payload.label,
+        )
+        return fav
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.delete("/filesystem/favorites/{favorite_id}")
+def delete_favorite(
+    request: Request,
+    favorite_id: int,
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        request.app.state.service.delete_favorite(current_user.id, favorite_id)
+        return {"status": "ok", "deleted_id": favorite_id}
+    except KeyError as exc:
+        raise HTTPException(404, "favorite not found") from exc
+
+
+@router.get("/filesystem/recent")
+def list_recent(
+    request: Request,
+    limit: int = Query(default=20, ge=1, le=50),
+    current_user: User = Depends(get_current_user),
+):
+    return {"items": request.app.state.service.list_recent_paths(current_user.id, limit=limit)}
+
+
+@router.post("/filesystem/recent")
+def record_recent(
+    request: Request,
+    payload: RecentRecordRequest,
+    current_user: User = Depends(get_current_user),
+):
+    return {"items": request.app.state.service.record_recent_paths(current_user.id, payload.paths)}
+
+
 # Dashboard
 @router.get("/dashboard/summary")
 def get_dashboard_summary(request: Request):

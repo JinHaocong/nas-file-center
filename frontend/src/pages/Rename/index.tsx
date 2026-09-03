@@ -28,9 +28,9 @@ import { batchApi, plansApi } from '../../api/domain';
 import { useTitle } from '../../hooks/useTitle';
 import { splitLines } from '../../utils/format';
 import { RenameProposal } from '../../types';
+import { DirectoryPicker } from '../../components/DirectoryPicker';
 
 const { Title, Text } = Typography;
-const { TextArea } = Input;
 
 export const RenamePage: React.FC = () => {
   useTitle('批量重命名');
@@ -68,9 +68,14 @@ export const RenamePage: React.FC = () => {
   const handlePreview = async () => {
     try {
       const values = await form.validateFields();
-      const paths = splitLines(values.paths_text);
+      let paths: string[] = [];
+      if (Array.isArray(values.paths)) {
+        paths = values.paths.filter(Boolean);
+      } else if (typeof values.paths === 'string') {
+        paths = splitLines(values.paths);
+      }
       if (paths.length === 0) {
-        message.error('请至少输入一个文件路径');
+        message.error('请至少选择或输入一个待重命名路径');
         return;
       }
       previewMutation.mutate({
@@ -143,7 +148,7 @@ export const RenamePage: React.FC = () => {
         }
         return (
           <Tag color="success" icon={<CheckCircleOutlined />}>
-            正常
+            安全
           </Tag>
         );
       },
@@ -168,11 +173,12 @@ export const RenamePage: React.FC = () => {
           initialValues={{ number_width: 3, include_parent: false }}
         >
           <Form.Item
-            name="paths_text"
-            label="文件或目录绝对路径清单（每行一个路径）"
-            rules={[{ required: true, message: '请输入待重命名的路径' }]}
+            name="paths"
+            label="文件或目录绝对路径清单"
+            rules={[{ required: true, message: '请选择或输入待重命名的路径' }]}
+            extra="支持可视化选择目录或高级手动多行输入"
           >
-            <TextArea rows={4} placeholder="/data/Photos/img01.jpg&#10;/data/Photos/img02.jpg" />
+            <DirectoryPicker multiple placeholder="点击选择或添加待重命名目录..." />
           </Form.Item>
 
           <Row gutter={16}>
@@ -202,22 +208,21 @@ export const RenamePage: React.FC = () => {
           </Row>
 
           <Row gutter={16}>
-            <Col xs={12} md={6}>
-              <Form.Item name="number_start" label="起始编号（留空不编号）">
-                <InputNumber min={0} placeholder="如: 1" style={{ width: '100%' }} />
-              </Form.Item>
-            </Col>
-            <Col xs={12} md={6}>
-              <Form.Item name="number_width" label="编号补零位数">
-                <InputNumber min={1} max={8} style={{ width: '100%' }} />
+            <Col xs={24} md={12}>
+              <Form.Item name="number_start" label="起始数字序号 (可选，如 1)">
+                <InputNumber min={0} placeholder="留空不添加序号" style={{ width: '100%' }} />
               </Form.Item>
             </Col>
             <Col xs={24} md={12}>
-              <Form.Item name="include_parent" valuePropName="checked" label="附加父目录名">
-                <Checkbox>在文件名开头拼接所在父文件夹名称</Checkbox>
+              <Form.Item name="number_width" label="序号补零宽度 (位数)">
+                <InputNumber min={1} max={10} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
           </Row>
+
+          <Form.Item name="include_parent" valuePropName="checked">
+            <Checkbox>在文件名前拼入直接父文件夹名称</Checkbox>
+          </Form.Item>
 
           <Space style={{ marginTop: 8 }}>
             <Button
@@ -226,38 +231,39 @@ export const RenamePage: React.FC = () => {
               onClick={handlePreview}
               loading={previewMutation.isPending}
             >
-              预览重命名效果
+              生成重命名预览
             </Button>
             {proposals && proposals.length > 0 && (
               <Button
+                type="dashed"
                 icon={<ScheduleOutlined />}
                 onClick={handleGeneratePlan}
-                disabled={hasConflicts}
                 loading={planMutation.isPending}
-                type="dashed"
+                disabled={hasConflicts}
               >
-                生成执行计划
+                生成执行 Plan (#{proposals.length} 项)
               </Button>
             )}
           </Space>
         </Form>
       </Card>
 
+      {hasConflicts && (
+        <Alert
+          type="error"
+          showIcon
+          message="检测到重命名目标冲突"
+          description="部分文件重命名后的目标路径已存在或产生内部重名冲突，系统已自动锁定生成计划按钮，请修正重命名规则。"
+          style={{ marginBottom: 16 }}
+        />
+      )}
+
       {proposals && (
         <Card
-          title={`重命名预览比对 (${proposals.length} 项)`}
           bordered={false}
           style={{ borderRadius: 12 }}
+          title={`重命名提议清单 (共 ${proposals.length} 项)`}
         >
-          {hasConflicts && (
-            <Alert
-              message="存在重命名冲突"
-              description="部分目标路径重名或已存在，请检查并修改重命名规则，否则无法生成计划。"
-              type="error"
-              showIcon
-              style={{ marginBottom: 16 }}
-            />
-          )}
           <Table
             dataSource={proposals}
             columns={columns}
