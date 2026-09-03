@@ -1,88 +1,37 @@
 from __future__ import annotations
 
 from pathlib import Path
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.openapi.utils import get_openapi
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.ui import router as ui_router
-
-from app.batch.rename import RenameRule
+from app.api.router import router as api_router
+from app.auth.dependencies import get_current_user
+from app.auth.rate_limiter import LoginRateLimiter
+from app.auth.router import router as auth_router
 from app.config import Settings, get_settings
 from app.service import FileCenterService
-
-
-class IndexCreateRequest(BaseModel):
-    root: str
-
-
-class IndexMatchRequest(BaseModel):
-    root_keys: list[str] = Field(min_length=1)
-    mode: str = "relative-path"
-    normalize_pattern: str | None = None
-    normalize_replacement: str = ""
-
-
-class ScanCreateRequest(BaseModel):
-    name: str = Field(min_length=1, max_length=255)
-    roots: list[str] = Field(min_length=1)
-    isolate: bool = False
-    min_size: str | None = None
-    name_patterns: list[str] | None = None
-    exclude_patterns: list[str] | None = None
-
-
-class DedupePlanRequest(BaseModel):
-    policy: str = "balanced-roots"
-    path_priority_patterns: list[str] | None = None
-    relative_path_priority_patterns: list[str] | None = None
-
-
-class OrganizerPreviewRequest(BaseModel):
-    root: str
-
-
-class PathMatchRequest(BaseModel):
-    roots: list[str]
-    mode: str = "relative-path"
-    normalize_pattern: str | None = None
-    normalize_replacement: str = ""
-
-
-class RenamePreviewRequest(BaseModel):
-    paths: list[str]
-    regex_pattern: str | None = None
-    regex_replacement: str = ""
-    prefix: str = ""
-    suffix: str = ""
-    number_start: int | None = None
-    number_width: int = 3
-    include_parent: bool = False
-
-
-class PlanItemInput(BaseModel):
-    operation: str
-    source: str
-    target: str | None = None
-    keep: str | None = None
-    expected_size: int = 0
-    expected_hash: str | None = None
-    protected_dir: str | None = None
-
-
-class PlanCreateRequest(BaseModel):
-    name: str = Field(min_length=1, max_length=255)
-    kind: str = Field(min_length=1, max_length=64)
-    items: list[PlanItemInput] = Field(min_length=1)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     service = FileCenterService(settings)
-    app = FastAPI(title="NAS File Center", version="0.2.0")
+    rate_limiter = LoginRateLimiter()
+
+    # Disable default public docs/openapi URLs
+    app = FastAPI(
+        title="NAS File Center",
+        version="0.3.1",
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+    )
     app.state.service = service
     app.state.settings = settings
+    app.state.rate_limiter = rate_limiter
 
+    # Public Health Endpoint
     @app.get("/health")
     def health():
         return {
@@ -92,145 +41,81 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "allowed_roots": [str(p) for p in settings.allowed_roots],
         }
 
-    app.mount("/static", StaticFiles(directory=str(Path(__file__).resolve().parent / "static")), name="static")
-    app.include_router(ui_router)
+    # Protected OpenAPI Endpoint (zero CDN, pure authenticated OpenAPI JSON)
+    @app.get("/openapi.json", include_in_schema=False, dependencies=[Depends(get_current_user)])
+    async def get_open_api_endpoint():
+        return JSONResponse(get_openapi(title=app.title, version=app.version, routes=app.routes))
 
-    @app.post("/api/indexes")
-    def create_index(request: IndexCreateRequest):
-        try:
-            return service.enqueue_index(request.root)
-        except (ValueError, OSError) as exc:
-            raise HTTPException(400, str(exc)) from exc
+    # Mount static assets if present
+    static_dir = Path(__file__).resolve().parent / "static"
+    if static_dir.exists():
+        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
-    @app.get("/api/work-jobs/{work_job_id}")
-    def work_job_detail(work_job_id: int):
-        try:
-            return service.work_job_detail(work_job_id)
-        except KeyError as exc:
-            raise HTTPException(404, "work job not found") from exc
+    # Include Auth and API routers
+    app.include_router(auth_router)
+    app.include_router(api_router)
 
-    @app.post("/api/index-match/preview")
-    def index_match(request: IndexMatchRequest):
-        try:
-            groups = service.index_match_preview(
-                request.root_keys,
-                mode=request.mode,
-                normalize_pattern=request.normalize_pattern,
-                normalize_replacement=request.normalize_replacement,
-            )
-            return {"groups": groups, "count": len(groups)}
-        except (ValueError, OSError) as exc:
-            raise HTTPException(400, str(exc)) from exc
+    # React Frontend SPA Hosting (TASK-031-03)
+    frontend_dist = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+    if not frontend_dist.exists():
+        # Check inside app/static/dist or frontend/public
+        frontend_dist = static_dir / "dist"
 
-    @app.post("/api/scans")
-    def create_scan(request: ScanCreateRequest):
-        try:
-            return service.enqueue_scan(
-                name=request.name,
-                roots=request.roots,
-                isolate=request.isolate,
-                min_size=request.min_size,
-                name_patterns=request.name_patterns,
-                exclude_patterns=request.exclude_patterns,
-            )
-        except (ValueError, OSError) as exc:
-            raise HTTPException(400, str(exc)) from exc
+    frontend_public = Path(__file__).resolve().parent.parent / "frontend" / "public"
 
-    @app.get("/api/scans/{scan_job_id}")
-    def scan_detail(scan_job_id: int):
-        try:
-            return service.scan_detail(scan_job_id)
-        except KeyError as exc:
-            raise HTTPException(404, "scan not found") from exc
+    # Explicit Favicon and Icon Endpoints with strict media types (Blocker 9)
+    @app.api_route("/favicon.ico", methods=["GET", "HEAD"], include_in_schema=False)
+    async def get_favicon_ico():
+        for candidate in [frontend_dist / "favicon.ico", frontend_public / "favicon.ico"]:
+            if candidate.is_file():
+                return FileResponse(candidate, media_type="image/x-icon")
+        raise HTTPException(status_code=404, detail="favicon.ico not found")
 
-    @app.post("/api/scans/{scan_job_id}/dedupe-plan")
-    def create_dedupe_plan(scan_job_id: int, request: DedupePlanRequest):
-        try:
-            return service.create_dedupe_plan(
-                scan_job_id,
-                policy=request.policy,
-                path_priority_patterns=request.path_priority_patterns,
-                relative_path_priority_patterns=request.relative_path_priority_patterns,
-            )
-        except KeyError as exc:
-            raise HTTPException(404, "scan not found") from exc
-        except ValueError as exc:
-            raise HTTPException(409, str(exc)) from exc
+    @app.api_route("/favicon.svg", methods=["GET", "HEAD"], include_in_schema=False)
+    async def get_favicon_svg():
+        for candidate in [frontend_dist / "favicon.svg", frontend_public / "favicon.svg"]:
+            if candidate.is_file():
+                return FileResponse(candidate, media_type="image/svg+xml")
+        raise HTTPException(status_code=404, detail="favicon.svg not found")
 
-    @app.post("/api/organizers/shaonv/preview")
-    def shaonv_preview(request: OrganizerPreviewRequest):
-        try:
-            return {"items": service.shaonv_preview(request.root)}
-        except (ValueError, OSError) as exc:
-            raise HTTPException(400, str(exc)) from exc
+    @app.api_route("/apple-touch-icon.png", methods=["GET", "HEAD"], include_in_schema=False)
+    async def get_apple_touch_icon():
+        for candidate in [frontend_dist / "apple-touch-icon.png", frontend_public / "apple-touch-icon.png"]:
+            if candidate.is_file():
+                return FileResponse(candidate, media_type="image/png")
+        raise HTTPException(status_code=404, detail="apple-touch-icon.png not found")
 
-    @app.post("/api/path-match/preview")
-    def path_match(request: PathMatchRequest):
-        try:
-            groups = service.path_match_preview(request.roots, mode=request.mode, normalize_pattern=request.normalize_pattern, normalize_replacement=request.normalize_replacement)
-            return {"groups": groups, "count": len(groups)}
-        except (ValueError, OSError) as exc:
-            raise HTTPException(400, str(exc)) from exc
+    if frontend_dist.exists():
+        assets_dir = frontend_dist / "assets"
+        if assets_dir.exists():
+            app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
 
-    @app.post("/api/rename/preview")
-    def rename_preview(request: RenamePreviewRequest):
-        try:
-            rule = RenameRule(
-                regex_pattern=request.regex_pattern,
-                regex_replacement=request.regex_replacement,
-                prefix=request.prefix,
-                suffix=request.suffix,
-                number_start=request.number_start,
-                number_width=request.number_width,
-                include_parent=request.include_parent,
-            )
-            return {"items": service.rename_preview(request.paths, rule)}
-        except (ValueError, OSError) as exc:
-            raise HTTPException(400, str(exc)) from exc
+        @app.api_route("/", methods=["GET", "HEAD"])
+        async def spa_root():
+            index_file = frontend_dist / "index.html"
+            if index_file.is_file():
+                return FileResponse(index_file)
+            raise HTTPException(status_code=404, detail="SPA index.html not found")
 
-    @app.post("/api/plans")
-    def create_plan(request: PlanCreateRequest):
-        try:
-            plan = service.create_plan(name=request.name, kind=request.kind, items=[item.model_dump() for item in request.items])
-            return {"id": plan.id, "status": plan.status, "expected_changes": plan.expected_changes}
-        except (ValueError, OSError) as exc:
-            raise HTTPException(400, str(exc)) from exc
+        @app.api_route("/{full_path:path}", methods=["GET", "HEAD", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
+        async def spa_fallback(request: Request, full_path: str):
+            # Never swallow /api/, /health, /docs, /openapi.json, /redoc, /ui/
+            if full_path.startswith("api/") or full_path == "api":
+                return JSONResponse({"error": "Not Found", "detail": f"Endpoint /{full_path} not found"}, status_code=404)
+            if full_path in ("health", "docs", "openapi.json", "redoc") or full_path == "ui" or full_path.startswith("ui/"):
+                raise HTTPException(status_code=404, detail="Not Found")
 
-    @app.get("/api/plans/{plan_id}")
-    def plan_detail(plan_id: int):
-        try:
-            return service.plan_detail(plan_id)
-        except KeyError as exc:
-            raise HTTPException(404, "plan not found") from exc
+            if request.method not in ("GET", "HEAD"):
+                raise HTTPException(status_code=404, detail="Not Found")
 
-    @app.post("/api/plans/{plan_id}/freeze")
-    def freeze(plan_id: int):
-        try:
-            plan = service.freeze_plan(plan_id)
-            return {"id": plan.id, "status": plan.status}
-        except KeyError as exc:
-            raise HTTPException(404, "plan not found") from exc
-        except ValueError as exc:
-            raise HTTPException(409, str(exc)) from exc
+            target_file = frontend_dist / full_path
+            if target_file.is_file():
+                return FileResponse(target_file)
 
-
-    @app.post("/api/plans/{plan_id}/validate")
-    def validate(plan_id: int):
-        try:
-            return service.validate_plan(plan_id)
-        except KeyError as exc:
-            raise HTTPException(404, "plan not found") from exc
-        except ValueError as exc:
-            raise HTTPException(409, str(exc)) from exc
-
-    @app.post("/api/plans/{plan_id}/execute")
-    def execute(plan_id: int):
-        try:
-            return service.execute_plan(plan_id)
-        except KeyError as exc:
-            raise HTTPException(404, "plan not found") from exc
-        except ValueError as exc:
-            raise HTTPException(409, str(exc)) from exc
+            index_file = frontend_dist / "index.html"
+            if index_file.is_file():
+                return FileResponse(index_file)
+            raise HTTPException(status_code=404, detail="Not Found")
 
     return app
 

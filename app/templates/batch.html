@@ -1,7 +1,0 @@
-{% extends "base.html" %}
-{% block page_title %}批量处理{% endblock %}
-{% block page_subtitle %}移动、重命名、隔离和 touch 都先生成执行计划{% endblock %}
-{% block content %}
-<div class="alert alert-light border"><i class="bi bi-shield-check text-success me-2"></i>这里不会直接执行文件操作，只会创建 Dry Run 计划。计划需要 Freeze 后才能进入校验/执行阶段。</div>
-<div class="card panel-card"><div class="card-body"><form method="post" action="/ui/batch/plan" class="row g-3"><div class="col-md-5"><label class="form-label">计划名称</label><input class="form-control" name="name" value="批量处理"></div><div class="col-md-4"><label class="form-label">操作</label><select class="form-select" name="operation" id="batchOperation"><option value="quarantine">隔离（推荐删除方式）</option><option value="touch">刷新 mtime</option><option value="move">移动</option><option value="rename">重命名</option></select></div><div class="col-12"><label class="form-label">单路径操作 <span class="text-muted">（touch / 隔离时使用，每行一个）</span></label><textarea class="form-control font-monospace" name="paths_text" rows="6" placeholder="/data/A/file1.jpg&#10;/data/A/file2.jpg"></textarea></div><div class="col-12"><label class="form-label">源 → 目标映射 <span class="text-muted">（移动 / 重命名时使用）</span></label><textarea class="form-control font-monospace" name="mappings_text" rows="6" placeholder="/data/A/old.jpg -> /data/B/new.jpg"></textarea></div><div class="col-12"><button class="btn btn-primary"><i class="bi bi-list-check"></i> 创建 Dry Run 计划</button></div></form></div></div>
-{% endblock %}

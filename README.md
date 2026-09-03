@@ -1,203 +1,189 @@
-# NAS File Center v0.2
+# NAS File Center v0.3.1
 
 面向几十 TB NAS 数据的**中文 Web 文件批处理与精确去重中心**。
 
 核心原则：**fclones 负责高性能重复发现；NAS File Center 负责规则、Dry Run、SHA256 二次校验、安全执行、审计和可视化操作。** fclones 永远不会被调用 `remove/link/dedupe` 等破坏性子命令。
 
-## v0.2 重点
+---
 
-- 全中文 Web 管理界面，不再依赖 Swagger 完成日常操作
-- 本地打包 Bootstrap 5 + Bootstrap Icons，**运行时不访问外部 CDN**，适合国内 / 局域网 NAS
-- Dashboard：索引量、重复组、预计可释放空间、最近扫描 / Worker 状态
-- 扫描去重：直接创建 fclones 扫描、查看重复组、生成去重计划
-- 去重策略：
-  - 多根目录均衡保留 `balanced-roots`
-  - 保留最新 `keep-newest`
-  - 保留最旧 `keep-oldest`
-  - 优先第一个根目录 `keep-first-root`
-  - 完整路径优先级 `path-priority`
-  - 相对路径优先级 `relative-path-preference`
-- 执行计划：Dry Run → Freeze → Validate → Execute
-- 批量重命名：正则、前后缀、编号、父目录拼接，左右预览
-- 批量处理：隔离、touch、移动、重命名，统一先生成计划
-- 路径匹配：相对路径 / basename / stem / 正则归一化路径
-- 增量文件索引
-- 少女映画 Organizer：按实际内容重算 P/V/大小并清理旧统计尾巴，保留 `[存疑]`
-- Worker 任务中心和审计日志
-- 安全设置页面只展示状态；危险开关不能从网页一键开启
-- **ZFS 大 inode 修复**：支持真实观察到的 inode `12164156718799206349`，不再触发 `Python int too large to convert to SQLite INTEGER`
+## v0.3.1 核心更新与亮点
 
-## 1. 你当前极空间 + Komodo 推荐 Compose
+1. **全新现代化企业级 Web 管理界面**：
+   - 升级为 **React + TypeScript + Vite + Ant Design 5** 架构，取代旧版 Bootstrap 页面。
+   - 包含 Dashboard 概览、文件索引、扫描去重、跨目录路径匹配、批量重命名、批量处理、少女映画 Organizer、执行计划、任务中心、审计日志与系统设置。
+   - 本地全量静态打包，**运行时严禁访问任何外部 CDN**，完全适配局域网 / 私有 NAS。
+2. **本地管理员认证与 Session 会话安全**：
+   - **Argon2id** 安全密码哈希算法。
+   - **HttpOnly + SameSite=Lax + Secure** Cookie 会话存储，服务端 SQLite 仅保存 Token SHA256 哈希，禁止将认证 Token 存入 localStorage。
+   - 支持防暴力破解频控锁定（15分钟5次失败限制）、CSRF/Origin 严格同源校验、修改密码自动吊销其他设备、多设备会话管理。
+   - 环境变量初始化：支持 `INITIAL_ADMIN_USERNAME` 与 `INITIAL_ADMIN_PASSWORD`，一旦数据库存在任何用户后永久忽略该环境变量，避免重启被覆盖。
+3. **视觉与主题体验**：
+   - 内置定制设计 NAS Favicon（SVG / ICO）与 Apple Touch Icon。
+   - 动态路由网页标题跟随。
+   - 完整支持 **浅色 (Light) / 深色 (Dark) / 跟随系统 (System)** 主题一键切换。
+4. **数据库自动备份与无损平滑迁移**：
+   - 无论 API 还是 Worker 谁先启动，在执行任何 schema mutation 前均自动备份原 SQLite 数据库至 `/config/backups/nas-file-center-YYYYMMDD-HHMMSS.db`。
+   - 完美兼容 v0.2 原有数据，**绝不要求删除已有数据库**。
+   - 100% 保留 ZFS 大 inode (`12164156718799206349`) 防溢出修复与只读安全防御机制。
 
-项目里已经附带：
+---
 
+## 1. 部署架构与配置 (Zoraxy + Komodo Stack)
+
+### 推荐生产部署网络拓扑
 ```text
-compose.komodo.yaml
+用户浏览器 (HTTPS)
+   ↓
+https://file.kerwin.cloud
+   ↓
+Zoraxy 反向代理 (SSL Termination)
+   ↓ (Docker 内部网络 nginx_network)
+nas-file-center-api:8080 (容器内 HTTP 端口，禁止直接映射宿主机端口)
 ```
 
-它按当前环境配置为：
+### `compose.komodo.yaml` (极空间 / Komodo Stack 推荐配置)
 
-```text
-镜像：kerwinjhc/nas-file-center:latest
-Web：8089 -> 8080
-配置：/tmp/zfsv3/nvme13/15246330601/data/NasFileCenter
-数据：/tmp/zfsv3/sata11/15246330601/data -> /data:ro
-网络：nginx_network
+```yaml
+services:
+  nas-file-center-api:
+    image: kerwinjhc/nas-file-center:latest
+    container_name: nas-file-center-api
+    volumes:
+      - /tmp/zfsv3/nvme13/15246330601/data/NasFileCenter:/config
+      - /tmp/zfsv3/sata11/15246330601/data:/data:ro
+    networks:
+      - nginx_network
+    environment:
+      - CONFIG_DIR=/config
+      - DATA_MOUNT=/data
+      - ALLOWED_ROOTS=/data
+      - QUARANTINE_ROOT=/data/.nas-file-center-trash
+      - ALLOW_MUTATION=false
+      - ALLOW_DELETE=false
+      - PROTECT_LAST_FILE=true
+      - FCLONES_BINARY=/usr/local/bin/fclones
+      - MTIME_REFRESH_DELAY_SECONDS=2
+      - SESSION_COOKIE_SECURE=true
+      - INITIAL_ADMIN_USERNAME=${INITIAL_ADMIN_USERNAME:-}
+      - INITIAL_ADMIN_PASSWORD=${INITIAL_ADMIN_PASSWORD:-}
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8080/health\")' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  nas-file-center-worker:
+    image: kerwinjhc/nas-file-center:latest
+    container_name: nas-file-center-worker
+    command:
+      - python
+      - -m
+      - app.worker
+    volumes:
+      - /tmp/zfsv3/nvme13/15246330601/data/NasFileCenter:/config
+      - /tmp/zfsv3/sata11/15246330601/data:/data:ro
+    networks:
+      - nginx_network
+    environment:
+      - CONFIG_DIR=/config
+      - DATA_MOUNT=/data
+      - ALLOWED_ROOTS=/data
+      - QUARANTINE_ROOT=/data/.nas-file-center-trash
+      - ALLOW_MUTATION=false
+      - ALLOW_DELETE=false
+      - PROTECT_LAST_FILE=true
+      - FCLONES_BINARY=/usr/local/bin/fclones
+      - MTIME_REFRESH_DELAY_SECONDS=2
+    depends_on:
+      nas-file-center-api:
+        condition: service_healthy
+    restart: unless-stopped
+
+networks:
+  nginx_network:
+    external: true
 ```
 
-默认仍然是三重安全状态：
+默认三重安全状态：
+- `/data:ro` (只读挂载)
+- `ALLOW_MUTATION=false`
+- `ALLOW_DELETE=false`
 
-```text
-/data:ro
-ALLOW_MUTATION=false
-ALLOW_DELETE=false
+---
+
+## 2. 从 v0.2 升级到 v0.3.1 步骤
+
+1. 在构建机器构建 `linux/amd64` 镜像并推送：
+   ```bash
+   docker buildx build \
+     --platform linux/amd64 \
+     -t kerwinjhc/nas-file-center:latest \
+     --push \
+     .
+   ```
+2. 在 Komodo / NAS 环境变量中配置管理员账号密码：
+   - `INITIAL_ADMIN_USERNAME=admin`
+   - `INITIAL_ADMIN_PASSWORD=YourSecurePassword123!`
+3. 在 Komodo / NAS 管理后台对 NasFileCenter 服务执行 **Pull / Redeploy**。
+4. 容器启动时会自动：
+   - 检查 `/config/app.db` 是否存在；
+   - 若存在旧版数据，自动在变更前备份至 `/config/backups/nas-file-center-*.db`；
+   - 自动增量迁移创建 `users` 与 `sessions` 表；
+   - 使用您提供的初始账号密码创建管理员（若未配置环境变量，禁止自动创建弱口令）。
+5. 打开域名访问 `https://file.kerwin.cloud`：
+   - 系统自动跳转至 `/login` 登录页；
+   - 输入管理员账号密码即可安全登录并使用全新 React Ant Design 5 界面。
+
+---
+
+## 3. 功能操作指南
+
+### A. 概览与状态指示
+- 顶部导航栏直观显示 **只读安全模式 / 写入模式** 徽标与 **Worker 活跃状态**。
+- 支持一键切换浅色 / 深色 / 系统跟随主题，并提供修改管理员密码与安全登出入口。
+
+### B. 文件索引与路径匹配
+- **文件索引**：对几十 TB 存储目录建立轻量增量 SQLite 索引，秒级检索文件。
+- **路径匹配**：支持跨目录相对路径、文件名、去除后缀主名或正则表达式归一化匹配，直接从 `members[].path` 生成去重计划。
+
+### C. 精确扫描与去重计划
+- **新建扫描**：直接调用 Rust fclones 原生引擎，支持普通全量扫描与 A/B 跨目录隔离扫描。
+- **去重策略**：支持多根目录均衡保留 (`balanced-roots`)、最新 (`keep-newest`)、最旧 (`keep-oldest`)、首根目录优先、完整路径优先级与相对路径优先级。
+- **严格计划生命周期**：
+  `Draft (草稿)` → `Freeze (冻结不可变)` → `Validate (实时 SHA256 二次校验)` → `Ready (已就绪)` → `Execute (安全执行)`。
+  - **禁止未校验直接执行**：Draft 与 Frozen 状态禁止 Execute，必须先通过 Validate 达到 Ready 状态方可执行。
+  - 在只读安全模式下（`ALLOW_MUTATION=false`），执行按钮物理锁定。
+
+### D. 批量重命名与批量处理
+- **批量重命名**：提供正则表达式、前后缀、编号补零、父目录名拼接，后端逐项比对 `conflict` 与 `conflict_reason`，存在重名冲突时禁止生成计划。
+- **批量处理**：支持隔离 (`quarantine`)、`touch` 更新时间戳、跨目录移动与改名。
+
+### E. 少女映画 Organizer
+- 深度识别照片/视频文件，按实际内容精确重算 `[P V GB]` 统计后缀并清除冗余历史尾巴，智能保留 `[存疑]` 等关键业务标记，准确比对 `changed` 状态生成改名计划。
+
+---
+
+## 4. 开发与本地测试验证
+
+### 自动化测试
+```bash
+# 运行全部后端安全与业务测试
+PYTHONPATH=. pytest -v
+
+# 检查前端类型定义 (0 errors)
+cd frontend && npm run typecheck
+
+# 构建前端生产产物 (0 errors)
+npm run build
 ```
 
-部署后访问：
-
-- Web UI: `http://NAS-IP:8089/`
-- Health: `http://NAS-IP:8089/health`
-- Swagger（高级/调试）: `http://NAS-IP:8089/docs`
-
-## 2. 从 v0.1 升级
-
-在 Mac 项目目录重新构建并推送：
-
+### Docker 容器构建验证
 ```bash
 docker buildx build \
   --platform linux/amd64 \
-  -t kerwinjhc/nas-file-center:latest \
-  --push \
+  -t nas-file-center:v0.3.1-fixed2 \
+  --load \
   .
 ```
-
-然后在 Komodo 对 NasFileCenter Stack 执行 **Pull / Redeploy**。
-
-现有 `/config/app.db` 可以继续使用。v0.2 对 ZFS `st_dev/st_ino` 使用带前缀的十六进制文本绑定，即使旧 SQLite 数据库对应列仍具有 INTEGER affinity，也不会把大 unsigned inode 强制转成 REAL 丢失精度。
-
-之前因为大 inode 失败的扫描任务可以保留作为历史记录，升级后重新创建扫描即可。
-
-## 3. 推荐使用顺序
-
-### A. 文件索引
-
-打开左侧 **文件索引**：
-
-1. 填 `/data/Download` 或更具体的目录
-2. 点击“加入索引队列”
-3. 在 **任务中心** 查看状态
-
-同一根目录后续重新索引会更新变化项并清除 stale 项。
-
-### B. 精确查重
-
-打开 **扫描去重**：
-
-- 单目录内部查重：只填一个根目录，关闭 isolate
-- A/B 跨目录查重：每行一个根目录，开启 isolate
-
-示例：
-
-```text
-/data/NasFileCenterTest_20260902/A
-/data/NasFileCenterTest_20260902/B
-```
-
-完成后进入扫描详情，可以展开重复组，并直接选择“均衡保留 / 最新 / 最旧 / 路径优先”等策略生成 Dry Run 计划。
-
-### C. 计划生命周期
-
-所有文件修改统一走：
-
-```text
-创建计划
-  ↓
-Freeze
-  ↓
-Validate（去重时重新 streaming SHA256）
-  ↓
-Execute
-```
-
-在默认只读模式下，Execute 按钮会被 UI 禁用；后端安全检查仍然存在，UI 不能绕过。
-
-## 4. 开启隔离执行
-
-只有当 Dry Run 和 Validate 都确认正确后，再改 Compose：
-
-```yaml
-- /tmp/zfsv3/sata11/15246330601/data:/data:rw
-```
-
-以及：
-
-```yaml
-- ALLOW_MUTATION=true
-- ALLOW_DELETE=false
-```
-
-Redeploy 后，精确去重默认仍是 **quarantine 隔离**，不会直接 unlink。隔离目录默认：
-
-```text
-/data/.nas-file-center-trash/<plan-id>/...
-```
-
-## 5. 永久删除
-
-永久 unlink 额外要求：
-
-```yaml
-- ALLOW_MUTATION=true
-- ALLOW_DELETE=true
-```
-
-UI v0.2 不主动生成永久删除计划。推荐几十 TB 正式数据长期使用隔离模式。
-
-## 6. 批量重命名
-
-打开 **批量重命名**，每行输入一个文件或目录，可组合：
-
-- 正则查找 / 替换
-- 前缀 / 后缀
-- 自动编号、补零
-- 拼接父目录名
-
-页面会先显示 `原路径 → 新路径`，确认后才生成计划。
-
-## 7. 批量处理
-
-打开 **批量处理**：
-
-- 隔离：每行一个源路径
-- touch：每行一个路径
-- move / rename：每行使用 `源 -> 目标`
-
-同样只创建 Dry Run 计划。
-
-## 8. 少女映画 Organizer
-
-打开 **Organizer**，输入：
-
-```text
-/data/Download/少女映画/百度网盘1（更新）
-```
-
-会按真实文件重新统计 P/V/大小，清除已有统计后缀并生成目录改名预览，业务标记如 `[存疑]` 会保留。
-
-## 9. 几十 TB 使用建议
-
-- 第一次扫描先从小目录验证，再逐步扩大
-- 正式数据长期保持 fclones cache 和 SQLite `/config` 持久化
-- HDD 大规模扫描不要频繁中断；Worker 与 Web API 分离，浏览器关闭不会停止后台任务
-- 路径匹配优先先建立增量索引，避免每次重新遍历整棵树
-- 删除前保持 quarantine；不要为了省一步直接开启永久 unlink
-- 定期备份 `/config/app.db`，它包含索引、计划和审计历史
-
-## 10. 开发验证
-
-```bash
-PYTHONPATH=. python -m pytest -q
-python -m compileall -q app
-```
-
-项目继续保留完整 JSON API；Web UI 是建立在同一 `FileCenterService` 安全层之上的浏览器操作面。

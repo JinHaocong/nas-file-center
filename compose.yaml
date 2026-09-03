@@ -1,7 +1,7 @@
 name: nas-file-center
 
 x-common: &common
-  image: nas-file-center:0.2.0
+  image: nas-file-center:0.3.1
   build:
     context: .
     args:
@@ -20,6 +20,8 @@ x-common: &common
     FCLONES_BINARY: /usr/local/bin/fclones
     FCLONES_THREADS: ${FCLONES_THREADS:-}
     MTIME_REFRESH_DELAY_SECONDS: ${MTIME_REFRESH_DELAY_SECONDS:-2}
+    INITIAL_ADMIN_USERNAME: ${INITIAL_ADMIN_USERNAME:-}
+    INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:-}
   volumes:
     - ${HOST_CONFIG_DIR:-./config}:/config
     - ${HOST_DATA_DIR:?Set HOST_DATA_DIR in .env}:/data:${DATA_MODE:-ro}

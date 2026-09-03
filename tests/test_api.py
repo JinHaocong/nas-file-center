@@ -16,8 +16,13 @@ def make_client(tmp_path, *, allow_mutation=False, allow_delete=False):
         QUARANTINE_ROOT=str(data / ".trash"),
         ALLOW_MUTATION=allow_mutation,
         ALLOW_DELETE=allow_delete,
+        INITIAL_ADMIN_USERNAME="admin",
+        INITIAL_ADMIN_PASSWORD="test-password-123",
     )
-    return TestClient(create_app(settings)), data
+    client = TestClient(create_app(settings))
+    client.headers.update({"Origin": "http://testserver"})
+    client.post("/api/auth/login", json={"username": "admin", "password": "test-password-123"})
+    return client, data
 
 
 def test_health(tmp_path):
@@ -55,6 +60,8 @@ def test_plan_freeze_and_mutation_guard(tmp_path):
     plan_id = created.json()["id"]
     frozen = client.post(f"/api/plans/{plan_id}/freeze")
     assert frozen.status_code == 200 and frozen.json()["status"] == "frozen"
+    val = client.post(f"/api/plans/{plan_id}/validate")
+    assert val.status_code == 200
     executed = client.post(f"/api/plans/{plan_id}/execute")
     assert executed.status_code == 200
     assert executed.json()["status"] == "partial"
@@ -71,6 +78,7 @@ def test_quarantine_plan_executes_when_mutation_enabled(tmp_path):
     })
     plan_id = created.json()["id"]
     client.post(f"/api/plans/{plan_id}/freeze")
+    client.post(f"/api/plans/{plan_id}/validate")
     executed = client.post(f"/api/plans/{plan_id}/execute")
     assert executed.json()["status"] == "completed"
     assert not src.exists()

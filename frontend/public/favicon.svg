@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1677ff" />
+      <stop offset="100%" stop-color="#0958d9" />
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#52c41a" />
+      <stop offset="100%" stop-color="#389e0d" />
+    </linearGradient>
+  </defs>
+  <!-- Background Server Chassis -->
+  <rect x="14" y="16" width="100" height="96" rx="16" fill="url(#grad)" />
+  <!-- Drive bays -->
+  <rect x="24" y="28" width="80" height="18" rx="6" fill="#ffffff" opacity="0.9" />
+  <circle cx="34" cy="37" r="3.5" fill="#52c41a" />
+  <rect x="44" y="34" width="50" height="6" rx="3" fill="#d9d9d9" />
+
+  <rect x="24" y="54" width="80" height="18" rx="6" fill="#ffffff" opacity="0.9" />
+  <circle cx="34" cy="63" r="3.5" fill="#1677ff" />
+  <rect x="44" y="60" width="50" height="6" rx="3" fill="#d9d9d9" />
+
+  <rect x="24" y="80" width="80" height="18" rx="6" fill="#ffffff" opacity="0.9" />
+  <circle cx="34" cy="89" r="3.5" fill="#faad14" />
+  <rect x="44" y="86" width="50" height="6" rx="3" fill="#d9d9d9" />
+
+  <!-- Deduplication check emblem -->
+  <circle cx="94" cy="94" r="22" fill="#ffffff" filter="drop-shadow(0 4px 6px rgba(0,0,0,0.2))" />
+  <circle cx="94" cy="94" r="18" fill="url(#accent)" />
+  <path d="M86 94 l5 6 l10 -11" fill="none" stroke="#ffffff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" />
+</svg>

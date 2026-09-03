@@ -9,7 +9,8 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from app.batch.plans import OperationItem
-from app.batch.rename import RenameRule, build_rename_plan
+from app.batch.rename import RenameCollisionError, RenameRule, _new_name, build_rename_plan
+from app.batch.stats import collect_tree_stats
 from app.config import Settings
 from app.db import create_engine_and_session, init_db
 from app.execution.executor import execute_item
@@ -18,7 +19,7 @@ from app.indexing.indexer import IndexedEntry, iter_root, scan_root
 from app.indexing.matcher import match_entries
 from app.models import AuditEvent, BatchPlan, BatchPlanItem, DuplicateFile, DuplicateGroup, IndexedPath, ScanJob, WorkJob, utcnow
 from app.path_safety import require_allowed_path
-from app.organizers.shaonv import build_stat_rename_proposals
+from app.organizers.shaonv import build_stat_rename_proposals, shaonv_stat_name
 from app.planning.engine import CandidateFile, CandidateGroup, generate_plan
 
 
@@ -28,7 +29,13 @@ class FileCenterService:
         for directory in (settings.config_dir, settings.reports_dir, settings.backups_dir, settings.logs_dir, settings.fclones_home):
             directory.mkdir(parents=True, exist_ok=True)
         self.engine, self.SessionLocal = create_engine_and_session(settings.database_path)
-        init_db(self.engine)
+        init_db(
+            self.engine,
+            db_path=settings.database_path,
+            backups_dir=settings.backups_dir,
+            initial_admin_username=settings.initial_admin_username,
+            initial_admin_password=settings.initial_admin_password,
+        )
 
     def dashboard_summary(self) -> dict:
         with self.SessionLocal() as session:
@@ -47,11 +54,16 @@ class FileCenterService:
                 "latest_reclaimable_bytes": latest_completed.reclaimable_bytes if latest_completed else 0,
             }
 
-    def list_scans(self, *, limit: int = 100) -> list[dict]:
-        limit = max(1, min(int(limit), 500))
+    def list_scans(self, *, page: int = 1, page_size: int = 20, limit: int | None = None) -> dict:
+        if limit is not None:
+            page_size = limit
+        page = max(1, int(page))
+        page_size = max(1, min(int(page_size), 500))
+        offset = (page - 1) * page_size
         with self.SessionLocal() as session:
-            rows = list(session.scalars(select(ScanJob).order_by(ScanJob.id.desc()).limit(limit)))
-            return [{
+            total = session.scalar(select(func.count(ScanJob.id))) or 0
+            rows = list(session.scalars(select(ScanJob).order_by(ScanJob.id.desc()).limit(page_size).offset(offset)))
+            items = [{
                 "id": row.id,
                 "name": row.name,
                 "mode": row.mode,
@@ -62,25 +74,34 @@ class FileCenterService:
                 "reclaimable_bytes": row.reclaimable_bytes,
                 "error": row.error_text,
                 "created_at": row.created_at,
+                "started_at": row.started_at,
+                "finished_at": row.finished_at,
             } for row in rows]
+            return {"items": items, "total": total, "page": page, "page_size": page_size}
 
-    def scan_groups(self, scan_job_id: int, *, limit: int = 200) -> list[dict]:
-        limit = max(1, min(int(limit), 1000))
+    def scan_groups(self, scan_job_id: int, *, page: int = 1, page_size: int = 20, limit: int | None = None) -> dict:
+        if limit is not None:
+            page_size = limit
+        page = max(1, int(page))
+        page_size = max(1, min(int(page_size), 500))
+        offset = (page - 1) * page_size
         with self.SessionLocal() as session:
             if session.get(ScanJob, scan_job_id) is None:
                 raise KeyError(scan_job_id)
+            total = session.scalar(select(func.count(DuplicateGroup.id)).where(DuplicateGroup.scan_job_id == scan_job_id)) or 0
             groups = list(session.scalars(
                 select(DuplicateGroup)
                 .where(DuplicateGroup.scan_job_id == scan_job_id)
                 .order_by(DuplicateGroup.file_size.desc(), DuplicateGroup.id)
-                .limit(limit)
+                .limit(page_size)
+                .offset(offset)
             ))
-            result = []
+            items = []
             for group in groups:
                 files = list(session.scalars(
                     select(DuplicateFile).where(DuplicateFile.group_id == group.id).order_by(DuplicateFile.root_id, DuplicateFile.relative_path)
                 ))
-                result.append({
+                items.append({
                     "id": group.id,
                     "content_hash": group.content_hash,
                     "file_size": group.file_size,
@@ -96,13 +117,18 @@ class FileCenterService:
                         "mtime_ns": file.mtime_ns,
                     } for file in files],
                 })
-            return result
+            return {"items": items, "total": total, "page": page, "page_size": page_size}
 
-    def list_plans(self, *, limit: int = 100) -> list[dict]:
-        limit = max(1, min(int(limit), 500))
+    def list_plans(self, *, page: int = 1, page_size: int = 20, limit: int | None = None) -> dict:
+        if limit is not None:
+            page_size = limit
+        page = max(1, int(page))
+        page_size = max(1, min(int(page_size), 500))
+        offset = (page - 1) * page_size
         with self.SessionLocal() as session:
-            rows = list(session.scalars(select(BatchPlan).order_by(BatchPlan.id.desc()).limit(limit)))
-            return [{
+            total = session.scalar(select(func.count(BatchPlan.id))) or 0
+            rows = list(session.scalars(select(BatchPlan).order_by(BatchPlan.id.desc()).limit(page_size).offset(offset)))
+            items = [{
                 "id": row.id,
                 "name": row.name,
                 "kind": row.kind,
@@ -111,13 +137,20 @@ class FileCenterService:
                 "expected_reclaim_bytes": row.expected_reclaim_bytes,
                 "metadata": json.loads(row.metadata_json or "{}"),
                 "created_at": row.created_at,
+                "frozen_at": row.frozen_at,
             } for row in rows]
+            return {"items": items, "total": total, "page": page, "page_size": page_size}
 
-    def list_work_jobs(self, *, limit: int = 100) -> list[dict]:
-        limit = max(1, min(int(limit), 500))
+    def list_work_jobs(self, *, page: int = 1, page_size: int = 20, limit: int | None = None) -> dict:
+        if limit is not None:
+            page_size = limit
+        page = max(1, int(page))
+        page_size = max(1, min(int(page_size), 500))
+        offset = (page - 1) * page_size
         with self.SessionLocal() as session:
-            rows = list(session.scalars(select(WorkJob).order_by(WorkJob.id.desc()).limit(limit)))
-            return [{
+            total = session.scalar(select(func.count(WorkJob.id))) or 0
+            rows = list(session.scalars(select(WorkJob).order_by(WorkJob.id.desc()).limit(page_size).offset(offset)))
+            items = [{
                 "id": row.id,
                 "kind": row.kind,
                 "status": row.status,
@@ -129,18 +162,34 @@ class FileCenterService:
                 "started_at": row.started_at,
                 "finished_at": row.finished_at,
             } for row in rows]
+            return {"items": items, "total": total, "page": page, "page_size": page_size}
 
-    def list_audit_events(self, *, limit: int = 200) -> list[dict]:
-        limit = max(1, min(int(limit), 1000))
+    def list_audit_events(self, *, page: int = 1, page_size: int = 20, limit: int | None = None, query: str | None = None, operation: str | None = None) -> dict:
+        if limit is not None:
+            page_size = limit
+        page = max(1, int(page))
+        page_size = max(1, min(int(page_size), 500))
+        offset = (page - 1) * page_size
         with self.SessionLocal() as session:
-            rows = list(session.scalars(select(AuditEvent).order_by(AuditEvent.id.desc()).limit(limit)))
-            result = []
+            stmt = select(AuditEvent)
+            count_stmt = select(func.count(AuditEvent.id))
+            if operation:
+                stmt = stmt.where(AuditEvent.operation == operation.strip())
+                count_stmt = count_stmt.where(AuditEvent.operation == operation.strip())
+            if query:
+                pattern = f"%{query.strip()}%"
+                stmt = stmt.where(AuditEvent.path.like(pattern) | AuditEvent.operation.like(pattern) | AuditEvent.result.like(pattern))
+                count_stmt = count_stmt.where(AuditEvent.path.like(pattern) | AuditEvent.operation.like(pattern) | AuditEvent.result.like(pattern))
+
+            total = session.scalar(count_stmt) or 0
+            rows = list(session.scalars(stmt.order_by(AuditEvent.id.desc()).limit(page_size).offset(offset)))
+            items = []
             for row in rows:
                 try:
                     details = json.loads(row.details_json or "{}")
                 except json.JSONDecodeError:
                     details = {"raw": row.details_json}
-                result.append({
+                items.append({
                     "id": row.id,
                     "timestamp": row.timestamp,
                     "operation": row.operation,
@@ -148,11 +197,16 @@ class FileCenterService:
                     "result": row.result,
                     "details": details,
                 })
-            return result
+            return {"items": items, "total": total, "page": page, "page_size": page_size}
 
-    def list_index_roots(self, *, limit: int = 100) -> list[dict]:
-        limit = max(1, min(int(limit), 500))
+    def list_index_roots(self, *, page: int = 1, page_size: int = 20, limit: int | None = None) -> dict:
+        if limit is not None:
+            page_size = limit
+        page = max(1, int(page))
+        page_size = max(1, min(int(page_size), 500))
+        offset = (page - 1) * page_size
         with self.SessionLocal() as session:
+            total = session.scalar(select(func.count(func.distinct(IndexedPath.root_key)))) or 0
             rows = session.execute(
                 select(
                     IndexedPath.root_key,
@@ -162,14 +216,16 @@ class FileCenterService:
                 )
                 .group_by(IndexedPath.root_key)
                 .order_by(IndexedPath.root_key)
-                .limit(limit)
+                .limit(page_size)
+                .offset(offset)
             ).all()
-            return [{
+            items = [{
                 "root": row.root_key,
                 "files": int(row.files or 0),
                 "folders": int(row.folders or 0),
                 "last_seen_at": row.last_seen_at,
             } for row in rows]
+            return {"items": items, "total": total, "page": page, "page_size": page_size}
 
     def reindex_root(self, root: str, *, batch_size: int = 1000) -> dict:
         safe_root = require_allowed_path(root, self.settings.allowed_roots)
@@ -328,6 +384,9 @@ class FileCenterService:
                 "progress_total": work.progress_total,
                 "state": json.loads(work.state_json or "{}"),
                 "error": work.error_text,
+                "created_at": work.created_at,
+                "started_at": work.started_at,
+                "finished_at": work.finished_at,
             }
 
     def enqueue_scan(
@@ -385,6 +444,9 @@ class FileCenterService:
                 "reclaimable_bytes": scan.reclaimable_bytes,
                 "raw_report_path": scan.raw_report_path,
                 "error": scan.error_text,
+                "created_at": scan.created_at,
+                "started_at": scan.started_at,
+                "finished_at": scan.finished_at,
             }
 
     def create_dedupe_plan(
@@ -527,12 +589,85 @@ class FileCenterService:
 
 
     def shaonv_preview(self, root: str) -> list[dict]:
-        proposals = build_stat_rename_proposals(root, allowed_roots=self.settings.allowed_roots)
-        return [{"source": str(p.source), "target": str(p.target)} for p in proposals]
+        safe_root = require_allowed_path(root, self.settings.allowed_roots)
+        if not safe_root.is_dir():
+            raise ValueError(f"Not a directory: {safe_root}")
+        items = []
+        target_names: set[str] = set()
+        source_names = {p.name for p in safe_root.iterdir() if p.is_dir() and not p.is_symlink()}
 
-    def rename_preview(self, paths: list[str], rule: RenameRule):
-        proposals = build_rename_plan(paths, rule=rule, allowed_roots=self.settings.allowed_roots)
-        return [{"source": str(p.source), "target": str(p.target)} for p in proposals]
+        for source in sorted((p for p in safe_root.iterdir() if p.is_dir() and not p.is_symlink()), key=lambda p: p.name):
+            stats = collect_tree_stats(source)
+            target = source.with_name(shaonv_stat_name(source.name, stats))
+            if target.name in target_names:
+                raise RenameCollisionError(f"Duplicate target: {target}")
+            if target.exists() and target.name not in source_names and target != source:
+                raise RenameCollisionError(f"Target already exists: {target}")
+            target_names.add(target.name)
+            items.append({
+                "source": str(source),
+                "target": str(target),
+                "images": stats.images,
+                "videos": stats.videos,
+                "total_bytes": stats.total_bytes,
+                "has_suspicious_tag": "[存疑]" in source.name,
+                "changed": (target != source),
+            })
+        return items
+
+    def rename_preview(self, paths: list[str], rule: RenameRule) -> list[dict]:
+        sources = [require_allowed_path(path, self.settings.allowed_roots) for path in paths]
+        sources.sort(key=str)
+        source_set = set(sources)
+        results = []
+        targets: set[Path] = set()
+
+        for index, source in enumerate(sources):
+            if not source.exists():
+                results.append({
+                    "source": str(source),
+                    "target": str(source),
+                    "conflict": True,
+                    "conflict_reason": "源文件不存在",
+                })
+                continue
+            if source.is_symlink():
+                results.append({
+                    "source": str(source),
+                    "target": str(source),
+                    "conflict": True,
+                    "conflict_reason": "符号链接不允许重命名",
+                })
+                continue
+            try:
+                new_file_name = _new_name(source, rule, index)
+                target = source.with_name(new_file_name)
+                require_allowed_path(target, self.settings.allowed_roots)
+
+                conflict = False
+                conflict_reason = None
+                if target in targets:
+                    conflict = True
+                    conflict_reason = "多个源文件映射到同一个目标路径"
+                elif target.exists() and target not in source_set and target != source:
+                    conflict = True
+                    conflict_reason = "目标文件已存在"
+                targets.add(target)
+
+                results.append({
+                    "source": str(source),
+                    "target": str(target),
+                    "conflict": conflict,
+                    "conflict_reason": conflict_reason,
+                })
+            except Exception as e:
+                results.append({
+                    "source": str(source),
+                    "target": str(source),
+                    "conflict": True,
+                    "conflict_reason": str(e),
+                })
+        return results
 
     def create_plan(self, *, name: str, kind: str, items: list[dict]) -> BatchPlan:
         with self.SessionLocal() as session:
@@ -585,8 +720,8 @@ class FileCenterService:
             plan = session.get(BatchPlan, plan_id)
             if plan is None:
                 raise KeyError(plan_id)
-            if plan.status not in {"frozen", "ready", "partial"}:
-                raise ValueError(f"Plan must be frozen before execution, current status={plan.status}")
+            if plan.status not in {"ready", "partial"}:
+                raise ValueError(f"Plan must be validated before execution (status must be 'ready' or 'partial'), current status={plan.status}")
             plan.status = "executing"
             session.commit()
 
@@ -658,19 +793,56 @@ class FileCenterService:
             session.commit(); session.refresh(plan)
             return {"id": plan.id, "status": plan.status, "items": output}
 
-    def plan_detail(self, plan_id: int) -> dict:
+    def plan_detail(self, plan_id: int, *, page: int = 1, page_size: int = 50) -> dict:
+        page = max(1, int(page))
+        page_size = max(1, min(int(page_size), 500))
+        offset = (page - 1) * page_size
         with self.SessionLocal() as session:
             plan = session.get(BatchPlan, plan_id)
             if plan is None:
                 raise KeyError(plan_id)
-            rows = list(session.scalars(select(BatchPlanItem).where(BatchPlanItem.plan_id == plan_id).order_by(BatchPlanItem.sequence)))
+            total_items = session.scalar(select(func.count(BatchPlanItem.id)).where(BatchPlanItem.plan_id == plan_id)) or 0
+            rows = list(session.scalars(
+                select(BatchPlanItem)
+                .where(BatchPlanItem.plan_id == plan_id)
+                .order_by(BatchPlanItem.sequence)
+                .limit(page_size)
+                .offset(offset)
+            ))
             return {
                 "id": plan.id,
                 "name": plan.name,
                 "kind": plan.kind,
                 "status": plan.status,
+                "expected_changes": plan.expected_changes,
+                "expected_reclaim_bytes": plan.expected_reclaim_bytes,
+                "created_at": plan.created_at,
+                "frozen_at": plan.frozen_at,
+                "total_items": total_items,
+                "page": page,
+                "page_size": page_size,
                 "items": [
-                    {"id": r.id, "sequence": r.sequence, "operation": r.operation, "source": r.source_path, "target": r.target_path, "keep": r.keep_path, "state": r.state, "reason": r.reason}
+                    {
+                        "id": r.id,
+                        "sequence": r.sequence,
+                        "operation": r.operation,
+                        "source": r.source_path,
+                        "target": r.target_path,
+                        "keep": r.keep_path,
+                        "expected_size": r.expected_size,
+                        "expected_hash": r.expected_hash,
+                        "state": r.state,
+                        "reason": r.reason,
+                    }
                     for r in rows
                 ],
             }
+
+    def plan_items(self, plan_id: int, *, page: int = 1, page_size: int = 50) -> dict:
+        detail = self.plan_detail(plan_id, page=page, page_size=page_size)
+        return {
+            "items": detail["items"],
+            "total": detail["total_items"],
+            "page": detail["page"],
+            "page_size": detail["page_size"],
+        }

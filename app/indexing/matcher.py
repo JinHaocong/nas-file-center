@@ -14,21 +14,26 @@ def match_entries(
     normalize_pattern: str | None = None,
     normalize_replacement: str = "",
 ) -> dict[str, list[IndexedEntry]]:
-    if mode not in {"relative-path", "basename", "stem", "normalized-relative-path"}:
+    if mode in {"normalized", "normalized-relative-path"}:
+        norm_mode = "normalized"
+    elif mode in {"relative-path", "basename", "stem"}:
+        norm_mode = mode
+    else:
         raise ValueError(f"Unsupported match mode: {mode}")
-    if mode == "normalized-relative-path" and not normalize_pattern:
-        raise ValueError("normalize_pattern is required")
+
+    if norm_mode == "normalized" and not normalize_pattern:
+        raise ValueError("normalize_pattern is required for normalized mode")
 
     pattern = re.compile(normalize_pattern) if normalize_pattern else None
     grouped: dict[str, list[IndexedEntry]] = defaultdict(list)
     for entry in entries:
         if entry.is_dir:
             continue
-        if mode == "relative-path":
+        if norm_mode == "relative-path":
             key = entry.relative_path
-        elif mode == "basename":
+        elif norm_mode == "basename":
             key = entry.basename
-        elif mode == "stem":
+        elif norm_mode == "stem":
             key = entry.stem
         else:
             key = pattern.sub(normalize_replacement, entry.relative_path)  # type: ignore[union-attr]

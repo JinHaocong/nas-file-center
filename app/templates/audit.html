@@ -1,4 +1,0 @@
-{% extends "base.html" %}
-{% block page_title %}审计日志{% endblock %}
-{% block page_subtitle %}校验、执行、隔离等关键动作保留可追溯记录{% endblock %}
-{% block content %}<div class="card panel-card"><div class="table-responsive"><table class="table table-hover align-middle mb-0"><thead><tr><th>时间</th><th>操作</th><th>结果</th><th>路径</th><th>详情</th></tr></thead><tbody>{% for event in events %}<tr><td class="small text-muted text-nowrap">{{ event.timestamp }}</td><td><code>{{ event.operation }}</code></td><td><span class="badge {{ 'bg-success' if event.result in ['ok','completed','validated'] else 'bg-warning text-dark' }}">{{ status_zh(event.result) }}</span></td><td class="font-monospace small text-break">{{ event.path or '-' }}</td><td><details><summary class="small text-muted">查看</summary><pre class="audit-json">{{ event.details|tojson(indent=2) }}</pre></details></td></tr>{% else %}<tr><td colspan="5" class="empty-cell">暂无审计记录</td></tr>{% endfor %}</tbody></table></div></div>{% endblock %}

@@ -8,7 +8,7 @@ from sqlalchemy import delete, select
 
 from app.config import Settings, get_settings
 from app.db import create_engine_and_session, init_db
-from app.models import DuplicateFile, DuplicateGroup, ScanJob, WorkJob
+from app.models import DuplicateFile, DuplicateGroup, ScanJob, WorkJob, utcnow
 from app.path_safety import require_allowed_path
 from app.scanners.fclones import build_group_command, run_scan
 from app.scanners.parser import parse_fclones_report
@@ -23,7 +23,13 @@ def _containing_root(path: Path, roots: list[Path]) -> tuple[int, Path] | None:
 
 def process_work_job(settings: Settings, work_job_id: int) -> None:
     engine, SessionLocal = create_engine_and_session(settings.database_path)
-    init_db(engine)
+    init_db(
+        engine,
+        db_path=settings.database_path,
+        backups_dir=settings.backups_dir,
+        initial_admin_username=settings.initial_admin_username,
+        initial_admin_password=settings.initial_admin_password,
+    )
     with SessionLocal() as session:
         work = session.get(WorkJob, work_job_id)
         if work is None:
@@ -31,6 +37,7 @@ def process_work_job(settings: Settings, work_job_id: int) -> None:
         state = json.loads(work.state_json)
         if work.kind == "index-root":
             work.status = "running"
+            work.started_at = utcnow()
             session.commit()
             root = state["root"]
             try:
@@ -38,6 +45,7 @@ def process_work_job(settings: Settings, work_job_id: int) -> None:
                 result = FileCenterService(settings).reindex_root(root)
                 work = session.get(WorkJob, work_job_id)
                 work.status = "completed"
+                work.finished_at = utcnow()
                 work.progress_current = result["files"] + result["folders"]
                 work.progress_total = work.progress_current
                 work.state_json = json.dumps({**state, "result": result}, ensure_ascii=False)
@@ -47,6 +55,7 @@ def process_work_job(settings: Settings, work_job_id: int) -> None:
                 session.rollback()
                 work = session.get(WorkJob, work_job_id)
                 work.status = "failed"
+                work.finished_at = utcnow()
                 work.error_text = str(exc)
                 session.commit()
                 raise
@@ -57,31 +66,53 @@ def process_work_job(settings: Settings, work_job_id: int) -> None:
         if scan is None:
             raise ValueError("scan job missing")
         roots = [require_allowed_path(p, settings.allowed_roots) for p in state["roots"]]
+        now = utcnow()
         work.status = "running"
+        work.started_at = now
         scan.status = "running"
+        scan.started_at = now
         session.commit()
 
-    command = build_group_command(
-        binary=settings.fclones_binary,
-        roots=roots,
-        allowed_roots=settings.allowed_roots,
-        isolate=bool(state.get("isolate", False)),
-        min_size=state.get("min_size"),
-        threads=state.get("threads") or settings.fclones_threads,
-        name_patterns=state.get("name_patterns"),
-        exclude_patterns=state.get("exclude_patterns"),
-    )
-    report_path = settings.reports_dir / f"scan-{state['scan_job_id']}.json"
-    completed = run_scan(command, report_path=report_path, home_dir=settings.fclones_home)
+    try:
+        command = build_group_command(
+            binary=settings.fclones_binary,
+            roots=roots,
+            allowed_roots=settings.allowed_roots,
+            isolate=bool(state.get("isolate", False)),
+            min_size=state.get("min_size"),
+            threads=state.get("threads") or settings.fclones_threads,
+            name_patterns=state.get("name_patterns"),
+            exclude_patterns=state.get("exclude_patterns"),
+        )
+        report_path = settings.reports_dir / f"scan-{state['scan_job_id']}.json"
+        completed = run_scan(command, report_path=report_path, home_dir=settings.fclones_home)
+    except Exception as exc:
+        with SessionLocal() as session:
+            now = utcnow()
+            work = session.get(WorkJob, work_job_id)
+            scan = session.get(ScanJob, int(state["scan_job_id"]))
+            if work:
+                work.status = "failed"
+                work.finished_at = now
+                work.error_text = str(exc)
+            if scan:
+                scan.status = "failed"
+                scan.finished_at = now
+                scan.error_text = str(exc)
+            session.commit()
+        raise
 
     with SessionLocal() as session:
         work = session.get(WorkJob, work_job_id)
         scan = session.get(ScanJob, int(state["scan_job_id"]))
         if completed.returncode != 0:
+            now = utcnow()
             message = completed.stderr[-8000:] if completed.stderr else f"fclones exit {completed.returncode}"
             work.status = "failed"
+            work.finished_at = now
             work.error_text = message
             scan.status = "failed"
+            scan.finished_at = now
             scan.error_text = message
             session.commit()
             return
@@ -137,24 +168,30 @@ def process_work_job(settings: Settings, work_job_id: int) -> None:
                 total_files += len(members)
                 reclaimable += parsed.file_size * (len(members) - 1)
 
+            now = utcnow()
             scan.status = "completed"
+            scan.finished_at = now
             scan.raw_report_path = str(report_path)
             scan.total_groups = total_groups
             scan.total_files_in_groups = total_files
             scan.reclaimable_bytes = reclaimable
             scan.error_text = None
             work.status = "completed"
+            work.finished_at = now
             work.progress_current = total_groups
             work.progress_total = total_groups
             work.error_text = None
             session.commit()
         except Exception as exc:
             session.rollback()
+            now = utcnow()
             work = session.get(WorkJob, work_job_id)
             scan = session.get(ScanJob, int(state["scan_job_id"]))
             work.status = "failed"
+            work.finished_at = now
             work.error_text = str(exc)
             scan.status = "failed"
+            scan.finished_at = now
             scan.error_text = str(exc)
             session.commit()
             raise
@@ -162,7 +199,13 @@ def process_work_job(settings: Settings, work_job_id: int) -> None:
 
 def recover_running_jobs(settings: Settings) -> int:
     engine, SessionLocal = create_engine_and_session(settings.database_path)
-    init_db(engine)
+    init_db(
+        engine,
+        db_path=settings.database_path,
+        backups_dir=settings.backups_dir,
+        initial_admin_username=settings.initial_admin_username,
+        initial_admin_password=settings.initial_admin_password,
+    )
     with SessionLocal() as session:
         jobs = list(session.scalars(select(WorkJob).where(WorkJob.status == "running")))
         for job in jobs:
@@ -175,7 +218,13 @@ def worker_loop(settings: Settings | None = None, *, poll_seconds: float = 2.0) 
     settings = settings or get_settings()
     recover_running_jobs(settings)
     engine, SessionLocal = create_engine_and_session(settings.database_path)
-    init_db(engine)
+    init_db(
+        engine,
+        db_path=settings.database_path,
+        backups_dir=settings.backups_dir,
+        initial_admin_username=settings.initial_admin_username,
+        initial_admin_password=settings.initial_admin_password,
+    )
     while True:
         with SessionLocal() as session:
             job = session.scalar(select(WorkJob).where(WorkJob.status == "queued").order_by(WorkJob.id).limit(1))

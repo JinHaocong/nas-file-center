@@ -7,8 +7,6 @@ services:
       - /tmp/zfsv3/sata11/15246330601/data:/data:ro
     networks:
       - nginx_network
-    ports:
-      - "8089:8080"
     environment:
       - CONFIG_DIR=/config
       - DATA_MOUNT=/data
@@ -19,6 +17,15 @@ services:
       - PROTECT_LAST_FILE=true
       - FCLONES_BINARY=/usr/local/bin/fclones
       - MTIME_REFRESH_DELAY_SECONDS=2
+      - SESSION_COOKIE_SECURE=true
+      - INITIAL_ADMIN_USERNAME=${INITIAL_ADMIN_USERNAME:-}
+      - INITIAL_ADMIN_PASSWORD=${INITIAL_ADMIN_PASSWORD:-}
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8080/health\")' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
     restart: unless-stopped
 
   nas-file-center-worker:
@@ -43,6 +50,9 @@ services:
       - PROTECT_LAST_FILE=true
       - FCLONES_BINARY=/usr/local/bin/fclones
       - MTIME_REFRESH_DELAY_SECONDS=2
+    depends_on:
+      nas-file-center-api:
+        condition: service_healthy
     restart: unless-stopped
 
 networks:

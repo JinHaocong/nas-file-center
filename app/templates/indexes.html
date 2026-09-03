@@ -1,7 +1,0 @@
-{% extends "base.html" %}
-{% block page_title %}文件索引{% endblock %}
-{% block page_subtitle %}持久化路径索引用于几十 TB 数据的增量匹配{% endblock %}
-{% block content %}
-<div class="row g-4"><div class="col-xl-4"><div class="card panel-card"><div class="card-header"><h2 class="h5 mb-0">建立 / 更新索引</h2></div><div class="card-body"><form method="post" action="/ui/indexes"><label class="form-label">容器内根目录</label><input class="form-control font-monospace" name="root" required placeholder="/data/Download"><div class="form-text">重复索引同一根目录时会更新变化项并清除已不存在记录。</div><button class="btn btn-primary w-100 mt-3"><i class="bi bi-database-add"></i> 加入索引队列</button></form></div></div></div>
-<div class="col-xl-8"><div class="card panel-card"><div class="card-header"><h2 class="h5 mb-0">已索引根目录</h2></div><div class="table-responsive"><table class="table table-hover align-middle mb-0"><thead><tr><th>根目录</th><th class="text-end">文件</th><th class="text-end">目录</th><th>最后扫描</th></tr></thead><tbody>{% for row in roots %}<tr><td><code>{{ row.root }}</code></td><td class="text-end">{{ '{:,}'.format(row.files) }}</td><td class="text-end">{{ '{:,}'.format(row.folders) }}</td><td class="small text-muted">{{ row.last_seen_at or '-' }}</td></tr>{% else %}<tr><td colspan="4" class="empty-cell">还没有建立索引</td></tr>{% endfor %}</tbody></table></div></div></div></div>
-{% endblock %}
