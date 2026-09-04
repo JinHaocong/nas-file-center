@@ -1,5 +1,5 @@
-from __future__ import annotations
-
+from datetime import datetime
+import inspect
 import json
 from typing import Any
 from sqlalchemy import delete, func, select, text
@@ -96,16 +96,22 @@ def atomic_task_transition(
     Execute a Task state transition under an atomic BEGIN IMMEDIATE write transaction.
     Ensures:
     1. The SQLite writer lock is obtained BEFORE reading the WorkJob state.
-    2. The WorkJob is reloaded from fresh database state.
-    3. Any validation occurs against current database truth, preventing stale in-memory
+    2. transaction_now = utcnow() is sampled immediately AFTER acquiring the writer lock.
+    3. The WorkJob is reloaded from fresh database state.
+    4. Any validation occurs against current database truth, preventing stale in-memory
        ORM states or concurrent worker completions from being overwritten.
     """
     with session_factory() as session:
         session.execute(text("BEGIN IMMEDIATE"))
+        transaction_now = utcnow()
         job = session.get(WorkJob, task_id)
         if job is None:
             raise KeyError(task_id)
-        result = transition_fn(session, job)
+        sig = inspect.signature(transition_fn)
+        if len(sig.parameters) >= 3 or any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in sig.parameters.values()):
+            result = transition_fn(session, job, transaction_now)
+        else:
+            result = transition_fn(session, job)
         session.commit()
         return result
 
@@ -165,7 +171,7 @@ class TaskService:
             return data
 
     def pause_task(self, task_id: int) -> dict:
-        def _transition(session: Session, job: WorkJob):
+        def _transition(session: Session, job: WorkJob, now: datetime):
             caps = get_job_capabilities(job.kind)
             if not caps.get("supports_pause", False):
                 raise ValueError("Job type does not support pause")
@@ -185,17 +191,19 @@ class TaskService:
                     event_type="paused",
                     message="Job paused while queued",
                     level="info",
+                    timestamp=now,
                 )
                 return format_task(job)
 
             if job.status == JobState.RUNNING.value:
-                job.pause_requested_at = utcnow()
+                job.pause_requested_at = now
                 log_task_event(
                     session,
                     job_id=task_id,
                     event_type="pause_requested",
                     message="Pause requested by user",
                     level="info",
+                    timestamp=now,
                 )
                 return format_task(job)
 
@@ -204,7 +212,7 @@ class TaskService:
         return atomic_task_transition(self.SessionLocal, task_id, _transition)
 
     def resume_task(self, task_id: int) -> dict:
-        def _transition(session: Session, job: WorkJob):
+        def _transition(session: Session, job: WorkJob, now: datetime):
             caps = get_job_capabilities(job.kind)
             if not caps.get("supports_resume", False):
                 raise ValueError("Job type does not support resume")
@@ -221,15 +229,14 @@ class TaskService:
                 event_type="resumed",
                 message="Job resumed by user, placed back in queue",
                 level="info",
+                timestamp=now,
             )
             return format_task(job)
 
         return atomic_task_transition(self.SessionLocal, task_id, _transition)
 
     def cancel_task(self, task_id: int) -> dict:
-        now = utcnow()
-
-        def _transition(session: Session, job: WorkJob):
+        def _transition(session: Session, job: WorkJob, now: datetime):
             caps = get_job_capabilities(job.kind)
             if not caps.get("supports_cancel", False):
                 raise ValueError("Job type does not support cancel")
@@ -258,6 +265,7 @@ class TaskService:
                     event_type="cancelled",
                     message=f"Job cancelled directly from state '{job.status}'",
                     level="warning",
+                    timestamp=now,
                 )
                 return format_task(job)
 
@@ -271,6 +279,7 @@ class TaskService:
                     event_type="cancel_requested",
                     message="Cancel requested by user",
                     level="warning",
+                    timestamp=now,
                 )
                 return format_task(job)
 
@@ -279,9 +288,7 @@ class TaskService:
         return atomic_task_transition(self.SessionLocal, task_id, _transition)
 
     def retry_task(self, task_id: int) -> dict:
-        now = utcnow()
-
-        def _transition(session: Session, job: WorkJob):
+        def _transition(session: Session, job: WorkJob, now: datetime):
             caps = get_job_capabilities(job.kind)
             if not caps.get("supports_retry", False):
                 raise ValueError("Job type does not support retry")
@@ -309,6 +316,7 @@ class TaskService:
                 event_type="retry_created",
                 message=f"Created retry Job #{new_job.id}",
                 level="info",
+                timestamp=now,
             )
             log_task_event(
                 session,
@@ -316,13 +324,14 @@ class TaskService:
                 event_type="queued",
                 message=f"Job created as retry of Job #{job.id}",
                 level="info",
+                timestamp=now,
             )
             return {"job": format_task(new_job), "retry_of": job.id}
 
         return atomic_task_transition(self.SessionLocal, task_id, _transition)
 
     def delete_task(self, task_id: int) -> dict:
-        def _transition(session: Session, job: WorkJob):
+        def _transition(session: Session, job: WorkJob, *args: Any):
             if job.status not in TERMINAL_STATES:
                 raise ValueError(f"Only terminal jobs can be deleted (current status is '{job.status}')")
 

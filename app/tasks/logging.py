@@ -1,3 +1,4 @@
+from datetime import datetime
 import json
 import re
 from typing import Any
@@ -87,12 +88,13 @@ def log_task_event(
     message: str,
     level: str = "info",
     context: dict | None = None,
+    timestamp: datetime | None = None,
 ) -> TaskEvent:
     """Insert a structured task event into the database with redacted secrets."""
     sanitized_message = sanitize_text(message)
     event = TaskEvent(
         job_id=job_id,
-        timestamp=utcnow(),
+        timestamp=timestamp or utcnow(),
         level=level,
         event_type=event_type,
         message=sanitized_message,
