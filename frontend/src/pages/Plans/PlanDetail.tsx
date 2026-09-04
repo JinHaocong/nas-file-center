@@ -29,6 +29,7 @@ import { formatBytes, formatDateTime } from '../../utils/format';
 import { STATUS_MAP } from '../../utils/constants';
 import { PlanItem } from '../../types';
 import { PlanDeleteButton } from '../../components/plans/PlanDeleteButton';
+import { invalidatePlanDeleteFailure } from '../../components/plans/plan_cleanup';
 
 const { Title, Text } = Typography;
 
@@ -100,6 +101,7 @@ export const PlanDetailPage: React.FC = () => {
     },
     onError: (err: any) => {
       message.error(err.message || '删除计划失败');
+      invalidatePlanDeleteFailure(queryClient, planId);
     },
   });
 

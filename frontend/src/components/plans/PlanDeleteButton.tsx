@@ -1,7 +1,12 @@
 import React from 'react';
 import { Button, Popconfirm, Tooltip } from 'antd';
 import { DeleteOutlined } from '@ant-design/icons';
-import { getPlanDeleteAvailability } from './plan_cleanup';
+import { useQueryClient } from '@tanstack/react-query';
+import {
+  getPlanDeleteAvailability,
+  getPlanDeleteConfirmationContent,
+  invalidatePlanDeleteFailure,
+} from './plan_cleanup';
 
 export interface PlanDeleteButtonProps {
   plan: {
@@ -26,7 +31,10 @@ export const PlanDeleteButton: React.FC<PlanDeleteButtonProps> = ({
   danger = true,
   buttonText = '删除',
 }) => {
-  const { canDelete, reason, hasExecutionHistory } = getPlanDeleteAvailability(plan);
+  const queryClient = useQueryClient();
+  const { canDelete, reason } = getPlanDeleteAvailability(plan);
+  const { title: popconfirmTitle, description: popconfirmDescription } =
+    getPlanDeleteConfirmationContent(plan);
 
   const btn = (
     <Button
@@ -49,18 +57,22 @@ export const PlanDeleteButton: React.FC<PlanDeleteButtonProps> = ({
     );
   }
 
-  const description = hasExecutionHistory
-    ? '该计划包含历史执行状态。删除仅清理计划记录与审计流水，不会撤销 NAS 文件操作（Delete ≠ Undo）。'
-    : '删除未执行的计划记录，该操作不可逆。';
+  const handleConfirm = async () => {
+    try {
+      await onDelete();
+    } catch (err: any) {
+      invalidatePlanDeleteFailure(queryClient, plan.id);
+    }
+  };
 
   return (
     <Popconfirm
-      title="确认删除此执行计划？"
-      description={description}
+      title={popconfirmTitle}
+      description={popconfirmDescription}
       okText="确认删除"
       cancelText="取消"
       okButtonProps={{ danger: true }}
-      onConfirm={onDelete}
+      onConfirm={handleConfirm}
     >
       {btn}
     </Popconfirm>

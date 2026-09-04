@@ -89,7 +89,7 @@ export const PlanHistoryCleanupModal: React.FC<Props> = ({ onCleaned }) => {
             type="warning"
             showIcon
             message="批量清理说明"
-            description="批量清理仅删除选定状态的已终态计划历史元数据与条目记录（BatchPlan 及 PlanItem），不会撤销已执行的文件操作（Delete ≠ Undo）。"
+            description="批量清理仅删除选定状态的已终态计划历史元数据与条目记录（BatchPlan 及 BatchPlanItem），不会撤销已执行的文件操作（Delete ≠ Undo）。"
           />
 
           <div>

@@ -10,6 +10,7 @@ import { STATUS_MAP } from '../../utils/constants';
 import { PlanDeleteButton } from '../../components/plans/PlanDeleteButton';
 import { PlanHistoryCleanupModal } from '../../components/plans/PlanHistoryCleanupModal';
 import { LegacyPlanCleanup } from '../../components/plans/LegacyPlanCleanup';
+import { invalidatePlanDeleteFailure } from '../../components/plans/plan_cleanup';
 
 const { Title, Text } = Typography;
 
@@ -43,8 +44,9 @@ export const PlansPage: React.FC = () => {
         setPage((prev) => prev - 1);
       }
     },
-    onError: (err: any) => {
+    onError: (err: any, id: number) => {
       message.error(err.message || '删除计划失败');
+      invalidatePlanDeleteFailure(queryClient, id);
     },
     onSettled: () => setDeletingId(null),
   });

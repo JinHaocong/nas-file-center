@@ -1,132 +1,104 @@
-# NAS File Center v0.3.3-step2-fixed8 验收报告与实现文档
-## Plan Lifecycle Cleanup Gate
+# NAS File Center v0.3.3-step2-fixed8-hotfix1 验收报告与实现文档
+## Plan Cleanup Truthful UI & Stale-State Hotfix
 
 ## 1. Baseline（基线说明）
-- **基线版本**：`NAS File Center v0.3.3-step2-fixed7`（Commit: `7b02020`）。
-- **任务目标**：本轮专注完成 `Plan Lifecycle Cleanup Gate`，彻底解决计划数据生命周期管理问题：
-  1. **当前 BatchPlan 单计划安全删除**：支持对终态及未执行计划的安全删除，并在校验/执行中（`validating`, `executing`）提供防误删强隔离（409 Conflict）；
-  2. **计划历史批量清理**：提供 `POST /api/plans/clear-history`，仅允许批量清理终态历史（`completed`, `failed`），严格禁止空入参或非法入参；
-  3. **解锁扫描记录删除**：解决 Scan 关联 Plan 导致 fixed7 防护网拦截的“死锁”，在计划删除后自动释放扫描关联依赖；
-  4. **旧版兼容计划清理**：提供 `GET /api/plans/legacy/summary` 与 `POST /api/plans/legacy/clear`，并在前端通过提示条引导一键清理旧版不参与执行链路的遗留 `Plan` / `PlanItem`，彻底解锁受阻塞的扫描记录；
-  5. **Delete ≠ Undo 原则**：删除仅清理计划元数据与条目流水，严格保证 NAS 文件系统零变动（Filesystem Mutation = 0），且 AuditEvent 与 WorkJob 永久保留。
-- **严格隔离原则**：
+- **基线版本**：`NAS File Center v0.3.3-step2-fixed8`（Commit: `a2d9381`）。
+- **性质定位**：UI 真实性与陈旧状态（Truthful UI & Stale-State）窄范围专项 Hotfix。
+- **严格约束**：
+  - **Backend production diff = 0**：`app/service.py`、`app/api/router.py`、`app/models.py`、`app/tasks/**` 保持完全零改动；
   - 零数据库 Schema 变更、零迁移变更、零新增第三方依赖；
-  - 维持现有生产 Plan Engine / Worker Concurrency / Fclones Parser 零改动。
+  - 维持现有 Plan Engine、Worker Concurrency、Scan Lifecycle 零改动。
 
 ---
 
-## 2. 根因分析与后端实现（RED → GREEN）
+## 2. 核心问题根因与修复（RED → GREEN）
 
-### A. 当前 BatchPlan 删除能力缺失与状态安全门禁
-- **现状与缺陷**：
-  此前系统缺少针对 `BatchPlan` 的删除接口。同时，若计划处于 `validating` 或 `executing` 状态，强行删除会导致后台校验或文件执行发生不可预知的空指针或竞态异常。
+### Problem A: Audit 破坏性确认文案失真（Audit Destructive Confirmation Mismatch）
+- **根因与失真点**：
+  在 fixed8 中，删除计划确认弹窗出现文案：*“删除仅清理计划记录与审计流水，不会撤销 NAS 文件操作（Delete ≠ Undo）”*。事实上真实后端在删除 `BatchPlan` / `BatchPlanItem` 时，**严格持久化保留**了 `AuditEvent`、`WorkJob`、`ScanJob` 与 NAS 真实物理文件。原错误文案会让用户误以为审计流水也会被抹除，违反了破坏性操作真实性原则。
 - **RED 阶段**：
-  在 `tests/test_plan_history_cleanup.py` 中编写对 `DELETE /api/plans/{id}` 的测试用例。在 fixed7 基线中该路由不存在（405 Method Not Allowed 或 404 Not Found），在进行原子并发状态校验时无法拦截。
+  在 `frontend/tests/plan_cleanup.test.ts` 中针对执行过的计划确认文案增加断言，验证不得包含“清理计划记录与审计流水”，且必须包含“Audit 审计记录仍会保留”。在 fixed8 基线代码下测试失败，复现原实现缺陷。
 - **GREEN 阶段**：
-  1. 状态矩阵白名单与黑名单策略：
-     - `PLAN_SINGLE_DELETE_ALLOWED = {'draft', 'frozen', 'ready', 'partial', 'completed', 'failed'}`；
-     - `PLAN_DELETE_BLOCKED_ACTIVE = {'validating', 'executing'}`；
-     - 未知状态严格 fail-closed 拦截。
-  2. 原子短写事务保障：
-     - 在 SQLite 事务中使用 `session.execute(text("BEGIN IMMEDIATE"))`，防止在读取状态与执行删除之间发生并发状态迁移（如从 `ready` 转为 `executing`）；
-  3. 关联项目级联清理：
-     - 查询并删除关联的 `BatchPlanItem`，随后删除 `BatchPlan`，保证无孤儿记录遗留；
-     - 关联的任务记录 `WorkJob` 和审计事件 `AuditEvent` 严格保留；
-     - 文件系统变更数为 0。
+  在 `frontend/src/components/plans/plan_cleanup.ts` 抽离纯函数 `getPlanDeleteConfirmationContent(plan)`，并由 `PlanDeleteButton.tsx` 统一消费：
+  - **已执行计划（`partial`, `completed`, `failed`）**：
+    `该计划可能包含已经执行过的文件操作。删除仅清理计划及计划条目元数据，不会撤销已经执行的 NAS 文件操作（Delete ≠ Undo）。Audit 审计记录仍会保留。`
+  - **未执行计划（`draft`, `frozen`, `ready`）**：
+    `仅删除该计划及其计划条目元数据，不会修改 NAS 上的任何真实文件。Audit 审计记录不会受到影响。`
 
-### B. 计划历史批量清理（Batch History Cleanup）
-- **现状与需求**：
-  随着频繁去重与规整，系统中累积大量已完成或已失败的历史计划。用户需要一键批量清理终态计划。
+---
+
+### Problem B: 旧版计划清理受影响扫描语义失真（affected_scan_count Semantic Mismatch）
+- **根因与失真点（为什么 affected != unlocked）**：
+  后端接口 `GET /api/plans/legacy/summary` 与 `POST /api/plans/legacy/clear` 返回的 `affected_scan_count` 字段真实语义为：*“有多少 Scan 曾被 legacy Plan 引用关联”*，而不是*“清理后一定有多少 Scan 可以直接删除”*。若某一扫描同时关联了当前的 `BatchPlan`，在清理旧版计划后，由于 `BatchPlan` 依赖仍然存在，该扫描仍然处于被锁状态（`has_dependent_plan=true`）。原 UI 文案“已清理 N 个旧版兼容计划，解锁 K 个扫描记录”与“清理后可安全恢复扫描记录的删除权限”存在误导。
 - **RED 阶段**：
-  验证 `POST /api/plans/clear-history` 在空列表 `statuses: []`、非法状态（如 `draft`, `executing`）或未授权访问时是否正确拦截。原实现无此接口。
+  在 `frontend/tests/legacy_plan_cleanup.test.ts` 中断言清理成功提示与横幅文案：不得包含“解锁 N 个扫描”，必须说明仅移除旧版依赖，并明确指出若仍存在当前批处理计划关联，删除限制仍会继续保留。在原实现下断言失败，复现缺陷。
 - **GREEN 阶段**：
-  1. `clear_plan_history(session, statuses)` 服务方法：
-     - 严格限定仅允许 `PLAN_HISTORY_STATES = {'completed', 'failed'}`；
-     - 若 `statuses` 为空或包含任何非终态值，直接拒绝抛出 `ValueError`（API 层返回 400 Bad Request），坚决不自动回退或删除全部；
-     - 在短事务中查询匹配的计划 ID 列表，批量删除子项及计划本身，并返回 `{ "deleted_count": count }`。
+  在 `plan_cleanup.ts` 中实现格式化纯函数并在 `LegacyPlanCleanup.tsx` 中应用：
+  - **成功消息**：`已清理 ${res.deleted_count} 个旧版计划，并移除 ${res.affected_scan_count} 个扫描记录上的旧版计划依赖（若仍关联当前批处理计划，删除限制将继续保留）。`
+  - **横幅说明**：`发现 ${summary.plan_count} 个旧版计划，包含 ${summary.item_count} 个旧版计划项，涉及 ${summary.affected_scan_count} 个扫描记录。这些记录已不参与当前 Plan 执行链路，但仍可能作为旧版依赖阻止关联扫描记录删除。清理后会移除 legacy Plan / PlanItem 元数据；如果扫描仍关联当前 BatchPlan，其删除限制仍会继续保留。`
+  - **二次确认说明**：`该操作仅删除旧版 Plan / PlanItem 元数据。不会删除当前 BatchPlan / BatchPlanItem、Scan 记录、Task / WorkJob、Audit 审计记录或 NAS 上的真实文件。清理后会移除 legacy Plan 对 Scan 的依赖；如果 Scan 仍关联当前 BatchPlan，其删除限制不会解除。`
 
-### C. 旧版兼容计划清理（Legacy Plan Compatibility Cleanup）
-- **现状与隐患**：
-  在系统从旧版演进至批处理计划后，数据库中可能残留历史 `Plan` 和 `PlanItem` 记录。虽然当前执行链路已全部基于 `BatchPlan`，但 fixed7 的 `_check_scan_has_dependent_plan()` 为保证安全，同时检查了 `Plan.scan_job_id`。如果存在旧版计划，用户在 UI 计划列表中看不见它们，也无法删除它们，导致关联的扫描记录被永久阻塞无法删除。
+---
+
+### Problem C: Plan Delete 失败后的陈旧状态滞留（409 Stale-State UX Bug）
+- **根因与陈旧状态表现**：
+  当用户端缓存计划为 `ready` 状态并显示 `[删除]` 按钮时，如果后台或其他操作将该计划转为 `executing`，用户点击删除触发 `DELETE /api/plans/{id}`，后端正确返回 `409 Conflict`。此前前端的 `onError` 仅弹窗报错 `message.error()`，未主动使前端缓存失效，导致 UI 仍维持 `ready` 和可点击的 `[删除]` 按钮，形成陈旧操作态（Stale Capability）。
 - **RED 阶段**：
-  在测试中构建孤儿/遗留 `Plan` 挂载在 `ScanJob` 上，验证其阻止扫描删除；在调用清理前，旧版计划统计接口不存在。
+  编写测试验证 `invalidatePlanDeleteFailure(queryClient, planId)` 是否正确对 `plansList` 和 `planDetail` 触发缓存失效。在未引入统一失效机制前，断言失败。
 - **GREEN 阶段**：
-  1. 契约路由实现：
-     - `GET /api/plans/legacy/summary`：返回 `{ plan_count, item_count, affected_scan_count }`；
-     - `POST /api/plans/legacy/clear`：原子删除所有旧版 `PlanItem` 及 `Plan`，返回清理统计并解锁关联扫描；
-  2. 严格遵循静态路由在动态路由之前的挂载顺序，避免 `/plans/legacy/*` 被 `/plans/{plan_id}` 误拦截。
+  实现统一失效机制 `invalidatePlanDeleteFailure(queryClient, planId)`：
+  - 当删除遇到任何错误（400、403、404、409、500 或网络错误）时：
+    1. 提示真实错误信息；
+    2. 主动调用 `queryClient.invalidateQueries({ queryKey: ['plansList'] })`；
+    3. 主动调用 `queryClient.invalidateQueries({ queryKey: ['planDetail', planId] })` 与 `['planDetail']`；
+  - 列表与详情页重新自后端获取真实状态（例如转为 `executing` 后，删除按钮自动变为禁用并展示“计划正在校验或执行中，禁止删除”；若遇 404 则平滑呈现不存在提示），彻底消除前端陈旧态。
+  - 在 `PlanDeleteButton.tsx`、`Plans/index.tsx` 以及 `Plans/PlanDetail.tsx` 全链路集成。
 
 ---
 
-## 3. 后端自动化测试验证（Pytest）
-
-在 `tests/test_plan_history_cleanup.py` 中实现了 21 个场景测试（Cases A through AN）：
-1. **Case A - F**: 单计划删除状态矩阵（`draft`, `frozen`, `ready`, `partial`, `completed`, `failed` 允许删除，无孤儿数据遗留）；
-2. **Case G - H**: 运行中状态严格拦截（`validating`, `executing` 返回 409 Conflict，计划数据完好无损）；
-3. **Case I**: 未知计划状态安全防御（Fail-closed，返回 409 Conflict）；
-4. **Case J**: 不存在的计划 ID 返回 404 Not Found；
-5. **Case K - L**: 批量历史清理状态验证（仅允许 `completed` 与 `failed`，草稿与活跃计划完全不受影响）；
-6. **Case M - O**: 批量历史清理参数严格校验（空列表 `[]`、包含非法状态均返回 400 Bad Request，实行零删除）；
-7. **Case P - R**: 旧版计划汇总与一键清理验证（精准统计 affected_scan_count，清理后成功解锁关联扫描）；
-8. **Case S**: Delete ≠ Undo 原则验证（NAS 文件系统真实物理文件零变更，验证删除前后散列与内容完全一致）；
-9. **Case T**: WorkJob 与 AuditEvent 持久性验证（WorkJob 与 AuditEvent 记录未被级联删除）；
-10. **Case U - V**: 权限与安全边界验证（未登录 401 拦截，缺失 Origin/CSRF 403 拦截）。
-
-**测试运行结果**：
-- 专用套件：`21 / 21 passed`；
-- Docker 隔离全量套件（Rule 62 只读挂载）：**`283 / 283 passed`**（零失败、零回归）。
+### PlanHistoryCleanupModal 细化修正
+- 修复 `PlanHistoryCleanupModal.tsx` 说明中“BatchPlan 及 PlanItem”的不严谨表述，修正为真实数据对象：**“BatchPlan 及 BatchPlanItem”**。
+- 继续保持：Audit 保留、NAS 文件不删除、Delete ≠ Undo 原则不变。
 
 ---
 
-## 4. 前端实现与测试验证
+## 3. 测试矩阵与自动化回归验证
 
-### 1. 类型定义与 API Client 扩展
-- [`frontend/src/types/index.ts`](file:///Users/Kerwin/MyProject/nas-file-center/frontend/src/types/index.ts)：
-  - 补充 `PlanStatus`、`PlanHistoryStatus`、`DeletePlanResponse`、`ClearPlanHistoryResponse`、`LegacyPlanSummary`、`ClearLegacyPlansResponse`。
-- [`frontend/src/api/domain.ts`](file:///Users/Kerwin/MyProject/nas-file-center/frontend/src/api/domain.ts)：
-  - `plansApi.deletePlan(id)`；
-  - `plansApi.clearHistory(statuses)`；
-  - `plansApi.getLegacySummary()`；
-  - `plansApi.clearLegacyPlans()`。
+### 1. 前端测试（Node Test Runner）
+- 扩展测试：
+  - `frontend/tests/plan_cleanup.test.ts`：增加真实确认文案断言与失败缓存失效断言；
+  - `frontend/tests/legacy_plan_cleanup.test.ts`：增加旧版计划清理真实性语义断言（移除虚假解锁描述）。
+- **执行结果**：
+  ```text
+  # tests 98
+  # suites 30
+  # pass 98
+  # fail 0
+  ```
+  **98 / 98 passed**（相比 fixed8 的 92 tests 净增 6 个，零失败）。
+- **TypeScript 类型检查**：`npm run typecheck` 退出码 0，**0 错误**。
+- **生产打包构建**：`npm run build` 成功完成，耗时 3.69s。
 
-### 2. 组件实现
-- [`frontend/src/components/plans/plan_cleanup.ts`](file:///Users/Kerwin/MyProject/nas-file-center/frontend/src/components/plans/plan_cleanup.ts)：
-  - 纯函数 `getPlanDeleteAvailability(plan)`，精准映射单个删除可用性及 `hasExecutionHistory` 标识。
-- [`frontend/src/components/plans/PlanDeleteButton.tsx`](file:///Users/Kerwin/MyProject/nas-file-center/frontend/src/components/plans/PlanDeleteButton.tsx)：
-  - 删除确认按钮，支持 Tooltip 禁用原因展示及二次 Popconfirm 确认；
-  - 针对含执行历史（`partial`, `completed`, `failed`）展示“不会撤销 NAS 文件操作（Delete ≠ Undo）”醒目警告；针对未执行计划展示不可逆确认。
-- [`frontend/src/components/plans/PlanHistoryCleanupModal.tsx`](file:///Users/Kerwin/MyProject/nas-file-center/frontend/src/components/plans/PlanHistoryCleanupModal.tsx)：
-  - 批量历史清理模态窗，提供 `completed` 与 `failed` 多选框，至少选一项才允许提交；
-  - 详细说明清理范围与安全说明（Delete ≠ Undo，不影响活跃计划与审计记录）。
-- [`frontend/src/components/plans/LegacyPlanCleanup.tsx`](file:///Users/Kerwin/MyProject/nas-file-center/frontend/src/components/plans/LegacyPlanCleanup.tsx)：
-  - 旧版计划清理横幅，仅在检测到 `plan_count > 0` 时展示；
-  - 提示受阻扫描数量并提供一键清理操作，清理后自动失效并更新扫描与计划列表缓存。
+### 2. 后端全量测试（Pytest）
+- 运行环境：遵循 Rule 62（`-v "$PWD":/src:ro -w /tmp/project`），完全只读挂载并在容器内部副本运行。
+- **执行结果**：
+  ```text
+  ======================= 283 passed, 4 warnings in 38.62s =======================
+  ```
+  **283 / 283 passed**（零失败、零回归）。
 
-### 3. 页面视图优化
-- **计划列表**（[`frontend/src/pages/Plans/index.tsx`](file:///Users/Kerwin/MyProject/nas-file-center/frontend/src/pages/Plans/index.tsx)）：
-  - 顶部操作栏新增 `[清理计划历史]` 按钮；
-  - 列表上方集成 `<LegacyPlanCleanup />` 提示横幅；
-  - 操作列增加 `[删除]` 按钮（使用 `PlanDeleteButton`）；
-  - 删除最后一项时自动回退上一分页。
-- **计划详情**（[`frontend/src/pages/Plans/PlanDetail.tsx`](file:///Users/Kerwin/MyProject/nas-file-center/frontend/src/pages/Plans/PlanDetail.tsx)）：
-  - 顶部操作栏集成 `[删除计划]` 按钮，删除成功后优雅导航回 `/plans` 列表页。
-
-### 4. 前端自动化测试（Node Test Runner）
-- `frontend/tests/plan_cleanup.test.ts`：覆盖策略矩阵（各类状态允许/拦截/执行历史标识）及 API Client 契约；
-- `frontend/tests/legacy_plan_cleanup.test.ts`：覆盖旧版计划查询与清理 API 契约；
-- 全量前端测试套件：**`92 / 92 passed`**（27 个子测试套件，零失败）；
-- TypeScript 类型检查：`npm run typecheck` 零错误；
-- 生产打包构建：`npm run build` 成功完成。
+### 3. Docker 镜像与容器冒烟验证
+- **镜像构建**：`docker build -t kerwinjhc/nas-file-center:0.3.3-step2-fixed8-hotfix1 .` 成功。
+- **容器冒烟测试**：
+  - `/health` 返回 200 OK；
+  - 未认证访问 `/api/plans`、`/api/plans/legacy/summary`、`/api/plans/clear-history` 均严格返回 401 Unauthorized。
 
 ---
 
-## 5. Docker 镜像与容器冒烟验证
+## 4. 干净发布包验证与 Release Decision
 
-- **镜像名称**：`kerwinjhc/nas-file-center:0.3.3-step2-fixed8`
-- **构建结果**：多阶段 Docker 构建全部完成。
-- **冒烟测试结果**：
-  - `GET /health`：返回 HTTP 200 OK，健康状态正常；
-  - 未认证请求 `GET /api/plans`：返回 HTTP 401 Unauthorized；
-  - 未认证请求 `GET /api/plans/legacy/summary`：返回 HTTP 401 Unauthorized；
-  - 未认证请求 `POST /api/plans/clear-history`：返回 HTTP 401 Unauthorized；
-  - 认证与安全策略符合规范。
+- **干净归档**：使用 `git archive` 打包，彻底排除 `.git`、`node_modules`、缓存与临时数据库。
+- **解压独立验证**：在 `/tmp/verify_clean_step2_fixed8_hotfix1` 进行解压后独立验证：
+  - `npm ci && npm test && npm run typecheck && npm run build` 100% 通过；
+  - Docker 全量测试 `283 / 283 passed` 100% 通过。
+- **Release Decision**：**PASS / APPROVED**。

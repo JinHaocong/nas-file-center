@@ -1,6 +1,10 @@
 import test, { describe } from 'node:test';
 import assert from 'node:assert';
-import { getPlanDeleteAvailability } from '../src/components/plans/plan_cleanup';
+import {
+  getPlanDeleteAvailability,
+  getPlanDeleteConfirmationContent,
+  invalidatePlanDeleteFailure,
+} from '../src/components/plans/plan_cleanup';
 import { plansApi } from '../src/api/domain';
 import { api } from '../src/api/client';
 
@@ -97,6 +101,74 @@ describe('Plan Lifecycle Cleanup: Policy Matrix & API Contract Tests', () => {
       } finally {
         api.post = originalPost;
       }
+    });
+  });
+
+  describe('Truthful Destructive UI: Plan Delete Confirmation Copy', () => {
+    test('executed plan confirmation clarifies Audit is preserved and does NOT claim audit is cleaned', () => {
+      const executedStatuses = ['partial', 'completed', 'failed'];
+      for (const status of executedStatuses) {
+        const content = getPlanDeleteConfirmationContent({ id: 123, status });
+        assert.ok(content.title.includes('#123'), 'Title must identify plan ID');
+        assert.ok(
+          !content.description.includes('清理计划记录与审计流水'),
+          'Must not claim audit log is cleaned up'
+        );
+        assert.ok(
+          content.description.includes('Audit 审计记录仍会保留'),
+          'Must explicitly clarify Audit log is preserved'
+        );
+        assert.ok(
+          content.description.includes('Delete ≠ Undo'),
+          'Must clearly state Delete ≠ Undo'
+        );
+        assert.ok(
+          content.description.includes('不会撤销已经执行的 NAS 文件操作'),
+          'Must clearly state executed operations are not reverted'
+        );
+      }
+    });
+
+    test('pre-execution plan confirmation clarifies Audit is unaffected and NAS files untouched', () => {
+      const preExecStatuses = ['draft', 'frozen', 'ready'];
+      for (const status of preExecStatuses) {
+        const content = getPlanDeleteConfirmationContent({ id: 456, status });
+        assert.ok(content.title.includes('#456'), 'Title must identify plan ID');
+        assert.ok(
+          content.description.includes('Audit 审计记录不会受到影响'),
+          'Must state Audit records are unaffected'
+        );
+        assert.ok(
+          content.description.includes('不会修改 NAS 上的任何真实文件'),
+          'Must state NAS files are not modified'
+        );
+      }
+    });
+  });
+
+  describe('Stale-State Prevention: Invalidation on Plan Delete Failure', () => {
+    test('invalidatePlanDeleteFailure refreshes both plansList and planDetail queries', () => {
+      const invalidatedKeys: any[] = [];
+      const mockQueryClient = {
+        invalidateQueries: (filters: { queryKey: any[] }) => {
+          invalidatedKeys.push(filters.queryKey);
+        },
+      };
+
+      invalidatePlanDeleteFailure(mockQueryClient, 88);
+
+      const hasPlansList = invalidatedKeys.some(
+        (key) => Array.isArray(key) && key[0] === 'plansList'
+      );
+      const hasPlanDetailWithId = invalidatedKeys.some(
+        (key) => Array.isArray(key) && key[0] === 'planDetail' && key[1] === 88
+      );
+      const hasPlanDetailPrefix = invalidatedKeys.some(
+        (key) => Array.isArray(key) && key[0] === 'planDetail'
+      );
+
+      assert.ok(hasPlansList, 'Must invalidate plansList query key');
+      assert.ok(hasPlanDetailWithId || hasPlanDetailPrefix, 'Must invalidate planDetail query key');
     });
   });
 });

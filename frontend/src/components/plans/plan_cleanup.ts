@@ -41,3 +41,51 @@ export function getPlanDeleteAvailability(plan?: {
     hasExecutionHistory: PLAN_EXECUTED_STATES.has(plan.status),
   };
 }
+
+export interface PlanDeleteConfirmationContent {
+  title: string;
+  description: string;
+}
+
+export function getPlanDeleteConfirmationContent(plan: {
+  id: number;
+  status?: string;
+  name?: string;
+}): PlanDeleteConfirmationContent {
+  const { hasExecutionHistory } = getPlanDeleteAvailability(plan);
+  const title = `确认删除计划 #${plan.id}？`;
+  const description = hasExecutionHistory
+    ? '该计划可能包含已经执行过的文件操作。删除仅清理计划及计划条目元数据，不会撤销已经执行的 NAS 文件操作（Delete ≠ Undo）。Audit 审计记录仍会保留。'
+    : '仅删除该计划及其计划条目元数据，不会修改 NAS 上的任何真实文件。Audit 审计记录不会受到影响。';
+  return { title, description };
+}
+
+export function invalidatePlanDeleteFailure(
+  queryClient: { invalidateQueries: (filters: { queryKey: any[] }) => any },
+  planId?: number
+) {
+  queryClient.invalidateQueries({ queryKey: ['plansList'] });
+  if (planId !== undefined) {
+    queryClient.invalidateQueries({ queryKey: ['planDetail', planId] });
+  }
+  queryClient.invalidateQueries({ queryKey: ['planDetail'] });
+}
+
+export function formatLegacyClearSuccessMessage(
+  deletedCount: number,
+  affectedScanCount: number
+): string {
+  return `已清理 ${deletedCount} 个旧版计划，并移除 ${affectedScanCount} 个扫描记录上的旧版计划依赖（若仍关联当前批处理计划，删除限制将继续保留）。`;
+}
+
+export function formatLegacyAlertDescription(summary: {
+  plan_count: number;
+  item_count: number;
+  affected_scan_count: number;
+}): string {
+  return `发现 ${summary.plan_count} 个旧版计划，包含 ${summary.item_count} 个旧版计划项，涉及 ${summary.affected_scan_count} 个扫描记录。这些记录已不参与当前 Plan 执行链路，但仍可能作为旧版依赖阻止关联扫描记录删除。清理后会移除 legacy Plan / PlanItem 元数据；如果扫描仍关联当前 BatchPlan，其删除限制仍会继续保留。`;
+}
+
+export const LEGACY_CLEANUP_CONFIRM_DESCRIPTION =
+  '该操作仅删除旧版 Plan / PlanItem 元数据。不会删除当前 BatchPlan / BatchPlanItem、Scan 记录、Task / WorkJob、Audit 审计记录或 NAS 上的真实文件。清理后会移除 legacy Plan 对 Scan 的依赖；如果 Scan 仍关联当前 BatchPlan，其删除限制不会解除。';
+
