@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 import sqlite3
 
-from sqlalchemy import Engine, create_engine, delete, event, func, inspect, select
+from sqlalchemy import Engine, create_engine, delete, event, func, inspect, select, text
 from sqlalchemy.orm import sessionmaker
 
 from app.auth.password import hash_password
@@ -88,14 +88,57 @@ def init_db(
         inspector = inspect(engine)
         existing_tables = set(inspector.get_table_names())
 
-        # If migrating an existing database (has tables) that lacks any required table, backup first
-        required_tables = {"users", "sessions", "favorite_paths", "recent_paths", "organizer_profiles"}
-        if existing_tables and not required_tables.issubset(existing_tables):
-            if db_path and backups_dir:
-                backup_database(db_path, backups_dir)
+        required_tables = {
+            "users",
+            "sessions",
+            "favorite_paths",
+            "recent_paths",
+            "organizer_profiles",
+            "worker_state",
+            "task_events",
+        }
+
+        # Check existing columns in work_jobs
+        missing_work_job_cols: list[tuple[str, str]] = []
+        if "work_jobs" in existing_tables:
+            current_cols = {c["name"] for c in inspector.get_columns("work_jobs")}
+            expected_new_cols = [
+                ("progress_message", "TEXT"),
+                ("checkpoint_json", "TEXT DEFAULT '{}'"),
+                ("error_code", "VARCHAR(64)"),
+                ("pause_requested_at", "DATETIME"),
+                ("cancel_requested_at", "DATETIME"),
+                ("heartbeat_at", "DATETIME"),
+                ("retry_of", "INTEGER REFERENCES work_jobs(id) ON DELETE SET NULL"),
+            ]
+            missing_work_job_cols = [(col, ctype) for col, ctype in expected_new_cols if col not in current_cols]
+
+        needs_backup = bool(
+            existing_tables
+            and (
+                not required_tables.issubset(existing_tables)
+                or bool(missing_work_job_cols)
+            )
+        )
+        if needs_backup and db_path and backups_dir:
+            backup_database(db_path, backups_dir)
+
+        # Migrate missing columns into work_jobs if needed
+        if missing_work_job_cols:
+            with engine.connect() as conn:
+                for col, ctype in missing_work_job_cols:
+                    conn.execute(text(f"ALTER TABLE work_jobs ADD COLUMN {col} {ctype}"))
+                conn.commit()
 
         # Create all newly defined tables / columns / indexes
         Base.metadata.create_all(engine)
+
+        # Ensure performance indexes exist on work_jobs
+        with engine.connect() as conn:
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_work_jobs_retry_of ON work_jobs(retry_of)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_work_jobs_created_at ON work_jobs(created_at)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_work_jobs_heartbeat_at ON work_jobs(heartbeat_at)"))
+            conn.commit()
 
         SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, future=True)
 

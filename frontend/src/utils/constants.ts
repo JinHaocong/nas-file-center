@@ -1,6 +1,9 @@
 export const STATUS_MAP: Record<string, { label: string; color: string }> = {
   queued: { label: '排队中', color: 'default' },
   running: { label: '运行中', color: 'processing' },
+  paused: { label: '已暂停', color: 'warning' },
+  cancel_requested: { label: '取消中', color: 'warning' },
+  cancelled: { label: '已取消', color: 'default' },
   completed: { label: '已完成', color: 'success' },
   failed: { label: '失败', color: 'error' },
   draft: { label: '草稿', color: 'default' },

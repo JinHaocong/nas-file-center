@@ -332,7 +332,116 @@ def create_dedupe_plan(request: Request, scan_job_id: int, payload: DedupePlanRe
         raise HTTPException(409, str(exc)) from exc
 
 
-# Work Jobs
+# =========================================================================
+# Task Engine Endpoints (TASK-033)
+# =========================================================================
+
+class ClearTaskHistoryRequest(BaseModel):
+    statuses: list[str] | None = None
+
+
+@router.get("/tasks")
+def list_tasks(
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+    status: str | None = None,
+    job_type: str | None = None,
+):
+    return request.app.state.service.list_tasks(
+        page=page, page_size=page_size, status=status, job_type=job_type
+    )
+
+
+@router.get("/tasks/worker")
+def get_worker_status(request: Request):
+    return request.app.state.service.get_worker_status()
+
+
+@router.post("/tasks/clear-history")
+def clear_task_history(request: Request, body: ClearTaskHistoryRequest | None = None):
+    try:
+        statuses = body.statuses if body else None
+        return request.app.state.service.clear_task_history(statuses=statuses)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.get("/tasks/{task_id}")
+def get_task_detail(request: Request, task_id: int):
+    try:
+        return request.app.state.service.get_task_detail(task_id)
+    except KeyError as exc:
+        raise HTTPException(404, "Task not found") from exc
+
+
+@router.post("/tasks/{task_id}/pause")
+def pause_task(request: Request, task_id: int):
+    try:
+        return request.app.state.service.pause_task(task_id)
+    except KeyError as exc:
+        raise HTTPException(404, "Task not found") from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/tasks/{task_id}/resume")
+def resume_task(request: Request, task_id: int):
+    try:
+        return request.app.state.service.resume_task(task_id)
+    except KeyError as exc:
+        raise HTTPException(404, "Task not found") from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/tasks/{task_id}/cancel")
+def cancel_task(request: Request, task_id: int):
+    try:
+        return request.app.state.service.cancel_task(task_id)
+    except KeyError as exc:
+        raise HTTPException(404, "Task not found") from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/tasks/{task_id}/retry")
+def retry_task(request: Request, task_id: int):
+    try:
+        return request.app.state.service.retry_task(task_id)
+    except KeyError as exc:
+        raise HTTPException(404, "Task not found") from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.delete("/tasks/{task_id}")
+def delete_task(request: Request, task_id: int):
+    try:
+        return request.app.state.service.delete_task(task_id)
+    except KeyError as exc:
+        raise HTTPException(404, "Task not found") from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.get("/tasks/{task_id}/logs")
+def get_task_logs(
+    request: Request,
+    task_id: int,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+    level: str | None = None,
+):
+    try:
+        return request.app.state.service.get_task_logs(
+            task_id, page=page, page_size=page_size, level=level
+        )
+    except KeyError as exc:
+        raise HTTPException(404, "Task not found") from exc
+
+
+# Legacy compatibility routes for v0.3.1 / v0.3.2 UI
 @router.get("/work-jobs")
 def list_work_jobs(
     request: Request,

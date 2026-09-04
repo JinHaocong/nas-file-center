@@ -46,7 +46,7 @@ export interface ScanJob {
   name: string;
   mode: string;
   roots: string[];
-  status: 'queued' | 'running' | 'completed' | 'failed';
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
   total_groups: number;
   total_files_in_groups: number;
   reclaimable_bytes: number;
@@ -107,7 +107,7 @@ export interface Plan {
 export interface WorkJob {
   id: number;
   kind: string;
-  status: 'queued' | 'running' | 'completed' | 'failed';
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'paused' | 'cancel_requested' | 'cancelled';
   progress_current: number;
   progress_total: number;
   state: Record<string, any>;

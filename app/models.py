@@ -198,11 +198,57 @@ class WorkJob(Base):
     status: Mapped[str] = mapped_column(String(32), default="queued", index=True)
     progress_current: Mapped[int] = mapped_column(BigInteger, default=0)
     progress_total: Mapped[int] = mapped_column(BigInteger, default=0)
+    progress_message: Mapped[str | None] = mapped_column(Text)
     state_json: Mapped[str] = mapped_column(Text, default="{}")
+    checkpoint_json: Mapped[str | None] = mapped_column(Text, default="{}")
     error_text: Mapped[str | None] = mapped_column(Text)
+    error_code: Mapped[str | None] = mapped_column(String(64))
+    pause_requested_at: Mapped[datetime | None]
+    cancel_requested_at: Mapped[datetime | None]
+    heartbeat_at: Mapped[datetime | None]
+    retry_of: Mapped[int | None] = mapped_column(ForeignKey("work_jobs.id", ondelete="SET NULL"), index=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     started_at: Mapped[datetime | None]
     finished_at: Mapped[datetime | None]
+
+    events: Mapped[list["TaskEvent"]] = relationship(back_populates="job", cascade="all, delete-orphan")
+
+    @property
+    def job_type(self) -> str:
+        return self.kind
+
+    @job_type.setter
+    def job_type(self, val: str) -> None:
+        self.kind = val
+
+
+class WorkerState(Base):
+    __tablename__ = "worker_state"
+
+    worker_key: Mapped[str] = mapped_column(String(64), primary_key=True, default="default")
+    worker_id: Mapped[str] = mapped_column(String(128))
+    started_at: Mapped[datetime] = mapped_column(default=utcnow)
+    heartbeat_at: Mapped[datetime] = mapped_column(default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
+
+
+class TaskEvent(Base):
+    __tablename__ = "task_events"
+    __table_args__ = (
+        Index("ix_task_events_job_id_id", "job_id", "id"),
+        Index("ix_task_events_timestamp", "timestamp"),
+        Index("ix_task_events_level", "level"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("work_jobs.id", ondelete="CASCADE"), index=True)
+    timestamp: Mapped[datetime] = mapped_column(default=utcnow)
+    level: Mapped[str] = mapped_column(String(16), default="info")
+    event_type: Mapped[str] = mapped_column(String(64), index=True)
+    message: Mapped[str] = mapped_column(Text)
+    context_json: Mapped[str] = mapped_column(Text, default="{}")
+
+    job: Mapped[WorkJob] = relationship(back_populates="events")
 
 
 class User(Base):

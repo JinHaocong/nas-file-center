@@ -13,7 +13,7 @@ from uuid import uuid4
 
 from app.utils.sorting import _MaxHeapCandidate, natural_sort_key
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from app.batch.plans import OperationItem
@@ -51,6 +51,7 @@ from app.organizers.templates import (
     validate_template,
 )
 from app.planning.engine import CandidateFile, CandidateGroup, generate_plan
+from app.tasks.service import TaskService
 
 
 class FileCenterService:
@@ -66,6 +67,7 @@ class FileCenterService:
             initial_admin_username=settings.initial_admin_username,
             initial_admin_password=settings.initial_admin_password,
         )
+        self.task_service = TaskService(self.SessionLocal)
         self._preview_snapshots: dict[str, dict[str, Any]] = {}
 
     def dashboard_summary(self) -> dict:
@@ -195,6 +197,50 @@ class FileCenterService:
             } for row in rows]
             return {"items": items, "total": total, "page": page, "page_size": page_size}
 
+    def list_tasks(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 50,
+        status: str | None = None,
+        job_type: str | None = None,
+    ) -> dict:
+        return self.task_service.list_tasks(page=page, page_size=page_size, status=status, job_type=job_type)
+
+    def get_task_detail(self, task_id: int) -> dict:
+        return self.task_service.get_task_detail(task_id)
+
+    def pause_task(self, task_id: int) -> dict:
+        return self.task_service.pause_task(task_id)
+
+    def resume_task(self, task_id: int) -> dict:
+        return self.task_service.resume_task(task_id)
+
+    def cancel_task(self, task_id: int) -> dict:
+        return self.task_service.cancel_task(task_id)
+
+    def retry_task(self, task_id: int) -> dict:
+        return self.task_service.retry_task(task_id)
+
+    def delete_task(self, task_id: int) -> dict:
+        return self.task_service.delete_task(task_id)
+
+    def clear_task_history(self, statuses: list[str] | None = None) -> dict:
+        return self.task_service.clear_task_history(statuses)
+
+    def get_task_logs(
+        self,
+        task_id: int,
+        *,
+        page: int = 1,
+        page_size: int = 50,
+        level: str | None = None,
+    ) -> dict:
+        return self.task_service.get_task_logs(task_id, page=page, page_size=page_size, level=level)
+
+    def get_worker_status(self) -> dict:
+        return self.task_service.get_worker_status()
+
     def list_audit_events(self, *, page: int = 1, page_size: int = 20, limit: int | None = None, query: str | None = None, operation: str | None = None) -> dict:
         if limit is not None:
             page_size = limit
@@ -258,7 +304,14 @@ class FileCenterService:
             } for row in rows]
             return {"items": items, "total": total, "page": page, "page_size": page_size}
 
-    def reindex_root(self, root: str, *, batch_size: int = 1000) -> dict:
+    def reindex_root(
+        self,
+        root: str,
+        *,
+        batch_size: int = 1000,
+        transaction_guard: Any | None = None,
+        checkpoint_callback: Any | None = None,
+    ) -> dict:
         safe_root = require_allowed_path(root, self.settings.allowed_roots)
         if not safe_root.is_dir():
             raise ValueError(f"Not a directory: {safe_root}")
@@ -267,61 +320,72 @@ class FileCenterService:
         files = folders = 0
         batch: list[dict] = []
 
-        def flush(session):
+        def flush():
             nonlocal batch
             if not batch:
                 return
-            stmt = sqlite_insert(IndexedPath).values(batch)
-            excluded = stmt.excluded
-            stmt = stmt.on_conflict_do_update(
-                index_elements=[IndexedPath.absolute_path],
-                set_={
-                    "root_key": excluded.root_key,
-                    "relative_path": excluded.relative_path,
-                    "basename": excluded.basename,
-                    "stem": excluded.stem,
-                    "suffix": excluded.suffix,
-                    "size": excluded.size,
-                    "mtime_ns": excluded.mtime_ns,
-                    "device": excluded.device,
-                    "inode": excluded.inode,
-                    "is_dir": excluded.is_dir,
-                    "last_seen_at": excluded.last_seen_at,
-                    "scan_generation": excluded.scan_generation,
-                },
-            )
-            session.execute(stmt)
-            session.commit()
+            with self.SessionLocal() as session:
+                session.execute(text("BEGIN IMMEDIATE"))
+                if transaction_guard is not None:
+                    transaction_guard(session)
+                stmt = sqlite_insert(IndexedPath).values(batch)
+                excluded = stmt.excluded
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=[IndexedPath.absolute_path],
+                    set_={
+                        "root_key": excluded.root_key,
+                        "relative_path": excluded.relative_path,
+                        "basename": excluded.basename,
+                        "stem": excluded.stem,
+                        "suffix": excluded.suffix,
+                        "size": excluded.size,
+                        "mtime_ns": excluded.mtime_ns,
+                        "device": excluded.device,
+                        "inode": excluded.inode,
+                        "is_dir": excluded.is_dir,
+                        "last_seen_at": excluded.last_seen_at,
+                        "scan_generation": excluded.scan_generation,
+                    },
+                )
+                session.execute(stmt)
+                session.commit()
             batch = []
+            if checkpoint_callback is not None:
+                checkpoint_callback(files + folders, 0)
+
+        for entry in iter_root(safe_root, self.settings.allowed_roots, root_key=root_key):
+            now = utcnow()
+            if entry.is_dir:
+                folders += 1
+            else:
+                files += 1
+            batch.append({
+                "root_key": root_key,
+                "absolute_path": str(entry.absolute_path),
+                "relative_path": entry.relative_path,
+                "basename": entry.basename,
+                "stem": entry.stem,
+                "suffix": entry.suffix,
+                "size": entry.size,
+                "mtime_ns": entry.mtime_ns,
+                "device": entry.device,
+                "inode": entry.inode,
+                "is_dir": entry.is_dir,
+                "first_seen_at": now,
+                "last_seen_at": now,
+                "scan_generation": generation,
+            })
+            if len(batch) >= batch_size:
+                flush()
+        flush()
 
         with self.SessionLocal() as session:
-            for entry in iter_root(safe_root, self.settings.allowed_roots, root_key=root_key):
-                now = utcnow()
-                if entry.is_dir:
-                    folders += 1
-                else:
-                    files += 1
-                batch.append({
-                    "root_key": root_key,
-                    "absolute_path": str(entry.absolute_path),
-                    "relative_path": entry.relative_path,
-                    "basename": entry.basename,
-                    "stem": entry.stem,
-                    "suffix": entry.suffix,
-                    "size": entry.size,
-                    "mtime_ns": entry.mtime_ns,
-                    "device": entry.device,
-                    "inode": entry.inode,
-                    "is_dir": entry.is_dir,
-                    "first_seen_at": now,
-                    "last_seen_at": now,
-                    "scan_generation": generation,
-                })
-                if len(batch) >= batch_size:
-                    flush(session)
-            flush(session)
+            session.execute(text("BEGIN IMMEDIATE"))
+            if transaction_guard is not None:
+                transaction_guard(session)
             session.execute(delete(IndexedPath).where(IndexedPath.root_key == root_key, IndexedPath.scan_generation != generation))
             session.commit()
+
         return {"root": root_key, "generation": generation, "files": files, "folders": folders}
 
     def index_match_preview(

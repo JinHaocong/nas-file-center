@@ -1,203 +1,306 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+import signal
+import threading
 import time
+from typing import Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import select, text
+from sqlalchemy.orm import sessionmaker
 
 from app.config import Settings, get_settings
 from app.db import create_engine_and_session, init_db
-from app.models import DuplicateFile, DuplicateGroup, ScanJob, WorkJob, utcnow
-from app.path_safety import require_allowed_path
-from app.scanners.fclones import build_group_command, run_scan
-from app.scanners.parser import parse_fclones_report
+from app.models import ScanJob, WorkJob, utcnow
+from app.tasks.context import JobContext
+from app.tasks.handlers import get_handler
+from app.tasks.logging import log_task_event
+from app.tasks.recovery import (
+    acquire_worker_ownership,
+    assert_active_worker_lease,
+    claim_next_job,
+    generate_worker_id,
+    recover_interrupted_jobs,
+    update_worker_heartbeat,
+)
+from app.tasks.state_machine import (
+    JobCancelRequested,
+    JobLeaseLost,
+    JobPauseRequested,
+    JobState,
+    TERMINAL_STATES,
+    validate_transition,
+)
+from app.tasks.sync import sync_scan_job_status
 
 
-def _containing_root(path: Path, roots: list[Path]) -> tuple[int, Path] | None:
-    matches = [(idx, root) for idx, root in enumerate(roots) if path == root or path.is_relative_to(root)]
-    if not matches:
-        return None
-    return max(matches, key=lambda pair: len(pair[1].parts))
-
-
-def process_work_job(settings: Settings, work_job_id: int) -> None:
-    engine, SessionLocal = create_engine_and_session(settings.database_path)
-    init_db(
-        engine,
-        db_path=settings.database_path,
-        backups_dir=settings.backups_dir,
-        initial_admin_username=settings.initial_admin_username,
-        initial_admin_password=settings.initial_admin_password,
-    )
-    with SessionLocal() as session:
-        work = session.get(WorkJob, work_job_id)
-        if work is None:
-            raise KeyError(work_job_id)
-        state = json.loads(work.state_json)
-        if work.kind == "index-root":
-            work.status = "running"
-            work.started_at = utcnow()
-            session.commit()
-            root = state["root"]
-            try:
-                from app.service import FileCenterService
-                result = FileCenterService(settings).reindex_root(root)
-                work = session.get(WorkJob, work_job_id)
-                work.status = "completed"
-                work.finished_at = utcnow()
-                work.progress_current = result["files"] + result["folders"]
-                work.progress_total = work.progress_current
-                work.state_json = json.dumps({**state, "result": result}, ensure_ascii=False)
-                work.error_text = None
-                session.commit()
-            except Exception as exc:
-                session.rollback()
-                work = session.get(WorkJob, work_job_id)
-                work.status = "failed"
-                work.finished_at = utcnow()
-                work.error_text = str(exc)
-                session.commit()
-                raise
-            return
-        if work.kind != "fclones-scan":
-            raise ValueError(f"Unsupported work job kind: {work.kind}")
-        scan = session.get(ScanJob, int(state["scan_job_id"]))
-        if scan is None:
-            raise ValueError("scan job missing")
-        roots = [require_allowed_path(p, settings.allowed_roots) for p in state["roots"]]
-        now = utcnow()
-        work.status = "running"
-        work.started_at = now
-        scan.status = "running"
-        scan.started_at = now
-        session.commit()
+def process_work_job(
+    settings: Settings,
+    work_job_id: int,
+    session_factory: sessionmaker | None = None,
+    engine: Any = None,
+    worker_id: str | None = None,
+) -> bool:
+    if session_factory is None or engine is None:
+        engine, session_factory = create_engine_and_session(settings.database_path)
+        init_db(
+            engine,
+            db_path=settings.database_path,
+            backups_dir=settings.backups_dir,
+            initial_admin_username=settings.initial_admin_username,
+            initial_admin_password=settings.initial_admin_password,
+        )
 
     try:
-        command = build_group_command(
-            binary=settings.fclones_binary,
-            roots=roots,
-            allowed_roots=settings.allowed_roots,
-            isolate=bool(state.get("isolate", False)),
-            min_size=state.get("min_size"),
-            threads=state.get("threads") or settings.fclones_threads,
-            name_patterns=state.get("name_patterns"),
-            exclude_patterns=state.get("exclude_patterns"),
-        )
-        report_path = settings.reports_dir / f"scan-{state['scan_job_id']}.json"
-        completed = run_scan(command, report_path=report_path, home_dir=settings.fclones_home)
-    except Exception as exc:
-        with SessionLocal() as session:
+        with session_factory() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
             now = utcnow()
+            if worker_id is not None:
+                assert_active_worker_lease(session, worker_id, now=now)
+
             work = session.get(WorkJob, work_job_id)
-            scan = session.get(ScanJob, int(state["scan_job_id"]))
+            if work is None:
+                session.rollback()
+                return False
+
+            job_type = work.kind
+
+            # Worker Preflight
+            if work.status == JobState.CANCEL_REQUESTED.value:
+                validate_transition(work.status, JobState.CANCELLED.value)
+                work.status = JobState.CANCELLED.value
+                work.finished_at = now
+                work.error_text = "Cancelled by user"
+                sync_scan_job_status(
+                    session,
+                    work,
+                    "cancelled",
+                    finished_at=now,
+                    error_text="Cancelled by user",
+                    cleanup_partial_results=True,
+                )
+                log_task_event(
+                    session,
+                    job_id=work_job_id,
+                    event_type="cancelled",
+                    message=f"Job #{work_job_id} cancelled prior to handler execution",
+                    level="warning",
+                )
+                session.commit()
+                return True
+
+            if work.status in TERMINAL_STATES or work.status == JobState.PAUSED.value:
+                session.rollback()
+                return True
+
+            if work.status == JobState.QUEUED.value:
+                validate_transition(work.status, JobState.RUNNING.value)
+                work.status = JobState.RUNNING.value
+                work.started_at = work.started_at or now
+
+            sync_scan_job_status(session, work, "running", started_at=work.started_at)
+            work.heartbeat_at = now
+            log_task_event(
+                session,
+                job_id=work_job_id,
+                event_type="started",
+                message=f"Job #{work_job_id} ({job_type}) started",
+                level="info",
+            )
+            session.commit()
+
+        handler = get_handler(job_type)
+        if handler is None:
+            with session_factory() as session:
+                session.execute(text("BEGIN IMMEDIATE"))
+                now = utcnow()
+                if worker_id is not None:
+                    assert_active_worker_lease(session, worker_id, now=now)
+
+                work = session.get(WorkJob, work_job_id)
+                if work:
+                    work.status = JobState.FAILED.value
+                    work.error_code = "UNKNOWN_JOB_TYPE"
+                    work.error_text = f"Unsupported work job kind: {job_type}"
+                    work.finished_at = now
+                    log_task_event(
+                        session,
+                        job_id=work_job_id,
+                        event_type="failed",
+                        message=f"Unknown job type '{job_type}'",
+                        level="error",
+                        context={"error_code": "UNKNOWN_JOB_TYPE"},
+                    )
+                    sync_scan_job_status(
+                        session,
+                        work,
+                        "failed",
+                        finished_at=now,
+                        error_text=work.error_text,
+                        cleanup_partial_results=True,
+                    )
+                    session.commit()
+            return False
+
+        ctx = JobContext(engine, session_factory, work_job_id, worker_id=worker_id)
+
+        with session_factory() as session:
+            work = session.get(WorkJob, work_job_id)
+            handler.run(work, ctx, settings)
+
+        # Finished cleanly -> completed under active lease
+        with session_factory() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            now = utcnow()
+            if worker_id is not None:
+                assert_active_worker_lease(session, worker_id, now=now)
+
+            work = session.get(WorkJob, work_job_id)
+            if work and work.status == JobState.RUNNING.value:
+                validate_transition(work.status, JobState.COMPLETED.value)
+                work.status = JobState.COMPLETED.value
+                work.finished_at = now
+                work.heartbeat_at = now
+                work.error_text = None
+                work.error_code = None
+
+                sync_scan_job_status(session, work, "completed", finished_at=now)
+
+                log_task_event(
+                    session,
+                    job_id=work_job_id,
+                    event_type="completed",
+                    message=f"Job #{work_job_id} completed successfully",
+                    level="info",
+                )
+                session.commit()
+            elif work and work.status == JobState.CANCEL_REQUESTED.value:
+                validate_transition(work.status, JobState.CANCELLED.value)
+                work.status = JobState.CANCELLED.value
+                work.finished_at = now
+                work.heartbeat_at = now
+                work.error_text = "Cancelled by user"
+
+                sync_scan_job_status(
+                    session,
+                    work,
+                    "cancelled",
+                    finished_at=now,
+                    error_text="Cancelled by user",
+                    cleanup_partial_results=True,
+                )
+
+                log_task_event(
+                    session,
+                    job_id=work_job_id,
+                    event_type="cancelled",
+                    message=f"Job #{work_job_id} cancelled (cancel requested prior to finalization)",
+                    level="warning",
+                )
+                session.commit()
+        return True
+
+    except JobPauseRequested:
+        # Job safely paused at checkpoint boundary. Status already updated to paused in checkpoint().
+        return True
+    except JobCancelRequested:
+        # Job safely cancelled at checkpoint boundary. Sync ScanJob if applicable under active lease.
+        with session_factory() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            now = utcnow()
+            if worker_id is not None:
+                try:
+                    assert_active_worker_lease(session, worker_id, now=now)
+                except JobLeaseLost:
+                    return False
+
+            work = session.get(WorkJob, work_job_id)
             if work:
-                work.status = "failed"
+                sync_scan_job_status(
+                    session,
+                    work,
+                    "cancelled",
+                    finished_at=now,
+                    error_text="Cancelled by user",
+                    cleanup_partial_results=True,
+                )
+                session.commit()
+        return True
+    except JobLeaseLost:
+        # Worker lease lost; another worker may have taken ownership or recovered this job.
+        # Surrender immediately without mutating WorkJob status or database.
+        return False
+    except Exception as exc:
+        with session_factory() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            now = utcnow()
+            if worker_id is not None:
+                try:
+                    assert_active_worker_lease(session, worker_id, now=now)
+                except JobLeaseLost:
+                    # Stale worker MUST NOT mutate database!
+                    return False
+
+            work = session.get(WorkJob, work_job_id)
+            if work and work.status not in (JobState.CANCELLED.value, JobState.PAUSED.value):
+                work.status = JobState.FAILED.value
                 work.finished_at = now
                 work.error_text = str(exc)
-            if scan:
-                scan.status = "failed"
-                scan.finished_at = now
-                scan.error_text = str(exc)
-            session.commit()
-        raise
-
-    with SessionLocal() as session:
-        work = session.get(WorkJob, work_job_id)
-        scan = session.get(ScanJob, int(state["scan_job_id"]))
-        if completed.returncode != 0:
-            now = utcnow()
-            message = completed.stderr[-8000:] if completed.stderr else f"fclones exit {completed.returncode}"
-            work.status = "failed"
-            work.finished_at = now
-            work.error_text = message
-            scan.status = "failed"
-            scan.finished_at = now
-            scan.error_text = message
-            session.commit()
-            return
-
-        try:
-            parsed_groups = parse_fclones_report(report_path)
-            session.execute(delete(DuplicateGroup).where(DuplicateGroup.scan_job_id == scan.id))
-            session.flush()
-            total_groups = total_files = reclaimable = 0
-            for parsed in parsed_groups:
-                members = []
-                for raw_path in parsed.files:
-                    raw = Path(raw_path)
-                    if raw.is_symlink():
-                        continue
-                    try:
-                        safe = require_allowed_path(raw, roots)
-                    except ValueError:
-                        continue
-                    if not safe.is_file():
-                        continue
-                    root_match = _containing_root(safe, roots)
-                    if root_match is None:
-                        continue
-                    root_id, root = root_match
-                    stat = safe.stat(follow_symlinks=False)
-                    relative = safe.relative_to(root)
-                    top = root / relative.parts[0] if len(relative.parts) > 1 else root
-                    members.append((root_id, safe, relative, top, stat))
-                if len(members) < 2:
-                    continue
-                group = DuplicateGroup(
-                    scan_job_id=scan.id,
-                    content_hash=parsed.content_hash,
-                    file_size=parsed.file_size,
-                    member_count=len(members),
+                work.error_code = getattr(exc, "error_code", "EXECUTION_ERROR")
+                log_task_event(
+                    session,
+                    job_id=work_job_id,
+                    event_type="failed",
+                    message=f"Job #{work_job_id} failed: {exc}",
+                    level="error",
+                    context={"error": str(exc)},
                 )
-                session.add(group)
-                session.flush()
-                for root_id, safe, relative, top, stat in members:
-                    session.add(DuplicateFile(
-                        group_id=group.id,
-                        root_id=root_id,
-                        absolute_path=str(safe),
-                        relative_path=relative.as_posix(),
-                        top_level_dir=str(top),
-                        size=stat.st_size,
-                        mtime_ns=stat.st_mtime_ns,
-                        device=stat.st_dev,
-                        inode=stat.st_ino,
-                    ))
-                total_groups += 1
-                total_files += len(members)
-                reclaimable += parsed.file_size * (len(members) - 1)
+                sync_scan_job_status(
+                    session,
+                    work,
+                    "failed",
+                    finished_at=now,
+                    error_text=str(exc),
+                    cleanup_partial_results=True,
+                )
+                session.commit()
+        return False
 
-            now = utcnow()
-            scan.status = "completed"
-            scan.finished_at = now
-            scan.raw_report_path = str(report_path)
-            scan.total_groups = total_groups
-            scan.total_files_in_groups = total_files
-            scan.reclaimable_bytes = reclaimable
-            scan.error_text = None
-            work.status = "completed"
-            work.finished_at = now
-            work.progress_current = total_groups
-            work.progress_total = total_groups
-            work.error_text = None
-            session.commit()
-        except Exception as exc:
-            session.rollback()
-            now = utcnow()
-            work = session.get(WorkJob, work_job_id)
-            scan = session.get(ScanJob, int(state["scan_job_id"]))
-            work.status = "failed"
-            work.finished_at = now
-            work.error_text = str(exc)
-            scan.status = "failed"
-            scan.finished_at = now
-            scan.error_text = str(exc)
-            session.commit()
-            raise
+
+class WorkerHeartbeatThread(threading.Thread):
+    def __init__(
+        self,
+        engine: Any,
+        session_factory: sessionmaker,
+        worker_id: str,
+        interval: float = 10.0,
+        stop_event: threading.Event | None = None,
+        lease_lost_event: threading.Event | None = None,
+    ):
+        super().__init__(name="WorkerHeartbeat", daemon=True)
+        self.engine = engine
+        self.session_factory = session_factory
+        self.worker_id = worker_id
+        self.interval = interval
+        self.stop_event = stop_event or threading.Event()
+        self.lease_lost_event = lease_lost_event
+
+    def run(self) -> None:
+        while not self.stop_event.is_set():
+            if self.stop_event.wait(self.interval):
+                break
+            try:
+                renewed = update_worker_heartbeat(self.engine, self.session_factory, worker_id=self.worker_id)
+                if not renewed and self.lease_lost_event is not None:
+                    self.lease_lost_event.set()
+            except Exception:
+                pass
 
 
 def recover_running_jobs(settings: Settings) -> int:
+    """Legacy compatibility function for recovering running jobs on startup."""
     engine, SessionLocal = create_engine_and_session(settings.database_path)
     init_db(
         engine,
@@ -206,17 +309,21 @@ def recover_running_jobs(settings: Settings) -> int:
         initial_admin_username=settings.initial_admin_username,
         initial_admin_password=settings.initial_admin_password,
     )
-    with SessionLocal() as session:
-        jobs = list(session.scalars(select(WorkJob).where(WorkJob.status == "running")))
-        for job in jobs:
-            job.status = "queued"
-        session.commit()
-        return len(jobs)
+    worker_id = generate_worker_id()
+    if acquire_worker_ownership(engine, SessionLocal, worker_id=worker_id):
+        stats = recover_interrupted_jobs(engine, SessionLocal, worker_id=worker_id)
+        return stats["recovered_requeued"] + stats["failed_interrupted"] + stats["cancelled"]
+    return 0
 
 
-def worker_loop(settings: Settings | None = None, *, poll_seconds: float = 2.0) -> None:
+def worker_loop(
+    settings: Settings | None = None,
+    *,
+    poll_seconds: float = 2.0,
+    heartbeat_interval: float = 10.0,
+    stop_event: threading.Event | None = None,
+) -> None:
     settings = settings or get_settings()
-    recover_running_jobs(settings)
     engine, SessionLocal = create_engine_and_session(settings.database_path)
     init_db(
         engine,
@@ -225,14 +332,80 @@ def worker_loop(settings: Settings | None = None, *, poll_seconds: float = 2.0) 
         initial_admin_username=settings.initial_admin_username,
         initial_admin_password=settings.initial_admin_password,
     )
-    while True:
-        with SessionLocal() as session:
-            job = session.scalar(select(WorkJob).where(WorkJob.status == "queued").order_by(WorkJob.id).limit(1))
-            job_id = job.id if job else None
-        if job_id is None:
-            time.sleep(poll_seconds)
-            continue
-        process_work_job(settings, job_id)
+
+    worker_id = generate_worker_id()
+    stop_event = stop_event or threading.Event()
+    lease_lost_event = threading.Event()
+
+    def _sig_handler(signum, frame):
+        if stop_event:
+            stop_event.set()
+
+    try:
+        signal.signal(signal.SIGTERM, _sig_handler)
+        signal.signal(signal.SIGINT, _sig_handler)
+    except (ValueError, AttributeError):
+        pass
+
+    acquired = acquire_worker_ownership(engine, SessionLocal, worker_id=worker_id)
+
+    heartbeat_thread = WorkerHeartbeatThread(
+        engine,
+        SessionLocal,
+        worker_id=worker_id,
+        interval=heartbeat_interval,
+        stop_event=stop_event,
+        lease_lost_event=lease_lost_event,
+    )
+    heartbeat_thread.start()
+
+    if acquired:
+        recover_interrupted_jobs(engine, SessionLocal, worker_id=worker_id)
+
+    try:
+        while True:
+            if stop_event.is_set():
+                break
+
+            if lease_lost_event.is_set():
+                acquired = False
+                lease_lost_event.clear()
+
+            if not acquired:
+                acquired = acquire_worker_ownership(engine, SessionLocal, worker_id=worker_id)
+                if not acquired:
+                    time.sleep(poll_seconds)
+                    continue
+                recover_interrupted_jobs(engine, SessionLocal, worker_id=worker_id)
+
+            try:
+                claimed_id = claim_next_job(engine, SessionLocal, worker_id=worker_id)
+            except JobLeaseLost:
+                acquired = False
+                continue
+
+            if claimed_id is None:
+                time.sleep(poll_seconds)
+                continue
+
+            try:
+                success = process_work_job(
+                    settings,
+                    claimed_id,
+                    session_factory=SessionLocal,
+                    engine=engine,
+                    worker_id=worker_id,
+                )
+                if success is False:
+                    acquired = False
+            except JobLeaseLost:
+                acquired = False
+            except Exception:
+                # Individual job failures do not terminate the worker container
+                pass
+    finally:
+        stop_event.set()
+        heartbeat_thread.join(timeout=1.0)
 
 
 if __name__ == "__main__":
