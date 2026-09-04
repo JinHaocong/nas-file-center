@@ -77,6 +77,30 @@ from app.planning.engine import CandidateFile, CandidateGroup, generate_plan
 from app.tasks.service import TaskService
 
 
+def _index_job_root(job: WorkJob) -> str | None:
+    raw = job.state_json
+    if not raw:
+        return None
+
+    try:
+        payload = json.loads(raw)
+    except (json.JSONDecodeError, TypeError, UnicodeDecodeError):
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+
+    root = payload.get("root")
+    if not isinstance(root, str):
+        return None
+
+    root = root.strip()
+    if not root:
+        return None
+
+    return root
+
+
 class FileCenterService:
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -383,16 +407,9 @@ class FileCenterService:
 
             active_job_map: dict[str, WorkJob] = {}
             for job in active_jobs:
-                if not job.state_json:
-                    continue
-                try:
-                    payload = json.loads(job.state_json)
-                    job_root = payload.get("root")
-                    if job_root and isinstance(job_root, str):
-                        if job_root not in active_job_map:
-                            active_job_map[job_root] = job
-                except Exception:
-                    pass
+                job_root = _index_job_root(job)
+                if job_root and job_root not in active_job_map:
+                    active_job_map[job_root] = job
 
             items = []
             for r in roots:
@@ -642,19 +659,11 @@ class FileCenterService:
             ).all()
 
             for job in active_jobs:
-                if not job.state_json:
-                    continue
-                try:
-                    payload = json.loads(job.state_json)
-                    job_root = payload.get("root")
-                    if job_root == root_str:
-                        raise ValueError(
-                            f"Cannot remove index for '{root_str}' while index task #{job.id} is active ({job.status})"
-                        )
-                except ValueError:
-                    raise
-                except Exception:
-                    pass
+                job_root = _index_job_root(job)
+                if job_root == root_str:
+                    raise ValueError(
+                        f"Cannot remove index root '{root_str}' while index task #{job.id} is active ({job.status})"
+                    )
 
             del_res = session.execute(
                 delete(IndexedPath).where(IndexedPath.root_key == root_str)

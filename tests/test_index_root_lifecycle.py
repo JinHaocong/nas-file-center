@@ -464,3 +464,244 @@ def test_worker_fencing_aborts_registry_update(tmp_path: Path):
     # 事务回滚，last_indexed_at 保持不变
     curr_time = service.list_index_roots()["items"][0]["last_indexed_at"]
     assert curr_time == orig_time
+
+
+# ==============================================================================
+# hotfix1 Regression Tests: Index Active-Job Corrupt State Isolation
+# ==============================================================================
+
+
+def test_malformed_unrelated_active_job_does_not_block_index_root_delete(tmp_path: Path):
+    """hotfix1-1: 存在 state_json 损坏的无关 active index-root 任务时，绝不阻止目标 IndexRoot 删除，且损坏 Job 完好保留"""
+    service, data, _ = make_service(tmp_path)
+    folder = data / "NormalFolder"
+    folder.mkdir()
+    (folder / "file.txt").write_text("hello")
+
+    enq = service.enqueue_index(str(folder))
+    idx_id = enq["index_root_id"]
+    job_id = enq["work_job_id"]
+    service.reindex_root(str(folder))
+
+    # 将本目录的任务置为终态 completed
+    with service.SessionLocal() as session:
+        j = session.get(WorkJob, job_id)
+        j.status = "completed"
+        # 插入一条完全无关、state_json 损坏的 active 任务
+        corrupt_job = WorkJob(
+            kind="index-root",
+            status="running",
+            state_json="{broken json",
+        )
+        session.add(corrupt_job)
+        session.commit()
+        corrupt_id = corrupt_job.id
+
+    # 列表视角验证：已如实反映无活跃任务且可删除
+    roots = service.list_index_roots()
+    assert roots["total"] == 1
+    assert roots["items"][0]["has_active_job"] is False
+    assert roots["items"][0]["can_remove"] is True
+
+    # 删除目标 IndexRoot：baseline 会因为 JSONDecodeError 抛出 ValueError，hotfix1 应成功
+    del_res = service.delete_index_root(idx_id)
+    assert del_res["deleted"] is True
+    assert del_res["id"] == idx_id
+
+    # 验证元数据已删除，但损坏的 WorkJob 必须保留
+    with service.SessionLocal() as session:
+        assert session.get(IndexRoot, idx_id) is None
+        assert len(list(session.scalars(select(IndexedPath).where(IndexedPath.root_key == str(folder.resolve()))))) == 0
+        preserved_corrupt = session.get(WorkJob, corrupt_id)
+        assert preserved_corrupt is not None
+        assert preserved_corrupt.status == "running"
+        assert preserved_corrupt.state_json == "{broken json"
+
+
+def test_api_delete_with_malformed_unrelated_active_job(tmp_path: Path):
+    """hotfix1-2: API 级验证：存在损坏 state_json 时 DELETE 接口返回 200 成功，绝不泄露 parser error 或错误返回 409"""
+    client, service, data, _ = make_authed_client(tmp_path)
+    folder = data / "ApiFolder"
+    folder.mkdir()
+
+    enq = service.enqueue_index(str(folder))
+    idx_id = enq["index_root_id"]
+    job_id = enq["work_job_id"]
+    service.reindex_root(str(folder))
+
+    with service.SessionLocal() as session:
+        j = session.get(WorkJob, job_id)
+        j.status = "completed"
+        corrupt_job = WorkJob(
+            kind="index-root",
+            status="running",
+            state_json='{"invalid_json: unterminated',
+        )
+        session.add(corrupt_job)
+        session.commit()
+
+    resp = client.delete(f"/api/indexes/{idx_id}", headers={"Origin": "http://testserver"})
+    assert resp.status_code == 200, f"Expected 200, got {resp.status_code} detail: {resp.text}"
+    body = resp.json()
+    assert body["deleted"] is True
+    assert body["id"] == idx_id
+    assert "JSONDecodeError" not in resp.text
+    assert "Expecting" not in resp.text
+
+
+def test_valid_active_exact_root_still_blocks_delete_and_preserves_records(tmp_path: Path):
+    """hotfix1-3: 真正的 active exact-root 任务必须严格阻止删除（409），保留全部记录且返回业务信息"""
+    client, service, data, _ = make_authed_client(tmp_path)
+    folder = data / "TargetFolder"
+    folder.mkdir()
+    (folder / "file.txt").write_text("data")
+
+    enq = service.enqueue_index(str(folder))
+    idx_id = enq["index_root_id"]
+    job_id = enq["work_job_id"]
+    service.reindex_root(str(folder))
+
+    # job 保持 running 状态，state_json 包含 exact root
+    with service.SessionLocal() as session:
+        j = session.get(WorkJob, job_id)
+        j.status = "running"
+        j.state_json = json.dumps({"root": str(folder.resolve())})
+        session.commit()
+
+    # service 层阻断
+    with pytest.raises(ValueError, match=f"while index task #{job_id} is active \\(running\\)"):
+        service.delete_index_root(idx_id)
+
+    # API 层阻断
+    resp = client.delete(f"/api/indexes/{idx_id}", headers={"Origin": "http://testserver"})
+    assert resp.status_code == 409
+    assert f"while index task #{job_id} is active" in resp.json()["detail"]
+
+    # 验证全部记录完好无损
+    with service.SessionLocal() as session:
+        assert session.get(IndexRoot, idx_id) is not None
+        assert len(list(session.scalars(select(IndexedPath).where(IndexedPath.root_key == str(folder.resolve()))))) > 0
+        assert session.get(WorkJob, job_id) is not None
+
+
+def test_unknown_non_terminal_state_still_blocks(tmp_path: Path):
+    """hotfix1-4: 未知非终态状态（如 future_active_state）仍严格 fail-safe 阻断删除"""
+    service, data, _ = make_service(tmp_path)
+    folder = data / "FutureStatusFolder"
+    folder.mkdir()
+
+    enq = service.enqueue_index(str(folder))
+    idx_id = enq["index_root_id"]
+    job_id = enq["work_job_id"]
+
+    with service.SessionLocal() as session:
+        j = session.get(WorkJob, job_id)
+        j.status = "future_active_state"
+        j.state_json = json.dumps({"root": str(folder.resolve())})
+        session.commit()
+
+    with pytest.raises(ValueError, match="is active \\(future_active_state\\)"):
+        service.delete_index_root(idx_id)
+
+
+@pytest.mark.parametrize("bad_state", [
+    "",
+    "{broken",
+    "[]",
+    "null",
+    '"hello"',
+    '{"foo": "bar"}',
+    '{"root": null}',
+    '{"root": 123}',
+    '{"root": "   "}',
+])
+def test_malformed_payload_shapes_do_not_block_deletion(tmp_path: Path, bad_state: str):
+    """hotfix1-5: 各种异常形状的 state_json 均不能证明归属目标 Root，绝不阻断目标删除"""
+    service, data, _ = make_service(tmp_path)
+    folder = data / "Target"
+    folder.mkdir()
+
+    enq = service.enqueue_index(str(folder))
+    idx_id = enq["index_root_id"]
+    job_id = enq["work_job_id"]
+
+    with service.SessionLocal() as session:
+        j = session.get(WorkJob, job_id)
+        j.status = "completed"
+        # 增加具有异常 payload 的活跃工作任务
+        bad_job = WorkJob(
+            kind="index-root",
+            status="running",
+            state_json=bad_state,
+        )
+        session.add(bad_job)
+        session.commit()
+
+    del_res = service.delete_index_root(idx_id)
+    assert del_res["deleted"] is True
+
+
+def test_exact_root_boundary_active_jobs(tmp_path: Path):
+    """hotfix1-6: 只有 exact root 相同的 active job 才会阻止，子目录或前缀相似目录绝不互相阻止"""
+    service, data, _ = make_service(tmp_path)
+    dir_a = data / "A"
+    dir_a_sub = dir_a / "sub"
+    dir_ab = data / "AB"
+    dir_a.mkdir()
+    dir_a_sub.mkdir()
+    dir_ab.mkdir()
+
+    enq_a = service.enqueue_index(str(dir_a))
+    id_a = enq_a["index_root_id"]
+    job_a_id = enq_a["work_job_id"]
+
+    enq_sub = service.enqueue_index(str(dir_a_sub))
+    enq_ab = service.enqueue_index(str(dir_ab))
+
+    # A 自己的任务已完成；但 A/sub 和 AB 的任务正在 running
+    with service.SessionLocal() as session:
+        j_a = session.get(WorkJob, job_a_id)
+        j_a.status = "completed"
+
+        j_sub = session.get(WorkJob, enq_sub["work_job_id"])
+        j_sub.status = "running"
+        j_sub.state_json = json.dumps({"root": str(dir_a_sub.resolve())})
+
+        j_ab = session.get(WorkJob, enq_ab["work_job_id"])
+        j_ab.status = "running"
+        j_ab.state_json = json.dumps({"root": str(dir_ab.resolve())})
+        session.commit()
+
+    # 删除 A 成功（A/sub 和 AB 的 running 任务绝不阻止 A）
+    del_res = service.delete_index_root(id_a)
+    assert del_res["deleted"] is True
+
+    # 但删除 A/sub 和 AB 时各自必须被阻断
+    with pytest.raises(ValueError, match="is active"):
+        service.delete_index_root(enq_sub["index_root_id"])
+    with pytest.raises(ValueError, match="is active"):
+        service.delete_index_root(enq_ab["index_root_id"])
+
+
+def test_terminal_jobs_do_not_block_even_for_exact_root(tmp_path: Path):
+    """hotfix1-7: 针对 exact root，只要任务处于 completed / failed / cancelled 终态，绝不阻止删除"""
+    service, data, _ = make_service(tmp_path)
+
+    for term_status in ["completed", "failed", "cancelled"]:
+        folder = data / f"TermExact_{term_status}"
+        folder.mkdir()
+        enq = service.enqueue_index(str(folder))
+        idx_id = enq["index_root_id"]
+        job_id = enq["work_job_id"]
+
+        with service.SessionLocal() as session:
+            j = session.get(WorkJob, job_id)
+            j.status = term_status
+            j.state_json = json.dumps({"root": str(folder.resolve())})
+            session.commit()
+
+        del_res = service.delete_index_root(idx_id)
+        assert del_res["deleted"] is True
+        with service.SessionLocal() as session:
+            assert session.get(WorkJob, job_id) is not None
+
