@@ -19,6 +19,7 @@ import { formatDateTime, formatElapsed } from '../../utils/format';
 import { sanitizeContext } from '../../utils/sanitize';
 import { calculateTaskEta } from './task_utils';
 import { TaskActionBar } from './TaskActionBar';
+import { TaskDeleteButton } from './TaskDeleteButton';
 
 const { Text } = Typography;
 
@@ -203,9 +204,25 @@ export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose, onVie
           <Divider style={{ margin: '16px 0' }} />
 
           <div style={{ marginBottom: 16 }}>
-            <Text strong style={{ display: 'block', marginBottom: 8, fontSize: 13, color: '#475569' }}>
-              任务操作 (Task Actions)
-            </Text>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: 8,
+              }}
+            >
+              <Text strong style={{ fontSize: 13, color: '#475569' }}>
+                任务操作 (Task Actions)
+              </Text>
+              <TaskDeleteButton
+                task={task}
+                size="small"
+                type="default"
+                danger
+                onSuccess={onClose}
+              />
+            </div>
             <TaskActionBar task={task} onViewTask={onViewTask} />
           </div>
 

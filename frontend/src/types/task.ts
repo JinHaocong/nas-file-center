@@ -80,3 +80,14 @@ export interface RetryTaskResponse {
   job: TaskItem;
   retry_of: number;
 }
+
+export type TerminalTaskStatus = 'completed' | 'failed' | 'cancelled';
+
+export interface DeleteTaskResponse {
+  deleted: boolean;
+  id: number;
+}
+
+export interface ClearTaskHistoryResponse {
+  deleted_count: number;
+}

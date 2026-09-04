@@ -6,6 +6,9 @@ import {
   PaginatedTaskEventsResponse,
   WorkerStatus,
   RetryTaskResponse,
+  DeleteTaskResponse,
+  ClearTaskHistoryResponse,
+  TerminalTaskStatus,
 } from '../types/task';
 
 export interface ListTasksParams {
@@ -78,4 +81,13 @@ export const tasksApi = {
   retryTask: (taskId: number): Promise<RetryTaskResponse> => {
     return api.post<RetryTaskResponse>(`/api/tasks/${taskId}/retry`);
   },
+
+  deleteTask: (taskId: number): Promise<DeleteTaskResponse> => {
+    return api.delete<DeleteTaskResponse>(`/api/tasks/${taskId}`);
+  },
+
+  clearTaskHistory: (statuses: TerminalTaskStatus[]): Promise<ClearTaskHistoryResponse> => {
+    return api.post<ClearTaskHistoryResponse>('/api/tasks/clear-history', { statuses });
+  },
 };
+

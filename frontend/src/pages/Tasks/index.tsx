@@ -22,6 +22,8 @@ import { WorkerStatusCard } from '../../components/tasks/WorkerStatusCard';
 import { TaskStatusTag } from '../../components/tasks/TaskStatusTag';
 import { TaskProgress } from '../../components/tasks/TaskProgress';
 import { TaskDetailDrawer } from '../../components/tasks/TaskDetailDrawer';
+import { TaskDeleteButton } from '../../components/tasks/TaskDeleteButton';
+import { TaskHistoryCleanupModal } from '../../components/tasks/TaskHistoryCleanupModal';
 
 const { Title, Text } = Typography;
 
@@ -177,17 +179,32 @@ export const TasksPage: React.FC = () => {
     {
       title: '操作',
       key: 'action',
-      width: 80,
+      width: 140,
       fixed: 'right' as const,
       render: (_: unknown, record: TaskItem) => (
-        <Button
-          size="small"
-          type="link"
-          icon={<EyeOutlined />}
-          onClick={() => setSelectedTaskId(record.id)}
-        >
-          详情
-        </Button>
+        <Space size={4}>
+          <Button
+            size="small"
+            type="link"
+            icon={<EyeOutlined />}
+            onClick={() => setSelectedTaskId(record.id)}
+          >
+            详情
+          </Button>
+          <TaskDeleteButton
+            task={record}
+            size="small"
+            type="link"
+            onSuccess={() => {
+              if (page > 1 && data?.items?.length === 1) {
+                setPage((prev) => Math.max(1, prev - 1));
+              }
+              if (selectedTaskId === record.id) {
+                setSelectedTaskId(null);
+              }
+            }}
+          />
+        </Space>
       ),
     },
   ];
@@ -213,13 +230,21 @@ export const TasksPage: React.FC = () => {
             实时监控后台 Worker 扫描、索引与计划任务状态
           </Text>
         </div>
-        <Button
-          icon={<ReloadOutlined />}
-          onClick={() => refetch()}
-          loading={isFetching}
-        >
-          刷新
-        </Button>
+        <Space size={8}>
+          <TaskHistoryCleanupModal
+            onCleaned={() => {
+              setPage(1);
+              setSelectedTaskId(null);
+            }}
+          />
+          <Button
+            icon={<ReloadOutlined />}
+            onClick={() => refetch()}
+            loading={isFetching}
+          >
+            刷新
+          </Button>
+        </Space>
       </div>
 
       {/* Top Worker Status Banner */}

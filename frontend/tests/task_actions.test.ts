@@ -297,7 +297,7 @@ describe('Tasks API Client Mutation Contract & Mock Tests', () => {
     }
   });
 
-  test('mutation errors (409 conflict, 404 not found) are propagated without swallowing', async () => {
+  test('mutation 409 conflict error is propagated without swallowing', async () => {
     api.post = (() => {
       const err = new Error('Terminal job in state completed cannot be cancelled');
       (err as any).status = 409;
@@ -318,10 +318,31 @@ describe('Tasks API Client Mutation Contract & Mock Tests', () => {
     }
   });
 
-  test('TASK-033-UI-06 isolation assertion: deleteTask and clearHistory are NOT exposed on tasksApi', () => {
-    const apiObj = tasksApi as Record<string, unknown>;
-    assert.strictEqual(apiObj.deleteTask, undefined, 'deleteTask must NOT be exposed in frontend');
-    assert.strictEqual(apiObj.clearHistory, undefined, 'clearHistory must NOT be exposed in frontend');
-    assert.strictEqual(apiObj.clearTaskHistory, undefined, 'clearTaskHistory must NOT be exposed in frontend');
+  test('mutation 404 not found error is propagated with real 404 status and message', async () => {
+    api.post = (() => {
+      const err = new Error('Task not found');
+      (err as any).status = 404;
+      return Promise.reject(err);
+    }) as any;
+
+    try {
+      await assert.rejects(
+        async () => {
+          await tasksApi.retryTask(999999);
+        },
+        (err: any) => {
+          assert.strictEqual(err.status, 404);
+          assert.strictEqual(err.message, 'Task not found');
+          return true;
+        }
+      );
+    } finally {
+      api.post = originalPost;
+    }
+  });
+
+  test('TASK-033-UI-06 Gate assertion: deleteTask and clearTaskHistory are exposed as functions', () => {
+    assert.strictEqual(typeof tasksApi.deleteTask, 'function');
+    assert.strictEqual(typeof tasksApi.clearTaskHistory, 'function');
   });
 });

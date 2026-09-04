@@ -342,7 +342,13 @@ class TaskService:
         return atomic_task_transition(self.SessionLocal, task_id, _transition)
 
     def clear_task_history(self, statuses: list[str] | None = None) -> dict:
-        target_statuses = set(statuses or TERMINAL_STATES)
+        if statuses is None:
+            target_statuses = set(TERMINAL_STATES)
+        elif len(statuses) == 0:
+            raise ValueError("At least one terminal status is required")
+        else:
+            target_statuses = set(statuses)
+
         for s in target_statuses:
             if s not in TERMINAL_STATES:
                 raise ValueError(f"Cannot clear non-terminal status '{s}'")

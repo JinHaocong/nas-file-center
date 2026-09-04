@@ -1,97 +1,176 @@
-# NAS File Center v0.3.3-step2-fixed5 验收报告与实现文档
-## IndexRoot Progress Contract Backend Hotfix
+# NAS File Center v0.3.3-step2-fixed6 验收报告与实现文档
+## TASK-033-UI-06 Task History Cleanup Gate
 
 ## 1. Baseline（基线说明）
-- **基线版本**：`NAS File Center v0.3.3-step2-fixed4`（Commit: `27a6895`）。
-- **定位**：本轮为针对 NAS 实机实测 Task #23 故障的 **后端窄范围紧急修复（Backend Hotfix）**。前端生产代码零变动、DB Schema 零变动、Alembic Migration 零变动、API 契约零变动、第三方依赖零引入。
+- **基线版本**：`NAS File Center v0.3.3-step2-fixed5`（Commit: `03dcb26`）。
+- **任务目标**：本轮专注完成 `TASK-033-UI-06 Task History Cleanup Gate`，实现安全删除单条终态 Task 以及批量清理终态 Task History 的完整端到端能力。
+- **严格隔离原则**：本轮绝对不处理 Plan 删除、Scan History 删除、Audit 删除、Operation Journal 删除、文件索引 Directory Picker、NAS 文件删除与 Quarantine purge，这些功能保持完全未启用与零变动。
 
-## 2. NAS Task #23 事故现场与精确根因
-### 故障现象
-NAS 实机执行大目录 `index-root` 任务（Task #23）时：
-- 任务处理到第 1000 个文件后突然变为 `failed`；
-- 状态数据显示：`progress_current=1000, progress_total=0, error_code="EXECUTION_ERROR"`；
-- 报错信息为：`progress_total (0) cannot be smaller than saved progress_current (1000)`。
+---
 
-### 精确根因追踪
-1. 在 [`app/service.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/service.py) 的 `FileCenterService.reindex_root()` 中：
-   - 默认分批刷新阈值 `batch_size = 1000`；
-   - 每批满 1000 个条目写入 DB 后，执行 `checkpoint_callback(files + folders, 0)`。
-2. 第一次 batch 写入（条目数达 1000）：
-   - `files + folders = 1000`，调用 `checkpoint_callback(1000, 0)`；
-   - [`app/tasks/context.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/tasks/context.py) 的 `_apply_progress()` 逻辑中，初始 `saved_curr = 0`，`p_tot = 0`；
-   - 校验 `p_tot < saved_curr`（`0 < 0`）为 False，校验通过，成功落库 `progress_current = 1000, progress_total = 0`。
-3. 第二次 batch 写入（条目数超过 1000）：
-   - `files + folders > 1000`，再次调用 `checkpoint_callback(files + folders, 0)`；
-   - 此时 `_apply_progress()` 检查当前 DB 中已保存的 `saved_curr = 1000`，而本次传入的 `p_tot = 0`；
-   - 条件 `p_tot < saved_curr`（`0 < 1000`）成立，触发保护性断言抛出 `ValueError: progress_total (0) cannot be smaller than saved progress_current (1000)`；
-   - 任务被外层捕获并标记为 `failed`，`error_code = "EXECUTION_ERROR"`。
+## 2. 现有后端接口与安全隐患修复（RED → GREEN）
 
-## 3. RED 阶段（先失败复现）
-在 [`tests/test_index_root_progress_regression.py`](file:///Users/Kerwin/MyProject/nas-file-center/tests/test_index_root_progress_regression.py) 中构建真实多批次 `index-root` 场景（包含 1050 个条目以强行触发第 2 个 batch 的 flush）：
-- 运行测试真实复现失败：
-```text
-AssertionError: Expected completed but got failed, error_code=EXECUTION_ERROR, error_text=progress_total (0) cannot be smaller than saved progress_current (1000)
-assert 'failed' == 'completed'
-```
-100% 验证了 fixed4 原逻辑中的边界缺陷。
+### 现有后端契约
+Backend 已存在以下接口，本轮未新增任何重复或第二套 API：
+- **单任务删除**：`DELETE /api/tasks/{task_id}`
+  - 终态（`completed`, `failed`, `cancelled`）允许删除，返回 `{"deleted": true, "id": task_id}`；
+  - 活跃态（`queued`, `running`, `paused`, `cancel_requested`）禁止删除，返回 `409 Conflict`；
+  - 任务不存在返回 `404 Task not found`。
+- **批量清理**：`POST /api/tasks/clear-history`
+  - 请求体：`{"statuses": ["completed", "failed", "cancelled"]}`；
+  - 成功返回：`{"deleted_count": N}`；
+  - 仅允许终态状态。
 
-## 4. GREEN 阶段（契约收敛修复）
-严格遵照不破坏、不放宽 `JobContext` 进度不变量（Invariant）的原则，在 Caller / Handler 层面收敛契约：
-1. **明确未知总量（Indeterminate Progress）契约**：
-   - 目录遍历阶段在未扫完全盘前无法预知最终总文件数；
-   - 在 [`app/service.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/service.py) 中将 `flush()` 的 `checkpoint_callback(files + folders, 0)` 修改为 `checkpoint_callback(files + folders, None)`，显式声明总量未知。
-2. **Handler 防御性转换**：
-   - 在 [`app/tasks/handlers.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/tasks/handlers.py) 的 `IndexRootHandler` 中：
-     - 启动阶段设置 `progress_total = None`（消除原写死的 `progress_total = 1` 伪造总量）；
-     - `on_batch` 中防卫性处理 `effective_total = total if (total is not None and total > 0) else None`，确保遍历阶段绝不向 `JobContext` 传递 `progress_total = 0`，保持优雅的 Indeterminate 状态；
-     - 最终完成阶段原子上报 `progress_current = total_items, progress_total = total_items`，达成 `current == total == files + folders` 的 100% 自洽终态。
+### 后端安全缺陷追踪与修复（RED → GREEN）
+- **根因发现**：在 [`app/tasks/service.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/tasks/service.py) 中，`clear_task_history()` 原实现为：
+  ```python
+  target_statuses = set(statuses or TERMINAL_STATES)
+  ```
+  当前端或 API 调用传入 `statuses = []` 时，Python 将空列表判定为 `falsy`，导致逻辑错误回退到 `TERMINAL_STATES`。即当用户在界面上未选择任何状态时，反而可能将系统内所有 `completed` / `failed` / `cancelled` 历史任务全量清除！
+- **RED 阶段（先失败复现）**：
+  在 [`tests/test_task_history_cleanup.py`](file:///Users/Kerwin/MyProject/nas-file-center/tests/test_task_history_cleanup.py) 中构建测试，调用 `clear_task_history(statuses=[])` 并断言其抛出 `ValueError`。在 fixed5 基线代码下直接报错 `Failed: DID NOT RAISE ValueError`，证明基线存在严重的误删风险。
+- **GREEN 阶段（修复与语义拆分）**：
+  将状态解析语义严格细分为三种情况：
+  ```python
+  if statuses is None:
+      target_statuses = set(TERMINAL_STATES)
+  elif len(statuses) == 0:
+      raise ValueError("At least one terminal status is required")
+  else:
+      target_statuses = set(statuses)
+
+  for s in target_statuses:
+      if s not in TERMINAL_STATES:
+          raise ValueError(f"Cannot clear non-terminal status '{s}'")
+  ```
+  - `statuses is None` $\rightarrow$ 缺省清理全部终态；
+  - `statuses == []` $\rightarrow$ 严格抛出 `ValueError`，由外层转换为 `400 Bad Request`，**零删除**，保护所有数据安全；
+  - 包含非终态 $\rightarrow$ 抛出 `ValueError`（400），原子拒绝。
+
+---
+
+## 3. 关联数据生命周期与安全边界
+
+1. **TaskEvent / Task Logs 生命周期**：
+   - 数据库模型中 `TaskEvent.job_id` 声明了 `ForeignKey("work_jobs.id", ondelete="CASCADE")`，且 SQLite 全局启用了 `PRAGMA foreign_keys=ON`；
+   - 删除 Task 时，该任务对应的 `TaskEvent` 级联自动清除（作为任务证据链随任务一同归档移除）；
+   - 不提供单条日志的删除垃圾桶，保证日志作为证据链的完整性。
+2. **Audit 审计日志隔离**：
+   - `AuditEvent` 为独立合规审计实体，**绝对保留**；
+   - 删除任何 Task 或清理历史，均绝不触发对 `audit_events` 的删除或清理。
+3. **Retry Lineage（重试衍生链保护）**：
+   - `WorkJob.retry_of` 定义为 `ForeignKey("work_jobs.id", ondelete="SET NULL")`；
+   - 当原失败任务被删除后，重试生成的子任务依然存活，其 `retry_of` 字段自动设为 `NULL`，外键完整性不受破坏。
+4. **NAS 文件系统零修改与 ALLOW_DELETE 解耦**：
+   - 任务中心元数据删除仅针对 SQLite 元数据表，**不调用任何 `os.remove` / `unlink` / `rmtree`**；
+   - 该功能与保护 NAS 实机文件删除的 `ALLOW_DELETE` 完全解耦，安全边界来自：身份认证、CSRF 防护、终态状态校验与前端二次确认。
+
+---
+
+## 4. 前端架构与交互实现
+
+1. **类型与 API Client**：
+   - [`frontend/src/types/task.ts`](file:///Users/Kerwin/MyProject/nas-file-center/frontend/src/types/task.ts)：新增 `TerminalTaskStatus`、`DeleteTaskResponse`、`ClearTaskHistoryResponse`；
+   - [`frontend/src/api/tasks.ts`](file:///Users/Kerwin/MyProject/nas-file-center/frontend/src/api/tasks.ts)：新增 `deleteTask(taskId)` 与 `clearTaskHistory(statuses)`，UI 永远显式传递状态数组，严防空缺省。
+2. **统一删除策略 Policy**：
+   - [`frontend/src/components/tasks/task_cleanup.ts`](file:///Users/Kerwin/MyProject/nas-file-center/frontend/src/components/tasks/task_cleanup.ts)：纯函数 `getTaskDeleteAvailability(task)`：
+     - `completed` / `failed` / `cancelled` $\rightarrow$ `enabled: true, reason: null`；
+     - `queued` $\rightarrow$ `enabled: false, reason: "排队中的任务不能删除"`；
+     - `running` $\rightarrow$ `enabled: false, reason: "执行中的任务不能删除"`；
+     - `paused` $\rightarrow$ `enabled: false, reason: "暂停中的任务不能删除，请先取消任务"`；
+     - `cancel_requested` $\rightarrow$ `enabled: false, reason: "任务正在取消，请等待进入终态后再删除"`。
+3. **复用删除按钮组件**：
+   - [`frontend/src/components/tasks/TaskDeleteButton.tsx`](file:///Users/Kerwin/MyProject/nas-file-center/frontend/src/components/tasks/TaskDeleteButton.tsx)：
+     - 禁用状态下 Tooltip 展示具体不可删原因；
+     - 启用状态下点击触发 Popconfirm 二次确认弹窗，明确提示「删除后将同时清除该任务的事件日志。该操作不会删除 NAS 上的任何文件，也不会删除 Audit 审计记录」；
+     - 确认删除为 danger 红色按钮，禁止单击直接删除；
+     - 成功后自动执行 `message.success`，并在 React Query 中全局失效 `['tasksList']`，同时精准清除 `['taskDetail', taskId]` 与 `['taskLogs', taskId]` 缓存；
+     - 在任务列表表格操作列（`[详情] [删除]`）与任务详情抽屉（`TaskDetailDrawer`）中高度复用。
+4. **分页防空自适应处理**：
+   - 当用户在第 `N (N > 1)` 页删除最后一条任务时，前端自动向前回退页码 `setPage(page - 1)`，避免界面停留在空分页中。
+5. **批量清理历史模态框**：
+   - [`frontend/src/components/tasks/TaskHistoryCleanupModal.tsx`](file:///Users/Kerwin/MyProject/nas-file-center/frontend/src/components/tasks/TaskHistoryCleanupModal.tsx)：
+     - 在任务中心顶部工具栏集成「清理历史」按钮（`DeleteOutlined`，danger 样式）；
+     - 弹窗仅提供 `completed`、`failed`、`cancelled` 勾选项，默认全选；
+     - 明确告示清理范围：「该操作会清理所有任务类型中符合所选终态的历史任务，不是仅清理当前分页或当前任务类型筛选结果」；
+     - 详细说明影响范围与安全保证；
+     - 若取消全部勾选，确认按钮自动禁用，杜绝发出非法空请求；
+     - 成功清理后提示真实数量（如「已清理 42 个历史任务」），自动重置分页 `setPage(1)` 并全局刷新列表。
+
+---
 
 ## 5. 修改文件清单
-### 生产代码文件（极窄范围）：
-- [`app/service.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/service.py)：`reindex_root` 中 `checkpoint_callback` 传递 `None`；
-- [`app/tasks/handlers.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/tasks/handlers.py)：启动检查点与 `on_batch` 适配未知总量契约。
 
-### 测试与文档文件：
-- [`tests/test_index_root_progress_regression.py`](file:///Users/Kerwin/MyProject/nas-file-center/tests/test_index_root_progress_regression.py)：[NEW] 新增 Cases A ~ F 全量回归用例；
-- [`walkthrough.md`](file:///Users/Kerwin/MyProject/nas-file-center/walkthrough.md)：更新为 step2-fixed5 故障与验收报告。
+### 后端生产代码（仅 1 处窄范围安全修复）：
+- [`app/tasks/service.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/tasks/service.py)：修复 `clear_task_history` 中对空状态列表的容错缺陷。
 
-## 6. 未修改范围
-- **前端生产代码**：`frontend/src/**` 零修改（Frontend production diff = 0）；
+### 前端生产代码：
+- [`frontend/src/types/task.ts`](file:///Users/Kerwin/MyProject/nas-file-center/frontend/src/types/task.ts)：新增终态及清理响应接口定义；
+- [`frontend/src/api/tasks.ts`](file:///Users/Kerwin/MyProject/nas-file-center/frontend/src/api/tasks.ts)：新增 `deleteTask` 与 `clearTaskHistory` 方法；
+- [`frontend/src/components/tasks/task_cleanup.ts`](file:///Users/Kerwin/MyProject/nas-file-center/frontend/src/components/tasks/task_cleanup.ts)：[NEW] 任务删除策略纯函数；
+- [`frontend/src/components/tasks/TaskDeleteButton.tsx`](file:///Users/Kerwin/MyProject/nas-file-center/frontend/src/components/tasks/TaskDeleteButton.tsx)：[NEW] 单任务删除按钮组件（带 Popconfirm 与 Tooltip）；
+- [`frontend/src/components/tasks/TaskHistoryCleanupModal.tsx`](file:///Users/Kerwin/MyProject/nas-file-center/frontend/src/components/tasks/TaskHistoryCleanupModal.tsx)：[NEW] 批量清理历史模态框组件；
+- [`frontend/src/pages/Tasks/index.tsx`](file:///Users/Kerwin/MyProject/nas-file-center/frontend/src/pages/Tasks/index.tsx)：表格操作列集成删除按钮、头部工具栏集成批量清理入口、单删分页回退保护；
+- [`frontend/src/components/tasks/TaskDetailDrawer.tsx`](file:///Users/Kerwin/MyProject/nas-file-center/frontend/src/components/tasks/TaskDetailDrawer.tsx)：详情抽屉集成删除按钮并在删除后自动关闭抽屉。
+
+### 测试与脚本文件：
+- [`tests/test_task_history_cleanup.py`](file:///Users/Kerwin/MyProject/nas-file-center/tests/test_task_history_cleanup.py)：[NEW] 后端 Cases A ~ S 全场景回归测试；
+- [`frontend/tests/task_cleanup.test.ts`](file:///Users/Kerwin/MyProject/nas-file-center/frontend/tests/task_cleanup.test.ts)：[NEW] 前端删除策略与 API 契约测试；
+- [`frontend/tests/task_actions.test.ts`](file:///Users/Kerwin/MyProject/nas-file-center/frontend/tests/task_actions.test.ts)：更新 404 错误断言与 UI-06 门禁断言；
+- [`frontend/scripts/run-tests.mjs`](file:///Users/Kerwin/MyProject/nas-file-center/frontend/scripts/run-tests.mjs)：加入 `task_cleanup.test.ts` 执行。
+
+---
+
+## 6. 未修改范围与架构纪律
 - **数据库结构**：DB Schema 零修改、DB models 零修改；
 - **迁移脚本**：Alembic migrations 零修改；
-- **API 接口契约**：REST Endpoints 与 Schema 零修改；
+- **接口路由定义**：REST API 契约与路径零修改；
 - **第三方依赖**：零新依赖引入（New dependencies = 0）；
-- **安全与控制**：Worker Lease、Fencing、Capability Actions 均保持不变。
+- **计划与扫描隔离**：Plan 清理、Scan 历史清理、Audit 清理、Organizer 高级功能、Directory Picker 均保持未启用与零修改。
 
-## 7. 全量场景回归（Cases A ~ F 全部通过）
-在 Docker `python:3.12-slim` 容器中运行 [`tests/test_index_root_progress_regression.py`](file:///Users/Kerwin/MyProject/nas-file-center/tests/test_index_root_progress_regression.py)：
-- **Case A（<= 1000 entries）**：350 个文件单批次索引，`completed`，`current == total == 350`（PASS）；
-- **Case B（> 1000 entries）**：1200 个文件跨 2 批次索引（复现 NAS Task #23 场景），`completed`，`current == total == 1200`（PASS）；
-- **Case C（> 2000 entries）**：2150 个文件跨 3+ 批次索引，`completed`，`current == total == 2150`（PASS）；
-- **Case D（Empty directory）**：0 文件 0 目录，`completed`，`current == total == 0`（PASS）；
-- **Case E（Reindex existing rows）**：已有 400 条旧索引，增量扩充至 1100 条后重建索引，`completed`，旧 generation 正确清理，`current == total == 1100`（PASS）；
-- **Case F（Final completed progress consistency）**：1100 文件 + 15 目录，最终完成检查点 `current == total == 1115`，Checkpoint Payload 中 files/folders 结构自洽（PASS）。
+---
 
-## 8. Backend Regression
-在 Docker `python:3.12-slim` 容器中执行全量回归测试：
-```bash
-docker run --rm --platform linux/amd64 -v $(pwd):/app -w /app python:3.12-slim bash -c "pip install -q -e . pytest pytest-asyncio httpx && PYTHONPATH=. pytest -q"
-```
-结果：**231 passed in 100%**, 0 failed, 0 skipped（从 fixed4 的 225 项测试严格增长至 231 项）。
+## 7. 全量测试与验证结果
 
-## 9. Frontend Regression
-在 `frontend` 目录执行完整检查：
-- `npm test`：**tests: 61, suites: 14, pass: 61, fail: 0**；
+### 1. 后端 Cases A ~ S 回归（19 项用例全部通过）
+- **Case A**: DELETE completed $\rightarrow$ 200，任务删除
+- **Case B**: DELETE failed $\rightarrow$ 200，任务删除
+- **Case C**: DELETE cancelled $\rightarrow$ 200，任务删除
+- **Case D**: DELETE queued/running/paused/cancel_requested $\rightarrow$ 409，任务保留
+- **Case E**: DELETE terminal Task $\rightarrow$ 关联 TaskEvent 级联删除
+- **Case F**: DELETE terminal Task $\rightarrow$ AuditEvent 严格保留
+- **Case G**: POST clear-history statuses=["completed"] $\rightarrow$ 仅 completed 被清理
+- **Case H**: statuses=["failed","cancelled"] $\rightarrow$ failed/cancelled 清理，completed 保留
+- **Case I**: statuses=None $\rightarrow$ 所有 terminal 清理，活跃任务保留
+- **Case J (CRITICAL)**: statuses=[] $\rightarrow$ 400 报错拒绝，零删除，所有任务保留
+- **Case K**: statuses=["running"] $\rightarrow$ 400 报错，零删除
+- **Case L**: 混合状态 ["completed","running"] $\rightarrow$ 400 报错，原子性零删除
+- **Case M**: clear-history $\rightarrow$ TaskEvent 级联清理
+- **Case N**: clear-history $\rightarrow$ AuditEvent 完整保留
+- **Case O**: Retry 子任务在父任务被删除后存活 $\rightarrow$ FK `ondelete="SET NULL"` 生效，retry_of 变为 None
+- **Case P**: 删除不存在的任务 $\rightarrow$ 404
+- **Case Q**: 未认证 DELETE $\rightarrow$ 401
+- **Case R**: 认证请求缺失 Origin/Referer $\rightarrow$ 403 CSRF 拦截
+- **Case S**: 认证且带有合法 Origin $\rightarrow$ 正常响应
+
+### 2. 后端全量测试（Docker `python:3.12-slim`）
+- 运行命令：`docker run --rm --platform linux/amd64 -v $(pwd):/app -w /app python:3.12-slim bash -c "pip install -q -e . pytest pytest-asyncio httpx && PYTHONPATH=. pytest -q"`
+- 结果：**250 passed in 100%**, 0 failed, 0 skipped（从 fixed5 的 231 项严格净增 19 项）。
+
+### 3. 前端全量测试与构建
+- `npm test`：**74 passed in 17 suites**, 0 failed（从 fixed5 的 61 项严格净增 13 项）；
 - `npm run typecheck` (`tsc --noEmit`)：**0 errors**；
-- `npm run build` (`tsc && vite build`)：**3704 modules transformed, build completed**。
+- `npm run build` (`tsc && vite build`)：**3707 modules transformed, 生产构建完成**。
 
-## 10. Docker Build & Smoke
-- 构建生产镜像：`kerwinjhc/nas-file-center:0.3.3-step2-fixed5`（`linux/amd64`）成功；
-- 启动容器测试：
+### 4. Docker 镜像与 Smoke 验证
+- 生产镜像：`kerwinjhc/nas-file-center:0.3.3-step2-fixed6` (`linux/amd64`)；
+- Smoke 测试验证：
   - `GET /health` $\rightarrow$ `200 OK`；
-  - `GET /tasks` $\rightarrow$ `200 OK`；
-  - 13 个 SPA 路由全部可达；
-  - 4 个任务控制 mutation 端点鉴权与 CSRF 拦截有效。
+  - `GET /tasks` $\rightarrow$ `200 OK`（SPA 路由）；
+  - `DELETE /api/tasks/1`（未认证） $\rightarrow$ `401 Unauthorized`；
+  - `POST /api/tasks/clear-history`（未认证） $\rightarrow$ `401 Unauthorized`。
 
-## 11. Release Decision
-**PASS**：NAS Task #23 故障根因彻底定位并修复，RED 阶段稳定复现，GREEN 阶段 Cases A ~ F 全部通过，全量 231 项后端测试与 61 项前端测试 100% 绿灯，生产镜像打包与 Smoke 验证完毕。
+---
+
+## 8. Release Decision
+**PASS**：`TASK-033-UI-06 Task History Cleanup Gate` 所有需求全部实现，`statuses=[]` 隐患经 RED 复现并 GREEN 修复，后端 250 项测试及前端 74 项测试 100% 通过，生产 Docker 镜像与 Smoke 验证全部正常。
