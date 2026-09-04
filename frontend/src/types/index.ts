@@ -252,3 +252,5 @@ export interface OrganizerProfileListResponse {
   page: number;
   page_size: number;
 }
+
+export * from './task';
