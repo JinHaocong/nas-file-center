@@ -32,6 +32,7 @@ import { PlanDeleteButton } from '../../components/plans/PlanDeleteButton';
 import {
   invalidatePlanDeleteFailure,
   getPlanDetailRenderState,
+  getPlanDetailView,
 } from '../../components/plans/plan_cleanup';
 
 const { Title, Text } = Typography;
@@ -121,7 +122,9 @@ export const PlanDetailPage: React.FC = () => {
     hasPlan: !!plan,
   });
 
-  if (renderState === 'loading') {
+  const view = getPlanDetailView(renderState, !!plan);
+
+  if (view === 'loading') {
     return (
       <div style={{ textAlign: 'center', padding: 60 }}>
         <Spin size="large" />
@@ -129,7 +132,7 @@ export const PlanDetailPage: React.FC = () => {
     );
   }
 
-  if (renderState === 'not-found' || renderState === 'empty' || !plan) {
+  if (view === 'not-found') {
     return (
       <Alert
         message="计划不存在"
@@ -141,7 +144,7 @@ export const PlanDetailPage: React.FC = () => {
     );
   }
 
-  if (renderState === 'error') {
+  if (view === 'error') {
     return (
       <Alert
         message="加载计划失败"
@@ -151,6 +154,18 @@ export const PlanDetailPage: React.FC = () => {
         type="error"
         showIcon
         action={<Button onClick={() => refetch()}>重试</Button>}
+      />
+    );
+  }
+
+  if (!plan) {
+    return (
+      <Alert
+        message="计划不存在"
+        description={`未找到 ID 为 #${planId} 的批处理计划`}
+        type="error"
+        showIcon
+        action={<Button onClick={() => navigate('/plans')}>返回计划列表</Button>}
       />
     );
   }

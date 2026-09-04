@@ -6,6 +6,7 @@ import {
   invalidatePlanDeleteFailure,
   isPlanNotFoundError,
   getPlanDetailRenderState,
+  getPlanDetailView,
 } from '../src/components/plans/plan_cleanup';
 import { plansApi } from '../src/api/domain';
 import { api } from '../src/api/client';
@@ -244,6 +245,67 @@ describe('Plan Lifecycle Cleanup: Policy Matrix & API Contract Tests', () => {
         hasPlan: false,
       });
       assert.strictEqual(state, 'empty');
+    });
+
+    test('Case G: no cache (hasPlan: false) + 500 server error yields view "error", NOT "not-found"', () => {
+      const renderState = getPlanDetailRenderState({
+        isLoading: false,
+        isError: true,
+        error: { status: 500, message: 'Internal Server Error' },
+        hasPlan: false,
+      });
+      assert.strictEqual(renderState, 'error');
+
+      const view = getPlanDetailView(renderState, false);
+      assert.strictEqual(view, 'error', '500 server error without cached plan must display error view, NOT not-found');
+    });
+
+    test('Case H: no cache (hasPlan: false) + network error yields view "error", NOT "not-found"', () => {
+      const renderState = getPlanDetailRenderState({
+        isLoading: false,
+        isError: true,
+        error: new Error('Network Error: Failed to fetch'),
+        hasPlan: false,
+      });
+      assert.strictEqual(renderState, 'error');
+
+      const view = getPlanDetailView(renderState, false);
+      assert.strictEqual(view, 'error', 'Network error without cached plan must display error view, NOT not-found');
+    });
+
+    test('Case I: stale cache (hasPlan: true) + 500 server error yields view "error"', () => {
+      const renderState = getPlanDetailRenderState({
+        isLoading: false,
+        isError: true,
+        error: { status: 500, message: 'Internal Server Error' },
+        hasPlan: true,
+      });
+      assert.strictEqual(renderState, 'error');
+
+      const view = getPlanDetailView(renderState, true);
+      assert.strictEqual(view, 'error', '500 error with stale cache must display error view');
+    });
+
+    test('Case J: 404 error yields view "not-found" (both with and without cache)', () => {
+      const viewNoCache = getPlanDetailView('not-found', false);
+      assert.strictEqual(viewNoCache, 'not-found');
+
+      const viewWithCache = getPlanDetailView('not-found', true);
+      assert.strictEqual(viewWithCache, 'not-found');
+    });
+
+    test('Case K: loading state yields view "loading" regardless of hasPlan', () => {
+      assert.strictEqual(getPlanDetailView('loading', false), 'loading');
+      assert.strictEqual(getPlanDetailView('loading', true), 'loading');
+    });
+
+    test('Case L: empty / no plan without error yields view "not-found"', () => {
+      assert.strictEqual(getPlanDetailView('empty', false), 'not-found');
+      assert.strictEqual(getPlanDetailView('ready', false), 'not-found');
+    });
+
+    test('Case M: ready state with plan yields view "ready"', () => {
+      assert.strictEqual(getPlanDetailView('ready', true), 'ready');
     });
   });
 });

@@ -125,4 +125,25 @@ export function getPlanDetailRenderState(params: {
   return 'ready';
 }
 
+export type PlanDetailView = 'loading' | 'not-found' | 'error' | 'ready';
+
+export function getPlanDetailView(
+  renderState: PlanDetailRenderState,
+  hasPlan: boolean
+): PlanDetailView {
+  if (renderState === 'loading') {
+    return 'loading';
+  }
+  if (renderState === 'not-found') {
+    return 'not-found';
+  }
+  if (renderState === 'error') {
+    return 'error';
+  }
+  if (renderState === 'empty' || !hasPlan) {
+    return 'not-found';
+  }
+  return 'ready';
+}
+
 
