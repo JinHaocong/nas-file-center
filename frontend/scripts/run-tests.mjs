@@ -5,14 +5,14 @@ import { resolve } from 'node:path';
 const outDir = resolve('dist-test');
 try {
   execSync(
-    'npx tsc --outDir dist-test --module commonjs --target es2022 --moduleResolution node --esModuleInterop tests/task_observability.test.ts',
+    'npx tsc --outDir dist-test --module commonjs --target es2022 --moduleResolution node --esModuleInterop tests/task_observability.test.ts tests/task_actions.test.ts',
     { stdio: 'inherit' }
   );
   writeFileSync(
     resolve(outDir, 'package.json'),
     JSON.stringify({ type: 'commonjs' })
   );
-  execSync('node --test dist-test/tests/task_observability.test.js', {
+  execSync('node --test dist-test/tests/task_observability.test.js dist-test/tests/task_actions.test.js', {
     stdio: 'inherit',
   });
 } finally {

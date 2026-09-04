@@ -1,9 +1,11 @@
 import { api } from './client';
 import {
+  TaskItem,
   TaskDetail,
   PaginatedTasksResponse,
   PaginatedTaskEventsResponse,
   WorkerStatus,
+  RetryTaskResponse,
 } from '../types/task';
 
 export interface ListTasksParams {
@@ -59,5 +61,21 @@ export const tasksApi = {
 
   getWorkerStatus: (): Promise<WorkerStatus> => {
     return api.get<WorkerStatus>('/api/tasks/worker');
+  },
+
+  pauseTask: (taskId: number): Promise<TaskItem> => {
+    return api.post<TaskItem>(`/api/tasks/${taskId}/pause`);
+  },
+
+  resumeTask: (taskId: number): Promise<TaskItem> => {
+    return api.post<TaskItem>(`/api/tasks/${taskId}/resume`);
+  },
+
+  cancelTask: (taskId: number): Promise<TaskItem> => {
+    return api.post<TaskItem>(`/api/tasks/${taskId}/cancel`);
+  },
+
+  retryTask: (taskId: number): Promise<RetryTaskResponse> => {
+    return api.post<RetryTaskResponse>(`/api/tasks/${taskId}/retry`);
   },
 };

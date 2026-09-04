@@ -75,3 +75,8 @@ export interface PaginatedTaskEventsResponse {
   page_size: number;
   total: number;
 }
+
+export interface RetryTaskResponse {
+  job: TaskItem;
+  retry_of: number;
+}

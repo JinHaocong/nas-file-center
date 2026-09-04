@@ -18,6 +18,7 @@ import { TaskLogTable } from './TaskLogTable';
 import { formatDateTime, formatElapsed } from '../../utils/format';
 import { sanitizeContext } from '../../utils/sanitize';
 import { calculateTaskEta } from './task_utils';
+import { TaskActionBar } from './TaskActionBar';
 
 const { Text } = Typography;
 
@@ -25,9 +26,10 @@ interface Props {
   taskId: number | null;
   open: boolean;
   onClose: () => void;
+  onViewTask?: (taskId: number) => void;
 }
 
-export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose }) => {
+export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose, onViewTask }) => {
   const { data: task, isLoading, isError, error } = useQuery({
     queryKey: ['taskDetail', taskId],
     queryFn: () => (taskId ? tasksApi.getTaskDetail(taskId) : Promise.reject('No ID')),
@@ -197,6 +199,15 @@ export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose }) => 
               </Text>
             </Descriptions.Item>
           </Descriptions>
+
+          <Divider style={{ margin: '16px 0' }} />
+
+          <div style={{ marginBottom: 16 }}>
+            <Text strong style={{ display: 'block', marginBottom: 8, fontSize: 13, color: '#475569' }}>
+              任务操作 (Task Actions)
+            </Text>
+            <TaskActionBar task={task} onViewTask={onViewTask} />
+          </div>
 
           <Divider style={{ margin: '16px 0' }} />
 

@@ -334,6 +334,7 @@ export const TasksPage: React.FC = () => {
         taskId={selectedTaskId}
         open={selectedTaskId !== null}
         onClose={() => setSelectedTaskId(null)}
+        onViewTask={(newId) => setSelectedTaskId(newId)}
       />
     </div>
   );
