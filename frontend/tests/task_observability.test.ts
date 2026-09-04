@@ -309,9 +309,23 @@ describe('Task ETA Estimation & Deterministic Rules', () => {
 
   test('3. percent == null / unknown progress returns ETA unknown', () => {
     const startedAt = baseTime.subtract(40, 'second').toISOString();
-    const res = calculateTaskEta('running', 0, 0, startedAt, null, baseTime);
-    assert.strictEqual(res.isUnknown, true);
-    assert.strictEqual(res.text, '未知');
+    // Test A: running, current=50, total=100, percent=null, valid started_at => unknown
+    const resA = calculateTaskEta('running', 50, 100, startedAt, null, baseTime);
+    assert.strictEqual(resA.isUnknown, true);
+    assert.strictEqual(resA.etaSeconds, null);
+    assert.strictEqual(resA.text, '未知');
+
+    // Test B: running, current=50, total=100, percent=undefined, valid started_at => unknown
+    const resB = calculateTaskEta('running', 50, 100, startedAt, undefined, baseTime);
+    assert.strictEqual(resB.isUnknown, true);
+    assert.strictEqual(resB.etaSeconds, null);
+    assert.strictEqual(resB.text, '未知');
+
+    // Zero current & zero total with null percent
+    const resZero = calculateTaskEta('running', 0, 0, startedAt, null, baseTime);
+    assert.strictEqual(resZero.isUnknown, true);
+    assert.strictEqual(resZero.etaSeconds, null);
+    assert.strictEqual(resZero.text, '未知');
   });
 
   test('4. current == 0 returns ETA unknown (no velocity sample)', () => {
@@ -355,6 +369,18 @@ describe('Task ETA Estimation & Deterministic Rules', () => {
     assert.strictEqual(exceedRes.isUnknown, false);
     assert.strictEqual(exceedRes.etaSeconds, 0);
     assert.strictEqual(exceedRes.text, '0s');
+
+    // Test C: running, current=100, total=100, percent=100, started_at=null -> 0s
+    const resC = calculateTaskEta('running', 100, 100, null, 100, baseTime);
+    assert.strictEqual(resC.isUnknown, false);
+    assert.strictEqual(resC.etaSeconds, 0);
+    assert.strictEqual(resC.text, '0s');
+
+    // Test D: running, current=120, total=100, percent=100, started_at=invalid -> 0s
+    const resD = calculateTaskEta('running', 120, 100, 'invalid-date-string', 100, baseTime);
+    assert.strictEqual(resD.isUnknown, false);
+    assert.strictEqual(resD.etaSeconds, 0);
+    assert.strictEqual(resD.text, '0s');
   });
 
   test('7. failed, cancelled, paused, and cancel_requested return deterministic state-specific text', () => {
@@ -409,5 +435,39 @@ describe('Task ETA Estimation & Deterministic Rules', () => {
     assert.strictEqual(result.isUnknown, false);
     assert.strictEqual(result.etaSeconds, 60);
     assert.strictEqual(result.text, '1m 0s');
+  });
+
+  test('10. mandatory boundary checks A, B, C, D, E (step2-fixed3 review verification)', () => {
+    const startedAt = baseTime.subtract(60, 'second').toISOString();
+
+    // A: running, current=50, total=100, percent=null, valid started_at => unknown
+    const checkA = calculateTaskEta('running', 50, 100, startedAt, null, baseTime);
+    assert.strictEqual(checkA.isUnknown, true);
+    assert.strictEqual(checkA.text, '未知');
+    assert.strictEqual(checkA.etaSeconds, null);
+
+    // B: running, current=50, total=100, percent=undefined, valid started_at => unknown
+    const checkB = calculateTaskEta('running', 50, 100, startedAt, undefined, baseTime);
+    assert.strictEqual(checkB.isUnknown, true);
+    assert.strictEqual(checkB.text, '未知');
+    assert.strictEqual(checkB.etaSeconds, null);
+
+    // C: running, current=100, total=100, percent=100, started_at=null => 0s
+    const checkC = calculateTaskEta('running', 100, 100, null, 100, baseTime);
+    assert.strictEqual(checkC.isUnknown, false);
+    assert.strictEqual(checkC.text, '0s');
+    assert.strictEqual(checkC.etaSeconds, 0);
+
+    // D: running, current=120, total=100, percent=100, started_at=invalid => 0s
+    const checkD = calculateTaskEta('running', 120, 100, 'invalid-date-string', 100, baseTime);
+    assert.strictEqual(checkD.isUnknown, false);
+    assert.strictEqual(checkD.text, '0s');
+    assert.strictEqual(checkD.etaSeconds, 0);
+
+    // E: running, current=50, total=100, percent=50, elapsed=60s => eta 60s ('1m 0s')
+    const checkE = calculateTaskEta('running', 50, 100, startedAt, 50, baseTime);
+    assert.strictEqual(checkE.isUnknown, false);
+    assert.strictEqual(checkE.text, '1m 0s');
+    assert.strictEqual(checkE.etaSeconds, 60);
   });
 });

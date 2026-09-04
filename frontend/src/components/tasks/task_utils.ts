@@ -150,24 +150,29 @@ export function calculateTaskEta(
     return { etaSeconds: null, text: '未知', isUnknown: true };
   }
 
-  // Case 1: total unknown (total <= 0 or null/undefined)
+  // 1. total validity: total unknown (total <= 0 or null/undefined)
   const totalVal = tot ?? 0;
   if (totalVal <= 0) {
     return { etaSeconds: null, text: '未知', isUnknown: true };
   }
 
-  // Case 2: percent is explicitly null while total <= 0 or unknown
-  if (pct === null && totalVal <= 0) {
+  // 2. percent validity: percent unknown or missing
+  if (pct === null || pct === undefined) {
     return { etaSeconds: null, text: '未知', isUnknown: true };
   }
 
-  // Case 3: current <= 0
+  // 3. current validity: current <= 0 (no velocity sample)
   const currentVal = curr ?? 0;
   if (currentVal <= 0) {
     return { etaSeconds: null, text: '未知', isUnknown: true };
   }
 
-  // Case 4: started_at missing or invalid
+  // 4. current >= total: deterministic completion check before started_at/elapsed
+  if (currentVal >= totalVal) {
+    return { etaSeconds: 0, text: '0s', isUnknown: false };
+  }
+
+  // 5. started_at validity: missing or invalid
   if (!startStr) {
     return { etaSeconds: null, text: '未知', isUnknown: true };
   }
@@ -181,18 +186,14 @@ export function calculateTaskEta(
     return { etaSeconds: null, text: '未知', isUnknown: true };
   }
 
+  // 6. elapsed validity
   const currentTime = now || dayjs();
   const elapsedSeconds = currentTime.diff(start, 'second');
   if (!Number.isFinite(elapsedSeconds) || elapsedSeconds <= 0) {
     return { etaSeconds: null, text: '未知', isUnknown: true };
   }
 
-  // If already reached or exceeded total while in running state
-  if (currentVal >= totalVal) {
-    return { etaSeconds: 0, text: '0s', isUnknown: false };
-  }
-
-  // Case 5: running and data valid
+  // 7. calculate ETA
   const remaining = totalVal - currentVal;
   const rawEta = (elapsedSeconds * remaining) / currentVal;
 
