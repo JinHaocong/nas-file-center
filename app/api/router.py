@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.auth.dependencies import get_current_user
 from app.batch.rename import RenameRule
@@ -135,6 +135,22 @@ class FavoriteCreateRequest(BaseModel):
 
 class RecentRecordRequest(BaseModel):
     paths: list[str] = Field(min_length=1)
+
+
+class DataLifecyclePolicyUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    audit_retention_days: int = Field(strict=True, ge=0, le=3650)
+
+    @field_validator("audit_retention_days")
+    @classmethod
+    def validate_audit_retention_days(cls, v: Any) -> int:
+        if isinstance(v, bool):
+            raise ValueError("audit_retention_days cannot be a boolean")
+        if not isinstance(v, int):
+            raise ValueError("audit_retention_days must be an integer")
+        if v < 0 or v > 3650:
+            raise ValueError("audit_retention_days must be between 0 and 3650")
+        return v
 
 
 # Filesystem Browser & Path Management
@@ -817,3 +833,33 @@ def list_audit_events(
         query=query,
         operation=operation,
     )
+
+
+@router.get("/audit/retention-preview")
+def preview_audit_retention(request: Request):
+    return request.app.state.service.preview_audit_retention()
+
+
+@router.post("/audit/apply-retention")
+def apply_audit_retention(request: Request):
+    try:
+        return request.app.state.service.apply_audit_retention()
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+# Data Lifecycle Policy
+@router.get("/data-lifecycle")
+def get_data_lifecycle_policy(request: Request):
+    return request.app.state.service.get_data_lifecycle_policy()
+
+
+@router.put("/data-lifecycle")
+def update_data_lifecycle_policy(
+    request: Request,
+    body: DataLifecyclePolicyUpdateRequest,
+):
+    try:
+        return request.app.state.service.update_data_lifecycle_policy(body.audit_retention_days)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc

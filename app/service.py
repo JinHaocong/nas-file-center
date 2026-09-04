@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import heapq
 import json
 import math
@@ -29,6 +29,7 @@ from app.models import (
     AuditEvent,
     BatchPlan,
     BatchPlanItem,
+    DataLifecyclePolicy,
     DuplicateFile,
     DuplicateGroup,
     FavoritePath,
@@ -362,6 +363,129 @@ class FileCenterService:
                     "details": details,
                 })
             return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+    def get_data_lifecycle_policy(self) -> dict:
+        with self.SessionLocal() as session:
+            policy = session.get(DataLifecyclePolicy, 1)
+            if policy is None:
+                policy = DataLifecyclePolicy(id=1, audit_retention_days=0, updated_at=utcnow())
+                session.add(policy)
+                session.commit()
+            return {
+                "audit_retention_days": policy.audit_retention_days,
+                "updated_at": policy.updated_at.isoformat() if policy.updated_at else None,
+            }
+
+    def update_data_lifecycle_policy(self, audit_retention_days: int) -> dict:
+        if isinstance(audit_retention_days, bool) or not isinstance(audit_retention_days, int):
+            raise ValueError("audit_retention_days must be an integer between 0 and 3650")
+        if audit_retention_days < 0 or audit_retention_days > 3650:
+            raise ValueError("audit_retention_days must be an integer between 0 and 3650")
+
+        with self.SessionLocal() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            policy = session.get(DataLifecyclePolicy, 1)
+            now = utcnow()
+            if policy is None:
+                policy = DataLifecyclePolicy(id=1, audit_retention_days=audit_retention_days, updated_at=now)
+                session.add(policy)
+            else:
+                policy.audit_retention_days = audit_retention_days
+                policy.updated_at = now
+            session.commit()
+            return {
+                "audit_retention_days": policy.audit_retention_days,
+                "updated_at": policy.updated_at.isoformat() if policy.updated_at else None,
+            }
+
+    def preview_audit_retention(self, *, now: datetime | None = None) -> dict:
+        with self.SessionLocal() as session:
+            policy = session.get(DataLifecyclePolicy, 1)
+            retention_days = policy.audit_retention_days if policy else 0
+
+            total_count = session.scalar(select(func.count(AuditEvent.id))) or 0
+            oldest_ts = session.scalar(select(func.min(AuditEvent.timestamp)))
+            newest_ts = session.scalar(select(func.max(AuditEvent.timestamp)))
+
+            if retention_days <= 0:
+                return {
+                    "retention_days": 0,
+                    "enabled": False,
+                    "cutoff": None,
+                    "total_count": total_count,
+                    "delete_count": 0,
+                    "keep_count": total_count,
+                    "oldest_timestamp": oldest_ts.isoformat() if oldest_ts else None,
+                    "newest_timestamp": newest_ts.isoformat() if newest_ts else None,
+                }
+
+            if now is None:
+                now = utcnow()
+            cutoff = now - timedelta(days=retention_days)
+
+            delete_count = session.scalar(
+                select(func.count(AuditEvent.id)).where(AuditEvent.timestamp < cutoff)
+            ) or 0
+            keep_count = max(0, total_count - delete_count)
+
+            return {
+                "retention_days": retention_days,
+                "enabled": True,
+                "cutoff": cutoff.isoformat(),
+                "total_count": total_count,
+                "delete_count": delete_count,
+                "keep_count": keep_count,
+                "oldest_timestamp": oldest_ts.isoformat() if oldest_ts else None,
+                "newest_timestamp": newest_ts.isoformat() if newest_ts else None,
+            }
+
+    def apply_audit_retention(self, *, transaction_guard: Any | None = None, now: datetime | None = None) -> dict:
+        with self.SessionLocal() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            policy = session.get(DataLifecyclePolicy, 1)
+            retention_days = policy.audit_retention_days if policy else 0
+
+            if retention_days <= 0:
+                raise ValueError("Cannot apply retention cleanup when audit_retention_days is 0 (permanent retention)")
+
+            if now is None:
+                now = utcnow()
+            cutoff = now - timedelta(days=retention_days)
+
+            # Strictly delete timestamp < cutoff (equality is preserved)
+            del_stmt = delete(AuditEvent).where(AuditEvent.timestamp < cutoff)
+            del_res = session.execute(del_stmt)
+            deleted_count = del_res.rowcount or 0
+
+            # Single self-audit event
+            self_audit = AuditEvent(
+                timestamp=now,
+                operation="audit.retention",
+                path=None,
+                result="success",
+                details_json=json.dumps({
+                    "retention_days": retention_days,
+                    "cutoff": cutoff.isoformat(),
+                    "deleted_count": deleted_count,
+                }, ensure_ascii=False),
+            )
+            session.add(self_audit)
+            session.flush()
+
+            if transaction_guard is not None:
+                transaction_guard(session)
+
+            session.commit()
+
+            # remaining_count including the newly inserted self-audit
+            remaining_count = session.scalar(select(func.count(AuditEvent.id))) or 0
+
+            return {
+                "retention_days": retention_days,
+                "cutoff": cutoff.isoformat(),
+                "deleted_count": deleted_count,
+                "remaining_count": remaining_count,
+            }
 
     def list_index_roots(self, *, page: int = 1, page_size: int = 20, limit: int | None = None) -> dict:
         if limit is not None:

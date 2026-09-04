@@ -2,10 +2,11 @@ import React, { useState } from 'react';
 import { Card, Table, Typography, Tag, Button, Modal, Space, Input } from 'antd';
 import { ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
-import { auditApi } from '../../api/domain';
+import { auditApi, dataLifecycleApi } from '../../api/domain';
 import { useTitle } from '../../hooks/useTitle';
 import { formatDateTime } from '../../utils/format';
 import { AuditEvent } from '../../types';
+import { formatAuditRetention } from '../../components/settings/data_lifecycle';
 
 const { Title, Text } = Typography;
 
@@ -15,6 +16,11 @@ export const AuditPage: React.FC = () => {
   const [searchText, setSearchText] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+
+  const { data: lifecyclePolicy } = useQuery({
+    queryKey: ['dataLifecyclePolicy'],
+    queryFn: () => dataLifecycleApi.getPolicy(),
+  });
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['auditEvents', page, pageSize, searchText],
@@ -68,10 +74,19 @@ export const AuditPage: React.FC = () => {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <div>
-          <Title level={4} style={{ margin: 0 }}>
-            安全审计日志
-          </Title>
-          <Text type="secondary">永久记录所有文件操作、隔离变更与执行校验事件</Text>
+          <Space align="center">
+            <Title level={4} style={{ margin: 0 }}>
+              安全审计日志
+            </Title>
+            {lifecyclePolicy && (
+              <Tag color={lifecyclePolicy.audit_retention_days === 0 ? 'default' : 'blue'}>
+                保留策略: {formatAuditRetention(lifecyclePolicy.audit_retention_days)}
+              </Tag>
+            )}
+          </Space>
+          <div>
+            <Text type="secondary">按系统数据生命周期保留策略记录文件操作、隔离变更与执行校验事件</Text>
+          </div>
         </div>
         <Space>
           <Input

@@ -118,6 +118,14 @@ class AuditEvent(Base):
     details_json: Mapped[str] = mapped_column(Text, default="{}")
 
 
+class DataLifecyclePolicy(Base):
+    __tablename__ = "data_lifecycle_policy"
+
+    id: Mapped[int] = mapped_column(primary_key=True, default=1)
+    audit_retention_days: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow, nullable=False)
+
+
 class TaskLock(Base):
     __tablename__ = "task_lock"
 

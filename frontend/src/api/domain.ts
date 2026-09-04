@@ -16,6 +16,9 @@ import {
   ScanJob,
   SystemSettings,
   WorkJob,
+  DataLifecyclePolicy,
+  AuditRetentionPreview,
+  AuditRetentionApplyResult,
 } from '../types';
 
 export const dashboardApi = {
@@ -134,6 +137,14 @@ export const auditApi = {
     if (operation) params.append('operation', operation);
     return api.get<PaginatedResponse<AuditEvent>>(`/api/audit?${params.toString()}`);
   },
+  getRetentionPreview: () => api.get<AuditRetentionPreview>('/api/audit/retention-preview'),
+  applyRetention: () => api.post<AuditRetentionApplyResult>('/api/audit/apply-retention'),
+};
+
+export const dataLifecycleApi = {
+  getPolicy: () => api.get<DataLifecyclePolicy>('/api/data-lifecycle'),
+  updatePolicy: (audit_retention_days: number) =>
+    api.put<DataLifecyclePolicy>('/api/data-lifecycle', { audit_retention_days }),
 };
 
 export const settingsApi = {

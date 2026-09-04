@@ -97,6 +97,7 @@ def init_db(
             "worker_state",
             "task_events",
             "index_roots",
+            "data_lifecycle_policy",
         }
 
         # Check existing columns in work_jobs
@@ -185,6 +186,16 @@ def init_db(
                 except Exception:
                     pass
 
+            session.commit()
+
+        # Seed singleton DataLifecyclePolicy if not exists
+        with SessionLocal() as session:
+            session.execute(
+                text("""
+                    INSERT OR IGNORE INTO data_lifecycle_policy (id, audit_retention_days, updated_at)
+                    VALUES (1, 0, CURRENT_TIMESTAMP)
+                """)
+            )
             session.commit()
 
         # Ensure no builtin profiles exist; organizer profiles count starts at 0

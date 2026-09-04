@@ -172,6 +172,30 @@ export interface AuditEvent {
   details: Record<string, any>;
 }
 
+export interface DataLifecyclePolicy {
+  audit_retention_days: number;
+  updated_at: string | null;
+}
+
+export interface AuditRetentionPreview {
+  retention_days: number;
+  enabled: boolean;
+  cutoff: string | null;
+  total_count: number;
+  delete_count: number;
+  keep_count: number;
+  oldest_timestamp: string | null;
+  newest_timestamp: string | null;
+}
+
+export interface AuditRetentionApplyResult {
+  retention_days: number;
+  cutoff: string;
+  deleted_count: number;
+  remaining_count: number;
+  self_audit_event_id: number;
+}
+
 export interface PaginatedResponse<T> {
   items: T[];
   total: number;
