@@ -47,12 +47,12 @@ export const SettingsPage: React.FC = () => {
     queryFn: () => settingsApi.getSettings(),
   });
 
-  const { data: lifecyclePolicy, refetch: refetchPolicy } = useQuery({
+  const { data: lifecyclePolicy, isError: policyQueryError, refetch: refetchPolicy } = useQuery({
     queryKey: ['dataLifecyclePolicy'],
     queryFn: () => dataLifecycleApi.getPolicy(),
   });
 
-  const { data: retentionPreview, isLoading: previewLoading, refetch: refetchPreview } = useQuery({
+  const { data: retentionPreview, isLoading: previewLoading, isError: previewQueryError, refetch: refetchPreview } = useQuery({
     queryKey: ['auditRetentionPreview'],
     queryFn: () => auditApi.getRetentionPreview(),
   });
@@ -104,6 +104,7 @@ export const SettingsPage: React.FC = () => {
       isSavingPolicy: savePolicyMutation.isPending,
       isPreparingApply: prepareApplyPending,
       isApplying: applyRetentionMutation.isPending,
+      isQueryError: policyQueryError || previewQueryError,
     }
   );
 

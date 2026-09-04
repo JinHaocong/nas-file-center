@@ -279,4 +279,43 @@ describe('Data Lifecycle & Audit Retention: Frontend Unit Tests', () => {
       assert.ok(!mutationBody.includes('preview.delete_count'), 'Must not use preview.delete_count for success toast');
     });
   });
+
+  describe('Hotfix 2: Query-Error Wiring Integration', () => {
+    test('Settings/index.tsx destructures isError from dataLifecyclePolicy query', () => {
+      const content = readFileSync(resolve(__dirname, '../../src/pages/Settings/index.tsx'), 'utf-8');
+      assert.ok(
+        /const\s*\{\s*[^}]*\bisError\s*:\s*policyQueryError[^}]*\}\s*=\s*useQuery\(\s*\{\s*queryKey:\s*\['dataLifecyclePolicy'\]/m.test(content) ||
+        /queryKey:\s*\['dataLifecyclePolicy'\][\s\S]*?isError\s*:\s*policyQueryError/.test(content),
+        'Settings/index.tsx must destructure isError: policyQueryError from dataLifecyclePolicy query'
+      );
+    });
+
+    test('Settings/index.tsx destructures isError from auditRetentionPreview query', () => {
+      const content = readFileSync(resolve(__dirname, '../../src/pages/Settings/index.tsx'), 'utf-8');
+      assert.ok(
+        /const\s*\{\s*[^}]*\bisError\s*:\s*previewQueryError[^}]*\}\s*=\s*useQuery\(\s*\{\s*queryKey:\s*\['auditRetentionPreview'\]/m.test(content) ||
+        /queryKey:\s*\['auditRetentionPreview'\][\s\S]*?isError\s*:\s*previewQueryError/.test(content),
+        'Settings/index.tsx must destructure isError: previewQueryError from auditRetentionPreview query'
+      );
+    });
+
+    test('Settings/index.tsx passes isQueryError into getAuditRetentionApplyAvailability', () => {
+      const content = readFileSync(resolve(__dirname, '../../src/pages/Settings/index.tsx'), 'utf-8');
+      assert.ok(
+        /isQueryError:\s*policyQueryError\s*\|\|\s*previewQueryError/.test(content),
+        'Settings/index.tsx must pass isQueryError: policyQueryError || previewQueryError to getAuditRetentionApplyAvailability'
+      );
+    });
+
+    test('getAuditRetentionApplyAvailability returns canApply=false and truthful disabledReason on isQueryError', () => {
+      const res = getAuditRetentionApplyAvailability(
+        { audit_retention_days: 30 },
+        { enabled: true, delete_count: 10 },
+        { isQueryError: true }
+      );
+      assert.strictEqual(res.canApply, false);
+      assert.strictEqual(res.disabledReason, '获取保留策略或清理预览失败，请刷新重试');
+    });
+  });
 });
+
