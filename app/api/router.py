@@ -679,6 +679,29 @@ def rename_preview(request: Request, payload: RenamePreviewRequest):
 
 
 # Plans
+class PlanClearHistoryRequest(BaseModel):
+    statuses: list[str] | None = None
+
+
+@router.post("/plans/clear-history")
+def clear_plan_history(request: Request, body: PlanClearHistoryRequest | None = None):
+    try:
+        statuses = body.statuses if body else None
+        return request.app.state.service.clear_plan_history(statuses=statuses)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.get("/plans/legacy/summary")
+def legacy_plan_summary(request: Request):
+    return request.app.state.service.legacy_plan_summary()
+
+
+@router.post("/plans/legacy/clear")
+def clear_legacy_plans(request: Request):
+    return request.app.state.service.clear_legacy_plans()
+
+
 @router.get("/plans")
 def list_plans(
     request: Request,
@@ -756,6 +779,17 @@ def execute(request: Request, plan_id: int):
         raise HTTPException(404, "plan not found") from exc
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
+
+
+@router.delete("/plans/{plan_id}")
+def delete_plan(request: Request, plan_id: int):
+    try:
+        return request.app.state.service.delete_plan(plan_id)
+    except KeyError as exc:
+        raise HTTPException(404, "Plan not found") from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
 
 
 # Audit

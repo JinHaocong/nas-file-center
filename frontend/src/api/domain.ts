@@ -6,6 +6,11 @@ import {
   IndexRoot,
   PaginatedResponse,
   Plan,
+  PlanHistoryStatus,
+  DeletePlanResponse,
+  ClearPlanHistoryResponse,
+  LegacyPlanSummary,
+  ClearLegacyPlansResponse,
   PlanItem,
   RenameProposal,
   ScanJob,
@@ -76,6 +81,11 @@ export const plansApi = {
   freezePlan: (id: number) => api.post<{ id: number; status: string }>(`/api/plans/${id}/freeze`),
   validatePlan: (id: number) => api.post<Plan>(`/api/plans/${id}/validate`),
   executePlan: (id: number) => api.post<{ id: number; status: string; items: any[] }>(`/api/plans/${id}/execute`),
+  deletePlan: (id: number) => api.delete<DeletePlanResponse>(`/api/plans/${id}`),
+  clearHistory: (statuses: PlanHistoryStatus[]) =>
+    api.post<ClearPlanHistoryResponse>('/api/plans/clear-history', { statuses }),
+  getLegacySummary: () => api.get<LegacyPlanSummary>('/api/plans/legacy/summary'),
+  clearLegacyPlans: () => api.post<ClearLegacyPlansResponse>('/api/plans/legacy/clear'),
 };
 
 export const batchApi = {

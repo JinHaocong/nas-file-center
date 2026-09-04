@@ -35,12 +35,33 @@ from app.models import (
     IndexedPath,
     OrganizerProfile,
     Plan,
+    PlanItem,
     RecentPath,
     ScanJob,
     WorkJob,
     utcnow,
 )
 from app.path_safety import require_allowed_path, validate_mutation_destination
+
+PLAN_SINGLE_DELETE_ALLOWED = {
+    "draft",
+    "frozen",
+    "ready",
+    "partial",
+    "completed",
+    "failed",
+}
+
+PLAN_DELETE_BLOCKED_ACTIVE = {
+    "validating",
+    "executing",
+}
+
+PLAN_HISTORY_STATES = {
+    "completed",
+    "failed",
+}
+
 from app.organizers.engine import generate_organizer_proposals
 from app.organizers.planner import plan_organizer_operations
 from app.organizers.templates import (
@@ -1008,7 +1029,73 @@ class FileCenterService:
             "page_size": detail["page_size"],
         }
 
+    def delete_plan(self, plan_id: int) -> dict:
+        with self.SessionLocal() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            plan = session.get(BatchPlan, plan_id)
+            if plan is None:
+                raise KeyError(plan_id)
+
+            if plan.status in PLAN_DELETE_BLOCKED_ACTIVE or plan.status not in PLAN_SINGLE_DELETE_ALLOWED:
+                raise ValueError(f"Plan with status '{plan.status}' cannot be deleted")
+
+            session.execute(delete(BatchPlanItem).where(BatchPlanItem.plan_id == plan_id))
+            session.delete(plan)
+            session.commit()
+            return {"deleted": True, "id": plan_id}
+
+    def clear_plan_history(self, statuses: list[str] | None) -> dict:
+        if statuses is None or len(statuses) == 0:
+            raise ValueError("At least one terminal status is required")
+
+        for s in statuses:
+            if s not in PLAN_HISTORY_STATES:
+                raise ValueError(f"Cannot clear non-history status '{s}'")
+
+        target_statuses = set(statuses)
+        with self.SessionLocal() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            plan_ids = list(session.scalars(
+                select(BatchPlan.id).where(BatchPlan.status.in_(target_statuses))
+            ).all())
+            if not plan_ids:
+                session.commit()
+                return {"deleted_count": 0}
+
+            session.execute(delete(BatchPlanItem).where(BatchPlanItem.plan_id.in_(plan_ids)))
+            session.execute(delete(BatchPlan).where(BatchPlan.id.in_(plan_ids)))
+            session.commit()
+            return {"deleted_count": len(plan_ids)}
+
+    def legacy_plan_summary(self) -> dict:
+        with self.SessionLocal() as session:
+            plan_count = session.scalar(select(func.count(Plan.id))) or 0
+            item_count = session.scalar(select(func.count(PlanItem.id))) or 0
+            affected_scan_count = session.scalar(select(func.count(func.distinct(Plan.scan_job_id)))) or 0
+            return {
+                "plan_count": plan_count,
+                "item_count": item_count,
+                "affected_scan_count": affected_scan_count,
+            }
+
+    def clear_legacy_plans(self) -> dict:
+        with self.SessionLocal() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            plan_count = session.scalar(select(func.count(Plan.id))) or 0
+            item_count = session.scalar(select(func.count(PlanItem.id))) or 0
+            affected_scan_count = session.scalar(select(func.count(func.distinct(Plan.scan_job_id)))) or 0
+
+            session.execute(delete(PlanItem))
+            session.execute(delete(Plan))
+            session.commit()
+            return {
+                "deleted_count": plan_count,
+                "deleted_item_count": item_count,
+                "affected_scan_count": affected_scan_count,
+            }
+
     # ==================== Filesystem Browser API ====================
+
 
     def list_directory(
         self,

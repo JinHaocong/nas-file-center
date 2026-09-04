@@ -28,6 +28,7 @@ import { useTitle } from '../../hooks/useTitle';
 import { formatBytes, formatDateTime } from '../../utils/format';
 import { STATUS_MAP } from '../../utils/constants';
 import { PlanItem } from '../../types';
+import { PlanDeleteButton } from '../../components/plans/PlanDeleteButton';
 
 const { Title, Text } = Typography;
 
@@ -85,6 +86,20 @@ export const PlanDetailPage: React.FC = () => {
     },
     onError: (err: any) => {
       message.error(err.message || '执行失败');
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: () => plansApi.deletePlan(planId),
+    onSuccess: () => {
+      message.success(`计划 #${planId} 已安全删除`);
+      queryClient.invalidateQueries({ queryKey: ['plansList'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboardSummary'] });
+      queryClient.invalidateQueries({ queryKey: ['scansList'] });
+      navigate('/plans');
+    },
+    onError: (err: any) => {
+      message.error(err.message || '删除计划失败');
     },
   });
 
@@ -264,6 +279,14 @@ export const PlanDetailPage: React.FC = () => {
               </span>
             </Tooltip>
           )}
+
+          <PlanDeleteButton
+            plan={plan}
+            onDelete={() => deleteMutation.mutate()}
+            loading={deleteMutation.isPending}
+            type="default"
+            size="middle"
+          />
         </Space>
       </div>
 

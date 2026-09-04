@@ -1,24 +1,52 @@
 import React, { useState } from 'react';
-import { Card, Table, Button, Typography, Space, Tag } from 'antd';
+import { Card, Table, Button, Typography, Space, Tag, message } from 'antd';
 import { ScheduleOutlined, ReloadOutlined } from '@ant-design/icons';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { plansApi } from '../../api/domain';
 import { useTitle } from '../../hooks/useTitle';
 import { formatBytes, formatDateTime } from '../../utils/format';
 import { STATUS_MAP } from '../../utils/constants';
+import { PlanDeleteButton } from '../../components/plans/PlanDeleteButton';
+import { PlanHistoryCleanupModal } from '../../components/plans/PlanHistoryCleanupModal';
+import { LegacyPlanCleanup } from '../../components/plans/LegacyPlanCleanup';
 
 const { Title, Text } = Typography;
 
 export const PlansPage: React.FC = () => {
   useTitle('执行计划');
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['plansList', page, pageSize],
     queryFn: () => plansApi.listPlans(page, pageSize),
+    refetchInterval: (query) => {
+      const items = query.state.data?.items || [];
+      const hasActive = items.some((p: any) => p.status === 'validating' || p.status === 'executing');
+      return hasActive ? 3000 : false;
+    },
+  });
+
+  const deletePlanMutation = useMutation({
+    mutationFn: (id: number) => plansApi.deletePlan(id),
+    onMutate: (id) => setDeletingId(id),
+    onSuccess: (_, id) => {
+      message.success(`计划 #${id} 已安全删除`);
+      queryClient.invalidateQueries({ queryKey: ['plansList'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboardSummary'] });
+      queryClient.invalidateQueries({ queryKey: ['scansList'] });
+      if (data?.items?.length === 1 && page > 1) {
+        setPage((prev) => prev - 1);
+      }
+    },
+    onError: (err: any) => {
+      message.error(err.message || '删除计划失败');
+    },
+    onSettled: () => setDeletingId(null),
   });
 
   const columns = [
@@ -76,9 +104,16 @@ export const PlansPage: React.FC = () => {
       title: '操作',
       key: 'action',
       render: (_: any, record: any) => (
-        <Button size="small" type="link" onClick={() => navigate(`/plans/${record.id}`)}>
-          查看与执行
-        </Button>
+        <Space size="small">
+          <Button size="small" type="link" onClick={() => navigate(`/plans/${record.id}`)}>
+            查看与执行
+          </Button>
+          <PlanDeleteButton
+            plan={record}
+            onDelete={() => deletePlanMutation.mutate(record.id)}
+            loading={deletingId === record.id}
+          />
+        </Space>
       ),
     },
   ];
@@ -94,10 +129,15 @@ export const PlansPage: React.FC = () => {
             所有文件操作均严格遵循 Dry Run 计划生命周期：Draft → Frozen → Validate → Execute
           </Text>
         </div>
-        <Button icon={<ReloadOutlined />} onClick={() => refetch()} loading={isLoading}>
-          刷新
-        </Button>
+        <Space>
+          <Button icon={<ReloadOutlined />} onClick={() => refetch()} loading={isLoading}>
+            刷新
+          </Button>
+          <PlanHistoryCleanupModal />
+        </Space>
       </div>
+
+      <LegacyPlanCleanup />
 
       <Card bordered={false} style={{ borderRadius: 12 }}>
         <Table

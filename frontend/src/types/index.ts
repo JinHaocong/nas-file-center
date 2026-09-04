@@ -92,11 +92,44 @@ export interface PlanItem {
   reason?: string | null;
 }
 
+export type PlanStatus =
+  | 'draft'
+  | 'frozen'
+  | 'validating'
+  | 'ready'
+  | 'executing'
+  | 'completed'
+  | 'partial'
+  | 'failed';
+
+export type PlanHistoryStatus = 'completed' | 'failed';
+
+export interface DeletePlanResponse {
+  deleted: boolean;
+  id: number;
+}
+
+export interface ClearPlanHistoryResponse {
+  deleted_count: number;
+}
+
+export interface LegacyPlanSummary {
+  plan_count: number;
+  item_count: number;
+  affected_scan_count: number;
+}
+
+export interface ClearLegacyPlansResponse {
+  deleted_count: number;
+  deleted_item_count: number;
+  affected_scan_count: number;
+}
+
 export interface Plan {
   id: number;
   name: string;
   kind: string;
-  status: 'draft' | 'frozen' | 'validating' | 'ready' | 'executing' | 'completed' | 'partial' | 'failed';
+  status: PlanStatus;
   expected_changes: number;
   expected_reclaim_bytes: number;
   metadata?: Record<string, any>;
