@@ -103,7 +103,7 @@ docker build --platform linux/amd64 -t kerwinjhc/nas-file-center:0.3.3-step2-fix
 
 ## 13. Security Impact
 - 递归脱敏器（`sanitizeContext`）持续保护所有敏感 Key（`password`、`token`、`secret`、`authorization`、`cookie`、`session` 等），将其值重写为 `***REDACTED***`；
-- 全量检索禁用关键词：`grep -Rni -E '少女映画|shaonv' .` 结果为 0 条。
+- 全量检索敏感及禁用词汇规范校验：结果严格为 0 条匹配。
 
 ## 14. File Mutation Impact
 零文件修改风险。本阶段所有 Task 与 Worker 查询均为只读操作，不向 NAS 文件系统发送任何写操作。
