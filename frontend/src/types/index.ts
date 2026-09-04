@@ -38,10 +38,19 @@ export interface DashboardSummary {
 }
 
 export interface IndexRoot {
+  id: number;
   root: string;
   files: number;
   folders: number;
-  last_seen_at: string | null;
+  created_at: string;
+  last_indexed_at: string | null;
+  last_seen_at?: string | null;
+  exists: boolean;
+  path_state: 'available' | 'missing' | 'blocked';
+  has_active_job: boolean;
+  active_job_id: number | null;
+  active_job_status: string | null;
+  can_remove: boolean;
 }
 
 export interface ScanJob {

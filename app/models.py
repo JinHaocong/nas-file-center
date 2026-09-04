@@ -127,6 +127,15 @@ class TaskLock(Base):
     acquired_at: Mapped[datetime | None]
 
 
+class IndexRoot(Base):
+    __tablename__ = "index_roots"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    root: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    last_indexed_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+
 class IndexedPath(Base):
     __tablename__ = "indexed_paths"
     __table_args__ = (

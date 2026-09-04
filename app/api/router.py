@@ -257,6 +257,16 @@ def create_index(request: Request, payload: IndexCreateRequest):
         raise HTTPException(400, str(exc)) from exc
 
 
+@router.delete("/indexes/{index_root_id}")
+def delete_index(request: Request, index_root_id: int):
+    try:
+        return request.app.state.service.delete_index_root(index_root_id)
+    except KeyError as exc:
+        raise HTTPException(404, f"Index root #{index_root_id} not found") from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
 @router.post("/index-match/preview")
 def index_match(request: Request, payload: IndexMatchRequest):
     try:

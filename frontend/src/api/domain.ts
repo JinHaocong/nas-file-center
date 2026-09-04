@@ -50,7 +50,21 @@ export const scansApi = {
 export const indexesApi = {
   listIndexes: (page = 1, pageSize = 20) =>
     api.get<PaginatedResponse<IndexRoot>>(`/api/indexes?page=${page}&page_size=${pageSize}`),
-  createIndex: (root: string) => api.post<{ work_job_id: number }>('/api/indexes', { root }),
+  createIndex: (root: string) =>
+    api.post<{
+      index_root_id: number;
+      work_job_id: number;
+      status: string;
+      root: string;
+      created: boolean;
+    }>('/api/indexes', { root }),
+  deleteIndex: (id: number) =>
+    api.delete<{
+      deleted: boolean;
+      id: number;
+      root: string;
+      deleted_indexed_paths: number;
+    }>(`/api/indexes/${id}`),
   matchPreview: (payload: {
     root_keys: string[];
     mode?: string;

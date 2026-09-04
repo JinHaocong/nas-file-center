@@ -32,6 +32,7 @@ from app.models import (
     DuplicateFile,
     DuplicateGroup,
     FavoritePath,
+    IndexRoot,
     IndexedPath,
     OrganizerProfile,
     Plan,
@@ -345,25 +346,95 @@ class FileCenterService:
         page_size = max(1, min(int(page_size), 500))
         offset = (page - 1) * page_size
         with self.SessionLocal() as session:
-            total = session.scalar(select(func.count(func.distinct(IndexedPath.root_key)))) or 0
-            rows = session.execute(
+            total = session.scalar(select(func.count(IndexRoot.id))) or 0
+            roots = session.scalars(
+                select(IndexRoot)
+                .order_by(IndexRoot.root)
+                .limit(page_size)
+                .offset(offset)
+            ).all()
+
+            if not roots:
+                return {"items": [], "total": total, "page": page, "page_size": page_size}
+
+            page_root_strings = [r.root for r in roots]
+
+            # Query 2: Aggregate IndexedPath counts for only this page's roots
+            stats_rows = session.execute(
                 select(
                     IndexedPath.root_key,
                     func.sum(func.iif(IndexedPath.is_dir.is_(False), 1, 0)).label("files"),
                     func.sum(func.iif(IndexedPath.is_dir.is_(True), 1, 0)).label("folders"),
-                    func.max(IndexedPath.last_seen_at).label("last_seen_at"),
                 )
+                .where(IndexedPath.root_key.in_(page_root_strings))
                 .group_by(IndexedPath.root_key)
-                .order_by(IndexedPath.root_key)
-                .limit(page_size)
-                .offset(offset)
             ).all()
-            items = [{
-                "root": row.root_key,
-                "files": int(row.files or 0),
-                "folders": int(row.folders or 0),
-                "last_seen_at": row.last_seen_at,
-            } for row in rows]
+            stats_map = {row.root_key: (int(row.files or 0), int(row.folders or 0)) for row in stats_rows}
+
+            # Query 3: Find active index-root WorkJobs (non-terminal)
+            terminal_states = {"completed", "failed", "cancelled"}
+            active_jobs = session.scalars(
+                select(WorkJob)
+                .where(
+                    WorkJob.kind == "index-root",
+                    WorkJob.status.not_in(terminal_states),
+                )
+            ).all()
+
+            active_job_map: dict[str, WorkJob] = {}
+            for job in active_jobs:
+                if not job.state_json:
+                    continue
+                try:
+                    payload = json.loads(job.state_json)
+                    job_root = payload.get("root")
+                    if job_root and isinstance(job_root, str):
+                        if job_root not in active_job_map:
+                            active_job_map[job_root] = job
+                except Exception:
+                    pass
+
+            items = []
+            for r in roots:
+                files_count, folders_count = stats_map.get(r.root, (0, 0))
+                active_job = active_job_map.get(r.root)
+                has_active_job = active_job is not None
+                active_job_id = active_job.id if active_job else None
+                active_job_status = active_job.status if active_job else None
+                can_remove = not has_active_job
+
+                exists = False
+                try:
+                    safe_path = require_allowed_path(r.root, self.settings.allowed_roots)
+                    if safe_path.is_dir():
+                        path_state = "available"
+                        exists = True
+                    else:
+                        path_state = "missing"
+                        exists = False
+                except ValueError:
+                    path_state = "blocked"
+                    exists = False
+                except Exception:
+                    path_state = "missing"
+                    exists = False
+
+                items.append({
+                    "id": r.id,
+                    "root": r.root,
+                    "files": files_count,
+                    "folders": folders_count,
+                    "created_at": r.created_at,
+                    "last_indexed_at": r.last_indexed_at,
+                    "last_seen_at": r.last_indexed_at,
+                    "exists": exists,
+                    "path_state": path_state,
+                    "has_active_job": has_active_job,
+                    "active_job_id": active_job_id,
+                    "active_job_status": active_job_status,
+                    "can_remove": can_remove,
+                })
+
             return {"items": items, "total": total, "page": page, "page_size": page_size}
 
     def reindex_root(
@@ -446,6 +517,13 @@ class FileCenterService:
             if transaction_guard is not None:
                 transaction_guard(session)
             session.execute(delete(IndexedPath).where(IndexedPath.root_key == root_key, IndexedPath.scan_generation != generation))
+            now = utcnow()
+            idx_root = session.scalar(select(IndexRoot).where(IndexRoot.root == root_key))
+            if idx_root is None:
+                idx_root = IndexRoot(root=root_key, created_at=now, last_indexed_at=now)
+                session.add(idx_root)
+            else:
+                idx_root.last_indexed_at = now
             session.commit()
 
         return {"root": root_key, "generation": generation, "files": files, "folders": folders}
@@ -519,14 +597,79 @@ class FileCenterService:
         safe_root = require_allowed_path(root, self.settings.allowed_roots)
         if not safe_root.is_dir():
             raise ValueError(f"Not a directory: {safe_root}")
+        root_str = str(safe_root)
         with self.SessionLocal() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            idx_root = session.scalar(select(IndexRoot).where(IndexRoot.root == root_str))
+            created = False
+            if idx_root is None:
+                idx_root = IndexRoot(root=root_str, created_at=utcnow())
+                session.add(idx_root)
+                session.flush()
+                created = True
             work = WorkJob(
                 kind="index-root",
                 status="queued",
-                state_json=json.dumps({"root": str(safe_root)}, ensure_ascii=False),
+                state_json=json.dumps({"root": root_str}, ensure_ascii=False),
             )
-            session.add(work); session.commit()
-            return {"work_job_id": work.id, "status": work.status, "root": str(safe_root)}
+            session.add(work)
+            session.commit()
+            return {
+                "index_root_id": idx_root.id,
+                "work_job_id": work.id,
+                "status": work.status,
+                "root": root_str,
+                "created": created,
+            }
+
+    def delete_index_root(self, index_root_id: int) -> dict:
+        with self.SessionLocal() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            idx_root = session.get(IndexRoot, index_root_id)
+            if idx_root is None:
+                raise KeyError(index_root_id)
+
+            root_str = idx_root.root
+
+            # Check active index-root WorkJobs for exact root
+            terminal_states = {"completed", "failed", "cancelled"}
+            active_jobs = session.scalars(
+                select(WorkJob)
+                .where(
+                    WorkJob.kind == "index-root",
+                    WorkJob.status.not_in(terminal_states),
+                )
+            ).all()
+
+            for job in active_jobs:
+                if not job.state_json:
+                    continue
+                try:
+                    payload = json.loads(job.state_json)
+                    job_root = payload.get("root")
+                    if job_root == root_str:
+                        raise ValueError(
+                            f"Cannot remove index for '{root_str}' while index task #{job.id} is active ({job.status})"
+                        )
+                except ValueError:
+                    raise
+                except Exception:
+                    pass
+
+            del_res = session.execute(
+                delete(IndexedPath).where(IndexedPath.root_key == root_str)
+            )
+            deleted_paths = del_res.rowcount or 0
+
+            session.delete(idx_root)
+            session.commit()
+
+            return {
+                "deleted": True,
+                "id": index_root_id,
+                "root": root_str,
+                "deleted_indexed_paths": deleted_paths,
+            }
 
     def work_job_detail(self, work_job_id: int) -> dict:
         with self.SessionLocal() as session:

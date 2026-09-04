@@ -11,7 +11,7 @@ from sqlalchemy import Engine, create_engine, delete, event, func, inspect, sele
 from sqlalchemy.orm import sessionmaker
 
 from app.auth.password import hash_password
-from app.models import Base, OrganizerProfile, User
+from app.models import Base, IndexRoot, IndexedPath, OrganizerProfile, User, WorkJob
 
 
 @contextmanager
@@ -96,6 +96,7 @@ def init_db(
             "organizer_profiles",
             "worker_state",
             "task_events",
+            "index_roots",
         }
 
         # Check existing columns in work_jobs
@@ -141,6 +142,50 @@ def init_db(
             conn.commit()
 
         SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, future=True)
+
+        # Backfill index_roots from existing indexed_paths and active index-root work_jobs
+        with SessionLocal() as session:
+            session.execute(
+                text("""
+                    INSERT OR IGNORE INTO index_roots (root, created_at, last_indexed_at)
+                    SELECT 
+                        root_key AS root,
+                        COALESCE(MIN(first_seen_at), CURRENT_TIMESTAMP) AS created_at,
+                        MAX(last_seen_at) AS last_indexed_at
+                    FROM indexed_paths
+                    WHERE root_key IS NOT NULL AND TRIM(root_key) != ''
+                    GROUP BY root_key
+                """)
+            )
+
+            # Backfill from active index-root work_jobs (status not terminal)
+            active_jobs = session.execute(
+                select(WorkJob.created_at, WorkJob.state_json)
+                .where(
+                    WorkJob.kind == "index-root",
+                    WorkJob.status.not_in(["completed", "failed", "cancelled"]),
+                )
+            ).all()
+
+            for job_created_at, state_json in active_jobs:
+                if not state_json:
+                    continue
+                try:
+                    payload = json.loads(state_json)
+                    root_val = payload.get("root")
+                    if root_val and isinstance(root_val, str) and root_val.strip():
+                        root_clean = root_val.strip()
+                        session.execute(
+                            text("""
+                                INSERT OR IGNORE INTO index_roots (root, created_at, last_indexed_at)
+                                VALUES (:root, :created_at, NULL)
+                            """),
+                            {"root": root_clean, "created_at": job_created_at or datetime.now(timezone.utc)},
+                        )
+                except Exception:
+                    pass
+
+            session.commit()
 
         # Ensure no builtin profiles exist; organizer profiles count starts at 0
         with SessionLocal() as session:
