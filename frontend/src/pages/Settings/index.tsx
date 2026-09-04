@@ -40,6 +40,7 @@ export const SettingsPage: React.FC = () => {
   useTitle('系统设置');
   const queryClient = useQueryClient();
   const [retentionDaysInput, setRetentionDaysInput] = useState<number | null>(0);
+  const [prepareApplyPending, setPrepareApplyPending] = useState(false);
 
   const { data: settings, refetch: refetchSettings } = useQuery({
     queryKey: ['settings'],
@@ -96,27 +97,40 @@ export const SettingsPage: React.FC = () => {
     savePolicyMutation.mutate(retentionDaysInput!);
   };
 
-  const availability = getAuditRetentionApplyAvailability(lifecyclePolicy, retentionPreview);
-
-  const handleConfirmApplyRetention = () => {
-    if (!availability.canApply) {
-      message.warning(availability.disabledReason || '当前策略不可执行清理');
-      return;
+  const availability = getAuditRetentionApplyAvailability(
+    lifecyclePolicy,
+    retentionPreview,
+    {
+      isSavingPolicy: savePolicyMutation.isPending,
+      isPreparingApply: prepareApplyPending,
+      isApplying: applyRetentionMutation.isPending,
     }
+  );
 
+  const showApplyConfirmation = (
+    freshPolicy: { audit_retention_days: number },
+    freshPreview: { delete_count: number; cutoff?: string | null }
+  ) => {
     Modal.confirm({
       title: '确认执行审计日志保留清理？',
       icon: <ExclamationCircleOutlined style={{ color: '#ff4d4f' }} />,
       content: (
         <div>
           <p>
-            将按照系统已保存的策略（<strong>{formatAuditRetention(lifecyclePolicy?.audit_retention_days)}</strong>），
-            永久清理截止时间（<strong>{retentionPreview?.cutoff ? formatDateTime(retentionPreview.cutoff) : '计算中'}</strong>）之前的全部审计日志。
+            当前已保存策略：<strong>{formatAuditRetention(freshPolicy.audit_retention_days)}</strong>
           </p>
           <p>
-            拟删除记录数：<strong style={{ color: '#ff4d4f' }}>{retentionPreview?.delete_count ?? 0}</strong> 条。
+            当前最新预览：预计清理 <strong style={{ color: '#ff4d4f' }}>{freshPreview.delete_count}</strong> 条 Audit 历史记录。
           </p>
-          <p style={{ color: '#ff4d4f' }}>此操作不可逆！清理操作执行后，系统将自动生成 1 条 audit.retention 自审计记录。</p>
+          <p style={{ color: '#d48806', fontSize: 13 }}>
+            提示：当前预览仅为预计结果。实际执行时将根据数据库中最新保存的保留策略以及执行时最新的审计数据重新计算，最终删除数量可能与当前预览不同。
+          </p>
+          <p style={{ fontSize: 13, color: '#595959' }}>
+            安全边界：本操作仅清理符合保留期条件的 Audit 历史记录。不会删除 NAS 上的真实文件或目录，也不会删除 Task、Scan、Plan 或 Index 数据。
+          </p>
+          <p style={{ color: '#ff4d4f', fontWeight: 500, fontSize: 13 }}>
+            审计历史清理不可撤销。
+          </p>
         </div>
       ),
       okText: '确认执行清理',
@@ -124,6 +138,40 @@ export const SettingsPage: React.FC = () => {
       cancelText: '取消',
       onOk: () => applyRetentionMutation.mutateAsync(),
     });
+  };
+
+  const handlePrepareApply = async () => {
+    if (prepareApplyPending || applyRetentionMutation.isPending || savePolicyMutation.isPending) {
+      return;
+    }
+
+    setPrepareApplyPending(true);
+
+    try {
+      const [policyResult, previewResult] = await Promise.all([
+        refetchPolicy(),
+        refetchPreview(),
+      ]);
+
+      const freshPolicy = policyResult.data;
+      const freshPreview = previewResult.data;
+
+      if (policyResult.isError || previewResult.isError || !freshPolicy || !freshPreview) {
+        message.error('无法获取最新保留策略或清理预览，请稍后重试');
+        return;
+      }
+
+      if (freshPolicy.audit_retention_days === 0) {
+        message.info('当前策略为永久保留（0 天），没有可执行的保留期清理');
+        return;
+      }
+
+      showApplyConfirmation(freshPolicy, freshPreview);
+    } catch (err: any) {
+      message.error(err.message || '无法获取最新保留策略或清理预览，请重试');
+    } finally {
+      setPrepareApplyPending(false);
+    }
   };
 
   const { data: sessionsData, isLoading: sessionsLoading, refetch: refetchSessions } = useQuery({
@@ -370,8 +418,8 @@ export const SettingsPage: React.FC = () => {
                   type="primary"
                   icon={<DeleteOutlined />}
                   disabled={!availability.canApply}
-                  loading={applyRetentionMutation.isPending}
-                  onClick={handleConfirmApplyRetention}
+                  loading={applyRetentionMutation.isPending || prepareApplyPending}
+                  onClick={handlePrepareApply}
                 >
                   执行审计清理
                 </Button>

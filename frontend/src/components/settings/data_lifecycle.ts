@@ -37,13 +37,46 @@ export function validateRetentionDaysInput(value: unknown): { valid: boolean; er
   return { valid: true };
 }
 
+export interface RetentionApplyAvailabilityOptions {
+  isSavingPolicy?: boolean;
+  isPreparingApply?: boolean;
+  isApplying?: boolean;
+  isQueryError?: boolean;
+}
+
 /**
  * 获取执行审计清理按钮的可用性状态
  */
 export function getAuditRetentionApplyAvailability(
   policy?: { audit_retention_days: number } | null,
   preview?: { enabled: boolean; delete_count: number } | null,
+  options?: RetentionApplyAvailabilityOptions,
 ): RetentionApplyAvailability {
+  if (options?.isSavingPolicy) {
+    return {
+      canApply: false,
+      disabledReason: '正在保存保留策略，请稍候',
+    };
+  }
+  if (options?.isPreparingApply) {
+    return {
+      canApply: false,
+      disabledReason: '正在刷新最新保留策略与清理预览，请稍候',
+    };
+  }
+  if (options?.isApplying) {
+    return {
+      canApply: false,
+      disabledReason: '正在执行审计清理，请稍候',
+    };
+  }
+  if (options?.isQueryError) {
+    return {
+      canApply: false,
+      disabledReason: '获取保留策略或清理预览失败，请刷新重试',
+    };
+  }
+
   if (!policy || policy.audit_retention_days === 0) {
     return {
       canApply: false,

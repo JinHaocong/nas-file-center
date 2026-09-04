@@ -179,4 +179,104 @@ describe('Data Lifecycle & Audit Retention: Frontend Unit Tests', () => {
       assert.ok(!content.includes('deleteAudit'));
     });
   });
+
+  describe('Hotfix 1: Confirmation Truthfulness & Fresh Refetch Requirements', () => {
+    test('Settings/index.tsx includes truthful advisory and recomputation disclosure in confirmation', () => {
+      const content = readFileSync(resolve(__dirname, '../../src/pages/Settings/index.tsx'), 'utf-8');
+      assert.ok(content.includes('当前预览仅为预计结果'), 'Must state preview is only an estimate');
+      assert.ok(
+        content.includes('实际执行时将根据数据库中最新保存的保留策略以及执行时最新的审计数据重新计算'),
+        'Must disclose actual execution recomputes from latest DB policy'
+      );
+      assert.ok(content.includes('最终删除数量可能与当前预览不同'), 'Must disclose final count may differ from preview');
+    });
+
+    test('Settings/index.tsx includes non-filesystem and non-task/scan/plan/index safety boundary in confirmation', () => {
+      const content = readFileSync(resolve(__dirname, '../../src/pages/Settings/index.tsx'), 'utf-8');
+      assert.ok(content.includes('不会删除 NAS 上的真实文件或目录'), 'Must declare NAS filesystem unaffected');
+      assert.ok(content.includes('不会删除 Task、Scan、Plan 或 Index 数据'), 'Must declare Task/Scan/Plan/Index unaffected');
+    });
+
+    test('Settings/index.tsx executes fresh policy and preview refetch before Modal.confirm and uses fresh result', () => {
+      const content = readFileSync(resolve(__dirname, '../../src/pages/Settings/index.tsx'), 'utf-8');
+      assert.ok(content.includes('refetchPolicy'), 'Must invoke refetchPolicy before confirm');
+      assert.ok(content.includes('refetchPreview'), 'Must invoke refetchPreview before confirm');
+      assert.ok(
+        content.includes('prepareApplyPending') || content.includes('preparingApply'),
+        'Must track preparing state'
+      );
+    });
+
+    test('getAuditRetentionApplyAvailability disables apply while saving policy, preparing apply, or applying', () => {
+      const saving = getAuditRetentionApplyAvailability(
+        { audit_retention_days: 90 },
+        { enabled: true, delete_count: 5 },
+        { isSavingPolicy: true }
+      );
+      assert.strictEqual(saving.canApply, false);
+      assert.ok(saving.disabledReason?.includes('保存'));
+
+      const preparing = getAuditRetentionApplyAvailability(
+        { audit_retention_days: 90 },
+        { enabled: true, delete_count: 5 },
+        { isPreparingApply: true }
+      );
+      assert.strictEqual(preparing.canApply, false);
+      assert.ok(preparing.disabledReason?.includes('刷新') || preparing.disabledReason?.includes('获取'));
+
+      const applying = getAuditRetentionApplyAvailability(
+        { audit_retention_days: 90 },
+        { enabled: true, delete_count: 5 },
+        { isApplying: true }
+      );
+      assert.strictEqual(applying.canApply, false);
+
+      const queryError = getAuditRetentionApplyAvailability(
+        { audit_retention_days: 90 },
+        { enabled: true, delete_count: 5 },
+        { isQueryError: true }
+      );
+      assert.strictEqual(queryError.canApply, false);
+      assert.ok(queryError.disabledReason?.includes('失败'));
+    });
+
+    test('zero-candidates with positive policy continues to allow apply (regression guard)', () => {
+      const res = getAuditRetentionApplyAvailability(
+        { audit_retention_days: 30 },
+        { enabled: true, delete_count: 0 }
+      );
+      assert.strictEqual(res.canApply, true);
+      assert.strictEqual(res.isZeroCandidates, true);
+    });
+
+    test('policy 0 continues to strictly disable apply (regression guard)', () => {
+      const res = getAuditRetentionApplyAvailability(
+        { audit_retention_days: 0 },
+        { enabled: false, delete_count: 0 }
+      );
+      assert.strictEqual(res.canApply, false);
+      assert.ok(res.disabledReason?.includes('永久保留'));
+    });
+
+    test('save policy never triggers apply retention (Save != Apply invariant)', () => {
+      const content = readFileSync(resolve(__dirname, '../../src/pages/Settings/index.tsx'), 'utf-8');
+      const handleSaveStart = content.indexOf('const handleSavePolicy = () => {');
+      assert.ok(handleSaveStart !== -1);
+      const handleSaveEnd = content.indexOf('};', handleSaveStart);
+      const handleSaveBody = content.slice(handleSaveStart, handleSaveEnd);
+      assert.ok(handleSaveBody.includes('savePolicyMutation.mutate'));
+      assert.ok(!handleSaveBody.includes('applyRetention'));
+      assert.ok(!handleSaveBody.includes('applyRetentionMutation'));
+    });
+
+    test('apply success feedback truthfully uses backend response.deleted_count', () => {
+      const content = readFileSync(resolve(__dirname, '../../src/pages/Settings/index.tsx'), 'utf-8');
+      const mutationStart = content.indexOf('const applyRetentionMutation = useMutation({');
+      assert.ok(mutationStart !== -1);
+      const mutationEnd = content.indexOf('  });', mutationStart);
+      const mutationBody = content.slice(mutationStart, mutationEnd);
+      assert.ok(mutationBody.includes('res.deleted_count'), 'Must use backend response.deleted_count');
+      assert.ok(!mutationBody.includes('preview.delete_count'), 'Must not use preview.delete_count for success toast');
+    });
+  });
 });
