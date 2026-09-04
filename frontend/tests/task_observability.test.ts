@@ -4,11 +4,13 @@ import { test, describe } from 'node:test';
 import {
   computeProgressPercentage,
   isProgressIndeterminate,
+  calculateTaskEta,
   TASK_STATUS_CONFIG,
   WORKER_STATUS_BADGE_MAP,
   CANONICAL_JOB_CAPABILITIES,
   TASK_LOG_LEVEL_MAP,
 } from '../src/components/tasks/task_utils';
+import dayjs from 'dayjs';
 import { sanitizeContext, isSensitiveKey } from '../src/utils/sanitize';
 import {
   formatDuration,
@@ -269,5 +271,143 @@ describe('Tasks API Client Query Parameters & Contract', () => {
     assert.strictEqual(TASK_LOG_LEVEL_MAP.warning.color, 'orange');
     assert.strictEqual(TASK_LOG_LEVEL_MAP.error.color, 'red');
     assert.strictEqual(TASK_LOG_LEVEL_MAP.debug.color, 'default');
+  });
+});
+
+describe('Task ETA Estimation & Deterministic Rules', () => {
+  const baseTime = dayjs('2026-09-04T12:00:00Z');
+
+  test('1. known total + running + valid elapsed returns finite ETA', () => {
+    // Started 60 seconds ago, processed 50 out of 100 items -> remaining 50 -> rate 50/60s -> eta 60s ('1m')
+    const startedAt = baseTime.subtract(60, 'second').toISOString();
+    const result = calculateTaskEta('running', 50, 100, startedAt, 50, baseTime);
+
+    assert.strictEqual(result.isUnknown, false);
+    assert.strictEqual(result.etaSeconds, 60);
+    assert.strictEqual(result.text, '1m 0s');
+
+    // Started 120 seconds ago, processed 30 out of 150 items -> remaining 120 -> rate 30/120s -> eta 480s ('8m')
+    const startedAt2 = baseTime.subtract(120, 'second').toISOString();
+    const result2 = calculateTaskEta('running', 30, 150, startedAt2, 20, baseTime);
+    assert.strictEqual(result2.isUnknown, false);
+    assert.strictEqual(result2.etaSeconds, 480);
+    assert.strictEqual(result2.text, '8m 0s');
+  });
+
+  test('2. total == 0 returns ETA unknown', () => {
+    const startedAt = baseTime.subtract(30, 'second').toISOString();
+    const res1 = calculateTaskEta('running', 0, 0, startedAt, null, baseTime);
+    assert.strictEqual(res1.isUnknown, true);
+    assert.strictEqual(res1.etaSeconds, null);
+    assert.strictEqual(res1.text, '未知');
+
+    const res2 = calculateTaskEta('running', 10, 0, startedAt, null, baseTime);
+    assert.strictEqual(res2.isUnknown, true);
+    assert.strictEqual(res2.etaSeconds, null);
+    assert.strictEqual(res2.text, '未知');
+  });
+
+  test('3. percent == null / unknown progress returns ETA unknown', () => {
+    const startedAt = baseTime.subtract(40, 'second').toISOString();
+    const res = calculateTaskEta('running', 0, 0, startedAt, null, baseTime);
+    assert.strictEqual(res.isUnknown, true);
+    assert.strictEqual(res.text, '未知');
+  });
+
+  test('4. current == 0 returns ETA unknown (no velocity sample)', () => {
+    const startedAt = baseTime.subtract(10, 'second').toISOString();
+    const res = calculateTaskEta('running', 0, 100, startedAt, 0, baseTime);
+    assert.strictEqual(res.isUnknown, true);
+    assert.strictEqual(res.etaSeconds, null);
+    assert.strictEqual(res.text, '未知');
+  });
+
+  test('5. missing or invalid started_at returns ETA unknown', () => {
+    const res1 = calculateTaskEta('running', 50, 100, null, 50, baseTime);
+    assert.strictEqual(res1.isUnknown, true);
+    assert.strictEqual(res1.text, '未知');
+
+    const res2 = calculateTaskEta('running', 50, 100, undefined, 50, baseTime);
+    assert.strictEqual(res2.isUnknown, true);
+    assert.strictEqual(res2.text, '未知');
+
+    const res3 = calculateTaskEta('running', 50, 100, 'not-a-valid-date', 50, baseTime);
+    assert.strictEqual(res3.isUnknown, true);
+    assert.strictEqual(res3.text, '未知');
+  });
+
+  test('6. completed or current >= total returns deterministic completed behavior', () => {
+    // Completed status
+    const completedRes = calculateTaskEta('completed', 100, 100, null, 100, baseTime);
+    assert.strictEqual(completedRes.isUnknown, false);
+    assert.strictEqual(completedRes.etaSeconds, 0);
+    assert.strictEqual(completedRes.text, '已完成');
+
+    // Running but already finished count
+    const startedAt = baseTime.subtract(50, 'second').toISOString();
+    const finishRes = calculateTaskEta('running', 100, 100, startedAt, 100, baseTime);
+    assert.strictEqual(finishRes.isUnknown, false);
+    assert.strictEqual(finishRes.etaSeconds, 0);
+    assert.strictEqual(finishRes.text, '0s');
+
+    // Running with current exceeding total
+    const exceedRes = calculateTaskEta('running', 120, 100, startedAt, 100, baseTime);
+    assert.strictEqual(exceedRes.isUnknown, false);
+    assert.strictEqual(exceedRes.etaSeconds, 0);
+    assert.strictEqual(exceedRes.text, '0s');
+  });
+
+  test('7. failed, cancelled, paused, and cancel_requested return deterministic state-specific text', () => {
+    const failedRes = calculateTaskEta('failed', 10, 100, null, 10, baseTime);
+    assert.strictEqual(failedRes.isUnknown, true);
+    assert.strictEqual(failedRes.text, '不可用');
+
+    const cancelledRes = calculateTaskEta('cancelled', 10, 100, null, 10, baseTime);
+    assert.strictEqual(cancelledRes.isUnknown, true);
+    assert.strictEqual(cancelledRes.text, '不可用');
+
+    const pausedRes = calculateTaskEta('paused', 10, 100, null, 10, baseTime);
+    assert.strictEqual(pausedRes.isUnknown, true);
+    assert.strictEqual(pausedRes.text, '已暂停');
+
+    const cancelReqRes = calculateTaskEta('cancel_requested', 10, 100, null, 10, baseTime);
+    assert.strictEqual(cancelReqRes.isUnknown, true);
+    assert.strictEqual(cancelReqRes.text, '正在取消');
+  });
+
+  test('8. invalid timestamps never return NaN, Infinity, or negative numbers', () => {
+    // Zero elapsed time (now == started_at)
+    const startedAt = baseTime.toISOString();
+    const res1 = calculateTaskEta('running', 5, 100, startedAt, 5, baseTime);
+    assert.strictEqual(res1.isUnknown, true);
+    assert.strictEqual(res1.text, '未知');
+    assert.strictEqual(Number.isNaN(res1.etaSeconds), false);
+
+    // Future timestamp (started_at in the future -> elapsed < 0)
+    const futureStartedAt = baseTime.add(60, 'second').toISOString();
+    const res2 = calculateTaskEta('running', 5, 100, futureStartedAt, 5, baseTime);
+    assert.strictEqual(res2.isUnknown, true);
+    assert.strictEqual(res2.text, '未知');
+    assert.strictEqual(Number.isNaN(res2.etaSeconds), false);
+
+    // Huge numbers
+    const res3 = calculateTaskEta('running', 1, 1000000, baseTime.subtract(1, 'second').toISOString(), 0, baseTime);
+    assert.strictEqual(Number.isFinite(res3.etaSeconds), true);
+    assert.ok((res3.etaSeconds ?? 0) >= 0);
+  });
+
+  test('9. supports options object parameter convention', () => {
+    const startedAt = baseTime.subtract(60, 'second').toISOString();
+    const result = calculateTaskEta({
+      status: 'running',
+      current: 50,
+      total: 100,
+      startedAt,
+      percent: 50,
+      now: baseTime,
+    });
+    assert.strictEqual(result.isUnknown, false);
+    assert.strictEqual(result.etaSeconds, 60);
+    assert.strictEqual(result.text, '1m 0s');
   });
 });

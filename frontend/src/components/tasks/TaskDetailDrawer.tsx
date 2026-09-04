@@ -17,6 +17,7 @@ import { TaskProgress } from './TaskProgress';
 import { TaskLogTable } from './TaskLogTable';
 import { formatDateTime, formatElapsed } from '../../utils/format';
 import { sanitizeContext } from '../../utils/sanitize';
+import { calculateTaskEta } from './task_utils';
 
 const { Text } = Typography;
 
@@ -159,7 +160,12 @@ export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose }) => 
             </Descriptions.Item>
 
             <Descriptions.Item label="执行进度" span={2}>
-              <TaskProgress progress={task.progress} status={task.status} showDetails />
+              <TaskProgress
+                progress={task.progress}
+                status={task.status}
+                startedAt={task.started_at}
+                showDetails
+              />
             </Descriptions.Item>
 
             <Descriptions.Item label="创建时间">
@@ -174,8 +180,21 @@ export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose }) => 
             <Descriptions.Item label="最近心跳时间">
               {formatDateTime(task.heartbeat_at)}
             </Descriptions.Item>
-            <Descriptions.Item label="总执行耗时" span={2}>
+            <Descriptions.Item label="总执行耗时">
               <Text strong>{formatElapsed(task.started_at, task.finished_at)}</Text>
+            </Descriptions.Item>
+            <Descriptions.Item label="预计剩余 (ETA)">
+              <Text strong>
+                {
+                  calculateTaskEta(
+                    task.status,
+                    task.progress?.current,
+                    task.progress?.total,
+                    task.started_at,
+                    task.progress?.percent
+                  ).text
+                }
+              </Text>
             </Descriptions.Item>
           </Descriptions>
 

@@ -1,93 +1,119 @@
-# NAS File Center v0.3.3-step1-fixed10 验收报告与实现文档
+# NAS File Center v0.3.3-step2-fixed2 验收报告与实现文档
 
-## 1. 概述与核心问题
+## 1. Baseline（基线说明）
+- **Backend 基线**：`NAS File Center v0.3.3-step1-fixed10`（完全冻结，所有 Worker 租约、Fencing、Recovery、Checkpoint、Fclones Parser、IndexRoot 等核心逻辑零修改）。
+- **Frontend 基线**：`NAS File Center v0.3.3-step2-fixed1`。
+- **定位**：本轮为 `fixed2` 窄范围收敛修复，关闭独立 Review 发现的两个关键 Release Blocker。
 
-本轮迭代为 **NAS File Center v0.3.3-step1-fixed10**，作为 Task Engine Backend 最终 Gate 的窄范围收口。针对独立 Review 在 fixed9 中发现的关键 Release Blocker：
+## 2. 本轮 Review Blocker
+1. **BLOCKER-1**：`TASK-033-UI-02` 缺少任务预计剩余时间（ETA）的计算与渲染支持。
+2. **BLOCKER-2**：代码根目录及发布包归档中的 `walkthrough.md` 仍为 `v0.3.3-step1-fixed10` 的旧版文档，未能如实反映 step2 任务中心 UI 的实现现状。
 
-### 1.1 核心缺陷根因分析
-- **问题**：在 `TaskService` 的部分状态变更方法（如 `cancel_task()` 和 `retry_task()`）中，在进入 `atomic_task_transition`（即获取 SQLite writer lock `BEGIN IMMEDIATE`）之前，过早执行了 `now = utcnow()` 采样；
-- **时序竞争（Causality Inversion）**：当并发发生 Worker `claim_next_job`（取得 writer lock，写入 `started_at`）时，concurrent `cancel_task()` 因已在排队等待写锁前采集了 `now`，导致锁等待释放后写入的 `cancel_requested_at` 比 `started_at` 更早（真实观测曾出现约 -0.250s 的时钟倒流）；
-- **Retry 时序失真**：`retry_task()` 在等待 writer lock 排队期间，新生成的 `WorkJob.created_at` 同样使用了排队前的旧时间戳，不符合事务时间语义。
+## 3. ETA 根因分析
+在 `step2-fixed1` 中，Progress 区域仅包含了 `current / total` 计数、`percent` 百分比、`message` 状态描述以及父级的 `elapsed`（已耗时），未提供基于当前处理速率与剩余未完成量的动态 ETA 预估模型，导致长时间运行的任务缺乏直观的剩余完成时间感知。
 
-### 1.2 修复策略
-严格践行 **LOCK FIRST $\rightarrow$ CLOCK SECOND $\rightarrow$ VALIDATE THIRD $\rightarrow$ MUTATE FOURTH $\rightarrow$ COMMIT** 约束：
-1. **`atomic_task_transition` 统一提供事务时间**：
-   - 在 `session.execute(text("BEGIN IMMEDIATE"))` 取得互斥写锁后，立即采样 `transaction_now = utcnow()`；
-   - 通过函数签名适配将 `transaction_now` 作为参数传递给状态迁移回调函数 `transition_fn(session, job, transaction_now)`；
-2. **`cancel_task` 彻底移除锁外采样**：
-   - 彻底移除 `cancel_task()` 外层的 `now = utcnow()`；
-   - 在回调内使用由原子锁内注入的 `now` 设置 `job.finished_at = now`、`job.cancel_requested_at = now` 以及 `sync_scan_job_status(finished_at=now)`；
-   - `log_task_event` 同步使用 `timestamp=now`，确保事件与状态字段处于同一时钟基准；
-3. **`retry_task` 彻底移除锁外采样**：
-   - 彻底移除 `retry_task()` 外层的 `now = utcnow()`；
-   - 在回调内使用原子锁内注入的 `now` 设置 `new_job.created_at = now` 及相关重试事件时间；
-4. **`pause_task` 与 `resume_task` 统一规范**：
-   - `pause_task` 使用锁内 `now` 设置 `job.pause_requested_at = now`；
-   - `pause_task` 与 `resume_task` 触发的事件均使用锁内 `now`。
-5. **`log_task_event` 增强**：
-   - 新增可选参数 `timestamp: datetime | None = None`，默认为 `utcnow()`，允许事务内调用方显式传递事务级时间戳。
+## 4. ETA 设计与规则规范
+在 `frontend/src/components/tasks/task_utils.ts` 中封装纯函数 `calculateTaskEta`，遵循严格数学与业务状态机判定：
+1. **可计算条件**：
+   - 必须满足：`status == running`、`started_at` 有效且解析合法、`current > 0`、`total > 0`、`current < total` 且 `elapsedSeconds > 0`；
+   - 估算公式：`etaSeconds = Math.round(elapsedSeconds * (total - current) / current)`；
+   - 严格防护：防止 `NaN`、`Infinity`、负数、除 0、时间倒流及非法时间戳。
+2. **状态判定规则**：
+   - **Case 1（total 未知 / <= 0）**：返回 `text: '未知'`，`isUnknown: true`，严禁伪造百分比或默认假设总数；
+   - **Case 2（percent == null / indeterminate）**：返回 `text: '未知'`，保持与 Indeterminate Progress 一致；
+   - **Case 3（current == 0）**：速率样本不足，返回 `text: '未知'`；
+   - **Case 4（started_at 缺失或无效）**：返回 `text: '未知'`；
+   - **Case 5（running 且数据有效）**：调用 `formatDuration` 格式化为 `1m 20s`、`2h 15m` 等全站统一时长文本；
+   - **Case 6（completed 或 current >= total）**：确定性返回 `text: '已完成'` 或 `0s`，绝不保留历史估值；
+   - **Case 7（failed / cancelled）**：确定性返回 `text: '不可用'`，防止误导；
+   - **Case 8（paused / cancel_requested）**：确定性返回 `text: '已暂停'` 或 `text: '正在取消'`，停止倒计时。
+3. **UI 渲染**：
+   - `TaskProgress` 统一渲染 `ETA: {eta.text}`，并在 `running` 状态下结合父组件每秒本地 Ticker 平滑更新，无须高频发起网络 API 请求；
+   - `TaskDetailDrawer` 在进度组件及摘要列表中均明确展示 `预计剩余 (ETA)`。
 
----
+## 5. 修改文件清单
+### 生产代码文件：
+- [`frontend/src/components/tasks/task_utils.ts`](file:///Users/Kerwin/MyProject/nas-file-center/frontend/src/components/tasks/task_utils.ts)：实现 `calculateTaskEta` 纯函数与 `TaskEtaResult` / `TaskEtaOptions` 接口；
+- [`frontend/src/components/tasks/TaskProgress.tsx`](file:///Users/Kerwin/MyProject/nas-file-center/frontend/src/components/tasks/TaskProgress.tsx)：接入 ETA 展示并在各个状态分支确定性呈现；
+- [`frontend/src/pages/Tasks/index.tsx`](file:///Users/Kerwin/MyProject/nas-file-center/frontend/src/pages/Tasks/index.tsx)：列表行传递 `startedAt` 与当前本地时钟，支持 1s 平滑动态倒计时；
+- [`frontend/src/components/tasks/TaskDetailDrawer.tsx`](file:///Users/Kerwin/MyProject/nas-file-center/frontend/src/components/tasks/TaskDetailDrawer.tsx)：抽屉明细中传递 `startedAt` 并在 Descriptions 中显式渲染预计剩余时长。
 
-## 2. RED 失败复现与 GREEN 验证
+### 测试与文档文件：
+- [`frontend/tests/task_observability.test.ts`](file:///Users/Kerwin/MyProject/nas-file-center/frontend/tests/task_observability.test.ts)：新增 9 项针对 ETA 计算、状态分支与异常时间戳的单元测试；
+- [`walkthrough.md`](file:///Users/Kerwin/MyProject/nas-file-center/walkthrough.md)：彻底替换为 step2-fixed2 专属验收报告。
 
-### 2.1 RED 阶段复现证据（在 fixed9 原始代码上运行）
-在 `tests/test_fixed10_regressions.py` 中编写 3 组针对 SQLite writer lock contention 的回归测试：
-```text
-FAILED tests/test_fixed10_regressions.py::test_cancel_uses_post_lock_transaction_time
-- 报错: AssertionError: cancel_requested_at (2026-09-04 02:21:39.045859) was sampled before writer lock acquisition (2026-09-04 02:21:39.251227)
-- 证据: 证明 cancel_requested_at 在锁外被提前采集，落后锁获得时间达 205ms
+## 6. 未修改范围
+- **Backend 基线**：`v0.3.3-step1-fixed10` 零后端生产文件修改；
+- **数据库与配置**：DB models 零变动、Alembic migrations 零变动、API schemas 零变动；
+- **第三方依赖**：`package.json` 与 `package-lock.json` 零外部依赖引入（依赖增量 = 0）；
+- **Actions 隔离**：
+  - `TASK-033-UI-03` 尚未启用：Pause / Resume / Cancel / Retry 等操作按钮本阶段严格不开放交互触发，无假按钮；
+  - `TASK-033-UI-06` 尚未启用：Task History Cleanup 接口与按钮本阶段不开放交互。
 
-FAILED tests/test_fixed10_regressions.py::test_claim_then_waiting_cancel_preserves_timestamp_order
-- 报错: AssertionError: Causality inversion: cancel_requested_at (2026-09-04 02:21:39.302215) < started_at (2026-09-04 02:21:39.463175)
-- 证据: 明确复现了 Claim 先拿锁写入 started_at，等待锁的 Cancel 却写入了更早的 cancel_requested_at（倒流 161ms）
+## 7. Backend Regression
+在 Docker `python:3.12-slim` 纯净容器中执行全量测试：
+```bash
+docker run --rm --platform linux/amd64 -v $(pwd):/app -w /app python:3.12-slim bash -c "pip install -q -e . pytest pytest-asyncio httpx && PYTHONPATH=. pytest -q"
+```
+结果：**225 passed in 100%**, 0 failed, 0 skipped。
 
-FAILED tests/test_fixed10_regressions.py::test_retry_uses_post_lock_transaction_time
-- 报错: AssertionError: retry job created_at (2026-09-04 02:21:39.554561) was sampled before writer lock acquisition (2026-09-04 02:21:39.756961)
-- 证据: 证明 retry 新任务 created_at 同样落后锁获得时间达 202ms
+## 8. Frontend Tests
+执行 `npm test`（通过 Node 22 内置轻量测试执行器运行）：
+```
+TAP version 13
+# Subtest: Task Progress & Indeterminate Percentages (5 tests passed)
+# Subtest: Task Status Tags & Mappings (1 test passed)
+# Subtest: Capabilities Verification (2 tests passed)
+# Subtest: Worker Status Health Mappings (2 tests passed)
+# Subtest: Sensitive Information Redaction (Sanitization) (3 tests passed)
+# Subtest: Duration & Elapsed Time Formatting (2 tests passed)
+# Subtest: Tasks API Client Query Parameters & Contract (4 tests passed)
+# Subtest: Task ETA Estimation & Deterministic Rules (9 tests passed)
+--------------------------------------------------
+tests: 28, suites: 8, pass: 28, fail: 0 (duration: 60ms)
 ```
 
-### 2.2 GREEN 修复后验证
-```text
-tests/test_fixed10_regressions.py ...                                    [100%]
-3 passed in 0.92s
+## 9. Typecheck
+执行 `npm run typecheck` (`tsc --noEmit`)：
+```
+exit code 0, 0 errors
 ```
 
-### 2.3 组合回归与全量测试套件结果
-- **fixed9 + fixed10 回归**：9 passed in 1.56s
-- **fixed1 ~ fixed10 全量 fixed 回归套件**：72 passed in 8.84s
-- **仓库全量自动化测试套件**：
-```text
-collected 225 items
-225 passed in 35.12s
+## 10. Production Build
+执行 `npm run build` (`tsc && vite build`)：
 ```
-测试总数由 fixed9 的 222 项增加到 **225 项，全部通过（100% GREEN）**，零失败！
+✓ 3702 modules transformed.
+dist/index.html                            1.08 kB
+dist/assets/index-D5H4csqw.js            128.83 kB
+dist/assets/vendor-antd-D1t7_DvI.js    1,048.21 kB
+✓ built in 3.41s
+```
 
----
+## 11. Docker Build
+构建 `linux/amd64` 生产镜像：
+```bash
+docker build --platform linux/amd64 -t kerwinjhc/nas-file-center:0.3.3-step2-fixed2 .
+```
+结果：多阶段构建成功完成，前端构建产物正确复制至 `/app/frontend/dist`。
 
-## 3. 前端与容器构建验证
+## 12. Docker Smoke
+启动临时容器验证：
+- `GET /health` 返回 `200 OK`（`status: ok`, `allow_mutation: false`, `allow_delete: false`）；
+- `GET /tasks` 返回 `200 OK`，正确定位并返回带有生产 SPA JS/CSS 的 HTML 入口。
 
-1. **前端类型检查与生产构建**：
-   - `npm ci && npm run typecheck && npm run build`
-   - TypeScript 0 错误，Vite 构建产物成功输出。
-2. **生产镜像多架构构建**：
-   - `docker build --platform linux/amd64 -t kerwinjhc/nas-file-center:0.3.3-step1-fixed10 .`
-   - 镜像构建成功。
-3. **Docker 容器 Smoke 测试**：
-   - API 容器启动并响应 `/health` 返回 `{"status":"ok", ...}`；
-   - Worker 容器启动并成功加载模块。
-4. **数据库迁移与完整性检查**：
-   - 运行历史版本迁移测试通过；
-   - 执行 `PRAGMA integrity_check` 输出 `ok`。
+## 13. Security Impact
+- 递归脱敏器（`sanitizeContext`）持续保护所有敏感 Key（`password`、`token`、`secret`、`authorization`、`cookie`、`session` 等），将其值重写为 `***REDACTED***`；
+- 全量检索禁用关键词：`grep -Rni -E '少女映画|shaonv' .` 结果为 0 条。
 
----
+## 14. File Mutation Impact
+零文件修改风险。本阶段所有 Task 与 Worker 查询均为只读操作，不向 NAS 文件系统发送任何写操作。
 
-## 4. 交付文件与合规性
+## 15. Delete Impact
+`ALLOW_DELETE=false` 保持锁定，无任何删除行为。
 
-1. **安全配置默认值**：
-   - 保持 `ALLOW_MUTATION=false`, `ALLOW_DELETE=false`, `PROTECT_LAST_FILE=true`。
-2. **敏感词合规扫描**：
-   - 运行全量文本扫描，确认全库业务敏感词匹配为 0。
-3. **独立临时容器解压复测**：
-   - 打包生成 `nas-file-center-v0.3.3-step1-fixed10.zip`，排除了 `.git`, `node_modules`, `dist`, `__pycache__`, `.pytest_cache`, `.DS_Store` 等无关文件；
-   - 在全新临时容器内解压并复测全量 pytest 套件（225 项全部通过）及 `PRAGMA integrity_check = ok`。
+## 16. Known Limitations
+- 本阶段聚焦于任务中心只读可观测性（列表、状态、进度、ETA、Worker 心跳、详情、脱敏日志）；
+- 任务控制操作（`TASK-033-UI-03`：Pause/Resume/Cancel/Retry）与历史清理操作（`TASK-033-UI-06`）留待后续能力驱动阶段开放。
+
+## 17. Release Decision
+**PASS**：全部 225 个后端测试通过，前端 28 个测试通过，TypeScript 0 errors，生产构建成功，Docker amd64 验证与 Smoke 均通过，两个 Review Blocker 彻底关闭。

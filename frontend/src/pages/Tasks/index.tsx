@@ -110,7 +110,12 @@ export const TasksPage: React.FC = () => {
       key: 'progress',
       width: 220,
       render: (_: unknown, record: TaskItem) => (
-        <TaskProgress progress={record.progress} status={record.status} />
+        <TaskProgress
+          progress={record.progress}
+          status={record.status}
+          startedAt={record.started_at}
+          now={currentTime}
+        />
       ),
     },
     {
