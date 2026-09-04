@@ -83,7 +83,7 @@ class IndexRootHandler(TaskHandler):
         # Checkpoint before starting
         context.checkpoint(
             progress_current=0,
-            progress_total=1,
+            progress_total=None,
             progress_message="Starting root reindex...",
             checkpoint_data={"schema_version": 1, "phase": "starting"},
         )
@@ -95,10 +95,11 @@ class IndexRootHandler(TaskHandler):
                 from app.tasks.recovery import assert_active_worker_lease
                 assert_active_worker_lease(session, context.worker_id, now=utcnow())
 
-        def on_batch(current, total):
+        def on_batch(current: int, total: int | None = None):
+            effective_total = total if (total is not None and total > 0) else None
             context.checkpoint(
                 progress_current=current,
-                progress_total=total,
+                progress_total=effective_total,
                 progress_message=f"Indexing {current} items...",
             )
 

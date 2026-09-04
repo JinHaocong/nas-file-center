@@ -351,7 +351,7 @@ class FileCenterService:
                 session.commit()
             batch = []
             if checkpoint_callback is not None:
-                checkpoint_callback(files + folders, 0)
+                checkpoint_callback(files + folders, None)
 
         for entry in iter_root(safe_root, self.settings.allowed_roots, root_key=root_key):
             now = utcnow()
