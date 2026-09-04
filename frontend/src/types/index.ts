@@ -32,6 +32,9 @@ export interface DashboardSummary {
   duplicate_group_count: number;
   queued_or_running_jobs: number;
   latest_reclaimable_bytes: number;
+  latest_scan_id?: number | null;
+  latest_scan_name?: string | null;
+  latest_scan_finished_at?: string | null;
 }
 
 export interface IndexRoot {
@@ -50,6 +53,7 @@ export interface ScanJob {
   total_groups: number;
   total_files_in_groups: number;
   reclaimable_bytes: number;
+  has_dependent_plan?: boolean;
   error?: string | null;
   created_at: string;
   started_at?: string | null;

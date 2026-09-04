@@ -39,6 +39,7 @@ export const scansApi = {
       relative_path_priority_patterns?: string[] | null;
     }
   ) => api.post<{ id: number; status: string; expected_changes: number }>(`/api/scans/${scanId}/dedupe-plan`, payload),
+  deleteScan: (id: number) => api.delete<{ deleted: boolean; id: number }>(`/api/scans/${id}`),
 };
 
 export const indexesApi = {

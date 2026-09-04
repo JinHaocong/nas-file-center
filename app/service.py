@@ -34,6 +34,7 @@ from app.models import (
     FavoritePath,
     IndexedPath,
     OrganizerProfile,
+    Plan,
     RecentPath,
     ScanJob,
     WorkJob,
@@ -70,6 +71,20 @@ class FileCenterService:
         self.task_service = TaskService(self.SessionLocal)
         self._preview_snapshots: dict[str, dict[str, Any]] = {}
 
+    def _check_scan_has_dependent_plan(self, session: Session, scan_job_id: int) -> bool:
+        legacy_count = session.scalar(
+            select(func.count(Plan.id)).where(Plan.scan_job_id == scan_job_id)
+        ) or 0
+        if legacy_count > 0:
+            return True
+
+        batch_count = session.scalar(
+            select(func.count(BatchPlan.id)).where(
+                func.json_extract(BatchPlan.metadata_json, "$.scan_job_id") == scan_job_id
+            )
+        ) or 0
+        return batch_count > 0
+
     def dashboard_summary(self) -> dict:
         with self.SessionLocal() as session:
             latest_completed = session.scalar(
@@ -80,11 +95,18 @@ class FileCenterService:
                 "indexed_folders": session.scalar(select(func.count(IndexedPath.id)).where(IndexedPath.is_dir.is_(True))) or 0,
                 "scan_count": session.scalar(select(func.count(ScanJob.id))) or 0,
                 "plan_count": session.scalar(select(func.count(BatchPlan.id))) or 0,
-                "duplicate_group_count": session.scalar(select(func.count(DuplicateGroup.id))) or 0,
+                "duplicate_group_count": latest_completed.total_groups if latest_completed else 0,
+                "latest_reclaimable_bytes": latest_completed.reclaimable_bytes if latest_completed else 0,
+                "latest_scan_id": latest_completed.id if latest_completed else None,
+                "latest_scan_name": latest_completed.name if latest_completed else None,
+                "latest_scan_finished_at": (
+                    latest_completed.finished_at.isoformat()
+                    if latest_completed and latest_completed.finished_at
+                    else None
+                ),
                 "queued_or_running_jobs": session.scalar(
                     select(func.count(WorkJob.id)).where(WorkJob.status.in_(["queued", "running"]))
                 ) or 0,
-                "latest_reclaimable_bytes": latest_completed.reclaimable_bytes if latest_completed else 0,
             }
 
     def list_scans(self, *, page: int = 1, page_size: int = 20, limit: int | None = None) -> dict:
@@ -96,6 +118,24 @@ class FileCenterService:
         with self.SessionLocal() as session:
             total = session.scalar(select(func.count(ScanJob.id))) or 0
             rows = list(session.scalars(select(ScanJob).order_by(ScanJob.id.desc()).limit(page_size).offset(offset)))
+
+            scan_ids = [row.id for row in rows]
+            all_dep_ids: set[int] = set()
+            if scan_ids:
+                legacy_dep = set(session.scalars(
+                    select(Plan.scan_job_id).where(Plan.scan_job_id.in_(scan_ids))
+                ))
+                batch_dep_raw = set(session.scalars(
+                    select(func.json_extract(BatchPlan.metadata_json, "$.scan_job_id"))
+                    .where(func.json_extract(BatchPlan.metadata_json, "$.scan_job_id").in_(scan_ids))
+                ))
+                for x in legacy_dep | batch_dep_raw:
+                    if x is not None:
+                        try:
+                            all_dep_ids.add(int(x))
+                        except (ValueError, TypeError):
+                            pass
+
             items = [{
                 "id": row.id,
                 "name": row.name,
@@ -105,6 +145,7 @@ class FileCenterService:
                 "total_groups": row.total_groups,
                 "total_files_in_groups": row.total_files_in_groups,
                 "reclaimable_bytes": row.reclaimable_bytes,
+                "has_dependent_plan": row.id in all_dep_ids,
                 "error": row.error_text,
                 "created_at": row.created_at,
                 "started_at": row.started_at,
@@ -538,11 +579,32 @@ class FileCenterService:
                 "total_files_in_groups": scan.total_files_in_groups,
                 "reclaimable_bytes": scan.reclaimable_bytes,
                 "raw_report_path": scan.raw_report_path,
+                "has_dependent_plan": self._check_scan_has_dependent_plan(session, scan.id),
                 "error": scan.error_text,
                 "created_at": scan.created_at,
                 "started_at": scan.started_at,
                 "finished_at": scan.finished_at,
             }
+
+    def delete_scan(self, scan_job_id: int) -> dict:
+        terminal_states = {"completed", "failed", "cancelled"}
+        with self.SessionLocal() as session:
+            scan = session.get(ScanJob, scan_job_id)
+            if scan is None:
+                raise KeyError(scan_job_id)
+
+            if scan.status not in terminal_states:
+                raise ValueError(f"Only terminal scans can be deleted (current status is '{scan.status}')")
+
+            if self._check_scan_has_dependent_plan(session, scan_job_id):
+                raise ValueError("该扫描已生成关联计划，请先处理相关计划后再删除扫描记录。")
+
+            group_ids_subq = select(DuplicateGroup.id).where(DuplicateGroup.scan_job_id == scan_job_id)
+            session.execute(delete(DuplicateFile).where(DuplicateFile.group_id.in_(group_ids_subq)))
+            session.execute(delete(DuplicateGroup).where(DuplicateGroup.scan_job_id == scan_job_id))
+            session.delete(scan)
+            session.commit()
+            return {"deleted": True, "id": scan_job_id}
 
     def create_dedupe_plan(
         self,

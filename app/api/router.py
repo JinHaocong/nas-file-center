@@ -332,6 +332,17 @@ def create_dedupe_plan(request: Request, scan_job_id: int, payload: DedupePlanRe
         raise HTTPException(409, str(exc)) from exc
 
 
+@router.delete("/scans/{scan_job_id}")
+def delete_scan(request: Request, scan_job_id: int):
+    try:
+        return request.app.state.service.delete_scan(scan_job_id)
+    except KeyError as exc:
+        raise HTTPException(404, "Scan not found") from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+
 # =========================================================================
 # Task Engine Endpoints (TASK-033)
 # =========================================================================

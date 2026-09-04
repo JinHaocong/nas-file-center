@@ -11,6 +11,7 @@ import {
   Alert,
   Spin,
   Tooltip,
+  message,
 } from 'antd';
 import {
   ArrowLeftOutlined,
@@ -18,13 +19,14 @@ import {
   ScheduleOutlined,
   CheckCircleOutlined,
 } from '@ant-design/icons';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { scansApi } from '../../api/domain';
 import { useTitle } from '../../hooks/useTitle';
 import { formatBytes, formatDateTime } from '../../utils/format';
 import { STATUS_MAP } from '../../utils/constants';
 import { DedupePlanModal } from './DedupePlanModal';
 import { DuplicateGroup } from '../../types';
+import { ScanDeleteButton } from '../../components/scans/ScanDeleteButton';
 
 const { Title, Text } = Typography;
 
@@ -32,11 +34,26 @@ export const ScanDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const scanId = Number(id);
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   useTitle(`扫描详情 #${scanId}`);
 
   const [planModalOpen, setPlanModalOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+
+  const deleteScanMutation = useMutation({
+    mutationFn: () => scansApi.deleteScan(scanId),
+    onSuccess: () => {
+      message.success(`扫描 #${scanId} 已成功删除`);
+      queryClient.invalidateQueries({ queryKey: ['scansList'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboardSummary'] });
+      navigate('/scans');
+    },
+    onError: (err: any) => {
+      message.error(err.message || '删除扫描失败');
+    },
+  });
+
 
   const { data: scan, isLoading: scanLoading, refetch: refetchScan } = useQuery({
     queryKey: ['scanDetail', scanId],
@@ -172,11 +189,23 @@ export const ScanDetailPage: React.FC = () => {
           <Tag color={statusConfig.color} style={{ fontSize: 13, padding: '2px 8px' }}>
             {statusConfig.label}
           </Tag>
+          {scan.has_dependent_plan && (
+            <Tag color="gold" style={{ fontSize: 13, padding: '2px 8px' }}>
+              已生成关联计划
+            </Tag>
+          )}
         </Space>
         <Space>
           <Button icon={<ReloadOutlined />} onClick={() => { refetchScan(); refetchGroups(); }}>
             刷新
           </Button>
+          <ScanDeleteButton
+            scan={scan}
+            onDelete={() => deleteScanMutation.mutate()}
+            loading={deleteScanMutation.isPending}
+            buttonText="删除扫描"
+            type="default"
+          />
           {scan.status === 'completed' && scan.total_groups > 0 && (
             <Button type="primary" icon={<ScheduleOutlined />} onClick={() => setPlanModalOpen(true)}>
               生成去重计划

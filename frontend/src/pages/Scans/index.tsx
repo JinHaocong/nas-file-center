@@ -21,6 +21,7 @@ import { formatBytes, formatDateTime } from '../../utils/format';
 import { STATUS_MAP } from '../../utils/constants';
 
 import { DirectoryPicker } from '../../components/DirectoryPicker';
+import { ScanDeleteButton } from '../../components/scans/ScanDeleteButton';
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
@@ -34,6 +35,7 @@ export const ScansPage: React.FC = () => {
 
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['scansList', page, pageSize],
@@ -44,6 +46,26 @@ export const ScansPage: React.FC = () => {
       return hasActive ? 3000 : false;
     },
   });
+
+  const deleteScanMutation = useMutation({
+    mutationFn: (id: number) => scansApi.deleteScan(id),
+    onMutate: (id) => setDeletingId(id),
+    onSuccess: (_, id) => {
+      message.success(`扫描 #${id} 已安全删除`);
+      queryClient.invalidateQueries({ queryKey: ['scansList'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboardSummary'] });
+      if (data?.items?.length === 1 && page > 1) {
+        setPage((prev) => prev - 1);
+      }
+    },
+    onError: (err: any) => {
+      message.error(err.message || '删除扫描失败');
+    },
+    onSettled: () => {
+      setDeletingId(null);
+    },
+  });
+
 
   const createScanMutation = useMutation({
     mutationFn: (values: any) => {
@@ -144,9 +166,16 @@ export const ScansPage: React.FC = () => {
       title: '操作',
       key: 'action',
       render: (_: any, record: any) => (
-        <Button size="small" type="link" onClick={() => navigate(`/scans/${record.id}`)}>
-          查看详情
-        </Button>
+        <Space size="small">
+          <Button size="small" type="link" onClick={() => navigate(`/scans/${record.id}`)}>
+            查看详情
+          </Button>
+          <ScanDeleteButton
+            scan={record}
+            onDelete={() => deleteScanMutation.mutate(record.id)}
+            loading={deletingId === record.id}
+          />
+        </Space>
       ),
     },
   ];

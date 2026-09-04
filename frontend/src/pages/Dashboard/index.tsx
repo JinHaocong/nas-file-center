@@ -1,5 +1,5 @@
 import React from 'react';
-import { Row, Col, Card, Statistic, Table, Tag, Typography, Button, Space, Empty } from 'antd';
+import { Row, Col, Card, Statistic, Table, Tag, Typography, Button, Space, Empty, Alert } from 'antd';
 import {
   FileTextOutlined,
   ScanOutlined,
@@ -77,7 +77,7 @@ export const DashboardPage: React.FC = () => {
         data: [
           { value: summary?.indexed_files || 0, name: '索引文件数', itemStyle: { color: '#1677ff' } },
           { value: summary?.indexed_folders || 0, name: '索引目录数', itemStyle: { color: '#52c41a' } },
-          { value: summary?.duplicate_group_count || 0, name: '重复组数', itemStyle: { color: '#fa8c16' } },
+          { value: summary?.duplicate_group_count || 0, name: '最新扫描重复组', itemStyle: { color: '#fa8c16' } },
           { value: summary?.plan_count || 0, name: '批处理计划', itemStyle: { color: '#722ed1' } },
         ],
       },
@@ -181,6 +181,16 @@ export const DashboardPage: React.FC = () => {
         </Button>
       </div>
 
+      {/* Snapshot Semantics Notice */}
+      <Alert
+        type="info"
+        showIcon
+        message="扫描快照时效说明"
+        description="系统概览中的重复组与可释放空间基于最近一次已完成扫描任务的快照结果；如需获取最新 NAS 去重状态，请前往扫描页面发起新任务。"
+        style={{ marginBottom: 16, borderRadius: 10 }}
+        closable
+      />
+
       {/* Statistics Cards */}
       <Row gutter={[16, 16]}>
         <Col xs={24} sm={12} lg={6}>
@@ -191,25 +201,45 @@ export const DashboardPage: React.FC = () => {
               suffix={`/ ${summary?.indexed_folders || 0}`}
               prefix={<FileTextOutlined style={{ color: '#1677ff' }} />}
             />
+            <div style={{ marginTop: 6 }}>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                已构建元数据索引库
+              </Text>
+            </div>
           </Card>
         </Col>
         <Col xs={24} sm={12} lg={6}>
           <Card bordered={false} style={{ borderRadius: 12 }}>
             <Statistic
-              title="发现重复组数"
-              value={summary?.duplicate_group_count || 0}
+              title="最近一次扫描发现"
+              value={summary?.latest_scan_id ? (summary?.duplicate_group_count || 0) : '—'}
+              suffix={summary?.latest_scan_id ? '组' : undefined}
               prefix={<ScanOutlined style={{ color: '#fa8c16' }} />}
             />
+            <div style={{ marginTop: 6 }}>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {summary?.latest_scan_id
+                  ? `基于: ${summary.latest_scan_name || `扫描 #${summary.latest_scan_id}`} (${summary.latest_scan_finished_at ? formatDateTime(summary.latest_scan_finished_at) : '已完成'})`
+                  : '暂无已完成扫描'}
+              </Text>
+            </div>
           </Card>
         </Col>
         <Col xs={24} sm={12} lg={6}>
           <Card bordered={false} style={{ borderRadius: 12 }}>
             <Statistic
-              title="最新预计可释放空间"
-              value={formatBytes(summary?.latest_reclaimable_bytes || 0)}
+              title="最近一次扫描预计可释放"
+              value={summary?.latest_scan_id ? formatBytes(summary?.latest_reclaimable_bytes || 0) : '—'}
               prefix={<DeleteOutlined style={{ color: '#52c41a' }} />}
-              valueStyle={{ color: '#52c41a' }}
+              valueStyle={{ color: summary?.latest_scan_id ? '#52c41a' : undefined }}
             />
+            <div style={{ marginTop: 6 }}>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {summary?.latest_scan_id
+                  ? '单次扫描潜在释放量快照'
+                  : '暂无已完成扫描'}
+              </Text>
+            </div>
           </Card>
         </Col>
         <Col xs={24} sm={12} lg={6}>
@@ -219,6 +249,11 @@ export const DashboardPage: React.FC = () => {
               value={summary?.plan_count || 0}
               prefix={<ScheduleOutlined style={{ color: '#722ed1' }} />}
             />
+            <div style={{ marginTop: 6 }}>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                去重与整理执行计划
+              </Text>
+            </div>
           </Card>
         </Col>
       </Row>
@@ -227,7 +262,7 @@ export const DashboardPage: React.FC = () => {
       <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
         <Col xs={24} lg={12}>
           <Card
-            title="数据构成统计"
+            title="系统数据概览"
             bordered={false}
             style={{ borderRadius: 12, minHeight: 340 }}
           >
