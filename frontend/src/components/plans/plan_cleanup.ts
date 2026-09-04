@@ -89,3 +89,40 @@ export function formatLegacyAlertDescription(summary: {
 export const LEGACY_CLEANUP_CONFIRM_DESCRIPTION =
   '该操作仅删除旧版 Plan / PlanItem 元数据。不会删除当前 BatchPlan / BatchPlanItem、Scan 记录、Task / WorkJob、Audit 审计记录或 NAS 上的真实文件。清理后会移除 legacy Plan 对 Scan 的依赖；如果 Scan 仍关联当前 BatchPlan，其删除限制不会解除。';
 
+export function isPlanNotFoundError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+  const err = error as { status?: number; response?: { status?: number } };
+  return err.status === 404 || err.response?.status === 404;
+}
+
+export type PlanDetailRenderState =
+  | 'loading'
+  | 'not-found'
+  | 'error'
+  | 'empty'
+  | 'ready';
+
+export function getPlanDetailRenderState(params: {
+  isLoading: boolean;
+  isError: boolean;
+  error: unknown;
+  hasPlan: boolean;
+}): PlanDetailRenderState {
+  if (params.isLoading) {
+    return 'loading';
+  }
+  if (params.isError && isPlanNotFoundError(params.error)) {
+    return 'not-found';
+  }
+  if (params.isError) {
+    return 'error';
+  }
+  if (!params.hasPlan) {
+    return 'empty';
+  }
+  return 'ready';
+}
+
+

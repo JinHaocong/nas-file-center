@@ -29,7 +29,10 @@ import { formatBytes, formatDateTime } from '../../utils/format';
 import { STATUS_MAP } from '../../utils/constants';
 import { PlanItem } from '../../types';
 import { PlanDeleteButton } from '../../components/plans/PlanDeleteButton';
-import { invalidatePlanDeleteFailure } from '../../components/plans/plan_cleanup';
+import {
+  invalidatePlanDeleteFailure,
+  getPlanDetailRenderState,
+} from '../../components/plans/plan_cleanup';
 
 const { Title, Text } = Typography;
 
@@ -48,7 +51,13 @@ export const PlanDetailPage: React.FC = () => {
     queryFn: () => settingsApi.getSettings(),
   });
 
-  const { data: plan, isLoading, refetch } = useQuery({
+  const {
+    data: plan,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useQuery({
     queryKey: ['planDetail', planId, page, pageSize],
     queryFn: () => plansApi.getPlanDetail(planId, page, pageSize),
   });
@@ -105,7 +114,14 @@ export const PlanDetailPage: React.FC = () => {
     },
   });
 
-  if (isLoading) {
+  const renderState = getPlanDetailRenderState({
+    isLoading,
+    isError,
+    error,
+    hasPlan: !!plan,
+  });
+
+  if (renderState === 'loading') {
     return (
       <div style={{ textAlign: 'center', padding: 60 }}>
         <Spin size="large" />
@@ -113,7 +129,7 @@ export const PlanDetailPage: React.FC = () => {
     );
   }
 
-  if (!plan) {
+  if (renderState === 'not-found' || renderState === 'empty' || !plan) {
     return (
       <Alert
         message="计划不存在"
@@ -121,6 +137,20 @@ export const PlanDetailPage: React.FC = () => {
         type="error"
         showIcon
         action={<Button onClick={() => navigate('/plans')}>返回计划列表</Button>}
+      />
+    );
+  }
+
+  if (renderState === 'error') {
+    return (
+      <Alert
+        message="加载计划失败"
+        description={
+          (error as any)?.message || '获取计划详情失败，请检查网络或稍后重试'
+        }
+        type="error"
+        showIcon
+        action={<Button onClick={() => refetch()}>重试</Button>}
       />
     );
   }

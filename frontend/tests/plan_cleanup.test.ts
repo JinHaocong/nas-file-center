@@ -4,6 +4,8 @@ import {
   getPlanDeleteAvailability,
   getPlanDeleteConfirmationContent,
   invalidatePlanDeleteFailure,
+  isPlanNotFoundError,
+  getPlanDetailRenderState,
 } from '../src/components/plans/plan_cleanup';
 import { plansApi } from '../src/api/domain';
 import { api } from '../src/api/client';
@@ -169,6 +171,79 @@ describe('Plan Lifecycle Cleanup: Policy Matrix & API Contract Tests', () => {
 
       assert.ok(hasPlansList, 'Must invalidate plansList query key');
       assert.ok(hasPlanDetailWithId || hasPlanDetailPrefix, 'Must invalidate planDetail query key');
+    });
+  });
+
+  describe('Plan Detail 404 & Error State Priority Tests (Stale Cache Prevention)', () => {
+    test('isPlanNotFoundError accurately detects 404 status from ApiError or response', () => {
+      assert.strictEqual(isPlanNotFoundError({ status: 404, message: 'Not found' }), true);
+      assert.strictEqual(isPlanNotFoundError({ response: { status: 404 } }), true);
+      assert.strictEqual(isPlanNotFoundError({ status: 500, message: 'Server error' }), false);
+      assert.strictEqual(isPlanNotFoundError({ status: 409, message: 'Conflict' }), false);
+      assert.strictEqual(isPlanNotFoundError({ status: 403, message: 'Forbidden' }), false);
+      assert.strictEqual(isPlanNotFoundError(null), false);
+      assert.strictEqual(isPlanNotFoundError(undefined), false);
+      assert.strictEqual(isPlanNotFoundError('404'), false);
+    });
+
+    test('Case A: no cache + 404 returns not-found', () => {
+      const state = getPlanDetailRenderState({
+        isLoading: false,
+        isError: true,
+        error: { status: 404, message: 'Plan not found' },
+        hasPlan: false,
+      });
+      assert.strictEqual(state, 'not-found');
+    });
+
+    test('Case B: stale cache exists + 404 returns not-found (404 truth overrides stale data)', () => {
+      const state = getPlanDetailRenderState({
+        isLoading: false,
+        isError: true,
+        error: { status: 404, message: 'Plan not found' },
+        hasPlan: true, // Stale cached plan in TanStack Query
+      });
+      assert.strictEqual(state, 'not-found', '404 backend truth must override stale cached plan data');
+    });
+
+    test('Case C: stale cache exists + 500 returns error (latest backend error overrides stale data)', () => {
+      const state = getPlanDetailRenderState({
+        isLoading: false,
+        isError: true,
+        error: { status: 500, message: 'Internal Server Error' },
+        hasPlan: true,
+      });
+      assert.strictEqual(state, 'error', 'Latest server error must override stale cached plan data');
+    });
+
+    test('Case D: plan exists + no error returns ready', () => {
+      const state = getPlanDetailRenderState({
+        isLoading: false,
+        isError: false,
+        error: null,
+        hasPlan: true,
+      });
+      assert.strictEqual(state, 'ready');
+    });
+
+    test('Case E: isLoading returns loading regardless of cached data or error', () => {
+      const state = getPlanDetailRenderState({
+        isLoading: true,
+        isError: false,
+        error: null,
+        hasPlan: true,
+      });
+      assert.strictEqual(state, 'loading');
+    });
+
+    test('Case F: no plan + no error returns empty', () => {
+      const state = getPlanDetailRenderState({
+        isLoading: false,
+        isError: false,
+        error: null,
+        hasPlan: false,
+      });
+      assert.strictEqual(state, 'empty');
     });
   });
 });
