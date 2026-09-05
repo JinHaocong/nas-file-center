@@ -147,39 +147,36 @@ describe('Gate4 Quarantine, Restore, Purge & Undo Plan Contract Tests', () => {
   });
 
   describe('PurgeConfirmModal Matrix & Double-guard Protection', () => {
-    test('PurgeConfirmModal requires exact uppercase DELETE', () => {
-      const resLower = getQuarantinePurgeAvailability(true, true, 'delete');
-      assert.strictEqual(resLower.canPurge, false);
-      assert.match(resLower.reason || '', /DELETE/);
+    test('Purge capability matrix: admin, allowMutation, allowDelete, confirmationInput', () => {
+      // 1. All true + DELETE -> enabled
+      const resEnabled = getQuarantinePurgeAvailability(true, true, true, 'DELETE');
+      assert.strictEqual(resEnabled.canPurge, true);
+      assert.strictEqual(resEnabled.reason, undefined);
 
-      const resMixed = getQuarantinePurgeAvailability(true, true, 'Delete');
-      assert.strictEqual(resMixed.canPurge, false);
+      // 2. Read-only mode (ALLOW_MUTATION=false) -> disabled
+      const resSafe = getQuarantinePurgeAvailability(true, true, false, 'DELETE');
+      assert.strictEqual(resSafe.canPurge, false);
+      assert.match(resSafe.reason || '', /ALLOW_MUTATION=false|只读/);
 
-      const resEmpty = getQuarantinePurgeAvailability(true, true, '');
-      assert.strictEqual(resEmpty.canPurge, false);
-
-      // Trailing, leading, internal whitespace or newlines must be rejected
-      assert.strictEqual(getQuarantinePurgeAvailability(true, true, 'DELETE ').canPurge, false);
-      assert.strictEqual(getQuarantinePurgeAvailability(true, true, ' DELETE').canPurge, false);
-      assert.strictEqual(getQuarantinePurgeAvailability(true, true, '  DELETE  ').canPurge, false);
-      assert.strictEqual(getQuarantinePurgeAvailability(true, true, 'DELETE\n').canPurge, false);
-      assert.strictEqual(getQuarantinePurgeAvailability(true, true, 'DELETE\t').canPurge, false);
-
-      const resValid = getQuarantinePurgeAvailability(true, true, 'DELETE');
-      assert.strictEqual(resValid.canPurge, true);
-      assert.strictEqual(resValid.reason, undefined);
-    });
-
-    test('PurgeConfirmModal blocks non-admin users', () => {
-      const resNonAdmin = getQuarantinePurgeAvailability(false, true, 'DELETE');
-      assert.strictEqual(resNonAdmin.canPurge, false);
-      assert.match(resNonAdmin.reason || '', /管理员/);
-    });
-
-    test('PurgeConfirmModal blocks when ALLOW_DELETE=false', () => {
-      const resNoDelete = getQuarantinePurgeAvailability(true, false, 'DELETE');
+      // 3. Delete disabled (ALLOW_DELETE=false) -> disabled
+      const resNoDelete = getQuarantinePurgeAvailability(true, false, true, 'DELETE');
       assert.strictEqual(resNoDelete.canPurge, false);
       assert.match(resNoDelete.reason || '', /ALLOW_DELETE=false/);
+
+      // 4. Non-admin -> disabled
+      const resNonAdmin = getQuarantinePurgeAvailability(false, true, true, 'DELETE');
+      assert.strictEqual(resNonAdmin.canPurge, false);
+      assert.match(resNonAdmin.reason || '', /管理员/);
+
+      // 5. Wrong token -> disabled
+      assert.strictEqual(getQuarantinePurgeAvailability(true, true, true, 'delete').canPurge, false);
+      assert.strictEqual(getQuarantinePurgeAvailability(true, true, true, 'Delete').canPurge, false);
+      assert.strictEqual(getQuarantinePurgeAvailability(true, true, true, '').canPurge, false);
+      assert.strictEqual(getQuarantinePurgeAvailability(true, true, true, 'DELETE ').canPurge, false);
+      assert.strictEqual(getQuarantinePurgeAvailability(true, true, true, ' DELETE').canPurge, false);
+      assert.strictEqual(getQuarantinePurgeAvailability(true, true, true, '  DELETE  ').canPurge, false);
+      assert.strictEqual(getQuarantinePurgeAvailability(true, true, true, 'DELETE\n').canPurge, false);
+      assert.strictEqual(getQuarantinePurgeAvailability(true, true, true, 'DELETE\t').canPurge, false);
     });
 
     test('quarantineApi.purge sends DELETE confirmation payload', async () => {
@@ -271,20 +268,36 @@ describe('Gate4 Quarantine, Restore, Purge & Undo Plan Contract Tests', () => {
   });
 
   describe('Undo Plan Flow & Policy Matrix', () => {
-    test('PlanDetail Create Undo Plan button appears only for completed or partial plans with operations', () => {
-      // Completed plan with journal items -> allowed
-      assert.strictEqual(canCreateUndoPlan({ status: 'completed', expected_changes: 5 }, 5), true);
-      assert.strictEqual(canCreateUndoPlan({ status: 'completed', expected_changes: 5 }, 0), true);
+    test('PlanDetail Create Undo Plan button appears only for completed or partial plans with real operations', () => {
+      // completed + journalTotal=1 -> true
+      assert.strictEqual(canCreateUndoPlan({ status: 'completed' }, 1), true);
 
-      // Partial plan with journal items -> allowed
-      assert.strictEqual(canCreateUndoPlan({ status: 'partial', expected_changes: 10 }, 4), true);
+      // partial + journalTotal=1 -> true
+      assert.strictEqual(canCreateUndoPlan({ status: 'partial' }, 1), true);
 
-      // Draft, frozen, ready, validating, executing, stale, failed without executed items -> disallowed
-      assert.strictEqual(canCreateUndoPlan({ status: 'draft', expected_changes: 5 }, 0), false);
-      assert.strictEqual(canCreateUndoPlan({ status: 'frozen', expected_changes: 5 }, 0), false);
-      assert.strictEqual(canCreateUndoPlan({ status: 'ready', expected_changes: 5 }, 0), false);
-      assert.strictEqual(canCreateUndoPlan({ status: 'executing', expected_changes: 5 }, 2), false);
-      assert.strictEqual(canCreateUndoPlan({ status: 'stale', expected_changes: 5 }, 0), false);
+      // completed + journalTotal=0 + expected_changes=5 -> false
+      assert.strictEqual(canCreateUndoPlan({ status: 'completed', expected_changes: 5 }, 0), false);
+
+      // partial + journalTotal=0 + expected_changes=10 -> false
+      assert.strictEqual(canCreateUndoPlan({ status: 'partial', expected_changes: 10 }, 0), false);
+
+      // draft + journalTotal=1 -> false
+      assert.strictEqual(canCreateUndoPlan({ status: 'draft' }, 1), false);
+
+      // running + journalTotal=1 -> false
+      assert.strictEqual(canCreateUndoPlan({ status: 'running' }, 1), false);
+
+      // failed + journalTotal=1 -> false
+      assert.strictEqual(canCreateUndoPlan({ status: 'failed' }, 1), false);
+
+      // stale + journalTotal=1 -> false
+      assert.strictEqual(canCreateUndoPlan({ status: 'stale' }, 1), false);
+
+      // frozen + journalTotal=1 -> false
+      assert.strictEqual(canCreateUndoPlan({ status: 'frozen' }, 1), false);
+
+      // ready + journalTotal=1 -> false
+      assert.strictEqual(canCreateUndoPlan({ status: 'ready' }, 1), false);
 
       // Null or invalid plan
       assert.strictEqual(canCreateUndoPlan(null, 5), false);

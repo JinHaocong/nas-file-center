@@ -79,7 +79,6 @@ export const QuarantinePage: React.FC = () => {
         pageSize,
         state: stateFilter,
         query: activeSearch,
-        search: activeSearch,
       }),
   });
 
@@ -186,6 +185,8 @@ export const QuarantinePage: React.FC = () => {
                 title={
                   !isAdmin
                     ? '仅系统管理员允许彻底清除'
+                    : isSafeMode
+                    ? '只读保护模式 (ALLOW_MUTATION=false) 生效中，禁止清除'
                     : !allowDelete
                     ? '系统禁用永久删除 (ALLOW_DELETE=false)'
                     : '彻底从磁盘物理清除该文件'
@@ -195,7 +196,7 @@ export const QuarantinePage: React.FC = () => {
                   size="small"
                   danger
                   icon={<DeleteOutlined />}
-                  disabled={!isAdmin || !allowDelete}
+                  disabled={isSafeMode || !isAdmin || !allowDelete}
                   onClick={() => {
                     setPurgeEntry(record);
                     setPurgeModalOpen(true);
@@ -321,6 +322,7 @@ export const QuarantinePage: React.FC = () => {
         }}
         onSuccess={() => refetch()}
         isAdmin={isAdmin}
+        allowMutation={!isSafeMode}
         allowDelete={allowDelete}
       />
     </div>

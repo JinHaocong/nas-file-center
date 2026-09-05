@@ -1,26 +1,30 @@
 import { QuarantineConflictPolicy, Plan } from '../../types';
 
 export function canCreateUndoPlan(
-  plan: Plan | { status: string; kind?: string; expected_changes?: number } | null | undefined,
+  plan: Plan | { status: string; kind?: string } | null | undefined,
   journalCount: number
 ): boolean {
   if (!plan || !plan.status) return false;
   if (plan.status !== 'completed' && plan.status !== 'partial') return false;
-  return journalCount > 0 || (plan.expected_changes ?? 0) > 0;
+  return journalCount > 0;
 }
 
 export function getQuarantinePurgeAvailability(
   isAdmin: boolean,
   allowDelete: boolean,
-  confirmationInput: string
+  allowMutation: boolean,
+  confirmationInput?: string
 ): { canPurge: boolean; reason?: string } {
   if (!isAdmin) {
     return { canPurge: false, reason: '只有系统管理员允许执行隔离文件的永久清除操作' };
   }
+  if (!allowMutation) {
+    return { canPurge: false, reason: '只读安全模式生效中，禁止执行清除操作 (ALLOW_MUTATION=false)' };
+  }
   if (!allowDelete) {
     return { canPurge: false, reason: '服务端配置已禁用永久文件删除 (ALLOW_DELETE=false)' };
   }
-  if (confirmationInput !== 'DELETE') {
+  if (confirmationInput !== undefined && confirmationInput !== 'DELETE') {
     return { canPurge: false, reason: '必须严格输入全大写字母 "DELETE"' };
   }
   return { canPurge: true };

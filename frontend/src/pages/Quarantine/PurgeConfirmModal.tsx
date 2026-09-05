@@ -22,6 +22,7 @@ interface Props {
   onClose: () => void;
   onSuccess: () => void;
   isAdmin: boolean;
+  allowMutation: boolean;
   allowDelete: boolean;
 }
 
@@ -31,6 +32,7 @@ export const PurgeConfirmModal: React.FC<Props> = ({
   onClose,
   onSuccess,
   isAdmin,
+  allowMutation,
   allowDelete,
 }) => {
   const queryClient = useQueryClient();
@@ -45,6 +47,9 @@ export const PurgeConfirmModal: React.FC<Props> = ({
   const purgeMutation = useMutation({
     mutationFn: async () => {
       if (!entry) return;
+      if (!isAdmin || !allowMutation || !allowDelete) {
+        throw new Error('当前系统安全配置或权限禁止执行永久清除操作');
+      }
       if (confirmInput !== 'DELETE') {
         throw new Error('确认词不正确，必须严格输入大写的 DELETE');
       }
@@ -65,7 +70,7 @@ export const PurgeConfirmModal: React.FC<Props> = ({
   if (!entry) return null;
 
   const isConfirmed = confirmInput === 'DELETE';
-  const canPurge = isAdmin && allowDelete;
+  const canPurge = isAdmin && allowMutation && allowDelete;
 
   return (
     <Modal
@@ -94,6 +99,17 @@ export const PurgeConfirmModal: React.FC<Props> = ({
           description="只有系统管理员 (admin) 允许执行隔离文件的永久清除操作。"
           type="error"
           showIcon
+          style={{ marginBottom: 16 }}
+        />
+      )}
+
+      {!allowMutation && (
+        <Alert
+          message="只读安全模式生效中 (ALLOW_MUTATION=false)"
+          description="系统当前处于只读保护模式，禁止执行任何永久清除操作。"
+          type="warning"
+          showIcon
+          icon={<LockOutlined />}
           style={{ marginBottom: 16 }}
         />
       )}

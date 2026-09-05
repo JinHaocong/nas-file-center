@@ -67,7 +67,12 @@ export const PlanDetailPage: React.FC = () => {
     queryFn: () => plansApi.getPlanDetail(planId, page, pageSize),
   });
 
-  const { data: journalData, refetch: refetchJournal } = useQuery({
+  const {
+    data: journalData,
+    isLoading: isJournalLoading,
+    isError: isJournalError,
+    refetch: refetchJournal,
+  } = useQuery({
     queryKey: ['planOperationJournalSummary', planId],
     queryFn: () => plansApi.getOperationJournal(planId, 1, 1),
     enabled: !!planId,
@@ -198,10 +203,12 @@ export const PlanDetailPage: React.FC = () => {
   const executeDisabled = isSafeMode || hasActiveJob;
   const statusConfig = STATUS_MAP[plan.status] || { label: plan.status, color: 'default' };
 
-  const journalTotal = journalData?.total ?? 0;
+  const journalTotal = (!isJournalLoading && !isJournalError) ? (journalData?.total ?? 0) : 0;
   const canCreateUndo =
     (plan.status === 'completed' || plan.status === 'partial') &&
-    (journalTotal > 0 || plan.expected_changes > 0);
+    journalTotal > 0 &&
+    !isJournalLoading &&
+    !isJournalError;
 
   const columns = [
     {
