@@ -157,8 +157,13 @@ def test_plan_lifecycle_and_api_contract(tmp_path: Path):
     exec_resp = client.post(f"/api/plans/{plan_id}/execute", headers={"Origin": "http://testserver"})
     assert exec_resp.status_code == 200
     exec_data = exec_resp.json()
-    assert exec_data["status"] == "completed"
-    assert exec_data["items"][0]["state"] == "completed"
+    assert exec_data["status"] == "queued"
+    assert "work_job_id" in exec_data
+    from app.worker import process_work_job
+    process_work_job(settings, exec_data["work_job_id"])
+    plan_after = client.get(f"/api/plans/{plan_id}").json()
+    assert plan_after["status"] == "completed"
+    assert plan_after["items"][0]["state"] == "completed"
 
     # Verify f_dup was safely quarantined and f_keep still exists
     assert f_keep.exists()

@@ -27,6 +27,7 @@ RETRY_WHITELISTS: dict[str, set[str]] = {
         "name_patterns",
         "exclude_patterns",
     },
+    "batch-plan-execute": {"plan_id"},
 }
 
 
@@ -287,7 +288,7 @@ class TaskService:
 
         return atomic_task_transition(self.SessionLocal, task_id, _transition)
 
-    def retry_task(self, task_id: int) -> dict:
+    def retry_task(self, task_id: int, user_id: int | None = None) -> dict:
         def _transition(session: Session, job: WorkJob, now: datetime):
             caps = get_job_capabilities(job.kind)
             if not caps.get("supports_retry", False):
@@ -298,6 +299,13 @@ class TaskService:
 
             # Create new queued job with whitelisted payload, fresh progress/error
             cleaned_state_json = filter_retry_payload(job.kind, job.state_json)
+            if user_id is not None:
+                try:
+                    payload_dict = json.loads(cleaned_state_json)
+                    payload_dict["requested_by_user_id"] = user_id
+                    cleaned_state_json = json.dumps(payload_dict, ensure_ascii=False)
+                except Exception:
+                    pass
             new_job = WorkJob(
                 kind=job.kind,
                 status=JobState.QUEUED.value,

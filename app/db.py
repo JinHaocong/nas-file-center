@@ -99,6 +99,7 @@ def init_db(
             "index_roots",
             "data_lifecycle_policy",
             "quarantine_entries",
+            "operation_journal",
         }
 
         # Check existing columns in work_jobs

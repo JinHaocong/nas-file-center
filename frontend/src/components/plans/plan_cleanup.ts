@@ -26,9 +26,13 @@ export const PLAN_EXECUTED_STATES = new Set([
 
 export function getPlanDeleteAvailability(plan?: {
   status?: string;
+  active_work_job_id?: number | null;
 } | null): PlanDeleteAvailability {
   if (!plan || !plan.status) {
     return { canDelete: false, reason: '无效的计划状态' };
+  }
+  if (plan.active_work_job_id) {
+    return { canDelete: false, reason: '计划正在任务队列中执行，禁止删除' };
   }
   if (PLAN_DELETE_BLOCKED_ACTIVE.has(plan.status)) {
     return { canDelete: false, reason: '计划正在校验或执行中，禁止删除' };

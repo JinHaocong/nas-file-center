@@ -89,11 +89,13 @@ export const PlanDetailPage: React.FC = () => {
 
   const executeMutation = useMutation({
     mutationFn: () => plansApi.executePlan(planId),
-    onSuccess: () => {
-      message.success('执行完成，请查看审计日志与执行结果');
+    onSuccess: (data) => {
+      message.success(`计划已加入任务队列，任务 #${data.work_job_id}`);
       refetch();
       queryClient.invalidateQueries({ queryKey: ['plansList'] });
       queryClient.invalidateQueries({ queryKey: ['dashboardSummary'] });
+      queryClient.invalidateQueries({ queryKey: ['tasksList'] });
+      queryClient.invalidateQueries({ queryKey: ['workJobs'] });
     },
     onError: (err: any) => {
       message.error(err.message || '执行失败');
@@ -148,9 +150,7 @@ export const PlanDetailPage: React.FC = () => {
     return (
       <Alert
         message="加载计划失败"
-        description={
-          (error as any)?.message || '获取计划详情失败，请检查网络或稍后重试'
-        }
+        description={(error as any)?.message || '获取计划详情失败，请检查网络或稍后重试'}
         type="error"
         showIcon
         action={<Button onClick={() => refetch()}>重试</Button>}
@@ -171,6 +171,8 @@ export const PlanDetailPage: React.FC = () => {
   }
 
   const isSafeMode = !settings?.allow_mutation;
+  const hasActiveJob = Boolean(plan.active_work_job_id);
+  const executeDisabled = isSafeMode || hasActiveJob;
   const statusConfig = STATUS_MAP[plan.status] || { label: plan.status, color: 'default' };
 
   const columns = [
@@ -201,7 +203,11 @@ export const PlanDetailPage: React.FC = () => {
       title: '源文件 / 待操作路径',
       dataIndex: 'source',
       key: 'source',
-      render: (text: string) => <Text code copyable>{text}</Text>,
+      render: (text: string) => (
+        <Text code copyable>
+          {text}
+        </Text>
+      ),
     },
     {
       title: '目标路径 / 保留副本',
@@ -221,7 +227,9 @@ export const PlanDetailPage: React.FC = () => {
           return (
             <Space>
               <Tag color="green">保留首选</Tag>
-              <Text code copyable>{record.keep}</Text>
+              <Text code copyable>
+                {record.keep}
+              </Text>
             </Space>
           );
         }
@@ -255,7 +263,14 @@ export const PlanDetailPage: React.FC = () => {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: 20,
+        }}
+      >
         <Space>
           <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/plans')}>
             返回列表
@@ -284,15 +299,26 @@ export const PlanDetailPage: React.FC = () => {
           )}
 
           {(plan.status === 'frozen' || plan.status === 'ready' || plan.status === 'partial') && (
-            <Button
-              type="primary"
-              ghost
-              icon={<CheckCircleOutlined />}
-              onClick={() => validateMutation.mutate()}
-              loading={validateMutation.isPending}
+            <Tooltip
+              title={
+                hasActiveJob
+                  ? `该计划当前已有执行任务进行中 (任务 #${plan.active_work_job_id})`
+                  : undefined
+              }
             >
-              SHA256 实时校验 (Validate)
-            </Button>
+              <span>
+                <Button
+                  type="primary"
+                  ghost
+                  icon={<CheckCircleOutlined />}
+                  onClick={() => validateMutation.mutate()}
+                  loading={validateMutation.isPending}
+                  disabled={hasActiveJob}
+                >
+                  SHA256 实时校验 (Validate)
+                </Button>
+              </span>
+            </Tooltip>
           )}
 
           {(plan.status === 'ready' || plan.status === 'partial') && (
@@ -300,7 +326,9 @@ export const PlanDetailPage: React.FC = () => {
               title={
                 isSafeMode
                   ? '当前处于只读安全模式 (ALLOW_MUTATION=false)，执行按钮已被锁定。若确认执行，请修改 compose 环境变量开启允许写入。'
-                  : '执行计划：将按计划安全变更/隔离文件'
+                  : hasActiveJob
+                    ? `该计划当前已有执行任务进行中 (任务 #${plan.active_work_job_id})`
+                    : '执行计划：将按计划安全变更/隔离文件'
               }
             >
               <span>
@@ -308,7 +336,7 @@ export const PlanDetailPage: React.FC = () => {
                   title="确认执行计划？"
                   description="请确认您已仔细核对所有计划项并完成了校验。"
                   onConfirm={() => executeMutation.mutate()}
-                  disabled={isSafeMode}
+                  disabled={executeDisabled}
                   okText="确认执行"
                   cancelText="取消"
                   okButtonProps={{ danger: true }}
@@ -317,7 +345,7 @@ export const PlanDetailPage: React.FC = () => {
                     type="primary"
                     danger
                     icon={<PlayCircleOutlined />}
-                    disabled={isSafeMode}
+                    disabled={executeDisabled}
                     loading={executeMutation.isPending}
                   >
                     执行计划 (Execute)

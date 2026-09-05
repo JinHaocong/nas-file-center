@@ -60,9 +60,12 @@ def build_quarantine_target_path(
     plan_id: str | int,
     entry_id: int,
     check_symlink: bool = False,
+    task_id: str | int | None = None,
 ) -> Path:
     """
     Construct the pre-allocated quarantine target path:
+    <QUARANTINE_ROOT>/task-<task_id>/root-<slot>/<relative_parent>/<stem>.q-<entry_id><suffix>
+    or fallback to:
     <QUARANTINE_ROOT>/plan-<plan_id>/root-<slot>/<relative_parent>/<stem>.q-<entry_id><suffix>
     """
     source_p = Path(source)
@@ -88,7 +91,8 @@ def build_quarantine_target_path(
     suffix = source_p.suffix
     target_name = f"{stem}.q-{entry_id}{suffix}"
 
-    target_rel = Path(f"plan-{plan_id}") / f"root-{slot}" / rel_parent / target_name
+    top_dir = f"task-{task_id}" if task_id is not None else f"plan-{plan_id}"
+    target_rel = Path(top_dir) / f"root-{slot}" / rel_parent / target_name
     return (quarantine_p / target_rel).resolve(strict=False)
 
 

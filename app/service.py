@@ -14,7 +14,7 @@ from uuid import uuid4
 
 from app.utils.sorting import _MaxHeapCandidate, natural_sort_key
 
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import Integer, delete, func, select, text
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from app.batch.plans import OperationItem
@@ -36,6 +36,7 @@ from app.models import (
     FavoritePath,
     IndexRoot,
     IndexedPath,
+    OperationJournal,
     OrganizerProfile,
     Plan,
     PlanItem,
@@ -117,6 +118,21 @@ def _index_job_root(job: WorkJob) -> str | None:
 
 class StateConflictError(ValueError):
     pass
+
+
+ACTIVE_EXECUTION_JOB_STATUSES: tuple[str, ...] = ("queued", "running", "paused", "cancel_requested")
+
+
+def _get_active_execution_job(session, plan_id: int) -> WorkJob | None:
+    return session.scalars(
+        select(WorkJob)
+        .where(
+            WorkJob.kind == "batch-plan-execute",
+            WorkJob.status.in_(ACTIVE_EXECUTION_JOB_STATUSES),
+            func.cast(func.json_extract(WorkJob.state_json, "$.plan_id"), Integer) == plan_id,
+        )
+        .order_by(WorkJob.id.desc())
+    ).first()
 
 
 class FileCenterService:
@@ -267,11 +283,32 @@ class FileCenterService:
         with self.SessionLocal() as session:
             total = session.scalar(select(func.count(BatchPlan.id))) or 0
             rows = list(session.scalars(select(BatchPlan).order_by(BatchPlan.id.desc()).limit(page_size).offset(offset)))
+            plan_ids = [row.id for row in rows]
+            active_jobs_map: dict[int, int] = {}
+            if plan_ids:
+                active_jobs = session.scalars(
+                    select(WorkJob)
+                    .where(
+                        WorkJob.kind == "batch-plan-execute",
+                        WorkJob.status.in_(ACTIVE_EXECUTION_JOB_STATUSES),
+                        func.cast(func.json_extract(WorkJob.state_json, "$.plan_id"), Integer).in_(plan_ids),
+                    )
+                ).all()
+                for aj in active_jobs:
+                    try:
+                        st = json.loads(aj.state_json or "{}")
+                        pid = st.get("plan_id")
+                        if pid is not None and int(pid) not in active_jobs_map:
+                            active_jobs_map[int(pid)] = aj.id
+                    except Exception:
+                        pass
+
             items = [{
                 "id": row.id,
                 "name": row.name,
                 "kind": row.kind,
                 "status": row.status,
+                "active_work_job_id": active_jobs_map.get(row.id),
                 "expected_changes": row.expected_changes,
                 "expected_reclaim_bytes": row.expected_reclaim_bytes,
                 "metadata": json.loads(row.metadata_json or "{}"),
@@ -325,8 +362,8 @@ class FileCenterService:
     def cancel_task(self, task_id: int) -> dict:
         return self.task_service.cancel_task(task_id)
 
-    def retry_task(self, task_id: int) -> dict:
-        return self.task_service.retry_task(task_id)
+    def retry_task(self, task_id: int, user_id: int | None = None) -> dict:
+        return self.task_service.retry_task(task_id, user_id=user_id)
 
     def delete_task(self, task_id: int) -> dict:
         return self.task_service.delete_task(task_id)
@@ -1000,11 +1037,17 @@ class FileCenterService:
 
     def validate_plan(self, plan_id: int) -> dict:
         with self.SessionLocal() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
             plan = session.get(BatchPlan, plan_id)
             if plan is None:
                 raise KeyError(plan_id)
+            active_job = _get_active_execution_job(session, plan_id)
+            if active_job is not None:
+                raise StateConflictError(
+                    f"Cannot validate plan #{plan_id}: active execution task #{active_job.id} (status: {active_job.status})"
+                )
             if plan.status not in {"frozen", "partial", "ready"}:
-                raise ValueError(f"Plan must be frozen before validation, current status={plan.status}")
+                raise StateConflictError(f"Plan must be frozen before validation, current status={plan.status}")
             plan.status = "validating"; session.commit()
             rows = list(session.scalars(select(BatchPlanItem).where(BatchPlanItem.plan_id == plan_id).order_by(BatchPlanItem.sequence)))
             all_ok = True
@@ -1205,6 +1248,52 @@ class FileCenterService:
             session.commit(); session.refresh(plan)
             return plan
 
+    def enqueue_plan_execution(self, plan_id: int, user_id: int | None = None) -> dict:
+        with self.SessionLocal() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            plan = session.get(BatchPlan, plan_id)
+            if plan is None:
+                raise KeyError(plan_id)
+            if plan.status not in {"ready", "partial"}:
+                raise StateConflictError(
+                    f"Plan must be validated before execution (status must be 'ready' or 'partial'), current status={plan.status}"
+                )
+            active_job = _get_active_execution_job(session, plan_id)
+            if active_job is not None:
+                raise StateConflictError(
+                    f"Plan #{plan_id} already has an active execution task #{active_job.id} (status: {active_job.status})"
+                )
+
+            payload = {
+                "plan_id": plan_id,
+                "requested_by_user_id": user_id,
+            }
+            job = WorkJob(
+                kind="batch-plan-execute",
+                status="queued",
+                state_json=json.dumps(payload, ensure_ascii=False),
+                created_at=utcnow(),
+            )
+            session.add(job)
+            session.flush()
+
+            session.add(AuditEvent(
+                operation="plan_execute_enqueue",
+                path=f"plan:{plan_id}",
+                result="queued",
+                details_json=json.dumps({
+                    "plan_id": plan_id,
+                    "work_job_id": job.id,
+                    "user_id": user_id,
+                }, ensure_ascii=False),
+            ))
+            session.commit()
+            return {
+                "plan_id": plan_id,
+                "work_job_id": job.id,
+                "status": "queued",
+            }
+
     def execute_plan(self, plan_id: int) -> dict:
         with self.SessionLocal() as session:
             plan = session.get(BatchPlan, plan_id)
@@ -1366,11 +1455,13 @@ class FileCenterService:
                 .limit(page_size)
                 .offset(offset)
             ))
+            active_job = _get_active_execution_job(session, plan_id)
             return {
                 "id": plan.id,
                 "name": plan.name,
                 "kind": plan.kind,
                 "status": plan.status,
+                "active_work_job_id": active_job.id if active_job else None,
                 "expected_changes": plan.expected_changes,
                 "expected_reclaim_bytes": plan.expected_reclaim_bytes,
                 "created_at": plan.created_at,
@@ -1411,6 +1502,12 @@ class FileCenterService:
             if plan is None:
                 raise KeyError(plan_id)
 
+            active_job = _get_active_execution_job(session, plan_id)
+            if active_job is not None:
+                raise StateConflictError(
+                    f"Cannot delete plan #{plan_id}: active execution task #{active_job.id} (status: {active_job.status})"
+                )
+
             if plan.status in PLAN_DELETE_BLOCKED_ACTIVE or plan.status not in PLAN_SINGLE_DELETE_ALLOWED:
                 raise ValueError(f"Plan with status '{plan.status}' cannot be deleted")
 
@@ -1437,10 +1534,153 @@ class FileCenterService:
                 session.commit()
                 return {"deleted_count": 0}
 
+            active_plan_ids = {
+                int(pid) for pid in session.scalars(
+                    select(func.cast(func.json_extract(WorkJob.state_json, "$.plan_id"), Integer))
+                    .where(
+                        WorkJob.kind == "batch-plan-execute",
+                        WorkJob.status.in_(ACTIVE_EXECUTION_JOB_STATUSES),
+                    )
+                ).all() if pid is not None
+            }
+            plan_ids = [pid for pid in plan_ids if pid not in active_plan_ids]
+            if not plan_ids:
+                session.commit()
+                return {"deleted_count": 0}
+
             session.execute(delete(BatchPlanItem).where(BatchPlanItem.plan_id.in_(plan_ids)))
             session.execute(delete(BatchPlan).where(BatchPlan.id.in_(plan_ids)))
             session.commit()
             return {"deleted_count": len(plan_ids)}
+
+    def create_undo_plan(self, plan_id: int, user_id: int | None = None) -> dict:
+        with self.SessionLocal() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            plan = session.get(BatchPlan, plan_id)
+            if plan is None:
+                raise KeyError(f"Plan #{plan_id} not found")
+
+            active_job = _get_active_execution_job(session, plan_id)
+            if active_job is not None:
+                raise StateConflictError(
+                    f"Cannot create undo plan while plan #{plan_id} has an active execution task #{active_job.id}"
+                )
+
+            entries = list(session.scalars(
+                select(OperationJournal)
+                .where(OperationJournal.plan_id == plan_id)
+                .order_by(OperationJournal.sequence.desc(), OperationJournal.id.desc())
+            ))
+            if not entries:
+                raise ValueError(f"Plan #{plan_id} has no completed operations to undo")
+
+            undo_plan = BatchPlan(
+                name=f"Undo {plan.name}",
+                kind="undo",
+                status="draft",
+                expected_changes=len(entries),
+                metadata_json=json.dumps({
+                    "undo_for_plan_id": plan_id,
+                    "created_by_user_id": user_id,
+                }, ensure_ascii=False),
+                created_at=utcnow(),
+            )
+            session.add(undo_plan)
+            session.flush()
+
+            for seq, entry in enumerate(entries, start=1):
+                before = json.loads(entry.before_json or "{}")
+                after = json.loads(entry.after_json or "{}")
+                meta = {}
+
+                if entry.operation in ("rename", "move"):
+                    source_p = after.get("path") or ""
+                    target_p = before.get("path") or ""
+                    op = entry.operation
+                    expected_size = after.get("size") or before.get("size") or 0
+                    expected_mtime_ns = 0
+                elif entry.operation == "quarantine":
+                    source_p = after.get("quarantine_path") or ""
+                    target_p = before.get("path") or ""
+                    op = "move"
+                    expected_size = after.get("size") or before.get("size") or 0
+                    expected_mtime_ns = 0
+                elif entry.operation == "touch":
+                    source_p = after.get("path") or before.get("path") or ""
+                    target_p = None
+                    op = "touch"
+                    expected_size = 0
+                    expected_mtime_ns = before.get("mtime_ns") or 0
+                else:
+                    source_p = after.get("path") or before.get("path") or ""
+                    target_p = before.get("path")
+                    op = entry.operation
+                    expected_size = 0
+                    expected_mtime_ns = 0
+
+                session.add(BatchPlanItem(
+                    plan_id=undo_plan.id,
+                    sequence=seq,
+                    operation=op,
+                    source_path=source_p,
+                    target_path=target_p,
+                    keep_path=None,
+                    expected_size=expected_size,
+                    expected_mtime_ns=expected_mtime_ns,
+                    state="planned",
+                    metadata_json=json.dumps(meta, ensure_ascii=False),
+                ))
+
+            session.commit()
+            return {
+                "id": undo_plan.id,
+                "name": undo_plan.name,
+                "kind": undo_plan.kind,
+                "status": undo_plan.status,
+                "total_items": len(entries),
+            }
+
+    def list_operation_journal(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 50,
+        operation: str | None = None,
+        plan_id: int | None = None,
+        task_id: int | None = None,
+    ) -> dict:
+        page = max(1, int(page))
+        page_size = max(1, min(int(page_size), 500))
+        offset = (page - 1) * page_size
+        with self.SessionLocal() as session:
+            stmt = select(OperationJournal)
+            if operation:
+                stmt = stmt.where(OperationJournal.operation == operation)
+            if plan_id is not None:
+                stmt = stmt.where(OperationJournal.plan_id == plan_id)
+            if task_id is not None:
+                stmt = stmt.where(OperationJournal.task_id == task_id)
+
+            total = session.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+            rows = list(session.scalars(stmt.order_by(OperationJournal.id.desc()).limit(page_size).offset(offset)))
+            items = [
+                {
+                    "id": r.id,
+                    "operation": r.operation,
+                    "sequence": r.sequence,
+                    "plan_id": r.plan_id,
+                    "plan_item_id": r.plan_item_id,
+                    "task_id": r.task_id,
+                    "user_id": r.user_id,
+                    "before": json.loads(r.before_json or "{}"),
+                    "after": json.loads(r.after_json or "{}"),
+                    "metadata_before": json.loads(r.metadata_before_json or "{}"),
+                    "metadata_after": json.loads(r.metadata_after_json or "{}"),
+                    "created_at": r.created_at,
+                }
+                for r in rows
+            ]
+            return {"items": items, "total": total, "page": page, "page_size": page_size}
 
     def legacy_plan_summary(self) -> dict:
         with self.SessionLocal() as session:
@@ -2529,6 +2769,34 @@ class FileCenterService:
             entry.state = "restored"
             entry.restored_at = now
             entry.updated_at = now
+
+            dest_stat = None
+            try:
+                dest_stat = dest.stat(follow_symlinks=False)
+            except OSError:
+                pass
+
+            session.add(OperationJournal(
+                operation="restore",
+                sequence=1,
+                plan_id=None,
+                plan_item_id=entry.plan_item_id,
+                task_id=entry.task_id,
+                user_id=None,
+                before_json=json.dumps({
+                    "quarantine_path": str(target),
+                    "quarantine_entry_id": entry.id,
+                    "original_path": entry.original_path,
+                }, ensure_ascii=False),
+                after_json=json.dumps({
+                    "restored_path": str(dest),
+                    "size": dest_stat.st_size if dest_stat else entry.size,
+                    "mtime_ns": getattr(dest_stat, "st_mtime_ns", int(dest_stat.st_mtime * 1e9)) if dest_stat else entry.mtime_ns,
+                }, ensure_ascii=False),
+                metadata_before_json="{}",
+                metadata_after_json="{}",
+                created_at=now,
+            ))
             session.add(AuditEvent(
                 operation="quarantine.restore",
                 path=str(dest),

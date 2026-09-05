@@ -64,8 +64,12 @@ def test_plan_freeze_and_mutation_guard(tmp_path):
     assert val.status_code == 200
     executed = client.post(f"/api/plans/{plan_id}/execute")
     assert executed.status_code == 200
-    assert executed.json()["status"] == "partial"
-    assert executed.json()["items"][0]["state"] == "skipped"
+    assert executed.json()["status"] == "queued"
+    from app.worker import process_work_job
+    process_work_job(client.app.state.settings, executed.json()["work_job_id"])
+    plan_after = client.get(f"/api/plans/{plan_id}").json()
+    assert plan_after["status"] == "partial"
+    assert plan_after["items"][0]["state"] == "skipped"
 
 
 def test_quarantine_plan_executes_when_mutation_enabled(tmp_path):
@@ -80,8 +84,13 @@ def test_quarantine_plan_executes_when_mutation_enabled(tmp_path):
     client.post(f"/api/plans/{plan_id}/freeze")
     client.post(f"/api/plans/{plan_id}/validate")
     executed = client.post(f"/api/plans/{plan_id}/execute")
-    assert executed.json()["status"] == "completed"
-    assert list((data / ".trash" / f"plan-{plan_id}").rglob("x.q-*.txt"))
+    assert executed.status_code == 200
+    assert executed.json()["status"] == "queued"
+    from app.worker import process_work_job
+    process_work_job(client.app.state.settings, executed.json()["work_job_id"])
+    plan_after = client.get(f"/api/plans/{plan_id}").json()
+    assert plan_after["status"] == "completed"
+    assert list((data / ".trash" / f"task-{executed.json()['work_job_id']}").rglob("x.q-*.txt"))
 
 
 def test_scan_enqueue_and_detail_api(tmp_path):

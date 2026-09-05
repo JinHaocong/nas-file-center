@@ -96,7 +96,12 @@ def test_pathmatch_api_contract_and_plan_generation(tmp_path: Path):
 
     exec_resp = client.post(f"/api/plans/{plan_id}/execute")
     assert exec_resp.status_code == 200
-    assert exec_resp.json()["status"] == "completed"
+    assert exec_resp.json()["status"] == "queued"
+    assert "work_job_id" in exec_resp.json()
+    from app.worker import process_work_job
+    process_work_job(settings, exec_resp.json()["work_job_id"])
+    plan_after = client.get(f"/api/plans/{plan_id}").json()
+    assert plan_after["status"] == "completed"
 
     assert (dir_a / "movie.mkv").exists()
     assert not (dir_b / "movie.mkv").exists()

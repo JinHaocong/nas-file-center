@@ -408,3 +408,32 @@ class OrganizerProfile(Base):
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
 
     user: Mapped[User | None] = relationship(back_populates="organizer_profiles")
+
+
+class OperationJournal(Base):
+    __tablename__ = "operation_journal"
+    __table_args__ = (
+        Index("ix_operation_journal_plan_sequence", "plan_id", "sequence"),
+        Index("ix_operation_journal_task_id", "task_id"),
+        Index("ix_operation_journal_plan_item_id", "plan_item_id"),
+        Index("ix_operation_journal_created_at", "created_at"),
+        Index("ix_operation_journal_operation", "operation"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    operation: Mapped[str] = mapped_column(String(64), nullable=False)
+    sequence: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    plan_id: Mapped[int | None] = mapped_column(ForeignKey("batch_plans.id", ondelete="SET NULL"), nullable=True)
+    plan_item_id: Mapped[int | None] = mapped_column(ForeignKey("batch_plan_items.id", ondelete="SET NULL"), nullable=True)
+    task_id: Mapped[int | None] = mapped_column(ForeignKey("work_jobs.id", ondelete="SET NULL"), nullable=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    before_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    after_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+
+    metadata_before_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    metadata_after_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, nullable=False)
+

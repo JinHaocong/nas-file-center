@@ -19,6 +19,7 @@ from app.organizers.templates import (
     validate_and_normalize_extensions,
     validate_cleanup_patterns,
 )
+from app.worker import process_work_job
 
 
 def _get_client(tmp_path: Path):
@@ -96,7 +97,11 @@ def test_plan_execution_with_ordered_touch(tmp_path: Path):
     exec_resp = client.post(f"/api/plans/{plan_id}/execute")
     assert exec_resp.status_code == 200
     exec_data = exec_resp.json()
-    assert exec_data["status"] == "completed"
+    assert exec_data["status"] == "queued"
+    assert "work_job_id" in exec_data
+    process_work_job(settings, exec_data["work_job_id"])
+    plan_after = client.get(f"/api/plans/{plan_id}").json()
+    assert plan_after["status"] == "completed"
 
     # Verify rename and touch completed
     assert not f1.exists()
@@ -143,7 +148,10 @@ def test_recursive_nested_rename(tmp_path: Path):
     client.post(f"/api/plans/{plan_id}/validate")
     exec_resp = client.post(f"/api/plans/{plan_id}/execute")
     assert exec_resp.status_code == 200
-    assert exec_resp.json()["status"] == "completed"
+    assert exec_resp.json()["status"] == "queued"
+    process_work_job(settings, exec_resp.json()["work_job_id"])
+    plan_after = client.get(f"/api/plans/{plan_id}").json()
+    assert plan_after["status"] == "completed"
 
     # Assert old paths no longer exist, new paths exist
     assert not parent.exists()
@@ -193,7 +201,10 @@ def test_rename_dependency_chain(tmp_path: Path):
     client.post(f"/api/plans/{plan_id}/validate")
     exec_resp = client.post(f"/api/plans/{plan_id}/execute")
     assert exec_resp.status_code == 200
-    assert exec_resp.json()["status"] == "completed"
+    assert exec_resp.json()["status"] == "queued"
+    process_work_job(settings, exec_resp.json()["work_job_id"])
+    plan_after = client.get(f"/api/plans/{plan_id}").json()
+    assert plan_after["status"] == "completed"
 
     assert not (root / "001").exists()
     assert (root / "002").exists()
@@ -337,7 +348,10 @@ def test_mtime_delay_seconds_behavior(tmp_path: Path):
     with patch("time.sleep", side_effect=lambda s: sleep_calls.append(s)):
         exec_resp = client.post(f"/api/plans/{plan_id}/execute")
         assert exec_resp.status_code == 200
-        assert exec_resp.json()["status"] == "completed"
+        assert exec_resp.json()["status"] == "queued"
+        process_work_job(settings, exec_resp.json()["work_job_id"])
+        plan_after = client.get(f"/api/plans/{plan_id}").json()
+        assert plan_after["status"] == "completed"
 
     assert 2.5 in sleep_calls
 
@@ -456,7 +470,11 @@ def test_recursive_four_level_rename_and_touch_completed(tmp_path: Path):
     exec_resp = client.post(f"/api/plans/{plan_id}/execute")
     assert exec_resp.status_code == 200
     exec_data = exec_resp.json()
-    assert exec_data["status"] == "completed"
+    assert exec_data["status"] == "queued"
+    assert "work_job_id" in exec_data
+    process_work_job(settings, exec_data["work_job_id"])
+    plan_after = client.get(f"/api/plans/{plan_id}").json()
+    assert plan_after["status"] == "completed"
 
     # Verify all 4 levels are renamed and exist under their final paths
     final_a = root / "A [1P 5 B]"
@@ -582,7 +600,10 @@ def test_touch_only_organizer_plan(tmp_path: Path):
     client.post(f"/api/plans/{plan_id}/validate")
     exec_resp = client.post(f"/api/plans/{plan_id}/execute")
     assert exec_resp.status_code == 200
-    assert exec_resp.json()["status"] == "completed"
+    assert exec_resp.json()["status"] == "queued"
+    process_work_job(settings, exec_resp.json()["work_job_id"])
+    plan_after = client.get(f"/api/plans/{plan_id}").json()
+    assert plan_after["status"] == "completed"
 
     # Both directories still exist with unchanged names
     assert dA.exists()

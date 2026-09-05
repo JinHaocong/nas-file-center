@@ -33,7 +33,7 @@ from app.tasks.state_machine import (
     TERMINAL_STATES,
     validate_transition,
 )
-from app.tasks.sync import sync_scan_job_status
+from app.tasks.sync import sync_batch_plan_status, sync_scan_job_status
 
 
 def process_work_job(
@@ -81,6 +81,13 @@ def process_work_job(
                     error_text="Cancelled by user",
                     cleanup_partial_results=True,
                 )
+                sync_batch_plan_status(
+                    session,
+                    work,
+                    "cancelled",
+                    finished_at=now,
+                    error_text="Cancelled by user",
+                )
                 log_task_event(
                     session,
                     job_id=work_job_id,
@@ -101,6 +108,7 @@ def process_work_job(
                 work.started_at = work.started_at or now
 
             sync_scan_job_status(session, work, "running", started_at=work.started_at)
+            sync_batch_plan_status(session, work, "running", started_at=work.started_at)
             work.heartbeat_at = now
             log_task_event(
                 session,
@@ -141,6 +149,13 @@ def process_work_job(
                         error_text=work.error_text,
                         cleanup_partial_results=True,
                     )
+                    sync_batch_plan_status(
+                        session,
+                        work,
+                        "failed",
+                        finished_at=now,
+                        error_text=work.error_text,
+                    )
                     session.commit()
             return False
 
@@ -167,6 +182,7 @@ def process_work_job(
                 work.error_code = None
 
                 sync_scan_job_status(session, work, "completed", finished_at=now)
+                sync_batch_plan_status(session, work, "completed", finished_at=now)
 
                 log_task_event(
                     session,
@@ -191,6 +207,13 @@ def process_work_job(
                     error_text="Cancelled by user",
                     cleanup_partial_results=True,
                 )
+                sync_batch_plan_status(
+                    session,
+                    work,
+                    "cancelled",
+                    finished_at=now,
+                    error_text="Cancelled by user",
+                )
 
                 log_task_event(
                     session,
@@ -203,7 +226,12 @@ def process_work_job(
         return True
 
     except JobPauseRequested:
-        # Job safely paused at checkpoint boundary. Status already updated to paused in checkpoint().
+        with session_factory() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            work = session.get(WorkJob, work_job_id)
+            if work:
+                sync_batch_plan_status(session, work, "paused")
+                session.commit()
         return True
     except JobCancelRequested:
         # Job safely cancelled at checkpoint boundary. Sync ScanJob if applicable under active lease.
@@ -225,6 +253,13 @@ def process_work_job(
                     finished_at=now,
                     error_text="Cancelled by user",
                     cleanup_partial_results=True,
+                )
+                sync_batch_plan_status(
+                    session,
+                    work,
+                    "cancelled",
+                    finished_at=now,
+                    error_text="Cancelled by user",
                 )
                 session.commit()
         return True
@@ -264,6 +299,13 @@ def process_work_job(
                     finished_at=now,
                     error_text=str(exc),
                     cleanup_partial_results=True,
+                )
+                sync_batch_plan_status(
+                    session,
+                    work,
+                    "failed",
+                    finished_at=now,
+                    error_text=str(exc),
                 )
                 session.commit()
         return False

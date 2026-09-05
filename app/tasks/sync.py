@@ -6,7 +6,15 @@ from typing import Any
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from app.models import DuplicateFile, DuplicateGroup, ScanJob, WorkJob, utcnow
+from app.models import (
+    BatchPlan,
+    BatchPlanItem,
+    DuplicateFile,
+    DuplicateGroup,
+    ScanJob,
+    WorkJob,
+    utcnow,
+)
 
 
 def sync_scan_job_status(
@@ -70,3 +78,52 @@ def sync_scan_job_status(
         return scan
     except Exception:
         return None
+
+
+def sync_batch_plan_status(
+    session: Session,
+    work_job: WorkJob,
+    target_status: str,
+    *,
+    started_at: datetime | None = None,
+    finished_at: datetime | None = None,
+    error_text: str | None = None,
+) -> BatchPlan | None:
+    """
+    Synchronize linked BatchPlan lifecycle with its parent WorkJob.
+    """
+    if work_job.kind != "batch-plan-execute":
+        return None
+
+    try:
+        st = json.loads(work_job.state_json or "{}")
+        plan_id = st.get("plan_id")
+        if not plan_id:
+            return None
+
+        plan = session.get(BatchPlan, int(plan_id))
+        if not plan:
+            return None
+
+        if target_status == "running":
+            plan.status = "executing"
+        elif target_status in ("completed", "cancelled", "failed"):
+            items = list(session.scalars(select(BatchPlanItem).where(BatchPlanItem.plan_id == plan.id)))
+            states = {item.state for item in items}
+            if states and states <= {"completed"}:
+                plan.status = "completed"
+            elif any(s == "completed" for s in states):
+                plan.status = "partial"
+            elif target_status == "completed":
+                plan.status = "completed" if states <= {"completed"} else "partial"
+            else:
+                plan.status = "failed"
+        elif target_status == "paused":
+            items = list(session.scalars(select(BatchPlanItem).where(BatchPlanItem.plan_id == plan.id)))
+            states = {item.state for item in items}
+            if any(s == "completed" for s in states):
+                plan.status = "partial"
+        return plan
+    except Exception:
+        return None
+

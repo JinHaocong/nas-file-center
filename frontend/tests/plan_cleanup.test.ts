@@ -56,6 +56,15 @@ describe('Plan Lifecycle Cleanup: Policy Matrix & API Contract Tests', () => {
       }
     });
 
+    test('plan with active_work_job_id is blocked from deletion even in deletable statuses', () => {
+      const testStatuses = ['draft', 'frozen', 'ready', 'partial', 'completed', 'failed'];
+      for (const status of testStatuses) {
+        const res = getPlanDeleteAvailability({ status, active_work_job_id: 123 });
+        assert.strictEqual(res.canDelete, false, `Status ${status} with active_work_job_id must be blocked`);
+        assert.strictEqual(res.reason, '计划正在任务队列中执行，禁止删除');
+      }
+    });
+
     test('unknown or unrecognized statuses fail closed', () => {
       const unknownStatuses = ['cancelled', 'pending', 'unknown', 'paused'];
       for (const status of unknownStatuses) {

@@ -119,14 +119,27 @@ def execute_item(
             if target_raw.is_symlink():
                 return _skip("target symlink is not allowed")
             target = require_allowed_path(target_raw, allowed_roots)
-            if target.exists():
-                return _skip("target already exists")
             target.parent.mkdir(parents=True, exist_ok=True)
-            source.rename(target)
+            try:
+                from app.fs_ops import rename_noreplace
+                rename_noreplace(source, target)
+            except FileExistsError:
+                return _skip("target already exists")
+            except OSError as exc:
+                return ItemResult("failed", str(exc))
             return ItemResult("completed", "moved", target)
 
         if item.operation == "touch":
-            os.utime(source, None, follow_symlinks=False)
+            target_mtime_ns = getattr(item, "target_mtime_ns", None) or getattr(item, "expected_mtime_ns", None)
+            if target_mtime_ns and target_mtime_ns > 0:
+                try:
+                    st = source.stat(follow_symlinks=False)
+                    atime_ns = getattr(st, "st_atime_ns", int(st.st_atime * 1e9))
+                except OSError:
+                    atime_ns = target_mtime_ns
+                os.utime(source, ns=(atime_ns, target_mtime_ns), follow_symlinks=False)
+            else:
+                os.utime(source, None, follow_symlinks=False)
             return ItemResult("completed", "mtime refreshed", source)
 
         if item.operation == "quarantine":

@@ -148,6 +148,7 @@ export interface Plan {
   page?: number;
   page_size?: number;
   items?: PlanItem[];
+  active_work_job_id?: number | null;
 }
 
 export interface WorkJob {

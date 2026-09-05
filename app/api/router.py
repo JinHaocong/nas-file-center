@@ -466,9 +466,13 @@ def cancel_task(request: Request, task_id: int):
 
 
 @router.post("/tasks/{task_id}/retry")
-def retry_task(request: Request, task_id: int):
+def retry_task(
+    request: Request,
+    task_id: int,
+    current_user: User = Depends(get_current_user),
+):
     try:
-        return request.app.state.service.retry_task(task_id)
+        return request.app.state.service.retry_task(task_id, user_id=current_user.id)
     except KeyError as exc:
         raise HTTPException(404, "Task not found") from exc
     except ValueError as exc:
@@ -821,11 +825,17 @@ def validate(request: Request, plan_id: int):
 
 
 @router.post("/plans/{plan_id}/execute")
-def execute(request: Request, plan_id: int):
+def execute(
+    request: Request,
+    plan_id: int,
+    current_user: User = Depends(get_current_user),
+):
     try:
-        return request.app.state.service.execute_plan(plan_id)
+        return request.app.state.service.enqueue_plan_execution(plan_id, user_id=current_user.id)
     except KeyError as exc:
         raise HTTPException(404, "plan not found") from exc
+    except StateConflictError as exc:
+        raise HTTPException(409, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
 
@@ -836,8 +846,58 @@ def delete_plan(request: Request, plan_id: int):
         return request.app.state.service.delete_plan(plan_id)
     except KeyError as exc:
         raise HTTPException(404, "Plan not found") from exc
+    except StateConflictError as exc:
+        raise HTTPException(409, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/plans/{plan_id}/undo-plan")
+def undo_plan(
+    request: Request,
+    plan_id: int,
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        return request.app.state.service.create_undo_plan(plan_id, user_id=current_user.id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except StateConflictError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.get("/plans/{plan_id}/operation-journal")
+def list_plan_operation_journal(
+    request: Request,
+    plan_id: int,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+):
+    return request.app.state.service.list_operation_journal(
+        page=page,
+        page_size=page_size,
+        plan_id=plan_id,
+    )
+
+
+@router.get("/operation-journal")
+def list_operation_journal(
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+    operation: str | None = Query(default=None),
+    plan_id: int | None = Query(default=None),
+    task_id: int | None = Query(default=None),
+):
+    return request.app.state.service.list_operation_journal(
+        page=page,
+        page_size=page_size,
+        operation=operation,
+        plan_id=plan_id,
+        task_id=task_id,
+    )
 
 
 

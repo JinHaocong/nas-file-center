@@ -97,7 +97,8 @@ export const plansApi = {
   }) => api.post<{ id: number; status: string; expected_changes: number }>('/api/plans', payload),
   freezePlan: (id: number) => api.post<{ id: number; status: string }>(`/api/plans/${id}/freeze`),
   validatePlan: (id: number) => api.post<Plan>(`/api/plans/${id}/validate`),
-  executePlan: (id: number) => api.post<{ id: number; status: string; items: any[] }>(`/api/plans/${id}/execute`),
+  executePlan: (id: number) =>
+    api.post<{ plan_id: number; work_job_id: number; status: string }>(`/api/plans/${id}/execute`),
   deletePlan: (id: number) => api.delete<DeletePlanResponse>(`/api/plans/${id}`),
   clearHistory: (statuses: PlanHistoryStatus[]) =>
     api.post<ClearPlanHistoryResponse>('/api/plans/clear-history', { statuses }),

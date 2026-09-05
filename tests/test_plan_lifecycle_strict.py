@@ -63,8 +63,13 @@ def test_strict_plan_lifecycle_draft_frozen_ready_execution(tmp_path: Path):
     assert val_resp.status_code == 200
     assert val_resp.json()["status"] == "ready"
 
-    # 6. Execute READY plan -> MUST SUCCEED (200)
+    # 6. Execute READY plan -> MUST SUCCEED (200) and enqueue WorkJob
     exec_ready = client.post(f"/api/plans/{plan_id}/execute")
     assert exec_ready.status_code == 200
-    assert exec_ready.json()["status"] == "completed"
-    assert exec_ready.json()["items"][0]["state"] == "completed"
+    assert exec_ready.json()["status"] == "queued"
+    assert "work_job_id" in exec_ready.json()
+    from app.worker import process_work_job
+    process_work_job(settings, exec_ready.json()["work_job_id"])
+    plan_after = client.get(f"/api/plans/{plan_id}").json()
+    assert plan_after["status"] == "completed"
+    assert plan_after["items"][0]["state"] == "completed"
