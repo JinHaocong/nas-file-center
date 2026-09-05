@@ -2764,6 +2764,15 @@ class FileCenterService:
             assert_source_unmodified(target, verified_stat)
             from app.fs_ops import rename_noreplace
             rename_noreplace(target, dest)
+        except ValueError as exc:
+            with self.SessionLocal() as session:
+                entry = session.get(QuarantineEntry, entry_id)
+                if entry:
+                    entry.state = "inconsistent"
+                    entry.last_error = str(exc)
+                    entry.updated_at = utcnow()
+                    session.commit()
+            raise
         except FileExistsError:
             with self.SessionLocal() as session:
                 entry = session.get(QuarantineEntry, entry_id)

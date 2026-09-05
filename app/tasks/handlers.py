@@ -397,6 +397,7 @@ def _build_stat_dict(p: Path, st: os.stat_result) -> dict:
         "object_type": obj_type,
         "size": st.st_size,
         "mtime_ns": getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9)),
+        "ctime_ns": getattr(st, "st_ctime_ns", int(st.st_ctime * 1e9)),
         "device": getattr(st, "st_dev", 0),
         "inode": getattr(st, "st_ino", 0),
     }
@@ -409,6 +410,7 @@ class ReconcileEvidence:
     inode: int
     size: int
     mtime_ns: int
+    ctime_ns: int
     object_type: str = "file"
 
 
@@ -417,14 +419,31 @@ def gather_reconcile_evidence(p: Path) -> ReconcileEvidence | None:
     if not p.is_file() or p.is_symlink():
         return None
     try:
-        st = p.stat(follow_symlinks=False)
+        st_before = p.stat(follow_symlinks=False)
         h = safe_quarantine_hash(p)
+        st_after = p.stat(follow_symlinks=False)
+
+        before_mtime_ns = getattr(st_before, "st_mtime_ns", int(st_before.st_mtime * 1e9))
+        after_mtime_ns = getattr(st_after, "st_mtime_ns", int(st_after.st_mtime * 1e9))
+        before_ctime_ns = getattr(st_before, "st_ctime_ns", int(st_before.st_ctime * 1e9))
+        after_ctime_ns = getattr(st_after, "st_ctime_ns", int(st_after.st_ctime * 1e9))
+
+        if (
+            getattr(st_before, "st_dev", 0) != getattr(st_after, "st_dev", 0)
+            or getattr(st_before, "st_ino", 0) != getattr(st_after, "st_ino", 0)
+            or st_before.st_size != st_after.st_size
+            or before_mtime_ns != after_mtime_ns
+            or before_ctime_ns != after_ctime_ns
+        ):
+            return None
+
         return ReconcileEvidence(
             content_hash=h,
-            device=getattr(st, "st_dev", 0),
-            inode=getattr(st, "st_ino", 0),
-            size=st.st_size,
-            mtime_ns=getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9)),
+            device=getattr(st_after, "st_dev", 0),
+            inode=getattr(st_after, "st_ino", 0),
+            size=st_after.st_size,
+            mtime_ns=after_mtime_ns,
+            ctime_ns=after_ctime_ns,
             object_type="file",
         )
     except OSError:
@@ -439,15 +458,17 @@ def _validate_evidence(st: os.stat_result, evidence: Any) -> bool:
         ev_ino = evidence.get("inode")
         ev_size = evidence.get("size")
         ev_mtime_ns = evidence.get("mtime_ns")
+        ev_ctime_ns = evidence.get("ctime_ns")
         ev_hash = evidence.get("content_hash")
     else:
         ev_dev = getattr(evidence, "device", None)
         ev_ino = getattr(evidence, "inode", None)
         ev_size = getattr(evidence, "size", None)
         ev_mtime_ns = getattr(evidence, "mtime_ns", None)
+        ev_ctime_ns = getattr(evidence, "ctime_ns", None)
         ev_hash = getattr(evidence, "content_hash", None)
 
-    if not ev_hash or ev_dev is None or ev_ino is None or ev_size is None or ev_mtime_ns is None:
+    if not ev_hash or ev_dev is None or ev_ino is None or ev_size is None or ev_mtime_ns is None or ev_ctime_ns is None:
         return False
     if getattr(st, "st_dev", 0) != ev_dev:
         return False
@@ -457,6 +478,9 @@ def _validate_evidence(st: os.stat_result, evidence: Any) -> bool:
         return False
     curr_mtime_ns = getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))
     if curr_mtime_ns != ev_mtime_ns:
+        return False
+    curr_ctime_ns = getattr(st, "st_ctime_ns", int(st.st_ctime * 1e9))
+    if curr_ctime_ns != ev_ctime_ns:
         return False
     return True
 
@@ -819,6 +843,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                         "object_type": obj_type,
                         "size": st.st_size,
                         "mtime_ns": getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9)),
+                        "ctime_ns": getattr(st, "st_ctime_ns", int(st.st_ctime * 1e9)),
                         "device": getattr(st, "st_dev", 0),
                         "inode": getattr(st, "st_ino", 0),
                     }

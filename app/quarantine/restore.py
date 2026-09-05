@@ -67,31 +67,51 @@ def verify_quarantine_source_integrity(
         raise ValueError("Quarantined target is a symlink, restore aborted")
 
     try:
-        st = target.stat(follow_symlinks=False)
+        st_before = target.stat(follow_symlinks=False)
     except OSError as exc:
         raise ValueError(f"Stat failed on quarantined file: {exc}")
 
     if expected_size is not None and expected_size > 0:
-        if st.st_size != expected_size:
-            raise ValueError(f"Quarantined file size mismatch (expected {expected_size}, got {st.st_size})")
+        if st_before.st_size != expected_size:
+            raise ValueError(f"Quarantined file size mismatch (expected {expected_size}, got {st_before.st_size})")
 
     if expected_hash:
         current_hash = safe_quarantine_hash(target)
         if current_hash != expected_hash:
             raise ValueError(f"Hash verification failed: Quarantined file hash mismatch (expected {expected_hash}, got {current_hash})")
 
+    try:
+        st_after = target.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise ValueError(f"Post-hash stat failed on quarantined file: {exc}")
+
+    before_mtime = getattr(st_before, "st_mtime_ns", int(st_before.st_mtime * 1e9))
+    after_mtime = getattr(st_after, "st_mtime_ns", int(st_after.st_mtime * 1e9))
+    before_ctime = getattr(st_before, "st_ctime_ns", int(st_before.st_ctime * 1e9))
+    after_ctime = getattr(st_after, "st_ctime_ns", int(st_after.st_ctime * 1e9))
+
+    if (
+        getattr(st_before, "st_dev", 0) != getattr(st_after, "st_dev", 0)
+        or getattr(st_before, "st_ino", 0) != getattr(st_after, "st_ino", 0)
+        or st_before.st_size != st_after.st_size
+        or before_mtime != after_mtime
+        or before_ctime != after_ctime
+    ):
+        raise ValueError("Quarantined source modified during hash verification")
+
     return {
         "object_type": "file",
-        "size": st.st_size,
-        "mtime_ns": getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9)),
-        "device": getattr(st, "st_dev", 0),
-        "inode": getattr(st, "st_ino", 0),
+        "size": st_after.st_size,
+        "mtime_ns": after_mtime,
+        "ctime_ns": after_ctime,
+        "device": getattr(st_after, "st_dev", 0),
+        "inode": getattr(st_after, "st_ino", 0),
     }
 
 
 def assert_source_unmodified(target: Path, verified_stat: dict) -> None:
     """
-    Immediate pre-mutation fence check: verify that device, inode, size, and mtime
+    Immediate pre-mutation fence check: verify that device, inode, size, mtime, and ctime
     have not changed since the source integrity was verified.
     """
     target = Path(target)
@@ -108,6 +128,8 @@ def assert_source_unmodified(target: Path, verified_stat: dict) -> None:
         raise ValueError(f"Quarantined source size modified before mutation (expected {verified_stat['size']}, got {st.st_size})")
     if verified_stat.get("mtime_ns") is not None and getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9)) != verified_stat["mtime_ns"]:
         raise ValueError("Quarantined source mtime modified before mutation")
+    if verified_stat.get("ctime_ns") is not None and getattr(st, "st_ctime_ns", int(st.st_ctime * 1e9)) != verified_stat["ctime_ns"]:
+        raise ValueError("Quarantined source ctime modified before mutation")
 
 
 def validate_quarantine_for_restore(

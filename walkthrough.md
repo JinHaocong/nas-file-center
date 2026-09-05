@@ -1,9 +1,10 @@
-# NAS File Center v0.3.4-Gate2-hotfix4
-Reconciliation Evidence Integrity / Zero Write-Tx Hash / Fail-Closed Precompute Race / No Same-Run Re-execution 验收报告
+# NAS File Center v0.3.4-Gate2-hotfix5
+Restore / Reconciliation Identity Freshness 验收报告
+Same-mtime Tamper Rejection / Stable Hash Snapshot / ctime-bound Runtime Evidence / Unified Restore Integrity Semantics
 
 > [!IMPORTANT]
 > **版本阶段声明**：
-> 本交付物为 **NAS File Center v0.3.4-Gate2-hotfix4** 修复里程碑，**不是 v0.3.4 Final**。
+> 本交付物为 **NAS File Center v0.3.4-Gate2-hotfix5** 修复里程碑，**不是 v0.3.4 Final**。
 > Gate2 维持 **HOLD** 状态。Gate3（Stale Plan 过期计划自动标记与感知）与 Gate4（Quarantine / Journal / Undo 前端独立管理页面与操作 UI）尚未实现，留待后续阶段实施。
 > 禁止提前启动 Gate3/Gate4。严禁 git push / tag / docker push。
 
@@ -11,124 +12,134 @@ Reconciliation Evidence Integrity / Zero Write-Tx Hash / Fail-Closed Precompute 
 
 ## 1. 交付概述与演进基线 (Baseline & Provenance)
 
-- **当前里程碑**：`NAS File Center v0.3.4-Gate2-hotfix4`
+- **当前里程碑**：`NAS File Center v0.3.4-Gate2-hotfix5`
 - **交付目标**：
-  解决 Gate2-hotfix3 遗留与识别的 5 项核心缺陷与并发安全漏洞：
-  1. **Blocker A (P1)**: 还原崩溃重协调预计算竞争坚决不在写事务内计算哈希（Restore reconciliation precompute race never hashes under write transaction）。杜绝外部在 Phase A 扫描后、Phase B 事务前才完成还原时退化为持有 SQLite 排他写锁（`BEGIN IMMEDIATE`）长耗时哈希的问题。
-  2. **Blocker B (P1)**: 隔离崩溃重协调预计算竞争坚决不在写事务内计算哈希（Quarantine reconciliation precompute race never hashes under write transaction）。杜绝外部在 Phase A 扫描后才隔离完成并在 Phase B 事务中退化为持有写锁全量哈希的问题。
-  3. **Blocker C & D (P1)**: 重协调证据必须深度绑定物理文件身份（Reconcile Evidence bound to physical file identity）且过期证据坚决 Fail-Closed（Stale precomputed evidence fails closed）。引入不可变快照凭据 `ReconcileEvidence`（绑定 `content_hash`、`device`、`inode`、`size`、`mtime_ns`），在事务内校验物理 stat 与凭据强一致，一旦发生外部改写/篡改/截断，绝不使用失效凭据，坚决拒绝认领并标记 `failed`，绝不在写事务内回退计算哈希。
-  4. **Blocker E (P1)**: 崩溃重协调失败项禁止在同一次 Worker 运行中重复执行（No same-run re-execution after reconcile failure）。在 Phase B 标记为 `failed` 的项被加入 `reconciled_failed_item_ids` 并在后续计划项循环中显式跳过，杜绝重入物理执行导致的二次破坏或破坏状态一致性。
+  解决 Gate2-hotfix4 独立审查识别的身份新鲜度绕过漏洞与哈希快照稳定性缺陷：
+  1. **Blocker A (P0)**: 服务层直接还原同时间戳篡改防护（Direct Restore Same-mtime Tamper Rejection）。阻断在哈希校验通过后、物理重命名前外部使用相同尺寸覆写相同 Inode 并使用 `os.utime()` 精确恢复 `mtime_ns` 的攻击绕过；在物理变更前校验 `ctime_ns` 变动，坚决阻断物理还原，将隔离记录置为 `inconsistent` 并记录详细错误，零写入成功日志。
+  2. **Blocker B (P0)**: 还原崩溃重协调同时间戳篡改 Fail-Closed（Restore Crash Reconciliation Same-mtime Tamper Fail-Closed）。在 Phase A 采集有效哈希凭据后、Phase B 事务前，目标被篡改并恢复 `mtime_ns` 时，事务内通过 `_validate_evidence()` 检测 `ctime_ns` 差异，坚决拒绝认定还原成功，计划项判为 `failed`，隔离区置 `inconsistent`，零虚假 OperationJournal，持写锁期间零哈希。
+  3. **Blocker C (P1)**: 隔离崩溃重协调同时间戳篡改 Fail-Closed（Quarantine Crash Reconciliation Same-mtime Tamper Fail-Closed）。隔离目标在证据采集后被篡改并恢复 `mtime_ns` 时，事务内检测 `ctime_ns` 不符，判为 `failed`，记录置 `abandoned`，杜绝持久化虚假的 `content_hash`，零虚假成功日志。
+  4. **Root Cause A (P0)**: `mtime_ns` 用户可任意伪造，运行时完整性快照必须深度绑定 `ctime_ns`（内核状态变更纳秒时间戳），构成 Linux 环境下防静默篡改的运行时新鲜度围栏（Runtime Freshness Fence）。零 DB 模式变更。
+  5. **Root Cause B (P1)**: 哈希快照跨计算过程物理稳定性验证（Stable Hash Snapshot）。在 `gather_reconcile_evidence()` 与 `verify_quarantine_source_integrity()` 中严格执行 `stat_before` 与 `stat_after` 双重比对（比对 `device`、`inode`、`size`、`mtime_ns`、`ctime_ns`），只要哈希期间文件被改写、追加或触碰，立刻拒绝产出有效凭据或报错中断，杜绝接受不稳定的哈希。
+  6. **Unified Restore Integrity Semantics**: 统一服务层直接还原与 Worker 还原的运行时 Stat 快照契约（`object_type`、`size`、`mtime_ns`、`ctime_ns`、`device`、`inode`），并在物理执行前严格执行 `assert_source_unmodified` 校验。
 - **演进基线 (Baseline)**：
-  - **Gate2-hotfix3 基线 Commit**：`3c7748018cd7a95222c0df8a324880e3e57b0104`
-  - **Gate2-hotfix3 基线 Artifact SHA256**：`904d8038d5b45a3e5ab891975beac5a948de0feb484ef9be3fe9a4f46e77b79b`
+  - **Gate2-hotfix4 基线 Commit**：`e52521410ef155be62fe0b785ce9a0bdce23ff0b`
+  - **Gate2-hotfix4 基线 Artifact SHA256**：`0eb7acc6aad94166aa3e378216650d48cae2a344d11131c5a9598d9ece241d9b`
   - **Gate1 验收基线**：`e276e5df66ba30260967b10d3070ea064255492e`
 - **测试基线与当前规模**：
-  - Backend：**438 passed**（基线 434 + 净增 4 个 Gate2-hotfix4 专项测试，Gate1 52 个安全用例全绿，Gate2 50 个用例全绿）
+  - Backend：**443 passed**（基线 438 + 净增 5 个 Gate2-hotfix5 专项对抗测试，Gate1 52 个安全用例全绿，Gate2 55 个用例全绿）
   - Frontend：**151 passed / 44 suites**
 
 ---
 
 ## 2. 核心问题修复与技术实现
 
-### 1. 结构性不变量：写事务内零哈希 (Zero Hash Under Write Transaction)
-- **问题分析**：
-  在 hotfix3 中，Worker 启动时的 `BatchPlanExecuteHandler.run()` 在 Phase A（事务外）预先扫描并哈希可能的目标文件，然后传入 Phase B 的 `_reconcile_executing_item()`。但在原逻辑中，若 Phase A 扫描时目标尚不存在，而在 Phase B 进入 `BEGIN IMMEDIATE` 写事务时目标已被外部进程（如旧 worker）写入，原实现回退为 `precomputed_hash or safe_quarantine_hash(target_path)`。此时 `safe_quarantine_hash` 就会在持有 SQLite 排他写锁期间执行，导致其他并发写连接产生 `database is locked`。
-- **技术实现**（[`app/tasks/handlers.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/tasks/handlers.py)）：
-  - **彻底移除 `_reconcile_executing_item()` 内的所有 `safe_quarantine_hash` 调用**。
-  - 在 SQLite `BEGIN IMMEDIATE` 写锁保护下，重协调逻辑 **100% 绝对不发起任何内容哈希计算**。
-  - 对于需要哈希校验的场景（quarantine 与 restore），如果无预计算凭据，或者凭据与当前文件物理 Stat 不匹配，**一律直接 fail-closed，将项置为 `failed`（或保持安全未决状态），绝不生成虚假 OperationJournal**。
-
-### 2. 物理身份绑定凭据与过期凭据 Fail-Closed (Reconcile Evidence Identity)
-- **定义数据凭据 `ReconcileEvidence`**：
-  ```python
-  @dataclass(frozen=True)
-  class ReconcileEvidence:
-      content_hash: str
-      device: int
-      inode: int
-      size: int
-      mtime_ns: int
-      object_type: str = "file"
-  ```
-- **事务外凭据收集函数 `gather_reconcile_evidence(p: Path) -> ReconcileEvidence | None`**：
-  - 仅处理非软链接（symlink）的常规文件；
-  - 首先通过 `p.stat(follow_symlinks=False)` 采集物理标识；
-  - 随后调用 `safe_quarantine_hash(p)`；
-  - 哈希完成后再次 stat 验证是否在此期间被变动；
-  - 完整打包 `device`, `inode`, `size`, `mtime_ns`, `content_hash`。
-- **凭据校验函数 `_validate_evidence(st: os.stat_result, evidence: ReconcileEvidence | None) -> bool`**：
-  - 在 Phase B `_reconcile_executing_item` 内部，通过 `target.stat(follow_symlinks=False)` 取得当前物理快照；
-  - 严格校验 `st.st_dev == evidence.device`、`st.st_ino == evidence.inode`、`st.st_size == evidence.size`、`st.st_mtime_ns == evidence.mtime_ns`；
-  - 只要有任意一项不匹配（说明预计算后文件被追加、篡改、替换、重链接），凭据即刻失效；
-  - 凭据失效直接进入 Fail-Closed，拒绝认领，不写日志，记录详细错误原因。
-
-### 3. 重协调失败项禁止同 Run 重入执行 (No Same-Run Re-execution)
-- **问题分析**：
-  Worker 在启动或接管计划时，在 Phase B 遍历所有 `executing` 项执行 `_reconcile_executing_item()`。若某项因物理凭据不匹配或目标丢失被标记为 `item.state = "failed"`，随后 Worker 退出 Phase B 进入计划项执行主循环 `for item in items:` 时，如果仅根据初始加载的列表执行，可能尝试重新执行刚刚失败的项，造成二次破坏或违背状态机单调性。
-- **技术实现**（[`app/tasks/handlers.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/tasks/handlers.py)）：
-  - 引入 `reconciled_failed_item_ids: set[int] = set()`；
-  - 在 Phase B 中，一旦重协调判定项失败并持久化 `item.state = "failed"`，立即将其记录进 `reconciled_failed_item_ids`；
-  - 在主执行循环遍历计划项时：
+### 1. ctime 绑定运行时新鲜度围栏 (ctime-bound Runtime Freshness Fence)
+- **原理**：
+  在 Linux/Unix 文件系统语义下，普通用户使用 `write()` 覆写文件会同时更新 `st_mtime` 和 `st_ctime`；即便后续使用 `os.utime()` 恢复了原始的 `atime` 与 `mtime`，`os.utime()` 自身作为 inode 元数据修改操作，依然会强制将 `st_ctime` 刷新为当前系统时间。
+  因此，仅比对 `(device, inode, size, mtime_ns)` 允许了攻击者在相同 inode 上覆盖同尺寸内容并复原 mtime 绕过检查；增加对 `ctime_ns` 的不可变校验，即可在不增加持久化 DB 列的前提下，构筑运行时的强新鲜度校验屏障。
+- **技术实现**（[`app/tasks/handlers.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/tasks/handlers.py), [`app/quarantine/restore.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/quarantine/restore.py)）：
+  - 更新 `ReconcileEvidence` 运行时数据结构：
     ```python
-    if item.id in reconciled_failed_item_ids or item.state == "failed":
-        logger.info("Skipping item %s which failed reconciliation in this run", item.id)
-        continue
+    @dataclass(frozen=True)
+    class ReconcileEvidence:
+        content_hash: str
+        device: int
+        inode: int
+        size: int
+        mtime_ns: int
+        ctime_ns: int
+        object_type: str = "file"
     ```
-  - 从根本上杜绝同一 Worker 运行内对重协调失败项的再次执行。
+  - `_validate_evidence` 严格要求包含 `ctime_ns`，并与物理实体的实时 `st_ctime_ns` 匹配；缺失或不符一律 Fail-Closed。
+  - `assert_source_unmodified` 增加对 `ctime_ns` 的即时比对，阻断同时间戳物理变更。
+
+### 2. 哈希计算稳定性双重核验 (Pre-hash & Post-hash Stat Verification)
+- **原理与纠偏**：
+  纠正此前文档中未彻底落地的描述，在生产代码中真正实现哈希前与哈希后的物理一致性比对。
+- **技术实现**（[`app/tasks/handlers.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/tasks/handlers.py), [`app/quarantine/restore.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/quarantine/restore.py)）：
+  - 在 `gather_reconcile_evidence(p)` 中：
+    1. 执行 `st_before = p.stat(follow_symlinks=False)`；
+    2. 计算无锁内容哈希 `h = safe_quarantine_hash(p)`；
+    3. 执行 `st_after = p.stat(follow_symlinks=False)`；
+    4. 对比前后 `st_dev`、`st_ino`、`st_size`、`st_mtime_ns`、`st_ctime_ns`；若有任何一项不同，说明哈希期间文件被变动，立即返回 `None`（拒绝产出凭据）。
+  - 在 `verify_quarantine_source_integrity(target)` 中：
+    同样对 `st_before` 与 `st_after` 进行完整对比，若有变动立即抛出 `ValueError("Quarantined source modified during hash verification")`。
+
+### 3. 统一还原完整性语义与异常状态转移 (Unified Restore Semantics)
+- **服务层直接还原**（[`app/service.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/service.py)）：
+  - 针对 `assert_source_unmodified` 抛出的 `ValueError`，捕获并将 `QuarantineEntry.state` 明确设置为 `inconsistent`，记录 `last_error` 并提交，确保失败时零文件物理移动、隔离区源文件完整保留、零还原日志生成。
+- **Worker 还原执行器**（[`app/tasks/handlers.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/tasks/handlers.py)）：
+  - 在 Worker 任务主循环中，在执行物理变更前调用 `assert_source_unmodified(src_p, verified_restore_stat)` 校验 `ctime_ns`；
+  - 发生篡改时立即记录审计事件并将计划项标为 `failed`、隔离区标为 `inconsistent`，阻断后续 `execute_item` 物理变更。
+
+### 4. 结构性不变量维持：排他写事务内零哈希
+- 重协调函数 `_reconcile_executing_item` 绝不在 `BEGIN IMMEDIATE` 持写锁期间调用任何内容哈希；所有哈希均在 Phase A 事务外完成并绑定包含 `ctime_ns` 的不可变快照。
 
 ---
 
-## 3. 验证与回归测试结果 (Verification Evidence)
+## 3. 严格 TDD 验证过程 (Strict TDD Evidence)
 
-### 1. Gate2-hotfix4 专项测试 (4 tests)
-- **测试文件**：`tests/test_gate2_hotfix4_reconciliation_evidence.py`
-- **用例清单与覆盖**：
-  1. `test_restore_reconciliation_precompute_race_never_hashes_under_write_transaction`:
-     验证还原崩溃重协调在预计算竞争（Phase A 扫描时无证据）场景下，Phase B 事务中绝不调用哈希，并发写连接顺利获取排他写锁，重协调项 fail-closed 并标记 `failed`，零虚假 OperationJournal。
-  2. `test_quarantine_reconciliation_precompute_race_never_hashes_under_write_transaction`:
-     验证隔离崩溃重协调在预计算竞争场景下，绝不持有排他写锁计算哈希，并发写锁不受阻，重协调安全标记 `failed`，零虚假日志。
-  3. `test_reconciliation_stale_precomputed_hash_evidence_fails_closed`:
-     验证预计算证据在被外部篡改/追加后（物理 Stat 发生偏移），凭据失效，重协调坚决 Fail-Closed，零成功认领。
-  4. `test_reconciliation_failed_item_not_reexecuted_in_same_run`:
-     验证在 Phase B 重协调被判为 `failed` 的项，在同一次 Worker 运行的主循环中被显式跳过，绝不发起物理变更。
-- **运行命令与结果**：
-  ```bash
-  docker run --rm -v "$(pwd)":/app -w /app nas-test-env bash -c "PYTHONPATH=. pytest -v tests/test_gate2_hotfix4_reconciliation_evidence.py"
-  ```
-  **4 passed in 0.49s**
+### 1. RED 阶段：精确复现与失败定位
+在编写生产代码前，于 [`tests/test_gate2_hotfix5_freshness.py`](file:///Users/Kerwin/MyProject/nas-file-center/tests/test_gate2_hotfix5_freshness.py) 编写 5 个对抗性测试用例：
+1. `test_direct_restore_same_size_same_mtime_tamper_after_hash_is_rejected`: 在基线代码上因未能阻断篡改而执行成功（`Failed: DID NOT RAISE <class 'ValueError'>`）；
+2. `test_worker_restore_same_size_same_mtime_tamper_is_rejected`: 在基线代码上项被误判完成（`Item must fail, got completed`）；
+3. `test_restore_reconciliation_same_inode_same_size_restored_mtime_tamper_fails_closed`: 在基线代码上崩溃重协调误认成功（`Item must fail, got completed`）；
+4. `test_quarantine_reconciliation_same_inode_same_size_restored_mtime_tamper_fails_closed`: 在基线代码上崩溃重协调误认成功并写入原哈希（`Item must fail, got completed`）；
+5. `test_reconcile_evidence_rejects_file_changed_during_hash`: 在基线代码上未核验 post-hash stat，文件在哈希期间变动仍返回凭据（`Expected None, got ReconcileEvidence(...)`）。
+**5 个对抗用例全部精确复现预期缺陷并进入 RED 状态**。
 
-### 2. Gate2 全量测试 (50 tests)
-- **运行命令与结果**：
-  ```bash
-  docker run --rm -v "$(pwd)":/app -w /app nas-test-env bash -c "PYTHONPATH=. pytest -v tests/test_gate2_*.py"
-  ```
-  **50 passed, 2 warnings in 3.78s** (包含 hotfix1, hotfix2, hotfix3, hotfix4 全部测试)
-
-### 3. Gate1 隔离区安全回归测试 (52 tests)
-- **运行命令与结果**：
-  ```bash
-  docker run --rm -v "$(pwd)":/app -w /app nas-test-env bash -c "PYTHONPATH=. pytest -v tests/test_quarantine_*.py"
-  ```
-  **52 passed, 2 warnings in 2.80s**
-
-### 4. 后端全量测试回归 (438 tests)
-- **运行命令与结果**：
-  ```bash
-  docker run --rm -v "$(pwd)":/app -w /app nas-test-env bash -c "PYTHONPATH=. pytest"
-  ```
-  **438 passed, 20 warnings in 47.85s**
-
-### 5. 前端测试与文件系统一致性
-- **前端测试**：`cd frontend && npm test -- --run` -> **151 tests / 44 suites, 151 passed, 0 failed**
-- **前端代码变更**：`git diff 3c7748018cd7a95222c0df8a324880e3e57b0104 -- frontend/` -> **0 行修改，100% 字节一致**。
-
-### 6. 数据库模型与迁移
-- **数据库模型**：`git diff 3c7748018cd7a95222c0df8a324880e3e57b0104 -- app/models.py app/db.py alembic/` -> **0 行修改，零迁移增量**。
+### 2. GREEN 阶段：最小化生产加固
+引入 `ctime_ns` 运行时围栏、双重 stat 稳定性对比并在 [`app/quarantine/restore.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/quarantine/restore.py)、[`app/service.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/service.py)、[`app/tasks/handlers.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/tasks/handlers.py) 完成修复后：
+```bash
+docker run --rm -v "$(pwd)":/app -w /app nas-test-env bash -c "PYTHONPATH=. pytest -v tests/test_gate2_hotfix5_freshness.py"
+```
+**结果：5 passed in 0.26s**
 
 ---
 
-## 4. Scope Gate 范围核查
+## 4. 全量回归与一致性核查 (Regression & Verification Suite)
 
-- [x] **严格遵守 Gate2 HOLD 约束**：未开启 Gate3，未开启 Gate4。
-- [x] **无第三方依赖膨胀**：`pyproject.toml` 与 `package.json` 零新增依赖。
-- [x] **无 git push / tag / docker push**。
+### 1. Gate2 专项与全量测试套件 (55 passed)
+```bash
+docker run --rm -v "$(pwd)":/app -w /app nas-test-env bash -c "PYTHONPATH=. pytest -v tests/test_gate2_*.py"
+```
+**结果：55 passed, 2 warnings in 3.94s**（基线 50 + 净增 5 个 hotfix5 专项测试）
+
+### 2. Gate1 隔离区安全回归套件 (52 passed)
+```bash
+docker run --rm -v "$(pwd)":/app -w /app nas-test-env bash -c "PYTHONPATH=. pytest -v tests/test_quarantine_*.py"
+```
+**结果：52 passed, 2 warnings in 2.70s**
+
+### 3. 后端全量测试回归套件 (443 passed)
+```bash
+docker run --rm -v "$(pwd)":/app -w /app nas-test-env bash -c "PYTHONPATH=. pytest"
+```
+**结果：443 passed, 20 warnings in 47.69s**（较基线 438 净增 5 个专项测试，零失败）
+
+### 4. 前端测试与文件一致性核验 (151 passed / 0 diff)
+- 前端测试套件执行：
+  ```bash
+  npm --prefix frontend test -- --run
+  ```
+  **结果：151 passed / 44 suites, 0 failed in 91.61ms**
+- 前端文件变更：
+  `git diff e52521410ef155be62fe0b785ce9a0bdce23ff0b HEAD -- frontend/` -> **0 行修改，100% 字节一致**。
+
+### 5. 数据库模型与迁移零增量 (0 diff)
+- `git diff e52521410ef155be62fe0b785ce9a0bdce23ff0b HEAD -- app/models.py app/db.py alembic/` -> **0 行修改，零迁移增量**。
+
+### 6. 依赖项零增量 (0 diff)
+- `git diff e52521410ef155be62fe0b785ce9a0bdce23ff0b HEAD -- pyproject.toml package.json package-lock.json` -> **0 行修改，零依赖变更**。
+
+---
+
+## 5. Scope Gate 范围核查确认
+
+| 检查项 | 约束要求 | 实际状态 | 结果 |
+| :--- | :--- | :--- | :--- |
+| **Gate2 状态** | 必须维持 HOLD，等待 NAS 独立验收 | 已声明 HOLD | **PASS** |
+| **Gate3 范围** | 禁止开启 Stale Plan 功能 | 零接触 | **PASS** |
+| **Gate4 范围** | 禁止开启独立前端管理页面 | 零接触 | **PASS** |
+| **外部依赖** | 禁止引入新 pip / npm 包 | 依赖配置文件 0 变更 | **PASS** |
+| **发布操作** | 严禁 git push / tag / docker push | 零网络推送操作 | **PASS** |
