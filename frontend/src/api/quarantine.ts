@@ -10,13 +10,16 @@ import {
 } from '../types';
 
 export const quarantineApi = {
-  list: (params?: { page?: number; pageSize?: number; state?: string; search?: string }) => {
-    const query = new URLSearchParams();
-    if (params?.page) query.append('page', String(params.page));
-    if (params?.pageSize) query.append('page_size', String(params.pageSize));
-    if (params?.state && params.state !== 'all') query.append('state', params.state);
-    if (params?.search && params.search.trim()) query.append('search', params.search.trim());
-    const qs = query.toString();
+  list: (params?: { page?: number; pageSize?: number; state?: string; search?: string; query?: string }) => {
+    const urlParams = new URLSearchParams();
+    if (params?.page) urlParams.append('page', String(params.page));
+    if (params?.pageSize) urlParams.append('page_size', String(params.pageSize));
+    if (params?.state && params.state !== 'all') urlParams.append('state', params.state);
+    const searchVal = (params?.query ?? params?.search)?.trim();
+    if (searchVal) {
+      urlParams.append('query', searchVal);
+    }
+    const qs = urlParams.toString();
     return api.get<QuarantineListResponse>(`/api/quarantine${qs ? `?${qs}` : ''}`);
   },
 

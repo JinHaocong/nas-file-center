@@ -49,7 +49,16 @@ describe('Gate4 Quarantine, Restore, Purge & Undo Plan Contract Tests', () => {
         assert.strictEqual(urlObj.searchParams.get('page'), '2');
         assert.strictEqual(urlObj.searchParams.get('page_size'), '50');
         assert.strictEqual(urlObj.searchParams.get('state'), 'active');
-        assert.strictEqual(urlObj.searchParams.get('search'), 'test_file.txt');
+        assert.strictEqual(urlObj.searchParams.get('query'), 'test_file.txt');
+
+        // Also test calling directly with query parameter
+        await quarantineApi.list({
+          page: 1,
+          pageSize: 20,
+          query: 'direct_query.txt',
+        });
+        const urlObj2 = new URL('http://localhost' + capturedUrl);
+        assert.strictEqual(urlObj2.searchParams.get('query'), 'direct_query.txt');
       } finally {
         api.get = originalGet;
       }
@@ -148,6 +157,13 @@ describe('Gate4 Quarantine, Restore, Purge & Undo Plan Contract Tests', () => {
 
       const resEmpty = getQuarantinePurgeAvailability(true, true, '');
       assert.strictEqual(resEmpty.canPurge, false);
+
+      // Trailing, leading, internal whitespace or newlines must be rejected
+      assert.strictEqual(getQuarantinePurgeAvailability(true, true, 'DELETE ').canPurge, false);
+      assert.strictEqual(getQuarantinePurgeAvailability(true, true, ' DELETE').canPurge, false);
+      assert.strictEqual(getQuarantinePurgeAvailability(true, true, '  DELETE  ').canPurge, false);
+      assert.strictEqual(getQuarantinePurgeAvailability(true, true, 'DELETE\n').canPurge, false);
+      assert.strictEqual(getQuarantinePurgeAvailability(true, true, 'DELETE\t').canPurge, false);
 
       const resValid = getQuarantinePurgeAvailability(true, true, 'DELETE');
       assert.strictEqual(resValid.canPurge, true);

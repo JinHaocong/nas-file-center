@@ -177,6 +177,9 @@ def test_undo_rejects_unsupported_operation(tmp_path: Path):
     )
 
     with svc.SessionLocal() as session:
+        db_plan = session.get(BatchPlan, plan.id)
+        assert db_plan is not None
+        db_plan.status = "completed"
         session.add(OperationJournal(
             operation="unknown_alien_op",
             sequence=1,

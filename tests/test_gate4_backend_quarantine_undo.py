@@ -315,7 +315,7 @@ def test_purge_guard_rules(tmp_path: Path):
     assert resp_reg.status_code == 403
 
     # 2. Bad confirmation token
-    for bad_token in ["delete", "Delete", "CONFIRM", "YES", ""]:
+    for bad_token in ["delete", "Delete", "CONFIRM", "YES", "", "DELETE ", " DELETE", "  DELETE  ", "DELETE\n", "DELETE\t"]:
         resp_bad = admin_client.post(
             f"/api/quarantine/{entry_id}/purge",
             json={"confirmation": bad_token},
@@ -376,7 +376,7 @@ def test_purge_guard_rules(tmp_path: Path):
 # ==============================================================================
 
 def test_create_undo_plan_invalid_states_and_empty_journal(tmp_path: Path):
-    """Cannot create undo plan for draft/pending plans or plans with 0 completed operations."""
+    """Cannot create undo plan for non-completed/partial plans (409) or completed plans with 0 operations (400)."""
     env = _setup_gate4_env(tmp_path)
     client = env["admin_client"]
     service = env["service"]
@@ -386,26 +386,65 @@ def test_create_undo_plan_invalid_states_and_empty_journal(tmp_path: Path):
     f1.write_text("content", encoding="utf-8")
     target1 = data / "test_undo_state_moved.txt"
 
-    # Plan in draft status
+    # 1. Plan in draft status -> 409 StateConflictError
     plan = service.create_plan(
         name="Draft Plan",
         kind="organize",
         items=[{"source": str(f1), "target": str(target1), "operation": "rename"}],
     )
 
-    # Attempt undo on draft plan -> 400 (no completed operations)
-    resp = client.post(f"/api/plans/{plan.id}/undo-plan")
-    assert resp.status_code == 400
-    assert "no completed operations to undo" in resp.text
+    resp_draft = client.post(f"/api/plans/{plan.id}/undo-plan")
+    assert resp_draft.status_code == 409
+    assert "must be 'completed' or 'partial'" in resp_draft.text
 
-    # Freeze & Validate
+    # 2. Plan in ready status -> 409 StateConflictError
     service.freeze_plan(plan.id)
     service.validate_plan(plan.id)
 
-    # Attempt undo on ready plan (not executed yet) -> 400
     resp_ready = client.post(f"/api/plans/{plan.id}/undo-plan")
-    assert resp_ready.status_code == 400
-    assert "no completed operations to undo" in resp_ready.text
+    assert resp_ready.status_code == 409
+    assert "must be 'completed' or 'partial'" in resp_ready.text
+
+    # 3. Non-terminal / illegal statuses rejected even if journal entries exist in DB
+    with service.SessionLocal() as session:
+        fake_journal = OperationJournal(
+            plan_id=plan.id,
+            plan_item_id=None,
+            operation="rename",
+            before_json=json.dumps({"path": str(f1), "size": 7}),
+            after_json=json.dumps({"path": str(target1), "size": 7}),
+            sequence=1,
+            created_at=utcnow(),
+        )
+        session.add(fake_journal)
+        session.commit()
+
+    for invalid_status in ["draft", "pending", "ready", "running", "failed", "cancelled", "stale"]:
+        with service.SessionLocal() as session:
+            p = session.get(BatchPlan, plan.id)
+            assert p is not None
+            p.status = invalid_status
+            session.commit()
+
+        resp_inv = client.post(f"/api/plans/{plan.id}/undo-plan")
+        assert resp_inv.status_code == 409
+        assert f"status is '{invalid_status}', must be 'completed' or 'partial'" in resp_inv.text
+
+    # 4. Plan in completed status but 0 journal entries -> 400 Bad Request
+    empty_completed_plan = service.create_plan(
+        name="Empty Completed Plan",
+        kind="organize",
+        items=[],
+    )
+    with service.SessionLocal() as session:
+        ecp = session.get(BatchPlan, empty_completed_plan.id)
+        assert ecp is not None
+        ecp.status = "completed"
+        session.commit()
+
+    resp_empty = client.post(f"/api/plans/{empty_completed_plan.id}/undo-plan")
+    assert resp_empty.status_code == 400
+    assert "no completed operations to undo" in resp_empty.text
 
 
 def test_undo_plan_full_lifecycle_and_reflexivity(tmp_path: Path):
@@ -512,3 +551,57 @@ def test_undo_plan_full_lifecycle_and_reflexivity(tmp_path: Path):
     assert not src_file.exists()
     assert renamed_file.exists()
     assert renamed_file.read_text(encoding="utf-8") == "original text content"
+
+
+def test_quarantine_list_search_and_query_parameters(tmp_path: Path):
+    """Test that /api/quarantine works seamlessly with both ?query= and ?search= parameters."""
+    env = _setup_gate4_env(tmp_path)
+    client = env["admin_client"]
+    service = env["service"]
+    data = env["data"]
+    trash = env["trash"]
+
+    f1 = trash / "target_alpha.q-301.txt"
+    f1.write_text("alpha content", encoding="utf-8")
+    f2 = trash / "target_beta.q-302.txt"
+    f2.write_text("beta content", encoding="utf-8")
+
+    with service.SessionLocal() as session:
+        entry1 = QuarantineEntry(
+            original_path=str(data / "alpha_doc.txt"),
+            quarantine_path=str(f1),
+            state="active",
+            size=len("alpha content"),
+            content_hash=safe_quarantine_hash(f1),
+            created_at=utcnow(),
+            updated_at=utcnow(),
+        )
+        entry2 = QuarantineEntry(
+            original_path=str(data / "beta_file.pdf"),
+            quarantine_path=str(f2),
+            state="active",
+            size=len("beta content"),
+            content_hash=safe_quarantine_hash(f2),
+            created_at=utcnow(),
+            updated_at=utcnow(),
+        )
+        session.add_all([entry1, entry2])
+        session.commit()
+
+    # 1. Search using ?query=
+    resp_query = client.get("/api/quarantine?query=alpha")
+    assert resp_query.status_code == 200
+    assert resp_query.json()["total"] == 1
+    assert "alpha" in resp_query.json()["items"][0]["original_path"]
+
+    # 2. Search using ?search= (backwards-compatibility)
+    resp_search = client.get("/api/quarantine?search=beta")
+    assert resp_search.status_code == 200
+    assert resp_search.json()["total"] == 1
+    assert "beta" in resp_search.json()["items"][0]["original_path"]
+
+    # 3. Search with no match
+    resp_nomatch = client.get("/api/quarantine?query=nonexistent_xyz")
+    assert resp_nomatch.status_code == 200
+    assert resp_nomatch.json()["total"] == 0
+

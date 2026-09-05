@@ -45,10 +45,10 @@ export const PurgeConfirmModal: React.FC<Props> = ({
   const purgeMutation = useMutation({
     mutationFn: async () => {
       if (!entry) return;
-      if (confirmInput.trim() !== 'DELETE') {
-        throw new Error('确认词不正确，必须输入大写的 DELETE');
+      if (confirmInput !== 'DELETE') {
+        throw new Error('确认词不正确，必须严格输入大写的 DELETE');
       }
-      return quarantineApi.purge(entry.id, { confirmation: 'DELETE' });
+      return quarantineApi.purge(entry.id, { confirmation: confirmInput });
     },
     onSuccess: () => {
       message.success(`隔离文件 #${entry?.id} 已被永久彻底清除`);
@@ -64,7 +64,7 @@ export const PurgeConfirmModal: React.FC<Props> = ({
 
   if (!entry) return null;
 
-  const isConfirmed = confirmInput.trim() === 'DELETE';
+  const isConfirmed = confirmInput === 'DELETE';
   const canPurge = isAdmin && allowDelete;
 
   return (

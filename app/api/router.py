@@ -974,12 +974,14 @@ def list_quarantine(
     page_size: int = Query(default=50, ge=1, le=500),
     state: str | None = Query(default=None),
     query: str | None = Query(default=None),
+    search: str | None = Query(default=None),
 ):
+    effective_query = query if query is not None else search
     return request.app.state.service.list_quarantine_entries(
         page=page,
         page_size=page_size,
         state=state,
-        search=query,
+        search=effective_query,
     )
 
 

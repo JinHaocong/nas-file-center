@@ -78,6 +78,7 @@ export const QuarantinePage: React.FC = () => {
         page,
         pageSize,
         state: stateFilter,
+        query: activeSearch,
         search: activeSearch,
       }),
   });

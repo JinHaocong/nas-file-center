@@ -1930,6 +1930,11 @@ class FileCenterService:
             if plan is None:
                 raise KeyError(f"Plan #{plan_id} not found")
 
+            if plan.status not in {"completed", "partial"}:
+                raise StateConflictError(
+                    f"Cannot create undo plan: plan #{plan_id} status is '{plan.status}', must be 'completed' or 'partial'"
+                )
+
             active_job = _get_active_execution_job(session, plan_id)
             if active_job is not None:
                 raise StateConflictError(

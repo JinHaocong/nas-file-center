@@ -20,7 +20,7 @@ export function getQuarantinePurgeAvailability(
   if (!allowDelete) {
     return { canPurge: false, reason: '服务端配置已禁用永久文件删除 (ALLOW_DELETE=false)' };
   }
-  if (confirmationInput.trim() !== 'DELETE') {
+  if (confirmationInput !== 'DELETE') {
     return { canPurge: false, reason: '必须严格输入全大写字母 "DELETE"' };
   }
   return { canPurge: true };
