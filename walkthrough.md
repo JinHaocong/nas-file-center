@@ -1,149 +1,111 @@
-# NAS File Center v0.3.3-step2-fixed10-hotfix2 验收报告与实现文档
-## Audit Retention Query-Error Wiring Final Fix
+# NAS File Center v0.3.3 FINAL RELEASE GATE 验收报告
+## Production Release Verification
 
-## 1. Baseline 与版本说明（Version & Baseline）
-- **交付版本**：`NAS File Center v0.3.3-step2-fixed10-hotfix2`
-- **基线版本**：`v0.3.3-step2-fixed10-hotfix1`
-- **基线 Commit**：`edcc62e4e06023193251ea92d4aa18d5e4d72001`
-- **基线发布包 SHA256**：`f008163bccd445d3eda4acaecf80b97b0d7c595a66eaa3034ed03931fcf2e799`
-- **提交作者**：`Jin Haocong <jinhaocong@outlook.com>`
-- **发布产物**：`nas-file-center-v0.3.3-step2-fixed10-hotfix2.zip`
-- **Docker 镜像**：`kerwinjhc/nas-file-center:0.3.3-step2-fixed10-hotfix2`
+## 1. Release Baseline & Lineage（发布基线与演进血统）
 
----
+- **正式发布版本**：`NAS File Center v0.3.3`
+- **发布类型**：`FINAL RELEASE GATE (Production Release)`
+- **基线版本**：`v0.3.3-step2-fixed10-hotfix2`
+- **基线 Commit**：`3d671a096efda06ac0c1001bca06dcd9f38321ca`
+- **基线归档包 SHA256**：`8a6acd78d8090e96bb2227beb75d8ba5eed66efe6ea7d47ec4ee34d536ebf873`
+- **发布作者**：`Jin Haocong <jinhaocong@outlook.com>`
 
-## 2. 缺陷根因与装配缺失分析（Root Cause & Wiring Gap Analysis）
-
-### A. 缺陷根因
-在 fixed10-hotfix1 中，辅助函数 `getAuditRetentionApplyAvailability` 已经完备支持了 `options.isQueryError`：
-```ts
-if (options?.isQueryError) {
-  return {
-    canApply: false,
-    disabledReason: '获取保留策略或清理预览失败，请刷新重试',
-  };
-}
-```
-并且在单元测试中验证了 `isQueryError: true` 时能够严格禁用清理按钮并提示刷新重试。
-
-然而，在业务组件 `frontend/src/pages/Settings/index.tsx` 的实际装配代码中：
-```tsx
-// fixed10-hotfix1 原始代码
-const { data: lifecyclePolicy, refetch: refetchPolicy } = useQuery({
-  queryKey: ['dataLifecyclePolicy'],
-  queryFn: () => dataLifecycleApi.getPolicy(),
-});
-
-const { data: retentionPreview, isLoading: previewLoading, refetch: refetchPreview } = useQuery({
-  queryKey: ['auditRetentionPreview'],
-  queryFn: () => auditApi.getRetentionPreview(),
-});
-
-...
-
-const availability = getAuditRetentionApplyAvailability(
-  lifecyclePolicy,
-  retentionPreview,
-  {
-    isSavingPolicy: savePolicyMutation.isPending,
-    isPreparingApply: prepareApplyPending,
-    isApplying: applyRetentionMutation.isPending,
-  }
-);
-```
-
-存在以下装配缺失（Wiring Gap）：
-1. 组件未从 `dataLifecyclePolicy` 查询中解构 `isError`；
-2. 组件未从 `auditRetentionPreview` 查询中解构 `isError`；
-3. `getAuditRetentionApplyAvailability` 调用的配置参数中遗漏了 `isQueryError`。
-
-### B. 潜在生产影响
-TanStack Query 在后台静默刷新失败（例如网络抖动、临时 500 错误、网关超时等）时，其内部行为是：
-- 维持既有缓存数据 `data` 不变（仍然为 truthy 对象）；
-- 将 `isError` 置为 `true`。
-
-由于页面仅检查了 `!policy`，当存在旧缓存且后台查询出错时，`lifecyclePolicy` 仍为旧对象，导致前端按钮依然保持“可执行”状态。若用户点击执行，可能基于已损坏或过期的状态触发操作。
+### 发布血统溯源（Release Lineage Artifacts）
+| 里程碑 Gate | 核心解决领域 | 基线交付包 SHA256 |
+| :--- | :--- | :--- |
+| **fixed6** | Task Lifecycle & History Cleanup Gate | `e3e2095a5b0c84b7dc979fe2662745b08691371686a5888dded5f938e238d7b9` |
+| **fixed7** | Scan Lifecycle & Plan Dependency Gate | `87d92404993fe1d041ee91d2f14d05a59864a1dcffd0c43a95cc5f9ef1b44181` |
+| **fixed8-hotfix3** | Plan Lifecycle & Detail UI Truthfulness Gate | `3a426218335f8d42f134291fafcdfb9bcbcd9813bbbf80ce212ffc7d537c244f` |
+| **fixed9-hotfix1** | Index Root Lifecycle & Directory Picker Gate | `c9727acb2061beaf5873dc9826fd6f36529f014fd66370135529106fe2184c0f` |
+| **fixed10-hotfix2** | Audit Retention & Data Lifecycle Settings Gate | `8a6acd78d8090e96bb2227beb75d8ba5eed66efe6ea7d47ec4ee34d536ebf873` |
+| **v0.3.3 Final** | Production Quality & Release Gate Verification | *正式发布产物（外部计算独立校验）* |
 
 ---
 
-## 3. 修复实现与规范装配（Hotfix Implementation & Wiring）
+## 2. Release Scope Freeze & Diff Audit（变更范围与代码冻结审计）
 
-### A. 变更范围与严格基线
-- **后端代码零变更（Backend Production Diff = 0）**：`app/**` 绝对零修改；
-- **数据库零变更**：Schema 零修改，Migration 零修改；
-- **依赖零变更**：`package.json`, `pnpm-lock.yaml`, `pyproject.toml` 零修改；
-- **组件辅助函数零修改**：`frontend/src/components/settings/data_lifecycle.ts` 零修改；
-- **审计页面零修改**：`frontend/src/pages/Audit/index.tsx` 零修改。
-
-### B. 生产代码修改（`frontend/src/pages/Settings/index.tsx`）
-1. 在查询解构中捕获策略查询错误与预览查询错误：
-```tsx
-const { data: lifecyclePolicy, isError: policyQueryError, refetch: refetchPolicy } = useQuery({
-  queryKey: ['dataLifecyclePolicy'],
-  queryFn: () => dataLifecycleApi.getPolicy(),
-});
-
-const { data: retentionPreview, isLoading: previewLoading, isError: previewQueryError, refetch: refetchPreview } = useQuery({
-  queryKey: ['auditRetentionPreview'],
-  queryFn: () => auditApi.getRetentionPreview(),
-});
-```
-2. 将查询错误合成后传入可用性判断：
-```tsx
-const availability = getAuditRetentionApplyAvailability(
-  lifecyclePolicy,
-  retentionPreview,
-  {
-    isSavingPolicy: savePolicyMutation.isPending,
-    isPreparingApply: prepareApplyPending,
-    isApplying: applyRetentionMutation.isPending,
-    isQueryError: policyQueryError || previewQueryError,
-  }
-);
-```
-
-当保留策略查询失败或清理预览查询失败的任一场景发生时，`isQueryError` 立即为 `true`，执行按钮严格置灰，并真实提示：“获取保留策略或清理预览失败，请刷新重试”。
+### A. 生产行为零变更（Production Behavior Diff = 0）
+- **后端代码**：`app/**` 零修改（`git diff app/` -> 0 差异）；
+- **前端业务交互**：`frontend/src/**` 零修改；
+- **数据库结构**：Schema 与模型定义零修改；
+- **依赖库锁定**：`pyproject.toml`、`frontend/package.json`、`pnpm-lock.yaml` 零依赖增减；
+- **文档元数据更新**：仅将 `README.md` 标题头更新为正式 `v0.3.3`，并更新本验收报告 `walkthrough.md`。
 
 ---
 
-## 4. 验证矩阵与回归测试结果（Verification Matrix）
+## 3. 全量自动化测试与回归矩阵（Automated Verification Matrix）
 
-### A. 前端自动化测试（`npm test`）
-- **测试文件**：[`frontend/tests/data_lifecycle.test.ts`](file:///Users/Kerwin/MyProject/nas-file-center/frontend/tests/data_lifecycle.test.ts)
-- **新增用例（Hotfix 2: Query-Error Wiring Integration）**：
-  1. `Settings/index.tsx destructures isError from dataLifecyclePolicy query`（源码契约验证解构 `policyQueryError`）
-  2. `Settings/index.tsx destructures isError from auditRetentionPreview query`（源码契约验证解构 `previewQueryError`）
-  3. `Settings/index.tsx passes isQueryError into getAuditRetentionApplyAvailability`（源码契约验证传递 `policyQueryError || previewQueryError`）
-  4. `getAuditRetentionApplyAvailability returns canApply=false and truthful disabledReason on isQueryError`（验证辅助函数在 `isQueryError` 时输出 `canApply=false` 及真实禁用文案）
-- **测试结果**：**150 passed, 44 suites, 0 failed**（fixed10-hotfix1 为 146 passed，净增 4 个测试）；
-- **类型检查**：`npm run typecheck` -> **0 errors**；
-- **生产构建**：`npm run build` -> **0 errors**（Vite 生产构建成功）。
+### A. 后端测试套件（Docker Rule 62 隔离环境）
+- **执行命令**：`PYTHONPATH=. pytest -q`
+- **用例收集与执行数**：**330 / 330 passed**
+- **失败数**：**0 failed**
+- **告警数**：20 个已知警告（18 个底层依赖日期适配提示 + 2 个 Starlette/AnyIO 测试客户端废弃提示）
+- **覆盖核心**：
+  - 任务中心完整状态机、Worker 租约锁定、心跳超时、分块日志与敏感信息脱敏；
+  - 扫描去重历史生命周期、依赖计划强阻断、Dashboard 快照真实性；
+  - 批处理计划删除权限矩阵、验证/执行中 409 阻断、旧版遗留 Plan 兼容清理；
+  - 持久化 IndexRoot 注册表、空目录索引追踪、损坏工作任务状态隔离；
+  - 数据生命周期单例 `id=1`、`0 = 永久保留`、只读预览与显式清理原子性事务。
 
-### B. 后端自动化测试（`pytest -q`）
-- **隔离环境**：Docker Rule 62 隔离环境运行（`python:3.12-slim` + 内存工作目录）；
-- **运行结果**：**330 passed, 0 failed**（全部 330 个测试 100% 通过，无回归）；
-- **告警**：20 个已知安全/协议告警。
-
-### C. 生产 Docker 镜像与冒烟验证
-- **镜像标签**：`kerwinjhc/nas-file-center:0.3.3-step2-fixed10-hotfix2`
-- **构建测试**：`docker build --platform linux/amd64 -t kerwinjhc/nas-file-center:0.3.3-step2-fixed10-hotfix2 .`；
-- **冒烟验证项**：
-  - `/health` -> `200 OK`
-  - 未认证 `GET /api/data-lifecycle` -> `401 Unauthorized`
-  - 管理员认证登录 -> `200 OK`
-  - 缺失 Origin `PUT /api/data-lifecycle` -> `403 Forbidden`（CSRF 防护）
-  - 合法 `PUT /api/data-lifecycle` -> `200 OK`
-  - `GET /api/audit/retention-preview` -> `200 OK`
-  - `POST /api/audit/apply-retention` -> `200 OK`
-  - 前端 SPA 静态托管 -> `200 OK`。
+### B. 前端测试套件（Node.js Test Runner）
+- **执行命令**：`npm test`
+- **测试结果**：**150 passed, 44 suites, 0 failed**
+- **静态类型检查**：`npm run typecheck` -> **0 errors**
+- **生产发布构建**：`npm run build` -> **0 errors**（Vite 3715 modules transformed，正常产出生产包）。
 
 ---
 
-## 5. 发布决议（Release Decision）
-- **决议**：**PASS**
-- **生产文件变更统计**：
-  - 后端：0 个修改；
-  - 数据库：0 个修改；
-  - 前端生产：1 个文件修改（`frontend/src/pages/Settings/index.tsx`）；
-  - 测试套件：1 个文件修改（`frontend/tests/data_lifecycle.test.ts`）；
-  - 交付文档：1 个文件修改（`walkthrough.md`）。
+## 4. 数据库初始化、并发保护与升级演练证明（Database Rehearsal Proofs）
+
+在独立 Python 3.12 隔离环境中，针对生产数据库生命周期进行了全链路仿真验证：
+
+1. **全新数据库安装（Fresh DB Installation）**：
+   - 验证空目录初始化：自动创建包含 `index_roots` 与 `data_lifecycle_policy` 在内的完整数据表结构；
+   - 单例策略自动注入：`id=1, audit_retention_days=0`；
+   - 绝不产生多余的迁移备份文件（0 backup created）；
+   - `PRAGMA integrity_check` -> `ok`，`PRAGMA foreign_key_check` -> 0 错误。
+2. **API 与 Worker 并发初始化冲突防护（Concurrent Init Protection）**：
+   - 模拟 4 个并发工作线程同时尝试初始化同一全新数据库文件；
+   - 文件锁 `_db_init_lock` 严格排队，零死锁、零数据库锁定（`database is locked`）异常，策略单例行数严格保持为 1。
+3. **旧版数据库无损升级与备份前置证明（Old DB Upgrade Rehearsal & Backup Proof）**：
+   - 注入 pre-fixed9 与 pre-fixed10 遗留数据库（包含用户、扫描去重组、大 inode 文件、计划项、审计日志、旧 IndexedPath 及运行中 index-root 任务，缺失 `index_roots` 与 `data_lifecycle_policy` 表）；
+   - **备份前置确证（Backup Before Mutation）**：在发生任何结构变更前，自动创建备份文件；经独立解析备份文件确认：备份库内绝对不含新增的目标表，`PRAGMA integrity_check` 完整通过；
+   - **数据迁移与回填确证**：目标库平滑升级，`index_roots` 从已有路径与活跃任务完整回填，`data_lifecycle_policy` 默认配置为 0 天（永久保留）；
+   - **行数保护审计（Protected Row Count Audit）**：迁移前后各受保护业务表行数 100% 吻合，无任何数据丢失或漂移；
+   - **迁移幂等性（Migration Idempotency）**：二次启动不产生冗余备份，不重复回填数据。
+
+---
+
+## 5. 安全边界与文件系统零破坏验证（Safety Invariants & Security Matrix）
+
+### A. 物理文件系统安全边界
+- 验收过程严格遵照安全红线：严禁触碰任何真实 NAS 媒体或个人数据；
+- 任务删除、扫描删除、计划清理、索引根目录删除、审计历史清理等所有生命周期操作均仅作用于数据库元数据，**物理 NAS 文件与目录变更数 = 0**。
+
+### B. 认证与访问控制（Auth & CSRF Protection）
+- 未认证访问受保护 API（如 `/api/data-lifecycle`, `/api/indexes`, `/api/audit/retention-preview`）严格返回 `401 Unauthorized`；
+- 修改类请求（`POST`, `PUT`, `DELETE`）缺失 `Origin` 标头时严格触发 CSRF 防御返回 `403 Forbidden`；
+- 合法登录建立 HttpOnly 会话 Cookie，受保护 API 正常协同响应；
+- 系统严格杜绝任意删除单条审计日志的接口（无 `DELETE /api/audit/{id}`）。
+
+---
+
+## 6. 已知边界说明（Known Limitations）
+
+1. **非实时文件系统监听**：系统采用主动扫描与显式索引机制，不维护常驻 inotify/fsevents 物理文件监听；
+2. **外部文件变动不自动刷新扫描快照**：若用户在外部对 NAS 物理文件执行增删，历史 Scan 结果中的重复文件快照保持该任务执行完成时刻的历史快照语义；
+3. **审计清理无后台自动调度器**：严格贯彻“保存策略 ≠ 执行删除”原则，不部署后台定时清理器，保留清理必须由管理员在前端显式确认触发；
+4. **多管理员并发策略窗口**：若在打开确认弹窗后、点击执行前的微小窗口内有其他管理员修改了保留策略，后端清理在执行时刻仍以数据库最新持久化单例为准。
+
+---
+
+## 7. 发布决议（Release Decision）
+
+- **终审状态**：**PASS / APPROVED**
+- **决议结论**：
+  - `fixed6` Task Lifecycle: **CLOSED**
+  - `fixed7` Scan Lifecycle: **CLOSED**
+  - `fixed8` Plan Lifecycle: **CLOSED**
+  - `fixed9` Index Lifecycle: **CLOSED**
+  - `fixed10` Audit Lifecycle: **CLOSED**
+  - **NAS File Center v0.3.3 正式批准发布**。

@@ -1,6 +1,6 @@
-# NAS File Center v0.3.3-step1
+# NAS File Center v0.3.3
 
-> **说明**：当前版本为 **Task Engine Backend preview / step1**，集中实现了统一 Job 状态机、Worker Lease Fencing、Checkpoint、中断恢复、流式解析与并发租约治理架构；本阶段为后端收尾阶段，不是最终 v0.3.3 发布版，未包含 step2 UI。
+> **说明**：当前版本为 **NAS File Center v0.3.3 正式版**，建立完整的任务生命周期、扫描去重历史治理、执行计划清理与兼容、持久化索引根目录体系与数据生命周期保留机制。
 
 面向几十 TB NAS 数据的**中文 Web 文件批处理与精确去重中心**。
 
