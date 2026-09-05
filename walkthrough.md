@@ -46,11 +46,18 @@
 | **frontend `package.json`** | `0.3.2-step2` | `0.3.3` | `test_frontend_package_json_version` |
 | **frontend `package-lock.json`** | `0.3.1` (root) | `0.3.3` (root) | `test_frontend_package_lock_version` |
 | **README 标题与声明** | `v0.3.3-step1` | `v0.3.3` | 源码审计 |
+| **README Docker 构建命令标签** | `-t nas-file-center:v0.3.2` | `-t nas-file-center:v0.3.3` | README 源码审计 |
 | **Docker OpenAPI 元数据** | `0.3.3.dev1` | `0.3.3` | `/openapi.json` 运行时冒烟 |
 
 ### C. 依赖锁定文件治理与事实纠正
 - **事实纠正**：纠正先前验收文档中关于 `pnpm-lock.yaml` 的误称，项目前端实际并唯一使用标准的 `frontend/package-lock.json`；
 - **依赖图谱零漂移**：`package-lock.json` 仅同步修改了根包自身的版本元数据字段，所有 `node_modules` 依赖项、版本区间、resolved URL 以及 integrity 哈希均保持完全一致，并通过了严格的 `npm ci` 洁净安装测试。
+
+### D. README 当前构建命令标签修复 (v0.3.3-final-hotfix2)
+- **发现问题**：README 第 4 节“开发与本地测试验证”中的 Docker 容器构建验证命令遗留历史 `-t nas-file-center:v0.3.2` 镜像标签；
+- **最小化修正**：将构建样例命令标签更正为 `-t nas-file-center:v0.3.3`；
+- **历史语义严格保留**：保留所有关于 v0.3.2 的历史特性、演进说明与版本升级指导文本；
+- **业务代码零变更**：除 `README.md` 与 `walkthrough.md` 之外，所有生产源码、前端代码、依赖定义及测试套件与 `54b10a1` 保持完全的字节级一致。
 
 ---
 

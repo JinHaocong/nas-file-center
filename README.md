@@ -196,7 +196,7 @@ npm run build
 ```bash
 docker buildx build \
   --platform linux/amd64 \
-  -t nas-file-center:v0.3.2 \
+  -t nas-file-center:v0.3.3 \
   --load \
   .
 ```
