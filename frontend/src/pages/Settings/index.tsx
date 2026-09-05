@@ -11,6 +11,7 @@ import {
   message,
   Popconfirm,
   InputNumber,
+  Select,
   Modal,
   Tooltip,
 } from 'antd';
@@ -23,7 +24,7 @@ import {
   DeleteOutlined,
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { settingsApi, dataLifecycleApi, auditApi } from '../../api/domain';
+import { settingsApi, dataLifecycleApi, auditApi, quarantineApi } from '../../api/domain';
 import { authApi } from '../../api/auth';
 import { useTitle } from '../../hooks/useTitle';
 import { formatDateTime } from '../../utils/format';
@@ -57,11 +58,41 @@ export const SettingsPage: React.FC = () => {
     queryFn: () => auditApi.getRetentionPreview(),
   });
 
+  const [quarantineDaysInput, setQuarantineDaysInput] = useState<number>(0);
+
+  const { data: quarantinePolicy, refetch: refetchQuarantinePolicy } = useQuery({
+    queryKey: ['quarantineRetentionPolicy'],
+    queryFn: () => quarantineApi.getRetentionPolicy(),
+  });
+
   useEffect(() => {
     if (lifecyclePolicy) {
       setRetentionDaysInput(lifecyclePolicy.audit_retention_days);
     }
   }, [lifecyclePolicy]);
+
+  useEffect(() => {
+    if (quarantinePolicy) {
+      setQuarantineDaysInput(quarantinePolicy.quarantine_retention_days);
+    }
+  }, [quarantinePolicy]);
+
+  const saveQuarantinePolicyMutation = useMutation({
+    mutationFn: (days: number) => {
+      if (![0, 7, 30, 90].includes(days)) {
+        throw new Error('隔离区保留天数仅支持 0、7、30 或 90 天');
+      }
+      return quarantineApi.updateRetentionPolicy(days);
+    },
+    onSuccess: () => {
+      message.success('隔离区保留策略已更新');
+      queryClient.invalidateQueries({ queryKey: ['quarantineRetentionPolicy'] });
+      queryClient.invalidateQueries({ queryKey: ['quarantineList'] });
+    },
+    onError: (err: any) => {
+      message.error(err.message || '更新隔离区保留策略失败');
+    },
+  });
 
   const savePolicyMutation = useMutation({
     mutationFn: (days: number) => dataLifecycleApi.updatePolicy(days),
@@ -269,6 +300,7 @@ export const SettingsPage: React.FC = () => {
             refetchSessions();
             refetchPolicy();
             refetchPreview();
+            refetchQuarantinePolicy();
           }}
         >
           刷新
@@ -337,7 +369,12 @@ export const SettingsPage: React.FC = () => {
           <Space>
             {lifecyclePolicy && (
               <Tag color={lifecyclePolicy.audit_retention_days === 0 ? 'default' : 'blue'}>
-                当前策略: {formatAuditRetention(lifecyclePolicy.audit_retention_days)}
+                审计策略: {formatAuditRetention(lifecyclePolicy.audit_retention_days)}
+              </Tag>
+            )}
+            {quarantinePolicy && (
+              <Tag color={quarantinePolicy.quarantine_retention_days === 0 ? 'default' : 'orange'}>
+                隔离区保留: {quarantinePolicy.quarantine_retention_days === 0 ? '永久保留' : `${quarantinePolicy.quarantine_retention_days} 天`}
               </Tag>
             )}
           </Space>
@@ -398,6 +435,48 @@ export const SettingsPage: React.FC = () => {
                 </span>
               )}
             </Text>
+          </div>
+        </div>
+
+        {/* Quarantine Retention Policy Configuration */}
+        <div style={{ background: '#fafafa', padding: '16px 20px', borderRadius: 8, marginBottom: 20, border: '1px solid #f0f0f0' }}>
+          <div style={{ marginBottom: 12, fontWeight: 500 }}>文件隔离区保留策略配置 (Quarantine Retention)</div>
+          <Space wrap align="center" style={{ marginBottom: 12 }}>
+            <Text>保留周期：</Text>
+            <Select
+              value={quarantineDaysInput}
+              onChange={(val) => setQuarantineDaysInput(val)}
+              style={{ width: 180 }}
+              options={[
+                { label: '永久保留 (0 天)', value: 0 },
+                { label: '保留 7 天 (7 days)', value: 7 },
+                { label: '保留 30 天 (30 days)', value: 30 },
+                { label: '保留 90 天 (90 days)', value: 90 },
+              ]}
+            />
+            <Button
+              type="primary"
+              icon={<SaveOutlined />}
+              loading={saveQuarantinePolicyMutation.isPending}
+              onClick={() => saveQuarantinePolicyMutation.mutate(quarantineDaysInput)}
+            >
+              保存隔离区策略
+            </Button>
+          </Space>
+          <div>
+            <Text type="secondary" style={{ fontSize: 13 }}>
+              {quarantineDaysInput === 0
+                ? '提示：设置为 0 表示永久保留全部隔离文件，系统绝不标记过期时间。'
+                : `提示：保存后新进入隔离区的文件将自动记录 ${quarantineDaysInput} 天后过期。`}
+              {quarantinePolicy?.updated_at && (
+                <span style={{ marginLeft: 12 }}>
+                  (上次保存于: {formatDateTime(quarantinePolicy.updated_at)})
+                </span>
+              )}
+            </Text>
+            <div style={{ marginTop: 6, fontSize: 12, color: '#8c8c8c' }}>
+              安全约束：保存策略仅记录元数据与到期时间戳，系统绝不启动后台静默自动删除线程。如需清理过期隔离文件，必须由管理员在文件隔离区页面人工审阅并确认清除。
+            </div>
           </div>
         </div>
 

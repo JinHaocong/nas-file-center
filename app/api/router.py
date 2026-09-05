@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.auth.dependencies import get_current_user, require_admin_user
 from app.batch.rename import RenameRule
+from app.exceptions import PlanStaleError
 from app.models import User
 from app.service import StateConflictError
 
@@ -832,12 +834,28 @@ def execute(
 ):
     try:
         return request.app.state.service.enqueue_plan_execution(plan_id, user_id=current_user.id)
+    except PlanStaleError as exc:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "error": {
+                    "code": "PLAN_STALE",
+                    "message": exc.message,
+                    "details": {
+                        "plan_id": exc.plan_id,
+                        "stale_count": len(exc.stale_items),
+                        "stale_items": exc.stale_items,
+                    },
+                }
+            },
+        )
     except KeyError as exc:
         raise HTTPException(404, "plan not found") from exc
     except StateConflictError as exc:
         raise HTTPException(409, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
+
 
 
 @router.delete("/plans/{plan_id}")

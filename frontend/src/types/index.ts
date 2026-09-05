@@ -97,7 +97,7 @@ export interface PlanItem {
   keep?: string | null;
   expected_size: number;
   expected_hash?: string | null;
-  state: 'planned' | 'validated' | 'executed' | 'completed' | 'failed' | 'skipped';
+  state: 'planned' | 'validated' | 'executed' | 'completed' | 'failed' | 'skipped' | 'stale';
   reason?: string | null;
 }
 
@@ -109,7 +109,8 @@ export type PlanStatus =
   | 'executing'
   | 'completed'
   | 'partial'
-  | 'failed';
+  | 'failed'
+  | 'stale';
 
 export type PlanHistoryStatus = 'completed' | 'failed';
 
@@ -325,3 +326,5 @@ export interface OrganizerProfileListResponse {
 }
 
 export * from './task';
+export * from './quarantine';
+export * from './journal';

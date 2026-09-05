@@ -15,6 +15,7 @@ import { PlanDetailPage } from '../pages/Plans/PlanDetail';
 import { TasksPage } from '../pages/Tasks';
 import { AuditPage } from '../pages/Audit';
 import { SettingsPage } from '../pages/Settings';
+import { QuarantinePage } from '../pages/Quarantine';
 
 export const AppRouter: React.FC = () => {
   return (
@@ -32,6 +33,7 @@ export const AppRouter: React.FC = () => {
         <Route path="organizer" element={<OrganizerPage />} />
         <Route path="plans" element={<PlansPage />} />
         <Route path="plans/:id" element={<PlanDetailPage />} />
+        <Route path="quarantine" element={<QuarantinePage />} />
         <Route path="tasks" element={<TasksPage />} />
         <Route path="audit" element={<AuditPage />} />
         <Route path="settings" element={<SettingsPage />} />

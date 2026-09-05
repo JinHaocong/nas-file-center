@@ -19,7 +19,10 @@ import {
   DataLifecyclePolicy,
   AuditRetentionPreview,
   AuditRetentionApplyResult,
+  OperationJournalListResponse,
+  UndoPlanResponse,
 } from '../types';
+export { quarantineApi } from './quarantine';
 
 export const dashboardApi = {
   getSummary: () => api.get<DashboardSummary>('/api/dashboard/summary'),
@@ -104,6 +107,9 @@ export const plansApi = {
     api.post<ClearPlanHistoryResponse>('/api/plans/clear-history', { statuses }),
   getLegacySummary: () => api.get<LegacyPlanSummary>('/api/plans/legacy/summary'),
   clearLegacyPlans: () => api.post<ClearLegacyPlansResponse>('/api/plans/legacy/clear'),
+  createUndoPlan: (id: number) => api.post<UndoPlanResponse>(`/api/plans/${id}/undo-plan`),
+  getOperationJournal: (id: number, page = 1, pageSize = 50) =>
+    api.get<OperationJournalListResponse>(`/api/plans/${id}/operation-journal?page=${page}&page_size=${pageSize}`),
 };
 
 export const batchApi = {

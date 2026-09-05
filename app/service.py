@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
 import errno
+import hashlib
 import heapq
 import json
 import math
 import os
 from pathlib import Path
 import re
+import stat
 import time
 from uuid import uuid4
 
@@ -46,7 +48,8 @@ from app.models import (
     WorkJob,
     utcnow,
 )
-from app.exceptions import StateConflictError
+from app.exceptions import PlanStaleError, StateConflictError
+from app.planning.stale import capture_source_snapshot, verify_item_freshness, StaleItemDetail, resolve_origin_path
 from app.quarantine.paths import (
     build_quarantine_target_path,
     build_restore_rename_path,
@@ -1042,7 +1045,6 @@ class FileCenterService:
 
     def validate_plan(self, plan_id: int) -> dict:
         with self.SessionLocal() as session:
-            session.execute(text("BEGIN IMMEDIATE"))
             plan = session.get(BatchPlan, plan_id)
             if plan is None:
                 raise KeyError(plan_id)
@@ -1051,52 +1053,95 @@ class FileCenterService:
                 raise StateConflictError(
                     f"Cannot validate plan #{plan_id}: active execution task #{active_job.id} (status: {active_job.status})"
                 )
-            if plan.status not in {"frozen", "partial", "ready"}:
+            if plan.status not in {"frozen", "partial", "ready", "stale"}:
                 raise StateConflictError(f"Plan must be frozen before validation, current status={plan.status}")
-            plan.status = "validating"; session.commit()
+            was_already_stale = (plan.status == "stale")
             rows = list(session.scalars(select(BatchPlanItem).where(BatchPlanItem.plan_id == plan_id).order_by(BatchPlanItem.sequence)))
-            all_ok = True
-            for row in rows:
-                if row.state == "completed":
-                    continue
-                if row.keep_path:
-                    result = verify_duplicate_pair(
-                        row.keep_path,
-                        row.source_path,
-                        allowed_roots=self.settings.allowed_roots,
-                        expected_size=row.expected_size,
-                        expected_hash=row.expected_hash,
-                    )
-                    if result.ok:
-                        row.expected_hash = result.sha256
-                        row.state = "validated"
-                        row.reason = "SHA256 verified"
-                    else:
-                        row.state = "skipped"
-                        row.reason = result.reason
-                        all_ok = False
-                elif row.operation == "restore":
-                    meta = json.loads(row.metadata_json or "{}")
-                    qid = meta.get("quarantine_entry_id") or meta.get("undo", {}).get("quarantine_entry_id")
-                    q_entry = session.get(QuarantineEntry, int(qid)) if qid else None
-                    if not q_entry or q_entry.state != "active":
-                        row.state = "skipped"
-                        row.reason = f"Quarantine entry #{qid} is invalid or not active"
-                        all_ok = False
-                    elif not Path(row.source_path).exists():
-                        row.state = "skipped"
-                        row.reason = f"Quarantine file does not exist: {row.source_path}"
-                        all_ok = False
-                    else:
-                        row.state = "validated"
-                        row.reason = "quarantine restore validated"
+
+        # Validate items outside DB write lock
+        stale_items = []
+        item_validations: dict[int, tuple[str, str, str | None]] = {}
+        has_error = False
+
+        for row in rows:
+            if row.state == "completed":
+                continue
+
+            if row.operation == "restore":
+                meta = json.loads(row.metadata_json or "{}")
+                qid = meta.get("quarantine_entry_id") or meta.get("undo", {}).get("quarantine_entry_id")
+                with self.SessionLocal() as s_read:
+                    q_entry = s_read.get(QuarantineEntry, int(qid)) if qid else None
+                if not q_entry or q_entry.state != "active":
+                    has_error = True
+                    item_validations[row.id] = ("skipped", f"Quarantine entry #{qid} is invalid or not active", None)
+                elif not Path(row.source_path).exists():
+                    has_error = True
+                    item_validations[row.id] = ("skipped", f"Quarantine file does not exist: {row.source_path}", None)
                 else:
-                    row.state = "validated"
-                    row.reason = "metadata validation deferred to execution"
-                session.add(AuditEvent(operation="validate", path=row.source_path, result=row.state, details_json=json.dumps({"plan_id": plan_id, "item_id": row.id, "reason": row.reason}, ensure_ascii=False)))
-                session.commit()
+                    item_validations[row.id] = ("validated", "quarantine restore validated", None)
+                continue
+
+            is_fresh, stale_detail = verify_item_freshness(
+                item_id=row.id,
+                source_path=row.source_path,
+                operation=row.operation,
+                expected_device=row.expected_device,
+                expected_inode=row.expected_inode,
+                expected_size=row.expected_size,
+                expected_mtime_ns=row.expected_mtime_ns,
+                expected_hash=row.expected_hash,
+                metadata_json=row.metadata_json,
+                allowed_roots=self.settings.allowed_roots,
+                quarantine_root=self.settings.quarantine_root,
+                check_hash=True,
+                allow_deferred_chained_missing=True,
+            )
+            if not is_fresh and stale_detail:
+                stale_items.append(stale_detail)
+                item_validations[row.id] = ("stale", stale_detail.reason, None)
+                continue
+
+            if row.keep_path:
+                result = verify_duplicate_pair(
+                    row.keep_path,
+                    row.source_path,
+                    allowed_roots=self.settings.allowed_roots,
+                    expected_size=row.expected_size,
+                    expected_hash=row.expected_hash,
+                )
+                if result.ok:
+                    item_validations[row.id] = ("validated", "SHA256 verified", result.sha256)
+                else:
+                    has_error = True
+                    item_validations[row.id] = ("skipped", result.reason, None)
+            else:
+                row_meta = json.loads(row.metadata_json or "{}")
+                val_msg = "chained item validated" if row_meta.get("chained_target") else "snapshot verified"
+                item_validations[row.id] = ("validated", val_msg, None)
+
+        with self.SessionLocal() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
             plan = session.get(BatchPlan, plan_id)
-            plan.status = "ready" if all_ok else "partial"
+            rows = list(session.scalars(select(BatchPlanItem).where(BatchPlanItem.plan_id == plan_id).order_by(BatchPlanItem.sequence)))
+            for row in rows:
+                if row.id in item_validations:
+                    new_state, new_reason, new_hash = item_validations[row.id]
+                    row.state = new_state
+                    row.reason = new_reason
+                    session.add(AuditEvent(
+                        operation="validate",
+                        path=row.source_path,
+                        result=row.state,
+                        details_json=json.dumps({"plan_id": plan_id, "item_id": row.id, "reason": row.reason}, ensure_ascii=False),
+                    ))
+
+            if was_already_stale or len(stale_items) > 0:
+                plan.status = "stale"
+            elif has_error:
+                plan.status = "partial"
+            else:
+                plan.status = "ready"
             session.commit()
         return self.plan_detail(plan_id)
 
@@ -1265,12 +1310,268 @@ class FileCenterService:
                 raise KeyError(plan_id)
             if plan.status != "draft":
                 raise ValueError(f"Only draft plans can be frozen, current status={plan.status}")
+
+            items_data = [
+                {
+                    "id": it.id,
+                    "operation": it.operation,
+                    "source_path": it.source_path,
+                    "target_path": it.target_path,
+                    "keep_path": it.keep_path,
+                    "expected_device": it.expected_device,
+                    "expected_inode": it.expected_inode,
+                    "expected_size": it.expected_size,
+                    "expected_mtime_ns": it.expected_mtime_ns,
+                    "expected_hash": it.expected_hash,
+                    "metadata_json": it.metadata_json,
+                }
+                for it in session.scalars(select(BatchPlanItem).where(BatchPlanItem.plan_id == plan_id).order_by(BatchPlanItem.sequence))
+            ]
+
+        planned_producers: list[dict[str, Any]] = []
+        item_updates: dict[int, dict[str, Any]] = {}
+        for it in items_data:
+            item_id = it["id"]
+            src_p = Path(it["source_path"])
+            upd: dict[str, Any] = {}
+            if it["operation"] != "restore":
+                is_chained = False
+                producer_match: dict[str, Any] | None = None
+                matched_origin: Path | None = None
+
+                if not src_p.exists():
+                    matched_origin, producer_match = resolve_origin_path(src_p, planned_producers)
+                    if matched_origin is not None and producer_match is not None:
+                        is_chained = True
+
+                meta = json.loads(it["metadata_json"] or "{}")
+                if is_chained and producer_match is not None and matched_origin is not None:
+                    snap = capture_source_snapshot(
+                        matched_origin,
+                        allowed_roots=self.settings.allowed_roots,
+                        quarantine_root=self.settings.quarantine_root,
+                    )
+                    exp_dev = it["expected_device"] or snap["device"]
+                    exp_ino = it["expected_inode"] or snap["inode"]
+                    exp_size = it["expected_size"] or snap["size"]
+                    exp_mtime = it["expected_mtime_ns"]
+                    if it["operation"] != "touch" and exp_mtime == 0:
+                        exp_mtime = snap["mtime_ns"]
+
+                    upd["expected_device"] = exp_dev
+                    upd["expected_inode"] = exp_ino
+                    upd["expected_size"] = exp_size
+                    upd["expected_mtime_ns"] = exp_mtime
+
+                    meta["chained_target"] = True
+                    meta["chain"] = {
+                        "producer_item_id": producer_match["item_id"],
+                        "origin_path": str(matched_origin),
+                    }
+                    meta["snapshot"] = {
+                        "device": exp_dev,
+                        "inode": exp_ino,
+                        "size": exp_size,
+                        "mtime_ns": snap["mtime_ns"],
+                        "ctime_ns": snap["ctime_ns"],
+                        "object_type": snap["object_type"],
+                    }
+                    upd["metadata_json"] = json.dumps(meta, ensure_ascii=False)
+
+                    if it["target_path"]:
+                        planned_producers.append({
+                            "item_id": item_id,
+                            "source_path": src_p,
+                            "target_path": Path(it["target_path"]),
+                            "origin_path": matched_origin,
+                        })
+                    item_updates[item_id] = upd
+                    continue
+
+                snap = capture_source_snapshot(
+                    src_p,
+                    allowed_roots=self.settings.allowed_roots,
+                    quarantine_root=self.settings.quarantine_root,
+                )
+                exp_dev = it["expected_device"] or snap["device"]
+                exp_ino = it["expected_inode"] or snap["inode"]
+                exp_size = it["expected_size"] or snap["size"]
+                exp_mtime = it["expected_mtime_ns"]
+                if it["operation"] != "touch" and exp_mtime == 0:
+                    exp_mtime = snap["mtime_ns"]
+
+                upd["expected_device"] = exp_dev
+                upd["expected_inode"] = exp_ino
+                upd["expected_size"] = exp_size
+                upd["expected_mtime_ns"] = exp_mtime
+
+                computed_hash = it["expected_hash"]
+                if it["keep_path"] and not computed_hash:
+                    # Dedupe item without hash: compute hash securely with stat_before -> hash -> stat_after
+                    try:
+                        st_b = os.lstat(src_p)
+                        if stat.S_ISREG(st_b.st_mode):
+                            h = hashlib.sha256()
+                            with open(src_p, "rb") as f:
+                                while chunk := f.read(1024 * 1024):
+                                    h.update(chunk)
+                            st_a = os.lstat(src_p)
+                            if (
+                                getattr(st_b, "st_dev", 0) == getattr(st_a, "st_dev", 0)
+                                and getattr(st_b, "st_ino", 0) == getattr(st_a, "st_ino", 0)
+                                and getattr(st_b, "st_size", 0) == getattr(st_a, "st_size", 0)
+                                and getattr(st_b, "st_mtime_ns", 0) == getattr(st_a, "st_mtime_ns", 0)
+                                and getattr(st_b, "st_ctime_ns", 0) == getattr(st_a, "st_ctime_ns", 0)
+                            ):
+                                computed_hash = h.hexdigest()
+                    except Exception:
+                        pass
+
+                if computed_hash:
+                    upd["expected_hash"] = computed_hash
+
+                meta["snapshot"] = {
+                    "device": exp_dev,
+                    "inode": exp_ino,
+                    "size": exp_size,
+                    "mtime_ns": snap["mtime_ns"],
+                    "ctime_ns": snap["ctime_ns"],
+                    "object_type": snap["object_type"],
+                }
+                if computed_hash:
+                    meta["snapshot"]["hash"] = computed_hash
+
+                if it["keep_path"]:
+                    try:
+                        snap_k = capture_source_snapshot(it["keep_path"], allowed_roots=self.settings.allowed_roots)
+                        if computed_hash:
+                            snap_k["hash"] = computed_hash
+                        meta["keep_snapshot"] = snap_k
+                    except Exception:
+                        pass
+                upd["metadata_json"] = json.dumps(meta, ensure_ascii=False)
+
+                if it["target_path"]:
+                    planned_producers.append({
+                        "item_id": item_id,
+                        "source_path": src_p,
+                        "target_path": Path(it["target_path"]),
+                        "origin_path": src_p,
+                    })
+
+            item_updates[item_id] = upd
+
+        with self.SessionLocal() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            plan = session.get(BatchPlan, plan_id)
+            if plan is None:
+                raise KeyError(plan_id)
+            if plan.status != "draft":
+                raise ValueError(f"Only draft plans can be frozen, current status={plan.status}")
+            rows = list(session.scalars(select(BatchPlanItem).where(BatchPlanItem.plan_id == plan_id)))
+            for row in rows:
+                if row.id in item_updates:
+                    for k, v in item_updates[row.id].items():
+                        setattr(row, k, v)
             plan.status = "frozen"
             plan.frozen_at = datetime.now(timezone.utc)
-            session.commit(); session.refresh(plan)
+            session.commit()
+            session.refresh(plan)
             return plan
 
     def enqueue_plan_execution(self, plan_id: int, user_id: int | None = None) -> dict:
+        with self.SessionLocal() as session:
+            plan = session.get(BatchPlan, plan_id)
+            if plan is None:
+                raise KeyError(plan_id)
+            if plan.status == "stale":
+                rows = list(session.scalars(select(BatchPlanItem).where(BatchPlanItem.plan_id == plan_id).order_by(BatchPlanItem.sequence)))
+                stale_list = []
+                for r in rows:
+                    if r.state == "stale":
+                        stale_list.append({
+                            "item_id": r.id,
+                            "source_path": r.source_path,
+                            "reason": r.reason or "filesystem_identity_changed",
+                            "expected": {"device": r.expected_device, "inode": r.expected_inode, "size": r.expected_size, "mtime_ns": r.expected_mtime_ns},
+                            "actual": None,
+                        })
+                if not stale_list and rows:
+                    r0 = rows[0]
+                    stale_list.append({
+                        "item_id": r0.id,
+                        "source_path": r0.source_path,
+                        "reason": r0.reason or "filesystem_identity_changed",
+                        "expected": {"device": r0.expected_device, "inode": r0.expected_inode, "size": r0.expected_size, "mtime_ns": r0.expected_mtime_ns},
+                        "actual": None,
+                    })
+                raise PlanStaleError(
+                    plan_id=plan_id,
+                    message="计划已过期，文件已被修改、删除或替换",
+                    stale_items=stale_list,
+                )
+            if plan.status not in {"ready", "partial"}:
+                raise StateConflictError(
+                    f"Plan must be validated before execution (status must be 'ready' or 'partial'), current status={plan.status}"
+                )
+            active_job = _get_active_execution_job(session, plan_id)
+            if active_job is not None:
+                raise StateConflictError(
+                    f"Plan #{plan_id} already has an active execution task #{active_job.id} (status: {active_job.status})"
+                )
+            rows = list(session.scalars(select(BatchPlanItem).where(BatchPlanItem.plan_id == plan_id).order_by(BatchPlanItem.sequence)))
+
+        # Preflight freshness check outside write lock
+        stale_items = []
+        for row in rows:
+            if row.state in ("completed", "skipped") or row.operation == "restore":
+                continue
+            is_fresh, stale_detail = verify_item_freshness(
+                item_id=row.id,
+                source_path=row.source_path,
+                operation=row.operation,
+                expected_device=row.expected_device,
+                expected_inode=row.expected_inode,
+                expected_size=row.expected_size,
+                expected_mtime_ns=row.expected_mtime_ns,
+                expected_hash=row.expected_hash,
+                metadata_json=row.metadata_json,
+                allowed_roots=self.settings.allowed_roots,
+                quarantine_root=self.settings.quarantine_root,
+                check_hash=True,
+                allow_deferred_chained_missing=True,
+            )
+            if not is_fresh and stale_detail:
+                stale_items.append(stale_detail.to_dict())
+            elif row.keep_path:
+                is_k_fresh, k_detail = verify_item_freshness(
+                    item_id=row.id,
+                    source_path=row.keep_path,
+                    allowed_roots=self.settings.allowed_roots,
+                    quarantine_root=self.settings.quarantine_root,
+                    check_hash=False,
+                )
+                if not is_k_fresh and k_detail:
+                    stale_items.append(k_detail.to_dict())
+
+        if len(stale_items) > 0:
+            with self.SessionLocal() as session:
+                session.execute(text("BEGIN IMMEDIATE"))
+                plan = session.get(BatchPlan, plan_id)
+                if plan:
+                    plan.status = "stale"
+                for s in stale_items:
+                    row = session.get(BatchPlanItem, s["item_id"])
+                    if row:
+                        row.state = "stale"
+                        row.reason = s["reason"]
+                session.commit()
+            raise PlanStaleError(
+                plan_id=plan_id,
+                message="计划已过期，文件已被修改、删除或替换",
+                stale_items=stale_items,
+            )
+
         with self.SessionLocal() as session:
             session.execute(text("BEGIN IMMEDIATE"))
             plan = session.get(BatchPlan, plan_id)
@@ -1321,8 +1622,54 @@ class FileCenterService:
             plan = session.get(BatchPlan, plan_id)
             if plan is None:
                 raise KeyError(plan_id)
+            if plan.status == "stale":
+                raise PlanStaleError(plan_id, "计划已过期，文件已被修改、删除或替换", [])
             if plan.status not in {"ready", "partial"}:
                 raise ValueError(f"Plan must be validated before execution (status must be 'ready' or 'partial'), current status={plan.status}")
+            rows = list(session.scalars(select(BatchPlanItem).where(BatchPlanItem.plan_id == plan_id).order_by(BatchPlanItem.sequence)))
+
+        stale_items = []
+        for row in rows:
+            if row.state in ("completed", "skipped") or row.operation == "restore":
+                continue
+            is_fresh, stale_detail = verify_item_freshness(
+                item_id=row.id,
+                source_path=row.source_path,
+                operation=row.operation,
+                expected_device=row.expected_device,
+                expected_inode=row.expected_inode,
+                expected_size=row.expected_size,
+                expected_mtime_ns=row.expected_mtime_ns,
+                expected_hash=row.expected_hash,
+                metadata_json=row.metadata_json,
+                allowed_roots=self.settings.allowed_roots,
+                quarantine_root=self.settings.quarantine_root,
+                check_hash=True,
+                allow_deferred_chained_missing=True,
+            )
+            if not is_fresh and stale_detail:
+                stale_items.append(stale_detail.to_dict())
+
+        if len(stale_items) > 0:
+            with self.SessionLocal() as session:
+                session.execute(text("BEGIN IMMEDIATE"))
+                plan = session.get(BatchPlan, plan_id)
+                if plan:
+                    plan.status = "stale"
+                for s in stale_items:
+                    row = session.get(BatchPlanItem, s["item_id"])
+                    if row:
+                        row.state = "stale"
+                        row.reason = s["reason"]
+                session.commit()
+            raise PlanStaleError(
+                plan_id=plan_id,
+                message="计划已过期，文件已被修改、删除或替换",
+                stale_items=stale_items,
+            )
+
+        with self.SessionLocal() as session:
+            plan = session.get(BatchPlan, plan_id)
             plan.status = "executing"
             session.commit()
 
@@ -1488,6 +1835,7 @@ class FileCenterService:
                 "expected_reclaim_bytes": plan.expected_reclaim_bytes,
                 "created_at": plan.created_at,
                 "frozen_at": plan.frozen_at,
+                "metadata": json.loads(plan.metadata_json or "{}"),
                 "total_items": total_items,
                 "page": page,
                 "page_size": page_size,

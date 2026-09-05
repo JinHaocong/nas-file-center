@@ -29,6 +29,7 @@ from app.models import (
 )
 from app.exceptions import StateConflictError
 from app.path_safety import require_allowed_path
+from app.planning.stale import verify_item_freshness
 from app.quarantine.paths import build_quarantine_target_path, safe_quarantine_hash
 from app.quarantine.restore import (
     validate_quarantine_for_restore,
@@ -720,6 +721,55 @@ def _reconcile_executing_item(
             item.state = "failed"
             item.reason = "reconciliation failed: source does not exist"
 
+def _verify_plan_item_and_keep_freshness(
+    item_meta: Any,
+    settings: Settings,
+) -> tuple[bool, Any]:
+    is_fresh, stale_detail = verify_item_freshness(
+        item_id=item_meta.id,
+        source_path=item_meta.source_path,
+        operation=item_meta.operation,
+        expected_device=item_meta.expected_device,
+        expected_inode=item_meta.expected_inode,
+        expected_size=item_meta.expected_size,
+        expected_mtime_ns=item_meta.expected_mtime_ns,
+        expected_hash=item_meta.expected_hash,
+        metadata_json=item_meta.metadata_json,
+        allowed_roots=settings.allowed_roots,
+        quarantine_root=settings.quarantine_root,
+        check_hash=True,
+    )
+    if not is_fresh:
+        return False, stale_detail
+
+    if item_meta.keep_path:
+        meta: dict[str, Any] = {}
+        if item_meta.metadata_json:
+            try:
+                meta = json.loads(item_meta.metadata_json)
+            except Exception:
+                meta = {}
+        keep_snap = meta.get("keep_snapshot")
+        if keep_snap:
+            k_fresh, k_stale = verify_item_freshness(
+                item_id=item_meta.id,
+                source_path=item_meta.keep_path,
+                operation="",
+                expected_device=keep_snap.get("device", 0),
+                expected_inode=keep_snap.get("inode", 0),
+                expected_size=keep_snap.get("size", 0),
+                expected_mtime_ns=keep_snap.get("mtime_ns", 0),
+                expected_hash=item_meta.expected_hash or keep_snap.get("hash"),
+                metadata_json=json.dumps({"snapshot": keep_snap}),
+                allowed_roots=settings.allowed_roots,
+                quarantine_root=settings.quarantine_root,
+                check_hash=True,
+            )
+            if not k_fresh:
+                return False, k_stale
+
+    return True, None
+
 
 @register_handler
 class BatchPlanExecuteHandler(TaskHandler):
@@ -808,6 +858,66 @@ class BatchPlanExecuteHandler(TaskHandler):
             progress_message=f"Executing plan #{plan_id} ({completed_or_skipped}/{total_count} processed)...",
         )
 
+        # Worker Preflight Check: Verify freshness of unexecuted items before first mutation
+        unexecuted_items = [
+            it for it in all_items
+            if it.state not in ("completed", "skipped", "failed")
+            and it.id not in reconciled_failed_item_ids
+            and it.operation != "restore"
+        ]
+        worker_stale_items = []
+        for it in unexecuted_items:
+            is_fresh, stale_detail = verify_item_freshness(
+                item_id=it.id,
+                source_path=it.source_path,
+                operation=it.operation,
+                expected_device=it.expected_device,
+                expected_inode=it.expected_inode,
+                expected_size=it.expected_size,
+                expected_mtime_ns=it.expected_mtime_ns,
+                expected_hash=it.expected_hash,
+                metadata_json=it.metadata_json,
+                allowed_roots=settings.allowed_roots,
+                quarantine_root=settings.quarantine_root,
+                check_hash=True,
+                allow_deferred_chained_missing=True,
+            )
+            if not is_fresh and stale_detail:
+                worker_stale_items.append(stale_detail)
+            elif it.keep_path:
+                is_k_fresh, k_detail = verify_item_freshness(
+                    item_id=it.id,
+                    source_path=it.keep_path,
+                    allowed_roots=settings.allowed_roots,
+                    quarantine_root=settings.quarantine_root,
+                    check_hash=False,
+                )
+                if not is_k_fresh and k_detail:
+                    worker_stale_items.append(k_detail)
+
+        if worker_stale_items:
+            with context.SessionLocal() as session:
+                session.execute(text("BEGIN IMMEDIATE"))
+                now = utcnow()
+                if context.worker_id is not None:
+                    assert_active_worker_lease(session, context.worker_id, now=now)
+                plan = session.get(BatchPlan, plan_id)
+                completed_count = sum(1 for it in all_items if it.state == "completed")
+                if plan:
+                    plan.status = "partial" if completed_count > 0 else "stale"
+                for s in worker_stale_items:
+                    row = session.get(BatchPlanItem, s.item_id)
+                    if row:
+                        row.state = "failed"
+                        row.reason = f"Plan stale: {s.reason}"
+                session.commit()
+            context.checkpoint(
+                progress_current=completed_or_skipped,
+                progress_total=total_count,
+                progress_message=f"Plan #{plan_id} execution aborted: stale items detected before mutation",
+            )
+            return
+
         # 3. Item-by-item 3-phase execution
         for item_meta in all_items:
             # Check current status in DB before starting Phase 1
@@ -818,6 +928,47 @@ class BatchPlanExecuteHandler(TaskHandler):
                 row = session.get(BatchPlanItem, item_meta.id)
                 if row is None or row.state in ("completed", "skipped", "failed") or row.id in reconciled_failed_item_ids:
                     continue
+
+            # Boundary Freshness Check
+            if item_meta.operation != "restore":
+                is_fresh, stale_detail = _verify_plan_item_and_keep_freshness(item_meta, settings)
+                if not is_fresh:
+                    stale_reason = f"Item stale: {stale_detail.reason if stale_detail else 'stale'}"
+                    with context.SessionLocal() as session:
+                        session.execute(text("BEGIN IMMEDIATE"))
+                        now = utcnow()
+                        if context.worker_id is not None:
+                            assert_active_worker_lease(session, context.worker_id, now=now)
+                        row = session.get(BatchPlanItem, item_meta.id)
+                        if row:
+                            row.state = "failed"
+                            row.reason = stale_reason
+
+                        plan = session.get(BatchPlan, plan_id)
+                        items = list(session.scalars(select(BatchPlanItem).where(BatchPlanItem.plan_id == plan_id)))
+                        completed_count = sum(1 for it in items if it.state == "completed")
+                        plan_meta = json.loads(plan.metadata_json or "{}")
+                        exec_meta = plan_meta.setdefault("execution", {})
+                        if completed_count > 0:
+                            plan.status = "partial"
+                            exec_meta["termination_reason"] = "PLAN_STALE"
+                        else:
+                            plan.status = "stale"
+                        plan.metadata_json = json.dumps(plan_meta, ensure_ascii=False)
+
+                        session.add(AuditEvent(
+                            operation=item_meta.operation,
+                            path=item_meta.source_path,
+                            result="failed",
+                            details_json=json.dumps({
+                                "plan_id": plan_id,
+                                "item_id": item_meta.id,
+                                "task_id": job.id,
+                                "reason": stale_reason,
+                            }, ensure_ascii=False),
+                        ))
+                        session.commit()
+                    break
 
             # Checkpoint at item boundary
             context.checkpoint(
@@ -1027,10 +1178,44 @@ class BatchPlanExecuteHandler(TaskHandler):
                     session.commit()
 
             # Final immediate source identity/stat check before mutation
-            if item_meta.operation == "restore" and verified_restore_stat is not None:
-                try:
-                    assert_source_unmodified(src_p, verified_restore_stat)
-                except ValueError as exc:
+            if item_meta.operation == "restore":
+                if verified_restore_stat is not None:
+                    try:
+                        assert_source_unmodified(src_p, verified_restore_stat)
+                    except ValueError as exc:
+                        with context.SessionLocal() as session:
+                            session.execute(text("BEGIN IMMEDIATE"))
+                            now = utcnow()
+                            if context.worker_id is not None:
+                                assert_active_worker_lease(session, context.worker_id, now=now)
+                            row = session.get(BatchPlanItem, item_meta.id)
+                            if row:
+                                row.state = "failed"
+                                row.reason = str(exc)
+                            if q_restore_entry_id:
+                                qe = session.get(QuarantineEntry, q_restore_entry_id)
+                                if qe:
+                                    qe.state = "inconsistent"
+                                    qe.last_error = str(exc)
+                                    qe.updated_at = now
+                            session.add(AuditEvent(
+                                operation="restore",
+                                path=str(src_p),
+                                result="failed",
+                                details_json=json.dumps({
+                                    "plan_id": plan_id,
+                                    "item_id": item_meta.id,
+                                    "task_id": job.id,
+                                    "reason": str(exc),
+                                }, ensure_ascii=False),
+                            ))
+                            session.commit()
+                        completed_or_skipped += 1
+                        continue
+            else:
+                final_fresh, final_stale_detail = _verify_plan_item_and_keep_freshness(item_meta, settings)
+                if not final_fresh:
+                    stale_reason = f"Item stale: {final_stale_detail.reason if final_stale_detail else 'stale'}"
                     with context.SessionLocal() as session:
                         session.execute(text("BEGIN IMMEDIATE"))
                         now = utcnow()
@@ -1039,27 +1224,39 @@ class BatchPlanExecuteHandler(TaskHandler):
                         row = session.get(BatchPlanItem, item_meta.id)
                         if row:
                             row.state = "failed"
-                            row.reason = str(exc)
-                        if q_restore_entry_id:
-                            qe = session.get(QuarantineEntry, q_restore_entry_id)
+                            row.reason = stale_reason
+                        if q_entry_id:
+                            qe = session.get(QuarantineEntry, q_entry_id)
                             if qe:
-                                qe.state = "inconsistent"
-                                qe.last_error = str(exc)
+                                qe.state = "abandoned"
+                                qe.last_error = stale_reason
                                 qe.updated_at = now
+
+                        plan = session.get(BatchPlan, plan_id)
+                        items = list(session.scalars(select(BatchPlanItem).where(BatchPlanItem.plan_id == plan_id)))
+                        completed_count = sum(1 for it in items if it.state == "completed")
+                        plan_meta = json.loads(plan.metadata_json or "{}")
+                        exec_meta = plan_meta.setdefault("execution", {})
+                        if completed_count > 0:
+                            plan.status = "partial"
+                            exec_meta["termination_reason"] = "PLAN_STALE"
+                        else:
+                            plan.status = "stale"
+                        plan.metadata_json = json.dumps(plan_meta, ensure_ascii=False)
+
                         session.add(AuditEvent(
-                            operation="restore",
-                            path=str(src_p),
+                            operation=item_meta.operation,
+                            path=item_meta.source_path,
                             result="failed",
                             details_json=json.dumps({
                                 "plan_id": plan_id,
                                 "item_id": item_meta.id,
                                 "task_id": job.id,
-                                "reason": str(exc),
+                                "reason": stale_reason,
                             }, ensure_ascii=False),
                         ))
                         session.commit()
-                    completed_or_skipped += 1
-                    continue
+                    break
 
             result = execute_item(
                 item_op,
@@ -1238,7 +1435,22 @@ class BatchPlanExecuteHandler(TaskHandler):
             plan = session.get(BatchPlan, plan_id)
             items = list(session.scalars(select(BatchPlanItem).where(BatchPlanItem.plan_id == plan_id)))
             states = {it.state for it in items}
-            plan.status = "completed" if states <= {"completed"} else "partial"
+            completed_count = sum(1 for it in items if it.state == "completed")
+            plan_meta = json.loads(plan.metadata_json or "{}")
+            exec_meta = plan_meta.setdefault("execution", {})
+            has_stale_failure = any(
+                it.state == "stale" or (it.state == "failed" and "stale" in (it.reason or "").lower())
+                for it in items
+            )
+            if states <= {"completed"}:
+                plan.status = "completed"
+            elif completed_count > 0:
+                plan.status = "partial"
+                if has_stale_failure:
+                    exec_meta["termination_reason"] = "PLAN_STALE"
+            else:
+                plan.status = "stale" if any(it.state in ("stale", "failed") for it in items) else "partial"
+            plan.metadata_json = json.dumps(plan_meta, ensure_ascii=False)
             session.commit()
 
         context.checkpoint(

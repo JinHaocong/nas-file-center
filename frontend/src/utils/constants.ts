@@ -15,6 +15,7 @@ export const STATUS_MAP: Record<string, { label: string; color: string }> = {
   planned: { label: '待校验', color: 'default' },
   validated: { label: '已校验', color: 'success' },
   skipped: { label: '已跳过', color: 'warning' },
+  stale: { label: '已过期 (文件已变更)', color: 'error' },
 };
 
 export const POLICY_OPTIONS = [

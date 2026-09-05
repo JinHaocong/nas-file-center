@@ -21,7 +21,10 @@ import {
   CheckCircleOutlined,
   PlayCircleOutlined,
   ArrowRightOutlined,
+  HistoryOutlined,
+  RollbackOutlined,
 } from '@ant-design/icons';
+import { OperationJournalDrawer } from './OperationJournalDrawer';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { plansApi, settingsApi } from '../../api/domain';
 import { useTitle } from '../../hooks/useTitle';
@@ -46,6 +49,7 @@ export const PlanDetailPage: React.FC = () => {
 
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
+  const [journalDrawerOpen, setJournalDrawerOpen] = useState(false);
 
   const { data: settings } = useQuery({
     queryKey: ['settings'],
@@ -61,6 +65,25 @@ export const PlanDetailPage: React.FC = () => {
   } = useQuery({
     queryKey: ['planDetail', planId, page, pageSize],
     queryFn: () => plansApi.getPlanDetail(planId, page, pageSize),
+  });
+
+  const { data: journalData, refetch: refetchJournal } = useQuery({
+    queryKey: ['planOperationJournalSummary', planId],
+    queryFn: () => plansApi.getOperationJournal(planId, 1, 1),
+    enabled: !!planId,
+  });
+
+  const undoPlanMutation = useMutation({
+    mutationFn: () => plansApi.createUndoPlan(planId),
+    onSuccess: (res) => {
+      message.success(`已成功创建撤销计划 #${res.id}（共 ${res.total_items} 项逆向操作）`);
+      queryClient.invalidateQueries({ queryKey: ['plansList'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboardSummary'] });
+      navigate(`/plans/${res.id}`);
+    },
+    onError: (err: any) => {
+      message.error(err.message || '生成撤销计划失败');
+    },
   });
 
   const freezeMutation = useMutation({
@@ -174,6 +197,11 @@ export const PlanDetailPage: React.FC = () => {
   const hasActiveJob = Boolean(plan.active_work_job_id);
   const executeDisabled = isSafeMode || hasActiveJob;
   const statusConfig = STATUS_MAP[plan.status] || { label: plan.status, color: 'default' };
+
+  const journalTotal = journalData?.total ?? 0;
+  const canCreateUndo =
+    (plan.status === 'completed' || plan.status === 'partial') &&
+    (journalTotal > 0 || plan.expected_changes > 0);
 
   const columns = [
     {
@@ -298,7 +326,7 @@ export const PlanDetailPage: React.FC = () => {
             </Button>
           )}
 
-          {(plan.status === 'frozen' || plan.status === 'ready' || plan.status === 'partial') && (
+          {(plan.status === 'frozen' || plan.status === 'ready' || plan.status === 'partial' || plan.status === 'stale') && (
             <Tooltip
               title={
                 hasActiveJob
@@ -355,6 +383,47 @@ export const PlanDetailPage: React.FC = () => {
             </Tooltip>
           )}
 
+          <Button
+            icon={<HistoryOutlined />}
+            onClick={() => {
+              refetchJournal();
+              setJournalDrawerOpen(true);
+            }}
+          >
+            操作日志 {journalTotal > 0 ? `(${journalTotal})` : ''}
+          </Button>
+
+          {canCreateUndo && (
+            <Tooltip
+              title={
+                hasActiveJob
+                  ? `该计划当前已有执行任务进行中 (任务 #${plan.active_work_job_id})`
+                  : '基于底层操作日志倒序生成一份逆向还原计划'
+              }
+            >
+              <span>
+                <Popconfirm
+                  title="确认生成撤销计划？"
+                  description="系统将基于该计划已完成的操作日志（Operation Journal）倒序生成一份新的 Undo 计划。新计划为独立草稿态，仍需按常规流程完成参数冻结与实时校验后方可执行。"
+                  onConfirm={() => undoPlanMutation.mutate()}
+                  disabled={hasActiveJob || undoPlanMutation.isPending}
+                  okText="生成撤销计划"
+                  cancelText="取消"
+                >
+                  <Button
+                    type="primary"
+                    ghost
+                    icon={<RollbackOutlined />}
+                    loading={undoPlanMutation.isPending}
+                    disabled={hasActiveJob}
+                  >
+                    生成撤销计划 (Undo)
+                  </Button>
+                </Popconfirm>
+              </span>
+            </Tooltip>
+          )}
+
           <PlanDeleteButton
             plan={plan}
             onDelete={() => deleteMutation.mutate()}
@@ -364,6 +433,44 @@ export const PlanDetailPage: React.FC = () => {
           />
         </Space>
       </div>
+
+      {(plan.kind === 'undo' || plan.metadata?.is_undo) && (
+        <Alert
+          message={`撤销还原计划 (Undo Plan for #${plan.metadata?.undo_of_plan_id || plan.metadata?.undo_for_plan_id || 'Unknown'})`}
+          description={
+            <div>
+              本计划为计划 #{plan.metadata?.undo_of_plan_id || plan.metadata?.undo_for_plan_id} 的撤销还原计划。所有操作项已根据底层操作日志严格倒序排布。
+              <div style={{ marginTop: 4, fontWeight: 500, color: '#1677ff' }}>
+                安全声明：Undo 计划绝不支持直接原地执行，必须严格按照常规生命周期完成 Freeze 冻结与实时 SHA256 校验后方可通过任务中心安全执行。
+              </div>
+            </div>
+          }
+          type="info"
+          showIcon
+          icon={<RollbackOutlined />}
+          action={
+            (plan.metadata?.undo_of_plan_id || plan.metadata?.undo_for_plan_id) ? (
+              <Button
+                size="small"
+                onClick={() => navigate(`/plans/${plan.metadata?.undo_of_plan_id || plan.metadata?.undo_for_plan_id}`)}
+              >
+                查看原计划
+              </Button>
+            ) : undefined
+          }
+          style={{ marginBottom: 16 }}
+        />
+      )}
+
+      {plan.status === 'stale' && (
+        <Alert
+          message="计划已过期 (PLAN_STALE)"
+          description="计划中的源文件已被外部修改、移动、删除或替换。为保障 NAS 数据安全，该计划已被锁定，严禁执行。如需继续操作，请删除此计划并重新生成。"
+          type="error"
+          showIcon
+          style={{ marginBottom: 16 }}
+        />
+      )}
 
       {isSafeMode && (
         <Alert
@@ -380,7 +487,16 @@ export const PlanDetailPage: React.FC = () => {
         <Descriptions bordered column={{ xs: 1, sm: 2, md: 3 }}>
           <Descriptions.Item label="计划 ID">#{plan.id}</Descriptions.Item>
           <Descriptions.Item label="计划类型">
-            <Tag color="geekblue">{plan.kind}</Tag>
+            <Space wrap>
+              <Tag color={plan.kind === 'undo' ? 'magenta' : 'geekblue'}>
+                {plan.kind === 'undo' ? 'undo (撤销计划)' : plan.kind}
+              </Tag>
+              {(plan.metadata?.undo_of_plan_id || plan.metadata?.undo_for_plan_id) && (
+                <Tag color="cyan">
+                  源计划: #{plan.metadata?.undo_of_plan_id || plan.metadata?.undo_for_plan_id}
+                </Tag>
+              )}
+            </Space>
           </Descriptions.Item>
           <Descriptions.Item label="创建时间">{formatDateTime(plan.created_at)}</Descriptions.Item>
           <Descriptions.Item label="预计变更项数">
@@ -421,6 +537,12 @@ export const PlanDetailPage: React.FC = () => {
           }}
         />
       </Card>
+
+      <OperationJournalDrawer
+        planId={planId}
+        open={journalDrawerOpen}
+        onClose={() => setJournalDrawerOpen(false)}
+      />
     </div>
   );
 };

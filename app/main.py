@@ -14,6 +14,7 @@ from app.auth.dependencies import get_current_user
 from app.auth.rate_limiter import LoginRateLimiter
 from app.auth.router import router as auth_router
 from app.config import Settings, get_settings
+from app.exceptions import PlanStaleError
 from app.service import FileCenterService
 
 
@@ -50,6 +51,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
         sanitized = _sanitize_validation_errors(exc.errors())
         return JSONResponse(status_code=422, content={"detail": sanitized})
+
+    @app.exception_handler(PlanStaleError)
+    async def plan_stale_exception_handler(request: Request, exc: PlanStaleError):
+        return JSONResponse(
+            status_code=409,
+            content={
+                "error": {
+                    "code": "PLAN_STALE",
+                    "message": exc.message,
+                    "details": {
+                        "plan_id": exc.plan_id,
+                        "stale_count": len(exc.stale_items),
+                        "stale_items": exc.stale_items,
+                    },
+                }
+            },
+        )
+
     app.state.settings = settings
     app.state.rate_limiter = rate_limiter
 
