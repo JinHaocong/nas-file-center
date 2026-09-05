@@ -46,11 +46,13 @@ from app.models import (
     WorkJob,
     utcnow,
 )
+from app.exceptions import StateConflictError
 from app.quarantine.paths import (
     build_quarantine_target_path,
     build_restore_rename_path,
     safe_quarantine_hash,
 )
+from app.quarantine.restore import validate_quarantine_for_restore
 from app.path_safety import (
     UnsafePathError,
     is_reserved_quarantine_path,
@@ -116,8 +118,6 @@ def _index_job_root(job: WorkJob) -> str | None:
     return root
 
 
-class StateConflictError(ValueError):
-    pass
 
 
 ACTIVE_EXECUTION_JOB_STATUSES: tuple[str, ...] = ("queued", "running", "paused", "cancel_requested")
@@ -1070,6 +1070,21 @@ class FileCenterService:
                         row.state = "skipped"
                         row.reason = result.reason
                         all_ok = False
+                elif row.operation == "restore":
+                    meta = json.loads(row.metadata_json or "{}")
+                    qid = meta.get("quarantine_entry_id") or meta.get("undo", {}).get("quarantine_entry_id")
+                    q_entry = session.get(QuarantineEntry, int(qid)) if qid else None
+                    if not q_entry or q_entry.state != "active":
+                        row.state = "skipped"
+                        row.reason = f"Quarantine entry #{qid} is invalid or not active"
+                        all_ok = False
+                    elif not Path(row.source_path).exists():
+                        row.state = "skipped"
+                        row.reason = f"Quarantine file does not exist: {row.source_path}"
+                        all_ok = False
+                    else:
+                        row.state = "validated"
+                        row.reason = "quarantine restore validated"
                 else:
                     row.state = "validated"
                     row.reason = "metadata validation deferred to execution"
@@ -1582,8 +1597,11 @@ class FileCenterService:
                 status="draft",
                 expected_changes=len(entries),
                 metadata_json=json.dumps({
+                    "is_undo": True,
+                    "undo_of_plan_id": plan_id,
                     "undo_for_plan_id": plan_id,
                     "created_by_user_id": user_id,
+                    "source_journal_ids": [e.id for e in entries],
                 }, ensure_ascii=False),
                 created_at=utcnow(),
             )
@@ -1601,26 +1619,41 @@ class FileCenterService:
                     op = entry.operation
                     expected_size = after.get("size") or before.get("size") or 0
                     expected_mtime_ns = 0
+                    meta["undo"] = {"source_journal_id": entry.id}
                 elif entry.operation == "quarantine":
                     source_p = after.get("quarantine_path") or ""
                     target_p = before.get("path") or ""
                     op = "restore"
                     expected_size = after.get("size") or before.get("size") or 0
                     expected_mtime_ns = 0
-                    meta["quarantine_entry_id"] = after.get("quarantine_entry_id")
+                    qid = after.get("quarantine_entry_id")
+                    meta["quarantine_entry_id"] = qid
                     meta["source_journal_id"] = entry.id
+                    meta["undo"] = {
+                        "source_journal_id": entry.id,
+                        "quarantine_entry_id": qid,
+                    }
+                elif entry.operation == "restore":
+                    source_p = after.get("restored_path") or before.get("original_path") or ""
+                    target_p = None
+                    op = "quarantine"
+                    expected_size = after.get("size") or before.get("size") or 0
+                    expected_mtime_ns = after.get("mtime_ns") or 0
+                    meta["undo"] = {
+                        "source_journal_id": entry.id,
+                        "inverse_of_restore": True,
+                    }
                 elif entry.operation == "touch":
                     source_p = after.get("path") or before.get("path") or ""
                     target_p = None
                     op = "touch"
                     expected_size = 0
                     expected_mtime_ns = before.get("mtime_ns") or 0
+                    meta["undo"] = {"source_journal_id": entry.id}
                 else:
-                    source_p = after.get("path") or before.get("path") or ""
-                    target_p = before.get("path")
-                    op = entry.operation
-                    expected_size = 0
-                    expected_mtime_ns = 0
+                    raise ValueError(
+                        f"Cannot create undo plan: unsupported operation '{entry.operation}' in journal #{entry.id}"
+                    )
 
                 session.add(BatchPlanItem(
                     plan_id=undo_plan.id,
@@ -2676,49 +2709,18 @@ class FileCenterService:
             if not entry:
                 raise KeyError(f"Quarantine entry #{entry_id} not found")
 
-            if entry.state != "active":
-                raise StateConflictError(f"Cannot restore quarantine entry in state '{entry.state}'")
-
-            target = Path(entry.quarantine_path)
-            if not target.exists():
-                entry.state = "inconsistent"
-                entry.last_error = f"Quarantined target file does not exist: {target}"
+            try:
+                target, dest = validate_quarantine_for_restore(
+                    entry,
+                    allowed_roots=self.settings.allowed_roots,
+                    quarantine_root=self.settings.quarantine_root,
+                    custom_target=custom_target,
+                    conflict_policy=conflict_policy,
+                )
+            except (StateConflictError, ValueError):
                 entry.updated_at = utcnow()
                 session.commit()
-                raise StateConflictError(f"Quarantined target file does not exist: {target}")
-
-            if target.is_symlink() or os.path.islink(target):
-                entry.state = "inconsistent"
-                entry.last_error = "Quarantined target file is a symlink"
-                entry.updated_at = utcnow()
-                session.commit()
-                raise ValueError("Quarantined target is a symlink, restore aborted")
-
-            # Hash verification if recorded
-            if entry.content_hash:
-                current_hash = safe_quarantine_hash(target)
-                if current_hash != entry.content_hash:
-                    entry.state = "inconsistent"
-                    entry.last_error = f"Hash verification failed: expected {entry.content_hash}, got {current_hash}"
-                    entry.updated_at = utcnow()
-                    session.commit()
-                    raise ValueError(f"Quarantined file hash mismatch (expected {entry.content_hash}, got {current_hash})")
-
-            # Determine destination path
-            if conflict_policy == "manual":
-                if not custom_target or not custom_target.strip():
-                    raise ValueError("custom_target is required when conflict_policy is 'manual'")
-                dest = validate_mutation_destination(
-                    custom_target.strip(),
-                    self.settings.allowed_roots,
-                    quarantine_root=self.settings.quarantine_root,
-                )
-            else:
-                dest = validate_mutation_destination(
-                    entry.original_path,
-                    self.settings.allowed_roots,
-                    quarantine_root=self.settings.quarantine_root,
-                )
+                raise
 
             # Check conflict
             if dest.exists() or dest.is_symlink():

@@ -26,8 +26,10 @@ from app.models import (
     WorkJob,
     utcnow,
 )
+from app.exceptions import StateConflictError
 from app.path_safety import require_allowed_path
 from app.quarantine.paths import build_quarantine_target_path, safe_quarantine_hash
+from app.quarantine.restore import validate_quarantine_for_restore
 from app.scanners.fclones import build_group_command, run_scan
 from app.scanners.parser import parse_fclones_report, parse_fclones_report_iter
 from app.tasks.context import JobContext
@@ -365,17 +367,58 @@ class FclonesScanHandler(TaskHandler):
             raise
 
 
+def _check_target_identity(tgt: Path, source_stat: dict) -> bool:
+    if not source_stat:
+        return True
+    try:
+        st = tgt.stat(follow_symlinks=False)
+    except OSError:
+        return False
+    src_dev = source_stat.get("device")
+    src_ino = source_stat.get("inode")
+    src_size = source_stat.get("size")
+    if src_dev is not None and st.st_dev == src_dev:
+        if src_ino is not None and st.st_ino != src_ino:
+            return False
+    else:
+        if src_size is not None and st.st_size != src_size:
+            return False
+    return True
+
+
+def _build_stat_dict(p: Path, st: os.stat_result) -> dict:
+    obj_type = "directory" if p.is_dir() else ("symlink" if p.is_symlink() else "file")
+    return {
+        "object_type": obj_type,
+        "size": st.st_size,
+        "mtime_ns": getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9)),
+        "device": getattr(st, "st_dev", 0),
+        "inode": getattr(st, "st_ino", 0),
+    }
+
+
 def _reconcile_executing_item(session, item: BatchPlanItem, plan_id: int, job_id: int, user_id: int | None, settings: Settings, now) -> None:
     """Reconcile an item found in 'executing' state after a crash or worker restart."""
     src = Path(item.source_path)
+    meta = json.loads(item.metadata_json or "{}")
+    exec_meta = meta.get("execution") or {}
+    source_stat = exec_meta.get("source_stat") or {}
+    metadata_before = exec_meta.get("metadata_before") or source_stat
+
     if item.operation in ("rename", "move"):
         tgt = Path(item.target_path) if item.target_path else None
         if tgt and tgt.exists() and not src.exists():
+            st = tgt.stat(follow_symlinks=False)
+            if not _check_target_identity(tgt, source_stat):
+                item.state = "failed"
+                item.reason = "reconciliation conflict after crash (target identity mismatch)"
+                return
+
             item.state = "completed"
             item.reason = "reconciled after crash (target exists)"
             existing_j = session.scalar(select(OperationJournal).where(OperationJournal.plan_item_id == item.id))
             if not existing_j:
-                st = tgt.stat(follow_symlinks=False)
+                res_stat = _build_stat_dict(tgt, st)
                 session.add(OperationJournal(
                     operation=item.operation,
                     sequence=item.sequence,
@@ -383,10 +426,10 @@ def _reconcile_executing_item(session, item: BatchPlanItem, plan_id: int, job_id
                     plan_item_id=item.id,
                     task_id=job_id,
                     user_id=user_id,
-                    before_json=json.dumps({"path": str(src), "size": item.expected_size}, ensure_ascii=False),
+                    before_json=json.dumps({"path": str(src), "size": source_stat.get("size") or item.expected_size, "mtime_ns": source_stat.get("mtime_ns")}, ensure_ascii=False),
                     after_json=json.dumps({"path": str(tgt), "size": st.st_size, "mtime_ns": getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))}, ensure_ascii=False),
-                    metadata_before_json="{}",
-                    metadata_after_json="{}",
+                    metadata_before_json=json.dumps(metadata_before or source_stat, ensure_ascii=False),
+                    metadata_after_json=json.dumps(res_stat, ensure_ascii=False),
                     created_at=now,
                 ))
         elif src.exists() and (not tgt or not tgt.exists()):
@@ -400,18 +443,31 @@ def _reconcile_executing_item(session, item: BatchPlanItem, plan_id: int, job_id
         q_entry = session.scalar(select(QuarantineEntry).where(QuarantineEntry.plan_item_id == item.id))
         tgt = Path(q_entry.quarantine_path) if q_entry and q_entry.quarantine_path else (Path(item.target_path) if item.target_path else None)
         if tgt and tgt.exists() and not src.exists():
+            st = tgt.stat(follow_symlinks=False)
+            if not _check_target_identity(tgt, source_stat):
+                item.state = "failed"
+                item.reason = "reconciliation conflict after crash (target identity mismatch)"
+                if q_entry:
+                    q_entry.state = "abandoned"
+                    q_entry.last_error = item.reason
+                    q_entry.updated_at = now
+                return
+
             item.state = "completed"
             item.reason = "reconciled after crash (quarantine exists)"
             if q_entry:
-                st = tgt.stat(follow_symlinks=False)
                 q_entry.size = st.st_size
                 q_entry.mtime_ns = getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))
+                q_entry.device = getattr(st, "st_dev", 0)
+                q_entry.inode = getattr(st, "st_ino", 0)
+                if tgt.is_file() and not tgt.is_symlink():
+                    q_entry.content_hash = safe_quarantine_hash(tgt)
                 q_entry.state = "active"
                 q_entry.quarantined_at = q_entry.quarantined_at or now
                 q_entry.updated_at = now
             existing_j = session.scalar(select(OperationJournal).where(OperationJournal.plan_item_id == item.id))
             if not existing_j:
-                st = tgt.stat(follow_symlinks=False)
+                res_stat = _build_stat_dict(tgt, st)
                 session.add(OperationJournal(
                     operation=item.operation,
                     sequence=item.sequence,
@@ -419,10 +475,10 @@ def _reconcile_executing_item(session, item: BatchPlanItem, plan_id: int, job_id
                     plan_item_id=item.id,
                     task_id=job_id,
                     user_id=user_id,
-                    before_json=json.dumps({"path": str(src), "size": item.expected_size}, ensure_ascii=False),
-                    after_json=json.dumps({"quarantine_path": str(tgt), "quarantine_entry_id": q_entry.id if q_entry else None, "size": st.st_size}, ensure_ascii=False),
-                    metadata_before_json="{}",
-                    metadata_after_json="{}",
+                    before_json=json.dumps({"path": str(src), "size": source_stat.get("size") or item.expected_size, "mtime_ns": source_stat.get("mtime_ns"), "is_dir": False}, ensure_ascii=False),
+                    after_json=json.dumps({"quarantine_path": str(tgt), "quarantine_entry_id": q_entry.id if q_entry else None, "size": st.st_size, "mtime_ns": getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))}, ensure_ascii=False),
+                    metadata_before_json=json.dumps(metadata_before or source_stat, ensure_ascii=False),
+                    metadata_after_json=json.dumps(res_stat, ensure_ascii=False),
                     created_at=now,
                 ))
         elif src.exists() and (not tgt or not tgt.exists()):
@@ -437,10 +493,28 @@ def _reconcile_executing_item(session, item: BatchPlanItem, plan_id: int, job_id
 
     elif item.operation == "restore":
         tgt = Path(item.target_path) if item.target_path else None
-        meta = json.loads(item.metadata_json or "{}")
-        qid = meta.get("quarantine_entry_id")
+        qid = meta.get("quarantine_entry_id") or meta.get("undo", {}).get("quarantine_entry_id")
         q_entry = session.get(QuarantineEntry, int(qid)) if qid else None
         if tgt and tgt.exists() and not src.exists():
+            st = tgt.stat(follow_symlinks=False)
+            if not _check_target_identity(tgt, source_stat):
+                item.state = "failed"
+                item.reason = "reconciliation conflict after crash (target identity mismatch)"
+                if q_entry:
+                    q_entry.state = "inconsistent"
+                    q_entry.last_error = item.reason
+                    q_entry.updated_at = now
+                return
+            if q_entry and q_entry.content_hash and tgt.is_file():
+                current_h = safe_quarantine_hash(tgt)
+                if current_h != q_entry.content_hash:
+                    item.state = "failed"
+                    item.reason = f"reconciliation conflict after crash (hash mismatch: expected {q_entry.content_hash}, got {current_h})"
+                    q_entry.state = "inconsistent"
+                    q_entry.last_error = item.reason
+                    q_entry.updated_at = now
+                    return
+
             item.state = "completed"
             item.reason = "reconciled after crash (restored file exists)"
             if q_entry:
@@ -449,7 +523,7 @@ def _reconcile_executing_item(session, item: BatchPlanItem, plan_id: int, job_id
                 q_entry.updated_at = now
             existing_j = session.scalar(select(OperationJournal).where(OperationJournal.plan_item_id == item.id))
             if not existing_j:
-                st = tgt.stat(follow_symlinks=False)
+                res_stat = _build_stat_dict(tgt, st)
                 session.add(OperationJournal(
                     operation=item.operation,
                     sequence=item.sequence,
@@ -457,10 +531,10 @@ def _reconcile_executing_item(session, item: BatchPlanItem, plan_id: int, job_id
                     plan_item_id=item.id,
                     task_id=job_id,
                     user_id=user_id,
-                    before_json=json.dumps({"quarantine_path": str(src), "quarantine_entry_id": q_entry.id if q_entry else None}, ensure_ascii=False),
+                    before_json=json.dumps({"quarantine_path": str(src), "quarantine_entry_id": q_entry.id if q_entry else None, "original_path": str(tgt), "size": source_stat.get("size") or item.expected_size, "mtime_ns": source_stat.get("mtime_ns")}, ensure_ascii=False),
                     after_json=json.dumps({"restored_path": str(tgt), "size": st.st_size, "mtime_ns": getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))}, ensure_ascii=False),
-                    metadata_before_json="{}",
-                    metadata_after_json="{}",
+                    metadata_before_json=json.dumps(metadata_before or source_stat, ensure_ascii=False),
+                    metadata_after_json=json.dumps(res_stat, ensure_ascii=False),
                     created_at=now,
                 ))
         elif src.exists() and (not tgt or not tgt.exists()):
@@ -628,7 +702,10 @@ class BatchPlanExecuteHandler(TaskHandler):
                 item_metadata = json.loads(row.metadata_json or "{}")
                 item_metadata["execution"] = {
                     "phase": "intent",
+                    "task_id": job.id,
+                    "operation": row.operation,
                     "source_stat": src_stat_dict,
+                    "metadata_before": src_stat_dict,
                     "target_mtime_ns": target_touch_mtime_ns,
                 }
                 row.metadata_json = json.dumps(item_metadata, ensure_ascii=False)
@@ -661,14 +738,52 @@ class BatchPlanExecuteHandler(TaskHandler):
                     target_path_str = str(q_target)
                 elif row.operation == "restore":
                     meta_dict = json.loads(row.metadata_json or "{}")
-                    qid = meta_dict.get("quarantine_entry_id")
-                    if qid:
-                        q_entry = session.get(QuarantineEntry, int(qid))
-                        if q_entry and q_entry.state == "active":
-                            q_entry.state = "restoring"
-                            q_entry.updated_at = now
-                            q_restore_entry_id = q_entry.id
-                    target_path_str = row.target_path
+                    qid = meta_dict.get("quarantine_entry_id") or meta_dict.get("undo", {}).get("quarantine_entry_id")
+                    if not qid:
+                        row.state = "failed"
+                        row.reason = "missing quarantine_entry_id for restore operation"
+                        session.commit()
+                        completed_or_skipped += 1
+                        continue
+                    q_entry = session.get(QuarantineEntry, int(qid))
+                    if not q_entry:
+                        row.state = "failed"
+                        row.reason = f"Quarantine entry #{qid} not found"
+                        session.commit()
+                        completed_or_skipped += 1
+                        continue
+
+                    try:
+                        q_tgt_p, q_dest_p = validate_quarantine_for_restore(
+                            q_entry,
+                            allowed_roots=settings.allowed_roots,
+                            quarantine_root=settings.quarantine_root,
+                            conflict_policy="skip",
+                        )
+                    except (StateConflictError, ValueError) as exc:
+                        q_entry.updated_at = now
+                        row.state = "failed"
+                        row.reason = str(exc)
+                        session.add(AuditEvent(
+                            operation=row.operation,
+                            path=row.source_path,
+                            result="failed",
+                            details_json=json.dumps({
+                                "plan_id": plan_id,
+                                "item_id": row.id,
+                                "task_id": job.id,
+                                "quarantine_entry_id": q_entry.id,
+                                "reason": str(exc),
+                            }, ensure_ascii=False),
+                        ))
+                        session.commit()
+                        completed_or_skipped += 1
+                        continue
+
+                    q_entry.state = "restoring"
+                    q_entry.updated_at = now
+                    q_restore_entry_id = q_entry.id
+                    target_path_str = str(q_dest_p)
                 else:
                     target_path_str = row.target_path
 

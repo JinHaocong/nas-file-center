@@ -5,6 +5,7 @@ from typing import Any
 from sqlalchemy import Integer, delete, func, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.exceptions import StateConflictError
 from app.models import BatchPlan, ScanJob, TaskEvent, WorkJob, WorkerState, utcnow
 from app.tasks.handlers import get_job_capabilities
 from app.tasks.logging import log_task_event
@@ -316,8 +317,10 @@ class TaskService:
                 plan = session.get(BatchPlan, int(plan_id))
                 if plan is None:
                     raise ValueError(f"Cannot retry execution: plan #{plan_id} not found")
-                if plan.status == "completed":
-                    raise ValueError(f"Cannot retry execution: plan #{plan_id} is already completed")
+                if plan.status not in {"ready", "partial"}:
+                    raise StateConflictError(
+                        f"Cannot retry execution: plan #{plan_id} is in status '{plan.status}', expected 'ready' or 'partial'"
+                    )
 
                 active_job = session.scalars(
                     select(WorkJob)
