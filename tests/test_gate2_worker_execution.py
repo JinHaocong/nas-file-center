@@ -259,10 +259,31 @@ def test_crash_recovery_reconciles_interrupted_item(tmp_path: Path):
     job_id = enqueue_res.json()["work_job_id"]
 
     # Simulate crash: item is in "executing" state, but file was physically moved before worker died!
+    st = file1.stat()
     file1.rename(target1)
     with service.SessionLocal() as session:
         item = session.scalar(select(BatchPlanItem).where(BatchPlanItem.plan_id == plan.id))
         item.state = "executing"
+        item.metadata_json = json.dumps({
+            "execution": {
+                "task_id": job_id,
+                "operation": "rename",
+                "source_stat": {
+                    "object_type": "file",
+                    "size": st.st_size,
+                    "mtime_ns": getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9)),
+                    "device": st.st_dev,
+                    "inode": st.st_ino,
+                },
+                "metadata_before": {
+                    "object_type": "file",
+                    "size": st.st_size,
+                    "mtime_ns": getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9)),
+                    "device": st.st_dev,
+                    "inode": st.st_ino,
+                },
+            }
+        })
         session.commit()
 
     # Now new worker picks up job and runs

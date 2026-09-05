@@ -52,7 +52,12 @@ from app.quarantine.paths import (
     build_restore_rename_path,
     safe_quarantine_hash,
 )
-from app.quarantine.restore import validate_quarantine_for_restore
+from app.quarantine.restore import (
+    validate_quarantine_for_restore,
+    validate_restore_destination_intent,
+    verify_quarantine_source_integrity,
+    assert_source_unmodified,
+)
 from app.path_safety import (
     UnsafePathError,
     is_reserved_quarantine_path,
@@ -2709,18 +2714,15 @@ class FileCenterService:
             if not entry:
                 raise KeyError(f"Quarantine entry #{entry_id} not found")
 
-            try:
-                target, dest = validate_quarantine_for_restore(
-                    entry,
-                    allowed_roots=self.settings.allowed_roots,
-                    quarantine_root=self.settings.quarantine_root,
-                    custom_target=custom_target,
-                    conflict_policy=conflict_policy,
-                )
-            except (StateConflictError, ValueError):
-                entry.updated_at = utcnow()
-                session.commit()
-                raise
+            target, dest = validate_restore_destination_intent(
+                entry,
+                allowed_roots=self.settings.allowed_roots,
+                quarantine_root=self.settings.quarantine_root,
+                custom_target=custom_target,
+                conflict_policy=conflict_policy,
+            )
+            expected_size = entry.size
+            expected_hash = entry.content_hash
 
             # Check conflict
             if dest.exists() or dest.is_symlink():
@@ -2742,46 +2744,71 @@ class FileCenterService:
             entry.updated_at = utcnow()
             session.commit()
 
-            # Ensure parent exists
-            dest.parent.mkdir(parents=True, exist_ok=True)
+        # Phase 2: Outside DB write transaction - verify source integrity
+        try:
+            verified_stat = verify_quarantine_source_integrity(target, expected_size, expected_hash)
+        except (StateConflictError, ValueError) as exc:
+            with self.SessionLocal() as session:
+                entry = session.get(QuarantineEntry, entry_id)
+                if entry:
+                    entry.state = "inconsistent"
+                    entry.last_error = str(exc)
+                    entry.updated_at = utcnow()
+                    session.commit()
+            raise
 
-            try:
-                from app.fs_ops import rename_noreplace
-                rename_noreplace(target, dest)
-            except FileExistsError:
-                entry.state = "active"
-                entry.last_error = f"Destination already exists: {dest}"
-                entry.updated_at = utcnow()
-                session.commit()
-                if conflict_policy == "skip":
-                    return {
-                        "id": entry.id,
-                        "state": "skipped",
-                        "status": "skipped",
-                        "reason": f"Destination already exists: {dest}",
-                        "restored_to_path": None,
-                    }
-                raise ValueError(f"Destination already exists: {dest}")
-            except OSError as exc:
-                entry.state = "active"
-                entry.last_error = str(exc)
-                entry.updated_at = utcnow()
-                session.commit()
-                if exc.errno == errno.EXDEV:
-                    raise RuntimeError("Cross-filesystem restore is not supported")
-                raise
+        # Ensure parent exists
+        dest.parent.mkdir(parents=True, exist_ok=True)
 
-            # Transition state to restored
-            now = utcnow()
+        try:
+            assert_source_unmodified(target, verified_stat)
+            from app.fs_ops import rename_noreplace
+            rename_noreplace(target, dest)
+        except FileExistsError:
+            with self.SessionLocal() as session:
+                entry = session.get(QuarantineEntry, entry_id)
+                if entry:
+                    entry.state = "active"
+                    entry.last_error = f"Destination already exists: {dest}"
+                    entry.updated_at = utcnow()
+                    session.commit()
+            if conflict_policy == "skip":
+                return {
+                    "id": entry_id,
+                    "state": "skipped",
+                    "status": "skipped",
+                    "reason": f"Destination already exists: {dest}",
+                    "restored_to_path": None,
+                }
+            raise ValueError(f"Destination already exists: {dest}")
+        except OSError as exc:
+            with self.SessionLocal() as session:
+                entry = session.get(QuarantineEntry, entry_id)
+                if entry:
+                    entry.state = "active"
+                    entry.last_error = str(exc)
+                    entry.updated_at = utcnow()
+                    session.commit()
+            if exc.errno == errno.EXDEV:
+                raise RuntimeError("Cross-filesystem restore is not supported")
+            raise
+
+        # Transition state to restored
+        now = utcnow()
+        dest_stat = dest.stat(follow_symlinks=False)
+        res_stat = {
+            "object_type": "file",
+            "size": dest_stat.st_size,
+            "mtime_ns": getattr(dest_stat, "st_mtime_ns", int(dest_stat.st_mtime * 1e9)),
+            "device": getattr(dest_stat, "st_dev", 0),
+            "inode": getattr(dest_stat, "st_ino", 0),
+        }
+
+        with self.SessionLocal() as session:
+            entry = session.get(QuarantineEntry, entry_id)
             entry.state = "restored"
             entry.restored_at = now
             entry.updated_at = now
-
-            dest_stat = None
-            try:
-                dest_stat = dest.stat(follow_symlinks=False)
-            except OSError:
-                pass
 
             session.add(OperationJournal(
                 operation="restore",
@@ -2797,11 +2824,11 @@ class FileCenterService:
                 }, ensure_ascii=False),
                 after_json=json.dumps({
                     "restored_path": str(dest),
-                    "size": dest_stat.st_size if dest_stat else entry.size,
-                    "mtime_ns": getattr(dest_stat, "st_mtime_ns", int(dest_stat.st_mtime * 1e9)) if dest_stat else entry.mtime_ns,
+                    "size": dest_stat.st_size,
+                    "mtime_ns": getattr(dest_stat, "st_mtime_ns", int(dest_stat.st_mtime * 1e9)),
                 }, ensure_ascii=False),
-                metadata_before_json="{}",
-                metadata_after_json="{}",
+                metadata_before_json=json.dumps(verified_stat, ensure_ascii=False),
+                metadata_after_json=json.dumps(res_stat, ensure_ascii=False),
                 created_at=now,
             ))
             session.add(AuditEvent(
@@ -2822,6 +2849,8 @@ class FileCenterService:
                 "state": "restored",
                 "status": "restored",
                 "restored_to_path": str(dest),
+                "conflict_policy": conflict_policy,
+                "conflict_resolved": (conflict_policy == "rename" and str(dest) != entry.original_path),
             }
 
     def purge_quarantine_entry(

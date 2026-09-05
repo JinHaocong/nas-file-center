@@ -78,7 +78,10 @@ def execute_item(
     if source_raw.is_symlink():
         return _skip("symlink is not allowed")
     try:
-        source = require_allowed_path(source_raw, allowed_roots)
+        valid_roots = list(allowed_roots)
+        if item.operation == "restore" and quarantine_root:
+            valid_roots.append(Path(quarantine_root).resolve())
+        source = require_allowed_path(source_raw, valid_roots)
     except UnsafePathError as exc:
         return _skip(str(exc))
     if not source.exists():
@@ -138,6 +141,21 @@ def execute_item(
             target = require_allowed_path(target_raw, allowed_roots)
             if is_reserved_quarantine_path(target, quarantine_root):
                 return _skip("restore target cannot be within quarantine root")
+
+            # Final pre-mutation integrity checks
+            if item.expected_hash:
+                from app.quarantine.paths import safe_quarantine_hash
+                current_h = safe_quarantine_hash(source)
+                if current_h != item.expected_hash:
+                    return ItemResult("failed", f"Hash verification failed: Quarantined file hash mismatch (expected {item.expected_hash}, got {current_h})")
+            if item.expected_size is not None and item.expected_size > 0:
+                try:
+                    st = source.stat(follow_symlinks=False)
+                    if st.st_size != item.expected_size:
+                        return ItemResult("failed", f"Quarantined file size mismatch (expected {item.expected_size}, got {st.st_size})")
+                except OSError as exc:
+                    return ItemResult("failed", f"Stat failed on quarantined source: {exc}")
+
             target.parent.mkdir(parents=True, exist_ok=True)
             try:
                 from app.fs_ops import rename_noreplace

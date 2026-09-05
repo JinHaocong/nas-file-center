@@ -29,7 +29,12 @@ from app.models import (
 from app.exceptions import StateConflictError
 from app.path_safety import require_allowed_path
 from app.quarantine.paths import build_quarantine_target_path, safe_quarantine_hash
-from app.quarantine.restore import validate_quarantine_for_restore
+from app.quarantine.restore import (
+    validate_quarantine_for_restore,
+    validate_restore_destination_intent,
+    verify_quarantine_source_integrity,
+    assert_source_unmodified,
+)
 from app.scanners.fclones import build_group_command, run_scan
 from app.scanners.parser import parse_fclones_report, parse_fclones_report_iter
 from app.tasks.context import JobContext
@@ -368,21 +373,20 @@ class FclonesScanHandler(TaskHandler):
 
 
 def _check_target_identity(tgt: Path, source_stat: dict) -> bool:
-    if not source_stat:
-        return True
+    if not source_stat or not isinstance(source_stat, dict):
+        return False
+    src_dev = source_stat.get("device")
+    src_ino = source_stat.get("inode")
+    if src_dev is None or src_ino is None:
+        return False
     try:
         st = tgt.stat(follow_symlinks=False)
     except OSError:
         return False
-    src_dev = source_stat.get("device")
-    src_ino = source_stat.get("inode")
-    src_size = source_stat.get("size")
-    if src_dev is not None and st.st_dev == src_dev:
-        if src_ino is not None and st.st_ino != src_ino:
-            return False
-    else:
-        if src_size is not None and st.st_size != src_size:
-            return False
+    if st.st_dev != src_dev:
+        return False
+    if st.st_ino != src_ino:
+        return False
     return True
 
 
@@ -397,7 +401,7 @@ def _build_stat_dict(p: Path, st: os.stat_result) -> dict:
     }
 
 
-def _reconcile_executing_item(session, item: BatchPlanItem, plan_id: int, job_id: int, user_id: int | None, settings: Settings, now) -> None:
+def _reconcile_executing_item(session, item: BatchPlanItem, plan_id: int, job_id: int, user_id: int | None, settings: Settings, now, precomputed_hash: str | None = None) -> None:
     """Reconcile an item found in 'executing' state after a crash or worker restart."""
     src = Path(item.source_path)
     meta = json.loads(item.metadata_json or "{}")
@@ -461,7 +465,7 @@ def _reconcile_executing_item(session, item: BatchPlanItem, plan_id: int, job_id
                 q_entry.device = getattr(st, "st_dev", 0)
                 q_entry.inode = getattr(st, "st_ino", 0)
                 if tgt.is_file() and not tgt.is_symlink():
-                    q_entry.content_hash = safe_quarantine_hash(tgt)
+                    q_entry.content_hash = precomputed_hash or safe_quarantine_hash(tgt)
                 q_entry.state = "active"
                 q_entry.quarantined_at = q_entry.quarantined_at or now
                 q_entry.updated_at = now
@@ -506,7 +510,7 @@ def _reconcile_executing_item(session, item: BatchPlanItem, plan_id: int, job_id
                     q_entry.updated_at = now
                 return
             if q_entry and q_entry.content_hash and tgt.is_file():
-                current_h = safe_quarantine_hash(tgt)
+                current_h = precomputed_hash or safe_quarantine_hash(tgt)
                 if current_h != q_entry.content_hash:
                     item.state = "failed"
                     item.reason = f"reconciliation conflict after crash (hash mismatch: expected {q_entry.content_hash}, got {current_h})"
@@ -610,6 +614,30 @@ class BatchPlanExecuteHandler(TaskHandler):
         user_id = state.get("requested_by_user_id")
 
         # 1. Announce start & reconcile interrupted items
+        # Precompute reconciliation hashes outside DB write lock
+        precomputed_reconcile_hashes: dict[int, str] = {}
+        with context.SessionLocal() as session:
+            exec_items = list(session.scalars(
+                select(BatchPlanItem)
+                .where(BatchPlanItem.plan_id == plan_id, BatchPlanItem.state == "executing")
+                .order_by(BatchPlanItem.sequence)
+            ))
+            for it in exec_items:
+                if it.operation in ("quarantine", "restore"):
+                    meta = json.loads(it.metadata_json or "{}")
+                    tgt = None
+                    if it.operation == "quarantine":
+                        qid = meta.get("quarantine_entry_id") or meta.get("undo", {}).get("quarantine_entry_id")
+                        qe = session.get(QuarantineEntry, int(qid)) if qid else None
+                        if not qe:
+                            qe = session.scalar(select(QuarantineEntry).where(QuarantineEntry.plan_item_id == it.id))
+                        tgt = Path(qe.quarantine_path) if qe and qe.quarantine_path else (Path(it.target_path) if it.target_path else None)
+                    elif it.operation == "restore":
+                        tgt = Path(it.target_path) if it.target_path else None
+                    src = Path(it.source_path)
+                    if tgt and tgt.is_file() and not tgt.is_symlink() and not src.exists():
+                        precomputed_reconcile_hashes[it.id] = safe_quarantine_hash(tgt)
+
         with context.SessionLocal() as session:
             session.execute(text("BEGIN IMMEDIATE"))
             now = utcnow()
@@ -630,7 +658,10 @@ class BatchPlanExecuteHandler(TaskHandler):
                 .order_by(BatchPlanItem.sequence)
             ))
             for it in executing_items:
-                _reconcile_executing_item(session, it, plan_id, job.id, user_id, settings, now)
+                _reconcile_executing_item(
+                    session, it, plan_id, job.id, user_id, settings, now,
+                    precomputed_hash=precomputed_reconcile_hashes.get(it.id),
+                )
             session.commit()
 
         # 2. Query all plan items
@@ -669,6 +700,8 @@ class BatchPlanExecuteHandler(TaskHandler):
             src_p = Path(item_meta.source_path)
             src_stat_dict = {}
             target_touch_mtime_ns = None
+            restore_expected_size = None
+            restore_expected_hash = None
             try:
                 if src_p.exists():
                     st = src_p.stat(follow_symlinks=False)
@@ -754,7 +787,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                         continue
 
                     try:
-                        q_tgt_p, q_dest_p = validate_quarantine_for_restore(
+                        q_tgt_p, q_dest_p = validate_restore_destination_intent(
                             q_entry,
                             allowed_roots=settings.allowed_roots,
                             quarantine_root=settings.quarantine_root,
@@ -784,10 +817,52 @@ class BatchPlanExecuteHandler(TaskHandler):
                     q_entry.updated_at = now
                     q_restore_entry_id = q_entry.id
                     target_path_str = str(q_dest_p)
+                    restore_expected_size = q_entry.size
+                    restore_expected_hash = q_entry.content_hash
                 else:
                     target_path_str = row.target_path
 
                 session.commit()
+
+            # --- PRE-MUTATION RESTORE INTEGRITY (OUTSIDE DB WRITE LOCK) ---
+            verified_restore_stat = None
+            if item_meta.operation == "restore":
+                try:
+                    verified_restore_stat = verify_quarantine_source_integrity(
+                        src_p,
+                        expected_size=restore_expected_size,
+                        expected_hash=restore_expected_hash,
+                    )
+                except (StateConflictError, ValueError) as exc:
+                    with context.SessionLocal() as session:
+                        session.execute(text("BEGIN IMMEDIATE"))
+                        now = utcnow()
+                        if context.worker_id is not None:
+                            assert_active_worker_lease(session, context.worker_id, now=now)
+                        row = session.get(BatchPlanItem, item_meta.id)
+                        if row:
+                            row.state = "failed"
+                            row.reason = str(exc)
+                        if q_restore_entry_id:
+                            qe = session.get(QuarantineEntry, q_restore_entry_id)
+                            if qe:
+                                qe.state = "inconsistent"
+                                qe.last_error = str(exc)
+                                qe.updated_at = now
+                        session.add(AuditEvent(
+                            operation="restore",
+                            path=str(src_p),
+                            result="failed",
+                            details_json=json.dumps({
+                                "plan_id": plan_id,
+                                "item_id": item_meta.id,
+                                "task_id": job.id,
+                                "reason": str(exc),
+                            }, ensure_ascii=False),
+                        ))
+                        session.commit()
+                    completed_or_skipped += 1
+                    continue
 
             # --- PHASE 2: FILESYSTEM MUTATION OUTSIDE DB LOCK ---
             before_size = src_stat_dict.get("size")
@@ -799,8 +874,8 @@ class BatchPlanExecuteHandler(TaskHandler):
                 source=src_p,
                 target=Path(target_path_str) if target_path_str else None,
                 keep=Path(item_meta.keep_path) if item_meta.keep_path else None,
-                expected_size=item_meta.expected_size,
-                expected_hash=item_meta.expected_hash,
+                expected_size=restore_expected_size if item_meta.operation == "restore" else item_meta.expected_size,
+                expected_hash=restore_expected_hash if item_meta.operation == "restore" else item_meta.expected_hash,
                 state=item_meta.state,
                 expected_mtime_ns=item_meta.expected_mtime_ns,
                 target_mtime_ns=target_touch_mtime_ns,
@@ -816,6 +891,41 @@ class BatchPlanExecuteHandler(TaskHandler):
                     if lock and lock.owner == context.worker_id:
                         lock.acquired_at = now
                     session.commit()
+
+            # Final immediate source identity/stat check before mutation
+            if item_meta.operation == "restore" and verified_restore_stat is not None:
+                try:
+                    assert_source_unmodified(src_p, verified_restore_stat)
+                except ValueError as exc:
+                    with context.SessionLocal() as session:
+                        session.execute(text("BEGIN IMMEDIATE"))
+                        now = utcnow()
+                        if context.worker_id is not None:
+                            assert_active_worker_lease(session, context.worker_id, now=now)
+                        row = session.get(BatchPlanItem, item_meta.id)
+                        if row:
+                            row.state = "failed"
+                            row.reason = str(exc)
+                        if q_restore_entry_id:
+                            qe = session.get(QuarantineEntry, q_restore_entry_id)
+                            if qe:
+                                qe.state = "inconsistent"
+                                qe.last_error = str(exc)
+                                qe.updated_at = now
+                        session.add(AuditEvent(
+                            operation="restore",
+                            path=str(src_p),
+                            result="failed",
+                            details_json=json.dumps({
+                                "plan_id": plan_id,
+                                "item_id": item_meta.id,
+                                "task_id": job.id,
+                                "reason": str(exc),
+                            }, ensure_ascii=False),
+                        ))
+                        session.commit()
+                    completed_or_skipped += 1
+                    continue
 
             result = execute_item(
                 item_op,
@@ -896,6 +1006,10 @@ class BatchPlanExecuteHandler(TaskHandler):
                             q_entry.state = "restored"
                             q_entry.restored_at = now
                             q_entry.updated_at = now
+                        elif result.state == "failed":
+                            q_entry.state = "inconsistent"
+                            q_entry.last_error = result.reason
+                            q_entry.updated_at = now
                         else:
                             q_entry.state = "active"
                             q_entry.last_error = result.reason
@@ -944,6 +1058,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                         except OSError:
                             pass
 
+                    meta_before_dict = verified_restore_stat if (row.operation == "restore" and verified_restore_stat) else src_stat_dict
                     session.add(OperationJournal(
                         operation=row.operation,
                         sequence=row.sequence,
@@ -953,7 +1068,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                         user_id=user_id,
                         before_json=b_json,
                         after_json=a_json,
-                        metadata_before_json=json.dumps(src_stat_dict, ensure_ascii=False),
+                        metadata_before_json=json.dumps(meta_before_dict, ensure_ascii=False),
                         metadata_after_json=json.dumps(res_stat_dict, ensure_ascii=False),
                         created_at=now,
                     ))
