@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
+import errno
 import heapq
 import json
 import math
@@ -38,12 +39,23 @@ from app.models import (
     OrganizerProfile,
     Plan,
     PlanItem,
+    QuarantineEntry,
     RecentPath,
     ScanJob,
     WorkJob,
     utcnow,
 )
-from app.path_safety import require_allowed_path, validate_mutation_destination
+from app.quarantine.paths import (
+    build_quarantine_target_path,
+    build_restore_rename_path,
+    safe_quarantine_hash,
+)
+from app.path_safety import (
+    is_reserved_quarantine_path,
+    require_allowed_path,
+    require_unreserved_path,
+    validate_mutation_destination,
+)
 
 PLAN_SINGLE_DELETE_ALLOWED = {
     "draft",
@@ -736,6 +748,7 @@ class FileCenterService:
 
     def enqueue_index(self, root: str) -> dict:
         safe_root = require_allowed_path(root, self.settings.allowed_roots)
+        require_unreserved_path(safe_root, self.settings.quarantine_root)
         if not safe_root.is_dir():
             raise ValueError(f"Not a directory: {safe_root}")
         root_str = str(safe_root)
@@ -832,7 +845,10 @@ class FileCenterService:
         name_patterns: list[str] | None = None,
         exclude_patterns: list[str] | None = None,
     ) -> dict:
-        safe_roots = [require_allowed_path(root, self.settings.allowed_roots) for root in roots]
+        safe_roots = [
+            require_unreserved_path(require_allowed_path(root, self.settings.allowed_roots), self.settings.quarantine_root)
+            for root in roots
+        ]
         if not safe_roots:
             raise ValueError("At least one root is required")
         if isolate and len(safe_roots) < 2:
@@ -1110,13 +1126,20 @@ class FileCenterService:
 
             # Track planned target paths from renames/moves within this plan
             planned_targets: set[str] = {
-                str(validate_mutation_destination(raw["target"], self.settings.allowed_roots))
+                str(validate_mutation_destination(raw["target"], self.settings.allowed_roots, quarantine_root=self.settings.quarantine_root))
                 for raw in items
                 if raw.get("operation") in {"rename", "move"} and raw.get("target")
             }
 
             for sequence, raw in enumerate(items, 1):
-                source = require_allowed_path(raw["source"], self.settings.allowed_roots)
+                operation = raw.get("operation")
+                if operation == "unlink":
+                    raise ValueError("Operation 'unlink' is deprecated and cannot be used in new plans. Use 'quarantine' instead.")
+
+                source = require_unreserved_path(
+                    require_allowed_path(raw["source"], self.settings.allowed_roots),
+                    self.settings.quarantine_root,
+                )
                 is_valid_source = (
                     source.exists()
                     or str(source) in planned_targets
@@ -1127,14 +1150,22 @@ class FileCenterService:
                 target = raw.get("target")
                 keep = raw.get("keep")
                 protected_dir = raw.get("protected_dir")
-                if target and raw.get("operation") in {"rename", "move"}:
-                    target_path = str(validate_mutation_destination(target, self.settings.allowed_roots))
+                if target and operation in {"rename", "move"}:
+                    target_path = str(validate_mutation_destination(target, self.settings.allowed_roots, quarantine_root=self.settings.quarantine_root))
                 elif target:
-                    target_path = str(require_allowed_path(target, self.settings.allowed_roots))
+                    target_path = str(require_unreserved_path(require_allowed_path(target, self.settings.allowed_roots), self.settings.quarantine_root))
                 else:
                     target_path = None
-                keep_path = str(require_allowed_path(keep, self.settings.allowed_roots)) if keep else None
-                item_metadata = {"protected_dir": str(require_allowed_path(protected_dir, self.settings.allowed_roots))} if protected_dir else {}
+                keep_path = (
+                    str(require_unreserved_path(require_allowed_path(keep, self.settings.allowed_roots), self.settings.quarantine_root))
+                    if keep
+                    else None
+                )
+                item_metadata = (
+                    {"protected_dir": str(require_unreserved_path(require_allowed_path(protected_dir, self.settings.allowed_roots), self.settings.quarantine_root))}
+                    if protected_dir
+                    else {}
+                )
                 session.add(BatchPlanItem(
                     plan_id=plan.id,
                     sequence=raw.get("sequence", sequence),
@@ -1191,11 +1222,40 @@ class FileCenterService:
                     session.commit()
                     output.append({"id": row.id, "sequence": row.sequence, "operation": row.operation, "source": row.source_path, "state": row.state, "reason": row.reason, "result_path": None})
                     continue
+                q_entry = None
+                if row.operation == "quarantine":
+                    policy = session.scalar(select(DataLifecyclePolicy).where(DataLifecyclePolicy.id == 1))
+                    retention_days = policy.quarantine_retention_days if policy else 0
+                    now = utcnow()
+                    q_entry = QuarantineEntry(
+                        plan_item_id=row.id,
+                        original_path=row.source_path,
+                        quarantine_path="",
+                        state="preparing",
+                        created_at=now,
+                        updated_at=now,
+                    )
+                    session.add(q_entry)
+                    session.flush()
+
+                    q_target = build_quarantine_target_path(
+                        source=Path(row.source_path),
+                        allowed_roots=self.settings.allowed_roots,
+                        quarantine_root=self.settings.quarantine_root,
+                        plan_id=str(plan_id),
+                        entry_id=q_entry.id,
+                        check_symlink=True,
+                    )
+                    q_entry.quarantine_path = str(q_target)
+                    row.target_path = str(q_target)
+                    session.commit()
+
+                target_for_op = Path(row.target_path) if row.target_path else None
                 operation = OperationItem(
                     sequence=row.sequence,
                     operation=row.operation,
                     source=Path(row.source_path),
-                    target=Path(row.target_path) if row.target_path else None,
+                    target=target_for_op,
                     keep=Path(row.keep_path) if row.keep_path else None,
                     expected_size=row.expected_size,
                     expected_hash=row.expected_hash,
@@ -1216,6 +1276,33 @@ class FileCenterService:
                 if is_organizer and row.operation == "touch" and result.state == "completed" and mtime_delay > 0:
                     time.sleep(mtime_delay)
 
+                if q_entry is not None:
+                    target_p = Path(q_entry.quarantine_path)
+                    now = utcnow()
+                    if result.state == "completed" and target_p.exists():
+                        st = target_p.stat()
+                        q_entry.size = st.st_size
+                        q_entry.content_hash = safe_quarantine_hash(target_p)
+                        q_entry.mtime_ns = getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))
+                        q_entry.device = st.st_dev
+                        q_entry.inode = st.st_ino
+                        q_entry.quarantined_at = now
+                        if retention_days > 0:
+                            q_entry.expires_at = now + timedelta(days=retention_days)
+                        else:
+                            q_entry.expires_at = None
+                        q_entry.state = "active"
+                        q_entry.updated_at = now
+                    else:
+                        src_p = Path(q_entry.original_path)
+                        if src_p.exists():
+                            q_entry.state = "abandoned"
+                        else:
+                            q_entry.state = "inconsistent"
+                        q_entry.last_error = result.reason
+                        q_entry.updated_at = now
+                    session.commit()
+
                 row.state = result.state
                 row.reason = result.reason
                 if result.result_path is not None:
@@ -1228,6 +1315,7 @@ class FileCenterService:
                     details_json=json.dumps({
                         "plan_id": plan_id,
                         "item_id": row.id,
+                        "quarantine_entry_id": q_entry.id if q_entry else None,
                         "reason": result.reason,
                         "target": row.target_path,
                         "keep": row.keep_path,
@@ -1388,6 +1476,7 @@ class FileCenterService:
             target_path = Path(path.strip())
 
         safe_path = require_allowed_path(target_path, self.settings.allowed_roots)
+        require_unreserved_path(safe_path, self.settings.quarantine_root)
 
         if not safe_path.exists():
             raise FileNotFoundError(f"Path does not exist: {safe_path}")
@@ -1399,9 +1488,10 @@ class FileCenterService:
         if safe_path.parent != safe_path:
             try:
                 parent_safe = require_allowed_path(safe_path.parent, self.settings.allowed_roots)
-                # If safe_path was already at one of the allowed roots, do not allow going above it
-                if safe_path not in self.settings.allowed_roots:
-                    parent_str = str(parent_safe)
+                if not is_reserved_quarantine_path(parent_safe, self.settings.quarantine_root):
+                    # If safe_path was already at one of the allowed roots, do not allow going above it
+                    if safe_path not in self.settings.allowed_roots:
+                        parent_str = str(parent_safe)
             except ValueError:
                 parent_str = None
 
@@ -1419,6 +1509,8 @@ class FileCenterService:
         try:
             with os.scandir(safe_path) as it:
                 for entry in it:
+                    if is_reserved_quarantine_path(entry.path, self.settings.quarantine_root):
+                        continue
                     name = entry.name
                     if search_clean and search_clean not in name.lower():
                         continue
@@ -1678,7 +1770,10 @@ class FileCenterService:
 
         root = payload.get("root")
         if root and str(root).strip():
-            safe_root = require_allowed_path(str(root).strip(), self.settings.allowed_roots)
+            safe_root = require_unreserved_path(
+                require_allowed_path(str(root).strip(), self.settings.allowed_roots),
+                self.settings.quarantine_root,
+            )
             clean_root = str(safe_root)
         else:
             clean_root = None
@@ -2024,7 +2119,10 @@ class FileCenterService:
             if not target_root:
                 raise ValueError("未指定整理根目录，请在请求或配置中提供 root")
 
-            safe_root = require_allowed_path(target_root, self.settings.allowed_roots)
+            safe_root = require_unreserved_path(
+                require_allowed_path(target_root, self.settings.allowed_roots),
+                self.settings.quarantine_root,
+            )
 
             now = time.time()
             # Clean expired snapshots (> 600s)
@@ -2110,7 +2208,10 @@ class FileCenterService:
             if not target_root:
                 raise ValueError("未指定整理根目录，请在请求或配置中提供 root")
 
-            safe_root = require_allowed_path(target_root, self.settings.allowed_roots)
+            safe_root = require_unreserved_path(
+                require_allowed_path(target_root, self.settings.allowed_roots),
+                self.settings.quarantine_root,
+            )
 
             image_extensions = json.loads(profile.image_extensions or "[]")
             video_extensions = json.loads(profile.video_extensions or "[]")
@@ -2157,3 +2258,367 @@ class FileCenterService:
                 "mtime_delay_seconds": profile.mtime_delay_seconds,
             }
             return self.create_plan(name=plan_name, kind=plan_kind, items=items, metadata=metadata)
+
+    # Quarantine Core Engine
+    def reconcile_quarantine_entry(self, entry_id: int) -> dict:
+        with self.SessionLocal() as session:
+            entry = session.get(QuarantineEntry, entry_id)
+            if not entry:
+                raise KeyError(f"Quarantine entry #{entry_id} not found")
+            if entry.state != "preparing":
+                return {
+                    "id": entry.id,
+                    "state": entry.state,
+                    "reconciled": False,
+                    "reason": f"Entry in state '{entry.state}', not 'preparing'",
+                }
+
+            policy = session.scalar(select(DataLifecyclePolicy).where(DataLifecyclePolicy.id == 1))
+            retention_days = policy.quarantine_retention_days if policy else 0
+
+            src = Path(entry.original_path)
+            tgt = Path(entry.quarantine_path) if entry.quarantine_path else None
+            tgt_exists = tgt.exists() if (tgt and str(tgt)) else False
+            src_exists = src.exists()
+            now = utcnow()
+
+            # Case A: source exists, target missing -> abandoned
+            if src_exists and not tgt_exists:
+                entry.state = "abandoned"
+                entry.updated_at = now
+                entry.last_error = "Crash reconciliation: source exists, target missing (move never completed)"
+            # Case B: source missing, target exists -> finalize active
+            elif not src_exists and tgt_exists:
+                st = tgt.stat()
+                entry.size = st.st_size
+                entry.content_hash = safe_quarantine_hash(tgt)
+                entry.mtime_ns = getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))
+                entry.device = st.st_dev
+                entry.inode = st.st_ino
+                entry.quarantined_at = now
+                if retention_days > 0:
+                    entry.expires_at = now + timedelta(days=retention_days)
+                else:
+                    entry.expires_at = None
+                entry.state = "active"
+                entry.updated_at = now
+            # Case C: source exists, target exists -> inconsistent
+            elif src_exists and tgt_exists:
+                entry.state = "inconsistent"
+                entry.updated_at = now
+                entry.last_error = "Crash reconciliation: both source and target exist"
+            # Case D: neither exists -> inconsistent
+            else:
+                entry.state = "inconsistent"
+                entry.updated_at = now
+                entry.last_error = "Crash reconciliation: neither source nor target exists"
+
+            session.commit()
+            return {
+                "id": entry.id,
+                "state": entry.state,
+                "reconciled": True,
+            }
+
+    def reconcile_all_preparing_entries(self) -> list[dict]:
+        with self.SessionLocal() as session:
+            preparing_ids = list(
+                session.scalars(
+                    select(QuarantineEntry.id)
+                    .where(QuarantineEntry.state == "preparing")
+                    .order_by(QuarantineEntry.id.asc())
+                )
+            )
+        return [self.reconcile_quarantine_entry(eid) for eid in preparing_ids]
+
+    def restore_quarantine_entry(
+        self,
+        entry_id: int,
+        *,
+        conflict_policy: str = "skip",
+        custom_target: str | None = None,
+    ) -> dict:
+        if conflict_policy not in {"skip", "rename", "manual"}:
+            raise ValueError(f"Invalid conflict_policy: {conflict_policy}. Must be 'skip', 'rename', or 'manual'.")
+
+        if not self.settings.allow_mutation:
+            raise ValueError("Filesystem mutation is disabled")
+
+        with self.SessionLocal() as session:
+            entry = session.get(QuarantineEntry, entry_id)
+            if not entry:
+                raise KeyError(f"Quarantine entry #{entry_id} not found")
+
+            if entry.state != "active":
+                raise ValueError(f"Cannot restore quarantine entry in state '{entry.state}'")
+
+            target = Path(entry.quarantine_path)
+            if not target.exists():
+                entry.state = "inconsistent"
+                entry.last_error = f"Quarantined target file does not exist: {target}"
+                entry.updated_at = utcnow()
+                session.commit()
+                raise ValueError(f"Quarantined target file does not exist: {target}")
+
+            if target.is_symlink() or os.path.islink(target):
+                entry.state = "inconsistent"
+                entry.last_error = "Quarantined target file is a symlink"
+                entry.updated_at = utcnow()
+                session.commit()
+                raise ValueError("Quarantined target is a symlink, restore aborted")
+
+            # Hash verification if recorded
+            if entry.content_hash:
+                current_hash = safe_quarantine_hash(target)
+                if current_hash != entry.content_hash:
+                    entry.state = "inconsistent"
+                    entry.last_error = f"Hash verification failed: expected {entry.content_hash}, got {current_hash}"
+                    entry.updated_at = utcnow()
+                    session.commit()
+                    raise ValueError(f"Quarantined file hash mismatch (expected {entry.content_hash}, got {current_hash})")
+
+            # Determine destination path
+            if conflict_policy == "manual":
+                if not custom_target or not custom_target.strip():
+                    raise ValueError("custom_target is required when conflict_policy is 'manual'")
+                dest = validate_mutation_destination(
+                    custom_target.strip(),
+                    self.settings.allowed_roots,
+                    quarantine_root=self.settings.quarantine_root,
+                )
+            else:
+                dest = validate_mutation_destination(
+                    entry.original_path,
+                    self.settings.allowed_roots,
+                    quarantine_root=self.settings.quarantine_root,
+                )
+
+            # Check conflict
+            if dest.exists() or dest.is_symlink():
+                if conflict_policy == "skip":
+                    return {
+                        "id": entry.id,
+                        "state": "skipped",
+                        "reason": f"Destination already exists: {dest}",
+                        "restored_to_path": None,
+                    }
+                elif conflict_policy == "rename":
+                    dest = build_restore_rename_path(dest, entry_id=entry.id)
+                elif conflict_policy == "manual":
+                    raise ValueError(f"Manual destination already exists: {dest}")
+
+            # Transition state to restoring
+            entry.state = "restoring"
+            entry.updated_at = utcnow()
+            session.commit()
+
+            # Ensure parent exists
+            dest.parent.mkdir(parents=True, exist_ok=True)
+
+            try:
+                os.replace(target, dest)
+            except OSError as exc:
+                entry.state = "active"
+                entry.last_error = str(exc)
+                entry.updated_at = utcnow()
+                session.commit()
+                if exc.errno == errno.EXDEV:
+                    raise RuntimeError("Cross-filesystem restore is not supported")
+                raise
+
+            # Transition state to restored
+            now = utcnow()
+            entry.state = "restored"
+            entry.restored_at = now
+            entry.updated_at = now
+            session.add(AuditEvent(
+                operation="quarantine.restore",
+                path=str(dest),
+                result="restored",
+                details_json=json.dumps({
+                    "quarantine_entry_id": entry.id,
+                    "original_path": entry.original_path,
+                    "quarantine_path": entry.quarantine_path,
+                    "restored_to_path": str(dest),
+                    "conflict_policy": conflict_policy,
+                }, ensure_ascii=False),
+            ))
+            session.commit()
+            return {
+                "id": entry.id,
+                "state": "restored",
+                "restored_to_path": str(dest),
+            }
+
+    def purge_quarantine_entry(
+        self,
+        entry_id: int,
+        *,
+        confirmation: str,
+        is_admin: bool = False,
+    ) -> dict:
+        if not is_admin:
+            raise PermissionError("Only administrator can purge quarantine entries")
+
+        if not self.settings.allow_mutation:
+            raise ValueError("Filesystem mutation is disabled")
+        if not self.settings.allow_delete:
+            raise ValueError("Permanent deletion is disabled")
+
+        if confirmation != "DELETE":
+            raise ValueError("Confirmation token must be 'DELETE'")
+
+        with self.SessionLocal() as session:
+            entry = session.get(QuarantineEntry, entry_id)
+            if not entry:
+                raise KeyError(f"Quarantine entry #{entry_id} not found")
+
+            if entry.state != "active":
+                raise ValueError(f"Cannot purge quarantine entry in state '{entry.state}'")
+
+            target = Path(entry.quarantine_path).resolve(strict=False)
+            if not is_reserved_quarantine_path(target, self.settings.quarantine_root):
+                raise UnsafePathError(f"Target path is not inside quarantine root: {target}")
+
+            if target.is_symlink() or os.path.islink(target):
+                raise ValueError(f"Target is a symlink, cannot purge: {target}")
+
+            entry.state = "purging"
+            entry.updated_at = utcnow()
+            session.commit()
+
+            if target.exists():
+                target.unlink()
+                # Clean empty parent directories up to (but not including) quarantine_root
+                cur = target.parent
+                quarantine_resolved = Path(self.settings.quarantine_root).resolve(strict=False)
+                while cur != quarantine_resolved and cur.is_relative_to(quarantine_resolved):
+                    try:
+                        cur.rmdir()
+                        cur = cur.parent
+                    except OSError:
+                        break
+
+            now = utcnow()
+            entry.state = "purged"
+            entry.purged_at = now
+            entry.updated_at = now
+            session.add(AuditEvent(
+                operation="quarantine.purge",
+                path=entry.quarantine_path,
+                result="purged",
+                details_json=json.dumps({
+                    "quarantine_entry_id": entry.id,
+                    "original_path": entry.original_path,
+                    "quarantine_path": entry.quarantine_path,
+                }, ensure_ascii=False),
+            ))
+            session.commit()
+            return {
+                "id": entry.id,
+                "state": "purged",
+            }
+
+    def get_quarantine_retention_policy(self) -> dict:
+        with self.SessionLocal() as session:
+            policy = session.scalar(select(DataLifecyclePolicy).where(DataLifecyclePolicy.id == 1))
+            days = policy.quarantine_retention_days if policy else 0
+            updated_at = policy.updated_at.isoformat() if policy and policy.updated_at else None
+            return {
+                "quarantine_retention_days": days,
+                "updated_at": updated_at,
+            }
+
+    def update_quarantine_retention_policy(self, days: int) -> dict:
+        if not isinstance(days, int) or isinstance(days, bool) or days not in (0, 7, 30, 90):
+            raise ValueError(f"Invalid quarantine retention days: {days}. Must be one of 0, 7, 30, 90.")
+
+        with self.SessionLocal() as session:
+            policy = session.scalar(select(DataLifecyclePolicy).where(DataLifecyclePolicy.id == 1))
+            now = utcnow()
+            if not policy:
+                policy = DataLifecyclePolicy(id=1, audit_retention_days=0, quarantine_retention_days=days, created_at=now, updated_at=now)
+                session.add(policy)
+            else:
+                policy.quarantine_retention_days = days
+                policy.updated_at = now
+            session.add(AuditEvent(
+                operation="lifecycle.quarantine_policy_update",
+                path="data_lifecycle_policy",
+                result="updated",
+                details_json=json.dumps({"quarantine_retention_days": days}, ensure_ascii=False),
+            ))
+            session.commit()
+            return {
+                "quarantine_retention_days": days,
+                "updated_at": now.isoformat(),
+            }
+
+    def list_quarantine_entries(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 50,
+        state: str | None = None,
+        search: str | None = None,
+    ) -> dict:
+        page = max(1, int(page))
+        page_size = max(1, min(int(page_size), 500))
+        offset = (page - 1) * page_size
+
+        with self.SessionLocal() as session:
+            stmt = select(QuarantineEntry)
+            count_stmt = select(func.count(QuarantineEntry.id))
+
+            if state and state.strip():
+                stmt = stmt.where(QuarantineEntry.state == state.strip())
+                count_stmt = count_stmt.where(QuarantineEntry.state == state.strip())
+
+            if search and search.strip():
+                pattern = f"%{search.strip()}%"
+                filt = QuarantineEntry.original_path.ilike(pattern) | QuarantineEntry.quarantine_path.ilike(pattern)
+                stmt = stmt.where(filt)
+                count_stmt = count_stmt.where(filt)
+
+            total = session.scalar(count_stmt) or 0
+            rows = session.scalars(
+                stmt.order_by(QuarantineEntry.id.desc()).offset(offset).limit(page_size)
+            ).all()
+
+            items = [self._serialize_quarantine_entry(r) for r in rows]
+            return {
+                "items": items,
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+            }
+
+    def get_quarantine_entry(self, entry_id: int) -> dict:
+        with self.SessionLocal() as session:
+            entry = session.get(QuarantineEntry, entry_id)
+            if not entry:
+                raise KeyError(f"Quarantine entry #{entry_id} not found")
+            return self._serialize_quarantine_entry(entry)
+
+    def _serialize_quarantine_entry(self, entry: QuarantineEntry) -> dict:
+        return {
+            "id": entry.id,
+            "original_path": entry.original_path,
+            "quarantine_path": entry.quarantine_path,
+            "task_id": entry.task_id,
+            "plan_item_id": entry.plan_item_id,
+            "state": entry.state,
+            "size": entry.size,
+            "hash": entry.content_hash,
+            "mtime_ns": entry.mtime_ns,
+            "device": entry.device,
+            "inode": entry.inode,
+            "quarantined_at": entry.quarantined_at.isoformat() if entry.quarantined_at else None,
+            "expires_at": entry.expires_at.isoformat() if entry.expires_at else None,
+            "restored_at": entry.restored_at.isoformat() if entry.restored_at else None,
+            "purged_at": entry.purged_at.isoformat() if entry.purged_at else None,
+            "last_error": entry.last_error,
+            "created_at": entry.created_at.isoformat() if entry.created_at else None,
+            "updated_at": entry.updated_at.isoformat() if entry.updated_at else None,
+        }
+

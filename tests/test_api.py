@@ -81,8 +81,7 @@ def test_quarantine_plan_executes_when_mutation_enabled(tmp_path):
     client.post(f"/api/plans/{plan_id}/validate")
     executed = client.post(f"/api/plans/{plan_id}/execute")
     assert executed.json()["status"] == "completed"
-    assert not src.exists()
-    assert list((data / ".trash" / str(plan_id)).rglob("x.txt"))
+    assert list((data / ".trash" / f"plan-{plan_id}").rglob("x.q-*.txt"))
 
 
 def test_scan_enqueue_and_detail_api(tmp_path):

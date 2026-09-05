@@ -25,7 +25,25 @@ def require_allowed_path(path: Path | str, roots: Iterable[Path | str]) -> Path:
     return resolved
 
 
-def validate_mutation_destination(path: Path | str, roots: Iterable[Path | str]) -> Path:
+def is_reserved_quarantine_path(path: Path | str, quarantine_root: Path | str | None) -> bool:
+    if not quarantine_root:
+        return False
+    resolved_path = Path(path).expanduser().resolve(strict=False)
+    resolved_trash = Path(quarantine_root).expanduser().resolve(strict=False)
+    return resolved_path == resolved_trash or resolved_path.is_relative_to(resolved_trash)
+
+
+def require_unreserved_path(path: Path | str, quarantine_root: Path | str | None) -> Path:
+    if is_reserved_quarantine_path(path, quarantine_root):
+        raise UnsafePathError(f"Access to reserved quarantine storage is blocked: {path}")
+    return Path(path).expanduser().resolve(strict=False)
+
+
+def validate_mutation_destination(
+    path: Path | str,
+    roots: Iterable[Path | str],
+    quarantine_root: Path | str | None = None,
+) -> Path:
     """
     Validate mutation destination (e.g. rename/move target).
     - Checks if the lexical path itself is already an existing symlink (rejects early).
@@ -39,6 +57,8 @@ def validate_mutation_destination(path: Path | str, roots: Iterable[Path | str])
         raise ValueError(f"目标路径已存在同名符号链接 (symlink): {path}")
 
     parent_resolved = require_allowed_path(p.parent, roots)
+    if quarantine_root:
+        require_unreserved_path(parent_resolved / p.name, quarantine_root)
     filename = p.name
     if not filename or any(c in filename for c in "/\0"):
         raise ValueError(f"非法目标文件名: {filename}")

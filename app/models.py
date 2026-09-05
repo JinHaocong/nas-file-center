@@ -123,6 +123,42 @@ class DataLifecyclePolicy(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, default=1)
     audit_retention_days: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    quarantine_retention_days: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow, nullable=False)
+
+
+class QuarantineEntry(Base):
+    __tablename__ = "quarantine_entries"
+    __table_args__ = (
+        Index("ix_quarantine_entries_state", "state"),
+        Index("ix_quarantine_entries_expires_at", "expires_at"),
+        Index("ix_quarantine_entries_quarantined_at", "quarantined_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    original_path: Mapped[str] = mapped_column(Text, nullable=False)
+    quarantine_path: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+
+    task_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    plan_item_id: Mapped[int | None] = mapped_column(ForeignKey("batch_plan_items.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    state: Mapped[str] = mapped_column(String(32), default="preparing", nullable=False)
+
+    size: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    content_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+    mtime_ns: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    device: Mapped[int] = mapped_column(FilesystemId(), default=0, nullable=False)
+    inode: Mapped[int] = mapped_column(FilesystemId(), default=0, nullable=False)
+
+    quarantined_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    restored_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    purged_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow, nullable=False)
 
 

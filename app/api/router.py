@@ -4,12 +4,34 @@ from typing import Any
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.auth.dependencies import get_current_user
+from app.auth.dependencies import get_current_user, require_admin_user
 from app.batch.rename import RenameRule
 from app.models import User
 
 
 router = APIRouter(prefix="/api", tags=["file-center"], dependencies=[Depends(get_current_user)])
+
+
+class QuarantineRestoreRequest(BaseModel):
+    conflict_policy: str = "skip"
+    custom_target: str | None = None
+
+
+class QuarantinePurgeRequest(BaseModel):
+    confirmation: str
+
+
+class QuarantineRetentionPolicyUpdateRequest(BaseModel):
+    quarantine_retention_days: int
+
+    @field_validator("quarantine_retention_days", mode="before")
+    @classmethod
+    def validate_strict_days(cls, v: Any) -> int:
+        if isinstance(v, bool) or not isinstance(v, int):
+            raise ValueError("quarantine_retention_days must be an integer")
+        if v not in (0, 7, 30, 90):
+            raise ValueError("quarantine_retention_days must be one of 0, 7, 30, 90")
+        return v
 
 
 class IndexCreateRequest(BaseModel):
@@ -863,3 +885,89 @@ def update_data_lifecycle_policy(
         return request.app.state.service.update_data_lifecycle_policy(body.audit_retention_days)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+
+
+# Quarantine Core
+@router.get("/quarantine")
+def list_quarantine(
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+    state: str | None = Query(default=None),
+    query: str | None = Query(default=None),
+):
+    return request.app.state.service.list_quarantine_entries(
+        page=page,
+        page_size=page_size,
+        state=state,
+        search=query,
+    )
+
+
+@router.get("/quarantine/retention-policy")
+def get_quarantine_retention_policy(request: Request):
+    return request.app.state.service.get_quarantine_retention_policy()
+
+
+@router.put("/quarantine/retention-policy")
+def update_quarantine_retention_policy(
+    request: Request,
+    payload: QuarantineRetentionPolicyUpdateRequest,
+    admin_user: User = Depends(require_admin_user),
+):
+    try:
+        return request.app.state.service.update_quarantine_retention_policy(
+            payload.quarantine_retention_days
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.get("/quarantine/{id}")
+def get_quarantine_entry(request: Request, id: int):
+    try:
+        return request.app.state.service.get_quarantine_entry(id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.post("/quarantine/{id}/restore")
+def restore_quarantine_entry(
+    request: Request,
+    id: int,
+    payload: QuarantineRestoreRequest,
+):
+    try:
+        return request.app.state.service.restore_quarantine_entry(
+            id,
+            conflict_policy=payload.conflict_policy,
+            custom_target=payload.custom_target,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(500, str(exc)) from exc
+
+
+@router.post("/quarantine/{id}/purge")
+def purge_quarantine_entry(
+    request: Request,
+    id: int,
+    payload: QuarantinePurgeRequest,
+    admin_user: User = Depends(require_admin_user),
+):
+    try:
+        return request.app.state.service.purge_quarantine_entry(
+            id,
+            confirmation=payload.confirmation,
+            is_admin=True,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+

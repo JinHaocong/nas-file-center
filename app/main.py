@@ -26,7 +26,9 @@ def _sanitize_validation_errors(obj: Any) -> Any:
         return {k: _sanitize_validation_errors(v) for k, v in obj.items()}
     if isinstance(obj, list):
         return [_sanitize_validation_errors(v) for v in obj]
-    return obj
+    if isinstance(obj, (int, str, bool, type(None))):
+        return obj
+    return str(obj)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:

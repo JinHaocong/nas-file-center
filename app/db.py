@@ -98,6 +98,7 @@ def init_db(
             "task_events",
             "index_roots",
             "data_lifecycle_policy",
+            "quarantine_entries",
         }
 
         # Check existing columns in work_jobs
@@ -115,11 +116,19 @@ def init_db(
             ]
             missing_work_job_cols = [(col, ctype) for col, ctype in expected_new_cols if col not in current_cols]
 
+        # Check existing columns in data_lifecycle_policy
+        missing_dlp_cols: list[tuple[str, str]] = []
+        if "data_lifecycle_policy" in existing_tables:
+            current_dlp_cols = {c["name"] for c in inspector.get_columns("data_lifecycle_policy")}
+            if "quarantine_retention_days" not in current_dlp_cols:
+                missing_dlp_cols.append(("quarantine_retention_days", "INTEGER DEFAULT 0 NOT NULL"))
+
         needs_backup = bool(
             existing_tables
             and (
                 not required_tables.issubset(existing_tables)
                 or bool(missing_work_job_cols)
+                or bool(missing_dlp_cols)
             )
         )
         if needs_backup and db_path and backups_dir:
@@ -130,6 +139,13 @@ def init_db(
             with engine.connect() as conn:
                 for col, ctype in missing_work_job_cols:
                     conn.execute(text(f"ALTER TABLE work_jobs ADD COLUMN {col} {ctype}"))
+                conn.commit()
+
+        # Migrate missing columns into data_lifecycle_policy if needed
+        if missing_dlp_cols:
+            with engine.connect() as conn:
+                for col, ctype in missing_dlp_cols:
+                    conn.execute(text(f"ALTER TABLE data_lifecycle_policy ADD COLUMN {col} {ctype}"))
                 conn.commit()
 
         # Create all newly defined tables / columns / indexes
@@ -192,8 +208,8 @@ def init_db(
         with SessionLocal() as session:
             session.execute(
                 text("""
-                    INSERT OR IGNORE INTO data_lifecycle_policy (id, audit_retention_days, updated_at)
-                    VALUES (1, 0, CURRENT_TIMESTAMP)
+                    INSERT OR IGNORE INTO data_lifecycle_policy (id, audit_retention_days, quarantine_retention_days, updated_at)
+                    VALUES (1, 0, 0, CURRENT_TIMESTAMP)
                 """)
             )
             session.commit()

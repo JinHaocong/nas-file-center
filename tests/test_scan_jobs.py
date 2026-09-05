@@ -68,4 +68,4 @@ def test_durable_scan_import_plan_validate_and_execute(tmp_path):
     assert executed["status"] == "completed"
     assert sum(1 for p in a.iterdir() if p.is_file()) == 1
     assert sum(1 for p in b.iterdir() if p.is_file()) == 1
-    assert len(list((data / ".trash" / str(plan["id"])).rglob("*.bin"))) == 2
+    assert len(list((data / ".trash" / f"plan-{plan['id']}").rglob("*.bin"))) == 2

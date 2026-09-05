@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import errno
 import os
 from pathlib import Path
 import re
@@ -8,7 +9,7 @@ from typing import Iterable
 
 from app.batch.plans import OperationItem
 from app.execution.verifier import verify_duplicate_pair
-from app.path_safety import UnsafePathError, require_allowed_path
+from app.path_safety import UnsafePathError, is_reserved_quarantine_path, require_allowed_path
 
 
 @dataclass(frozen=True)
@@ -129,13 +130,28 @@ def execute_item(
             return ItemResult("completed", "mtime refreshed", source)
 
         if item.operation == "quarantine":
-            quarantine = require_allowed_path(quarantine_root, allowed_roots)
-            target = _quarantine_target(source, allowed_roots=allowed_roots, quarantine_root=quarantine, plan_id=plan_id)
-            require_allowed_path(target, allowed_roots)
+            if item.target is not None:
+                target_raw = Path(item.target)
+                if target_raw.is_symlink():
+                    return _skip("target symlink is not allowed")
+                target = target_raw.resolve(strict=False)
+                require_allowed_path(target, allowed_roots)
+                if not is_reserved_quarantine_path(target, quarantine_root):
+                    return _skip("quarantine target must be within quarantine root")
+            else:
+                quarantine = require_allowed_path(quarantine_root, allowed_roots)
+                target = _quarantine_target(source, allowed_roots=allowed_roots, quarantine_root=quarantine, plan_id=plan_id)
+                require_allowed_path(target, allowed_roots)
+
             if target.exists():
                 return _skip("quarantine target already exists")
             target.parent.mkdir(parents=True, exist_ok=True)
-            source.rename(target)
+            try:
+                os.replace(source, target)
+            except OSError as exc:
+                if exc.errno == errno.EXDEV:
+                    return ItemResult("failed", "cross-filesystem quarantine is not supported")
+                return ItemResult("failed", str(exc))
             return ItemResult("completed", "quarantined", target)
 
         os.unlink(source)
