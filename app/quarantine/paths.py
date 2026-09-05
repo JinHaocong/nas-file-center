@@ -66,13 +66,15 @@ def build_quarantine_target_path(
     <QUARANTINE_ROOT>/plan-<plan_id>/root-<slot>/<relative_parent>/<stem>.q-<entry_id><suffix>
     """
     source_p = Path(source)
-    quarantine_p = Path(quarantine_root).resolve(strict=False)
+    quarantine_raw = Path(quarantine_root)
 
     if check_symlink:
         if source_p.is_symlink() or os.path.islink(source_p):
             raise ValueError(f"Symlinks are not permitted in quarantine: {source}")
-        if quarantine_p.is_symlink() or os.path.islink(quarantine_p):
+        if quarantine_raw.is_symlink() or os.path.islink(quarantine_raw):
             raise ValueError(f"Quarantine root is a symlink: {quarantine_root}")
+
+    quarantine_p = quarantine_raw.resolve(strict=False)
 
     slot, root = get_containing_root_slot(source_p, allowed_roots)
     resolved_source = source_p.resolve(strict=False)

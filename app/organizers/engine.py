@@ -42,19 +42,34 @@ class OrganizerProposal:
         return asdict(self)
 
 
+def _make_exclusion_filter(excluded_roots: Iterable[Path | str] | None):
+    resolved_excluded = [Path(ex).resolve(strict=False) for ex in (excluded_roots or ())]
+
+    def _is_excluded(p: Path) -> bool:
+        resolved = p.resolve(strict=False)
+        for ex in resolved_excluded:
+            if resolved == ex or resolved.is_relative_to(ex):
+                return True
+        return False
+
+    return _is_excluded
+
+
 def collect_directory_stats(
     path: Path,
     image_extensions: set[str],
     video_extensions: set[str],
+    excluded_roots: Iterable[Path | str] | None = None,
 ) -> DirectoryStats:
     """Collect image, video, file, folder count and total bytes in directory."""
     stats = DirectoryStats()
+    _is_excluded = _make_exclusion_filter(excluded_roots)
     for current, dirnames, filenames in os.walk(path, followlinks=False):
         curr_p = Path(current)
         kept_dirs = []
         for d in dirnames:
             p = curr_p / d
-            if p.is_symlink():
+            if p.is_symlink() or _is_excluded(p):
                 continue
             kept_dirs.append(d)
         dirnames[:] = kept_dirs
@@ -62,7 +77,7 @@ def collect_directory_stats(
 
         for f in filenames:
             p = curr_p / f
-            if p.is_symlink():
+            if p.is_symlink() or _is_excluded(p):
                 continue
             try:
                 st = p.stat(follow_symlinks=False)
@@ -82,6 +97,7 @@ def collect_tree_stats_bottom_up(
     root: Path,
     image_extensions: set[str],
     video_extensions: set[str],
+    excluded_roots: Iterable[Path | str] | None = None,
 ) -> tuple[dict[Path, DirectoryStats], int, list[Path]]:
     """
     Single-pass tree traversal with bottom-up aggregation.
@@ -92,13 +108,14 @@ def collect_tree_stats_bottom_up(
     direct_stats: dict[Path, dict[str, Any]] = {}
     candidate_dirs: list[Path] = []
     unique_total_bytes = 0
+    _is_excluded = _make_exclusion_filter(excluded_roots)
 
     for current, dirnames, filenames in os.walk(root, followlinks=False):
         curr_p = Path(current)
         kept_dirs = []
         for d in dirnames:
             p = curr_p / d
-            if p.is_symlink():
+            if p.is_symlink() or _is_excluded(p):
                 continue
             kept_dirs.append(d)
             candidate_dirs.append(p)
@@ -111,7 +128,7 @@ def collect_tree_stats_bottom_up(
 
         for f in filenames:
             fp = curr_p / f
-            if fp.is_symlink():
+            if fp.is_symlink() or _is_excluded(fp):
                 continue
             try:
                 st = fp.stat(follow_symlinks=False)
@@ -202,6 +219,7 @@ def generate_organizer_proposals(
     mtime_mode: str = "none",
     mtime_delay_seconds: float = 2.0,
     recursive: bool = False,
+    excluded_roots: Iterable[Path | str] | None = None,
 ) -> tuple[dict[str, Any], list[OrganizerProposal]]:
     """
     Pure read-only calculation of rename proposals and conflict detection.
@@ -213,6 +231,7 @@ def generate_organizer_proposals(
 
     img_exts = {e.lstrip(".").lower() for e in image_extensions}
     vid_exts = {e.lstrip(".").lower() for e in video_extensions}
+    _is_excluded = _make_exclusion_filter(excluded_roots)
 
     # Discover candidate subdirectories and compute stats
     candidates: list[Path] = []
@@ -221,7 +240,7 @@ def generate_organizer_proposals(
 
     if recursive:
         subtree_stats, unique_total_bytes, candidates = collect_tree_stats_bottom_up(
-            safe_root, img_exts, vid_exts
+            safe_root, img_exts, vid_exts, excluded_roots=excluded_roots
         )
         candidates.sort(key=lambda p: (len(p.parts), natural_sort_key(p.name)))
     else:
@@ -229,12 +248,15 @@ def generate_organizer_proposals(
             for entry in it:
                 try:
                     if entry.is_dir(follow_symlinks=False):
-                        candidates.append(Path(entry.path))
+                        p = Path(entry.path)
+                        if _is_excluded(p):
+                            continue
+                        candidates.append(p)
                 except OSError:
                     continue
         candidates.sort(key=lambda p: natural_sort_key(p.name))
         for c in candidates:
-            st = collect_directory_stats(c, img_exts, vid_exts)
+            st = collect_directory_stats(c, img_exts, vid_exts, excluded_roots=excluded_roots)
             subtree_stats[c] = st
             unique_total_bytes += st.total_bytes
 

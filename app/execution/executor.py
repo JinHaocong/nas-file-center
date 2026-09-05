@@ -143,11 +143,12 @@ def execute_item(
                 target = _quarantine_target(source, allowed_roots=allowed_roots, quarantine_root=quarantine, plan_id=plan_id)
                 require_allowed_path(target, allowed_roots)
 
-            if target.exists():
-                return _skip("quarantine target already exists")
             target.parent.mkdir(parents=True, exist_ok=True)
             try:
-                os.replace(source, target)
+                from app.fs_ops import rename_noreplace
+                rename_noreplace(source, target)
+            except FileExistsError:
+                return _skip("quarantine target already exists")
             except OSError as exc:
                 if exc.errno == errno.EXDEV:
                     return ItemResult("failed", "cross-filesystem quarantine is not supported")

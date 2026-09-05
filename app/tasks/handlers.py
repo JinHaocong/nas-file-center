@@ -146,6 +146,13 @@ class FclonesScanHandler(TaskHandler):
             progress_message="Building scan command...",
         )
 
+        effective_excludes = list(state.get("exclude_patterns") or [])
+        if getattr(settings, "quarantine_root", None):
+            q_root_str = str(settings.quarantine_root)
+            q_pattern = f"{q_root_str}/**"
+            if q_pattern not in effective_excludes:
+                effective_excludes.append(q_pattern)
+
         command = build_group_command(
             binary=settings.fclones_binary,
             roots=roots,
@@ -154,7 +161,7 @@ class FclonesScanHandler(TaskHandler):
             min_size=state.get("min_size"),
             threads=state.get("threads") or settings.fclones_threads,
             name_patterns=state.get("name_patterns"),
-            exclude_patterns=state.get("exclude_patterns"),
+            exclude_patterns=effective_excludes,
         )
 
         context.checkpoint(
@@ -225,6 +232,10 @@ class FclonesScanHandler(TaskHandler):
                             continue
                         if not safe.is_file():
                             continue
+                        if getattr(settings, "quarantine_root", None):
+                            from app.path_safety import is_reserved_quarantine_path
+                            if is_reserved_quarantine_path(safe, settings.quarantine_root):
+                                continue
                         root_match = _containing_root(safe, roots)
                         if root_match is None:
                             continue

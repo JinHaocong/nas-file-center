@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from app.auth.dependencies import get_current_user, require_admin_user
 from app.batch.rename import RenameRule
 from app.models import User
+from app.service import StateConflictError
 
 
 router = APIRouter(prefix="/api", tags=["file-center"], dependencies=[Depends(get_current_user)])
@@ -945,6 +946,8 @@ def restore_quarantine_entry(
         )
     except KeyError as exc:
         raise HTTPException(404, str(exc)) from exc
+    except StateConflictError as exc:
+        raise HTTPException(409, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except RuntimeError as exc:
@@ -968,6 +971,8 @@ def purge_quarantine_entry(
         raise HTTPException(404, str(exc)) from exc
     except PermissionError as exc:
         raise HTTPException(403, str(exc)) from exc
+    except StateConflictError as exc:
+        raise HTTPException(409, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 

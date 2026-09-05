@@ -65,24 +65,33 @@ def strip_trailing_stat_suffixes(name: str) -> str:
         value = stripped
 
 
-def collect_tree_stats(path: Path | str) -> TreeStats:
+def collect_tree_stats(path: Path | str, excluded_roots: Iterable[Path | str] | None = None) -> TreeStats:
     root = Path(path)
     if not root.is_dir():
         raise ValueError(f"Not a directory: {root}")
+    resolved_excluded = [Path(ex).resolve(strict=False) for ex in (excluded_roots or ())]
+
+    def _is_excluded(p: Path) -> bool:
+        resolved = p.resolve(strict=False)
+        for ex in resolved_excluded:
+            if resolved == ex or resolved.is_relative_to(ex):
+                return True
+        return False
+
     images = videos = files = folders = total_bytes = 0
     for current, dirnames, filenames in os.walk(root, followlinks=False):
         current_path = Path(current)
         kept_dirs: list[str] = []
         for dirname in dirnames:
             p = current_path / dirname
-            if p.is_symlink():
+            if p.is_symlink() or _is_excluded(p):
                 continue
             folders += 1
             kept_dirs.append(dirname)
         dirnames[:] = kept_dirs
         for filename in filenames:
             p = current_path / filename
-            if p.is_symlink():
+            if p.is_symlink() or _is_excluded(p):
                 continue
             try:
                 stat = p.stat(follow_symlinks=False)
@@ -96,6 +105,7 @@ def collect_tree_stats(path: Path | str) -> TreeStats:
             if suffix in VIDEO_EXTENSIONS:
                 videos += 1
     return TreeStats(images=images, videos=videos, files=files, folders=folders, total_bytes=total_bytes)
+
 
 
 def render_stat_name(name: str, stats: TreeStats, *, template: str) -> str:

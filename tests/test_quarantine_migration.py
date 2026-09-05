@@ -199,6 +199,14 @@ def test_migration_from_v033_with_backup_before_mutation(tmp_path: Path):
         fk_res = conn.execute(text("PRAGMA foreign_key_check;")).fetchall()
         assert len(fk_res) == 0
 
+        # Check PRAGMA foreign_key_list
+        fkl = conn.execute(text("PRAGMA foreign_key_list(quarantine_entries);")).fetchall()
+        fk_map = {row[3]: (row[2], row[4]) for row in fkl}
+        assert "task_id" in fk_map
+        assert fk_map["task_id"] == ("work_jobs", "id")
+        assert "plan_item_id" in fk_map
+        assert fk_map["plan_item_id"] == ("batch_plan_items", "id")
+
     engine.dispose()
 
 

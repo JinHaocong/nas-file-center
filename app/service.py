@@ -51,6 +51,7 @@ from app.quarantine.paths import (
     safe_quarantine_hash,
 )
 from app.path_safety import (
+    UnsafePathError,
     is_reserved_quarantine_path,
     require_allowed_path,
     require_unreserved_path,
@@ -114,6 +115,10 @@ def _index_job_root(job: WorkJob) -> str | None:
     return root
 
 
+class StateConflictError(ValueError):
+    pass
+
+
 class FileCenterService:
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -129,6 +134,7 @@ class FileCenterService:
         )
         self.task_service = TaskService(self.SessionLocal)
         self._preview_snapshots: dict[str, dict[str, Any]] = {}
+        self.reconcile_startup_entries()
 
     def _check_scan_has_dependent_plan(self, session: Session, scan_job_id: int) -> bool:
         legacy_count = session.scalar(
@@ -639,7 +645,8 @@ class FileCenterService:
             if checkpoint_callback is not None:
                 checkpoint_callback(files + folders, None)
 
-        for entry in iter_root(safe_root, self.settings.allowed_roots, root_key=root_key):
+        quarantine_ex = [self.settings.quarantine_root] if getattr(self.settings, "quarantine_root", None) else None
+        for entry in iter_root(safe_root, self.settings.allowed_roots, root_key=root_key, excluded_roots=quarantine_ex):
             now = utcnow()
             if entry.is_dir:
                 folders += 1
@@ -1032,8 +1039,9 @@ class FileCenterService:
 
     def path_match_preview(self, roots: list[str], *, mode: str, normalize_pattern: str | None = None, normalize_replacement: str = ""):
         entries = []
+        quarantine_ex = [self.settings.quarantine_root] if getattr(self.settings, "quarantine_root", None) else None
         for index, root in enumerate(roots):
-            entries.extend(scan_root(root, self.settings.allowed_roots, root_key=f"root-{index}"))
+            entries.extend(scan_root(root, self.settings.allowed_roots, root_key=f"root-{index}", excluded_roots=quarantine_ex))
         groups = match_entries(
             entries,
             mode=mode,
@@ -1282,7 +1290,10 @@ class FileCenterService:
                     if result.state == "completed" and target_p.exists():
                         st = target_p.stat()
                         q_entry.size = st.st_size
-                        q_entry.content_hash = safe_quarantine_hash(target_p)
+                        if target_p.is_dir():
+                            q_entry.content_hash = None
+                        else:
+                            q_entry.content_hash = safe_quarantine_hash(target_p)
                         q_entry.mtime_ns = getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))
                         q_entry.device = st.st_dev
                         q_entry.inode = st.st_ino
@@ -2141,6 +2152,7 @@ class FileCenterService:
                 preserve_tags = json.loads(profile.preserve_tags or "[]")
                 cleanup_patterns = json.loads(profile.cleanup_patterns or "[]")
 
+                quarantine_ex = [self.settings.quarantine_root] if getattr(self.settings, "quarantine_root", None) else None
                 summary, proposals = generate_organizer_proposals(
                     safe_root,
                     allowed_roots=self.settings.allowed_roots,
@@ -2156,6 +2168,7 @@ class FileCenterService:
                     mtime_mode=profile.mtime_mode,
                     mtime_delay_seconds=profile.mtime_delay_seconds,
                     recursive=profile.recursive,
+                    excluded_roots=quarantine_ex,
                 )
                 active_snapshot_id = uuid4().hex
                 self._preview_snapshots[active_snapshot_id] = {
@@ -2218,6 +2231,7 @@ class FileCenterService:
             preserve_tags = json.loads(profile.preserve_tags or "[]")
             cleanup_patterns = json.loads(profile.cleanup_patterns or "[]")
 
+            quarantine_ex = [self.settings.quarantine_root] if getattr(self.settings, "quarantine_root", None) else None
             summary, proposals = generate_organizer_proposals(
                 safe_root,
                 allowed_roots=self.settings.allowed_roots,
@@ -2233,6 +2247,7 @@ class FileCenterService:
                 mtime_mode=profile.mtime_mode,
                 mtime_delay_seconds=profile.mtime_delay_seconds,
                 recursive=profile.recursive,
+                excluded_roots=quarantine_ex,
             )
 
             if summary["conflicts"] > 0:
@@ -2291,7 +2306,10 @@ class FileCenterService:
             elif not src_exists and tgt_exists:
                 st = tgt.stat()
                 entry.size = st.st_size
-                entry.content_hash = safe_quarantine_hash(tgt)
+                if tgt.is_dir():
+                    entry.content_hash = None
+                else:
+                    entry.content_hash = safe_quarantine_hash(tgt)
                 entry.mtime_ns = getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))
                 entry.device = st.st_dev
                 entry.inode = st.st_ino
@@ -2317,6 +2335,7 @@ class FileCenterService:
             return {
                 "id": entry.id,
                 "state": entry.state,
+                "content_hash": entry.content_hash,
                 "reconciled": True,
             }
 
@@ -2331,15 +2350,78 @@ class FileCenterService:
             )
         return [self.reconcile_quarantine_entry(eid) for eid in preparing_ids]
 
+    def reconcile_startup_entries(self) -> list[dict]:
+        try:
+            with self.SessionLocal() as session:
+                transitional_ids = list(
+                    session.scalars(
+                        select(QuarantineEntry.id)
+                        .where(QuarantineEntry.state.in_(["preparing", "restoring", "purging"]))
+                        .order_by(QuarantineEntry.id.asc())
+                    )
+                )
+        except Exception:
+            return []
+
+        results = []
+        for eid in transitional_ids:
+            try:
+                res = self._reconcile_single_transitional_entry(eid)
+                results.append(res)
+            except Exception as ex:
+                results.append({"id": eid, "reconciled": False, "error": str(ex)})
+        return results
+
+    def _reconcile_single_transitional_entry(self, entry_id: int) -> dict:
+        with self.SessionLocal() as session:
+            entry = session.get(QuarantineEntry, entry_id)
+            if not entry:
+                return {"id": entry_id, "reconciled": False, "reason": "Not found"}
+            if entry.state == "preparing":
+                return self.reconcile_quarantine_entry(entry_id)
+            elif entry.state == "restoring":
+                tgt = Path(entry.quarantine_path) if entry.quarantine_path else None
+                tgt_exists = (tgt.exists() or tgt.is_symlink()) if (tgt and str(tgt)) else False
+                now = utcnow()
+                if tgt_exists:
+                    entry.state = "active"
+                    entry.updated_at = now
+                    entry.last_error = "Startup reconciliation: restored target still in quarantine; reset to active"
+                else:
+                    entry.state = "inconsistent"
+                    entry.updated_at = now
+                    entry.last_error = "Startup reconciliation: target missing during restore"
+                session.commit()
+                return {"id": entry.id, "state": entry.state, "reconciled": True}
+            elif entry.state == "purging":
+                tgt = Path(entry.quarantine_path) if entry.quarantine_path else None
+                tgt_exists = (tgt.exists() or tgt.is_symlink()) if (tgt and str(tgt)) else False
+                now = utcnow()
+                if tgt_exists:
+                    entry.state = "active"
+                    entry.updated_at = now
+                    entry.last_error = "Startup reconciliation: purged target still in quarantine; reset to active"
+                else:
+                    entry.state = "purged"
+                    entry.purged_at = entry.purged_at or now
+                    entry.updated_at = now
+                session.commit()
+                return {"id": entry.id, "state": entry.state, "reconciled": True}
+            else:
+                return {"id": entry.id, "state": entry.state, "reconciled": False, "reason": f"Entry state {entry.state} not transitional"}
+
     def restore_quarantine_entry(
         self,
         entry_id: int,
         *,
-        conflict_policy: str = "skip",
+        conflict_policy: str | None = None,
+        conflict_strategy: str | None = None,
         custom_target: str | None = None,
     ) -> dict:
-        if conflict_policy not in {"skip", "rename", "manual"}:
-            raise ValueError(f"Invalid conflict_policy: {conflict_policy}. Must be 'skip', 'rename', or 'manual'.")
+        policy = conflict_policy or conflict_strategy or "skip"
+        if policy not in {"skip", "rename", "manual"}:
+            raise ValueError(f"Invalid conflict_policy: {policy}. Must be 'skip', 'rename', or 'manual'.")
+        conflict_policy = policy
 
         if not self.settings.allow_mutation:
             raise ValueError("Filesystem mutation is disabled")
@@ -2350,7 +2432,7 @@ class FileCenterService:
                 raise KeyError(f"Quarantine entry #{entry_id} not found")
 
             if entry.state != "active":
-                raise ValueError(f"Cannot restore quarantine entry in state '{entry.state}'")
+                raise StateConflictError(f"Cannot restore quarantine entry in state '{entry.state}'")
 
             target = Path(entry.quarantine_path)
             if not target.exists():
@@ -2358,7 +2440,7 @@ class FileCenterService:
                 entry.last_error = f"Quarantined target file does not exist: {target}"
                 entry.updated_at = utcnow()
                 session.commit()
-                raise ValueError(f"Quarantined target file does not exist: {target}")
+                raise StateConflictError(f"Quarantined target file does not exist: {target}")
 
             if target.is_symlink() or os.path.islink(target):
                 entry.state = "inconsistent"
@@ -2399,6 +2481,7 @@ class FileCenterService:
                     return {
                         "id": entry.id,
                         "state": "skipped",
+                        "status": "skipped",
                         "reason": f"Destination already exists: {dest}",
                         "restored_to_path": None,
                     }
@@ -2416,7 +2499,22 @@ class FileCenterService:
             dest.parent.mkdir(parents=True, exist_ok=True)
 
             try:
-                os.replace(target, dest)
+                from app.fs_ops import rename_noreplace
+                rename_noreplace(target, dest)
+            except FileExistsError:
+                entry.state = "active"
+                entry.last_error = f"Destination already exists: {dest}"
+                entry.updated_at = utcnow()
+                session.commit()
+                if conflict_policy == "skip":
+                    return {
+                        "id": entry.id,
+                        "state": "skipped",
+                        "status": "skipped",
+                        "reason": f"Destination already exists: {dest}",
+                        "restored_to_path": None,
+                    }
+                raise ValueError(f"Destination already exists: {dest}")
             except OSError as exc:
                 entry.state = "active"
                 entry.last_error = str(exc)
@@ -2447,6 +2545,7 @@ class FileCenterService:
             return {
                 "id": entry.id,
                 "state": "restored",
+                "status": "restored",
                 "restored_to_path": str(dest),
             }
 
@@ -2474,30 +2573,58 @@ class FileCenterService:
                 raise KeyError(f"Quarantine entry #{entry_id} not found")
 
             if entry.state != "active":
-                raise ValueError(f"Cannot purge quarantine entry in state '{entry.state}'")
+                raise StateConflictError(f"Cannot purge quarantine entry in state '{entry.state}'")
 
-            target = Path(entry.quarantine_path).resolve(strict=False)
-            if not is_reserved_quarantine_path(target, self.settings.quarantine_root):
-                raise UnsafePathError(f"Target path is not inside quarantine root: {target}")
+            raw_target = Path(entry.quarantine_path)
+            quarantine_resolved = Path(self.settings.quarantine_root).resolve(strict=False)
 
-            if target.is_symlink() or os.path.islink(target):
-                raise ValueError(f"Target is a symlink, cannot purge: {target}")
+            # Check parent directory containment within quarantine root
+            raw_parent = raw_target.parent.resolve(strict=False)
+            if not (raw_parent == quarantine_resolved or raw_parent.is_relative_to(quarantine_resolved)):
+                raise UnsafePathError(f"Target path is not inside quarantine root: {raw_target}")
+
+            # Lexical final component check: DO NOT delete symlink referent
+            if raw_target.is_symlink() or os.path.islink(raw_target):
+                raise ValueError(f"Target is a symlink, cannot purge: {raw_target}")
+
+            # Missing target check: FAIL CLOSED (cannot mark as purged!)
+            if not raw_target.exists():
+                entry.state = "inconsistent"
+                entry.last_error = f"Quarantine target does not exist: {raw_target}"
+                entry.updated_at = utcnow()
+                session.commit()
+                raise StateConflictError(f"Quarantine target does not exist: {raw_target}")
 
             entry.state = "purging"
             entry.updated_at = utcnow()
             session.commit()
 
-            if target.exists():
-                target.unlink()
-                # Clean empty parent directories up to (but not including) quarantine_root
-                cur = target.parent
-                quarantine_resolved = Path(self.settings.quarantine_root).resolve(strict=False)
-                while cur != quarantine_resolved and cur.is_relative_to(quarantine_resolved):
-                    try:
-                        cur.rmdir()
-                        cur = cur.parent
-                    except OSError:
-                        break
+            if raw_target.is_dir():
+                # Safe recursive lexical walk, bottom-up, without following symlinks
+                for root_dir, dirnames, filenames in os.walk(raw_target, followlinks=False, topdown=False):
+                    root_p = Path(root_dir)
+                    for f in filenames:
+                        child = root_p / f
+                        # child is unlinked lexically; if it is a symlink, unlink only removes the link, NOT the referent
+                        child.unlink(missing_ok=True)
+                    for d in dirnames:
+                        child_d = root_p / d
+                        if child_d.is_symlink() or os.path.islink(child_d):
+                            child_d.unlink(missing_ok=True)
+                        else:
+                            child_d.rmdir()
+                raw_target.rmdir()
+            else:
+                raw_target.unlink()
+
+            # Clean empty parent directories up to (but not including) quarantine_root
+            cur = raw_target.parent.resolve(strict=False)
+            while cur != quarantine_resolved and cur.is_relative_to(quarantine_resolved):
+                try:
+                    cur.rmdir()
+                    cur = cur.parent
+                except OSError:
+                    break
 
             now = utcnow()
             entry.state = "purged"
@@ -2517,6 +2644,7 @@ class FileCenterService:
             return {
                 "id": entry.id,
                 "state": "purged",
+                "status": "purged",
             }
 
     def get_quarantine_retention_policy(self) -> dict:

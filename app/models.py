@@ -139,7 +139,7 @@ class QuarantineEntry(Base):
     original_path: Mapped[str] = mapped_column(Text, nullable=False)
     quarantine_path: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
 
-    task_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    task_id: Mapped[int | None] = mapped_column(ForeignKey("work_jobs.id", ondelete="SET NULL"), nullable=True, index=True)
     plan_item_id: Mapped[int | None] = mapped_column(ForeignKey("batch_plan_items.id", ondelete="SET NULL"), nullable=True, index=True)
 
     state: Mapped[str] = mapped_column(String(32), default="preparing", nullable=False)

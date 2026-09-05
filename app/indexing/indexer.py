@@ -45,11 +45,21 @@ def iter_root(
     allowed_roots: Iterable[Path | str],
     *,
     root_key: str | None = None,
+    excluded_roots: Iterable[Path | str] | None = None,
 ) -> Iterator[IndexedEntry]:
     safe_root = require_allowed_path(root, allowed_roots)
     if not safe_root.is_dir():
         raise ValueError(f"Scan root is not a directory: {safe_root}")
     key = root_key or safe_root.name
+
+    resolved_excluded = [Path(ex).resolve(strict=False) for ex in (excluded_roots or ())]
+
+    def _is_excluded(p: Path) -> bool:
+        resolved = p.resolve(strict=False)
+        for ex in resolved_excluded:
+            if resolved == ex or resolved.is_relative_to(ex):
+                return True
+        return False
 
     for current, dirnames, filenames in os.walk(safe_root, followlinks=False):
         current_path = Path(current)
@@ -57,6 +67,8 @@ def iter_root(
         for name in sorted(dirnames):
             path = current_path / name
             if path.is_symlink():
+                continue
+            if _is_excluded(path):
                 continue
             try:
                 yield _entry(safe_root, path, key, is_dir=True)
@@ -69,6 +81,8 @@ def iter_root(
             path = current_path / name
             if path.is_symlink():
                 continue
+            if _is_excluded(path):
+                continue
             try:
                 yield _entry(safe_root, path, key, is_dir=False)
             except OSError:
@@ -80,7 +94,9 @@ def scan_root(
     allowed_roots: Iterable[Path | str],
     *,
     root_key: str | None = None,
+    excluded_roots: Iterable[Path | str] | None = None,
 ) -> list[IndexedEntry]:
-    entries = list(iter_root(root, allowed_roots, root_key=root_key))
+    entries = list(iter_root(root, allowed_roots, root_key=root_key, excluded_roots=excluded_roots))
     entries.sort(key=lambda item: item.relative_path)
     return entries
+
