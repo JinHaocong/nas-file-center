@@ -15,7 +15,7 @@ from app.models import (
     utcnow,
 )
 from app.service import FileCenterService
-from app.tasks.handlers import _reconcile_executing_item
+from app.tasks.handlers import _reconcile_executing_item, gather_reconcile_evidence
 
 
 def _setup_service(tmp_path: Path):
@@ -289,7 +289,8 @@ def test_quarantine_crash_reconcile_accepts_matching_target_with_metadata(tmp_pa
         session.add(q_entry)
         session.commit()
 
-        _reconcile_executing_item(session, item, plan.id, job_id=103, user_id=None, settings=settings, now=now)
+        evidence = gather_reconcile_evidence(q_file)
+        _reconcile_executing_item(session, item, plan.id, job_id=103, user_id=None, settings=settings, now=now, precomputed_evidence=evidence)
         session.commit()
 
         assert item.state == "completed"

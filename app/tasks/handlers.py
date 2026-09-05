@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 import json
 import time
 from datetime import timedelta
@@ -401,13 +402,92 @@ def _build_stat_dict(p: Path, st: os.stat_result) -> dict:
     }
 
 
-def _reconcile_executing_item(session, item: BatchPlanItem, plan_id: int, job_id: int, user_id: int | None, settings: Settings, now, precomputed_hash: str | None = None) -> None:
+@dataclass(frozen=True)
+class ReconcileEvidence:
+    content_hash: str
+    device: int
+    inode: int
+    size: int
+    mtime_ns: int
+    object_type: str = "file"
+
+
+def gather_reconcile_evidence(p: Path) -> ReconcileEvidence | None:
+    p = Path(p)
+    if not p.is_file() or p.is_symlink():
+        return None
+    try:
+        st = p.stat(follow_symlinks=False)
+        h = safe_quarantine_hash(p)
+        return ReconcileEvidence(
+            content_hash=h,
+            device=getattr(st, "st_dev", 0),
+            inode=getattr(st, "st_ino", 0),
+            size=st.st_size,
+            mtime_ns=getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9)),
+            object_type="file",
+        )
+    except OSError:
+        return None
+
+
+def _validate_evidence(st: os.stat_result, evidence: Any) -> bool:
+    if evidence is None:
+        return False
+    if isinstance(evidence, dict):
+        ev_dev = evidence.get("device")
+        ev_ino = evidence.get("inode")
+        ev_size = evidence.get("size")
+        ev_mtime_ns = evidence.get("mtime_ns")
+        ev_hash = evidence.get("content_hash")
+    else:
+        ev_dev = getattr(evidence, "device", None)
+        ev_ino = getattr(evidence, "inode", None)
+        ev_size = getattr(evidence, "size", None)
+        ev_mtime_ns = getattr(evidence, "mtime_ns", None)
+        ev_hash = getattr(evidence, "content_hash", None)
+
+    if not ev_hash or ev_dev is None or ev_ino is None or ev_size is None or ev_mtime_ns is None:
+        return False
+    if getattr(st, "st_dev", 0) != ev_dev:
+        return False
+    if getattr(st, "st_ino", 0) != ev_ino:
+        return False
+    if st.st_size != ev_size:
+        return False
+    curr_mtime_ns = getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))
+    if curr_mtime_ns != ev_mtime_ns:
+        return False
+    return True
+
+
+def _get_evidence_hash(evidence: Any) -> str | None:
+    if evidence is None:
+        return None
+    if isinstance(evidence, dict):
+        return evidence.get("content_hash")
+    return getattr(evidence, "content_hash", None)
+
+
+def _reconcile_executing_item(
+    session,
+    item: BatchPlanItem,
+    plan_id: int,
+    job_id: int,
+    user_id: int | None,
+    settings: Settings,
+    now,
+    precomputed_hash: str | None = None,
+    precomputed_evidence: ReconcileEvidence | dict | None = None,
+) -> None:
     """Reconcile an item found in 'executing' state after a crash or worker restart."""
     src = Path(item.source_path)
     meta = json.loads(item.metadata_json or "{}")
     exec_meta = meta.get("execution") or {}
     source_stat = exec_meta.get("source_stat") or {}
     metadata_before = exec_meta.get("metadata_before") or source_stat
+
+    evidence = precomputed_evidence
 
     if item.operation in ("rename", "move"):
         tgt = Path(item.target_path) if item.target_path else None
@@ -457,6 +537,20 @@ def _reconcile_executing_item(session, item: BatchPlanItem, plan_id: int, job_id
                     q_entry.updated_at = now
                 return
 
+            if tgt.is_file() and not tgt.is_symlink():
+                if not _validate_evidence(st, evidence):
+                    item.state = "failed"
+                    item.reason = "reconciliation conflict after crash (missing or stale quarantine hash evidence)"
+                    if q_entry:
+                        q_entry.state = "abandoned"
+                        q_entry.last_error = item.reason
+                        q_entry.updated_at = now
+                    return
+                if q_entry:
+                    q_entry.content_hash = _get_evidence_hash(evidence)
+            elif q_entry:
+                q_entry.content_hash = None
+
             item.state = "completed"
             item.reason = "reconciled after crash (quarantine exists)"
             if q_entry:
@@ -464,8 +558,6 @@ def _reconcile_executing_item(session, item: BatchPlanItem, plan_id: int, job_id
                 q_entry.mtime_ns = getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))
                 q_entry.device = getattr(st, "st_dev", 0)
                 q_entry.inode = getattr(st, "st_ino", 0)
-                if tgt.is_file() and not tgt.is_symlink():
-                    q_entry.content_hash = precomputed_hash or safe_quarantine_hash(tgt)
                 q_entry.state = "active"
                 q_entry.quarantined_at = q_entry.quarantined_at or now
                 q_entry.updated_at = now
@@ -509,14 +601,23 @@ def _reconcile_executing_item(session, item: BatchPlanItem, plan_id: int, job_id
                     q_entry.last_error = item.reason
                     q_entry.updated_at = now
                 return
-            if q_entry and q_entry.content_hash and tgt.is_file():
-                current_h = precomputed_hash or safe_quarantine_hash(tgt)
-                if current_h != q_entry.content_hash:
+            if q_entry and q_entry.content_hash and tgt.is_file() and not tgt.is_symlink():
+                if not _validate_evidence(st, evidence):
                     item.state = "failed"
-                    item.reason = f"reconciliation conflict after crash (hash mismatch: expected {q_entry.content_hash}, got {current_h})"
-                    q_entry.state = "inconsistent"
-                    q_entry.last_error = item.reason
-                    q_entry.updated_at = now
+                    item.reason = "reconciliation conflict after crash (missing or stale restore hash evidence)"
+                    if q_entry:
+                        q_entry.state = "inconsistent"
+                        q_entry.last_error = item.reason
+                        q_entry.updated_at = now
+                    return
+                ev_hash = _get_evidence_hash(evidence)
+                if ev_hash != q_entry.content_hash:
+                    item.state = "failed"
+                    item.reason = f"reconciliation conflict after crash (hash mismatch: expected {q_entry.content_hash}, got {ev_hash})"
+                    if q_entry:
+                        q_entry.state = "inconsistent"
+                        q_entry.last_error = item.reason
+                        q_entry.updated_at = now
                     return
 
             item.state = "completed"
@@ -614,8 +715,8 @@ class BatchPlanExecuteHandler(TaskHandler):
         user_id = state.get("requested_by_user_id")
 
         # 1. Announce start & reconcile interrupted items
-        # Precompute reconciliation hashes outside DB write lock
-        precomputed_reconcile_hashes: dict[int, str] = {}
+        # Precompute reconciliation evidence outside DB write lock
+        precomputed_evidence: dict[int, ReconcileEvidence] = {}
         with context.SessionLocal() as session:
             exec_items = list(session.scalars(
                 select(BatchPlanItem)
@@ -635,9 +736,12 @@ class BatchPlanExecuteHandler(TaskHandler):
                     elif it.operation == "restore":
                         tgt = Path(it.target_path) if it.target_path else None
                     src = Path(it.source_path)
-                    if tgt and tgt.is_file() and not tgt.is_symlink() and not src.exists():
-                        precomputed_reconcile_hashes[it.id] = safe_quarantine_hash(tgt)
+                    if tgt and not src.exists():
+                        ev = gather_reconcile_evidence(tgt)
+                        if ev:
+                            precomputed_evidence[it.id] = ev
 
+        reconciled_failed_item_ids: set[int] = set()
         with context.SessionLocal() as session:
             session.execute(text("BEGIN IMMEDIATE"))
             now = utcnow()
@@ -660,8 +764,10 @@ class BatchPlanExecuteHandler(TaskHandler):
             for it in executing_items:
                 _reconcile_executing_item(
                     session, it, plan_id, job.id, user_id, settings, now,
-                    precomputed_hash=precomputed_reconcile_hashes.get(it.id),
+                    precomputed_evidence=precomputed_evidence.get(it.id),
                 )
+                if it.state == "failed":
+                    reconciled_failed_item_ids.add(it.id)
             session.commit()
 
         # 2. Query all plan items
@@ -681,9 +787,12 @@ class BatchPlanExecuteHandler(TaskHandler):
         # 3. Item-by-item 3-phase execution
         for item_meta in all_items:
             # Check current status in DB before starting Phase 1
+            if item_meta.id in reconciled_failed_item_ids:
+                continue
+
             with context.SessionLocal() as session:
                 row = session.get(BatchPlanItem, item_meta.id)
-                if row is None or row.state in ("completed", "skipped"):
+                if row is None or row.state in ("completed", "skipped", "failed") or row.id in reconciled_failed_item_ids:
                     continue
 
             # Checkpoint at item boundary
@@ -723,7 +832,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                     assert_active_worker_lease(session, context.worker_id, now=now)
 
                 row = session.get(BatchPlanItem, item_meta.id)
-                if row.state in ("completed", "skipped"):
+                if row.state in ("completed", "skipped", "failed") or row.id in reconciled_failed_item_ids:
                     completed_or_skipped += 1
                     continue
 
