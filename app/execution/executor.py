@@ -71,7 +71,7 @@ def execute_item(
         return _skip("filesystem mutation is disabled")
     if item.operation == "unlink" and not allow_delete:
         return _skip("permanent deletion is disabled")
-    if item.operation not in {"rename", "move", "touch", "quarantine", "unlink"}:
+    if item.operation not in {"rename", "move", "touch", "quarantine", "unlink", "restore"}:
         return _skip(f"unsupported operation: {item.operation}")
 
     source_raw = Path(item.source)
@@ -128,6 +128,27 @@ def execute_item(
             except OSError as exc:
                 return ItemResult("failed", str(exc))
             return ItemResult("completed", "moved", target)
+
+        if item.operation == "restore":
+            if item.target is None:
+                return _skip("target is required for restore")
+            target_raw = Path(item.target)
+            if target_raw.is_symlink():
+                return _skip("target symlink is not allowed")
+            target = require_allowed_path(target_raw, allowed_roots)
+            if is_reserved_quarantine_path(target, quarantine_root):
+                return _skip("restore target cannot be within quarantine root")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                from app.fs_ops import rename_noreplace
+                rename_noreplace(source, target)
+            except FileExistsError:
+                return _skip("target already exists")
+            except OSError as exc:
+                if exc.errno == errno.EXDEV:
+                    return ItemResult("failed", "cross-filesystem restore is not supported")
+                return ItemResult("failed", str(exc))
+            return ItemResult("completed", "restored", target)
 
         if item.operation == "touch":
             target_mtime_ns = getattr(item, "target_mtime_ns", None) or getattr(item, "expected_mtime_ns", None)

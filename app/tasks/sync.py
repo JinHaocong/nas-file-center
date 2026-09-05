@@ -112,8 +112,10 @@ def sync_batch_plan_status(
             states = {item.state for item in items}
             if states and states <= {"completed"}:
                 plan.status = "completed"
-            elif any(s == "completed" for s in states):
+            elif any(s in ("completed", "failed") for s in states):
                 plan.status = "partial"
+            elif target_status == "cancelled" and all(s == "pending" for s in states):
+                plan.status = "ready"
             elif target_status == "completed":
                 plan.status = "completed" if states <= {"completed"} else "partial"
             else:

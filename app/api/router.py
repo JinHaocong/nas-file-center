@@ -996,13 +996,15 @@ def get_quarantine_entry(request: Request, id: int):
 def restore_quarantine_entry(
     request: Request,
     id: int,
-    payload: QuarantineRestoreRequest,
+    payload: QuarantineRestoreRequest = QuarantineRestoreRequest(),
+    current_user: User = Depends(get_current_user),
 ):
     try:
         return request.app.state.service.restore_quarantine_entry(
             id,
             conflict_policy=payload.conflict_policy,
             custom_target=payload.custom_target,
+            user_id=current_user.id,
         )
     except KeyError as exc:
         raise HTTPException(404, str(exc)) from exc

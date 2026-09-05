@@ -22,6 +22,7 @@ from app.models import (
     OperationJournal,
     QuarantineEntry,
     ScanJob,
+    TaskLock,
     WorkJob,
     utcnow,
 )
@@ -434,9 +435,87 @@ def _reconcile_executing_item(session, item: BatchPlanItem, plan_id: int, job_id
             item.state = "failed"
             item.reason = "reconciliation conflict after crash"
 
+    elif item.operation == "restore":
+        tgt = Path(item.target_path) if item.target_path else None
+        meta = json.loads(item.metadata_json or "{}")
+        qid = meta.get("quarantine_entry_id")
+        q_entry = session.get(QuarantineEntry, int(qid)) if qid else None
+        if tgt and tgt.exists() and not src.exists():
+            item.state = "completed"
+            item.reason = "reconciled after crash (restored file exists)"
+            if q_entry:
+                q_entry.state = "restored"
+                q_entry.restored_at = q_entry.restored_at or now
+                q_entry.updated_at = now
+            existing_j = session.scalar(select(OperationJournal).where(OperationJournal.plan_item_id == item.id))
+            if not existing_j:
+                st = tgt.stat(follow_symlinks=False)
+                session.add(OperationJournal(
+                    operation=item.operation,
+                    sequence=item.sequence,
+                    plan_id=plan_id,
+                    plan_item_id=item.id,
+                    task_id=job_id,
+                    user_id=user_id,
+                    before_json=json.dumps({"quarantine_path": str(src), "quarantine_entry_id": q_entry.id if q_entry else None}, ensure_ascii=False),
+                    after_json=json.dumps({"restored_path": str(tgt), "size": st.st_size, "mtime_ns": getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))}, ensure_ascii=False),
+                    metadata_before_json="{}",
+                    metadata_after_json="{}",
+                    created_at=now,
+                ))
+        elif src.exists() and (not tgt or not tgt.exists()):
+            if q_entry and q_entry.state == "restoring":
+                q_entry.state = "active"
+                q_entry.updated_at = now
+            item.state = "planned"
+            item.reason = None
+        else:
+            item.state = "failed"
+            item.reason = "reconciliation conflict after crash"
+
     elif item.operation == "touch":
-        item.state = "planned"
-        item.reason = None
+        meta = json.loads(item.metadata_json or "{}")
+        exec_meta = meta.get("execution") or {}
+        target_mtime_ns = exec_meta.get("target_mtime_ns") or item.expected_mtime_ns
+        source_stat = exec_meta.get("source_stat") or {}
+        before_mtime_ns = source_stat.get("mtime_ns")
+
+        if src.exists():
+            st = src.stat(follow_symlinks=False)
+            curr_mtime_ns = getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))
+            if target_mtime_ns and curr_mtime_ns == target_mtime_ns:
+                item.state = "completed"
+                item.reason = "reconciled after crash (touch target mtime matches)"
+                existing_j = session.scalar(select(OperationJournal).where(OperationJournal.plan_item_id == item.id))
+                if not existing_j:
+                    session.add(OperationJournal(
+                        operation=item.operation,
+                        sequence=item.sequence,
+                        plan_id=plan_id,
+                        plan_item_id=item.id,
+                        task_id=job_id,
+                        user_id=user_id,
+                        before_json=json.dumps({"path": str(src), "mtime_ns": before_mtime_ns}, ensure_ascii=False),
+                        after_json=json.dumps({"path": str(src), "mtime_ns": curr_mtime_ns}, ensure_ascii=False),
+                        metadata_before_json=json.dumps(source_stat, ensure_ascii=False),
+                        metadata_after_json=json.dumps({
+                            "object_type": "file",
+                            "size": st.st_size,
+                            "mtime_ns": curr_mtime_ns,
+                            "device": getattr(st, "st_dev", 0),
+                            "inode": getattr(st, "st_ino", 0),
+                        }, ensure_ascii=False),
+                        created_at=now,
+                    ))
+            elif before_mtime_ns is not None and curr_mtime_ns == before_mtime_ns:
+                item.state = "planned"
+                item.reason = None
+            else:
+                item.state = "failed"
+                item.reason = "reconciliation conflict after crash (mtime mismatch)"
+        else:
+            item.state = "failed"
+            item.reason = "reconciliation failed: source does not exist"
 
 
 @register_handler
@@ -511,7 +590,25 @@ class BatchPlanExecuteHandler(TaskHandler):
 
             # --- PHASE 1: DB INTENT ---
             q_entry_id = None
+            q_restore_entry_id = None
             target_path_str = None
+            src_p = Path(item_meta.source_path)
+            src_stat_dict = {}
+            target_touch_mtime_ns = None
+            try:
+                if src_p.exists():
+                    st = src_p.stat(follow_symlinks=False)
+                    obj_type = "directory" if src_p.is_dir() else ("symlink" if src_p.is_symlink() else "file")
+                    src_stat_dict = {
+                        "object_type": obj_type,
+                        "size": st.st_size,
+                        "mtime_ns": getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9)),
+                        "device": getattr(st, "st_dev", 0),
+                        "inode": getattr(st, "st_ino", 0),
+                    }
+            except OSError:
+                pass
+
             with context.SessionLocal() as session:
                 session.execute(text("BEGIN IMMEDIATE"))
                 now = utcnow()
@@ -524,6 +621,17 @@ class BatchPlanExecuteHandler(TaskHandler):
                     continue
 
                 row.state = "executing"
+
+                if row.operation == "touch":
+                    target_touch_mtime_ns = row.expected_mtime_ns if (row.expected_mtime_ns and row.expected_mtime_ns > 0) else int(now.timestamp() * 1e9)
+
+                item_metadata = json.loads(row.metadata_json or "{}")
+                item_metadata["execution"] = {
+                    "phase": "intent",
+                    "source_stat": src_stat_dict,
+                    "target_mtime_ns": target_touch_mtime_ns,
+                }
+                row.metadata_json = json.dumps(item_metadata, ensure_ascii=False)
 
                 if row.operation == "quarantine":
                     q_entry = QuarantineEntry(
@@ -551,22 +659,24 @@ class BatchPlanExecuteHandler(TaskHandler):
                     q_entry.quarantine_path = str(q_target)
                     row.target_path = str(q_target)
                     target_path_str = str(q_target)
+                elif row.operation == "restore":
+                    meta_dict = json.loads(row.metadata_json or "{}")
+                    qid = meta_dict.get("quarantine_entry_id")
+                    if qid:
+                        q_entry = session.get(QuarantineEntry, int(qid))
+                        if q_entry and q_entry.state == "active":
+                            q_entry.state = "restoring"
+                            q_entry.updated_at = now
+                            q_restore_entry_id = q_entry.id
+                    target_path_str = row.target_path
                 else:
                     target_path_str = row.target_path
 
                 session.commit()
 
             # --- PHASE 2: FILESYSTEM MUTATION OUTSIDE DB LOCK ---
-            src_p = Path(item_meta.source_path)
-            before_size = None
-            before_mtime_ns = None
-            try:
-                if src_p.exists():
-                    st = src_p.stat(follow_symlinks=False)
-                    before_size = st.st_size
-                    before_mtime_ns = getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))
-            except OSError:
-                pass
+            before_size = src_stat_dict.get("size")
+            before_mtime_ns = src_stat_dict.get("mtime_ns")
 
             item_op = OperationItem(
                 sequence=item_meta.sequence,
@@ -578,7 +688,19 @@ class BatchPlanExecuteHandler(TaskHandler):
                 expected_hash=item_meta.expected_hash,
                 state=item_meta.state,
                 expected_mtime_ns=item_meta.expected_mtime_ns,
+                target_mtime_ns=target_touch_mtime_ns,
             )
+
+            # Boundary Fence: Freshly renew and assert active worker lease before filesystem mutation
+            if context.worker_id is not None:
+                with context.SessionLocal() as session:
+                    session.execute(text("BEGIN IMMEDIATE"))
+                    now = utcnow()
+                    assert_active_worker_lease(session, context.worker_id, now=now)
+                    lock = session.get(TaskLock, 1)
+                    if lock and lock.owner == context.worker_id:
+                        lock.acquired_at = now
+                    session.commit()
 
             result = execute_item(
                 item_op,
@@ -591,6 +713,12 @@ class BatchPlanExecuteHandler(TaskHandler):
 
             after_size = None
             after_mtime_ns = None
+            q_stat_size = None
+            q_stat_mtime_ns = None
+            q_stat_dev = None
+            q_stat_ino = None
+            q_content_hash = None
+
             if result.state == "completed":
                 res_p = result.result_path or src_p
                 try:
@@ -598,6 +726,15 @@ class BatchPlanExecuteHandler(TaskHandler):
                         st = res_p.stat(follow_symlinks=False)
                         after_size = st.st_size
                         after_mtime_ns = getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))
+                        if q_entry_id is not None and result.result_path and result.result_path.exists():
+                            q_stat_size = st.st_size
+                            q_stat_mtime_ns = after_mtime_ns
+                            q_stat_dev = st.st_dev
+                            q_stat_ino = st.st_ino
+                            if res_p.is_dir():
+                                q_content_hash = None
+                            else:
+                                q_content_hash = safe_quarantine_hash(res_p)
                 except OSError:
                     pass
 
@@ -621,16 +758,11 @@ class BatchPlanExecuteHandler(TaskHandler):
                     q_entry = session.get(QuarantineEntry, q_entry_id)
                     if q_entry:
                         if result.state == "completed" and result.result_path and result.result_path.exists():
-                            target_p = result.result_path
-                            st = target_p.stat(follow_symlinks=False)
-                            q_entry.size = st.st_size
-                            if target_p.is_dir():
-                                q_entry.content_hash = None
-                            else:
-                                q_entry.content_hash = safe_quarantine_hash(target_p)
-                            q_entry.mtime_ns = getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))
-                            q_entry.device = st.st_dev
-                            q_entry.inode = st.st_ino
+                            q_entry.size = q_stat_size or 0
+                            q_entry.content_hash = q_content_hash
+                            q_entry.mtime_ns = q_stat_mtime_ns or 0
+                            q_entry.device = q_stat_dev or 0
+                            q_entry.inode = q_stat_ino or 0
                             q_entry.quarantined_at = now
                             policy = session.scalar(select(DataLifecyclePolicy).where(DataLifecyclePolicy.id == 1))
                             retention_days = policy.quarantine_retention_days if policy else 0
@@ -642,6 +774,18 @@ class BatchPlanExecuteHandler(TaskHandler):
                             q_entry.last_error = result.reason
                             q_entry.updated_at = now
 
+                if q_restore_entry_id is not None:
+                    q_entry = session.get(QuarantineEntry, q_restore_entry_id)
+                    if q_entry:
+                        if result.state == "completed":
+                            q_entry.state = "restored"
+                            q_entry.restored_at = now
+                            q_entry.updated_at = now
+                        else:
+                            q_entry.state = "active"
+                            q_entry.last_error = result.reason
+                            q_entry.updated_at = now
+
                 if result.state == "completed":
                     if row.operation in ("rename", "move"):
                         b_json = json.dumps({"path": row.source_path, "size": before_size or row.expected_size, "mtime_ns": before_mtime_ns}, ensure_ascii=False)
@@ -649,12 +793,41 @@ class BatchPlanExecuteHandler(TaskHandler):
                     elif row.operation == "quarantine":
                         b_json = json.dumps({"path": row.source_path, "size": before_size or row.expected_size, "mtime_ns": before_mtime_ns, "is_dir": False}, ensure_ascii=False)
                         a_json = json.dumps({"quarantine_path": str(result.result_path), "quarantine_entry_id": q_entry_id, "size": after_size, "mtime_ns": after_mtime_ns}, ensure_ascii=False)
+                    elif row.operation == "restore":
+                        b_json = json.dumps({
+                            "quarantine_path": row.source_path,
+                            "quarantine_entry_id": q_restore_entry_id,
+                            "original_path": row.target_path,
+                            "size": before_size or row.expected_size,
+                            "mtime_ns": before_mtime_ns,
+                        }, ensure_ascii=False)
+                        a_json = json.dumps({
+                            "restored_path": str(result.result_path),
+                            "size": after_size,
+                            "mtime_ns": after_mtime_ns,
+                        }, ensure_ascii=False)
                     elif row.operation == "touch":
                         b_json = json.dumps({"path": row.source_path, "mtime_ns": before_mtime_ns}, ensure_ascii=False)
                         a_json = json.dumps({"path": row.source_path, "mtime_ns": after_mtime_ns}, ensure_ascii=False)
                     else:
                         b_json = json.dumps({"path": row.source_path}, ensure_ascii=False)
                         a_json = json.dumps({"path": str(result.result_path) if result.result_path else None}, ensure_ascii=False)
+
+                    res_stat_dict = {}
+                    res_target = result.result_path if (result.result_path and result.result_path.exists()) else (src_p if (result.state == "completed" and src_p.exists()) else None)
+                    if res_target:
+                        try:
+                            st_res = res_target.stat(follow_symlinks=False)
+                            res_obj_type = "directory" if res_target.is_dir() else ("symlink" if res_target.is_symlink() else "file")
+                            res_stat_dict = {
+                                "object_type": res_obj_type,
+                                "size": st_res.st_size,
+                                "mtime_ns": getattr(st_res, "st_mtime_ns", int(st_res.st_mtime * 1e9)),
+                                "device": getattr(st_res, "st_dev", 0),
+                                "inode": getattr(st_res, "st_ino", 0),
+                            }
+                        except OSError:
+                            pass
 
                     session.add(OperationJournal(
                         operation=row.operation,
@@ -665,8 +838,8 @@ class BatchPlanExecuteHandler(TaskHandler):
                         user_id=user_id,
                         before_json=b_json,
                         after_json=a_json,
-                        metadata_before_json="{}",
-                        metadata_after_json="{}",
+                        metadata_before_json=json.dumps(src_stat_dict, ensure_ascii=False),
+                        metadata_after_json=json.dumps(res_stat_dict, ensure_ascii=False),
                         created_at=now,
                     ))
 

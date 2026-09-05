@@ -1186,6 +1186,8 @@ class FileCenterService:
                 operation = raw.get("operation")
                 if operation == "unlink":
                     raise ValueError("Operation 'unlink' is deprecated and cannot be used in new plans. Use 'quarantine' instead.")
+                if operation == "restore":
+                    raise ValueError("Operation 'restore' is reserved for system undo plans")
 
                 source = require_unreserved_path(
                     require_allowed_path(raw["source"], self.settings.allowed_roots),
@@ -1602,9 +1604,11 @@ class FileCenterService:
                 elif entry.operation == "quarantine":
                     source_p = after.get("quarantine_path") or ""
                     target_p = before.get("path") or ""
-                    op = "move"
+                    op = "restore"
                     expected_size = after.get("size") or before.get("size") or 0
                     expected_mtime_ns = 0
+                    meta["quarantine_entry_id"] = after.get("quarantine_entry_id")
+                    meta["source_journal_id"] = entry.id
                 elif entry.operation == "touch":
                     source_p = after.get("path") or before.get("path") or ""
                     target_p = None
@@ -2657,6 +2661,7 @@ class FileCenterService:
         conflict_policy: str | None = None,
         conflict_strategy: str | None = None,
         custom_target: str | None = None,
+        user_id: int | None = None,
     ) -> dict:
         policy = conflict_policy or conflict_strategy or "skip"
         if policy not in {"skip", "rename", "manual"}:
@@ -2780,9 +2785,9 @@ class FileCenterService:
                 operation="restore",
                 sequence=1,
                 plan_id=None,
-                plan_item_id=entry.plan_item_id,
-                task_id=entry.task_id,
-                user_id=None,
+                plan_item_id=None,
+                task_id=None,
+                user_id=user_id,
                 before_json=json.dumps({
                     "quarantine_path": str(target),
                     "quarantine_entry_id": entry.id,

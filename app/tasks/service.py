@@ -2,10 +2,10 @@ from datetime import datetime
 import inspect
 import json
 from typing import Any
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import Integer, delete, func, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.models import ScanJob, TaskEvent, WorkJob, WorkerState, utcnow
+from app.models import BatchPlan, ScanJob, TaskEvent, WorkJob, WorkerState, utcnow
 from app.tasks.handlers import get_job_capabilities
 from app.tasks.logging import log_task_event
 from app.tasks.recovery import compute_worker_status
@@ -15,7 +15,7 @@ from app.tasks.state_machine import (
     TERMINAL_STATES,
     validate_transition,
 )
-from app.tasks.sync import sync_scan_job_status
+from app.tasks.sync import sync_batch_plan_status, sync_scan_job_status
 
 RETRY_WHITELISTS: dict[str, set[str]] = {
     "index-root": {"root"},
@@ -260,6 +260,13 @@ class TaskService:
                     error_text="Cancelled by user",
                     cleanup_partial_results=True,
                 )
+                sync_batch_plan_status(
+                    session,
+                    job,
+                    "cancelled",
+                    finished_at=now,
+                    error_text="Cancelled by user",
+                )
                 log_task_event(
                     session,
                     job_id=task_id,
@@ -296,6 +303,35 @@ class TaskService:
 
             if job.status != JobState.FAILED.value:
                 raise ValueError(f"Only failed jobs can be retried (current status is '{job.status}')")
+
+            if job.kind == "batch-plan-execute":
+                try:
+                    payload_data = json.loads(job.state_json or "{}")
+                    plan_id = payload_data.get("plan_id")
+                except Exception:
+                    plan_id = None
+                if not plan_id:
+                    raise ValueError("Invalid batch-plan-execute job: missing plan_id")
+
+                plan = session.get(BatchPlan, int(plan_id))
+                if plan is None:
+                    raise ValueError(f"Cannot retry execution: plan #{plan_id} not found")
+                if plan.status == "completed":
+                    raise ValueError(f"Cannot retry execution: plan #{plan_id} is already completed")
+
+                active_job = session.scalars(
+                    select(WorkJob)
+                    .where(
+                        WorkJob.kind == "batch-plan-execute",
+                        WorkJob.status.in_(("queued", "running", "paused", "cancel_requested")),
+                        func.cast(func.json_extract(WorkJob.state_json, "$.plan_id"), Integer) == int(plan_id),
+                    )
+                    .order_by(WorkJob.id.desc())
+                ).first()
+                if active_job is not None:
+                    raise ValueError(
+                        f"Cannot retry execution: plan #{plan_id} already has an active execution task #{active_job.id} (status: {active_job.status})"
+                    )
 
             # Create new queued job with whitelisted payload, fresh progress/error
             cleaned_state_json = filter_retry_payload(job.kind, job.state_json)

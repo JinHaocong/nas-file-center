@@ -18,3 +18,4 @@ class OperationItem:
     expected_mtime_ns: int = 0
     expected_device: int = 0
     expected_inode: int = 0
+    target_mtime_ns: int | None = None

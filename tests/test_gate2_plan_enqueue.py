@@ -178,13 +178,23 @@ def test_retry_payload_only_plan_id_and_actor_is_current_user(tmp_path: Path):
         "authorization": "Bearer evil",
     }
     with service.SessionLocal() as session:
+        plan = BatchPlan(
+            id=99,
+            name="Plan 99",
+            kind="reorganize",
+            status="partial",
+            expected_changes=1,
+            expected_reclaim_bytes=0,
+            metadata_json="{}",
+            created_at=utcnow(),
+        )
         job = WorkJob(
             kind="batch-plan-execute",
             status="failed",
             state_json=json.dumps(poisoned_payload),
             created_at=utcnow(),
         )
-        session.add(job)
+        session.add_all([plan, job])
         session.commit()
         job_id = job.id
 
