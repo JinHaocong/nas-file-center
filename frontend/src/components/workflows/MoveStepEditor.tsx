@@ -8,9 +8,10 @@ import { MoveStep } from '../../types/workflow';
 interface MoveStepEditorProps {
   step: MoveStep;
   onChange: (updated: MoveStep) => void;
+  readOnly?: boolean;
 }
 
-export const MoveStepEditor: React.FC<MoveStepEditorProps> = ({ step, onChange }) => {
+export const MoveStepEditor: React.FC<MoveStepEditorProps> = ({ step, onChange, readOnly = false }) => {
   const { data: indexesData, isLoading } = useQuery({
     queryKey: ['indexesRootsList'],
     queryFn: async () => {
@@ -22,7 +23,7 @@ export const MoveStepEditor: React.FC<MoveStepEditorProps> = ({ step, onChange }
   const roots: IndexRoot[] = indexesData || [];
 
   return (
-    <Form layout="vertical">
+    <Form layout="vertical" disabled={readOnly}>
       <Form.Item
         label="目标根目录 (destination_root_id)"
         required

@@ -21,9 +21,12 @@ export const workflowApi = {
     return api.get<WorkflowListItem[]>(`/api/workflows?include_archived=${includeArchived}`);
   },
 
-  getWorkflow: async (id: number, revision?: number): Promise<WorkflowResponse> => {
-    const query = revision ? `?revision=${revision}` : '';
-    return api.get<WorkflowResponse>(`/api/workflows/${id}${query}`);
+  getWorkflow: async (id: number): Promise<WorkflowResponse> => {
+    return api.get<WorkflowResponse>(`/api/workflows/${id}`);
+  },
+
+  getRevision: async (id: number, revision: number): Promise<WorkflowRevisionResponse> => {
+    return api.get<WorkflowRevisionResponse>(`/api/workflows/${id}/revisions/${revision}`);
   },
 
   createWorkflow: async (data: WorkflowCreateRequest): Promise<WorkflowResponse> => {

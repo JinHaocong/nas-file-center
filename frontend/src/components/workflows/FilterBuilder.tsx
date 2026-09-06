@@ -8,8 +8,10 @@ import {
   Button,
   Space,
   Typography,
+  DatePicker,
 } from 'antd';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
+import dayjs from 'dayjs';
 import {
   FilterNode,
   FilterLeafNode,
@@ -21,6 +23,14 @@ import {
   isFilterAndOrNode,
   isFilterNotNode,
 } from '../../types/workflow';
+import {
+  ALLOWED_OPERATORS_BY_FIELD,
+  MEDIA_TYPE_OPTIONS,
+  MAX_FILTER_DEPTH,
+  MAX_FILTER_CHILDREN,
+  MAX_FILTER_LEAVES,
+  normalizeExtension,
+} from '../../utils/filterMatrix';
 
 const { Text } = Typography;
 
@@ -33,25 +43,37 @@ const FIELD_OPTIONS: { label: string; value: FilterLeafField }[] = [
   { label: '媒体类型 (media_type)', value: 'media_type' },
 ];
 
-const OPERATOR_OPTIONS: { label: string; value: FilterLeafOperator }[] = [
-  { label: '等于 (=)', value: 'eq' },
-  { label: '不等于 (!=)', value: 'neq' },
-  { label: '包含 (contains)', value: 'contains' },
-  { label: '前缀匹配 (startswith)', value: 'startswith' },
-  { label: '后缀匹配 (endswith)', value: 'endswith' },
-  { label: '属于列表 (in)', value: 'in' },
-  { label: '不属于列表 (nin)', value: 'nin' },
-  { label: '大于 (>)', value: 'gt' },
-  { label: '大于等于 (>=)', value: 'gte' },
-  { label: '小于 (<)', value: 'lt' },
-  { label: '小于等于 (<=)', value: 'lte' },
-];
+const OPERATOR_LABELS: Record<FilterLeafOperator, string> = {
+  eq: '等于 (=)',
+  neq: '不等于 (!=)',
+  contains: '包含 (contains)',
+  startswith: '前缀匹配 (startswith)',
+  endswith: '后缀匹配 (endswith)',
+  in: '属于列表 (in)',
+  nin: '不属于列表 (nin)',
+  gt: '大于 (>)',
+  gte: '大于等于 (>=)',
+  lt: '小于 (<)',
+  lte: '小于等于 (<=)',
+};
+
+function countLeaves(node: FilterNode): number {
+  if (isFilterLeafNode(node)) return 1;
+  if (isFilterAndOrNode(node)) {
+    return node.children.reduce((acc, c) => acc + countLeaves(c), 0);
+  }
+  if (isFilterNotNode(node)) {
+    return countLeaves(node.child);
+  }
+  return 1;
+}
 
 export interface FilterBuilderProps {
   value: FilterNode;
   onChange: (newNode: FilterNode) => void;
   onDelete?: () => void;
   depth?: number;
+  readOnly?: boolean;
 }
 
 export const FilterBuilder: React.FC<FilterBuilderProps> = ({
@@ -59,8 +81,8 @@ export const FilterBuilder: React.FC<FilterBuilderProps> = ({
   onChange,
   onDelete,
   depth = 0,
+  readOnly = false,
 }) => {
-  // Determine current node type
   const nodeType: 'leaf' | 'and' | 'or' | 'not' = isFilterLeafNode(value)
     ? 'leaf'
     : isFilterAndOrNode(value)
@@ -69,7 +91,12 @@ export const FilterBuilder: React.FC<FilterBuilderProps> = ({
     ? 'not'
     : 'leaf';
 
+  const canNest = depth < MAX_FILTER_DEPTH;
+  const currentLeaves = countLeaves(value);
+  const canAddLeaf = currentLeaves < MAX_FILTER_LEAVES;
+
   const handleTypeChange = (newType: 'leaf' | 'and' | 'or' | 'not') => {
+    if (readOnly) return;
     if (newType === 'leaf') {
       onChange({
         field: 'extension',
@@ -78,6 +105,7 @@ export const FilterBuilder: React.FC<FilterBuilderProps> = ({
         case_sensitive: false,
       });
     } else if (newType === 'and' || newType === 'or') {
+      if (!canNest) return;
       onChange({
         op: newType,
         children: [
@@ -90,6 +118,7 @@ export const FilterBuilder: React.FC<FilterBuilderProps> = ({
         ],
       });
     } else if (newType === 'not') {
+      if (!canNest) return;
       onChange({
         op: 'not',
         child: {
@@ -106,51 +135,54 @@ export const FilterBuilder: React.FC<FilterBuilderProps> = ({
     const leaf = value as FilterLeafNode;
 
     const handleFieldChange = (field: FilterLeafField) => {
+      if (readOnly) return;
+      const allowedOps = ALLOWED_OPERATORS_BY_FIELD[field];
+      const nextOp = allowedOps.includes(leaf.operator) ? leaf.operator : allowedOps[0];
       let defVal: any = '';
-      let defOp: FilterLeafOperator = 'eq';
-      if (field === 'size' || field === 'mtime') {
+
+      if (field === 'size') {
         defVal = 0;
-        defOp = 'gt';
+      } else if (field === 'mtime') {
+        defVal = new Date().toISOString();
       } else if (field === 'extension') {
-        defVal = 'jpg';
-        defOp = 'eq';
+        defVal = nextOp === 'in' || nextOp === 'nin' ? ['jpg'] : 'jpg';
       } else if (field === 'media_type') {
-        defVal = 'image';
-        defOp = 'eq';
+        defVal = nextOp === 'in' || nextOp === 'nin' ? ['image'] : 'image';
       } else {
-        defVal = '';
-        defOp = 'contains';
+        defVal = nextOp === 'in' || nextOp === 'nin' ? ['sample'] : '';
       }
+
       onChange({
         ...leaf,
         field,
-        operator: defOp,
+        operator: nextOp,
         value: defVal,
       });
     };
 
-    const isNumericField = leaf.field === 'size' || leaf.field === 'mtime';
+    const allowedOperators = ALLOWED_OPERATORS_BY_FIELD[leaf.field] || ['eq'];
     const isStringList = leaf.operator === 'in' || leaf.operator === 'nin';
-    const isBooleanField = false;
 
     return (
       <Card size="small" style={{ background: '#ffffff', marginBottom: 8, borderRadius: 6 }}>
         <Space wrap align="center">
           <Select
             value="leaf"
-            style={{ width: 100 }}
+            style={{ width: 110 }}
+            disabled={readOnly}
             onChange={handleTypeChange}
             options={[
               { label: '条件', value: 'leaf' },
-              { label: '并且 (AND)', value: 'and' },
-              { label: '或者 (OR)', value: 'or' },
-              { label: '取反 (NOT)', value: 'not' },
+              { label: '并且 (AND)', value: 'and', disabled: !canNest },
+              { label: '或者 (OR)', value: 'or', disabled: !canNest },
+              { label: '取反 (NOT)', value: 'not', disabled: !canNest },
             ]}
           />
 
           <Select
             value={leaf.field}
             style={{ width: 160 }}
+            disabled={readOnly}
             onChange={handleFieldChange}
             options={FIELD_OPTIONS}
           />
@@ -158,52 +190,124 @@ export const FilterBuilder: React.FC<FilterBuilderProps> = ({
           <Select
             value={leaf.operator}
             style={{ width: 150 }}
-            onChange={(op) => onChange({ ...leaf, operator: op })}
-            options={OPERATOR_OPTIONS}
+            disabled={readOnly}
+            onChange={(op: FilterLeafOperator) => {
+              if (readOnly) return;
+              let nextVal = leaf.value;
+              const willBeList = op === 'in' || op === 'nin';
+              const wasList = leaf.operator === 'in' || leaf.operator === 'nin';
+              if (willBeList && !wasList) {
+                nextVal = typeof leaf.value === 'string' && leaf.value ? [leaf.value] : [];
+              } else if (!willBeList && wasList) {
+                nextVal = Array.isArray(leaf.value) && leaf.value.length > 0 ? leaf.value[0] : '';
+              }
+              onChange({ ...leaf, operator: op, value: nextVal });
+            }}
+            options={allowedOperators.map((op) => ({
+              label: OPERATOR_LABELS[op] || op,
+              value: op,
+            }))}
           />
 
-          {isBooleanField ? (
-            <Switch
-              checked={Boolean(leaf.value)}
-              checkedChildren="是"
-              unCheckedChildren="否"
-              onChange={(checked) => onChange({ ...leaf, value: checked })}
+          {leaf.field === 'mtime' ? (
+            <DatePicker
+              showTime
+              disabled={readOnly}
+              value={typeof leaf.value === 'string' && leaf.value ? dayjs(leaf.value) : null}
+              onChange={(date) => {
+                if (readOnly) return;
+                onChange({
+                  ...leaf,
+                  value: date ? date.toISOString() : '',
+                });
+              }}
             />
-          ) : isNumericField ? (
-            <InputNumber
-              value={typeof leaf.value === 'number' ? leaf.value : 0}
-              style={{ width: 140 }}
-              onChange={(num) => onChange({ ...leaf, value: num ?? 0 })}
-            />
+          ) : leaf.field === 'size' ? (
+            <Space size={4}>
+              <InputNumber
+                disabled={readOnly}
+                value={typeof leaf.value === 'number' ? leaf.value : 0}
+                min={0}
+                style={{ width: 140 }}
+                onChange={(num) => {
+                  if (readOnly) return;
+                  onChange({ ...leaf, value: Math.floor(Math.max(0, num ?? 0)) });
+                }}
+              />
+              <Text type="secondary">字节 (Bytes)</Text>
+            </Space>
+          ) : leaf.field === 'media_type' ? (
+            isStringList ? (
+              <Select
+                mode="multiple"
+                disabled={readOnly}
+                value={Array.isArray(leaf.value) ? leaf.value : []}
+                style={{ minWidth: 180 }}
+                placeholder="选择媒体类型"
+                onChange={(vals) => {
+                  if (readOnly) return;
+                  onChange({ ...leaf, value: vals });
+                }}
+                options={MEDIA_TYPE_OPTIONS}
+              />
+            ) : (
+              <Select
+                disabled={readOnly}
+                value={typeof leaf.value === 'string' ? leaf.value : 'image'}
+                style={{ width: 140 }}
+                onChange={(val) => {
+                  if (readOnly) return;
+                  onChange({ ...leaf, value: val });
+                }}
+                options={MEDIA_TYPE_OPTIONS}
+              />
+            )
           ) : isStringList ? (
             <Select
               mode="tags"
+              disabled={readOnly}
               value={Array.isArray(leaf.value) ? leaf.value : []}
               placeholder="输入标签列表"
               style={{ minWidth: 160 }}
-              onChange={(tags) => onChange({ ...leaf, value: tags })}
+              onChange={(tags) => {
+                if (readOnly) return;
+                const normalized = leaf.field === 'extension'
+                  ? tags.map(normalizeExtension).filter(Boolean)
+                  : tags;
+                onChange({ ...leaf, value: normalized });
+              }}
             />
           ) : (
             <Input
+              disabled={readOnly}
               value={String(leaf.value ?? '')}
-              placeholder="值"
+              placeholder="匹配文本"
               style={{ width: 160 }}
-              onChange={(e) => onChange({ ...leaf, value: e.target.value })}
+              onChange={(e) => {
+                if (readOnly) return;
+                const val = e.target.value;
+                const finalVal = leaf.field === 'extension' ? normalizeExtension(val) : val;
+                onChange({ ...leaf, value: finalVal });
+              }}
             />
           )}
 
-          {!isNumericField && !isBooleanField && (
+          {leaf.field !== 'size' && leaf.field !== 'mtime' && (
             <Space size={4}>
               <Switch
                 size="small"
+                disabled={readOnly}
                 checked={leaf.case_sensitive ?? false}
-                onChange={(checked) => onChange({ ...leaf, case_sensitive: checked })}
+                onChange={(checked) => {
+                  if (readOnly) return;
+                  onChange({ ...leaf, case_sensitive: checked });
+                }}
               />
               <Text type="secondary" style={{ fontSize: 12 }}>区分大小写</Text>
             </Space>
           )}
 
-          {onDelete && (
+          {onDelete && !readOnly && (
             <Button
               type="text"
               danger
@@ -219,6 +323,8 @@ export const FilterBuilder: React.FC<FilterBuilderProps> = ({
 
   if (nodeType === 'and' || nodeType === 'or') {
     const andOr = value as FilterAndOrNode;
+    const canAddChild = andOr.children.length < MAX_FILTER_CHILDREN && canAddLeaf;
+
     return (
       <Card
         size="small"
@@ -233,8 +339,10 @@ export const FilterBuilder: React.FC<FilterBuilderProps> = ({
           <Space>
             <Select
               value={andOr.op}
+              disabled={readOnly}
               style={{ width: 120 }}
               onChange={(val: any) => {
+                if (readOnly) return;
                 if (val === 'leaf' || val === 'not') {
                   handleTypeChange(val);
                 } else {
@@ -245,46 +353,49 @@ export const FilterBuilder: React.FC<FilterBuilderProps> = ({
                 { label: '并且 (AND)', value: 'and' },
                 { label: '或者 (OR)', value: 'or' },
                 { label: '改为叶子条件', value: 'leaf' },
-                { label: '改为取反 (NOT)', value: 'not' },
+                { label: '改为取反 (NOT)', value: 'not', disabled: !canNest },
               ]}
             />
             <Text type="secondary" style={{ fontSize: 12 }}>
-              需同时满足所有子条件
+              {andOr.op === 'and' ? '需同时满足所有子条件' : '只需满足任一子条件'}
             </Text>
           </Space>
 
-          <Space>
-            <Button
-              size="small"
-              type="dashed"
-              icon={<PlusOutlined />}
-              onClick={() => {
-                onChange({
-                  ...andOr,
-                  children: [
-                    ...andOr.children,
-                    {
-                      field: 'extension',
-                      operator: 'eq',
-                      value: 'png',
-                      case_sensitive: false,
-                    },
-                  ],
-                });
-              }}
-            >
-              添加子条件
-            </Button>
-            {onDelete && (
+          {!readOnly && (
+            <Space>
               <Button
-                type="text"
-                danger
-                icon={<DeleteOutlined />}
-                onClick={onDelete}
                 size="small"
-              />
-            )}
-          </Space>
+                type="dashed"
+                icon={<PlusOutlined />}
+                disabled={!canAddChild}
+                onClick={() => {
+                  onChange({
+                    ...andOr,
+                    children: [
+                      ...andOr.children,
+                      {
+                        field: 'extension',
+                        operator: 'eq',
+                        value: 'png',
+                        case_sensitive: false,
+                      },
+                    ],
+                  });
+                }}
+              >
+                添加子条件
+              </Button>
+              {onDelete && (
+                <Button
+                  type="text"
+                  danger
+                  icon={<DeleteOutlined />}
+                  onClick={onDelete}
+                  size="small"
+                />
+              )}
+            </Space>
+          )}
         </div>
 
         <div style={{ paddingLeft: 12 }}>
@@ -293,13 +404,15 @@ export const FilterBuilder: React.FC<FilterBuilderProps> = ({
               key={idx}
               value={cond}
               depth={depth + 1}
+              readOnly={readOnly}
               onChange={(newCond) => {
+                if (readOnly) return;
                 const nextChildren = [...andOr.children];
                 nextChildren[idx] = newCond;
                 onChange({ ...andOr, children: nextChildren });
               }}
               onDelete={
-                andOr.children.length > 1
+                !readOnly && andOr.children.length > 1
                   ? () => {
                       const nextChildren = andOr.children.filter((_, i) => i !== idx);
                       onChange({ ...andOr, children: nextChildren });
@@ -329,6 +442,7 @@ export const FilterBuilder: React.FC<FilterBuilderProps> = ({
         <Space>
           <Select
             value="not"
+            disabled={readOnly}
             style={{ width: 120 }}
             onChange={handleTypeChange}
             options={[
@@ -342,7 +456,7 @@ export const FilterBuilder: React.FC<FilterBuilderProps> = ({
             对内部条件进行逻辑取反
           </Text>
         </Space>
-        {onDelete && (
+        {onDelete && !readOnly && (
           <Button
             type="text"
             danger
@@ -357,7 +471,11 @@ export const FilterBuilder: React.FC<FilterBuilderProps> = ({
         <FilterBuilder
           value={notNode.child}
           depth={depth + 1}
-          onChange={(newCond) => onChange({ ...notNode, child: newCond })}
+          readOnly={readOnly}
+          onChange={(newCond) => {
+            if (readOnly) return;
+            onChange({ ...notNode, child: newCond });
+          }}
         />
       </div>
     </Card>

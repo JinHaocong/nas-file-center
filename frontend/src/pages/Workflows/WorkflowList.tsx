@@ -27,6 +27,8 @@ import { WorkflowListItem } from '../../types/workflow';
 import { RevisionDrawer } from '../../components/workflows/RevisionDrawer';
 import { useTitle } from '../../hooks/useTitle';
 import { formatDateTime } from '../../utils/format';
+import { useAuth } from '../../contexts/AuthContext';
+import { canCreateWorkflow, canArchiveWorkflow } from '../../utils/workflowRbac';
 
 const { Title, Text } = Typography;
 
@@ -34,6 +36,7 @@ export const WorkflowListPage: React.FC = () => {
   useTitle('工作流中心');
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { user } = useAuth();
 
   const [includeArchived, setIncludeArchived] = useState(false);
   const [selectedWorkflowForRevision, setSelectedWorkflowForRevision] = useState<WorkflowListItem | null>(null);
@@ -155,7 +158,7 @@ export const WorkflowListPage: React.FC = () => {
             版本
           </Button>
 
-          {!record.is_builtin && !record.archived_at && (
+          {!record.is_builtin && !record.archived_at && canArchiveWorkflow(user?.role, Boolean(record.archived_at)) && (
             <Popconfirm
               title="确认归档此工作流？"
               description="归档后工作流将进入只读封存态，不再执行任何计划构建。"
@@ -201,13 +204,15 @@ export const WorkflowListPage: React.FC = () => {
             刷新
           </Button>
 
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={() => navigate('/workflows/new')}
-          >
-            新建工作流
-          </Button>
+          {canCreateWorkflow(user?.role) && (
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => navigate('/workflows/new')}
+            >
+              新建工作流
+            </Button>
+          )}
         </Space>
       </div>
 
@@ -227,6 +232,7 @@ export const WorkflowListPage: React.FC = () => {
           workflowId={selectedWorkflowForRevision.id}
           currentRevision={selectedWorkflowForRevision.current_revision}
           isBuiltin={selectedWorkflowForRevision.is_builtin}
+          isArchived={Boolean(selectedWorkflowForRevision.archived_at)}
           onClose={() => setSelectedWorkflowForRevision(null)}
           onRollbackSuccess={() => {
             queryClient.invalidateQueries({ queryKey: ['workflowsList'] });

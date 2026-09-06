@@ -36,8 +36,8 @@ export const OrganizerProfileFields: React.FC<OrganizerProfileFieldsProps> = ({
   const getName = (name: string | number) => (prefix.length > 0 ? [...prefix, name] : name);
 
   // Watch fields for live preview
-  const renameTpl = Form.useWatch(getName('rename_template'), form) || '{name} {statistics}';
-  const statTpl = Form.useWatch(getName('statistics_template'), form) || '[{images}P{?videos: {videos}V} {size}]';
+  const renameTpl = Form.useWatch(getName('rename_template'), form) ?? '{name}';
+  const statTpl = Form.useWatch(getName('statistics_template'), form) ?? '[{images}P {videos}V {size}]';
   const numberingMode = Form.useWatch(getName('numbering_mode'), form) || 'none';
   const numStart = Form.useWatch(getName('numbering_start'), form) ?? 1;
   const numPadding = Form.useWatch(getName('numbering_padding'), form) ?? 3;
@@ -160,9 +160,9 @@ export const OrganizerProfileFields: React.FC<OrganizerProfileFieldsProps> = ({
                 name={getName('rename_template')}
                 label="目录重命名模板 (rename_template)"
                 rules={[{ required: true, message: '请输入重命名模板' }]}
-                extra="最终目录新名称。例如：{name} {statistics} 或 {index} {name} {statistics}"
+                extra="最终目录新名称。例如：{name} 或 {index} {name} {statistics}"
               >
-                <Input placeholder="{name} {statistics}" />
+                <Input placeholder="{name}" />
               </Form.Item>
 
               <Card

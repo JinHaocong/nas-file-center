@@ -45,7 +45,8 @@ def is_workflow_plan_metadata(metadata_raw):
     )
 
 
-def test_gate5c_full_blackbox_acceptance():
+def test_gate5c_full_integration_acceptance():
+    """Gate5-C Full Integration Acceptance Test Suite (TestClient-based in-process integration)."""
     temp_dir = tempfile.mkdtemp()
     try:
         config_dir = Path(temp_dir) / "config"

@@ -80,8 +80,7 @@ export const StaleRebuildDrawer: React.FC<StaleRebuildDrawerProps> = ({
     onError: (err: unknown) => {
       const structured = getStructuredApiError(err);
       if (structured.code === 'PREVIEW_CHANGED') {
-        setErrorMessage('文件状态或底层快照已发生变动，请刷新预览后重试');
-        refetch();
+        setErrorMessage('文件状态或底层快照已发生变动，请手动点击刷新预览后重试');
       } else if (structured.code === 'WORKFLOW_ARCHIVED') {
         setErrorMessage('关联的工作流已被归档，无法重新生成计划');
       } else {

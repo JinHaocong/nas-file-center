@@ -13,6 +13,8 @@ import {
 import type { MenuProps } from 'antd';
 import { WorkflowStep, WorkflowMode } from '../../types/workflow';
 import { StepCard } from './StepCard';
+import { createDefaultOrganizerSnapshot } from '../../utils/organizerDefaults';
+import { getAllowedInsertions, canMoveStep, canDeleteStep } from '../../utils/workflowTopology';
 
 interface StepListProps {
   steps: WorkflowStep[];
@@ -55,8 +57,8 @@ export const StepList: React.FC<StepListProps> = ({
         newStep = {
           id: generateId('rename'),
           type: 'rename',
-          pattern: '^(.*)$',
-          replacement: '$1',
+          pattern: 'draft',
+          replacement: 'final',
         };
         break;
       case 'move':
@@ -86,65 +88,47 @@ export const StepList: React.FC<StepListProps> = ({
         newStep = {
           id: generateId('organize'),
           type: 'organize',
-          profile_snapshot: {
-            name: '默认整理快照',
-            recursive: false,
-            image_extensions: ['jpg', 'jpeg', 'png', 'webp'],
-            video_extensions: ['mp4', 'mov', 'mkv'],
-            rename_template: '{name} {statistics}',
-            statistics_template: '[{images}P{?videos: {videos}V} {size}]',
-            preserve_tags: [],
-            cleanup_patterns: [],
-            numbering_mode: 'none',
-            numbering_start: 1,
-            numbering_padding: 3,
-            mtime_mode: 'none',
-            mtime_delay_seconds: 2.0,
-          },
+          profile_snapshot: createDefaultOrganizerSnapshot('默认整理快照'),
         };
         break;
     }
     onChange([...steps, newStep]);
   };
 
-  const menuItems: MenuProps['items'] =
+  const allowedInsertions = getAllowedInsertions(steps, mode);
+
+  const rawMenuItems: Array<{ key: WorkflowStep['type']; icon: React.ReactNode; label: string }> =
     mode === 'file'
       ? [
           {
             key: 'scan',
             icon: <FolderOpenOutlined />,
             label: '扫描根目录 (Scan)',
-            onClick: () => handleAddStep('scan'),
           },
           {
             key: 'filter',
             icon: <FilterOutlined />,
             label: '条件过滤 (Filter)',
-            onClick: () => handleAddStep('filter'),
           },
           {
             key: 'rename',
             icon: <EditOutlined />,
-            label: '正则重命名 (Rename)',
-            onClick: () => handleAddStep('rename'),
+            label: '字面量重命名 (Rename)',
           },
           {
             key: 'move',
             icon: <FolderOutlined />,
             label: '路径移动 (Move)',
-            onClick: () => handleAddStep('move'),
           },
           {
             key: 'touch',
             icon: <ClockCircleOutlined />,
             label: '刷新时间戳 (Touch)',
-            onClick: () => handleAddStep('touch'),
           },
           {
             key: 'quarantine',
             icon: <SafetyCertificateOutlined />,
             label: '隔离归档 (Quarantine)',
-            onClick: () => handleAddStep('quarantine'),
           },
         ]
       : [
@@ -152,15 +136,21 @@ export const StepList: React.FC<StepListProps> = ({
             key: 'scan',
             icon: <FolderOpenOutlined />,
             label: '扫描根目录 (Scan)',
-            onClick: () => handleAddStep('scan'),
           },
           {
             key: 'organize',
             icon: <AppstoreOutlined />,
             label: '目录整理方案 (Organize)',
-            onClick: () => handleAddStep('organize'),
           },
         ];
+
+  const menuItems: MenuProps['items'] = rawMenuItems.map((item) => ({
+    key: item.key,
+    icon: item.icon,
+    label: item.label,
+    disabled: !allowedInsertions.includes(item.key),
+    onClick: () => handleAddStep(item.key),
+  }));
 
   const handleStepChange = (index: number, updated: WorkflowStep) => {
     const nextSteps = [...steps];
@@ -207,6 +197,9 @@ export const StepList: React.FC<StepListProps> = ({
             totalSteps={steps.length}
             mode={mode}
             readOnly={readOnly}
+            canMoveUp={canMoveStep(steps, idx, 'up', mode)}
+            canMoveDown={canMoveStep(steps, idx, 'down', mode)}
+            canDelete={canDeleteStep(steps, idx, mode)}
             onChange={(updated) => handleStepChange(idx, updated)}
             onMoveUp={() => handleMoveUp(idx)}
             onMoveDown={() => handleMoveDown(idx)}

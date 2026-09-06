@@ -3772,17 +3772,29 @@ class FileCenterService:
 
             # Erratum E1: Transactional recheck
             session.execute(text("BEGIN IMMEDIATE"))
+            session.expire_all()
             source_plan = session.get(BatchPlan, plan_id)
             active_job = _get_active_execution_job(session, plan_id)
+            source_wf = session.get(Workflow, wf.id)
+            source_rev = session.scalar(
+                select(WorkflowRevision).where(
+                    WorkflowRevision.workflow_id == wf.id,
+                    WorkflowRevision.revision == rev.revision,
+                )
+            ) if source_wf else None
             if (
                 source_plan is None
                 or source_plan.status != "stale"
                 or active_job is not None
                 or source_plan.metadata_json != metadata_str
+                or source_wf is None
+                or source_wf.archived_at is not None
+                or source_rev is None
+                or source_rev.definition_sha256 != metadata.get("definition_sha256")
             ):
                 session.rollback()
                 raise WorkflowDigestMismatchError(
-                    "Source plan state changed during rebuild transaction",
+                    "Source plan or workflow lineage changed during rebuild transaction",
                     details={"plan_id": plan_id},
                 )
 

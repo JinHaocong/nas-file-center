@@ -5,11 +5,12 @@ import { QuarantineStep } from '../../types/workflow';
 interface QuarantineStepEditorProps {
   step: QuarantineStep;
   onChange: (updated: QuarantineStep) => void;
+  readOnly?: boolean;
 }
 
-export const QuarantineStepEditor: React.FC<QuarantineStepEditorProps> = ({ step, onChange }) => {
+export const QuarantineStepEditor: React.FC<QuarantineStepEditorProps> = ({ step, onChange, readOnly = false }) => {
   return (
-    <Form layout="vertical">
+    <Form layout="vertical" disabled={readOnly}>
       <Form.Item
         label="隔离归档原因 (reason)"
         required

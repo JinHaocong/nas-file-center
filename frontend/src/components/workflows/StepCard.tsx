@@ -31,6 +31,9 @@ interface StepCardProps {
   totalSteps: number;
   mode: WorkflowMode;
   readOnly?: boolean;
+  canMoveUp?: boolean;
+  canMoveDown?: boolean;
+  canDelete?: boolean;
   onChange: (updated: WorkflowStep) => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
@@ -40,8 +43,11 @@ interface StepCardProps {
 export const StepCard: React.FC<StepCardProps> = ({
   step,
   index,
-  totalSteps,
+  totalSteps: _totalSteps,
   readOnly = false,
+  canMoveUp = true,
+  canMoveDown = true,
+  canDelete = true,
   onChange,
   onMoveUp,
   onMoveDown,
@@ -67,7 +73,7 @@ export const StepCard: React.FC<StepCardProps> = ({
         };
       case 'rename':
         return {
-          title: '正则重命名 (Rename)',
+          title: '字面量重命名 (Rename)',
           color: 'cyan',
           icon: <EditOutlined />,
           summary: `${step.pattern} -> ${step.replacement}`,
@@ -140,7 +146,7 @@ export const StepCard: React.FC<StepCardProps> = ({
                 type="text"
                 size="small"
                 icon={<ArrowUpOutlined />}
-                disabled={index === 0}
+                disabled={!canMoveUp}
                 onClick={onMoveUp}
               />
             </Tooltip>
@@ -149,7 +155,7 @@ export const StepCard: React.FC<StepCardProps> = ({
                 type="text"
                 size="small"
                 icon={<ArrowDownOutlined />}
-                disabled={index === totalSteps - 1}
+                disabled={!canMoveDown}
                 onClick={onMoveDown}
               />
             </Tooltip>
@@ -159,6 +165,7 @@ export const StepCard: React.FC<StepCardProps> = ({
                 danger
                 size="small"
                 icon={<DeleteOutlined />}
+                disabled={!canDelete}
                 onClick={onDelete}
               />
             </Tooltip>
@@ -169,25 +176,25 @@ export const StepCard: React.FC<StepCardProps> = ({
       {expanded && (
         <div style={{ padding: '8px 0' }}>
           {step.type === 'scan' && (
-            <ScanStepEditor step={step} onChange={onChange} />
+            <ScanStepEditor step={step} onChange={onChange} readOnly={readOnly} />
           )}
           {step.type === 'filter' && (
-            <FilterStepEditor step={step} onChange={onChange} />
+            <FilterStepEditor step={step} onChange={onChange} readOnly={readOnly} />
           )}
           {step.type === 'rename' && (
-            <RenameStepEditor step={step} onChange={onChange} />
+            <RenameStepEditor step={step} onChange={onChange} readOnly={readOnly} />
           )}
           {step.type === 'move' && (
-            <MoveStepEditor step={step} onChange={onChange} />
+            <MoveStepEditor step={step} onChange={onChange} readOnly={readOnly} />
           )}
           {step.type === 'touch' && (
-            <TouchStepEditor step={step} onChange={onChange} />
+            <TouchStepEditor step={step} onChange={onChange} readOnly={readOnly} />
           )}
           {step.type === 'quarantine' && (
-            <QuarantineStepEditor step={step} onChange={onChange} />
+            <QuarantineStepEditor step={step} onChange={onChange} readOnly={readOnly} />
           )}
           {step.type === 'organize' && (
-            <OrganizerStepEditor step={step} onChange={onChange} />
+            <OrganizerStepEditor step={step} onChange={onChange} readOnly={readOnly} />
           )}
         </div>
       )}

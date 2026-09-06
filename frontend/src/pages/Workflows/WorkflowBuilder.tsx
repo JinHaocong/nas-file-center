@@ -12,6 +12,7 @@ import {
   Spin,
   message,
   Modal,
+  Popconfirm,
 } from 'antd';
 import {
   ArrowLeftOutlined,
@@ -21,7 +22,7 @@ import {
   FileTextOutlined,
   AppstoreOutlined,
 } from '@ant-design/icons';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { workflowApi } from '../../api/workflows';
 import { getStructuredApiError } from '../../api/errors';
@@ -35,6 +36,13 @@ import { StepList } from '../../components/workflows/StepList';
 import { RevisionDrawer } from '../../components/workflows/RevisionDrawer';
 import { WorkflowPreviewPanel } from './WorkflowPreviewPanel';
 import { useTitle } from '../../hooks/useTitle';
+import { useAuth } from '../../contexts/AuthContext';
+import {
+  canCreateWorkflow,
+  canSaveRevision,
+  canRollbackWorkflow,
+} from '../../utils/workflowRbac';
+import { createDefaultOrganizerSnapshot } from '../../utils/organizerDefaults';
 
 const { Title, Text } = Typography;
 
@@ -44,9 +52,13 @@ export const WorkflowBuilderPage: React.FC = () => {
   const workflowId = isNew ? 0 : Number(id);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
+  const revisionQuery = searchParams.get('revision');
+  const targetRevision = revisionQuery ? parseInt(revisionQuery, 10) : null;
 
   useTitle(isNew ? '新建工作流' : `编辑工作流 #${workflowId}`);
 
+  const { user } = useAuth();
   const [form] = Form.useForm();
   const [mode, setMode] = useState<WorkflowMode>('file');
   const [steps, setSteps] = useState<WorkflowStep[]>([]);
@@ -65,8 +77,40 @@ export const WorkflowBuilderPage: React.FC = () => {
     enabled: !isNew && !!workflowId,
   });
 
+  const isHistoricalView = targetRevision !== null && workflow && targetRevision !== workflow.current_revision;
+
+  const {
+    data: historicalRevisionData,
+    isLoading: isHistLoading,
+  } = useQuery({
+    queryKey: ['workflowRevisionDetail', workflowId, targetRevision],
+    queryFn: () => workflowApi.getRevision(workflowId, targetRevision!),
+    enabled: !isNew && !!workflowId && !!targetRevision,
+  });
+
+  const isArchived = Boolean(workflow?.archived_at);
+  const isBuiltin = Boolean(workflow?.is_builtin);
+  const canEdit =
+    !isHistoricalView &&
+    !isArchived &&
+    !isBuiltin &&
+    (isNew ? canCreateWorkflow(user?.role) : canSaveRevision(user?.role, isArchived));
+  const canRollback = canRollbackWorkflow(user?.role, isArchived) && !isBuiltin;
+
   useEffect(() => {
-    if (workflow) {
+    if (targetRevision && historicalRevisionData) {
+      if (workflow) {
+        form.setFieldsValue({
+          name: workflow.name,
+          description: workflow.description,
+        });
+      }
+      if (historicalRevisionData.definition) {
+        setMode(historicalRevisionData.definition.mode || 'file');
+        setSteps(historicalRevisionData.definition.steps || []);
+      }
+      setIsDirty(false);
+    } else if (workflow && !targetRevision) {
       form.setFieldsValue({
         name: workflow.name,
         description: workflow.description,
@@ -92,7 +136,7 @@ export const WorkflowBuilderPage: React.FC = () => {
       ]);
       setIsDirty(false);
     }
-  }, [workflow, isNew, form]);
+  }, [workflow, targetRevision, historicalRevisionData, isNew, form]);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -135,6 +179,69 @@ export const WorkflowBuilderPage: React.FC = () => {
     },
   });
 
+  const rollbackMutation = useMutation({
+    mutationFn: (rev: number) => {
+      if (!workflow) throw new Error('工作流不存在');
+      return workflowApi.rollbackWorkflow(workflowId, {
+        target_revision: rev,
+        expected_current_revision: workflow.current_revision,
+      });
+    },
+    onSuccess: (data) => {
+      message.success(`已成功回滚至版本 r${data.current_revision}`);
+      queryClient.invalidateQueries({ queryKey: ['workflowDetail', workflowId] });
+      queryClient.invalidateQueries({ queryKey: ['workflowsList'] });
+      navigate(`/workflows/${workflowId}`);
+      refetch();
+    },
+    onError: (err) => {
+      const structured = getStructuredApiError(err);
+      message.error(structured.message || '回滚失败');
+    },
+  });
+
+  const handleModeChange = (newMode: WorkflowMode) => {
+    if (newMode === mode) return;
+    if (steps.length > 0) {
+      Modal.confirm({
+        title: '切换工作流模式',
+        icon: <ExclamationCircleOutlined />,
+        content: `切换到 ${newMode === 'file' ? '文件规则流' : '目录整理流'} 将重置流水线步骤为该模式的标准默认拓扑。确定切换吗？`,
+        okText: '确认重置并切换',
+        cancelText: '取消',
+        onOk: () => {
+          setMode(newMode);
+          if (newMode === 'file') {
+            setSteps([
+              {
+                id: 'step_scan_1',
+                type: 'scan',
+                root_ids: [1],
+              },
+            ]);
+          } else {
+            setSteps([
+              {
+                id: 'step_scan_1',
+                type: 'scan',
+                root_ids: [1],
+              },
+              {
+                id: 'step_organize_1',
+                type: 'organize',
+                profile_snapshot: createDefaultOrganizerSnapshot('默认整理快照'),
+              },
+            ]);
+          }
+          setIsDirty(true);
+        },
+      });
+    } else {
+      setMode(newMode);
+      setIsDirty(true);
+    }
+  };
+
   const handleStepChange = (newSteps: WorkflowStep[]) => {
     setSteps(newSteps);
     setIsDirty(true);
@@ -155,7 +262,7 @@ export const WorkflowBuilderPage: React.FC = () => {
     }
   };
 
-  if (!isNew && isLoading) {
+  if (!isNew && (isLoading || isHistLoading)) {
     return (
       <div style={{ textAlign: 'center', padding: 60 }}>
         <Spin size="large" tip="正在载入工作流配置..." />
@@ -175,7 +282,17 @@ export const WorkflowBuilderPage: React.FC = () => {
     );
   }
 
-  const isBuiltin = Boolean(workflow?.is_builtin);
+  if (isNew && !canCreateWorkflow(user?.role)) {
+    return (
+      <Alert
+        type="error"
+        showIcon
+        message="权限不足"
+        description="普通成员不可创建新工作流，请联系管理员。"
+        action={<Button onClick={() => navigate('/workflows')}>返回列表</Button>}
+      />
+    );
+  }
 
   return (
     <div>
@@ -188,13 +305,36 @@ export const WorkflowBuilderPage: React.FC = () => {
             {isNew ? '新建工作流' : `工作流编排: ${workflow?.name}`}
           </Title>
           {!isNew && workflow && (
-            <Tag color="geekblue">r{workflow.current_revision}</Tag>
+            <Tag color={isHistoricalView ? 'orange' : 'geekblue'}>
+              {isHistoricalView ? `历史版本 r${targetRevision}` : `r${workflow.current_revision}`}
+            </Tag>
           )}
+          {isArchived && <Tag color="error">已归档 (完全只读)</Tag>}
           {isBuiltin && <Tag color="gold">系统预置内置流 (只读)</Tag>}
           {isDirty && <Tag color="warning">有未保存修改</Tag>}
         </Space>
 
         <Space>
+          {isHistoricalView && (
+            <Button onClick={() => navigate(`/workflows/${workflowId}`)}>
+              返回当前最新版 (r{workflow?.current_revision})
+            </Button>
+          )}
+
+          {isHistoricalView && canRollback && (
+            <Popconfirm
+              title={`确认回滚至历史版本 r${targetRevision}？`}
+              description="系统将基于此定义生成新修订版本并恢复至当前。"
+              onConfirm={() => rollbackMutation.mutate(targetRevision!)}
+              okText="确认回滚"
+              cancelText="取消"
+            >
+              <Button danger icon={<HistoryOutlined />} loading={rollbackMutation.isPending}>
+                回滚至此版本
+              </Button>
+            </Popconfirm>
+          )}
+
           {!isNew && workflow && (
             <Button
               icon={<HistoryOutlined />}
@@ -204,7 +344,7 @@ export const WorkflowBuilderPage: React.FC = () => {
             </Button>
           )}
 
-          {!isBuiltin && (
+          {canEdit && (
             <Button
               type="primary"
               icon={<SaveOutlined />}
@@ -218,12 +358,42 @@ export const WorkflowBuilderPage: React.FC = () => {
         </Space>
       </div>
 
+      {isArchived && (
+        <Alert
+          type="error"
+          showIcon
+          message="工作流已被归档封存"
+          description="该工作流已被归档，处于完全只读状态。禁止编辑、修改步骤、保存新版本、回滚或生成执行计划。"
+          style={{ marginBottom: 16 }}
+        />
+      )}
+
+      {isHistoricalView && (
+        <Alert
+          type="info"
+          showIcon
+          message={`当前正在查看历史版本 r${targetRevision} (只读模式)`}
+          description="历史版本为审计只读态，无法直接编辑。非归档状态下，您可以基于此确切版本生成预览与草稿计划，或由管理员将其回滚为当前最新版本。"
+          style={{ marginBottom: 16 }}
+        />
+      )}
+
+      {!isNew && !canEdit && !isArchived && !isHistoricalView && (
+        <Alert
+          type="warning"
+          showIcon
+          message="普通成员权限提示"
+          description="您当前为普通成员身份，拥有查看配置、预览及生成草稿计划的权限，但无权修改步骤、保存新版本或归档工作流。"
+          style={{ marginBottom: 16 }}
+        />
+      )}
+
       <Card title="基础信息与执行模式" bordered={false} style={{ borderRadius: 12, marginBottom: 16 }}>
         <Form
           form={form}
           layout="vertical"
           onValuesChange={() => setIsDirty(true)}
-          disabled={isBuiltin}
+          disabled={!canEdit}
         >
           <Form.Item
             name="name"
@@ -240,11 +410,8 @@ export const WorkflowBuilderPage: React.FC = () => {
           <Form.Item label="工作流模式 (Mode)" required extra={!isNew ? '工作流模式已冻结锁定，不可修改' : '选择工作流的执行体系'}>
             <Radio.Group
               value={mode}
-              onChange={(e) => {
-                setMode(e.target.value);
-                setIsDirty(true);
-              }}
-              disabled={!isNew || isBuiltin}
+              onChange={(e) => handleModeChange(e.target.value)}
+              disabled={!isNew || !canEdit}
             >
               <Radio.Button value="file">
                 <Space>
@@ -278,7 +445,7 @@ export const WorkflowBuilderPage: React.FC = () => {
         <StepList
           steps={steps}
           mode={mode}
-          readOnly={isBuiltin}
+          readOnly={!canEdit}
           onChange={handleStepChange}
         />
       </Card>
@@ -286,8 +453,9 @@ export const WorkflowBuilderPage: React.FC = () => {
       {!isNew && workflow && (
         <WorkflowPreviewPanel
           workflowId={workflow.id}
-          revision={workflow.current_revision}
+          revision={targetRevision || workflow.current_revision}
           isDirty={isDirty}
+          isArchived={isArchived}
           onGeneratePlanSuccess={(planId) => {
             navigate(`/plans/${planId}`);
           }}
@@ -300,6 +468,7 @@ export const WorkflowBuilderPage: React.FC = () => {
           workflowId={workflow.id}
           currentRevision={workflow.current_revision}
           isBuiltin={workflow.is_builtin}
+          isArchived={isArchived}
           onClose={() => setRevisionDrawerOpen(false)}
           onRollbackSuccess={() => {
             refetch();

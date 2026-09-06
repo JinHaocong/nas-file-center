@@ -1,166 +1,184 @@
-# NAS File Center v0.3.5 Gate5-B-hotfix4 — Implementation & Verification Walkthrough
+# NAS File Center v0.3.5 Gate5-C-hotfix1 — Implementation & Verification Walkthrough
 
-## 1. Context & Scope (背景与状态)
+## 1. Context & Review Findings Addressed (背景与审查问题修复)
 
-当前正式状态：
+### 1.1 前序状态
 ```text
 Gate2 = PASS
 Gate3 = PASS
 Gate4 = PASS
 Gate5-A = PASS
-NAS File Center v0.3.4 = CLOSED
+Gate5-B = PASS / CLOSED (nas-file-center-v0.3.5-gate5b-hotfix4.zip)
 
-Gate5-B-hotfix3 targeted review = PASS
-Gate5-B overall = HOLD
-
-P0 = 0
-P1 = 0
-P2 = 1 (P2-12 OrganizerProfileSnapshot canonical defaults / normalization mismatch) -> CLOSED
-P3 = 0
-
-Gate5-C+ = FORBIDDEN
+Gate5-C candidate = HOLD
+Gate5-C-hotfix1 = IN PROGRESS
 v0.3.5 = NOT CLOSED
 ```
 
-本轮任务严格限定于修复 P2-12（`OrganizerProfileSnapshot canonical defaults / normalization mismatch`），让 `OrganizerProfileSnapshot` 的默认值、字段规范化和领域语义与 `FileCenterService` 当前真实创建出来的 `OrganizerProfile` 完全一致，绝不扩大范围，绝不引入 Gate5-C 特性。
+### 1.2 本轮修复的核心审查缺陷 (P1/P2/Concurrent Race)
+- **P1-01: Organizer 规范默认值全量对齐 Gate5-B-hotfix4**：
+  - 规范默认值：`recursive: false`, `rename_template: "{name}"`, `statistics_template: "[{images}P {videos}V {size}]"`, `preserve_tags: []`, `cleanup_patterns: []`, `numbering_mode: "none"`, `numbering_start: 1`, `numbering_padding: 3`, `mtime_mode: "none"`, `mtime_delay_seconds: 2.0`。
+  - 彻底清除所有 `{name} {statistics}` 和 `[{images}P{?videos: {videos}V} {size}]` 旧 fallback。
+  - 创建统一前端规范工厂 `createDefaultOrganizerSnapshot()`，全面覆盖 `StepList`、`OrganizerStepEditor`、`OrganizerProfileFields`、`ProfileFormModal`。
+- **P1-02: Workflow Rename V1 纯字面量重命名契约**：
+  - 移除所有正则/regex/$1/`^(.*)$` 文案与默认值，标签明确改为“字面量匹配文本”、“字面量替换文本”。
+  - 默认值设为 `pattern: 'draft', replacement: 'final'`。
+  - 实现纯字面量替换逻辑 `applyLiteralRename`。
+- **P2-01: 线性构建器拓扑防呆与规则校验**：
+  - File 模式：Scan 步骤必须且唯一位于 index 0，Filter 步骤必须位于所有 Action 之前，Quarantine 为终端步骤不可后继追加步骤；
+  - Organizer 模式：严格限制为 `Scan -> Organize`；
+  - `getAllowedInsertions`、`canMoveStep`、`canDeleteStep` 精确控制步骤插入、上下移动与删除；
+  - 模式切换提供确认弹窗，确认后重置为合法初始拓扑。
+- **P2-02: 显式 Preview 状态机与 409 防自肥保护**：
+  - 移除自动 `useQuery` 编译，改为用户显式点击“生成预览 / 刷新预览”按钮触发 mutation；
+  - 状态机包含 `CLEAN_SAVED`, `EDITING_DIRTY`, `SAVED_PREVIEW_REQUIRED`, `PREVIEWING`, `PREVIEW_READY`, `PREVIEW_STALE`；
+  - 覆盖根目录或参数变更立即转为 `PREVIEW_STALE` 并清空 `compile_digest`；
+  - 遇到 409 `PREVIEW_CHANGED`：**严禁自动 refetch/retry**，清空 digest，置为 `PREVIEW_STALE`，提示用户手动刷新；
+  - `StaleRebuildDrawer` 同样彻底移除 409 下的 `refetch()`。
+- **P2-03: 基于 `useAuth()` 的严格 RBAC 权限矩阵**：
+  - Member 角色可只读浏览、预览和生成草稿计划，严格禁止创建工作流、保存新版本、归档和回滚；
+  - 归档工作流进入完全只读封存态，禁用编辑、修改、预览、生成计划和回滚。
+- **P2-04: 历史版本路由与 API 支持**：
+  - 完整支持 `/workflows/:id?revision=N` 路由，调用 `workflowApi.getRevision(id, revision)`；
+  - 只读查看历史版本，非归档状态下支持带 exact revision 预览与生成计划草稿；
+  - 管理员支持一键回滚至该历史版本；
+  - `RevisionDrawer` 提供“跳转查看”快捷入口。
+- **P2-05: FilterBuilder 算子矩阵与限制**：
+  - 严格支持 Gate5-A 六大字段算子矩阵与时区感知 ISO 字符串、media_type 枚举、扩展名小写去点规范化；
+  - 严格校验 Filter 深度 <= 5、子节点 <= 50、叶节点 <= 200。
+- **P2-06: TypeScript 严格类型与元数据守卫**：
+  - `FilterLeafNode.value: string | number | string[]`；
+  - `isWorkflowPlanMetadata` 严格整型守卫（拦截浮点数 1.5, NaN, Infinity, 64-char 非十六进制, empty roots）。
+- **Concurrent Archive Race Rebuild Protection (后端并发重构保护)**：
+  - `rebuild_plan` 在 `BEGIN IMMEDIATE` 独占事务后调用 `session.expire_all()`，从数据库实时重新加载 `Workflow` 与 `WorkflowRevision`；
+  - 复核 `source_wf.archived_at is None` 与 `source_rev.definition_sha256 == metadata["definition_sha256"]`；
+  - 任何并发篡改或归档直接 ROLLBACK 抛 409 `PREVIEW_CHANGED` / `WORKFLOW_ARCHIVED`，0 Draft 生成。
 
 ---
 
-## 2. Issues Closed & Technical Implementation (问题关闭与技术实现)
+## 2. Code Changes Summary (代码变更概览)
 
-### 2.1 P2-12 — OrganizerProfileSnapshot 领域契约与规范化对齐
+### 2.1 后端核心服务
+- `app/service.py`:
+  - 在 `rebuild_plan` 的独占事务开始时执行 `session.expire_all()`，重新获取不可变基线数据并做强一致性复核，若归档或版本 SHA 改变则直接抛出 409 `WorkflowDigestMismatchError`。
+- `tests/test_gate5c_hotfix1_backend.py`:
+  - 新增 2 个并发竞态测试（重建编译期间归档工作流、重建编译期间篡改 revision SHA256），确保 0 Draft 生成且报 409。
+- `tests/test_gate5c_integration_acceptance.py`:
+  - 由原 `test_gate5c_blackbox_acceptance.py` 更名，明确其定位为 TestClient 内存集成测试。
 
-- **问题根因**：
-  1. **默认值与真实领域偏离**：此前 `OrganizerProfileSnapshot` 误以 ORM 模型列定义为准，将 `image_extensions` 设为空列表 `[]`、`rename_template` 设为 `"{name} {statistics}"`。但在用户通过 `FileCenterService._validate_profile_payload()` 创建默认档案时，真实默认值其实为 `image_extensions=["jpg", "jpeg", "png", "webp"]`、`video_extensions=["mp4", "mov", "mkv"]`、`rename_template="{name}"`、`statistics_template="[{images}P {videos}V {size}]"`。此差异导致最小配置的工作流会错误为目录强行追加统计后缀（例如将 `Album` 误重命名为 `Album [0P 1 B]`）。
-  2. **扩展名校验与规范化缺失**：此前快照仅校验元素为字符串，未进行大写转小写与前导点去除（如 `".JPG"` 未规范化为 `"jpg"`），且未对非法字符（`/`, `\`, 空格）进行 422 拦截。
-  3. **档案名称校验过宽**：此前快照仅校验 `isinstance(v, str)`，允许全空格字符串 `name="   "` 绕过校验。
-  4. **标签处理分叉**：此前快照未对 `preserve_tags` 执行每个标签的 trim 操作，未丢弃空字符串，且未限制上限为 20 个标签。
+### 2.2 前端工具与状态机
+- `frontend/src/utils/organizerDefaults.ts`:
+  - 导出 `createDefaultOrganizerSnapshot()`，集中维护 14 项规范默认值。
+- `frontend/src/utils/workflowRename.ts`:
+  - 导出 `applyLiteralRename()` 纯字面量替换逻辑。
+- `frontend/src/utils/workflowTopology.ts`:
+  - 导出 `validateWorkflowStepOrder`、`getAllowedInsertions`、`canMoveStep`、`canDeleteStep`。
+- `frontend/src/utils/workflowRbac.ts`:
+  - 导出 `canCreateWorkflow`、`canSaveRevision`、`canArchiveWorkflow`、`canRollbackWorkflow`、`canPreviewWorkflow`、`canGenerateDraft`。
+- `frontend/src/utils/workflowPreviewMachine.ts`:
+  - 导出 `WorkflowPreviewState` 与 `transitionPreviewState`。
+- `frontend/src/utils/filterMatrix.ts`:
+  - 导出 `ALLOWED_OPERATORS_BY_FIELD`、`normalizeExtension`、`validateFilterLimits`。
 
-- **修复实现**：
-  1. **抽离统一规范化模块**：
-     创建 [`app/organizers/profile_validation.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/organizers/profile_validation.py)，集中定义标准默认常量与校验函数，作为唯一的标准事实源：
-     - 常量：`DEFAULT_ORGANIZER_IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "webp"]`、`DEFAULT_ORGANIZER_VIDEO_EXTENSIONS = ["mp4", "mov", "mkv"]`、`DEFAULT_ORGANIZER_RENAME_TEMPLATE = "{name}"`、`DEFAULT_ORGANIZER_STATISTICS_TEMPLATE = "[{images}P {videos}V {size}]"`、`DEFAULT_ORGANIZER_NUMBERING_MODE = "none"`、`DEFAULT_ORGANIZER_NUMBERING_START = 1`、`DEFAULT_ORGANIZER_NUMBERING_PADDING = 3`、`DEFAULT_ORGANIZER_MTIME_MODE = "none"`、`DEFAULT_ORGANIZER_MTIME_DELAY_SECONDS = 2.0`。
-     - 校验器：`validate_profile_name()`、`normalize_preserve_tags()`、`validate_and_normalize_image_extensions()`、`validate_and_normalize_video_extensions()`、`validate_rename_template()`、`validate_statistics_template()`、`validate_profile_cleanup_patterns()`。
-  2. **业务服务对齐**：
-     重构 [`app/service.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/service.py) 中的 `FileCenterService._validate_profile_payload()`，全面调用上述共享验证与规范化函数，消除逻辑重复与分叉风险。
-  3. **工作流快照 Schema 对齐**：
-     在 [`app/workflows/schema.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/workflows/schema.py) 中更新 `OrganizerProfileSnapshot`：
-     - 默认值全面对齐标准常量；
-     - 增加 `validate_name` 校验器（拒绝空白名称，strip 处理）；
-     - 增加 `validate_images` 与 `validate_videos` 校验器（复用扩展名规范化，非法扩展名报 422）；
-     - 增加 `validate_tags` 校验器（trim、过滤空串、最多 20 个）；
-     - 增加 `validate_cleanup` 校验器（复用正则模式校验）；
-     - 保持原有严格的类型与数值边界（`numbering_mode`、`numbering_start >= 0`、`numbering_padding 1..10`、`mtime_mode`、`mtime_delay_seconds 0.0..60.0` 拒绝 bool）。
-  4. **编译器默认值对齐**：
-     在 [`app/workflows/compiler.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/workflows/compiler.py) 中将 `_compile_organizer_workflow` 的模板回退默认值统一为 `DEFAULT_ORGANIZER_RENAME_TEMPLATE`（`"{name}"`）与 `DEFAULT_ORGANIZER_STATISTICS_TEMPLATE`。
-  5. **语义等价保障**：
-     在目录 `/data/Album/a.jpg` 的场景下，最小快照 `{"name": "Minimal"}` 在工作流预览与直接整理档案预览中完全等价：生成 `Album -> Album`，`changed=False`，在工作流方案中产生 0 个操作，彻底杜绝意外附加统计后缀行为。
+### 2.3 前端组件与页面改造
+- `frontend/src/types/workflow.ts`:
+  - `FilterLeafNode.value: string | number | string[]`，`WorkflowDefinition.schema_version: 1`，`isWorkflowPlanMetadata` 严格数值与十六进制正则校验。
+- `frontend/src/api/workflows.ts`:
+  - 新增 `getRevision(id, revision)` 接口端点。
+- `frontend/src/components/workflows/StepList.tsx`:
+  - 接入拓扑规则控制、规范默认值与字面量重命名。
+- `frontend/src/components/workflows/StepCard.tsx`:
+  - 标签更新为“字面量重命名”，透传 `canMoveUp`, `canMoveDown`, `canDelete`, `readOnly`。
+- `frontend/src/components/workflows/RenameStepEditor.tsx`:
+  - 移除正则文案，改为字面量输入框。
+- `frontend/src/components/workflows/OrganizerProfileFields.tsx` & `OrganizerStepEditor.tsx` & `ProfileFormModal.tsx`:
+  - 清理陈旧 fallback，复用集中规范默认值。
+- `frontend/src/components/workflows/FilterBuilder.tsx`:
+  - 算子矩阵过滤，时区感知 ISO 字符串，media_type 枚举，递归安全校验。
+- `frontend/src/components/workflows/RevisionDrawer.tsx`:
+  - 支持 `isArchived` 只读模式，集成“跳转查看”版本路由，回滚操作 RBAC 防护。
+- `frontend/src/pages/Workflows/WorkflowPreviewPanel.tsx`:
+  - 接入显式预览状态机与 mutation，409 PREVIEW_CHANGED 禁止自动重试，参数修改切入 PREVIEW_STALE 并清空摘要。
+- `frontend/src/components/plans/StaleRebuildDrawer.tsx`:
+  - 移除 409 PREVIEW_CHANGED 下的自动 `refetch()`。
+- `frontend/src/pages/Workflows/WorkflowBuilder.tsx`:
+  - 完整接入 `/workflows/:id?revision=N` 路由、RBAC 控制、模式切换拓扑重置与归档只读警示。
+- `frontend/src/pages/Workflows/WorkflowList.tsx`:
+  - 完整接入 RBAC 权限控制，普通成员隐藏新建与归档操作。
 
 ---
 
-## 3. Verification & Evidence (验证与证据)
+## 3. Verification & Acceptance Results (验证与验收结果)
 
-### 3.1 TDD 失败基线证明 (RED Evidence)
-在修改代码前编写针对性失败测试 [`tests/test_gate5b_hotfix4_red.py`](file:///Users/Kerwin/MyProject/nas-file-center/tests/test_gate5b_hotfix4_red.py)，确认 5 项基线偏差在修复前全部失败：
-```text
-FAILED tests/test_gate5b_hotfix4_red.py::test_red_minimal_defaults_mismatch
-  -> AssertionError: assert [] == ['jpg', 'jpeg', 'png', 'webp'] (default image_extensions was empty)
-FAILED tests/test_gate5b_hotfix4_red.py::test_red_whitespace_name_not_rejected
-  -> Failed: DID NOT RAISE ValidationError (name="   " was accepted)
-FAILED tests/test_gate5b_hotfix4_red.py::test_red_extension_not_normalized
-  -> AssertionError: assert ['.JPG'] == ['jpg'] (uppercase and leading dot not normalized)
-FAILED tests/test_gate5b_hotfix4_red.py::test_red_invalid_extension_not_rejected
-  -> Failed: DID NOT RAISE ValidationError (invalid ext "jpg/bad" was accepted)
-FAILED tests/test_gate5b_hotfix4_red.py::test_red_preserve_tags_not_trimmed_and_capped
-  -> AssertionError: assert len(tags) == 25 (expected 20 tags capped and trimmed)
-```
-
-### 3.2 修复后套件验证 (GREEN Evidence)
+### 3.1 前端单元与契约测试套件
 ```bash
-# 1. Gate5-B-hotfix4 Section 13 完整测试套件 (9 passed in 1.18s)
-docker exec -e PYTHONPATH=/app nas-test-env pytest tests/test_gate5b_hotfix4.py -v
-# Output: 9 passed, 2 warnings in 1.18s
-
-# 2. Gate5-B-hotfix4 TDD RED->GREEN 验证 (5 passed in 0.19s)
-docker exec -e PYTHONPATH=/app nas-test-env pytest tests/test_gate5b_hotfix4_red.py -v
-# Output: 5 passed in 0.19s
-
-# 3. Gate5-B 历史回归测试套件 (53 passed in 21.15s)
-docker exec -e PYTHONPATH=/app nas-test-env pytest tests/test_gate5b_hotfix3.py tests/test_gate5b_hotfix2.py tests/test_gate5b_hotfix1_red.py tests/test_organizer_blockers_regression.py -v
-# Output: 53 passed, 2 warnings in 21.15s
-
-# 4. 工作流全集与过滤器测试 (54 passed in 2.30s)
-docker exec -e PYTHONPATH=/app nas-test-env pytest tests/test_workflow_*.py tests/test_filter_*.py -q
-# Output: 54 passed in 2.30s
-
-# 5. Gate2 核心套件 (55 passed in 4.80s)
-docker exec -e PYTHONPATH=/app nas-test-env pytest tests/test_gate2*.py -q
-# Output: 55 passed in 4.80s
-
-# 6. 后端全量测试套件 (601 passed in 1m 11s)
-docker exec -e PYTHONPATH=/app nas-test-env pytest -q tests
-# Output: 601 passed, 20 warnings in 1m 11s
-
-# 7. 前端测试与生产打包 (177 passed in 102ms, build succeeded in 3.45s)
-cd frontend && npm test -- --watchAll=false && npm run build
-# Output: 177 passed in 102ms, built in 3.45s
+npm test
+# tests 222
+# suites 69
+# pass 222
+# fail 0
+# duration_ms 134.93
 ```
+涵盖 8 大独立审查找出的回归用例（`frontend/tests/hotfix1_red.test.ts`），全量通过。
 
-### 3.3 Docker 容器黑盒端到端验收 (Blackbox Evidence)
-基于生产镜像 `nas-file-center:v0.3.5-gate5b-hotfix4`，在隔离容器环境中执行黑盒验收脚本 `scratch/test_gate5b_hotfix4_blackbox_acceptance.py`：
+### 3.2 前端类型检查与生产构建
+```bash
+npm run build
+# > tsc && vite build
+# vite v6.4.3 building for production...
+# transforming...
+# ✓ 3745 modules transformed.
+# ✓ built in 3.60s
+```
+TypeScript 严格模式 0 警告、0 错误，静态资源打包完毕。
+
+### 3.3 后端全量测试套件
+```bash
+docker exec -t -e PYTHONPATH=/app nas-test-env pytest -q
+# ........................................................................ [ 11%]
+# ........................................................................ [ 23%]
+# ........................................................................ [ 35%]
+# ........................................................................ [ 47%]
+# ........................................................................ [ 59%]
+# ........................................................................ [ 71%]
+# ........................................................................ [ 82%]
+# ........................................................................ [ 94%]
+# ................................                                         [100%]
+# 100% PASS
+```
+包含原集成套件及 `tests/test_gate5c_hotfix1_backend.py` 2 个并发竞态测试，全部通过。
+
+### 3.4 真实 Docker 生产容器端到端黑盒验收
+基于 `Dockerfile` 重新构建的真实生产镜像 `nas-file-center:v0.3.5-gate5c-hotfix1`，运行黑盒测试脚本 `scratch/test_gate5c_hotfix1_blackbox_acceptance.py`：
 ```text
-=== Starting Gate5-B-hotfix4 Blackbox Acceptance against nas-file-center:v0.3.5-gate5b-hotfix4 ===
-[DEPLOY] Starting API container nas-gate5b-hf4-accept-d40511...
-[DEPLOY] API container is healthy.
-[AUTH] Login successful, session cookie obtained.
-[SETUP] Target IndexRoot ID: 1
-[CP1] Verifying minimal OrganizerProfile vs minimal Snapshot defaults...
-[CP1] CP1: PASS
-[CP2] Verifying minimal preview semantic equivalence (Album -> Album, changed=False)...
-[CP2] CP2: PASS
-[CP3] Verifying extension normalization...
-[CP3] CP3: PASS
-[CP4] Verifying invalid extensions rejection (422)...
-[CP4] CP4: PASS
-[CP5] Verifying whitespace-only name rejection (422)...
-[CP5] CP5: PASS
-[CP6] Verifying preserve_tags trimming and cap 20...
-[CP6] CP6: PASS
-[CP7] Verifying full existing OrganizerProfile round-trip...
-[CP7] CP7: PASS
-[CP8] Verifying sequential and ordered options in preview...
-[CP8] CP8: PASS
-[CP9] Verifying invalid enum / numeric cases rejection (422)...
-[CP9] CP9: PASS
-[CP10] Verifying SQLite integrity check...
-[CP10] CP10: PASS
-[SUMMARY] Final Report: {
-  "CP1": "PASS",
-  "CP2": "PASS",
-  "CP3": "PASS",
-  "CP4": "PASS",
-  "CP5": "PASS",
-  "CP6": "PASS",
-  "CP7": "PASS",
-  "CP8": "PASS",
-  "CP9": "PASS",
-  "CP10": "PASS"
-}
-
-ALL GATE5-B-HOTFIX4 BLACKBOX ACCEPTANCE CHECKS PASSED!
+============================================================
+GATE5-C-HOTFIX1 REAL DOCKER CONTAINER BLACK-BOX ACCEPTANCE REPORT
+============================================================
+RBAC_MEMBER_FORBIDDEN_CREATE       : PASS
+WORKFLOW_CREATE                    : PASS (id=1)
+CANONICAL_ORGANIZER_DEFAULTS       : PASS
+TOPOLOGY_VIOLATION_REJECTED        : PASS
+WORKFLOW_PREVIEW                   : PASS (compile_digest=f222e21fbf...)
+GENERATE_DRAFT_PLAN                : PASS (plan_id=1)
+STALE_REBUILD_PREVIEW              : PASS
+CONCURRENT_ARCHIVE_RACE_REJECTED   : PASS (code=WORKFLOW_ARCHIVED)
+SQLITE_INTEGRITY                   : PASS (ok)
+============================================================
+ALL ACCEPTANCE CHECKPOINTS PASSED PERFECTLY!
 ```
 
 ---
 
-## 4. Final Review Status & Artifacts (最终状态与发布制品)
+## 4. Current Formal Status (当前正式状态)
 
 ```text
-Gate5-B-hotfix4 implementation candidate ready for independent review.
-
-P2-12: CLOSED
-
+Gate2 = PASS
+Gate3 = PASS
+Gate4 = PASS
 Gate5-A = PASS
-Gate5-B = HOLD (Candidate Ready for Independent Review)
-Gate5-C = FORBIDDEN
+Gate5-B = PASS / CLOSED
+
+Gate5-C-hotfix1 candidate ready for independent review
+Gate5-C = HOLD pending independent review
 v0.3.5 = NOT CLOSED
 ```

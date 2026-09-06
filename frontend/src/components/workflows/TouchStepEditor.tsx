@@ -6,11 +6,12 @@ import { TouchStep } from '../../types/workflow';
 interface TouchStepEditorProps {
   step: TouchStep;
   onChange: (updated: TouchStep) => void;
+  readOnly?: boolean;
 }
 
-export const TouchStepEditor: React.FC<TouchStepEditorProps> = ({ step, onChange }) => {
+export const TouchStepEditor: React.FC<TouchStepEditorProps> = ({ step, onChange, readOnly = false }) => {
   return (
-    <Form layout="vertical">
+    <Form layout="vertical" disabled={readOnly}>
       <Form.Item
         label="更新为当前时间 (touch_now)"
         extra="开启后将在执行时刷新为 NAS 服务端当前系统时间戳"

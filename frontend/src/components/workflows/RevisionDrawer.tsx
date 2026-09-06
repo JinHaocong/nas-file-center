@@ -11,12 +11,15 @@ import {
   message,
   Alert,
 } from 'antd';
-import { HistoryOutlined, RollbackOutlined, EyeOutlined } from '@ant-design/icons';
+import { HistoryOutlined, RollbackOutlined, EyeOutlined, ExportOutlined } from '@ant-design/icons';
 import { useQuery, useMutation } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { workflowApi } from '../../api/workflows';
 import { getStructuredApiError } from '../../api/errors';
 import { WorkflowRevisionResponse, WorkflowResponse } from '../../types/workflow';
 import { formatDateTime } from '../../utils/format';
+import { useAuth } from '../../contexts/AuthContext';
+import { canRollbackWorkflow } from '../../utils/workflowRbac';
 
 const { Text } = Typography;
 
@@ -25,6 +28,7 @@ interface RevisionDrawerProps {
   workflowId: number;
   currentRevision: number;
   isBuiltin?: boolean;
+  isArchived?: boolean;
   onClose: () => void;
   onRollbackSuccess: (res: WorkflowResponse) => void;
 }
@@ -34,9 +38,12 @@ export const RevisionDrawer: React.FC<RevisionDrawerProps> = ({
   workflowId,
   currentRevision,
   isBuiltin = false,
+  isArchived = false,
   onClose,
   onRollbackSuccess,
 }) => {
+  const navigate = useNavigate();
+  const { user } = useAuth();
   const [inspectRevision, setInspectRevision] = useState<WorkflowRevisionResponse | null>(null);
 
   const {
@@ -102,9 +109,10 @@ export const RevisionDrawer: React.FC<RevisionDrawerProps> = ({
     {
       title: '操作',
       key: 'actions',
-      width: 170,
+      width: 220,
       render: (_: any, record: WorkflowRevisionResponse) => {
         const isCurrent = record.revision === currentRevision;
+        const canRollback = !isBuiltin && !isCurrent && canRollbackWorkflow(user?.role, isArchived);
         return (
           <Space>
             <Button
@@ -115,7 +123,20 @@ export const RevisionDrawer: React.FC<RevisionDrawerProps> = ({
               查看定义
             </Button>
 
-            {!isBuiltin && !isCurrent && (
+            {!isCurrent && (
+              <Button
+                size="small"
+                icon={<ExportOutlined />}
+                onClick={() => {
+                  onClose();
+                  navigate(`/workflows/${workflowId}?revision=${record.revision}`);
+                }}
+              >
+                跳转查看
+              </Button>
+            )}
+
+            {canRollback && (
               <Popconfirm
                 title="确认回滚至该历史版本？"
                 description={`系统将生成新修订版本并恢复至第 r${record.revision} 版定义。`}

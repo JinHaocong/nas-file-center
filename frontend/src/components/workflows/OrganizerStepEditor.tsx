@@ -3,31 +3,35 @@ import { Form } from 'antd';
 import { OrganizeStep, OrganizerProfileSnapshot } from '../../types/workflow';
 import { OrganizerProfileFields } from './OrganizerProfileFields';
 
+import { createDefaultOrganizerSnapshot } from '../../utils/organizerDefaults';
+
 interface OrganizerStepEditorProps {
   step: OrganizeStep;
   onChange: (updated: OrganizeStep) => void;
+  readOnly?: boolean;
 }
 
-export const OrganizerStepEditor: React.FC<OrganizerStepEditorProps> = ({ step, onChange }) => {
+export const OrganizerStepEditor: React.FC<OrganizerStepEditorProps> = ({ step, onChange, readOnly = false }) => {
   const [form] = Form.useForm();
 
   useEffect(() => {
+    const defaults = createDefaultOrganizerSnapshot();
     form.setFieldsValue({
       name: step.profile_snapshot.name || '',
       description: step.profile_snapshot.description || '',
       root: step.profile_snapshot.root || '',
-      recursive: step.profile_snapshot.recursive ?? false,
-      image_extensions: step.profile_snapshot.image_extensions || ['jpg', 'jpeg', 'png', 'webp'],
-      video_extensions: step.profile_snapshot.video_extensions || ['mp4', 'mov', 'mkv'],
-      rename_template: step.profile_snapshot.rename_template || '{name} {statistics}',
-      statistics_template: step.profile_snapshot.statistics_template || '[{images}P{?videos: {videos}V} {size}]',
-      preserve_tags: step.profile_snapshot.preserve_tags ?? [],
-      cleanup_patterns: step.profile_snapshot.cleanup_patterns || [],
-      numbering_mode: step.profile_snapshot.numbering_mode || 'none',
-      numbering_start: step.profile_snapshot.numbering_start ?? 1,
-      numbering_padding: step.profile_snapshot.numbering_padding ?? 3,
-      mtime_mode: step.profile_snapshot.mtime_mode || 'none',
-      mtime_delay_seconds: step.profile_snapshot.mtime_delay_seconds ?? 2.0,
+      recursive: step.profile_snapshot.recursive ?? defaults.recursive,
+      image_extensions: step.profile_snapshot.image_extensions ?? defaults.image_extensions,
+      video_extensions: step.profile_snapshot.video_extensions ?? defaults.video_extensions,
+      rename_template: step.profile_snapshot.rename_template ?? defaults.rename_template,
+      statistics_template: step.profile_snapshot.statistics_template ?? defaults.statistics_template,
+      preserve_tags: step.profile_snapshot.preserve_tags ?? defaults.preserve_tags,
+      cleanup_patterns: step.profile_snapshot.cleanup_patterns ?? defaults.cleanup_patterns,
+      numbering_mode: step.profile_snapshot.numbering_mode ?? defaults.numbering_mode,
+      numbering_start: step.profile_snapshot.numbering_start ?? defaults.numbering_start,
+      numbering_padding: step.profile_snapshot.numbering_padding ?? defaults.numbering_padding,
+      mtime_mode: step.profile_snapshot.mtime_mode ?? defaults.mtime_mode,
+      mtime_delay_seconds: step.profile_snapshot.mtime_delay_seconds ?? defaults.mtime_delay_seconds,
     });
   }, [step.profile_snapshot, form]);
 
@@ -59,6 +63,7 @@ export const OrganizerStepEditor: React.FC<OrganizerStepEditorProps> = ({ step, 
     <Form
       form={form}
       layout="vertical"
+      disabled={readOnly}
       onValuesChange={handleValuesChange}
     >
       <OrganizerProfileFields includeRoot={false} />

@@ -8,9 +8,10 @@ import { ScanStep } from '../../types/workflow';
 interface ScanStepEditorProps {
   step: ScanStep;
   onChange: (updated: ScanStep) => void;
+  readOnly?: boolean;
 }
 
-export const ScanStepEditor: React.FC<ScanStepEditorProps> = ({ step, onChange }) => {
+export const ScanStepEditor: React.FC<ScanStepEditorProps> = ({ step, onChange, readOnly = false }) => {
   const { data: rootsData, isLoading } = useQuery({
     queryKey: ['indexesRootsList'],
     queryFn: async () => {
@@ -23,7 +24,7 @@ export const ScanStepEditor: React.FC<ScanStepEditorProps> = ({ step, onChange }
 
   return (
     <div>
-      <Form layout="vertical">
+      <Form layout="vertical" disabled={readOnly}>
         <Form.Item
           label="扫描索引根目录 (root_ids)"
           required

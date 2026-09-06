@@ -22,7 +22,7 @@ export type FilterLeafOperator =
 export interface FilterLeafNode {
   field: FilterLeafField;
   operator: FilterLeafOperator;
-  value: string | number | boolean | string[] | null;
+  value: string | number | string[];
   case_sensitive?: boolean;
 }
 
@@ -135,10 +135,19 @@ export type WorkflowStep =
   | QuarantineStep
   | OrganizeStep;
 
+export type WorkflowStepType =
+  | 'scan'
+  | 'filter'
+  | 'rename'
+  | 'move'
+  | 'touch'
+  | 'quarantine'
+  | 'organize';
+
 export type WorkflowMode = 'file' | 'organizer';
 
 export interface WorkflowDefinition {
-  schema_version: number;
+  schema_version: 1;
   mode: WorkflowMode;
   steps: WorkflowStep[];
 }
@@ -322,21 +331,38 @@ export function isWorkflowPlanMetadata(metadata: unknown): metadata is WorkflowP
       return false;
     }
   }
-  if (!m || typeof m !== 'object') {
+  if (!m || typeof m !== 'object' || Array.isArray(m)) {
     return false;
   }
   const obj = m as Record<string, any>;
   if (obj.source !== 'workflow') return false;
-  if (typeof obj.workflow_id !== 'number' || obj.workflow_id <= 0) return false;
-  if (typeof obj.workflow_revision !== 'number' || obj.workflow_revision <= 0) return false;
-  if (typeof obj.definition_sha256 !== 'string' || obj.definition_sha256.length !== 64) return false;
-  if (typeof obj.compile_digest !== 'string' || obj.compile_digest.length !== 64) return false;
+
+  if (typeof obj.workflow_id !== 'number' || !Number.isInteger(obj.workflow_id) || obj.workflow_id <= 0) {
+    return false;
+  }
+  if (
+    typeof obj.workflow_revision !== 'number' ||
+    !Number.isInteger(obj.workflow_revision) ||
+    obj.workflow_revision <= 0
+  ) {
+    return false;
+  }
+
+  const hex64Regex = /^[0-9a-fA-F]{64}$/;
+  if (typeof obj.definition_sha256 !== 'string' || !hex64Regex.test(obj.definition_sha256)) {
+    return false;
+  }
+  if (typeof obj.compile_digest !== 'string' || !hex64Regex.test(obj.compile_digest)) {
+    return false;
+  }
+
   if (
     !obj.runtime_inputs ||
     typeof obj.runtime_inputs !== 'object' ||
+    Array.isArray(obj.runtime_inputs) ||
     !Array.isArray(obj.runtime_inputs.root_ids) ||
     obj.runtime_inputs.root_ids.length === 0 ||
-    !obj.runtime_inputs.root_ids.every((id: any) => typeof id === 'number' && id > 0)
+    !obj.runtime_inputs.root_ids.every((id: any) => typeof id === 'number' && Number.isInteger(id) && id > 0)
   ) {
     return false;
   }
