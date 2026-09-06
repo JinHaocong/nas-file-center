@@ -229,3 +229,44 @@ def test_preview_fail_closed_validation_errors(test_setup):
         headers={"Origin": "http://testserver"},
     )
     assert resp_non_str.status_code == 422
+
+    # 6. P2-04: mtime integer 9223372037 exceeds SQLite INT64_MAX -> must return 422, NOT 500
+    resp_mtime_overflow = client.post(
+        "/api/filters/preview",
+        json={"roots": [media_root], "filter": {"field": "mtime", "operator": "gte", "value": 9223372037}},
+        headers={"Origin": "http://testserver"},
+    )
+    assert resp_mtime_overflow.status_code == 422, f"Expected 422, got {resp_mtime_overflow.status_code}: {resp_mtime_overflow.text}"
+
+    # 7. P2-04: mtime ISO year 9999 exceeds INT64_MAX -> must return 422, NOT 500
+    resp_mtime_9999 = client.post(
+        "/api/filters/preview",
+        json={"roots": [media_root], "filter": {"field": "mtime", "operator": "gte", "value": "9999-12-31T23:59:59Z"}},
+        headers={"Origin": "http://testserver"},
+    )
+    assert resp_mtime_9999.status_code == 422, f"Expected 422, got {resp_mtime_9999.status_code}: {resp_mtime_9999.text}"
+
+    # 8. P2-04: mtime microsecond boundary overflow -> 2262-04-11T23:47:16.854776Z -> must return 422
+    resp_mtime_us_overflow = client.post(
+        "/api/filters/preview",
+        json={"roots": [media_root], "filter": {"field": "mtime", "operator": "gte", "value": "2262-04-11T23:47:16.854776Z"}},
+        headers={"Origin": "http://testserver"},
+    )
+    assert resp_mtime_us_overflow.status_code == 422, f"Expected 422, got {resp_mtime_us_overflow.status_code}: {resp_mtime_us_overflow.text}"
+
+    # 9. P2-04: safe mtime integer boundary 9223372036 -> must return 200
+    resp_mtime_safe = client.post(
+        "/api/filters/preview",
+        json={"roots": [media_root], "filter": {"field": "mtime", "operator": "gte", "value": 9223372036}},
+        headers={"Origin": "http://testserver"},
+    )
+    assert resp_mtime_safe.status_code == 200, f"Expected 200, got {resp_mtime_safe.status_code}: {resp_mtime_safe.text}"
+
+    # 10. P2-04: safe mtime ISO boundary 2262-04-11T23:47:16.854775Z -> must return 200
+    resp_mtime_iso_safe = client.post(
+        "/api/filters/preview",
+        json={"roots": [media_root], "filter": {"field": "mtime", "operator": "gte", "value": "2262-04-11T23:47:16.854775Z"}},
+        headers={"Origin": "http://testserver"},
+    )
+    assert resp_mtime_iso_safe.status_code == 200, f"Expected 200, got {resp_mtime_iso_safe.status_code}: {resp_mtime_iso_safe.text}"
+

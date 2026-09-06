@@ -204,9 +204,47 @@ def test_mtime_strict_typing_and_timezone():
     leaf_int = validate_filter_ast(LeafNode(field="mtime", operator="eq", value=1788688800))
     assert leaf_int.value == 1788688800000000000
 
+    # INT64_MAX boundary tests (P2-04)
+    # MAX_EPOCH_SECONDS = 9223372036 (INT64_MAX // 1e9)
+    leaf_max_int = validate_filter_ast(LeafNode(field="mtime", operator="eq", value=9223372036))
+    assert leaf_max_int.value == 9223372036000000000
+
+    # 9223372037 exceeds SQLite INT64_MAX when converted to ns -> must be rejected (422)
+    with pytest.raises(FilterValidationError, match="range"):
+        validate_filter_ast(LeafNode(field="mtime", operator="eq", value=9223372037))
+
+    # negative int must be rejected
+    with pytest.raises(FilterValidationError, match="range"):
+        validate_filter_ast(LeafNode(field="mtime", operator="eq", value=-1))
+
+    # ISO boundary: 2262-04-11T23:47:16Z is 9223372036s -> accepted
+    leaf_max_iso = validate_filter_ast(LeafNode(field="mtime", operator="eq", value="2262-04-11T23:47:16Z"))
+    assert leaf_max_iso.value == 9223372036000000000
+
+    # ISO boundary: 2262-04-11T23:47:16.854775Z -> 9223372036854775000 ns <= INT64_MAX -> accepted
+    leaf_max_iso_us = validate_filter_ast(LeafNode(field="mtime", operator="eq", value="2262-04-11T23:47:16.854775Z"))
+    assert leaf_max_iso_us.value == 9223372036854775000
+
+    # ISO boundary: 2262-04-11T23:47:16.854776Z -> 9223372036854776000 ns > INT64_MAX -> rejected (422)
+    with pytest.raises(FilterValidationError, match="range"):
+        validate_filter_ast(LeafNode(field="mtime", operator="eq", value="2262-04-11T23:47:16.854776Z"))
+
+    # ISO boundary: 2262-04-12T00:00:00Z -> rejected (422)
+    with pytest.raises(FilterValidationError, match="range"):
+        validate_filter_ast(LeafNode(field="mtime", operator="eq", value="2262-04-12T00:00:00Z"))
+
+    # Year 9999 ISO string must be rejected (422)
+    with pytest.raises(FilterValidationError, match="range"):
+        validate_filter_ast(LeafNode(field="mtime", operator="eq", value="9999-12-31T23:59:59Z"))
+
+    # Pre-epoch ISO string (negative ns) must be rejected
+    with pytest.raises(FilterValidationError, match="range"):
+        validate_filter_ast(LeafNode(field="mtime", operator="eq", value="1969-12-31T23:59:59Z"))
+
     # integer nanoseconds or out-of-range must be rejected
     with pytest.raises(FilterValidationError, match="range"):
         validate_filter_ast(LeafNode(field="mtime", operator="eq", value=1788688800000000000))
+
 
 
 def test_string_fields_strict_types():

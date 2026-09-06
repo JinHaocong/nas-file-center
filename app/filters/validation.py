@@ -27,17 +27,26 @@ class FilterValidationError(ValueError):
     pass
 
 
+INT64_MAX = (1 << 63) - 1
+MIN_MTIME_NS = 0
+MAX_MTIME_NS = INT64_MAX
+MAX_EPOCH_SECONDS = INT64_MAX // 1_000_000_000
+EPOCH_UTC = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
 def _parse_mtime_to_ns(val: Any) -> int:
-    """Parse timezone-aware string ISO-8601 or int epoch seconds into UTC nanoseconds integer."""
+    """Parse timezone-aware string ISO-8601 or int epoch seconds into UTC nanoseconds integer within SQLite INT64 range."""
     if isinstance(val, bool):
         raise FilterValidationError("mtime value cannot be a boolean")
     if isinstance(val, float):
         raise FilterValidationError("mtime value cannot be a float")
     if type(val) is int:
-        # Bounded epoch seconds (0 to 253402300799 = year 9999)
-        if val < 0 or val > 253_402_300_799:
-            raise FilterValidationError(f"mtime epoch seconds out of supported range (0 to 253402300799), got {val}")
-        return val * 1_000_000_000
+        if val < 0 or val > MAX_EPOCH_SECONDS:
+            raise FilterValidationError(f"mtime epoch seconds out of supported range (0 to {MAX_EPOCH_SECONDS}), got {val}")
+        ns = val * 1_000_000_000
+        if ns < MIN_MTIME_NS or ns > MAX_MTIME_NS:
+            raise FilterValidationError(f"mtime nanoseconds out of supported range ({MIN_MTIME_NS} to {MAX_MTIME_NS}), got {ns}")
+        return ns
     if isinstance(val, str):
         val_str = val.strip()
         if val_str.endswith("Z") or val_str.endswith("z"):
@@ -50,8 +59,14 @@ def _parse_mtime_to_ns(val: Any) -> int:
             raise FilterValidationError(f"Invalid mtime format '{val}': {exc}") from exc
         if dt.tzinfo is None:
             raise FilterValidationError("mtime ISO datetime must be timezone-aware (missing timezone)")
-        return int(dt.timestamp() * 1_000_000_000)
+        dt_utc = dt.astimezone(timezone.utc)
+        delta = dt_utc - EPOCH_UTC
+        ns = delta.days * 86_400 * 1_000_000_000 + delta.seconds * 1_000_000_000 + delta.microseconds * 1_000
+        if ns < MIN_MTIME_NS or ns > MAX_MTIME_NS:
+            raise FilterValidationError(f"mtime nanoseconds out of supported range ({MIN_MTIME_NS} to {MAX_MTIME_NS}), got {ns}")
+        return ns
     raise FilterValidationError(f"mtime value must be timezone-aware ISO string or integer epoch seconds, got {type(val).__name__}")
+
 
 
 def validate_filter_ast(node: FilterNode, current_depth: int = 1, leaf_counter: list[int] | None = None) -> FilterNode:
