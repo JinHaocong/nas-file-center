@@ -182,15 +182,6 @@ def _validate_single_step(step: WorkflowStep, idx: int, session: Session | None 
                 code="INVALID_RENAME_REPLACEMENT",
                 details={"index": idx, "step_id": step.id},
             )
-        if step.is_regex:
-            try:
-                re.compile(step.pattern)
-            except re.error as exc:
-                raise WorkflowValidationError(
-                    f"Invalid regular expression in step '{step.id}': {exc}",
-                    code="INVALID_REGEX",
-                    details={"index": idx, "step_id": step.id, "pattern": step.pattern},
-                ) from exc
 
     elif isinstance(step, MoveStep):
         if step.destination_root_id <= 0:

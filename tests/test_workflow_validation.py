@@ -145,17 +145,8 @@ def test_rename_step_validation():
         validate_workflow_definition(wf)
     assert exc.value.code == "INVALID_RENAME_PATTERN"
 
-    wf_regex = WorkflowDefinition(
-        schema_version=1,
-        mode="file",
-        steps=[
-            ScanStep(id="s1", type="scan"),
-            RenameStep(id="s2", type="rename", pattern="[unclosed_regex", replacement="b", is_regex=True),
-        ],
-    )
-    with pytest.raises(WorkflowValidationError) as exc:
-        validate_workflow_definition(wf_regex)
-    assert exc.value.code == "INVALID_REGEX"
+    with pytest.raises(Exception) as exc:
+        RenameStep.model_validate({"id": "s2", "type": "rename", "pattern": "a", "replacement": "b", "is_regex": True})
 
 
 def test_valid_organizer_workflow():

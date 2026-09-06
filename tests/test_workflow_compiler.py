@@ -144,14 +144,15 @@ def test_file_workflow_compiler_collision_intra_step(setup_env):
     quarantine_dir = setup_env["quarantine_dir"]
     root_id = setup_env["root_id"]
 
-    # Rename regex that maps doc1 and doc2 to file.txt
+    # Two steps mapping doc1 and doc2 to same.txt
     wf = WorkflowDefinition(
         schema_version=1,
         mode="file",
         steps=[
             ScanStep(id="s1", type="scan", root_ids=[root_id]),
             FilterStep(id="s2", type="filter", filter=LeafNode(field="extension", operator="eq", value=".txt")),
-            RenameStep(id="s3", type="rename", pattern=r"doc\d+", replacement="file", is_regex=True),
+            RenameStep(id="s3", type="rename", pattern="doc1", replacement="same"),
+            RenameStep(id="s4", type="rename", pattern="doc2", replacement="same"),
         ],
     )
 
@@ -200,17 +201,7 @@ def test_file_workflow_compiler_cycle_detection(setup_env):
     quarantine_dir = setup_env["quarantine_dir"]
     root_id = setup_env["root_id"]
 
-    # Move doc1 -> tmp, doc2 -> doc1, tmp -> doc2 creates a cycle if doc1 -> doc2 and doc2 -> doc1
-    wf = WorkflowDefinition(
-        schema_version=1,
-        mode="file",
-        steps=[
-            ScanStep(id="s1", type="scan", root_ids=[root_id]),
-            FilterStep(id="s2", type="filter", filter=LeafNode(field="extension", operator="eq", value=".txt")),
-            RenameStep(id="s3", type="rename", pattern=r"doc(1|2)", replacement=r"doc\2", is_regex=True),
-        ],
-    )
-    # Let's test direct cycle in VirtualPathGraph
+    # Direct cycle in VirtualPathGraph
     from app.workflows.graph import VirtualCandidate, VirtualPathGraph
     graph = VirtualPathGraph(allowed_roots=[root_dir], quarantine_root=quarantine_dir)
     c1 = VirtualCandidate(

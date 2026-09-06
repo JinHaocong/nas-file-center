@@ -33,7 +33,6 @@ class RenameStep(BaseModel):
     type: Literal["rename"] = "rename"
     pattern: str
     replacement: str
-    is_regex: bool = False
 
 
 class MoveStep(BaseModel):
@@ -100,6 +99,11 @@ class WorkflowDefinition(BaseModel):
         return v
 
 
+class RuntimeInputs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    root_ids: list[int] | None = None
+
+
 class WorkflowCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=1, max_length=128)
@@ -111,7 +115,7 @@ class WorkflowUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str | None = Field(default=None, min_length=1, max_length=128)
     description: str | None = Field(default=None, max_length=1000)
-    expected_current_revision: int
+    expected_current_revision: int = Field(ge=1)
     definition: WorkflowDefinition | None = None
 
 
@@ -161,6 +165,8 @@ class WorkflowRevisionResponse(BaseModel):
 
 class WorkflowPreviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    revision: int | None = Field(default=None, ge=1)
+    runtime_inputs: RuntimeInputs | None = None
     root_ids: list[int] | None = None
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=50, ge=1, le=500)
@@ -181,6 +187,10 @@ class WorkflowPreviewResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     workflow_id: int
     revision: int
+    workflow_revision: int
+    definition_sha256: str
+    preview_source: Literal["index", "organizer-live-readonly"] = "index"
+    live_filesystem_verified: Literal[False] = False
     compile_digest: str
     matched_count: int
     matched_bytes: int
@@ -193,8 +203,10 @@ class WorkflowPreviewResponse(BaseModel):
 
 class WorkflowGeneratePlanRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    expected_compile_digest: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-fA-F]{64}$")
+    revision: int | None = Field(default=None, ge=1)
+    runtime_inputs: RuntimeInputs | None = None
     root_ids: list[int] | None = None
-    expected_compile_digest: str | None = None
     plan_name: str | None = None
 
 

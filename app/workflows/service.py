@@ -8,8 +8,14 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import Settings
 from app.models import BatchPlan, BatchPlanItem, Workflow, WorkflowRevision, utcnow
-from app.workflows.compiler import WorkflowCompiler, MAX_PREVIEW_CANDIDATES, MAX_GENERATE_CANDIDATES
+from app.workflows.compiler import (
+    MAX_WORKFLOW_CANDIDATES,
+    MAX_WORKFLOW_PLAN_ITEMS,
+    WorkflowCompiler,
+)
 from app.workflows.errors import (
+    BuiltinWorkflowImmutableError,
+    RecipeRevisionNotFoundError,
     WorkflowArchivedError,
     WorkflowDigestMismatchError,
     WorkflowNotFoundError,
@@ -138,6 +144,8 @@ class WorkflowService:
             wf = session.get(Workflow, workflow_id)
             if not wf:
                 raise WorkflowNotFoundError(f"Workflow {workflow_id} not found")
+            if wf.is_builtin:
+                raise BuiltinWorkflowImmutableError(f"Built-in workflow {workflow_id} cannot be modified")
             if wf.archived_at is not None:
                 raise WorkflowArchivedError(f"Workflow {workflow_id} is archived")
 
@@ -158,13 +166,14 @@ class WorkflowService:
             active_definition: dict[str, Any] | None = None
             active_sha256: str | None = None
 
+            next_rev = wf.current_revision + 1
+
             if payload.definition is not None:
                 validate_workflow_definition(payload.definition, session)
                 raw_def = payload.definition.model_dump()
                 canon_json = canonical_json_dumps(raw_def)
                 sha256_hash = compute_definition_sha256(raw_def)
 
-                next_rev = wf.current_revision + 1
                 rev = WorkflowRevision(
                     workflow_id=wf.id,
                     revision=next_rev,
@@ -183,9 +192,19 @@ class WorkflowService:
                         WorkflowRevision.revision == wf.current_revision,
                     )
                 )
-                if current_rev:
-                    active_definition = json.loads(current_rev.definition_json)
-                    active_sha256 = current_rev.definition_sha256
+                if not current_rev:
+                    raise RecipeRevisionNotFoundError(f"Current revision {wf.current_revision} not found")
+                rev = WorkflowRevision(
+                    workflow_id=wf.id,
+                    revision=next_rev,
+                    definition_json=current_rev.definition_json,
+                    definition_sha256=current_rev.definition_sha256,
+                    created_by_user_id=user_id,
+                )
+                session.add(rev)
+                wf.current_revision = next_rev
+                active_definition = json.loads(current_rev.definition_json)
+                active_sha256 = current_rev.definition_sha256
 
             wf.updated_at = utcnow()
             session.commit()
@@ -205,14 +224,32 @@ class WorkflowService:
                 "definition_sha256": active_sha256 or "",
             }
 
-    def archive_workflow(self, user_id: int | None, workflow_id: int) -> None:
+    def archive_workflow(
+        self,
+        user_id: int | None,
+        workflow_id: int,
+        expected_current_revision: int,
+    ) -> None:
         with self.SessionLocal() as session:
             wf = session.get(Workflow, workflow_id)
             if not wf:
                 raise WorkflowNotFoundError(f"Workflow {workflow_id} not found")
+            if wf.is_builtin:
+                raise BuiltinWorkflowImmutableError(f"Built-in workflow {workflow_id} cannot be archived")
             if wf.archived_at is not None:
-                return  # Idempotent
+                raise WorkflowArchivedError(f"Workflow {workflow_id} is already archived")
+
+            if expected_current_revision != wf.current_revision:
+                raise WorkflowRevisionConflictError(
+                    f"Workflow revision conflict: expected {expected_current_revision}, got {wf.current_revision}",
+                    details={
+                        "expected_revision": expected_current_revision,
+                        "current_revision": wf.current_revision,
+                    },
+                )
+
             wf.archived_at = utcnow()
+            wf.updated_at = utcnow()
             session.commit()
 
     def rollback_workflow(
@@ -225,6 +262,8 @@ class WorkflowService:
             wf = session.get(Workflow, workflow_id)
             if not wf:
                 raise WorkflowNotFoundError(f"Workflow {workflow_id} not found")
+            if wf.is_builtin:
+                raise BuiltinWorkflowImmutableError(f"Built-in workflow {workflow_id} cannot be rolled back")
             if wf.archived_at is not None:
                 raise WorkflowArchivedError(f"Workflow {workflow_id} is archived")
 
@@ -244,7 +283,7 @@ class WorkflowService:
                 )
             )
             if not target_rev:
-                raise WorkflowNotFoundError(f"Target revision {payload.target_revision} not found")
+                raise RecipeRevisionNotFoundError(f"Target revision {payload.target_revision} not found")
 
             next_rev = wf.current_revision + 1
             new_rev = WorkflowRevision(
@@ -312,7 +351,7 @@ class WorkflowService:
                 )
             )
             if not r:
-                raise WorkflowNotFoundError(f"Revision {revision} not found for workflow {workflow_id}")
+                raise RecipeRevisionNotFoundError(f"Revision {revision} not found for workflow {workflow_id}")
 
             return {
                 "id": r.id,
@@ -332,18 +371,25 @@ class WorkflowService:
             if wf.archived_at is not None:
                 raise WorkflowArchivedError(f"Workflow {workflow_id} is archived")
 
+            target_revision = payload.revision if payload.revision is not None else wf.current_revision
             rev = session.scalar(
                 select(WorkflowRevision).where(
                     WorkflowRevision.workflow_id == wf.id,
-                    WorkflowRevision.revision == wf.current_revision,
+                    WorkflowRevision.revision == target_revision,
                 )
             )
             if not rev:
-                raise WorkflowNotFoundError(f"Current revision {wf.current_revision} not found")
+                raise RecipeRevisionNotFoundError(f"Revision {target_revision} not found for workflow {workflow_id}")
 
             def_dict = json.loads(rev.definition_json)
             validate_raw_steps_types(def_dict.get("steps", []))
             definition = WorkflowDefinition.model_validate(def_dict)
+
+            effective_root_ids = (
+                payload.root_ids
+                if payload.root_ids is not None
+                else (payload.runtime_inputs.root_ids if payload.runtime_inputs and payload.runtime_inputs.root_ids is not None else None)
+            )
 
             compiler = WorkflowCompiler(
                 session=session,
@@ -352,8 +398,12 @@ class WorkflowService:
             )
             res = compiler.compile(
                 definition,
-                override_root_ids=payload.root_ids,
-                max_candidates=MAX_PREVIEW_CANDIDATES,
+                workflow_id=wf.id,
+                workflow_revision=target_revision,
+                definition_sha256=rev.definition_sha256,
+                override_root_ids=effective_root_ids,
+                max_candidates=MAX_WORKFLOW_CANDIDATES,
+                max_plan_items=MAX_WORKFLOW_PLAN_ITEMS,
             )
 
             all_items = res.planned_operations
@@ -381,7 +431,11 @@ class WorkflowService:
 
             return {
                 "workflow_id": wf.id,
-                "revision": wf.current_revision,
+                "revision": target_revision,
+                "workflow_revision": target_revision,
+                "definition_sha256": rev.definition_sha256,
+                "preview_source": "organizer-live-readonly" if definition.mode == "organizer" else "index",
+                "live_filesystem_verified": False,
                 "compile_digest": res.compile_digest,
                 "matched_count": res.matched_count,
                 "matched_bytes": res.matched_bytes,
@@ -405,18 +459,25 @@ class WorkflowService:
             if wf.archived_at is not None:
                 raise WorkflowArchivedError(f"Workflow {workflow_id} is archived")
 
+            target_revision = payload.revision if payload.revision is not None else wf.current_revision
             rev = session.scalar(
                 select(WorkflowRevision).where(
                     WorkflowRevision.workflow_id == wf.id,
-                    WorkflowRevision.revision == wf.current_revision,
+                    WorkflowRevision.revision == target_revision,
                 )
             )
             if not rev:
-                raise WorkflowNotFoundError(f"Current revision {wf.current_revision} not found")
+                raise RecipeRevisionNotFoundError(f"Revision {target_revision} not found for workflow {workflow_id}")
 
             def_dict = json.loads(rev.definition_json)
             validate_raw_steps_types(def_dict.get("steps", []))
             definition = WorkflowDefinition.model_validate(def_dict)
+
+            effective_root_ids = (
+                payload.root_ids
+                if payload.root_ids is not None
+                else (payload.runtime_inputs.root_ids if payload.runtime_inputs and payload.runtime_inputs.root_ids is not None else None)
+            )
 
             compiler = WorkflowCompiler(
                 session=session,
@@ -425,31 +486,36 @@ class WorkflowService:
             )
             res = compiler.compile(
                 definition,
-                override_root_ids=payload.root_ids,
-                max_candidates=MAX_GENERATE_CANDIDATES,
+                workflow_id=wf.id,
+                workflow_revision=target_revision,
+                definition_sha256=rev.definition_sha256,
+                override_root_ids=effective_root_ids,
+                max_candidates=MAX_WORKFLOW_CANDIDATES,
+                max_plan_items=MAX_WORKFLOW_PLAN_ITEMS,
             )
 
-            if payload.expected_compile_digest:
-                if payload.expected_compile_digest != res.compile_digest:
-                    raise WorkflowDigestMismatchError(
-                        f"Workflow compile digest mismatch: expected '{payload.expected_compile_digest}', got '{res.compile_digest}'",
-                        details={
-                            "expected_compile_digest": payload.expected_compile_digest,
-                            "actual_compile_digest": res.compile_digest,
-                        },
-                    )
+            if not payload.expected_compile_digest or payload.expected_compile_digest != res.compile_digest:
+                raise WorkflowDigestMismatchError(
+                    f"Workflow compile digest mismatch: expected '{payload.expected_compile_digest}', got '{res.compile_digest}'",
+                    details={
+                        "expected_compile_digest": payload.expected_compile_digest,
+                        "actual_compile_digest": res.compile_digest,
+                    },
+                )
 
             if not res.planned_operations:
                 raise WorkflowValidationError("No operations planned in this workflow", code="EMPTY_PLAN")
 
-            plan_name = payload.plan_name or f"工作流计划 - {wf.name} (r{wf.current_revision})"
+            plan_name = payload.plan_name or f"工作流计划 - {wf.name} (r{target_revision})"
             plan_metadata = {
                 "source": "workflow",
                 "workflow_id": wf.id,
                 "workflow_name": wf.name,
-                "workflow_revision": wf.current_revision,
+                "workflow_revision": target_revision,
                 "definition_sha256": rev.definition_sha256,
                 "compile_digest": res.compile_digest,
+                "runtime_inputs": res.runtime_inputs,
+                "compile_context": res.compile_context,
                 "matched_count": res.matched_count,
                 "matched_bytes": res.matched_bytes,
             }

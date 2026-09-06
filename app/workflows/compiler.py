@@ -33,8 +33,8 @@ from app.workflows.schema import (
     WorkflowDefinition,
 )
 
-MAX_PREVIEW_CANDIDATES = 50_000
-MAX_GENERATE_CANDIDATES = 100_000
+MAX_WORKFLOW_CANDIDATES = 50_000
+MAX_WORKFLOW_PLAN_ITEMS = 100_000
 
 
 @dataclass
@@ -43,6 +43,8 @@ class CompilationResult:
     matched_bytes: int
     planned_operations: list[dict[str, Any]]
     compile_digest: str
+    runtime_inputs: dict[str, Any]
+    compile_context: dict[str, Any]
 
 
 class WorkflowCompiler:
@@ -60,21 +62,33 @@ class WorkflowCompiler:
         self,
         definition: WorkflowDefinition,
         *,
+        workflow_id: int | None = None,
+        workflow_revision: int | None = None,
+        definition_sha256: str | None = None,
         override_root_ids: list[int] | None = None,
-        max_candidates: int = MAX_PREVIEW_CANDIDATES,
+        max_candidates: int = MAX_WORKFLOW_CANDIDATES,
+        max_plan_items: int = MAX_WORKFLOW_PLAN_ITEMS,
     ) -> CompilationResult:
         """Compile a validated workflow definition into planned operations with compile_digest."""
         if definition.mode == "organizer":
             return self._compile_organizer_workflow(
                 definition,
+                workflow_id=workflow_id,
+                workflow_revision=workflow_revision,
+                definition_sha256=definition_sha256,
                 override_root_ids=override_root_ids,
                 max_candidates=max_candidates,
+                max_plan_items=max_plan_items,
             )
         elif definition.mode == "file":
             return self._compile_file_workflow(
                 definition,
+                workflow_id=workflow_id,
+                workflow_revision=workflow_revision,
+                definition_sha256=definition_sha256,
                 override_root_ids=override_root_ids,
                 max_candidates=max_candidates,
+                max_plan_items=max_plan_items,
             )
         else:
             raise WorkflowValidationError(f"Unsupported workflow mode: {definition.mode}")
@@ -83,8 +97,12 @@ class WorkflowCompiler:
         self,
         definition: WorkflowDefinition,
         *,
+        workflow_id: int | None = None,
+        workflow_revision: int | None = None,
+        definition_sha256: str | None = None,
         override_root_ids: list[int] | None = None,
-        max_candidates: int = MAX_PREVIEW_CANDIDATES,
+        max_candidates: int = MAX_WORKFLOW_CANDIDATES,
+        max_plan_items: int = MAX_WORKFLOW_PLAN_ITEMS,
     ) -> CompilationResult:
         scan_step: ScanStep = definition.steps[0]  # type: ignore
         organize_step: OrganizeStep = definition.steps[1]  # type: ignore
@@ -178,20 +196,51 @@ class WorkflowCompiler:
                 details={"cycle_sources": sorted(cycle_sources)},
             )
 
-        digest = compute_definition_sha256(items)
+        if len(items) > max_plan_items:
+            raise WorkflowSafetyLimitExceededError(
+                f"Planned operations count ({len(items)}) exceeds safety limit ({max_plan_items})",
+                details={"planned_operations_count": len(items), "limit": max_plan_items},
+            )
+
+        runtime_inputs = {
+            "root_ids": sorted(effective_root_ids) if effective_root_ids is not None else [],
+        }
+
+        policy = self.session.get(FilterPolicy, 1)
+        compile_context = {
+            "effective_exclude_dir_names": [],
+            "filter_policy_updated_at": policy.updated_at.isoformat() if policy and policy.updated_at else None,
+        }
+
+        digest_payload = {
+            "workflow_id": workflow_id,
+            "workflow_revision": workflow_revision,
+            "definition_sha256": definition_sha256 or compute_definition_sha256(definition.model_dump()),
+            "runtime_inputs": runtime_inputs,
+            "compile_context": compile_context,
+            "planned_operations": items,
+        }
+        digest = compute_definition_sha256(digest_payload)
+
         return CompilationResult(
             matched_count=summary.get("total_directories", len(proposals)),
             matched_bytes=summary.get("total_size", 0),
             planned_operations=items,
             compile_digest=digest,
+            runtime_inputs=runtime_inputs,
+            compile_context=compile_context,
         )
 
     def _compile_file_workflow(
         self,
         definition: WorkflowDefinition,
         *,
+        workflow_id: int | None = None,
+        workflow_revision: int | None = None,
+        definition_sha256: str | None = None,
         override_root_ids: list[int] | None = None,
-        max_candidates: int = MAX_PREVIEW_CANDIDATES,
+        max_candidates: int = MAX_WORKFLOW_CANDIDATES,
+        max_plan_items: int = MAX_WORKFLOW_PLAN_ITEMS,
     ) -> CompilationResult:
         scan_step: ScanStep = definition.steps[0]  # type: ignore
         effective_root_ids = override_root_ids if override_root_ids is not None else scan_step.root_ids
@@ -252,7 +301,7 @@ class WorkflowCompiler:
 
         if matched_count > max_candidates:
             raise WorkflowSafetyLimitExceededError(
-                f"Candidate count ({matched_count}) exceeds limit ({max_candidates})",
+                f"Candidate count ({matched_count}) exceeds safety limit ({max_candidates})",
                 details={"matched_count": matched_count, "limit": max_candidates},
             )
 
@@ -284,10 +333,10 @@ class WorkflowCompiler:
                 )
             )
 
-        # Execute action steps
-        for step in definition.steps:
+        # Execute action steps with step index
+        for idx, step in enumerate(definition.steps):
             if isinstance(step, RenameStep):
-                graph.apply_rename(step)
+                graph.apply_rename(step, step_index=idx)
             elif isinstance(step, MoveStep):
                 dest_root_rec = self.session.get(IndexRoot, step.destination_root_id)
                 if not dest_root_rec:
@@ -295,18 +344,44 @@ class WorkflowCompiler:
                         f"Destination root {step.destination_root_id} not found",
                         code="INDEX_ROOT_NOT_FOUND",
                     )
-                graph.apply_move(step, dest_root_rec.root)
+                graph.apply_move(step, dest_root_rec.root, step_index=idx)
             elif isinstance(step, TouchStep):
-                graph.apply_touch(step)
+                graph.apply_touch(step, step_index=idx)
             elif isinstance(step, QuarantineStep):
-                graph.apply_quarantine(step)
+                graph.apply_quarantine(step, step_index=idx)
 
         planned_ops = graph.resolve_ordered_operations()
-        digest = compute_definition_sha256(planned_ops)
+
+        if len(planned_ops) > max_plan_items:
+            raise WorkflowSafetyLimitExceededError(
+                f"Planned operations count ({len(planned_ops)}) exceeds safety limit ({max_plan_items})",
+                details={"planned_operations_count": len(planned_ops), "limit": max_plan_items},
+            )
+
+        runtime_inputs = {
+            "root_ids": sorted(effective_root_ids) if effective_root_ids is not None else [],
+        }
+
+        compile_context = {
+            "effective_exclude_dir_names": sorted(excludes),
+            "filter_policy_updated_at": policy.updated_at.isoformat() if policy and policy.updated_at else None,
+        }
+
+        digest_payload = {
+            "workflow_id": workflow_id,
+            "workflow_revision": workflow_revision,
+            "definition_sha256": definition_sha256 or compute_definition_sha256(definition.model_dump()),
+            "runtime_inputs": runtime_inputs,
+            "compile_context": compile_context,
+            "planned_operations": planned_ops,
+        }
+        digest = compute_definition_sha256(digest_payload)
 
         return CompilationResult(
             matched_count=matched_count,
             matched_bytes=matched_bytes,
             planned_operations=planned_ops,
             compile_digest=digest,
+            runtime_inputs=runtime_inputs,
+            compile_context=compile_context,
         )

@@ -1166,9 +1166,14 @@ def update_workflow(
 def archive_workflow(
     request: Request,
     workflow_id: int,
+    expected_current_revision: int = Query(...),
     admin_user: User = Depends(require_admin_user),
 ):
-    request.app.state.service.workflow_service.archive_workflow(admin_user.id, workflow_id)
+    request.app.state.service.workflow_service.archive_workflow(
+        admin_user.id,
+        workflow_id,
+        expected_current_revision=expected_current_revision,
+    )
     return {"status": "ok", "archived": True}
 
 
@@ -1215,7 +1220,7 @@ def preview_workflow(
 def generate_workflow_plan(
     request: Request,
     workflow_id: int,
-    payload: WorkflowGeneratePlanRequest = Body(default_factory=WorkflowGeneratePlanRequest),
+    payload: WorkflowGeneratePlanRequest,
     current_user: User = Depends(get_current_user),
 ):
     return request.app.state.service.workflow_service.generate_plan(current_user.id, workflow_id, payload)

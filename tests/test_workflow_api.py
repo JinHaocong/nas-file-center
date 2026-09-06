@@ -150,7 +150,7 @@ def test_workflow_rbac(workflow_test_env):
 
     # Member update / delete / rollback -> 403
     assert member.put(f"/api/workflows/{wf_id}", json={"expected_current_revision": 1, "name": "Hack"}).status_code == 403
-    assert member.delete(f"/api/workflows/{wf_id}").status_code == 403
+    assert member.delete(f"/api/workflows/{wf_id}?expected_current_revision=1").status_code == 403
     assert member.post(f"/api/workflows/{wf_id}/rollback", json={"expected_current_revision": 1, "target_revision": 1}).status_code == 403
 
     # Member read actions -> 200
@@ -216,7 +216,9 @@ def test_workflow_crud_optimistic_locking(workflow_test_env):
         },
     )
     assert conflict_res.status_code == 409
-    assert conflict_res.json()["error"] == "WORKFLOW_REVISION_CONFLICT"
+    err = conflict_res.json()["error"]
+    code = err["code"] if isinstance(err, dict) else err
+    assert code == "WORKFLOW_REVISION_CONFLICT"
 
 
 def test_workflow_rollback_and_archive(workflow_test_env):
@@ -271,7 +273,7 @@ def test_workflow_rollback_and_archive(workflow_test_env):
     assert rolled_back["definition"]["steps"][1]["replacement"] == "v1"
 
     # Delete (archive)
-    del_res = admin.delete(f"/api/workflows/{wf_id}")
+    del_res = admin.delete(f"/api/workflows/{wf_id}?expected_current_revision=3")
     assert del_res.status_code == 200
     assert del_res.json() == {"status": "ok", "archived": True}
 
@@ -283,10 +285,10 @@ def test_workflow_rollback_and_archive(workflow_test_env):
     list_archived = member.get("/api/workflows?include_archived=true")
     assert any(w["id"] == wf_id for w in list_archived.json())
 
-    # Actions on archived workflow are rejected
-    assert admin.put(f"/api/workflows/{wf_id}", json={"expected_current_revision": 3, "name": "new"}).status_code == 400
-    assert member.post(f"/api/workflows/{wf_id}/preview", json={}).status_code == 400
-    assert member.post(f"/api/workflows/{wf_id}/generate-plan", json={}).status_code == 400
+    # Actions on archived workflow are rejected with 409
+    assert admin.put(f"/api/workflows/{wf_id}", json={"expected_current_revision": 3, "name": "new"}).status_code == 409
+    assert member.post(f"/api/workflows/{wf_id}/preview", json={}).status_code == 409
+    assert member.post(f"/api/workflows/{wf_id}/generate-plan", json={"expected_compile_digest": "0" * 64}).status_code == 409
 
 
 def test_workflow_unsupported_step_rejection(workflow_test_env):
@@ -308,8 +310,10 @@ def test_workflow_unsupported_step_rejection(workflow_test_env):
             },
         },
     )
-    assert res_dedupe.status_code == 400
-    assert res_dedupe.json()["error"] == "UNSUPPORTED_STEP"
+    assert res_dedupe.status_code == 422
+    err = res_dedupe.json()["error"]
+    code = err["code"] if isinstance(err, dict) else err
+    assert code == "UNSUPPORTED_STEP"
 
     # Reject copy
     res_copy = admin.post(
@@ -326,8 +330,10 @@ def test_workflow_unsupported_step_rejection(workflow_test_env):
             },
         },
     )
-    assert res_copy.status_code == 400
-    assert res_copy.json()["error"] == "UNSUPPORTED_STEP"
+    assert res_copy.status_code == 422
+    err = res_copy.json()["error"]
+    code = err["code"] if isinstance(err, dict) else err
+    assert code == "UNSUPPORTED_STEP"
 
 
 def test_workflow_preview_and_generate_plan(workflow_test_env):
@@ -371,10 +377,12 @@ def test_workflow_preview_and_generate_plan(workflow_test_env):
     # 2. Generate Plan with digest mismatch -> 409
     bad_gen = member.post(
         f"/api/workflows/{wf_id}/generate-plan",
-        json={"expected_compile_digest": "bad_digest_hash"},
+        json={"expected_compile_digest": "0" * 64},
     )
     assert bad_gen.status_code == 409
-    assert bad_gen.json()["error"] == "COMPILE_DIGEST_MISMATCH"
+    err = bad_gen.json()["error"]
+    code = err["code"] if isinstance(err, dict) else err
+    assert code == "PREVIEW_CHANGED"
 
     # 3. Generate Plan with correct digest -> 201 Created
     gen_res = member.post(

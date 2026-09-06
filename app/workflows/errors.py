@@ -14,18 +14,18 @@ class WorkflowError(Exception):
         self.status_code = status_code
 
     def to_dict(self) -> dict[str, Any]:
-        res: dict[str, Any] = {
-            "error": self.code,
-            "message": self.message,
+        return {
+            "error": {
+                "code": self.code,
+                "message": self.message,
+                "details": self.details or {},
+            }
         }
-        if self.details:
-            res["details"] = self.details
-        return res
 
 
 class WorkflowValidationError(WorkflowError):
-    def __init__(self, message: str, code: str = "WORKFLOW_VALIDATION_ERROR", details: Any = None):
-        super().__init__(message=message, code=code, details=details, status_code=400)
+    def __init__(self, message: str, code: str = "INVALID_WORKFLOW", details: Any = None, status_code: int = 422):
+        super().__init__(message=message, code=code, details=details, status_code=status_code)
 
 
 class WorkflowRevisionConflictError(WorkflowError):
@@ -38,19 +38,29 @@ class WorkflowNotFoundError(WorkflowError):
         super().__init__(message=message, code="WORKFLOW_NOT_FOUND", details=details, status_code=404)
 
 
+class RecipeRevisionNotFoundError(WorkflowError):
+    def __init__(self, message: str = "Workflow recipe revision not found", details: Any = None):
+        super().__init__(message=message, code="RECIPE_REVISION_NOT_FOUND", details=details, status_code=404)
+
+
 class WorkflowArchivedError(WorkflowError):
     def __init__(self, message: str = "Workflow is archived and cannot be modified or executed", details: Any = None):
-        super().__init__(message=message, code="WORKFLOW_ARCHIVED", details=details, status_code=400)
+        super().__init__(message=message, code="WORKFLOW_ARCHIVED", details=details, status_code=409)
+
+
+class BuiltinWorkflowImmutableError(WorkflowError):
+    def __init__(self, message: str = "Builtin workflow cannot be modified or archived", details: Any = None):
+        super().__init__(message=message, code="BUILTIN_WORKFLOW_IMMUTABLE", details=details, status_code=409)
 
 
 class VirtualGraphCollisionError(WorkflowError):
     def __init__(self, message: str, details: Any = None):
-        super().__init__(message=message, code="PATH_COLLISION", details=details, status_code=400)
+        super().__init__(message=message, code="PATH_COLLISION", details=details, status_code=409)
 
 
 class VirtualGraphCycleError(WorkflowError):
     def __init__(self, message: str, details: Any = None):
-        super().__init__(message=message, code="PATH_CYCLE", details=details, status_code=400)
+        super().__init__(message=message, code="PATH_CYCLE", details=details, status_code=409)
 
 
 class WorkflowBoundaryError(WorkflowError):
@@ -60,9 +70,9 @@ class WorkflowBoundaryError(WorkflowError):
 
 class WorkflowSafetyLimitExceededError(WorkflowError):
     def __init__(self, message: str, details: Any = None):
-        super().__init__(message=message, code="WORKFLOW_LIMIT_EXCEEDED", details=details, status_code=400)
+        super().__init__(message=message, code="WORKFLOW_LIMIT_EXCEEDED", details=details, status_code=422)
 
 
 class WorkflowDigestMismatchError(WorkflowError):
-    def __init__(self, message: str = "compile_digest mismatch", details: Any = None):
-        super().__init__(message=message, code="COMPILE_DIGEST_MISMATCH", details=details, status_code=409)
+    def __init__(self, message: str = "Workflow compile digest has changed", details: Any = None):
+        super().__init__(message=message, code="PREVIEW_CHANGED", details=details, status_code=409)

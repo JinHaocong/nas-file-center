@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from pathlib import Path
-import re
 from typing import Any, Iterable
 
 from app.path_safety import UnsafePathError, validate_mutation_destination
@@ -16,6 +15,38 @@ from app.workflows.schema import MoveStep, QuarantineStep, RenameStep, TouchStep
 
 
 @dataclass
+class VirtualOperation:
+    candidate_id: int
+    workflow_step_index: int
+    candidate_operation_index: int
+    operation: str
+    source: str
+    target: str | None
+    mtime_ns: int | None = None
+    reason: str | None = None
+    sequence: int = 0
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {
+            "candidate_id": self.candidate_id,
+            "workflow_step_index": self.workflow_step_index,
+            "candidate_operation_index": self.candidate_operation_index,
+            "operation": self.operation,
+            "source": self.source,
+            "target": self.target,
+            "sequence": self.sequence,
+        }
+        if self.mtime_ns is not None:
+            d["mtime_ns"] = self.mtime_ns
+        if self.reason is not None:
+            d["reason"] = self.reason
+        if self.metadata:
+            d["metadata"] = self.metadata
+        return d
+
+
+@dataclass
 class VirtualCandidate:
     id: int
     original_path: str
@@ -25,7 +56,7 @@ class VirtualCandidate:
     size: int
     mtime_ns: int
     is_quarantined: bool = False
-    operations: list[dict[str, Any]] = field(default_factory=list)
+    operations: list[VirtualOperation] = field(default_factory=list)
 
 
 class VirtualPathGraph:
@@ -47,16 +78,11 @@ class VirtualPathGraph:
     def add_candidate(self, cand: VirtualCandidate) -> None:
         self.candidates[cand.id] = cand
 
-    def apply_rename(self, step: RenameStep) -> None:
+    def apply_rename(self, step: RenameStep, step_index: int = 0) -> None:
         pattern = step.pattern
         replacement = step.replacement
-        is_regex = step.is_regex
 
-        compiled_re = re.compile(pattern) if is_regex else None
-
-        # Track targets generated in this step to detect collisions
         step_targets: dict[str, int] = {}
-        all_current_paths = {c.current_path: c.id for c in self.candidates.values()}
 
         for cid, cand in sorted(self.candidates.items(), key=lambda x: x[0]):
             if cand.is_quarantined:
@@ -65,10 +91,8 @@ class VirtualPathGraph:
             curr_p = Path(cand.current_path)
             curr_name = curr_p.name
 
-            if is_regex:
-                new_name = compiled_re.sub(replacement, curr_name)
-            else:
-                new_name = curr_name.replace(pattern, replacement)
+            # Literal substring replacement only (regex strictly forbidden in V1)
+            new_name = curr_name.replace(pattern, replacement)
 
             if new_name == curr_name:
                 continue
@@ -90,7 +114,7 @@ class VirtualPathGraph:
                     details={"step_id": step.id, "target": target_str, "error": str(exc)},
                 ) from exc
 
-            # Collision check 1: within same step
+            # Collision check within same step
             if target_str in step_targets:
                 other_id = step_targets[target_str]
                 raise VirtualGraphCollisionError(
@@ -98,25 +122,26 @@ class VirtualPathGraph:
                     details={"step_id": step.id, "target": target_str, "file_ids": [other_id, cid]},
                 )
 
-            # Collision check 2: target is an existing candidate that isn't moving away or physical file
             step_targets[target_str] = cid
 
-            op = {
-                "operation": "rename",
-                "source": cand.current_path,
-                "target": target_str,
-                "step_id": step.id,
-            }
+            op_index = len(cand.operations)
+            op = VirtualOperation(
+                candidate_id=cid,
+                workflow_step_index=step_index,
+                candidate_operation_index=op_index,
+                operation="rename",
+                source=cand.current_path,
+                target=target_str,
+                metadata={"step_id": step.id},
+            )
             cand.operations.append(op)
             cand.current_path = target_str
-
-        # After step, check if any target collides with static physical files
-        self._check_physical_collisions(step_targets)
 
     def apply_move(
         self,
         step: MoveStep,
         destination_root_path: str,
+        step_index: int = 0,
     ) -> None:
         dest_root_p = Path(destination_root_path)
         if step.destination_subpath:
@@ -161,104 +186,177 @@ class VirtualPathGraph:
 
             step_targets[target_str] = cid
 
-            op = {
-                "operation": "move",
-                "source": cand.current_path,
-                "target": target_str,
-                "step_id": step.id,
-            }
+            op_index = len(cand.operations)
+            op = VirtualOperation(
+                candidate_id=cid,
+                workflow_step_index=step_index,
+                candidate_operation_index=op_index,
+                operation="move",
+                source=cand.current_path,
+                target=target_str,
+                metadata={"step_id": step.id},
+            )
             cand.operations.append(op)
             cand.current_path = target_str
             cand.current_root_id = step.destination_root_id
 
-        self._check_physical_collisions(step_targets)
-
-    def apply_touch(self, step: TouchStep) -> None:
+    def apply_touch(self, step: TouchStep, step_index: int = 0) -> None:
         for cid, cand in sorted(self.candidates.items(), key=lambda x: x[0]):
             if cand.is_quarantined:
                 continue
-            op = {
-                "operation": "touch",
-                "source": cand.current_path,
-                "target": None,
-                "step_id": step.id,
-                "mtime_ns": step.mtime_ns,
-            }
+            op_index = len(cand.operations)
+            op = VirtualOperation(
+                candidate_id=cid,
+                workflow_step_index=step_index,
+                candidate_operation_index=op_index,
+                operation="touch",
+                source=cand.current_path,
+                target=None,
+                mtime_ns=step.mtime_ns,
+                metadata={"step_id": step.id},
+            )
             cand.operations.append(op)
 
-    def apply_quarantine(self, step: QuarantineStep) -> None:
+    def apply_quarantine(self, step: QuarantineStep, step_index: int = 0) -> None:
         for cid, cand in sorted(self.candidates.items(), key=lambda x: x[0]):
             if cand.is_quarantined:
                 continue
-            op = {
-                "operation": "quarantine",
-                "source": cand.current_path,
-                "target": None,
-                "step_id": step.id,
-                "reason": step.reason,
-            }
+            op_index = len(cand.operations)
+            op = VirtualOperation(
+                candidate_id=cid,
+                workflow_step_index=step_index,
+                candidate_operation_index=op_index,
+                operation="quarantine",
+                source=cand.current_path,
+                target=None,
+                reason=step.reason,
+                metadata={"step_id": step.id},
+            )
             cand.operations.append(op)
             cand.is_quarantined = True
 
-    def _check_physical_collisions(self, step_targets: dict[str, int]) -> None:
-        # All original candidate paths
-        all_original_paths = {c.original_path for c in self.candidates.values()}
-        for target_str, cid in step_targets.items():
-            tp = Path(target_str)
-            if tp.exists():
-                # If target physically exists, it must be one of our candidates moving away
-                if target_str not in all_original_paths:
-                    raise VirtualGraphCollisionError(
-                        f"Target path already exists on filesystem: '{target_str}'",
-                        details={"target": target_str, "candidate_id": cid},
-                    )
-
     def resolve_ordered_operations(self) -> list[dict[str, Any]]:
         """
-        Collect all operations across candidates, detect cycles,
-        and topologically sort path modifications before touch/quarantine.
+        Collect all operations across candidates, enforce collision reservation rules,
+        distinguish same-entity from cross-entity dependencies, detect cycles,
+        and topologically sort operations deterministically.
         """
-        path_ops: list[dict[str, Any]] = []
-        terminal_ops: list[dict[str, Any]] = []
+        # Map original paths to candidates
+        original_path_to_cand: dict[str, VirtualCandidate] = {
+            c.original_path: c for c in self.candidates.values()
+        }
 
+        # Gather all operations (convert dict to VirtualOperation if needed)
+        all_ops: list[VirtualOperation] = []
         for cand in sorted(self.candidates.values(), key=lambda c: (c.original_path, c.id)):
-            for op in cand.operations:
-                if op["operation"] in {"rename", "move"}:
-                    path_ops.append(op)
+            converted_ops: list[VirtualOperation] = []
+            for idx, op in enumerate(cand.operations):
+                if isinstance(op, dict):
+                    op_obj = VirtualOperation(
+                        candidate_id=cand.id,
+                        workflow_step_index=op.get("workflow_step_index", 0),
+                        candidate_operation_index=op.get("candidate_operation_index", idx),
+                        operation=op["operation"],
+                        source=op["source"],
+                        target=op.get("target"),
+                        mtime_ns=op.get("mtime_ns"),
+                        reason=op.get("reason"),
+                        sequence=op.get("sequence", 0),
+                        metadata=op.get("metadata", {}),
+                    )
+                    converted_ops.append(op_obj)
                 else:
-                    terminal_ops.append(op)
+                    converted_ops.append(op)
+            cand.operations = converted_ops
+            all_ops.extend(converted_ops)
 
-        # Detect cycles in path_ops
-        sorted_path_ops = self._topological_sort_path_ops(path_ops)
+        if not all_ops:
+            return []
 
-        # Combine
-        combined = sorted_path_ops + terminal_ops
-        # Assign sequence numbers deterministically
-        for idx, op in enumerate(combined, 1):
-            op["sequence"] = idx
+        # Check target collision across all operations: multiple candidates cannot end up at the same target
+        target_to_ops: dict[str, list[VirtualOperation]] = defaultdict(list)
+        for op in all_ops:
+            if op.target is not None and op.target != op.source:
+                target_to_ops[op.target].append(op)
 
-        return combined
+        for target_path, ops in target_to_ops.items():
+            candidate_ids = {op.candidate_id for op in ops}
+            if len(candidate_ids) > 1:
+                final_candidates = [
+                    cid for cid in candidate_ids
+                    if self.candidates[cid].current_path == target_path
+                ]
+                if len(final_candidates) > 1:
+                    raise VirtualGraphCollisionError(
+                        f"Path collision: multiple candidates target the same path '{target_path}'",
+                        details={"target": target_path, "candidate_ids": sorted(final_candidates)},
+                    )
 
-    def _topological_sort_path_ops(self, ops: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        if len(ops) <= 1:
-            return list(ops)
+        # Check collision reservation rules for operations targeting existing paths
+        # Map path -> list of operations that VACATE that path (i.e. op.source == path and op.target != path)
+        vacating_ops_by_path: dict[str, list[VirtualOperation]] = defaultdict(list)
+        for op in all_ops:
+            if op.target is not None and op.target != op.source:
+                vacating_ops_by_path[op.source].append(op)
 
-        n = len(ops)
-        source_to_idx = {op["source"]: i for i, op in enumerate(ops)}
+        # Validate each mutation target
+        for op in all_ops:
+            if op.target is not None and op.target != op.source:
+                target_p = Path(op.target)
+                if target_p.exists():
+                    # Target exists on physical filesystem!
+                    # Check if target is a known candidate
+                    occupant = original_path_to_cand.get(op.target)
+                    if occupant is None:
+                        # Physical file that is not in workflow candidates -> cannot move into it!
+                        raise VirtualGraphCollisionError(
+                            f"Target path already exists on filesystem: '{op.target}'",
+                            details={"target": op.target, "candidate_id": op.candidate_id},
+                        )
+                    # Occupant is in candidates. But does occupant VACATE this target?
+                    vacating = vacating_ops_by_path.get(op.target, [])
+                    if not vacating:
+                        # Occupant candidate has NO vacating operation!
+                        raise VirtualGraphCollisionError(
+                            f"Target path '{op.target}' is occupied by candidate {occupant.id} which does not vacate it",
+                            details={"target": op.target, "candidate_id": op.candidate_id, "occupant_id": occupant.id},
+                        )
 
-        adj = defaultdict(list)
+        # Build dependency graph
+        # Nodes: 0..len(all_ops)-1
+        n = len(all_ops)
+        adj: dict[int, list[int]] = defaultdict(list)
         in_degree = [0] * n
 
-        for i, op in enumerate(ops):
-            target = op["target"]
-            if target in source_to_idx and source_to_idx[target] != i:
-                j = source_to_idx[target]
-                # j must execute before i so target is vacated
-                adj[j].append(i)
-                in_degree[i] += 1
+        def add_edge(u: int, v: int) -> None:
+            adj[u].append(v)
+            in_degree[v] += 1
 
+        # 1. Same-Entity Dependencies:
+        # For the same candidate, operations must execute strictly in chronological order (op_k BEFORE op_k+1)
+        for cand in self.candidates.values():
+            if len(cand.operations) > 1:
+                for k in range(len(cand.operations) - 1):
+                    op_before = cand.operations[k]
+                    op_after = cand.operations[k + 1]
+                    idx_before = all_ops.index(op_before)
+                    idx_after = all_ops.index(op_after)
+                    add_edge(idx_before, idx_after)
+
+        # 2. Cross-Entity Dependencies:
+        # If candidate X targets path P, and candidate Y (Y != X) vacates path P via operation op_Y,
+        # then op_Y must execute BEFORE op_X so that P is vacated first!
+        for i, op_X in enumerate(all_ops):
+            if op_X.target is not None and op_X.target != op_X.source:
+                target_path = op_X.target
+                for op_Y in vacating_ops_by_path.get(target_path, []):
+                    if op_Y.candidate_id != op_X.candidate_id:
+                        j = all_ops.index(op_Y)
+                        add_edge(j, i)
+
+        # 3. Topological sort using Kahn's algorithm
         queue = deque([i for i in range(n) if in_degree[i] == 0])
-        ordered_indices = []
+        ordered_indices: list[int] = []
 
         while queue:
             u = queue.popleft()
@@ -269,10 +367,17 @@ class VirtualPathGraph:
                     queue.append(v)
 
         if len(ordered_indices) < n:
-            cycle_sources = [ops[i]["source"] for i in range(n) if in_degree[i] > 0]
+            cycle_sources = [all_ops[i].source for i in range(n) if in_degree[i] > 0]
             raise VirtualGraphCycleError(
-                f"Detected dependency cycle in planned path mutations: {cycle_sources}",
-                details={"cycle_sources": sorted(cycle_sources)},
+                f"Detected dependency cycle in planned path mutations: {sorted(set(cycle_sources))}",
+                details={"cycle_sources": sorted(set(cycle_sources))},
             )
 
-        return [ops[i] for i in ordered_indices]
+        # Assign deterministic sequence numbers (1-indexed)
+        result: list[dict[str, Any]] = []
+        for seq, idx in enumerate(ordered_indices, 1):
+            op = all_ops[idx]
+            op.sequence = seq
+            result.append(op.to_dict())
+
+        return result
