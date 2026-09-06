@@ -8,7 +8,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from app.auth.dependencies import get_current_user, require_admin_user
 from app.batch.rename import RenameRule
 from app.exceptions import PlanStaleError
+from app.filters.schema import FilterPreviewRequest, FilterPreviewResponse
+from app.filters.validation import FilterValidationError
 from app.models import User
+from app.path_safety import UnsafePathError
 from app.service import StateConflictError
 
 
@@ -176,6 +179,11 @@ class DataLifecyclePolicyUpdateRequest(BaseModel):
         if v < 0 or v > 3650:
             raise ValueError("audit_retention_days must be between 0 and 3650")
         return v
+
+
+class FilterPolicyUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    exclude_dir_names: list[str]
 
 
 # Filesystem Browser & Path Management
@@ -968,6 +976,47 @@ def update_data_lifecycle_policy(
         return request.app.state.service.update_data_lifecycle_policy(body.audit_retention_days)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+
+
+# Filter Policy
+@router.get("/filter-policy")
+def get_filter_policy(request: Request, current_user: User = Depends(get_current_user)):
+    return request.app.state.service.get_filter_policy()
+
+
+@router.put("/filter-policy")
+def update_filter_policy(
+    request: Request,
+    body: FilterPolicyUpdateRequest,
+    admin_user: User = Depends(require_admin_user),
+):
+    try:
+        return request.app.state.service.update_filter_policy(body.exclude_dir_names)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.post("/filters/preview", response_model=FilterPreviewResponse)
+def preview_filter(
+    request: Request,
+    payload: FilterPreviewRequest,
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        return request.app.state.service.preview_filter(
+            roots=payload.roots,
+            filter_node=payload.filter,
+            page=payload.page,
+            page_size=payload.page_size,
+            sort_by=payload.sort_by,
+            sort_order=payload.sort_order,
+        )
+    except UnsafePathError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except (FilterValidationError, ValueError) as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 # Quarantine Core

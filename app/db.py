@@ -11,7 +11,7 @@ from sqlalchemy import Engine, create_engine, delete, event, func, inspect, sele
 from sqlalchemy.orm import sessionmaker
 
 from app.auth.password import hash_password
-from app.models import Base, IndexRoot, IndexedPath, OrganizerProfile, User, WorkJob
+from app.models import Base, FilterPolicy, IndexRoot, IndexedPath, OrganizerProfile, User, WorkJob
 
 
 @contextmanager
@@ -100,6 +100,7 @@ def init_db(
             "data_lifecycle_policy",
             "quarantine_entries",
             "operation_journal",
+            "filter_policy",
         }
 
         # Check existing columns in work_jobs
@@ -212,6 +213,17 @@ def init_db(
                     INSERT OR IGNORE INTO data_lifecycle_policy (id, audit_retention_days, quarantine_retention_days, updated_at)
                     VALUES (1, 0, 0, CURRENT_TIMESTAMP)
                 """)
+            )
+            session.commit()
+
+        # Seed singleton FilterPolicy if not exists
+        with SessionLocal() as session:
+            session.execute(
+                text("""
+                    INSERT OR IGNORE INTO filter_policy (id, exclude_dir_names_json, updated_at)
+                    VALUES (1, :default_excludes, CURRENT_TIMESTAMP)
+                """),
+                {"default_excludes": json.dumps([".git", ".recycle", "@eaDir", ".nas-file-center-trash"])},
             )
             session.commit()
 

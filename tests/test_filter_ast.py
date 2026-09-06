@@ -1,0 +1,117 @@
+import pytest
+from app.filters.schema import FilterExpression, LeafNode, LogicalNode
+from app.filters.validation import validate_filter_ast, FilterValidationError
+from app.filters.media_types import get_media_type, get_extensions_for_media_type
+
+def test_valid_leaf_node():
+    leaf = LeafNode(field="extension", operator="in", value=["JPG", ".png"])
+    validated = validate_filter_ast(leaf)
+    assert validated.field == "extension"
+    assert validated.value == ["jpg", "png"]
+
+def test_valid_logical_and_tree():
+    tree = LogicalNode(
+        op="and",
+        children=[
+            LeafNode(field="extension", operator="eq", value="mkv"),
+            LeafNode(field="size", operator="gte", value=1024),
+            LogicalNode(
+                op="not",
+                child=LeafNode(field="name", operator="contains", value="sample")
+            )
+        ]
+    )
+    validated = validate_filter_ast(tree)
+    assert validated.op == "and"
+    assert len(validated.children) == 3
+
+def test_depth_limit_enforced():
+    # Depth 5 should be accepted
+    # 1: and -> 2: and -> 3: and -> 4: and -> 5: leaf
+    curr = LeafNode(field="size", operator="gt", value=0)
+    for _ in range(4):
+        curr = LogicalNode(op="and", children=[curr])
+    assert validate_filter_ast(curr) is not None
+
+    # Depth 6 should be rejected
+    curr = LogicalNode(op="and", children=[curr])
+    with pytest.raises(FilterValidationError, match="exceeds maximum allowed depth of 5"):
+        validate_filter_ast(curr)
+
+def test_children_limit_enforced():
+    children_50 = [LeafNode(field="size", operator="gt", value=i) for i in range(50)]
+    node_50 = LogicalNode(op="or", children=children_50)
+    assert validate_filter_ast(node_50) is not None
+
+    children_51 = [LeafNode(field="size", operator="gt", value=i) for i in range(51)]
+    node_51 = LogicalNode(op="or", children=children_51)
+    with pytest.raises(FilterValidationError, match="exceeds maximum allowed children count of 50"):
+        validate_filter_ast(node_51)
+
+def test_empty_logical_nodes_rejected():
+    with pytest.raises(FilterValidationError, match="Logical node 'and' must have at least one child"):
+        validate_filter_ast(LogicalNode(op="and", children=[]))
+
+    with pytest.raises(FilterValidationError, match="Logical node 'or' must have at least one child"):
+        validate_filter_ast(LogicalNode(op="or", children=[]))
+
+    with pytest.raises(FilterValidationError, match="Logical node 'not' must have exactly one child"):
+        validate_filter_ast(LogicalNode(op="not", children=[]))
+
+def test_regex_and_matches_rejected():
+    with pytest.raises(FilterValidationError, match="regex filtering is not supported in Gate5-A"):
+        validate_filter_ast(LeafNode(field="regex", operator="matches", value=".*"))
+
+    with pytest.raises(FilterValidationError, match="regex filtering is not supported in Gate5-A"):
+        validate_filter_ast(LeafNode(field="name", operator="matches", value=".*"))
+
+def test_unknown_field_or_operator_rejected():
+    with pytest.raises(FilterValidationError, match="Unsupported field 'owner'"):
+        validate_filter_ast(LeafNode(field="owner", operator="eq", value="root"))
+
+    with pytest.raises(FilterValidationError, match="Unsupported operator 'like' for field 'name'"):
+        validate_filter_ast(LeafNode(field="name", operator="like", value="foo"))
+
+def test_size_validation():
+    # Negative size rejected
+    with pytest.raises(FilterValidationError, match="Size value must be an integer >= 0"):
+        validate_filter_ast(LeafNode(field="size", operator="gte", value=-10))
+
+    # Float size rejected
+    with pytest.raises(FilterValidationError, match="Size value must be an integer >= 0"):
+        validate_filter_ast(LeafNode(field="size", operator="gte", value=10.5))
+
+    # Boolean size rejected
+    with pytest.raises(FilterValidationError, match="Size value must be an integer >= 0"):
+        validate_filter_ast(LeafNode(field="size", operator="gte", value=True))
+
+def test_mtime_validation():
+    # ISO-8601 string converted to mtime_ns integer
+    iso_val = "2026-08-15T12:00:00Z"
+    leaf = validate_filter_ast(LeafNode(field="mtime", operator="gte", value=iso_val))
+    assert isinstance(leaf.value, int)
+    assert leaf.value == 1786795200000000000
+
+    # Unix epoch seconds int converted to mtime_ns
+    leaf2 = validate_filter_ast(LeafNode(field="mtime", operator="gte", value=1786795200))
+    assert leaf2.value == 1786795200000000000
+
+    # Invalid timestamp string rejected
+    with pytest.raises(FilterValidationError, match="Invalid mtime format"):
+        validate_filter_ast(LeafNode(field="mtime", operator="gte", value="not-a-timestamp"))
+
+def test_media_type_validation_and_mapping():
+    assert get_media_type("mkv") == "video"
+    assert get_media_type(".JPG") == "image"
+    assert get_media_type("mp3") == "audio"
+    assert get_media_type("pdf") == "document"
+    assert get_media_type("zip") == "archive"
+    assert get_media_type("xyz123") == "other"
+
+    # Valid media_type filter
+    leaf = validate_filter_ast(LeafNode(field="media_type", operator="eq", value="VIDEO"))
+    assert leaf.value == "video"
+
+    # Invalid media_type value rejected
+    with pytest.raises(FilterValidationError, match="Invalid media_type 'unknown_type'"):
+        validate_filter_ast(LeafNode(field="media_type", operator="eq", value="unknown_type"))

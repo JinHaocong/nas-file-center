@@ -16,7 +16,7 @@ from uuid import uuid4
 
 from app.utils.sorting import _MaxHeapCandidate, natural_sort_key
 
-from sqlalchemy import Integer, delete, func, select, text
+from sqlalchemy import Integer, and_, delete, func, or_, select, text
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from app.batch.plans import OperationItem
@@ -36,6 +36,7 @@ from app.models import (
     DuplicateFile,
     DuplicateGroup,
     FavoritePath,
+    FilterPolicy,
     IndexRoot,
     IndexedPath,
     OperationJournal,
@@ -68,6 +69,11 @@ from app.path_safety import (
     require_unreserved_path,
     validate_mutation_destination,
 )
+from app.filters.excludes import DEFAULT_EXCLUDE_DIR_NAMES, validate_exclude_rules, build_exclude_predicates
+from app.filters.compiler import compile_filter_to_sql
+from app.filters.media_types import get_media_type, normalize_extension
+from app.filters.validation import validate_filter_ast
+from app.filters.schema import FilterNode
 
 PLAN_SINGLE_DELETE_ALLOWED = {
     "draft",
@@ -459,6 +465,174 @@ class FileCenterService:
             return {
                 "audit_retention_days": policy.audit_retention_days,
                 "updated_at": policy.updated_at.isoformat() if policy.updated_at else None,
+            }
+
+    def get_filter_policy(self) -> dict:
+        with self.SessionLocal() as session:
+            policy = session.get(FilterPolicy, 1)
+            if policy is None:
+                return {
+                    "id": 1,
+                    "exclude_dir_names": list(DEFAULT_EXCLUDE_DIR_NAMES),
+                    "updated_at": utcnow().isoformat(),
+                }
+            try:
+                excludes = json.loads(policy.exclude_dir_names_json or "[]")
+            except Exception:
+                excludes = list(DEFAULT_EXCLUDE_DIR_NAMES)
+            return {
+                "id": policy.id,
+                "exclude_dir_names": excludes,
+                "updated_at": policy.updated_at.isoformat() if policy.updated_at else None,
+            }
+
+    def update_filter_policy(self, exclude_dir_names: list[str]) -> dict:
+        valid_rules = validate_exclude_rules(exclude_dir_names)
+        with self.SessionLocal() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            policy = session.get(FilterPolicy, 1)
+            now = utcnow()
+            if policy is None:
+                policy = FilterPolicy(
+                    id=1,
+                    exclude_dir_names_json=json.dumps(valid_rules),
+                    updated_at=now,
+                )
+                session.add(policy)
+            else:
+                policy.exclude_dir_names_json = json.dumps(valid_rules)
+                policy.updated_at = now
+            session.commit()
+            return {
+                "id": policy.id,
+                "exclude_dir_names": valid_rules,
+                "updated_at": policy.updated_at.isoformat() if policy.updated_at else None,
+            }
+
+    def preview_filter(
+        self,
+        *,
+        roots: list[str],
+        filter_node: FilterNode | None = None,
+        page: int = 1,
+        page_size: int = 50,
+        sort_by: str = "size",
+        sort_order: str = "desc",
+    ) -> dict:
+        if not roots or len(roots) > 16:
+            raise ValueError("roots count must be between 1 and 16")
+        if page < 1:
+            raise ValueError("page must be >= 1")
+        if page_size < 1 or page_size > 200:
+            raise ValueError("page_size must be between 1 and 200")
+
+        clean_roots = []
+        for r in roots:
+            safe_root = str(require_allowed_path(r, self.settings.allowed_roots))
+            clean_roots.append(safe_root)
+
+        with self.SessionLocal() as session:
+            db_roots = session.scalars(
+                select(IndexRoot).where(IndexRoot.root.in_(clean_roots))
+            ).all()
+            found_root_paths = {r.root for r in db_roots}
+            for cr in clean_roots:
+                if cr not in found_root_paths:
+                    raise KeyError(f"Root is not indexed: {cr}")
+
+            roots_meta = [
+                {
+                    "root": r.root,
+                    "last_indexed_at": r.last_indexed_at.isoformat() if r.last_indexed_at else None,
+                }
+                for r in db_roots
+            ]
+
+            where_clauses = [
+                IndexedPath.is_dir == False,
+                IndexedPath.root_key.in_(clean_roots),
+            ]
+
+            if filter_node is not None:
+                validated_ast = validate_filter_ast(filter_node)
+                where_clauses.append(compile_filter_to_sql(validated_ast))
+
+            policy = session.get(FilterPolicy, 1)
+            excludes = []
+            if policy and policy.exclude_dir_names_json:
+                try:
+                    excludes = json.loads(policy.exclude_dir_names_json)
+                except Exception:
+                    excludes = list(DEFAULT_EXCLUDE_DIR_NAMES)
+            else:
+                excludes = list(DEFAULT_EXCLUDE_DIR_NAMES)
+
+            quarantine_root = getattr(self.settings, "quarantine_root", None)
+            where_clauses.append(
+                build_exclude_predicates(
+                    excludes,
+                    quarantine_root=str(quarantine_root) if quarantine_root else None,
+                )
+            )
+
+            combined_where = and_(*where_clauses)
+
+            count_stmt = select(func.count(IndexedPath.id)).where(combined_where)
+            sum_stmt = select(func.coalesce(func.sum(IndexedPath.size), 0)).where(combined_where)
+
+            matched_count = session.scalar(count_stmt) or 0
+            matched_bytes = session.scalar(sum_stmt) or 0
+
+            sort_field = sort_by.strip().lower()
+            sort_dir = sort_order.strip().lower()
+
+            col_map = {
+                "size": IndexedPath.size,
+                "mtime": IndexedPath.mtime_ns,
+                "name": IndexedPath.basename,
+                "path": IndexedPath.relative_path,
+            }
+            primary_col = col_map.get(sort_field, IndexedPath.size)
+            if sort_dir == "asc":
+                order_by_clause = [primary_col.asc(), IndexedPath.id.asc()]
+            else:
+                order_by_clause = [primary_col.desc(), IndexedPath.id.desc()]
+
+            total_pages = (matched_count + page_size - 1) // page_size if matched_count > 0 else 1
+            offset = (page - 1) * page_size
+
+            items_stmt = (
+                select(IndexedPath)
+                .where(combined_where)
+                .order_by(*order_by_clause)
+                .limit(page_size)
+                .offset(offset)
+            )
+            rows = session.scalars(items_stmt).all()
+
+            items = [
+                {
+                    "path": row.absolute_path,
+                    "relative_path": row.relative_path,
+                    "name": row.basename,
+                    "extension": normalize_extension(row.suffix),
+                    "size": row.size,
+                    "mtime_ns": row.mtime_ns,
+                    "media_type": get_media_type(row.suffix),
+                }
+                for row in rows
+            ]
+
+            return {
+                "preview_source": "index",
+                "live_filesystem_verified": False,
+                "matched_count": matched_count,
+                "matched_bytes": matched_bytes,
+                "page": page,
+                "page_size": page_size,
+                "total_pages": total_pages,
+                "roots": roots_meta,
+                "items": items,
             }
 
     def preview_audit_retention(self, *, now: datetime | None = None) -> dict:

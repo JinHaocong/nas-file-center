@@ -127,6 +127,18 @@ class DataLifecyclePolicy(Base):
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow, nullable=False)
 
 
+class FilterPolicy(Base):
+    __tablename__ = "filter_policy"
+
+    id: Mapped[int] = mapped_column(primary_key=True, default=1)
+    exclude_dir_names_json: Mapped[str] = mapped_column(
+        Text,
+        default='[".git", ".recycle", "@eaDir", ".nas-file-center-trash"]',
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow, nullable=False)
+
+
 class QuarantineEntry(Base):
     __tablename__ = "quarantine_entries"
     __table_args__ = (
