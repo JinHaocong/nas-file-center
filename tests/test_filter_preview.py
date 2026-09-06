@@ -270,3 +270,28 @@ def test_preview_fail_closed_validation_errors(test_setup):
     )
     assert resp_mtime_iso_safe.status_code == 200, f"Expected 200, got {resp_mtime_iso_safe.status_code}: {resp_mtime_iso_safe.text}"
 
+    # 11. P2-04-hotfix3: mtime ISO timezone overflow 9999-12-31T23:59:59-12:00 -> must return 422, NOT 500
+    resp_mtime_tz_overflow = client.post(
+        "/api/filters/preview",
+        json={"roots": [media_root], "filter": {"field": "mtime", "operator": "gte", "value": "9999-12-31T23:59:59-12:00"}},
+        headers={"Origin": "http://testserver"},
+    )
+    assert resp_mtime_tz_overflow.status_code == 422, f"Expected 422, got {resp_mtime_tz_overflow.status_code}: {resp_mtime_tz_overflow.text}"
+
+    # 12. P2-04-hotfix3: mtime ISO timezone underflow 0001-01-01T00:00:00+14:00 -> must return 422, NOT 500
+    resp_mtime_tz_underflow = client.post(
+        "/api/filters/preview",
+        json={"roots": [media_root], "filter": {"field": "mtime", "operator": "gte", "value": "0001-01-01T00:00:00+14:00"}},
+        headers={"Origin": "http://testserver"},
+    )
+    assert resp_mtime_tz_underflow.status_code == 422, f"Expected 422, got {resp_mtime_tz_underflow.status_code}: {resp_mtime_tz_underflow.text}"
+
+    # 13. P2-04-hotfix3: safe mtime ISO with large positive offset 1970-01-01T14:00:00+14:00 (epoch 0) -> must return 200
+    resp_mtime_tz_safe = client.post(
+        "/api/filters/preview",
+        json={"roots": [media_root], "filter": {"field": "mtime", "operator": "gte", "value": "1970-01-01T14:00:00+14:00"}},
+        headers={"Origin": "http://testserver"},
+    )
+    assert resp_mtime_tz_safe.status_code == 200, f"Expected 200, got {resp_mtime_tz_safe.status_code}: {resp_mtime_tz_safe.text}"
+
+

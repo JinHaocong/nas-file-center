@@ -241,9 +241,28 @@ def test_mtime_strict_typing_and_timezone():
     with pytest.raises(FilterValidationError, match="range"):
         validate_filter_ast(LeafNode(field="mtime", operator="eq", value="1969-12-31T23:59:59Z"))
 
+    # P2-04-hotfix3: Timezone offset edge cases without astimezone() OverflowError
+    # 1. Normal offsets within range
+    leaf_epoch_utc = validate_filter_ast(LeafNode(field="mtime", operator="eq", value="1970-01-01T00:00:00Z"))
+    assert leaf_epoch_utc.value == 0
+
+    leaf_epoch_plus14 = validate_filter_ast(LeafNode(field="mtime", operator="eq", value="1970-01-01T14:00:00+14:00"))
+    assert leaf_epoch_plus14.value == 0
+
+    leaf_epoch_minus1 = validate_filter_ast(LeafNode(field="mtime", operator="eq", value="1970-01-01T00:00:00-01:00"))
+    assert leaf_epoch_minus1.value == 3_600_000_000_000
+
+    # 2. Timezone overflow/underflow edges -> must raise FilterValidationError (422), never OverflowError (500)
+    with pytest.raises(FilterValidationError, match="range"):
+        validate_filter_ast(LeafNode(field="mtime", operator="eq", value="9999-12-31T23:59:59-12:00"))
+
+    with pytest.raises(FilterValidationError, match="range"):
+        validate_filter_ast(LeafNode(field="mtime", operator="eq", value="0001-01-01T00:00:00+14:00"))
+
     # integer nanoseconds or out-of-range must be rejected
     with pytest.raises(FilterValidationError, match="range"):
         validate_filter_ast(LeafNode(field="mtime", operator="eq", value=1788688800000000000))
+
 
 
 

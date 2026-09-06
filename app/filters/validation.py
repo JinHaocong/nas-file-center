@@ -31,7 +31,7 @@ INT64_MAX = (1 << 63) - 1
 MIN_MTIME_NS = 0
 MAX_MTIME_NS = INT64_MAX
 MAX_EPOCH_SECONDS = INT64_MAX // 1_000_000_000
-EPOCH_UTC = datetime(1970, 1, 1, tzinfo=timezone.utc)
+EPOCH_NAIVE = datetime(1970, 1, 1)
 
 
 def _parse_mtime_to_ns(val: Any) -> int:
@@ -59,8 +59,11 @@ def _parse_mtime_to_ns(val: Any) -> int:
             raise FilterValidationError(f"Invalid mtime format '{val}': {exc}") from exc
         if dt.tzinfo is None:
             raise FilterValidationError("mtime ISO datetime must be timezone-aware (missing timezone)")
-        dt_utc = dt.astimezone(timezone.utc)
-        delta = dt_utc - EPOCH_UTC
+        offset = dt.utcoffset()
+        if offset is None:
+            raise FilterValidationError("mtime ISO datetime must be timezone-aware (missing timezone)")
+        local_naive = dt.replace(tzinfo=None)
+        delta = local_naive - EPOCH_NAIVE - offset
         ns = delta.days * 86_400 * 1_000_000_000 + delta.seconds * 1_000_000_000 + delta.microseconds * 1_000
         if ns < MIN_MTIME_NS or ns > MAX_MTIME_NS:
             raise FilterValidationError(f"mtime nanoseconds out of supported range ({MIN_MTIME_NS} to {MAX_MTIME_NS}), got {ns}")
