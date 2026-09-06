@@ -14,6 +14,8 @@ from app.models import User
 from app.path_safety import UnsafePathError
 from app.service import StateConflictError
 from app.workflows.schema import (
+    PlanRebuildPreviewRequest,
+    PlanRebuildRequest,
     WorkflowCreateRequest,
     WorkflowGeneratePlanRequest,
     WorkflowGeneratePlanResponse,
@@ -904,6 +906,44 @@ def undo_plan(
         raise HTTPException(409, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/plans/{plan_id}/rebuild-preview")
+def rebuild_plan_preview(
+    request: Request,
+    plan_id: int,
+    payload: PlanRebuildPreviewRequest | None = None,
+    current_user: User = Depends(get_current_user),
+):
+    body = payload or PlanRebuildPreviewRequest()
+    try:
+        return request.app.state.service.rebuild_plan_preview(
+            plan_id=plan_id,
+            page=body.page,
+            page_size=body.page_size,
+            only_changed=body.only_changed,
+            user_id=current_user.id,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, "Plan not found") from exc
+
+
+@router.post("/plans/{plan_id}/rebuild", status_code=201)
+def rebuild_plan(
+    request: Request,
+    plan_id: int,
+    payload: PlanRebuildRequest,
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        return request.app.state.service.rebuild_plan(
+            plan_id=plan_id,
+            expected_compile_digest=payload.expected_compile_digest,
+            plan_name=payload.plan_name,
+            user_id=current_user.id,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, "Plan not found") from exc
 
 
 @router.get("/plans/{plan_id}/operation-journal")

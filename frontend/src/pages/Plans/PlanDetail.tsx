@@ -23,8 +23,11 @@ import {
   ArrowRightOutlined,
   HistoryOutlined,
   RollbackOutlined,
+  BuildOutlined,
 } from '@ant-design/icons';
 import { OperationJournalDrawer } from './OperationJournalDrawer';
+import { StaleRebuildDrawer } from '../../components/plans/StaleRebuildDrawer';
+import { isWorkflowPlanMetadata } from '../../types/workflow';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { plansApi, settingsApi } from '../../api/domain';
 import { useTitle } from '../../hooks/useTitle';
@@ -50,6 +53,7 @@ export const PlanDetailPage: React.FC = () => {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [journalDrawerOpen, setJournalDrawerOpen] = useState(false);
+  const [rebuildDrawerOpen, setRebuildDrawerOpen] = useState(false);
 
   const { data: settings } = useQuery({
     queryKey: ['settings'],
@@ -209,6 +213,10 @@ export const PlanDetailPage: React.FC = () => {
     journalTotal > 0 &&
     !isJournalLoading &&
     !isJournalError;
+
+  const isStaleWorkflowPlan = Boolean(
+    plan && plan.status === 'stale' && isWorkflowPlanMetadata(plan.metadata)
+  );
 
   const columns = [
     {
@@ -431,6 +439,16 @@ export const PlanDetailPage: React.FC = () => {
             </Tooltip>
           )}
 
+          {isStaleWorkflowPlan && (
+            <Button
+              type="primary"
+              icon={<BuildOutlined />}
+              onClick={() => setRebuildDrawerOpen(true)}
+            >
+              重建工作流计划 (Rebuild Plan)
+            </Button>
+          )}
+
           <PlanDeleteButton
             plan={plan}
             onDelete={() => deleteMutation.mutate()}
@@ -471,10 +489,21 @@ export const PlanDetailPage: React.FC = () => {
 
       {plan.status === 'stale' && (
         <Alert
-          message="计划已过期 (PLAN_STALE)"
-          description="计划中的源文件已被外部修改、移动、删除或替换。为保障 NAS 数据安全，该计划已被锁定，严禁执行。如需继续操作，请删除此计划并重新生成。"
+          message={isStaleWorkflowPlan ? "工作流计划已过期 (PLAN_STALE)" : "计划已过期 (PLAN_STALE)"}
+          description={
+            isStaleWorkflowPlan
+              ? "计划中的源文件已被外部修改、移动、删除或替换。为保障 NAS 数据安全，该计划已被锁定。由于此计划源自工作流，您可以基于原始工作流历史版本与快照参数重新构建全新草稿。"
+              : "计划中的源文件已被外部修改、移动、删除或替换。为保障 NAS 数据安全，该计划已被锁定，严禁执行。如需继续操作，请删除此计划并重新生成。"
+          }
           type="error"
           showIcon
+          action={
+            isStaleWorkflowPlan ? (
+              <Button type="primary" onClick={() => setRebuildDrawerOpen(true)}>
+                重建计划预览
+              </Button>
+            ) : undefined
+          }
           style={{ marginBottom: 16 }}
         />
       )}
@@ -550,6 +579,18 @@ export const PlanDetailPage: React.FC = () => {
         open={journalDrawerOpen}
         onClose={() => setJournalDrawerOpen(false)}
       />
+
+      {isStaleWorkflowPlan && (
+        <StaleRebuildDrawer
+          open={rebuildDrawerOpen}
+          planId={planId}
+          onClose={() => setRebuildDrawerOpen(false)}
+          onRebuildSuccess={(newPlanId) => {
+            queryClient.invalidateQueries({ queryKey: ['plansList'] });
+            navigate(`/plans/${newPlanId}`);
+          }}
+        />
+      )}
     </div>
   );
 };

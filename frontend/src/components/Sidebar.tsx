@@ -15,6 +15,7 @@ import {
   SettingOutlined,
   HddOutlined,
   SafetyCertificateOutlined,
+  DeploymentUnitOutlined,
 } from '@ant-design/icons';
 
 const { Sider } = Layout;
@@ -64,6 +65,11 @@ export const Sidebar: React.FC<Props> = ({ collapsed, onCollapse }) => {
       key: '/organizer',
       icon: <FolderViewOutlined />,
       label: 'Organizer 整理',
+    },
+    {
+      key: '/workflows',
+      icon: <DeploymentUnitOutlined />,
+      label: '工作流中心',
     },
     {
       key: '/plans',

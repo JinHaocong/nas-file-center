@@ -244,11 +244,25 @@ class WorkflowListItem(BaseModel):
     id: int
     name: str
     description: str
+    mode: Literal["file", "organizer"]
     current_revision: int
     is_builtin: bool
     archived_at: str | None = None
     created_at: str
     updated_at: str
+
+
+class PlanRebuildPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=50, ge=1, le=500)
+    only_changed: bool = False
+
+
+class PlanRebuildRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_compile_digest: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-fA-F]{64}$")
+    plan_name: str | None = None
 
 
 class WorkflowResponse(BaseModel):

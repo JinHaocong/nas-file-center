@@ -328,3 +328,4 @@ export interface OrganizerProfileListResponse {
 export * from './task';
 export * from './quarantine';
 export * from './journal';
+export * from './workflow';

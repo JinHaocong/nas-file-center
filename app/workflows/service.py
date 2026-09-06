@@ -38,27 +38,64 @@ class WorkflowService:
     def __init__(self, session_factory: sessionmaker, settings: Settings):
         self.SessionLocal = session_factory
         self.settings = settings
+    def compile_workflow_definition(
+        self,
+        session: Session,
+        definition: WorkflowDefinition,
+        workflow_id: int,
+        workflow_revision: int,
+        definition_sha256: str,
+        override_root_ids: list[int] | None = None,
+    ):
+        compiler = WorkflowCompiler(
+            session=session,
+            allowed_roots=self.settings.allowed_roots,
+            quarantine_root=self.settings.quarantine_root,
+        )
+        return compiler.compile(
+            definition,
+            workflow_id=workflow_id,
+            workflow_revision=workflow_revision,
+            definition_sha256=definition_sha256,
+            override_root_ids=override_root_ids,
+            max_candidates=MAX_WORKFLOW_CANDIDATES,
+            max_plan_items=MAX_WORKFLOW_PLAN_ITEMS,
+        )
 
     def list_workflows(self, include_archived: bool = False) -> list[dict[str, Any]]:
         with self.SessionLocal() as session:
-            stmt = select(Workflow)
+            stmt = (
+                select(Workflow, WorkflowRevision.definition_json)
+                .join(
+                    WorkflowRevision,
+                    (WorkflowRevision.workflow_id == Workflow.id)
+                    & (WorkflowRevision.revision == Workflow.current_revision),
+                )
+            )
             if not include_archived:
                 stmt = stmt.where(Workflow.archived_at.is_(None))
             stmt = stmt.order_by(Workflow.is_builtin.desc(), Workflow.updated_at.desc(), Workflow.id.desc())
-            workflows = session.scalars(stmt).all()
-            return [
-                {
+            rows = session.execute(stmt).all()
+            res = []
+            for wf, def_json in rows:
+                mode = "file"
+                if def_json:
+                    try:
+                        mode = json.loads(def_json).get("mode", "file")
+                    except Exception:
+                        mode = "file"
+                res.append({
                     "id": wf.id,
                     "name": wf.name,
                     "description": wf.description,
+                    "mode": mode,
                     "current_revision": wf.current_revision,
                     "is_builtin": wf.is_builtin,
                     "archived_at": wf.archived_at.isoformat() if wf.archived_at else None,
                     "created_at": wf.created_at.isoformat(),
                     "updated_at": wf.updated_at.isoformat(),
-                }
-                for wf in workflows
-            ]
+                })
+            return res
 
     def get_workflow(self, workflow_id: int) -> dict[str, Any]:
         with self.SessionLocal() as session:
@@ -401,19 +438,13 @@ class WorkflowService:
                 else payload.root_ids
             )
 
-            compiler = WorkflowCompiler(
+            res = self.compile_workflow_definition(
                 session=session,
-                allowed_roots=self.settings.allowed_roots,
-                quarantine_root=self.settings.quarantine_root,
-            )
-            res = compiler.compile(
-                definition,
+                definition=definition,
                 workflow_id=wf.id,
                 workflow_revision=target_revision,
                 definition_sha256=rev.definition_sha256,
                 override_root_ids=effective_root_ids,
-                max_candidates=MAX_WORKFLOW_CANDIDATES,
-                max_plan_items=MAX_WORKFLOW_PLAN_ITEMS,
             )
 
             all_items = res.planned_operations
@@ -495,19 +526,13 @@ class WorkflowService:
                 else payload.root_ids
             )
 
-            compiler = WorkflowCompiler(
+            res = self.compile_workflow_definition(
                 session=session,
-                allowed_roots=self.settings.allowed_roots,
-                quarantine_root=self.settings.quarantine_root,
-            )
-            res = compiler.compile(
-                definition,
+                definition=definition,
                 workflow_id=wf.id,
                 workflow_revision=target_revision,
                 definition_sha256=rev.definition_sha256,
                 override_root_ids=effective_root_ids,
-                max_candidates=MAX_WORKFLOW_CANDIDATES,
-                max_plan_items=MAX_WORKFLOW_PLAN_ITEMS,
             )
 
             if not payload.expected_compile_digest or payload.expected_compile_digest != res.compile_digest:

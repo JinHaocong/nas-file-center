@@ -47,8 +47,19 @@ from app.models import (
     RecentPath,
     ScanJob,
     WorkJob,
+    Workflow,
+    WorkflowRevision,
     utcnow,
 )
+from app.workflows.errors import (
+    RecipeRevisionNotFoundError,
+    WorkflowArchivedError,
+    WorkflowDigestMismatchError,
+    WorkflowError,
+    WorkflowNotFoundError,
+)
+from app.workflows.schema import WorkflowDefinition
+from app.workflows.validation import validate_raw_steps_types
 from app.exceptions import PlanStaleError, StateConflictError
 from app.planning.stale import capture_source_snapshot, verify_item_freshness, StaleItemDetail, resolve_origin_path
 from app.quarantine.paths import (
@@ -3573,4 +3584,263 @@ class FileCenterService:
             "created_at": entry.created_at.isoformat() if entry.created_at else None,
             "updated_at": entry.updated_at.isoformat() if entry.updated_at else None,
         }
+
+    def _validate_rebuild_eligibility(self, session, plan_id: int):
+        plan = session.get(BatchPlan, plan_id)
+        if plan is None:
+            raise KeyError(f"Plan #{plan_id} not found")
+
+        if plan.status != "stale":
+            raise WorkflowError(
+                f"Cannot rebuild plan #{plan_id}: status is '{plan.status}', must be 'stale'",
+                code="PLAN_REBUILD_NOT_ELIGIBLE",
+                status_code=400,
+            )
+
+        active_job = _get_active_execution_job(session, plan_id)
+        if active_job is not None:
+            raise WorkflowError(
+                f"Cannot rebuild plan #{plan_id} while it has an active execution task #{active_job.id}",
+                code="PLAN_REBUILD_NOT_ELIGIBLE",
+                status_code=400,
+            )
+
+        metadata_str = plan.metadata_json or ""
+        try:
+            metadata = json.loads(metadata_str)
+            if not isinstance(metadata, dict):
+                raise ValueError("Metadata is not an object")
+        except Exception:
+            raise WorkflowError(
+                "Plan metadata is missing or not valid JSON",
+                code="PLAN_REBUILD_LINEAGE_MISSING",
+                status_code=400,
+            )
+
+        if metadata.get("source") != "workflow":
+            raise WorkflowError(
+                f"Plan #{plan_id} is not a workflow plan (source={metadata.get('source')!r})",
+                code="PLAN_REBUILD_NOT_ELIGIBLE",
+                status_code=400,
+            )
+
+        workflow_id = metadata.get("workflow_id")
+        workflow_revision = metadata.get("workflow_revision")
+        definition_sha256 = metadata.get("definition_sha256")
+        runtime_inputs = metadata.get("runtime_inputs")
+        compile_digest = metadata.get("compile_digest")
+
+        if (
+            not isinstance(workflow_id, int)
+            or isinstance(workflow_id, bool)
+            or workflow_id <= 0
+            or not isinstance(workflow_revision, int)
+            or isinstance(workflow_revision, bool)
+            or workflow_revision <= 0
+            or not isinstance(definition_sha256, str)
+            or len(definition_sha256) != 64
+            or not isinstance(runtime_inputs, dict)
+            or not isinstance(runtime_inputs.get("root_ids"), list)
+            or len(runtime_inputs.get("root_ids")) == 0
+            or not all(isinstance(r, int) and not isinstance(r, bool) and r > 0 for r in runtime_inputs["root_ids"])
+            or not isinstance(compile_digest, str)
+            or len(compile_digest) != 64
+        ):
+            raise WorkflowError(
+                "Plan metadata has missing or invalid workflow lineage fields",
+                code="PLAN_REBUILD_LINEAGE_MISSING",
+                status_code=400,
+            )
+
+        wf = session.get(Workflow, workflow_id)
+        if not wf:
+            raise WorkflowNotFoundError(f"Workflow {workflow_id} not found")
+        if wf.archived_at is not None:
+            raise WorkflowArchivedError(f"Workflow {workflow_id} is archived")
+
+        rev = session.scalar(
+            select(WorkflowRevision).where(
+                WorkflowRevision.workflow_id == wf.id,
+                WorkflowRevision.revision == workflow_revision,
+            )
+        )
+        if not rev:
+            raise RecipeRevisionNotFoundError(f"Revision {workflow_revision} not found for workflow {workflow_id}")
+
+        if rev.definition_sha256 != definition_sha256:
+            raise WorkflowError(
+                "Definition SHA256 in plan metadata does not match workflow revision",
+                code="PLAN_REBUILD_LINEAGE_MISSING",
+                status_code=400,
+            )
+
+        def_dict = json.loads(rev.definition_json)
+        validate_raw_steps_types(def_dict.get("steps", []))
+        definition = WorkflowDefinition.model_validate(def_dict)
+
+        return plan, metadata, metadata_str, wf, rev, definition, runtime_inputs
+
+    def rebuild_plan_preview(
+        self,
+        plan_id: int,
+        page: int = 1,
+        page_size: int = 50,
+        only_changed: bool = False,
+        user_id: int | None = None,
+    ) -> dict[str, Any]:
+        with self.SessionLocal() as session:
+            plan, metadata, metadata_str, wf, rev, definition, runtime_inputs = self._validate_rebuild_eligibility(session, plan_id)
+
+            effective_root_ids = runtime_inputs["root_ids"]
+            res = self.workflow_service.compile_workflow_definition(
+                session=session,
+                definition=definition,
+                workflow_id=wf.id,
+                workflow_revision=rev.revision,
+                definition_sha256=rev.definition_sha256,
+                override_root_ids=effective_root_ids,
+            )
+
+            all_items = res.planned_operations
+            if only_changed:
+                all_items = [item for item in all_items if item.get("operation") in {"rename", "move", "quarantine"}]
+
+            total = len(all_items)
+            total_pages = math.ceil(total / page_size) if total > 0 else 1
+            start = (page - 1) * page_size
+            end = start + page_size
+            page_items = all_items[start:end]
+
+            preview_items = [
+                {
+                    "source_path": item["source"],
+                    "target_path": item.get("target"),
+                    "operation": item["operation"],
+                    "mtime_ns": item.get("mtime_ns"),
+                    "changed": item.get("operation") in {"rename", "move", "quarantine"},
+                    "metadata": {k: v for k, v in item.items() if k not in {"source", "target", "operation", "mtime_ns"}},
+                }
+                for item in page_items
+            ]
+
+            return {
+                "source_plan_id": plan_id,
+                "workflow_id": wf.id,
+                "workflow_revision": rev.revision,
+                "definition_sha256": rev.definition_sha256,
+                "runtime_inputs": runtime_inputs,
+                "preview_source": "organizer-live-readonly" if definition.mode == "organizer" else "index",
+                "live_filesystem_verified": False,
+                "compile_digest": res.compile_digest,
+                "matched_count": res.matched_count,
+                "matched_bytes": res.matched_bytes,
+                "planned_operations_count": len(res.planned_operations),
+                "page": page,
+                "page_size": page_size,
+                "total_pages": total_pages,
+                "items": preview_items,
+            }
+
+    def rebuild_plan(
+        self,
+        plan_id: int,
+        expected_compile_digest: str,
+        plan_name: str | None = None,
+        user_id: int | None = None,
+    ) -> dict[str, Any]:
+        with self.SessionLocal() as session:
+            plan, metadata, metadata_str, wf, rev, definition, runtime_inputs = self._validate_rebuild_eligibility(session, plan_id)
+
+            effective_root_ids = runtime_inputs["root_ids"]
+            res = self.workflow_service.compile_workflow_definition(
+                session=session,
+                definition=definition,
+                workflow_id=wf.id,
+                workflow_revision=rev.revision,
+                definition_sha256=rev.definition_sha256,
+                override_root_ids=effective_root_ids,
+            )
+
+            if expected_compile_digest != res.compile_digest:
+                raise WorkflowDigestMismatchError(
+                    f"Workflow rebuild compile digest mismatch: expected '{expected_compile_digest}', got '{res.compile_digest}'",
+                    details={
+                        "expected_compile_digest": expected_compile_digest,
+                        "actual_compile_digest": res.compile_digest,
+                    },
+                )
+
+            # Erratum E1: Transactional recheck
+            session.execute(text("BEGIN IMMEDIATE"))
+            source_plan = session.get(BatchPlan, plan_id)
+            active_job = _get_active_execution_job(session, plan_id)
+            if (
+                source_plan is None
+                or source_plan.status != "stale"
+                or active_job is not None
+                or source_plan.metadata_json != metadata_str
+            ):
+                session.rollback()
+                raise WorkflowDigestMismatchError(
+                    "Source plan state changed during rebuild transaction",
+                    details={"plan_id": plan_id},
+                )
+
+            new_name = plan_name or f"工作流重建计划 - {wf.name} (r{rev.revision})"
+            new_metadata = {
+                "source": "workflow",
+                "workflow_id": wf.id,
+                "workflow_name": wf.name,
+                "workflow_revision": rev.revision,
+                "definition_sha256": rev.definition_sha256,
+                "compile_digest": res.compile_digest,
+                "runtime_inputs": runtime_inputs,
+                "compile_context": res.compile_context,
+                "matched_count": res.matched_count,
+                "matched_bytes": res.matched_bytes,
+                "rebuild_of_plan_id": plan_id,
+                "rebuild_source_status": "stale",
+                "created_by_user_id": user_id,
+            }
+            new_plan = BatchPlan(
+                name=new_name,
+                kind=f"workflow-{wf.id}",
+                status="draft",
+                expected_changes=len(res.planned_operations),
+                expected_reclaim_bytes=0,
+                metadata_json=json.dumps(new_metadata, ensure_ascii=False),
+                created_at=utcnow(),
+            )
+            session.add(new_plan)
+            session.flush()
+
+            for op in res.planned_operations:
+                item_metadata = {k: v for k, v in op.items() if k not in {"source", "target", "operation", "sequence"}}
+                item = BatchPlanItem(
+                    plan_id=new_plan.id,
+                    sequence=op.get("sequence", 0),
+                    operation=op["operation"],
+                    source_path=op["source"],
+                    target_path=op.get("target"),
+                    expected_inode=0,
+                    expected_device=0,
+                    expected_mtime_ns=0,
+                    expected_size=op.get("size", 0),
+                    expected_hash=op.get("hash", ""),
+                    state="pending",
+                    reason="",
+                    metadata_json=json.dumps(item_metadata, ensure_ascii=False),
+                )
+                session.add(item)
+            session.commit()
+            session.refresh(new_plan)
+            return {
+                "id": new_plan.id,
+                "plan_id": new_plan.id,
+                "name": new_plan.name,
+                "status": new_plan.status,
+                "rebuild_of_plan_id": plan_id,
+                "expected_changes": new_plan.expected_changes,
+                "compile_digest": res.compile_digest,
+            }
 
