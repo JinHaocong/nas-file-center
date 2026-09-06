@@ -141,29 +141,9 @@ class WorkflowCompiler:
             raise WorkflowValidationError(str(e), code="INDEX_ROOT_NOT_FOUND")
 
         image_extensions = snapshot.get("image_extensions") or []
-        if isinstance(image_extensions, str):
-            try:
-                image_extensions = json.loads(image_extensions)
-            except Exception:
-                image_extensions = []
         video_extensions = snapshot.get("video_extensions") or []
-        if isinstance(video_extensions, str):
-            try:
-                video_extensions = json.loads(video_extensions)
-            except Exception:
-                video_extensions = []
         preserve_tags = snapshot.get("preserve_tags") or []
-        if isinstance(preserve_tags, str):
-            try:
-                preserve_tags = json.loads(preserve_tags)
-            except Exception:
-                preserve_tags = []
         cleanup_patterns = snapshot.get("cleanup_patterns") or []
-        if isinstance(cleanup_patterns, str):
-            try:
-                cleanup_patterns = json.loads(cleanup_patterns)
-            except Exception:
-                cleanup_patterns = []
 
         # Read global exclusion policy
         policy = self.session.get(FilterPolicy, 1)
@@ -177,6 +157,16 @@ class WorkflowCompiler:
             excludes = list(DEFAULT_EXCLUDE_DIR_NAMES)
 
         quarantine_ex = [self.quarantine_root] if self.quarantine_root else None
+        num_start = snapshot.get("numbering_start")
+        if num_start is None:
+            num_start = 1
+        num_pad = snapshot.get("numbering_padding")
+        if num_pad is None:
+            num_pad = 3
+        m_delay = snapshot.get("mtime_delay_seconds")
+        if m_delay is None:
+            m_delay = 2.0
+
         summary, proposals = generate_organizer_proposals(
             safe_root,
             allowed_roots=self.allowed_roots,
@@ -187,10 +177,10 @@ class WorkflowCompiler:
             preserve_tags=preserve_tags,
             cleanup_patterns=cleanup_patterns,
             numbering_mode=snapshot.get("numbering_mode") or "none",
-            numbering_start=int(snapshot.get("numbering_start") or 1),
-            numbering_padding=int(snapshot.get("numbering_padding") or 3),
+            numbering_start=num_start,
+            numbering_padding=num_pad,
             mtime_mode=snapshot.get("mtime_mode") or "none",
-            mtime_delay_seconds=float(snapshot.get("mtime_delay_seconds") or 2.0),
+            mtime_delay_seconds=float(m_delay),
             recursive=bool(snapshot.get("recursive", False)),
             excluded_roots=quarantine_ex,
             exclude_dir_names=excludes,

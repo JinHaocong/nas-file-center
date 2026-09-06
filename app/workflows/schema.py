@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any, Literal, Union
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -64,34 +65,93 @@ class OrganizerProfileSnapshot(BaseModel):
     name: str = Field(min_length=1)
     description: str | None = None
     root: str | None = None
-    recursive: bool = True
+    recursive: bool = False
     image_extensions: list[str] = Field(default_factory=list)
     video_extensions: list[str] = Field(default_factory=list)
-    rename_template: str = "{name}"
-    statistics_template: str | None = None
+    rename_template: str = "{name} {statistics}"
+    statistics_template: str = "[{images}P{?videos: {videos}V} {size}]"
     preserve_tags: list[str] = Field(default_factory=list)
     cleanup_patterns: list[str] = Field(default_factory=list)
-    numbering_mode: Literal["per_folder", "continuous", "none"] = "per_folder"
+    numbering_mode: Literal["none", "sequential"] = "none"
     numbering_start: int = 1
-    numbering_padding: int = 4
-    mtime_mode: Literal["preserve", "delay", "current", "none"] = "preserve"
-    mtime_delay_seconds: float = 0.0
+    numbering_padding: int = 3
+    mtime_mode: Literal["none", "ordered"] = "none"
+    mtime_delay_seconds: float = 2.0
 
-    @field_validator("numbering_start", "numbering_padding", mode="before")
+    @field_validator("recursive", mode="before")
     @classmethod
-    def validate_strict_int(cls, v: Any) -> int:
+    def validate_recursive_bool(cls, v: Any) -> bool:
+        if isinstance(v, bool):
+            return v
+        raise ValueError("recursive must be a boolean")
+
+    @field_validator("numbering_start", mode="before")
+    @classmethod
+    def validate_numbering_start(cls, v: Any) -> int:
         if isinstance(v, bool) or not isinstance(v, int):
-            raise ValueError("Must be a valid integer")
+            raise ValueError("numbering_start must be an integer")
+        if v < 0:
+            raise ValueError("numbering_start must be >= 0")
         return v
+
+    @field_validator("numbering_padding", mode="before")
+    @classmethod
+    def validate_numbering_padding(cls, v: Any) -> int:
+        if isinstance(v, bool) or not isinstance(v, int):
+            raise ValueError("numbering_padding must be an integer")
+        if v < 1 or v > 10:
+            raise ValueError("numbering_padding must be between 1 and 10")
+        return v
+
+    @field_validator("mtime_delay_seconds", mode="before")
+    @classmethod
+    def validate_mtime_delay(cls, v: Any) -> float:
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            raise ValueError("mtime_delay_seconds must be a finite number")
+        val = float(v)
+        if not math.isfinite(val):
+            raise ValueError("mtime_delay_seconds must be a finite number")
+        if val < 0.0 or val > 60.0:
+            raise ValueError("mtime_delay_seconds must be between 0.0 and 60.0")
+        return val
 
     @field_validator("image_extensions", "video_extensions", "preserve_tags", "cleanup_patterns", mode="before")
     @classmethod
     def validate_string_list(cls, v: Any) -> list[str]:
-        if isinstance(v, str) or not isinstance(v, list):
+        if isinstance(v, (str, bytes, dict)) or not isinstance(v, list):
             raise ValueError("Must be a list of strings")
         for item in v:
-            if not isinstance(item, str):
+            if isinstance(item, bool) or not isinstance(item, str):
                 raise ValueError("All elements must be strings")
+        return v
+
+    @field_validator("rename_template")
+    @classmethod
+    def validate_rename_tmpl(cls, v: str) -> str:
+        from app.organizers.templates import ALLOWED_RENAME_VARS, validate_template
+        errors = validate_template(v, ALLOWED_RENAME_VARS)
+        if errors:
+            raise ValueError(errors[0])
+        return v
+
+    @field_validator("statistics_template")
+    @classmethod
+    def validate_stats_tmpl(cls, v: str | None) -> str:
+        if v is None:
+            return "[{images}P{?videos: {videos}V} {size}]"
+        from app.organizers.templates import ALLOWED_STATISTICS_VARS, validate_template
+        errors = validate_template(v, ALLOWED_STATISTICS_VARS)
+        if errors:
+            raise ValueError(errors[0])
+        return v
+
+    @field_validator("cleanup_patterns")
+    @classmethod
+    def validate_cleanup(cls, v: list[str]) -> list[str]:
+        from app.organizers.templates import validate_cleanup_patterns
+        errors = validate_cleanup_patterns(v)
+        if errors:
+            raise ValueError(errors[0])
         return v
 
 
