@@ -5,6 +5,27 @@ from typing import Any, Literal, Union
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.filters.schema import FilterNode
+from app.organizers.profile_validation import (
+    DEFAULT_ORGANIZER_CLEANUP_PATTERNS,
+    DEFAULT_ORGANIZER_IMAGE_EXTENSIONS,
+    DEFAULT_ORGANIZER_MTIME_DELAY_SECONDS,
+    DEFAULT_ORGANIZER_MTIME_MODE,
+    DEFAULT_ORGANIZER_NUMBERING_MODE,
+    DEFAULT_ORGANIZER_NUMBERING_PADDING,
+    DEFAULT_ORGANIZER_NUMBERING_START,
+    DEFAULT_ORGANIZER_PRESERVE_TAGS,
+    DEFAULT_ORGANIZER_RECURSIVE,
+    DEFAULT_ORGANIZER_RENAME_TEMPLATE,
+    DEFAULT_ORGANIZER_STATISTICS_TEMPLATE,
+    DEFAULT_ORGANIZER_VIDEO_EXTENSIONS,
+    normalize_preserve_tags,
+    validate_and_normalize_image_extensions,
+    validate_and_normalize_video_extensions,
+    validate_profile_cleanup_patterns,
+    validate_profile_name,
+    validate_rename_template,
+    validate_statistics_template,
+)
 
 
 class BaseStep(BaseModel):
@@ -62,21 +83,26 @@ class QuarantineStep(BaseModel):
 class OrganizerProfileSnapshot(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    name: str = Field(min_length=1)
+    name: str
     description: str | None = None
     root: str | None = None
-    recursive: bool = False
-    image_extensions: list[str] = Field(default_factory=list)
-    video_extensions: list[str] = Field(default_factory=list)
-    rename_template: str = "{name} {statistics}"
-    statistics_template: str = "[{images}P{?videos: {videos}V} {size}]"
+    recursive: bool = DEFAULT_ORGANIZER_RECURSIVE
+    image_extensions: list[str] = Field(default_factory=lambda: list(DEFAULT_ORGANIZER_IMAGE_EXTENSIONS))
+    video_extensions: list[str] = Field(default_factory=lambda: list(DEFAULT_ORGANIZER_VIDEO_EXTENSIONS))
+    rename_template: str = DEFAULT_ORGANIZER_RENAME_TEMPLATE
+    statistics_template: str = DEFAULT_ORGANIZER_STATISTICS_TEMPLATE
     preserve_tags: list[str] = Field(default_factory=list)
     cleanup_patterns: list[str] = Field(default_factory=list)
-    numbering_mode: Literal["none", "sequential"] = "none"
-    numbering_start: int = 1
-    numbering_padding: int = 3
-    mtime_mode: Literal["none", "ordered"] = "none"
-    mtime_delay_seconds: float = 2.0
+    numbering_mode: Literal["none", "sequential"] = DEFAULT_ORGANIZER_NUMBERING_MODE
+    numbering_start: int = DEFAULT_ORGANIZER_NUMBERING_START
+    numbering_padding: int = DEFAULT_ORGANIZER_NUMBERING_PADDING
+    mtime_mode: Literal["none", "ordered"] = DEFAULT_ORGANIZER_MTIME_MODE
+    mtime_delay_seconds: float = DEFAULT_ORGANIZER_MTIME_DELAY_SECONDS
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def validate_name(cls, v: Any) -> str:
+        return validate_profile_name(v)
 
     @field_validator("recursive", mode="before")
     @classmethod
@@ -115,44 +141,35 @@ class OrganizerProfileSnapshot(BaseModel):
             raise ValueError("mtime_delay_seconds must be between 0.0 and 60.0")
         return val
 
-    @field_validator("image_extensions", "video_extensions", "preserve_tags", "cleanup_patterns", mode="before")
+    @field_validator("image_extensions", mode="before")
     @classmethod
-    def validate_string_list(cls, v: Any) -> list[str]:
-        if isinstance(v, (str, bytes, dict)) or not isinstance(v, list):
-            raise ValueError("Must be a list of strings")
-        for item in v:
-            if isinstance(item, bool) or not isinstance(item, str):
-                raise ValueError("All elements must be strings")
-        return v
+    def validate_images(cls, v: Any) -> list[str]:
+        return validate_and_normalize_image_extensions(v)
 
-    @field_validator("rename_template")
+    @field_validator("video_extensions", mode="before")
     @classmethod
-    def validate_rename_tmpl(cls, v: str) -> str:
-        from app.organizers.templates import ALLOWED_RENAME_VARS, validate_template
-        errors = validate_template(v, ALLOWED_RENAME_VARS)
-        if errors:
-            raise ValueError(errors[0])
-        return v
+    def validate_videos(cls, v: Any) -> list[str]:
+        return validate_and_normalize_video_extensions(v)
 
-    @field_validator("statistics_template")
+    @field_validator("preserve_tags", mode="before")
     @classmethod
-    def validate_stats_tmpl(cls, v: str | None) -> str:
-        if v is None:
-            return "[{images}P{?videos: {videos}V} {size}]"
-        from app.organizers.templates import ALLOWED_STATISTICS_VARS, validate_template
-        errors = validate_template(v, ALLOWED_STATISTICS_VARS)
-        if errors:
-            raise ValueError(errors[0])
-        return v
+    def validate_tags(cls, v: Any) -> list[str]:
+        return normalize_preserve_tags(v)
 
-    @field_validator("cleanup_patterns")
+    @field_validator("cleanup_patterns", mode="before")
     @classmethod
-    def validate_cleanup(cls, v: list[str]) -> list[str]:
-        from app.organizers.templates import validate_cleanup_patterns
-        errors = validate_cleanup_patterns(v)
-        if errors:
-            raise ValueError(errors[0])
-        return v
+    def validate_cleanup(cls, v: Any) -> list[str]:
+        return validate_profile_cleanup_patterns(v)
+
+    @field_validator("rename_template", mode="before")
+    @classmethod
+    def validate_rename_tmpl(cls, v: Any) -> str:
+        return validate_rename_template(v)
+
+    @field_validator("statistics_template", mode="before")
+    @classmethod
+    def validate_stats_tmpl(cls, v: Any) -> str:
+        return validate_statistics_template(v)
 
 
 class OrganizeStep(BaseModel):

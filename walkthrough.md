@@ -1,4 +1,4 @@
-# NAS File Center v0.3.5 Gate5-B-hotfix3 — Implementation & Verification Walkthrough
+# NAS File Center v0.3.5 Gate5-B-hotfix4 — Implementation & Verification Walkthrough
 
 ## 1. Context & Scope (背景与状态)
 
@@ -10,139 +10,130 @@ Gate4 = PASS
 Gate5-A = PASS
 NAS File Center v0.3.4 = CLOSED
 
-Gate5-B-hotfix2 requested-fixes targeted review = PASS
+Gate5-B-hotfix3 targeted review = PASS
 Gate5-B overall = HOLD
 
 P0 = 0
 P1 = 0
-P2 = 1 (P2-11 OrganizerProfileSnapshot contract mismatch) -> CLOSED
+P2 = 1 (P2-12 OrganizerProfileSnapshot canonical defaults / normalization mismatch) -> CLOSED
 P3 = 0
 
 Gate5-C+ = FORBIDDEN
 v0.3.5 = NOT CLOSED
 ```
 
-本轮任务严格限定于修复 P2-11（`OrganizerProfileSnapshot contract mismatch`），让 Workflow 中的 `OrganizerProfileSnapshot` 严格等价于当前 NAS File Center 现有 `OrganizerProfile` 的真实领域契约，绝不扩大范围，绝不引入 Gate5-C 特性。
+本轮任务严格限定于修复 P2-12（`OrganizerProfileSnapshot canonical defaults / normalization mismatch`），让 `OrganizerProfileSnapshot` 的默认值、字段规范化和领域语义与 `FileCenterService` 当前真实创建出来的 `OrganizerProfile` 完全一致，绝不扩大范围，绝不引入 Gate5-C 特性。
 
 ---
 
 ## 2. Issues Closed & Technical Implementation (问题关闭与技术实现)
 
-### 2.1 P2-11 — OrganizerProfileSnapshot 契约对齐与规范化
+### 2.1 P2-12 — OrganizerProfileSnapshot 领域契约与规范化对齐
 
 - **问题根因**：
-  1. **枚举错位**：此前 Snapshot 中 `numbering_mode` 声明为 `"per_folder" | "continuous" | "none"`，而真实 Organizer 引擎仅支持 `"none" | "sequential"`，导致合法的 `"sequential"` 被错误拦截（422），而错误的 `"continuous"` 被错误接受；同理，`mtime_mode` 此前声明为 `"preserve" | "delay" | "current" | "none"`，而真实引擎仅支持 `"none" | "ordered"`。
-  2. **边界与类型缺失**：`numbering_start` 缺少 `>= 0` 约束，`numbering_padding` 缺少 `1..10` 约束；`mtime_delay_seconds` 允许 `bool`（Pydantic 自动将 `True` 强转为 `1.0`）及超出 `0.0..60.0` 的非法浮点数。
-  3. **默认值不一致**：此前 Snapshot 默认 `recursive=True`、`rename_template="{name}"`、`numbering_padding=4`、`mtime_delay_seconds=0.0`，与现有 OrganizerProfile 默认值严重不一致。
-  4. **编译器多余宽容清洗**：`_compile_organizer_workflow()` 中仍存在针对字符串格式扩展名/标签的 `json.loads()` 容错 fallback，破坏了强类型 Recipe 的设计原则。
+  1. **默认值与真实领域偏离**：此前 `OrganizerProfileSnapshot` 误以 ORM 模型列定义为准，将 `image_extensions` 设为空列表 `[]`、`rename_template` 设为 `"{name} {statistics}"`。但在用户通过 `FileCenterService._validate_profile_payload()` 创建默认档案时，真实默认值其实为 `image_extensions=["jpg", "jpeg", "png", "webp"]`、`video_extensions=["mp4", "mov", "mkv"]`、`rename_template="{name}"`、`statistics_template="[{images}P {videos}V {size}]"`。此差异导致最小配置的工作流会错误为目录强行追加统计后缀（例如将 `Album` 误重命名为 `Album [0P 1 B]`）。
+  2. **扩展名校验与规范化缺失**：此前快照仅校验元素为字符串，未进行大写转小写与前导点去除（如 `".JPG"` 未规范化为 `"jpg"`），且未对非法字符（`/`, `\`, 空格）进行 422 拦截。
+  3. **档案名称校验过宽**：此前快照仅校验 `isinstance(v, str)`，允许全空格字符串 `name="   "` 绕过校验。
+  4. **标签处理分叉**：此前快照未对 `preserve_tags` 执行每个标签的 trim 操作，未丢弃空字符串，且未限制上限为 20 个标签。
 
 - **修复实现**：
-  1. 在 [`app/workflows/schema.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/workflows/schema.py) 中全面重构 `OrganizerProfileSnapshot`：
-     - **枚举约束**：
-       - `numbering_mode: Literal["none", "sequential"] = "none"`
-       - `mtime_mode: Literal["none", "ordered"] = "none"`
-     - **数值与边界强校验**：
-       - `numbering_start: int = 1`：严格校验 `type(v) is int`（拒绝 `bool`），要求 `v >= 0`；
-       - `numbering_padding: int = 3`：严格校验 `type(v) is int`（拒绝 `bool`），要求 `1 <= v <= 10`；
-       - `mtime_delay_seconds: float = 2.0`：严格校验 `type(v) in {int, float}`（拒绝 `bool`），要求有限数值且 `0.0 <= v <= 60.0`；
-       - `recursive: bool = False`：严格校验纯布尔类型（拒绝字符串伪造）。
-     - **模板与列表深层验证**：
-       - `rename_template: str = "{name} {statistics}"` 复用 `validate_template(v, ALLOWED_RENAME_VARS)`；
-       - `statistics_template: str = "[{images}P{?videos: {videos}V} {size}]"` 复用 `validate_template(v, ALLOWED_STATISTICS_VARS)`；
-       - `cleanup_patterns` 复用 `validate_cleanup_patterns(v)`；
-       - 列表字段 `image_extensions`、`video_extensions`、`preserve_tags` 严格校验为纯字符串列表（拒绝 raw string、number、bool 元素）。
-  2. 在 [`app/workflows/compiler.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/workflows/compiler.py) 中：
-     - 彻底移除 `json.loads(...)` 容错清洗逻辑，编译器直接信任经过不可变验证的 Recipe 快照；
-     - 修复 `numbering_start` / `mtime_delay_seconds` 采用 `or` 时误将 `0` 判定为 falsy 并回退默认值的潜在问题。
+  1. **抽离统一规范化模块**：
+     创建 [`app/organizers/profile_validation.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/organizers/profile_validation.py)，集中定义标准默认常量与校验函数，作为唯一的标准事实源：
+     - 常量：`DEFAULT_ORGANIZER_IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "webp"]`、`DEFAULT_ORGANIZER_VIDEO_EXTENSIONS = ["mp4", "mov", "mkv"]`、`DEFAULT_ORGANIZER_RENAME_TEMPLATE = "{name}"`、`DEFAULT_ORGANIZER_STATISTICS_TEMPLATE = "[{images}P {videos}V {size}]"`、`DEFAULT_ORGANIZER_NUMBERING_MODE = "none"`、`DEFAULT_ORGANIZER_NUMBERING_START = 1`、`DEFAULT_ORGANIZER_NUMBERING_PADDING = 3`、`DEFAULT_ORGANIZER_MTIME_MODE = "none"`、`DEFAULT_ORGANIZER_MTIME_DELAY_SECONDS = 2.0`。
+     - 校验器：`validate_profile_name()`、`normalize_preserve_tags()`、`validate_and_normalize_image_extensions()`、`validate_and_normalize_video_extensions()`、`validate_rename_template()`、`validate_statistics_template()`、`validate_profile_cleanup_patterns()`。
+  2. **业务服务对齐**：
+     重构 [`app/service.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/service.py) 中的 `FileCenterService._validate_profile_payload()`，全面调用上述共享验证与规范化函数，消除逻辑重复与分叉风险。
+  3. **工作流快照 Schema 对齐**：
+     在 [`app/workflows/schema.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/workflows/schema.py) 中更新 `OrganizerProfileSnapshot`：
+     - 默认值全面对齐标准常量；
+     - 增加 `validate_name` 校验器（拒绝空白名称，strip 处理）；
+     - 增加 `validate_images` 与 `validate_videos` 校验器（复用扩展名规范化，非法扩展名报 422）；
+     - 增加 `validate_tags` 校验器（trim、过滤空串、最多 20 个）；
+     - 增加 `validate_cleanup` 校验器（复用正则模式校验）；
+     - 保持原有严格的类型与数值边界（`numbering_mode`、`numbering_start >= 0`、`numbering_padding 1..10`、`mtime_mode`、`mtime_delay_seconds 0.0..60.0` 拒绝 bool）。
+  4. **编译器默认值对齐**：
+     在 [`app/workflows/compiler.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/workflows/compiler.py) 中将 `_compile_organizer_workflow` 的模板回退默认值统一为 `DEFAULT_ORGANIZER_RENAME_TEMPLATE`（`"{name}"`）与 `DEFAULT_ORGANIZER_STATISTICS_TEMPLATE`。
+  5. **语义等价保障**：
+     在目录 `/data/Album/a.jpg` 的场景下，最小快照 `{"name": "Minimal"}` 在工作流预览与直接整理档案预览中完全等价：生成 `Album -> Album`，`changed=False`，在工作流方案中产生 0 个操作，彻底杜绝意外附加统计后缀行为。
 
 ---
 
 ## 3. Verification & Evidence (验证与证据)
 
 ### 3.1 TDD 失败基线证明 (RED Evidence)
-在实现前编写针对性测试 [`tests/test_gate5b_hotfix3_red.py`](file:///Users/Kerwin/MyProject/nas-file-center/tests/test_gate5b_hotfix3_red.py)，完整复现了契约不一致的失败证据：
+在修改代码前编写针对性失败测试 [`tests/test_gate5b_hotfix4_red.py`](file:///Users/Kerwin/MyProject/nas-file-center/tests/test_gate5b_hotfix4_red.py)，确认 5 项基线偏差在修复前全部失败：
 ```text
-FAILED tests/test_gate5b_hotfix3_red.py::test_sequential_snapshot_accepted
-  -> ValidationError: Input should be 'per_folder', 'continuous' or 'none' (sequential rejected)
-FAILED tests/test_gate5b_hotfix3_red.py::test_ordered_snapshot_accepted
-  -> ValidationError: Input should be 'preserve', 'delay', 'current' or 'none' (ordered rejected)
-FAILED tests/test_gate5b_hotfix3_red.py::test_continuous_snapshot_rejected
-  -> Failed: DID NOT RAISE ValidationError (continuous accepted)
-FAILED tests/test_gate5b_hotfix3_red.py::test_delay_snapshot_rejected
-  -> Failed: DID NOT RAISE ValidationError (delay accepted)
-FAILED tests/test_gate5b_hotfix3_red.py::test_numbering_padding_1000_rejected
-  -> Failed: DID NOT RAISE ValidationError (padding 1000 accepted)
-FAILED tests/test_gate5b_hotfix3_red.py::test_numbering_start_negative_rejected
-  -> Failed: DID NOT RAISE ValidationError (start -5 accepted)
-FAILED tests/test_gate5b_hotfix3_red.py::test_mtime_delay_seconds_bool_rejected
-  -> Failed: DID NOT RAISE ValidationError (delay=True accepted)
+FAILED tests/test_gate5b_hotfix4_red.py::test_red_minimal_defaults_mismatch
+  -> AssertionError: assert [] == ['jpg', 'jpeg', 'png', 'webp'] (default image_extensions was empty)
+FAILED tests/test_gate5b_hotfix4_red.py::test_red_whitespace_name_not_rejected
+  -> Failed: DID NOT RAISE ValidationError (name="   " was accepted)
+FAILED tests/test_gate5b_hotfix4_red.py::test_red_extension_not_normalized
+  -> AssertionError: assert ['.JPG'] == ['jpg'] (uppercase and leading dot not normalized)
+FAILED tests/test_gate5b_hotfix4_red.py::test_red_invalid_extension_not_rejected
+  -> Failed: DID NOT RAISE ValidationError (invalid ext "jpg/bad" was accepted)
+FAILED tests/test_gate5b_hotfix4_red.py::test_red_preserve_tags_not_trimmed_and_capped
+  -> AssertionError: assert len(tags) == 25 (expected 20 tags capped and trimmed)
 ```
 
 ### 3.2 修复后套件验证 (GREEN Evidence)
 ```bash
-# 1. Gate5-B-hotfix3 CP1~CP11 完整测试套件 (11 passed in 1.34s)
-docker exec -e PYTHONPATH=/app nas-test-env pytest tests/test_gate5b_hotfix3.py -v
-# Output: 11 passed, 2 warnings in 1.34s
+# 1. Gate5-B-hotfix4 Section 13 完整测试套件 (9 passed in 1.18s)
+docker exec -e PYTHONPATH=/app nas-test-env pytest tests/test_gate5b_hotfix4.py -v
+# Output: 9 passed, 2 warnings in 1.18s
 
-# 2. Gate5-B-hotfix3 专属 RED 验证测试 (7 passed in 0.05s)
-docker exec -e PYTHONPATH=/app nas-test-env pytest tests/test_gate5b_hotfix3_red.py -v
-# Output: 7 passed, 0 warnings in 0.05s
+# 2. Gate5-B-hotfix4 TDD RED->GREEN 验证 (5 passed in 0.19s)
+docker exec -e PYTHONPATH=/app nas-test-env pytest tests/test_gate5b_hotfix4_red.py -v
+# Output: 5 passed in 0.19s
 
-# 3. Gate5-B-hotfix2 回归测试 (6 passed in 0.90s)
-docker exec -e PYTHONPATH=/app nas-test-env pytest tests/test_gate5b_hotfix2.py -v
-# Output: 6 passed, 2 warnings in 0.90s
+# 3. Gate5-B 历史回归测试套件 (53 passed in 21.15s)
+docker exec -e PYTHONPATH=/app nas-test-env pytest tests/test_gate5b_hotfix3.py tests/test_gate5b_hotfix2.py tests/test_gate5b_hotfix1_red.py tests/test_organizer_blockers_regression.py -v
+# Output: 53 passed, 2 warnings in 21.15s
 
-# 4. Gate5-B-hotfix1 回归与整理方案回归测试 (36 passed in 19.61s)
-docker exec -e PYTHONPATH=/app nas-test-env pytest tests/test_gate5b_hotfix1_red.py tests/test_organizer_blockers_regression.py -v
-# Output: 36 passed, 2 warnings in 19.61s
+# 4. 工作流全集与过滤器测试 (54 passed in 2.30s)
+docker exec -e PYTHONPATH=/app nas-test-env pytest tests/test_workflow_*.py tests/test_filter_*.py -q
+# Output: 54 passed in 2.30s
 
-# 5. 工作流全集与过滤器测试 (54 passed in 2.34s)
-docker exec -e PYTHONPATH=/app nas-test-env pytest tests/test_workflow_*.py tests/test_filter_*.py -v
-# Output: 54 passed, 2 warnings in 2.34s
-
-# 6. Gate2 核心套件 (55 passed)
+# 5. Gate2 核心套件 (55 passed in 4.80s)
 docker exec -e PYTHONPATH=/app nas-test-env pytest tests/test_gate2*.py -q
-# Output: 55 passed in 5.61s
+# Output: 55 passed in 4.80s
 
-# 7. 后端全量测试套件 (587 passed in 1m 09s)
+# 6. 后端全量测试套件 (601 passed in 1m 11s)
 docker exec -e PYTHONPATH=/app nas-test-env pytest -q tests
-# Output: 587 passed, 20 warnings in 1m 09s
+# Output: 601 passed, 20 warnings in 1m 11s
 
-# 8. 前端测试与生产打包 (177 passed in 102ms, build succeeded in 3.46s)
-cd frontend && npm test && npm run build
-# Output: 177 passed in 102ms, built in 3.46s
+# 7. 前端测试与生产打包 (177 passed in 102ms, build succeeded in 3.45s)
+cd frontend && npm test -- --watchAll=false && npm run build
+# Output: 177 passed in 102ms, built in 3.45s
 ```
 
 ### 3.3 Docker 容器黑盒端到端验收 (Blackbox Evidence)
-全新构建生产镜像 `nas-file-center:v0.3.5-gate5b-hotfix3`，并在隔离容器环境中执行黑盒验收脚本 `scratch/test_gate5b_hotfix3_blackbox_acceptance.py`：
+基于生产镜像 `nas-file-center:v0.3.5-gate5b-hotfix4`，在隔离容器环境中执行黑盒验收脚本 `scratch/test_gate5b_hotfix4_blackbox_acceptance.py`：
 ```text
-=== Starting Gate5-B-hotfix3 Blackbox Acceptance against nas-file-center:v0.3.5-gate5b-hotfix3 ===
-[DEPLOY] Starting API container nas-gate5b-hf3-accept-2fadb7...
+=== Starting Gate5-B-hotfix4 Blackbox Acceptance against nas-file-center:v0.3.5-gate5b-hotfix4 ===
+[DEPLOY] Starting API container nas-gate5b-hf4-accept-d40511...
 [DEPLOY] API container is healthy.
 [AUTH] Login successful, session cookie obtained.
 [SETUP] Target IndexRoot ID: 1
-[CP1] Verifying sequential snapshot accepted (201)...
+[CP1] Verifying minimal OrganizerProfile vs minimal Snapshot defaults...
 [CP1] CP1: PASS
-[CP2] Verifying ordered snapshot accepted (201)...
+[CP2] Verifying minimal preview semantic equivalence (Album -> Album, changed=False)...
 [CP2] CP2: PASS
-[CP3] Verifying continuous / per_folder rejected (422)...
+[CP3] Verifying extension normalization...
 [CP3] CP3: PASS
-[CP4] Verifying delay / preserve / current rejected (422)...
+[CP4] Verifying invalid extensions rejection (422)...
 [CP4] CP4: PASS
-[CP5] Verifying numbering bounds rejected (422)...
+[CP5] Verifying whitespace-only name rejection (422)...
 [CP5] CP5: PASS
-[CP6] Verifying bool/string delay seconds rejected (422)...
+[CP6] Verifying preserve_tags trimming and cap 20...
 [CP6] CP6: PASS
-[CP7] Verifying existing OrganizerProfile -> snapshot roundtrip...
+[CP7] Verifying full existing OrganizerProfile round-trip...
 [CP7] CP7: PASS
-[CP8] Verifying direct Organizer plan vs Workflow snapshot plan semantic equivalence...
+[CP8] Verifying sequential and ordered options in preview...
 [CP8] CP8: PASS
-[CP9] Verifying live Profile mutation isolation...
+[CP9] Verifying invalid enum / numeric cases rejection (422)...
 [CP9] CP9: PASS
-[CP10] Verifying zero unexpected filesystem mutation...
+[CP10] Verifying SQLite integrity check...
 [CP10] CP10: PASS
-[CP11] Verifying SQLite integrity and recipe immutability...
-[CP11] CP11: PASS
 [SUMMARY] Final Report: {
   "CP1": "PASS",
   "CP2": "PASS",
@@ -153,11 +144,10 @@ cd frontend && npm test && npm run build
   "CP7": "PASS",
   "CP8": "PASS",
   "CP9": "PASS",
-  "CP10": "PASS",
-  "CP11": "PASS"
+  "CP10": "PASS"
 }
 
-ALL GATE5-B-HOTFIX3 BLACKBOX ACCEPTANCE CHECKS PASSED!
+ALL GATE5-B-HOTFIX4 BLACKBOX ACCEPTANCE CHECKS PASSED!
 ```
 
 ---
@@ -165,9 +155,9 @@ ALL GATE5-B-HOTFIX3 BLACKBOX ACCEPTANCE CHECKS PASSED!
 ## 4. Final Review Status & Artifacts (最终状态与发布制品)
 
 ```text
-Gate5-B-hotfix3 implementation candidate ready for independent review.
+Gate5-B-hotfix4 implementation candidate ready for independent review.
 
-P2-11: CLOSED
+P2-12: CLOSED
 
 Gate5-A = PASS
 Gate5-B = HOLD (Candidate Ready for Independent Review)

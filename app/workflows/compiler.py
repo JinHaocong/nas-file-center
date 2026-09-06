@@ -13,6 +13,10 @@ from app.filters.validation import validate_filter_ast
 from app.models import FilterPolicy, IndexRoot, IndexedPath
 from app.organizers.engine import generate_organizer_proposals
 from app.organizers.planner import plan_organizer_operations
+from app.organizers.profile_validation import (
+    DEFAULT_ORGANIZER_RENAME_TEMPLATE,
+    DEFAULT_ORGANIZER_STATISTICS_TEMPLATE,
+)
 from app.path_safety import require_allowed_path, require_unreserved_path
 from app.workflows.errors import (
     VirtualGraphCollisionError,
@@ -172,8 +176,8 @@ class WorkflowCompiler:
             allowed_roots=self.allowed_roots,
             image_extensions=image_extensions,
             video_extensions=video_extensions,
-            rename_template=snapshot.get("rename_template") or "{name} {statistics}",
-            statistics_template=snapshot.get("statistics_template") or "[{images}P{?videos: {videos}V} {size}]",
+            rename_template=snapshot.get("rename_template") or DEFAULT_ORGANIZER_RENAME_TEMPLATE,
+            statistics_template=snapshot.get("statistics_template") or DEFAULT_ORGANIZER_STATISTICS_TEMPLATE,
             preserve_tags=preserve_tags,
             cleanup_patterns=cleanup_patterns,
             numbering_mode=snapshot.get("numbering_mode") or "none",

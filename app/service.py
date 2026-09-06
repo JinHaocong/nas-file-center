@@ -96,6 +96,15 @@ PLAN_HISTORY_STATES = {
 
 from app.organizers.engine import generate_organizer_proposals
 from app.organizers.planner import plan_organizer_operations
+from app.organizers.profile_validation import (
+    normalize_preserve_tags,
+    validate_and_normalize_image_extensions,
+    validate_and_normalize_video_extensions,
+    validate_profile_cleanup_patterns,
+    validate_profile_name,
+    validate_rename_template,
+    validate_statistics_template,
+)
 from app.organizers.templates import (
     ALLOWED_RENAME_VARS,
     ALLOWED_STATISTICS_VARS,
@@ -2586,9 +2595,7 @@ class FileCenterService:
         }
 
     def _validate_profile_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
-        name = str(payload.get("name") or "").strip()
-        if not name:
-            raise ValueError("方案名称不能为空")
+        name = validate_profile_name(payload.get("name"))
 
         root = payload.get("root")
         if root and str(root).strip():
@@ -2600,37 +2607,12 @@ class FileCenterService:
         else:
             clean_root = None
 
-        if "image_extensions" in payload and payload["image_extensions"] is not None:
-            image_extensions = validate_and_normalize_extensions(payload["image_extensions"], "image_extensions")
-        else:
-            image_extensions = ["jpg", "jpeg", "png", "webp"]
-
-        if "video_extensions" in payload and payload["video_extensions"] is not None:
-            video_extensions = validate_and_normalize_extensions(payload["video_extensions"], "video_extensions")
-        else:
-            video_extensions = ["mp4", "mov", "mkv"]
-
-        rename_template = str(payload.get("rename_template") or "{name}").strip()
-        r_errors = validate_template(rename_template, ALLOWED_RENAME_VARS)
-        if r_errors:
-            raise ValueError(r_errors[0])
-
-        statistics_template = str(payload.get("statistics_template") or "[{images}P {videos}V {size}]").strip()
-        s_errors = validate_template(statistics_template, ALLOWED_STATISTICS_VARS)
-        if s_errors:
-            raise ValueError(s_errors[0])
-
-        cleanup_patterns = payload.get("cleanup_patterns") if "cleanup_patterns" in payload and payload["cleanup_patterns"] is not None else []
-        if not isinstance(cleanup_patterns, list):
-            raise ValueError("cleanup_patterns 必须为列表")
-        c_errors = validate_cleanup_patterns(cleanup_patterns)
-        if c_errors:
-            raise ValueError(c_errors[0])
-
-        preserve_tags = payload.get("preserve_tags") if "preserve_tags" in payload and payload["preserve_tags"] is not None else []
-        if not isinstance(preserve_tags, list):
-            raise ValueError("preserve_tags 必须为列表")
-        clean_tags = [str(t).strip() for t in preserve_tags if str(t).strip()][:20]
+        image_extensions = validate_and_normalize_image_extensions(payload.get("image_extensions"))
+        video_extensions = validate_and_normalize_video_extensions(payload.get("video_extensions"))
+        rename_template = validate_rename_template(payload.get("rename_template"))
+        statistics_template = validate_statistics_template(payload.get("statistics_template"))
+        cleanup_patterns = validate_profile_cleanup_patterns(payload.get("cleanup_patterns"))
+        clean_tags = normalize_preserve_tags(payload.get("preserve_tags"))
 
         numbering_mode = str(payload.get("numbering_mode") or "none").strip()
         if numbering_mode not in {"none", "sequential"}:
