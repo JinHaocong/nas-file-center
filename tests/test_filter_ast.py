@@ -55,7 +55,7 @@ def test_empty_logical_nodes_rejected():
     with pytest.raises(FilterValidationError, match="Logical node 'or' must have at least one child"):
         validate_filter_ast(LogicalNode(op="or", children=[]))
 
-    with pytest.raises(FilterValidationError, match="Logical node 'not' must have exactly one child"):
+    with pytest.raises(FilterValidationError, match="Logical node 'not'"):
         validate_filter_ast(LogicalNode(op="not", children=[]))
 
 def test_regex_and_matches_rejected():
@@ -115,3 +115,119 @@ def test_media_type_validation_and_mapping():
     # Invalid media_type value rejected
     with pytest.raises(FilterValidationError, match="Invalid media_type 'unknown_type'"):
         validate_filter_ast(LeafNode(field="media_type", operator="eq", value="unknown_type"))
+
+def test_ast_fail_closed_extra_fields():
+    from pydantic import ValidationError
+    from app.filters.schema import FilterPreviewRequest
+
+    # Top-level typo in FilterPreviewRequest must raise ValidationError
+    with pytest.raises(ValidationError):
+        FilterPreviewRequest.model_validate({
+            "roots": ["/data/media"],
+            "filtter": {
+                "field": "name",
+                "operator": "eq",
+                "value": "a.txt"
+            }
+        })
+
+    # Leaf extra attribute must raise ValidationError
+    with pytest.raises(ValidationError):
+        LeafNode.model_validate({
+            "field": "name",
+            "operator": "eq",
+            "value": "a.txt",
+            "typo_extra": True
+        })
+
+
+def test_logical_node_strict_one_shape():
+    # and / or with 'child' must be rejected
+    with pytest.raises(FilterValidationError, match="Logical node 'and' only allows 'children'"):
+        validate_filter_ast(LogicalNode(
+            op="and",
+            children=[LeafNode(field="name", operator="eq", value="a.txt")],
+            child=LeafNode(field="name", operator="eq", value="b.txt")
+        ))
+
+    with pytest.raises(FilterValidationError, match="Logical node 'or' only allows 'children'"):
+        validate_filter_ast(LogicalNode(
+            op="or",
+            children=[LeafNode(field="name", operator="eq", value="a.txt")],
+            child=LeafNode(field="name", operator="eq", value="b.txt")
+        ))
+
+    # not with 'children' must be rejected
+    with pytest.raises(FilterValidationError, match="Logical node 'not' only allows 'child'"):
+        validate_filter_ast(LogicalNode(
+            op="not",
+            children=[LeafNode(field="name", operator="eq", value="a.txt")]
+        ))
+
+    # not with both child and children must be rejected
+    with pytest.raises(FilterValidationError, match="Logical node 'not' only allows 'child'"):
+        validate_filter_ast(LogicalNode(
+            op="not",
+            child=LeafNode(field="name", operator="eq", value="a.txt"),
+            children=[LeafNode(field="name", operator="eq", value="b.txt")]
+        ))
+
+
+def test_mtime_strict_typing_and_timezone():
+    # float mtime must be rejected
+    with pytest.raises(FilterValidationError, match="float"):
+        validate_filter_ast(LeafNode(field="mtime", operator="eq", value=1.5))
+
+    with pytest.raises(FilterValidationError, match="float"):
+        validate_filter_ast(LeafNode(field="mtime", operator="eq", value=1786795200.123))
+
+    # boolean mtime must be rejected
+    with pytest.raises(FilterValidationError, match="boolean"):
+        validate_filter_ast(LeafNode(field="mtime", operator="eq", value=True))
+
+    with pytest.raises(FilterValidationError, match="boolean"):
+        validate_filter_ast(LeafNode(field="mtime", operator="eq", value=False))
+
+    # timezone-naive ISO string must be rejected
+    with pytest.raises(FilterValidationError, match="timezone"):
+        validate_filter_ast(LeafNode(field="mtime", operator="eq", value="2026-09-06T10:00:00"))
+
+    # timezone-aware UTC ISO string must be accepted
+    leaf_utc = validate_filter_ast(LeafNode(field="mtime", operator="eq", value="2026-09-06T10:00:00Z"))
+    assert leaf_utc.value == 1788688800000000000
+
+    # timezone-aware offset ISO string must be accepted
+    leaf_offset = validate_filter_ast(LeafNode(field="mtime", operator="eq", value="2026-09-06T18:00:00+08:00"))
+    assert leaf_offset.value == 1788688800000000000
+
+    # integer epoch seconds must be accepted
+    leaf_int = validate_filter_ast(LeafNode(field="mtime", operator="eq", value=1788688800))
+    assert leaf_int.value == 1788688800000000000
+
+    # integer nanoseconds or out-of-range must be rejected
+    with pytest.raises(FilterValidationError, match="range"):
+        validate_filter_ast(LeafNode(field="mtime", operator="eq", value=1788688800000000000))
+
+
+def test_string_fields_strict_types():
+    # in/nin non-string rejected
+    for bad_val in [[123], [True], ["jpg", 1], "a,b,c", []]:
+        with pytest.raises(FilterValidationError):
+            validate_filter_ast(LeafNode(field="name", operator="in", value=bad_val))
+        with pytest.raises(FilterValidationError):
+            validate_filter_ast(LeafNode(field="path", operator="in", value=bad_val))
+        with pytest.raises(FilterValidationError):
+            validate_filter_ast(LeafNode(field="extension", operator="in", value=bad_val))
+        with pytest.raises(FilterValidationError):
+            validate_filter_ast(LeafNode(field="media_type", operator="in", value=bad_val))
+
+    # single string operations non-string rejected
+    for bad_scalar in [123, True, 1.5, None, ["a"]]:
+        with pytest.raises(FilterValidationError):
+            validate_filter_ast(LeafNode(field="name", operator="eq", value=bad_scalar))
+        with pytest.raises(FilterValidationError):
+            validate_filter_ast(LeafNode(field="path", operator="contains", value=bad_scalar))
+        with pytest.raises(FilterValidationError):
+            validate_filter_ast(LeafNode(field="extension", operator="eq", value=bad_scalar))
+        with pytest.raises(FilterValidationError):
+            validate_filter_ast(LeafNode(field="media_type", operator="eq", value=bad_scalar))

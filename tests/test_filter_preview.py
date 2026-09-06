@@ -162,3 +162,70 @@ def test_preview_pagination(test_setup):
     data2 = resp2.json()
     assert len(data2["items"]) == 1
     assert data2["items"][0]["name"] == "photo.jpg"
+
+def test_preview_media_type_in_and_nin_api(test_setup):
+    client, media_root = test_setup
+
+    # media_type IN ["video", "image"] -> 200 OK
+    payload_in = {
+        "roots": [media_root],
+        "filter": {"field": "media_type", "operator": "in", "value": ["video", "image"]},
+    }
+    resp_in = client.post("/api/filters/preview", json=payload_in, headers={"Origin": "http://testserver"})
+    assert resp_in.status_code == 200, resp_in.text
+    assert resp_in.json()["matched_count"] == 2
+
+    # media_type NIN ["video", "image"] -> 200 OK
+    payload_nin = {
+        "roots": [media_root],
+        "filter": {"field": "media_type", "operator": "nin", "value": ["video", "image"]},
+    }
+    resp_nin = client.post("/api/filters/preview", json=payload_nin, headers={"Origin": "http://testserver"})
+    assert resp_nin.status_code == 200, resp_nin.text
+    # small.txt is document, so matches nin video/image
+    assert resp_nin.json()["matched_count"] == 1
+    assert resp_nin.json()["items"][0]["name"] == "small.txt"
+
+
+def test_preview_fail_closed_validation_errors(test_setup):
+    client, media_root = test_setup
+
+    # 1. Top-level typo must return 422
+    resp_typo = client.post(
+        "/api/filters/preview",
+        json={"roots": [media_root], "filtter": {"field": "name", "operator": "eq", "value": "small.txt"}},
+        headers={"Origin": "http://testserver"},
+    )
+    assert resp_typo.status_code == 422
+
+    # 2. Leaf extra field must return 422
+    resp_leaf_extra = client.post(
+        "/api/filters/preview",
+        json={"roots": [media_root], "filter": {"field": "name", "operator": "eq", "value": "small.txt", "extra_bad": 1}},
+        headers={"Origin": "http://testserver"},
+    )
+    assert resp_leaf_extra.status_code == 422
+
+    # 3. mtime float must return 422
+    resp_mtime_float = client.post(
+        "/api/filters/preview",
+        json={"roots": [media_root], "filter": {"field": "mtime", "operator": "gte", "value": 1786795200.5}},
+        headers={"Origin": "http://testserver"},
+    )
+    assert resp_mtime_float.status_code == 422
+
+    # 4. mtime naive ISO must return 422
+    resp_mtime_naive = client.post(
+        "/api/filters/preview",
+        json={"roots": [media_root], "filter": {"field": "mtime", "operator": "gte", "value": "2026-09-06T10:00:00"}},
+        headers={"Origin": "http://testserver"},
+    )
+    assert resp_mtime_naive.status_code == 422
+
+    # 5. non-string in list must return 422
+    resp_non_str = client.post(
+        "/api/filters/preview",
+        json={"roots": [media_root], "filter": {"field": "name", "operator": "in", "value": [123]}},
+        headers={"Origin": "http://testserver"},
+    )
+    assert resp_non_str.status_code == 422

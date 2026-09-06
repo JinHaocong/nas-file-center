@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from typing import Any, Literal, Union
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class LeafNode(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     field: str
     operator: str
     value: Any
@@ -12,6 +14,8 @@ class LeafNode(BaseModel):
 
 
 class LogicalNode(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     op: Literal["and", "or", "not"]
     children: list[FilterNode] | None = None
     child: FilterNode | None = None
@@ -22,10 +26,14 @@ LogicalNode.model_rebuild()
 
 
 class FilterExpression(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     node: FilterNode
 
 
 class FilterPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     roots: list[str]
     filter: FilterNode | None = None
     page: int = 1

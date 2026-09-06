@@ -1,48 +1,37 @@
-# NAS File Center v0.3.5 Gate5-A — Implementation & Acceptance Walkthrough
+# NAS File Center v0.3.5 Gate5-A-hotfix1 — Implementation & Acceptance Walkthrough
 
 ## 1. Scope (本次范围)
 - **唯一基线**: `nas-file-center-v0.3.4-gate4-baseline-hotfix1.zip` (Commit: `e9cf7ef5defa0678d117d60dd997e881134d2ede`)
 - **核心性质**: **FILESYSTEM READ ONLY**。Preview 仅从 `IndexedPath` 与 `IndexRoot` 读取，严禁创建 BatchPlan / PlanItem / WorkJob / OperationJournal / QuarantineEntry，严禁产生文件系统突变。
-- **本次实现范围**:
-  1. **Unified Filter AST**: Pydantic AST 语法树模型（LogicalNode: `and`, `or`, `not`; LeafNode: `field`, `operator`, `value`, `case_sensitive`）。
-  2. **Filter Validation & Complexity Guard**: 最大深度 5，单逻辑节点子项上限 50，总叶子上限 200。字段范围严格限定为 `path`, `name`, `extension`, `size`, `mtime`, `media_type`。严格拒绝 `regex` 字段与 `matches` 操作符（HTTP 422 明确提示 `"regex filtering is not supported in Gate5-A"`）。
-  3. **SQL Filter Compiler**: 将 Filter AST 编译为 SQLAlchemy `IndexedPath` 谓词。精确转义 LIKE 特殊字符（`%`, `_`, `!`），支持大小写敏感/不敏感与复合布尔逻辑。
-  4. **Global Exclude Rules & Persistence (`FilterPolicy`)**: 段感知目录 Basename 排除谓词生成；默认排除规则持久化在 SQLite 单例表 `filter_policy` (id=1)；硬隔离 `quarantine_root` 排除保护。
-  5. **Read-only Filter Preview API**: `POST /api/filters/preview`，面向所有登录用户开放，提供服务端分页（1 <= page, 1 <= page_size <= 200, 默认 50）、稳定二级排序（`IndexedPath.id`）、SQL 聚合（`COUNT(*)` 与 `COALESCE(SUM(size), 0)`）及索引新鲜度元数据（`preview_source="index"`, `live_filesystem_verified=false`, `roots=[{root, last_indexed_at}]`）。
-  6. **FilterPolicy API**: `GET /api/filter-policy`（所有登录用户可读），`PUT /api/filter-policy`（Admin 专享，普通用户 403 阻断）。
-- **严格非目标**:
-  - 严禁实现 Workflow DB / Compiler / UI / Revision、Plan Rebuild、Advanced Dedupe、Resource Control、Scheduler、Regex 运行时、文件突变编排。
+- **Gate5-A-hotfix1 修复范围**:
+  1. **P2-01: media_type in/nin runtime 500 修复**:
+     - 修复 `app/filters/compiler.py` 中 `or_*` 与 `and_*` 语法错误，改为正确的 SQLAlchemy `or_(*expressions)` 与 `and_(*(not_(e) for e in expressions))`。
+     - 覆盖 `media_type eq`, `neq`, `in`, `nin`，并添加 API 集成测试。
+  2. **P2-02: AST 语法树 Fail-closed 严格校验**:
+     - `FilterPreviewRequest`, `LeafNode`, `LogicalNode`, `FilterExpression` 均增加 `model_config = ConfigDict(extra="forbid")`，顶层与叶子节点拼写错误及未知字段统一返回 HTTP 422。
+     - `LogicalNode` 严格单形态：`and`/`or` 仅允许 `children`（有 `child` 返回 422）；`not` 仅允许单个 `child`（有 `children` 返回 422），移除任何宽容兼容逻辑。
+  3. **P2-03: mtime 强类型与字符串字段严格类型校验**:
+     - `mtime` 仅接受时区感知的 ISO-8601 字符串（无时区返回 422）或在有效范围（0 ~ 253402300799）内的整数 epoch 秒，转换为 UTC 纳秒；浮点数、布尔值及超范围纳秒整数统一返回 422。
+     - `path`, `name`, `extension`, `media_type` 的 `in`/`nin` 强制要求非空 `list[str]`（包含数字、布尔值等直接 422）；标量比较（`eq`, `neq` 等）严格要求字符串类型，禁止静默类型转换。
 
 ---
 
 ## 2. Technical Implementation Details (技术实现要点)
 
-### 2.1 模块分层结构
-```text
-app/filters/
-├── __init__.py
-├── schema.py        # Filter AST Pydantic 模型与 API 契约
-├── validation.py    # 语法树深度/节点数量守卫、字段操作符语义校验与类型转换
-├── media_types.py   # 扩展名到 media_type 的确定性映射
-├── compiler.py      # AST 递归编译为 SQLAlchemy IndexedPath 谓词（! 转义 LIKE）
-└── excludes.py      # 全局排除规则校验与段感知 SQL 谓词构建器
-```
-
-### 2.2 核心安全与只读保证
-1. **0 文件系统突变**: Preview 阶段执行纯粹的 SQLite 查询，文件系统 pre/post manifest 100% 恒等一致。
-2. **0 任务与计划生成**: Preview 不创建 BatchPlan、PlanItem、WorkJob、Journal、QuarantineEntry。
-3. **安全模式兼容**: `ALLOW_MUTATION=false` 下 Preview 与 `PUT /api/filter-policy`（仅 SQLite 配置变更）正常运行。
-4. **Index Freshness 契约 (Rule 30)**: 文件从磁盘删除而未重新索引时，Preview 继续依据 Index 返回条目并明确声明 `live_filesystem_verified=false`，重新索引后失效条目自动消失。
+### 2.1 模块修改清单
+- `app/filters/compiler.py`: 修复 `media_type in/nin` 谓词编译逻辑；移除 `not` 的 `children` 宽松降级。
+- `app/filters/schema.py`: 为 AST 与请求模型添加 `ConfigDict(extra="forbid")`。
+- `app/filters/validation.py`: 严格化 `_parse_mtime_to_ns`（拒绝 float/bool/naive ISO），严格化 `validate_filter_ast`（严格逻辑节点形态、非空字符串列表与标量字符串类型检查）。
 
 ---
 
 ## 3. Verification & Acceptance (验证与验收结果)
 
-### 3.1 后端全量测试 (522 passed, 100% PASS)
+### 3.1 后端全量测试 (529 passed, 100% PASS)
 - 命令: `docker run --rm -v "$(pwd):/app" -w /app -e PYTHONPATH=. nas-test-env:latest pytest -q`
-- 结果: **522 passed, 0 failed** (原基线 499 passed + Gate5-A 新增 23 passed)
+- 结果: **529 passed, 0 failed** (原基线 499 passed + Gate5-A 与 hotfix1 新增 30 passed)
   - `Existing baseline failures`: 0
-  - `Gate5-A new failures`: 0
+  - `Gate5-A-hotfix1 new failures`: 0
 
 ### 3.2 核心安全回归套件 (174 passed, 100% PASS)
 - Gate2 套件: `pytest -q tests/test_gate2_*.py` -> **55 passed**
@@ -54,19 +43,20 @@ app/filters/
 - `npm run typecheck` -> **tsc --noEmit 零错误**
 - `npm run build` -> **vite 生产构建成功**
 
-### 3.4 Docker 镜像与容器独立黑盒验收 (CP1 ~ CP10 全部 PASS)
-- 构建镜像: `docker build --platform linux/amd64 -t nas-file-center:v0.3.5-gate5a .`
-- 运行黑盒脚本: `scratch/test_gate5a_blackbox_acceptance.py`
-  - `CP1_HEALTH`: PASS (API & Worker 容器健康运行)
-  - `CP2_INDEX`: PASS (多目录并发索引与任务执行正常)
-  - `CP3_PREVIEW`: PASS (AST、操作符、media_type 准确解析；regex/matches 显式 422 拒绝)
-  - `CP4_PAGINATION`: PASS (分页参数边界校验、稳定排序、SQL 聚合匹配字节与数量准确)
-  - `CP5_EXCLUDES`: PASS (段感知全局目录排除生效；隔离区硬排除生效)
-  - `CP6_RBAC`: PASS (普通用户读 200 写 403；Admin 读写 200)
-  - `CP7_SAFE_MODE`: PASS (`ALLOW_MUTATION=false` 下 Preview 读与策略写正常)
-  - `CP8_ZERO_MUTATION`: PASS (0 plan, 0 item, 0 journal, 0 quarantine, /data manifest 100% 保持一致)
-  - `CP9_FRESHNESS`: PASS (严格遵守 Rule 30 索引新鲜度行为)
-  - `CP10_SQLITE`: PASS (integrity_check=ok, foreign_key_check=clean, journal_mode=wal)
+### 3.4 Docker 镜像与容器独立黑盒验收 (CP1 ~ CP11 全部 PASS)
+- 构建镜像: `docker build --platform linux/amd64 -t nas-file-center:v0.3.5-gate5a-hotfix1 .`
+- 运行黑盒脚本: `scratch/test_gate5a_hotfix1_blackbox_acceptance.py`
+  - `CP1_MEDIA_TYPE_IN`: PASS (API 200，准确匹配视频与图片)
+  - `CP2_MEDIA_TYPE_NIN`: PASS (API 200，准确排除视频与图片)
+  - `CP3_FILTER_TYPO`: PASS (顶层拼写错误拒绝 422)
+  - `CP4_LEAF_EXTRA`: PASS (叶子额外属性拒绝 422)
+  - `CP5_LOGICAL_SHAPE`: PASS (非法逻辑节点形态拒绝 422)
+  - `CP6_MTIME_FLOAT`: PASS (mtime 浮点数拒绝 422)
+  - `CP7_NAIVE_MTIME`: PASS (无时区 ISO 字符串拒绝 422)
+  - `CP8_AWARE_MTIME`: PASS (UTC 与偏移时区 ISO 字符串正常返回 200)
+  - `CP9_NON_STRING_IN`: PASS (非字符串列表项拒绝 422)
+  - `CP10_ZERO_MUTATION`: PASS (0 plan, 0 item, 0 journal, 0 quarantine, /data manifest 100% 保持一致)
+  - `CP11_SQLITE`: PASS (integrity_check=ok, foreign_key_check=clean, journal_mode=wal)
 
 ---
 

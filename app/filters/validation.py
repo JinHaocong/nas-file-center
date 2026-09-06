@@ -28,31 +28,30 @@ class FilterValidationError(ValueError):
 
 
 def _parse_mtime_to_ns(val: Any) -> int:
-    """Parse string ISO-8601 or int seconds/ns into UTC nanoseconds integer."""
+    """Parse timezone-aware string ISO-8601 or int epoch seconds into UTC nanoseconds integer."""
     if isinstance(val, bool):
         raise FilterValidationError("mtime value cannot be a boolean")
-    if isinstance(val, (int, float)):
-        int_val = int(val)
-        # If timestamp looks like seconds (< 1e11), convert to ns
-        if int_val < 100_000_000_000:
-            return int_val * 1_000_000_000
-        return int_val
+    if isinstance(val, float):
+        raise FilterValidationError("mtime value cannot be a float")
+    if type(val) is int:
+        # Bounded epoch seconds (0 to 253402300799 = year 9999)
+        if val < 0 or val > 253_402_300_799:
+            raise FilterValidationError(f"mtime epoch seconds out of supported range (0 to 253402300799), got {val}")
+        return val * 1_000_000_000
     if isinstance(val, str):
         val_str = val.strip()
+        if val_str.endswith("Z") or val_str.endswith("z"):
+            val_clean = val_str[:-1] + "+00:00"
+        else:
+            val_clean = val_str
         try:
-            # Handle trailing Z for UTC
-            if val_str.endswith("Z") or val_str.endswith("z"):
-                val_clean = val_str[:-1] + "+00:00"
-            else:
-                val_clean = val_str
             dt = datetime.fromisoformat(val_clean)
-            if dt.tzinfo is None:
-                # Force UTC if timezone naive
-                dt = dt.replace(tzinfo=timezone.utc)
-            return int(dt.timestamp() * 1_000_000_000)
         except Exception as exc:
             raise FilterValidationError(f"Invalid mtime format '{val}': {exc}") from exc
-    raise FilterValidationError(f"mtime value must be ISO-8601 string or integer timestamp, got {type(val).__name__}")
+        if dt.tzinfo is None:
+            raise FilterValidationError("mtime ISO datetime must be timezone-aware (missing timezone)")
+        return int(dt.timestamp() * 1_000_000_000)
+    raise FilterValidationError(f"mtime value must be timezone-aware ISO string or integer epoch seconds, got {type(val).__name__}")
 
 
 def validate_filter_ast(node: FilterNode, current_depth: int = 1, leaf_counter: list[int] | None = None) -> FilterNode:
@@ -86,44 +85,56 @@ def validate_filter_ast(node: FilterNode, current_depth: int = 1, leaf_counter: 
         val = node.value
         # Type & value validations
         if field == "size":
-            if isinstance(val, bool) or not isinstance(val, int) or val < 0:
+            if isinstance(val, bool) or type(val) is not int or val < 0:
                 raise FilterValidationError("Size value must be an integer >= 0")
             clean_val = val
         elif field == "mtime":
             clean_val = _parse_mtime_to_ns(val)
         elif field == "extension":
             if operator in {"in", "nin"}:
-                if not isinstance(val, (list, tuple, set)) or not val:
+                if type(val) is not list or len(val) == 0:
                     raise FilterValidationError(f"Value for extension {operator} must be a non-empty list of strings")
-                clean_val = [normalize_extension(str(x)) for x in val]
+                clean_val = []
+                for x in val:
+                    if type(x) is not str or not x.strip():
+                        raise FilterValidationError(f"All items for extension {operator} must be non-empty strings, got {x!r}")
+                    clean_val.append(normalize_extension(x))
             else:
-                if not isinstance(val, str) or not val.strip():
+                if type(val) is not str or not val.strip():
                     raise FilterValidationError("Value for extension must be a non-empty string")
                 clean_val = normalize_extension(val)
         elif field == "media_type":
             if operator in {"in", "nin"}:
-                if not isinstance(val, (list, tuple, set)) or not val:
-                    raise FilterValidationError(f"Value for media_type {operator} must be a non-empty list")
+                if type(val) is not list or len(val) == 0:
+                    raise FilterValidationError(f"Value for media_type {operator} must be a non-empty list of strings")
                 clean_val = []
                 for x in val:
-                    mt = str(x).strip().lower()
+                    if type(x) is not str or not x.strip():
+                        raise FilterValidationError(f"All items for media_type {operator} must be non-empty strings, got {x!r}")
+                    mt = x.strip().lower()
                     if mt not in MEDIA_TYPES:
                         raise FilterValidationError(f"Invalid media_type '{x}'. Allowed: {sorted(MEDIA_TYPES)}")
                     clean_val.append(mt)
             else:
-                mt = str(val).strip().lower()
+                if type(val) is not str or not val.strip():
+                    raise FilterValidationError("Value for media_type must be a non-empty string")
+                mt = val.strip().lower()
                 if mt not in MEDIA_TYPES:
                     raise FilterValidationError(f"Invalid media_type '{val}'. Allowed: {sorted(MEDIA_TYPES)}")
                 clean_val = mt
         elif field in {"path", "name"}:
             if operator in {"in", "nin"}:
-                if not isinstance(val, (list, tuple, set)) or not val:
+                if type(val) is not list or len(val) == 0:
                     raise FilterValidationError(f"Value for {field} {operator} must be a non-empty list of strings")
-                clean_val = [str(x) for x in val]
+                clean_val = []
+                for x in val:
+                    if type(x) is not str or not x.strip():
+                        raise FilterValidationError(f"All items for {field} {operator} must be non-empty strings, got {x!r}")
+                    clean_val.append(x)
             else:
-                if not isinstance(val, str):
-                    raise FilterValidationError(f"Value for {field} must be a string")
-                clean_val = str(val)
+                if type(val) is not str:
+                    raise FilterValidationError(f"Value for {field} must be a string, got {type(val).__name__}")
+                clean_val = val
         else:
             clean_val = val
 
@@ -140,8 +151,10 @@ def validate_filter_ast(node: FilterNode, current_depth: int = 1, leaf_counter: 
             raise FilterValidationError(f"Unsupported logical operator '{node.op}'")
 
         if op in {"and", "or"}:
-            children = node.children or []
-            if not children:
+            if node.child is not None:
+                raise FilterValidationError(f"Logical node '{op}' only allows 'children', got 'child'")
+            children = node.children
+            if not isinstance(children, list) or not children:
                 raise FilterValidationError(f"Logical node '{op}' must have at least one child")
             if len(children) > MAX_CHILDREN:
                 raise FilterValidationError(f"Logical node '{op}' exceeds maximum allowed children count of {MAX_CHILDREN}")
@@ -152,14 +165,11 @@ def validate_filter_ast(node: FilterNode, current_depth: int = 1, leaf_counter: 
             return LogicalNode(op=op, children=validated_children)
 
         if op == "not":
+            if node.children is not None:
+                raise FilterValidationError("Logical node 'not' only allows 'child', got 'children'")
             child = node.child
             if child is None:
-                if node.children and len(node.children) == 1:
-                    child = node.children[0]
-                else:
-                    raise FilterValidationError("Logical node 'not' must have exactly one child")
-            elif node.children and len(node.children) > 0:
-                raise FilterValidationError("Logical node 'not' cannot specify both 'child' and 'children'")
+                raise FilterValidationError("Logical node 'not' only allows 'child', child is missing")
             validated_child = validate_filter_ast(child, current_depth + 1, leaf_counter)
             return LogicalNode(op="not", child=validated_child)
 

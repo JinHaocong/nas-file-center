@@ -108,8 +108,8 @@ def test_size_and_mtime_filter(db_session: Session):
     stmt = select(IndexedPath.basename).where(IndexedPath.is_dir == False, compile_filter_to_sql(leaf_size))
     assert db_session.scalars(stmt).all() == ["movie1.mkv"]
 
-    # Mtime lt 1785500000000000000
-    leaf_mtime = validate_filter_ast(LeafNode(field="mtime", operator="lt", value=1785500000000000000))
+    # Mtime lt 1785500000 (epoch seconds converted to 1785500000000000000 ns)
+    leaf_mtime = validate_filter_ast(LeafNode(field="mtime", operator="lt", value=1785500000))
     stmt = select(IndexedPath.basename).where(IndexedPath.is_dir == False, compile_filter_to_sql(leaf_mtime))
     results = set(db_session.scalars(stmt).all())
     assert results == {"movie1.mkv", "100%_real.txt"}
@@ -130,3 +130,94 @@ def test_composite_logical_filter(db_session: Session):
     stmt = select(IndexedPath.basename).where(IndexedPath.is_dir == False, expr)
     # 1000_real.txt has size 600 (< 1000) and does not contain "%_"
     assert db_session.scalars(stmt).all() == ["1000_real.txt"]
+
+def test_media_type_in_and_nin_compiler(db_session: Session):
+    # Seed specific dataset from Section 2
+    specific_items = [
+        IndexedPath(
+            root_key="/data/media",
+            absolute_path="/data/media/movie.mkv",
+            relative_path="movie.mkv",
+            basename="movie.mkv",
+            stem="movie",
+            suffix=".mkv",
+            size=1000,
+            mtime_ns=1780000000000000000,
+            is_dir=False,
+            scan_generation="gen1",
+        ),
+        IndexedPath(
+            root_key="/data/media",
+            absolute_path="/data/media/photo.jpg",
+            relative_path="photo.jpg",
+            basename="photo.jpg",
+            stem="photo",
+            suffix=".jpg",
+            size=1000,
+            mtime_ns=1780000000000000000,
+            is_dir=False,
+            scan_generation="gen1",
+        ),
+        IndexedPath(
+            root_key="/data/media",
+            absolute_path="/data/media/song.mp3",
+            relative_path="song.mp3",
+            basename="song.mp3",
+            stem="song",
+            suffix=".mp3",
+            size=1000,
+            mtime_ns=1780000000000000000,
+            is_dir=False,
+            scan_generation="gen1",
+        ),
+        IndexedPath(
+            root_key="/data/media",
+            absolute_path="/data/media/readme.txt",
+            relative_path="readme.txt",
+            basename="readme.txt",
+            stem="readme",
+            suffix=".txt",
+            size=1000,
+            mtime_ns=1780000000000000000,
+            is_dir=False,
+            scan_generation="gen1",
+        ),
+        IndexedPath(
+            root_key="/data/media",
+            absolute_path="/data/media/data.xyz",
+            relative_path="data.xyz",
+            basename="data.xyz",
+            stem="data",
+            suffix=".xyz",
+            size=1000,
+            mtime_ns=1780000000000000000,
+            is_dir=False,
+            scan_generation="gen1",
+        ),
+    ]
+    db_session.add_all(specific_items)
+    db_session.commit()
+
+    # 1. media_type IN ["video", "image"] -> movie.mkv + photo.jpg
+    leaf_in = validate_filter_ast(LeafNode(field="media_type", operator="in", value=["video", "image"]))
+    expr_in = compile_filter_to_sql(leaf_in)
+    stmt_in = select(IndexedPath.basename).where(IndexedPath.is_dir == False, expr_in)
+    res_in = set(db_session.scalars(stmt_in).all())
+    assert {"movie.mkv", "photo.jpg"}.issubset(res_in)
+    assert not {"song.mp3", "readme.txt", "data.xyz"}.intersection(res_in)
+
+    # 2. media_type NIN ["video", "image"] -> song.mp3 + readme.txt + data.xyz
+    leaf_nin = validate_filter_ast(LeafNode(field="media_type", operator="nin", value=["video", "image"]))
+    expr_nin = compile_filter_to_sql(leaf_nin)
+    stmt_nin = select(IndexedPath.basename).where(IndexedPath.is_dir == False, expr_nin)
+    res_nin = set(db_session.scalars(stmt_nin).all())
+    assert {"song.mp3", "readme.txt", "data.xyz"}.issubset(res_nin)
+    assert not {"movie.mkv", "photo.jpg"}.intersection(res_nin)
+
+    # 3. media_type neq "video"
+    leaf_neq = validate_filter_ast(LeafNode(field="media_type", operator="neq", value="video"))
+    expr_neq = compile_filter_to_sql(leaf_neq)
+    stmt_neq = select(IndexedPath.basename).where(IndexedPath.is_dir == False, expr_neq)
+    res_neq = set(db_session.scalars(stmt_neq).all())
+    assert "movie.mkv" not in res_neq
+    assert "photo.jpg" in res_neq

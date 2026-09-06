@@ -48,8 +48,6 @@ def compile_filter_to_sql(node: FilterNode) -> ColumnElement[bool]:
         if node.op == "not":
             if node.child is not None:
                 return not_(compile_filter_to_sql(node.child))
-            if node.children and len(node.children) == 1:
-                return not_(compile_filter_to_sql(node.children[0]))
             raise ValueError("LogicalNode 'not' requires a child")
         raise ValueError(f"Unknown logical op: {node.op}")
 
@@ -100,9 +98,11 @@ def compile_filter_to_sql(node: FilterNode) -> ColumnElement[bool]:
             if op == "neq":
                 return not_(_compile_media_type_single(str(val)))
             if op == "in":
-                return or_*([_compile_media_type_single(str(x)) for x in val])
+                expressions = [_compile_media_type_single(str(x)) for x in val]
+                return or_(*expressions)
             if op == "nin":
-                return and_*([not_(_compile_media_type_single(str(x))) for x in val])
+                expressions = [_compile_media_type_single(str(x)) for x in val]
+                return and_(*(not_(expr) for expr in expressions))
 
         elif field in {"path", "name"}:
             col = IndexedPath.relative_path if field == "path" else IndexedPath.basename
