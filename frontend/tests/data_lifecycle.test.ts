@@ -6,6 +6,8 @@ import {
   formatAuditRetention,
   validateRetentionDaysInput,
   getAuditRetentionApplyAvailability,
+  getAuditRetentionSaveAvailability,
+  getQuarantineRetentionSaveAvailability,
 } from '../src/components/settings/data_lifecycle';
 import { dataLifecycleApi, auditApi } from '../src/api/domain';
 import { api } from '../src/api/client';
@@ -315,6 +317,84 @@ describe('Data Lifecycle & Audit Retention: Frontend Unit Tests', () => {
       );
       assert.strictEqual(res.canApply, false);
       assert.strictEqual(res.disabledReason, '获取保留策略或清理预览失败，请刷新重试');
+    });
+  });
+
+  describe('Gate4-baseline-hotfix1: Role-based Retention Capability Matrix & Settings Alignment', () => {
+    test('ADMIN: Audit retention save is enabled', () => {
+      const res = getAuditRetentionSaveAvailability(true);
+      assert.strictEqual(res.canSave, true);
+      assert.strictEqual(res.disabledReason, undefined);
+    });
+
+    test('REGULAR USER: Audit retention save is disabled with strict tooltip', () => {
+      const res = getAuditRetentionSaveAvailability(false);
+      assert.strictEqual(res.canSave, false);
+      assert.strictEqual(res.disabledReason, '仅系统管理员允许修改审计保留策略');
+    });
+
+    test('ADMIN: Audit retention apply is enabled when policy > 0 and candidates exist', () => {
+      const res = getAuditRetentionApplyAvailability(
+        { audit_retention_days: 90 },
+        { enabled: true, delete_count: 5 },
+        { isAdmin: true }
+      );
+      assert.strictEqual(res.canApply, true);
+      assert.strictEqual(res.disabledReason, undefined);
+    });
+
+    test('REGULAR USER: Audit retention apply is strictly disabled with reason', () => {
+      const res = getAuditRetentionApplyAvailability(
+        { audit_retention_days: 90 },
+        { enabled: true, delete_count: 5 },
+        { isAdmin: false }
+      );
+      assert.strictEqual(res.canApply, false);
+      assert.strictEqual(res.disabledReason, '仅系统管理员允许执行审计日志清理');
+    });
+
+    test('ADMIN: Quarantine retention save is enabled', () => {
+      const res = getQuarantineRetentionSaveAvailability(true);
+      assert.strictEqual(res.canSave, true);
+      assert.strictEqual(res.disabledReason, undefined);
+    });
+
+    test('REGULAR USER: Quarantine retention save is disabled with strict tooltip', () => {
+      const res = getQuarantineRetentionSaveAvailability(false);
+      assert.strictEqual(res.canSave, false);
+      assert.strictEqual(res.disabledReason, '仅系统管理员允许修改隔离区保留策略');
+    });
+
+    test('Settings/index.tsx imports useAuth and checks isAdmin', () => {
+      const content = readFileSync(resolve(__dirname, '../../src/pages/Settings/index.tsx'), 'utf-8');
+      assert.ok(
+        /import\s*\{\s*[^}]*useAuth[^}]*\}\s*from\s*['"][^'"]*contexts?\/AuthContext['"]/.test(content),
+        'Settings/index.tsx must import useAuth from contexts/AuthContext'
+      );
+      assert.ok(
+        /const\s*\{\s*user\s*\}\s*=\s*useAuth\(\)/.test(content),
+        'Settings/index.tsx must call useAuth to retrieve user'
+      );
+      assert.ok(
+        /const\s+isAdmin\s*=\s*user\?\.role\s*===\s*['"]admin['"]/.test(content),
+        'Settings/index.tsx must compute isAdmin from user?.role'
+      );
+    });
+
+    test('Settings/index.tsx binds isAdmin to Audit save, Audit apply, and Quarantine save', () => {
+      const content = readFileSync(resolve(__dirname, '../../src/pages/Settings/index.tsx'), 'utf-8');
+      assert.ok(
+        content.includes('仅系统管理员允许修改审计保留策略'),
+        'Settings/index.tsx must include audit retention save disabled tooltip'
+      );
+      assert.ok(
+        content.includes('仅系统管理员允许执行审计日志清理'),
+        'Settings/index.tsx must include audit retention apply disabled tooltip'
+      );
+      assert.ok(
+        content.includes('仅系统管理员允许修改隔离区保留策略'),
+        'Settings/index.tsx must include quarantine retention save disabled tooltip'
+      );
     });
   });
 });

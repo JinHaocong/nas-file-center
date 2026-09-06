@@ -942,7 +942,10 @@ def preview_audit_retention(request: Request):
 
 
 @router.post("/audit/apply-retention")
-def apply_audit_retention(request: Request):
+def apply_audit_retention(
+    request: Request,
+    admin_user: User = Depends(require_admin_user),
+):
     try:
         return request.app.state.service.apply_audit_retention()
     except ValueError as exc:
@@ -959,6 +962,7 @@ def get_data_lifecycle_policy(request: Request):
 def update_data_lifecycle_policy(
     request: Request,
     body: DataLifecyclePolicyUpdateRequest,
+    admin_user: User = Depends(require_admin_user),
 ):
     try:
         return request.app.state.service.update_data_lifecycle_policy(body.audit_retention_days)

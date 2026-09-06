@@ -42,6 +42,51 @@ export interface RetentionApplyAvailabilityOptions {
   isPreparingApply?: boolean;
   isApplying?: boolean;
   isQueryError?: boolean;
+  isAdmin?: boolean;
+}
+
+/**
+ * 获取修改审计保留策略按钮的可用性状态
+ */
+export function getAuditRetentionSaveAvailability(
+  isAdmin: boolean,
+  isSaving?: boolean,
+): { canSave: boolean; disabledReason?: string } {
+  if (!isAdmin) {
+    return {
+      canSave: false,
+      disabledReason: '仅系统管理员允许修改审计保留策略',
+    };
+  }
+  if (isSaving) {
+    return {
+      canSave: false,
+      disabledReason: '正在保存审计保留策略，请稍候',
+    };
+  }
+  return { canSave: true };
+}
+
+/**
+ * 获取修改隔离区保留策略按钮的可用性状态
+ */
+export function getQuarantineRetentionSaveAvailability(
+  isAdmin: boolean,
+  isSaving?: boolean,
+): { canSave: boolean; disabledReason?: string } {
+  if (!isAdmin) {
+    return {
+      canSave: false,
+      disabledReason: '仅系统管理员允许修改隔离区保留策略',
+    };
+  }
+  if (isSaving) {
+    return {
+      canSave: false,
+      disabledReason: '正在保存隔离区保留策略，请稍候',
+    };
+  }
+  return { canSave: true };
 }
 
 /**
@@ -52,6 +97,12 @@ export function getAuditRetentionApplyAvailability(
   preview?: { enabled: boolean; delete_count: number } | null,
   options?: RetentionApplyAvailabilityOptions,
 ): RetentionApplyAvailability {
+  if (options?.isAdmin === false) {
+    return {
+      canApply: false,
+      disabledReason: '仅系统管理员允许执行审计日志清理',
+    };
+  }
   if (options?.isSavingPolicy) {
     return {
       canApply: false,
@@ -95,3 +146,4 @@ export function getAuditRetentionApplyAvailability(
     canApply: true,
   };
 }
+

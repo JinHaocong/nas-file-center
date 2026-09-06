@@ -19,6 +19,7 @@ from app.models import (
     WorkJob,
 )
 from app.service import FileCenterService
+from app.auth.password import hash_password
 
 
 def make_service(tmp_path: Path):
@@ -325,3 +326,97 @@ def test_apply_api_auth_and_csrf(tmp_path: Path):
     # 认证后无 Origin 发起 POST
     resp_no_origin = client.post("/api/audit/apply-retention")
     assert resp_no_origin.status_code == 403
+
+
+def test_non_admin_cannot_apply_audit_retention(tmp_path: Path):
+    """P1 授权约束：普通用户 (role=user) 禁止执行审计保留清理，返回 403 Forbidden，审计记录与策略零变更"""
+    service, data, settings = make_service(tmp_path)
+    now = datetime.now(timezone.utc)
+
+    # 插入老审计记录 (60 天前) 与普通用户
+    with service.SessionLocal() as session:
+        user = User(
+            username="regular_staff",
+            password_hash=hash_password("StaffPass123!"),
+            role="user",
+        )
+        session.add(user)
+        old_audit = AuditEvent(
+            id=1,
+            timestamp=now - timedelta(days=60),
+            operation="sensitive_mutation",
+            path="/data/important.txt",
+            result="ok",
+            details_json="{}",
+        )
+        session.add(old_audit)
+        session.commit()
+
+    # 先以管理员或底层服务设置策略为 30 天
+    service.update_data_lifecycle_policy(30)
+
+    app = create_app(settings)
+    client = TestClient(app)
+
+    # 普通用户登录
+    login_resp = client.post(
+        "/api/auth/login",
+        json={"username": "regular_staff", "password": "StaffPass123!"},
+        headers={"Origin": "http://testserver"},
+    )
+    assert login_resp.status_code == 200
+
+    # 允许普通用户查看预览 GET /api/audit/retention-preview (保持 authenticated 可读)
+    preview_resp = client.get("/api/audit/retention-preview")
+    assert preview_resp.status_code == 200
+    assert preview_resp.json()["delete_count"] == 1
+
+    # 普通用户尝试执行清理 -> 必须被 403 拒绝
+    apply_resp = client.post(
+        "/api/audit/apply-retention",
+        headers={"Origin": "http://testserver"},
+    )
+    assert apply_resp.status_code == 403
+
+    # 验证底层审计记录完全完好，未被删除！
+    with service.SessionLocal() as session:
+        assert session.get(AuditEvent, 1) is not None
+        assert session.scalar(select(func.count(AuditEvent.id))) == 1
+        assert session.scalar(select(func.count(AuditEvent.id)).where(AuditEvent.operation == "audit.retention")) == 0
+
+
+def test_admin_can_manage_and_apply_audit_retention(tmp_path: Path):
+    """验证管理员正常管理策略并执行清理功能不回归"""
+    client, service, _, _ = make_authed_client(tmp_path)
+    now = datetime.now(timezone.utc)
+
+    # 管理员更新策略
+    put_resp = client.put(
+        "/api/data-lifecycle",
+        json={"audit_retention_days": 30},
+        headers={"Origin": "http://testserver"},
+    )
+    assert put_resp.status_code == 200
+    assert put_resp.json()["audit_retention_days"] == 30
+
+    # 插入过期审计记录
+    with service.SessionLocal() as session:
+        session.add(AuditEvent(
+            id=10,
+            timestamp=now - timedelta(days=60),
+            operation="admin_audit_test",
+            result="ok",
+        ))
+        session.commit()
+
+    # 管理员执行清理
+    apply_resp = client.post(
+        "/api/audit/apply-retention",
+        headers={"Origin": "http://testserver"},
+    )
+    assert apply_resp.status_code == 200
+    assert apply_resp.json()["deleted_count"] == 1
+
+    with service.SessionLocal() as session:
+        assert session.get(AuditEvent, 10) is None
+

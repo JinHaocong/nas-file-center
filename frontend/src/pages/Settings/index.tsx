@@ -26,12 +26,15 @@ import {
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { settingsApi, dataLifecycleApi, auditApi, quarantineApi } from '../../api/domain';
 import { authApi } from '../../api/auth';
+import { useAuth } from '../../contexts/AuthContext';
 import { useTitle } from '../../hooks/useTitle';
 import { formatDateTime } from '../../utils/format';
 import { SessionInfo } from '../../types';
 import {
   formatAuditRetention,
   getAuditRetentionApplyAvailability,
+  getAuditRetentionSaveAvailability,
+  getQuarantineRetentionSaveAvailability,
   validateRetentionDaysInput,
 } from '../../components/settings/data_lifecycle';
 
@@ -40,6 +43,8 @@ const { Title, Text } = Typography;
 export const SettingsPage: React.FC = () => {
   useTitle('系统设置');
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const [retentionDaysInput, setRetentionDaysInput] = useState<number | null>(0);
   const [prepareApplyPending, setPrepareApplyPending] = useState(false);
 
@@ -79,6 +84,9 @@ export const SettingsPage: React.FC = () => {
 
   const saveQuarantinePolicyMutation = useMutation({
     mutationFn: (days: number) => {
+      if (!isAdmin) {
+        throw new Error('仅系统管理员允许修改隔离区保留策略');
+      }
       if (![0, 7, 30, 90].includes(days)) {
         throw new Error('隔离区保留天数仅支持 0、7、30 或 90 天');
       }
@@ -95,7 +103,12 @@ export const SettingsPage: React.FC = () => {
   });
 
   const savePolicyMutation = useMutation({
-    mutationFn: (days: number) => dataLifecycleApi.updatePolicy(days),
+    mutationFn: (days: number) => {
+      if (!isAdmin) {
+        throw new Error('仅系统管理员允许修改审计保留策略');
+      }
+      return dataLifecycleApi.updatePolicy(days);
+    },
     onSuccess: () => {
       message.success('数据生命周期保留策略已更新');
       queryClient.invalidateQueries({ queryKey: ['dataLifecyclePolicy'] });
@@ -107,7 +120,12 @@ export const SettingsPage: React.FC = () => {
   });
 
   const applyRetentionMutation = useMutation({
-    mutationFn: () => auditApi.applyRetention(),
+    mutationFn: () => {
+      if (!isAdmin) {
+        throw new Error('仅系统管理员允许执行审计日志清理');
+      }
+      return auditApi.applyRetention();
+    },
     onSuccess: (res) => {
       message.success(`审计日志保留清理执行成功，已清理 ${res.deleted_count} 条记录，剩余 ${res.remaining_count} 条`);
       queryClient.invalidateQueries({ queryKey: ['auditRetentionPreview'] });
@@ -120,6 +138,10 @@ export const SettingsPage: React.FC = () => {
   });
 
   const handleSavePolicy = () => {
+    if (!isAdmin) {
+      message.error('仅系统管理员允许修改审计保留策略');
+      return;
+    }
     const valResult = validateRetentionDaysInput(retentionDaysInput);
     if (!valResult.valid) {
       message.error(valResult.error || '保留天数无效');
@@ -127,6 +149,9 @@ export const SettingsPage: React.FC = () => {
     }
     savePolicyMutation.mutate(retentionDaysInput!);
   };
+
+  const auditSaveAvail = getAuditRetentionSaveAvailability(isAdmin, savePolicyMutation.isPending);
+  const quarantineSaveAvail = getQuarantineRetentionSaveAvailability(isAdmin, saveQuarantinePolicyMutation.isPending);
 
   const availability = getAuditRetentionApplyAvailability(
     lifecyclePolicy,
@@ -136,6 +161,7 @@ export const SettingsPage: React.FC = () => {
       isPreparingApply: prepareApplyPending,
       isApplying: applyRetentionMutation.isPending,
       isQueryError: policyQueryError || previewQueryError,
+      isAdmin,
     }
   );
 
@@ -173,6 +199,10 @@ export const SettingsPage: React.FC = () => {
   };
 
   const handlePrepareApply = async () => {
+    if (!isAdmin) {
+      message.error('仅系统管理员允许执行审计日志清理');
+      return;
+    }
     if (prepareApplyPending || applyRetentionMutation.isPending || savePolicyMutation.isPending) {
       return;
     }
@@ -415,14 +445,19 @@ export const SettingsPage: React.FC = () => {
               <Button size="small" onClick={() => setRetentionDaysInput(180)}>180 天</Button>
               <Button size="small" onClick={() => setRetentionDaysInput(365)}>365 天</Button>
             </Space>
-            <Button
-              type="primary"
-              icon={<SaveOutlined />}
-              loading={savePolicyMutation.isPending}
-              onClick={handleSavePolicy}
-            >
-              保存策略
-            </Button>
+            <Tooltip title={!auditSaveAvail.canSave ? auditSaveAvail.disabledReason : undefined}>
+              <span>
+                <Button
+                  type="primary"
+                  icon={<SaveOutlined />}
+                  disabled={!auditSaveAvail.canSave}
+                  loading={savePolicyMutation.isPending}
+                  onClick={handleSavePolicy}
+                >
+                  保存策略
+                </Button>
+              </span>
+            </Tooltip>
           </Space>
           <div>
             <Text type="secondary" style={{ fontSize: 13 }}>
@@ -454,14 +489,19 @@ export const SettingsPage: React.FC = () => {
                 { label: '保留 90 天 (90 days)', value: 90 },
               ]}
             />
-            <Button
-              type="primary"
-              icon={<SaveOutlined />}
-              loading={saveQuarantinePolicyMutation.isPending}
-              onClick={() => saveQuarantinePolicyMutation.mutate(quarantineDaysInput)}
-            >
-              保存隔离区策略
-            </Button>
+            <Tooltip title={!quarantineSaveAvail.canSave ? quarantineSaveAvail.disabledReason : undefined}>
+              <span>
+                <Button
+                  type="primary"
+                  icon={<SaveOutlined />}
+                  disabled={!quarantineSaveAvail.canSave}
+                  loading={saveQuarantinePolicyMutation.isPending}
+                  onClick={() => saveQuarantinePolicyMutation.mutate(quarantineDaysInput)}
+                >
+                  保存隔离区策略
+                </Button>
+              </span>
+            </Tooltip>
           </Space>
           <div>
             <Text type="secondary" style={{ fontSize: 13 }}>
@@ -493,16 +533,18 @@ export const SettingsPage: React.FC = () => {
                 刷新预览
               </Button>
               <Tooltip title={!availability.canApply ? availability.disabledReason : undefined}>
-                <Button
-                  danger
-                  type="primary"
-                  icon={<DeleteOutlined />}
-                  disabled={!availability.canApply}
-                  loading={applyRetentionMutation.isPending || prepareApplyPending}
-                  onClick={handlePrepareApply}
-                >
-                  执行审计清理
-                </Button>
+                <span>
+                  <Button
+                    danger
+                    type="primary"
+                    icon={<DeleteOutlined />}
+                    disabled={!availability.canApply}
+                    loading={applyRetentionMutation.isPending || prepareApplyPending}
+                    onClick={handlePrepareApply}
+                  >
+                    执行审计清理
+                  </Button>
+                </span>
               </Tooltip>
             </Space>
           </div>

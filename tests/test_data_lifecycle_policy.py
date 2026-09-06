@@ -8,7 +8,8 @@ from sqlalchemy import func, select
 
 from app.config import Settings
 from app.main import create_app
-from app.models import AuditEvent
+from app.models import AuditEvent, User
+from app.auth.password import hash_password
 from app.service import FileCenterService
 
 
@@ -154,3 +155,44 @@ def test_policy_api_auth_and_csrf(tmp_path: Path):
     # 已认证但无 Origin/Referer 头
     resp_no_origin = client.put("/api/data-lifecycle", json={"audit_retention_days": 30})
     assert resp_no_origin.status_code == 403
+
+
+def test_non_admin_cannot_modify_audit_retention_policy(tmp_path: Path):
+    """P1 授权约束：普通用户 (role=user) 禁止修改审计保留策略，返回 403 Forbidden，策略保持不变"""
+    service, data, settings = make_service(tmp_path)
+    # 创建普通用户
+    with service.SessionLocal() as session:
+        user = User(
+            username="regular_staff",
+            password_hash=hash_password("StaffPass123!"),
+            role="user",
+        )
+        session.add(user)
+        session.commit()
+
+    app = create_app(settings)
+    client = TestClient(app)
+
+    # 普通用户登录
+    login_resp = client.post(
+        "/api/auth/login",
+        json={"username": "regular_staff", "password": "StaffPass123!"},
+        headers={"Origin": "http://testserver"},
+    )
+    assert login_resp.status_code == 200
+
+    # 验证只读 GET /api/data-lifecycle 允许普通用户访问 (保持 authenticated 可读)
+    get_resp = client.get("/api/data-lifecycle")
+    assert get_resp.status_code == 200
+    assert get_resp.json()["audit_retention_days"] == 0
+
+    # 尝试修改策略为 30 天 -> 必须被 403 拒绝
+    put_resp = client.put(
+        "/api/data-lifecycle",
+        json={"audit_retention_days": 30},
+        headers={"Origin": "http://testserver"},
+    )
+    assert put_resp.status_code == 403
+
+    # 验证底层持久化策略完全不变
+    assert service.get_data_lifecycle_policy()["audit_retention_days"] == 0
