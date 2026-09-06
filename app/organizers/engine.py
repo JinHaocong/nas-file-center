@@ -42,13 +42,22 @@ class OrganizerProposal:
         return asdict(self)
 
 
-def _make_exclusion_filter(excluded_roots: Iterable[Path | str] | None):
+def _make_exclusion_filter(
+    excluded_roots: Iterable[Path | str] | None = None,
+    exclude_dir_names: Iterable[str] | None = None,
+):
     resolved_excluded = [Path(ex).resolve(strict=False) for ex in (excluded_roots or ())]
+    exclude_dirs = {str(d).strip() for d in (exclude_dir_names or ()) if str(d).strip()}
 
     def _is_excluded(p: Path) -> bool:
         resolved = p.resolve(strict=False)
         for ex in resolved_excluded:
             if resolved == ex or resolved.is_relative_to(ex):
+                return True
+        if exclude_dirs:
+            if any(part in exclude_dirs for part in p.parts):
+                return True
+            if any(part in exclude_dirs for part in resolved.parts):
                 return True
         return False
 
@@ -60,10 +69,11 @@ def collect_directory_stats(
     image_extensions: set[str],
     video_extensions: set[str],
     excluded_roots: Iterable[Path | str] | None = None,
+    exclude_dir_names: Iterable[str] | None = None,
 ) -> DirectoryStats:
     """Collect image, video, file, folder count and total bytes in directory."""
     stats = DirectoryStats()
-    _is_excluded = _make_exclusion_filter(excluded_roots)
+    _is_excluded = _make_exclusion_filter(excluded_roots, exclude_dir_names=exclude_dir_names)
     for current, dirnames, filenames in os.walk(path, followlinks=False):
         curr_p = Path(current)
         kept_dirs = []
@@ -98,6 +108,7 @@ def collect_tree_stats_bottom_up(
     image_extensions: set[str],
     video_extensions: set[str],
     excluded_roots: Iterable[Path | str] | None = None,
+    exclude_dir_names: Iterable[str] | None = None,
 ) -> tuple[dict[Path, DirectoryStats], int, list[Path]]:
     """
     Single-pass tree traversal with bottom-up aggregation.
@@ -108,7 +119,7 @@ def collect_tree_stats_bottom_up(
     direct_stats: dict[Path, dict[str, Any]] = {}
     candidate_dirs: list[Path] = []
     unique_total_bytes = 0
-    _is_excluded = _make_exclusion_filter(excluded_roots)
+    _is_excluded = _make_exclusion_filter(excluded_roots, exclude_dir_names=exclude_dir_names)
 
     for current, dirnames, filenames in os.walk(root, followlinks=False):
         curr_p = Path(current)
@@ -220,6 +231,7 @@ def generate_organizer_proposals(
     mtime_delay_seconds: float = 2.0,
     recursive: bool = False,
     excluded_roots: Iterable[Path | str] | None = None,
+    exclude_dir_names: Iterable[str] | None = None,
 ) -> tuple[dict[str, Any], list[OrganizerProposal]]:
     """
     Pure read-only calculation of rename proposals and conflict detection.
@@ -231,7 +243,7 @@ def generate_organizer_proposals(
 
     img_exts = {e.lstrip(".").lower() for e in image_extensions}
     vid_exts = {e.lstrip(".").lower() for e in video_extensions}
-    _is_excluded = _make_exclusion_filter(excluded_roots)
+    _is_excluded = _make_exclusion_filter(excluded_roots, exclude_dir_names=exclude_dir_names)
 
     # Discover candidate subdirectories and compute stats
     candidates: list[Path] = []
@@ -240,7 +252,7 @@ def generate_organizer_proposals(
 
     if recursive:
         subtree_stats, unique_total_bytes, candidates = collect_tree_stats_bottom_up(
-            safe_root, img_exts, vid_exts, excluded_roots=excluded_roots
+            safe_root, img_exts, vid_exts, excluded_roots=excluded_roots, exclude_dir_names=exclude_dir_names
         )
         candidates.sort(key=lambda p: (len(p.parts), natural_sort_key(p.name)))
     else:
@@ -256,7 +268,7 @@ def generate_organizer_proposals(
                     continue
         candidates.sort(key=lambda p: natural_sort_key(p.name))
         for c in candidates:
-            st = collect_directory_stats(c, img_exts, vid_exts, excluded_roots=excluded_roots)
+            st = collect_directory_stats(c, img_exts, vid_exts, excluded_roots=excluded_roots, exclude_dir_names=exclude_dir_names)
             subtree_stats[c] = st
             unique_total_bytes += st.total_bytes
 

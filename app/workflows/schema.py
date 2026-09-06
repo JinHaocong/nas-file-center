@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Literal, Union
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.filters.schema import FilterNode
 
@@ -58,11 +58,48 @@ class QuarantineStep(BaseModel):
     reason: str = "quarantine by workflow"
 
 
+class OrganizerProfileSnapshot(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1)
+    description: str | None = None
+    root: str | None = None
+    recursive: bool = True
+    image_extensions: list[str] = Field(default_factory=list)
+    video_extensions: list[str] = Field(default_factory=list)
+    rename_template: str = "{name}"
+    statistics_template: str | None = None
+    preserve_tags: list[str] = Field(default_factory=list)
+    cleanup_patterns: list[str] = Field(default_factory=list)
+    numbering_mode: Literal["per_folder", "continuous", "none"] = "per_folder"
+    numbering_start: int = 1
+    numbering_padding: int = 4
+    mtime_mode: Literal["preserve", "delay", "current", "none"] = "preserve"
+    mtime_delay_seconds: float = 0.0
+
+    @field_validator("numbering_start", "numbering_padding", mode="before")
+    @classmethod
+    def validate_strict_int(cls, v: Any) -> int:
+        if isinstance(v, bool) or not isinstance(v, int):
+            raise ValueError("Must be a valid integer")
+        return v
+
+    @field_validator("image_extensions", "video_extensions", "preserve_tags", "cleanup_patterns", mode="before")
+    @classmethod
+    def validate_string_list(cls, v: Any) -> list[str]:
+        if isinstance(v, str) or not isinstance(v, list):
+            raise ValueError("Must be a list of strings")
+        for item in v:
+            if not isinstance(item, str):
+                raise ValueError("All elements must be strings")
+        return v
+
+
 class OrganizeStep(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str
     type: Literal["organize"] = "organize"
-    profile_snapshot: dict[str, Any]
+    profile_snapshot: OrganizerProfileSnapshot
 
 
 WorkflowStep = Union[
@@ -172,6 +209,16 @@ class WorkflowPreviewRequest(BaseModel):
     page_size: int = Field(default=50, ge=1, le=500)
     only_changed: bool = False
 
+    @model_validator(mode="after")
+    def validate_root_contract(self) -> WorkflowPreviewRequest:
+        from app.workflows.errors import WorkflowValidationError
+        if self.root_ids is not None and self.runtime_inputs is not None:
+            raise WorkflowValidationError(
+                "Ambiguous root inputs: provide root_ids only within runtime_inputs",
+                code="AMBIGUOUS_RUNTIME_INPUTS",
+            )
+        return self
+
 
 class WorkflowPreviewItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -208,6 +255,16 @@ class WorkflowGeneratePlanRequest(BaseModel):
     runtime_inputs: RuntimeInputs | None = None
     root_ids: list[int] | None = None
     plan_name: str | None = None
+
+    @model_validator(mode="after")
+    def validate_root_contract(self) -> WorkflowGeneratePlanRequest:
+        from app.workflows.errors import WorkflowValidationError
+        if self.root_ids is not None and self.runtime_inputs is not None:
+            raise WorkflowValidationError(
+                "Ambiguous root inputs: provide root_ids only within runtime_inputs",
+                code="AMBIGUOUS_RUNTIME_INPUTS",
+            )
+        return self
 
 
 class WorkflowGeneratePlanResponse(BaseModel):

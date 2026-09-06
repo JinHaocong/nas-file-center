@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from math import ceil
 from typing import Any
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import Settings
@@ -92,6 +92,7 @@ class WorkflowService:
 
     def create_workflow(self, user_id: int | None, payload: WorkflowCreateRequest) -> dict[str, Any]:
         with self.SessionLocal() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
             # Semantic validation
             validate_workflow_definition(payload.definition, session)
 
@@ -141,6 +142,7 @@ class WorkflowService:
         payload: WorkflowUpdateRequest,
     ) -> dict[str, Any]:
         with self.SessionLocal() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
             wf = session.get(Workflow, workflow_id)
             if not wf:
                 raise WorkflowNotFoundError(f"Workflow {workflow_id} not found")
@@ -231,6 +233,7 @@ class WorkflowService:
         expected_current_revision: int,
     ) -> None:
         with self.SessionLocal() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
             wf = session.get(Workflow, workflow_id)
             if not wf:
                 raise WorkflowNotFoundError(f"Workflow {workflow_id} not found")
@@ -259,6 +262,7 @@ class WorkflowService:
         payload: WorkflowRollbackRequest,
     ) -> dict[str, Any]:
         with self.SessionLocal() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
             wf = session.get(Workflow, workflow_id)
             if not wf:
                 raise WorkflowNotFoundError(f"Workflow {workflow_id} not found")
@@ -385,10 +389,16 @@ class WorkflowService:
             validate_raw_steps_types(def_dict.get("steps", []))
             definition = WorkflowDefinition.model_validate(def_dict)
 
+            if payload.root_ids is not None and payload.runtime_inputs is not None:
+                raise WorkflowValidationError(
+                    "Ambiguous root inputs: cannot provide both top-level 'root_ids' and 'runtime_inputs'",
+                    code="AMBIGUOUS_RUNTIME_INPUTS",
+                )
+
             effective_root_ids = (
-                payload.root_ids
-                if payload.root_ids is not None
-                else (payload.runtime_inputs.root_ids if payload.runtime_inputs and payload.runtime_inputs.root_ids is not None else None)
+                payload.runtime_inputs.root_ids
+                if payload.runtime_inputs and payload.runtime_inputs.root_ids is not None
+                else payload.root_ids
             )
 
             compiler = WorkflowCompiler(
@@ -473,10 +483,16 @@ class WorkflowService:
             validate_raw_steps_types(def_dict.get("steps", []))
             definition = WorkflowDefinition.model_validate(def_dict)
 
+            if payload.root_ids is not None and payload.runtime_inputs is not None:
+                raise WorkflowValidationError(
+                    "Ambiguous root inputs: cannot provide both top-level 'root_ids' and 'runtime_inputs'",
+                    code="AMBIGUOUS_RUNTIME_INPUTS",
+                )
+
             effective_root_ids = (
-                payload.root_ids
-                if payload.root_ids is not None
-                else (payload.runtime_inputs.root_ids if payload.runtime_inputs and payload.runtime_inputs.root_ids is not None else None)
+                payload.runtime_inputs.root_ids
+                if payload.runtime_inputs and payload.runtime_inputs.root_ids is not None
+                else payload.root_ids
             )
 
             compiler = WorkflowCompiler(

@@ -1,8 +1,8 @@
-# NAS File Center v0.3.5 Gate5-B — Implementation & Safety Walkthrough
+# NAS File Center v0.3.5 Gate5-B-hotfix2 — Implementation & Verification Walkthrough
 
-## 1. Context & Scope (背景与本次范围)
+## 1. Context & Scope (背景与状态)
 
-当前整体状态：
+当前正式状态：
 ```text
 Gate2 = PASS
 Gate3 = PASS
@@ -10,112 +10,173 @@ Gate4 = PASS
 Gate5-A = PASS
 NAS File Center v0.3.4 = CLOSED
 
-Gate5-B Architecture Freeze = APPROVED
-Gate5-B implementation = IN PROGRESS (Candidate Ready for Review)
-Gate5-C+ = NOT AUTHORIZED
+Gate5-B-hotfix1 targeted review = PASS
+Gate5-B overall independent review = FAIL / HOLD
+
+P0 = 0
+P1 = 2 (P1-03, P1-04)
+P2 = 4 (P2-07, P2-08, P2-09, P2-10)
+P3 = 1 (P3-02)
+
+Gate5-C+ = FORBIDDEN
 v0.3.5 = NOT CLOSED
 ```
 
-### 1.1 Gate5-B 目标与范围红线
-1. **Workflow 定义与语法校验**:
-   - Pydantic AST 语法校验，支持两类严格 Pipeline 结构（`file` 模式与 `organizer` 模式）。
-   - 严禁任何未知或保留步骤类型（`dedupe`, `copy`, `delete` 等），一律返回 HTTP 400 (`UNSUPPORTED_STEP`)。
-2. **不可变版本模型 (Immutable Revision Model)**:
-   - `workflows` 表记录工作流元数据与当前版本号，`workflow_revisions` 表记录单 JSON 步骤配方与规范化 `definition_sha256`。
-   - 乐观并发锁机制：更新与回滚强制校验 `expected_current_revision`，不匹配时返回 HTTP 409 (`WORKFLOW_REVISION_CONFLICT`)。
-3. **虚拟路径图 (Virtual Path Graph)**:
-   - 纯内存多步变更模拟，严禁伪造物理身份（`expected_inode`, `expected_device`, `expected_mtime_ns` 严格保持为 0）。
-   - 碰撞检测（`PATH_COLLISION`）、环路检测（`PATH_CYCLE`）、PathGuard 越界拦截（`PATH_OUTSIDE_ALLOWED_ROOT`）。
-4. **只读 Dry-Run 试跑 API**:
-   - `POST /api/workflows/{id}/preview`：零文件系统突变、零数据库计划记录生成，返回确定的 `compile_digest`，受 50k 安全上限保护。
-5. **显式生成标准 BatchPlan(draft)**:
-   - `POST /api/workflows/{id}/generate-plan`：校验 `expected_compile_digest`，仅在数据库生成 `status="draft"` 的通用批处理计划，绝不直接修改文件，绝不启动 Worker。
-6. **RBAC 权限守卫**:
-   - Admin 专享写操作（创建、修改、删除归档、回滚）。
-   - Authenticated 用户（管理员与普通成员）均可只读查看、Dry-Run 试跑及生成 Draft 计划。
-7. **范围绝对红线**:
-   - 严禁 UI 可视化搭建器（Gate5-C）、Stale Rebuild UI（Gate5-C）、高级去重评分（Gate5-D）、资源并发限制（Gate5-E）、Scheduler 定时调度（DEFER）。
-   - 严禁实现直接修改文件系统的独立执行器，所有执行必须且仅能通过既有 Gate3 Freeze + Worker 机制完成。
+本轮任务严格限定于修复 Gate5-B 整体独立评审发现的 7 个问题（2 个 P1、4 个 P2、1 个 P3），绝不扩大范围，绝不引入 Gate5-C 特性。
 
 ---
 
-## 2. Technical Implementation (技术实现)
+## 2. Issues Closed & Technical Implementation (问题关闭与技术实现)
 
-### 2.1 模块构成
-1. **[`app/models.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/models.py)** & **[`app/db.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/db.py)**:
-   - 定义 `Workflow` 与 `WorkflowRevision` 模型，建立唯一约束 `UNIQUE(workflow_id, revision)` 及 `CheckConstraint("current_revision >= 1")`。
-   - 在 `app/db.py` 中纳入增量幂等建表与在库自动备份机制。
-2. **[`app/workflows/errors.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/workflows/errors.py)**:
-   - 定义结构化异常体系：`WorkflowError` 基础类，以及 `WorkflowValidationError`, `WorkflowRevisionConflictError`, `WorkflowNotFoundError`, `WorkflowArchivedError`, `VirtualGraphCollisionError`, `VirtualGraphCycleError`, `WorkflowBoundaryError`, `WorkflowSafetyLimitExceededError`, `WorkflowDigestMismatchError`。
-3. **[`app/workflows/revisions.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/workflows/revisions.py)**:
-   - 实现 `canonical_json_dumps` 与 `compute_definition_sha256`，保证步骤配方的键排序、紧凑分隔符与 SHA-256 哈希确定性。
-4. **[`app/workflows/schema.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/workflows/schema.py)**:
-   - Pydantic 模型：`ScanStep`, `FilterStep` (100% 复用 Gate5-A AST), `RenameStep`, `MoveStep`, `TouchStep`, `QuarantineStep`, `OrganizeStep`, 以及完整 API 请求/响应模型。
-5. **[`app/workflows/validation.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/workflows/validation.py)**:
-   - 语法检查：Mode 校验、Pipeline 结构校验、参数安全与正则合法性检查，前置拦截 `dedupe` 并抛出 `UNSUPPORTED_STEP`。
-6. **[`app/workflows/graph.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/workflows/graph.py)**:
-   - 内存虚拟路径图 `VirtualPathGraph`：追踪候选文件虚拟状态、多步重命名/移动冲突排查、拓扑排序与依赖环路探测。
-7. **[`app/workflows/compiler.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/workflows/compiler.py)**:
-   - `WorkflowCompiler`：从 `IndexedPath` 结合全局排除与 Gate5-A Filter AST 进行候选集查询，执行安全上限防护（50k/100k），计算并产出不可变 `compile_digest`。
-8. **[`app/workflows/service.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/workflows/service.py)**:
-   - `WorkflowService`：承载 CRUD、乐观锁冲突判断、版本回滚、只读试跑预览与标准 `BatchPlan(status="draft")` 生产。
-9. **[`app/api/router.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/api/router.py)**:
-   - 挂载 10 个 REST 路由，配合 `get_current_user` 与 `require_admin_user` 实施细粒度 RBAC 拦截。
+### 2.1 P1-03 — Organizer Global Exclude Bypass & Digest Linkage
+- **问题根因**：此前文件工作流正确应用了 `FilterPolicy.exclude_dir_names_json`，但整理工作流（Organizer Workflow）仅排除了 `quarantine_root`，导致 `.git/`、`.recycle/`、`@eaDir/` 等目录仍可被扫描整理；且编译上下文中的 `effective_exclude_dir_names` 硬编码为空列表，全局排除策略更新不会引发 `compile_digest` 变化。
+- **修复方案**：
+  1. 在 `app/organizers/engine.py` 中扩展 `_make_exclusion_filter(excluded_roots, exclude_dir_names)`，实现段敏感（Segment-aware）的目录过滤：
+     - 路径任一段匹配 `exclude_dir_names`（如 `.git`）即排除（如 `.git/`, `subdir/.git/`）；
+     - 非全字匹配段（如 `.git2/`, `my.git/`）予以保留；
+     - 保持硬排除 `quarantine_root` 不变。
+  2. 在 `collect_directory_stats`、`collect_tree_stats_bottom_up` 与 `generate_organizer_proposals` 中全链路透传 `exclude_dir_names`。
+  3. 在 `app/workflows/compiler.py` 的 `_compile_organizer_workflow` 中动态拉取 `FilterPolicy` 的全局排除目录列表，传入整理提议生成器，并将排序后的排除项写入 `compile_context["effective_exclude_dir_names"]`，使得排除策略变更时 `compile_digest` 必然联动刷新。
+
+### 2.2 P1-04 — Empty Roots Fail Closed & IndexRoot Boundary Validation
+- **问题根因**：当未指定根目录时，文件工作流可能泛化到所有 IndexedPath；且越界或不存在的 root ID 此前仅被静默丢弃。
+- **修复方案**：
+  1. 在 `app/workflows/compiler.py` 的 `_compile_file_workflow` 中：
+     - 严格要求 `1 <= len(effective_root_ids) <= 16`，空列表抛出 422 `ROOT_REQUIRED`，超过 16 个抛出 422 `ROOT_LIMIT_EXCEEDED`；
+     - 对每一个 root ID 强校验存在性与边界：不存在或不在 `ALLOWED_ROOTS` 内时，立即抛出 422 `INDEX_ROOT_NOT_FOUND`；
+     - 强制将 `IndexedPath.root_key.in_(target_roots)` 加入查询条件，根绝根目录泛化漏洞。
+  2. 在 `_compile_organizer_workflow` 中：
+     - 若指定 `effective_root_ids`，强制要求数量为 1，否则分别返回 422 `ROOT_REQUIRED`（0 个）或 422 `ORGANIZER_SINGLE_ROOT_REQUIRED`（>1 个）；
+     - 同样执行 `INDEX_ROOT_NOT_FOUND` 边界校验。
+
+### 2.3 P2-07 — Real SQLite Concurrency Transaction
+- **问题根因**：此前在 `WorkflowService` 的 `update_workflow`、`archive_workflow`、`rollback_workflow` 中，先以默认 DEFERRED 读取 `wf.current_revision`，再检查并发冲突。当两并发线程同时发起预期相同版本的更新时，导致 Check-Then-Act 窗口，在第二阶段写入时引发 SQLite `IntegrityError` 或 `database is locked`（HTTP 500）。
+- **修复方案**：
+  - 在 `create_workflow`、`update_workflow`、`archive_workflow`、`rollback_workflow` 的事务开启最初阶段立即执行 `session.execute(text("BEGIN IMMEDIATE"))`，在读取工作流对象前即获得排他写锁；
+  - 第二个竞争线程排队等待直至前序事务完成，随后在排他事务中读取到已更新的版本号，干净利落地抛出 409 `WorkflowRevisionConflictError` (`WORKFLOW_REVISION_CONFLICT`)，杜绝 500 与数据完整性异常。
+
+### 2.4 P2-08 — Organizer profile_snapshot Strict Validation & Immutability
+- **问题根因**：工作流步骤定义中 `OrganizeStep.profile_snapshot` 采用宽松的 `dict[str, Any]`，未在创建与更新时强校验字段类型与未知字段，可能留存至运行期才报错。
+- **修复方案**：
+  1. 在 `app/workflows/schema.py` 中定义严格的 `OrganizerProfileSnapshot` Pydantic 模型：
+     - 声明 `model_config = ConfigDict(extra="forbid")`，禁止任何额外未知属性；
+     - 强制数字字段校验（`numbering_start`, `numbering_padding` 为纯正整数，严禁布尔值与字符串）；
+     - 强制列表字段校验（`image_extensions`, `video_extensions`, `preserve_tags`, `cleanup_patterns` 必须为字符串数组，严禁 raw string）；
+  2. `OrganizeStep.profile_snapshot` 采用强类型绑定，在 Workflow 创建与更新入口（POST/PUT）直接拦截并返回 422；
+  3. 快照在写入 `workflow_revisions.definition_json` 后固化为不可变版本，原始 `OrganizerProfile` 后续修改或删除均不影响工作流快照。
+
+### 2.5 P2-09 — Runtime Root Contract Ambiguity
+- **问题根因**：`WorkflowPreviewRequest` 与 `WorkflowGeneratePlanRequest` 同时暴露顶层 `root_ids` 与 `runtime_inputs.root_ids`，缺乏明确的单一事实源约束与冲突处理规范。
+- **修复方案**：
+  1. 在 `WorkflowPreviewRequest` 与 `WorkflowGeneratePlanRequest` 模型中增加 Pydantic `model_validator`：
+     - 若同时提供顶层 `root_ids` 与 `runtime_inputs`，立即拒绝并抛出 422 `AMBIGUOUS_RUNTIME_INPUTS`；
+  2. 在 `WorkflowService.preview_workflow` 与 `generate_plan` 中以 `runtime_inputs.root_ids` 为首要事实源；
+  3. 整理工作流在预览时传入多个 root ID 直接抛出 422 `ORGANIZER_SINGLE_ROOT_REQUIRED`。
+
+### 2.6 P2-10 — Virtual Graph O(n) Optimization
+- **问题根因**：在 `app/workflows/graph.py` 的依赖边构建中（Lines 342, 343, 354），反复对完整操作列表调用 `all_ops.index(...)` 导致 $O(n^2)$ 复杂度假死（20,000 操作图构建需耗时 38.87 秒）。
+- **修复方案**：
+  1. 构建内存索引字典 `op_index_by_id = {id(op): idx for idx, op in enumerate(all_ops)}`，将依赖节点查表由 $O(n)$ 降为 $O(1)$；
+  2. 拓扑排序升级为带稳定堆（Min-Heap）的确定性 Kahn 算法：
+     - 堆元素键采用 `(op.workflow_step_index, op.candidate_operation_index, op.candidate_id, op.source, idx)`，兼具绝对确定性与极低排序开销；
+  3. 复杂性彻底降至 $O(V + E \log V)$。实测 10,000 候选对象（20,000 操作）的依赖建图与拓扑解析耗时由 **38.87s** 锐减至 **0.095s**（性能提升超 400 倍）。
+
+### 2.7 P3-02 — Stale Walkthrough
+- 更新代码库中的 `walkthrough.md` 与会话制品，完整记录 Gate5-B-hotfix2 的缺陷根因、修复细节与全量验证数据。
 
 ---
 
-## 3. Verification Results (验证结果)
+## 3. Verification & Evidence (验证与证据)
 
-### 3.1 单元与集成测试套件
-```bash
-# 1. Gate5-B 专属测试套件 (24 tests) -> 100% PASS
-docker run --rm -e PYTHONPATH=. -v "$(pwd):/app" -w /app nas-test-env:latest pytest -q tests/test_workflow_*.py
-# Output: 24 passed in 2.11s
-
-# 2. Gate5-A 专项测试套件 (30 tests) -> 100% PASS
-docker run --rm -e PYTHONPATH=. -v "$(pwd):/app" -w /app nas-test-env:latest pytest -q \
-  tests/test_filter_ast.py tests/test_filter_compiler.py tests/test_filter_preview.py \
-  tests/test_filter_policy.py tests/test_filter_index_freshness.py tests/test_filter_preview_readonly.py
-# Output: 30 passed in 1.87s
-
-# 3. Gate2/3/4 安全核心套件 (49 tests) -> 100% PASS
-docker run --rm -e PYTHONPATH=. -v "$(pwd):/app" -w /app nas-test-env:latest pytest -q \
-  tests/test_gate2_worker_execution.py tests/test_gate2_undo_plan.py tests/test_gate2_hotfix1_worker_fencing.py \
-  tests/test_gate3_stale_plan.py tests/test_gate4_backend_quarantine_undo.py
-# Output: 49 passed in 8.35s
-
-# 4. 后端全量测试套件 (553 tests) -> 100% PASS
-docker run --rm -e PYTHONPATH=. -v "$(pwd):/app" -w /app nas-test-env:latest pytest -q
-# Output: 553 passed in 65.2s
-
-# 5. 前端测试与构建 (177 tests) -> 100% PASS
-npm test -- --run && npm run build
-# Output: 177 passed in 103ms, Vite production build succeeded
-```
-
-### 3.2 独立黑盒容器验收 (Checkpoints CP1 ~ CP9)
-测试脚本：`test_gate5b_blackbox_acceptance.py`，针对全新独立容器 `nas-file-center:v0.3.5-gate5b` 执行端到端黑盒验证：
+### 3.1 TDD 失败基线证明 (RED Evidence)
+在实现前编写针对性失败测试 `tests/test_gate5b_hotfix2_red.py`，完整复现了 6 项缺陷：
 ```text
-============================================================
-GATE5-B BLACKBOX ACCEPTANCE REPORT
-============================================================
-CP1   : PASS (Health endpoint accessible and healthy)
-CP2   : PASS (DB Migration: workflows & revisions tables created, integrity ok)
-CP3   : PASS (RBAC: Member write blocked 403, Admin allowed 201, Unauth 401)
-CP4   : PASS (Unsupported step rejection: dedupe and copy rejected with 400 UNSUPPORTED_STEP)
-CP5   : PASS (Workflow CRUD & Optimistic locking: rev bump 1->2, stale update 409)
-CP6   : PASS (Rollback & Archive: rollback to rev 1 -> rev 3, DELETE archives, archived rejected 400)
-CP7   : PASS (Read-only Dry-Run Preview: digest generated, 0 FS mutation, 0 DB BatchPlans created)
-CP8   : PASS (Explicit Plan Generation: BatchPlan draft generated, expected_inode/device/mtime=0)
-CP9   : PASS (SQLite DB integrity check ok)
-============================================================
-ALL CHECKPOINTS PASS
+FAILED tests/test_gate5b_hotfix2_red.py::test_p1_03_organizer_global_exclude_and_digest
+  -> AssertionError: subdir/.git was not excluded
+FAILED tests/test_gate5b_hotfix2_red.py::test_p1_04_empty_roots_and_boundary_validation
+  -> AssertionError: assert 200 == 422 (empty roots allowed instead of ROOT_REQUIRED)
+FAILED tests/test_gate5b_hotfix2_red.py::test_p2_07_real_sqlite_concurrency_transaction
+  -> IntegrityError: UNIQUE constraint failed: workflow_revisions.workflow_id, workflow_revisions.revision
+FAILED tests/test_gate5b_hotfix2_red.py::test_p2_08_organizer_profile_snapshot_strict_validation
+  -> AssertionError: assert 201 == 422 (bad snapshot string numbering accepted)
+FAILED tests/test_gate5b_hotfix2_red.py::test_p2_09_runtime_root_contract_ambiguity
+  -> AssertionError: assert 200 == 422 (ambiguous roots accepted instead of AMBIGUOUS_RUNTIME_INPUTS)
+FAILED tests/test_gate5b_hotfix2_red.py::test_p2_10_virtual_graph_performance
+  -> AssertionError: Graph resolution took 38.87s, exceeding 5.0s limit
+```
+
+### 3.2 修复后套件验证 (GREEN Evidence)
+```bash
+# 1. Gate5-B-hotfix2 专项测试套件 (6 passed in 0.88s)
+docker exec -e PYTHONPATH=/app nas-test-env pytest tests/test_gate5b_hotfix2.py -v
+# Output: 6 passed, 2 warnings in 0.88s
+
+# 2. Gate5-B-hotfix1 回归测试与整理方案回归测试 (36 passed in 19.41s)
+docker exec -e PYTHONPATH=/app nas-test-env pytest tests/test_gate5b_hotfix1_red.py tests/test_organizer_blockers_regression.py -v
+# Output: 36 passed, 2 warnings in 19.41s
+
+# 3. 工作流全集模块单元/接口测试 (24 passed in 1.26s)
+docker exec -e PYTHONPATH=/app nas-test-env pytest tests/test_workflow_*.py -v
+# Output: 24 passed, 2 warnings in 1.26s
+
+# 4. 后端全量测试套件 (569 passed in 58.39s)
+docker exec -e PYTHONPATH=/app nas-test-env pytest -v
+# Output: 569 passed, 20 warnings in 58.39s
+
+# 5. 前端全量测试与生产构建 (177 passed in 83.6ms, build succeeded)
+npm test && npm run build
+# Output: 177 passed in 83.6ms, built in 3.30s
+```
+
+### 3.3 Docker 容器黑盒端到端验收 (Blackbox Evidence)
+全新构建生产镜像 `nas-file-center:v0.3.5-gate5b-hotfix2`，并在隔离容器环境中执行黑盒验收脚本 `scratch/test_gate5b_hotfix2_blackbox_acceptance.py`：
+```text
+=== Starting Gate5-B-hotfix2 Blackbox Acceptance against nas-file-center:v0.3.5-gate5b-hotfix2 ===
+[DEPLOY] Starting API container nas-gate5b-hf2-accept-c623c1...
+[DEPLOY] API container is healthy.
+[SETUP] Created IndexRoot ID: 1
+[CP1] Verifying P1-03: Organizer Global Exclude segment-awareness and compile_digest...
+[CP1] P1-03: PASS
+[CP2] Verifying P1-04: Empty roots fail closed...
+[CP2] P1-04: PASS
+[CP3] Verifying P2-07: SQLite BEGIN IMMEDIATE concurrency conflict...
+[CP3] Concurrent update response status codes: [409, 200]
+[CP3] P2-07: PASS
+[CP4] Verifying P2-08: Organizer profile_snapshot strict validation...
+[CP4] P2-08: PASS
+[CP5] Verifying P2-09: Ambiguity and Organizer root limit...
+[CP5] P2-09: PASS
+[CP6] Verifying P2-10: Virtual Graph performance in container...
+[CP6] Container graph performance output: OPS=20000 DUR=0.095
+[SUMMARY] Final Report: {
+  "P1-03": "PASS",
+  "P1-04": "PASS",
+  "P2-07": "PASS",
+  "P2-08": "PASS",
+  "P2-09": "PASS",
+  "P2-10": "PASS"
+}
+
+ALL GATE5-B-HOTFIX2 BLACKBOX ACCEPTANCE CHECKS PASSED!
 ```
 
 ---
 
-## 4. Release Candidate Identity (工件标识)
+## 4. Final Review Status (最终状态声明)
 
-- **Docker 镜像**: `nas-file-center:v0.3.5-gate5b`
-- **实现分支**: `v0.3.5-gate5b`
-- **候选状态**: `Gate5-B implementation candidate ready for independent review`
+```text
+Gate5-B-hotfix2 implementation candidate ready for independent review.
+
+P1-03: CLOSED
+P1-04: CLOSED
+P2-07: CLOSED
+P2-08: CLOSED
+P2-09: CLOSED
+P2-10: CLOSED
+P3-02: CLOSED
+
+Gate5-A = PASS
+Gate5-B = HOLD (Candidate Ready for Independent Review)
+Gate5-C = FORBIDDEN
+v0.3.5 = NOT CLOSED
+```

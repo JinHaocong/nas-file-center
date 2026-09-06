@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
+import heapq
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -327,6 +328,7 @@ class VirtualPathGraph:
         n = len(all_ops)
         adj: dict[int, list[int]] = defaultdict(list)
         in_degree = [0] * n
+        op_index_by_id = {id(op): idx for idx, op in enumerate(all_ops)}
 
         def add_edge(u: int, v: int) -> None:
             adj[u].append(v)
@@ -339,8 +341,8 @@ class VirtualPathGraph:
                 for k in range(len(cand.operations) - 1):
                     op_before = cand.operations[k]
                     op_after = cand.operations[k + 1]
-                    idx_before = all_ops.index(op_before)
-                    idx_after = all_ops.index(op_after)
+                    idx_before = op_index_by_id[id(op_before)]
+                    idx_after = op_index_by_id[id(op_after)]
                     add_edge(idx_before, idx_after)
 
         # 2. Cross-Entity Dependencies:
@@ -351,20 +353,33 @@ class VirtualPathGraph:
                 target_path = op_X.target
                 for op_Y in vacating_ops_by_path.get(target_path, []):
                     if op_Y.candidate_id != op_X.candidate_id:
-                        j = all_ops.index(op_Y)
+                        j = op_index_by_id[id(op_Y)]
                         add_edge(j, i)
 
-        # 3. Topological sort using Kahn's algorithm
-        queue = deque([i for i in range(n) if in_degree[i] == 0])
+        # 3. Deterministic Topological sort using Kahn's algorithm with min-heap
+        def make_heap_item(idx: int):
+            op = all_ops[idx]
+            return (
+                op.workflow_step_index,
+                op.candidate_operation_index,
+                op.candidate_id,
+                op.source,
+                idx,
+            )
+
+        heap = [make_heap_item(i) for i in range(n) if in_degree[i] == 0]
+        heapq.heapify(heap)
+
         ordered_indices: list[int] = []
 
-        while queue:
-            u = queue.popleft()
+        while heap:
+            item = heapq.heappop(heap)
+            u = item[-1]
             ordered_indices.append(u)
             for v in adj[u]:
                 in_degree[v] -= 1
                 if in_degree[v] == 0:
-                    queue.append(v)
+                    heapq.heappush(heap, make_heap_item(v))
 
         if len(ordered_indices) < n:
             cycle_sources = [all_ops[i].source for i in range(n) if in_degree[i] > 0]

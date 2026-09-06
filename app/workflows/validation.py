@@ -226,13 +226,16 @@ def _validate_single_step(step: WorkflowStep, idx: int, session: Session | None 
 
     elif isinstance(step, OrganizeStep):
         snapshot = step.profile_snapshot
-        if not isinstance(snapshot, dict) or not snapshot:
+        if hasattr(snapshot, "name"):
+            name = str(snapshot.name or "").strip()
+        elif isinstance(snapshot, dict):
+            name = str(snapshot.get("name") or "").strip()
+        else:
             raise WorkflowValidationError(
-                f"Organize step '{step.id}' profile_snapshot must be a non-empty dictionary",
+                f"Organize step '{step.id}' profile_snapshot must be an OrganizerProfileSnapshot object",
                 code="INVALID_PROFILE_SNAPSHOT",
                 details={"index": idx, "step_id": step.id},
             )
-        name = str(snapshot.get("name") or "").strip()
         if not name:
             raise WorkflowValidationError(
                 f"Organize step '{step.id}' profile_snapshot must contain a valid 'name'",

@@ -106,27 +106,39 @@ class WorkflowCompiler:
     ) -> CompilationResult:
         scan_step: ScanStep = definition.steps[0]  # type: ignore
         organize_step: OrganizeStep = definition.steps[1]  # type: ignore
-        snapshot = organize_step.profile_snapshot
+        snapshot_raw = organize_step.profile_snapshot
+        snapshot = snapshot_raw.model_dump() if hasattr(snapshot_raw, "model_dump") else (snapshot_raw if isinstance(snapshot_raw, dict) else {})
 
         effective_root_ids = override_root_ids if override_root_ids is not None else scan_step.root_ids
         target_root_str: str | None = None
 
-        if effective_root_ids:
+        if effective_root_ids is not None:
+            if len(effective_root_ids) != 1:
+                raise WorkflowValidationError(
+                    f"Organizer workflow requires exactly one root, got {len(effective_root_ids)}",
+                    code="ORGANIZER_SINGLE_ROOT_REQUIRED" if len(effective_root_ids) > 1 else "ROOT_REQUIRED",
+                )
             first_root_id = effective_root_ids[0]
             root_record = self.session.scalar(select(IndexRoot.root).where(IndexRoot.id == first_root_id))
-            if root_record:
-                target_root_str = root_record
-
-        if not target_root_str:
+            if not root_record:
+                raise WorkflowValidationError(
+                    f"Index root {first_root_id} not found",
+                    code="INDEX_ROOT_NOT_FOUND",
+                )
+            target_root_str = root_record
+        elif snapshot.get("root"):
             target_root_str = snapshot.get("root")
 
         if not target_root_str or not str(target_root_str).strip():
             raise WorkflowValidationError("No target root found for organizer workflow", code="ROOT_REQUIRED")
 
-        safe_root = require_unreserved_path(
-            require_allowed_path(str(target_root_str).strip(), self.allowed_roots),
-            self.quarantine_root,
-        )
+        try:
+            safe_root = require_unreserved_path(
+                require_allowed_path(str(target_root_str).strip(), self.allowed_roots),
+                self.quarantine_root,
+            )
+        except Exception as e:
+            raise WorkflowValidationError(str(e), code="INDEX_ROOT_NOT_FOUND")
 
         image_extensions = snapshot.get("image_extensions") or []
         if isinstance(image_extensions, str):
@@ -153,6 +165,17 @@ class WorkflowCompiler:
             except Exception:
                 cleanup_patterns = []
 
+        # Read global exclusion policy
+        policy = self.session.get(FilterPolicy, 1)
+        excludes: list[str] = []
+        if policy and policy.exclude_dir_names_json:
+            try:
+                excludes = json.loads(policy.exclude_dir_names_json)
+            except Exception:
+                excludes = list(DEFAULT_EXCLUDE_DIR_NAMES)
+        else:
+            excludes = list(DEFAULT_EXCLUDE_DIR_NAMES)
+
         quarantine_ex = [self.quarantine_root] if self.quarantine_root else None
         summary, proposals = generate_organizer_proposals(
             safe_root,
@@ -170,6 +193,7 @@ class WorkflowCompiler:
             mtime_delay_seconds=float(snapshot.get("mtime_delay_seconds") or 2.0),
             recursive=bool(snapshot.get("recursive", False)),
             excluded_roots=quarantine_ex,
+            exclude_dir_names=excludes,
         )
 
         if len(proposals) > max_candidates:
@@ -206,9 +230,8 @@ class WorkflowCompiler:
             "root_ids": sorted(effective_root_ids) if effective_root_ids is not None else [],
         }
 
-        policy = self.session.get(FilterPolicy, 1)
         compile_context = {
-            "effective_exclude_dir_names": [],
+            "effective_exclude_dir_names": sorted(list(set(excludes))),
             "filter_policy_updated_at": policy.updated_at.isoformat() if policy and policy.updated_at else None,
         }
 
@@ -245,17 +268,35 @@ class WorkflowCompiler:
         scan_step: ScanStep = definition.steps[0]  # type: ignore
         effective_root_ids = override_root_ids if override_root_ids is not None else scan_step.root_ids
 
-        # Step 1: Candidate query on IndexedPath
-        where_clauses = [IndexedPath.is_dir.is_(False)]
-
         # Root filtering
         all_roots = self.session.scalars(select(IndexRoot)).all()
         root_map = {r.id: r.root for r in all_roots}
         root_key_to_id = {r.root: r.id for r in all_roots}
 
-        if effective_root_ids:
-            target_roots = [root_map[rid] for rid in effective_root_ids if rid in root_map]
-            where_clauses.append(IndexedPath.root_key.in_(target_roots))
+        if not effective_root_ids:
+            raise WorkflowValidationError("At least one root is required", code="ROOT_REQUIRED")
+
+        if len(effective_root_ids) > 16:
+            raise WorkflowValidationError(
+                f"Cannot scan more than 16 roots, got {len(effective_root_ids)}",
+                code="ROOT_LIMIT_EXCEEDED",
+            )
+
+        for rid in effective_root_ids:
+            if rid not in root_map:
+                raise WorkflowValidationError(f"Index root {rid} not found", code="INDEX_ROOT_NOT_FOUND")
+            try:
+                require_allowed_path(root_map[rid], self.allowed_roots)
+            except Exception:
+                raise WorkflowValidationError(f"Index root {rid} is outside allowed roots", code="INDEX_ROOT_NOT_FOUND")
+
+        target_roots = [root_map[rid] for rid in effective_root_ids]
+
+        # Step 1: Candidate query on IndexedPath
+        where_clauses = [
+            IndexedPath.is_dir.is_(False),
+            IndexedPath.root_key.in_(target_roots),
+        ]
 
         if scan_step.subpath:
             sub = scan_step.subpath.strip().lstrip("/\\")
