@@ -16,6 +16,7 @@ from app.auth.router import router as auth_router
 from app.config import Settings, get_settings
 from app.exceptions import PlanStaleError
 from app.service import FileCenterService
+from app.workflows.errors import WorkflowError
 
 
 def _sanitize_validation_errors(obj: Any) -> Any:
@@ -49,6 +50,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        for err in exc.errors():
+            ctx_err = err.get("ctx", {}).get("error")
+            if isinstance(ctx_err, WorkflowError):
+                return JSONResponse(status_code=ctx_err.status_code, content=ctx_err.to_dict())
         sanitized = _sanitize_validation_errors(exc.errors())
         return JSONResponse(status_code=422, content={"detail": sanitized})
 
@@ -67,6 +72,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     },
                 }
             },
+        )
+
+    @app.exception_handler(WorkflowError)
+    async def workflow_exception_handler(request: Request, exc: WorkflowError):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=exc.to_dict(),
         )
 
     app.state.settings = settings

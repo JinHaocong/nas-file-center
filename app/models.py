@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import BigInteger, Boolean, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from app.dbtypes import FilesystemId
@@ -448,4 +448,51 @@ class OperationJournal(Base):
     metadata_after_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(default=utcnow, nullable=False)
+
+
+
+class Workflow(Base):
+    __tablename__ = "workflows"
+    __table_args__ = (
+        CheckConstraint("current_revision >= 1", name="ck_workflows_current_revision"),
+        Index("ix_workflows_archived_at", "archived_at"),
+        Index("ix_workflows_created_by_user_id", "created_by_user_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    current_revision: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    is_builtin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    archived_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow, nullable=False)
+
+    revisions: Mapped[list["WorkflowRevision"]] = relationship(
+        back_populates="workflow",
+        cascade="all, delete-orphan",
+        order_by="WorkflowRevision.revision.asc()",
+    )
+
+
+class WorkflowRevision(Base):
+    __tablename__ = "workflow_revisions"
+    __table_args__ = (
+        UniqueConstraint("workflow_id", "revision", name="uq_workflow_revisions_wf_rev"),
+        CheckConstraint("revision >= 1", name="ck_workflow_revisions_revision"),
+        Index("ix_workflow_revisions_wf_rev", "workflow_id", "revision"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    workflow_id: Mapped[int] = mapped_column(ForeignKey("workflows.id", ondelete="RESTRICT"), nullable=False, index=True)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    definition_json: Mapped[str] = mapped_column(Text, nullable=False)
+    definition_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, nullable=False)
+
+    workflow: Mapped[Workflow] = relationship(back_populates="revisions")
+
+
 

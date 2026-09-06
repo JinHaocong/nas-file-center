@@ -106,6 +106,7 @@ from app.organizers.templates import (
 )
 from app.planning.engine import CandidateFile, CandidateGroup, generate_plan
 from app.tasks.service import TaskService
+from app.workflows.service import WorkflowService
 
 
 def _index_job_root(job: WorkJob) -> str | None:
@@ -163,6 +164,7 @@ class FileCenterService:
             initial_admin_password=settings.initial_admin_password,
         )
         self.task_service = TaskService(self.SessionLocal)
+        self.workflow_service = WorkflowService(self.SessionLocal, self.settings)
         self._preview_snapshots: dict[str, dict[str, Any]] = {}
         self.reconcile_startup_entries()
 

@@ -13,6 +13,18 @@ from app.filters.validation import FilterValidationError
 from app.models import User
 from app.path_safety import UnsafePathError
 from app.service import StateConflictError
+from app.workflows.schema import (
+    WorkflowCreateRequest,
+    WorkflowGeneratePlanRequest,
+    WorkflowGeneratePlanResponse,
+    WorkflowListItem,
+    WorkflowPreviewRequest,
+    WorkflowPreviewResponse,
+    WorkflowResponse,
+    WorkflowRevisionResponse,
+    WorkflowRollbackRequest,
+    WorkflowUpdateRequest,
+)
 
 
 router = APIRouter(prefix="/api", tags=["file-center"], dependencies=[Depends(get_current_user)])
@@ -1110,4 +1122,101 @@ def purge_quarantine_entry(
         raise HTTPException(409, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+
+
+# Workflow Routes
+@router.get("/workflows", response_model=list[WorkflowListItem])
+def list_workflows(
+    request: Request,
+    include_archived: bool = Query(default=False),
+    current_user: User = Depends(get_current_user),
+):
+    return request.app.state.service.workflow_service.list_workflows(include_archived=include_archived)
+
+
+@router.post("/workflows", response_model=WorkflowResponse, status_code=201)
+def create_workflow(
+    request: Request,
+    payload: WorkflowCreateRequest,
+    admin_user: User = Depends(require_admin_user),
+):
+    return request.app.state.service.workflow_service.create_workflow(admin_user.id, payload)
+
+
+@router.get("/workflows/{workflow_id}", response_model=WorkflowResponse)
+def get_workflow(
+    request: Request,
+    workflow_id: int,
+    current_user: User = Depends(get_current_user),
+):
+    return request.app.state.service.workflow_service.get_workflow(workflow_id)
+
+
+@router.put("/workflows/{workflow_id}", response_model=WorkflowResponse)
+def update_workflow(
+    request: Request,
+    workflow_id: int,
+    payload: WorkflowUpdateRequest,
+    admin_user: User = Depends(require_admin_user),
+):
+    return request.app.state.service.workflow_service.update_workflow(admin_user.id, workflow_id, payload)
+
+
+@router.delete("/workflows/{workflow_id}")
+def archive_workflow(
+    request: Request,
+    workflow_id: int,
+    admin_user: User = Depends(require_admin_user),
+):
+    request.app.state.service.workflow_service.archive_workflow(admin_user.id, workflow_id)
+    return {"status": "ok", "archived": True}
+
+
+@router.post("/workflows/{workflow_id}/rollback", response_model=WorkflowResponse)
+def rollback_workflow(
+    request: Request,
+    workflow_id: int,
+    payload: WorkflowRollbackRequest,
+    admin_user: User = Depends(require_admin_user),
+):
+    return request.app.state.service.workflow_service.rollback_workflow(admin_user.id, workflow_id, payload)
+
+
+@router.get("/workflows/{workflow_id}/revisions", response_model=list[WorkflowRevisionResponse])
+def list_workflow_revisions(
+    request: Request,
+    workflow_id: int,
+    current_user: User = Depends(get_current_user),
+):
+    return request.app.state.service.workflow_service.list_workflow_revisions(workflow_id)
+
+
+@router.get("/workflows/{workflow_id}/revisions/{revision}", response_model=WorkflowRevisionResponse)
+def get_workflow_revision(
+    request: Request,
+    workflow_id: int,
+    revision: int,
+    current_user: User = Depends(get_current_user),
+):
+    return request.app.state.service.workflow_service.get_workflow_revision(workflow_id, revision)
+
+
+@router.post("/workflows/{workflow_id}/preview", response_model=WorkflowPreviewResponse)
+def preview_workflow(
+    request: Request,
+    workflow_id: int,
+    payload: WorkflowPreviewRequest = Body(default_factory=WorkflowPreviewRequest),
+    current_user: User = Depends(get_current_user),
+):
+    return request.app.state.service.workflow_service.preview_workflow(workflow_id, payload)
+
+
+@router.post("/workflows/{workflow_id}/generate-plan", response_model=WorkflowGeneratePlanResponse, status_code=201)
+def generate_workflow_plan(
+    request: Request,
+    workflow_id: int,
+    payload: WorkflowGeneratePlanRequest = Body(default_factory=WorkflowGeneratePlanRequest),
+    current_user: User = Depends(get_current_user),
+):
+    return request.app.state.service.workflow_service.generate_plan(current_user.id, workflow_id, payload)
 

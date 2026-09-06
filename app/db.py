@@ -11,7 +11,7 @@ from sqlalchemy import Engine, create_engine, delete, event, func, inspect, sele
 from sqlalchemy.orm import sessionmaker
 
 from app.auth.password import hash_password
-from app.models import Base, FilterPolicy, IndexRoot, IndexedPath, OrganizerProfile, User, WorkJob
+from app.models import Base, FilterPolicy, IndexRoot, IndexedPath, OrganizerProfile, User, Workflow, WorkflowRevision, WorkJob
 
 
 @contextmanager
@@ -101,6 +101,8 @@ def init_db(
             "quarantine_entries",
             "operation_journal",
             "filter_policy",
+            "workflows",
+            "workflow_revisions",
         }
 
         # Check existing columns in work_jobs

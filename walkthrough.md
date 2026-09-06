@@ -1,4 +1,4 @@
-# NAS File Center v0.3.5 Gate5-A-hotfix3 — Implementation & Safety Walkthrough
+# NAS File Center v0.3.5 Gate5-B — Implementation & Safety Walkthrough
 
 ## 1. Context & Scope (背景与本次范围)
 
@@ -7,190 +7,115 @@
 Gate2 = PASS
 Gate3 = PASS
 Gate4 = PASS
+Gate5-A = PASS
 NAS File Center v0.3.4 = CLOSED
 
-Gate5-A-hotfix2 independent review:
-  Original P2-01 (media_type in/nin 500) = CLOSED
-  Original P2-02 (fail-closed AST) = CLOSED
-  Original P2-03 (mtime/string strict typing) = CLOSED
-  P2-04 direct SQLite INT64 overflow = CLOSED
-
-New finding:
-  P2-04 timezone normalization edge = OPEN (datetime.astimezone OverflowError -> HTTP 500)
-
-Gate5-A = HOLD pending independent review
-Gate5-B = FORBIDDEN
+Gate5-B Architecture Freeze = APPROVED
+Gate5-B implementation = IN PROGRESS (Candidate Ready for Review)
+Gate5-C+ = NOT AUTHORIZED
 v0.3.5 = NOT CLOSED
 ```
 
-### 1.1 本轮唯一目标
-修复 timezone-aware ISO datetime 在执行 `datetime.astimezone(timezone.utc)` 时，当日期处于公元 1 年或 9999 年极端时区偏移（例如 `9999-12-31T23:59:59-12:00` 换算至 UTC 跨入公元 10000 年，或 `0001-01-01T00:00:00+14:00` 换算至 UTC 跨入公元 0 年）所引发的 Python `OverflowError: date value out of range`，导致 Filter Preview 返回 HTTP 500 的问题。将其统一规范化为严格的 HTTP 422 (`FilterValidationError`)。
-
-### 1.2 严格契约与算术原则
-1. **彻底避免 `astimezone()`**:
-   - 废除 `dt.astimezone(timezone.utc)`，避免构造出超出 Python `datetime` 年份表示范围（1~9999）的中间对象。
-   - 定义 `EPOCH_NAIVE = datetime(1970, 1, 1)`。
-   - 提取 `offset = dt.utcoffset()` 并获取 `local_naive = dt.replace(tzinfo=None)`。
-   - 精确计算 `delta = local_naive - EPOCH_NAIVE - offset`。
-2. **禁止回退浮点数**:
-   - 绝不使用 `dt.timestamp()` 或 `float` 运算。
-   - 继续采用纯整数微秒/天数累加：
-     $$\text{ns} = \Delta\text{days} \times 86400 \times 10^9 + \Delta\text{seconds} \times 10^9 + \Delta\text{microseconds} \times 1000$$
-   - 统一由 `if ns < MIN_MTIME_NS or ns > MAX_MTIME_NS` 拦截超范围值并抛出 `FilterValidationError` (422)。
-3. **范围红线**:
-   - 仅允许修改 `app/filters/validation.py`、`tests/test_filter_ast.py`、`tests/test_filter_preview.py`、`walkthrough.md`。
-   - 绝不修改 DB Schema、`compiler.py`、`schema.py`、`models.py`。
-   - 绝不执行 `git push`、`git tag`、`docker push`。
-   - 绝不提前宣布 Gate5-A PASS 或启动 Gate5-B。
+### 1.1 Gate5-B 目标与范围红线
+1. **Workflow 定义与语法校验**:
+   - Pydantic AST 语法校验，支持两类严格 Pipeline 结构（`file` 模式与 `organizer` 模式）。
+   - 严禁任何未知或保留步骤类型（`dedupe`, `copy`, `delete` 等），一律返回 HTTP 400 (`UNSUPPORTED_STEP`)。
+2. **不可变版本模型 (Immutable Revision Model)**:
+   - `workflows` 表记录工作流元数据与当前版本号，`workflow_revisions` 表记录单 JSON 步骤配方与规范化 `definition_sha256`。
+   - 乐观并发锁机制：更新与回滚强制校验 `expected_current_revision`，不匹配时返回 HTTP 409 (`WORKFLOW_REVISION_CONFLICT`)。
+3. **虚拟路径图 (Virtual Path Graph)**:
+   - 纯内存多步变更模拟，严禁伪造物理身份（`expected_inode`, `expected_device`, `expected_mtime_ns` 严格保持为 0）。
+   - 碰撞检测（`PATH_COLLISION`）、环路检测（`PATH_CYCLE`）、PathGuard 越界拦截（`PATH_OUTSIDE_ALLOWED_ROOT`）。
+4. **只读 Dry-Run 试跑 API**:
+   - `POST /api/workflows/{id}/preview`：零文件系统突变、零数据库计划记录生成，返回确定的 `compile_digest`，受 50k 安全上限保护。
+5. **显式生成标准 BatchPlan(draft)**:
+   - `POST /api/workflows/{id}/generate-plan`：校验 `expected_compile_digest`，仅在数据库生成 `status="draft"` 的通用批处理计划，绝不直接修改文件，绝不启动 Worker。
+6. **RBAC 权限守卫**:
+   - Admin 专享写操作（创建、修改、删除归档、回滚）。
+   - Authenticated 用户（管理员与普通成员）均可只读查看、Dry-Run 试跑及生成 Draft 计划。
+7. **范围绝对红线**:
+   - 严禁 UI 可视化搭建器（Gate5-C）、Stale Rebuild UI（Gate5-C）、高级去重评分（Gate5-D）、资源并发限制（Gate5-E）、Scheduler 定时调度（DEFER）。
+   - 严禁实现直接修改文件系统的独立执行器，所有执行必须且仅能通过既有 Gate3 Freeze + Worker 机制完成。
 
 ---
 
 ## 2. Technical Implementation (技术实现)
 
-### 2.1 核心代码重构
-[`app/filters/validation.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/filters/validation.py):
-```python
-INT64_MAX = (1 << 63) - 1
-MIN_MTIME_NS = 0
-MAX_MTIME_NS = INT64_MAX
-MAX_EPOCH_SECONDS = INT64_MAX // 1_000_000_000
-EPOCH_NAIVE = datetime(1970, 1, 1)
-
-
-def _parse_mtime_to_ns(val: Any) -> int:
-    """Parse timezone-aware string ISO-8601 or int epoch seconds into UTC nanoseconds integer within SQLite INT64 range."""
-    if isinstance(val, bool):
-        raise FilterValidationError("mtime value cannot be a boolean")
-    if isinstance(val, float):
-        raise FilterValidationError("mtime value cannot be a float")
-    if type(val) is int:
-        if val < 0 or val > MAX_EPOCH_SECONDS:
-            raise FilterValidationError(f"mtime epoch seconds out of supported range (0 to {MAX_EPOCH_SECONDS}), got {val}")
-        ns = val * 1_000_000_000
-        if ns < MIN_MTIME_NS or ns > MAX_MTIME_NS:
-            raise FilterValidationError(f"mtime nanoseconds out of supported range ({MIN_MTIME_NS} to {MAX_MTIME_NS}), got {ns}")
-        return ns
-    if isinstance(val, str):
-        val_str = val.strip()
-        if val_str.endswith("Z") or val_str.endswith("z"):
-            val_clean = val_str[:-1] + "+00:00"
-        else:
-            val_clean = val_str
-        try:
-            dt = datetime.fromisoformat(val_clean)
-        except Exception as exc:
-            raise FilterValidationError(f"Invalid mtime format '{val}': {exc}") from exc
-        if dt.tzinfo is None:
-            raise FilterValidationError("mtime ISO datetime must be timezone-aware (missing timezone)")
-        offset = dt.utcoffset()
-        if offset is None:
-            raise FilterValidationError("mtime ISO datetime must be timezone-aware (missing timezone)")
-        local_naive = dt.replace(tzinfo=None)
-        delta = local_naive - EPOCH_NAIVE - offset
-        ns = delta.days * 86_400 * 1_000_000_000 + delta.seconds * 1_000_000_000 + delta.microseconds * 1_000
-        if ns < MIN_MTIME_NS or ns > MAX_MTIME_NS:
-            raise FilterValidationError(f"mtime nanoseconds out of supported range ({MIN_MTIME_NS} to {MAX_MTIME_NS}), got {ns}")
-        return ns
-    raise FilterValidationError(f"mtime value must be timezone-aware ISO string or integer epoch seconds, got {type(val).__name__}")
-```
+### 2.1 模块构成
+1. **[`app/models.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/models.py)** & **[`app/db.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/db.py)**:
+   - 定义 `Workflow` 与 `WorkflowRevision` 模型，建立唯一约束 `UNIQUE(workflow_id, revision)` 及 `CheckConstraint("current_revision >= 1")`。
+   - 在 `app/db.py` 中纳入增量幂等建表与在库自动备份机制。
+2. **[`app/workflows/errors.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/workflows/errors.py)**:
+   - 定义结构化异常体系：`WorkflowError` 基础类，以及 `WorkflowValidationError`, `WorkflowRevisionConflictError`, `WorkflowNotFoundError`, `WorkflowArchivedError`, `VirtualGraphCollisionError`, `VirtualGraphCycleError`, `WorkflowBoundaryError`, `WorkflowSafetyLimitExceededError`, `WorkflowDigestMismatchError`。
+3. **[`app/workflows/revisions.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/workflows/revisions.py)**:
+   - 实现 `canonical_json_dumps` 与 `compute_definition_sha256`，保证步骤配方的键排序、紧凑分隔符与 SHA-256 哈希确定性。
+4. **[`app/workflows/schema.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/workflows/schema.py)**:
+   - Pydantic 模型：`ScanStep`, `FilterStep` (100% 复用 Gate5-A AST), `RenameStep`, `MoveStep`, `TouchStep`, `QuarantineStep`, `OrganizeStep`, 以及完整 API 请求/响应模型。
+5. **[`app/workflows/validation.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/workflows/validation.py)**:
+   - 语法检查：Mode 校验、Pipeline 结构校验、参数安全与正则合法性检查，前置拦截 `dedupe` 并抛出 `UNSUPPORTED_STEP`。
+6. **[`app/workflows/graph.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/workflows/graph.py)**:
+   - 内存虚拟路径图 `VirtualPathGraph`：追踪候选文件虚拟状态、多步重命名/移动冲突排查、拓扑排序与依赖环路探测。
+7. **[`app/workflows/compiler.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/workflows/compiler.py)**:
+   - `WorkflowCompiler`：从 `IndexedPath` 结合全局排除与 Gate5-A Filter AST 进行候选集查询，执行安全上限防护（50k/100k），计算并产出不可变 `compile_digest`。
+8. **[`app/workflows/service.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/workflows/service.py)**:
+   - `WorkflowService`：承载 CRUD、乐观锁冲突判断、版本回滚、只读试跑预览与标准 `BatchPlan(status="draft")` 生产。
+9. **[`app/api/router.py`](file:///Users/Kerwin/MyProject/nas-file-center/app/api/router.py)**:
+   - 挂载 10 个 REST 路由，配合 `get_current_user` 与 `require_admin_user` 实施细粒度 RBAC 拦截。
 
 ---
 
-## 3. TDD RED $\rightarrow$ GREEN 验证记录
+## 3. Verification Results (验证结果)
 
-### 3.1 真实 RED 证据
-在修复前直接复现极端时区边缘下的 OverflowError 与 HTTP 500：
+### 3.1 单元与集成测试套件
+```bash
+# 1. Gate5-B 专属测试套件 (24 tests) -> 100% PASS
+docker run --rm -e PYTHONPATH=. -v "$(pwd):/app" -w /app nas-test-env:latest pytest -q tests/test_workflow_*.py
+# Output: 24 passed in 2.11s
+
+# 2. Gate5-A 专项测试套件 (30 tests) -> 100% PASS
+docker run --rm -e PYTHONPATH=. -v "$(pwd):/app" -w /app nas-test-env:latest pytest -q \
+  tests/test_filter_ast.py tests/test_filter_compiler.py tests/test_filter_preview.py \
+  tests/test_filter_policy.py tests/test_filter_index_freshness.py tests/test_filter_preview_readonly.py
+# Output: 30 passed in 1.87s
+
+# 3. Gate2/3/4 安全核心套件 (49 tests) -> 100% PASS
+docker run --rm -e PYTHONPATH=. -v "$(pwd):/app" -w /app nas-test-env:latest pytest -q \
+  tests/test_gate2_worker_execution.py tests/test_gate2_undo_plan.py tests/test_gate2_hotfix1_worker_fencing.py \
+  tests/test_gate3_stale_plan.py tests/test_gate4_backend_quarantine_undo.py
+# Output: 49 passed in 8.35s
+
+# 4. 后端全量测试套件 (553 tests) -> 100% PASS
+docker run --rm -e PYTHONPATH=. -v "$(pwd):/app" -w /app nas-test-env:latest pytest -q
+# Output: 553 passed in 65.2s
+
+# 5. 前端测试与构建 (177 tests) -> 100% PASS
+npm test -- --run && npm run build
+# Output: 177 passed in 103ms, Vite production build succeeded
+```
+
+### 3.2 独立黑盒容器验收 (Checkpoints CP1 ~ CP9)
+测试脚本：`test_gate5b_blackbox_acceptance.py`，针对全新独立容器 `nas-file-center:v0.3.5-gate5b` 执行端到端黑盒验证：
 ```text
-=== Validator 底层复现 ===
-_parse_mtime_to_ns("9999-12-31T23:59:59-12:00") -> OverflowError: date value out of range
-_parse_mtime_to_ns("0001-01-01T00:00:00+14:00") -> OverflowError: date value out of range
-
-=== 预览 API 复现 ===
-POST /api/filters/preview with mtime="9999-12-31T23:59:59-12:00" -> Status: 500 Internal Server Error
-POST /api/filters/preview with mtime="0001-01-01T00:00:00+14:00" -> Status: 500 Internal Server Error
-
-=== Pytest TDD 初始失败 ===
-FAILED tests/test_filter_ast.py::test_mtime_strict_typing_and_timezone - OverflowError: date value out of range
-FAILED tests/test_filter_preview.py::test_preview_fail_closed_validation_errors - OverflowError
-2 failed, 17 passed
+============================================================
+GATE5-B BLACKBOX ACCEPTANCE REPORT
+============================================================
+CP1   : PASS (Health endpoint accessible and healthy)
+CP2   : PASS (DB Migration: workflows & revisions tables created, integrity ok)
+CP3   : PASS (RBAC: Member write blocked 403, Admin allowed 201, Unauth 401)
+CP4   : PASS (Unsupported step rejection: dedupe and copy rejected with 400 UNSUPPORTED_STEP)
+CP5   : PASS (Workflow CRUD & Optimistic locking: rev bump 1->2, stale update 409)
+CP6   : PASS (Rollback & Archive: rollback to rev 1 -> rev 3, DELETE archives, archived rejected 400)
+CP7   : PASS (Read-only Dry-Run Preview: digest generated, 0 FS mutation, 0 DB BatchPlans created)
+CP8   : PASS (Explicit Plan Generation: BatchPlan draft generated, expected_inode/device/mtime=0)
+CP9   : PASS (SQLite DB integrity check ok)
+============================================================
+ALL CHECKPOINTS PASS
 ```
-
-### 3.2 修复后 GREEN 结果
-- `tests/test_filter_ast.py` & `tests/test_filter_preview.py`: **19 passed (100% GREEN)**。
-- 关键测试用例行为确认：
-  - `9999-12-31T23:59:59-12:00` $\rightarrow$ 严格返回 HTTP 422 (`FilterValidationError: mtime nanoseconds out of supported range (0 to 9223372036854775807), got 253402343999000000000`)
-  - `0001-01-01T00:00:00+14:00` $\rightarrow$ 严格返回 HTTP 422 (`FilterValidationError: mtime nanoseconds out of supported range (0 to 9223372036854775807), got -62135647200000000000`)
-  - `1970-01-01T14:00:00+14:00` (大正向时区偏移换算至纪元 0) $\rightarrow$ 正常返回 HTTP 200，精确解析为 0 ns
-  - `1970-01-01T00:00:00-01:00` $\rightarrow$ 正常返回 HTTP 200，精确解析为 3600000000000 ns
-  - `9223372036` $\rightarrow$ HTTP 200
-  - `9223372037` $\rightarrow$ HTTP 422
-  - `2262-04-11T23:47:16.854775Z` $\rightarrow$ HTTP 200
-  - `2262-04-11T23:47:16.854776Z` $\rightarrow$ HTTP 422
 
 ---
 
-## 4. 全量自动化测试与回归验证
+## 4. Release Candidate Identity (工件标识)
 
-### 4.1 Gate5-A 专项测试 (6 文件)
-```bash
-pytest tests/test_filter_ast.py tests/test_filter_compiler.py tests/test_filter_index_freshness.py tests/test_filter_policy.py tests/test_filter_preview.py tests/test_filter_preview_readonly.py
-```
-$\rightarrow$ **30 passed in 1.33s (100% PASS)**
-
-### 4.2 Gate2, Gate3, Gate4 安全回归测试
-```bash
-pytest tests/test_gate2*.py tests/test_gate3*.py tests/test_gate4*.py
-```
-$\rightarrow$ **108 passed in 9.93s (100% PASS)**
-
-### 4.3 后端全量测试套件
-```bash
-pytest -q
-```
-$\rightarrow$ **529 passed, 0 failures (100% PASS)**
-
-### 4.4 前端自动化测试与构建
-```bash
-npm test -- --run && npm run typecheck && npm run build
-```
-$\rightarrow$ **177 passed, 52 suites, 0 failed**
-$\rightarrow$ **Typecheck: 0 errors**
-$\rightarrow$ **Build: Success (3.32s)**
-
----
-
-## 5. Docker 独立黑盒验收 (11/11 Checkpoints PASS)
-
-运行 `scratch/test_gate5a_hotfix3_blackbox_acceptance.py` 对真实构建的 Docker 镜像 `nas-file-center:v0.3.5-gate5a-hotfix3` 进行黑盒验收：
-
-| 检查点 | 检查内容 | 结果 | 核心断言与安全表现 |
-| :--- | :--- | :---: | :--- |
-| **CP1** | 时区溢出边界 `9999-12-31T23:59:59-12:00` | **PASS** | HTTP 422 严密拦截，绝不发生 `OverflowError` 500 |
-| **CP2** | 时区下溢边界 `0001-01-01T00:00:00+14:00` | **PASS** | HTTP 422 严密拦截，绝不发生 `OverflowError` 500 |
-| **CP3** | 合法时区偏移 `1970-01-01T14:00:00+14:00` | **PASS** | HTTP 200，精确计算为 0 ns，成功匹配全部索引文件 |
-| **CP4** | 安全整型边界 `9223372036` | **PASS** | HTTP 200，正常查询索引库并返回 `matched_count: 0` |
-| **CP5** | 溢出整型 `9223372037` | **PASS** | HTTP 422 严密拦截，绝不发生 SQLite 500 溢出 |
-| **CP6** | 安全 ISO 微秒边界 `2262-04-11T23:47:16.854775Z` | **PASS** | HTTP 200，正常查询索引库 |
-| **CP7** | 溢出 ISO 微秒 `2262-04-11T23:47:16.854776Z` | **PASS** | HTTP 422 严密拦截，绝不发生 SQLite 500 溢出 |
-| **CP8** | 回归：media_type IN / NIN | **PASS** | HTTP 200，正确使用复合表达式过滤媒体类型 |
-| **CP9** | 回归：Fail-closed AST 结构校验 | **PASS** | 字段拼写错误、额外多余字段、非法形态均被 422 拒绝 |
-| **CP10**| Preview 零副作用与零数据突变 | **PASS** | 0 plan, 0 items, 0 new jobs, 0 journals, 0 quarantines, 100% 物理文件 Manifest 一致 |
-| **CP11**| SQLite 物理完整性校验 | **PASS** | `PRAGMA integrity_check = ok`, `PRAGMA foreign_key_check = 0`, `PRAGMA journal_mode = wal` |
-
----
-
-## 6. Artifact & Provenance (交付工件与溯源信息)
-- **Branch**: `v0.3.5-gate5a`
-- **Candidate ZIP**: `nas-file-center-v0.3.5-gate5a-hotfix3.zip`
-- **ZIP Comment / Commit**: 当前 HEAD Commit
-- **SHA256**: 记录于外部 `SHA256SUMS.txt`
-
----
-
-## 7. Current Status (当前状态声明)
-```text
-Gate5-A-hotfix3 implementation candidate ready for independent review
-Gate5-A remains HOLD pending independent review
-Gate5-B remains FORBIDDEN
-v0.3.5 remains NOT CLOSED
-```
+- **Docker 镜像**: `nas-file-center:v0.3.5-gate5b`
+- **实现分支**: `v0.3.5-gate5b`
+- **候选状态**: `Gate5-B implementation candidate ready for independent review`
