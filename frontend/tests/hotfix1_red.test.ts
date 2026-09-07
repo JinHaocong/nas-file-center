@@ -1,6 +1,6 @@
 import test, { describe } from 'node:test';
 import assert from 'node:assert';
-import { isWorkflowPlanMetadata } from '../src/types/workflow';
+import { isWorkflowPlanMetadata, CANONICAL_ORGANIZER_SNAPSHOT_DEFAULTS } from '../src/types/workflow';
 import { createDefaultOrganizerSnapshot } from '../src/utils/organizerDefaults';
 import { applyLiteralRename } from '../src/utils/workflowRename';
 import {
@@ -26,11 +26,33 @@ import {
   normalizeExtension,
   validateFilterLimits,
 } from '../src/utils/filterMatrix';
-import { workflowApi } from '../src/api/workflows';
+import { workflowApi, getWorkflowRevision } from '../src/api/workflows';
 import { api } from '../src/api/client';
 
 describe('Gate5-C-hotfix1 RED Tests', () => {
   describe('P1-01: Organizer Canonical Defaults', () => {
+    test('CANONICAL_ORGANIZER_SNAPSHOT_DEFAULTS is exported from types/workflow', () => {
+      assert.strictEqual(CANONICAL_ORGANIZER_SNAPSHOT_DEFAULTS.recursive, false);
+      assert.deepStrictEqual(CANONICAL_ORGANIZER_SNAPSHOT_DEFAULTS.image_extensions, ['jpg', 'jpeg', 'png', 'webp']);
+      assert.deepStrictEqual(CANONICAL_ORGANIZER_SNAPSHOT_DEFAULTS.video_extensions, ['mp4', 'mov', 'mkv']);
+      assert.strictEqual(CANONICAL_ORGANIZER_SNAPSHOT_DEFAULTS.rename_template, '{name}');
+      assert.strictEqual(CANONICAL_ORGANIZER_SNAPSHOT_DEFAULTS.statistics_template, '[{images}P {videos}V {size}]');
+      assert.deepStrictEqual(CANONICAL_ORGANIZER_SNAPSHOT_DEFAULTS.preserve_tags, []);
+      assert.deepStrictEqual(CANONICAL_ORGANIZER_SNAPSHOT_DEFAULTS.cleanup_patterns, []);
+      assert.strictEqual(CANONICAL_ORGANIZER_SNAPSHOT_DEFAULTS.numbering_mode, 'none');
+      assert.strictEqual(CANONICAL_ORGANIZER_SNAPSHOT_DEFAULTS.numbering_start, 1);
+      assert.strictEqual(CANONICAL_ORGANIZER_SNAPSHOT_DEFAULTS.numbering_padding, 3);
+      assert.strictEqual(CANONICAL_ORGANIZER_SNAPSHOT_DEFAULTS.mtime_mode, 'none');
+      assert.strictEqual(CANONICAL_ORGANIZER_SNAPSHOT_DEFAULTS.mtime_delay_seconds, 2.0);
+    });
+
+    test('new Organizer Profile defaults == new Workflow Organize Step defaults', () => {
+      const snap = createDefaultOrganizerSnapshot('');
+      const { name, ...restOfSnap } = snap;
+      const { name: _, ...restOfCanonical } = CANONICAL_ORGANIZER_SNAPSHOT_DEFAULTS;
+      assert.deepStrictEqual(restOfSnap, restOfCanonical);
+    });
+
     test('createDefaultOrganizerSnapshot returns exact canonical defaults', () => {
       const snap = createDefaultOrganizerSnapshot('Minimal');
       assert.strictEqual(snap.name, 'Minimal');
@@ -159,23 +181,44 @@ describe('Gate5-C-hotfix1 RED Tests', () => {
   });
 
   describe('P2-02: Explicit Preview State Machine', () => {
-    test('state transitions and 409 PREVIEW_CHANGED handling', () => {
+    test('state transitions and 409 PREVIEW_CHANGED handling across all 8 states', () => {
       let state: WorkflowPreviewState = 'CLEAN_SAVED';
 
       state = transitionPreviewState(state, { type: 'DIRTY_CHANGE', isDirty: true });
       assert.strictEqual(state, 'EDITING_DIRTY');
 
-      state = transitionPreviewState(state, { type: 'DIRTY_CHANGE', isDirty: false });
+      // Saving transitions
+      state = transitionPreviewState(state, { type: 'START_SAVE' });
+      assert.strictEqual(state, 'SAVING');
+
+      state = transitionPreviewState(state, { type: 'SAVE_SUCCESS' });
       assert.strictEqual(state, 'SAVED_PREVIEW_REQUIRED');
 
+      // Save error returns to dirty
+      const dirtyState = transitionPreviewState('SAVING', { type: 'SAVE_ERROR' });
+      assert.strictEqual(dirtyState, 'EDITING_DIRTY');
+
+      // Preview transitions
       state = transitionPreviewState(state, { type: 'START_PREVIEW' });
       assert.strictEqual(state, 'PREVIEWING');
 
       state = transitionPreviewState(state, { type: 'PREVIEW_SUCCESS', compileDigest: 'd'.repeat(64) });
       assert.strictEqual(state, 'PREVIEW_READY');
 
+      // Generation transitions
+      state = transitionPreviewState(state, { type: 'START_GENERATE' });
+      assert.strictEqual(state, 'GENERATING');
+
+      // Generation failure returns to PREVIEW_READY
+      const genErrState = transitionPreviewState('GENERATING', { type: 'GENERATE_ERROR' });
+      assert.strictEqual(genErrState, 'PREVIEW_READY');
+
+      // Generation success returns to CLEAN_SAVED
+      state = transitionPreviewState('GENERATING', { type: 'GENERATE_SUCCESS' });
+      assert.strictEqual(state, 'CLEAN_SAVED');
+
       // Root changes invalidate preview
-      state = transitionPreviewState(state, { type: 'ROOTS_CHANGE' });
+      state = transitionPreviewState('PREVIEW_READY', { type: 'ROOTS_CHANGE' });
       assert.strictEqual(state, 'PREVIEW_STALE');
 
       // 409 error transitions to PREVIEW_STALE without auto-retry
@@ -211,11 +254,11 @@ describe('Gate5-C-hotfix1 RED Tests', () => {
   });
 
   describe('P2-04: Historical Revision API', () => {
-    test('workflowApi.getRevision calls /api/workflows/{id}/revisions/{revision}', async () => {
-      let capturedUrl = '';
+    test('workflowApi.getRevision, workflowApi.getWorkflowRevision, and getWorkflowRevision call /api/workflows/{id}/revisions/{revision}', async () => {
+      let capturedUrls: string[] = [];
       const origGet = api.get;
       api.get = (async (url: string) => {
-        capturedUrl = url;
+        capturedUrls.push(url);
         return {
           id: 10,
           workflow_id: 3,
@@ -228,7 +271,13 @@ describe('Gate5-C-hotfix1 RED Tests', () => {
 
       try {
         await workflowApi.getRevision(3, 2);
-        assert.strictEqual(capturedUrl, '/api/workflows/3/revisions/2');
+        await workflowApi.getWorkflowRevision(3, 2);
+        await getWorkflowRevision(3, 2);
+        assert.deepStrictEqual(capturedUrls, [
+          '/api/workflows/3/revisions/2',
+          '/api/workflows/3/revisions/2',
+          '/api/workflows/3/revisions/2',
+        ]);
       } finally {
         api.get = origGet;
       }

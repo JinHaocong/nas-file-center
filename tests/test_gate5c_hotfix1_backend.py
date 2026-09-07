@@ -13,6 +13,7 @@ from app.models import (
     IndexedPath,
     Workflow,
     WorkflowRevision,
+    WorkJob,
     utcnow,
 )
 from app.service import FileCenterService
@@ -231,3 +232,237 @@ def test_rebuild_concurrent_revision_changed_race(hotfix1_env):
 
     assert exc_info.value.code == "PREVIEW_CHANGED"
     assert exc_info.value.status_code == 409
+
+
+def test_red_rebuild_concurrent_status_changed_race(hotfix1_env):
+    """Case A: source plan status changes from 'stale' to 'ready' concurrently."""
+    service: FileCenterService = hotfix1_env["service"]
+    client: TestClient = hotfix1_env["client"]
+    data_dir: Path = hotfix1_env["data_dir"]
+
+    f = data_dir / "test_case_a.txt"
+    f.write_text("case_a")
+    with service.SessionLocal() as session:
+        session.add(
+            IndexedPath(
+                root_key=str(data_dir),
+                absolute_path=str(f),
+                relative_path=f.name,
+                basename=f.name,
+                stem=f.stem,
+                suffix=f.suffix,
+                size=len(f.read_text()),
+                mtime_ns=1_000_000,
+                is_dir=False,
+                scan_generation="gen1",
+            )
+        )
+        session.commit()
+
+    r_wf = client.post("/api/workflows", json={
+        "name": "Race WF Case A",
+        "definition": {
+            "schema_version": 1,
+            "mode": "file",
+            "steps": [
+                {"id": "s1", "type": "scan", "root_ids": [1]},
+                {"id": "s2", "type": "touch", "touch_now": True, "mtime_ns": None},
+            ],
+        },
+    })
+    wf_id = r_wf.json()["id"]
+    r_prev = client.post(f"/api/workflows/{wf_id}/preview", json={"runtime_inputs": {"root_ids": [1]}})
+    digest = r_prev.json()["compile_digest"]
+    r_gen = client.post(f"/api/workflows/{wf_id}/generate-plan", json={
+        "expected_compile_digest": digest,
+        "runtime_inputs": {"root_ids": [1]},
+    })
+    plan_id = r_gen.json()["plan_id"]
+
+    with service.SessionLocal() as session:
+        p = session.get(BatchPlan, plan_id)
+        p.status = "stale"
+        session.commit()
+
+    original_compile = service.workflow_service.compile_workflow_definition
+
+    def compile_with_concurrent_status_change(*args, **kwargs):
+        res = original_compile(*args, **kwargs)
+        with service.SessionLocal() as session2:
+            p2 = session2.get(BatchPlan, plan_id)
+            p2.status = "ready"
+            session2.commit()
+        return res
+
+    service.workflow_service.compile_workflow_definition = compile_with_concurrent_status_change
+
+    with service.SessionLocal() as session:
+        plans_before = session.scalar(text("SELECT count(*) FROM batch_plans"))
+
+    with pytest.raises(WorkflowDigestMismatchError) as exc_info:
+        service.rebuild_plan(plan_id, expected_compile_digest=digest)
+
+    assert exc_info.value.code == "PREVIEW_CHANGED"
+    assert exc_info.value.status_code == 409
+
+    with service.SessionLocal() as session:
+        plans_after = session.scalar(text("SELECT count(*) FROM batch_plans"))
+        assert plans_after == plans_before
+
+
+def test_red_rebuild_concurrent_metadata_changed_race(hotfix1_env):
+    """Case B: source plan metadata_json is tampered/changed concurrently."""
+    service: FileCenterService = hotfix1_env["service"]
+    client: TestClient = hotfix1_env["client"]
+    data_dir: Path = hotfix1_env["data_dir"]
+
+    f = data_dir / "test_case_b.txt"
+    f.write_text("case_b")
+    with service.SessionLocal() as session:
+        session.add(
+            IndexedPath(
+                root_key=str(data_dir),
+                absolute_path=str(f),
+                relative_path=f.name,
+                basename=f.name,
+                stem=f.stem,
+                suffix=f.suffix,
+                size=len(f.read_text()),
+                mtime_ns=1_000_000,
+                is_dir=False,
+                scan_generation="gen1",
+            )
+        )
+        session.commit()
+
+    r_wf = client.post("/api/workflows", json={
+        "name": "Race WF Case B",
+        "definition": {
+            "schema_version": 1,
+            "mode": "file",
+            "steps": [
+                {"id": "s1", "type": "scan", "root_ids": [1]},
+                {"id": "s2", "type": "touch", "touch_now": True, "mtime_ns": None},
+            ],
+        },
+    })
+    wf_id = r_wf.json()["id"]
+    r_prev = client.post(f"/api/workflows/{wf_id}/preview", json={"runtime_inputs": {"root_ids": [1]}})
+    digest = r_prev.json()["compile_digest"]
+    r_gen = client.post(f"/api/workflows/{wf_id}/generate-plan", json={
+        "expected_compile_digest": digest,
+        "runtime_inputs": {"root_ids": [1]},
+    })
+    plan_id = r_gen.json()["plan_id"]
+
+    with service.SessionLocal() as session:
+        p = session.get(BatchPlan, plan_id)
+        p.status = "stale"
+        session.commit()
+
+    original_compile = service.workflow_service.compile_workflow_definition
+
+    def compile_with_concurrent_metadata_mod(*args, **kwargs):
+        res = original_compile(*args, **kwargs)
+        with service.SessionLocal() as session2:
+            p2 = session2.get(BatchPlan, plan_id)
+            meta = json.loads(p2.metadata_json)
+            meta["tampered"] = True
+            p2.metadata_json = json.dumps(meta)
+            session2.commit()
+        return res
+
+    service.workflow_service.compile_workflow_definition = compile_with_concurrent_metadata_mod
+
+    with service.SessionLocal() as session:
+        plans_before = session.scalar(text("SELECT count(*) FROM batch_plans"))
+
+    with pytest.raises(WorkflowDigestMismatchError) as exc_info:
+        service.rebuild_plan(plan_id, expected_compile_digest=digest)
+
+    assert exc_info.value.code == "PREVIEW_CHANGED"
+    assert exc_info.value.status_code == 409
+
+    with service.SessionLocal() as session:
+        plans_after = session.scalar(text("SELECT count(*) FROM batch_plans"))
+        assert plans_after == plans_before
+
+
+def test_red_rebuild_concurrent_active_job_race(hotfix1_env):
+    """Case D: active execution job is inserted concurrently."""
+    service: FileCenterService = hotfix1_env["service"]
+    client: TestClient = hotfix1_env["client"]
+    data_dir: Path = hotfix1_env["data_dir"]
+
+    f = data_dir / "test_case_d.txt"
+    f.write_text("case_d")
+    with service.SessionLocal() as session:
+        session.add(
+            IndexedPath(
+                root_key=str(data_dir),
+                absolute_path=str(f),
+                relative_path=f.name,
+                basename=f.name,
+                stem=f.stem,
+                suffix=f.suffix,
+                size=len(f.read_text()),
+                mtime_ns=1_000_000,
+                is_dir=False,
+                scan_generation="gen1",
+            )
+        )
+        session.commit()
+
+    r_wf = client.post("/api/workflows", json={
+        "name": "Race WF Case D",
+        "definition": {
+            "schema_version": 1,
+            "mode": "file",
+            "steps": [
+                {"id": "s1", "type": "scan", "root_ids": [1]},
+                {"id": "s2", "type": "touch", "touch_now": True, "mtime_ns": None},
+            ],
+        },
+    })
+    wf_id = r_wf.json()["id"]
+    r_prev = client.post(f"/api/workflows/{wf_id}/preview", json={"runtime_inputs": {"root_ids": [1]}})
+    digest = r_prev.json()["compile_digest"]
+    r_gen = client.post(f"/api/workflows/{wf_id}/generate-plan", json={
+        "expected_compile_digest": digest,
+        "runtime_inputs": {"root_ids": [1]},
+    })
+    plan_id = r_gen.json()["plan_id"]
+
+    with service.SessionLocal() as session:
+        p = session.get(BatchPlan, plan_id)
+        p.status = "stale"
+        session.commit()
+
+    original_compile = service.workflow_service.compile_workflow_definition
+
+    def compile_with_concurrent_active_job(*args, **kwargs):
+        res = original_compile(*args, **kwargs)
+        with service.SessionLocal() as session2:
+            job = WorkJob(
+                kind="batch-plan-execute",
+                status="running",
+                state_json=json.dumps({"plan_id": plan_id}),
+            )
+            session2.add(job)
+            session2.commit()
+        return res
+
+    service.workflow_service.compile_workflow_definition = compile_with_concurrent_active_job
+
+    with service.SessionLocal() as session:
+        plans_before = session.scalar(text("SELECT count(*) FROM batch_plans"))
+
+    with pytest.raises(WorkflowDigestMismatchError) as exc_info:
+        service.rebuild_plan(plan_id, expected_compile_digest=digest)
+
+    assert exc_info.value.code == "PREVIEW_CHANGED"
+    assert exc_info.value.status_code == 409
+
+    with service.SessionLocal() as session:
+        plans_after = session.scalar(text("SELECT count(*) FROM batch_plans"))
+        assert plans_after == plans_before

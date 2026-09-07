@@ -29,6 +29,10 @@ export const workflowApi = {
     return api.get<WorkflowRevisionResponse>(`/api/workflows/${id}/revisions/${revision}`);
   },
 
+  getWorkflowRevision: async (id: number, revision: number): Promise<WorkflowRevisionResponse> => {
+    return api.get<WorkflowRevisionResponse>(`/api/workflows/${id}/revisions/${revision}`);
+  },
+
   createWorkflow: async (data: WorkflowCreateRequest): Promise<WorkflowResponse> => {
     return api.post<WorkflowResponse>('/api/workflows', data);
   },
@@ -85,3 +89,5 @@ export const workflowApi = {
     return api.post<PlanRebuildResponse>(`/api/plans/${planId}/rebuild`, data);
   },
 };
+
+export const getWorkflowRevision = workflowApi.getWorkflowRevision;

@@ -113,11 +113,11 @@ v0.3.5 = NOT CLOSED
 ### 3.1 前端单元与契约测试套件
 ```bash
 npm test
-# tests 222
+# tests 224
 # suites 69
-# pass 222
+# pass 224
 # fail 0
-# duration_ms 134.93
+# duration_ms 114.30
 ```
 涵盖 8 大独立审查找出的回归用例（`frontend/tests/hotfix1_red.test.ts`），全量通过。
 
@@ -128,7 +128,7 @@ npm run build
 # vite v6.4.3 building for production...
 # transforming...
 # ✓ 3745 modules transformed.
-# ✓ built in 3.60s
+# ✓ built in 3.87s
 ```
 TypeScript 严格模式 0 警告、0 错误，静态资源打包完毕。
 
@@ -139,14 +139,14 @@ docker exec -t -e PYTHONPATH=/app nas-test-env pytest -q
 # ........................................................................ [ 23%]
 # ........................................................................ [ 35%]
 # ........................................................................ [ 47%]
-# ........................................................................ [ 59%]
-# ........................................................................ [ 71%]
+# ........................................................................ [ 58%]
+# ........................................................................ [ 70%]
 # ........................................................................ [ 82%]
 # ........................................................................ [ 94%]
-# ................................                                         [100%]
-# 100% PASS
+# ...................................                                      [100%]
+# 611 passed, 0 failed
 ```
-包含原集成套件及 `tests/test_gate5c_hotfix1_backend.py` 2 个并发竞态测试，全部通过。
+包含原套件及 `tests/test_gate5c_hotfix1_backend.py` 5 个精准并发竞态测试（Case A, Case B, Case C, Case D 及版本篡改），全部通过。
 
 ### 3.4 真实 Docker 生产容器端到端黑盒验收
 基于 `Dockerfile` 重新构建的真实生产镜像 `nas-file-center:v0.3.5-gate5c-hotfix1`，运行黑盒测试脚本 `scratch/test_gate5c_hotfix1_blackbox_acceptance.py`：
@@ -158,7 +158,7 @@ RBAC_MEMBER_FORBIDDEN_CREATE       : PASS
 WORKFLOW_CREATE                    : PASS (id=1)
 CANONICAL_ORGANIZER_DEFAULTS       : PASS
 TOPOLOGY_VIOLATION_REJECTED        : PASS
-WORKFLOW_PREVIEW                   : PASS (compile_digest=f222e21fbf...)
+WORKFLOW_PREVIEW                   : PASS (compile_digest=b6de09b06b...)
 GENERATE_DRAFT_PLAN                : PASS (plan_id=1)
 STALE_REBUILD_PREVIEW              : PASS
 CONCURRENT_ARCHIVE_RACE_REJECTED   : PASS (code=WORKFLOW_ARCHIVED)
@@ -180,5 +180,6 @@ Gate5-B = PASS / CLOSED
 
 Gate5-C-hotfix1 candidate ready for independent review
 Gate5-C = HOLD pending independent review
+Gate5-D = FORBIDDEN
 v0.3.5 = NOT CLOSED
 ```

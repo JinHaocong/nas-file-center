@@ -3748,12 +3748,13 @@ class FileCenterService:
         plan_name: str | None = None,
         user_id: int | None = None,
     ) -> dict[str, Any]:
-        with self.SessionLocal() as session:
-            plan, metadata, metadata_str, wf, rev, definition, runtime_inputs = self._validate_rebuild_eligibility(session, plan_id)
+        # Phase 1: Read-only verification & compile in dedicated read session
+        with self.SessionLocal() as read_session:
+            plan, metadata, metadata_str, wf, rev, definition, runtime_inputs = self._validate_rebuild_eligibility(read_session, plan_id)
 
             effective_root_ids = runtime_inputs["root_ids"]
             res = self.workflow_service.compile_workflow_definition(
-                session=session,
+                session=read_session,
                 definition=definition,
                 workflow_id=wf.id,
                 workflow_revision=rev.revision,
@@ -3761,72 +3762,89 @@ class FileCenterService:
                 override_root_ids=effective_root_ids,
             )
 
-            if expected_compile_digest != res.compile_digest:
-                raise WorkflowDigestMismatchError(
-                    f"Workflow rebuild compile digest mismatch: expected '{expected_compile_digest}', got '{res.compile_digest}'",
-                    details={
-                        "expected_compile_digest": expected_compile_digest,
-                        "actual_compile_digest": res.compile_digest,
-                    },
-                )
+            # Capture immutable snapshots for write phase
+            captured_plan_id = plan.id
+            captured_metadata_str = metadata_str
+            captured_wf_id = wf.id
+            captured_wf_name = wf.name
+            captured_revision = rev.revision
+            captured_definition_sha256 = metadata.get("definition_sha256")
+            captured_runtime_inputs = json.loads(json.dumps(runtime_inputs))
+            captured_compile_digest = res.compile_digest
+            captured_compile_context = res.compile_context
+            captured_matched_count = res.matched_count
+            captured_matched_bytes = res.matched_bytes
+            captured_planned_operations = list(res.planned_operations)
 
-            # Erratum E1: Transactional recheck
-            session.execute(text("BEGIN IMMEDIATE"))
-            session.expire_all()
-            source_plan = session.get(BatchPlan, plan_id)
-            active_job = _get_active_execution_job(session, plan_id)
-            source_wf = session.get(Workflow, wf.id)
-            source_rev = session.scalar(
+        # read_session is completely closed and identity map destroyed
+
+        if expected_compile_digest != captured_compile_digest:
+            raise WorkflowDigestMismatchError(
+                f"Workflow rebuild compile digest mismatch: expected '{expected_compile_digest}', got '{captured_compile_digest}'",
+                details={
+                    "expected_compile_digest": expected_compile_digest,
+                    "actual_compile_digest": captured_compile_digest,
+                },
+            )
+
+        # Phase 2: Fresh write session with immediate write lock & fresh DB recheck
+        with self.SessionLocal() as write_session:
+            write_session.execute(text("BEGIN IMMEDIATE"))
+            source_plan = write_session.get(BatchPlan, captured_plan_id)
+            active_job = _get_active_execution_job(write_session, captured_plan_id)
+            source_wf = write_session.get(Workflow, captured_wf_id)
+            source_rev = write_session.scalar(
                 select(WorkflowRevision).where(
-                    WorkflowRevision.workflow_id == wf.id,
-                    WorkflowRevision.revision == rev.revision,
+                    WorkflowRevision.workflow_id == captured_wf_id,
+                    WorkflowRevision.revision == captured_revision,
                 )
             ) if source_wf else None
+
             if (
                 source_plan is None
                 or source_plan.status != "stale"
                 or active_job is not None
-                or source_plan.metadata_json != metadata_str
+                or source_plan.metadata_json != captured_metadata_str
                 or source_wf is None
                 or source_wf.archived_at is not None
                 or source_rev is None
-                or source_rev.definition_sha256 != metadata.get("definition_sha256")
+                or source_rev.definition_sha256 != captured_definition_sha256
             ):
-                session.rollback()
+                write_session.rollback()
                 raise WorkflowDigestMismatchError(
                     "Source plan or workflow lineage changed during rebuild transaction",
                     details={"plan_id": plan_id},
                 )
 
-            new_name = plan_name or f"工作流重建计划 - {wf.name} (r{rev.revision})"
+            new_name = plan_name or f"工作流重建计划 - {captured_wf_name} (r{captured_revision})"
             new_metadata = {
                 "source": "workflow",
-                "workflow_id": wf.id,
-                "workflow_name": wf.name,
-                "workflow_revision": rev.revision,
-                "definition_sha256": rev.definition_sha256,
-                "compile_digest": res.compile_digest,
-                "runtime_inputs": runtime_inputs,
-                "compile_context": res.compile_context,
-                "matched_count": res.matched_count,
-                "matched_bytes": res.matched_bytes,
+                "workflow_id": captured_wf_id,
+                "workflow_name": captured_wf_name,
+                "workflow_revision": captured_revision,
+                "definition_sha256": captured_definition_sha256,
+                "compile_digest": captured_compile_digest,
+                "runtime_inputs": captured_runtime_inputs,
+                "compile_context": captured_compile_context,
+                "matched_count": captured_matched_count,
+                "matched_bytes": captured_matched_bytes,
                 "rebuild_of_plan_id": plan_id,
                 "rebuild_source_status": "stale",
                 "created_by_user_id": user_id,
             }
             new_plan = BatchPlan(
                 name=new_name,
-                kind=f"workflow-{wf.id}",
+                kind=f"workflow-{captured_wf_id}",
                 status="draft",
-                expected_changes=len(res.planned_operations),
+                expected_changes=len(captured_planned_operations),
                 expected_reclaim_bytes=0,
                 metadata_json=json.dumps(new_metadata, ensure_ascii=False),
                 created_at=utcnow(),
             )
-            session.add(new_plan)
-            session.flush()
+            write_session.add(new_plan)
+            write_session.flush()
 
-            for op in res.planned_operations:
+            for op in captured_planned_operations:
                 item_metadata = {k: v for k, v in op.items() if k not in {"source", "target", "operation", "sequence"}}
                 item = BatchPlanItem(
                     plan_id=new_plan.id,
@@ -3843,9 +3861,9 @@ class FileCenterService:
                     reason="",
                     metadata_json=json.dumps(item_metadata, ensure_ascii=False),
                 )
-                session.add(item)
-            session.commit()
-            session.refresh(new_plan)
+                write_session.add(item)
+            write_session.commit()
+            write_session.refresh(new_plan)
             return {
                 "id": new_plan.id,
                 "plan_id": new_plan.id,
@@ -3853,6 +3871,6 @@ class FileCenterService:
                 "status": new_plan.status,
                 "rebuild_of_plan_id": plan_id,
                 "expected_changes": new_plan.expected_changes,
-                "compile_digest": res.compile_digest,
+                "compile_digest": captured_compile_digest,
             }
 

@@ -1,21 +1,14 @@
-import { OrganizerProfileSnapshot } from '../types/workflow';
+import { OrganizerProfileSnapshot, CANONICAL_ORGANIZER_SNAPSHOT_DEFAULTS } from '../types/workflow';
+
+export { CANONICAL_ORGANIZER_SNAPSHOT_DEFAULTS };
 
 export function createDefaultOrganizerSnapshot(name = ''): OrganizerProfileSnapshot {
   return {
+    ...CANONICAL_ORGANIZER_SNAPSHOT_DEFAULTS,
     name,
-    description: '',
-    root: '',
-    recursive: false,
-    image_extensions: ['jpg', 'jpeg', 'png', 'webp'],
-    video_extensions: ['mp4', 'mov', 'mkv'],
-    rename_template: '{name}',
-    statistics_template: '[{images}P {videos}V {size}]',
-    preserve_tags: [],
-    cleanup_patterns: [],
-    numbering_mode: 'none',
-    numbering_start: 1,
-    numbering_padding: 3,
-    mtime_mode: 'none',
-    mtime_delay_seconds: 2.0,
+    image_extensions: [...(CANONICAL_ORGANIZER_SNAPSHOT_DEFAULTS.image_extensions || [])],
+    video_extensions: [...(CANONICAL_ORGANIZER_SNAPSHOT_DEFAULTS.video_extensions || [])],
+    preserve_tags: [...(CANONICAL_ORGANIZER_SNAPSHOT_DEFAULTS.preserve_tags || [])],
+    cleanup_patterns: [...(CANONICAL_ORGANIZER_SNAPSHOT_DEFAULTS.cleanup_patterns || [])],
   };
 }
