@@ -670,12 +670,22 @@ def run_advanced_dedupe(
                     modified_members.append(m)
 
             if any_modified:
+                orig_eligible_count = sum(1 for m in group.members if m.eligible_as_keep)
                 group = DedupeGroupSnapshot(
                     provenance_id=group.provenance_id,
                     content_hash=group.content_hash,
                     file_size=group.file_size,
                     members=tuple(modified_members),
                 )
+                if orig_eligible_count > 0 and not any(m.eligible_as_keep for m in modified_members):
+                    res = _make_skipped_group_result(
+                        group,
+                        "PROTECT_LAST_FILE_NO_SAFE_SELECTION",
+                        "protect_last_file",
+                    )
+                    results.append(res)
+                    skipped_count += 1
+                    continue
 
         res = evaluate_group(
             group,

@@ -378,6 +378,7 @@ def test_protect_last_file_zero_safe_candidates_skips_group(db_session: Session,
     assert res.skipped_group_count == 1
     assert res.planned_quarantine_count == 0
     assert res.groups[0].status == "skipped"
+    assert res.groups[0].skip_reason == "PROTECT_LAST_FILE_NO_SAFE_SELECTION"
 
 
 def test_protect_last_file_cumulative_scheduled_deletes(db_session: Session, tmp_path: Path):
@@ -864,4 +865,273 @@ def test_cumulative_logic_obeys_d1_order_regardless_of_db_id(db_session: Session
     # Small group cannot quarantine f_small_a because dir_a only had 2 files, and f_large_a is already scheduled!
     # So small group MUST keep f_small_a!
     assert res.groups[1].recommended_keep.absolute_path == str(f_small_a)
+
+
+def test_top_level_dir_mismatch_fails_closed(db_session: Session, tmp_path: Path):
+    root = tmp_path / "root"
+    dir_a = root / "dir_a"
+    dir_b = root / "dir_b"
+    dir_a.mkdir(parents=True)
+    dir_b.mkdir(parents=True)
+
+    _create_completed_scan(db_session, scan_id=70, roots=[str(root)])
+
+    f_a = dir_a / "f.txt"
+    f_b = dir_b / "f.txt"
+    (dir_b / "extra.txt").write_text("extra")
+    f_a.write_text("content")
+    f_b.write_text("content")
+
+    g = DuplicateGroup(scan_job_id=70, content_hash="h_tlm", file_size=7, member_count=2)
+    db_session.add(g)
+    db_session.flush()
+    # Malformed row: f_a is in dir_a, but DB top_level_dir is erroneously set to dir_b!
+    db_session.add(DuplicateFile(
+        group_id=g.id,
+        root_id=0,
+        absolute_path=str(f_a),
+        relative_path="dir_a/f.txt",
+        top_level_dir=str(dir_b),  # WRONG! Derived is dir_a
+        size=7,
+        mtime_ns=1,
+    ))
+    db_session.add(DuplicateFile(
+        group_id=g.id,
+        root_id=0,
+        absolute_path=str(f_b),
+        relative_path="dir_b/f.txt",
+        top_level_dir=str(dir_b),
+        size=7,
+        mtime_ns=1,
+    ))
+    db_session.commit()
+
+    cfg = AdvancedDedupeConfig()
+    res = compile_advanced_dedupe_preview(
+        db_session,
+        scan_job_id=70,
+        config=cfg,
+        allowed_roots=[str(root)],
+        protect_last_file=True,
+    )
+
+    assert res.actionable_group_count == 0
+    assert res.skipped_group_count == 1
+    assert res.planned_quarantine_count == 0
+    assert res.expected_reclaim_bytes == 0
+    assert res.groups[0].status == "skipped"
+    assert res.groups[0].skip_reason == "TOP_LEVEL_DIR_MISMATCH"
+    # The mismatched member explain has TOP_LEVEL_DIR_MISMATCH
+    explain_a = next(m for m in res.groups[0].members if m.absolute_path == str(f_a))
+    assert explain_a.eligible_as_keep is False
+    assert "TOP_LEVEL_DIR_MISMATCH" in explain_a.safety_reasons
+
+
+def test_skipped_group_does_not_traverse_untrusted_top_level_dir(db_session: Session, tmp_path: Path, monkeypatch):
+    root = tmp_path / "root"
+    dir_a = root / "dir_a"
+    untrusted_dir = tmp_path / "huge_untrusted_dir"
+    dir_a.mkdir(parents=True)
+    untrusted_dir.mkdir(parents=True)
+
+    _create_completed_scan(db_session, scan_id=71, roots=[str(root)])
+
+    f_a = dir_a / "f.txt"
+    f_missing = root / "missing.txt"
+    f_a.write_text("content")
+    # f_missing does not exist -> group will be skipped for SOURCE_NOT_FOUND / SOURCE_SNAPSHOT_STALE
+
+    g = DuplicateGroup(scan_job_id=71, content_hash="h_trav", file_size=7, member_count=2)
+    db_session.add(g)
+    db_session.flush()
+    db_session.add(DuplicateFile(
+        group_id=g.id,
+        root_id=0,
+        absolute_path=str(f_a),
+        relative_path="dir_a/f.txt",
+        top_level_dir=str(dir_a),
+        size=7,
+        mtime_ns=1,
+    ))
+    db_session.add(DuplicateFile(
+        group_id=g.id,
+        root_id=0,
+        absolute_path=str(f_missing),
+        relative_path="missing.txt",
+        top_level_dir=str(untrusted_dir),
+        size=7,
+        mtime_ns=1,
+    ))
+    db_session.commit()
+
+    traversed_dirs = []
+    orig_rglob = Path.rglob
+
+    def spy_rglob(self, pattern):
+        traversed_dirs.append(str(self))
+        return orig_rglob(self, pattern)
+
+    monkeypatch.setattr(Path, "rglob", spy_rglob)
+
+    cfg = AdvancedDedupeConfig()
+    res = compile_advanced_dedupe_preview(
+        db_session,
+        scan_job_id=71,
+        config=cfg,
+        allowed_roots=[str(root)],
+        protect_last_file=True,
+    )
+
+    assert res.skipped_group_count == 1
+    # Untrusted dir or dirs from skipped group must NOT be traversed!
+    assert str(untrusted_dir) not in traversed_dirs
+    assert str(dir_a) not in traversed_dirs
+
+
+def test_missing_member_explain_contains_safety_reason(db_session: Session, tmp_path: Path):
+    root = tmp_path / "root"
+    root.mkdir()
+    _create_completed_scan(db_session, scan_id=72, roots=[str(root)])
+
+    f1 = root / "f1.txt"
+    f2 = root / "f2.txt"
+    f1.write_text("x")
+    # f2 missing
+
+    g = DuplicateGroup(scan_job_id=72, content_hash="h_miss_exp", file_size=1, member_count=2)
+    db_session.add(g)
+    db_session.flush()
+    db_session.add(DuplicateFile(group_id=g.id, root_id=0, absolute_path=str(f1), relative_path="f1.txt", top_level_dir=str(root), size=1, mtime_ns=1))
+    db_session.add(DuplicateFile(group_id=g.id, root_id=0, absolute_path=str(f2), relative_path="f2.txt", top_level_dir=str(root), size=1, mtime_ns=1))
+    db_session.commit()
+
+    cfg = AdvancedDedupeConfig()
+    res = compile_advanced_dedupe_preview(
+        db_session,
+        scan_job_id=72,
+        config=cfg,
+        allowed_roots=[str(root)],
+    )
+
+    assert res.skipped_group_count == 1
+    assert res.groups[0].status == "skipped"
+    explain_f2 = next(m for m in res.groups[0].members if m.absolute_path == str(f2))
+    assert explain_f2.eligible_as_keep is False
+    assert "SOURCE_NOT_FOUND" in explain_f2.safety_reasons
+
+
+def test_symlink_member_explain_contains_safety_reason(db_session: Session, tmp_path: Path):
+    root = tmp_path / "root"
+    root.mkdir()
+    _create_completed_scan(db_session, scan_id=73, roots=[str(root)])
+
+    f1 = root / "f1.txt"
+    target = root / "target.txt"
+    f2 = root / "f2.txt"
+    f1.write_text("x")
+    target.write_text("x")
+    os.symlink(str(target), str(f2))
+
+    g = DuplicateGroup(scan_job_id=73, content_hash="h_sym_exp", file_size=1, member_count=2)
+    db_session.add(g)
+    db_session.flush()
+    db_session.add(DuplicateFile(group_id=g.id, root_id=0, absolute_path=str(f1), relative_path="f1.txt", top_level_dir=str(root), size=1, mtime_ns=1))
+    db_session.add(DuplicateFile(group_id=g.id, root_id=0, absolute_path=str(f2), relative_path="f2.txt", top_level_dir=str(root), size=1, mtime_ns=1))
+    db_session.commit()
+
+    cfg = AdvancedDedupeConfig()
+    res = compile_advanced_dedupe_preview(
+        db_session,
+        scan_job_id=73,
+        config=cfg,
+        allowed_roots=[str(root)],
+    )
+
+    assert res.skipped_group_count == 1
+    assert res.groups[0].status == "skipped"
+    explain_f2 = next(m for m in res.groups[0].members if m.absolute_path == str(f2))
+    assert explain_f2.eligible_as_keep is False
+    assert "SYMLINK" in explain_f2.safety_reasons
+
+
+def test_invalid_raw_root_id_changes_source_snapshot_digest(db_session: Session, tmp_path: Path):
+    root = tmp_path / "root"
+    root.mkdir()
+    _create_completed_scan(db_session, scan_id=74, roots=[str(root)])
+
+    f1 = root / "f1.txt"
+    f2 = root / "f2.txt"
+    f1.write_text("x")
+    f2.write_text("x")
+
+    g = DuplicateGroup(scan_job_id=74, content_hash="h_raw_rid", file_size=1, member_count=2)
+    db_session.add(g)
+    db_session.flush()
+    db_session.add(DuplicateFile(group_id=g.id, root_id=0, absolute_path=str(f1), relative_path="f1.txt", top_level_dir=str(root), size=1, mtime_ns=1))
+    f2_row = DuplicateFile(group_id=g.id, root_id=99, absolute_path=str(f2), relative_path="f2.txt", top_level_dir=str(root), size=1, mtime_ns=1)
+    db_session.add(f2_row)
+    db_session.commit()
+
+    cfg = AdvancedDedupeConfig()
+    res1 = compile_advanced_dedupe_preview(
+        db_session,
+        scan_job_id=74,
+        config=cfg,
+        allowed_roots=[str(root)],
+    )
+
+    # Change invalid root_id from 99 to 100
+    f2_row.root_id = 100
+    db_session.commit()
+
+    res2 = compile_advanced_dedupe_preview(
+        db_session,
+        scan_job_id=74,
+        config=cfg,
+        allowed_roots=[str(root)],
+    )
+
+    # Digest MUST change even though both are invalid/skipped!
+    assert res1.source_snapshot_digest != res2.source_snapshot_digest
+
+
+def test_cross_group_duplicate_member_path_fails_closed(db_session: Session, tmp_path: Path):
+    root = tmp_path / "root"
+    root.mkdir()
+    _create_completed_scan(db_session, scan_id=75, roots=[str(root)])
+
+    f1 = root / "f1.txt"
+    f2 = root / "f2.txt"
+    f3 = root / "f3.txt"
+    f1.write_text("x")
+    f2.write_text("x")
+    f3.write_text("x")
+
+    # Inconsistent DB: f1 appears in both group 1 and group 2
+    g1 = DuplicateGroup(scan_job_id=75, content_hash="h1", file_size=1, member_count=2)
+    g2 = DuplicateGroup(scan_job_id=75, content_hash="h2", file_size=1, member_count=2)
+    db_session.add_all([g1, g2])
+    db_session.flush()
+
+    db_session.add(DuplicateFile(group_id=g1.id, root_id=0, absolute_path=str(f1), relative_path="f1.txt", top_level_dir=str(root), size=1, mtime_ns=1))
+    db_session.add(DuplicateFile(group_id=g1.id, root_id=0, absolute_path=str(f2), relative_path="f2.txt", top_level_dir=str(root), size=1, mtime_ns=1))
+
+    db_session.add(DuplicateFile(group_id=g2.id, root_id=0, absolute_path=str(f1), relative_path="f1.txt", top_level_dir=str(root), size=1, mtime_ns=1))
+    db_session.add(DuplicateFile(group_id=g2.id, root_id=0, absolute_path=str(f3), relative_path="f3.txt", top_level_dir=str(root), size=1, mtime_ns=1))
+    db_session.commit()
+
+    cfg = AdvancedDedupeConfig()
+    res = compile_advanced_dedupe_preview(
+        db_session,
+        scan_job_id=75,
+        config=cfg,
+        allowed_roots=[str(root)],
+    )
+
+    assert res.actionable_group_count == 0
+    assert res.skipped_group_count == 2
+    for g_res in res.groups:
+        assert g_res.status == "skipped"
+        assert g_res.skip_reason == "SOURCE_SNAPSHOT_INCONSISTENT"
+
 

@@ -25,6 +25,8 @@ from app.planning.dedupe_engine import (
     GroupDecisionResult,
     normalize_dedupe_path,
     run_advanced_dedupe,
+    _is_lexical_contained,
+    _lexical_relpath,
     _stable_group_path_fingerprint,
 )
 
@@ -46,6 +48,17 @@ class DedupeScanNotCompletedError(ValueError):
 class DedupeLimitExceededError(ValueError):
     """Raised when candidate count or planned quarantine items exceed configured caps."""
     pass
+
+
+def derive_canonical_top_level_dir(scan_root: str, relative_path: str) -> str:
+    """Pure lexical derivation of top-level protected directory."""
+    norm_root = normalize_dedupe_path(scan_root)
+    # Extract components lexically
+    rel_norm = normalize_dedupe_path(relative_path).lstrip("/")
+    rel_parts = [p for p in rel_norm.split("/") if p and p != "."]
+    if len(rel_parts) > 1:
+        return normalize_dedupe_path(f"{norm_root}/{rel_parts[0]}")
+    return norm_root
 
 
 @dataclass(frozen=True)
@@ -70,41 +83,17 @@ def compute_source_snapshot_digest(
     scan_job_id: int,
     scan_roots: Sequence[str],
     scan_provenance: Mapping[str, Any],
-    groups_snapshot: Sequence[DedupeGroupSnapshot],
+    raw_groups_data: Sequence[Mapping[str, Any]],
     member_safety_facts: Mapping[str, Mapping[str, Any]],
     directory_file_counts: Mapping[str, int] | None,
 ) -> str:
-    """Deterministic fingerprint over database and read-only filesystem source state."""
-    # Deterministic sorting of groups
-    sorted_groups = sorted(
-        groups_snapshot,
-        key=lambda g: (-g.file_size, g.content_hash, _stable_group_path_fingerprint(g)),
-    )
-
+    """Deterministic fingerprint over RAW database rows and read-only filesystem source facts."""
     payload = {
         "scan_job_id": scan_job_id,
         "scan_roots": list(scan_roots),
         "scan_provenance": dict(sorted(scan_provenance.items())),
-        "groups": [
-            {
-                "provenance_id": g.provenance_id,
-                "content_hash": g.content_hash,
-                "file_size": g.file_size,
-                "members": [
-                    {
-                        "absolute_path": m.absolute_path,
-                        "relative_path": m.relative_path,
-                        "scan_root_index": m.scan_root_index,
-                        "size": m.size,
-                        "mtime_ns": m.mtime_ns,
-                        "top_level_dir": m.top_level_dir,
-                        "safety_facts": dict(sorted(member_safety_facts.get(m.absolute_path, {}).items())),
-                    }
-                    for m in sorted(g.members, key=lambda x: normalize_dedupe_path(x.absolute_path))
-                ],
-            }
-            for g in sorted_groups
-        ],
+        "raw_groups": list(raw_groups_data),
+        "member_safety_facts": {k: dict(sorted(v.items())) for k, v in sorted(member_safety_facts.items())},
         "directory_file_counts": dict(sorted(directory_file_counts.items())) if directory_file_counts is not None else None,
     }
     serialized = canonical_json_dumps(payload)
@@ -195,8 +184,27 @@ def compile_advanced_dedupe_preview(
         select(DuplicateGroup).where(DuplicateGroup.scan_job_id == scan_job_id)
     ))
 
-    # Sort groups deterministically by content_hash, file_size, id
+    # Sort groups deterministically for processing
     db_groups.sort(key=lambda g: (-g.file_size, g.content_hash, g.id))
+
+    group_files: dict[int, list[DuplicateFile]] = {}
+    seen_member_paths: dict[str, list[int]] = {}
+
+    for db_g in db_groups:
+        files = list(session.scalars(
+            select(DuplicateFile).where(DuplicateFile.group_id == db_g.id)
+        ))
+        files.sort(key=lambda f: (f.root_id, normalize_dedupe_path(f.absolute_path), f.id))
+        group_files[db_g.id] = files
+        for f in files:
+            norm_p = normalize_dedupe_path(f.absolute_path)
+            seen_member_paths.setdefault(norm_p, []).append(db_g.id)
+
+    # Check cross-group duplicate member paths (inconsistent snapshot)
+    inconsistent_group_ids = set()
+    for norm_p, gids in seen_member_paths.items():
+        if len(gids) > 1:
+            inconsistent_group_ids.update(gids)
 
     group_snapshots: list[DedupeGroupSnapshot] = []
     pre_skipped_reasons: dict[int | str, str] = {}
@@ -204,88 +212,123 @@ def compile_advanced_dedupe_preview(
     distinct_top_dirs: set[str] = set()
 
     for db_g in db_groups:
-        db_files = list(session.scalars(
-            select(DuplicateFile).where(DuplicateFile.group_id == db_g.id)
-        ))
-        # Sort files deterministically
-        db_files.sort(key=lambda f: (f.root_id, normalize_dedupe_path(f.absolute_path)))
+        db_files = group_files[db_g.id]
 
         group_skip_reason: str | None = None
+        if db_g.id in inconsistent_group_ids:
+            group_skip_reason = "SOURCE_SNAPSHOT_INCONSISTENT"
+
         members: list[DedupeMemberSnapshot] = []
+        candidate_group_top_dirs: set[str] = set()
 
         for f in db_files:
             abs_p = Path(f.absolute_path)
             norm_abs = normalize_dedupe_path(f.absolute_path)
 
-            # Facts collection
+            member_fail_reason: str | None = None
+            if db_g.id in inconsistent_group_ids:
+                member_fail_reason = "SOURCE_SNAPSHOT_INCONSISTENT"
+
+            # Step 1: Root index bounds
+            if member_fail_reason is None and (f.root_id < 0 or f.root_id >= len(scan_roots)):
+                member_fail_reason = "INVALID_SCAN_ROOT_INDEX"
+
+            norm_root = scan_roots[f.root_id] if 0 <= f.root_id < len(scan_roots) else ""
+
+            # Step 2: Authoritative scan root & lexical absolute/relative provenance
+            if member_fail_reason is None:
+                if not norm_abs.startswith("/"):
+                    member_fail_reason = "INVALID_ABSOLUTE_PATH"
+                elif not norm_root.startswith("/"):
+                    member_fail_reason = "INVALID_ABSOLUTE_PATH"
+                elif not _is_lexical_contained(norm_abs, norm_root):
+                    member_fail_reason = "PATH_OUTSIDE_SCAN_ROOT"
+                else:
+                    expected_rel = _lexical_relpath(norm_abs, norm_root)
+                    actual_rel = normalize_dedupe_path(f.relative_path) if f.relative_path.startswith("/") else os.path.normpath(f.relative_path)
+                    if actual_rel != expected_rel:
+                        member_fail_reason = "RELATIVE_PATH_MISMATCH"
+
+            # Step 3: Canonical top-level protected dir & DB consistency
+            canonical_top: str | None = None
+            if member_fail_reason is None:
+                actual_rel = normalize_dedupe_path(f.relative_path) if f.relative_path.startswith("/") else os.path.normpath(f.relative_path)
+                canonical_top = derive_canonical_top_level_dir(norm_root, actual_rel)
+                norm_db_top = normalize_dedupe_path(f.top_level_dir) if f.top_level_dir else ""
+                if norm_db_top != canonical_top:
+                    member_fail_reason = "TOP_LEVEL_DIR_MISMATCH"
+
+            # Step 4: Allowed roots & quarantine boundary
+            is_allowed = False
+            is_reserved_quarantine = False
+            if member_fail_reason is None:
+                is_allowed = is_path_allowed(abs_p, allowed_roots)
+                if not is_allowed:
+                    member_fail_reason = "PATH_OUTSIDE_ALLOWED_ROOT"
+                elif quarantine_root and is_reserved_quarantine_path(abs_p, quarantine_root):
+                    is_reserved_quarantine = True
+                    member_fail_reason = "RESERVED_QUARANTINE_PATH"
+
+            # Step 5: Read-only FS checks (symlink, exists, regular)
             exists = False
             is_file = False
             is_symlink = False
-            is_allowed = False
-
             try:
                 is_symlink = abs_p.is_symlink() or os.path.islink(abs_p)
                 exists = abs_p.exists()
                 is_file = abs_p.is_file() and not is_symlink
-                is_allowed = is_path_allowed(abs_p, allowed_roots)
             except OSError:
                 pass
 
+            if member_fail_reason is None:
+                if is_symlink:
+                    member_fail_reason = "SYMLINK"
+                elif not exists:
+                    member_fail_reason = "SOURCE_NOT_FOUND"
+                elif not is_file:
+                    member_fail_reason = "NOT_REGULAR_FILE"
+
+            # Record per-member safety facts
+            safety_reasons = (member_fail_reason,) if member_fail_reason else ()
             member_safety_facts[norm_abs] = {
                 "exists": exists,
                 "is_file": is_file,
                 "is_symlink": is_symlink,
                 "is_allowed": is_allowed,
+                "is_reserved_quarantine": is_reserved_quarantine,
+                "safety_reasons": list(safety_reasons),
             }
 
-            # Safety Rule 1: Valid scan root index
-            if f.root_id < 0 or f.root_id >= len(scan_roots):
-                if group_skip_reason is None:
-                    group_skip_reason = "INVALID_SCAN_ROOT_INDEX"
-
-            # Safety Rule 2: Allowed roots boundary
-            elif not is_allowed:
-                if group_skip_reason is None:
-                    group_skip_reason = "PATH_OUTSIDE_ALLOWED_ROOT"
-
-            # Safety Rule 3: Quarantine storage boundary
-            elif quarantine_root and is_reserved_quarantine_path(abs_p, quarantine_root):
-                if group_skip_reason is None:
-                    group_skip_reason = "FILESYSTEM_SAFETY_CHECK_FAILED"
-
-            # Safety Rule 4: Not a symlink
-            elif is_symlink:
-                if group_skip_reason is None:
-                    group_skip_reason = "FILESYSTEM_SAFETY_CHECK_FAILED"
-
-            # Safety Rule 5: Existing regular file
-            elif not exists or not is_file:
-                if group_skip_reason is None:
+            if member_fail_reason is not None and group_skip_reason is None:
+                if member_fail_reason in ("SOURCE_NOT_FOUND", "NOT_REGULAR_FILE"):
                     group_skip_reason = "SOURCE_SNAPSHOT_STALE"
+                elif member_fail_reason in ("SYMLINK", "RESERVED_QUARANTINE_PATH"):
+                    group_skip_reason = "FILESYSTEM_SAFETY_CHECK_FAILED"
+                else:
+                    group_skip_reason = member_fail_reason
 
-            root_p = scan_roots[f.root_id] if 0 <= f.root_id < len(scan_roots) else ""
-            top_dir = f.top_level_dir
-            if not top_dir and root_p:
-                rel_parts = Path(f.relative_path).parts
-                top_dir = str(Path(root_p) / rel_parts[0] if len(rel_parts) > 1 else Path(root_p))
-
-            if top_dir:
-                distinct_top_dirs.add(top_dir)
+            if canonical_top:
+                candidate_group_top_dirs.add(canonical_top)
 
             members.append(
                 DedupeMemberSnapshot(
                     absolute_path=norm_abs,
                     relative_path=f.relative_path,
                     scan_root_index=f.root_id if 0 <= f.root_id < len(scan_roots) else 0,
-                    scan_root_path=root_p,
+                    scan_root_path=norm_root,
                     mtime_ns=f.mtime_ns,
                     size=f.size,
-                    top_level_dir=top_dir,
+                    eligible_as_keep=(member_fail_reason is None),
+                    safety_reasons=safety_reasons,
+                    top_level_dir=canonical_top,
                 )
             )
 
         if group_skip_reason is not None:
             pre_skipped_reasons[db_g.id] = group_skip_reason
+        else:
+            # ONLY groups that passed structural/path/basic FS safety contribute to distinct_top_dirs!
+            distinct_top_dirs.update(candidate_group_top_dirs)
 
         group_snapshots.append(
             DedupeGroupSnapshot(
@@ -297,6 +340,7 @@ def compile_advanced_dedupe_preview(
         )
 
     # 5. Read-only PROTECT_LAST_FILE directory file counts
+    # ONLY executed on verified canonical top dirs from safe groups
     directory_file_counts: dict[str, int] | None = None
     if protect_last_file:
         directory_file_counts = {}
@@ -327,7 +371,32 @@ def compile_advanced_dedupe_preview(
             f"DEDUPE_LIMIT_EXCEEDED: planned quarantine count {engine_result.planned_quarantine_count} exceeds maximum {MAX_PLANNED_QUARANTINE}"
         )
 
-    # 8. Compute Source Snapshot Digest & Decision Digest
+    # 8. Build RAW DB snapshot and digests
+    raw_groups_data = []
+    for db_g in sorted(db_groups, key=lambda g: (-g.file_size, g.content_hash, g.id)):
+        files_for_g = group_files[db_g.id]
+        sorted_files = sorted(files_for_g, key=lambda f: (f.root_id, normalize_dedupe_path(f.absolute_path), f.id))
+        raw_groups_data.append({
+            "provenance_id": db_g.id,
+            "content_hash": db_g.content_hash,
+            "file_size": db_g.file_size,
+            "member_count": db_g.member_count,
+            "files": [
+                {
+                    "group_id": f.group_id,
+                    "raw_root_id": f.root_id,  # Bind raw DB root_id without clamping
+                    "absolute_path": f.absolute_path,
+                    "relative_path": f.relative_path,
+                    "top_level_dir": f.top_level_dir,
+                    "size": f.size,
+                    "mtime_ns": f.mtime_ns,
+                    "scan_device": getattr(f, "device", 0),
+                    "scan_inode": getattr(f, "inode", 0),
+                }
+                for f in sorted_files
+            ],
+        })
+
     scan_provenance = {
         "name": scan.name,
         "mode": scan.mode,
@@ -339,7 +408,7 @@ def compile_advanced_dedupe_preview(
         scan_job_id=scan_job_id,
         scan_roots=scan_roots,
         scan_provenance=scan_provenance,
-        groups_snapshot=group_snapshots,
+        raw_groups_data=raw_groups_data,
         member_safety_facts=member_safety_facts,
         directory_file_counts=directory_file_counts,
     )
