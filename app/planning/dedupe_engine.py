@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass, field
 from fnmatch import fnmatchcase
 import hashlib
 import json
 import os
 from pathlib import Path
-from typing import Any, Iterable, Literal, Sequence
+from typing import Any, Iterable, Literal, Mapping, Sequence
 
 from app.planning.dedupe_config import (
     AdvancedDedupeConfig,
@@ -93,6 +94,7 @@ class DedupeMemberSnapshot:
     size: int
     eligible_as_keep: bool = True
     safety_reasons: tuple[str, ...] = field(default_factory=tuple)
+    top_level_dir: str | None = None
 
     def __post_init__(self):
         if type(self.absolute_path) is not str:
@@ -113,6 +115,8 @@ class DedupeMemberSnapshot:
             raise ValueError(f"size must be >= 0, got {self.size}")
         if type(self.eligible_as_keep) is not bool:
             raise ValueError(f"eligible_as_keep must be a boolean, got {self.eligible_as_keep!r}")
+        if self.top_level_dir is not None and type(self.top_level_dir) is not str:
+            raise ValueError(f"top_level_dir must be a string if provided, got {type(self.top_level_dir).__name__}")
 
         # Ensure safety_reasons is an immutable tuple of strings
         if not isinstance(self.safety_reasons, (list, tuple)):
@@ -297,6 +301,14 @@ def _make_skipped_group_result(
         reclaimable_bytes=0,
         group_decision_fingerprint=fp,
     )
+
+
+def make_skipped_group_result(
+    group: DedupeGroupSnapshot,
+    skip_reason: str,
+    selection_reason: str = "skipped",
+) -> GroupDecisionResult:
+    return _make_skipped_group_result(group, skip_reason, selection_reason)
 
 
 def evaluate_group(
@@ -577,6 +589,8 @@ def run_advanced_dedupe(
     config: AdvancedDedupeConfig,
     *,
     scan_roots: Sequence[str],
+    protect_last_file_counts: Mapping[str, int] | None = None,
+    pre_skipped_reasons: Mapping[int | str, str] | None = None,
 ) -> AdvancedDedupeResult:
     config = validate_and_canonicalize_config(config)
 
@@ -595,6 +609,7 @@ def run_advanced_dedupe(
     )
 
     released_bytes_by_scan_root: dict[int, int] = {r: 0 for r in authoritative_indices}
+    scheduled_directory_deletes: Counter[str] = Counter()
 
     # 3. Evaluate groups sequentially, accumulating released bytes for balancer
     results: list[GroupDecisionResult] = []
@@ -604,6 +619,64 @@ def run_advanced_dedupe(
     expected_reclaim_bytes = 0
 
     for group in sorted_groups:
+        if pre_skipped_reasons and group.provenance_id in pre_skipped_reasons:
+            res = _make_skipped_group_result(group, pre_skipped_reasons[group.provenance_id], "fs_safety_failed")
+            results.append(res)
+            skipped_count += 1
+            continue
+
+        if protect_last_file_counts is not None:
+            modified_members = []
+            any_modified = False
+            for m in group.members:
+                if not m.eligible_as_keep:
+                    modified_members.append(m)
+                    continue
+
+                proposed_deletes: Counter[str] = Counter()
+                for other in group.members:
+                    if other.absolute_path != m.absolute_path:
+                        top_dir = other.top_level_dir
+                        if not top_dir:
+                            root_p = Path(other.scan_root_path)
+                            rel_p = Path(other.relative_path)
+                            top_dir = str(root_p / rel_p.parts[0] if len(rel_p.parts) > 1 else root_p)
+                        proposed_deletes[top_dir] += 1
+
+                is_safe = True
+                for top_dir, count in proposed_deletes.items():
+                    current_cnt = protect_last_file_counts.get(top_dir)
+                    if current_cnt is not None:
+                        if current_cnt - scheduled_directory_deletes[top_dir] - count < 1:
+                            is_safe = False
+                            break
+
+                if not is_safe:
+                    modified_members.append(
+                        DedupeMemberSnapshot(
+                            absolute_path=m.absolute_path,
+                            relative_path=m.relative_path,
+                            scan_root_index=m.scan_root_index,
+                            scan_root_path=m.scan_root_path,
+                            mtime_ns=m.mtime_ns,
+                            size=m.size,
+                            eligible_as_keep=False,
+                            safety_reasons=(*m.safety_reasons, "PROTECT_LAST_FILE"),
+                            top_level_dir=m.top_level_dir,
+                        )
+                    )
+                    any_modified = True
+                else:
+                    modified_members.append(m)
+
+            if any_modified:
+                group = DedupeGroupSnapshot(
+                    provenance_id=group.provenance_id,
+                    content_hash=group.content_hash,
+                    file_size=group.file_size,
+                    members=tuple(modified_members),
+                )
+
         res = evaluate_group(
             group,
             config,
@@ -620,6 +693,12 @@ def run_advanced_dedupe(
                 if res.recommended_keep and m.absolute_path != res.recommended_keep.absolute_path:
                     if m.scan_root_index in released_bytes_by_scan_root:
                         released_bytes_by_scan_root[m.scan_root_index] += group.file_size
+                    top_dir = m.top_level_dir
+                    if not top_dir:
+                        root_p = Path(m.scan_root_path)
+                        rel_p = Path(m.relative_path)
+                        top_dir = str(root_p / rel_p.parts[0] if len(rel_p.parts) > 1 else root_p)
+                    scheduled_directory_deletes[top_dir] += 1
         else:
             skipped_count += 1
 
