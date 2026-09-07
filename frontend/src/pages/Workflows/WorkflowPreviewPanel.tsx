@@ -28,8 +28,14 @@ import { WorkflowPreviewItem, WorkflowPreviewResponse } from '../../types/workfl
 import { WorkflowPreviewState, transitionPreviewState } from '../../utils/workflowPreviewMachine';
 import { canPreviewWorkflow, canGenerateDraft } from '../../utils/workflowRbac';
 import { normalizeSelectedRoots } from '../../utils/rootCardinality';
+import { computePreviewRowIndex } from '../../utils/workflowRevisionParser';
 
 const { Text } = Typography;
+
+export interface PreviewRequestParams {
+  page: number;
+  pageSize: number;
+}
 
 interface WorkflowPreviewPanelProps {
   workflowId: number;
@@ -86,14 +92,14 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
   }, [mode, workflowId, revision]);
 
   const previewMutation = useMutation({
-    mutationFn: async (targetPage: number = 1) => {
+    mutationFn: async ({ page: targetPage, pageSize: targetPageSize }: PreviewRequestParams) => {
       if (!workflowId || isDirty || isArchived) {
         throw new Error('当前状态无法执行工作流预览');
       }
       return workflowApi.previewWorkflow(workflowId, {
         revision,
         page: targetPage,
-        page_size: pageSize,
+        page_size: targetPageSize,
         runtime_inputs: selectedRoots && selectedRoots.length > 0 ? { root_ids: selectedRoots } : undefined,
       });
     },
@@ -102,7 +108,9 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
       setErrorMessage(null);
       setPreviewState((prev) => transitionPreviewState(prev, { type: 'START_PREVIEW' }));
     },
-    onSuccess: (data) => {
+    onSuccess: (data, variables) => {
+      setPage(variables.page);
+      setPageSize(variables.pageSize);
       setPreviewData(data);
       setPreviewState((prev) =>
         transitionPreviewState(prev, {
@@ -169,7 +177,7 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
       title: '序号',
       key: 'index',
       width: 60,
-      render: (_: any, __: any, idx: number) => (page - 1) * pageSize + idx + 1,
+      render: (_: any, __: any, idx: number) => computePreviewRowIndex(page, pageSize, idx),
     },
     {
       title: '操作类型',
@@ -259,7 +267,7 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
         <Space>
           <Button
             icon={<ReloadOutlined />}
-            onClick={() => previewMutation.mutate(page)}
+            onClick={() => previewMutation.mutate({ page, pageSize })}
             loading={previewMutation.isPending}
             disabled={!canPreview}
           >
@@ -411,7 +419,7 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
                 setPage(p);
                 setPageSize(ps);
                 if (previewState === 'PREVIEW_READY') {
-                  previewMutation.mutate(p);
+                  previewMutation.mutate({ page: p, pageSize: ps });
                 }
               },
             }}

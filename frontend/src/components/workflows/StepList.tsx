@@ -38,7 +38,7 @@ export const StepList: React.FC<StepListProps> = ({
         newStep = {
           id: generateId('scan'),
           type: 'scan',
-          root_ids: [1],
+          root_ids: [],
         };
         break;
       case 'filter':

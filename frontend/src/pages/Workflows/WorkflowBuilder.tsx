@@ -44,6 +44,7 @@ import {
   canSwitchWorkflowMode,
 } from '../../utils/workflowRbac';
 import { createDefaultOrganizerSnapshot } from '../../utils/organizerDefaults';
+import { parseWorkflowRevisionQuery, createInitialScanStep } from '../../utils/workflowRevisionParser';
 
 const { Title, Text } = Typography;
 
@@ -55,7 +56,6 @@ export const WorkflowBuilderPage: React.FC = () => {
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const revisionQuery = searchParams.get('revision');
-  const targetRevision = revisionQuery ? parseInt(revisionQuery, 10) : null;
 
   useTitle(isNew ? '新建工作流' : `编辑工作流 #${workflowId}`);
 
@@ -78,15 +78,19 @@ export const WorkflowBuilderPage: React.FC = () => {
     enabled: !isNew && !!workflowId,
   });
 
-  const isHistoricalView = targetRevision !== null && workflow && targetRevision !== workflow.current_revision;
+  const parsedRevision = parseWorkflowRevisionQuery(revisionQuery, workflow?.current_revision);
+  const isHistoricalView = parsedRevision.isValid && parsedRevision.isHistorical;
+  const targetRevision = parsedRevision.revision;
 
   const {
     data: historicalRevisionData,
     isLoading: isHistLoading,
+    isError: isHistError,
+    error: histError,
   } = useQuery({
     queryKey: ['workflowRevisionDetail', workflowId, targetRevision],
     queryFn: () => workflowApi.getRevision(workflowId, targetRevision!),
-    enabled: !isNew && !!workflowId && !!targetRevision,
+    enabled: !isNew && !!workflowId && isHistoricalView && targetRevision !== null,
   });
 
   const isArchived = Boolean(workflow?.archived_at);
@@ -96,7 +100,7 @@ export const WorkflowBuilderPage: React.FC = () => {
     !isArchived &&
     !isBuiltin &&
     (isNew ? canCreateWorkflow(user?.role) : canSaveRevision(user?.role, isArchived));
-  const canRollback = canRollbackWorkflow(user?.role, isArchived) && !isBuiltin;
+  const canRollback = isHistoricalView && canRollbackWorkflow(user?.role, isArchived) && !isBuiltin;
   const canSwitchMode = isNew
     ? canEdit
     : canSwitchWorkflowMode(user?.role, {
@@ -106,7 +110,10 @@ export const WorkflowBuilderPage: React.FC = () => {
       });
 
   useEffect(() => {
-    if (targetRevision && historicalRevisionData) {
+    if (!parsedRevision.isValid) {
+      return;
+    }
+    if (isHistoricalView && historicalRevisionData) {
       if (workflow) {
         form.setFieldsValue({
           name: workflow.name,
@@ -118,7 +125,7 @@ export const WorkflowBuilderPage: React.FC = () => {
         setSteps(historicalRevisionData.definition.steps || []);
       }
       setIsDirty(false);
-    } else if (workflow && !targetRevision) {
+    } else if (workflow && !isHistoricalView) {
       form.setFieldsValue({
         name: workflow.name,
         description: workflow.description,
@@ -135,16 +142,10 @@ export const WorkflowBuilderPage: React.FC = () => {
         description: '',
       });
       setMode('file');
-      setSteps([
-        {
-          id: 'step_scan_1',
-          type: 'scan',
-          root_ids: [1],
-        },
-      ]);
+      setSteps([createInitialScanStep('step_scan_1')]);
       setIsDirty(false);
     }
-  }, [workflow, targetRevision, historicalRevisionData, isNew, form]);
+  }, [workflow, parsedRevision.isValid, isHistoricalView, targetRevision, historicalRevisionData, isNew, form]);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -220,20 +221,10 @@ export const WorkflowBuilderPage: React.FC = () => {
         onOk: () => {
           setMode(newMode);
           if (newMode === 'file') {
-            setSteps([
-              {
-                id: 'step_scan_1',
-                type: 'scan',
-                root_ids: [1],
-              },
-            ]);
+            setSteps([createInitialScanStep('step_scan_1')]);
           } else {
             setSteps([
-              {
-                id: 'step_scan_1',
-                type: 'scan',
-                root_ids: [1],
-              },
+              createInitialScanStep('step_scan_1'),
               {
                 id: 'step_organize_1',
                 type: 'organize',
@@ -270,7 +261,7 @@ export const WorkflowBuilderPage: React.FC = () => {
     }
   };
 
-  if (!isNew && (isLoading || isHistLoading)) {
+  if (!isNew && (isLoading || (isHistoricalView && isHistLoading))) {
     return (
       <div style={{ textAlign: 'center', padding: 60 }}>
         <Spin size="large" tip="正在载入工作流配置..." />
@@ -287,6 +278,52 @@ export const WorkflowBuilderPage: React.FC = () => {
         description={getStructuredApiError(error).message}
         action={<Button onClick={() => navigate('/workflows')}>返回列表</Button>}
       />
+    );
+  }
+
+  if (!isNew && !parsedRevision.isValid) {
+    return (
+      <div style={{ maxWidth: 800, margin: '24px auto' }}>
+        <div style={{ marginBottom: 16 }}>
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate(`/workflows/${workflowId}`)}>
+            返回当前版本
+          </Button>
+        </div>
+        <Alert
+          type="error"
+          showIcon
+          message="无效的历史版本号"
+          description={parsedRevision.errorMessage || '版本号参数不合法，已拒绝访问。'}
+          action={
+            <Button type="primary" onClick={() => navigate(`/workflows/${workflowId}`)}>
+              查看当前最新版本 (r{workflow?.current_revision ?? ''})
+            </Button>
+          }
+        />
+      </div>
+    );
+  }
+
+  if (!isNew && isHistoricalView && isHistError) {
+    return (
+      <div style={{ maxWidth: 800, margin: '24px auto' }}>
+        <div style={{ marginBottom: 16 }}>
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate(`/workflows/${workflowId}`)}>
+            返回当前版本
+          </Button>
+        </div>
+        <Alert
+          type="error"
+          showIcon
+          message="历史版本加载失败"
+          description={getStructuredApiError(histError).message || '指定的历史版本不存在或加载失败。'}
+          action={
+            <Button type="primary" onClick={() => navigate(`/workflows/${workflowId}`)}>
+              查看当前最新版本 (r{workflow?.current_revision ?? ''})
+            </Button>
+          }
+        />
+      </div>
     );
   }
 
@@ -466,10 +503,10 @@ export const WorkflowBuilderPage: React.FC = () => {
         />
       </Card>
 
-      {!isNew && workflow && (
+      {!isNew && workflow && (!isHistoricalView || Boolean(historicalRevisionData)) && (
         <WorkflowPreviewPanel
           workflowId={workflow.id}
-          revision={targetRevision || workflow.current_revision}
+          revision={isHistoricalView ? targetRevision! : workflow.current_revision}
           mode={mode}
           isDirty={isDirty}
           isArchived={isArchived}
