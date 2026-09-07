@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { OrganizeStep, OrganizerProfileSnapshot } from '../../types/workflow';
 import { OrganizerProfileFields } from './OrganizerProfileFields';
 import { organizerProfilesApi } from '../../api/organizerProfiles';
+import { getStructuredApiError } from '../../api/errors';
 import { createDefaultOrganizerSnapshot, importProfileToSnapshot } from '../../utils/organizerDefaults';
 
 const { Text } = Typography;
@@ -17,6 +18,7 @@ interface OrganizerStepEditorProps {
 
 export const OrganizerStepEditor: React.FC<OrganizerStepEditorProps> = ({ step, onChange, readOnly = false }) => {
   const [form] = Form.useForm();
+  const [isImporting, setIsImporting] = React.useState(false);
 
   const { data: profilesData, isLoading: isLoadingProfiles } = useQuery({
     queryKey: ['organizerProfilesListForImport'],
@@ -44,15 +46,22 @@ export const OrganizerStepEditor: React.FC<OrganizerStepEditorProps> = ({ step, 
     });
   }, [step.profile_snapshot, form]);
 
-  const handleImportProfile = (profileId: number) => {
-    const target = (profilesData?.items || []).find((p) => p.id === profileId);
-    if (!target) return;
-    const immutableSnapshot = importProfileToSnapshot(target);
-    onChange({
-      ...step,
-      profile_snapshot: immutableSnapshot,
-    });
-    message.success(`已从「${target.name}」导入配置快照（此为独立不可变副本）`);
+  const handleImportProfile = async (profileId: number) => {
+    setIsImporting(true);
+    try {
+      const fresh = await organizerProfilesApi.getProfile(profileId);
+      const immutableSnapshot = importProfileToSnapshot(fresh);
+      onChange({
+        ...step,
+        profile_snapshot: immutableSnapshot,
+      });
+      message.success(`已从「${fresh.name}」获取最新配置并导入为独立快照副本`);
+    } catch (err: unknown) {
+      const structured = getStructuredApiError(err);
+      message.error(`导入配置失败: ${structured.message}`);
+    } finally {
+      setIsImporting(false);
+    }
   };
 
   const handleValuesChange = (_: any, allValues: any) => {
@@ -99,8 +108,8 @@ export const OrganizerStepEditor: React.FC<OrganizerStepEditorProps> = ({ step, 
               </Space>
               <Select
                 placeholder="选择已有方案导入快照..."
-                style={{ minWidth: 240 }}
-                loading={isLoadingProfiles}
+                loading={isLoadingProfiles || isImporting}
+                disabled={isImporting}
                 value={undefined}
                 onChange={handleImportProfile}
                 options={(profilesData?.items || []).map((p) => ({

@@ -56,13 +56,15 @@ export const ScanStepEditor: React.FC<ScanStepEditorProps> = ({
           ) : (
             <Select
               mode="multiple"
+              maxCount={16}
               value={step.root_ids}
-              placeholder="请选择根目录"
+              placeholder="请选择根目录 (最多16个)"
               loading={isLoading}
-              onChange={(ids) => onChange({ ...step, root_ids: ids })}
+              onChange={(ids) => onChange({ ...step, root_ids: ids.slice(0, 16) })}
               options={roots.map((r) => ({
                 label: `${r.root} (ID: ${r.id})`,
                 value: r.id,
+                disabled: !step.root_ids?.includes(r.id) && (step.root_ids?.length ?? 0) >= 16,
               }))}
               style={{ width: '100%' }}
             />

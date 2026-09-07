@@ -27,6 +27,7 @@ import { getStructuredApiError } from '../../api/errors';
 import { WorkflowPreviewItem, WorkflowPreviewResponse } from '../../types/workflow';
 import { WorkflowPreviewState, transitionPreviewState } from '../../utils/workflowPreviewMachine';
 import { canPreviewWorkflow, canGenerateDraft } from '../../utils/workflowRbac';
+import { normalizeSelectedRoots } from '../../utils/rootCardinality';
 
 const { Text } = Typography;
 
@@ -79,9 +80,10 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
   }, [isDirty]);
 
   useEffect(() => {
+    setSelectedRoots(undefined);
     setPreviewData(null);
     setPreviewState(isDirty ? 'EDITING_DIRTY' : 'SAVED_PREVIEW_REQUIRED');
-  }, [workflowId, revision]);
+  }, [mode, workflowId, revision]);
 
   const previewMutation = useMutation({
     mutationFn: async (targetPage: number = 1) => {
@@ -123,7 +125,8 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
   });
 
   const handleRootsChange = (roots: number[] | undefined) => {
-    setSelectedRoots(roots);
+    const normalized = normalizeSelectedRoots(roots, mode);
+    setSelectedRoots(normalized);
     setPage(1);
     setPreviewState((prev) => transitionPreviewState(prev, { type: 'ROOTS_CHANGE' }));
     setPreviewData((prev) => (prev ? { ...prev, compile_digest: '' } : null));
@@ -342,13 +345,15 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
               ) : (
                 <Select
                   mode="multiple"
-                  placeholder="使用步骤预设根目录 (可多选)"
+                  maxCount={16}
+                  placeholder="使用步骤预设根目录 (最多16个)"
                   value={selectedRoots}
                   onChange={handleRootsChange}
                   style={{ minWidth: 260 }}
                   options={(scanRoots || []).map((r) => ({
                     label: `${r.root} (ID: ${r.id})`,
                     value: r.id,
+                    disabled: !selectedRoots?.includes(r.id) && (selectedRoots?.length ?? 0) >= 16,
                   }))}
                   allowClear
                 />

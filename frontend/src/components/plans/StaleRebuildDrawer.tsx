@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Drawer,
   Button,
@@ -22,6 +22,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { workflowApi } from '../../api/workflows';
 import { getStructuredApiError } from '../../api/errors';
 import { WorkflowPreviewItem } from '../../types/workflow';
+import { computeRebuildReadiness } from '../../utils/rebuildReadiness';
 
 const { Text } = Typography;
 
@@ -43,10 +44,12 @@ export const StaleRebuildDrawer: React.FC<StaleRebuildDrawerProps> = ({
   const [customPlanName, setCustomPlanName] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [previewInvalidated, setPreviewInvalidated] = useState(false);
+  const [acceptedDigest, setAcceptedDigest] = useState<string | null>(null);
 
   const {
     data: preview,
     isLoading,
+    isFetching,
     isError,
     error,
     refetch,
@@ -60,19 +63,46 @@ export const StaleRebuildDrawer: React.FC<StaleRebuildDrawerProps> = ({
     enabled: open && !!planId,
   });
 
+  useEffect(() => {
+    if (preview?.compile_digest && !previewInvalidated) {
+      setAcceptedDigest(preview.compile_digest);
+    }
+  }, [preview, previewInvalidated]);
+
   const handleManualRefresh = async () => {
-    setPreviewInvalidated(false);
     setErrorMessage(null);
-    await refetch();
+    setPreviewInvalidated(true);
+    setAcceptedDigest(null);
+    try {
+      const res = await refetch();
+      if (res.isSuccess && res.data?.compile_digest) {
+        setAcceptedDigest(res.data.compile_digest);
+        setPreviewInvalidated(false);
+      } else {
+        setPreviewInvalidated(true);
+        setAcceptedDigest(null);
+      }
+    } catch {
+      setPreviewInvalidated(true);
+      setAcceptedDigest(null);
+    }
   };
+
+  const readiness = computeRebuildReadiness({
+    hasPreview: Boolean(preview),
+    previewInvalidated,
+    acceptedDigest,
+    isLoading,
+    isFetching,
+  });
 
   const rebuildMutation = useMutation({
     mutationFn: async () => {
-      if (previewInvalidated || !preview?.compile_digest) {
-        throw new Error('当前预览已失效，请先点击“刷新预览”重新获取有效摘要');
+      if (!readiness.canSubmit || !readiness.submitDigest) {
+        throw new Error('当前预览已失效或正在获取，请先点击“刷新预览”重新获取有效摘要');
       }
       return workflowApi.rebuildPlan(planId, {
-        expected_compile_digest: preview.compile_digest,
+        expected_compile_digest: readiness.submitDigest,
         plan_name: customPlanName.trim() || undefined,
       });
     },
@@ -85,6 +115,7 @@ export const StaleRebuildDrawer: React.FC<StaleRebuildDrawerProps> = ({
       const structured = getStructuredApiError(err);
       if (structured.code === 'PREVIEW_CHANGED') {
         setPreviewInvalidated(true);
+        setAcceptedDigest(null);
         setErrorMessage('文件状态或底层快照已发生变动，旧预览已失效，必须手动点击“刷新预览”重新计算摘要');
       } else if (structured.code === 'WORKFLOW_ARCHIVED') {
         setErrorMessage('关联的工作流已被归档，无法重新生成计划');
@@ -161,14 +192,14 @@ export const StaleRebuildDrawer: React.FC<StaleRebuildDrawerProps> = ({
       width={900}
       extra={
         <Space>
-          <Button icon={<ReloadOutlined />} onClick={handleManualRefresh} loading={isLoading}>
+          <Button icon={<ReloadOutlined />} onClick={handleManualRefresh} loading={isLoading || isFetching}>
             刷新预览
           </Button>
           <Button
             type="primary"
             icon={<ThunderboltOutlined />}
             loading={rebuildMutation.isPending}
-            disabled={!preview || isLoading || previewInvalidated}
+            disabled={!readiness.canSubmit}
             onClick={() => rebuildMutation.mutate()}
           >
             生成全新草稿 (Rebuild as Draft)
