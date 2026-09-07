@@ -12,6 +12,7 @@ from app.planning.dedupe_config import (
     AdvancedDedupeConfig,
     canonical_json_dumps,
     extract_file_extension,
+    validate_and_canonicalize_config,
 )
 
 
@@ -91,7 +92,35 @@ class DedupeMemberSnapshot:
     mtime_ns: int
     size: int
     eligible_as_keep: bool = True
-    safety_reasons: list[str] = field(default_factory=list)
+    safety_reasons: tuple[str, ...] = field(default_factory=tuple)
+
+    def __post_init__(self):
+        if type(self.absolute_path) is not str:
+            raise ValueError(f"absolute_path must be a string, got {type(self.absolute_path).__name__}")
+        if type(self.relative_path) is not str:
+            raise ValueError(f"relative_path must be a string, got {type(self.relative_path).__name__}")
+        if type(self.scan_root_index) is not int or isinstance(self.scan_root_index, bool):
+            raise ValueError(f"scan_root_index cannot be boolean; strict non-negative integer required, got {self.scan_root_index!r}")
+        if self.scan_root_index < 0:
+            raise ValueError(f"scan_root_index must be >= 0, got {self.scan_root_index}")
+        if type(self.scan_root_path) is not str:
+            raise ValueError(f"scan_root_path must be a string, got {type(self.scan_root_path).__name__}")
+        if type(self.mtime_ns) is not int or isinstance(self.mtime_ns, bool):
+            raise ValueError(f"mtime_ns cannot be boolean; strict integer required, got {self.mtime_ns!r}")
+        if type(self.size) is not int or isinstance(self.size, bool):
+            raise ValueError(f"size cannot be boolean; strict non-negative integer required, got {self.size!r}")
+        if self.size < 0:
+            raise ValueError(f"size must be >= 0, got {self.size}")
+        if type(self.eligible_as_keep) is not bool:
+            raise ValueError(f"eligible_as_keep must be a boolean, got {self.eligible_as_keep!r}")
+
+        # Ensure safety_reasons is an immutable tuple of strings
+        if not isinstance(self.safety_reasons, (list, tuple)):
+            raise ValueError(f"safety_reasons must be a list or tuple, got {type(self.safety_reasons).__name__}")
+        for r in self.safety_reasons:
+            if type(r) is not str:
+                raise ValueError(f"safety_reasons elements must be strings, got {type(r).__name__}")
+        object.__setattr__(self, "safety_reasons", tuple(self.safety_reasons))
 
 
 @dataclass(frozen=True)
@@ -99,7 +128,26 @@ class DedupeGroupSnapshot:
     provenance_id: str | int
     content_hash: str
     file_size: int
-    members: list[DedupeMemberSnapshot]
+    members: tuple[DedupeMemberSnapshot, ...]
+
+    def __post_init__(self):
+        if type(self.provenance_id) not in (int, str) or isinstance(self.provenance_id, bool):
+            raise ValueError(f"provenance_id must be a string or integer scalar, got {self.provenance_id!r}")
+        if type(self.provenance_id) is str and not self.provenance_id.strip():
+            raise ValueError("provenance_id string cannot be empty or blank")
+        if type(self.content_hash) is not str or not self.content_hash.strip():
+            raise ValueError("content_hash must be a non-empty string")
+        if type(self.file_size) is not int or isinstance(self.file_size, bool):
+            raise ValueError(f"file_size cannot be boolean; strict non-negative integer required, got {self.file_size!r}")
+        if self.file_size < 0:
+            raise ValueError(f"file_size must be >= 0, got {self.file_size}")
+
+        if not isinstance(self.members, (list, tuple)):
+            raise ValueError(f"members must be a list or tuple of DedupeMemberSnapshot, got {type(self.members).__name__}")
+        for m in self.members:
+            if not isinstance(m, DedupeMemberSnapshot):
+                raise ValueError(f"members must only contain DedupeMemberSnapshot instances, got {type(m).__name__}")
+        object.__setattr__(self, "members", tuple(self.members))
 
 
 @dataclass(frozen=True)
@@ -257,8 +305,9 @@ def evaluate_group(
     *,
     scan_roots: Sequence[str],
     current_released_bytes: dict[int, int] | None = None,
-    all_scan_roots: Sequence[int] | None = None,
 ) -> GroupDecisionResult:
+    config = validate_and_canonicalize_config(config)
+
     # 1. Structural Validation
     if len(group.members) < 2:
         return _make_skipped_group_result(group, "INSUFFICIENT_MEMBERS", "insufficient_members")
@@ -529,6 +578,8 @@ def run_advanced_dedupe(
     *,
     scan_roots: Sequence[str],
 ) -> AdvancedDedupeResult:
+    config = validate_and_canonicalize_config(config)
+
     # 1. Authoritative scan roots validation (P1)
     norm_scan_roots = _validate_authoritative_scan_roots(scan_roots)
     authoritative_indices = list(range(len(norm_scan_roots)))

@@ -1341,4 +1341,103 @@ def test_scan_roots_reject_malformed_or_duplicate_authority():
         run_advanced_dedupe([group], config, scan_roots=[123])  # type: ignore
 
 
+# =========================================================================
+# D1-hotfix3 RED Tests
+# =========================================================================
+
+def test_direct_config_and_dict_config_have_identical_canonical_semantics():
+    # Direct construction with un-canonicalized uppercase extensions
+    direct_pe = PreferredExtensionFactor(enabled=True, weight=20, extensions=("JPG", ".PNG"))
+    direct_config = AdvancedDedupeConfig(factors=DedupeFactorsConfig(preferred_extension=direct_pe))
+
+    # Dict construction with identical semantics
+    dict_config = validate_and_canonicalize_config({
+        "factors": {
+            "preferred_extension": {"enabled": True, "weight": 20, "extensions": ["JPG", ".PNG"]}
+        }
+    })
+
+    # Direct config extensions must already be canonical tuple ('jpg', 'png')
+    assert direct_config.factors.preferred_extension.extensions == ("jpg", "png")
+    assert dict_config.factors.preferred_extension.extensions == ("jpg", "png")
+
+    # Config digests must be identical
+    digest_direct = compute_config_digest(direct_config)
+    digest_dict = compute_config_digest(dict_config)
+    assert digest_direct == digest_dict
+
+    # Both must produce identical scoring and recommended keep
+    group = DedupeGroupSnapshot(
+        provenance_id=1,
+        content_hash="h1",
+        file_size=10,
+        members=[
+            DedupeMemberSnapshot("/r0/f.jpg", "f.jpg", 0, "/r0", 1, 10),
+            DedupeMemberSnapshot("/r0/f.png", "f.png", 0, "/r0", 1, 10),
+        ],
+    )
+    res_direct = run_advanced_dedupe([group], direct_config, scan_roots=["/r0"])
+    res_dict = run_advanced_dedupe([group], dict_config, scan_roots=["/r0"])
+    assert res_direct.groups[0].recommended_keep.absolute_path == res_dict.groups[0].recommended_keep.absolute_path
+    assert res_direct.groups[0].members[0].total_score == res_dict.groups[0].members[0].total_score
+
+
+def test_member_snapshot_rejects_bool_scan_root_index():
+    with pytest.raises(ValueError, match="scan_root_index.*cannot be boolean|integer required"):
+        DedupeMemberSnapshot("/r0/a", "a", True, "/r0", 1000, 100)  # type: ignore
+
+
+def test_member_snapshot_rejects_invalid_size_types():
+    with pytest.raises(ValueError, match="scan_root_index"):
+        DedupeMemberSnapshot("/r0/a", "a", True, "/r0", 1000, 100)  # type: ignore
+
+    with pytest.raises(ValueError, match="size.*cannot be boolean|integer required"):
+        DedupeMemberSnapshot("/r0/a", "a", 0, "/r0", 1000, True)  # type: ignore
+
+    with pytest.raises(ValueError, match="size must be >= 0"):
+        DedupeMemberSnapshot("/r0/a", "a", 0, "/r0", 1000, -1)
+
+
+def test_group_snapshot_rejects_invalid_file_size():
+    m = DedupeMemberSnapshot("/r0/a", "a", 0, "/r0", 1000, 100)
+    with pytest.raises(ValueError, match="file_size.*cannot be boolean|integer required"):
+        DedupeGroupSnapshot(1, "h", True, [m])  # type: ignore
+
+    with pytest.raises(ValueError, match="file_size must be >= 0"):
+        DedupeGroupSnapshot(1, "h", -1, [m])
+
+
+def test_snapshot_collections_are_immutable_copies():
+    reasons = ["reason1"]
+    m = DedupeMemberSnapshot("/r0/a", "a", 0, "/r0", 1000, 100, safety_reasons=reasons)
+    reasons.append("reason2")
+    # Mutating original list cannot mutate snapshot
+    assert m.safety_reasons == ("reason1",)
+
+    members_list = [m]
+    g = DedupeGroupSnapshot(1, "h", 100, members_list)
+    m2 = DedupeMemberSnapshot("/r0/b", "b", 0, "/r0", 1000, 100)
+    members_list.append(m2)
+    # Mutating original list cannot mutate snapshot
+    assert len(g.members) == 1
+    assert g.members == (m,)
+
+
+def test_path_priority_rule_requires_explicit_scope_and_pattern():
+    with pytest.raises(ValueError, match="scope is required"):
+        validate_and_canonicalize_config({
+            "factors": {
+                "path_priority": {"enabled": True, "weight": 10, "rules": [{"pattern": "/r0/*"}]}
+            }
+        })
+
+    with pytest.raises(ValueError, match="pattern is required"):
+        validate_and_canonicalize_config({
+            "factors": {
+                "path_priority": {"enabled": True, "weight": 10, "rules": [{"scope": "absolute"}]}
+            }
+        })
+
+
+
 

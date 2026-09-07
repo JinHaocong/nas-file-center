@@ -119,9 +119,16 @@ class PreferredExtensionFactor:
             object.__setattr__(self, "extensions", tuple(self.extensions))
         if len(self.extensions) > MAX_EXTENSIONS_COUNT:
             raise ValueError(f"preferred_extension extensions exceed maximum {MAX_EXTENSIONS_COUNT} limit")
+        canon_exts = []
         for ext in self.extensions:
             if type(ext) is not str:
                 raise ValueError(f"PreferredExtensionFactor extensions must only contain strings, got {type(ext).__name__}")
+            canon = canonicalize_extension(ext)
+            if canon:
+                if len(canon) > MAX_EXTENSION_LENGTH:
+                    raise ValueError(f"Extension '{canon}' exceeds maximum length of {MAX_EXTENSION_LENGTH}")
+                canon_exts.append(canon)
+        object.__setattr__(self, "extensions", tuple(canon_exts))
 
 
 @dataclass(frozen=True)
@@ -248,12 +255,16 @@ def validate_and_canonicalize_config(raw: Any) -> AdvancedDedupeConfig:
                     for rk in r:
                         if rk not in ALLOWED_RULE_KEYS:
                             raise ValueError(f"DEDUPE_INVALID_CONFIG: unknown field '{rk}' in rule")
-                    scope = r.get("scope", "absolute")
-                    if type(scope) is not str:
-                        raise ValueError("rule scope must be a string")
-                    pattern = r.get("pattern")
+                    if "scope" not in r or r["scope"] is None:
+                        raise ValueError("DEDUPE_INVALID_CONFIG: rule scope is required and cannot be null")
+                    scope = r["scope"]
+                    if type(scope) is not str or scope not in {"absolute", "relative"}:
+                        raise ValueError(f"DEDUPE_INVALID_CONFIG: rule scope must be 'absolute' or 'relative', got {scope!r}")
+                    if "pattern" not in r or r["pattern"] is None:
+                        raise ValueError("DEDUPE_INVALID_CONFIG: rule pattern is required and cannot be null")
+                    pattern = r["pattern"]
                     if type(pattern) is not str or not pattern.strip():
-                        raise ValueError("rule pattern must be a non-empty string")
+                        raise ValueError("DEDUPE_INVALID_CONFIG: rule pattern must be a non-empty string")
                     # Preserve exact pattern characters without modifying trailing spaces
                     rules_list.append(PathPriorityRule(scope=scope, pattern=pattern))
                 else:
@@ -375,5 +386,6 @@ def canonical_json_dumps(data: Any) -> str:
 
 
 def compute_config_digest(config: AdvancedDedupeConfig) -> str:
-    raw = canonical_json_dumps(canonical_config_dict(config))
+    canonical_cfg = validate_and_canonicalize_config(config)
+    raw = canonical_json_dumps(canonical_config_dict(canonical_cfg))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
