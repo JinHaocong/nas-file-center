@@ -213,7 +213,7 @@ def test_path_priority_first_active_rule_wins():
         ],
     )
 
-    res = run_advanced_dedupe([group], config)
+    res = run_advanced_dedupe([group], config, scan_roots=["/data/master", "/data/backup"])
     assert res.actionable_group_count == 1
     g_res = res.groups[0]
     assert g_res.recommended_keep.absolute_path == "/data/master/doc.pdf"
@@ -265,7 +265,7 @@ def test_path_priority_relative_rule_and_case_sensitivity():
         ],
     )
 
-    res = run_advanced_dedupe([group], config)
+    res = run_advanced_dedupe([group], config, scan_roots=["/vol1", "/vol2"])
     g_res = res.groups[0]
     assert g_res.recommended_keep.absolute_path == "/vol2/archive/f.txt"
 
@@ -310,7 +310,7 @@ def test_preferred_extension_fallback():
         ],
     )
 
-    res = run_advanced_dedupe([group], config)
+    res = run_advanced_dedupe([group], config, scan_roots=["/p"])
     g_res = res.groups[0]
     assert g_res.recommended_keep.absolute_path == "/p/img.PNG"
     exp_png = next(m for m in g_res.members if m.absolute_path == "/p/img.PNG")
@@ -355,7 +355,7 @@ def test_preferred_extension_tar_gz_and_dotfile():
         ],
     )
 
-    res = run_advanced_dedupe([group], config)
+    res = run_advanced_dedupe([group], config, scan_roots=["/a", "/b"])
     # gz is preferred over tar in config
     assert res.groups[0].recommended_keep.absolute_path == "/b/data.tar.gz"
 
@@ -404,7 +404,7 @@ def test_mtime_newest_and_tie():
         ],
     )
 
-    res = run_advanced_dedupe([group], config)
+    res = run_advanced_dedupe([group], config, scan_roots=["/r1", "/r0", "/r2"])
     g = res.groups[0]
     # Both /r0/a.txt and /r1/b.txt get 60. Deterministic path tie-break chooses /r0/a.txt (lexical order)
     assert g.recommended_keep.absolute_path == "/r0/a.txt"
@@ -442,7 +442,7 @@ def test_mtime_oldest():
         ],
     )
 
-    res = run_advanced_dedupe([group], config)
+    res = run_advanced_dedupe([group], config, scan_roots=["/x"])
     assert res.groups[0].recommended_keep.absolute_path == "/x/old.txt"
 
 
@@ -486,14 +486,14 @@ def test_combined_weights_and_all_zero():
         ],
     )
 
-    res = run_advanced_dedupe([group], config)
+    res = run_advanced_dedupe([group], config, scan_roots=["/primary", "/secondary"])
     assert res.groups[0].recommended_keep.absolute_path == "/primary/img.png"
     exp_a = next(m for m in res.groups[0].members if m.absolute_path == "/primary/img.png")
     assert exp_a.total_score == 70
 
     # All zero config
     zero_config = validate_and_canonicalize_config({})
-    res_zero = run_advanced_dedupe([group], zero_config)
+    res_zero = run_advanced_dedupe([group], zero_config, scan_roots=["/primary", "/secondary"])
     # Both score 0. Lexical tie-break: /primary/img.png < /secondary/img.jpg
     assert res_zero.groups[0].recommended_keep.absolute_path == "/primary/img.png"
     assert res_zero.groups[0].members[0].total_score == 0
@@ -553,7 +553,7 @@ def test_safety_ineligible_cannot_activate_rules_or_win():
         ],
     )
 
-    res = run_advanced_dedupe([group], config)
+    res = run_advanced_dedupe([group], config, scan_roots=["/ineligible", "/backup", "/other"])
     g = res.groups[0]
     # The active rule becomes /backup/* because /ineligible/photo.jpg cannot activate rules!
     # /backup/photo.png matches active path rule (100) and .png extension (50) -> 150 score
@@ -612,7 +612,7 @@ def test_structural_validation_duplicate_member_path_skips():
             DedupeMemberSnapshot("/same/path.txt", "path.txt", 0, "/same", 1, 100),
         ],
     )
-    res = run_advanced_dedupe([group], config)
+    res = run_advanced_dedupe([group], config, scan_roots=["/same"])
     assert res.skipped_group_count == 1
     assert res.groups[0].status == "skipped"
     assert res.groups[0].skip_reason == "DUPLICATE_MEMBER_PATH"
@@ -625,11 +625,11 @@ def test_structural_validation_size_mismatch_skips():
         content_hash="hash_size_mismatch",
         file_size=100,
         members=[
-            DedupeMemberSnapshot("/a.txt", "a.txt", 0, "/", 1, 100),
-            DedupeMemberSnapshot("/b.txt", "b.txt", 1, "/", 1, 200),  # size 200 != group.file_size 100
+            DedupeMemberSnapshot("/r0/a.txt", "a.txt", 0, "/r0", 1, 100),
+            DedupeMemberSnapshot("/r1/b.txt", "b.txt", 1, "/r1", 1, 200),  # size 200 != group.file_size 100
         ],
     )
-    res = run_advanced_dedupe([group], config)
+    res = run_advanced_dedupe([group], config, scan_roots=["/r0", "/r1"])
     assert res.skipped_group_count == 1
     assert res.groups[0].status == "skipped"
     assert res.groups[0].skip_reason == "MEMBER_SIZE_MISMATCH"
@@ -678,7 +678,7 @@ def test_balanced_by_bytes_objective():
     # If keep r0: g2 deletes r1 -> r1 release += 500 -> released = {0: 0, 1: 1500}, spread = 1500
     # If keep r1: g2 deletes r0 -> r0 release += 500 -> released = {0: 500, 1: 1000}, spread = 500
     # Spread 500 < 1500, so balancer MUST choose to keep r1 (/r1/f2.bin)!
-    res = run_advanced_dedupe([g1, g2], config, scan_root_indices=[0, 1])
+    res = run_advanced_dedupe([g1, g2], config, scan_roots=["/r0", "/r1"])
     assert res.groups[0].recommended_keep.absolute_path == "/r0/f1.bin"
     assert res.groups[1].recommended_keep.absolute_path == "/r1/f2.bin"
     assert res.released_bytes_by_scan_root == {0: 500, 1: 1000}
@@ -705,7 +705,7 @@ def test_balanced_by_bytes_multiple_copies_in_same_root():
     # Option A (keep r0 copy1): deletes r0 copy2 (100) and r1 copy3 (100) -> r0 total=200, r1 total=100. spread = 100. sum_sq = 40000 + 10000 = 50000
     # Option B (keep r1 copy3): deletes r0 copy1 (100) and r0 copy2 (100) -> r0 total=300, r1 total=0. spread = 300. sum_sq = 90000
     # Balancer chooses Option A!
-    res = run_advanced_dedupe([group], config, scan_root_indices=[0, 1])
+    res = run_advanced_dedupe([group], config, scan_roots=["/r0", "/r1"])
     # Both /r0/copy1.txt and /r0/copy2.txt give spread 100. Lexical tie chooses copy1
     assert res.groups[0].recommended_keep.absolute_path == "/r0/copy1.txt"
 
@@ -731,7 +731,7 @@ def test_balanced_by_bytes_cannot_override_higher_score():
     )
 
     # Even if r1 was heavily behind on balance, r0 wins because of score!
-    res = run_advanced_dedupe([group], config, scan_root_indices=[0, 1])
+    res = run_advanced_dedupe([group], config, scan_roots=["/r0", "/r1"])
     assert res.groups[0].recommended_keep.absolute_path == "/r0/file.txt"
     assert res.groups[0].members[0].total_score == 100
     assert res.groups[0].members[1].total_score == 0
@@ -751,7 +751,7 @@ def test_balanced_by_bytes_includes_zero_release_roots():
             DedupeMemberSnapshot("/r1/f.bin", "f.bin", 1, "/r1", 1, 500),
         ],
     )
-    res = run_advanced_dedupe([group], config, scan_root_indices=[0, 1, 2])
+    res = run_advanced_dedupe([group], config, scan_roots=["/r0", "/r1", "/r2"])
     assert 2 in res.released_bytes_by_scan_root
     assert res.released_bytes_by_scan_root[2] == 0
 
@@ -774,17 +774,17 @@ def test_determinism_member_and_group_order_independence():
     m2 = DedupeMemberSnapshot("/b/backup/f1.txt", "backup/f1.txt", 1, "/b", 2000, 500)
     g1 = DedupeGroupSnapshot(1, "hash_order_1", 500, [m1, m2])
 
-    m3 = DedupeMemberSnapshot("/x/a.bin", "a.bin", 0, "/x", 500, 1000)
-    m4 = DedupeMemberSnapshot("/y/b.bin", "b.bin", 1, "/y", 600, 1000)
+    m3 = DedupeMemberSnapshot("/a/a.bin", "a.bin", 0, "/a", 500, 1000)
+    m4 = DedupeMemberSnapshot("/b/b.bin", "b.bin", 1, "/b", 600, 1000)
     g2 = DedupeGroupSnapshot(2, "hash_order_2", 1000, [m3, m4])
 
     # Run 1: original order
-    res1 = run_advanced_dedupe([g1, g2], config, scan_root_indices=[0, 1])
+    res1 = run_advanced_dedupe([g1, g2], config, scan_roots=["/a", "/b"])
 
     # Run 2: reversed group order and reversed member order inside each group
     g1_rev = DedupeGroupSnapshot(1, "hash_order_1", 500, [m2, m1])
     g2_rev = DedupeGroupSnapshot(2, "hash_order_2", 1000, [m4, m3])
-    res2 = run_advanced_dedupe([g2_rev, g1_rev], config, scan_root_indices=[0, 1])
+    res2 = run_advanced_dedupe([g2_rev, g1_rev], config, scan_roots=["/a", "/b"])
 
     # Must produce byte-identical canonical JSON representation and fingerprints!
     assert res1.actionable_group_count == res2.actionable_group_count
@@ -814,7 +814,7 @@ def test_mtime_oldest_tie():
             DedupeMemberSnapshot("/c/file.txt", "file.txt", 2, "/c", mtime_ns=2000, size=10),
         ],
     )
-    res = run_advanced_dedupe([group], config)
+    res = run_advanced_dedupe([group], config, scan_roots=["/b", "/a", "/c"])
     # Both /a and /b tie for oldest with score 50. Lexical tie chooses /a/file.txt
     assert res.groups[0].recommended_keep.absolute_path == "/a/file.txt"
 
@@ -879,8 +879,8 @@ def test_balanced_by_bytes_square_sum_tie_break():
     res_g = evaluate_group(
         group,
         config,
+        scan_roots=["/r0", "/z", "/a", "/r3"],
         current_released_bytes={0: 10, 1: 5, 2: 1, 3: 0},
-        all_scan_roots=[0, 1, 2, 3],
     )
     assert res_g.recommended_keep.absolute_path == "/z/cand_r1.bin"
     winner_exp = next(m for m in res_g.members if m.recommended_keep)
@@ -903,7 +903,7 @@ def test_explain_balancer_separate_from_score():
             DedupeMemberSnapshot("/r1/f.bin", "f.bin", 1, "/r1", 1, 100),
         ],
     )
-    res = run_advanced_dedupe([group], config, scan_root_indices=[0, 1])
+    res = run_advanced_dedupe([group], config, scan_roots=["/r0", "/r1"])
     winner_explain = next(m for m in res.groups[0].members if m.recommended_keep)
 
     # Balancer is NOT a score factor!
@@ -1205,6 +1205,140 @@ def test_double_leading_slash_normalization():
     assert normalize_dedupe_path("//data/a") == "/data/a"
     assert normalize_dedupe_path("///data//sub///b") == "/data/sub/b"
     assert normalize_dedupe_path("/data/./sub/../b") == "/data/b"
-    assert normalize_dedupe_path("  /data/a  ") == "/data/a"
+
+
+# =========================================================================
+# D1-hotfix2 RED Tests
+# =========================================================================
+
+def test_run_advanced_dedupe_requires_authoritative_scan_roots():
+    group = DedupeGroupSnapshot(1, "hash1", 100, [
+        DedupeMemberSnapshot("/r0/a.txt", "a.txt", 0, "/r0", 100, 100),
+        DedupeMemberSnapshot("/r0/b.txt", "b.txt", 0, "/r0", 200, 100),
+    ])
+    config = AdvancedDedupeConfig()
+
+    # Calling without scan_roots must be rejected
+    with pytest.raises((TypeError, ValueError)):
+        run_advanced_dedupe([group], config)  # type: ignore
+
+    # Passing scan_roots=None must be rejected
+    with pytest.raises(ValueError):
+        run_advanced_dedupe([group], config, scan_roots=None)  # type: ignore
+
+
+def test_no_member_derived_root_authority():
+    group = DedupeGroupSnapshot(1, "hash1", 100, [
+        DedupeMemberSnapshot("/r0/a.txt", "a.txt", 0, "/r0", 100, 100),
+        DedupeMemberSnapshot("/r99/b.txt", "b.txt", 99, "/r99", 200, 100),
+    ])
+    config = AdvancedDedupeConfig()
+    res = run_advanced_dedupe([group], config, scan_roots=["/r0", "/r1"])
+    assert res.actionable_group_count == 0
+    assert res.skipped_group_count == 1
+    assert res.groups[0].status == "skipped"
+    assert res.groups[0].skip_reason == "INVALID_SCAN_ROOT_INDEX"
+    # Released bytes keys must strictly be only the authoritative roots
+    assert set(res.released_bytes_by_scan_root.keys()) == {0, 1}
+    assert 99 not in res.released_bytes_by_scan_root
+
+
+def test_config_rejects_explicit_null_factor_objects():
+    with pytest.raises(ValueError, match="path_priority.*null|dict required"):
+        validate_and_canonicalize_config({
+            "factors": {"path_priority": None}
+        })
+
+    with pytest.raises(ValueError, match="preferred_extension.*null|dict required"):
+        validate_and_canonicalize_config({
+            "factors": {"preferred_extension": None}
+        })
+
+    with pytest.raises(ValueError, match="mtime.*null|dict required"):
+        validate_and_canonicalize_config({
+            "factors": {"mtime": None}
+        })
+
+
+def test_config_rejects_explicit_null_rules_and_extensions():
+    with pytest.raises(ValueError, match="rules.*null|list.*required"):
+        validate_and_canonicalize_config({
+            "factors": {
+                "path_priority": {"rules": None}
+            }
+        })
+
+    with pytest.raises(ValueError, match="extensions.*null|list.*required"):
+        validate_and_canonicalize_config({
+            "factors": {
+                "preferred_extension": {"extensions": None}
+            }
+        })
+
+
+def test_direct_canonical_dataclass_construction_cannot_bypass_validation():
+    with pytest.raises((TypeError, ValueError)):
+        AdvancedDedupeConfig(factors="oops")  # type: ignore
+
+    with pytest.raises((TypeError, ValueError)):
+        PathPriorityFactor(rules=("not-a-rule",))  # type: ignore
+
+    with pytest.raises((TypeError, ValueError)):
+        PreferredExtensionFactor(extensions=(123,))  # type: ignore
+
+    with pytest.raises((TypeError, ValueError)):
+        DedupeFactorsConfig(path_priority="oops")  # type: ignore
+
+
+def test_validate_existing_config_cannot_bypass_nested_types():
+    with pytest.raises((TypeError, ValueError)):
+        validate_and_canonicalize_config(
+            AdvancedDedupeConfig(factors="oops")  # type: ignore
+        )
+
+
+def test_normalize_dedupe_path_preserves_linux_filename_whitespace():
+    from app.planning.dedupe_engine import normalize_dedupe_path
+
+    assert normalize_dedupe_path("/data/a ") == "/data/a "
+    assert normalize_dedupe_path("/data/ a") == "/data/ a"
+    assert normalize_dedupe_path("/data/a  b/c ") == "/data/a  b/c "
+
+
+def test_paths_differing_only_by_trailing_space_remain_distinct():
+    group = DedupeGroupSnapshot(1, "hash1", 100, [
+        DedupeMemberSnapshot("/r0/a", "a", 0, "/r0", 100, 100),
+        DedupeMemberSnapshot("/r0/a ", "a ", 0, "/r0", 200, 100),
+    ])
+    config = AdvancedDedupeConfig()
+    res = run_advanced_dedupe([group], config, scan_roots=["/r0"])
+    # Must not be skipped as DUPLICATE_MEMBER_PATH
+    assert res.groups[0].skip_reason != "DUPLICATE_MEMBER_PATH"
+    assert res.groups[0].status == "actionable"
+
+
+def test_scan_roots_reject_malformed_or_duplicate_authority():
+    config = AdvancedDedupeConfig()
+    group = DedupeGroupSnapshot(1, "hash1", 100, [
+        DedupeMemberSnapshot("/r0/a", "a", 0, "/r0", 100, 100),
+        DedupeMemberSnapshot("/r0/b", "b", 0, "/r0", 200, 100),
+    ])
+
+    # Empty scan_roots
+    with pytest.raises(ValueError, match="scan_roots.*non-empty"):
+        run_advanced_dedupe([group], config, scan_roots=[])
+
+    # Relative scan_root
+    with pytest.raises(ValueError, match="absolute path"):
+        run_advanced_dedupe([group], config, scan_roots=["relative/path"])
+
+    # Duplicate root after normalization
+    with pytest.raises(ValueError, match="duplicate root"):
+        run_advanced_dedupe([group], config, scan_roots=["/r0", "//r0"])
+
+    # Non-string item
+    with pytest.raises(ValueError, match="must be a string"):
+        run_advanced_dedupe([group], config, scan_roots=[123])  # type: ignore
+
 
 

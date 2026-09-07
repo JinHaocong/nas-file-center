@@ -18,21 +18,47 @@ from app.planning.dedupe_config import (
 def normalize_dedupe_path(path: str | Path) -> str:
     """Pure lexical normalization of POSIX path.
 
-    - Strips surrounding whitespace
+    - Preserves internal and leading/trailing filename whitespace
     - Canonicalizes single or repeated leading slashes (e.g. '//data/a' -> '/data/a')
     - Resolves '.' and '..' lexically
     - Case-sensitive
     - No filesystem access
     """
-    s = str(path).strip()
+    s = str(path)
     if not s:
         return ""
     if s.startswith("/"):
-        s = "/" + s.lstrip("/")
+        idx = 0
+        while idx < len(s) and s[idx] == "/":
+            idx += 1
+        s = "/" + s[idx:]
     norm = os.path.normpath(s)
     if norm.startswith("//"):
-        norm = "/" + norm.lstrip("/")
+        idx = 0
+        while idx < len(norm) and norm[idx] == "/":
+            idx += 1
+        norm = "/" + norm[idx:]
     return norm
+
+
+def _validate_authoritative_scan_roots(scan_roots: Sequence[str]) -> tuple[str, ...]:
+    if not isinstance(scan_roots, (list, tuple)) or len(scan_roots) == 0:
+        raise ValueError("scan_roots must be a non-empty sequence of absolute path strings")
+    norm_roots: list[str] = []
+    seen: set[str] = set()
+    for idx, r in enumerate(scan_roots):
+        if type(r) is not str:
+            raise ValueError(f"scan_roots[{idx}] must be a string, got {type(r).__name__}")
+        if not r.startswith("/"):
+            raise ValueError(f"scan_roots[{idx}] must be an absolute path starting with '/', got {r!r}")
+        norm = normalize_dedupe_path(r)
+        if not norm or not norm.startswith("/"):
+            raise ValueError(f"scan_roots[{idx}] normalized to invalid path: {norm!r}")
+        if norm in seen:
+            raise ValueError(f"scan_roots contains duplicate root after normalization: {norm!r}")
+        seen.add(norm)
+        norm_roots.append(norm)
+    return tuple(norm_roots)
 
 
 def _is_lexical_contained(sub_path: str, root_path: str) -> bool:
@@ -228,9 +254,10 @@ def _make_skipped_group_result(
 def evaluate_group(
     group: DedupeGroupSnapshot,
     config: AdvancedDedupeConfig,
+    *,
+    scan_roots: Sequence[str],
     current_released_bytes: dict[int, int] | None = None,
     all_scan_roots: Sequence[int] | None = None,
-    scan_roots: Sequence[str] | None = None,
 ) -> GroupDecisionResult:
     # 1. Structural Validation
     if len(group.members) < 2:
@@ -241,21 +268,19 @@ def evaluate_group(
         return _make_skipped_group_result(group, "DUPLICATE_MEMBER_PATH", "duplicate_member_path")
 
     # Authoritative scan roots validation (P1)
-    norm_scan_roots = [normalize_dedupe_path(r) for r in scan_roots] if scan_roots is not None else None
+    norm_scan_roots = _validate_authoritative_scan_roots(scan_roots)
 
     for m in group.members:
         norm_abs = normalize_dedupe_path(m.absolute_path)
         norm_root = normalize_dedupe_path(m.scan_root_path)
 
         # Provenance Check 1: scan_root_index bounds
-        if m.scan_root_index < 0:
+        if m.scan_root_index < 0 or m.scan_root_index >= len(norm_scan_roots):
             return _make_skipped_group_result(group, "INVALID_SCAN_ROOT_INDEX", "invalid_scan_root_index")
-        if norm_scan_roots is not None:
-            if m.scan_root_index >= len(norm_scan_roots):
-                return _make_skipped_group_result(group, "INVALID_SCAN_ROOT_INDEX", "invalid_scan_root_index")
-            # Provenance Check 2: scan_root_path must match authoritative scan root
-            if norm_root != norm_scan_roots[m.scan_root_index]:
-                return _make_skipped_group_result(group, "SCAN_ROOT_PATH_MISMATCH", "scan_root_path_mismatch")
+
+        # Provenance Check 2: scan_root_path must match authoritative scan root
+        if norm_root != norm_scan_roots[m.scan_root_index]:
+            return _make_skipped_group_result(group, "SCAN_ROOT_PATH_MISMATCH", "scan_root_path_mismatch")
 
         # Provenance Check 3: absolute_path must be absolute
         if not norm_abs.startswith("/"):
@@ -408,13 +433,7 @@ def evaluate_group(
             winner_reason = "unique_top_score"
         else:
             # Balancer simulation among top_candidates only
-            roots_pool = set(all_scan_roots or [])
-            if norm_scan_roots is not None:
-                roots_pool.update(range(len(norm_scan_roots)))
-            else:
-                for m in group.members:
-                    roots_pool.add(m.scan_root_index)
-            sorted_roots = sorted(roots_pool)
+            sorted_roots = list(range(len(norm_scan_roots)))
 
             curr_rel = dict(current_released_bytes or {})
             vals_before = [curr_rel.get(r, 0) for r in sorted_roots]
@@ -507,10 +526,14 @@ def evaluate_group(
 def run_advanced_dedupe(
     groups: Iterable[DedupeGroupSnapshot],
     config: AdvancedDedupeConfig,
-    scan_roots: Sequence[str] | None = None,
-    scan_root_indices: list[int] | None = None,
+    *,
+    scan_roots: Sequence[str],
 ) -> AdvancedDedupeResult:
-    # 1. Global deterministic sorting of groups:
+    # 1. Authoritative scan roots validation (P1)
+    norm_scan_roots = _validate_authoritative_scan_roots(scan_roots)
+    authoritative_indices = list(range(len(norm_scan_roots)))
+
+    # 2. Global deterministic sorting of groups:
     # 1) group.file_size DESC
     # 2) content_hash ASC
     # 3) stable member-path fingerprint ASC
@@ -519,19 +542,6 @@ def run_advanced_dedupe(
         raw_groups,
         key=lambda g: (-g.file_size, g.content_hash, _stable_group_path_fingerprint(g)),
     )
-
-    # 2. Collect and initialize authoritative scan roots
-    if scan_roots is not None:
-        authoritative_indices = list(range(len(scan_roots)))
-    elif scan_root_indices is not None:
-        authoritative_indices = sorted(scan_root_indices)
-    else:
-        indices_set = set()
-        for g in sorted_groups:
-            for m in g.members:
-                if m.scan_root_index >= 0:
-                    indices_set.add(m.scan_root_index)
-        authoritative_indices = sorted(indices_set)
 
     released_bytes_by_scan_root: dict[int, int] = {r: 0 for r in authoritative_indices}
 
@@ -547,8 +557,7 @@ def run_advanced_dedupe(
             group,
             config,
             current_released_bytes=released_bytes_by_scan_root,
-            all_scan_roots=authoritative_indices,
-            scan_roots=scan_roots,
+            scan_roots=norm_scan_roots,
         )
         results.append(res)
         if res.status == "actionable":

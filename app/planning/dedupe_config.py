@@ -93,9 +93,14 @@ class PathPriorityFactor:
             raise ValueError("PathPriorityFactor enabled must be a boolean (True/False)")
         _validate_weight(self.weight, "path_priority")
         if not isinstance(self.rules, tuple):
+            if not isinstance(self.rules, list):
+                raise ValueError("PathPriorityFactor rules must be a tuple or list")
             object.__setattr__(self, "rules", tuple(self.rules))
         if len(self.rules) > MAX_RULES_COUNT:
             raise ValueError(f"path_priority rules exceed maximum {MAX_RULES_COUNT} limit")
+        for r in self.rules:
+            if not isinstance(r, PathPriorityRule):
+                raise ValueError(f"PathPriorityFactor rules must only contain PathPriorityRule instances, got {type(r).__name__}")
 
 
 @dataclass(frozen=True)
@@ -109,9 +114,14 @@ class PreferredExtensionFactor:
             raise ValueError("PreferredExtensionFactor enabled must be a boolean (True/False)")
         _validate_weight(self.weight, "preferred_extension")
         if not isinstance(self.extensions, tuple):
+            if not isinstance(self.extensions, list):
+                raise ValueError("PreferredExtensionFactor extensions must be a tuple or list")
             object.__setattr__(self, "extensions", tuple(self.extensions))
         if len(self.extensions) > MAX_EXTENSIONS_COUNT:
             raise ValueError(f"preferred_extension extensions exceed maximum {MAX_EXTENSIONS_COUNT} limit")
+        for ext in self.extensions:
+            if type(ext) is not str:
+                raise ValueError(f"PreferredExtensionFactor extensions must only contain strings, got {type(ext).__name__}")
 
 
 @dataclass(frozen=True)
@@ -131,6 +141,14 @@ class DedupeFactorsConfig:
     preferred_extension: PreferredExtensionFactor = field(default_factory=PreferredExtensionFactor)
     mtime: MtimeFactor = field(default_factory=MtimeFactor)
 
+    def __post_init__(self):
+        if not isinstance(self.path_priority, PathPriorityFactor):
+            raise ValueError(f"path_priority must be a PathPriorityFactor instance, got {type(self.path_priority).__name__}")
+        if not isinstance(self.preferred_extension, PreferredExtensionFactor):
+            raise ValueError(f"preferred_extension must be a PreferredExtensionFactor instance, got {type(self.preferred_extension).__name__}")
+        if not isinstance(self.mtime, MtimeFactor):
+            raise ValueError(f"mtime must be a MtimeFactor instance, got {type(self.mtime).__name__}")
+
 
 @dataclass(frozen=True)
 class AdvancedDedupeConfig:
@@ -143,11 +161,22 @@ class AdvancedDedupeConfig:
             raise ValueError(f"Invalid schema_version {self.schema_version}, must be integer 1")
         if type(self.selection_mode) is not str or self.selection_mode not in {"weighted", "balanced_by_bytes"}:
             raise ValueError(f"Invalid selection_mode {self.selection_mode}, must be 'weighted' or 'balanced_by_bytes'")
+        if not isinstance(self.factors, DedupeFactorsConfig):
+            raise ValueError(f"factors must be a DedupeFactorsConfig instance, got {type(self.factors).__name__}")
 
 
 def validate_and_canonicalize_config(raw: Any) -> AdvancedDedupeConfig:
     if isinstance(raw, AdvancedDedupeConfig):
-        return raw
+        if not isinstance(raw.factors, DedupeFactorsConfig):
+            raise ValueError(f"factors must be a DedupeFactorsConfig instance, got {type(raw.factors).__name__}")
+        if not isinstance(raw.factors.path_priority, PathPriorityFactor):
+            raise ValueError("factors.path_priority must be a PathPriorityFactor instance")
+        if not isinstance(raw.factors.preferred_extension, PreferredExtensionFactor):
+            raise ValueError("factors.preferred_extension must be a PreferredExtensionFactor instance")
+        if not isinstance(raw.factors.mtime, MtimeFactor):
+            raise ValueError("factors.mtime must be a MtimeFactor instance")
+        # Canonicalize through dict to guarantee all inner invariants
+        return validate_and_canonicalize_config(canonical_config_dict(raw))
 
     if type(raw) is not dict:
         raise ValueError("Config must be a dictionary or AdvancedDedupeConfig instance")
@@ -181,27 +210,34 @@ def validate_and_canonicalize_config(raw: Any) -> AdvancedDedupeConfig:
             raise ValueError(f"DEDUPE_INVALID_CONFIG: unknown factor '{k}'")
 
     # Path priority
-    pp_raw = raw_factors.get("path_priority")
-    if pp_raw is None:
+    if "path_priority" not in raw_factors:
         path_priority = PathPriorityFactor()
     else:
-        if type(pp_raw) is not dict:
-            raise ValueError("factors.path_priority must be a dict")
+        pp_raw = raw_factors["path_priority"]
+        if pp_raw is None or type(pp_raw) is not dict:
+            raise ValueError("factors.path_priority cannot be null; dict required")
         for k in pp_raw:
             if k not in ALLOWED_PATH_PRIORITY_KEYS:
                 raise ValueError(f"DEDUPE_INVALID_CONFIG: unknown field '{k}' in path_priority")
 
-        pp_enabled_val = pp_raw.get("enabled", False)
-        if type(pp_enabled_val) is not bool:
-            raise ValueError("path_priority.enabled must be a boolean (True/False)")
-        pp_weight = _validate_weight(pp_raw.get("weight", 0), "path_priority")
+        if "enabled" in pp_raw:
+            pp_enabled_val = pp_raw["enabled"]
+            if type(pp_enabled_val) is not bool:
+                raise ValueError("path_priority.enabled must be a boolean (True/False)")
+        else:
+            pp_enabled_val = False
 
-        pp_rules_raw = pp_raw.get("rules")
-        if pp_rules_raw is None:
+        if "weight" in pp_raw:
+            pp_weight = _validate_weight(pp_raw["weight"], "path_priority")
+        else:
+            pp_weight = 0
+
+        if "rules" not in pp_raw:
             pp_rules = ()
         else:
-            if type(pp_rules_raw) is not list:
-                raise ValueError("factors.path_priority.rules must be a list")
+            pp_rules_raw = pp_raw["rules"]
+            if pp_rules_raw is None or type(pp_rules_raw) not in (list, tuple):
+                raise ValueError("factors.path_priority.rules cannot be null; list required")
             if len(pp_rules_raw) > MAX_RULES_COUNT:
                 raise ValueError(f"path_priority rules exceed maximum {MAX_RULES_COUNT} limit")
             rules_list = []
@@ -227,27 +263,34 @@ def validate_and_canonicalize_config(raw: Any) -> AdvancedDedupeConfig:
         path_priority = PathPriorityFactor(enabled=pp_enabled_val, weight=pp_weight, rules=pp_rules)
 
     # Preferred extension
-    pe_raw = raw_factors.get("preferred_extension")
-    if pe_raw is None:
+    if "preferred_extension" not in raw_factors:
         preferred_extension = PreferredExtensionFactor()
     else:
-        if type(pe_raw) is not dict:
-            raise ValueError("factors.preferred_extension must be a dict")
+        pe_raw = raw_factors["preferred_extension"]
+        if pe_raw is None or type(pe_raw) is not dict:
+            raise ValueError("factors.preferred_extension cannot be null; dict required")
         for k in pe_raw:
             if k not in ALLOWED_PREFERRED_EXTENSION_KEYS:
                 raise ValueError(f"DEDUPE_INVALID_CONFIG: unknown field '{k}' in preferred_extension")
 
-        pe_enabled_val = pe_raw.get("enabled", False)
-        if type(pe_enabled_val) is not bool:
-            raise ValueError("preferred_extension.enabled must be a boolean (True/False)")
-        pe_weight = _validate_weight(pe_raw.get("weight", 0), "preferred_extension")
+        if "enabled" in pe_raw:
+            pe_enabled_val = pe_raw["enabled"]
+            if type(pe_enabled_val) is not bool:
+                raise ValueError("preferred_extension.enabled must be a boolean (True/False)")
+        else:
+            pe_enabled_val = False
 
-        pe_exts_raw = pe_raw.get("extensions")
-        if pe_exts_raw is None:
+        if "weight" in pe_raw:
+            pe_weight = _validate_weight(pe_raw["weight"], "preferred_extension")
+        else:
+            pe_weight = 0
+
+        if "extensions" not in pe_raw:
             pe_exts = ()
         else:
-            if type(pe_exts_raw) is not list:
-                raise ValueError("factors.preferred_extension.extensions must be a list")
+            pe_exts_raw = pe_raw["extensions"]
+            if pe_exts_raw is None or type(pe_exts_raw) not in (list, tuple):
+                raise ValueError("factors.preferred_extension.extensions cannot be null; list required")
             if len(pe_exts_raw) > MAX_EXTENSIONS_COUNT:
                 raise ValueError(f"preferred_extension extensions exceed maximum {MAX_EXTENSIONS_COUNT} limit")
             exts_list = []
@@ -264,20 +307,28 @@ def validate_and_canonicalize_config(raw: Any) -> AdvancedDedupeConfig:
         preferred_extension = PreferredExtensionFactor(enabled=pe_enabled_val, weight=pe_weight, extensions=pe_exts)
 
     # mtime
-    mt_raw = raw_factors.get("mtime")
-    if mt_raw is None:
+    if "mtime" not in raw_factors:
         mtime = MtimeFactor()
     else:
-        if type(mt_raw) is not dict:
-            raise ValueError("factors.mtime must be a dict")
+        mt_raw = raw_factors["mtime"]
+        if mt_raw is None or type(mt_raw) is not dict:
+            raise ValueError("factors.mtime cannot be null; dict required")
         for k in mt_raw:
             if k not in ALLOWED_MTIME_KEYS:
                 raise ValueError(f"DEDUPE_INVALID_CONFIG: unknown field '{k}' in mtime")
 
-        mt_mode = mt_raw.get("mode", "none")
-        if type(mt_mode) is not str:
-            raise ValueError("mtime mode must be a string")
-        mt_weight = _validate_weight(mt_raw.get("weight", 0), "mtime")
+        if "mode" in mt_raw:
+            mt_mode = mt_raw["mode"]
+            if type(mt_mode) is not str or mt_mode not in {"none", "newest", "oldest"}:
+                raise ValueError(f"mtime mode must be 'none', 'newest', or 'oldest', got {mt_mode!r}")
+        else:
+            mt_mode = "none"
+
+        if "weight" in mt_raw:
+            mt_weight = _validate_weight(mt_raw["weight"], "mtime")
+        else:
+            mt_weight = 0
+
         mtime = MtimeFactor(mode=mt_mode, weight=mt_weight)
 
     factors = DedupeFactorsConfig(
