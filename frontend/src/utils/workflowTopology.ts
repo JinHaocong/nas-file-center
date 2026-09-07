@@ -73,7 +73,13 @@ export function getAllowedInsertions(
     return [];
   }
 
-  // In file mode, scan cannot be added again.
+  // Filter can only appear after Scan and before the first Action.
+  // Once an action (rename, move, touch) exists, filter can no longer be appended.
+  const hasAction = steps.some((s) => s.type === 'rename' || s.type === 'move' || s.type === 'touch');
+  if (hasAction) {
+    return ['rename', 'move', 'touch', 'quarantine'];
+  }
+
   return ['filter', 'rename', 'move', 'touch', 'quarantine'];
 }
 

@@ -44,6 +44,7 @@ export const StepCard: React.FC<StepCardProps> = ({
   step,
   index,
   totalSteps: _totalSteps,
+  mode = 'file',
   readOnly = false,
   canMoveUp = true,
   canMoveDown = true,
@@ -176,7 +177,7 @@ export const StepCard: React.FC<StepCardProps> = ({
       {expanded && (
         <div style={{ padding: '8px 0' }}>
           {step.type === 'scan' && (
-            <ScanStepEditor step={step} onChange={onChange} readOnly={readOnly} />
+            <ScanStepEditor step={step} onChange={onChange} readOnly={readOnly} mode={mode} />
           )}
           {step.type === 'filter' && (
             <FilterStepEditor step={step} onChange={onChange} readOnly={readOnly} />

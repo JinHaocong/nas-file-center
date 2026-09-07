@@ -1,9 +1,13 @@
 import React, { useEffect } from 'react';
-import { Form } from 'antd';
+import { Form, Select, Space, Typography, message } from 'antd';
+import { ImportOutlined } from '@ant-design/icons';
+import { useQuery } from '@tanstack/react-query';
 import { OrganizeStep, OrganizerProfileSnapshot } from '../../types/workflow';
 import { OrganizerProfileFields } from './OrganizerProfileFields';
+import { organizerProfilesApi } from '../../api/organizerProfiles';
+import { createDefaultOrganizerSnapshot, importProfileToSnapshot } from '../../utils/organizerDefaults';
 
-import { createDefaultOrganizerSnapshot } from '../../utils/organizerDefaults';
+const { Text } = Typography;
 
 interface OrganizerStepEditorProps {
   step: OrganizeStep;
@@ -13,6 +17,11 @@ interface OrganizerStepEditorProps {
 
 export const OrganizerStepEditor: React.FC<OrganizerStepEditorProps> = ({ step, onChange, readOnly = false }) => {
   const [form] = Form.useForm();
+
+  const { data: profilesData, isLoading: isLoadingProfiles } = useQuery({
+    queryKey: ['organizerProfilesListForImport'],
+    queryFn: () => organizerProfilesApi.listProfiles(1, 100),
+  });
 
   useEffect(() => {
     const defaults = createDefaultOrganizerSnapshot();
@@ -34,6 +43,17 @@ export const OrganizerStepEditor: React.FC<OrganizerStepEditorProps> = ({ step, 
       mtime_delay_seconds: step.profile_snapshot.mtime_delay_seconds ?? defaults.mtime_delay_seconds,
     });
   }, [step.profile_snapshot, form]);
+
+  const handleImportProfile = (profileId: number) => {
+    const target = (profilesData?.items || []).find((p) => p.id === profileId);
+    if (!target) return;
+    const immutableSnapshot = importProfileToSnapshot(target);
+    onChange({
+      ...step,
+      profile_snapshot: immutableSnapshot,
+    });
+    message.success(`已从「${target.name}」导入配置快照（此为独立不可变副本）`);
+  };
 
   const handleValuesChange = (_: any, allValues: any) => {
     const updatedSnapshot: OrganizerProfileSnapshot = {
@@ -60,13 +80,50 @@ export const OrganizerStepEditor: React.FC<OrganizerStepEditorProps> = ({ step, 
   };
 
   return (
-    <Form
-      form={form}
-      layout="vertical"
-      disabled={readOnly}
-      onValuesChange={handleValuesChange}
-    >
-      <OrganizerProfileFields includeRoot={false} />
-    </Form>
+    <div>
+      {!readOnly && (
+        <div
+          style={{
+            marginBottom: 16,
+            padding: 12,
+            background: '#f6ffed',
+            border: '1px solid #b7eb8f',
+            borderRadius: 8,
+          }}
+        >
+          <Space direction="vertical" style={{ width: '100%' }}>
+            <Space align="center" style={{ width: '100%', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+              <Space>
+                <ImportOutlined style={{ color: '#52c41a' }} />
+                <Text strong>从现有整理方案导入配置 (Import from Profile)</Text>
+              </Space>
+              <Select
+                placeholder="选择已有方案导入快照..."
+                style={{ minWidth: 240 }}
+                loading={isLoadingProfiles}
+                value={undefined}
+                onChange={handleImportProfile}
+                options={(profilesData?.items || []).map((p) => ({
+                  label: `${p.name} (ID: #${p.id})`,
+                  value: p.id,
+                }))}
+              />
+            </Space>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              说明：导入操作将把目标方案的配置复制为独立的不可变快照，后续原方案的修改不会影响本工作流。
+            </Text>
+          </Space>
+        </div>
+      )}
+
+      <Form
+        form={form}
+        layout="vertical"
+        disabled={readOnly}
+        onValuesChange={handleValuesChange}
+      >
+        <OrganizerProfileFields includeRoot={false} />
+      </Form>
+    </div>
   );
 };

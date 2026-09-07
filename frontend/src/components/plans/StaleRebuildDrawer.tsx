@@ -8,7 +8,6 @@ import {
   Alert,
   Spin,
   Typography,
-  Switch,
   Input,
   message,
   Card,
@@ -41,9 +40,9 @@ export const StaleRebuildDrawer: React.FC<StaleRebuildDrawerProps> = ({
 }) => {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
-  const [onlyChanged, setOnlyChanged] = useState(false);
   const [customPlanName, setCustomPlanName] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [previewInvalidated, setPreviewInvalidated] = useState(false);
 
   const {
     data: preview,
@@ -52,20 +51,25 @@ export const StaleRebuildDrawer: React.FC<StaleRebuildDrawerProps> = ({
     error,
     refetch,
   } = useQuery({
-    queryKey: ['rebuildPlanPreview', planId, page, pageSize, onlyChanged],
+    queryKey: ['rebuildPlanPreview', planId, page, pageSize],
     queryFn: () =>
       workflowApi.rebuildPlanPreview(planId, {
         page,
         page_size: pageSize,
-        only_changed: onlyChanged,
       }),
     enabled: open && !!planId,
   });
 
+  const handleManualRefresh = async () => {
+    setPreviewInvalidated(false);
+    setErrorMessage(null);
+    await refetch();
+  };
+
   const rebuildMutation = useMutation({
     mutationFn: async () => {
-      if (!preview?.compile_digest) {
-        throw new Error('未获取到有效的编译摘要 (compile_digest)');
+      if (previewInvalidated || !preview?.compile_digest) {
+        throw new Error('当前预览已失效，请先点击“刷新预览”重新获取有效摘要');
       }
       return workflowApi.rebuildPlan(planId, {
         expected_compile_digest: preview.compile_digest,
@@ -80,7 +84,8 @@ export const StaleRebuildDrawer: React.FC<StaleRebuildDrawerProps> = ({
     onError: (err: unknown) => {
       const structured = getStructuredApiError(err);
       if (structured.code === 'PREVIEW_CHANGED') {
-        setErrorMessage('文件状态或底层快照已发生变动，请手动点击刷新预览后重试');
+        setPreviewInvalidated(true);
+        setErrorMessage('文件状态或底层快照已发生变动，旧预览已失效，必须手动点击“刷新预览”重新计算摘要');
       } else if (structured.code === 'WORKFLOW_ARCHIVED') {
         setErrorMessage('关联的工作流已被归档，无法重新生成计划');
       } else {
@@ -156,14 +161,14 @@ export const StaleRebuildDrawer: React.FC<StaleRebuildDrawerProps> = ({
       width={900}
       extra={
         <Space>
-          <Button icon={<ReloadOutlined />} onClick={() => refetch()} loading={isLoading}>
+          <Button icon={<ReloadOutlined />} onClick={handleManualRefresh} loading={isLoading}>
             刷新预览
           </Button>
           <Button
             type="primary"
             icon={<ThunderboltOutlined />}
             loading={rebuildMutation.isPending}
-            disabled={!preview || isLoading}
+            disabled={!preview || isLoading || previewInvalidated}
             onClick={() => rebuildMutation.mutate()}
           >
             生成全新草稿 (Rebuild as Draft)
@@ -171,6 +176,16 @@ export const StaleRebuildDrawer: React.FC<StaleRebuildDrawerProps> = ({
         </Space>
       }
     >
+      {previewInvalidated && (
+        <Alert
+          type="warning"
+          showIcon
+          message="预览摘要已失效"
+          description="底层状态发生变动，旧编译摘要已被废弃，无法提交重建。请点击上方“刷新预览”以生成最新有效摘要。"
+          style={{ marginBottom: 16 }}
+        />
+      )}
+
       {errorMessage && (
         <Alert
           type="error"
@@ -231,16 +246,7 @@ export const StaleRebuildDrawer: React.FC<StaleRebuildDrawerProps> = ({
           </Card>
 
           <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Space>
-              <Switch
-                checked={onlyChanged}
-                onChange={(val) => {
-                  setOnlyChanged(val);
-                  setPage(1);
-                }}
-              />
-              <span>仅查看发生重命名/移动/隔离的变更项 (过滤 touch)</span>
-            </Space>
+            <Text type="secondary">计划操作项全量预览 (含保持/更新与变更)</Text>
 
             <Input
               placeholder="自定义新重建草稿名称（可选）"

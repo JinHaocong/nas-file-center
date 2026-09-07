@@ -41,6 +41,7 @@ import {
   canCreateWorkflow,
   canSaveRevision,
   canRollbackWorkflow,
+  canSwitchWorkflowMode,
 } from '../../utils/workflowRbac';
 import { createDefaultOrganizerSnapshot } from '../../utils/organizerDefaults';
 
@@ -96,6 +97,13 @@ export const WorkflowBuilderPage: React.FC = () => {
     !isBuiltin &&
     (isNew ? canCreateWorkflow(user?.role) : canSaveRevision(user?.role, isArchived));
   const canRollback = canRollbackWorkflow(user?.role, isArchived) && !isBuiltin;
+  const canSwitchMode = isNew
+    ? canEdit
+    : canSwitchWorkflowMode(user?.role, {
+        isBuiltin,
+        isArchived,
+        isHistorical: isHistoricalView,
+      });
 
   useEffect(() => {
     if (targetRevision && historicalRevisionData) {
@@ -407,11 +415,19 @@ export const WorkflowBuilderPage: React.FC = () => {
             <Input.TextArea rows={2} placeholder="详细描述该工作流的处理逻辑与目标场景..." />
           </Form.Item>
 
-          <Form.Item label="工作流模式 (Mode)" required extra={!isNew ? '工作流模式已冻结锁定，不可修改' : '选择工作流的执行体系'}>
+          <Form.Item
+            label="工作流模式 (Mode)"
+            required
+            extra={
+              !canSwitchMode
+                ? '当前状态或权限下工作流模式不可修改'
+                : '选择工作流的执行体系；切换模式将重置步骤为该模式的标准拓扑，并需保存为新版本'
+            }
+          >
             <Radio.Group
               value={mode}
               onChange={(e) => handleModeChange(e.target.value)}
-              disabled={!isNew || !canEdit}
+              disabled={!canSwitchMode}
             >
               <Radio.Button value="file">
                 <Space>
@@ -454,6 +470,7 @@ export const WorkflowBuilderPage: React.FC = () => {
         <WorkflowPreviewPanel
           workflowId={workflow.id}
           revision={targetRevision || workflow.current_revision}
+          mode={mode}
           isDirty={isDirty}
           isArchived={isArchived}
           onGeneratePlanSuccess={(planId) => {

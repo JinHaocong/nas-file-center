@@ -3638,13 +3638,13 @@ class FileCenterService:
             or isinstance(workflow_revision, bool)
             or workflow_revision <= 0
             or not isinstance(definition_sha256, str)
-            or len(definition_sha256) != 64
+            or not re.match(r"^[0-9a-fA-F]{64}$", definition_sha256)
             or not isinstance(runtime_inputs, dict)
             or not isinstance(runtime_inputs.get("root_ids"), list)
             or len(runtime_inputs.get("root_ids")) == 0
             or not all(isinstance(r, int) and not isinstance(r, bool) and r > 0 for r in runtime_inputs["root_ids"])
             or not isinstance(compile_digest, str)
-            or len(compile_digest) != 64
+            or not re.match(r"^[0-9a-fA-F]{64}$", compile_digest)
         ):
             raise WorkflowError(
                 "Plan metadata has missing or invalid workflow lineage fields",

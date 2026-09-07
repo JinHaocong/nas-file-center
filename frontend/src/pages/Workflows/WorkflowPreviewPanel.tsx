@@ -6,7 +6,6 @@ import {
   Tag,
   Space,
   Typography,
-  Switch,
   Alert,
   Descriptions,
   Input,
@@ -34,6 +33,7 @@ const { Text } = Typography;
 interface WorkflowPreviewPanelProps {
   workflowId: number;
   revision: number;
+  mode?: 'file' | 'organizer';
   isDirty: boolean;
   isArchived?: boolean;
   onGeneratePlanSuccess: (planId: number) => void;
@@ -42,6 +42,7 @@ interface WorkflowPreviewPanelProps {
 export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
   workflowId,
   revision,
+  mode = 'file',
   isDirty,
   isArchived = false,
   onGeneratePlanSuccess,
@@ -49,11 +50,12 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
-  const [onlyChanged, setOnlyChanged] = useState(false);
   const [selectedRoots, setSelectedRoots] = useState<number[] | undefined>(undefined);
   const [customPlanName, setCustomPlanName] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
+
+  const isOrganizer = mode === 'organizer';
 
   const [previewState, setPreviewState] = useState<WorkflowPreviewState>(
     isDirty ? 'EDITING_DIRTY' : 'SAVED_PREVIEW_REQUIRED'
@@ -90,7 +92,6 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
         revision,
         page: targetPage,
         page_size: pageSize,
-        only_changed: onlyChanged,
         runtime_inputs: selectedRoots && selectedRoots.length > 0 ? { root_ids: selectedRoots } : undefined,
       });
     },
@@ -125,13 +126,6 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
     setSelectedRoots(roots);
     setPage(1);
     setPreviewState((prev) => transitionPreviewState(prev, { type: 'ROOTS_CHANGE' }));
-    setPreviewData((prev) => (prev ? { ...prev, compile_digest: '' } : null));
-  };
-
-  const handleOnlyChangedChange = (checked: boolean) => {
-    setOnlyChanged(checked);
-    setPage(1);
-    setPreviewState((prev) => transitionPreviewState(prev, { type: 'ONLY_CHANGED_TOGGLE' }));
     setPreviewData((prev) => (prev ? { ...prev, compile_digest: '' } : null));
   };
 
@@ -333,26 +327,32 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
           <div style={{ display: 'flex', gap: 16, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <Text type="secondary">覆盖根目录 (可选):</Text>
-              <Select
-                mode="multiple"
-                placeholder="使用步骤预设根目录"
-                value={selectedRoots}
-                onChange={handleRootsChange}
-                style={{ minWidth: 220 }}
-                options={(scanRoots || []).map((r) => ({
-                  label: `${r.root} (ID: ${r.id})`,
-                  value: r.id,
-                }))}
-                allowClear
-              />
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Switch
-                checked={onlyChanged}
-                onChange={handleOnlyChangedChange}
-              />
-              <Text type="secondary">仅显示有变更项 (过滤 touch)</Text>
+              {isOrganizer ? (
+                <Select
+                  placeholder="覆盖单一根目录 (整理模式仅限 1 个)"
+                  value={selectedRoots?.[0]}
+                  onChange={(val) => handleRootsChange(val ? [val] : undefined)}
+                  style={{ minWidth: 260 }}
+                  options={(scanRoots || []).map((r) => ({
+                    label: `${r.root} (ID: ${r.id})`,
+                    value: r.id,
+                  }))}
+                  allowClear
+                />
+              ) : (
+                <Select
+                  mode="multiple"
+                  placeholder="使用步骤预设根目录 (可多选)"
+                  value={selectedRoots}
+                  onChange={handleRootsChange}
+                  style={{ minWidth: 260 }}
+                  options={(scanRoots || []).map((r) => ({
+                    label: `${r.root} (ID: ${r.id})`,
+                    value: r.id,
+                  }))}
+                  allowClear
+                />
+              )}
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
