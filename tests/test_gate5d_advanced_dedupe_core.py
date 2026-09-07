@@ -118,7 +118,7 @@ def test_config_extension_canonicalization():
             }
         }
     })
-    assert config.factors.preferred_extension.extensions == ["jpg", "png", "webp"]
+    assert config.factors.preferred_extension.extensions == ("jpg", "png", "webp")
 
 
 def test_config_digest_determinism():
@@ -571,11 +571,11 @@ def test_safety_zero_eligible_candidates_skips_group():
         content_hash="hash_all_ineligible",
         file_size=100,
         members=[
-            DedupeMemberSnapshot("/a", "a", 0, "/a", 1, 100, eligible_as_keep=False, safety_reasons=["reason1"]),
-            DedupeMemberSnapshot("/b", "b", 1, "/b", 1, 100, eligible_as_keep=False, safety_reasons=["reason2"]),
+            DedupeMemberSnapshot("/r0/a", "a", 0, "/r0", 1, 100, eligible_as_keep=False, safety_reasons=["reason1"]),
+            DedupeMemberSnapshot("/r1/b", "b", 1, "/r1", 1, 100, eligible_as_keep=False, safety_reasons=["reason2"]),
         ],
     )
-    res = run_advanced_dedupe([group], config)
+    res = run_advanced_dedupe([group], config, scan_roots=["/r0", "/r1"])
     assert res.actionable_group_count == 0
     assert res.skipped_group_count == 1
     assert res.groups[0].status == "skipped"
@@ -590,15 +590,15 @@ def test_safety_single_eligible_candidate_wins_directly():
         content_hash="hash_one_eligible",
         file_size=100,
         members=[
-            DedupeMemberSnapshot("/a", "a", 0, "/a", 1, 100, eligible_as_keep=True),
-            DedupeMemberSnapshot("/b", "b", 1, "/b", 1, 100, eligible_as_keep=False, safety_reasons=["quarantine target locked"]),
+            DedupeMemberSnapshot("/r0/a", "a", 0, "/r0", 1, 100, eligible_as_keep=True),
+            DedupeMemberSnapshot("/r1/b", "b", 1, "/r1", 1, 100, eligible_as_keep=False, safety_reasons=["quarantine target locked"]),
         ],
     )
-    res = run_advanced_dedupe([group], config)
+    res = run_advanced_dedupe([group], config, scan_roots=["/r0", "/r1"])
     assert res.actionable_group_count == 1
     assert res.groups[0].status == "actionable"
-    assert res.groups[0].recommended_keep.absolute_path == "/a"
-    assert res.groups[0].quarantine_candidates == ["/b"]
+    assert res.groups[0].recommended_keep.absolute_path == "/r0/a"
+    assert res.groups[0].quarantine_candidates == ["/r1/b"]
 
 
 def test_structural_validation_duplicate_member_path_skips():
@@ -664,7 +664,7 @@ def test_balanced_by_bytes_objective():
         file_size=500,
         members=[
             DedupeMemberSnapshot("/r0/f2.bin", "f2.bin", scan_root_index=0, scan_root_path="/r0", mtime_ns=1, size=500),
-            DedupeMemberSnapshot("/r1/f2.bin", "f1.bin", scan_root_index=1, scan_root_path="/r1", mtime_ns=1, size=500),
+            DedupeMemberSnapshot("/r1/f2.bin", "f2.bin", scan_root_index=1, scan_root_path="/r1", mtime_ns=1, size=500),
         ],
     )
 
@@ -944,4 +944,267 @@ def test_legacy_policies_untouched():
     assert preference_key(c2, "keep-first-root", [1, 2]) == (1, "/r2/f.txt")
     assert preference_key(c1, "keep-newest", [1, 2]) == (-1, 0, "/r1/f.txt")
     assert preference_key(c1, "keep-oldest", [1, 2]) == (1, 0, "/r1/f.txt")
+
+
+# =========================================================================
+# 10. D1-hotfix1 Specific Red Tests (P1, P2, P3 Hardening)
+# =========================================================================
+
+def test_config_rejects_non_bool_enabled():
+    for bad_val in ["false", "true", 1, 0, None, 1.0, [], {}]:
+        with pytest.raises(ValueError, match="enabled.*boolean|type.*bool"):
+            validate_and_canonicalize_config({
+                "factors": {
+                    "path_priority": {"enabled": bad_val, "weight": 10, "rules": []}
+                }
+            })
+
+
+def test_config_rejects_bool_schema_version():
+    for bad_ver in [True, False, "1", 1.0, None, 2]:
+        with pytest.raises(ValueError, match="schema_version"):
+            validate_and_canonicalize_config({"schema_version": bad_ver})
+
+
+def test_config_rejects_falsey_wrong_container_types():
+    with pytest.raises(ValueError, match="factors.*dict"):
+        validate_and_canonicalize_config({"factors": []})
+
+    with pytest.raises(ValueError, match="path_priority.*dict"):
+        validate_and_canonicalize_config({"factors": {"path_priority": []}})
+
+    with pytest.raises(ValueError, match="rules.*list"):
+        validate_and_canonicalize_config({
+            "factors": {"path_priority": {"enabled": True, "weight": 10, "rules": {}}}
+        })
+
+    with pytest.raises(ValueError, match="extensions.*list"):
+        validate_and_canonicalize_config({
+            "factors": {"preferred_extension": {"enabled": True, "weight": 10, "extensions": {}}}
+        })
+
+    with pytest.raises(ValueError, match="factors.*dict|cannot be None"):
+        validate_and_canonicalize_config({"factors": None})
+
+
+def test_config_rejects_non_string_pattern_and_extension():
+    for bad in [123, True, False, [], {}]:
+        with pytest.raises(ValueError, match="pattern.*string"):
+            validate_and_canonicalize_config({
+                "factors": {
+                    "path_priority": {
+                        "enabled": True,
+                        "weight": 10,
+                        "rules": [{"scope": "absolute", "pattern": bad}],
+                    }
+                }
+            })
+
+        with pytest.raises(ValueError, match="extension.*string"):
+            validate_and_canonicalize_config({
+                "factors": {
+                    "preferred_extension": {
+                        "enabled": True,
+                        "weight": 10,
+                        "extensions": [bad],
+                    }
+                }
+            })
+
+
+def test_config_rejects_unknown_keys():
+    # Unknown top-level key
+    with pytest.raises(ValueError, match="unknown.*top-level|DEDUPE_INVALID_CONFIG"):
+        validate_and_canonicalize_config({"schema_version": 1, "unknown_key": 123})
+
+    # Unknown factor (typo)
+    with pytest.raises(ValueError, match="unknown factor|DEDUPE_INVALID_CONFIG"):
+        validate_and_canonicalize_config({
+            "factors": {"prefered_extension": {"enabled": True, "weight": 10}}
+        })
+
+    # Unknown factor
+    with pytest.raises(ValueError, match="unknown factor|DEDUPE_INVALID_CONFIG"):
+        validate_and_canonicalize_config({
+            "factors": {"banana": {"enabled": True, "weight": 10}}
+        })
+
+    # Unknown field within factor
+    with pytest.raises(ValueError, match="unknown field|DEDUPE_INVALID_CONFIG"):
+        validate_and_canonicalize_config({
+            "factors": {
+                "path_priority": {"enabled": True, "wieght": 10, "rules": []}
+            }
+        })
+
+    # Unknown field within rule
+    with pytest.raises(ValueError, match="unknown field|DEDUPE_INVALID_CONFIG"):
+        validate_and_canonicalize_config({
+            "factors": {
+                "path_priority": {
+                    "enabled": True,
+                    "weight": 10,
+                    "rules": [{"scope": "absolute", "pattern": "/a/*", "extra": 1}],
+                }
+            }
+        })
+
+
+def test_config_is_deeply_immutable():
+    ext_list = ["jpg", "png"]
+    rule_list = [{"scope": "absolute", "pattern": "/data/*"}]
+    config = validate_and_canonicalize_config({
+        "factors": {
+            "path_priority": {"enabled": True, "weight": 10, "rules": rule_list},
+            "preferred_extension": {"enabled": True, "weight": 20, "extensions": ext_list},
+        }
+    })
+
+    # Internal containers must be tuples (immutable)
+    assert isinstance(config.factors.path_priority.rules, tuple)
+    assert isinstance(config.factors.preferred_extension.extensions, tuple)
+
+    # Attempting to mutate via append or item assignment must fail
+    with pytest.raises((AttributeError, TypeError)):
+        config.factors.path_priority.rules.append(PathPriorityRule("absolute", "/other/*"))  # type: ignore
+
+    with pytest.raises((AttributeError, TypeError)):
+        config.factors.preferred_extension.extensions.append("gif")  # type: ignore
+
+    # Mutating external list must NOT mutate config
+    digest_before = compute_config_digest(config)
+    ext_list.append("bmp")
+    rule_list.append({"scope": "absolute", "pattern": "/hacked/*"})
+    digest_after = compute_config_digest(config)
+    assert digest_before == digest_after
+
+
+def test_invalid_positive_scan_root_index_skips_group():
+    config = validate_and_canonicalize_config({})
+    group = DedupeGroupSnapshot(
+        provenance_id=301,
+        content_hash="hash_idx_99",
+        file_size=100,
+        members=[
+            DedupeMemberSnapshot("/r0/f.txt", "f.txt", scan_root_index=0, scan_root_path="/r0", mtime_ns=1, size=100),
+            DedupeMemberSnapshot("/r99/f.txt", "f.txt", scan_root_index=99, scan_root_path="/r99", mtime_ns=1, size=100),
+        ],
+    )
+    res = run_advanced_dedupe([group], config, scan_roots=["/r0", "/r1"])
+    assert res.skipped_group_count == 1
+    assert res.groups[0].status == "skipped"
+    assert res.groups[0].skip_reason == "INVALID_SCAN_ROOT_INDEX"
+    assert len(res.groups[0].quarantine_candidates) == 0
+    # Crucial: 99 must NOT appear in released_bytes_by_scan_root keys!
+    assert 99 not in res.released_bytes_by_scan_root
+    assert set(res.released_bytes_by_scan_root.keys()) == {0, 1}
+
+
+def test_scan_root_path_mismatch_skips_group():
+    config = validate_and_canonicalize_config({})
+    # scan_root_index is 0, but member.scan_root_path is "/r1" instead of "/r0"
+    group = DedupeGroupSnapshot(
+        provenance_id=302,
+        content_hash="hash_root_mismatch",
+        file_size=100,
+        members=[
+            DedupeMemberSnapshot("/r0/f.txt", "f.txt", 0, "/r0", 1, 100),
+            DedupeMemberSnapshot("/r1/f.txt", "f.txt", 0, "/r1", 1, 100),
+        ],
+    )
+    res = run_advanced_dedupe([group], config, scan_roots=["/r0", "/r1"])
+    assert res.skipped_group_count == 1
+    assert res.groups[0].status == "skipped"
+    assert res.groups[0].skip_reason == "SCAN_ROOT_PATH_MISMATCH"
+
+
+def test_path_outside_scan_root_skips_group():
+    config = validate_and_canonicalize_config({})
+    group = DedupeGroupSnapshot(
+        provenance_id=303,
+        content_hash="hash_outside_root",
+        file_size=100,
+        members=[
+            DedupeMemberSnapshot("/r0/f.txt", "f.txt", 0, "/r0", 1, 100),
+            # /r01/f.txt starts with /r0 prefix as string, but is NOT inside /r0/!
+            DedupeMemberSnapshot("/r01/f.txt", "f.txt", 0, "/r0", 1, 100),
+        ],
+    )
+    res = run_advanced_dedupe([group], config, scan_roots=["/r0"])
+    assert res.skipped_group_count == 1
+    assert res.groups[0].status == "skipped"
+    assert res.groups[0].skip_reason == "PATH_OUTSIDE_SCAN_ROOT"
+
+
+def test_relative_path_mismatch_skips_group():
+    config = validate_and_canonicalize_config({})
+    group = DedupeGroupSnapshot(
+        provenance_id=304,
+        content_hash="hash_relpath_mismatch",
+        file_size=100,
+        members=[
+            DedupeMemberSnapshot("/r0/sub/f.txt", "sub/f.txt", 0, "/r0", 1, 100),
+            DedupeMemberSnapshot("/r0/sub/g.txt", "wrong/g.txt", 0, "/r0", 1, 100),
+        ],
+    )
+    res = run_advanced_dedupe([group], config, scan_roots=["/r0"])
+    assert res.skipped_group_count == 1
+    assert res.groups[0].status == "skipped"
+    assert res.groups[0].skip_reason == "RELATIVE_PATH_MISMATCH"
+
+
+def test_result_member_order_independent():
+    config = validate_and_canonicalize_config({
+        "selection_mode": "weighted",
+        "factors": {"mtime": {"mode": "newest", "weight": 50}}
+    })
+
+    m_a = DedupeMemberSnapshot("/r0/a.txt", "a.txt", 0, "/r0", 1000, 100)
+    m_b = DedupeMemberSnapshot("/r0/b.txt", "b.txt", 0, "/r0", 2000, 100)
+    m_c = DedupeMemberSnapshot("/r0/c.txt", "c.txt", 0, "/r0", 3000, 100)
+
+    g_fwd = DedupeGroupSnapshot(305, "hash_order_indep", 100, [m_a, m_b, m_c])
+    g_rev = DedupeGroupSnapshot(305, "hash_order_indep", 100, [m_c, m_b, m_a])
+
+    res1 = run_advanced_dedupe([g_fwd], config, scan_roots=["/r0"])
+    res2 = run_advanced_dedupe([g_rev], config, scan_roots=["/r0"])
+
+    # Output members list must be identically sorted by normalized_absolute_path ASC
+    paths1 = [m.absolute_path for m in res1.groups[0].members]
+    paths2 = [m.absolute_path for m in res2.groups[0].members]
+    assert paths1 == ["/r0/a.txt", "/r0/b.txt", "/r0/c.txt"]
+    assert paths2 == ["/r0/a.txt", "/r0/b.txt", "/r0/c.txt"]
+
+    # Full group decision fingerprint must match
+    assert res1.groups[0].group_decision_fingerprint == res2.groups[0].group_decision_fingerprint
+
+
+def test_group_path_fingerprint_uses_unambiguous_encoding():
+    from app.planning.dedupe_engine import _stable_group_path_fingerprint
+
+    # Two distinct path sets that would collide under ";".join():
+    # Set 1: ["/a;b", "/c"] -> "/a;b;/c"
+    # Set 2: ["/a", "b;/c"] -> "/a;b;/c"
+    g1 = DedupeGroupSnapshot(1, "h", 10, [
+        DedupeMemberSnapshot("/a;b", "a;b", 0, "/", 1, 10),
+        DedupeMemberSnapshot("/c", "c", 0, "/", 1, 10),
+    ])
+    g2 = DedupeGroupSnapshot(2, "h", 10, [
+        DedupeMemberSnapshot("/a", "a", 0, "/", 1, 10),
+        DedupeMemberSnapshot("/b;/c", "b;/c", 0, "/", 1, 10),
+    ])
+
+    fp1 = _stable_group_path_fingerprint(g1)
+    fp2 = _stable_group_path_fingerprint(g2)
+    assert fp1 != fp2
+
+
+def test_double_leading_slash_normalization():
+    from app.planning.dedupe_engine import normalize_dedupe_path
+
+    assert normalize_dedupe_path("//data/a") == "/data/a"
+    assert normalize_dedupe_path("///data//sub///b") == "/data/sub/b"
+    assert normalize_dedupe_path("/data/./sub/../b") == "/data/b"
+    assert normalize_dedupe_path("  /data/a  ") == "/data/a"
+
 

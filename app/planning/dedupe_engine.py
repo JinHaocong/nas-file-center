@@ -1,19 +1,59 @@
 from __future__ import annotations
 
-from collections import Counter
 from dataclasses import dataclass, field
 from fnmatch import fnmatchcase
 import hashlib
 import json
 import os
 from pathlib import Path
-from typing import Any, Iterable, Literal
+from typing import Any, Iterable, Literal, Sequence
 
 from app.planning.dedupe_config import (
     AdvancedDedupeConfig,
     canonical_json_dumps,
     extract_file_extension,
 )
+
+
+def normalize_dedupe_path(path: str | Path) -> str:
+    """Pure lexical normalization of POSIX path.
+
+    - Strips surrounding whitespace
+    - Canonicalizes single or repeated leading slashes (e.g. '//data/a' -> '/data/a')
+    - Resolves '.' and '..' lexically
+    - Case-sensitive
+    - No filesystem access
+    """
+    s = str(path).strip()
+    if not s:
+        return ""
+    if s.startswith("/"):
+        s = "/" + s.lstrip("/")
+    norm = os.path.normpath(s)
+    if norm.startswith("//"):
+        norm = "/" + norm.lstrip("/")
+    return norm
+
+
+def _is_lexical_contained(sub_path: str, root_path: str) -> bool:
+    norm_sub = normalize_dedupe_path(sub_path)
+    norm_root = normalize_dedupe_path(root_path)
+    if norm_root == "/":
+        return norm_sub.startswith("/")
+    return norm_sub == norm_root or norm_sub.startswith(norm_root + "/")
+
+
+def _lexical_relpath(sub_path: str, root_path: str) -> str:
+    norm_sub = normalize_dedupe_path(sub_path)
+    norm_root = normalize_dedupe_path(root_path)
+    if norm_sub == norm_root:
+        return ""
+    if norm_root == "/":
+        return norm_sub.lstrip("/")
+    prefix = norm_root + "/"
+    if norm_sub.startswith(prefix):
+        return norm_sub[len(prefix):]
+    return os.path.relpath(norm_sub, norm_root)
 
 
 @dataclass(frozen=True)
@@ -82,18 +122,18 @@ class AdvancedDedupeResult:
 
 
 def _stable_group_path_fingerprint(group: DedupeGroupSnapshot) -> str:
-    norm_paths = sorted(os.path.normpath(m.absolute_path) for m in group.members)
-    return hashlib.sha256(";".join(norm_paths).encode("utf-8")).hexdigest()
+    norm_paths = sorted(normalize_dedupe_path(m.absolute_path) for m in group.members)
+    return hashlib.sha256(canonical_json_dumps(norm_paths).encode("utf-8")).hexdigest()
 
 
 def compute_group_fingerprint(group: DedupeGroupSnapshot) -> str:
     members_data = []
-    for m in sorted(group.members, key=lambda x: os.path.normpath(x.absolute_path)):
+    for m in sorted(group.members, key=lambda x: normalize_dedupe_path(x.absolute_path)):
         members_data.append({
-            "absolute_path": os.path.normpath(m.absolute_path),
+            "absolute_path": normalize_dedupe_path(m.absolute_path),
             "relative_path": m.relative_path,
             "scan_root_index": m.scan_root_index,
-            "scan_root_path": m.scan_root_path,
+            "scan_root_path": normalize_dedupe_path(m.scan_root_path),
             "mtime_ns": m.mtime_ns,
             "size": m.size,
             "eligible_as_keep": m.eligible_as_keep,
@@ -117,7 +157,7 @@ def compute_decision_fingerprint(
     members: list[MemberDecisionExplain],
 ) -> str:
     members_payload = []
-    for m in sorted(members, key=lambda x: os.path.normpath(x.absolute_path)):
+    for m in sorted(members, key=lambda x: normalize_dedupe_path(x.absolute_path)):
         contribs = [
             {
                 "factor": c.factor,
@@ -128,7 +168,7 @@ def compute_decision_fingerprint(
             for c in m.contributions
         ]
         members_payload.append({
-            "absolute_path": os.path.normpath(m.absolute_path),
+            "absolute_path": normalize_dedupe_path(m.absolute_path),
             "scan_root_index": m.scan_root_index,
             "eligible_as_keep": m.eligible_as_keep,
             "safety_reasons": sorted(m.safety_reasons),
@@ -144,162 +184,109 @@ def compute_decision_fingerprint(
         "status": status,
         "skip_reason": skip_reason,
         "file_size": file_size,
-        "recommended_keep_path": os.path.normpath(recommended_keep_path) if recommended_keep_path else None,
-        "quarantine_candidates": sorted(os.path.normpath(p) for p in quarantine_candidates),
+        "recommended_keep_path": normalize_dedupe_path(recommended_keep_path) if recommended_keep_path else None,
+        "quarantine_candidates": sorted(normalize_dedupe_path(p) for p in quarantine_candidates),
         "members": members_payload,
     }
     return hashlib.sha256(canonical_json_dumps(payload).encode("utf-8")).hexdigest()
+
+
+def _make_skipped_group_result(
+    group: DedupeGroupSnapshot,
+    skip_reason: str,
+    selection_reason: str = "skipped",
+) -> GroupDecisionResult:
+    explains = [
+        MemberDecisionExplain(
+            absolute_path=m.absolute_path,
+            scan_root_index=m.scan_root_index,
+            eligible_as_keep=m.eligible_as_keep,
+            safety_reasons=list(m.safety_reasons),
+            total_score=0,
+            contributions=[],
+            is_top_candidate=False,
+            recommended_keep=False,
+            selection_reason=selection_reason,
+        )
+        for m in group.members
+    ]
+    # Ensure members are deterministically sorted
+    explains.sort(key=lambda x: normalize_dedupe_path(x.absolute_path))
+    fp = compute_decision_fingerprint("skipped", skip_reason, group.file_size, None, [], explains)
+    return GroupDecisionResult(
+        status="skipped",
+        skip_reason=skip_reason,
+        file_size=group.file_size,
+        recommended_keep=None,
+        members=explains,
+        quarantine_candidates=[],
+        reclaimable_bytes=0,
+        group_decision_fingerprint=fp,
+    )
 
 
 def evaluate_group(
     group: DedupeGroupSnapshot,
     config: AdvancedDedupeConfig,
     current_released_bytes: dict[int, int] | None = None,
-    all_scan_roots: list[int] | None = None,
+    all_scan_roots: Sequence[int] | None = None,
+    scan_roots: Sequence[str] | None = None,
 ) -> GroupDecisionResult:
     # 1. Structural Validation
     if len(group.members) < 2:
-        explains = [
-            MemberDecisionExplain(
-                absolute_path=m.absolute_path,
-                scan_root_index=m.scan_root_index,
-                eligible_as_keep=m.eligible_as_keep,
-                safety_reasons=list(m.safety_reasons),
-                total_score=0,
-                contributions=[],
-                is_top_candidate=False,
-                recommended_keep=False,
-                selection_reason="insufficient_members",
-            )
-            for m in group.members
-        ]
-        fp = compute_decision_fingerprint("skipped", "INSUFFICIENT_MEMBERS", group.file_size, None, [], explains)
-        return GroupDecisionResult(
-            status="skipped",
-            skip_reason="INSUFFICIENT_MEMBERS",
-            file_size=group.file_size,
-            recommended_keep=None,
-            members=explains,
-            quarantine_candidates=[],
-            reclaimable_bytes=0,
-            group_decision_fingerprint=fp,
-        )
+        return _make_skipped_group_result(group, "INSUFFICIENT_MEMBERS", "insufficient_members")
 
-    norm_paths = [os.path.normpath(m.absolute_path) for m in group.members]
+    norm_paths = [normalize_dedupe_path(m.absolute_path) for m in group.members]
     if len(norm_paths) != len(set(norm_paths)):
-        explains = [
-            MemberDecisionExplain(
-                absolute_path=m.absolute_path,
-                scan_root_index=m.scan_root_index,
-                eligible_as_keep=m.eligible_as_keep,
-                safety_reasons=list(m.safety_reasons),
-                total_score=0,
-                contributions=[],
-                is_top_candidate=False,
-                recommended_keep=False,
-                selection_reason="duplicate_member_path",
-            )
-            for m in group.members
-        ]
-        fp = compute_decision_fingerprint("skipped", "DUPLICATE_MEMBER_PATH", group.file_size, None, [], explains)
-        return GroupDecisionResult(
-            status="skipped",
-            skip_reason="DUPLICATE_MEMBER_PATH",
-            file_size=group.file_size,
-            recommended_keep=None,
-            members=explains,
-            quarantine_candidates=[],
-            reclaimable_bytes=0,
-            group_decision_fingerprint=fp,
-        )
+        return _make_skipped_group_result(group, "DUPLICATE_MEMBER_PATH", "duplicate_member_path")
+
+    # Authoritative scan roots validation (P1)
+    norm_scan_roots = [normalize_dedupe_path(r) for r in scan_roots] if scan_roots is not None else None
 
     for m in group.members:
+        norm_abs = normalize_dedupe_path(m.absolute_path)
+        norm_root = normalize_dedupe_path(m.scan_root_path)
+
+        # Provenance Check 1: scan_root_index bounds
         if m.scan_root_index < 0:
-            explains = [
-                MemberDecisionExplain(
-                    absolute_path=x.absolute_path,
-                    scan_root_index=x.scan_root_index,
-                    eligible_as_keep=x.eligible_as_keep,
-                    safety_reasons=list(x.safety_reasons),
-                    total_score=0,
-                    contributions=[],
-                    is_top_candidate=False,
-                    recommended_keep=False,
-                    selection_reason="invalid_scan_root_index",
-                )
-                for x in group.members
-            ]
-            fp = compute_decision_fingerprint("skipped", "INVALID_SCAN_ROOT_INDEX", group.file_size, None, [], explains)
-            return GroupDecisionResult(
-                status="skipped",
-                skip_reason="INVALID_SCAN_ROOT_INDEX",
-                file_size=group.file_size,
-                recommended_keep=None,
-                members=explains,
-                quarantine_candidates=[],
-                reclaimable_bytes=0,
-                group_decision_fingerprint=fp,
-            )
+            return _make_skipped_group_result(group, "INVALID_SCAN_ROOT_INDEX", "invalid_scan_root_index")
+        if norm_scan_roots is not None:
+            if m.scan_root_index >= len(norm_scan_roots):
+                return _make_skipped_group_result(group, "INVALID_SCAN_ROOT_INDEX", "invalid_scan_root_index")
+            # Provenance Check 2: scan_root_path must match authoritative scan root
+            if norm_root != norm_scan_roots[m.scan_root_index]:
+                return _make_skipped_group_result(group, "SCAN_ROOT_PATH_MISMATCH", "scan_root_path_mismatch")
+
+        # Provenance Check 3: absolute_path must be absolute
+        if not norm_abs.startswith("/"):
+            return _make_skipped_group_result(group, "INVALID_ABSOLUTE_PATH", "invalid_absolute_path")
+
+        # Provenance Check 4: scan_root_path must be absolute
+        if not norm_root.startswith("/"):
+            return _make_skipped_group_result(group, "INVALID_ABSOLUTE_PATH", "invalid_absolute_path")
+
+        # Provenance Check 5: absolute_path must be lexical-contained in scan root
+        if not _is_lexical_contained(norm_abs, norm_root):
+            return _make_skipped_group_result(group, "PATH_OUTSIDE_SCAN_ROOT", "path_outside_scan_root")
+
+        # Provenance Check 6: relative_path must match lexical relpath
+        expected_rel = _lexical_relpath(norm_abs, norm_root)
+        actual_rel = normalize_dedupe_path(m.relative_path) if m.relative_path.startswith("/") else os.path.normpath(m.relative_path)
+        if actual_rel != expected_rel:
+            return _make_skipped_group_result(group, "RELATIVE_PATH_MISMATCH", "relative_path_mismatch")
+
+        # Size consistency check
         if m.size != group.file_size:
-            explains = [
-                MemberDecisionExplain(
-                    absolute_path=x.absolute_path,
-                    scan_root_index=x.scan_root_index,
-                    eligible_as_keep=x.eligible_as_keep,
-                    safety_reasons=list(x.safety_reasons),
-                    total_score=0,
-                    contributions=[],
-                    is_top_candidate=False,
-                    recommended_keep=False,
-                    selection_reason="member_size_mismatch",
-                )
-                for x in group.members
-            ]
-            fp = compute_decision_fingerprint("skipped", "MEMBER_SIZE_MISMATCH", group.file_size, None, [], explains)
-            return GroupDecisionResult(
-                status="skipped",
-                skip_reason="MEMBER_SIZE_MISMATCH",
-                file_size=group.file_size,
-                recommended_keep=None,
-                members=explains,
-                quarantine_candidates=[],
-                reclaimable_bytes=0,
-                group_decision_fingerprint=fp,
-            )
+            return _make_skipped_group_result(group, "MEMBER_SIZE_MISMATCH", "member_size_mismatch")
 
     # 2. Safety Eligibility Check
     eligible_members = [m for m in group.members if m.eligible_as_keep]
 
     if len(eligible_members) == 0:
-        explains = [
-            MemberDecisionExplain(
-                absolute_path=m.absolute_path,
-                scan_root_index=m.scan_root_index,
-                eligible_as_keep=False,
-                safety_reasons=list(m.safety_reasons),
-                total_score=0,
-                contributions=[],
-                is_top_candidate=False,
-                recommended_keep=False,
-                selection_reason="ineligible",
-            )
-            for m in group.members
-        ]
-        fp = compute_decision_fingerprint("skipped", "NO_ELIGIBLE_KEEP_CANDIDATE", group.file_size, None, [], explains)
-        return GroupDecisionResult(
-            status="skipped",
-            skip_reason="NO_ELIGIBLE_KEEP_CANDIDATE",
-            file_size=group.file_size,
-            recommended_keep=None,
-            members=explains,
-            quarantine_candidates=[],
-            reclaimable_bytes=0,
-            group_decision_fingerprint=fp,
-        )
+        return _make_skipped_group_result(group, "NO_ELIGIBLE_KEEP_CANDIDATE", "ineligible")
 
     # 3. Factor Scoring for Eligible Candidates
     member_contributions: dict[str, list[FactorContribution]] = {}
-
     factors = config.factors
 
     # A. Path Priority
@@ -412,7 +399,7 @@ def evaluate_group(
             winner = top_candidates[0]
             winner_reason = "unique_top_score"
         else:
-            sorted_ties = sorted(top_candidates, key=lambda c: os.path.normpath(c.absolute_path))
+            sorted_ties = sorted(top_candidates, key=lambda c: normalize_dedupe_path(c.absolute_path))
             winner = sorted_ties[0]
             winner_reason = "deterministic_path_tie_break"
     elif config.selection_mode == "balanced_by_bytes":
@@ -422,8 +409,11 @@ def evaluate_group(
         else:
             # Balancer simulation among top_candidates only
             roots_pool = set(all_scan_roots or [])
-            for m in group.members:
-                roots_pool.add(m.scan_root_index)
+            if norm_scan_roots is not None:
+                roots_pool.update(range(len(norm_scan_roots)))
+            else:
+                for m in group.members:
+                    roots_pool.add(m.scan_root_index)
             sorted_roots = sorted(roots_pool)
 
             curr_rel = dict(current_released_bytes or {})
@@ -439,7 +429,7 @@ def evaluate_group(
                 vals = [sim.get(r, 0) for r in sorted_roots]
                 spread = max(vals, default=0) - min(vals, default=0)
                 sum_sq = sum(v ** 2 for v in vals)
-                tie_key = os.path.normpath(cand.absolute_path)
+                tie_key = normalize_dedupe_path(cand.absolute_path)
                 sim_options.append(((spread, sum_sq, tie_key), cand, spread))
 
             best_sim = min(sim_options, key=lambda opt: opt[0])
@@ -486,7 +476,11 @@ def evaluate_group(
                 balance_info=winner_balance_info if is_winner else None,
             ))
 
+    # Deterministic output sorting for members (P2)
+    explains.sort(key=lambda x: normalize_dedupe_path(x.absolute_path))
+
     quarantine_candidates = [m.absolute_path for m in group.members if m.absolute_path != winner.absolute_path]
+    quarantine_candidates.sort(key=lambda p: normalize_dedupe_path(p))
     reclaimable_bytes = group.file_size * len(quarantine_candidates)
 
     fp = compute_decision_fingerprint(
@@ -513,6 +507,7 @@ def evaluate_group(
 def run_advanced_dedupe(
     groups: Iterable[DedupeGroupSnapshot],
     config: AdvancedDedupeConfig,
+    scan_roots: Sequence[str] | None = None,
     scan_root_indices: list[int] | None = None,
 ) -> AdvancedDedupeResult:
     # 1. Global deterministic sorting of groups:
@@ -525,14 +520,20 @@ def run_advanced_dedupe(
         key=lambda g: (-g.file_size, g.content_hash, _stable_group_path_fingerprint(g)),
     )
 
-    # 2. Collect and initialize all scan roots
-    roots_set = set(scan_root_indices or [])
-    for g in sorted_groups:
-        for m in g.members:
-            roots_set.add(m.scan_root_index)
-    all_scan_roots = sorted(roots_set)
+    # 2. Collect and initialize authoritative scan roots
+    if scan_roots is not None:
+        authoritative_indices = list(range(len(scan_roots)))
+    elif scan_root_indices is not None:
+        authoritative_indices = sorted(scan_root_indices)
+    else:
+        indices_set = set()
+        for g in sorted_groups:
+            for m in g.members:
+                if m.scan_root_index >= 0:
+                    indices_set.add(m.scan_root_index)
+        authoritative_indices = sorted(indices_set)
 
-    released_bytes_by_scan_root: dict[int, int] = {r: 0 for r in all_scan_roots}
+    released_bytes_by_scan_root: dict[int, int] = {r: 0 for r in authoritative_indices}
 
     # 3. Evaluate groups sequentially, accumulating released bytes for balancer
     results: list[GroupDecisionResult] = []
@@ -546,7 +547,8 @@ def run_advanced_dedupe(
             group,
             config,
             current_released_bytes=released_bytes_by_scan_root,
-            all_scan_roots=all_scan_roots,
+            all_scan_roots=authoritative_indices,
+            scan_roots=scan_roots,
         )
         results.append(res)
         if res.status == "actionable":
@@ -556,9 +558,8 @@ def run_advanced_dedupe(
             # Accumulate released bytes by scan root for each quarantined member
             for m in group.members:
                 if res.recommended_keep and m.absolute_path != res.recommended_keep.absolute_path:
-                    released_bytes_by_scan_root[m.scan_root_index] = (
-                        released_bytes_by_scan_root.get(m.scan_root_index, 0) + group.file_size
-                    )
+                    if m.scan_root_index in released_bytes_by_scan_root:
+                        released_bytes_by_scan_root[m.scan_root_index] += group.file_size
         else:
             skipped_count += 1
 
@@ -568,7 +569,7 @@ def run_advanced_dedupe(
         "skipped_group_count": skipped_count,
         "planned_quarantine_count": planned_quarantine_count,
         "expected_reclaim_bytes": expected_reclaim_bytes,
-        "all_scan_roots": all_scan_roots,
+        "all_scan_roots": authoritative_indices,
     }
 
     return AdvancedDedupeResult(
