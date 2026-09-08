@@ -471,14 +471,29 @@ def compile_advanced_dedupe_preview(
     )
 
 
+def canonicalize_safety_path(value: Path | str) -> str:
+    """Canonicalize a safety authority path resolving symlinks and home directory without mutation."""
+    return str(Path(value).expanduser().resolve(strict=False))
+
+
 def canonicalize_effective_safety_policy(
     protect_last_file: bool = True,
     allowed_roots: Sequence[str | Path] | None = None,
     quarantine_root: str | Path | None = None,
 ) -> dict[str, Any]:
     """Deterministically canonicalize server safety authority context."""
-    canon_allowed = sorted(list({normalize_dedupe_path(str(r)) for r in allowed_roots if str(r)})) if allowed_roots else []
-    canon_quarantine = normalize_dedupe_path(str(quarantine_root)) if quarantine_root else None
+    if allowed_roots:
+        resolved_roots = {canonicalize_safety_path(r) for r in allowed_roots if str(r).strip()}
+        canon_allowed = sorted(list(resolved_roots))
+    else:
+        canon_allowed = []
+
+    canon_quarantine = (
+        canonicalize_safety_path(quarantine_root)
+        if quarantine_root is not None and str(quarantine_root).strip()
+        else None
+    )
+
     return {
         "allowed_roots": canon_allowed,
         "protect_last_file": bool(protect_last_file),

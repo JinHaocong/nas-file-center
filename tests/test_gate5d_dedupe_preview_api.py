@@ -305,7 +305,75 @@ def test_strict_pagination_validation_returns_422(api_test_env):
 
 
 # =========================================================================
-# 5. GLOBAL SUMMARY & TRUTH MARKERS CONTRACT
+# 5. PAGINATION SERVER CONTRACT & PARTITION SEQUENCE
+# =========================================================================
+
+def test_preview_pagination_server_contract(api_test_env):
+    """Verify default page/size, member row required fields, 3+3+1 partition, and beyond-end 200 response."""
+    client = api_test_env["client"]
+    SessionLocal = api_test_env["SessionLocal"]
+    data_dir = api_test_env["data_dir"]
+
+    with SessionLocal() as session:
+        _setup_duplicate_test_data(session, data_dir, scan_id=10)
+
+    # 1. Default page=1, default page_size=50
+    resp_def = client.post("/api/scans/10/dedupe-preview", json={})
+    assert resp_def.status_code == 200
+    body_def = resp_def.json()
+    assert body_def["page"] == 1
+    assert body_def["page_size"] == 50
+    assert body_def["total_rows"] == 7
+    assert len(body_def["rows"]) == 7
+
+    # Verify all member row required fields
+    required_row_fields = [
+        "group_provenance_id", "group_status", "group_skip_reason", "group_file_size",
+        "group_recommended_keep_path", "group_reclaimable_bytes", "group_selection_reason", "group_balance_info",
+        "absolute_path", "relative_path", "scan_root_index", "scan_root_path",
+        "eligible_as_keep", "safety_reasons", "total_score", "contributions",
+        "is_top_candidate", "recommended_keep", "member_decision", "selection_reason", "balance_info",
+    ]
+    for row in body_def["rows"]:
+        for field in required_row_fields:
+            assert field in row, f"Missing required field {field} in row"
+
+    # 2. Partition 3 + 3 + 1
+    p1 = client.post("/api/scans/10/dedupe-preview", json={"page": 1, "page_size": 3}).json()
+    assert p1["total_rows"] == 7
+    assert p1["total_pages"] == 3
+    assert p1["page"] == 1
+    assert len(p1["rows"]) == 3
+
+    p2 = client.post("/api/scans/10/dedupe-preview", json={"page": 2, "page_size": 3}).json()
+    assert p2["total_rows"] == 7
+    assert p2["total_pages"] == 3
+    assert p2["page"] == 2
+    assert len(p2["rows"]) == 3
+
+    p3 = client.post("/api/scans/10/dedupe-preview", json={"page": 3, "page_size": 3}).json()
+    assert p3["total_rows"] == 7
+    assert p3["total_pages"] == 3
+    assert p3["page"] == 3
+    assert len(p3["rows"]) == 1
+
+    # Concatenated rows match full fetch sequence deterministically
+    concat_paths = [r["absolute_path"] for r in p1["rows"] + p2["rows"] + p3["rows"]]
+    full_paths = [r["absolute_path"] for r in body_def["rows"]]
+    assert concat_paths == full_paths
+
+    # 3. Out of bounds page: returns 200, rows=[]
+    p4 = client.post("/api/scans/10/dedupe-preview", json={"page": 4, "page_size": 3})
+    assert p4.status_code == 200
+    p4_body = p4.json()
+    assert p4_body["rows"] == []
+    assert p4_body["total_rows"] == 7
+    assert p4_body["total_pages"] == 3
+    assert p4_body["page"] == 4
+
+
+# =========================================================================
+# 6. GLOBAL SUMMARY & TRUTH MARKERS CONTRACT
 # =========================================================================
 
 def test_global_summary_and_truth_markers_contract(api_test_env):
@@ -337,12 +405,12 @@ def test_global_summary_and_truth_markers_contract(api_test_env):
     assert body["live_filesystem_verified"] is False
     assert body["dedupe_engine_version"] == 1
 
-    # Released bytes by scan root: string keys for all scan roots
+    # Released bytes by scan root: scan_root_index string keys for all scan roots
     assert body["released_bytes_by_scan_root"] == {"0": 450}
 
     # Effective safety policy
     assert body["effective_safety_policy"]["protect_last_file"] is True
-    assert str(data_dir) in body["effective_safety_policy"]["allowed_roots"]
+    assert str(data_dir.resolve()) in body["effective_safety_policy"]["allowed_roots"]
     assert "quarantine_root" in body["effective_safety_policy"]
 
     # Summary object contract
@@ -357,11 +425,11 @@ def test_global_summary_and_truth_markers_contract(api_test_env):
 
 
 # =========================================================================
-# 6. PAGE-LOCAL GROUP EXPLAIN ON EVERY ROW
+# 7. PAGE-LOCAL GROUP EXPLAIN & QUARANTINE EXPLAIN
 # =========================================================================
 
 def test_page_local_group_explain_on_every_row(api_test_env):
-    """Every member row (even with page_size=1 on a quarantine row) must explain its group."""
+    """Every member row (even with page_size=1) must explain its group."""
     client = api_test_env["client"]
     SessionLocal = api_test_env["SessionLocal"]
     data_dir = api_test_env["data_dir"]
@@ -369,25 +437,171 @@ def test_page_local_group_explain_on_every_row(api_test_env):
     with SessionLocal() as session:
         _setup_duplicate_test_data(session, data_dir, scan_id=11)
 
-    # Fetch with page_size=1
     p1 = client.post("/api/scans/11/dedupe-preview", json={"page": 1, "page_size": 1}).json()
     assert len(p1["rows"]) == 1
     row = p1["rows"][0]
 
-    # Must contain group-level decision context
     assert "group_recommended_keep_path" in row
     assert "group_reclaimable_bytes" in row
     assert "group_selection_reason" in row
     assert "group_balance_info" in row
 
-    # Group 1 has 3 files, size 100, 2 quarantine -> 200 reclaimable bytes
     assert row["group_reclaimable_bytes"] > 0
     assert row["group_recommended_keep_path"] is not None
     assert row["group_selection_reason"] is not None
 
 
+def test_page_local_quarantine_explain(api_test_env):
+    """In an actionable group, a QUARANTINE member row on its own isolated page must explain its group."""
+    client = api_test_env["client"]
+    SessionLocal = api_test_env["SessionLocal"]
+    data_dir = api_test_env["data_dir"]
+
+    with SessionLocal() as session:
+        _setup_duplicate_test_data(session, data_dir, scan_id=12)
+
+    # Fetch with page_size=1 and iterate until finding the QUARANTINE row
+    quarantine_page = None
+    for p in range(1, 8):
+        resp = client.post("/api/scans/12/dedupe-preview", json={"page": p, "page_size": 1}).json()
+        assert len(resp["rows"]) == 1
+        if resp["rows"][0]["member_decision"] == "QUARANTINE":
+            quarantine_page = resp
+            break
+
+    assert quarantine_page is not None, "Could not find a QUARANTINE row across pages"
+    q_row = quarantine_page["rows"][0]
+
+    # Verify self-contained explanation on this isolated page
+    assert q_row["group_status"] == "actionable"
+    assert q_row["group_recommended_keep_path"] is not None
+    assert q_row["group_recommended_keep_path"] != q_row["absolute_path"]
+    assert q_row["group_reclaimable_bytes"] > 0
+    assert q_row["group_selection_reason"] is not None
+
+
+def test_balanced_by_bytes_page_local_explain(api_test_env, tmp_path: Path):
+    """With selection_mode=balanced_by_bytes, balancer tie-breaking is recorded in group context on QUARANTINE row."""
+    client = api_test_env["client"]
+    service = api_test_env["service"]
+    SessionLocal = api_test_env["SessionLocal"]
+
+    root0 = tmp_path / "root0"
+    root1 = tmp_path / "root1"
+    root0.mkdir()
+    root1.mkdir()
+
+    # Add extra files in both roots so protect_last_file allows either candidate to be quarantined
+    for i in range(5):
+        (root0 / f"extra_{i}.txt").write_text("extra")
+        (root1 / f"extra_{i}.txt").write_text("extra")
+
+    orig_allowed = service.settings.allowed_roots_raw
+    service.settings.allowed_roots_raw = f"{orig_allowed},{root0},{root1}"
+
+    # Group 1: 2 files in root0 (1000 bytes each). Keeping one releases 1000 bytes in root0.
+    f1_a = root0 / "g1_a.bin"
+    f1_b = root0 / "g1_b.bin"
+    f1_a.write_bytes(b"1" * 1000)
+    f1_b.write_bytes(b"1" * 1000)
+
+    # Group 2: 1 file in root0, 1 file in root1 (1000 bytes each).
+    # Since root0 has already released 1000 bytes, keeping f2_root0 causes f2_root1 to be deleted,
+    # releasing 1000 in root1 -> spread becomes |1000 - 1000| = 0.
+    # If f2_root1 was kept, root0 would release another 1000 -> root0 released = 2000, root1 = 0 -> spread = 2000.
+    # Therefore, balancer chooses f2_root0 as keeper! f2_root1 is QUARANTINE with group_selection_reason="balanced_by_bytes".
+    f2_root0 = root0 / "g2_r0.bin"
+    f2_root1 = root1 / "g2_r1.bin"
+    f2_root0.write_bytes(b"2" * 1000)
+    f2_root1.write_bytes(b"2" * 1000)
+
+    scan_id = 15
+    with SessionLocal() as session:
+        _create_completed_scan(session, scan_id=scan_id, roots=[str(root0), str(root1)])
+
+        # Group 1 (file_size=1000)
+        g1 = DuplicateGroup(id=151, scan_job_id=scan_id, content_hash="hash_b1", file_size=1000, member_count=2)
+        session.add(g1)
+        session.flush()
+        session.add(DuplicateFile(group_id=g1.id, root_id=0, absolute_path=str(f1_a), relative_path=f1_a.name, top_level_dir=str(root0), size=1000, mtime_ns=1000))
+        session.add(DuplicateFile(group_id=g1.id, root_id=0, absolute_path=str(f1_b), relative_path=f1_b.name, top_level_dir=str(root0), size=1000, mtime_ns=2000))
+
+        # Group 2 (file_size=1000)
+        g2 = DuplicateGroup(id=152, scan_job_id=scan_id, content_hash="hash_b2", file_size=1000, member_count=2)
+        session.add(g2)
+        session.flush()
+        session.add(DuplicateFile(group_id=g2.id, root_id=0, absolute_path=str(f2_root0), relative_path=f2_root0.name, top_level_dir=str(root0), size=1000, mtime_ns=3000))
+        session.add(DuplicateFile(group_id=g2.id, root_id=1, absolute_path=str(f2_root1), relative_path=f2_root1.name, top_level_dir=str(root1), size=1000, mtime_ns=4000))
+
+        session.commit()
+
+    cfg = {"scorer_config": {"selection_mode": "balanced_by_bytes"}}
+
+    # Fetch all rows with page_size=1 to find the QUARANTINE row of Group 2 (f2_root1)
+    target_row = None
+    for p in range(1, 5):
+        resp = client.post(f"/api/scans/{scan_id}/dedupe-preview", json={**cfg, "page": p, "page_size": 1}).json()
+        assert len(resp["rows"]) == 1
+        r = resp["rows"][0]
+        if r["absolute_path"] == str(f2_root1):
+            target_row = r
+            break
+
+    assert target_row is not None, "Target quarantine row f2_root1 not found"
+    assert target_row["member_decision"] == "QUARANTINE"
+    assert target_row["group_selection_reason"] == "balanced_by_bytes"
+    assert target_row["group_balance_info"] is not None
+    assert "spread_before" in target_row["group_balance_info"]
+    assert "spread_after" in target_row["group_balance_info"]
+    assert target_row["group_balance_info"]["spread_after"] < target_row["group_balance_info"]["spread_before"]
+
+    # Verify balancer info is group context, NOT in contributions
+    contrib_factors = [c["factor"] for c in target_row["contributions"]]
+    assert "balanced_by_bytes" not in contrib_factors
+    assert "balance" not in contrib_factors
+
+
 # =========================================================================
-# 7. EFFECTIVE SAFETY CONTEXT IN PREVIEW DIGEST
+# 8. MISSING MEMBER API EXPLAIN
+# =========================================================================
+
+def test_missing_member_api_explain(api_test_env):
+    """API response for a missing file must mark eligible_as_keep=False, member_decision=SKIPPED, safety_reasons with SOURCE_NOT_FOUND."""
+    client = api_test_env["client"]
+    SessionLocal = api_test_env["SessionLocal"]
+    data_dir = api_test_env["data_dir"]
+
+    # Create 1 existing file, 1 missing file
+    f_real = data_dir / "real_file.txt"
+    f_real.write_text("existing")
+    f_missing = data_dir / "nonexistent_file.txt"
+
+    with SessionLocal() as session:
+        _create_completed_scan(session, scan_id=82, roots=[str(data_dir)])
+        g = DuplicateGroup(id=821, scan_job_id=82, content_hash="hash_missing_mem", file_size=8, member_count=2)
+        session.add(g)
+        session.flush()
+        session.add(DuplicateFile(group_id=g.id, root_id=0, absolute_path=str(f_real), relative_path=f_real.name, top_level_dir=str(data_dir), size=8, mtime_ns=1000))
+        session.add(DuplicateFile(group_id=g.id, root_id=0, absolute_path=str(f_missing), relative_path=f_missing.name, top_level_dir=str(data_dir), size=8, mtime_ns=2000))
+        session.commit()
+
+    resp = client.post("/api/scans/82/dedupe-preview", json={})
+    assert resp.status_code == 200
+    body = resp.json()
+
+    assert body["skipped_group_count"] == 1
+    assert body["actionable_group_count"] == 0
+
+    missing_row = next(r for r in body["rows"] if r["absolute_path"] == str(f_missing))
+    assert missing_row["eligible_as_keep"] is False
+    assert missing_row["member_decision"] == "SKIPPED"
+    assert "SOURCE_NOT_FOUND" in missing_row["safety_reasons"]
+    assert missing_row["group_status"] == "skipped"
+    assert missing_row["group_skip_reason"] == "SOURCE_SNAPSHOT_STALE"
+
+
+# =========================================================================
+# 9. PREVIEW DIGEST INVARIANCE & SENSITIVITY
 # =========================================================================
 
 def test_preview_digest_invariance_across_pagination(api_test_env):
@@ -409,6 +623,25 @@ def test_preview_digest_invariance_across_pagination(api_test_env):
     assert res_p1["scorer_config_digest"] == res_p2["scorer_config_digest"] == res_p3["scorer_config_digest"]
     assert res_p1["source_snapshot_digest"] == res_p2["source_snapshot_digest"] == res_p3["source_snapshot_digest"]
     assert res_p1["decision_digest"] == res_p2["decision_digest"] == res_p3["decision_digest"]
+
+
+def test_preview_digest_sensitivity_to_config(api_test_env):
+    """Changing scorer config must change scorer_config_digest and preview_digest."""
+    client = api_test_env["client"]
+    SessionLocal = api_test_env["SessionLocal"]
+    data_dir = api_test_env["data_dir"]
+
+    with SessionLocal() as session:
+        _setup_duplicate_test_data(session, data_dir, scan_id=30)
+
+    cfg1 = {"scorer_config": {"factors": {"preferred_extension": {"enabled": True, "weight": 10, "extensions": ["jpg"]}}}}
+    cfg2 = {"scorer_config": {"factors": {"preferred_extension": {"enabled": True, "weight": 20, "extensions": ["jpg"]}}}}
+
+    res1 = client.post("/api/scans/30/dedupe-preview", json=cfg1).json()
+    res2 = client.post("/api/scans/30/dedupe-preview", json=cfg2).json()
+
+    assert res1["scorer_config_digest"] != res2["scorer_config_digest"]
+    assert res1["preview_digest"] != res2["preview_digest"]
 
 
 def test_preview_digest_sensitivity_to_safety_context(api_test_env, tmp_path: Path):
@@ -447,8 +680,106 @@ def test_preview_digest_sensitivity_to_safety_context(api_test_env, tmp_path: Pa
     service.settings.quarantine_root = orig_q
 
 
+def test_quarantine_canonical_equivalent_alias_invariance(api_test_env, tmp_path: Path):
+    """Equivalent quarantine path (real dir vs symlink alias) must produce identical effective policy and preview_digest."""
+    client = api_test_env["client"]
+    service = api_test_env["service"]
+    SessionLocal = api_test_env["SessionLocal"]
+    data_dir = api_test_env["data_dir"]
+
+    with SessionLocal() as session:
+        _setup_duplicate_test_data(session, data_dir, scan_id=23)
+
+    qreal = tmp_path / "qreal_alias_test"
+    qreal.mkdir(parents=True, exist_ok=True)
+    qalias = tmp_path / "qalias_test"
+    if qalias.exists() or qalias.is_symlink():
+        qalias.unlink()
+    qalias.symlink_to(qreal)
+
+    # 1. Preview using qreal
+    service.settings.quarantine_root = qreal
+    res_real = client.post("/api/scans/23/dedupe-preview", json={}).json()
+
+    # 2. Preview using qalias
+    service.settings.quarantine_root = qalias
+    res_alias = client.post("/api/scans/23/dedupe-preview", json={}).json()
+
+    assert res_real["effective_safety_policy"]["quarantine_root"] == str(qreal.resolve())
+    assert res_alias["effective_safety_policy"]["quarantine_root"] == str(qreal.resolve())
+    assert res_real["effective_safety_policy"] == res_alias["effective_safety_policy"]
+    assert res_real["preview_digest"] == res_alias["preview_digest"]
+
+
+def test_quarantine_canonical_symlink_retarget_sensitivity(api_test_env, tmp_path: Path):
+    """Retargeting quarantine symlink must change effective_safety_policy and preview_digest even when candidates are outside."""
+    client = api_test_env["client"]
+    service = api_test_env["service"]
+    SessionLocal = api_test_env["SessionLocal"]
+    data_dir = api_test_env["data_dir"]
+
+    with SessionLocal() as session:
+        _setup_duplicate_test_data(session, data_dir, scan_id=24)
+
+    q1 = tmp_path / "q1_target"
+    q2 = tmp_path / "q2_target"
+    q1.mkdir(parents=True, exist_ok=True)
+    q2.mkdir(parents=True, exist_ok=True)
+
+    qalias = tmp_path / "q_retarget_alias"
+    if qalias.exists() or qalias.is_symlink():
+        qalias.unlink()
+    qalias.symlink_to(q1)
+
+    # Preview A: qalias -> q1
+    service.settings.quarantine_root = qalias
+    res_a = client.post("/api/scans/24/dedupe-preview", json={}).json()
+
+    # Retarget qalias -> q2
+    qalias.unlink()
+    qalias.symlink_to(q2)
+
+    # Preview B: qalias -> q2
+    res_b = client.post("/api/scans/24/dedupe-preview", json={}).json()
+
+    # Neither candidate files nor group decisions change
+    assert res_a["source_snapshot_digest"] == res_b["source_snapshot_digest"]
+    assert res_a["decision_digest"] == res_b["decision_digest"]
+
+    # But quarantine authority changes -> effective_safety_policy changes -> preview_digest changes!
+    assert res_a["effective_safety_policy"]["quarantine_root"] == str(q1.resolve())
+    assert res_b["effective_safety_policy"]["quarantine_root"] == str(q2.resolve())
+    assert res_a["effective_safety_policy"] != res_b["effective_safety_policy"]
+    assert res_a["preview_digest"] != res_b["preview_digest"]
+
+
+def test_quarantine_canonical_relative_absolute_equivalence(api_test_env, tmp_path: Path):
+    """Relative quarantine path and its resolved absolute path must produce identical effective policy and preview_digest."""
+    client = api_test_env["client"]
+    service = api_test_env["service"]
+    SessionLocal = api_test_env["SessionLocal"]
+    data_dir = api_test_env["data_dir"]
+
+    with SessionLocal() as session:
+        _setup_duplicate_test_data(session, data_dir, scan_id=25)
+
+    qreal = tmp_path / "qreal_rel_test"
+    qreal.mkdir(parents=True, exist_ok=True)
+
+    rel_q = os.path.relpath(qreal, os.getcwd())
+
+    service.settings.quarantine_root = qreal
+    res_abs = client.post("/api/scans/25/dedupe-preview", json={}).json()
+
+    service.settings.quarantine_root = Path(rel_q)
+    res_rel = client.post("/api/scans/25/dedupe-preview", json={}).json()
+
+    assert res_abs["effective_safety_policy"] == res_rel["effective_safety_policy"]
+    assert res_abs["preview_digest"] == res_rel["preview_digest"]
+
+
 def test_preview_digest_sensitivity_to_db_snapshot(api_test_env):
-    """Changing raw DB snapshot (e.g. root_id 99 -> 100, both invalid) must change source_snapshot_digest and preview_digest."""
+    """Changing raw DB snapshot (root_id 99 -> 100, both invalid) must change source_snapshot_digest and preview_digest."""
     client = api_test_env["client"]
     SessionLocal = api_test_env["SessionLocal"]
     data_dir = api_test_env["data_dir"]
@@ -456,15 +787,23 @@ def test_preview_digest_sensitivity_to_db_snapshot(api_test_env):
     with SessionLocal() as session:
         _setup_duplicate_test_data(session, data_dir, scan_id=22)
 
-    res1 = client.post("/api/scans/22/dedupe-preview", json={}).json()
-
-    # Modify raw DB root_id
+    # Set root_id to 99 for a file in DB (invalid root_id for 1 scan_root)
     with SessionLocal() as session:
-        f = session.scalars(select(DuplicateFile).limit(1)).first()
+        f = session.scalars(select(DuplicateFile).where(DuplicateFile.group_id == 221).limit(1)).first()
         f.root_id = 99
         session.commit()
 
+    res1 = client.post("/api/scans/22/dedupe-preview", json={}).json()
+    assert res1["skipped_group_count"] >= 1
+
+    # Now change root_id from 99 to 100 (both invalid)
+    with SessionLocal() as session:
+        f = session.scalars(select(DuplicateFile).where(DuplicateFile.group_id == 221).limit(1)).first()
+        f.root_id = 100
+        session.commit()
+
     res2 = client.post("/api/scans/22/dedupe-preview", json={}).json()
+    assert res2["skipped_group_count"] >= 1
 
     assert res1["source_snapshot_digest"] != res2["source_snapshot_digest"]
     assert res1["preview_digest"] != res2["preview_digest"]
@@ -493,7 +832,7 @@ def test_preview_digest_sensitivity_to_filesystem_changes(api_test_env):
 
 
 # =========================================================================
-# 8. EMPTY PREVIEW & ALL SKIPPED SCENARIOS
+# 10. EMPTY PREVIEW & ALL SKIPPED SCENARIOS
 # =========================================================================
 
 def test_empty_scan_zero_duplicate_groups(api_test_env):
@@ -552,7 +891,7 @@ def test_preview_all_groups_skipped(api_test_env):
 
 
 # =========================================================================
-# 9. EXPLAIN DETAIL & PROTECT LAST FILE API TESTS
+# 11. EXPLAIN DETAIL & PROTECT LAST FILE API TESTS
 # =========================================================================
 
 def test_explain_protect_last_file_api(api_test_env):
@@ -593,14 +932,43 @@ def test_explain_protect_last_file_api(api_test_env):
     assert "PROTECT_LAST_FILE" in row["safety_reasons"]
 
 
+def test_explain_serialization_breakdown(api_test_env):
+    """Contributions list in rows must be properly serialized with factor, configured_weight, actual_contribution, reason."""
+    client = api_test_env["client"]
+    SessionLocal = api_test_env["SessionLocal"]
+    data_dir = api_test_env["data_dir"]
+
+    with SessionLocal() as session:
+        _setup_duplicate_test_data(session, data_dir, scan_id=50)
+
+    cfg = {
+        "scorer_config": {
+            "factors": {
+                "preferred_extension": {"enabled": True, "weight": 50, "extensions": ["jpg"]},
+                "mtime": {"mode": "newest", "weight": 30},
+            }
+        }
+    }
+    resp = client.post("/api/scans/50/dedupe-preview", json=cfg)
+    assert resp.status_code == 200
+    body = resp.json()
+
+    jpg_row = next(r for r in body["rows"] if r["absolute_path"].endswith(".jpg"))
+    assert len(jpg_row["contributions"]) > 0
+    c = jpg_row["contributions"][0]
+    assert "factor" in c
+    assert "configured_weight" in c
+    assert "actual_contribution" in c
+    assert "reason" in c
+
+
 # =========================================================================
-# 10. REAL QUERY ORDER DETERMINISM
+# 12. REAL QUERY ORDER DETERMINISM
 # =========================================================================
 
 def test_real_db_query_order_determinism(api_test_env, monkeypatch):
     """Inverting incidental DB query order must produce strictly identical digests and row sequences."""
     client = api_test_env["client"]
-    service = api_test_env["service"]
     SessionLocal = api_test_env["SessionLocal"]
     data_dir = api_test_env["data_dir"]
 
@@ -616,7 +984,6 @@ def test_real_db_query_order_determinism(api_test_env, monkeypatch):
     def mock_scalars(self, statement, *args, **kwargs):
         res = orig_scalars(self, statement, *args, **kwargs)
         all_items = list(res)
-        # Reverse the order returned from the DB query
         all_items.reverse()
         return all_items
 
@@ -632,7 +999,7 @@ def test_real_db_query_order_determinism(api_test_env, monkeypatch):
 
 
 # =========================================================================
-# 11. NO-MUTATION GUARANTEE
+# 13. NO-MUTATION GUARANTEE
 # =========================================================================
 
 def test_zero_mutation_guarantee(api_test_env):
@@ -668,11 +1035,11 @@ def test_zero_mutation_guarantee(api_test_env):
 
 
 # =========================================================================
-# 12. LIMIT EXCEEDED (422)
+# 14. LIMIT EXCEEDED (422)
 # =========================================================================
 
 def test_limit_exceeded_returns_422(api_test_env, monkeypatch):
-    """Exceeding MAX_DEDUPE_CANDIDATES or MAX_PLANNED_QUARANTINE must return 422 with DEDUPE_LIMIT_EXCEEDED."""
+    """Exceeding MAX_DEDUPE_CANDIDATES must return 422 with DEDUPE_LIMIT_EXCEEDED."""
     client = api_test_env["client"]
     SessionLocal = api_test_env["SessionLocal"]
     data_dir = api_test_env["data_dir"]
@@ -688,3 +1055,32 @@ def test_limit_exceeded_returns_422(api_test_env, monkeypatch):
     body = resp.json()
     assert "error" in body
     assert body["error"]["code"] == "DEDUPE_LIMIT_EXCEEDED"
+
+
+def test_planned_quarantine_limit_exceeded_returns_422(api_test_env, monkeypatch):
+    """Exceeding MAX_PLANNED_QUARANTINE must return 422 with DEDUPE_LIMIT_EXCEEDED and create zero records."""
+    client = api_test_env["client"]
+    SessionLocal = api_test_env["SessionLocal"]
+    data_dir = api_test_env["data_dir"]
+
+    with SessionLocal() as session:
+        _setup_duplicate_test_data(session, data_dir, scan_id=71)
+        init_plans = session.scalar(select(func.count(BatchPlan.id)))
+        init_items = session.scalar(select(func.count(BatchPlanItem.id)))
+        init_jobs = session.scalar(select(func.count(WorkJob.id)))
+        init_quarantine = session.scalar(select(func.count(QuarantineEntry.id)))
+
+    # In scan 71, there are 4 planned quarantine items. Monkeypatch limit to 1.
+    monkeypatch.setattr(dp_mod, "MAX_PLANNED_QUARANTINE", 1)
+
+    resp = client.post("/api/scans/71/dedupe-preview", json={})
+    assert resp.status_code == 422
+    body = resp.json()
+    assert "error" in body
+    assert body["error"]["code"] == "DEDUPE_LIMIT_EXCEEDED"
+
+    with SessionLocal() as session:
+        assert session.scalar(select(func.count(BatchPlan.id))) == init_plans
+        assert session.scalar(select(func.count(BatchPlanItem.id))) == init_items
+        assert session.scalar(select(func.count(WorkJob.id))) == init_jobs
+        assert session.scalar(select(func.count(QuarantineEntry.id))) == init_quarantine
