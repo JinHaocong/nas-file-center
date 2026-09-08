@@ -52,6 +52,7 @@ from app.models import (
     utcnow,
 )
 from app.workflows.errors import (
+    DedupeRescanRequiredError,
     RecipeRevisionNotFoundError,
     WorkflowArchivedError,
     WorkflowDigestMismatchError,
@@ -3640,6 +3641,12 @@ class FileCenterService:
                 f"Plan #{plan_id} is not a workflow plan (source={metadata.get('source')!r})",
                 code="PLAN_REBUILD_NOT_ELIGIBLE",
                 status_code=400,
+            )
+
+        if metadata.get("workflow_mode") == "dedupe":
+            raise DedupeRescanRequiredError(
+                f"Dedupe workflow plan #{plan_id} cannot be rebuilt from historical scan. A new scan is required.",
+                details={"plan_id": plan_id, "scan_job_id": metadata.get("scan_job_id")},
             )
 
         workflow_id = metadata.get("workflow_id")

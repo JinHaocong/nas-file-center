@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.filters.compiler import compile_filter_to_sql
 from app.filters.excludes import DEFAULT_EXCLUDE_DIR_NAMES, build_exclude_predicates
 from app.filters.validation import validate_filter_ast
-from app.models import FilterPolicy, IndexRoot, IndexedPath
+from app.models import FilterPolicy, IndexRoot, IndexedPath, ScanJob
 from app.organizers.engine import generate_organizer_proposals
 from app.organizers.planner import plan_organizer_operations
 from app.organizers.profile_validation import (
@@ -18,6 +18,15 @@ from app.organizers.profile_validation import (
     DEFAULT_ORGANIZER_STATISTICS_TEMPLATE,
 )
 from app.path_safety import require_allowed_path, require_unreserved_path
+from app.planning.dedupe_generate import build_advanced_dedupe_draft_intents
+from app.planning.dedupe_preview import (
+    canonicalize_effective_safety_policy,
+    canonicalize_safety_path,
+    compile_advanced_dedupe_preview,
+    compute_preview_digest,
+    DedupeScanNotFoundError,
+    DedupeScanNotCompletedError,
+)
 from app.workflows.errors import (
     VirtualGraphCollisionError,
     VirtualGraphCycleError,
@@ -27,6 +36,7 @@ from app.workflows.errors import (
 from app.workflows.graph import VirtualCandidate, VirtualPathGraph
 from app.workflows.revisions import compute_definition_sha256
 from app.workflows.schema import (
+    DedupeStep,
     FilterStep,
     MoveStep,
     OrganizeStep,
@@ -57,10 +67,12 @@ class WorkflowCompiler:
         session: Session,
         allowed_roots: Iterable[Path | str],
         quarantine_root: Path | str | None = None,
+        protect_last_file: bool = True,
     ):
         self.session = session
         self.allowed_roots = [str(r) for r in allowed_roots]
         self.quarantine_root = str(quarantine_root) if quarantine_root else None
+        self.protect_last_file = protect_last_file
 
     def compile(
         self,
@@ -70,6 +82,7 @@ class WorkflowCompiler:
         workflow_revision: int | None = None,
         definition_sha256: str | None = None,
         override_root_ids: list[int] | None = None,
+        scan_job_id: int | None = None,
         max_candidates: int = MAX_WORKFLOW_CANDIDATES,
         max_plan_items: int = MAX_WORKFLOW_PLAN_ITEMS,
     ) -> CompilationResult:
@@ -94,8 +107,208 @@ class WorkflowCompiler:
                 max_candidates=max_candidates,
                 max_plan_items=max_plan_items,
             )
+        elif definition.mode == "dedupe":
+            return self._compile_dedupe_workflow(
+                definition,
+                workflow_id=workflow_id,
+                workflow_revision=workflow_revision,
+                definition_sha256=definition_sha256,
+                scan_job_id=scan_job_id,
+                max_plan_items=max_plan_items,
+            )
         else:
             raise WorkflowValidationError(f"Unsupported workflow mode: {definition.mode}")
+
+    def _compile_dedupe_workflow(
+        self,
+        definition: WorkflowDefinition,
+        *,
+        workflow_id: int | None = None,
+        workflow_revision: int | None = None,
+        definition_sha256: str | None = None,
+        scan_job_id: int | None = None,
+        max_plan_items: int = MAX_WORKFLOW_PLAN_ITEMS,
+    ) -> CompilationResult:
+        if scan_job_id is None:
+            raise WorkflowValidationError(
+                "runtime_inputs.scan_job_id is required for dedupe workflow",
+                code="SCAN_JOB_REQUIRED",
+            )
+
+        scan = self.session.get(ScanJob, scan_job_id)
+        if not scan:
+            raise DedupeScanNotFoundError(
+                f"ScanJob #{scan_job_id} not found",
+            )
+        if scan.status != "completed":
+            raise DedupeScanNotCompletedError(
+                f"Scan job #{scan_job_id} status is '{scan.status}', expected 'completed'",
+                details={"scan_job_id": scan_job_id, "status": scan.status},
+            )
+
+        allowed_roots = tuple(
+            Path(canonicalize_safety_path(root))
+            for root in self.allowed_roots
+            if str(root).strip()
+        )
+        quarantine_root = (
+            Path(canonicalize_safety_path(self.quarantine_root))
+            if self.quarantine_root and str(self.quarantine_root).strip()
+            else None
+        )
+        effective_safety_policy = canonicalize_effective_safety_policy(
+            protect_last_file=self.protect_last_file,
+            allowed_roots=allowed_roots,
+            quarantine_root=quarantine_root,
+        )
+
+        dedupe_step: DedupeStep = definition.steps[0]  # type: ignore
+        compilation = compile_advanced_dedupe_preview(
+            session=self.session,
+            scan_job_id=scan_job_id,
+            config=dedupe_step.scorer_config,
+            protect_last_file=self.protect_last_file,
+            allowed_roots=allowed_roots,
+            quarantine_root=quarantine_root,
+        )
+
+        actual_preview_digest = compute_preview_digest(
+            scan_job_id=compilation.scan_job_id,
+            scorer_config_digest=compilation.scorer_config_digest,
+            source_snapshot_digest=compilation.source_snapshot_digest,
+            decision_digest=compilation.decision_digest,
+            effective_safety_policy=effective_safety_policy,
+        )
+
+        intents = build_advanced_dedupe_draft_intents(
+            compilation,
+            protect_last_file=self.protect_last_file,
+        )
+
+        if len(intents) > max_plan_items:
+            raise WorkflowSafetyLimitExceededError(
+                f"Planned operations count ({len(intents)}) exceeds safety limit ({max_plan_items})",
+                details={"planned_operations_count": len(intents), "limit": max_plan_items},
+            )
+
+        quarantine_operations = [
+            {
+                "sequence": it.sequence,
+                "operation": it.operation,
+                "source": it.source_path,
+                "target": None,
+                "keep_path": it.keep_path,
+                "expected_size": it.expected_size,
+            }
+            for it in intents
+        ]
+
+        compile_payload = {
+            "workflow_id": workflow_id,
+            "workflow_revision": workflow_revision,
+            "definition_sha256": definition_sha256 or compute_definition_sha256(definition.model_dump()),
+            "runtime_inputs": {
+                "scan_job_id": scan_job_id,
+            },
+            "preview_digest": actual_preview_digest,
+            "planned_operations": quarantine_operations,
+        }
+        digest = compute_definition_sha256(compile_payload)
+
+        all_rows = []
+        for g in compilation.groups:
+            g_prov_id = g.group_provenance_id
+            g_status = g.status
+            g_skip_reason = g.skip_reason
+            g_file_size = g.file_size
+            g_quarantine_set = set(g.quarantine_candidates)
+            keeper_m = next((mem for mem in g.members if mem.recommended_keep), None)
+            if g.status == "actionable":
+                g_recommended_keep_path = g.recommended_keep.absolute_path if g.recommended_keep else None
+                g_reclaimable_bytes = g.reclaimable_bytes
+                g_selection_reason = keeper_m.selection_reason if keeper_m else "winner"
+                g_balance_info = keeper_m.balance_info if keeper_m else None
+            else:
+                g_recommended_keep_path = None
+                g_reclaimable_bytes = 0
+                g_selection_reason = g.skip_reason or "skipped"
+                g_balance_info = None
+
+            for m in g.members:
+                if g_status == "skipped":
+                    member_decision = "SKIPPED"
+                    op = "skipped"
+                    changed = False
+                elif m.recommended_keep:
+                    member_decision = "KEEP"
+                    op = "keep"
+                    changed = False
+                elif m.absolute_path in g_quarantine_set:
+                    member_decision = "QUARANTINE"
+                    op = "quarantine"
+                    changed = True
+                else:
+                    member_decision = "SKIPPED"
+                    op = "skipped"
+                    changed = False
+
+                contrib_list = [
+                    {
+                        "factor": c.factor,
+                        "configured_weight": c.configured_weight,
+                        "actual_contribution": c.actual_contribution,
+                        "reason": c.reason,
+                    }
+                    for c in m.contributions
+                ]
+
+                all_rows.append({
+                    "source": m.absolute_path,
+                    "target": None,
+                    "operation": op,
+                    "mtime_ns": None,
+                    "changed": changed,
+                    "group_provenance_id": g_prov_id,
+                    "group_status": g_status,
+                    "group_skip_reason": g_skip_reason,
+                    "group_file_size": g_file_size,
+                    "group_recommended_keep_path": g_recommended_keep_path,
+                    "group_reclaimable_bytes": g_reclaimable_bytes,
+                    "group_selection_reason": g_selection_reason,
+                    "group_balance_info": g_balance_info,
+                    "absolute_path": m.absolute_path,
+                    "relative_path": m.relative_path,
+                    "scan_root_index": m.scan_root_index,
+                    "scan_root_path": m.scan_root_path,
+                    "eligible_as_keep": m.eligible_as_keep,
+                    "safety_reasons": list(m.safety_reasons),
+                    "total_score": m.total_score,
+                    "contributions": contrib_list,
+                    "is_top_candidate": m.is_top_candidate,
+                    "recommended_keep": m.recommended_keep,
+                    "member_decision": member_decision,
+                    "selection_reason": m.selection_reason,
+                    "balance_info": m.balance_info,
+                    "keep_path": g_recommended_keep_path,
+                })
+
+        matched_count = sum(len(g.members) for g in compilation.groups)
+        matched_bytes = sum(g.file_size * len(g.members) for g in compilation.groups)
+
+        return CompilationResult(
+            matched_count=matched_count,
+            matched_bytes=matched_bytes,
+            planned_operations=quarantine_operations,
+            compile_digest=digest,
+            runtime_inputs={"scan_job_id": scan_job_id},
+            compile_context={
+                "compilation": compilation,
+                "intents": intents,
+                "preview_digest": actual_preview_digest,
+                "effective_safety_policy": effective_safety_policy,
+                "all_rows": all_rows,
+            },
+        )
 
     def _compile_organizer_workflow(
         self,

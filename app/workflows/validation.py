@@ -7,8 +7,10 @@ from sqlalchemy.orm import Session
 
 from app.filters.validation import INT64_MAX, validate_filter_ast, FilterValidationError
 from app.models import IndexRoot
+from app.planning.dedupe_config import validate_and_canonicalize_config
 from app.workflows.errors import WorkflowValidationError
 from app.workflows.schema import (
+    DedupeStep,
     FilterStep,
     MoveStep,
     OrganizeStep,
@@ -20,12 +22,15 @@ from app.workflows.schema import (
     WorkflowStep,
 )
 
-RESERVED_UNSUPPORTED_STEPS = frozenset({"dedupe", "copy", "delete", "remove", "unlink"})
-ALLOWED_STEP_TYPES = frozenset({"scan", "filter", "rename", "move", "touch", "quarantine", "organize"})
+RESERVED_UNSUPPORTED_STEPS = frozenset({"copy", "delete", "remove", "unlink"})
+ALLOWED_STEP_TYPES = frozenset({"scan", "filter", "rename", "move", "touch", "quarantine", "organize", "dedupe"})
 
 
-def validate_raw_steps_types(raw_steps: list[Any]) -> None:
+def validate_raw_steps_types(raw_steps: list[Any], mode: str | None = None) -> None:
     """Pre-validation on raw dictionary or step objects before or during Pydantic parsing to enforce UNSUPPORTED_STEP code."""
+    reserved = frozenset({"copy", "delete", "remove", "unlink"})
+    if mode != "dedupe":
+        reserved = reserved | {"dedupe"}
     for idx, raw in enumerate(raw_steps):
         if hasattr(raw, "type"):
             step_type = str(getattr(raw, "type", "")).strip().lower()
@@ -36,7 +41,7 @@ def validate_raw_steps_types(raw_steps: list[Any]) -> None:
 
         if not step_type:
             raise WorkflowValidationError(f"Step at index {idx} missing 'type'", code="INVALID_STEP_PAYLOAD")
-        if step_type in RESERVED_UNSUPPORTED_STEPS:
+        if step_type in reserved:
             raise WorkflowValidationError(
                 f"Workflow does not support step type '{step_type}'",
                 code="UNSUPPORTED_STEP",
@@ -68,7 +73,26 @@ def validate_workflow_definition(
         seen_ids.add(step_id)
 
     # Pipeline grammar validation by mode
-    if definition.mode == "organizer":
+    if definition.mode == "dedupe":
+        if len(definition.steps) != 1:
+            raise WorkflowValidationError(
+                "Dedupe workflow must contain exactly 1 step: 'dedupe'",
+                code="INVALID_PIPELINE_STRUCTURE",
+                details={"step_count": len(definition.steps)},
+            )
+        if not isinstance(definition.steps[0], DedupeStep):
+            raise WorkflowValidationError(
+                "Step 0 in dedupe workflow must be 'dedupe'",
+                code="INVALID_PIPELINE_STRUCTURE",
+            )
+    elif definition.mode == "organizer":
+        for idx, step in enumerate(definition.steps):
+            if isinstance(step, DedupeStep):
+                raise WorkflowValidationError(
+                    "Step 'dedupe' is only allowed in 'dedupe' mode workflows",
+                    code="INVALID_PIPELINE_STRUCTURE",
+                    details={"index": idx},
+                )
         if len(definition.steps) != 2:
             raise WorkflowValidationError(
                 "Organizer workflow must contain exactly 2 steps: 'scan' and 'organize'",
@@ -86,6 +110,13 @@ def validate_workflow_definition(
                 code="INVALID_PIPELINE_STRUCTURE",
             )
     elif definition.mode == "file":
+        for idx, step in enumerate(definition.steps):
+            if isinstance(step, DedupeStep):
+                raise WorkflowValidationError(
+                    "Step 'dedupe' is only allowed in 'dedupe' mode workflows",
+                    code="INVALID_PIPELINE_STRUCTURE",
+                    details={"index": idx},
+                )
         if not isinstance(definition.steps[0], ScanStep):
             raise WorkflowValidationError(
                 "First step in 'file' workflow must be 'scan'",
@@ -242,3 +273,18 @@ def _validate_single_step(step: WorkflowStep, idx: int, session: Session | None 
                 code="INVALID_PROFILE_SNAPSHOT",
                 details={"index": idx, "step_id": step.id},
             )
+
+    elif isinstance(step, DedupeStep):
+        try:
+            validate_and_canonicalize_config(step.scorer_config)
+        except ValueError as exc:
+            msg = str(exc)
+            code = "DEDUPE_INVALID_CONFIG"
+            if "DEDUPE_FACTOR_UNAVAILABLE" in msg:
+                code = "DEDUPE_FACTOR_UNAVAILABLE"
+            raise WorkflowValidationError(
+                msg,
+                code=code,
+                details={"index": idx, "step_id": step.id, "reason": msg},
+            ) from exc
+

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from typing import Any, Literal, Union
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
 from app.filters.schema import FilterNode
 from app.organizers.profile_validation import (
@@ -179,6 +179,13 @@ class OrganizeStep(BaseModel):
     profile_snapshot: OrganizerProfileSnapshot
 
 
+class DedupeStep(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    type: Literal["dedupe"] = "dedupe"
+    scorer_config: dict[str, Any] = Field(default_factory=dict)
+
+
 WorkflowStep = Union[
     ScanStep,
     FilterStep,
@@ -187,21 +194,23 @@ WorkflowStep = Union[
     TouchStep,
     QuarantineStep,
     OrganizeStep,
+    DedupeStep,
 ]
 
 
 class WorkflowDefinition(BaseModel):
     model_config = ConfigDict(extra="forbid")
     schema_version: int = 1
-    mode: Literal["file", "organizer"]
+    mode: Literal["file", "organizer", "dedupe"]
     steps: list[WorkflowStep]
 
     @field_validator("steps", mode="before")
     @classmethod
-    def pre_validate_raw_steps(cls, v: Any) -> Any:
+    def pre_validate_raw_steps(cls, v: Any, info: ValidationInfo) -> Any:
         from app.workflows.validation import validate_raw_steps_types
+        mode = info.data.get("mode") if info and hasattr(info, "data") else None
         if isinstance(v, list):
-            validate_raw_steps_types(v)
+            validate_raw_steps_types(v, mode=mode)
         return v
 
     @field_validator("steps")
@@ -216,6 +225,30 @@ class WorkflowDefinition(BaseModel):
 class RuntimeInputs(BaseModel):
     model_config = ConfigDict(extra="forbid")
     root_ids: list[int] | None = None
+    scan_job_id: int | None = None
+
+    @field_validator("scan_job_id", mode="before")
+    @classmethod
+    def validate_scan_job_id(cls, v: Any) -> int | None:
+        if v is None:
+            return None
+        if isinstance(v, bool) or not isinstance(v, int):
+            raise ValueError("scan_job_id cannot be boolean; strict positive integer required")
+        if v <= 0:
+            raise ValueError("scan_job_id must be a positive integer")
+        return v
+
+    @field_validator("root_ids", mode="before")
+    @classmethod
+    def validate_root_ids(cls, v: Any) -> list[int] | None:
+        if v is None:
+            return None
+        if not isinstance(v, list):
+            raise ValueError("root_ids must be a list")
+        for item in v:
+            if isinstance(item, bool) or not isinstance(item, int) or item <= 0:
+                raise ValueError("root_ids must contain positive integers, no booleans")
+        return v
 
 
 class WorkflowCreateRequest(BaseModel):
@@ -244,7 +277,7 @@ class WorkflowListItem(BaseModel):
     id: int
     name: str
     description: str
-    mode: Literal["file", "organizer"]
+    mode: Literal["file", "organizer", "dedupe"]
     current_revision: int
     is_builtin: bool
     archived_at: str | None = None
@@ -327,7 +360,7 @@ class WorkflowPreviewResponse(BaseModel):
     revision: int
     workflow_revision: int
     definition_sha256: str
-    preview_source: Literal["index", "organizer-live-readonly"] = "index"
+    preview_source: Literal["index", "organizer-live-readonly", "completed-scan-readonly-safety"] = "index"
     live_filesystem_verified: Literal[False] = False
     compile_digest: str
     matched_count: int

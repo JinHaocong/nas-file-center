@@ -76,3 +76,9 @@ class WorkflowSafetyLimitExceededError(WorkflowError):
 class WorkflowDigestMismatchError(WorkflowError):
     def __init__(self, message: str = "Workflow compile digest has changed", details: Any = None):
         super().__init__(message=message, code="PREVIEW_CHANGED", details=details, status_code=409)
+
+
+class DedupeRescanRequiredError(WorkflowError):
+    def __init__(self, message: str = "Stale dedupe plan requires a new scan before rebuild", details: Any = None):
+        super().__init__(message=message, code="DEDUPE_RESCAN_REQUIRED", details=details, status_code=409)
+
