@@ -1153,6 +1153,7 @@ class BatchPlanExecuteHandler(TaskHandler):
             before_size = src_stat_dict.get("size")
             before_mtime_ns = src_stat_dict.get("mtime_ns")
 
+            meta = json.loads(item_meta.metadata_json or "{}")
             item_op = OperationItem(
                 sequence=item_meta.sequence,
                 operation=item_meta.operation,
@@ -1162,6 +1163,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                 expected_size=restore_expected_size if item_meta.operation == "restore" else item_meta.expected_size,
                 expected_hash=restore_expected_hash if item_meta.operation == "restore" else item_meta.expected_hash,
                 state=item_meta.state,
+                protected_dir=Path(meta["protected_dir"]) if meta.get("protected_dir") else None,
                 expected_mtime_ns=item_meta.expected_mtime_ns,
                 target_mtime_ns=target_touch_mtime_ns,
             )
