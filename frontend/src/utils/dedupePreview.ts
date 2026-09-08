@@ -19,7 +19,10 @@ export interface DecisionClassification {
   kind: MemberDecision;
 }
 
-export function classifyMemberDecision(rawDecision: string | MemberDecision): DecisionClassification {
+export function classifyMemberDecision(
+  rawDecision: string | MemberDecision,
+  eligibleAsKeep?: boolean
+): DecisionClassification {
   const norm = (rawDecision || '').toUpperCase().replace(/[\s-]+/g, '_');
   if (norm === 'KEEP') {
     return { label: 'KEEP', color: 'success', kind: 'KEEP' };
@@ -27,7 +30,10 @@ export function classifyMemberDecision(rawDecision: string | MemberDecision): De
   if (norm === 'QUARANTINE') {
     return { label: 'QUARANTINE', color: 'error', kind: 'QUARANTINE' };
   }
-  if (norm === 'SAFETY_EXCLUDED' || norm === 'SAFETYEXCLUDED') {
+  if (norm === 'UNAVAILABLE') {
+    return { label: 'UNAVAILABLE', color: 'default', kind: 'UNAVAILABLE' };
+  }
+  if (norm === 'SAFETY_EXCLUDED' || norm === 'SAFETYEXCLUDED' || eligibleAsKeep === false) {
     return { label: 'SAFETY EXCLUDED', color: 'warning', kind: 'SAFETY_EXCLUDED' };
   }
   return { label: 'SKIPPED', color: 'default', kind: 'SKIPPED' };
@@ -41,8 +47,41 @@ export function mapWorkflowPreviewItemsToDedupeRows(items: WorkflowPreviewItem[]
   if (!items || !Array.isArray(items)) return [];
   return items.map((item) => {
     const meta = item.metadata || {};
+    const hasCanonical =
+      typeof meta === 'object' &&
+      meta !== null &&
+      meta.member_decision !== undefined &&
+      meta.group_provenance_id !== undefined;
+
+    if (!hasCanonical) {
+      return {
+        group_provenance_id: meta.group_provenance_id ?? 0,
+        group_status: meta.group_status || 'actionable',
+        group_skip_reason: meta.group_skip_reason || null,
+        group_file_size: meta.group_file_size || 0,
+        group_recommended_keep_path: meta.group_recommended_keep_path || null,
+        group_reclaimable_bytes: meta.group_reclaimable_bytes || 0,
+        group_selection_reason: meta.group_selection_reason || null,
+        group_balance_info: meta.group_balance_info || null,
+        absolute_path: meta.absolute_path || item.source_path,
+        relative_path: meta.relative_path || '',
+        scan_root_index: typeof meta.scan_root_index === 'number' ? meta.scan_root_index : 0,
+        scan_root_path: meta.scan_root_path || '',
+        eligible_as_keep: Boolean(meta.eligible_as_keep),
+        safety_reasons: Array.isArray(meta.safety_reasons) ? meta.safety_reasons : [],
+        total_score: typeof meta.total_score === 'number' ? meta.total_score : undefined,
+        contributions: Array.isArray(meta.contributions) ? meta.contributions : [],
+        is_top_candidate: Boolean(meta.is_top_candidate),
+        recommended_keep: Boolean(meta.recommended_keep),
+        member_decision: 'UNAVAILABLE',
+        selection_reason: meta.selection_reason || null,
+        balance_info: meta.balance_info || null,
+        incomplete: true,
+      };
+    }
+
     return {
-      group_provenance_id: meta.group_provenance_id || 0,
+      group_provenance_id: meta.group_provenance_id,
       group_status: meta.group_status || 'actionable',
       group_skip_reason: meta.group_skip_reason || null,
       group_file_size: meta.group_file_size || 0,
@@ -56,13 +95,14 @@ export function mapWorkflowPreviewItemsToDedupeRows(items: WorkflowPreviewItem[]
       scan_root_path: meta.scan_root_path || '',
       eligible_as_keep: Boolean(meta.eligible_as_keep),
       safety_reasons: Array.isArray(meta.safety_reasons) ? meta.safety_reasons : [],
-      total_score: typeof meta.total_score === 'number' ? meta.total_score : 0,
+      total_score: typeof meta.total_score === 'number' ? meta.total_score : undefined,
       contributions: Array.isArray(meta.contributions) ? meta.contributions : [],
       is_top_candidate: Boolean(meta.is_top_candidate),
       recommended_keep: Boolean(meta.recommended_keep),
-      member_decision: meta.member_decision || (item.operation === 'keep' ? 'KEEP' : 'QUARANTINE'),
+      member_decision: meta.member_decision,
       selection_reason: meta.selection_reason || null,
       balance_info: meta.balance_info || null,
+      incomplete: false,
     };
   });
 }

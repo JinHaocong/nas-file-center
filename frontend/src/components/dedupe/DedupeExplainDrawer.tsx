@@ -43,7 +43,7 @@ export const DedupeExplainDrawer: React.FC<Props> = ({
     return null;
   }
 
-  const decisionCls = classifyMemberDecision(member.member_decision);
+  const decisionCls = classifyMemberDecision(member.member_decision, member.eligible_as_keep);
   const factorContributions = (member.contributions || []).filter(
     (c) => !isBalancerContributionExcludedFromFactors(c)
   );
@@ -71,6 +71,16 @@ export const DedupeExplainDrawer: React.FC<Props> = ({
       destroyOnClose
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+        {/* Incomplete Warning */}
+        {member.incomplete && (
+          <Alert
+            type="warning"
+            showIcon
+            message="缺少详细指标分析数据"
+            description="当前去重项缺少完整的后端 canonical 分析数据，无法展示详细的因子评分与决策依据。"
+          />
+        )}
+
         {/* 1. Basic File Info */}
         <Card size="small" title="文件基本信息" bordered={false} style={{ background: '#fafafa' }}>
           <Descriptions column={1} size="small" bordered>
@@ -98,7 +108,40 @@ export const DedupeExplainDrawer: React.FC<Props> = ({
           </Descriptions>
         </Card>
 
-        {/* 2. Decision and Eligibility */}
+        {/* 2. Group Level Info (Canonical Contract) */}
+        <Card size="small" title="重复组级别摘要 (Group Summary)" bordered={false} style={{ background: '#fafafa' }}>
+          <Descriptions column={1} size="small" bordered>
+            <Descriptions.Item label="组状态 (group_status)">
+              <Tag color={member.group_status === 'actionable' ? 'green' : 'orange'}>
+                {member.group_status}
+              </Tag>
+            </Descriptions.Item>
+            {member.group_skip_reason && (
+              <Descriptions.Item label="组跳过原因 (group_skip_reason)">
+                <Text type="warning">{member.group_skip_reason}</Text>
+              </Descriptions.Item>
+            )}
+            {member.group_recommended_keep_path && (
+              <Descriptions.Item label="组推荐保留路径 (group_recommended_keep_path)">
+                <Text copyable strong style={{ wordBreak: 'break-all' }}>
+                  {member.group_recommended_keep_path}
+                </Text>
+              </Descriptions.Item>
+            )}
+            <Descriptions.Item label="组可释放容量 (group_reclaimable_bytes)">
+              <Text strong style={{ color: '#52c41a' }}>
+                {formatBytes(member.group_reclaimable_bytes)}
+              </Text>
+            </Descriptions.Item>
+            {member.group_selection_reason && (
+              <Descriptions.Item label="组选择原因 (group_selection_reason)">
+                <Text>{member.group_selection_reason}</Text>
+              </Descriptions.Item>
+            )}
+          </Descriptions>
+        </Card>
+
+        {/* 3. Decision and Eligibility */}
         <Card size="small" title="决策与资格判定" bordered={false} style={{ background: '#fafafa' }}>
           <Descriptions column={1} size="small" bordered>
             <Descriptions.Item label="最终决策 (Decision)">
@@ -126,72 +169,74 @@ export const DedupeExplainDrawer: React.FC<Props> = ({
             </Descriptions.Item>
             <Descriptions.Item label="总评分 (Total Score)">
               <Text strong style={{ fontSize: 16, color: '#1890ff' }}>
-                {member.total_score.toLocaleString()}
+                {member.total_score !== undefined ? member.total_score.toLocaleString() : '-'}
               </Text>
             </Descriptions.Item>
           </Descriptions>
         </Card>
 
-        {/* 3. Factor Contributions Table (Excluding balancer) */}
-        <Card
-          size="small"
-          title={
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span>各因子打分明细 (Factor Contributions)</span>
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                加权评分层
-              </Text>
-            </div>
-          }
-          bordered={false}
-          style={{ background: '#fafafa' }}
-        >
-          {factorContributions.length === 0 ? (
-            <Alert type="info" message="当前无单独计分因子贡献项。" />
-          ) : (
-            <Table<FactorContribution>
-              dataSource={factorContributions}
-              rowKey="factor"
-              size="small"
-              pagination={false}
-              columns={[
-                {
-                  title: '因子名称',
-                  dataIndex: 'factor',
-                  key: 'factor',
-                  render: (f: string) => <Tag color="geekblue">{f}</Tag>,
-                },
-                {
-                  title: '配置权重',
-                  dataIndex: 'configured_weight',
-                  key: 'configured_weight',
-                  align: 'right',
-                  render: (w: number) => <Text>{w}</Text>,
-                },
-                {
-                  title: '实际贡献分',
-                  dataIndex: 'actual_contribution',
-                  key: 'actual_contribution',
-                  align: 'right',
-                  render: (c: number) => (
-                    <Text strong style={{ color: c > 0 ? '#52c41a' : '#8c8c8c' }}>
-                      +{c.toLocaleString()}
-                    </Text>
-                  ),
-                },
-                {
-                  title: '说明 / 命中规则',
-                  dataIndex: 'reason',
-                  key: 'reason',
-                  render: (r?: string) => <Text type="secondary">{r || '-'}</Text>,
-                },
-              ]}
-            />
-          )}
-        </Card>
+        {/* 4. Factor Contributions Table (Excluding balancer) - Only if not incomplete */}
+        {!member.incomplete && (
+          <Card
+            size="small"
+            title={
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>各因子打分明细 (Factor Contributions)</span>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  加权评分层
+                </Text>
+              </div>
+            }
+            bordered={false}
+            style={{ background: '#fafafa' }}
+          >
+            {factorContributions.length === 0 ? (
+              <Alert type="info" message="当前无单独计分因子贡献项。" />
+            ) : (
+              <Table<FactorContribution>
+                dataSource={factorContributions}
+                rowKey="factor"
+                size="small"
+                pagination={false}
+                columns={[
+                  {
+                    title: '因子名称',
+                    dataIndex: 'factor',
+                    key: 'factor',
+                    render: (f: string) => <Tag color="geekblue">{f}</Tag>,
+                  },
+                  {
+                    title: '配置权重',
+                    dataIndex: 'configured_weight',
+                    key: 'configured_weight',
+                    align: 'right',
+                    render: (w: number) => <Text>{w}</Text>,
+                  },
+                  {
+                    title: '实际贡献分',
+                    dataIndex: 'actual_contribution',
+                    key: 'actual_contribution',
+                    align: 'right',
+                    render: (c: number) => (
+                      <Text strong style={{ color: c > 0 ? '#52c41a' : '#8c8c8c' }}>
+                        +{c.toLocaleString()}
+                      </Text>
+                    ),
+                  },
+                  {
+                    title: '说明 / 命中规则',
+                    dataIndex: 'reason',
+                    key: 'reason',
+                    render: (r?: string) => <Text type="secondary">{r || '-'}</Text>,
+                  },
+                ]}
+              />
+            )}
+          </Card>
+        )}
 
-        {/* 4. Balancer Info Section (Strictly Separated from Factors) */}
-        {balanceInfo && (
+        {/* 5. Balancer Info Section (Strictly Separated from Factors) */}
+        {!member.incomplete && balanceInfo && (
           <Card
             size="small"
             title={
@@ -211,16 +256,14 @@ export const DedupeExplainDrawer: React.FC<Props> = ({
                 style={{ marginBottom: 8 }}
               />
               <Descriptions column={1} size="small" bordered style={{ background: '#fff' }}>
-                {balanceInfo.tie_broken_by_balancer !== undefined && (
-                  <Descriptions.Item label="平衡器仲裁">
-                    <Tag color={balanceInfo.tie_broken_by_balancer ? 'orange' : 'default'}>
-                      {balanceInfo.tie_broken_by_balancer ? '由字节平衡器打破平局' : '未触发仲裁'}
-                    </Tag>
+                {balanceInfo.spread_before !== undefined && (
+                  <Descriptions.Item label="平衡前极差 (spread_before)">
+                    <Text strong>{formatBytes(balanceInfo.spread_before)}</Text>
                   </Descriptions.Item>
                 )}
-                {balanceInfo.chosen_scan_root !== undefined && (
-                  <Descriptions.Item label="优先隔离目标根">
-                    <Text strong>Scan Root {balanceInfo.chosen_scan_root}</Text>
+                {balanceInfo.spread_after !== undefined && (
+                  <Descriptions.Item label="平衡后极差 (spread_after)">
+                    <Text strong>{formatBytes(balanceInfo.spread_after)}</Text>
                   </Descriptions.Item>
                 )}
               </Descriptions>
@@ -228,7 +271,7 @@ export const DedupeExplainDrawer: React.FC<Props> = ({
           </Card>
         )}
 
-        {/* 5. Sibling Members in Duplicate Group */}
+        {/* 6. Sibling Members in Duplicate Group */}
         {siblings.length > 0 && (
           <Card
             size="small"
@@ -238,7 +281,7 @@ export const DedupeExplainDrawer: React.FC<Props> = ({
           >
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {siblings.map((sib, idx) => {
-                const sCls = classifyMemberDecision(sib.member_decision);
+                const sCls = classifyMemberDecision(sib.member_decision, sib.eligible_as_keep);
                 return (
                   <div
                     key={idx}
@@ -251,8 +294,8 @@ export const DedupeExplainDrawer: React.FC<Props> = ({
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                       <Tag color={sCls.color}>{sCls.label}</Tag>
-                      <Text strong style={{ color: sib.total_score > 0 ? '#1890ff' : '#595959' }}>
-                        评分: {sib.total_score}
+                      <Text strong style={{ color: sib.total_score !== undefined && sib.total_score > 0 ? '#1890ff' : '#595959' }}>
+                        评分: {sib.total_score !== undefined ? sib.total_score : '-'}
                       </Text>
                     </div>
                     <Text ellipsis style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>

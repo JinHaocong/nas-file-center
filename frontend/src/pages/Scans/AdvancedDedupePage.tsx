@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useReducer } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
@@ -21,6 +21,7 @@ import {
   ExclamationCircleOutlined,
 } from "@ant-design/icons";
 import { scansApi } from "../../api/domain";
+import { formatDedupeErrorMessage, getStructuredApiError } from "../../api/errors";
 import {
   DedupeScorerConfig,
   DirectDedupePreviewResponse,
@@ -31,6 +32,11 @@ import {
   isScorerConfigDirty,
   validateScorerConfigForm,
 } from "../../utils/dedupeConfig";
+import {
+  dedupeStateReducer,
+  initialDedupeState,
+  canGeneratePlan,
+} from "../../utils/dedupeState";
 import {
   DedupeScorerConfigEditor,
   DedupePreviewTable,
@@ -47,6 +53,9 @@ export const AdvancedDedupePage: React.FC = () => {
   const scanId = parseInt(id || "0", 10);
   const navigate = useNavigate();
 
+  // Dedupe state machine
+  const [dedupeState, dispatch] = useReducer(dedupeStateReducer, initialDedupeState);
+
   // Scorer configuration state
   const [scorerConfig, setScorerConfig] = useState<DedupeScorerConfig>(
     createDefaultDedupeScorerConfig()
@@ -55,9 +64,9 @@ export const AdvancedDedupePage: React.FC = () => {
   const [previewedConfig, setPreviewedConfig] = useState<DedupeScorerConfig | null>(null);
   const [previewData, setPreviewData] = useState<DirectDedupePreviewResponse | null>(null);
 
-  // Pagination for preview table
+  // Pagination for preview table (Default 50)
   const [page, setPage] = useState<number>(1);
-  const [pageSize, setPageSize] = useState<number>(20);
+  const [pageSize, setPageSize] = useState<number>(50);
 
   // Explain drawer state
   const [selectedMember, setSelectedMember] = useState<DedupePreviewMemberRow | null>(null);
@@ -74,46 +83,66 @@ export const AdvancedDedupePage: React.FC = () => {
     enabled: !!scanId,
   });
 
-  // Preview mutation
+  // Config change handler: triggers state machine CONFIG_EDITED
+  const handleConfigChange = (newCfg: DedupeScorerConfig) => {
+    setScorerConfig(newCfg);
+    dispatch({ type: "CONFIG_EDITED" });
+  };
+
+  // Preview mutation with generation correlation
   const previewMutation = useMutation({
-    mutationFn: (cfg: DedupeScorerConfig) =>
+    mutationFn: (variables: { cfg: DedupeScorerConfig; generation: number }) =>
       scansApi.dedupePreview(scanId, {
-        scorer_config: cfg,
+        scorer_config: variables.cfg,
         page,
         page_size: pageSize,
       }),
     onSuccess: (data, variables) => {
       setPreviewData(data);
-      setPreviewedConfig(JSON.parse(JSON.stringify(variables)));
+      setPreviewedConfig(JSON.parse(JSON.stringify(variables.cfg)));
+      dispatch({
+        type: "PREVIEW_SUCCESS",
+        digest: data.preview_digest,
+        requestGeneration: variables.generation,
+      });
       message.success("高级预览计算完成");
     },
     onError: (err: any) => {
-      message.error(err.message || "预览计算失败");
+      const formatted = formatDedupeErrorMessage(err);
+      dispatch({ type: "PREVIEW_FAILED", error: formatted });
+      message.error(formatted);
     },
   });
 
   // Generate plan mutation
   const generateMutation = useMutation({
     mutationFn: () => {
-      if (!previewData || !previewedConfig) {
-        throw new Error("无有效的预览数据");
+      if (!previewData || !previewedConfig || !dedupeState.acceptedPreviewDigest) {
+        throw new Error("无有效的权威预览数据，请先运行预览");
       }
       return scansApi.createAdvancedDedupePlan(scanId, {
         scorer_config: previewedConfig,
-        expected_preview_digest: previewData.preview_digest,
+        expected_preview_digest: dedupeState.acceptedPreviewDigest,
       });
     },
     onSuccess: (res) => {
+      dispatch({ type: "GENERATE_SUCCESS" });
       message.success(`成功生成精确去重计划 #${res.id || res.plan_id}`);
       navigate(`/plans/${res.id || res.plan_id}`);
     },
     onError: (err: any) => {
-      const msg = err.message || "生成计划草案失败";
-      if (msg.includes("409") || msg.includes("PREVIEW_CHANGED") || msg.includes("digest mismatch")) {
+      const structured = getStructuredApiError(err);
+      const formatted = formatDedupeErrorMessage(err);
+      if (
+        structured.code === "PREVIEW_CHANGED" ||
+        structured.code === "DEDUPE_PREVIEW_CHANGED" ||
+        err.message?.includes("409")
+      ) {
+        dispatch({ type: "PREVIEW_CHANGED_ERROR", error: formatted });
         Modal.confirm({
           title: "预览校验失败 (409 PREVIEW_CHANGED)",
           icon: <ExclamationCircleOutlined style={{ color: "#fa8c16" }} />,
-          content: "检测到底层文件或打分状态已变化，权威摘要已失效。是否立即重新运行预览？",
+          content: "检测到底层文件或打分状态已变化，权威摘要已失效。是否重新运行预览？",
           okText: "重新运行预览",
           cancelText: "取消",
           onOk: () => {
@@ -121,14 +150,16 @@ export const AdvancedDedupePage: React.FC = () => {
           },
         });
       } else {
-        message.error(msg);
+        dispatch({ type: "GENERATE_FAILED", error: formatted });
+        message.error(formatted);
       }
     },
   });
 
-  const isDirty = previewedConfig
-    ? isScorerConfigDirty(scorerConfig, previewedConfig)
-    : false;
+  const isDirty =
+    dedupeState.status === "PREVIEW_STALE" ||
+    dedupeState.acceptedPreviewDigest === null ||
+    (previewedConfig ? isScorerConfigDirty(scorerConfig, previewedConfig) : true);
 
   const validation = validateScorerConfigForm(scorerConfig);
 
@@ -137,7 +168,32 @@ export const AdvancedDedupePage: React.FC = () => {
       message.error("请先修正配置校验错误");
       return;
     }
-    previewMutation.mutate(scorerConfig);
+    const currentGen = dedupeState.configGeneration;
+    dispatch({ type: "PREVIEW_STARTED" });
+    previewMutation.mutate({ cfg: scorerConfig, generation: currentGen });
+  };
+
+  const handleConfirmGeneratePlan = () => {
+    Modal.confirm({
+      title: "确认生成精确去重计划草案？",
+      icon: <ExclamationCircleOutlined style={{ color: "#1890ff" }} />,
+      content: (
+        <div>
+          <Paragraph>
+            将提交当前权威预览摘要以原子方式创建执行计划草案。
+          </Paragraph>
+          <Paragraph type="secondary" style={{ fontSize: 13 }}>
+            注意：生成后仅创建 <strong>Draft</strong> 状态计划，底层物理文件不会发生任何改变。后续仍需在计划详情页完成 <strong>Freeze -&gt; Validate -&gt; Execute</strong> 流程。
+          </Paragraph>
+        </div>
+      ),
+      okText: "确认生成草案",
+      cancelText: "取消",
+      onOk: () => {
+        dispatch({ type: "GENERATE_STARTED" });
+        generateMutation.mutate();
+      },
+    });
   };
 
   const handlePageChange = (newPage: number, newPageSize: number) => {
@@ -261,7 +317,7 @@ export const AdvancedDedupePage: React.FC = () => {
       >
         <DedupeScorerConfigEditor
           value={scorerConfig}
-          onChange={setScorerConfig}
+          onChange={handleConfigChange}
           disabled={previewMutation.isPending || generateMutation.isPending}
         />
 
@@ -309,6 +365,7 @@ export const AdvancedDedupePage: React.FC = () => {
             sourceSnapshotDigest={previewData.source_snapshot_digest}
             decisionDigest={previewData.decision_digest}
             engineVersion={previewData.dedupe_engine_version}
+            effectiveSafetyPolicy={previewData.effective_safety_policy || previewData.summary?.effective_safety_policy}
           />
 
           {/* Preview Summary Panel */}
@@ -360,10 +417,10 @@ export const AdvancedDedupePage: React.FC = () => {
                   type="primary"
                   size="large"
                   icon={<ScheduleOutlined />}
-                  onClick={() => generateMutation.mutate()}
+                  onClick={handleConfirmGeneratePlan}
                   loading={generateMutation.isPending}
                   disabled={
-                    isDirty ||
+                    !canGeneratePlan(dedupeState) ||
                     previewMutation.isPending ||
                     previewData.planned_quarantine_count === 0
                   }

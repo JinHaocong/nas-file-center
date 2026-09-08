@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Card,
   Table,
@@ -52,9 +52,13 @@ import {
 
 const { Text } = Typography;
 
-export interface PreviewRequestParams {
+export interface PreviewRequestSnapshot {
   page: number;
   pageSize: number;
+  onlyChanged: boolean;
+  scanJobId?: number;
+  roots?: number[];
+  requestId: number;
 }
 
 interface WorkflowPreviewPanelProps {
@@ -95,6 +99,7 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
     isDirty ? "EDITING_DIRTY" : "SAVED_PREVIEW_REQUIRED"
   );
   const [previewData, setPreviewData] = useState<WorkflowPreviewResponse | null>(null);
+  const latestRequestIdRef = useRef<number>(0);
 
   const { data: indexesData } = useQuery({
     queryKey: ["indexesRootsList"],
@@ -121,32 +126,32 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
   }, [mode, workflowId, revision]);
 
   const previewMutation = useMutation({
-    mutationFn: async ({ page: targetPage, pageSize: targetPageSize }: PreviewRequestParams) => {
+    mutationFn: async (snapshot: PreviewRequestSnapshot) => {
       if (!workflowId || isDirty || isArchived) {
         throw new Error("当前状态无法执行工作流预览");
       }
       if (isDedupe) {
-        if (!selectedScanJobId) {
+        if (!snapshot.scanJobId) {
           throw new Error("请先选择已完成的扫描任务");
         }
         return workflowApi.previewWorkflow(workflowId, {
           revision,
-          page: targetPage,
-          page_size: targetPageSize,
-          only_changed: onlyChanged,
+          page: snapshot.page,
+          page_size: snapshot.pageSize,
+          only_changed: snapshot.onlyChanged,
           runtime_inputs: {
-            scan_job_id: selectedScanJobId,
+            scan_job_id: snapshot.scanJobId,
           },
         });
       }
 
       return workflowApi.previewWorkflow(workflowId, {
         revision,
-        page: targetPage,
-        page_size: targetPageSize,
+        page: snapshot.page,
+        page_size: snapshot.pageSize,
         runtime_inputs:
-          selectedRoots && selectedRoots.length > 0
-            ? { root_ids: selectedRoots }
+          snapshot.roots && snapshot.roots.length > 0
+            ? { root_ids: snapshot.roots }
             : undefined,
       });
     },
@@ -156,6 +161,9 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
       setPreviewState((prev) => transitionPreviewState(prev, { type: "START_PREVIEW" }));
     },
     onSuccess: (data, variables) => {
+      if (variables.requestId !== latestRequestIdRef.current) {
+        return;
+      }
       setPage(variables.page);
       setPageSize(variables.pageSize);
       setPreviewData(data);
@@ -166,7 +174,10 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
         })
       );
     },
-    onError: (err) => {
+    onError: (err, variables) => {
+      if (variables?.requestId !== latestRequestIdRef.current) {
+        return;
+      }
       const structured = getStructuredApiError(err);
       setPreviewError(structured.message || "工作流预览失败");
       setPreviewData(null);
@@ -178,6 +189,30 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
       );
     },
   });
+
+  const triggerPreview = (params?: {
+    page?: number;
+    pageSize?: number;
+    onlyChanged?: boolean;
+    scanJobId?: number;
+    roots?: number[];
+  }) => {
+    const p = params?.page ?? page;
+    const ps = params?.pageSize ?? pageSize;
+    const oc = params?.onlyChanged !== undefined ? params.onlyChanged : onlyChanged;
+    const sid = params?.scanJobId !== undefined ? params.scanJobId : selectedScanJobId;
+    const rts = params?.roots !== undefined ? params.roots : selectedRoots;
+
+    const reqId = ++latestRequestIdRef.current;
+    previewMutation.mutate({
+      page: p,
+      pageSize: ps,
+      onlyChanged: oc,
+      scanJobId: sid,
+      roots: rts,
+      requestId: reqId,
+    });
+  };
 
   const handleRootsChange = (roots: number[] | undefined) => {
     const normalized = normalizeSelectedRoots(roots, mode as any);
@@ -243,26 +278,10 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
     return mapWorkflowPreviewItemsToDedupeRows(previewData.items);
   }, [isDedupe, previewData?.items]);
 
-  // Derived dedupe summary for dedupe mode
-  const dedupeSummary = useMemo<DedupeSummary | null>(() => {
-    if (!isDedupe || !previewData) return null;
-    const rawAny = previewData as any;
-    return {
-      scan_job_id: selectedScanJobId,
-      group_count:
-        rawAny.group_count ??
-        new Set(dedupeRows.map((r) => r.group_provenance_id)).size,
-      candidate_member_count: rawAny.candidate_member_count ?? previewData.matched_count,
-      actionable_group_count: rawAny.actionable_group_count ?? 0,
-      skipped_group_count: rawAny.skipped_group_count ?? 0,
-      planned_quarantine_count:
-        rawAny.planned_quarantine_count ??
-        dedupeRows.filter((r) => r.member_decision === "QUARANTINE").length,
-      expected_reclaim_bytes: rawAny.expected_reclaim_bytes ?? previewData.matched_bytes,
-      released_bytes_by_scan_root: rawAny.released_bytes_by_scan_root,
-      preview_digest: previewData.compile_digest,
-    };
-  }, [isDedupe, previewData, dedupeRows, selectedScanJobId]);
+  // Directly consume dedupe_summary from previewData (Blocker 1)
+  const dedupeSummary: DedupeSummary | null = isDedupe
+    ? (previewData?.dedupe_summary ?? null)
+    : null;
 
   const columns = [
     {
@@ -350,7 +369,7 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
     Boolean(previewData?.compile_digest) &&
     !previewMutation.isPending &&
     !generatePlanMutation.isPending &&
-    (!isDedupe || Boolean(selectedScanJobId));
+    (!isDedupe || (Boolean(selectedScanJobId) && Boolean(previewData?.dedupe_summary)));
 
   return (
     <Card
@@ -367,7 +386,7 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
         <Space>
           <Button
             icon={<ReloadOutlined />}
-            onClick={() => previewMutation.mutate({ page, pageSize })}
+            onClick={() => triggerPreview()}
             loading={previewMutation.isPending}
             disabled={!canPreview}
           >
@@ -435,6 +454,16 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
             />
           )}
 
+          {isDedupe && previewData && !previewData.dedupe_summary && (
+            <Alert
+              type="error"
+              showIcon
+              message="缺少去重权威摘要 (dedupe_summary)"
+              description="后端返回的预览数据中未包含权威 dedupe_summary，无法验证去重统计与安全性，系统已禁止生成计划草案。"
+              style={{ marginBottom: 16 }}
+            />
+          )}
+
           {/* Runtime Inputs Selector */}
           <div
             style={{
@@ -453,7 +482,7 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
                   onChange={(val) => {
                     setSelectedScanJobId(val);
                     setPreviewData(null);
-                    setPreviewState(val ? "SAVED_PREVIEW_REQUIRED" : "EDITING_DIRTY");
+                    setPreviewState("SAVED_PREVIEW_REQUIRED");
                   }}
                   disabled={previewMutation.isPending || generatePlanMutation.isPending}
                 />
@@ -463,7 +492,7 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
                     onChange={(checked) => {
                       setOnlyChanged(checked);
                       if (selectedScanJobId) {
-                        previewMutation.mutate({ page: 1, pageSize });
+                        triggerPreview({ page: 1, pageSize, onlyChanged: checked, scanJobId: selectedScanJobId });
                       }
                     }}
                     disabled={previewMutation.isPending || generatePlanMutation.isPending}
@@ -527,6 +556,11 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
                   authorityDigest={previewData.compile_digest}
                   authorityType="compile_digest"
                   liveFilesystemVerified={previewData.live_filesystem_verified}
+                  scorerConfigDigest={dedupeSummary?.scorer_config_digest}
+                  sourceSnapshotDigest={dedupeSummary?.source_snapshot_digest}
+                  decisionDigest={dedupeSummary?.decision_digest}
+                  engineVersion={dedupeSummary?.dedupe_engine_version}
+                  effectiveSafetyPolicy={dedupeSummary?.effective_safety_policy}
                 />
 
                 {dedupeSummary && (
@@ -558,9 +592,7 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
                       pageSize,
                       total: previewData.matched_count || previewData.items.length,
                       onChange: (p, ps) => {
-                        setPage(p);
-                        setPageSize(ps);
-                        previewMutation.mutate({ page: p, pageSize: ps });
+                        triggerPreview({ page: p, pageSize: ps });
                       },
                     }}
                   />
@@ -611,10 +643,8 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
                     showSizeChanger: true,
                     pageSizeOptions: ["20", "50", "100"],
                     onChange: (p, ps) => {
-                      setPage(p);
-                      setPageSize(ps);
                       if (previewState === "PREVIEW_READY") {
-                        previewMutation.mutate({ page: p, pageSize: ps });
+                        triggerPreview({ page: p, pageSize: ps });
                       }
                     },
                   }}

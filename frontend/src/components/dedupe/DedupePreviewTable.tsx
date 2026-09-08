@@ -57,7 +57,8 @@ export const DedupePreviewTable: React.FC<Props> = ({
         if (!matchAbs && !matchRel) return false;
       }
       if (decisionFilter !== 'ALL') {
-        if (r.member_decision !== decisionFilter) return false;
+        const cls = classifyMemberDecision(r.member_decision, r.eligible_as_keep);
+        if (cls.kind !== decisionFilter) return false;
       }
       if (rootFilter !== 'ALL') {
         if (r.scan_root_index !== rootFilter) return false;
@@ -77,7 +78,7 @@ export const DedupePreviewTable: React.FC<Props> = ({
       key: 'member_decision',
       width: 140,
       render: (val: string | MemberDecision, record) => {
-        const cls = classifyMemberDecision(val);
+        const cls = classifyMemberDecision(val, record.eligible_as_keep);
         return (
           <Space direction="vertical" size={2}>
             <Tag color={cls.color} style={{ fontWeight: 600, margin: 0 }}>
@@ -149,10 +150,10 @@ export const DedupePreviewTable: React.FC<Props> = ({
       key: 'total_score',
       width: 110,
       align: 'right',
-      render: (score: number) => {
+      render: (score?: number) => {
         return (
-          <Text strong style={{ color: score > 0 ? '#1890ff' : '#595959' }}>
-            {score.toLocaleString()}
+          <Text strong style={{ color: score !== undefined && score > 0 ? '#1890ff' : '#595959' }}>
+            {score !== undefined ? score.toLocaleString() : '-'}
           </Text>
         );
       },

@@ -1,4 +1,4 @@
-import { DedupeScorerConfig } from './dedupe';
+import { DedupeScorerConfig, DedupeSummary } from './dedupe';
 
 export type FilterLeafField =
   | 'path'
@@ -260,7 +260,8 @@ export interface WorkflowPreviewResponse {
   revision: number;
   workflow_revision: number;
   definition_sha256: string;
-  preview_source: 'index' | 'organizer-live-readonly';
+  workflow_mode?: 'file' | 'organizer' | 'dedupe';
+  preview_source: 'index' | 'organizer-live-readonly' | 'completed-scan-readonly-safety';
   live_filesystem_verified: boolean;
   compile_digest: string;
   matched_count: number;
@@ -270,6 +271,7 @@ export interface WorkflowPreviewResponse {
   page_size: number;
   total_pages: number;
   items: WorkflowPreviewItem[];
+  dedupe_summary?: DedupeSummary | null;
 }
 
 export interface WorkflowGeneratePlanRequest {
@@ -303,11 +305,13 @@ export interface PlanRebuildPreviewResponse {
   workflow_id: number;
   workflow_revision: number;
   definition_sha256: string;
+  workflow_mode?: 'file' | 'organizer' | 'dedupe';
   runtime_inputs: {
-    root_ids: number[];
+    root_ids?: number[];
+    scan_job_id?: number;
     [key: string]: any;
   };
-  preview_source: 'index' | 'organizer-live-readonly';
+  preview_source: 'index' | 'organizer-live-readonly' | 'completed-scan-readonly-safety';
   live_filesystem_verified: boolean;
   compile_digest: string;
   matched_count: number;
@@ -317,6 +321,7 @@ export interface PlanRebuildPreviewResponse {
   page_size: number;
   total_pages: number;
   items: WorkflowPreviewItem[];
+  dedupe_summary?: DedupeSummary | null;
 }
 
 export interface PlanRebuildRequest {
@@ -401,19 +406,25 @@ export function isWorkflowPlanMetadata(metadata: unknown): metadata is WorkflowP
 
   const isDedupe =
     obj.workflow_mode === 'dedupe' ||
-    typeof obj.runtime_inputs.scan_job_id === 'number' ||
-    typeof obj.scan_job_id === 'number';
+    obj.runtime_inputs.scan_job_id !== undefined ||
+    obj.scan_job_id !== undefined;
 
   if (isDedupe) {
-    const scanJobId = obj.runtime_inputs.scan_job_id ?? obj.scan_job_id;
-    if (typeof scanJobId !== 'number' || !Number.isInteger(scanJobId) || scanJobId <= 0) {
+    if (
+      typeof obj.scan_job_id !== 'number' ||
+      !Number.isInteger(obj.scan_job_id) ||
+      obj.scan_job_id <= 0
+    ) {
       return false;
     }
     if (
-      typeof obj.scan_job_id === 'number' &&
-      typeof obj.runtime_inputs.scan_job_id === 'number' &&
-      obj.scan_job_id !== obj.runtime_inputs.scan_job_id
+      typeof obj.runtime_inputs.scan_job_id !== 'number' ||
+      !Number.isInteger(obj.runtime_inputs.scan_job_id) ||
+      obj.runtime_inputs.scan_job_id <= 0
     ) {
+      return false;
+    }
+    if (obj.scan_job_id !== obj.runtime_inputs.scan_job_id) {
       return false;
     }
     return true;

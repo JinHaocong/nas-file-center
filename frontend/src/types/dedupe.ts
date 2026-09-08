@@ -67,19 +67,17 @@ export interface FactorContribution {
 }
 
 export interface BalanceInfo {
-  tie_broken_by_balancer?: boolean;
-  chosen_scan_root?: number;
-  scan_root_released_bytes_before?: Record<string, number>;
-  scan_root_released_bytes_after?: Record<string, number>;
+  spread_before?: number;
+  spread_after?: number;
   released_bytes_by_scan_root?: Record<string, number>;
   [key: string]: any;
 }
 
-export type MemberDecision = 'KEEP' | 'QUARANTINE' | 'SAFETY_EXCLUDED' | 'SKIPPED';
+export type MemberDecision = 'KEEP' | 'QUARANTINE' | 'SAFETY_EXCLUDED' | 'SKIPPED' | 'UNAVAILABLE';
 
 export interface DedupePreviewMemberRow {
   group_provenance_id: number;
-  group_status: 'actionable' | 'skipped';
+  group_status: 'actionable' | 'skipped' | string;
   group_skip_reason?: string | null;
   group_file_size: number;
   group_recommended_keep_path?: string | null;
@@ -92,13 +90,14 @@ export interface DedupePreviewMemberRow {
   scan_root_path: string;
   eligible_as_keep: boolean;
   safety_reasons: string[];
-  total_score: number;
+  total_score?: number;
   contributions: FactorContribution[];
   is_top_candidate: boolean;
   recommended_keep: boolean;
   member_decision: MemberDecision;
   selection_reason?: string | null;
   balance_info?: BalanceInfo | null;
+  incomplete?: boolean;
 }
 
 export interface DedupeSummary {

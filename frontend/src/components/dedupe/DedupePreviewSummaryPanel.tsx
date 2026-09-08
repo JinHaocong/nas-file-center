@@ -152,9 +152,15 @@ export const DedupePreviewSummaryPanel: React.FC<Props> = ({
 
       {/* 4. Safety Guarantee Callout */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <CheckCircleOutlined style={{ color: '#52c41a' }} />
+        <CheckCircleOutlined
+          style={{
+            color: summary.effective_safety_policy?.protect_last_file ? '#52c41a' : '#faad14',
+          }}
+        />
         <Text type="secondary" style={{ fontSize: 12 }}>
-          去重安全保证：每个重复组始终保留至少 1 个副本（protect_last_file 保护已就绪）。
+          {summary.effective_safety_policy?.protect_last_file
+            ? '去重安全保护策略 (protect_last_file): 已启用 (true)，确保每个重复组保留至少 1 个副本。'
+            : '去重安全保护策略 (protect_last_file): 未启用 (false)。'}
         </Text>
       </div>
     </div>

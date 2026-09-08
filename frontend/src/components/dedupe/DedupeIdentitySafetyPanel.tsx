@@ -16,6 +16,10 @@ interface Props {
   sourceSnapshotDigest?: string;
   decisionDigest?: string;
   engineVersion?: number;
+  effectiveSafetyPolicy?: {
+    protect_last_file?: boolean;
+    [key: string]: any;
+  };
 }
 
 export const DedupeIdentitySafetyPanel: React.FC<Props> = ({
@@ -26,6 +30,7 @@ export const DedupeIdentitySafetyPanel: React.FC<Props> = ({
   sourceSnapshotDigest,
   decisionDigest,
   engineVersion,
+  effectiveSafetyPolicy,
 }) => {
   const isDirectScan = authorityType === "preview_digest";
   const authorityLabel = isDirectScan
@@ -47,7 +52,7 @@ export const DedupeIdentitySafetyPanel: React.FC<Props> = ({
         description={
           liveFilesystemVerified
             ? "当前预览直接反映实时文件系统状态。"
-            : "当前为预览/草案状态 (live_filesystem_verified=false)。生成计划与最终执行时，系统将通过 BEGIN IMMEDIATE 短事务强校验文件哈希、大小与修改时间，保障数据绝对一致。"
+            : "当前预览基于已完成扫描快照与只读安全观测（completed-scan-readonly-safety），纯内存计算候选与打分，尚未执行物理哈希比对。实际物理文件一致性及 SHA-256 哈希校验将在计划的 Freeze -> Validate -> Execute 阶段由后端事务严格执行。"
         }
       />
 
@@ -106,6 +111,14 @@ export const DedupeIdentitySafetyPanel: React.FC<Props> = ({
               <Text code copyable style={{ fontSize: 12 }}>
                 {decisionDigest}
               </Text>
+            </Descriptions.Item>
+          )}
+
+          {effectiveSafetyPolicy && effectiveSafetyPolicy.protect_last_file !== undefined && (
+            <Descriptions.Item label="保留最后文件策略 (protect_last_file)">
+              <Tag color={effectiveSafetyPolicy.protect_last_file ? "green" : "red"}>
+                {effectiveSafetyPolicy.protect_last_file ? "已启用 (true)" : "未启用 (false)"}
+              </Tag>
             </Descriptions.Item>
           )}
         </Descriptions>
