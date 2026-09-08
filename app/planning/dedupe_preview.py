@@ -120,6 +120,7 @@ class DedupePreviewCompilation:
     released_bytes_by_scan_root: dict[int, int]
     source_snapshot_digest: str
     decision_digest: str
+    db_lineage_digest: str
     summary: dict[str, Any]
 
 
@@ -176,6 +177,89 @@ def compute_decision_digest(
     }
     serialized = canonical_json_dumps(payload)
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _compute_db_lineage_digest_from_loaded(
+    scan: ScanJob,
+    scan_roots: Sequence[str],
+    db_groups: Sequence[DuplicateGroup],
+    group_files: Mapping[int, Sequence[DuplicateFile]],
+) -> str:
+    payload = {
+        "scan": {
+            "id": scan.id,
+            "name": scan.name,
+            "mode": scan.mode,
+            "status": scan.status,
+            "roots": list(scan_roots),
+            "finished_at": scan.finished_at.isoformat() if scan.finished_at else None,
+        },
+        "groups": [],
+    }
+
+    for group in sorted(db_groups, key=lambda g: (g.id, g.content_hash, g.file_size)):
+        files = sorted(
+            group_files.get(group.id, ()),
+            key=lambda f: (f.id, f.root_id, normalize_dedupe_path(f.absolute_path)),
+        )
+        payload["groups"].append({
+            "id": group.id,
+            "scan_job_id": group.scan_job_id,
+            "content_hash": group.content_hash,
+            "file_size": group.file_size,
+            "member_count": group.member_count,
+            "files": [
+                {
+                    "id": f.id,
+                    "group_id": f.group_id,
+                    "root_id": f.root_id,
+                    "absolute_path": f.absolute_path,
+                    "relative_path": f.relative_path,
+                    "top_level_dir": f.top_level_dir,
+                    "size": f.size,
+                    "mtime_ns": f.mtime_ns,
+                    "device": int(getattr(f, "device", 0) or 0),
+                    "inode": int(getattr(f, "inode", 0) or 0),
+                }
+                for f in files
+            ],
+        })
+
+    return hashlib.sha256(canonical_json_dumps(payload).encode("utf-8")).hexdigest()
+
+
+def compute_current_dedupe_db_lineage_digest(session: Session, scan_job_id: int) -> str | None:
+    scan = session.get(ScanJob, scan_job_id)
+    if scan is None:
+        return None
+
+    try:
+        raw_roots = json.loads(scan.roots_json)
+    except Exception:
+        raw_roots = [scan.roots_json]
+    if isinstance(raw_roots, list) and all(isinstance(root, str) for root in raw_roots):
+        scan_roots = tuple(normalize_dedupe_path(root) for root in raw_roots)
+    else:
+        scan_roots = (str(scan.roots_json),)
+
+    db_groups = list(session.scalars(
+        select(DuplicateGroup).where(DuplicateGroup.scan_job_id == scan_job_id)
+    ))
+    member_count = session.scalar(
+        select(func.count(DuplicateFile.id))
+        .join(DuplicateGroup)
+        .where(DuplicateGroup.scan_job_id == scan_job_id)
+    ) or 0
+    if member_count > MAX_DEDUPE_CANDIDATES:
+        return None
+
+    group_files: dict[int, list[DuplicateFile]] = {}
+    for group in db_groups:
+        group_files[group.id] = list(session.scalars(
+            select(DuplicateFile).where(DuplicateFile.group_id == group.id)
+        ))
+
+    return _compute_db_lineage_digest_from_loaded(scan, scan_roots, db_groups, group_files)
 
 
 def compile_advanced_dedupe_preview(
@@ -463,6 +547,13 @@ def compile_advanced_dedupe_preview(
         dedupe_result=engine_result,
     )
 
+    db_lineage_digest = _compute_db_lineage_digest_from_loaded(
+        scan,
+        scan_roots,
+        db_groups,
+        group_files,
+    )
+
     return DedupePreviewCompilation(
         scan_job_id=scan_job_id,
         scan_roots=scan_roots,
@@ -477,6 +568,7 @@ def compile_advanced_dedupe_preview(
         released_bytes_by_scan_root=engine_result.released_bytes_by_scan_root,
         source_snapshot_digest=source_snapshot_digest,
         decision_digest=decision_digest,
+        db_lineage_digest=db_lineage_digest,
         summary=engine_result.summary,
     )
 
