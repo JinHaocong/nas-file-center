@@ -104,6 +104,9 @@ from app.filters.compiler import compile_filter_to_sql
 from app.filters.media_types import get_media_type, normalize_extension
 from app.filters.validation import validate_filter_ast
 from app.filters.schema import FilterNode
+from app.batch_utilities.schema import QuarantineFilteredAction
+from app.batch_utilities.compiler import compile_quarantine_filtered_preview
+from app.batch_utilities.service import capture_batch_utility_safety_snapshot, build_batch_utility_preview_response
 
 PLAN_SINGLE_DELETE_ALLOWED = {
     "draft",
@@ -4117,4 +4120,26 @@ class FileCenterService:
             session.commit()
             session.refresh(plan)
             return plan
+
+    def get_batch_utility_preview(
+        self,
+        *,
+        action: QuarantineFilteredAction,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> dict[str, Any]:
+        snapshot = capture_batch_utility_safety_snapshot(self.settings)
+        with self.SessionLocal() as session:
+            compilation = compile_quarantine_filtered_preview(
+                session=session,
+                action=action,
+                safety_snapshot=snapshot,
+            )
+            return build_batch_utility_preview_response(
+                compilation,
+                snapshot,
+                page=page,
+                page_size=page_size,
+            )
+
 

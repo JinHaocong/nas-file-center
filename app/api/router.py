@@ -4,13 +4,21 @@ import re
 from typing import Any
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from app.auth.dependencies import get_current_user, require_admin_user
 from app.batch.rename import RenameRule
 from app.exceptions import PlanStaleError
 from app.filters.schema import FilterPreviewRequest, FilterPreviewResponse
 from app.filters.validation import FilterValidationError
+from app.batch_utilities.schema import (
+    BatchUtilityPreviewRequest,
+    BatchUtilityGenerateRequest,
+)
+from app.batch_utilities.errors import (
+    BatchUtilityError,
+    BatchUtilityInvalidConfigError,
+)
 from app.models import User
 from app.path_safety import UnsafePathError
 from app.service import StateConflictError
@@ -1417,4 +1425,35 @@ def generate_workflow_plan(
     current_user: User = Depends(get_current_user),
 ):
     return request.app.state.service.workflow_service.generate_plan(current_user.id, workflow_id, payload)
+
+
+@router.post("/batch-utilities/preview")
+def preview_batch_utility(
+    request: Request,
+    payload: Any = Body(...),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        req = BatchUtilityPreviewRequest.model_validate(payload)
+    except ValidationError as ve:
+        err = BatchUtilityInvalidConfigError(f"Validation error: {ve}", details={"errors": ve.errors()})
+        return JSONResponse(status_code=err.status_code, content=err.to_dict())
+    except Exception as e:
+        err = BatchUtilityInvalidConfigError(f"Malformed request payload: {e}")
+        return JSONResponse(status_code=err.status_code, content=err.to_dict())
+
+    service = request.app.state.service
+    try:
+        preview_data = service.get_batch_utility_preview(
+            action=req.action,
+            page=req.page,
+            page_size=req.page_size,
+        )
+        return preview_data
+    except BatchUtilityError as bu_err:
+        return JSONResponse(status_code=bu_err.status_code, content=bu_err.to_dict())
+    except Exception as e:
+        err = BatchUtilityInvalidConfigError(str(e))
+        return JSONResponse(status_code=err.status_code, content=err.to_dict())
+
 
