@@ -6,6 +6,7 @@ import { DashboardPage } from '../pages/Dashboard';
 import { IndexesPage } from '../pages/Indexes';
 import { ScansPage } from '../pages/Scans';
 import { ScanDetailPage } from '../pages/Scans/ScanDetail';
+import { AdvancedDedupePage } from '../pages/Scans/AdvancedDedupePage';
 import { PathMatchPage } from '../pages/PathMatch';
 import { RenamePage } from '../pages/Rename';
 import { BatchPage } from '../pages/Batch';
@@ -28,6 +29,7 @@ export const AppRouter: React.FC = () => {
         <Route path="indexes" element={<IndexesPage />} />
         <Route path="scans" element={<ScansPage />} />
         <Route path="scans/:id" element={<ScanDetailPage />} />
+        <Route path="scans/:id/dedupe" element={<AdvancedDedupePage />} />
         <Route path="path-match" element={<PathMatchPage />} />
         <Route path="rename" element={<RenamePage />} />
         <Route path="batch" element={<BatchPage />} />

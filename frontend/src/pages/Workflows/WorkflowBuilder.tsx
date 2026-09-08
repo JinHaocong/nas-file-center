@@ -21,6 +21,7 @@ import {
   ExclamationCircleOutlined,
   FileTextOutlined,
   AppstoreOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -44,6 +45,7 @@ import {
   canSwitchWorkflowMode,
 } from '../../utils/workflowRbac';
 import { createDefaultOrganizerSnapshot } from '../../utils/organizerDefaults';
+import { createDefaultDedupeScorerConfig } from '../../utils/dedupeConfig';
 import { parseWorkflowRevisionQuery, createInitialScanStep } from '../../utils/workflowRevisionParser';
 
 const { Title, Text } = Typography;
@@ -211,24 +213,34 @@ export const WorkflowBuilderPage: React.FC = () => {
 
   const handleModeChange = (newMode: WorkflowMode) => {
     if (newMode === mode) return;
+    const modeLabel =
+      newMode === 'file' ? '文件规则流' : newMode === 'organizer' ? '目录整理流' : '高级去重流';
     if (steps.length > 0) {
       Modal.confirm({
         title: '切换工作流模式',
         icon: <ExclamationCircleOutlined />,
-        content: `切换到 ${newMode === 'file' ? '文件规则流' : '目录整理流'} 将重置流水线步骤为该模式的标准默认拓扑。确定切换吗？`,
+        content: `切换到 ${modeLabel} 将重置流水线步骤为该模式的标准默认拓扑。确定切换吗？`,
         okText: '确认重置并切换',
         cancelText: '取消',
         onOk: () => {
           setMode(newMode);
           if (newMode === 'file') {
             setSteps([createInitialScanStep('step_scan_1')]);
-          } else {
+          } else if (newMode === 'organizer') {
             setSteps([
               createInitialScanStep('step_scan_1'),
               {
                 id: 'step_organize_1',
                 type: 'organize',
                 profile_snapshot: createDefaultOrganizerSnapshot('默认整理快照'),
+              },
+            ]);
+          } else {
+            setSteps([
+              {
+                id: 'step_dedupe_1',
+                type: 'dedupe',
+                scorer_config: createDefaultDedupeScorerConfig(),
               },
             ]);
           }
@@ -476,6 +488,12 @@ export const WorkflowBuilderPage: React.FC = () => {
                 <Space>
                   <AppstoreOutlined />
                   <span>目录整理流 (organizer)</span>
+                </Space>
+              </Radio.Button>
+              <Radio.Button value="dedupe">
+                <Space>
+                  <ThunderboltOutlined />
+                  <span>高级去重流 (dedupe)</span>
                 </Space>
               </Radio.Button>
             </Radio.Group>

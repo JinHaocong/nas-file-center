@@ -1,3 +1,5 @@
+import { DedupeScorerConfig } from './dedupe';
+
 export type FilterLeafField =
   | 'path'
   | 'name'
@@ -144,6 +146,12 @@ export interface OrganizeStep {
   profile_snapshot: OrganizerProfileSnapshot;
 }
 
+export interface DedupeStep {
+  id: string;
+  type: 'dedupe';
+  scorer_config: DedupeScorerConfig;
+}
+
 export type WorkflowStep =
   | ScanStep
   | FilterStep
@@ -151,7 +159,8 @@ export type WorkflowStep =
   | MoveStep
   | TouchStep
   | QuarantineStep
-  | OrganizeStep;
+  | OrganizeStep
+  | DedupeStep;
 
 export type WorkflowStepType =
   | 'scan'
@@ -160,9 +169,10 @@ export type WorkflowStepType =
   | 'move'
   | 'touch'
   | 'quarantine'
-  | 'organize';
+  | 'organize'
+  | 'dedupe';
 
-export type WorkflowMode = 'file' | 'organizer';
+export type WorkflowMode = 'file' | 'organizer' | 'dedupe';
 
 export interface WorkflowDefinition {
   schema_version: 1;
@@ -236,6 +246,8 @@ export interface WorkflowPreviewRequest {
   revision?: number;
   runtime_inputs?: {
     root_ids?: number[];
+    scan_job_id?: number;
+    [key: string]: any;
   };
   root_ids?: number[];
   page?: number;
@@ -265,6 +277,8 @@ export interface WorkflowGeneratePlanRequest {
   revision?: number;
   runtime_inputs?: {
     root_ids?: number[];
+    scan_job_id?: number;
+    [key: string]: any;
   };
   root_ids?: number[];
   plan_name?: string;
@@ -325,10 +339,13 @@ export interface WorkflowPlanMetadata {
   workflow_id: number;
   workflow_name?: string;
   workflow_revision: number;
+  workflow_mode?: WorkflowMode;
+  scan_job_id?: number;
   definition_sha256: string;
   compile_digest: string;
   runtime_inputs: {
-    root_ids: number[];
+    root_ids?: number[];
+    scan_job_id?: number;
     [key: string]: any;
   };
   compile_context?: Record<string, any>;
@@ -377,7 +394,32 @@ export function isWorkflowPlanMetadata(metadata: unknown): metadata is WorkflowP
   if (
     !obj.runtime_inputs ||
     typeof obj.runtime_inputs !== 'object' ||
-    Array.isArray(obj.runtime_inputs) ||
+    Array.isArray(obj.runtime_inputs)
+  ) {
+    return false;
+  }
+
+  const isDedupe =
+    obj.workflow_mode === 'dedupe' ||
+    typeof obj.runtime_inputs.scan_job_id === 'number' ||
+    typeof obj.scan_job_id === 'number';
+
+  if (isDedupe) {
+    const scanJobId = obj.runtime_inputs.scan_job_id ?? obj.scan_job_id;
+    if (typeof scanJobId !== 'number' || !Number.isInteger(scanJobId) || scanJobId <= 0) {
+      return false;
+    }
+    if (
+      typeof obj.scan_job_id === 'number' &&
+      typeof obj.runtime_inputs.scan_job_id === 'number' &&
+      obj.scan_job_id !== obj.runtime_inputs.scan_job_id
+    ) {
+      return false;
+    }
+    return true;
+  }
+
+  if (
     !Array.isArray(obj.runtime_inputs.root_ids) ||
     obj.runtime_inputs.root_ids.length === 0 ||
     !obj.runtime_inputs.root_ids.every((id: any) => typeof id === 'number' && Number.isInteger(id) && id > 0)

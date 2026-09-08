@@ -14,6 +14,7 @@ import type { MenuProps } from 'antd';
 import { WorkflowStep, WorkflowMode } from '../../types/workflow';
 import { StepCard } from './StepCard';
 import { createDefaultOrganizerSnapshot } from '../../utils/organizerDefaults';
+import { createDefaultDedupeScorerConfig } from '../../utils/dedupeConfig';
 import { getAllowedInsertions, canMoveStep, canDeleteStep } from '../../utils/workflowTopology';
 
 interface StepListProps {
@@ -89,6 +90,13 @@ export const StepList: React.FC<StepListProps> = ({
           id: generateId('organize'),
           type: 'organize',
           profile_snapshot: createDefaultOrganizerSnapshot('默认整理快照'),
+        };
+        break;
+      case 'dedupe':
+        newStep = {
+          id: generateId('dedupe'),
+          type: 'dedupe',
+          scorer_config: createDefaultDedupeScorerConfig(),
         };
         break;
     }
@@ -208,7 +216,7 @@ export const StepList: React.FC<StepListProps> = ({
         ))
       )}
 
-      {!readOnly && (
+      {!readOnly && mode !== 'dedupe' && (
         <div style={{ marginTop: 16, textAlign: 'center' }}>
           <Dropdown menu={{ items: menuItems }} placement="bottom">
             <Button type="dashed" icon={<PlusOutlined />} size="large">

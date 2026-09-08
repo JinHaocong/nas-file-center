@@ -1,5 +1,5 @@
 import React from 'react';
-import { Modal, Form, Select, Input, Typography, message } from 'antd';
+import { Modal, Form, Select, Input, Typography, message, Alert } from 'antd';
 import { useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { scansApi } from '../../api/domain';
@@ -57,7 +57,7 @@ export const DedupePlanModal: React.FC<Props> = ({ scanId, open, onClose }) => {
 
   return (
     <Modal
-      title="生成精确去重计划 (Dry Run Plan)"
+      title="生成经典去重计划 (Classic Dedupe Plan)"
       open={open}
       onOk={handleCreate}
       onCancel={() => {
@@ -69,6 +69,13 @@ export const DedupePlanModal: React.FC<Props> = ({ scanId, open, onClose }) => {
       cancelText="取消"
       destroyOnClose
     >
+      <Alert
+        type="info"
+        showIcon
+        message="经典去重策略"
+        description="此模态框使用经典单一策略。如需多因子加权评分、路径优先级、实时预览与解释分析，推荐使用『高级精确去重』页面。"
+        style={{ marginTop: 8, marginBottom: 12 }}
+      />
       <Form
         form={form}
         layout="vertical"

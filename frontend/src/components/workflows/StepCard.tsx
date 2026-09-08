@@ -13,6 +13,7 @@ import {
   ClockCircleOutlined,
   SafetyCertificateOutlined,
   AppstoreOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons';
 import { WorkflowStep, WorkflowMode } from '../../types/workflow';
 import { ScanStepEditor } from './ScanStepEditor';
@@ -22,6 +23,7 @@ import { MoveStepEditor } from './MoveStepEditor';
 import { TouchStepEditor } from './TouchStepEditor';
 import { QuarantineStepEditor } from './QuarantineStepEditor';
 import { OrganizerStepEditor } from './OrganizerStepEditor';
+import { DedupeStepEditor } from './DedupeStepEditor';
 
 const { Text } = Typography;
 
@@ -106,6 +108,13 @@ export const StepCard: React.FC<StepCardProps> = ({
           color: 'magenta',
           icon: <AppstoreOutlined />,
           summary: `方案快照: ${step.profile_snapshot?.name || '未命名'}`,
+        };
+      case 'dedupe':
+        return {
+          title: '高级精确去重 (Dedupe)',
+          color: 'purple',
+          icon: <ThunderboltOutlined />,
+          summary: `选择模式: ${step.scorer_config?.selection_mode || 'weighted'}`,
         };
     }
   };
@@ -196,6 +205,9 @@ export const StepCard: React.FC<StepCardProps> = ({
           )}
           {step.type === 'organize' && (
             <OrganizerStepEditor step={step} onChange={onChange} readOnly={readOnly} />
+          )}
+          {step.type === 'dedupe' && (
+            <DedupeStepEditor step={step} onChange={onChange} readOnly={readOnly} />
           )}
         </div>
       )}

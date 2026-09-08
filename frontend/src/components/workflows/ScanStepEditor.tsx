@@ -3,13 +3,13 @@ import { Form, Select, Input } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import { indexesApi } from '../../api/domain';
 import { IndexRoot } from '../../types';
-import { ScanStep } from '../../types/workflow';
+import { ScanStep, WorkflowMode } from '../../types/workflow';
 
 interface ScanStepEditorProps {
   step: ScanStep;
   onChange: (updated: ScanStep) => void;
   readOnly?: boolean;
-  mode?: 'file' | 'organizer';
+  mode?: WorkflowMode;
 }
 
 export const ScanStepEditor: React.FC<ScanStepEditorProps> = ({

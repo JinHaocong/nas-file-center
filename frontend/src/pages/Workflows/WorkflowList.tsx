@@ -18,6 +18,7 @@ import {
   DeleteOutlined,
   FileTextOutlined,
   AppstoreOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -93,16 +94,24 @@ export const WorkflowListPage: React.FC = () => {
       dataIndex: 'mode',
       key: 'mode',
       width: 140,
-      render: (mode: 'file' | 'organizer') =>
-        mode === 'file' ? (
+      render: (mode: WorkflowListItem['mode']) => {
+        if (mode === 'dedupe') {
+          return (
+            <Tag color="purple" icon={<ThunderboltOutlined />}>
+              高级去重流
+            </Tag>
+          );
+        }
+        return mode === 'file' ? (
           <Tag color="blue" icon={<FileTextOutlined />}>
             文件规则流
           </Tag>
         ) : (
-          <Tag color="purple" icon={<AppstoreOutlined />}>
+          <Tag color="magenta" icon={<AppstoreOutlined />}>
             目录整理流
           </Tag>
-        ),
+        );
+      },
     },
     {
       title: '当前版本',

@@ -1,4 +1,4 @@
-import { WorkflowStep, WorkflowStepType } from '../types/workflow';
+import { WorkflowStep, WorkflowStepType, WorkflowMode } from '../types/workflow';
 
 export interface ValidationResult {
   valid: boolean;
@@ -7,10 +7,23 @@ export interface ValidationResult {
 
 export function validateWorkflowStepOrder(
   steps: WorkflowStep[],
-  mode: 'file' | 'organizer'
+  mode: WorkflowMode
 ): ValidationResult {
   if (!steps || steps.length === 0) {
+    if (mode === 'dedupe') {
+      return { valid: false, error: '去重模式 (Dedupe) 必须且只能包含一个去重步骤 (Dedupe)' };
+    }
     return { valid: false, error: '工作流至少需要包含一个扫描步骤 (Scan)' };
+  }
+
+  if (mode === 'dedupe') {
+    if (steps.length !== 1) {
+      return { valid: false, error: '去重模式 (Dedupe) 必须且只能包含一个去重步骤 (Dedupe)' };
+    }
+    if (steps[0].type !== 'dedupe') {
+      return { valid: false, error: '去重模式 (Dedupe) 的唯一步骤必须是 Dedupe' };
+    }
+    return { valid: true };
   }
 
   // Common: step 0 must be scan
@@ -60,10 +73,9 @@ export function validateWorkflowStepOrder(
 
 export function getAllowedInsertions(
   steps: WorkflowStep[],
-  mode: 'file' | 'organizer'
+  mode: WorkflowMode
 ): WorkflowStepType[] {
-  if (mode === 'organizer') {
-    // Organizer mode has fixed topology: Scan -> Organize. No further insertions allowed.
+  if (mode === 'organizer' || mode === 'dedupe') {
     return [];
   }
 
@@ -87,9 +99,9 @@ export function canMoveStep(
   steps: WorkflowStep[],
   index: number,
   direction: 'up' | 'down',
-  mode: 'file' | 'organizer'
+  mode: WorkflowMode
 ): boolean {
-  if (mode === 'organizer') {
+  if (mode === 'organizer' || mode === 'dedupe') {
     return false;
   }
   if (index === 0) {
@@ -113,13 +125,13 @@ export function canMoveStep(
 export function canDeleteStep(
   steps: WorkflowStep[],
   index: number,
-  mode: 'file' | 'organizer'
+  mode: WorkflowMode
 ): boolean {
   if (index === 0) {
-    // Scan step can never be deleted
+    // Scan or Dedupe step can never be deleted
     return false;
   }
-  if (mode === 'organizer') {
+  if (mode === 'organizer' || mode === 'dedupe') {
     return false;
   }
   const remaining = steps.filter((_, i) => i !== index);

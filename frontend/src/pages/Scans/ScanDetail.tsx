@@ -18,6 +18,7 @@ import {
   ReloadOutlined,
   ScheduleOutlined,
   CheckCircleOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { scansApi } from '../../api/domain';
@@ -207,9 +208,18 @@ export const ScanDetailPage: React.FC = () => {
             type="default"
           />
           {scan.status === 'completed' && scan.total_groups > 0 && (
-            <Button type="primary" icon={<ScheduleOutlined />} onClick={() => setPlanModalOpen(true)}>
-              生成去重计划
-            </Button>
+            <>
+              <Button icon={<ScheduleOutlined />} onClick={() => setPlanModalOpen(true)}>
+                经典去重计划
+              </Button>
+              <Button
+                type="primary"
+                icon={<ThunderboltOutlined />}
+                onClick={() => navigate(`/scans/${scan.id}/dedupe`)}
+              >
+                高级去重 (推荐)
+              </Button>
+            </>
           )}
         </Space>
       </div>

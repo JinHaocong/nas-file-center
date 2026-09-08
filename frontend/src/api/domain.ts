@@ -22,6 +22,12 @@ import {
   OperationJournalListResponse,
   UndoPlanResponse,
 } from '../types';
+import {
+  DirectDedupePreviewRequest,
+  DirectDedupePreviewResponse,
+  DirectAdvancedDedupeGenerateRequest,
+  DirectAdvancedDedupeGenerateResponse,
+} from '../types/dedupe';
 export { quarantineApi } from './quarantine';
 
 export const dashboardApi = {
@@ -50,6 +56,10 @@ export const scansApi = {
       relative_path_priority_patterns?: string[] | null;
     }
   ) => api.post<{ id: number; status: string; expected_changes: number }>(`/api/scans/${scanId}/dedupe-plan`, payload),
+  dedupePreview: (scanJobId: number, payload: DirectDedupePreviewRequest) =>
+    api.post<DirectDedupePreviewResponse>(`/api/scans/${scanJobId}/dedupe-preview`, payload),
+  createAdvancedDedupePlan: (scanJobId: number, payload: DirectAdvancedDedupeGenerateRequest) =>
+    api.post<DirectAdvancedDedupeGenerateResponse>(`/api/scans/${scanJobId}/dedupe-plan`, payload),
   deleteScan: (id: number) => api.delete<{ deleted: boolean; id: number }>(`/api/scans/${id}`),
 };
 
