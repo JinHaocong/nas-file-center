@@ -121,9 +121,7 @@ class DedupePreviewRequest(BaseModel):
 
 
 class DedupePlanRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    policy: str | None = None
+    policy: str = "balanced-roots"
     path_priority_patterns: list[str] | None = None
     relative_path_priority_patterns: list[str] | None = None
     scorer_config: dict[str, Any] | None = None
@@ -140,11 +138,6 @@ class DedupePlanRequest(BaseModel):
 
         has_scorer = "scorer_config" in raw
         has_expected = "expected_preview_digest" in raw
-        legacy_fields = (
-            "policy",
-            "path_priority_patterns",
-            "relative_path_priority_patterns",
-        )
 
         if has_scorer:
             scorer = raw.get("scorer_config")
@@ -153,12 +146,26 @@ class DedupePlanRequest(BaseModel):
                     "scorer_config must be an object for advanced Generate",
                     details={"field": "scorer_config"},
                 )
-            mixed = [field for field in legacy_fields if field in raw]
-            if mixed:
+
+            allowed_advanced_keys = {"scorer_config", "expected_preview_digest"}
+            extra_or_mixed = [k for k in raw.keys() if k not in allowed_advanced_keys]
+            if extra_or_mixed:
+                legacy_fields = {
+                    "policy",
+                    "path_priority_patterns",
+                    "relative_path_priority_patterns",
+                }
+                mixed = [k for k in extra_or_mixed if k in legacy_fields]
+                if mixed:
+                    raise DedupeInvalidConfigError(
+                        "Advanced and legacy dedupe request fields cannot be mixed",
+                        details={"mixed_fields": mixed},
+                    )
                 raise DedupeInvalidConfigError(
-                    "Advanced and legacy dedupe request fields cannot be mixed",
-                    details={"mixed_fields": mixed},
+                    "Unexpected fields in advanced dedupe generate request",
+                    details={"unexpected_fields": extra_or_mixed},
                 )
+
             digest = raw.get("expected_preview_digest")
             if type(digest) is not str or re.fullmatch(r"[0-9a-fA-F]{64}", digest) is None:
                 raise DedupeInvalidConfigError(
@@ -173,9 +180,7 @@ class DedupePlanRequest(BaseModel):
                 details={"field": "expected_preview_digest"},
             )
 
-        normalized = dict(raw)
-        normalized.setdefault("policy", "balanced-roots")
-        return normalized
+        return raw
 
     @property
     def is_advanced(self) -> bool:
@@ -526,15 +531,25 @@ def create_dedupe_plan(request: Request, scan_job_id: int, payload: DedupePlanRe
         if payload.is_advanced:
             assert payload.scorer_config is not None
             assert payload.expected_preview_digest is not None
-            return service.create_advanced_dedupe_plan(
-                scan_job_id,
-                scorer_config=payload.scorer_config,
-                expected_preview_digest=payload.expected_preview_digest,
-            )
+            try:
+                return service.create_advanced_dedupe_plan(
+                    scan_job_id,
+                    scorer_config=payload.scorer_config,
+                    expected_preview_digest=payload.expected_preview_digest,
+                )
+            except ValueError as exc:
+                msg = str(exc)
+                if "DEDUPE_FACTOR_UNAVAILABLE" in msg:
+                    err = DedupeFactorUnavailableError(msg)
+                elif "DEDUPE_LIMIT_EXCEEDED" in msg:
+                    err = DedupeLimitExceededError(msg)
+                else:
+                    err = DedupeInvalidConfigError(msg)
+                return JSONResponse(status_code=err.status_code, content=err.to_dict())
 
         return service.create_dedupe_plan(
             scan_job_id,
-            policy=payload.policy or "balanced-roots",
+            policy=payload.policy,
             path_priority_patterns=payload.path_priority_patterns,
             relative_path_priority_patterns=payload.relative_path_priority_patterns,
         )

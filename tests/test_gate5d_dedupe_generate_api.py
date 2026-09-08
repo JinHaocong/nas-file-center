@@ -161,12 +161,95 @@ def test_digest_without_scorer_config_is_rejected_not_treated_as_legacy(api_test
     _assert_structured_dedupe_error(resp, status=422, code="DEDUPE_INVALID_CONFIG")
 
 
-def test_unknown_dedupe_plan_field_uses_structured_error(api_test_env):
+def test_advanced_unknown_extra_field_rejected(api_test_env):
     resp = api_test_env["client"].post(
         "/api/scans/1/dedupe-plan",
-        json={"policy": "balanced-roots", "unexpected": True},
+        json={
+            "scorer_config": {},
+            "expected_preview_digest": "a" * 64,
+            "unexpected": True,
+        },
     )
     _assert_structured_dedupe_error(resp, status=422, code="DEDUPE_INVALID_CONFIG")
+
+
+def test_advanced_invalid_scorer_config_selection_mode_returns_422_structured(api_test_env):
+    scan_id = 230
+    _setup_duplicate_test_data(api_test_env["SessionLocal"], api_test_env["data_dir"], scan_id=scan_id)
+    before = _count_plan_state(api_test_env["SessionLocal"])
+    resp = api_test_env["client"].post(
+        f"/api/scans/{scan_id}/dedupe-plan",
+        json={
+            "scorer_config": {"selection_mode": "bogus"},
+            "expected_preview_digest": "a" * 64,
+        },
+    )
+    _assert_structured_dedupe_error(resp, status=422, code="DEDUPE_INVALID_CONFIG")
+    assert _count_plan_state(api_test_env["SessionLocal"]) == before
+
+
+def test_advanced_reserved_factor_returns_422_factor_unavailable(api_test_env):
+    scan_id = 231
+    _setup_duplicate_test_data(api_test_env["SessionLocal"], api_test_env["data_dir"], scan_id=scan_id)
+    before = _count_plan_state(api_test_env["SessionLocal"])
+    resp = api_test_env["client"].post(
+        f"/api/scans/{scan_id}/dedupe-plan",
+        json={
+            "scorer_config": {"factors": {"resolution": {"weight": 1}}},
+            "expected_preview_digest": "a" * 64,
+        },
+    )
+    _assert_structured_dedupe_error(resp, status=422, code="DEDUPE_FACTOR_UNAVAILABLE")
+    assert _count_plan_state(api_test_env["SessionLocal"]) == before
+
+
+def test_advanced_factors_null_returns_422_structured(api_test_env):
+    scan_id = 232
+    _setup_duplicate_test_data(api_test_env["SessionLocal"], api_test_env["data_dir"], scan_id=scan_id)
+    before = _count_plan_state(api_test_env["SessionLocal"])
+    resp = api_test_env["client"].post(
+        f"/api/scans/{scan_id}/dedupe-plan",
+        json={
+            "scorer_config": {"factors": None},
+            "expected_preview_digest": "a" * 64,
+        },
+    )
+    _assert_structured_dedupe_error(resp, status=422, code="DEDUPE_INVALID_CONFIG")
+    assert _count_plan_state(api_test_env["SessionLocal"]) == before
+
+
+def test_legacy_policy_null_returns_422_validation_error_and_does_not_call_service(api_test_env, monkeypatch):
+    service = api_test_env["service"]
+    called = []
+    monkeypatch.setattr(service, "create_dedupe_plan", lambda *a, **kw: called.append(1))
+    monkeypatch.setattr(service, "create_advanced_dedupe_plan", lambda *a, **kw: called.append(1))
+    resp = api_test_env["client"].post(
+        "/api/scans/1/dedupe-plan",
+        json={"policy": None},
+    )
+    assert resp.status_code == 422
+    body = resp.json()
+    assert "detail" in body
+    assert "error" not in body  # standard Pydantic validation error envelope, not structured DedupeError
+    assert called == []
+
+
+def test_legacy_unknown_extra_field_ignored_and_calls_service(api_test_env, monkeypatch):
+    service = api_test_env["service"]
+    calls = []
+
+    def fake_legacy(scan_job_id, *, policy, path_priority_patterns=None, relative_path_priority_patterns=None):
+        calls.append((scan_job_id, policy, path_priority_patterns, relative_path_priority_patterns))
+        return {"id": 99, "status": "draft", "items": 0, "delete_counts": {}}
+
+    monkeypatch.setattr(service, "create_dedupe_plan", fake_legacy)
+    resp = api_test_env["client"].post(
+        "/api/scans/777/dedupe-plan",
+        json={"policy": "balanced-roots", "unexpected": True},
+    )
+    assert resp.status_code == 200
+    assert calls == [(777, "balanced-roots", None, None)]
+
 
 
 def test_http_matching_digest_creates_draft(api_test_env):
