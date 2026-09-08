@@ -20,7 +20,7 @@ import {
 } from '@ant-design/icons';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { workflowApi } from '../../api/workflows';
-import { getStructuredApiError } from '../../api/errors';
+import { getStructuredApiError, formatDedupeErrorMessage } from '../../api/errors';
 import { WorkflowPreviewItem } from '../../types/workflow';
 import { computeRebuildReadiness } from '../../utils/rebuildReadiness';
 
@@ -119,6 +119,8 @@ export const StaleRebuildDrawer: React.FC<StaleRebuildDrawerProps> = ({
         setErrorMessage('文件状态或底层快照已发生变动，旧预览已失效，必须手动点击“刷新预览”重新计算摘要');
       } else if (structured.code === 'WORKFLOW_ARCHIVED') {
         setErrorMessage('关联的工作流已被归档，无法重新生成计划');
+      } else if (structured.code === 'DEDUPE_RESCAN_REQUIRED') {
+        setErrorMessage(formatDedupeErrorMessage(err));
       } else {
         setErrorMessage(structured.message || '重建计划失败');
       }

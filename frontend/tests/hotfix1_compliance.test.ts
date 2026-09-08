@@ -312,7 +312,11 @@ test("Item 15-E: mapWorkflowPreviewItemsToDedupeRows non-canonical handling", as
         metadata: {
           group_provenance_id: 101,
           member_decision: "QUARANTINE",
+          group_status: "actionable",
+          group_file_size: 1024,
+          scan_root_index: 0,
           eligible_as_keep: true,
+          recommended_keep: false,
           total_score: 85,
         },
       },

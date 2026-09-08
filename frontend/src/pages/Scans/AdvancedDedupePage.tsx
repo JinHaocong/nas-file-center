@@ -45,6 +45,7 @@ import {
   DedupeIdentitySafetyPanel,
 } from "../../components/dedupe";
 import { formatBytes } from "../../utils/format";
+import { shouldAcceptDirectResponse } from "../../utils/hotfix2Helpers";
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -90,14 +91,30 @@ export const AdvancedDedupePage: React.FC = () => {
   };
 
   // Preview mutation with generation correlation
+  interface PreviewMutationVariables {
+    cfg: DedupeScorerConfig;
+    generation: number;
+    page: number;
+    pageSize: number;
+  }
+
+  // Preview mutation with generation correlation
   const previewMutation = useMutation({
-    mutationFn: (variables: { cfg: DedupeScorerConfig; generation: number }) =>
+    mutationFn: (variables: PreviewMutationVariables) =>
       scansApi.dedupePreview(scanId, {
         scorer_config: variables.cfg,
-        page,
-        page_size: pageSize,
+        page: variables.page,
+        page_size: variables.pageSize,
       }),
     onSuccess: (data, variables) => {
+      if (!shouldAcceptDirectResponse({
+        responseGeneration: variables.generation,
+        currentGeneration: dedupeState.configGeneration,
+      })) {
+        return;
+      }
+      setPage(variables.page);
+      setPageSize(variables.pageSize);
       setPreviewData(data);
       setPreviewedConfig(JSON.parse(JSON.stringify(variables.cfg)));
       dispatch({
@@ -135,12 +152,11 @@ export const AdvancedDedupePage: React.FC = () => {
       const formatted = formatDedupeErrorMessage(err);
       if (
         structured.code === "PREVIEW_CHANGED" ||
-        structured.code === "DEDUPE_PREVIEW_CHANGED" ||
-        err.message?.includes("409")
+        structured.code === "DEDUPE_PREVIEW_CHANGED"
       ) {
         dispatch({ type: "PREVIEW_CHANGED_ERROR", error: formatted });
         Modal.confirm({
-          title: "预览校验失败 (409 PREVIEW_CHANGED)",
+          title: "预览校验失败 (PREVIEW_CHANGED)",
           icon: <ExclamationCircleOutlined style={{ color: "#fa8c16" }} />,
           content: "检测到底层文件或打分状态已变化，权威摘要已失效。是否重新运行预览？",
           okText: "重新运行预览",
@@ -170,7 +186,12 @@ export const AdvancedDedupePage: React.FC = () => {
     }
     const currentGen = dedupeState.configGeneration;
     dispatch({ type: "PREVIEW_STARTED" });
-    previewMutation.mutate({ cfg: scorerConfig, generation: currentGen });
+    previewMutation.mutate({
+      cfg: scorerConfig,
+      generation: currentGen,
+      page: 1,
+      pageSize,
+    });
   };
 
   const handleConfirmGeneratePlan = () => {
@@ -197,22 +218,14 @@ export const AdvancedDedupePage: React.FC = () => {
   };
 
   const handlePageChange = (newPage: number, newPageSize: number) => {
-    setPage(newPage);
-    setPageSize(newPageSize);
-    if (previewedConfig) {
-      scansApi
-        .dedupePreview(scanId, {
-          scorer_config: previewedConfig,
-          page: newPage,
-          page_size: newPageSize,
-        })
-        .then((data) => {
-          setPreviewData(data);
-        })
-        .catch((err) => {
-          message.error(err.message || "分页加载失败");
-        });
-    }
+    const currentGen = dedupeState.configGeneration;
+    dispatch({ type: "PREVIEW_STARTED" });
+    previewMutation.mutate({
+      cfg: scorerConfig,
+      generation: currentGen,
+      page: newPage,
+      pageSize: newPageSize,
+    });
   };
 
   const handleSelectMember = (member: DedupePreviewMemberRow) => {
@@ -360,6 +373,7 @@ export const AdvancedDedupePage: React.FC = () => {
           <DedupeIdentitySafetyPanel
             authorityDigest={previewData.preview_digest}
             authorityType="preview_digest"
+            previewSource={previewData.preview_source}
             liveFilesystemVerified={previewData.live_filesystem_verified}
             scorerConfigDigest={previewData.scorer_config_digest}
             sourceSnapshotDigest={previewData.source_snapshot_digest}
@@ -370,7 +384,11 @@ export const AdvancedDedupePage: React.FC = () => {
 
           {/* Preview Summary Panel */}
           <DedupePreviewSummaryPanel
-            summary={previewData.summary || previewData}
+            summary={{
+              ...(previewData.summary || previewData),
+              effective_safety_policy: previewData.effective_safety_policy,
+            }}
+            effectiveSafetyPolicy={previewData.effective_safety_policy}
             scanRoots={previewData.scan_roots || scan.roots}
             selectionMode={previewData.selection_mode}
           />

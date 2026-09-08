@@ -217,10 +217,7 @@ export const PlanDetailPage: React.FC = () => {
   const isWorkflowPlan = Boolean(plan && isWorkflowPlanMetadata(plan.metadata));
   const workflowMeta = isWorkflowPlan ? (plan.metadata as WorkflowPlanMetadata) : null;
   const isDedupeWorkflowPlan = Boolean(
-    workflowMeta &&
-      (workflowMeta.workflow_mode === 'dedupe' ||
-        typeof workflowMeta.runtime_inputs?.scan_job_id === 'number' ||
-        typeof workflowMeta.scan_job_id === 'number')
+    workflowMeta && workflowMeta.workflow_mode === 'dedupe'
   );
   const isStaleWorkflowPlan = Boolean(
     plan && plan.status === 'stale' && isWorkflowPlan && !isDedupeWorkflowPlan

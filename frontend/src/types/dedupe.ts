@@ -76,25 +76,25 @@ export interface BalanceInfo {
 export type MemberDecision = 'KEEP' | 'QUARANTINE' | 'SAFETY_EXCLUDED' | 'SKIPPED' | 'UNAVAILABLE';
 
 export interface DedupePreviewMemberRow {
-  group_provenance_id: number;
-  group_status: 'actionable' | 'skipped' | string;
+  group_provenance_id?: number;
+  group_status?: 'actionable' | 'skipped' | string;
   group_skip_reason?: string | null;
-  group_file_size: number;
+  group_file_size?: number;
   group_recommended_keep_path?: string | null;
-  group_reclaimable_bytes: number;
+  group_reclaimable_bytes?: number;
   group_selection_reason?: string | null;
   group_balance_info?: BalanceInfo | null;
   absolute_path: string;
-  relative_path: string;
-  scan_root_index: number;
-  scan_root_path: string;
-  eligible_as_keep: boolean;
-  safety_reasons: string[];
+  relative_path?: string;
+  scan_root_index?: number;
+  scan_root_path?: string;
+  eligible_as_keep?: boolean;
+  safety_reasons?: string[];
   total_score?: number;
-  contributions: FactorContribution[];
-  is_top_candidate: boolean;
-  recommended_keep: boolean;
-  member_decision: MemberDecision;
+  contributions?: FactorContribution[];
+  is_top_candidate?: boolean;
+  recommended_keep?: boolean;
+  member_decision?: MemberDecision;
   selection_reason?: string | null;
   balance_info?: BalanceInfo | null;
   incomplete?: boolean;

@@ -62,12 +62,6 @@ export function formatDedupeErrorMessage(err: unknown): string {
   const msg = structured.message;
 
   switch (code) {
-    case 'DEDUPE_SCAN_NOT_COMPLETED':
-      return `指定的扫描任务尚未完成 (DEDUPE_SCAN_NOT_COMPLETED)：${msg}`;
-    case 'DEDUPE_SNAPSHOT_EMPTY':
-      return `扫描任务快照为空 (DEDUPE_SNAPSHOT_EMPTY)：${msg}`;
-    case 'DEDUPE_ROOT_MISMATCH':
-      return `扫描根路径不匹配 (DEDUPE_ROOT_MISMATCH)：${msg}`;
     case 'DEDUPE_INVALID_CONFIG':
       return `去重配置无效 (DEDUPE_INVALID_CONFIG)：${msg}`;
     case 'DEDUPE_FACTOR_UNAVAILABLE':
@@ -79,6 +73,27 @@ export function formatDedupeErrorMessage(err: unknown): string {
     case 'PREVIEW_CHANGED':
     case 'DEDUPE_PREVIEW_CHANGED':
       return `预览已失效 (PREVIEW_CHANGED)：底层文件或打分配置已改变，请重新运行预览。${msg ? ` (${msg})` : ''}`;
+    case 'DEDUPE_SCAN_NOT_FOUND':
+      return `指定的扫描任务不存在 (DEDUPE_SCAN_NOT_FOUND)：${msg}`;
+    case 'DEDUPE_SCAN_NOT_COMPLETED':
+      return `指定的扫描任务尚未完成 (DEDUPE_SCAN_NOT_COMPLETED)：${msg}`;
+    case 'SCAN_JOB_ID_REQUIRED':
+      return `去重模式必须提供扫描任务 ID (SCAN_JOB_ID_REQUIRED)：${msg}`;
+    case 'SCAN_JOB_ID_FORBIDDEN':
+      return `非去重工作流禁止传入扫描任务 ID (SCAN_JOB_ID_FORBIDDEN)：${msg}`;
+    case 'ROOT_IDS_FORBIDDEN':
+      return `去重工作流禁止传入 root_ids 参数 (ROOT_IDS_FORBIDDEN)：${msg}`;
+    case 'AMBIGUOUS_RUNTIME_INPUTS':
+      return `运行时输入参数冲突或不明确 (AMBIGUOUS_RUNTIME_INPUTS)：${msg}`;
+    case 'WORKFLOW_ARCHIVED':
+      return `工作流已被归档 (WORKFLOW_ARCHIVED)：已被归档的工作流禁止生成计划或执行操作。${msg ? ` (${msg})` : ''}`;
+    case 'DEDUPE_RESCAN_REQUIRED':
+      return `重新扫描已失效 (DEDUPE_RESCAN_REQUIRED)：检测到扫描快照数据过时，请按标准流程恢复：new scan → completed → return Workflow → select new Scan Job → Preview → Generate new Draft。${msg ? ` (${msg})` : ''}`;
+    // Legacy compatibility codes
+    case 'DEDUPE_SNAPSHOT_EMPTY':
+      return `扫描任务快照为空 (DEDUPE_SNAPSHOT_EMPTY)：${msg}`;
+    case 'DEDUPE_ROOT_MISMATCH':
+      return `扫描根路径不匹配 (DEDUPE_ROOT_MISMATCH)：${msg}`;
     case 'DEDUPE_QUARANTINE_CONFLICT':
       return `隔离区路径冲突 (DEDUPE_QUARANTINE_CONFLICT)：${msg}`;
     case 'DEDUPE_STEP_NOT_FOUND':

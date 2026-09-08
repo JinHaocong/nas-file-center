@@ -100,10 +100,10 @@ export const DedupeExplainDrawer: React.FC<Props> = ({
               </Tag>
             </Descriptions.Item>
             <Descriptions.Item label="单文件大小">
-              <Text strong>{formatBytes(member.group_file_size)}</Text>
+              <Text strong>{member.group_file_size !== undefined ? formatBytes(member.group_file_size) : '-'}</Text>
             </Descriptions.Item>
             <Descriptions.Item label="重复组 ID">
-              <Tag color="purple">组 #{member.group_provenance_id}</Tag>
+              <Tag color="purple">组 #{member.group_provenance_id ?? '-'}</Tag>
             </Descriptions.Item>
           </Descriptions>
         </Card>
@@ -111,11 +111,13 @@ export const DedupeExplainDrawer: React.FC<Props> = ({
         {/* 2. Group Level Info (Canonical Contract) */}
         <Card size="small" title="重复组级别摘要 (Group Summary)" bordered={false} style={{ background: '#fafafa' }}>
           <Descriptions column={1} size="small" bordered>
-            <Descriptions.Item label="组状态 (group_status)">
-              <Tag color={member.group_status === 'actionable' ? 'green' : 'orange'}>
-                {member.group_status}
-              </Tag>
-            </Descriptions.Item>
+            {member.group_status && (
+              <Descriptions.Item label="组状态 (group_status)">
+                <Tag color={member.group_status === 'actionable' ? 'green' : 'orange'}>
+                  {member.group_status}
+                </Tag>
+              </Descriptions.Item>
+            )}
             {member.group_skip_reason && (
               <Descriptions.Item label="组跳过原因 (group_skip_reason)">
                 <Text type="warning">{member.group_skip_reason}</Text>
@@ -130,7 +132,7 @@ export const DedupeExplainDrawer: React.FC<Props> = ({
             )}
             <Descriptions.Item label="组可释放容量 (group_reclaimable_bytes)">
               <Text strong style={{ color: '#52c41a' }}>
-                {formatBytes(member.group_reclaimable_bytes)}
+                {member.group_reclaimable_bytes !== undefined ? formatBytes(member.group_reclaimable_bytes) : '-'}
               </Text>
             </Descriptions.Item>
             {member.group_selection_reason && (
@@ -154,14 +156,16 @@ export const DedupeExplainDrawer: React.FC<Props> = ({
               </Space>
             </Descriptions.Item>
             <Descriptions.Item label="可保留资格 (Eligible)">
-              {member.eligible_as_keep ? (
+              {member.eligible_as_keep === true ? (
                 <Tag icon={<CheckCircleOutlined />} color="success">
                   满足保留资格
                 </Tag>
-              ) : (
+              ) : member.eligible_as_keep === false ? (
                 <Tag icon={<CloseCircleOutlined />} color="warning">
-                  受限不可保留 ({member.safety_reasons.join(', ') || '安全策略排除'})
+                  受限不可保留 ({member.safety_reasons?.join(', ') || '安全策略排除'})
                 </Tag>
+              ) : (
+                <Tag color="default">-</Tag>
               )}
             </Descriptions.Item>
             <Descriptions.Item label="决策原因 / 说明">

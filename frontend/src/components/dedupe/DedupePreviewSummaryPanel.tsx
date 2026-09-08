@@ -16,15 +16,21 @@ const { Text } = Typography;
 
 interface Props {
   summary: DedupeSummary;
+  effectiveSafetyPolicy?: {
+    protect_last_file?: boolean;
+    [key: string]: any;
+  };
   scanRoots?: string[];
   selectionMode?: DedupeSelectionMode;
 }
 
 export const DedupePreviewSummaryPanel: React.FC<Props> = ({
   summary,
+  effectiveSafetyPolicy,
   scanRoots = [],
   selectionMode,
 }) => {
+  const policy = effectiveSafetyPolicy || summary.effective_safety_policy;
   const rootEntries = mapReleasedBytesByScanRoot(
     summary.released_bytes_by_scan_root,
     scanRoots.length > 0 ? scanRoots : summary.scan_roots
@@ -154,11 +160,11 @@ export const DedupePreviewSummaryPanel: React.FC<Props> = ({
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <CheckCircleOutlined
           style={{
-            color: summary.effective_safety_policy?.protect_last_file ? '#52c41a' : '#faad14',
+            color: policy?.protect_last_file ? '#52c41a' : '#faad14',
           }}
         />
         <Text type="secondary" style={{ fontSize: 12 }}>
-          {summary.effective_safety_policy?.protect_last_file
+          {policy?.protect_last_file
             ? '去重安全保护策略 (protect_last_file): 已启用 (true)，确保每个重复组保留至少 1 个副本。'
             : '去重安全保护策略 (protect_last_file): 未启用 (false)。'}
         </Text>

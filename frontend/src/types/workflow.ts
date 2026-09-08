@@ -404,12 +404,7 @@ export function isWorkflowPlanMetadata(metadata: unknown): metadata is WorkflowP
     return false;
   }
 
-  const isDedupe =
-    obj.workflow_mode === 'dedupe' ||
-    obj.runtime_inputs.scan_job_id !== undefined ||
-    obj.scan_job_id !== undefined;
-
-  if (isDedupe) {
+  if (obj.workflow_mode === 'dedupe') {
     if (
       typeof obj.scan_job_id !== 'number' ||
       !Number.isInteger(obj.scan_job_id) ||
@@ -428,6 +423,11 @@ export function isWorkflowPlanMetadata(metadata: unknown): metadata is WorkflowP
       return false;
     }
     return true;
+  }
+
+  // Non-dedupe: scan_job_id is forbidden
+  if (obj.scan_job_id !== undefined || obj.runtime_inputs.scan_job_id !== undefined) {
+    return false;
   }
 
   if (

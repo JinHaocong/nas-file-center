@@ -11,6 +11,11 @@ const { Text } = Typography;
 interface Props {
   authorityDigest: string;
   authorityType: "preview_digest" | "compile_digest";
+  dedupePreviewDigest?: string;
+  previewSource?: string;
+  workflowRevision?: number;
+  definitionSha256?: string;
+  runtimeScanJobId?: number;
   liveFilesystemVerified?: boolean;
   scorerConfigDigest?: string;
   sourceSnapshotDigest?: string;
@@ -25,6 +30,11 @@ interface Props {
 export const DedupeIdentitySafetyPanel: React.FC<Props> = ({
   authorityDigest,
   authorityType,
+  dedupePreviewDigest,
+  previewSource,
+  workflowRevision,
+  definitionSha256,
+  runtimeScanJobId,
   liveFilesystemVerified = false,
   scorerConfigDigest,
   sourceSnapshotDigest,
@@ -76,7 +86,7 @@ export const DedupeIdentitySafetyPanel: React.FC<Props> = ({
         <Descriptions column={{ xs: 1, sm: 2 }} size="small" bordered>
           <Descriptions.Item
             label={
-              <Tooltip title={isDirectScan ? "直接扫描生成计划必须提交的权威验证摘要" : "工作流生成计划必须提交的权威验证摘要"}>
+              <Tooltip title={isDirectScan ? "直接扫描生成计划必须提交的权威验证摘要" : "工作流生成计划必须提交的权威编译摘要"}>
                 <Space size={4}>
                   <Text strong>{authorityLabel}</Text>
                   <InfoCircleOutlined style={{ color: "#1890ff" }} />
@@ -89,6 +99,42 @@ export const DedupeIdentitySafetyPanel: React.FC<Props> = ({
               {authorityDigest || "-"}
             </Text>
           </Descriptions.Item>
+
+          {dedupePreviewDigest && (
+            <Descriptions.Item
+              label={
+                <Tooltip title="底层去重步骤独立计算的算法与组结果摘要">
+                  <Space size={4}>
+                    <Text strong>去重预览摘要 (dedupe_preview_digest)</Text>
+                    <InfoCircleOutlined style={{ color: "#1890ff" }} />
+                  </Space>
+                </Tooltip>
+              }
+              span={2}
+            >
+              <Text code copyable strong style={{ fontSize: 13, color: "#722ed1" }}>
+                {dedupePreviewDigest}
+              </Text>
+            </Descriptions.Item>
+          )}
+
+          {workflowRevision !== undefined && (
+            <Descriptions.Item label="工作流基线版本 (Revision)">
+              <Tag color="purple">第 r{workflowRevision} 版</Tag>
+            </Descriptions.Item>
+          )}
+
+          {runtimeScanJobId !== undefined && (
+            <Descriptions.Item label="运行时扫描任务 (scan_job_id)">
+              <Tag color="cyan">Scan #{runtimeScanJobId}</Tag>
+            </Descriptions.Item>
+          )}
+
+          {previewSource && (
+            <Descriptions.Item label="预览数据源 (preview_source)">
+              <Tag color="blue">{previewSource}</Tag>
+            </Descriptions.Item>
+          )}
 
           {scorerConfigDigest && (
             <Descriptions.Item label="打分配置摘要 (scorer_config_digest)">
@@ -110,6 +156,14 @@ export const DedupeIdentitySafetyPanel: React.FC<Props> = ({
             <Descriptions.Item label="决策摘要 (decision_digest)">
               <Text code copyable style={{ fontSize: 12 }}>
                 {decisionDigest}
+              </Text>
+            </Descriptions.Item>
+          )}
+
+          {definitionSha256 && (
+            <Descriptions.Item label="定义哈希 (definition_sha256)" span={2}>
+              <Text code copyable style={{ fontSize: 12 }}>
+                {definitionSha256}
               </Text>
             </Descriptions.Item>
           )}

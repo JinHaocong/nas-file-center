@@ -4,7 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 import { EditOutlined, UnorderedListOutlined, CheckOutlined } from "@ant-design/icons";
 import { scansApi } from "../../api/domain";
 import { ScanJob } from "../../types";
-import { formatBytes } from "../../utils/format";
+import { formatBytes, formatDateTime } from "../../utils/format";
+import { formatScanRootLabel } from "../../utils/dedupePreview";
 
 interface Props {
   value?: number;
@@ -151,13 +152,22 @@ export const CompletedScanPicker: React.FC<Props> = ({
             <Tag color={activeScan.status === "completed" ? "green" : "orange"}>
               {activeScan.status}
             </Tag>
+            <span style={{ fontWeight: 500 }}>Scan #{activeScan.id}</span>
+            <span>|</span>
             <span>名称: {activeScan.name}</span>
+            <span>|</span>
+            <span>完成时间: {formatDateTime(activeScan.finished_at)}</span>
             <span>|</span>
             <span>重复组: {activeScan.total_groups}</span>
             <span>|</span>
             <span>文件总数: {activeScan.total_files_in_groups}</span>
             <span>|</span>
-            <span>根目录: {activeScan.roots.join(", ")}</span>
+            <span>根目录:</span>
+            {activeScan.roots?.map((r, idx) => (
+              <Tag key={idx} color="cyan">
+                {formatScanRootLabel(idx, r)}
+              </Tag>
+            ))}
           </Space>
         </div>
       )}
