@@ -3907,6 +3907,8 @@ class FileCenterService:
             return build_preview_response(
                 compilation=compilation,
                 protect_last_file=protect_last_file,
+                allowed_roots=allowed_roots,
+                quarantine_root=quarantine_root,
                 page=page,
                 page_size=page_size,
             )

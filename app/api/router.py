@@ -99,7 +99,7 @@ class DedupePreviewRequest(BaseModel):
     @field_validator("page", mode="before")
     @classmethod
     def validate_page(cls, v: Any) -> int:
-        if isinstance(v, bool) or not isinstance(v, int):
+        if type(v) is not int or isinstance(v, bool):
             raise DedupeInvalidConfigError("page must be an integer", details={"field": "page"})
         if v < 1:
             raise DedupeInvalidConfigError("page must be >= 1", details={"field": "page"})
@@ -108,7 +108,7 @@ class DedupePreviewRequest(BaseModel):
     @field_validator("page_size", mode="before")
     @classmethod
     def validate_page_size(cls, v: Any) -> int:
-        if isinstance(v, bool) or not isinstance(v, int):
+        if type(v) is not int or isinstance(v, bool):
             raise DedupeInvalidConfigError("page_size must be an integer", details={"field": "page_size"})
         if v < 1:
             raise DedupeInvalidConfigError("page_size must be >= 1", details={"field": "page_size"})

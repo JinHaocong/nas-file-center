@@ -471,13 +471,28 @@ def compile_advanced_dedupe_preview(
     )
 
 
+def canonicalize_effective_safety_policy(
+    protect_last_file: bool = True,
+    allowed_roots: Sequence[str | Path] | None = None,
+    quarantine_root: str | Path | None = None,
+) -> dict[str, Any]:
+    """Deterministically canonicalize server safety authority context."""
+    canon_allowed = sorted(list({normalize_dedupe_path(str(r)) for r in allowed_roots if str(r)})) if allowed_roots else []
+    canon_quarantine = normalize_dedupe_path(str(quarantine_root)) if quarantine_root else None
+    return {
+        "allowed_roots": canon_allowed,
+        "protect_last_file": bool(protect_last_file),
+        "quarantine_root": canon_quarantine,
+    }
+
+
 def compute_preview_digest(
     *,
     scan_job_id: int,
     scorer_config_digest: str,
     source_snapshot_digest: str,
     decision_digest: str,
-    protect_last_file: bool,
+    effective_safety_policy: Mapping[str, Any],
     dedupe_engine_version: int = 1,
 ) -> str:
     """Compute deterministic preview_digest independent of pagination."""
@@ -487,9 +502,7 @@ def compute_preview_digest(
         "scorer_config_digest": scorer_config_digest,
         "source_snapshot_digest": source_snapshot_digest,
         "decision_digest": decision_digest,
-        "effective_safety_policy": {
-            "protect_last_file": protect_last_file,
-        },
+        "effective_safety_policy": dict(sorted(effective_safety_policy.items())),
     }
     serialized = canonical_json_dumps(payload)
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
@@ -498,17 +511,25 @@ def compute_preview_digest(
 def build_preview_response(
     compilation: DedupePreviewCompilation,
     *,
-    protect_last_file: bool,
+    protect_last_file: bool = True,
+    allowed_roots: Sequence[str | Path] | None = None,
+    quarantine_root: str | Path | None = None,
     page: int = 1,
     page_size: int = 50,
 ) -> dict[str, Any]:
     """Format and paginate DedupePreviewCompilation into an API response dict."""
+    canonical_safety_policy = canonicalize_effective_safety_policy(
+        protect_last_file=protect_last_file,
+        allowed_roots=allowed_roots,
+        quarantine_root=quarantine_root,
+    )
+
     preview_digest = compute_preview_digest(
         scan_job_id=compilation.scan_job_id,
         scorer_config_digest=compilation.scorer_config_digest,
         source_snapshot_digest=compilation.source_snapshot_digest,
         decision_digest=compilation.decision_digest,
-        protect_last_file=protect_last_file,
+        effective_safety_policy=canonical_safety_policy,
     )
 
     all_rows: list[dict[str, Any]] = []
@@ -518,6 +539,18 @@ def build_preview_response(
         g_skip_reason = g.skip_reason
         g_file_size = g.file_size
         g_quarantine_set = set(g.quarantine_candidates)
+
+        keeper_m = next((mem for mem in g.members if mem.recommended_keep), None)
+        if g.status == "actionable":
+            g_recommended_keep_path = g.recommended_keep.absolute_path if g.recommended_keep else None
+            g_reclaimable_bytes = g.reclaimable_bytes
+            g_selection_reason = keeper_m.selection_reason if keeper_m else "winner"
+            g_balance_info = keeper_m.balance_info if keeper_m else None
+        else:
+            g_recommended_keep_path = None
+            g_reclaimable_bytes = 0
+            g_selection_reason = g.skip_reason or "skipped"
+            g_balance_info = None
 
         for m in g.members:
             if g_status == "skipped":
@@ -544,6 +577,10 @@ def build_preview_response(
                 "group_status": g_status,
                 "group_skip_reason": g_skip_reason,
                 "group_file_size": g_file_size,
+                "group_recommended_keep_path": g_recommended_keep_path,
+                "group_reclaimable_bytes": g_reclaimable_bytes,
+                "group_selection_reason": g_selection_reason,
+                "group_balance_info": g_balance_info,
                 "absolute_path": m.absolute_path,
                 "relative_path": m.relative_path,
                 "scan_root_index": m.scan_root_index,
@@ -565,16 +602,42 @@ def build_preview_response(
     end = start + page_size
     page_rows = all_rows[start:end] if start < total_rows else []
 
+    released_bytes_by_scan_root_formatted = {
+        str(i): compilation.released_bytes_by_scan_root.get(i, 0)
+        for i in range(len(compilation.scan_roots))
+    }
+
+    summary_data = {
+        "selection_mode": compilation.summary.get("selection_mode", compilation.scorer_config.selection_mode),
+        "group_count": len(compilation.groups),
+        "candidate_member_count": compilation.candidate_member_count,
+        "actionable_group_count": compilation.actionable_group_count,
+        "skipped_group_count": compilation.skipped_group_count,
+        "planned_quarantine_count": compilation.planned_quarantine_count,
+        "expected_reclaim_bytes": compilation.expected_reclaim_bytes,
+        "released_bytes_by_scan_root": released_bytes_by_scan_root_formatted,
+    }
+
     return {
         "scan_job_id": compilation.scan_job_id,
-        "preview_digest": preview_digest,
+        "scan_roots": list(compilation.scan_roots),
+        "selection_mode": summary_data["selection_mode"],
+        "group_count": len(compilation.groups),
+        "candidate_member_count": compilation.candidate_member_count,
+        "actionable_group_count": compilation.actionable_group_count,
+        "skipped_group_count": compilation.skipped_group_count,
+        "planned_quarantine_count": compilation.planned_quarantine_count,
+        "expected_reclaim_bytes": compilation.expected_reclaim_bytes,
+        "released_bytes_by_scan_root": released_bytes_by_scan_root_formatted,
         "scorer_config_digest": compilation.scorer_config_digest,
         "source_snapshot_digest": compilation.source_snapshot_digest,
         "decision_digest": compilation.decision_digest,
-        "effective_safety_policy": {
-            "protect_last_file": protect_last_file,
-        },
-        "summary": compilation.summary,
+        "preview_digest": preview_digest,
+        "effective_safety_policy": canonical_safety_policy,
+        "preview_source": "completed-scan-readonly-safety",
+        "live_filesystem_verified": False,
+        "dedupe_engine_version": 1,
+        "summary": summary_data,
         "page": page,
         "page_size": page_size,
         "total_rows": total_rows,
