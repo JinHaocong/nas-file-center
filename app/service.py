@@ -58,6 +58,16 @@ from app.workflows.errors import (
     WorkflowError,
     WorkflowNotFoundError,
 )
+from app.planning.dedupe_preview import (
+    DedupeError,
+    DedupeFactorUnavailableError,
+    DedupeInvalidConfigError,
+    DedupeLimitExceededError,
+    DedupeScanNotCompletedError,
+    DedupeScanNotFoundError,
+    build_preview_response,
+    compile_advanced_dedupe_preview,
+)
 from app.workflows.schema import WorkflowDefinition
 from app.workflows.validation import validate_raw_steps_types
 from app.exceptions import PlanStaleError, StateConflictError
@@ -3873,4 +3883,31 @@ class FileCenterService:
                 "expected_changes": new_plan.expected_changes,
                 "compile_digest": captured_compile_digest,
             }
+
+    def get_dedupe_preview(
+        self,
+        scan_job_id: int,
+        scorer_config: dict[str, Any] | None = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> dict[str, Any]:
+        protect_last_file = bool(getattr(self.settings, "protect_last_file", True))
+        allowed_roots = getattr(self.settings, "allowed_roots", None)
+        quarantine_root = getattr(self.settings, "quarantine_root", None)
+
+        with self.SessionLocal() as session:
+            compilation = compile_advanced_dedupe_preview(
+                session=session,
+                scan_job_id=scan_job_id,
+                config=scorer_config or {},
+                protect_last_file=protect_last_file,
+                allowed_roots=allowed_roots,
+                quarantine_root=quarantine_root,
+            )
+            return build_preview_response(
+                compilation=compilation,
+                protect_last_file=protect_last_file,
+                page=page,
+                page_size=page_size,
+            )
 

@@ -174,6 +174,8 @@ class MemberDecisionExplain:
     recommended_keep: bool
     selection_reason: str
     balance_info: dict[str, Any] | None = None
+    relative_path: str = ""
+    scan_root_path: str = ""
 
 
 @dataclass(frozen=True)
@@ -186,6 +188,7 @@ class GroupDecisionResult:
     quarantine_candidates: list[str]
     reclaimable_bytes: int
     group_decision_fingerprint: str
+    group_provenance_id: int | str = 0
 
 
 @dataclass(frozen=True)
@@ -285,6 +288,8 @@ def _make_skipped_group_result(
             is_top_candidate=False,
             recommended_keep=False,
             selection_reason=selection_reason,
+            relative_path=m.relative_path,
+            scan_root_path=m.scan_root_path,
         )
         for m in group.members
     ]
@@ -300,6 +305,7 @@ def _make_skipped_group_result(
         quarantine_candidates=[],
         reclaimable_bytes=0,
         group_decision_fingerprint=fp,
+        group_provenance_id=group.provenance_id,
     )
 
 
@@ -534,6 +540,8 @@ def evaluate_group(
                 is_top_candidate=False,
                 recommended_keep=False,
                 selection_reason="ineligible",
+                relative_path=m.relative_path,
+                scan_root_path=m.scan_root_path,
             ))
         else:
             is_winner = (m.absolute_path == winner.absolute_path)
@@ -554,6 +562,8 @@ def evaluate_group(
                 recommended_keep=is_winner,
                 selection_reason=sel_reason,
                 balance_info=winner_balance_info if is_winner else None,
+                relative_path=m.relative_path,
+                scan_root_path=m.scan_root_path,
             ))
 
     # Deterministic output sorting for members (P2)
@@ -581,6 +591,7 @@ def evaluate_group(
         quarantine_candidates=quarantine_candidates,
         reclaimable_bytes=reclaimable_bytes,
         group_decision_fingerprint=fp,
+        group_provenance_id=group.provenance_id,
     )
 
 

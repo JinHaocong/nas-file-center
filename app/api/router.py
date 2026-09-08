@@ -13,6 +13,14 @@ from app.filters.validation import FilterValidationError
 from app.models import User
 from app.path_safety import UnsafePathError
 from app.service import StateConflictError
+from app.planning.dedupe_preview import (
+    DedupeError,
+    DedupeFactorUnavailableError,
+    DedupeInvalidConfigError,
+    DedupeLimitExceededError,
+    DedupeScanNotCompletedError,
+    DedupeScanNotFoundError,
+)
 from app.workflows.schema import (
     PlanRebuildPreviewRequest,
     PlanRebuildRequest,
@@ -72,6 +80,41 @@ class ScanCreateRequest(BaseModel):
     min_size: str | None = None
     name_patterns: list[str] | None = None
     exclude_patterns: list[str] | None = None
+
+
+class DedupePreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scorer_config: dict[str, Any] | None = None
+    page: int = 1
+    page_size: int = 50
+
+    @field_validator("scorer_config", mode="before")
+    @classmethod
+    def validate_scorer_config(cls, v: Any) -> Any:
+        if v is not None and not isinstance(v, dict):
+            raise DedupeInvalidConfigError("scorer_config must be a dict or null", details={"field": "scorer_config"})
+        return v
+
+    @field_validator("page", mode="before")
+    @classmethod
+    def validate_page(cls, v: Any) -> int:
+        if isinstance(v, bool) or not isinstance(v, int):
+            raise DedupeInvalidConfigError("page must be an integer", details={"field": "page"})
+        if v < 1:
+            raise DedupeInvalidConfigError("page must be >= 1", details={"field": "page"})
+        return v
+
+    @field_validator("page_size", mode="before")
+    @classmethod
+    def validate_page_size(cls, v: Any) -> int:
+        if isinstance(v, bool) or not isinstance(v, int):
+            raise DedupeInvalidConfigError("page_size must be an integer", details={"field": "page_size"})
+        if v < 1:
+            raise DedupeInvalidConfigError("page_size must be >= 1", details={"field": "page_size"})
+        if v > 500:
+            raise DedupeInvalidConfigError("page_size cannot exceed 500", details={"field": "page_size"})
+        return v
 
 
 class DedupePlanRequest(BaseModel):
@@ -388,6 +431,33 @@ def scan_groups(
         return request.app.state.service.scan_groups(scan_job_id, page=page, page_size=page_size)
     except KeyError as exc:
         raise HTTPException(404, "scan not found") from exc
+
+
+@router.post("/scans/{scan_job_id}/dedupe-preview")
+def dedupe_preview(
+    request: Request,
+    scan_job_id: int,
+    payload: DedupePreviewRequest = Body(...),
+):
+    service = request.app.state.service
+    try:
+        return service.get_dedupe_preview(
+            scan_job_id=scan_job_id,
+            scorer_config=payload.scorer_config,
+            page=payload.page,
+            page_size=payload.page_size,
+        )
+    except DedupeError as exc:
+        return JSONResponse(status_code=exc.status_code, content=exc.to_dict())
+    except ValueError as exc:
+        msg = str(exc)
+        if "DEDUPE_FACTOR_UNAVAILABLE" in msg:
+            err = DedupeFactorUnavailableError(msg)
+        elif "DEDUPE_LIMIT_EXCEEDED" in msg:
+            err = DedupeLimitExceededError(msg)
+        else:
+            err = DedupeInvalidConfigError(msg)
+        return JSONResponse(status_code=err.status_code, content=err.to_dict())
 
 
 @router.post("/scans/{scan_job_id}/dedupe-plan")

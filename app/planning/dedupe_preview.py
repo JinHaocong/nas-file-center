@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -35,19 +36,52 @@ MAX_DEDUPE_CANDIDATES = 50_000
 MAX_PLANNED_QUARANTINE = 100_000
 
 
-class DedupeScanNotFoundError(ValueError):
+class DedupeError(Exception):
+    def __init__(self, message: str, code: str, details: Any = None, status_code: int = 400):
+        super().__init__(message)
+        self.message = message
+        self.code = code
+        self.details = details or {}
+        self.status_code = status_code
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "error": {
+                "code": self.code,
+                "message": self.message,
+                "details": self.details or {},
+            }
+        }
+
+
+class DedupeScanNotFoundError(DedupeError, ValueError):
     """Raised when the requested ScanJob does not exist in the database."""
-    pass
+    def __init__(self, message: str = "DEDUPE_SCAN_NOT_FOUND: scan not found", details: Any = None):
+        super().__init__(message=message, code="DEDUPE_SCAN_NOT_FOUND", details=details, status_code=404)
 
 
-class DedupeScanNotCompletedError(ValueError):
+class DedupeScanNotCompletedError(DedupeError, ValueError):
     """Raised when the ScanJob exists but is not in 'completed' status."""
-    pass
+    def __init__(self, message: str = "DEDUPE_SCAN_NOT_COMPLETED: scan not completed", details: Any = None):
+        super().__init__(message=message, code="DEDUPE_SCAN_NOT_COMPLETED", details=details, status_code=409)
 
 
-class DedupeLimitExceededError(ValueError):
+class DedupeLimitExceededError(DedupeError, ValueError):
     """Raised when candidate count or planned quarantine items exceed configured caps."""
-    pass
+    def __init__(self, message: str = "DEDUPE_LIMIT_EXCEEDED: limit exceeded", details: Any = None):
+        super().__init__(message=message, code="DEDUPE_LIMIT_EXCEEDED", details=details, status_code=422)
+
+
+class DedupeInvalidConfigError(DedupeError, ValueError):
+    """Raised when dedupe configuration is invalid or cannot be canonicalized."""
+    def __init__(self, message: str = "DEDUPE_INVALID_CONFIG: invalid dedupe configuration", details: Any = None):
+        super().__init__(message=message, code="DEDUPE_INVALID_CONFIG", details=details, status_code=422)
+
+
+class DedupeFactorUnavailableError(DedupeError, ValueError):
+    """Raised when a requested dedupe factor is reserved and unavailable in V1."""
+    def __init__(self, message: str = "DEDUPE_FACTOR_UNAVAILABLE: factor unavailable in V1", details: Any = None):
+        super().__init__(message=message, code="DEDUPE_FACTOR_UNAVAILABLE", details=details, status_code=422)
 
 
 def derive_canonical_top_level_dir(scan_root: str, relative_path: str) -> str:
@@ -435,3 +469,115 @@ def compile_advanced_dedupe_preview(
         decision_digest=decision_digest,
         summary=engine_result.summary,
     )
+
+
+def compute_preview_digest(
+    *,
+    scan_job_id: int,
+    scorer_config_digest: str,
+    source_snapshot_digest: str,
+    decision_digest: str,
+    protect_last_file: bool,
+    dedupe_engine_version: int = 1,
+) -> str:
+    """Compute deterministic preview_digest independent of pagination."""
+    payload = {
+        "dedupe_engine_version": dedupe_engine_version,
+        "scan_job_id": scan_job_id,
+        "scorer_config_digest": scorer_config_digest,
+        "source_snapshot_digest": source_snapshot_digest,
+        "decision_digest": decision_digest,
+        "effective_safety_policy": {
+            "protect_last_file": protect_last_file,
+        },
+    }
+    serialized = canonical_json_dumps(payload)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def build_preview_response(
+    compilation: DedupePreviewCompilation,
+    *,
+    protect_last_file: bool,
+    page: int = 1,
+    page_size: int = 50,
+) -> dict[str, Any]:
+    """Format and paginate DedupePreviewCompilation into an API response dict."""
+    preview_digest = compute_preview_digest(
+        scan_job_id=compilation.scan_job_id,
+        scorer_config_digest=compilation.scorer_config_digest,
+        source_snapshot_digest=compilation.source_snapshot_digest,
+        decision_digest=compilation.decision_digest,
+        protect_last_file=protect_last_file,
+    )
+
+    all_rows: list[dict[str, Any]] = []
+    for g in compilation.groups:
+        g_prov_id = g.group_provenance_id
+        g_status = g.status
+        g_skip_reason = g.skip_reason
+        g_file_size = g.file_size
+        g_quarantine_set = set(g.quarantine_candidates)
+
+        for m in g.members:
+            if g_status == "skipped":
+                member_decision = "SKIPPED"
+            elif m.recommended_keep:
+                member_decision = "KEEP"
+            elif m.absolute_path in g_quarantine_set:
+                member_decision = "QUARANTINE"
+            else:
+                member_decision = "SKIPPED"
+
+            contrib_list = [
+                {
+                    "factor": c.factor,
+                    "configured_weight": c.configured_weight,
+                    "actual_contribution": c.actual_contribution,
+                    "reason": c.reason,
+                }
+                for c in m.contributions
+            ]
+
+            all_rows.append({
+                "group_provenance_id": g_prov_id,
+                "group_status": g_status,
+                "group_skip_reason": g_skip_reason,
+                "group_file_size": g_file_size,
+                "absolute_path": m.absolute_path,
+                "relative_path": m.relative_path,
+                "scan_root_index": m.scan_root_index,
+                "scan_root_path": m.scan_root_path,
+                "eligible_as_keep": m.eligible_as_keep,
+                "safety_reasons": list(m.safety_reasons),
+                "total_score": m.total_score,
+                "contributions": contrib_list,
+                "is_top_candidate": m.is_top_candidate,
+                "recommended_keep": m.recommended_keep,
+                "member_decision": member_decision,
+                "selection_reason": m.selection_reason,
+                "balance_info": m.balance_info,
+            })
+
+    total_rows = len(all_rows)
+    total_pages = math.ceil(total_rows / page_size) if total_rows > 0 else 0
+    start = (page - 1) * page_size
+    end = start + page_size
+    page_rows = all_rows[start:end] if start < total_rows else []
+
+    return {
+        "scan_job_id": compilation.scan_job_id,
+        "preview_digest": preview_digest,
+        "scorer_config_digest": compilation.scorer_config_digest,
+        "source_snapshot_digest": compilation.source_snapshot_digest,
+        "decision_digest": compilation.decision_digest,
+        "effective_safety_policy": {
+            "protect_last_file": protect_last_file,
+        },
+        "summary": compilation.summary,
+        "page": page,
+        "page_size": page_size,
+        "total_rows": total_rows,
+        "total_pages": total_pages,
+        "rows": page_rows,
+    }

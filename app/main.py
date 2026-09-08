@@ -17,6 +17,7 @@ from app.config import Settings, get_settings
 from app.exceptions import PlanStaleError
 from app.service import FileCenterService
 from app.workflows.errors import WorkflowError
+from app.planning.dedupe_preview import DedupeError
 
 
 def _sanitize_validation_errors(obj: Any) -> Any:
@@ -54,8 +55,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ctx_err = err.get("ctx", {}).get("error")
             if isinstance(ctx_err, WorkflowError):
                 return JSONResponse(status_code=ctx_err.status_code, content=ctx_err.to_dict())
+            if isinstance(ctx_err, DedupeError):
+                return JSONResponse(status_code=ctx_err.status_code, content=ctx_err.to_dict())
         sanitized = _sanitize_validation_errors(exc.errors())
+        if "/dedupe-preview" in request.url.path:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": {
+                        "code": "DEDUPE_INVALID_CONFIG",
+                        "message": "Invalid dedupe preview request parameters",
+                        "details": sanitized,
+                    }
+                },
+            )
         return JSONResponse(status_code=422, content={"detail": sanitized})
+
+    @app.exception_handler(DedupeError)
+    async def dedupe_exception_handler(request: Request, exc: DedupeError):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=exc.to_dict(),
+        )
 
     @app.exception_handler(PlanStaleError)
     async def plan_stale_exception_handler(request: Request, exc: PlanStaleError):
