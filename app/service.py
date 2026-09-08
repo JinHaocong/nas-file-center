@@ -58,16 +58,23 @@ from app.workflows.errors import (
     WorkflowError,
     WorkflowNotFoundError,
 )
+from app.planning.dedupe_config import canonical_config_dict
+from app.planning.dedupe_generate import DedupeDraftIntent, build_advanced_dedupe_draft_intents
 from app.planning.dedupe_preview import (
+    DedupeEmptyPlanError,
     DedupeError,
     DedupeFactorUnavailableError,
     DedupeInvalidConfigError,
     DedupeLimitExceededError,
+    DedupePreviewChangedError,
     DedupeScanNotCompletedError,
     DedupeScanNotFoundError,
     build_preview_response,
+    canonicalize_effective_safety_policy,
     canonicalize_safety_path,
     compile_advanced_dedupe_preview,
+    compute_current_dedupe_db_lineage_digest,
+    compute_preview_digest,
 )
 from app.workflows.schema import WorkflowDefinition
 from app.workflows.validation import validate_raw_steps_types
@@ -3928,4 +3935,99 @@ class FileCenterService:
                 page=page,
                 page_size=page_size,
             )
+
+    def _capture_effective_dedupe_safety_snapshot(self) -> tuple[bool, tuple[Path, ...], Path | None, dict[str, Any]]:
+        protect_last_file = bool(getattr(self.settings, "protect_last_file", True))
+
+        raw_allowed = getattr(self.settings, "allowed_roots", None)
+        allowed_roots = tuple(
+            Path(canonicalize_safety_path(root))
+            for root in (raw_allowed or ())
+            if str(root).strip()
+        )
+
+        raw_quarantine = getattr(self.settings, "quarantine_root", None)
+        quarantine_root = (
+            Path(canonicalize_safety_path(raw_quarantine))
+            if raw_quarantine is not None and str(raw_quarantine).strip()
+            else None
+        )
+
+        policy = canonicalize_effective_safety_policy(
+            protect_last_file=protect_last_file,
+            allowed_roots=allowed_roots,
+            quarantine_root=quarantine_root,
+        )
+        return protect_last_file, allowed_roots, quarantine_root, policy
+
+    def create_advanced_dedupe_plan(
+        self,
+        scan_job_id: int,
+        *,
+        scorer_config: dict[str, Any],
+        expected_preview_digest: str,
+    ) -> dict[str, Any]:
+        protect_last_file, allowed_roots, quarantine_root, effective_safety_policy = (
+            self._capture_effective_dedupe_safety_snapshot()
+        )
+
+        with self.SessionLocal() as session:
+            compilation = compile_advanced_dedupe_preview(
+                session=session,
+                scan_job_id=scan_job_id,
+                config=scorer_config,
+                protect_last_file=protect_last_file,
+                allowed_roots=allowed_roots,
+                quarantine_root=quarantine_root,
+            )
+
+        actual_preview_digest = compute_preview_digest(
+            scan_job_id=compilation.scan_job_id,
+            scorer_config_digest=compilation.scorer_config_digest,
+            source_snapshot_digest=compilation.source_snapshot_digest,
+            decision_digest=compilation.decision_digest,
+            effective_safety_policy=effective_safety_policy,
+        )
+        if actual_preview_digest.lower() != expected_preview_digest.lower():
+            raise DedupePreviewChangedError(details={
+                "expected_preview_digest": expected_preview_digest.lower(),
+                "actual_preview_digest": actual_preview_digest,
+            })
+
+        if compilation.planned_quarantine_count == 0:
+            raise DedupeEmptyPlanError(details={
+                "scan_job_id": scan_job_id,
+                "preview_digest": actual_preview_digest,
+            })
+
+        intents = build_advanced_dedupe_draft_intents(
+            compilation,
+            protect_last_file=protect_last_file,
+        )
+        if len(intents) != compilation.planned_quarantine_count:
+            raise DedupeInvalidConfigError(
+                "Advanced dedupe intent count does not match compilation summary",
+                details={
+                    "planned_quarantine_count": compilation.planned_quarantine_count,
+                    "intent_count": len(intents),
+                },
+            )
+
+        plan = self._persist_advanced_dedupe_draft(
+            scan_job_id=scan_job_id,
+            compilation=compilation,
+            preview_digest=actual_preview_digest,
+            effective_safety_policy=effective_safety_policy,
+            intents=intents,
+        )
+
+        return {
+            "id": plan.id,
+            "plan_id": plan.id,
+            "status": plan.status,
+            "items": len(intents),
+            "expected_changes": plan.expected_changes,
+            "expected_reclaim_bytes": plan.expected_reclaim_bytes,
+            "preview_digest": actual_preview_digest,
+        }
 

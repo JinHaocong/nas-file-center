@@ -9,7 +9,12 @@ from sqlalchemy import func, select
 from app.config import Settings
 from app.models import BatchPlan, BatchPlanItem, DuplicateFile, DuplicateGroup, QuarantineEntry, ScanJob, WorkJob, utcnow
 from app.planning.dedupe_generate import DedupeDraftIntent, build_advanced_dedupe_draft_intents
-from app.planning.dedupe_preview import compile_advanced_dedupe_preview, compute_current_dedupe_db_lineage_digest
+from app.planning.dedupe_preview import (
+    DedupeEmptyPlanError,
+    DedupePreviewChangedError,
+    compile_advanced_dedupe_preview,
+    compute_current_dedupe_db_lineage_digest,
+)
 from app.service import FileCenterService
 
 
@@ -178,4 +183,47 @@ def test_draft_intents_never_carry_frozen_identity(service_env):
         assert "keep_scan_root_path" in meta
         assert "selection_reason" in meta
         assert "protected_dir" in meta
+
+
+def test_advanced_generate_bad_digest_stops_before_persistence(service_env, monkeypatch):
+    _create_duplicate_fixture(service_env, scan_id=310)
+    service = service_env["service"]
+    called = False
+
+    def forbidden_persist(**kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("persistence must not run on PREVIEW_CHANGED")
+
+    monkeypatch.setattr(service, "_persist_advanced_dedupe_draft", forbidden_persist, raising=False)
+    with pytest.raises(DedupePreviewChangedError) as exc_info:
+        service.create_advanced_dedupe_plan(
+            310,
+            scorer_config={},
+            expected_preview_digest="0" * 64,
+        )
+    assert exc_info.value.code == "PREVIEW_CHANGED"
+    assert called is False
+
+
+def test_advanced_generate_empty_compilation_stops_before_persistence(service_env, monkeypatch):
+    _create_completed_scan(service_env, scan_id=311)
+    service = service_env["service"]
+    called = False
+
+    def forbidden_persist(**kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("persistence must not run for empty advanced Generate")
+
+    monkeypatch.setattr(service, "_persist_advanced_dedupe_draft", forbidden_persist, raising=False)
+    preview = service.get_dedupe_preview(311, scorer_config={})
+    with pytest.raises(DedupeEmptyPlanError):
+        service.create_advanced_dedupe_plan(
+            311,
+            scorer_config={},
+            expected_preview_digest=preview["preview_digest"],
+        )
+    assert called is False
+
 
