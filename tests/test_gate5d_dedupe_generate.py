@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 
 from app.config import Settings
 from app.models import BatchPlan, BatchPlanItem, DuplicateFile, DuplicateGroup, QuarantineEntry, ScanJob, WorkJob, utcnow
+from app.planning.dedupe_generate import DedupeDraftIntent, build_advanced_dedupe_draft_intents
 from app.planning.dedupe_preview import compile_advanced_dedupe_preview, compute_current_dedupe_db_lineage_digest
 from app.service import FileCenterService
 
@@ -130,3 +131,51 @@ def test_db_lineage_digest_matches_fresh_db_read(service_env):
         )
         current = compute_current_dedupe_db_lineage_digest(session, 302)
     assert current == first.db_lineage_digest
+
+
+def test_draft_intents_are_server_derived_and_preserve_keep_path(service_env):
+    _create_duplicate_fixture(service_env, scan_id=305)
+    with service_env["SessionLocal"]() as session:
+        compilation = compile_advanced_dedupe_preview(
+            session, 305, {},
+            allowed_roots=service_env["settings"].allowed_roots,
+            quarantine_root=service_env["settings"].quarantine_root,
+            protect_last_file=service_env["settings"].protect_last_file,
+        )
+    intents = build_advanced_dedupe_draft_intents(compilation, protect_last_file=True)
+    assert len(intents) == compilation.planned_quarantine_count
+    assert [intent.sequence for intent in intents] == list(range(1, len(intents) + 1))
+    assert all(intent.operation == "quarantine" for intent in intents)
+    assert all(intent.keep_path for intent in intents)
+    assert all(intent.source_path != intent.keep_path for intent in intents)
+    assert all(intent.expected_size > 0 for intent in intents)
+
+
+def test_draft_intents_never_carry_frozen_identity(service_env):
+    _create_duplicate_fixture(service_env, scan_id=306)
+    with service_env["SessionLocal"]() as session:
+        compilation = compile_advanced_dedupe_preview(
+            session, 306, {},
+            allowed_roots=service_env["settings"].allowed_roots,
+            quarantine_root=service_env["settings"].quarantine_root,
+            protect_last_file=service_env["settings"].protect_last_file,
+        )
+    intents = build_advanced_dedupe_draft_intents(compilation, protect_last_file=True)
+    for intent in intents:
+        assert intent.expected_device == 0
+        assert intent.expected_inode == 0
+        assert intent.expected_mtime_ns == 0
+        assert intent.expected_hash is None
+
+    for intent in intents:
+        meta = json.loads(intent.metadata_json)
+        assert meta["scan_job_id"] == 306
+        assert "group_provenance_id" in meta
+        assert "group_decision_fingerprint" in meta
+        assert "scan_root_index" in meta
+        assert "scan_root_path" in meta
+        assert "keep_scan_root_index" in meta
+        assert "keep_scan_root_path" in meta
+        assert "selection_reason" in meta
+        assert "protected_dir" in meta
+
