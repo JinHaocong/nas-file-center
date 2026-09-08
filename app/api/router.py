@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.auth.dependencies import get_current_user, require_admin_user
 from app.batch.rename import RenameRule
@@ -14,10 +15,12 @@ from app.models import User
 from app.path_safety import UnsafePathError
 from app.service import StateConflictError
 from app.planning.dedupe_preview import (
+    DedupeEmptyPlanError,
     DedupeError,
     DedupeFactorUnavailableError,
     DedupeInvalidConfigError,
     DedupeLimitExceededError,
+    DedupePreviewChangedError,
     DedupeScanNotCompletedError,
     DedupeScanNotFoundError,
 )
@@ -118,9 +121,65 @@ class DedupePreviewRequest(BaseModel):
 
 
 class DedupePlanRequest(BaseModel):
-    policy: str = "balanced-roots"
+    model_config = ConfigDict(extra="forbid")
+
+    policy: str | None = None
     path_priority_patterns: list[str] | None = None
     relative_path_priority_patterns: list[str] | None = None
+    scorer_config: dict[str, Any] | None = None
+    expected_preview_digest: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_request_shape(cls, raw: Any) -> Any:
+        if type(raw) is not dict:
+            raise DedupeInvalidConfigError(
+                "Dedupe plan request must be a JSON object",
+                details={"field": "body"},
+            )
+
+        has_scorer = "scorer_config" in raw
+        has_expected = "expected_preview_digest" in raw
+        legacy_fields = (
+            "policy",
+            "path_priority_patterns",
+            "relative_path_priority_patterns",
+        )
+
+        if has_scorer:
+            scorer = raw.get("scorer_config")
+            if type(scorer) is not dict:
+                raise DedupeInvalidConfigError(
+                    "scorer_config must be an object for advanced Generate",
+                    details={"field": "scorer_config"},
+                )
+            mixed = [field for field in legacy_fields if field in raw]
+            if mixed:
+                raise DedupeInvalidConfigError(
+                    "Advanced and legacy dedupe request fields cannot be mixed",
+                    details={"mixed_fields": mixed},
+                )
+            digest = raw.get("expected_preview_digest")
+            if type(digest) is not str or re.fullmatch(r"[0-9a-fA-F]{64}", digest) is None:
+                raise DedupeInvalidConfigError(
+                    "expected_preview_digest must be exactly 64 hexadecimal characters",
+                    details={"field": "expected_preview_digest"},
+                )
+            return raw
+
+        if has_expected:
+            raise DedupeInvalidConfigError(
+                "expected_preview_digest requires scorer_config",
+                details={"field": "expected_preview_digest"},
+            )
+
+        normalized = dict(raw)
+        normalized.setdefault("policy", "balanced-roots")
+        return normalized
+
+    @property
+    def is_advanced(self) -> bool:
+        return self.scorer_config is not None
 
 
 class OrganizerProfileCreateRequest(BaseModel):

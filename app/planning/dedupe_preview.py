@@ -84,6 +84,16 @@ class DedupeFactorUnavailableError(DedupeError, ValueError):
         super().__init__(message=message, code="DEDUPE_FACTOR_UNAVAILABLE", details=details, status_code=422)
 
 
+class DedupePreviewChangedError(DedupeError):
+    def __init__(self, message: str = "Preview changed; run Preview again before generating a Draft", details: Any = None):
+        super().__init__(message=message, code="PREVIEW_CHANGED", details=details, status_code=409)
+
+
+class DedupeEmptyPlanError(DedupeError):
+    def __init__(self, message: str = "DEDUPE_EMPTY_PLAN: advanced dedupe produced no quarantine intents", details: Any = None):
+        super().__init__(message=message, code="DEDUPE_EMPTY_PLAN", details=details, status_code=422)
+
+
 def derive_canonical_top_level_dir(scan_root: str, relative_path: str) -> str:
     """Pure lexical derivation of top-level protected directory."""
     norm_root = normalize_dedupe_path(scan_root)

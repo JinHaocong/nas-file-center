@@ -58,13 +58,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if isinstance(ctx_err, DedupeError):
                 return JSONResponse(status_code=ctx_err.status_code, content=ctx_err.to_dict())
         sanitized = _sanitize_validation_errors(exc.errors())
-        if "/dedupe-preview" in request.url.path:
+        if "/dedupe-preview" in request.url.path or "/dedupe-plan" in request.url.path:
             return JSONResponse(
                 status_code=422,
                 content={
                     "error": {
                         "code": "DEDUPE_INVALID_CONFIG",
-                        "message": "Invalid dedupe preview request parameters",
+                        "message": "Invalid dedupe request parameters",
                         "details": sanitized,
                     }
                 },
