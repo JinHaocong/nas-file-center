@@ -204,6 +204,10 @@ def test_http_bad_digest_returns_409_and_zero_draft(api_test_env):
     )
     _assert_structured_dedupe_error(resp, status=409, code="PREVIEW_CHANGED")
     assert _count_plan_state(api_test_env["SessionLocal"]) == before
+    details = resp.json()["error"]["details"]
+    assert details["expected_preview_digest"] == "0" * 64
+    assert len(details["actual_preview_digest"]) == 64
+    assert details["actual_preview_digest"] != details["expected_preview_digest"]
 
 
 def test_http_empty_advanced_generate_returns_422_zero_draft(api_test_env):
@@ -243,4 +247,113 @@ def test_legacy_policy_request_still_calls_legacy_service(api_test_env, monkeypa
     )
     assert resp.status_code == 200
     assert calls == [(777, policy, None, None)]
+
+
+def test_scorer_change_after_preview_returns_preview_changed(api_test_env):
+    scan_id = 210
+    _setup_duplicate_test_data(api_test_env["SessionLocal"], api_test_env["data_dir"], scan_id=scan_id)
+    config_a = {"selection_mode": "weighted"}
+    config_b = {
+        "selection_mode": "weighted",
+        "factors": {"mtime": {"mode": "newest", "weight": 10}},
+    }
+    preview = api_test_env["client"].post(
+        f"/api/scans/{scan_id}/dedupe-preview",
+        json={"scorer_config": config_a},
+    ).json()
+    before = _count_plan_state(api_test_env["SessionLocal"])
+    resp = api_test_env["client"].post(
+        f"/api/scans/{scan_id}/dedupe-plan",
+        json={
+            "scorer_config": config_b,
+            "expected_preview_digest": preview["preview_digest"],
+        },
+    )
+    _assert_structured_dedupe_error(resp, status=409, code="PREVIEW_CHANGED")
+    assert _count_plan_state(api_test_env["SessionLocal"]) == before
+
+
+def test_scan_provenance_change_after_preview_returns_preview_changed(api_test_env):
+    scan_id = 211
+    _setup_duplicate_test_data(api_test_env["SessionLocal"], api_test_env["data_dir"], scan_id=scan_id)
+    preview = api_test_env["client"].post(
+        f"/api/scans/{scan_id}/dedupe-preview",
+        json={"scorer_config": {}},
+    ).json()
+    with api_test_env["SessionLocal"]() as session:
+        scan = session.get(ScanJob, scan_id)
+        assert scan is not None
+        scan.name = "changed-after-preview"
+        session.commit()
+    before = _count_plan_state(api_test_env["SessionLocal"])
+    resp = api_test_env["client"].post(
+        f"/api/scans/{scan_id}/dedupe-plan",
+        json={"scorer_config": {}, "expected_preview_digest": preview["preview_digest"]},
+    )
+    _assert_structured_dedupe_error(resp, status=409, code="PREVIEW_CHANGED")
+    assert _count_plan_state(api_test_env["SessionLocal"]) == before
+
+
+def test_filesystem_safety_change_after_preview_returns_preview_changed(api_test_env):
+    scan_id = 212
+    _setup_duplicate_test_data(api_test_env["SessionLocal"], api_test_env["data_dir"], scan_id=scan_id)
+    preview = api_test_env["client"].post(
+        f"/api/scans/{scan_id}/dedupe-preview",
+        json={"scorer_config": {}},
+    ).json()
+    with api_test_env["SessionLocal"]() as session:
+        victim = session.scalar(
+            select(DuplicateFile)
+            .join(DuplicateGroup)
+            .where(DuplicateGroup.scan_job_id == scan_id)
+            .order_by(DuplicateFile.id)
+        )
+        assert victim is not None
+        victim_path = Path(victim.absolute_path)
+    victim_path.unlink()
+    before = _count_plan_state(api_test_env["SessionLocal"])
+    resp = api_test_env["client"].post(
+        f"/api/scans/{scan_id}/dedupe-plan",
+        json={"scorer_config": {}, "expected_preview_digest": preview["preview_digest"]},
+    )
+    _assert_structured_dedupe_error(resp, status=409, code="PREVIEW_CHANGED")
+    assert _count_plan_state(api_test_env["SessionLocal"]) == before
+
+
+def test_effective_safety_authority_change_after_preview_returns_preview_changed(api_test_env, tmp_path: Path):
+    scan_id = 213
+    _setup_duplicate_test_data(api_test_env["SessionLocal"], api_test_env["data_dir"], scan_id=scan_id)
+    preview = api_test_env["client"].post(
+        f"/api/scans/{scan_id}/dedupe-preview",
+        json={"scorer_config": {}},
+    ).json()
+    new_quarantine = tmp_path / "new-quarantine"
+    new_quarantine.mkdir()
+    api_test_env["service"].settings.quarantine_root = new_quarantine
+    before = _count_plan_state(api_test_env["SessionLocal"])
+    resp = api_test_env["client"].post(
+        f"/api/scans/{scan_id}/dedupe-plan",
+        json={"scorer_config": {}, "expected_preview_digest": preview["preview_digest"]},
+    )
+    _assert_structured_dedupe_error(resp, status=409, code="PREVIEW_CHANGED")
+    assert _count_plan_state(api_test_env["SessionLocal"]) == before
+
+
+def test_protected_directory_count_change_after_preview_returns_preview_changed(api_test_env):
+    scan_id = 214
+    _setup_duplicate_test_data(api_test_env["SessionLocal"], api_test_env["data_dir"], scan_id=scan_id)
+    preview = api_test_env["client"].post(
+        f"/api/scans/{scan_id}/dedupe-preview",
+        json={"scorer_config": {}},
+    ).json()
+    extra = api_test_env["data_dir"] / "unrelated-file.bin"
+    extra.write_bytes(b"extra")
+    before = _count_plan_state(api_test_env["SessionLocal"])
+    resp = api_test_env["client"].post(
+        f"/api/scans/{scan_id}/dedupe-plan",
+        json={"scorer_config": {}, "expected_preview_digest": preview["preview_digest"]},
+    )
+    _assert_structured_dedupe_error(resp, status=409, code="PREVIEW_CHANGED")
+    assert _count_plan_state(api_test_env["SessionLocal"]) == before
+
 
