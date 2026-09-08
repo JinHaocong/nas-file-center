@@ -32,13 +32,10 @@ def capture_batch_utility_safety_snapshot(settings: Settings) -> BatchUtilitySaf
     )
 
 
-def build_batch_utility_preview_response(
+def compute_preview_digest_from_compilation(
     compilation: BatchUtilityCompilation,
     safety_snapshot: BatchUtilitySafetySnapshot,
-    *,
-    page: int,
-    page_size: int,
-) -> dict[str, Any]:
+) -> str:
     intents_dicts = [
         {
             "sequence": intent.sequence,
@@ -56,13 +53,23 @@ def build_batch_utility_preview_response(
         for intent in compilation.intents
     ]
 
-    preview_digest = compute_preview_digest(
+    return compute_preview_digest(
         action_config_digest=compilation.action_config_digest,
         source_snapshot_digest=compilation.source_snapshot_digest,
         effective_safety_policy=safety_snapshot.effective_policy,
         decision_rows=compilation.rows,
         intents=intents_dicts,
     )
+
+
+def build_batch_utility_preview_response(
+    compilation: BatchUtilityCompilation,
+    safety_snapshot: BatchUtilitySafetySnapshot,
+    *,
+    page: int,
+    page_size: int,
+) -> dict[str, Any]:
+    preview_digest = compute_preview_digest_from_compilation(compilation, safety_snapshot)
 
     total_items = len(compilation.rows)
     total_pages = 0 if total_items == 0 else math.ceil(total_items / page_size)

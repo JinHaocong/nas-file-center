@@ -105,8 +105,21 @@ from app.filters.media_types import get_media_type, normalize_extension
 from app.filters.validation import validate_filter_ast
 from app.filters.schema import FilterNode
 from app.batch_utilities.schema import QuarantineFilteredAction
-from app.batch_utilities.compiler import compile_quarantine_filtered_preview
-from app.batch_utilities.service import capture_batch_utility_safety_snapshot, build_batch_utility_preview_response
+from app.batch_utilities.compiler import (
+    compile_quarantine_filtered_preview,
+    compute_current_quarantine_filtered_db_lineage_digest,
+    BatchUtilitySafetySnapshot,
+    BatchUtilityCompilation,
+)
+from app.batch_utilities.service import (
+    capture_batch_utility_safety_snapshot,
+    build_batch_utility_preview_response,
+    compute_preview_digest_from_compilation,
+)
+from app.batch_utilities.errors import (
+    BatchUtilityPreviewChangedError,
+    BatchUtilityEmptyPlanError,
+)
 
 PLAN_SINGLE_DELETE_ALLOWED = {
     "draft",
@@ -4141,5 +4154,139 @@ class FileCenterService:
                 page=page,
                 page_size=page_size,
             )
+
+    def create_batch_utility_plan(
+        self,
+        *,
+        action: QuarantineFilteredAction,
+        expected_preview_digest: str,
+    ) -> dict[str, Any]:
+        # Phase A: Authoritative recompile outside write transaction
+        safety_snapshot = capture_batch_utility_safety_snapshot(self.settings)
+        with self.SessionLocal() as session:
+            compilation = compile_quarantine_filtered_preview(
+                session=session,
+                action=action,
+                safety_snapshot=safety_snapshot,
+            )
+
+        actual_preview_digest = compute_preview_digest_from_compilation(
+            compilation,
+            safety_snapshot,
+        )
+
+        expected_norm = (expected_preview_digest or "").strip().lower()
+        actual_norm = actual_preview_digest.strip().lower()
+        if expected_norm != actual_norm:
+            raise BatchUtilityPreviewChangedError(
+                "Preview digest mismatch during plan generation",
+                details={
+                    "expected_preview_digest": expected_preview_digest,
+                    "actual_preview_digest": actual_preview_digest,
+                },
+            )
+
+        if len(compilation.intents) == 0:
+            raise BatchUtilityEmptyPlanError(
+                "No actionable items to quarantine in batch utility action",
+                details={
+                    "matched_count": compilation.matched_count,
+                    "skipped_count": compilation.skipped_count,
+                    "safety_excluded_count": compilation.safety_excluded_count,
+                },
+            )
+
+        # Phase B: Short BEGIN IMMEDIATE persistence transaction
+        plan = self._persist_batch_utility_draft(
+            compilation=compilation,
+            preview_digest=actual_preview_digest,
+            safety_snapshot=safety_snapshot,
+        )
+
+        return {
+            "id": plan.id,
+            "plan_id": plan.id,
+            "status": plan.status,
+            "utility_action": "quarantine_filtered",
+            "expected_changes": plan.expected_changes,
+            "expected_reclaim_bytes": plan.expected_reclaim_bytes,
+            "preview_digest": actual_preview_digest,
+        }
+
+    def _persist_batch_utility_draft(
+        self,
+        *,
+        compilation: BatchUtilityCompilation,
+        preview_digest: str,
+        safety_snapshot: BatchUtilitySafetySnapshot,
+    ) -> BatchPlan:
+        with self.SessionLocal() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            current_lineage = compute_current_quarantine_filtered_db_lineage_digest(
+                session,
+                compilation.canonical_action,
+            )
+            if current_lineage != compilation.db_lineage_digest:
+                session.rollback()
+                raise BatchUtilityPreviewChangedError(
+                    "Database lineage changed before draft persistence",
+                    details={
+                        "expected_db_lineage_digest": compilation.db_lineage_digest,
+                        "actual_db_lineage_digest": current_lineage,
+                        "preview_digest": preview_digest,
+                    },
+                )
+
+            roots_meta = []
+            for rid in compilation.canonical_action.get("root_ids", []):
+                r = session.get(IndexRoot, rid)
+                if r:
+                    roots_meta.append({"index_root_id": r.id, "root": r.root})
+
+            plan_metadata = {
+                "source": "batch-utility",
+                "utility_action": "quarantine_filtered",
+                "utility_engine_version": 1,
+                "canonical_action_config": compilation.canonical_action,
+                "action_config_digest": compilation.action_config_digest,
+                "source_snapshot_digest": compilation.source_snapshot_digest,
+                "preview_digest": preview_digest,
+                "effective_safety_policy": safety_snapshot.effective_policy,
+                "canonical_filter": compilation.canonical_action.get("filter"),
+                "roots": roots_meta,
+                "summary": compilation.summary,
+            }
+
+            plan = BatchPlan(
+                name="batch-utility-quarantine-filtered",
+                kind="batch-utility",
+                status="draft",
+                expected_changes=len(compilation.intents),
+                expected_reclaim_bytes=compilation.expected_reclaim_bytes,
+                metadata_json=json.dumps(plan_metadata, ensure_ascii=False, sort_keys=True),
+            )
+            session.add(plan)
+            session.flush()
+
+            for intent in compilation.intents:
+                session.add(BatchPlanItem(
+                    plan_id=plan.id,
+                    sequence=intent.sequence,
+                    operation=intent.operation,
+                    source_path=intent.source_path,
+                    target_path=intent.target_path,
+                    keep_path=intent.keep_path,
+                    expected_size=intent.expected_size,
+                    expected_mtime_ns=intent.expected_mtime_ns,
+                    expected_device=intent.expected_device,
+                    expected_inode=intent.expected_inode,
+                    expected_hash=intent.expected_hash,
+                    state="planned",
+                    metadata_json=intent.metadata_json,
+                ))
+
+            session.commit()
+            session.refresh(plan)
+            return plan
 
 

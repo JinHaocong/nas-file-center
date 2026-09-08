@@ -1436,7 +1436,11 @@ def preview_batch_utility(
     try:
         req = BatchUtilityPreviewRequest.model_validate(payload)
     except ValidationError as ve:
-        err = BatchUtilityInvalidConfigError(f"Validation error: {ve}", details={"errors": ve.errors()})
+        safe_errors = [
+            {"loc": [str(x) for x in e.get("loc", ())], "msg": str(e.get("msg")), "type": str(e.get("type"))}
+            for e in ve.errors()
+        ]
+        err = BatchUtilityInvalidConfigError(f"Validation error: {ve}", details={"errors": safe_errors})
         return JSONResponse(status_code=err.status_code, content=err.to_dict())
     except Exception as e:
         err = BatchUtilityInvalidConfigError(f"Malformed request payload: {e}")
@@ -1455,5 +1459,39 @@ def preview_batch_utility(
     except Exception as e:
         err = BatchUtilityInvalidConfigError(str(e))
         return JSONResponse(status_code=err.status_code, content=err.to_dict())
+
+
+@router.post("/batch-utilities/generate-plan", status_code=201)
+def generate_batch_utility_plan(
+    request: Request,
+    payload: Any = Body(...),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        req = BatchUtilityGenerateRequest.model_validate(payload)
+    except ValidationError as ve:
+        safe_errors = [
+            {"loc": [str(x) for x in e.get("loc", ())], "msg": str(e.get("msg")), "type": str(e.get("type"))}
+            for e in ve.errors()
+        ]
+        err = BatchUtilityInvalidConfigError(f"Validation error: {ve}", details={"errors": safe_errors})
+        return JSONResponse(status_code=err.status_code, content=err.to_dict())
+    except Exception as e:
+        err = BatchUtilityInvalidConfigError(f"Malformed request payload: {e}")
+        return JSONResponse(status_code=err.status_code, content=err.to_dict())
+
+    service = request.app.state.service
+    try:
+        plan_data = service.create_batch_utility_plan(
+            action=req.action,
+            expected_preview_digest=req.expected_preview_digest,
+        )
+        return JSONResponse(status_code=201, content=plan_data)
+    except BatchUtilityError as bu_err:
+        return JSONResponse(status_code=bu_err.status_code, content=bu_err.to_dict())
+    except Exception as e:
+        err = BatchUtilityInvalidConfigError(str(e))
+        return JSONResponse(status_code=err.status_code, content=err.to_dict())
+
 
 
