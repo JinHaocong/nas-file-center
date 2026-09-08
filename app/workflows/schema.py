@@ -183,7 +183,39 @@ class DedupeStep(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str
     type: Literal["dedupe"] = "dedupe"
-    scorer_config: dict[str, Any] = Field(default_factory=dict)
+    scorer_config: dict[str, Any]
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_explicit_scorer_config(cls, data: Any) -> Any:
+        from app.workflows.errors import WorkflowValidationError
+
+        if isinstance(data, dict):
+            if data.get("type") is not None and data.get("type") != "dedupe":
+                return data
+            if "scorer_config" not in data:
+                raise WorkflowValidationError(
+                    "Dedupe step requires explicit scorer_config",
+                    code="DEDUPE_INVALID_CONFIG",
+                    status_code=422,
+                )
+            if not isinstance(data.get("scorer_config"), dict):
+                raise WorkflowValidationError(
+                    "scorer_config must be a dictionary",
+                    code="DEDUPE_INVALID_CONFIG",
+                    status_code=422,
+                )
+        elif hasattr(data, "scorer_config"):
+            if getattr(data, "type", None) not in (None, "dedupe"):
+                return data
+            cfg = getattr(data, "scorer_config")
+            if cfg is None or not isinstance(cfg, dict):
+                raise WorkflowValidationError(
+                    "scorer_config must be a dictionary",
+                    code="DEDUPE_INVALID_CONFIG",
+                    status_code=422,
+                )
+        return data
 
 
 WorkflowStep = Union[

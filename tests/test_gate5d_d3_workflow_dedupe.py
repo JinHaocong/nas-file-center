@@ -1770,3 +1770,192 @@ def test_32_phase_b_zero_filesystem_and_scoring_calls(workflow_test_env):
     assert gen_res.status_code == 201
 
 
+# 33. DedupeStep missing scorer_config is rejected on create (A)
+def test_33_dedupe_step_missing_scorer_config_rejected_on_create(workflow_test_env):
+    client = workflow_test_env["client"]
+    service = workflow_test_env["service"]
+
+    with service.SessionLocal() as session:
+        initial_wf_count = session.scalar(select(func.count(Workflow.id))) or 0
+        initial_rev_count = session.scalar(select(func.count(WorkflowRevision.id))) or 0
+
+    res = client.post(
+        "/api/workflows",
+        json={
+            "name": "Missing Scorer Create WF",
+            "definition": {
+                "schema_version": 1,
+                "mode": "dedupe",
+                "steps": [
+                    {
+                        "id": "d1",
+                        "type": "dedupe",
+                    }
+                ],
+            },
+        },
+    )
+    assert res.status_code == 422
+    data = res.json()
+    assert data["error"]["code"] == "DEDUPE_INVALID_CONFIG"
+
+    with service.SessionLocal() as session:
+        wf_count = session.scalar(select(func.count(Workflow.id))) or 0
+        rev_count = session.scalar(select(func.count(WorkflowRevision.id))) or 0
+        assert wf_count == initial_wf_count
+        assert rev_count == initial_rev_count
+
+
+# 34. DedupeStep missing scorer_config is rejected on update (B)
+def test_34_dedupe_step_missing_scorer_config_rejected_on_update(workflow_test_env):
+    client = workflow_test_env["client"]
+    service = workflow_test_env["service"]
+
+    # 1. Create a valid workflow with explicit scorer_config: {}
+    create_res = client.post(
+        "/api/workflows",
+        json={
+            "name": "Explicit Scorer WF",
+            "description": "Initial valid description",
+            "definition": {
+                "schema_version": 1,
+                "mode": "dedupe",
+                "steps": [
+                    {
+                        "id": "d1",
+                        "type": "dedupe",
+                        "scorer_config": {},
+                    }
+                ],
+            },
+        },
+    )
+    assert create_res.status_code == 201
+    wf_id = create_res.json()["id"]
+
+    # Record baseline state
+    with service.SessionLocal() as session:
+        wf_before = session.get(Workflow, wf_id)
+        assert wf_before.current_revision == 1
+        initial_name = wf_before.name
+        initial_desc = wf_before.description
+        rev1 = session.scalars(select(WorkflowRevision).where(WorkflowRevision.workflow_id == wf_id)).one()
+        initial_definition_sha256 = rev1.definition_sha256
+
+    # 2. PUT with missing scorer_config
+    up_res = client.put(
+        f"/api/workflows/{wf_id}",
+        json={
+            "expected_current_revision": 1,
+            "name": "Attempted Name Change",
+            "description": "Attempted Description Change",
+            "definition": {
+                "schema_version": 1,
+                "mode": "dedupe",
+                "steps": [
+                    {
+                        "id": "d1",
+                        "type": "dedupe",
+                    }
+                ],
+            },
+        },
+    )
+    assert up_res.status_code == 422
+    data = up_res.json()
+    assert data["error"]["code"] == "DEDUPE_INVALID_CONFIG"
+
+    # Verify unchanged workflow and revision state
+    with service.SessionLocal() as session:
+        wf_after = session.get(Workflow, wf_id)
+        assert wf_after.current_revision == 1
+        assert wf_after.name == initial_name
+        assert wf_after.description == initial_desc
+        revs = session.scalars(select(WorkflowRevision).where(WorkflowRevision.workflow_id == wf_id)).all()
+        assert len(revs) == 1
+        assert revs[0].definition_sha256 == initial_definition_sha256
+
+
+# 35. DedupeStep explicit empty scorer_config is valid and canonicalized (C)
+def test_35_dedupe_step_explicit_empty_scorer_config_valid_and_canonicalized(workflow_test_env):
+    client = workflow_test_env["client"]
+    service = workflow_test_env["service"]
+
+    res = client.post(
+        "/api/workflows",
+        json={
+            "name": "Canonical Config WF",
+            "definition": {
+                "schema_version": 1,
+                "mode": "dedupe",
+                "steps": [
+                    {
+                        "id": "d1",
+                        "type": "dedupe",
+                        "scorer_config": {},
+                    }
+                ],
+            },
+        },
+    )
+    assert res.status_code == 201
+    wf_id = res.json()["id"]
+
+    with service.SessionLocal() as session:
+        rev = session.scalars(select(WorkflowRevision).where(WorkflowRevision.workflow_id == wf_id)).one()
+        step = json.loads(rev.definition_json)["steps"][0]
+        assert "scorer_config" in step
+        cfg = step["scorer_config"]
+        # Canonical config has selection_mode and factors
+        assert cfg.get("selection_mode") == "weighted"
+        assert "factors" in cfg
+
+
+# 36. Historical / saved canonical config preview and generate (D)
+def test_36_saved_canonical_config_preview_and_generate(workflow_test_env):
+    client = workflow_test_env["client"]
+    scan_id = 3601
+    _setup_duplicate_test_data(
+        workflow_test_env["SessionLocal"],
+        workflow_test_env["data_dir"],
+        scan_id=scan_id,
+    )
+
+    wf = client.post(
+        "/api/workflows",
+        json={
+            "name": "Preview Generate Explicit Config WF",
+            "definition": {
+                "schema_version": 1,
+                "mode": "dedupe",
+                "steps": [{"id": "s1", "type": "dedupe", "scorer_config": {}}],
+            },
+        },
+    ).json()
+
+    # Preview succeeds
+    prev = client.post(
+        f"/api/workflows/{wf['id']}/preview",
+        json={"runtime_inputs": {"scan_job_id": scan_id}},
+    )
+    assert prev.status_code == 200
+    prev_data = prev.json()
+    assert prev_data["workflow_mode"] == "dedupe"
+    assert prev_data["dedupe_summary"] is not None
+    assert prev_data["dedupe_summary"]["preview_digest"] is not None
+
+    # Generate succeeds with expected_compile_digest
+    gen = client.post(
+        f"/api/workflows/{wf['id']}/generate-plan",
+        json={
+            "runtime_inputs": {"scan_job_id": scan_id},
+            "expected_compile_digest": prev_data["compile_digest"],
+        },
+    )
+    assert gen.status_code == 201
+    gen_data = gen.json()
+    assert gen_data["plan_id"] > 0
+    assert gen_data["status"] == "draft"
+
+
+
