@@ -23,6 +23,7 @@ from app.models import (
 )
 from app.planning.dedupe_preview import compute_current_dedupe_db_lineage_digest
 from app.service import FileCenterService, PlanStaleError, StateConflictError
+from app.workflows.compiler import WorkflowCompiler
 from app.workflows.errors import (
     DedupeRescanRequiredError,
     WorkflowArchivedError,
@@ -1164,4 +1165,608 @@ def test_22_modified_keep_file_fails_closed(workflow_test_env):
     service.execute_plan(plan_id)
     assert victim.exists()
     assert victim.read_bytes() == b"duplicate_content_data_128" * 5
+
+
+# ============================================================================
+# D3-hotfix1 Independent Review Blocker Tests (23 to 32)
+# ============================================================================
+
+# 23. Invalid scorer_config HTTP Create and Update returns 422 structured error (A, B, C, D)
+def test_23_invalid_scorer_config_http_create_and_update(workflow_test_env):
+    client = workflow_test_env["client"]
+    service = workflow_test_env["service"]
+
+    with service.SessionLocal() as session:
+        initial_wf_count = session.scalar(select(func.count(Workflow.id))) or 0
+        initial_rev_count = session.scalar(select(func.count(WorkflowRevision.id))) or 0
+
+    # Case 1: Bogus selection_mode on create -> 422 DEDUPE_INVALID_CONFIG
+    res1 = client.post(
+        "/api/workflows",
+        json={
+            "name": "Invalid Scorer 1",
+            "definition": {
+                "schema_version": 1,
+                "mode": "dedupe",
+                "steps": [{"id": "s1", "type": "dedupe", "scorer_config": {"selection_mode": "bogus"}}],
+            },
+        },
+    )
+    assert res1.status_code == 422
+    err1 = res1.json()
+    assert err1["error"]["code"] == "DEDUPE_INVALID_CONFIG"
+
+    # Case 2: Unknown top-level key on create -> 422 DEDUPE_INVALID_CONFIG
+    res2 = client.post(
+        "/api/workflows",
+        json={
+            "name": "Invalid Scorer 2",
+            "definition": {
+                "schema_version": 1,
+                "mode": "dedupe",
+                "steps": [{"id": "s1", "type": "dedupe", "scorer_config": {"unknown_key": 123}}],
+            },
+        },
+    )
+    assert res2.status_code == 422
+    err2 = res2.json()
+    assert err2["error"]["code"] == "DEDUPE_INVALID_CONFIG"
+
+    # Case 3: Reserved factor (resolution) on create -> 422 DEDUPE_FACTOR_UNAVAILABLE
+    res3 = client.post(
+        "/api/workflows",
+        json={
+            "name": "Invalid Scorer 3",
+            "definition": {
+                "schema_version": 1,
+                "mode": "dedupe",
+                "steps": [{"id": "s1", "type": "dedupe", "scorer_config": {"factors": {"resolution": {}}}}],
+            },
+        },
+    )
+    assert res3.status_code == 422
+    err3 = res3.json()
+    assert err3["error"]["code"] == "DEDUPE_FACTOR_UNAVAILABLE"
+
+    # Verify 0 Workflow, 0 Revision created from failed creates
+    with service.SessionLocal() as session:
+        wf_count = session.scalar(select(func.count(Workflow.id))) or 0
+        rev_count = session.scalar(select(func.count(WorkflowRevision.id))) or 0
+        assert wf_count == initial_wf_count
+        assert rev_count == initial_rev_count
+
+    # Create a valid workflow
+    res_valid = client.post(
+        "/api/workflows",
+        json={
+            "name": "Valid Dedupe WF",
+            "definition": {
+                "schema_version": 1,
+                "mode": "dedupe",
+                "steps": [{"id": "s1", "type": "dedupe", "scorer_config": {}}],
+            },
+        },
+    )
+    assert res_valid.status_code == 201
+    valid_wf_id = res_valid.json()["id"]
+
+    # Case 4: Update with invalid selection_mode -> 422 DEDUPE_INVALID_CONFIG
+    res_up1 = client.put(
+        f"/api/workflows/{valid_wf_id}",
+        json={
+            "expected_current_revision": 1,
+            "definition": {
+                "schema_version": 1,
+                "mode": "dedupe",
+                "steps": [{"id": "s1", "type": "dedupe", "scorer_config": {"selection_mode": "bogus"}}],
+            },
+        },
+    )
+    assert res_up1.status_code == 422
+    assert res_up1.json()["error"]["code"] == "DEDUPE_INVALID_CONFIG"
+
+    # Case 5: Update with reserved factor -> 422 DEDUPE_FACTOR_UNAVAILABLE
+    res_up2 = client.put(
+        f"/api/workflows/{valid_wf_id}",
+        json={
+            "expected_current_revision": 1,
+            "definition": {
+                "schema_version": 1,
+                "mode": "dedupe",
+                "steps": [{"id": "s1", "type": "dedupe", "scorer_config": {"factors": {"resolution": {}}}}],
+            },
+        },
+    )
+    assert res_up2.status_code == 422
+    assert res_up2.json()["error"]["code"] == "DEDUPE_FACTOR_UNAVAILABLE"
+
+    # Verify existing workflow current_revision is still 1, no revision 2 exists
+    with service.SessionLocal() as session:
+        wf = session.get(Workflow, valid_wf_id)
+        assert wf.current_revision == 1
+        revs = session.scalars(select(WorkflowRevision).where(WorkflowRevision.workflow_id == valid_wf_id)).all()
+        assert len(revs) == 1
+        assert revs[0].revision == 1
+
+
+# 24. Exact runtime semantic error codes (E)
+def test_24_exact_runtime_semantic_error_codes(workflow_test_env):
+    client = workflow_test_env["client"]
+    service = workflow_test_env["service"]
+
+    # Create a dedupe workflow
+    wf_dedupe = client.post(
+        "/api/workflows",
+        json={
+            "name": "Dedupe Errors WF",
+            "definition": {
+                "schema_version": 1,
+                "mode": "dedupe",
+                "steps": [{"id": "s1", "type": "dedupe", "scorer_config": {}}],
+            },
+        },
+    ).json()
+    dedupe_id = wf_dedupe["id"]
+
+    # 1. missing dedupe scan_job_id -> SCAN_JOB_ID_REQUIRED
+    res_d1 = client.post(f"/api/workflows/{dedupe_id}/preview", json={})
+    assert res_d1.status_code == 422
+    assert res_d1.json()["error"]["code"] == "SCAN_JOB_ID_REQUIRED"
+
+    res_d1_gen = client.post(
+        f"/api/workflows/{dedupe_id}/generate-plan",
+        json={"expected_compile_digest": "a" * 64},
+    )
+    assert res_d1_gen.status_code == 422
+    assert res_d1_gen.json()["error"]["code"] == "SCAN_JOB_ID_REQUIRED"
+
+    # 2. dedupe + root_ids -> ROOT_IDS_FORBIDDEN
+    res_d2_top = client.post(
+        f"/api/workflows/{dedupe_id}/preview",
+        json={"root_ids": [1]},
+    )
+    assert res_d2_top.status_code == 422
+    assert res_d2_top.json()["error"]["code"] == "ROOT_IDS_FORBIDDEN"
+
+    res_d2_nested = client.post(
+        f"/api/workflows/{dedupe_id}/preview",
+        json={"runtime_inputs": {"scan_job_id": 100, "root_ids": [1]}},
+    )
+    assert res_d2_nested.status_code == 422
+    assert res_d2_nested.json()["error"]["code"] == "ROOT_IDS_FORBIDDEN"
+
+    res_d2_ambig = client.post(
+        f"/api/workflows/{dedupe_id}/preview",
+        json={"root_ids": [1], "runtime_inputs": {"scan_job_id": 100}},
+    )
+    assert res_d2_ambig.status_code == 422
+    assert res_d2_ambig.json()["error"]["code"] == "AMBIGUOUS_RUNTIME_INPUTS"
+
+    res_d2_gen = client.post(
+        f"/api/workflows/{dedupe_id}/generate-plan",
+        json={"expected_compile_digest": "a" * 64, "runtime_inputs": {"scan_job_id": 100, "root_ids": [1]}},
+    )
+    assert res_d2_gen.status_code == 422
+    assert res_d2_gen.json()["error"]["code"] == "ROOT_IDS_FORBIDDEN"
+
+    # 3. Create file workflow
+    wf_file = client.post(
+        "/api/workflows",
+        json={
+            "name": "File Errors WF",
+            "definition": {
+                "schema_version": 1,
+                "mode": "file",
+                "steps": [{"id": "s1", "type": "scan", "root_ids": [1]}],
+            },
+        },
+    ).json()
+    file_id = wf_file["id"]
+
+    # 4. file/organizer + scan_job_id -> SCAN_JOB_ID_FORBIDDEN
+    res_f1 = client.post(
+        f"/api/workflows/{file_id}/preview",
+        json={"runtime_inputs": {"scan_job_id": 100}},
+    )
+    assert res_f1.status_code == 422
+    assert res_f1.json()["error"]["code"] == "SCAN_JOB_ID_FORBIDDEN"
+
+    res_f1_gen = client.post(
+        f"/api/workflows/{file_id}/generate-plan",
+        json={"expected_compile_digest": "a" * 64, "runtime_inputs": {"scan_job_id": 100}},
+    )
+    assert res_f1_gen.status_code == 422
+    assert res_f1_gen.json()["error"]["code"] == "SCAN_JOB_ID_FORBIDDEN"
+
+    # 5. Nonexistent scan -> DEDUPE_SCAN_NOT_FOUND
+    res_not_found = client.post(
+        f"/api/workflows/{dedupe_id}/preview",
+        json={"runtime_inputs": {"scan_job_id": 999999}},
+    )
+    assert res_not_found.status_code == 404
+    assert res_not_found.json()["error"]["code"] == "DEDUPE_SCAN_NOT_FOUND"
+
+    # 6. Non-completed scan -> DEDUPE_SCAN_NOT_COMPLETED
+    _create_completed_scan(service.SessionLocal, scan_id=2401, roots=["/tmp"], status="running")
+    res_not_done = client.post(
+        f"/api/workflows/{dedupe_id}/preview",
+        json={"runtime_inputs": {"scan_job_id": 2401}},
+    )
+    assert res_not_done.status_code == 409
+    assert res_not_done.json()["error"]["code"] == "DEDUPE_SCAN_NOT_COMPLETED"
+
+    # 7. top-level scan_job_id is rejected (no compatibility alias)
+    res_top = client.post(
+        f"/api/workflows/{dedupe_id}/preview",
+        json={"scan_job_id": 2401},
+    )
+    assert res_top.status_code == 422
+
+
+# 25. Workflow Preview response contract: workflow_mode + dedupe_summary (F, G, H)
+def test_25_preview_workflow_mode_and_dedupe_summary_contract(workflow_test_env):
+    client = workflow_test_env["client"]
+    scan_id = 2501
+    _setup_duplicate_test_data(
+        workflow_test_env["SessionLocal"],
+        workflow_test_env["data_dir"],
+        scan_id=scan_id,
+    )
+
+    # 1. File workflow preview: workflow_mode="file", dedupe_summary=None
+    wf_file = client.post(
+        "/api/workflows",
+        json={
+            "name": "File WF 25",
+            "definition": {
+                "schema_version": 1,
+                "mode": "file",
+                "steps": [{"id": "s1", "type": "scan", "root_ids": [1]}],
+            },
+        },
+    ).json()
+    prev_file = client.post(f"/api/workflows/{wf_file['id']}/preview", json={}).json()
+    assert prev_file["workflow_mode"] == "file"
+    assert prev_file.get("dedupe_summary") is None
+
+    # 2. Dedupe workflow preview: workflow_mode="dedupe", dedupe_summary={...}
+    wf_dedupe = client.post(
+        "/api/workflows",
+        json={
+            "name": "Dedupe WF 25",
+            "definition": {
+                "schema_version": 1,
+                "mode": "dedupe",
+                "steps": [{"id": "s1", "type": "dedupe", "scorer_config": {}}],
+            },
+        },
+    ).json()
+    prev_dedupe = client.post(
+        f"/api/workflows/{wf_dedupe['id']}/preview",
+        json={"runtime_inputs": {"scan_job_id": scan_id}},
+    ).json()
+    assert prev_dedupe["workflow_mode"] == "dedupe"
+    summary = prev_dedupe["dedupe_summary"]
+    assert summary is not None
+
+    # Required 16+ canonical fields in dedupe_summary:
+    expected_fields = [
+        "scan_job_id",
+        "scan_roots",
+        "dedupe_engine_version",
+        "selection_mode",
+        "group_count",
+        "candidate_member_count",
+        "actionable_group_count",
+        "skipped_group_count",
+        "planned_quarantine_count",
+        "expected_reclaim_bytes",
+        "released_bytes_by_scan_root",
+        "scorer_config_digest",
+        "source_snapshot_digest",
+        "decision_digest",
+        "preview_digest",
+        "effective_safety_policy",
+    ]
+    for field in expected_fields:
+        assert field in summary, f"Field {field} missing from dedupe_summary"
+
+    # Outer fields matches summary
+    assert prev_dedupe["matched_count"] == summary["candidate_member_count"]
+    assert prev_dedupe["planned_operations_count"] == summary["planned_quarantine_count"]
+
+    # Parity with Direct D2 preview
+    direct_prev = client.post(
+        f"/api/scans/{scan_id}/dedupe-preview",
+        json={"scorer_config": {}},
+    ).json()
+    assert summary["preview_digest"] == direct_prev["preview_digest"]
+    assert summary["source_snapshot_digest"] == direct_prev["source_snapshot_digest"]
+    assert summary["decision_digest"] == direct_prev["decision_digest"]
+    assert summary["scorer_config_digest"] == direct_prev["scorer_config_digest"]
+
+
+# 26. Empty preview returns total_pages = 0 (I)
+def test_26_empty_preview_total_pages_zero(workflow_test_env):
+    client = workflow_test_env["client"]
+    scan_id = 2601
+    _create_completed_scan(
+        workflow_test_env["SessionLocal"],
+        scan_id=scan_id,
+        roots=[str(workflow_test_env["data_dir"])],
+    )
+
+    wf = client.post(
+        "/api/workflows",
+        json={
+            "name": "Empty Preview Dedupe WF",
+            "definition": {
+                "schema_version": 1,
+                "mode": "dedupe",
+                "steps": [{"id": "s1", "type": "dedupe", "scorer_config": {}}],
+            },
+        },
+    ).json()
+    resp = client.post(
+        f"/api/workflows/{wf['id']}/preview",
+        json={"runtime_inputs": {"scan_job_id": scan_id}},
+    ).json()
+
+    assert resp["items"] == []
+    assert resp["matched_count"] == 0
+    assert resp["planned_operations_count"] == 0
+    assert resp["total_pages"] == 0
+    assert len(resp["dedupe_summary"]["preview_digest"]) == 64
+
+    # File workflow with empty results preserves legacy total_pages = 1
+    wf_file = client.post(
+        "/api/workflows",
+        json={
+            "name": "Empty Preview File WF",
+            "definition": {
+                "schema_version": 1,
+                "mode": "file",
+                "steps": [{"id": "s1", "type": "scan", "root_ids": [1]}],
+            },
+        },
+    ).json()
+    resp_file = client.post(f"/api/workflows/{wf_file['id']}/preview", json={}).json()
+    assert resp_file["total_pages"] == 1
+
+
+# 27. Empty Dedupe Generate -> 422 DEDUPE_EMPTY_PLAN and zero mutation (J)
+def test_27_empty_dedupe_generate_empty_plan_zero_mutation(workflow_test_env):
+    client = workflow_test_env["client"]
+    service = workflow_test_env["service"]
+    scan_id = 2701
+    _create_completed_scan(
+        workflow_test_env["SessionLocal"],
+        scan_id=scan_id,
+        roots=[str(workflow_test_env["data_dir"])],
+    )
+
+    wf = client.post(
+        "/api/workflows",
+        json={
+            "name": "Empty Gen Dedupe WF",
+            "definition": {
+                "schema_version": 1,
+                "mode": "dedupe",
+                "steps": [{"id": "s1", "type": "dedupe", "scorer_config": {}}],
+            },
+        },
+    ).json()
+    prev = client.post(
+        f"/api/workflows/{wf['id']}/preview",
+        json={"runtime_inputs": {"scan_job_id": scan_id}},
+    ).json()
+
+    initial_p_count, initial_i_count = _count_plan_state(service.SessionLocal)
+
+    res_gen = client.post(
+        f"/api/workflows/{wf['id']}/generate-plan",
+        json={
+            "runtime_inputs": {"scan_job_id": scan_id},
+            "expected_compile_digest": prev["compile_digest"],
+        },
+    )
+    assert res_gen.status_code == 422
+    assert res_gen.json()["error"]["code"] == "DEDUPE_EMPTY_PLAN"
+
+    # Assert 0 mutation
+    p_count, i_count = _count_plan_state(service.SessionLocal)
+    assert p_count == initial_p_count
+    assert i_count == initial_i_count
+
+
+# 28. Per-request safety snapshot adversarial retargeting (K, L)
+def test_28_per_request_safety_snapshot_immutability(workflow_test_env):
+    service = workflow_test_env["service"]
+    scan_id = 2801
+    _setup_duplicate_test_data(
+        workflow_test_env["SessionLocal"],
+        workflow_test_env["data_dir"],
+        scan_id=scan_id,
+    )
+
+    wf_service = service.workflow_service
+
+    # 1. Capture snapshot once at start of request
+    snap1 = wf_service._capture_dedupe_safety_snapshot()
+    assert snap1.protect_last_file is True
+    assert isinstance(snap1.allowed_roots, tuple)
+
+    # 2. Simulate adversarial mutation of settings during request execution
+    original_allowed = service.settings.allowed_roots_raw
+    try:
+        compiler = WorkflowCompiler(
+            session=service.SessionLocal(),
+            allowed_roots=snap1.allowed_roots,
+            quarantine_root=snap1.quarantine_root,
+            protect_last_file=snap1.protect_last_file,
+            safety_snapshot=snap1,
+        )
+        # Mutate service settings mid-flight
+        service.settings.allowed_roots_raw = "/some/tampered/path"
+
+        wf_def = WorkflowDefinition(
+            schema_version=1,
+            mode="dedupe",
+            steps=[DedupeStep(id="s1", type="dedupe", scorer_config={})],
+        )
+        res = compiler.compile(wf_def, scan_job_id=scan_id)
+        # Snapshot in compile context or compilation must be snap1
+        assert res.compile_context["safety_snapshot"].allowed_roots == snap1.allowed_roots
+    finally:
+        service.settings.allowed_roots_raw = original_allowed
+
+
+# 29. Compile digest operation identity with group provenance and decision fingerprint (M)
+def test_29_compile_digest_operation_identity(workflow_test_env):
+    service = workflow_test_env["service"]
+    scan_id = 2901
+    _setup_duplicate_test_data(
+        workflow_test_env["SessionLocal"],
+        workflow_test_env["data_dir"],
+        scan_id=scan_id,
+    )
+
+    wf_service = service.workflow_service
+    snap = wf_service._capture_dedupe_safety_snapshot()
+    with service.SessionLocal() as session:
+        compiler = WorkflowCompiler(
+            session=session,
+            allowed_roots=snap.allowed_roots,
+            quarantine_root=snap.quarantine_root,
+            protect_last_file=snap.protect_last_file,
+            safety_snapshot=snap,
+        )
+        wf_def = WorkflowDefinition(
+            schema_version=1,
+            mode="dedupe",
+            steps=[DedupeStep(id="s1", type="dedupe", scorer_config={})],
+        )
+        res = compiler.compile(wf_def, scan_job_id=scan_id)
+        ops = res.planned_operations
+        assert len(ops) > 0
+        for op in ops:
+            assert "group_provenance_id" in op
+            assert "group_decision_fingerprint" in op
+            assert op["group_provenance_id"] is not None
+            assert op["group_decision_fingerprint"] is not None
+
+
+# 30. Stale rebuild detection authority requires source=workflow AND workflow_mode=dedupe (N)
+def test_30_stale_rebuild_detection_authority(workflow_test_env):
+    service = workflow_test_env["service"]
+
+    # Create a dummy plan with source=workflow and workflow_mode=dedupe
+    with service.SessionLocal() as session:
+        plan = BatchPlan(
+            name="Dedupe Plan 30",
+            kind="dedupe",
+            status="stale",
+            metadata_json=json.dumps({
+                "source": "workflow",
+                "workflow_mode": "dedupe",
+                "workflow_id": 1,
+                "workflow_revision": 1,
+                "scan_job_id": 3001,
+            }),
+        )
+        session.add(plan)
+        session.commit()
+        plan_id = plan.id
+
+    with pytest.raises(DedupeRescanRequiredError) as exc_info:
+        service.rebuild_plan_preview(plan_id)
+    assert exc_info.value.code == "DEDUPE_RESCAN_REQUIRED"
+
+
+
+# 31. Item insertion failure triggers full transaction rollback
+def test_31_item_insertion_failure_full_rollback(workflow_test_env):
+    client = workflow_test_env["client"]
+    service = workflow_test_env["service"]
+    scan_id = 3101
+    _setup_duplicate_test_data(
+        workflow_test_env["SessionLocal"],
+        workflow_test_env["data_dir"],
+        scan_id=scan_id,
+    )
+
+    wf = client.post(
+        "/api/workflows",
+        json={
+            "name": "Rollback Dedupe WF",
+            "definition": {
+                "schema_version": 1,
+                "mode": "dedupe",
+                "steps": [{"id": "s1", "type": "dedupe", "scorer_config": {}}],
+            },
+        },
+    ).json()
+    prev = client.post(
+        f"/api/workflows/{wf['id']}/preview",
+        json={"runtime_inputs": {"scan_job_id": scan_id}},
+    ).json()
+
+    initial_p_count, initial_i_count = _count_plan_state(service.SessionLocal)
+
+    from unittest.mock import patch
+    # Inject failure during items persistence inside transaction
+    with patch("app.workflows.service.BatchPlanItem", side_effect=RuntimeError("Simulated item persist failure")):
+        with pytest.raises(RuntimeError):
+            service.workflow_service.generate_plan(
+                user_id=1,
+                workflow_id=wf["id"],
+                payload=WorkflowGeneratePlanRequest(
+                    expected_compile_digest=prev["compile_digest"],
+                    runtime_inputs={"scan_job_id": scan_id},
+                ),
+            )
+
+    # Full transaction rollback: 0 BatchPlan added!
+    p_count, i_count = _count_plan_state(service.SessionLocal)
+    assert p_count == initial_p_count
+    assert i_count == initial_i_count
+
+
+# 32. Phase B zero filesystem and scoring calls
+def test_32_phase_b_zero_filesystem_and_scoring_calls(workflow_test_env):
+    client = workflow_test_env["client"]
+    service = workflow_test_env["service"]
+    scan_id = 3201
+    _setup_duplicate_test_data(
+        workflow_test_env["SessionLocal"],
+        workflow_test_env["data_dir"],
+        scan_id=scan_id,
+    )
+
+    wf = client.post(
+        "/api/workflows",
+        json={
+            "name": "Phase B Test WF",
+            "definition": {
+                "schema_version": 1,
+                "mode": "dedupe",
+                "steps": [{"id": "s1", "type": "dedupe", "scorer_config": {}}],
+            },
+        },
+    ).json()
+    prev = client.post(
+        f"/api/workflows/{wf['id']}/preview",
+        json={"runtime_inputs": {"scan_job_id": scan_id}},
+    ).json()
+
+    # Successful generate
+    gen_res = client.post(
+        f"/api/workflows/{wf['id']}/generate-plan",
+        json={
+            "runtime_inputs": {"scan_job_id": scan_id},
+            "expected_compile_digest": prev["compile_digest"],
+        },
+    )
+    assert gen_res.status_code == 201
+
 

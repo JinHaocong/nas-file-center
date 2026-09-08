@@ -51,6 +51,14 @@ MAX_WORKFLOW_CANDIDATES = 50_000
 MAX_WORKFLOW_PLAN_ITEMS = 100_000
 
 
+@dataclass(frozen=True)
+class DedupeWorkflowSafetySnapshot:
+    protect_last_file: bool
+    allowed_roots: tuple[Path, ...]
+    quarantine_root: Path | None
+    effective_policy: dict[str, Any]
+
+
 @dataclass
 class CompilationResult:
     matched_count: int
@@ -68,11 +76,13 @@ class WorkflowCompiler:
         allowed_roots: Iterable[Path | str],
         quarantine_root: Path | str | None = None,
         protect_last_file: bool = True,
+        safety_snapshot: DedupeWorkflowSafetySnapshot | None = None,
     ):
         self.session = session
         self.allowed_roots = [str(r) for r in allowed_roots]
         self.quarantine_root = str(quarantine_root) if quarantine_root else None
         self.protect_last_file = protect_last_file
+        self.safety_snapshot = safety_snapshot
 
     def compile(
         self,
@@ -132,7 +142,8 @@ class WorkflowCompiler:
         if scan_job_id is None:
             raise WorkflowValidationError(
                 "runtime_inputs.scan_job_id is required for dedupe workflow",
-                code="SCAN_JOB_REQUIRED",
+                code="SCAN_JOB_ID_REQUIRED",
+                status_code=422,
             )
 
         scan = self.session.get(ScanJob, scan_job_id)
@@ -146,28 +157,42 @@ class WorkflowCompiler:
                 details={"scan_job_id": scan_job_id, "status": scan.status},
             )
 
-        allowed_roots = tuple(
-            Path(canonicalize_safety_path(root))
-            for root in self.allowed_roots
-            if str(root).strip()
-        )
-        quarantine_root = (
-            Path(canonicalize_safety_path(self.quarantine_root))
-            if self.quarantine_root and str(self.quarantine_root).strip()
-            else None
-        )
-        effective_safety_policy = canonicalize_effective_safety_policy(
-            protect_last_file=self.protect_last_file,
-            allowed_roots=allowed_roots,
-            quarantine_root=quarantine_root,
-        )
+        if self.safety_snapshot is not None:
+            allowed_roots = self.safety_snapshot.allowed_roots
+            quarantine_root = self.safety_snapshot.quarantine_root
+            protect_last_file = self.safety_snapshot.protect_last_file
+            effective_safety_policy = self.safety_snapshot.effective_policy
+            safety_snapshot = self.safety_snapshot
+        else:
+            allowed_roots = tuple(
+                Path(canonicalize_safety_path(root))
+                for root in self.allowed_roots
+                if str(root).strip()
+            )
+            quarantine_root = (
+                Path(canonicalize_safety_path(self.quarantine_root))
+                if self.quarantine_root and str(self.quarantine_root).strip()
+                else None
+            )
+            protect_last_file = self.protect_last_file
+            effective_safety_policy = canonicalize_effective_safety_policy(
+                protect_last_file=protect_last_file,
+                allowed_roots=allowed_roots,
+                quarantine_root=quarantine_root,
+            )
+            safety_snapshot = DedupeWorkflowSafetySnapshot(
+                protect_last_file=protect_last_file,
+                allowed_roots=allowed_roots,
+                quarantine_root=quarantine_root,
+                effective_policy=effective_safety_policy,
+            )
 
         dedupe_step: DedupeStep = definition.steps[0]  # type: ignore
         compilation = compile_advanced_dedupe_preview(
             session=self.session,
             scan_job_id=scan_job_id,
             config=dedupe_step.scorer_config,
-            protect_last_file=self.protect_last_file,
+            protect_last_file=protect_last_file,
             allowed_roots=allowed_roots,
             quarantine_root=quarantine_root,
         )
@@ -182,7 +207,7 @@ class WorkflowCompiler:
 
         intents = build_advanced_dedupe_draft_intents(
             compilation,
-            protect_last_file=self.protect_last_file,
+            protect_last_file=protect_last_file,
         )
 
         if len(intents) > max_plan_items:
@@ -191,17 +216,19 @@ class WorkflowCompiler:
                 details={"planned_operations_count": len(intents), "limit": max_plan_items},
             )
 
-        quarantine_operations = [
-            {
+        quarantine_operations = []
+        for it in intents:
+            meta = json.loads(it.metadata_json) if it.metadata_json else {}
+            quarantine_operations.append({
                 "sequence": it.sequence,
                 "operation": it.operation,
                 "source": it.source_path,
                 "target": None,
                 "keep_path": it.keep_path,
                 "expected_size": it.expected_size,
-            }
-            for it in intents
-        ]
+                "group_provenance_id": meta.get("group_provenance_id"),
+                "group_decision_fingerprint": meta.get("group_decision_fingerprint"),
+            })
 
         compile_payload = {
             "workflow_id": workflow_id,
@@ -306,6 +333,7 @@ class WorkflowCompiler:
                 "intents": intents,
                 "preview_digest": actual_preview_digest,
                 "effective_safety_policy": effective_safety_policy,
+                "safety_snapshot": safety_snapshot,
                 "all_rows": all_rows,
             },
         )

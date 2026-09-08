@@ -360,6 +360,7 @@ class WorkflowPreviewResponse(BaseModel):
     revision: int
     workflow_revision: int
     definition_sha256: str
+    workflow_mode: Literal["file", "organizer", "dedupe"] = "file"
     preview_source: Literal["index", "organizer-live-readonly", "completed-scan-readonly-safety"] = "index"
     live_filesystem_verified: Literal[False] = False
     compile_digest: str
@@ -370,6 +371,7 @@ class WorkflowPreviewResponse(BaseModel):
     page_size: int
     total_pages: int
     items: list[WorkflowPreviewItem]
+    dedupe_summary: dict[str, Any] | None = None
 
 
 class WorkflowGeneratePlanRequest(BaseModel):

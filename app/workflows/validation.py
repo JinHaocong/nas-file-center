@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.filters.validation import INT64_MAX, validate_filter_ast, FilterValidationError
 from app.models import IndexRoot
-from app.planning.dedupe_config import validate_and_canonicalize_config
+from app.planning.dedupe_config import canonical_config_dict, validate_and_canonicalize_config
 from app.workflows.errors import WorkflowValidationError
 from app.workflows.schema import (
     DedupeStep,
@@ -16,6 +16,7 @@ from app.workflows.schema import (
     OrganizeStep,
     QuarantineStep,
     RenameStep,
+    RuntimeInputs,
     ScanStep,
     TouchStep,
     WorkflowDefinition,
@@ -275,16 +276,79 @@ def _validate_single_step(step: WorkflowStep, idx: int, session: Session | None 
             )
 
     elif isinstance(step, DedupeStep):
-        try:
-            validate_and_canonicalize_config(step.scorer_config)
-        except ValueError as exc:
-            msg = str(exc)
-            code = "DEDUPE_INVALID_CONFIG"
-            if "DEDUPE_FACTOR_UNAVAILABLE" in msg:
-                code = "DEDUPE_FACTOR_UNAVAILABLE"
+        validate_and_canonicalize_workflow_scorer_config(step.scorer_config, step_idx=idx, step_id=step.id)
+
+
+def validate_and_canonicalize_workflow_scorer_config(
+    raw_config: Any,
+    *,
+    step_idx: int | None = None,
+    step_id: str | None = None,
+) -> dict[str, Any]:
+    """Validate and canonicalize scorer_config for dedupe workflow, mapping errors to 422 WorkflowValidationError."""
+    try:
+        cfg = validate_and_canonicalize_config(raw_config)
+        return canonical_config_dict(cfg)
+    except ValueError as exc:
+        msg = str(exc)
+        code = "DEDUPE_FACTOR_UNAVAILABLE" if "DEDUPE_FACTOR_UNAVAILABLE" in msg else "DEDUPE_INVALID_CONFIG"
+        details: dict[str, Any] = {"reason": msg}
+        if step_idx is not None:
+            details["index"] = step_idx
+        if step_id is not None:
+            details["step_id"] = step_id
+        raise WorkflowValidationError(
+            msg,
+            code=code,
+            details=details,
+            status_code=422,
+        ) from exc
+
+
+def resolve_mode_runtime_inputs(
+    mode: str,
+    root_ids: list[int] | None,
+    runtime_inputs: RuntimeInputs | None,
+) -> tuple[int | None, list[int] | None]:
+    """Resolve and validate runtime inputs based on workflow mode.
+
+    Returns:
+        tuple of (scan_job_id, effective_root_ids)
+    """
+    if mode == "dedupe":
+        if root_ids is not None or (runtime_inputs is not None and runtime_inputs.root_ids is not None):
             raise WorkflowValidationError(
-                msg,
-                code=code,
-                details={"index": idx, "step_id": step.id, "reason": msg},
-            ) from exc
+                "root_ids is forbidden in dedupe workflow mode",
+                code="ROOT_IDS_FORBIDDEN",
+                status_code=422,
+            )
+        if runtime_inputs is None or runtime_inputs.scan_job_id is None:
+            raise WorkflowValidationError(
+                "runtime_inputs.scan_job_id is required for dedupe workflow",
+                code="SCAN_JOB_ID_REQUIRED",
+                status_code=422,
+            )
+        return runtime_inputs.scan_job_id, None
+    elif mode in {"file", "organizer"}:
+        if runtime_inputs is not None and runtime_inputs.scan_job_id is not None:
+            raise WorkflowValidationError(
+                "scan_job_id is forbidden in file/organizer workflow mode",
+                code="SCAN_JOB_ID_FORBIDDEN",
+                status_code=422,
+            )
+        if root_ids is not None and runtime_inputs is not None:
+            raise WorkflowValidationError(
+                "Ambiguous root inputs: cannot provide both top-level 'root_ids' and 'runtime_inputs'",
+                code="AMBIGUOUS_RUNTIME_INPUTS",
+                status_code=422,
+            )
+        effective_roots = (
+            runtime_inputs.root_ids
+            if runtime_inputs and runtime_inputs.root_ids is not None
+            else root_ids
+        )
+        return None, effective_roots
+    else:
+        raise WorkflowValidationError(f"Unsupported workflow mode '{mode}'", code="UNSUPPORTED_MODE")
+
 

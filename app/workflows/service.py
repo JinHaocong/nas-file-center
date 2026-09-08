@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from math import ceil
+from pathlib import Path
 from typing import Any
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session, sessionmaker
@@ -9,8 +10,14 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.config import Settings
 from app.models import BatchPlan, BatchPlanItem, ScanJob, Workflow, WorkflowRevision, utcnow
 from app.planning.dedupe_config import canonical_config_dict, validate_and_canonicalize_config
-from app.planning.dedupe_preview import compute_current_dedupe_db_lineage_digest
+from app.planning.dedupe_preview import (
+    canonicalize_effective_safety_policy,
+    canonicalize_safety_path,
+    compute_current_dedupe_db_lineage_digest,
+    DedupeEmptyPlanError,
+)
 from app.workflows.compiler import (
+    DedupeWorkflowSafetySnapshot,
     MAX_WORKFLOW_CANDIDATES,
     MAX_WORKFLOW_PLAN_ITEMS,
     WorkflowCompiler,
@@ -34,13 +41,44 @@ from app.workflows.schema import (
     WorkflowRollbackRequest,
     WorkflowUpdateRequest,
 )
-from app.workflows.validation import validate_raw_steps_types, validate_workflow_definition
+from app.workflows.validation import (
+    resolve_mode_runtime_inputs,
+    validate_and_canonicalize_workflow_scorer_config,
+    validate_raw_steps_types,
+    validate_workflow_definition,
+)
 
 
 class WorkflowService:
     def __init__(self, session_factory: sessionmaker, settings: Settings):
         self.SessionLocal = session_factory
         self.settings = settings
+
+    def _capture_dedupe_safety_snapshot(self) -> DedupeWorkflowSafetySnapshot:
+        protect_last_file = bool(getattr(self.settings, "protect_last_file", True))
+        raw_allowed = getattr(self.settings, "allowed_roots", None) or ()
+        allowed_roots = tuple(
+            Path(canonicalize_safety_path(r))
+            for r in raw_allowed
+            if str(r).strip()
+        )
+        raw_quarantine = getattr(self.settings, "quarantine_root", None)
+        quarantine_root = (
+            Path(canonicalize_safety_path(raw_quarantine))
+            if raw_quarantine is not None and str(raw_quarantine).strip()
+            else None
+        )
+        effective_policy = canonicalize_effective_safety_policy(
+            protect_last_file=protect_last_file,
+            allowed_roots=allowed_roots,
+            quarantine_root=quarantine_root,
+        )
+        return DedupeWorkflowSafetySnapshot(
+            protect_last_file=protect_last_file,
+            allowed_roots=allowed_roots,
+            quarantine_root=quarantine_root,
+            effective_policy=effective_policy,
+        )
 
     def compile_workflow_definition(
         self,
@@ -51,13 +89,23 @@ class WorkflowService:
         definition_sha256: str,
         override_root_ids: list[int] | None = None,
         scan_job_id: int | None = None,
+        safety_snapshot: DedupeWorkflowSafetySnapshot | None = None,
     ):
-        protect_last_file = bool(getattr(self.settings, "protect_last_file", True))
+        if safety_snapshot is not None:
+            allowed_roots = safety_snapshot.allowed_roots
+            quarantine_root = safety_snapshot.quarantine_root
+            protect_last_file = safety_snapshot.protect_last_file
+        else:
+            protect_last_file = bool(getattr(self.settings, "protect_last_file", True))
+            allowed_roots = self.settings.allowed_roots
+            quarantine_root = self.settings.quarantine_root
+
         compiler = WorkflowCompiler(
             session=session,
-            allowed_roots=self.settings.allowed_roots,
-            quarantine_root=self.settings.quarantine_root,
+            allowed_roots=allowed_roots,
+            quarantine_root=quarantine_root,
             protect_last_file=protect_last_file,
+            safety_snapshot=safety_snapshot,
         )
         return compiler.compile(
             definition,
@@ -141,7 +189,7 @@ class WorkflowService:
             if payload.definition.mode == "dedupe":
                 step = payload.definition.steps[0]
                 if isinstance(step, DedupeStep):
-                    step.scorer_config = canonical_config_dict(validate_and_canonicalize_config(step.scorer_config))
+                    step.scorer_config = validate_and_canonicalize_workflow_scorer_config(step.scorer_config)
             # Semantic validation
             validate_workflow_definition(payload.definition, session)
 
@@ -223,7 +271,7 @@ class WorkflowService:
                 if payload.definition.mode == "dedupe":
                     step = payload.definition.steps[0]
                     if isinstance(step, DedupeStep):
-                        step.scorer_config = canonical_config_dict(validate_and_canonicalize_config(step.scorer_config))
+                        step.scorer_config = validate_and_canonicalize_workflow_scorer_config(step.scorer_config)
                 validate_workflow_definition(payload.definition, session)
                 raw_def = payload.definition.model_dump()
                 canon_json = canonical_json_dumps(raw_def)
@@ -443,37 +491,12 @@ class WorkflowService:
             validate_raw_steps_types(def_dict.get("steps", []), mode=mode)
             definition = WorkflowDefinition.model_validate(def_dict)
 
-            scan_job_id: int | None = None
-            effective_root_ids: list[int] | None = None
-
-            if definition.mode == "dedupe":
-                if payload.root_ids is not None or (payload.runtime_inputs is not None and payload.runtime_inputs.root_ids is not None):
-                    raise WorkflowValidationError(
-                        "root_ids is forbidden in dedupe workflow mode",
-                        code="INVALID_RUNTIME_INPUTS",
-                    )
-                if payload.runtime_inputs is None or payload.runtime_inputs.scan_job_id is None:
-                    raise WorkflowValidationError(
-                        "runtime_inputs.scan_job_id is required for dedupe workflow",
-                        code="SCAN_JOB_REQUIRED",
-                    )
-                scan_job_id = payload.runtime_inputs.scan_job_id
-            else:
-                if payload.runtime_inputs is not None and payload.runtime_inputs.scan_job_id is not None:
-                    raise WorkflowValidationError(
-                        "scan_job_id is forbidden in file/organizer workflow mode",
-                        code="INVALID_RUNTIME_INPUTS",
-                    )
-                if payload.root_ids is not None and payload.runtime_inputs is not None:
-                    raise WorkflowValidationError(
-                        "Ambiguous root inputs: cannot provide both top-level 'root_ids' and 'runtime_inputs'",
-                        code="AMBIGUOUS_RUNTIME_INPUTS",
-                    )
-                effective_root_ids = (
-                    payload.runtime_inputs.root_ids
-                    if payload.runtime_inputs and payload.runtime_inputs.root_ids is not None
-                    else payload.root_ids
-                )
+            scan_job_id, effective_root_ids = resolve_mode_runtime_inputs(
+                definition.mode,
+                payload.root_ids,
+                payload.runtime_inputs,
+            )
+            safety_snapshot = self._capture_dedupe_safety_snapshot() if definition.mode == "dedupe" else None
 
             res = self.compile_workflow_definition(
                 session=session,
@@ -483,6 +506,7 @@ class WorkflowService:
                 definition_sha256=rev.definition_sha256,
                 override_root_ids=effective_root_ids,
                 scan_job_id=scan_job_id,
+                safety_snapshot=safety_snapshot,
             )
 
             if definition.mode == "dedupe":
@@ -494,7 +518,7 @@ class WorkflowService:
 
                 total = len(selected_rows)
                 page_size = payload.page_size
-                total_pages = ceil(total / page_size) if total > 0 else 1
+                total_pages = ceil(total / page_size) if total > 0 else 0
                 start = (payload.page - 1) * page_size
                 end = start + page_size
                 page_items = selected_rows[start:end]
@@ -511,11 +535,36 @@ class WorkflowService:
                     for item in page_items
                 ]
 
+                compilation = res.compile_context["compilation"]
+                released_bytes_by_scan_root_formatted = {
+                    str(i): compilation.released_bytes_by_scan_root.get(i, 0)
+                    for i in range(len(compilation.scan_roots))
+                }
+                dedupe_summary = {
+                    "scan_job_id": compilation.scan_job_id,
+                    "scan_roots": list(compilation.scan_roots),
+                    "dedupe_engine_version": 1,
+                    "selection_mode": compilation.summary.get("selection_mode", compilation.scorer_config.selection_mode),
+                    "group_count": len(compilation.groups),
+                    "candidate_member_count": compilation.candidate_member_count,
+                    "actionable_group_count": compilation.actionable_group_count,
+                    "skipped_group_count": compilation.skipped_group_count,
+                    "planned_quarantine_count": compilation.planned_quarantine_count,
+                    "expected_reclaim_bytes": compilation.expected_reclaim_bytes,
+                    "released_bytes_by_scan_root": released_bytes_by_scan_root_formatted,
+                    "scorer_config_digest": compilation.scorer_config_digest,
+                    "source_snapshot_digest": compilation.source_snapshot_digest,
+                    "decision_digest": compilation.decision_digest,
+                    "preview_digest": res.compile_context["preview_digest"],
+                    "effective_safety_policy": res.compile_context["effective_safety_policy"],
+                }
+
                 return {
                     "workflow_id": wf.id,
                     "revision": target_revision,
                     "workflow_revision": target_revision,
                     "definition_sha256": rev.definition_sha256,
+                    "workflow_mode": "dedupe",
                     "preview_source": "completed-scan-readonly-safety",
                     "live_filesystem_verified": False,
                     "compile_digest": res.compile_digest,
@@ -526,6 +575,7 @@ class WorkflowService:
                     "page_size": page_size,
                     "total_pages": total_pages,
                     "items": preview_items,
+                    "dedupe_summary": dedupe_summary,
                 }
             else:
                 all_items = res.planned_operations
@@ -556,6 +606,7 @@ class WorkflowService:
                     "revision": target_revision,
                     "workflow_revision": target_revision,
                     "definition_sha256": rev.definition_sha256,
+                    "workflow_mode": definition.mode,
                     "preview_source": "organizer-live-readonly" if definition.mode == "organizer" else "index",
                     "live_filesystem_verified": False,
                     "compile_digest": res.compile_digest,
@@ -566,6 +617,7 @@ class WorkflowService:
                     "page_size": page_size,
                     "total_pages": total_pages,
                     "items": preview_items,
+                    "dedupe_summary": None,
                 }
 
     def generate_plan(
@@ -596,37 +648,12 @@ class WorkflowService:
             validate_raw_steps_types(def_dict.get("steps", []), mode=mode)
             definition = WorkflowDefinition.model_validate(def_dict)
 
-            scan_job_id: int | None = None
-            effective_root_ids: list[int] | None = None
-
-            if definition.mode == "dedupe":
-                if payload.root_ids is not None or (payload.runtime_inputs is not None and payload.runtime_inputs.root_ids is not None):
-                    raise WorkflowValidationError(
-                        "root_ids is forbidden in dedupe workflow mode",
-                        code="INVALID_RUNTIME_INPUTS",
-                    )
-                if payload.runtime_inputs is None or payload.runtime_inputs.scan_job_id is None:
-                    raise WorkflowValidationError(
-                        "runtime_inputs.scan_job_id is required for dedupe workflow",
-                        code="SCAN_JOB_REQUIRED",
-                    )
-                scan_job_id = payload.runtime_inputs.scan_job_id
-            else:
-                if payload.runtime_inputs is not None and payload.runtime_inputs.scan_job_id is not None:
-                    raise WorkflowValidationError(
-                        "scan_job_id is forbidden in file/organizer workflow mode",
-                        code="INVALID_RUNTIME_INPUTS",
-                    )
-                if payload.root_ids is not None and payload.runtime_inputs is not None:
-                    raise WorkflowValidationError(
-                        "Ambiguous root inputs: cannot provide both top-level 'root_ids' and 'runtime_inputs'",
-                        code="AMBIGUOUS_RUNTIME_INPUTS",
-                    )
-                effective_root_ids = (
-                    payload.runtime_inputs.root_ids
-                    if payload.runtime_inputs and payload.runtime_inputs.root_ids is not None
-                    else payload.root_ids
-                )
+            scan_job_id, effective_root_ids = resolve_mode_runtime_inputs(
+                definition.mode,
+                payload.root_ids,
+                payload.runtime_inputs,
+            )
+            safety_snapshot = self._capture_dedupe_safety_snapshot() if definition.mode == "dedupe" else None
 
             # Phase A: Read-only recompile
             res = self.compile_workflow_definition(
@@ -637,6 +664,7 @@ class WorkflowService:
                 definition_sha256=rev.definition_sha256,
                 override_root_ids=effective_root_ids,
                 scan_job_id=scan_job_id,
+                safety_snapshot=safety_snapshot,
             )
 
             if not payload.expected_compile_digest or payload.expected_compile_digest != res.compile_digest:
@@ -649,6 +677,8 @@ class WorkflowService:
                 )
 
             if not res.planned_operations:
+                if definition.mode == "dedupe":
+                    raise DedupeEmptyPlanError("Dedupe plan has no operations to execute")
                 raise WorkflowValidationError("No operations planned in this workflow", code="EMPTY_PLAN")
 
         # Phase B: BEGIN IMMEDIATE short transaction

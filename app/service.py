@@ -3643,7 +3643,7 @@ class FileCenterService:
                 status_code=400,
             )
 
-        if metadata.get("workflow_mode") == "dedupe":
+        if metadata.get("source") == "workflow" and metadata.get("workflow_mode") == "dedupe":
             raise DedupeRescanRequiredError(
                 f"Dedupe workflow plan #{plan_id} cannot be rebuilt from historical scan. A new scan is required.",
                 details={"plan_id": plan_id, "scan_job_id": metadata.get("scan_job_id")},
@@ -3966,6 +3966,9 @@ class FileCenterService:
             quarantine_root=quarantine_root,
         )
         return protect_last_file, allowed_roots, quarantine_root, policy
+
+    def _capture_dedupe_safety_snapshot(self):
+        return self.workflow_service._capture_dedupe_safety_snapshot()
 
     def create_advanced_dedupe_plan(
         self,
