@@ -251,6 +251,29 @@ def test_legacy_unknown_extra_field_ignored_and_calls_service(api_test_env, monk
     assert calls == [(777, "balanced-roots", None, None)]
 
 
+@pytest.mark.parametrize("body", [
+    [],
+    "x",
+    123,
+    True,
+])
+def test_legacy_non_object_body_preserves_baseline_pydantic_validation(api_test_env, monkeypatch, body):
+    service = api_test_env["service"]
+    called = []
+    monkeypatch.setattr(service, "create_dedupe_plan", lambda *a, **kw: called.append(1))
+    monkeypatch.setattr(service, "create_advanced_dedupe_plan", lambda *a, **kw: called.append(1))
+    resp = api_test_env["client"].post(
+        "/api/scans/1/dedupe-plan",
+        json=body,
+    )
+    assert resp.status_code == 422
+    data = resp.json()
+    assert "detail" in data
+    assert "error" not in data
+    assert called == []
+
+
+
 
 def test_http_matching_digest_creates_draft(api_test_env):
     scan_id = 200

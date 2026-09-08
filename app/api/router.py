@@ -131,10 +131,7 @@ class DedupePlanRequest(BaseModel):
     @classmethod
     def validate_request_shape(cls, raw: Any) -> Any:
         if type(raw) is not dict:
-            raise DedupeInvalidConfigError(
-                "Dedupe plan request must be a JSON object",
-                details={"field": "body"},
-            )
+            return raw
 
         has_scorer = "scorer_config" in raw
         has_expected = "expected_preview_digest" in raw
