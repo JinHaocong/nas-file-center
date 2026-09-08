@@ -119,7 +119,7 @@ export interface DedupeSummary {
   effective_safety_policy?: {
     protect_last_file?: boolean;
     allowed_roots?: string[];
-    quarantine_root?: string;
+    quarantine_root?: string | null;
     [key: string]: any;
   };
 }
@@ -149,8 +149,8 @@ export interface DirectDedupePreviewResponse {
   expected_reclaim_bytes: number;
   released_bytes_by_scan_root: Record<string, number>;
   effective_safety_policy: {
-    protect_last_file: boolean;
-    allowed_roots: string[];
-    quarantine_root: string;
+    protect_last_file?: boolean;
+    allowed_roots?: string[];
+    quarantine_root?: string | null;
   };
 }

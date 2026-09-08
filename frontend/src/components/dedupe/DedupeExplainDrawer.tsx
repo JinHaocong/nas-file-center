@@ -22,6 +22,11 @@ import {
   classifyMemberDecision,
   isBalancerContributionExcludedFromFactors,
 } from '../../utils/dedupePreview';
+import {
+  formatOptionalGroupId,
+  formatOptionalFileSize,
+  findDuplicateGroupSiblings,
+} from '../../utils/dedupePresentation';
 import { formatBytes } from '../../utils/format';
 
 const { Text } = Typography;
@@ -49,10 +54,8 @@ export const DedupeExplainDrawer: React.FC<Props> = ({
   );
   const balanceInfo = member.balance_info || member.group_balance_info;
 
-  // Filter group members belonging to the same group provenance
-  const siblings = groupMembers.filter(
-    (m) => m.group_provenance_id === member.group_provenance_id && m.absolute_path !== member.absolute_path
-  );
+  // Filter group members belonging to the same group provenance (strictly requiring non-null ID)
+  const siblings = findDuplicateGroupSiblings(member, groupMembers);
 
   return (
     <Drawer
@@ -100,10 +103,10 @@ export const DedupeExplainDrawer: React.FC<Props> = ({
               </Tag>
             </Descriptions.Item>
             <Descriptions.Item label="单文件大小">
-              <Text strong>{member.group_file_size !== undefined ? formatBytes(member.group_file_size) : '-'}</Text>
+              <Text strong>{formatOptionalFileSize(member.group_file_size)}</Text>
             </Descriptions.Item>
             <Descriptions.Item label="重复组 ID">
-              <Tag color="purple">组 #{member.group_provenance_id ?? '-'}</Tag>
+              <Tag color="purple">{formatOptionalGroupId(member.group_provenance_id)}</Tag>
             </Descriptions.Item>
           </Descriptions>
         </Card>
@@ -132,7 +135,7 @@ export const DedupeExplainDrawer: React.FC<Props> = ({
             )}
             <Descriptions.Item label="组可释放容量 (group_reclaimable_bytes)">
               <Text strong style={{ color: '#52c41a' }}>
-                {member.group_reclaimable_bytes !== undefined ? formatBytes(member.group_reclaimable_bytes) : '-'}
+                {formatOptionalFileSize(member.group_reclaimable_bytes)}
               </Text>
             </Descriptions.Item>
             {member.group_selection_reason && (
@@ -165,7 +168,7 @@ export const DedupeExplainDrawer: React.FC<Props> = ({
                   受限不可保留 ({member.safety_reasons?.join(', ') || '安全策略排除'})
                 </Tag>
               ) : (
-                <Tag color="default">-</Tag>
+                <Tag color="default">不可用 / -</Tag>
               )}
             </Descriptions.Item>
             <Descriptions.Item label="决策原因 / 说明">

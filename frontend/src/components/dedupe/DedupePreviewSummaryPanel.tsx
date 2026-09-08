@@ -9,6 +9,7 @@ import {
   InfoCircleOutlined,
 } from '@ant-design/icons';
 import { DedupeSummary, DedupeSelectionMode } from '../../types/dedupe';
+import { getProtectLastFileDescription } from '../../utils/dedupePresentation';
 import { formatBytes } from '../../utils/format';
 import { formatScanRootLabel, mapReleasedBytesByScanRoot } from '../../utils/dedupePreview';
 
@@ -109,7 +110,7 @@ export const DedupePreviewSummaryPanel: React.FC<Props> = ({
           showIcon
           icon={<InfoCircleOutlined />}
           message="根目录字节平衡模式已生效"
-          description="跨扫描根目录平衡容量释放；系统优先隔离占用容量较高根目录中的副本，以平衡各卷存储压力。"
+          description="Balanced by Bytes 使用 backend released_bytes 作为跨组选择层，在候选允许的情况下尽量均衡各 Scan Root 的累计计划释放字节。注意：此机制独立于因子权重计分之外，不是 score factor，不产生打分贡献。"
         />
       )}
 
@@ -164,9 +165,9 @@ export const DedupePreviewSummaryPanel: React.FC<Props> = ({
           }}
         />
         <Text type="secondary" style={{ fontSize: 12 }}>
-          {policy?.protect_last_file
-            ? '去重安全保护策略 (protect_last_file): 已启用 (true)，确保每个重复组保留至少 1 个副本。'
-            : '去重安全保护策略 (protect_last_file): 未启用 (false)。'}
+          {policy && policy.protect_last_file !== undefined
+            ? getProtectLastFileDescription(policy.protect_last_file)
+            : '去重安全保护策略 (protect_last_file): 未配置。'}
         </Text>
       </div>
     </div>

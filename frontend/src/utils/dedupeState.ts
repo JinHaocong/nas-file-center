@@ -85,7 +85,9 @@ export function dedupeStateReducer(state: DedupeState, action: DedupeAction): De
     case 'GENERATE_FAILED':
       return {
         ...state,
-        status: state.acceptedPreviewDigest ? 'PREVIEW_READY' : 'PREVIEW_STALE',
+        status: 'PREVIEW_STALE',
+        acceptedPreviewDigest: null,
+        currentPreviewDigest: null,
         lastErrorMessage: action.error || null,
       };
     case 'GENERATE_SUCCESS':

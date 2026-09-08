@@ -167,7 +167,44 @@ export const AdvancedDedupePage: React.FC = () => {
         });
       } else {
         dispatch({ type: "GENERATE_FAILED", error: formatted });
-        message.error(formatted);
+        if (structured.code === "DEDUPE_SCAN_NOT_FOUND") {
+          Modal.error({
+            title: "扫描任务不存在 (DEDUPE_SCAN_NOT_FOUND)",
+            content: (
+              <div>
+                <p>{formatted}</p>
+                <p style={{ color: "#8c8c8c" }}>关联的底层扫描任务已不可用，当前去重计划草案无法生成。</p>
+              </div>
+            ),
+            okText: "返回扫描列表",
+            onOk: () => navigate("/scans"),
+          });
+        } else if (structured.code === "DEDUPE_SCAN_NOT_COMPLETED") {
+          Modal.warning({
+            title: "扫描任务尚未完成 (DEDUPE_SCAN_NOT_COMPLETED)",
+            content: (
+              <div>
+                <p>{formatted}</p>
+                <p style={{ color: "#8c8c8c" }}>扫描任务当前未处于完成状态，请等待扫描完成后再生成去重计划。</p>
+              </div>
+            ),
+            okText: "返回扫描详情",
+            onOk: () => navigate(`/scans/${scanId}`),
+          });
+        } else if (structured.code === "DEDUPE_EMPTY_PLAN") {
+          Modal.info({
+            title: "无可用去重操作 (DEDUPE_EMPTY_PLAN)",
+            content: (
+              <div>
+                <p>{formatted}</p>
+                <p style={{ color: "#8c8c8c" }}>当前配置下未产生任何可执行的去重操作（如所有重复项均被安全保护策略排除或未发现冗余副本）。</p>
+              </div>
+            ),
+            okText: "确定",
+          });
+        } else {
+          message.error(formatted);
+        }
       }
     },
   });
@@ -361,7 +398,7 @@ export const AdvancedDedupePage: React.FC = () => {
             )}
           </Space>
           <Text type="secondary" style={{ fontSize: 13 }}>
-            预览由服务端纯内存计算，不修改底层任何文件或数据库计划。
+            预览由服务端基于已完成扫描数据与只读安全观察生成；不会修改文件系统，也不会创建 BatchPlan。
           </Text>
         </div>
       </Card>

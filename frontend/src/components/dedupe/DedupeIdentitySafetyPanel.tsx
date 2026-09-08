@@ -5,6 +5,11 @@ import {
   KeyOutlined,
   InfoCircleOutlined,
 } from "@ant-design/icons";
+import {
+  formatQuarantineRootPresentation,
+  formatAllowedRootPresentation,
+  getProtectLastFileDescription,
+} from "../../utils/dedupePresentation";
 
 const { Text } = Typography;
 
@@ -23,6 +28,8 @@ interface Props {
   engineVersion?: number;
   effectiveSafetyPolicy?: {
     protect_last_file?: boolean;
+    allowed_roots?: string[];
+    quarantine_root?: string | null;
     [key: string]: any;
   };
 }
@@ -62,7 +69,7 @@ export const DedupeIdentitySafetyPanel: React.FC<Props> = ({
         description={
           liveFilesystemVerified
             ? "当前预览直接反映实时文件系统状态。"
-            : "当前预览基于已完成扫描快照与只读安全观测（completed-scan-readonly-safety），纯内存计算候选与打分，尚未执行物理哈希比对。实际物理文件一致性及 SHA-256 哈希校验将在计划的 Freeze -> Validate -> Execute 阶段由后端事务严格执行。"
+            : "当前预览基于已完成扫描数据和只读安全观察生成。实际物理身份与 SHA-256 仍将在 Freeze → Validate → Execute 阶段重新校验。"
         }
       />
 
@@ -168,11 +175,46 @@ export const DedupeIdentitySafetyPanel: React.FC<Props> = ({
             </Descriptions.Item>
           )}
 
+          <Descriptions.Item label="实时文件系统验证 (live_filesystem_verified)">
+            <Tag color={liveFilesystemVerified ? "green" : "default"}>
+              {liveFilesystemVerified ? "已验证 (true)" : "未验证 (false)"}
+            </Tag>
+          </Descriptions.Item>
+
           {effectiveSafetyPolicy && effectiveSafetyPolicy.protect_last_file !== undefined && (
-            <Descriptions.Item label="保留最后文件策略 (protect_last_file)">
-              <Tag color={effectiveSafetyPolicy.protect_last_file ? "green" : "red"}>
+            <Descriptions.Item
+              label={
+                <Tooltip title={getProtectLastFileDescription(effectiveSafetyPolicy.protect_last_file)}>
+                  <Space size={4}>
+                    <span>保留最后文件保护 (protect_last_file)</span>
+                    <InfoCircleOutlined style={{ color: "#1890ff" }} />
+                  </Space>
+                </Tooltip>
+              }
+            >
+              <Tag color={effectiveSafetyPolicy.protect_last_file ? "green" : "default"}>
                 {effectiveSafetyPolicy.protect_last_file ? "已启用 (true)" : "未启用 (false)"}
               </Tag>
+            </Descriptions.Item>
+          )}
+
+          {effectiveSafetyPolicy && (
+            <Descriptions.Item label="隔离区根目录 (quarantine_root)" span={2}>
+              <Text code={Boolean(effectiveSafetyPolicy.quarantine_root)} style={{ fontSize: 12 }}>
+                {formatQuarantineRootPresentation(effectiveSafetyPolicy.quarantine_root)}
+              </Text>
+            </Descriptions.Item>
+          )}
+
+          {effectiveSafetyPolicy && effectiveSafetyPolicy.allowed_roots && effectiveSafetyPolicy.allowed_roots.length > 0 && (
+            <Descriptions.Item label="允许扫描根目录 (allowed_roots)" span={2}>
+              <Space direction="vertical" size={2}>
+                {effectiveSafetyPolicy.allowed_roots.map((root, idx) => (
+                  <Text key={idx} code style={{ fontSize: 12 }}>
+                    {formatAllowedRootPresentation(idx, root)}
+                  </Text>
+                ))}
+              </Space>
             </Descriptions.Item>
           )}
         </Descriptions>

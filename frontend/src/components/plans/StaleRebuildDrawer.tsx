@@ -236,7 +236,7 @@ export const StaleRebuildDrawer: React.FC<StaleRebuildDrawerProps> = ({
           type="error"
           showIcon
           message="无法生成重建预览"
-          description={getStructuredApiError(error).message}
+          description={formatDedupeErrorMessage(error)}
           style={{ marginBottom: 16 }}
         />
       )}

@@ -19,7 +19,11 @@ import {
 } from '@ant-design/icons';
 import { DedupePreviewMemberRow, MemberDecision } from '../../types/dedupe';
 import { formatScanRootLabel, classifyMemberDecision } from '../../utils/dedupePreview';
-import { formatBytes } from '../../utils/format';
+import {
+  getEligibilityPresentation,
+  formatOptionalGroupId,
+  formatOptionalFileSize,
+} from '../../utils/dedupePresentation';
 
 const { Text } = Typography;
 
@@ -115,9 +119,9 @@ export const DedupePreviewTable: React.FC<Props> = ({
               </Tooltip>
             </Space>
             <div style={{ fontSize: 12, color: '#8c8c8c' }}>
-              <span>组 #{record.group_provenance_id}</span>
+              <span>{formatOptionalGroupId(record.group_provenance_id)}</span>
               <span style={{ margin: '0 8px' }}>|</span>
-              <span>单文件大小: {formatBytes(record.group_file_size)}</span>
+              <span>单文件大小: {formatOptionalFileSize(record.group_file_size)}</span>
               {record.relative_path && (
                 <>
                   <span style={{ margin: '0 8px' }}>|</span>
@@ -164,20 +168,28 @@ export const DedupePreviewTable: React.FC<Props> = ({
       key: 'eligible_as_keep',
       width: 110,
       align: 'center',
-      render: (eligible: boolean, record) => {
-        if (eligible) {
+      render: (_, record) => {
+        const pres = getEligibilityPresentation(record.eligible_as_keep);
+        if (pres.status === 'eligible') {
           return (
             <Tag icon={<CheckCircleOutlined />} color="success">
-              符合资格
+              {pres.text}
             </Tag>
           );
         }
+        if (pres.status === 'safety_excluded') {
+          return (
+            <Tooltip title={record.safety_reasons?.join('; ') || '不满足安全保护策略'}>
+              <Tag icon={<CloseCircleOutlined />} color="warning">
+                {pres.text}
+              </Tag>
+            </Tooltip>
+          );
+        }
         return (
-          <Tooltip title={record.safety_reasons?.join('; ') || '不满足安全保护策略'}>
-            <Tag icon={<CloseCircleOutlined />} color="warning">
-              安全排除
-            </Tag>
-          </Tooltip>
+          <Tag color="default">
+            {pres.text}
+          </Tag>
         );
       },
     },
@@ -275,7 +287,7 @@ export const DedupePreviewTable: React.FC<Props> = ({
       </div>
 
       <Table<DedupePreviewMemberRow>
-        rowKey={(r) => `${r.group_provenance_id}_${r.absolute_path}`}
+        rowKey={(r) => `${r.group_provenance_id ?? 'ungrouped'}_${r.absolute_path}`}
         columns={columns}
         dataSource={filteredRows}
         loading={loading}

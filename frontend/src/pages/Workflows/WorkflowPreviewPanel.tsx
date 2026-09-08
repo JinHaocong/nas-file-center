@@ -302,6 +302,14 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
         setPreviewState((prev) =>
           transitionPreviewState(prev, { type: "PREVIEW_CHANGED_ERROR" })
         );
+      } else if (
+        structured.code === "DEDUPE_SCAN_NOT_FOUND" ||
+        structured.code === "DEDUPE_SCAN_NOT_COMPLETED"
+      ) {
+        setErrorMessage(formatted);
+        setPreviewData(null);
+        setSelectedScanJobId(undefined);
+        setPreviewState("SAVED_PREVIEW_REQUIRED");
       } else if (structured.code === "WORKFLOW_ARCHIVED") {
         setErrorMessage(formatted);
         setPreviewData(null);
