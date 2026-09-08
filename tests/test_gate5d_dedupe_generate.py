@@ -227,3 +227,254 @@ def test_advanced_generate_empty_compilation_stops_before_persistence(service_en
     assert called is False
 
 
+def test_matching_preview_digest_creates_exactly_one_draft_and_expected_items(service_env):
+    scan_id = 315
+    _create_duplicate_fixture(service_env, scan_id=scan_id)
+    service = service_env["service"]
+    config = {"selection_mode": "weighted"}
+    preview = service.get_dedupe_preview(scan_id, scorer_config=config)
+    result = service.create_advanced_dedupe_plan(
+        scan_id,
+        scorer_config=config,
+        expected_preview_digest=preview["preview_digest"],
+    )
+
+    with service.SessionLocal() as session:
+        plans = list(session.scalars(select(BatchPlan).where(BatchPlan.id == result["id"])))
+        assert len(plans) == 1
+        plan = plans[0]
+        assert plan.kind == "dedupe"
+        assert plan.status == "draft"
+        assert plan.expected_changes == preview["planned_quarantine_count"]
+        assert plan.expected_reclaim_bytes == preview["expected_reclaim_bytes"]
+
+        items = list(session.scalars(
+            select(BatchPlanItem)
+            .where(BatchPlanItem.plan_id == plan.id)
+            .order_by(BatchPlanItem.sequence)
+        ))
+        assert len(items) == preview["planned_quarantine_count"]
+        assert [item.sequence for item in items] == list(range(1, len(items) + 1))
+        for item in items:
+            assert item.operation == "quarantine"
+            assert item.target_path is None
+            assert item.keep_path
+            assert item.source_path != item.keep_path
+            assert item.expected_size > 0
+            assert item.expected_device == 0
+            assert item.expected_inode == 0
+            assert item.expected_mtime_ns == 0
+            assert item.expected_hash is None
+            assert item.state == "planned"
+
+        metadata = json.loads(plan.metadata_json)
+        assert metadata["source"] == "dedupe"
+        assert metadata["dedupe_engine_version"] == 1
+        assert metadata["scan_job_id"] == scan_id
+        assert metadata["scorer_config_digest"] == preview["scorer_config_digest"]
+        assert metadata["source_snapshot_digest"] == preview["source_snapshot_digest"]
+        assert metadata["decision_digest"] == preview["decision_digest"]
+        assert metadata["preview_digest"] == preview["preview_digest"]
+        assert metadata["effective_safety_policy"] == preview["effective_safety_policy"]
+        assert isinstance(metadata["scorer_config"], dict)
+        assert len(metadata["db_lineage_digest"]) == 64
+
+
+def test_advanced_generate_zero_side_effects(service_env):
+    scan_id = 316
+    _create_duplicate_fixture(service_env, scan_id=scan_id)
+    service = service_env["service"]
+    config = {"selection_mode": "weighted"}
+    preview = service.get_dedupe_preview(scan_id, scorer_config=config)
+
+    file_a = service_env["data_dir"] / f"dup-{scan_id}-a.bin"
+    file_b = service_env["data_dir"] / f"dup-{scan_id}-b.bin"
+    bytes_a_before = file_a.read_bytes()
+    bytes_b_before = file_b.read_bytes()
+
+    with service.SessionLocal() as session:
+        plans_before = session.scalar(select(func.count(BatchPlan.id))) or 0
+        items_before = session.scalar(select(func.count(BatchPlanItem.id))) or 0
+        work_jobs_before = session.scalar(select(func.count(WorkJob.id))) or 0
+        quarantine_before = session.scalar(select(func.count(QuarantineEntry.id))) or 0
+
+    result = service.create_advanced_dedupe_plan(
+        scan_id,
+        scorer_config=config,
+        expected_preview_digest=preview["preview_digest"],
+    )
+
+    with service.SessionLocal() as session:
+        plans_after = session.scalar(select(func.count(BatchPlan.id))) or 0
+        items_after = session.scalar(select(func.count(BatchPlanItem.id))) or 0
+        work_jobs_after = session.scalar(select(func.count(WorkJob.id))) or 0
+        quarantine_after = session.scalar(select(func.count(QuarantineEntry.id))) or 0
+
+    assert plans_after == plans_before + 1
+    assert items_after == items_before + preview["planned_quarantine_count"]
+    assert work_jobs_after == work_jobs_before
+    assert quarantine_after == quarantine_before
+    assert file_a.read_bytes() == bytes_a_before
+    assert file_b.read_bytes() == bytes_b_before
+
+
+def test_db_lineage_race_group_change_after_phase_a_fails(service_env, monkeypatch):
+    import app.service
+    scan_id = 317
+    _create_duplicate_fixture(service_env, scan_id=scan_id)
+    service = service_env["service"]
+    config = {"selection_mode": "weighted"}
+    preview = service.get_dedupe_preview(scan_id, scorer_config=config)
+
+    real_compile = app.service.compile_advanced_dedupe_preview
+
+    def race_compile(*args, **kwargs):
+        res = real_compile(*args, **kwargs)
+        with service.SessionLocal() as session:
+            grp = session.scalar(select(DuplicateGroup).where(DuplicateGroup.scan_job_id == scan_id))
+            assert grp is not None
+            grp.file_size += 1
+            session.commit()
+        return res
+
+    monkeypatch.setattr(app.service, "compile_advanced_dedupe_preview", race_compile)
+
+    with service.SessionLocal() as session:
+        plans_before = session.scalar(select(func.count(BatchPlan.id))) or 0
+        items_before = session.scalar(select(func.count(BatchPlanItem.id))) or 0
+
+    with pytest.raises(DedupePreviewChangedError) as exc_info:
+        service.create_advanced_dedupe_plan(
+            scan_id,
+            scorer_config=config,
+            expected_preview_digest=preview["preview_digest"],
+        )
+    assert exc_info.value.details["reason"] == "db_lineage_changed"
+
+    with service.SessionLocal() as session:
+        assert session.scalar(select(func.count(BatchPlan.id))) == plans_before
+        assert session.scalar(select(func.count(BatchPlanItem.id))) == items_before
+
+
+def test_db_lineage_race_file_change_after_phase_a_fails(service_env, monkeypatch):
+    import app.service
+    scan_id = 318
+    _create_duplicate_fixture(service_env, scan_id=scan_id)
+    service = service_env["service"]
+    config = {"selection_mode": "weighted"}
+    preview = service.get_dedupe_preview(scan_id, scorer_config=config)
+
+    real_compile = app.service.compile_advanced_dedupe_preview
+
+    def race_compile(*args, **kwargs):
+        res = real_compile(*args, **kwargs)
+        with service.SessionLocal() as session:
+            file_row = session.scalar(
+                select(DuplicateFile).join(DuplicateGroup).where(DuplicateGroup.scan_job_id == scan_id)
+            )
+            assert file_row is not None
+            file_row.mtime_ns += 1
+            session.commit()
+        return res
+
+    monkeypatch.setattr(app.service, "compile_advanced_dedupe_preview", race_compile)
+
+    with service.SessionLocal() as session:
+        plans_before = session.scalar(select(func.count(BatchPlan.id))) or 0
+        items_before = session.scalar(select(func.count(BatchPlanItem.id))) or 0
+
+    with pytest.raises(DedupePreviewChangedError) as exc_info:
+        service.create_advanced_dedupe_plan(
+            scan_id,
+            scorer_config=config,
+            expected_preview_digest=preview["preview_digest"],
+        )
+    assert exc_info.value.details["reason"] == "db_lineage_changed"
+
+    with service.SessionLocal() as session:
+        assert session.scalar(select(func.count(BatchPlan.id))) == plans_before
+        assert session.scalar(select(func.count(BatchPlanItem.id))) == items_before
+
+
+def test_db_lineage_race_scan_deleted_between_phases_fails(service_env, monkeypatch):
+    import app.service
+    scan_id = 319
+    _create_duplicate_fixture(service_env, scan_id=scan_id)
+    service = service_env["service"]
+    config = {"selection_mode": "weighted"}
+    preview = service.get_dedupe_preview(scan_id, scorer_config=config)
+
+    real_compile = app.service.compile_advanced_dedupe_preview
+
+    def race_compile(*args, **kwargs):
+        res = real_compile(*args, **kwargs)
+        with service.SessionLocal() as session:
+            scan = session.get(ScanJob, scan_id)
+            assert scan is not None
+            session.delete(scan)
+            session.commit()
+        return res
+
+    monkeypatch.setattr(app.service, "compile_advanced_dedupe_preview", race_compile)
+
+    with pytest.raises(DedupePreviewChangedError) as exc_info:
+        service.create_advanced_dedupe_plan(
+            scan_id,
+            scorer_config=config,
+            expected_preview_digest=preview["preview_digest"],
+        )
+    assert exc_info.value.details["reason"] == "db_lineage_changed"
+
+
+def test_persistence_rollback_on_item_failure(service_env, monkeypatch):
+    scan_id = 320
+    _create_duplicate_fixture(service_env, scan_id=scan_id)
+    service = service_env["service"]
+    import app.service as service_module
+
+    real_item_cls = service_module.BatchPlanItem
+    calls = 0
+
+    def exploding_item(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("synthetic item insert failure")
+        return real_item_cls(*args, **kwargs)
+
+    monkeypatch.setattr(service_module, "BatchPlanItem", exploding_item)
+    preview = service.get_dedupe_preview(scan_id, scorer_config={})
+
+    with service.SessionLocal() as session:
+        plans_before = session.scalar(select(func.count(BatchPlan.id))) or 0
+        items_before = session.scalar(select(func.count(BatchPlanItem.id))) or 0
+
+    with pytest.raises(RuntimeError, match="synthetic item insert failure"):
+        service.create_advanced_dedupe_plan(
+            scan_id,
+            scorer_config={},
+            expected_preview_digest=preview["preview_digest"],
+        )
+
+    with service.SessionLocal() as session:
+        assert session.scalar(select(func.count(BatchPlan.id))) == plans_before
+        assert session.scalar(select(func.count(BatchPlanItem.id))) == items_before
+
+
+def test_scan_dependency_guard_sees_advanced_draft(service_env):
+    scan_id = 321
+    _create_duplicate_fixture(service_env, scan_id=scan_id)
+    service = service_env["service"]
+    config = {"selection_mode": "weighted"}
+    preview = service.get_dedupe_preview(scan_id, scorer_config=config)
+    service.create_advanced_dedupe_plan(
+        scan_id,
+        scorer_config=config,
+        expected_preview_digest=preview["preview_digest"],
+    )
+    with pytest.raises(ValueError, match="关联计划"):
+        service.delete_scan(scan_id)
+
+
+
+

@@ -4031,3 +4031,80 @@ class FileCenterService:
             "preview_digest": actual_preview_digest,
         }
 
+    def _persist_advanced_dedupe_draft(
+        self,
+        *,
+        scan_job_id: int,
+        compilation,
+        preview_digest: str,
+        effective_safety_policy: dict[str, Any],
+        intents: tuple[DedupeDraftIntent, ...],
+    ) -> BatchPlan:
+        metadata = {
+            "source": "dedupe",
+            "dedupe_engine_version": 1,
+            "scan_job_id": scan_job_id,
+            "scorer_config": canonical_config_dict(compilation.scorer_config),
+            "scorer_config_digest": compilation.scorer_config_digest,
+            "source_snapshot_digest": compilation.source_snapshot_digest,
+            "decision_digest": compilation.decision_digest,
+            "preview_digest": preview_digest,
+            "db_lineage_digest": compilation.db_lineage_digest,
+            "selection_mode": compilation.summary.get("selection_mode"),
+            "effective_safety_policy": effective_safety_policy,
+            "summary": {
+                "actionable_group_count": compilation.actionable_group_count,
+                "skipped_group_count": compilation.skipped_group_count,
+                "planned_quarantine_count": compilation.planned_quarantine_count,
+                "expected_reclaim_bytes": compilation.expected_reclaim_bytes,
+                "released_bytes_by_scan_root": {
+                    str(key): value
+                    for key, value in sorted(compilation.released_bytes_by_scan_root.items())
+                },
+            },
+        }
+
+        with self.SessionLocal() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            current_lineage = compute_current_dedupe_db_lineage_digest(session, scan_job_id)
+            if current_lineage != compilation.db_lineage_digest:
+                session.rollback()
+                raise DedupePreviewChangedError(details={
+                    "reason": "db_lineage_changed",
+                    "expected_db_lineage_digest": compilation.db_lineage_digest,
+                    "actual_db_lineage_digest": current_lineage,
+                    "preview_digest": preview_digest,
+                })
+
+            plan = BatchPlan(
+                name=f"scan-{scan_job_id}-advanced-dedupe",
+                kind="dedupe",
+                status="draft",
+                expected_changes=len(intents),
+                expected_reclaim_bytes=compilation.expected_reclaim_bytes,
+                metadata_json=json.dumps(metadata, ensure_ascii=False, sort_keys=True),
+            )
+            session.add(plan)
+            session.flush()
+
+            for intent in intents:
+                session.add(BatchPlanItem(
+                    plan_id=plan.id,
+                    sequence=intent.sequence,
+                    operation=intent.operation,
+                    source_path=intent.source_path,
+                    target_path=None,
+                    keep_path=intent.keep_path,
+                    expected_size=intent.expected_size,
+                    expected_mtime_ns=intent.expected_mtime_ns,
+                    expected_device=intent.expected_device,
+                    expected_inode=intent.expected_inode,
+                    expected_hash=intent.expected_hash,
+                    state="planned",
+                    metadata_json=intent.metadata_json,
+                ))
+
+            session.commit()
+            session.refresh(plan)
+            return plan
+
