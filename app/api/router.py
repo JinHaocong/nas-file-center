@@ -521,13 +521,25 @@ def dedupe_preview(
 
 @router.post("/scans/{scan_job_id}/dedupe-plan")
 def create_dedupe_plan(request: Request, scan_job_id: int, payload: DedupePlanRequest):
+    service = request.app.state.service
     try:
-        return request.app.state.service.create_dedupe_plan(
+        if payload.is_advanced:
+            assert payload.scorer_config is not None
+            assert payload.expected_preview_digest is not None
+            return service.create_advanced_dedupe_plan(
+                scan_job_id,
+                scorer_config=payload.scorer_config,
+                expected_preview_digest=payload.expected_preview_digest,
+            )
+
+        return service.create_dedupe_plan(
             scan_job_id,
-            policy=payload.policy,
+            policy=payload.policy or "balanced-roots",
             path_priority_patterns=payload.path_priority_patterns,
             relative_path_priority_patterns=payload.relative_path_priority_patterns,
         )
+    except DedupeError as exc:
+        return JSONResponse(status_code=exc.status_code, content=exc.to_dict())
     except KeyError as exc:
         raise HTTPException(404, "scan not found") from exc
     except ValueError as exc:

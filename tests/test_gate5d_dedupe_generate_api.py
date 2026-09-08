@@ -32,7 +32,8 @@ def api_test_env(tmp_path: Path):
         initial_admin_username="admin",
         initial_admin_password="AdminPassword123!",
     )
-    service = FileCenterService(settings)
+    app = create_app(settings)
+    service = app.state.service
     with service.SessionLocal() as session:
         session.add(User(
             username="normaluser",
@@ -42,7 +43,6 @@ def api_test_env(tmp_path: Path):
         ))
         session.commit()
 
-    app = create_app(settings)
     client = TestClient(app)
     client.headers["Origin"] = "http://testserver"
     login = client.post(
@@ -167,3 +167,80 @@ def test_unknown_dedupe_plan_field_uses_structured_error(api_test_env):
         json={"policy": "balanced-roots", "unexpected": True},
     )
     _assert_structured_dedupe_error(resp, status=422, code="DEDUPE_INVALID_CONFIG")
+
+
+def test_http_matching_digest_creates_draft(api_test_env):
+    scan_id = 200
+    _setup_duplicate_test_data(api_test_env["SessionLocal"], api_test_env["data_dir"], scan_id=scan_id)
+    config = {"selection_mode": "weighted"}
+    preview = api_test_env["client"].post(
+        f"/api/scans/{scan_id}/dedupe-preview",
+        json={"scorer_config": config},
+    ).json()
+    resp = api_test_env["client"].post(
+        f"/api/scans/{scan_id}/dedupe-plan",
+        json={
+            "scorer_config": config,
+            "expected_preview_digest": preview["preview_digest"],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["id"] == body["plan_id"]
+    assert body["status"] == "draft"
+    assert body["items"] == preview["planned_quarantine_count"]
+    assert body["expected_changes"] == preview["planned_quarantine_count"]
+    assert body["expected_reclaim_bytes"] == preview["expected_reclaim_bytes"]
+    assert body["preview_digest"] == preview["preview_digest"]
+
+
+def test_http_bad_digest_returns_409_and_zero_draft(api_test_env):
+    scan_id = 201
+    _setup_duplicate_test_data(api_test_env["SessionLocal"], api_test_env["data_dir"], scan_id=scan_id)
+    before = _count_plan_state(api_test_env["SessionLocal"])
+    resp = api_test_env["client"].post(
+        f"/api/scans/{scan_id}/dedupe-plan",
+        json={"scorer_config": {}, "expected_preview_digest": "0" * 64},
+    )
+    _assert_structured_dedupe_error(resp, status=409, code="PREVIEW_CHANGED")
+    assert _count_plan_state(api_test_env["SessionLocal"]) == before
+
+
+def test_http_empty_advanced_generate_returns_422_zero_draft(api_test_env):
+    scan_id = 202
+    _create_completed_scan(api_test_env["SessionLocal"], scan_id=scan_id, roots=[str(api_test_env["data_dir"])])
+    preview = api_test_env["client"].post(
+        f"/api/scans/{scan_id}/dedupe-preview",
+        json={"scorer_config": {}},
+    ).json()
+    resp = api_test_env["client"].post(
+        f"/api/scans/{scan_id}/dedupe-plan",
+        json={"scorer_config": {}, "expected_preview_digest": preview["preview_digest"]},
+    )
+    _assert_structured_dedupe_error(resp, status=422, code="DEDUPE_EMPTY_PLAN")
+
+
+@pytest.mark.parametrize("policy", [
+    "keep-first-root",
+    "keep-newest",
+    "keep-oldest",
+    "balanced-roots",
+    "path-priority",
+    "relative-path-preference",
+])
+def test_legacy_policy_request_still_calls_legacy_service(api_test_env, monkeypatch, policy):
+    service = api_test_env["service"]
+    calls = []
+
+    def fake_legacy(scan_job_id, *, policy, path_priority_patterns=None, relative_path_priority_patterns=None):
+        calls.append((scan_job_id, policy, path_priority_patterns, relative_path_priority_patterns))
+        return {"id": 99, "status": "draft", "items": 0, "delete_counts": {}}
+
+    monkeypatch.setattr(service, "create_dedupe_plan", fake_legacy)
+    resp = api_test_env["client"].post(
+        "/api/scans/777/dedupe-plan",
+        json={"policy": policy},
+    )
+    assert resp.status_code == 200
+    assert calls == [(777, policy, None, None)]
+
