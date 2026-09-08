@@ -1084,3 +1084,129 @@ def test_planned_quarantine_limit_exceeded_returns_422(api_test_env, monkeypatch
         assert session.scalar(select(func.count(BatchPlanItem.id))) == init_items
         assert session.scalar(select(func.count(WorkJob.id))) == init_jobs
         assert session.scalar(select(func.count(QuarantineEntry.id))) == init_quarantine
+
+
+# =========================================================================
+# 15. ADVERSARIAL PER-REQUEST SAFETY SNAPSHOT IMMUNITY
+# =========================================================================
+
+def test_per_request_safety_snapshot_immune_to_mid_request_quarantine_retarget(api_test_env, tmp_path: Path, monkeypatch):
+    """Retargeting quarantine symlink during compilation must NOT bleed into the response or effective safety policy."""
+    client = api_test_env["client"]
+    service = api_test_env["service"]
+    SessionLocal = api_test_env["SessionLocal"]
+
+    q1 = tmp_path / "race_q1"
+    q2 = tmp_path / "race_q2"
+    q1.mkdir(parents=True, exist_ok=True)
+    q2.mkdir(parents=True, exist_ok=True)
+
+    qalias = tmp_path / "race_qalias"
+    if qalias.exists() or qalias.is_symlink():
+        qalias.unlink()
+    qalias.symlink_to(q1)
+
+    service.settings.quarantine_root = qalias
+    service.settings.protect_last_file = False
+    orig_allowed = service.settings.allowed_roots_raw
+    service.settings.allowed_roots_raw = f"{orig_allowed},{q1},{q2}"
+
+    # Files located in q1
+    f_a = q1 / "a.bin"
+    f_b = q1 / "b.bin"
+    f_a.write_bytes(b"x" * 100)
+    f_b.write_bytes(b"x" * 100)
+
+    scan_id = 100
+    with SessionLocal() as session:
+        _create_completed_scan(session, scan_id=scan_id, roots=[str(q1)])
+        g = DuplicateGroup(id=1001, scan_job_id=scan_id, content_hash="hash_race_q1", file_size=100, member_count=2)
+        session.add(g)
+        session.flush()
+        session.add(DuplicateFile(group_id=g.id, root_id=0, absolute_path=str(f_a), relative_path=f_a.name, top_level_dir=str(q1), size=100, mtime_ns=1000))
+        session.add(DuplicateFile(group_id=g.id, root_id=0, absolute_path=str(f_b), relative_path=f_b.name, top_level_dir=str(q1), size=100, mtime_ns=2000))
+        session.commit()
+
+    # Intercept compile_advanced_dedupe_preview in app.service to simulate external retarget right after compilation
+    orig_compile = dp_mod.compile_advanced_dedupe_preview
+
+    def retarget_on_compile(*args, **kwargs):
+        comp = orig_compile(*args, **kwargs)
+        # Retarget symlink from q1 -> q2 during request execution
+        qalias.unlink()
+        qalias.symlink_to(q2)
+        return comp
+
+    monkeypatch.setattr("app.service.compile_advanced_dedupe_preview", retarget_on_compile)
+
+    resp = client.post(f"/api/scans/{scan_id}/dedupe-preview", json={})
+    assert resp.status_code == 200
+    body = resp.json()
+
+    # The entire response MUST be bound to q1, not q2
+    assert body["effective_safety_policy"]["quarantine_root"] == str(q1.resolve())
+    assert body["effective_safety_policy"]["quarantine_root"] != str(q2.resolve())
+
+    # Because files are inside q1 (the snapshot quarantine root), they must be flagged RESERVED_QUARANTINE_PATH
+    assert body["group_count"] == 1
+    assert body["skipped_group_count"] == 1
+    assert len(body["rows"]) == 2
+    for r in body["rows"]:
+        assert "RESERVED_QUARANTINE_PATH" in r["safety_reasons"]
+        assert r["member_decision"] == "SKIPPED"
+        assert r["group_status"] == "skipped"
+        assert r["group_skip_reason"] == "FILESYSTEM_SAFETY_CHECK_FAILED"
+
+
+def test_per_request_safety_snapshot_successive_requests_atomic_transition(api_test_env, tmp_path: Path, monkeypatch):
+    """Successive requests each capture their own atomic safety snapshot without leaking previous state."""
+    client = api_test_env["client"]
+    service = api_test_env["service"]
+    SessionLocal = api_test_env["SessionLocal"]
+    data_dir = api_test_env["data_dir"]
+
+    q1 = tmp_path / "atom_q1"
+    q2 = tmp_path / "atom_q2"
+    q1.mkdir(parents=True, exist_ok=True)
+    q2.mkdir(parents=True, exist_ok=True)
+
+    qalias = tmp_path / "atom_qalias"
+    if qalias.exists() or qalias.is_symlink():
+        qalias.unlink()
+    qalias.symlink_to(q1)
+
+    service.settings.quarantine_root = qalias
+    scan_id = 101
+    with SessionLocal() as session:
+        _setup_duplicate_test_data(session, data_dir, scan_id=scan_id)
+
+    # Monkeypatch to retarget qalias during Request A
+    orig_compile = dp_mod.compile_advanced_dedupe_preview
+
+    def retarget_during_req_a(*args, **kwargs):
+        comp = orig_compile(*args, **kwargs)
+        qalias.unlink()
+        qalias.symlink_to(q2)
+        return comp
+
+    monkeypatch.setattr("app.service.compile_advanced_dedupe_preview", retarget_during_req_a)
+
+    # Request A: Captured q1 at start
+    res_a = client.post(f"/api/scans/{scan_id}/dedupe-preview", json={}).json()
+    assert res_a["effective_safety_policy"]["quarantine_root"] == str(q1.resolve())
+
+    # Undo monkeypatch for Request B
+    monkeypatch.undo()
+
+    # Request B: Captures q2 at start
+    res_b = client.post(f"/api/scans/{scan_id}/dedupe-preview", json={}).json()
+    assert res_b["effective_safety_policy"]["quarantine_root"] == str(q2.resolve())
+
+    # Candidate data files are in data_dir (outside q1 and q2), so snapshot and decision digests remain equal
+    assert res_a["source_snapshot_digest"] == res_b["source_snapshot_digest"]
+    assert res_a["decision_digest"] == res_b["decision_digest"]
+
+    # But quarantine authority changed between requests -> effective_safety_policy and preview_digest change atomically!
+    assert res_a["effective_safety_policy"] != res_b["effective_safety_policy"]
+    assert res_a["preview_digest"] != res_b["preview_digest"]
+

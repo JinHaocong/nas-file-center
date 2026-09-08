@@ -66,6 +66,7 @@ from app.planning.dedupe_preview import (
     DedupeScanNotCompletedError,
     DedupeScanNotFoundError,
     build_preview_response,
+    canonicalize_safety_path,
     compile_advanced_dedupe_preview,
 )
 from app.workflows.schema import WorkflowDefinition
@@ -3891,24 +3892,39 @@ class FileCenterService:
         page: int = 1,
         page_size: int = 50,
     ) -> dict[str, Any]:
-        protect_last_file = bool(getattr(self.settings, "protect_last_file", True))
-        allowed_roots = getattr(self.settings, "allowed_roots", None)
-        quarantine_root = getattr(self.settings, "quarantine_root", None)
+        effective_protect_last_file = bool(getattr(self.settings, "protect_last_file", True))
+
+        raw_allowed = getattr(self.settings, "allowed_roots", None)
+        if raw_allowed:
+            effective_allowed_roots = tuple(
+                Path(canonicalize_safety_path(r))
+                for r in raw_allowed
+                if str(r).strip()
+            )
+        else:
+            effective_allowed_roots = ()
+
+        raw_quarantine = getattr(self.settings, "quarantine_root", None)
+        effective_quarantine_root = (
+            Path(canonicalize_safety_path(raw_quarantine))
+            if raw_quarantine is not None and str(raw_quarantine).strip()
+            else None
+        )
 
         with self.SessionLocal() as session:
             compilation = compile_advanced_dedupe_preview(
                 session=session,
                 scan_job_id=scan_job_id,
                 config=scorer_config or {},
-                protect_last_file=protect_last_file,
-                allowed_roots=allowed_roots,
-                quarantine_root=quarantine_root,
+                protect_last_file=effective_protect_last_file,
+                allowed_roots=effective_allowed_roots,
+                quarantine_root=effective_quarantine_root,
             )
             return build_preview_response(
                 compilation=compilation,
-                protect_last_file=protect_last_file,
-                allowed_roots=allowed_roots,
-                quarantine_root=quarantine_root,
+                protect_last_file=effective_protect_last_file,
+                allowed_roots=effective_allowed_roots,
+                quarantine_root=effective_quarantine_root,
                 page=page,
                 page_size=page_size,
             )
