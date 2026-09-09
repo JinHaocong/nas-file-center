@@ -51,10 +51,16 @@ def validate_mutation_destination(
     - Checks that filename is non-empty, contains no illegal characters, and does not exceed NAME_MAX.
     - Preserves lexical target under resolved parent without resolving to existing symlink targets.
     """
+    import errno
     import os
     p = Path(path).expanduser()
-    if p.is_symlink():
-        raise ValueError(f"目标路径已存在同名符号链接 (symlink): {path}")
+    try:
+        if p.is_symlink():
+            raise ValueError(f"目标路径已存在同名符号链接 (symlink): {path}")
+    except OSError as exc:
+        if getattr(exc, "errno", None) == errno.ENAMETOOLONG or "too long" in str(exc).lower():
+            raise ValueError(f"目标名称过长或无效: {exc}") from exc
+
 
     parent_resolved = require_allowed_path(p.parent, roots)
     if quarantine_root:

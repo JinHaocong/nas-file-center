@@ -109,3 +109,69 @@ class BatchUtilityConflictError(BatchUtilityError):
             status_code=409,
             details=details,
         )
+
+
+class BatchUtilitySymlinkBlockedError(BatchUtilityConflictError):
+    def __init__(
+        self,
+        message: str = "Target path is a symlink",
+        details: dict[str, Any] | None = None,
+    ):
+        super().__init__(
+            message=message,
+            details=details,
+        )
+        self.code = "BATCH_UTILITY_SYMLINK_BLOCKED"
+
+
+class BatchUtilityCrossRootError(BatchUtilityConflictError):
+    def __init__(
+        self,
+        message: str = "Target path is outside allowed roots",
+        details: dict[str, Any] | None = None,
+    ):
+        super().__init__(
+            message=message,
+            details=details,
+        )
+        self.code = "BATCH_UTILITY_CROSS_ROOT"
+
+
+class BatchUtilityNameTooLongError(BatchUtilityConflictError):
+    def __init__(
+        self,
+        message: str = "Target filename exceeds maximum length",
+        details: dict[str, Any] | None = None,
+    ):
+        super().__init__(
+            message=message,
+            details=details,
+        )
+        self.code = "BATCH_UTILITY_NAME_TOO_LONG"
+
+
+class BatchUtilityCaseCollisionError(BatchUtilityConflictError):
+    def __init__(
+        self,
+        message: str = "Case-only collision detected for target path",
+        details: dict[str, Any] | None = None,
+    ):
+        super().__init__(
+            message=message,
+            details=details,
+        )
+        self.code = "BATCH_UTILITY_CASE_COLLISION"
+
+
+class BatchUtilityCollisionError(BatchUtilityConflictError):
+    def __init__(
+        self,
+        message: str = "Target collision or cycle detected in batch utility plan",
+        details: dict[str, Any] | None = None,
+    ):
+        super().__init__(
+            message=message,
+            details=details,
+        )
+        self.code = "BATCH_UTILITY_COLLISION"
+

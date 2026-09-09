@@ -1204,6 +1204,8 @@ def compile_suffix_transform_preview(
                 device=st.st_dev,
                 inode=st.st_ino,
                 original_cand_id=cand.id,
+                resolved_source_path=str(resolved_candidate),
+                resolved_target_path=None,
             )
         )
 
@@ -1252,40 +1254,39 @@ def compile_suffix_transform_preview(
     # Sort decision rows deterministically by source_path asc
     decision_rows.sort(key=lambda r: r["source_path"])
 
-    # Build intents if no blocking conflicts
+    # Build intents from surviving ordered items (Blocker F)
     intents: list[BatchUtilityDraftIntent] = []
-    if not graph_res.has_blocking_conflicts:
-        for seq, ord_item in enumerate(graph_res.ordered_items, start=1):
-            meta_dict = {
-                "utility_action": "suffix_transform",
-                "mode": mode,
-                "suffix": target_suffix,
-                "index_root_id": ord_item.index_root_id,
-                "index_root_path": ord_item.index_root_path,
-                "relative_path": ord_item.relative_path,
-                "source_basename": Path(ord_item.source_path).name,
-                "target_basename": Path(ord_item.target_path).name,
-            }
-            intents.append(
-                BatchUtilityDraftIntent(
-                    sequence=seq,
-                    operation="rename",
-                    source_path=ord_item.source_path,
-                    target_path=ord_item.target_path,
-                    keep_path=None,
-                    expected_size=ord_item.size,
-                    expected_device=0,
-                    expected_inode=0,
-                    expected_mtime_ns=0,
-                    expected_hash=None,
-                    metadata_json=canonical_json_dumps(meta_dict),
-                )
+    for seq, ord_item in enumerate(graph_res.ordered_items, start=1):
+        meta_dict = {
+            "utility_action": "suffix_transform",
+            "mode": mode,
+            "suffix": target_suffix,
+            "index_root_id": ord_item.index_root_id,
+            "index_root_path": ord_item.index_root_path,
+            "relative_path": ord_item.relative_path,
+            "source_basename": Path(ord_item.source_path).name,
+            "target_basename": Path(ord_item.target_path).name,
+        }
+        intents.append(
+            BatchUtilityDraftIntent(
+                sequence=seq,
+                operation="rename",
+                source_path=ord_item.source_path,
+                target_path=ord_item.target_path,
+                keep_path=None,
+                expected_size=ord_item.size,
+                expected_device=0,
+                expected_inode=0,
+                expected_mtime_ns=0,
+                expected_hash=None,
+                metadata_json=canonical_json_dumps(meta_dict),
             )
+        )
 
     planned_operations_count = len(intents)
     skipped_count = sum(1 for r in decision_rows if r["decision"] == "SKIPPED")
     safety_excluded_count = sum(1 for r in decision_rows if r["decision"] == "SAFETY_EXCLUDED")
-    blocking_conflict_count = len(graph_res.conflicts)
+    blocking_conflict_count = sum(1 for r in decision_rows if r["decision"] == "BLOCKING_CONFLICT")
     expected_reclaim_bytes = 0
 
     source_snapshot_payload = {
@@ -1295,10 +1296,23 @@ def compile_suffix_transform_preview(
         "suffix": target_suffix,
         "blocking_conflict_count": blocking_conflict_count,
         "ordered_sources": [item.source_path for item in graph_res.ordered_items],
+        "target_observations": list(graph_res.target_observations),
+        "casefold_directory_observations": list(graph_res.directory_observations),
+        "dependency_edges": list(graph_res.dependency_edges),
+        "conflict_facts": [
+            {
+                "source_path": c.source_path,
+                "target_path": c.target_path,
+                "conflict_type": c.conflict_type,
+                "reason": c.reason,
+            }
+            for c in graph_res.conflicts
+        ],
     }
     source_snapshot_digest = hashlib.sha256(
         canonical_json_dumps(source_snapshot_payload).encode("utf-8")
     ).hexdigest()
+
 
     summary = {
         "matched_count": matched_count,

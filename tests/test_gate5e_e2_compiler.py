@@ -231,3 +231,83 @@ def test_compile_suffix_transform_vacating_order(tmp_path, db_session):
     assert comp.intents[0].sequence == 1
     assert comp.intents[1].source_path == str(f_a)
     assert comp.intents[1].sequence == 2
+
+
+def test_preview_digest_graph_authority_reviewer_case_h(tmp_path, db_session):
+    """
+    Reviewer reproduction H: Verify preview digest authority binds target observations,
+    casefold directory observations, and dependency facts.
+    """
+    root_dir = tmp_path / "root"
+    root_dir.mkdir()
+
+    f_src = root_dir / "src.jpg"
+    f_src.write_text("src")
+    st = f_src.stat()
+
+    iroot = IndexRoot(root=str(root_dir))
+    db_session.add(iroot)
+    db_session.flush()
+
+    ip = IndexedPath(
+        root_key=str(root_dir),
+        absolute_path=str(f_src),
+        relative_path="src.jpg",
+        basename="src.jpg",
+        stem="src",
+        suffix=".jpg",
+        size=st.st_size,
+        mtime_ns=st.st_mtime_ns,
+        device=st.st_dev,
+        inode=st.st_ino,
+        is_dir=False,
+        scan_generation=1,
+    )
+    db_session.add(ip)
+    db_session.commit()
+
+    action = SuffixTransformAction(
+        type="suffix_transform",
+        root_ids=[iroot.id],
+        mode="append",
+        suffix=".bak",
+    )
+    safety = BatchUtilitySafetySnapshot(
+        protect_last_file=True,
+        allowed_roots=(root_dir,),
+        quarantine_root=None,
+        effective_policy={},
+    )
+
+    # Base compilation
+    comp1 = compile_suffix_transform_preview(
+        session=db_session,
+        action=action,
+        safety_snapshot=safety,
+    )
+    digest1 = comp1.source_snapshot_digest
+
+    # 1. Add a file in the directory that changes casefold observations (e.g. unrelated.TXT)
+    other = root_dir / "unrelated.TXT"
+    other.write_text("unrelated")
+
+    comp2 = compile_suffix_transform_preview(
+        session=db_session,
+        action=action,
+        safety_snapshot=safety,
+    )
+    digest2 = comp2.source_snapshot_digest
+    assert digest1 != digest2, "Digest must change when casefold directory occupant is added"
+
+    # 2. Add target on disk (target appears)
+    target = root_dir / "src.jpg.bak"
+    target.write_text("target exists now")
+
+    comp3 = compile_suffix_transform_preview(
+        session=db_session,
+        action=action,
+        safety_snapshot=safety,
+    )
+    digest3 = comp3.source_snapshot_digest
+    assert digest2 != digest3, "Digest must change when target appears on disk"
+

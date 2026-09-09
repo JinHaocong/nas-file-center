@@ -238,6 +238,81 @@ def test_generate_suffix_transform_blocking_conflict_fails(service_env):
         assert session.query(BatchPlan).count() == 0
 
 
+def test_generate_suffix_transform_safe_and_conflict_coexistence(service_env):
+    """Reviewer reproduction D: safe.jpg -> safe.txt (RENAME) survives in preview, but generate rejects with 409, 0 draft."""
+    svc, Session, allowed, _ = service_env
+    f_safe = allowed / "safe.jpg"
+    f_safe.write_text("safe")
+    f_bad = allowed / "bad.jpg"
+    f_bad.write_text("bad")
+
+    # Existing conflict target
+    f_occ = allowed / "bad.jpg.txt"
+    f_occ.write_text("occupied")
+
+    st_safe = f_safe.stat()
+    st_bad = f_bad.stat()
+
+    with Session() as session:
+        iroot = IndexRoot(root=str(allowed))
+        session.add(iroot)
+        session.flush()
+
+        ip1 = IndexedPath(
+            root_key=str(allowed),
+            absolute_path=str(f_safe),
+            relative_path="safe.jpg",
+            basename="safe.jpg",
+            stem="safe",
+            suffix=".jpg",
+            size=st_safe.st_size,
+            mtime_ns=st_safe.st_mtime_ns,
+            device=st_safe.st_dev,
+            inode=st_safe.st_ino,
+            is_dir=False,
+            scan_generation=1,
+        )
+        ip2 = IndexedPath(
+            root_key=str(allowed),
+            absolute_path=str(f_bad),
+            relative_path="bad.jpg",
+            basename="bad.jpg",
+            stem="bad",
+            suffix=".jpg",
+            size=st_bad.st_size,
+            mtime_ns=st_bad.st_mtime_ns,
+            device=st_bad.st_dev,
+            inode=st_bad.st_ino,
+            is_dir=False,
+            scan_generation=1,
+        )
+        session.add_all([ip1, ip2])
+        session.commit()
+        root_id = iroot.id
+
+    action = SuffixTransformAction(
+        type="suffix_transform",
+        root_ids=[root_id],
+        mode="append",
+        suffix=".txt",
+    )
+
+    preview = svc.get_batch_utility_preview(action=action)
+    assert preview["planned_operations_count"] == 1
+    assert preview["blocking_conflict_count"] == 1
+    digest = preview["preview_digest"]
+
+    with pytest.raises(BatchUtilityConflictError):
+        svc.create_batch_utility_plan(
+            action=action,
+            expected_preview_digest=digest,
+        )
+
+    with Session() as session:
+        assert session.query(BatchPlan).count() == 0
+
+
+
 def test_generate_suffix_transform_empty_plan_fails(service_env):
     svc, Session, allowed, _ = service_env
     f1 = allowed / "file1.txt"

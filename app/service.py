@@ -123,7 +123,13 @@ from app.batch_utilities.errors import (
     BatchUtilityPreviewChangedError,
     BatchUtilityEmptyPlanError,
     BatchUtilityConflictError,
+    BatchUtilitySymlinkBlockedError,
+    BatchUtilityCrossRootError,
+    BatchUtilityNameTooLongError,
+    BatchUtilityCaseCollisionError,
+    BatchUtilityCollisionError,
 )
+
 
 PLAN_SINGLE_DELETE_ALLOWED = {
     "draft",
@@ -4191,22 +4197,61 @@ class FileCenterService:
             )
 
         if compilation.blocking_conflict_count > 0:
-            raise BatchUtilityConflictError(
-                "Blocking conflicts detected in batch utility plan",
-                details={
-                    "blocking_conflict_count": compilation.blocking_conflict_count,
-                    "conflicts": [
-                        {
-                            "source_path": r["source_path"],
-                            "target_path": r.get("target_path"),
-                            "reason_code": r.get("reason_code"),
-                            "reason": r.get("reason"),
-                        }
-                        for r in compilation.rows
-                        if r.get("decision") in ("BLOCKING_CONFLICT", "CONFLICT")
-                    ],
-                },
-            )
+            blocking_rows = [
+                r for r in compilation.rows
+                if r.get("decision") in ("BLOCKING_CONFLICT", "CONFLICT")
+            ]
+            conflicts_detail = [
+                {
+                    "source_path": r["source_path"],
+                    "target_path": r.get("target_path"),
+                    "reason_code": r.get("reason_code"),
+                    "reason": r.get("reason"),
+                }
+                for r in blocking_rows
+            ]
+            err_details = {
+                "blocking_conflict_count": compilation.blocking_conflict_count,
+                "conflicts": conflicts_detail,
+            }
+            codes = {r.get("reason_code") for r in blocking_rows}
+
+            # Priority 1: TARGET_SYMLINK -> BATCH_UTILITY_SYMLINK_BLOCKED
+            if "TARGET_SYMLINK" in codes:
+                raise BatchUtilitySymlinkBlockedError(
+                    "Target path is a symlink",
+                    details=err_details,
+                )
+            # Priority 2: TARGET_OUTSIDE_ALLOWED_ROOT -> BATCH_UTILITY_CROSS_ROOT
+            elif "TARGET_OUTSIDE_ALLOWED_ROOT" in codes:
+                raise BatchUtilityCrossRootError(
+                    "Target path is outside allowed roots",
+                    details=err_details,
+                )
+            # Priority 3: NAME_TOO_LONG -> BATCH_UTILITY_NAME_TOO_LONG
+            elif "NAME_TOO_LONG" in codes:
+                raise BatchUtilityNameTooLongError(
+                    "Target filename exceeds maximum length",
+                    details=err_details,
+                )
+            # Priority 4: CASE_ONLY_COLLISION -> BATCH_UTILITY_CASE_COLLISION
+            elif "CASE_ONLY_COLLISION" in codes:
+                raise BatchUtilityCaseCollisionError(
+                    "Case-only collision detected for target path",
+                    details=err_details,
+                )
+            # Priority 5: TARGET_EXISTS, PLANNED_TARGET_COLLISION, RESERVED_TARGET, RENAME_CYCLE -> BATCH_UTILITY_COLLISION
+            elif any(c in codes for c in ("TARGET_EXISTS", "PLANNED_TARGET_COLLISION", "RESERVED_TARGET", "RENAME_CYCLE")):
+                raise BatchUtilityCollisionError(
+                    "Target collision or cycle detected in batch utility plan",
+                    details=err_details,
+                )
+            else:
+                raise BatchUtilityConflictError(
+                    "Blocking conflicts detected in batch utility plan",
+                    details=err_details,
+                )
+
 
         if len(compilation.intents) == 0:
             raise BatchUtilityEmptyPlanError(

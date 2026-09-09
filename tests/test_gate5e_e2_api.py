@@ -157,8 +157,8 @@ def test_preview_api_suffix_transform_blocking_conflict(api_test_env):
     data = resp.json()
     assert data["blocking_conflict_count"] >= 1
     conflict_rows = [r for r in data["items"] if r["decision"] == "BLOCKING_CONFLICT"]
-    assert len(conflict_rows) >= 1
-    assert any(r["reason_code"] == "TARGET_COLLISION" for r in conflict_rows)
+    assert any(r["reason_code"] == "TARGET_EXISTS" for r in conflict_rows)
+
 
 
 def test_preview_api_invalid_suffix_rejected(api_test_env):
@@ -280,7 +280,79 @@ def test_generate_plan_api_blocking_conflict_rejected(api_test_env):
     )
     assert gen_resp.status_code == 409
     err = gen_resp.json()
-    assert err["error"]["code"] == "BATCH_UTILITY_CONFLICT"
+    assert err["error"]["code"] == "BATCH_UTILITY_COLLISION"
+
+
+def test_generate_plan_api_specific_error_codes(api_test_env, monkeypatch):
+    """Reviewer reproduction G: Test specific error codes for TARGET_SYMLINK, NAME_TOO_LONG, CASE_ONLY_COLLISION, TARGET_EXISTS."""
+    import os
+    client = api_test_env["client"]
+    root1_path = api_test_env["root1_path"]
+
+    # 1. TARGET_SYMLINK -> BATCH_UTILITY_SYMLINK_BLOCKED
+    other_file = root1_path / "other_raw.txt"
+    other_file.write_text("other")
+    link_target = root1_path / "file_01.png.sym"
+    link_target.symlink_to(other_file)
+
+    p_resp = client.post(
+        "/api/batch-utilities/preview",
+        json={"action": {"type": "suffix_transform", "root_ids": [1], "mode": "append", "suffix": ".sym"}},
+    )
+    assert p_resp.status_code == 200
+    digest = p_resp.json()["preview_digest"]
+
+    g_resp = client.post(
+        "/api/batch-utilities/generate-plan",
+        json={"action": {"type": "suffix_transform", "root_ids": [1], "mode": "append", "suffix": ".sym"}, "expected_preview_digest": digest},
+    )
+    assert g_resp.status_code == 409
+    assert g_resp.json()["error"]["code"] == "BATCH_UTILITY_SYMLINK_BLOCKED"
+
+    # 2. NAME_TOO_LONG -> BATCH_UTILITY_NAME_TOO_LONG (via pathconf monkeypatch)
+    orig_pathconf = os.pathconf
+    def mock_pathconf(path, name):
+        if name == "PC_NAME_MAX":
+            return 10
+        return orig_pathconf(path, name)
+
+    monkeypatch.setattr(os, "pathconf", mock_pathconf)
+
+    p_resp2 = client.post(
+        "/api/batch-utilities/preview",
+        json={"action": {"type": "suffix_transform", "root_ids": [1], "mode": "append", "suffix": ".toolong"}},
+    )
+    assert p_resp2.status_code == 200
+    digest2 = p_resp2.json()["preview_digest"]
+
+    g_resp2 = client.post(
+        "/api/batch-utilities/generate-plan",
+        json={"action": {"type": "suffix_transform", "root_ids": [1], "mode": "append", "suffix": ".toolong"}, "expected_preview_digest": digest2},
+    )
+    assert g_resp2.status_code == 409
+    assert g_resp2.json()["error"]["code"] == "BATCH_UTILITY_NAME_TOO_LONG"
+
+    monkeypatch.undo()
+
+    # 3. CASE_ONLY_COLLISION -> BATCH_UTILITY_CASE_COLLISION
+    # Create file_01.png.case
+    case_target = root1_path / "FILE_01.PNG.CASE"
+    case_target.write_text("case collision")
+
+    p_resp3 = client.post(
+        "/api/batch-utilities/preview",
+        json={"action": {"type": "suffix_transform", "root_ids": [1], "mode": "append", "suffix": ".case"}},
+    )
+    assert p_resp3.status_code == 200
+    digest3 = p_resp3.json()["preview_digest"]
+
+    g_resp3 = client.post(
+        "/api/batch-utilities/generate-plan",
+        json={"action": {"type": "suffix_transform", "root_ids": [1], "mode": "append", "suffix": ".case"}, "expected_preview_digest": digest3},
+    )
+    assert g_resp3.status_code == 409
+    assert g_resp3.json()["error"]["code"] == "BATCH_UTILITY_CASE_COLLISION"
+
 
 
 def test_generate_plan_api_empty_plan_rejected(api_test_env):

@@ -19,20 +19,19 @@ class TransformedBasenameResult:
 def canonicalize_suffix(suffix: str) -> str:
     if not isinstance(suffix, str):
         raise ValueError("suffix must be a string")
-    s = suffix.strip()
-    if not s:
-        raise ValueError("suffix cannot be empty")
-    if "\0" in s:
+    raw = suffix.strip()
+    if not raw or raw == ".":
+        raise ValueError("suffix cannot be empty or just a dot")
+    if "\0" in raw:
         raise ValueError("suffix cannot contain NUL bytes")
-    if "/" in s or "\\" in s:
+    if "/" in raw or "\\" in raw:
         raise ValueError("suffix cannot contain path separators")
-    if s == ".":
-        raise ValueError("suffix cannot be empty or just a dot")
-    if not s.startswith("."):
-        s = "." + s
-    if s == ".":
-        raise ValueError("suffix cannot be empty or just a dot")
-    return s
+    body = raw[1:] if raw.startswith(".") else raw
+    parts = body.split(".")
+    if not body or any(part == "" for part in parts):
+        raise ValueError("suffix has invalid format or dot structure")
+    return "." + body
+
 
 
 def compute_transformed_basename(

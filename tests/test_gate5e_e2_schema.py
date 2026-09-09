@@ -21,22 +21,30 @@ def test_canonicalize_suffix_valid():
     assert canonicalize_suffix("txt") == ".txt"
     assert canonicalize_suffix(".txt") == ".txt"
     assert canonicalize_suffix("  .tar.gz  ") == ".tar.gz"
+    assert canonicalize_suffix("tar.gz") == ".tar.gz"
     assert canonicalize_suffix("bak") == ".bak"
+    assert canonicalize_suffix("TXT") == ".TXT"
+    assert canonicalize_suffix(".TAR.GZ") == ".TAR.GZ"
 
 
 def test_canonicalize_suffix_invalid():
-    with pytest.raises(ValueError, match="cannot be empty"):
-        canonicalize_suffix("")
-    with pytest.raises(ValueError, match="cannot be empty"):
-        canonicalize_suffix("   ")
-    with pytest.raises(ValueError, match="cannot be empty or just a dot"):
-        canonicalize_suffix(".")
-    with pytest.raises(ValueError, match="path separator"):
-        canonicalize_suffix("foo/bar")
-    with pytest.raises(ValueError, match="path separator"):
-        canonicalize_suffix("foo\\bar")
-    with pytest.raises(ValueError, match="NUL"):
-        canonicalize_suffix("txt\0")
+    bad_suffixes = [
+        "",
+        "   ",
+        ".",
+        "..",
+        "..txt",
+        "txt..gz",
+        ".tar..gz",
+        "a/../b",
+        "a/b",
+        "a\\b",
+        "x\0y",
+    ]
+    for bad in bad_suffixes:
+        with pytest.raises(ValueError):
+            canonicalize_suffix(bad)
+
 
 
 def test_suffix_transform_action_validation():
