@@ -763,3 +763,93 @@ def test_compiler_directory_source_replacement_blocked(tmp_path):
         assert comp.rows[0]["reason_code"] == "SOURCE_IDENTITY_CHANGED"
 
 
+def test_compiler_nonempty_wrapper_child_appearance_blocked(tmp_path):
+    """E3-hotfix5 Regression 1:
+    Nonempty wrapper child-appearance race.
+    1. wrapper contains W/a.txt
+    2. discovery and wrapper observation observe only W/a.txt
+    3. before graph authority completes: create W/new.txt
+    Expected: 0 planned operations, 0 intents, BLOCKING_CONFLICT, WRAPPER_IDENTITY_CHANGED
+    """
+    from unittest.mock import patch
+    from app.batch_utilities import flatten_graph as flatten_graph_module
+
+    root = tmp_path / "root"
+    wrapper = root / "W"
+    wrapper.mkdir(parents=True)
+    (wrapper / "a.txt").write_text("file in W")
+
+    action = FlattenOneLevelAction(
+        type="flatten_one_level",
+        wrapper_paths=[str(wrapper)]
+    )
+    snapshot = BatchUtilitySafetySnapshot(
+        protect_last_file=True,
+        allowed_roots=(root,),
+        quarantine_root=None,
+        effective_policy={},
+    )
+
+    orig_resolve_graph = flatten_graph_module.resolve_flatten_graph
+
+    def racing_resolve_graph(*args, **kwargs):
+        # Create new child after discovery and wrapper observation, but before graph resolution
+        (wrapper / "new.txt").write_text("new child")
+        return orig_resolve_graph(*args, **kwargs)
+
+    with patch("app.batch_utilities.compiler.resolve_flatten_graph", side_effect=racing_resolve_graph):
+        comp = compile_flatten_one_level_preview(session=None, action=action, safety_snapshot=snapshot)
+        assert comp.planned_operations_count == 0
+        assert len(comp.intents) == 0
+        assert len(comp.rows) == 1
+        assert comp.rows[0]["decision"] == "BLOCKING_CONFLICT"
+        assert comp.rows[0]["reason_code"] == "WRAPPER_IDENTITY_CHANGED"
+        assert "WRAPPER_IDENTITY_CHANGED" in comp.rows[0]["reason"]
+
+
+def test_compiler_empty_wrapper_child_appearance_blocked(tmp_path):
+    """E3-hotfix5 Regression 2:
+    Empty wrapper child-appearance race.
+    1. wrapper W is initially empty (0 candidates)
+    2. discovery and wrapper observation observe empty W
+    3. before graph authority completes: create W/new.txt
+    Expected: 0 planned operations, 0 intents, BLOCKING_CONFLICT on W, WRAPPER_IDENTITY_CHANGED
+    """
+    from unittest.mock import patch
+    from app.batch_utilities import flatten_graph as flatten_graph_module
+
+    root = tmp_path / "root"
+    wrapper = root / "W_empty"
+    wrapper.mkdir(parents=True)
+
+    action = FlattenOneLevelAction(
+        type="flatten_one_level",
+        wrapper_paths=[str(wrapper)]
+    )
+    snapshot = BatchUtilitySafetySnapshot(
+        protect_last_file=True,
+        allowed_roots=(root,),
+        quarantine_root=None,
+        effective_policy={},
+    )
+
+    orig_resolve_graph = flatten_graph_module.resolve_flatten_graph
+
+    def racing_resolve_graph(*args, **kwargs):
+        # Create new child in empty wrapper after discovery and wrapper observation, before graph
+        (wrapper / "new.txt").write_text("new child in empty W")
+        return orig_resolve_graph(*args, **kwargs)
+
+    with patch("app.batch_utilities.compiler.resolve_flatten_graph", side_effect=racing_resolve_graph):
+        comp = compile_flatten_one_level_preview(session=None, action=action, safety_snapshot=snapshot)
+        assert comp.planned_operations_count == 0
+        assert len(comp.intents) == 0
+        assert len(comp.rows) == 1
+        assert comp.rows[0]["source_path"] == str(wrapper)
+        assert comp.rows[0]["decision"] == "BLOCKING_CONFLICT"
+        assert comp.rows[0]["reason_code"] == "WRAPPER_IDENTITY_CHANGED"
+        assert "WRAPPER_IDENTITY_CHANGED" in comp.rows[0]["reason"]
+        assert comp.blocking_conflict_count == 1
+
+
+

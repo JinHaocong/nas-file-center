@@ -70,7 +70,7 @@ class BatchUtilityDraftIntent:
 CONFLICT_PRIORITY_RANK: dict[str, int] = {
     "TARGET_SYMLINK": 1,
     "WRAPPER_CHILD_SYMLINK": 1,
-    "WRAPPER_IDENTITY_CHANGED": 1,
+    "WRAPPER_IDENTITY_CHANGED": 5,
     "TARGET_OUTSIDE_ALLOWED_ROOT": 2,
     "SOURCE_OUTSIDE_ALLOWED_ROOT": 2,
     "CROSS_ROOT": 2,
@@ -1433,19 +1433,27 @@ def compile_flatten_one_level_preview(
                     "inode": st.st_ino,
                     "mtime_ns": st.st_mtime_ns,
                     "scan_status": "FAILED",
+                    "direct_children": [],
                 })
             else:
+                try:
+                    with os.scandir(w_lex) as it:
+                        children = sorted(entry.name for entry in it)
+                except OSError:
+                    children = []
                 wrapper_observations.append({
                     "wrapper_path": w_lex,
                     "device": st.st_dev,
                     "inode": st.st_ino,
                     "mtime_ns": st.st_mtime_ns,
                     "scan_status": "OK",
+                    "direct_children": children,
                 })
         except OSError:
             wrapper_observations.append({
                 "wrapper_path": w_lex,
                 "scan_status": "FAILED",
+                "direct_children": [],
             })
     wrapper_observations.sort(key=lambda o: o["wrapper_path"])
 
@@ -1535,6 +1543,30 @@ def compile_flatten_one_level_preview(
                 "size": item.size,
                 "protected_dir": None,
             })
+
+    # Ensure wrappers with conflicts but no candidate items are represented in decision_rows
+    for w_lex in canonical_wrappers:
+        if w_lex in conflicts_by_src:
+            has_wrapper_items = any(
+                r.get("wrapper_path") == w_lex and r.get("source_path") != w_lex
+                for r in decision_rows
+            )
+            if not has_wrapper_items and not any(r.get("source_path") == w_lex for r in decision_rows):
+                primary_c = select_primary_conflict(conflicts_by_src[w_lex])
+                decision_rows.append({
+                    "source_path": w_lex,
+                    "target_path": None,
+                    "index_root_id": None,
+                    "index_root_path": None,
+                    "wrapper_path": w_lex,
+                    "relative_path": Path(w_lex).name,
+                    "object_type": "directory",
+                    "decision": "BLOCKING_CONFLICT",
+                    "reason_code": primary_c.conflict_type,
+                    "reason": primary_c.reason,
+                    "size": 0,
+                    "protected_dir": None,
+                })
 
     decision_rows.sort(key=lambda r: r["source_path"])
 

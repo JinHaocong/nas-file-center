@@ -180,31 +180,52 @@ def resolve_flatten_graph(
     _scandir = scandir_func or os.scandir
     conflicts: list[BlockingConflict] = []
 
+    def _get_child_names(scandir_callable: Any, path_str: str) -> list[str]:
+        res = scandir_callable(path_str)
+        if hasattr(res, "__enter__"):
+            with res as it:
+                return sorted(e.name for e in it)
+        else:
+            return sorted(e.name for e in res)
+
     wrapper_obs_map: dict[str, dict[str, Any]] = {}
     if wrapper_observations:
         for obs in wrapper_observations:
             wrapper_obs_map[obs["wrapper_path"]] = obs
 
-    cached_wrapper_status: dict[str, tuple[bool, str, dict[str, Any]]] = {}
+    wrapper_status: dict[str, tuple[bool, bool, str, dict[str, Any]]] = {}
 
-    def _check_wrapper(w_lex: str) -> tuple[bool, str, dict[str, Any]]:
-        if w_lex in cached_wrapper_status:
-            return cached_wrapper_status[w_lex]
+    def _validate_wrapper(w_lex: str, exp: dict[str, Any] | None) -> tuple[bool, bool, str, dict[str, Any]]:
         try:
             st_w = _lstat(w_lex)
             if stat.S_ISLNK(st_w.st_mode):
-                res = (False, f"WRAPPER_IDENTITY_CHANGED: Wrapper '{w_lex}' is a symlink", {"wrapper_path": w_lex, "error": "WRAPPER_SYMLINK"})
-            elif not stat.S_ISDIR(st_w.st_mode):
-                res = (False, f"WRAPPER_IDENTITY_CHANGED: Wrapper '{w_lex}' is not a directory", {"wrapper_path": w_lex, "error": "NOT_A_DIRECTORY"})
-            elif wrapper_obs_map and w_lex in wrapper_obs_map:
-                exp = wrapper_obs_map[w_lex]
+                return (
+                    True,
+                    False,
+                    f"WRAPPER_IDENTITY_CHANGED: Wrapper '{w_lex}' is a symlink",
+                    {"wrapper_path": w_lex, "error": "WRAPPER_SYMLINK"},
+                )
+            if not stat.S_ISDIR(st_w.st_mode):
+                return (
+                    True,
+                    False,
+                    f"WRAPPER_IDENTITY_CHANGED: Wrapper '{w_lex}' is not a directory",
+                    {"wrapper_path": w_lex, "error": "NOT_A_DIRECTORY"},
+                )
+            if exp is not None:
                 if exp.get("scan_status") != "OK":
-                    res = (False, f"WRAPPER_IDENTITY_CHANGED: Wrapper '{w_lex}' initial scan status was not OK", {"wrapper_path": w_lex})
-                elif (
+                    return (
+                        True,
+                        False,
+                        f"WRAPPER_IDENTITY_CHANGED: Wrapper '{w_lex}' initial scan status was not OK",
+                        {"wrapper_path": w_lex},
+                    )
+                if (
                     st_w.st_dev != exp.get("device")
                     or st_w.st_ino != exp.get("inode")
                 ):
-                    res = (
+                    return (
+                        True,
                         False,
                         f"WRAPPER_IDENTITY_CHANGED: Wrapper '{w_lex}' physical identity changed",
                         {
@@ -215,17 +236,79 @@ def resolve_flatten_graph(
                             "current_inode": st_w.st_ino,
                         },
                     )
-                else:
-                    res = (True, "", {})
-            else:
-                res = (True, "", {})
-        except FileNotFoundError:
-            res = (False, f"WRAPPER_IDENTITY_CHANGED: Wrapper '{w_lex}' does not exist", {"wrapper_path": w_lex, "error": "WRAPPER_MISSING"})
-        except OSError as e:
-            res = (False, f"WRAPPER_IDENTITY_CHANGED: Failed to access wrapper '{w_lex}': {e}", {"wrapper_path": w_lex, "errno": getattr(e, "errno", None)})
+                # Check enumeration fingerprint and mtime
+                enum_mismatches = []
+                details: dict[str, Any] = {"wrapper_path": w_lex}
+                if "direct_children" in exp and exp["direct_children"] is not None:
+                    try:
+                        curr_children = _get_child_names(_scandir, w_lex)
+                        if curr_children != exp["direct_children"]:
+                            enum_mismatches.append("children")
+                            details["expected_children"] = exp["direct_children"]
+                            details["current_children"] = curr_children
+                    except OSError as e:
+                        return (
+                            False,
+                            True,
+                            f"WRAPPER_IDENTITY_CHANGED: Failed to re-scan wrapper '{w_lex}': {e}",
+                            {"wrapper_path": w_lex, "errno": getattr(e, "errno", None)},
+                        )
+                if st_w.st_mtime_ns != exp.get("mtime_ns"):
+                    enum_mismatches.append("mtime_ns")
+                    details["expected_mtime_ns"] = exp.get("mtime_ns")
+                    details["current_mtime_ns"] = st_w.st_mtime_ns
 
-        cached_wrapper_status[w_lex] = res
-        return res
+                if enum_mismatches:
+                    return (
+                        False,
+                        True,
+                        f"WRAPPER_IDENTITY_CHANGED: Wrapper '{w_lex}' enumeration/mtime changed ({', '.join(enum_mismatches)})",
+                        details,
+                    )
+            return (False, False, "", {})
+        except FileNotFoundError:
+            return (
+                True,
+                False,
+                f"WRAPPER_IDENTITY_CHANGED: Wrapper '{w_lex}' does not exist",
+                {"wrapper_path": w_lex, "error": "WRAPPER_MISSING"},
+            )
+        except OSError as e:
+            return (
+                True,
+                False,
+                f"WRAPPER_IDENTITY_CHANGED: Failed to access wrapper '{w_lex}': {e}",
+                {"wrapper_path": w_lex, "errno": getattr(e, "errno", None)},
+            )
+
+    # Standalone wrapper-level continuity pass for all observed wrappers
+    for obs in (wrapper_observations or []):
+        w_lex = obs.get("wrapper_path")
+        if not w_lex:
+            continue
+        wrapper_status[w_lex] = _validate_wrapper(w_lex, obs)
+
+    def _check_wrapper(w_lex: str) -> tuple[bool, bool, str, dict[str, Any]]:
+        if w_lex in wrapper_status:
+            return wrapper_status[w_lex]
+        exp = wrapper_obs_map.get(w_lex)
+        status = _validate_wrapper(w_lex, exp)
+        wrapper_status[w_lex] = status
+        return status
+
+    # Check if any wrapper failed continuity and has no candidate items
+    observed_wrappers_with_items = {item.wrapper_path for item in items if item.wrapper_path}
+    for w_lex, (is_c_rep, is_e_chg, w_reason, w_details) in wrapper_status.items():
+        if (is_c_rep or is_e_chg) and w_lex not in observed_wrappers_with_items:
+            conflicts.append(
+                BlockingConflict(
+                    source_path=w_lex,
+                    target_path=w_lex,
+                    conflict_type="WRAPPER_IDENTITY_CHANGED",
+                    reason=w_reason,
+                    details={"source_path": w_lex, **w_details},
+                )
+            )
 
     # Phase A: Fresh no-follow source observation & authority revalidation
     source_blocked_paths: set[str] = set()
@@ -239,9 +322,13 @@ def resolve_flatten_graph(
         is_blocked = False
 
         # 0. Wrapper continuity check
+        w_container_replaced = False
+        w_enum_changed = False
+        w_reason = ""
+        w_details: dict[str, Any] = {}
         if item.wrapper_path:
-            w_ok, w_reason, w_details = _check_wrapper(item.wrapper_path)
-            if not w_ok:
+            w_container_replaced, w_enum_changed, w_reason, w_details = _check_wrapper(item.wrapper_path)
+            if w_container_replaced:
                 conflicts.append(
                     BlockingConflict(
                         source_path=src_lex,
@@ -424,6 +511,18 @@ def resolve_flatten_graph(
                     )
                 )
                 is_blocked = True
+
+        if not is_blocked and w_enum_changed:
+            conflicts.append(
+                BlockingConflict(
+                    source_path=src_lex,
+                    target_path=tgt_lex,
+                    conflict_type="WRAPPER_IDENTITY_CHANGED",
+                    reason=w_reason,
+                    details={"source_path": src_lex, **w_details},
+                )
+            )
+            is_blocked = True
 
         if is_blocked:
             source_blocked_paths.add(src_lex)

@@ -553,3 +553,103 @@ def test_generate_flatten_wrapper_replaced_by_different_directory_race_raises_40
             assert len(plans) == 0
 
 
+def test_generate_flatten_nonempty_wrapper_child_appearance_race_raises_409(api_test_env):
+    """E3-hotfix5 API Regression 1:
+    Nonempty wrapper child-appearance race.
+    1. wrapper contains W/a.txt
+    2. preview: candidate_count = 1, planned_operations_count = 1
+    3. during Generate Phase A: after discovery & wrapper observation, before graph authority:
+       create W/new.txt
+    Expected: HTTP 409 PREVIEW_CHANGED, 0 Draft.
+    """
+    from unittest.mock import patch
+    from app.batch_utilities import flatten_graph as flatten_graph_module
+
+    client = api_test_env["client"]
+    service = api_test_env["service"]
+    root = api_test_env["root1_path"]
+    wrapper = root / "w_nonempty_child_race"
+    wrapper.mkdir()
+    (wrapper / "a.txt").write_text("file in W")
+
+    action = {
+        "type": "flatten_one_level",
+        "wrapper_paths": [str(wrapper)]
+    }
+
+    resp_prev = client.post("/api/batch-utilities/preview", json={"action": action})
+    assert resp_prev.status_code == 200
+    preview_digest = resp_prev.json()["preview_digest"]
+
+    orig_resolve_graph = flatten_graph_module.resolve_flatten_graph
+
+    def racing_resolve_graph(*args, **kwargs):
+        # Create W/new.txt after discovery & wrapper observation, before graph
+        (wrapper / "new.txt").write_text("new file appeared")
+        return orig_resolve_graph(*args, **kwargs)
+
+    with patch("app.batch_utilities.compiler.resolve_flatten_graph", side_effect=racing_resolve_graph):
+        req = {
+            "action": action,
+            "expected_preview_digest": preview_digest
+        }
+        resp = client.post("/api/batch-utilities/generate-plan", json=req)
+        assert resp.status_code == 409
+        err = resp.json()["error"]
+        assert err["code"] == "PREVIEW_CHANGED"
+
+        with service.SessionLocal() as session:
+            plans = session.query(BatchPlan).all()
+            assert len(plans) == 0
+
+
+def test_generate_flatten_empty_wrapper_child_appearance_race_raises_409(api_test_env):
+    """E3-hotfix5 API Regression 2:
+    Empty wrapper child-appearance race.
+    1. wrapper W is initially empty (0 candidates, 0 planned ops)
+    2. preview: candidate_count = 0, planned_operations_count = 0
+    3. during Generate Phase A: after discovery & wrapper observation, before graph authority:
+       create W/new.txt
+    Expected: HTTP 409 PREVIEW_CHANGED (NOT 422 BATCH_UTILITY_EMPTY_PLAN), 0 Draft.
+    """
+    from unittest.mock import patch
+    from app.batch_utilities import flatten_graph as flatten_graph_module
+
+    client = api_test_env["client"]
+    service = api_test_env["service"]
+    root = api_test_env["root1_path"]
+    wrapper = root / "w_empty_child_race"
+    wrapper.mkdir()
+
+    action = {
+        "type": "flatten_one_level",
+        "wrapper_paths": [str(wrapper)]
+    }
+
+    resp_prev = client.post("/api/batch-utilities/preview", json={"action": action})
+    assert resp_prev.status_code == 200
+    preview_digest = resp_prev.json()["preview_digest"]
+
+    orig_resolve_graph = flatten_graph_module.resolve_flatten_graph
+
+    def racing_resolve_graph(*args, **kwargs):
+        # Create W/new.txt in empty wrapper after discovery & wrapper observation, before graph
+        (wrapper / "new.txt").write_text("new file appeared in empty wrapper")
+        return orig_resolve_graph(*args, **kwargs)
+
+    with patch("app.batch_utilities.compiler.resolve_flatten_graph", side_effect=racing_resolve_graph):
+        req = {
+            "action": action,
+            "expected_preview_digest": preview_digest
+        }
+        resp = client.post("/api/batch-utilities/generate-plan", json=req)
+        assert resp.status_code == 409
+        err = resp.json()["error"]
+        assert err["code"] == "PREVIEW_CHANGED"
+
+        with service.SessionLocal() as session:
+            plans = session.query(BatchPlan).all()
+            assert len(plans) == 0
+
+
+
