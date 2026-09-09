@@ -22,10 +22,22 @@ All TDD pipelines (RED -> GREEN -> REFACTOR) were followed, delivering robust Ph
    - Constructed draft operations for `move`.
 
 ## Regression & QA
-- Authored tests: `test_gate5e_e3_schema.py`, `test_gate5e_e3_discovery.py`, `test_gate5e_e3_graph.py`, `test_gate5e_e3_compiler.py`.
-- Final full suite regression executed flawlessly via Dockerized `python:3.12-slim`: **100% Pass** for `test_gate5e_e1_*.py`, `test_gate5e_e2_*.py`, and `test_gate5e_e3_*.py`.
+- **Required E3 Test Suite (7 files)**:
+  1. `tests/test_gate5e_e3_schema.py`: Schema validation, non-empty wrapper paths, lexical duplicates rejection, type enforcement.
+  2. `tests/test_gate5e_e3_discovery.py`: Discovery of direct 1st-level children, non-existent wrappers, scandir failure handling, symlinks.
+  3. `tests/test_gate5e_e3_graph.py`: Overlap detection, ancestor/descendant collision, target conflicts (`TARGET_EXISTS`, `PLANNED_TARGET_COLLISION`).
+  4. `tests/test_gate5e_e3_compiler.py`: Preview compiler, live-directory-readonly tracking, draft moves, candidate limit (<50000).
+  5. `tests/test_gate5e_e3_api.py`: Preview API endpoints, pagination, digest verification, 422/409 error mappings.
+  6. `tests/test_gate5e_e3_generate.py`: Generate plan success, digest mismatch (`PREVIEW_CHANGED`), collision/empty plan handling, Phase B zero filesystem work.
+  7. `tests/test_gate5e_e3_lifecycle.py`: Freeze, validate, execute, undo lifecycle for files and directories; EXDEV fail-closed integration verification.
+- **Verification Results**:
+  - `PYTHONPATH=. pytest -o addopts='' --disable-warnings -q tests/test_gate5e_e3_*.py` -> **18 passed, 0 failed** (100% pass).
+  - `PYTHONPATH=. pytest -o addopts='' --disable-warnings -q tests/test_gate5e_e1_*.py tests/test_gate5e_e2_*.py` -> **77 passed, 0 failed** (100% pass).
 
-## Deliverables
-- Documentation: `docs/history/gate5e/gate5e-e3-walkthrough.md`
-- Source Snapshot ZIP: `nas-file-center-v0.3.5-gate5e-e3.zip` (Artifact generated)
-- Current Code HEAD: `8f6642d2226552b466d2cce9930174c7265b731a`
+## Deliverables & Identity
+- **Documentation**: `docs/history/gate5e/gate5e-e3-walkthrough.md`
+- **Source Snapshot ZIP**: `nas-file-center-v0.3.5-gate5e-e3.zip`
+- **Baseline HEAD**: `9ca4e94aaa0b063a3a6ae812ea2ee6afceb84e08`
+- **E3 Implementation HEAD**: `575c1f32246587c993e25e1a0b12167d3f5c5280`
+- **Final Repository HEAD**: Refer to git `FINAL_HEAD` (`git rev-parse HEAD`), matching ZIP Comment.
+
