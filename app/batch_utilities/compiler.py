@@ -58,6 +58,32 @@ class BatchUtilityDraftIntent:
     metadata_json: str
 
 
+CONFLICT_PRIORITY_RANK: dict[str, int] = {
+    "TARGET_SYMLINK": 1,
+    "TARGET_OUTSIDE_ALLOWED_ROOT": 2,
+    "NAME_TOO_LONG": 3,
+    "CASE_ONLY_COLLISION": 4,
+    "TARGET_EXISTS": 5,
+    "PLANNED_TARGET_COLLISION": 5,
+    "RESERVED_TARGET": 5,
+    "RENAME_CYCLE": 5,
+}
+
+
+def select_primary_conflict(conflicts: Sequence[Any]) -> Any:
+    """Select deterministically the primary conflict according to frozen priority:
+    TARGET_SYMLINK (1) > TARGET_OUTSIDE_ALLOWED_ROOT (2) > NAME_TOO_LONG (3) > CASE_ONLY_COLLISION (4) > others (5).
+    """
+    return min(
+        conflicts,
+        key=lambda c: (
+            CONFLICT_PRIORITY_RANK.get(getattr(c, "conflict_type", str(c)), 99),
+            getattr(c, "conflict_type", ""),
+            getattr(c, "reason", "") or "",
+        ),
+    )
+
+
 @dataclass(frozen=True)
 class BatchUtilityCompilation:
     canonical_action: dict[str, Any]
@@ -1222,7 +1248,7 @@ def compile_suffix_transform_preview(
 
     for cand_item in actionable_candidates:
         if cand_item.source_path in conflicts_by_src:
-            primary_c = conflicts_by_src[cand_item.source_path][0]
+            primary_c = select_primary_conflict(conflicts_by_src[cand_item.source_path])
             decision_rows.append({
                 "source_path": cand_item.source_path,
                 "target_path": cand_item.target_path,

@@ -274,18 +274,26 @@ def resolve_suffix_transform_graph(
     target_parent_dirs = sorted({Path(resolved_targets_by_src[item.source_path]).parent for item in effective_items}, key=lambda p: str(p))
     directory_observations: list[dict[str, Any]] = []
     dir_entries_by_parent: dict[Path, list[str]] = {}
+    failed_parent_dirs: set[Path] = set()
 
     for p_dir in target_parent_dirs:
         entries: list[str] = []
-        if p_dir.exists() and p_dir.is_dir():
-            try:
+        scan_status = "OK"
+        try:
+            if p_dir.exists() and p_dir.is_dir():
                 with os.scandir(p_dir) as it:
                     for entry in it:
                         entries.append(entry.name)
-            except Exception:
-                pass
+        except OSError:
+            scan_status = "FAILED"
+            failed_parent_dirs.add(p_dir)
+
         entries.sort()
         dir_entries_by_parent[p_dir] = entries
+        directory_observations.append({
+            "parent": str(p_dir),
+            "scan_status": scan_status,
+        })
         for e_name in entries:
             directory_observations.append({
                 "parent": str(p_dir),
@@ -297,6 +305,19 @@ def resolve_suffix_transform_graph(
         res_tgt_p = Path(resolved_targets_by_src[item.source_path])
         p_dir = res_tgt_p.parent
         tgt_name = res_tgt_p.name
+
+        if p_dir in failed_parent_dirs:
+            conflicts.append(
+                BlockingConflict(
+                    source_path=item.source_path,
+                    target_path=item.target_path,
+                    conflict_type="CASE_ONLY_COLLISION",
+                    reason=f"Failed to perform directory casefold observation on parent '{p_dir}'",
+                    details={"target_path": item.target_path, "parent_dir": str(p_dir)},
+                )
+            )
+            continue
+
         entries = dir_entries_by_parent.get(p_dir, [])
         for e_name in entries:
             if e_name.casefold() == tgt_name.casefold() and e_name != tgt_name:

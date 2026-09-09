@@ -311,3 +311,148 @@ def test_preview_digest_graph_authority_reviewer_case_h(tmp_path, db_session):
     digest3 = comp3.source_snapshot_digest
     assert digest2 != digest3, "Digest must change when target appears on disk"
 
+
+def test_scandir_failure_fails_closed_and_changes_digest(tmp_path, db_session, monkeypatch):
+    """Reviewer reproduction 26 / Blocker 1: scandir failure fails closed with CASE_ONLY_COLLISION and changes digest."""
+    import os
+    root_dir = tmp_path / "root_scandir_fail"
+    root_dir.mkdir()
+
+    f_src = root_dir / "src.jpg"
+    f_src.write_text("src")
+    st = f_src.stat()
+
+    iroot = IndexRoot(root=str(root_dir))
+    db_session.add(iroot)
+    db_session.flush()
+
+    ip = IndexedPath(
+        root_key=str(root_dir),
+        absolute_path=str(f_src),
+        relative_path="src.jpg",
+        basename="src.jpg",
+        stem="src",
+        suffix=".jpg",
+        size=st.st_size,
+        mtime_ns=st.st_mtime_ns,
+        device=st.st_dev,
+        inode=st.st_ino,
+        is_dir=False,
+        scan_generation=1,
+    )
+    db_session.add(ip)
+    db_session.commit()
+
+    action = SuffixTransformAction(
+        type="suffix_transform",
+        root_ids=[iroot.id],
+        mode="append",
+        suffix=".txt",
+    )
+    safety = BatchUtilitySafetySnapshot(
+        protect_last_file=True,
+        allowed_roots=(root_dir,),
+        quarantine_root=None,
+        effective_policy={},
+    )
+
+    # 1. Success scan
+    comp_success = compile_suffix_transform_preview(
+        session=db_session,
+        action=action,
+        safety_snapshot=safety,
+    )
+    assert comp_success.blocking_conflict_count == 0
+    assert comp_success.planned_operations_count == 1
+
+    # 2. Failure scan
+    orig_scandir = os.scandir
+
+    def mock_scandir(path):
+        if str(path) == str(root_dir):
+            raise PermissionError("Simulated scandir permission error")
+        return orig_scandir(path)
+
+    monkeypatch.setattr(os, "scandir", mock_scandir)
+
+    comp_failure = compile_suffix_transform_preview(
+        session=db_session,
+        action=action,
+        safety_snapshot=safety,
+    )
+
+    assert comp_failure.planned_operations_count == 0
+    assert comp_failure.blocking_conflict_count == 1
+    assert comp_failure.rows[0]["decision"] == "BLOCKING_CONFLICT"
+    assert comp_failure.rows[0]["reason_code"] == "CASE_ONLY_COLLISION"
+    assert comp_failure.source_snapshot_digest != comp_success.source_snapshot_digest
+
+
+def test_same_source_conflict_priority_reviewer_case_b(tmp_path, db_session):
+    """Reviewer reproduction 27 / Blocker 2: Same source with TARGET_SYMLINK and CASE_ONLY_COLLISION selects TARGET_SYMLINK."""
+    root_dir = tmp_path / "root_priority"
+    root_dir.mkdir()
+
+    f_src = root_dir / "src.jpg"
+    f_src.write_text("src")
+    st = f_src.stat()
+
+    f_case = root_dir / "SRC.TXT"
+    f_case.write_text("uppercase")
+
+    other_file = root_dir / "other.dat"
+    other_file.write_text("other")
+
+    # target is a symlink: src.txt -> other.dat
+    symlink_target = root_dir / "src.txt"
+    symlink_target.symlink_to(other_file)
+
+    iroot = IndexRoot(root=str(root_dir))
+    db_session.add(iroot)
+    db_session.flush()
+
+    ip = IndexedPath(
+        root_key=str(root_dir),
+        absolute_path=str(f_src),
+        relative_path="src.jpg",
+        basename="src.jpg",
+        stem="src",
+        suffix=".jpg",
+        size=st.st_size,
+        mtime_ns=st.st_mtime_ns,
+        device=st.st_dev,
+        inode=st.st_ino,
+        is_dir=False,
+        scan_generation=1,
+    )
+    db_session.add(ip)
+    db_session.commit()
+
+    action = SuffixTransformAction(
+        type="suffix_transform",
+        root_ids=[iroot.id],
+        mode="change",
+        suffix=".txt",
+    )
+    safety = BatchUtilitySafetySnapshot(
+        protect_last_file=True,
+        allowed_roots=(root_dir,),
+        quarantine_root=None,
+        effective_policy={},
+    )
+
+    comp = compile_suffix_transform_preview(
+        session=db_session,
+        action=action,
+        safety_snapshot=safety,
+    )
+
+    # Exactly 1 blocking row for this source
+    assert comp.blocking_conflict_count == 1
+    assert comp.planned_operations_count == 0
+    assert len(comp.rows) == 1
+    assert comp.rows[0]["decision"] == "BLOCKING_CONFLICT"
+    # Primary reason MUST be TARGET_SYMLINK, not CASE_ONLY_COLLISION
+    assert comp.rows[0]["reason_code"] == "TARGET_SYMLINK"
+
+

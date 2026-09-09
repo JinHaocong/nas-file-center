@@ -407,3 +407,129 @@ def test_generate_suffix_transform_phase_b_zero_filter_compilation(service_env):
         )
         assert plan_info["status"] == "draft"
         assert mock_compile_sql.call_count == 0
+
+
+def test_generate_scandir_failure_raises_case_collision(service_env, monkeypatch):
+    """Reviewer reproduction 26: scandir failure results in BatchUtilityCaseCollisionError and 0 Draft."""
+    import os
+    from app.batch_utilities.errors import BatchUtilityCaseCollisionError
+    svc, Session, allowed, _ = service_env
+    f1 = allowed / "file1.png"
+    f1.write_text("content1")
+    st1 = f1.stat()
+
+    with Session() as session:
+        iroot = IndexRoot(root=str(allowed))
+        session.add(iroot)
+        session.flush()
+        ip1 = IndexedPath(
+            root_key=str(allowed),
+            absolute_path=str(f1),
+            relative_path="file1.png",
+            basename="file1.png",
+            stem="file1",
+            suffix=".png",
+            size=st1.st_size,
+            mtime_ns=st1.st_mtime_ns,
+            device=st1.st_dev,
+            inode=st1.st_ino,
+            is_dir=False,
+            scan_generation=1,
+        )
+        session.add(ip1)
+        session.commit()
+        root_id = iroot.id
+
+    action = SuffixTransformAction(
+        type="suffix_transform",
+        root_ids=[root_id],
+        mode="append",
+        suffix=".bak",
+    )
+
+    orig_scandir = os.scandir
+
+    def fake_scandir(path):
+        if str(path) == str(allowed):
+            raise PermissionError("Simulated scandir error")
+        return orig_scandir(path)
+
+    monkeypatch.setattr(os, "scandir", fake_scandir)
+
+    preview = svc.get_batch_utility_preview(action=action)
+    assert preview["planned_operations_count"] == 0
+    assert preview["blocking_conflict_count"] == 1
+    digest = preview["preview_digest"]
+
+    with pytest.raises(BatchUtilityCaseCollisionError):
+        svc.create_batch_utility_plan(
+            action=action,
+            expected_preview_digest=digest,
+        )
+
+    with Session() as session:
+        assert session.query(BatchPlan).count() == 0
+
+
+def test_generate_same_source_symlink_and_casefold_raises_symlink_blocked(service_env):
+    """Reviewer reproduction 27: same-source TARGET_SYMLINK + CASE_ONLY_COLLISION raises BatchUtilitySymlinkBlockedError."""
+    from app.batch_utilities.errors import BatchUtilitySymlinkBlockedError
+    svc, Session, allowed, _ = service_env
+
+    src = allowed / "src.jpg"
+    src.write_text("content")
+    st = src.stat()
+
+    # Case collision target existing on disk
+    case_target = allowed / "SRC.TXT"
+    case_target.write_text("case collision")
+
+    # Symlink target pointing elsewhere
+    other_file = allowed / "dummy.dat"
+    other_file.write_text("dummy")
+    symlink_target = allowed / "src.txt"
+    symlink_target.symlink_to(other_file)
+
+    with Session() as session:
+        iroot = IndexRoot(root=str(allowed))
+        session.add(iroot)
+        session.flush()
+        ip = IndexedPath(
+            root_key=str(allowed),
+            absolute_path=str(src),
+            relative_path="src.jpg",
+            basename="src.jpg",
+            stem="src",
+            suffix=".jpg",
+            size=st.st_size,
+            mtime_ns=st.st_mtime_ns,
+            device=st.st_dev,
+            inode=st.st_ino,
+            is_dir=False,
+            scan_generation=1,
+        )
+        session.add(ip)
+        session.commit()
+        root_id = iroot.id
+
+    action = SuffixTransformAction(
+        type="suffix_transform",
+        root_ids=[root_id],
+        mode="change",
+        suffix=".txt",
+    )
+
+    preview = svc.get_batch_utility_preview(action=action)
+    assert preview["planned_operations_count"] == 0
+    assert preview["blocking_conflict_count"] == 1
+    digest = preview["preview_digest"]
+
+    with pytest.raises(BatchUtilitySymlinkBlockedError):
+        svc.create_batch_utility_plan(
+            action=action,
+            expected_preview_digest=digest,
+        )
+
+    with Session() as session:
+        assert session.query(BatchPlan).count() == 0
+

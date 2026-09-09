@@ -401,3 +401,38 @@ def test_dynamic_name_max_via_pathconf(tmp_path, monkeypatch):
     types = [c.conflict_type for c in result.conflicts]
     assert "NAME_TOO_LONG" in types
 
+
+def test_casefold_scandir_failure_fails_closed(tmp_path, monkeypatch):
+    """Reviewer reproduction 26 / Blocker 1: os.scandir raising PermissionError fails closed with CASE_ONLY_COLLISION."""
+    import os
+    root = tmp_path / "allowed"
+    root.mkdir()
+    allowed_roots = [root]
+
+    f_src = root / "src.jpg"
+    f_src.write_text("src")
+    f_existing = root / "A.TXT"
+    f_existing.write_text("existing")
+
+    c1 = make_cand(str(f_src), str(root / "a.txt"), root_path=str(root))
+
+    orig_scandir = os.scandir
+
+    def fake_scandir(path):
+        if str(path) == str(root):
+            raise PermissionError("Simulated scandir permission denied")
+        return orig_scandir(path)
+
+    monkeypatch.setattr(os, "scandir", fake_scandir)
+
+    result = resolve_suffix_transform_graph(
+        items=[c1],
+        allowed_roots=allowed_roots,
+        quarantine_root=None,
+    )
+    assert result.has_blocking_conflicts is True
+    assert len(result.ordered_items) == 0
+    conflict_types = [c.conflict_type for c in result.conflicts if c.source_path == str(f_src)]
+    assert "CASE_ONLY_COLLISION" in conflict_types
+
+

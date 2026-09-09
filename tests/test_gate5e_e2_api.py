@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
@@ -387,3 +388,130 @@ def test_generate_plan_api_empty_plan_rejected(api_test_env):
     assert gen_resp.status_code == 422
     err = gen_resp.json()
     assert err["error"]["code"] == "BATCH_UTILITY_EMPTY_PLAN"
+
+
+def test_scandir_failure_fails_closed_in_preview_and_generate(api_test_env, monkeypatch):
+    """Reviewer reproduction 26: scandir PermissionError fails closed in Preview and Generate."""
+    client = api_test_env["client"]
+    service = api_test_env["service"]
+    root1_path = api_test_env["root1_path"]
+
+    action_dict = {
+        "type": "suffix_transform",
+        "root_ids": [1],
+        "mode": "append",
+        "suffix": ".bak",
+    }
+
+    # 1. Normal preview succeeds
+    p_ok = client.post("/api/batch-utilities/preview", json={"action": action_dict})
+    assert p_ok.status_code == 200
+    ok_digest = p_ok.json()["preview_digest"]
+
+    # 2. Mock scandir failure on root1_path
+    orig_scandir = os.scandir
+
+    def fake_scandir(path):
+        if str(path) == str(root1_path):
+            raise PermissionError("Simulated scandir permission error")
+        return orig_scandir(path)
+
+    monkeypatch.setattr(os, "scandir", fake_scandir)
+
+    # Preview under scandir failure
+    p_fail = client.post("/api/batch-utilities/preview", json={"action": action_dict})
+    assert p_fail.status_code == 200
+    p_fail_data = p_fail.json()
+    assert p_fail_data["planned_operations_count"] == 0
+    assert p_fail_data["blocking_conflict_count"] > 0
+    assert p_fail_data["preview_digest"] != ok_digest
+
+    fail_digest = p_fail_data["preview_digest"]
+
+    # Generate under scandir failure -> 409 BATCH_UTILITY_CASE_COLLISION, 0 draft created
+    with service.SessionLocal() as session:
+        plans_before = session.scalar(select(func.count(BatchPlan.id))) or 0
+
+    g_fail = client.post(
+        "/api/batch-utilities/generate-plan",
+        json={"action": action_dict, "expected_preview_digest": fail_digest},
+    )
+    assert g_fail.status_code == 409
+    assert g_fail.json()["error"]["code"] == "BATCH_UTILITY_CASE_COLLISION"
+
+    with service.SessionLocal() as session:
+        plans_after = session.scalar(select(func.count(BatchPlan.id))) or 0
+        assert plans_after == plans_before
+
+
+def test_same_source_symlink_and_casefold_priority_in_api(api_test_env):
+    """Reviewer reproduction 27: same-source TARGET_SYMLINK + CASE_ONLY_COLLISION yields TARGET_SYMLINK and 409 BATCH_UTILITY_SYMLINK_BLOCKED."""
+    client = api_test_env["client"]
+    service = api_test_env["service"]
+    root1_path = api_test_env["root1_path"]
+
+    # Single source file
+    src_file = root1_path / "single_src.jpg"
+    src_file.write_text("content")
+    st = src_file.stat()
+
+    # Case collision target existing on disk
+    case_target = root1_path / "SINGLE_SRC.TXT"
+    case_target.write_text("uppercase")
+
+    # Symlink target pointing elsewhere
+    other_file = root1_path / "dummy.dat"
+    other_file.write_text("dummy")
+    symlink_target = root1_path / "single_src.txt"
+    symlink_target.symlink_to(other_file)
+
+    with service.SessionLocal() as session:
+        ip = IndexedPath(
+            root_key=str(root1_path),
+            absolute_path=str(src_file),
+            relative_path="single_src.jpg",
+            basename="single_src.jpg",
+            stem="single_src",
+            suffix=".jpg",
+            size=st.st_size,
+            mtime_ns=st.st_mtime_ns,
+            device=st.st_dev,
+            inode=st.st_ino,
+            is_dir=False,
+            scan_generation=1,
+        )
+        session.add(ip)
+        session.commit()
+
+        plans_before = session.scalar(select(func.count(BatchPlan.id))) or 0
+
+    action_dict = {
+        "type": "suffix_transform",
+        "root_ids": [1],
+        "mode": "change",
+        "suffix": ".txt",
+    }
+
+    p_resp = client.post("/api/batch-utilities/preview", json={"action": action_dict})
+    assert p_resp.status_code == 200
+    p_data = p_resp.json()
+
+    # Verify single_src row decision and reason_code
+    src_rows = [r for r in p_data["items"] if r["source_path"] == str(src_file)]
+    assert len(src_rows) == 1
+    assert src_rows[0]["decision"] == "BLOCKING_CONFLICT"
+    # TARGET_SYMLINK (priority 1) must take precedence over CASE_ONLY_COLLISION (priority 4)
+    assert src_rows[0]["reason_code"] == "TARGET_SYMLINK"
+
+    # Generate must return 409 BATCH_UTILITY_SYMLINK_BLOCKED
+    g_resp = client.post(
+        "/api/batch-utilities/generate-plan",
+        json={"action": action_dict, "expected_preview_digest": p_data["preview_digest"]},
+    )
+    assert g_resp.status_code == 409
+    assert g_resp.json()["error"]["code"] == "BATCH_UTILITY_SYMLINK_BLOCKED"
+
+    with service.SessionLocal() as session:
+        plans_after = session.scalar(select(func.count(BatchPlan.id))) or 0
+        assert plans_after == plans_before
+
