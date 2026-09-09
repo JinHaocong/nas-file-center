@@ -4147,7 +4147,7 @@ class FileCenterService:
     def get_batch_utility_preview(
         self,
         *,
-        action: QuarantineFilteredAction | SuffixTransformAction,
+        action: QuarantineFilteredAction | SuffixTransformAction | FlattenOneLevelAction,
         page: int = 1,
         page_size: int = 50,
     ) -> dict[str, Any]:
@@ -4292,7 +4292,9 @@ class FileCenterService:
         with self.SessionLocal() as session:
             session.execute(text("BEGIN IMMEDIATE"))
             action_type = compilation.canonical_action.get("type", "quarantine_filtered")
-            if action_type == "suffix_transform":
+            if action_type == "flatten_one_level":
+                current_lineage = "0" * 64
+            elif action_type == "suffix_transform":
                 current_lineage = compute_current_suffix_transform_db_lineage_digest(
                     session,
                     compilation.canonical_action,

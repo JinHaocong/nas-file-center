@@ -1,3 +1,5 @@
+from collections import defaultdict
+
 import errno
 import hashlib
 import json
@@ -49,7 +51,7 @@ class BatchUtilitySafetySnapshot:
 @dataclass(frozen=True)
 class BatchUtilityDraftIntent:
     sequence: int
-    operation: Literal["quarantine", "rename"]
+    operation: Literal["quarantine", "rename", "move"]
     source_path: str
     target_path: str | None
     keep_path: str | None

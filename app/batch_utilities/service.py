@@ -80,7 +80,7 @@ def build_batch_utility_preview_response(
     return {
         "utility_action": compilation.canonical_action.get("type", "quarantine_filtered"),
         "utility_engine_version": BATCH_UTILITY_ENGINE_VERSION,
-        "preview_source": "index-readonly-safety",
+        "preview_source": "live-directory-readonly" if compilation.canonical_action.get("type") == "flatten_one_level" else "index-readonly-safety",
         "live_filesystem_verified": False,
         "matched_count": compilation.matched_count,
         "matched_bytes": compilation.matched_bytes,
