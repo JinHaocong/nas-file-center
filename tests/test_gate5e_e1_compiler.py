@@ -484,6 +484,14 @@ def test_parent_symlink_and_resolved_path_safety(tmp_path):
     loop_b.symlink_to(loop_a)
     indexed_loop_path = loop_a / "loop_file.txt"
 
+    # Case E: Normal missing final file (nonexistent on disk)
+    missing_file = allowed_root / "normal_missing.txt"
+
+    # Case F: Source itself is a symlink (pointing inside allowed roots to sibling.txt)
+    link_file = allowed_root / "link_self_symlink.txt"
+    link_file.symlink_to(sibling_file)
+    st_link = os.lstat(link_file)
+
     with SessionLocal() as session:
         r = IndexRoot(id=1, root=str(allowed_root))
         session.add(r)
@@ -546,7 +554,35 @@ def test_parent_symlink_and_resolved_path_safety(tmp_path):
             is_dir=False,
             scan_generation=1,
         )
-        session.add_all([p_victim, p_q, p_internal, p_loop])
+        p_missing = IndexedPath(
+            root_key=str(allowed_root),
+            absolute_path=str(missing_file),
+            relative_path="normal_missing.txt",
+            basename="normal_missing.txt",
+            stem="normal_missing",
+            suffix=".txt",
+            size=10,
+            mtime_ns=10,
+            device=1,
+            inode=1,
+            is_dir=False,
+            scan_generation=1,
+        )
+        p_symlink = IndexedPath(
+            root_key=str(allowed_root),
+            absolute_path=str(link_file),
+            relative_path="link_self_symlink.txt",
+            basename="link_self_symlink.txt",
+            stem="link_self_symlink",
+            suffix=".txt",
+            size=st_link.st_size,
+            mtime_ns=st_link.st_mtime_ns,
+            device=st_link.st_dev,
+            inode=st_link.st_ino,
+            is_dir=False,
+            scan_generation=1,
+        )
+        session.add_all([p_victim, p_q, p_internal, p_loop, p_missing, p_symlink])
         session.commit()
 
         snapshot = BatchUtilitySafetySnapshot(
@@ -595,4 +631,17 @@ def test_parent_symlink_and_resolved_path_safety(tmp_path):
         assert row_loop["decision"] == "SAFETY_EXCLUDED"
         assert row_loop["reason_code"] == "PATH_OUTSIDE_ALLOWED_ROOT"
         assert not any(i.source_path == str(indexed_loop_path) for i in compilation.intents)
+
+        # Check Row E (normal missing final file -> SKIPPED / SOURCE_MISSING)
+        row_missing = next(r for r in compilation.rows if r["source_path"] == str(missing_file))
+        assert row_missing["decision"] == "SKIPPED"
+        assert row_missing["reason_code"] == "SOURCE_MISSING"
+        assert not any(i.source_path == str(missing_file) for i in compilation.intents)
+
+        # Check Row F (source path itself is a symlink -> SAFETY_EXCLUDED / SYMLINK_BLOCKED)
+        row_symlink = next(r for r in compilation.rows if r["source_path"] == str(link_file))
+        assert row_symlink["decision"] == "SAFETY_EXCLUDED"
+        assert row_symlink["reason_code"] == "SYMLINK_BLOCKED"
+        assert not any(i.source_path == str(link_file) for i in compilation.intents)
+
 

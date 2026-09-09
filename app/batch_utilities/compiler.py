@@ -1,3 +1,4 @@
+import errno
 import hashlib
 import json
 import os
@@ -92,6 +93,10 @@ def _count_regular_files_in_dir(dir_path: Path) -> int:
             if not p.is_symlink() and p.is_file():
                 count += 1
     return count
+
+
+def _resolve_existing_candidate_for_safety(path: Path) -> Path:
+    return path.expanduser().resolve(strict=True)
 
 
 def _parse_and_validate_filter(filter_obj: Any) -> Any:
@@ -370,13 +375,71 @@ def compile_quarantine_filtered_preview(
             })
             continue
 
-        # Case 2: Resolved path safety checks (fail-closed against symlink loops and escapes)
+        # Case 2: Strict existing-path resolution & boundary safety check
         try:
-            path_in_quarantine = is_reserved_quarantine_path(abs_p, safety_snapshot.quarantine_root)
-        except (OSError, RuntimeError, ValueError):
-            path_in_quarantine = False
+            resolved_candidate = _resolve_existing_candidate_for_safety(abs_p)
+        except FileNotFoundError:
+            # Source path does not resolve to an existing target.
+            # Check if lexical source path itself is an existing symlink (e.g. broken symlink)
+            try:
+                lex_st = os.lstat(cand.absolute_path)
+                if stat.S_ISLNK(lex_st.st_mode):
+                    cand_fact["status"] = "symlink"
+                    source_facts.append(cand_fact)
+                    decision_rows.append({
+                        "source_path": cand.absolute_path,
+                        "target_path": None,
+                        "index_root_id": index_root_id,
+                        "index_root_path": index_root_path,
+                        "relative_path": cand.relative_path,
+                        "object_type": "symlink",
+                        "decision": "SAFETY_EXCLUDED",
+                        "reason_code": "SYMLINK_BLOCKED",
+                        "reason": "Source path is a symlink",
+                        "size": lex_st.st_size,
+                        "protected_dir": None,
+                    })
+                    continue
+            except Exception:
+                pass
 
-        if path_in_quarantine:
+            cand_fact["status"] = "missing"
+            source_facts.append(cand_fact)
+            decision_rows.append({
+                "source_path": cand.absolute_path,
+                "target_path": None,
+                "index_root_id": index_root_id,
+                "index_root_path": index_root_path,
+                "relative_path": cand.relative_path,
+                "object_type": "missing",
+                "decision": "SKIPPED",
+                "reason_code": "SOURCE_MISSING",
+                "reason": "Source file does not exist on disk",
+                "size": cand.size,
+                "protected_dir": None,
+            })
+            continue
+        except (RuntimeError, OSError) as e:
+            # Symlink loop (ELOOP), unresolvable parent chain, etc. fail closed
+            cand_fact["status"] = "outside_allowed"
+            source_facts.append(cand_fact)
+            decision_rows.append({
+                "source_path": cand.absolute_path,
+                "target_path": None,
+                "index_root_id": index_root_id,
+                "index_root_path": index_root_path,
+                "relative_path": cand.relative_path,
+                "object_type": "file",
+                "decision": "SAFETY_EXCLUDED",
+                "reason_code": "PATH_OUTSIDE_ALLOWED_ROOT",
+                "reason": "Path is outside allowed roots or contains unresolvable symlink chain",
+                "size": cand.size,
+                "protected_dir": None,
+            })
+            continue
+
+        # Resolved object exists. Check boundary containment on resolved_candidate
+        if is_reserved_quarantine_path(resolved_candidate, safety_snapshot.quarantine_root):
             cand_fact["status"] = "reserved_quarantine"
             source_facts.append(cand_fact)
             decision_rows.append({
@@ -394,12 +457,7 @@ def compile_quarantine_filtered_preview(
             })
             continue
 
-        try:
-            path_allowed = is_path_allowed(abs_p, safety_snapshot.allowed_roots)
-        except (OSError, RuntimeError, ValueError):
-            path_allowed = False
-
-        if not path_allowed:
+        if not is_path_allowed(resolved_candidate, safety_snapshot.allowed_roots):
             cand_fact["status"] = "outside_allowed"
             source_facts.append(cand_fact)
             decision_rows.append({
@@ -417,7 +475,7 @@ def compile_quarantine_filtered_preview(
             })
             continue
 
-        # Case 3: Read-only live observation via os.lstat
+        # Case 3: Read-only live observation via os.lstat on lexical source path
         try:
             st = os.lstat(cand.absolute_path)
         except FileNotFoundError:
@@ -437,7 +495,24 @@ def compile_quarantine_filtered_preview(
                 "protected_dir": None,
             })
             continue
-        except Exception as e:
+        except OSError as e:
+            if hasattr(errno, "ELOOP") and e.errno == errno.ELOOP:
+                cand_fact["status"] = "outside_allowed"
+                source_facts.append(cand_fact)
+                decision_rows.append({
+                    "source_path": cand.absolute_path,
+                    "target_path": None,
+                    "index_root_id": index_root_id,
+                    "index_root_path": index_root_path,
+                    "relative_path": cand.relative_path,
+                    "object_type": "file",
+                    "decision": "SAFETY_EXCLUDED",
+                    "reason_code": "PATH_OUTSIDE_ALLOWED_ROOT",
+                    "reason": "Path contains symlink loop",
+                    "size": cand.size,
+                    "protected_dir": None,
+                })
+                continue
             cand_fact["status"] = f"lstat_error_{e}"
             source_facts.append(cand_fact)
             decision_rows.append({
