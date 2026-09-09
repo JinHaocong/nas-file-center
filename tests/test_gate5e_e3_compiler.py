@@ -188,3 +188,268 @@ def test_compiler_digest_changes_on_same_size_mtime_change(tmp_path):
     
     assert snap_digest1 != snap_digest2
     assert digest1 != digest2
+
+
+def test_compiler_candidate_limit_includes_all_error_rows(tmp_path):
+    from unittest.mock import patch
+    from app.batch_utilities.flatten import FlattenError
+    from app.batch_utilities.errors import BatchUtilityLimitExceededError
+    
+    root = tmp_path / "root"
+    wrapper = root / "wrapper"
+    wrapper.mkdir(parents=True)
+    
+    action = FlattenOneLevelAction(
+        type="flatten_one_level",
+        wrapper_paths=[str(wrapper)]
+    )
+    snapshot = BatchUtilitySafetySnapshot(
+        protect_last_file=True,
+        allowed_roots=(root,),
+        quarantine_root=None,
+        effective_policy={},
+    )
+    
+    # 50,001 error rows
+    fake_errors = [
+        FlattenError(
+            source_path=f"{wrapper}/link_{i}.txt",
+            conflict_type="WRAPPER_CHILD_SYMLINK",
+            reason="Wrapper child is a symlink",
+            wrapper_path=str(wrapper),
+            object_type="symlink",
+        )
+        for i in range(50001)
+    ]
+    
+    with patch("app.batch_utilities.compiler.discover_flatten_one_level", return_value=([], fake_errors)):
+        with pytest.raises(BatchUtilityLimitExceededError, match="maximum 50,000 candidates"):
+            compile_flatten_one_level_preview(session=None, action=action, safety_snapshot=snapshot)
+
+
+def test_compiler_wrapper_scandir_oserror_fails_closed(tmp_path):
+    import os
+    from unittest.mock import patch
+    from app.batch_utilities.errors import BatchUtilityInvalidConfigError
+    
+    root = tmp_path / "root"
+    wrapper = root / "wrapper"
+    wrapper.mkdir(parents=True)
+    
+    action = FlattenOneLevelAction(
+        type="flatten_one_level",
+        wrapper_paths=[str(wrapper)]
+    )
+    snapshot = BatchUtilitySafetySnapshot(
+        protect_last_file=True,
+        allowed_roots=(root,),
+        quarantine_root=None,
+        effective_policy={},
+    )
+    
+    orig_scandir = os.scandir
+    def mock_scandir(path):
+        if str(path) == str(wrapper):
+            err = PermissionError(13, "Permission denied")
+            err.errno = 13
+            raise err
+        return orig_scandir(path)
+        
+    with patch("os.scandir", side_effect=mock_scandir):
+        with pytest.raises(BatchUtilityInvalidConfigError) as exc_info:
+            compile_flatten_one_level_preview(session=None, action=action, safety_snapshot=snapshot)
+        assert exc_info.value.details.get("wrapper_path") == str(wrapper)
+        assert exc_info.value.details.get("errno") == 13
+
+
+def test_compiler_quarantine_wrapper_maps_cross_root(tmp_path):
+    from app.batch_utilities.errors import BatchUtilityCrossRootError
+    root = tmp_path / "root"
+    root.mkdir()
+    quarantine = tmp_path / "quarantine"
+    quarantine.mkdir()
+    w_quarantine = quarantine / "w_inside_quarantine"
+    w_quarantine.mkdir()
+    
+    action = FlattenOneLevelAction(
+        type="flatten_one_level",
+        wrapper_paths=[str(w_quarantine)]
+    )
+    snapshot = BatchUtilitySafetySnapshot(
+        protect_last_file=True,
+        allowed_roots=(root,),
+        quarantine_root=quarantine,
+        effective_policy={},
+    )
+    with pytest.raises(BatchUtilityCrossRootError):
+        compile_flatten_one_level_preview(session=None, action=action, safety_snapshot=snapshot)
+
+
+def test_compiler_allowed_root_wrapper_maps_invalid_config(tmp_path):
+    from app.batch_utilities.errors import BatchUtilityInvalidConfigError
+    root = tmp_path / "root"
+    root.mkdir()
+    
+    action = FlattenOneLevelAction(
+        type="flatten_one_level",
+        wrapper_paths=[str(root)]
+    )
+    snapshot = BatchUtilitySafetySnapshot(
+        protect_last_file=True,
+        allowed_roots=(root,),
+        quarantine_root=None,
+        effective_policy={},
+    )
+    with pytest.raises(BatchUtilityInvalidConfigError):
+        compile_flatten_one_level_preview(session=None, action=action, safety_snapshot=snapshot)
+
+
+def test_compiler_overlap_resolution_oserror_fails_closed(tmp_path):
+    from unittest.mock import patch
+    from app.batch_utilities.errors import BatchUtilityInvalidConfigError
+    root = tmp_path / "root"
+    w1 = root / "w1"
+    w1.mkdir(parents=True)
+    w2 = root / "w2"
+    w2.mkdir(parents=True)
+    
+    action = FlattenOneLevelAction(
+        type="flatten_one_level",
+        wrapper_paths=[str(w1), str(w2)]
+    )
+    snapshot = BatchUtilitySafetySnapshot(
+        protect_last_file=True,
+        allowed_roots=(root,),
+        quarantine_root=None,
+        effective_policy={},
+    )
+    
+    orig_resolve = Path.resolve
+    def mock_resolve(self, strict=False):
+        if str(self) == str(w2):
+            raise OSError(5, "Input/output error")
+        return orig_resolve(self, strict=strict)
+        
+    with patch.object(Path, "resolve", mock_resolve):
+        with pytest.raises(BatchUtilityInvalidConfigError) as exc_info:
+            compile_flatten_one_level_preview(session=None, action=action, safety_snapshot=snapshot)
+        assert exc_info.value.details.get("wrapper_path") == str(w2)
+
+
+def test_compiler_overlap_physical_dev_ino_duplicate(tmp_path):
+    import os
+    from unittest.mock import patch
+    from app.batch_utilities.errors import BatchUtilityScopeOverlapError
+    root = tmp_path / "root"
+    w1 = root / "w1"
+    w1.mkdir(parents=True)
+    w2 = root / "w2"
+    w2.mkdir(parents=True)
+    
+    action = FlattenOneLevelAction(
+        type="flatten_one_level",
+        wrapper_paths=[str(w1), str(w2)]
+    )
+    snapshot = BatchUtilitySafetySnapshot(
+        protect_last_file=True,
+        allowed_roots=(root,),
+        quarantine_root=None,
+        effective_policy={},
+    )
+    
+    orig_stat = os.stat
+    def mock_stat(path, *args, **kwargs):
+        st = orig_stat(path, *args, **kwargs)
+        if str(path) == str(w2):
+            # Simulate same dev & ino as w1
+            st1 = orig_stat(str(w1))
+            class MockStat:
+                st_mode = st.st_mode
+                st_size = st.st_size
+                st_mtime_ns = st.st_mtime_ns
+                st_dev = st1.st_dev
+                st_ino = st1.st_ino
+            return MockStat()
+        return st
+        
+    with patch("os.stat", side_effect=mock_stat):
+        with pytest.raises(BatchUtilityScopeOverlapError):
+            compile_flatten_one_level_preview(session=None, action=action, safety_snapshot=snapshot)
+
+
+def test_compiler_candidate_source_outside_allowed_roots_blocks(tmp_path):
+    from unittest.mock import patch
+    from app.batch_utilities.flatten import FlattenCandidate
+    
+    root = tmp_path / "root"
+    wrapper = root / "wrapper"
+    wrapper.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir(parents=True)
+    outside_file = outside / "secret.txt"
+    outside_file.write_text("secret")
+    
+    action = FlattenOneLevelAction(
+        type="flatten_one_level",
+        wrapper_paths=[str(wrapper)]
+    )
+    snapshot = BatchUtilitySafetySnapshot(
+        protect_last_file=True,
+        allowed_roots=(root,),
+        quarantine_root=None,
+        effective_policy={},
+    )
+    
+    # Injected candidate whose source is outside allowed roots
+    cand = FlattenCandidate(
+        wrapper_path=str(wrapper),
+        source_path=str(outside_file),
+        target_path=str(root / "secret.txt"),
+        object_type="file",
+        size=6,
+        mtime_ns=0,
+        device=0,
+        inode=0,
+        is_dir=False,
+    )
+    
+    with patch("app.batch_utilities.compiler.discover_flatten_one_level", return_value=([cand], [])):
+        comp = compile_flatten_one_level_preview(session=None, action=action, safety_snapshot=snapshot)
+        assert comp.planned_operations_count == 0
+        assert len(comp.intents) == 0
+        assert len(comp.rows) == 1
+        assert comp.rows[0]["decision"] == "BLOCKING_CONFLICT"
+        assert comp.rows[0]["reason_code"] in ("TARGET_OUTSIDE_ALLOWED_ROOT", "SOURCE_OUTSIDE_ALLOWED_ROOT")
+
+
+def test_compiler_candidate_source_escaped_symlink_race(tmp_path):
+    import os
+    root = tmp_path / "root"
+    wrapper = root / "wrapper"
+    wrapper.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir(parents=True)
+    outside_file = outside / "secret.txt"
+    outside_file.write_text("secret")
+    
+    # Symlink child escaping to outside
+    escaped_link = wrapper / "escaped.txt"
+    os.symlink(str(outside_file), str(escaped_link))
+    
+    action = FlattenOneLevelAction(
+        type="flatten_one_level",
+        wrapper_paths=[str(wrapper)]
+    )
+    snapshot = BatchUtilitySafetySnapshot(
+        protect_last_file=True,
+        allowed_roots=(root,),
+        quarantine_root=None,
+        effective_policy={},
+    )
+    
+    comp = compile_flatten_one_level_preview(session=None, action=action, safety_snapshot=snapshot)
+    assert comp.planned_operations_count == 0
+    assert len(comp.intents) == 0
+    assert len(comp.rows) == 1
+    assert comp.rows[0]["decision"] == "BLOCKING_CONFLICT"
+    assert comp.rows[0]["reason_code"] in ("WRAPPER_CHILD_SYMLINK", "TARGET_OUTSIDE_ALLOWED_ROOT")

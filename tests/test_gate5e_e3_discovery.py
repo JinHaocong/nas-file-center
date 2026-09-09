@@ -31,10 +31,9 @@ def test_discover_flatten_symlink_conflict(tmp_path):
     assert errors[0].conflict_type == "WRAPPER_CHILD_SYMLINK"
 
 def test_discover_flatten_oserror(tmp_path):
-    # Non-existent path triggers FileNotFoundError (subclass of OSError)
+    # Non-existent path or unreadable directory raises BatchUtilityInvalidConfigError
     missing = tmp_path / "missing"
-    
-    items, errors = discover_flatten_one_level(wrapper_paths=[str(missing)])
-    assert len(items) == 0
-    assert len(errors) == 1
-    assert errors[0].conflict_type == "SCANDIR_FAILED"
+    from app.batch_utilities.errors import BatchUtilityInvalidConfigError
+    with pytest.raises(BatchUtilityInvalidConfigError) as exc_info:
+        discover_flatten_one_level(wrapper_paths=[str(missing)])
+    assert exc_info.value.details.get("wrapper_path") == str(missing)

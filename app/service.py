@@ -4222,10 +4222,10 @@ class FileCenterService:
                     "Target path is a symlink",
                     details=err_details,
                 )
-            # Priority 2: TARGET_OUTSIDE_ALLOWED_ROOT -> BATCH_UTILITY_CROSS_ROOT
-            elif "TARGET_OUTSIDE_ALLOWED_ROOT" in codes:
+            # Priority 2: TARGET_OUTSIDE_ALLOWED_ROOT / SOURCE_OUTSIDE_ALLOWED_ROOT -> BATCH_UTILITY_CROSS_ROOT
+            elif any(c in codes for c in ("TARGET_OUTSIDE_ALLOWED_ROOT", "SOURCE_OUTSIDE_ALLOWED_ROOT", "CROSS_ROOT")):
                 raise BatchUtilityCrossRootError(
-                    "Target path is outside allowed roots",
+                    "Source or target path is outside allowed roots",
                     details=err_details,
                 )
             # Priority 3: NAME_TOO_LONG -> BATCH_UTILITY_NAME_TOO_LONG

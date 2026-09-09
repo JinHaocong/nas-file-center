@@ -155,3 +155,46 @@ def test_preview_wrapper_child_symlink(api_test_env):
     assert rows_by_src[str(wrapper / "link.txt")]["decision"] == "BLOCKING_CONFLICT"
     assert rows_by_src[str(wrapper / "link.txt")]["reason_code"] == "WRAPPER_CHILD_SYMLINK"
 
+
+def test_preview_wrapper_scandir_failure_invalid_config(api_test_env):
+    import os
+    from unittest.mock import patch
+    client = api_test_env["client"]
+    root = api_test_env["root1_path"]
+    wrapper = root / "unreadable_w"
+    wrapper.mkdir()
+    
+    orig_scandir = os.scandir
+    def mock_scandir(path):
+        if str(path) == str(wrapper):
+            err = PermissionError(13, "Permission denied")
+            err.errno = 13
+            raise err
+        return orig_scandir(path)
+        
+    with patch("os.scandir", side_effect=mock_scandir):
+        resp = client.post(
+            "/api/batch-utilities/preview",
+            json={"action": {"type": "flatten_one_level", "wrapper_paths": [str(wrapper)]}}
+        )
+        assert resp.status_code == 422
+        err = resp.json()["error"]
+        assert err["code"] == "BATCH_UTILITY_INVALID_CONFIG"
+        assert err["details"].get("wrapper_path") == str(wrapper)
+        assert err["details"].get("errno") == 13
+
+
+def test_preview_quarantine_wrapper_error_cross_root(api_test_env):
+    client = api_test_env["client"]
+    settings = api_test_env["settings"]
+    q_dir = settings.quarantine_root
+    w_inside_q = q_dir / "q_wrapper"
+    w_inside_q.mkdir()
+    
+    resp = client.post(
+        "/api/batch-utilities/preview",
+        json={"action": {"type": "flatten_one_level", "wrapper_paths": [str(w_inside_q)]}}
+    )
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == "BATCH_UTILITY_CROSS_ROOT"
+

@@ -3,6 +3,7 @@ import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
+from app.batch_utilities.errors import BatchUtilityInvalidConfigError, BatchUtilityLimitExceededError
 
 
 @dataclass
@@ -93,15 +94,12 @@ def discover_flatten_one_level(
                             is_dir=is_dir,
                         )
                     )
+                    if len(candidates) + len(errors) > 50000:
+                        raise BatchUtilityLimitExceededError("Flatten utility supports maximum 50,000 candidates")
         except OSError as e:
-            errors.append(
-                FlattenError(
-                    source_path=w_path,
-                    conflict_type="SCANDIR_FAILED",
-                    reason=f"Failed to scan wrapper directory: {e}",
-                    wrapper_path=w_path,
-                    object_type="directory",
-                )
+            raise BatchUtilityInvalidConfigError(
+                f"Failed to scan wrapper directory '{w_path}': {e}",
+                details={"wrapper_path": w_path, "errno": getattr(e, "errno", None)},
             )
 
     return candidates, errors

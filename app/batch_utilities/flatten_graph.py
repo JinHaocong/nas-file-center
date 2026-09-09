@@ -76,15 +76,23 @@ def validate_wrappers_preflight(
 
         # 2. Safety bounds checks
         if quarantine_root and is_reserved_quarantine_path(w_lex, quarantine_root):
-            raise BatchUtilityInvalidConfigError(
+            raise BatchUtilityCrossRootError(
                 f"Wrapper '{w_lex}' is within reserved quarantine storage",
                 details={"wrapper_path": w_lex},
             )
 
-        if not is_path_allowed(w_lex, allowed_roots):
-            raise BatchUtilityCrossRootError(
-                f"Wrapper path '{w_lex}' is outside allowed roots",
-                details={"wrapper_path": w_lex},
+        try:
+            if not is_path_allowed(w_lex, allowed_roots):
+                raise BatchUtilityCrossRootError(
+                    f"Wrapper path '{w_lex}' is outside allowed roots",
+                    details={"wrapper_path": w_lex},
+                )
+        except BatchUtilityCrossRootError:
+            raise
+        except OSError as e:
+            raise BatchUtilityInvalidConfigError(
+                f"Failed to resolve wrapper path '{w_lex}': {e}",
+                details={"wrapper_path": w_lex, "errno": getattr(e, "errno", None)},
             )
 
         norm_w = os.path.normpath(w_lex)
@@ -96,13 +104,16 @@ def validate_wrappers_preflight(
                     details={"wrapper_path": w_lex},
                 )
             try:
-                if w_path.resolve(strict=False) == r.resolve(strict=False):
+                if w_path.resolve(strict=True) == r.resolve(strict=True):
                     raise BatchUtilityInvalidConfigError(
                         f"Wrapper '{w_lex}' cannot be an allowed root",
                         details={"wrapper_path": w_lex},
                     )
-            except OSError:
-                pass
+            except OSError as e:
+                raise BatchUtilityInvalidConfigError(
+                    f"Failed to resolve wrapper path '{w_lex}': {e}",
+                    details={"wrapper_path": w_lex, "errno": getattr(e, "errno", None)},
+                )
 
     # 3. Check for physical duplicate / ancestor-descendant overlap
     check_wrapper_overlap(wrapper_paths)
@@ -110,18 +121,24 @@ def validate_wrappers_preflight(
 
 def check_wrapper_overlap(wrapper_paths: Sequence[str]) -> None:
     resolved_paths = []
+    seen_dev_ino = {}
     for w_lex in wrapper_paths:
         w_path = Path(w_lex)
         if not w_path.is_absolute():
             raise BatchUtilityInvalidConfigError(f"Wrapper path must be absolute: {w_lex}")
         try:
             r = w_path.resolve(strict=True)
-            resolved_paths.append((w_lex, r))
-        except OSError:
-            pass
+            st = os.stat(r)
+            dev_ino = (st.st_dev, st.st_ino)
+        except OSError as e:
+            raise BatchUtilityInvalidConfigError(
+                f"Failed to resolve wrapper path '{w_lex}': {e}",
+                details={"wrapper_path": w_lex, "errno": getattr(e, "errno", None)},
+            )
+        resolved_paths.append((w_lex, r, dev_ino))
 
     seen_physical = {}
-    for lex, phys in resolved_paths:
+    for lex, phys, dev_ino in resolved_paths:
         if phys in seen_physical:
             raise BatchUtilityScopeOverlapError(
                 f"Duplicate physical wrappers detected: '{lex}' and '{seen_physical[phys]}'",
@@ -129,8 +146,15 @@ def check_wrapper_overlap(wrapper_paths: Sequence[str]) -> None:
             )
         seen_physical[phys] = lex
 
-    for i, (lex1, phys1) in enumerate(resolved_paths):
-        for j, (lex2, phys2) in enumerate(resolved_paths):
+        if dev_ino in seen_dev_ino:
+            raise BatchUtilityScopeOverlapError(
+                f"Duplicate physical wrappers detected: '{lex}' and '{seen_dev_ino[dev_ino]}'",
+                details={"wrapper_1": lex, "wrapper_2": seen_dev_ino[dev_ino]},
+            )
+        seen_dev_ino[dev_ino] = lex
+
+    for i, (lex1, phys1, _) in enumerate(resolved_paths):
+        for j, (lex2, phys2, _) in enumerate(resolved_paths):
             if i == j:
                 continue
             try:
@@ -182,6 +206,64 @@ def resolve_flatten_graph(
     for item in items:
         tgt_lex = item.target_path
         tgt_p = Path(tgt_lex)
+        src_lex = item.source_path
+        src_p = Path(src_lex)
+
+        # Source physical authority validation
+        source_blocked = False
+        if item.resolved_source_path:
+            res_src = item.resolved_source_path
+        else:
+            try:
+                res_src = str(src_p.expanduser().resolve(strict=True))
+            except (FileNotFoundError, OSError):
+                res_src = str(src_p.expanduser().resolve(strict=False))
+
+        # Lexical symlink check on source
+        try:
+            st_src_lex = _lstat(src_lex)
+            if stat.S_ISLNK(st_src_lex.st_mode):
+                conflicts.append(
+                    BlockingConflict(
+                        source_path=src_lex,
+                        target_path=item.target_path,
+                        conflict_type="WRAPPER_CHILD_SYMLINK",
+                        reason=f"Source path '{src_lex}' is a symlink",
+                        details={"source_path": src_lex},
+                    )
+                )
+                source_blocked = True
+        except (FileNotFoundError, OSError):
+            pass
+
+        if not source_blocked and res_src:
+            if quarantine_root and is_reserved_quarantine_path(res_src, quarantine_root):
+                conflicts.append(
+                    BlockingConflict(
+                        source_path=src_lex,
+                        target_path=item.target_path,
+                        conflict_type="TARGET_OUTSIDE_ALLOWED_ROOT",
+                        reason=f"Resolved source path '{res_src}' is within reserved quarantine storage",
+                        details={"source_path": src_lex, "resolved_source_path": res_src},
+                    )
+                )
+                source_blocked = True
+            elif not is_path_allowed(res_src, allowed_roots):
+                conflicts.append(
+                    BlockingConflict(
+                        source_path=src_lex,
+                        target_path=item.target_path,
+                        conflict_type="TARGET_OUTSIDE_ALLOWED_ROOT",
+                        reason=f"Resolved source path '{res_src}' is outside allowed roots",
+                        details={"source_path": src_lex, "resolved_source_path": res_src},
+                    )
+                )
+                source_blocked = True
+
+        if source_blocked:
+            resolved_targets_by_src[item.source_path] = str(tgt_p)
+            effective_items.append(item)
+            continue
 
         # Lexical symlink check on target
         is_link = False
@@ -214,6 +296,23 @@ def resolve_flatten_graph(
             )
             canon_tgt = str(canon_p)
             resolved_targets_by_src[item.source_path] = canon_tgt
+
+            # Check source and target belong to same containing root
+            src_root = next((r for r in allowed_roots if Path(res_src).is_relative_to(r)), None)
+            tgt_root = next((r for r in allowed_roots if canon_p.is_relative_to(r)), None)
+            if src_root is None or tgt_root is None or src_root != tgt_root:
+                conflicts.append(
+                    BlockingConflict(
+                        source_path=src_lex,
+                        target_path=item.target_path,
+                        conflict_type="TARGET_OUTSIDE_ALLOWED_ROOT",
+                        reason=f"Source '{res_src}' and target '{canon_tgt}' do not belong to the same containing root",
+                        details={"source_path": src_lex, "resolved_source_path": res_src, "target_path": canon_tgt},
+                    )
+                )
+                effective_items.append(item)
+                continue
+
             eff_item = TargetItemCandidate(
                 source_path=item.source_path,
                 target_path=item.target_path,
@@ -225,7 +324,7 @@ def resolve_flatten_graph(
                 device=item.device,
                 inode=item.inode,
                 original_cand_id=item.original_cand_id,
-                resolved_source_path=_resolve_physical_source(item),
+                resolved_source_path=res_src,
                 resolved_target_path=canon_tgt,
                 is_dir=item.is_dir,
                 object_type=item.object_type,

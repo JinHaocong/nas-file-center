@@ -71,6 +71,8 @@ CONFLICT_PRIORITY_RANK: dict[str, int] = {
     "TARGET_SYMLINK": 1,
     "WRAPPER_CHILD_SYMLINK": 1,
     "TARGET_OUTSIDE_ALLOWED_ROOT": 2,
+    "SOURCE_OUTSIDE_ALLOWED_ROOT": 2,
+    "CROSS_ROOT": 2,
     "NAME_TOO_LONG": 3,
     "CASE_ONLY_COLLISION": 4,
     "TARGET_EXISTS": 5,
@@ -1411,7 +1413,7 @@ def compile_flatten_one_level_preview(
 
     flatten_cands, flatten_errors = discover_flatten_one_level(canonical_wrappers)
 
-    if len(flatten_cands) > MAX_CANDIDATES_LIMIT:
+    if len(flatten_cands) + len(flatten_errors) > MAX_CANDIDATES_LIMIT:
         raise BatchUtilityLimitExceededError("Flatten utility supports maximum 50,000 candidates")
 
     # Wrapper observations
@@ -1539,9 +1541,9 @@ def compile_flatten_one_level_preview(
                 target_path=ord_item.target_path,
                 keep_path=None,
                 expected_size=ord_item.size,
-                expected_device=ord_item.device,
-                expected_inode=ord_item.inode,
-                expected_mtime_ns=ord_item.mtime_ns,
+                expected_device=0,
+                expected_inode=0,
+                expected_mtime_ns=0,
                 expected_hash=None,
                 metadata_json=canonical_json_dumps(meta_dict),
             )
