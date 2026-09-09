@@ -95,3 +95,17 @@ class BatchUtilityScopeNotFoundError(BatchUtilityError):
             status_code=404,
             details=details,
         )
+
+
+class BatchUtilityConflictError(BatchUtilityError):
+    def __init__(
+        self,
+        message: str = "Blocking conflicts detected in batch utility plan",
+        details: dict[str, Any] | None = None,
+    ):
+        super().__init__(
+            message=message,
+            code="BATCH_UTILITY_CONFLICT",
+            status_code=409,
+            details=details,
+        )

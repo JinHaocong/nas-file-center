@@ -78,7 +78,7 @@ def build_batch_utility_preview_response(
     paged_items = compilation.rows[start_idx:end_idx]
 
     return {
-        "utility_action": "quarantine_filtered",
+        "utility_action": compilation.canonical_action.get("type", "quarantine_filtered"),
         "utility_engine_version": BATCH_UTILITY_ENGINE_VERSION,
         "preview_source": "index-readonly-safety",
         "live_filesystem_verified": False,

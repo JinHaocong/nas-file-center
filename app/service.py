@@ -104,10 +104,13 @@ from app.filters.compiler import compile_filter_to_sql
 from app.filters.media_types import get_media_type, normalize_extension
 from app.filters.validation import validate_filter_ast
 from app.filters.schema import FilterNode
-from app.batch_utilities.schema import QuarantineFilteredAction
+from app.batch_utilities.schema import QuarantineFilteredAction, SuffixTransformAction
 from app.batch_utilities.compiler import (
     compile_quarantine_filtered_preview,
+    compile_suffix_transform_preview,
+    compile_batch_utility_preview,
     compute_current_quarantine_filtered_db_lineage_digest,
+    compute_current_suffix_transform_db_lineage_digest,
     BatchUtilitySafetySnapshot,
     BatchUtilityCompilation,
 )
@@ -119,6 +122,7 @@ from app.batch_utilities.service import (
 from app.batch_utilities.errors import (
     BatchUtilityPreviewChangedError,
     BatchUtilityEmptyPlanError,
+    BatchUtilityConflictError,
 )
 
 PLAN_SINGLE_DELETE_ALLOWED = {
@@ -4137,13 +4141,13 @@ class FileCenterService:
     def get_batch_utility_preview(
         self,
         *,
-        action: QuarantineFilteredAction,
+        action: QuarantineFilteredAction | SuffixTransformAction,
         page: int = 1,
         page_size: int = 50,
     ) -> dict[str, Any]:
         snapshot = capture_batch_utility_safety_snapshot(self.settings)
         with self.SessionLocal() as session:
-            compilation = compile_quarantine_filtered_preview(
+            compilation = compile_batch_utility_preview(
                 session=session,
                 action=action,
                 safety_snapshot=snapshot,
@@ -4158,13 +4162,13 @@ class FileCenterService:
     def create_batch_utility_plan(
         self,
         *,
-        action: QuarantineFilteredAction,
+        action: QuarantineFilteredAction | SuffixTransformAction,
         expected_preview_digest: str,
     ) -> dict[str, Any]:
         # Phase A: Authoritative recompile outside write transaction
         safety_snapshot = capture_batch_utility_safety_snapshot(self.settings)
         with self.SessionLocal() as session:
-            compilation = compile_quarantine_filtered_preview(
+            compilation = compile_batch_utility_preview(
                 session=session,
                 action=action,
                 safety_snapshot=safety_snapshot,
@@ -4186,13 +4190,32 @@ class FileCenterService:
                 },
             )
 
+        if compilation.blocking_conflict_count > 0:
+            raise BatchUtilityConflictError(
+                "Blocking conflicts detected in batch utility plan",
+                details={
+                    "blocking_conflict_count": compilation.blocking_conflict_count,
+                    "conflicts": [
+                        {
+                            "source_path": r["source_path"],
+                            "target_path": r.get("target_path"),
+                            "reason_code": r.get("reason_code"),
+                            "reason": r.get("reason"),
+                        }
+                        for r in compilation.rows
+                        if r.get("decision") in ("BLOCKING_CONFLICT", "CONFLICT")
+                    ],
+                },
+            )
+
         if len(compilation.intents) == 0:
             raise BatchUtilityEmptyPlanError(
-                "No actionable items to quarantine in batch utility action",
+                "No actionable items in batch utility action",
                 details={
                     "matched_count": compilation.matched_count,
                     "skipped_count": compilation.skipped_count,
                     "safety_excluded_count": compilation.safety_excluded_count,
+                    "blocking_conflict_count": compilation.blocking_conflict_count,
                 },
             )
 
@@ -4203,11 +4226,12 @@ class FileCenterService:
             safety_snapshot=safety_snapshot,
         )
 
+        action_type = compilation.canonical_action.get("type", "quarantine_filtered")
         return {
             "id": plan.id,
             "plan_id": plan.id,
             "status": plan.status,
-            "utility_action": "quarantine_filtered",
+            "utility_action": action_type,
             "expected_changes": plan.expected_changes,
             "expected_reclaim_bytes": plan.expected_reclaim_bytes,
             "preview_digest": actual_preview_digest,
@@ -4222,12 +4246,21 @@ class FileCenterService:
     ) -> BatchPlan:
         with self.SessionLocal() as session:
             session.execute(text("BEGIN IMMEDIATE"))
-            current_lineage = compute_current_quarantine_filtered_db_lineage_digest(
-                session,
-                compilation.canonical_action,
-                compiled_where_clause=compilation.compiled_where_clause,
-                filter_policy_snapshot=compilation.filter_policy_snapshot,
-            )
+            action_type = compilation.canonical_action.get("type", "quarantine_filtered")
+            if action_type == "suffix_transform":
+                current_lineage = compute_current_suffix_transform_db_lineage_digest(
+                    session,
+                    compilation.canonical_action,
+                    compiled_where_clause=compilation.compiled_where_clause,
+                    filter_policy_snapshot=compilation.filter_policy_snapshot,
+                )
+            else:
+                current_lineage = compute_current_quarantine_filtered_db_lineage_digest(
+                    session,
+                    compilation.canonical_action,
+                    compiled_where_clause=compilation.compiled_where_clause,
+                    filter_policy_snapshot=compilation.filter_policy_snapshot,
+                )
             if current_lineage != compilation.db_lineage_digest:
                 session.rollback()
                 raise BatchUtilityPreviewChangedError(
@@ -4247,7 +4280,7 @@ class FileCenterService:
 
             plan_metadata = {
                 "source": "batch-utility",
-                "utility_action": "quarantine_filtered",
+                "utility_action": action_type,
                 "utility_engine_version": 1,
                 "canonical_action_config": compilation.canonical_action,
                 "action_config_digest": compilation.action_config_digest,
@@ -4259,8 +4292,9 @@ class FileCenterService:
                 "summary": compilation.summary,
             }
 
+            plan_name = f"batch-utility-{action_type.replace('_', '-')}"
             plan = BatchPlan(
-                name="batch-utility-quarantine-filtered",
+                name=plan_name,
                 kind="batch-utility",
                 status="draft",
                 expected_changes=len(compilation.intents),
