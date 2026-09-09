@@ -1,3 +1,4 @@
+import os
 import re
 from typing import Annotated, Any, Literal, Union
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -72,8 +73,35 @@ class SuffixTransformAction(BaseModel):
         return True
 
 
+class FlattenOneLevelAction(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["flatten_one_level"]
+    wrapper_paths: list[str]
+
+    @field_validator("wrapper_paths", mode="before")
+    @classmethod
+    def validate_wrapper_paths(cls, v: Any) -> list[str]:
+        if not isinstance(v, list) or len(v) == 0:
+            raise ValueError("wrapper_paths must be a non-empty list of strings")
+        
+        seen = set()
+        clean_paths = []
+        for item in v:
+            if not isinstance(item, str):
+                raise ValueError("wrapper_paths items must be strings")
+            if not os.path.isabs(item):
+                raise ValueError(f"wrapper_paths items must be absolute path: {item}")
+            if item in seen:
+                raise ValueError(f"duplicate wrapper path detected: {item}")
+            seen.add(item)
+            clean_paths.append(item)
+            
+        return clean_paths
+
+
 BatchUtilityAction = Annotated[
-    Union[QuarantineFilteredAction, SuffixTransformAction],
+    Union[QuarantineFilteredAction, SuffixTransformAction, FlattenOneLevelAction],
     Field(discriminator="type"),
 ]
 
@@ -119,9 +147,9 @@ class BatchUtilityPreviewRow(BaseModel):
 class BatchUtilityPreviewResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    utility_action: Literal["quarantine_filtered", "suffix_transform"]
+    utility_action: Literal["quarantine_filtered", "suffix_transform", "flatten_one_level"]
     utility_engine_version: int
-    preview_source: Literal["index-readonly-safety"]
+    preview_source: Literal["index-readonly-safety", "live-directory-readonly"]
     live_filesystem_verified: Literal[False]
     matched_count: int
     matched_bytes: int

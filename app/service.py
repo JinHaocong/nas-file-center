@@ -104,7 +104,7 @@ from app.filters.compiler import compile_filter_to_sql
 from app.filters.media_types import get_media_type, normalize_extension
 from app.filters.validation import validate_filter_ast
 from app.filters.schema import FilterNode
-from app.batch_utilities.schema import QuarantineFilteredAction, SuffixTransformAction
+from app.batch_utilities.schema import QuarantineFilteredAction, SuffixTransformAction, FlattenOneLevelAction
 from app.batch_utilities.compiler import (
     compile_quarantine_filtered_preview,
     compile_suffix_transform_preview,
@@ -4168,7 +4168,7 @@ class FileCenterService:
     def create_batch_utility_plan(
         self,
         *,
-        action: QuarantineFilteredAction | SuffixTransformAction,
+        action: QuarantineFilteredAction | SuffixTransformAction | FlattenOneLevelAction,
         expected_preview_digest: str,
     ) -> dict[str, Any]:
         # Phase A: Authoritative recompile outside write transaction

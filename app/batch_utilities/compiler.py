@@ -11,11 +11,12 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
 from app.models import IndexRoot, IndexedPath, FilterPolicy
-from app.batch_utilities.schema import QuarantineFilteredAction, SuffixTransformAction
+from app.batch_utilities.schema import QuarantineFilteredAction, SuffixTransformAction, FlattenOneLevelAction
 from app.batch_utilities.errors import (
     BatchUtilityScopeNotFoundError,
     BatchUtilityInvalidConfigError,
     BatchUtilityLimitExceededError,
+    BatchUtilityScopeOverlapError,
 )
 from app.batch_utilities.digest import (
     canonical_json_dumps,
@@ -26,6 +27,8 @@ from app.batch_utilities.digest import (
 )
 from app.batch_utilities.transform import compute_transformed_basename, TransformDecision
 from app.batch_utilities.graph import TargetItemCandidate, resolve_suffix_transform_graph
+from app.batch_utilities.flatten import discover_flatten_one_level
+from app.batch_utilities.flatten_graph import check_wrapper_overlap, resolve_flatten_graph
 from app.filters.validation import validate_filter_ast
 from app.filters.compiler import compile_filter_to_sql
 from app.filters.excludes import DEFAULT_EXCLUDE_DIR_NAMES, build_exclude_predicates
@@ -1374,10 +1377,219 @@ def compile_suffix_transform_preview(
     )
 
 
+def compile_flatten_one_level_preview(
+    *,
+    session: Session,
+    action: FlattenOneLevelAction,
+    safety_snapshot: BatchUtilitySafetySnapshot,
+) -> BatchUtilityCompilation:
+    canonical_action = action.model_dump(exclude_unset=True)
+    action_config_digest = hashlib.sha256(
+        canonical_json_dumps(canonical_action).encode("utf-8")
+    ).hexdigest()
+
+    # Pre-flight overlap check
+    check_wrapper_overlap(action.wrapper_paths)
+    
+    # Pre-flight wrapper validation
+    for w_lex in action.wrapper_paths:
+        if quarantine_root := safety_snapshot.quarantine_root:
+            if is_reserved_quarantine_path(w_lex, quarantine_root):
+                raise BatchUtilityInvalidConfigError(f"Wrapper '{w_lex}' is within reserved quarantine storage")
+        if not is_path_allowed(w_lex, safety_snapshot.allowed_roots):
+            raise BatchUtilityInvalidConfigError(f"Wrapper '{w_lex}' is outside allowed roots")
+        
+        w_path = Path(w_lex)
+        for r in safety_snapshot.allowed_roots:
+            try:
+                if w_path.resolve(strict=False) == r.resolve(strict=False):
+                    raise BatchUtilityInvalidConfigError(f"Wrapper '{w_lex}' cannot be exactly an allowed root")
+            except OSError:
+                pass
+                
+        if not w_path.exists():
+            raise BatchUtilityInvalidConfigError(f"Wrapper '{w_lex}' does not exist")
+        if w_path.is_symlink():
+            raise BatchUtilityInvalidConfigError(f"Wrapper '{w_lex}' cannot be a symlink")
+        if not w_path.is_dir():
+            raise BatchUtilityInvalidConfigError(f"Wrapper '{w_lex}' must be a directory")
+
+    flatten_cands, flatten_errors = discover_flatten_one_level(action.wrapper_paths)
+
+    if len(flatten_cands) > 50000:
+        raise BatchUtilityLimitExceededError("Flatten utility supports maximum 50,000 candidates")
+
+    # Map to TargetItemCandidate
+    items = []
+    for cand in flatten_cands:
+        # Find allowed root for index_root_id compatibility
+        root_path = ""
+        for r in safety_snapshot.allowed_roots:
+            if is_path_allowed(cand.source_path, [r]):
+                root_path = str(r)
+                break
+                
+        rel_path = str(Path(cand.source_path).relative_to(root_path)) if root_path else Path(cand.source_path).name
+        
+        items.append(
+            TargetItemCandidate(
+                source_path=cand.source_path,
+                target_path=cand.target_path,
+                index_root_id=0, # E3 doesn't use DB
+                index_root_path=root_path,
+                relative_path=rel_path,
+                size=cand.size,
+                mtime_ns=0,
+                device=0,
+                inode=0,
+                original_cand_id=0,
+            )
+        )
+
+    # Graph resolution
+    graph_res = resolve_flatten_graph(
+        items=items,
+        allowed_roots=safety_snapshot.allowed_roots,
+        quarantine_root=safety_snapshot.quarantine_root,
+    )
+
+    decision_rows = []
+    
+    # Discovery errors
+    for err in flatten_errors:
+        decision_rows.append({
+            "source_path": err.source_path,
+            "target_path": None,
+            "index_root_id": 0,
+            "index_root_path": "",
+            "relative_path": Path(err.source_path).name,
+            "object_type": "file",
+            "decision": "BLOCKING_CONFLICT",
+            "reason_code": err.conflict_type,
+            "reason": err.reason,
+            "size": 0,
+            "protected_dir": None,
+        })
+        
+    conflicts_by_src = defaultdict(list)
+    for c in graph_res.conflicts:
+        conflicts_by_src[c.source_path].append(c)
+
+    for item in items:
+        if item.source_path in conflicts_by_src:
+            primary_c = conflicts_by_src[item.source_path][0] # Simplified priority
+            decision_rows.append({
+                "source_path": item.source_path,
+                "target_path": item.target_path,
+                "index_root_id": 0,
+                "index_root_path": item.index_root_path,
+                "relative_path": item.relative_path,
+                "object_type": "directory" if getattr(item, "is_dir", False) else "file",
+                "decision": "BLOCKING_CONFLICT",
+                "reason_code": primary_c.conflict_type,
+                "reason": primary_c.reason,
+                "size": item.size,
+                "protected_dir": None,
+            })
+        else:
+            decision_rows.append({
+                "source_path": item.source_path,
+                "target_path": item.target_path,
+                "index_root_id": 0,
+                "index_root_path": item.index_root_path,
+                "relative_path": item.relative_path,
+                "object_type": "directory" if getattr(item, "is_dir", False) else "file",
+                "decision": "RENAME",
+                "reason_code": None,
+                "reason": None,
+                "size": item.size,
+                "protected_dir": None,
+            })
+
+    decision_rows.sort(key=lambda r: r["source_path"])
+
+    intents = []
+    for seq, ord_item in enumerate(graph_res.ordered_items, start=1):
+        meta_dict = {
+            "utility_action": "flatten_one_level",
+            "source_basename": Path(ord_item.source_path).name,
+            "target_basename": Path(ord_item.target_path).name,
+        }
+        intents.append(
+            BatchUtilityDraftIntent(
+                sequence=seq,
+                operation="move",
+                source_path=ord_item.source_path,
+                target_path=ord_item.target_path,
+                keep_path=None,
+                expected_size=ord_item.size,
+                expected_device=0,
+                expected_inode=0,
+                expected_mtime_ns=0,
+                expected_hash=None,
+                metadata_json=canonical_json_dumps(meta_dict),
+            )
+        )
+
+    planned_operations_count = len(intents)
+    blocking_conflict_count = sum(1 for r in decision_rows if r["decision"] == "BLOCKING_CONFLICT")
+    candidate_count = len(items) + len(flatten_errors)
+    
+    source_snapshot_payload = {
+        "wrappers": action.wrapper_paths,
+        "mode": "flatten_one_level",
+        "blocking_conflict_count": blocking_conflict_count,
+        "ordered_sources": [item.source_path for item in graph_res.ordered_items],
+        "conflict_facts": [
+            {
+                "source_path": c.source_path,
+                "target_path": c.target_path,
+                "conflict_type": c.conflict_type,
+                "reason": c.reason,
+            }
+            for c in graph_res.conflicts
+        ],
+    }
+    source_snapshot_digest = hashlib.sha256(
+        canonical_json_dumps(source_snapshot_payload).encode("utf-8")
+    ).hexdigest()
+
+    summary = {
+        "matched_count": candidate_count,
+        "matched_bytes": sum(c.size for c in flatten_cands),
+        "candidate_count": candidate_count,
+        "candidate_bytes": sum(c.size for c in flatten_cands),
+        "planned_operations_count": planned_operations_count,
+        "skipped_count": 0,
+        "safety_excluded_count": 0,
+        "blocking_conflict_count": blocking_conflict_count,
+        "expected_reclaim_bytes": 0,
+    }
+
+    return BatchUtilityCompilation(
+        canonical_action=canonical_action,
+        action_config_digest=action_config_digest,
+        source_snapshot_digest=source_snapshot_digest,
+        db_lineage_digest="0"*64,
+        rows=tuple(decision_rows),
+        intents=tuple(intents),
+        matched_count=summary["matched_count"],
+        matched_bytes=summary["matched_bytes"],
+        candidate_count=summary["candidate_count"],
+        candidate_bytes=summary["candidate_bytes"],
+        planned_operations_count=planned_operations_count,
+        skipped_count=0,
+        safety_excluded_count=0,
+        blocking_conflict_count=blocking_conflict_count,
+        expected_reclaim_bytes=0,
+        summary=summary,
+        compiled_where_clause="",
+        filter_policy_snapshot={},
+    )
 def compile_batch_utility_preview(
     *,
     session: Session,
-    action: QuarantineFilteredAction | SuffixTransformAction,
+    action: QuarantineFilteredAction | SuffixTransformAction | FlattenOneLevelAction,
     safety_snapshot: BatchUtilitySafetySnapshot,
 ) -> BatchUtilityCompilation:
     if action.type == "quarantine_filtered":
@@ -1388,6 +1600,12 @@ def compile_batch_utility_preview(
         )
     elif action.type == "suffix_transform":
         return compile_suffix_transform_preview(
+            session=session,
+            action=action,
+            safety_snapshot=safety_snapshot,
+        )
+    elif action.type == "flatten_one_level":
+        return compile_flatten_one_level_preview(
             session=session,
             action=action,
             safety_snapshot=safety_snapshot,

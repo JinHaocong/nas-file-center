@@ -97,6 +97,20 @@ class BatchUtilityScopeNotFoundError(BatchUtilityError):
         )
 
 
+class BatchUtilityScopeOverlapError(BatchUtilityError):
+    def __init__(
+        self,
+        message: str = "Batch utility scope overlap detected",
+        details: dict[str, Any] | None = None,
+    ):
+        super().__init__(
+            message=message,
+            code="BATCH_UTILITY_SCOPE_OVERLAP",
+            status_code=422,
+            details=details,
+        )
+
+
 class BatchUtilityConflictError(BatchUtilityError):
     def __init__(
         self,
