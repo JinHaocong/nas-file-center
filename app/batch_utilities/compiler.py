@@ -30,7 +30,11 @@ from app.batch_utilities.digest import (
 from app.batch_utilities.transform import compute_transformed_basename, TransformDecision
 from app.batch_utilities.graph import TargetItemCandidate, resolve_suffix_transform_graph
 from app.batch_utilities.flatten import discover_flatten_one_level
-from app.batch_utilities.flatten_graph import check_wrapper_overlap, resolve_flatten_graph
+from app.batch_utilities.flatten_graph import (
+    check_wrapper_overlap,
+    resolve_flatten_graph,
+    validate_wrappers_preflight,
+)
 from app.filters.validation import validate_filter_ast
 from app.filters.compiler import compile_filter_to_sql
 from app.filters.excludes import DEFAULT_EXCLUDE_DIR_NAMES, build_exclude_predicates
@@ -60,11 +64,12 @@ class BatchUtilityDraftIntent:
     expected_inode: int
     expected_mtime_ns: int
     expected_hash: str | None
-    metadata_json: str
+    metadata_json: str | None = None
 
 
 CONFLICT_PRIORITY_RANK: dict[str, int] = {
     "TARGET_SYMLINK": 1,
+    "WRAPPER_CHILD_SYMLINK": 1,
     "TARGET_OUTSIDE_ALLOWED_ROOT": 2,
     "NAME_TOO_LONG": 3,
     "CASE_ONLY_COLLISION": 4,
@@ -72,6 +77,9 @@ CONFLICT_PRIORITY_RANK: dict[str, int] = {
     "PLANNED_TARGET_COLLISION": 5,
     "RESERVED_TARGET": 5,
     "RENAME_CYCLE": 5,
+    "SCANDIR_FAILED": 5,
+    "STAT_FAILED": 5,
+    "UNSUPPORTED_OBJECT": 5,
 }
 
 
@@ -94,7 +102,7 @@ class BatchUtilityCompilation:
     canonical_action: dict[str, Any]
     action_config_digest: str
     source_snapshot_digest: str
-    db_lineage_digest: str
+    db_lineage_digest: str | None
     rows: tuple[dict[str, Any], ...]
     intents: tuple[BatchUtilityDraftIntent, ...]
     matched_count: int
@@ -1385,70 +1393,68 @@ def compile_flatten_one_level_preview(
     action: FlattenOneLevelAction,
     safety_snapshot: BatchUtilitySafetySnapshot,
 ) -> BatchUtilityCompilation:
-    canonical_action = action.model_dump(exclude_unset=True)
+    canonical_wrappers = sorted(action.wrapper_paths)
+    canonical_action = {
+        "type": "flatten_one_level",
+        "wrapper_paths": canonical_wrappers,
+    }
     action_config_digest = hashlib.sha256(
         canonical_json_dumps(canonical_action).encode("utf-8")
     ).hexdigest()
 
-    # Pre-flight overlap check
-    check_wrapper_overlap(action.wrapper_paths)
-    
-    # Pre-flight wrapper validation
-    for w_lex in action.wrapper_paths:
-        if quarantine_root := safety_snapshot.quarantine_root:
-            if is_reserved_quarantine_path(w_lex, quarantine_root):
-                raise BatchUtilityInvalidConfigError(f"Wrapper '{w_lex}' is within reserved quarantine storage")
-        if not is_path_allowed(w_lex, safety_snapshot.allowed_roots):
-            raise BatchUtilityInvalidConfigError(f"Wrapper '{w_lex}' is outside allowed roots")
-        
-        w_path = Path(w_lex)
-        for r in safety_snapshot.allowed_roots:
-            try:
-                if w_path.resolve(strict=False) == r.resolve(strict=False):
-                    raise BatchUtilityInvalidConfigError(f"Wrapper '{w_lex}' cannot be exactly an allowed root")
-            except OSError:
-                pass
-                
-        if not w_path.exists():
-            raise BatchUtilityInvalidConfigError(f"Wrapper '{w_lex}' does not exist")
-        if w_path.is_symlink():
-            raise BatchUtilityInvalidConfigError(f"Wrapper '{w_lex}' cannot be a symlink")
-        if not w_path.is_dir():
-            raise BatchUtilityInvalidConfigError(f"Wrapper '{w_lex}' must be a directory")
+    # Pre-flight wrapper validation (checks no-follow, missing, symlink, cross-root, root match, overlap)
+    validate_wrappers_preflight(
+        canonical_wrappers,
+        safety_snapshot.allowed_roots,
+        safety_snapshot.quarantine_root,
+    )
 
-    flatten_cands, flatten_errors = discover_flatten_one_level(action.wrapper_paths)
+    flatten_cands, flatten_errors = discover_flatten_one_level(canonical_wrappers)
 
-    if len(flatten_cands) > 50000:
+    if len(flatten_cands) > MAX_CANDIDATES_LIMIT:
         raise BatchUtilityLimitExceededError("Flatten utility supports maximum 50,000 candidates")
+
+    # Wrapper observations
+    wrapper_observations = []
+    for w_lex in canonical_wrappers:
+        try:
+            st = os.lstat(w_lex)
+            wrapper_observations.append({
+                "wrapper_path": w_lex,
+                "device": st.st_dev,
+                "inode": st.st_ino,
+                "mtime_ns": st.st_mtime_ns,
+                "scan_status": "OK",
+            })
+        except OSError:
+            wrapper_observations.append({
+                "wrapper_path": w_lex,
+                "scan_status": "FAILED",
+            })
+    wrapper_observations.sort(key=lambda o: o["wrapper_path"])
 
     # Map to TargetItemCandidate
     items = []
     for cand in flatten_cands:
-        # Find allowed root for index_root_id compatibility
-        root_path = ""
-        for r in safety_snapshot.allowed_roots:
-            if is_path_allowed(cand.source_path, [r]):
-                root_path = str(r)
-                break
-                
-        rel_path = str(Path(cand.source_path).relative_to(root_path)) if root_path else Path(cand.source_path).name
-        
         items.append(
             TargetItemCandidate(
                 source_path=cand.source_path,
                 target_path=cand.target_path,
-                index_root_id=0, # E3 doesn't use DB
-                index_root_path=root_path,
-                relative_path=rel_path,
+                index_root_id=None,
+                index_root_path=None,
+                relative_path=Path(cand.source_path).name,
                 size=cand.size,
-                mtime_ns=0,
-                device=0,
-                inode=0,
+                mtime_ns=cand.mtime_ns,
+                device=cand.device,
+                inode=cand.inode,
                 original_cand_id=0,
+                is_dir=cand.is_dir,
+                object_type=cand.object_type,
+                wrapper_path=cand.wrapper_path,
             )
         )
 
-    # Graph resolution
+    # Graph resolution (detects casefold collisions, dependencies, cycles, blocked propagation)
     graph_res = resolve_flatten_graph(
         items=items,
         allowed_roots=safety_snapshot.allowed_roots,
@@ -1456,37 +1462,41 @@ def compile_flatten_one_level_preview(
     )
 
     decision_rows = []
-    
-    # Discovery errors
+
+    # Discovery errors (e.g. wrapper child symlinks, stat failures)
     for err in flatten_errors:
         decision_rows.append({
             "source_path": err.source_path,
             "target_path": None,
-            "index_root_id": 0,
-            "index_root_path": "",
+            "index_root_id": None,
+            "index_root_path": None,
+            "wrapper_path": err.wrapper_path,
             "relative_path": Path(err.source_path).name,
-            "object_type": "file",
+            "object_type": err.object_type,
             "decision": "BLOCKING_CONFLICT",
             "reason_code": err.conflict_type,
             "reason": err.reason,
             "size": 0,
             "protected_dir": None,
         })
-        
+
     conflicts_by_src = defaultdict(list)
     for c in graph_res.conflicts:
         conflicts_by_src[c.source_path].append(c)
 
+    safe_sources = {it.source_path for it in graph_res.ordered_items}
+
     for item in items:
         if item.source_path in conflicts_by_src:
-            primary_c = conflicts_by_src[item.source_path][0] # Simplified priority
+            primary_c = select_primary_conflict(conflicts_by_src[item.source_path])
             decision_rows.append({
                 "source_path": item.source_path,
                 "target_path": item.target_path,
-                "index_root_id": 0,
-                "index_root_path": item.index_root_path,
+                "index_root_id": None,
+                "index_root_path": None,
+                "wrapper_path": item.wrapper_path,
                 "relative_path": item.relative_path,
-                "object_type": "directory" if getattr(item, "is_dir", False) else "file",
+                "object_type": item.object_type,
                 "decision": "BLOCKING_CONFLICT",
                 "reason_code": primary_c.conflict_type,
                 "reason": primary_c.reason,
@@ -1497,11 +1507,12 @@ def compile_flatten_one_level_preview(
             decision_rows.append({
                 "source_path": item.source_path,
                 "target_path": item.target_path,
-                "index_root_id": 0,
-                "index_root_path": item.index_root_path,
+                "index_root_id": None,
+                "index_root_path": None,
+                "wrapper_path": item.wrapper_path,
                 "relative_path": item.relative_path,
-                "object_type": "directory" if getattr(item, "is_dir", False) else "file",
-                "decision": "RENAME",
+                "object_type": item.object_type,
+                "decision": "MOVE",
                 "reason_code": None,
                 "reason": None,
                 "size": item.size,
@@ -1510,12 +1521,15 @@ def compile_flatten_one_level_preview(
 
     decision_rows.sort(key=lambda r: r["source_path"])
 
+    # Draft intents: ONLY created for safe, unblocked items
     intents = []
     for seq, ord_item in enumerate(graph_res.ordered_items, start=1):
         meta_dict = {
             "utility_action": "flatten_one_level",
+            "wrapper_path": ord_item.wrapper_path,
+            "object_type": ord_item.object_type,
             "source_basename": Path(ord_item.source_path).name,
-            "target_basename": Path(ord_item.target_path).name,
+            "target_path": ord_item.target_path,
         }
         intents.append(
             BatchUtilityDraftIntent(
@@ -1525,9 +1539,9 @@ def compile_flatten_one_level_preview(
                 target_path=ord_item.target_path,
                 keep_path=None,
                 expected_size=ord_item.size,
-                expected_device=0,
-                expected_inode=0,
-                expected_mtime_ns=0,
+                expected_device=ord_item.device,
+                expected_inode=ord_item.inode,
+                expected_mtime_ns=ord_item.mtime_ns,
                 expected_hash=None,
                 metadata_json=canonical_json_dumps(meta_dict),
             )
@@ -1536,21 +1550,39 @@ def compile_flatten_one_level_preview(
     planned_operations_count = len(intents)
     blocking_conflict_count = sum(1 for r in decision_rows if r["decision"] == "BLOCKING_CONFLICT")
     candidate_count = len(items) + len(flatten_errors)
-    
+
+    # Full digest binding authoritative facts
     source_snapshot_payload = {
-        "wrappers": action.wrapper_paths,
         "mode": "flatten_one_level",
-        "blocking_conflict_count": blocking_conflict_count,
-        "ordered_sources": [item.source_path for item in graph_res.ordered_items],
+        "canonical_wrappers": canonical_wrappers,
+        "wrapper_observations": wrapper_observations,
+        "direct_children": [
+            {
+                "source_path": cand.source_path,
+                "wrapper_path": cand.wrapper_path,
+                "object_type": cand.object_type,
+                "device": cand.device,
+                "inode": cand.inode,
+                "mtime_ns": cand.mtime_ns,
+                "size": cand.size,
+            }
+            for cand in sorted(flatten_cands, key=lambda c: c.source_path)
+        ],
+        "target_observations": list(graph_res.target_observations),
+        "casefold_directory_observations": list(graph_res.directory_observations),
+        "dependency_edges": list(graph_res.dependency_edges),
         "conflict_facts": [
             {
                 "source_path": c.source_path,
                 "target_path": c.target_path,
                 "conflict_type": c.conflict_type,
                 "reason": c.reason,
+                "details": c.details,
             }
             for c in graph_res.conflicts
         ],
+        "ordered_safe_sources": [item.source_path for item in graph_res.ordered_items],
+        "blocking_conflict_count": blocking_conflict_count,
     }
     source_snapshot_digest = hashlib.sha256(
         canonical_json_dumps(source_snapshot_payload).encode("utf-8")
@@ -1572,7 +1604,7 @@ def compile_flatten_one_level_preview(
         canonical_action=canonical_action,
         action_config_digest=action_config_digest,
         source_snapshot_digest=source_snapshot_digest,
-        db_lineage_digest="0"*64,
+        db_lineage_digest=None,
         rows=tuple(decision_rows),
         intents=tuple(intents),
         matched_count=summary["matched_count"],

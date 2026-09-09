@@ -2,7 +2,7 @@ import hashlib
 import json
 from typing import Any, Mapping, Sequence
 
-from app.batch_utilities.schema import QuarantineFilteredAction, SuffixTransformAction
+from app.batch_utilities.schema import QuarantineFilteredAction, SuffixTransformAction, FlattenOneLevelAction
 from app.filters.validation import validate_filter_ast
 
 BATCH_UTILITY_ENGINE_VERSION = 1
@@ -41,6 +41,14 @@ def canonicalize_suffix_transform_action(action: SuffixTransformAction) -> dict[
     }
 
 
+def canonicalize_flatten_one_level_action(action: FlattenOneLevelAction) -> dict[str, Any]:
+    sorted_wrappers = sorted(action.wrapper_paths)
+    return {
+        "type": "flatten_one_level",
+        "wrapper_paths": sorted_wrappers,
+    }
+
+
 def canonicalize_batch_utility_action(action: Any) -> dict[str, Any]:
     if isinstance(action, QuarantineFilteredAction) or (isinstance(action, dict) and action.get("type") == "quarantine_filtered"):
         if isinstance(action, dict):
@@ -50,6 +58,10 @@ def canonicalize_batch_utility_action(action: Any) -> dict[str, Any]:
         if isinstance(action, dict):
             action = SuffixTransformAction.model_validate(action)
         return canonicalize_suffix_transform_action(action)
+    if isinstance(action, FlattenOneLevelAction) or (isinstance(action, dict) and action.get("type") == "flatten_one_level"):
+        if isinstance(action, dict):
+            action = FlattenOneLevelAction.model_validate(action)
+        return canonicalize_flatten_one_level_action(action)
     raise ValueError(f"Unsupported batch utility action: {action}")
 
 

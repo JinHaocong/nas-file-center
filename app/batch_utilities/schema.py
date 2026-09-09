@@ -85,16 +85,17 @@ class FlattenOneLevelAction(BaseModel):
         if not isinstance(v, list) or len(v) == 0:
             raise ValueError("wrapper_paths must be a non-empty list of strings")
         
-        seen = set()
+        seen_norm = set()
         clean_paths = []
         for item in v:
             if not isinstance(item, str):
                 raise ValueError("wrapper_paths items must be strings")
             if not os.path.isabs(item):
                 raise ValueError(f"wrapper_paths items must be absolute path: {item}")
-            if item in seen:
+            norm = os.path.normpath(item)
+            if norm in seen_norm:
                 raise ValueError(f"duplicate wrapper path detected: {item}")
-            seen.add(item)
+            seen_norm.add(norm)
             clean_paths.append(item)
             
         return clean_paths
@@ -133,11 +134,12 @@ class BatchUtilityPreviewRow(BaseModel):
 
     source_path: str
     target_path: str | None = None
-    index_root_id: int
-    index_root_path: str
+    index_root_id: int | None = None
+    index_root_path: str | None = None
+    wrapper_path: str | None = None
     relative_path: str
     object_type: Literal["file", "directory", "symlink", "unsupported", "missing"]
-    decision: Literal["QUARANTINE", "RENAME", "SAFETY_EXCLUDED", "SKIPPED", "CONFLICT", "BLOCKING_CONFLICT"]
+    decision: Literal["QUARANTINE", "RENAME", "MOVE", "SAFETY_EXCLUDED", "SKIPPED", "CONFLICT", "BLOCKING_CONFLICT"]
     reason_code: str | None = None
     reason: str | None = None
     size: int = 0

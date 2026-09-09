@@ -176,3 +176,70 @@ def test_generate_flatten_one_level_empty_plan(api_test_env):
     resp = client.post("/api/batch-utilities/generate-plan", json=req)
     assert resp.status_code == 422
     assert resp.json()["error"]["code"] == "BATCH_UTILITY_EMPTY_PLAN"
+
+
+def test_generate_flatten_mixed_safe_and_blocked_fails_closed(api_test_env):
+    client = api_test_env["client"]
+    service = api_test_env["service"]
+    root = api_test_env["root1_path"]
+    wrapper = root / "wrapper_mixed"
+    wrapper.mkdir()
+    (wrapper / "blocked.txt").write_text("blocked")
+    (wrapper / "safe.txt").write_text("safe")
+    # Make target for blocked exist
+    (root / "blocked.txt").write_text("exists")
+    
+    action = {
+        "type": "flatten_one_level",
+        "wrapper_paths": [str(wrapper)]
+    }
+    
+    resp = client.post("/api/batch-utilities/preview", json={"action": action})
+    assert resp.status_code == 200
+    assert resp.json()["planned_operations_count"] == 1
+    preview_digest = resp.json()["preview_digest"]
+    
+    req = {
+        "action": action,
+        "expected_preview_digest": preview_digest
+    }
+    resp = client.post("/api/batch-utilities/generate-plan", json=req)
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == "BATCH_UTILITY_COLLISION"
+    
+    # Verify zero plans created
+    with service.SessionLocal() as session:
+        plans = session.query(BatchPlan).all()
+        assert len(plans) == 0
+
+
+def test_generate_flatten_symlink_fails_closed(api_test_env):
+    import os
+    client = api_test_env["client"]
+    service = api_test_env["service"]
+    root = api_test_env["root1_path"]
+    wrapper = root / "wrapper_sym_child_gen"
+    wrapper.mkdir()
+    (wrapper / "real.txt").write_text("real")
+    os.symlink("real.txt", wrapper / "child.link")
+    
+    action = {
+        "type": "flatten_one_level",
+        "wrapper_paths": [str(wrapper)]
+    }
+    
+    resp = client.post("/api/batch-utilities/preview", json={"action": action})
+    assert resp.status_code == 200
+    preview_digest = resp.json()["preview_digest"]
+    
+    req = {
+        "action": action,
+        "expected_preview_digest": preview_digest
+    }
+    resp = client.post("/api/batch-utilities/generate-plan", json=req)
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == "BATCH_UTILITY_SYMLINK_BLOCKED"
+    
+    with service.SessionLocal() as session:
+        plans = session.query(BatchPlan).all()
+        assert len(plans) == 0

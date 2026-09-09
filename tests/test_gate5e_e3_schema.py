@@ -19,9 +19,19 @@ def test_flatten_one_level_action_duplicate():
     with pytest.raises(ValidationError, match="duplicate"):
         FlattenOneLevelAction(type="flatten_one_level", wrapper_paths=["/a/b", "/a/b"])
 
+
+def test_flatten_one_level_action_normalized_lexical_duplicate():
+    with pytest.raises(ValidationError, match="duplicate"):
+        FlattenOneLevelAction(type="flatten_one_level", wrapper_paths=["/tmp/a", "/tmp/x/../a"])
+
+    with pytest.raises(ValidationError, match="duplicate"):
+        FlattenOneLevelAction(type="flatten_one_level", wrapper_paths=["/tmp/a", "/tmp/a/"])
+
+
 def test_flatten_one_level_action_discriminator():
     req = BatchUtilityPreviewRequest(
         action={"type": "flatten_one_level", "wrapper_paths": ["/a"]}
     )
     assert isinstance(req.action, FlattenOneLevelAction)
     assert req.action.wrapper_paths == ["/a"]
+

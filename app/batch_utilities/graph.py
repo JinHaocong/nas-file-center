@@ -17,16 +17,19 @@ from app.path_safety import (
 class TargetItemCandidate:
     source_path: str
     target_path: str
-    index_root_id: int
-    index_root_path: str
-    relative_path: str
-    size: int
-    mtime_ns: int
-    device: int
-    inode: int
-    original_cand_id: int
+    index_root_id: int | None = None
+    index_root_path: str | None = None
+    relative_path: str = ""
+    size: int = 0
+    mtime_ns: int = 0
+    device: int = 0
+    inode: int = 0
+    original_cand_id: int = 0
     resolved_source_path: str | None = None
     resolved_target_path: str | None = None
+    is_dir: bool = False
+    object_type: str = "file"
+    wrapper_path: str | None = None
 
     def get_resolved_source_path(self) -> str:
         return self.resolved_source_path or self.source_path

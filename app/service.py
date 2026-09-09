@@ -4217,7 +4217,7 @@ class FileCenterService:
             codes = {r.get("reason_code") for r in blocking_rows}
 
             # Priority 1: TARGET_SYMLINK -> BATCH_UTILITY_SYMLINK_BLOCKED
-            if "TARGET_SYMLINK" in codes:
+            if any(c in codes for c in ("TARGET_SYMLINK", "WRAPPER_CHILD_SYMLINK")):
                 raise BatchUtilitySymlinkBlockedError(
                     "Target path is a symlink",
                     details=err_details,
@@ -4293,7 +4293,7 @@ class FileCenterService:
             session.execute(text("BEGIN IMMEDIATE"))
             action_type = compilation.canonical_action.get("type", "quarantine_filtered")
             if action_type == "flatten_one_level":
-                current_lineage = "0" * 64
+                current_lineage = None
             elif action_type == "suffix_transform":
                 current_lineage = compute_current_suffix_transform_db_lineage_digest(
                     session,
@@ -4308,7 +4308,7 @@ class FileCenterService:
                     compiled_where_clause=compilation.compiled_where_clause,
                     filter_policy_snapshot=compilation.filter_policy_snapshot,
                 )
-            if current_lineage != compilation.db_lineage_digest:
+            if compilation.db_lineage_digest is not None and current_lineage != compilation.db_lineage_digest:
                 session.rollback()
                 raise BatchUtilityPreviewChangedError(
                     "Database lineage changed before draft persistence",
@@ -4338,6 +4338,8 @@ class FileCenterService:
                 "roots": roots_meta,
                 "summary": compilation.summary,
             }
+            if action_type == "flatten_one_level":
+                plan_metadata["wrapper_paths"] = compilation.canonical_action.get("wrapper_paths", [])
 
             plan_name = f"batch-utility-{action_type.replace('_', '-')}"
             plan = BatchPlan(
