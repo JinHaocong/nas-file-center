@@ -423,3 +423,102 @@ def test_generate_plan_protect_last_file_false_omits_protected_dir(tmp_path):
         assert len(items) == 1
         item_meta = json.loads(items[0].metadata_json)
         assert "protected_dir" not in item_meta
+
+
+def test_generate_phase_b_zero_filter_compilation_under_write_lock(generate_test_env, monkeypatch):
+    """Blocker B: verify compile_filter_to_sql is not called under Phase B write lock, and FilterPolicy change rejects."""
+    import app.filters.compiler as filter_compiler
+    import app.batch_utilities.compiler as batch_compiler
+    from app.models import FilterPolicy
+
+    client = generate_test_env["client"]
+    service = generate_test_env["service"]
+
+    preview_payload = {
+        "action": {
+            "type": "quarantine_filtered",
+            "root_ids": [1],
+            "filter": {
+                "field": "extension",
+                "operator": "eq",
+                "value": "txt",
+            },
+        },
+    }
+    prev_resp = client.post("/api/batch-utilities/preview", json=preview_payload)
+    assert prev_resp.status_code == 200
+    digest = prev_resp.json()["preview_digest"]
+
+    # Wrap _persist_batch_utility_draft to forbid filter compilation during write lock
+    orig_persist = FileCenterService._persist_batch_utility_draft
+    phase_b_compiler_calls = []
+
+    def mock_compile_filter_to_sql(*args, **kwargs):
+        phase_b_compiler_calls.append("compile_filter_to_sql")
+        raise AssertionError("compile_filter_to_sql MUST NOT be called in Phase B write transaction!")
+
+    def mock_parse_and_validate_filter(*args, **kwargs):
+        phase_b_compiler_calls.append("_parse_and_validate_filter")
+        raise AssertionError("_parse_and_validate_filter MUST NOT be called in Phase B write transaction!")
+
+    def guarded_persist(self, *args, **kwargs):
+        monkeypatch.setattr(batch_compiler, "compile_filter_to_sql", mock_compile_filter_to_sql)
+        monkeypatch.setattr(batch_compiler, "_parse_and_validate_filter", mock_parse_and_validate_filter)
+        return orig_persist(self, *args, **kwargs)
+
+    monkeypatch.setattr(FileCenterService, "_persist_batch_utility_draft", guarded_persist)
+
+    gen_payload = {
+        "action": preview_payload["action"],
+        "expected_preview_digest": digest,
+    }
+    gen_resp = client.post("/api/batch-utilities/generate-plan", json=gen_payload)
+    assert gen_resp.status_code == 201
+    assert len(phase_b_compiler_calls) == 0
+
+
+def test_generate_phase_b_rejects_on_concurrent_filter_policy_change(generate_test_env, monkeypatch):
+    """Blocker B: verify FilterPolicy change between Phase A and Phase B rejects as lineage changed."""
+    from app.models import FilterPolicy
+
+    client = generate_test_env["client"]
+
+    preview_payload = {
+        "action": {
+            "type": "quarantine_filtered",
+            "root_ids": [1],
+            "filter": {
+                "field": "extension",
+                "operator": "eq",
+                "value": "txt",
+            },
+        },
+    }
+    prev_resp = client.post("/api/batch-utilities/preview", json=preview_payload)
+    assert prev_resp.status_code == 200
+    digest = prev_resp.json()["preview_digest"]
+
+    # Concurrently update FilterPolicy between Phase A and Phase B
+    orig_persist = FileCenterService._persist_batch_utility_draft
+
+    def mutate_policy_and_persist(self, *args, **kwargs):
+        with self.SessionLocal() as session:
+            pol = session.get(FilterPolicy, 1)
+            if not pol:
+                pol = FilterPolicy(id=1, exclude_dir_names_json=json.dumps(["concurrently_changed_dir"]))
+                session.add(pol)
+            else:
+                pol.exclude_dir_names_json = json.dumps(["concurrently_changed_dir"])
+            session.commit()
+        return orig_persist(self, *args, **kwargs)
+
+    monkeypatch.setattr(FileCenterService, "_persist_batch_utility_draft", mutate_policy_and_persist)
+
+    gen_payload = {
+        "action": preview_payload["action"],
+        "expected_preview_digest": digest,
+    }
+    gen_resp = client.post("/api/batch-utilities/generate-plan", json=gen_payload)
+    assert gen_resp.status_code == 409
+    assert gen_resp.json()["error"]["code"] == "PREVIEW_CHANGED"
+

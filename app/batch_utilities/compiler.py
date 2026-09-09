@@ -25,6 +25,7 @@ from app.batch_utilities.digest import (
 from app.filters.validation import validate_filter_ast
 from app.filters.compiler import compile_filter_to_sql
 from app.filters.excludes import DEFAULT_EXCLUDE_DIR_NAMES, build_exclude_predicates
+from app.path_safety import is_path_allowed, is_reserved_quarantine_path
 
 
 MAX_CANDIDATES_LIMIT = 50000
@@ -71,6 +72,8 @@ class BatchUtilityCompilation:
     blocking_conflict_count: int
     expected_reclaim_bytes: int
     summary: dict[str, Any]
+    compiled_where_clause: Any = None
+    filter_policy_snapshot: str | None = None
 
 
 def _count_regular_files_in_dir(dir_path: Path) -> int:
@@ -135,6 +138,9 @@ def _build_filter_where_clause(
 def compute_current_quarantine_filtered_db_lineage_digest(
     session: Session,
     canonical_action: Mapping[str, Any],
+    *,
+    compiled_where_clause: Any | None = None,
+    filter_policy_snapshot: str | None = None,
 ) -> str | None:
     root_ids = canonical_action.get("root_ids", [])
     if not root_ids:
@@ -148,17 +154,28 @@ def compute_current_quarantine_filtered_db_lineage_digest(
         return None
 
     root_keys = [r.root for r in roots]
-    filter_dict = canonical_action.get("filter")
-    filter_ast = None
-    if filter_dict:
-        filter_ast = _parse_and_validate_filter(filter_dict)
 
-    where_condition = _build_filter_where_clause(
-        session=session,
-        root_keys=root_keys,
-        filter_ast=filter_ast,
-        quarantine_root=None,
-    )
+    # Check FilterPolicy concurrency if snapshot was provided
+    if filter_policy_snapshot is not None:
+        policy = session.get(FilterPolicy, 1)
+        current_policy_json = policy.exclude_dir_names_json if policy else None
+        if current_policy_json != filter_policy_snapshot:
+            return "FILTER_POLICY_CHANGED"
+
+    if compiled_where_clause is not None:
+        where_condition = compiled_where_clause
+    else:
+        filter_dict = canonical_action.get("filter")
+        filter_ast = None
+        if filter_dict:
+            filter_ast = _parse_and_validate_filter(filter_dict)
+
+        where_condition = _build_filter_where_clause(
+            session=session,
+            root_keys=root_keys,
+            filter_ast=filter_ast,
+            quarantine_root=None,
+        )
 
     query = (
         select(
@@ -226,31 +243,57 @@ def compile_quarantine_filtered_preview(
 
     # 2. Validate root paths within allowed_roots and outside quarantine_root
     for root_id, root_obj in roots_by_id.items():
-        root_p = Path(root_obj.root).resolve()
-        is_allowed = any(root_p == ar or root_p.is_relative_to(ar) for ar in safety_snapshot.allowed_roots)
-        if not is_allowed:
+        if not is_path_allowed(root_obj.root, safety_snapshot.allowed_roots):
             raise BatchUtilityInvalidConfigError(
                 f"IndexRoot #{root_id} ({root_obj.root}) is outside allowed roots",
                 details={"root_id": root_id, "root": root_obj.root},
             )
-        if safety_snapshot.quarantine_root:
-            qr = safety_snapshot.quarantine_root.resolve()
-            if root_p == qr or root_p.is_relative_to(qr):
-                raise BatchUtilityInvalidConfigError(
-                    f"IndexRoot #{root_id} ({root_obj.root}) is within quarantine storage",
-                    details={"root_id": root_id, "root": root_obj.root},
-                )
+        if is_reserved_quarantine_path(root_obj.root, safety_snapshot.quarantine_root):
+            raise BatchUtilityInvalidConfigError(
+                f"IndexRoot #{root_id} ({root_obj.root}) is within quarantine storage",
+                details={"root_id": root_id, "root": root_obj.root},
+            )
 
     root_map = {r.root: r for r in roots_by_id.values()}
     root_keys = list(root_map.keys())
 
-    # 3. Query candidate IndexedPaths
-    where_condition = _build_filter_where_clause(
-        session=session,
-        root_keys=root_keys,
-        filter_ast=action.filter,
-        quarantine_root=safety_snapshot.quarantine_root,
+    # 3. Query candidate IndexedPaths - Phase A authoritative compile
+    filter_dict = canonical_action.get("filter")
+    filter_ast = None
+    if filter_dict:
+        filter_ast = _parse_and_validate_filter(filter_dict)
+    compiled_filter_sql = compile_filter_to_sql(filter_ast) if filter_ast is not None else None
+
+    policy = session.get(FilterPolicy, 1)
+    filter_policy_snapshot = policy.exclude_dir_names_json if policy else None
+    excludes = list(DEFAULT_EXCLUDE_DIR_NAMES)
+    if policy and policy.exclude_dir_names_json:
+        try:
+            excludes = json.loads(policy.exclude_dir_names_json)
+        except Exception:
+            excludes = list(DEFAULT_EXCLUDE_DIR_NAMES)
+
+    lineage_where_clauses = [IndexedPath.root_key.in_(root_keys)]
+    if compiled_filter_sql is not None:
+        lineage_where_clauses.append(compiled_filter_sql)
+    lineage_where_clauses.append(
+        build_exclude_predicates(
+            excludes,
+            quarantine_root=None,
+        )
     )
+    compiled_lineage_where = and_(*lineage_where_clauses)
+
+    candidates_where_clauses = [IndexedPath.root_key.in_(root_keys)]
+    if compiled_filter_sql is not None:
+        candidates_where_clauses.append(compiled_filter_sql)
+    candidates_where_clauses.append(
+        build_exclude_predicates(
+            excludes,
+            quarantine_root=str(safety_snapshot.quarantine_root) if safety_snapshot.quarantine_root else None,
+        )
+    )
+    where_condition = and_(*candidates_where_clauses)
 
     # Cap check
     count_query = select(func.count(IndexedPath.id)).where(where_condition)
@@ -269,8 +312,13 @@ def compile_quarantine_filtered_preview(
     )
     candidates = session.execute(candidates_query).scalars().all()
 
-    # DB lineage digest
-    db_lineage_digest = compute_current_quarantine_filtered_db_lineage_digest(session, canonical_action) or ""
+    # DB lineage digest (Phase A using precompiled where condition)
+    db_lineage_digest = compute_current_quarantine_filtered_db_lineage_digest(
+        session,
+        canonical_action,
+        compiled_where_clause=compiled_lineage_where,
+        filter_policy_snapshot=filter_policy_snapshot,
+    ) or ""
 
     decision_rows: list[dict[str, Any]] = []
     intents: list[BatchUtilityDraftIntent] = []
@@ -322,7 +370,54 @@ def compile_quarantine_filtered_preview(
             })
             continue
 
-        # Case 2: Read-only live observation via os.lstat
+        # Case 2: Resolved path safety checks (fail-closed against symlink loops and escapes)
+        try:
+            path_in_quarantine = is_reserved_quarantine_path(abs_p, safety_snapshot.quarantine_root)
+        except (OSError, RuntimeError, ValueError):
+            path_in_quarantine = False
+
+        if path_in_quarantine:
+            cand_fact["status"] = "reserved_quarantine"
+            source_facts.append(cand_fact)
+            decision_rows.append({
+                "source_path": cand.absolute_path,
+                "target_path": None,
+                "index_root_id": index_root_id,
+                "index_root_path": index_root_path,
+                "relative_path": cand.relative_path,
+                "object_type": "file",
+                "decision": "SAFETY_EXCLUDED",
+                "reason_code": "RESERVED_QUARANTINE_PATH",
+                "reason": "Path is within reserved quarantine storage",
+                "size": cand.size,
+                "protected_dir": None,
+            })
+            continue
+
+        try:
+            path_allowed = is_path_allowed(abs_p, safety_snapshot.allowed_roots)
+        except (OSError, RuntimeError, ValueError):
+            path_allowed = False
+
+        if not path_allowed:
+            cand_fact["status"] = "outside_allowed"
+            source_facts.append(cand_fact)
+            decision_rows.append({
+                "source_path": cand.absolute_path,
+                "target_path": None,
+                "index_root_id": index_root_id,
+                "index_root_path": index_root_path,
+                "relative_path": cand.relative_path,
+                "object_type": "file",
+                "decision": "SAFETY_EXCLUDED",
+                "reason_code": "PATH_OUTSIDE_ALLOWED_ROOT",
+                "reason": "Path is outside allowed roots",
+                "size": cand.size,
+                "protected_dir": None,
+            })
+            continue
+
+        # Case 3: Read-only live observation via os.lstat
         try:
             st = os.lstat(cand.absolute_path)
         except FileNotFoundError:
@@ -368,7 +463,7 @@ def compile_quarantine_filtered_preview(
             "mode": st.st_mode,
         }
 
-        # Case 3: Live object is a symlink -> SAFETY_EXCLUDED / SYMLINK_BLOCKED
+        # Case 4: Live object is a symlink -> SAFETY_EXCLUDED / SYMLINK_BLOCKED
         if stat.S_ISLNK(st.st_mode):
             cand_fact["status"] = "symlink"
             source_facts.append(cand_fact)
@@ -387,48 +482,7 @@ def compile_quarantine_filtered_preview(
             })
             continue
 
-        # Case 4: Live path outside allowed roots
-        is_path_allowed = any(abs_p == ar or abs_p.is_relative_to(ar) for ar in safety_snapshot.allowed_roots)
-        if not is_path_allowed:
-            cand_fact["status"] = "outside_allowed"
-            source_facts.append(cand_fact)
-            decision_rows.append({
-                "source_path": cand.absolute_path,
-                "target_path": None,
-                "index_root_id": index_root_id,
-                "index_root_path": index_root_path,
-                "relative_path": cand.relative_path,
-                "object_type": "file",
-                "decision": "SAFETY_EXCLUDED",
-                "reason_code": "PATH_OUTSIDE_ALLOWED_ROOT",
-                "reason": "Path is outside allowed roots",
-                "size": st.st_size,
-                "protected_dir": None,
-            })
-            continue
-
-        # Case 5: Live path in quarantine reserved
-        if safety_snapshot.quarantine_root:
-            qr = safety_snapshot.quarantine_root.resolve()
-            if abs_p == qr or abs_p.is_relative_to(qr):
-                cand_fact["status"] = "reserved_quarantine"
-                source_facts.append(cand_fact)
-                decision_rows.append({
-                    "source_path": cand.absolute_path,
-                    "target_path": None,
-                    "index_root_id": index_root_id,
-                    "index_root_path": index_root_path,
-                    "relative_path": cand.relative_path,
-                    "object_type": "file",
-                    "decision": "SAFETY_EXCLUDED",
-                    "reason_code": "RESERVED_QUARANTINE_PATH",
-                    "reason": "Path is within reserved quarantine storage",
-                    "size": st.st_size,
-                    "protected_dir": None,
-                })
-                continue
-
-        # Case 6: Live object is not a regular file
+        # Case 5: Live object is not a regular file
         if not stat.S_ISREG(st.st_mode):
             cand_fact["status"] = "unsupported_object"
             source_facts.append(cand_fact)
@@ -597,4 +651,6 @@ def compile_quarantine_filtered_preview(
         blocking_conflict_count=blocking_conflict_count,
         expected_reclaim_bytes=expected_reclaim_bytes,
         summary=summary,
+        compiled_where_clause=compiled_lineage_where,
+        filter_policy_snapshot=filter_policy_snapshot,
     )

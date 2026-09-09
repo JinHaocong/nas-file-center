@@ -56,6 +56,7 @@ def test_db_and_files(tmp_path):
     f_c.write_bytes(b"http://example.com")
     st_c = f_c.stat()
 
+
     with SessionLocal() as session:
         r1 = IndexRoot(id=1, root=str(root1_path))
         r2 = IndexRoot(id=2, root=str(root2_path))
@@ -424,3 +425,174 @@ def test_db_lineage_digest_changes_on_indexed_path_mutation(test_db_and_files):
         d2 = compute_current_quarantine_filtered_db_lineage_digest(session, canonical_action)
         assert d2 is not None
         assert d1 != d2
+
+
+def test_parent_symlink_and_resolved_path_safety(tmp_path):
+    """Blocker A: verify parent symlinks resolving outside allowed roots or into quarantine are excluded."""
+    from app.path_safety import require_allowed_path, is_reserved_quarantine_path, UnsafePathError
+
+    db_file = tmp_path / "test_symlink_safety.db"
+    engine = create_engine(f"sqlite:///{db_file}")
+    Base.metadata.create_all(engine)
+    SessionLocal = sessionmaker(bind=engine)
+
+    allowed_root = tmp_path / "allowed_root"
+    allowed_root.mkdir()
+    outside_dir = tmp_path / "outside_dir"
+    outside_dir.mkdir()
+    quarantine_root = tmp_path / "quarantine_root"
+    quarantine_root.mkdir()
+    internal_target_dir = allowed_root / "real_sub"
+    internal_target_dir.mkdir()
+
+    # Case A: root/link -> outside ALLOWED_ROOTS
+    # target file is outside_dir/victim.txt
+    victim_file = outside_dir / "victim.txt"
+    victim_file.write_text("outside victim content")
+    st_victim = victim_file.stat()
+
+    link_to_outside = allowed_root / "link_outside"
+    link_to_outside.symlink_to(outside_dir, target_is_directory=True)
+    indexed_victim_path = link_to_outside / "victim.txt"
+
+    # Case B: root/alias -> quarantine_root
+    q_file = quarantine_root / "q.txt"
+    q_file.write_text("quarantine content")
+    st_q = q_file.stat()
+
+    link_to_quarantine = allowed_root / "alias_quarantine"
+    link_to_quarantine.symlink_to(quarantine_root, target_is_directory=True)
+    indexed_q_path = link_to_quarantine / "q.txt"
+
+    # Case C: root/internal_link -> real_sub (inside ALLOWED_ROOTS and not quarantine)
+    internal_file = internal_target_dir / "valid.txt"
+    internal_file.write_text("internal valid content")
+    st_internal = internal_file.stat()
+
+    link_to_internal = allowed_root / "link_internal"
+    link_to_internal.symlink_to(internal_target_dir, target_is_directory=True)
+    indexed_internal_path = link_to_internal / "valid.txt"
+
+    # Sibling file in real_sub to ensure PROTECT_LAST_FILE does not exclude valid.txt
+    sibling_file = internal_target_dir / "sibling.txt"
+    sibling_file.write_text("sibling content")
+
+    # Case D: Symlink loop (fail closed)
+    loop_a = allowed_root / "loop_a"
+    loop_b = allowed_root / "loop_b"
+    loop_a.symlink_to(loop_b)
+    loop_b.symlink_to(loop_a)
+    indexed_loop_path = loop_a / "loop_file.txt"
+
+    with SessionLocal() as session:
+        r = IndexRoot(id=1, root=str(allowed_root))
+        session.add(r)
+        session.commit()
+
+        # Add indexed paths
+        p_victim = IndexedPath(
+            root_key=str(allowed_root),
+            absolute_path=str(indexed_victim_path),
+            relative_path="link_outside/victim.txt",
+            basename="victim.txt",
+            stem="victim",
+            suffix=".txt",
+            size=st_victim.st_size,
+            mtime_ns=st_victim.st_mtime_ns,
+            device=st_victim.st_dev,
+            inode=st_victim.st_ino,
+            is_dir=False,
+            scan_generation=1,
+        )
+        p_q = IndexedPath(
+            root_key=str(allowed_root),
+            absolute_path=str(indexed_q_path),
+            relative_path="alias_quarantine/q.txt",
+            basename="q.txt",
+            stem="q",
+            suffix=".txt",
+            size=st_q.st_size,
+            mtime_ns=st_q.st_mtime_ns,
+            device=st_q.st_dev,
+            inode=st_q.st_ino,
+            is_dir=False,
+            scan_generation=1,
+        )
+        p_internal = IndexedPath(
+            root_key=str(allowed_root),
+            absolute_path=str(indexed_internal_path),
+            relative_path="link_internal/valid.txt",
+            basename="valid.txt",
+            stem="valid",
+            suffix=".txt",
+            size=st_internal.st_size,
+            mtime_ns=st_internal.st_mtime_ns,
+            device=st_internal.st_dev,
+            inode=st_internal.st_ino,
+            is_dir=False,
+            scan_generation=1,
+        )
+        p_loop = IndexedPath(
+            root_key=str(allowed_root),
+            absolute_path=str(indexed_loop_path),
+            relative_path="loop_a/loop_file.txt",
+            basename="loop_file.txt",
+            stem="loop_file",
+            suffix=".txt",
+            size=100,
+            mtime_ns=0,
+            device=0,
+            inode=0,
+            is_dir=False,
+            scan_generation=1,
+        )
+        session.add_all([p_victim, p_q, p_internal, p_loop])
+        session.commit()
+
+        snapshot = BatchUtilitySafetySnapshot(
+            protect_last_file=True,
+            allowed_roots=(allowed_root.resolve(),),
+            quarantine_root=quarantine_root.resolve(),
+            effective_policy={
+                "protect_last_file": True,
+                "allowed_roots": [str(allowed_root.resolve())],
+                "quarantine_root": str(quarantine_root.resolve()),
+            },
+        )
+
+        action = QuarantineFilteredAction(type="quarantine_filtered", root_ids=[1], filter=None)
+        compilation = compile_quarantine_filtered_preview(
+            session=session,
+            action=action,
+            safety_snapshot=snapshot,
+        )
+
+        # Cross-lifecycle consistency assertions
+        with pytest.raises(UnsafePathError):
+            require_allowed_path(indexed_victim_path, snapshot.allowed_roots)
+        assert is_reserved_quarantine_path(indexed_q_path, snapshot.quarantine_root) is True
+        assert require_allowed_path(indexed_internal_path, snapshot.allowed_roots) is not None
+
+        # Check Row A (outside allowed roots via symlink parent)
+        row_victim = next(r for r in compilation.rows if r["source_path"] == str(indexed_victim_path))
+        assert row_victim["decision"] == "SAFETY_EXCLUDED"
+        assert row_victim["reason_code"] == "PATH_OUTSIDE_ALLOWED_ROOT"
+        assert not any(i.source_path == str(indexed_victim_path) for i in compilation.intents)
+
+        # Check Row B (quarantine storage via symlink parent)
+        row_q = next(r for r in compilation.rows if r["source_path"] == str(indexed_q_path))
+        assert row_q["decision"] == "SAFETY_EXCLUDED"
+        assert row_q["reason_code"] == "RESERVED_QUARANTINE_PATH"
+        assert not any(i.source_path == str(indexed_q_path) for i in compilation.intents)
+
+        # Check Row C (internal symlink parent: inside allowed roots, not quarantine)
+        row_internal = next(r for r in compilation.rows if r["source_path"] == str(indexed_internal_path))
+        assert row_internal["decision"] == "QUARANTINE"
+        assert any(i.source_path == str(indexed_internal_path) for i in compilation.intents)
+
+        # Check Row D (symlink loop fails closed)
+        row_loop = next(r for r in compilation.rows if r["source_path"] == str(indexed_loop_path))
+        assert row_loop["decision"] == "SAFETY_EXCLUDED"
+        assert row_loop["reason_code"] == "PATH_OUTSIDE_ALLOWED_ROOT"
+        assert not any(i.source_path == str(indexed_loop_path) for i in compilation.intents)
+

@@ -4225,6 +4225,8 @@ class FileCenterService:
             current_lineage = compute_current_quarantine_filtered_db_lineage_digest(
                 session,
                 compilation.canonical_action,
+                compiled_where_clause=compilation.compiled_where_clause,
+                filter_policy_snapshot=compilation.filter_policy_snapshot,
             )
             if current_lineage != compilation.db_lineage_digest:
                 session.rollback()
