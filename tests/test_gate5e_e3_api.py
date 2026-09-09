@@ -198,3 +198,148 @@ def test_preview_quarantine_wrapper_error_cross_root(api_test_env):
     assert resp.status_code == 409
     assert resp.json()["error"]["code"] == "BATCH_UTILITY_CROSS_ROOT"
 
+
+def test_preview_snapshot_second_scandir_failure_empty_wrapper(api_test_env):
+    """E3-hotfix6 Regression:
+    Empty wrapper scandir failure during snapshot capture.
+    scan #1 (discovery): succeeds
+    scan #2 (snapshot): PermissionError(errno=13)
+    Expected: HTTP 422, BATCH_UTILITY_INVALID_CONFIG, stage=SNAPSHOT, errno=13
+    """
+    import os
+    from unittest.mock import patch
+    client = api_test_env["client"]
+    root = api_test_env["root1_path"]
+    wrapper = root / "w_empty_snap_err"
+    wrapper.mkdir()
+
+    orig_scandir = os.scandir
+    call_count = 0
+
+    def mock_scandir(path, *args, **kwargs):
+        nonlocal call_count
+        if os.path.normpath(str(path)) == str(wrapper):
+            call_count += 1
+            if call_count == 2:
+                err = PermissionError(13, "Permission denied")
+                err.errno = 13
+                raise err
+        return orig_scandir(path, *args, **kwargs)
+
+    with patch("os.scandir", side_effect=mock_scandir):
+        resp = client.post(
+            "/api/batch-utilities/preview",
+            json={"action": {"type": "flatten_one_level", "wrapper_paths": [str(wrapper)]}},
+        )
+        assert resp.status_code == 422
+        err = resp.json()["error"]
+        assert err["code"] == "BATCH_UTILITY_INVALID_CONFIG"
+        assert err["details"].get("wrapper_path") == str(wrapper)
+        assert err["details"].get("errno") == 13
+        assert err["details"].get("stage") == "SNAPSHOT"
+
+
+def test_preview_snapshot_second_scandir_failure_nonempty_wrapper(api_test_env):
+    """E3-hotfix6 Regression:
+    Nonempty wrapper scandir failure during snapshot capture.
+    scan #1 (discovery): succeeds
+    scan #2 (snapshot): PermissionError(errno=13)
+    Expected: HTTP 422, BATCH_UTILITY_INVALID_CONFIG, stage=SNAPSHOT, errno=13
+    """
+    import os
+    from unittest.mock import patch
+    client = api_test_env["client"]
+    root = api_test_env["root1_path"]
+    wrapper = root / "w_nonempty_snap_err"
+    wrapper.mkdir()
+    (wrapper / "item.txt").write_text("hello")
+
+    orig_scandir = os.scandir
+    call_count = 0
+
+    def mock_scandir(path, *args, **kwargs):
+        nonlocal call_count
+        if os.path.normpath(str(path)) == str(wrapper):
+            call_count += 1
+            if call_count == 2:
+                err = PermissionError(13, "Permission denied")
+                err.errno = 13
+                raise err
+        return orig_scandir(path, *args, **kwargs)
+
+    with patch("os.scandir", side_effect=mock_scandir):
+        resp = client.post(
+            "/api/batch-utilities/preview",
+            json={"action": {"type": "flatten_one_level", "wrapper_paths": [str(wrapper)]}},
+        )
+        assert resp.status_code == 422
+        err = resp.json()["error"]
+        assert err["code"] == "BATCH_UTILITY_INVALID_CONFIG"
+        assert err["details"].get("wrapper_path") == str(wrapper)
+        assert err["details"].get("errno") == 13
+        assert err["details"].get("stage") == "SNAPSHOT"
+
+
+def test_preview_canonical_wrapper_trailing_slash_digest_equality(api_test_env):
+    """E3-hotfix6 Regression:
+    W vs W/ selects the same wrapper and produces identical action_config_digest and preview_digest.
+    """
+    client = api_test_env["client"]
+    root = api_test_env["root1_path"]
+    wrapper = root / "w_slash_test"
+    wrapper.mkdir()
+    (wrapper / "item.txt").write_text("test")
+
+    resp1 = client.post(
+        "/api/batch-utilities/preview",
+        json={"action": {"type": "flatten_one_level", "wrapper_paths": [str(wrapper)]}},
+    )
+    resp2 = client.post(
+        "/api/batch-utilities/preview",
+        json={"action": {"type": "flatten_one_level", "wrapper_paths": [str(wrapper) + "/"]}},
+    )
+
+    assert resp1.status_code == 200
+    assert resp2.status_code == 200
+
+    d1 = resp1.json()
+    d2 = resp2.json()
+
+    assert d1["action_config_digest"] == d2["action_config_digest"]
+    assert d1["source_snapshot_digest"] == d2["source_snapshot_digest"]
+    assert d1["preview_digest"] == d2["preview_digest"]
+    assert d1["candidate_count"] == d2["candidate_count"] == 1
+
+
+def test_preview_canonical_wrapper_ordering_digest_invariance(api_test_env):
+    """E3-hotfix6 Regression:
+    Wrapper input ordering is invariant for action_config_digest and preview_digest.
+    """
+    client = api_test_env["client"]
+    root = api_test_env["root1_path"]
+    w1 = root / "w_ord_1"
+    w2 = root / "w_ord_2"
+    w1.mkdir()
+    w2.mkdir()
+    (w1 / "f1.txt").write_text("1")
+    (w2 / "f2.txt").write_text("2")
+
+    resp1 = client.post(
+        "/api/batch-utilities/preview",
+        json={"action": {"type": "flatten_one_level", "wrapper_paths": [str(w1), str(w2)]}},
+    )
+    resp2 = client.post(
+        "/api/batch-utilities/preview",
+        json={"action": {"type": "flatten_one_level", "wrapper_paths": [str(w2), str(w1)]}},
+    )
+
+    assert resp1.status_code == 200
+    assert resp2.status_code == 200
+
+    d1 = resp1.json()
+    d2 = resp2.json()
+
+    assert d1["action_config_digest"] == d2["action_config_digest"]
+    assert d1["source_snapshot_digest"] == d2["source_snapshot_digest"]
+    assert d1["preview_digest"] == d2["preview_digest"]
+

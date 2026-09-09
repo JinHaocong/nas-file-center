@@ -652,4 +652,155 @@ def test_generate_flatten_empty_wrapper_child_appearance_race_raises_409(api_tes
             assert len(plans) == 0
 
 
+def test_generate_continuity_scandir_failure_empty_wrapper(api_test_env):
+    """E3-hotfix6 Regression:
+    Empty wrapper continuity re-scan failure during Generate Phase A.
+    Expected: HTTP 422 BATCH_UTILITY_INVALID_CONFIG (NOT 409 PREVIEW_CHANGED or 200/201),
+              details: stage=CONTINUITY, errno=13, wrapper_path.
+              Zero draft plans in DB.
+    """
+    import os
+    from unittest.mock import patch
+    client = api_test_env["client"]
+    service = api_test_env["service"]
+    root = api_test_env["root1_path"]
+    wrapper = root / "w_empty_cont_err"
+    wrapper.mkdir()
+
+    action = {
+        "type": "flatten_one_level",
+        "wrapper_paths": [str(wrapper)]
+    }
+
+    resp_prev = client.post("/api/batch-utilities/preview", json={"action": action})
+    assert resp_prev.status_code == 200
+    preview_digest = resp_prev.json()["preview_digest"]
+
+    orig_scandir = os.scandir
+    call_count = 0
+
+    def mock_scandir(path, *args, **kwargs):
+        nonlocal call_count
+        if os.path.normpath(str(path)) == str(wrapper):
+            call_count += 1
+            if call_count == 3:
+                err = PermissionError(13, "Permission denied")
+                err.errno = 13
+                raise err
+        return orig_scandir(path, *args, **kwargs)
+
+    with patch("os.scandir", side_effect=mock_scandir):
+        req = {
+            "action": action,
+            "expected_preview_digest": preview_digest
+        }
+        resp = client.post("/api/batch-utilities/generate-plan", json=req)
+        assert resp.status_code == 422
+        err = resp.json()["error"]
+        assert err["code"] == "BATCH_UTILITY_INVALID_CONFIG"
+        assert err["details"].get("wrapper_path") == str(wrapper)
+        assert err["details"].get("errno") == 13
+        assert err["details"].get("stage") == "CONTINUITY"
+
+        with service.SessionLocal() as session:
+            plans = session.query(BatchPlan).all()
+            assert len(plans) == 0
+
+
+def test_generate_continuity_scandir_failure_nonempty_wrapper(api_test_env):
+    """E3-hotfix6 Regression:
+    Nonempty wrapper continuity re-scan failure during Generate Phase A.
+    Expected: HTTP 422 BATCH_UTILITY_INVALID_CONFIG,
+              details: stage=CONTINUITY, errno=13, wrapper_path.
+              Zero draft plans in DB.
+    """
+    import os
+    from unittest.mock import patch
+    client = api_test_env["client"]
+    service = api_test_env["service"]
+    root = api_test_env["root1_path"]
+    wrapper = root / "w_nonempty_cont_err"
+    wrapper.mkdir()
+    (wrapper / "item.txt").write_text("data")
+
+    action = {
+        "type": "flatten_one_level",
+        "wrapper_paths": [str(wrapper)]
+    }
+
+    resp_prev = client.post("/api/batch-utilities/preview", json={"action": action})
+    assert resp_prev.status_code == 200
+    preview_digest = resp_prev.json()["preview_digest"]
+
+    orig_scandir = os.scandir
+    call_count = 0
+
+    def mock_scandir(path, *args, **kwargs):
+        nonlocal call_count
+        if os.path.normpath(str(path)) == str(wrapper):
+            call_count += 1
+            if call_count == 3:
+                err = PermissionError(13, "Permission denied")
+                err.errno = 13
+                raise err
+        return orig_scandir(path, *args, **kwargs)
+
+    with patch("os.scandir", side_effect=mock_scandir):
+        req = {
+            "action": action,
+            "expected_preview_digest": preview_digest
+        }
+        resp = client.post("/api/batch-utilities/generate-plan", json=req)
+        assert resp.status_code == 422
+        err = resp.json()["error"]
+        assert err["code"] == "BATCH_UTILITY_INVALID_CONFIG"
+        assert err["details"].get("wrapper_path") == str(wrapper)
+        assert err["details"].get("errno") == 13
+        assert err["details"].get("stage") == "CONTINUITY"
+
+        with service.SessionLocal() as session:
+            plans = session.query(BatchPlan).all()
+            assert len(plans) == 0
+
+
+def test_generate_canonical_wrapper_plan_metadata(api_test_env):
+    """E3-hotfix6 Regression:
+    Wrapper path provided with trailing slash 'W/' is saved as canonical 'W'
+    in plan_metadata top-level wrapper_paths and canonical_action_config.
+    db_lineage_digest is None.
+    """
+    import json
+    client = api_test_env["client"]
+    service = api_test_env["service"]
+    root = api_test_env["root1_path"]
+    wrapper = root / "w_meta_canon"
+    wrapper.mkdir()
+    (wrapper / "item.txt").write_text("content")
+
+    action = {
+        "type": "flatten_one_level",
+        "wrapper_paths": [str(wrapper) + "/"]
+    }
+
+    resp_prev = client.post("/api/batch-utilities/preview", json={"action": action})
+    assert resp_prev.status_code == 200
+    preview_digest = resp_prev.json()["preview_digest"]
+
+    req = {
+        "action": action,
+        "expected_preview_digest": preview_digest
+    }
+    resp_gen = client.post("/api/batch-utilities/generate-plan", json=req)
+    assert resp_gen.status_code == 201
+
+    with service.SessionLocal() as session:
+        plans = session.query(BatchPlan).all()
+        assert len(plans) == 1
+        plan = plans[0]
+        meta = json.loads(plan.metadata_json)
+        assert meta["wrapper_paths"] == [str(wrapper)]
+        assert meta["canonical_action_config"]["wrapper_paths"] == [str(wrapper)]
+        assert meta.get("db_lineage_digest") is None
+
+
 

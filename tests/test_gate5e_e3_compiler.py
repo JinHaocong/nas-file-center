@@ -2,7 +2,7 @@ import pytest
 from pathlib import Path
 from app.batch_utilities.schema import FlattenOneLevelAction
 from app.batch_utilities.compiler import compile_flatten_one_level_preview, BatchUtilitySafetySnapshot
-from app.batch_utilities.errors import BatchUtilityScopeOverlapError
+from app.batch_utilities.errors import BatchUtilityScopeOverlapError, BatchUtilityInvalidConfigError, BatchUtilitySymlinkBlockedError
 
 def test_compile_flatten_overlap(tmp_path):
     root = tmp_path / "root"
@@ -850,6 +850,310 @@ def test_compiler_empty_wrapper_child_appearance_blocked(tmp_path):
         assert comp.rows[0]["reason_code"] == "WRAPPER_IDENTITY_CHANGED"
         assert "WRAPPER_IDENTITY_CHANGED" in comp.rows[0]["reason"]
         assert comp.blocking_conflict_count == 1
+
+
+def test_canonical_wrapper_trailing_slash_digest_equality(tmp_path):
+    """E3-hotfix6 Regression:
+    W and W/ represent the same actual wrapper:
+    -> same canonical wrapper representation
+    -> same action_config_digest
+    Also test redundant lexical form: /root/X/../W where X is a real non-symlink directory
+    """
+    from app.batch_utilities.digest import (
+        canonicalize_flatten_one_level_action,
+        compute_action_config_digest,
+    )
+    root = tmp_path / "root"
+    wrapper = root / "W"
+    wrapper.mkdir(parents=True)
+    x_dir = root / "X"
+    x_dir.mkdir(parents=True)
+
+    w_plain = str(wrapper)
+    w_slash = str(wrapper) + "/"
+    w_redundant = str(root / "X" / ".." / "W")
+
+    a1 = FlattenOneLevelAction(type="flatten_one_level", wrapper_paths=[w_plain])
+    a2 = FlattenOneLevelAction(type="flatten_one_level", wrapper_paths=[w_slash])
+    a3 = FlattenOneLevelAction(type="flatten_one_level", wrapper_paths=[w_redundant])
+
+    c1 = canonicalize_flatten_one_level_action(a1)
+    c2 = canonicalize_flatten_one_level_action(a2)
+    c3 = canonicalize_flatten_one_level_action(a3)
+
+    assert c1["wrapper_paths"] == c2["wrapper_paths"] == c3["wrapper_paths"]
+    assert len(c1["wrapper_paths"]) == 1
+    assert not c1["wrapper_paths"][0].endswith("/")
+
+    d1 = compute_action_config_digest(c1)
+    d2 = compute_action_config_digest(c2)
+    d3 = compute_action_config_digest(c3)
+
+    assert d1 == d2 == d3
+
+
+def test_canonical_wrapper_input_ordering_invariance(tmp_path):
+    """E3-hotfix6 Regression:
+    Wrapper input ordering is invariant for action_config_digest.
+    """
+    from app.batch_utilities.digest import (
+        canonicalize_flatten_one_level_action,
+        compute_action_config_digest,
+    )
+    root = tmp_path / "root"
+    w1 = root / "W1"
+    w2 = root / "W2"
+    w1.mkdir(parents=True)
+    w2.mkdir(parents=True)
+
+    a1 = FlattenOneLevelAction(type="flatten_one_level", wrapper_paths=[str(w1), str(w2)])
+    a2 = FlattenOneLevelAction(type="flatten_one_level", wrapper_paths=[str(w2), str(w1)])
+
+    c1 = canonicalize_flatten_one_level_action(a1)
+    c2 = canonicalize_flatten_one_level_action(a2)
+
+    assert c1["wrapper_paths"] == c2["wrapper_paths"]
+    assert compute_action_config_digest(c1) == compute_action_config_digest(c2)
+
+
+def test_canonical_wrapper_duplicate_rejection(tmp_path):
+    """E3-hotfix6 Regression:
+    Duplicate wrapper representations (e.g. W and W/) are rejected.
+    Pydantic schema validation rejects normalized duplicates with ValidationError.
+    Canonicalize / compiler also rejects duplicate canonical paths with BatchUtilityScopeOverlapError.
+    """
+    from app.batch_utilities.digest import canonicalize_flatten_one_level_action
+    from pydantic import ValidationError
+    root = tmp_path / "root"
+    wrapper = root / "W"
+    wrapper.mkdir(parents=True)
+
+    # In schema validation
+    with pytest.raises(ValidationError):
+        FlattenOneLevelAction(type="flatten_one_level", wrapper_paths=[str(wrapper), str(wrapper) + "/"])
+
+    # In canonicalize_flatten_one_level_action with model_construct
+    a_dup = FlattenOneLevelAction.model_construct(
+        type="flatten_one_level",
+        wrapper_paths=[str(wrapper), str(wrapper) + "/"],
+    )
+    with pytest.raises(BatchUtilityScopeOverlapError):
+        canonicalize_flatten_one_level_action(a_dup)
+
+    # In compiler preview
+    snapshot = BatchUtilitySafetySnapshot(
+        protect_last_file=True,
+        allowed_roots=(root,),
+        quarantine_root=None,
+        effective_policy={},
+    )
+    with pytest.raises(BatchUtilityScopeOverlapError):
+        compile_flatten_one_level_preview(session=None, action=a_dup, safety_snapshot=snapshot)
+
+
+def test_preflight_trailing_slash_symlink_blocked(tmp_path):
+    """E3-hotfix6 Regression:
+    Wrapper path with trailing slash on symlink is blocked with BatchUtilitySymlinkBlockedError.
+    """
+    from app.batch_utilities.errors import BatchUtilitySymlinkBlockedError
+    import os
+    root = tmp_path / "root"
+    root.mkdir(parents=True)
+    other = root / "other"
+    other.mkdir(parents=True)
+    sym = root / "sym_w"
+    os.symlink(str(other), str(sym))
+
+    action = FlattenOneLevelAction(type="flatten_one_level", wrapper_paths=[str(sym) + "/"])
+    snapshot = BatchUtilitySafetySnapshot(
+        protect_last_file=True,
+        allowed_roots=(root,),
+        quarantine_root=None,
+        effective_policy={},
+    )
+    with pytest.raises(BatchUtilitySymlinkBlockedError):
+        compile_flatten_one_level_preview(session=None, action=action, safety_snapshot=snapshot)
+
+
+def test_compiler_snapshot_scandir_failure_empty_wrapper(tmp_path):
+    """E3-hotfix6 Regression:
+    Instrument scandir:
+    scan #1 (discovery): succeeds
+    scan #2 (snapshot direct_children): raises PermissionError(errno=13)
+    Expected: BatchUtilityInvalidConfigError, HTTP 422, stage SNAPSHOT, errno 13
+    """
+    import os
+    from unittest.mock import patch
+    root = tmp_path / "root"
+    wrapper = root / "W_empty"
+    wrapper.mkdir(parents=True)
+
+    action = FlattenOneLevelAction(type="flatten_one_level", wrapper_paths=[str(wrapper)])
+    snapshot = BatchUtilitySafetySnapshot(
+        protect_last_file=True,
+        allowed_roots=(root,),
+        quarantine_root=None,
+        effective_policy={},
+    )
+
+    orig_scandir = os.scandir
+    call_count = 0
+
+    def mock_scandir(path, *args, **kwargs):
+        nonlocal call_count
+        if os.path.normpath(str(path)) == str(wrapper):
+            call_count += 1
+            if call_count == 2:
+                err = PermissionError(13, "Permission denied")
+                err.errno = 13
+                raise err
+        return orig_scandir(path, *args, **kwargs)
+
+    with patch("os.scandir", side_effect=mock_scandir):
+        with pytest.raises(BatchUtilityInvalidConfigError) as exc_info:
+            compile_flatten_one_level_preview(session=None, action=action, safety_snapshot=snapshot)
+        assert exc_info.value.code == "BATCH_UTILITY_INVALID_CONFIG"
+        assert exc_info.value.status_code == 422
+        assert exc_info.value.details.get("wrapper_path") == str(wrapper)
+        assert exc_info.value.details.get("errno") == 13
+        assert exc_info.value.details.get("stage") == "SNAPSHOT"
+
+
+def test_compiler_snapshot_scandir_failure_nonempty_wrapper(tmp_path):
+    """E3-hotfix6 Regression:
+    Instrument scandir on nonempty wrapper:
+    scan #1 (discovery): succeeds
+    scan #2 (snapshot direct_children): raises PermissionError(errno=13)
+    Expected: BatchUtilityInvalidConfigError, HTTP 422, stage SNAPSHOT, errno 13
+    """
+    import os
+    from unittest.mock import patch
+    root = tmp_path / "root"
+    wrapper = root / "W_nonempty"
+    wrapper.mkdir(parents=True)
+    (wrapper / "a.txt").write_text("content")
+
+    action = FlattenOneLevelAction(type="flatten_one_level", wrapper_paths=[str(wrapper)])
+    snapshot = BatchUtilitySafetySnapshot(
+        protect_last_file=True,
+        allowed_roots=(root,),
+        quarantine_root=None,
+        effective_policy={},
+    )
+
+    orig_scandir = os.scandir
+    call_count = 0
+
+    def mock_scandir(path, *args, **kwargs):
+        nonlocal call_count
+        if os.path.normpath(str(path)) == str(wrapper):
+            call_count += 1
+            if call_count == 2:
+                err = PermissionError(13, "Permission denied")
+                err.errno = 13
+                raise err
+        return orig_scandir(path, *args, **kwargs)
+
+    with patch("os.scandir", side_effect=mock_scandir):
+        with pytest.raises(BatchUtilityInvalidConfigError) as exc_info:
+            compile_flatten_one_level_preview(session=None, action=action, safety_snapshot=snapshot)
+        assert exc_info.value.code == "BATCH_UTILITY_INVALID_CONFIG"
+        assert exc_info.value.status_code == 422
+        assert exc_info.value.details.get("wrapper_path") == str(wrapper)
+        assert exc_info.value.details.get("errno") == 13
+        assert exc_info.value.details.get("stage") == "SNAPSHOT"
+
+
+def test_compiler_continuity_scandir_failure_empty_wrapper(tmp_path):
+    """E3-hotfix6 Regression:
+    Instrument scandir on empty wrapper:
+    scan #1 (discovery): succeeds
+    scan #2 (snapshot): succeeds
+    scan #3 (continuity re-scan): raises PermissionError(errno=13)
+    Expected: BatchUtilityInvalidConfigError, HTTP 422, stage CONTINUITY, errno 13
+    """
+    import os
+    from unittest.mock import patch
+    root = tmp_path / "root"
+    wrapper = root / "W_empty_cont"
+    wrapper.mkdir(parents=True)
+
+    action = FlattenOneLevelAction(type="flatten_one_level", wrapper_paths=[str(wrapper)])
+    snapshot = BatchUtilitySafetySnapshot(
+        protect_last_file=True,
+        allowed_roots=(root,),
+        quarantine_root=None,
+        effective_policy={},
+    )
+
+    orig_scandir = os.scandir
+    call_count = 0
+
+    def mock_scandir(path, *args, **kwargs):
+        nonlocal call_count
+        if os.path.normpath(str(path)) == str(wrapper):
+            call_count += 1
+            if call_count == 3:
+                err = PermissionError(13, "Permission denied")
+                err.errno = 13
+                raise err
+        return orig_scandir(path, *args, **kwargs)
+
+    with patch("os.scandir", side_effect=mock_scandir):
+        with pytest.raises(BatchUtilityInvalidConfigError) as exc_info:
+            compile_flatten_one_level_preview(session=None, action=action, safety_snapshot=snapshot)
+        assert exc_info.value.code == "BATCH_UTILITY_INVALID_CONFIG"
+        assert exc_info.value.status_code == 422
+        assert exc_info.value.details.get("wrapper_path") == str(wrapper)
+        assert exc_info.value.details.get("errno") == 13
+        assert exc_info.value.details.get("stage") == "CONTINUITY"
+
+
+def test_compiler_continuity_scandir_failure_nonempty_wrapper(tmp_path):
+    """E3-hotfix6 Regression:
+    Instrument scandir on nonempty wrapper:
+    scan #1 (discovery): succeeds
+    scan #2 (snapshot): succeeds
+    scan #3 (continuity re-scan): raises PermissionError(errno=13)
+    Expected: BatchUtilityInvalidConfigError, HTTP 422, stage CONTINUITY, errno 13
+    """
+    import os
+    from unittest.mock import patch
+    root = tmp_path / "root"
+    wrapper = root / "W_nonempty_cont"
+    wrapper.mkdir(parents=True)
+    (wrapper / "a.txt").write_text("content")
+
+    action = FlattenOneLevelAction(type="flatten_one_level", wrapper_paths=[str(wrapper)])
+    snapshot = BatchUtilitySafetySnapshot(
+        protect_last_file=True,
+        allowed_roots=(root,),
+        quarantine_root=None,
+        effective_policy={},
+    )
+
+    orig_scandir = os.scandir
+    call_count = 0
+
+    def mock_scandir(path, *args, **kwargs):
+        nonlocal call_count
+        if os.path.normpath(str(path)) == str(wrapper):
+            call_count += 1
+            if call_count == 3:
+                err = PermissionError(13, "Permission denied")
+                err.errno = 13
+                raise err
+        return orig_scandir(path, *args, **kwargs)
+
+    with patch("os.scandir", side_effect=mock_scandir):
+        with pytest.raises(BatchUtilityInvalidConfigError) as exc_info:
+            compile_flatten_one_level_preview(session=None, action=action, safety_snapshot=snapshot)
+        assert exc_info.value.code == "BATCH_UTILITY_INVALID_CONFIG"
+        assert exc_info.value.status_code == 422
+        assert exc_info.value.details.get("wrapper_path") == str(wrapper)
+        assert exc_info.value.details.get("errno") == 13
+        assert exc_info.value.details.get("stage") == "CONTINUITY"
+
 
 
 

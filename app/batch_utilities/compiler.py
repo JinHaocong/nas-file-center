@@ -24,6 +24,7 @@ from app.batch_utilities.digest import (
     canonical_json_dumps,
     canonicalize_quarantine_filtered_action,
     canonicalize_suffix_transform_action,
+    canonicalize_flatten_one_level_action,
     compute_action_config_digest,
     compute_preview_digest,
 )
@@ -1400,21 +1401,16 @@ def compile_flatten_one_level_preview(
     action: FlattenOneLevelAction,
     safety_snapshot: BatchUtilitySafetySnapshot,
 ) -> BatchUtilityCompilation:
-    canonical_wrappers = sorted(action.wrapper_paths)
-    canonical_action = {
-        "type": "flatten_one_level",
-        "wrapper_paths": canonical_wrappers,
-    }
-    action_config_digest = hashlib.sha256(
-        canonical_json_dumps(canonical_action).encode("utf-8")
-    ).hexdigest()
-
     # Pre-flight wrapper validation (checks no-follow, missing, symlink, cross-root, root match, overlap)
     validate_wrappers_preflight(
-        canonical_wrappers,
+        action.wrapper_paths,
         safety_snapshot.allowed_roots,
         safety_snapshot.quarantine_root,
     )
+
+    canonical_action = canonicalize_flatten_one_level_action(action)
+    canonical_wrappers = canonical_action["wrapper_paths"]
+    action_config_digest = compute_action_config_digest(canonical_action)
 
     flatten_cands, flatten_errors = discover_flatten_one_level(canonical_wrappers)
 
@@ -1439,8 +1435,15 @@ def compile_flatten_one_level_preview(
                 try:
                     with os.scandir(w_lex) as it:
                         children = sorted(entry.name for entry in it)
-                except OSError:
-                    children = []
+                except OSError as e:
+                    raise BatchUtilityInvalidConfigError(
+                        f"Failed to scan wrapper directory '{w_lex}': {e}",
+                        details={
+                            "wrapper_path": w_lex,
+                            "errno": getattr(e, "errno", None),
+                            "stage": "SNAPSHOT",
+                        },
+                    )
                 wrapper_observations.append({
                     "wrapper_path": w_lex,
                     "device": st.st_dev,

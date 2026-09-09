@@ -49,7 +49,14 @@ def validate_wrappers_preflight(
             )
 
         # 1. No-follow lstat first
+        norm_lex = os.path.normpath(w_lex)
         try:
+            st_norm = os.lstat(norm_lex)
+            if stat.S_ISLNK(st_norm.st_mode):
+                raise BatchUtilitySymlinkBlockedError(
+                    f"Wrapper path '{w_lex}' is a symlink",
+                    details={"wrapper_path": w_lex},
+                )
             st = os.lstat(w_lex)
         except FileNotFoundError:
             raise BatchUtilityScopeNotFoundError(
@@ -247,11 +254,13 @@ def resolve_flatten_graph(
                             details["expected_children"] = exp["direct_children"]
                             details["current_children"] = curr_children
                     except OSError as e:
-                        return (
-                            False,
-                            True,
-                            f"WRAPPER_IDENTITY_CHANGED: Failed to re-scan wrapper '{w_lex}': {e}",
-                            {"wrapper_path": w_lex, "errno": getattr(e, "errno", None)},
+                        raise BatchUtilityInvalidConfigError(
+                            f"Failed to scan wrapper directory '{w_lex}': {e}",
+                            details={
+                                "wrapper_path": w_lex,
+                                "errno": getattr(e, "errno", None),
+                                "stage": "CONTINUITY",
+                            },
                         )
                 if st_w.st_mtime_ns != exp.get("mtime_ns"):
                     enum_mismatches.append("mtime_ns")

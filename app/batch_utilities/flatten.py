@@ -99,7 +99,11 @@ def discover_flatten_one_level(
         except OSError as e:
             raise BatchUtilityInvalidConfigError(
                 f"Failed to scan wrapper directory '{w_path}': {e}",
-                details={"wrapper_path": w_path, "errno": getattr(e, "errno", None)},
+                details={
+                    "wrapper_path": str(w_path),
+                    "errno": getattr(e, "errno", None),
+                    "stage": "DISCOVERY",
+                },
             )
 
     return candidates, errors

@@ -1,8 +1,12 @@
 import hashlib
 import json
+import os
+from pathlib import Path
+import stat
 from typing import Any, Mapping, Sequence
 
 from app.batch_utilities.schema import QuarantineFilteredAction, SuffixTransformAction, FlattenOneLevelAction
+from app.batch_utilities.errors import BatchUtilityScopeOverlapError
 from app.filters.validation import validate_filter_ast
 
 BATCH_UTILITY_ENGINE_VERSION = 1
@@ -41,11 +45,34 @@ def canonicalize_suffix_transform_action(action: SuffixTransformAction) -> dict[
     }
 
 
+def canonicalize_wrapper_path(path: str) -> str:
+    """Canonicalize a wrapper directory path for batch utilities.
+    Normalizes redundant lexical separators, trailing slashes, '.', and '..'.
+    If the path exists on disk and is a real directory without being a symlink,
+    resolves to strict canonical path. Preserves raw symlink paths so no-follow
+    safety checks can detect and reject them.
+    """
+    raw = str(path).strip()
+    norm = os.path.normpath(raw)
+    try:
+        st = os.lstat(norm)
+        if stat.S_ISLNK(st.st_mode):
+            return norm
+        return str(Path(norm).resolve(strict=True))
+    except (OSError, FileNotFoundError, RuntimeError):
+        return norm
+
+
 def canonicalize_flatten_one_level_action(action: FlattenOneLevelAction) -> dict[str, Any]:
-    sorted_wrappers = sorted(action.wrapper_paths)
+    canon_paths = [canonicalize_wrapper_path(w) for w in action.wrapper_paths]
+    if len(canon_paths) != len(set(canon_paths)):
+        raise BatchUtilityScopeOverlapError(
+            "Duplicate wrapper paths detected in action configuration",
+            details={"wrapper_paths": action.wrapper_paths},
+        )
     return {
         "type": "flatten_one_level",
-        "wrapper_paths": sorted_wrappers,
+        "wrapper_paths": sorted(canon_paths),
     }
 
 
