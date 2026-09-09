@@ -172,12 +172,60 @@ def resolve_flatten_graph(
     items: Sequence[TargetItemCandidate],
     allowed_roots: Sequence[Path],
     quarantine_root: Path | None,
+    wrapper_observations: Sequence[dict[str, Any]] | None = None,
     lstat_func: Callable[[str | os.PathLike[str]], os.stat_result] | None = None,
     scandir_func: Any | None = None,
 ) -> GraphResolutionResult:
     _lstat = lstat_func or os.lstat
     _scandir = scandir_func or os.scandir
     conflicts: list[BlockingConflict] = []
+
+    wrapper_obs_map: dict[str, dict[str, Any]] = {}
+    if wrapper_observations:
+        for obs in wrapper_observations:
+            wrapper_obs_map[obs["wrapper_path"]] = obs
+
+    cached_wrapper_status: dict[str, tuple[bool, str, dict[str, Any]]] = {}
+
+    def _check_wrapper(w_lex: str) -> tuple[bool, str, dict[str, Any]]:
+        if w_lex in cached_wrapper_status:
+            return cached_wrapper_status[w_lex]
+        try:
+            st_w = _lstat(w_lex)
+            if stat.S_ISLNK(st_w.st_mode):
+                res = (False, f"WRAPPER_IDENTITY_CHANGED: Wrapper '{w_lex}' is a symlink", {"wrapper_path": w_lex, "error": "WRAPPER_SYMLINK"})
+            elif not stat.S_ISDIR(st_w.st_mode):
+                res = (False, f"WRAPPER_IDENTITY_CHANGED: Wrapper '{w_lex}' is not a directory", {"wrapper_path": w_lex, "error": "NOT_A_DIRECTORY"})
+            elif wrapper_obs_map and w_lex in wrapper_obs_map:
+                exp = wrapper_obs_map[w_lex]
+                if exp.get("scan_status") != "OK":
+                    res = (False, f"WRAPPER_IDENTITY_CHANGED: Wrapper '{w_lex}' initial scan status was not OK", {"wrapper_path": w_lex})
+                elif (
+                    st_w.st_dev != exp.get("device")
+                    or st_w.st_ino != exp.get("inode")
+                ):
+                    res = (
+                        False,
+                        f"WRAPPER_IDENTITY_CHANGED: Wrapper '{w_lex}' physical identity changed",
+                        {
+                            "wrapper_path": w_lex,
+                            "expected_device": exp.get("device"),
+                            "current_device": st_w.st_dev,
+                            "expected_inode": exp.get("inode"),
+                            "current_inode": st_w.st_ino,
+                        },
+                    )
+                else:
+                    res = (True, "", {})
+            else:
+                res = (True, "", {})
+        except FileNotFoundError:
+            res = (False, f"WRAPPER_IDENTITY_CHANGED: Wrapper '{w_lex}' does not exist", {"wrapper_path": w_lex, "error": "WRAPPER_MISSING"})
+        except OSError as e:
+            res = (False, f"WRAPPER_IDENTITY_CHANGED: Failed to access wrapper '{w_lex}': {e}", {"wrapper_path": w_lex, "errno": getattr(e, "errno", None)})
+
+        cached_wrapper_status[w_lex] = res
+        return res
 
     # Phase A: Fresh no-follow source observation & authority revalidation
     source_blocked_paths: set[str] = set()
@@ -190,31 +238,47 @@ def resolve_flatten_graph(
         src_p = Path(src_lex)
         is_blocked = False
 
+        # 0. Wrapper continuity check
+        if item.wrapper_path:
+            w_ok, w_reason, w_details = _check_wrapper(item.wrapper_path)
+            if not w_ok:
+                conflicts.append(
+                    BlockingConflict(
+                        source_path=src_lex,
+                        target_path=tgt_lex,
+                        conflict_type="WRAPPER_IDENTITY_CHANGED",
+                        reason=w_reason,
+                        details={"source_path": src_lex, **w_details},
+                    )
+                )
+                is_blocked = True
+
         # 1. Fresh no-follow observation via lstat
-        try:
-            st_src = _lstat(src_lex)
-        except FileNotFoundError:
-            conflicts.append(
-                BlockingConflict(
-                    source_path=src_lex,
-                    target_path=tgt_lex,
-                    conflict_type="SOURCE_MISSING",
-                    reason="SOURCE_MISSING",
-                    details={"source_path": src_lex, "error": "SOURCE_MISSING"},
+        if not is_blocked:
+            try:
+                st_src = _lstat(src_lex)
+            except FileNotFoundError:
+                conflicts.append(
+                    BlockingConflict(
+                        source_path=src_lex,
+                        target_path=tgt_lex,
+                        conflict_type="SOURCE_MISSING",
+                        reason="SOURCE_MISSING",
+                        details={"source_path": src_lex, "error": "SOURCE_MISSING"},
+                    )
                 )
-            )
-            is_blocked = True
-        except OSError as e:
-            conflicts.append(
-                BlockingConflict(
-                    source_path=src_lex,
-                    target_path=tgt_lex,
-                    conflict_type="SOURCE_INACCESSIBLE",
-                    reason=f"SOURCE_INACCESSIBLE: Failed to stat source path '{src_lex}': {e}",
-                    details={"source_path": src_lex, "errno": getattr(e, "errno", None)},
+                is_blocked = True
+            except OSError as e:
+                conflicts.append(
+                    BlockingConflict(
+                        source_path=src_lex,
+                        target_path=tgt_lex,
+                        conflict_type="SOURCE_INACCESSIBLE",
+                        reason=f"SOURCE_INACCESSIBLE: Failed to stat source path '{src_lex}': {e}",
+                        details={"source_path": src_lex, "errno": getattr(e, "errno", None)},
+                    )
                 )
-            )
-            is_blocked = True
+                is_blocked = True
 
         # 2. Symlink check on source
         if not is_blocked:
@@ -267,6 +331,44 @@ def resolve_flatten_graph(
                             conflict_type="SOURCE_TYPE_CHANGED",
                             reason=f"SOURCE_TYPE_CHANGED: File source '{src_lex}' mutated to non-file",
                             details={"source_path": src_lex, "expected_type": "file", "current_type": "directory" if is_dir else "unsupported"},
+                        )
+                    )
+                    is_blocked = True
+
+        # 3.5 Physical identity continuity verification against discovery candidate
+        if not is_blocked:
+            if item.device != 0 or item.inode != 0 or item.mtime_ns != 0:
+                is_reg = stat.S_ISREG(st_src.st_mode)
+                is_dir = stat.S_ISDIR(st_src.st_mode)
+                mismatch_fields = []
+                if st_src.st_dev != item.device:
+                    mismatch_fields.append("device")
+                if st_src.st_ino != item.inode:
+                    mismatch_fields.append("inode")
+                if st_src.st_mtime_ns != item.mtime_ns:
+                    mismatch_fields.append("mtime_ns")
+                if is_reg and st_src.st_size != item.size:
+                    mismatch_fields.append("size")
+
+                if mismatch_fields:
+                    conflicts.append(
+                        BlockingConflict(
+                            source_path=src_lex,
+                            target_path=tgt_lex,
+                            conflict_type="SOURCE_IDENTITY_CHANGED",
+                            reason=f"SOURCE_IDENTITY_CHANGED: Physical identity of source '{src_lex}' changed since discovery ({', '.join(mismatch_fields)})",
+                            details={
+                                "source_path": src_lex,
+                                "mismatch_fields": mismatch_fields,
+                                "expected_device": item.device,
+                                "current_device": st_src.st_dev,
+                                "expected_inode": item.inode,
+                                "current_inode": st_src.st_ino,
+                                "expected_mtime_ns": item.mtime_ns,
+                                "current_mtime_ns": st_src.st_mtime_ns,
+                                "expected_size": item.size,
+                                "current_size": st_src.st_size,
+                            },
                         )
                     )
                     is_blocked = True

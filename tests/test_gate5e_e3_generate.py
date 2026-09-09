@@ -384,3 +384,172 @@ def test_generate_flatten_source_missing_race_raises_409(api_test_env):
             plans = session.query(BatchPlan).all()
             assert len(plans) == 0
 
+
+def test_generate_flatten_same_type_source_replacement_race_raises_409(api_test_env):
+    """Section 7 API regression:
+    1. Preview old file normally (W/same.bin, regular file, size=4, content=AAAA).
+    2. During Generate: replace source after discovery but before graph (content=BBBB, size=4, different identity).
+    Expected: HTTP 409 PREVIEW_CHANGED, 0 Draft.
+    """
+    import os
+    from unittest.mock import patch
+    from app.batch_utilities import compiler as compiler_module
+
+    client = api_test_env["client"]
+    service = api_test_env["service"]
+    root = api_test_env["root1_path"]
+    wrapper = root / "w_same_type_race"
+    wrapper.mkdir()
+    same_bin = wrapper / "same.bin"
+    same_bin.write_bytes(b"AAAA")  # size = 4
+
+    action = {
+        "type": "flatten_one_level",
+        "wrapper_paths": [str(wrapper)]
+    }
+
+    # 1. Preview old file normally
+    resp_prev = client.post("/api/batch-utilities/preview", json={"action": action})
+    assert resp_prev.status_code == 200
+    preview_digest = resp_prev.json()["preview_digest"]
+
+    # 2. Race hook: during Generate Phase A, discovery observes the original source,
+    # then immediately before graph resolution, same.bin is replaced by another regular file (BBBB, size 4)
+    orig_discover = compiler_module.discover_flatten_one_level
+
+    def racing_discover(wrapper_paths):
+        cands, errs = orig_discover(wrapper_paths)
+        # File is replaced after discovery but before graph resolution
+        same_bin.unlink()
+        same_bin.write_bytes(b"BBBB")
+        new_mtime = cands[0].mtime_ns + 5_000_000
+        os.utime(same_bin, ns=(new_mtime, new_mtime))
+        return cands, errs
+
+    with patch("app.batch_utilities.compiler.discover_flatten_one_level", side_effect=racing_discover):
+        req = {
+            "action": action,
+            "expected_preview_digest": preview_digest
+        }
+        resp = client.post("/api/batch-utilities/generate-plan", json=req)
+        assert resp.status_code == 409
+        err = resp.json()["error"]
+        assert err["code"] == "PREVIEW_CHANGED"
+
+        # Verify zero Draft plans created in DB
+        with service.SessionLocal() as session:
+            plans = session.query(BatchPlan).all()
+            assert len(plans) == 0
+
+
+def test_generate_flatten_wrapper_symlink_swap_race_raises_409(api_test_env):
+    """Section 8 API regression:
+    Preview: W is normal directory.
+    During Generate:
+    after discovery / wrapper identity observation and before graph,
+    replace W with symlink to another directory inside the SAME allowed root.
+    Expected: HTTP 409 PREVIEW_CHANGED, 0 Draft.
+    """
+    import os
+    import shutil
+    from unittest.mock import patch
+    from app.batch_utilities import compiler as compiler_module
+
+    client = api_test_env["client"]
+    service = api_test_env["service"]
+    root = api_test_env["root1_path"]
+    wrapper = root / "w_symlink_race"
+    wrapper.mkdir()
+    (wrapper / "a.txt").write_text("file in W")
+
+    other = root / "other_dir"
+    other.mkdir()
+    (other / "a.txt").write_text("file in other")
+
+    action = {
+        "type": "flatten_one_level",
+        "wrapper_paths": [str(wrapper)]
+    }
+
+    # 1. Preview W normally
+    resp_prev = client.post("/api/batch-utilities/preview", json={"action": action})
+    assert resp_prev.status_code == 200
+    preview_digest = resp_prev.json()["preview_digest"]
+
+    # 2. Race hook: after discovery / wrapper observation but before graph, replace W with W -> other
+    orig_discover = compiler_module.discover_flatten_one_level
+
+    def racing_discover(wrapper_paths):
+        cands, errs = orig_discover(wrapper_paths)
+        shutil.rmtree(wrapper)
+        os.symlink(str(other), str(wrapper))
+        return cands, errs
+
+    with patch("app.batch_utilities.compiler.discover_flatten_one_level", side_effect=racing_discover):
+        req = {
+            "action": action,
+            "expected_preview_digest": preview_digest
+        }
+        resp = client.post("/api/batch-utilities/generate-plan", json=req)
+        assert resp.status_code == 409
+        err = resp.json()["error"]
+        assert err["code"] == "PREVIEW_CHANGED"
+
+        # Verify zero Draft plans and zero items created in DB
+        with service.SessionLocal() as session:
+            plans = session.query(BatchPlan).all()
+            assert len(plans) == 0
+
+
+def test_generate_flatten_wrapper_replaced_by_different_directory_race_raises_409(api_test_env):
+    """Section 8 additional API regression:
+    Wrapper replaced by a different real directory identity (new inode).
+    Expected: HTTP 409 PREVIEW_CHANGED, 0 Draft.
+    """
+    import shutil
+    from unittest.mock import patch
+    from app.batch_utilities import compiler as compiler_module
+
+    client = api_test_env["client"]
+    service = api_test_env["service"]
+    root = api_test_env["root1_path"]
+    wrapper = root / "w_replaced_dir_race"
+    wrapper.mkdir()
+    (wrapper / "a.txt").write_text("file in W")
+
+    action = {
+        "type": "flatten_one_level",
+        "wrapper_paths": [str(wrapper)]
+    }
+
+    resp_prev = client.post("/api/batch-utilities/preview", json={"action": action})
+    assert resp_prev.status_code == 200
+    preview_digest = resp_prev.json()["preview_digest"]
+
+    import os
+    orig_discover = compiler_module.discover_flatten_one_level
+
+    def racing_discover(wrapper_paths):
+        cands, errs = orig_discover(wrapper_paths)
+        w2 = root / "w_new"
+        w2.mkdir()
+        (w2 / "a.txt").write_text("file in new W")
+        shutil.rmtree(wrapper)
+        os.rename(str(w2), str(wrapper))
+        return cands, errs
+
+    with patch("app.batch_utilities.compiler.discover_flatten_one_level", side_effect=racing_discover):
+        req = {
+            "action": action,
+            "expected_preview_digest": preview_digest
+        }
+        resp = client.post("/api/batch-utilities/generate-plan", json=req)
+        assert resp.status_code == 409
+        err = resp.json()["error"]
+        assert err["code"] == "PREVIEW_CHANGED"
+
+        with service.SessionLocal() as session:
+            plans = session.query(BatchPlan).all()
+            assert len(plans) == 0
+
+

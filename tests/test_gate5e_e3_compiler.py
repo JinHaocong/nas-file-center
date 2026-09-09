@@ -576,3 +576,190 @@ def test_compiler_source_type_race_directory_to_file(tmp_path):
         assert comp.rows[0]["decision"] == "BLOCKING_CONFLICT"
         assert comp.rows[0]["reason_code"] == "SOURCE_TYPE_CHANGED"
 
+
+def test_compiler_same_type_source_replacement_blocked(tmp_path):
+    """Section 7 Regression:
+    1. create W/same.bin as regular file
+    2. perform real discovery
+    3. preserve discovery candidate
+    4. replace same.bin with a different regular file
+    5. keep same basename and same size
+    6. ensure mtime_ns and/or physical identity differs
+    7. run graph/compiler
+    Expected: 0 ordered items, 0 Draft intents, BLOCKING_CONFLICT, SOURCE_IDENTITY_CHANGED
+    """
+    import os
+    from unittest.mock import patch
+    from app.batch_utilities import flatten_graph as flatten_graph_module
+
+    root = tmp_path / "root"
+    wrapper = root / "W"
+    wrapper.mkdir(parents=True)
+    same_bin = wrapper / "same.bin"
+    same_bin.write_bytes(b"AAAA")  # size = 4
+
+    action = FlattenOneLevelAction(
+        type="flatten_one_level",
+        wrapper_paths=[str(wrapper)]
+    )
+    snapshot = BatchUtilitySafetySnapshot(
+        protect_last_file=True,
+        allowed_roots=(root,),
+        quarantine_root=None,
+        effective_policy={},
+    )
+
+    orig_resolve_graph = flatten_graph_module.resolve_flatten_graph
+
+    def racing_resolve_graph(*args, **kwargs):
+        # File is replaced after discovery and wrapper observation, but before graph
+        st_before = os.lstat(same_bin)
+        same_bin.unlink()
+        same_bin.write_bytes(b"BBBB")  # size remains 4
+        new_mtime = st_before.st_mtime_ns + 5_000_000
+        os.utime(same_bin, ns=(new_mtime, new_mtime))
+        return orig_resolve_graph(*args, **kwargs)
+
+    with patch("app.batch_utilities.compiler.resolve_flatten_graph", side_effect=racing_resolve_graph):
+        comp = compile_flatten_one_level_preview(session=None, action=action, safety_snapshot=snapshot)
+        assert comp.planned_operations_count == 0
+        assert len(comp.intents) == 0
+        assert len(comp.rows) == 1
+        assert comp.rows[0]["decision"] == "BLOCKING_CONFLICT"
+        assert comp.rows[0]["reason_code"] == "SOURCE_IDENTITY_CHANGED"
+        assert "SOURCE_IDENTITY_CHANGED" in comp.rows[0]["reason"]
+
+
+def test_compiler_wrapper_symlink_swap_blocked(tmp_path):
+    """Section 8 Regression:
+    Preview: W is normal directory.
+    During Generate / graph:
+    after discovery / wrapper identity observation and before graph,
+    replace W with symlink to another directory inside the SAME allowed root.
+    Expected: 0 safe ordered items, 0 Draft, BLOCKING_CONFLICT, WRAPPER_IDENTITY_CHANGED
+    """
+    import os
+    import shutil
+    from unittest.mock import patch
+    from app.batch_utilities import flatten_graph as flatten_graph_module
+
+    root = tmp_path / "root"
+    wrapper = root / "W"
+    wrapper.mkdir(parents=True)
+    (wrapper / "a.txt").write_text("file in W")
+
+    other = root / "Other"
+    other.mkdir(parents=True)
+    (other / "a.txt").write_text("file in Other")
+
+    action = FlattenOneLevelAction(
+        type="flatten_one_level",
+        wrapper_paths=[str(wrapper)]
+    )
+    snapshot = BatchUtilitySafetySnapshot(
+        protect_last_file=True,
+        allowed_roots=(root,),
+        quarantine_root=None,
+        effective_policy={},
+    )
+
+    orig_resolve_graph = flatten_graph_module.resolve_flatten_graph
+
+    def racing_resolve_graph(*args, **kwargs):
+        # Swap after discovery and wrapper observation, immediately before graph
+        shutil.rmtree(wrapper)
+        os.symlink(str(other), str(wrapper))
+        return orig_resolve_graph(*args, **kwargs)
+
+    with patch("app.batch_utilities.compiler.resolve_flatten_graph", side_effect=racing_resolve_graph):
+        comp = compile_flatten_one_level_preview(session=None, action=action, safety_snapshot=snapshot)
+        assert comp.planned_operations_count == 0
+        assert len(comp.intents) == 0
+        assert len(comp.rows) == 1
+        assert comp.rows[0]["decision"] == "BLOCKING_CONFLICT"
+        assert comp.rows[0]["reason_code"] == "WRAPPER_IDENTITY_CHANGED"
+
+
+def test_compiler_wrapper_replaced_by_different_directory_blocked(tmp_path):
+    """Test wrapper replaced by a different real directory identity, not only symlink."""
+    import os
+    import shutil
+    from unittest.mock import patch
+    from app.batch_utilities import flatten_graph as flatten_graph_module
+
+    root = tmp_path / "root"
+    wrapper = root / "W"
+    wrapper.mkdir(parents=True)
+    (wrapper / "a.txt").write_text("file in original W")
+
+    action = FlattenOneLevelAction(
+        type="flatten_one_level",
+        wrapper_paths=[str(wrapper)]
+    )
+    snapshot = BatchUtilitySafetySnapshot(
+        protect_last_file=True,
+        allowed_roots=(root,),
+        quarantine_root=None,
+        effective_policy={},
+    )
+
+    orig_resolve_graph = flatten_graph_module.resolve_flatten_graph
+
+    def racing_resolve_graph(*args, **kwargs):
+        # Re-create W as a different directory identity (new inode)
+        w2 = root / "W_new"
+        w2.mkdir(parents=True)
+        (w2 / "a.txt").write_text("file in new W")
+        shutil.rmtree(wrapper)
+        os.rename(str(w2), str(wrapper))
+        return orig_resolve_graph(*args, **kwargs)
+
+    with patch("app.batch_utilities.compiler.resolve_flatten_graph", side_effect=racing_resolve_graph):
+        comp = compile_flatten_one_level_preview(session=None, action=action, safety_snapshot=snapshot)
+        assert comp.planned_operations_count == 0
+        assert len(comp.intents) == 0
+        assert len(comp.rows) == 1
+        assert comp.rows[0]["decision"] == "BLOCKING_CONFLICT"
+        assert comp.rows[0]["reason_code"] == "WRAPPER_IDENTITY_CHANGED"
+
+
+def test_compiler_directory_source_replacement_blocked(tmp_path):
+    """Test directory candidate physical identity mismatch."""
+    import shutil
+    from unittest.mock import patch
+    from app.batch_utilities import flatten_graph as flatten_graph_module
+
+    root = tmp_path / "root"
+    wrapper = root / "W"
+    wrapper.mkdir(parents=True)
+    sub = wrapper / "sub"
+    sub.mkdir()
+
+    action = FlattenOneLevelAction(
+        type="flatten_one_level",
+        wrapper_paths=[str(wrapper)]
+    )
+    snapshot = BatchUtilitySafetySnapshot(
+        protect_last_file=True,
+        allowed_roots=(root,),
+        quarantine_root=None,
+        effective_policy={},
+    )
+
+    orig_resolve_graph = flatten_graph_module.resolve_flatten_graph
+
+    def racing_resolve_graph(*args, **kwargs):
+        # Replace sub with a new directory (new inode)
+        shutil.rmtree(sub)
+        sub.mkdir()
+        return orig_resolve_graph(*args, **kwargs)
+
+    with patch("app.batch_utilities.compiler.resolve_flatten_graph", side_effect=racing_resolve_graph):
+        comp = compile_flatten_one_level_preview(session=None, action=action, safety_snapshot=snapshot)
+        assert comp.planned_operations_count == 0
+        assert len(comp.intents) == 0
+        assert len(comp.rows) == 1
+        assert comp.rows[0]["decision"] == "BLOCKING_CONFLICT"
+        assert comp.rows[0]["reason_code"] == "SOURCE_IDENTITY_CHANGED"
+
+

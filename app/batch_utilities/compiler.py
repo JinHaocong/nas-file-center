@@ -70,6 +70,7 @@ class BatchUtilityDraftIntent:
 CONFLICT_PRIORITY_RANK: dict[str, int] = {
     "TARGET_SYMLINK": 1,
     "WRAPPER_CHILD_SYMLINK": 1,
+    "WRAPPER_IDENTITY_CHANGED": 1,
     "TARGET_OUTSIDE_ALLOWED_ROOT": 2,
     "SOURCE_OUTSIDE_ALLOWED_ROOT": 2,
     "CROSS_ROOT": 2,
@@ -85,6 +86,7 @@ CONFLICT_PRIORITY_RANK: dict[str, int] = {
     "SOURCE_MISSING": 5,
     "SOURCE_INACCESSIBLE": 5,
     "SOURCE_TYPE_CHANGED": 5,
+    "SOURCE_IDENTITY_CHANGED": 5,
 }
 
 
@@ -1424,13 +1426,22 @@ def compile_flatten_one_level_preview(
     for w_lex in canonical_wrappers:
         try:
             st = os.lstat(w_lex)
-            wrapper_observations.append({
-                "wrapper_path": w_lex,
-                "device": st.st_dev,
-                "inode": st.st_ino,
-                "mtime_ns": st.st_mtime_ns,
-                "scan_status": "OK",
-            })
+            if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
+                wrapper_observations.append({
+                    "wrapper_path": w_lex,
+                    "device": st.st_dev,
+                    "inode": st.st_ino,
+                    "mtime_ns": st.st_mtime_ns,
+                    "scan_status": "FAILED",
+                })
+            else:
+                wrapper_observations.append({
+                    "wrapper_path": w_lex,
+                    "device": st.st_dev,
+                    "inode": st.st_ino,
+                    "mtime_ns": st.st_mtime_ns,
+                    "scan_status": "OK",
+                })
         except OSError:
             wrapper_observations.append({
                 "wrapper_path": w_lex,
@@ -1464,6 +1475,7 @@ def compile_flatten_one_level_preview(
         items=items,
         allowed_roots=safety_snapshot.allowed_roots,
         quarantine_root=safety_snapshot.quarantine_root,
+        wrapper_observations=wrapper_observations,
     )
 
     decision_rows = []
