@@ -332,3 +332,55 @@ def test_generate_flatten_source_outside_allowed_roots_raises_cross_root(api_tes
         with service.SessionLocal() as session:
             plans = session.query(BatchPlan).all()
             assert len(plans) == 0
+
+
+def test_generate_flatten_source_missing_race_raises_409(api_test_env):
+    """Test D: Generate Phase A with a racing discovery where source disappears before graph resolution.
+    Expected: 409 structured blocking response, 0 Draft.
+    """
+    from unittest.mock import patch
+    from app.batch_utilities.flatten import discover_flatten_one_level
+    client = api_test_env["client"]
+    service = api_test_env["service"]
+    root = api_test_env["root1_path"]
+    wrapper = root / "racing_w"
+    wrapper.mkdir()
+    gone_file = wrapper / "gone.txt"
+    gone_file.write_text("temporary")
+
+    action = {
+        "type": "flatten_one_level",
+        "wrapper_paths": [str(wrapper)]
+    }
+
+    # Real discovery observes gone.txt
+    cands, errs = discover_flatten_one_level(wrapper_paths=[str(wrapper)])
+    assert len(cands) == 1
+
+    # Source disappears before graph resolution
+    gone_file.unlink()
+
+    # Generate Phase A with racing discovery where source disappeared before graph resolution
+    with patch("app.batch_utilities.compiler.discover_flatten_one_level", return_value=(cands, errs)):
+        resp_prev = client.post("/api/batch-utilities/preview", json={"action": action})
+        assert resp_prev.status_code == 200
+        preview_digest = resp_prev.json()["preview_digest"]
+
+        req = {
+            "action": action,
+            "expected_preview_digest": preview_digest
+        }
+        resp = client.post("/api/batch-utilities/generate-plan", json=req)
+        assert resp.status_code == 409
+        err = resp.json()["error"]
+        assert err["code"] == "BATCH_UTILITY_CONFLICT"
+        assert err["details"]["blocking_conflict_count"] == 1
+        conflicts = err["details"]["conflicts"]
+        assert len(conflicts) == 1
+        assert conflicts[0]["source_path"] == str(gone_file)
+        assert conflicts[0]["reason_code"] == "SOURCE_MISSING"
+
+        with service.SessionLocal() as session:
+            plans = session.query(BatchPlan).all()
+            assert len(plans) == 0
+

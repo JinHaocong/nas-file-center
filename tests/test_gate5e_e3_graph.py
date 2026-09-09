@@ -7,6 +7,7 @@ def test_resolve_flatten_graph_success(tmp_path):
     root = tmp_path / "root"
     wrapper = root / "wrapper"
     wrapper.mkdir(parents=True)
+    (wrapper / "a.txt").write_text("a")
     
     items = [
         TargetItemCandidate(
@@ -36,6 +37,10 @@ def test_resolve_flatten_graph_collision(tmp_path):
     root = tmp_path / "root"
     wrapper1 = root / "wrapper1"
     wrapper2 = root / "wrapper2"
+    wrapper1.mkdir(parents=True)
+    wrapper2.mkdir(parents=True)
+    (wrapper1 / "a.txt").write_text("1")
+    (wrapper2 / "a.txt").write_text("2")
     
     items = [
         TargetItemCandidate(
@@ -74,6 +79,7 @@ def test_casefold_existing_sibling_collision(tmp_path):
     wrapper.mkdir(parents=True)
     # Existing sibling with different case
     (root / "A.JPG").write_text("existing")
+    (wrapper / "a.jpg").write_text("src")
     
     items = [
         TargetItemCandidate(
@@ -111,6 +117,8 @@ def test_casefold_planned_vs_planned_collision(tmp_path):
     w2 = root / "w2"
     w1.mkdir(parents=True)
     w2.mkdir(parents=True)
+    (w1 / "File.TXT").write_text("1")
+    (w2 / "file.txt").write_text("2")
     
     items = [
         TargetItemCandidate(
@@ -158,6 +166,7 @@ def test_casefold_scandir_oserror_fails_closed(tmp_path):
     root = tmp_path / "root"
     wrapper = root / "wrapper"
     wrapper.mkdir(parents=True)
+    (wrapper / "a.txt").write_text("a")
     
     items = [
         TargetItemCandidate(
@@ -194,6 +203,7 @@ def test_dependency_edges_and_vacating_occupant(tmp_path):
     root = tmp_path / "root"
     w1 = root / "w1"
     w1.mkdir(parents=True)
+    (w1 / "a.txt").write_text("a")
     # Target b.txt exists on disk
     (root / "b.txt").write_text("occupant")
     
@@ -291,6 +301,7 @@ def test_blocked_occupant_propagation(tmp_path):
     root = tmp_path / "root"
     w1 = root / "w1"
     w1.mkdir(parents=True)
+    (w1 / "a.txt").write_text("a")
     # root/b.txt exists, and root/c.txt exists (static occupant)
     (root / "b.txt").write_text("occupant1")
     (root / "c.txt").write_text("occupant2_static")
@@ -342,6 +353,9 @@ def test_stable_topo_sort(tmp_path):
     root = tmp_path / "root"
     wrapper = root / "wrapper"
     wrapper.mkdir(parents=True)
+    (wrapper / "z.txt").write_text("z")
+    (wrapper / "m.txt").write_text("m")
+    (wrapper / "a.txt").write_text("a")
     
     items = [
         TargetItemCandidate(

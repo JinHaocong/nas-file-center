@@ -179,12 +179,157 @@ def resolve_flatten_graph(
     _scandir = scandir_func or os.scandir
     conflicts: list[BlockingConflict] = []
 
-    # 1. Map items by resolved physical source to detect duplicate physical sources
+    # Phase A: Fresh no-follow source observation & authority revalidation
+    source_blocked_paths: set[str] = set()
+    item_res_sources: dict[str, str] = {}
     items_by_resolved_source: dict[str, list[TargetItemCandidate]] = defaultdict(list)
-    for item in items:
-        res_src = _resolve_physical_source(item)
-        items_by_resolved_source[res_src].append(item)
 
+    for item in items:
+        src_lex = item.source_path
+        tgt_lex = item.target_path
+        src_p = Path(src_lex)
+        is_blocked = False
+
+        # 1. Fresh no-follow observation via lstat
+        try:
+            st_src = _lstat(src_lex)
+        except FileNotFoundError:
+            conflicts.append(
+                BlockingConflict(
+                    source_path=src_lex,
+                    target_path=tgt_lex,
+                    conflict_type="SOURCE_MISSING",
+                    reason="SOURCE_MISSING",
+                    details={"source_path": src_lex, "error": "SOURCE_MISSING"},
+                )
+            )
+            is_blocked = True
+        except OSError as e:
+            conflicts.append(
+                BlockingConflict(
+                    source_path=src_lex,
+                    target_path=tgt_lex,
+                    conflict_type="SOURCE_INACCESSIBLE",
+                    reason=f"SOURCE_INACCESSIBLE: Failed to stat source path '{src_lex}': {e}",
+                    details={"source_path": src_lex, "errno": getattr(e, "errno", None)},
+                )
+            )
+            is_blocked = True
+
+        # 2. Symlink check on source
+        if not is_blocked:
+            if stat.S_ISLNK(st_src.st_mode):
+                conflicts.append(
+                    BlockingConflict(
+                        source_path=src_lex,
+                        target_path=tgt_lex,
+                        conflict_type="WRAPPER_CHILD_SYMLINK",
+                        reason=f"Source path '{src_lex}' is a symlink",
+                        details={"source_path": src_lex},
+                    )
+                )
+                is_blocked = True
+
+        # 3. Object type verification & type race detection
+        if not is_blocked:
+            is_reg = stat.S_ISREG(st_src.st_mode)
+            is_dir = stat.S_ISDIR(st_src.st_mode)
+            if not (is_reg or is_dir):
+                conflicts.append(
+                    BlockingConflict(
+                        source_path=src_lex,
+                        target_path=tgt_lex,
+                        conflict_type="UNSUPPORTED_OBJECT",
+                        reason=f"UNSUPPORTED_OBJECT: Source '{src_lex}' is neither regular file nor directory",
+                        details={"source_path": src_lex, "mode": st_src.st_mode},
+                    )
+                )
+                is_blocked = True
+            elif item.is_dir or (item.object_type == "directory"):
+                if not is_dir:
+                    conflicts.append(
+                        BlockingConflict(
+                            source_path=src_lex,
+                            target_path=tgt_lex,
+                            conflict_type="SOURCE_TYPE_CHANGED",
+                            reason=f"SOURCE_TYPE_CHANGED: Directory source '{src_lex}' mutated to non-directory",
+                            details={"source_path": src_lex, "expected_type": "directory", "current_type": "file" if is_reg else "unsupported"},
+                        )
+                    )
+                    is_blocked = True
+            else:
+                # Discovery candidate observed regular file
+                if not is_reg:
+                    conflicts.append(
+                        BlockingConflict(
+                            source_path=src_lex,
+                            target_path=tgt_lex,
+                            conflict_type="SOURCE_TYPE_CHANGED",
+                            reason=f"SOURCE_TYPE_CHANGED: File source '{src_lex}' mutated to non-file",
+                            details={"source_path": src_lex, "expected_type": "file", "current_type": "directory" if is_dir else "unsupported"},
+                        )
+                    )
+                    is_blocked = True
+
+        # 4. Strict physical resolution: resolve(strict=True)
+        if not is_blocked:
+            try:
+                res_src = str(src_p.expanduser().resolve(strict=True))
+            except FileNotFoundError:
+                conflicts.append(
+                    BlockingConflict(
+                        source_path=src_lex,
+                        target_path=tgt_lex,
+                        conflict_type="SOURCE_MISSING",
+                        reason="SOURCE_MISSING",
+                        details={"source_path": src_lex, "error": "SOURCE_MISSING"},
+                    )
+                )
+                is_blocked = True
+            except OSError as e:
+                conflicts.append(
+                    BlockingConflict(
+                        source_path=src_lex,
+                        target_path=tgt_lex,
+                        conflict_type="SOURCE_INACCESSIBLE",
+                        reason=f"SOURCE_INACCESSIBLE: Failed to resolve source path '{src_lex}': {e}",
+                        details={"source_path": src_lex, "errno": getattr(e, "errno", None)},
+                    )
+                )
+                is_blocked = True
+
+        # 5. Check allowed roots & quarantine containment
+        if not is_blocked:
+            if quarantine_root and is_reserved_quarantine_path(res_src, quarantine_root):
+                conflicts.append(
+                    BlockingConflict(
+                        source_path=src_lex,
+                        target_path=tgt_lex,
+                        conflict_type="TARGET_OUTSIDE_ALLOWED_ROOT",
+                        reason=f"Resolved source path '{res_src}' is within reserved quarantine storage",
+                        details={"source_path": src_lex, "resolved_source_path": res_src},
+                    )
+                )
+                is_blocked = True
+            elif not is_path_allowed(res_src, allowed_roots):
+                conflicts.append(
+                    BlockingConflict(
+                        source_path=src_lex,
+                        target_path=tgt_lex,
+                        conflict_type="TARGET_OUTSIDE_ALLOWED_ROOT",
+                        reason=f"Resolved source path '{res_src}' is outside allowed roots",
+                        details={"source_path": src_lex, "resolved_source_path": res_src},
+                    )
+                )
+                is_blocked = True
+
+        if is_blocked:
+            source_blocked_paths.add(src_lex)
+        else:
+            item_res_sources[src_lex] = res_src
+            items_by_resolved_source[res_src].append(item)
+
+    # Detect duplicate physical sources among valid candidates
     for res_src, cands in items_by_resolved_source.items():
         if len(cands) > 1:
             sources = sorted(c.source_path for c in cands)
@@ -198,72 +343,22 @@ def resolve_flatten_graph(
                         details={"resolved_source_path": res_src, "colliding_sources": sources},
                     )
                 )
+                source_blocked_paths.add(cand.source_path)
 
-    # 2. Target validation via validate_mutation_destination & canonical target resolution
+    # Phase B: Target validation via validate_mutation_destination & canonical target resolution
     resolved_targets_by_src: dict[str, str] = {}
     effective_items: list[TargetItemCandidate] = []
 
     for item in items:
+        src_lex = item.source_path
         tgt_lex = item.target_path
         tgt_p = Path(tgt_lex)
-        src_lex = item.source_path
-        src_p = Path(src_lex)
 
-        # Source physical authority validation
-        source_blocked = False
-        if item.resolved_source_path:
-            res_src = item.resolved_source_path
-        else:
-            try:
-                res_src = str(src_p.expanduser().resolve(strict=True))
-            except (FileNotFoundError, OSError):
-                res_src = str(src_p.expanduser().resolve(strict=False))
-
-        # Lexical symlink check on source
-        try:
-            st_src_lex = _lstat(src_lex)
-            if stat.S_ISLNK(st_src_lex.st_mode):
-                conflicts.append(
-                    BlockingConflict(
-                        source_path=src_lex,
-                        target_path=item.target_path,
-                        conflict_type="WRAPPER_CHILD_SYMLINK",
-                        reason=f"Source path '{src_lex}' is a symlink",
-                        details={"source_path": src_lex},
-                    )
-                )
-                source_blocked = True
-        except (FileNotFoundError, OSError):
-            pass
-
-        if not source_blocked and res_src:
-            if quarantine_root and is_reserved_quarantine_path(res_src, quarantine_root):
-                conflicts.append(
-                    BlockingConflict(
-                        source_path=src_lex,
-                        target_path=item.target_path,
-                        conflict_type="TARGET_OUTSIDE_ALLOWED_ROOT",
-                        reason=f"Resolved source path '{res_src}' is within reserved quarantine storage",
-                        details={"source_path": src_lex, "resolved_source_path": res_src},
-                    )
-                )
-                source_blocked = True
-            elif not is_path_allowed(res_src, allowed_roots):
-                conflicts.append(
-                    BlockingConflict(
-                        source_path=src_lex,
-                        target_path=item.target_path,
-                        conflict_type="TARGET_OUTSIDE_ALLOWED_ROOT",
-                        reason=f"Resolved source path '{res_src}' is outside allowed roots",
-                        details={"source_path": src_lex, "resolved_source_path": res_src},
-                    )
-                )
-                source_blocked = True
-
-        if source_blocked:
-            resolved_targets_by_src[item.source_path] = str(tgt_p)
-            effective_items.append(item)
+        # Skip items whose source was blocked during Phase A
+        if src_lex in source_blocked_paths:
             continue
+
+        res_src = item_res_sources[src_lex]
 
         # Lexical symlink check on target
         is_link = False
@@ -277,14 +372,14 @@ def resolve_flatten_graph(
         if is_link:
             conflicts.append(
                 BlockingConflict(
-                    source_path=item.source_path,
-                    target_path=item.target_path,
+                    source_path=src_lex,
+                    target_path=tgt_lex,
                     conflict_type="TARGET_SYMLINK",
                     reason=f"Target path '{tgt_lex}' already exists as a symlink",
                     details={"target_path": tgt_lex},
                 )
             )
-            resolved_targets_by_src[item.source_path] = str(tgt_p)
+            resolved_targets_by_src[src_lex] = str(tgt_p)
             effective_items.append(item)
             continue
 
@@ -295,7 +390,7 @@ def resolve_flatten_graph(
                 quarantine_root=quarantine_root,
             )
             canon_tgt = str(canon_p)
-            resolved_targets_by_src[item.source_path] = canon_tgt
+            resolved_targets_by_src[src_lex] = canon_tgt
 
             # Check source and target belong to same containing root
             src_root = next((r for r in allowed_roots if Path(res_src).is_relative_to(r)), None)
@@ -304,7 +399,7 @@ def resolve_flatten_graph(
                 conflicts.append(
                     BlockingConflict(
                         source_path=src_lex,
-                        target_path=item.target_path,
+                        target_path=tgt_lex,
                         conflict_type="TARGET_OUTSIDE_ALLOWED_ROOT",
                         reason=f"Source '{res_src}' and target '{canon_tgt}' do not belong to the same containing root",
                         details={"source_path": src_lex, "resolved_source_path": res_src, "target_path": canon_tgt},

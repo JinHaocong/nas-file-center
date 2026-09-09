@@ -453,3 +453,126 @@ def test_compiler_candidate_source_escaped_symlink_race(tmp_path):
     assert len(comp.rows) == 1
     assert comp.rows[0]["decision"] == "BLOCKING_CONFLICT"
     assert comp.rows[0]["reason_code"] in ("WRAPPER_CHILD_SYMLINK", "TARGET_OUTSIDE_ALLOWED_ROOT")
+
+
+def test_compiler_source_missing_after_discovery(tmp_path):
+    """Test A: wrapper/W/gone.txt exists -> real discovery -> unlink gone.txt -> graph/compiler.
+    Expected: planned_operations_count = 0, no intent, BLOCKING_CONFLICT, reason = SOURCE_MISSING.
+    """
+    from unittest.mock import patch
+    from app.batch_utilities.flatten import discover_flatten_one_level
+    root = tmp_path / "root"
+    wrapper = root / "W"
+    wrapper.mkdir(parents=True)
+    gone_file = wrapper / "gone.txt"
+    gone_file.write_text("temporary")
+
+    # Real discovery
+    cands, errs = discover_flatten_one_level(wrapper_paths=[str(wrapper)])
+    assert len(cands) == 1
+
+    # Unlink after discovery
+    gone_file.unlink()
+
+    action = FlattenOneLevelAction(
+        type="flatten_one_level",
+        wrapper_paths=[str(wrapper)]
+    )
+    snapshot = BatchUtilitySafetySnapshot(
+        protect_last_file=True,
+        allowed_roots=(root,),
+        quarantine_root=None,
+        effective_policy={},
+    )
+
+    with patch("app.batch_utilities.compiler.discover_flatten_one_level", return_value=(cands, errs)):
+        comp = compile_flatten_one_level_preview(session=None, action=action, safety_snapshot=snapshot)
+        assert comp.planned_operations_count == 0
+        assert len(comp.intents) == 0
+        assert len(comp.rows) == 1
+        assert comp.rows[0]["decision"] == "BLOCKING_CONFLICT"
+        assert comp.rows[0]["reason_code"] == "SOURCE_MISSING"
+        assert comp.rows[0]["reason"] == "SOURCE_MISSING"
+
+
+def test_compiler_source_type_race_file_to_directory(tmp_path):
+    """Test B: wrapper/W/x exists as regular file -> real discovery -> replace x with directory -> graph/compiler.
+    Expected: 0 intent, blocking conflict.
+    """
+    from unittest.mock import patch
+    from app.batch_utilities.flatten import discover_flatten_one_level
+    root = tmp_path / "root"
+    wrapper = root / "W"
+    wrapper.mkdir(parents=True)
+    x_file = wrapper / "x"
+    x_file.write_text("regular file")
+
+    # Real discovery
+    cands, errs = discover_flatten_one_level(wrapper_paths=[str(wrapper)])
+    assert len(cands) == 1
+    assert cands[0].object_type == "file"
+
+    # Replace x with directory
+    x_file.unlink()
+    x_file.mkdir()
+
+    action = FlattenOneLevelAction(
+        type="flatten_one_level",
+        wrapper_paths=[str(wrapper)]
+    )
+    snapshot = BatchUtilitySafetySnapshot(
+        protect_last_file=True,
+        allowed_roots=(root,),
+        quarantine_root=None,
+        effective_policy={},
+    )
+
+    with patch("app.batch_utilities.compiler.discover_flatten_one_level", return_value=(cands, errs)):
+        comp = compile_flatten_one_level_preview(session=None, action=action, safety_snapshot=snapshot)
+        assert comp.planned_operations_count == 0
+        assert len(comp.intents) == 0
+        assert len(comp.rows) == 1
+        assert comp.rows[0]["decision"] == "BLOCKING_CONFLICT"
+        assert comp.rows[0]["reason_code"] == "SOURCE_TYPE_CHANGED"
+
+
+def test_compiler_source_type_race_directory_to_file(tmp_path):
+    """Test C: directory candidate -> replace with regular file after discovery.
+    Expected: 0 intent, blocking conflict.
+    """
+    from unittest.mock import patch
+    from app.batch_utilities.flatten import discover_flatten_one_level
+    root = tmp_path / "root"
+    wrapper = root / "W"
+    wrapper.mkdir(parents=True)
+    sub_dir = wrapper / "subdir"
+    sub_dir.mkdir()
+
+    # Real discovery
+    cands, errs = discover_flatten_one_level(wrapper_paths=[str(wrapper)])
+    assert len(cands) == 1
+    assert cands[0].object_type == "directory"
+
+    # Replace with regular file
+    sub_dir.rmdir()
+    sub_dir.write_text("now regular file")
+
+    action = FlattenOneLevelAction(
+        type="flatten_one_level",
+        wrapper_paths=[str(wrapper)]
+    )
+    snapshot = BatchUtilitySafetySnapshot(
+        protect_last_file=True,
+        allowed_roots=(root,),
+        quarantine_root=None,
+        effective_policy={},
+    )
+
+    with patch("app.batch_utilities.compiler.discover_flatten_one_level", return_value=(cands, errs)):
+        comp = compile_flatten_one_level_preview(session=None, action=action, safety_snapshot=snapshot)
+        assert comp.planned_operations_count == 0
+        assert len(comp.intents) == 0
+        assert len(comp.rows) == 1
+        assert comp.rows[0]["decision"] == "BLOCKING_CONFLICT"
+        assert comp.rows[0]["reason_code"] == "SOURCE_TYPE_CHANGED"
+
