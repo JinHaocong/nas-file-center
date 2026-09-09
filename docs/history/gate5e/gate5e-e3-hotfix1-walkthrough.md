@@ -103,3 +103,10 @@
    pytest -o addopts='' --disable-warnings -q
    # 930 passed, 0 failed
    ```
+
+## Deliverables & Identity
+- **Documentation**: `docs/history/gate5e/gate5e-e3-hotfix1-walkthrough.md`
+- **Source Snapshot ZIP**: `nas-file-center-v0.3.5-gate5e-e3-hotfix1.zip`
+- **Baseline HEAD**: `997b56774f85d74e0fa28f14313557ccbe8f8bed`
+- **Implementation HEAD**: `abb7123d625a5afac8afedc4583336c8b433d491`
+- **Final Repository HEAD**: Refer to git `FINAL_HEAD` (`git rev-parse HEAD`), matching ZIP Comment.
