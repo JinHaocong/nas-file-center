@@ -343,3 +343,73 @@ def test_preview_canonical_wrapper_ordering_digest_invariance(api_test_env):
     assert d1["source_snapshot_digest"] == d2["source_snapshot_digest"]
     assert d1["preview_digest"] == d2["preview_digest"]
 
+
+def test_preview_canonical_wrapper_symlink_dotdot_selection(api_test_env):
+    """E3-hotfix7 Regression:
+    Preview selects actual physical directory via symlink-sensitive dotdot traversal.
+    """
+    import os
+    client = api_test_env["client"]
+    root = api_test_env["root1_path"]
+
+    a_dir = root / "A"
+    b_dir = a_dir / "B"
+    b_dir.mkdir(parents=True)
+    w_intended = a_dir / "W"
+    w_intended.mkdir(parents=True)
+    (w_intended / "intended.txt").write_text("intended")
+
+    w_wrong = root / "W"
+    w_wrong.mkdir(parents=True)
+    (w_wrong / "wrong.txt").write_text("wrong")
+
+    link = root / "link"
+    os.symlink(str(b_dir), str(link))
+
+    wrapper_input = str(link) + "/../W"
+
+    resp = client.post(
+        "/api/batch-utilities/preview",
+        json={"action": {"type": "flatten_one_level", "wrapper_paths": [wrapper_input]}},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["candidate_count"] == 1
+    assert len(data["items"]) == 1
+    item = data["items"][0]
+    assert item["source_path"] == str(w_intended.resolve(strict=True) / "intended.txt")
+    assert item["wrapper_path"] == str(w_intended.resolve(strict=True))
+    assert item["target_path"] == str(a_dir.resolve(strict=True) / "intended.txt")
+
+
+def test_preview_canonical_wrapper_trailing_space_directory(api_test_env):
+    """E3-hotfix7 Regression:
+    Preview preserves valid trailing space directory without stripping.
+    """
+    client = api_test_env["client"]
+    root = api_test_env["root1_path"]
+
+    w_wrong = root / "W"
+    w_wrong.mkdir(parents=True)
+    (w_wrong / "wrong.txt").write_text("wrong")
+
+    w_space = root / "W "
+    w_space.mkdir(parents=True)
+    (w_space / "intended.txt").write_text("intended")
+
+    wrapper_input = str(w_space)
+    assert wrapper_input.endswith("W ")
+
+    resp = client.post(
+        "/api/batch-utilities/preview",
+        json={"action": {"type": "flatten_one_level", "wrapper_paths": [wrapper_input]}},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["candidate_count"] == 1
+    assert len(data["items"]) == 1
+    item = data["items"][0]
+    assert item["source_path"] == str(w_space.resolve(strict=True) / "intended.txt")
+    assert item["wrapper_path"] == str(w_space.resolve(strict=True))
+    assert item["wrapper_path"].endswith("W ")
+

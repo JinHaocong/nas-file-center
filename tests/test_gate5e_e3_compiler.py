@@ -951,6 +951,139 @@ def test_canonical_wrapper_duplicate_rejection(tmp_path):
         compile_flatten_one_level_preview(session=None, action=a_dup, safety_snapshot=snapshot)
 
 
+def test_canonical_wrapper_symlink_dotdot_selection(tmp_path):
+    """E3-hotfix7 Regression A:
+    Symlink-sensitive dotdot traversal:
+    root/
+    ├── A/
+    │   ├── B/
+    │   └── W/
+    │       └── intended.txt
+    ├── W/
+    │   └── wrong.txt
+    └── link -> root/A/B
+
+    Input: root/link/../W
+    Expected:
+    canonical wrapper == root/A/W
+    Preview contains root/A/W/intended.txt
+    Preview does NOT contain root/W/wrong.txt
+    Generate Draft source: root/A/W/intended.txt
+    """
+    from app.batch_utilities.digest import canonicalize_wrapper_path, canonicalize_flatten_one_level_action
+    import os
+
+    root = tmp_path / "root"
+    a_dir = root / "A"
+    b_dir = a_dir / "B"
+    b_dir.mkdir(parents=True)
+    w_intended = a_dir / "W"
+    w_intended.mkdir(parents=True)
+    (w_intended / "intended.txt").write_text("intended")
+
+    w_wrong = root / "W"
+    w_wrong.mkdir(parents=True)
+    (w_wrong / "wrong.txt").write_text("wrong")
+
+    link = root / "link"
+    os.symlink(str(b_dir), str(link))
+
+    wrapper_input = str(link) + "/../W"
+
+    # Canonical helper asserts
+    canon_single = canonicalize_wrapper_path(wrapper_input)
+    assert canon_single == str(w_intended.resolve(strict=True))
+
+    action = FlattenOneLevelAction(type="flatten_one_level", wrapper_paths=[wrapper_input])
+    canon_action = canonicalize_flatten_one_level_action(action)
+    assert canon_action["wrapper_paths"] == [str(w_intended.resolve(strict=True))]
+
+    snapshot = BatchUtilitySafetySnapshot(
+        protect_last_file=True,
+        allowed_roots=(root,),
+        quarantine_root=None,
+        effective_policy={},
+    )
+    comp = compile_flatten_one_level_preview(session=None, action=action, safety_snapshot=snapshot)
+    assert comp.planned_operations_count == 1
+    assert len(comp.rows) == 1
+    assert comp.rows[0]["decision"] == "MOVE"
+    assert comp.rows[0]["source_path"] == str(w_intended.resolve(strict=True) / "intended.txt")
+    assert comp.rows[0]["wrapper_path"] == str(w_intended.resolve(strict=True))
+    assert comp.rows[0]["target_path"] == str(a_dir.resolve(strict=True) / "intended.txt")
+
+    assert len(comp.intents) == 1
+    assert comp.intents[0].operation == "move"
+    assert comp.intents[0].source_path == str(w_intended.resolve(strict=True) / "intended.txt")
+    assert comp.intents[0].target_path == str(a_dir.resolve(strict=True) / "intended.txt")
+
+
+def test_canonical_wrapper_trailing_space_directory(tmp_path):
+    """E3-hotfix7 Regression B:
+    Valid trailing-space directory:
+    root/W/wrong.txt
+    root/"W "/intended.txt
+    Input: root/"W "
+    Assert canonical wrapper remains the physical "W " directory.
+    Preview/Generate must never switch to root/W.
+    """
+    from app.batch_utilities.digest import canonicalize_wrapper_path, canonicalize_flatten_one_level_action
+
+    root = tmp_path / "root"
+    w_wrong = root / "W"
+    w_wrong.mkdir(parents=True)
+    (w_wrong / "wrong.txt").write_text("wrong")
+
+    w_space = root / "W "
+    w_space.mkdir(parents=True)
+    (w_space / "intended.txt").write_text("intended")
+
+    wrapper_input = str(w_space)
+    assert wrapper_input.endswith("W ")
+
+    # Canonical helper asserts
+    canon_single = canonicalize_wrapper_path(wrapper_input)
+    assert canon_single == str(w_space.resolve(strict=True))
+    assert canon_single.endswith("W ")
+
+    action = FlattenOneLevelAction(type="flatten_one_level", wrapper_paths=[wrapper_input])
+    canon_action = canonicalize_flatten_one_level_action(action)
+    assert canon_action["wrapper_paths"] == [str(w_space.resolve(strict=True))]
+    assert canon_action["wrapper_paths"][0].endswith("W ")
+
+    snapshot = BatchUtilitySafetySnapshot(
+        protect_last_file=True,
+        allowed_roots=(root,),
+        quarantine_root=None,
+        effective_policy={},
+    )
+    comp = compile_flatten_one_level_preview(session=None, action=action, safety_snapshot=snapshot)
+    assert comp.planned_operations_count == 1
+    assert len(comp.rows) == 1
+    assert comp.rows[0]["decision"] == "MOVE"
+    assert comp.rows[0]["source_path"] == str(w_space.resolve(strict=True) / "intended.txt")
+    assert comp.rows[0]["wrapper_path"] == str(w_space.resolve(strict=True))
+
+    assert len(comp.intents) == 1
+    assert comp.intents[0].source_path == str(w_space.resolve(strict=True) / "intended.txt")
+
+
+def test_canonical_wrapper_strict_resolution_failure_fails_closed(tmp_path):
+    """E3-hotfix7 Regression:
+    If canonical strict resolution fails, fail closed with structured error.
+    Must NOT silently fall back to lexical normpath.
+    """
+    from app.batch_utilities.digest import canonicalize_wrapper_path
+    from app.batch_utilities.errors import BatchUtilityScopeNotFoundError
+
+    root = tmp_path / "root"
+    root.mkdir(parents=True)
+    non_existent = str(root / "does_not_exist")
+
+    with pytest.raises(BatchUtilityScopeNotFoundError):
+        canonicalize_wrapper_path(non_existent)
+
+
 def test_preflight_trailing_slash_symlink_blocked(tmp_path):
     """E3-hotfix6 Regression:
     Wrapper path with trailing slash on symlink is blocked with BatchUtilitySymlinkBlockedError.

@@ -803,4 +803,114 @@ def test_generate_canonical_wrapper_plan_metadata(api_test_env):
         assert meta.get("db_lineage_digest") is None
 
 
+def test_generate_canonical_wrapper_symlink_dotdot_selection(api_test_env):
+    """E3-hotfix7 Regression:
+    Generate creates draft move intents from the actual physical directory
+    selected via symlink-sensitive dotdot traversal.
+    """
+    import os
+    import json
+    from app.models import BatchPlan
+    client = api_test_env["client"]
+    service = api_test_env["service"]
+    root = api_test_env["root1_path"]
+
+    a_dir = root / "A"
+    b_dir = a_dir / "B"
+    b_dir.mkdir(parents=True)
+    w_intended = a_dir / "W"
+    w_intended.mkdir(parents=True)
+    (w_intended / "intended.txt").write_text("intended")
+
+    w_wrong = root / "W"
+    w_wrong.mkdir(parents=True)
+    (w_wrong / "wrong.txt").write_text("wrong")
+
+    link = root / "link"
+    os.symlink(str(b_dir), str(link))
+
+    wrapper_input = str(link) + "/../W"
+
+    action = {
+        "type": "flatten_one_level",
+        "wrapper_paths": [wrapper_input],
+    }
+
+    resp_prev = client.post("/api/batch-utilities/preview", json={"action": action})
+    assert resp_prev.status_code == 200
+    preview_digest = resp_prev.json()["preview_digest"]
+
+    req = {
+        "action": action,
+        "expected_preview_digest": preview_digest,
+    }
+    resp_gen = client.post("/api/batch-utilities/generate-plan", json=req)
+    assert resp_gen.status_code == 201
+
+    with service.SessionLocal() as session:
+        plans = session.query(BatchPlan).all()
+        assert len(plans) == 1
+        plan = plans[0]
+        meta = json.loads(plan.metadata_json)
+        assert meta["wrapper_paths"] == [str(w_intended.resolve(strict=True))]
+        assert meta["canonical_action_config"]["wrapper_paths"] == [str(w_intended.resolve(strict=True))]
+
+        items = plan.items
+        assert len(items) == 1
+        item = items[0]
+        assert item.source_path == str(w_intended.resolve(strict=True) / "intended.txt")
+        assert item.target_path == str(a_dir.resolve(strict=True) / "intended.txt")
+
+
+def test_generate_canonical_wrapper_trailing_space_directory(api_test_env):
+    """E3-hotfix7 Regression:
+    Generate creates draft move intents from the valid trailing-space directory.
+    """
+    import json
+    from app.models import BatchPlan
+    client = api_test_env["client"]
+    service = api_test_env["service"]
+    root = api_test_env["root1_path"]
+
+    w_wrong = root / "W"
+    w_wrong.mkdir(parents=True)
+    (w_wrong / "wrong.txt").write_text("wrong")
+
+    w_space = root / "W "
+    w_space.mkdir(parents=True)
+    (w_space / "intended.txt").write_text("intended")
+
+    wrapper_input = str(w_space)
+    assert wrapper_input.endswith("W ")
+
+    action = {
+        "type": "flatten_one_level",
+        "wrapper_paths": [wrapper_input],
+    }
+
+    resp_prev = client.post("/api/batch-utilities/preview", json={"action": action})
+    assert resp_prev.status_code == 200
+    preview_digest = resp_prev.json()["preview_digest"]
+
+    req = {
+        "action": action,
+        "expected_preview_digest": preview_digest,
+    }
+    resp_gen = client.post("/api/batch-utilities/generate-plan", json=req)
+    assert resp_gen.status_code == 201
+
+    with service.SessionLocal() as session:
+        plans = session.query(BatchPlan).all()
+        assert len(plans) == 1
+        plan = plans[0]
+        meta = json.loads(plan.metadata_json)
+        assert meta["wrapper_paths"] == [str(w_space.resolve(strict=True))]
+        assert meta["wrapper_paths"][0].endswith("W ")
+
+        items = plan.items
+        assert len(items) == 1
+        item = items[0]
+        assert item.source_path == str(w_space.resolve(strict=True) / "intended.txt")
+
+
 

@@ -6,7 +6,11 @@ import stat
 from typing import Any, Mapping, Sequence
 
 from app.batch_utilities.schema import QuarantineFilteredAction, SuffixTransformAction, FlattenOneLevelAction
-from app.batch_utilities.errors import BatchUtilityScopeOverlapError
+from app.batch_utilities.errors import (
+    BatchUtilityScopeOverlapError,
+    BatchUtilityScopeNotFoundError,
+    BatchUtilityInvalidConfigError,
+)
 from app.filters.validation import validate_filter_ast
 
 BATCH_UTILITY_ENGINE_VERSION = 1
@@ -47,20 +51,41 @@ def canonicalize_suffix_transform_action(action: SuffixTransformAction) -> dict[
 
 def canonicalize_wrapper_path(path: str) -> str:
     """Canonicalize a wrapper directory path for batch utilities.
-    Normalizes redundant lexical separators, trailing slashes, '.', and '..'.
-    If the path exists on disk and is a real directory without being a symlink,
-    resolves to strict canonical path. Preserves raw symlink paths so no-follow
-    safety checks can detect and reject them.
+    Derives canonical identity from the original validated path's actual filesystem resolution.
+    Does not call strip() or normpath() on the input path string.
+    Preserves raw symlink leaf representation so preflight checks can detect symlinks.
+    If strict resolution fails, fails closed with structured error.
     """
-    raw = str(path).strip()
-    norm = os.path.normpath(raw)
+    raw = str(path)
+    raw_leaf = raw.rstrip("/") or "/"
     try:
-        st = os.lstat(norm)
+        st = os.lstat(raw_leaf)
         if stat.S_ISLNK(st.st_mode):
-            return norm
-        return str(Path(norm).resolve(strict=True))
-    except (OSError, FileNotFoundError, RuntimeError):
-        return norm
+            return raw_leaf
+    except FileNotFoundError:
+        raise BatchUtilityScopeNotFoundError(
+            f"Wrapper directory '{raw}' does not exist",
+            details={"wrapper_path": raw},
+        )
+    except OSError as e:
+        raise BatchUtilityInvalidConfigError(
+            f"Failed to access wrapper '{raw}': {e}",
+            details={"wrapper_path": raw, "errno": getattr(e, "errno", None)},
+        )
+
+    try:
+        resolved = Path(raw).resolve(strict=True)
+        return str(resolved)
+    except FileNotFoundError:
+        raise BatchUtilityScopeNotFoundError(
+            f"Wrapper directory '{raw}' does not exist",
+            details={"wrapper_path": raw},
+        )
+    except OSError as e:
+        raise BatchUtilityInvalidConfigError(
+            f"Failed to resolve wrapper path '{raw}': {e}",
+            details={"wrapper_path": raw, "errno": getattr(e, "errno", None)},
+        )
 
 
 def canonicalize_flatten_one_level_action(action: FlattenOneLevelAction) -> dict[str, Any]:
