@@ -413,3 +413,108 @@ def test_preview_canonical_wrapper_trailing_space_directory(api_test_env):
     assert item["wrapper_path"] == str(w_space.resolve(strict=True))
     assert item["wrapper_path"].endswith("W ")
 
+
+def test_preview_symlink_sensitive_trailing_slash_leaf_symlink_blocked(api_test_env):
+    """E3-hotfix8 API Regression A:
+    Preview with trailing slash on symlink leaf: root/link/../W/
+    must fail preflight with HTTP 409 BATCH_UTILITY_SYMLINK_BLOCKED.
+    """
+    import os
+    client = api_test_env["client"]
+    root = api_test_env["root1_path"]
+
+    a_dir = root / "A"
+    b_dir = a_dir / "B"
+    b_dir.mkdir(parents=True)
+    real_dir = a_dir / "Real"
+    real_dir.mkdir(parents=True)
+    (real_dir / "secret.txt").write_text("secret")
+
+    w_symlink = a_dir / "W"
+    os.symlink(str(real_dir), str(w_symlink))
+
+    w_wrong = root / "W"
+    w_wrong.mkdir(parents=True)
+    (w_wrong / "wrong.txt").write_text("wrong")
+
+    link = root / "link"
+    os.symlink(str(b_dir), str(link))
+
+    wrapper_input = str(link) + "/../W/"
+
+    resp = client.post(
+        "/api/batch-utilities/preview",
+        json={"action": {"type": "flatten_one_level", "wrapper_paths": [wrapper_input]}},
+    )
+    assert resp.status_code == 409
+    err = resp.json()["error"]
+    assert err["code"] == "BATCH_UTILITY_SYMLINK_BLOCKED"
+
+
+def test_preview_physically_distinct_wrappers_same_normpath_accepted(api_test_env):
+    """E3-hotfix8 API Regression B:
+    Preview accepts physically distinct wrappers even if normpath text is identical:
+    p1: root/link/../W -> root/A/W
+    p2: root/W -> root/W
+    """
+    import os
+    client = api_test_env["client"]
+    root = api_test_env["root1_path"]
+
+    a_dir = root / "A"
+    b_dir = a_dir / "B"
+    b_dir.mkdir(parents=True)
+    w_a = a_dir / "W"
+    w_a.mkdir(parents=True)
+    (w_a / "a.txt").write_text("a")
+
+    w_root = root / "W"
+    w_root.mkdir(parents=True)
+    (w_root / "root.txt").write_text("root")
+
+    link = root / "link"
+    os.symlink(str(b_dir), str(link))
+
+    p1 = str(link) + "/../W"
+    p2 = str(w_root)
+
+    resp = client.post(
+        "/api/batch-utilities/preview",
+        json={"action": {"type": "flatten_one_level", "wrapper_paths": [p1, p2]}},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["candidate_count"] == 2
+    sources = {item["source_path"] for item in data["items"]}
+    assert str(w_a.resolve(strict=True) / "a.txt") in sources
+    assert str(w_root.resolve(strict=True) / "root.txt") in sources
+
+
+def test_preview_allowed_root_equality_symlink_dotdot_accepted(api_test_env):
+    """E3-hotfix8 API Regression C:
+    Preview accepts wrapper root/link/.. which resolves to root/A (not root).
+    """
+    import os
+    client = api_test_env["client"]
+    root = api_test_env["root1_path"]
+
+    a_dir = root / "A"
+    b_dir = a_dir / "B"
+    b_dir.mkdir(parents=True)
+    (a_dir / "item.txt").write_text("item")
+
+    link = root / "link"
+    os.symlink(str(b_dir), str(link))
+
+    wrapper_input = str(link) + "/.."
+
+    resp = client.post(
+        "/api/batch-utilities/preview",
+        json={"action": {"type": "flatten_one_level", "wrapper_paths": [wrapper_input]}},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["candidate_count"] == 2
+    sources = {item["source_path"] for item in data["items"]}
+    assert str(a_dir.resolve(strict=True) / "item.txt") in sources
+

@@ -20,12 +20,15 @@ def test_flatten_one_level_action_duplicate():
         FlattenOneLevelAction(type="flatten_one_level", wrapper_paths=["/a/b", "/a/b"])
 
 
-def test_flatten_one_level_action_normalized_lexical_duplicate():
-    with pytest.raises(ValidationError, match="duplicate"):
-        FlattenOneLevelAction(type="flatten_one_level", wrapper_paths=["/tmp/a", "/tmp/x/../a"])
+def test_flatten_one_level_action_distinct_strings_accepted():
+    # In hotfix8, schema only rejects exact string duplicates.
+    # Textually distinct strings (even if normpath would be identical) are accepted by schema,
+    # leaving physical resolution and overlap detection to the compiler/preflight layer.
+    action = FlattenOneLevelAction(type="flatten_one_level", wrapper_paths=["/tmp/a", "/tmp/x/../a"])
+    assert len(action.wrapper_paths) == 2
 
-    with pytest.raises(ValidationError, match="duplicate"):
-        FlattenOneLevelAction(type="flatten_one_level", wrapper_paths=["/tmp/a", "/tmp/a/"])
+    action2 = FlattenOneLevelAction(type="flatten_one_level", wrapper_paths=["/tmp/a", "/tmp/a/"])
+    assert len(action2.wrapper_paths) == 2
 
 
 def test_flatten_one_level_action_discriminator():

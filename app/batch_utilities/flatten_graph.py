@@ -48,16 +48,10 @@ def validate_wrappers_preflight(
                 details={"wrapper_path": w_lex},
             )
 
-        # 1. No-follow lstat first
-        norm_lex = os.path.normpath(w_lex)
+        # 1. No-follow lstat on leaf first
+        raw_leaf = w_lex.rstrip("/") or "/"
         try:
-            st_norm = os.lstat(norm_lex)
-            if stat.S_ISLNK(st_norm.st_mode):
-                raise BatchUtilitySymlinkBlockedError(
-                    f"Wrapper path '{w_lex}' is a symlink",
-                    details={"wrapper_path": w_lex},
-                )
-            st = os.lstat(w_lex)
+            st_leaf = os.lstat(raw_leaf)
         except FileNotFoundError:
             raise BatchUtilityScopeNotFoundError(
                 f"Wrapper directory '{w_lex}' does not exist",
@@ -69,27 +63,41 @@ def validate_wrappers_preflight(
                 details={"wrapper_path": w_lex, "error": str(e)},
             )
 
-        if stat.S_ISLNK(st.st_mode):
+        if stat.S_ISLNK(st_leaf.st_mode):
             raise BatchUtilitySymlinkBlockedError(
                 f"Wrapper path '{w_lex}' is a symlink",
                 details={"wrapper_path": w_lex},
             )
 
-        if not stat.S_ISDIR(st.st_mode):
+        if not stat.S_ISDIR(st_leaf.st_mode):
             raise BatchUtilityInvalidConfigError(
                 f"Wrapper path '{w_lex}' is not a directory",
                 details={"wrapper_path": w_lex},
             )
 
-        # 2. Safety bounds checks
-        if quarantine_root and is_reserved_quarantine_path(w_lex, quarantine_root):
+        # 2. Strict physical resolution determines filesystem identity
+        try:
+            w_phys = w_path.resolve(strict=True)
+        except FileNotFoundError:
+            raise BatchUtilityScopeNotFoundError(
+                f"Wrapper directory '{w_lex}' does not exist",
+                details={"wrapper_path": w_lex},
+            )
+        except OSError as e:
+            raise BatchUtilityInvalidConfigError(
+                f"Failed to resolve wrapper path '{w_lex}': {e}",
+                details={"wrapper_path": w_lex, "errno": getattr(e, "errno", None)},
+            )
+
+        # 3. Safety bounds checks against physical wrapper path
+        if quarantine_root and is_reserved_quarantine_path(w_phys, quarantine_root):
             raise BatchUtilityCrossRootError(
                 f"Wrapper '{w_lex}' is within reserved quarantine storage",
                 details={"wrapper_path": w_lex},
             )
 
         try:
-            if not is_path_allowed(w_lex, allowed_roots):
+            if not is_path_allowed(w_phys, allowed_roots):
                 raise BatchUtilityCrossRootError(
                     f"Wrapper path '{w_lex}' is outside allowed roots",
                     details={"wrapper_path": w_lex},
@@ -102,24 +110,18 @@ def validate_wrappers_preflight(
                 details={"wrapper_path": w_lex, "errno": getattr(e, "errno", None)},
             )
 
-        norm_w = os.path.normpath(w_lex)
         for r in allowed_roots:
-            norm_r = str(r)
-            if norm_w == norm_r:
+            try:
+                r_phys = r.resolve(strict=True)
+            except OSError as e:
+                raise BatchUtilityInvalidConfigError(
+                    f"Failed to resolve allowed root '{r}': {e}",
+                    details={"allowed_root": str(r), "errno": getattr(e, "errno", None)},
+                )
+            if w_phys == r_phys:
                 raise BatchUtilityInvalidConfigError(
                     f"Wrapper '{w_lex}' cannot be an allowed root",
                     details={"wrapper_path": w_lex},
-                )
-            try:
-                if w_path.resolve(strict=True) == r.resolve(strict=True):
-                    raise BatchUtilityInvalidConfigError(
-                        f"Wrapper '{w_lex}' cannot be an allowed root",
-                        details={"wrapper_path": w_lex},
-                    )
-            except OSError as e:
-                raise BatchUtilityInvalidConfigError(
-                    f"Failed to resolve wrapper path '{w_lex}': {e}",
-                    details={"wrapper_path": w_lex, "errno": getattr(e, "errno", None)},
                 )
 
     # 3. Check for physical duplicate / ancestor-descendant overlap

@@ -913,4 +913,109 @@ def test_generate_canonical_wrapper_trailing_space_directory(api_test_env):
         assert item.source_path == str(w_space.resolve(strict=True) / "intended.txt")
 
 
+def test_generate_symlink_sensitive_trailing_slash_leaf_symlink_blocked(api_test_env):
+    """E3-hotfix8 Regression A:
+    Generate rejects trailing-slash leaf symlink wrapper:
+    root/link/../W/ where root/A/W is a symlink.
+    Expected: HTTP 409 BATCH_UTILITY_SYMLINK_BLOCKED. 0 Draft plans in DB.
+    """
+    import os
+    from app.models import BatchPlan
+    client = api_test_env["client"]
+    service = api_test_env["service"]
+    root = api_test_env["root1_path"]
 
+    a_dir = root / "A"
+    b_dir = a_dir / "B"
+    b_dir.mkdir(parents=True)
+    real_dir = a_dir / "Real"
+    real_dir.mkdir(parents=True)
+    (real_dir / "secret.txt").write_text("secret")
+
+    w_symlink = a_dir / "W"
+    os.symlink(str(real_dir), str(w_symlink))
+
+    w_wrong = root / "W"
+    w_wrong.mkdir(parents=True)
+    (w_wrong / "wrong.txt").write_text("wrong")
+
+    link = root / "link"
+    os.symlink(str(b_dir), str(link))
+
+    wrapper_input = str(link) + "/../W/"
+
+    action = {
+        "type": "flatten_one_level",
+        "wrapper_paths": [wrapper_input],
+    }
+
+    req = {
+        "action": action,
+        "expected_preview_digest": "a" * 64,
+    }
+    resp_gen = client.post("/api/batch-utilities/generate-plan", json=req)
+    assert resp_gen.status_code == 409
+    err = resp_gen.json()["error"]
+    assert err["code"] == "BATCH_UTILITY_SYMLINK_BLOCKED"
+
+    with service.SessionLocal() as session:
+        plans = session.query(BatchPlan).all()
+        assert len(plans) == 0
+
+
+def test_generate_physically_distinct_wrappers_same_normpath_accepted(api_test_env):
+    """E3-hotfix8 Regression B:
+    Generate accepts physically distinct wrappers sharing textual normpath:
+    p1: root/link/../W -> root/A/W
+    p2: root/W -> root/W
+    Expected: HTTP 201, draft plan generated with 2 items.
+    """
+    import os
+    import json
+    from app.models import BatchPlan
+    client = api_test_env["client"]
+    service = api_test_env["service"]
+    root = api_test_env["root1_path"]
+
+    a_dir = root / "A"
+    b_dir = a_dir / "B"
+    b_dir.mkdir(parents=True)
+    w_a = a_dir / "W"
+    w_a.mkdir(parents=True)
+    (w_a / "a.txt").write_text("a")
+
+    w_root = root / "W"
+    w_root.mkdir(parents=True)
+    (w_root / "root.txt").write_text("root")
+
+    link = root / "link"
+    os.symlink(str(b_dir), str(link))
+
+    p1 = str(link) + "/../W"
+    p2 = str(w_root)
+
+    action = {
+        "type": "flatten_one_level",
+        "wrapper_paths": [p1, p2],
+    }
+
+    resp_prev = client.post("/api/batch-utilities/preview", json={"action": action})
+    assert resp_prev.status_code == 200
+    preview_digest = resp_prev.json()["preview_digest"]
+
+    req = {
+        "action": action,
+        "expected_preview_digest": preview_digest,
+    }
+    resp_gen = client.post("/api/batch-utilities/generate-plan", json=req)
+    assert resp_gen.status_code == 201
+
+    with service.SessionLocal() as session:
+        plans = session.query(BatchPlan).all()
+        assert len(plans) == 1
+        plan = plans[0]
+        meta = json.loads(plan.metadata_json)
+        canon_wrappers = set(meta["wrapper_paths"])
+        assert str(w_a.resolve(strict=True)) in canon_wrappers
+        assert str(w_root.resolve(strict=True)) in canon_wrappers
+        assert len(plan.items) == 2

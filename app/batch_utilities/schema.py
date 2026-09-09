@@ -85,17 +85,16 @@ class FlattenOneLevelAction(BaseModel):
         if not isinstance(v, list) or len(v) == 0:
             raise ValueError("wrapper_paths must be a non-empty list of strings")
         
-        seen_norm = set()
+        seen = set()
         clean_paths = []
         for item in v:
             if not isinstance(item, str):
                 raise ValueError("wrapper_paths items must be strings")
             if not os.path.isabs(item):
                 raise ValueError(f"wrapper_paths items must be absolute path: {item}")
-            norm = os.path.normpath(item)
-            if norm in seen_norm:
+            if item in seen:
                 raise ValueError(f"duplicate wrapper path detected: {item}")
-            seen_norm.add(norm)
+            seen.add(item)
             clean_paths.append(item)
             
         return clean_paths

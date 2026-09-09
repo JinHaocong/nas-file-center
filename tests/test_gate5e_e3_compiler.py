@@ -928,19 +928,21 @@ def test_canonical_wrapper_duplicate_rejection(tmp_path):
     wrapper = root / "W"
     wrapper.mkdir(parents=True)
 
-    # In schema validation
+    # In schema validation: exact duplicate strings are rejected
     with pytest.raises(ValidationError):
-        FlattenOneLevelAction(type="flatten_one_level", wrapper_paths=[str(wrapper), str(wrapper) + "/"])
+        FlattenOneLevelAction(type="flatten_one_level", wrapper_paths=[str(wrapper), str(wrapper)])
 
-    # In canonicalize_flatten_one_level_action with model_construct
-    a_dup = FlattenOneLevelAction.model_construct(
+    # Textually distinct strings resolving to same wrapper are accepted by schema
+    a_dup = FlattenOneLevelAction(
         type="flatten_one_level",
         wrapper_paths=[str(wrapper), str(wrapper) + "/"],
     )
+
+    # In canonicalize_flatten_one_level_action: physical duplicates rejected with BatchUtilityScopeOverlapError
     with pytest.raises(BatchUtilityScopeOverlapError):
         canonicalize_flatten_one_level_action(a_dup)
 
-    # In compiler preview
+    # In compiler preview: physical duplicates rejected with BatchUtilityScopeOverlapError
     snapshot = BatchUtilitySafetySnapshot(
         protect_last_file=True,
         allowed_roots=(root,),
@@ -1286,6 +1288,191 @@ def test_compiler_continuity_scandir_failure_nonempty_wrapper(tmp_path):
         assert exc_info.value.details.get("wrapper_path") == str(wrapper)
         assert exc_info.value.details.get("errno") == 13
         assert exc_info.value.details.get("stage") == "CONTINUITY"
+
+
+def test_preflight_symlink_sensitive_trailing_slash_leaf_symlink_blocked(tmp_path):
+    """E3-hotfix8 Regression A:
+    Input: root/link/../W/
+    where root/link -> root/A/B, and root/A/W is a symlink (root/A/W -> root/A/Real).
+    root/W is a regular directory with wrong.txt.
+    Expected:
+    Preflight must block root/link/../W/ as a symlink before discovery.
+    BatchUtilitySymlinkBlockedError / HTTP 409 BATCH_UTILITY_SYMLINK_BLOCKED.
+    Discovery must NOT scan through the symlink.
+    """
+    import os
+    from unittest.mock import patch
+    from app.batch_utilities.errors import BatchUtilitySymlinkBlockedError
+    import app.batch_utilities.compiler as compiler_mod
+
+    root = tmp_path / "root"
+    a_dir = root / "A"
+    b_dir = a_dir / "B"
+    b_dir.mkdir(parents=True)
+    real_dir = a_dir / "Real"
+    real_dir.mkdir(parents=True)
+    (real_dir / "secret.txt").write_text("secret")
+
+    w_symlink = a_dir / "W"
+    os.symlink(str(real_dir), str(w_symlink))
+
+    w_wrong = root / "W"
+    w_wrong.mkdir(parents=True)
+    (w_wrong / "wrong.txt").write_text("wrong")
+
+    link = root / "link"
+    os.symlink(str(b_dir), str(link))
+
+    wrapper_input = str(link) + "/../W/"
+    action = FlattenOneLevelAction(type="flatten_one_level", wrapper_paths=[wrapper_input])
+    snapshot = BatchUtilitySafetySnapshot(
+        protect_last_file=True,
+        allowed_roots=(root,),
+        quarantine_root=None,
+        effective_policy={},
+    )
+
+    with patch.object(compiler_mod, "discover_flatten_one_level", wraps=compiler_mod.discover_flatten_one_level) as mock_disc:
+        with pytest.raises(BatchUtilitySymlinkBlockedError) as exc_info:
+            compile_flatten_one_level_preview(session=None, action=action, safety_snapshot=snapshot)
+        assert exc_info.value.code == "BATCH_UTILITY_SYMLINK_BLOCKED"
+        assert exc_info.value.status_code == 409
+        # Discovery must not have been called
+        assert mock_disc.call_count == 0
+
+
+def test_compiler_physically_distinct_wrappers_same_normpath_accepted(tmp_path):
+    """E3-hotfix8 Regression B:
+    Physically distinct wrappers with same normpath text:
+    p1: root/link/../W -> root/A/W
+    p2: root/W -> root/W
+    Expected:
+    Schema accepts the action.
+    Preflight accepts both.
+    Preview represents both wrappers. No false duplicate.
+    """
+    import os
+
+    root = tmp_path / "root"
+    a_dir = root / "A"
+    b_dir = a_dir / "B"
+    b_dir.mkdir(parents=True)
+    w_a = a_dir / "W"
+    w_a.mkdir(parents=True)
+    (w_a / "a.txt").write_text("file in A/W")
+
+    w_root = root / "W"
+    w_root.mkdir(parents=True)
+    (w_root / "root.txt").write_text("file in root/W")
+
+    link = root / "link"
+    os.symlink(str(b_dir), str(link))
+
+    p1 = str(link) + "/../W"
+    p2 = str(w_root)
+
+    # Schema must accept both
+    action = FlattenOneLevelAction(type="flatten_one_level", wrapper_paths=[p1, p2])
+    assert len(action.wrapper_paths) == 2
+
+    snapshot = BatchUtilitySafetySnapshot(
+        protect_last_file=True,
+        allowed_roots=(root,),
+        quarantine_root=None,
+        effective_policy={},
+    )
+
+    comp = compile_flatten_one_level_preview(session=None, action=action, safety_snapshot=snapshot)
+    assert comp.planned_operations_count == 2
+    assert len(comp.rows) == 2
+    src_paths = {r["source_path"] for r in comp.rows}
+    assert str(w_a.resolve(strict=True) / "a.txt") in src_paths
+    assert str(w_root.resolve(strict=True) / "root.txt") in src_paths
+
+
+def test_preflight_allowed_root_equality_symlink_dotdot_accepted(tmp_path):
+    """E3-hotfix8 Regression C:
+    wrapper: root/link/..
+    where root/link -> root/A/B
+    actual physical selection: root/A (not equal to root!)
+    Expected:
+    Not rejected merely because normpath == root.
+    Preflight and Preview accept root/link/..
+    """
+    import os
+    from app.batch_utilities.flatten_graph import validate_wrappers_preflight
+
+    root = tmp_path / "root"
+    a_dir = root / "A"
+    b_dir = a_dir / "B"
+    b_dir.mkdir(parents=True)
+    (a_dir / "item.txt").write_text("item in A")
+
+    link = root / "link"
+    os.symlink(str(b_dir), str(link))
+
+    wrapper_input = str(link) + "/.."
+
+    # Preflight should pass
+    validate_wrappers_preflight([wrapper_input], [root], None)
+
+    action = FlattenOneLevelAction(type="flatten_one_level", wrapper_paths=[wrapper_input])
+    snapshot = BatchUtilitySafetySnapshot(
+        protect_last_file=True,
+        allowed_roots=(root,),
+        quarantine_root=None,
+        effective_policy={},
+    )
+    comp = compile_flatten_one_level_preview(session=None, action=action, safety_snapshot=snapshot)
+    assert comp.planned_operations_count == 2
+    sources = {r["source_path"] for r in comp.rows}
+    assert str(a_dir.resolve(strict=True) / "item.txt") in sources
+
+def test_compiler_true_physical_duplicate_rejected_overlap(tmp_path):
+    """E3-hotfix8 Regression D:
+    True physical duplicate still rejected:
+    root/X/../W and root/W with X an ordinary directory and both resolving to root/W.
+    Expected: BATCH_UTILITY_SCOPE_OVERLAP.
+    """
+    from app.batch_utilities.errors import BatchUtilityScopeOverlapError
+
+    root = tmp_path / "root"
+    x_dir = root / "X"
+    x_dir.mkdir(parents=True)
+    w_dir = root / "W"
+    w_dir.mkdir(parents=True)
+    (w_dir / "item.txt").write_text("item")
+
+    p1 = str(x_dir) + "/../W"
+    p2 = str(w_dir)
+
+    # Schema accepts distinct strings
+    action = FlattenOneLevelAction(type="flatten_one_level", wrapper_paths=[p1, p2])
+
+    snapshot = BatchUtilitySafetySnapshot(
+        protect_last_file=True,
+        allowed_roots=(root,),
+        quarantine_root=None,
+        effective_policy={},
+    )
+    with pytest.raises(BatchUtilityScopeOverlapError) as exc_info:
+        compile_flatten_one_level_preview(session=None, action=action, safety_snapshot=snapshot)
+    assert exc_info.value.code == "BATCH_UTILITY_SCOPE_OVERLAP"
+    assert exc_info.value.status_code == 422
+
+
+def test_schema_exact_duplicate_rejected(tmp_path):
+    """E3-hotfix8 Regression E:
+    Exact duplicate strings remain rejected at schema validation layer.
+    """
+    from pydantic import ValidationError
+
+    root = tmp_path / "root"
+    w_dir = root / "W"
+    w_dir.mkdir(parents=True)
+
+    with pytest.raises(ValidationError):
+        FlattenOneLevelAction(type="flatten_one_level", wrapper_paths=[str(w_dir), str(w_dir)])
 
 
 
