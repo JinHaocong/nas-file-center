@@ -13,7 +13,12 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
 from app.models import IndexRoot, IndexedPath, FilterPolicy
-from app.batch_utilities.schema import QuarantineFilteredAction, SuffixTransformAction, FlattenOneLevelAction
+from app.batch_utilities.schema import (
+    QuarantineFilteredAction,
+    SuffixTransformAction,
+    FlattenOneLevelAction,
+    RemoveEmptyDirsAction,
+)
 from app.batch_utilities.errors import (
     BatchUtilityScopeNotFoundError,
     BatchUtilityInvalidConfigError,
@@ -26,6 +31,7 @@ from app.batch_utilities.digest import (
     canonicalize_quarantine_filtered_action,
     canonicalize_suffix_transform_action,
     canonicalize_flatten_one_level_action,
+    canonicalize_remove_empty_dirs_action,
     compute_action_config_digest,
     compute_preview_digest,
 )
@@ -36,6 +42,10 @@ from app.batch_utilities.flatten_graph import (
     check_wrapper_overlap,
     resolve_flatten_graph,
     validate_wrappers_preflight,
+)
+from app.batch_utilities.empty_dirs import (
+    validate_remove_empty_scopes_preflight,
+    discover_remove_empty_dirs,
 )
 from app.filters.validation import validate_filter_ast
 from app.filters.compiler import compile_filter_to_sql
@@ -57,7 +67,7 @@ class BatchUtilitySafetySnapshot:
 @dataclass(frozen=True)
 class BatchUtilityDraftIntent:
     sequence: int
-    operation: Literal["quarantine", "rename", "move"]
+    operation: Literal["quarantine", "rename", "move", "rmdir_empty", "mkdir_empty"]
     source_path: str
     target_path: str | None
     keep_path: str | None
@@ -1810,10 +1820,237 @@ def compile_flatten_one_level_preview(
         compiled_where_clause="",
         filter_policy_snapshot={},
     )
+
+
+def compile_remove_empty_dirs_preview(
+    *,
+    session: Session | None,
+    action: RemoveEmptyDirsAction,
+    safety_snapshot: BatchUtilitySafetySnapshot,
+) -> BatchUtilityCompilation:
+    # Pre-flight scope validation (checks leaf symlink, missing, quarantine, allowed root, overlap)
+    bindings = validate_remove_empty_scopes_preflight(
+        action.scope_paths,
+        safety_snapshot.allowed_roots,
+        safety_snapshot.quarantine_root,
+    )
+    if not isinstance(bindings, (tuple, list)) or not bindings:
+        raise BatchUtilityInvalidConfigError(
+            "Preflight failed to establish scope physical identities",
+            details={"stage": "PREFLIGHT", "error": "MISSING_SCOPE_IDENTITY"},
+        )
+
+    # Re-verify that raw inputs still match authorized physical identities
+    binding_by_requested = {b.requested_path: b for b in bindings}
+    binding_by_canonical = {b.canonical_path: b for b in bindings}
+
+    for s_in in action.scope_paths:
+        clean_in = str(s_in).rstrip("/") or "/"
+        exp_binding = binding_by_requested.get(s_in) or binding_by_requested.get(clean_in)
+        if exp_binding is None:
+            raise BatchUtilityInvalidConfigError(
+                f"Missing physical identity for scope '{s_in}'",
+                details={"scope_path": str(s_in), "error": "SCOPE_IDENTITY_CHANGED", "stage": "CANONICALIZE"},
+            )
+        try:
+            st_leaf = os.lstat(clean_in)
+            if stat.S_ISLNK(st_leaf.st_mode):
+                raise BatchUtilitySymlinkBlockedError(
+                    f"Scope path '{s_in}' is a symlink",
+                    details={"scope_path": str(s_in), "stage": "CANONICALIZE"},
+                )
+            st = os.stat(clean_in)
+            if (st.st_dev, st.st_ino) != (exp_binding.device, exp_binding.inode):
+                raise BatchUtilityInvalidConfigError(
+                    f"SCOPE_IDENTITY_CHANGED: Scope '{s_in}' physical identity changed",
+                    details={
+                        "scope_path": str(s_in),
+                        "error": "SCOPE_IDENTITY_CHANGED",
+                        "stage": "CANONICALIZE",
+                        "expected_device": exp_binding.device,
+                        "current_device": st.st_dev,
+                        "expected_inode": exp_binding.inode,
+                        "current_inode": st.st_ino,
+                    },
+                )
+        except (BatchUtilitySymlinkBlockedError, BatchUtilityInvalidConfigError):
+            raise
+        except OSError as e:
+            raise BatchUtilityInvalidConfigError(
+                f"Failed to access scope '{s_in}': {e}",
+                details={"scope_path": str(s_in), "errno": getattr(e, "errno", None), "stage": "CANONICALIZE"},
+            )
+
+    canonical_action = canonicalize_remove_empty_dirs_action(action)
+    canonical_scopes = canonical_action["scope_paths"]
+    action_config_digest = compute_action_config_digest(canonical_action)
+
+    # Verify canonical scopes still correspond to expected identities
+    for c_path in canonical_scopes:
+        exp_binding = binding_by_canonical.get(c_path)
+        if exp_binding is None:
+            raise BatchUtilityInvalidConfigError(
+                f"Missing physical identity for canonical scope '{c_path}'",
+                details={"scope_path": c_path, "error": "SCOPE_IDENTITY_CHANGED", "stage": "CANONICALIZE"},
+            )
+        try:
+            st_leaf = os.lstat(c_path)
+            if stat.S_ISLNK(st_leaf.st_mode):
+                raise BatchUtilitySymlinkBlockedError(
+                    f"Canonical scope path '{c_path}' is a symlink",
+                    details={"scope_path": c_path, "stage": "CANONICALIZE"},
+                )
+            st = os.stat(c_path)
+            if (st.st_dev, st.st_ino) != (exp_binding.device, exp_binding.inode):
+                raise BatchUtilityInvalidConfigError(
+                    f"SCOPE_IDENTITY_CHANGED: Scope '{c_path}' physical identity changed",
+                    details={
+                        "scope_path": c_path,
+                        "error": "SCOPE_IDENTITY_CHANGED",
+                        "stage": "CANONICALIZE",
+                        "expected_device": exp_binding.device,
+                        "current_device": st.st_dev,
+                        "expected_inode": exp_binding.inode,
+                        "current_inode": st.st_ino,
+                    },
+                )
+        except (BatchUtilitySymlinkBlockedError, BatchUtilityInvalidConfigError):
+            raise
+        except OSError as e:
+            raise BatchUtilityInvalidConfigError(
+                f"Failed to access canonical scope '{c_path}': {e}",
+                details={"scope_path": c_path, "errno": getattr(e, "errno", None), "stage": "CANONICALIZE"},
+            )
+
+    decisions = discover_remove_empty_dirs(
+        bindings,
+        quarantine_root=safety_snapshot.quarantine_root,
+    )
+
+    removable_decisions = [d for d in decisions if d.removable]
+    skipped_decisions = [d for d in decisions if not d.removable]
+
+    decision_rows = [
+        {
+            "source_path": d.path,
+            "target_path": None,
+            "index_root_id": None,
+            "index_root_path": None,
+            "wrapper_path": None,
+            "relative_path": d.relative_path,
+            "object_type": "directory",
+            "decision": "REMOVE_EMPTY_DIR",
+            "reason_code": None,
+            "reason": None,
+            "size": 0,
+            "protected_dir": None,
+        }
+        for d in removable_decisions
+    ]
+
+    intents = [
+        BatchUtilityDraftIntent(
+            sequence=seq,
+            operation="rmdir_empty",
+            source_path=d.path,
+            target_path=None,
+            keep_path=None,
+            expected_size=0,
+            expected_device=0,
+            expected_inode=0,
+            expected_mtime_ns=0,
+            expected_hash=None,
+            metadata_json=canonical_json_dumps({
+                "scope_root": d.scope_root,
+                "relative_path": d.relative_path,
+                "depth": d.depth,
+                "preview_observed_device": d.device,
+                "preview_observed_inode": d.inode,
+            }),
+        )
+        for seq, d in enumerate(removable_decisions, start=1)
+    ]
+
+    source_snapshot_payload = {
+        "mode": "remove_empty_dirs",
+        "canonical_scopes": canonical_scopes,
+        "scope_identities": [
+            {
+                "requested_path": b.requested_path,
+                "canonical_path": b.canonical_path,
+                "device": b.device,
+                "inode": b.inode,
+            }
+            for b in sorted(bindings, key=lambda b: b.canonical_path)
+        ],
+        "removable_directories": [
+            {
+                "scope_root": d.scope_root,
+                "path": d.path,
+                "relative_path": d.relative_path,
+                "depth": d.depth,
+                "device": d.device,
+                "inode": d.inode,
+            }
+            for d in removable_decisions
+        ],
+        "non_removable_directories": [
+            {
+                "scope_root": d.scope_root,
+                "path": d.path,
+                "relative_path": d.relative_path,
+                "depth": d.depth,
+                "device": d.device,
+                "inode": d.inode,
+                "reason_code": d.reason_code,
+            }
+            for d in skipped_decisions
+        ],
+        "examined_count": len(decisions),
+        "candidate_count": len(removable_decisions),
+    }
+    source_snapshot_digest = hashlib.sha256(
+        canonical_json_dumps(source_snapshot_payload).encode("utf-8")
+    ).hexdigest()
+
+    summary = {
+        "matched_count": len(decisions),
+        "matched_bytes": 0,
+        "candidate_count": len(removable_decisions),
+        "candidate_bytes": 0,
+        "planned_operations_count": len(intents),
+        "skipped_count": len(skipped_decisions),
+        "safety_excluded_count": 0,
+        "blocking_conflict_count": 0,
+        "expected_reclaim_bytes": 0,
+    }
+
+    return BatchUtilityCompilation(
+        canonical_action=canonical_action,
+        action_config_digest=action_config_digest,
+        source_snapshot_digest=source_snapshot_digest,
+        db_lineage_digest=None,
+        rows=tuple(decision_rows),
+        intents=tuple(intents),
+        matched_count=summary["matched_count"],
+        matched_bytes=summary["matched_bytes"],
+        candidate_count=summary["candidate_count"],
+        candidate_bytes=summary["candidate_bytes"],
+        planned_operations_count=summary["planned_operations_count"],
+        skipped_count=summary["skipped_count"],
+        safety_excluded_count=0,
+        blocking_conflict_count=0,
+        expected_reclaim_bytes=0,
+        summary=summary,
+        compiled_where_clause="",
+        filter_policy_snapshot={},
+    )
+
+
 def compile_batch_utility_preview(
     *,
     session: Session,
-    action: QuarantineFilteredAction | SuffixTransformAction | FlattenOneLevelAction,
+    action: QuarantineFilteredAction | SuffixTransformAction | FlattenOneLevelAction | RemoveEmptyDirsAction,
     safety_snapshot: BatchUtilitySafetySnapshot,
 ) -> BatchUtilityCompilation:
     if action.type == "quarantine_filtered":
@@ -1830,6 +2067,12 @@ def compile_batch_utility_preview(
         )
     elif action.type == "flatten_one_level":
         return compile_flatten_one_level_preview(
+            session=session,
+            action=action,
+            safety_snapshot=safety_snapshot,
+        )
+    elif action.type == "remove_empty_dirs":
+        return compile_remove_empty_dirs_preview(
             session=session,
             action=action,
             safety_snapshot=safety_snapshot,
