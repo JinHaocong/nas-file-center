@@ -3,7 +3,7 @@ import pytest
 from fastapi.testclient import TestClient
 from app.config import Settings
 from app.main import create_app
-from app.models import User
+from app.models import User, ResourcePolicy
 from app.auth.password import hash_password
 from app.service import FileCenterService
 
@@ -192,3 +192,87 @@ def test_put_resource_policy_disabled_window_allows_equal_times(tmp_path: Path):
     assert data["active_window_timezone"] == "UTC"
     assert data["effective_now"]["profile"] == "full"
     assert data["effective_now"]["resource_jobs_admitted"] is True
+
+def test_put_resource_policy_authorization_matrix(tmp_path: Path):
+    client, service, settings = make_api_client(tmp_path)
+
+    PERSISTED_POLICY_KEYS = (
+        "id",
+        "scan_threads",
+        "hash_threads",
+        "io_limit",
+        "job_priority",
+        "active_window_enabled",
+        "active_window_start",
+        "active_window_end",
+        "active_window_timezone",
+        "outside_window_mode",
+        "revision",
+    )
+
+    valid_payload = {
+        "scan_threads": 4,
+        "hash_threads": 4,
+        "io_limit": "low",
+        "job_priority": "background",
+        "active_window_enabled": True,
+        "active_window_start": "02:00",
+        "active_window_end": "06:00",
+        "active_window_timezone": "UTC",
+        "outside_window_mode": "pause",
+    }
+
+    # Capture initial DB state
+    with service.SessionLocal() as session:
+        p_before = session.get(ResourcePolicy, 1)
+        before_state = {k: getattr(p_before, k) for k in PERSISTED_POLICY_KEYS}
+
+    # 1. Unauthenticated PUT -> 401
+    unauth_resp = client.put(
+        "/api/settings/resource-policy",
+        json=valid_payload,
+        headers={"Origin": "http://testserver"},
+    )
+    assert unauth_resp.status_code == 401
+
+    with service.SessionLocal() as session:
+        p_after = session.get(ResourcePolicy, 1)
+        after_state = {k: getattr(p_after, k) for k in PERSISTED_POLICY_KEYS}
+        assert after_state == before_state
+
+    # 2. Normal authenticated user PUT -> 403
+    client.post(
+        "/api/auth/login",
+        json={"username": "staff_user", "password": "StaffPassword123!"},
+        headers={"Origin": "http://testserver"},
+    )
+    user_resp = client.put(
+        "/api/settings/resource-policy",
+        json=valid_payload,
+        headers={"Origin": "http://testserver"},
+    )
+    assert user_resp.status_code == 403
+
+    with service.SessionLocal() as session:
+        p_after = session.get(ResourcePolicy, 1)
+        after_state = {k: getattr(p_after, k) for k in PERSISTED_POLICY_KEYS}
+        assert after_state == before_state
+
+    # 3. Admin PUT -> 200
+    client.post(
+        "/api/auth/login",
+        json={"username": "admin", "password": "AdminPassword123!"},
+        headers={"Origin": "http://testserver"},
+    )
+    admin_resp = client.put(
+        "/api/settings/resource-policy",
+        json=valid_payload,
+        headers={"Origin": "http://testserver"},
+    )
+    assert admin_resp.status_code == 200
+    data = admin_resp.json()
+    assert data["scan_threads"] == 4
+    assert data["hash_threads"] == 4
+    assert data["io_limit"] == "low"
+    assert data["job_priority"] == "background"
+    assert data["revision"] == before_state["revision"] + 1

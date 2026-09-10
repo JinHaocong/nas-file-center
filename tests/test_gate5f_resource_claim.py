@@ -247,3 +247,73 @@ def test_claim_with_disabled_window_and_equal_times_admits_resource_job(tmp_path
     with SessionLocal() as session:
         j = session.get(WorkJob, 801)
         assert j.status == "running"
+
+def test_claim_job_priority_background_prefers_mutation_over_resource(tmp_path: Path):
+    engine, SessionLocal = make_task_db(tmp_path)
+    worker_id = "worker-priority-bg"
+
+    with SessionLocal() as session:
+        policy = session.get(ResourcePolicy, 1)
+        policy.job_priority = "background"
+        policy.active_window_enabled = False
+
+        j1 = WorkJob(id=901, kind="fclones-scan", status="queued", state_json="{}")
+        j2 = WorkJob(id=902, kind="batch-plan-execute", status="queued", state_json="{}")
+        session.add_all([j1, j2])
+        session.commit()
+
+    with patch("app.tasks.recovery.utcnow", return_value=FROZEN_OUTSIDE_TIME):
+        assert acquire_worker_ownership(engine, SessionLocal, worker_id) is True
+        claimed = claim_next_job(engine, SessionLocal, worker_id)
+        assert claimed == 902
+
+    with SessionLocal() as session:
+        assert session.get(WorkJob, 901).status == "queued"
+        assert session.get(WorkJob, 902).status == "running"
+
+def test_claim_job_priority_normal_uses_fifo(tmp_path: Path):
+    engine, SessionLocal = make_task_db(tmp_path)
+    worker_id = "worker-priority-normal"
+
+    with SessionLocal() as session:
+        policy = session.get(ResourcePolicy, 1)
+        policy.job_priority = "normal"
+        policy.active_window_enabled = False
+
+        j1 = WorkJob(id=911, kind="fclones-scan", status="queued", state_json="{}")
+        j2 = WorkJob(id=912, kind="batch-plan-execute", status="queued", state_json="{}")
+        session.add_all([j1, j2])
+        session.commit()
+
+    with patch("app.tasks.recovery.utcnow", return_value=FROZEN_OUTSIDE_TIME):
+        assert acquire_worker_ownership(engine, SessionLocal, worker_id) is True
+        claimed = claim_next_job(engine, SessionLocal, worker_id)
+        assert claimed == 911
+
+    with SessionLocal() as session:
+        assert session.get(WorkJob, 911).status == "running"
+        assert session.get(WorkJob, 912).status == "queued"
+
+def test_claim_with_configured_active_window_does_not_create_scheduled_jobs(tmp_path: Path):
+    engine, SessionLocal = make_task_db(tmp_path)
+    worker_id = "worker-no-scheduler"
+
+    with SessionLocal() as session:
+        policy = session.get(ResourcePolicy, 1)
+        policy.active_window_enabled = True
+        policy.active_window_start = "01:00"
+        policy.active_window_end = "07:00"
+        policy.active_window_timezone = "UTC"
+        policy.outside_window_mode = "limited"
+        session.commit()
+
+    with SessionLocal() as session:
+        assert session.query(WorkJob).count() == 0
+
+    with patch("app.tasks.recovery.utcnow", return_value=FROZEN_OUTSIDE_TIME):
+        assert acquire_worker_ownership(engine, SessionLocal, worker_id) is True
+        claimed = claim_next_job(engine, SessionLocal, worker_id)
+        assert claimed is None
+
+    with SessionLocal() as session:
+        assert session.query(WorkJob).count() == 0
