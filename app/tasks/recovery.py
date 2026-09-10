@@ -6,7 +6,14 @@ from typing import Any
 from sqlalchemy import select, update, text
 from sqlalchemy.orm import sessionmaker
 
-from app.models import ScanJob, TaskLock, TaskEvent, WorkJob, WorkerState, utcnow
+from app.models import ResourcePolicy, ScanJob, TaskLock, TaskEvent, WorkJob, WorkerState, utcnow
+from app.resource_control import (
+    ResourcePolicySnapshot,
+    evaluate_resource_policy,
+    resolve_timezone,
+    resource_policy_row_fingerprint,
+    validate_resource_policy_snapshot,
+)
 from app.tasks.handlers import get_job_capabilities
 from app.tasks.logging import log_task_event
 from app.tasks.state_machine import JobLeaseLost, JobState
@@ -178,27 +185,148 @@ def update_worker_heartbeat(
         return False
 
 
+def get_policy_row_for_check(session: Any) -> ResourcePolicy | None:
+    return session.get(ResourcePolicy, 1)
+
+
 def claim_next_job(
     engine: Any,
     session_factory: sessionmaker,
     worker_id: str,
     timeout_seconds: float = WORKER_LEASE_TIMEOUT_SECONDS,
 ) -> int | None:
-    """
-    Atomically claim the next queued job under BEGIN IMMEDIATE write transaction.
-    Worker must hold an active, non-stale lease before claiming.
-    Raises JobLeaseLost if worker lease is not active/held.
-    Returns None if queue is empty.
-    Returns claimed job ID if successfully claimed.
-    """
+    MAX_POLICY_ATTEMPTS = 3
+
+    for attempt in range(MAX_POLICY_ATTEMPTS):
+        # Phase A: Outside write transaction (no write lock, no authoritative lease check)
+        with session_factory() as session:
+            row = session.get(ResourcePolicy, 1)
+            expected_fingerprint = resource_policy_row_fingerprint(row)
+            if row is None:
+                policy_valid = False
+                snapshot = None
+                prepared_tz = None
+            else:
+                try:
+                    snapshot = ResourcePolicySnapshot(
+                        scan_threads=row.scan_threads,
+                        hash_threads=row.hash_threads,
+                        io_limit=row.io_limit,
+                        job_priority=row.job_priority,
+                        active_window_enabled=row.active_window_enabled,
+                        active_window_start=row.active_window_start,
+                        active_window_end=row.active_window_end,
+                        active_window_timezone=row.active_window_timezone,
+                        outside_window_mode=row.outside_window_mode,
+                        revision=row.revision,
+                    )
+                    validate_resource_policy_snapshot(snapshot)
+                    policy_valid = True
+                    prepared_tz = (
+                        resolve_timezone(snapshot.active_window_timezone)
+                        if snapshot.active_window_enabled and snapshot.active_window_timezone
+                        else None
+                    )
+                except Exception:
+                    policy_valid = False
+                    snapshot = None
+                    prepared_tz = None
+
+        # Phase B: Short BEGIN IMMEDIATE write transaction
+        with session_factory() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            claim_now = utcnow()
+            assert_active_worker_lease(session, worker_id, now=claim_now, timeout_seconds=timeout_seconds)
+
+            current_row = get_policy_row_for_check(session)
+            current_fingerprint = resource_policy_row_fingerprint(current_row)
+
+            # Strict comparison of FULL policy fingerprint
+            if current_fingerprint != expected_fingerprint:
+                session.rollback()
+                continue
+
+            # Active-window eligibility evaluated against fresh transaction-time claim_now
+            if not policy_valid or snapshot is None:
+                resource_jobs_admitted = False
+                job_priority = "normal"
+            else:
+                eff = evaluate_resource_policy(snapshot, now_utc=claim_now, resolved_timezone=prepared_tz)
+                resource_jobs_admitted = eff.resource_jobs_admitted
+                job_priority = snapshot.job_priority
+
+            candidate_id = None
+            if not resource_jobs_admitted:
+                candidate_id = session.scalar(
+                    select(WorkJob.id)
+                    .where(
+                        WorkJob.status == JobState.QUEUED.value,
+                        WorkJob.kind.not_in(["index-root", "fclones-scan"]),
+                    )
+                    .order_by(WorkJob.id)
+                    .limit(1)
+                )
+            elif job_priority == "background":
+                candidate_id = session.scalar(
+                    select(WorkJob.id)
+                    .where(
+                        WorkJob.status == JobState.QUEUED.value,
+                        WorkJob.kind.not_in(["index-root", "fclones-scan"]),
+                    )
+                    .order_by(WorkJob.id)
+                    .limit(1)
+                )
+                if candidate_id is None:
+                    candidate_id = session.scalar(
+                        select(WorkJob.id)
+                        .where(
+                            WorkJob.status == JobState.QUEUED.value,
+                            WorkJob.kind.in_(["index-root", "fclones-scan"]),
+                        )
+                        .order_by(WorkJob.id)
+                        .limit(1)
+                    )
+            else:
+                candidate_id = session.scalar(
+                    select(WorkJob.id)
+                    .where(WorkJob.status == JobState.QUEUED.value)
+                    .order_by(WorkJob.id)
+                    .limit(1)
+                )
+
+            if candidate_id is None:
+                session.rollback()
+                return None
+
+            stmt = (
+                update(WorkJob)
+                .where(WorkJob.id == candidate_id, WorkJob.status == JobState.QUEUED.value)
+                .values(
+                    status=JobState.RUNNING.value,
+                    started_at=claim_now,
+                    heartbeat_at=claim_now,
+                    error_code=None,
+                    error_text=None,
+                )
+            )
+            result = session.execute(stmt)
+            session.commit()
+            if result.rowcount == 1:
+                return candidate_id
+            return None
+
+    # Retry exhaustion fallback: after 3 unstable snapshot attempts
+    # MUST NOT use stale policy, MUST NOT claim resource-controlled jobs
     with session_factory() as session:
         session.execute(text("BEGIN IMMEDIATE"))
-        now = utcnow()
-        assert_active_worker_lease(session, worker_id, now=now, timeout_seconds=timeout_seconds)
-
+        fallback_now = utcnow()
+        assert_active_worker_lease(session, worker_id, now=fallback_now, timeout_seconds=timeout_seconds)
         candidate_id = session.scalar(
             select(WorkJob.id)
-            .where(WorkJob.status == JobState.QUEUED.value)
+            .where(
+                WorkJob.status == JobState.QUEUED.value,
+                WorkJob.kind.not_in(["index-root", "fclones-scan"]),
+            )
             .order_by(WorkJob.id)
             .limit(1)
         )
@@ -211,8 +339,8 @@ def claim_next_job(
             .where(WorkJob.id == candidate_id, WorkJob.status == JobState.QUEUED.value)
             .values(
                 status=JobState.RUNNING.value,
-                started_at=now,
-                heartbeat_at=now,
+                started_at=fallback_now,
+                heartbeat_at=fallback_now,
                 error_code=None,
                 error_text=None,
             )
