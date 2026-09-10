@@ -219,3 +219,31 @@ def test_claim_active_window_boundary_race_evaluates_at_phase_b(tmp_path: Path):
 
     with SessionLocal() as session:
         assert session.get(WorkJob, 701).status == "queued"
+
+def test_claim_with_disabled_window_and_equal_times_admits_resource_job(tmp_path: Path):
+    engine, SessionLocal = make_task_db(tmp_path)
+    worker_id = "worker-disabled-equal"
+
+    with SessionLocal() as session:
+        policy = session.get(ResourcePolicy, 1)
+        policy.active_window_enabled = False
+        policy.active_window_start = "08:00"
+        policy.active_window_end = "08:00"
+        policy.active_window_timezone = "UTC"
+        policy.outside_window_mode = "pause"
+        policy.revision = 2
+
+        job = WorkJob(id=801, kind="index-root", status="queued", state_json="{}")
+        session.add(job)
+        session.commit()
+
+    with patch("app.tasks.recovery.utcnow", return_value=FROZEN_OUTSIDE_TIME):
+        acquired = acquire_worker_ownership(engine, SessionLocal, worker_id)
+        assert acquired is True
+
+        claimed = claim_next_job(engine, SessionLocal, worker_id)
+        assert claimed == 801
+
+    with SessionLocal() as session:
+        j = session.get(WorkJob, 801)
+        assert j.status == "running"

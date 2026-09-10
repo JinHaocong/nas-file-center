@@ -160,3 +160,35 @@ def test_put_resource_policy_semantic_validation_matrix_returns_422(tmp_path: Pa
         assert after_resp.status_code == 200
         after = persisted_projection(after_resp.json())
         assert after == before, f"Case {name} mutated persisted policy state!"
+
+def test_put_resource_policy_disabled_window_allows_equal_times(tmp_path: Path):
+    client, service, settings = make_api_client(tmp_path)
+    client.post(
+        "/api/auth/login",
+        json={"username": "admin", "password": "AdminPassword123!"},
+        headers={"Origin": "http://testserver"},
+    )
+    payload = {
+        "scan_threads": 2,
+        "hash_threads": 2,
+        "io_limit": "normal",
+        "job_priority": "normal",
+        "active_window_enabled": False,
+        "active_window_start": "08:00",
+        "active_window_end": "08:00",
+        "active_window_timezone": "UTC",
+        "outside_window_mode": "pause",
+    }
+    resp = client.put(
+        "/api/settings/resource-policy",
+        json=payload,
+        headers={"Origin": "http://testserver"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["active_window_enabled"] is False
+    assert data["active_window_start"] == "08:00"
+    assert data["active_window_end"] == "08:00"
+    assert data["active_window_timezone"] == "UTC"
+    assert data["effective_now"]["profile"] == "full"
+    assert data["effective_now"]["resource_jobs_admitted"] is True

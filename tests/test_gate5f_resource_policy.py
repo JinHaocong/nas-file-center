@@ -206,3 +206,53 @@ def test_is_resource_controlled_job():
     assert is_resource_controlled_job("fclones-scan") is True
     assert is_resource_controlled_job("batch-plan-execute") is False
     assert is_resource_controlled_job("quarantine-apply") is False
+
+def test_disabled_active_window_allows_equal_valid_times():
+    snap = ResourcePolicySnapshot(
+        scan_threads=2,
+        hash_threads=2,
+        io_limit="normal",
+        job_priority="normal",
+        active_window_enabled=False,
+        active_window_start="08:00",
+        active_window_end="08:00",
+        active_window_timezone="UTC",
+        outside_window_mode="pause",
+        revision=1,
+    )
+
+    validate_resource_policy_snapshot(snap)
+
+    eff = evaluate_resource_policy(
+        snap,
+        now_utc=datetime(
+            2026,
+            9,
+            10,
+            12,
+            0,
+            tzinfo=timezone.utc,
+        ),
+    )
+
+    assert eff.profile == "full"
+    assert eff.inside_active_window is None
+    assert eff.resource_jobs_admitted is True
+    assert eff.effective_thread_cap == 2
+
+def test_disabled_active_window_still_rejects_malformed_non_null_time():
+    snap = ResourcePolicySnapshot(
+        2,
+        2,
+        "normal",
+        "normal",
+        False,
+        "99:99",
+        "08:00",
+        "UTC",
+        "limited",
+        1,
+    )
+
+    with pytest.raises(ResourcePolicyValidationError):
+        validate_resource_policy_snapshot(snap)
