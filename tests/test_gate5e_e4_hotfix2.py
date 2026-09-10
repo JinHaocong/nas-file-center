@@ -432,3 +432,146 @@ def test_relocate_empty_dir_target_collision_fails_safely(tmp_path):
     assert res.state == "failed"
     assert "already exists" in res.reason
     assert d.exists(), "Source must be untouched"
+
+
+def test_execute_rmdir_empty_zero_rmdir_unlink_rmtree(lifecycle_env, monkeypatch):
+    import shutil
+    root = lifecycle_env["root_path"]
+    quarantine = lifecycle_env["quarantine_dir"]
+
+    victim = root / "zero_destruct_dir"
+    victim.mkdir()
+    st = victim.stat()
+
+    for fn in ("rmdir", "unlink"):
+        def forbidden(*args, **kwargs):
+            raise AssertionError(f"FORBIDDEN: os.{fn} called")
+        monkeypatch.setattr(os, fn, forbidden)
+    monkeypatch.setattr(shutil, "rmtree", lambda *a, **k: pytest.fail("FORBIDDEN: shutil.rmtree called"))
+
+    item = OperationItem(
+        sequence=1,
+        operation="rmdir_empty",
+        source=victim,
+        expected_device=st.st_dev,
+        expected_inode=st.st_ino,
+    )
+
+    res = execute_item(
+        item,
+        allowed_roots=[root],
+        allow_mutation=True,
+        allow_delete=True,
+        quarantine_root=quarantine,
+        plan_id="p_zero",
+    )
+
+    assert res.state == "completed"
+    assert not victim.exists()
+    assert res.result_path.exists()
+    assert res.result_path.is_dir()
+    assert res.result_path.stat().st_ino == st.st_ino
+
+
+def test_execute_restore_empty_dir_success_exact_inode(lifecycle_env):
+    root = lifecycle_env["root_path"]
+    quarantine = lifecycle_env["quarantine_dir"]
+
+    # 1. First logically remove an empty dir
+    d = root / "to_restore"
+    d.mkdir()
+    st = d.stat()
+
+    item_rm = OperationItem(
+        sequence=1,
+        operation="rmdir_empty",
+        source=d,
+        expected_device=st.st_dev,
+        expected_inode=st.st_ino,
+    )
+    res_rm = execute_item(
+        item_rm,
+        allowed_roots=[root],
+        allow_mutation=True,
+        allow_delete=True,
+        quarantine_root=quarantine,
+        plan_id="p_rest",
+    )
+    assert res_rm.state == "completed"
+    q_path = res_rm.result_path
+    assert q_path.exists()
+    assert not d.exists()
+
+    # 2. Now execute restore_empty_dir
+    st_q = q_path.stat()
+    item_restore = OperationItem(
+        sequence=2,
+        operation="restore_empty_dir",
+        source=q_path,
+        target=d,
+        expected_device=st_q.st_dev,
+        expected_inode=st_q.st_ino,
+    )
+    res_restore = execute_item(
+        item_restore,
+        allowed_roots=[root],
+        allow_mutation=True,
+        allow_delete=False,  # Prove ALLOW_DELETE is NOT required
+        quarantine_root=quarantine,
+        plan_id="p_rest",
+    )
+
+    assert res_restore.state == "completed"
+    assert d.exists()
+    assert not q_path.exists()
+    assert d.stat().st_ino == st.st_ino, "Exact inode must be preserved across restore!"
+
+
+def test_execute_restore_empty_dir_target_occupied_fails_safely(lifecycle_env):
+    root = lifecycle_env["root_path"]
+    quarantine = lifecycle_env["quarantine_dir"]
+
+    d = root / "occupied_target"
+    d.mkdir()
+    st = d.stat()
+
+    item_rm = OperationItem(
+        sequence=1,
+        operation="rmdir_empty",
+        source=d,
+        expected_device=st.st_dev,
+        expected_inode=st.st_ino,
+    )
+    res_rm = execute_item(
+        item_rm,
+        allowed_roots=[root],
+        allow_mutation=True,
+        allow_delete=True,
+        quarantine_root=quarantine,
+        plan_id="p_occ",
+    )
+    assert res_rm.state == "completed"
+    q_path = res_rm.result_path
+
+    # External actor occupies the original location
+    d.mkdir()
+    (d / "new_file.txt").write_text("blocker")
+
+    item_restore = OperationItem(
+        sequence=2,
+        operation="restore_empty_dir",
+        source=q_path,
+        target=d,
+    )
+    res_restore = execute_item(
+        item_restore,
+        allowed_roots=[root],
+        allow_mutation=True,
+        allow_delete=False,
+        quarantine_root=quarantine,
+        plan_id="p_occ",
+    )
+
+    assert res_restore.state == "skipped"
+    assert q_path.exists(), "Quarantined directory must remain preserved!"
+    assert (d / "new_file.txt").exists(), "Occupying target must not be overwritten!"

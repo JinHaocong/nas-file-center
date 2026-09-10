@@ -73,7 +73,7 @@ def execute_item(
         return _skip("filesystem mutation is disabled")
     if item.operation in {"unlink", "rmdir_empty"} and not allow_delete:
         return _skip("permanent deletion is disabled")
-    if item.operation not in {"rename", "move", "touch", "quarantine", "unlink", "restore", "rmdir_empty", "mkdir_empty"}:
+    if item.operation not in {"rename", "move", "touch", "quarantine", "unlink", "restore", "rmdir_empty", "mkdir_empty", "restore_empty_dir"}:
         return _skip(f"unsupported operation: {item.operation}")
 
     source_raw = Path(item.source)
@@ -81,7 +81,7 @@ def execute_item(
         return _skip("symlink is not allowed")
     try:
         valid_roots = list(allowed_roots)
-        if item.operation == "restore" and quarantine_root:
+        if item.operation in {"restore", "restore_empty_dir"} and quarantine_root:
             valid_roots.append(Path(quarantine_root).resolve())
         source = require_allowed_path(source_raw, valid_roots)
     except UnsafePathError as exc:
@@ -222,50 +222,22 @@ def execute_item(
                 except OSError as exc:
                     return _skip(f"stat failed: {exc}")
 
-            match = _containing_root(source, allowed_roots)
-            if match is None:
-                return _skip("source is outside configured roots")
-            _, base_root = match
-            rel_to_root = source.relative_to(base_root)
-            if len(rel_to_root.parts) == 0:
-                return _skip("cannot remove allowed root directory")
+            from app.batch_utilities.empty_dir_quarantine import relocate_empty_dir_to_quarantine
 
-            leaf_name = rel_to_root.parts[-1]
-            parent_parts = rel_to_root.parts[:-1]
-
-            flags = os.O_RDONLY | os.O_DIRECTORY
-            if hasattr(os, "O_NOFOLLOW"):
-                flags |= os.O_NOFOLLOW
-
-            with contextlib.ExitStack() as stack:
-                try:
-                    curr_fd = os.open(str(base_root), flags)
-                    stack.callback(os.close, curr_fd)
-                    for comp in parent_parts:
-                        next_fd = os.open(comp, flags, dir_fd=curr_fd)
-                        stack.callback(os.close, next_fd)
-                        curr_fd = next_fd
-                except OSError as exc:
-                    return _skip(f"failed to safely access directory path: {exc}")
-
-                try:
-                    st_leaf = os.stat(leaf_name, dir_fd=curr_fd, follow_symlinks=False)
-                except OSError as exc:
-                    return _skip(f"stat failed: {exc}")
-
-                if stat.S_ISLNK(st_leaf.st_mode) or not stat.S_ISDIR(st_leaf.st_mode):
-                    return _skip("source is not a directory")
-
-                if (item.expected_device and st_leaf.st_dev != item.expected_device) or (
-                    item.expected_inode and st_leaf.st_ino != item.expected_inode
-                ):
-                    return _skip("source identity changed")
-
-                try:
-                    os.rmdir(leaf_name, dir_fd=curr_fd)
-                except OSError as exc:
-                    return ItemResult("failed", str(exc))
-                return ItemResult("completed", "empty directory removed", source)
+            reloc_res = relocate_empty_dir_to_quarantine(
+                source,
+                allowed_roots=allowed_roots,
+                quarantine_root=quarantine_root,
+                plan_id=plan_id,
+                sequence=item.sequence,
+                expected_device=item.expected_device,
+                expected_inode=item.expected_inode,
+            )
+            return ItemResult(
+                state=reloc_res.state,
+                reason=reloc_res.reason,
+                result_path=reloc_res.quarantine_path if reloc_res.state == "completed" else (reloc_res.quarantine_path or source),
+            )
 
         if item.operation == "mkdir_empty":
             if item.target is None:
@@ -350,6 +322,122 @@ def execute_item(
                     return ItemResult("failed", str(exc))
 
                 return ItemResult("completed", "empty directory created", target)
+
+        if item.operation == "restore_empty_dir":
+            if item.target is None:
+                return _skip("target is required for restore_empty_dir")
+            target_raw = Path(item.target)
+            if target_raw.is_symlink() or os.path.lexists(target_raw):
+                return _skip("target already exists")
+
+            target = require_allowed_path(target_raw, allowed_roots)
+            if is_reserved_quarantine_path(target, quarantine_root):
+                return _skip("restore target cannot be within quarantine root")
+
+            if not is_reserved_quarantine_path(source, quarantine_root):
+                return _skip("restore source must be within quarantine root")
+
+            if source.is_symlink() or not source.is_dir():
+                return _skip("restore source is missing or not a directory")
+
+            parent_raw = target_raw.parent
+            if parent_raw.is_symlink() or not parent_raw.exists() or not parent_raw.is_dir():
+                return _skip("target parent is missing or not a directory")
+
+            if item.expected_device or item.expected_inode:
+                try:
+                    st_src = os.lstat(source)
+                    if (item.expected_device and st_src.st_dev != item.expected_device) or (
+                        item.expected_inode and st_src.st_ino != item.expected_inode
+                    ):
+                        return _skip("quarantined source identity changed")
+                except OSError as exc:
+                    return _skip(f"stat failed on source: {exc}")
+
+            flags = os.O_RDONLY | os.O_DIRECTORY
+            if hasattr(os, "O_NOFOLLOW"):
+                flags |= os.O_NOFOLLOW
+
+            q_root = Path(quarantine_root).expanduser().resolve()
+            match_target = _containing_root(target, allowed_roots)
+            if match_target is None:
+                return _skip("target is outside configured roots")
+            _, base_root = match_target
+            rel_target = target.relative_to(base_root)
+            target_leaf = rel_target.parts[-1]
+            parent_parts = rel_target.parts[:-1]
+
+            from app.fs_ops import rename_noreplace_at
+
+            with contextlib.ExitStack() as stack:
+                try:
+                    q_fd = os.open(str(q_root), flags)
+                    stack.callback(os.close, q_fd)
+                except OSError as exc:
+                    return ItemResult("failed", f"failed to open quarantine root: {exc}")
+
+                try:
+                    curr_fd = os.open(str(base_root), flags)
+                    stack.callback(os.close, curr_fd)
+                    for comp in parent_parts:
+                        next_fd = os.open(comp, flags, dir_fd=curr_fd)
+                        stack.callback(os.close, next_fd)
+                        curr_fd = next_fd
+                except OSError as exc:
+                    return _skip(f"target parent is missing or not a directory: {exc}")
+
+                target_parent_fd = curr_fd
+
+                try:
+                    os.stat(target_leaf, dir_fd=target_parent_fd, follow_symlinks=False)
+                    return _skip("target already exists")
+                except FileNotFoundError:
+                    pass
+                except OSError as exc:
+                    if exc.errno != errno.ENOENT:
+                        return ItemResult("failed", str(exc))
+
+                rel_src = source.relative_to(q_root)
+                if len(rel_src.parts) == 1:
+                    src_q_fd = q_fd
+                    src_name = rel_src.parts[0]
+                else:
+                    src_curr = q_fd
+                    for p in rel_src.parts[:-1]:
+                        s_next = os.open(p, flags, dir_fd=src_curr)
+                        stack.callback(os.close, s_next)
+                        src_curr = s_next
+                    src_q_fd = src_curr
+                    src_name = rel_src.parts[-1]
+
+                try:
+                    st_q = os.stat(src_name, dir_fd=src_q_fd, follow_symlinks=False)
+                except OSError as exc:
+                    return _skip(f"stat failed on quarantine source: {exc}")
+
+                if stat.S_ISLNK(st_q.st_mode) or not stat.S_ISDIR(st_q.st_mode):
+                    return _skip("quarantine source is not a directory")
+
+                if (item.expected_device and st_q.st_dev != item.expected_device) or (
+                    item.expected_inode and st_q.st_ino != item.expected_inode
+                ):
+                    return _skip("quarantined source identity changed")
+
+                try:
+                    rename_noreplace_at(
+                        src_q_fd,
+                        src_name,
+                        target_parent_fd,
+                        target_leaf,
+                    )
+                except FileExistsError:
+                    return _skip("target already exists")
+                except OSError as exc:
+                    if exc.errno == errno.EXDEV:
+                        return ItemResult("failed", "cross-filesystem restore is not supported")
+                    return ItemResult("failed", str(exc))
+
+                return ItemResult("completed", "empty directory restored from quarantine", target)
 
         if item.operation == "unlink":
             os.unlink(source)
