@@ -131,15 +131,22 @@ def test_reconcile_rmdir_empty_after_successful_removal_completes_and_adds_one_j
     settings = recovery_test_env["settings"]
     root = recovery_test_env["root_path"]
 
+    from app.batch_utilities.empty_dir_quarantine import build_e4_quarantine_name
     dir_to_rm = root / "deleted_empty_dir"
     dir_to_rm.mkdir()
     st = dir_to_rm.stat()
-    dir_to_rm.rmdir()  # Removed on disk, but DB was left executing
 
     with service.SessionLocal() as session:
         plan = BatchPlan(name="p1", kind="batch-utility", status="running")
         session.add(plan)
-        session.flush()
+        session.commit()
+        plan_id = plan.id
+
+    q_name = build_e4_quarantine_name(plan_id, 1, str(dir_to_rm))
+    q_target = Path(settings.quarantine_root) / q_name
+    dir_to_rm.rename(q_target)  # Relocated to quarantine on disk, but DB was left executing
+
+    with service.SessionLocal() as session:
 
         item = BatchPlanItem(
             plan_id=plan.id,

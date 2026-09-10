@@ -61,12 +61,14 @@ def undo_test_env(tmp_path):
     }
 
 
-def test_undo_rmdir_empty_produces_mkdir_empty_in_shallowest_first_order(undo_test_env):
+def test_undo_rmdir_empty_produces_restore_empty_dir_in_shallowest_first_order(undo_test_env):
     service = undo_test_env["service"]
     root = undo_test_env["root_path"]
 
     scope = root / "scope"
     (scope / "a" / "b").mkdir(parents=True)
+    orig_ino_a = (scope / "a").stat().st_ino
+    orig_ino_b = (scope / "a" / "b").stat().st_ino
 
     action = {
         "type": "remove_empty_dirs",
@@ -115,12 +117,12 @@ def test_undo_rmdir_empty_produces_mkdir_empty_in_shallowest_first_order(undo_te
         job_db.status = "completed"
         session.commit()
 
-    # Assert directories were deleted
+    # Assert directories were relocated from managed scope
     assert not (scope / "a" / "b").exists()
     assert not (scope / "a").exists()
     assert scope.exists()
 
-    # Verify journals were created
+    # Verify journals were created with quarantine_path
     with service.SessionLocal() as session:
         journals = session.query(OperationJournal).filter_by(plan_id=plan_id).order_by(OperationJournal.sequence).all()
         assert len(journals) == 2
@@ -128,11 +130,15 @@ def test_undo_rmdir_empty_produces_mkdir_empty_in_shallowest_first_order(undo_te
         j1_a = json.loads(journals[0].after_json)
         assert j1_b["path"] == str(scope / "a" / "b")
         assert j1_b["scope_root"] == str(scope.resolve())
-        assert j1_a["removed"] is True
+        assert j1_a["logical_removed"] is True
+        assert j1_a["quarantine_path"] is not None
 
         j2_b = json.loads(journals[1].before_json)
+        j2_a = json.loads(journals[1].after_json)
         assert j2_b["path"] == str(scope / "a")
         assert j2_b["scope_root"] == str(scope.resolve())
+        assert j2_a["logical_removed"] is True
+        assert j2_a["quarantine_path"] is not None
 
     # Create Undo Plan
     undo_res = service.create_undo_plan(plan_id)
@@ -142,21 +148,18 @@ def test_undo_rmdir_empty_produces_mkdir_empty_in_shallowest_first_order(undo_te
         undo_items = session.query(BatchPlanItem).filter_by(plan_id=undo_id).order_by(BatchPlanItem.sequence).all()
         assert len(undo_items) == 2
 
-        # Shallowest-first: sequence 1 must create 'a', sequence 2 creates 'a/b'
+        # Shallowest-first: sequence 1 must restore 'a', sequence 2 restores 'a/b'
         assert undo_items[0].sequence == 1
-        assert undo_items[0].operation == "mkdir_empty"
-        assert undo_items[0].source_path == str(scope.resolve())
+        assert undo_items[0].operation == "restore_empty_dir"
+        assert undo_items[0].source_path == j2_a["quarantine_path"]
         assert undo_items[0].target_path == str(scope / "a")
         assert undo_items[0].expected_device == 0
         assert undo_items[0].expected_inode == 0
 
         assert undo_items[1].sequence == 2
-        assert undo_items[1].operation == "mkdir_empty"
-        assert undo_items[1].source_path == str(scope.resolve())
+        assert undo_items[1].operation == "restore_empty_dir"
+        assert undo_items[1].source_path == j1_a["quarantine_path"]
         assert undo_items[1].target_path == str(scope / "a" / "b")
-
-        meta0 = json.loads(undo_items[0].metadata_json)
-        assert meta0["undo"]["structural_only"] is True
 
     # Now Freeze, Validate, and Execute the Undo plan!
     service.freeze_plan(undo_id)
@@ -173,9 +176,49 @@ def test_undo_rmdir_empty_produces_mkdir_empty_in_shallowest_first_order(undo_te
         job_undo_db.status = "completed"
         session.commit()
 
-    # Assert directories are restored!
+    # Assert directories are restored with EXACT PRESERVED INODES!
     assert (scope / "a").is_dir()
     assert (scope / "a" / "b").is_dir()
+    assert (scope / "a").stat().st_ino == orig_ino_a, "Exact inode must be preserved for 'a'"
+    assert (scope / "a" / "b").stat().st_ino == orig_ino_b, "Exact inode must be preserved for 'a/b'"
+
+
+def test_undo_legacy_rmdir_empty_without_quarantine_path_produces_mkdir_empty(undo_test_env):
+    """
+    §13.3 Legacy compatibility:
+    Pre-amendment persisted plans/journals without quarantine_path produce structural mkdir_empty.
+    """
+    service = undo_test_env["service"]
+    root = undo_test_env["root_path"]
+
+    scope = root / "scope_legacy"
+
+    with service.SessionLocal() as session:
+        plan = BatchPlan(name="legacy-plan", kind="batch-utility", status="completed")
+        session.add(plan)
+        session.flush()
+
+        j = OperationJournal(
+            operation="rmdir_empty",
+            sequence=1,
+            plan_id=plan.id,
+            plan_item_id=None,
+            task_id=None,
+            before_json=json.dumps({"path": str(scope / "old_dir"), "scope_root": str(scope)}),
+            after_json=json.dumps({"removed": True}),  # Legacy journal without quarantine_path
+        )
+        session.add(j)
+        session.commit()
+        plan_id = plan.id
+
+    undo_res = service.create_undo_plan(plan_id)
+    with service.SessionLocal() as session:
+        items = session.query(BatchPlanItem).filter_by(plan_id=undo_res["id"]).all()
+        assert len(items) == 1
+        assert items[0].operation == "mkdir_empty"
+        assert items[0].target_path == str(scope / "old_dir")
+        meta = json.loads(items[0].metadata_json)
+        assert meta["undo"]["structural_only"] is True
 
 
 def test_undo_mkdir_empty_inverts_to_rmdir_empty(undo_test_env):

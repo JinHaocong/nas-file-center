@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import pytest
 
-from app.models import IndexRoot, User, BatchPlan, BatchPlanItem, OperationJournal
+from app.models import IndexRoot, User, BatchPlan, BatchPlanItem, OperationJournal, WorkJob, utcnow
 from app.config import Settings
 from app.service import FileCenterService
 from app.auth.password import hash_password
@@ -43,12 +43,19 @@ def lifecycle_env(tmp_path):
         r = IndexRoot(id=1, root=str(root_path))
         session.add(r)
         reg_user = User(
+            id=1,
             username="normaluser",
             password_hash=hash_password("UserPassword123!"),
             is_active=True,
             role="user",
         )
         session.add(reg_user)
+        job = WorkJob(
+            id=1,
+            kind="batch-plan-execute",
+            status="running",
+        )
+        session.add(job)
         session.commit()
 
     return {
@@ -861,4 +868,437 @@ def test_undo_restore_empty_dir_inverts_to_rmdir_empty(lifecycle_env):
         assert len(items) == 1
         assert items[0].operation == "rmdir_empty"
         assert items[0].source_path == str(d)
+
+
+def test_reconcile_rmdir_empty_state_a_returns_to_planned(lifecycle_env):
+    """
+    State A (§15.1):
+    source exists as Frozen X, quarantine target absent -> return to planned, reason=None
+    """
+    from app.tasks.handlers import _reconcile_executing_item
+    service = lifecycle_env["service"]
+    settings = service.settings
+    root = lifecycle_env["root_path"]
+
+    d = root / "state_a_dir"
+    d.mkdir()
+    st = d.stat()
+
+    with service.SessionLocal() as session:
+        plan = BatchPlan(name="p_state_a", kind="batch-utility", status="running")
+        session.add(plan)
+        session.flush()
+
+        item = BatchPlanItem(
+            plan_id=plan.id,
+            sequence=1,
+            operation="rmdir_empty",
+            source_path=str(d),
+            expected_device=st.st_dev,
+            expected_inode=st.st_ino,
+            state="executing",
+            metadata_json=json.dumps({
+                "scope_root": str(root),
+                "execution": {
+                    "source_stat": {
+                        "device": st.st_dev,
+                        "inode": st.st_ino,
+                        "object_type": "directory",
+                    }
+                }
+            }),
+        )
+        session.add(item)
+        session.commit()
+        item_id = item.id
+        plan_id = plan.id
+
+    with service.SessionLocal() as session:
+        item = session.get(BatchPlanItem, item_id)
+        _reconcile_executing_item(
+            session=session,
+            item=item,
+            plan_id=plan_id,
+            job_id=1,
+            user_id=1,
+            settings=settings,
+            now=utcnow(),
+        )
+        session.commit()
+
+    with service.SessionLocal() as session:
+        item = session.get(BatchPlanItem, item_id)
+        assert item.state == "planned"
+        assert item.reason is None
+
+
+def test_reconcile_rmdir_empty_state_b_relocated_completes_with_quarantine_journal(lifecycle_env):
+    """
+    State B (§15.1):
+    source absent, quarantine target exists as Frozen X
+    -> mark completed, create missing success journal with quarantine_path exactly once.
+    """
+    from app.tasks.handlers import _reconcile_executing_item
+    from app.batch_utilities.empty_dir_quarantine import build_e4_quarantine_name
+    service = lifecycle_env["service"]
+    settings = service.settings
+    root = lifecycle_env["root_path"]
+    quarantine = lifecycle_env["quarantine_dir"]
+
+    d = root / "state_b_dir"
+    d.mkdir()
+    st = d.stat()
+
+    # Emulate crash right after atomic relocation to quarantine target
+    plan_id = 901
+    seq = 1
+    q_name = build_e4_quarantine_name(plan_id, seq, str(d))
+    q_target = quarantine / q_name
+    d.rename(q_target)
+
+    with service.SessionLocal() as session:
+        plan = BatchPlan(id=plan_id, name="p_state_b", kind="batch-utility", status="running")
+        session.add(plan)
+        session.flush()
+
+        item = BatchPlanItem(
+            plan_id=plan.id,
+            sequence=seq,
+            operation="rmdir_empty",
+            source_path=str(d),
+            expected_device=st.st_dev,
+            expected_inode=st.st_ino,
+            state="executing",
+            metadata_json=json.dumps({
+                "scope_root": str(root),
+                "execution": {
+                    "source_stat": {
+                        "device": st.st_dev,
+                        "inode": st.st_ino,
+                        "object_type": "directory",
+                    }
+                }
+            }),
+        )
+        session.add(item)
+        session.commit()
+        item_id = item.id
+
+    with service.SessionLocal() as session:
+        item = session.get(BatchPlanItem, item_id)
+        _reconcile_executing_item(
+            session=session,
+            item=item,
+            plan_id=plan_id,
+            job_id=1,
+            user_id=1,
+            settings=settings,
+            now=utcnow(),
+        )
+        session.commit()
+
+    with service.SessionLocal() as session:
+        item = session.get(BatchPlanItem, item_id)
+        assert item.state == "completed"
+        journals = session.query(OperationJournal).filter_by(plan_item_id=item_id).all()
+        assert len(journals) == 1
+        j = journals[0]
+        assert j.operation == "rmdir_empty"
+        after = json.loads(j.after_json)
+        assert after["quarantine_path"] == str(q_target)
+        assert after["logical_removed"] is True
+        assert after["preserved"] is True
+
+
+def test_reconcile_rmdir_empty_state_c_quarantine_identity_mismatch_fails_safely(lifecycle_env):
+    """
+    State C (§15.1):
+    quarantine target exists but identity != Frozen X
+    -> mark failed/conflict, do not destroy target, attempt safe rollback if possible.
+    """
+    from app.tasks.handlers import _reconcile_executing_item
+    from app.batch_utilities.empty_dir_quarantine import build_e4_quarantine_name
+    service = lifecycle_env["service"]
+    settings = service.settings
+    root = lifecycle_env["root_path"]
+    quarantine = lifecycle_env["quarantine_dir"]
+
+    d = root / "state_c_dir"
+    # Expected identity was from a previous object
+    exp_dev = 1
+    exp_ino = 9999999
+
+    plan_id = 902
+    seq = 1
+    q_name = build_e4_quarantine_name(plan_id, seq, str(d))
+    q_target = quarantine / q_name
+    q_target.mkdir()  # Created with different inode
+
+    with service.SessionLocal() as session:
+        plan = BatchPlan(id=plan_id, name="p_state_c", kind="batch-utility", status="running")
+        session.add(plan)
+        session.flush()
+
+        item = BatchPlanItem(
+            plan_id=plan.id,
+            sequence=seq,
+            operation="rmdir_empty",
+            source_path=str(d),
+            expected_device=exp_dev,
+            expected_inode=exp_ino,
+            state="executing",
+            metadata_json=json.dumps({
+                "scope_root": str(root),
+                "execution": {
+                    "source_stat": {
+                        "device": exp_dev,
+                        "inode": exp_ino,
+                        "object_type": "directory",
+                    }
+                }
+            }),
+        )
+        session.add(item)
+        session.commit()
+        item_id = item.id
+
+    with service.SessionLocal() as session:
+        item = session.get(BatchPlanItem, item_id)
+        _reconcile_executing_item(
+            session=session,
+            item=item,
+            plan_id=plan_id,
+            job_id=1,
+            user_id=1,
+            settings=settings,
+            now=utcnow(),
+        )
+        session.commit()
+
+    with service.SessionLocal() as session:
+        item = session.get(BatchPlanItem, item_id)
+        assert item.state == "failed"
+        assert "conflict" in (item.reason or "")
+        # Object in quarantine or rolled back to d must not be destroyed!
+        assert q_target.exists() or d.exists()
+
+
+def test_reconcile_rmdir_empty_state_d_both_source_and_quarantine_exist_conflicts(lifecycle_env):
+    """
+    State D (§15.1):
+    source Frozen X exists AND quarantine target exists -> conflict, preserve both!
+    """
+    from app.tasks.handlers import _reconcile_executing_item
+    from app.batch_utilities.empty_dir_quarantine import build_e4_quarantine_name
+    service = lifecycle_env["service"]
+    settings = service.settings
+    root = lifecycle_env["root_path"]
+    quarantine = lifecycle_env["quarantine_dir"]
+
+    d = root / "state_d_dir"
+    d.mkdir()
+    st = d.stat()
+
+    plan_id = 903
+    seq = 1
+    q_name = build_e4_quarantine_name(plan_id, seq, str(d))
+    q_target = quarantine / q_name
+    q_target.mkdir()
+
+    with service.SessionLocal() as session:
+        plan = BatchPlan(id=plan_id, name="p_state_d", kind="batch-utility", status="running")
+        session.add(plan)
+        session.flush()
+
+        item = BatchPlanItem(
+            plan_id=plan.id,
+            sequence=seq,
+            operation="rmdir_empty",
+            source_path=str(d),
+            expected_device=st.st_dev,
+            expected_inode=st.st_ino,
+            state="executing",
+            metadata_json=json.dumps({
+                "scope_root": str(root),
+                "execution": {
+                    "source_stat": {
+                        "device": st.st_dev,
+                        "inode": st.st_ino,
+                        "object_type": "directory",
+                    }
+                }
+            }),
+        )
+        session.add(item)
+        session.commit()
+        item_id = item.id
+
+    with service.SessionLocal() as session:
+        item = session.get(BatchPlanItem, item_id)
+        _reconcile_executing_item(
+            session=session,
+            item=item,
+            plan_id=plan_id,
+            job_id=1,
+            user_id=1,
+            settings=settings,
+            now=utcnow(),
+        )
+        session.commit()
+
+    with service.SessionLocal() as session:
+        item = session.get(BatchPlanItem, item_id)
+        assert item.state == "failed"
+        assert "conflict" in (item.reason or "")
+        assert d.exists()
+        assert q_target.exists()
+
+
+def test_reconcile_rmdir_empty_state_e_both_absent_fails_closed(lifecycle_env):
+    """
+    State E (§15.1):
+    source absent AND quarantine target absent -> fail closed
+    """
+    from app.tasks.handlers import _reconcile_executing_item
+    service = lifecycle_env["service"]
+    settings = service.settings
+    root = lifecycle_env["root_path"]
+
+    d = root / "state_e_dir"
+    exp_dev = 1
+    exp_ino = 8888888
+
+    with service.SessionLocal() as session:
+        plan = BatchPlan(id=904, name="p_state_e", kind="batch-utility", status="running")
+        session.add(plan)
+        session.flush()
+
+        item = BatchPlanItem(
+            plan_id=plan.id,
+            sequence=1,
+            operation="rmdir_empty",
+            source_path=str(d),
+            expected_device=exp_dev,
+            expected_inode=exp_ino,
+            state="executing",
+            metadata_json=json.dumps({
+                "scope_root": str(root),
+                "execution": {
+                    "source_stat": {
+                        "device": exp_dev,
+                        "inode": exp_ino,
+                        "object_type": "directory",
+                    }
+                }
+            }),
+        )
+        session.add(item)
+        session.commit()
+        item_id = item.id
+
+    with service.SessionLocal() as session:
+        item = session.get(BatchPlanItem, item_id)
+        _reconcile_executing_item(
+            session=session,
+            item=item,
+            plan_id=904,
+            job_id=1,
+            user_id=1,
+            settings=settings,
+            now=utcnow(),
+        )
+        session.commit()
+
+    with service.SessionLocal() as session:
+        item = session.get(BatchPlanItem, item_id)
+        assert item.state == "failed"
+        assert "absent" in (item.reason or "")
+
+
+def test_reconcile_restore_empty_dir_states(lifecycle_env):
+    """
+    Restore empty dir crash states (§15.2):
+    - restore source in quarantine, target absent -> planned
+    - quarantine absent, target exists with Frozen identity -> completed + journal
+    - target exists with wrong identity -> failed/conflict
+    """
+    from app.tasks.handlers import _reconcile_executing_item
+    service = lifecycle_env["service"]
+    settings = service.settings
+    root = lifecycle_env["root_path"]
+    quarantine = lifecycle_env["quarantine_dir"]
+
+    # 1. Unfinished restore: source in quarantine, target absent -> planned
+    q_src1 = quarantine / ".nfc-e4-p905-s1-test"
+    q_src1.mkdir()
+    st1 = q_src1.stat()
+    tgt1 = root / "restored_1"
+
+    with service.SessionLocal() as session:
+        plan = BatchPlan(id=905, name="p_rest_crash", kind="undo", status="running")
+        session.add(plan)
+        session.flush()
+
+        item1 = BatchPlanItem(
+            plan_id=plan.id,
+            sequence=1,
+            operation="restore_empty_dir",
+            source_path=str(q_src1),
+            target_path=str(tgt1),
+            expected_device=st1.st_dev,
+            expected_inode=st1.st_ino,
+            state="executing",
+            metadata_json=json.dumps({"scope_root": str(root)}),
+        )
+        session.add(item1)
+        session.commit()
+        i1_id = item1.id
+
+    with service.SessionLocal() as session:
+        item = session.get(BatchPlanItem, i1_id)
+        _reconcile_executing_item(session, item, 905, 1, 1, settings, utcnow())
+        session.commit()
+
+    with service.SessionLocal() as session:
+        item = session.get(BatchPlanItem, i1_id)
+        assert item.state == "planned"
+        assert item.reason is None
+
+    # 2. Completed restore: quarantine absent, target exists with Frozen identity -> completed + journal
+    q_src2 = quarantine / ".nfc-e4-p905-s2-test"
+    tgt2 = root / "restored_2"
+    tgt2.mkdir()
+    st2 = tgt2.stat()
+
+    with service.SessionLocal() as session:
+        item2 = BatchPlanItem(
+            plan_id=905,
+            sequence=2,
+            operation="restore_empty_dir",
+            source_path=str(q_src2),
+            target_path=str(tgt2),
+            expected_device=st2.st_dev,
+            expected_inode=st2.st_ino,
+            state="executing",
+            metadata_json=json.dumps({"scope_root": str(root)}),
+        )
+        session.add(item2)
+        session.commit()
+        i2_id = item2.id
+
+    with service.SessionLocal() as session:
+        item = session.get(BatchPlanItem, i2_id)
+        _reconcile_executing_item(session, item, 905, 1, 1, settings, utcnow())
+        session.commit()
+
+    with service.SessionLocal() as session:
+        item = session.get(BatchPlanItem, i2_id)
+        assert item.state == "completed"
+        journals = session.query(OperationJournal).filter_by(plan_item_id=i2_id).all()
+        assert len(journals) == 1
+        j = journals[0]
+        assert j.operation == "restore_empty_dir"
+        after = json.loads(j.after_json)
+        assert after["restored"] is True
+
 

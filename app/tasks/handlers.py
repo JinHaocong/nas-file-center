@@ -42,6 +42,8 @@ from app.scanners.fclones import build_group_command, run_scan
 from app.scanners.parser import parse_fclones_report, parse_fclones_report_iter
 from app.tasks.context import JobContext
 from app.tasks.state_machine import JobCancelRequested, JobLeaseLost, JobPauseRequested
+from app.batch_utilities.empty_dir_quarantine import build_e4_quarantine_name
+from app.fs_ops import rename_noreplace_at
 
 
 class TaskHandler(ABC):
@@ -728,55 +730,217 @@ def _reconcile_executing_item(
         source_stat = exec_meta.get("source_stat") or {}
         metadata_before = exec_meta.get("metadata_before") or source_stat
 
-        if src.is_symlink():
+        exp_dev = item.expected_device or source_stat.get("device")
+        exp_ino = item.expected_inode or source_stat.get("inode")
+        if exp_dev is None or exp_ino is None:
             item.state = "failed"
-            item.reason = "reconciliation conflict after crash (source replaced by symlink)"
-        elif src.exists():
-            if not src.is_dir():
-                item.state = "failed"
-                item.reason = "reconciliation conflict after crash (source is not a directory)"
-            else:
+            item.reason = "reconciliation conflict after crash (missing pre-mutation identity evidence)"
+            return
+
+        if not settings.quarantine_root:
+            item.state = "failed"
+            item.reason = "reconciliation failed after crash (quarantine root not configured)"
+            return
+
+        q_name = build_e4_quarantine_name(plan_id, item.sequence, str(src))
+        q_target = Path(settings.quarantine_root) / q_name
+
+        src_exists = os.path.lexists(src)
+        src_is_frozen_x = False
+        if src_exists and not src.is_symlink():
+            try:
+                st_src = src.stat(follow_symlinks=False)
+                if src.is_dir() and st_src.st_dev == exp_dev and st_src.st_ino == exp_ino:
+                    src_is_frozen_x = True
+            except OSError:
+                pass
+
+        q_exists = os.path.lexists(q_target)
+        q_is_frozen_x = False
+        q_st = None
+        if q_exists and not q_target.is_symlink():
+            try:
+                st_q = q_target.stat(follow_symlinks=False)
+                q_st = st_q
+                if q_target.is_dir() and st_q.st_dev == exp_dev and st_q.st_ino == exp_ino:
+                    q_is_frozen_x = True
+            except OSError:
+                pass
+
+        # State D: Both source Frozen X and quarantine target exist -> conflict
+        if src_is_frozen_x and q_exists:
+            item.state = "failed"
+            item.reason = "reconciliation conflict after crash (both source and quarantine target exist)"
+            return
+
+        # State A: source exists as Frozen X, quarantine target absent -> planned (retryable)
+        if src_is_frozen_x and not q_exists:
+            item.state = "planned"
+            item.reason = None
+            return
+
+        # State B: source absent or occupied by unrelated object, quarantine exists as Frozen X
+        if q_is_frozen_x:
+            item.state = "completed"
+            item.reason = "reconciled after crash (empty directory relocated to quarantine)"
+            existing_j = session.scalar(select(OperationJournal).where(OperationJournal.plan_item_id == item.id))
+            if not existing_j:
+                session.add(OperationJournal(
+                    operation=item.operation,
+                    sequence=item.sequence,
+                    plan_id=plan_id,
+                    plan_item_id=item.id,
+                    task_id=job_id,
+                    user_id=user_id,
+                    before_json=json.dumps({
+                        "path": str(src),
+                        "scope_root": meta.get("scope_root"),
+                        "object_type": "directory",
+                    }, ensure_ascii=False),
+                    after_json=json.dumps({
+                        "logical_removed": True,
+                        "preserved": True,
+                        "removed": True,
+                        "quarantine_path": str(q_target),
+                    }, ensure_ascii=False),
+                    metadata_before_json=json.dumps(metadata_before or source_stat, ensure_ascii=False),
+                    metadata_after_json=json.dumps({
+                        "object_type": "directory",
+                        "size": q_st.st_size if q_st else 0,
+                        "mtime_ns": getattr(q_st, "st_mtime_ns", int(q_st.st_mtime * 1e9)) if q_st else 0,
+                        "device": getattr(q_st, "st_dev", 0) if q_st else 0,
+                        "inode": getattr(q_st, "st_ino", 0) if q_st else 0,
+                    }, ensure_ascii=False),
+                    created_at=now,
+                ))
+            return
+
+        # State C: quarantine target exists but identity != Frozen X
+        if q_exists:
+            item.state = "failed"
+            item.reason = "reconciliation conflict after crash (quarantine target identity mismatch)"
+            # Attempt safe no-replace rollback if source path does not exist
+            if not src_exists:
                 try:
-                    st = src.stat(follow_symlinks=False)
-                    exp_dev = item.expected_device or source_stat.get("device")
-                    exp_ino = item.expected_inode or source_stat.get("inode")
-                    if exp_dev is not None and exp_ino is not None and st.st_dev == exp_dev and st.st_ino == exp_ino:
-                        item.state = "planned"
-                        item.reason = None
-                    else:
-                        item.state = "failed"
-                        item.reason = "reconciliation conflict after crash (source identity mismatch)"
-                except OSError:
-                    item.state = "failed"
-                    item.reason = "reconciliation conflict after crash (stat failed on source)"
-        else:
-            exp_dev = item.expected_device or source_stat.get("device")
-            exp_ino = item.expected_inode or source_stat.get("inode")
-            if exp_dev is None or exp_ino is None:
-                item.state = "failed"
-                item.reason = "reconciliation conflict after crash (missing pre-mutation identity evidence)"
-            else:
-                item.state = "completed"
-                item.reason = "reconciled after crash (empty directory removed)"
-                existing_j = session.scalar(select(OperationJournal).where(OperationJournal.plan_item_id == item.id))
-                if not existing_j:
-                    session.add(OperationJournal(
-                        operation=item.operation,
-                        sequence=item.sequence,
-                        plan_id=plan_id,
-                        plan_item_id=item.id,
-                        task_id=job_id,
-                        user_id=user_id,
-                        before_json=json.dumps({
-                            "path": str(src),
-                            "scope_root": meta.get("scope_root"),
-                            "object_type": "directory",
-                        }, ensure_ascii=False),
-                        after_json=json.dumps({"removed": True}, ensure_ascii=False),
-                        metadata_before_json=json.dumps(metadata_before or source_stat, ensure_ascii=False),
-                        metadata_after_json=json.dumps({}, ensure_ascii=False),
-                        created_at=now,
-                    ))
+                    q_dir_fd = os.open(str(settings.quarantine_root), os.O_RDONLY | os.O_DIRECTORY)
+                    try:
+                        src_parent_fd = os.open(str(src.parent), os.O_RDONLY | os.O_DIRECTORY)
+                        try:
+                            rename_noreplace_at(q_dir_fd, q_name, src_parent_fd, src.name)
+                        finally:
+                            os.close(src_parent_fd)
+                    finally:
+                        os.close(q_dir_fd)
+                except Exception:
+                    pass  # Keep preserved in quarantine
+            return
+
+        # State E: both source and quarantine target absent
+        if not src_exists and not q_exists:
+            item.state = "failed"
+            item.reason = "reconciliation failed after crash (source and quarantine target absent)"
+            return
+
+        # Any other conflict (e.g. source replaced by symlink or different inode, quarantine absent)
+        item.state = "failed"
+        item.reason = "reconciliation conflict after crash (source identity mismatch)"
+        return
+
+    elif item.operation == "restore_empty_dir":
+        meta = json.loads(item.metadata_json or "{}")
+        exec_meta = meta.get("execution") or {}
+        source_stat = exec_meta.get("source_stat") or {}
+        metadata_before = exec_meta.get("metadata_before") or source_stat
+
+        exp_dev = item.expected_device or source_stat.get("device")
+        exp_ino = item.expected_inode or source_stat.get("inode")
+        tgt = Path(item.target_path) if item.target_path else None
+
+        if not tgt:
+            item.state = "failed"
+            item.reason = "reconciliation conflict after crash (missing target path for restore_empty_dir)"
+            return
+
+        src_exists = os.path.lexists(src)
+        src_is_frozen = False
+        if src_exists and not src.is_symlink():
+            try:
+                st_src = src.stat(follow_symlinks=False)
+                if src.is_dir() and (exp_dev is None or (st_src.st_dev == exp_dev and st_src.st_ino == exp_ino)):
+                    src_is_frozen = True
+            except OSError:
+                pass
+
+        tgt_exists = os.path.lexists(tgt)
+        tgt_is_frozen = False
+        tgt_st = None
+        if tgt_exists and not tgt.is_symlink():
+            try:
+                st_tgt = tgt.stat(follow_symlinks=False)
+                tgt_st = st_tgt
+                if tgt.is_dir() and (exp_dev is None or (st_tgt.st_dev == exp_dev and st_tgt.st_ino == exp_ino)):
+                    tgt_is_frozen = True
+            except OSError:
+                pass
+
+        # Both source and target exist -> conflict, preserve both
+        if src_exists and tgt_exists:
+            item.state = "failed"
+            item.reason = "reconciliation conflict after crash (both source and target exist)"
+            return
+
+        # Unfinished restore: source exists in quarantine, target absent -> planned (retryable)
+        if src_is_frozen and not tgt_exists:
+            item.state = "planned"
+            item.reason = None
+            return
+
+        # Completed restore: quarantine absent, target exists with Frozen identity -> completed + journal
+        if not src_exists and tgt_is_frozen:
+            item.state = "completed"
+            item.reason = "reconciled after crash (directory restored)"
+            existing_j = session.scalar(select(OperationJournal).where(OperationJournal.plan_item_id == item.id))
+            if not existing_j:
+                session.add(OperationJournal(
+                    operation=item.operation,
+                    sequence=item.sequence,
+                    plan_id=plan_id,
+                    plan_item_id=item.id,
+                    task_id=job_id,
+                    user_id=user_id,
+                    before_json=json.dumps({
+                        "quarantine_path": str(src),
+                        "scope_root": meta.get("scope_root"),
+                        "target_path": str(tgt),
+                        "object_type": "directory",
+                    }, ensure_ascii=False),
+                    after_json=json.dumps({
+                        "path": str(tgt),
+                        "restored": True,
+                        "object_type": "directory",
+                    }, ensure_ascii=False),
+                    metadata_before_json=json.dumps(metadata_before or source_stat, ensure_ascii=False),
+                    metadata_after_json=json.dumps({
+                        "object_type": "directory",
+                        "size": tgt_st.st_size if tgt_st else 0,
+                        "mtime_ns": getattr(tgt_st, "st_mtime_ns", int(tgt_st.st_mtime * 1e9)) if tgt_st else 0,
+                        "device": getattr(tgt_st, "st_dev", 0) if tgt_st else 0,
+                        "inode": getattr(tgt_st, "st_ino", 0) if tgt_st else 0,
+                    }, ensure_ascii=False),
+                    created_at=now,
+                ))
+            return
+
+        # Target exists with different identity -> conflict
+        if tgt_exists and not tgt_is_frozen:
+            item.state = "failed"
+            item.reason = "reconciliation conflict after crash (target identity mismatch)"
+            return
+
+        # Neither exists -> fail closed
+        item.state = "failed"
+        item.reason = "reconciliation failed after crash (source and target absent)"
+        return
 
     elif item.operation == "mkdir_empty":
         meta = json.loads(item.metadata_json or "{}")
@@ -1563,7 +1727,25 @@ class BatchPlanExecuteHandler(TaskHandler):
                             "scope_root": item_meta_json.get("scope_root"),
                             "object_type": "directory",
                         }, ensure_ascii=False)
-                        a_json = json.dumps({"removed": True}, ensure_ascii=False)
+                        a_json = json.dumps({
+                            "logical_removed": True,
+                            "preserved": True,
+                            "removed": True,
+                            "quarantine_path": str(result.result_path) if result.result_path else None,
+                        }, ensure_ascii=False)
+                    elif row.operation == "restore_empty_dir":
+                        item_meta_json = json.loads(row.metadata_json or "{}")
+                        b_json = json.dumps({
+                            "quarantine_path": row.source_path,
+                            "scope_root": item_meta_json.get("scope_root"),
+                            "target_path": row.target_path,
+                            "object_type": "directory",
+                        }, ensure_ascii=False)
+                        a_json = json.dumps({
+                            "path": str(result.result_path or row.target_path),
+                            "restored": True,
+                            "object_type": "directory",
+                        }, ensure_ascii=False)
                     elif row.operation == "mkdir_empty":
                         item_meta_json = json.loads(row.metadata_json or "{}")
                         b_json = json.dumps({
