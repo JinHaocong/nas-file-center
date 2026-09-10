@@ -38,8 +38,8 @@
 | `app/models.py` | **[MODIFY]** Add singleton ORM model `ResourcePolicy` with table-level check constraints. |
 | `app/db.py` | **[MODIFY]** Register `resource_policy` in `required_tables`, trigger backup on upgrade, and seed default singleton row in `init_db()`. |
 | `app/service.py` | **[MODIFY]** Add application service methods `get_resource_policy()` and atomic two-phase `update_resource_policy()` (Phase A validation + pre-cache ZoneInfo, Phase B short SQLite `BEGIN IMMEDIATE`). |
-| `app/api/router.py` | **[MODIFY]** Expose `GET /api/settings/resource-policy` and `PUT /api/settings/resource-policy` with explicit admin dependency, session auth, and `ResourcePolicyValidationError -> HTTP 422` conversion. |
-| `app/tasks/recovery.py` | **[MODIFY]** Enhance `claim_next_job()` with two-phase policy preparation (Phase A outside tx, Phase B `BEGIN IMMEDIATE`) for admission and priority. |
+| `app/api/router.py` | **[MODIFY]** Expose `GET /api/settings/resource-policy` and `PUT /api/settings/resource-policy` via canonical `request.app.state.service` pattern, session auth, strict Pydantic types, and `ResourcePolicyValidationError -> HTTP 422` conversion. |
+| `app/tasks/recovery.py` | **[MODIFY]** Enhance `claim_next_job()` with two-phase policy preparation (Phase A outside tx, Phase B `BEGIN IMMEDIATE`), bounded retry exhaustion fallback, pause window holding, and background priority. |
 | `app/tasks/handlers.py` | **[MODIFY]** Integrate effective thread ceiling and `context.log()` diagnostics in `FclonesScanHandler` and `IndexRootHandler`. |
 | `app/scanners/fclones.py` | **[MODIFY]** Validate and accept sanitized thread parameter in `build_group_command()`. |
 | `frontend/src/types/index.ts` | **[MODIFY]** Define TypeScript interfaces for `ResourcePolicy`, `EffectiveResourcePolicy`, and `ResourcePolicyUpdate` using standard `number` types. |
@@ -369,7 +369,7 @@ git commit -m "feat(gate5f): add resource policy evaluator"
 
 ---
 
-### Task 3: ResourcePolicy Service & Admin API (Session Auth, Two-Phase PUT & HTTP 422 Semantics)
+### Task 3: ResourcePolicy Service & Admin API (Canonical Service Access, Strict Pydantic Types & Two-Phase PUT)
 
 **Files:**
 - Modify: `app/service.py`
@@ -377,12 +377,12 @@ git commit -m "feat(gate5f): add resource policy evaluator"
 - Test: `tests/test_gate5f_resource_policy_api.py`
 
 **Interfaces:**
-- Consumes: `ResourcePolicy` ORM, `validate_resource_policy_snapshot`, `evaluate_resource_policy`, `require_admin_user`, existing session auth.
+- Consumes: `ResourcePolicy` ORM, `validate_resource_policy_snapshot`, `evaluate_resource_policy`, `require_admin_user`, existing session auth, `request.app.state.service`.
 - Produces:
   - `FileCenterService.get_resource_policy() -> dict`
   - `FileCenterService.update_resource_policy(payload: dict) -> dict`
   - `GET /api/settings/resource-policy`
-  - `PUT /api/settings/resource-policy` (converts `ResourcePolicyValidationError` to HTTP 422)
+  - `PUT /api/settings/resource-policy` with `strict=True` Pydantic fields and `ResourcePolicyValidationError -> HTTP 422` conversion.
 
 - [ ] **Step 1: Write failing API and Service tests using session cookie auth and complete mutation matrix**
 
@@ -536,7 +536,7 @@ def test_put_resource_policy_semantic_validation_matrix_returns_422(tmp_path: Pa
 Run: `pytest tests/test_gate5f_resource_policy_api.py -v`
 Expected: FAIL with 404 (endpoint not defined).
 
-- [ ] **Step 3: Implement service methods with safe two-phase PUT and router endpoints**
+- [ ] **Step 3: Implement service methods and router endpoints with canonical request.app.state.service pattern**
 
 In `app/service.py`:
 ```python
@@ -611,28 +611,49 @@ In `app/service.py`:
 
 In `app/api/router.py`:
 ```python
+from typing import Any, Literal
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, ConfigDict, Field
+from app.auth.dependencies import require_admin_user
+from app.resource_control import ResourcePolicyValidationError
+
 class ResourcePolicyUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    scan_threads: int = Field(..., ge=1, le=32)
-    hash_threads: int = Field(..., ge=1, le=32)
+    scan_threads: int = Field(..., strict=True, ge=1, le=32)
+    hash_threads: int = Field(..., strict=True, ge=1, le=32)
     io_limit: Literal["low", "normal", "unlimited"]
     job_priority: Literal["normal", "background"]
-    active_window_enabled: bool
+    active_window_enabled: bool = Field(..., strict=True)
     active_window_start: str | None = None
     active_window_end: str | None = None
     active_window_timezone: str | None = None
     outside_window_mode: Literal["limited", "pause"]
 
-@router.put("/settings/resource-policy", dependencies=[Depends(require_admin_user)])
+@router.get(
+    "/settings/resource-policy",
+    dependencies=[Depends(require_admin_user)],
+)
+def get_resource_policy_endpoint(request: Request):
+    return request.app.state.service.get_resource_policy()
+
+@router.put(
+    "/settings/resource-policy",
+    dependencies=[Depends(require_admin_user)],
+)
 def update_resource_policy_endpoint(
+    request: Request,
     payload: ResourcePolicyUpdateRequest,
-    service: FileCenterService = Depends(get_service),
 ):
     try:
-        return service.update_resource_policy(payload.model_dump())
-    except ResourcePolicyValidationError as e:
-        raise HTTPException(status_code=422, detail=str(e))
+        return request.app.state.service.update_resource_policy(
+            payload.model_dump()
+        )
+    except ResourcePolicyValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=str(exc),
+        ) from exc
 ```
 
 - [ ] **Step 4: Run tests to verify they pass (GREEN)**
@@ -649,7 +670,7 @@ git commit -m "feat(gate5f): expose admin resource policy api"
 
 ---
 
-### Task 4: Resource-Aware Worker Claim Admission (Isolated DB & Deterministic Time)
+### Task 4: Resource-Aware Worker Claim Admission & Bounded Retry Exhaustion
 
 **Files:**
 - Modify: `app/tasks/recovery.py`
@@ -658,9 +679,9 @@ git commit -m "feat(gate5f): expose admin resource policy api"
 
 **Interfaces:**
 - Consumes: `claim_next_job()`, `assert_active_worker_lease()`, `ResourcePolicy`, `evaluate_resource_policy()`.
-- Produces: Enhanced `claim_next_job()` with deterministic two-phase policy preparation, pause window holding, and background priority reordering.
+- Produces: Enhanced `claim_next_job()` with deterministic two-phase policy preparation, bounded retry exhaustion fallback (claims eligible non-resource jobs, never uses stale snapshot or claims resource jobs), pause window holding, and background priority reordering.
 
-- [ ] **Step 1: Write failing tests for claim admission using isolated DB helper**
+- [ ] **Step 1: Write failing tests for claim admission, priority and retry exhaustion**
 
 ```python
 # tests/test_gate5f_resource_claim.py
@@ -750,6 +771,55 @@ def test_background_priority_claims_non_resource_job_first(tmp_path: Path):
         acquire_worker_ownership(engine, SessionLocal, worker_id)
         claimed = claim_next_job(engine, SessionLocal, worker_id)
         assert claimed == 202
+
+def test_claim_retry_exhaustion_claims_non_resource_job(tmp_path: Path):
+    engine, SessionLocal = make_task_db(tmp_path)
+    worker_id = "worker-exhaustion-1"
+
+    with SessionLocal() as session:
+        j1 = WorkJob(id=601, kind="index-root", status="queued", state_json="{}")
+        j2 = WorkJob(id=602, kind="batch-plan-execute", status="queued", state_json="{}")
+        session.add_all([j1, j2])
+        session.commit()
+
+    with patch("app.tasks.recovery.utcnow", return_value=FROZEN_INSIDE_TIME):
+        acquire_worker_ownership(engine, SessionLocal, worker_id)
+
+        # Deterministically simulate policy revision change on every attempt
+        original_get = SessionLocal().get
+        attempt_count = 0
+
+        # Simulate revision change inside Phase B check
+        with patch("app.tasks.recovery.get_policy_row_for_check") as mock_check:
+            mock_check.side_effect = lambda session: ResourcePolicy(id=1, revision=999)
+
+            claimed = claim_next_job(engine, SessionLocal, worker_id)
+            # Under retry exhaustion: 601 (resource-controlled) is held, 602 (mutation) is claimed
+            assert claimed == 602
+
+    with SessionLocal() as session:
+        j1_current = session.get(WorkJob, 601)
+        assert j1_current.status == "queued"
+
+def test_claim_retry_exhaustion_returns_none_when_only_resource_jobs(tmp_path: Path):
+    engine, SessionLocal = make_task_db(tmp_path)
+    worker_id = "worker-exhaustion-2"
+
+    with SessionLocal() as session:
+        j1 = WorkJob(id=603, kind="index-root", status="queued", state_json="{}")
+        session.add(j1)
+        session.commit()
+
+    with patch("app.tasks.recovery.utcnow", return_value=FROZEN_INSIDE_TIME):
+        acquire_worker_ownership(engine, SessionLocal, worker_id)
+
+        with patch("app.tasks.recovery.get_policy_row_for_check") as mock_check:
+            mock_check.side_effect = lambda session: ResourcePolicy(id=1, revision=999)
+            claimed = claim_next_job(engine, SessionLocal, worker_id)
+            assert claimed is None
+
+    with SessionLocal() as session:
+        assert session.get(WorkJob, 603).status == "queued"
 ```
 
 - [ ] **Step 2: Run tests to verify they fail (RED)**
@@ -757,23 +827,165 @@ def test_background_priority_claims_non_resource_job_first(tmp_path: Path):
 Run: `pytest tests/test_gate5f_resource_claim.py -v`
 Expected: FAIL.
 
-- [ ] **Step 3: Implement two-phase claim pattern in app/tasks/recovery.py**
+- [ ] **Step 3: Implement two-phase claim pattern and retry exhaustion fallback in app/tasks/recovery.py**
 
 Implement:
-- **Phase A (Outside write lock)**:
-  Read `ResourcePolicy(1)`.
-  If missing/unparseable, set `policy_valid = False` and `resource_jobs_admitted = False`.
-  If valid, resolve timezone via cached `resolve_timezone()` and compute `EffectiveResourcePolicy`.
-- **Phase B (`BEGIN IMMEDIATE`)**:
-  `assert_active_worker_lease(session, worker_id, now=now, timeout_seconds=timeout_seconds)`.
-  Re-read `ResourcePolicy(1)`.
-  If revision or policy fields differ from Phase A, rollback and retry Phase A (bounded up to 3 attempts).
-  Candidate query:
-  - If `resource_jobs_admitted is False`: filter `WorkJob.kind.not_in(["index-root", "fclones-scan"])`.
-  - If `resource_jobs_admitted is True` and `job_priority == "background"`:
-    First query non-resource-controlled queued jobs; if none, query resource-controlled queued jobs.
-  - If `job_priority == "normal"`: standard FIFO query.
-  Select candidate ID, update to `JobState.RUNNING.value`, commit and return candidate ID.
+```python
+def get_policy_row_for_check(session):
+    return session.get(ResourcePolicy, 1)
+
+def claim_next_job(
+    engine: Any,
+    session_factory: sessionmaker,
+    worker_id: str,
+    timeout_seconds: float = WORKER_LEASE_TIMEOUT_SECONDS,
+) -> int | None:
+    now = utcnow()
+    MAX_POLICY_ATTEMPTS = 3
+
+    for attempt in range(MAX_POLICY_ATTEMPTS):
+        # Phase A: Outside write transaction
+        with session_factory() as session:
+            row = session.get(ResourcePolicy, 1)
+            if row is None:
+                policy_valid = False
+                resource_jobs_admitted = False
+                job_priority = "normal"
+                expected_revision = None
+            else:
+                expected_revision = row.revision
+                try:
+                    snapshot = ResourcePolicySnapshot(
+                        scan_threads=row.scan_threads,
+                        hash_threads=row.hash_threads,
+                        io_limit=row.io_limit,
+                        job_priority=row.job_priority,
+                        active_window_enabled=row.active_window_enabled,
+                        active_window_start=row.active_window_start,
+                        active_window_end=row.active_window_end,
+                        active_window_timezone=row.active_window_timezone,
+                        outside_window_mode=row.outside_window_mode,
+                        revision=row.revision,
+                    )
+                    validate_resource_policy_snapshot(snapshot)
+                    eff = evaluate_resource_policy(snapshot, now_utc=now)
+                    policy_valid = True
+                    resource_jobs_admitted = eff.resource_jobs_admitted
+                    job_priority = snapshot.job_priority
+                except Exception:
+                    policy_valid = False
+                    resource_jobs_admitted = False
+                    job_priority = "normal"
+
+        # Phase B: Short BEGIN IMMEDIATE write transaction
+        with session_factory() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            assert_active_worker_lease(session, worker_id, now=now, timeout_seconds=timeout_seconds)
+
+            current_row = get_policy_row_for_check(session)
+            current_rev = current_row.revision if current_row else None
+
+            # If policy changed between Phase A and Phase B, rollback and retry
+            if current_rev != expected_revision:
+                session.rollback()
+                continue
+
+            # Policy matches: select candidate according to admission and priority
+            candidate_id = None
+            if not resource_jobs_admitted:
+                candidate_id = session.scalar(
+                    select(WorkJob.id)
+                    .where(
+                        WorkJob.status == JobState.QUEUED.value,
+                        WorkJob.kind.not_in(["index-root", "fclones-scan"]),
+                    )
+                    .order_by(WorkJob.id)
+                    .limit(1)
+                )
+            elif job_priority == "background":
+                candidate_id = session.scalar(
+                    select(WorkJob.id)
+                    .where(
+                        WorkJob.status == JobState.QUEUED.value,
+                        WorkJob.kind.not_in(["index-root", "fclones-scan"]),
+                    )
+                    .order_by(WorkJob.id)
+                    .limit(1)
+                )
+                if candidate_id is None:
+                    candidate_id = session.scalar(
+                        select(WorkJob.id)
+                        .where(
+                            WorkJob.status == JobState.QUEUED.value,
+                            WorkJob.kind.in_(["index-root", "fclones-scan"]),
+                        )
+                        .order_by(WorkJob.id)
+                        .limit(1)
+                    )
+            else:
+                candidate_id = session.scalar(
+                    select(WorkJob.id)
+                    .where(WorkJob.status == JobState.QUEUED.value)
+                    .order_by(WorkJob.id)
+                    .limit(1)
+                )
+
+            if candidate_id is None:
+                session.rollback()
+                return None
+
+            stmt = (
+                update(WorkJob)
+                .where(WorkJob.id == candidate_id, WorkJob.status == JobState.QUEUED.value)
+                .values(
+                    status=JobState.RUNNING.value,
+                    started_at=now,
+                    heartbeat_at=now,
+                    error_code=None,
+                    error_text=None,
+                )
+            )
+            result = session.execute(stmt)
+            session.commit()
+            if result.rowcount == 1:
+                return candidate_id
+            return None
+
+    # Retry exhaustion fallback: after 3 unstable snapshot attempts
+    # MUST NOT use stale policy, MUST NOT claim resource-controlled jobs
+    with session_factory() as session:
+        session.execute(text("BEGIN IMMEDIATE"))
+        assert_active_worker_lease(session, worker_id, now=now, timeout_seconds=timeout_seconds)
+        candidate_id = session.scalar(
+            select(WorkJob.id)
+            .where(
+                WorkJob.status == JobState.QUEUED.value,
+                WorkJob.kind.not_in(["index-root", "fclones-scan"]),
+            )
+            .order_by(WorkJob.id)
+            .limit(1)
+        )
+        if candidate_id is None:
+            session.rollback()
+            return None
+
+        stmt = (
+            update(WorkJob)
+            .where(WorkJob.id == candidate_id, WorkJob.status == JobState.QUEUED.value)
+            .values(
+                status=JobState.RUNNING.value,
+                started_at=now,
+                heartbeat_at=now,
+                error_code=None,
+                error_text=None,
+            )
+        )
+        result = session.execute(stmt)
+        session.commit()
+        if result.rowcount == 1:
+            return candidate_id
+        return None
+```
 
 - [ ] **Step 4: Run tests to verify they pass (GREEN)**
 
@@ -1100,7 +1312,7 @@ git commit -m "test(gate5f): preserve non-resumable running jobs"
 **Interfaces:**
 - Consumes: `useAuth()` (`isAdmin`), Ant Design, `@tanstack/react-query`, `api` from `./client`.
 - Produces:
-  - TypeScript types: `ResourcePolicy`, `EffectiveResourcePolicy`, `ResourcePolicyUpdate` with `number` types and `profile: 'full' | 'limited' | 'pause'`.
+  - TypeScript types: `ResourcePolicy`, `EffectiveResourcePolicy`, `ResourcePolicyUpdate` with standard `number` types and `profile: 'full' | 'limited' | 'pause'`.
   - API client: `resourcePolicyApi.getPolicy()`, `resourcePolicyApi.updatePolicy()`.
   - Resource Control card in `SettingsPage` with soft concurrency notices.
 
