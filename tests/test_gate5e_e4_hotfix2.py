@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import pytest
 
-from app.models import IndexRoot, User, BatchPlan, BatchPlanItem
+from app.models import IndexRoot, User, BatchPlan, BatchPlanItem, OperationJournal
 from app.config import Settings
 from app.service import FileCenterService
 from app.auth.password import hash_password
@@ -575,3 +575,290 @@ def test_execute_restore_empty_dir_target_occupied_fails_safely(lifecycle_env):
     assert res_restore.state == "skipped"
     assert q_path.exists(), "Quarantined directory must remain preserved!"
     assert (d / "new_file.txt").exists(), "Occupying target must not be overwritten!"
+
+
+def test_freeze_restore_empty_dir_captures_identity(lifecycle_env):
+    service = lifecycle_env["service"]
+    root = lifecycle_env["root_path"]
+    quarantine = lifecycle_env["quarantine_dir"]
+
+    # Prepare a directory in quarantine
+    q_dir = quarantine / ".nfc-e4-p99-s1-testdummy"
+    q_dir.mkdir()
+    st = q_dir.stat()
+
+    target_dir = root / "restored_dir"
+
+    with service.SessionLocal() as session:
+        plan = BatchPlan(name="test-freeze-restore", kind="undo", status="draft")
+        session.add(plan)
+        session.flush()
+
+        item = BatchPlanItem(
+            plan_id=plan.id,
+            sequence=1,
+            operation="restore_empty_dir",
+            source_path=str(q_dir),
+            target_path=str(target_dir),
+            expected_device=0,
+            expected_inode=0,
+            expected_size=0,
+            expected_mtime_ns=0,
+            state="planned",
+        )
+        session.add(item)
+        session.commit()
+        plan_id = plan.id
+
+    frozen_plan = service.freeze_plan(plan_id)
+    assert frozen_plan.status == "frozen"
+
+    with service.SessionLocal() as session:
+        frozen_item = session.query(BatchPlanItem).filter_by(plan_id=plan_id).one()
+        assert frozen_item.expected_device == st.st_dev
+        assert frozen_item.expected_inode == st.st_ino
+        assert frozen_item.expected_size == 0
+        assert frozen_item.expected_mtime_ns == 0
+
+        meta = json.loads(frozen_item.metadata_json)
+        assert meta["snapshot"]["object_type"] == "directory"
+        assert meta["snapshot"]["device"] == st.st_dev
+        assert meta["snapshot"]["inode"] == st.st_ino
+
+
+def test_freeze_restore_empty_dir_rejects_non_quarantine_or_non_dir(lifecycle_env):
+    service = lifecycle_env["service"]
+    root = lifecycle_env["root_path"]
+    quarantine = lifecycle_env["quarantine_dir"]
+
+    # 1. Source not in quarantine
+    outside_dir = root / "outside_dir"
+    outside_dir.mkdir()
+
+    with service.SessionLocal() as session:
+        plan = BatchPlan(name="test-freeze-outside", kind="undo", status="draft")
+        session.add(plan)
+        session.flush()
+        session.add(BatchPlanItem(
+            plan_id=plan.id,
+            sequence=1,
+            operation="restore_empty_dir",
+            source_path=str(outside_dir),
+            target_path=str(root / "tgt"),
+            state="planned",
+        ))
+        session.commit()
+        p1_id = plan.id
+
+    with pytest.raises(ValueError, match="quarantine storage"):
+        service.freeze_plan(p1_id)
+
+    # 2. Source in quarantine is a file, not a directory
+    q_file = quarantine / ".nfc-e4-p99-s2-file"
+    q_file.write_text("not a dir")
+
+    with service.SessionLocal() as session:
+        plan2 = BatchPlan(name="test-freeze-file", kind="undo", status="draft")
+        session.add(plan2)
+        session.flush()
+        session.add(BatchPlanItem(
+            plan_id=plan2.id,
+            sequence=1,
+            operation="restore_empty_dir",
+            source_path=str(q_file),
+            target_path=str(root / "tgt"),
+            state="planned",
+        ))
+        session.commit()
+        p2_id = plan2.id
+
+    with pytest.raises(ValueError, match="not a directory"):
+        service.freeze_plan(p2_id)
+
+
+def test_validate_restore_empty_dir_success_and_chaining(lifecycle_env):
+    service = lifecycle_env["service"]
+    root = lifecycle_env["root_path"]
+    quarantine = lifecycle_env["quarantine_dir"]
+
+    # Nested restoration: parent 'p' restored first, then child 'p/c'
+    q_parent = quarantine / ".nfc-e4-p10-s1-parent"
+    q_child = quarantine / ".nfc-e4-p10-s2-child"
+    q_parent.mkdir()
+    q_child.mkdir()
+
+    target_parent = root / "p_restored"
+    target_child = target_parent / "c_restored"
+
+    with service.SessionLocal() as session:
+        plan = BatchPlan(name="test-validate-nested", kind="undo", status="draft")
+        session.add(plan)
+        session.flush()
+
+        session.add(BatchPlanItem(
+            plan_id=plan.id,
+            sequence=1,
+            operation="restore_empty_dir",
+            source_path=str(q_parent),
+            target_path=str(target_parent),
+            state="planned",
+        ))
+        session.add(BatchPlanItem(
+            plan_id=plan.id,
+            sequence=2,
+            operation="restore_empty_dir",
+            source_path=str(q_child),
+            target_path=str(target_child),
+            state="planned",
+        ))
+        session.commit()
+        plan_id = plan.id
+
+    service.freeze_plan(plan_id)
+    val_res = service.validate_plan(plan_id)
+    assert val_res["status"] == "ready"
+
+
+def test_validate_restore_empty_dir_stale_on_identity_mismatch(lifecycle_env):
+    service = lifecycle_env["service"]
+    root = lifecycle_env["root_path"]
+    quarantine = lifecycle_env["quarantine_dir"]
+
+    q_dir = quarantine / ".nfc-e4-p11-s1-stale"
+    q_dir.mkdir()
+    target_dir = root / "stale_tgt"
+
+    with service.SessionLocal() as session:
+        plan = BatchPlan(name="test-validate-stale", kind="undo", status="draft")
+        session.add(plan)
+        session.flush()
+        session.add(BatchPlanItem(
+            plan_id=plan.id,
+            sequence=1,
+            operation="restore_empty_dir",
+            source_path=str(q_dir),
+            target_path=str(target_dir),
+            state="planned",
+        ))
+        session.commit()
+        plan_id = plan.id
+
+    service.freeze_plan(plan_id)
+
+    # Now replace q_dir with guaranteed different inode
+    old_ino = q_dir.stat().st_ino
+    q_dir.rmdir()
+    fillers = []
+    while True:
+        f = quarantine / f"filler_{len(fillers)}"
+        f.mkdir()
+        fillers.append(f)
+        q_dir.mkdir()
+        if q_dir.stat().st_ino != old_ino:
+            break
+        q_dir.rmdir()
+
+    val_res = service.validate_plan(plan_id)
+    assert val_res["status"] == "stale"
+
+
+def test_create_undo_plan_produces_restore_empty_dir(lifecycle_env):
+    service = lifecycle_env["service"]
+    root = lifecycle_env["root_path"]
+    quarantine = lifecycle_env["quarantine_dir"]
+
+    scope = root / "undo_scope"
+    d_a = scope / "a"
+    d_b = d_a / "b"
+    d_b.mkdir(parents=True)
+
+    # Simulate completed plan with two rmdir_empty operations
+    # b removed first (seq 1), a removed second (seq 2)
+    q_b = quarantine / ".nfc-e4-p20-s1-b"
+    q_a = quarantine / ".nfc-e4-p20-s2-a"
+    d_b.rename(q_b)
+    d_a.rename(q_a)
+
+    with service.SessionLocal() as session:
+        plan = BatchPlan(name="test-undo-rmdir", kind="batch-utility", status="completed")
+        session.add(plan)
+        session.flush()
+
+        j1 = OperationJournal(
+            operation="rmdir_empty",
+            sequence=1,
+            plan_id=plan.id,
+            plan_item_id=None,
+            task_id=None,
+            before_json=json.dumps({"path": str(d_b), "scope_root": str(scope)}),
+            after_json=json.dumps({"logical_removed": True, "preserved": True, "quarantine_path": str(q_b)}),
+        )
+        j2 = OperationJournal(
+            operation="rmdir_empty",
+            sequence=2,
+            plan_id=plan.id,
+            plan_item_id=None,
+            task_id=None,
+            before_json=json.dumps({"path": str(d_a), "scope_root": str(scope)}),
+            after_json=json.dumps({"logical_removed": True, "preserved": True, "quarantine_path": str(q_a)}),
+        )
+        session.add(j1)
+        session.add(j2)
+        session.commit()
+        plan_id = plan.id
+
+    undo_res = service.create_undo_plan(plan_id)
+    undo_id = undo_res["id"]
+
+    with service.SessionLocal() as session:
+        items = session.query(BatchPlanItem).filter_by(plan_id=undo_id).order_by(BatchPlanItem.sequence).all()
+        assert len(items) == 2
+
+        # Reversal must produce shallowest-first: 'a' restored before 'a/b'
+        assert items[0].sequence == 1
+        assert items[0].operation == "restore_empty_dir"
+        assert items[0].source_path == str(q_a)
+        assert items[0].target_path == str(d_a)
+        assert items[0].expected_device == 0
+        assert items[0].expected_inode == 0
+
+        assert items[1].sequence == 2
+        assert items[1].operation == "restore_empty_dir"
+        assert items[1].source_path == str(q_b)
+        assert items[1].target_path == str(d_b)
+
+
+def test_undo_restore_empty_dir_inverts_to_rmdir_empty(lifecycle_env):
+    service = lifecycle_env["service"]
+    root = lifecycle_env["root_path"]
+    quarantine = lifecycle_env["quarantine_dir"]
+
+    d = root / "restored_dir"
+
+    with service.SessionLocal() as session:
+        plan = BatchPlan(name="test-undo-restore", kind="undo", status="completed")
+        session.add(plan)
+        session.flush()
+
+        j = OperationJournal(
+            operation="restore_empty_dir",
+            sequence=1,
+            plan_id=plan.id,
+            plan_item_id=None,
+            task_id=None,
+            before_json=json.dumps({"quarantine_path": str(quarantine / "dummy"), "target_path": str(d), "scope_root": str(root)}),
+            after_json=json.dumps({"path": str(d), "restored": True, "object_type": "directory"}),
+        )
+        session.add(j)
+        session.commit()
+        plan_id = plan.id
+
+    undo_res = service.create_undo_plan(plan_id)
+    undo_id = undo_res["id"]
+
+    with service.SessionLocal() as session:
+        items = session.query(BatchPlanItem).filter_by(plan_id=undo_id).order_by(BatchPlanItem.sequence).all()
+        assert len(items) == 1
+        assert items[0].operation == "rmdir_empty"
+        assert items[0].source_path == str(d)
+

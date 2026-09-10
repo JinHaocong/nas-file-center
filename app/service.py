@@ -1362,6 +1362,73 @@ class FileCenterService:
                 item_validations[row.id] = ("validated", "empty directory deletion validated", None)
                 continue
 
+            if row.operation == "restore_empty_dir":
+                if not self.settings.quarantine_root or not is_reserved_quarantine_path(Path(row.source_path), self.settings.quarantine_root):
+                    stale_items.append(StaleItemDetail(
+                        item_id=row.id,
+                        source_path=row.source_path,
+                        reason="source_not_in_quarantine",
+                        expected={"device": row.expected_device, "inode": row.expected_inode},
+                        actual=None,
+                    ))
+                    item_validations[row.id] = ("stale", "source_not_in_quarantine", None)
+                    continue
+
+                is_fresh, stale_detail = verify_item_freshness(
+                    item_id=row.id,
+                    source_path=row.source_path,
+                    operation=row.operation,
+                    expected_device=row.expected_device,
+                    expected_inode=row.expected_inode,
+                    expected_size=row.expected_size,
+                    expected_mtime_ns=row.expected_mtime_ns,
+                    expected_hash=row.expected_hash,
+                    metadata_json=row.metadata_json,
+                    allowed_roots=[self.settings.quarantine_root],
+                    quarantine_root=self.settings.quarantine_root,
+                    check_hash=False,
+                )
+                if not is_fresh and stale_detail:
+                    stale_items.append(stale_detail)
+                    item_validations[row.id] = ("stale", stale_detail.reason, None)
+                    continue
+
+                target = Path(row.target_path or "")
+                if not row.target_path:
+                    has_error = True
+                    item_validations[row.id] = ("skipped", "Missing target path for restore_empty_dir", None)
+                    continue
+
+                if self.settings.quarantine_root and is_reserved_quarantine_path(target, self.settings.quarantine_root):
+                    has_error = True
+                    item_validations[row.id] = ("skipped", "Target path is inside reserved quarantine storage", None)
+                    continue
+
+                if target in planned_mkdir_targets or target.is_symlink() or os.path.lexists(target):
+                    has_error = True
+                    item_validations[row.id] = ("skipped", "Target path already exists", None)
+                    continue
+
+                parent = target.parent
+                if parent not in planned_mkdir_targets:
+                    if parent.is_symlink() or not parent.exists() or not parent.is_dir():
+                        has_error = True
+                        item_validations[row.id] = ("skipped", "Target parent directory is missing or not a directory", None)
+                        continue
+
+                try:
+                    require_allowed_path(target, self.settings.allowed_roots)
+                    if parent not in planned_mkdir_targets:
+                        require_allowed_path(parent, self.settings.allowed_roots)
+                except UnsafePathError:
+                    has_error = True
+                    item_validations[row.id] = ("skipped", "Target path is outside allowed roots", None)
+                    continue
+
+                planned_mkdir_targets.add(target)
+                item_validations[row.id] = ("validated", "restore_empty_dir destination validated", None)
+                continue
+
             if row.operation == "mkdir_empty":
                 is_fresh, stale_detail = verify_item_freshness(
                     item_id=row.id,
@@ -1695,6 +1762,37 @@ class FileCenterService:
                 )
                 if snap["object_type"] != "directory":
                     raise ValueError(f"Source path for rmdir_empty is not a directory: {src_p}")
+
+                exp_dev = snap["device"]
+                exp_ino = snap["inode"]
+                upd["expected_device"] = exp_dev
+                upd["expected_inode"] = exp_ino
+                upd["expected_size"] = 0
+                upd["expected_mtime_ns"] = 0
+
+                meta = json.loads(it["metadata_json"] or "{}")
+                meta["snapshot"] = {
+                    "device": exp_dev,
+                    "inode": exp_ino,
+                    "size": 0,
+                    "mtime_ns": snap["mtime_ns"],
+                    "ctime_ns": snap["ctime_ns"],
+                    "object_type": "directory",
+                }
+                upd["metadata_json"] = json.dumps(meta, ensure_ascii=False)
+                item_updates[item_id] = upd
+                continue
+
+            if it["operation"] == "restore_empty_dir":
+                if not self.settings.quarantine_root or not is_reserved_quarantine_path(src_p, self.settings.quarantine_root):
+                    raise ValueError(f"Source path for restore_empty_dir must be in quarantine storage: {src_p}")
+                snap = capture_source_snapshot(
+                    src_p,
+                    allowed_roots=[self.settings.quarantine_root],
+                    quarantine_root=self.settings.quarantine_root,
+                )
+                if snap["object_type"] != "directory":
+                    raise ValueError(f"Source path for restore_empty_dir is not a directory: {src_p}")
 
                 exp_dev = snap["device"]
                 exp_ino = snap["inode"]
@@ -2420,17 +2518,37 @@ class FileCenterService:
                     expected_mtime_ns = before.get("mtime_ns") or 0
                     meta["undo"] = {"source_journal_id": entry.id}
                 elif entry.operation == "rmdir_empty":
-                    source_p = before["scope_root"]
-                    target_p = before["path"]
-                    op = "mkdir_empty"
+                    if after.get("quarantine_path"):
+                        source_p = after["quarantine_path"]
+                        target_p = before.get("path") or ""
+                        op = "restore_empty_dir"
+                        expected_size = 0
+                        expected_mtime_ns = 0
+                        meta["scope_root"] = before.get("scope_root")
+                        meta["undo"] = {
+                            "source_journal_id": entry.id,
+                            "scope_root": before.get("scope_root"),
+                        }
+                    else:
+                        source_p = before.get("scope_root") or ""
+                        target_p = before.get("path") or ""
+                        op = "mkdir_empty"
+                        expected_size = 0
+                        expected_mtime_ns = 0
+                        meta["scope_root"] = before.get("scope_root")
+                        meta["undo"] = {
+                            "source_journal_id": entry.id,
+                            "structural_only": True,
+                            "scope_root": before.get("scope_root"),
+                        }
+                elif entry.operation == "restore_empty_dir":
+                    source_p = after.get("path") or before.get("target_path") or ""
+                    target_p = None
+                    op = "rmdir_empty"
                     expected_size = 0
                     expected_mtime_ns = 0
-                    meta["scope_root"] = before["scope_root"]
-                    meta["undo"] = {
-                        "source_journal_id": entry.id,
-                        "structural_only": True,
-                        "scope_root": before["scope_root"],
-                    }
+                    meta["scope_root"] = before.get("scope_root")
+                    meta["undo"] = {"source_journal_id": entry.id}
                 elif entry.operation == "mkdir_empty":
                     source_p = after.get("path") or before.get("target_path") or ""
                     target_p = None

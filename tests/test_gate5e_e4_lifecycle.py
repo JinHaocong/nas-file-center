@@ -380,7 +380,8 @@ def test_execute_rmdir_empty_success_removes_dir(lifecycle_env):
         plan_id="p1",
     )
     assert res.state == "completed"
-    assert "empty directory removed" in res.reason
+    assert "empty directory logically removed to quarantine" in res.reason
+    assert res.result_path.exists()
     assert not target_dir.exists()
 
 
@@ -391,20 +392,29 @@ def test_execute_rmdir_empty_no_unlink_or_rmtree(lifecycle_env, monkeypatch):
 
     target_dir = root / "safe_rmdir"
     target_dir.mkdir()
+    st = target_dir.stat()
 
     item = OperationItem(
         sequence=1,
         operation="rmdir_empty",
         source=target_dir,
+        expected_device=st.st_dev,
+        expected_inode=st.st_ino,
     )
+
+    def forbidden_rmdir(*args, **kwargs):
+        raise AssertionError("FORBIDDEN: os.rmdir called during rmdir_empty")
+
+    monkeypatch.setattr(os, "rmdir", forbidden_rmdir)
 
     def forbidden_unlink(*args, **kwargs):
         raise AssertionError("FORBIDDEN: os.unlink called during rmdir_empty")
 
+    monkeypatch.setattr(os, "unlink", forbidden_unlink)
+
     def forbidden_rmtree(*args, **kwargs):
         raise AssertionError("FORBIDDEN: shutil.rmtree called during rmdir_empty")
 
-    monkeypatch.setattr(os, "unlink", forbidden_unlink)
     monkeypatch.setattr(shutil, "rmtree", forbidden_rmtree)
 
     res = execute_item(
@@ -693,17 +703,24 @@ def test_execute_rmdir_empty_file_appears_immediately_before_mutation(lifecycle_
         expected_inode=st.st_ino,
     )
 
-    orig_rmdir = os.rmdir
+    import app.batch_utilities.empty_dir_quarantine as eq
+    orig_rename = eq.rename_noreplace_at
     race_triggered = [False]
+    real_rmdir = os.rmdir
 
-    def racing_rmdir(path, *args, **kwargs):
+    def racing_rename(*args, **kwargs):
         if not race_triggered[0]:
             race_triggered[0] = True
-            d.rmdir()
+            real_rmdir(d)
             d.write_text("regular file content")
-        return orig_rmdir(path, *args, **kwargs)
+        return orig_rename(*args, **kwargs)
 
-    monkeypatch.setattr(os, "rmdir", racing_rmdir)
+    monkeypatch.setattr(eq, "rename_noreplace_at", racing_rename)
+
+    def forbidden_rmdir(*args, **kwargs):
+        raise AssertionError("FORBIDDEN: os.rmdir called during rmdir_empty")
+
+    monkeypatch.setattr(os, "rmdir", forbidden_rmdir)
 
     unlink_called = [False]
 
@@ -752,17 +769,24 @@ def test_execute_rmdir_empty_symlink_swap_immediately_before_mutation(lifecycle_
         expected_inode=st.st_ino,
     )
 
-    orig_rmdir = os.rmdir
+    import app.batch_utilities.empty_dir_quarantine as eq
+    orig_rename = eq.rename_noreplace_at
     race_triggered = [False]
+    real_rmdir = os.rmdir
 
-    def racing_rmdir(path, *args, **kwargs):
+    def racing_rename(*args, **kwargs):
         if not race_triggered[0]:
             race_triggered[0] = True
-            d.rmdir()
+            real_rmdir(d)
             os.symlink(str(sensitive), str(d))
-        return orig_rmdir(path, *args, **kwargs)
+        return orig_rename(*args, **kwargs)
 
-    monkeypatch.setattr(os, "rmdir", racing_rmdir)
+    monkeypatch.setattr(eq, "rename_noreplace_at", racing_rename)
+
+    def forbidden_rmdir(*args, **kwargs):
+        raise AssertionError("FORBIDDEN: os.rmdir called during rmdir_empty")
+
+    monkeypatch.setattr(os, "rmdir", forbidden_rmdir)
 
     res = execute_item(
         item,
@@ -791,9 +815,10 @@ def test_execute_rmdir_empty_error_fallback_matrix(lifecycle_env, monkeypatch, e
     """
     5.5 error fallback matrix
     Verify ENOTEMPTY/EEXIST, EBUSY, EACCES/EPERM, EIO never trigger recursive cleanup or unlink.
-    0 os.unlink, 0 shutil.rmtree.
+    0 os.rmdir, 0 os.unlink, 0 shutil.rmtree.
     """
     import shutil
+    import app.batch_utilities.empty_dir_quarantine as eq
 
     root = lifecycle_env["root_path"]
     quarantine_dir = lifecycle_env["quarantine_dir"]
@@ -810,10 +835,15 @@ def test_execute_rmdir_empty_error_fallback_matrix(lifecycle_env, monkeypatch, e
         expected_inode=st.st_ino,
     )
 
-    def failing_rmdir(*args, **kwargs):
+    def failing_rename(*args, **kwargs):
         raise OSError(errno_val, f"Simulated {err_name}")
 
-    monkeypatch.setattr(os, "rmdir", failing_rmdir)
+    monkeypatch.setattr(eq, "rename_noreplace_at", failing_rename)
+
+    def forbidden_rmdir(*args, **kwargs):
+        raise AssertionError("FORBIDDEN: os.rmdir called during rmdir_empty")
+
+    monkeypatch.setattr(os, "rmdir", forbidden_rmdir)
 
     def forbidden_unlink(*args, **kwargs):
         raise AssertionError("FORBIDDEN: os.unlink called on error")
