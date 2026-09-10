@@ -3,7 +3,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 
-def make_client(tmp_path, *, allow_mutation=False, allow_delete=False):
+def make_client(tmp_path, *, allow_mutation=False, allow_delete=False, protect_last_file=True):
     data = tmp_path / "data"; data.mkdir()
     config = tmp_path / "config"; config.mkdir()
     from app.config import Settings
@@ -16,6 +16,7 @@ def make_client(tmp_path, *, allow_mutation=False, allow_delete=False):
         QUARANTINE_ROOT=str(data / ".trash"),
         ALLOW_MUTATION=allow_mutation,
         ALLOW_DELETE=allow_delete,
+        PROTECT_LAST_FILE=protect_last_file,
         INITIAL_ADMIN_USERNAME="admin",
         INITIAL_ADMIN_PASSWORD="test-password-123",
     )
@@ -31,6 +32,15 @@ def test_health(tmp_path):
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
     assert response.json()["allow_mutation"] is False
+    assert response.json()["protect_last_file"] is True
+
+
+def test_health_reflects_protect_last_file_false(tmp_path):
+    client, _ = make_client(tmp_path, protect_last_file=False)
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json()["protect_last_file"] is False
 
 
 def test_path_match_preview_and_rename_preview_are_read_only(tmp_path):

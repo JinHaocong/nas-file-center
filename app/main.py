@@ -112,6 +112,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "status": "ok",
             "allow_mutation": settings.allow_mutation,
             "allow_delete": settings.allow_delete,
+            "protect_last_file": settings.protect_last_file,
             "allowed_roots": [str(p) for p in settings.allowed_roots],
         }
 
