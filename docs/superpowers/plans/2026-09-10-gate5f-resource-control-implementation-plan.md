@@ -34,12 +34,12 @@
 
 | File Path | Role & Responsibility |
 |---|---|
-| `app/resource_control.py` | **[NEW]** Pure resource-policy types, validation helpers, active-window evaluator, thread-ceiling composition, job classification, and safe timezone resolver with LRU cache. |
+| `app/resource_control.py` | **[NEW]** Pure resource-policy types, validation helpers, full policy fingerprinting (`resource_policy_row_fingerprint`), active-window evaluator with pre-resolved timezone support, thread-ceiling composition, job classification, and safe timezone resolver with LRU cache. |
 | `app/models.py` | **[MODIFY]** Add singleton ORM model `ResourcePolicy` with table-level check constraints. |
 | `app/db.py` | **[MODIFY]** Register `resource_policy` in `required_tables`, trigger backup on upgrade, and seed default singleton row in `init_db()`. |
 | `app/service.py` | **[MODIFY]** Add application service methods `get_resource_policy()` and atomic two-phase `update_resource_policy()` (Phase A validation + pre-cache ZoneInfo, Phase B short SQLite `BEGIN IMMEDIATE`). |
-| `app/api/router.py` | **[MODIFY]** Expose `GET /api/settings/resource-policy` and `PUT /api/settings/resource-policy` via canonical `request.app.state.service` pattern, session auth, strict Pydantic types, and `ResourcePolicyValidationError -> HTTP 422` conversion. |
-| `app/tasks/recovery.py` | **[MODIFY]** Enhance `claim_next_job()` with two-phase policy preparation (Phase A outside tx, Phase B `BEGIN IMMEDIATE`), bounded retry exhaustion fallback, pause window holding, and background priority. |
+| `app/api/router.py` | **[MODIFY]** Expose `GET /api/settings/resource-policy` and `PUT /api/settings/resource-policy` via canonical `request.app.state.service` pattern, session auth, strict Pydantic types (`strict=True`), and `ResourcePolicyValidationError -> HTTP 422` conversion. |
+| `app/tasks/recovery.py` | **[MODIFY]** Enhance `claim_next_job()` with strict two-phase claim protocol (Phase A full fingerprinting & timezone prep outside tx; Phase B `BEGIN IMMEDIATE` with fresh transaction-time lease check, full fingerprint validation, transaction-time active window evaluation, and bounded retry exhaustion fallback). |
 | `app/tasks/handlers.py` | **[MODIFY]** Integrate effective thread ceiling and `context.log()` diagnostics in `FclonesScanHandler` and `IndexRootHandler`. |
 | `app/scanners/fclones.py` | **[MODIFY]** Validate and accept sanitized thread parameter in `build_group_command()`. |
 | `frontend/src/types/index.ts` | **[MODIFY]** Define TypeScript interfaces for `ResourcePolicy`, `EffectiveResourcePolicy`, and `ResourcePolicyUpdate` using standard `number` types. |
@@ -206,7 +206,7 @@ git commit -m "feat(gate5f): add resource policy persistence"
 
 ---
 
-### Task 2: Pure Policy Evaluator & Canonical Profile Vocabulary
+### Task 2: Pure Policy Evaluator, Full Fingerprinting & Pre-Resolved Timezones
 
 **Files:**
 - Create/Extend: `app/resource_control.py`
@@ -217,32 +217,37 @@ git commit -m "feat(gate5f): add resource policy persistence"
 - Produces:
   - `ResourcePolicySnapshot` (frozen dataclass)
   - `EffectiveResourcePolicy` (frozen dataclass with `profile: "full" | "limited" | "pause"`)
+  - `resource_policy_row_fingerprint(row: ResourcePolicy | None) -> tuple | None`
   - `ResourcePolicyValidationError(ValueError)`
   - `ResourcePolicyConfigError(RuntimeError)`
   - `validate_resource_policy_snapshot(snapshot: ResourcePolicySnapshot) -> None`
-  - `evaluate_resource_policy(snapshot: ResourcePolicySnapshot, *, now_utc: datetime) -> EffectiveResourcePolicy`
+  - `evaluate_resource_policy(snapshot: ResourcePolicySnapshot, *, now_utc: datetime, resolved_timezone: zoneinfo.ZoneInfo | None = None) -> EffectiveResourcePolicy`
   - `parse_positive_thread_ceiling(val: Any) -> int | None`
   - `compose_fclones_thread_cap(policy_effective_cap: int, legacy_fclones_threads: Any = None, requested_task_threads: Any = None) -> int`
   - `is_resource_controlled_job(kind: str) -> bool`
   - `resolve_timezone(name: str) -> zoneinfo.ZoneInfo`
 
-- [ ] **Step 1: Write failing tests for pure evaluator**
+- [ ] **Step 1: Write failing tests for pure evaluator and fingerprinting**
 
 ```python
 # tests/test_gate5f_resource_policy.py
 import pytest
 from datetime import datetime, timezone
+import zoneinfo
 from app.resource_control import (
     ResourcePolicySnapshot,
     EffectiveResourcePolicy,
     ResourcePolicyValidationError,
     ResourcePolicyConfigError,
+    resource_policy_row_fingerprint,
     validate_resource_policy_snapshot,
     evaluate_resource_policy,
     parse_positive_thread_ceiling,
     compose_fclones_thread_cap,
     is_resource_controlled_job,
+    resolve_timezone,
 )
+from app.models import ResourcePolicy
 
 def test_default_policy_evaluation_returns_full_profile():
     snap = ResourcePolicySnapshot(
@@ -266,6 +271,39 @@ def test_default_policy_evaluation_returns_full_profile():
     assert eff.effective_thread_cap == 2
     assert eff.revision == 1
 
+def test_resource_policy_row_fingerprint():
+    row = ResourcePolicy(
+        id=1,
+        scan_threads=2,
+        hash_threads=4,
+        io_limit="normal",
+        job_priority="background",
+        active_window_enabled=True,
+        active_window_start="01:00",
+        active_window_end="07:00",
+        active_window_timezone="UTC",
+        outside_window_mode="pause",
+        revision=3,
+    )
+    fp = resource_policy_row_fingerprint(row)
+    assert fp == (3, 2, 4, "normal", "background", True, "01:00", "07:00", "UTC", "pause")
+    assert resource_policy_row_fingerprint(None) is None
+
+def test_evaluate_resource_policy_with_pre_resolved_timezone():
+    snap = ResourcePolicySnapshot(4, 4, "normal", "normal", True, "08:00", "18:00", "Asia/Shanghai", "pause", 1)
+    tz = resolve_timezone("Asia/Shanghai")
+    # 09:00 UTC is 17:00 Shanghai -> inside [08:00, 18:00)
+    now_in = datetime(2026, 9, 10, 9, 0, tzinfo=timezone.utc)
+    eff_in = evaluate_resource_policy(snap, now_utc=now_in, resolved_timezone=tz)
+    assert eff_in.profile == "full"
+    assert eff_in.resource_jobs_admitted is True
+
+    # 11:00 UTC is 19:00 Shanghai -> outside
+    now_out = datetime(2026, 9, 10, 11, 0, tzinfo=timezone.utc)
+    eff_out = evaluate_resource_policy(snap, now_utc=now_out, resolved_timezone=tz)
+    assert eff_out.profile == "pause"
+    assert eff_out.resource_jobs_admitted is False
+
 def test_io_limit_calculations():
     now = datetime(2026, 9, 10, 12, 0, tzinfo=timezone.utc)
     # low limits cap to 1, profile is full
@@ -282,48 +320,18 @@ def test_io_limit_calculations():
     snap_unlim = ResourcePolicySnapshot(8, 6, "unlimited", "normal", False, None, None, None, "limited", 1)
     assert evaluate_resource_policy(snap_unlim, now_utc=now).effective_thread_cap == 6
 
-def test_active_window_same_day_and_cross_midnight():
-    # Same-day: 08:00 to 18:00 UTC
-    snap_sameday = ResourcePolicySnapshot(4, 4, "normal", "normal", True, "08:00", "18:00", "UTC", "pause", 1)
-    validate_resource_policy_snapshot(snap_sameday)
-    # 08:00 exact start is inside [inclusive) -> profile 'full'
-    eff_in = evaluate_resource_policy(snap_sameday, now_utc=datetime(2026, 9, 10, 8, 0, tzinfo=timezone.utc))
-    assert eff_in.profile == "full"
-    assert eff_in.resource_jobs_admitted is True
-
-    # 18:00 exact end is outside [exclusive) -> profile 'pause'
-    outside = evaluate_resource_policy(snap_sameday, now_utc=datetime(2026, 9, 10, 18, 0, tzinfo=timezone.utc))
-    assert outside.resource_jobs_admitted is False
-    assert outside.profile == "pause"
-
-    # Cross-midnight: 22:00 to 06:00 UTC
-    snap_cross = ResourcePolicySnapshot(4, 4, "normal", "normal", True, "22:00", "06:00", "UTC", "limited", 1)
-    validate_resource_policy_snapshot(snap_cross)
-    # 23:30 is inside
-    assert evaluate_resource_policy(snap_cross, now_utc=datetime(2026, 9, 10, 23, 30, tzinfo=timezone.utc)).profile == "full"
-    # 05:59 is inside
-    assert evaluate_resource_policy(snap_cross, now_utc=datetime(2026, 9, 11, 5, 59, tzinfo=timezone.utc)).profile == "full"
-    # 12:00 is outside -> profile 'limited'
-    eff_out = evaluate_resource_policy(snap_cross, now_utc=datetime(2026, 9, 11, 12, 0, tzinfo=timezone.utc))
-    assert eff_out.inside_active_window is False
-    assert eff_out.profile == "limited"
-    assert eff_out.effective_thread_cap == 1
-
 def test_strict_validation_rejects_malformed_inputs():
     with pytest.raises(ResourcePolicyValidationError):
-        # bool masquerading as int
         validate_resource_policy_snapshot(ResourcePolicySnapshot(True, 2, "normal", "normal", False, None, None, None, "limited", 1))
     with pytest.raises(ResourcePolicyValidationError):
-        # start == end when active window enabled
         validate_resource_policy_snapshot(ResourcePolicySnapshot(2, 2, "normal", "normal", True, "08:00", "08:00", "UTC", "limited", 1))
     with pytest.raises(ResourcePolicyValidationError):
-        # invalid timezone
         validate_resource_policy_snapshot(ResourcePolicySnapshot(2, 2, "normal", "normal", True, "08:00", "18:00", "Mars/Phobos", "limited", 1))
 
 def test_compose_fclones_thread_cap():
     assert compose_fclones_thread_cap(2, None, None) == 2
     assert compose_fclones_thread_cap(2, "1", None) == 1
-    assert compose_fclones_thread_cap(2, "8", None) == 2  # cannot raise cap
+    assert compose_fclones_thread_cap(2, "8", None) == 2
     assert compose_fclones_thread_cap(6, 4, 3) == 3
     with pytest.raises(ResourcePolicyConfigError):
         compose_fclones_thread_cap(2, "invalid_threads", None)
@@ -340,10 +348,11 @@ def test_is_resource_controlled_job():
 Run: `pytest tests/test_gate5f_resource_policy.py -v`
 Expected: FAIL with missing functions or classes in `app.resource_control`.
 
-- [ ] **Step 3: Implement pure evaluation logic in app/resource_control.py**
+- [ ] **Step 3: Implement pure evaluation logic and fingerprinting in app/resource_control.py**
 
 Implement:
-- `ResourcePolicySnapshot` and `EffectiveResourcePolicy` frozen dataclasses.
+- `resource_policy_row_fingerprint(row)`: returns canonical 10-field tuple or `None`.
+- `evaluate_resource_policy(snapshot, *, now_utc, resolved_timezone=None)`: accepts pre-resolved timezone object; falls back to cached lookup only when `resolved_timezone is None` and not inside write lock.
 - Canonical `profile` assignment:
   - If `not active_window_enabled` or `inside_active_window`: `profile = "full"`, `effective_thread_cap = normal_cap`.
   - If outside window and `outside_window_mode == "limited"`: `profile = "limited"`, `effective_thread_cap = min(normal_cap, 1)`.
@@ -410,7 +419,6 @@ def make_api_client(tmp_path: Path):
         initial_admin_password="AdminPassword123!",
     )
     service = FileCenterService(settings)
-    # Seed regular non-admin user
     with service.SessionLocal() as session:
         user = User(
             username="staff_user",
@@ -505,7 +513,6 @@ def test_put_resource_policy_semantic_validation_matrix_returns_422(tmp_path: Pa
         "outside_window_mode": "limited",
     }
 
-    # Matrix of semantic and schema violations
     invalid_cases = [
         ("scan_threads_zero", {**base_valid, "scan_threads": 0}),
         ("scan_threads_bool", {**base_valid, "scan_threads": True}),
@@ -526,7 +533,6 @@ def test_put_resource_policy_semantic_validation_matrix_returns_422(tmp_path: Pa
         )
         assert resp.status_code == 422, f"Failed on case {name}: {resp.text}"
 
-        # Verify DB unchanged
         get_resp = client.get("/api/settings/resource-policy")
         assert get_resp.json()["revision"] == 1
 ```
@@ -571,7 +577,6 @@ In `app/service.py`:
 
     def update_resource_policy(self, payload: dict) -> dict:
         # Phase A: Outside DB write transaction
-        # Validate semantic constraints, parse HH:MM, pre-resolve and cache ZoneInfo
         temp_snapshot = ResourcePolicySnapshot(
             scan_threads=payload["scan_threads"],
             hash_threads=payload["hash_threads"],
@@ -582,7 +587,7 @@ In `app/service.py`:
             active_window_end=payload.get("active_window_end"),
             active_window_timezone=payload.get("active_window_timezone"),
             outside_window_mode=payload["outside_window_mode"],
-            revision=1, # evaluated against DB truth in Phase B
+            revision=1,
         )
         validate_resource_policy_snapshot(temp_snapshot)
 
@@ -670,7 +675,7 @@ git commit -m "feat(gate5f): expose admin resource policy api"
 
 ---
 
-### Task 4: Resource-Aware Worker Claim Admission & Bounded Retry Exhaustion
+### Task 4: Resource-Aware Worker Claim Admission (Strict Fingerprint, Fresh Lease Check & Bounded Fallback)
 
 **Files:**
 - Modify: `app/tasks/recovery.py`
@@ -678,20 +683,24 @@ git commit -m "feat(gate5f): expose admin resource policy api"
 - Test: `tests/test_gate5f_resource_claim.py`
 
 **Interfaces:**
-- Consumes: `claim_next_job()`, `assert_active_worker_lease()`, `ResourcePolicy`, `evaluate_resource_policy()`.
-- Produces: Enhanced `claim_next_job()` with deterministic two-phase policy preparation, bounded retry exhaustion fallback (claims eligible non-resource jobs, never uses stale snapshot or claims resource jobs), pause window holding, and background priority reordering.
+- Consumes: `claim_next_job()`, `assert_active_worker_lease()`, `ResourcePolicy`, `resource_policy_row_fingerprint()`, `evaluate_resource_policy()`.
+- Produces: Enhanced `claim_next_job()` with:
+  - Phase A: capture full policy fingerprint and pre-resolve timezone outside write lock.
+  - Phase B (`BEGIN IMMEDIATE`): fresh `claim_now` lease check, full fingerprint validation, transaction-time active window evaluation.
+  - Bounded retry exhaustion fallback: after 3 unstable snapshot attempts, fresh lease check and claim eligible NON-resource jobs only (never use stale policy or claim resource jobs).
 
-- [ ] **Step 1: Write failing tests for claim admission, priority and retry exhaustion**
+- [ ] **Step 1: Write failing tests for claim protocol safety, fingerprint drift, lease expiry, and boundary race**
 
 ```python
 # tests/test_gate5f_resource_claim.py
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import pytest
 from unittest.mock import patch
 from app.db import create_engine_and_session, init_db
 from app.tasks.recovery import claim_next_job, acquire_worker_ownership
 from app.models import WorkJob, ResourcePolicy
+from app.tasks.state_machine import JobLeaseLost
 
 FROZEN_OUTSIDE_TIME = datetime(2026, 9, 10, 12, 0, 0, tzinfo=timezone.utc)
 FROZEN_INSIDE_TIME = datetime(2026, 9, 10, 2, 0, 0, tzinfo=timezone.utc)
@@ -706,7 +715,6 @@ def test_claim_outside_pause_window_holds_resource_job_queued(tmp_path: Path):
     engine, SessionLocal = make_task_db(tmp_path)
     worker_id = "worker-test-1"
 
-    # Configure active window 01:00-03:00 UTC (FROZEN_OUTSIDE_TIME 12:00 is outside)
     with SessionLocal() as session:
         policy = session.get(ResourcePolicy, 1)
         policy.active_window_enabled = True
@@ -728,7 +736,6 @@ def test_claim_outside_pause_window_holds_resource_job_queued(tmp_path: Path):
         claimed = claim_next_job(engine, SessionLocal, worker_id)
         assert claimed is None
 
-    # Job remains queued (not paused, not failed, not cancelled)
     with SessionLocal() as session:
         j = session.get(WorkJob, job_id)
         assert j.status == "queued"
@@ -754,72 +761,87 @@ def test_claim_outside_pause_window_allows_mutation_job(tmp_path: Path):
         claimed = claim_next_job(engine, SessionLocal, worker_id)
         assert claimed == 102
 
-def test_background_priority_claims_non_resource_job_first(tmp_path: Path):
+def test_claim_rejects_same_revision_fingerprint_drift(tmp_path: Path):
     engine, SessionLocal = make_task_db(tmp_path)
-    worker_id = "worker-test-3"
-    with SessionLocal() as session:
-        policy = session.get(ResourcePolicy, 1)
-        policy.job_priority = "background"
-        policy.active_window_enabled = False
-
-        j1 = WorkJob(id=201, kind="fclones-scan", status="queued", state_json="{}")
-        j2 = WorkJob(id=202, kind="batch-plan-execute", status="queued", state_json="{}")
-        session.add_all([j1, j2])
-        session.commit()
-
-    with patch("app.tasks.recovery.utcnow", return_value=FROZEN_INSIDE_TIME):
-        acquire_worker_ownership(engine, SessionLocal, worker_id)
-        claimed = claim_next_job(engine, SessionLocal, worker_id)
-        assert claimed == 202
-
-def test_claim_retry_exhaustion_claims_non_resource_job(tmp_path: Path):
-    engine, SessionLocal = make_task_db(tmp_path)
-    worker_id = "worker-exhaustion-1"
+    worker_id = "worker-fp-drift"
 
     with SessionLocal() as session:
         j1 = WorkJob(id=601, kind="index-root", status="queued", state_json="{}")
-        j2 = WorkJob(id=602, kind="batch-plan-execute", status="queued", state_json="{}")
-        session.add_all([j1, j2])
-        session.commit()
-
-    with patch("app.tasks.recovery.utcnow", return_value=FROZEN_INSIDE_TIME):
-        acquire_worker_ownership(engine, SessionLocal, worker_id)
-
-        # Deterministically simulate policy revision change on every attempt
-        original_get = SessionLocal().get
-        attempt_count = 0
-
-        # Simulate revision change inside Phase B check
-        with patch("app.tasks.recovery.get_policy_row_for_check") as mock_check:
-            mock_check.side_effect = lambda session: ResourcePolicy(id=1, revision=999)
-
-            claimed = claim_next_job(engine, SessionLocal, worker_id)
-            # Under retry exhaustion: 601 (resource-controlled) is held, 602 (mutation) is claimed
-            assert claimed == 602
-
-    with SessionLocal() as session:
-        j1_current = session.get(WorkJob, 601)
-        assert j1_current.status == "queued"
-
-def test_claim_retry_exhaustion_returns_none_when_only_resource_jobs(tmp_path: Path):
-    engine, SessionLocal = make_task_db(tmp_path)
-    worker_id = "worker-exhaustion-2"
-
-    with SessionLocal() as session:
-        j1 = WorkJob(id=603, kind="index-root", status="queued", state_json="{}")
         session.add(j1)
         session.commit()
 
     with patch("app.tasks.recovery.utcnow", return_value=FROZEN_INSIDE_TIME):
         acquire_worker_ownership(engine, SessionLocal, worker_id)
 
+        # Simulate field drift while revision stays identical
         with patch("app.tasks.recovery.get_policy_row_for_check") as mock_check:
-            mock_check.side_effect = lambda session: ResourcePolicy(id=1, revision=999)
+            # Same revision 1, but job_priority changed to background
+            mock_check.side_effect = lambda session: ResourcePolicy(
+                id=1, revision=1, scan_threads=2, hash_threads=2, io_limit="normal",
+                job_priority="background", active_window_enabled=False, outside_window_mode="limited"
+            )
             claimed = claim_next_job(engine, SessionLocal, worker_id)
+            # Drift causes retry exhaustion; resource job is NOT claimed with stale snapshot
             assert claimed is None
 
     with SessionLocal() as session:
-        assert session.get(WorkJob, 603).status == "queued"
+        assert session.get(WorkJob, 601).status == "queued"
+
+def test_claim_lease_fencing_detects_expiry_during_phase_a(tmp_path: Path):
+    engine, SessionLocal = make_task_db(tmp_path)
+    worker_id = "worker-lease-expire"
+
+    # Lease acquired at T0
+    t0 = datetime(2026, 9, 10, 12, 0, 0, tzinfo=timezone.utc)
+    with patch("app.tasks.recovery.utcnow", return_value=t0):
+        acquire_worker_ownership(engine, SessionLocal, worker_id)
+
+    with SessionLocal() as session:
+        j = WorkJob(id=650, kind="batch-plan-execute", status="queued", state_json="{}")
+        session.add(j)
+        session.commit()
+
+    # Time advances by 35s (> 30s timeout) before Phase B runs
+    t_expired = t0 + timedelta(seconds=35)
+    with patch("app.tasks.recovery.utcnow", return_value=t_expired):
+        with pytest.raises(JobLeaseLost):
+            claim_next_job(engine, SessionLocal, worker_id)
+
+    with SessionLocal() as session:
+        assert session.get(WorkJob, 650).status == "queued"
+
+def test_claim_active_window_boundary_race_evaluates_at_phase_b(tmp_path: Path):
+    engine, SessionLocal = make_task_db(tmp_path)
+    worker_id = "worker-boundary-race"
+
+    with SessionLocal() as session:
+        policy = session.get(ResourcePolicy, 1)
+        policy.active_window_enabled = True
+        policy.active_window_start = "01:00"
+        policy.active_window_end = "03:00"
+        policy.active_window_timezone = "UTC"
+        policy.outside_window_mode = "pause"
+
+        j1 = WorkJob(id=701, kind="fclones-scan", status="queued", state_json="{}")
+        j2 = WorkJob(id=702, kind="batch-plan-execute", status="queued", state_json="{}")
+        session.add_all([j1, j2])
+        session.commit()
+
+    # Acquire lease inside window
+    acquire_time = datetime(2026, 9, 10, 2, 59, 0, tzinfo=timezone.utc)
+    with patch("app.tasks.recovery.utcnow", return_value=acquire_time):
+        acquire_worker_ownership(engine, SessionLocal, worker_id)
+
+    # Phase B runs at exactly 03:00:00 (end of window, exclusive -> outside pause)
+    boundary_time = datetime(2026, 9, 10, 3, 0, 0, tzinfo=timezone.utc)
+    with patch("app.tasks.recovery.utcnow", return_value=boundary_time):
+        claimed = claim_next_job(engine, SessionLocal, worker_id)
+        # 701 is held because Phase B evaluates against fresh claim_now boundary_time
+        # 702 (mutation) is claimed
+        assert claimed == 702
+
+    with SessionLocal() as session:
+        assert session.get(WorkJob, 701).status == "queued"
 ```
 
 - [ ] **Step 2: Run tests to verify they fail (RED)**
@@ -827,7 +849,7 @@ def test_claim_retry_exhaustion_returns_none_when_only_resource_jobs(tmp_path: P
 Run: `pytest tests/test_gate5f_resource_claim.py -v`
 Expected: FAIL.
 
-- [ ] **Step 3: Implement two-phase claim pattern and retry exhaustion fallback in app/tasks/recovery.py**
+- [ ] **Step 3: Implement strict two-phase claim protocol in app/tasks/recovery.py**
 
 Implement:
 ```python
@@ -840,20 +862,18 @@ def claim_next_job(
     worker_id: str,
     timeout_seconds: float = WORKER_LEASE_TIMEOUT_SECONDS,
 ) -> int | None:
-    now = utcnow()
     MAX_POLICY_ATTEMPTS = 3
 
     for attempt in range(MAX_POLICY_ATTEMPTS):
-        # Phase A: Outside write transaction
+        # Phase A: Outside write transaction (no write lock, no authoritative lease check)
         with session_factory() as session:
             row = session.get(ResourcePolicy, 1)
+            expected_fingerprint = resource_policy_row_fingerprint(row)
             if row is None:
                 policy_valid = False
-                resource_jobs_admitted = False
-                job_priority = "normal"
-                expected_revision = None
+                snapshot = None
+                prepared_tz = None
             else:
-                expected_revision = row.revision
                 try:
                     snapshot = ResourcePolicySnapshot(
                         scan_threads=row.scan_threads,
@@ -868,29 +888,36 @@ def claim_next_job(
                         revision=row.revision,
                     )
                     validate_resource_policy_snapshot(snapshot)
-                    eff = evaluate_resource_policy(snapshot, now_utc=now)
                     policy_valid = True
-                    resource_jobs_admitted = eff.resource_jobs_admitted
-                    job_priority = snapshot.job_priority
+                    prepared_tz = resolve_timezone(snapshot.active_window_timezone) if snapshot.active_window_enabled and snapshot.active_window_timezone else None
                 except Exception:
                     policy_valid = False
-                    resource_jobs_admitted = False
-                    job_priority = "normal"
+                    snapshot = None
+                    prepared_tz = None
 
         # Phase B: Short BEGIN IMMEDIATE write transaction
         with session_factory() as session:
             session.execute(text("BEGIN IMMEDIATE"))
-            assert_active_worker_lease(session, worker_id, now=now, timeout_seconds=timeout_seconds)
+            claim_now = utcnow()
+            assert_active_worker_lease(session, worker_id, now=claim_now, timeout_seconds=timeout_seconds)
 
             current_row = get_policy_row_for_check(session)
-            current_rev = current_row.revision if current_row else None
+            current_fingerprint = resource_policy_row_fingerprint(current_row)
 
-            # If policy changed between Phase A and Phase B, rollback and retry
-            if current_rev != expected_revision:
+            # Strict comparison of FULL policy fingerprint
+            if current_fingerprint != expected_fingerprint:
                 session.rollback()
                 continue
 
-            # Policy matches: select candidate according to admission and priority
+            # Active-window eligibility evaluated against fresh transaction-time claim_now
+            if not policy_valid or snapshot is None:
+                resource_jobs_admitted = False
+                job_priority = "normal"
+            else:
+                eff = evaluate_resource_policy(snapshot, now_utc=claim_now, resolved_timezone=prepared_tz)
+                resource_jobs_admitted = eff.resource_jobs_admitted
+                job_priority = snapshot.job_priority
+
             candidate_id = None
             if not resource_jobs_admitted:
                 candidate_id = session.scalar(
@@ -939,8 +966,8 @@ def claim_next_job(
                 .where(WorkJob.id == candidate_id, WorkJob.status == JobState.QUEUED.value)
                 .values(
                     status=JobState.RUNNING.value,
-                    started_at=now,
-                    heartbeat_at=now,
+                    started_at=claim_now,
+                    heartbeat_at=claim_now,
                     error_code=None,
                     error_text=None,
                 )
@@ -955,7 +982,8 @@ def claim_next_job(
     # MUST NOT use stale policy, MUST NOT claim resource-controlled jobs
     with session_factory() as session:
         session.execute(text("BEGIN IMMEDIATE"))
-        assert_active_worker_lease(session, worker_id, now=now, timeout_seconds=timeout_seconds)
+        fallback_now = utcnow()
+        assert_active_worker_lease(session, worker_id, now=fallback_now, timeout_seconds=timeout_seconds)
         candidate_id = session.scalar(
             select(WorkJob.id)
             .where(
@@ -974,8 +1002,8 @@ def claim_next_job(
             .where(WorkJob.id == candidate_id, WorkJob.status == JobState.QUEUED.value)
             .values(
                 status=JobState.RUNNING.value,
-                started_at=now,
-                heartbeat_at=now,
+                started_at=fallback_now,
+                heartbeat_at=fallback_now,
                 error_code=None,
                 error_text=None,
             )
@@ -1152,7 +1180,6 @@ def test_index_root_maintains_serial_execution(tmp_path: Path):
     context.SessionLocal = SessionLocal
     context.worker_id = None
 
-    # Real Settings object with isolated temporary directories
     config_dir = tmp_path / "config"
     config_dir.mkdir(parents=True, exist_ok=True)
     data_dir = tmp_path / "data"
@@ -1239,19 +1266,16 @@ def test_running_job_remains_running_on_window_transition(tmp_path: Path):
     worker_id = "worker-transition-test"
 
     with SessionLocal() as session:
-        # Initially inside full profile (active window disabled)
         p = session.get(ResourcePolicy, 1)
         p.active_window_enabled = False
         p.revision = 1
 
-        # Job 501 is RUNNING, Job 502 is queued index-root, Job 503 is queued batch mutation
         j1 = WorkJob(id=501, kind="fclones-scan", status="running", state_json='{"roots": ["/allowed/root"]}')
         j2 = WorkJob(id=502, kind="index-root", status="queued", state_json='{"root": "/allowed/root"}')
         j3 = WorkJob(id=503, kind="batch-plan-execute", status="queued", state_json='{}')
         session.add_all([j1, j2, j3])
         session.commit()
 
-    # Transition policy: outside active window with mode = pause
     fixed_outside = datetime(2026, 9, 10, 12, 0, 0, tzinfo=timezone.utc)
     with SessionLocal() as session:
         p = session.get(ResourcePolicy, 1)
@@ -1263,7 +1287,6 @@ def test_running_job_remains_running_on_window_transition(tmp_path: Path):
         p.revision = 2
         session.commit()
 
-    # Freezing time before lease acquisition ensures clock consistency across operations
     with patch("app.tasks.recovery.utcnow", return_value=fixed_outside):
         acquired = acquire_worker_ownership(engine, SessionLocal, worker_id)
         assert acquired is True
@@ -1271,11 +1294,9 @@ def test_running_job_remains_running_on_window_transition(tmp_path: Path):
         claimed_mutation = claim_next_job(engine, SessionLocal, worker_id)
         assert claimed_mutation == 503
 
-        # Next claim sees only resource-controlled queued job j2 -> returns None
         claimed_none = claim_next_job(engine, SessionLocal, worker_id)
         assert claimed_none is None
 
-    # Assert running job 501 is NOT killed, NOT fake-paused, NOT failed
     with SessionLocal() as session:
         current_j1 = session.get(WorkJob, 501)
         assert current_j1.status == "running"
@@ -1451,8 +1472,6 @@ def test_corrupted_active_window_holds_resource_job_but_allows_mutation(tmp_path
     with patch("app.tasks.recovery.utcnow", return_value=FROZEN_TIME):
         acquired = acquire_worker_ownership(engine, SessionLocal, worker_id)
         assert acquired is True
-        # j1 fails closed (cannot be claimed safely under invalid policy)
-        # j2 is mutation and must still be claimed to prevent global engine outage
         claimed = claim_next_job(engine, SessionLocal, worker_id)
         assert claimed == 302
 
@@ -1486,7 +1505,7 @@ Expected: FAIL if corrupted policy causes crash or blocks mutation jobs.
 
 In `app/tasks/recovery.py`:
 If `ResourcePolicy` is missing or fails validation or timezone resolution:
-- Mark `resource_policy_valid = False`.
+- Mark `policy_valid = False` and `resource_jobs_admitted = False`.
 - Exclude resource-controlled job kinds (`index-root`, `fclones-scan`).
 - Permit non-resource-controlled jobs to proceed normally.
 
