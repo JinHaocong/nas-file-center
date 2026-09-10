@@ -1541,6 +1541,129 @@ def test_compiler_preflight_to_discovery_symlink_swap_blocks_enumeration(tmp_pat
     assert not any("secret.txt" in c.source_path for c in discovered_candidates)
 
 
+def test_compiler_wrapper_ordinary_dir_replacement_fails_closed_before_discovery(tmp_path):
+    """Gate5-E / E3-hotfix10 Test 1:
+    Leaf replaced by different ordinary directory before discovery.
+    FAILS CLOSED, 0 children enumerated.
+    """
+    import os
+    import shutil
+    from unittest.mock import patch
+    import app.batch_utilities.compiler as compiler_mod
+    from app.batch_utilities.errors import BatchUtilityInvalidConfigError
+    from app.batch_utilities.compiler import (
+        compile_flatten_one_level_preview,
+        BatchUtilitySafetySnapshot,
+    )
+    from app.batch_utilities.schema import FlattenOneLevelAction
+
+    root = tmp_path / "root"
+    root.mkdir(parents=True)
+    w_dir = root / "W"
+    w_dir.mkdir(parents=True)
+    (w_dir / "before.txt").write_text("before")
+
+    action = FlattenOneLevelAction(type="flatten_one_level", wrapper_paths=[str(w_dir)])
+    snapshot = BatchUtilitySafetySnapshot(
+        protect_last_file=True,
+        allowed_roots=(root,),
+        quarantine_root=None,
+        effective_policy={},
+    )
+
+    # Hook validate_wrappers_preflight: swap W to a different ordinary directory with secret.txt
+    orig_preflight = compiler_mod.validate_wrappers_preflight
+    def racing_preflight(*args, **kwargs):
+        res = orig_preflight(*args, **kwargs)
+        # Move original W aside, create new directory at W with different inode
+        w_old = root / "W_old"
+        os.rename(str(w_dir), str(w_old))
+        os.mkdir(str(w_dir))
+        (w_dir / "secret.txt").write_text("secret")
+        return res
+
+    discovered_candidates = []
+    orig_disc = compiler_mod.discover_flatten_one_level
+    def spy_disc(wrappers, *args, **kwargs):
+        cands, errs = orig_disc(wrappers, *args, **kwargs)
+        discovered_candidates.extend(cands)
+        return cands, errs
+
+    with patch.object(compiler_mod, "validate_wrappers_preflight", side_effect=racing_preflight):
+        with patch.object(compiler_mod, "discover_flatten_one_level", side_effect=spy_disc):
+            with pytest.raises(BatchUtilityInvalidConfigError) as exc_info:
+                compile_flatten_one_level_preview(session=None, action=action, safety_snapshot=snapshot)
+            assert "WRAPPER_IDENTITY_CHANGED" in str(exc_info.value) or exc_info.value.details.get("error") == "WRAPPER_IDENTITY_CHANGED"
+
+    # Assert secret.txt was NEVER enumerated by discovery
+    assert len(discovered_candidates) == 0
+    assert not any("secret.txt" in c.source_path for c in discovered_candidates)
+
+
+def test_compiler_wrapper_intermediate_path_replacement_fails_closed_before_discovery(tmp_path):
+    """Gate5-E / E3-hotfix10 Test 3:
+    Intermediate component replaced before discovery so canonical path selects another W.
+    FAILS CLOSED, 0 children enumerated.
+    """
+    import os
+    from unittest.mock import patch
+    import app.batch_utilities.compiler as compiler_mod
+    from app.batch_utilities.errors import BatchUtilityInvalidConfigError
+    from app.batch_utilities.compiler import (
+        compile_flatten_one_level_preview,
+        BatchUtilitySafetySnapshot,
+    )
+    from app.batch_utilities.schema import FlattenOneLevelAction
+
+    root = tmp_path / "root"
+    a_dir = root / "A"
+    a_dir.mkdir(parents=True)
+    w1 = a_dir / "W"
+    w1.mkdir(parents=True)
+    (w1 / "legit.txt").write_text("legit")
+
+    b_dir = root / "B"
+    b_dir.mkdir(parents=True)
+    w2 = b_dir / "W"
+    w2.mkdir(parents=True)
+    (w2 / "secret.txt").write_text("secret")
+
+    action = FlattenOneLevelAction(type="flatten_one_level", wrapper_paths=[str(w1)])
+    snapshot = BatchUtilitySafetySnapshot(
+        protect_last_file=True,
+        allowed_roots=(root,),
+        quarantine_root=None,
+        effective_policy={},
+    )
+
+    # Hook validate_wrappers_preflight: swap intermediate directory A to symlink pointing to B
+    orig_preflight = compiler_mod.validate_wrappers_preflight
+    def racing_preflight(*args, **kwargs):
+        res = orig_preflight(*args, **kwargs)
+        a_orig = root / "A_orig"
+        os.rename(str(a_dir), str(a_orig))
+        os.symlink(str(b_dir), str(a_dir))
+        return res
+
+    discovered_candidates = []
+    orig_disc = compiler_mod.discover_flatten_one_level
+    def spy_disc(wrappers, *args, **kwargs):
+        cands, errs = orig_disc(wrappers, *args, **kwargs)
+        discovered_candidates.extend(cands)
+        return cands, errs
+
+    with patch.object(compiler_mod, "validate_wrappers_preflight", side_effect=racing_preflight):
+        with patch.object(compiler_mod, "discover_flatten_one_level", side_effect=spy_disc):
+            with pytest.raises(BatchUtilityInvalidConfigError) as exc_info:
+                compile_flatten_one_level_preview(session=None, action=action, safety_snapshot=snapshot)
+            assert "WRAPPER_IDENTITY_CHANGED" in str(exc_info.value) or exc_info.value.details.get("error") == "WRAPPER_IDENTITY_CHANGED"
+
+    # Assert secret.txt was NEVER enumerated by discovery
+    assert len(discovered_candidates) == 0
+    assert not any("secret.txt" in c.source_path for c in discovered_candidates)
+
+
+
 
 
 

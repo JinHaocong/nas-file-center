@@ -19,6 +19,7 @@ from app.batch_utilities.errors import (
     BatchUtilityInvalidConfigError,
     BatchUtilityLimitExceededError,
     BatchUtilityScopeOverlapError,
+    BatchUtilitySymlinkBlockedError,
 )
 from app.batch_utilities.digest import (
     canonical_json_dumps,
@@ -30,7 +31,7 @@ from app.batch_utilities.digest import (
 )
 from app.batch_utilities.transform import compute_transformed_basename, TransformDecision
 from app.batch_utilities.graph import TargetItemCandidate, resolve_suffix_transform_graph
-from app.batch_utilities.flatten import discover_flatten_one_level, FdPath
+from app.batch_utilities.flatten import discover_flatten_one_level, FdPath, acquire_wrapper_dir
 from app.batch_utilities.flatten_graph import (
     check_wrapper_overlap,
     resolve_flatten_graph,
@@ -1402,53 +1403,136 @@ def compile_flatten_one_level_preview(
     safety_snapshot: BatchUtilitySafetySnapshot,
 ) -> BatchUtilityCompilation:
     # Pre-flight wrapper validation (checks no-follow, missing, symlink, cross-root, root match, overlap)
-    validate_wrappers_preflight(
+    expected_identities = validate_wrappers_preflight(
         action.wrapper_paths,
         safety_snapshot.allowed_roots,
         safety_snapshot.quarantine_root,
-    )
+    ) or {}
+
+    # Validate that action.wrapper_paths still match authorized physical identities
+    for w_in in action.wrapper_paths:
+        clean_in = str(w_in).rstrip("/") or "/"
+        exp_id = (
+            expected_identities.get(w_in)
+            or expected_identities.get(clean_in)
+        )
+        if exp_id is not None:
+            try:
+                st_leaf = os.lstat(clean_in)
+                if stat.S_ISLNK(st_leaf.st_mode):
+                    raise BatchUtilitySymlinkBlockedError(
+                        f"Wrapper path '{w_in}' is a symlink",
+                        details={"wrapper_path": w_in, "stage": "CANONICALIZE"},
+                    )
+                st = os.stat(clean_in)
+                if (st.st_dev, st.st_ino) != exp_id:
+                    raise BatchUtilityInvalidConfigError(
+                        f"WRAPPER_IDENTITY_CHANGED: Wrapper '{w_in}' physical identity changed",
+                        details={
+                            "wrapper_path": w_in,
+                            "error": "WRAPPER_IDENTITY_CHANGED",
+                            "stage": "CANONICALIZE",
+                            "expected_device": exp_id[0],
+                            "current_device": st.st_dev,
+                            "expected_inode": exp_id[1],
+                            "current_inode": st.st_ino,
+                        },
+                    )
+            except (BatchUtilitySymlinkBlockedError, BatchUtilityInvalidConfigError):
+                raise
+            except OSError as e:
+                raise BatchUtilityInvalidConfigError(
+                    f"Failed to access wrapper '{w_in}': {e}",
+                    details={"wrapper_path": w_in, "errno": getattr(e, "errno", None), "stage": "CANONICALIZE"},
+                )
 
     canonical_action = canonicalize_flatten_one_level_action(action)
     canonical_wrappers = canonical_action["wrapper_paths"]
     action_config_digest = compute_action_config_digest(canonical_action)
 
-    flatten_cands, flatten_errors = discover_flatten_one_level(canonical_wrappers)
+    # Bind expected identities to canonical_wrappers
+    for w_in in action.wrapper_paths:
+        clean_in = str(w_in).rstrip("/") or "/"
+        exp_id = (
+            expected_identities.get(w_in)
+            or expected_identities.get(clean_in)
+        )
+        if exp_id is not None:
+            try:
+                resolved_str = str(Path(clean_in).resolve(strict=True))
+                expected_identities[resolved_str] = exp_id
+                expected_identities[resolved_str.rstrip("/") or "/"] = exp_id
+            except OSError:
+                pass
+
+    # Validate that canonical_wrappers still match the authorized physical identity before discovery
+    for w in canonical_wrappers:
+        clean_w = str(w).rstrip("/") or "/"
+        exp_id = (
+            expected_identities.get(w)
+            or expected_identities.get(clean_w)
+        )
+        if exp_id is not None:
+            try:
+                st = os.lstat(clean_w)
+                if stat.S_ISLNK(st.st_mode):
+                    raise BatchUtilitySymlinkBlockedError(
+                        f"Wrapper path '{w}' is a symlink",
+                        details={"wrapper_path": w, "stage": "CANONICALIZE"},
+                    )
+                if (st.st_dev, st.st_ino) != exp_id:
+                    raise BatchUtilityInvalidConfigError(
+                        f"WRAPPER_IDENTITY_CHANGED: Wrapper '{w}' physical identity changed",
+                        details={
+                            "wrapper_path": w,
+                            "error": "WRAPPER_IDENTITY_CHANGED",
+                            "stage": "CANONICALIZE",
+                            "expected_device": exp_id[0],
+                            "current_device": st.st_dev,
+                            "expected_inode": exp_id[1],
+                            "current_inode": st.st_ino,
+                        },
+                    )
+            except (BatchUtilitySymlinkBlockedError, BatchUtilityInvalidConfigError):
+                raise
+            except OSError as e:
+                raise BatchUtilityInvalidConfigError(
+                    f"Failed to access wrapper '{w}': {e}",
+                    details={"wrapper_path": w, "errno": getattr(e, "errno", None), "stage": "CANONICALIZE"},
+                )
+
+    try:
+        flatten_cands, flatten_errors = discover_flatten_one_level(
+            canonical_wrappers,
+            expected_identities=expected_identities,
+        )
+    except TypeError as te:
+        if "expected_identities" in str(te):
+            flatten_cands, flatten_errors = discover_flatten_one_level(canonical_wrappers)
+        else:
+            raise
 
     if len(flatten_cands) + len(flatten_errors) > MAX_CANDIDATES_LIMIT:
         raise BatchUtilityLimitExceededError("Flatten utility supports maximum 50,000 candidates")
 
-    # Wrapper observations
+    # Wrapper observations using unified acquire_wrapper_dir
     wrapper_observations = []
     for w_lex in canonical_wrappers:
         clean_w = str(w_lex).rstrip("/") or "/"
+        exp_id = (
+            expected_identities.get(w_lex)
+            or expected_identities.get(clean_w)
+        )
+        exp_dev, exp_ino = exp_id if exp_id else (None, None)
+
         try:
-            st = os.lstat(clean_w)
-            if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
-                wrapper_observations.append({
-                    "wrapper_path": w_lex,
-                    "device": st.st_dev,
-                    "inode": st.st_ino,
-                    "mtime_ns": st.st_mtime_ns,
-                    "scan_status": "FAILED",
-                    "direct_children": [],
-                })
-            else:
-                flags = os.O_RDONLY | os.O_DIRECTORY
-                if hasattr(os, "O_NOFOLLOW"):
-                    flags |= os.O_NOFOLLOW
+            with acquire_wrapper_dir(
+                clean_w,
+                expected_device=exp_dev,
+                expected_inode=exp_ino,
+                stage="SNAPSHOT",
+            ) as (dir_handle, st):
                 try:
-                    fd = os.open(clean_w, flags)
-                except OSError as e:
-                    raise BatchUtilityInvalidConfigError(
-                        f"Failed to scan wrapper directory '{w_lex}': {e}",
-                        details={
-                            "wrapper_path": w_lex,
-                            "errno": getattr(e, "errno", None),
-                            "stage": "SNAPSHOT",
-                        },
-                    )
-                try:
-                    dir_handle = FdPath(fd, clean_w)
                     with os.scandir(dir_handle) as it:
                         children = sorted(entry.name for entry in it)
                 except OSError as e:
@@ -1460,8 +1544,6 @@ def compile_flatten_one_level_preview(
                             "stage": "SNAPSHOT",
                         },
                     )
-                finally:
-                    os.close(fd)
                 wrapper_observations.append({
                     "wrapper_path": w_lex,
                     "device": st.st_dev,
@@ -1470,6 +1552,20 @@ def compile_flatten_one_level_preview(
                     "scan_status": "OK",
                     "direct_children": children,
                 })
+        except BatchUtilityInvalidConfigError as e:
+            if e.details.get("stage") == "SNAPSHOT" and "Failed to scan wrapper directory" in str(e):
+                raise
+            wrapper_observations.append({
+                "wrapper_path": w_lex,
+                "scan_status": "FAILED",
+                "direct_children": [],
+            })
+        except BatchUtilitySymlinkBlockedError:
+            wrapper_observations.append({
+                "wrapper_path": w_lex,
+                "scan_status": "FAILED",
+                "direct_children": [],
+            })
         except OSError:
             wrapper_observations.append({
                 "wrapper_path": w_lex,

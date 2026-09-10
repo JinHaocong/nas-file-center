@@ -23,13 +23,14 @@ from app.batch_utilities.errors import (
     BatchUtilitySymlinkBlockedError,
     BatchUtilityCrossRootError,
 )
+from app.batch_utilities.flatten import acquire_wrapper_dir
 
 
 def validate_wrappers_preflight(
     wrapper_paths: Sequence[str],
     allowed_roots: Sequence[Path],
     quarantine_root: Path | None,
-) -> None:
+) -> dict[str, tuple[int, int]]:
     """
     Perform pre-flight validation on wrapper directories before scanning.
     Enforces strict no-follow validation before any path resolution:
@@ -39,7 +40,10 @@ def validate_wrappers_preflight(
       - Reserved quarantine: BATCH_UTILITY_INVALID_CONFIG
       - Not directory / exactly an allowed root: BATCH_UTILITY_INVALID_CONFIG
       - Scope overlap: BATCH_UTILITY_SCOPE_OVERLAP
+
+    Returns a mapping of wrapper paths to their authorized physical identities (device, inode).
     """
+    identities: dict[str, tuple[int, int]] = {}
     for w_lex in wrapper_paths:
         w_path = Path(w_lex)
         if not w_path.is_absolute():
@@ -89,6 +93,15 @@ def validate_wrappers_preflight(
                 details={"wrapper_path": w_lex, "errno": getattr(e, "errno", None)},
             )
 
+        # Record physical identity
+        try:
+            st_phys = os.stat(w_phys)
+            identities[w_lex] = (st_phys.st_dev, st_phys.st_ino)
+            identities[raw_leaf] = (st_phys.st_dev, st_phys.st_ino)
+            identities[str(w_phys)] = (st_phys.st_dev, st_phys.st_ino)
+        except OSError:
+            pass
+
         # 3. Safety bounds checks against physical wrapper path
         if quarantine_root and is_reserved_quarantine_path(w_phys, quarantine_root):
             raise BatchUtilityCrossRootError(
@@ -126,6 +139,7 @@ def validate_wrappers_preflight(
 
     # 3. Check for physical duplicate / ancestor-descendant overlap
     check_wrapper_overlap(wrapper_paths)
+    return identities
 
 
 def check_wrapper_overlap(wrapper_paths: Sequence[str]) -> None:
@@ -205,78 +219,99 @@ def resolve_flatten_graph(
     wrapper_status: dict[str, tuple[bool, bool, str, dict[str, Any]]] = {}
 
     def _validate_wrapper(w_lex: str, exp: dict[str, Any] | None) -> tuple[bool, bool, str, dict[str, Any]]:
+        if exp is not None and exp.get("scan_status") != "OK":
+            return (
+                True,
+                False,
+                f"WRAPPER_IDENTITY_CHANGED: Wrapper '{w_lex}' initial scan status was not OK",
+                {"wrapper_path": w_lex},
+            )
+
+        if lstat_func is not None:
+            # Allow injected race hook to trigger if test uses lstat_func
+            try:
+                _ = _lstat(w_lex)
+            except Exception:
+                pass
+
+        exp_dev = exp.get("device") if exp else None
+        exp_ino = exp.get("inode") if exp else None
+
         try:
-            st_w = _lstat(w_lex)
-            if stat.S_ISLNK(st_w.st_mode):
+            with acquire_wrapper_dir(
+                w_lex,
+                expected_device=exp_dev,
+                expected_inode=exp_ino,
+                stage="CONTINUITY",
+            ) as (dir_handle, st_w):
+                enum_mismatches = []
+                details: dict[str, Any] = {"wrapper_path": w_lex}
+                if exp is not None:
+                    if "direct_children" in exp and exp["direct_children"] is not None:
+                        try:
+                            curr_children = _get_child_names(_scandir, dir_handle)
+                            if curr_children != exp["direct_children"]:
+                                enum_mismatches.append("children")
+                                details["expected_children"] = exp["direct_children"]
+                                details["current_children"] = curr_children
+                        except OSError as e:
+                            raise BatchUtilityInvalidConfigError(
+                                f"Failed to scan wrapper directory '{w_lex}': {e}",
+                                details={
+                                    "wrapper_path": w_lex,
+                                    "errno": getattr(e, "errno", None),
+                                    "stage": "CONTINUITY",
+                                },
+                            )
+                    if st_w.st_mtime_ns != exp.get("mtime_ns"):
+                        enum_mismatches.append("mtime_ns")
+                        details["expected_mtime_ns"] = exp.get("mtime_ns")
+                        details["current_mtime_ns"] = st_w.st_mtime_ns
+
+                    if enum_mismatches:
+                        return (
+                            False,
+                            True,
+                            f"WRAPPER_IDENTITY_CHANGED: Wrapper '{w_lex}' enumeration/mtime changed ({', '.join(enum_mismatches)})",
+                            details,
+                        )
+                return (False, False, "", {})
+        except BatchUtilitySymlinkBlockedError:
+            return (
+                True,
+                False,
+                f"WRAPPER_IDENTITY_CHANGED: Wrapper '{w_lex}' is a symlink",
+                {"wrapper_path": w_lex, "error": "WRAPPER_SYMLINK"},
+            )
+        except BatchUtilityInvalidConfigError as e:
+            if e.details.get("error") == "WRAPPER_IDENTITY_CHANGED":
                 return (
                     True,
                     False,
-                    f"WRAPPER_IDENTITY_CHANGED: Wrapper '{w_lex}' is a symlink",
-                    {"wrapper_path": w_lex, "error": "WRAPPER_SYMLINK"},
+                    f"WRAPPER_IDENTITY_CHANGED: Wrapper '{w_lex}' physical identity changed",
+                    {
+                        "wrapper_path": w_lex,
+                        "expected_device": exp_dev,
+                        "current_device": e.details.get("current_device"),
+                        "expected_inode": exp_ino,
+                        "current_inode": e.details.get("current_inode"),
+                    },
                 )
-            if not stat.S_ISDIR(st_w.st_mode):
+            if e.details.get("stage") == "CONTINUITY" and "Failed to scan wrapper directory" in str(e):
+                raise
+            if "not a directory" in str(e):
                 return (
                     True,
                     False,
                     f"WRAPPER_IDENTITY_CHANGED: Wrapper '{w_lex}' is not a directory",
                     {"wrapper_path": w_lex, "error": "NOT_A_DIRECTORY"},
                 )
-            if exp is not None:
-                if exp.get("scan_status") != "OK":
-                    return (
-                        True,
-                        False,
-                        f"WRAPPER_IDENTITY_CHANGED: Wrapper '{w_lex}' initial scan status was not OK",
-                        {"wrapper_path": w_lex},
-                    )
-                if (
-                    st_w.st_dev != exp.get("device")
-                    or st_w.st_ino != exp.get("inode")
-                ):
-                    return (
-                        True,
-                        False,
-                        f"WRAPPER_IDENTITY_CHANGED: Wrapper '{w_lex}' physical identity changed",
-                        {
-                            "wrapper_path": w_lex,
-                            "expected_device": exp.get("device"),
-                            "current_device": st_w.st_dev,
-                            "expected_inode": exp.get("inode"),
-                            "current_inode": st_w.st_ino,
-                        },
-                    )
-                # Check enumeration fingerprint and mtime
-                enum_mismatches = []
-                details: dict[str, Any] = {"wrapper_path": w_lex}
-                if "direct_children" in exp and exp["direct_children"] is not None:
-                    try:
-                        curr_children = _get_child_names(_scandir, w_lex)
-                        if curr_children != exp["direct_children"]:
-                            enum_mismatches.append("children")
-                            details["expected_children"] = exp["direct_children"]
-                            details["current_children"] = curr_children
-                    except OSError as e:
-                        raise BatchUtilityInvalidConfigError(
-                            f"Failed to scan wrapper directory '{w_lex}': {e}",
-                            details={
-                                "wrapper_path": w_lex,
-                                "errno": getattr(e, "errno", None),
-                                "stage": "CONTINUITY",
-                            },
-                        )
-                if st_w.st_mtime_ns != exp.get("mtime_ns"):
-                    enum_mismatches.append("mtime_ns")
-                    details["expected_mtime_ns"] = exp.get("mtime_ns")
-                    details["current_mtime_ns"] = st_w.st_mtime_ns
-
-                if enum_mismatches:
-                    return (
-                        False,
-                        True,
-                        f"WRAPPER_IDENTITY_CHANGED: Wrapper '{w_lex}' enumeration/mtime changed ({', '.join(enum_mismatches)})",
-                        details,
-                    )
-            return (False, False, "", {})
+            return (
+                True,
+                False,
+                f"WRAPPER_IDENTITY_CHANGED: Failed to access wrapper '{w_lex}': {e}",
+                {"wrapper_path": w_lex, "errno": e.details.get("errno")},
+            )
         except FileNotFoundError:
             return (
                 True,

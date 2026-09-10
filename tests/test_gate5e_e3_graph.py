@@ -408,3 +408,84 @@ def test_stable_topo_sort(tmp_path):
     assert len(res.ordered_items) == 3
     sources = [it.source_path for it in res.ordered_items]
     assert sources == [str(wrapper / "a.txt"), str(wrapper / "m.txt"), str(wrapper / "z.txt")]
+
+
+def test_continuity_wrapper_rescan_race_directory_replacement_blocks_child_acquisition(tmp_path):
+    """Gate5-E / E3-hotfix10 Test 4:
+    Continuity re-scan race: Replacement directory created before child acquisition.
+    Must report WRAPPER_IDENTITY_CHANGED and 0 children enumerated from replacement directory.
+    """
+    import os
+    import shutil
+
+    root = tmp_path / "root"
+    wrapper = root / "wrapper"
+    wrapper.mkdir(parents=True)
+    (wrapper / "before.txt").write_text("before")
+    st_orig = os.stat(wrapper)
+
+    obs = [{
+        "wrapper_path": str(wrapper),
+        "device": st_orig.st_dev,
+        "inode": st_orig.st_ino,
+        "mtime_ns": st_orig.st_mtime_ns,
+        "scan_status": "OK",
+        "direct_children": ["before.txt"],
+    }]
+
+    items = [
+        TargetItemCandidate(
+            source_path=str(wrapper / "before.txt"),
+            target_path=str(root / "before.txt"),
+            index_root_id=None,
+            index_root_path=None,
+            relative_path="wrapper/before.txt",
+            size=6,
+            mtime_ns=st_orig.st_mtime_ns,
+            device=st_orig.st_dev,
+            inode=st_orig.st_ino,
+            original_cand_id=1,
+            wrapper_path=str(wrapper),
+        )
+    ]
+
+    # Spy scandir to track entries read
+    enumerated_entries = []
+    real_scandir = os.scandir
+
+    def spy_scandir(path_or_fd):
+        res = real_scandir(path_or_fd)
+        if hasattr(res, "__enter__"):
+            with res as it:
+                for e in it:
+                    enumerated_entries.append(e.name)
+        else:
+            for e in res:
+                enumerated_entries.append(e.name)
+        return real_scandir(path_or_fd)
+
+    def racing_lstat(path):
+        res = os.lstat(path)
+        # Immediately after lstat sees identity #1, swap directory before child acquisition
+        w_old = root / "wrapper_old"
+        if not w_old.exists():
+            os.rename(str(wrapper), str(w_old))
+            os.mkdir(str(wrapper))
+            (wrapper / "secret.txt").write_text("secret")
+        return res
+
+    res = resolve_flatten_graph(
+        items=items,
+        allowed_roots=[root],
+        quarantine_root=None,
+        wrapper_observations=obs,
+        lstat_func=racing_lstat,
+        scandir_func=spy_scandir,
+    )
+
+    assert res.has_blocking_conflicts
+    wrapper_conflicts = [c for c in res.conflicts if c.conflict_type == "WRAPPER_IDENTITY_CHANGED"]
+    assert len(wrapper_conflicts) > 0
+    # Zero children from identity #2 may be acquired
+    assert "secret.txt" not in enumerated_entries
+

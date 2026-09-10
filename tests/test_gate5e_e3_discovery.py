@@ -63,3 +63,32 @@ def test_discover_flatten_leaf_symlink_blocked(tmp_path):
         discover_flatten_one_level([str(symlink_dir) + "/"])
     assert exc_info.value.code == "BATCH_UTILITY_SYMLINK_BLOCKED"
 
+
+def test_discover_flatten_wrapper_identity_mismatch_fails_closed(tmp_path):
+    """Gate5-E / E3-hotfix10 Discovery unit test:
+    discover_flatten_one_level with expected_identities fails closed immediately
+    on ordinary directory replacement with 0 children enumerated.
+    """
+    from app.batch_utilities.errors import BatchUtilityInvalidConfigError
+
+    root = tmp_path / "root"
+    root.mkdir()
+    wrapper = root / "w"
+    wrapper.mkdir()
+    (wrapper / "before.txt").write_text("before")
+    st = os.stat(wrapper)
+
+    # Replace wrapper with new directory identity containing secret.txt
+    w_old = root / "w_old"
+    os.rename(str(wrapper), str(w_old))
+    wrapper.mkdir()
+    (wrapper / "secret.txt").write_text("secret")
+
+    with pytest.raises(BatchUtilityInvalidConfigError) as exc_info:
+        discover_flatten_one_level(
+            [str(wrapper)],
+            expected_identities={str(wrapper): (st.st_dev, st.st_ino)},
+        )
+    assert "WRAPPER_IDENTITY_CHANGED" in str(exc_info.value) or exc_info.value.details.get("error") == "WRAPPER_IDENTITY_CHANGED"
+
+
