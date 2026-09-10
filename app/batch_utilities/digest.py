@@ -5,7 +5,12 @@ from pathlib import Path
 import stat
 from typing import Any, Mapping, Sequence
 
-from app.batch_utilities.schema import QuarantineFilteredAction, SuffixTransformAction, FlattenOneLevelAction
+from app.batch_utilities.schema import (
+    QuarantineFilteredAction,
+    SuffixTransformAction,
+    FlattenOneLevelAction,
+    RemoveEmptyDirsAction,
+)
 from app.batch_utilities.errors import (
     BatchUtilityScopeOverlapError,
     BatchUtilityScopeNotFoundError,
@@ -105,6 +110,62 @@ def canonicalize_flatten_one_level_action(action: FlattenOneLevelAction) -> dict
     }
 
 
+def canonicalize_remove_empty_scope_path(path: str) -> str:
+    """Canonicalize a scope directory path for remove_empty_dirs.
+    Derives canonical identity from the original validated path's actual filesystem resolution.
+    Does not call strip() or normpath() on the input path string.
+    If leaf is a symlink (including trailing slash), fails closed with BatchUtilitySymlinkBlockedError.
+    If strict resolution fails, fails closed with structured error.
+    """
+    raw = str(path)
+    raw_leaf = raw.rstrip("/") or "/"
+    try:
+        st = os.lstat(raw_leaf)
+        if stat.S_ISLNK(st.st_mode):
+            raise BatchUtilitySymlinkBlockedError(
+                f"Scope path '{raw}' is a symlink",
+                details={"scope_path": raw},
+            )
+    except FileNotFoundError:
+        raise BatchUtilityScopeNotFoundError(
+            f"Scope directory '{raw}' does not exist",
+            details={"scope_path": raw},
+        )
+    except OSError as e:
+        raise BatchUtilityInvalidConfigError(
+            f"Failed to access scope path '{raw}': {e}",
+            details={"scope_path": raw, "errno": getattr(e, "errno", None)},
+        )
+
+    try:
+        resolved = Path(raw).resolve(strict=True)
+        return str(resolved)
+    except FileNotFoundError:
+        raise BatchUtilityScopeNotFoundError(
+            f"Scope directory '{raw}' does not exist",
+            details={"scope_path": raw},
+        )
+    except OSError as e:
+        raise BatchUtilityInvalidConfigError(
+            f"Failed to resolve scope path '{raw}': {e}",
+            details={"scope_path": raw, "errno": getattr(e, "errno", None)},
+        )
+
+
+def canonicalize_remove_empty_dirs_action(action: RemoveEmptyDirsAction) -> dict[str, Any]:
+    canon_paths = [canonicalize_remove_empty_scope_path(p) for p in action.scope_paths]
+    if len(canon_paths) != len(set(canon_paths)):
+        raise BatchUtilityScopeOverlapError(
+            "Duplicate physical scope paths detected in action configuration",
+            details={"scope_paths": action.scope_paths},
+        )
+    return {
+        "type": "remove_empty_dirs",
+        "scope_paths": sorted(canon_paths),
+        "recursive": True,
+    }
+
+
 def canonicalize_batch_utility_action(action: Any) -> dict[str, Any]:
     if isinstance(action, QuarantineFilteredAction) or (isinstance(action, dict) and action.get("type") == "quarantine_filtered"):
         if isinstance(action, dict):
@@ -118,6 +179,10 @@ def canonicalize_batch_utility_action(action: Any) -> dict[str, Any]:
         if isinstance(action, dict):
             action = FlattenOneLevelAction.model_validate(action)
         return canonicalize_flatten_one_level_action(action)
+    if isinstance(action, RemoveEmptyDirsAction) or (isinstance(action, dict) and action.get("type") == "remove_empty_dirs"):
+        if isinstance(action, dict):
+            action = RemoveEmptyDirsAction.model_validate(action)
+        return canonicalize_remove_empty_dirs_action(action)
     raise ValueError(f"Unsupported batch utility action: {action}")
 
 

@@ -100,8 +100,48 @@ class FlattenOneLevelAction(BaseModel):
         return clean_paths
 
 
+class RemoveEmptyDirsAction(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["remove_empty_dirs"]
+    scope_paths: list[str]
+    recursive: Literal[True] = True
+
+    @field_validator("scope_paths", mode="before")
+    @classmethod
+    def validate_scope_paths(cls, v: Any) -> list[str]:
+        if not isinstance(v, list) or not v:
+            raise ValueError("scope_paths must be a non-empty list of strings")
+        if len(v) > 16:
+            raise ValueError("scope_paths must contain at most 16 entries")
+        seen: set[str] = set()
+        clean: list[str] = []
+        for item in v:
+            if not isinstance(item, str):
+                raise ValueError("scope_paths items must be strings")
+            if not os.path.isabs(item):
+                raise ValueError(f"scope_paths items must be absolute path: {item}")
+            if item in seen:
+                raise ValueError(f"duplicate scope path detected: {item}")
+            seen.add(item)
+            clean.append(item)
+        return clean
+
+    @field_validator("recursive")
+    @classmethod
+    def validate_recursive(cls, v: Any) -> bool:
+        if v is not True:
+            raise ValueError("recursive must be True")
+        return True
+
+
 BatchUtilityAction = Annotated[
-    Union[QuarantineFilteredAction, SuffixTransformAction, FlattenOneLevelAction],
+    Union[
+        QuarantineFilteredAction,
+        SuffixTransformAction,
+        FlattenOneLevelAction,
+        RemoveEmptyDirsAction,
+    ],
     Field(discriminator="type"),
 ]
 
@@ -138,7 +178,7 @@ class BatchUtilityPreviewRow(BaseModel):
     wrapper_path: str | None = None
     relative_path: str
     object_type: Literal["file", "directory", "symlink", "unsupported", "missing"]
-    decision: Literal["QUARANTINE", "RENAME", "MOVE", "SAFETY_EXCLUDED", "SKIPPED", "CONFLICT", "BLOCKING_CONFLICT"]
+    decision: Literal["QUARANTINE", "RENAME", "MOVE", "REMOVE_EMPTY_DIR", "SAFETY_EXCLUDED", "SKIPPED", "CONFLICT", "BLOCKING_CONFLICT"]
     reason_code: str | None = None
     reason: str | None = None
     size: int = 0
@@ -148,7 +188,7 @@ class BatchUtilityPreviewRow(BaseModel):
 class BatchUtilityPreviewResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    utility_action: Literal["quarantine_filtered", "suffix_transform", "flatten_one_level"]
+    utility_action: Literal["quarantine_filtered", "suffix_transform", "flatten_one_level", "remove_empty_dirs"]
     utility_engine_version: int
     preview_source: Literal["index-readonly-safety", "live-directory-readonly"]
     live_filesystem_verified: Literal[False]
