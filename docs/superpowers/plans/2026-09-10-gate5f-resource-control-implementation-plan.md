@@ -38,11 +38,11 @@
 | `app/models.py` | **[MODIFY]** Add singleton ORM model `ResourcePolicy` with table-level check constraints. |
 | `app/db.py` | **[MODIFY]** Register `resource_policy` in `required_tables`, trigger backup on upgrade, and seed default singleton row in `init_db()`. |
 | `app/service.py` | **[MODIFY]** Add application service methods `get_resource_policy()` and atomic two-phase `update_resource_policy()` (Phase A validation + pre-cache ZoneInfo, Phase B short SQLite `BEGIN IMMEDIATE`). |
-| `app/api/router.py` | **[MODIFY]** Expose `GET /api/settings/resource-policy` and `PUT /api/settings/resource-policy` with explicit admin dependency and session auth. |
+| `app/api/router.py` | **[MODIFY]** Expose `GET /api/settings/resource-policy` and `PUT /api/settings/resource-policy` with explicit admin dependency, session auth, and `ResourcePolicyValidationError -> HTTP 422` conversion. |
 | `app/tasks/recovery.py` | **[MODIFY]** Enhance `claim_next_job()` with two-phase policy preparation (Phase A outside tx, Phase B `BEGIN IMMEDIATE`) for admission and priority. |
 | `app/tasks/handlers.py` | **[MODIFY]** Integrate effective thread ceiling and `context.log()` diagnostics in `FclonesScanHandler` and `IndexRootHandler`. |
 | `app/scanners/fclones.py` | **[MODIFY]** Validate and accept sanitized thread parameter in `build_group_command()`. |
-| `frontend/src/types/index.ts` | **[MODIFY]** Define TypeScript interfaces for `ResourcePolicy`, `EffectiveResourcePolicy`, and `ResourcePolicyUpdate` using `number` types. |
+| `frontend/src/types/index.ts` | **[MODIFY]** Define TypeScript interfaces for `ResourcePolicy`, `EffectiveResourcePolicy`, and `ResourcePolicyUpdate` using standard `number` types. |
 | `frontend/src/api/domain.ts` | **[MODIFY]** Add `resourcePolicyApi.getPolicy()` and `updatePolicy()` clients using existing `api.get<T>` / `api.put<T>` pattern. |
 | `frontend/src/pages/Settings/index.tsx` | **[MODIFY]** Add Resource Control settings card with soft I/O pressure notices and admission-only status indicators. |
 | `frontend/src/components/settings/resource_policy.ts` | **[NEW]** Pure UI helper for formatting options, validation, and notice copy. |
@@ -68,12 +68,13 @@
 
 ```python
 # tests/test_gate5f_migration.py
+from pathlib import Path
 import pytest
 from sqlalchemy import inspect, select, text
 from app.db import init_db, create_engine_and_session
 from app.models import ResourcePolicy
 
-def test_init_db_creates_resource_policy_singleton(tmp_path):
+def test_init_db_creates_resource_policy_singleton(tmp_path: Path):
     db_file = tmp_path / "test.db"
     engine, SessionLocal = create_engine_and_session(db_file)
     init_db(engine, db_path=db_file)
@@ -96,7 +97,7 @@ def test_init_db_creates_resource_policy_singleton(tmp_path):
         assert policy.outside_window_mode == "limited"
         assert policy.revision == 1
 
-def test_init_db_idempotency_preserves_custom_policy(tmp_path):
+def test_init_db_idempotency_preserves_custom_policy(tmp_path: Path):
     db_file = tmp_path / "test.db"
     engine, SessionLocal = create_engine_and_session(db_file)
     init_db(engine, db_path=db_file)
@@ -115,7 +116,7 @@ def test_init_db_idempotency_preserves_custom_policy(tmp_path):
         assert policy.scan_threads == 4
         assert policy.revision == 2
 
-def test_existing_db_upgrade_triggers_backup_before_creating_table(tmp_path):
+def test_existing_db_upgrade_triggers_backup_before_creating_table(tmp_path: Path):
     db_file = tmp_path / "legacy.db"
     backups_dir = tmp_path / "backups"
     engine, SessionLocal = create_engine_and_session(db_file)
@@ -259,7 +260,6 @@ def test_default_policy_evaluation_returns_full_profile():
     validate_resource_policy_snapshot(snap)
     now = datetime(2026, 9, 10, 12, 0, tzinfo=timezone.utc)
     eff = evaluate_resource_policy(snap, now_utc=now)
-    # FIX 1: Canonical profile must be 'full', not 'normal'
     assert eff.profile == "full"
     assert eff.inside_active_window is None
     assert eff.resource_jobs_admitted is True
@@ -369,7 +369,7 @@ git commit -m "feat(gate5f): add resource policy evaluator"
 
 ---
 
-### Task 3: ResourcePolicy Service & Admin API (Session Auth & Safe Two-Phase PUT)
+### Task 3: ResourcePolicy Service & Admin API (Session Auth, Two-Phase PUT & HTTP 422 Semantics)
 
 **Files:**
 - Modify: `app/service.py`
@@ -382,9 +382,9 @@ git commit -m "feat(gate5f): add resource policy evaluator"
   - `FileCenterService.get_resource_policy() -> dict`
   - `FileCenterService.update_resource_policy(payload: dict) -> dict`
   - `GET /api/settings/resource-policy`
-  - `PUT /api/settings/resource-policy`
+  - `PUT /api/settings/resource-policy` (converts `ResourcePolicyValidationError` to HTTP 422)
 
-- [ ] **Step 1: Write failing API and Service tests using session cookie auth**
+- [ ] **Step 1: Write failing API and Service tests using session cookie auth and complete mutation matrix**
 
 ```python
 # tests/test_gate5f_resource_policy_api.py
@@ -485,23 +485,50 @@ def test_put_resource_policy_updates_and_increments_revision(tmp_path: Path):
     assert data["io_limit"] == "low"
     assert data["revision"] == 2
 
-def test_put_resource_policy_rejects_invalid_inputs_without_mutating_db(tmp_path: Path):
+def test_put_resource_policy_semantic_validation_matrix_returns_422(tmp_path: Path):
     client, service, settings = make_api_client(tmp_path)
     client.post(
         "/api/auth/login",
         json={"username": "admin", "password": "AdminPassword123!"},
         headers={"Origin": "http://testserver"},
     )
-    resp = client.put(
-        "/api/settings/resource-policy",
-        json={"scan_threads": 0},
-        headers={"Origin": "http://testserver"},
-    )
-    assert resp.status_code == 422
 
-    # Verify DB unchanged
-    get_resp = client.get("/api/settings/resource-policy")
-    assert get_resp.json()["revision"] == 1
+    base_valid = {
+        "scan_threads": 2,
+        "hash_threads": 2,
+        "io_limit": "normal",
+        "job_priority": "normal",
+        "active_window_enabled": True,
+        "active_window_start": "01:00",
+        "active_window_end": "07:00",
+        "active_window_timezone": "UTC",
+        "outside_window_mode": "limited",
+    }
+
+    # Matrix of semantic and schema violations
+    invalid_cases = [
+        ("scan_threads_zero", {**base_valid, "scan_threads": 0}),
+        ("scan_threads_bool", {**base_valid, "scan_threads": True}),
+        ("hash_threads_too_large", {**base_valid, "hash_threads": 33}),
+        ("io_limit_invalid", {**base_valid, "io_limit": "superfast"}),
+        ("job_priority_invalid", {**base_valid, "job_priority": "urgent"}),
+        ("outside_window_mode_invalid", {**base_valid, "outside_window_mode": "halt"}),
+        ("window_start_equals_end", {**base_valid, "active_window_start": "08:00", "active_window_end": "08:00"}),
+        ("timezone_invalid", {**base_valid, "active_window_timezone": "Invalid/Zone"}),
+        ("extra_field_forbidden", {**base_valid, "unexpected_field": 123}),
+    ]
+
+    for name, payload in invalid_cases:
+        resp = client.put(
+            "/api/settings/resource-policy",
+            json=payload,
+            headers={"Origin": "http://testserver"},
+        )
+        assert resp.status_code == 422, f"Failed on case {name}: {resp.text}"
+
+        # Verify DB unchanged
+        get_resp = client.get("/api/settings/resource-policy")
+        assert get_resp.json()["revision"] == 1
 ```
 
 - [ ] **Step 2: Run tests to verify they fail (RED)**
@@ -583,9 +610,30 @@ In `app/service.py`:
 ```
 
 In `app/api/router.py`:
-- Define `ResourcePolicyUpdateRequest(BaseModel)` with `model_config = ConfigDict(extra="forbid")`.
-- `@router.get("/settings/resource-policy", dependencies=[Depends(require_admin_user)])`
-- `@router.put("/settings/resource-policy", dependencies=[Depends(require_admin_user)])`
+```python
+class ResourcePolicyUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scan_threads: int = Field(..., ge=1, le=32)
+    hash_threads: int = Field(..., ge=1, le=32)
+    io_limit: Literal["low", "normal", "unlimited"]
+    job_priority: Literal["normal", "background"]
+    active_window_enabled: bool
+    active_window_start: str | None = None
+    active_window_end: str | None = None
+    active_window_timezone: str | None = None
+    outside_window_mode: Literal["limited", "pause"]
+
+@router.put("/settings/resource-policy", dependencies=[Depends(require_admin_user)])
+def update_resource_policy_endpoint(
+    payload: ResourcePolicyUpdateRequest,
+    service: FileCenterService = Depends(get_service),
+):
+    try:
+        return service.update_resource_policy(payload.model_dump())
+    except ResourcePolicyValidationError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+```
 
 - [ ] **Step 4: Run tests to verify they pass (GREEN)**
 
@@ -601,7 +649,7 @@ git commit -m "feat(gate5f): expose admin resource policy api"
 
 ---
 
-### Task 4: Resource-Aware Worker Claim Admission (Deterministic Frozen Time)
+### Task 4: Resource-Aware Worker Claim Admission (Isolated DB & Deterministic Time)
 
 **Files:**
 - Modify: `app/tasks/recovery.py`
@@ -612,25 +660,33 @@ git commit -m "feat(gate5f): expose admin resource policy api"
 - Consumes: `claim_next_job()`, `assert_active_worker_lease()`, `ResourcePolicy`, `evaluate_resource_policy()`.
 - Produces: Enhanced `claim_next_job()` with deterministic two-phase policy preparation, pause window holding, and background priority reordering.
 
-- [ ] **Step 1: Write failing tests for claim admission & priority with deterministic time**
+- [ ] **Step 1: Write failing tests for claim admission using isolated DB helper**
 
 ```python
 # tests/test_gate5f_resource_claim.py
-import pytest
 from datetime import datetime, timezone
+from pathlib import Path
+import pytest
 from unittest.mock import patch
+from app.db import create_engine_and_session, init_db
 from app.tasks.recovery import claim_next_job, acquire_worker_ownership
 from app.models import WorkJob, ResourcePolicy
 
-# Deterministic frozen UTC time
 FROZEN_OUTSIDE_TIME = datetime(2026, 9, 10, 12, 0, 0, tzinfo=timezone.utc)
 FROZEN_INSIDE_TIME = datetime(2026, 9, 10, 2, 0, 0, tzinfo=timezone.utc)
 
-def test_claim_outside_pause_window_holds_resource_job_queued(session_factory, engine):
+def make_task_db(tmp_path: Path):
+    db_path = tmp_path / "test.db"
+    engine, SessionLocal = create_engine_and_session(db_path)
+    init_db(engine, db_path=db_path)
+    return engine, SessionLocal
+
+def test_claim_outside_pause_window_holds_resource_job_queued(tmp_path: Path):
+    engine, SessionLocal = make_task_db(tmp_path)
     worker_id = "worker-test-1"
 
     # Configure active window 01:00-03:00 UTC (FROZEN_OUTSIDE_TIME 12:00 is outside)
-    with session_factory() as session:
+    with SessionLocal() as session:
         policy = session.get(ResourcePolicy, 1)
         policy.active_window_enabled = True
         policy.active_window_start = "01:00"
@@ -644,22 +700,22 @@ def test_claim_outside_pause_window_holds_resource_job_queued(session_factory, e
         session.commit()
         job_id = job.id
 
-    # Patch recovery.utcnow for both ownership acquisition and claiming
     with patch("app.tasks.recovery.utcnow", return_value=FROZEN_OUTSIDE_TIME):
-        acquired = acquire_worker_ownership(engine, session_factory, worker_id)
+        acquired = acquire_worker_ownership(engine, SessionLocal, worker_id)
         assert acquired is True
 
-        claimed = claim_next_job(engine, session_factory, worker_id)
+        claimed = claim_next_job(engine, SessionLocal, worker_id)
         assert claimed is None
 
     # Job remains queued (not paused, not failed, not cancelled)
-    with session_factory() as session:
+    with SessionLocal() as session:
         j = session.get(WorkJob, job_id)
         assert j.status == "queued"
 
-def test_claim_outside_pause_window_allows_mutation_job(session_factory, engine):
+def test_claim_outside_pause_window_allows_mutation_job(tmp_path: Path):
+    engine, SessionLocal = make_task_db(tmp_path)
     worker_id = "worker-test-2"
-    with session_factory() as session:
+    with SessionLocal() as session:
         policy = session.get(ResourcePolicy, 1)
         policy.active_window_enabled = True
         policy.active_window_start = "01:00"
@@ -673,14 +729,14 @@ def test_claim_outside_pause_window_allows_mutation_job(session_factory, engine)
         session.commit()
 
     with patch("app.tasks.recovery.utcnow", return_value=FROZEN_OUTSIDE_TIME):
-        acquire_worker_ownership(engine, session_factory, worker_id)
-        # j1 is resource-controlled and paused, but j2 is mutation and must be claimed
-        claimed = claim_next_job(engine, session_factory, worker_id)
+        acquire_worker_ownership(engine, SessionLocal, worker_id)
+        claimed = claim_next_job(engine, SessionLocal, worker_id)
         assert claimed == 102
 
-def test_background_priority_claims_non_resource_job_first(session_factory, engine):
+def test_background_priority_claims_non_resource_job_first(tmp_path: Path):
+    engine, SessionLocal = make_task_db(tmp_path)
     worker_id = "worker-test-3"
-    with session_factory() as session:
+    with SessionLocal() as session:
         policy = session.get(ResourcePolicy, 1)
         policy.job_priority = "background"
         policy.active_window_enabled = False
@@ -691,8 +747,8 @@ def test_background_priority_claims_non_resource_job_first(session_factory, engi
         session.commit()
 
     with patch("app.tasks.recovery.utcnow", return_value=FROZEN_INSIDE_TIME):
-        acquire_worker_ownership(engine, session_factory, worker_id)
-        claimed = claim_next_job(engine, session_factory, worker_id)
+        acquire_worker_ownership(engine, SessionLocal, worker_id)
+        claimed = claim_next_job(engine, SessionLocal, worker_id)
         assert claimed == 202
 ```
 
@@ -733,7 +789,7 @@ git commit -m "feat(gate5f): add resource-aware task admission"
 
 ---
 
-### Task 5: fclones Effective Thread Ceiling & Subprocess Race Safety
+### Task 5: fclones Effective Thread Ceiling & Subprocess Isolation (Executable Tests)
 
 **Files:**
 - Modify: `app/tasks/handlers.py`
@@ -746,54 +802,68 @@ git commit -m "feat(gate5f): add resource-aware task admission"
 - Produces:
   - Bounded `--threads <N>` argument in fclones command.
   - TaskEvent `resource_policy_applied` recorded via `context.log()`.
-  - Safe subprocess launch boundary (already running job continues with captured resources even if window changes to pause; unresolvable/corrupted policy fails closed).
+  - Deterministic test verification without report parsing or worker lease fencing.
 
-- [ ] **Step 1: Write failing tests for fclones resources and race safety**
+- [ ] **Step 1: Write failing tests with report isolation and exact log assertions**
 
 ```python
 # tests/test_gate5f_fclones_resources.py
+from pathlib import Path
 import pytest
 from unittest.mock import MagicMock, patch
+from app.db import create_engine_and_session, init_db
 from app.tasks.handlers import FclonesScanHandler
 from app.models import WorkJob, ResourcePolicy
 from app.resource_control import ResourcePolicyConfigError
 
-def test_fclones_scan_handler_applies_effective_threads_and_logs(session_factory, tmp_path):
+def make_task_db(tmp_path: Path):
+    db_path = tmp_path / "test.db"
+    engine, SessionLocal = create_engine_and_session(db_path)
+    init_db(engine, db_path=db_path)
+    return engine, SessionLocal
+
+def test_fclones_scan_handler_applies_effective_threads_and_logs(tmp_path: Path):
+    engine, SessionLocal = make_task_db(tmp_path)
     handler = FclonesScanHandler()
     job = WorkJob(id=1, kind="fclones-scan", state_json='{"roots": ["/allowed/root"], "scan_job_id": 1}')
     context = MagicMock()
-    context.SessionLocal = session_factory
+    context.SessionLocal = SessionLocal
+    context.worker_id = None  # Prevent mock lease check failure
     settings = MagicMock()
     settings.allowed_roots = ["/allowed/root"]
     settings.reports_dir = tmp_path
     settings.fclones_binary = "fclones"
     settings.fclones_threads = "4"  # legacy setting
 
-    with session_factory() as session:
+    with SessionLocal() as session:
         p = session.get(ResourcePolicy, 1)
         p.scan_threads = 2
         p.hash_threads = 2
         p.io_limit = "normal"
         session.commit()
 
-    with patch("app.tasks.handlers.build_group_command") as mock_build,          patch("app.tasks.handlers.run_scan") as mock_run:
+    with patch("app.tasks.handlers.build_group_command") as mock_build,          patch("app.tasks.handlers.run_scan") as mock_run,          patch("app.tasks.handlers.parse_fclones_report_iter", return_value=iter(())):
         mock_run.return_value.returncode = 0
         handler.run(job, context, settings)
 
         mock_build.assert_called_once()
         assert mock_build.call_args.kwargs["threads"] == "2"
-        # FIX 3: Verify context.log interface
-        context.log.assert_any_call(
-            "resource_policy_applied",
-            "Applied resource policy",
-            context=pytest.approx(dict, ...),
-        )
 
-def test_fclones_scan_corrupt_policy_fails_closed_before_subprocess(session_factory, tmp_path):
+        # Exact dictionary-field assertion on logged context
+        call_args_list = [c for c in context.log.call_args_list if c[0][0] == "resource_policy_applied"]
+        assert len(call_args_list) >= 1
+        logged_ctx = call_args_list[0][1]["context"]
+        assert logged_ctx["resource_policy_revision"] == 1
+        assert logged_ctx["profile"] == "full"
+        assert logged_ctx["effective_thread_cap"] == 2
+
+def test_fclones_scan_corrupt_policy_fails_closed_before_subprocess(tmp_path: Path):
+    engine, SessionLocal = make_task_db(tmp_path)
     handler = FclonesScanHandler()
     job = WorkJob(id=2, kind="fclones-scan", state_json='{"roots": ["/allowed/root"], "scan_job_id": 2}')
     context = MagicMock()
-    context.SessionLocal = session_factory
+    context.SessionLocal = SessionLocal
+    context.worker_id = None
     settings = MagicMock()
     settings.allowed_roots = ["/allowed/root"]
     settings.reports_dir = tmp_path
@@ -818,7 +888,7 @@ In `app/tasks/handlers.py` (`FclonesScanHandler.run`):
 - Calculate `effective_threads = compose_fclones_thread_cap(eff.effective_thread_cap, settings.fclones_threads, state.get("threads"))`.
 - If invalid configuration ceiling is detected, fail-closed before subprocess launch: record error via `context.log(..., level="error")` and raise `ResourcePolicyConfigError`.
 - Call `build_group_command(..., threads=str(effective_threads))`.
-- Log TaskEvent via `context.log("resource_policy_applied", "Applied resource policy", context={...})`.
+- Log TaskEvent via `context.log("resource_policy_applied", "Applied resource policy", context={"resource_policy_revision": eff.revision, "profile": eff.profile, "effective_thread_cap": effective_threads})`.
 
 - [ ] **Step 4: Run tests to verify they pass (GREEN)**
 
@@ -834,7 +904,7 @@ git commit -m "feat(gate5f): enforce bounded fclones resources"
 
 ---
 
-### Task 6: Index-Root Resource Control Behavior (Real Service Seam)
+### Task 6: Index-Root Resource Control Behavior (Real Settings & Real Seam)
 
 **Files:**
 - Modify (minimally, for `context.log`): `app/tasks/handlers.py`
@@ -844,35 +914,53 @@ git commit -m "feat(gate5f): enforce bounded fclones resources"
 - Consumes: `IndexRootHandler`, `FileCenterService.reindex_root`, `ResourcePolicy`, `JobContext.log`.
 - Produces: Deterministic serial execution maintained (concurrency = 1); TaskEvent `resource_policy_applied` logged via `context.log()`.
 
-- [ ] **Step 1: Write failing tests using real service seam**
+- [ ] **Step 1: Write failing tests using real settings and real service seam**
 
 ```python
 # tests/test_gate5f_index_resources.py
+from pathlib import Path
 import pytest
 from unittest.mock import MagicMock, patch
+from app.config import Settings
+from app.db import create_engine_and_session, init_db
 from app.tasks.handlers import IndexRootHandler
 from app.models import WorkJob
 
-def test_index_root_maintains_serial_execution(session_factory, tmp_path):
+def make_task_db(tmp_path: Path):
+    db_path = tmp_path / "test.db"
+    engine, SessionLocal = create_engine_and_session(db_path)
+    init_db(engine, db_path=db_path)
+    return engine, SessionLocal
+
+def test_index_root_maintains_serial_execution(tmp_path: Path):
+    engine, SessionLocal = make_task_db(tmp_path)
     handler = IndexRootHandler()
     job = WorkJob(id=2, kind="index-root", state_json='{"root": "/allowed/root"}')
     context = MagicMock()
-    context.SessionLocal = session_factory
-    settings = MagicMock()
-    settings.allowed_roots = ["/allowed/root"]
+    context.SessionLocal = SessionLocal
+    context.worker_id = None
 
-    # FIX 4: Mock the real call seam: FileCenterService.reindex_root
+    # Real Settings object with isolated temporary directories
+    config_dir = tmp_path / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    data_dir = tmp_path / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    settings = Settings(
+        config_dir=config_dir,
+        data_mount=data_dir,
+        allowed_roots_raw=str(data_dir),
+    )
+
     with patch("app.service.FileCenterService.reindex_root") as mock_reindex:
         mock_reindex.return_value = {"files": 10, "folders": 2}
         handler.run(job, context, settings)
 
         mock_reindex.assert_called_once()
-        # FIX 3: Verify context.log interface
-        context.log.assert_any_call(
-            "resource_policy_applied",
-            "Applied resource policy",
-            context=pytest.approx(dict, ...),
-        )
+        call_args_list = [c for c in context.log.call_args_list if c[0][0] == "resource_policy_applied"]
+        assert len(call_args_list) >= 1
+        logged_ctx = call_args_list[0][1]["context"]
+        assert logged_ctx["profile"] == "full"
+        assert logged_ctx["execution_concurrency"] == 1
 ```
 
 - [ ] **Step 2: Run tests to verify they fail (RED)**
@@ -901,7 +989,7 @@ git commit -m "test(gate5f): lock index resource admission semantics"
 
 ---
 
-### Task 7: Running-Job Window Transition Semantics (Zero Placeholders)
+### Task 7: Running-Job Window Transition Semantics (Frozen Time Enclosing Lease Acquisition)
 
 **Files:**
 - Test: `tests/test_gate5f_running_job_semantics.py`
@@ -909,29 +997,37 @@ git commit -m "test(gate5f): lock index resource admission semantics"
 
 **Interfaces:**
 - Consumes: Non-resumable contracts `supports_pause = False` for `index-root` and `fclones-scan`.
-- Produces: Concrete verification that running jobs are never killed or fake-paused when policy transitions to pause outside window.
+- Produces: Concrete verification that running jobs are never killed or fake-paused when policy transitions to pause outside window, with lease and claims evaluated under unified frozen time.
 
-- [ ] **Step 1: Write comprehensive running job boundary tests without placeholders**
+- [ ] **Step 1: Write comprehensive running job boundary tests with unified frozen time**
 
 ```python
 # tests/test_gate5f_running_job_semantics.py
 from datetime import datetime, timezone
+from pathlib import Path
 import pytest
 from unittest.mock import patch
+from app.db import create_engine_and_session, init_db
 from app.models import WorkJob, ResourcePolicy
 from app.tasks.handlers import FclonesScanHandler, IndexRootHandler
 from app.tasks.recovery import acquire_worker_ownership, claim_next_job
+
+def make_task_db(tmp_path: Path):
+    db_path = tmp_path / "test.db"
+    engine, SessionLocal = create_engine_and_session(db_path)
+    init_db(engine, db_path=db_path)
+    return engine, SessionLocal
 
 def test_handlers_declare_supports_pause_false():
     assert FclonesScanHandler.supports_pause is False
     assert IndexRootHandler.supports_pause is False
 
-def test_running_job_remains_running_on_window_transition(session_factory, engine):
+def test_running_job_remains_running_on_window_transition(tmp_path: Path):
+    engine, SessionLocal = make_task_db(tmp_path)
     worker_id = "worker-transition-test"
-    acquire_worker_ownership(engine, session_factory, worker_id)
 
-    with session_factory() as session:
-        # Initially inside full profile
+    with SessionLocal() as session:
+        # Initially inside full profile (active window disabled)
         p = session.get(ResourcePolicy, 1)
         p.active_window_enabled = False
         p.revision = 1
@@ -945,7 +1041,7 @@ def test_running_job_remains_running_on_window_transition(session_factory, engin
 
     # Transition policy: outside active window with mode = pause
     fixed_outside = datetime(2026, 9, 10, 12, 0, 0, tzinfo=timezone.utc)
-    with session_factory() as session:
+    with SessionLocal() as session:
         p = session.get(ResourcePolicy, 1)
         p.active_window_enabled = True
         p.active_window_start = "01:00"
@@ -955,25 +1051,26 @@ def test_running_job_remains_running_on_window_transition(session_factory, engin
         p.revision = 2
         session.commit()
 
-    # FIX 2: Assert running job 501 is NOT killed, NOT fake-paused, NOT failed
-    with session_factory() as session:
+    # Freezing time before lease acquisition ensures clock consistency across operations
+    with patch("app.tasks.recovery.utcnow", return_value=fixed_outside):
+        acquired = acquire_worker_ownership(engine, SessionLocal, worker_id)
+        assert acquired is True
+
+        claimed_mutation = claim_next_job(engine, SessionLocal, worker_id)
+        assert claimed_mutation == 503
+
+        # Next claim sees only resource-controlled queued job j2 -> returns None
+        claimed_none = claim_next_job(engine, SessionLocal, worker_id)
+        assert claimed_none is None
+
+    # Assert running job 501 is NOT killed, NOT fake-paused, NOT failed
+    with SessionLocal() as session:
         current_j1 = session.get(WorkJob, 501)
         assert current_j1.status == "running"
         assert current_j1.pause_requested_at is None
         assert current_j1.cancel_requested_at is None
         assert current_j1.error_code is None
 
-    # Assert claim under pause window holds j2 (index-root), but claims j3 (batch-plan-execute)
-    with patch("app.tasks.recovery.utcnow", return_value=fixed_outside):
-        claimed_mutation = claim_next_job(engine, session_factory, worker_id)
-        assert claimed_mutation == 503
-
-        # Next claim sees only resource-controlled queued job j2 -> returns None
-        claimed_none = claim_next_job(engine, session_factory, worker_id)
-        assert claimed_none is None
-
-    # Verify j2 remains queued
-    with session_factory() as session:
         current_j2 = session.get(WorkJob, 502)
         assert current_j2.status == "queued"
 ```
@@ -1086,49 +1183,86 @@ git commit -m "feat(gate5f): add resource control settings ui"
 
 ---
 
-### Task 9: Failure & Corruption Safety (Fail Closed for Resources, Open for Mutation)
+### Task 9: Failure & Corruption Safety (Deterministically Corrupted & Missing Singleton)
 
 **Files:**
 - Create: `tests/test_gate5f_fail_closed.py`
 - Modify (if needed for safety guards): `app/tasks/recovery.py`, `app/resource_control.py`
 
 **Interfaces:**
-- Consumes: Corrupted DB states (invalid enum, null row, bad timezone).
+- Consumes: Corrupted DB states (active window with invalid timezone, missing singleton row).
 - Produces: Resource-controlled jobs fail closed without CPU-count fallback; non-resource mutation jobs remain claimable.
 
-- [ ] **Step 1: Write failing safety tests**
+- [ ] **Step 1: Write failing safety tests for enabled corrupt window and missing singleton**
 
 ```python
 # tests/test_gate5f_fail_closed.py
 from datetime import datetime, timezone
+from pathlib import Path
 import pytest
 from sqlalchemy import text
 from unittest.mock import patch
+from app.db import create_engine_and_session, init_db
 from app.tasks.recovery import claim_next_job, acquire_worker_ownership
 from app.models import WorkJob
 
 FROZEN_TIME = datetime(2026, 9, 10, 12, 0, 0, tzinfo=timezone.utc)
 
-def test_corrupted_policy_holds_resource_job_but_allows_mutation_job(session_factory, engine):
+def make_task_db(tmp_path: Path):
+    db_path = tmp_path / "test.db"
+    engine, SessionLocal = create_engine_and_session(db_path)
+    init_db(engine, db_path=db_path)
+    return engine, SessionLocal
+
+def test_corrupted_active_window_holds_resource_job_but_allows_mutation(tmp_path: Path):
+    engine, SessionLocal = make_task_db(tmp_path)
     worker_id = "worker-fail-closed-1"
 
-    # Corrupt resource_policy row directly via SQL
+    # Deterministically force timezone evaluation by enabling window
     with engine.connect() as conn:
-        conn.execute(text("UPDATE resource_policy SET active_window_timezone = 'Invalid/Zone' WHERE id = 1"))
+        conn.execute(text("""
+            UPDATE resource_policy
+            SET active_window_enabled = 1,
+                active_window_start = '01:00',
+                active_window_end = '03:00',
+                active_window_timezone = 'Invalid/Zone'
+            WHERE id = 1
+        """))
         conn.commit()
 
-    with session_factory() as session:
+    with SessionLocal() as session:
         j1 = WorkJob(id=301, kind="fclones-scan", status="queued", state_json="{}")
         j2 = WorkJob(id=302, kind="batch-plan-execute", status="queued", state_json="{}")
         session.add_all([j1, j2])
         session.commit()
 
     with patch("app.tasks.recovery.utcnow", return_value=FROZEN_TIME):
-        acquire_worker_ownership(engine, session_factory, worker_id)
+        acquired = acquire_worker_ownership(engine, SessionLocal, worker_id)
+        assert acquired is True
         # j1 fails closed (cannot be claimed safely under invalid policy)
         # j2 is mutation and must still be claimed to prevent global engine outage
-        claimed = claim_next_job(engine, session_factory, worker_id)
+        claimed = claim_next_job(engine, SessionLocal, worker_id)
         assert claimed == 302
+
+def test_missing_singleton_holds_resource_job_but_allows_mutation(tmp_path: Path):
+    engine, SessionLocal = make_task_db(tmp_path)
+    worker_id = "worker-fail-closed-2"
+
+    with engine.connect() as conn:
+        conn.execute(text("DELETE FROM resource_policy WHERE id = 1"))
+        conn.commit()
+
+    with SessionLocal() as session:
+        j1 = WorkJob(id=303, kind="index-root", status="queued", state_json="{}")
+        j2 = WorkJob(id=304, kind="batch-plan-execute", status="queued", state_json="{}")
+        session.add_all([j1, j2])
+        session.commit()
+
+    with patch("app.tasks.recovery.utcnow", return_value=FROZEN_TIME):
+        acquired = acquire_worker_ownership(engine, SessionLocal, worker_id)
+        assert acquired is True
+        claimed = claim_next_job(engine, SessionLocal, worker_id)
+        assert claimed == 304
 ```
 
 - [ ] **Step 2: Run tests to verify (RED)**
@@ -1139,7 +1273,7 @@ Expected: FAIL if corrupted policy causes crash or blocks mutation jobs.
 - [ ] **Step 3: Ensure robust error boundary in claim_next_job**
 
 In `app/tasks/recovery.py`:
-If `ResourcePolicy` fails validation or timezone resolution:
+If `ResourcePolicy` is missing or fails validation or timezone resolution:
 - Mark `resource_policy_valid = False`.
 - Exclude resource-controlled job kinds (`index-root`, `fclones-scan`).
 - Permit non-resource-controlled jobs to proceed normally.
