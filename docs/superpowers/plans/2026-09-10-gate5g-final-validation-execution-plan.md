@@ -309,7 +309,7 @@ echo 'FRONTEND_DIST_NON_EMPTY_OK'
 ```
 Expected: All assertions pass cleanly.
 
-- [ ] **Step 3: Export image to tar archive and compute SHA256 checksum**
+- [ ] **Step 3: Export image to tar archive, compute SHA256 checksum, and write transport manifest**
 
 Run:
 ```bash
@@ -324,8 +324,19 @@ else
 fi
 
 echo "G2_IMAGE_ARCHIVE_SHA256: ${G2_IMAGE_ARCHIVE_SHA256}"
+
+# Explicitly create transport manifest to hand off identity to target NAS
+G2_IMAGE_MANIFEST_PATH="/tmp/gate5g-image-manifest.env"
+cat <<EOF > "${G2_IMAGE_MANIFEST_PATH}"
+G2_IMAGE_TAG="${G2_IMAGE_TAG}"
+G2_IMAGE_ID="${G2_IMAGE_ID}"
+G2_IMAGE_ARCHIVE_PATH="${G2_IMAGE_ARCHIVE_PATH}"
+G2_IMAGE_ARCHIVE_SHA256="${G2_IMAGE_ARCHIVE_SHA256}"
+EOF
+echo "G2 Image Manifest created at ${G2_IMAGE_MANIFEST_PATH}:"
+cat "${G2_IMAGE_MANIFEST_PATH}"
 ```
-Expected: Tar file is generated; `G2_IMAGE_ARCHIVE_SHA256` is recorded for Phase G7 identity transfer.
+Expected: Tar file is generated; `G2_IMAGE_ARCHIVE_SHA256` is recorded; `/tmp/gate5g-image-manifest.env` is written for deterministic Phase G7 transfer.
 
 ---
 
@@ -549,19 +560,7 @@ rm -rf "${MIG_DIR}"
 mkdir -p "${MIG_DIR}/fresh_config" "${MIG_DIR}/data"
 
 echo "Starting fresh application container against empty CONFIG..."
-docker run -d --name gate5g-mig-fresh \
-  --platform linux/amd64 \
-  -p 18083:8080 \
-  -v "${MIG_DIR}/fresh_config:/config" \
-  -v "${MIG_DIR}/data:/data:ro" \
-  -e CONFIG_DIR=/config \
-  -e DATA_MOUNT=/data \
-  -e ALLOWED_ROOTS=/data \
-  -e QUARANTINE_ROOT=/data/.quarantine \
-  -e ALLOW_MUTATION=false \
-  -e ALLOW_DELETE=false \
-  -e PROTECT_LAST_FILE=true \
-  "${G2_IMAGE_TAG}"
+docker run -d --name gate5g-mig-fresh   --platform linux/amd64   -p 18083:8080   -v "${MIG_DIR}/fresh_config:/config"   -v "${MIG_DIR}/data:/data:ro"   -e CONFIG_DIR=/config   -e DATA_MOUNT=/data   -e ALLOWED_ROOTS=/data   -e QUARANTINE_ROOT=/data/.quarantine   -e ALLOW_MUTATION=false   -e ALLOW_DELETE=false   -e PROTECT_LAST_FILE=true   "${G2_IMAGE_TAG}"
 
 # Poll health
 for i in {1..30}; do
@@ -581,7 +580,7 @@ python3 -c "
 import sqlite3
 conn = sqlite3.connect('${MIG_DIR}/fresh_config/app.db')
 cursor = conn.cursor()
-cursor.execute('SELECT name FROM sqlite_master WHERE type=\"table\";')
+cursor.execute('SELECT name FROM sqlite_master WHERE type="table";')
 tables = {row[0] for row in cursor.fetchall()}
 required_tables = {'users', 'sessions', 'work_jobs', 'batch_plans', 'batch_plan_items', 'operation_journal', 'scan_jobs', 'indexed_paths', 'resource_policy'}
 missing = required_tables - tables
@@ -595,14 +594,7 @@ print('FRESH_DB_INSPECTION_SUCCESS')
 "
 
 # Restart container against the same DB to prove idempotency
-docker run -d --name gate5g-mig-fresh-restart \
-  --platform linux/amd64 \
-  -p 18083:8080 \
-  -v "${MIG_DIR}/fresh_config:/config" \
-  -v "${MIG_DIR}/data:/data:ro" \
-  -e CONFIG_DIR=/config \
-  -e DATA_MOUNT=/data \
-  "${G2_IMAGE_TAG}"
+docker run -d --name gate5g-mig-fresh-restart   --platform linux/amd64   -p 18083:8080   -v "${MIG_DIR}/fresh_config:/config"   -v "${MIG_DIR}/data:/data:ro"   -e CONFIG_DIR=/config   -e DATA_MOUNT=/data   "${G2_IMAGE_TAG}"
 
 sleep 3
 curl -s http://127.0.0.1:18083/health | grep -q '"status":"ok"' || { echo "Restart failed"; exit 1; }
@@ -623,16 +615,10 @@ mkdir -p "${HIST_SRC_DIR}"
 echo "Exporting Gate5-E historical baseline source tree..."
 git archive 3e4c8a00bcf54e0c0a13f1b9f21dd4fd05b2d1d9 app pyproject.toml | tar -x -C "${HIST_SRC_DIR}"
 
-mkdir -p "${MIG_DIR}/upgrade_config"
+mkdir -p "${MIG_DIR}/historical_original_config"
 
 # Construct and seed historical database inside candidate container (deterministic, network-independent)
-docker run --rm \
-  --platform linux/amd64 \
-  -v "${HIST_SRC_DIR}:/hist_app:ro" \
-  -v "${MIG_DIR}/upgrade_config:/config" \
-  -w /hist_app \
-  "${G2_IMAGE_TAG}" \
-  python -c "
+docker run --rm   --platform linux/amd64   -v "${HIST_SRC_DIR}:/hist_app:ro"   -v "${MIG_DIR}/historical_original_config:/config"   -w /hist_app   "${G2_IMAGE_TAG}"   python -c "
 from pathlib import Path
 from app.db import create_engine_and_session, init_db
 from app.models import User, Session, WorkJob, BatchPlan, BatchPlanItem, ScanJob, IndexedPath, OperationJournal, utcnow
@@ -647,7 +633,7 @@ with SessionLocal() as s:
     u = User(id=1, username='hist_user', password_hash=hash_password('HistPassword123!'), role='user')
     s.add(u)
     s.flush()
-    sess = Session(id=1, user_id=1, token_hash='hist_token_hash_abc123', created_at=utcnow(), expires_at=utcnow())
+    sess = Session(id=1, user_id=1, token_hash='hist_token_hash_abc123', created_at=utcnow(), expires_at=utcnow(), last_seen_at=utcnow())
     s.add(sess)
 
     # 2. Completed WorkJob
@@ -661,16 +647,16 @@ with SessionLocal() as s:
     s.add(bp)
     s.flush()
 
-    # 5. BatchPlanItem (plan_id: int, sequence: int, operation: str, state: str)
-    bpi = BatchPlanItem(id=1, plan_id=1, sequence=1, operation='quarantine', source_path='/data/old.txt', target_path='/quarantine/old.txt', keep_path='/data/keep.txt', state='completed', created_at=utcnow())
+    # 5. BatchPlanItem (plan_id: int, sequence: int, operation: str, state: str - Note: NO created_at in historical BatchPlanItem)
+    bpi = BatchPlanItem(id=1, plan_id=1, sequence=1, operation='quarantine', source_path='/data/old.txt', target_path='/quarantine/old.txt', keep_path='/data/keep.txt', state='completed')
     s.add(bpi)
     s.flush()
 
     # 6. ScanJob
-    s.add(ScanJob(id=1, name='scan-001', mode='normal', roots_json='[\"/data\"]', status='completed', created_at=utcnow()))
+    s.add(ScanJob(id=1, name='scan-001', mode='normal', roots_json='["/data"]', status='completed', created_at=utcnow()))
 
-    # 7. IndexedPath
-    s.add(IndexedPath(id=1, root_key='/data', absolute_path='/data/old.txt', relative_path='old.txt', basename='old.txt', stem='old', suffix='.txt', scan_generation='gen1', created_at=utcnow()))
+    # 7. IndexedPath (Note: NO created_at in historical IndexedPath, uses first_seen_at / last_seen_at)
+    s.add(IndexedPath(id=1, root_key='/data', absolute_path='/data/old.txt', relative_path='old.txt', basename='old.txt', stem='old', suffix='.txt', scan_generation='gen1', first_seen_at=utcnow(), last_seen_at=utcnow()))
 
     # 8. OperationJournal (real fields: operation, sequence, plan_id, plan_item_id, task_id, user_id)
     s.add(OperationJournal(id=1, operation='quarantine', sequence=1, plan_id=1, plan_item_id=1, task_id=101, user_id=1, before_json='{}', after_json='{}', metadata_before_json='{}', metadata_after_json='{}', created_at=utcnow()))
@@ -680,25 +666,18 @@ print('HISTORICAL_DB_ALL_ENTITIES_SEEDED_SUCCESS')
 "
 rm -rf "${HIST_SRC_DIR}"
 ```
-Expected: Historical DB created with users, sessions, jobs, plans, plan items, scan jobs, indexed paths, and operation journals matching Gate5-E schema.
+Expected: Historical DB created with users, sessions, jobs, plans, plan items, scan jobs, indexed paths, and operation journals matching exact Gate5-E schema; preserved untouched in `historical_original_config/app.db`.
 
-- [ ] **Step 3: Run candidate application container against a COPY of historical database**
+- [ ] **Step 3: Run candidate application container against an isolated COPY of historical database**
 
 Run:
 ```bash
-# Make an explicit copy for testing upgrade
-cp "${MIG_DIR}/upgrade_config/app.db" "${MIG_DIR}/upgrade_config/app_copy.db"
+# Create isolated upgrade-test CONFIG directory whose tested historical COPY is named exactly app.db
+mkdir -p "${MIG_DIR}/upgrade_test_config"
+cp "${MIG_DIR}/historical_original_config/app.db" "${MIG_DIR}/upgrade_test_config/app.db"
 
-# Start candidate application container against copy
-docker run -d --name gate5g-mig-upgrade \
-  --platform linux/amd64 \
-  -p 18084:8080 \
-  -v "${MIG_DIR}/upgrade_config:/config" \
-  -v "${MIG_DIR}/data:/data:ro" \
-  -e CONFIG_DIR=/config \
-  -e DATA_MOUNT=/data \
-  "${G2_IMAGE_TAG}" \
-  uvicorn app.main:app --host 0.0.0.0 --port 8080
+# Start candidate application container against that directory (where Settings.database_path resolves to /config/app.db)
+docker run -d --name gate5g-mig-upgrade   --platform linux/amd64   -p 18084:8080   -v "${MIG_DIR}/upgrade_test_config:/config"   -v "${MIG_DIR}/data:/data:ro"   -e CONFIG_DIR=/config   -e DATA_MOUNT=/data   "${G2_IMAGE_TAG}"   uvicorn app.main:app --host 0.0.0.0 --port 8080
 
 # Poll health
 for i in {1..30}; do
@@ -713,10 +692,10 @@ done
 docker stop gate5g-mig-upgrade
 docker rm gate5g-mig-upgrade
 
-# Inspect upgraded database offline
+# Inspect upgraded database offline at ${MIG_DIR}/upgrade_test_config/app.db
 python3 -c "
 import sqlite3
-conn = sqlite3.connect('${MIG_DIR}/upgrade_config/app_copy.db')
+conn = sqlite3.connect('${MIG_DIR}/upgrade_test_config/app.db')
 cursor = conn.cursor()
 
 # 1. Assert ResourcePolicy table added and singleton row seeded
@@ -756,16 +735,8 @@ conn.close()
 print('UPGRADE_MIGRATION_RECORDS_PRESERVED_SUCCESS')
 "
 
-# Restart candidate container to prove idempotency
-docker run -d --name gate5g-mig-upgrade-restart \
-  --platform linux/amd64 \
-  -p 18084:8080 \
-  -v "${MIG_DIR}/upgrade_config:/config" \
-  -v "${MIG_DIR}/data:/data:ro" \
-  -e CONFIG_DIR=/config \
-  -e DATA_MOUNT=/data \
-  "${G2_IMAGE_TAG}" \
-  uvicorn app.main:app --host 0.0.0.0 --port 8080
+# Restart candidate container against the exact same DB to prove idempotency
+docker run -d --name gate5g-mig-upgrade-restart   --platform linux/amd64   -p 18084:8080   -v "${MIG_DIR}/upgrade_test_config:/config"   -v "${MIG_DIR}/data:/data:ro"   -e CONFIG_DIR=/config   -e DATA_MOUNT=/data   "${G2_IMAGE_TAG}"   uvicorn app.main:app --host 0.0.0.0 --port 8080
 
 sleep 3
 curl -s http://127.0.0.1:18084/health | grep -q '"status":"ok"' || { echo "Restart failed"; exit 1; }
@@ -773,27 +744,27 @@ docker stop gate5g-mig-upgrade-restart
 docker rm gate5g-mig-upgrade-restart
 echo "UPGRADE_MIGRATION_IDEMPOTENCY_SUCCESS"
 ```
-Expected: Additive migration creates `resource_policy` table without dropping or corrupting any historical records; second container start is idempotent.
+Expected: Additive migration creates `resource_policy` table without dropping or corrupting any historical records; second container start is idempotent; untouched original historical database remains preserved in `historical_original_config/app.db`.
 
 ---
 
 ### Task 5: Phase G5 — SQLite Integrity Check & Schema / Index Constraint Verification
 
 **Files:**
-- Database: `/tmp/gate5g-migration/fresh_config/app.db` and `/tmp/gate5g-migration/upgrade_config/app_copy.db`
+- Database: `/tmp/gate5g-migration/fresh_config/app.db` and `/tmp/gate5g-migration/upgrade_test_config/app.db`
 
 **Interfaces:**
 - Consumes: Post-migration SQLite databases after clean container shutdown.
-- Produces: Raw PRAGMA integrity check, foreign key check, and schema constraint verification outputs.
+- Produces: Raw PRAGMA integrity check, foreign key check, and schema/foreign key/index constraint verification outputs.
 
-- [ ] **Step 1: Checkpoint WAL and run SQLite integrity checks**
+- [ ] **Step 1: Checkpoint WAL and run SQLite integrity & foreign key checks**
 
 Run:
 ```bash
 python3 -c "
 import sqlite3
 
-for name, p in [('fresh', '/tmp/gate5g-migration/fresh_config/app.db'), ('upgrade', '/tmp/gate5g-migration/upgrade_config/app_copy.db')]:
+for name, p in [('fresh', '/tmp/gate5g-migration/fresh_config/app.db'), ('upgrade', '/tmp/gate5g-migration/upgrade_test_config/app.db')]:
     conn = sqlite3.connect(p)
     cursor = conn.cursor()
     # Checkpoint WAL
@@ -807,27 +778,27 @@ for name, p in [('fresh', '/tmp/gate5g-migration/fresh_config/app.db'), ('upgrad
     fk_res = cursor.fetchall()
     assert len(fk_res) == 0, f'{name} foreign_key_check found violations: {fk_res}'
     # Singleton check
-    cursor.execute('SELECT count(*), id FROM resource_policy;')
-    cnt, rid = cursor.fetchone()
-    assert cnt == 1 and rid == 1, f'{name} resource_policy singleton corrupted: count={cnt}, id={rid}'
+    cursor.execute('SELECT count(*), id, revision FROM resource_policy;')
+    cnt, rid, rev = cursor.fetchone()
+    assert cnt == 1 and rid == 1 and rev == 1, f'{name} resource_policy singleton corrupted: count={cnt}, id={rid}, revision={rev}'
     conn.close()
     print(f'SQLITE_PRAGMA_CHECKS_PASS: {name}')
 "
 ```
-Expected: Both fresh and upgraded databases return `integrity_check = ok`, `foreign_key_check = 0 rows`, and `resource_policy` count = 1, id = 1.
+Expected: Both fresh and upgraded databases return `integrity_check = ok`, `foreign_key_check = 0 rows`, and `resource_policy` count = 1, id = 1, revision = 1.
 
-- [ ] **Step 2: Verify expected schema, indexes, and unique constraints required by Freeze**
+- [ ] **Step 2: Verify expected schema, foreign keys, unique constraints, and indexes required by Freeze**
 
 Run:
 ```bash
 python3 -c "
 import sqlite3
 
-for name, p in [('fresh', '/tmp/gate5g-migration/fresh_config/app.db'), ('upgrade', '/tmp/gate5g-migration/upgrade_config/app_copy.db')]:
+for name, p in [('fresh', '/tmp/gate5g-migration/fresh_config/app.db'), ('upgrade', '/tmp/gate5g-migration/upgrade_test_config/app.db')]:
     conn = sqlite3.connect(p)
     cursor = conn.cursor()
 
-    # Verify resource_policy columns
+    # 1. PRAGMA table_info for resource_policy columns
     cursor.execute('PRAGMA table_info(resource_policy);')
     cols = {row[1] for row in cursor.fetchall()}
     expected_cols = {
@@ -838,8 +809,34 @@ for name, p in [('fresh', '/tmp/gate5g-migration/fresh_config/app.db'), ('upgrad
     missing_cols = expected_cols - cols
     assert not missing_cols, f'{name} resource_policy missing columns: {missing_cols}'
 
-    # Verify indexes exist in sqlite_master
-    cursor.execute('SELECT name FROM sqlite_master WHERE type=\"index\";')
+    # 2. PRAGMA foreign_key_list for representative critical relationships
+    cursor.execute('PRAGMA foreign_key_list(batch_plan_items);')
+    bpi_fks = cursor.fetchall()
+    assert any(row[2] == 'batch_plans' and row[3] == 'plan_id' for row in bpi_fks), f'{name} batch_plan_items missing FK to batch_plans'
+
+    cursor.execute('PRAGMA foreign_key_list(sessions);')
+    sess_fks = cursor.fetchall()
+    assert any(row[2] == 'users' and row[3] == 'user_id' for row in sess_fks), f'{name} sessions missing FK to users'
+
+    # 3. PRAGMA index_list for unique constraints
+    cursor.execute('PRAGMA index_list(users);')
+    users_idx = cursor.fetchall()
+    assert any(row[2] == 1 for row in users_idx), f'{name} users missing unique constraint index'
+
+    cursor.execute('PRAGMA index_list(sessions);')
+    sess_idx = cursor.fetchall()
+    assert any(row[2] == 1 for row in sess_idx), f'{name} sessions missing unique constraint index'
+
+    cursor.execute('PRAGMA index_list(quarantine_entries);')
+    qe_idx = cursor.fetchall()
+    assert any(row[2] == 1 for row in qe_idx), f'{name} quarantine_entries missing unique constraint index'
+
+    cursor.execute('PRAGMA index_list(indexed_paths);')
+    ip_idx = cursor.fetchall()
+    assert any(row[2] == 1 for row in ip_idx), f'{name} indexed_paths missing unique constraint index'
+
+    # 4. Verify required named indexes exist in sqlite_master
+    cursor.execute('SELECT name FROM sqlite_master WHERE type="index";')
     indexes = {row[0] for row in cursor.fetchall()}
     required_indexes = {
         'ix_work_jobs_status',
@@ -852,10 +849,10 @@ for name, p in [('fresh', '/tmp/gate5g-migration/fresh_config/app.db'), ('upgrad
     assert not missing_indexes, f'{name} missing required indexes: {missing_indexes}'
 
     conn.close()
-    print(f'SCHEMA_INDEX_CONSTRAINTS_VERIFIED: {name}')
+    print(f'SCHEMA_FK_UNIQUE_INDEX_CONSTRAINTS_VERIFIED: {name}')
 "
 ```
-Expected: All required columns and indexes exist in both fresh and upgraded databases.
+Expected: All required columns, foreign keys, unique constraints, and indexes exist in both fresh and upgraded databases.
 
 - [ ] **Step 3: Clean up migration temporary directory**
 
@@ -874,9 +871,9 @@ Expected: Directory removed cleanly.
 
 **Interfaces:**
 - Consumes: Built Docker image `G2_IMAGE_TAG`.
-- Produces: Verification of 5-stage lifecycle (`Preview -> Draft -> Freeze -> Validate -> Execute`), plan-derived keep/quarantine assertions, real dedupe stale preflight rejection, and mandatory quarantine restore.
+- Produces: Verification of 5-stage lifecycle (`Preview -> Draft -> Freeze -> Validate -> Execute`), plan-derived keep/quarantine assertions, separate stale preflight rejection, reachable symlink protection, and mandatory quarantine restore.
 
-- [ ] **Step 1: Construct deterministic synthetic filesystem fixture**
+- [ ] **Step 1: Construct deterministic synthetic filesystem fixture with reachable symlink target**
 
 Run:
 ```bash
@@ -884,13 +881,9 @@ FIXTURE_DIR="/tmp/gate5g-safety-fixture"
 rm -rf "${FIXTURE_DIR}"
 mkdir -p "${FIXTURE_DIR}/allowed_root" "${FIXTURE_DIR}/quarantine_root" "${FIXTURE_DIR}/sentinel_dir" "${FIXTURE_DIR}/config"
 
-# Group 1 duplicates (byte-identical)
+# Primary group duplicates (byte-identical)
 echo "GATE5G_SYNTHETIC_DUPLICATE_GROUP1_CONTENT_DATA_ABC" > "${FIXTURE_DIR}/allowed_root/group1_fileA.dat"
 cp "${FIXTURE_DIR}/allowed_root/group1_fileA.dat" "${FIXTURE_DIR}/allowed_root/group1_fileB.dat"
-
-# Stale duplicate group (byte-identical)
-echo "GATE5G_SYNTHETIC_STALE_DUPLICATE_GROUP2_CONTENT_XYZ" > "${FIXTURE_DIR}/allowed_root/stale_group_fileA.dat"
-cp "${FIXTURE_DIR}/allowed_root/stale_group_fileA.dat" "${FIXTURE_DIR}/allowed_root/stale_group_fileB.dat"
 
 # Solitary unique file
 echo "GATE5G_SYNTHETIC_UNIQUE_SOLITARY_FILE_123" > "${FIXTURE_DIR}/allowed_root/unique_file.txt"
@@ -898,33 +891,47 @@ echo "GATE5G_SYNTHETIC_UNIQUE_SOLITARY_FILE_123" > "${FIXTURE_DIR}/allowed_root/
 # External sentinel file outside allowed root
 echo "GATE5G_EXTERNAL_SENTINEL_DO_NOT_ALTER_SAFETY_LOCK" > "${FIXTURE_DIR}/sentinel_dir/external_file.txt"
 
-# Symlink escape pointing outside allowed root
-ln -s "${FIXTURE_DIR}/sentinel_dir/external_file.txt" "${FIXTURE_DIR}/allowed_root/symlink_to_external"
+# Reachable symlink pointing to external sentinel via container path (/sentinel/external_file.txt)
+ln -s "/sentinel/external_file.txt" "${FIXTURE_DIR}/allowed_root/symlink_to_external"
 
-# Record baseline hashes, sizes, and mtimes
+# Verify from container namespace that escape target is genuinely reachable and symlink resolves
+docker run --rm \
+  --platform linux/amd64 \
+  -v "${FIXTURE_DIR}/allowed_root:/data:ro" \
+  -v "${FIXTURE_DIR}/sentinel_dir:/sentinel:ro" \
+  "${G2_IMAGE_TAG}" \
+  bash -c "
+test -f /sentinel/external_file.txt || { echo 'Sentinel target missing in container'; exit 1; }
+test -L /data/symlink_to_external || { echo 'Symlink missing in container'; exit 1; }
+test -f /data/symlink_to_external || { echo 'Symlink referent unreachable in container'; exit 1; }
+echo 'REACHABLE_SYMLINK_FIXTURE_VERIFIED_IN_CONTAINER'
+"
+
+# Record baseline snapshot of entire fixture (file set, SHA256, size, mtime_ns)
 python3 -c "
 import hashlib, os, json
 from pathlib import Path
 
 root = Path('${FIXTURE_DIR}')
 baseline = {}
-for p in root.rglob('*'):
-    if p.is_file():
-        rel = str(p.relative_to(root))
-        st = p.stat()
-        h = hashlib.sha256(p.read_bytes()).hexdigest()
-        baseline[rel] = {'sha256': h, 'size': st.st_size, 'mtime_ns': st.st_mtime_ns}
+for subdir in ['allowed_root', 'sentinel_dir']:
+    for p in (root / subdir).rglob('*'):
+        if p.is_file() and not p.is_symlink():
+            rel = str(p.relative_to(root))
+            st = p.stat()
+            h = hashlib.sha256(p.read_bytes()).hexdigest()
+            baseline[rel] = {'sha256': h, 'size': st.st_size, 'mtime_ns': st.st_mtime_ns}
 
 with open('${FIXTURE_DIR}/baseline_records.json', 'w') as f:
     json.dump(baseline, f, indent=2)
 print('BASELINE_RECORDS_SAVED:', len(baseline), 'files')
 "
 ```
-Expected: Fixture created; duplicate members verified identical; external sentinel and symlink in place.
+Expected: Fixture created; primary duplicate pair and sentinel file verified; symlink referent proven reachable inside container namespace; baseline recorded. Note: Stale duplicate pair will be created in Step 5 as a separate, independent scenario.
 
-- [ ] **Step 2: Read-Only Safety Verification Stage (Real Worker-Backed Execution)**
+- [ ] **Step 2: Read-Only Safety Verification Stage (Real Worker-Backed Execution & Exact Snapshot Comparison)**
 
-Start real API and Worker containers with safe read-only configuration:
+Start real API and Worker containers with safe read-only configuration (mounting sentinel outside `/data`):
 ```bash
 docker run -d --name gate5g-safety-ro-api \
   --platform linux/amd64 \
@@ -932,6 +939,7 @@ docker run -d --name gate5g-safety-ro-api \
   -v "${FIXTURE_DIR}/config:/config" \
   -v "${FIXTURE_DIR}/allowed_root:/data:ro" \
   -v "${FIXTURE_DIR}/quarantine_root:/quarantine:ro" \
+  -v "${FIXTURE_DIR}/sentinel_dir:/sentinel:ro" \
   -e CONFIG_DIR=/config \
   -e DATA_MOUNT=/data \
   -e ALLOWED_ROOTS=/data \
@@ -948,6 +956,7 @@ docker run -d --name gate5g-safety-ro-worker \
   -v "${FIXTURE_DIR}/config:/config" \
   -v "${FIXTURE_DIR}/allowed_root:/data:ro" \
   -v "${FIXTURE_DIR}/quarantine_root:/quarantine:ro" \
+  -v "${FIXTURE_DIR}/sentinel_dir:/sentinel:ro" \
   -e CONFIG_DIR=/config \
   -e DATA_MOUNT=/data \
   -e ALLOWED_ROOTS=/data \
@@ -973,7 +982,7 @@ echo "Scan enqueue response: ${SCAN_RESP}"
 SCAN_ID=$(echo "${SCAN_RESP}" | grep -o '"scan_job_id":[0-9]*' | cut -d: -f2)
 [ -n "${SCAN_ID}" ] || { echo "Failed to enqueue scan"; exit 1; }
 
-# Poll scan job until Worker completes it (zero manual SQLite status updates)
+# Poll scan job until Worker completes it
 for i in {1..30}; do
   STATUS=$(curl -s -b "${FIXTURE_DIR}/cookie.txt" "http://127.0.0.1:18081/api/scans/${SCAN_ID}" | grep -o '"status":"[^"]*' | cut -d'"' -f4)
   echo "Polling scan status: ${STATUS}"
@@ -983,12 +992,24 @@ for i in {1..30}; do
 done
 [ "${STATUS}" = "completed" ] || { echo "Scan timed out waiting for worker"; exit 1; }
 
-# 2. Trigger index via /api/indexes
+# 2. Trigger index via /api/indexes, capture work_job_id, and poll until completed
 INDEX_RESP=$(curl -s -b "${FIXTURE_DIR}/cookie.txt" -X POST http://127.0.0.1:18081/api/indexes \
   -H "Content-Type: application/json" -H "Origin: http://127.0.0.1:18081" \
   -d '{"root":"/data"}')
 echo "Index enqueue response: ${INDEX_RESP}"
-sleep 3
+INDEX_WORK_JOB_ID=$(echo "${INDEX_RESP}" | grep -o '"work_job_id":[0-9]*' | cut -d: -f2)
+[ -n "${INDEX_WORK_JOB_ID}" ] || { echo "Failed to enqueue index task"; exit 1; }
+
+for i in {1..30}; do
+  INDEX_STATUS=$(curl -s -b "${FIXTURE_DIR}/cookie.txt" "http://127.0.0.1:18081/api/tasks/${INDEX_WORK_JOB_ID}" | grep -o '"status":"[^"]*' | cut -d'"' -f4)
+  echo "Polling index WorkJob status: ${INDEX_STATUS}"
+  if [ "${INDEX_STATUS}" = "completed" ]; then break; fi
+  if [ "${INDEX_STATUS}" = "failed" ] || [ "${INDEX_STATUS}" = "cancelled" ]; then
+    echo "Index WorkJob failed or cancelled: ${INDEX_STATUS}"; docker logs gate5g-safety-ro-worker; exit 1
+  fi
+  sleep 1
+done
+[ "${INDEX_STATUS}" = "completed" ] || { echo "Index WorkJob timed out"; exit 1; }
 
 # 3. Trigger real dedupe preview
 PREVIEW_RESP=$(curl -s -b "${FIXTURE_DIR}/cookie.txt" -X POST "http://127.0.0.1:18081/api/scans/${SCAN_ID}/dedupe-preview" \
@@ -998,29 +1019,41 @@ echo "Preview response: ${PREVIEW_RESP}"
 docker stop gate5g-safety-ro-worker gate5g-safety-ro-api
 docker rm gate5g-safety-ro-worker gate5g-safety-ro-api
 
-# Assert zero mutation: compare current hashes/sizes/mtimes with baseline
+# Assert zero mutation: compare current file set, hashes, sizes, and mtimes with baseline
 python3 -c "
 import hashlib, json
 from pathlib import Path
 
 root = Path('${FIXTURE_DIR}')
+current = {}
+for subdir in ['allowed_root', 'sentinel_dir']:
+    for p in (root / subdir).rglob('*'):
+        if p.is_file() and not p.is_symlink():
+            rel = str(p.relative_to(root))
+            st = p.stat()
+            h = hashlib.sha256(p.read_bytes()).hexdigest()
+            current[rel] = {'sha256': h, 'size': st.st_size, 'mtime_ns': st.st_mtime_ns}
+
 with open('${FIXTURE_DIR}/baseline_records.json') as f:
     baseline = json.load(f)
 
+# Assert exact file set identity (unexpected creation or deletion fails)
+assert set(current.keys()) == set(baseline.keys()), (
+    f'File set changed! Added: {set(current.keys()) - set(baseline.keys())}, '
+    f'Removed: {set(baseline.keys()) - set(current.keys())}'
+)
+
 for rel, expected in baseline.items():
-    p = root / rel
-    assert p.exists(), f'File disappeared: {rel}'
-    st = p.stat()
-    assert st.st_size == expected['size'], f'Size changed for {rel}'
-    assert st.st_mtime_ns == expected['mtime_ns'], f'Mtime changed for {rel}'
-    h = hashlib.sha256(p.read_bytes()).hexdigest()
-    assert h == expected['sha256'], f'Content hash changed for {rel}'
+    cur = current[rel]
+    assert cur['size'] == expected['size'], f'Size changed for {rel}: expected {expected["size"]}, got {cur["size"]}'
+    assert cur['mtime_ns'] == expected['mtime_ns'], f'Mtime changed for {rel}: expected {expected["mtime_ns"]}, got {cur["mtime_ns"]}'
+    assert cur['sha256'] == expected['sha256'], f'Content hash changed for {rel}: expected {expected["sha256"]}, got {cur["sha256"]}'
 print('READ_ONLY_STAGE_ZERO_MUTATION_VERIFIED_SUCCESS')
 "
 ```
-Expected: Real scan and index executed by Worker; dedupe preview generated; zero mutations to disk.
+Expected: Real scan and index executed and verified completed by Worker; dedupe preview generated; zero disk mutations across file set, hashes, sizes, and mtimes.
 
-- [ ] **Step 3: Controlled Dedupe Mutation Stage (Real Dedupe Chain & Plan-Derived Assertions)**
+- [ ] **Step 3: Controlled Dedupe Mutation Stage (Primary Lifecycle & Plan-Derived Schema Compliance)**
 
 Start real API and Worker containers in controlled mutation mode:
 ```bash
@@ -1030,6 +1063,7 @@ docker run -d --name gate5g-safety-rw-api \
   -v "${FIXTURE_DIR}/config:/config" \
   -v "${FIXTURE_DIR}/allowed_root:/data:rw" \
   -v "${FIXTURE_DIR}/quarantine_root:/quarantine:rw" \
+  -v "${FIXTURE_DIR}/sentinel_dir:/sentinel:ro" \
   -e CONFIG_DIR=/config \
   -e DATA_MOUNT=/data \
   -e ALLOWED_ROOTS=/data \
@@ -1044,6 +1078,7 @@ docker run -d --name gate5g-safety-rw-worker \
   -v "${FIXTURE_DIR}/config:/config" \
   -v "${FIXTURE_DIR}/allowed_root:/data:rw" \
   -v "${FIXTURE_DIR}/quarantine_root:/quarantine:rw" \
+  -v "${FIXTURE_DIR}/sentinel_dir:/sentinel:ro" \
   -e CONFIG_DIR=/config \
   -e DATA_MOUNT=/data \
   -e ALLOWED_ROOTS=/data \
@@ -1092,7 +1127,7 @@ FREEZE_RESP=$(curl -s -b "${FIXTURE_DIR}/cookie_rw.txt" -X POST "http://127.0.0.
   -H "Origin: http://127.0.0.1:18082")
 echo "Freeze response: ${FREEZE_RESP}"
 
-# 5. Substep: Inspect Frozen Plan to extract actual plan-derived paths
+# 5. Inspect Frozen Plan: extract plan-derived paths using exact API schema (source, keep)
 PLAN_ITEMS=$(curl -s -b "${FIXTURE_DIR}/cookie_rw.txt" "http://127.0.0.1:18082/api/plans/${PLAN_ID}/items")
 echo "Frozen Plan Items: ${PLAN_ITEMS}"
 
@@ -1101,21 +1136,20 @@ import json
 data = json.loads('''${PLAN_ITEMS}''')
 items = data.get('items', [])
 assert len(items) >= 1, 'No items in frozen plan'
-# Filter for group1 item
 target_item = None
 for it in items:
-    if 'group1' in it['source_path']:
+    if 'group1' in it['source']:
         target_item = it
         break
 assert target_item is not None, 'group1 item not found in plan'
 
 with open('${FIXTURE_DIR}/plan_paths.json', 'w') as f:
     json.dump({
-        'keep_path': target_item['keep_path'],
-        'mutation_source': target_item['source_path'],
+        'keep_path': target_item['keep'],
+        'mutation_source': target_item['source'],
         'item_id': target_item['id']
     }, f)
-print('PLAN_DERIVED_PATHS_EXTRACTED:', target_item['keep_path'], '->', target_item['source_path'])
+print('PLAN_DERIVED_PATHS_EXTRACTED:', target_item['keep'], '->', target_item['source'])
 "
 
 ACTUAL_KEEP_PATH=$(python3 -c "import json; print(json.load(open('${FIXTURE_DIR}/plan_paths.json'))['keep_path'])")
@@ -1150,10 +1184,10 @@ HOST_MUTATION_SOURCE="${FIXTURE_DIR}/allowed_root/$(basename ${ACTUAL_MUTATION_S
 [ -f "${HOST_KEEP_PATH}" ] || { echo "Protected keep copy missing: ${HOST_KEEP_PATH}"; exit 1; }
 [ ! -f "${HOST_MUTATION_SOURCE}" ] || { echo "Quarantined source still in allowed root: ${HOST_MUTATION_SOURCE}"; exit 1; }
 
-# Query QuarantineEntry associated with actual executed item
+# Query QuarantineEntry associated with actual executed item and verify state == 'active'
 Q_LIST=$(curl -s -b "${FIXTURE_DIR}/cookie_rw.txt" http://127.0.0.1:18082/api/quarantine)
 python3 -c "
-import json
+import json, os
 data = json.loads('''${Q_LIST}''')
 entries = data.get('items', [])
 match = None
@@ -1162,20 +1196,78 @@ for e in entries:
         match = e
         break
 assert match is not None, f'No quarantine entry found for ${ACTUAL_MUTATION_SOURCE}'
-assert match['state'] == 'quarantined', f'Expected state quarantined, got {match[\"state\"]}'
+assert match['state'] == 'active', f'Expected state active, got {match["state"]}'
+
+# Map quarantine_path to host path using relative path from /quarantine to handle nested structures
+rel_qpath = os.path.relpath(match['quarantine_path'], '/quarantine')
+host_qpath = os.path.join('${FIXTURE_DIR}/quarantine_root', rel_qpath)
+assert os.path.isfile(host_qpath), f'Quarantined file missing at mapped host path: {host_qpath}'
 
 with open('${FIXTURE_DIR}/quarantine_entry.json', 'w') as f:
-    json.dump(match, f)
-print('QUARANTINE_ENTRY_ASSOCIATED:', match['id'], 'target:', match['quarantine_path'])
+    json.dump({
+        'id': match['id'],
+        'quarantine_path': match['quarantine_path'],
+        'host_qpath': host_qpath
+    }, f)
+print('QUARANTINE_ENTRY_ASSOCIATED_AND_ACTIVE:', match['id'], 'target:', host_qpath)
 "
 ```
-Expected: Real dedupe chain executed; keep path preserved; planned mutation source moved to quarantine root and associated with QuarantineEntry.
+Expected: Real dedupe chain executed; keep path preserved; planned mutation source moved to quarantine root and associated with QuarantineEntry with `state == 'active'`.
 
-- [ ] **Step 4: Real Dedupe Stale Preflight Protection Stage**
+- [ ] **Step 4: Mandatory Quarantine Restore Stage**
 
 Run:
 ```bash
-# Build a genuine separate duplicate scan/group for stale_group
+# Load associated quarantine entry id and mapped host quarantine path from Step 3
+QUARANTINE_ENTRY_ID=$(python3 -c "import json; print(json.load(open('${FIXTURE_DIR}/quarantine_entry.json'))['id'])")
+HOST_QUARANTINE_FILE=$(python3 -c "import json; print(json.load(open('${FIXTURE_DIR}/quarantine_entry.json'))['host_qpath'])")
+
+echo "Restoring QuarantineEntry ID: ${QUARANTINE_ENTRY_ID}..."
+
+# Call POST /api/quarantine/{id}/restore through real API
+RESTORE_RESP=$(curl -s -b "${FIXTURE_DIR}/cookie_rw.txt" -X POST "http://127.0.0.1:18082/api/quarantine/${QUARANTINE_ENTRY_ID}/restore" \
+  -H "Content-Type: application/json" \
+  -H "Origin: http://127.0.0.1:18082" \
+  -d '{}')
+echo "Restore Response: ${RESTORE_RESP}"
+
+# Verify returned state == restored
+python3 -c "
+import json
+data = json.loads('''${RESTORE_RESP}''')
+assert data.get('state') == 'restored', f'Expected state restored, got {data.get("state")}'
+print('RESTORE_RESPONSE_STATE_OK')
+"
+
+# Verify original destination file recovered with byte-for-byte hash equality against baseline
+[ -f "${HOST_MUTATION_SOURCE}" ] || { echo "Restored file missing from original destination"; exit 1; }
+python3 -c "
+import hashlib, json
+records = json.load(open('${FIXTURE_DIR}/baseline_records.json'))
+baseline_entry = records['allowed_root/$(basename ${HOST_MUTATION_SOURCE})']
+restored_data = open('${HOST_MUTATION_SOURCE}', 'rb').read()
+restored_hash = hashlib.sha256(restored_data).hexdigest()
+assert restored_hash == baseline_entry['sha256'], f'Restored hash mismatch: expected {baseline_entry["sha256"]}, got {restored_hash}'
+assert len(restored_data) == baseline_entry['size'], f'Restored size mismatch: expected {baseline_entry["size"]}, got {len(restored_data)}'
+print('RESTORED_BYTE_FOR_BYTE_EQUALITY_OK')
+"
+
+# Verify quarantine source no longer exists
+[ ! -f "${HOST_QUARANTINE_FILE}" ] || { echo "Quarantined source still exists in quarantine root: ${HOST_QUARANTINE_FILE}"; exit 1; }
+
+echo "MANDATORY_QUARANTINE_RESTORE_SUCCESS"
+```
+Expected: Specific QuarantineEntry restored; state transitions to `restored`; original file recovered with byte-for-byte identical SHA256 and size; quarantine source cleaned up.
+
+- [ ] **Step 5: Real Dedupe Stale Preflight Protection Stage (Separate Independent Duplicate Scenario)**
+
+Run:
+```bash
+# Construct a separate, fresh duplicate pair strictly after primary lifecycle completion
+echo "GATE5G_SYNTHETIC_STALE_DUPLICATE_GROUP_INDEPENDENT_AAA" > "${FIXTURE_DIR}/allowed_root/stale_fileA.dat"
+cp "${FIXTURE_DIR}/allowed_root/stale_fileA.dat" "${FIXTURE_DIR}/allowed_root/stale_fileB.dat"
+
+# Trigger a separate fresh scan for the stale scenario
 SCAN_STALE_RESP=$(curl -s -b "${FIXTURE_DIR}/cookie_rw.txt" -X POST http://127.0.0.1:18082/api/scans \
   -H "Content-Type: application/json" -H "Origin: http://127.0.0.1:18082" \
   -d '{"name":"stale-scan","roots":["/data"]}')
@@ -1195,7 +1287,7 @@ STALE_PLAN_ID=$(echo "${STALE_PLAN_RESP}" | grep -o '"id":[0-9]*' | cut -d: -f2)
 
 curl -s -b "${FIXTURE_DIR}/cookie_rw.txt" -X POST "http://127.0.0.1:18082/api/plans/${STALE_PLAN_ID}/freeze" -H "Origin: http://127.0.0.1:18082"
 
-# Inspect frozen items to find actual stale mutation source
+# Inspect frozen items using correct schema (source, keep) to find actual mutation source
 STALE_ITEMS=$(curl -s -b "${FIXTURE_DIR}/cookie_rw.txt" "http://127.0.0.1:18082/api/plans/${STALE_PLAN_ID}/items")
 python3 -c "
 import json
@@ -1203,81 +1295,39 @@ data = json.loads('''${STALE_ITEMS}''')
 items = data.get('items', [])
 target = None
 for it in items:
-    if 'stale_group' in it['source_path']:
+    if 'stale_file' in it['source']:
         target = it
         break
-assert target is not None, 'stale_group item not found in frozen plan'
+assert target is not None, 'stale item not found in frozen plan'
 with open('${FIXTURE_DIR}/stale_source.txt', 'w') as f:
-    f.write(target['source_path'])
-print('STALE_ACTUAL_SOURCE:', target['source_path'])
+    f.write(target['source'])
+print('STALE_ACTUAL_SOURCE:', target['source'])
 "
 ACTUAL_STALE_SOURCE=$(cat "${FIXTURE_DIR}/stale_source.txt")
 HOST_STALE_SOURCE="${FIXTURE_DIR}/allowed_root/$(basename ${ACTUAL_STALE_SOURCE})"
 
-# Externally modify THAT exact source after Freeze
+# Externally modify THAT exact source file after Freeze
 echo "TAMPERED_MODIFIED_PAYLOAD_AFTER_FREEZE" >> "${HOST_STALE_SOURCE}"
 
-# Validate -> MUST produce stale result
+# Validate -> MUST detect stale state
 STALE_VAL_RESP=$(curl -s -b "${FIXTURE_DIR}/cookie_rw.txt" -X POST "http://127.0.0.1:18082/api/plans/${STALE_PLAN_ID}/validate" -H "Origin: http://127.0.0.1:18082")
 echo "Stale Validate Response: ${STALE_VAL_RESP}"
 echo "${STALE_VAL_RESP}" | grep -E "stale|STALE" || { echo "Validate did not detect stale state"; exit 1; }
 
-# Attempt Execute -> MUST BE REFUSED with 409 PLAN_STALE
+# Attempt Execute -> MUST BE REFUSED with HTTP 409 PLAN_STALE
 STALE_EXEC_RESP=$(curl -s -w "\n%{http_code}" -b "${FIXTURE_DIR}/cookie_rw.txt" -X POST "http://127.0.0.1:18082/api/plans/${STALE_PLAN_ID}/execute" -H "Origin: http://127.0.0.1:18082")
 STALE_EXEC_CODE=$(echo "${STALE_EXEC_RESP}" | tail -n1)
 echo "Stale Execute Status Code: ${STALE_EXEC_CODE}"
 [ "${STALE_EXEC_CODE}" = "409" ] || { echo "Expected 409 for stale execution, got ${STALE_EXEC_CODE}"; exit 1; }
 
-# Verify source remains untouched on disk
+# Verify source remains intact on disk and clean up stale test pair
 [ -f "${HOST_STALE_SOURCE}" ] || { echo "Modified file was erroneously removed!"; exit 1; }
+rm -f "${FIXTURE_DIR}/allowed_root/stale_fileA.dat" "${FIXTURE_DIR}/allowed_root/stale_fileB.dat"
 echo "STALE_PROTECTION_SUCCESS"
 ```
-Expected: Validate explicitly reports stale; Execute refused with 409; file not moved or deleted.
+Expected: Validate explicitly reports stale; Execute refused with 409; modified file remains untouched; stale test files cleaned up.
 
-- [ ] **Step 5: Mandatory Quarantine Restore Stage**
-
-Run:
-```bash
-# Load associated quarantine entry id from Step 3
-QUARANTINE_ENTRY_ID=$(python3 -c "import json; print(json.load(open('${FIXTURE_DIR}/quarantine_entry.json'))['id'])")
-CONTAINER_QUARANTINE_PATH=$(python3 -c "import json; print(json.load(open('${FIXTURE_DIR}/quarantine_entry.json'))['quarantine_path'])")
-HOST_QUARANTINE_FILE="${FIXTURE_DIR}/quarantine_root/$(basename ${CONTAINER_QUARANTINE_PATH})"
-
-echo "Restoring QuarantineEntry ID: ${QUARANTINE_ENTRY_ID}..."
-
-# Call POST /api/quarantine/{id}/restore through real API
-RESTORE_RESP=$(curl -s -b "${FIXTURE_DIR}/cookie_rw.txt" -X POST "http://127.0.0.1:18082/api/quarantine/${QUARANTINE_ENTRY_ID}/restore" \
-  -H "Content-Type: application/json" \
-  -H "Origin: http://127.0.0.1:18082" \
-  -d '{}')
-echo "Restore Response: ${RESTORE_RESP}"
-
-# Verify returned state == restored
-python3 -c "
-import json
-data = json.loads('''${RESTORE_RESP}''')
-assert data.get('state') == 'restored', f'Expected state restored, got {data.get(\"state\")}'
-print('RESTORE_RESPONSE_STATE_OK')
-"
-
-# Verify original destination file recovered with byte-for-byte hash
-[ -f "${HOST_MUTATION_SOURCE}" ] || { echo "Restored file missing from original destination"; exit 1; }
-RESTORED_HASH=$(sha256sum "${HOST_MUTATION_SOURCE}" | awk '{print $1}')
-ORIGINAL_HASH=$(python3 -c "
-import json
-records = json.load(open('${FIXTURE_DIR}/baseline_records.json'))
-print(records['allowed_root/$(basename ${HOST_MUTATION_SOURCE})']['sha256'])
-")
-[ "${RESTORED_HASH}" = "${ORIGINAL_HASH}" ] || { echo "Restored file hash mismatch!"; exit 1; }
-
-# Verify quarantine source no longer exists
-[ ! -f "${HOST_QUARANTINE_FILE}" ] || { echo "Quarantined source still exists in quarantine root"; exit 1; }
-
-echo "MANDATORY_QUARANTINE_RESTORE_SUCCESS"
-```
-Expected: Specific QuarantineEntry restored; original file recovered with byte-for-byte identical hash; quarantine source cleaned up.
-
-- [ ] **Step 6: Verify Sentinel and Symlink Traversal Protection**
+- [ ] **Step 6: Verify Reachable Sentinel and Symlink Traversal Protection**
 
 Run:
 ```bash
@@ -1285,11 +1335,16 @@ python3 -c "
 import hashlib, json
 records = json.load(open('${FIXTURE_DIR}/baseline_records.json'))
 sentinel_expected = records['sentinel_dir/external_file.txt']
-current_h = hashlib.sha256(open('${FIXTURE_DIR}/sentinel_dir/external_file.txt', 'rb').read()).hexdigest()
-assert current_h == sentinel_expected['sha256'], 'Sentinel file was modified!'
-print('SENTINEL_INTEGRITY_VERIFIED_OK')
+sentinel_path = '${FIXTURE_DIR}/sentinel_dir/external_file.txt'
+
+st = open(sentinel_path, 'rb').read()
+current_h = hashlib.sha256(st).hexdigest()
+assert current_h == sentinel_expected['sha256'], 'Sentinel file content was modified!'
+assert len(st) == sentinel_expected['size'], 'Sentinel file size was modified!'
+print('SENTINEL_INTEGRITY_VERIFIED_OK: External sentinel completely untouched across all mutation stages')
 "
 ```
+Expected: External sentinel file content, size, and hash remain completely unmodified.
 
 - [ ] **Step 7: Clean up safety containers and fixture**
 
@@ -1308,26 +1363,36 @@ Expected: Clean teardown.
 **Files:**
 - Host Filesystem: Target 极空间 NAS filesystem
 - Transient Compose File: `/tmp/nas-gate5g-transient-compose.yaml` (outside git worktree)
+- Transport Manifest: `/tmp/gate5g-image-manifest.env`
 
 **Interfaces:**
-- Consumes: Transferred image tar archive `G2_IMAGE_ARCHIVE_PATH` and checksum `G2_IMAGE_ARCHIVE_SHA256`.
-- Produces: Target NAS environment metrics, exact Image ID equality verification, and end-to-end black-box verification logs.
+- Consumes: Transferred image tar archive `/tmp/nas-file-center-candidate.tar` and explicit manifest `/tmp/gate5g-image-manifest.env`.
+- Produces: Target NAS environment metrics, exact Image ID equality verification, completed RO matrix, completed RW mutation & restore matrix, and restart persistence logs.
 
-- [ ] **Step 1: Transfer image archive to target 极空间 NAS and verify SHA256**
+- [ ] **Step 1: Transfer image archive and manifest to target 极空间 NAS**
 
 Run:
 ```bash
 # On verifier host:
 # scp "${G2_IMAGE_ARCHIVE_PATH}" user@nas:/tmp/nas-file-center-candidate.tar
+# scp "${G2_IMAGE_MANIFEST_PATH}" user@nas:/tmp/gate5g-image-manifest.env
 
 # On NAS:
+echo "Checking transferred files on NAS..."
+[ -f /tmp/nas-file-center-candidate.tar ] || { echo "Image archive missing on NAS"; exit 1; }
+[ -f /tmp/gate5g-image-manifest.env ] || { echo "Image manifest missing on NAS"; exit 1; }
+
+# Source manifest to explicitly load G2_IMAGE_TAG, G2_IMAGE_ID, and G2_IMAGE_ARCHIVE_SHA256
+source /tmp/gate5g-image-manifest.env
+echo "Loaded Manifest: TAG=${G2_IMAGE_TAG}, ID=${G2_IMAGE_ID}, SHA256=${G2_IMAGE_ARCHIVE_SHA256}"
+
 echo "Verifying transferred image archive SHA256 checksum on NAS..."
 NAS_ARCHIVE_SHA256=$(sha256sum /tmp/nas-file-center-candidate.tar | awk '{print $1}')
 echo "NAS_ARCHIVE_SHA256: ${NAS_ARCHIVE_SHA256}"
 echo "G2_IMAGE_ARCHIVE_SHA256: ${G2_IMAGE_ARCHIVE_SHA256}"
 [ "${NAS_ARCHIVE_SHA256}" = "${G2_IMAGE_ARCHIVE_SHA256}" ] || { echo "Image archive SHA256 mismatch on NAS!"; exit 1; }
 ```
-Expected: SHA256 checksum on the NAS matches `G2_IMAGE_ARCHIVE_SHA256` bit-for-bit.
+Expected: SHA256 checksum on the NAS matches `G2_IMAGE_ARCHIVE_SHA256` bit-for-bit; manifest variables explicitly loaded.
 
 - [ ] **Step 2: Load Docker image on NAS and verify Image ID equality**
 
@@ -1358,8 +1423,9 @@ GATE5G_TEST_ROOT="/tmp/zfsv3/sata11/gate5g_isolated_testbed"
 GATE5G_TEST_DATA_PATH="${GATE5G_TEST_ROOT}/data"
 GATE5G_TEST_CONFIG_PATH="${GATE5G_TEST_ROOT}/config"
 GATE5G_TEST_QUARANTINE_PATH="${GATE5G_TEST_ROOT}/quarantine"
+GATE5G_TEST_SENTINEL_PATH="${GATE5G_TEST_ROOT}/sentinel"
 
-mkdir -p "${GATE5G_TEST_DATA_PATH}" "${GATE5G_TEST_CONFIG_PATH}" "${GATE5G_TEST_QUARANTINE_PATH}"
+mkdir -p "${GATE5G_TEST_DATA_PATH}" "${GATE5G_TEST_CONFIG_PATH}" "${GATE5G_TEST_QUARANTINE_PATH}" "${GATE5G_TEST_SENTINEL_PATH}"
 
 python3 -c "
 import sys
@@ -1405,7 +1471,7 @@ echo "==================================="
 ```
 Record: NAS model/firmware, CPU arch, Docker engine version, filesystem type of test mount.
 
-- [ ] **Step 5: Stage 1 — Read-Only Verification on NAS (`/data:ro`, `ALLOW_MUTATION=false`)**
+- [ ] **Step 5: Stage 1 — Mandatory Read-Only Matrix Verification on NAS (`/data:ro`, `ALLOW_MUTATION=false`)**
 
 Generate transient compose file outside git worktree at `/tmp/nas-gate5g-transient-compose.yaml`:
 Run (on NAS):
@@ -1431,6 +1497,7 @@ services:
       - ${GATE5G_TEST_CONFIG_PATH}:/config
       - ${GATE5G_TEST_DATA_PATH}:/data:ro
       - ${GATE5G_TEST_QUARANTINE_PATH}:/quarantine:ro
+      - ${GATE5G_TEST_SENTINEL_PATH}:/sentinel:ro
     restart: "no"
 
   worker:
@@ -1449,56 +1516,161 @@ services:
       - ${GATE5G_TEST_CONFIG_PATH}:/config
       - ${GATE5G_TEST_DATA_PATH}:/data:ro
       - ${GATE5G_TEST_QUARANTINE_PATH}:/quarantine:ro
+      - ${GATE5G_TEST_SENTINEL_PATH}:/sentinel:ro
     restart: "no"
 EOF
 
 docker compose -f /tmp/nas-gate5g-transient-compose.yaml up -d
 sleep 5
 
-# Verify health and worker online
-curl -s http://127.0.0.1:28080/health | grep -q '"status":"ok"' || { echo "NAS API unhealthy"; exit 1; }
+# 1. API Health Check and exact safety flags
+NAS_HEALTH=$(curl -s http://127.0.0.1:28080/health)
+echo "NAS Health: ${NAS_HEALTH}"
+python3 -c "
+import json
+data = json.loads('''${NAS_HEALTH}''')
+assert data.get('status') == 'ok', 'status is not ok'
+assert data.get('allow_mutation') is False, 'allow_mutation must be False'
+assert data.get('allow_delete') is False, 'allow_delete must be False'
+assert data.get('protect_last_file') is True, 'protect_last_file must be True'
+print('NAS_RO_HEALTH_FLAGS_OK')
+"
 
-# Login
+# 2. Login admin
 curl -s -c /tmp/nas_cookie.txt -X POST http://127.0.0.1:28080/api/auth/login \
   -H "Content-Type: application/json" -H "Origin: http://127.0.0.1:28080" \
   -d '{"username":"admin","password":"AdminPassword123!"}'
 
-# Verify worker online
-curl -s -b /tmp/nas_cookie.txt http://127.0.0.1:28080/api/tasks/worker | grep -q '"online":true' || { echo "NAS Worker not online"; exit 1; }
+# 3. Verify worker online and single ownership lease
+NAS_WORKER=$(curl -s -b /tmp/nas_cookie.txt http://127.0.0.1:28080/api/tasks/worker)
+python3 -c "
+import json
+data = json.loads('''${NAS_WORKER}''')
+assert data.get('online') is True, 'NAS worker is not online'
+print('NAS_WORKER_ONLINE_OK')
+"
 
-# Verify fclones runs on mounted volume
+# 4. Real Worker-backed scan on NAS volume
+NAS_RO_SCAN_RESP=$(curl -s -b /tmp/nas_cookie.txt -X POST http://127.0.0.1:28080/api/scans \
+  -H "Content-Type: application/json" -H "Origin: http://127.0.0.1:28080" \
+  -d '{"name":"nas-ro-scan","roots":["/data"]}')
+NAS_RO_SCAN_ID=$(echo "${NAS_RO_SCAN_RESP}" | grep -o '"scan_job_id":[0-9]*' | cut -d: -f2)
+for i in {1..30}; do
+  STATUS=$(curl -s -b /tmp/nas_cookie.txt "http://127.0.0.1:28080/api/scans/${NAS_RO_SCAN_ID}" | grep -o '"status":"[^"]*' | cut -d'"' -f4)
+  if [ "${STATUS}" = "completed" ]; then break; fi
+  sleep 1
+done
+[ "${STATUS}" = "completed" ] || { echo "NAS RO Scan timed out"; exit 1; }
+
+# 5. Real /api/indexes WorkJob on NAS volume
+NAS_RO_IDX_RESP=$(curl -s -b /tmp/nas_cookie.txt -X POST http://127.0.0.1:28080/api/indexes \
+  -H "Content-Type: application/json" -H "Origin: http://127.0.0.1:28080" \
+  -d '{"root":"/data"}')
+NAS_RO_IDX_WORK_ID=$(echo "${NAS_RO_IDX_RESP}" | grep -o '"work_job_id":[0-9]*' | cut -d: -f2)
+for i in {1..30}; do
+  STATUS=$(curl -s -b /tmp/nas_cookie.txt "http://127.0.0.1:28080/api/tasks/${NAS_RO_IDX_WORK_ID}" | grep -o '"status":"[^"]*' | cut -d'"' -f4)
+  if [ "${STATUS}" = "completed" ]; then break; fi
+  sleep 1
+done
+[ "${STATUS}" = "completed" ] || { echo "NAS RO Index WorkJob timed out"; exit 1; }
+
+# 6. Verify fclones executes inside container on NAS filesystem
+docker exec gate5g-nas-api fclones --version
 docker exec gate5g-nas-api fclones group /data > /dev/null
 
-# Verify ResourcePolicy and zero-scheduler invariant
-curl -s -b /tmp/nas_cookie.txt http://127.0.0.1:28080/api/settings/resource-policy | grep -q '"scan_threads"' || { echo "Resource policy access failed"; exit 1; }
+# 7. Admin ResourcePolicy GET
+POL_GET=$(curl -s -b /tmp/nas_cookie.txt http://127.0.0.1:28080/api/resource-policy)
+echo "Resource Policy GET: ${POL_GET}"
+python3 -c "
+import json
+data = json.loads('''${POL_GET}''')
+assert data.get('scan_threads') is not None, 'scan_threads missing'
+assert data.get('revision') == 1, 'revision must be 1'
+print('NAS_RESOURCE_POLICY_GET_OK')
+"
+
+# 8. Admin ResourcePolicy PUT and readback verification
+POL_PUT=$(curl -s -b /tmp/nas_cookie.txt -X PUT http://127.0.0.1:28080/api/resource-policy \
+  -H "Content-Type: application/json" -H "Origin: http://127.0.0.1:28080" \
+  -d '{"scan_threads":2,"expected_revision":1}')
+echo "Resource Policy PUT: ${POL_PUT}"
+python3 -c "
+import json
+data = json.loads('''${POL_PUT}''')
+assert data.get('scan_threads') == 2, 'scan_threads not updated'
+assert data.get('revision') == 2, 'revision not incremented'
+print('NAS_RESOURCE_POLICY_PUT_OK')
+"
+
+# 9. Verify ordinary user is forbidden on ResourcePolicy
+docker exec gate5g-nas-api python -c "
+from app.db import create_engine_and_session
+from app.models import User
+from app.auth.password import hash_password
+from pathlib import Path
+engine, SessionLocal = create_engine_and_session(Path('/config/app.db'))
+with SessionLocal() as s:
+    if not s.query(User).filter_by(username='ordinary_user').first():
+        s.add(User(username='ordinary_user', password_hash=hash_password('UserPass123!'), role='user'))
+        s.commit()
+"
+curl -s -c /tmp/nas_user_cookie.txt -X POST http://127.0.0.1:28080/api/auth/login \
+  -H "Content-Type: application/json" -H "Origin: http://127.0.0.1:28080" \
+  -d '{"username":"ordinary_user","password":"UserPass123!"}'
+
+USER_POL_CODE=$(curl -s -o /dev/null -w "%{http_code}" -b /tmp/nas_user_cookie.txt http://127.0.0.1:28080/api/resource-policy)
+[ "${USER_POL_CODE}" = "403" ] || { echo "Ordinary user was not forbidden: ${USER_POL_CODE}"; exit 1; }
+echo "NAS_ORDINARY_USER_RBAC_FORBIDDEN_OK"
+
+# 10. Prove Zero-Scheduler Invariant: zero scheduled work jobs exist
+docker exec gate5g-nas-api python -c "
+from app.db import create_engine_and_session
+from app.models import WorkJob
+from pathlib import Path
+engine, SessionLocal = create_engine_and_session(Path('/config/app.db'))
+with SessionLocal() as s:
+    scheduled = s.query(WorkJob).filter(WorkJob.status == 'scheduled').count()
+    assert scheduled == 0, f'Found {scheduled} scheduled jobs; Zero-Scheduler Invariant violated'
+print('NAS_ZERO_SCHEDULER_INVARIANT_OK')
+"
+
+# 11. Restore ResourcePolicy back to safe initial state before mutation stage
+curl -s -b /tmp/nas_cookie.txt -X PUT http://127.0.0.1:28080/api/resource-policy \
+  -H "Content-Type: application/json" -H "Origin: http://127.0.0.1:28080" \
+  -d '{"scan_threads":1,"expected_revision":2}' > /dev/null
 
 docker compose -f /tmp/nas-gate5g-transient-compose.yaml down
 echo "NAS_STAGE1_READ_ONLY_SUCCESS"
 ```
-Expected: Stage 1 read-only verification passes cleanly on target NAS.
+Expected: Stage 1 read-only mandatory matrix passes cleanly on target NAS.
 
-- [ ] **Step 6: Stage 2 — Controlled Mutation Verification on NAS (`/data:rw`, `ALLOW_MUTATION=true`)**
+- [ ] **Step 6: Stage 2 — Controlled Mutation, Stale Defense, Reachable Symlink, & Mandatory Restore Verification on NAS**
 
 Update `/tmp/nas-gate5g-transient-compose.yaml` for RW mode:
 ```bash
 sed -i 's/:ro/:rw/g' /tmp/nas-gate5g-transient-compose.yaml
+# Keep sentinel mount strictly read-only
+sed -i 's/sentinel:rw/sentinel:ro/g' /tmp/nas-gate5g-transient-compose.yaml
 sed -i 's/ALLOW_MUTATION=false/ALLOW_MUTATION=true/g' /tmp/nas-gate5g-transient-compose.yaml
 
 docker compose -f /tmp/nas-gate5g-transient-compose.yaml up -d
 sleep 5
 
-# 1. Setup fixture files on NAS test data
-echo "NAS_DUP1_ALPHA" > "${GATE5G_TEST_DATA_PATH}/nas_fileA.dat"
+# 1. Setup primary duplicate pair on NAS test data
+echo "NAS_PRIMARY_DUP_DATA_ALPHA" > "${GATE5G_TEST_DATA_PATH}/nas_fileA.dat"
 cp "${GATE5G_TEST_DATA_PATH}/nas_fileA.dat" "${GATE5G_TEST_DATA_PATH}/nas_fileB.dat"
-echo "NAS_STALE_ALPHA" > "${GATE5G_TEST_DATA_PATH}/nas_staleA.dat"
-cp "${GATE5G_TEST_DATA_PATH}/nas_staleA.dat" "${GATE5G_TEST_DATA_PATH}/nas_staleB.dat"
 
-# Login
+# Setup sentinel and reachable symlink
+echo "NAS_EXTERNAL_SENTINEL_PAYLOAD_SAFE" > "${GATE5G_TEST_SENTINEL_PATH}/external_file.txt"
+ln -sf "/sentinel/external_file.txt" "${GATE5G_TEST_DATA_PATH}/symlink_to_external"
+NAS_SENTINEL_HASH_ORIG=$(sha256sum "${GATE5G_TEST_SENTINEL_PATH}/external_file.txt" | awk '{print $1}')
+
+# Login admin
 curl -s -c /tmp/nas_rw_cookie.txt -X POST http://127.0.0.1:28080/api/auth/login \
   -H "Content-Type: application/json" -H "Origin: http://127.0.0.1:28080" \
   -d '{"username":"admin","password":"AdminPassword123!"}'
 
-# 2. Trigger scan
+# 2. Trigger primary scan on NAS
 NAS_SCAN_RESP=$(curl -s -b /tmp/nas_rw_cookie.txt -X POST http://127.0.0.1:28080/api/scans \
   -H "Content-Type: application/json" -H "Origin: http://127.0.0.1:28080" \
   -d '{"name":"nas-mutation-scan","roots":["/data"]}')
@@ -1518,20 +1690,23 @@ NAS_PLAN_ID=$(echo "${NAS_PLAN_RESP}" | grep -o '"id":[0-9]*' | cut -d: -f2)
 
 curl -s -b /tmp/nas_rw_cookie.txt -X POST "http://127.0.0.1:28080/api/plans/${NAS_PLAN_ID}/freeze" -H "Origin: http://127.0.0.1:28080"
 
-# Inspect frozen items: extract plan-derived paths
+# Inspect frozen items: extract plan-derived paths using correct API schema (source, keep)
 NAS_ITEMS=$(curl -s -b /tmp/nas_rw_cookie.txt "http://127.0.0.1:28080/api/plans/${NAS_PLAN_ID}/items")
 python3 -c "
 import json
 data = json.loads('''${NAS_ITEMS}''')
-item = data['items'][0]
+items = data.get('items', [])
+assert len(items) >= 1, 'No items in NAS frozen plan'
+item = items[0]
 with open('/tmp/nas_plan_paths.json', 'w') as f:
-    json.dump({'keep': item['keep_path'], 'source': item['source_path']}, f)
-print('NAS_PLAN_DERIVED_PATHS:', item['keep_path'], '->', item['source_path'])
+    json.dump({'keep': item['keep'], 'source': item['source']}, f)
+print('NAS_PLAN_DERIVED_PATHS:', item['keep'], '->', item['source'])
 "
 NAS_KEEP=$(python3 -c "import json; print(json.load(open('/tmp/nas_plan_paths.json'))['keep'])")
 NAS_SOURCE=$(python3 -c "import json; print(json.load(open('/tmp/nas_plan_paths.json'))['source'])")
+NAS_ORIG_HASH=$(sha256sum "${GATE5G_TEST_DATA_PATH}/$(basename ${NAS_SOURCE})" | awk '{print $1}')
 
-# Validate & Execute
+# Validate & Execute primary plan
 curl -s -b /tmp/nas_rw_cookie.txt -X POST "http://127.0.0.1:28080/api/plans/${NAS_PLAN_ID}/validate" -H "Origin: http://127.0.0.1:28080"
 EXEC_OUT=$(curl -s -b /tmp/nas_rw_cookie.txt -X POST "http://127.0.0.1:28080/api/plans/${NAS_PLAN_ID}/execute" -H "Origin: http://127.0.0.1:28080")
 NAS_WORK_ID=$(echo "${EXEC_OUT}" | grep -o '"work_job_id":[0-9]*' | cut -d: -f2)
@@ -1546,33 +1721,162 @@ done
 [ -f "${GATE5G_TEST_DATA_PATH}/$(basename ${NAS_KEEP})" ] || { echo "NAS keep file missing"; exit 1; }
 [ ! -f "${GATE5G_TEST_DATA_PATH}/$(basename ${NAS_SOURCE})" ] || { echo "NAS quarantined file still in data"; exit 1; }
 
-# Find QuarantineEntry ID
+# Find QuarantineEntry ID and verify state == 'active'
 NAS_Q_LIST=$(curl -s -b /tmp/nas_rw_cookie.txt http://127.0.0.1:28080/api/quarantine)
-NAS_Q_ID=$(python3 -c "
-import json
+python3 -c "
+import json, os
 data = json.loads('''${NAS_Q_LIST}''')
-for e in data['items']:
+entries = data.get('items', [])
+match = None
+for e in entries:
     if e['original_path'] == '${NAS_SOURCE}':
-        print(e['id'])
+        match = e
         break
-")
+assert match is not None, f'No quarantine entry on NAS for ${NAS_SOURCE}'
+assert match['state'] == 'active', f'Expected active state, got {match["state"]}'
+
+rel_qpath = os.path.relpath(match['quarantine_path'], '/quarantine')
+host_qpath = os.path.join('${GATE5G_TEST_QUARANTINE_PATH}', rel_qpath)
+assert os.path.isfile(host_qpath), f'Quarantined file missing on NAS host: {host_qpath}'
+
+with open('/tmp/nas_q_entry.json', 'w') as f:
+    json.dump({'id': match['id'], 'host_qpath': host_qpath}, f)
+print('NAS_QUARANTINE_ENTRY_ACTIVE:', match['id'])
+"
+NAS_Q_ID=$(python3 -c "import json; print(json.load(open('/tmp/nas_q_entry.json'))['id'])")
+NAS_HOST_Q_FILE=$(python3 -c "import json; print(json.load(open('/tmp/nas_q_entry.json'))['host_qpath'])")
 
 # 4. Mandatory Quarantine Restore on NAS
 RESTORE_RESP=$(curl -s -b /tmp/nas_rw_cookie.txt -X POST "http://127.0.0.1:28080/api/quarantine/${NAS_Q_ID}/restore" \
   -H "Content-Type: application/json" -H "Origin: http://127.0.0.1:28080" -d '{}')
-echo "${RESTORE_RESP}" | grep -q '"state":"restored"' || { echo "Restore failed on NAS"; exit 1; }
+python3 -c "
+import json
+data = json.loads('''${RESTORE_RESP}''')
+assert data.get('state') == 'restored', f'NAS restore state not restored: {data.get("state")}'
+print('NAS_RESTORE_STATE_OK')
+"
 [ -f "${GATE5G_TEST_DATA_PATH}/$(basename ${NAS_SOURCE})" ] || { echo "Restored file missing on NAS"; exit 1; }
+NAS_RESTORED_HASH=$(sha256sum "${GATE5G_TEST_DATA_PATH}/$(basename ${NAS_SOURCE})" | awk '{print $1}')
+[ "${NAS_RESTORED_HASH}" = "${NAS_ORIG_HASH}" ] || { echo "NAS restore SHA256 mismatch!"; exit 1; }
+[ ! -f "${NAS_HOST_Q_FILE}" ] || { echo "Quarantine source file still exists on NAS after restore"; exit 1; }
+echo "NAS_MANDATORY_RESTORE_SHA256_VERIFIED_OK"
 
-echo "NAS_STAGE2_MUTATION_AND_RESTORE_SUCCESS"
+# 5. Separate Independent Stale Lifecycle on NAS
+echo "NAS_STALE_DUP_DATA_AAA" > "${GATE5G_TEST_DATA_PATH}/nas_staleA.dat"
+cp "${GATE5G_TEST_DATA_PATH}/nas_staleA.dat" "${GATE5G_TEST_DATA_PATH}/nas_staleB.dat"
+
+NAS_STALE_SCAN_RESP=$(curl -s -b /tmp/nas_rw_cookie.txt -X POST http://127.0.0.1:28080/api/scans \
+  -H "Content-Type: application/json" -H "Origin: http://127.0.0.1:28080" \
+  -d '{"name":"nas-stale-scan","roots":["/data"]}')
+NAS_STALE_SCAN_ID=$(echo "${NAS_STALE_SCAN_RESP}" | grep -o '"scan_job_id":[0-9]*' | cut -d: -f2)
+for i in {1..30}; do
+  STATUS=$(curl -s -b /tmp/nas_rw_cookie.txt "http://127.0.0.1:28080/api/scans/${NAS_STALE_SCAN_ID}" | grep -o '"status":"[^"]*' | cut -d'"' -f4)
+  if [ "${STATUS}" = "completed" ]; then break; fi
+  sleep 1
+done
+
+curl -s -b /tmp/nas_rw_cookie.txt -X POST "http://127.0.0.1:28080/api/scans/${NAS_STALE_SCAN_ID}/dedupe-preview" -H "Origin: http://127.0.0.1:28080" -d '{}'
+NAS_STALE_PLAN_RESP=$(curl -s -b /tmp/nas_rw_cookie.txt -X POST "http://127.0.0.1:28080/api/scans/${NAS_STALE_SCAN_ID}/dedupe-plan" \
+  -H "Content-Type: application/json" -H "Origin: http://127.0.0.1:28080" -d '{"policy":"newest"}')
+NAS_STALE_PLAN_ID=$(echo "${NAS_STALE_PLAN_RESP}" | grep -o '"id":[0-9]*' | cut -d: -f2)
+
+curl -s -b /tmp/nas_rw_cookie.txt -X POST "http://127.0.0.1:28080/api/plans/${NAS_STALE_PLAN_ID}/freeze" -H "Origin: http://127.0.0.1:28080"
+
+# Inspect items and extract actual stale mutation source
+NAS_STALE_ITEMS=$(curl -s -b /tmp/nas_rw_cookie.txt "http://127.0.0.1:28080/api/plans/${NAS_STALE_PLAN_ID}/items")
+python3 -c "
+import json
+data = json.loads('''${NAS_STALE_ITEMS}''')
+items = data.get('items', [])
+target = None
+for it in items:
+    if 'nas_stale' in it['source']:
+        target = it
+        break
+assert target is not None, 'NAS stale item not found in plan'
+with open('/tmp/nas_stale_source.txt', 'w') as f:
+    f.write(target['source'])
+print('NAS_STALE_SOURCE:', target['source'])
+"
+NAS_STALE_SOURCE=$(cat /tmp/nas_stale_source.txt)
+NAS_HOST_STALE_SOURCE="${GATE5G_TEST_DATA_PATH}/$(basename ${NAS_STALE_SOURCE})"
+
+# Modify source file after freeze
+echo "MODIFIED_ON_NAS_AFTER_FREEZE" >> "${NAS_HOST_STALE_SOURCE}"
+
+# Validate fails
+NAS_STALE_VAL=$(curl -s -b /tmp/nas_rw_cookie.txt -X POST "http://127.0.0.1:28080/api/plans/${NAS_STALE_PLAN_ID}/validate" -H "Origin: http://127.0.0.1:28080")
+echo "${NAS_STALE_VAL}" | grep -E "stale|STALE" || { echo "NAS validate did not detect stale"; exit 1; }
+
+# Execute rejected with 409
+NAS_STALE_EXEC_CODE=$(curl -s -o /dev/null -w "%{http_code}" -b /tmp/nas_rw_cookie.txt -X POST "http://127.0.0.1:28080/api/plans/${NAS_STALE_PLAN_ID}/execute" -H "Origin: http://127.0.0.1:28080")
+[ "${NAS_STALE_EXEC_CODE}" = "409" ] || { echo "Expected 409 on NAS stale execute, got ${NAS_STALE_EXEC_CODE}"; exit 1; }
+[ -f "${NAS_HOST_STALE_SOURCE}" ] || { echo "Stale source was deleted on NAS"; exit 1; }
+rm -f "${GATE5G_TEST_DATA_PATH}/nas_staleA.dat" "${GATE5G_TEST_DATA_PATH}/nas_staleB.dat"
+echo "NAS_STALE_DEFENSE_VERIFIED_OK"
+
+# 6. Verify Reachable Sentinel and Zero Filesystem Escape outside test root
+NAS_SENTINEL_HASH_CURRENT=$(sha256sum "${GATE5G_TEST_SENTINEL_PATH}/external_file.txt" | awk '{print $1}')
+[ "${NAS_SENTINEL_HASH_CURRENT}" = "${NAS_SENTINEL_HASH_ORIG}" ] || { echo "Sentinel modified on NAS!"; exit 1; }
+echo "NAS_SENTINEL_INTEGRITY_VERIFIED_OK"
 ```
-Expected: Real G6 lifecycle executed cleanly on NAS storage volume, including plan-derived quarantine and mandatory restore.
+Expected: Real G6 lifecycle, plan-derived quarantine, byte-identical restore, separate stale rejection with 409, and reachable sentinel protection verified on target NAS.
 
-- [ ] **Step 7: Teardown transient NAS testbed**
+- [ ] **Step 7: Verify Restart Resilience, Ownership Recovery, & Database Persistence on NAS**
+
+Run (on NAS):
+```bash
+echo "Verifying restart resilience and state persistence on NAS..."
+
+# 1. Restart Worker container and verify heartbeat/ownership recovery
+docker restart gate5g-nas-worker
+sleep 3
+NAS_WORKER_AFTER_RESTART=$(curl -s -b /tmp/nas_rw_cookie.txt http://127.0.0.1:28080/api/tasks/worker)
+python3 -c "
+import json
+data = json.loads('''${NAS_WORKER_AFTER_RESTART}''')
+assert data.get('online') is True, 'Worker not online after restart'
+print('NAS_WORKER_RESTART_RECOVERY_OK')
+"
+
+# 2. Restart API container and verify health recovery
+docker restart gate5g-nas-api
+sleep 3
+NAS_HEALTH_AFTER_RESTART=$(curl -s http://127.0.0.1:28080/health)
+echo "${NAS_HEALTH_AFTER_RESTART}" | grep -q '"status":"ok"' || { echo "API unhealthy after restart"; exit 1; }
+
+# Re-login admin
+curl -s -c /tmp/nas_rw_cookie.txt -X POST http://127.0.0.1:28080/api/auth/login \
+  -H "Content-Type: application/json" -H "Origin: http://127.0.0.1:28080" \
+  -d '{"username":"admin","password":"AdminPassword123!"}'
+
+# 3. Verify SQLite DB and ResourcePolicy state persisted across restarts
+PERSISTED_POL=$(curl -s -b /tmp/nas_rw_cookie.txt http://127.0.0.1:28080/api/resource-policy)
+python3 -c "
+import json
+data = json.loads('''${PERSISTED_POL}''')
+assert data.get('id') == 1, 'ResourcePolicy id missing'
+print('NAS_DB_AND_POLICY_PERSISTED_OK')
+"
+
+# 4. Verify container restart counts and absence of crash loops
+API_RESTARTS=$(docker inspect --format='{{.RestartCount}}' gate5g-nas-api)
+WORKER_RESTARTS=$(docker inspect --format='{{.RestartCount}}' gate5g-nas-worker)
+echo "NAS API Restarts: ${API_RESTARTS}, Worker Restarts: ${WORKER_RESTARTS}"
+[ "${API_RESTARTS}" -le 1 ] || { echo "NAS API crash-loop detected"; exit 1; }
+[ "${WORKER_RESTARTS}" -le 1 ] || { echo "NAS Worker crash-loop detected"; exit 1; }
+echo "NAS_RESTART_AND_PERSISTENCE_VERIFIED_OK"
+```
+Expected: API and Worker recover cleanly; DB and ResourcePolicy persist across restarts; restart counts `<= 1`; zero crash-loops.
+
+- [ ] **Step 8: Teardown transient NAS testbed**
 
 Run (on NAS):
 ```bash
 docker compose -f /tmp/nas-gate5g-transient-compose.yaml down -v
-rm -f /tmp/nas-gate5g-transient-compose.yaml /tmp/nas_cookie.txt /tmp/nas_rw_cookie.txt /tmp/nas_plan_paths.json /tmp/nas-file-center-candidate.tar
+rm -f /tmp/nas-gate5g-transient-compose.yaml /tmp/nas_cookie.txt /tmp/nas_rw_cookie.txt /tmp/nas_user_cookie.txt
+rm -f /tmp/nas_plan_paths.json /tmp/nas_q_entry.json /tmp/nas_stale_source.txt
+rm -f /tmp/nas-file-center-candidate.tar /tmp/gate5g-image-manifest.env
 rm -rf "${GATE5G_TEST_ROOT}"
 ```
 Expected: Clean teardown on NAS with zero lingering files or containers.
@@ -1603,9 +1907,9 @@ PHASE_G1_RESULT: PASS (0 failed, 0 errors in backend; frontend typecheck, test, 
 PHASE_G2_RESULT: PASS (Clean linux/amd64 Docker build, internal inspection verified)
 PHASE_G3_RESULT: PASS (Isolated API + Worker container smoke, single worker ownership, crash-loop free)
 PHASE_G4_RESULT: PASS (Fresh install + Gate5-E upgrade migration clean, additive, idempotent)
-PHASE_G5_RESULT: PASS (SQLite integrity_check=ok, foreign_key_check=0, singleton count=1 id=1, schema/indexes verified)
-PHASE_G6_RESULT: PASS (Synthetic safety lifecycle verified: preview/draft/freeze/validate/execute, plan-derived quarantine, stale rejection, mandatory restore passed)
-PHASE_G7_RESULT: PASS (Real 极空间 NAS smoke passed on isolated disposable mounts with verified image byte transfer)
+PHASE_G5_RESULT: PASS (SQLite integrity_check=ok, foreign_key_check=0, singleton count=1 id=1, PRAGMAs & schema/indexes/unique verified)
+PHASE_G6_RESULT: PASS (Synthetic safety lifecycle verified: preview/draft/freeze/validate/execute, plan-derived quarantine, stale rejection, reachable symlink protection, mandatory restore passed)
+PHASE_G7_RESULT: PASS (Real 极空间 NAS smoke passed: RO matrix complete, RW lifecycle, stale rejection, reachable symlink protection, restore byte equality, restart persistence verified)
 
 G2_IMAGE_TAG: nas-file-center:0.3.5-gate5g-<shortSHA>
 G2_IMAGE_ID: <SHA256>
@@ -1631,8 +1935,10 @@ SQLITE_FK_RESULT: foreign_key_check=0 rows
 SCHEMA_CONSTRAINTS_RESULT: columns and indexes verified
 
 SYNTHETIC_SAFETY_RESULT: lifecycle verified, plan-derived quarantine passed
+QUARANTINE_STATE_RESULT: active upon quarantine, restored upon restore, relative path host mapping verified
 STALE_PREFLIGHT_RESULT: validate rejected, execute refused with 409 PLAN_STALE, zero file corruption
 RESTORE_RESULT: mandatory restore passed, byte-identical recovery verified
+NAS_RESTART_PERSISTENCE_RESULT: API + Worker recovered cleanly, DB/policy persisted, restart counts <= 1
 
 TARGET_NAS_MODEL: <captured from NAS environment>
 TARGET_NAS_OS: <captured from NAS environment>

@@ -1,8 +1,8 @@
-# Gate5-G Final Validation Execution Plan Checkpoint — Revision 1
+# Gate5-G Final Validation Execution Plan Checkpoint — Revision 2 (Closure Fix)
 
 **Date:** 2026-09-10
 **Target Branch:** `v0.3.5-gate5c-hotfix4`
-**BASE_HEAD:** `86ebf712bce619bcfdaf564cf29b577215c79b9c`
+**BASE_HEAD:** `17010b037f984d14458669fa31028130f711f683`
 **APPROVED_FREEZE_HEAD:** `073a69eb1e001e1738c32739f9b57820cba1b05f`
 
 ---
@@ -13,11 +13,8 @@
 Gate5-G Architecture / Validation Freeze
 = PASS / APPROVED / CLOSED
 
-APPROVED_FREEZE_HEAD =
-073a69eb1e001e1738c32739f9b57820cba1b05f
-
 Gate5-G Execution Plan
-= CANDIDATE / READY FOR INDEPENDENT REVIEW
+= READY FOR FINAL INDEPENDENT CLOSURE REVIEW
 
 Gate5-G Execution
 = NOT AUTHORIZED
@@ -28,16 +25,16 @@ v0.3.5
 ```
 
 > **Review Boundary Notice:**
-> This checkpoint records a plan candidate prepared for external independent review.
+> This checkpoint records a plan candidate prepared for final external independent closure review.
 > The authoring agent does not claim independent approval of its own plan.
-> Formal execution of Gate5-G remains NOT AUTHORIZED until independent plan review and project-owner approval are granted.
+> Formal execution of Gate5-G remains NOT AUTHORIZED until independent plan closure review and project-owner approval are granted.
 
 ---
 
 ## 2. Baseline & Scope Integrity
 
 - **Authoritative Freeze Baseline HEAD:** `073a69eb1e001e1738c32739f9b57820cba1b05f`
-- **Revision 1 BASE_HEAD:** `86ebf712bce619bcfdaf564cf29b577215c79b9c`
+- **Revision 2 BASE_HEAD:** `17010b037f984d14458669fa31028130f711f683`
 - **Prior Closed Gates:** Gate5-A, Gate5-B, Gate5-C, Gate5-D, Gate5-E, and Gate5-F are all PASS / CLOSED.
 - **Files Modified in this Checkpoint:**
   - `docs/superpowers/plans/2026-09-10-gate5g-final-validation-execution-plan.md` (Execution Plan)
@@ -49,73 +46,76 @@ v0.3.5
 
 ---
 
-## 3. Revision 1 Independent Review Findings & Resolutions
+## 3. Revision 2 Findings & 1:1 Plan Verification Mapping
 
-Revision 1 addresses all findings identified during independent review to ensure full executability, safety, and alignment with the Freeze specification:
+Revision 2 implements all 13 closure corrections. Every claim in this checkpoint maps one-to-one to executable commands in `2026-09-10-gate5g-final-validation-execution-plan.md`:
 
-1. **Header Spec Link:**
-   - Updated spec reference link to repository-relative path `docs/superpowers/specs/2026-09-10-gate5g-final-validation-design.md`.
+1. **Historical ORM Constructors Exact (G4):**
+   - Verified all constructors against Gate5-E closed baseline SHA `3e4c8a00bcf54e0c0a13f1b9f21dd4fd05b2d1d9`.
+   - Removed nonexistent `created_at` argument from `BatchPlanItem`.
+   - Removed nonexistent `created_at` argument from `IndexedPath`, using historical fields `first_seen_at` and `last_seen_at`.
+   - Preserved original pre-migration database untouched in `historical_original_config/app.db`.
 
-2. **Phase G2 / G3 Executable Verification:**
-   - Replaced string checking of python version with programmatic assertion `sys.version_info >= (3, 12)`.
-   - Verified non-empty `/app/frontend/dist/index.html` via `test -s`.
-   - Asserted exact safety flags on `/health` (`status="ok"`, `allow_mutation=false`, `allow_delete=false`, `protect_last_file=true`).
-   - Authenticated via real session cookie, verified single worker online status via API and direct DB query confirming exactly one `WorkerState` entry and active `TaskLock` owner lease.
-   - Enforced container restart count assertions (`RestartCount <= 1`) proving zero crash-looping.
+2. **Upgrade Candidate Database Identity (G4):**
+   - Candidate application container strictly uses `Settings.database_path = CONFIG_DIR / "app.db"`.
+   - Created isolated `upgrade_test_config/` directory whose historical copy is named exactly `app.db`.
+   - Booted candidate container against `upgrade_test_config:/config`, verified automatic additive migration, gracefully stopped container, and inspected `upgrade_test_config/app.db` offline.
+   - Restarted candidate container against the same `app.db` to prove idempotency.
 
-3. **Phase G4 Fresh Installation via Actual Application Container:**
-   - Replaced direct `init_db()` validation with actual candidate container startup against an empty disposable CONFIG directory.
-   - Polled `/health` until healthy, gracefully stopped container, and inspected SQLite tables offline.
-   - Proved idempotency by restarting the candidate container against the same database.
-   - Avoided false assertions of admin creation without bootstrap environment credentials.
+3. **Executable SQLite PRAGMA & Schema / Index / Unique Constraints (G5):**
+   - Plan explicitly executes `PRAGMA wal_checkpoint(TRUNCATE)`, `PRAGMA integrity_check` (asserting `[('ok',)]`), and `PRAGMA foreign_key_check` (asserting `0` violations).
+   - Confirmed singleton `resource_policy` `id=1, revision=1`.
+   - Executed `PRAGMA table_info(resource_policy)` verifying all 11 columns.
+   - Executed `PRAGMA foreign_key_list` verifying critical relationships (`batch_plan_items -> batch_plans`, `sessions -> users`).
+   - Executed `PRAGMA index_list` verifying unique constraint indexes on `users`, `sessions`, `quarantine_entries`, and `indexed_paths`.
+   - Verified required named indexes in `sqlite_master`.
 
-4. **Phase G4 Historical Migration Determinism & Model Accuracy:**
-   - Eliminated external network `pip install` by running historical database construction inside candidate container `${G2_IMAGE_TAG}` mounting historical source archived from `3e4c8a00bcf54e0c0a13f1b9f21dd4fd05b2d1d9`.
-   - Seeded database adhering strictly to historical model schema:
-     - `BatchPlan.id` (INTEGER), `BatchPlanItem.id` (INTEGER), `BatchPlanItem.sequence` (INTEGER).
-     - `OperationJournal` with fields `operation`, `sequence`, `plan_id`, `plan_item_id`, `task_id`, `user_id`, `before_json`, `after_json`, `metadata_before_json`, `metadata_after_json`.
-     - Password hashing via Argon2 (`app.auth.password.hash_password`), not bcrypt.
-   - Seeded representative records across User, Session, completed/queued WorkJobs, BatchPlan, BatchPlanItem, ScanJob, IndexedPath, and OperationJournal.
-   - Booted candidate application container against a copy of the pre-migration DB, verified automatic migration, graceful stop, offline DB verification, and idempotency restart.
+4. **API Response Schema Compliance (G6 & G7):**
+   - Replaced all parsing of `source_path` and `keep_path` when querying `/api/plans/{id}/items` with actual returned schema fields `source` and `keep` across both desktop G6 and NAS G7 tasks.
 
-5. **Phase G5 SQLite PRAGMA & Schema / Index Verification:**
-   - Executed `PRAGMA table_info`, `foreign_key_list`, `index_list`, `integrity_check`, and `foreign_key_check`.
-   - Asserted newly added `resource_policy` columns and required indexes (`ix_work_jobs_status`, `ix_work_jobs_kind`, `ix_batch_plan_items_plan_state`, `ix_operation_journal_plan_sequence`, `ix_indexed_paths_root_relative`).
+5. **QuarantineEntry State & Path Mapping (G6 & G7):**
+   - Asserted `QuarantineEntry.state == "active"` upon successful quarantine execution (prohibiting `"quarantined"`).
+   - Asserted `QuarantineEntry.state == "restored"` following restore.
+   - Mapped `quarantine_path` to host filesystem using relative path from container `/quarantine` (`os.path.relpath(..., '/quarantine')`), correctly supporting nested quarantine storage structures.
 
-6. **Phase G6 Read-Only Safety via Real Worker:**
-   - Replaced inline database edits with real Worker-backed scan (`POST /api/scans` with name & roots) and index (`POST /api/indexes`).
-   - Polled scan until Worker set status to `completed`.
-   - Triggered dedupe preview and asserted zero filesystem mutation before vs after via baseline SHA256 hashes, sizes, and mtimes.
+6. **Independent Primary and Stale Duplicate Scenarios (G6 & G7):**
+   - Separated primary and stale test groups. The primary dedupe plan and restore cycle execute strictly before the stale duplicate pair is created.
+   - Stale scenario begins with a fresh, genuine duplicate pair (`stale_fileA.dat`, `stale_fileB.dat`), followed by an independent scan, preview, draft plan, freeze, disk tampering, validate failure, and execute rejection.
 
-7. **Phase G6 Controlled Dedupe Lifecycle:**
-   - Implemented real dedupe chain: `POST /api/scans` -> `dedupe-preview` -> capture preview digest -> `dedupe-plan` -> `freeze` -> inspect items -> `validate` -> `execute` -> poll WorkJob until completed.
-   - Dynamically extracted plan-derived `keep_path`, `source_path`, and `item_id` without hardcoding file roles.
-   - Verified protected keep file preserved and planned mutation source moved to quarantine root.
-   - Associated executed item with its `QuarantineEntry`.
+7. **Terminal WorkJob Polling for Indexing & Exact Baseline Comparison (G6):**
+   - Captured `work_job_id` from `POST /api/indexes`.
+   - Polled `/api/tasks/{work_job_id}` until terminal status `completed`, failing explicitly on `failed`, `cancelled`, or timeout.
+   - Implemented exact snapshot comparison asserting identical file sets (unexpected file addition/deletion fails), SHA256 hashes, file sizes, and `mtime_ns`.
 
-8. **Phase G6 Genuine Stale Preflight Protection:**
-   - Constructed a separate duplicate group (`stale_group`).
-   - Executed real scan, preview, draft plan, and freeze.
-   - Modified actual source file on disk.
-   - Verified `validate` fails and `execute` returns HTTP 409 `PLAN_STALE`.
+8. **Genuinely Reachable Symlink Escape Fixture (G6 & G7):**
+   - Mounted external sentinel directory into container at `/sentinel:ro` outside allowed roots (`ALLOWED_ROOTS=/data`).
+   - Symlink inside `/data` points to container-internal `/sentinel/external_file.txt`.
+   - Asserted escape target exists and symlink resolves from container namespace prior to testing.
+   - Verified sentinel file content, size, and hash remain completely unmodified across all mutation stages.
 
-9. **Phase G6 Mandatory Quarantine Restore:**
-   - Identified the specific `QuarantineEntry` ID created during dedupe execution.
-   - Called `POST /api/quarantine/{id}/restore`.
-   - Verified entry state transitioned to `restored`.
-   - Verified file restored to original destination with byte-for-byte identical SHA256 and size, and quarantine source deleted.
+9. **Mandatory NAS Read-Only Matrix (G7):**
+   - Validated `/health` HTTP 200 with exact safety flags (`allow_mutation=false`).
+   - Verified Worker online and single ownership lease.
+   - Completed real Worker-backed scan and real `/api/indexes` WorkJob on NAS filesystem.
+   - Verified `fclones` execution inside container on NAS mount.
+   - Verified admin `ResourcePolicy` GET and PUT (revision incremented to 2 and read back).
+   - Verified ordinary user RBAC rejection (HTTP 403).
+   - Proved Zero-Scheduler Invariant (zero scheduled work jobs).
+   - Restored `ResourcePolicy` to safe test value prior to mutation stage.
 
-10. **Phase G7 Isolation & Ancestry Overlap Check:**
-    - Established dedicated disposable testbed outside production data and config paths.
-    - Implemented programmatic canonical realpath check rejecting testbed if it equals, is an ancestor of, or is a descendant of production directories.
+10. **Complete NAS Read-Write Safety Matrix (G7):**
+    - Executed primary dedupe lifecycle on NAS storage volume.
+    - Performed mandatory quarantine restore, verifying restored file with SHA256 byte equality against original content, and verifying quarantine source cleanup.
+    - Executed independent stale duplicate lifecycle: preview, draft, freeze, disk tampering, validate failure, execute rejection with HTTP 409 `PLAN_STALE`.
+    - Verified reachable symlink escape and sentinel protection on NAS.
+    - Verified zero filesystem escape outside `GATE5G_TEST_ROOT`.
 
-11. **Phase G7 Real NAS Exact Image Substitution:**
-    - Used programmatically substituted `${G2_IMAGE_TAG}` in transient compose manifest outside git worktree.
-    - Prohibited building or floating pulling on NAS.
+11. **NAS Restart Resilience & State Persistence (G7):**
+    - Restarted Worker container and verified heartbeat/lease recovery.
+    - Restarted API container and verified healthcheck recovery.
+    - Verified SQLite database and `ResourcePolicy` persisted across container restarts.
+    - Verified container restart counts `<= 1`, confirming absence of crash loops.
 
-12. **Phase G7 Staged RO -> RW Sequence on NAS:**
-    - Stage 1: Deployed read-only mode (`/data:ro`, `ALLOW_MUTATION=false`), verified health and read operations.
-    - Stage 2: Switched to read-write mode, executed full dedupe lifecycle on NAS storage volume, verified plan-derived quarantine, and executed mandatory quarantine restore.
-
-13. **Phase G8 Final Evidence Audit:**
-    - Implemented unified evidence matrix capturing `KNOWN_LIMITATIONS` and raw deprecation warnings dynamically.
+12. **Executable G2 -> G7 Transport Manifest (G2 & G7):**
+    - Phase G2 explicitly writes `/tmp/gate5g-image-manifest.env` containing `G2_IMAGE_TAG`, `G2_IMAGE_ID`, `G2_IMAGE_ARCHIVE_PATH`, and `G2_IMAGE_ARCHIVE_SHA256`.
+    - Phase G7 explicitly transfers and sources this manifest on the NAS shell, eliminating implicit variable assumptions and enforcing exact bit-for-bit image identity.
