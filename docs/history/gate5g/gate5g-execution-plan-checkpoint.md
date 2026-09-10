@@ -1,8 +1,8 @@
-# Gate5-G Final Validation Execution Plan Checkpoint — Revision 4 (Final Freeze-Alignment Closure)
+# Gate5-G Final Validation Execution Plan Checkpoint — Revision 5 (Preview Response Contract Closure)
 
 **Date:** 2026-09-10
 **Target Branch:** `v0.3.5-gate5c-hotfix4`
-**BASE_HEAD:** `fab6be25fd47761a945ca5c05a1bc9ce7e906d88`
+**BASE_HEAD:** `d4831e4e24721f2f35ab6e286c4c23df98a92902`
 **APPROVED_FREEZE_HEAD:** `073a69eb1e001e1738c32739f9b57820cba1b05f`
 
 ---
@@ -34,7 +34,7 @@ v0.3.5
 ## 2. Baseline & Scope Integrity
 
 - **Authoritative Freeze Baseline HEAD:** `073a69eb1e001e1738c32739f9b57820cba1b05f`
-- **Revision 4 BASE_HEAD:** `fab6be25fd47761a945ca5c05a1bc9ce7e906d88`
+- **Revision 5 BASE_HEAD:** `d4831e4e24721f2f35ab6e286c4c23df98a92902`
 - **Prior Closed Gates:** Gate5-A, Gate5-B, Gate5-C, Gate5-D, Gate5-E, and Gate5-F are all PASS / CLOSED.
 - **Files Modified in this Checkpoint:**
   - `docs/superpowers/plans/2026-09-10-gate5g-final-validation-execution-plan.md` (Execution Plan)
@@ -46,28 +46,23 @@ v0.3.5
 
 ---
 
-## 3. Revision 4 Freeze-Alignment Findings & 1:1 Plan Verification Mapping
+## 3. Revision 5 Protocol Alignment & 1:1 Plan Verification Mapping
 
-Revision 4 resolves all 4 freeze-alignment review findings. Every claim in this checkpoint maps one-to-one to executable commands in `2026-09-10-gate5g-final-validation-execution-plan.md`:
+Revision 5 resolves the dedupe-preview response schema finding across all 6 preview stages. Every claim in this checkpoint maps one-to-one to executable commands in `2026-09-10-gate5g-final-validation-execution-plan.md`:
 
 1. **Lease-Aware Worker Replacement & Restart (G3, G6, G7):**
    - Respects `WORKER_LEASE_TIMEOUT_SECONDS = 30` and the runtime fact that Worker graceful shutdown does not clear `TaskLock`.
    - Never clears, rewrites, unlocks, or deletes `WorkerState` or `TaskLock` manually.
-   - For all 4 Worker replacement/restart scenarios using the same database:
-     - G3 Worker restart
-     - G6 RO → RW Worker transition
-     - G7 RO → RW Worker transition
-     - G7 final Worker restart
-   - Captures `OLD_WORKER_ID` prior to restart/stop.
-   - Polls for natural lease takeover with a 75-second timeout exceeding the 30-second lease timeout.
-   - Asserts `NEW_WORKER_ID != OLD_WORKER_ID`, `online == True`, exactly one `WorkerState` row, `TaskLock.locked == True`, `TaskLock.owner == NEW_WORKER_ID`, and `WorkerState.worker_id == NEW_WORKER_ID`.
-   - Prohibits enqueuing jobs until ownership takeover is proven; completely eliminates fixed `sleep 3` or `sleep 5` ownership assertions.
+   - For all 4 Worker replacement/restart scenarios using the same database (G3 Worker restart, G6 RO → RW transition, G7 RO → RW transition, G7 final Worker restart):
+     - Captures `OLD_WORKER_ID` prior to restart/stop.
+     - Polls for natural lease takeover with a 75-second timeout exceeding the 30-second lease timeout.
+     - Asserts `NEW_WORKER_ID != OLD_WORKER_ID`, `online == True`, exactly one `WorkerState` row, `TaskLock.locked == True`, `TaskLock.owner == NEW_WORKER_ID`, and `WorkerState.worker_id == NEW_WORKER_ID`.
+     - Prohibits enqueuing jobs until ownership takeover is proven; completely eliminates fixed `sleep 3` or `sleep 5` ownership assertions.
 
-2. **All Dedupe-Preview Requests Validated JSON & Response Schema:**
+2. **All Dedupe-Preview Requests Validated Against Real Response Contract:**
    - Enforced `-H "Content-Type: application/json"` and `-H "Origin: ..."` with body `-d '{}'` for every `/dedupe-preview` call across the entire plan.
-   - Fixed G6 stale preview, G7 primary preview, and G7 stale preview.
-   - Added dedupe-preview to G7 RO matrix.
-   - Parses each preview response and asserts valid content (`'groups' in data`), eliminating unasserted or ignored responses.
+   - Covers G6 RO preview, G6 RW primary preview, G6 stale preview, G7 RO preview, G7 RW primary preview, and G7 stale preview.
+   - Validates the authoritative response contract: rows (list) / total_rows (int) / pagination fields (page, page_size) + 64-hex preview_digest + absence of error payload, eliminating nonexistent top-level `groups` field assertions.
 
 3. **G6 Controlled-Stage Zero-Mutation & Freeze Physical Identity Evidence:**
    - Before Preview: captures baseline snapshot of `allowed_root`, `quarantine_root`, and `sentinel_dir` (`sha256`, `size`, `mtime_ns`).
@@ -84,7 +79,7 @@ Revision 4 resolves all 4 freeze-alignment review findings. Every claim in this 
 
 5. **Checkpoint Truthfulness & Boundary:**
    - Every claim in this checkpoint maps strictly 1:1 to executable commands in the execution plan.
-   - Preserved all accepted Revision 1–3 corrections without regression.
+   - Preserved all accepted Revision 1–4 corrections without regression.
    - Authoring agent does not self-approve.
 
 ---

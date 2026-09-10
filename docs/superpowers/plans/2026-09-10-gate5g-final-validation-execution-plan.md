@@ -1071,14 +1071,21 @@ for i in {1..30}; do
 done
 [ "${INDEX_STATUS}" = "completed" ] || { echo "Index WorkJob timed out"; exit 1; }
 
-# 3. Trigger real dedupe preview and assert valid preview response
+# 3. Trigger real dedupe preview and assert valid preview response contract
 PREVIEW_RESP=$(curl -s -b "${FIXTURE_DIR}/cookie.txt" -X POST "http://127.0.0.1:18081/api/scans/${SCAN_ID}/dedupe-preview" \
   -H "Content-Type: application/json" -H "Origin: http://127.0.0.1:18081" -d '{}')
 echo "Preview response: ${PREVIEW_RESP}"
 python3 -c "
-import json
+import json, re
 data = json.loads('''${PREVIEW_RESP}''')
-assert 'groups' in data, f'Invalid preview response: {data}'
+assert 'error' not in data, f'Preview returned error payload: {data}'
+assert isinstance(data.get('rows'), list), f'Preview rows missing/invalid: {data}'
+assert type(data.get('total_rows')) is int, f'Preview total_rows missing/invalid: {data}'
+assert type(data.get('page')) is int, f'Preview page missing/invalid: {data}'
+assert type(data.get('page_size')) is int, f'Preview page_size missing/invalid: {data}'
+digest = data.get('preview_digest')
+assert isinstance(digest, str), f'preview_digest missing: {data}'
+assert re.fullmatch(r'[0-9a-fA-F]{64}', digest), f'preview_digest is not a 64-hex digest: {digest}'
 print('G6_RO_DEDUPE_PREVIEW_SUCCESS')
 "
 
@@ -1250,9 +1257,16 @@ PREVIEW_RESP=$(curl -s -b "${FIXTURE_DIR}/cookie_rw.txt" -X POST "http://127.0.0
   -H "Content-Type: application/json" -H "Origin: http://127.0.0.1:18082" -d '{}')
 echo "Preview response: ${PREVIEW_RESP}"
 python3 -c "
-import json
+import json, re
 data = json.loads('''${PREVIEW_RESP}''')
-assert 'groups' in data, f'Invalid preview response: {data}'
+assert 'error' not in data, f'Preview returned error payload: {data}'
+assert isinstance(data.get('rows'), list), f'Preview rows missing/invalid: {data}'
+assert type(data.get('total_rows')) is int, f'Preview total_rows missing/invalid: {data}'
+assert type(data.get('page')) is int, f'Preview page missing/invalid: {data}'
+assert type(data.get('page_size')) is int, f'Preview page_size missing/invalid: {data}'
+digest = data.get('preview_digest')
+assert isinstance(digest, str), f'preview_digest missing: {data}'
+assert re.fullmatch(r'[0-9a-fA-F]{64}', digest), f'preview_digest is not a 64-hex digest: {digest}'
 print('G6_RW_PRIMARY_DEDUPE_PREVIEW_SUCCESS')
 "
 
@@ -1515,9 +1529,16 @@ done
 STALE_PREVIEW_RESP=$(curl -s -b "${FIXTURE_DIR}/cookie_rw.txt" -X POST "http://127.0.0.1:18082/api/scans/${STALE_SCAN_ID}/dedupe-preview" \
   -H "Content-Type: application/json" -H "Origin: http://127.0.0.1:18082" -d '{}')
 python3 -c "
-import json
+import json, re
 data = json.loads('''${STALE_PREVIEW_RESP}''')
-assert 'groups' in data, f'Invalid stale preview response: {data}'
+assert 'error' not in data, f'Preview returned error payload: {data}'
+assert isinstance(data.get('rows'), list), f'Preview rows missing/invalid: {data}'
+assert type(data.get('total_rows')) is int, f'Preview total_rows missing/invalid: {data}'
+assert type(data.get('page')) is int, f'Preview page missing/invalid: {data}'
+assert type(data.get('page_size')) is int, f'Preview page_size missing/invalid: {data}'
+digest = data.get('preview_digest')
+assert isinstance(digest, str), f'preview_digest missing: {data}'
+assert re.fullmatch(r'[0-9a-fA-F]{64}', digest), f'preview_digest is not a 64-hex digest: {digest}'
 print('G6_STALE_DEDUPE_PREVIEW_SUCCESS')
 "
 STALE_PLAN_RESP=$(curl -s -b "${FIXTURE_DIR}/cookie_rw.txt" -X POST "http://127.0.0.1:18082/api/scans/${STALE_SCAN_ID}/dedupe-plan" \
@@ -1884,13 +1905,20 @@ done
 docker exec gate5g-nas-api fclones --version
 docker exec gate5g-nas-api fclones group /data > /dev/null
 
-# Trigger real dedupe preview on NAS RO scan
+# Trigger real dedupe preview on NAS RO scan and assert valid response contract
 NAS_RO_PREVIEW_RESP=$(curl -s -b /tmp/nas_cookie.txt -X POST "http://127.0.0.1:28080/api/scans/${NAS_RO_SCAN_ID}/dedupe-preview" \
   -H "Content-Type: application/json" -H "Origin: http://127.0.0.1:28080" -d '{}')
 python3 -c "
-import json
+import json, re
 data = json.loads('''${NAS_RO_PREVIEW_RESP}''')
-assert 'groups' in data, f'Invalid NAS RO preview response: {data}'
+assert 'error' not in data, f'Preview returned error payload: {data}'
+assert isinstance(data.get('rows'), list), f'Preview rows missing/invalid: {data}'
+assert type(data.get('total_rows')) is int, f'Preview total_rows missing/invalid: {data}'
+assert type(data.get('page')) is int, f'Preview page missing/invalid: {data}'
+assert type(data.get('page_size')) is int, f'Preview page_size missing/invalid: {data}'
+digest = data.get('preview_digest')
+assert isinstance(digest, str), f'preview_digest missing: {data}'
+assert re.fullmatch(r'[0-9a-fA-F]{64}', digest), f'preview_digest is not a 64-hex digest: {digest}'
 print('NAS_RO_DEDUPE_PREVIEW_SUCCESS')
 "
 
@@ -2180,9 +2208,16 @@ done
 NAS_PREVIEW_RESP=$(curl -s -b /tmp/nas_rw_cookie.txt -X POST "http://127.0.0.1:28080/api/scans/${NAS_SCAN_ID}/dedupe-preview" \
   -H "Content-Type: application/json" -H "Origin: http://127.0.0.1:28080" -d '{}')
 python3 -c "
-import json
+import json, re
 data = json.loads('''${NAS_PREVIEW_RESP}''')
-assert 'groups' in data, f'Invalid NAS preview response: {data}'
+assert 'error' not in data, f'Preview returned error payload: {data}'
+assert isinstance(data.get('rows'), list), f'Preview rows missing/invalid: {data}'
+assert type(data.get('total_rows')) is int, f'Preview total_rows missing/invalid: {data}'
+assert type(data.get('page')) is int, f'Preview page missing/invalid: {data}'
+assert type(data.get('page_size')) is int, f'Preview page_size missing/invalid: {data}'
+digest = data.get('preview_digest')
+assert isinstance(digest, str), f'preview_digest missing: {data}'
+assert re.fullmatch(r'[0-9a-fA-F]{64}', digest), f'preview_digest is not a 64-hex digest: {digest}'
 print('NAS_PRIMARY_DEDUPE_PREVIEW_SUCCESS')
 "
 NAS_PLAN_RESP=$(curl -s -b /tmp/nas_rw_cookie.txt -X POST "http://127.0.0.1:28080/api/scans/${NAS_SCAN_ID}/dedupe-plan" \
@@ -2279,9 +2314,16 @@ done
 NAS_STALE_PREVIEW_RESP=$(curl -s -b /tmp/nas_rw_cookie.txt -X POST "http://127.0.0.1:28080/api/scans/${NAS_STALE_SCAN_ID}/dedupe-preview" \
   -H "Content-Type: application/json" -H "Origin: http://127.0.0.1:28080" -d '{}')
 python3 -c "
-import json
+import json, re
 data = json.loads('''${NAS_STALE_PREVIEW_RESP}''')
-assert 'groups' in data, f'Invalid NAS stale preview response: {data}'
+assert 'error' not in data, f'Preview returned error payload: {data}'
+assert isinstance(data.get('rows'), list), f'Preview rows missing/invalid: {data}'
+assert type(data.get('total_rows')) is int, f'Preview total_rows missing/invalid: {data}'
+assert type(data.get('page')) is int, f'Preview page missing/invalid: {data}'
+assert type(data.get('page_size')) is int, f'Preview page_size missing/invalid: {data}'
+digest = data.get('preview_digest')
+assert isinstance(digest, str), f'preview_digest missing: {data}'
+assert re.fullmatch(r'[0-9a-fA-F]{64}', digest), f'preview_digest is not a 64-hex digest: {digest}'
 print('NAS_STALE_DEDUPE_PREVIEW_SUCCESS')
 "
 NAS_STALE_PLAN_RESP=$(curl -s -b /tmp/nas_rw_cookie.txt -X POST "http://127.0.0.1:28080/api/scans/${NAS_STALE_SCAN_ID}/dedupe-plan" \
