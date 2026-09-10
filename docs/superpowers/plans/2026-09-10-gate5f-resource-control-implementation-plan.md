@@ -22,6 +22,7 @@
 - **Filesystem Safety:** Zero filesystem mutation semantic changes; no changes to Gate3 identity authority; all quarantine and restore invariants from Gate5-E remain immutable.
 - **Digest / Freshness Decoupling:** ResourcePolicy must never participate in Preview digest, Draft identity, Freeze identity, Validate filesystem freshness, or OperationJournal filesystem identity.
 - **Controlled Job Kinds:** In V1, only read-heavy workloads (`index-root` and `fclones-scan`) are resource-controlled. Mutation jobs are never window-paused.
+- **Canonical Profile Vocabulary:** Effective profiles are strictly `full`, `limited`, or `pause` (never `normal`). `io_limit` values remain `low`, `normal`, `unlimited`.
 - **Canonical Defaults:** `scan_threads = 2`, `hash_threads = 2`, `io_limit = "normal"`, `job_priority = "normal"`, `active_window_enabled = False`, `outside_window_mode = "limited"`, `revision = 1`.
 - **No CPU Auto-Scaling:** Never invoke `os.cpu_count()` to scale concurrency; thread caps are strictly bounded by explicit user configuration and safety ceilings.
 - **Soft I/O Pressure:** `io_limit` represents application-level concurrency throttling (`low` = 1, `normal` = 2, `unlimited` = configured cap), not hard MB/s or IOPS rate-limiting.
@@ -33,16 +34,16 @@
 
 | File Path | Role & Responsibility |
 |---|---|
-| `app/resource_control.py` | **[NEW]** Pure resource-policy types, validation helpers, active-window evaluator, thread-ceiling composition, job classification, and safe timezone resolver. |
+| `app/resource_control.py` | **[NEW]** Pure resource-policy types, validation helpers, active-window evaluator, thread-ceiling composition, job classification, and safe timezone resolver with LRU cache. |
 | `app/models.py` | **[MODIFY]** Add singleton ORM model `ResourcePolicy` with table-level check constraints. |
 | `app/db.py` | **[MODIFY]** Register `resource_policy` in `required_tables`, trigger backup on upgrade, and seed default singleton row in `init_db()`. |
-| `app/service.py` | **[MODIFY]** Add application service methods `get_resource_policy()` and atomic `update_resource_policy()` via SQLite `BEGIN IMMEDIATE`. |
-| `app/api/router.py` | **[MODIFY]** Expose `GET /api/settings/resource-policy` and `PUT /api/settings/resource-policy` with explicit admin dependency. |
+| `app/service.py` | **[MODIFY]** Add application service methods `get_resource_policy()` and atomic two-phase `update_resource_policy()` (Phase A validation + pre-cache ZoneInfo, Phase B short SQLite `BEGIN IMMEDIATE`). |
+| `app/api/router.py` | **[MODIFY]** Expose `GET /api/settings/resource-policy` and `PUT /api/settings/resource-policy` with explicit admin dependency and session auth. |
 | `app/tasks/recovery.py` | **[MODIFY]** Enhance `claim_next_job()` with two-phase policy preparation (Phase A outside tx, Phase B `BEGIN IMMEDIATE`) for admission and priority. |
-| `app/tasks/handlers.py` | **[MODIFY]** Integrate effective thread ceiling and TaskEvent logging in `FclonesScanHandler` and index-root handler. |
+| `app/tasks/handlers.py` | **[MODIFY]** Integrate effective thread ceiling and `context.log()` diagnostics in `FclonesScanHandler` and `IndexRootHandler`. |
 | `app/scanners/fclones.py` | **[MODIFY]** Validate and accept sanitized thread parameter in `build_group_command()`. |
-| `frontend/src/types/index.ts` | **[MODIFY]** Define TypeScript interfaces for `ResourcePolicy`, `EffectiveResourcePolicy`, and `ResourcePolicyUpdate`. |
-| `frontend/src/api/domain.ts` | **[MODIFY]** Add `resourcePolicyApi.getPolicy()` and `updatePolicy()` clients. |
+| `frontend/src/types/index.ts` | **[MODIFY]** Define TypeScript interfaces for `ResourcePolicy`, `EffectiveResourcePolicy`, and `ResourcePolicyUpdate` using `number` types. |
+| `frontend/src/api/domain.ts` | **[MODIFY]** Add `resourcePolicyApi.getPolicy()` and `updatePolicy()` clients using existing `api.get<T>` / `api.put<T>` pattern. |
 | `frontend/src/pages/Settings/index.tsx` | **[MODIFY]** Add Resource Control settings card with soft I/O pressure notices and admission-only status indicators. |
 | `frontend/src/components/settings/resource_policy.ts` | **[NEW]** Pure UI helper for formatting options, validation, and notice copy. |
 
@@ -204,17 +205,17 @@ git commit -m "feat(gate5f): add resource policy persistence"
 
 ---
 
-### Task 2: Pure Policy Evaluator
+### Task 2: Pure Policy Evaluator & Canonical Profile Vocabulary
 
 **Files:**
 - Create/Extend: `app/resource_control.py`
 - Test: `tests/test_gate5f_resource_policy.py`
 
 **Interfaces:**
-- Consumes: Standard library `dataclasses`, `datetime`, `zoneinfo`.
+- Consumes: Standard library `dataclasses`, `datetime`, `zoneinfo`, `functools.lru_cache`.
 - Produces:
   - `ResourcePolicySnapshot` (frozen dataclass)
-  - `EffectiveResourcePolicy` (frozen dataclass)
+  - `EffectiveResourcePolicy` (frozen dataclass with `profile: "full" | "limited" | "pause"`)
   - `ResourcePolicyValidationError(ValueError)`
   - `ResourcePolicyConfigError(RuntimeError)`
   - `validate_resource_policy_snapshot(snapshot: ResourcePolicySnapshot) -> None`
@@ -242,7 +243,7 @@ from app.resource_control import (
     is_resource_controlled_job,
 )
 
-def test_default_policy_evaluation():
+def test_default_policy_evaluation_returns_full_profile():
     snap = ResourcePolicySnapshot(
         scan_threads=2,
         hash_threads=2,
@@ -258,7 +259,8 @@ def test_default_policy_evaluation():
     validate_resource_policy_snapshot(snap)
     now = datetime(2026, 9, 10, 12, 0, tzinfo=timezone.utc)
     eff = evaluate_resource_policy(snap, now_utc=now)
-    assert eff.profile == "normal"
+    # FIX 1: Canonical profile must be 'full', not 'normal'
+    assert eff.profile == "full"
     assert eff.inside_active_window is None
     assert eff.resource_jobs_admitted is True
     assert eff.effective_thread_cap == 2
@@ -266,9 +268,11 @@ def test_default_policy_evaluation():
 
 def test_io_limit_calculations():
     now = datetime(2026, 9, 10, 12, 0, tzinfo=timezone.utc)
-    # low limits cap to 1
+    # low limits cap to 1, profile is full
     snap_low = ResourcePolicySnapshot(4, 4, "low", "normal", False, None, None, None, "limited", 1)
-    assert evaluate_resource_policy(snap_low, now_utc=now).effective_thread_cap == 1
+    eff_low = evaluate_resource_policy(snap_low, now_utc=now)
+    assert eff_low.profile == "full"
+    assert eff_low.effective_thread_cap == 1
 
     # normal limits cap to 2 even if threads configured to 8
     snap_norm = ResourcePolicySnapshot(8, 8, "normal", "normal", False, None, None, None, "limited", 1)
@@ -282,9 +286,12 @@ def test_active_window_same_day_and_cross_midnight():
     # Same-day: 08:00 to 18:00 UTC
     snap_sameday = ResourcePolicySnapshot(4, 4, "normal", "normal", True, "08:00", "18:00", "UTC", "pause", 1)
     validate_resource_policy_snapshot(snap_sameday)
-    # 08:00 exact start is inside [inclusive)
-    assert evaluate_resource_policy(snap_sameday, now_utc=datetime(2026, 9, 10, 8, 0, tzinfo=timezone.utc)).resource_jobs_admitted is True
-    # 18:00 exact end is outside [exclusive)
+    # 08:00 exact start is inside [inclusive) -> profile 'full'
+    eff_in = evaluate_resource_policy(snap_sameday, now_utc=datetime(2026, 9, 10, 8, 0, tzinfo=timezone.utc))
+    assert eff_in.profile == "full"
+    assert eff_in.resource_jobs_admitted is True
+
+    # 18:00 exact end is outside [exclusive) -> profile 'pause'
     outside = evaluate_resource_policy(snap_sameday, now_utc=datetime(2026, 9, 10, 18, 0, tzinfo=timezone.utc))
     assert outside.resource_jobs_admitted is False
     assert outside.profile == "pause"
@@ -293,10 +300,10 @@ def test_active_window_same_day_and_cross_midnight():
     snap_cross = ResourcePolicySnapshot(4, 4, "normal", "normal", True, "22:00", "06:00", "UTC", "limited", 1)
     validate_resource_policy_snapshot(snap_cross)
     # 23:30 is inside
-    assert evaluate_resource_policy(snap_cross, now_utc=datetime(2026, 9, 10, 23, 30, tzinfo=timezone.utc)).inside_active_window is True
+    assert evaluate_resource_policy(snap_cross, now_utc=datetime(2026, 9, 10, 23, 30, tzinfo=timezone.utc)).profile == "full"
     # 05:59 is inside
-    assert evaluate_resource_policy(snap_cross, now_utc=datetime(2026, 9, 11, 5, 59, tzinfo=timezone.utc)).inside_active_window is True
-    # 12:00 is outside
+    assert evaluate_resource_policy(snap_cross, now_utc=datetime(2026, 9, 11, 5, 59, tzinfo=timezone.utc)).profile == "full"
+    # 12:00 is outside -> profile 'limited'
     eff_out = evaluate_resource_policy(snap_cross, now_utc=datetime(2026, 9, 11, 12, 0, tzinfo=timezone.utc))
     assert eff_out.inside_active_window is False
     assert eff_out.profile == "limited"
@@ -337,13 +344,15 @@ Expected: FAIL with missing functions or classes in `app.resource_control`.
 
 Implement:
 - `ResourcePolicySnapshot` and `EffectiveResourcePolicy` frozen dataclasses.
+- Canonical `profile` assignment:
+  - If `not active_window_enabled` or `inside_active_window`: `profile = "full"`, `effective_thread_cap = normal_cap`.
+  - If outside window and `outside_window_mode == "limited"`: `profile = "limited"`, `effective_thread_cap = min(normal_cap, 1)`.
+  - If outside window and `outside_window_mode == "pause"`: `profile = "pause"`, `resource_jobs_admitted = False`, `effective_thread_cap = min(normal_cap, 1)`.
 - Strict type checks: `isinstance(val, int) and not isinstance(val, bool)`.
 - Range checks: `1 <= threads <= 32`.
 - Enums: `io_limit in ("low", "normal", "unlimited")`, `job_priority in ("normal", "background")`, `outside_window_mode in ("limited", "pause")`.
 - Time parser: `HH:MM` where `0 <= HH <= 23` and `0 <= MM <= 59`.
-- `zoneinfo.ZoneInfo` resolver with `@lru_cache`.
-- Time window interval calculation: `[start_time, end_time)`.
-- Thread composition: `configured_cap = min(scan_threads, hash_threads)`.
+- Cached ZoneInfo resolver via `@lru_cache(maxsize=32)`.
 - Never call `os.cpu_count()`.
 
 - [ ] **Step 4: Run tests to verify they pass (GREEN)**
@@ -360,7 +369,7 @@ git commit -m "feat(gate5f): add resource policy evaluator"
 
 ---
 
-### Task 3: ResourcePolicy Service & Admin API
+### Task 3: ResourcePolicy Service & Admin API (Session Auth & Safe Two-Phase PUT)
 
 **Files:**
 - Modify: `app/service.py`
@@ -368,39 +377,92 @@ git commit -m "feat(gate5f): add resource policy evaluator"
 - Test: `tests/test_gate5f_resource_policy_api.py`
 
 **Interfaces:**
-- Consumes: `ResourcePolicy` ORM, `validate_resource_policy_snapshot`, `evaluate_resource_policy`, `require_admin_user`.
+- Consumes: `ResourcePolicy` ORM, `validate_resource_policy_snapshot`, `evaluate_resource_policy`, `require_admin_user`, existing session auth.
 - Produces:
   - `FileCenterService.get_resource_policy() -> dict`
   - `FileCenterService.update_resource_policy(payload: dict) -> dict`
   - `GET /api/settings/resource-policy`
   - `PUT /api/settings/resource-policy`
 
-- [ ] **Step 1: Write failing API and Service tests**
+- [ ] **Step 1: Write failing API and Service tests using session cookie auth**
 
 ```python
 # tests/test_gate5f_resource_policy_api.py
+from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
+from app.config import Settings
+from app.main import create_app
+from app.models import User
+from app.auth.password import hash_password
+from app.service import FileCenterService
 
-def test_get_resource_policy_requires_admin(client: TestClient, normal_token: str, admin_token: str):
-    # Unauthenticated -> 401
+def make_api_client(tmp_path: Path):
+    data = tmp_path / "data"
+    data.mkdir(parents=True, exist_ok=True)
+    config = tmp_path / "config"
+    config.mkdir(parents=True, exist_ok=True)
+    settings = Settings(
+        config_dir=config,
+        data_mount=data,
+        allowed_roots_raw=str(data),
+        initial_admin_username="admin",
+        initial_admin_password="AdminPassword123!",
+    )
+    service = FileCenterService(settings)
+    # Seed regular non-admin user
+    with service.SessionLocal() as session:
+        user = User(
+            username="staff_user",
+            password_hash=hash_password("StaffPassword123!"),
+            role="user",
+            is_active=True,
+        )
+        session.add(user)
+        session.commit()
+    app = create_app(settings)
+    client = TestClient(app)
+    return client, service, settings
+
+def test_get_resource_policy_auth_matrix(tmp_path: Path):
+    client, service, settings = make_api_client(tmp_path)
+
+    # 1. Unauthenticated -> 401
     resp = client.get("/api/settings/resource-policy")
     assert resp.status_code == 401
 
-    # Normal user -> 403
-    resp = client.get("/api/settings/resource-policy", headers={"Authorization": f"Bearer {normal_token}"})
-    assert resp.status_code == 403
+    # 2. Normal user session -> 403
+    login_resp = client.post(
+        "/api/auth/login",
+        json={"username": "staff_user", "password": "StaffPassword123!"},
+        headers={"Origin": "http://testserver"},
+    )
+    assert login_resp.status_code == 200
+    user_get = client.get("/api/settings/resource-policy")
+    assert user_get.status_code == 403
 
-    # Admin -> 200
-    resp = client.get("/api/settings/resource-policy", headers={"Authorization": f"Bearer {admin_token}"})
-    assert resp.status_code == 200
-    data = resp.json()
+    # 3. Admin user session -> 200
+    admin_login = client.post(
+        "/api/auth/login",
+        json={"username": "admin", "password": "AdminPassword123!"},
+        headers={"Origin": "http://testserver"},
+    )
+    assert admin_login.status_code == 200
+    admin_get = client.get("/api/settings/resource-policy")
+    assert admin_get.status_code == 200
+    data = admin_get.json()
     assert data["scan_threads"] == 2
+    assert data["hash_threads"] == 2
     assert data["revision"] == 1
-    assert "effective_now" in data
-    assert data["effective_now"]["profile"] == "normal"
+    assert data["effective_now"]["profile"] == "full"
 
-def test_put_resource_policy_updates_and_increments_revision(client: TestClient, admin_token: str):
+def test_put_resource_policy_updates_and_increments_revision(tmp_path: Path):
+    client, service, settings = make_api_client(tmp_path)
+    client.post(
+        "/api/auth/login",
+        json={"username": "admin", "password": "AdminPassword123!"},
+        headers={"Origin": "http://testserver"},
+    )
     update_payload = {
         "scan_threads": 4,
         "hash_threads": 4,
@@ -412,20 +474,33 @@ def test_put_resource_policy_updates_and_increments_revision(client: TestClient,
         "active_window_timezone": "UTC",
         "outside_window_mode": "pause",
     }
-    resp = client.put("/api/settings/resource-policy", json=update_payload, headers={"Authorization": f"Bearer {admin_token}"})
+    resp = client.put(
+        "/api/settings/resource-policy",
+        json=update_payload,
+        headers={"Origin": "http://testserver"},
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert data["scan_threads"] == 4
     assert data["io_limit"] == "low"
     assert data["revision"] == 2
 
-def test_put_resource_policy_rejects_invalid_inputs_without_mutating_db(client: TestClient, admin_token: str):
-    # Try invalid thread count
-    resp = client.put("/api/settings/resource-policy", json={"scan_threads": 0}, headers={"Authorization": f"Bearer {admin_token}"})
+def test_put_resource_policy_rejects_invalid_inputs_without_mutating_db(tmp_path: Path):
+    client, service, settings = make_api_client(tmp_path)
+    client.post(
+        "/api/auth/login",
+        json={"username": "admin", "password": "AdminPassword123!"},
+        headers={"Origin": "http://testserver"},
+    )
+    resp = client.put(
+        "/api/settings/resource-policy",
+        json={"scan_threads": 0},
+        headers={"Origin": "http://testserver"},
+    )
     assert resp.status_code == 422
 
     # Verify DB unchanged
-    get_resp = client.get("/api/settings/resource-policy", headers={"Authorization": f"Bearer {admin_token}"})
+    get_resp = client.get("/api/settings/resource-policy")
     assert get_resp.json()["revision"] == 1
 ```
 
@@ -434,22 +509,81 @@ def test_put_resource_policy_rejects_invalid_inputs_without_mutating_db(client: 
 Run: `pytest tests/test_gate5f_resource_policy_api.py -v`
 Expected: FAIL with 404 (endpoint not defined).
 
-- [ ] **Step 3: Implement service methods and API endpoints**
+- [ ] **Step 3: Implement service methods with safe two-phase PUT and router endpoints**
 
 In `app/service.py`:
-- `get_resource_policy()`: load singleton row, construct `ResourcePolicySnapshot`, evaluate `effective_now` using current UTC time, return dictionary representation.
-- `update_resource_policy(payload: dict)`:
-  Execute inside `BEGIN IMMEDIATE`:
-  Load `id = 1` from database truth.
-  Validate replacement snapshot via `validate_resource_policy_snapshot`.
-  Update model fields.
-  Monotonically increment: `policy.revision = policy.revision + 1`.
-  Update `updated_at = datetime.utcnow()`.
-  Commit and return updated dictionary representation.
+```python
+    def get_resource_policy(self) -> dict:
+        with self.SessionLocal() as session:
+            row = session.get(ResourcePolicy, 1)
+            if row is None:
+                raise RuntimeError("ResourcePolicy singleton missing")
+            snapshot = ResourcePolicySnapshot(
+                scan_threads=row.scan_threads,
+                hash_threads=row.hash_threads,
+                io_limit=row.io_limit,
+                job_priority=row.job_priority,
+                active_window_enabled=row.active_window_enabled,
+                active_window_start=row.active_window_start,
+                active_window_end=row.active_window_end,
+                active_window_timezone=row.active_window_timezone,
+                outside_window_mode=row.outside_window_mode,
+                revision=row.revision,
+            )
+            validate_resource_policy_snapshot(snapshot)
+            eff = evaluate_resource_policy(snapshot, now_utc=utcnow())
+            data = row.__dict__.copy()
+            data.pop("_sa_instance_state", None)
+            data["effective_now"] = {
+                "profile": eff.profile,
+                "inside_active_window": eff.inside_active_window,
+                "resource_jobs_admitted": eff.resource_jobs_admitted,
+                "effective_thread_cap": eff.effective_thread_cap,
+            }
+            return data
+
+    def update_resource_policy(self, payload: dict) -> dict:
+        # Phase A: Outside DB write transaction
+        # Validate semantic constraints, parse HH:MM, pre-resolve and cache ZoneInfo
+        temp_snapshot = ResourcePolicySnapshot(
+            scan_threads=payload["scan_threads"],
+            hash_threads=payload["hash_threads"],
+            io_limit=payload["io_limit"],
+            job_priority=payload["job_priority"],
+            active_window_enabled=payload["active_window_enabled"],
+            active_window_start=payload.get("active_window_start"),
+            active_window_end=payload.get("active_window_end"),
+            active_window_timezone=payload.get("active_window_timezone"),
+            outside_window_mode=payload["outside_window_mode"],
+            revision=1, # evaluated against DB truth in Phase B
+        )
+        validate_resource_policy_snapshot(temp_snapshot)
+
+        # Phase B: Short SQLite BEGIN IMMEDIATE write transaction (Zero ZoneInfo file I/O)
+        with self.SessionLocal() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            row = session.get(ResourcePolicy, 1)
+            if row is None:
+                session.rollback()
+                raise RuntimeError("ResourcePolicy singleton missing")
+            row.scan_threads = temp_snapshot.scan_threads
+            row.hash_threads = temp_snapshot.hash_threads
+            row.io_limit = temp_snapshot.io_limit
+            row.job_priority = temp_snapshot.job_priority
+            row.active_window_enabled = temp_snapshot.active_window_enabled
+            row.active_window_start = temp_snapshot.active_window_start
+            row.active_window_end = temp_snapshot.active_window_end
+            row.active_window_timezone = temp_snapshot.active_window_timezone
+            row.outside_window_mode = temp_snapshot.outside_window_mode
+            row.revision = row.revision + 1
+            row.updated_at = utcnow()
+            session.commit()
+
+        return self.get_resource_policy()
+```
 
 In `app/api/router.py`:
-- Define `ResourcePolicyUpdateRequest` (Pydantic model with `ConfigDict(extra="forbid")`).
-- Define `ResourcePolicyResponse`.
+- Define `ResourcePolicyUpdateRequest(BaseModel)` with `model_config = ConfigDict(extra="forbid")`.
 - `@router.get("/settings/resource-policy", dependencies=[Depends(require_admin_user)])`
 - `@router.put("/settings/resource-policy", dependencies=[Depends(require_admin_user)])`
 
@@ -467,7 +601,7 @@ git commit -m "feat(gate5f): expose admin resource policy api"
 
 ---
 
-### Task 4: Resource-Aware Worker Claim Admission
+### Task 4: Resource-Aware Worker Claim Admission (Deterministic Frozen Time)
 
 **Files:**
 - Modify: `app/tasks/recovery.py`
@@ -476,54 +610,60 @@ git commit -m "feat(gate5f): expose admin resource policy api"
 
 **Interfaces:**
 - Consumes: `claim_next_job()`, `assert_active_worker_lease()`, `ResourcePolicy`, `evaluate_resource_policy()`.
-- Produces: Enhanced `claim_next_job()` with two-phase policy preparation, pause window holding, and background priority reordering.
+- Produces: Enhanced `claim_next_job()` with deterministic two-phase policy preparation, pause window holding, and background priority reordering.
 
-- [ ] **Step 1: Write failing tests for claim admission & priority**
+- [ ] **Step 1: Write failing tests for claim admission & priority with deterministic time**
 
 ```python
 # tests/test_gate5f_resource_claim.py
 import pytest
 from datetime import datetime, timezone
+from unittest.mock import patch
 from app.tasks.recovery import claim_next_job, acquire_worker_ownership
 from app.models import WorkJob, ResourcePolicy
 
+# Deterministic frozen UTC time
+FROZEN_OUTSIDE_TIME = datetime(2026, 9, 10, 12, 0, 0, tzinfo=timezone.utc)
+FROZEN_INSIDE_TIME = datetime(2026, 9, 10, 2, 0, 0, tzinfo=timezone.utc)
+
 def test_claim_outside_pause_window_holds_resource_job_queued(session_factory, engine):
     worker_id = "worker-test-1"
-    acquire_worker_ownership(engine, session_factory, worker_id)
 
+    # Configure active window 01:00-03:00 UTC (FROZEN_OUTSIDE_TIME 12:00 is outside)
     with session_factory() as session:
-        # Set active window with pause outside
         policy = session.get(ResourcePolicy, 1)
         policy.active_window_enabled = True
         policy.active_window_start = "01:00"
-        policy.active_window_end = "02:00"
+        policy.active_window_end = "03:00"
         policy.active_window_timezone = "UTC"
         policy.outside_window_mode = "pause"
         policy.revision = 2
 
-        # Add index-root job
         job = WorkJob(kind="index-root", status="queued", state_json="{}")
         session.add(job)
         session.commit()
         job_id = job.id
 
-    # Outside active window: claim returns None, job remains queued
-    claimed = claim_next_job(engine, session_factory, worker_id)
-    assert claimed is None
+    # Patch recovery.utcnow for both ownership acquisition and claiming
+    with patch("app.tasks.recovery.utcnow", return_value=FROZEN_OUTSIDE_TIME):
+        acquired = acquire_worker_ownership(engine, session_factory, worker_id)
+        assert acquired is True
 
+        claimed = claim_next_job(engine, session_factory, worker_id)
+        assert claimed is None
+
+    # Job remains queued (not paused, not failed, not cancelled)
     with session_factory() as session:
         j = session.get(WorkJob, job_id)
-        assert j.status == "queued"  # NOT paused, NOT failed
+        assert j.status == "queued"
 
 def test_claim_outside_pause_window_allows_mutation_job(session_factory, engine):
     worker_id = "worker-test-2"
-    acquire_worker_ownership(engine, session_factory, worker_id)
-
     with session_factory() as session:
         policy = session.get(ResourcePolicy, 1)
         policy.active_window_enabled = True
         policy.active_window_start = "01:00"
-        policy.active_window_end = "02:00"
+        policy.active_window_end = "03:00"
         policy.active_window_timezone = "UTC"
         policy.outside_window_mode = "pause"
 
@@ -532,14 +672,14 @@ def test_claim_outside_pause_window_allows_mutation_job(session_factory, engine)
         session.add_all([j1, j2])
         session.commit()
 
-    # j1 is resource-controlled and paused, but j2 is mutation and must be claimed
-    claimed = claim_next_job(engine, session_factory, worker_id)
-    assert claimed == 102
+    with patch("app.tasks.recovery.utcnow", return_value=FROZEN_OUTSIDE_TIME):
+        acquire_worker_ownership(engine, session_factory, worker_id)
+        # j1 is resource-controlled and paused, but j2 is mutation and must be claimed
+        claimed = claim_next_job(engine, session_factory, worker_id)
+        assert claimed == 102
 
 def test_background_priority_claims_non_resource_job_first(session_factory, engine):
     worker_id = "worker-test-3"
-    acquire_worker_ownership(engine, session_factory, worker_id)
-
     with session_factory() as session:
         policy = session.get(ResourcePolicy, 1)
         policy.job_priority = "background"
@@ -550,9 +690,10 @@ def test_background_priority_claims_non_resource_job_first(session_factory, engi
         session.add_all([j1, j2])
         session.commit()
 
-    # Even though j1 was queued first, background priority claims j2 first
-    claimed = claim_next_job(engine, session_factory, worker_id)
-    assert claimed == 202
+    with patch("app.tasks.recovery.utcnow", return_value=FROZEN_INSIDE_TIME):
+        acquire_worker_ownership(engine, session_factory, worker_id)
+        claimed = claim_next_job(engine, session_factory, worker_id)
+        assert claimed == 202
 ```
 
 - [ ] **Step 2: Run tests to verify they fail (RED)**
@@ -562,16 +703,16 @@ Expected: FAIL.
 
 - [ ] **Step 3: Implement two-phase claim pattern in app/tasks/recovery.py**
 
-Implement two-phase claim pattern:
+Implement:
 - **Phase A (Outside write lock)**:
   Read `ResourcePolicy(1)`.
   If missing/unparseable, set `policy_valid = False` and `resource_jobs_admitted = False`.
-  If valid, resolve timezone and compute `EffectiveResourcePolicy`.
+  If valid, resolve timezone via cached `resolve_timezone()` and compute `EffectiveResourcePolicy`.
 - **Phase B (`BEGIN IMMEDIATE`)**:
   `assert_active_worker_lease(session, worker_id, now=now, timeout_seconds=timeout_seconds)`.
   Re-read `ResourcePolicy(1)`.
   If revision or policy fields differ from Phase A, rollback and retry Phase A (bounded up to 3 attempts).
-  Build candidate query:
+  Candidate query:
   - If `resource_jobs_admitted is False`: filter `WorkJob.kind.not_in(["index-root", "fclones-scan"])`.
   - If `resource_jobs_admitted is True` and `job_priority == "background"`:
     First query non-resource-controlled queued jobs; if none, query resource-controlled queued jobs.
@@ -592,7 +733,7 @@ git commit -m "feat(gate5f): add resource-aware task admission"
 
 ---
 
-### Task 5: fclones Effective Thread Ceiling & Handler Diagnostics
+### Task 5: fclones Effective Thread Ceiling & Subprocess Race Safety
 
 **Files:**
 - Modify: `app/tasks/handlers.py`
@@ -601,12 +742,13 @@ git commit -m "feat(gate5f): add resource-aware task admission"
 - Test: `tests/test_gate5f_fclones_resources.py`
 
 **Interfaces:**
-- Consumes: `compose_fclones_thread_cap`, `ResourcePolicy`, `build_group_command`.
+- Consumes: `compose_fclones_thread_cap`, `ResourcePolicy`, `build_group_command`, `JobContext.log`.
 - Produces:
   - Bounded `--threads <N>` argument in fclones command.
-  - TaskEvent `resource_policy_applied` recorded in task journal.
+  - TaskEvent `resource_policy_applied` recorded via `context.log()`.
+  - Safe subprocess launch boundary (already running job continues with captured resources even if window changes to pause; unresolvable/corrupted policy fails closed).
 
-- [ ] **Step 1: Write failing tests for fclones effective resources**
+- [ ] **Step 1: Write failing tests for fclones resources and race safety**
 
 ```python
 # tests/test_gate5f_fclones_resources.py
@@ -614,8 +756,9 @@ import pytest
 from unittest.mock import MagicMock, patch
 from app.tasks.handlers import FclonesScanHandler
 from app.models import WorkJob, ResourcePolicy
+from app.resource_control import ResourcePolicyConfigError
 
-def test_fclones_scan_handler_applies_effective_threads(session_factory, tmp_path):
+def test_fclones_scan_handler_applies_effective_threads_and_logs(session_factory, tmp_path):
     handler = FclonesScanHandler()
     job = WorkJob(id=1, kind="fclones-scan", state_json='{"roots": ["/allowed/root"], "scan_job_id": 1}')
     context = MagicMock()
@@ -627,7 +770,6 @@ def test_fclones_scan_handler_applies_effective_threads(session_factory, tmp_pat
     settings.fclones_threads = "4"  # legacy setting
 
     with session_factory() as session:
-        # DB policy cap is 2 (normal limit)
         p = session.get(ResourcePolicy, 1)
         p.scan_threads = 2
         p.hash_threads = 2
@@ -639,10 +781,28 @@ def test_fclones_scan_handler_applies_effective_threads(session_factory, tmp_pat
         handler.run(job, context, settings)
 
         mock_build.assert_called_once()
-        # Even though settings.fclones_threads is 4, effective threads is clamped to 2
         assert mock_build.call_args.kwargs["threads"] == "2"
-        # Verify TaskEvent logged
-        context.log_event.assert_any_call("resource_policy_applied", pytest.approx(dict, ...))
+        # FIX 3: Verify context.log interface
+        context.log.assert_any_call(
+            "resource_policy_applied",
+            "Applied resource policy",
+            context=pytest.approx(dict, ...),
+        )
+
+def test_fclones_scan_corrupt_policy_fails_closed_before_subprocess(session_factory, tmp_path):
+    handler = FclonesScanHandler()
+    job = WorkJob(id=2, kind="fclones-scan", state_json='{"roots": ["/allowed/root"], "scan_job_id": 2}')
+    context = MagicMock()
+    context.SessionLocal = session_factory
+    settings = MagicMock()
+    settings.allowed_roots = ["/allowed/root"]
+    settings.reports_dir = tmp_path
+    settings.fclones_threads = "invalid_threads_format"
+
+    with patch("app.tasks.handlers.run_scan") as mock_run:
+        with pytest.raises(ResourcePolicyConfigError):
+            handler.run(job, context, settings)
+        mock_run.assert_not_called()
 ```
 
 - [ ] **Step 2: Run tests to verify they fail (RED)**
@@ -656,9 +816,9 @@ In `app/tasks/handlers.py` (`FclonesScanHandler.run`):
 - Load current `ResourcePolicy(1)` snapshot from DB.
 - Evaluate `EffectiveResourcePolicy`.
 - Calculate `effective_threads = compose_fclones_thread_cap(eff.effective_thread_cap, settings.fclones_threads, state.get("threads"))`.
-- If invalid configuration ceiling is detected, fail-closed before subprocess launch: record error and raise `ResourcePolicyConfigError`.
+- If invalid configuration ceiling is detected, fail-closed before subprocess launch: record error via `context.log(..., level="error")` and raise `ResourcePolicyConfigError`.
 - Call `build_group_command(..., threads=str(effective_threads))`.
-- Log TaskEvent `resource_policy_applied` containing snapshot diagnostics.
+- Log TaskEvent via `context.log("resource_policy_applied", "Applied resource policy", context={...})`.
 
 - [ ] **Step 4: Run tests to verify they pass (GREEN)**
 
@@ -674,24 +834,24 @@ git commit -m "feat(gate5f): enforce bounded fclones resources"
 
 ---
 
-### Task 6: Index-Root Resource Control Behavior
+### Task 6: Index-Root Resource Control Behavior (Real Service Seam)
 
 **Files:**
-- Modify (minimally, if needed for TaskEvent): `app/tasks/handlers.py`
+- Modify (minimally, for `context.log`): `app/tasks/handlers.py`
 - Test: `tests/test_gate5f_index_resources.py`
 
 **Interfaces:**
-- Consumes: `IndexRootHandler`, `ResourcePolicy`.
-- Produces: Deterministic serial execution maintained (concurrency = 1); TaskEvent `resource_policy_applied` logged.
+- Consumes: `IndexRootHandler`, `FileCenterService.reindex_root`, `ResourcePolicy`, `JobContext.log`.
+- Produces: Deterministic serial execution maintained (concurrency = 1); TaskEvent `resource_policy_applied` logged via `context.log()`.
 
-- [ ] **Step 1: Write failing tests for index-root resource behavior**
+- [ ] **Step 1: Write failing tests using real service seam**
 
 ```python
 # tests/test_gate5f_index_resources.py
 import pytest
 from unittest.mock import MagicMock, patch
 from app.tasks.handlers import IndexRootHandler
-from app.models import WorkJob, ResourcePolicy
+from app.models import WorkJob
 
 def test_index_root_maintains_serial_execution(session_factory, tmp_path):
     handler = IndexRootHandler()
@@ -701,11 +861,18 @@ def test_index_root_maintains_serial_execution(session_factory, tmp_path):
     settings = MagicMock()
     settings.allowed_roots = ["/allowed/root"]
 
-    with patch("app.tasks.handlers.scan_and_index_root") as mock_scan:
+    # FIX 4: Mock the real call seam: FileCenterService.reindex_root
+    with patch("app.service.FileCenterService.reindex_root") as mock_reindex:
+        mock_reindex.return_value = {"files": 10, "folders": 2}
         handler.run(job, context, settings)
-        # Verify index-root executed with serial traversal, zero thread pool created
-        mock_scan.assert_called_once()
-        context.log_event.assert_any_call("resource_policy_applied", pytest.approx(dict, ...))
+
+        mock_reindex.assert_called_once()
+        # FIX 3: Verify context.log interface
+        context.log.assert_any_call(
+            "resource_policy_applied",
+            "Applied resource policy",
+            context=pytest.approx(dict, ...),
+        )
 ```
 
 - [ ] **Step 2: Run tests to verify they fail (RED)**
@@ -717,7 +884,7 @@ Expected: FAIL.
 
 In `app/tasks/handlers.py` (`IndexRootHandler.run`):
 - Capture `ResourcePolicySnapshot`.
-- Log TaskEvent `resource_policy_applied` noting policy ceiling while affirming actual execution concurrency is 1.
+- Log TaskEvent via `context.log("resource_policy_applied", "Applied resource policy", context={"profile": eff.profile, "policy_thread_cap": eff.effective_thread_cap, "execution_concurrency": 1})`.
 - Ensure no thread pool or parallel traversal is created.
 
 - [ ] **Step 4: Run tests to verify they pass (GREEN)**
@@ -734,7 +901,7 @@ git commit -m "test(gate5f): lock index resource admission semantics"
 
 ---
 
-### Task 7: Running-Job Window Transition Semantics
+### Task 7: Running-Job Window Transition Semantics (Zero Placeholders)
 
 **Files:**
 - Test: `tests/test_gate5f_running_job_semantics.py`
@@ -742,26 +909,76 @@ git commit -m "test(gate5f): lock index resource admission semantics"
 
 **Interfaces:**
 - Consumes: Non-resumable contracts `supports_pause = False` for `index-root` and `fclones-scan`.
-- Produces: Confirmation that running jobs are never killed or fake-paused across window boundaries.
+- Produces: Concrete verification that running jobs are never killed or fake-paused when policy transitions to pause outside window.
 
-- [ ] **Step 1: Write comprehensive running job boundary tests**
+- [ ] **Step 1: Write comprehensive running job boundary tests without placeholders**
 
 ```python
 # tests/test_gate5f_running_job_semantics.py
+from datetime import datetime, timezone
 import pytest
+from unittest.mock import patch
+from app.models import WorkJob, ResourcePolicy
 from app.tasks.handlers import FclonesScanHandler, IndexRootHandler
+from app.tasks.recovery import acquire_worker_ownership, claim_next_job
 
 def test_handlers_declare_supports_pause_false():
     assert FclonesScanHandler.supports_pause is False
     assert IndexRootHandler.supports_pause is False
 
-def test_running_job_not_killed_or_fake_paused_on_window_transition():
-    # Verify that worker heartbeat and task engine do not inject pause_requested_at
-    # or SIGKILL into active subprocesses when active_window transitions to outside
-    pass
+def test_running_job_remains_running_on_window_transition(session_factory, engine):
+    worker_id = "worker-transition-test"
+    acquire_worker_ownership(engine, session_factory, worker_id)
+
+    with session_factory() as session:
+        # Initially inside full profile
+        p = session.get(ResourcePolicy, 1)
+        p.active_window_enabled = False
+        p.revision = 1
+
+        # Job 501 is RUNNING, Job 502 is queued index-root, Job 503 is queued batch mutation
+        j1 = WorkJob(id=501, kind="fclones-scan", status="running", state_json='{"roots": ["/allowed/root"]}')
+        j2 = WorkJob(id=502, kind="index-root", status="queued", state_json='{"root": "/allowed/root"}')
+        j3 = WorkJob(id=503, kind="batch-plan-execute", status="queued", state_json='{}')
+        session.add_all([j1, j2, j3])
+        session.commit()
+
+    # Transition policy: outside active window with mode = pause
+    fixed_outside = datetime(2026, 9, 10, 12, 0, 0, tzinfo=timezone.utc)
+    with session_factory() as session:
+        p = session.get(ResourcePolicy, 1)
+        p.active_window_enabled = True
+        p.active_window_start = "01:00"
+        p.active_window_end = "06:00"
+        p.active_window_timezone = "UTC"
+        p.outside_window_mode = "pause"
+        p.revision = 2
+        session.commit()
+
+    # FIX 2: Assert running job 501 is NOT killed, NOT fake-paused, NOT failed
+    with session_factory() as session:
+        current_j1 = session.get(WorkJob, 501)
+        assert current_j1.status == "running"
+        assert current_j1.pause_requested_at is None
+        assert current_j1.cancel_requested_at is None
+        assert current_j1.error_code is None
+
+    # Assert claim under pause window holds j2 (index-root), but claims j3 (batch-plan-execute)
+    with patch("app.tasks.recovery.utcnow", return_value=fixed_outside):
+        claimed_mutation = claim_next_job(engine, session_factory, worker_id)
+        assert claimed_mutation == 503
+
+        # Next claim sees only resource-controlled queued job j2 -> returns None
+        claimed_none = claim_next_job(engine, session_factory, worker_id)
+        assert claimed_none is None
+
+    # Verify j2 remains queued
+    with session_factory() as session:
+        current_j2 = session.get(WorkJob, 502)
+        assert current_j2.status == "queued"
 ```
 
-- [ ] **Step 2: Run tests to verify (RED/GREEN)**
+- [ ] **Step 2: Run tests to verify they pass (GREEN)**
 
 Run: `pytest tests/test_gate5f_running_job_semantics.py -v`
 Expected: PASS.
@@ -775,7 +992,7 @@ git commit -m "test(gate5f): preserve non-resumable running jobs"
 
 ---
 
-### Task 8: Frontend Resource Control Settings
+### Task 8: Frontend Resource Control Settings (TypeScript & Real API Client)
 
 **Files:**
 - Modify: `frontend/src/types/index.ts`
@@ -784,9 +1001,9 @@ git commit -m "test(gate5f): preserve non-resumable running jobs"
 - Create: `frontend/src/components/settings/resource_policy.ts`
 
 **Interfaces:**
-- Consumes: `useAuth()` (`isAdmin`), Ant Design, `@tanstack/react-query`.
+- Consumes: `useAuth()` (`isAdmin`), Ant Design, `@tanstack/react-query`, `api` from `./client`.
 - Produces:
-  - TypeScript types: `ResourcePolicy`, `EffectiveResourcePolicy`, `ResourcePolicyUpdate`.
+  - TypeScript types: `ResourcePolicy`, `EffectiveResourcePolicy`, `ResourcePolicyUpdate` with `number` types and `profile: 'full' | 'limited' | 'pause'`.
   - API client: `resourcePolicyApi.getPolicy()`, `resourcePolicyApi.updatePolicy()`.
   - Resource Control card in `SettingsPage` with soft concurrency notices.
 
@@ -795,11 +1012,10 @@ git commit -m "test(gate5f): preserve non-resumable running jobs"
 In `frontend/src/types/index.ts`:
 ```typescript
 export interface EffectiveResourcePolicy {
-  profile: 'normal' | 'limited' | 'pause';
+  profile: 'full' | 'limited' | 'pause';
   inside_active_window: boolean | null;
   resource_jobs_admitted: boolean;
-  effective_thread_cap: int;
-  revision: number;
+  effective_thread_cap: number;
 }
 
 export interface ResourcePolicy {
@@ -814,8 +1030,8 @@ export interface ResourcePolicy {
   active_window_timezone: string | null;
   outside_window_mode: 'limited' | 'pause';
   revision: number;
-  updated_at: string;
-  effective_now?: EffectiveResourcePolicy;
+  updated_at: string | null;
+  effective_now: EffectiveResourcePolicy;
 }
 
 export interface ResourcePolicyUpdate {
@@ -834,14 +1050,10 @@ export interface ResourcePolicyUpdate {
 In `frontend/src/api/domain.ts`:
 ```typescript
 export const resourcePolicyApi = {
-  getPolicy: async (): Promise<ResourcePolicy> => {
-    const res = await client.get('/api/settings/resource-policy');
-    return res.data;
-  },
-  updatePolicy: async (data: ResourcePolicyUpdate): Promise<ResourcePolicy> => {
-    const res = await client.put('/api/settings/resource-policy', data);
-    return res.data;
-  },
+  getPolicy: () =>
+    api.get<ResourcePolicy>('/api/settings/resource-policy'),
+  updatePolicy: (payload: ResourcePolicyUpdate) =>
+    api.put<ResourcePolicy>('/api/settings/resource-policy', payload),
 };
 ```
 
@@ -854,8 +1066,8 @@ In `frontend/src/pages/Settings/index.tsx`:
   - Select for IO pressure: low, normal, unlimited.
   - Select for Job priority: normal, background.
   - Switch for Active window enabled.
-  - When enabled: start time (TimePicker / Input), end time, IANA timezone selector, outside-window mode (limited / pause).
-  - Status display: current effective profile, effective thread cap, resource jobs admitted/held, revision.
+  - When enabled: start time, end time, IANA timezone selector, outside-window mode (limited / pause).
+  - Status display: current effective profile (`full`, `limited`, `pause`), effective thread cap, resource jobs admitted/held, revision.
   - Clear notices:
     - "I/O pressure is application-level concurrency control. It is not guaranteed MB/s or IOPS throttling."
     - "Outside-window Pause does not schedule jobs. It only holds queued scan/index jobs from starting."
@@ -888,14 +1100,17 @@ git commit -m "feat(gate5f): add resource control settings ui"
 
 ```python
 # tests/test_gate5f_fail_closed.py
+from datetime import datetime, timezone
 import pytest
 from sqlalchemy import text
+from unittest.mock import patch
 from app.tasks.recovery import claim_next_job, acquire_worker_ownership
 from app.models import WorkJob
 
+FROZEN_TIME = datetime(2026, 9, 10, 12, 0, 0, tzinfo=timezone.utc)
+
 def test_corrupted_policy_holds_resource_job_but_allows_mutation_job(session_factory, engine):
     worker_id = "worker-fail-closed-1"
-    acquire_worker_ownership(engine, session_factory, worker_id)
 
     # Corrupt resource_policy row directly via SQL
     with engine.connect() as conn:
@@ -908,10 +1123,12 @@ def test_corrupted_policy_holds_resource_job_but_allows_mutation_job(session_fac
         session.add_all([j1, j2])
         session.commit()
 
-    # j1 fails closed (cannot be claimed safely under invalid policy)
-    # j2 is mutation and must still be claimed to prevent global engine outage
-    claimed = claim_next_job(engine, session_factory, worker_id)
-    assert claimed == 302
+    with patch("app.tasks.recovery.utcnow", return_value=FROZEN_TIME):
+        acquire_worker_ownership(engine, session_factory, worker_id)
+        # j1 fails closed (cannot be claimed safely under invalid policy)
+        # j2 is mutation and must still be claimed to prevent global engine outage
+        claimed = claim_next_job(engine, session_factory, worker_id)
+        assert claimed == 302
 ```
 
 - [ ] **Step 2: Run tests to verify (RED)**
@@ -941,7 +1158,7 @@ git commit -m "fix(gate5f): fail closed without blocking mutation jobs"
 
 ---
 
-### Task 10: Full Regression Verification Gate
+### Task 10: Full Regression Verification Gate (Frozen Concrete Suites)
 
 **Files:**
 - Full backend suite: `tests/`
@@ -959,31 +1176,42 @@ pytest tests/test_gate5f_running_job_semantics.py -v
 pytest tests/test_gate5f_fail_closed.py -v
 ```
 
-- [ ] **Step 2: Run Task Engine & Worker suites**
+- [ ] **Step 2: Run all Gate5-F tests together**
 ```bash
-pytest tests/test_worker_lease.py tests/test_worker_recovery.py tests/test_task_service.py tests/test_task_handlers.py -v
+pytest tests/test_gate5f_*.py -v
 ```
 
-- [ ] **Step 3: Run closed gate safety suites**
+- [ ] **Step 3: Run frozen existing Task Engine & Worker suites**
+```bash
+pytest tests/test_worker_recovery_and_claim.py tests/test_task_state_machine.py tests/test_task_api.py tests/test_task_checkpoint.py tests/test_task_pause_resume_e2e.py tests/test_gate2_hotfix1_worker_fencing.py -v
+```
+
+- [ ] **Step 4: Run frozen existing Fclones & Indexing suites**
+```bash
+pytest tests/test_fclones.py tests/test_scan_jobs.py tests/test_indexing.py tests/test_index_root_lifecycle.py tests/test_index_root_progress_regression.py -v
+```
+
+- [ ] **Step 5: Run closed gate safety regression suites**
 ```bash
 pytest tests/test_gate5e_*.py -v
 pytest tests/test_gate5d_*.py -v
 pytest tests/test_gate5c_*.py -v
 pytest tests/test_gate5b_*.py -v
 pytest tests/test_gate5a_*.py -v
+pytest tests/test_planning.py tests/test_execution.py -v
 ```
 
-- [ ] **Step 4: Run entire test suite**
+- [ ] **Step 6: Run full repository pytest suite**
 ```bash
 pytest tests/
 ```
 
-- [ ] **Step 5: Verify frontend typecheck and build**
+- [ ] **Step 7: Verify frontend typecheck and build**
 ```bash
 cd frontend && npm run typecheck && npm run build
 ```
 
-- [ ] **Step 6: Verify clean workspace**
+- [ ] **Step 8: Verify clean workspace**
 ```bash
 git diff --check
 git status --short
