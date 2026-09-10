@@ -1663,7 +1663,68 @@ def test_compiler_wrapper_intermediate_path_replacement_fails_closed_before_disc
     assert not any("secret.txt" in c.source_path for c in discovered_candidates)
 
 
+def test_compiler_preflight_identity_capture_failure_fails_closed(tmp_path):
+    """Gate5-E / E3-hotfix11 Test 1:
+    Wrapper is a normal directory, preflight resolution succeeds, but
+    identity observation fails once. Wrapper is then replaced by another ordinary
+    directory with secret.txt.
+    Must fail closed before discovery: 0 replacement child enumeration, 0 accepted candidate.
+    """
+    import os
+    from unittest.mock import patch
+    import app.batch_utilities.compiler as compiler_mod
+    from app.batch_utilities.errors import BatchUtilityInvalidConfigError
+    from app.batch_utilities.compiler import (
+        compile_flatten_one_level_preview,
+        BatchUtilitySafetySnapshot,
+    )
+    from app.batch_utilities.schema import FlattenOneLevelAction
 
+    root = tmp_path / "root"
+    root.mkdir()
+    w = root / "W"
+    w.mkdir()
+    (w / "before.txt").write_text("before")
+    w_phys_str = str(w.resolve())
 
+    action = FlattenOneLevelAction(type="flatten_one_level", wrapper_paths=[str(w)])
+    snapshot = BatchUtilitySafetySnapshot(
+        protect_last_file=True,
+        allowed_roots=(root,),
+        quarantine_root=None,
+        effective_policy={},
+    )
 
+    discovered_candidates = []
+    orig_disc = compiler_mod.discover_flatten_one_level
 
+    def spy_disc(wrappers, *args, **kwargs):
+        cands, errs = orig_disc(wrappers, *args, **kwargs)
+        discovered_candidates.extend(cands)
+        return cands, errs
+
+    real_stat = os.stat
+    stat_failed = False
+
+    def failing_stat(path, *args, **kwargs):
+        nonlocal stat_failed
+        # When preflight calls os.stat(w_phys), fail once
+        if not stat_failed and str(path) == w_phys_str:
+            stat_failed = True
+            # Swap W to new ordinary directory with secret.txt
+            w_old = root / "W_old"
+            os.rename(str(w), str(w_old))
+            w.mkdir()
+            (w / "secret.txt").write_text("secret")
+            raise OSError("Transient I/O failure during identity capture")
+        return real_stat(path, *args, **kwargs)
+
+    with patch("os.stat", side_effect=failing_stat):
+        with patch.object(compiler_mod, "discover_flatten_one_level", side_effect=spy_disc):
+            with pytest.raises(BatchUtilityInvalidConfigError) as exc_info:
+                compile_flatten_one_level_preview(session=None, action=action, safety_snapshot=snapshot)
+            assert exc_info.value.details.get("stage") in ("PREFLIGHT", "CANONICALIZE")
+
+    # Assert secret.txt was NEVER enumerated by discovery
+    assert len(discovered_candidates) == 0
+    assert not any("secret.txt" in c.source_path for c in discovered_candidates)

@@ -96,11 +96,22 @@ def validate_wrappers_preflight(
         # Record physical identity
         try:
             st_phys = os.stat(w_phys)
-            identities[w_lex] = (st_phys.st_dev, st_phys.st_ino)
-            identities[raw_leaf] = (st_phys.st_dev, st_phys.st_ino)
-            identities[str(w_phys)] = (st_phys.st_dev, st_phys.st_ino)
-        except OSError:
-            pass
+        except OSError as e:
+            raise BatchUtilityInvalidConfigError(
+                f"Failed to access wrapper '{w_lex}': {e}",
+                details={
+                    "wrapper_path": w_lex,
+                    "errno": getattr(e, "errno", None),
+                    "stage": "PREFLIGHT",
+                },
+            )
+
+        identities[w_lex] = (st_phys.st_dev, st_phys.st_ino)
+        identities[w_lex.rstrip("/") or "/"] = (st_phys.st_dev, st_phys.st_ino)
+        identities[raw_leaf] = (st_phys.st_dev, st_phys.st_ino)
+        identities[raw_leaf.rstrip("/") or "/"] = (st_phys.st_dev, st_phys.st_ino)
+        identities[str(w_phys)] = (st_phys.st_dev, st_phys.st_ino)
+        identities[str(w_phys).rstrip("/") or "/"] = (st_phys.st_dev, st_phys.st_ino)
 
         # 3. Safety bounds checks against physical wrapper path
         if quarantine_root and is_reserved_quarantine_path(w_phys, quarantine_root):

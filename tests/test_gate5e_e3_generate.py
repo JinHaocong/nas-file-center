@@ -417,8 +417,8 @@ def test_generate_flatten_same_type_source_replacement_race_raises_409(api_test_
     # then immediately before graph resolution, same.bin is replaced by another regular file (BBBB, size 4)
     orig_discover = compiler_module.discover_flatten_one_level
 
-    def racing_discover(wrapper_paths):
-        cands, errs = orig_discover(wrapper_paths)
+    def racing_discover(wrapper_paths, *args, **kwargs):
+        cands, errs = orig_discover(wrapper_paths, *args, **kwargs)
         # File is replaced after discovery but before graph resolution
         same_bin.unlink()
         same_bin.write_bytes(b"BBBB")
@@ -479,8 +479,8 @@ def test_generate_flatten_wrapper_symlink_swap_race_raises_409(api_test_env):
     # 2. Race hook: after discovery / wrapper observation but before graph, replace W with W -> other
     orig_discover = compiler_module.discover_flatten_one_level
 
-    def racing_discover(wrapper_paths):
-        cands, errs = orig_discover(wrapper_paths)
+    def racing_discover(wrapper_paths, *args, **kwargs):
+        cands, errs = orig_discover(wrapper_paths, *args, **kwargs)
         shutil.rmtree(wrapper)
         os.symlink(str(other), str(wrapper))
         return cands, errs
@@ -529,8 +529,8 @@ def test_generate_flatten_wrapper_replaced_by_different_directory_race_raises_40
     import os
     orig_discover = compiler_module.discover_flatten_one_level
 
-    def racing_discover(wrapper_paths):
-        cands, errs = orig_discover(wrapper_paths)
+    def racing_discover(wrapper_paths, *args, **kwargs):
+        cands, errs = orig_discover(wrapper_paths, *args, **kwargs)
         w2 = root / "w_new"
         w2.mkdir()
         (w2 / "a.txt").write_text("file in new W")
@@ -1075,8 +1075,8 @@ def test_generate_preflight_to_discovery_symlink_swap_blocks_enumeration(api_tes
 
     discovered_in_generate = []
     orig_disc = compiler_mod.discover_flatten_one_level
-    def spy_disc(wrappers):
-        cands, errs = orig_disc(wrappers)
+    def spy_disc(wrappers, *args, **kwargs):
+        cands, errs = orig_disc(wrappers, *args, **kwargs)
         discovered_in_generate.extend(cands)
         return cands, errs
 
@@ -1099,3 +1099,78 @@ def test_generate_preflight_to_discovery_symlink_swap_blocks_enumeration(api_tes
     assert not any("secret.txt" in c.source_path for c in discovered_in_generate)
     assert (real_dir / "secret.txt").exists()
 
+
+def test_generate_preflight_identity_capture_failure_fails_closed(api_test_env):
+    """Gate5-E / E3-hotfix11 Test 2:
+    Generate Phase A: If identity authority cannot be established during preflight,
+    fails closed: 0 BatchPlan, 0 BatchPlanItem, 0 filesystem mutation.
+    """
+    import os
+    from unittest.mock import patch
+    from app.models import BatchPlan, BatchPlanItem
+    import app.batch_utilities.compiler as compiler_mod
+
+    client = api_test_env["client"]
+    service = api_test_env["service"]
+    root = api_test_env["root1_path"]
+    w = root / "w_gen_identity_fail"
+    w.mkdir()
+    (w / "before.txt").write_text("before")
+    w_phys_str = str(w.resolve())
+
+    action = {
+        "type": "flatten_one_level",
+        "wrapper_paths": [str(w)]
+    }
+
+    resp_prev = client.post("/api/batch-utilities/preview", json={"action": action})
+    assert resp_prev.status_code == 200
+    preview_digest = resp_prev.json()["preview_digest"]
+
+    # In Generate Phase A, fail preflight identity capture and swap W with secret.txt
+    real_stat = os.stat
+    stat_failed = False
+
+    def failing_stat(path, *args, **kwargs):
+        nonlocal stat_failed
+        if not stat_failed and str(path) == w_phys_str:
+            stat_failed = True
+            w_old = root / "w_old"
+            os.rename(str(w), str(w_old))
+            w.mkdir()
+            (w / "secret.txt").write_text("secret")
+            raise OSError("Transient I/O failure during identity capture")
+        return real_stat(path, *args, **kwargs)
+
+    discovered_in_generate = []
+    orig_disc = compiler_mod.discover_flatten_one_level
+
+    def spy_disc(wrappers, *args, **kwargs):
+        cands, errs = orig_disc(wrappers, *args, **kwargs)
+        discovered_in_generate.extend(cands)
+        return cands, errs
+
+    with patch("os.stat", side_effect=failing_stat):
+        with patch("app.batch_utilities.compiler.discover_flatten_one_level", side_effect=spy_disc):
+            req = {
+                "action": action,
+                "expected_preview_digest": preview_digest
+            }
+            resp = client.post("/api/batch-utilities/generate-plan", json=req)
+            assert resp.status_code in (400, 409, 422)
+            err = resp.json()["error"]
+            assert err["code"] == "BATCH_UTILITY_INVALID_CONFIG"
+
+    # Verify zero discovery of replacement children
+    assert len(discovered_in_generate) == 0
+    assert not any("secret.txt" in c.source_path for c in discovered_in_generate)
+
+    # Verify zero plans and zero items created in DB
+    with service.SessionLocal() as session:
+        plans = session.query(BatchPlan).all()
+        assert len(plans) == 0
+        items = session.query(BatchPlanItem).all()
+        assert len(items) == 0
+
+    # Verify secret.txt was not mutated
+    assert (w / "secret.txt").exists()

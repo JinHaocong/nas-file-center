@@ -1407,7 +1407,12 @@ def compile_flatten_one_level_preview(
         action.wrapper_paths,
         safety_snapshot.allowed_roots,
         safety_snapshot.quarantine_root,
-    ) or {}
+    )
+    if not isinstance(expected_identities, dict) or not expected_identities:
+        raise BatchUtilityInvalidConfigError(
+            "Preflight failed to establish wrapper physical identities",
+            details={"stage": "PREFLIGHT", "error": "MISSING_WRAPPER_IDENTITY"},
+        )
 
     # Validate that action.wrapper_paths still match authorized physical identities
     for w_in in action.wrapper_paths:
@@ -1416,35 +1421,43 @@ def compile_flatten_one_level_preview(
             expected_identities.get(w_in)
             or expected_identities.get(clean_in)
         )
-        if exp_id is not None:
-            try:
-                st_leaf = os.lstat(clean_in)
-                if stat.S_ISLNK(st_leaf.st_mode):
-                    raise BatchUtilitySymlinkBlockedError(
-                        f"Wrapper path '{w_in}' is a symlink",
-                        details={"wrapper_path": w_in, "stage": "CANONICALIZE"},
-                    )
-                st = os.stat(clean_in)
-                if (st.st_dev, st.st_ino) != exp_id:
-                    raise BatchUtilityInvalidConfigError(
-                        f"WRAPPER_IDENTITY_CHANGED: Wrapper '{w_in}' physical identity changed",
-                        details={
-                            "wrapper_path": w_in,
-                            "error": "WRAPPER_IDENTITY_CHANGED",
-                            "stage": "CANONICALIZE",
-                            "expected_device": exp_id[0],
-                            "current_device": st.st_dev,
-                            "expected_inode": exp_id[1],
-                            "current_inode": st.st_ino,
-                        },
-                    )
-            except (BatchUtilitySymlinkBlockedError, BatchUtilityInvalidConfigError):
-                raise
-            except OSError as e:
-                raise BatchUtilityInvalidConfigError(
-                    f"Failed to access wrapper '{w_in}': {e}",
-                    details={"wrapper_path": w_in, "errno": getattr(e, "errno", None), "stage": "CANONICALIZE"},
+        if exp_id is None:
+            raise BatchUtilityInvalidConfigError(
+                f"Missing physical identity for wrapper '{w_in}'",
+                details={
+                    "wrapper_path": str(w_in),
+                    "error": "WRAPPER_IDENTITY_CHANGED",
+                    "stage": "CANONICALIZE",
+                },
+            )
+        try:
+            st_leaf = os.lstat(clean_in)
+            if stat.S_ISLNK(st_leaf.st_mode):
+                raise BatchUtilitySymlinkBlockedError(
+                    f"Wrapper path '{w_in}' is a symlink",
+                    details={"wrapper_path": str(w_in), "stage": "CANONICALIZE"},
                 )
+            st = os.stat(clean_in)
+            if (st.st_dev, st.st_ino) != exp_id:
+                raise BatchUtilityInvalidConfigError(
+                    f"WRAPPER_IDENTITY_CHANGED: Wrapper '{w_in}' physical identity changed",
+                    details={
+                        "wrapper_path": str(w_in),
+                        "error": "WRAPPER_IDENTITY_CHANGED",
+                        "stage": "CANONICALIZE",
+                        "expected_device": exp_id[0],
+                        "current_device": st.st_dev,
+                        "expected_inode": exp_id[1],
+                        "current_inode": st.st_ino,
+                    },
+                )
+        except (BatchUtilitySymlinkBlockedError, BatchUtilityInvalidConfigError):
+            raise
+        except OSError as e:
+            raise BatchUtilityInvalidConfigError(
+                f"Failed to access wrapper '{w_in}': {e}",
+                details={"wrapper_path": str(w_in), "errno": getattr(e, "errno", None), "stage": "CANONICALIZE"},
+            )
 
     canonical_action = canonicalize_flatten_one_level_action(action)
     canonical_wrappers = canonical_action["wrapper_paths"]
@@ -1472,45 +1485,47 @@ def compile_flatten_one_level_preview(
             expected_identities.get(w)
             or expected_identities.get(clean_w)
         )
-        if exp_id is not None:
-            try:
-                st = os.lstat(clean_w)
-                if stat.S_ISLNK(st.st_mode):
-                    raise BatchUtilitySymlinkBlockedError(
-                        f"Wrapper path '{w}' is a symlink",
-                        details={"wrapper_path": w, "stage": "CANONICALIZE"},
-                    )
-                if (st.st_dev, st.st_ino) != exp_id:
-                    raise BatchUtilityInvalidConfigError(
-                        f"WRAPPER_IDENTITY_CHANGED: Wrapper '{w}' physical identity changed",
-                        details={
-                            "wrapper_path": w,
-                            "error": "WRAPPER_IDENTITY_CHANGED",
-                            "stage": "CANONICALIZE",
-                            "expected_device": exp_id[0],
-                            "current_device": st.st_dev,
-                            "expected_inode": exp_id[1],
-                            "current_inode": st.st_ino,
-                        },
-                    )
-            except (BatchUtilitySymlinkBlockedError, BatchUtilityInvalidConfigError):
-                raise
-            except OSError as e:
-                raise BatchUtilityInvalidConfigError(
-                    f"Failed to access wrapper '{w}': {e}",
-                    details={"wrapper_path": w, "errno": getattr(e, "errno", None), "stage": "CANONICALIZE"},
+        if exp_id is None:
+            raise BatchUtilityInvalidConfigError(
+                f"Missing physical identity for canonical wrapper '{w}'",
+                details={
+                    "wrapper_path": str(w),
+                    "error": "WRAPPER_IDENTITY_CHANGED",
+                    "stage": "CANONICALIZE",
+                },
+            )
+        try:
+            st = os.lstat(clean_w)
+            if stat.S_ISLNK(st.st_mode):
+                raise BatchUtilitySymlinkBlockedError(
+                    f"Wrapper path '{w}' is a symlink",
+                    details={"wrapper_path": str(w), "stage": "CANONICALIZE"},
                 )
-
-    try:
-        flatten_cands, flatten_errors = discover_flatten_one_level(
-            canonical_wrappers,
-            expected_identities=expected_identities,
-        )
-    except TypeError as te:
-        if "expected_identities" in str(te):
-            flatten_cands, flatten_errors = discover_flatten_one_level(canonical_wrappers)
-        else:
+            if (st.st_dev, st.st_ino) != exp_id:
+                raise BatchUtilityInvalidConfigError(
+                    f"WRAPPER_IDENTITY_CHANGED: Wrapper '{w}' physical identity changed",
+                    details={
+                        "wrapper_path": str(w),
+                        "error": "WRAPPER_IDENTITY_CHANGED",
+                        "stage": "CANONICALIZE",
+                        "expected_device": exp_id[0],
+                        "current_device": st.st_dev,
+                        "expected_inode": exp_id[1],
+                        "current_inode": st.st_ino,
+                    },
+                )
+        except (BatchUtilitySymlinkBlockedError, BatchUtilityInvalidConfigError):
             raise
+        except OSError as e:
+            raise BatchUtilityInvalidConfigError(
+                f"Failed to access wrapper '{w}': {e}",
+                details={"wrapper_path": str(w), "errno": getattr(e, "errno", None), "stage": "CANONICALIZE"},
+            )
+
+    flatten_cands, flatten_errors = discover_flatten_one_level(
+        canonical_wrappers,
+        expected_identities=expected_identities,
+    )
 
     if len(flatten_cands) + len(flatten_errors) > MAX_CANDIDATES_LIMIT:
         raise BatchUtilityLimitExceededError("Flatten utility supports maximum 50,000 candidates")
@@ -1523,7 +1538,16 @@ def compile_flatten_one_level_preview(
             expected_identities.get(w_lex)
             or expected_identities.get(clean_w)
         )
-        exp_dev, exp_ino = exp_id if exp_id else (None, None)
+        if exp_id is None:
+            raise BatchUtilityInvalidConfigError(
+                f"Missing physical identity for snapshot wrapper '{w_lex}'",
+                details={
+                    "wrapper_path": str(w_lex),
+                    "error": "WRAPPER_IDENTITY_CHANGED",
+                    "stage": "SNAPSHOT",
+                },
+            )
+        exp_dev, exp_ino = exp_id
 
         try:
             with acquire_wrapper_dir(
