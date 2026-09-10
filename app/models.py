@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from app.dbtypes import FilesystemId
@@ -495,4 +495,28 @@ class WorkflowRevision(Base):
     workflow: Mapped[Workflow] = relationship(back_populates="revisions")
 
 
+class ResourcePolicy(Base):
+    __tablename__ = "resource_policy"
 
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    scan_threads: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+    hash_threads: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+    io_limit: Mapped[str] = mapped_column(String(32), nullable=False, default="normal")
+    job_priority: Mapped[str] = mapped_column(String(32), nullable=False, default="normal")
+    active_window_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    active_window_start: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    active_window_end: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    active_window_timezone: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    outside_window_mode: Mapped[str] = mapped_column(String(32), nullable=False, default="limited")
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+
+    __table_args__ = (
+        CheckConstraint("id = 1", name="ck_resource_policy_singleton_id"),
+        CheckConstraint("scan_threads >= 1 AND scan_threads <= 32", name="ck_resource_policy_scan_threads"),
+        CheckConstraint("hash_threads >= 1 AND hash_threads <= 32", name="ck_resource_policy_hash_threads"),
+        CheckConstraint("io_limit IN ('low', 'normal', 'unlimited')", name="ck_resource_policy_io_limit"),
+        CheckConstraint("job_priority IN ('normal', 'background')", name="ck_resource_policy_job_priority"),
+        CheckConstraint("outside_window_mode IN ('limited', 'pause')", name="ck_resource_policy_outside_window_mode"),
+        CheckConstraint("revision >= 1", name="ck_resource_policy_revision"),
+    )

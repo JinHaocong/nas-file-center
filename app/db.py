@@ -103,6 +103,7 @@ def init_db(
             "filter_policy",
             "workflows",
             "workflow_revisions",
+            "resource_policy",
         }
 
         # Check existing columns in work_jobs
@@ -226,6 +227,23 @@ def init_db(
                     VALUES (1, :default_excludes, CURRENT_TIMESTAMP)
                 """),
                 {"default_excludes": json.dumps([".git", ".recycle", "@eaDir", ".nas-file-center-trash"])},
+            )
+            session.commit()
+
+        # Seed singleton ResourcePolicy if not exists
+        with SessionLocal() as session:
+            session.execute(
+                text("""
+                    INSERT OR IGNORE INTO resource_policy (
+                        id, scan_threads, hash_threads, io_limit, job_priority,
+                        active_window_enabled, active_window_start, active_window_end,
+                        active_window_timezone, outside_window_mode, revision, updated_at
+                    ) VALUES (
+                        1, 2, 2, 'normal', 'normal',
+                        0, NULL, NULL,
+                        NULL, 'limited', 1, CURRENT_TIMESTAMP
+                    )
+                """)
             )
             session.commit()
 
