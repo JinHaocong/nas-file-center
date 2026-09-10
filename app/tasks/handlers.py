@@ -112,6 +112,38 @@ def _containing_root(path: Path, roots: list[Path]) -> tuple[int, Path] | None:
     return max(matches, key=lambda pair: len(pair[1].parts))
 
 
+def _get_effective_resource_policy(context: JobContext) -> tuple[ResourcePolicySnapshot, EffectiveResourcePolicy]:
+    with context.SessionLocal() as session:
+        row = session.get(ResourcePolicy, 1)
+        if row is None:
+            context.log("resource_policy_error", "ResourcePolicy singleton missing", level="error")
+            raise ResourcePolicyConfigError("ResourcePolicy singleton missing")
+        try:
+            snapshot = ResourcePolicySnapshot(
+                scan_threads=row.scan_threads,
+                hash_threads=row.hash_threads,
+                io_limit=row.io_limit,
+                job_priority=row.job_priority,
+                active_window_enabled=row.active_window_enabled,
+                active_window_start=row.active_window_start,
+                active_window_end=row.active_window_end,
+                active_window_timezone=row.active_window_timezone,
+                outside_window_mode=row.outside_window_mode,
+                revision=row.revision,
+            )
+            validate_resource_policy_snapshot(snapshot)
+            prepared_tz = (
+                resolve_timezone(snapshot.active_window_timezone)
+                if snapshot.active_window_enabled and snapshot.active_window_timezone
+                else None
+            )
+            eff = evaluate_resource_policy(snapshot, now_utc=utcnow(), resolved_timezone=prepared_tz)
+            return snapshot, eff
+        except Exception as exc:
+            context.log("resource_policy_error", f"Corrupt resource policy: {exc}", level="error")
+            raise ResourcePolicyConfigError(f"Corrupt resource policy: {exc}") from exc
+
+
 @register_handler
 class IndexRootHandler(TaskHandler):
     job_type = "index-root"
@@ -133,6 +165,17 @@ class IndexRootHandler(TaskHandler):
             progress_total=None,
             progress_message="Starting root reindex...",
             checkpoint_data={"schema_version": 1, "phase": "starting"},
+        )
+
+        snapshot, eff = _get_effective_resource_policy(context)
+        context.log(
+            "resource_policy_applied",
+            "Applied resource policy",
+            context={
+                "profile": eff.profile,
+                "policy_thread_cap": eff.effective_thread_cap,
+                "execution_concurrency": 1,
+            },
         )
 
         service = FileCenterService(settings)
@@ -168,38 +211,6 @@ class IndexRootHandler(TaskHandler):
 from app.tasks.state_machine import JobCancelRequested, JobLeaseLost
 
 SCAN_IMPORT_BATCH_SIZE: int = 100
-
-
-def _get_effective_resource_policy(context: JobContext) -> tuple[ResourcePolicySnapshot, EffectiveResourcePolicy]:
-    with context.SessionLocal() as session:
-        row = session.get(ResourcePolicy, 1)
-        if row is None:
-            context.log("resource_policy_error", "ResourcePolicy singleton missing", level="error")
-            raise ResourcePolicyConfigError("ResourcePolicy singleton missing")
-        try:
-            snapshot = ResourcePolicySnapshot(
-                scan_threads=row.scan_threads,
-                hash_threads=row.hash_threads,
-                io_limit=row.io_limit,
-                job_priority=row.job_priority,
-                active_window_enabled=row.active_window_enabled,
-                active_window_start=row.active_window_start,
-                active_window_end=row.active_window_end,
-                active_window_timezone=row.active_window_timezone,
-                outside_window_mode=row.outside_window_mode,
-                revision=row.revision,
-            )
-            validate_resource_policy_snapshot(snapshot)
-            prepared_tz = (
-                resolve_timezone(snapshot.active_window_timezone)
-                if snapshot.active_window_enabled and snapshot.active_window_timezone
-                else None
-            )
-            eff = evaluate_resource_policy(snapshot, now_utc=utcnow(), resolved_timezone=prepared_tz)
-            return snapshot, eff
-        except Exception as exc:
-            context.log("resource_policy_error", f"Corrupt resource policy: {exc}", level="error")
-            raise ResourcePolicyConfigError(f"Corrupt resource policy: {exc}") from exc
 
 
 @register_handler
