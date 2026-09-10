@@ -1499,6 +1499,170 @@ def test_reconcile_rmdir_empty_quarantine_root_symlink_fails_closed(lifecycle_en
         assert not src.exists()
 
 
+def test_reconcile_rmdir_empty_non_empty_quarantined_rolls_back_safely(lifecycle_env):
+    from app.tasks.handlers import _reconcile_executing_item
+    from app.batch_utilities.empty_dir_quarantine import build_e4_quarantine_name
+
+    service = lifecycle_env["service"]
+    settings = lifecycle_env["settings"]
+    root = lifecycle_env["root_path"]
+    quarantine = lifecycle_env["quarantine_dir"]
+
+    src = root / "dir_x"
+    src.mkdir()
+    st_x = src.stat()
+    exp_dev = st_x.st_dev
+    exp_ino = st_x.st_ino
+
+    plan_id = 991
+    seq = 1
+    q_name = build_e4_quarantine_name(plan_id, seq, str(src))
+    q_target = quarantine / q_name
+
+    # Atomically move X to quarantine, source becomes absent
+    src.rename(q_target)
+    assert not src.exists()
+
+    # After relocation, create a child file inside quarantined X (simulates crash before emptiness check)
+    child = q_target / "leaked_file.txt"
+    child.write_text("critical data")
+
+    with service.SessionLocal() as session:
+        plan = BatchPlan(id=plan_id, name="p_non_empty_crash", kind="execute", status="running")
+        session.add(plan)
+        session.flush()
+
+        item = BatchPlanItem(
+            plan_id=plan.id,
+            sequence=seq,
+            operation="rmdir_empty",
+            source_path=str(src),
+            target_path=None,
+            expected_device=exp_dev,
+            expected_inode=exp_ino,
+            state="executing",
+            metadata_json=json.dumps({
+                "scope_root": str(root),
+                "execution": {
+                    "source_stat": {"device": exp_dev, "inode": exp_ino}
+                }
+            }),
+        )
+        session.add(item)
+        session.commit()
+        item_id = item.id
+
+    with service.SessionLocal() as session:
+        item = session.get(BatchPlanItem, item_id)
+        _reconcile_executing_item(session, item, plan_id, 1, 1, settings, utcnow())
+        session.commit()
+
+    with service.SessionLocal() as session:
+        item = session.get(BatchPlanItem, item_id)
+        journals = session.query(OperationJournal).filter_by(plan_item_id=item_id).all()
+        # Expected:
+        # item MUST NOT become completed
+        # NO success Journal
+        # child file MUST survive
+        # X restored to original source path with child intact
+        # item = failed/conflict
+        assert item.state != "completed"
+        assert item.state == "failed"
+        assert "conflict" in (item.reason or "") or "non-empty" in (item.reason or "")
+        assert len(journals) == 0
+        assert src.exists() and src.is_dir()
+        st_restored = src.stat()
+        assert st_restored.st_dev == exp_dev and st_restored.st_ino == exp_ino
+        restored_child = src / "leaked_file.txt"
+        assert restored_child.exists()
+        assert restored_child.read_text() == "critical data"
+        assert not q_target.exists()
+
+
+def test_reconcile_rmdir_empty_non_empty_quarantined_collision_preserves_quarantine(lifecycle_env):
+    from app.tasks.handlers import _reconcile_executing_item
+    from app.batch_utilities.empty_dir_quarantine import build_e4_quarantine_name
+
+    service = lifecycle_env["service"]
+    settings = lifecycle_env["settings"]
+    root = lifecycle_env["root_path"]
+    quarantine = lifecycle_env["quarantine_dir"]
+
+    src = root / "dir_x_occupied"
+    src.mkdir()
+    st_x = src.stat()
+    exp_dev = st_x.st_dev
+    exp_ino = st_x.st_ino
+
+    plan_id = 992
+    seq = 1
+    q_name = build_e4_quarantine_name(plan_id, seq, str(src))
+    q_target = quarantine / q_name
+
+    # Atomically move X to quarantine
+    src.rename(q_target)
+
+    # After relocation, create child file inside quarantined X
+    child = q_target / "leaked_file.txt"
+    child.write_text("critical data")
+
+    # Original source becomes occupied by another object
+    src.mkdir()
+    (src / "occupying.txt").write_text("i am occupying")
+    st_occ = src.stat()
+
+    with service.SessionLocal() as session:
+        plan = BatchPlan(id=plan_id, name="p_non_empty_collision", kind="execute", status="running")
+        session.add(plan)
+        session.flush()
+
+        item = BatchPlanItem(
+            plan_id=plan.id,
+            sequence=seq,
+            operation="rmdir_empty",
+            source_path=str(src),
+            target_path=None,
+            expected_device=exp_dev,
+            expected_inode=exp_ino,
+            state="executing",
+            metadata_json=json.dumps({
+                "scope_root": str(root),
+                "execution": {
+                    "source_stat": {"device": exp_dev, "inode": exp_ino}
+                }
+            }),
+        )
+        session.add(item)
+        session.commit()
+        item_id = item.id
+
+    with service.SessionLocal() as session:
+        item = session.get(BatchPlanItem, item_id)
+        _reconcile_executing_item(session, item, plan_id, 1, 1, settings, utcnow())
+        session.commit()
+
+    with service.SessionLocal() as session:
+        item = session.get(BatchPlanItem, item_id)
+        journals = session.query(OperationJournal).filter_by(plan_item_id=item_id).all()
+        # Expected:
+        # item MUST NOT become completed
+        # NO success Journal
+        # child file MUST survive in quarantine
+        # occupying object at source remains untouched
+        # item = failed/conflict
+        assert item.state != "completed"
+        assert item.state == "failed"
+        assert "conflict" in (item.reason or "") or "non-empty" in (item.reason or "")
+        assert len(journals) == 0
+        assert q_target.exists() and q_target.is_dir()
+        assert child.exists()
+        assert child.read_text() == "critical data"
+        assert src.exists()
+        assert src.stat().st_ino == st_occ.st_ino
+        assert (src / "occupying.txt").read_text() == "i am occupying"
+
+
+
 
 
 
