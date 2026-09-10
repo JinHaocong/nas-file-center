@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Literal
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
@@ -11,6 +11,7 @@ from app.batch.rename import RenameRule
 from app.exceptions import PlanStaleError
 from app.filters.schema import FilterPreviewRequest, FilterPreviewResponse
 from app.filters.validation import FilterValidationError
+from app.resource_control import ResourcePolicyValidationError
 from app.batch_utilities.schema import (
     BatchUtilityPreviewRequest,
     BatchUtilityGenerateRequest,
@@ -412,6 +413,47 @@ def get_system_settings(request: Request):
         "fclones_binary": s.fclones_binary,
         "verification_hash": s.verification_hash,
     }
+
+
+class ResourcePolicyUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scan_threads: int = Field(..., strict=True, ge=1, le=32)
+    hash_threads: int = Field(..., strict=True, ge=1, le=32)
+    io_limit: Literal["low", "normal", "unlimited"]
+    job_priority: Literal["normal", "background"]
+    active_window_enabled: bool = Field(..., strict=True)
+    active_window_start: str | None = None
+    active_window_end: str | None = None
+    active_window_timezone: str | None = None
+    outside_window_mode: Literal["limited", "pause"]
+
+
+@router.get(
+    "/settings/resource-policy",
+    dependencies=[Depends(require_admin_user)],
+)
+def get_resource_policy_endpoint(request: Request):
+    return request.app.state.service.get_resource_policy()
+
+
+@router.put(
+    "/settings/resource-policy",
+    dependencies=[Depends(require_admin_user)],
+)
+def update_resource_policy_endpoint(
+    request: Request,
+    payload: ResourcePolicyUpdateRequest,
+):
+    try:
+        return request.app.state.service.update_resource_policy(
+            payload.model_dump()
+        )
+    except ResourcePolicyValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=str(exc),
+        ) from exc
 
 
 # Indexes

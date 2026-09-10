@@ -49,7 +49,13 @@ from app.models import (
     WorkJob,
     Workflow,
     WorkflowRevision,
+    ResourcePolicy,
     utcnow,
+)
+from app.resource_control import (
+    ResourcePolicySnapshot,
+    validate_resource_policy_snapshot,
+    evaluate_resource_policy,
 )
 from app.workflows.errors import (
     DedupeRescanRequiredError,
@@ -579,6 +585,85 @@ class FileCenterService:
                 "exclude_dir_names": valid_rules,
                 "updated_at": policy.updated_at.isoformat() if policy.updated_at else None,
             }
+
+    def get_resource_policy(self) -> dict:
+        with self.SessionLocal() as session:
+            row = session.get(ResourcePolicy, 1)
+            if row is None:
+                raise RuntimeError("ResourcePolicy singleton missing")
+            snapshot = ResourcePolicySnapshot(
+                scan_threads=row.scan_threads,
+                hash_threads=row.hash_threads,
+                io_limit=row.io_limit,
+                job_priority=row.job_priority,
+                active_window_enabled=row.active_window_enabled,
+                active_window_start=row.active_window_start,
+                active_window_end=row.active_window_end,
+                active_window_timezone=row.active_window_timezone,
+                outside_window_mode=row.outside_window_mode,
+                revision=row.revision,
+            )
+            validate_resource_policy_snapshot(snapshot)
+            eff = evaluate_resource_policy(snapshot, now_utc=utcnow())
+            data = {
+                "id": row.id,
+                "scan_threads": row.scan_threads,
+                "hash_threads": row.hash_threads,
+                "io_limit": row.io_limit,
+                "job_priority": row.job_priority,
+                "active_window_enabled": row.active_window_enabled,
+                "active_window_start": row.active_window_start,
+                "active_window_end": row.active_window_end,
+                "active_window_timezone": row.active_window_timezone,
+                "outside_window_mode": row.outside_window_mode,
+                "revision": row.revision,
+                "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+                "effective_now": {
+                    "profile": eff.profile,
+                    "inside_active_window": eff.inside_active_window,
+                    "resource_jobs_admitted": eff.resource_jobs_admitted,
+                    "effective_thread_cap": eff.effective_thread_cap,
+                },
+            }
+            return data
+
+    def update_resource_policy(self, payload: dict) -> dict:
+        # Phase A: Outside DB write transaction
+        temp_snapshot = ResourcePolicySnapshot(
+            scan_threads=payload["scan_threads"],
+            hash_threads=payload["hash_threads"],
+            io_limit=payload["io_limit"],
+            job_priority=payload["job_priority"],
+            active_window_enabled=payload["active_window_enabled"],
+            active_window_start=payload.get("active_window_start"),
+            active_window_end=payload.get("active_window_end"),
+            active_window_timezone=payload.get("active_window_timezone"),
+            outside_window_mode=payload["outside_window_mode"],
+            revision=1,
+        )
+        validate_resource_policy_snapshot(temp_snapshot)
+
+        # Phase B: Short SQLite BEGIN IMMEDIATE write transaction (Zero ZoneInfo file I/O)
+        with self.SessionLocal() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            row = session.get(ResourcePolicy, 1)
+            if row is None:
+                session.rollback()
+                raise RuntimeError("ResourcePolicy singleton missing")
+            row.scan_threads = temp_snapshot.scan_threads
+            row.hash_threads = temp_snapshot.hash_threads
+            row.io_limit = temp_snapshot.io_limit
+            row.job_priority = temp_snapshot.job_priority
+            row.active_window_enabled = temp_snapshot.active_window_enabled
+            row.active_window_start = temp_snapshot.active_window_start
+            row.active_window_end = temp_snapshot.active_window_end
+            row.active_window_timezone = temp_snapshot.active_window_timezone
+            row.outside_window_mode = temp_snapshot.outside_window_mode
+            row.revision = row.revision + 1
+            row.updated_at = utcnow()
+            session.commit()
+
+        return self.get_resource_policy()
 
     def preview_filter(
         self,
