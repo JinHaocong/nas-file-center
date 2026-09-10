@@ -562,14 +562,20 @@ mkdir -p "${MIG_DIR}/fresh_config" "${MIG_DIR}/data"
 echo "Starting fresh application container against empty CONFIG..."
 docker run -d --name gate5g-mig-fresh   --platform linux/amd64   -p 18083:8080   -v "${MIG_DIR}/fresh_config:/config"   -v "${MIG_DIR}/data:/data:ro"   -e CONFIG_DIR=/config   -e DATA_MOUNT=/data   -e ALLOWED_ROOTS=/data   -e QUARANTINE_ROOT=/data/.quarantine   -e ALLOW_MUTATION=false   -e ALLOW_DELETE=false   -e PROTECT_LAST_FILE=true   "${G2_IMAGE_TAG}"
 
-# Poll health
+# Poll health (fail-closed)
+HEALTH_OK=0
 for i in {1..30}; do
   if curl -s http://127.0.0.1:18083/health | grep -q '"status":"ok"'; then
+    HEALTH_OK=1
     echo "Fresh container is healthy"
     break
   fi
   sleep 1
 done
+[ "${HEALTH_OK}" = "1" ] || {
+  docker logs gate5g-mig-fresh
+  echo "Fresh container never became healthy"; exit 1;
+}
 
 # Gracefully stop container to ensure WAL truncate
 docker stop gate5g-mig-fresh
@@ -679,14 +685,20 @@ cp "${MIG_DIR}/historical_original_config/app.db" "${MIG_DIR}/upgrade_test_confi
 # Start candidate application container against that directory (where Settings.database_path resolves to /config/app.db)
 docker run -d --name gate5g-mig-upgrade   --platform linux/amd64   -p 18084:8080   -v "${MIG_DIR}/upgrade_test_config:/config"   -v "${MIG_DIR}/data:/data:ro"   -e CONFIG_DIR=/config   -e DATA_MOUNT=/data   "${G2_IMAGE_TAG}"   uvicorn app.main:app --host 0.0.0.0 --port 8080
 
-# Poll health
+# Poll health (fail-closed)
+UPGRADE_HEALTH_OK=0
 for i in {1..30}; do
   if curl -s http://127.0.0.1:18084/health | grep -q '"status":"ok"'; then
+    UPGRADE_HEALTH_OK=1
     echo "Upgraded container is healthy"
     break
   fi
   sleep 1
 done
+[ "${UPGRADE_HEALTH_OK}" = "1" ] || {
+  docker logs gate5g-mig-upgrade
+  echo "Upgraded container never became healthy"; exit 1;
+}
 
 # Gracefully stop container
 docker stop gate5g-mig-upgrade
@@ -818,22 +830,23 @@ for name, p in [('fresh', '/tmp/gate5g-migration/fresh_config/app.db'), ('upgrad
     sess_fks = cursor.fetchall()
     assert any(row[2] == 'users' and row[3] == 'user_id' for row in sess_fks), f'{name} sessions missing FK to users'
 
-    # 3. PRAGMA index_list for unique constraints
-    cursor.execute('PRAGMA index_list(users);')
-    users_idx = cursor.fetchall()
-    assert any(row[2] == 1 for row in users_idx), f'{name} users missing unique constraint index'
+    # 3. PRAGMA index_list & PRAGMA index_info for verified unique constraints
+    def assert_unique_column(table_name, expected_column):
+        cursor.execute(f"PRAGMA index_list({table_name});")
+        indexes = cursor.fetchall()
+        for idx in indexes:
+            if idx[2] == 1:  # unique index
+                idx_name = idx[1]
+                cursor.execute(f"PRAGMA index_info('{idx_name}');")
+                cols = [col[2] for col in cursor.fetchall()]
+                if expected_column in cols:
+                    return
+        raise AssertionError(f"{name} table {table_name} missing unique constraint on column {expected_column}")
 
-    cursor.execute('PRAGMA index_list(sessions);')
-    sess_idx = cursor.fetchall()
-    assert any(row[2] == 1 for row in sess_idx), f'{name} sessions missing unique constraint index'
-
-    cursor.execute('PRAGMA index_list(quarantine_entries);')
-    qe_idx = cursor.fetchall()
-    assert any(row[2] == 1 for row in qe_idx), f'{name} quarantine_entries missing unique constraint index'
-
-    cursor.execute('PRAGMA index_list(indexed_paths);')
-    ip_idx = cursor.fetchall()
-    assert any(row[2] == 1 for row in ip_idx), f'{name} indexed_paths missing unique constraint index'
+    assert_unique_column('users', 'username')
+    assert_unique_column('sessions', 'token_hash')
+    assert_unique_column('quarantine_entries', 'quarantine_path')
+    assert_unique_column('indexed_paths', 'absolute_path')
 
     # 4. Verify required named indexes exist in sqlite_master
     cursor.execute('SELECT name FROM sqlite_master WHERE type="index";')
@@ -1314,11 +1327,20 @@ STALE_VAL_RESP=$(curl -s -b "${FIXTURE_DIR}/cookie_rw.txt" -X POST "http://127.0
 echo "Stale Validate Response: ${STALE_VAL_RESP}"
 echo "${STALE_VAL_RESP}" | grep -E "stale|STALE" || { echo "Validate did not detect stale state"; exit 1; }
 
-# Attempt Execute -> MUST BE REFUSED with HTTP 409 PLAN_STALE
+# Attempt Execute -> MUST BE REFUSED with HTTP 409 and JSON error.code == PLAN_STALE
 STALE_EXEC_RESP=$(curl -s -w "\n%{http_code}" -b "${FIXTURE_DIR}/cookie_rw.txt" -X POST "http://127.0.0.1:18082/api/plans/${STALE_PLAN_ID}/execute" -H "Origin: http://127.0.0.1:18082")
 STALE_EXEC_CODE=$(echo "${STALE_EXEC_RESP}" | tail -n1)
-echo "Stale Execute Status Code: ${STALE_EXEC_CODE}"
+STALE_EXEC_BODY=$(echo "${STALE_EXEC_RESP}" | sed '$d')
+echo "Stale Execute Status Code: ${STALE_EXEC_CODE}, Body: ${STALE_EXEC_BODY}"
 [ "${STALE_EXEC_CODE}" = "409" ] || { echo "Expected 409 for stale execution, got ${STALE_EXEC_CODE}"; exit 1; }
+python3 -c "
+import json
+body = json.loads('''${STALE_EXEC_BODY}''')
+err = body.get('error') or {}
+err_code = err.get('code') if isinstance(err, dict) else None
+assert err_code == 'PLAN_STALE', f'Expected error.code == PLAN_STALE, got: {body}'
+print('G6_PLAN_STALE_CODE_VERIFIED_OK: HTTP 409 and error.code == PLAN_STALE')
+"
 
 # Verify source remains intact on disk and clean up stale test pair
 [ -f "${HOST_STALE_SOURCE}" ] || { echo "Modified file was erroneously removed!"; exit 1; }
@@ -1332,16 +1354,19 @@ Expected: Validate explicitly reports stale; Execute refused with 409; modified 
 Run:
 ```bash
 python3 -c "
-import hashlib, json
+import hashlib, json, os
 records = json.load(open('${FIXTURE_DIR}/baseline_records.json'))
 sentinel_expected = records['sentinel_dir/external_file.txt']
 sentinel_path = '${FIXTURE_DIR}/sentinel_dir/external_file.txt'
 
 st = open(sentinel_path, 'rb').read()
+stat_info = os.stat(sentinel_path)
 current_h = hashlib.sha256(st).hexdigest()
-assert current_h == sentinel_expected['sha256'], 'Sentinel file content was modified!'
-assert len(st) == sentinel_expected['size'], 'Sentinel file size was modified!'
-print('SENTINEL_INTEGRITY_VERIFIED_OK: External sentinel completely untouched across all mutation stages')
+assert current_h == sentinel_expected['sha256'], 'Sentinel SHA256 was modified!'
+assert len(st) == sentinel_expected['size'], 'Sentinel content size was modified!'
+assert stat_info.st_size == sentinel_expected['size'], 'Sentinel stat size was modified!'
+assert stat_info.st_mtime_ns == sentinel_expected['mtime_ns'], 'Sentinel mtime_ns was modified!'
+print('SENTINEL_INTEGRITY_VERIFIED_OK: Sentinel SHA256, size, and mtime_ns completely untouched')
 "
 ```
 Expected: External sentinel file content, size, and hash remain completely unmodified.
@@ -1391,6 +1416,11 @@ NAS_ARCHIVE_SHA256=$(sha256sum /tmp/nas-file-center-candidate.tar | awk '{print 
 echo "NAS_ARCHIVE_SHA256: ${NAS_ARCHIVE_SHA256}"
 echo "G2_IMAGE_ARCHIVE_SHA256: ${G2_IMAGE_ARCHIVE_SHA256}"
 [ "${NAS_ARCHIVE_SHA256}" = "${G2_IMAGE_ARCHIVE_SHA256}" ] || { echo "Image archive SHA256 mismatch on NAS!"; exit 1; }
+
+# Produce authoritative G7_IMAGE_ARCHIVE_SHA256 variable for G8 evidence audit
+G7_IMAGE_ARCHIVE_SHA256="${NAS_ARCHIVE_SHA256}"
+[ "${G7_IMAGE_ARCHIVE_SHA256}" = "${G2_IMAGE_ARCHIVE_SHA256}" ] || { echo "G7_IMAGE_ARCHIVE_SHA256 mismatch!"; exit 1; }
+echo "G7_IMAGE_ARCHIVE_SHA256=${G7_IMAGE_ARCHIVE_SHA256}"
 ```
 Expected: SHA256 checksum on the NAS matches `G2_IMAGE_ARCHIVE_SHA256` bit-for-bit; manifest variables explicitly loaded.
 
@@ -1550,6 +1580,23 @@ assert data.get('online') is True, 'NAS worker is not online'
 print('NAS_WORKER_ONLINE_OK')
 "
 
+# Executable DB proof of single Worker ownership (WorkerState count==1, TaskLock locked==true, owner==worker_id)
+docker exec gate5g-nas-api python -c "
+from app.db import create_engine_and_session
+from app.models import WorkerState, TaskLock
+from pathlib import Path
+engine, SessionLocal = create_engine_and_session(Path('/config/app.db'))
+with SessionLocal() as s:
+    workers = s.query(WorkerState).all()
+    assert len(workers) == 1, f'Expected exactly 1 WorkerState, found {len(workers)}'
+    w = workers[0]
+    lock = s.query(TaskLock).filter(TaskLock.id == 1).first()
+    assert lock is not None, 'TaskLock id=1 missing'
+    assert lock.locked is True, f'TaskLock is not locked: {lock.locked}'
+    assert lock.owner == w.worker_id, f'TaskLock owner {lock.owner} != worker_id {w.worker_id}'
+print('NAS_WORKER_SINGLE_OWNERSHIP_DB_PROOF_OK: exactly 1 worker owning TaskLock id=1')
+"
+
 # 4. Real Worker-backed scan on NAS volume
 NAS_RO_SCAN_RESP=$(curl -s -b /tmp/nas_cookie.txt -X POST http://127.0.0.1:28080/api/scans \
   -H "Content-Type: application/json" -H "Origin: http://127.0.0.1:28080" \
@@ -1578,28 +1625,74 @@ done
 docker exec gate5g-nas-api fclones --version
 docker exec gate5g-nas-api fclones group /data > /dev/null
 
+# Capture WorkJob stats before policy update (Zero-Scheduler proof baseline)
+read -r G7_WORKJOB_COUNT_BEFORE_POLICY G7_WORKJOB_MAX_ID_BEFORE_POLICY < <(docker exec gate5g-nas-api python -c "
+from app.db import create_engine_and_session
+from app.models import WorkJob
+from pathlib import Path
+from sqlalchemy import func
+engine, SessionLocal = create_engine_and_session(Path('/config/app.db'))
+with SessionLocal() as s:
+    cnt = s.query(func.count(WorkJob.id)).scalar() or 0
+    max_id = s.query(func.max(WorkJob.id)).scalar() or 0
+    print(f'{cnt} {max_id}')
+")
+echo "G7_WORKJOB_COUNT_BEFORE_POLICY: ${G7_WORKJOB_COUNT_BEFORE_POLICY}"
+echo "G7_WORKJOB_MAX_ID_BEFORE_POLICY: ${G7_WORKJOB_MAX_ID_BEFORE_POLICY}"
+
 # 7. Admin ResourcePolicy GET
-POL_GET=$(curl -s -b /tmp/nas_cookie.txt http://127.0.0.1:28080/api/resource-policy)
+POL_GET=$(curl -s -b /tmp/nas_cookie.txt http://127.0.0.1:28080/api/settings/resource-policy)
 echo "Resource Policy GET: ${POL_GET}"
-python3 -c "
+OLD_REV=$(python3 -c "
 import json
 data = json.loads('''${POL_GET}''')
 assert data.get('scan_threads') is not None, 'scan_threads missing'
-assert data.get('revision') == 1, 'revision must be 1'
-print('NAS_RESOURCE_POLICY_GET_OK')
-"
+assert data.get('revision') == 1, 'initial revision must be 1'
+print(data['revision'])
+")
+echo "Initial Policy Revision: ${OLD_REV}"
 
-# 8. Admin ResourcePolicy PUT and readback verification
-POL_PUT=$(curl -s -b /tmp/nas_cookie.txt -X PUT http://127.0.0.1:28080/api/resource-policy \
+# 8. Admin ResourcePolicy PUT and readback verification (full replacement payload, extra forbidden)
+POL_PUT_RESP=$(curl -s -w "\n%{http_code}" -b /tmp/nas_cookie.txt -X PUT http://127.0.0.1:28080/api/settings/resource-policy \
   -H "Content-Type: application/json" -H "Origin: http://127.0.0.1:28080" \
-  -d '{"scan_threads":2,"expected_revision":1}')
-echo "Resource Policy PUT: ${POL_PUT}"
+  -d '{
+    "scan_threads": 2,
+    "hash_threads": 2,
+    "io_limit": "normal",
+    "job_priority": "normal",
+    "active_window_enabled": true,
+    "active_window_start": "00:00",
+    "active_window_end": "23:59",
+    "active_window_timezone": "UTC",
+    "outside_window_mode": "limited"
+  }')
+POL_PUT_CODE=$(echo "${POL_PUT_RESP}" | tail -n1)
+POL_PUT_BODY=$(echo "${POL_PUT_RESP}" | sed '$d')
+echo "Resource Policy PUT Code: ${POL_PUT_CODE}, Body: ${POL_PUT_BODY}"
+[ "${POL_PUT_CODE}" = "200" ] || { echo "PUT resource policy failed with ${POL_PUT_CODE}"; exit 1; }
 python3 -c "
 import json
-data = json.loads('''${POL_PUT}''')
-assert data.get('scan_threads') == 2, 'scan_threads not updated'
-assert data.get('revision') == 2, 'revision not incremented'
+data = json.loads('''${POL_PUT_BODY}''')
+assert data.get('revision') == int('${OLD_REV}') + 1, 'revision not incremented by 1'
 print('NAS_RESOURCE_POLICY_PUT_OK')
+"
+
+# Fresh GET readback verifying all persisted fields
+POL_GET_FRESH=$(curl -s -b /tmp/nas_cookie.txt http://127.0.0.1:28080/api/settings/resource-policy)
+python3 -c "
+import json
+data = json.loads('''${POL_GET_FRESH}''')
+assert data.get('scan_threads') == 2, 'scan_threads mismatch'
+assert data.get('hash_threads') == 2, 'hash_threads mismatch'
+assert data.get('io_limit') == 'normal', 'io_limit mismatch'
+assert data.get('job_priority') == 'normal', 'job_priority mismatch'
+assert data.get('active_window_enabled') is True, 'active_window_enabled mismatch'
+assert data.get('active_window_start') == '00:00', 'active_window_start mismatch'
+assert data.get('active_window_end') == '23:59', 'active_window_end mismatch'
+assert data.get('active_window_timezone') == 'UTC', 'active_window_timezone mismatch'
+assert data.get('outside_window_mode') == 'limited', 'outside_window_mode mismatch'
+assert data.get('revision') == int('${OLD_REV}') + 1, 'revision mismatch'
+print('NAS_RESOURCE_POLICY_FRESH_GET_READBACK_OK')
 "
 
 # 9. Verify ordinary user is forbidden on ResourcePolicy
@@ -1618,26 +1711,53 @@ curl -s -c /tmp/nas_user_cookie.txt -X POST http://127.0.0.1:28080/api/auth/logi
   -H "Content-Type: application/json" -H "Origin: http://127.0.0.1:28080" \
   -d '{"username":"ordinary_user","password":"UserPass123!"}'
 
-USER_POL_CODE=$(curl -s -o /dev/null -w "%{http_code}" -b /tmp/nas_user_cookie.txt http://127.0.0.1:28080/api/resource-policy)
+USER_POL_CODE=$(curl -s -o /dev/null -w "%{http_code}" -b /tmp/nas_user_cookie.txt http://127.0.0.1:28080/api/settings/resource-policy)
 [ "${USER_POL_CODE}" = "403" ] || { echo "Ordinary user was not forbidden: ${USER_POL_CODE}"; exit 1; }
 echo "NAS_ORDINARY_USER_RBAC_FORBIDDEN_OK"
 
-# 10. Prove Zero-Scheduler Invariant: zero scheduled work jobs exist
-docker exec gate5g-nas-api python -c "
+# 10. Prove Zero-Scheduler Invariant: wait across multiple worker polling iterations and assert zero automatic jobs created
+sleep 6
+
+read -r G7_WORKJOB_COUNT_AFTER_POLICY G7_WORKJOB_MAX_ID_AFTER_POLICY < <(docker exec gate5g-nas-api python -c "
 from app.db import create_engine_and_session
 from app.models import WorkJob
 from pathlib import Path
+from sqlalchemy import func
 engine, SessionLocal = create_engine_and_session(Path('/config/app.db'))
 with SessionLocal() as s:
-    scheduled = s.query(WorkJob).filter(WorkJob.status == 'scheduled').count()
-    assert scheduled == 0, f'Found {scheduled} scheduled jobs; Zero-Scheduler Invariant violated'
-print('NAS_ZERO_SCHEDULER_INVARIANT_OK')
-"
+    cnt = s.query(func.count(WorkJob.id)).scalar() or 0
+    max_id = s.query(func.max(WorkJob.id)).scalar() or 0
+    print(f'{cnt} {max_id}')
+")
+echo "G7_WORKJOB_COUNT_AFTER_POLICY: ${G7_WORKJOB_COUNT_AFTER_POLICY}"
+echo "G7_WORKJOB_MAX_ID_AFTER_POLICY: ${G7_WORKJOB_MAX_ID_AFTER_POLICY}"
+[ "${G7_WORKJOB_COUNT_AFTER_POLICY}" = "${G7_WORKJOB_COUNT_BEFORE_POLICY}" ] || { echo "WorkJob count changed after policy update!"; exit 1; }
+[ "${G7_WORKJOB_MAX_ID_AFTER_POLICY}" = "${G7_WORKJOB_MAX_ID_BEFORE_POLICY}" ] || { echo "WorkJob max(id) changed after policy update!"; exit 1; }
+AUTOMATIC_JOBS_CREATED=0
+echo "AUTOMATIC_JOBS_CREATED=${AUTOMATIC_JOBS_CREATED}"
+echo "NAS_ZERO_SCHEDULER_INVARIANT_OK"
 
-# 11. Restore ResourcePolicy back to safe initial state before mutation stage
-curl -s -b /tmp/nas_cookie.txt -X PUT http://127.0.0.1:28080/api/resource-policy \
+# 11. Put complete known-safe ResourcePolicy before mutation stage and capture G7_SAFE_POLICY_REVISION
+SAFE_POL_RESP=$(curl -s -b /tmp/nas_cookie.txt -X PUT http://127.0.0.1:28080/api/settings/resource-policy \
   -H "Content-Type: application/json" -H "Origin: http://127.0.0.1:28080" \
-  -d '{"scan_threads":1,"expected_revision":2}' > /dev/null
+  -d '{
+    "scan_threads": 2,
+    "hash_threads": 2,
+    "io_limit": "normal",
+    "job_priority": "normal",
+    "active_window_enabled": false,
+    "active_window_start": null,
+    "active_window_end": null,
+    "active_window_timezone": null,
+    "outside_window_mode": "limited"
+  }')
+G7_SAFE_POLICY_REVISION=$(python3 -c "
+import json
+data = json.loads('''${SAFE_POL_RESP}''')
+assert data.get('active_window_enabled') is False, 'safe policy active_window_enabled not False'
+print(data['revision'])
+")
+echo "G7_SAFE_POLICY_REVISION=${G7_SAFE_POLICY_REVISION}"
 
 docker compose -f /tmp/nas-gate5g-transient-compose.yaml down
 echo "NAS_STAGE1_READ_ONLY_SUCCESS"
@@ -1663,7 +1783,16 @@ cp "${GATE5G_TEST_DATA_PATH}/nas_fileA.dat" "${GATE5G_TEST_DATA_PATH}/nas_fileB.
 # Setup sentinel and reachable symlink
 echo "NAS_EXTERNAL_SENTINEL_PAYLOAD_SAFE" > "${GATE5G_TEST_SENTINEL_PATH}/external_file.txt"
 ln -sf "/sentinel/external_file.txt" "${GATE5G_TEST_DATA_PATH}/symlink_to_external"
-NAS_SENTINEL_HASH_ORIG=$(sha256sum "${GATE5G_TEST_SENTINEL_PATH}/external_file.txt" | awk '{print $1}')
+
+# Record NAS Sentinel baseline (SHA256, size, mtime_ns)
+read -r NAS_SENTINEL_HASH_ORIG NAS_SENTINEL_SIZE_ORIG NAS_SENTINEL_MTIME_ORIG < <(python3 -c "
+import os, hashlib
+p = '${GATE5G_TEST_SENTINEL_PATH}/external_file.txt'
+st = os.stat(p)
+h = hashlib.sha256(open(p, 'rb').read()).hexdigest()
+print(f'{h} {st.st_size} {st.st_mtime_ns}')
+")
+echo "NAS Sentinel Baseline: hash=${NAS_SENTINEL_HASH_ORIG} size=${NAS_SENTINEL_SIZE_ORIG} mtime_ns=${NAS_SENTINEL_MTIME_ORIG}"
 
 # Login admin
 curl -s -c /tmp/nas_rw_cookie.txt -X POST http://127.0.0.1:28080/api/auth/login \
@@ -1808,17 +1937,35 @@ echo "MODIFIED_ON_NAS_AFTER_FREEZE" >> "${NAS_HOST_STALE_SOURCE}"
 NAS_STALE_VAL=$(curl -s -b /tmp/nas_rw_cookie.txt -X POST "http://127.0.0.1:28080/api/plans/${NAS_STALE_PLAN_ID}/validate" -H "Origin: http://127.0.0.1:28080")
 echo "${NAS_STALE_VAL}" | grep -E "stale|STALE" || { echo "NAS validate did not detect stale"; exit 1; }
 
-# Execute rejected with 409
-NAS_STALE_EXEC_CODE=$(curl -s -o /dev/null -w "%{http_code}" -b /tmp/nas_rw_cookie.txt -X POST "http://127.0.0.1:28080/api/plans/${NAS_STALE_PLAN_ID}/execute" -H "Origin: http://127.0.0.1:28080")
+# Execute rejected with HTTP 409 and JSON error.code == PLAN_STALE
+NAS_STALE_EXEC_RESP=$(curl -s -w "\n%{http_code}" -b /tmp/nas_rw_cookie.txt -X POST "http://127.0.0.1:28080/api/plans/${NAS_STALE_PLAN_ID}/execute" -H "Origin: http://127.0.0.1:28080")
+NAS_STALE_EXEC_CODE=$(echo "${NAS_STALE_EXEC_RESP}" | tail -n1)
+NAS_STALE_EXEC_BODY=$(echo "${NAS_STALE_EXEC_RESP}" | sed '$d')
+echo "NAS Stale Execute Code: ${NAS_STALE_EXEC_CODE}, Body: ${NAS_STALE_EXEC_BODY}"
 [ "${NAS_STALE_EXEC_CODE}" = "409" ] || { echo "Expected 409 on NAS stale execute, got ${NAS_STALE_EXEC_CODE}"; exit 1; }
+python3 -c "
+import json
+body = json.loads('''${NAS_STALE_EXEC_BODY}''')
+err = body.get('error') or {}
+err_code = err.get('code') if isinstance(err, dict) else None
+assert err_code == 'PLAN_STALE', f'Expected error.code == PLAN_STALE on NAS, got: {body}'
+print('NAS_PLAN_STALE_CODE_VERIFIED_OK: HTTP 409 and error.code == PLAN_STALE')
+"
 [ -f "${NAS_HOST_STALE_SOURCE}" ] || { echo "Stale source was deleted on NAS"; exit 1; }
 rm -f "${GATE5G_TEST_DATA_PATH}/nas_staleA.dat" "${GATE5G_TEST_DATA_PATH}/nas_staleB.dat"
 echo "NAS_STALE_DEFENSE_VERIFIED_OK"
 
 # 6. Verify Reachable Sentinel and Zero Filesystem Escape outside test root
-NAS_SENTINEL_HASH_CURRENT=$(sha256sum "${GATE5G_TEST_SENTINEL_PATH}/external_file.txt" | awk '{print $1}')
-[ "${NAS_SENTINEL_HASH_CURRENT}" = "${NAS_SENTINEL_HASH_ORIG}" ] || { echo "Sentinel modified on NAS!"; exit 1; }
-echo "NAS_SENTINEL_INTEGRITY_VERIFIED_OK"
+python3 -c "
+import os, hashlib
+p = '${GATE5G_TEST_SENTINEL_PATH}/external_file.txt'
+st = os.stat(p)
+h = hashlib.sha256(open(p, 'rb').read()).hexdigest()
+assert h == '${NAS_SENTINEL_HASH_ORIG}', f'NAS sentinel SHA256 mismatch: {h} != ${NAS_SENTINEL_HASH_ORIG}'
+assert st.st_size == int('${NAS_SENTINEL_SIZE_ORIG}'), f'NAS sentinel size mismatch: {st.st_size} != ${NAS_SENTINEL_SIZE_ORIG}'
+assert st.st_mtime_ns == int('${NAS_SENTINEL_MTIME_ORIG}'), f'NAS sentinel mtime_ns mismatch: {st.st_mtime_ns} != ${NAS_SENTINEL_MTIME_ORIG}'
+print('NAS_SENTINEL_INTEGRITY_VERIFIED_OK: SHA256, size, and mtime_ns unchanged')
+"
 ```
 Expected: Real G6 lifecycle, plan-derived quarantine, byte-identical restore, separate stale rejection with 409, and reachable sentinel protection verified on target NAS.
 
@@ -1850,13 +1997,34 @@ curl -s -c /tmp/nas_rw_cookie.txt -X POST http://127.0.0.1:28080/api/auth/login 
   -H "Content-Type: application/json" -H "Origin: http://127.0.0.1:28080" \
   -d '{"username":"admin","password":"AdminPassword123!"}'
 
-# 3. Verify SQLite DB and ResourcePolicy state persisted across restarts
-PERSISTED_POL=$(curl -s -b /tmp/nas_rw_cookie.txt http://127.0.0.1:28080/api/resource-policy)
+# 3. Verify SQLite DB exists, passes integrity check, and ResourcePolicy fully persisted across restarts
+docker exec gate5g-nas-api python -c "
+import sqlite3
+conn = sqlite3.connect('/config/app.db')
+cursor = conn.cursor()
+cursor.execute('PRAGMA integrity_check;')
+res = cursor.fetchall()
+assert res == [('ok',)], f'NAS DB integrity check failed after restart: {res}'
+conn.close()
+print('NAS_DB_INTEGRITY_POST_RESTART_OK')
+"
+
+PERSISTED_POL=$(curl -s -b /tmp/nas_rw_cookie.txt http://127.0.0.1:28080/api/settings/resource-policy)
+echo "Persisted Policy after restart: ${PERSISTED_POL}"
 python3 -c "
 import json
 data = json.loads('''${PERSISTED_POL}''')
-assert data.get('id') == 1, 'ResourcePolicy id missing'
-print('NAS_DB_AND_POLICY_PERSISTED_OK')
+assert data.get('scan_threads') == 2, 'scan_threads not persisted'
+assert data.get('hash_threads') == 2, 'hash_threads not persisted'
+assert data.get('io_limit') == 'normal', 'io_limit not persisted'
+assert data.get('job_priority') == 'normal', 'job_priority not persisted'
+assert data.get('active_window_enabled') is False, 'active_window_enabled not persisted'
+assert data.get('active_window_start') is None, 'active_window_start not persisted'
+assert data.get('active_window_end') is None, 'active_window_end not persisted'
+assert data.get('active_window_timezone') is None, 'active_window_timezone not persisted'
+assert data.get('outside_window_mode') == 'limited', 'outside_window_mode not persisted'
+assert data.get('revision') == int('${G7_SAFE_POLICY_REVISION}'), f'Expected revision {${G7_SAFE_POLICY_REVISION}}, got {data.get("revision")}'
+print('NAS_RESOURCE_POLICY_ALL_FIELDS_PERSISTED_OK: all 10 fields match G7_SAFE_POLICY_REVISION')
 "
 
 # 4. Verify container restart counts and absence of crash loops
