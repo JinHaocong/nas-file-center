@@ -1,8 +1,8 @@
 # Gate5-G Final Validation Design Checkpoint
 
-**Date:** 2026-09-10  
-**Target Branch:** `v0.3.5-gate5c-hotfix4`  
-**BASE_HEAD:** `e04399c8ee8a5b2a81b9090dabb402c49e21e2fb`  
+**Date:** 2026-09-10
+**Target Branch:** `v0.3.5-gate5c-hotfix4`
+**BASE_HEAD:** `e04399c8ee8a5b2a81b9090dabb402c49e21e2fb`
 
 ---
 
@@ -22,9 +22,9 @@ v0.3.5
 = NOT CLOSED
 ```
 
-> **Review Boundary Notice:**  
-> This document is a design checkpoint prepared for external independent review.  
-> The authoring agent does not claim independent approval of its own design.  
+> **Review Boundary Notice:**
+> This document is a design checkpoint prepared for external independent review.
+> The authoring agent does not claim independent approval of its own design.
 > Formal Architecture / Validation Freeze requires external project-owner approval prior to any execution.
 
 ---
@@ -53,7 +53,7 @@ The design specification explicitly records the following known version metadata
 - `compose.yaml`: `image: nas-file-center:0.3.2`
 - `compose.komodo.yaml`: `image: kerwinjhc/nas-file-center:latest`
 
-**Formal Handling:**  
+**Formal Handling:**
 These mismatches are designated as `KNOWN G0 BLOCKING FINDING`. They are deliberately preserved without modification in this design checkpoint. During initial Gate5-G execution, Phase G0 will formally record this failure, triggering an authorized, bounded release-metadata hotfix to establish the canonical `0.3.5` release candidate commit.
 
 ---

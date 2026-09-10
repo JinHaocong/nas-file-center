@@ -1,11 +1,11 @@
 # NAS File Center v0.3.5 — Gate5-G Final Validation Design Specification
 
-**Document Version:** 1.0.0  
-**Date:** 2026-09-10  
-**Status:** DESIGN SPECIFICATION CANDIDATE / ARCHITECTURE FREEZE PROPOSAL  
-**Implementation / Execution Status:** NOT AUTHORIZED  
-**Authoritative Baseline HEAD:** `e04399c8ee8a5b2a81b9090dabb402c49e21e2fb`  
-**Target Branch:** `v0.3.5-gate5c-hotfix4`  
+**Document Version:** 1.0.0
+**Date:** 2026-09-10
+**Status:** DESIGN SPECIFICATION CANDIDATE / ARCHITECTURE FREEZE PROPOSAL
+**Implementation / Execution Status:** NOT AUTHORIZED
+**Authoritative Baseline HEAD:** `e04399c8ee8a5b2a81b9090dabb402c49e21e2fb`
+**Target Branch:** `v0.3.5-gate5c-hotfix4`
 
 ---
 
@@ -481,7 +481,7 @@ The creation of the final immutable Git release tag:
 ```text
 v0.3.5
 ```
-is **strictly prohibited** during the design and validation phases. 
+is **strictly prohibited** during the design and validation phases.
 
 ### 8.2 Sequence of Authority
 1. Gate5-G executable verification completes with 100% passing results across G0–G8.
