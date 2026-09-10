@@ -1,8 +1,8 @@
-# Gate5-G Final Validation Execution Plan Checkpoint — Revision 3 (Final Protocol Closure)
+# Gate5-G Final Validation Execution Plan Checkpoint — Revision 4 (Final Freeze-Alignment Closure)
 
 **Date:** 2026-09-10
 **Target Branch:** `v0.3.5-gate5c-hotfix4`
-**BASE_HEAD:** `6c692e93bb1bc8a9877ddc5fc4bef9544a4b126d`
+**BASE_HEAD:** `fab6be25fd47761a945ca5c05a1bc9ce7e906d88`
 **APPROVED_FREEZE_HEAD:** `073a69eb1e001e1738c32739f9b57820cba1b05f`
 
 ---
@@ -34,7 +34,7 @@ v0.3.5
 ## 2. Baseline & Scope Integrity
 
 - **Authoritative Freeze Baseline HEAD:** `073a69eb1e001e1738c32739f9b57820cba1b05f`
-- **Revision 3 BASE_HEAD:** `6c692e93bb1bc8a9877ddc5fc4bef9544a4b126d`
+- **Revision 4 BASE_HEAD:** `fab6be25fd47761a945ca5c05a1bc9ce7e906d88`
 - **Prior Closed Gates:** Gate5-A, Gate5-B, Gate5-C, Gate5-D, Gate5-E, and Gate5-F are all PASS / CLOSED.
 - **Files Modified in this Checkpoint:**
   - `docs/superpowers/plans/2026-09-10-gate5g-final-validation-execution-plan.md` (Execution Plan)
@@ -46,90 +46,68 @@ v0.3.5
 
 ---
 
-## 3. Revision 3 Protocol Closure & 1:1 Plan Verification Mapping
+## 3. Revision 4 Freeze-Alignment Findings & 1:1 Plan Verification Mapping
 
-Revision 3 implements all 11 final protocol closure corrections. Every claim in this checkpoint maps one-to-one to executable commands in `2026-09-10-gate5g-final-validation-execution-plan.md`:
+Revision 4 resolves all 4 freeze-alignment review findings. Every claim in this checkpoint maps one-to-one to executable commands in `2026-09-10-gate5g-final-validation-execution-plan.md`:
 
-1. **G7 ResourcePolicy Endpoint Exact:**
-   - Replaced every G7 occurrence of `/api/resource-policy` with the authoritative endpoint `/api/settings/resource-policy`.
-   - Covers admin GET, admin PUT, normal-user RBAC rejection (HTTP 403), safe policy restore, and post-restart persistence verification.
-   - Zero modifications to production API.
+1. **Lease-Aware Worker Replacement & Restart (G3, G6, G7):**
+   - Respects `WORKER_LEASE_TIMEOUT_SECONDS = 30` and the runtime fact that Worker graceful shutdown does not clear `TaskLock`.
+   - Never clears, rewrites, unlocks, or deletes `WorkerState` or `TaskLock` manually.
+   - For all 4 Worker replacement/restart scenarios using the same database:
+     - G3 Worker restart
+     - G6 RO → RW Worker transition
+     - G7 RO → RW Worker transition
+     - G7 final Worker restart
+   - Captures `OLD_WORKER_ID` prior to restart/stop.
+   - Polls for natural lease takeover with a 75-second timeout exceeding the 30-second lease timeout.
+   - Asserts `NEW_WORKER_ID != OLD_WORKER_ID`, `online == True`, exactly one `WorkerState` row, `TaskLock.locked == True`, `TaskLock.owner == NEW_WORKER_ID`, and `WorkerState.worker_id == NEW_WORKER_ID`.
+   - Prohibits enqueuing jobs until ownership takeover is proven; completely eliminates fixed `sleep 3` or `sleep 5` ownership assertions.
 
-2. **ResourcePolicy Full Replacement Payload & Readback Verification:**
-   - Complying with `ResourcePolicyUpdateRequest(extra="forbid")`, removed nonexistent `expected_revision`.
-   - PUT sends complete 9-field valid payload (`scan_threads`, `hash_threads`, `io_limit`, `job_priority`, `active_window_enabled`, `active_window_start`, `active_window_end`, `active_window_timezone`, `outside_window_mode`).
-   - Asserts HTTP 200 and `revision == old_revision + 1`.
-   - Fresh GET readback verifies every persisted field matches intended configuration.
-   - Sets complete known-safe policy before mutation stage and captures `G7_SAFE_POLICY_REVISION`.
+2. **All Dedupe-Preview Requests Validated JSON & Response Schema:**
+   - Enforced `-H "Content-Type: application/json"` and `-H "Origin: ..."` with body `-d '{}'` for every `/dedupe-preview` call across the entire plan.
+   - Fixed G6 stale preview, G7 primary preview, and G7 stale preview.
+   - Added dedupe-preview to G7 RO matrix.
+   - Parses each preview response and asserts valid content (`'groups' in data`), eliminating unasserted or ignored responses.
 
-3. **Zero-Scheduler WorkJob Delta Proof:**
-   - Eliminated invalid query `WorkJob.status == "scheduled"` (`"scheduled"` is not a Task Engine state).
-   - Finishes explicit scan and index jobs, then captures baseline `G7_WORKJOB_COUNT_BEFORE_POLICY` and `G7_WORKJOB_MAX_ID_BEFORE_POLICY`.
-   - Performs active-window ResourcePolicy PUT and waits `sleep 6` across multiple worker polling iterations.
-   - Queries WorkJob again and asserts count and max(id) unchanged (`AUTOMATIC_JOBS_CREATED = 0`), proving zero automatic jobs were spawned.
+3. **G6 Controlled-Stage Zero-Mutation & Freeze Physical Identity Evidence:**
+   - Before Preview: captures baseline snapshot of `allowed_root`, `quarantine_root`, and `sentinel_dir` (`sha256`, `size`, `mtime_ns`).
+   - After Preview: asserts zero mutations, empty quarantine, and untouched sentinel with `ALLOW_MUTATION=true`, proving Preview preserves the 0-filesystem-mutation contract under active mutation configuration.
+   - After Draft generation: repeats filesystem comparison proving draft generation persists DB state while the filesystem remains byte/stat identical.
+   - After Freeze: directly inspects `/config/app.db` `BatchPlanItem` verifying `source_path`, `keep_path`, `expected_device > 0`, `expected_inode > 0`, `expected_size == os.lstat(source).st_size`, `expected_mtime_ns == os.lstat(source).st_mtime_ns`, `expected_hash == sha256(source)`.
 
-4. **Executable G7 Single-Worker Ownership Proof:**
-   - Following `/api/tasks/worker` heartbeat check, added authoritative DB proof matching G3:
-     - `WorkerState` record count == 1.
-     - `TaskLock` `id=1` exists and has `locked == True`.
-     - `TaskLock.owner == WorkerState.worker_id`.
+4. **Dedicated NAS Read-Only Safety Fixture & Full Filesystem Snapshot Equality (G7):**
+   - Before starting G7 Stage 1 RO containers, creates dedicated RO fixture inside `GATE5G_TEST_DATA_PATH`: `nas_ro_fileA.dat`, `nas_ro_fileB.dat` (duplicate pair), `nas_ro_unique.txt`, `symlink_to_external -> /sentinel/external_file.txt`, and external sentinel under `GATE5G_TEST_SENTINEL_PATH`.
+   - Captures pre-RO baseline snapshot across `DATA`, `QUARANTINE`, and `SENTINEL`.
+   - Executes real RO matrix (`/data:ro`, `/quarantine:ro`, `/sentinel:ro`, `ALLOW_MUTATION=false`) with Worker scan, `/api/indexes`, `fclones`, dedupe-preview, Zero-Scheduler delta proof, ResourcePolicy/RBAC checks.
+   - Compares complete post-RO snapshot against baseline, asserting `DATA`, `QUARANTINE`, and `SENTINEL` unchanged, and asserts `NAS RO SAFETY = PASS`.
+   - Cleans up RO-only test files explicitly recorded as verifier fixture management before constructing the RW fixture.
 
-5. **Strengthened Restart Persistence & DB Integrity Proof:**
-   - After Worker and API container restarts, verifies `/config/app.db` via `PRAGMA integrity_check` returning `[('ok',)]`.
-   - Performs GET `/api/settings/resource-policy` and compares against safe policy written before mutation stage, asserting all 10 fields (`scan_threads`, `hash_threads`, `io_limit`, `job_priority`, `active_window_enabled`, `active_window_start`, `active_window_end`, `active_window_timezone`, `outside_window_mode`, and `revision == G7_SAFE_POLICY_REVISION`).
-
-6. **G4 Initial Health Polling Fails Closed:**
-   - Added deterministic fail-closed healthcheck polling loops (`HEALTH_OK=0` / `UPGRADE_HEALTH_OK=0`) with max 30 attempts.
-   - Explicitly asserts `[ "${HEALTH_OK}" = "1" ]` / `[ "${UPGRADE_HEALTH_OK}" = "1" ]`, dumping `docker logs` and exiting 1 on timeout before any DB inspection.
-
-7. **Exact PLAN_STALE Error Identity:**
-   - For both desktop G6 and NAS G7 stale Execute:
-     - Captures HTTP status code and response body.
-     - Asserts HTTP status == 409.
-     - Asserts JSON `error.code == "PLAN_STALE"`.
-
-8. **Complete Sentinel Immutability Evidence:**
-   - For both desktop G6 and NAS G7:
-     - Records SHA256, size, and `mtime_ns` prior to mutation.
-     - Following all scan, index, dedupe, stale, and restore actions, asserts all three properties (`sha256`, `size`, `mtime_ns`) remain strictly unchanged.
-     - Sentinel remains mounted read-only outside `ALLOWED_ROOTS`.
-
-9. **Tightened Unique-Constraint Verification:**
-   - Using `PRAGMA index_list` combined with `PRAGMA index_info(<index>)`, inspects indexed column names.
-   - Proves verified unique constraints on:
-     - `users.username`
-     - `sessions.token_hash`
-     - `quarantine_entries.quarantine_path`
-     - `indexed_paths.absolute_path`
-
-10. **Normalized G7 Archive Evidence Variable:**
-    - After NAS archive verification, explicitly sets `G7_IMAGE_ARCHIVE_SHA256="${NAS_ARCHIVE_SHA256}"`.
-    - Asserts `G7_IMAGE_ARCHIVE_SHA256 == G2_IMAGE_ARCHIVE_SHA256`, directly satisfying Phase G8 audit prerequisite.
-
-11. **Checkpoint Truthfulness & Boundary:**
-    - Every claim in this checkpoint maps strictly 1:1 to executable commands in the execution plan.
-    - Preserved all accepted Revision 2 corrections without regression.
-    - Authoring agent does not self-approve.
+5. **Checkpoint Truthfulness & Boundary:**
+   - Every claim in this checkpoint maps strictly 1:1 to executable commands in the execution plan.
+   - Preserved all accepted Revision 1–3 corrections without regression.
+   - Authoring agent does not self-approve.
 
 ---
 
 ## 4. Preserved Historical Corrections (No Regression)
 
 The following previously accepted corrections remain fully preserved in the plan:
+- `/api/settings/resource-policy` authoritative endpoint across all occurrences.
+- Complete ResourcePolicy replacement payload and fresh GET readback.
+- WorkJob count and max(id) delta proof for Zero-Scheduler invariant.
+- G7 single WorkerState and TaskLock ownership lease proof.
+- Full safe-policy persistence after restart matching `G7_SAFE_POLICY_REVISION`.
+- G4 first-start fail-closed healthcheck polling loops.
+- HTTP 409 and JSON `error.code == "PLAN_STALE"` assertions.
+- Sentinel immutability assertions (`sha256`, `size`, `mtime_ns`).
+- PRAGMA `index_list` + `index_info` unique-column constraints proof.
+- Authoritative `G7_IMAGE_ARCHIVE_SHA256` production and equality with `G2_IMAGE_ARCHIVE_SHA256`.
+- G2/G7 Image ID equality enforcement.
+- Historical `app.db` migration identity and isolated `upgrade_test_config`.
 - Correct historical ORM constructors matching Gate5-E SHA `3e4c8a00bcf54e0c0a13f1b9f21dd4fd05b2d1d9`.
-- Dedicated `upgrade_test_config/app.db` ensuring untouched `historical_original_config/app.db`.
-- PRAGMA `wal_checkpoint(TRUNCATE)`, `integrity_check`, and `foreign_key_check`.
-- Plan-item API schema fields `source` and `keep`.
+- Separation of primary dedupe lifecycle and stale duplicate scenario.
 - QuarantineEntry states `active` and `restored`.
 - Relative path calculation supporting nested quarantine directories.
-- Separation of primary dedupe lifecycle and stale duplicate scenario.
-- Terminal WorkJob polling for `/api/indexes`.
-- Reachable `/sentinel` symlink traversal testing.
-- NAS host mount isolation and ancestry rejection against production paths.
-- G2 transport manifest `/tmp/gate5g-image-manifest.env`.
-- G2/G7 Image ID equality enforcement.
-- NAS read-only verification before read-write testing.
 - Mandatory byte-identical quarantine restore verification.
-- Restart resilience with restart count `<= 1`.
-- Dynamic G8 evidence audit table.
+- Production mount isolation and ancestry rejection.
 - Immutable candidate restart rule.

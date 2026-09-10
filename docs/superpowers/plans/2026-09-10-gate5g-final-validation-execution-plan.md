@@ -508,11 +508,58 @@ Expected: Admin receives 200, regular user receives 403, 0 scheduled work jobs e
 
 Run:
 ```bash
+# Capture pre-restart worker ID
+G3_OLD_WORKER_ID=$(docker exec gate5g-smoke-api python -c "
+from app.db import create_engine_and_session
+from app.models import WorkerState
+from pathlib import Path
+engine, SessionLocal = create_engine_and_session(Path('/config/app.db'))
+with SessionLocal() as s:
+    w = s.query(WorkerState).first()
+    print(w.worker_id if w else '')
+")
+echo "G3_OLD_WORKER_ID: ${G3_OLD_WORKER_ID}"
+[ -n "${G3_OLD_WORKER_ID}" ] || { echo "G3 pre-restart worker ID missing"; exit 1; }
+
 echo "Restarting Worker container..."
 docker restart gate5g-smoke-worker
-sleep 3
+
+# Poll for natural lease takeover (timeout 75s exceeding 30s WORKER_LEASE_TIMEOUT_SECONDS)
+TAKEOVER_OK=0
+for i in {1..75}; do
+  CHECK_TAKEOVER=$(docker exec gate5g-smoke-api python -c "
+from app.db import create_engine_and_session
+from app.models import WorkerState, TaskLock
+from pathlib import Path
+engine, SessionLocal = create_engine_and_session(Path('/config/app.db'))
+with SessionLocal() as s:
+    workers = s.query(WorkerState).all()
+    lock = s.get(TaskLock, 1)
+    if len(workers) == 1 and lock and lock.locked and lock.owner == workers[0].worker_id and workers[0].worker_id != '${G3_OLD_WORKER_ID}':
+        print('OK ' + workers[0].worker_id)
+    else:
+        print('WAIT')
+")
+  if echo "${CHECK_TAKEOVER}" | grep -q '^OK '; then
+    G3_NEW_WORKER_ID=$(echo "${CHECK_TAKEOVER}" | awk '{print $2}')
+    TAKEOVER_OK=1
+    break
+  fi
+  sleep 1
+done
+[ "${TAKEOVER_OK}" = "1" ] || { echo "G3 Worker natural lease takeover timed out"; exit 1; }
+
+# Verify online and matching new worker_id via API
 WORKER_RESTART_RESP=$(curl -s -b "${SMOKE_DIR}/cookie.txt" http://127.0.0.1:18080/api/tasks/worker)
-echo "${WORKER_RESTART_RESP}" | grep -q '"online":true' || { echo "Worker did not recover online status after restart"; exit 1; }
+python3 -c "
+import json
+data = json.loads('''${WORKER_RESTART_RESP}''')
+assert data.get('online') is True, 'Worker not online after restart'
+wid = data.get('worker_id') or data.get('id')
+assert wid == '${G3_NEW_WORKER_ID}', f'Worker ID mismatch: {wid} != ${G3_NEW_WORKER_ID}'
+assert wid != '${G3_OLD_WORKER_ID}', f'Worker ID must change after restart: {wid} == ${G3_OLD_WORKER_ID}'
+print('G3_WORKER_RESTART_LEASE_TAKEOVER_OK:', wid)
+"
 
 echo "Restarting API container..."
 docker restart gate5g-smoke-api
@@ -1024,10 +1071,29 @@ for i in {1..30}; do
 done
 [ "${INDEX_STATUS}" = "completed" ] || { echo "Index WorkJob timed out"; exit 1; }
 
-# 3. Trigger real dedupe preview
+# 3. Trigger real dedupe preview and assert valid preview response
 PREVIEW_RESP=$(curl -s -b "${FIXTURE_DIR}/cookie.txt" -X POST "http://127.0.0.1:18081/api/scans/${SCAN_ID}/dedupe-preview" \
   -H "Content-Type: application/json" -H "Origin: http://127.0.0.1:18081" -d '{}')
 echo "Preview response: ${PREVIEW_RESP}"
+python3 -c "
+import json
+data = json.loads('''${PREVIEW_RESP}''')
+assert 'groups' in data, f'Invalid preview response: {data}'
+print('G6_RO_DEDUPE_PREVIEW_SUCCESS')
+"
+
+# Capture G6 RO Worker ID before container shutdown for lease-aware takeover verification
+G6_RO_WORKER_ID=$(docker exec gate5g-safety-ro-api python -c "
+from app.db import create_engine_and_session
+from app.models import WorkerState
+from pathlib import Path
+engine, SessionLocal = create_engine_and_session(Path('/config/app.db'))
+with SessionLocal() as s:
+    w = s.query(WorkerState).first()
+    print(w.worker_id if w else '')
+")
+echo "G6_RO_WORKER_ID: ${G6_RO_WORKER_ID}"
+[ -n "${G6_RO_WORKER_ID}" ] || { echo "G6 RO worker ID missing"; exit 1; }
 
 docker stop gate5g-safety-ro-worker gate5g-safety-ro-api
 docker rm gate5g-safety-ro-worker gate5g-safety-ro-api
@@ -1102,12 +1168,47 @@ docker run -d --name gate5g-safety-rw-worker \
   "${G2_IMAGE_TAG}" \
   python -m app.worker
 
-sleep 3
 # Login
 curl -s -c "${FIXTURE_DIR}/cookie_rw.txt" -X POST http://127.0.0.1:18082/api/auth/login \
   -H "Content-Type: application/json" \
   -H "Origin: http://127.0.0.1:18082" \
   -d '{"username":"admin","password":"AdminPassword123!"}'
+
+# Poll for natural lease takeover from RO worker (timeout 75s exceeding 30s WORKER_LEASE_TIMEOUT_SECONDS)
+TAKEOVER_OK=0
+for i in {1..75}; do
+  CHECK_TAKEOVER=$(docker exec gate5g-safety-rw-api python -c "
+from app.db import create_engine_and_session
+from app.models import WorkerState, TaskLock
+from pathlib import Path
+engine, SessionLocal = create_engine_and_session(Path('/config/app.db'))
+with SessionLocal() as s:
+    workers = s.query(WorkerState).all()
+    lock = s.get(TaskLock, 1)
+    if len(workers) == 1 and lock and lock.locked and lock.owner == workers[0].worker_id and workers[0].worker_id != '${G6_RO_WORKER_ID}':
+        print('OK ' + workers[0].worker_id)
+    else:
+        print('WAIT')
+")
+  if echo "${CHECK_TAKEOVER}" | grep -q '^OK '; then
+    G6_RW_WORKER_ID=$(echo "${CHECK_TAKEOVER}" | awk '{print $2}')
+    TAKEOVER_OK=1
+    break
+  fi
+  sleep 1
+done
+[ "${TAKEOVER_OK}" = "1" ] || { echo "G6 RW Worker lease takeover timed out"; exit 1; }
+
+RW_WORKER_RESP=$(curl -s -b "${FIXTURE_DIR}/cookie_rw.txt" http://127.0.0.1:18082/api/tasks/worker)
+python3 -c "
+import json
+data = json.loads('''${RW_WORKER_RESP}''')
+assert data.get('online') is True, 'RW Worker not online'
+wid = data.get('worker_id') or data.get('id')
+assert wid == '${G6_RW_WORKER_ID}', f'Worker ID mismatch: {wid} != ${G6_RW_WORKER_ID}'
+assert wid != '${G6_RO_WORKER_ID}', f'Worker ID must change from RO worker: {wid} == ${G6_RO_WORKER_ID}'
+print('G6_RO_TO_RW_WORKER_TAKEOVER_VERIFIED_OK:', wid)
+"
 
 # 1. Enqueue scan targeting allowed_root
 SCAN_RESP=$(curl -s -b "${FIXTURE_DIR}/cookie_rw.txt" -X POST http://127.0.0.1:18082/api/scans \
@@ -1122,10 +1223,72 @@ for i in {1..30}; do
   sleep 1
 done
 
-# 2. Preview
+# Capture pre-Preview filesystem snapshot (allowed_root, quarantine_root, sentinel_dir)
+python3 -c "
+import os, hashlib, json
+from pathlib import Path
+
+root = Path('${FIXTURE_DIR}')
+snap = {}
+for subdir in ['allowed_root', 'quarantine_root', 'sentinel_dir']:
+    sub_path = root / subdir
+    if sub_path.exists():
+        for p in sub_path.rglob('*'):
+            if p.is_file() and not p.is_symlink():
+                rel = str(p.relative_to(root))
+                st = p.stat()
+                h = hashlib.sha256(p.read_bytes()).hexdigest()
+                snap[rel] = {'sha256': h, 'size': st.st_size, 'mtime_ns': st.st_mtime_ns}
+
+with open('${FIXTURE_DIR}/pre_preview_snapshot.json', 'w') as f:
+    json.dump(snap, f, indent=2)
+print('PRE_PREVIEW_SNAPSHOT_SAVED:', len(snap), 'files')
+"
+
+# 2. Preview (executed with ALLOW_MUTATION=true to prove 0-filesystem-mutation contract)
 PREVIEW_RESP=$(curl -s -b "${FIXTURE_DIR}/cookie_rw.txt" -X POST "http://127.0.0.1:18082/api/scans/${SCAN_ID}/dedupe-preview" \
   -H "Content-Type: application/json" -H "Origin: http://127.0.0.1:18082" -d '{}')
 echo "Preview response: ${PREVIEW_RESP}"
+python3 -c "
+import json
+data = json.loads('''${PREVIEW_RESP}''')
+assert 'groups' in data, f'Invalid preview response: {data}'
+print('G6_RW_PRIMARY_DEDUPE_PREVIEW_SUCCESS')
+"
+
+# Immediately compare filesystem against pre-Preview snapshot: zero mutations allowed
+python3 -c "
+import os, hashlib, json
+from pathlib import Path
+
+root = Path('${FIXTURE_DIR}')
+current = {}
+for subdir in ['allowed_root', 'quarantine_root', 'sentinel_dir']:
+    sub_path = root / subdir
+    if sub_path.exists():
+        for p in sub_path.rglob('*'):
+            if p.is_file() and not p.is_symlink():
+                rel = str(p.relative_to(root))
+                st = p.stat()
+                h = hashlib.sha256(p.read_bytes()).hexdigest()
+                current[rel] = {'sha256': h, 'size': st.st_size, 'mtime_ns': st.st_mtime_ns}
+
+with open('${FIXTURE_DIR}/pre_preview_snapshot.json') as f:
+    baseline = json.load(f)
+
+assert set(current.keys()) == set(baseline.keys()), f'File set changed after preview: {set(current.keys()) ^ set(baseline.keys())}'
+for rel, exp in baseline.items():
+    cur = current[rel]
+    assert cur['sha256'] == exp['sha256'], f'Hash modified in {rel} after preview'
+    assert cur['size'] == exp['size'], f'Size modified in {rel} after preview'
+    assert cur['mtime_ns'] == exp['mtime_ns'], f'Mtime modified in {rel} after preview'
+
+# Assert quarantine remains empty/unchanged
+q_files = list((root / 'quarantine_root').rglob('*')) if (root / 'quarantine_root').exists() else []
+q_non_dir = [p for p in q_files if p.is_file()]
+assert len(q_non_dir) == 0, f'Quarantine not empty after preview: {q_non_dir}'
+print('MUTATION_ENABLED_PREVIEW_ZERO_MUTATION_VERIFIED_SUCCESS: zero filesystem mutations with ALLOW_MUTATION=true')
+"
 
 # 3. Explicit Generate Draft Plan through real dedupe endpoint
 PLAN_RESP=$(curl -s -b "${FIXTURE_DIR}/cookie_rw.txt" -X POST "http://127.0.0.1:18082/api/scans/${SCAN_ID}/dedupe-plan" \
@@ -1134,6 +1297,35 @@ PLAN_RESP=$(curl -s -b "${FIXTURE_DIR}/cookie_rw.txt" -X POST "http://127.0.0.1:
 echo "Draft plan response: ${PLAN_RESP}"
 PLAN_ID=$(echo "${PLAN_RESP}" | grep -o '"id":[0-9]*' | cut -d: -f2)
 [ -n "${PLAN_ID}" ] || { echo "Failed to create dedupe plan"; exit 1; }
+
+# Repeat filesystem comparison after Draft generation: DB plan state persisted, but filesystem remains byte/stat identical
+python3 -c "
+import os, hashlib, json
+from pathlib import Path
+
+root = Path('${FIXTURE_DIR}')
+current = {}
+for subdir in ['allowed_root', 'quarantine_root', 'sentinel_dir']:
+    sub_path = root / subdir
+    if sub_path.exists():
+        for p in sub_path.rglob('*'):
+            if p.is_file() and not p.is_symlink():
+                rel = str(p.relative_to(root))
+                st = p.stat()
+                h = hashlib.sha256(p.read_bytes()).hexdigest()
+                current[rel] = {'sha256': h, 'size': st.st_size, 'mtime_ns': st.st_mtime_ns}
+
+with open('${FIXTURE_DIR}/pre_preview_snapshot.json') as f:
+    baseline = json.load(f)
+
+assert set(current.keys()) == set(baseline.keys()), f'File set changed after draft: {set(current.keys()) ^ set(baseline.keys())}'
+for rel, exp in baseline.items():
+    cur = current[rel]
+    assert cur['sha256'] == exp['sha256'], f'Hash modified in {rel} after draft'
+    assert cur['size'] == exp['size'], f'Size modified in {rel} after draft'
+    assert cur['mtime_ns'] == exp['mtime_ns'], f'Mtime modified in {rel} after draft'
+print('DRAFT_ZERO_MUTATION_VERIFIED_SUCCESS: draft generated without modifying filesystem')
+"
 
 # 4. Freeze
 FREEZE_RESP=$(curl -s -b "${FIXTURE_DIR}/cookie_rw.txt" -X POST "http://127.0.0.1:18082/api/plans/${PLAN_ID}/freeze" \
@@ -1167,6 +1359,33 @@ print('PLAN_DERIVED_PATHS_EXTRACTED:', target_item['keep'], '->', target_item['s
 
 ACTUAL_KEEP_PATH=$(python3 -c "import json; print(json.load(open('${FIXTURE_DIR}/plan_paths.json'))['keep_path'])")
 ACTUAL_MUTATION_SOURCE=$(python3 -c "import json; print(json.load(open('${FIXTURE_DIR}/plan_paths.json'))['mutation_source'])")
+ITEM_ID=$(python3 -c "import json; print(json.load(open('${FIXTURE_DIR}/plan_paths.json'))['item_id'])")
+
+# Direct DB inspection of frozen BatchPlanItem physical identity evidence
+docker exec gate5g-safety-rw-api python -c "
+import os, hashlib, json
+from pathlib import Path
+from app.db import create_engine_and_session
+from app.models import BatchPlanItem
+engine, SessionLocal = create_engine_and_session(Path('/config/app.db'))
+with SessionLocal() as s:
+    item = s.query(BatchPlanItem).filter(BatchPlanItem.plan_id == ${PLAN_ID}, BatchPlanItem.id == ${ITEM_ID}).first()
+    assert item is not None, f'BatchPlanItem {${ITEM_ID}} not found in DB'
+    assert item.source_path == '${ACTUAL_MUTATION_SOURCE}', f'source_path mismatch: {item.source_path} != ${ACTUAL_MUTATION_SOURCE}'
+    assert item.keep_path == '${ACTUAL_KEEP_PATH}', f'keep_path mismatch: {item.keep_path} != ${ACTUAL_KEEP_PATH}'
+    st = os.lstat(item.source_path)
+    assert item.expected_device > 0, f'expected_device not positive: {item.expected_device}'
+    assert item.expected_inode > 0, f'expected_inode not positive: {item.expected_inode}'
+    assert item.expected_size == st.st_size, f'expected_size mismatch: {item.expected_size} != {st.st_size}'
+    assert item.expected_mtime_ns == st.st_mtime_ns, f'expected_mtime_ns mismatch: {item.expected_mtime_ns} != {st.st_mtime_ns}'
+    assert item.expected_hash is not None, 'expected_hash is None'
+    with open(item.source_path, 'rb') as f:
+        actual_hash = hashlib.sha256(f.read()).hexdigest()
+    assert item.expected_hash == actual_hash, f'expected_hash mismatch: {item.expected_hash} != {actual_hash}'
+    meta = json.loads(item.metadata_json or '{}')
+    assert isinstance(meta, dict), 'metadata_json must be valid dict'
+print('G6_FROZEN_PLAN_ITEM_PHYSICAL_IDENTITY_VERIFIED_OK: device, inode, size, mtime_ns, hash match source file')
+"
 
 # 6. Validate
 VAL_RESP=$(curl -s -b "${FIXTURE_DIR}/cookie_rw.txt" -X POST "http://127.0.0.1:18082/api/plans/${PLAN_ID}/validate" \
@@ -1293,7 +1512,14 @@ for i in {1..30}; do
 done
 
 # Preview -> Draft Plan -> Freeze
-curl -s -b "${FIXTURE_DIR}/cookie_rw.txt" -X POST "http://127.0.0.1:18082/api/scans/${STALE_SCAN_ID}/dedupe-preview" -H "Origin: http://127.0.0.1:18082" -d '{}'
+STALE_PREVIEW_RESP=$(curl -s -b "${FIXTURE_DIR}/cookie_rw.txt" -X POST "http://127.0.0.1:18082/api/scans/${STALE_SCAN_ID}/dedupe-preview" \
+  -H "Content-Type: application/json" -H "Origin: http://127.0.0.1:18082" -d '{}')
+python3 -c "
+import json
+data = json.loads('''${STALE_PREVIEW_RESP}''')
+assert 'groups' in data, f'Invalid stale preview response: {data}'
+print('G6_STALE_DEDUPE_PREVIEW_SUCCESS')
+"
 STALE_PLAN_RESP=$(curl -s -b "${FIXTURE_DIR}/cookie_rw.txt" -X POST "http://127.0.0.1:18082/api/scans/${STALE_SCAN_ID}/dedupe-plan" \
   -H "Content-Type: application/json" -H "Origin: http://127.0.0.1:18082" -d '{"policy":"newest"}')
 STALE_PLAN_ID=$(echo "${STALE_PLAN_RESP}" | grep -o '"id":[0-9]*' | cut -d: -f2)
@@ -1550,6 +1776,39 @@ services:
     restart: "no"
 EOF
 
+# Construct dedicated NAS read-only safety fixture inside testbed
+echo "NAS_RO_DUPLICATE_PAYLOAD_ABC" > "${GATE5G_TEST_DATA_PATH}/nas_ro_fileA.dat"
+cp "${GATE5G_TEST_DATA_PATH}/nas_ro_fileA.dat" "${GATE5G_TEST_DATA_PATH}/nas_ro_fileB.dat"
+echo "NAS_RO_UNIQUE_CONTENT_XYZ" > "${GATE5G_TEST_DATA_PATH}/nas_ro_unique.txt"
+
+# External sentinel under GATE5G_TEST_SENTINEL_PATH (reachable from container at /sentinel/external_file.txt outside /data)
+echo "NAS_EXTERNAL_SENTINEL_RO_PAYLOAD" > "${GATE5G_TEST_SENTINEL_PATH}/external_file.txt"
+ln -sf "/sentinel/external_file.txt" "${GATE5G_TEST_DATA_PATH}/symlink_to_external"
+
+# Capture baseline filesystem snapshot before RO execution (DATA, QUARANTINE, SENTINEL)
+python3 -c "
+import os, hashlib, json
+from pathlib import Path
+
+baseline = {}
+targets = {
+    'data': Path('${GATE5G_TEST_DATA_PATH}'),
+    'quarantine': Path('${GATE5G_TEST_QUARANTINE_PATH}'),
+    'sentinel': Path('${GATE5G_TEST_SENTINEL_PATH}')
+}
+for area, root in targets.items():
+    for p in root.rglob('*'):
+        if p.is_file() and not p.is_symlink():
+            rel = f'{area}/{p.relative_to(root)}'
+            st = p.stat()
+            h = hashlib.sha256(p.read_bytes()).hexdigest()
+            baseline[rel] = {'sha256': h, 'size': st.st_size, 'mtime_ns': st.st_mtime_ns}
+
+with open('/tmp/nas_ro_baseline.json', 'w') as f:
+    json.dump(baseline, f, indent=2)
+print('NAS_RO_BASELINE_SNAPSHOT_SAVED:', len(baseline), 'files')
+"
+
 docker compose -f /tmp/nas-gate5g-transient-compose.yaml up -d
 sleep 5
 
@@ -1624,6 +1883,16 @@ done
 # 6. Verify fclones executes inside container on NAS filesystem
 docker exec gate5g-nas-api fclones --version
 docker exec gate5g-nas-api fclones group /data > /dev/null
+
+# Trigger real dedupe preview on NAS RO scan
+NAS_RO_PREVIEW_RESP=$(curl -s -b /tmp/nas_cookie.txt -X POST "http://127.0.0.1:28080/api/scans/${NAS_RO_SCAN_ID}/dedupe-preview" \
+  -H "Content-Type: application/json" -H "Origin: http://127.0.0.1:28080" -d '{}')
+python3 -c "
+import json
+data = json.loads('''${NAS_RO_PREVIEW_RESP}''')
+assert 'groups' in data, f'Invalid NAS RO preview response: {data}'
+print('NAS_RO_DEDUPE_PREVIEW_SUCCESS')
+"
 
 # Capture WorkJob stats before policy update (Zero-Scheduler proof baseline)
 read -r G7_WORKJOB_COUNT_BEFORE_POLICY G7_WORKJOB_MAX_ID_BEFORE_POLICY < <(docker exec gate5g-nas-api python -c "
@@ -1759,8 +2028,64 @@ print(data['revision'])
 ")
 echo "G7_SAFE_POLICY_REVISION=${G7_SAFE_POLICY_REVISION}"
 
+# Capture G7 RO Worker ID before container shutdown for lease-aware takeover verification
+G7_RO_WORKER_ID=$(docker exec gate5g-nas-api python -c "
+from app.db import create_engine_and_session
+from app.models import WorkerState
+from pathlib import Path
+engine, SessionLocal = create_engine_and_session(Path('/config/app.db'))
+with SessionLocal() as s:
+    w = s.query(WorkerState).first()
+    print(w.worker_id if w else '')
+")
+echo "G7_RO_WORKER_ID: ${G7_RO_WORKER_ID}"
+[ -n "${G7_RO_WORKER_ID}" ] || { echo "G7 RO worker ID missing"; exit 1; }
+
+# Compare current filesystem state against pre-RO snapshot: zero mutations allowed
+python3 -c "
+import os, hashlib, json
+from pathlib import Path
+
+targets = {
+    'data': Path('${GATE5G_TEST_DATA_PATH}'),
+    'quarantine': Path('${GATE5G_TEST_QUARANTINE_PATH}'),
+    'sentinel': Path('${GATE5G_TEST_SENTINEL_PATH}')
+}
+current = {}
+for area, root in targets.items():
+    for p in root.rglob('*'):
+        if p.is_file() and not p.is_symlink():
+            rel = f'{area}/{p.relative_to(root)}'
+            st = p.stat()
+            h = hashlib.sha256(p.read_bytes()).hexdigest()
+            current[rel] = {'sha256': h, 'size': st.st_size, 'mtime_ns': st.st_mtime_ns}
+
+with open('/tmp/nas_ro_baseline.json') as f:
+    baseline = json.load(f)
+
+assert set(current.keys()) == set(baseline.keys()), (
+    f'NAS RO file set mismatch! Added: {set(current.keys()) - set(baseline.keys())}, '
+    f'Removed: {set(baseline.keys()) - set(current.keys())}'
+)
+for rel, expected in baseline.items():
+    cur = current[rel]
+    assert cur['sha256'] == expected['sha256'], f'Hash changed in RO stage for {rel}'
+    assert cur['size'] == expected['size'], f'Size changed in RO stage for {rel}'
+    assert cur['mtime_ns'] == expected['mtime_ns'], f'Mtime changed in RO stage for {rel}'
+
+# Sentinel escape target check
+sentinel_file = Path('${GATE5G_TEST_SENTINEL_PATH}/external_file.txt')
+assert sentinel_file.is_file(), 'Sentinel file missing'
+print('NAS_RO_STAGE_ZERO_MUTATION_VERIFIED_SUCCESS')
+"
+echo "NAS RO SAFETY = PASS"
+
 docker compose -f /tmp/nas-gate5g-transient-compose.yaml down
 echo "NAS_STAGE1_READ_ONLY_SUCCESS"
+
+# Verifier fixture cleanup: remove RO-only test files so they do not interfere with RW primary dedupe scenario
+rm -f "${GATE5G_TEST_DATA_PATH}/nas_ro_fileA.dat" "${GATE5G_TEST_DATA_PATH}/nas_ro_fileB.dat" "${GATE5G_TEST_DATA_PATH}/nas_ro_unique.txt" "${GATE5G_TEST_DATA_PATH}/symlink_to_external"
+echo "NAS_RO_FIXTURE_CLEANUP_RECORDED_OK"
 ```
 Expected: Stage 1 read-only mandatory matrix passes cleanly on target NAS.
 
@@ -1774,7 +2099,47 @@ sed -i 's/sentinel:rw/sentinel:ro/g' /tmp/nas-gate5g-transient-compose.yaml
 sed -i 's/ALLOW_MUTATION=false/ALLOW_MUTATION=true/g' /tmp/nas-gate5g-transient-compose.yaml
 
 docker compose -f /tmp/nas-gate5g-transient-compose.yaml up -d
-sleep 5
+
+# Login admin
+curl -s -c /tmp/nas_rw_cookie.txt -X POST http://127.0.0.1:28080/api/auth/login \
+  -H "Content-Type: application/json" -H "Origin: http://127.0.0.1:28080" \
+  -d '{"username":"admin","password":"AdminPassword123!"}'
+
+# Poll for natural lease takeover from RO worker (timeout 75s exceeding 30s WORKER_LEASE_TIMEOUT_SECONDS)
+TAKEOVER_OK=0
+for i in {1..75}; do
+  CHECK_TAKEOVER=$(docker exec gate5g-nas-api python -c "
+from app.db import create_engine_and_session
+from app.models import WorkerState, TaskLock
+from pathlib import Path
+engine, SessionLocal = create_engine_and_session(Path('/config/app.db'))
+with SessionLocal() as s:
+    workers = s.query(WorkerState).all()
+    lock = s.get(TaskLock, 1)
+    if len(workers) == 1 and lock and lock.locked and lock.owner == workers[0].worker_id and workers[0].worker_id != '${G7_RO_WORKER_ID}':
+        print('OK ' + workers[0].worker_id)
+    else:
+        print('WAIT')
+")
+  if echo "${CHECK_TAKEOVER}" | grep -q '^OK '; then
+    G7_RW_WORKER_ID=$(echo "${CHECK_TAKEOVER}" | awk '{print $2}')
+    TAKEOVER_OK=1
+    break
+  fi
+  sleep 1
+done
+[ "${TAKEOVER_OK}" = "1" ] || { echo "G7 RW Worker lease takeover timed out"; exit 1; }
+
+NAS_RW_WORKER_RESP=$(curl -s -b /tmp/nas_rw_cookie.txt http://127.0.0.1:28080/api/tasks/worker)
+python3 -c "
+import json
+data = json.loads('''${NAS_RW_WORKER_RESP}''')
+assert data.get('online') is True, 'NAS RW Worker not online'
+wid = data.get('worker_id') or data.get('id')
+assert wid == '${G7_RW_WORKER_ID}', f'Worker ID mismatch: {wid} != ${G7_RW_WORKER_ID}'
+assert wid != '${G7_RO_WORKER_ID}', f'Worker ID must change from RO worker: {wid} == ${G7_RO_WORKER_ID}'
+print('G7_RO_TO_RW_WORKER_TAKEOVER_VERIFIED_OK:', wid)
+"
 
 # 1. Setup primary duplicate pair on NAS test data
 echo "NAS_PRIMARY_DUP_DATA_ALPHA" > "${GATE5G_TEST_DATA_PATH}/nas_fileA.dat"
@@ -1812,7 +2177,14 @@ for i in {1..30}; do
 done
 
 # 3. Dedupe Preview -> Draft Plan -> Freeze Plan
-curl -s -b /tmp/nas_rw_cookie.txt -X POST "http://127.0.0.1:28080/api/scans/${NAS_SCAN_ID}/dedupe-preview" -H "Origin: http://127.0.0.1:28080" -d '{}'
+NAS_PREVIEW_RESP=$(curl -s -b /tmp/nas_rw_cookie.txt -X POST "http://127.0.0.1:28080/api/scans/${NAS_SCAN_ID}/dedupe-preview" \
+  -H "Content-Type: application/json" -H "Origin: http://127.0.0.1:28080" -d '{}')
+python3 -c "
+import json
+data = json.loads('''${NAS_PREVIEW_RESP}''')
+assert 'groups' in data, f'Invalid NAS preview response: {data}'
+print('NAS_PRIMARY_DEDUPE_PREVIEW_SUCCESS')
+"
 NAS_PLAN_RESP=$(curl -s -b /tmp/nas_rw_cookie.txt -X POST "http://127.0.0.1:28080/api/scans/${NAS_SCAN_ID}/dedupe-plan" \
   -H "Content-Type: application/json" -H "Origin: http://127.0.0.1:28080" -d '{"policy":"newest"}')
 NAS_PLAN_ID=$(echo "${NAS_PLAN_RESP}" | grep -o '"id":[0-9]*' | cut -d: -f2)
@@ -1904,7 +2276,14 @@ for i in {1..30}; do
   sleep 1
 done
 
-curl -s -b /tmp/nas_rw_cookie.txt -X POST "http://127.0.0.1:28080/api/scans/${NAS_STALE_SCAN_ID}/dedupe-preview" -H "Origin: http://127.0.0.1:28080" -d '{}'
+NAS_STALE_PREVIEW_RESP=$(curl -s -b /tmp/nas_rw_cookie.txt -X POST "http://127.0.0.1:28080/api/scans/${NAS_STALE_SCAN_ID}/dedupe-preview" \
+  -H "Content-Type: application/json" -H "Origin: http://127.0.0.1:28080" -d '{}')
+python3 -c "
+import json
+data = json.loads('''${NAS_STALE_PREVIEW_RESP}''')
+assert 'groups' in data, f'Invalid NAS stale preview response: {data}'
+print('NAS_STALE_DEDUPE_PREVIEW_SUCCESS')
+"
 NAS_STALE_PLAN_RESP=$(curl -s -b /tmp/nas_rw_cookie.txt -X POST "http://127.0.0.1:28080/api/scans/${NAS_STALE_SCAN_ID}/dedupe-plan" \
   -H "Content-Type: application/json" -H "Origin: http://127.0.0.1:28080" -d '{"policy":"newest"}')
 NAS_STALE_PLAN_ID=$(echo "${NAS_STALE_PLAN_RESP}" | grep -o '"id":[0-9]*' | cut -d: -f2)
@@ -1975,15 +2354,56 @@ Run (on NAS):
 ```bash
 echo "Verifying restart resilience and state persistence on NAS..."
 
+# Capture pre-restart worker ID
+PRE_RESTART_WORKER_ID=$(docker exec gate5g-nas-api python -c "
+from app.db import create_engine_and_session
+from app.models import WorkerState
+from pathlib import Path
+engine, SessionLocal = create_engine_and_session(Path('/config/app.db'))
+with SessionLocal() as s:
+    w = s.query(WorkerState).first()
+    print(w.worker_id if w else '')
+")
+echo "PRE_RESTART_WORKER_ID: ${PRE_RESTART_WORKER_ID}"
+[ -n "${PRE_RESTART_WORKER_ID}" ] || { echo "G7 pre-restart worker ID missing"; exit 1; }
+
 # 1. Restart Worker container and verify heartbeat/ownership recovery
 docker restart gate5g-nas-worker
-sleep 3
+
+# Poll for natural lease takeover (timeout 75s exceeding 30s WORKER_LEASE_TIMEOUT_SECONDS)
+TAKEOVER_OK=0
+for i in {1..75}; do
+  CHECK_TAKEOVER=$(docker exec gate5g-nas-api python -c "
+from app.db import create_engine_and_session
+from app.models import WorkerState, TaskLock
+from pathlib import Path
+engine, SessionLocal = create_engine_and_session(Path('/config/app.db'))
+with SessionLocal() as s:
+    workers = s.query(WorkerState).all()
+    lock = s.get(TaskLock, 1)
+    if len(workers) == 1 and lock and lock.locked and lock.owner == workers[0].worker_id and workers[0].worker_id != '${PRE_RESTART_WORKER_ID}':
+        print('OK ' + workers[0].worker_id)
+    else:
+        print('WAIT')
+")
+  if echo "${CHECK_TAKEOVER}" | grep -q '^OK '; then
+    POST_RESTART_WORKER_ID=$(echo "${CHECK_TAKEOVER}" | awk '{print $2}')
+    TAKEOVER_OK=1
+    break
+  fi
+  sleep 1
+done
+[ "${TAKEOVER_OK}" = "1" ] || { echo "G7 Worker restart lease takeover timed out"; exit 1; }
+
 NAS_WORKER_AFTER_RESTART=$(curl -s -b /tmp/nas_rw_cookie.txt http://127.0.0.1:28080/api/tasks/worker)
 python3 -c "
 import json
 data = json.loads('''${NAS_WORKER_AFTER_RESTART}''')
 assert data.get('online') is True, 'Worker not online after restart'
-print('NAS_WORKER_RESTART_RECOVERY_OK')
+wid = data.get('worker_id') or data.get('id')
+assert wid == '${POST_RESTART_WORKER_ID}', f'Worker ID mismatch: {wid} != ${POST_RESTART_WORKER_ID}'
+assert wid != '${PRE_RESTART_WORKER_ID}', f'Worker ID must change after restart: {wid} == ${PRE_RESTART_WORKER_ID}'
+print('NAS_WORKER_RESTART_RECOVERY_OK:', wid)
 "
 
 # 2. Restart API container and verify health recovery
