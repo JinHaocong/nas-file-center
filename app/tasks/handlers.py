@@ -3,6 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 import json
+import os
 import time
 from datetime import timedelta
 from pathlib import Path
@@ -1394,7 +1395,27 @@ class BatchPlanExecuteHandler(TaskHandler):
                             q_entry.updated_at = now
 
                 if result.state == "completed":
-                    if row.operation in ("rename", "move"):
+                    if row.operation == "rmdir_empty":
+                        item_meta_json = json.loads(row.metadata_json or "{}")
+                        b_json = json.dumps({
+                            "path": row.source_path,
+                            "scope_root": item_meta_json.get("scope_root"),
+                            "object_type": "directory",
+                        }, ensure_ascii=False)
+                        a_json = json.dumps({"removed": True}, ensure_ascii=False)
+                    elif row.operation == "mkdir_empty":
+                        item_meta_json = json.loads(row.metadata_json or "{}")
+                        b_json = json.dumps({
+                            "anchor_path": row.source_path,
+                            "scope_root": item_meta_json.get("scope_root") or row.source_path,
+                            "target_path": row.target_path,
+                        }, ensure_ascii=False)
+                        a_json = json.dumps({
+                            "path": str(result.result_path or row.target_path),
+                            "created": True,
+                            "object_type": "directory",
+                        }, ensure_ascii=False)
+                    elif row.operation in ("rename", "move"):
                         b_json = json.dumps({"path": row.source_path, "size": before_size or row.expected_size, "mtime_ns": before_mtime_ns}, ensure_ascii=False)
                         a_json = json.dumps({"path": str(result.result_path), "size": after_size, "mtime_ns": after_mtime_ns}, ensure_ascii=False)
                     elif row.operation == "quarantine":

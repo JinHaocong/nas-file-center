@@ -1307,6 +1307,7 @@ class FileCenterService:
         stale_items = []
         item_validations: dict[int, tuple[str, str, str | None]] = {}
         has_error = False
+        planned_mkdir_targets: set[Path] = set()
 
         for row in rows:
             if row.state == "completed":
@@ -1395,16 +1396,17 @@ class FileCenterService:
                     item_validations[row.id] = ("skipped", "Target is not descendant of anchor", None)
                     continue
 
-                if target.is_symlink() or os.path.lexists(target):
+                if target in planned_mkdir_targets or target.is_symlink() or os.path.lexists(target):
                     has_error = True
                     item_validations[row.id] = ("skipped", "Target path already exists", None)
                     continue
 
                 parent = target.parent
-                if parent.is_symlink() or not parent.exists() or not parent.is_dir():
-                    has_error = True
-                    item_validations[row.id] = ("skipped", "Target parent directory is missing or not a directory", None)
-                    continue
+                if parent not in planned_mkdir_targets:
+                    if parent.is_symlink() or not parent.exists() or not parent.is_dir():
+                        has_error = True
+                        item_validations[row.id] = ("skipped", "Target parent directory is missing or not a directory", None)
+                        continue
 
                 if self.settings.quarantine_root:
                     q_root = Path(self.settings.quarantine_root)
@@ -1426,6 +1428,7 @@ class FileCenterService:
                     item_validations[row.id] = ("skipped", "Path is outside allowed roots", None)
                     continue
 
+                planned_mkdir_targets.add(target)
                 item_validations[row.id] = ("validated", "mkdir_empty destination validated", None)
                 continue
 
@@ -2415,6 +2418,26 @@ class FileCenterService:
                     op = "touch"
                     expected_size = 0
                     expected_mtime_ns = before.get("mtime_ns") or 0
+                    meta["undo"] = {"source_journal_id": entry.id}
+                elif entry.operation == "rmdir_empty":
+                    source_p = before["scope_root"]
+                    target_p = before["path"]
+                    op = "mkdir_empty"
+                    expected_size = 0
+                    expected_mtime_ns = 0
+                    meta["scope_root"] = before["scope_root"]
+                    meta["undo"] = {
+                        "source_journal_id": entry.id,
+                        "structural_only": True,
+                        "scope_root": before["scope_root"],
+                    }
+                elif entry.operation == "mkdir_empty":
+                    source_p = after.get("path") or before.get("target_path") or ""
+                    target_p = None
+                    op = "rmdir_empty"
+                    expected_size = 0
+                    expected_mtime_ns = 0
+                    meta["scope_root"] = before.get("scope_root") or before.get("anchor_path")
                     meta["undo"] = {"source_journal_id": entry.id}
                 else:
                     raise ValueError(
