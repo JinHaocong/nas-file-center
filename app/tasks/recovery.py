@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
+import logging
 from typing import Any
 from sqlalchemy import select, update, text
 from sqlalchemy.orm import sessionmaker
@@ -17,6 +18,8 @@ from app.resource_control import (
 from app.tasks.handlers import get_job_capabilities
 from app.tasks.logging import log_task_event
 from app.tasks.state_machine import JobLeaseLost, JobState
+
+logger = logging.getLogger(__name__)
 
 WORKER_ONLINE_THRESHOLD_SECONDS = 30.0
 WORKER_STALE_THRESHOLD_SECONDS = 90.0
@@ -198,6 +201,7 @@ def claim_next_job(
     MAX_POLICY_ATTEMPTS = 3
 
     for attempt in range(MAX_POLICY_ATTEMPTS):
+        policy_error_reason: str | None = None
         # Phase A: Outside write transaction (no write lock, no authoritative lease check)
         with session_factory() as session:
             row = session.get(ResourcePolicy, 1)
@@ -206,6 +210,7 @@ def claim_next_job(
                 policy_valid = False
                 snapshot = None
                 prepared_tz = None
+                policy_error_reason = "ResourcePolicy singleton row missing"
             else:
                 try:
                     snapshot = ResourcePolicySnapshot(
@@ -227,10 +232,17 @@ def claim_next_job(
                         if snapshot.active_window_enabled and snapshot.active_window_timezone
                         else None
                     )
-                except Exception:
+                except Exception as exc:
                     policy_valid = False
                     snapshot = None
                     prepared_tz = None
+                    policy_error_reason = str(exc)
+
+        if not policy_valid:
+            logger.warning(
+                "ResourcePolicy invalid or unavailable (%s); resource-controlled jobs held fail-closed",
+                policy_error_reason or "unknown error",
+            )
 
         # Phase B: Short BEGIN IMMEDIATE write transaction
         with session_factory() as session:
@@ -317,6 +329,10 @@ def claim_next_job(
 
     # Retry exhaustion fallback: after 3 unstable snapshot attempts
     # MUST NOT use stale policy, MUST NOT claim resource-controlled jobs
+    logger.warning(
+        "ResourcePolicy invalid or unavailable (%s); resource-controlled jobs held fail-closed",
+        "snapshot unstable after max retry attempts",
+    )
     with session_factory() as session:
         session.execute(text("BEGIN IMMEDIATE"))
         fallback_now = utcnow()
