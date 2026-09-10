@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass
 import errno
 import os
 from pathlib import Path
 import re
+import stat
 from typing import Iterable
 
 from app.batch.plans import OperationItem
@@ -219,11 +221,51 @@ def execute_item(
                         return _skip("source identity changed")
                 except OSError as exc:
                     return _skip(f"stat failed: {exc}")
-            try:
-                os.rmdir(source)
-            except OSError as exc:
-                return ItemResult("failed", str(exc))
-            return ItemResult("completed", "empty directory removed", source)
+
+            match = _containing_root(source, allowed_roots)
+            if match is None:
+                return _skip("source is outside configured roots")
+            _, base_root = match
+            rel_to_root = source.relative_to(base_root)
+            if len(rel_to_root.parts) == 0:
+                return _skip("cannot remove allowed root directory")
+
+            leaf_name = rel_to_root.parts[-1]
+            parent_parts = rel_to_root.parts[:-1]
+
+            flags = os.O_RDONLY | os.O_DIRECTORY
+            if hasattr(os, "O_NOFOLLOW"):
+                flags |= os.O_NOFOLLOW
+
+            with contextlib.ExitStack() as stack:
+                try:
+                    curr_fd = os.open(str(base_root), flags)
+                    stack.callback(os.close, curr_fd)
+                    for comp in parent_parts:
+                        next_fd = os.open(comp, flags, dir_fd=curr_fd)
+                        stack.callback(os.close, next_fd)
+                        curr_fd = next_fd
+                except OSError as exc:
+                    return _skip(f"failed to safely access directory path: {exc}")
+
+                try:
+                    st_leaf = os.stat(leaf_name, dir_fd=curr_fd, follow_symlinks=False)
+                except OSError as exc:
+                    return _skip(f"stat failed: {exc}")
+
+                if stat.S_ISLNK(st_leaf.st_mode) or not stat.S_ISDIR(st_leaf.st_mode):
+                    return _skip("source is not a directory")
+
+                if (item.expected_device and st_leaf.st_dev != item.expected_device) or (
+                    item.expected_inode and st_leaf.st_ino != item.expected_inode
+                ):
+                    return _skip("source identity changed")
+
+                try:
+                    os.rmdir(leaf_name, dir_fd=curr_fd)
+                except OSError as exc:
+                    return ItemResult("failed", str(exc))
+                return ItemResult("completed", "empty directory removed", source)
 
         if item.operation == "mkdir_empty":
             if item.target is None:
@@ -254,11 +296,60 @@ def execute_item(
                         return _skip("anchor identity changed")
                 except OSError as exc:
                     return _skip(f"stat failed: {exc}")
-            try:
-                os.mkdir(target)
-            except OSError as exc:
-                return ItemResult("failed", str(exc))
-            return ItemResult("completed", "empty directory created", target)
+
+            flags = os.O_RDONLY | os.O_DIRECTORY
+            if hasattr(os, "O_NOFOLLOW"):
+                flags |= os.O_NOFOLLOW
+
+            with contextlib.ExitStack() as stack:
+                try:
+                    anchor_fd = os.open(str(source), flags)
+                    stack.callback(os.close, anchor_fd)
+                except OSError as exc:
+                    return _skip(f"failed to open anchor directory: {exc}")
+
+                try:
+                    st_anchor = os.fstat(anchor_fd)
+                except OSError as exc:
+                    return _skip(f"stat failed on anchor: {exc}")
+
+                if not stat.S_ISDIR(st_anchor.st_mode):
+                    return _skip("anchor is not a directory")
+                if (item.expected_device and st_anchor.st_dev != item.expected_device) or (
+                    item.expected_inode and st_anchor.st_ino != item.expected_inode
+                ):
+                    return _skip("anchor identity changed")
+
+                rel_to_anchor = target_raw.relative_to(source)
+                parent_parts = rel_to_anchor.parts[:-1]
+                leaf_name = rel_to_anchor.parts[-1]
+
+                curr_fd = anchor_fd
+                for comp in parent_parts:
+                    try:
+                        next_fd = os.open(comp, flags, dir_fd=curr_fd)
+                        stack.callback(os.close, next_fd)
+                        curr_fd = next_fd
+                    except OSError:
+                        return _skip("target parent is missing or not a directory")
+
+                try:
+                    os.stat(leaf_name, dir_fd=curr_fd, follow_symlinks=False)
+                    return _skip("target already exists")
+                except FileNotFoundError:
+                    pass
+                except OSError as exc:
+                    if exc.errno == errno.ENOENT:
+                        pass
+                    else:
+                        return ItemResult("failed", str(exc))
+
+                try:
+                    os.mkdir(leaf_name, dir_fd=curr_fd)
+                except OSError as exc:
+                    return ItemResult("failed", str(exc))
+
+                return ItemResult("completed", "empty directory created", target)
 
         if item.operation == "unlink":
             os.unlink(source)

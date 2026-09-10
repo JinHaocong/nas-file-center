@@ -1,3 +1,4 @@
+import errno
 import json
 import os
 import time
@@ -553,4 +554,287 @@ def test_execute_mkdir_empty_success_and_fences(lifecycle_env, monkeypatch):
         plan_id="p1",
     )
     assert res_exists.state == "skipped"
+
+
+def test_execute_mkdir_empty_parent_redirection_race(lifecycle_env, monkeypatch):
+    """
+    5.1 mkdir_empty parent redirection race
+    When target's parent is swapped with a symlink to outside,
+    the mutation MUST NOT escape to outside/new_dir, and must fail closed.
+    """
+    root = lifecycle_env["root_path"]
+    quarantine_dir = lifecycle_env["quarantine_dir"]
+
+    anchor = root / "anchor"
+    anchor.mkdir()
+    st_anchor = anchor.stat()
+
+    parent = anchor / "parent"
+    parent.mkdir()
+
+    target = parent / "new_dir"
+
+    outside = lifecycle_env["data_dir"].parent / "outside"
+    outside.mkdir(parents=True, exist_ok=True)
+
+    item = OperationItem(
+        sequence=1,
+        operation="mkdir_empty",
+        source=anchor,
+        target=target,
+        expected_device=st_anchor.st_dev,
+        expected_inode=st_anchor.st_ino,
+    )
+
+    # Simulate race: right after initial path observation,
+    # parent is renamed away and replaced by a symlink to outside.
+    orig_lstat = os.lstat
+    lstat_count = [0]
+
+    def racing_lstat(path, *args, **kwargs):
+        res = orig_lstat(path, *args, **kwargs)
+        if Path(path) == anchor:
+            lstat_count[0] += 1
+            # Trigger race on final lstat observation of anchor right before mutation
+            if lstat_count[0] == 6:
+                parent_backup = anchor / "parent_real"
+                parent.rename(parent_backup)
+                os.symlink(str(outside), str(parent))
+        return res
+
+    monkeypatch.setattr(os, "lstat", racing_lstat)
+
+    res = execute_item(
+        item,
+        allowed_roots=[root],
+        allow_mutation=True,
+        allow_delete=True,
+        quarantine_root=quarantine_dir,
+        plan_id="p1",
+    )
+
+    # 1. outside/new_dir MUST NOT exist
+    assert not (outside / "new_dir").exists(), "VULNERABILITY: outside/new_dir was created via symlink escape!"
+    # 2. item must not be completed
+    assert res.state != "completed"
+
+
+def test_execute_rmdir_empty_identity_replacement_race(lifecycle_env, monkeypatch):
+    """
+    5.2 rmdir_empty identity/path replacement race
+    Frozen source inode = X.
+    Immediately before mutation, source is replaced by another directory with inode = Y.
+    Wrong object (Y) must not be deleted.
+    """
+    root = lifecycle_env["root_path"]
+    quarantine_dir = lifecycle_env["quarantine_dir"]
+
+    d = root / "victim_dir"
+    d.mkdir()
+    st_orig = d.stat()
+
+    item = OperationItem(
+        sequence=1,
+        operation="rmdir_empty",
+        source=d,
+        expected_device=st_orig.st_dev,
+        expected_inode=st_orig.st_ino,
+    )
+
+    orig_lstat = os.lstat
+    lstat_count = [0]
+    replacement_d = root / "replacement_holder"
+
+    def racing_lstat(path, *args, **kwargs):
+        res = orig_lstat(path, *args, **kwargs)
+        if Path(path) == d:
+            lstat_count[0] += 1
+            # Trigger race on final lstat observation of source right before mutation
+            if lstat_count[0] == 4:
+                d.rename(replacement_d)
+                d.mkdir()  # New directory with new inode Y
+        return res
+
+    monkeypatch.setattr(os, "lstat", racing_lstat)
+
+    res = execute_item(
+        item,
+        allowed_roots=[root],
+        allow_mutation=True,
+        allow_delete=True,
+        quarantine_root=quarantine_dir,
+        plan_id="p1",
+    )
+
+    # Under old code, os.rmdir(d) is called without dir_fd and without final fence, deleting d (inode Y)!
+    # With FD-based fence, leaf identity must be verified in parent_fd immediately before rmdir,
+    # refusing to delete the replacement object.
+    assert res.state != "completed"
+    assert d.exists(), "VULNERABILITY: replacement directory (inode Y) was wrongfully deleted!"
+
+
+def test_execute_rmdir_empty_file_appears_immediately_before_mutation(lifecycle_env, monkeypatch):
+    """
+    5.3 file appears immediately before rmdir
+    Freeze §24.7: file appears immediately before mutation -> rmdir fails -> file remains -> no fallback deletion.
+    """
+    root = lifecycle_env["root_path"]
+    quarantine_dir = lifecycle_env["quarantine_dir"]
+
+    d = root / "file_replace_dir"
+    d.mkdir()
+    st = d.stat()
+
+    item = OperationItem(
+        sequence=1,
+        operation="rmdir_empty",
+        source=d,
+        expected_device=st.st_dev,
+        expected_inode=st.st_ino,
+    )
+
+    orig_rmdir = os.rmdir
+    race_triggered = [False]
+
+    def racing_rmdir(path, *args, **kwargs):
+        if not race_triggered[0]:
+            race_triggered[0] = True
+            d.rmdir()
+            d.write_text("regular file content")
+        return orig_rmdir(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "rmdir", racing_rmdir)
+
+    unlink_called = [False]
+
+    def forbidden_unlink(*args, **kwargs):
+        unlink_called[0] = True
+        raise AssertionError("FORBIDDEN: os.unlink called during rmdir_empty")
+
+    monkeypatch.setattr(os, "unlink", forbidden_unlink)
+
+    res = execute_item(
+        item,
+        allowed_roots=[root],
+        allow_mutation=True,
+        allow_delete=True,
+        quarantine_root=quarantine_dir,
+        plan_id="p1",
+    )
+
+    assert res.state != "completed"
+    assert d.is_file(), "File must remain on disk untouched"
+    assert d.read_text() == "regular file content"
+    assert not unlink_called[0]
+
+
+def test_execute_rmdir_empty_symlink_swap_immediately_before_mutation(lifecycle_env, monkeypatch):
+    """
+    5.4 symlink swap immediately before mutation
+    Symlink swap -> blocked / failed closed -> symlink target untouched.
+    """
+    root = lifecycle_env["root_path"]
+    quarantine_dir = lifecycle_env["quarantine_dir"]
+
+    d = root / "sym_victim_dir"
+    d.mkdir()
+    st = d.stat()
+
+    sensitive = root / "sensitive_data"
+    sensitive.mkdir()
+    (sensitive / "important.txt").write_text("critical data")
+
+    item = OperationItem(
+        sequence=1,
+        operation="rmdir_empty",
+        source=d,
+        expected_device=st.st_dev,
+        expected_inode=st.st_ino,
+    )
+
+    orig_rmdir = os.rmdir
+    race_triggered = [False]
+
+    def racing_rmdir(path, *args, **kwargs):
+        if not race_triggered[0]:
+            race_triggered[0] = True
+            d.rmdir()
+            os.symlink(str(sensitive), str(d))
+        return orig_rmdir(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "rmdir", racing_rmdir)
+
+    res = execute_item(
+        item,
+        allowed_roots=[root],
+        allow_mutation=True,
+        allow_delete=True,
+        quarantine_root=quarantine_dir,
+        plan_id="p1",
+    )
+
+    assert res.state != "completed"
+    assert sensitive.exists()
+    assert (sensitive / "important.txt").exists()
+    assert (sensitive / "important.txt").read_text() == "critical data"
+
+
+@pytest.mark.parametrize("errno_val,err_name", [
+    (errno.ENOTEMPTY, "ENOTEMPTY"),
+    (errno.EEXIST, "EEXIST"),
+    (errno.EBUSY, "EBUSY"),
+    (errno.EACCES, "EACCES"),
+    (errno.EPERM, "EPERM"),
+    (errno.EIO, "EIO"),
+])
+def test_execute_rmdir_empty_error_fallback_matrix(lifecycle_env, monkeypatch, errno_val, err_name):
+    """
+    5.5 error fallback matrix
+    Verify ENOTEMPTY/EEXIST, EBUSY, EACCES/EPERM, EIO never trigger recursive cleanup or unlink.
+    0 os.unlink, 0 shutil.rmtree.
+    """
+    import shutil
+
+    root = lifecycle_env["root_path"]
+    quarantine_dir = lifecycle_env["quarantine_dir"]
+
+    d = root / f"err_dir_{err_name}"
+    d.mkdir()
+    st = d.stat()
+
+    item = OperationItem(
+        sequence=1,
+        operation="rmdir_empty",
+        source=d,
+        expected_device=st.st_dev,
+        expected_inode=st.st_ino,
+    )
+
+    def failing_rmdir(*args, **kwargs):
+        raise OSError(errno_val, f"Simulated {err_name}")
+
+    monkeypatch.setattr(os, "rmdir", failing_rmdir)
+
+    def forbidden_unlink(*args, **kwargs):
+        raise AssertionError("FORBIDDEN: os.unlink called on error")
+
+    monkeypatch.setattr(os, "unlink", forbidden_unlink)
+
+    def forbidden_rmtree(*args, **kwargs):
+        raise AssertionError("FORBIDDEN: shutil.rmtree called on error")
+
+    monkeypatch.setattr(shutil, "rmtree", forbidden_rmtree)
+
+    res = execute_item(
+        item,
+        allowed_roots=[root],
+        allow_mutation=True,
+        allow_delete=True,
+        quarantine_root=quarantine_dir,
+        plan_id="p1",
+    )
+
+    assert res.state == "failed"
+    assert d.exists()
+
 
