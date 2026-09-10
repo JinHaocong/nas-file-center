@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 import json
 import os
+import stat
 import time
 from datetime import timedelta
 from pathlib import Path
@@ -747,115 +748,125 @@ def _reconcile_executing_item(
             item.reason = "reconciliation failed after crash (quarantine root not configured)"
             return
 
-        q_name = build_e4_quarantine_name(plan_id, item.sequence, str(src))
-        q_target = Path(settings.quarantine_root) / q_name
-
-        src_exists = os.path.lexists(src)
-        src_is_frozen_x = False
-        if src_exists and not src.is_symlink():
-            try:
-                st_src = src.stat(follow_symlinks=False)
-                if src.is_dir() and st_src.st_dev == exp_dev and st_src.st_ino == exp_ino:
-                    src_is_frozen_x = True
-            except OSError:
-                pass
-
-        q_exists = os.path.lexists(q_target)
-        q_is_frozen_x = False
-        q_st = None
-        if q_exists and not q_target.is_symlink():
-            try:
-                st_q = q_target.stat(follow_symlinks=False)
-                q_st = st_q
-                if q_target.is_dir() and st_q.st_dev == exp_dev and st_q.st_ino == exp_ino:
-                    q_is_frozen_x = True
-            except OSError:
-                pass
-
-        # State D: Both source Frozen X and quarantine target exist -> conflict
-        if src_is_frozen_x and q_exists:
+        try:
+            q_root_fd, q_root_path, q_root_stat = acquire_safe_quarantine_root_fd(settings.quarantine_root)
+        except Exception as exc:
             item.state = "failed"
-            item.reason = "reconciliation conflict after crash (both source and quarantine target exist)"
+            item.reason = f"reconciliation conflict after crash (invalid quarantine root: {exc})"
             return
 
-        # State A: source exists as Frozen X, quarantine target absent -> planned (retryable)
-        if src_is_frozen_x and not q_exists:
-            item.state = "planned"
-            item.reason = None
-            return
+        with contextlib.ExitStack() as stack:
+            stack.callback(os.close, q_root_fd)
 
-        # State B: source absent or occupied by unrelated object, quarantine exists as Frozen X
-        if q_is_frozen_x:
-            item.state = "completed"
-            item.reason = "reconciled after crash (empty directory relocated to quarantine)"
-            existing_j = session.scalar(select(OperationJournal).where(OperationJournal.plan_item_id == item.id))
-            if not existing_j:
-                session.add(OperationJournal(
-                    operation=item.operation,
-                    sequence=item.sequence,
-                    plan_id=plan_id,
-                    plan_item_id=item.id,
-                    task_id=job_id,
-                    user_id=user_id,
-                    before_json=json.dumps({
-                        "path": str(src),
-                        "scope_root": meta.get("scope_root"),
-                        "object_type": "directory",
-                    }, ensure_ascii=False),
-                    after_json=json.dumps({
-                        "logical_removed": True,
-                        "preserved": True,
-                        "removed": True,
-                        "quarantine_path": str(q_target),
-                    }, ensure_ascii=False),
-                    metadata_before_json=json.dumps(metadata_before or source_stat, ensure_ascii=False),
-                    metadata_after_json=json.dumps({
-                        "object_type": "directory",
-                        "size": q_st.st_size if q_st else 0,
-                        "mtime_ns": getattr(q_st, "st_mtime_ns", int(q_st.st_mtime * 1e9)) if q_st else 0,
-                        "device": getattr(q_st, "st_dev", 0) if q_st else 0,
-                        "inode": getattr(q_st, "st_ino", 0) if q_st else 0,
-                    }, ensure_ascii=False),
-                    created_at=now,
-                ))
-            return
+            q_name = build_e4_quarantine_name(plan_id, item.sequence, str(src))
+            q_target = q_root_path / q_name
 
-        # State C: quarantine target exists but identity != Frozen X
-        if q_exists:
-            item.state = "failed"
-            item.reason = "reconciliation conflict after crash (quarantine target identity mismatch)"
-            # Attempt safe no-replace rollback if source path does not exist
-            if not src_exists:
-                allowed_roots = list(settings.allowed_roots) if hasattr(settings, "allowed_roots") and settings.allowed_roots else []
-                if meta.get("scope_root"):
-                    scope_p = Path(meta["scope_root"])
-                    if scope_p not in allowed_roots:
-                        allowed_roots.append(scope_p)
+            src_exists = os.path.lexists(src)
+            src_is_frozen_x = False
+            if src_exists and not src.is_symlink():
                 try:
-                    with contextlib.ExitStack() as stack:
-                        q_dir_fd, _, _ = acquire_safe_quarantine_root_fd(settings.quarantine_root)
-                        stack.callback(os.close, q_dir_fd)
+                    st_src = src.stat(follow_symlinks=False)
+                    if src.is_dir() and st_src.st_dev == exp_dev and st_src.st_ino == exp_ino:
+                        src_is_frozen_x = True
+                except OSError:
+                    pass
+
+            q_exists = False
+            q_is_frozen_x = False
+            q_st = None
+            try:
+                st_q = os.stat(q_name, dir_fd=q_root_fd, follow_symlinks=False)
+                q_exists = True
+                q_st = st_q
+                if stat.S_ISDIR(st_q.st_mode) and not stat.S_ISLNK(st_q.st_mode):
+                    if st_q.st_dev == exp_dev and st_q.st_ino == exp_ino:
+                        q_is_frozen_x = True
+            except FileNotFoundError:
+                q_exists = False
+            except OSError:
+                q_exists = True
+
+            # State D: Both source Frozen X and quarantine target exist -> conflict
+            if src_is_frozen_x and q_exists:
+                item.state = "failed"
+                item.reason = "reconciliation conflict after crash (both source and quarantine target exist)"
+                return
+
+            # State A: source exists as Frozen X, quarantine target absent -> planned (retryable)
+            if src_is_frozen_x and not q_exists:
+                item.state = "planned"
+                item.reason = None
+                return
+
+            # State B: source absent or occupied by unrelated object, quarantine exists as Frozen X
+            if q_is_frozen_x:
+                item.state = "completed"
+                item.reason = "reconciled after crash (empty directory relocated to quarantine)"
+                existing_j = session.scalar(select(OperationJournal).where(OperationJournal.plan_item_id == item.id))
+                if not existing_j:
+                    session.add(OperationJournal(
+                        operation=item.operation,
+                        sequence=item.sequence,
+                        plan_id=plan_id,
+                        plan_item_id=item.id,
+                        task_id=job_id,
+                        user_id=user_id,
+                        before_json=json.dumps({
+                            "path": str(src),
+                            "scope_root": meta.get("scope_root"),
+                            "object_type": "directory",
+                        }, ensure_ascii=False),
+                        after_json=json.dumps({
+                            "logical_removed": True,
+                            "preserved": True,
+                            "removed": True,
+                            "quarantine_path": str(q_target),
+                        }, ensure_ascii=False),
+                        metadata_before_json=json.dumps(metadata_before or source_stat, ensure_ascii=False),
+                        metadata_after_json=json.dumps({
+                            "object_type": "directory",
+                            "size": q_st.st_size if q_st else 0,
+                            "mtime_ns": getattr(q_st, "st_mtime_ns", int(q_st.st_mtime * 1e9)) if q_st else 0,
+                            "device": getattr(q_st, "st_dev", 0) if q_st else 0,
+                            "inode": getattr(q_st, "st_ino", 0) if q_st else 0,
+                        }, ensure_ascii=False),
+                        created_at=now,
+                    ))
+                return
+
+            # State C: quarantine target exists but identity != Frozen X
+            if q_exists:
+                item.state = "failed"
+                item.reason = "reconciliation conflict after crash (quarantine target identity mismatch)"
+                # Attempt safe no-replace rollback if source path does not exist
+                if not src_exists:
+                    allowed_roots = list(settings.allowed_roots) if hasattr(settings, "allowed_roots") and settings.allowed_roots else []
+                    if meta.get("scope_root"):
+                        scope_p = Path(meta["scope_root"])
+                        if scope_p not in allowed_roots:
+                            allowed_roots.append(scope_p)
+                    try:
                         with safe_open_parent_fd(src, allowed_roots) as (src_parent_fd, leaf_name):
                             # Pre-check: leaf_name must not exist in src_parent_fd
                             try:
                                 os.stat(leaf_name, dir_fd=src_parent_fd, follow_symlinks=False)
                                 # already exists in parent! Cannot rollback.
                             except FileNotFoundError:
-                                rename_noreplace_at(q_dir_fd, q_name, src_parent_fd, leaf_name)
-                except Exception:
-                    pass  # Keep preserved in quarantine
-            return
+                                rename_noreplace_at(q_root_fd, q_name, src_parent_fd, leaf_name)
+                    except Exception:
+                        pass  # Keep preserved in quarantine
+                return
 
-        # State E: both source and quarantine target absent
-        if not src_exists and not q_exists:
+            # State E: both source and quarantine target absent
+            if not src_exists and not q_exists:
+                item.state = "failed"
+                item.reason = "reconciliation failed after crash (source and quarantine target absent)"
+                return
+
+            # Any other conflict (e.g. source replaced by symlink or different inode, quarantine absent)
             item.state = "failed"
-            item.reason = "reconciliation failed after crash (source and quarantine target absent)"
+            item.reason = "reconciliation conflict after crash (source identity mismatch)"
             return
-
-        # Any other conflict (e.g. source replaced by symlink or different inode, quarantine absent)
-        item.state = "failed"
-        item.reason = "reconciliation conflict after crash (source identity mismatch)"
-        return
 
     elif item.operation == "restore_empty_dir":
         meta = json.loads(item.metadata_json or "{}")
