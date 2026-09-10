@@ -722,6 +722,167 @@ def _reconcile_executing_item(
             item.state = "failed"
             item.reason = "reconciliation failed: source does not exist"
 
+    elif item.operation == "rmdir_empty":
+        meta = json.loads(item.metadata_json or "{}")
+        exec_meta = meta.get("execution") or {}
+        source_stat = exec_meta.get("source_stat") or {}
+        metadata_before = exec_meta.get("metadata_before") or source_stat
+
+        if src.is_symlink():
+            item.state = "failed"
+            item.reason = "reconciliation conflict after crash (source replaced by symlink)"
+        elif src.exists():
+            if not src.is_dir():
+                item.state = "failed"
+                item.reason = "reconciliation conflict after crash (source is not a directory)"
+            else:
+                try:
+                    st = src.stat(follow_symlinks=False)
+                    exp_dev = item.expected_device or source_stat.get("device")
+                    exp_ino = item.expected_inode or source_stat.get("inode")
+                    if exp_dev is not None and exp_ino is not None and st.st_dev == exp_dev and st.st_ino == exp_ino:
+                        item.state = "planned"
+                        item.reason = None
+                    else:
+                        item.state = "failed"
+                        item.reason = "reconciliation conflict after crash (source identity mismatch)"
+                except OSError:
+                    item.state = "failed"
+                    item.reason = "reconciliation conflict after crash (stat failed on source)"
+        else:
+            exp_dev = item.expected_device or source_stat.get("device")
+            exp_ino = item.expected_inode or source_stat.get("inode")
+            if exp_dev is None or exp_ino is None:
+                item.state = "failed"
+                item.reason = "reconciliation conflict after crash (missing pre-mutation identity evidence)"
+            else:
+                item.state = "completed"
+                item.reason = "reconciled after crash (empty directory removed)"
+                existing_j = session.scalar(select(OperationJournal).where(OperationJournal.plan_item_id == item.id))
+                if not existing_j:
+                    session.add(OperationJournal(
+                        operation=item.operation,
+                        sequence=item.sequence,
+                        plan_id=plan_id,
+                        plan_item_id=item.id,
+                        task_id=job_id,
+                        user_id=user_id,
+                        before_json=json.dumps({
+                            "path": str(src),
+                            "scope_root": meta.get("scope_root"),
+                            "object_type": "directory",
+                        }, ensure_ascii=False),
+                        after_json=json.dumps({"removed": True}, ensure_ascii=False),
+                        metadata_before_json=json.dumps(metadata_before or source_stat, ensure_ascii=False),
+                        metadata_after_json=json.dumps({}, ensure_ascii=False),
+                        created_at=now,
+                    ))
+
+    elif item.operation == "mkdir_empty":
+        meta = json.loads(item.metadata_json or "{}")
+        exec_meta = meta.get("execution") or {}
+        source_stat = exec_meta.get("source_stat") or {}
+        metadata_before = exec_meta.get("metadata_before") or source_stat
+
+        anchor = src
+        tgt = Path(item.target_path) if item.target_path else None
+        if not tgt:
+            item.state = "failed"
+            item.reason = "reconciliation conflict after crash (missing target path for mkdir_empty)"
+            return
+
+        if anchor.is_symlink() or not anchor.is_dir():
+            item.state = "failed"
+            item.reason = "reconciliation conflict after crash (anchor is missing or not a directory)"
+            return
+
+        try:
+            st_anchor = anchor.stat(follow_symlinks=False)
+            exp_dev = item.expected_device or source_stat.get("device")
+            exp_ino = item.expected_inode or source_stat.get("inode")
+            if exp_dev is not None and exp_ino is not None:
+                if st_anchor.st_dev != exp_dev or st_anchor.st_ino != exp_ino:
+                    item.state = "failed"
+                    item.reason = "reconciliation conflict after crash (anchor identity mismatch)"
+                    return
+        except OSError:
+            item.state = "failed"
+            item.reason = "reconciliation conflict after crash (anchor stat failed)"
+            return
+
+        try:
+            rel = tgt.relative_to(anchor)
+            if str(rel) in ("", "."):
+                item.state = "failed"
+                item.reason = "reconciliation conflict after crash (target not strict descendant of anchor)"
+                return
+            require_allowed_path(anchor, settings.allowed_roots)
+            require_allowed_path(tgt, settings.allowed_roots)
+            require_allowed_path(tgt.parent, settings.allowed_roots)
+            if settings.quarantine_root:
+                q_root = Path(settings.quarantine_root)
+                if (
+                    is_reserved_quarantine_path(anchor, q_root)
+                    or is_reserved_quarantine_path(tgt, q_root)
+                    or is_reserved_quarantine_path(tgt.parent, q_root)
+                ):
+                    item.state = "failed"
+                    item.reason = "reconciliation conflict after crash (quarantine path violation)"
+                    return
+        except Exception:
+            item.state = "failed"
+            item.reason = "reconciliation conflict after crash (path safety violation)"
+            return
+
+        if not tgt.exists() and not tgt.is_symlink():
+            item.state = "planned"
+            item.reason = None
+        elif tgt.is_symlink():
+            item.state = "failed"
+            item.reason = "reconciliation conflict after crash (target is a symlink)"
+        elif not tgt.is_dir():
+            item.state = "failed"
+            item.reason = "reconciliation conflict after crash (target is not a directory)"
+        else:
+            try:
+                children = os.listdir(tgt)
+                if children:
+                    item.state = "failed"
+                    item.reason = "reconciliation conflict after crash (target directory is not empty)"
+                    return
+            except OSError:
+                item.state = "failed"
+                item.reason = "reconciliation conflict after crash (failed to list target directory)"
+                return
+
+            st_tgt = tgt.stat(follow_symlinks=False)
+            item.state = "completed"
+            item.reason = "reconciled after crash (target directory created)"
+            existing_j = session.scalar(select(OperationJournal).where(OperationJournal.plan_item_id == item.id))
+            if not existing_j:
+                res_stat = _build_stat_dict(tgt, st_tgt)
+                session.add(OperationJournal(
+                    operation=item.operation,
+                    sequence=item.sequence,
+                    plan_id=plan_id,
+                    plan_item_id=item.id,
+                    task_id=job_id,
+                    user_id=user_id,
+                    before_json=json.dumps({
+                        "anchor_path": str(anchor),
+                        "scope_root": meta.get("scope_root") or str(anchor),
+                        "target_path": str(tgt),
+                    }, ensure_ascii=False),
+                    after_json=json.dumps({
+                        "path": str(tgt),
+                        "created": True,
+                        "object_type": "directory",
+                    }, ensure_ascii=False),
+                    metadata_before_json=json.dumps(metadata_before or source_stat, ensure_ascii=False),
+                    metadata_after_json=json.dumps(res_stat, ensure_ascii=False),
+                    created_at=now,
+                ))
+
 def _verify_plan_item_and_keep_freshness(
     item_meta: Any,
     settings: Settings,
