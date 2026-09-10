@@ -14,13 +14,7 @@ from app.resource_control import (
     is_resource_controlled_job,
     resolve_timezone,
 )
-try:
-    from app.models import ResourcePolicy
-except ImportError:
-    class ResourcePolicy:  # type: ignore[no-redef]
-        def __init__(self, **kwargs):
-            for k, v in kwargs.items():
-                setattr(self, k, v)
+from app.models import ResourcePolicy
 
 def test_default_policy_evaluation_returns_full_profile():
     snap = ResourcePolicySnapshot(
