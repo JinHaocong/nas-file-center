@@ -103,8 +103,12 @@ from app.filters.excludes import DEFAULT_EXCLUDE_DIR_NAMES, validate_exclude_rul
 from app.filters.compiler import compile_filter_to_sql
 from app.filters.media_types import get_media_type, normalize_extension
 from app.filters.validation import validate_filter_ast
-from app.filters.schema import FilterNode
-from app.batch_utilities.schema import QuarantineFilteredAction, SuffixTransformAction, FlattenOneLevelAction
+from app.batch_utilities.schema import (
+    QuarantineFilteredAction,
+    SuffixTransformAction,
+    FlattenOneLevelAction,
+    RemoveEmptyDirsAction,
+)
 from app.batch_utilities.compiler import (
     compile_quarantine_filtered_preview,
     compile_suffix_transform_preview,
@@ -4147,7 +4151,7 @@ class FileCenterService:
     def get_batch_utility_preview(
         self,
         *,
-        action: QuarantineFilteredAction | SuffixTransformAction | FlattenOneLevelAction,
+        action: QuarantineFilteredAction | SuffixTransformAction | FlattenOneLevelAction | RemoveEmptyDirsAction,
         page: int = 1,
         page_size: int = 50,
     ) -> dict[str, Any]:
@@ -4168,7 +4172,7 @@ class FileCenterService:
     def create_batch_utility_plan(
         self,
         *,
-        action: QuarantineFilteredAction | SuffixTransformAction | FlattenOneLevelAction,
+        action: QuarantineFilteredAction | SuffixTransformAction | FlattenOneLevelAction | RemoveEmptyDirsAction,
         expected_preview_digest: str,
     ) -> dict[str, Any]:
         # Phase A: Authoritative recompile outside write transaction
@@ -4292,7 +4296,7 @@ class FileCenterService:
         with self.SessionLocal() as session:
             session.execute(text("BEGIN IMMEDIATE"))
             action_type = compilation.canonical_action.get("type", "quarantine_filtered")
-            if action_type == "flatten_one_level":
+            if action_type in {"flatten_one_level", "remove_empty_dirs"}:
                 current_lineage = None
             elif action_type == "suffix_transform":
                 current_lineage = compute_current_suffix_transform_db_lineage_digest(
@@ -4340,6 +4344,8 @@ class FileCenterService:
             }
             if action_type == "flatten_one_level":
                 plan_metadata["wrapper_paths"] = compilation.canonical_action.get("wrapper_paths", [])
+            elif action_type == "remove_empty_dirs":
+                plan_metadata["scope_paths"] = compilation.canonical_action.get("scope_paths", [])
 
             plan_name = f"batch-utility-{action_type.replace('_', '-')}"
             plan = BatchPlan(
