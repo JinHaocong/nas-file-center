@@ -1302,3 +1302,119 @@ def test_reconcile_restore_empty_dir_states(lifecycle_env):
         assert after["restored"] is True
 
 
+def test_quarantine_root_symlink_is_rejected_before_relocation(tmp_path):
+    from app.batch_utilities.empty_dir_quarantine import relocate_empty_dir_to_quarantine
+
+    allowed_root = tmp_path / "allowed"
+    allowed_root.mkdir()
+    source = allowed_root / "empty_dir"
+    source.mkdir()
+    st_src = source.stat()
+
+    real_q = tmp_path / "real_quarantine"
+    real_q.mkdir()
+    q_alias = tmp_path / "quarantine_alias"
+    q_alias.symlink_to(real_q, target_is_directory=True)
+
+    res = relocate_empty_dir_to_quarantine(
+        source,
+        allowed_roots=[allowed_root],
+        quarantine_root=q_alias,
+        plan_id="p-test",
+        sequence=1,
+        expected_device=st_src.st_dev,
+        expected_inode=st_src.st_ino,
+    )
+
+    # Expected:
+    # state != completed
+    # source remains at original path
+    # nothing appears in real_q
+    # no rename_noreplace_at mutation occurred
+    assert res.state != "completed"
+    assert res.state == "failed"
+    assert source.exists()
+    assert list(real_q.iterdir()) == []
+
+
+def test_reconcile_state_c_parent_symlink_hijack_preserves_quarantine(lifecycle_env, tmp_path):
+    from app.tasks.handlers import _reconcile_executing_item
+    from app.batch_utilities.empty_dir_quarantine import build_e4_quarantine_name
+
+    service = lifecycle_env["service"]
+    settings = lifecycle_env["settings"]
+    root = lifecycle_env["root_path"]
+    quarantine = lifecycle_env["quarantine_dir"]
+
+    # Construct: authorized root / parent / victim
+    parent = root / "parent"
+    parent.mkdir()
+    victim = parent / "victim"
+    src = victim
+
+    # Frozen X identity (dev, ino) recorded in plan item
+    exp_dev = 12345
+    exp_ino = 99999
+
+    # Quarantine deterministic target contains mismatched inode Y
+    q_name = build_e4_quarantine_name(999, 1, str(src))
+    q_target = quarantine / q_name
+    q_target.mkdir()
+    st_y = q_target.stat()
+    assert (st_y.st_dev, st_y.st_ino) != (exp_dev, exp_ino)
+
+    # Destination directory to attempt hijacking into
+    hijack_dest = tmp_path / "hijack_target"
+    hijack_dest.mkdir()
+
+    # Replace the original parent path with a symlink to hijack_dest
+    parent.rmdir()
+    parent.symlink_to(hijack_dest, target_is_directory=True)
+
+    with service.SessionLocal() as session:
+        plan = BatchPlan(id=999, name="p_crash_c", kind="execute", status="running")
+        session.add(plan)
+        session.flush()
+
+        item = BatchPlanItem(
+            plan_id=plan.id,
+            sequence=1,
+            operation="rmdir_empty",
+            source_path=str(src),
+            target_path=None,
+            expected_device=exp_dev,
+            expected_inode=exp_ino,
+            state="executing",
+            metadata_json=json.dumps({
+                "scope_root": str(root),
+                "execution": {
+                    "source_stat": {"device": exp_dev, "inode": exp_ino}
+                }
+            }),
+        )
+        session.add(item)
+        session.commit()
+        item_id = item.id
+
+    with service.SessionLocal() as session:
+        item = session.get(BatchPlanItem, item_id)
+        _reconcile_executing_item(session, item, 999, 1, 1, settings, utcnow())
+        session.commit()
+
+    with service.SessionLocal() as session:
+        item = session.get(BatchPlanItem, item_id)
+        # Expected:
+        # Y MUST remain in quarantine
+        # no object appears under symlink destination / victim
+        # item = failed/conflict
+        # reconciliation must not follow the replaced parent symlink
+        assert item.state == "failed"
+        assert "conflict" in item.reason
+        assert q_target.exists()
+        assert q_target.is_dir()
+        assert list(hijack_dest.iterdir()) == []
+        assert not (hijack_dest / "victim").exists()
+
+
+
+
