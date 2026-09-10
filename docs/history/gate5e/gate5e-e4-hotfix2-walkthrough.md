@@ -7,7 +7,8 @@
 - **远程仓库**：`https://github.com/JinHaocong/nas-file-center`
 - **目标分支**：`v0.3.5-gate5c-hotfix4`
 - **起始授权基线 HEAD**：`73fc9ac7d3fc952da5593bd3b1024b712e992d49`（Independent Review Blocker 结论记录提交）
-- **Amendment 冻结提交**：`9d8bfc242b5a59345c26b38c227db043e0fc1a9f`
+- **Amendment 冻结提交**：`9d8bfc2d8cee562ba2edec0b956fb89a502c5a40`
+- **hotfix2 最终交付 / 审查 HEAD**：`b0d093898cfc3603aa15fb5ca4b53ba3462724d1`
 - **实现依据**：
   1. `docs/history/gate5e/gate5e-e4-hotfix2-architecture-freeze-amendment.md`
   2. `Gate5-E / E4-hotfix2 Quarantine-First Logical Removal Implementation Plan`
@@ -174,6 +175,8 @@ pytest tests/
 ## 6. 状态声明（Strict Declaration）
 
 根据项目规范与角色约束，Implementation Agent 严格不越权自行裁定评审通过，最终状态声明如下：
+
+- **hotfix2 审查与交付最终 HEAD**：`b0d093898cfc3603aa15fb5ca4b53ba3462724d1`
 
 ```text
 Gate5-E / E4-hotfix2 IMPLEMENTATION COMPLETE
