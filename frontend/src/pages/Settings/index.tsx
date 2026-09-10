@@ -14,6 +14,8 @@ import {
   Select,
   Modal,
   Tooltip,
+  Switch,
+  Input,
 } from 'antd';
 import {
   ReloadOutlined,
@@ -24,12 +26,12 @@ import {
   DeleteOutlined,
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { settingsApi, dataLifecycleApi, auditApi, quarantineApi } from '../../api/domain';
+import { settingsApi, dataLifecycleApi, auditApi, quarantineApi, resourcePolicyApi } from '../../api/domain';
 import { authApi } from '../../api/auth';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTitle } from '../../hooks/useTitle';
 import { formatDateTime } from '../../utils/format';
-import { SessionInfo } from '../../types';
+import { SessionInfo, ResourcePolicyUpdate } from '../../types';
 import {
   formatAuditRetention,
   getAuditRetentionApplyAvailability,
@@ -37,6 +39,11 @@ import {
   getQuarantineRetentionSaveAvailability,
   validateRetentionDaysInput,
 } from '../../components/settings/data_lifecycle';
+import {
+  COMMON_TIMEZONES,
+  validateResourcePolicyUpdate,
+  getProfileDisplay,
+} from '../../components/settings/resource_policy';
 
 const { Title, Text } = Typography;
 
@@ -69,6 +76,76 @@ export const SettingsPage: React.FC = () => {
     queryKey: ['quarantineRetentionPolicy'],
     queryFn: () => quarantineApi.getRetentionPolicy(),
   });
+
+  const { data: resourcePolicy, isLoading: policyLoading, refetch: refetchResourcePolicy } = useQuery({
+    queryKey: ['resourcePolicy'],
+    queryFn: () => resourcePolicyApi.getPolicy(),
+    enabled: !!isAdmin,
+  });
+
+  const [scanThreadsInput, setScanThreadsInput] = useState<number>(2);
+  const [hashThreadsInput, setHashThreadsInput] = useState<number>(2);
+  const [ioLimitInput, setIoLimitInput] = useState<'low' | 'normal' | 'unlimited'>('normal');
+  const [jobPriorityInput, setJobPriorityInput] = useState<'normal' | 'background'>('normal');
+  const [windowEnabledInput, setWindowEnabledInput] = useState<boolean>(false);
+  const [windowStartInput, setWindowStartInput] = useState<string>('01:00');
+  const [windowEndInput, setWindowEndInput] = useState<string>('07:00');
+  const [windowTimezoneInput, setWindowTimezoneInput] = useState<string>('UTC');
+  const [outsideModeInput, setOutsideModeInput] = useState<'limited' | 'pause'>('limited');
+
+  useEffect(() => {
+    if (resourcePolicy) {
+      setScanThreadsInput(resourcePolicy.scan_threads);
+      setHashThreadsInput(resourcePolicy.hash_threads);
+      setIoLimitInput(resourcePolicy.io_limit);
+      setJobPriorityInput(resourcePolicy.job_priority);
+      setWindowEnabledInput(resourcePolicy.active_window_enabled);
+      setWindowStartInput(resourcePolicy.active_window_start || '01:00');
+      setWindowEndInput(resourcePolicy.active_window_end || '07:00');
+      setWindowTimezoneInput(resourcePolicy.active_window_timezone || 'UTC');
+      setOutsideModeInput(resourcePolicy.outside_window_mode);
+    }
+  }, [resourcePolicy]);
+
+  const saveResourcePolicyMutation = useMutation({
+    mutationFn: (payload: ResourcePolicyUpdate) => {
+      if (!isAdmin) {
+        throw new Error('仅系统管理员允许修改资源控制策略');
+      }
+      return resourcePolicyApi.updatePolicy(payload);
+    },
+    onSuccess: () => {
+      message.success('资源控制策略已更新');
+      queryClient.invalidateQueries({ queryKey: ['resourcePolicy'] });
+    },
+    onError: (err: any) => {
+      message.error(err.message || '更新资源控制策略失败');
+    },
+  });
+
+  const handleSaveResourcePolicy = () => {
+    if (!isAdmin) {
+      message.error('仅系统管理员允许修改资源控制策略');
+      return;
+    }
+    const payload: ResourcePolicyUpdate = {
+      scan_threads: scanThreadsInput,
+      hash_threads: hashThreadsInput,
+      io_limit: ioLimitInput,
+      job_priority: jobPriorityInput,
+      active_window_enabled: windowEnabledInput,
+      active_window_start: windowEnabledInput ? windowStartInput : null,
+      active_window_end: windowEnabledInput ? windowEndInput : null,
+      active_window_timezone: windowEnabledInput ? windowTimezoneInput : null,
+      outside_window_mode: outsideModeInput,
+    };
+    const valResult = validateResourcePolicyUpdate(payload);
+    if (!valResult.valid) {
+      message.error(valResult.error || '资源策略校验失败');
+      return;
+    }
+    saveResourcePolicyMutation.mutate(payload);
+  };
 
   useEffect(() => {
     if (lifecyclePolicy) {
@@ -581,6 +658,186 @@ export const SettingsPage: React.FC = () => {
           </Descriptions>
         </div>
       </Card>
+
+      {/* Resource Control */}
+      {isAdmin && (
+        <Card
+          title="资源控制 / Resource Control"
+          bordered={false}
+          style={{ borderRadius: 12 }}
+          extra={
+            <Space>
+              <Button
+                icon={<ReloadOutlined />}
+                loading={policyLoading}
+                onClick={() => refetchResourcePolicy()}
+              >
+                刷新
+              </Button>
+              <Button
+                type="primary"
+                icon={<SaveOutlined />}
+                loading={saveResourcePolicyMutation.isPending}
+                onClick={handleSaveResourcePolicy}
+              >
+                保存资源策略
+              </Button>
+            </Space>
+          }
+        >
+          <div style={{ marginBottom: 20 }}>
+            <Alert
+              type="info"
+              showIcon
+              message="资源控制说明与约束提示"
+              description={
+                <div style={{ fontSize: 13, lineHeight: '20px' }}>
+                  <div>• <strong>应用层并发控制：</strong>I/O 压力与线程限制为应用层并发节流控制，并非保证性的 MB/s 或 IOPS 硬件限速。</div>
+                  <div>• <strong>无后台自动调度：</strong>窗口外暂停模式（Pause）不包含后台定时调度创建机制，仅在窗口外阻止排队的扫描/索引任务被 Worker 认领。</div>
+                  <div>• <strong>安全降级：</strong>文件组织器、批量删除及隔离还原等变动任务不受资源策略限制，始终保证优先处理。</div>
+                </div>
+              }
+              style={{ marginBottom: 20 }}
+            />
+
+            {resourcePolicy && (
+              <div style={{ background: '#fafafa', padding: '16px 20px', borderRadius: 8, border: '1px solid #f0f0f0', marginBottom: 20 }}>
+                <div style={{ fontWeight: 500, marginBottom: 12 }}>当前生效状态 (Effective Now)</div>
+                <Descriptions bordered size="small" column={{ xs: 1, sm: 2, md: 4 }}>
+                  <Descriptions.Item label="当前配置版本 (Revision)">
+                    <Text strong>rev.{resourcePolicy.revision}</Text>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="当前生效模式 (Profile)">
+                    {(() => {
+                      const disp = getProfileDisplay(resourcePolicy.effective_now.profile);
+                      return <Tag color={disp.color}>{disp.text}</Tag>;
+                    })()}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="有效并发线程上限">
+                    <Text strong>{resourcePolicy.effective_now.effective_thread_cap}</Text> 线程
+                  </Descriptions.Item>
+                  <Descriptions.Item label="资源任务认领许可">
+                    {resourcePolicy.effective_now.resource_jobs_admitted ? (
+                      <Tag color="success">允许认领</Tag>
+                    ) : (
+                      <Tag color="error">队列保持 (Held)</Tag>
+                    )}
+                  </Descriptions.Item>
+                </Descriptions>
+              </div>
+            )}
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px' }}>
+              <div>
+                <Text strong style={{ display: 'block', marginBottom: 6 }}>扫描线程上限 (1..32):</Text>
+                <InputNumber
+                  min={1}
+                  max={32}
+                  value={scanThreadsInput}
+                  onChange={(v) => setScanThreadsInput(v || 1)}
+                  style={{ width: '100%' }}
+                />
+              </div>
+
+              <div>
+                <Text strong style={{ display: 'block', marginBottom: 6 }}>哈希线程上限 (1..32):</Text>
+                <InputNumber
+                  min={1}
+                  max={32}
+                  value={hashThreadsInput}
+                  onChange={(v) => setHashThreadsInput(v || 1)}
+                  style={{ width: '100%' }}
+                />
+              </div>
+
+              <div>
+                <Text strong style={{ display: 'block', marginBottom: 6 }}>I/O 压力模式 (IO Limit):</Text>
+                <Select
+                  value={ioLimitInput}
+                  onChange={setIoLimitInput}
+                  style={{ width: '100%' }}
+                  options={[
+                    { value: 'low', label: '低压模式 (Low - 上限 1 线程)' },
+                    { value: 'normal', label: '标准模式 (Normal - 上限 2 线程)' },
+                    { value: 'unlimited', label: '无上限模式 (Unlimited - 上限 32 线程)' },
+                  ]}
+                />
+              </div>
+
+              <div>
+                <Text strong style={{ display: 'block', marginBottom: 6 }}>任务调度优先级 (Job Priority):</Text>
+                <Select
+                  value={jobPriorityInput}
+                  onChange={setJobPriorityInput}
+                  style={{ width: '100%' }}
+                  options={[
+                    { value: 'normal', label: '标准先进先出 (Normal FIFO)' },
+                    { value: 'background', label: '后台让步 (Background - 优先变动任务)' },
+                  ]}
+                />
+              </div>
+            </div>
+
+            <div style={{ marginTop: 24, padding: '16px 20px', borderRadius: 8, border: '1px solid #f0f0f0' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <div>
+                  <div style={{ fontWeight: 500 }}>活跃时间窗口限制 (Active Window)</div>
+                  <Text type="secondary" style={{ fontSize: 13 }}>
+                    启用后，仅在指定时间窗口内全速执行；窗口外将自动降速或暂停扫描认领。
+                  </Text>
+                </div>
+                <Switch
+                  checked={windowEnabledInput}
+                  onChange={setWindowEnabledInput}
+                />
+              </div>
+
+              {windowEnabledInput && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginTop: 12 }}>
+                  <div>
+                    <Text strong style={{ display: 'block', marginBottom: 6 }}>窗口起始时间 (HH:MM):</Text>
+                    <Input
+                      placeholder="01:00"
+                      value={windowStartInput}
+                      onChange={(e) => setWindowStartInput(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <Text strong style={{ display: 'block', marginBottom: 6 }}>窗口结束时间 (HH:MM):</Text>
+                    <Input
+                      placeholder="07:00"
+                      value={windowEndInput}
+                      onChange={(e) => setWindowEndInput(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <Text strong style={{ display: 'block', marginBottom: 6 }}>时区 (IANA Timezone):</Text>
+                    <Select
+                      showSearch
+                      value={windowTimezoneInput}
+                      onChange={setWindowTimezoneInput}
+                      style={{ width: '100%' }}
+                      options={COMMON_TIMEZONES.map((tz) => ({ value: tz, label: tz }))}
+                    />
+                  </div>
+                  <div>
+                    <Text strong style={{ display: 'block', marginBottom: 6 }}>窗口外行为模式 (Outside Mode):</Text>
+                    <Select
+                      value={outsideModeInput}
+                      onChange={setOutsideModeInput}
+                      style={{ width: '100%' }}
+                      options={[
+                        { value: 'limited', label: '降速运行 (Limited - 1 线程)' },
+                        { value: 'pause', label: '暂停认领 (Pause - 队列等待)' },
+                      ]}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* Active Sessions */}
       <Card title="管理员活动会话管理" bordered={false} style={{ borderRadius: 12 }}>

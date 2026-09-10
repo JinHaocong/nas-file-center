@@ -21,6 +21,8 @@ import {
   AuditRetentionApplyResult,
   OperationJournalListResponse,
   UndoPlanResponse,
+  ResourcePolicy,
+  ResourcePolicyUpdate,
 } from '../types';
 import {
   DirectDedupePreviewRequest,
@@ -166,4 +168,11 @@ export const dataLifecycleApi = {
 
 export const settingsApi = {
   getSettings: () => api.get<SystemSettings>('/api/settings'),
+};
+
+export const resourcePolicyApi = {
+  getPolicy: () =>
+    api.get<ResourcePolicy>('/api/settings/resource-policy'),
+  updatePolicy: (payload: ResourcePolicyUpdate) =>
+    api.put<ResourcePolicy>('/api/settings/resource-policy', payload),
 };

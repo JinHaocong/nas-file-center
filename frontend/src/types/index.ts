@@ -325,6 +325,41 @@ export interface OrganizerProfileListResponse {
   page_size: number;
 }
 
+export interface EffectiveResourcePolicy {
+  profile: 'full' | 'limited' | 'pause';
+  inside_active_window: boolean | null;
+  resource_jobs_admitted: boolean;
+  effective_thread_cap: number;
+}
+
+export interface ResourcePolicy {
+  id: number;
+  scan_threads: number;
+  hash_threads: number;
+  io_limit: 'low' | 'normal' | 'unlimited';
+  job_priority: 'normal' | 'background';
+  active_window_enabled: boolean;
+  active_window_start: string | null;
+  active_window_end: string | null;
+  active_window_timezone: string | null;
+  outside_window_mode: 'limited' | 'pause';
+  revision: number;
+  updated_at: string | null;
+  effective_now: EffectiveResourcePolicy;
+}
+
+export interface ResourcePolicyUpdate {
+  scan_threads: number;
+  hash_threads: number;
+  io_limit: 'low' | 'normal' | 'unlimited';
+  job_priority: 'normal' | 'background';
+  active_window_enabled: boolean;
+  active_window_start?: string | null;
+  active_window_end?: string | null;
+  active_window_timezone?: string | null;
+  outside_window_mode: 'limited' | 'pause';
+}
+
 export * from './task';
 export * from './quarantine';
 export * from './journal';
