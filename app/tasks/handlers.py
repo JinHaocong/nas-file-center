@@ -800,38 +800,80 @@ def _reconcile_executing_item(
 
             # State B: source absent or occupied by unrelated object, quarantine exists as Frozen X
             if q_is_frozen_x:
-                item.state = "completed"
-                item.reason = "reconciled after crash (empty directory relocated to quarantine)"
-                existing_j = session.scalar(select(OperationJournal).where(OperationJournal.plan_item_id == item.id))
-                if not existing_j:
-                    session.add(OperationJournal(
-                        operation=item.operation,
-                        sequence=item.sequence,
-                        plan_id=plan_id,
-                        plan_item_id=item.id,
-                        task_id=job_id,
-                        user_id=user_id,
-                        before_json=json.dumps({
-                            "path": str(src),
-                            "scope_root": meta.get("scope_root"),
-                            "object_type": "directory",
-                        }, ensure_ascii=False),
-                        after_json=json.dumps({
-                            "logical_removed": True,
-                            "preserved": True,
-                            "removed": True,
-                            "quarantine_path": str(q_target),
-                        }, ensure_ascii=False),
-                        metadata_before_json=json.dumps(metadata_before or source_stat, ensure_ascii=False),
-                        metadata_after_json=json.dumps({
-                            "object_type": "directory",
-                            "size": q_st.st_size if q_st else 0,
-                            "mtime_ns": getattr(q_st, "st_mtime_ns", int(q_st.st_mtime * 1e9)) if q_st else 0,
-                            "device": getattr(q_st, "st_dev", 0) if q_st else 0,
-                            "inode": getattr(q_st, "st_ino", 0) if q_st else 0,
-                        }, ensure_ascii=False),
-                        created_at=now,
-                    ))
+                flags = os.O_RDONLY | os.O_DIRECTORY
+                if hasattr(os, "O_NOFOLLOW"):
+                    flags |= os.O_NOFOLLOW
+                q_is_empty = False
+                try:
+                    target_fd = os.open(q_name, flags, dir_fd=q_root_fd)
+                    try:
+                        st_target = os.fstat(target_fd)
+                        if (
+                            stat.S_ISDIR(st_target.st_mode)
+                            and not stat.S_ISLNK(st_target.st_mode)
+                            and st_target.st_dev == exp_dev
+                            and st_target.st_ino == exp_ino
+                        ):
+                            entries = os.listdir(target_fd)
+                            if len(entries) == 0:
+                                q_is_empty = True
+                    finally:
+                        os.close(target_fd)
+                except Exception:
+                    q_is_empty = False
+
+                if q_is_empty:
+                    item.state = "completed"
+                    item.reason = "reconciled after crash (empty directory relocated to quarantine)"
+                    existing_j = session.scalar(select(OperationJournal).where(OperationJournal.plan_item_id == item.id))
+                    if not existing_j:
+                        session.add(OperationJournal(
+                            operation=item.operation,
+                            sequence=item.sequence,
+                            plan_id=plan_id,
+                            plan_item_id=item.id,
+                            task_id=job_id,
+                            user_id=user_id,
+                            before_json=json.dumps({
+                                "path": str(src),
+                                "scope_root": meta.get("scope_root"),
+                                "object_type": "directory",
+                            }, ensure_ascii=False),
+                            after_json=json.dumps({
+                                "logical_removed": True,
+                                "preserved": True,
+                                "removed": True,
+                                "quarantine_path": str(q_target),
+                            }, ensure_ascii=False),
+                            metadata_before_json=json.dumps(metadata_before or source_stat, ensure_ascii=False),
+                            metadata_after_json=json.dumps({
+                                "object_type": "directory",
+                                "size": q_st.st_size if q_st else 0,
+                                "mtime_ns": getattr(q_st, "st_mtime_ns", int(q_st.st_mtime * 1e9)) if q_st else 0,
+                                "device": getattr(q_st, "st_dev", 0) if q_st else 0,
+                                "inode": getattr(q_st, "st_ino", 0) if q_st else 0,
+                            }, ensure_ascii=False),
+                            created_at=now,
+                        ))
+                    return
+
+                # Quarantined directory is non-empty -> conflict recovery
+                item.state = "failed"
+                item.reason = "reconciliation conflict after crash (quarantined directory is non-empty)"
+                if not src_exists:
+                    allowed_roots = list(settings.allowed_roots) if hasattr(settings, "allowed_roots") and settings.allowed_roots else []
+                    if meta.get("scope_root"):
+                        scope_p = Path(meta["scope_root"])
+                        if scope_p not in allowed_roots:
+                            allowed_roots.append(scope_p)
+                    try:
+                        with safe_open_parent_fd(src, allowed_roots) as (src_parent_fd, leaf_name):
+                            try:
+                                os.stat(leaf_name, dir_fd=src_parent_fd, follow_symlinks=False)
+                            except FileNotFoundError:
+                                rename_noreplace_at(q_root_fd, q_name, src_parent_fd, leaf_name)
+                    except Exception:
+                        pass  # Keep preserved in quarantine
                 return
 
             # State C: quarantine target exists but identity != Frozen X
