@@ -1416,5 +1416,89 @@ def test_reconcile_state_c_parent_symlink_hijack_preserves_quarantine(lifecycle_
         assert not (hijack_dest / "victim").exists()
 
 
+def test_reconcile_rmdir_empty_quarantine_root_symlink_fails_closed(lifecycle_env, tmp_path):
+    from app.tasks.handlers import _reconcile_executing_item
+    from app.batch_utilities.empty_dir_quarantine import build_e4_quarantine_name
+
+    service = lifecycle_env["service"]
+    settings = lifecycle_env["settings"]
+    root = lifecycle_env["root_path"]
+
+    # Setup:
+    # real quarantine dir
+    real_q = tmp_path / "real_quarantine"
+    real_q.mkdir()
+
+    # symlink alias -> real quarantine dir
+    q_alias = tmp_path / "quarantine_alias"
+    q_alias.symlink_to(real_q, target_is_directory=True)
+
+    # Point settings.quarantine_root to the symlink alias
+    settings.quarantine_root = q_alias
+
+    # source is absent
+    src = root / "missing_source"
+    assert not src.exists()
+
+    plan_id = 990
+    seq = 1
+    q_name = build_e4_quarantine_name(plan_id, seq, str(src))
+
+    # real quarantine target contains deterministic q_name whose dev/inode == Frozen X
+    q_target_real = real_q / q_name
+    q_target_real.mkdir()
+    st_q = q_target_real.stat()
+    exp_dev = st_q.st_dev
+    exp_ino = st_q.st_ino
+
+    # item.operation = rmdir_empty, item.state = executing
+    with service.SessionLocal() as session:
+        plan = BatchPlan(id=plan_id, name="p_q_symlink_crash", kind="execute", status="running")
+        session.add(plan)
+        session.flush()
+
+        item = BatchPlanItem(
+            plan_id=plan.id,
+            sequence=seq,
+            operation="rmdir_empty",
+            source_path=str(src),
+            target_path=None,
+            expected_device=exp_dev,
+            expected_inode=exp_ino,
+            state="executing",
+            metadata_json=json.dumps({
+                "scope_root": str(root),
+                "execution": {
+                    "source_stat": {"device": exp_dev, "inode": exp_ino}
+                }
+            }),
+        )
+        session.add(item)
+        session.commit()
+        item_id = item.id
+
+    with service.SessionLocal() as session:
+        item = session.get(BatchPlanItem, item_id)
+        _reconcile_executing_item(session, item, plan_id, 1, 1, settings, utcnow())
+        session.commit()
+
+    with service.SessionLocal() as session:
+        item = session.get(BatchPlanItem, item_id)
+        journals = session.query(OperationJournal).filter_by(plan_item_id=item_id).all()
+        # Expected:
+        # item MUST NOT become completed
+        # NO success OperationJournal
+        # NO rollback through invalid quarantine root
+        # object remains untouched
+        # item = failed/conflict
+        assert item.state != "completed"
+        assert item.state == "failed"
+        assert "conflict" in (item.reason or "") or "invalid" in (item.reason or "")
+        assert len(journals) == 0
+        assert q_target_real.exists()
+        assert not src.exists()
+
+
+
 
 
