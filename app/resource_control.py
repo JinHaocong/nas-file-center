@@ -103,9 +103,6 @@ def validate_resource_policy_snapshot(snapshot: ResourcePolicySnapshot) -> None:
             _parse_time(snapshot.active_window_start)
         if snapshot.active_window_end is not None:
             _parse_time(snapshot.active_window_end)
-        if snapshot.active_window_start is not None and snapshot.active_window_end is not None:
-            if _parse_time(snapshot.active_window_start) == _parse_time(snapshot.active_window_end):
-                raise ResourcePolicyValidationError("active_window_start and active_window_end cannot be equal")
         if snapshot.active_window_timezone is not None:
             resolve_timezone(snapshot.active_window_timezone)
 
