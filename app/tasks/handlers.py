@@ -24,10 +24,20 @@ from app.models import (
     DuplicateGroup,
     OperationJournal,
     QuarantineEntry,
+    ResourcePolicy,
     ScanJob,
     TaskLock,
     WorkJob,
     utcnow,
+)
+from app.resource_control import (
+    EffectiveResourcePolicy,
+    ResourcePolicyConfigError,
+    ResourcePolicySnapshot,
+    compose_fclones_thread_cap,
+    evaluate_resource_policy,
+    resolve_timezone,
+    validate_resource_policy_snapshot,
 )
 from app.exceptions import StateConflictError
 from app.path_safety import require_allowed_path, is_reserved_quarantine_path, UnsafePathError
@@ -160,6 +170,38 @@ from app.tasks.state_machine import JobCancelRequested, JobLeaseLost
 SCAN_IMPORT_BATCH_SIZE: int = 100
 
 
+def _get_effective_resource_policy(context: JobContext) -> tuple[ResourcePolicySnapshot, EffectiveResourcePolicy]:
+    with context.SessionLocal() as session:
+        row = session.get(ResourcePolicy, 1)
+        if row is None:
+            context.log("resource_policy_error", "ResourcePolicy singleton missing", level="error")
+            raise ResourcePolicyConfigError("ResourcePolicy singleton missing")
+        try:
+            snapshot = ResourcePolicySnapshot(
+                scan_threads=row.scan_threads,
+                hash_threads=row.hash_threads,
+                io_limit=row.io_limit,
+                job_priority=row.job_priority,
+                active_window_enabled=row.active_window_enabled,
+                active_window_start=row.active_window_start,
+                active_window_end=row.active_window_end,
+                active_window_timezone=row.active_window_timezone,
+                outside_window_mode=row.outside_window_mode,
+                revision=row.revision,
+            )
+            validate_resource_policy_snapshot(snapshot)
+            prepared_tz = (
+                resolve_timezone(snapshot.active_window_timezone)
+                if snapshot.active_window_enabled and snapshot.active_window_timezone
+                else None
+            )
+            eff = evaluate_resource_policy(snapshot, now_utc=utcnow(), resolved_timezone=prepared_tz)
+            return snapshot, eff
+        except Exception as exc:
+            context.log("resource_policy_error", f"Corrupt resource policy: {exc}", level="error")
+            raise ResourcePolicyConfigError(f"Corrupt resource policy: {exc}") from exc
+
+
 @register_handler
 class FclonesScanHandler(TaskHandler):
     job_type = "fclones-scan"
@@ -183,6 +225,27 @@ class FclonesScanHandler(TaskHandler):
             progress_message="Building scan command...",
         )
 
+        snapshot, eff = _get_effective_resource_policy(context)
+        try:
+            effective_threads = compose_fclones_thread_cap(
+                eff.effective_thread_cap,
+                getattr(settings, "fclones_threads", None),
+                state.get("threads"),
+            )
+        except ResourcePolicyConfigError as exc:
+            context.log("resource_policy_error", str(exc), level="error")
+            raise
+
+        context.log(
+            "resource_policy_applied",
+            "Applied resource policy",
+            context={
+                "resource_policy_revision": eff.revision,
+                "profile": eff.profile,
+                "effective_thread_cap": effective_threads,
+            },
+        )
+
         effective_excludes = list(state.get("exclude_patterns") or [])
         if getattr(settings, "quarantine_root", None):
             q_root_str = str(settings.quarantine_root)
@@ -196,7 +259,7 @@ class FclonesScanHandler(TaskHandler):
             allowed_roots=settings.allowed_roots,
             isolate=bool(state.get("isolate", False)),
             min_size=state.get("min_size"),
-            threads=state.get("threads") or settings.fclones_threads,
+            threads=str(effective_threads),
             name_patterns=state.get("name_patterns"),
             exclude_patterns=effective_excludes,
         )
