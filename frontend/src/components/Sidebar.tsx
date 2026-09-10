@@ -151,7 +151,7 @@ export const Sidebar: React.FC<Props> = ({ collapsed, onCollapse }) => {
               NAS File Center
             </Text>
             <Text type="secondary" style={{ fontSize: 11 }}>
-              v0.3.3 Enterprise
+              v0.3.5 Enterprise
             </Text>
           </div>
         )}

@@ -1,6 +1,6 @@
 services:
   nas-file-center-api:
-    image: kerwinjhc/nas-file-center:latest
+    image: kerwinjhc/nas-file-center:0.3.5
     container_name: nas-file-center-api
     volumes:
       - /tmp/zfsv3/nvme13/15246330601/data/NasFileCenter:/config
@@ -29,7 +29,7 @@ services:
     restart: unless-stopped
 
   nas-file-center-worker:
-    image: kerwinjhc/nas-file-center:latest
+    image: kerwinjhc/nas-file-center:0.3.5
     container_name: nas-file-center-worker
     command:
       - python
