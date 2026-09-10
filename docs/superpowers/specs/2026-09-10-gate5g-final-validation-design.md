@@ -1,10 +1,10 @@
 # NAS File Center v0.3.5 — Gate5-G Final Validation Design Specification
 
-**Document Version:** 1.0.0
+**Document Version:** 1.1.0 (Revision 1)
 **Date:** 2026-09-10
-**Status:** DESIGN SPECIFICATION CANDIDATE / ARCHITECTURE FREEZE PROPOSAL
+**Status:** DESIGN SPECIFICATION REVISION 1 / ARCHITECTURE FREEZE PROPOSAL
 **Implementation / Execution Status:** NOT AUTHORIZED
-**Authoritative Baseline HEAD:** `e04399c8ee8a5b2a81b9090dabb402c49e21e2fb`
+**Authoritative Baseline HEAD:** `cd49f6cbb244cd4e4ff4bbbd0e4608fdf752db12`
 **Target Branch:** `v0.3.5-gate5c-hotfix4`
 
 ---
@@ -14,12 +14,12 @@
 ### 1.1 Gate Hierarchy and Immutability of Prior Baselines
 NAS File Center v0.3.5 development has formally passed and closed all preceding functional and structural gates:
 ```text
-Gate5-A = PASS / CLOSED (Task Engine Core & Job Models)
-Gate5-B = PASS / CLOSED (Task Engine Cancellation, Fencing & Leases)
-Gate5-C = PASS / CLOSED (Worker Recovery & Task Engine Rebuild)
-Gate5-D = PASS / CLOSED (Advanced Deduplication Preview & Compiler)
-Gate5-E = PASS / CLOSED (Batch Utilities, Symlink Safety & Graph DAG Engine)
-Gate5-F = PASS / CLOSED (Resource Control & Active Window Governance)
+Gate5-A = PASS / CLOSED
+Gate5-B = PASS / CLOSED
+Gate5-C = PASS / CLOSED
+Gate5-D = PASS / CLOSED
+Gate5-E = PASS / CLOSED
+Gate5-F = PASS / CLOSED
 
 Gate5-G = AUTHORIZED FOR DESIGN / ARCHITECTURE FREEZE ONLY
 v0.3.5  = NOT CLOSED
@@ -56,7 +56,7 @@ Verification actions must actively test and prove that every stage of this lifec
 Gate5-G enforces strict candidate immutability. Verification is never performed against an ambiguous, shifting, or partially updated repository state. The formal candidate model is:
 ```text
 One Immutable Candidate SHA
-  + One Immutable Built Image Identity (Tag & Digest)
+  + One Immutable Built Image Identity (Tag, Image ID & Archive Digest)
     + One Fixed Verification Matrix (Phases G0 through G7)
       = One Gate5-G Candidate Evaluation
 ```
@@ -66,12 +66,13 @@ Gate5-G explicitly prohibits the following practices as verification proof:
 - "Mostly the same SHA" or testing across multiple cherry-picked commits.
 - "Latest branch state" or floating `HEAD` references.
 - "Whatever image is currently tagged `:latest`".
+- Rebuilding the application image on the NAS or substituting another image built from the same SHA.
 - Reusing an old local image built from an unverified or prior commit.
 
 Every single verification artifact, test log, and status report must bind to:
 1. Exact Git commit SHA (full 40-character hexadecimal string).
 2. Exact source tree (clean working tree verified by `git status --short` and `git diff --check`).
-3. Exact built Docker image tag and immutable Image ID / RepoDigest.
+3. Exact built Docker image tag, immutable Image ID, and image archive SHA256 digest.
 4. Target CPU architecture (`linux/amd64`).
 5. Specific target verification environment (local testbed vs. target 极空间 NAS).
 
@@ -125,7 +126,7 @@ Gate5-G is organized into nine sequential verification phases. These phases repr
 +---------------------------------------+---------------------------------------+
                                         |
 +---------------------------------------v---------------------------------------+
-| G2: Linux amd64 Docker Clean Build & Image Inspection                         |
+| G2: Linux amd64 Docker Clean Build & Image Archive Inspection                 |
 +---------------------------------------+---------------------------------------+
                                         |
 +---------------------------------------v---------------------------------------+
@@ -145,7 +146,7 @@ Gate5-G is organized into nine sequential verification phases. These phases repr
 +---------------------------------------+---------------------------------------+
                                         |
 +---------------------------------------v---------------------------------------+
-| G7: Target 极空间 NAS Black-Box Environment Smoke                             |
+| G7: Target 极空间 NAS Isolated Black-Box Environment Smoke                    |
 +---------------------------------------+---------------------------------------+
                                         |
 +---------------------------------------v---------------------------------------+
@@ -165,24 +166,37 @@ The canonical release version for this milestone is strictly:
 0.3.5
 ```
 
-#### 5.1.2 Consistency Requirements
-Before executing expensive build and test phases, all release-bearing metadata committed in the candidate must align:
+#### 5.1.2 Complete Release-Bearing Surface Inventory
+Before executing expensive build and test phases, all release-bearing surfaces committed in the candidate must align to `0.3.5`:
 1. `pyproject.toml` -> `[project].version == "0.3.5"`
 2. `app/main.py` -> `FastAPI(..., version="0.3.5")`
 3. `frontend/package.json` -> `"version": "0.3.5"`
-4. `frontend/package-lock.json` -> root package `"version": "0.3.5"` (if present)
-5. `compose.yaml` -> default application image tag `nas-file-center:0.3.5`
-6. `compose.komodo.yaml` -> production image reference `kerwinjhc/nas-file-center:0.3.5` or an immutable image digest.
+4. `frontend/package-lock.json` -> top-level `"version": "0.3.5"` and `packages[""]["version"] == "0.3.5"`
+5. `frontend/src/pages/Login/index.tsx` -> visible UI string containing `NAS File Center v0.3.5`
+6. `frontend/src/components/Sidebar.tsx` -> visible UI string containing `v0.3.5`
+7. `compose.yaml` -> default application image tag `nas-file-center:0.3.5`
+8. `compose.komodo.yaml` -> production image reference `kerwinjhc/nas-file-center:0.3.5` (or an immutable `@sha256:...` image digest).
 
-#### 5.1.3 Prohibition on `:latest` in Production Manifests
+#### 5.1.3 Release-Version Contract Test
+The repository maintains an automated version-consistency contract test:
+```bash
+pytest tests/test_release_version_consistency.py -v
+```
+- A future bounded G0 release-metadata hotfix must update `tests/test_release_version_consistency.py`'s expected release version to `0.3.5` in lockstep with the actual release surfaces.
+- That future test change is permitted only under the separately authorized G0 release-metadata hotfix. Because it creates a new candidate Git commit SHA, full Gate5-G executable verification will restart from Phase G0.
+- Do **not** make those modifications in this design checkpoint.
+
+#### 5.1.4 Prohibition on `:latest` in Production Manifests
 For immutable production deployments (including Komodo deployment), `:latest` is strictly rejected as the sole image identity. `compose.komodo.yaml` must bind explicitly to `kerwinjhc/nas-file-center:0.3.5` or an immutable `@sha256:...` digest. A convenience `:latest` tag alias may only be published post-release.
 
-#### 5.1.4 Known Baseline Finding (Recorded as KNOWN G0 BLOCKING FINDING)
-At the authoritative baseline HEAD (`e04399c8ee8a5b2a81b9090dabb402c49e21e2fb`), the repository exhibits the following known version discrepancies:
+#### 5.1.5 Known Baseline Finding (Recorded as KNOWN G0 BLOCKING FINDING)
+At the authoritative baseline HEAD (`cd49f6cbb244cd4e4ff4bbbd0e4608fdf752db12`), the repository exhibits the following known version discrepancies:
 - `pyproject.toml`: `version = "0.3.3"`
-- `app/main.py`: `version="0.3.3"`
+- `app/main.py`: `FastAPI(..., version="0.3.3")`
 - `frontend/package.json`: `"version": "0.3.3"`
-- `frontend/package-lock.json`: `"version": "0.3.3"`
+- `frontend/package-lock.json`: `"version": "0.3.3"` (root and `packages[""]`)
+- `frontend/src/pages/Login/index.tsx`: `NAS File Center v0.3.3`
+- `frontend/src/components/Sidebar.tsx`: `v0.3.3`
 - `compose.yaml`: `image: nas-file-center:0.3.2`
 - `compose.komodo.yaml`: `image: kerwinjhc/nas-file-center:latest`
 
@@ -190,7 +204,8 @@ At the authoritative baseline HEAD (`e04399c8ee8a5b2a81b9090dabb402c49e21e2fb`),
 - This discrepancy is formally recorded as `KNOWN G0 BLOCKING FINDING`.
 - It must **not** be modified in this design checkpoint commit.
 - During initial Gate5-G G0 execution, the current candidate will formally FAIL on Phase G0.
-- A dedicated, bounded release-metadata hotfix will subsequently be authorized to align all metadata to `0.3.5`, generating the true release-candidate SHA for full Gate5-G execution.
+- A dedicated, bounded release-metadata hotfix will subsequently be authorized to align all metadata and `tests/test_release_version_consistency.py` to `0.3.5`, generating the true release-candidate SHA for full Gate5-G execution.
+- G0 PASS requires all 8 surfaces to identify `0.3.5` and `pytest tests/test_release_version_consistency.py -v` to pass with exit code `0`.
 
 ---
 
@@ -198,14 +213,44 @@ At the authoritative baseline HEAD (`e04399c8ee8a5b2a81b9090dabb402c49e21e2fb`),
 
 #### 5.2.1 Backend Test Suites
 Executed in an environment meeting filesystem case-sensitivity requirements:
-1. **Gate5-A ~ Gate5-F Focused Suites**:
-   - `pytest tests/test_gate5a_*.py tests/test_gate5b_*.py tests/test_gate5c_*.py tests/test_gate5d_*.py tests/test_gate5e_*.py tests/test_gate5f_*.py -v`
+1. **Gate5-A ~ Gate5-F Focused Regression Command**:
+   ```bash
+   pytest \
+     tests/test_filter_ast.py \
+     tests/test_filter_compiler.py \
+     tests/test_filter_policy.py \
+     tests/test_filter_preview.py \
+     tests/test_filter_preview_readonly.py \
+     tests/test_filter_index_freshness.py \
+     tests/test_gate5b_*.py \
+     tests/test_gate5c_*.py \
+     tests/test_gate5d_*.py \
+     tests/test_gate5e_*.py \
+     tests/test_gate5f_*.py -v
+   ```
 2. **Task Engine, Worker, and Scanner Core Suites**:
-   - `pytest tests/test_worker_recovery_and_claim.py tests/test_task_state_machine.py tests/test_task_api.py tests/test_task_checkpoint.py tests/test_task_pause_resume_e2e.py tests/test_gate2_hotfix1_worker_fencing.py tests/test_fclones.py tests/test_scan_jobs.py tests/test_indexing.py tests/test_index_root_lifecycle.py tests/test_index_root_progress_regression.py -v`
+   ```bash
+   pytest \
+     tests/test_worker_recovery_and_claim.py \
+     tests/test_task_state_machine.py \
+     tests/test_task_api.py \
+     tests/test_task_checkpoint.py \
+     tests/test_task_pause_resume_e2e.py \
+     tests/test_gate2_hotfix1_worker_fencing.py \
+     tests/test_fclones.py \
+     tests/test_scan_jobs.py \
+     tests/test_indexing.py \
+     tests/test_index_root_lifecycle.py \
+     tests/test_index_root_progress_regression.py -v
+   ```
 3. **Planning & Execution Engine Suites**:
-   - `pytest tests/test_planning.py tests/test_execution.py -v`
+   ```bash
+   pytest tests/test_planning.py tests/test_execution.py -v
+   ```
 4. **Full Backend Repository Suite**:
-   - `pytest tests/`
+   ```bash
+   pytest tests/
+   ```
 
 **Pass Criteria:**
 - `0 failed, 0 errors` across all backend test runs.
@@ -223,7 +268,7 @@ Executed within the `frontend/` directory:
 
 ---
 
-### 5.3 Phase G2 — Linux amd64 Docker Clean Build & Inspection
+### 5.3 Phase G2 — Linux amd64 Docker Clean Build & Image Archive Inspection
 
 #### 5.3.1 Target Platform Requirement
 Production deployments target `linux/amd64` (x86_64) running Docker Engine on 极空间 NAS. Building or validating only for macOS ARM64 (`darwin/arm64`) is strictly insufficient.
@@ -246,8 +291,20 @@ Run a temporary container from the built image and verify:
 5. Static frontend distribution:
    - `/app/frontend/dist/index.html` exists and is non-empty.
 
-**Recorded Artifacts:**
-- Full Image Tag, Image ID (SHA256), RepoDigest (if pushed to registry), Architecture, OS, and Source Candidate SHA.
+#### 5.3.4 G2 -> G7 Image-Byte Transport Protocol
+To enforce candidate immutability across disparate environments:
+1. G2 builds the candidate image **exactly once**.
+2. Record local image tag and full `G2_IMAGE_ID` (SHA256).
+3. Save the exact image to a tar archive:
+   ```bash
+   docker save nas-file-center:0.3.5-gate5g-<shortSHA> -o /tmp/nas-file-center-0.3.5-gate5g-<shortSHA>.tar
+   ```
+4. Compute the SHA256 checksum of the archive:
+   ```bash
+   sha256sum /tmp/nas-file-center-0.3.5-gate5g-<shortSHA>.tar
+   ```
+   Record as `G2_IMAGE_ARCHIVE_SHA256`.
+5. Transfer the exact `.tar` archive to the target 极空间 NAS.
 
 ---
 
@@ -339,9 +396,11 @@ Construct an isolated filesystem hierarchy on the host:
 ```text
 /tmp/gate5g-safety-fixture/
   ├── allowed_root/
-  │     ├── unique_file.txt
-  │     ├── group1_fileA.dat (duplicate)
-  │     ├── group1_fileB.dat (duplicate)
+  │     ├── group1_fileA.dat (duplicate group 1)
+  │     ├── group1_fileB.dat (duplicate group 1)
+  │     ├── stale_group_fileA.dat (duplicate group 2 for stale testing)
+  │     ├── stale_group_fileB.dat (duplicate group 2 for stale testing)
+  │     ├── unique_file.txt (single unique file)
   │     └── symlink_to_external -> ../sentinel_dir/external_file.txt
   ├── quarantine_root/
   └── sentinel_dir/
@@ -357,29 +416,46 @@ Construct an isolated filesystem hierarchy on the host:
 - Execute filesystem scan, fclones duplicate detection, index creation, and plan preview.
 - **Verification:** Assert that zero files within `allowed_root`, `quarantine_root`, or `sentinel_dir` have modified timestamps, modified sizes, or altered contents.
 
-#### 5.7.3 Stage 2: Controlled Mutation Lifecycle Verification
+#### 5.7.3 Stage 2: Controlled Mutation Lifecycle Verification (Plan-Derived Assertions)
 - Restart containers with controlled mutation configuration:
   - `ALLOW_MUTATION=true`
   - `ALLOW_DELETE=false`
   - `PROTECT_LAST_FILE=true`
   - `DATA_MODE=rw`
-- Execute full 5-stage lifecycle:
+- Execute full 5-stage lifecycle targeting `group1`:
   1. **Preview**: Request deduplication preview. Assert zero disk mutation.
   2. **Draft Generation**: Generate explicit batch plan. Assert zero disk mutation.
   3. **Freeze**: Freeze batch plan. Verify exact file sizes, mtimes, and inode/fingerprint identities are locked in database.
-  4. **Validate**: Perform preflight validation against unchanged disk state. Assert validation passes.
-  5. **Execute**: Execute the validated plan.
-- **Verification:**
-  - One protected keep copy (`group1_fileA.dat`) remains in `allowed_root`.
-  - Duplicate copy (`group1_fileB.dat`) is moved into `quarantine_root`.
+  4. **Inspect Frozen Plan**:
+     - Extract `actual keep_path` determined by the scorer/policy.
+     - Extract `actual planned mutation/quarantine source` determined by the plan.
+     - Extract `planned quarantine target path`.
+     - Record these three paths explicitly as evidence.
+  5. **Validate**: Perform preflight validation against unchanged disk state. Assert validation passes.
+  6. **Execute**: Execute the validated plan.
+- **Verification (Dynamic, Plan-Derived):**
+  - The plan's `actual keep_path` remains intact in `allowed_root`.
+  - The plan's `actual planned mutation source` is successfully moved into `quarantine_root`.
+  - At least one protected member remains in `allowed_root`.
+  - No unauthorized file or non-duplicate member is moved.
   - No file is permanently deleted (unlink) because `ALLOW_DELETE=false`.
   - Quarantine location remains strictly confined within `quarantine_root`.
 
-#### 5.7.4 Stage 3: Stale Preflight Protection
-- Create a new frozen plan targeting `unique_file.txt`.
-- Prior to plan execution, modify the physical file externally on disk (e.g. append bytes or change content).
-- Trigger validation and execution.
-- **Verification:** Plan validation must explicitly fail with a stale identity error; execution must refuse to touch the modified file.
+#### 5.7.4 Stage 3: Real Dedupe Stale Preflight Protection
+Test stale rejection using a real duplicate candidate group (`stale_group`):
+1. Execute scan across `stale_group_fileA.dat` and `stale_group_fileB.dat`.
+2. Generate deduplication Preview.
+3. Generate Explicit Batch Plan Draft.
+4. Freeze the plan.
+5. Inspect the frozen plan and determine the exact source path scheduled for quarantine/mutation (`stale_target_source`).
+6. **Simulate Stale State**: Externally modify `stale_target_source` on disk (e.g. append bytes or change content) after Freeze.
+7. Trigger Plan Validation via normal API/lifecycle.
+8. **Verification:**
+   - Preflight validation must explicitly fail, reporting stale identity (mtime/size/fingerprint mismatch).
+   - Subsequent execution attempt via API must be strictly refused.
+   - The modified file `stale_target_source` must not be moved, modified, or quarantined.
+   - All other fixture files remain completely untouched.
+   - No mock rows or synthetic DB updates are used; the lifecycle must run through genuine service APIs.
 
 #### 5.7.5 Stage 4: Boundary & Symlink Traversal Protection
 - Verify that `sentinel_dir/external_file.txt` was never moved, modified, or quarantined.
@@ -388,34 +464,70 @@ Construct an isolated filesystem hierarchy on the host:
 
 ---
 
-### 5.8 Phase G7 — Target 极空间 NAS Black-Box Validation
+### 5.8 Phase G7 — Target 极空间 NAS Isolated Black-Box Validation
 
 #### 5.8.1 Mandatory Target Environment Testing
 Desktop/VM Linux amd64 Docker verification is necessary but **not sufficient** for final v0.3.5 release closure. Because the production target is 极空间 NAS, Gate5-G requires end-to-end execution on a real 极空间 NAS instance.
 
-#### 5.8.2 Environmental Record
-The verifier must record the target NAS hardware and software context:
-- NAS Model (e.g., Z4Pro, Z423, etc.) and ZSpace OS firmware version.
-- Host CPU architecture (must be x86_64).
-- Docker Engine version running on the NAS.
-- Volume filesystem type (e.g., ZFS, Btrfs, ext4) and mount parameters.
-- Candidate Git commit SHA and Docker image tag/digest.
+#### 5.8.2 Strict Mount Isolation from Committed Manifests
+The committed `compose.komodo.yaml` contains production NAS host paths (e.g. `/tmp/zfsv3/nvme13/15246330601/data/NasFileCenter` and `/tmp/zfsv3/sata11/15246330601/data`).
+- **Strict Prohibition:** G6/G7 verification must **never** execute mutation scenarios using the committed `compose.komodo.yaml` host mount paths.
+- The committed `compose.komodo.yaml` must **not** be edited in place merely to run validation.
+- NAS verification must execute using one of the following isolated mechanisms:
+  1. A verifier-owned transient Docker Compose file located outside the Git worktree.
+  2. A verifier-owned transient Compose override file located outside the Git worktree.
+  3. Direct `docker run` commands issued by the verifier.
+- All mechanisms must bind strictly to:
+  - Exact G2-loaded image (`nas-file-center:0.3.5-gate5g-<shortSHA>`).
+  - Dedicated disposable host `CONFIG` directory on the NAS.
+  - Dedicated disposable host `DATA` directory containing the Phase G6 safety fixture.
+  - Dedicated quarantine directory within the disposable fixture.
+  - Zero access to production media, storage pools, or production `app.db`.
 
-#### 5.8.3 Real NAS Validation Execution
-Using a dedicated disposable test directory on the NAS (never touching user media or real storage pools):
-1. Deploy API and Worker containers via Docker Compose / Komodo.
-2. Verify API and Worker container startup and healthcheck status.
-3. Authenticate and verify web UI / API accessibility.
-4. Verify Worker reports online and healthy.
-5. Execute scan and index operations across the mounted NAS test directory.
-6. Verify `fclones` executes successfully against the NAS volume without permission or filesystem compatibility errors.
-7. Verify Resource Policy settings can be read and updated by admin, and that active window governance does not create scheduled jobs.
-8. Execute the synthetic filesystem safety test (Phase G6 suite) directly on the NAS test filesystem:
-   - Preview -> Draft -> Freeze -> Validate -> Execute.
-   - Confirm quarantine move works on NAS storage pool.
-   - Confirm stale validation rejects modified files.
-   - Confirm no path escape outside the allowed NAS test root.
-9. Restart containers and verify persistent settings and SQLite database integrity on NAS storage.
+#### 5.8.3 Pre-Mutation Host Path Assertion
+Before enabling read-write mode (`DATA_MODE=rw`, `ALLOW_MUTATION=true`), the verifier must formally assert:
+```text
+real production DATA mount path != Gate5-G disposable test DATA path
+real production CONFIG mount path != Gate5-G disposable CONFIG path
+```
+If this absolute path isolation cannot be verified:
+```text
+STOP
+G7 = FAIL / NOT EXECUTED
+```
+Testing directly or "carefully" against production data is strictly prohibited.
+
+#### 5.8.4 Image Byte Loading on the NAS
+1. Prior to container execution, verify the SHA256 checksum of the transferred `.tar` archive matches `G2_IMAGE_ARCHIVE_SHA256`.
+2. Load image into NAS Docker daemon:
+   ```bash
+   docker load -i /path/to/nas-file-center-0.3.5-gate5g-<shortSHA>.tar
+   ```
+3. Inspect loaded image:
+   - `G7_LOADED_IMAGE_ID` must equal `G2_IMAGE_ID`.
+   - Target architecture must be `linux/amd64`.
+4. The NAS must **not** rebuild the image, run `docker compose build`, pull floating tags, or substitute images. A local verifier tag may be attached to the loaded image ID for execution.
+
+#### 5.8.5 Real NAS Execution Protocol
+1. Record environmental context:
+   - NAS Model (e.g., Z4Pro, Z423) and ZSpace OS firmware version.
+   - Host CPU architecture (must be x86_64).
+   - Docker Engine version running on the NAS.
+   - Filesystem type of the disposable mount (e.g., ZFS, Btrfs, ext4).
+2. Deploy API and Worker containers using the isolated configuration.
+3. Read-only verification stage:
+   - `/data` mounted `:ro`, `ALLOW_MUTATION=false`, `ALLOW_DELETE=false`.
+   - Verify API health (`GET /health` -> 200) and Worker online heartbeat.
+   - Execute indexing and verify `fclones` runs successfully on NAS storage volume.
+   - Verify Resource Policy read/write by admin; confirm active window does not spawn scheduler jobs.
+4. Mutation verification stage:
+   - Mount isolated fixture `:rw`, `ALLOW_MUTATION=true`, `ALLOW_DELETE=false`, `PROTECT_LAST_FILE=true`.
+   - Execute full Phase G6 synthetic filesystem lifecycle on the NAS volume:
+     - Preview -> Draft -> Freeze -> Validate -> Execute.
+     - Verify plan-derived keep and quarantine behavior.
+     - Verify stale modification rejection.
+     - Verify zero path traversal outside disposable root.
+5. Graceful restart and SQLite database integrity verification on NAS storage.
 
 ---
 
@@ -423,16 +535,25 @@ Using a dedicated disposable test directory on the NAS (never touching user medi
 
 #### 5.9.1 Unified Evidence Checklist
 Gate5-G PASS requires that **all phases G0 through G7 have passed against the same immutable candidate**:
-- [ ] G0 PASS: Release metadata consistent (version 0.3.5 across all components).
+- [ ] G0 PASS: Release metadata complete inventory consistent (`0.3.5` across all 8 surfaces) and `test_release_version_consistency.py` passes.
 - [ ] G1 PASS: Full backend test suites (100% pass) and frontend typecheck/test/build (100% pass).
-- [ ] G2 PASS: Clean Linux amd64 Docker build with verified internal binary and application dependencies.
+- [ ] G2 PASS: Clean Linux amd64 Docker build; verified internal dependencies; exact image archive saved and hashed.
 - [ ] G3 PASS: API and Worker container smoke, single worker ownership, and crash-loop free operation.
 - [ ] G4 PASS: Clean database initialization on fresh install and seamless additive upgrade from Gate5-E baseline.
 - [ ] G5 PASS: SQLite `integrity_check` (ok) and `foreign_key_check` (0 errors).
-- [ ] G6 PASS: Synthetic filesystem safety lifecycle (preview, draft, freeze, validate, execute, quarantine, stale protection).
-- [ ] G7 PASS: Target 极空间 NAS end-to-end operational and safety black-box smoke.
+- [ ] G6 PASS: Synthetic filesystem safety lifecycle (preview, draft, freeze, validate, execute, plan-derived quarantine, real dedupe stale protection).
+- [ ] G7 PASS: Target 极空间 NAS end-to-end operational and safety black-box smoke on isolated disposable mounts with verified image byte transfer.
 
-#### 5.9.2 Unacceptable Evidence Practices
+#### 5.9.2 Mandatory Image Byte Evidence Fields
+The final report in Phase G8 must record:
+- `G2_IMAGE_ID`
+- `G2_IMAGE_TAG`
+- `G2_IMAGE_ARCHIVE_SHA256`
+- `G7_LOADED_IMAGE_ID`
+- `G7_IMAGE_ARCHIVE_SHA256`
+- `identity_match = YES`
+
+#### 5.9.3 Unacceptable Evidence Practices
 - Any skipped phase automatically results in `Gate5-G = NOT PASS`.
 - "Not tested" must never be converted to or reported as "assumed pass".
 - Tests performed on different commit SHAs cannot be combined or aggregated.
