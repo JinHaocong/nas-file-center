@@ -28,8 +28,8 @@ from app.models import (
     utcnow,
 )
 from app.exceptions import StateConflictError
-from app.path_safety import require_allowed_path
-from app.planning.stale import verify_item_freshness
+from app.path_safety import require_allowed_path, is_reserved_quarantine_path, UnsafePathError
+from app.planning.stale import verify_item_freshness, StaleItemDetail
 from app.quarantine.paths import build_quarantine_target_path, safe_quarantine_hash
 from app.quarantine.restore import (
     validate_quarantine_for_restore,
@@ -725,6 +725,16 @@ def _verify_plan_item_and_keep_freshness(
     item_meta: Any,
     settings: Settings,
 ) -> tuple[bool, Any]:
+    if item_meta.operation == "rmdir_empty":
+        if settings.quarantine_root and is_reserved_quarantine_path(Path(item_meta.source_path), settings.quarantine_root):
+            return False, StaleItemDetail(
+                item_id=item_meta.id,
+                source_path=item_meta.source_path,
+                reason="quarantine_path_blocked",
+                expected={"device": item_meta.expected_device, "inode": item_meta.expected_inode},
+                actual=None,
+            )
+
     is_fresh, stale_detail = verify_item_freshness(
         item_id=item_meta.id,
         source_path=item_meta.source_path,
@@ -736,11 +746,44 @@ def _verify_plan_item_and_keep_freshness(
         expected_hash=item_meta.expected_hash,
         metadata_json=item_meta.metadata_json,
         allowed_roots=settings.allowed_roots,
-        quarantine_root=settings.quarantine_root,
-        check_hash=True,
+        quarantine_root=None if item_meta.operation in ("rmdir_empty", "mkdir_empty") else settings.quarantine_root,
+        check_hash=False if item_meta.operation in ("rmdir_empty", "mkdir_empty") else True,
     )
     if not is_fresh:
         return False, stale_detail
+
+    if item_meta.operation == "mkdir_empty":
+        anchor = Path(item_meta.source_path)
+        target = Path(item_meta.target_path or "")
+        try:
+            rel = target.relative_to(anchor)
+            if str(rel) in ("", "."):
+                return False, StaleItemDetail(item_id=item_meta.id, source_path=item_meta.source_path, reason="target_not_strict_descendant", expected={}, actual=None)
+        except Exception:
+            return False, StaleItemDetail(item_id=item_meta.id, source_path=item_meta.source_path, reason="target_not_descendant", expected={}, actual=None)
+
+        if target.is_symlink() or os.path.lexists(target):
+            return False, StaleItemDetail(item_id=item_meta.id, source_path=item_meta.source_path, reason="target_exists", expected={}, actual=None)
+
+        parent = target.parent
+        if parent.is_symlink() or not parent.exists() or not parent.is_dir():
+            return False, StaleItemDetail(item_id=item_meta.id, source_path=item_meta.source_path, reason="parent_invalid", expected={}, actual=None)
+
+        if settings.quarantine_root:
+            q_root = Path(settings.quarantine_root)
+            if (
+                is_reserved_quarantine_path(anchor, q_root)
+                or is_reserved_quarantine_path(target, q_root)
+                or is_reserved_quarantine_path(parent, q_root)
+            ):
+                return False, StaleItemDetail(item_id=item_meta.id, source_path=item_meta.source_path, reason="quarantine_blocked", expected={}, actual=None)
+
+        try:
+            require_allowed_path(anchor, settings.allowed_roots)
+            require_allowed_path(target, settings.allowed_roots)
+            require_allowed_path(parent, settings.allowed_roots)
+        except UnsafePathError:
+            return False, StaleItemDetail(item_id=item_meta.id, source_path=item_meta.source_path, reason="outside_allowed_roots", expected={}, actual=None)
 
     if item_meta.keep_path:
         meta: dict[str, Any] = {}
@@ -1165,6 +1208,8 @@ class BatchPlanExecuteHandler(TaskHandler):
                 state=item_meta.state,
                 protected_dir=Path(meta["protected_dir"]) if meta.get("protected_dir") else None,
                 expected_mtime_ns=item_meta.expected_mtime_ns,
+                expected_device=item_meta.expected_device,
+                expected_inode=item_meta.expected_inode,
                 target_mtime_ns=target_touch_mtime_ns,
             )
 

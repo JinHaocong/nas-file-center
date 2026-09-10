@@ -8,6 +8,8 @@ from app.models import IndexRoot, User, BatchPlan, BatchPlanItem
 from app.config import Settings
 from app.service import FileCenterService
 from app.auth.password import hash_password
+from app.batch.plans import OperationItem
+from app.execution.executor import execute_item
 
 
 @pytest.fixture
@@ -310,3 +312,245 @@ def test_validate_mkdir_empty_destination_contract(lifecycle_env):
     (anchor / "a").rmdir()
     val_res = service.validate_plan(plan_id)
     assert val_res["status"] == "partial"
+
+
+def test_execute_rmdir_empty_permission_gates(lifecycle_env):
+    root = lifecycle_env["root_path"]
+    quarantine_dir = lifecycle_env["quarantine_dir"]
+
+    target_dir = root / "perm_dir"
+    target_dir.mkdir()
+
+    item = OperationItem(
+        sequence=1,
+        operation="rmdir_empty",
+        source=target_dir,
+    )
+
+    # Gate 1: allow_mutation=False -> skip
+    res1 = execute_item(
+        item,
+        allowed_roots=[root],
+        allow_mutation=False,
+        allow_delete=True,
+        quarantine_root=quarantine_dir,
+        plan_id="p1",
+    )
+    assert res1.state == "skipped"
+    assert "mutation is disabled" in res1.reason
+    assert target_dir.is_dir()
+
+    # Gate 2: allow_delete=False -> skip
+    res2 = execute_item(
+        item,
+        allowed_roots=[root],
+        allow_mutation=True,
+        allow_delete=False,
+        quarantine_root=quarantine_dir,
+        plan_id="p1",
+    )
+    assert res2.state == "skipped"
+    assert "permanent deletion is disabled" in res2.reason
+    assert target_dir.is_dir()
+
+
+def test_execute_rmdir_empty_success_removes_dir(lifecycle_env):
+    root = lifecycle_env["root_path"]
+    quarantine_dir = lifecycle_env["quarantine_dir"]
+
+    target_dir = root / "success_rmdir"
+    target_dir.mkdir()
+    st = target_dir.stat()
+
+    item = OperationItem(
+        sequence=1,
+        operation="rmdir_empty",
+        source=target_dir,
+        expected_device=st.st_dev,
+        expected_inode=st.st_ino,
+    )
+
+    res = execute_item(
+        item,
+        allowed_roots=[root],
+        allow_mutation=True,
+        allow_delete=True,
+        quarantine_root=quarantine_dir,
+        plan_id="p1",
+    )
+    assert res.state == "completed"
+    assert "empty directory removed" in res.reason
+    assert not target_dir.exists()
+
+
+def test_execute_rmdir_empty_no_unlink_or_rmtree(lifecycle_env, monkeypatch):
+    import shutil
+    root = lifecycle_env["root_path"]
+    quarantine_dir = lifecycle_env["quarantine_dir"]
+
+    target_dir = root / "safe_rmdir"
+    target_dir.mkdir()
+
+    item = OperationItem(
+        sequence=1,
+        operation="rmdir_empty",
+        source=target_dir,
+    )
+
+    def forbidden_unlink(*args, **kwargs):
+        raise AssertionError("FORBIDDEN: os.unlink called during rmdir_empty")
+
+    def forbidden_rmtree(*args, **kwargs):
+        raise AssertionError("FORBIDDEN: shutil.rmtree called during rmdir_empty")
+
+    monkeypatch.setattr(os, "unlink", forbidden_unlink)
+    monkeypatch.setattr(shutil, "rmtree", forbidden_rmtree)
+
+    res = execute_item(
+        item,
+        allowed_roots=[root],
+        allow_mutation=True,
+        allow_delete=True,
+        quarantine_root=quarantine_dir,
+        plan_id="p1",
+    )
+    assert res.state == "completed"
+    assert not target_dir.exists()
+
+
+def test_execute_rmdir_empty_not_empty_fails(lifecycle_env):
+    root = lifecycle_env["root_path"]
+    quarantine_dir = lifecycle_env["quarantine_dir"]
+
+    target_dir = root / "not_empty_dir"
+    target_dir.mkdir()
+    (target_dir / "blocker.txt").write_text("blocked")
+
+    item = OperationItem(
+        sequence=1,
+        operation="rmdir_empty",
+        source=target_dir,
+    )
+
+    res = execute_item(
+        item,
+        allowed_roots=[root],
+        allow_mutation=True,
+        allow_delete=True,
+        quarantine_root=quarantine_dir,
+        plan_id="p1",
+    )
+    assert res.state == "failed"
+    assert target_dir.exists()
+    assert (target_dir / "blocker.txt").exists()
+
+
+def test_execute_rmdir_empty_symlink_or_inode_mismatch_skips(lifecycle_env):
+    root = lifecycle_env["root_path"]
+    quarantine_dir = lifecycle_env["quarantine_dir"]
+
+    # Symlink source
+    real_d = root / "real_dir"
+    real_d.mkdir()
+    sym_d = root / "sym_dir"
+    os.symlink(str(real_d), str(sym_d))
+
+    item_sym = OperationItem(
+        sequence=1,
+        operation="rmdir_empty",
+        source=sym_d,
+    )
+    res_sym = execute_item(
+        item_sym,
+        allowed_roots=[root],
+        allow_mutation=True,
+        allow_delete=True,
+        quarantine_root=quarantine_dir,
+        plan_id="p1",
+    )
+    assert res_sym.state == "skipped"
+
+    # Inode mismatch
+    target_d = root / "inode_dir"
+    target_d.mkdir()
+    st = target_d.stat()
+
+    item_ino = OperationItem(
+        sequence=2,
+        operation="rmdir_empty",
+        source=target_d,
+        expected_device=st.st_dev,
+        expected_inode=st.st_ino + 999999,
+    )
+    res_ino = execute_item(
+        item_ino,
+        allowed_roots=[root],
+        allow_mutation=True,
+        allow_delete=True,
+        quarantine_root=quarantine_dir,
+        plan_id="p1",
+    )
+    assert res_ino.state == "skipped"
+    assert target_d.exists()
+
+
+def test_execute_mkdir_empty_success_and_fences(lifecycle_env, monkeypatch):
+    root = lifecycle_env["root_path"]
+    quarantine_dir = lifecycle_env["quarantine_dir"]
+
+    anchor = root / "anchor"
+    anchor.mkdir()
+    st_anchor = anchor.stat()
+
+    target = anchor / "sub_new"
+
+    item = OperationItem(
+        sequence=1,
+        operation="mkdir_empty",
+        source=anchor,
+        target=target,
+        expected_device=st_anchor.st_dev,
+        expected_inode=st_anchor.st_ino,
+    )
+
+    # 1. Mutation disabled -> skip
+    res_dis = execute_item(
+        item,
+        allowed_roots=[root],
+        allow_mutation=False,
+        allow_delete=True,
+        quarantine_root=quarantine_dir,
+        plan_id="p1",
+    )
+    assert res_dis.state == "skipped"
+    assert not target.exists()
+
+    # 2. Verify single-level mkdir only (no makedirs)
+    def forbidden_makedirs(*args, **kwargs):
+        raise AssertionError("FORBIDDEN: os.makedirs called during mkdir_empty")
+    monkeypatch.setattr(os, "makedirs", forbidden_makedirs)
+
+    # 3. Successful execution
+    res = execute_item(
+        item,
+        allowed_roots=[root],
+        allow_mutation=True,
+        allow_delete=True,
+        quarantine_root=quarantine_dir,
+        plan_id="p1",
+    )
+    assert res.state == "completed"
+    assert "empty directory created" in res.reason
+    assert target.is_dir()
+
+    # 4. Target already exists -> skip
+    res_exists = execute_item(
+        item,
+        allowed_roots=[root],
+        allow_mutation=True,
+        allow_delete=True,
+        quarantine_root=quarantine_dir,
+        plan_id="p1",
+    )
+    assert res_exists.state == "skipped"
+

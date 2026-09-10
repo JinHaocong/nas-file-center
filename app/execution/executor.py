@@ -69,9 +69,9 @@ def execute_item(
         return ItemResult("completed", "already completed")
     if not allow_mutation:
         return _skip("filesystem mutation is disabled")
-    if item.operation == "unlink" and not allow_delete:
+    if item.operation in {"unlink", "rmdir_empty"} and not allow_delete:
         return _skip("permanent deletion is disabled")
-    if item.operation not in {"rename", "move", "touch", "quarantine", "unlink", "restore"}:
+    if item.operation not in {"rename", "move", "touch", "quarantine", "unlink", "restore", "rmdir_empty", "mkdir_empty"}:
         return _skip(f"unsupported operation: {item.operation}")
 
     source_raw = Path(item.source)
@@ -207,7 +207,63 @@ def execute_item(
                 return ItemResult("failed", str(exc))
             return ItemResult("completed", "quarantined", target)
 
-        os.unlink(source)
-        return ItemResult("completed", "unlinked")
+        if item.operation == "rmdir_empty":
+            if quarantine_root and is_reserved_quarantine_path(source, quarantine_root):
+                return _skip("source is in reserved quarantine storage")
+            if source.is_symlink() or os.path.islink(source) or not source.is_dir():
+                return _skip("source is not a directory")
+            if item.expected_device or item.expected_inode:
+                try:
+                    st = os.lstat(source)
+                    if (item.expected_device and st.st_dev != item.expected_device) or (item.expected_inode and st.st_ino != item.expected_inode):
+                        return _skip("source identity changed")
+                except OSError as exc:
+                    return _skip(f"stat failed: {exc}")
+            try:
+                os.rmdir(source)
+            except OSError as exc:
+                return ItemResult("failed", str(exc))
+            return ItemResult("completed", "empty directory removed", source)
+
+        if item.operation == "mkdir_empty":
+            if item.target is None:
+                return _skip("target is required for mkdir_empty")
+            target_raw = Path(item.target)
+            if target_raw.is_symlink() or os.path.lexists(target_raw):
+                return _skip("target already exists")
+            try:
+                rel = target_raw.relative_to(source)
+                if str(rel) in ("", "."):
+                    return _skip("target must be strict descendant of anchor")
+            except Exception:
+                return _skip("target is not descendant of anchor")
+            parent = target_raw.parent
+            if parent.is_symlink() or not parent.exists() or not parent.is_dir():
+                return _skip("target parent is missing or not a directory")
+            target = require_allowed_path(target_raw, allowed_roots)
+            if quarantine_root and (
+                is_reserved_quarantine_path(target, quarantine_root)
+                or is_reserved_quarantine_path(source, quarantine_root)
+                or is_reserved_quarantine_path(parent, quarantine_root)
+            ):
+                return _skip("path is in reserved quarantine storage")
+            if item.expected_device or item.expected_inode:
+                try:
+                    st = os.lstat(source)
+                    if (item.expected_device and st.st_dev != item.expected_device) or (item.expected_inode and st.st_ino != item.expected_inode):
+                        return _skip("anchor identity changed")
+                except OSError as exc:
+                    return _skip(f"stat failed: {exc}")
+            try:
+                os.mkdir(target)
+            except OSError as exc:
+                return ItemResult("failed", str(exc))
+            return ItemResult("completed", "empty directory created", target)
+
+        if item.operation == "unlink":
+            os.unlink(source)
+            return ItemResult("completed", "unlinked")
+
+        return _skip(f"unsupported operation: {item.operation}")
     except (OSError, UnsafePathError) as exc:
         return ItemResult("failed", str(exc))
