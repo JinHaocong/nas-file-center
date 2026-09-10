@@ -38,11 +38,16 @@ from app.quarantine.restore import (
     verify_quarantine_source_integrity,
     assert_source_unmodified,
 )
+import contextlib
 from app.scanners.fclones import build_group_command, run_scan
 from app.scanners.parser import parse_fclones_report, parse_fclones_report_iter
 from app.tasks.context import JobContext
 from app.tasks.state_machine import JobCancelRequested, JobLeaseLost, JobPauseRequested
-from app.batch_utilities.empty_dir_quarantine import build_e4_quarantine_name
+from app.batch_utilities.empty_dir_quarantine import (
+    acquire_safe_quarantine_root_fd,
+    build_e4_quarantine_name,
+    safe_open_parent_fd,
+)
 from app.fs_ops import rename_noreplace_at
 
 
@@ -821,16 +826,22 @@ def _reconcile_executing_item(
             item.reason = "reconciliation conflict after crash (quarantine target identity mismatch)"
             # Attempt safe no-replace rollback if source path does not exist
             if not src_exists:
+                allowed_roots = list(settings.allowed_roots) if hasattr(settings, "allowed_roots") and settings.allowed_roots else []
+                if meta.get("scope_root"):
+                    scope_p = Path(meta["scope_root"])
+                    if scope_p not in allowed_roots:
+                        allowed_roots.append(scope_p)
                 try:
-                    q_dir_fd = os.open(str(settings.quarantine_root), os.O_RDONLY | os.O_DIRECTORY)
-                    try:
-                        src_parent_fd = os.open(str(src.parent), os.O_RDONLY | os.O_DIRECTORY)
-                        try:
-                            rename_noreplace_at(q_dir_fd, q_name, src_parent_fd, src.name)
-                        finally:
-                            os.close(src_parent_fd)
-                    finally:
-                        os.close(q_dir_fd)
+                    with contextlib.ExitStack() as stack:
+                        q_dir_fd, _, _ = acquire_safe_quarantine_root_fd(settings.quarantine_root)
+                        stack.callback(os.close, q_dir_fd)
+                        with safe_open_parent_fd(src, allowed_roots) as (src_parent_fd, leaf_name):
+                            # Pre-check: leaf_name must not exist in src_parent_fd
+                            try:
+                                os.stat(leaf_name, dir_fd=src_parent_fd, follow_symlinks=False)
+                                # already exists in parent! Cannot rollback.
+                            except FileNotFoundError:
+                                rename_noreplace_at(q_dir_fd, q_name, src_parent_fd, leaf_name)
                 except Exception:
                     pass  # Keep preserved in quarantine
             return

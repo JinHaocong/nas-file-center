@@ -33,11 +33,103 @@ def build_e4_quarantine_name(
 
 
 def _containing_root(path: Path, roots: Iterable[Path | str]) -> tuple[int, Path] | None:
-    resolved_roots = [Path(r).expanduser().resolve(strict=False) for r in roots]
-    matches = [(i, r) for i, r in enumerate(resolved_roots) if path == r or path.is_relative_to(r)]
+    candidate_roots: list[tuple[int, Path]] = []
+    for i, r in enumerate(roots):
+        p = Path(r).expanduser()
+        candidate_roots.append((i, p))
+        try:
+            p_res = p.resolve(strict=False)
+            if p_res != p:
+                candidate_roots.append((i, p_res))
+        except OSError:
+            pass
+    matches = [(i, r) for i, r in candidate_roots if path == r or path.is_relative_to(r)]
     if not matches:
         return None
     return max(matches, key=lambda pair: len(pair[1].parts))
+
+
+def acquire_safe_quarantine_root_fd(quarantine_root: Path | str) -> tuple[int, Path, os.stat_result]:
+    """
+    Safely acquires an open directory file descriptor for the configured quarantine root:
+    - Validates lexical configured path before resolution.
+    - Rejects symlinks on the configured lexical leaf via os.lstat / Path.is_symlink.
+    - Rejects non-directories.
+    - Opens with os.O_RDONLY | os.O_DIRECTORY | (os.O_NOFOLLOW if available).
+    - Binds physical identity using os.fstat on the opened FD.
+    - Returns (fd, raw_path, stat_result). Caller is responsible for closing fd.
+    Raises OSError or ValueError if invalid or symlink.
+    """
+    raw_q = Path(quarantine_root).expanduser()
+    try:
+        st_raw = os.lstat(raw_q)
+    except OSError as exc:
+        raise ValueError(f"Quarantine root is inaccessible: {exc}") from exc
+
+    if stat.S_ISLNK(st_raw.st_mode) or raw_q.is_symlink():
+        raise ValueError(f"Quarantine root is a symlink: {quarantine_root}")
+
+    if not stat.S_ISDIR(st_raw.st_mode):
+        raise ValueError(f"Quarantine root is not a directory: {quarantine_root}")
+
+    flags = os.O_RDONLY | os.O_DIRECTORY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+
+    fd = os.open(str(raw_q), flags)
+    try:
+        st_fd = os.fstat(fd)
+        if not stat.S_ISDIR(st_fd.st_mode) or stat.S_ISLNK(st_fd.st_mode):
+            raise ValueError(f"Quarantine root descriptor is not a directory: {quarantine_root}")
+        return fd, raw_q, st_fd
+    except Exception:
+        os.close(fd)
+        raise
+
+
+@contextlib.contextmanager
+def safe_open_parent_fd(
+    source: Path | str,
+    allowed_roots: Iterable[Path | str],
+):
+    """
+    Safely walks and opens the parent directory of source from the matching allowed root:
+    - Finds matching allowed root.
+    - Verifies source is a strict descendant of base_root (never base_root itself).
+    - Walks component-by-component using os.open(comp, O_DIRECTORY | O_NOFOLLOW, dir_fd=curr_fd).
+    - Yields (parent_fd, leaf_name).
+    - If any component is a symlink, missing, or cannot be safely opened, raises OSError or ValueError.
+    - Closes all intermediate and final descriptors upon exit.
+    """
+    src = Path(source).expanduser()
+    match = _containing_root(src, allowed_roots)
+    if match is None:
+        raise ValueError(f"source is outside configured roots: {source}")
+    _, base_root = match
+
+    st_base = os.lstat(base_root)
+    if stat.S_ISLNK(st_base.st_mode) or not stat.S_ISDIR(st_base.st_mode):
+        raise ValueError(f"Base root is invalid or symlink: {base_root}")
+
+    rel_to_root = src.relative_to(base_root)
+    if len(rel_to_root.parts) == 0:
+        raise ValueError("source cannot be the allowed root directory itself")
+
+    leaf_name = rel_to_root.parts[-1]
+    parent_parts = rel_to_root.parts[:-1]
+
+    flags = os.O_RDONLY | os.O_DIRECTORY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+
+    with contextlib.ExitStack() as stack:
+        curr_fd = os.open(str(base_root), flags)
+        stack.callback(os.close, curr_fd)
+        for comp in parent_parts:
+            next_fd = os.open(comp, flags, dir_fd=curr_fd)
+            stack.callback(os.close, next_fd)
+            curr_fd = next_fd
+        yield curr_fd, leaf_name
 
 
 def _handle_rollback_or_preserve(
@@ -93,16 +185,19 @@ def relocate_empty_dir_to_quarantine(
     - If mismatch or non-empty, attempts atomic rollback with RENAME_NOREPLACE.
     - If rollback blocked, preserves object in quarantine without destroying it.
     """
-    q_root = Path(quarantine_root).expanduser().resolve()
-    if not q_root.exists() or not q_root.is_dir() or q_root.is_symlink():
-        return EmptyDirRelocationResult("failed", f"Quarantine root is invalid: {quarantine_root}")
+    try:
+        q_root_fd, q_root, _ = acquire_safe_quarantine_root_fd(quarantine_root)
+    except Exception as exc:
+        return EmptyDirRelocationResult("failed", f"Quarantine root is invalid: {exc}")
 
     match = _containing_root(source, allowed_roots)
     if match is None:
+        os.close(q_root_fd)
         return EmptyDirRelocationResult("skipped", "source is outside configured roots")
     _, base_root = match
     rel_to_root = source.relative_to(base_root)
     if len(rel_to_root.parts) == 0:
+        os.close(q_root_fd)
         return EmptyDirRelocationResult("skipped", "cannot remove allowed root directory")
 
     leaf_name = rel_to_root.parts[-1]
@@ -115,11 +210,7 @@ def relocate_empty_dir_to_quarantine(
         flags |= os.O_NOFOLLOW
 
     with contextlib.ExitStack() as stack:
-        try:
-            q_root_fd = os.open(str(q_root), flags)
-            stack.callback(os.close, q_root_fd)
-        except OSError as exc:
-            return EmptyDirRelocationResult("failed", f"Failed to open quarantine root: {exc}")
+        stack.callback(os.close, q_root_fd)
 
         # Check if deterministic quarantine target already exists
         try:

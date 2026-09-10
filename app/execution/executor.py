@@ -358,9 +358,15 @@ def execute_item(
             if hasattr(os, "O_NOFOLLOW"):
                 flags |= os.O_NOFOLLOW
 
-            q_root = Path(quarantine_root).expanduser().resolve()
+            from app.batch_utilities.empty_dir_quarantine import acquire_safe_quarantine_root_fd
+            try:
+                q_fd, q_root, _ = acquire_safe_quarantine_root_fd(quarantine_root)
+            except Exception as exc:
+                return ItemResult("failed", f"failed to open quarantine root: {exc}")
+
             match_target = _containing_root(target, allowed_roots)
             if match_target is None:
+                os.close(q_fd)
                 return _skip("target is outside configured roots")
             _, base_root = match_target
             rel_target = target.relative_to(base_root)
@@ -370,11 +376,7 @@ def execute_item(
             from app.fs_ops import rename_noreplace_at
 
             with contextlib.ExitStack() as stack:
-                try:
-                    q_fd = os.open(str(q_root), flags)
-                    stack.callback(os.close, q_fd)
-                except OSError as exc:
-                    return ItemResult("failed", f"failed to open quarantine root: {exc}")
+                stack.callback(os.close, q_fd)
 
                 try:
                     curr_fd = os.open(str(base_root), flags)
