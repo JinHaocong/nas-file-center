@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import sys
 
-__all__ = ["rename_noreplace"]
+__all__ = ["rename_noreplace", "rename_noreplace_at"]
 
 _AT_FDCWD = -100
 _RENAME_NOREPLACE = 1
@@ -54,6 +54,44 @@ def _get_linux_rename_func():
     return None
 
 
+def _get_linux_rename_at_func():
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+    except Exception:
+        return None
+
+    if hasattr(libc, "renameat2"):
+        func = libc.renameat2
+        func.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+        func.restype = ctypes.c_int
+
+        def _linux_rename_at(sfd: int, src: bytes, dfd: int, dst: bytes) -> int:
+            return func(sfd, src, dfd, dst, _RENAME_NOREPLACE)
+
+        return _linux_rename_at
+
+    if hasattr(libc, "syscall"):
+        import platform
+        machine = platform.machine().lower()
+        if machine in ("x86_64", "amd64"):
+            nr_renameat2 = 316
+        elif machine in ("aarch64", "arm64"):
+            nr_renameat2 = 276
+        else:
+            return None
+
+        syscall = libc.syscall
+        syscall.argtypes = [ctypes.c_long, ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+        syscall.restype = ctypes.c_int
+
+        def _linux_syscall_rename_at(sfd: int, src: bytes, dfd: int, dst: bytes) -> int:
+            return syscall(nr_renameat2, sfd, src, dfd, dst, _RENAME_NOREPLACE)
+
+        return _linux_syscall_rename_at
+
+    return None
+
+
 def _get_darwin_rename_func():
     try:
         libc = ctypes.CDLL(None, use_errno=True)
@@ -73,11 +111,33 @@ def _get_darwin_rename_func():
     return None
 
 
+def _get_darwin_rename_at_func():
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+    except Exception:
+        return None
+
+    if hasattr(libc, "renameatx_np"):
+        func = libc.renameatx_np
+        func.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+        func.restype = ctypes.c_int
+
+        def _darwin_rename_at(sfd: int, src: bytes, dfd: int, dst: bytes) -> int:
+            return func(sfd, src, dfd, dst, _RENAME_EXCL)
+
+        return _darwin_rename_at
+
+    return None
+
+
 _RENAME_IMPL = None
+_RENAME_AT_IMPL = None
 if sys.platform.startswith("linux"):
     _RENAME_IMPL = _get_linux_rename_func()
+    _RENAME_AT_IMPL = _get_linux_rename_at_func()
 elif sys.platform == "darwin":
     _RENAME_IMPL = _get_darwin_rename_func()
+    _RENAME_AT_IMPL = _get_darwin_rename_at_func()
 
 
 def rename_noreplace(source: Path | str, target: Path | str) -> None:
@@ -103,3 +163,34 @@ def rename_noreplace(source: Path | str, target: Path | str) -> None:
         if err == errno.ENOENT:
             raise FileNotFoundError(errno.ENOENT, f"No such file or directory: {source}")
         raise OSError(err, os.strerror(err), str(source))
+
+
+def rename_noreplace_at(
+    source_dir_fd: int,
+    source_name: str,
+    target_dir_fd: int,
+    target_name: str,
+) -> None:
+    """
+    Atomically renames `source_name` relative to `source_dir_fd` to `target_name`
+    relative to `target_dir_fd` with strict NO-REPLACE semantics using renameat2.
+    If `target_name` already exists, raises FileExistsError without overwriting target.
+    If cross-device link (EXDEV), raises OSError with errno.EXDEV.
+    If platform lacks atomic no-replace capability, fails closed with NotImplementedError.
+    """
+    if _RENAME_AT_IMPL is None:
+        raise NotImplementedError("Atomic no-replace renameat2 is not available on this platform; failing closed.")
+
+    src_bytes = os.fsencode(str(source_name))
+    dst_bytes = os.fsencode(str(target_name))
+
+    res = _RENAME_AT_IMPL(source_dir_fd, src_bytes, target_dir_fd, dst_bytes)
+    if res != 0:
+        err = ctypes.get_errno()
+        if err in (errno.EEXIST, errno.ENOTEMPTY):
+            raise FileExistsError(errno.EEXIST, f"Target path already exists: {target_name}")
+        if err == errno.EXDEV:
+            raise OSError(errno.EXDEV, f"Cross-device rename not permitted: {source_name} -> {target_name}")
+        if err == errno.ENOENT:
+            raise FileNotFoundError(errno.ENOENT, f"No such file or directory: {source_name}")
+        raise OSError(err, os.strerror(err), str(source_name))

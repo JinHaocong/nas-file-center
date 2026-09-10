@@ -119,3 +119,116 @@ def test_rmdir_empty_final_identity_check_then_empty_replacement_is_never_destro
     assert victim.exists()
     assert original_stat(victim, follow_symlinks=False).st_ino == replacement_inode["value"]
     assert result.state != "completed"
+
+
+def test_rename_noreplace_at_directory_success(tmp_path):
+    from app.fs_ops import rename_noreplace_at
+
+    src_dir = tmp_path / "src_dir"
+    src_dir.mkdir()
+    dst_dir = tmp_path / "dst_dir"
+    dst_dir.mkdir()
+
+    sub = src_dir / "my_sub"
+    sub.mkdir()
+    (sub / "file.txt").write_text("hello")
+    orig_inode = sub.stat().st_ino
+
+    src_fd = os.open(str(src_dir), os.O_RDONLY | os.O_DIRECTORY)
+    dst_fd = os.open(str(dst_dir), os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        rename_noreplace_at(src_fd, "my_sub", dst_fd, "renamed_sub")
+    finally:
+        os.close(src_fd)
+        os.close(dst_fd)
+
+    assert not (src_dir / "my_sub").exists()
+    assert (dst_dir / "renamed_sub").is_dir()
+    assert (dst_dir / "renamed_sub" / "file.txt").read_text() == "hello"
+    assert (dst_dir / "renamed_sub").stat().st_ino == orig_inode
+
+
+def test_rename_noreplace_at_target_collision_leaves_both_untouched(tmp_path):
+    from app.fs_ops import rename_noreplace_at
+
+    src_dir = tmp_path / "src_coll"
+    src_dir.mkdir()
+    dst_dir = tmp_path / "dst_coll"
+    dst_dir.mkdir()
+
+    s = src_dir / "item"
+    s.mkdir()
+    (s / "s.txt").write_text("source")
+
+    d = dst_dir / "item"
+    d.mkdir()
+    (d / "d.txt").write_text("dest")
+
+    src_fd = os.open(str(src_dir), os.O_RDONLY | os.O_DIRECTORY)
+    dst_fd = os.open(str(dst_dir), os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        with pytest.raises(FileExistsError):
+            rename_noreplace_at(src_fd, "item", dst_fd, "item")
+    finally:
+        os.close(src_fd)
+        os.close(dst_fd)
+
+    assert (src_dir / "item" / "s.txt").read_text() == "source"
+    assert (dst_dir / "item" / "d.txt").read_text() == "dest"
+
+
+def test_rename_noreplace_at_exdev_raises_no_fallback(tmp_path, monkeypatch):
+    import ctypes
+    import app.fs_ops as fs_ops_mod
+    from app.fs_ops import rename_noreplace_at
+
+    src_dir = tmp_path / "src_exdev"
+    src_dir.mkdir()
+    dst_dir = tmp_path / "dst_exdev"
+    dst_dir.mkdir()
+
+    s = src_dir / "sub"
+    s.mkdir()
+
+    src_fd = os.open(str(src_dir), os.O_RDONLY | os.O_DIRECTORY)
+    dst_fd = os.open(str(dst_dir), os.O_RDONLY | os.O_DIRECTORY)
+
+    def mock_exdev(sfd, src, dfd, dst):
+        ctypes.set_errno(errno.EXDEV)
+        return -1
+
+    monkeypatch.setattr(fs_ops_mod, "_RENAME_AT_IMPL", mock_exdev)
+
+    def forbidden_rename(*args, **kwargs):
+        raise AssertionError("FORBIDDEN: os.rename fallback")
+    monkeypatch.setattr(os, "rename", forbidden_rename)
+
+    try:
+        with pytest.raises(OSError) as exc_info:
+            rename_noreplace_at(src_fd, "sub", dst_fd, "sub_moved")
+        assert exc_info.value.errno == errno.EXDEV
+    finally:
+        os.close(src_fd)
+        os.close(dst_fd)
+
+    assert s.exists()
+    assert not (dst_dir / "sub_moved").exists()
+
+
+def test_legacy_rename_noreplace_unchanged(tmp_path):
+    from app.fs_ops import rename_noreplace
+
+    f1 = tmp_path / "f1.txt"
+    f1.write_text("data")
+    f2 = tmp_path / "f2.txt"
+
+    rename_noreplace(f1, f2)
+    assert not f1.exists()
+    assert f2.read_text() == "data"
+
+    f3 = tmp_path / "f3.txt"
+    f3.write_text("another")
+    with pytest.raises(FileExistsError):
+        rename_noreplace(f3, f2)
+    assert f3.exists()
+    assert f2.read_text() == "data"
