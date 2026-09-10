@@ -232,3 +232,203 @@ def test_legacy_rename_noreplace_unchanged(tmp_path):
         rename_noreplace(f3, f2)
     assert f3.exists()
     assert f2.read_text() == "data"
+
+
+def test_build_e4_quarantine_name():
+    from app.batch_utilities.empty_dir_quarantine import build_e4_quarantine_name
+    name = build_e4_quarantine_name("p123", 42, Path("/data/root1/a/b"))
+    assert name.startswith(".nfc-e4-pp123-s42-")
+    assert len(name) == len(".nfc-e4-pp123-s42-") + 16
+
+
+def test_relocate_empty_dir_success_outcome_a(tmp_path, monkeypatch):
+    import shutil
+    from app.batch_utilities.empty_dir_quarantine import relocate_empty_dir_to_quarantine
+
+    root = tmp_path / "root"
+    root.mkdir()
+    q_dir = tmp_path / "quarantine"
+    q_dir.mkdir()
+
+    d = root / "empty_dir"
+    d.mkdir()
+    st = d.stat()
+
+    for fn in ("rmdir", "unlink"):
+        def forbidden(*args, **kwargs):
+            raise AssertionError(f"FORBIDDEN: os.{fn} called")
+        monkeypatch.setattr(os, fn, forbidden)
+    monkeypatch.setattr(shutil, "rmtree", lambda *a, **k: pytest.fail("FORBIDDEN: rmtree"))
+
+    res = relocate_empty_dir_to_quarantine(
+        d,
+        allowed_roots=[root],
+        quarantine_root=q_dir,
+        plan_id="planA",
+        sequence=1,
+        expected_device=st.st_dev,
+        expected_inode=st.st_ino,
+    )
+
+    assert res.state == "completed"
+    assert not d.exists()
+    assert res.quarantine_path.exists()
+    assert res.quarantine_path.is_dir()
+    assert res.quarantine_path.stat().st_ino == st.st_ino
+
+
+def test_relocate_empty_dir_post_move_mismatch_rollbacks_safely(tmp_path, monkeypatch):
+    import app.batch_utilities.empty_dir_quarantine as eq_mod
+    from app.batch_utilities.empty_dir_quarantine import relocate_empty_dir_to_quarantine
+
+    root = tmp_path / "root"
+    root.mkdir()
+    q_dir = tmp_path / "quarantine"
+    q_dir.mkdir()
+
+    d = root / "race_dir"
+    d.mkdir()
+    st_orig = d.stat()
+
+    # Pre-check passes with st_orig, but between pre-check and fstat(moved_fd),
+    # fstat returns a different inode to simulate race
+    orig_fstat = os.fstat
+    fstat_calls = [0]
+
+    def racing_fstat(fd):
+        res = orig_fstat(fd)
+        fstat_calls[0] += 1
+        # Mock st_ino on moved object
+        class FakeStat:
+            st_dev = res.st_dev
+            st_ino = res.st_ino + 9999
+            st_mode = res.st_mode
+        return FakeStat()
+
+    monkeypatch.setattr(os, "fstat", racing_fstat)
+
+    res = relocate_empty_dir_to_quarantine(
+        d,
+        allowed_roots=[root],
+        quarantine_root=q_dir,
+        plan_id="planB",
+        sequence=1,
+        expected_device=st_orig.st_dev,
+        expected_inode=st_orig.st_ino,
+    )
+
+    assert res.state == "failed"
+    assert "conflict detected, safely rolled back" in res.reason
+    assert d.exists(), "Rolled back object must be restored to original path"
+    assert res.quarantine_path is None
+
+
+def test_relocate_empty_dir_rollback_collision_preserves_in_quarantine(tmp_path, monkeypatch):
+    import app.batch_utilities.empty_dir_quarantine as eq_mod
+    from app.batch_utilities.empty_dir_quarantine import relocate_empty_dir_to_quarantine
+
+    root = tmp_path / "root"
+    root.mkdir()
+    q_dir = tmp_path / "quarantine"
+    q_dir.mkdir()
+
+    d = root / "coll_dir"
+    d.mkdir()
+    st_orig = d.stat()
+
+    # Trigger mismatch on fstat
+    orig_fstat = os.fstat
+    def fake_fstat(fd):
+        res = orig_fstat(fd)
+        class FakeStat:
+            st_dev = res.st_dev
+            st_ino = res.st_ino + 8888
+            st_mode = res.st_mode
+        return FakeStat()
+    monkeypatch.setattr(os, "fstat", fake_fstat)
+
+    # Make rollback fail with FileExistsError
+    orig_rename_at = eq_mod.rename_noreplace_at
+    call_count = [0]
+    def mock_rename_at(sfd, sname, dfd, dname):
+        call_count[0] += 1
+        if call_count[0] == 1:
+            return orig_rename_at(sfd, sname, dfd, dname)
+        raise FileExistsError(errno.EEXIST, "Original location occupied")
+    monkeypatch.setattr(eq_mod, "rename_noreplace_at", mock_rename_at)
+
+    res = relocate_empty_dir_to_quarantine(
+        d,
+        allowed_roots=[root],
+        quarantine_root=q_dir,
+        plan_id="planC",
+        sequence=1,
+        expected_device=st_orig.st_dev,
+        expected_inode=st_orig.st_ino,
+    )
+
+    assert res.state == "failed"
+    assert "preserved in quarantine" in res.reason
+    assert res.quarantine_path is not None
+    assert res.quarantine_path.exists(), "Object must remain preserved in quarantine!"
+
+
+def test_relocate_empty_dir_non_empty_after_move_rollbacks(tmp_path, monkeypatch):
+    from app.batch_utilities.empty_dir_quarantine import relocate_empty_dir_to_quarantine
+
+    root = tmp_path / "root"
+    root.mkdir()
+    q_dir = tmp_path / "quarantine"
+    q_dir.mkdir()
+
+    d = root / "non_empty_dir"
+    d.mkdir()
+    st_orig = d.stat()
+
+    # Simulate child appearing after move (os.listdir returns a child)
+    monkeypatch.setattr(os, "listdir", lambda fd: ["ghost_file.txt"])
+
+    res = relocate_empty_dir_to_quarantine(
+        d,
+        allowed_roots=[root],
+        quarantine_root=q_dir,
+        plan_id="planD",
+        sequence=1,
+        expected_device=st_orig.st_dev,
+        expected_inode=st_orig.st_ino,
+    )
+
+    assert res.state == "failed"
+    assert "conflict detected, safely rolled back" in res.reason
+    assert d.exists(), "Object must be rolled back"
+
+
+def test_relocate_empty_dir_target_collision_fails_safely(tmp_path):
+    from app.batch_utilities.empty_dir_quarantine import relocate_empty_dir_to_quarantine, build_e4_quarantine_name
+
+    root = tmp_path / "root"
+    root.mkdir()
+    q_dir = tmp_path / "quarantine"
+    q_dir.mkdir()
+
+    d = root / "exist_target"
+    d.mkdir()
+    st_orig = d.stat()
+
+    # Pre-create the deterministic target in quarantine
+    q_name = build_e4_quarantine_name("planE", 1, d)
+    (q_dir / q_name).mkdir()
+
+    res = relocate_empty_dir_to_quarantine(
+        d,
+        allowed_roots=[root],
+        quarantine_root=q_dir,
+        plan_id="planE",
+        sequence=1,
+        expected_device=st_orig.st_dev,
+        expected_inode=st_orig.st_ino,
+    )
+
+    assert res.state == "failed"
+    assert "already exists" in res.reason
+    assert d.exists(), "Source must be untouched"
