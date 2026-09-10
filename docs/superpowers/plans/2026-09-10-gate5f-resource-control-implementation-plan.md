@@ -289,6 +289,104 @@ def test_resource_policy_row_fingerprint():
     assert fp == (3, 2, 4, "normal", "background", True, "01:00", "07:00", "UTC", "pause")
     assert resource_policy_row_fingerprint(None) is None
 
+def test_active_window_same_day_boundaries():
+    snap = ResourcePolicySnapshot(
+        4,
+        4,
+        "normal",
+        "normal",
+        True,
+        "08:00",
+        "18:00",
+        "UTC",
+        "pause",
+        1,
+    )
+
+    start = evaluate_resource_policy(
+        snap,
+        now_utc=datetime(
+            2026, 9, 10, 8, 0,
+            tzinfo=timezone.utc,
+        ),
+    )
+    assert start.inside_active_window is True
+    assert start.profile == "full"
+    assert start.resource_jobs_admitted is True
+
+    before_end = evaluate_resource_policy(
+        snap,
+        now_utc=datetime(
+            2026, 9, 10, 17, 59,
+            tzinfo=timezone.utc,
+        ),
+    )
+    assert before_end.profile == "full"
+
+    exact_end = evaluate_resource_policy(
+        snap,
+        now_utc=datetime(
+            2026, 9, 10, 18, 0,
+            tzinfo=timezone.utc,
+        ),
+    )
+    assert exact_end.inside_active_window is False
+    assert exact_end.profile == "pause"
+    assert exact_end.resource_jobs_admitted is False
+
+def test_active_window_cross_midnight():
+    snap = ResourcePolicySnapshot(
+        4,
+        4,
+        "normal",
+        "normal",
+        True,
+        "23:00",
+        "07:00",
+        "UTC",
+        "limited",
+        1,
+    )
+
+    before_midnight = evaluate_resource_policy(
+        snap,
+        now_utc=datetime(
+            2026, 9, 10, 23, 30,
+            tzinfo=timezone.utc,
+        ),
+    )
+    assert before_midnight.profile == "full"
+
+    after_midnight = evaluate_resource_policy(
+        snap,
+        now_utc=datetime(
+            2026, 9, 11, 6, 59,
+            tzinfo=timezone.utc,
+        ),
+    )
+    assert after_midnight.profile == "full"
+
+    exact_end = evaluate_resource_policy(
+        snap,
+        now_utc=datetime(
+            2026, 9, 11, 7, 0,
+            tzinfo=timezone.utc,
+        ),
+    )
+    assert exact_end.inside_active_window is False
+    assert exact_end.profile == "limited"
+    assert exact_end.effective_thread_cap == 1
+
+    daytime_outside = evaluate_resource_policy(
+        snap,
+        now_utc=datetime(
+            2026, 9, 11, 12, 0,
+            tzinfo=timezone.utc,
+        ),
+    )
+    assert daytime_outside.profile == "limited"
+    assert daytime_outside.effective_thread_cap == 1
+
 def test_evaluate_resource_policy_with_pre_resolved_timezone():
     snap = ResourcePolicySnapshot(4, 4, "normal", "normal", True, "08:00", "18:00", "Asia/Shanghai", "pause", 1)
     tz = resolve_timezone("Asia/Shanghai")
@@ -501,6 +599,28 @@ def test_put_resource_policy_semantic_validation_matrix_returns_422(tmp_path: Pa
         headers={"Origin": "http://testserver"},
     )
 
+    PERSISTED_POLICY_KEYS = (
+        "id",
+        "scan_threads",
+        "hash_threads",
+        "io_limit",
+        "job_priority",
+        "active_window_enabled",
+        "active_window_start",
+        "active_window_end",
+        "active_window_timezone",
+        "outside_window_mode",
+        "revision",
+        "updated_at",
+    )
+
+    def persisted_projection(payload: dict) -> dict:
+        return {key: payload[key] for key in PERSISTED_POLICY_KEYS}
+
+    before_resp = client.get("/api/settings/resource-policy")
+    assert before_resp.status_code == 200
+    before = persisted_projection(before_resp.json())
+
     base_valid = {
         "scan_threads": 2,
         "hash_threads": 2,
@@ -533,8 +653,10 @@ def test_put_resource_policy_semantic_validation_matrix_returns_422(tmp_path: Pa
         )
         assert resp.status_code == 422, f"Failed on case {name}: {resp.text}"
 
-        get_resp = client.get("/api/settings/resource-policy")
-        assert get_resp.json()["revision"] == 1
+        after_resp = client.get("/api/settings/resource-policy")
+        assert after_resp.status_code == 200
+        after = persisted_projection(after_resp.json())
+        assert after == before, f"Case {name} mutated persisted policy state!"
 ```
 
 - [ ] **Step 2: Run tests to verify they fail (RED)**
@@ -904,10 +1026,12 @@ def test_claim_active_window_boundary_race_evaluates_at_phase_b(tmp_path: Path):
         session.add_all([j1, j2])
         session.commit()
 
-    # Acquire lease inside window
-    acquire_time = datetime(2026, 9, 10, 2, 59, 0, tzinfo=timezone.utc)
-    with patch("app.tasks.recovery.utcnow", return_value=acquire_time):
-        acquire_worker_ownership(engine, SessionLocal, worker_id)
+    # Acquire lease inside window: lease_time at 02:59:45 (15 seconds before boundary)
+    # This guarantees the Worker lease is unquestionably fresh (age 15s < 30s timeout)
+    # when claim occurs exactly at the active-window boundary (03:00:00).
+    lease_time = datetime(2026, 9, 10, 2, 59, 45, tzinfo=timezone.utc)
+    with patch("app.tasks.recovery.utcnow", return_value=lease_time):
+        assert acquire_worker_ownership(engine, SessionLocal, worker_id) is True
 
     # Phase B runs at exactly 03:00:00 (end of window, exclusive -> outside pause)
     boundary_time = datetime(2026, 9, 10, 3, 0, 0, tzinfo=timezone.utc)
