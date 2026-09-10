@@ -37,3 +37,29 @@ def test_discover_flatten_oserror(tmp_path):
     with pytest.raises(BatchUtilityInvalidConfigError) as exc_info:
         discover_flatten_one_level(wrapper_paths=[str(missing)])
     assert exc_info.value.details.get("wrapper_path") == str(missing)
+
+
+def test_discover_flatten_leaf_symlink_blocked(tmp_path):
+    """E3-hotfix9 Discovery regression:
+    discover_flatten_one_level must not follow leaf symlink.
+    It must raise BatchUtilitySymlinkBlockedError and not enumerate symlink target children.
+    """
+    from app.batch_utilities.errors import BatchUtilitySymlinkBlockedError
+    root = tmp_path / "root"
+    root.mkdir()
+    real_dir = root / "real"
+    real_dir.mkdir()
+    (real_dir / "secret.txt").write_text("secret")
+
+    symlink_dir = root / "w_link"
+    os.symlink(str(real_dir), str(symlink_dir))
+
+    with pytest.raises(BatchUtilitySymlinkBlockedError) as exc_info:
+        discover_flatten_one_level([str(symlink_dir)])
+    assert exc_info.value.code == "BATCH_UTILITY_SYMLINK_BLOCKED"
+
+    # Also with trailing slash
+    with pytest.raises(BatchUtilitySymlinkBlockedError) as exc_info:
+        discover_flatten_one_level([str(symlink_dir) + "/"])
+    assert exc_info.value.code == "BATCH_UTILITY_SYMLINK_BLOCKED"
+

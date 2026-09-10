@@ -1475,5 +1475,72 @@ def test_schema_exact_duplicate_rejected(tmp_path):
         FlattenOneLevelAction(type="flatten_one_level", wrapper_paths=[str(w_dir), str(w_dir)])
 
 
+def test_compiler_preflight_to_discovery_symlink_swap_blocks_enumeration(tmp_path):
+    """E3-hotfix9 Compiler Regression:
+    Wrapper swapped to symlink between preflight and discovery.
+    Discovery must never enumerate through the wrapper leaf symlink.
+    secret.txt is never enumerated.
+    0 candidates originate from symlink target.
+    0 Draft.
+    Fails closed with BATCH_UTILITY_SYMLINK_BLOCKED.
+    """
+    import os
+    import shutil
+    from unittest.mock import patch
+    import app.batch_utilities.compiler as compiler_mod
+    from app.batch_utilities.errors import BatchUtilitySymlinkBlockedError
+
+    root = tmp_path / "root"
+    a_dir = root / "A"
+    b_dir = a_dir / "B"
+    b_dir.mkdir(parents=True)
+    real_dir = a_dir / "Real"
+    real_dir.mkdir(parents=True)
+    (real_dir / "secret.txt").write_text("secret")
+
+    w_dir = a_dir / "W"
+    w_dir.mkdir(parents=True)
+    (w_dir / "before.txt").write_text("before")
+
+    link = root / "link"
+    os.symlink(str(b_dir), str(link))
+    wrapper_input = str(link) + "/../W/"
+
+    action = FlattenOneLevelAction(type="flatten_one_level", wrapper_paths=[wrapper_input])
+    snapshot = BatchUtilitySafetySnapshot(
+        protect_last_file=True,
+        allowed_roots=(root,),
+        quarantine_root=None,
+        effective_policy={},
+    )
+
+    # Hook validate_wrappers_preflight to swap wrapper immediately after preflight passes
+    orig_preflight = compiler_mod.validate_wrappers_preflight
+    def racing_preflight(*args, **kwargs):
+        res = orig_preflight(*args, **kwargs)
+        shutil.rmtree(str(w_dir))
+        os.symlink(str(real_dir), str(w_dir))
+        return res
+
+    # Spy on discover_flatten_one_level
+    discovered_candidates = []
+    orig_disc = compiler_mod.discover_flatten_one_level
+    def spy_disc(wrappers):
+        cands, errs = orig_disc(wrappers)
+        discovered_candidates.extend(cands)
+        return cands, errs
+
+    with patch.object(compiler_mod, "validate_wrappers_preflight", side_effect=racing_preflight):
+        with patch.object(compiler_mod, "discover_flatten_one_level", side_effect=spy_disc):
+            with pytest.raises(BatchUtilitySymlinkBlockedError) as exc_info:
+                compile_flatten_one_level_preview(session=None, action=action, safety_snapshot=snapshot)
+            assert exc_info.value.code == "BATCH_UTILITY_SYMLINK_BLOCKED"
+
+    # Assert secret.txt was NEVER enumerated by discovery
+    assert len(discovered_candidates) == 0
+    assert not any("secret.txt" in c.source_path for c in discovered_candidates)
+
+
+
 
 

@@ -518,3 +518,51 @@ def test_preview_allowed_root_equality_symlink_dotdot_accepted(api_test_env):
     sources = {item["source_path"] for item in data["items"]}
     assert str(a_dir.resolve(strict=True) / "item.txt") in sources
 
+
+def test_preview_preflight_to_discovery_symlink_swap_blocks_enumeration(api_test_env):
+    """E3-hotfix9 API Preview regression:
+    Wrapper swapped to symlink between preflight and discovery during preview.
+    Preview must fail closed (HTTP 409 BATCH_UTILITY_SYMLINK_BLOCKED).
+    secret.txt is never enumerated or returned in response.
+    """
+    import os
+    import shutil
+    from unittest.mock import patch
+    import app.batch_utilities.compiler as compiler_mod
+
+    client = api_test_env["client"]
+    root = api_test_env["root1_path"]
+
+    a_dir = root / "A"
+    b_dir = a_dir / "B"
+    b_dir.mkdir(parents=True)
+    real_dir = a_dir / "Real"
+    real_dir.mkdir(parents=True)
+    (real_dir / "secret.txt").write_text("secret")
+
+    w_dir = a_dir / "W"
+    w_dir.mkdir(parents=True)
+    (w_dir / "before.txt").write_text("before")
+
+    link = root / "link"
+    os.symlink(str(b_dir), str(link))
+    wrapper_input = str(link) + "/../W/"
+
+    orig_preflight = compiler_mod.validate_wrappers_preflight
+    def racing_preflight(*args, **kwargs):
+        res = orig_preflight(*args, **kwargs)
+        shutil.rmtree(str(w_dir))
+        os.symlink(str(real_dir), str(w_dir))
+        return res
+
+    with patch("app.batch_utilities.compiler.validate_wrappers_preflight", side_effect=racing_preflight):
+        resp = client.post(
+            "/api/batch-utilities/preview",
+            json={"action": {"type": "flatten_one_level", "wrapper_paths": [wrapper_input]}},
+        )
+        assert resp.status_code == 409
+        err = resp.json()["error"]
+        assert err["code"] == "BATCH_UTILITY_SYMLINK_BLOCKED"
+        assert "secret.txt" not in resp.text
+
+

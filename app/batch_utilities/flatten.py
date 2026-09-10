@@ -3,7 +3,29 @@ import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
-from app.batch_utilities.errors import BatchUtilityInvalidConfigError, BatchUtilityLimitExceededError
+from app.batch_utilities.errors import (
+    BatchUtilityInvalidConfigError,
+    BatchUtilityLimitExceededError,
+    BatchUtilitySymlinkBlockedError,
+    BatchUtilityScopeNotFoundError,
+)
+
+
+class FdPath(int):
+    """An integer file descriptor subclass that preserves its original string path.
+    Enables passing file descriptors to os.scandir() on POSIX while preserving
+    string representations for path logging, error reporting, and test mocks.
+    """
+    def __new__(cls, fd: int, path: str):
+        obj = super().__new__(cls, fd)
+        obj.path = str(path)
+        return obj
+
+    def __str__(self) -> str:
+        return self.path
+
+    def __fspath__(self) -> str:
+        return self.path
 
 
 @dataclass
@@ -35,12 +57,50 @@ def discover_flatten_one_level(
     errors = []
 
     for w_path in wrapper_paths:
-        wrapper = Path(w_path)
+        clean_path = str(w_path).rstrip("/") or "/"
+
+        flags = os.O_RDONLY | os.O_DIRECTORY
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+
         try:
-            with os.scandir(w_path) as it:
+            fd = os.open(clean_path, flags)
+        except (NotADirectoryError, OSError) as e:
+            try:
+                st = os.lstat(clean_path)
+                if stat.S_ISLNK(st.st_mode):
+                    raise BatchUtilitySymlinkBlockedError(
+                        f"Wrapper path '{w_path}' is a symlink",
+                        details={"wrapper_path": str(w_path), "stage": "DISCOVERY"},
+                    )
+                if not stat.S_ISDIR(st.st_mode):
+                    raise BatchUtilityInvalidConfigError(
+                        f"Wrapper path '{w_path}' is not a directory",
+                        details={"wrapper_path": str(w_path), "stage": "DISCOVERY"},
+                    )
+            except BatchUtilitySymlinkBlockedError:
+                raise
+            except BatchUtilityInvalidConfigError:
+                raise
+            except OSError:
+                pass
+
+            raise BatchUtilityInvalidConfigError(
+                f"Failed to scan wrapper directory '{w_path}': {e}",
+                details={
+                    "wrapper_path": str(w_path),
+                    "errno": getattr(e, "errno", None),
+                    "stage": "DISCOVERY",
+                },
+            )
+
+        try:
+            target_parent = Path(clean_path).parent
+            dir_handle = FdPath(fd, clean_path)
+            with os.scandir(dir_handle) as it:
                 for entry in it:
-                    child_source = entry.path
-                    child_target = str(wrapper.parent / entry.name)
+                    child_source = os.path.join(clean_path, entry.name)
+                    child_target = str(target_parent / entry.name)
 
                     try:
                         st = entry.stat(follow_symlinks=False)
@@ -105,5 +165,7 @@ def discover_flatten_one_level(
                     "stage": "DISCOVERY",
                 },
             )
+        finally:
+            os.close(fd)
 
     return candidates, errors

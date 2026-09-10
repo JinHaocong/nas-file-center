@@ -10,6 +10,7 @@ from app.batch_utilities.errors import (
     BatchUtilityScopeOverlapError,
     BatchUtilityScopeNotFoundError,
     BatchUtilityInvalidConfigError,
+    BatchUtilitySymlinkBlockedError,
 )
 from app.filters.validation import validate_filter_ast
 
@@ -61,7 +62,10 @@ def canonicalize_wrapper_path(path: str) -> str:
     try:
         st = os.lstat(raw_leaf)
         if stat.S_ISLNK(st.st_mode):
-            return raw_leaf
+            raise BatchUtilitySymlinkBlockedError(
+                f"Wrapper path '{raw}' is a symlink",
+                details={"wrapper_path": raw},
+            )
     except FileNotFoundError:
         raise BatchUtilityScopeNotFoundError(
             f"Wrapper directory '{raw}' does not exist",

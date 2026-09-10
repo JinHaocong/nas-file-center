@@ -1019,3 +1019,83 @@ def test_generate_physically_distinct_wrappers_same_normpath_accepted(api_test_e
         assert str(w_a.resolve(strict=True)) in canon_wrappers
         assert str(w_root.resolve(strict=True)) in canon_wrappers
         assert len(plan.items) == 2
+
+
+def test_generate_preflight_to_discovery_symlink_swap_blocks_enumeration(api_test_env):
+    """E3-hotfix9 Generate regression:
+    Stable preview acquired.
+    During Generate, wrapper is swapped to symlink after preflight but before discovery.
+    Assert:
+    - Fails closed (HTTP 409 BATCH_UTILITY_SYMLINK_BLOCKED or PREVIEW_CHANGED).
+    - 0 BatchPlan in DB.
+    - 0 BatchPlanItem in DB.
+    - No filesystem mutation, secret.txt is never enumerated into intents.
+    """
+    import os
+    import shutil
+    from unittest.mock import patch
+    import app.batch_utilities.compiler as compiler_mod
+    from app.models import BatchPlan
+
+    client = api_test_env["client"]
+    service = api_test_env["service"]
+    root = api_test_env["root1_path"]
+
+    a_dir = root / "A"
+    b_dir = a_dir / "B"
+    b_dir.mkdir(parents=True)
+    real_dir = a_dir / "Real"
+    real_dir.mkdir(parents=True)
+    (real_dir / "secret.txt").write_text("secret")
+
+    w_dir = a_dir / "W"
+    w_dir.mkdir(parents=True)
+    (w_dir / "before.txt").write_text("before")
+
+    link = root / "link"
+    os.symlink(str(b_dir), str(link))
+    wrapper_input = str(link) + "/../W/"
+
+    action = {
+        "type": "flatten_one_level",
+        "wrapper_paths": [wrapper_input],
+    }
+
+    resp_prev = client.post("/api/batch-utilities/preview", json={"action": action})
+    assert resp_prev.status_code == 200
+    preview_digest = resp_prev.json()["preview_digest"]
+
+    # During Generate Phase A, swap wrapper after preflight
+    orig_preflight = compiler_mod.validate_wrappers_preflight
+    def racing_preflight(*args, **kwargs):
+        res = orig_preflight(*args, **kwargs)
+        shutil.rmtree(str(w_dir))
+        os.symlink(str(real_dir), str(w_dir))
+        return res
+
+    discovered_in_generate = []
+    orig_disc = compiler_mod.discover_flatten_one_level
+    def spy_disc(wrappers):
+        cands, errs = orig_disc(wrappers)
+        discovered_in_generate.extend(cands)
+        return cands, errs
+
+    with patch("app.batch_utilities.compiler.validate_wrappers_preflight", side_effect=racing_preflight):
+        with patch("app.batch_utilities.compiler.discover_flatten_one_level", side_effect=spy_disc):
+            req = {
+                "action": action,
+                "expected_preview_digest": preview_digest,
+            }
+            resp_gen = client.post("/api/batch-utilities/generate-plan", json=req)
+            assert resp_gen.status_code == 409
+            err = resp_gen.json()["error"]
+            assert err["code"] == "BATCH_UTILITY_SYMLINK_BLOCKED"
+
+            with service.SessionLocal() as session:
+                plans = session.query(BatchPlan).all()
+                assert len(plans) == 0
+
+    assert len(discovered_in_generate) == 0
+    assert not any("secret.txt" in c.source_path for c in discovered_in_generate)
+    assert (real_dir / "secret.txt").exists()
+

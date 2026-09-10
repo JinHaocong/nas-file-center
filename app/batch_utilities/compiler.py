@@ -30,7 +30,7 @@ from app.batch_utilities.digest import (
 )
 from app.batch_utilities.transform import compute_transformed_basename, TransformDecision
 from app.batch_utilities.graph import TargetItemCandidate, resolve_suffix_transform_graph
-from app.batch_utilities.flatten import discover_flatten_one_level
+from app.batch_utilities.flatten import discover_flatten_one_level, FdPath
 from app.batch_utilities.flatten_graph import (
     check_wrapper_overlap,
     resolve_flatten_graph,
@@ -1420,8 +1420,9 @@ def compile_flatten_one_level_preview(
     # Wrapper observations
     wrapper_observations = []
     for w_lex in canonical_wrappers:
+        clean_w = str(w_lex).rstrip("/") or "/"
         try:
-            st = os.lstat(w_lex)
+            st = os.lstat(clean_w)
             if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
                 wrapper_observations.append({
                     "wrapper_path": w_lex,
@@ -1432,8 +1433,23 @@ def compile_flatten_one_level_preview(
                     "direct_children": [],
                 })
             else:
+                flags = os.O_RDONLY | os.O_DIRECTORY
+                if hasattr(os, "O_NOFOLLOW"):
+                    flags |= os.O_NOFOLLOW
                 try:
-                    with os.scandir(w_lex) as it:
+                    fd = os.open(clean_w, flags)
+                except OSError as e:
+                    raise BatchUtilityInvalidConfigError(
+                        f"Failed to scan wrapper directory '{w_lex}': {e}",
+                        details={
+                            "wrapper_path": w_lex,
+                            "errno": getattr(e, "errno", None),
+                            "stage": "SNAPSHOT",
+                        },
+                    )
+                try:
+                    dir_handle = FdPath(fd, clean_w)
+                    with os.scandir(dir_handle) as it:
                         children = sorted(entry.name for entry in it)
                 except OSError as e:
                     raise BatchUtilityInvalidConfigError(
@@ -1444,6 +1460,8 @@ def compile_flatten_one_level_preview(
                             "stage": "SNAPSHOT",
                         },
                     )
+                finally:
+                    os.close(fd)
                 wrapper_observations.append({
                     "wrapper_path": w_lex,
                     "device": st.st_dev,
