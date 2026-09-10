@@ -1327,6 +1327,108 @@ class FileCenterService:
                     item_validations[row.id] = ("validated", "quarantine restore validated", None)
                 continue
 
+            if row.operation == "rmdir_empty":
+                if self.settings.quarantine_root and is_reserved_quarantine_path(Path(row.source_path), self.settings.quarantine_root):
+                    stale_items.append(StaleItemDetail(
+                        item_id=row.id,
+                        source_path=row.source_path,
+                        reason="quarantine_path_blocked",
+                        expected={"device": row.expected_device, "inode": row.expected_inode},
+                        actual=None,
+                    ))
+                    item_validations[row.id] = ("stale", "quarantine_path_blocked", None)
+                    continue
+
+                is_fresh, stale_detail = verify_item_freshness(
+                    item_id=row.id,
+                    source_path=row.source_path,
+                    operation=row.operation,
+                    expected_device=row.expected_device,
+                    expected_inode=row.expected_inode,
+                    expected_size=row.expected_size,
+                    expected_mtime_ns=row.expected_mtime_ns,
+                    expected_hash=row.expected_hash,
+                    metadata_json=row.metadata_json,
+                    allowed_roots=self.settings.allowed_roots,
+                    quarantine_root=None,
+                    check_hash=False,
+                )
+                if not is_fresh and stale_detail:
+                    stale_items.append(stale_detail)
+                    item_validations[row.id] = ("stale", stale_detail.reason, None)
+                    continue
+
+                item_validations[row.id] = ("validated", "empty directory deletion validated", None)
+                continue
+
+            if row.operation == "mkdir_empty":
+                is_fresh, stale_detail = verify_item_freshness(
+                    item_id=row.id,
+                    source_path=row.source_path,
+                    operation=row.operation,
+                    expected_device=row.expected_device,
+                    expected_inode=row.expected_inode,
+                    expected_size=row.expected_size,
+                    expected_mtime_ns=row.expected_mtime_ns,
+                    expected_hash=row.expected_hash,
+                    metadata_json=row.metadata_json,
+                    allowed_roots=self.settings.allowed_roots,
+                    quarantine_root=None,
+                    check_hash=False,
+                )
+                if not is_fresh and stale_detail:
+                    stale_items.append(stale_detail)
+                    item_validations[row.id] = ("stale", stale_detail.reason, None)
+                    continue
+
+                # Destination validation
+                anchor = Path(row.source_path)
+                target = Path(row.target_path or "")
+                try:
+                    rel = target.relative_to(anchor)
+                    if str(rel) in ("", "."):
+                        has_error = True
+                        item_validations[row.id] = ("skipped", "Target must be strict descendant of anchor", None)
+                        continue
+                except Exception:
+                    has_error = True
+                    item_validations[row.id] = ("skipped", "Target is not descendant of anchor", None)
+                    continue
+
+                if target.is_symlink() or os.path.lexists(target):
+                    has_error = True
+                    item_validations[row.id] = ("skipped", "Target path already exists", None)
+                    continue
+
+                parent = target.parent
+                if parent.is_symlink() or not parent.exists() or not parent.is_dir():
+                    has_error = True
+                    item_validations[row.id] = ("skipped", "Target parent directory is missing or not a directory", None)
+                    continue
+
+                if self.settings.quarantine_root:
+                    q_root = Path(self.settings.quarantine_root)
+                    if (
+                        is_reserved_quarantine_path(anchor, q_root)
+                        or is_reserved_quarantine_path(target, q_root)
+                        or is_reserved_quarantine_path(parent, q_root)
+                    ):
+                        has_error = True
+                        item_validations[row.id] = ("skipped", "Path is inside reserved quarantine storage", None)
+                        continue
+
+                try:
+                    require_allowed_path(anchor, self.settings.allowed_roots)
+                    require_allowed_path(target, self.settings.allowed_roots)
+                    require_allowed_path(parent, self.settings.allowed_roots)
+                except UnsafePathError:
+                    has_error = True
+                    item_validations[row.id] = ("skipped", "Path is outside allowed roots", None)
+                    continue
+
+                item_validations[row.id] = ("validated", "mkdir_empty destination validated", None)
+                continue
+
             is_fresh, stale_detail = verify_item_freshness(
                 item_id=row.id,
                 source_path=row.source_path,
@@ -1579,6 +1681,67 @@ class FileCenterService:
             item_id = it["id"]
             src_p = Path(it["source_path"])
             upd: dict[str, Any] = {}
+
+            if it["operation"] == "rmdir_empty":
+                if self.settings.quarantine_root and is_reserved_quarantine_path(src_p, self.settings.quarantine_root):
+                    raise ValueError(f"Source path is in reserved quarantine storage: {src_p}")
+                snap = capture_source_snapshot(
+                    src_p,
+                    allowed_roots=self.settings.allowed_roots,
+                    quarantine_root=None,
+                )
+                if snap["object_type"] != "directory":
+                    raise ValueError(f"Source path for rmdir_empty is not a directory: {src_p}")
+
+                exp_dev = snap["device"]
+                exp_ino = snap["inode"]
+                upd["expected_device"] = exp_dev
+                upd["expected_inode"] = exp_ino
+                upd["expected_size"] = 0
+                upd["expected_mtime_ns"] = 0
+
+                meta = json.loads(it["metadata_json"] or "{}")
+                meta["snapshot"] = {
+                    "device": exp_dev,
+                    "inode": exp_ino,
+                    "size": 0,
+                    "mtime_ns": snap["mtime_ns"],
+                    "ctime_ns": snap["ctime_ns"],
+                    "object_type": "directory",
+                }
+                upd["metadata_json"] = json.dumps(meta, ensure_ascii=False)
+                item_updates[item_id] = upd
+                continue
+
+            if it["operation"] == "mkdir_empty":
+                snap = capture_source_snapshot(
+                    src_p,
+                    allowed_roots=self.settings.allowed_roots,
+                    quarantine_root=None,
+                )
+                if snap["object_type"] != "directory":
+                    raise ValueError(f"Anchor path for mkdir_empty is not a directory: {src_p}")
+
+                exp_dev = snap["device"]
+                exp_ino = snap["inode"]
+                upd["expected_device"] = exp_dev
+                upd["expected_inode"] = exp_ino
+                upd["expected_size"] = 0
+                upd["expected_mtime_ns"] = 0
+
+                meta = json.loads(it["metadata_json"] or "{}")
+                meta["snapshot"] = {
+                    "device": exp_dev,
+                    "inode": exp_ino,
+                    "size": 0,
+                    "mtime_ns": snap["mtime_ns"],
+                    "ctime_ns": snap["ctime_ns"],
+                    "object_type": "directory",
+                }
+                upd["metadata_json"] = json.dumps(meta, ensure_ascii=False)
+                item_updates[item_id] = upd
+                continue
+
             if it["operation"] != "restore":
                 is_chained = False
                 producer_match: dict[str, Any] | None = None
