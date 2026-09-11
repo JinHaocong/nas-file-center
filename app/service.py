@@ -3698,7 +3698,7 @@ class FileCenterService:
                     allowed_roots=self.settings.allowed_roots,
                     custom_target=custom_target,
                 )
-                entry = session.get(QuarantineEntry, entry_id)
+                session.refresh(entry)
                 dest_str = custom_target or entry.original_path
                 return {
                     "id": entry.id,

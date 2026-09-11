@@ -116,7 +116,19 @@ def execute_transactional_quarantine(
         quarantine_path.parent.mkdir(parents=True, exist_ok=True)
 
     renew_and_assert_worker_lease(session_factory, worker_id)
-    os.link(str(candidate_anchor_path), str(quarantine_path))
+    try:
+        os.link(str(candidate_anchor_path), str(quarantine_path))
+    except Exception as exc:
+        with session_factory() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            assert_active_worker_lease(session, worker_id)
+            entry = session.get(QuarantineEntry, entry_id)
+            entry.state = "conflict"
+            entry.tx_phase = "conflict"
+            entry.last_error = f"Failed to publish to public quarantine path: {exc}"
+            entry.updated_at = utcnow()
+            session.commit()
+        raise
 
     with session_factory() as session:
         session.execute(text("BEGIN IMMEDIATE"))
@@ -150,9 +162,11 @@ def execute_transactional_quarantine(
             entry.state = "active"
             entry.quarantined_at = now
             entry.updated_at = now
+            session.commit()
         else:
             entry.tx_phase = "conflict"
             entry.state = "conflict"
             entry.last_error = f"foreign_inode_captured: expected {expected_dev}:{expected_ino}, got {st_captured.st_dev}:{st_captured.st_ino}"
             entry.updated_at = now
-        session.commit()
+            session.commit()
+            raise RuntimeError(f"Foreign inode captured in slot: expected {expected_dev}:{expected_ino}, got {st_captured.st_dev}:{st_captured.st_ino}")
