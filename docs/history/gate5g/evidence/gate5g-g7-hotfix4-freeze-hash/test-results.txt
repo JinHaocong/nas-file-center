@@ -1,0 +1,37 @@
+$ pytest tests/test_gate5g_g7_hotfix4_freeze_hash.py -v
+============================== 6 passed in 0.57s ===============================
+EXIT_CODE=0
+
+$ pytest tests/test_planning.py tests/test_gate3_stale_plan.py -v
+======================== 42 passed, 2 warnings in 3.74s ========================
+EXIT_CODE=0
+
+$ pytest tests/test_gate2_worker_execution.py tests/test_gate5g_g7_hotfix1_worker_gate3.py -v
+======================== 4 passed, 2 warnings in 0.76s =========================
+EXIT_CODE=0
+
+$ pytest tests/test_gate5g* -v
+======================= 103 passed, 2 warnings in 3.02s ========================
+EXIT_CODE=0
+
+$ pytest --disable-warnings
+================ 1252 passed, 3 skipped, 19 warnings in 95.01s =================
+EXIT_CODE=0
+
+$ cd frontend && npm run typecheck
+✓ tsc --noEmit
+EXIT_CODE=0
+
+$ cd frontend && npm test
+# tests 355
+# suites 100
+# pass 355
+# fail 0
+EXIT_CODE=0
+
+$ cd frontend && npm run build
+✓ built in 3.65s
+EXIT_CODE=0
+
+$ git diff --check
+EXIT_CODE=0
