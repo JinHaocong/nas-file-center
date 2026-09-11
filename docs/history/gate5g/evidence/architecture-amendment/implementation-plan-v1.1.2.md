@@ -426,31 +426,32 @@ Before issuing any filesystem mutation on NAS in future candidate validation:
 - [ ] **Step 1: Write failing test for DB-2 schema and legacy migration**
 ```python
 # tests/test_gate5g_g7_task1_schema.py
-def test_quarantine_entry_db2_columns(db_session):
-    entry = QuarantineEntry(
-        original_path="/vol/test.txt",
-        quarantine_path="/vol/.quarantine/test.txt",
-        state="preparing",
-        tx_token="tx-12345",
-        tx_phase="preparing",
-        authoritative_anchor_path="/vol/.quarantine/.tx/entry-1/attempt-1/anchor",
-        active_attempt_generation=1,
-    )
-    db_session.add(entry)
-    db_session.commit()
-    assert entry.tx_phase == "preparing"
+def test_quarantine_entry_db2_columns(session_factory):
+    with session_factory() as session:
+        entry = QuarantineEntry(
+            original_path="/vol/test.txt",
+            quarantine_path="/vol/.quarantine/test.txt",
+            state="preparing",
+            tx_token="tx-12345",
+            tx_phase="preparing",
+            authoritative_anchor_path="/vol/.quarantine/.tx/entry-1/attempt-1/anchor",
+            active_attempt_generation=1,
+        )
+        session.add(entry)
+        session.commit()
+        assert entry.tx_phase == "preparing"
 
-def test_legacy_rows_preserve_state_and_null_tx_phase(db_session):
-    # Simulate pre-existing legacy row
-    entry = QuarantineEntry(
-        original_path="/vol/legacy.txt",
-        quarantine_path="/vol/.quarantine/legacy.txt",
-        state="active",
-    )
-    db_session.add(entry)
-    db_session.commit()
-    assert entry.state == "active"
-    assert entry.tx_phase is None
+def test_legacy_rows_preserve_state_and_null_tx_phase(session_factory):
+    with session_factory() as session:
+        entry = QuarantineEntry(
+            original_path="/vol/legacy.txt",
+            quarantine_path="/vol/.quarantine/legacy.txt",
+            state="active",
+        )
+        session.add(entry)
+        session.commit()
+        assert entry.state == "active"
+        assert entry.tx_phase is None
 ```
 
 - [ ] **Step 2: Run test to verify failure**
@@ -685,7 +686,7 @@ Expected: PASS (all tests in file pass GREEN).
 
 - [ ] **Step 5: Focused regression & commit**
 Run: `pytest tests/test_gate5g_g7_hotfix1_fs_ops.py tests/test_fs_ops.py -v`
-Commit: `git add app/fs_ops.py tests/test_gate5g_hotfix1_fs_ops.py && git commit -m "feat(gate5g): decommission unsafe fs_ops fallback and assert EOPNOTSUPP"`
+Commit: `git add app/fs_ops.py tests/test_gate5g_g7_hotfix1_fs_ops.py && git commit -m "feat(gate5g): decommission unsafe fs_ops fallback and assert EOPNOTSUPP"`
 
 ---
 
