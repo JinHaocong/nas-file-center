@@ -3881,6 +3881,9 @@ class FileCenterService:
             if entry.state != "active":
                 raise StateConflictError(f"Cannot purge quarantine entry in state '{entry.state}'")
 
+            from app.quarantine.cleanup_gate import safe_quarantine_purge_guard
+            safe_quarantine_purge_guard(entry)
+
             raw_target = Path(entry.quarantine_path)
             quarantine_resolved = Path(self.settings.quarantine_root).resolve(strict=False)
 
