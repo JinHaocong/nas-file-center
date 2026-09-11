@@ -1,11 +1,11 @@
 # Gate5-G Architecture Amendment Review Status
 
-**Stage:** Architecture Amendment v3.1.0 (Revision 3.1)  
+**Stage:** Architecture Amendment v3.1.0 (Final Architecture Closure)  
 **Date:** 2026-09-11  
-**Status:** **G7 ARCHITECTURE AMENDMENT REVISION 3.1 COMPLETE / READY FOR FINAL INDEPENDENT ARCHITECTURE REVIEW**  
+**Status:** **ARCHITECTURE AMENDMENT FROZEN / CLOSED — IMPLEMENTATION PLAN AUTHORIZED**  
 
 ## State Summary
-- Revision 3 core paradigm accepted (authoritative anchor, presentation-only view, capture-by-rename, DB-2, single reconciliation hierarchy).
+- Gate5-G / G7 Architecture Amendment v3.1.0 = **PASS / APPROVED / FROZEN / CLOSED**.
 - Revision 3.1 achieves final architecture closure across all remaining findings:
   - Strict two-phase Candidate Anchor Qualification protocol against Gate3 Frozen identity (P0-1).
   - Monotonic Generation Allocation & Write-Once Capture Slot protocol by construction (P0-2).
@@ -15,4 +15,5 @@
   - DB-2 Legacy Row Compatibility & fail-closed gate for unanchored rows on COMPAT (P1-1).
   - COMPAT Purge & Retention Safety Gate refusing payload destruction while anchor persists (P1-2).
   - State model disambiguation: exact semantics frozen for `active`, `conflict`, `restored`, `legacy`.
-- Implementation remains strictly **NOT AUTHORIZED** pending final Independent Architecture Review approval.
+- **Implementation Plan:** **AUTHORIZED**.
+- **Production Implementation:** **NOT YET AUTHORIZED** (Pending Implementation Plan Review).
