@@ -1,5 +1,5 @@
 ================================================================================
-GATE5-G / G7 TRANSACTIONAL MUTATION IMPLEMENTATION EVIDENCE (HOTFIX 2 CLOSURE)
+GATE5-G / G7 TRANSACTIONAL MUTATION IMPLEMENTATION EVIDENCE (HOTFIX 3 CLOSURE)
 ================================================================================
 
 Target Release: v0.3.5
@@ -7,14 +7,14 @@ Branch: v0.3.5-gate5c-hotfix4
 Baseline Docs HEAD: 0ddf932747021578f08843c5069ef88a461d493f
 Baseline Plan HEAD: 2a9d6444f8abead9438ca3fe391193cf64075807
 Baseline Production Code HEAD: c32d0778c59add81e0c296d6f73aa66bc403c04f
-Previous Failed Candidate HEAD: f8f87c7a9253958b57bd761a6f012a5ffc4012e0
-Candidate Code HEAD: fd2bae07a30aab559e812ade4c0bcbab1cacea06
-Artifact Archive: nas-file-center-v0.3.5-gate5g-g7-hotfix6.zip
-Artifact SHA256: 5bb24d96047587d574a8bf4c283638e679165ace483e86b8cec1a6a9b1b712e1
-Status: G7 TRANSACTIONAL MUTATION IMPLEMENTATION HOTFIX2 COMPLETE / READY FOR INDEPENDENT IMPLEMENTATION REVIEW
+Previous Failed Candidate HEAD: fd2bae07a30aab559e812ade4c0bcbab1cacea06
+Candidate Code HEAD: 958c5d04c6b71c0ffd1ee5f77cb52ee1b046147d
+Artifact Archive: nas-file-center-v0.3.5-gate5g-g7-hotfix7.zip
+Artifact SHA256: 9e1938df884d31c4a4f79faccec2c1d0d8f54a73c9c5d368173234333f470dd5
+Status: G7 TRANSACTIONAL MUTATION IMPLEMENTATION HOTFIX3 COMPLETE / READY FOR FINAL INDEPENDENT IMPLEMENTATION REVIEW
 
 --------------------------------------------------------------------------------
-1. TASK COMMIT SUMMARY (TASKS 1 - 14)
+1. TASK COMMIT SUMMARY (TASKS 1 - 15)
 --------------------------------------------------------------------------------
 Task 1:  b7a1788 feat(gate5g): add DB-2 transaction fields to QuarantineEntry
 Task 2:  5573e48 feat(gate5g): implement Pattern A and B worker lease fences with null safety
@@ -30,10 +30,16 @@ Task 11: e3d1c2a feat(gate5g): enforce cleanup safety gate and zero payload unli
 Task 12: 8057724 test(gate5g): deliver complete R1-R16 race suite and e2e validation
 Task 13: f8f87c7 fix(gate5g): resolve 13 independent review findings for G7 transactional mutation hotfix1
 Task 14: fd2bae0 fix(gate5g-g7): implement hotfix2 transaction authority, anchor reverification, descriptor relative reconciliation, and write-once capture
+Task 15: 958c5d0 fix(gate5g-g7): implement hotfix3 post-capture qualification, restore takeover generation, classify-first evidence, and exclusive attempt dir
 
 --------------------------------------------------------------------------------
 2. TEST SUITE EXECUTION RESULTS
 --------------------------------------------------------------------------------
+$ .venv/bin/pytest tests/test_gate5g_g7_hotfix3_*.py -v
+tests/test_gate5g_g7_hotfix3_post_capture_qualification.py: 3 passed
+tests/test_gate5g_g7_hotfix3_restore_takeover_generation.py: 3 passed
+tests/test_gate5g_g7_hotfix3_exclusive_attempt_dir.py: 1 passed
+
 $ .venv/bin/pytest tests/test_gate5g_g7_hotfix2_*.py -v
 tests/test_gate5g_g7_hotfix2_anchor_reverification.py: 2 passed
 tests/test_gate5g_g7_hotfix2_descriptor_relative_reconcile.py: 2 passed
@@ -61,7 +67,7 @@ tests/test_gate5g_g7_hotfix1_worker_gate3.py: 1 passed
 tests/test_gate5g_g7_hotfix1_worker_restore.py: 2 passed
 
 Full regression suite execution:
-Exact result: 1239 passed, 3 skipped, 19 warnings in 95.93s
+Exact result: 1246 passed, 3 skipped, 19 warnings in 96.22s
 Failures: 0
 Errors: 0
 EXIT_CODE=0
@@ -78,7 +84,7 @@ $ npm --prefix frontend run test -- --run
 EXIT_CODE=0
 
 $ npm --prefix frontend run build
-✓ built in 4.08s
+✓ built in 4.06s
 dist/index.html                            1.08 kB │ gzip:   0.54 kB
 dist/assets/index-BQCeOY6q.css             0.14 kB │ gzip:   0.13 kB
 dist/assets/vendor-query-DdhEkQQI.js      41.69 kB │ gzip:  12.59 kB
@@ -91,10 +97,10 @@ EXIT_CODE=0
 --------------------------------------------------------------------------------
 4. ARCHIVE INTEGRITY VERIFICATION
 --------------------------------------------------------------------------------
-File: nas-file-center-v0.3.5-gate5g-g7-hotfix6.zip
-SHA256: 5bb24d96047587d574a8bf4c283638e679165ace483e86b8cec1a6a9b1b712e1
-ZIP Comment: fd2bae07a30aab559e812ade4c0bcbab1cacea06
-Entries Count: 607
+File: nas-file-center-v0.3.5-gate5g-g7-hotfix7.zip
+SHA256: 9e1938df884d31c4a4f79faccec2c1d0d8f54a73c9c5d368173234333f470dd5
+ZIP Comment: 958c5d04c6b71c0ffd1ee5f77cb52ee1b046147d
+Entries Count: 611
 testzip(): OK (None)
 Parent Traversal: None (0)
 Absolute Paths: None (0)
@@ -110,6 +116,6 @@ Excluded Directories:
   .DS_Store              = 0
 
 ================================================================================
-G7 TRANSACTIONAL MUTATION IMPLEMENTATION HOTFIX2 COMPLETE
-READY FOR INDEPENDENT IMPLEMENTATION REVIEW
+G7 TRANSACTIONAL MUTATION IMPLEMENTATION HOTFIX3 COMPLETE
+READY FOR FINAL INDEPENDENT IMPLEMENTATION REVIEW
 ================================================================================
