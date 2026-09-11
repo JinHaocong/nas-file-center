@@ -3529,6 +3529,13 @@ class FileCenterService:
                     "reconciled": False,
                     "reason": f"Entry in state '{entry.state}', not 'preparing'",
                 }
+            if entry.tx_phase is not None or entry.authoritative_anchor_path is not None:
+                return {
+                    "id": entry.id,
+                    "state": entry.state,
+                    "reconciled": False,
+                    "reason": "Deferred transactional entry to worker reconciliation",
+                }
 
             policy = session.scalar(select(DataLifecyclePolicy).where(DataLifecyclePolicy.id == 1))
             retention_days = policy.quarantine_retention_days if policy else 0
@@ -3619,6 +3626,13 @@ class FileCenterService:
             entry = session.get(QuarantineEntry, entry_id)
             if not entry:
                 return {"id": entry_id, "reconciled": False, "reason": "Not found"}
+            if entry.tx_phase is not None or entry.authoritative_anchor_path is not None:
+                return {
+                    "id": entry.id,
+                    "state": entry.state,
+                    "reconciled": False,
+                    "reason": "Deferred transactional entry to worker reconciliation",
+                }
             if entry.state == "preparing":
                 return self.reconcile_quarantine_entry(entry_id)
             elif entry.state == "restoring":
