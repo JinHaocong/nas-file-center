@@ -1,12 +1,16 @@
 # Gate5-G Architecture Amendment Review Status
 
-**Stage:** Architecture Amendment v2.0.0 (Revision 2)  
+**Stage:** Architecture Amendment v3.0.0 (Revision 3)  
 **Date:** 2026-09-11  
-**Status:** **G7 ARCHITECTURE AMENDMENT REVISION COMPLETE / READY FOR INDEPENDENT ARCHITECTURE REVIEW**  
+**Status:** **G7 ARCHITECTURE AMENDMENT REVISION 3 COMPLETE / READY FOR INDEPENDENT ARCHITECTURE REVIEW**  
 
 ## State Summary
-- Approach B (Persistent Two-Phase Mutation Transaction with Private Recovery Anchor) fully specified in Revision 2 (v2.0.0).
-- All 9 Independent Architecture Review findings/blockers (Blocker 1 through Blocker 9) completely addressed with formal invariants and crash/race matrices.
-- Approach A (Capability Gate Fail-Closed) retained as mandatory fallback for unsupported environments / inode types.
-- Approach C (Vendor FUSE_RENAME2 Driver) tracked as preferred native path.
+- Revision 2 evaluated by Independent Architecture Review and failed due to P0-A through P0-E (check-then-unlink is fundamentally non-atomic on uncooperative filesystems).
+- Revision 3 establishes the **Authoritative Private Payload Anchor** model:
+  - Private anchor persists for the FULL `QuarantineEntry` lifecycle; steady state is `ACTIVE_COMPAT`.
+  - Public quarantine path is strictly a presentation-only view; normal lifecycle NEVER unlinks the authoritative anchor.
+  - Source retirement executes via **capture-by-rename** into unique per-attempt private slots; foreign replacements are preserved in conflict holding and NEVER deleted.
+  - Stale workers are handled via **passive invariant protection** (resumed syscalls are intrinsically non-destructive).
+  - Symmetrical restore redesigned around authoritative anchor and capture-by-rename view retirement.
+  - Formally recommends minimal durable database fields (Option DB-2).
 - Implementation remains strictly **NOT AUTHORIZED** pending Independent Architecture Review approval.
