@@ -145,6 +145,8 @@ class QuarantineEntry(Base):
         Index("ix_quarantine_entries_state", "state"),
         Index("ix_quarantine_entries_expires_at", "expires_at"),
         Index("ix_quarantine_entries_quarantined_at", "quarantined_at"),
+        Index("ix_quarantine_entries_tx_token", "tx_token"),
+        Index("ix_quarantine_entries_tx_phase", "tx_phase"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -155,6 +157,10 @@ class QuarantineEntry(Base):
     plan_item_id: Mapped[int | None] = mapped_column(ForeignKey("batch_plan_items.id", ondelete="SET NULL"), nullable=True, index=True)
 
     state: Mapped[str] = mapped_column(String(32), default="preparing", nullable=False)
+    tx_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    tx_phase: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    authoritative_anchor_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    active_attempt_generation: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     size: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     content_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)

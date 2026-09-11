@@ -128,12 +128,25 @@ def init_db(
             if "quarantine_retention_days" not in current_dlp_cols:
                 missing_dlp_cols.append(("quarantine_retention_days", "INTEGER DEFAULT 0 NOT NULL"))
 
+        # Check existing columns in quarantine_entries
+        missing_quarantine_cols: list[tuple[str, str]] = []
+        if "quarantine_entries" in existing_tables:
+            current_quarantine_cols = {c["name"] for c in inspector.get_columns("quarantine_entries")}
+            expected_new_cols = [
+                ("tx_token", "VARCHAR(64)"),
+                ("tx_phase", "VARCHAR(32)"),
+                ("authoritative_anchor_path", "TEXT"),
+                ("active_attempt_generation", "INTEGER DEFAULT 0 NOT NULL"),
+            ]
+            missing_quarantine_cols = [(col, ctype) for col, ctype in expected_new_cols if col not in current_quarantine_cols]
+
         needs_backup = bool(
             existing_tables
             and (
                 not required_tables.issubset(existing_tables)
                 or bool(missing_work_job_cols)
                 or bool(missing_dlp_cols)
+                or bool(missing_quarantine_cols)
             )
         )
         if needs_backup and db_path and backups_dir:
@@ -153,14 +166,23 @@ def init_db(
                     conn.execute(text(f"ALTER TABLE data_lifecycle_policy ADD COLUMN {col} {ctype}"))
                 conn.commit()
 
+        # Migrate missing columns into quarantine_entries if needed
+        if missing_quarantine_cols:
+            with engine.connect() as conn:
+                for col, ctype in missing_quarantine_cols:
+                    conn.execute(text(f"ALTER TABLE quarantine_entries ADD COLUMN {col} {ctype}"))
+                conn.commit()
+
         # Create all newly defined tables / columns / indexes
         Base.metadata.create_all(engine)
 
-        # Ensure performance indexes exist on work_jobs
+        # Ensure performance indexes exist on work_jobs and quarantine_entries
         with engine.connect() as conn:
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_work_jobs_retry_of ON work_jobs(retry_of)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_work_jobs_created_at ON work_jobs(created_at)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_work_jobs_heartbeat_at ON work_jobs(heartbeat_at)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_quarantine_entries_tx_token ON quarantine_entries(tx_token)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_quarantine_entries_tx_phase ON quarantine_entries(tx_phase)"))
             conn.commit()
 
         SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, future=True)
