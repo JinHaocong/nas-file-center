@@ -484,12 +484,10 @@ def rename_noreplace(source: Path | str, target: Path | str) -> None:
         if err == errno.ENOENT:
             raise FileNotFoundError(errno.ENOENT, f"No such file or directory: {source}")
         if err in (errno.ENOSYS, errno.EOPNOTSUPP, getattr(errno, "ENOTSUP", errno.EOPNOTSUPP)):
-            _execute_safe_noreplace_fallback(source, target)
-            return
+            raise OSError(errno.EOPNOTSUPP, "Atomic no-replace rename not supported by filesystem", str(source))
         if err == errno.EINVAL:
             if _probe_rename_noreplace_supported(target) is False:
-                _execute_safe_noreplace_fallback(source, target)
-                return
+                raise OSError(errno.EOPNOTSUPP, "Atomic no-replace rename not supported by filesystem", str(source))
         raise OSError(err, os.strerror(err), str(source))
 
 
@@ -540,10 +538,8 @@ def rename_noreplace_at(
         if err == errno.ENOENT:
             raise FileNotFoundError(errno.ENOENT, f"No such file or directory: {source_name}")
         if err in (errno.ENOSYS, errno.EOPNOTSUPP, getattr(errno, "ENOTSUP", errno.EOPNOTSUPP)):
-            _execute_safe_noreplace_at_fallback(source_dir_fd, source_name, target_dir_fd, target_name)
-            return
+            raise OSError(errno.EOPNOTSUPP, "Atomic no-replace renameat2 not supported by filesystem", str(source_name))
         if err == errno.EINVAL:
             if _probe_rename_noreplace_supported(dir_fd=target_dir_fd) is False:
-                _execute_safe_noreplace_at_fallback(source_dir_fd, source_name, target_dir_fd, target_name)
-                return
+                raise OSError(errno.EOPNOTSUPP, "Atomic no-replace renameat2 not supported by filesystem", str(source_name))
         raise OSError(err, os.strerror(err), str(source_name))
