@@ -159,3 +159,121 @@ def validate_quarantine_for_restore(
         entry.state = "inconsistent"
         entry.last_error = str(exc)
         raise
+
+
+def execute_transactional_restore(
+    session_factory: sessionmaker,
+    entry_id: int,
+    worker_id: str,
+    allowed_roots: Sequence[Path | str] | None = None,
+    custom_target: str | None = None,
+) -> None:
+    """
+    Executes transactional restore with public view retirement into write-once slot.
+    Terminal condition:
+    - Original path published from authoritative anchor.
+    - Public quarantine view retired into write-once restore slot.
+    - Authoritative anchor remains intact.
+    - Foreign view: preserved where captured -> conflict.
+    """
+    from sqlalchemy import text
+    from app.models import utcnow
+    from app.tasks.recovery import assert_active_worker_lease, renew_and_assert_worker_lease
+
+    with session_factory() as session:
+        session.execute(text("BEGIN IMMEDIATE"))
+        if worker_id:
+            assert_active_worker_lease(session, worker_id)
+        entry = session.get(QuarantineEntry, entry_id)
+        if not entry:
+            raise ValueError(f"QuarantineEntry {entry_id} not found")
+        if not entry.authoritative_anchor_path:
+            raise StateConflictError(f"Entry {entry_id} lacks authoritative anchor")
+        anchor_path = Path(entry.authoritative_anchor_path)
+        if not anchor_path.exists():
+            entry.state = "conflict"
+            entry.tx_phase = "conflict"
+            entry.last_error = f"Authoritative anchor missing: {anchor_path}"
+            session.commit()
+            raise StateConflictError(f"Authoritative anchor missing: {anchor_path}")
+
+        dest_path = Path(custom_target) if custom_target else Path(entry.original_path)
+        public_quarantine_path = Path(entry.quarantine_path)
+
+        entry.state = "restoring"
+        entry.tx_phase = "restoring"
+        session.commit()
+
+    st_anchor = os.stat(str(anchor_path))
+
+    # Phase 1: Destination link from Authoritative Anchor
+    if dest_path.exists():
+        st_dest = os.lstat(str(dest_path))
+        if st_dest.st_dev != st_anchor.st_dev or st_dest.st_ino != st_anchor.st_ino:
+            with session_factory() as session:
+                session.execute(text("BEGIN IMMEDIATE"))
+                if worker_id:
+                    assert_active_worker_lease(session, worker_id)
+                entry = session.get(QuarantineEntry, entry_id)
+                entry.state = "conflict"
+                entry.tx_phase = "conflict"
+                entry.last_error = f"Destination path occupied by foreign inode: {dest_path}"
+                session.commit()
+            raise FileExistsError(f"Destination path occupied by foreign inode: {dest_path}")
+    else:
+        if not dest_path.parent.exists():
+            if worker_id:
+                renew_and_assert_worker_lease(session_factory, worker_id)
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
+        if worker_id:
+            renew_and_assert_worker_lease(session_factory, worker_id)
+        os.link(str(anchor_path), str(dest_path))
+
+    # Phase 2: Public Quarantine View Retirement into write-once slot
+    attempt_dir = anchor_path.parent
+    captured_view_slot = attempt_dir / "captured_quarantine_view"
+
+    if public_quarantine_path.exists() and not captured_view_slot.exists():
+        if worker_id:
+            renew_and_assert_worker_lease(session_factory, worker_id)
+        os.rename(str(public_quarantine_path), str(captured_view_slot))
+
+    if captured_view_slot.exists():
+        st_view = os.lstat(str(captured_view_slot))
+        if st_view.st_dev == st_anchor.st_dev and st_view.st_ino == st_anchor.st_ino:
+            with session_factory() as session:
+                session.execute(text("BEGIN IMMEDIATE"))
+                if worker_id:
+                    assert_active_worker_lease(session, worker_id)
+                entry = session.get(QuarantineEntry, entry_id)
+                now = utcnow()
+                entry.state = "restored"
+                entry.tx_phase = "restored"
+                entry.restored_at = now
+                entry.updated_at = now
+                session.commit()
+        else:
+            with session_factory() as session:
+                session.execute(text("BEGIN IMMEDIATE"))
+                if worker_id:
+                    assert_active_worker_lease(session, worker_id)
+                entry = session.get(QuarantineEntry, entry_id)
+                now = utcnow()
+                entry.state = "conflict"
+                entry.tx_phase = "conflict"
+                entry.last_error = f"Foreign quarantine view captured in slot: {captured_view_slot}"
+                entry.updated_at = now
+                session.commit()
+            raise RuntimeError(f"Foreign quarantine view captured in slot: {captured_view_slot}")
+    elif not public_quarantine_path.exists():
+        with session_factory() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            if worker_id:
+                assert_active_worker_lease(session, worker_id)
+            entry = session.get(QuarantineEntry, entry_id)
+            now = utcnow()
+            entry.state = "restored"
+            entry.tx_phase = "restored"
+            entry.restored_at = now
+            entry.updated_at = now
+            session.commit()

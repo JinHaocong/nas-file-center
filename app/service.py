@@ -3660,6 +3660,7 @@ class FileCenterService:
         conflict_strategy: str | None = None,
         custom_target: str | None = None,
         user_id: int | None = None,
+        worker_id: str | None = None,
     ) -> dict:
         policy = conflict_policy or conflict_strategy or "skip"
         if policy not in {"skip", "rename", "manual"}:
@@ -3673,6 +3674,24 @@ class FileCenterService:
             entry = session.get(QuarantineEntry, entry_id)
             if not entry:
                 raise KeyError(f"Quarantine entry #{entry_id} not found")
+
+            if entry.tx_phase is not None or entry.authoritative_anchor_path is not None:
+                from app.quarantine.restore import execute_transactional_restore
+                execute_transactional_restore(
+                    self.SessionLocal,
+                    entry_id,
+                    worker_id=worker_id,
+                    allowed_roots=self.settings.allowed_roots,
+                    custom_target=custom_target,
+                )
+                entry = session.get(QuarantineEntry, entry_id)
+                dest_str = custom_target or entry.original_path
+                return {
+                    "id": entry.id,
+                    "state": entry.state,
+                    "status": "succeeded" if entry.state == "restored" else entry.state,
+                    "restored_to_path": dest_str,
+                }
 
             target, dest = validate_restore_destination_intent(
                 entry,
