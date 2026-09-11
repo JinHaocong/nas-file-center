@@ -13,13 +13,15 @@ from app.quarantine.tx_allocator import allocate_next_generation
 
 
 def reconcile_quarantine_transaction(
-    target: sessionmaker | Session | QuarantineEntry | int,
-    entry_id_or_worker: int | str | None = None,
+    target: Any,
+    entry_id_or_worker: Any = None,
     worker_id: str | None = None,
     session_factory: sessionmaker | None = None,
+    quarantine_root: Path | str | None = None,
+    allowed_roots: Sequence[Path | str] | None = None,
 ) -> None:
     """
-    Unified Crash Reconciliation Engine implementing all 13 DB-Lag variants.
+    Unified Crash Reconciliation Engine (Section 16).
     Reconciles in-progress or interrupted transactional quarantine entries.
     Adheres strictly to the single-writer principle and Pattern A/B fences.
     """
@@ -56,13 +58,15 @@ def reconcile_quarantine_transaction(
     if not actual_factory or actual_entry_id is None:
         raise ValueError("Both session_factory and entry_id must be resolvable")
 
-    _run_reconciliation_flow(actual_factory, actual_entry_id, actual_worker_id)
+    _run_reconciliation_flow(actual_factory, actual_entry_id, actual_worker_id, quarantine_root=quarantine_root, allowed_roots=allowed_roots)
 
 
 def _run_reconciliation_flow(
     session_factory: sessionmaker,
     entry_id: int,
     worker_id: str | None,
+    quarantine_root: Path | str | None = None,
+    allowed_roots: Sequence[Path | str] | None = None,
 ) -> None:
     # 1. Load entry state under Pattern B fence
     with session_factory() as session:
@@ -75,15 +79,6 @@ def _run_reconciliation_flow(
 
         state = entry.state
         tx_phase = entry.tx_phase
-        orig_path = Path(entry.original_path)
-        pub_path = Path(entry.quarantine_path)
-        gen = entry.active_attempt_generation
-        anchor_path_str = entry.authoritative_anchor_path
-        dev = entry.device
-        ino = entry.inode
-        size = entry.size
-        mtime_ns = entry.mtime_ns
-        chash = entry.content_hash
 
     # If already in terminal or stable state, nothing to reconcile
     if state in ("active", "restored", "conflict", "purged"):
@@ -91,11 +86,11 @@ def _run_reconciliation_flow(
 
     # Handle restoring state (Variants 10, 11, 12, 13)
     if state == "restoring":
-        _reconcile_restoring(session_factory, entry_id, worker_id)
+        _reconcile_restoring(session_factory, entry_id, worker_id, quarantine_root=quarantine_root, allowed_roots=allowed_roots)
         return
 
     if state == "preparing":
-        _reconcile_preparing(session_factory, entry_id, worker_id)
+        _reconcile_preparing(session_factory, entry_id, worker_id, quarantine_root=quarantine_root, allowed_roots=allowed_roots)
         return
 
 
@@ -103,6 +98,8 @@ def _reconcile_preparing(
     session_factory: sessionmaker,
     entry_id: int,
     worker_id: str | None,
+    quarantine_root: Path | str | None = None,
+    allowed_roots: Sequence[Path | str] | None = None,
 ) -> None:
     # Read snapshot
     with session_factory() as session:
@@ -118,11 +115,29 @@ def _reconcile_preparing(
         mtime_ns = entry.mtime_ns
         chash = entry.content_hash
 
-    q_root = pub_path.parent
+    q_root: Path | None = Path(quarantine_root) if quarantine_root is not None else None
+    if q_root is None:
+        if anchor_path_str:
+            anchor_p = Path(anchor_path_str)
+            if len(anchor_p.parents) >= 4 and anchor_p.parents[2].name == ".tx":
+                q_root = anchor_p.parents[3]
+        if q_root is None:
+            curr = pub_path.parent
+            while curr != curr.parent:
+                if (curr / ".tx" / f"entry-{entry_id}").exists():
+                    q_root = curr
+                    break
+                curr = curr.parent
+        if q_root is None:
+            try:
+                from app.config import get_settings
+                q_root = Path(get_settings().quarantine_root)
+            except Exception:
+                q_root = pub_path.parent
     tx_base = q_root / ".tx" / f"entry-{entry_id}"
 
     # Phase 1: Preparing & Candidate Anchor (Variants 1, 2, 3)
-    if tx_phase == "preparing":
+    if tx_phase in ("preparing", "candidate_anchored"):
         attempt_dir = tx_base / f"attempt-{gen}"
         candidate_anchor = attempt_dir / "anchor"
 
@@ -142,11 +157,18 @@ def _reconcile_preparing(
                 return
 
             # Allocate generation and retry attempt dir under Pattern A fence
-            new_gen = allocate_next_generation(session_factory, entry_id, worker_id)
-            new_attempt = tx_base / f"attempt-{new_gen}"
+            new_gen, new_attempt = allocate_next_generation(session_factory, entry_id, worker_id, quarantine_root=q_root)
             if worker_id:
                 renew_and_assert_worker_lease(session_factory, worker_id)
-            new_attempt.mkdir(parents=True, exist_ok=True)
+            new_attempt.parent.mkdir(parents=True, exist_ok=True)
+            while True:
+                try:
+                    os.mkdir(str(new_attempt), mode=0o700)
+                    break
+                except FileExistsError:
+                    new_gen, new_attempt = allocate_next_generation(session_factory, entry_id, worker_id, quarantine_root=q_root)
+                    if worker_id:
+                        renew_and_assert_worker_lease(session_factory, worker_id)
             # Retain in preparing phase for execution engine
             return
 
@@ -308,6 +330,8 @@ def _reconcile_restoring(
     session_factory: sessionmaker,
     entry_id: int,
     worker_id: str | None,
+    quarantine_root: Path | str | None = None,
+    allowed_roots: Sequence[Path | str] | None = None,
 ) -> None:
     with session_factory() as session:
         entry = session.get(QuarantineEntry, entry_id)
@@ -406,16 +430,18 @@ def _reconcile_restoring(
                 e.updated_at = now
                 session.commit()
             return
-    elif not pub_path.exists():
+    else:
+        # Neither captured_view nor pub_path exists: cannot prove retirement occurred! Fail-closed to conflict.
         with session_factory() as session:
             session.execute(text("BEGIN IMMEDIATE"))
             if worker_id:
                 assert_active_worker_lease(session, worker_id)
             e = session.get(QuarantineEntry, entry_id)
             now = utcnow()
-            e.state = "restored"
-            e.tx_phase = "restored"
-            e.restored_at = e.restored_at or now
+            e.state = "conflict"
+            e.tx_phase = "conflict"
+            e.last_error = "Public quarantine view absent and captured view slot missing: cannot prove retirement"
             e.updated_at = now
             session.commit()
         return
+

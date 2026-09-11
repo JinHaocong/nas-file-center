@@ -488,7 +488,10 @@ def test_generate_same_source_symlink_and_casefold_raises_symlink_blocked(servic
     other_file = allowed / "dummy.dat"
     other_file.write_text("dummy")
     symlink_target = allowed / "src.txt"
-    symlink_target.symlink_to(other_file)
+    try:
+        symlink_target.symlink_to(other_file)
+    except FileExistsError:
+        pytest.skip("Filesystem is case-insensitive, cannot have both SRC.TXT and src.txt in the same directory")
 
     with Session() as session:
         iroot = IndexRoot(root=str(allowed))

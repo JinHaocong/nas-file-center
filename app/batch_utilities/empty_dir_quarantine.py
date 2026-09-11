@@ -126,7 +126,12 @@ def safe_open_parent_fd(
         curr_fd = os.open(str(base_root), flags)
         stack.callback(os.close, curr_fd)
         for comp in parent_parts:
-            next_fd = os.open(comp, flags, dir_fd=curr_fd)
+            try:
+                next_fd = os.open(comp, flags, dir_fd=curr_fd)
+            except OSError as err:
+                if err.errno in (errno.ELOOP, errno.ENOTDIR):
+                    raise ValueError(f"Path traversal encountered symlink or non-directory ancestor component: {comp}") from err
+                raise
             stack.callback(os.close, next_fd)
             curr_fd = next_fd
         yield curr_fd, leaf_name

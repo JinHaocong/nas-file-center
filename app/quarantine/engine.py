@@ -18,29 +18,50 @@ def execute_transactional_quarantine(
     entry_id: int,
     worker_id: str,
     allowed_roots: Sequence[Path | str] | None = None,
+    quarantine_root: Path | str | None = None,
 ) -> None:
     """
     Executes transactional quarantine mutation for COMPAT_TRANSACTIONAL mode.
 
     Protocol (5-step fenced flow):
     1. Allocation: Monotonic attempt generation allocation committed in DB before mkdir.
-       Pattern A fence before os.mkdir.
+       Pattern A fence before os.mkdir (mode 0700 exclusive).
     2. Candidate Anchor & Qualification:
-       Pattern A fence before os.link(source, candidate_anchor).
+       Safe parent dir_fd traversal: os.link(src_leaf, dst_leaf, src_dir_fd=..., dst_dir_fd=...).
        Open candidate descriptor, run qualify_candidate_anchor_fd against Gate3 baseline.
        If mismatch: transition to conflict (Pattern B), preserve candidate anchor in place (ZERO unlink), abort.
        If match: promote to authoritative anchor in DB (Pattern B).
     3. Public Publication:
-       Pattern A fence before os.link(authoritative_anchor, public_quarantine_path).
+       Safe parent dir_fd traversal: os.link(anchor_leaf, pub_leaf, src_dir_fd=..., dst_dir_fd=...).
        Advance to public_published in DB (Pattern B).
     4. Source Capture:
-       Write-once capture slot: Pattern A fence before os.rename(source, captured_source).
+       Write-once capture slot: os.rename(src_leaf, dst_leaf, src_dir_fd=..., dst_dir_fd=...).
        Advance to source_captured in DB (Pattern B).
     5. Post-Capture Verification:
        Verify captured source matches expected dev and ino.
        If match: promote entry to state='active', tx_phase='active' (Pattern B).
        If foreign: transition entry to state='conflict', tx_phase='conflict' (Pattern B).
     """
+    from app.batch_utilities.empty_dir_quarantine import safe_open_parent_fd
+
+    if allowed_roots is None:
+        from app.config import get_settings
+        roots = list(get_settings().allowed_roots)
+    else:
+        roots = list(allowed_roots)
+
+    q_root = Path(quarantine_root) if quarantine_root is not None else None
+    if q_root is None:
+        try:
+            from app.config import get_settings
+            q_root = Path(get_settings().quarantine_root)
+        except Exception:
+            q_root = None
+
+    valid_roots = list(roots)
+    if q_root and q_root not in valid_roots:
+        valid_roots.append(q_root)
+
     # Initialize / verify entry under Pattern B
     with session_factory() as session:
         session.execute(text("BEGIN IMMEDIATE"))
@@ -60,15 +81,24 @@ def execute_transactional_quarantine(
         entry.tx_phase = "preparing"
         session.commit()
 
-    # Step 1: Allocate generation & attempt directory
-    gen, attempt_dir = allocate_next_generation(session_factory, entry_id, worker_id)
+    # Step 1: Allocate generation & attempt directory (exclusive 0700, no exist_ok)
+    gen, attempt_dir = allocate_next_generation(session_factory, entry_id, worker_id, quarantine_root=q_root)
     renew_and_assert_worker_lease(session_factory, worker_id)
-    attempt_dir.mkdir(parents=True, exist_ok=False)
+    attempt_dir.parent.mkdir(parents=True, exist_ok=True)
+    while True:
+        try:
+            os.mkdir(str(attempt_dir), mode=0o700)
+            break
+        except FileExistsError:
+            gen, attempt_dir = allocate_next_generation(session_factory, entry_id, worker_id, quarantine_root=q_root)
+            renew_and_assert_worker_lease(session_factory, worker_id)
 
-    # Step 2: Candidate Anchor Creation & Qualification
+    # Step 2: Candidate Anchor Creation & Qualification via descriptor-relative traversal
     candidate_anchor_path = attempt_dir / "anchor"
-    renew_and_assert_worker_lease(session_factory, worker_id)
-    os.link(str(source_path), str(candidate_anchor_path))
+    with safe_open_parent_fd(source_path, valid_roots) as (src_dir_fd, src_leaf):
+        with safe_open_parent_fd(candidate_anchor_path, valid_roots) as (dst_dir_fd, dst_leaf):
+            renew_and_assert_worker_lease(session_factory, worker_id)
+            os.link(src_leaf, dst_leaf, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd)
 
     with session_factory() as session:
         session.execute(text("BEGIN IMMEDIATE"))
@@ -110,14 +140,16 @@ def execute_transactional_quarantine(
         entry.authoritative_anchor_path = str(candidate_anchor_path)
         session.commit()
 
-    # Step 3: Public Quarantine Publication
+    # Step 3: Public Quarantine Publication via descriptor-relative traversal
     if not quarantine_path.parent.exists():
         renew_and_assert_worker_lease(session_factory, worker_id)
         quarantine_path.parent.mkdir(parents=True, exist_ok=True)
 
-    renew_and_assert_worker_lease(session_factory, worker_id)
     try:
-        os.link(str(candidate_anchor_path), str(quarantine_path))
+        with safe_open_parent_fd(candidate_anchor_path, valid_roots) as (src_dir_fd, src_leaf):
+            with safe_open_parent_fd(quarantine_path, valid_roots) as (dst_dir_fd, dst_leaf):
+                renew_and_assert_worker_lease(session_factory, worker_id)
+                os.link(src_leaf, dst_leaf, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd)
     except Exception as exc:
         with session_factory() as session:
             session.execute(text("BEGIN IMMEDIATE"))
@@ -137,11 +169,13 @@ def execute_transactional_quarantine(
         entry.tx_phase = "public_published"
         session.commit()
 
-    # Step 4: Source Capture via Write-Once Slot
+    # Step 4: Source Capture via Write-Once Slot using descriptor-relative traversal
     captured_source_path = attempt_dir / "captured_source"
     if not captured_source_path.exists():
-        renew_and_assert_worker_lease(session_factory, worker_id)
-        os.rename(str(source_path), str(captured_source_path))
+        with safe_open_parent_fd(source_path, valid_roots) as (src_dir_fd, src_leaf):
+            with safe_open_parent_fd(captured_source_path, valid_roots) as (dst_dir_fd, dst_leaf):
+                renew_and_assert_worker_lease(session_factory, worker_id)
+                os.rename(src_leaf, dst_leaf, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd)
 
     with session_factory() as session:
         session.execute(text("BEGIN IMMEDIATE"))
@@ -170,3 +204,4 @@ def execute_transactional_quarantine(
             entry.updated_at = now
             session.commit()
             raise RuntimeError(f"Foreign inode captured in slot: expected {expected_dev}:{expected_ino}, got {st_captured.st_dev}:{st_captured.st_ino}")
+

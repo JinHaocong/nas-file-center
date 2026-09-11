@@ -147,31 +147,67 @@ def execute_item(
             if is_reserved_quarantine_path(target, quarantine_root):
                 return _skip("restore target cannot be within quarantine root")
 
-            # Final pre-mutation integrity checks
-            if item.expected_hash:
-                from app.quarantine.paths import safe_quarantine_hash
-                current_h = safe_quarantine_hash(source)
-                if current_h != item.expected_hash:
-                    return ItemResult("failed", f"Hash verification failed: Quarantined file hash mismatch (expected {item.expected_hash}, got {current_h})")
-            if item.expected_size is not None and item.expected_size > 0:
-                try:
-                    st = source.stat(follow_symlinks=False)
-                    if st.st_size != item.expected_size:
-                        return ItemResult("failed", f"Quarantined file size mismatch (expected {item.expected_size}, got {st.st_size})")
-                except OSError as exc:
-                    return ItemResult("failed", f"Stat failed on quarantined source: {exc}")
+            from app.quarantine.capability import MutationCapability, resolve_mutation_capability
+            valid_roots = list(allowed_roots)
+            if quarantine_root:
+                valid_roots.append(Path(quarantine_root).resolve())
+            capability = resolve_mutation_capability(source, target.parent, quarantine_root, valid_roots)
 
-            target.parent.mkdir(parents=True, exist_ok=True)
-            try:
-                from app.fs_ops import rename_noreplace
-                rename_noreplace(source, target)
-            except FileExistsError:
-                return _skip("target already exists")
-            except OSError as exc:
-                if exc.errno == errno.EXDEV:
-                    return ItemResult("failed", "cross-filesystem restore is not supported")
-                return ItemResult("failed", str(exc))
-            return ItemResult("completed", "restored", target)
+            if capability == MutationCapability.COMPAT_TRANSACTIONAL:
+                if not session_factory or not quarantine_entry_id:
+                    return ItemResult("failed", "EOPNOTSUPP: transactional restore requires session_factory and quarantine_entry_id")
+
+                with session_factory() as session:
+                    from app.models import QuarantineEntry
+                    q_entry = session.get(QuarantineEntry, quarantine_entry_id)
+                    if not q_entry:
+                        return ItemResult("failed", f"Quarantine entry #{quarantine_entry_id} not found")
+                    has_anchor = bool(q_entry.authoritative_anchor_path and Path(q_entry.authoritative_anchor_path).exists())
+                    if not has_anchor:
+                        return ItemResult("failed", "EOPNOTSUPP: legacy quarantine entry without authoritative anchor cannot be restored under COMPAT_TRANSACTIONAL")
+
+                try:
+                    from app.quarantine.restore import execute_transactional_restore
+                    execute_transactional_restore(
+                        session_factory,
+                        quarantine_entry_id,
+                        worker_id=worker_id,
+                        allowed_roots=valid_roots,
+                        quarantine_root=quarantine_root,
+                    )
+                except Exception as exc:
+                    return ItemResult("failed", str(exc))
+                return ItemResult("completed", "restored", target)
+            elif capability == MutationCapability.UNSUPPORTED:
+                return ItemResult("failed", "unsupported mutation capability")
+            else:
+                # Final pre-mutation integrity checks for native atomic rename
+                if item.expected_hash:
+                    from app.quarantine.paths import safe_quarantine_hash
+                    current_h = safe_quarantine_hash(source)
+                    if current_h != item.expected_hash:
+                        return ItemResult("failed", f"Hash verification failed: Quarantined file hash mismatch (expected {item.expected_hash}, got {current_h})")
+                if item.expected_size is not None and item.expected_size > 0:
+                    try:
+                        st = source.stat(follow_symlinks=False)
+                        if st.st_size != item.expected_size:
+                            return ItemResult("failed", f"Quarantined file size mismatch (expected {item.expected_size}, got {st.st_size})")
+                    except OSError as exc:
+                        return ItemResult("failed", f"Stat failed on quarantined source: {exc}")
+
+                target.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    from app.fs_ops import rename_noreplace
+                    rename_noreplace(source, target)
+                except FileExistsError:
+                    return _skip("target already exists")
+                except OSError as exc:
+                    if exc.errno == errno.EXDEV:
+                        return ItemResult("failed", "cross-filesystem restore is not supported")
+                    if exc.errno == errno.EOPNOTSUPP:
+                        return ItemResult("failed", "unsupported filesystem operation: RENAME_NOREPLACE")
+                    return ItemResult("failed", str(exc))
+                return ItemResult("completed", "restored", target)
 
         if item.operation == "touch":
             target_mtime_ns = getattr(item, "target_mtime_ns", None) or getattr(item, "expected_mtime_ns", None)
@@ -211,7 +247,13 @@ def execute_item(
             if capability == MutationCapability.COMPAT_TRANSACTIONAL and session_factory and worker_id and quarantine_entry_id:
                 try:
                     from app.quarantine.engine import execute_transactional_quarantine
-                    execute_transactional_quarantine(session_factory, quarantine_entry_id, worker_id, valid_roots)
+                    execute_transactional_quarantine(
+                        session_factory,
+                        quarantine_entry_id,
+                        worker_id,
+                        allowed_roots=valid_roots,
+                        quarantine_root=quarantine_root,
+                    )
                 except Exception as exc:
                     return ItemResult("failed", str(exc))
                 return ItemResult("completed", "quarantined", target)

@@ -1,3 +1,12 @@
+"""
+Native Atomic Filesystem Primitives.
+
+This module provides atomic filesystem primitives only (`renameat2(..., RENAME_NOREPLACE)`
+on Linux and `renameatx_np(..., RENAME_EXCL)` on macOS Darwin).
+The transactional quarantine engine (app.quarantine.engine and app.quarantine.restore) is
+the sole source of atomic/isolated mutations on COMPAT filesystems where native no-replace
+rename primitives are unsupported.
+"""
 from __future__ import annotations
 
 import ctypes
@@ -250,223 +259,20 @@ def _probe_rename_noreplace_supported(
     return None
 
 
-def _execute_safe_noreplace_fallback(source: Path | str, target: Path | str) -> None:
-    src_path = Path(source)
-    dst_path = Path(target)
-
-    try:
-        st_src = os.lstat(src_path)
-    except FileNotFoundError:
-        raise FileNotFoundError(errno.ENOENT, f"No such file or directory: {source}")
-    except OSError:
-        raise
-
-    if stat.S_ISDIR(st_src.st_mode):
-        raise OSError(
-            errno.EOPNOTSUPP,
-            f"Directory rename without replace not supported on this filesystem: {source}",
-        )
-
-    if not (stat.S_ISREG(st_src.st_mode) or stat.S_ISLNK(st_src.st_mode)):
-        raise OSError(
-            errno.EOPNOTSUPP,
-            f"Special inode rename without replace not supported on this filesystem: {source}",
-        )
-
-    if stat.S_ISREG(st_src.st_mode):
-        # 1. Exclusive destination publication via kernel link
-        os.link(src_path, dst_path, follow_symlinks=False)
-
-        # 2. Verify destination ownership before source retirement (Blocker B)
-        try:
-            st_dst = os.lstat(dst_path)
-            if st_dst.st_ino != st_src.st_ino or st_dst.st_dev != st_src.st_dev:
-                raise OSError(
-                    errno.ESTALE,
-                    f"Destination path replaced concurrently before source retirement: {target}",
-                )
-        except OSError as stat_err:
-            if stat_err.errno == errno.ESTALE:
-                raise
-            raise OSError(
-                errno.ESTALE,
-                f"Destination path replaced or missing concurrently before source retirement: {target}",
-            ) from stat_err
-
-        # 3. Retire source. Do NOT delete destination on failure (Blocker A)
-        os.unlink(src_path)
-        return
-
-    if stat.S_ISLNK(st_src.st_mode):
-        created_via_link = False
-        target_val = None
-        try:
-            os.link(src_path, dst_path, follow_symlinks=False)
-            created_via_link = True
-        except (PermissionError, OSError) as link_err:
-            if link_err.errno in (
-                errno.EPERM,
-                errno.EACCES,
-                errno.EOPNOTSUPP,
-                getattr(errno, "ENOTSUP", errno.EOPNOTSUPP),
-            ):
-                target_val = os.readlink(src_path)
-                os.symlink(target_val, dst_path)
-            else:
-                raise link_err
-
-        # Verify destination ownership before source retirement
-        try:
-            if created_via_link:
-                st_dst = os.lstat(dst_path)
-                if st_dst.st_ino != st_src.st_ino or st_dst.st_dev != st_src.st_dev:
-                    raise OSError(
-                        errno.ESTALE,
-                        f"Destination symlink replaced concurrently before source retirement: {target}",
-                    )
-            else:
-                if not os.path.islink(dst_path) or os.readlink(dst_path) != target_val:
-                    raise OSError(
-                        errno.ESTALE,
-                        f"Destination symlink modified or replaced concurrently: {target}",
-                    )
-        except OSError as stat_err:
-            if stat_err.errno == errno.ESTALE:
-                raise
-            raise OSError(
-                errno.ESTALE,
-                f"Destination symlink replaced or missing concurrently before source retirement: {target}",
-            ) from stat_err
-
-        # Retire source symlink. Do NOT delete destination on failure (Blocker A)
-        os.unlink(src_path)
-        return
-
-
-def _execute_safe_noreplace_at_fallback(
-    source_dir_fd: int,
-    source_name: str,
-    target_dir_fd: int,
-    target_name: str,
-) -> None:
-    sfd = _normalize_dir_fd(source_dir_fd)
-    dfd = _normalize_dir_fd(target_dir_fd)
-
-    try:
-        st_src = os.lstat(source_name, dir_fd=sfd)
-    except FileNotFoundError:
-        raise FileNotFoundError(errno.ENOENT, f"No such file or directory: {source_name}")
-    except OSError:
-        raise
-
-    if stat.S_ISDIR(st_src.st_mode):
-        raise OSError(
-            errno.EOPNOTSUPP,
-            f"Directory rename without replace not supported on this filesystem: {source_name}",
-        )
-
-    if not (stat.S_ISREG(st_src.st_mode) or stat.S_ISLNK(st_src.st_mode)):
-        raise OSError(
-            errno.EOPNOTSUPP,
-            f"Special inode rename without replace not supported on this filesystem: {source_name}",
-        )
-
-    if stat.S_ISREG(st_src.st_mode):
-        os.link(source_name, target_name, src_dir_fd=sfd, dst_dir_fd=dfd, follow_symlinks=False)
-
-        try:
-            st_dst = os.lstat(target_name, dir_fd=dfd)
-            if st_dst.st_ino != st_src.st_ino or st_dst.st_dev != st_src.st_dev:
-                raise OSError(
-                    errno.ESTALE,
-                    f"Destination path replaced concurrently before source retirement: {target_name}",
-                )
-        except OSError as stat_err:
-            if stat_err.errno == errno.ESTALE:
-                raise
-            raise OSError(
-                errno.ESTALE,
-                f"Destination path replaced or missing concurrently before source retirement: {target_name}",
-            ) from stat_err
-
-        os.unlink(source_name, dir_fd=sfd)
-        return
-
-    if stat.S_ISLNK(st_src.st_mode):
-        created_via_link = False
-        target_val = None
-        try:
-            os.link(source_name, target_name, src_dir_fd=sfd, dst_dir_fd=dfd, follow_symlinks=False)
-            created_via_link = True
-        except (PermissionError, OSError) as link_err:
-            if link_err.errno in (
-                errno.EPERM,
-                errno.EACCES,
-                errno.EOPNOTSUPP,
-                getattr(errno, "ENOTSUP", errno.EOPNOTSUPP),
-            ):
-                target_val = os.readlink(source_name, dir_fd=sfd)
-                os.symlink(target_val, target_name, dir_fd=dfd)
-            else:
-                raise link_err
-
-        try:
-            if created_via_link:
-                st_dst = os.lstat(target_name, dir_fd=dfd)
-                if st_dst.st_ino != st_src.st_ino or st_dst.st_dev != st_src.st_dev:
-                    raise OSError(
-                        errno.ESTALE,
-                        f"Destination symlink replaced concurrently before source retirement: {target_name}",
-                    )
-            else:
-                try:
-                    rlink = os.readlink(target_name, dir_fd=dfd)
-                    if rlink != target_val:
-                        raise OSError(
-                            errno.ESTALE,
-                            f"Destination symlink modified concurrently: {target_name}",
-                        )
-                except OSError as rlink_err:
-                    raise OSError(
-                        errno.ESTALE,
-                        f"Destination symlink replaced or missing concurrently: {target_name}",
-                    ) from rlink_err
-        except OSError as stat_err:
-            if stat_err.errno == errno.ESTALE:
-                raise
-            raise OSError(
-                errno.ESTALE,
-                f"Destination symlink replaced or missing concurrently before source retirement: {target_name}",
-            ) from stat_err
-
-        os.unlink(source_name, dir_fd=sfd)
-        return
-
-
 def rename_noreplace(source: Path | str, target: Path | str) -> None:
     """
-    Renames `source` to `target` with strict NO-REPLACE semantics.
+    Renames `source` to `target` with strict NO-REPLACE semantics using native kernel primitives.
 
     Execution paths:
     1. Native Path (Kernel Atomic):
        Uses kernel-level atomic `renameat2(..., RENAME_NOREPLACE)` on Linux or
        `renameatx_np(..., RENAME_EXCL)` on macOS Darwin. Guarantees single-syscall
        atomic rename with strict no-replace exclusion.
-
-    2. Compatibility Path (Unix link+unlink):
-       When the underlying filesystem rejects `RENAME_NOREPLACE` (e.g. `zfuse.zfsv3` on Linux
-       FUSE returning EINVAL/ENOSYS/EOPNOTSUPP), executes strict no-replace semantics via:
-       a. Capability probe (`_probe_rename_noreplace_supported`) using a disposable temporary file.
-       b. Exclusive destination creation via `os.link()` (or `os.symlink()` for symlinks).
-          If target already exists, the kernel atomically raises FileExistsError; target is never overwritten.
-       c. Pre-retirement destination ownership verification: confirms target still references the
-          exact same inode/device (or symlink target) before removing source. If target was replaced
-          concurrently, raises OSError(errno.ESTALE) and preserves source data intact.
-       d. Source retirement via `os.unlink()`. If unlinking source fails, source data is preserved and
-          target is NOT deleted, preventing accidental deletion of unrelated/replaced destination data.
-       e. Object types: Regular files and symlinks are supported. Directories and special inodes
-          (FIFO, socket, character/block devices) strictly fail closed with OSError(errno.EOPNOTSUPP).
-       f. Cross-device (EXDEV): Raises OSError(errno.EXDEV) and never falls back to cross-device copying.
+    2. Unsupported / Non-native:
+       If the underlying filesystem rejects `RENAME_NOREPLACE` (e.g. `zfuse.zfsv3` returning
+       EINVAL/ENOSYS/EOPNOTSUPP), raises OSError(errno.EOPNOTSUPP).
+       Compatibility mutations on such filesystems are handled solely by the transactional
+       quarantine engine (app.quarantine.engine and app.quarantine.restore).
     """
     if _RENAME_IMPL is None:
         raise NotImplementedError("Atomic no-replace rename is not available on this platform; failing closed.")
@@ -499,28 +305,18 @@ def rename_noreplace_at(
 ) -> None:
     """
     Renames `source_name` relative to `source_dir_fd` to `target_name` relative to
-    `target_dir_fd` with strict NO-REPLACE semantics.
+    `target_dir_fd` with strict NO-REPLACE semantics using native kernel primitives.
 
     Execution paths:
     1. Native Path (Kernel Atomic):
        Uses kernel-level atomic `renameat2(..., RENAME_NOREPLACE)` on Linux or
        `renameatx_np(..., RENAME_EXCL)` on macOS Darwin. Guarantees single-syscall
        atomic rename with strict no-replace exclusion.
-
-    2. Compatibility Path (Unix link+unlink):
-       When the underlying filesystem rejects `RENAME_NOREPLACE` (e.g. `zfuse.zfsv3` on Linux
-       FUSE returning EINVAL/ENOSYS/EOPNOTSUPP), executes strict no-replace semantics via:
-       a. Capability probe (`_probe_rename_noreplace_supported`) using a disposable temporary file.
-       b. Exclusive destination creation via `os.link()` (or `os.symlink()` for symlinks).
-          If target already exists, the kernel atomically raises FileExistsError; target is never overwritten.
-       c. Pre-retirement destination ownership verification: confirms target still references the
-          exact same inode/device (or symlink target) before removing source. If target was replaced
-          concurrently, raises OSError(errno.ESTALE) and preserves source data intact.
-       d. Source retirement via `os.unlink()`. If unlinking source fails, source data is preserved and
-          target is NOT deleted, preventing accidental deletion of unrelated/replaced destination data.
-       e. Object types: Regular files and symlinks are supported. Directories and special inodes
-          (FIFO, socket, character/block devices) strictly fail closed with OSError(errno.EOPNOTSUPP).
-       f. Cross-device (EXDEV): Raises OSError(errno.EXDEV) and never falls back to cross-device copying.
+    2. Unsupported / Non-native:
+       If the underlying filesystem rejects `RENAME_NOREPLACE` (e.g. `zfuse.zfsv3` returning
+       EINVAL/ENOSYS/EOPNOTSUPP), raises OSError(errno.EOPNOTSUPP).
+       Compatibility mutations on such filesystems are handled solely by the transactional
+       quarantine engine (app.quarantine.engine and app.quarantine.restore).
     """
     if _RENAME_AT_IMPL is None:
         raise NotImplementedError("Atomic no-replace renameat2 is not available on this platform; failing closed.")

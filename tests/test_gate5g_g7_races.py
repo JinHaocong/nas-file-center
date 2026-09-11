@@ -54,12 +54,12 @@ def test_race_r1_source_replaced_before_capture(tmp_path, session_factory):
 
     # We run quarantine but intercept right before step 4/5 rename
     real_rename = os.rename
-    def swap_before_rename(src, dst):
+    def swap_before_rename(src, dst, *args, **kwargs):
         if "captured_source" in str(dst):
             # Replace source with foreign file
-            os.unlink(src)
-            Path(src).write_bytes(b"FOREIGN_R1_PAYLOAD")
-        return real_rename(src, dst)
+            os.unlink(source)
+            source.write_bytes(b"FOREIGN_R1_PAYLOAD")
+        return real_rename(src, dst, *args, **kwargs)
 
     import unittest.mock as mock
     with mock.patch("os.rename", side_effect=swap_before_rename):
@@ -112,11 +112,11 @@ def test_race_r2_source_replaced_after_earlier_verification_before_capture(tmp_p
         session.commit()
 
     real_rename = os.rename
-    def swap_immediately_before_rename(src, dst):
+    def swap_immediately_before_rename(src, dst, *args, **kwargs):
         if "captured_source" in str(dst):
-            os.unlink(src)
-            Path(src).write_bytes(b"FOREIGN_R2_SWAP")
-        return real_rename(src, dst)
+            os.unlink(source)
+            source.write_bytes(b"FOREIGN_R2_SWAP")
+        return real_rename(src, dst, *args, **kwargs)
 
     import unittest.mock as mock
     with mock.patch("os.rename", side_effect=swap_immediately_before_rename):
@@ -163,11 +163,11 @@ def test_race_r3_source_recreated_immediately_after_capture(tmp_path, session_fa
         session.commit()
 
     real_rename = os.rename
-    def recreate_after_rename(src, dst):
-        res = real_rename(src, dst)
+    def recreate_after_rename(src, dst, *args, **kwargs):
+        res = real_rename(src, dst, *args, **kwargs)
         if "captured_source" in str(dst):
             # Third party creates new file at original source path
-            Path(src).write_bytes(b"NEW_THIRD_PARTY_FILE")
+            source.write_bytes(b"NEW_THIRD_PARTY_FILE")
         return res
 
     import unittest.mock as mock
@@ -370,29 +370,64 @@ def test_race_r7_public_destination_replaced_after_publication(tmp_path, session
 
 def test_race_r8_stale_worker_holds_old_tx_dir_fd(tmp_path, session_factory):
     """R8: Stale worker retains open dir_fd to old attempt directory."""
+    q_dir = tmp_path / "quarantine"
+    tx_dir = q_dir / ".tx" / "entry-1" / "attempt-1"
+    tx_dir.mkdir(parents=True)
+
     with session_factory() as session:
         session.execute(text("BEGIN IMMEDIATE"))
-        # Worker 2 owns lease
-        lock = TaskLock(id=1, locked=True, owner="worker-2", acquired_at=utcnow())
+        lock = TaskLock(id=1, locked=True, owner="worker-1", acquired_at=utcnow())
         session.add(lock)
         session.commit()
 
-    # Stale worker 1 holding fd attempts operation; fence rejects
-    with pytest.raises(JobLeaseLost):
-        renew_and_assert_worker_lease(session_factory, "worker-1")
+    # Worker 1 actually opens attempt directory and holds dir_fd open
+    dir_fd = os.open(str(tx_dir), os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        # Worker 2 takes over lease
+        with session_factory() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            lock = session.get(TaskLock, 1)
+            lock.owner = "worker-2"
+            lock.acquired_at = utcnow()
+            session.commit()
+
+        # Stale worker 1 holding open dir_fd attempts operation; lease fence rejects
+        with pytest.raises(JobLeaseLost):
+            renew_and_assert_worker_lease(session_factory, "worker-1")
+    finally:
+        os.close(dir_fd)
 
 
 def test_race_r9_stale_worker_holds_source_parent_fd(tmp_path, session_factory):
     """R9: Stale worker retains open parent dir_fd to source directory."""
+    data_dir = tmp_path / "data"
+    sub_dir = data_dir / "subdir"
+    sub_dir.mkdir(parents=True)
+    src_file = sub_dir / "target.txt"
+    src_file.write_bytes(b"DATA")
+
     with session_factory() as session:
         session.execute(text("BEGIN IMMEDIATE"))
-        lock = TaskLock(id=1, locked=True, owner="worker-2", acquired_at=utcnow())
+        lock = TaskLock(id=1, locked=True, owner="worker-1", acquired_at=utcnow())
         session.add(lock)
         session.commit()
 
-    # Stale worker 1 attempts rename fence
-    with pytest.raises(JobLeaseLost):
-        renew_and_assert_worker_lease(session_factory, "worker-1")
+    # Worker 1 actually opens source parent directory and holds parent_fd open
+    parent_fd = os.open(str(sub_dir), os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        # Worker 2 takes over lease
+        with session_factory() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            lock = session.get(TaskLock, 1)
+            lock.owner = "worker-2"
+            lock.acquired_at = utcnow()
+            session.commit()
+
+        # Stale worker 1 attempts fence while holding parent_fd open
+        with pytest.raises(JobLeaseLost):
+            renew_and_assert_worker_lease(session_factory, "worker-1")
+    finally:
+        os.close(parent_fd)
 
 
 def test_race_r10_current_worker_reconciles_while_old_worker_executes_one_fs_syscall(tmp_path, session_factory):

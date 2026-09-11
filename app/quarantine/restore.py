@@ -164,8 +164,9 @@ def validate_quarantine_for_restore(
 def execute_transactional_restore(
     session_factory: sessionmaker,
     entry_id: int,
-    worker_id: str,
+    worker_id: str | None,
     allowed_roots: Sequence[Path | str] | None = None,
+    quarantine_root: Path | str | None = None,
     custom_target: str | None = None,
 ) -> None:
     """
@@ -176,14 +177,35 @@ def execute_transactional_restore(
     - Authoritative anchor remains intact.
     - Foreign view: preserved where captured -> conflict.
     """
+    if not worker_id or not str(worker_id).strip():
+        raise PermissionError("Transactional restore requires valid worker authority / lease; direct unauthenticated API mutation is forbidden")
+
     from sqlalchemy import text
     from app.models import utcnow
     from app.tasks.recovery import assert_active_worker_lease, renew_and_assert_worker_lease
+    from app.batch_utilities.empty_dir_quarantine import safe_open_parent_fd
+
+    if allowed_roots is None:
+        from app.config import get_settings
+        roots = list(get_settings().allowed_roots)
+    else:
+        roots = list(allowed_roots)
+
+    q_root = Path(quarantine_root) if quarantine_root is not None else None
+    if q_root is None:
+        try:
+            from app.config import get_settings
+            q_root = Path(get_settings().quarantine_root)
+        except Exception:
+            q_root = None
+
+    valid_roots = list(roots)
+    if q_root and q_root not in valid_roots:
+        valid_roots.append(q_root)
 
     with session_factory() as session:
         session.execute(text("BEGIN IMMEDIATE"))
-        if worker_id:
-            assert_active_worker_lease(session, worker_id)
+        assert_active_worker_lease(session, worker_id)
         entry = session.get(QuarantineEntry, entry_id)
         if not entry:
             raise ValueError(f"QuarantineEntry {entry_id} not found")
@@ -197,7 +219,12 @@ def execute_transactional_restore(
             session.commit()
             raise StateConflictError(f"Authoritative anchor missing: {anchor_path}")
 
-        dest_path = Path(custom_target) if custom_target else Path(entry.original_path)
+        target_candidate = custom_target if custom_target else entry.original_path
+        dest_path = validate_mutation_destination(
+            target_candidate,
+            roots,
+            quarantine_root=q_root,
+        )
         public_quarantine_path = Path(entry.quarantine_path)
 
         entry.state = "restoring"
@@ -206,14 +233,13 @@ def execute_transactional_restore(
 
     st_anchor = os.stat(str(anchor_path))
 
-    # Phase 1: Destination link from Authoritative Anchor
+    # Phase 1: Destination link from Authoritative Anchor using descriptor-relative safe traversal
     if dest_path.exists():
         st_dest = os.lstat(str(dest_path))
         if st_dest.st_dev != st_anchor.st_dev or st_dest.st_ino != st_anchor.st_ino:
             with session_factory() as session:
                 session.execute(text("BEGIN IMMEDIATE"))
-                if worker_id:
-                    assert_active_worker_lease(session, worker_id)
+                assert_active_worker_lease(session, worker_id)
                 entry = session.get(QuarantineEntry, entry_id)
                 entry.state = "conflict"
                 entry.tx_phase = "conflict"
@@ -222,29 +248,31 @@ def execute_transactional_restore(
             raise FileExistsError(f"Destination path occupied by foreign inode: {dest_path}")
     else:
         if not dest_path.parent.exists():
-            if worker_id:
-                renew_and_assert_worker_lease(session_factory, worker_id)
-            dest_path.parent.mkdir(parents=True, exist_ok=True)
-        if worker_id:
             renew_and_assert_worker_lease(session_factory, worker_id)
-        os.link(str(anchor_path), str(dest_path))
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Phase 2: Public Quarantine View Retirement into write-once slot
+        with safe_open_parent_fd(anchor_path, valid_roots) as (src_dir_fd, src_leaf):
+            with safe_open_parent_fd(dest_path, valid_roots) as (dst_dir_fd, dst_leaf):
+                renew_and_assert_worker_lease(session_factory, worker_id)
+                os.link(src_leaf, dst_leaf, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd)
+
+    # Phase 2: Public Quarantine View Retirement into write-once slot using descriptor-relative operations
     attempt_dir = anchor_path.parent
     captured_view_slot = attempt_dir / "captured_quarantine_view"
 
     if public_quarantine_path.exists() and not captured_view_slot.exists():
-        if worker_id:
-            renew_and_assert_worker_lease(session_factory, worker_id)
-        os.rename(str(public_quarantine_path), str(captured_view_slot))
+        with safe_open_parent_fd(public_quarantine_path, valid_roots) as (src_dir_fd, src_leaf):
+            with safe_open_parent_fd(captured_view_slot, valid_roots) as (dst_dir_fd, dst_leaf):
+                renew_and_assert_worker_lease(session_factory, worker_id)
+                os.rename(src_leaf, dst_leaf, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd)
 
+    # Strict Terminal Evidence Verification
     if captured_view_slot.exists():
         st_view = os.lstat(str(captured_view_slot))
         if st_view.st_dev == st_anchor.st_dev and st_view.st_ino == st_anchor.st_ino:
             with session_factory() as session:
                 session.execute(text("BEGIN IMMEDIATE"))
-                if worker_id:
-                    assert_active_worker_lease(session, worker_id)
+                assert_active_worker_lease(session, worker_id)
                 entry = session.get(QuarantineEntry, entry_id)
                 now = utcnow()
                 entry.state = "restored"
@@ -255,8 +283,7 @@ def execute_transactional_restore(
         else:
             with session_factory() as session:
                 session.execute(text("BEGIN IMMEDIATE"))
-                if worker_id:
-                    assert_active_worker_lease(session, worker_id)
+                assert_active_worker_lease(session, worker_id)
                 entry = session.get(QuarantineEntry, entry_id)
                 now = utcnow()
                 entry.state = "conflict"
@@ -265,15 +292,17 @@ def execute_transactional_restore(
                 entry.updated_at = now
                 session.commit()
             raise RuntimeError(f"Foreign quarantine view captured in slot: {captured_view_slot}")
-    elif not public_quarantine_path.exists():
+    else:
+        # Neither captured_view nor pub_path exists: cannot prove retirement occurred! Fail-closed to conflict.
         with session_factory() as session:
             session.execute(text("BEGIN IMMEDIATE"))
-            if worker_id:
-                assert_active_worker_lease(session, worker_id)
+            assert_active_worker_lease(session, worker_id)
             entry = session.get(QuarantineEntry, entry_id)
             now = utcnow()
-            entry.state = "restored"
-            entry.tx_phase = "restored"
-            entry.restored_at = now
+            entry.state = "conflict"
+            entry.tx_phase = "conflict"
+            entry.last_error = "Public quarantine view absent and captured view slot missing: cannot prove retirement"
             entry.updated_at = now
             session.commit()
+        raise RuntimeError("Public quarantine view absent and captured view slot missing: cannot prove retirement")
+

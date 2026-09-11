@@ -463,7 +463,10 @@ def test_same_source_symlink_and_casefold_priority_in_api(api_test_env):
     other_file = root1_path / "dummy.dat"
     other_file.write_text("dummy")
     symlink_target = root1_path / "single_src.txt"
-    symlink_target.symlink_to(other_file)
+    try:
+        symlink_target.symlink_to(other_file)
+    except FileExistsError:
+        pytest.skip("Filesystem is case-insensitive, cannot have both SINGLE_SRC.TXT and single_src.txt in the same directory")
 
     with service.SessionLocal() as session:
         ip = IndexedPath(

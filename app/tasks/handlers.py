@@ -635,9 +635,18 @@ def _reconcile_executing_item(
     elif item.operation == "quarantine":
         q_entry = session.scalar(select(QuarantineEntry).where(QuarantineEntry.plan_item_id == item.id))
         if q_entry and (q_entry.tx_phase is not None or q_entry.authoritative_anchor_path is not None):
-            from app.quarantine.reconcile import reconcile_quarantine_transaction
-            reconcile_quarantine_transaction(session, q_entry.id, worker_id=worker_id)
             session.refresh(q_entry)
+            if q_entry.state not in ("active", "conflict", "restored", "purged"):
+                from app.quarantine.reconcile import reconcile_quarantine_transaction
+                session.flush()
+                reconcile_quarantine_transaction(
+                    session,
+                    q_entry.id,
+                    worker_id=worker_id,
+                    quarantine_root=settings.quarantine_root,
+                    allowed_roots=settings.allowed_roots,
+                )
+                session.refresh(q_entry)
             if q_entry.state == "active":
                 item.state = "completed"
                 item.reason = "reconciled transactional quarantine after crash"
@@ -647,6 +656,12 @@ def _reconcile_executing_item(
             elif q_entry.state in ("restored", "purged"):
                 item.state = "completed"
                 item.reason = f"reconciled transactional quarantine after crash ({q_entry.state})"
+            elif q_entry.state == "preparing":
+                item.state = "planned"
+                item.reason = None
+            else:
+                item.state = "failed"
+                item.reason = f"reconciliation unexpected state: {q_entry.state}"
             return
 
         tgt = Path(q_entry.quarantine_path) if q_entry and q_entry.quarantine_path else (Path(item.target_path) if item.target_path else None)
@@ -715,6 +730,32 @@ def _reconcile_executing_item(
         tgt = Path(item.target_path) if item.target_path else None
         qid = meta.get("quarantine_entry_id") or meta.get("undo", {}).get("quarantine_entry_id")
         q_entry = session.get(QuarantineEntry, int(qid)) if qid else None
+        if q_entry and (q_entry.tx_phase is not None or q_entry.authoritative_anchor_path is not None):
+            session.refresh(q_entry)
+            if q_entry.state not in ("restored", "conflict", "purged"):
+                from app.quarantine.reconcile import reconcile_quarantine_transaction
+                session.flush()
+                reconcile_quarantine_transaction(
+                    session,
+                    q_entry.id,
+                    worker_id=worker_id,
+                    quarantine_root=settings.quarantine_root,
+                    allowed_roots=settings.allowed_roots,
+                )
+                session.refresh(q_entry)
+            if q_entry.state == "restored":
+                item.state = "completed"
+                item.reason = "reconciled transactional restore after crash"
+            elif q_entry.state == "conflict":
+                item.state = "failed"
+                item.reason = f"reconciliation conflict after crash: {q_entry.last_error}"
+            elif q_entry.state == "active":
+                item.state = "planned"
+                item.reason = None
+            else:
+                item.state = "failed"
+                item.reason = f"reconciliation unexpected restore state: {q_entry.state}"
+            return
         if tgt and tgt.exists() and not src.exists():
             st = tgt.stat(follow_symlinks=False)
             if not _check_target_identity(tgt, source_stat):
@@ -1314,6 +1355,7 @@ class BatchPlanExecuteHandler(TaskHandler):
         # 1. Announce start & reconcile interrupted items
         # Precompute reconciliation evidence outside DB write lock
         precomputed_evidence: dict[int, ReconcileEvidence] = {}
+        tx_entries_to_reconcile: list[int] = []
         with context.SessionLocal() as session:
             exec_items = list(session.scalars(
                 select(BatchPlanItem)
@@ -1321,22 +1363,39 @@ class BatchPlanExecuteHandler(TaskHandler):
                 .order_by(BatchPlanItem.sequence)
             ))
             for it in exec_items:
-                if it.operation in ("quarantine", "restore"):
+                if it.operation == "quarantine":
                     meta = json.loads(it.metadata_json or "{}")
-                    tgt = None
-                    if it.operation == "quarantine":
-                        qid = meta.get("quarantine_entry_id") or meta.get("undo", {}).get("quarantine_entry_id")
-                        qe = session.get(QuarantineEntry, int(qid)) if qid else None
-                        if not qe:
-                            qe = session.scalar(select(QuarantineEntry).where(QuarantineEntry.plan_item_id == it.id))
+                    qid = meta.get("quarantine_entry_id") or meta.get("undo", {}).get("quarantine_entry_id")
+                    qe = session.get(QuarantineEntry, int(qid)) if qid else None
+                    if not qe:
+                        qe = session.scalar(select(QuarantineEntry).where(QuarantineEntry.plan_item_id == it.id))
+                    if qe and (qe.tx_phase is not None or qe.authoritative_anchor_path is not None):
+                        tx_entries_to_reconcile.append(qe.id)
+                    else:
                         tgt = Path(qe.quarantine_path) if qe and qe.quarantine_path else (Path(it.target_path) if it.target_path else None)
-                    elif it.operation == "restore":
+                        src = Path(it.source_path)
+                        if tgt and not src.exists():
+                            ev = gather_reconcile_evidence(tgt)
+                            if ev:
+                                precomputed_evidence[it.id] = ev
+                elif it.operation == "restore":
+                    meta = json.loads(it.metadata_json or "{}")
+                    qid = meta.get("quarantine_entry_id") or meta.get("undo", {}).get("quarantine_entry_id")
+                    qe = session.get(QuarantineEntry, int(qid)) if qid else None
+                    if qe and (qe.tx_phase is not None or qe.authoritative_anchor_path is not None):
+                        tx_entries_to_reconcile.append(qe.id)
+                    else:
                         tgt = Path(it.target_path) if it.target_path else None
-                    src = Path(it.source_path)
-                    if tgt and not src.exists():
-                        ev = gather_reconcile_evidence(tgt)
-                        if ev:
-                            precomputed_evidence[it.id] = ev
+                        src = Path(it.source_path)
+                        if tgt and not src.exists():
+                            ev = gather_reconcile_evidence(tgt)
+                            if ev:
+                                precomputed_evidence[it.id] = ev
+
+        # Reconcile transactional entries OUTSIDE the outer SQLite write transaction
+        for qid in tx_entries_to_reconcile:
+            from app.quarantine.reconcile import reconcile_quarantine_transaction
+            reconcile_quarantine_transaction(context.SessionLocal, qid, worker_id=getattr(context, "worker_id", None))
 
         reconciled_failed_item_ids: set[int] = set()
         with context.SessionLocal() as session:
@@ -1559,6 +1618,11 @@ class BatchPlanExecuteHandler(TaskHandler):
                         original_path=row.source_path,
                         quarantine_path="",
                         state="preparing",
+                        size=row.expected_size if row.expected_size is not None else src_stat_dict.get("size"),
+                        content_hash=row.expected_hash,
+                        device=row.expected_device if row.expected_device is not None else src_stat_dict.get("device"),
+                        inode=row.expected_inode if row.expected_inode is not None else src_stat_dict.get("inode"),
+                        mtime_ns=row.expected_mtime_ns if row.expected_mtime_ns is not None else src_stat_dict.get("mtime_ns"),
                         created_at=now,
                         updated_at=now,
                     )
@@ -1795,7 +1859,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                 plan_id=str(plan_id),
                 session_factory=context.SessionLocal,
                 worker_id=context.worker_id,
-                quarantine_entry_id=q_entry_id,
+                quarantine_entry_id=q_entry_id or q_restore_entry_id,
             )
 
             after_size = None
@@ -1844,36 +1908,51 @@ class BatchPlanExecuteHandler(TaskHandler):
                 if q_entry_id is not None:
                     q_entry = session.get(QuarantineEntry, q_entry_id)
                     if q_entry:
-                        if result.state == "completed" and result.result_path and result.result_path.exists():
-                            q_entry.size = q_stat_size or 0
-                            q_entry.content_hash = q_content_hash
-                            q_entry.mtime_ns = q_stat_mtime_ns or 0
-                            q_entry.device = q_stat_dev or 0
-                            q_entry.inode = q_stat_ino or 0
+                        is_tx = q_entry.tx_phase is not None or q_entry.authoritative_anchor_path is not None
+                        if result.state == "completed":
+                            if not is_tx:
+                                if result.result_path and result.result_path.exists():
+                                    q_entry.size = q_stat_size or 0
+                                    q_entry.content_hash = q_content_hash
+                                    q_entry.mtime_ns = q_stat_mtime_ns or 0
+                                    q_entry.device = q_stat_dev or 0
+                                    q_entry.inode = q_stat_ino or 0
                             q_entry.quarantined_at = now
                             policy = session.scalar(select(DataLifecyclePolicy).where(DataLifecyclePolicy.id == 1))
                             retention_days = policy.quarantine_retention_days if policy else 0
                             q_entry.expires_at = (now + timedelta(days=retention_days)) if retention_days > 0 else None
                             q_entry.state = "active"
+                            if is_tx:
+                                q_entry.tx_phase = "active"
                             q_entry.updated_at = now
                         else:
-                            q_entry.state = "abandoned"
+                            if is_tx and (q_entry.state == "conflict" or q_entry.tx_phase == "conflict"):
+                                pass
+                            else:
+                                q_entry.state = "abandoned"
                             q_entry.last_error = result.reason
                             q_entry.updated_at = now
 
                 if q_restore_entry_id is not None:
                     q_entry = session.get(QuarantineEntry, q_restore_entry_id)
                     if q_entry:
+                        is_tx = q_entry.tx_phase is not None or q_entry.authoritative_anchor_path is not None
                         if result.state == "completed":
                             q_entry.state = "restored"
+                            if is_tx:
+                                q_entry.tx_phase = "restored"
                             q_entry.restored_at = now
                             q_entry.updated_at = now
                         elif result.state == "failed":
-                            q_entry.state = "inconsistent"
+                            if not (is_tx and (q_entry.state == "conflict" or q_entry.tx_phase == "conflict")):
+                                q_entry.state = "inconsistent"
+                            if is_tx and q_entry.tx_phase != "conflict":
+                                q_entry.tx_phase = "inconsistent"
                             q_entry.last_error = result.reason
                             q_entry.updated_at = now
                         else:
-                            q_entry.state = "active"
+                            if not (is_tx and (q_entry.state == "conflict" or q_entry.tx_phase == "conflict")):
+                                q_entry.state = "active"
                             q_entry.last_error = result.reason
                             q_entry.updated_at = now
 

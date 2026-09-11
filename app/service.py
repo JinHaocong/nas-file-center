@@ -3690,12 +3690,22 @@ class FileCenterService:
                 raise KeyError(f"Quarantine entry #{entry_id} not found")
 
             if entry.tx_phase is not None or entry.authoritative_anchor_path is not None:
+                if not worker_id or not str(worker_id).strip():
+                    raise PermissionError("Transactional restore requires valid worker authority / lease; direct unauthenticated API mutation is forbidden")
+                if custom_target:
+                    from app.path_safety import validate_mutation_destination
+                    validate_mutation_destination(
+                        custom_target,
+                        allowed_roots=self.settings.allowed_roots,
+                        quarantine_root=self.settings.quarantine_root,
+                    )
                 from app.quarantine.restore import execute_transactional_restore
                 execute_transactional_restore(
                     self.SessionLocal,
                     entry_id,
                     worker_id=worker_id,
                     allowed_roots=self.settings.allowed_roots,
+                    quarantine_root=self.settings.quarantine_root,
                     custom_target=custom_target,
                 )
                 session.refresh(entry)

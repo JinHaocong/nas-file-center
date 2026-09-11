@@ -179,10 +179,10 @@ def test_restore_does_not_mark_restored_before_view_retirement(tmp_path, session
 
     # Simulate failure during Phase 2 (retirement rename)
     real_rename = os.rename
-    def failing_rename(src, dst):
+    def failing_rename(src, dst, *args, **kwargs):
         if "captured_quarantine_view" in str(dst):
             raise OSError("Simulated crash during view retirement")
-        return real_rename(src, dst)
+        return real_rename(src, dst, *args, **kwargs)
 
     monkeypatch.setattr(os, "rename", failing_rename)
 

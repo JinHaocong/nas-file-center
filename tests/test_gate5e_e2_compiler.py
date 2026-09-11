@@ -405,7 +405,10 @@ def test_same_source_conflict_priority_reviewer_case_b(tmp_path, db_session):
 
     # target is a symlink: src.txt -> other.dat
     symlink_target = root_dir / "src.txt"
-    symlink_target.symlink_to(other_file)
+    try:
+        symlink_target.symlink_to(other_file)
+    except FileExistsError:
+        pytest.skip("Filesystem is case-insensitive, cannot have both SRC.TXT and src.txt in the same directory")
 
     iroot = IndexRoot(root=str(root_dir))
     db_session.add(iroot)
