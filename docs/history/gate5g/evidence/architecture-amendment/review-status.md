@@ -1,16 +1,18 @@
 # Gate5-G Architecture Amendment Review Status
 
-**Stage:** Architecture Amendment v3.0.0 (Revision 3)  
+**Stage:** Architecture Amendment v3.1.0 (Revision 3.1)  
 **Date:** 2026-09-11  
-**Status:** **G7 ARCHITECTURE AMENDMENT REVISION 3 COMPLETE / READY FOR INDEPENDENT ARCHITECTURE REVIEW**  
+**Status:** **G7 ARCHITECTURE AMENDMENT REVISION 3.1 COMPLETE / READY FOR FINAL INDEPENDENT ARCHITECTURE REVIEW**  
 
 ## State Summary
-- Revision 2 evaluated by Independent Architecture Review and failed due to P0-A through P0-E (check-then-unlink is fundamentally non-atomic on uncooperative filesystems).
-- Revision 3 establishes the **Authoritative Private Payload Anchor** model:
-  - Private anchor persists for the FULL `QuarantineEntry` lifecycle; steady state is `ACTIVE_COMPAT`.
-  - Public quarantine path is strictly a presentation-only view; normal lifecycle NEVER unlinks the authoritative anchor.
-  - Source retirement executes via **capture-by-rename** into unique per-attempt private slots; foreign replacements are preserved in conflict holding and NEVER deleted.
-  - Stale workers are handled via **passive invariant protection** (resumed syscalls are intrinsically non-destructive).
-  - Symmetrical restore redesigned around authoritative anchor and capture-by-rename view retirement.
-  - Formally recommends minimal durable database fields (Option DB-2).
-- Implementation remains strictly **NOT AUTHORIZED** pending Independent Architecture Review approval.
+- Revision 3 core paradigm accepted (authoritative anchor, presentation-only view, capture-by-rename, DB-2, single reconciliation hierarchy).
+- Revision 3.1 achieves final architecture closure across all remaining findings:
+  - Strict two-phase Candidate Anchor Qualification protocol against Gate3 Frozen identity (P0-1).
+  - Monotonic Generation Allocation & Write-Once Capture Slot protocol by construction (P0-2).
+  - Zero Payload-Bearing Unlink in COMPAT mode (anchor, captured-source, foreign, restore view, unknown inodes; Category C deleted) (P0-3).
+  - Per-Mutation Lease Fencing Discipline formally bounding stale workers to at most one non-destructive filesystem call (P0-4).
+  - Foreign / Unknown Inodes preserved in place without re-renaming or unsafe restore (P0-5).
+  - DB-2 Legacy Row Compatibility & fail-closed gate for unanchored rows on COMPAT (P1-1).
+  - COMPAT Purge & Retention Safety Gate refusing payload destruction while anchor persists (P1-2).
+  - State model disambiguation: exact semantics frozen for `active`, `conflict`, `restored`, `legacy`.
+- Implementation remains strictly **NOT AUTHORIZED** pending final Independent Architecture Review approval.
