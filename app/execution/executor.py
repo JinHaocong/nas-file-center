@@ -66,6 +66,9 @@ def execute_item(
     allow_delete: bool,
     quarantine_root: Path | str,
     plan_id: str,
+    session_factory: Any = None,
+    worker_id: str | None = None,
+    quarantine_entry_id: int | None = None,
 ) -> ItemResult:
     if item.state == "completed":
         return ItemResult("completed", "already completed")
@@ -119,7 +122,7 @@ def execute_item(
     try:
         if item.operation in {"rename", "move"}:
             if item.target is None:
-                return _skip("target is required")
+                return _skip("target is required for rename/move")
             target_raw = Path(item.target)
             if target_raw.is_symlink():
                 return _skip("target symlink is not allowed")
@@ -198,16 +201,35 @@ def execute_item(
                 require_allowed_path(target, allowed_roots)
 
             target.parent.mkdir(parents=True, exist_ok=True)
-            try:
-                from app.fs_ops import rename_noreplace
-                rename_noreplace(source, target)
-            except FileExistsError:
-                return _skip("quarantine target already exists")
-            except OSError as exc:
-                if exc.errno == errno.EXDEV:
-                    return ItemResult("failed", "cross-filesystem quarantine is not supported")
-                return ItemResult("failed", str(exc))
-            return ItemResult("completed", "quarantined", target)
+
+            from app.quarantine.capability import MutationCapability, resolve_mutation_capability
+            valid_roots = list(allowed_roots)
+            if quarantine_root:
+                valid_roots.append(Path(quarantine_root).resolve())
+            capability = resolve_mutation_capability(source, target.parent, quarantine_root, valid_roots)
+
+            if capability == MutationCapability.COMPAT_TRANSACTIONAL and session_factory and worker_id and quarantine_entry_id:
+                try:
+                    from app.quarantine.engine import execute_transactional_quarantine
+                    execute_transactional_quarantine(session_factory, quarantine_entry_id, worker_id, valid_roots)
+                except Exception as exc:
+                    return ItemResult("failed", str(exc))
+                return ItemResult("completed", "quarantined", target)
+            elif capability == MutationCapability.UNSUPPORTED:
+                return ItemResult("failed", "unsupported mutation capability")
+            else:
+                try:
+                    from app.fs_ops import rename_noreplace
+                    rename_noreplace(source, target)
+                except FileExistsError:
+                    return _skip("quarantine target already exists")
+                except OSError as exc:
+                    if exc.errno == errno.EXDEV:
+                        return ItemResult("failed", "cross-filesystem quarantine is not supported")
+                    if exc.errno == errno.EOPNOTSUPP:
+                        return ItemResult("failed", "unsupported filesystem operation: RENAME_NOREPLACE")
+                    return ItemResult("failed", str(exc))
+                return ItemResult("completed", "quarantined", target)
 
         if item.operation == "rmdir_empty":
             if quarantine_root and is_reserved_quarantine_path(source, quarantine_root):

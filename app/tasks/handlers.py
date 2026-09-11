@@ -1776,6 +1776,9 @@ class BatchPlanExecuteHandler(TaskHandler):
                 allow_delete=settings.allow_delete,
                 quarantine_root=settings.quarantine_root,
                 plan_id=str(plan_id),
+                session_factory=context.SessionLocal,
+                worker_id=context.worker_id,
+                quarantine_entry_id=q_entry_id,
             )
 
             after_size = None
