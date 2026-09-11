@@ -20,6 +20,7 @@ This directory serves as the **authoritative persistent remote review evidence b
 | **G7-hotfix3** | `fe4ba01...` | `c32d077...` | 2026-09-11 | FAILED REVIEW | `c32d077` | [`gate5g-g7-hotfix3/`](./gate5g-g7-hotfix3/) | `nas-file-center:0.3.5-gate5g-c32d077` | Halted pending review | **FAILED** (TOCTOU race & symlink flaw) | Authorize G7-hotfix4 analysis |
 | **G7-hotfix4** | `c32d077...` | `c32d077...` | 2026-09-11 | ARCH BLOCKED | None (tests only) | [`gate5g-g7-hotfix4/`](./gate5g-g7-hotfix4/) | N/A (RED verification) | N/A | **OPTION B CONFIRMED** | Authorize Architecture Amendment |
 | **Amendment v1** | `c32d077...` | `c32d077...` | 2026-09-11 | REVISION-2 REQUIRED | None (docs only) | [`architecture-amendment/`](./architecture-amendment/) | N/A (Architecture Spec) | N/A | **FAILED REVIEW** (Rev-2 blockers) | Authorize Amendment Revision 2 |
+| **Amendment v2** | `c32d077...` | `c32d077...` | 2026-09-11 | REVISION-2 COMPLETE | None (docs only) | [`architecture-amendment/`](./architecture-amendment/) | N/A (Architecture Spec) | N/A | **READY FOR REVIEW** | Await Independent Review |
 
 ---
 
@@ -29,7 +30,7 @@ This directory serves as the **authoritative persistent remote review evidence b
 - [`gate5g-g7-hotfix2/`](./gate5g-g7-hotfix2/): Disposable existing-object probe implementation; verification logs; fallback blocker findings.
 - [`gate5g-g7-hotfix3/`](./gate5g-g7-hotfix3/): Fallback ownership hardening; test evidence; TOCTOU vulnerability analysis.
 - [`gate5g-g7-hotfix4/`](./gate5g-g7-hotfix4/): Mathematical impossibility proof; mandatory RED test results; Option B determination.
-- [`architecture-amendment/`](./architecture-amendment/): Persistent Two-Phase Mutation Transaction Architecture v1.0.0; Independent Review findings; Revision-2 blocker specifications.
+- [`architecture-amendment/`](./architecture-amendment/): Persistent Two-Phase Mutation Transaction Architecture v1.0.0 & v2.0.0; Independent Review findings (Blockers 1–9); Revision-2 resolutions and review status.
 
 ---
 
@@ -40,7 +41,7 @@ Gate5-A through Gate5-F = PASS / CLOSED
 Gate5-G G0 through G6   = PASS / CLOSED
 Gate5-G G7              = BLOCKED
 Gate5-G G8              = NOT EXECUTED
-Architecture Amendment  = DRAFT / REVISION-2 REQUIRED
+Architecture Amendment  = G7 ARCHITECTURE AMENDMENT REVISION COMPLETE / READY FOR INDEPENDENT ARCHITECTURE REVIEW
 Implementation          = NOT AUTHORIZED
 v0.3.5 Release          = NOT CLOSED
 ```
