@@ -225,6 +225,104 @@ def _get_active_execution_job(session, plan_id: int) -> WorkJob | None:
     ).first()
 
 
+def _freeze_capture_stable_quarantine_hash(src_p: Path, snap: dict[str, Any]) -> str:
+    """
+    G7 Hotfix4: Capture an authoritative and identity-stable SHA256 for a generic
+    regular-file quarantine item during freeze_plan().
+
+    Protocol:
+    A. Capture authoritative PRE-HASH source facts (binding object_type, dev, ino,
+       size, mtime_ns, ctime_ns). Must match frozen snapshot and be a regular file.
+    B. Compute SHA256 via safe_quarantine_hash(src_p).
+    C. Capture POST-HASH facts.
+    D. Require PRE and POST to match across all required dimensions.
+    E. Require object to remain a regular file.
+    F. Fail closed (raise StateConflictError) on any mismatch, I/O error, or mutation.
+    """
+    # A. Capture authoritative PRE-HASH source facts
+    try:
+        st_b = os.lstat(src_p)
+    except Exception as exc:
+        raise StateConflictError(
+            f"Failed to inspect quarantine source before hashing '{src_p}': {exc}"
+        ) from exc
+
+    if not stat.S_ISREG(st_b.st_mode) or os.path.islink(src_p):
+        raise StateConflictError(
+            f"Quarantine source is not a regular file prior to hashing: {src_p}"
+        )
+
+    b_dev = int(st_b.st_dev)
+    b_ino = int(st_b.st_ino)
+    b_size = int(st_b.st_size)
+    b_mtime = int(getattr(st_b, "st_mtime_ns", st_b.st_mtime * 1e9))
+    b_ctime = int(getattr(st_b, "st_ctime_ns", st_b.st_ctime * 1e9))
+    b_obj_type = "file"
+
+    if (
+        b_dev != snap.get("device")
+        or b_ino != snap.get("inode")
+        or b_size != snap.get("size")
+        or b_mtime != snap.get("mtime_ns")
+        or b_ctime != snap.get("ctime_ns")
+        or b_obj_type != snap.get("object_type")
+    ):
+        raise StateConflictError(
+            f"Quarantine source identity mutated before hash capture for '{src_p}'"
+        )
+
+    # B. Compute SHA256
+    try:
+        content_hash = safe_quarantine_hash(src_p)
+    except Exception as exc:
+        raise StateConflictError(
+            f"Failed to compute SHA256 for quarantine source '{src_p}': {exc}"
+        ) from exc
+
+    if not isinstance(content_hash, str) or len(content_hash) != 64:
+        raise StateConflictError(
+            f"Invalid SHA256 computed for quarantine source '{src_p}': {content_hash!r}"
+        )
+
+    # C. Capture POST-HASH facts
+    try:
+        st_a = os.lstat(src_p)
+    except Exception as exc:
+        raise StateConflictError(
+            f"Failed to inspect quarantine source after hashing '{src_p}': {exc}"
+        ) from exc
+
+    # E. Require the object to remain a regular file
+    if not stat.S_ISREG(st_a.st_mode) or os.path.islink(src_p):
+        raise StateConflictError(
+            f"Quarantine source is no longer a regular file after hashing: {src_p}"
+        )
+
+    a_dev = int(st_a.st_dev)
+    a_ino = int(st_a.st_ino)
+    a_size = int(st_a.st_size)
+    a_mtime = int(getattr(st_a, "st_mtime_ns", st_a.st_mtime * 1e9))
+    a_ctime = int(getattr(st_a, "st_ctime_ns", st_a.st_ctime * 1e9))
+    a_obj_type = "file"
+
+    # D. Require PRE and POST to match for: object_type, device, inode, size, mtime_ns, ctime_ns
+    if (
+        a_obj_type != b_obj_type
+        or a_dev != b_dev
+        or a_ino != b_ino
+        or a_size != b_size
+        or a_mtime != b_mtime
+        or a_ctime != b_ctime
+    ):
+        raise StateConflictError(
+            f"Quarantine source mutated during hash capture for '{src_p}': "
+            f"pre=(dev={b_dev}, ino={b_ino}, size={b_size}, mtime={b_mtime}, ctime={b_ctime}) "
+            f"post=(dev={a_dev}, ino={a_ino}, size={a_size}, mtime={a_mtime}, ctime={a_ctime})"
+        )
+
+    return content_hash
+
+
 class FileCenterService:
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -2028,6 +2126,9 @@ class FileCenterService:
                                 computed_hash = h.hexdigest()
                     except Exception:
                         pass
+
+                if it["operation"] == "quarantine" and snap["object_type"] == "file" and not computed_hash:
+                    computed_hash = _freeze_capture_stable_quarantine_hash(src_p, snap)
 
                 if computed_hash:
                     upd["expected_hash"] = computed_hash
