@@ -60,6 +60,25 @@ def assert_active_worker_lease(
     return lock
 
 
+def renew_and_assert_worker_lease(
+    session_factory: sessionmaker,
+    worker_id: str,
+    timeout_seconds: float = WORKER_LEASE_TIMEOUT_SECONDS,
+) -> None:
+    """
+    Pattern A fence: Short committed lease fence for filesystem syscalls.
+    Opens a dedicated write transaction, asserts the worker lease is active,
+    refreshes acquired_at to now, and COMMITS immediately.
+    No lock/transaction remains open across the filesystem syscall.
+    """
+    now = utcnow()
+    with session_factory() as session:
+        session.execute(text("BEGIN IMMEDIATE"))
+        lock = assert_active_worker_lease(session, worker_id, now=now, timeout_seconds=timeout_seconds)
+        lock.acquired_at = now
+        session.commit()
+
+
 def compute_worker_status(
     heartbeat_at: datetime | None,
     current_time: datetime | None = None,
