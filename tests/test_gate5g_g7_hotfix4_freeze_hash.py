@@ -102,17 +102,16 @@ def test_freeze_mutation_during_hashing_fails_closed(tmp_path, monkeypatch):
         items=[{"operation": "quarantine", "source": str(file_path)}],
     )
 
-    # Simulate file mutation when hash helper is invoked:
-    # Modify the file during safe_quarantine_hash execution
-    orig_hash_func = service_module.safe_quarantine_hash
+    # Simulate file mutation when descriptor hashing is invoked:
+    orig_hash_func = service_module._descriptor_sha256
 
-    def mutating_hash(p, *args, **kwargs):
-        # Mutate the file on disk during hashing
-        with open(p, "ab") as f:
+    def mutating_hash(fd, *args, **kwargs):
+        # Mutate the file on disk during descriptor hashing
+        with open(file_path, "ab") as f:
             f.write(b"_APPENDED_MUTATION")
-        return orig_hash_func(p, *args, **kwargs)
+        return orig_hash_func(fd, *args, **kwargs)
 
-    monkeypatch.setattr(service_module, "safe_quarantine_hash", mutating_hash)
+    monkeypatch.setattr(service_module, "_descriptor_sha256", mutating_hash)
 
     with pytest.raises((StateConflictError, ValueError)):
         service.freeze_plan(plan.id)
@@ -143,10 +142,10 @@ def test_freeze_hash_io_failure_fails_closed(tmp_path, monkeypatch):
         items=[{"operation": "quarantine", "source": str(file_path)}],
     )
 
-    def failing_hash(p, *args, **kwargs):
+    def failing_hash(fd, *args, **kwargs):
         raise OSError("Simulated disk I/O failure during quarantine hashing")
 
-    monkeypatch.setattr(service_module, "safe_quarantine_hash", failing_hash)
+    monkeypatch.setattr(service_module, "_descriptor_sha256", failing_hash)
 
     with pytest.raises((StateConflictError, ValueError)):
         service.freeze_plan(plan.id)
@@ -285,3 +284,190 @@ def test_freeze_hash_propagates_to_quarantine_entry_content_hash(tmp_path, monke
         assert q_entry.state == "active"
         assert q_entry.tx_phase == "active"
         assert q_entry.content_hash == expected_sha
+
+
+def test_p0_1_chained_rename_quarantine_captures_origin_sha256(tmp_path):
+    """
+    P0-1 RED test:
+    Chained plan:
+    Item 1: rename A -> B
+    Item 2: quarantine B (chained target from Item 1)
+    Freeze MUST capture the authoritative SHA256 of origin A into Item 2 expected_hash
+    and metadata['snapshot']['hash'].
+    On 46d03d1, Item 2 expected_hash is None (bypassed by continue).
+    """
+    import json
+    service, settings, data_dir, trash_dir = _setup_service(tmp_path)
+    file_a = data_dir / "file_a.txt"
+    file_b = data_dir / "file_b.txt"
+    payload = b"CHAINED_ORIGIN_PAYLOAD_ABC_123"
+    file_a.write_bytes(payload)
+    expected_sha = hashlib.sha256(payload).hexdigest()
+
+    plan = service.create_plan(
+        name="test-chained-rename-quarantine",
+        kind="cleanup",
+        items=[
+            {
+                "operation": "rename",
+                "source": str(file_a),
+                "target": str(file_b),
+            },
+            {
+                "operation": "quarantine",
+                "source": str(file_b),
+            },
+        ],
+    )
+    assert plan.status == "draft"
+
+    frozen_plan = service.freeze_plan(plan.id)
+    assert frozen_plan.status == "frozen"
+
+    with service.SessionLocal() as session:
+        items = list(
+            session.scalars(
+                select(BatchPlanItem)
+                .where(BatchPlanItem.plan_id == plan.id)
+                .order_by(BatchPlanItem.sequence)
+            )
+        )
+        assert len(items) == 2
+        q_item = items[1]
+        assert q_item.operation == "quarantine"
+        assert q_item.source_path == str(file_b)
+        # On 46d03d1, this FAILS because expected_hash is None:
+        assert q_item.expected_hash == expected_sha
+        meta = json.loads(q_item.metadata_json or "{}")
+        assert meta.get("snapshot", {}).get("hash") == expected_sha
+
+    # Verify validate reaches ready
+    res = service.validate_plan(plan.id)
+    assert res["status"] == "ready"
+    assert file_a.exists()
+    assert not file_b.exists()
+    assert file_a.read_bytes() == payload
+
+
+def test_p0_2_keep_path_dedupe_failure_preserves_legacy_semantics(tmp_path, monkeypatch):
+    """
+    P0-2 RED test:
+    When a keep_path/dedupe item's legacy hashing fails to produce a hash,
+    legacy behavior catches the exception and proceeds without setting expected_hash.
+    On 46d03d1, it fell through to generic quarantine hashing and invoked
+    _freeze_capture_stable_quarantine_hash, which raised StateConflictError.
+    """
+    service, settings, data_dir, trash_dir = _setup_service(tmp_path)
+    file_src = data_dir / "dedupe_src.txt"
+    file_keep = data_dir / "dedupe_keep.txt"
+    file_src.write_bytes(b"DEDUPE_SRC_PAYLOAD")
+    file_keep.write_bytes(b"DEDUPE_KEEP_PAYLOAD")
+
+    plan = service.create_plan(
+        name="test-dedupe-keep-path",
+        kind="cleanup",
+        items=[
+            {
+                "operation": "quarantine",
+                "source": str(file_src),
+                "keep": str(file_keep),
+            }
+        ],
+    )
+
+    # Track calls to generic quarantine helper
+    generic_helper_called = []
+    orig_helper = service_module._freeze_capture_stable_quarantine_hash
+    def tracked_generic_helper(*args, **kwargs):
+        generic_helper_called.append(True)
+        # Force it to fail closed if invoked
+        raise StateConflictError("Generic helper must NOT be called for keep_path dedupe items")
+
+    monkeypatch.setattr(service_module, "_freeze_capture_stable_quarantine_hash", tracked_generic_helper)
+
+    # Make the legacy dedupe hash block fail to produce a hash by raising inside open
+    import builtins
+    orig_open = builtins.open
+    def conditional_open(file, mode="r", *args, **kwargs):
+        if str(file) == str(file_src) and "b" in mode and "r" in mode:
+            raise OSError("Simulated disk read error during dedupe hash")
+        return orig_open(file, mode, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", conditional_open)
+
+    # In legacy behavior, dedupe ignores hash error and freezes without expected_hash.
+    # On 46d03d1, it falls through to generic quarantine helper and raises StateConflictError!
+    frozen_plan = service.freeze_plan(plan.id)
+    assert frozen_plan.status == "frozen"
+    assert not generic_helper_called, "Generic quarantine helper was invoked for keep_path item"
+
+    with service.SessionLocal() as session:
+        it = session.scalars(
+            select(BatchPlanItem).where(BatchPlanItem.plan_id == plan.id)
+        ).one()
+        assert it.expected_hash is None
+
+
+def test_p0_3_pathname_aba_replacement_fails_closed(tmp_path, monkeypatch):
+    """
+    P0-3 RED test:
+    1. Freeze hashing for generic quarantine MUST be descriptor-bound and MUST NOT call
+       path-based safe_quarantine_hash(src_p).
+    2. Any pathname ABA replacement or mutation during hash capture MUST fail closed
+       with StateConflictError.
+    """
+    service, settings, data_dir, trash_dir = _setup_service(tmp_path)
+    file_a = data_dir / "target_aba.txt"
+    payload_a = b"PAYLOAD_ORIGINAL_A"
+    file_a.write_bytes(payload_a)
+    sha_a = hashlib.sha256(payload_a).hexdigest()
+
+    plan = service.create_plan(
+        name="test-aba-race",
+        kind="cleanup",
+        items=[{"operation": "quarantine", "source": str(file_a)}],
+    )
+
+    # Freeze MUST NOT call path-based safe_quarantine_hash
+    def forbidden_path_hash(*args, **kwargs):
+        raise AssertionError("Forbidden: safe_quarantine_hash was called! Freeze hashing must be descriptor-bound.")
+
+    monkeypatch.setattr(service_module, "safe_quarantine_hash", forbidden_path_hash)
+
+    frozen_plan = service.freeze_plan(plan.id)
+    assert frozen_plan.status == "frozen"
+    with service.SessionLocal() as session:
+        it = session.scalars(
+            select(BatchPlanItem).where(BatchPlanItem.plan_id == plan.id)
+        ).one()
+        assert it.expected_hash == sha_a
+
+
+def test_p0_3_aba_path_swap_fails_closed(tmp_path, monkeypatch):
+    """
+    P0-3 test:
+    If during hashing, the path on disk is unlinked and replaced with a new file (different inode),
+    the post-hash lstat check MUST detect the ABA replacement and raise StateConflictError.
+    """
+    service, settings, data_dir, trash_dir = _setup_service(tmp_path)
+    file_a = data_dir / "target_aba_swap.txt"
+    payload_a = b"PAYLOAD_ORIGINAL_A"
+    file_a.write_bytes(payload_a)
+
+    plan = service.create_plan(
+        name="test-aba-swap",
+        kind="cleanup",
+        items=[{"operation": "quarantine", "source": str(file_a)}],
+    )
+
+    orig_descriptor_sha256 = service_module._descriptor_sha256
+    def swapping_sha256(fd):
+        # Unlink and replace file_a on disk with a new file (different inode)
+        file_a.unlink()
+        file_a.write_bytes(payload_a)
+        return orig_descriptor_sha256(fd)
+
+    monkeypatch.setattr(service_module, "_descriptor_sha256", swapping_sha256)
+
+    with pytest.raises(StateConflictError, match="ABA replacement detected|mutated during hash capture"):
+        service.freeze_plan(plan.id)

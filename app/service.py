@@ -92,6 +92,7 @@ from app.quarantine.paths import (
     build_restore_rename_path,
     safe_quarantine_hash,
 )
+from app.batch_utilities.empty_dir_quarantine import safe_open_parent_fd
 from app.quarantine.restore import (
     validate_quarantine_for_restore,
     validate_restore_destination_intent,
@@ -225,102 +226,161 @@ def _get_active_execution_job(session, plan_id: int) -> WorkJob | None:
     ).first()
 
 
-def _freeze_capture_stable_quarantine_hash(src_p: Path, snap: dict[str, Any]) -> str:
+def _descriptor_sha256(fd: int) -> str:
+    h = hashlib.sha256()
+    os.lseek(fd, 0, os.SEEK_SET)
+    while True:
+        chunk = os.read(fd, 1024 * 1024)
+        if not chunk:
+            break
+        h.update(chunk)
+    return h.hexdigest()
+
+
+def _freeze_capture_stable_quarantine_hash(
+    src_p: Path,
+    snap: dict[str, Any],
+    allowed_roots: Iterable[Path | str] | None = None,
+) -> str:
     """
-    G7 Hotfix4: Capture an authoritative and identity-stable SHA256 for a generic
+    G7 Hotfix4-fix1: Capture an authoritative and identity-stable SHA256 for a generic
     regular-file quarantine item during freeze_plan().
 
     Protocol:
-    A. Capture authoritative PRE-HASH source facts (binding object_type, dev, ino,
-       size, mtime_ns, ctime_ns). Must match frozen snapshot and be a regular file.
-    B. Compute SHA256 via safe_quarantine_hash(src_p).
-    C. Capture POST-HASH facts.
-    D. Require PRE and POST to match across all required dimensions.
-    E. Require object to remain a regular file.
+    A. Descriptor-bound open: open parent directory descriptor via safe_open_parent_fd
+       (or safe fallback) and open leaf file descriptor with O_RDONLY | O_NOFOLLOW.
+    B. Pre-hash descriptor verification: verify fstat(fd) matches snapshot (dev, ino,
+       size, mtime_ns, ctime_ns) and confirms regular file.
+    C. Descriptor-bound hash: compute SHA256 directly from the open file descriptor.
+    D. Post-hash descriptor verification: verify fstat(fd) matches pre-hash facts.
+    E. Post-hash pathname check: verify os.lstat(src_p) matches pre-hash dev/ino and
+       remains a regular file (detects ABA pathname replacement).
     F. Fail closed (raise StateConflictError) on any mismatch, I/O error, or mutation.
+    G. Always close file descriptor in finally block.
     """
-    # A. Capture authoritative PRE-HASH source facts
+    file_fd: int | None = None
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+
     try:
-        st_b = os.lstat(src_p)
-    except Exception as exc:
-        raise StateConflictError(
-            f"Failed to inspect quarantine source before hashing '{src_p}': {exc}"
-        ) from exc
+        try:
+            if allowed_roots is not None:
+                with safe_open_parent_fd(src_p, allowed_roots) as (parent_fd, leaf_name):
+                    file_fd = os.open(leaf_name, flags, dir_fd=parent_fd)
+            else:
+                p_fd = os.open(str(src_p.parent), os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+                try:
+                    file_fd = os.open(src_p.name, flags, dir_fd=p_fd)
+                finally:
+                    os.close(p_fd)
+        except Exception as exc:
+            raise StateConflictError(
+                f"Failed to open quarantine source safely '{src_p}': {exc}"
+            ) from exc
 
-    if not stat.S_ISREG(st_b.st_mode) or os.path.islink(src_p):
-        raise StateConflictError(
-            f"Quarantine source is not a regular file prior to hashing: {src_p}"
-        )
+        # B. Pre-hash fstat(file_fd)
+        try:
+            st_b = os.fstat(file_fd)
+        except Exception as exc:
+            raise StateConflictError(
+                f"Failed to inspect quarantine source descriptor before hashing '{src_p}': {exc}"
+            ) from exc
 
-    b_dev = int(st_b.st_dev)
-    b_ino = int(st_b.st_ino)
-    b_size = int(st_b.st_size)
-    b_mtime = int(getattr(st_b, "st_mtime_ns", st_b.st_mtime * 1e9))
-    b_ctime = int(getattr(st_b, "st_ctime_ns", st_b.st_ctime * 1e9))
-    b_obj_type = "file"
+        if not stat.S_ISREG(st_b.st_mode):
+            raise StateConflictError(
+                f"Quarantine source is not a regular file prior to hashing: {src_p}"
+            )
 
-    if (
-        b_dev != snap.get("device")
-        or b_ino != snap.get("inode")
-        or b_size != snap.get("size")
-        or b_mtime != snap.get("mtime_ns")
-        or b_ctime != snap.get("ctime_ns")
-        or b_obj_type != snap.get("object_type")
-    ):
-        raise StateConflictError(
-            f"Quarantine source identity mutated before hash capture for '{src_p}'"
-        )
+        b_dev = int(st_b.st_dev)
+        b_ino = int(st_b.st_ino)
+        b_size = int(st_b.st_size)
+        b_mtime = int(getattr(st_b, "st_mtime_ns", st_b.st_mtime * 1e9))
+        b_ctime = int(getattr(st_b, "st_ctime_ns", st_b.st_ctime * 1e9))
+        b_obj_type = "file"
 
-    # B. Compute SHA256
-    try:
-        content_hash = safe_quarantine_hash(src_p)
-    except Exception as exc:
-        raise StateConflictError(
-            f"Failed to compute SHA256 for quarantine source '{src_p}': {exc}"
-        ) from exc
+        if (
+            b_dev != snap.get("device")
+            or b_ino != snap.get("inode")
+            or b_size != snap.get("size")
+            or b_mtime != snap.get("mtime_ns")
+            or b_ctime != snap.get("ctime_ns")
+            or b_obj_type != snap.get("object_type")
+        ):
+            raise StateConflictError(
+                f"Quarantine source identity mutated before hash capture for '{src_p}'"
+            )
 
-    if not isinstance(content_hash, str) or len(content_hash) != 64:
-        raise StateConflictError(
-            f"Invalid SHA256 computed for quarantine source '{src_p}': {content_hash!r}"
-        )
+        # C. Compute SHA256 directly from file descriptor
+        try:
+            content_hash = _descriptor_sha256(file_fd)
+        except Exception as exc:
+            raise StateConflictError(
+                f"Failed to compute SHA256 for quarantine source '{src_p}': {exc}"
+            ) from exc
 
-    # C. Capture POST-HASH facts
-    try:
-        st_a = os.lstat(src_p)
-    except Exception as exc:
-        raise StateConflictError(
-            f"Failed to inspect quarantine source after hashing '{src_p}': {exc}"
-        ) from exc
+        if not isinstance(content_hash, str) or len(content_hash) != 64:
+            raise StateConflictError(
+                f"Invalid SHA256 computed for quarantine source '{src_p}': {content_hash!r}"
+            )
 
-    # E. Require the object to remain a regular file
-    if not stat.S_ISREG(st_a.st_mode) or os.path.islink(src_p):
-        raise StateConflictError(
-            f"Quarantine source is no longer a regular file after hashing: {src_p}"
-        )
+        # D. Post-hash fstat(file_fd)
+        try:
+            st_a = os.fstat(file_fd)
+        except Exception as exc:
+            raise StateConflictError(
+                f"Failed to inspect quarantine source descriptor after hashing '{src_p}': {exc}"
+            ) from exc
 
-    a_dev = int(st_a.st_dev)
-    a_ino = int(st_a.st_ino)
-    a_size = int(st_a.st_size)
-    a_mtime = int(getattr(st_a, "st_mtime_ns", st_a.st_mtime * 1e9))
-    a_ctime = int(getattr(st_a, "st_ctime_ns", st_a.st_ctime * 1e9))
-    a_obj_type = "file"
+        if not stat.S_ISREG(st_a.st_mode):
+            raise StateConflictError(
+                f"Quarantine source is no longer a regular file after hashing: {src_p}"
+            )
 
-    # D. Require PRE and POST to match for: object_type, device, inode, size, mtime_ns, ctime_ns
-    if (
-        a_obj_type != b_obj_type
-        or a_dev != b_dev
-        or a_ino != b_ino
-        or a_size != b_size
-        or a_mtime != b_mtime
-        or a_ctime != b_ctime
-    ):
-        raise StateConflictError(
-            f"Quarantine source mutated during hash capture for '{src_p}': "
-            f"pre=(dev={b_dev}, ino={b_ino}, size={b_size}, mtime={b_mtime}, ctime={b_ctime}) "
-            f"post=(dev={a_dev}, ino={a_ino}, size={a_size}, mtime={a_mtime}, ctime={a_ctime})"
-        )
+        a_dev = int(st_a.st_dev)
+        a_ino = int(st_a.st_ino)
+        a_size = int(st_a.st_size)
+        a_mtime = int(getattr(st_a, "st_mtime_ns", st_a.st_mtime * 1e9))
+        a_ctime = int(getattr(st_a, "st_ctime_ns", st_a.st_ctime * 1e9))
 
-    return content_hash
+        if (
+            a_dev != b_dev
+            or a_ino != b_ino
+            or a_size != b_size
+            or a_mtime != b_mtime
+            or a_ctime != b_ctime
+        ):
+            raise StateConflictError(
+                f"Quarantine source mutated during hash capture for '{src_p}': "
+                f"pre=(dev={b_dev}, ino={b_ino}, size={b_size}, mtime={b_mtime}, ctime={b_ctime}) "
+                f"post=(dev={a_dev}, ino={a_ino}, size={a_size}, mtime={a_mtime}, ctime={a_ctime})"
+            )
+
+        # E. Post-hash pathname check: verify path still references same dev/ino and not replaced/symlinked
+        try:
+            st_path = os.lstat(src_p)
+        except Exception as exc:
+            raise StateConflictError(
+                f"Failed to inspect quarantine source path after hashing '{src_p}': {exc}"
+            ) from exc
+
+        if not stat.S_ISREG(st_path.st_mode) or os.path.islink(src_p):
+            raise StateConflictError(
+                f"Quarantine source path no longer references a regular file after hashing: {src_p}"
+            )
+        if int(st_path.st_dev) != b_dev or int(st_path.st_ino) != b_ino:
+            raise StateConflictError(
+                f"Quarantine source path ABA replacement detected for '{src_p}': "
+                f"fd=(dev={b_dev}, ino={b_ino}) path=(dev={int(st_path.st_dev)}, ino={int(st_path.st_ino)})"
+            )
+
+        return content_hash
+    finally:
+        if file_fd is not None and file_fd >= 0:
+            try:
+                os.close(file_fd)
+            except OSError:
+                pass
 
 
 class FileCenterService:
@@ -2076,6 +2136,23 @@ class FileCenterService:
                         "ctime_ns": snap["ctime_ns"],
                         "object_type": snap["object_type"],
                     }
+
+                    computed_hash = it["expected_hash"]
+                    if (
+                        it["operation"] == "quarantine"
+                        and it.get("keep_path") is None
+                        and snap["object_type"] == "file"
+                        and not computed_hash
+                    ):
+                        computed_hash = _freeze_capture_stable_quarantine_hash(
+                            matched_origin,
+                            snap,
+                            allowed_roots=self.settings.allowed_roots,
+                        )
+                    if computed_hash:
+                        upd["expected_hash"] = computed_hash
+                        meta["snapshot"]["hash"] = computed_hash
+
                     upd["metadata_json"] = json.dumps(meta, ensure_ascii=False)
 
                     if it["target_path"]:
@@ -2127,8 +2204,17 @@ class FileCenterService:
                     except Exception:
                         pass
 
-                if it["operation"] == "quarantine" and snap["object_type"] == "file" and not computed_hash:
-                    computed_hash = _freeze_capture_stable_quarantine_hash(src_p, snap)
+                if (
+                    it["operation"] == "quarantine"
+                    and it.get("keep_path") is None
+                    and snap["object_type"] == "file"
+                    and not computed_hash
+                ):
+                    computed_hash = _freeze_capture_stable_quarantine_hash(
+                        src_p,
+                        snap,
+                        allowed_roots=self.settings.allowed_roots,
+                    )
 
                 if computed_hash:
                     upd["expected_hash"] = computed_hash
