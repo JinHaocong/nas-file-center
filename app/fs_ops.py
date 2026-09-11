@@ -4,6 +4,7 @@ import ctypes
 import errno
 import os
 from pathlib import Path
+import stat
 import sys
 
 __all__ = ["rename_noreplace", "rename_noreplace_at"]
@@ -140,6 +141,163 @@ elif sys.platform == "darwin":
     _RENAME_AT_IMPL = _get_darwin_rename_at_func()
 
 
+def _normalize_dir_fd(dfd: int | None) -> int | None:
+    if dfd is None or dfd in (_AT_FDCWD, -2):
+        return None
+    return dfd
+
+
+def _probe_rename_noreplace_supported(
+    target: Path | str | None = None,
+    *,
+    dir_path: Path | str | None = None,
+    dir_fd: int | None = None,
+) -> bool:
+    """
+    Probes whether the filesystem at target directory or dir_fd supports atomic RENAME_NOREPLACE.
+    Returns True if supported, False if unsupported (e.g. zfuse returning EINVAL/ENOSYS/EOPNOTSUPP).
+    """
+    if dir_fd is not None and _RENAME_AT_IMPL is not None:
+        probe_name = os.fsencode(f".__probe_noreplace_{os.urandom(8).hex()}")
+        res = _RENAME_AT_IMPL(dir_fd, probe_name, dir_fd, probe_name)
+        if res != 0:
+            perr = ctypes.get_errno()
+            if perr == errno.ENOENT:
+                return True
+            if perr in (errno.EINVAL, errno.ENOSYS, errno.EOPNOTSUPP, getattr(errno, "ENOTSUP", errno.EOPNOTSUPP)):
+                return False
+        return False
+
+    path = target if target is not None else dir_path
+    if path is not None and _RENAME_IMPL is not None:
+        try:
+            parent = os.path.dirname(os.fspath(path)) or "."
+            probe_path = os.fsencode(os.path.join(parent, f".__probe_noreplace_{os.urandom(8).hex()}"))
+            res = _RENAME_IMPL(probe_path, probe_path)
+            if res != 0:
+                perr = ctypes.get_errno()
+                if perr == errno.ENOENT:
+                    return True
+                if perr in (errno.EINVAL, errno.ENOSYS, errno.EOPNOTSUPP, getattr(errno, "ENOTSUP", errno.EOPNOTSUPP)):
+                    return False
+        except Exception:
+            pass
+        return False
+
+    return False
+
+
+def _execute_safe_noreplace_fallback(source: Path | str, target: Path | str) -> None:
+    src_path = Path(source)
+    dst_path = Path(target)
+
+    try:
+        st = os.lstat(src_path)
+    except FileNotFoundError:
+        raise FileNotFoundError(errno.ENOENT, f"No such file or directory: {source}")
+    except OSError:
+        raise
+
+    if stat.S_ISDIR(st.st_mode):
+        raise OSError(
+            errno.EOPNOTSUPP,
+            f"Directory rename without replace not supported on this filesystem: {source}",
+        )
+
+    if stat.S_ISLNK(st.st_mode):
+        try:
+            os.link(src_path, dst_path, follow_symlinks=False)
+        except (PermissionError, OSError) as link_err:
+            if link_err.errno in (
+                errno.EPERM,
+                errno.EACCES,
+                errno.EOPNOTSUPP,
+                getattr(errno, "ENOTSUP", errno.EOPNOTSUPP),
+            ):
+                target_val = os.readlink(src_path)
+                os.symlink(target_val, dst_path)
+            else:
+                raise link_err
+
+        try:
+            os.unlink(src_path)
+        except Exception as unlink_err:
+            try:
+                os.unlink(dst_path)
+            except Exception:
+                pass
+            raise unlink_err
+        return
+
+    os.link(src_path, dst_path, follow_symlinks=False)
+    try:
+        os.unlink(src_path)
+    except Exception as unlink_err:
+        try:
+            os.unlink(dst_path)
+        except Exception:
+            pass
+        raise unlink_err
+
+
+def _execute_safe_noreplace_at_fallback(
+    source_dir_fd: int,
+    source_name: str,
+    target_dir_fd: int,
+    target_name: str,
+) -> None:
+    sfd = _normalize_dir_fd(source_dir_fd)
+    dfd = _normalize_dir_fd(target_dir_fd)
+
+    try:
+        st = os.lstat(source_name, dir_fd=sfd)
+    except FileNotFoundError:
+        raise FileNotFoundError(errno.ENOENT, f"No such file or directory: {source_name}")
+    except OSError:
+        raise
+
+    if stat.S_ISDIR(st.st_mode):
+        raise OSError(
+            errno.EOPNOTSUPP,
+            f"Directory rename without replace not supported on this filesystem: {source_name}",
+        )
+
+    if stat.S_ISLNK(st.st_mode):
+        try:
+            os.link(source_name, target_name, src_dir_fd=sfd, dst_dir_fd=dfd, follow_symlinks=False)
+        except (PermissionError, OSError) as link_err:
+            if link_err.errno in (
+                errno.EPERM,
+                errno.EACCES,
+                errno.EOPNOTSUPP,
+                getattr(errno, "ENOTSUP", errno.EOPNOTSUPP),
+            ):
+                target_val = os.readlink(source_name, dir_fd=sfd)
+                os.symlink(target_val, target_name, dir_fd=dfd)
+            else:
+                raise link_err
+
+        try:
+            os.unlink(source_name, dir_fd=sfd)
+        except Exception as unlink_err:
+            try:
+                os.unlink(target_name, dir_fd=dfd)
+            except Exception:
+                pass
+            raise unlink_err
+        return
+
+    os.link(source_name, target_name, src_dir_fd=sfd, dst_dir_fd=dfd, follow_symlinks=False)
+    try:
+        os.unlink(source_name, dir_fd=sfd)
+    except Exception as unlink_err:
+        try:
+            os.unlink(target_name, dir_fd=dfd)
+        except Exception:
+            pass
+        raise unlink_err
+
+
 def rename_noreplace(source: Path | str, target: Path | str) -> None:
     """
     Atomically renames `source` to `target` with strict NO-REPLACE semantics.
@@ -162,6 +320,13 @@ def rename_noreplace(source: Path | str, target: Path | str) -> None:
             raise OSError(errno.EXDEV, f"Cross-device rename not permitted: {source} -> {target}")
         if err == errno.ENOENT:
             raise FileNotFoundError(errno.ENOENT, f"No such file or directory: {source}")
+        if err in (errno.ENOSYS, errno.EOPNOTSUPP, getattr(errno, "ENOTSUP", errno.EOPNOTSUPP)):
+            _execute_safe_noreplace_fallback(source, target)
+            return
+        if err == errno.EINVAL:
+            if not _probe_rename_noreplace_supported(target):
+                _execute_safe_noreplace_fallback(source, target)
+                return
         raise OSError(err, os.strerror(err), str(source))
 
 
@@ -193,4 +358,11 @@ def rename_noreplace_at(
             raise OSError(errno.EXDEV, f"Cross-device rename not permitted: {source_name} -> {target_name}")
         if err == errno.ENOENT:
             raise FileNotFoundError(errno.ENOENT, f"No such file or directory: {source_name}")
+        if err in (errno.ENOSYS, errno.EOPNOTSUPP, getattr(errno, "ENOTSUP", errno.EOPNOTSUPP)):
+            _execute_safe_noreplace_at_fallback(source_dir_fd, source_name, target_dir_fd, target_name)
+            return
+        if err == errno.EINVAL:
+            if not _probe_rename_noreplace_supported(dir_fd=target_dir_fd):
+                _execute_safe_noreplace_at_fallback(source_dir_fd, source_name, target_dir_fd, target_name)
+                return
         raise OSError(err, os.strerror(err), str(source_name))
