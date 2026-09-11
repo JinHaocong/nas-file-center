@@ -1,5 +1,5 @@
 ================================================================================
-GATE5-G / G7 TRANSACTIONAL MUTATION IMPLEMENTATION EVIDENCE (HOTFIX 1 CLOSURE)
+GATE5-G / G7 TRANSACTIONAL MUTATION IMPLEMENTATION EVIDENCE (HOTFIX 2 CLOSURE)
 ================================================================================
 
 Target Release: v0.3.5
@@ -7,14 +7,14 @@ Branch: v0.3.5-gate5c-hotfix4
 Baseline Docs HEAD: 0ddf932747021578f08843c5069ef88a461d493f
 Baseline Plan HEAD: 2a9d6444f8abead9438ca3fe391193cf64075807
 Baseline Production Code HEAD: c32d0778c59add81e0c296d6f73aa66bc403c04f
-Previous Failed Candidate HEAD: 8057724d1e4fdd34e9d28ef2c44ecb3fbe08a3ab
-Candidate Code HEAD: f8f87c7a9253958b57bd761a6f012a5ffc4012e0
-Artifact Archive: nas-file-center-v0.3.5-gate5g-g7-hotfix5.zip
-Artifact SHA256: 86a3b61cb255d0c3a96f0627e8fb438c70ef9ccfaaef2207134f1a53eb8ac25f
-Status: G7 TRANSACTIONAL MUTATION IMPLEMENTATION HOTFIX1 COMPLETE / READY FOR INDEPENDENT IMPLEMENTATION REVIEW
+Previous Failed Candidate HEAD: f8f87c7a9253958b57bd761a6f012a5ffc4012e0
+Candidate Code HEAD: fd2bae07a30aab559e812ade4c0bcbab1cacea06
+Artifact Archive: nas-file-center-v0.3.5-gate5g-g7-hotfix6.zip
+Artifact SHA256: 5bb24d96047587d574a8bf4c283638e679165ace483e86b8cec1a6a9b1b712e1
+Status: G7 TRANSACTIONAL MUTATION IMPLEMENTATION HOTFIX2 COMPLETE / READY FOR INDEPENDENT IMPLEMENTATION REVIEW
 
 --------------------------------------------------------------------------------
-1. TASK COMMIT SUMMARY (TASKS 1 - 13)
+1. TASK COMMIT SUMMARY (TASKS 1 - 14)
 --------------------------------------------------------------------------------
 Task 1:  b7a1788 feat(gate5g): add DB-2 transaction fields to QuarantineEntry
 Task 2:  5573e48 feat(gate5g): implement Pattern A and B worker lease fences with null safety
@@ -29,48 +29,26 @@ Task 10: be14ebd feat(gate5g): implement unified crash reconciliation engine
 Task 11: e3d1c2a feat(gate5g): enforce cleanup safety gate and zero payload unlink
 Task 12: 8057724 test(gate5g): deliver complete R1-R16 race suite and e2e validation
 Task 13: f8f87c7 fix(gate5g): resolve 13 independent review findings for G7 transactional mutation hotfix1
+Task 14: fd2bae0 fix(gate5g-g7): implement hotfix2 transaction authority, anchor reverification, descriptor relative reconciliation, and write-once capture
 
 --------------------------------------------------------------------------------
 2. TEST SUITE EXECUTION RESULTS
 --------------------------------------------------------------------------------
-$ .venv/bin/pytest tests/test_gate5g_g7_task1_schema.py -v
-tests/test_gate5g_g7_task1_schema.py: 23 passed
-
-$ .venv/bin/pytest tests/test_gate5g_g7_task2_lease_fence.py -v
-tests/test_gate5g_g7_task2_lease_fence.py: 8 passed
-
-$ .venv/bin/pytest tests/test_gate5g_g7_task3_candidate.py -v
-tests/test_gate5g_g7_task3_candidate.py: 8 passed
-
-$ .venv/bin/pytest tests/test_gate5g_g7_task4_allocator.py -v
-tests/test_gate5g_g7_task4_allocator.py: 10 passed
-
-$ .venv/bin/pytest tests/test_gate5g_g7_task5_capability.py -v
-tests/test_gate5g_g7_task5_capability.py: 15 passed
-
-$ .venv/bin/pytest tests/test_gate5g_g7_hotfix1_fs_ops.py -v
-tests/test_gate5g_g7_hotfix1_fs_ops.py: 16 passed
-
-$ .venv/bin/pytest tests/test_gate5g_g7_task7_engine.py -v
-tests/test_gate5g_g7_task7_engine.py: 9 passed
-
-$ .venv/bin/pytest tests/test_gate5g_g7_task8_restore.py -v
-tests/test_gate5g_g7_task8_restore.py: 3 passed
-
-$ .venv/bin/pytest tests/test_gate5g_g7_task9_boot_deferral.py -v
-tests/test_gate5g_g7_task9_boot_deferral.py: 1 passed
-
-$ .venv/bin/pytest tests/test_gate5g_g7_task10_reconcile.py -v
-tests/test_gate5g_g7_task10_reconcile.py: 6 passed
-
-$ .venv/bin/pytest tests/test_gate5g_g7_task11_cleanup_gate.py -v
-tests/test_gate5g_g7_task11_cleanup_gate.py: 1 passed
+$ .venv/bin/pytest tests/test_gate5g_g7_hotfix2_*.py -v
+tests/test_gate5g_g7_hotfix2_anchor_reverification.py: 2 passed
+tests/test_gate5g_g7_hotfix2_descriptor_relative_reconcile.py: 2 passed
+tests/test_gate5g_g7_hotfix2_worker_crash_no_nested_lock.py: 2 passed
+tests/test_gate5g_g7_hotfix2_worker_restore_authority.py: 3 passed
+tests/test_gate5g_g7_hotfix2_write_once_capture.py: 2 passed
 
 $ .venv/bin/pytest tests/test_gate5g_g7_races.py -v
 tests/test_gate5g_g7_races.py: 16 passed (R1 - R16 verified with true descriptor holding)
 
 $ .venv/bin/pytest tests/test_gate5g_g7_e2e_compat.py -v
 tests/test_gate5g_g7_e2e_compat.py: 2 passed
+
+$ .venv/bin/pytest tests/test_gate5g_g7_task10_reconcile.py -v
+tests/test_gate5g_g7_task10_reconcile.py: 6 passed
 
 $ .venv/bin/pytest tests/test_gate5g_g7_hotfix1_*.py -v
 tests/test_gate5g_g7_hotfix1_api_lease_pathguard.py: 4 passed
@@ -83,8 +61,9 @@ tests/test_gate5g_g7_hotfix1_worker_gate3.py: 1 passed
 tests/test_gate5g_g7_hotfix1_worker_restore.py: 2 passed
 
 Full regression suite execution:
-Exact result: 1228 passed, 3 skipped, 19 warnings in 97.35s
+Exact result: 1239 passed, 3 skipped, 19 warnings in 95.93s
 Failures: 0
+Errors: 0
 EXIT_CODE=0
 
 --------------------------------------------------------------------------------
@@ -99,7 +78,7 @@ $ npm --prefix frontend run test -- --run
 EXIT_CODE=0
 
 $ npm --prefix frontend run build
-✓ built in 3.63s
+✓ built in 4.08s
 dist/index.html                            1.08 kB │ gzip:   0.54 kB
 dist/assets/index-BQCeOY6q.css             0.14 kB │ gzip:   0.13 kB
 dist/assets/vendor-query-DdhEkQQI.js      41.69 kB │ gzip:  12.59 kB
@@ -112,10 +91,10 @@ EXIT_CODE=0
 --------------------------------------------------------------------------------
 4. ARCHIVE INTEGRITY VERIFICATION
 --------------------------------------------------------------------------------
-File: nas-file-center-v0.3.5-gate5g-g7-hotfix5.zip
-SHA256: 86a3b61cb255d0c3a96f0627e8fb438c70ef9ccfaaef2207134f1a53eb8ac25f
-ZIP Comment: f8f87c7a9253958b57bd761a6f012a5ffc4012e0
-Entries Count: 601
+File: nas-file-center-v0.3.5-gate5g-g7-hotfix6.zip
+SHA256: 5bb24d96047587d574a8bf4c283638e679165ace483e86b8cec1a6a9b1b712e1
+ZIP Comment: fd2bae07a30aab559e812ade4c0bcbab1cacea06
+Entries Count: 607
 testzip(): OK (None)
 Parent Traversal: None (0)
 Absolute Paths: None (0)
@@ -131,6 +110,6 @@ Excluded Directories:
   .DS_Store              = 0
 
 ================================================================================
-G7 TRANSACTIONAL MUTATION IMPLEMENTATION HOTFIX1 COMPLETE
+G7 TRANSACTIONAL MUTATION IMPLEMENTATION HOTFIX2 COMPLETE
 READY FOR INDEPENDENT IMPLEMENTATION REVIEW
 ================================================================================
