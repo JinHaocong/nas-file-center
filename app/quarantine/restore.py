@@ -185,7 +185,7 @@ def execute_transactional_restore(
     from app.models import utcnow
     from app.tasks.recovery import assert_active_worker_lease, renew_and_assert_worker_lease
     from app.batch_utilities.empty_dir_quarantine import safe_open_parent_fd
-    from app.quarantine.tx_allocator import allocate_next_generation
+    from app.quarantine.tx_allocator import allocate_next_generation, allocate_and_create_attempt_dir
 
     if allowed_roots is None:
         from app.config import get_settings
@@ -235,22 +235,19 @@ def execute_transactional_restore(
         )
         public_quarantine_path = Path(entry.quarantine_path)
 
+        initial_state = entry.state
         entry.state = "restoring"
         entry.tx_phase = "restoring"
         session.commit()
 
-    # Item 7: Allocate a dedicated generation for restore attempt if slot is occupied
     attempt_dir = anchor_path.parent
-    captured_view_slot = attempt_dir / "captured_quarantine_view"
-    if captured_view_slot.exists():
-        restore_gen, restore_attempt_dir = allocate_next_generation(
-            session_factory, entry_id, worker_id, quarantine_root=q_root
-        )
-        renew_and_assert_worker_lease(session_factory, worker_id)
-        restore_attempt_dir.mkdir(parents=True, exist_ok=True)
-        captured_view_slot = restore_attempt_dir / "captured_quarantine_view"
-    else:
-        restore_attempt_dir = attempt_dir
+    parent_tx = attempt_dir.parent
+
+    if q_root is None:
+        if len(anchor_path.parents) >= 4 and anchor_path.parents[2].name == ".tx":
+            q_root = anchor_path.parents[3]
+        elif public_quarantine_path.parent:
+            q_root = public_quarantine_path.parent
 
     # Item 4: Reverification of Authoritative Anchor before any mutation
     is_valid = False
@@ -282,53 +279,137 @@ def execute_transactional_restore(
             session.commit()
         raise StateConflictError(f"Authoritative anchor verification failed: {anchor_path}")
 
-    # Phase 1: Destination link from Authoritative Anchor using descriptor-relative safe traversal
-    if dest_path.exists():
-        st_dest = os.lstat(str(dest_path))
-        if st_dest.st_dev != expected_dev or st_dest.st_ino != expected_ino:
-            with session_factory() as session:
-                session.execute(text("BEGIN IMMEDIATE"))
-                assert_active_worker_lease(session, worker_id)
-                entry = session.get(QuarantineEntry, entry_id)
-                entry.state = "conflict"
-                entry.tx_phase = "conflict"
-                entry.last_error = f"Destination path occupied by foreign inode: {dest_path}"
-                session.commit()
-            raise FileExistsError(f"Destination path occupied by foreign inode: {dest_path}")
-    else:
-        if not dest_path.parent.exists():
-            renew_and_assert_worker_lease(session_factory, worker_id)
-            dest_path.parent.mkdir(parents=True, exist_ok=True)
+    # Finding 3: Classify existing restore evidence first across all attempts (Frozen Variant 13)
+    target_slot = None
+    for att in sorted(parent_tx.glob("attempt-*")):
+        cv = att / "captured_quarantine_view"
+        if cv.exists():
+            is_cv_valid = False
+            try:
+                with safe_open_parent_fd(cv, valid_roots) as (cv_dir_fd, cv_leaf):
+                    fd = os.open(cv_leaf, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=cv_dir_fd)
+                    try:
+                        is_cv_valid = qualify_candidate_anchor_fd(
+                            fd,
+                            expected_device=expected_dev,
+                            expected_inode=expected_ino,
+                            expected_size=expected_size or 0,
+                            expected_hash=expected_hash or "",
+                            expected_mtime_ns=expected_mtime_ns,
+                        )
+                    finally:
+                        os.close(fd)
+            except Exception:
+                is_cv_valid = False
 
-        with safe_open_parent_fd(anchor_path, valid_roots) as (src_dir_fd, src_leaf):
-            with safe_open_parent_fd(dest_path, valid_roots) as (dst_dir_fd, dst_leaf):
+            if is_cv_valid:
+                target_slot = cv
+                break
+            else:
+                # Foreign / unexpected view captured: preserve in place, zero mutation, conflict!
+                with session_factory() as session:
+                    session.execute(text("BEGIN IMMEDIATE"))
+                    assert_active_worker_lease(session, worker_id)
+                    entry = session.get(QuarantineEntry, entry_id)
+                    entry.state = "conflict"
+                    entry.tx_phase = "conflict"
+                    entry.last_error = f"Foreign quarantine view captured in slot: {cv}"
+                    session.commit()
+                raise StateConflictError(f"Foreign quarantine view captured in slot: {cv}")
+
+    if target_slot is not None:
+        # Existing expected captured view found: publish destination if missing, converge restored, zero new generation
+        if dest_path.exists():
+            st_dest = os.lstat(str(dest_path))
+            if st_dest.st_dev != expected_dev or st_dest.st_ino != expected_ino:
+                with session_factory() as session:
+                    session.execute(text("BEGIN IMMEDIATE"))
+                    assert_active_worker_lease(session, worker_id)
+                    entry = session.get(QuarantineEntry, entry_id)
+                    entry.state = "conflict"
+                    entry.tx_phase = "conflict"
+                    entry.last_error = f"Destination path occupied by foreign inode: {dest_path}"
+                    session.commit()
+                raise FileExistsError(f"Destination path occupied by foreign inode: {dest_path}")
+        else:
+            if not dest_path.parent.exists():
                 renew_and_assert_worker_lease(session_factory, worker_id)
-                os.link(src_leaf, dst_leaf, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd)
+                dest_path.parent.mkdir(parents=True, exist_ok=True)
+            with safe_open_parent_fd(anchor_path, valid_roots) as (src_dir_fd, src_leaf):
+                with safe_open_parent_fd(dest_path, valid_roots) as (dst_dir_fd, dst_leaf):
+                    renew_and_assert_worker_lease(session_factory, worker_id)
+                    os.link(src_leaf, dst_leaf, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd)
 
-    # Phase 2: Public Quarantine View Retirement into write-once slot using descriptor-relative operations
-    if public_quarantine_path.exists() and not captured_view_slot.exists():
+        with session_factory() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            assert_active_worker_lease(session, worker_id)
+            entry = session.get(QuarantineEntry, entry_id)
+            now = utcnow()
+            entry.state = "restored"
+            entry.tx_phase = "restored"
+            entry.restored_at = now
+            entry.updated_at = now
+            session.commit()
+        return
+
+    # No captured view in any generation:
+    if public_quarantine_path.exists():
+        # Destination link from Authoritative Anchor using descriptor-relative safe traversal
+        if dest_path.exists():
+            st_dest = os.lstat(str(dest_path))
+            if st_dest.st_dev != expected_dev or st_dest.st_ino != expected_ino:
+                with session_factory() as session:
+                    session.execute(text("BEGIN IMMEDIATE"))
+                    assert_active_worker_lease(session, worker_id)
+                    entry = session.get(QuarantineEntry, entry_id)
+                    entry.state = "conflict"
+                    entry.tx_phase = "conflict"
+                    entry.last_error = f"Destination path occupied by foreign inode: {dest_path}"
+                    session.commit()
+                raise FileExistsError(f"Destination path occupied by foreign inode: {dest_path}")
+        else:
+            if not dest_path.parent.exists():
+                renew_and_assert_worker_lease(session_factory, worker_id)
+                dest_path.parent.mkdir(parents=True, exist_ok=True)
+            with safe_open_parent_fd(anchor_path, valid_roots) as (src_dir_fd, src_leaf):
+                with safe_open_parent_fd(dest_path, valid_roots) as (dst_dir_fd, dst_leaf):
+                    renew_and_assert_worker_lease(session_factory, worker_id)
+                    os.link(src_leaf, dst_leaf, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd)
+
+        # Finding 2: If this is a lease takeover / retry of an interrupted restore, allocate attempt-(G+1) exclusively
+        if initial_state == "restoring":
+            restore_gen, restore_attempt_dir = allocate_and_create_attempt_dir(
+                session_factory, entry_id, worker_id, quarantine_root=q_root
+            )
+            captured_view_slot = restore_attempt_dir / "captured_quarantine_view"
+        else:
+            captured_view_slot = attempt_dir / "captured_quarantine_view"
+
         with safe_open_parent_fd(public_quarantine_path, valid_roots) as (src_dir_fd, src_leaf):
             with safe_open_parent_fd(captured_view_slot, valid_roots) as (dst_dir_fd, dst_leaf):
                 renew_and_assert_worker_lease(session_factory, worker_id)
                 os.rename(src_leaf, dst_leaf, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd)
 
-    # Strict Terminal Evidence Verification
-    target_slot = None
-    if captured_view_slot.exists():
-        target_slot = captured_view_slot
-    else:
-        parent_tx = restore_attempt_dir.parent
-        for att in sorted(parent_tx.glob("attempt-*")):
-            cv = att / "captured_quarantine_view"
-            if cv.exists():
-                st_cv = os.lstat(str(cv))
-                if st_cv.st_dev == expected_dev and st_cv.st_ino == expected_ino:
-                    target_slot = cv
-                    break
+        # Terminal qualification of retired view
+        is_retired_valid = False
+        try:
+            with safe_open_parent_fd(captured_view_slot, valid_roots) as (cv_dir_fd, cv_leaf):
+                fd = os.open(cv_leaf, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=cv_dir_fd)
+                try:
+                    is_retired_valid = qualify_candidate_anchor_fd(
+                        fd,
+                        expected_device=expected_dev,
+                        expected_inode=expected_ino,
+                        expected_size=expected_size or 0,
+                        expected_hash=expected_hash or "",
+                        expected_mtime_ns=expected_mtime_ns,
+                    )
+                finally:
+                    os.close(fd)
+        except Exception:
+            is_retired_valid = False
 
-    if target_slot is not None:
-        st_view = os.lstat(str(target_slot))
-        if st_view.st_dev == expected_dev and st_view.st_ino == expected_ino:
+        if is_retired_valid:
             with session_factory() as session:
                 session.execute(text("BEGIN IMMEDIATE"))
                 assert_active_worker_lease(session, worker_id)
@@ -339,6 +420,7 @@ def execute_transactional_restore(
                 entry.restored_at = now
                 entry.updated_at = now
                 session.commit()
+            return
         else:
             with session_factory() as session:
                 session.execute(text("BEGIN IMMEDIATE"))
@@ -347,10 +429,10 @@ def execute_transactional_restore(
                 now = utcnow()
                 entry.state = "conflict"
                 entry.tx_phase = "conflict"
-                entry.last_error = f"Foreign quarantine view captured in slot: {target_slot}"
+                entry.last_error = f"Retired quarantine view qualification failed: {captured_view_slot}"
                 entry.updated_at = now
                 session.commit()
-            raise RuntimeError(f"Foreign quarantine view captured in slot: {target_slot}")
+            raise RuntimeError(f"Retired quarantine view qualification failed: {captured_view_slot}")
     else:
         # Neither captured_view nor pub_path exists: cannot prove retirement occurred! Fail-closed to conflict.
         with session_factory() as session:

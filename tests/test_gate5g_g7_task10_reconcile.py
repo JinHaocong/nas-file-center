@@ -117,7 +117,7 @@ def test_reconcile_restoring_original_present_view_foreign_enters_conflict(tmp_p
         assert e.tx_phase == "conflict"
 
     # Foreign occupant must be preserved in captured_quarantine_view slot
-    captured_view = tx_dir / "captured_quarantine_view"
+    captured_view = q_dir / ".tx" / "entry-2" / f"attempt-{e.active_attempt_generation}" / "captured_quarantine_view"
     assert captured_view.exists()
     assert captured_view.read_bytes() == b"FOREIGN_VIEW_DATA"
     assert anchor.exists()

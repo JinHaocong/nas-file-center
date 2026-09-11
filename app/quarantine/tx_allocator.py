@@ -56,3 +56,36 @@ def allocate_next_generation(
     attempt_dir = q_root / ".tx" / f"entry-{entry_id}" / f"attempt-{next_gen}"
     return next_gen, attempt_dir
 
+
+def allocate_and_create_attempt_dir(
+    session_factory: sessionmaker,
+    entry_id: int,
+    worker_id: str | None,
+    quarantine_root: Path | str | None = None,
+) -> tuple[int, Path]:
+    """
+    Pattern B generation allocator + exclusive filesystem attempt directory creation:
+    1. BEGIN IMMEDIATE -> assert lease -> increment generation -> COMMIT
+    2. Pattern-A fence: renew_and_assert_worker_lease
+    3. os.mkdir(attempt_dir, mode=0o700) (exclusive leaf creation, zero exist_ok=True)
+    If FileExistsError:
+      - Does NOT silently adopt or reuse directory.
+      - Loops to allocate a new monotonic generation (N+1) and retries exclusive creation.
+    """
+    import os
+    from app.tasks.recovery import renew_and_assert_worker_lease
+
+    while True:
+        gen, attempt_dir = allocate_next_generation(
+            session_factory, entry_id, worker_id, quarantine_root=quarantine_root
+        )
+        if worker_id:
+            renew_and_assert_worker_lease(session_factory, worker_id)
+        attempt_dir.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            os.mkdir(str(attempt_dir), mode=0o700)
+            return gen, attempt_dir
+        except FileExistsError:
+            continue
+
+

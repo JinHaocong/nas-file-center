@@ -54,7 +54,8 @@ def execute_transactional_quarantine(
     if q_root is None:
         try:
             from app.config import get_settings
-            q_root = Path(get_settings().quarantine_root)
+            cfg_qroot = Path(get_settings().quarantine_root)
+            q_root = cfg_qroot
         except Exception:
             q_root = None
 
@@ -71,6 +72,8 @@ def execute_transactional_quarantine(
             raise ValueError(f"QuarantineEntry {entry_id} not found")
         source_path = Path(entry.original_path)
         quarantine_path = Path(entry.quarantine_path)
+        if q_root is None or not quarantine_path.is_relative_to(q_root):
+            q_root = quarantine_path.parent
         expected_dev = entry.device
         expected_ino = entry.inode
         expected_size = entry.size
@@ -82,16 +85,8 @@ def execute_transactional_quarantine(
         session.commit()
 
     # Step 1: Allocate generation & attempt directory (exclusive 0700, no exist_ok)
-    gen, attempt_dir = allocate_next_generation(session_factory, entry_id, worker_id, quarantine_root=q_root)
-    renew_and_assert_worker_lease(session_factory, worker_id)
-    attempt_dir.parent.mkdir(parents=True, exist_ok=True)
-    while True:
-        try:
-            os.mkdir(str(attempt_dir), mode=0o700)
-            break
-        except FileExistsError:
-            gen, attempt_dir = allocate_next_generation(session_factory, entry_id, worker_id, quarantine_root=q_root)
-            renew_and_assert_worker_lease(session_factory, worker_id)
+    from app.quarantine.tx_allocator import allocate_and_create_attempt_dir
+    gen, attempt_dir = allocate_and_create_attempt_dir(session_factory, entry_id, worker_id, quarantine_root=q_root)
 
     # Step 2: Candidate Anchor Creation & Qualification via descriptor-relative traversal
     candidate_anchor_path = attempt_dir / "anchor"
@@ -185,14 +180,31 @@ def execute_transactional_quarantine(
         entry.tx_phase = "source_captured"
         session.commit()
 
-    # Step 5: Post-Capture Verification & Promotion
-    st_captured = os.lstat(str(captured_source_path))
+    # Step 5: Post-Capture Full Qualification & Promotion (Descriptor-relative)
+    is_captured_valid = False
+    try:
+        with safe_open_parent_fd(captured_source_path, valid_roots) as (cs_dir_fd, cs_leaf):
+            fd = os.open(cs_leaf, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=cs_dir_fd)
+            try:
+                is_captured_valid = qualify_candidate_anchor_fd(
+                    fd,
+                    expected_device=expected_dev,
+                    expected_inode=expected_ino,
+                    expected_size=expected_size,
+                    expected_hash=expected_hash,
+                    expected_mtime_ns=expected_mtime_ns if (expected_mtime_ns and expected_mtime_ns > 0) else None,
+                )
+            finally:
+                os.close(fd)
+    except Exception:
+        is_captured_valid = False
+
     with session_factory() as session:
         session.execute(text("BEGIN IMMEDIATE"))
         assert_active_worker_lease(session, worker_id)
         entry = session.get(QuarantineEntry, entry_id)
         now = utcnow()
-        if st_captured.st_dev == expected_dev and st_captured.st_ino == expected_ino:
+        if is_captured_valid:
             entry.tx_phase = "active"
             entry.state = "active"
             entry.quarantined_at = now
@@ -201,8 +213,9 @@ def execute_transactional_quarantine(
         else:
             entry.tx_phase = "conflict"
             entry.state = "conflict"
-            entry.last_error = f"foreign_inode_captured: expected {expected_dev}:{expected_ino}, got {st_captured.st_dev}:{st_captured.st_ino}"
+            entry.last_error = f"Captured source qualification failed: {captured_source_path}"
             entry.updated_at = now
             session.commit()
-            raise RuntimeError(f"Foreign inode captured in slot: expected {expected_dev}:{expected_ino}, got {st_captured.st_dev}:{st_captured.st_ino}")
+            raise RuntimeError(f"Captured source qualification failed: {captured_source_path}")
+
 

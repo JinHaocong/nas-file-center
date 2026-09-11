@@ -158,7 +158,7 @@ def test_real_worker_compat_restore_uses_transactional_restore(tmp_path, monkeyp
 
     # Public view must be retired to captured_quarantine_view
     assert not pub_path.exists()
-    captured_view = tx_dir / "captured_quarantine_view"
+    captured_view = trash_dir / ".tx" / "entry-1" / f"attempt-{q_entry.active_attempt_generation}" / "captured_quarantine_view"
     assert captured_view.exists()
     st_cap = os.stat(captured_view)
     assert st_cap.st_dev == expected_dev

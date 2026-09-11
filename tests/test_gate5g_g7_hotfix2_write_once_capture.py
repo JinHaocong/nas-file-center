@@ -139,10 +139,6 @@ def test_write_once_view_retirement_under_lease_takeover_does_not_target_old_slo
     st = os.stat(anchor)
     os.link(str(anchor), str(pub_path))
 
-    # Old generation already has a captured_quarantine_view or old attempt
-    old_view_slot = tx_dir_gen1 / "captured_quarantine_view"
-    old_view_slot.write_bytes(b"OLD_VIEW_FROM_PREVIOUS_WORKER")
-
     with session_factory() as session:
         session.execute(text("BEGIN IMMEDIATE"))
         lock = TaskLock(id=1, locked=True, owner="worker-1", acquired_at=utcnow())
@@ -151,20 +147,21 @@ def test_write_once_view_retirement_under_lease_takeover_does_not_target_old_slo
             id=1,
             original_path=str(orig_path),
             quarantine_path=str(pub_path),
-            state="active",
-            tx_phase="active",
+            state="restoring",
+            tx_phase="restoring",
             authoritative_anchor_path=str(anchor),
             active_attempt_generation=1,
             device=st.st_dev,
             inode=st.st_ino,
             size=len(payload),
             content_hash=hashlib.sha256(payload).hexdigest(),
+            mtime_ns=getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9)),
         )
         session.add(entry)
         session.commit()
 
-    # Execute transactional restore by worker-1:
-    # Must allocate a new generation for the restore attempt so that old_view_slot is never overwritten!
+    # Execute transactional restore by worker-1 (lease takeover / new restore attempt):
+    # Must allocate a new generation for the restore attempt so that attempt-1 is never targeted!
     execute_transactional_restore(
         session_factory,
         1,
@@ -173,11 +170,18 @@ def test_write_once_view_retirement_under_lease_takeover_does_not_target_old_slo
         quarantine_root=quarantine_root,
     )
 
-    # Old view slot must be untouched!
-    assert old_view_slot.read_bytes() == b"OLD_VIEW_FROM_PREVIOUS_WORKER"
+    # Attempt 1 slot must NOT have been used
+    old_view_slot = tx_dir_gen1 / "captured_quarantine_view"
+    assert not old_view_slot.exists(), "New restore attempt must not target attempt-1 slot"
 
     # Restore attempt used generation 2
     tx_dir_gen2 = quarantine_root / ".tx" / "entry-1" / "attempt-2"
     assert tx_dir_gen2.exists()
     assert (tx_dir_gen2 / "captured_quarantine_view").read_bytes() == payload
     assert orig_path.read_bytes() == payload
+
+    # Stalled Worker's delayed rename lands into attempt-1 slot
+    old_view_slot.write_bytes(b"STALLED_PREVIOUS_WORKER_LANDED")
+    # Both evidence slots preserved without overwrite
+    assert old_view_slot.read_bytes() == b"STALLED_PREVIOUS_WORKER_LANDED"
+    assert (tx_dir_gen2 / "captured_quarantine_view").read_bytes() == payload
