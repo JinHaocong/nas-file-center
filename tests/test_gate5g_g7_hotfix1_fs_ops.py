@@ -517,3 +517,252 @@ def test_probe_fails_closed_when_capability_cannot_be_safely_determined(tmp_path
     assert not fallback_called, "Uncertain capability must fail closed and not enter fallback"
 
 
+def test_rollback_replacement_race_does_not_delete_unrelated_target(tmp_path: Path, monkeypatch):
+    """
+    BLOCKER A: If source unlink fails, and before rollback another actor replaced target
+    with unrelated third-party content, the implementation MUST NOT unlink the replacement target!
+    """
+    src = tmp_path / "src_important.txt"
+    src.write_text("ORIGINAL_USER_DATA", encoding="utf-8")
+    dst = tmp_path / "dst_target.txt"
+
+    def mock_zfuse(s, d):
+        ctypes.set_errno(errno.EINVAL)
+        return -1
+    monkeypatch.setattr(fs_ops_mod, "_RENAME_IMPL", mock_zfuse)
+
+    real_unlink = os.unlink
+
+    def hooked_unlink(path, *args, **kwargs):
+        p_str = str(path)
+        if "src_important" in p_str:
+            # Simulate race: another actor removes dst and creates third-party file before unlink fails
+            real_unlink(dst)
+            dst.write_text("THIRD_PARTY_REPLACEMENT_CONTENT", encoding="utf-8")
+            raise OSError(errno.EIO, "Simulated I/O error unlinking source")
+        return real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "unlink", hooked_unlink)
+
+    with pytest.raises(OSError) as exc_info:
+        rename_noreplace(src, dst)
+
+    assert exc_info.value.errno == errno.EIO
+    assert src.exists(), "Source file must remain intact"
+    assert src.read_text(encoding="utf-8") == "ORIGINAL_USER_DATA"
+    assert dst.exists(), "Third-party replacement target must NOT be deleted by fallback rollback!"
+    assert dst.read_text(encoding="utf-8") == "THIRD_PARTY_REPLACEMENT_CONTENT"
+
+
+def test_ordinary_source_unlink_failure_preserves_both_and_propagates(tmp_path: Path, monkeypatch):
+    """
+    BLOCKER A: On source unlink failure without replacement, source data is preserved,
+    destination is NOT deleted (preserving dual-link for safety over cosmetic rollback),
+    and failure is propagated.
+    """
+    src = tmp_path / "src_keep.txt"
+    src.write_text("CRITICAL_PAYLOAD", encoding="utf-8")
+    dst = tmp_path / "dst_keep.txt"
+
+    def mock_zfuse(s, d):
+        ctypes.set_errno(errno.EINVAL)
+        return -1
+    monkeypatch.setattr(fs_ops_mod, "_RENAME_IMPL", mock_zfuse)
+
+    real_unlink = os.unlink
+
+    def hooked_unlink(path, *args, **kwargs):
+        if "src_keep" in str(path):
+            raise OSError(errno.EACCES, "Permission denied unlinking source")
+        return real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "unlink", hooked_unlink)
+
+    with pytest.raises(OSError) as exc_info:
+        rename_noreplace(src, dst)
+
+    assert exc_info.value.errno == errno.EACCES
+    assert src.exists(), "Source must be preserved"
+    assert src.read_text(encoding="utf-8") == "CRITICAL_PAYLOAD"
+    assert dst.exists(), "Destination must not be cosmetically deleted"
+    assert dst.read_text(encoding="utf-8") == "CRITICAL_PAYLOAD"
+
+
+def test_success_path_destination_replacement_race(tmp_path: Path, monkeypatch):
+    """
+    BLOCKER B: If target is replaced after link() but before source-removal stage,
+    the implementation:
+    - MUST NOT unlink source (preventing original source data loss)
+    - MUST NOT return false success
+    - MUST NOT delete the unrelated replacement target
+    - MUST raise an OSError (e.g. ESTALE)
+    """
+    src = tmp_path / "src_original.txt"
+    src.write_text("ORIGINAL_PAYLOAD", encoding="utf-8")
+    dst = tmp_path / "dst_target.txt"
+
+    def mock_zfuse(s, d):
+        ctypes.set_errno(errno.EINVAL)
+        return -1
+    monkeypatch.setattr(fs_ops_mod, "_RENAME_IMPL", mock_zfuse)
+
+    real_link = os.link
+    real_unlink = os.unlink
+
+    def hooked_link(s, d, *args, **kwargs):
+        res = real_link(s, d, *args, **kwargs)
+        # Immediately after link succeeds, simulate another actor replacing dst with unrelated file!
+        real_unlink(dst)
+        dst.write_text("UNRELATED_THIRD_PARTY_OBJECT", encoding="utf-8")
+        return res
+
+    monkeypatch.setattr(os, "link", hooked_link)
+
+    with pytest.raises(OSError) as exc_info:
+        rename_noreplace(src, dst)
+
+    assert exc_info.value.errno in (errno.ESTALE, errno.EIO, errno.EBUSY)
+    assert src.exists(), "Original source must NOT be unlinked when destination was replaced!"
+    assert src.read_text(encoding="utf-8") == "ORIGINAL_PAYLOAD"
+    assert dst.exists(), "Replacement destination must remain untouched"
+    assert dst.read_text(encoding="utf-8") == "UNRELATED_THIRD_PARTY_OBJECT"
+
+
+def test_rename_noreplace_at_rollback_replacement_race(tmp_path: Path, monkeypatch):
+    """BLOCKER A for rename_noreplace_at: does not delete replaced destination on rollback."""
+    d_src = tmp_path / "dir_src"
+    d_src.mkdir()
+    d_dst = tmp_path / "dir_dst"
+    d_dst.mkdir()
+
+    f_src = d_src / "item_src.txt"
+    f_src.write_text("AT_ORIGINAL", encoding="utf-8")
+
+    sfd = os.open(str(d_src), os.O_RDONLY | os.O_DIRECTORY)
+    dfd = os.open(str(d_dst), os.O_RDONLY | os.O_DIRECTORY)
+
+    def mock_at_einval(s_fd, s, d_fd, d):
+        ctypes.set_errno(errno.EINVAL)
+        return -1
+    monkeypatch.setattr(fs_ops_mod, "_RENAME_AT_IMPL", mock_at_einval)
+
+    real_unlink = os.unlink
+
+    def hooked_unlink(path, *args, **kwargs):
+        if "item_src" in str(path):
+            real_unlink("item_dst.txt", dir_fd=dfd)
+            (d_dst / "item_dst.txt").write_text("AT_REPLACED_CONTENT", encoding="utf-8")
+            raise OSError(errno.EIO, "I/O error on source unlink")
+        return real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "unlink", hooked_unlink)
+
+    try:
+        with pytest.raises(OSError) as exc_info:
+            rename_noreplace_at(sfd, "item_src.txt", dfd, "item_dst.txt")
+        assert exc_info.value.errno == errno.EIO
+        assert f_src.exists()
+        assert (d_dst / "item_dst.txt").exists()
+        assert (d_dst / "item_dst.txt").read_text(encoding="utf-8") == "AT_REPLACED_CONTENT"
+    finally:
+        os.close(sfd)
+        os.close(dfd)
+
+
+def test_rename_noreplace_at_success_path_destination_replacement_race(tmp_path: Path, monkeypatch):
+    """BLOCKER B for rename_noreplace_at: prevents source deletion if destination was replaced."""
+    d_src = tmp_path / "dir_src"
+    d_src.mkdir()
+    d_dst = tmp_path / "dir_dst"
+    d_dst.mkdir()
+
+    f_src = d_src / "item_src.txt"
+    f_src.write_text("AT_PAYLOAD_SAFE", encoding="utf-8")
+
+    sfd = os.open(str(d_src), os.O_RDONLY | os.O_DIRECTORY)
+    dfd = os.open(str(d_dst), os.O_RDONLY | os.O_DIRECTORY)
+
+    def mock_at_einval(s_fd, s, d_fd, d):
+        ctypes.set_errno(errno.EINVAL)
+        return -1
+    monkeypatch.setattr(fs_ops_mod, "_RENAME_AT_IMPL", mock_at_einval)
+
+    real_link = os.link
+    real_unlink = os.unlink
+
+    def hooked_link(s, d, *args, **kwargs):
+        res = real_link(s, d, *args, **kwargs)
+        real_unlink("item_dst.txt", dir_fd=dfd)
+        (d_dst / "item_dst.txt").write_text("AT_UNRELATED_THIRD_PARTY", encoding="utf-8")
+        return res
+
+    monkeypatch.setattr(os, "link", hooked_link)
+
+    try:
+        with pytest.raises(OSError) as exc_info:
+            rename_noreplace_at(sfd, "item_src.txt", dfd, "item_dst.txt")
+        assert exc_info.value.errno in (errno.ESTALE, errno.EIO)
+        assert f_src.exists()
+        assert f_src.read_text(encoding="utf-8") == "AT_PAYLOAD_SAFE"
+        assert (d_dst / "item_dst.txt").read_text(encoding="utf-8") == "AT_UNRELATED_THIRD_PARTY"
+    finally:
+        os.close(sfd)
+        os.close(dfd)
+
+
+def test_symlink_replacement_and_rollback_safety(tmp_path: Path, monkeypatch):
+    """Symlink fallback must not delete replaced target on rollback and must detect replacement."""
+    referent = tmp_path / "ref.txt"
+    referent.write_text("REFERENT", encoding="utf-8")
+    src_sym = tmp_path / "sym_src"
+    os.symlink(str(referent), str(src_sym))
+    dst_sym = tmp_path / "sym_dst"
+
+    def mock_zfuse(s, d):
+        ctypes.set_errno(errno.EINVAL)
+        return -1
+    monkeypatch.setattr(fs_ops_mod, "_RENAME_IMPL", mock_zfuse)
+
+    real_unlink = os.unlink
+
+    def hooked_unlink(path, *args, **kwargs):
+        if "sym_src" in str(path):
+            real_unlink(dst_sym)
+            dst_sym.write_text("REPLACED_TARGET_NOT_SYMLINK", encoding="utf-8")
+            raise OSError(errno.EIO, "Failed to unlink sym_src")
+        return real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "unlink", hooked_unlink)
+
+    with pytest.raises(OSError):
+        rename_noreplace(src_sym, dst_sym)
+
+    assert src_sym.is_symlink(), "Source symlink must be preserved"
+    assert dst_sym.exists(), "Replaced target must not be deleted by rollback"
+    assert dst_sym.read_text(encoding="utf-8") == "REPLACED_TARGET_NOT_SYMLINK"
+
+
+def test_special_inode_fifo_fails_closed(tmp_path: Path, monkeypatch):
+    """Special inode types (FIFO, socket, device) must fail closed with EOPNOTSUPP."""
+    fifo_path = tmp_path / "test_pipe.fifo"
+    try:
+        os.mkfifo(str(fifo_path))
+    except (OSError, AttributeError):
+        pytest.skip("mkfifo not supported on this filesystem/platform")
+
+    dst = tmp_path / "dst_pipe.fifo"
+
+    def mock_zfuse(s, d):
+        ctypes.set_errno(errno.EINVAL)
+        return -1
+    monkeypatch.setattr(fs_ops_mod, "_RENAME_IMPL", mock_zfuse)
+
+    with pytest.raises(OSError) as exc_info:
+        rename_noreplace(fifo_path, dst)
+
+    assert exc_info.value.errno in (errno.EOPNOTSUPP, getattr(errno, "ENOTSUP", errno.EOPNOTSUPP))
+    assert fifo_path.exists(), "Special inode must not be removed"
+    assert not dst.exists()
+
+
+
