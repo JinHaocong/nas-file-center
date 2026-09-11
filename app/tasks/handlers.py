@@ -587,6 +587,7 @@ def _reconcile_executing_item(
     now,
     precomputed_hash: str | None = None,
     precomputed_evidence: ReconcileEvidence | dict | None = None,
+    worker_id: str | None = None,
 ) -> None:
     """Reconcile an item found in 'executing' state after a crash or worker restart."""
     src = Path(item.source_path)
@@ -633,6 +634,21 @@ def _reconcile_executing_item(
 
     elif item.operation == "quarantine":
         q_entry = session.scalar(select(QuarantineEntry).where(QuarantineEntry.plan_item_id == item.id))
+        if q_entry and (q_entry.tx_phase is not None or q_entry.authoritative_anchor_path is not None):
+            from app.quarantine.reconcile import reconcile_quarantine_transaction
+            reconcile_quarantine_transaction(session, q_entry.id, worker_id=worker_id)
+            session.refresh(q_entry)
+            if q_entry.state == "active":
+                item.state = "completed"
+                item.reason = "reconciled transactional quarantine after crash"
+            elif q_entry.state == "conflict":
+                item.state = "failed"
+                item.reason = f"reconciliation conflict after crash: {q_entry.last_error}"
+            elif q_entry.state in ("restored", "purged"):
+                item.state = "completed"
+                item.reason = f"reconciled transactional quarantine after crash ({q_entry.state})"
+            return
+
         tgt = Path(q_entry.quarantine_path) if q_entry and q_entry.quarantine_path else (Path(item.target_path) if item.target_path else None)
         if tgt and tgt.exists() and not src.exists():
             st = tgt.stat(follow_symlinks=False)
@@ -1346,6 +1362,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                 _reconcile_executing_item(
                     session, it, plan_id, job.id, user_id, settings, now,
                     precomputed_evidence=precomputed_evidence.get(it.id),
+                    worker_id=getattr(context, "worker_id", None),
                 )
                 if it.state == "failed":
                     reconciled_failed_item_ids.add(it.id)

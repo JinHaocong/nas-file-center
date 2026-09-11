@@ -7,12 +7,19 @@ import stat
 
 def qualify_candidate_anchor_fd(
     candidate_fd: int,
-    expected_dev: int,
-    expected_ino: int,
-    expected_size: int,
-    expected_hash: str,
+    expected_dev: int | None = None,
+    expected_ino: int | None = None,
+    expected_size: int = 0,
+    expected_hash: str = "",
     expected_mtime_ns: int | None = None,
+    *,
+    expected_device: int | None = None,
+    expected_inode: int | None = None,
 ) -> bool:
+    dev = expected_dev if expected_dev is not None else expected_device
+    ino = expected_ino if expected_ino is not None else expected_inode
+    if dev is None or ino is None:
+        raise ValueError("expected_dev (or expected_device) and expected_ino (or expected_inode) required")
     """
     Authoritative Gate3 candidate anchor qualification protocol.
     Operates strictly on an opened file descriptor without pathname reopen races.
@@ -34,7 +41,7 @@ def qualify_candidate_anchor_fd(
     if not stat.S_ISREG(st_before.st_mode):
         return False
 
-    if st_before.st_dev != expected_dev or st_before.st_ino != expected_ino or st_before.st_size != expected_size:
+    if st_before.st_dev != dev or st_before.st_ino != ino or st_before.st_size != expected_size:
         return False
 
     before_mtime_ns = getattr(st_before, "st_mtime_ns", int(st_before.st_mtime * 1e9))
