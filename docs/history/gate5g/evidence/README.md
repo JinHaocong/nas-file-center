@@ -26,7 +26,8 @@ This directory serves as the **authoritative persistent remote review evidence b
 | **Impl Plan v1.0** | `c32d077...` | `98dfb6a...` | 2026-09-11 | FAILED REVIEW | `98dfb6a` (docs only) | [`architecture-amendment/`](./architecture-amendment/) | N/A (Implementation Plan v1.0) | N/A | **FAILED** (16 findings identified) | Authorize Implementation Plan v1.1 |
 | **Impl Plan v1.1.0** | `c32d077...` | `23d2d93...` | 2026-09-11 | FAILED REVIEW | `23d2d93` (docs only) | [`architecture-amendment/`](./architecture-amendment/) | N/A (Implementation Plan v1.1.0) | N/A | **FAILED** (10 findings identified) | Authorize Implementation Plan v1.1.1 |
 | **Impl Plan v1.1.1** | `c32d077...` | `1500e54...` | 2026-09-11 | FAILED REVIEW | `1500e54` (docs only) | [`architecture-amendment/`](./architecture-amendment/) | N/A (Implementation Plan v1.1.1) | N/A | **FAILED** (8 findings identified) | Authorize Implementation Plan v1.1.2 |
-| **Impl Plan v1.1.2** | `c32d077...` | Pending | 2026-09-11 | PLAN COMPLETE | Docs only | [`architecture-amendment/`](./architecture-amendment/) | N/A (Implementation Plan v1.1.2) | N/A | **READY FOR REVIEW** | Final Independent Review |
+| **Impl Plan v1.1.2** | `c32d077...` | `f43f927...` | 2026-09-11 | FAILED REVIEW | `f43f927` (docs only) | [`architecture-amendment/`](./architecture-amendment/) | N/A (Implementation Plan v1.1.2) | N/A | **FAILED** (5 findings identified) | Authorize Implementation Plan v1.1.3 |
+| **Impl Plan v1.1.3** | `c32d077...` | Pending | 2026-09-11 | PLAN COMPLETE | Docs only | [`architecture-amendment/`](./architecture-amendment/) | N/A (Implementation Plan v1.1.3) | N/A | **READY FOR REVIEW** | Implementation Authorization Review |
 
 ---
 
@@ -36,7 +37,7 @@ This directory serves as the **authoritative persistent remote review evidence b
 - [`gate5g-g7-hotfix2/`](./gate5g-g7-hotfix2/): Disposable existing-object probe implementation; verification logs; fallback blocker findings.
 - [`gate5g-g7-hotfix3/`](./gate5g-g7-hotfix3/): Fallback ownership hardening; test evidence; TOCTOU vulnerability analysis.
 - [`gate5g-g7-hotfix4/`](./gate5g-g7-hotfix4/): Mathematical impossibility proof; mandatory RED test results; Option B determination.
-- [`architecture-amendment/`](./architecture-amendment/): Persistent Two-Phase Mutation Transaction Architecture v1.0.0, v2.0.0, v3.0.0 & v3.1.0; Independent Review findings (Review v1, Review v2, Review v3, Final Review, Implementation Plan Review v1, Implementation Plan Review v1.1, Implementation Plan Review v1.1.1); Implementation Plan v1.1.2 snapshot; Authoritative Anchor, Candidate Qualification, Write-Once Capture Slot, and Lease Discipline specifications.
+- [`architecture-amendment/`](./architecture-amendment/): Persistent Two-Phase Mutation Transaction Architecture v1.0.0, v2.0.0, v3.0.0 & v3.1.0; Independent Review findings (Review v1, Review v2, Review v3, Final Review, Implementation Plan Review v1, Implementation Plan Review v1.1, Implementation Plan Review v1.1.1, Implementation Plan Review v1.1.2); Implementation Plan v1.1.3 snapshot; Authoritative Anchor, Candidate Qualification, Write-Once Capture Slot, and Lease Discipline specifications.
 
 ---
 
@@ -48,7 +49,7 @@ Gate5-G G0 through G6   = PASS / CLOSED
 Gate5-G G7              = BLOCKED
 Gate5-G G8              = NOT EXECUTED
 Architecture Amendment  = PASS / APPROVED / FROZEN / CLOSED
-Implementation Plan     = v1.1.2 COMPLETE / PENDING FINAL INDEPENDENT REVIEW
+Implementation Plan     = v1.1.3 COMPLETE / READY FOR IMPLEMENTATION AUTHORIZATION REVIEW
 Production Implementation = NOT YET AUTHORIZED
 v0.3.5 Release          = NOT CLOSED
 ```
