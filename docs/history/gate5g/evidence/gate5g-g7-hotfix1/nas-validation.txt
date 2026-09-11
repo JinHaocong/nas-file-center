@@ -1,0 +1,30 @@
+TARGET_PLATFORM=极空间 NAS (ZSpace) / Linux amd64 / Docker
+TARGET_FILESYSTEM=zfuse.zfsv3
+CANDIDATE_HEAD=3e806fa8c52e6901870b3716189297ce1f7f6365
+CANDIDATE_IMAGE=nas-file-center:0.3.5-gate5g-3e806fa
+CANDIDATE_ARCHIVE_SHA256=8611d8fe984ba318147d2aaafc169dde80ef3e782a2419ed72180e0810b16dc0
+
+==================================================
+REAL NAS VALIDATION TRACE
+==================================================
+1. Base rename check:
+   os.rename(src, dst)
+   -> PASS (ordinary rename succeeds)
+
+2. Strict no-replace rename check:
+   rename_noreplace(existing_source, absent_target)
+   -> FAILED: OSError: [Errno 22] Invalid argument: 'test_noreplace.txt' -> 'test_noreplace.q.txt'
+   -> Result: EINVAL (errno 22)
+
+3. Fallback path status:
+   NOT REACHED.
+
+==================================================
+DIAGNOSIS
+==================================================
+The capability probe called renameat2(RENAME_NOREPLACE) on a non-existent source.
+In Linux kernel VFS, path lookup fails in dcache with ENOENT (Errno 2) before calling
+the underlying FUSE driver.
+The probe treated ENOENT as "supported", causing rename_noreplace() to treat the real EINVAL
+as an unexpected error rather than invoking the fallback.
+VALIDATION RESULT: FAILED REAL-NAS VALIDATION.

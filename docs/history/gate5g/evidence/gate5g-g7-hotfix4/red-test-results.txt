@@ -1,0 +1,91 @@
+==================================================
+MANDATORY RED TEST EXECUTION RESULTS
+==================================================
+EXPECTED_RED=YES
+STAGE=G7-hotfix4
+DATE=2026-09-11
+CODE_HEAD=c32d0778c59add81e0c296d6f73aa66bc403c04f
+
+--------------------------------------------------
+1. Focused fs_ops Suite (Mandatory RED Verification)
+--------------------------------------------------
+$ CONFIG_DIR=/tmp/test_cfg DATA_DIR=/tmp/test_dat QUARANTINE_DIR=/tmp/test_quar .venv/bin/pytest tests/test_gate5g_g7_hotfix1_fs_ops.py -v
+
+============================= test session starts ==============================
+platform darwin -- Python 3.12.13, pytest-8.4.2, pluggy-1.6.0
+rootdir: /Users/Kerwin/MyProject/nas-file-center
+configfile: pyproject.toml
+plugins: anyio-4.15.1
+collected 25 items
+
+tests/test_gate5g_g7_hotfix1_fs_ops.py ...................F.F.F.         [100%]
+
+=================================== FAILURES ===================================
+________________ test_success_path_destination_replacement_race ________________
+MANDATORY RED TEST 1: If target is replaced AFTER successful ownership lstat
+verification but BEFORE source unlink:
+E Failed: DID NOT RAISE <class 'OSError'>
+(Source file was unlinked, destination was foreign file, function returned false success)
+
+______ test_rename_noreplace_at_success_path_destination_replacement_race ______
+MANDATORY RED TEST 2 for rename_noreplace_at:
+Destination replacement AFTER successful ownership lstat verification but BEFORE source unlink:
+E Failed: DID NOT RAISE <class 'OSError'>
+
+_________ test_symlink_replacement_with_identical_referent_text_fails __________
+MANDATORY RED TEST 3: For symlink fallback created via os.symlink(),
+accepting destination based on readlink() content equality does NOT prove ownership:
+E Failed: DID NOT RAISE <class 'OSError'>
+
+=========================== short test summary info ============================
+FAILED tests/test_gate5g_g7_hotfix1_fs_ops.py::test_success_path_destination_replacement_race
+FAILED tests/test_gate5g_g7_hotfix1_fs_ops.py::test_rename_noreplace_at_success_path_destination_replacement_race
+FAILED tests/test_gate5g_g7_hotfix1_fs_ops.py::test_symlink_replacement_with_identical_referent_text_fails
+========================= 3 failed, 22 passed in 0.07s =========================
+EXIT_CODE=1 (EXPECTED_RED=YES)
+
+--------------------------------------------------
+2. Quarantine / Execution Regression
+--------------------------------------------------
+$ CONFIG_DIR=/tmp/test_cfg DATA_DIR=/tmp/test_dat QUARANTINE_DIR=/tmp/test_quar .venv/bin/pytest tests/test_quarantine_*.py tests/test_gate4_backend_quarantine_undo.py
+======================== 59 passed, 2 warnings in 4.22s ========================
+EXIT_CODE=0
+
+--------------------------------------------------
+3. Gate5-E E4 Regression
+--------------------------------------------------
+$ CONFIG_DIR=/tmp/test_cfg DATA_DIR=/tmp/test_dat QUARANTINE_DIR=/tmp/test_quar .venv/bin/pytest tests/test_gate5e_e4_*.py
+======================= 112 passed, 2 warnings in 3.44s ========================
+EXIT_CODE=0
+
+--------------------------------------------------
+4. Linux Container Case-Sensitive Regression
+--------------------------------------------------
+$ docker run --rm -v "$(pwd)":/workspace -w /workspace -e PYTHONPATH=/workspace python:3.12-slim bash -c "pytest tests/test_gate5e_e2_*.py -v"
+======================== 3 passed, 2 warnings in 0.79s =========================
+EXIT_CODE=0
+
+--------------------------------------------------
+5. Full Backend Suite
+--------------------------------------------------
+$ CONFIG_DIR=/tmp/test_cfg DATA_DIR=/tmp/test_dat QUARANTINE_DIR=/tmp/test_quar .venv/bin/pytest
+=========================== short test summary info ============================
+FAILED tests/test_gate5e_e2_api.py::test_same_source_symlink_and_casefold_priority_in_api (macOS APFS case-fold collision, passes in Linux Docker)
+FAILED tests/test_gate5e_e2_compiler.py::test_same_source_conflict_priority_reviewer_case_b (macOS APFS case-fold collision, passes in Linux Docker)
+FAILED tests/test_gate5e_e2_generate.py::test_generate_same_source_symlink_and_casefold_raises_symlink_blocked (macOS APFS case-fold collision, passes in Linux Docker)
+FAILED tests/test_gate5g_g7_hotfix1_fs_ops.py::test_success_path_destination_replacement_race (EXPECTED_RED=YES)
+FAILED tests/test_gate5g_g7_hotfix1_fs_ops.py::test_rename_noreplace_at_success_path_destination_replacement_race (EXPECTED_RED=YES)
+FAILED tests/test_gate5g_g7_hotfix1_fs_ops.py::test_symlink_replacement_with_identical_referent_text_fails (EXPECTED_RED=YES)
+================ 6 failed, 1171 passed, 19 warnings in 92.45s (0:01:32) ================
+EXIT_CODE=1 (EXPECTED_RED=YES)
+
+--------------------------------------------------
+6. Frontend Typecheck & Production Build
+--------------------------------------------------
+$ npm --prefix frontend run typecheck
+✓ tsc --noEmit
+EXIT_CODE=0
+
+$ npm --prefix frontend run build
+✓ built in 3.74s
+EXIT_CODE=0

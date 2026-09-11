@@ -1,0 +1,23 @@
+$ .venv/bin/pytest tests/test_gate5g_g7_hotfix1_fs_ops.py -v
+============================== 24 passed in 0.05s ==============================
+EXIT_CODE=0
+
+$ .venv/bin/pytest tests/test_gate5e_e4_*.py -v
+======================= 112 passed, 2 warnings in 3.65s ========================
+EXIT_CODE=0
+
+$ .venv/bin/pytest tests/test_quarantine_*.py tests/test_gate4_backend_quarantine_undo.py -v
+======================== 59 passed, 2 warnings in 4.50s ========================
+EXIT_CODE=0
+
+$ docker run --rm -v "$(pwd)":/workspace -w /workspace -e PYTHONPATH=/workspace python:3.12-slim bash -c "pytest tests/test_gate5e_e2_*.py -v"
+======================== 3 passed, 2 warnings in 0.68s =========================
+EXIT_CODE=0
+
+$ npm --prefix frontend run typecheck
+✓ tsc --noEmit
+EXIT_CODE=0
+
+$ npm --prefix frontend run build
+✓ built in 3.66s
+EXIT_CODE=0

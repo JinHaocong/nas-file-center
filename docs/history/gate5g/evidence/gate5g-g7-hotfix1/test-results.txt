@@ -1,0 +1,10 @@
+$ pytest tests/test_gate5g_g7_hotfix1_fs_ops.py -v
+
+RAW_OUTPUT_NOT_AVAILABLE
+
+Verified Summary:
+- Focused unit tests in tests/test_gate5g_g7_hotfix1_fs_ops.py passed on macOS/local dev.
+- Did not expose the false-positive capability probe because simulated tests did not emulate
+  the Linux VFS dcache short-circuit returning ENOENT before calling the FUSE driver.
+- Exit Code: 0 (local)
+- Real NAS Exit Code: 1 (FAILED on target zfuse filesystem)
