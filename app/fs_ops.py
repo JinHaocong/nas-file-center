@@ -152,39 +152,102 @@ def _probe_rename_noreplace_supported(
     *,
     dir_path: Path | str | None = None,
     dir_fd: int | None = None,
-) -> bool:
+) -> bool | None:
     """
     Probes whether the filesystem at target directory or dir_fd supports atomic RENAME_NOREPLACE.
-    Returns True if supported, False if unsupported (e.g. zfuse returning EINVAL/ENOSYS/EOPNOTSUPP).
+    Uses a valid, existing disposable temporary file to exercise the filesystem's handling
+    of the RENAME_NOREPLACE flag.
+    Returns:
+      True:  Filesystem supports RENAME_NOREPLACE (e.g. probe rename returned 0).
+      False: Filesystem rejects RENAME_NOREPLACE capability (e.g. returned EINVAL/ENOSYS/EOPNOTSUPP on existing source).
+      None:  Capability could not be safely established (fails closed).
     """
     if dir_fd is not None and _RENAME_AT_IMPL is not None:
-        probe_name = os.fsencode(f".__probe_noreplace_{os.urandom(8).hex()}")
-        res = _RENAME_AT_IMPL(dir_fd, probe_name, dir_fd, probe_name)
-        if res != 0:
-            perr = ctypes.get_errno()
-            if perr == errno.ENOENT:
+        dfd_norm = _normalize_dir_fd(dir_fd)
+        raw_fd = _AT_FDCWD if dfd_norm is None else dfd_norm
+        token = os.urandom(8).hex()
+        probe_src_name = f".__probe_noreplace_src_{token}"
+        probe_dst_name = f".__probe_noreplace_dst_{token}"
+
+        try:
+            fd = os.open(
+                probe_src_name,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o600,
+                dir_fd=dfd_norm,
+            )
+            os.close(fd)
+        except Exception:
+            return None
+
+        try:
+            res = _RENAME_AT_IMPL(
+                raw_fd,
+                os.fsencode(probe_src_name),
+                raw_fd,
+                os.fsencode(probe_dst_name),
+            )
+            if res == 0:
                 return True
-            if perr in (errno.EINVAL, errno.ENOSYS, errno.EOPNOTSUPP, getattr(errno, "ENOTSUP", errno.EOPNOTSUPP)):
+            perr = ctypes.get_errno()
+            if perr in (
+                errno.EINVAL,
+                errno.ENOSYS,
+                errno.EOPNOTSUPP,
+                getattr(errno, "ENOTSUP", errno.EOPNOTSUPP),
+            ):
                 return False
-        return False
+            return None
+        finally:
+            try:
+                os.unlink(probe_src_name, dir_fd=dfd_norm)
+            except OSError:
+                pass
+            try:
+                os.unlink(probe_dst_name, dir_fd=dfd_norm)
+            except OSError:
+                pass
 
     path = target if target is not None else dir_path
     if path is not None and _RENAME_IMPL is not None:
         try:
             parent = os.path.dirname(os.fspath(path)) or "."
-            probe_path = os.fsencode(os.path.join(parent, f".__probe_noreplace_{os.urandom(8).hex()}"))
-            res = _RENAME_IMPL(probe_path, probe_path)
-            if res != 0:
-                perr = ctypes.get_errno()
-                if perr == errno.ENOENT:
-                    return True
-                if perr in (errno.EINVAL, errno.ENOSYS, errno.EOPNOTSUPP, getattr(errno, "ENOTSUP", errno.EOPNOTSUPP)):
-                    return False
-        except Exception:
-            pass
-        return False
+            token = os.urandom(8).hex()
+            probe_src = os.path.join(parent, f".__probe_noreplace_src_{token}")
+            probe_dst = os.path.join(parent, f".__probe_noreplace_dst_{token}")
 
-    return False
+            try:
+                fd = os.open(probe_src, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                os.close(fd)
+            except Exception:
+                return None
+
+            try:
+                res = _RENAME_IMPL(os.fsencode(probe_src), os.fsencode(probe_dst))
+                if res == 0:
+                    return True
+                perr = ctypes.get_errno()
+                if perr in (
+                    errno.EINVAL,
+                    errno.ENOSYS,
+                    errno.EOPNOTSUPP,
+                    getattr(errno, "ENOTSUP", errno.EOPNOTSUPP),
+                ):
+                    return False
+                return None
+            finally:
+                try:
+                    os.unlink(probe_src)
+                except OSError:
+                    pass
+                try:
+                    os.unlink(probe_dst)
+                except OSError:
+                    pass
+        except Exception:
+            return None
+
+    return None
 
 
 def _execute_safe_noreplace_fallback(source: Path | str, target: Path | str) -> None:
@@ -324,7 +387,7 @@ def rename_noreplace(source: Path | str, target: Path | str) -> None:
             _execute_safe_noreplace_fallback(source, target)
             return
         if err == errno.EINVAL:
-            if not _probe_rename_noreplace_supported(target):
+            if _probe_rename_noreplace_supported(target) is False:
                 _execute_safe_noreplace_fallback(source, target)
                 return
         raise OSError(err, os.strerror(err), str(source))
@@ -362,7 +425,7 @@ def rename_noreplace_at(
             _execute_safe_noreplace_at_fallback(source_dir_fd, source_name, target_dir_fd, target_name)
             return
         if err == errno.EINVAL:
-            if not _probe_rename_noreplace_supported(dir_fd=target_dir_fd):
+            if _probe_rename_noreplace_supported(dir_fd=target_dir_fd) is False:
                 _execute_safe_noreplace_at_fallback(source_dir_fd, source_name, target_dir_fd, target_name)
                 return
         raise OSError(err, os.strerror(err), str(source_name))

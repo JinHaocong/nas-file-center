@@ -350,18 +350,170 @@ def test_einval_genuine_semantic_error_is_not_swallowed(tmp_path: Path, monkeypa
     src.write_text("DATA", encoding="utf-8")
     dst = tmp_path / "dst_real_einval.txt"
 
-    # Simulate native implementation returning EINVAL
-    def mock_einval(s, d):
-        ctypes.set_errno(errno.EINVAL)
-        return -1
+    call_count = 0
 
-    monkeypatch.setattr(fs_ops_mod, "_RENAME_IMPL", mock_einval)
+    def mock_native_with_genuine_einval(s, d):
+        nonlocal call_count
+        call_count += 1
+        s_str = os.fsdecode(s)
+        # Real operation on src_real_einval.txt returns EINVAL (genuine error)
+        if "src_real_einval" in s_str:
+            ctypes.set_errno(errno.EINVAL)
+            return -1
+        # Probe call on disposable probe file returns 0 (capability supported)
+        return 0
 
-    # But probe indicates RENAME_NOREPLACE IS supported by the filesystem
-    if hasattr(fs_ops_mod, "_probe_rename_noreplace_supported"):
-        monkeypatch.setattr(fs_ops_mod, "_probe_rename_noreplace_supported", lambda *args, **kwargs: True)
+    monkeypatch.setattr(fs_ops_mod, "_RENAME_IMPL", mock_native_with_genuine_einval)
 
     with pytest.raises(OSError) as exc_info:
         rename_noreplace(src, dst)
 
     assert exc_info.value.errno == errno.EINVAL, f"Expected EINVAL, got {exc_info.value}"
+
+
+def test_false_positive_enoent_probe_regression(tmp_path: Path, monkeypatch):
+    """
+    REGRESSION: Confirmed real-NAS defect where:
+    - Real operation on existing source returns EINVAL (zfuse lacks FUSE_RENAME2)
+    - Probing with a nonexistent source returns ENOENT (Linux VFS dcache lookup fails before rename2)
+    Old probe incorrectly interpreted ENOENT as 'capability supported', skipping fallback and re-raising EINVAL.
+    New probe must NOT conclude capability supported from ENOENT, must detect unsupported flag on existing disposable file,
+    and must safely enter fallback and succeed.
+    """
+    src = tmp_path / "real_file.dat"
+    src.write_text("IMPORTANT_USER_PAYLOAD", encoding="utf-8")
+    dst = tmp_path / "quarantine_target.dat"
+
+    # Simulate real Linux VFS + zfuse behavior:
+    # If path does not exist on disk, VFS returns ENOENT before rename2 is called.
+    # If path DOES exist on disk, zfuse returns EINVAL on renameat2 flags=1.
+    def mock_vfs_zfuse_rename(s, d):
+        src_path = os.fsdecode(s)
+        if not os.path.exists(src_path):
+            ctypes.set_errno(errno.ENOENT)
+            return -1
+        ctypes.set_errno(errno.EINVAL)
+        return -1
+
+    monkeypatch.setattr(fs_ops_mod, "_RENAME_IMPL", mock_vfs_zfuse_rename)
+
+    def forbidden_rename(*args, **kwargs):
+        raise AssertionError("FORBIDDEN: Naive os.rename called as fallback!")
+    monkeypatch.setattr(os, "rename", forbidden_rename)
+
+    # Under old probe: raises OSError: [Errno 22] Invalid argument
+    # Under new probe: must detect lack of support and safely enter fallback!
+    rename_noreplace(src, dst)
+
+    assert not src.exists(), "Source file must be moved"
+    assert dst.exists(), "Destination file must exist"
+    assert dst.read_text(encoding="utf-8") == "IMPORTANT_USER_PAYLOAD"
+
+
+def test_rename_noreplace_at_false_positive_enoent_probe_regression(tmp_path: Path, monkeypatch):
+    """
+    REGRESSION for rename_noreplace_at with realistic VFS + zfuse behavior.
+    """
+    d_src = tmp_path / "dir_src"
+    d_src.mkdir()
+    d_dst = tmp_path / "dir_dst"
+    d_dst.mkdir()
+
+    f_src = d_src / "item.txt"
+    f_src.write_text("PAYLOAD_AT_ZFUSE", encoding="utf-8")
+
+    sfd = os.open(str(d_src), os.O_RDONLY | os.O_DIRECTORY)
+    dfd = os.open(str(d_dst), os.O_RDONLY | os.O_DIRECTORY)
+
+    def mock_vfs_zfuse_rename_at(s_fd, s, d_fd, d):
+        s_name = os.fsdecode(s)
+        try:
+            os.stat(s_name, dir_fd=s_fd)
+        except OSError:
+            ctypes.set_errno(errno.ENOENT)
+            return -1
+        ctypes.set_errno(errno.EINVAL)
+        return -1
+
+    monkeypatch.setattr(fs_ops_mod, "_RENAME_AT_IMPL", mock_vfs_zfuse_rename_at)
+
+    try:
+        rename_noreplace_at(sfd, "item.txt", dfd, "item_moved.txt")
+    finally:
+        os.close(sfd)
+        os.close(dfd)
+
+    assert not f_src.exists()
+    assert (d_dst / "item_moved.txt").read_text(encoding="utf-8") == "PAYLOAD_AT_ZFUSE"
+
+
+def test_probe_temporary_files_are_always_cleaned_up(tmp_path: Path, monkeypatch):
+    """Probe must clean up all temporary files in both supported and unsupported outcomes."""
+    src = tmp_path / "src.txt"
+    src.write_text("DATA", encoding="utf-8")
+    dst = tmp_path / "dst.txt"
+
+    def mock_vfs_zfuse(s, d):
+        if not os.path.exists(os.fsdecode(s)):
+            ctypes.set_errno(errno.ENOENT)
+            return -1
+        ctypes.set_errno(errno.EINVAL)
+        return -1
+
+    monkeypatch.setattr(fs_ops_mod, "_RENAME_IMPL", mock_vfs_zfuse)
+
+    rename_noreplace(src, dst)
+
+    # Check no leftover probe files in tmp_path
+    leftovers = [f.name for f in tmp_path.iterdir() if f.name.startswith(".__probe_noreplace_")]
+    assert len(leftovers) == 0, f"Leftover probe files found: {leftovers}"
+
+
+def test_supported_native_rename_uses_native_path_and_not_fallback(tmp_path: Path, monkeypatch):
+    """When native renameat2 succeeds (returns 0), fallback must NOT be used."""
+    src = tmp_path / "src.txt"
+    src.write_text("NATIVE_CONTENT", encoding="utf-8")
+    dst = tmp_path / "dst.txt"
+
+    fallback_called = False
+
+    def mock_fallback(*args, **kwargs):
+        nonlocal fallback_called
+        fallback_called = True
+        raise AssertionError("Fallback should not be called when native rename succeeds!")
+
+    monkeypatch.setattr(fs_ops_mod, "_execute_safe_noreplace_fallback", mock_fallback)
+
+    rename_noreplace(src, dst)
+    assert not fallback_called
+    assert not src.exists()
+    assert dst.read_text(encoding="utf-8") == "NATIVE_CONTENT"
+
+
+def test_probe_fails_closed_when_capability_cannot_be_safely_determined(tmp_path: Path, monkeypatch):
+    """If capability probe fails to determine capability safely, it must fail closed and raise original error."""
+    src = tmp_path / "src.txt"
+    src.write_text("DATA", encoding="utf-8")
+    dst = tmp_path / "dst.txt"
+
+    def mock_einval(s, d):
+        ctypes.set_errno(errno.EINVAL)
+        return -1
+    monkeypatch.setattr(fs_ops_mod, "_RENAME_IMPL", mock_einval)
+
+    # Force probe file creation to fail (e.g. permission error / unwritable target directory)
+    monkeypatch.setattr(fs_ops_mod, "_probe_rename_noreplace_supported", lambda *args, **kwargs: None)
+
+    fallback_called = False
+    def mock_fallback(*args, **kwargs):
+        nonlocal fallback_called
+        fallback_called = True
+    monkeypatch.setattr(fs_ops_mod, "_execute_safe_noreplace_fallback", mock_fallback)
+
+    with pytest.raises(OSError) as exc_info:
+        rename_noreplace(src, dst)
+
+    assert exc_info.value.errno == errno.EINVAL
+    assert not fallback_called, "Uncertain capability must fail closed and not enter fallback"
+
+
