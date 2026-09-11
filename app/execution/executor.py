@@ -89,15 +89,27 @@ def execute_item(
         source = require_allowed_path(source_raw, valid_roots)
     except UnsafePathError as exc:
         return _skip(str(exc))
-    if not source.exists():
-        return _skip("source does not exist")
+    is_tx_restore = False
+    tx_anchor_p = None
+    if item.operation == "restore" and session_factory and quarantine_entry_id:
+        with session_factory() as session:
+            from app.models import QuarantineEntry
+            qe = session.get(QuarantineEntry, quarantine_entry_id)
+            if qe and ((qe.tx_phase not in (None, "legacy")) or (qe.authoritative_anchor_path is not None)):
+                is_tx_restore = True
+                if qe.authoritative_anchor_path:
+                    tx_anchor_p = Path(qe.authoritative_anchor_path)
 
-    if item.expected_size and source.is_file():
-        try:
-            if source.stat(follow_symlinks=False).st_size != item.expected_size:
-                return _skip("source size changed")
-        except OSError as exc:
-            return _skip(f"stat failed: {exc}")
+    if not is_tx_restore:
+        if not source.exists():
+            return _skip("source does not exist")
+
+        if item.expected_size and source.is_file():
+            try:
+                if source.stat(follow_symlinks=False).st_size != item.expected_size:
+                    return _skip("source size changed")
+            except OSError as exc:
+                return _skip(f"stat failed: {exc}")
 
     if item.protected_dir is not None and item.operation in {"quarantine", "unlink"}:
         protected = Path(item.protected_dir)
@@ -151,7 +163,8 @@ def execute_item(
             valid_roots = list(allowed_roots)
             if quarantine_root:
                 valid_roots.append(Path(quarantine_root).resolve())
-            capability = resolve_mutation_capability(source, target.parent, quarantine_root, valid_roots)
+            probe_src = tx_anchor_p if (is_tx_restore and tx_anchor_p and tx_anchor_p.exists()) else source
+            capability = resolve_mutation_capability(probe_src, target.parent, quarantine_root, valid_roots)
 
             if capability == MutationCapability.COMPAT_TRANSACTIONAL:
                 if not session_factory or not quarantine_entry_id:

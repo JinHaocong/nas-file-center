@@ -588,6 +588,7 @@ def _reconcile_executing_item(
     precomputed_hash: str | None = None,
     precomputed_evidence: ReconcileEvidence | dict | None = None,
     worker_id: str | None = None,
+    pre_reconciled: bool = False,
 ) -> None:
     """Reconcile an item found in 'executing' state after a crash or worker restart."""
     src = Path(item.source_path)
@@ -636,7 +637,7 @@ def _reconcile_executing_item(
         q_entry = session.scalar(select(QuarantineEntry).where(QuarantineEntry.plan_item_id == item.id))
         if q_entry and (q_entry.tx_phase is not None or q_entry.authoritative_anchor_path is not None):
             session.refresh(q_entry)
-            if q_entry.state not in ("active", "conflict", "restored", "purged"):
+            if not pre_reconciled and q_entry.state not in ("active", "conflict", "restored", "purged"):
                 from app.quarantine.reconcile import reconcile_quarantine_transaction
                 session.flush()
                 reconcile_quarantine_transaction(
@@ -732,7 +733,7 @@ def _reconcile_executing_item(
         q_entry = session.get(QuarantineEntry, int(qid)) if qid else None
         if q_entry and (q_entry.tx_phase is not None or q_entry.authoritative_anchor_path is not None):
             session.refresh(q_entry)
-            if q_entry.state not in ("restored", "conflict", "purged"):
+            if not pre_reconciled and q_entry.state not in ("restored", "conflict"):
                 from app.quarantine.reconcile import reconcile_quarantine_transaction
                 session.flush()
                 reconcile_quarantine_transaction(
@@ -1395,7 +1396,13 @@ class BatchPlanExecuteHandler(TaskHandler):
         # Reconcile transactional entries OUTSIDE the outer SQLite write transaction
         for qid in tx_entries_to_reconcile:
             from app.quarantine.reconcile import reconcile_quarantine_transaction
-            reconcile_quarantine_transaction(context.SessionLocal, qid, worker_id=getattr(context, "worker_id", None))
+            reconcile_quarantine_transaction(
+                context.SessionLocal,
+                qid,
+                worker_id=getattr(context, "worker_id", None),
+                quarantine_root=settings.quarantine_root,
+                allowed_roots=settings.allowed_roots,
+            )
 
         reconciled_failed_item_ids: set[int] = set()
         with context.SessionLocal() as session:
@@ -1422,6 +1429,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                     session, it, plan_id, job.id, user_id, settings, now,
                     precomputed_evidence=precomputed_evidence.get(it.id),
                     worker_id=getattr(context, "worker_id", None),
+                    pre_reconciled=True,
                 )
                 if it.state == "failed":
                     reconciled_failed_item_ids.add(it.id)
@@ -1569,6 +1577,7 @@ class BatchPlanExecuteHandler(TaskHandler):
             target_touch_mtime_ns = None
             restore_expected_size = None
             restore_expected_hash = None
+            is_tx_restore = False
             try:
                 if src_p.exists():
                     st = src_p.stat(follow_symlinks=False)
@@ -1659,39 +1668,80 @@ class BatchPlanExecuteHandler(TaskHandler):
                         completed_or_skipped += 1
                         continue
 
-                    try:
-                        q_tgt_p, q_dest_p = validate_restore_destination_intent(
-                            q_entry,
-                            allowed_roots=settings.allowed_roots,
-                            quarantine_root=settings.quarantine_root,
-                            conflict_policy="skip",
-                        )
-                    except (StateConflictError, ValueError) as exc:
-                        q_entry.updated_at = now
-                        row.state = "failed"
-                        row.reason = str(exc)
-                        session.add(AuditEvent(
-                            operation=row.operation,
-                            path=row.source_path,
-                            result="failed",
-                            details_json=json.dumps({
-                                "plan_id": plan_id,
-                                "item_id": row.id,
-                                "task_id": job.id,
-                                "quarantine_entry_id": q_entry.id,
-                                "reason": str(exc),
-                            }, ensure_ascii=False),
-                        ))
-                        session.commit()
-                        completed_or_skipped += 1
-                        continue
+                    is_tx = (q_entry.tx_phase not in (None, "legacy")) or (q_entry.authoritative_anchor_path is not None)
+                    is_tx_restore = is_tx
+                    if is_tx:
+                        # Transactional QuarantineEntry: public quarantine view is presentation-only!
+                        # Authority is: authoritative anchor + persisted frozen identity + worker lease + PathGuard
+                        conflict_policy = meta_dict.get("conflict_policy", "skip")
+                        custom_target = meta_dict.get("custom_target")
+                        if conflict_policy == "manual":
+                            if not custom_target or not custom_target.strip():
+                                row.state = "failed"
+                                row.reason = "custom_target is required when conflict_policy is 'manual'"
+                                session.commit()
+                                completed_or_skipped += 1
+                                continue
+                            dest_candidate = custom_target.strip()
+                        else:
+                            dest_candidate = q_entry.original_path
 
-                    q_entry.state = "restoring"
-                    q_entry.updated_at = now
-                    q_restore_entry_id = q_entry.id
-                    target_path_str = str(q_dest_p)
-                    restore_expected_size = q_entry.size
-                    restore_expected_hash = q_entry.content_hash
+                        try:
+                            from app.path_safety import validate_mutation_destination
+                            q_dest_p = validate_mutation_destination(
+                                dest_candidate,
+                                settings.allowed_roots,
+                                quarantine_root=settings.quarantine_root,
+                            )
+                        except Exception as exc:
+                            q_entry.updated_at = now
+                            row.state = "failed"
+                            row.reason = str(exc)
+                            session.commit()
+                            completed_or_skipped += 1
+                            continue
+
+                        q_entry.state = "restoring"
+                        q_entry.tx_phase = "restoring"
+                        q_entry.updated_at = now
+                        q_restore_entry_id = q_entry.id
+                        target_path_str = str(q_dest_p)
+                        restore_expected_size = q_entry.size
+                        restore_expected_hash = q_entry.content_hash
+                    else:
+                        try:
+                            q_tgt_p, q_dest_p = validate_restore_destination_intent(
+                                q_entry,
+                                allowed_roots=settings.allowed_roots,
+                                quarantine_root=settings.quarantine_root,
+                                conflict_policy="skip",
+                            )
+                        except (StateConflictError, ValueError) as exc:
+                            q_entry.updated_at = now
+                            row.state = "failed"
+                            row.reason = str(exc)
+                            session.add(AuditEvent(
+                                operation=row.operation,
+                                path=row.source_path,
+                                result="failed",
+                                details_json=json.dumps({
+                                    "plan_id": plan_id,
+                                    "item_id": row.id,
+                                    "task_id": job.id,
+                                    "quarantine_entry_id": q_entry.id,
+                                    "reason": str(exc),
+                                }, ensure_ascii=False),
+                            ))
+                            session.commit()
+                            completed_or_skipped += 1
+                            continue
+
+                        q_entry.state = "restoring"
+                        q_entry.updated_at = now
+                        q_restore_entry_id = q_entry.id
+                        target_path_str = str(q_dest_p)
+                        restore_expected_size = q_entry.size
+                        restore_expected_hash = q_entry.content_hash
                 else:
                     target_path_str = row.target_path
 
@@ -1699,7 +1749,7 @@ class BatchPlanExecuteHandler(TaskHandler):
 
             # --- PRE-MUTATION RESTORE INTEGRITY (OUTSIDE DB WRITE LOCK) ---
             verified_restore_stat = None
-            if item_meta.operation == "restore":
+            if item_meta.operation == "restore" and not is_tx_restore:
                 try:
                     verified_restore_stat = verify_quarantine_source_integrity(
                         src_p,
@@ -1770,7 +1820,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                     session.commit()
 
             # Final immediate source identity/stat check before mutation
-            if item_meta.operation == "restore":
+            if item_meta.operation == "restore" and not is_tx_restore:
                 if verified_restore_stat is not None:
                     try:
                         assert_source_unmodified(src_p, verified_restore_stat)
@@ -1936,7 +1986,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                 if q_restore_entry_id is not None:
                     q_entry = session.get(QuarantineEntry, q_restore_entry_id)
                     if q_entry:
-                        is_tx = q_entry.tx_phase is not None or q_entry.authoritative_anchor_path is not None
+                        is_tx = (q_entry.tx_phase not in (None, "legacy")) or (q_entry.authoritative_anchor_path is not None)
                         if result.state == "completed":
                             q_entry.state = "restored"
                             if is_tx:
@@ -1944,10 +1994,13 @@ class BatchPlanExecuteHandler(TaskHandler):
                             q_entry.restored_at = now
                             q_entry.updated_at = now
                         elif result.state == "failed":
-                            if not (is_tx and (q_entry.state == "conflict" or q_entry.tx_phase == "conflict")):
+                            if is_tx:
+                                if q_entry.state != "conflict":
+                                    q_entry.state = "conflict"
+                                if q_entry.tx_phase != "conflict":
+                                    q_entry.tx_phase = "conflict"
+                            else:
                                 q_entry.state = "inconsistent"
-                            if is_tx and q_entry.tx_phase != "conflict":
-                                q_entry.tx_phase = "inconsistent"
                             q_entry.last_error = result.reason
                             q_entry.updated_at = now
                         else:

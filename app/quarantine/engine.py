@@ -107,18 +107,19 @@ def execute_transactional_quarantine(
         entry.tx_phase = "candidate_anchored"
         session.commit()
 
-    fd = os.open(str(candidate_anchor_path), os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-    try:
-        qualified = qualify_candidate_anchor_fd(
-            fd,
-            expected_dev=expected_dev,
-            expected_ino=expected_ino,
-            expected_size=expected_size,
-            expected_hash=expected_hash or "",
-            expected_mtime_ns=expected_mtime_ns if (expected_mtime_ns and expected_mtime_ns > 0) else None,
-        )
-    finally:
-        os.close(fd)
+    with safe_open_parent_fd(candidate_anchor_path, valid_roots) as (cand_dir_fd, cand_leaf):
+        fd = os.open(cand_leaf, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=cand_dir_fd)
+        try:
+            qualified = qualify_candidate_anchor_fd(
+                fd,
+                expected_dev=expected_dev,
+                expected_ino=expected_ino,
+                expected_size=expected_size,
+                expected_hash=expected_hash or "",
+                expected_mtime_ns=expected_mtime_ns if (expected_mtime_ns and expected_mtime_ns > 0) else None,
+            )
+        finally:
+            os.close(fd)
 
     if not qualified:
         with session_factory() as session:

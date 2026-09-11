@@ -47,7 +47,7 @@ def qualify_candidate_anchor_fd(
     before_mtime_ns = getattr(st_before, "st_mtime_ns", int(st_before.st_mtime * 1e9))
     before_ctime_ns = getattr(st_before, "st_ctime_ns", int(st_before.st_ctime * 1e9))
 
-    if expected_mtime_ns is not None and before_mtime_ns != expected_mtime_ns:
+    if expected_mtime_ns is not None and expected_mtime_ns > 0 and before_mtime_ns != expected_mtime_ns:
         return False
 
     try:

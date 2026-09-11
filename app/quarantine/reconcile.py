@@ -10,6 +10,7 @@ from app.models import QuarantineEntry, utcnow
 from app.tasks.recovery import assert_active_worker_lease, renew_and_assert_worker_lease
 from app.quarantine.candidate import qualify_candidate_anchor_fd
 from app.quarantine.tx_allocator import allocate_next_generation
+from app.batch_utilities.empty_dir_quarantine import safe_open_parent_fd
 
 
 def reconcile_quarantine_transaction(
@@ -105,6 +106,7 @@ def _reconcile_preparing(
     with session_factory() as session:
         entry = session.get(QuarantineEntry, entry_id)
         tx_phase = entry.tx_phase
+        initial_tx_phase = tx_phase
         orig_path = Path(entry.original_path)
         pub_path = Path(entry.quarantine_path)
         gen = entry.active_attempt_generation
@@ -135,6 +137,24 @@ def _reconcile_preparing(
             except Exception:
                 q_root = pub_path.parent
     tx_base = q_root / ".tx" / f"entry-{entry_id}"
+
+    if allowed_roots is None:
+        try:
+            from app.config import get_settings
+            roots = list(get_settings().allowed_roots)
+        except Exception:
+            roots = []
+        try:
+            if not any(orig_path.is_relative_to(Path(r)) for r in roots):
+                roots.append(orig_path.parent)
+        except Exception:
+            pass
+    else:
+        roots = list(allowed_roots)
+
+    valid_roots = list(roots)
+    if q_root and q_root not in valid_roots:
+        valid_roots.append(q_root)
 
     # Phase 1: Preparing & Candidate Anchor (Variants 1, 2, 3)
     if tx_phase in ("preparing", "candidate_anchored"):
@@ -173,22 +193,25 @@ def _reconcile_preparing(
             return
 
         # Variant 2: Candidate anchor exists
-        fd = os.open(str(candidate_anchor), os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        is_valid = False
         err_msg = "Candidate anchor does not match expected Gate3 identity"
         try:
-            is_valid = qualify_candidate_anchor_fd(
-                fd,
-                expected_device=dev,
-                expected_inode=ino,
-                expected_size=size,
-                expected_mtime_ns=mtime_ns,
-                expected_hash=chash,
-            )
+            with safe_open_parent_fd(candidate_anchor, valid_roots) as (cand_dir_fd, cand_leaf):
+                fd = os.open(cand_leaf, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=cand_dir_fd)
+                try:
+                    is_valid = qualify_candidate_anchor_fd(
+                        fd,
+                        expected_device=dev,
+                        expected_inode=ino,
+                        expected_size=size,
+                        expected_mtime_ns=mtime_ns if (mtime_ns and mtime_ns > 0) else None,
+                        expected_hash=chash,
+                    )
+                finally:
+                    os.close(fd)
         except Exception as ex:
             is_valid = False
             err_msg = str(ex)
-        finally:
-            os.close(fd)
 
         if not is_valid:
             # Variant 2 mismatch: set conflict under Pattern B fence, zero unlink, zero retry
@@ -220,11 +243,54 @@ def _reconcile_preparing(
     # Phase 2: Authoritative Anchored -> Public Published (Variants 4, 5, 6)
     if tx_phase == "authoritative_anchored":
         anchor = Path(anchor_path_str)
-        st_anchor = os.stat(str(anchor))
+        if not anchor.exists():
+            with session_factory() as session:
+                session.execute(text("BEGIN IMMEDIATE"))
+                if worker_id:
+                    assert_active_worker_lease(session, worker_id)
+                e = session.get(QuarantineEntry, entry_id)
+                e.state = "conflict"
+                e.tx_phase = "conflict"
+                e.last_error = f"Authoritative anchor missing: {anchor}"
+                e.updated_at = utcnow()
+                session.commit()
+            return
+
+        # Item 4: Reverification of Authoritative Anchor before public publication
+        is_anchor_valid = False
+        try:
+            with safe_open_parent_fd(anchor, valid_roots) as (src_dir_fd, src_leaf):
+                fd = os.open(src_leaf, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=src_dir_fd)
+                try:
+                    is_anchor_valid = qualify_candidate_anchor_fd(
+                        fd,
+                        expected_device=dev,
+                        expected_inode=ino,
+                        expected_size=size,
+                        expected_mtime_ns=mtime_ns if (mtime_ns and mtime_ns > 0) else None,
+                        expected_hash=chash,
+                    )
+                finally:
+                    os.close(fd)
+        except Exception:
+            is_anchor_valid = False
+
+        if not is_anchor_valid:
+            with session_factory() as session:
+                session.execute(text("BEGIN IMMEDIATE"))
+                if worker_id:
+                    assert_active_worker_lease(session, worker_id)
+                e = session.get(QuarantineEntry, entry_id)
+                e.state = "conflict"
+                e.tx_phase = "conflict"
+                e.last_error = f"Authoritative anchor verification failed: {anchor}"
+                e.updated_at = utcnow()
+                session.commit()
+            return
 
         if pub_path.exists():
             st_pub = os.lstat(str(pub_path))
-            if st_pub.st_dev != st_anchor.st_dev or st_pub.st_ino != st_anchor.st_ino:
+            if st_pub.st_dev != dev or st_pub.st_ino != ino:
                 # Variant 6: Foreign occupant at public path
                 with session_factory() as session:
                     session.execute(text("BEGIN IMMEDIATE"))
@@ -239,10 +305,29 @@ def _reconcile_preparing(
                 return
             # Variant 5: Public path exists and matches anchor (FS succeeded, DB lagged)
         else:
-            # Variant 4: Public path absent; link under Pattern A fence
-            if worker_id:
-                renew_and_assert_worker_lease(session_factory, worker_id)
-            os.link(str(anchor), str(pub_path))
+            # Variant 4: Public path absent; link under Pattern A fence using safe_open_parent_fd
+            try:
+                if not pub_path.parent.exists():
+                    if worker_id:
+                        renew_and_assert_worker_lease(session_factory, worker_id)
+                    pub_path.parent.mkdir(parents=True, exist_ok=True)
+                with safe_open_parent_fd(anchor, valid_roots) as (src_dir_fd, src_leaf):
+                    with safe_open_parent_fd(pub_path, valid_roots) as (dst_dir_fd, dst_leaf):
+                        if worker_id:
+                            renew_and_assert_worker_lease(session_factory, worker_id)
+                        os.link(src_leaf, dst_leaf, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd)
+            except Exception as exc:
+                with session_factory() as session:
+                    session.execute(text("BEGIN IMMEDIATE"))
+                    if worker_id:
+                        assert_active_worker_lease(session, worker_id)
+                    e = session.get(QuarantineEntry, entry_id)
+                    e.state = "conflict"
+                    e.tx_phase = "conflict"
+                    e.last_error = f"Failed to link public quarantine path: {exc}"
+                    e.updated_at = utcnow()
+                    session.commit()
+                return
 
         with session_factory() as session:
             session.execute(text("BEGIN IMMEDIATE"))
@@ -257,28 +342,43 @@ def _reconcile_preparing(
     # Phase 3: Public Published -> Source Captured -> Active (Variants 7, 8, 9)
     if tx_phase == "public_published":
         anchor = Path(anchor_path_str)
-        st_anchor = os.stat(str(anchor))
         attempt_dir = anchor.parent
-        captured_source = attempt_dir / "captured_source"
+        parent_tx = attempt_dir.parent
 
-        if captured_source.exists():
-            st_cap = os.lstat(str(captured_source))
-            if st_cap.st_dev != st_anchor.st_dev or st_cap.st_ino != st_anchor.st_ino:
-                # Variant 9: Captured source occupied by foreign inode
-                with session_factory() as session:
-                    session.execute(text("BEGIN IMMEDIATE"))
-                    if worker_id:
-                        assert_active_worker_lease(session, worker_id)
-                    e = session.get(QuarantineEntry, entry_id)
-                    e.state = "conflict"
-                    e.tx_phase = "conflict"
-                    e.last_error = f"Captured source slot occupied by foreign inode: {captured_source}"
-                    e.updated_at = utcnow()
-                    session.commit()
-                return
-            # Variant 8: Captured source matches anchor (FS succeeded, DB lagged)
-        else:
-            # Variant 7: Captured source absent, check original source path
+        existing_captured = None
+        for att in sorted(parent_tx.glob("attempt-*")):
+            cs = att / "captured_source"
+            if cs.exists():
+                st_cs = os.lstat(str(cs))
+                if st_cs.st_dev == dev and st_cs.st_ino == ino:
+                    existing_captured = cs
+                    break
+                else:
+                    # Variant 9: Captured source occupied by foreign inode
+                    with session_factory() as session:
+                        session.execute(text("BEGIN IMMEDIATE"))
+                        if worker_id:
+                            assert_active_worker_lease(session, worker_id)
+                        e = session.get(QuarantineEntry, entry_id)
+                        e.state = "conflict"
+                        e.tx_phase = "conflict"
+                        e.last_error = f"Captured source slot occupied by foreign inode: {cs}"
+                        e.updated_at = utcnow()
+                        session.commit()
+                    return
+
+        if existing_captured is None:
+            # Variant 7: Captured source absent in all generations
+            if initial_tx_phase == "public_published":
+                # Interrupted after public publication: allocate a dedicated generation slot
+                new_gen, new_attempt = allocate_next_generation(session_factory, entry_id, worker_id, quarantine_root=q_root)
+                if worker_id:
+                    renew_and_assert_worker_lease(session_factory, worker_id)
+                new_attempt.mkdir(parents=True, exist_ok=True)
+                captured_source = new_attempt / "captured_source"
+            else:
+                captured_source = attempt_dir / "captured_source"
+
             if not orig_path.exists():
                 with session_factory() as session:
                     session.execute(text("BEGIN IMMEDIATE"))
@@ -293,8 +393,7 @@ def _reconcile_preparing(
                 return
 
             st_orig = os.lstat(str(orig_path))
-            if st_orig.st_dev != st_anchor.st_dev or st_orig.st_ino != st_anchor.st_ino:
-                # Source swapped
+            if st_orig.st_dev != dev or st_orig.st_ino != ino:
                 with session_factory() as session:
                     session.execute(text("BEGIN IMMEDIATE"))
                     if worker_id:
@@ -307,10 +406,24 @@ def _reconcile_preparing(
                     session.commit()
                 return
 
-            # Rename source into captured_source slot under Pattern A fence
-            if worker_id:
-                renew_and_assert_worker_lease(session_factory, worker_id)
-            os.rename(str(orig_path), str(captured_source))
+            try:
+                with safe_open_parent_fd(orig_path, valid_roots) as (src_dir_fd, src_leaf):
+                    with safe_open_parent_fd(captured_source, valid_roots) as (dst_dir_fd, dst_leaf):
+                        if worker_id:
+                            renew_and_assert_worker_lease(session_factory, worker_id)
+                        os.rename(src_leaf, dst_leaf, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd)
+            except Exception as exc:
+                with session_factory() as session:
+                    session.execute(text("BEGIN IMMEDIATE"))
+                    if worker_id:
+                        assert_active_worker_lease(session, worker_id)
+                    e = session.get(QuarantineEntry, entry_id)
+                    e.state = "conflict"
+                    e.tx_phase = "conflict"
+                    e.last_error = f"Failed to rename source into captured slot: {exc}"
+                    e.updated_at = utcnow()
+                    session.commit()
+                return
 
         # Finalize to Active under Pattern B fence
         with session_factory() as session:
@@ -338,6 +451,11 @@ def _reconcile_restoring(
         orig_path = Path(entry.original_path)
         pub_path = Path(entry.quarantine_path)
         anchor_path_str = entry.authoritative_anchor_path
+        dev = entry.device
+        ino = entry.inode
+        size = entry.size
+        mtime_ns = entry.mtime_ns
+        chash = entry.content_hash
 
     if not anchor_path_str:
         with session_factory() as session:
@@ -366,15 +484,71 @@ def _reconcile_restoring(
             session.commit()
         return
 
-    st_anchor = os.stat(str(anchor))
-    attempt_dir = anchor.parent
-    captured_view = attempt_dir / "captured_quarantine_view"
+    q_root: Path | None = Path(quarantine_root) if quarantine_root is not None else None
+    if q_root is None:
+        if len(anchor.parents) >= 4 and anchor.parents[2].name == ".tx":
+            q_root = anchor.parents[3]
+        if q_root is None:
+            try:
+                from app.config import get_settings
+                q_root = Path(get_settings().quarantine_root)
+            except Exception:
+                q_root = pub_path.parent
 
-    # Variant 10, 11, 12: Check original path
+    if allowed_roots is None:
+        try:
+            from app.config import get_settings
+            roots = list(get_settings().allowed_roots)
+        except Exception:
+            roots = []
+        try:
+            if not any(orig_path.is_relative_to(Path(r)) for r in roots):
+                roots.append(orig_path.parent)
+        except Exception:
+            pass
+    else:
+        roots = list(allowed_roots)
+
+    valid_roots = list(roots)
+    if q_root and q_root not in valid_roots:
+        valid_roots.append(q_root)
+
+    # Reverification of Authoritative Anchor before restore reconciliation
+    is_anchor_valid = False
+    try:
+        with safe_open_parent_fd(anchor, valid_roots) as (src_dir_fd, src_leaf):
+            fd = os.open(src_leaf, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=src_dir_fd)
+            try:
+                is_anchor_valid = qualify_candidate_anchor_fd(
+                    fd,
+                    expected_device=dev,
+                    expected_inode=ino,
+                    expected_size=size,
+                    expected_mtime_ns=mtime_ns if (mtime_ns and mtime_ns > 0) else None,
+                    expected_hash=chash,
+                )
+            finally:
+                os.close(fd)
+    except Exception:
+        is_anchor_valid = False
+
+    if not is_anchor_valid:
+        with session_factory() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            if worker_id:
+                assert_active_worker_lease(session, worker_id)
+            e = session.get(QuarantineEntry, entry_id)
+            e.state = "conflict"
+            e.tx_phase = "conflict"
+            e.last_error = f"Authoritative anchor qualification failed before restore: {anchor}"
+            e.updated_at = utcnow()
+            session.commit()
+        return
+
+    # Check original destination
     if orig_path.exists():
         st_orig = os.lstat(str(orig_path))
-        if st_orig.st_dev != st_anchor.st_dev or st_orig.st_ino != st_anchor.st_ino:
-            # Variant 12: Destination occupied by foreign file
+        if st_orig.st_dev != dev or st_orig.st_ino != ino:
             with session_factory() as session:
                 session.execute(text("BEGIN IMMEDIATE"))
                 if worker_id:
@@ -387,25 +561,17 @@ def _reconcile_restoring(
                 session.commit()
             return
     else:
-        # Variant 10: Original path absent, link from anchor under Pattern A fence
-        if not orig_path.parent.exists():
-            if worker_id:
-                renew_and_assert_worker_lease(session_factory, worker_id)
-            orig_path.parent.mkdir(parents=True, exist_ok=True)
-        if worker_id:
-            renew_and_assert_worker_lease(session_factory, worker_id)
-        os.link(str(anchor), str(orig_path))
-
-    # Variant 11, 13: View retirement
-    if pub_path.exists() and not captured_view.exists():
-        if worker_id:
-            renew_and_assert_worker_lease(session_factory, worker_id)
-        os.rename(str(pub_path), str(captured_view))
-
-    if captured_view.exists():
-        st_view = os.lstat(str(captured_view))
-        if st_view.st_dev != st_anchor.st_dev or st_view.st_ino != st_anchor.st_ino:
-            # Variant 11/13: Foreign view captured
+        try:
+            if not orig_path.parent.exists():
+                if worker_id:
+                    renew_and_assert_worker_lease(session_factory, worker_id)
+                orig_path.parent.mkdir(parents=True, exist_ok=True)
+            with safe_open_parent_fd(anchor, valid_roots) as (src_dir_fd, src_leaf):
+                with safe_open_parent_fd(orig_path, valid_roots) as (dst_dir_fd, dst_leaf):
+                    if worker_id:
+                        renew_and_assert_worker_lease(session_factory, worker_id)
+                    os.link(src_leaf, dst_leaf, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd)
+        except Exception as exc:
             with session_factory() as session:
                 session.execute(text("BEGIN IMMEDIATE"))
                 if worker_id:
@@ -413,11 +579,71 @@ def _reconcile_restoring(
                 e = session.get(QuarantineEntry, entry_id)
                 e.state = "conflict"
                 e.tx_phase = "conflict"
-                e.last_error = f"Foreign quarantine view captured in slot: {captured_view}"
+                e.last_error = f"Failed to link original destination: {exc}"
                 e.updated_at = utcnow()
                 session.commit()
             return
-        else:
+
+    # View retirement
+    attempt_dir = anchor.parent
+    parent_tx = attempt_dir.parent
+
+    target_view_slot = None
+    for att in sorted(parent_tx.glob("attempt-*")):
+        cv = att / "captured_quarantine_view"
+        if cv.exists():
+            st_cv = os.lstat(str(cv))
+            if st_cv.st_dev == dev and st_cv.st_ino == ino:
+                target_view_slot = cv
+                break
+            else:
+                with session_factory() as session:
+                    session.execute(text("BEGIN IMMEDIATE"))
+                    if worker_id:
+                        assert_active_worker_lease(session, worker_id)
+                    e = session.get(QuarantineEntry, entry_id)
+                    e.state = "conflict"
+                    e.tx_phase = "conflict"
+                    e.last_error = f"Foreign quarantine view captured in slot: {cv}"
+                    e.updated_at = utcnow()
+                    session.commit()
+                return
+
+    if target_view_slot is None:
+        if pub_path.exists():
+            candidate_slot = attempt_dir / "captured_quarantine_view"
+            if candidate_slot.exists():
+                new_gen, new_attempt = allocate_next_generation(session_factory, entry_id, worker_id, quarantine_root=q_root)
+                if worker_id:
+                    renew_and_assert_worker_lease(session_factory, worker_id)
+                new_attempt.mkdir(parents=True, exist_ok=True)
+                captured_view = new_attempt / "captured_quarantine_view"
+            else:
+                captured_view = candidate_slot
+
+            try:
+                with safe_open_parent_fd(pub_path, valid_roots) as (src_dir_fd, src_leaf):
+                    with safe_open_parent_fd(captured_view, valid_roots) as (dst_dir_fd, dst_leaf):
+                        if worker_id:
+                            renew_and_assert_worker_lease(session_factory, worker_id)
+                        os.rename(src_leaf, dst_leaf, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd)
+                target_view_slot = captured_view
+            except Exception as exc:
+                with session_factory() as session:
+                    session.execute(text("BEGIN IMMEDIATE"))
+                    if worker_id:
+                        assert_active_worker_lease(session, worker_id)
+                    e = session.get(QuarantineEntry, entry_id)
+                    e.state = "conflict"
+                    e.tx_phase = "conflict"
+                    e.last_error = f"Failed to retire public quarantine view: {exc}"
+                    e.updated_at = utcnow()
+                    session.commit()
+                return
+
+    if target_view_slot is not None and target_view_slot.exists():
+        st_view = os.lstat(str(target_view_slot))
+        if st_view.st_dev == dev and st_view.st_ino == ino:
             with session_factory() as session:
                 session.execute(text("BEGIN IMMEDIATE"))
                 if worker_id:
@@ -430,8 +656,19 @@ def _reconcile_restoring(
                 e.updated_at = now
                 session.commit()
             return
+        else:
+            with session_factory() as session:
+                session.execute(text("BEGIN IMMEDIATE"))
+                if worker_id:
+                    assert_active_worker_lease(session, worker_id)
+                e = session.get(QuarantineEntry, entry_id)
+                e.state = "conflict"
+                e.tx_phase = "conflict"
+                e.last_error = f"Foreign quarantine view captured in slot: {target_view_slot}"
+                e.updated_at = utcnow()
+                session.commit()
+            return
     else:
-        # Neither captured_view nor pub_path exists: cannot prove retirement occurred! Fail-closed to conflict.
         with session_factory() as session:
             session.execute(text("BEGIN IMMEDIATE"))
             if worker_id:

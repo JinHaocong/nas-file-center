@@ -1406,11 +1406,19 @@ class FileCenterService:
                 if not q_entry or q_entry.state != "active":
                     has_error = True
                     item_validations[row.id] = ("skipped", f"Quarantine entry #{qid} is invalid or not active", None)
-                elif not Path(row.source_path).exists():
-                    has_error = True
-                    item_validations[row.id] = ("skipped", f"Quarantine file does not exist: {row.source_path}", None)
                 else:
-                    item_validations[row.id] = ("validated", "quarantine restore validated", None)
+                    is_tx = (q_entry.tx_phase not in (None, "legacy")) or (q_entry.authoritative_anchor_path is not None)
+                    if is_tx:
+                        if not q_entry.authoritative_anchor_path or not Path(q_entry.authoritative_anchor_path).exists():
+                            has_error = True
+                            item_validations[row.id] = ("skipped", f"Authoritative anchor does not exist: {q_entry.authoritative_anchor_path}", None)
+                        else:
+                            item_validations[row.id] = ("validated", "quarantine restore validated", None)
+                    elif not Path(row.source_path).exists():
+                        has_error = True
+                        item_validations[row.id] = ("skipped", f"Quarantine file does not exist: {row.source_path}", None)
+                    else:
+                        item_validations[row.id] = ("validated", "quarantine restore validated", None)
                 continue
 
             if row.operation == "rmdir_empty":

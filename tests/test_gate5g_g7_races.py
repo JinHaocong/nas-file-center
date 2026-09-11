@@ -1,5 +1,6 @@
 import hashlib
 import os
+import stat
 from pathlib import Path
 import pytest
 from sqlalchemy import text
@@ -368,11 +369,26 @@ def test_race_r7_public_destination_replaced_after_publication(tmp_path, session
     assert (tx_dir / "captured_quarantine_view").read_bytes() == b"CORRUPTED_PUBLIC_VIEW"
 
 
-def test_race_r8_stale_worker_holds_old_tx_dir_fd(tmp_path, session_factory):
+def test_race_r8_stale_worker_holds_old_tx_dir_fd(tmp_path, session_factory, monkeypatch):
     """R8: Stale worker retains open dir_fd to old attempt directory."""
     q_dir = tmp_path / "quarantine"
     tx_dir = q_dir / ".tx" / "entry-1" / "attempt-1"
     tx_dir.mkdir(parents=True)
+
+    syscall_calls = {"link": 0, "rename": 0}
+    real_link = os.link
+    real_rename = os.rename
+
+    def spy_link(*args, **kwargs):
+        syscall_calls["link"] += 1
+        return real_link(*args, **kwargs)
+
+    def spy_rename(*args, **kwargs):
+        syscall_calls["rename"] += 1
+        return real_rename(*args, **kwargs)
+
+    monkeypatch.setattr(os, "link", spy_link)
+    monkeypatch.setattr(os, "rename", spy_rename)
 
     with session_factory() as session:
         session.execute(text("BEGIN IMMEDIATE"))
@@ -394,17 +410,40 @@ def test_race_r8_stale_worker_holds_old_tx_dir_fd(tmp_path, session_factory):
         # Stale worker 1 holding open dir_fd attempts operation; lease fence rejects
         with pytest.raises(JobLeaseLost):
             renew_and_assert_worker_lease(session_factory, "worker-1")
+
+        # Invariant verification: Zero syscall calls executed upon lease rejection
+        assert syscall_calls["link"] == 0
+        assert syscall_calls["rename"] == 0
+
+        # Invariant verification: dir_fd remained open and valid throughout
+        st_fd = os.fstat(dir_fd)
+        assert stat.S_ISDIR(st_fd.st_mode)
     finally:
         os.close(dir_fd)
 
 
-def test_race_r9_stale_worker_holds_source_parent_fd(tmp_path, session_factory):
+def test_race_r9_stale_worker_holds_source_parent_fd(tmp_path, session_factory, monkeypatch):
     """R9: Stale worker retains open parent dir_fd to source directory."""
     data_dir = tmp_path / "data"
     sub_dir = data_dir / "subdir"
     sub_dir.mkdir(parents=True)
     src_file = sub_dir / "target.txt"
     src_file.write_bytes(b"DATA")
+
+    syscall_calls = {"link": 0, "rename": 0}
+    real_link = os.link
+    real_rename = os.rename
+
+    def spy_link(*args, **kwargs):
+        syscall_calls["link"] += 1
+        return real_link(*args, **kwargs)
+
+    def spy_rename(*args, **kwargs):
+        syscall_calls["rename"] += 1
+        return real_rename(*args, **kwargs)
+
+    monkeypatch.setattr(os, "link", spy_link)
+    monkeypatch.setattr(os, "rename", spy_rename)
 
     with session_factory() as session:
         session.execute(text("BEGIN IMMEDIATE"))
@@ -426,6 +465,14 @@ def test_race_r9_stale_worker_holds_source_parent_fd(tmp_path, session_factory):
         # Stale worker 1 attempts fence while holding parent_fd open
         with pytest.raises(JobLeaseLost):
             renew_and_assert_worker_lease(session_factory, "worker-1")
+
+        # Invariant verification: Zero syscall calls executed upon lease rejection
+        assert syscall_calls["link"] == 0
+        assert syscall_calls["rename"] == 0
+
+        # Invariant verification: parent_fd remained open and valid throughout
+        st_fd = os.fstat(parent_fd)
+        assert stat.S_ISDIR(st_fd.st_mode)
     finally:
         os.close(parent_fd)
 
