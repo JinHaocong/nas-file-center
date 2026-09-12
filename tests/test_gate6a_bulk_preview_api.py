@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import os
 import re
 from pathlib import Path
 
@@ -38,6 +40,52 @@ def _setup_admin_client(tmp_path: Path) -> TestClient:
     )
     assert response.status_code == 200
     return client
+
+
+def _seed_active_transactional_entry(client: TestClient, name: str = "active.txt") -> tuple[int, Path]:
+    service = client.app.state.service
+    data = Path(service.settings.data_mount)
+    trash = Path(service.settings.quarantine_root)
+    original = data / name
+    payload = b"gate6a-active-payload"
+
+    with service.SessionLocal() as session:
+        entry = QuarantineEntry(
+            original_path=str(original),
+            quarantine_path=str(trash / f"pending-{name}"),
+            state="active",
+            tx_phase="active",
+            active_attempt_generation=1,
+            size=0,
+            content_hash=None,
+            mtime_ns=0,
+            device=0,
+            inode=0,
+            created_at=utcnow(),
+            updated_at=utcnow(),
+        )
+        session.add(entry)
+        session.flush()
+
+        attempt = trash / ".tx" / f"entry-{entry.id}" / "attempt-1"
+        attempt.mkdir(parents=True, exist_ok=True)
+        anchor = attempt / "anchor"
+        captured = attempt / "captured_source"
+        public_view = trash / f"{Path(name).stem}.q-{entry.id}{Path(name).suffix}"
+        anchor.write_bytes(payload)
+        os.link(anchor, captured)
+        os.link(anchor, public_view)
+        st = anchor.stat()
+
+        entry.quarantine_path = str(public_view)
+        entry.authoritative_anchor_path = str(anchor)
+        entry.size = st.st_size
+        entry.content_hash = hashlib.sha256(payload).hexdigest()
+        entry.mtime_ns = st.st_mtime_ns
+        entry.device = st.st_dev
+        entry.inode = st.st_ino
+        session.commit()
+        return entry.id, original
 
 
 def test_bulk_preview_rejects_empty_selection(tmp_path: Path) -> None:
@@ -216,3 +264,28 @@ def test_bulk_preview_marks_non_active_entry_blocked(tmp_path: Path) -> None:
     assert body["items"][0]["reason"] == "NON_ACTIVE_ENTRY"
     assert body["items"][0]["state"] == "restored"
     assert body["items"][0]["tx_phase"] == "restored"
+
+
+def test_bulk_restore_preview_defaults_to_skip_and_freezes_original_target(tmp_path: Path) -> None:
+    """An active restore Preview defaults to skip and freezes the exact original target."""
+    client = _setup_admin_client(tmp_path)
+    entry_id, original = _seed_active_transactional_entry(client)
+
+    response = client.post(
+        "/api/quarantine/bulk-preview",
+        json={
+            "action": "restore",
+            "entry_ids": [entry_id],
+        },
+        headers={"Origin": "http://testserver"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["eligible_count"] == 1
+    assert body["blocked_count"] == 0
+    assert body["items"][0]["entry_id"] == entry_id
+    assert body["items"][0]["eligible"] is True
+    assert body["items"][0]["conflict_policy"] == "skip"
+    assert body["items"][0]["target_path"] == str(original)
+    assert re.fullmatch(r"[0-9a-f]{64}", body["preview_digest"])
