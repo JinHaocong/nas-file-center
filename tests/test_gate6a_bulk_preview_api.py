@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.config import Settings
 from app.main import create_app
+from app.models import QuarantineEntry, utcnow
 
 
 def _setup_admin_client(tmp_path: Path) -> TestClient:
@@ -168,3 +169,50 @@ def test_bulk_preview_marks_missing_entry_blocked(tmp_path: Path) -> None:
         }
     ]
     assert re.fullmatch(r"[0-9a-f]{64}", body["preview_digest"])
+
+
+def test_bulk_preview_marks_non_active_entry_blocked(tmp_path: Path) -> None:
+    """A selected quarantine row that is no longer active remains visible but blocked."""
+    client = _setup_admin_client(tmp_path)
+    service = client.app.state.service
+    data = Path(service.settings.data_mount)
+    trash = Path(service.settings.quarantine_root)
+
+    with service.SessionLocal() as session:
+        entry = QuarantineEntry(
+            original_path=str(data / "already-restored.txt"),
+            quarantine_path=str(trash / "already-restored.q-1.txt"),
+            state="restored",
+            tx_phase="restored",
+            active_attempt_generation=3,
+            size=12,
+            content_hash="a" * 64,
+            mtime_ns=123456,
+            device=10,
+            inode=20,
+            created_at=utcnow(),
+            updated_at=utcnow(),
+        )
+        session.add(entry)
+        session.commit()
+        entry_id = entry.id
+
+    response = client.post(
+        "/api/quarantine/bulk-preview",
+        json={
+            "action": "restore",
+            "entry_ids": [entry_id],
+            "conflict_policy": "skip",
+        },
+        headers={"Origin": "http://testserver"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["eligible_count"] == 0
+    assert body["blocked_count"] == 1
+    assert body["items"][0]["entry_id"] == entry_id
+    assert body["items"][0]["eligible"] is False
+    assert body["items"][0]["reason"] == "NON_ACTIVE_ENTRY"
+    assert body["items"][0]["state"] == "restored"
+    assert body["items"][0]["tx_phase"] == "restored"
