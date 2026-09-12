@@ -16,7 +16,8 @@ def test_candidate_allows_legitimate_post_link_ctime_change_from_source_snapshot
         assert qualify_candidate_anchor_fd(fp.fileno(), st.st_dev, st.st_ino, len(content), h, mtime_ns) is True
 
 
-def test_candidate_rejects_ctime_change_during_hash(tmp_path, monkeypatch):
+def test_candidate_allows_ctime_change_during_hash_when_authoritative_facts_are_stable(tmp_path, monkeypatch):
+    """zfuse may change ctime as a side effect of read/hash; ctime alone is not mutation authority."""
     f = tmp_path / "candidate.txt"
     content = b"DATA" * 1024
     f.write_bytes(content)
@@ -32,7 +33,6 @@ def test_candidate_rejects_ctime_change_during_hash(tmp_path, monkeypatch):
         fstat_call_count += 1
         real_st = original_fstat(fd)
         if fstat_call_count > 1:
-            # Simulate ctime mutation after hash
             class FakeStat:
                 st_mode = real_st.st_mode
                 st_dev = real_st.st_dev
@@ -48,7 +48,7 @@ def test_candidate_rejects_ctime_change_during_hash(tmp_path, monkeypatch):
     monkeypatch.setattr(os, "fstat", mock_fstat)
 
     with open(f, "rb") as fp:
-        assert qualify_candidate_anchor_fd(fp.fileno(), st.st_dev, st.st_ino, len(content), h, mtime_ns) is False
+        assert qualify_candidate_anchor_fd(fp.fileno(), st.st_dev, st.st_ino, len(content), h, mtime_ns) is True
 
 
 def test_candidate_rejects_identity_mismatches(tmp_path):
