@@ -348,7 +348,6 @@ def _freeze_capture_stable_quarantine_hash(
             or a_ino != b_ino
             or a_size != b_size
             or a_mtime != b_mtime
-            or a_ctime != b_ctime
         ):
             raise StateConflictError(
                 f"Quarantine source mutated during hash capture for '{src_p}': "
