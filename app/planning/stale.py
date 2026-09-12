@@ -130,6 +130,11 @@ def verify_item_freshness(
     Verify if a plan item's target file on disk matches its frozen snapshot.
     Returns (True, None) if fresh, or (False, StaleItemDetail) if stale.
     MUST be run outside SQLite write transactions.
+
+    For hash-backed regular files, ctime is diagnostic-only. Real zfuse/fuseblk
+    production evidence shows that a read-only SHA256 pass can advance ctime while
+    device, inode, size, mtime, object type, and content remain unchanged. Those
+    authoritative facts plus SHA256 continue to fail closed on real mutation.
     """
     if operation == "restore":
         return True, None
@@ -221,6 +226,7 @@ def verify_item_freshness(
     actual_mtime_ns = int(getattr(st, "st_mtime_ns", st.st_mtime * 1e9))
     actual_ctime_ns = int(getattr(st, "st_ctime_ns", st.st_ctime * 1e9))
     actual_obj_type = "directory" if stat.S_ISDIR(st.st_mode) else "file"
+    hash_backed_regular = bool(check_hash and expected_hash and actual_obj_type == "file")
 
     actual_dict = {
         "device": actual_dev,
@@ -292,8 +298,9 @@ def verify_item_freshness(
             actual=actual_dict,
         )
 
-    # 9. Hash check
-    if check_hash and expected_hash and not stat.S_ISDIR(st.st_mode):
+    # 9. Hash check. ctime is intentionally excluded from intra-hash stability
+    # for hash-backed regular files; zfuse can advance ctime because of the read.
+    if hash_backed_regular:
         try:
             st_before = os.lstat(source_path)
             h = hashlib.sha256()
@@ -306,7 +313,6 @@ def verify_item_freshness(
                 or getattr(st_before, "st_ino", 0) != getattr(st_after, "st_ino", 0)
                 or st_before.st_size != st_after.st_size
                 or getattr(st_before, "st_mtime_ns", 0) != getattr(st_after, "st_mtime_ns", 0)
-                or getattr(st_before, "st_ctime_ns", 0) != getattr(st_after, "st_ctime_ns", 0)
             ):
                 return False, StaleItemDetail(
                     item_id=item_id,
@@ -334,9 +340,16 @@ def verify_item_freshness(
                 actual=actual_dict,
             )
 
-    # 10. Ctime check (files only; directory ctimes change upon child mutations; chained items change ctime upon producer mutation)
+    # 10. Ctime check remains for non-hash-backed file semantics. For hash-backed
+    # regular files, dev/inode/size/mtime + SHA256 are the authoritative facts.
     exp_ctime_ns = snapshot.get("ctime_ns")
-    if not is_chained and exp_ctime_ns and not stat.S_ISDIR(st.st_mode) and actual_ctime_ns != exp_ctime_ns:
+    if (
+        not hash_backed_regular
+        and not is_chained
+        and exp_ctime_ns
+        and not stat.S_ISDIR(st.st_mode)
+        and actual_ctime_ns != exp_ctime_ns
+    ):
         return False, StaleItemDetail(
             item_id=item_id,
             source_path=source_path,
