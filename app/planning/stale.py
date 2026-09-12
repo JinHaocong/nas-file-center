@@ -292,7 +292,9 @@ def verify_item_freshness(
             actual=actual_dict,
         )
 
-    # 9. Hash check
+    # 9. Hash check. ctime is deliberately excluded from the read-stability
+    # authority: zfuse can advance ctime as a side effect of O_RDONLY reads.
+    # dev/inode/size/mtime plus the frozen SHA256 remain authoritative.
     if check_hash and expected_hash and not stat.S_ISDIR(st.st_mode):
         try:
             st_before = os.lstat(source_path)
@@ -306,7 +308,6 @@ def verify_item_freshness(
                 or getattr(st_before, "st_ino", 0) != getattr(st_after, "st_ino", 0)
                 or st_before.st_size != st_after.st_size
                 or getattr(st_before, "st_mtime_ns", 0) != getattr(st_after, "st_mtime_ns", 0)
-                or getattr(st_before, "st_ctime_ns", 0) != getattr(st_after, "st_ctime_ns", 0)
             ):
                 return False, StaleItemDetail(
                     item_id=item_id,
@@ -334,9 +335,17 @@ def verify_item_freshness(
                 actual=actual_dict,
             )
 
-    # 10. Ctime check (files only; directory ctimes change upon child mutations; chained items change ctime upon producer mutation)
+    # 10. Ctime remains a stale guard only for regular-file items that do not
+    # have an authoritative frozen SHA256.  Hashed regular files intentionally
+    # ignore ctime because zfuse reads can advance it without content mutation.
     exp_ctime_ns = snapshot.get("ctime_ns")
-    if not is_chained and exp_ctime_ns and not stat.S_ISDIR(st.st_mode) and actual_ctime_ns != exp_ctime_ns:
+    if (
+        not expected_hash
+        and not is_chained
+        and exp_ctime_ns
+        and not stat.S_ISDIR(st.st_mode)
+        and actual_ctime_ns != exp_ctime_ns
+    ):
         return False, StaleItemDetail(
             item_id=item_id,
             source_path=source_path,
