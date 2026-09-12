@@ -27,7 +27,7 @@ class QuarantineBulkPreviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     action: Literal["restore", "purge"]
-    entry_ids: list[int] = Field(min_length=1)
+    entry_ids: list[int] = Field(min_length=1, max_length=5000)
     conflict_policy: Literal["skip", "rename"] | None = None
 
     @field_validator("entry_ids")
