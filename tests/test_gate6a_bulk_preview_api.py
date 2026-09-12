@@ -120,3 +120,20 @@ def test_bulk_preview_rejects_conflict_policy_for_purge(tmp_path: Path) -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_bulk_preview_rejects_custom_target_for_purge(tmp_path: Path) -> None:
+    """Bulk purge must reject restore-only custom target input instead of ignoring it."""
+    client = _setup_admin_client(tmp_path)
+
+    response = client.post(
+        "/api/quarantine/bulk-preview",
+        json={
+            "action": "purge",
+            "entry_ids": [7],
+            "custom_target": str(tmp_path / "forbidden-target.txt"),
+        },
+        headers={"Origin": "http://testserver"},
+    )
+
+    assert response.status_code == 422
