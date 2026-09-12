@@ -13,6 +13,7 @@ from app.quarantine.bulk import (
     canonicalize_entry_ids,
     quarantine_entry_identity_material,
 )
+from app.quarantine.paths import build_restore_rename_path
 
 
 router = APIRouter(
@@ -79,18 +80,26 @@ def preview_quarantine_bulk(request: Request, payload: QuarantineBulkPreviewRequ
 
             if payload.action == "purge":
                 raise HTTPException(status_code=501, detail="Gate6-A active-entry purge preview not implemented")
-            if effective_conflict_policy == "rename":
-                raise HTTPException(status_code=501, detail="Gate6-A rename restore preview not implemented")
 
-            target_path = validate_mutation_destination(
+            original_target = validate_mutation_destination(
                 entry.original_path,
                 service.settings.allowed_roots,
                 quarantine_root=service.settings.quarantine_root,
             )
+            target_path = original_target
+            if effective_conflict_policy == "rename" and (
+                original_target.exists() or original_target.is_symlink()
+            ):
+                target_path = validate_mutation_destination(
+                    build_restore_rename_path(original_target, entry_id=entry.id),
+                    service.settings.allowed_roots,
+                    quarantine_root=service.settings.quarantine_root,
+                )
+
             item = {
                 "entry_id": entry_id,
                 "eligible": True,
-                "conflict_policy": "skip",
+                "conflict_policy": effective_conflict_policy,
                 "target_path": str(target_path),
             }
             items.append(item)
