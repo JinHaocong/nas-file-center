@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.auth.dependencies import get_current_user
 from app.models import QuarantineEntry
 from app.path_safety import validate_mutation_destination
 from app.quarantine.bulk import (
+    build_purge_topology_manifest,
     canonical_preview_digest,
     canonicalize_entry_ids,
     quarantine_entry_identity_material,
@@ -79,7 +80,17 @@ def preview_quarantine_bulk(request: Request, payload: QuarantineBulkPreviewRequ
                 continue
 
             if payload.action == "purge":
-                raise HTTPException(status_code=501, detail="Gate6-A active-entry purge preview not implemented")
+                manifest = build_purge_topology_manifest(entry, service.settings.quarantine_root)
+                blockers = manifest["blockers"]
+                item = {
+                    "entry_id": entry_id,
+                    "eligible": not blockers,
+                    "reason": blockers[0] if blockers else None,
+                    "purge_topology_manifest": manifest,
+                }
+                items.append(item)
+                digest_items.append({**identity, **item})
+                continue
 
             original_target = validate_mutation_destination(
                 entry.original_path,
