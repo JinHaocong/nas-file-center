@@ -70,3 +70,19 @@ def test_bulk_preview_rejects_duplicate_entry_ids(tmp_path: Path) -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_bulk_preview_rejects_unsupported_action(tmp_path: Path) -> None:
+    """Only the frozen restore and purge actions are valid Gate6-A bulk operations."""
+    client = _setup_admin_client(tmp_path)
+
+    response = client.post(
+        "/api/quarantine/bulk-preview",
+        json={
+            "action": "archive",
+            "entry_ids": [7],
+        },
+        headers={"Origin": "http://testserver"},
+    )
+
+    assert response.status_code == 422
