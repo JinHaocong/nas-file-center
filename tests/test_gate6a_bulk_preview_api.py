@@ -86,3 +86,20 @@ def test_bulk_preview_rejects_unsupported_action(tmp_path: Path) -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_bulk_preview_rejects_unsupported_restore_conflict_policy(tmp_path: Path) -> None:
+    """Bulk restore conflict handling is frozen to skip or deterministic rename only."""
+    client = _setup_admin_client(tmp_path)
+
+    response = client.post(
+        "/api/quarantine/bulk-preview",
+        json={
+            "action": "restore",
+            "entry_ids": [7],
+            "conflict_policy": "overwrite",
+        },
+        headers={"Origin": "http://testserver"},
+    )
+
+    assert response.status_code == 422
