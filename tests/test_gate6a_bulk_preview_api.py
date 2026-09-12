@@ -53,3 +53,20 @@ def test_bulk_preview_rejects_empty_selection(tmp_path: Path) -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_bulk_preview_rejects_duplicate_entry_ids(tmp_path: Path) -> None:
+    """Duplicate selection is invalid; Gate6-A must never silently deduplicate it."""
+    client = _setup_admin_client(tmp_path)
+
+    response = client.post(
+        "/api/quarantine/bulk-preview",
+        json={
+            "action": "restore",
+            "entry_ids": [7, 7],
+            "conflict_policy": "skip",
+        },
+        headers={"Origin": "http://testserver"},
+    )
+
+    assert response.status_code == 422
