@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.auth.dependencies import get_current_user
+from app.quarantine.bulk import canonical_preview_digest, canonicalize_entry_ids
 
 
 router = APIRouter(
@@ -37,5 +38,36 @@ class QuarantineBulkPreviewRequest(BaseModel):
 
 
 @router.post("/bulk-preview")
-def preview_quarantine_bulk(payload: QuarantineBulkPreviewRequest):
-    raise HTTPException(status_code=501, detail="Gate6-A bulk preview not implemented")
+def preview_quarantine_bulk(request: Request, payload: QuarantineBulkPreviewRequest):
+    entry_ids = canonicalize_entry_ids(payload.entry_ids)
+    items: list[dict[str, object]] = []
+
+    for entry_id in entry_ids:
+        try:
+            request.app.state.service.get_quarantine_entry(entry_id)
+        except KeyError:
+            items.append(
+                {
+                    "entry_id": entry_id,
+                    "eligible": False,
+                    "reason": "MISSING_ENTRY",
+                }
+            )
+            continue
+
+        raise HTTPException(status_code=501, detail="Gate6-A active-entry bulk preview not implemented")
+
+    material = {
+        "action": payload.action,
+        "entry_ids": entry_ids,
+        "conflict_policy": payload.conflict_policy if payload.action == "restore" else None,
+        "items": items,
+    }
+    return {
+        "action": payload.action,
+        "entry_ids": entry_ids,
+        "eligible_count": 0,
+        "blocked_count": len(items),
+        "items": items,
+        "preview_digest": canonical_preview_digest(material),
+    }
