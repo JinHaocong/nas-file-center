@@ -103,3 +103,20 @@ def test_bulk_preview_rejects_unsupported_restore_conflict_policy(tmp_path: Path
     )
 
     assert response.status_code == 422
+
+
+def test_bulk_preview_rejects_conflict_policy_for_purge(tmp_path: Path) -> None:
+    """Purge has no restore conflict policy; sending one is invalid instead of ignored."""
+    client = _setup_admin_client(tmp_path)
+
+    response = client.post(
+        "/api/quarantine/bulk-preview",
+        json={
+            "action": "purge",
+            "entry_ids": [7],
+            "conflict_policy": "skip",
+        },
+        headers={"Origin": "http://testserver"},
+    )
+
+    assert response.status_code == 422
