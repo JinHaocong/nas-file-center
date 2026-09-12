@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.auth.dependencies import get_current_user
+from app.models import QuarantineEntry
 from app.quarantine.bulk import canonical_preview_digest, canonicalize_entry_ids
 
 
@@ -41,33 +42,34 @@ class QuarantineBulkPreviewRequest(BaseModel):
 def preview_quarantine_bulk(request: Request, payload: QuarantineBulkPreviewRequest):
     entry_ids = canonicalize_entry_ids(payload.entry_ids)
     items: list[dict[str, object]] = []
+    service = request.app.state.service
 
-    for entry_id in entry_ids:
-        try:
-            entry = request.app.state.service.get_quarantine_entry(entry_id)
-        except KeyError:
-            items.append(
-                {
-                    "entry_id": entry_id,
-                    "eligible": False,
-                    "reason": "MISSING_ENTRY",
-                }
-            )
-            continue
+    with service.SessionLocal() as session:
+        for entry_id in entry_ids:
+            entry = session.get(QuarantineEntry, entry_id)
+            if entry is None:
+                items.append(
+                    {
+                        "entry_id": entry_id,
+                        "eligible": False,
+                        "reason": "MISSING_ENTRY",
+                    }
+                )
+                continue
 
-        if entry["state"] != "active":
-            items.append(
-                {
-                    "entry_id": entry_id,
-                    "eligible": False,
-                    "reason": "NON_ACTIVE_ENTRY",
-                    "state": entry["state"],
-                    "tx_phase": entry.get("tx_phase"),
-                }
-            )
-            continue
+            if entry.state != "active":
+                items.append(
+                    {
+                        "entry_id": entry_id,
+                        "eligible": False,
+                        "reason": "NON_ACTIVE_ENTRY",
+                        "state": entry.state,
+                        "tx_phase": entry.tx_phase,
+                    }
+                )
+                continue
 
-        raise HTTPException(status_code=501, detail="Gate6-A active-entry bulk preview not implemented")
+            raise HTTPException(status_code=501, detail="Gate6-A active-entry bulk preview not implemented")
 
     material = {
         "action": payload.action,
