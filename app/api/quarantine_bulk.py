@@ -7,7 +7,12 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from app.auth.dependencies import get_current_user
 from app.models import QuarantineEntry
-from app.quarantine.bulk import canonical_preview_digest, canonicalize_entry_ids
+from app.path_safety import validate_mutation_destination
+from app.quarantine.bulk import (
+    canonical_preview_digest,
+    canonicalize_entry_ids,
+    quarantine_entry_identity_material,
+)
 
 
 router = APIRouter(
@@ -42,40 +47,60 @@ class QuarantineBulkPreviewRequest(BaseModel):
 def preview_quarantine_bulk(request: Request, payload: QuarantineBulkPreviewRequest):
     entry_ids = canonicalize_entry_ids(payload.entry_ids)
     items: list[dict[str, object]] = []
+    digest_items: list[dict[str, object]] = []
     service = request.app.state.service
+    effective_conflict_policy = (payload.conflict_policy or "skip") if payload.action == "restore" else None
 
     with service.SessionLocal() as session:
         for entry_id in entry_ids:
             entry = session.get(QuarantineEntry, entry_id)
             if entry is None:
-                items.append(
-                    {
-                        "entry_id": entry_id,
-                        "eligible": False,
-                        "reason": "MISSING_ENTRY",
-                    }
-                )
+                item = {
+                    "entry_id": entry_id,
+                    "eligible": False,
+                    "reason": "MISSING_ENTRY",
+                }
+                items.append(item)
+                digest_items.append(dict(item))
                 continue
 
+            identity = quarantine_entry_identity_material(entry)
             if entry.state != "active":
-                items.append(
-                    {
-                        "entry_id": entry_id,
-                        "eligible": False,
-                        "reason": "NON_ACTIVE_ENTRY",
-                        "state": entry.state,
-                        "tx_phase": entry.tx_phase,
-                    }
-                )
+                item = {
+                    "entry_id": entry_id,
+                    "eligible": False,
+                    "reason": "NON_ACTIVE_ENTRY",
+                    "state": entry.state,
+                    "tx_phase": entry.tx_phase,
+                }
+                items.append(item)
+                digest_items.append({**identity, **item})
                 continue
 
-            raise HTTPException(status_code=501, detail="Gate6-A active-entry bulk preview not implemented")
+            if payload.action == "purge":
+                raise HTTPException(status_code=501, detail="Gate6-A active-entry purge preview not implemented")
+            if effective_conflict_policy == "rename":
+                raise HTTPException(status_code=501, detail="Gate6-A rename restore preview not implemented")
+
+            target_path = validate_mutation_destination(
+                entry.original_path,
+                service.settings.allowed_roots,
+                quarantine_root=service.settings.quarantine_root,
+            )
+            item = {
+                "entry_id": entry_id,
+                "eligible": True,
+                "conflict_policy": "skip",
+                "target_path": str(target_path),
+            }
+            items.append(item)
+            digest_items.append({**identity, **item})
 
     material = {
         "action": payload.action,
         "entry_ids": entry_ids,
-        "conflict_policy": payload.conflict_policy if payload.action == "restore" else None,
-        "items": items,
+        "conflict_policy": effective_conflict_policy,
+        "items": digest_items,
     }
     blocked_count = sum(1 for item in items if not item["eligible"])
     return {
