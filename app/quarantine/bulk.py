@@ -3,9 +3,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import stat
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 
 
 def canonicalize_entry_ids(entry_ids: Iterable[int]) -> list[int]:
@@ -51,7 +52,26 @@ def _matches_persisted_identity(path: Path, entry: Any) -> bool:
     )
 
 
-def build_purge_topology_manifest(entry: Any, quarantine_root: Path | str) -> dict[str, Any]:
+def _private_owner_id(path: Path, tx_root: Path) -> int | None:
+    try:
+        relative = path.relative_to(tx_root)
+    except ValueError:
+        return None
+    if len(relative.parts) < 3:
+        return None
+    entry_match = re.fullmatch(r"entry-(\d+)", relative.parts[0])
+    attempt_match = re.fullmatch(r"attempt-(\d+)", relative.parts[1])
+    if not entry_match or not attempt_match:
+        return None
+    return int(entry_match.group(1))
+
+
+def build_purge_topology_manifest(
+    entry: Any,
+    quarantine_root: Path | str,
+    *,
+    owner_lookup: Callable[[int], Any | None] | None = None,
+) -> dict[str, Any]:
     """Build a read-only, fail-closed manifest for one transactional purge Preview."""
     root = _absolute_lexical(quarantine_root)
     tx_root = root / ".tx"
@@ -61,31 +81,36 @@ def build_purge_topology_manifest(entry: Any, quarantine_root: Path | str) -> di
     captured_source = attempt / "captured_source"
     public_view = _absolute_lexical(entry.quarantine_path)
     blockers: list[str] = []
+    blocking_owner_entry_ids: set[int] = set()
+
+    def add_blocker(code: str) -> None:
+        if code not in blockers:
+            blockers.append(code)
 
     if root.is_symlink() or tx_root.is_symlink():
-        blockers.append("UNSAFE_QUARANTINE_NAMESPACE")
+        add_blocker("UNSAFE_QUARANTINE_NAMESPACE")
 
     if not entry.content_hash:
-        blockers.append("MISSING_AUTHORITATIVE_HASH")
+        add_blocker("MISSING_AUTHORITATIVE_HASH")
     if generation <= 0:
-        blockers.append("INVALID_ACTIVE_GENERATION")
+        add_blocker("INVALID_ACTIVE_GENERATION")
 
     if not entry.authoritative_anchor_path:
-        blockers.append("MISSING_AUTHORITATIVE_ANCHOR")
+        add_blocker("MISSING_AUTHORITATIVE_ANCHOR")
     elif _absolute_lexical(entry.authoritative_anchor_path) != expected_anchor:
-        blockers.append("ANCHOR_PATH_MISMATCH")
+        add_blocker("ANCHOR_PATH_MISMATCH")
 
     try:
         public_view.relative_to(root)
     except ValueError:
-        blockers.append("PUBLIC_VIEW_OUTSIDE_QUARANTINE_ROOT")
+        add_blocker("PUBLIC_VIEW_OUTSIDE_QUARANTINE_ROOT")
     else:
         try:
             public_view.relative_to(tx_root)
         except ValueError:
             pass
         else:
-            blockers.append("PUBLIC_VIEW_INSIDE_PRIVATE_NAMESPACE")
+            add_blocker("PUBLIC_VIEW_INSIDE_PRIVATE_NAMESPACE")
 
     aliases = [
         {"role": "authoritative_anchor", "owner_entry_id": entry.id, "path": str(expected_anchor)},
@@ -96,7 +121,7 @@ def build_purge_topology_manifest(entry: Any, quarantine_root: Path | str) -> di
     known_paths = {expected_anchor, captured_source, public_view}
     for alias in aliases:
         if not _matches_persisted_identity(Path(alias["path"]), entry):
-            blockers.append(f"IDENTITY_MISMATCH:{alias['role']}")
+            add_blocker(f"IDENTITY_MISMATCH:{alias['role']}")
 
     # Discover additional aliases only inside NFC's private transaction namespace.
     # st_nlink is intentionally not used as authority on zfuse.
@@ -111,13 +136,49 @@ def build_purge_topology_manifest(entry: Any, quarantine_root: Path | str) -> di
                     st = candidate.stat(follow_symlinks=False)
                 except OSError:
                     continue
-                if stat.S_ISREG(st.st_mode) and st.st_dev == entry.device and st.st_ino == entry.inode:
-                    blockers.append(f"UNCLASSIFIED_PAYLOAD_ALIAS:{candidate}")
+                if not (stat.S_ISREG(st.st_mode) and st.st_dev == entry.device and st.st_ino == entry.inode):
+                    continue
+
+                owner_id = _private_owner_id(candidate, tx_root)
+                if owner_id is None:
+                    add_blocker("UNRECOGNIZED_PRIVATE_PATH")
+                    continue
+                if owner_id == entry.id:
+                    add_blocker("UNRECOGNIZED_PRIVATE_PATH")
+                    continue
+
+                owner = owner_lookup(owner_id) if owner_lookup is not None else None
+                if owner is None:
+                    add_blocker("UNKNOWN_PAYLOAD_OWNER")
+                    continue
+
+                if owner.state == "active":
+                    add_blocker("SHARED_ACTIVE_PAYLOAD")
+                    blocking_owner_entry_ids.add(owner_id)
+                elif owner.state == "restoring":
+                    add_blocker("SHARED_RESTORING_PAYLOAD")
+                    blocking_owner_entry_ids.add(owner_id)
+                elif owner.state == "restored":
+                    add_blocker("SHARED_RESTORED_PAYLOAD")
+                    blocking_owner_entry_ids.add(owner_id)
+                elif (
+                    owner.state == "conflict"
+                    and owner.tx_phase == "conflict"
+                    and owner.authoritative_anchor_path is None
+                ):
+                    # Historical conflict candidates become eligible only after the
+                    # dedicated Gate6-A reclassification test freezes that contract.
+                    add_blocker("HISTORICAL_CONFLICT_ALIAS_UNCLASSIFIED")
+                    blocking_owner_entry_ids.add(owner_id)
+                else:
+                    add_blocker("UNKNOWN_PAYLOAD_OWNER_STATE")
+                    blocking_owner_entry_ids.add(owner_id)
 
     return {
         "selected_entry_id": entry.id,
         "aliases": aliases,
         "historical_conflict_entry_ids": [],
+        "blocking_owner_entry_ids": sorted(blocking_owner_entry_ids),
         "blockers": blockers,
     }
 
