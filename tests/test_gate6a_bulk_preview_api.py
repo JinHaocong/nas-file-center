@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -137,3 +138,33 @@ def test_bulk_preview_rejects_custom_target_for_purge(tmp_path: Path) -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_bulk_preview_marks_missing_entry_blocked(tmp_path: Path) -> None:
+    """Preview remains read-only and reports a missing selected member as blocked."""
+    client = _setup_admin_client(tmp_path)
+
+    response = client.post(
+        "/api/quarantine/bulk-preview",
+        json={
+            "action": "restore",
+            "entry_ids": [999],
+            "conflict_policy": "skip",
+        },
+        headers={"Origin": "http://testserver"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["action"] == "restore"
+    assert body["entry_ids"] == [999]
+    assert body["eligible_count"] == 0
+    assert body["blocked_count"] == 1
+    assert body["items"] == [
+        {
+            "entry_id": 999,
+            "eligible": False,
+            "reason": "MISSING_ENTRY",
+        }
+    ]
+    assert re.fullmatch(r"[0-9a-f]{64}", body["preview_digest"])
