@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.router import router as api_router
+from app.api.quarantine_bulk import router as quarantine_bulk_router
 from app.auth.dependencies import get_current_user
 from app.auth.rate_limiter import LoginRateLimiter
 from app.auth.router import router as auth_router
@@ -126,8 +127,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     if static_dir.exists():
         app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
-    # Include Auth and API routers
+    # Include Auth and API routers. Gate6-A static quarantine routes are
+    # registered before the legacy /quarantine/{id} dynamic routes.
     app.include_router(auth_router)
+    app.include_router(quarantine_bulk_router)
     app.include_router(api_router)
 
     # React Frontend SPA Hosting (TASK-031-03)
