@@ -18,7 +18,7 @@ router = APIRouter(
 class QuarantineBulkPreviewRequest(BaseModel):
     action: Literal["restore", "purge"]
     entry_ids: list[int] = Field(min_length=1)
-    conflict_policy: str | None = None
+    conflict_policy: Literal["skip", "rename"] | None = None
 
     @field_validator("entry_ids")
     @classmethod
