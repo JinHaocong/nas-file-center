@@ -90,6 +90,45 @@ def _seed_active_entry(client: TestClient, name: str = "purge.txt") -> tuple[int
         }
 
 
+def _seed_shared_active_owner(client: TestClient, source_anchor: Path, name: str = "shared.txt") -> int:
+    service = client.app.state.service
+    data = Path(service.settings.data_mount)
+    trash = Path(service.settings.quarantine_root)
+    st = source_anchor.stat(follow_symlinks=False)
+    payload_hash = hashlib.sha256(source_anchor.read_bytes()).hexdigest()
+
+    with service.SessionLocal() as session:
+        entry = QuarantineEntry(
+            original_path=str(data / name),
+            quarantine_path=str(trash / f"pending-{name}"),
+            state="active",
+            tx_phase="active",
+            active_attempt_generation=1,
+            size=st.st_size,
+            content_hash=payload_hash,
+            mtime_ns=st.st_mtime_ns,
+            device=st.st_dev,
+            inode=st.st_ino,
+            created_at=utcnow(),
+            updated_at=utcnow(),
+        )
+        session.add(entry)
+        session.flush()
+
+        attempt = trash / ".tx" / f"entry-{entry.id}" / "attempt-1"
+        attempt.mkdir(parents=True, exist_ok=True)
+        anchor = attempt / "anchor"
+        captured = attempt / "captured_source"
+        public_view = trash / f"{Path(name).stem}.q-{entry.id}{Path(name).suffix}"
+        os.link(source_anchor, anchor)
+        os.link(source_anchor, captured)
+        os.link(source_anchor, public_view)
+        entry.quarantine_path = str(public_view)
+        entry.authoritative_anchor_path = str(anchor)
+        session.commit()
+        return entry.id
+
+
 def test_bulk_purge_preview_builds_read_only_owned_topology_manifest(tmp_path: Path) -> None:
     client = _setup_admin_client(tmp_path)
     entry_id, paths = _seed_active_entry(client)
@@ -131,3 +170,26 @@ def test_bulk_purge_preview_builds_read_only_owned_topology_manifest(tmp_path: P
             before[role].st_size,
             before[role].st_mtime_ns,
         )
+
+
+def test_bulk_purge_preview_blocks_same_payload_owned_by_another_active_entry(tmp_path: Path) -> None:
+    client = _setup_admin_client(tmp_path)
+    selected_id, selected_paths = _seed_active_entry(client, "selected.txt")
+    other_id = _seed_shared_active_owner(client, selected_paths["anchor"], "other-active.txt")
+
+    response = client.post(
+        "/api/quarantine/bulk-preview",
+        json={"action": "purge", "entry_ids": [selected_id]},
+        headers={"Origin": "http://testserver"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["eligible_count"] == 0
+    assert body["blocked_count"] == 1
+    item = body["items"][0]
+    assert item["eligible"] is False
+    assert item["reason"] == "SHARED_ACTIVE_PAYLOAD"
+    manifest = item["purge_topology_manifest"]
+    assert manifest["blocking_owner_entry_ids"] == [other_id]
+    assert manifest["historical_conflict_entry_ids"] == []
