@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
@@ -14,7 +16,7 @@ router = APIRouter(
 
 
 class QuarantineBulkPreviewRequest(BaseModel):
-    action: str
+    action: Literal["restore", "purge"]
     entry_ids: list[int] = Field(min_length=1)
     conflict_policy: str | None = None
 
