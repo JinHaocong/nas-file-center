@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.auth.dependencies import get_current_user
 
@@ -16,6 +16,8 @@ router = APIRouter(
 
 
 class QuarantineBulkPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     action: Literal["restore", "purge"]
     entry_ids: list[int] = Field(min_length=1)
     conflict_policy: Literal["skip", "rename"] | None = None
