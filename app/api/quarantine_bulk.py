@@ -80,7 +80,11 @@ def preview_quarantine_bulk(request: Request, payload: QuarantineBulkPreviewRequ
                 continue
 
             if payload.action == "purge":
-                manifest = build_purge_topology_manifest(entry, service.settings.quarantine_root)
+                manifest = build_purge_topology_manifest(
+                    entry,
+                    service.settings.quarantine_root,
+                    owner_lookup=lambda owner_id: session.get(QuarantineEntry, owner_id),
+                )
                 blockers = manifest["blockers"]
                 item = {
                     "entry_id": entry_id,
