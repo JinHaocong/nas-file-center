@@ -14,10 +14,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      CONFIG_DIR: ${{ runner.temp }}/nfc-config
-      DATA_MOUNT: ${{ runner.temp }}/nfc-data
-      ALLOWED_ROOTS: ${{ runner.temp }}/nfc-data
-      QUARANTINE_ROOT: ${{ runner.temp }}/nfc-data/.nas-file-center-trash
+      CONFIG_DIR: /tmp/nfc-config
+      DATA_MOUNT: /tmp/nfc-data
+      ALLOWED_ROOTS: /tmp/nfc-data
+      QUARANTINE_ROOT: /tmp/nfc-data/.nas-file-center-trash
 
     steps:
       - name: Checkout
