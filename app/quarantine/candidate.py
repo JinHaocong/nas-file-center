@@ -30,8 +30,12 @@ def qualify_candidate_anchor_fd(
     3. st_mtime_ns == expected_mtime_ns (if provided)
     4. Streaming SHA256 matches expected_hash
     5. Post-hash stat check (intra-qualification stability):
-       st_dev, st_ino, st_size, mtime_ns, and ctime_ns must match before-hash snapshot.
-    (Note: Pre-link ctime comparison is NOT required, as os.link legitimately modifies ctime).
+       st_dev, st_ino, st_size, and mtime_ns must match before-hash snapshot.
+
+    ctime is intentionally diagnostic-only for regular-file hash stability.  Real
+    zfuse deployments can advance ctime as a side effect of O_RDONLY reads, so
+    treating ctime as a mutation authority here creates deterministic false
+    conflicts while dev/inode/size/mtime/SHA256 remain stable.
     """
     try:
         st_before = os.fstat(candidate_fd)
@@ -45,7 +49,6 @@ def qualify_candidate_anchor_fd(
         return False
 
     before_mtime_ns = getattr(st_before, "st_mtime_ns", int(st_before.st_mtime * 1e9))
-    before_ctime_ns = getattr(st_before, "st_ctime_ns", int(st_before.st_ctime * 1e9))
 
     if expected_mtime_ns is not None and expected_mtime_ns > 0 and before_mtime_ns != expected_mtime_ns:
         return False
@@ -67,12 +70,10 @@ def qualify_candidate_anchor_fd(
         return False
 
     after_mtime_ns = getattr(st_after, "st_mtime_ns", int(st_after.st_mtime * 1e9))
-    after_ctime_ns = getattr(st_after, "st_ctime_ns", int(st_after.st_ctime * 1e9))
 
     return (
         st_after.st_dev == st_before.st_dev
         and st_after.st_ino == st_before.st_ino
         and st_after.st_size == st_before.st_size
         and after_mtime_ns == before_mtime_ns
-        and after_ctime_ns == before_ctime_ns
     )
