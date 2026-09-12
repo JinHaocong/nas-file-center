@@ -44,13 +44,25 @@ def preview_quarantine_bulk(request: Request, payload: QuarantineBulkPreviewRequ
 
     for entry_id in entry_ids:
         try:
-            request.app.state.service.get_quarantine_entry(entry_id)
+            entry = request.app.state.service.get_quarantine_entry(entry_id)
         except KeyError:
             items.append(
                 {
                     "entry_id": entry_id,
                     "eligible": False,
                     "reason": "MISSING_ENTRY",
+                }
+            )
+            continue
+
+        if entry["state"] != "active":
+            items.append(
+                {
+                    "entry_id": entry_id,
+                    "eligible": False,
+                    "reason": "NON_ACTIVE_ENTRY",
+                    "state": entry["state"],
+                    "tx_phase": entry.get("tx_phase"),
                 }
             )
             continue
@@ -63,11 +75,12 @@ def preview_quarantine_bulk(request: Request, payload: QuarantineBulkPreviewRequ
         "conflict_policy": payload.conflict_policy if payload.action == "restore" else None,
         "items": items,
     }
+    blocked_count = sum(1 for item in items if not item["eligible"])
     return {
         "action": payload.action,
         "entry_ids": entry_ids,
-        "eligible_count": 0,
-        "blocked_count": len(items),
+        "eligible_count": len(items) - blocked_count,
+        "blocked_count": blocked_count,
         "items": items,
         "preview_digest": canonical_preview_digest(material),
     }
