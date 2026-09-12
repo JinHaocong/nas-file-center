@@ -13,6 +13,11 @@ jobs:
   backend-tdd:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      CONFIG_DIR: ${{ runner.temp }}/nfc-config
+      DATA_MOUNT: ${{ runner.temp }}/nfc-data
+      ALLOWED_ROOTS: ${{ runner.temp }}/nfc-data
+      QUARANTINE_ROOT: ${{ runner.temp }}/nfc-data/.nas-file-center-trash
 
     steps:
       - name: Checkout
