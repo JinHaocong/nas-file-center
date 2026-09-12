@@ -1,0 +1,36 @@
+name: Gate6-A TDD
+
+on:
+  push:
+    branches:
+      - v0.3.6-gate6a-quarantine-bulk-operations
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend-tdd:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install test dependencies
+        run: python -m pip install -e '.[test]'
+
+      - name: Run current Gate6-A RED target
+        env:
+          PYTHONPATH: .
+        run: >-
+          pytest
+          tests/test_gate6a_bulk_preview_api.py::test_bulk_preview_rejects_empty_selection
+          -v
