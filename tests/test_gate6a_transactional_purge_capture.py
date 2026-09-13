@@ -83,3 +83,36 @@ def test_purge_intent_commits_purging_before_capture_phase(tmp_path: Path) -> No
         assert entry.state == "purging"
         assert entry.tx_phase == "purging"
         assert entry.active_attempt_generation == 1
+
+
+def test_purge_capture_attempt_generation_is_monotonic_and_never_reuses_occupied_dir(tmp_path: Path) -> None:
+    from app.quarantine.purge import _allocate_transactional_purge_attempt
+
+    SessionLocal = _session_factory(tmp_path)
+    quarantine_root = tmp_path / "trash"
+    quarantine_root.mkdir()
+    _insert_entry(SessionLocal, state="purging", tx_phase="purging")
+
+    occupied_attempt = quarantine_root / ".tx" / "entry-1" / "attempt-2"
+    occupied_attempt.mkdir(parents=True)
+    sentinel = occupied_attempt / "foreign-sentinel"
+    sentinel.write_bytes(b"must-not-be-overwritten")
+
+    generation, attempt_dir, purge_dir = _allocate_transactional_purge_attempt(
+        SessionLocal,
+        1,
+        "worker-1",
+        quarantine_root,
+    )
+
+    assert generation == 3
+    assert attempt_dir == quarantine_root / ".tx" / "entry-1" / "attempt-3"
+    assert purge_dir == attempt_dir / "purge"
+    assert attempt_dir.is_dir()
+    assert purge_dir.is_dir()
+    assert sentinel.read_bytes() == b"must-not-be-overwritten"
+
+    with SessionLocal() as session:
+        entry = session.get(QuarantineEntry, 1)
+        assert entry is not None
+        assert entry.active_attempt_generation == 3
