@@ -255,3 +255,49 @@ def test_purge_topology_classifier_blocks_historical_candidate_hash_mismatch(tmp
 
     assert "HISTORICAL_CONFLICT_IDENTITY_MISMATCH" in manifest["blockers"]
     assert manifest["blocking_owner_entry_ids"] == [2]
+
+
+def test_validate_purge_topology_manifest_reports_blocker_and_topology_change() -> None:
+    from app.quarantine.purge import validate_purge_topology_manifest
+
+    frozen = {
+        "selected_entry_id": 1,
+        "aliases": [{"role": "public_view", "owner_entry_id": 1, "path": "/q/a"}],
+        "historical_conflict_entry_ids": [],
+        "blocking_owner_entry_ids": [],
+        "blockers": [],
+    }
+    assert validate_purge_topology_manifest(frozen, dict(frozen)) is None
+
+    blocked = dict(frozen)
+    blocked["blockers"] = ["SHARED_ACTIVE_PAYLOAD"]
+    assert validate_purge_topology_manifest(frozen, blocked) == "SHARED_ACTIVE_PAYLOAD"
+
+    changed = dict(frozen)
+    changed["aliases"] = [{"role": "public_view", "owner_entry_id": 1, "path": "/q/b"}]
+    assert validate_purge_topology_manifest(frozen, changed) == "PURGE_TOPOLOGY_CHANGED"
+
+
+def test_classify_cross_entry_alias_owner_has_stable_active_and_history_contract(tmp_path: Path) -> None:
+    from app.quarantine.purge import classify_cross_entry_alias_owner
+
+    selected, data, trash, _, anchor, _, _ = _normal_topology(tmp_path, b"gate6a-owner-helper")
+    other_attempt = trash / ".tx" / "entry-2" / "attempt-1"
+    other_attempt.mkdir(parents=True)
+    candidate = other_attempt / "anchor"
+    os.link(anchor, candidate)
+    owner = _entry(2, data / "other.bin", trash / "other.q-2.bin", candidate)
+    tx_root = trash / ".tx"
+
+    assert classify_cross_entry_alias_owner(selected, owner, candidate, tx_root) == (
+        None,
+        "SHARED_ACTIVE_PAYLOAD",
+    )
+
+    owner.state = "conflict"
+    owner.tx_phase = "conflict"
+    owner.authoritative_anchor_path = None
+    assert classify_cross_entry_alias_owner(selected, owner, candidate, tx_root) == (
+        "historical_conflict_candidate",
+        None,
+    )
