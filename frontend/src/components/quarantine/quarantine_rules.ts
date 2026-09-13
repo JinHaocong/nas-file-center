@@ -79,6 +79,16 @@ export function isBulkPreviewSelectionCurrent(
   return preview.every((id, index) => id === selected[index]);
 }
 
+export function isBulkPreviewFilterCurrent(
+  previewFilter: { state: string; query: string },
+  currentFilter: { state: string; query: string }
+): boolean {
+  return (
+    previewFilter.state === currentFilter.state &&
+    previewFilter.query.trim() === currentFilter.query.trim()
+  );
+}
+
 export function validateQuarantineRetentionDays(days: any): { valid: boolean; error?: string } {
   if (typeof days !== 'number' || isNaN(days) || typeof days === 'boolean') {
     return { valid: false, error: '保留天数必须为数字' };
