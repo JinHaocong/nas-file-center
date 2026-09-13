@@ -10,7 +10,7 @@ from sqlalchemy import text
 
 from app.batch_utilities.empty_dir_quarantine import safe_open_parent_fd
 from app.exceptions import StateConflictError
-from app.models import QuarantineEntry
+from app.models import QuarantineEntry, utcnow
 from app.quarantine.bulk import (
     _expected_historical_candidate_path,
     _matches_persisted_identity,
@@ -273,3 +273,95 @@ def qualify_transactional_purge_capture(
         qualified.append(captured_path)
 
     return qualified
+
+
+def destroy_transactional_purge_capture(
+    session_factory: Any,
+    entry_id: int,
+    worker_id: str | None,
+    frozen_manifest: dict[str, Any],
+    quarantine_root: Path | str,
+    allowed_roots: list[Path | str],
+) -> None:
+    """Destroy only fully qualified captured payload slots, then commit terminal purged state."""
+    if not worker_id or not str(worker_id).strip():
+        raise PermissionError("Transactional purge destruction requires valid worker authority")
+
+    worker = str(worker_id)
+    qualified = qualify_transactional_purge_capture(
+        session_factory,
+        entry_id,
+        worker,
+        frozen_manifest,
+        quarantine_root,
+        allowed_roots,
+    )
+
+    with session_factory() as session:
+        assert_active_worker_lease(session, worker)
+        entry = session.get(QuarantineEntry, entry_id)
+        if entry is None:
+            raise StateConflictError(f"Quarantine entry #{entry_id} not found")
+        if entry.state != "purging" or entry.tx_phase != "purging":
+            raise StateConflictError(
+                f"Quarantine entry #{entry_id} is not in purging state "
+                f"(state={entry.state}, tx_phase={entry.tx_phase})"
+            )
+        generation = int(entry.active_attempt_generation or 0)
+
+    q_root = Path(quarantine_root)
+    valid_roots = [Path(root) for root in allowed_roots]
+    if q_root not in valid_roots:
+        valid_roots.append(q_root)
+
+    for captured_path in qualified:
+        with safe_open_parent_fd(captured_path, valid_roots) as (dir_fd, leaf):
+            renew_and_assert_worker_lease(session_factory, worker)
+            try:
+                os.unlink(leaf, dir_fd=dir_fd)
+            except OSError as exc:
+                raise StateConflictError(
+                    f"PURGE_DESTRUCTION_FAILED: cannot unlink qualified slot {captured_path}: {exc}"
+                ) from exc
+
+    # Prove exact captured-slot closure before terminal DB state. This is read-only
+    # filesystem observation and intentionally occurs outside any SQLite write tx.
+    for captured_path in qualified:
+        try:
+            with safe_open_parent_fd(captured_path, valid_roots) as (dir_fd, leaf):
+                try:
+                    os.stat(leaf, dir_fd=dir_fd, follow_symlinks=False)
+                except FileNotFoundError:
+                    continue
+                raise StateConflictError(
+                    f"PURGE_DESTRUCTION_FAILED: qualified slot still exists: {captured_path}"
+                )
+        except FileNotFoundError:
+            continue
+
+    with session_factory() as session:
+        session.execute(text("BEGIN IMMEDIATE"))
+        assert_active_worker_lease(session, worker)
+        entry = session.get(QuarantineEntry, entry_id)
+        if entry is None:
+            session.rollback()
+            raise StateConflictError(f"Quarantine entry #{entry_id} not found")
+        if entry.state != "purging" or entry.tx_phase != "purging":
+            state = entry.state
+            tx_phase = entry.tx_phase
+            session.rollback()
+            raise StateConflictError(
+                f"Quarantine entry #{entry_id} changed before terminal purge commit "
+                f"(state={state}, tx_phase={tx_phase})"
+            )
+        if int(entry.active_attempt_generation or 0) != generation:
+            current_generation = int(entry.active_attempt_generation or 0)
+            session.rollback()
+            raise StateConflictError(
+                f"Quarantine entry #{entry_id} purge generation changed "
+                f"(expected={generation}, current={current_generation})"
+            )
+        entry.state = "purged"
+        entry.tx_phase = "purged"
+        entry.purged_at = utcnow()
+        session.commit()
