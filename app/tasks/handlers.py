@@ -159,6 +159,7 @@ class IndexRootHandler(TaskHandler):
         if not root_str:
             raise ValueError("State missing 'root'")
 
+        # Checkpoint before starting
         context.checkpoint(
             progress_current=0,
             progress_total=None,
@@ -228,6 +229,7 @@ class FclonesScanHandler(TaskHandler):
         roots = [require_allowed_path(p, settings.allowed_roots) for p in roots_raw]
         report_path = settings.reports_dir / f"scan-{scan_job_id}.json"
 
+        # Checkpoint to announce starting
         context.checkpoint(
             progress_current=0,
             progress_total=0,
@@ -296,6 +298,7 @@ class FclonesScanHandler(TaskHandler):
             progress_message="Parsing scan results into database...",
         )
 
+        # Clean existing duplicate groups before importing under active lease
         with context.SessionLocal() as session:
             session.execute(text("BEGIN IMMEDIATE"))
             now = utcnow()
@@ -325,6 +328,8 @@ class FclonesScanHandler(TaskHandler):
 
         try:
             while True:
+                # 1. Read a bounded batch of ParsedGroup from iterator and resolve filesystem metadata
+                # Completely OUTSIDE the database write transaction to avoid blocking heartbeats!
                 batch_entries = []
                 for parsed in group_iter:
                     members = []
@@ -346,10 +351,10 @@ class FclonesScanHandler(TaskHandler):
                         if root_match is None:
                             continue
                         root_id, root = root_match
-                        stat_result = safe.stat(follow_symlinks=False)
+                        stat = safe.stat(follow_symlinks=False)
                         relative = safe.relative_to(root)
                         top = root / relative.parts[0] if len(relative.parts) > 1 else root
-                        members.append((root_id, safe, relative, top, stat_result))
+                        members.append((root_id, safe, relative, top, stat))
 
                     if len(members) >= 2:
                         batch_entries.append((parsed, members))
@@ -359,6 +364,7 @@ class FclonesScanHandler(TaskHandler):
                 if not batch_entries:
                     break
 
+                # 2. Short, tight DB write transaction to insert this batch under active lease
                 with context.SessionLocal() as session:
                     session.execute(text("BEGIN IMMEDIATE"))
                     now = utcnow()
@@ -375,23 +381,24 @@ class FclonesScanHandler(TaskHandler):
                         )
                         session.add(group)
                         session.flush()
-                        for root_id, safe, relative, top, stat_result in members:
+                        for root_id, safe, relative, top, stat in members:
                             session.add(DuplicateFile(
                                 group_id=group.id,
                                 root_id=root_id,
                                 absolute_path=str(safe),
                                 relative_path=relative.as_posix(),
                                 top_level_dir=str(top),
-                                size=stat_result.st_size,
-                                mtime_ns=stat_result.st_mtime_ns,
-                                device=stat_result.st_dev,
-                                inode=stat_result.st_ino,
+                                size=stat.st_size,
+                                mtime_ns=stat.st_mtime_ns,
+                                device=stat.st_dev,
+                                inode=stat.st_ino,
                             ))
                         total_groups += 1
                         total_files += len(members)
                         reclaimable += parsed.file_size * (len(members) - 1)
                     session.commit()
 
+                # 3. Checkpoint outside DB transaction (fences worker lease & checks cancel)
                 context.checkpoint(
                     progress_current=total_groups,
                     progress_total=0,
@@ -422,8 +429,12 @@ class FclonesScanHandler(TaskHandler):
                 progress_message=f"Scan completed: found {total_groups} duplicate groups",
             )
         except JobLeaseLost:
+            # Stale worker MUST NOT mutate database!
+            # No delete, no update, no commit.
+            # Partial cleanup is handled exclusively by the new lease owner in recover_interrupted_jobs().
             raise
         except (JobCancelRequested, Exception):
+            # Clean up partial import so no broken duplicate data remains under active lease
             with context.SessionLocal() as session:
                 session.execute(text("BEGIN IMMEDIATE"))
                 now = utcnow()
@@ -432,6 +443,7 @@ class FclonesScanHandler(TaskHandler):
                         from app.tasks.recovery import assert_active_worker_lease
                         assert_active_worker_lease(session, context.worker_id, now=now)
                     except JobLeaseLost:
+                        # Stale worker MUST NOT mutate database!
                         raise
                 group_ids_subq = select(DuplicateGroup.id).where(DuplicateGroup.scan_job_id == scan_job_id)
                 session.execute(delete(DuplicateFile).where(DuplicateFile.group_id.in_(group_ids_subq)))
@@ -578,11 +590,13 @@ def _reconcile_executing_item(
     worker_id: str | None = None,
     pre_reconciled: bool = False,
 ) -> None:
+    """Reconcile an item found in 'executing' state after a crash or worker restart."""
     src = Path(item.source_path)
     meta = json.loads(item.metadata_json or "{}")
     exec_meta = meta.get("execution") or {}
     source_stat = exec_meta.get("source_stat") or {}
     metadata_before = exec_meta.get("metadata_before") or source_stat
+
     evidence = precomputed_evidence
 
     if item.operation in ("rename", "move"):
@@ -593,6 +607,7 @@ def _reconcile_executing_item(
                 item.state = "failed"
                 item.reason = "reconciliation conflict after crash (target identity mismatch)"
                 return
+
             item.state = "completed"
             item.reason = "reconciled after crash (target exists)"
             existing_j = session.scalar(select(OperationJournal).where(OperationJournal.plan_item_id == item.id))
@@ -661,6 +676,7 @@ def _reconcile_executing_item(
                     q_entry.last_error = item.reason
                     q_entry.updated_at = now
                 return
+
             if tgt.is_file() and not tgt.is_symlink():
                 if not _validate_evidence(st, evidence):
                     item.state = "failed"
@@ -851,26 +867,32 @@ def _reconcile_executing_item(
         exec_meta = meta.get("execution") or {}
         source_stat = exec_meta.get("source_stat") or {}
         metadata_before = exec_meta.get("metadata_before") or source_stat
+
         exp_dev = item.expected_device or source_stat.get("device")
         exp_ino = item.expected_inode or source_stat.get("inode")
         if exp_dev is None or exp_ino is None:
             item.state = "failed"
             item.reason = "reconciliation conflict after crash (missing pre-mutation identity evidence)"
             return
+
         if not settings.quarantine_root:
             item.state = "failed"
             item.reason = "reconciliation failed after crash (quarantine root not configured)"
             return
+
         try:
-            q_root_fd, q_root_path, _ = acquire_safe_quarantine_root_fd(settings.quarantine_root)
+            q_root_fd, q_root_path, q_root_stat = acquire_safe_quarantine_root_fd(settings.quarantine_root)
         except Exception as exc:
             item.state = "failed"
             item.reason = f"reconciliation conflict after crash (invalid quarantine root: {exc})"
             return
+
         with contextlib.ExitStack() as stack:
             stack.callback(os.close, q_root_fd)
+
             q_name = build_e4_quarantine_name(plan_id, item.sequence, str(src))
             q_target = q_root_path / q_name
+
             src_exists = os.path.lexists(src)
             src_is_frozen_x = False
             if src_exists and not src.is_symlink():
@@ -880,6 +902,7 @@ def _reconcile_executing_item(
                         src_is_frozen_x = True
                 except OSError:
                     pass
+
             q_exists = False
             q_is_frozen_x = False
             q_st = None
@@ -894,14 +917,20 @@ def _reconcile_executing_item(
                 q_exists = False
             except OSError:
                 q_exists = True
+
+            # State D: Both source Frozen X and quarantine target exist -> conflict
             if src_is_frozen_x and q_exists:
                 item.state = "failed"
                 item.reason = "reconciliation conflict after crash (both source and quarantine target exist)"
                 return
+
+            # State A: source exists as Frozen X, quarantine target absent -> planned (retryable)
             if src_is_frozen_x and not q_exists:
                 item.state = "planned"
                 item.reason = None
                 return
+
+            # State B: source absent or occupied by unrelated object, quarantine exists as Frozen X
             if q_is_frozen_x:
                 flags = os.O_RDONLY | os.O_DIRECTORY
                 if hasattr(os, "O_NOFOLLOW"):
@@ -911,12 +940,20 @@ def _reconcile_executing_item(
                     target_fd = os.open(q_name, flags, dir_fd=q_root_fd)
                     try:
                         st_target = os.fstat(target_fd)
-                        if stat.S_ISDIR(st_target.st_mode) and not stat.S_ISLNK(st_target.st_mode) and st_target.st_dev == exp_dev and st_target.st_ino == exp_ino:
-                            q_is_empty = len(os.listdir(target_fd)) == 0
+                        if (
+                            stat.S_ISDIR(st_target.st_mode)
+                            and not stat.S_ISLNK(st_target.st_mode)
+                            and st_target.st_dev == exp_dev
+                            and st_target.st_ino == exp_ino
+                        ):
+                            entries = os.listdir(target_fd)
+                            if len(entries) == 0:
+                                q_is_empty = True
                     finally:
                         os.close(target_fd)
                 except Exception:
                     q_is_empty = False
+
                 if q_is_empty:
                     item.state = "completed"
                     item.reason = "reconciled after crash (empty directory relocated to quarantine)"
@@ -929,8 +966,17 @@ def _reconcile_executing_item(
                             plan_item_id=item.id,
                             task_id=job_id,
                             user_id=user_id,
-                            before_json=json.dumps({"path": str(src), "scope_root": meta.get("scope_root"), "object_type": "directory"}, ensure_ascii=False),
-                            after_json=json.dumps({"logical_removed": True, "preserved": True, "removed": True, "quarantine_path": str(q_target)}, ensure_ascii=False),
+                            before_json=json.dumps({
+                                "path": str(src),
+                                "scope_root": meta.get("scope_root"),
+                                "object_type": "directory",
+                            }, ensure_ascii=False),
+                            after_json=json.dumps({
+                                "logical_removed": True,
+                                "preserved": True,
+                                "removed": True,
+                                "quarantine_path": str(q_target),
+                            }, ensure_ascii=False),
                             metadata_before_json=json.dumps(metadata_before or source_stat, ensure_ascii=False),
                             metadata_after_json=json.dumps({
                                 "object_type": "directory",
@@ -942,6 +988,8 @@ def _reconcile_executing_item(
                             created_at=now,
                         ))
                     return
+
+                # Quarantined directory is non-empty -> conflict recovery
                 item.state = "failed"
                 item.reason = "reconciliation conflict after crash (quarantined directory is non-empty)"
                 if not src_exists:
@@ -957,11 +1005,14 @@ def _reconcile_executing_item(
                             except FileNotFoundError:
                                 rename_noreplace_at(q_root_fd, q_name, src_parent_fd, leaf_name)
                     except Exception:
-                        pass
+                        pass  # Keep preserved in quarantine
                 return
+
+            # State C: quarantine target exists but identity != Frozen X
             if q_exists:
                 item.state = "failed"
                 item.reason = "reconciliation conflict after crash (quarantine target identity mismatch)"
+                # Attempt safe no-replace rollback if source path does not exist
                 if not src_exists:
                     allowed_roots = list(settings.allowed_roots) if hasattr(settings, "allowed_roots") and settings.allowed_roots else []
                     if meta.get("scope_root"):
@@ -970,17 +1021,23 @@ def _reconcile_executing_item(
                             allowed_roots.append(scope_p)
                     try:
                         with safe_open_parent_fd(src, allowed_roots) as (src_parent_fd, leaf_name):
+                            # Pre-check: leaf_name must not exist in src_parent_fd
                             try:
                                 os.stat(leaf_name, dir_fd=src_parent_fd, follow_symlinks=False)
+                                # already exists in parent! Cannot rollback.
                             except FileNotFoundError:
                                 rename_noreplace_at(q_root_fd, q_name, src_parent_fd, leaf_name)
                     except Exception:
-                        pass
+                        pass  # Keep preserved in quarantine
                 return
+
+            # State E: both source and quarantine target absent
             if not src_exists and not q_exists:
                 item.state = "failed"
                 item.reason = "reconciliation failed after crash (source and quarantine target absent)"
                 return
+
+            # Any other conflict (e.g. source replaced by symlink or different inode, quarantine absent)
             item.state = "failed"
             item.reason = "reconciliation conflict after crash (source identity mismatch)"
             return
@@ -990,13 +1047,16 @@ def _reconcile_executing_item(
         exec_meta = meta.get("execution") or {}
         source_stat = exec_meta.get("source_stat") or {}
         metadata_before = exec_meta.get("metadata_before") or source_stat
+
         exp_dev = item.expected_device or source_stat.get("device")
         exp_ino = item.expected_inode or source_stat.get("inode")
         tgt = Path(item.target_path) if item.target_path else None
+
         if not tgt:
             item.state = "failed"
             item.reason = "reconciliation conflict after crash (missing target path for restore_empty_dir)"
             return
+
         src_exists = os.path.lexists(src)
         src_is_frozen = False
         if src_exists and not src.is_symlink():
@@ -1006,6 +1066,7 @@ def _reconcile_executing_item(
                     src_is_frozen = True
             except OSError:
                 pass
+
         tgt_exists = os.path.lexists(tgt)
         tgt_is_frozen = False
         tgt_st = None
@@ -1017,14 +1078,20 @@ def _reconcile_executing_item(
                     tgt_is_frozen = True
             except OSError:
                 pass
+
+        # Both source and target exist -> conflict, preserve both
         if src_exists and tgt_exists:
             item.state = "failed"
             item.reason = "reconciliation conflict after crash (both source and target exist)"
             return
+
+        # Unfinished restore: source exists in quarantine, target absent -> planned (retryable)
         if src_is_frozen and not tgt_exists:
             item.state = "planned"
             item.reason = None
             return
+
+        # Completed restore: quarantine absent, target exists with Frozen identity -> completed + journal
         if not src_exists and tgt_is_frozen:
             item.state = "completed"
             item.reason = "reconciled after crash (directory restored)"
@@ -1037,8 +1104,17 @@ def _reconcile_executing_item(
                     plan_item_id=item.id,
                     task_id=job_id,
                     user_id=user_id,
-                    before_json=json.dumps({"quarantine_path": str(src), "scope_root": meta.get("scope_root"), "target_path": str(tgt), "object_type": "directory"}, ensure_ascii=False),
-                    after_json=json.dumps({"path": str(tgt), "restored": True, "object_type": "directory"}, ensure_ascii=False),
+                    before_json=json.dumps({
+                        "quarantine_path": str(src),
+                        "scope_root": meta.get("scope_root"),
+                        "target_path": str(tgt),
+                        "object_type": "directory",
+                    }, ensure_ascii=False),
+                    after_json=json.dumps({
+                        "path": str(tgt),
+                        "restored": True,
+                        "object_type": "directory",
+                    }, ensure_ascii=False),
                     metadata_before_json=json.dumps(metadata_before or source_stat, ensure_ascii=False),
                     metadata_after_json=json.dumps({
                         "object_type": "directory",
@@ -1050,10 +1126,14 @@ def _reconcile_executing_item(
                     created_at=now,
                 ))
             return
+
+        # Target exists with different identity -> conflict
         if tgt_exists and not tgt_is_frozen:
             item.state = "failed"
             item.reason = "reconciliation conflict after crash (target identity mismatch)"
             return
+
+        # Neither exists -> fail closed
         item.state = "failed"
         item.reason = "reconciliation failed after crash (source and target absent)"
         return
@@ -1063,28 +1143,33 @@ def _reconcile_executing_item(
         exec_meta = meta.get("execution") or {}
         source_stat = exec_meta.get("source_stat") or {}
         metadata_before = exec_meta.get("metadata_before") or source_stat
+
         anchor = src
         tgt = Path(item.target_path) if item.target_path else None
         if not tgt:
             item.state = "failed"
             item.reason = "reconciliation conflict after crash (missing target path for mkdir_empty)"
             return
+
         if anchor.is_symlink() or not anchor.is_dir():
             item.state = "failed"
             item.reason = "reconciliation conflict after crash (anchor is missing or not a directory)"
             return
+
         try:
             st_anchor = anchor.stat(follow_symlinks=False)
             exp_dev = item.expected_device or source_stat.get("device")
             exp_ino = item.expected_inode or source_stat.get("inode")
-            if exp_dev is not None and exp_ino is not None and (st_anchor.st_dev != exp_dev or st_anchor.st_ino != exp_ino):
-                item.state = "failed"
-                item.reason = "reconciliation conflict after crash (anchor identity mismatch)"
-                return
+            if exp_dev is not None and exp_ino is not None:
+                if st_anchor.st_dev != exp_dev or st_anchor.st_ino != exp_ino:
+                    item.state = "failed"
+                    item.reason = "reconciliation conflict after crash (anchor identity mismatch)"
+                    return
         except OSError:
             item.state = "failed"
             item.reason = "reconciliation conflict after crash (anchor stat failed)"
             return
+
         try:
             rel = tgt.relative_to(anchor)
             if str(rel) in ("", "."):
@@ -1096,7 +1181,11 @@ def _reconcile_executing_item(
             require_allowed_path(tgt.parent, settings.allowed_roots)
             if settings.quarantine_root:
                 q_root = Path(settings.quarantine_root)
-                if is_reserved_quarantine_path(anchor, q_root) or is_reserved_quarantine_path(tgt, q_root) or is_reserved_quarantine_path(tgt.parent, q_root):
+                if (
+                    is_reserved_quarantine_path(anchor, q_root)
+                    or is_reserved_quarantine_path(tgt, q_root)
+                    or is_reserved_quarantine_path(tgt.parent, q_root)
+                ):
                     item.state = "failed"
                     item.reason = "reconciliation conflict after crash (quarantine path violation)"
                     return
@@ -1104,6 +1193,7 @@ def _reconcile_executing_item(
             item.state = "failed"
             item.reason = "reconciliation conflict after crash (path safety violation)"
             return
+
         if not tgt.exists() and not tgt.is_symlink():
             item.state = "planned"
             item.reason = None
@@ -1124,6 +1214,7 @@ def _reconcile_executing_item(
                 item.state = "failed"
                 item.reason = "reconciliation conflict after crash (failed to list target directory)"
                 return
+
             st_tgt = tgt.stat(follow_symlinks=False)
             item.state = "completed"
             item.reason = "reconciled after crash (target directory created)"
@@ -1137,15 +1228,25 @@ def _reconcile_executing_item(
                     plan_item_id=item.id,
                     task_id=job_id,
                     user_id=user_id,
-                    before_json=json.dumps({"anchor_path": str(anchor), "scope_root": meta.get("scope_root") or str(anchor), "target_path": str(tgt)}, ensure_ascii=False),
-                    after_json=json.dumps({"path": str(tgt), "created": True, "object_type": "directory"}, ensure_ascii=False),
+                    before_json=json.dumps({
+                        "anchor_path": str(anchor),
+                        "scope_root": meta.get("scope_root") or str(anchor),
+                        "target_path": str(tgt),
+                    }, ensure_ascii=False),
+                    after_json=json.dumps({
+                        "path": str(tgt),
+                        "created": True,
+                        "object_type": "directory",
+                    }, ensure_ascii=False),
                     metadata_before_json=json.dumps(metadata_before or source_stat, ensure_ascii=False),
                     metadata_after_json=json.dumps(res_stat, ensure_ascii=False),
                     created_at=now,
                 ))
 
-
-def _verify_plan_item_and_keep_freshness(item_meta: Any, settings: Settings) -> tuple[bool, Any]:
+def _verify_plan_item_and_keep_freshness(
+    item_meta: Any,
+    settings: Settings,
+) -> tuple[bool, Any]:
     if item_meta.operation == "rmdir_empty":
         if settings.quarantine_root and is_reserved_quarantine_path(Path(item_meta.source_path), settings.quarantine_root):
             return False, StaleItemDetail(
@@ -1182,15 +1283,23 @@ def _verify_plan_item_and_keep_freshness(item_meta: Any, settings: Settings) -> 
                 return False, StaleItemDetail(item_id=item_meta.id, source_path=item_meta.source_path, reason="target_not_strict_descendant", expected={}, actual=None)
         except Exception:
             return False, StaleItemDetail(item_id=item_meta.id, source_path=item_meta.source_path, reason="target_not_descendant", expected={}, actual=None)
+
         if target.is_symlink() or os.path.lexists(target):
             return False, StaleItemDetail(item_id=item_meta.id, source_path=item_meta.source_path, reason="target_exists", expected={}, actual=None)
+
         parent = target.parent
         if parent.is_symlink() or not parent.exists() or not parent.is_dir():
             return False, StaleItemDetail(item_id=item_meta.id, source_path=item_meta.source_path, reason="parent_invalid", expected={}, actual=None)
+
         if settings.quarantine_root:
             q_root = Path(settings.quarantine_root)
-            if is_reserved_quarantine_path(anchor, q_root) or is_reserved_quarantine_path(target, q_root) or is_reserved_quarantine_path(parent, q_root):
+            if (
+                is_reserved_quarantine_path(anchor, q_root)
+                or is_reserved_quarantine_path(target, q_root)
+                or is_reserved_quarantine_path(parent, q_root)
+            ):
                 return False, StaleItemDetail(item_id=item_meta.id, source_path=item_meta.source_path, reason="quarantine_blocked", expected={}, actual=None)
+
         try:
             require_allowed_path(anchor, settings.allowed_roots)
             require_allowed_path(target, settings.allowed_roots)
@@ -1223,6 +1332,7 @@ def _verify_plan_item_and_keep_freshness(item_meta: Any, settings: Settings) -> 
             )
             if not k_fresh:
                 return False, k_stale
+
     return True, None
 
 
@@ -1243,6 +1353,8 @@ class BatchPlanExecuteHandler(TaskHandler):
             raise ValueError("Job state missing 'plan_id'")
         user_id = state.get("requested_by_user_id")
 
+        # 1. Announce start & reconcile interrupted items
+        # Precompute reconciliation evidence outside DB write lock
         precomputed_evidence: dict[int, ReconcileEvidence] = {}
         tx_entries_to_reconcile: list[int] = []
         with context.SessionLocal() as session:
@@ -1281,6 +1393,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                             if ev:
                                 precomputed_evidence[it.id] = ev
 
+        # Reconcile transactional entries OUTSIDE the outer SQLite write transaction
         for qid in tx_entries_to_reconcile:
             from app.quarantine.reconcile import reconcile_quarantine_transaction
             reconcile_quarantine_transaction(
@@ -1297,14 +1410,15 @@ class BatchPlanExecuteHandler(TaskHandler):
             now = utcnow()
             if context.worker_id is not None:
                 assert_active_worker_lease(session, context.worker_id, now=now)
+
             plan = session.get(BatchPlan, plan_id)
             if not plan:
                 raise KeyError(f"Plan #{plan_id} not found")
-            is_gate6a_bulk_restore = plan.kind == "quarantine-bulk-restore"
             plan.status = "executing"
             plan_meta = json.loads(plan.metadata_json or "{}")
             is_organizer = plan_meta.get("is_organizer", False)
             mtime_delay = float(plan_meta.get("mtime_delay_seconds", 0) or 0)
+
             executing_items = list(session.scalars(
                 select(BatchPlanItem)
                 .where(BatchPlanItem.plan_id == plan_id, BatchPlanItem.state == "executing")
@@ -1321,6 +1435,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                     reconciled_failed_item_ids.add(it.id)
             session.commit()
 
+        # 2. Query all plan items
         with context.SessionLocal() as session:
             all_items = list(session.scalars(
                 select(BatchPlanItem).where(BatchPlanItem.plan_id == plan_id).order_by(BatchPlanItem.sequence)
@@ -1334,6 +1449,7 @@ class BatchPlanExecuteHandler(TaskHandler):
             progress_message=f"Executing plan #{plan_id} ({completed_or_skipped}/{total_count} processed)...",
         )
 
+        # Worker Preflight Check: Verify freshness of unexecuted items before first mutation
         unexecuted_items = [
             it for it in all_items
             if it.state not in ("completed", "skipped", "failed")
@@ -1380,11 +1496,11 @@ class BatchPlanExecuteHandler(TaskHandler):
                 completed_count = sum(1 for it in all_items if it.state == "completed")
                 if plan:
                     plan.status = "partial" if completed_count > 0 else "stale"
-                for stale_item in worker_stale_items:
-                    row = session.get(BatchPlanItem, stale_item.item_id)
+                for s in worker_stale_items:
+                    row = session.get(BatchPlanItem, s.item_id)
                     if row:
                         row.state = "failed"
-                        row.reason = f"Plan stale: {stale_item.reason}"
+                        row.reason = f"Plan stale: {s.reason}"
                 session.commit()
             context.checkpoint(
                 progress_current=completed_or_skipped,
@@ -1393,13 +1509,18 @@ class BatchPlanExecuteHandler(TaskHandler):
             )
             return
 
+        # 3. Item-by-item 3-phase execution
         for item_meta in all_items:
+            # Check current status in DB before starting Phase 1
             if item_meta.id in reconciled_failed_item_ids:
                 continue
+
             with context.SessionLocal() as session:
                 row = session.get(BatchPlanItem, item_meta.id)
                 if row is None or row.state in ("completed", "skipped", "failed") or row.id in reconciled_failed_item_ids:
                     continue
+
+            # Boundary Freshness Check
             if item_meta.operation != "restore":
                 is_fresh, stale_detail = _verify_plan_item_and_keep_freshness(item_meta, settings)
                 if not is_fresh:
@@ -1413,6 +1534,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                         if row:
                             row.state = "failed"
                             row.reason = stale_reason
+
                         plan = session.get(BatchPlan, plan_id)
                         items = list(session.scalars(select(BatchPlanItem).where(BatchPlanItem.plan_id == plan_id)))
                         completed_count = sum(1 for it in items if it.state == "completed")
@@ -1424,21 +1546,29 @@ class BatchPlanExecuteHandler(TaskHandler):
                         else:
                             plan.status = "stale"
                         plan.metadata_json = json.dumps(plan_meta, ensure_ascii=False)
+
                         session.add(AuditEvent(
                             operation=item_meta.operation,
                             path=item_meta.source_path,
                             result="failed",
-                            details_json=json.dumps({"plan_id": plan_id, "item_id": item_meta.id, "task_id": job.id, "reason": stale_reason}, ensure_ascii=False),
+                            details_json=json.dumps({
+                                "plan_id": plan_id,
+                                "item_id": item_meta.id,
+                                "task_id": job.id,
+                                "reason": stale_reason,
+                            }, ensure_ascii=False),
                         ))
                         session.commit()
                     break
 
+            # Checkpoint at item boundary
             context.checkpoint(
                 progress_current=completed_or_skipped,
                 progress_total=total_count,
                 progress_message=f"Executing item #{item_meta.sequence}: {item_meta.operation}...",
             )
 
+            # --- PHASE 1: DB INTENT ---
             q_entry_id = None
             q_restore_entry_id = None
             target_path_str = None
@@ -1468,13 +1598,17 @@ class BatchPlanExecuteHandler(TaskHandler):
                 now = utcnow()
                 if context.worker_id is not None:
                     assert_active_worker_lease(session, context.worker_id, now=now)
+
                 row = session.get(BatchPlanItem, item_meta.id)
                 if row.state in ("completed", "skipped", "failed") or row.id in reconciled_failed_item_ids:
                     completed_or_skipped += 1
                     continue
+
                 row.state = "executing"
+
                 if row.operation == "touch":
                     target_touch_mtime_ns = row.expected_mtime_ns if (row.expected_mtime_ns and row.expected_mtime_ns > 0) else int(now.timestamp() * 1e9)
+
                 item_metadata = json.loads(row.metadata_json or "{}")
                 item_metadata["execution"] = {
                     "phase": "intent",
@@ -1504,6 +1638,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                     session.add(q_entry)
                     session.flush()
                     q_entry_id = q_entry.id
+
                     q_target = build_quarantine_target_path(
                         source=Path(row.source_path),
                         allowed_roots=settings.allowed_roots,
@@ -1532,30 +1667,25 @@ class BatchPlanExecuteHandler(TaskHandler):
                         session.commit()
                         completed_or_skipped += 1
                         continue
+
                     is_tx = (q_entry.tx_phase not in (None, "legacy")) or (q_entry.authoritative_anchor_path is not None)
                     is_tx_restore = is_tx
                     if is_tx:
-                        if is_gate6a_bulk_restore:
-                            if not row.target_path:
+                        # Transactional QuarantineEntry: public quarantine view is presentation-only!
+                        # Authority is: authoritative anchor + persisted frozen identity + worker lease + PathGuard
+                        conflict_policy = meta_dict.get("conflict_policy", "skip")
+                        custom_target = meta_dict.get("custom_target")
+                        if conflict_policy == "manual":
+                            if not custom_target or not custom_target.strip():
                                 row.state = "failed"
-                                row.reason = "Gate6-A bulk restore is missing frozen target_path"
+                                row.reason = "custom_target is required when conflict_policy is 'manual'"
                                 session.commit()
                                 completed_or_skipped += 1
                                 continue
-                            dest_candidate = row.target_path
+                            dest_candidate = custom_target.strip()
                         else:
-                            conflict_policy = meta_dict.get("conflict_policy", "skip")
-                            custom_target = meta_dict.get("custom_target")
-                            if conflict_policy == "manual":
-                                if not custom_target or not custom_target.strip():
-                                    row.state = "failed"
-                                    row.reason = "custom_target is required when conflict_policy is 'manual'"
-                                    session.commit()
-                                    completed_or_skipped += 1
-                                    continue
-                                dest_candidate = custom_target.strip()
-                            else:
-                                dest_candidate = q_entry.original_path
+                            dest_candidate = q_entry.original_path
+
                         try:
                             from app.path_safety import validate_mutation_destination
                             q_dest_p = validate_mutation_destination(
@@ -1570,6 +1700,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                             session.commit()
                             completed_or_skipped += 1
                             continue
+
                         q_entry.state = "restoring"
                         q_entry.tx_phase = "restoring"
                         q_entry.updated_at = now
@@ -1579,7 +1710,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                         restore_expected_hash = q_entry.content_hash
                     else:
                         try:
-                            _, q_dest_p = validate_restore_destination_intent(
+                            q_tgt_p, q_dest_p = validate_restore_destination_intent(
                                 q_entry,
                                 allowed_roots=settings.allowed_roots,
                                 quarantine_root=settings.quarantine_root,
@@ -1593,11 +1724,18 @@ class BatchPlanExecuteHandler(TaskHandler):
                                 operation=row.operation,
                                 path=row.source_path,
                                 result="failed",
-                                details_json=json.dumps({"plan_id": plan_id, "item_id": row.id, "task_id": job.id, "quarantine_entry_id": q_entry.id, "reason": str(exc)}, ensure_ascii=False),
+                                details_json=json.dumps({
+                                    "plan_id": plan_id,
+                                    "item_id": row.id,
+                                    "task_id": job.id,
+                                    "quarantine_entry_id": q_entry.id,
+                                    "reason": str(exc),
+                                }, ensure_ascii=False),
                             ))
                             session.commit()
                             completed_or_skipped += 1
                             continue
+
                         q_entry.state = "restoring"
                         q_entry.updated_at = now
                         q_restore_entry_id = q_entry.id
@@ -1606,12 +1744,18 @@ class BatchPlanExecuteHandler(TaskHandler):
                         restore_expected_hash = q_entry.content_hash
                 else:
                     target_path_str = row.target_path
+
                 session.commit()
 
+            # --- PRE-MUTATION RESTORE INTEGRITY (OUTSIDE DB WRITE LOCK) ---
             verified_restore_stat = None
             if item_meta.operation == "restore" and not is_tx_restore:
                 try:
-                    verified_restore_stat = verify_quarantine_source_integrity(src_p, expected_size=restore_expected_size, expected_hash=restore_expected_hash)
+                    verified_restore_stat = verify_quarantine_source_integrity(
+                        src_p,
+                        expected_size=restore_expected_size,
+                        expected_hash=restore_expected_hash,
+                    )
                 except (StateConflictError, ValueError) as exc:
                     with context.SessionLocal() as session:
                         session.execute(text("BEGIN IMMEDIATE"))
@@ -1632,14 +1776,21 @@ class BatchPlanExecuteHandler(TaskHandler):
                             operation="restore",
                             path=str(src_p),
                             result="failed",
-                            details_json=json.dumps({"plan_id": plan_id, "item_id": item_meta.id, "task_id": job.id, "reason": str(exc)}, ensure_ascii=False),
+                            details_json=json.dumps({
+                                "plan_id": plan_id,
+                                "item_id": item_meta.id,
+                                "task_id": job.id,
+                                "reason": str(exc),
+                            }, ensure_ascii=False),
                         ))
                         session.commit()
                     completed_or_skipped += 1
                     continue
 
+            # --- PHASE 2: FILESYSTEM MUTATION OUTSIDE DB LOCK ---
             before_size = src_stat_dict.get("size")
             before_mtime_ns = src_stat_dict.get("mtime_ns")
+
             meta = json.loads(item_meta.metadata_json or "{}")
             item_op = OperationItem(
                 sequence=item_meta.sequence,
@@ -1657,6 +1808,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                 target_mtime_ns=target_touch_mtime_ns,
             )
 
+            # Boundary Fence: Freshly renew and assert active worker lease before filesystem mutation
             if context.worker_id is not None:
                 with context.SessionLocal() as session:
                     session.execute(text("BEGIN IMMEDIATE"))
@@ -1667,6 +1819,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                         lock.acquired_at = now
                     session.commit()
 
+            # Final immediate source identity/stat check before mutation
             if item_meta.operation == "restore" and not is_tx_restore:
                 if verified_restore_stat is not None:
                     try:
@@ -1691,7 +1844,12 @@ class BatchPlanExecuteHandler(TaskHandler):
                                 operation="restore",
                                 path=str(src_p),
                                 result="failed",
-                                details_json=json.dumps({"plan_id": plan_id, "item_id": item_meta.id, "task_id": job.id, "reason": str(exc)}, ensure_ascii=False),
+                                details_json=json.dumps({
+                                    "plan_id": plan_id,
+                                    "item_id": item_meta.id,
+                                    "task_id": job.id,
+                                    "reason": str(exc),
+                                }, ensure_ascii=False),
                             ))
                             session.commit()
                         completed_or_skipped += 1
@@ -1715,6 +1873,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                                 qe.state = "abandoned"
                                 qe.last_error = stale_reason
                                 qe.updated_at = now
+
                         plan = session.get(BatchPlan, plan_id)
                         items = list(session.scalars(select(BatchPlanItem).where(BatchPlanItem.plan_id == plan_id)))
                         completed_count = sum(1 for it in items if it.state == "completed")
@@ -1726,11 +1885,17 @@ class BatchPlanExecuteHandler(TaskHandler):
                         else:
                             plan.status = "stale"
                         plan.metadata_json = json.dumps(plan_meta, ensure_ascii=False)
+
                         session.add(AuditEvent(
                             operation=item_meta.operation,
                             path=item_meta.source_path,
                             result="failed",
-                            details_json=json.dumps({"plan_id": plan_id, "item_id": item_meta.id, "task_id": job.id, "reason": stale_reason}, ensure_ascii=False),
+                            details_json=json.dumps({
+                                "plan_id": plan_id,
+                                "item_id": item_meta.id,
+                                "task_id": job.id,
+                                "reason": stale_reason,
+                            }, ensure_ascii=False),
                         ))
                         session.commit()
                     break
@@ -1754,6 +1919,7 @@ class BatchPlanExecuteHandler(TaskHandler):
             q_stat_dev = None
             q_stat_ino = None
             q_content_hash = None
+
             if result.state == "completed":
                 res_p = result.result_path or src_p
                 try:
@@ -1766,18 +1932,24 @@ class BatchPlanExecuteHandler(TaskHandler):
                             q_stat_mtime_ns = after_mtime_ns
                             q_stat_dev = st.st_dev
                             q_stat_ino = st.st_ino
-                            q_content_hash = None if res_p.is_dir() else safe_quarantine_hash(res_p)
+                            if res_p.is_dir():
+                                q_content_hash = None
+                            else:
+                                q_content_hash = safe_quarantine_hash(res_p)
                 except OSError:
                     pass
 
+            # --- PHASE 3: FENCED DB FINALIZE ---
             with context.SessionLocal() as session:
                 session.execute(text("BEGIN IMMEDIATE"))
                 now = utcnow()
                 if context.worker_id is not None:
                     assert_active_worker_lease(session, context.worker_id, now=now)
+
                 row = session.get(BatchPlanItem, item_meta.id)
                 row.state = result.state
                 row.reason = result.reason
+
                 metadata = json.loads(row.metadata_json or "{}")
                 if result.result_path is not None:
                     metadata["result_path"] = str(result.result_path)
@@ -1788,12 +1960,13 @@ class BatchPlanExecuteHandler(TaskHandler):
                     if q_entry:
                         is_tx = q_entry.tx_phase is not None or q_entry.authoritative_anchor_path is not None
                         if result.state == "completed":
-                            if not is_tx and result.result_path and result.result_path.exists():
-                                q_entry.size = q_stat_size or 0
-                                q_entry.content_hash = q_content_hash
-                                q_entry.mtime_ns = q_stat_mtime_ns or 0
-                                q_entry.device = q_stat_dev or 0
-                                q_entry.inode = q_stat_ino or 0
+                            if not is_tx:
+                                if result.result_path and result.result_path.exists():
+                                    q_entry.size = q_stat_size or 0
+                                    q_entry.content_hash = q_content_hash
+                                    q_entry.mtime_ns = q_stat_mtime_ns or 0
+                                    q_entry.device = q_stat_dev or 0
+                                    q_entry.inode = q_stat_ino or 0
                             q_entry.quarantined_at = now
                             policy = session.scalar(select(DataLifecyclePolicy).where(DataLifecyclePolicy.id == 1))
                             retention_days = policy.quarantine_retention_days if policy else 0
@@ -1803,7 +1976,9 @@ class BatchPlanExecuteHandler(TaskHandler):
                                 q_entry.tx_phase = "active"
                             q_entry.updated_at = now
                         else:
-                            if not (is_tx and (q_entry.state == "conflict" or q_entry.tx_phase == "conflict")):
+                            if is_tx and (q_entry.state == "conflict" or q_entry.tx_phase == "conflict"):
+                                pass
+                            else:
                                 q_entry.state = "abandoned"
                             q_entry.last_error = result.reason
                             q_entry.updated_at = now
@@ -1837,16 +2012,42 @@ class BatchPlanExecuteHandler(TaskHandler):
                 if result.state == "completed":
                     if row.operation == "rmdir_empty":
                         item_meta_json = json.loads(row.metadata_json or "{}")
-                        b_json = json.dumps({"path": row.source_path, "scope_root": item_meta_json.get("scope_root"), "object_type": "directory"}, ensure_ascii=False)
-                        a_json = json.dumps({"logical_removed": True, "preserved": True, "removed": True, "quarantine_path": str(result.result_path) if result.result_path else None}, ensure_ascii=False)
+                        b_json = json.dumps({
+                            "path": row.source_path,
+                            "scope_root": item_meta_json.get("scope_root"),
+                            "object_type": "directory",
+                        }, ensure_ascii=False)
+                        a_json = json.dumps({
+                            "logical_removed": True,
+                            "preserved": True,
+                            "removed": True,
+                            "quarantine_path": str(result.result_path) if result.result_path else None,
+                        }, ensure_ascii=False)
                     elif row.operation == "restore_empty_dir":
                         item_meta_json = json.loads(row.metadata_json or "{}")
-                        b_json = json.dumps({"quarantine_path": row.source_path, "scope_root": item_meta_json.get("scope_root"), "target_path": row.target_path, "object_type": "directory"}, ensure_ascii=False)
-                        a_json = json.dumps({"path": str(result.result_path or row.target_path), "restored": True, "object_type": "directory"}, ensure_ascii=False)
+                        b_json = json.dumps({
+                            "quarantine_path": row.source_path,
+                            "scope_root": item_meta_json.get("scope_root"),
+                            "target_path": row.target_path,
+                            "object_type": "directory",
+                        }, ensure_ascii=False)
+                        a_json = json.dumps({
+                            "path": str(result.result_path or row.target_path),
+                            "restored": True,
+                            "object_type": "directory",
+                        }, ensure_ascii=False)
                     elif row.operation == "mkdir_empty":
                         item_meta_json = json.loads(row.metadata_json or "{}")
-                        b_json = json.dumps({"anchor_path": row.source_path, "scope_root": item_meta_json.get("scope_root") or row.source_path, "target_path": row.target_path}, ensure_ascii=False)
-                        a_json = json.dumps({"path": str(result.result_path or row.target_path), "created": True, "object_type": "directory"}, ensure_ascii=False)
+                        b_json = json.dumps({
+                            "anchor_path": row.source_path,
+                            "scope_root": item_meta_json.get("scope_root") or row.source_path,
+                            "target_path": row.target_path,
+                        }, ensure_ascii=False)
+                        a_json = json.dumps({
+                            "path": str(result.result_path or row.target_path),
+                            "created": True,
+                            "object_type": "directory",
+                        }, ensure_ascii=False)
                     elif row.operation in ("rename", "move"):
                         b_json = json.dumps({"path": row.source_path, "size": before_size or row.expected_size, "mtime_ns": before_mtime_ns}, ensure_ascii=False)
                         a_json = json.dumps({"path": str(result.result_path), "size": after_size, "mtime_ns": after_mtime_ns}, ensure_ascii=False)
@@ -1854,8 +2055,18 @@ class BatchPlanExecuteHandler(TaskHandler):
                         b_json = json.dumps({"path": row.source_path, "size": before_size or row.expected_size, "mtime_ns": before_mtime_ns, "is_dir": False}, ensure_ascii=False)
                         a_json = json.dumps({"quarantine_path": str(result.result_path), "quarantine_entry_id": q_entry_id, "size": after_size, "mtime_ns": after_mtime_ns}, ensure_ascii=False)
                     elif row.operation == "restore":
-                        b_json = json.dumps({"quarantine_path": row.source_path, "quarantine_entry_id": q_restore_entry_id, "original_path": row.target_path, "size": before_size or row.expected_size, "mtime_ns": before_mtime_ns}, ensure_ascii=False)
-                        a_json = json.dumps({"restored_path": str(result.result_path), "size": after_size, "mtime_ns": after_mtime_ns}, ensure_ascii=False)
+                        b_json = json.dumps({
+                            "quarantine_path": row.source_path,
+                            "quarantine_entry_id": q_restore_entry_id,
+                            "original_path": row.target_path,
+                            "size": before_size or row.expected_size,
+                            "mtime_ns": before_mtime_ns,
+                        }, ensure_ascii=False)
+                        a_json = json.dumps({
+                            "restored_path": str(result.result_path),
+                            "size": after_size,
+                            "mtime_ns": after_mtime_ns,
+                        }, ensure_ascii=False)
                     elif row.operation == "touch":
                         b_json = json.dumps({"path": row.source_path, "mtime_ns": before_mtime_ns}, ensure_ascii=False)
                         a_json = json.dumps({"path": row.source_path, "mtime_ns": after_mtime_ns}, ensure_ascii=False)
@@ -1878,6 +2089,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                             }
                         except OSError:
                             pass
+
                     meta_before_dict = verified_restore_stat if (row.operation == "restore" and verified_restore_stat) else src_stat_dict
                     session.add(OperationJournal(
                         operation=row.operation,
@@ -1911,20 +2123,26 @@ class BatchPlanExecuteHandler(TaskHandler):
 
             if is_organizer and item_meta.operation == "touch" and result.state == "completed" and mtime_delay > 0:
                 time.sleep(mtime_delay)
+
             completed_or_skipped += 1
 
+        # 4. Post-Loop Plan Status Finalization
         with context.SessionLocal() as session:
             session.execute(text("BEGIN IMMEDIATE"))
             now = utcnow()
             if context.worker_id is not None:
                 assert_active_worker_lease(session, context.worker_id, now=now)
+
             plan = session.get(BatchPlan, plan_id)
             items = list(session.scalars(select(BatchPlanItem).where(BatchPlanItem.plan_id == plan_id)))
             states = {it.state for it in items}
             completed_count = sum(1 for it in items if it.state == "completed")
             plan_meta = json.loads(plan.metadata_json or "{}")
             exec_meta = plan_meta.setdefault("execution", {})
-            has_stale_failure = any(it.state == "stale" or (it.state == "failed" and "stale" in (it.reason or "").lower()) for it in items)
+            has_stale_failure = any(
+                it.state == "stale" or (it.state == "failed" and "stale" in (it.reason or "").lower())
+                for it in items
+            )
             if states <= {"completed"}:
                 plan.status = "completed"
             elif completed_count > 0:
