@@ -136,7 +136,7 @@ def execute_transactional_purge_capture(
     quarantine_root: Path | str,
     allowed_roots: list[Path | str],
 ) -> None:
-    """Capture the normal Gate6-A purge alias set into one exclusive private attempt."""
+    """Capture the frozen Gate6-A purge alias set into one exclusive private attempt."""
     if not worker_id or not str(worker_id).strip():
         raise PermissionError("Transactional purge capture requires valid worker authority")
 
@@ -162,10 +162,20 @@ def execute_transactional_purge_capture(
     aliases = list(frozen_manifest.get("aliases") or [])
     for alias in aliases:
         role = str(alias.get("role") or "")
-        if role not in slot_by_role:
+        if role == "historical_conflict_candidate":
+            try:
+                owner_entry_id = int(alias.get("owner_entry_id"))
+            except (TypeError, ValueError):
+                raise StateConflictError("Historical purge alias is missing a valid owner entry id")
+            if owner_entry_id <= 0:
+                raise StateConflictError("Historical purge alias is missing a valid owner entry id")
+            slot_name = f"linked-conflict-{owner_entry_id}-anchor"
+        elif role in slot_by_role:
+            slot_name = slot_by_role[role]
+        else:
             raise StateConflictError(f"Unsupported purge capture alias role: {role}")
         source_path = Path(str(alias.get("path") or ""))
-        target_path = purge_dir / slot_by_role[role]
+        target_path = purge_dir / slot_name
         with safe_open_parent_fd(source_path, valid_roots) as (src_dir_fd, src_leaf):
             with safe_open_parent_fd(target_path, valid_roots) as (dst_dir_fd, dst_leaf):
                 try:
