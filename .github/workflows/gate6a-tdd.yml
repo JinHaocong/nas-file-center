@@ -42,6 +42,8 @@ jobs:
           tests/test_quarantine_hardening.py
           tests/test_gate5g_g7_task11_cleanup_gate.py
           tests/test_gate5g_g7_task8_restore.py
+          tests/test_gate5g_g7_hotfix2_worker_restore_authority.py
+          tests/test_gate5g_g7_hotfix3_restore_takeover_generation.py
           tests/test_v0351_zfuse_ctime_stability.py
           -q
 
