@@ -85,10 +85,87 @@ def classify_cross_entry_alias_owner(
     return None, "UNKNOWN_PAYLOAD_OWNER_STATE"
 
 
+def _intent_time_purge_ownership_reason(
+    session: Any,
+    entry: QuarantineEntry,
+    frozen_manifest: dict[str, Any],
+    quarantine_root: Path,
+) -> str | None:
+    """Revalidate DB ownership authority inside the purge-intent write transaction.
+
+    This helper is intentionally filesystem-free.  Filesystem topology is observed
+    before BEGIN IMMEDIATE; this second fence binds the mutable DB ownership facts
+    to the same transaction that changes the selected row from active to purging.
+    """
+    tx_root = quarantine_root / ".tx"
+    frozen_historical: dict[int, Path] = {}
+    for alias in list(frozen_manifest.get("aliases") or []):
+        if alias.get("role") != "historical_conflict_candidate":
+            continue
+        try:
+            owner_id = int(alias.get("owner_entry_id"))
+        except (TypeError, ValueError):
+            return "UNKNOWN_PAYLOAD_OWNER"
+        if owner_id <= 0:
+            return "UNKNOWN_PAYLOAD_OWNER"
+        frozen_historical[owner_id] = Path(str(alias.get("path") or ""))
+
+    # Every historical owner that was explicitly frozen must still be exactly the
+    # same non-authoritative conflict lineage when irreversible intent is committed.
+    for owner_id, frozen_path in frozen_historical.items():
+        owner = session.get(QuarantineEntry, owner_id)
+        if owner is None:
+            return "UNKNOWN_PAYLOAD_OWNER"
+        if owner.state == "active":
+            return "SHARED_ACTIVE_PAYLOAD"
+        if owner.state == "restoring":
+            return "SHARED_RESTORING_PAYLOAD"
+        if owner.state == "restored":
+            return "SHARED_RESTORED_PAYLOAD"
+        if not (
+            owner.state == "conflict"
+            and owner.tx_phase == "conflict"
+            and owner.authoritative_anchor_path is None
+        ):
+            return "UNKNOWN_PAYLOAD_OWNER_STATE"
+        if not _same_persisted_payload_identity(owner, entry):
+            return "HISTORICAL_CONFLICT_IDENTITY_MISMATCH"
+        expected_candidate = _expected_historical_candidate_path(owner, tx_root)
+        if expected_candidate is None or expected_candidate != frozen_path:
+            return "HISTORICAL_CONFLICT_PATH_MISMATCH"
+
+    # A new DB owner can be created after the read-only filesystem topology pass.
+    # Bind active/restoring/restored ownership and newly-created historical lineage
+    # before the selected row is allowed to enter purging.  Terminal purged rows
+    # carry stale identity metadata but no live authority, so they are ignored here.
+    other_entries = session.query(QuarantineEntry).filter(QuarantineEntry.id != entry.id).all()
+    for owner in other_entries:
+        if owner.id in frozen_historical:
+            continue
+        if not _same_persisted_payload_identity(owner, entry):
+            continue
+        if owner.state == "active":
+            return "SHARED_ACTIVE_PAYLOAD"
+        if owner.state == "restoring":
+            return "SHARED_RESTORING_PAYLOAD"
+        if owner.state == "restored":
+            return "SHARED_RESTORED_PAYLOAD"
+        if (
+            owner.state == "conflict"
+            and owner.tx_phase == "conflict"
+            and owner.authoritative_anchor_path is None
+        ):
+            return "PURGE_TOPOLOGY_CHANGED"
+
+    return None
+
+
 def _begin_transactional_purge_intent(
     session_factory: Any,
     entry_id: int,
     worker_id: str,
+    frozen_manifest: dict[str, Any] | None = None,
+    quarantine_root: Path | str | None = None,
 ) -> None:
     """Commit Gate6-A irreversible purge intent before any filesystem capture syscall."""
     with session_factory() as session:
@@ -106,6 +183,19 @@ def _begin_transactional_purge_intent(
                 f"Quarantine entry #{entry_id} must still be active before purge "
                 f"(state={state}, tx_phase={tx_phase})"
             )
+        if frozen_manifest is not None and quarantine_root is not None:
+            ownership_reason = _intent_time_purge_ownership_reason(
+                session,
+                entry,
+                frozen_manifest,
+                Path(quarantine_root),
+            )
+            if ownership_reason is not None:
+                session.rollback()
+                raise StateConflictError(
+                    f"{ownership_reason}: purge ownership changed before irreversible intent "
+                    f"for quarantine entry #{entry_id}"
+                )
         entry.state = "purging"
         entry.tx_phase = "purging"
         session.commit()
@@ -311,7 +401,13 @@ def execute_transactional_purge_capture(
 
     purge_dir: Path | None = None
     if current_state == "active" and current_tx_phase == "active":
-        _begin_transactional_purge_intent(session_factory, entry_id, worker)
+        _begin_transactional_purge_intent(
+            session_factory,
+            entry_id,
+            worker,
+            frozen_manifest=frozen_manifest,
+            quarantine_root=q_root,
+        )
     elif current_state == "purging" and current_tx_phase == "purging":
         frozen_generation = _frozen_selected_attempt_generation(frozen_manifest, entry_id)
         if current_generation != frozen_generation:
