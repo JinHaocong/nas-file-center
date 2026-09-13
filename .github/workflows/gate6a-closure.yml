@@ -1,0 +1,203 @@
+name: Gate6-A Closure Verification
+
+on:
+  push:
+    branches:
+      - v0.3.6-gate6a-quarantine-bulk-operations
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  full-regression-build-security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      CONFIG_DIR: /tmp/nfc-config
+      DATA_MOUNT: /tmp/nfc-data
+      ALLOWED_ROOTS: /tmp/nfc-data
+      QUARANTINE_ROOT: /tmp/nfc-data/.nas-file-center-trash
+      BASELINE_SHA: 8e7e2a669268117c2b7f0c83e14e6e32199fc8ba
+
+    steps:
+      - name: Checkout candidate with history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Record candidate identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "candidate_sha=$(git rev-parse HEAD)"
+            echo "candidate_branch=${GITHUB_REF_NAME}"
+            echo "baseline_sha=${BASELINE_SHA}"
+            echo "merge_base=$(git merge-base "${BASELINE_SHA}" HEAD)"
+            echo
+            git status --short
+          } | tee closure-identity.txt
+          test "$(git merge-base "${BASELINE_SHA}" HEAD)" = "${BASELINE_SHA}"
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install backend test dependencies
+        run: python -m pip install -e '.[test]'
+
+      - name: Run full backend regression
+        shell: bash
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          pytest --disable-warnings -q 2>&1 | tee backend-full-regression.log
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run frontend tests
+        shell: bash
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          npm test 2>&1 | tee ../frontend-tests.log
+
+      - name: Run frontend typecheck
+        shell: bash
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          npm run typecheck 2>&1 | tee ../frontend-typecheck.log
+
+      - name: Run frontend production build
+        shell: bash
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          npm run build 2>&1 | tee ../frontend-build.log
+
+      - name: Diff check and scope evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check "${BASELINE_SHA}...HEAD"
+          {
+            echo "# Gate6-A diff stat"
+            git diff --stat "${BASELINE_SHA}...HEAD"
+            echo
+            echo "# Gate6-A changed files"
+            git diff --name-status "${BASELINE_SHA}...HEAD"
+            echo
+            echo "# Added deletion-related lines in app/"
+            git diff --unified=0 "${BASELINE_SHA}...HEAD" -- app | grep -E '^\+[^+].*(rmtree|unlink\(|os\.remove\(|os\.unlink\()' || true
+            echo
+            echo "# st_nlink occurrences in changed app lines"
+            git diff --unified=0 "${BASELINE_SHA}...HEAD" -- app | grep -E '^\+[^+].*st_nlink' || true
+            echo
+            echo "# ctime occurrences in changed app lines"
+            git diff --unified=0 "${BASELINE_SHA}...HEAD" -- app | grep -Ei '^\+[^+].*ctime' || true
+            echo
+            echo "# cleanup gate references"
+            git grep -n 'safe_quarantine_purge_guard' -- app || true
+            echo
+            echo "# direct purge API / executor references"
+            git grep -nE 'quarantine_purge|purge_quarantine|safe_quarantine_purge_guard' -- app/api app/service.py app/execution app/tasks || true
+          } | tee gate6a-security-review.txt
+
+      - name: Verify API and worker deployment image references are identical
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY' | tee deployment-image-identity.txt
+          from pathlib import Path
+          import re
+
+          komodo = Path('compose.komodo.yaml').read_text()
+          images = re.findall(r'^\s*image:\s*(\S+)\s*$', komodo, flags=re.M)
+          if len(images) != 2:
+              raise SystemExit(f'expected exactly two explicit Komodo service images, got {images!r}')
+          if len(set(images)) != 1:
+              raise SystemExit(f'API/worker image mismatch: {images!r}')
+
+          compose = Path('compose.yaml').read_text()
+          common = re.findall(r'^\s*image:\s*(\S+)\s*$', compose, flags=re.M)
+          if len(common) != 1:
+              raise SystemExit(f'expected one shared compose image anchor, got {common!r}')
+
+          print(f'compose.komodo API/worker shared image: {images[0]}')
+          print(f'compose.yaml shared x-common image: {common[0]}')
+          PY
+
+      - name: Upload regression and security evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate6a-closure-regression-${{ github.sha }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            closure-identity.txt
+            backend-full-regression.log
+            frontend-tests.log
+            frontend-typecheck.log
+            frontend-build.log
+            gate6a-security-review.txt
+            deployment-image-identity.txt
+
+  linux-amd64-docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build linux amd64 candidate image locally
+        shell: bash
+        run: |
+          set -euo pipefail
+          SHA7="${GITHUB_SHA::7}"
+          TAG="kerwinjhc/nas-file-center:0.3.6-gate6a-${SHA7}"
+          echo "candidate_tag=${TAG}" | tee docker-evidence.txt
+          docker buildx build \
+            --platform linux/amd64 \
+            --load \
+            --tag "${TAG}" \
+            . 2>&1 | tee docker-build.log
+          {
+            echo
+            echo "# image inspect"
+            docker image inspect "${TAG}"
+            echo
+            echo "# platform"
+            docker image inspect --format 'id={{.Id}} os={{.Os}} arch={{.Architecture}} created={{.Created}}' "${TAG}"
+          } | tee -a docker-evidence.txt
+          test "$(docker image inspect --format '{{.Architecture}}' "${TAG}")" = "amd64"
+          test "$(docker image inspect --format '{{.Os}}' "${TAG}")" = "linux"
+
+      - name: Upload Docker evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate6a-closure-docker-${{ github.sha }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            docker-build.log
+            docker-evidence.txt
