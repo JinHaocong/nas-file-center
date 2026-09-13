@@ -8,7 +8,7 @@ from typing import Any
 from app.batch_utilities.empty_dir_quarantine import safe_open_parent_fd
 from app.exceptions import StateConflictError
 from app.models import QuarantineEntry
-from app.quarantine.bulk import build_purge_topology_manifest
+from app.quarantine.purge import build_purge_topology_manifest, validate_purge_topology_manifest
 from app.quarantine.candidate import qualify_candidate_anchor_fd
 
 
@@ -107,14 +107,14 @@ def freeze_bulk_plan_item(
                 service.settings.quarantine_root,
                 owner_lookup=lambda owner_id: session.get(QuarantineEntry, owner_id),
             )
-            blockers = list(current_manifest.get("blockers") or [])
-            if blockers:
+            topology_reason = validate_purge_topology_manifest(stored_manifest, current_manifest)
+            if topology_reason is not None:
+                if topology_reason == "PURGE_TOPOLOGY_CHANGED":
+                    raise StateConflictError(
+                        f"PURGE_TOPOLOGY_CHANGED: purge topology changed for quarantine entry #{entry_id}"
+                    )
                 raise StateConflictError(
-                    f"{blockers[0]}: purge topology is no longer eligible for quarantine entry #{entry_id}"
-                )
-            if current_manifest != stored_manifest:
-                raise StateConflictError(
-                    f"PURGE_TOPOLOGY_CHANGED: purge topology changed for quarantine entry #{entry_id}"
+                    f"{topology_reason}: purge topology is no longer eligible for quarantine entry #{entry_id}"
                 )
             if not entry.authoritative_anchor_path:
                 raise StateConflictError(
@@ -222,17 +222,11 @@ def validate_bulk_plan_item(service, *, plan_kind: str, item: Any) -> dict[str, 
                 service.settings.quarantine_root,
                 owner_lookup=lambda owner_id: session.get(QuarantineEntry, owner_id),
             )
-            blockers = list(current_manifest.get("blockers") or [])
-            if blockers:
+            topology_reason = validate_purge_topology_manifest(frozen_manifest, current_manifest)
+            if topology_reason is not None:
                 return {
                     "state": "stale",
-                    "reason": str(blockers[0]),
-                    "actual": {"purge_topology_manifest": current_manifest},
-                }
-            if current_manifest != frozen_manifest:
-                return {
-                    "state": "stale",
-                    "reason": "PURGE_TOPOLOGY_CHANGED",
+                    "reason": topology_reason,
                     "actual": {"purge_topology_manifest": current_manifest},
                 }
             if not entry.authoritative_anchor_path:
