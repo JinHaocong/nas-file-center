@@ -222,3 +222,101 @@ def test_quarantine_purge_executor_revalidates_historical_owner_before_capture(t
         assert selected.purged_at is None
         assert owner.state == "active"
         assert owner.tx_phase == "active"
+
+
+def test_quarantine_purge_executor_rejects_frozen_identity_drift_before_capture(tmp_path: Path) -> None:
+    """Execute must bind purge authority to the identity frozen into the plan item."""
+    data = tmp_path / "data"
+    data.mkdir()
+    quarantine_root = data / ".nas-file-center-trash"
+    attempt = quarantine_root / ".tx" / "entry-1" / "attempt-1"
+    attempt.mkdir(parents=True)
+
+    payload = b"gate6a-purge-frozen-identity"
+    payload_hash = hashlib.sha256(payload).hexdigest()
+    anchor = attempt / "anchor"
+    captured_source = attempt / "captured_source"
+    public_view = quarantine_root / "frozen-identity.q-1.bin"
+    anchor.write_bytes(payload)
+    os.link(anchor, captured_source)
+    os.link(anchor, public_view)
+    st = anchor.stat(follow_symlinks=False)
+
+    engine, SessionLocal = create_engine_and_session(tmp_path / "executor-frozen-identity.db")
+    init_db(engine)
+    with SessionLocal() as session:
+        session.execute(text("BEGIN IMMEDIATE"))
+        session.add(TaskLock(id=1, locked=True, owner="worker-1", acquired_at=utcnow()))
+        session.add(
+            QuarantineEntry(
+                id=1,
+                original_path=str(data / "frozen-identity.bin"),
+                quarantine_path=str(public_view),
+                state="active",
+                tx_phase="active",
+                authoritative_anchor_path=str(anchor),
+                active_attempt_generation=1,
+                device=st.st_dev,
+                inode=st.st_ino,
+                size=st.st_size,
+                mtime_ns=st.st_mtime_ns,
+                content_hash=payload_hash,
+            )
+        )
+        session.commit()
+
+    with SessionLocal() as session:
+        entry = session.get(QuarantineEntry, 1)
+        assert entry is not None
+        frozen_manifest = build_purge_topology_manifest(
+            entry,
+            quarantine_root,
+            owner_lookup=lambda _: None,
+        )
+        assert frozen_manifest["blockers"] == []
+
+    # Simulate DB identity drift after plan Validate while the frozen filesystem
+    # payload itself remains unchanged. Execute must reject before entering purging
+    # or renaming any source into a private purge slot.
+    with SessionLocal() as session:
+        session.execute(text("BEGIN IMMEDIATE"))
+        entry = session.get(QuarantineEntry, 1)
+        assert entry is not None
+        entry.content_hash = hashlib.sha256(b"different-authority").hexdigest()
+        session.commit()
+
+    result = execute_item(
+        OperationItem(
+            sequence=1,
+            operation="quarantine_purge",
+            source=public_view,
+            expected_device=st.st_dev,
+            expected_inode=st.st_ino,
+            expected_size=st.st_size,
+            expected_mtime_ns=st.st_mtime_ns,
+            expected_hash=payload_hash,
+        ),
+        allowed_roots=[data],
+        allow_mutation=True,
+        allow_delete=True,
+        quarantine_root=quarantine_root,
+        plan_id="gate6a-purge-frozen-identity",
+        session_factory=SessionLocal,
+        worker_id="worker-1",
+        quarantine_entry_id=1,
+        purge_manifest=frozen_manifest,
+    )
+
+    assert result.state == "failed"
+    assert "PURGE_FROZEN_IDENTITY_CHANGED" in result.reason
+    assert anchor.exists()
+    assert captured_source.exists()
+    assert public_view.exists()
+    assert not (quarantine_root / ".tx" / "entry-1" / "attempt-2").exists()
+
+    with SessionLocal() as session:
+        entry = session.get(QuarantineEntry, 1)
+        assert entry is not None
+        assert entry.state == "active"
+        assert entry.tx_phase == "active"
+        assert entry.purged_at is None
