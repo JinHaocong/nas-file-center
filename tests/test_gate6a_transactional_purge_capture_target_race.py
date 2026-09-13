@@ -12,11 +12,11 @@ from app.exceptions import StateConflictError
 from app.models import QuarantineEntry, TaskLock, utcnow
 
 
-def test_transactional_purge_capture_preserves_slot_inserted_immediately_before_rename(
+def test_transactional_purge_capture_preserves_slot_inserted_at_capture_syscall(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    """A foreign object racing into a write-once slot must never be overwritten."""
+    """Capture must use an atomic no-overwrite primitive for the private slot."""
     import app.quarantine.purge as purge
 
     data = tmp_path / "data"
@@ -68,21 +68,21 @@ def test_transactional_purge_capture_preserves_slot_inserted_immediately_before_
         )
         assert frozen_manifest["blockers"] == []
 
-    real_rename = os.rename
+    real_link = os.link
     injected = False
     raced_slot: Path | None = None
 
-    def rename_with_target_race(
+    def link_with_target_race(
         src: str,
         dst: str,
         *,
         src_dir_fd: int | None = None,
         dst_dir_fd: int | None = None,
+        follow_symlinks: bool = True,
     ) -> None:
         nonlocal injected, raced_slot
-        if not injected:
+        if not injected and dst_dir_fd is not None:
             injected = True
-            assert dst_dir_fd is not None
             fd = os.open(
                 dst,
                 os.O_WRONLY | os.O_CREAT | os.O_EXCL,
@@ -101,14 +101,15 @@ def test_transactional_purge_capture_preserves_slot_inserted_immediately_before_
                 / "purge"
                 / dst
             )
-        real_rename(
+        real_link(
             src,
             dst,
             src_dir_fd=src_dir_fd,
             dst_dir_fd=dst_dir_fd,
+            follow_symlinks=follow_symlinks,
         )
 
-    monkeypatch.setattr(purge.os, "rename", rename_with_target_race)
+    monkeypatch.setattr(purge.os, "link", link_with_target_race)
 
     with pytest.raises(StateConflictError):
         purge.execute_transactional_purge_capture(
