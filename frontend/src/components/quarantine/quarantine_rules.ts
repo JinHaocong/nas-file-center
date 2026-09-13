@@ -69,6 +69,16 @@ export function getBulkRestoreAvailability(
   return { canRestore: true };
 }
 
+export function isBulkPreviewSelectionCurrent(
+  previewEntryIds: readonly number[],
+  selectedEntryIds: readonly number[]
+): boolean {
+  if (previewEntryIds.length !== selectedEntryIds.length) return false;
+  const preview = [...previewEntryIds].sort((a, b) => a - b);
+  const selected = [...selectedEntryIds].sort((a, b) => a - b);
+  return preview.every((id, index) => id === selected[index]);
+}
+
 export function validateQuarantineRetentionDays(days: any): { valid: boolean; error?: string } {
   if (typeof days !== 'number' || isNaN(days) || typeof days === 'boolean') {
     return { valid: false, error: '保留天数必须为数字' };
