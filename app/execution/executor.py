@@ -187,6 +187,7 @@ def execute_item(
                         worker_id=worker_id,
                         allowed_roots=valid_roots,
                         quarantine_root=quarantine_root,
+                        custom_target=str(target),
                     )
                 except Exception as exc:
                     return ItemResult("failed", str(exc))
