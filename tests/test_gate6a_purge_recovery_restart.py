@@ -153,6 +153,15 @@ def test_real_worker_restart_requeues_and_resumes_partial_purge_destruction(
         item.state = "executing"
         metadata = json.loads(item.metadata_json or "{}")
         frozen_manifest = metadata["purge_topology_manifest"]
+        metadata["execution"] = {
+            "phase": "intent",
+            "task_id": job_id,
+            "operation": "quarantine_purge",
+            "source_stat": {},
+            "metadata_before": {},
+            "target_mtime_ns": None,
+        }
+        item.metadata_json = json.dumps(metadata, ensure_ascii=False)
         session.commit()
 
     purge.execute_transactional_purge_capture(
