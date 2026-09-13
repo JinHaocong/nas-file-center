@@ -6,6 +6,7 @@ import { api } from '../src/api/client';
 import {
   getBulkSelectableEntryIds,
   getBulkRestoreAvailability,
+  isBulkPreviewSelectionCurrent,
 } from '../src/components/quarantine/quarantine_rules';
 import type { QuarantineEntry } from '../src/types';
 
@@ -108,5 +109,12 @@ describe('Gate6-A quarantine bulk selection safety rules', () => {
     assert.deepStrictEqual(getBulkRestoreAvailability(false, 'rename'), { canRestore: true });
     assert.strictEqual(getBulkRestoreAvailability(false, 'manual' as never).canRestore, false);
     assert.strictEqual(getBulkRestoreAvailability(true, 'skip').canRestore, false);
+  });
+
+  test('bulk preview remains current only for the same canonical selected id set', () => {
+    assert.strictEqual(isBulkPreviewSelectionCurrent([3, 1], [1, 3]), true);
+    assert.strictEqual(isBulkPreviewSelectionCurrent([1, 3], [1, 3, 5]), false);
+    assert.strictEqual(isBulkPreviewSelectionCurrent([1, 3], [1]), false);
+    assert.strictEqual(isBulkPreviewSelectionCurrent([1, 3], [1, 4]), false);
   });
 });
