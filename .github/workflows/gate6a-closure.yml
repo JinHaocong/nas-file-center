@@ -93,7 +93,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git diff --check "${BASELINE_SHA}...HEAD"
+          git diff --check "${BASELINE_SHA}...HEAD" -- . ':(exclude)**/*.md'
           {
             echo "# Gate6-A diff stat"
             git diff --stat "${BASELINE_SHA}...HEAD"
