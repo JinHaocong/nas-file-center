@@ -48,8 +48,4 @@ jobs:
       - name: Run current Gate6-A focused tests
         env:
           PYTHONPATH: .
-        run: >-
-          pytest
-          tests/test_gate6a_bulk_preview*.py
-          tests/test_gate6a_bulk_restore.py
-          -v
+        run: pytest tests/test_gate6a_bulk_*.py -v
