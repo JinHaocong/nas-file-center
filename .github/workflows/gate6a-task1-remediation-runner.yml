@@ -33,11 +33,32 @@ jobs:
         run: |
           set -euo pipefail
           git fetch origin ops/gate6a-9fb3f92-nas-image:refs/remotes/origin/ops/gate6a-9fb3f92-nas-image
-          git show origin/ops/gate6a-9fb3f92-nas-image:.github/workflows/gate6a-task1-remediation.yml \
-            | sed -n "/python - <<'PY'/,/^          PY$/p" \
-            | sed '1d;$d;s/^          //' > /tmp/gate6a-task1-patch.py
+          git show origin/ops/gate6a-9fb3f92-nas-image:.github/workflows/gate6a-task1-remediation.yml > /tmp/task1-source.yml
+          python - <<'PY'
+          from pathlib import Path
+
+          text = Path('/tmp/task1-source.yml').read_text()
+          opener = "          python - <<'PY'\n"
+          start = text.index(opener) + len(opener)
+          end = text.index("\n          PY", start)
+          lines = text[start:end].splitlines()
+          out: list[str] = []
+          in_raw = False
+          for raw_line in lines:
+              line = raw_line
+              if not in_raw and line.startswith('          '):
+                  line = line[10:]
+              out.append(line)
+              if line.count("'''") % 2 == 1:
+                  in_raw = not in_raw
+          if in_raw:
+              raise SystemExit('unterminated raw replacement block')
+          Path('/tmp/gate6a-task1-patch.py').write_text('\n'.join(out) + '\n')
+          PY
           test -s /tmp/gate6a-task1-patch.py
+          python -m py_compile /tmp/gate6a-task1-patch.py
           python /tmp/gate6a-task1-patch.py
+          python -m py_compile app/quarantine/purge.py
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
