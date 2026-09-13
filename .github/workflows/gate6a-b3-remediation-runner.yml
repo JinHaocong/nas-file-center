@@ -1,0 +1,71 @@
+name: Gate6-A B3 Remediation Runner
+
+on:
+  push:
+    branches:
+      - v0.3.6-gate6a-quarantine-bulk-operations
+    paths:
+      - .github/workflows/gate6a-b3-remediation-runner.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TARGET_BRANCH: v0.3.6-gate6a-quarantine-bulk-operations
+      CONFIG_DIR: /tmp/nfc-config
+      DATA_MOUNT: /tmp/nfc-data
+      ALLOWED_ROOTS: /tmp/nfc-data
+      QUARANTINE_ROOT: /tmp/nfc-data/.nas-file-center-trash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          fetch-depth: 0
+          token: ${{ github.token }}
+
+      - name: Apply minimal B3 patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('app/quarantine/purge.py')
+          s = p.read_text()
+          old = '        _begin_transactional_purge_intent(session_factory, entry_id, worker)\n'
+          new = '''        _begin_transactional_purge_intent(\n            session_factory,\n            entry_id,\n            worker,\n            frozen_manifest,\n            q_root,\n        )\n'''
+          if s.count(old) != 1:
+              raise SystemExit(f'expected exactly one B3 call site, found {s.count(old)}')
+          p.write_text(s.replace(old, new, 1))
+          PY
+          python -m py_compile app/quarantine/purge.py
+          git diff --check -- app/quarantine/purge.py
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - run: python -m pip install -e '.[test]'
+
+      - name: Verify B3 GREEN
+        env:
+          PYTHONPATH: .
+        run: >-
+          pytest
+          tests/test_gate6a_transactional_purge_intent_race.py
+          tests/test_gate6a_transactional_purge.py
+          -v
+
+      - name: Commit only after GREEN
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add app/quarantine/purge.py
+          git config user.name "Gate6-A remediation bot"
+          git config user.email "actions@users.noreply.github.com"
+          git commit -m "fix(gate6a): fence purge ownership at intent commit"
+          git push origin "HEAD:$TARGET_BRANCH"
