@@ -11,20 +11,14 @@ from app.db import create_engine_and_session, init_db
 from app.models import QuarantineEntry, TaskLock, utcnow
 
 
-def test_transactional_purge_resumes_after_one_qualified_slot_was_destroyed(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    import app.quarantine.purge as purge
-
-    engine, SessionLocal = create_engine_and_session(tmp_path / "recovery.db")
+def _setup_recovery_entry(tmp_path: Path, payload: bytes, db_name: str):
+    engine, SessionLocal = create_engine_and_session(tmp_path / db_name)
     init_db(engine)
     data = tmp_path / "data"
     quarantine_root = data / ".nas-file-center-trash"
     attempt1 = quarantine_root / ".tx" / "entry-1" / "attempt-1"
     attempt1.mkdir(parents=True)
 
-    payload = b"gate6a-partial-destruction-recovery"
     anchor = attempt1 / "anchor"
     captured_source = attempt1 / "captured_source"
     public_view = quarantine_root / "recovery.q-1.bin"
@@ -54,15 +48,34 @@ def test_transactional_purge_resumes_after_one_qualified_slot_was_destroyed(
         )
         session.commit()
 
+    return SessionLocal, data, quarantine_root, anchor, captured_source, public_view
+
+
+def _frozen_manifest(purge, SessionLocal, quarantine_root: Path):
     with SessionLocal() as session:
         entry = session.get(QuarantineEntry, 1)
         assert entry is not None
-        frozen_manifest = purge.build_purge_topology_manifest(
+        manifest = purge.build_purge_topology_manifest(
             entry,
             quarantine_root,
             owner_lookup=lambda _: None,
         )
-        assert frozen_manifest["blockers"] == []
+        assert manifest["blockers"] == []
+        return manifest
+
+
+def test_transactional_purge_resumes_after_one_qualified_slot_was_destroyed(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    import app.quarantine.purge as purge
+
+    SessionLocal, data, quarantine_root, anchor, captured_source, public_view = _setup_recovery_entry(
+        tmp_path,
+        b"gate6a-partial-destruction-recovery",
+        "recovery.db",
+    )
+    frozen_manifest = _frozen_manifest(purge, SessionLocal, quarantine_root)
 
     purge.execute_transactional_purge_capture(
         SessionLocal,
@@ -103,6 +116,91 @@ def test_transactional_purge_resumes_after_one_qualified_slot_was_destroyed(
     assert not anchor.exists()
     assert not captured_source.exists()
     assert not public_view.exists()
+
+    purge.execute_transactional_purge_capture(
+        SessionLocal,
+        entry_id=1,
+        worker_id="worker-1",
+        frozen_manifest=frozen_manifest,
+        quarantine_root=quarantine_root,
+        allowed_roots=[data],
+    )
+    purge.destroy_transactional_purge_capture(
+        SessionLocal,
+        entry_id=1,
+        worker_id="worker-1",
+        frozen_manifest=frozen_manifest,
+        quarantine_root=quarantine_root,
+        allowed_roots=[data],
+    )
+
+    assert list(purge_dir.iterdir()) == []
+    with SessionLocal() as session:
+        entry = session.get(QuarantineEntry, 1)
+        assert entry is not None
+        assert entry.state == "purged"
+        assert entry.tx_phase == "purged"
+        assert entry.purged_at is not None
+        assert entry.active_attempt_generation == 2
+
+
+def test_transactional_purge_resumes_after_all_destruction_before_terminal_commit(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    import app.quarantine.purge as purge
+
+    SessionLocal, data, quarantine_root, anchor, captured_source, public_view = _setup_recovery_entry(
+        tmp_path,
+        b"gate6a-terminal-commit-recovery",
+        "terminal-recovery.db",
+    )
+    frozen_manifest = _frozen_manifest(purge, SessionLocal, quarantine_root)
+
+    purge.execute_transactional_purge_capture(
+        SessionLocal,
+        entry_id=1,
+        worker_id="worker-1",
+        frozen_manifest=frozen_manifest,
+        quarantine_root=quarantine_root,
+        allowed_roots=[data],
+    )
+
+    purge_dir = quarantine_root / ".tx" / "entry-1" / "attempt-2" / "purge"
+    original_assert = purge.assert_active_worker_lease
+    assert_calls = 0
+
+    def crash_before_terminal_commit(*args, **kwargs):
+        nonlocal assert_calls
+        assert_calls += 1
+        result = original_assert(*args, **kwargs)
+        if assert_calls == 3:
+            raise RuntimeError("simulated crash before terminal purge commit")
+        return result
+
+    monkeypatch.setattr(purge, "assert_active_worker_lease", crash_before_terminal_commit)
+    with pytest.raises(RuntimeError, match="terminal purge commit"):
+        purge.destroy_transactional_purge_capture(
+            SessionLocal,
+            entry_id=1,
+            worker_id="worker-1",
+            frozen_manifest=frozen_manifest,
+            quarantine_root=quarantine_root,
+            allowed_roots=[data],
+        )
+    monkeypatch.setattr(purge, "assert_active_worker_lease", original_assert)
+
+    assert not anchor.exists()
+    assert not captured_source.exists()
+    assert not public_view.exists()
+    assert list(purge_dir.iterdir()) == []
+    with SessionLocal() as session:
+        entry = session.get(QuarantineEntry, 1)
+        assert entry is not None
+        assert entry.state == "purging"
+        assert entry.tx_phase == "purging"
+        assert entry.purged_at is None
+        assert entry.active_attempt_generation == 2
 
     purge.execute_transactional_purge_capture(
         SessionLocal,
