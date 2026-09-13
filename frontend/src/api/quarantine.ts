@@ -37,6 +37,9 @@ export const quarantineApi = {
       const response = await quarantineApi.list({ ...params, page, pageSize });
       total = response.total;
       entryIds.push(...response.items.filter((entry) => entry.state === 'active').map((entry) => entry.id));
+      if (entryIds.length > 5000) {
+        throw new Error('Gate6-A bulk selection exceeds maximum of 5000 active entries');
+      }
       page += 1;
     } while ((page - 1) * pageSize < total);
 
