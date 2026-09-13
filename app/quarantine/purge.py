@@ -397,6 +397,70 @@ def qualify_transactional_purge_capture(
     return qualified
 
 
+def _destroy_one_qualified_purge_slot(
+    session_factory: Any,
+    worker_id: str,
+    captured_path: Path,
+    valid_roots: list[Path],
+    *,
+    expected_device: int | None,
+    expected_inode: int | None,
+    expected_size: int | None,
+    expected_mtime_ns: int | None,
+    expected_hash: str,
+) -> None:
+    """Re-qualify one captured slot under an open parent fd immediately before unlink."""
+    try:
+        with safe_open_parent_fd(captured_path, valid_roots) as (dir_fd, leaf):
+            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            fd = os.open(leaf, flags, dir_fd=dir_fd)
+            try:
+                st = os.fstat(fd)
+                if not (
+                    stat.S_ISREG(st.st_mode)
+                    and st.st_dev == expected_device
+                    and st.st_ino == expected_inode
+                    and st.st_size == expected_size
+                    and st.st_mtime_ns == expected_mtime_ns
+                ):
+                    raise StateConflictError(
+                        f"PURGE_DESTRUCTION_FAILED: captured slot identity changed: {captured_path}"
+                    )
+
+                digest = hashlib.sha256()
+                while chunk := os.read(fd, 1024 * 1024):
+                    digest.update(chunk)
+                if digest.hexdigest().lower() != expected_hash:
+                    raise StateConflictError(
+                        f"PURGE_DESTRUCTION_FAILED: captured slot hash changed: {captured_path}"
+                    )
+
+                # Preserve the per-mutation lease fence and bind the pathname back to
+                # the descriptor identity immediately before the one destructive syscall.
+                renew_and_assert_worker_lease(session_factory, worker_id)
+                live = os.stat(leaf, dir_fd=dir_fd, follow_symlinks=False)
+                if not (
+                    stat.S_ISREG(live.st_mode)
+                    and live.st_dev == st.st_dev
+                    and live.st_ino == st.st_ino
+                    and live.st_size == st.st_size
+                    and live.st_mtime_ns == st.st_mtime_ns
+                ):
+                    raise StateConflictError(
+                        f"PURGE_DESTRUCTION_FAILED: captured slot was replaced before unlink: {captured_path}"
+                    )
+
+                os.unlink(leaf, dir_fd=dir_fd)
+            finally:
+                os.close(fd)
+    except StateConflictError:
+        raise
+    except OSError as exc:
+        raise StateConflictError(
+            f"PURGE_DESTRUCTION_FAILED: cannot safely unlink captured slot {captured_path}: {exc}"
+        ) from exc
+
+
 def destroy_transactional_purge_capture(
     session_factory: Any,
     entry_id: int,
@@ -430,6 +494,14 @@ def destroy_transactional_purge_capture(
                 f"(state={entry.state}, tx_phase={entry.tx_phase})"
             )
         generation = int(entry.active_attempt_generation or 0)
+        expected_device = entry.device
+        expected_inode = entry.inode
+        expected_size = entry.size
+        expected_mtime_ns = entry.mtime_ns
+        expected_hash = (entry.content_hash or "").lower()
+
+    if generation <= 0 or not expected_hash:
+        raise StateConflictError("PURGE_DESTRUCTION_FAILED: missing frozen payload identity")
 
     q_root = Path(quarantine_root)
     valid_roots = [Path(root) for root in allowed_roots]
@@ -444,14 +516,17 @@ def destroy_transactional_purge_capture(
             )
 
     for captured_path in qualified:
-        with safe_open_parent_fd(captured_path, valid_roots) as (dir_fd, leaf):
-            renew_and_assert_worker_lease(session_factory, worker)
-            try:
-                os.unlink(leaf, dir_fd=dir_fd)
-            except OSError as exc:
-                raise StateConflictError(
-                    f"PURGE_DESTRUCTION_FAILED: cannot unlink qualified slot {captured_path}: {exc}"
-                ) from exc
+        _destroy_one_qualified_purge_slot(
+            session_factory,
+            worker,
+            captured_path,
+            valid_roots,
+            expected_device=expected_device,
+            expected_inode=expected_inode,
+            expected_size=expected_size,
+            expected_mtime_ns=expected_mtime_ns,
+            expected_hash=expected_hash,
+        )
 
     # Prove exact source + captured-slot closure before terminal DB state. This is
     # read-only filesystem observation and intentionally occurs outside any SQLite write tx.
