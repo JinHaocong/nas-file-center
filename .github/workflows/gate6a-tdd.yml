@@ -56,3 +56,18 @@ jobs:
           tests/test_gate6a_transactional_purge*.py
           tests/test_gate6a_purge_recovery*.py
           -v
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run Gate6-A frontend tests
+        working-directory: frontend
+        run: npm test
