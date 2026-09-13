@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from pathlib import Path
 
@@ -151,3 +152,71 @@ def test_bulk_plan_preview_changed_returns_409_and_persists_nothing(tmp_path: Pa
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "PREVIEW_CHANGED"
     assert _plan_counts(client) == before
+
+
+def test_bulk_plan_generates_restore_draft_from_exact_preview(tmp_path: Path) -> None:
+    client = _setup_admin_client(tmp_path)
+    entry_id = _seed_active_transactional_entry(client)
+    service = client.app.state.service
+
+    preview = client.post(
+        "/api/quarantine/bulk-preview",
+        json={
+            "action": "restore",
+            "entry_ids": [entry_id],
+            "conflict_policy": "skip",
+        },
+        headers={"Origin": "http://testserver"},
+    )
+    assert preview.status_code == 200
+    preview_body = preview.json()
+    digest = preview_body["preview_digest"]
+    target_path = preview_body["items"][0]["target_path"]
+
+    response = client.post(
+        "/api/quarantine/bulk-plan",
+        json={
+            "action": "restore",
+            "entry_ids": [entry_id],
+            "conflict_policy": "skip",
+            "expected_preview_digest": digest,
+        },
+        headers={"Origin": "http://testserver"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["kind"] == "quarantine-bulk-restore"
+    assert body["status"] == "draft"
+
+    with service.SessionLocal() as session:
+        plan = session.get(BatchPlan, body["id"])
+        assert plan is not None
+        assert plan.kind == "quarantine-bulk-restore"
+        assert plan.status == "draft"
+        assert plan.expected_changes == 1
+
+        items = list(
+            session.scalars(
+                select(BatchPlanItem)
+                .where(BatchPlanItem.plan_id == plan.id)
+                .order_by(BatchPlanItem.sequence)
+            )
+        )
+        assert len(items) == 1
+        item = items[0]
+        entry = session.get(QuarantineEntry, entry_id)
+        assert entry is not None
+        assert item.operation == "restore"
+        assert item.source_path == entry.quarantine_path
+        assert item.target_path == target_path
+        assert item.state == "planned"
+        assert item.expected_device == 0
+        assert item.expected_inode == 0
+        assert item.expected_mtime_ns == 0
+        assert item.expected_hash is None
+        assert json.loads(item.metadata_json) == {
+            "quarantine_entry_id": entry_id,
+            "conflict_policy": "skip",
+            "preview_digest": digest,
+        }
