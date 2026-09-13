@@ -136,3 +136,27 @@ def test_bulk_restore_freeze_rejects_entry_that_is_no_longer_active(tmp_path: Pa
 
     assert anchor.exists()
     assert public_view.exists()
+
+
+def test_bulk_restore_freeze_captures_authoritative_physical_identity(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    entry_id, anchor, public_view = _active_entry(client)
+    plan_id = _restore_draft(client, entry_id)
+    service = client.app.state.service
+    before = anchor.stat(follow_symlinks=False)
+    expected_hash = hashlib.sha256(anchor.read_bytes()).hexdigest()
+
+    frozen = service.freeze_plan(plan_id)
+    assert frozen.status == "frozen"
+
+    with service.SessionLocal() as session:
+        item = session.query(BatchPlanItem).filter_by(plan_id=plan_id).one()
+        assert item.state == "planned"
+        assert item.expected_device == before.st_dev
+        assert item.expected_inode == before.st_ino
+        assert item.expected_size == before.st_size
+        assert item.expected_mtime_ns == before.st_mtime_ns
+        assert item.expected_hash == expected_hash
+
+    assert anchor.exists()
+    assert public_view.exists()
