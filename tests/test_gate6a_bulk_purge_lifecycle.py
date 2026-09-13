@@ -195,3 +195,52 @@ def test_bulk_purge_validate_rejects_new_shared_active_owner_after_freeze(tmp_pa
     assert paths["captured_source"].exists()
     assert paths["public_view"].exists()
     assert owner_anchor.exists()
+
+
+def test_bulk_purge_validate_rejects_unrecognized_private_alias_after_freeze(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    selected_id, paths = _active_entry(client)
+    plan_id = _purge_draft(client, selected_id)
+    service = client.app.state.service
+
+    frozen = service.freeze_plan(plan_id)
+    assert frozen.status == "frozen"
+
+    rogue_alias = paths["anchor"].parent / "unexpected-private-alias"
+    os.link(paths["anchor"], rogue_alias)
+    detail = service.validate_plan(plan_id)
+
+    assert detail["status"] == "stale"
+    assert detail["items"][0]["state"] == "stale"
+    assert detail["items"][0]["reason"] == "UNRECOGNIZED_PRIVATE_PATH"
+    assert rogue_alias.exists()
+    assert paths["anchor"].exists()
+    assert paths["captured_source"].exists()
+    assert paths["public_view"].exists()
+
+
+def test_bulk_purge_validate_rejects_same_size_same_mtime_hash_drift_after_freeze(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    selected_id, paths = _active_entry(client)
+    plan_id = _purge_draft(client, selected_id)
+    service = client.app.state.service
+
+    frozen = service.freeze_plan(plan_id)
+    assert frozen.status == "frozen"
+
+    anchor = paths["anchor"]
+    before = anchor.stat(follow_symlinks=False)
+    original = anchor.read_bytes()
+    replacement = bytes((byte ^ 0x01) for byte in original)
+    assert len(replacement) == len(original)
+    anchor.write_bytes(replacement)
+    os.utime(anchor, ns=(before.st_atime_ns, before.st_mtime_ns), follow_symlinks=False)
+
+    detail = service.validate_plan(plan_id)
+
+    assert detail["status"] == "stale"
+    assert detail["items"][0]["state"] == "stale"
+    assert detail["items"][0]["reason"] == "purge_source_identity_changed"
+    assert anchor.exists()
+    assert paths["captured_source"].exists()
+    assert paths["public_view"].exists()
