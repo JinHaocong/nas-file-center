@@ -151,7 +151,11 @@ def build_purge_topology_manifest(
             dirnames[:] = sorted(dirnames)
             for filename in sorted(filenames):
                 candidate = _absolute_lexical(Path(dirpath) / filename)
-                if candidate in known_paths or candidate.is_symlink():
+                if candidate in known_paths:
+                    continue
+                if candidate.is_symlink():
+                    if _private_owner_id(candidate, tx_root) == entry.id:
+                        add_blocker("SYMLINK_IN_PAYLOAD_ALIAS_SET")
                     continue
                 try:
                     st = candidate.stat(follow_symlinks=False)
