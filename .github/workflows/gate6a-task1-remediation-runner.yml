@@ -58,6 +58,11 @@ jobs:
           test -s /tmp/gate6a-task1-patch.py
           python -m py_compile /tmp/gate6a-task1-patch.py
           python /tmp/gate6a-task1-patch.py
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('app/quarantine/purge.py')
+          p.write_text(p.read_text().rstrip() + '\n')
+          PY
           python -m py_compile app/quarantine/purge.py
 
       - name: Set up Python 3.12
