@@ -150,6 +150,34 @@ def _purge_slot_name(alias: dict[str, Any]) -> str:
     raise StateConflictError(f"Unsupported purge capture alias role: {role}")
 
 
+def _frozen_selected_attempt_generation(
+    frozen_manifest: dict[str, Any],
+    entry_id: int,
+) -> int:
+    """Return the selected authoritative anchor generation bound by the frozen manifest."""
+    for alias in list(frozen_manifest.get("aliases") or []):
+        if alias.get("role") != "authoritative_anchor":
+            continue
+        try:
+            owner_entry_id = int(alias.get("owner_entry_id"))
+        except (TypeError, ValueError):
+            continue
+        if owner_entry_id != entry_id:
+            continue
+        anchor_path = Path(str(alias.get("path") or ""))
+        attempt_name = anchor_path.parent.name
+        if anchor_path.name != "anchor" or not attempt_name.startswith("attempt-"):
+            break
+        try:
+            generation = int(attempt_name.removeprefix("attempt-"))
+        except ValueError:
+            break
+        if generation > 0:
+            return generation
+        break
+    raise StateConflictError("PURGE_RECOVERY_REQUIRED: frozen authoritative attempt generation is invalid")
+
+
 def execute_transactional_purge_capture(
     session_factory: Any,
     entry_id: int,
@@ -168,7 +196,30 @@ def execute_transactional_purge_capture(
     if q_root not in valid_roots:
         valid_roots.append(q_root)
 
-    _begin_transactional_purge_intent(session_factory, entry_id, worker)
+    with session_factory() as session:
+        assert_active_worker_lease(session, worker)
+        entry = session.get(QuarantineEntry, entry_id)
+        if entry is None:
+            raise StateConflictError(f"Quarantine entry #{entry_id} not found")
+        current_state = entry.state
+        current_tx_phase = entry.tx_phase
+        current_generation = int(entry.active_attempt_generation or 0)
+
+    if current_state == "active" and current_tx_phase == "active":
+        _begin_transactional_purge_intent(session_factory, entry_id, worker)
+    elif current_state == "purging" and current_tx_phase == "purging":
+        frozen_generation = _frozen_selected_attempt_generation(frozen_manifest, entry_id)
+        if current_generation != frozen_generation:
+            raise StateConflictError(
+                "PURGE_RECOVERY_REQUIRED: purge capture generation already advanced "
+                f"(frozen={frozen_generation}, current={current_generation})"
+            )
+    else:
+        raise StateConflictError(
+            f"Quarantine entry #{entry_id} cannot enter purge capture "
+            f"(state={current_state}, tx_phase={current_tx_phase})"
+        )
+
     _, _, purge_dir = _allocate_transactional_purge_attempt(
         session_factory,
         entry_id,
