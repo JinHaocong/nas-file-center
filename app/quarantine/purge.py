@@ -3,12 +3,17 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
+from sqlalchemy import text
+
+from app.exceptions import StateConflictError
+from app.models import QuarantineEntry
 from app.quarantine.bulk import (
     _expected_historical_candidate_path,
     _matches_persisted_identity,
     _same_persisted_payload_identity,
     build_purge_topology_manifest as _build_preview_purge_topology_manifest,
 )
+from app.tasks.recovery import assert_active_worker_lease
 
 
 def build_purge_topology_manifest(
@@ -73,6 +78,32 @@ def classify_cross_entry_alias_owner(
         return "historical_conflict_candidate", None
 
     return None, "UNKNOWN_PAYLOAD_OWNER_STATE"
+
+
+def _begin_transactional_purge_intent(
+    session_factory: Any,
+    entry_id: int,
+    worker_id: str,
+) -> None:
+    """Commit Gate6-A irreversible purge intent before any filesystem capture syscall."""
+    with session_factory() as session:
+        session.execute(text("BEGIN IMMEDIATE"))
+        assert_active_worker_lease(session, worker_id)
+        entry = session.get(QuarantineEntry, entry_id)
+        if entry is None:
+            session.rollback()
+            raise StateConflictError(f"Quarantine entry #{entry_id} not found")
+        if entry.state != "active" or entry.tx_phase != "active":
+            state = entry.state
+            tx_phase = entry.tx_phase
+            session.rollback()
+            raise StateConflictError(
+                f"Quarantine entry #{entry_id} must still be active before purge "
+                f"(state={state}, tx_phase={tx_phase})"
+            )
+        entry.state = "purging"
+        entry.tx_phase = "purging"
+        session.commit()
 
 
 def execute_transactional_purge_capture(
