@@ -122,3 +122,30 @@ def test_restore_bulk_plan_requires_allow_mutation(tmp_path: Path) -> None:
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "MUTATION_DISABLED"
     assert _counts(client) == before
+
+
+def test_purge_bulk_plan_requires_delete_confirmation_token(tmp_path: Path) -> None:
+    client = _setup_client(tmp_path, allow_mutation=True)
+    entry_id = _seed_active_entry(client)
+
+    preview = client.post(
+        "/api/quarantine/bulk-preview",
+        json={"action": "purge", "entry_ids": [entry_id]},
+        headers={"Origin": "http://testserver"},
+    )
+    assert preview.status_code == 200
+    assert preview.json()["eligible_count"] == 1
+    before = _counts(client)
+
+    response = client.post(
+        "/api/quarantine/bulk-plan",
+        json={
+            "action": "purge",
+            "entry_ids": [entry_id],
+            "expected_preview_digest": preview.json()["preview_digest"],
+        },
+        headers={"Origin": "http://testserver"},
+    )
+
+    assert response.status_code == 422
+    assert _counts(client) == before
