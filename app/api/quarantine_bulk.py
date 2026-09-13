@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.auth.dependencies import get_current_user
@@ -151,4 +152,26 @@ def preview_quarantine_bulk(request: Request, payload: QuarantineBulkPreviewRequ
 
 @router.post("/bulk-plan")
 def generate_quarantine_bulk_plan(request: Request, payload: QuarantineBulkPlanRequest):
+    preview_payload = QuarantineBulkPreviewRequest(
+        action=payload.action,
+        entry_ids=payload.entry_ids,
+        conflict_policy=payload.conflict_policy,
+    )
+    current_preview = _compute_bulk_preview(request.app.state.service, preview_payload)
+    actual_digest = str(current_preview["preview_digest"])
+    if actual_digest != payload.expected_preview_digest:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "error": {
+                    "code": "PREVIEW_CHANGED",
+                    "message": "Preview changed; run Preview again before generating a Draft",
+                    "details": {
+                        "expected_preview_digest": payload.expected_preview_digest,
+                        "actual_preview_digest": actual_digest,
+                    },
+                }
+            },
+        )
+
     raise HTTPException(status_code=501, detail="Gate6-A bulk plan generation not implemented")
