@@ -73,3 +73,18 @@ def classify_cross_entry_alias_owner(
         return "historical_conflict_candidate", None
 
     return None, "UNKNOWN_PAYLOAD_OWNER_STATE"
+
+
+def execute_transactional_purge_capture(
+    session_factory: Any,
+    entry_id: int,
+    worker_id: str | None,
+    frozen_manifest: dict[str, Any],
+    quarantine_root: Path | str,
+    allowed_roots: list[Path | str],
+) -> None:
+    """Worker-only Gate6-A purge capture entrypoint. Capture semantics are added incrementally by TDD."""
+    if not worker_id or not str(worker_id).strip():
+        raise PermissionError("Transactional purge capture requires valid worker authority")
+
+    raise NotImplementedError("Gate6-A transactional purge capture is not implemented yet")
