@@ -99,7 +99,7 @@ def test_quarantine_purge_executor_routes_authorized_transaction_to_terminal_pur
     )
 
     assert result.state == "completed"
-    assert "purged" in result.reason.lower()
+    assert result.reason == "purged"
     assert not anchor.exists()
     assert not captured_source.exists()
     assert not public_view.exists()
