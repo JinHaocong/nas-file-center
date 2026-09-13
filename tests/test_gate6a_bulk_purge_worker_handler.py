@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from app.config import Settings
 from app.main import create_app
-from app.models import BatchPlanItem, QuarantineEntry, TaskLock, WorkJob, utcnow
+from app.models import BatchPlan, BatchPlanItem, QuarantineEntry, TaskLock, WorkJob, utcnow
 from app.tasks.context import JobContext
 from app.tasks.handlers import BatchPlanExecuteHandler
 
@@ -161,3 +161,6 @@ def test_bulk_purge_worker_handler_passes_entry_and_frozen_manifest_to_executor(
         item = session.query(BatchPlanItem).filter_by(plan_id=plan_id).one()
         assert item.state == "completed"
         assert item.reason == "purged"
+        plan = session.get(BatchPlan, plan_id)
+        assert plan is not None
+        assert plan.status == "completed"
