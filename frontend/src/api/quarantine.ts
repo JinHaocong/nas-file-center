@@ -6,6 +6,10 @@ import {
   QuarantineRestoreResponse,
   QuarantinePurgeRequest,
   QuarantinePurgeResponse,
+  QuarantineBulkPreviewRequest,
+  QuarantineBulkPreviewResponse,
+  QuarantineBulkPlanRequest,
+  QuarantineBulkPlanResponse,
   QuarantineRetentionPolicy,
 } from '../types';
 
@@ -30,6 +34,12 @@ export const quarantineApi = {
 
   purge: (id: number, payload: QuarantinePurgeRequest) =>
     api.post<QuarantinePurgeResponse>(`/api/quarantine/${id}/purge`, payload),
+
+  bulkPreview: (payload: QuarantineBulkPreviewRequest) =>
+    api.post<QuarantineBulkPreviewResponse>('/api/quarantine/bulk-preview', payload),
+
+  bulkPlan: (payload: QuarantineBulkPlanRequest) =>
+    api.post<QuarantineBulkPlanResponse>('/api/quarantine/bulk-plan', payload),
 
   getRetentionPolicy: () => api.get<QuarantineRetentionPolicy>('/api/quarantine/retention-policy'),
 
