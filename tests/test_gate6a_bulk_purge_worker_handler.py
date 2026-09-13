@@ -111,11 +111,8 @@ def _prepare_worker(service, plan_id: int, worker_id: str) -> int:
         return int(job.id)
 
 
-def test_bulk_purge_worker_handler_passes_entry_and_frozen_manifest_to_executor(tmp_path: Path) -> None:
-    client = _client(tmp_path)
+def _bulk_purge_plan(client: TestClient, entry_id: int) -> int:
     service = client.app.state.service
-    entry_id, anchor, captured_source, public_view = _active_entry(client)
-
     preview = client.post(
         "/api/quarantine/bulk-preview",
         json={"action": "purge", "entry_ids": [entry_id]},
@@ -136,17 +133,28 @@ def test_bulk_purge_worker_handler_passes_entry_and_frozen_manifest_to_executor(
     )
     assert generated.status_code == 200
     plan_id = int(generated.json()["id"])
-
     assert service.freeze_plan(plan_id).status == "frozen"
     assert service.validate_plan(plan_id)["status"] == "ready"
+    return plan_id
 
-    worker_id = "worker-gate6a-purge-handler"
-    job_id = _prepare_worker(service, plan_id, worker_id)
+
+def _run_worker(service, job_id: int, worker_id: str) -> None:
     with service.SessionLocal() as session:
         job = session.get(WorkJob, job_id)
         assert job is not None
         context = JobContext(service.engine, service.SessionLocal, job_id, worker_id)
         BatchPlanExecuteHandler().run(job, context, service.settings)
+
+
+def test_bulk_purge_worker_handler_passes_entry_and_frozen_manifest_to_executor(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    service = client.app.state.service
+    entry_id, anchor, captured_source, public_view = _active_entry(client)
+    plan_id = _bulk_purge_plan(client, entry_id)
+
+    worker_id = "worker-gate6a-purge-handler"
+    job_id = _prepare_worker(service, plan_id, worker_id)
+    _run_worker(service, job_id, worker_id)
 
     assert not anchor.exists()
     assert not captured_source.exists()
@@ -164,3 +172,47 @@ def test_bulk_purge_worker_handler_passes_entry_and_frozen_manifest_to_executor(
         plan = session.get(BatchPlan, plan_id)
         assert plan is not None
         assert plan.status == "completed"
+
+
+def test_bulk_purge_worker_resumes_after_crash_immediately_after_durable_purging_intent(tmp_path: Path) -> None:
+    from app.quarantine.purge import _begin_transactional_purge_intent
+
+    client = _client(tmp_path)
+    service = client.app.state.service
+    entry_id, anchor, captured_source, public_view = _active_entry(client)
+    plan_id = _bulk_purge_plan(client, entry_id)
+
+    worker_id = "worker-gate6a-purge-resume-intent"
+    job_id = _prepare_worker(service, plan_id, worker_id)
+
+    _begin_transactional_purge_intent(service.SessionLocal, entry_id, worker_id)
+    with service.SessionLocal() as session:
+        entry = session.get(QuarantineEntry, entry_id)
+        assert entry is not None
+        assert entry.state == "purging"
+        assert entry.tx_phase == "purging"
+        assert entry.active_attempt_generation == 1
+        item = session.query(BatchPlanItem).filter_by(plan_id=plan_id).one()
+        item.state = "executing"
+        session.commit()
+
+    assert anchor.exists()
+    assert captured_source.exists()
+    assert public_view.exists()
+
+    _run_worker(service, job_id, worker_id)
+
+    assert not anchor.exists()
+    assert not captured_source.exists()
+    assert not public_view.exists()
+
+    with service.SessionLocal() as session:
+        entry = session.get(QuarantineEntry, entry_id)
+        assert entry is not None
+        assert entry.state == "purged"
+        assert entry.tx_phase == "purged"
+        assert entry.purged_at is not None
+        assert entry.active_attempt_generation > 1
+        item = session.query(BatchPlanItem).filter_by(plan_id=plan_id).one()
+        assert item.state == "completed"
+        assert item.reason == "purged"
