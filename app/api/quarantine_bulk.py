@@ -155,6 +155,18 @@ def preview_quarantine_bulk(request: Request, payload: QuarantineBulkPreviewRequ
 @router.post("/bulk-plan")
 def generate_quarantine_bulk_plan(request: Request, payload: QuarantineBulkPlanRequest):
     service = request.app.state.service
+    if not service.settings.allow_mutation:
+        return JSONResponse(
+            status_code=403,
+            content={
+                "error": {
+                    "code": "MUTATION_DISABLED",
+                    "message": "Filesystem mutation is disabled",
+                    "details": {},
+                }
+            },
+        )
+
     preview_payload = QuarantineBulkPreviewRequest(
         action=payload.action,
         entry_ids=payload.entry_ids,
