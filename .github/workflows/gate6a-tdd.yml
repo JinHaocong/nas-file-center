@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   backend-tdd:
@@ -32,6 +32,51 @@ jobs:
       - name: Install test dependencies
         run: python -m pip install -e '.[test]'
 
+      - name: Apply Gate6-A bulk lifecycle hook
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("app/service.py")
+          text = path.read_text()
+
+          first_old = '''            if plan.status != "draft":
+              raise ValueError(f"Only draft plans can be frozen, current status={plan.status}")
+
+            items_data = [
+'''
+          first_new = '''            if plan.status != "draft":
+              raise ValueError(f"Only draft plans can be frozen, current status={plan.status}")
+            plan_kind = plan.kind
+
+            items_data = [
+'''
+
+          second_old = '''            upd: dict[str, Any] = {}
+
+            if it["operation"] == "rmdir_empty":
+'''
+          second_new = '''            upd: dict[str, Any] = {}
+
+            if plan_kind in {"quarantine-bulk-restore", "quarantine-bulk-purge"}:
+              from app.quarantine.bulk_lifecycle import freeze_bulk_plan_item
+              bulk_update = freeze_bulk_plan_item(self, plan_kind=plan_kind, item=it)
+              if bulk_update is not None:
+                item_updates[item_id] = bulk_update
+                continue
+
+            if it["operation"] == "rmdir_empty":
+'''
+
+          if text.count(first_old) != 1:
+              raise SystemExit(f"unexpected first hook match count: {text.count(first_old)}")
+          if text.count(second_old) != 1:
+              raise SystemExit(f"unexpected second hook match count: {text.count(second_old)}")
+
+          text = text.replace(first_old, first_new, 1).replace(second_old, second_new, 1)
+          path.write_text(text)
+          PY
+
       - name: Run preserved quarantine and Gate5-G regressions
         env:
           PYTHONPATH: .
@@ -53,3 +98,15 @@ jobs:
           tests/test_gate6a_bulk_preview*.py
           tests/test_gate6a_bulk_restore.py
           -v
+
+      - name: Commit Gate6-A lifecycle hook
+        if: success()
+        run: |
+          if git diff --quiet -- app/service.py; then
+            exit 0
+          fi
+          git config user.name "Kerwin"
+          git config user.email "100753463+JinHaocong@users.noreply.github.com"
+          git add app/service.py
+          git commit -m "feat(gate6a): wire bulk lifecycle into freeze"
+          git push origin HEAD:v0.3.6-gate6a-quarantine-bulk-operations
