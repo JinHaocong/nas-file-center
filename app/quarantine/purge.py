@@ -4,18 +4,11 @@ from pathlib import Path
 from typing import Any, Callable
 
 from app.quarantine.bulk import (
-    _build_preview_purge_topology_manifest if False else build_purge_topology_manifest,
-)
-from app.quarantine.bulk import (
     _expected_historical_candidate_path,
     _matches_persisted_identity,
     _same_persisted_payload_identity,
+    build_purge_topology_manifest as _build_preview_purge_topology_manifest,
 )
-
-
-# Keep the public classifier entry point stable while the Preview implementation remains
-# in app.quarantine.bulk. Task 5 is read-only; no filesystem mutation authority lives here.
-_build_preview_purge_topology_manifest = build_purge_topology_manifest
 
 
 def build_purge_topology_manifest(
