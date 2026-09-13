@@ -53,5 +53,5 @@ jobs:
         run: >-
           pytest
           tests/test_gate6a_bulk_*.py
-          tests/test_gate6a_transactional_purge.py
+          tests/test_gate6a_transactional_purge*.py
           -v
