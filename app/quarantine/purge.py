@@ -168,6 +168,12 @@ def execute_transactional_purge_capture(
         target_path = purge_dir / slot_by_role[role]
         with safe_open_parent_fd(source_path, valid_roots) as (src_dir_fd, src_leaf):
             with safe_open_parent_fd(target_path, valid_roots) as (dst_dir_fd, dst_leaf):
+                try:
+                    os.stat(dst_leaf, dir_fd=dst_dir_fd, follow_symlinks=False)
+                except FileNotFoundError:
+                    pass
+                else:
+                    raise StateConflictError(f"Purge capture slot is occupied: {target_path}")
                 renew_and_assert_worker_lease(session_factory, worker)
                 os.rename(
                     src_leaf,
