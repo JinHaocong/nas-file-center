@@ -210,10 +210,18 @@ def execute_transactional_purge_capture(
     elif current_state == "purging" and current_tx_phase == "purging":
         frozen_generation = _frozen_selected_attempt_generation(frozen_manifest, entry_id)
         if current_generation != frozen_generation:
-            raise StateConflictError(
-                "PURGE_RECOVERY_REQUIRED: purge capture generation already advanced "
-                f"(frozen={frozen_generation}, current={current_generation})"
+            current_attempt_dir = (
+                q_root / ".tx" / f"entry-{entry_id}" / f"attempt-{current_generation}"
             )
+            allocation_only_crash = (
+                current_generation == frozen_generation + 1
+                and not os.path.lexists(current_attempt_dir)
+            )
+            if not allocation_only_crash:
+                raise StateConflictError(
+                    "PURGE_RECOVERY_REQUIRED: purge capture generation already advanced "
+                    f"(frozen={frozen_generation}, current={current_generation})"
+                )
     else:
         raise StateConflictError(
             f"Quarantine entry #{entry_id} cannot enter purge capture "
