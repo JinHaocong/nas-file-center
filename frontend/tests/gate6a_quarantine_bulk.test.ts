@@ -70,6 +70,55 @@ describe('Gate6-A quarantine bulk API contract', () => {
       api.post = originalPost;
     }
   });
+
+  test('resolveBulkFilteredEntryIds paginates current filters into explicit active ids', async () => {
+    const originalGet = api.get;
+    const urls: string[] = [];
+    const makeEntry = (id: number, state: QuarantineEntry['state']): QuarantineEntry => ({
+      id,
+      original_path: `/data/${id}.bin`,
+      quarantine_path: `/trash/${id}.bin`,
+      task_id: null,
+      plan_item_id: null,
+      state,
+      size: 1,
+      hash: null,
+      mtime_ns: 1,
+      device: 1,
+      inode: id,
+      quarantined_at: null,
+      expires_at: null,
+      restored_at: null,
+      purged_at: null,
+      last_error: null,
+      created_at: null,
+      updated_at: null,
+    });
+
+    const firstPage = Array.from({ length: 500 }, (_, index) => makeEntry(index + 1, 'active'));
+    firstPage[10] = makeEntry(11, 'restored');
+
+    api.get = (async (url: string) => {
+      urls.push(url);
+      if (url.includes('page=1')) {
+        return { items: firstPage, total: 501, page: 1, page_size: 500 };
+      }
+      return { items: [makeEntry(501, 'active')], total: 501, page: 2, page_size: 500 };
+    }) as typeof api.get;
+
+    try {
+      const ids = await quarantineApi.resolveBulkFilteredEntryIds({ state: 'all', query: ' movie ' });
+      assert.strictEqual(ids.length, 500);
+      assert.strictEqual(ids.includes(11), false);
+      assert.strictEqual(ids[ids.length - 1], 501);
+      assert.deepStrictEqual(urls, [
+        '/api/quarantine?page=1&page_size=500&query=movie',
+        '/api/quarantine?page=2&page_size=500&query=movie',
+      ]);
+    } finally {
+      api.get = originalGet;
+    }
+  });
 });
 
 describe('Gate6-A quarantine bulk selection safety rules', () => {
