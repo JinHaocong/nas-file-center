@@ -160,3 +160,37 @@ def test_bulk_restore_freeze_captures_authoritative_physical_identity(tmp_path: 
 
     assert anchor.exists()
     assert public_view.exists()
+
+
+def test_bulk_restore_validate_rejects_foreign_target_occupied_after_freeze(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    entry_id, anchor, public_view = _active_entry(client)
+    plan_id = _restore_draft(client, entry_id)
+    service = client.app.state.service
+
+    frozen = service.freeze_plan(plan_id)
+    assert frozen.status == "frozen"
+
+    with service.SessionLocal() as session:
+        item = session.query(BatchPlanItem).filter_by(plan_id=plan_id).one()
+        assert item.target_path is not None
+        target = Path(item.target_path)
+
+    assert not target.exists()
+    foreign_payload = b"foreign-owner-must-survive"
+    target.write_bytes(foreign_payload)
+
+    detail = service.validate_plan(plan_id)
+
+    assert detail["status"] == "stale"
+    assert detail["items"][0]["state"] == "stale"
+    assert target.read_bytes() == foreign_payload
+
+    with service.SessionLocal() as session:
+        entry = session.get(QuarantineEntry, entry_id)
+        assert entry is not None
+        assert entry.state == "active"
+        assert entry.tx_phase == "active"
+
+    assert anchor.exists()
+    assert public_view.exists()
