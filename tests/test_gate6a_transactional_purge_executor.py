@@ -110,3 +110,115 @@ def test_quarantine_purge_executor_routes_authorized_transaction_to_terminal_pur
         assert entry.state == "purged"
         assert entry.tx_phase == "purged"
         assert entry.purged_at is not None
+
+
+def test_quarantine_purge_executor_revalidates_historical_owner_before_capture(tmp_path: Path) -> None:
+    """An alias owner that becomes active after Validate must block Execute without mutation."""
+    data = tmp_path / "data"
+    data.mkdir()
+    quarantine_root = data / ".nas-file-center-trash"
+    selected_attempt = quarantine_root / ".tx" / "entry-1" / "attempt-1"
+    historical_attempt = quarantine_root / ".tx" / "entry-2" / "attempt-1"
+    selected_attempt.mkdir(parents=True)
+    historical_attempt.mkdir(parents=True)
+
+    payload = b"gate6a-purge-execute-owner-race"
+    anchor = selected_attempt / "anchor"
+    captured_source = selected_attempt / "captured_source"
+    public_view = quarantine_root / "entry.q-1.bin"
+    historical_candidate = historical_attempt / "anchor"
+    anchor.write_bytes(payload)
+    os.link(anchor, captured_source)
+    os.link(anchor, public_view)
+    os.link(anchor, historical_candidate)
+    st = anchor.stat(follow_symlinks=False)
+    payload_hash = hashlib.sha256(payload).hexdigest()
+
+    engine, SessionLocal = create_engine_and_session(tmp_path / "executor-owner-race.db")
+    init_db(engine)
+    with SessionLocal() as session:
+        session.execute(text("BEGIN IMMEDIATE"))
+        session.add(TaskLock(id=1, locked=True, owner="worker-1", acquired_at=utcnow()))
+        session.add(
+            QuarantineEntry(
+                id=1,
+                original_path=str(data / "selected.bin"),
+                quarantine_path=str(public_view),
+                state="active",
+                tx_phase="active",
+                authoritative_anchor_path=str(anchor),
+                active_attempt_generation=1,
+                device=st.st_dev,
+                inode=st.st_ino,
+                size=st.st_size,
+                mtime_ns=st.st_mtime_ns,
+                content_hash=payload_hash,
+            )
+        )
+        session.add(
+            QuarantineEntry(
+                id=2,
+                original_path=str(data / "historical.bin"),
+                quarantine_path=str(quarantine_root / "historical.q-2.bin"),
+                state="conflict",
+                tx_phase="conflict",
+                authoritative_anchor_path=None,
+                active_attempt_generation=1,
+                device=st.st_dev,
+                inode=st.st_ino,
+                size=st.st_size,
+                mtime_ns=st.st_mtime_ns,
+                content_hash=payload_hash,
+            )
+        )
+        session.commit()
+
+    with SessionLocal() as session:
+        selected = session.get(QuarantineEntry, 1)
+        assert selected is not None
+        frozen_manifest = build_purge_topology_manifest(
+            selected,
+            quarantine_root,
+            owner_lookup=lambda owner_id: session.get(QuarantineEntry, owner_id),
+        )
+        assert frozen_manifest["blockers"] == []
+        assert frozen_manifest["historical_conflict_entry_ids"] == [2]
+
+    # Simulate the owner changing after plan Validate but before Worker Execute.
+    with SessionLocal() as session:
+        session.execute(text("BEGIN IMMEDIATE"))
+        owner = session.get(QuarantineEntry, 2)
+        assert owner is not None
+        owner.state = "active"
+        owner.tx_phase = "active"
+        session.commit()
+
+    result = execute_item(
+        OperationItem(sequence=1, operation="quarantine_purge", source=public_view),
+        allowed_roots=[data],
+        allow_mutation=True,
+        allow_delete=True,
+        quarantine_root=quarantine_root,
+        plan_id="gate6a-purge-owner-race",
+        session_factory=SessionLocal,
+        worker_id="worker-1",
+        quarantine_entry_id=1,
+        purge_manifest=frozen_manifest,
+    )
+
+    assert result.state == "failed"
+    assert "SHARED_ACTIVE_PAYLOAD" in result.reason or "PURGE_TOPOLOGY_CHANGED" in result.reason
+    assert anchor.exists()
+    assert captured_source.exists()
+    assert public_view.exists()
+    assert historical_candidate.exists()
+
+    with SessionLocal() as session:
+        selected = session.get(QuarantineEntry, 1)
+        owner = session.get(QuarantineEntry, 2)
+        assert selected is not None and owner is not None
+        assert selected.state == "active"
+        assert selected.tx_phase == "active"
+        assert selected.purged_at is None
+        assert owner.state == "active"
+        assert owner.tx_phase == "active"
