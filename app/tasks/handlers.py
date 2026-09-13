@@ -2140,6 +2140,31 @@ class BatchPlanExecuteHandler(TaskHandler):
                         created_at=now,
                     ))
 
+                if result.state == "completed" and row.operation == "quarantine_purge":
+                    topology = metadata.get("purge_topology_manifest")
+                    if isinstance(topology, dict):
+                        for alias in topology.get("aliases") or []:
+                            if not isinstance(alias, dict) or alias.get("role") != "historical_conflict_candidate":
+                                continue
+                            linked_path = alias.get("path")
+                            if not linked_path:
+                                continue
+                            session.add(AuditEvent(
+                                operation="quarantine_purge",
+                                path=str(linked_path),
+                                result="completed",
+                                details_json=json.dumps({
+                                    "plan_id": plan_id,
+                                    "item_id": row.id,
+                                    "task_id": job.id,
+                                    "quarantine_entry_id": q_purge_entry_id,
+                                    "linked_quarantine_entry_id": alias.get("owner_entry_id"),
+                                    "preview_digest": metadata.get("preview_digest"),
+                                    "role": "historical_conflict_candidate",
+                                    "reason": "retired linked historical conflict alias",
+                                }, ensure_ascii=False),
+                            ))
+
                 session.add(AuditEvent(
                     operation=row.operation,
                     path=row.source_path,
