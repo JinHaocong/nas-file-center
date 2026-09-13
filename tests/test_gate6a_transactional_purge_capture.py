@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import os
 from pathlib import Path
 
 import pytest
@@ -116,3 +118,86 @@ def test_purge_capture_attempt_generation_is_monotonic_and_never_reuses_occupied
         entry = session.get(QuarantineEntry, 1)
         assert entry is not None
         assert entry.active_attempt_generation == 3
+
+
+def test_transactional_purge_capture_moves_normal_alias_set_into_private_slots(tmp_path: Path) -> None:
+    from app.quarantine.purge import build_purge_topology_manifest, execute_transactional_purge_capture
+
+    SessionLocal = _session_factory(tmp_path)
+    data = tmp_path / "data"
+    quarantine_root = data / ".nas-file-center-trash"
+    attempt1 = quarantine_root / ".tx" / "entry-1" / "attempt-1"
+    attempt1.mkdir(parents=True)
+
+    payload = b"gate6a-normal-purge-capture"
+    anchor = attempt1 / "anchor"
+    captured_source = attempt1 / "captured_source"
+    public_view = quarantine_root / "normal.q-1.bin"
+    original = data / "normal.bin"
+    anchor.write_bytes(payload)
+    os.link(anchor, captured_source)
+    os.link(anchor, public_view)
+    st = anchor.stat(follow_symlinks=False)
+
+    with SessionLocal() as session:
+        session.execute(text("BEGIN IMMEDIATE"))
+        session.add(TaskLock(id=1, locked=True, owner="worker-1", acquired_at=utcnow()))
+        session.add(
+            QuarantineEntry(
+                id=1,
+                original_path=str(original),
+                quarantine_path=str(public_view),
+                state="active",
+                tx_phase="active",
+                authoritative_anchor_path=str(anchor),
+                active_attempt_generation=1,
+                device=st.st_dev,
+                inode=st.st_ino,
+                size=st.st_size,
+                mtime_ns=st.st_mtime_ns,
+                content_hash=hashlib.sha256(payload).hexdigest(),
+            )
+        )
+        session.commit()
+
+    with SessionLocal() as session:
+        entry = session.get(QuarantineEntry, 1)
+        assert entry is not None
+        frozen_manifest = build_purge_topology_manifest(
+            entry,
+            quarantine_root,
+            owner_lookup=lambda _: None,
+        )
+        assert frozen_manifest["blockers"] == []
+
+    execute_transactional_purge_capture(
+        SessionLocal,
+        entry_id=1,
+        worker_id="worker-1",
+        frozen_manifest=frozen_manifest,
+        quarantine_root=quarantine_root,
+        allowed_roots=[data],
+    )
+
+    purge_dir = quarantine_root / ".tx" / "entry-1" / "attempt-2" / "purge"
+    expected_slots = {
+        "current-anchor": purge_dir / "current-anchor",
+        "captured-source": purge_dir / "captured-source",
+        "public-view": purge_dir / "public-view",
+    }
+
+    assert not anchor.exists()
+    assert not captured_source.exists()
+    assert not public_view.exists()
+    assert {name: path.read_bytes() for name, path in expected_slots.items()} == {
+        "current-anchor": payload,
+        "captured-source": payload,
+        "public-view": payload,
+    }
+
+    with SessionLocal() as session:
+        entry = session.get(QuarantineEntry, 1)
+        assert entry is not None
+        assert entry.state == "purging"
+        assert entry.tx_phase == "purging"
+        assert entry.active_attempt_generation == 2
