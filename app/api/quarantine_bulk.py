@@ -56,6 +56,12 @@ class QuarantineBulkPlanRequest(QuarantineBulkPreviewRequest):
     )
     confirmation: str | None = None
 
+    @model_validator(mode="after")
+    def require_purge_confirmation(self) -> "QuarantineBulkPlanRequest":
+        if self.action == "purge" and self.confirmation != "DELETE":
+            raise ValueError("purge bulk plan confirmation must be DELETE")
+        return self
+
 
 def _compute_bulk_preview(service, payload: QuarantineBulkPreviewRequest) -> dict[str, object]:
     entry_ids = canonicalize_entry_ids(payload.entry_ids)
