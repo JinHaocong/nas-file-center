@@ -6,6 +6,7 @@ from typing import Any, Callable
 
 from sqlalchemy import text
 
+from app.batch_utilities.empty_dir_quarantine import safe_open_parent_fd
 from app.exceptions import StateConflictError
 from app.models import QuarantineEntry
 from app.quarantine.bulk import (
@@ -135,8 +136,42 @@ def execute_transactional_purge_capture(
     quarantine_root: Path | str,
     allowed_roots: list[Path | str],
 ) -> None:
-    """Worker-only Gate6-A purge capture entrypoint. Capture semantics are added incrementally by TDD."""
+    """Capture the normal Gate6-A purge alias set into one exclusive private attempt."""
     if not worker_id or not str(worker_id).strip():
         raise PermissionError("Transactional purge capture requires valid worker authority")
 
-    raise NotImplementedError("Gate6-A transactional purge capture is not implemented yet")
+    worker = str(worker_id)
+    q_root = Path(quarantine_root)
+    valid_roots = [Path(root) for root in allowed_roots]
+    if q_root not in valid_roots:
+        valid_roots.append(q_root)
+
+    _begin_transactional_purge_intent(session_factory, entry_id, worker)
+    _, _, purge_dir = _allocate_transactional_purge_attempt(
+        session_factory,
+        entry_id,
+        worker,
+        q_root,
+    )
+
+    slot_by_role = {
+        "authoritative_anchor": "current-anchor",
+        "captured_source": "captured-source",
+        "public_view": "public-view",
+    }
+    aliases = list(frozen_manifest.get("aliases") or [])
+    for alias in aliases:
+        role = str(alias.get("role") or "")
+        if role not in slot_by_role:
+            raise StateConflictError(f"Unsupported purge capture alias role: {role}")
+        source_path = Path(str(alias.get("path") or ""))
+        target_path = purge_dir / slot_by_role[role]
+        with safe_open_parent_fd(source_path, valid_roots) as (src_dir_fd, src_leaf):
+            with safe_open_parent_fd(target_path, valid_roots) as (dst_dir_fd, dst_leaf):
+                renew_and_assert_worker_lease(session_factory, worker)
+                os.rename(
+                    src_leaf,
+                    dst_leaf,
+                    src_dir_fd=src_dir_fd,
+                    dst_dir_fd=dst_dir_fd,
+                )
