@@ -1414,6 +1414,7 @@ class BatchPlanExecuteHandler(TaskHandler):
             plan = session.get(BatchPlan, plan_id)
             if not plan:
                 raise KeyError(f"Plan #{plan_id} not found")
+            is_gate6a_bulk_restore = plan.kind == "quarantine-bulk-restore"
             plan.status = "executing"
             plan_meta = json.loads(plan.metadata_json or "{}")
             is_organizer = plan_meta.get("is_organizer", False)
@@ -1673,18 +1674,27 @@ class BatchPlanExecuteHandler(TaskHandler):
                     if is_tx:
                         # Transactional QuarantineEntry: public quarantine view is presentation-only!
                         # Authority is: authoritative anchor + persisted frozen identity + worker lease + PathGuard
-                        conflict_policy = meta_dict.get("conflict_policy", "skip")
-                        custom_target = meta_dict.get("custom_target")
-                        if conflict_policy == "manual":
-                            if not custom_target or not custom_target.strip():
+                        if is_gate6a_bulk_restore:
+                            if not row.target_path:
                                 row.state = "failed"
-                                row.reason = "custom_target is required when conflict_policy is 'manual'"
+                                row.reason = "Gate6-A bulk restore is missing frozen target_path"
                                 session.commit()
                                 completed_or_skipped += 1
                                 continue
-                            dest_candidate = custom_target.strip()
+                            dest_candidate = row.target_path
                         else:
-                            dest_candidate = q_entry.original_path
+                            conflict_policy = meta_dict.get("conflict_policy", "skip")
+                            custom_target = meta_dict.get("custom_target")
+                            if conflict_policy == "manual":
+                                if not custom_target or not custom_target.strip():
+                                    row.state = "failed"
+                                    row.reason = "custom_target is required when conflict_policy is 'manual'"
+                                    session.commit()
+                                    completed_or_skipped += 1
+                                    continue
+                                dest_candidate = custom_target.strip()
+                            else:
+                                dest_candidate = q_entry.original_path
 
                         try:
                             from app.path_safety import validate_mutation_destination
