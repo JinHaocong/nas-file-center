@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-import json
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from sqlalchemy import text
 
 from app.auth.dependencies import get_current_user
-from app.models import BatchPlan, BatchPlanItem, QuarantineEntry, User
+from app.api.quarantine_bulk_plan import persist_bulk_draft
+from app.models import QuarantineEntry, User
 from app.path_safety import validate_mutation_destination
 from app.quarantine.bulk import (
     build_purge_topology_manifest,
@@ -221,92 +220,37 @@ def generate_quarantine_bulk_plan(
             },
         )
 
-    if payload.action != "restore" or int(current_preview["blocked_count"]) != 0:
-        raise HTTPException(status_code=501, detail="Gate6-A bulk plan generation not implemented")
+    if int(current_preview["blocked_count"]) != 0:
+        raise HTTPException(status_code=501, detail="Gate6-A blocked bulk plan generation not implemented")
 
-    preview_items = {
-        int(item["entry_id"]): item
-        for item in current_preview["items"]
-    }
+    preview_items = {int(item["entry_id"]): item for item in current_preview["items"]}
     entry_ids = canonicalize_entry_ids(payload.entry_ids)
-    conflict_policy = payload.conflict_policy or "skip"
+    conflict_policy = (payload.conflict_policy or "skip") if payload.action == "restore" else None
 
-    # Phase B is deliberately a short SQLite write transaction. All filesystem
-    # topology/target work above completed before BEGIN IMMEDIATE.
-    with service.SessionLocal() as session:
-        session.execute(text("BEGIN IMMEDIATE"))
-        entries: dict[int, QuarantineEntry] = {}
-        for entry_id in entry_ids:
-            entry = session.get(QuarantineEntry, entry_id)
-            if entry is None or entry.state != "active":
-                session.rollback()
-                return JSONResponse(
-                    status_code=409,
-                    content={
-                        "error": {
-                            "code": "PREVIEW_CHANGED",
-                            "message": "Preview changed; run Preview again before generating a Draft",
-                            "details": {"entry_id": entry_id},
-                        }
-                    },
-                )
-            entries[entry_id] = entry
-
-        plan = BatchPlan(
-            name="quarantine-bulk-restore",
-            kind="quarantine-bulk-restore",
-            status="draft",
-            expected_changes=len(entry_ids),
-            expected_reclaim_bytes=0,
-            metadata_json=json.dumps(
-                {
-                    "action": "restore",
-                    "entry_ids": entry_ids,
-                    "conflict_policy": conflict_policy,
-                    "preview_digest": actual_digest,
-                },
-                ensure_ascii=False,
-                sort_keys=True,
-            ),
+    try:
+        plan_id, plan_kind = persist_bulk_draft(
+            service,
+            action=payload.action,
+            entry_ids=entry_ids,
+            preview_items=preview_items,
+            preview_digest=actual_digest,
+            conflict_policy=conflict_policy,
         )
-        session.add(plan)
-        session.flush()
-
-        for sequence, entry_id in enumerate(entry_ids, start=1):
-            entry = entries[entry_id]
-            preview_item = preview_items[entry_id]
-            session.add(
-                BatchPlanItem(
-                    plan_id=plan.id,
-                    sequence=sequence,
-                    operation="restore",
-                    source_path=entry.quarantine_path,
-                    target_path=str(preview_item["target_path"]),
-                    keep_path=None,
-                    expected_size=0,
-                    expected_mtime_ns=0,
-                    expected_device=0,
-                    expected_inode=0,
-                    expected_hash=None,
-                    state="planned",
-                    metadata_json=json.dumps(
-                        {
-                            "quarantine_entry_id": entry_id,
-                            "conflict_policy": conflict_policy,
-                            "preview_digest": actual_digest,
-                        },
-                        ensure_ascii=False,
-                        sort_keys=True,
-                    ),
-                )
-            )
-
-        session.commit()
-        plan_id = plan.id
+    except RuntimeError as exc:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "error": {
+                    "code": "PREVIEW_CHANGED",
+                    "message": "Preview changed; run Preview again before generating a Draft",
+                    "details": {"reason": str(exc)},
+                }
+            },
+        )
 
     return {
         "id": plan_id,
-        "kind": "quarantine-bulk-restore",
+        "kind": plan_kind,
         "status": "draft",
         "expected_changes": len(entry_ids),
         "preview_digest": actual_digest,
