@@ -256,10 +256,19 @@ def test_bulk_purge_worker_resumes_after_generation_allocation_before_attempt_mk
 
     _run_worker(service, job_id, worker_id)
 
+    recovered_purge_dir = (
+        Path(service.settings.quarantine_root)
+        / ".tx"
+        / f"entry-{entry_id}"
+        / "attempt-3"
+        / "purge"
+    )
     assert not anchor.exists()
     assert not captured_source.exists()
     assert not public_view.exists()
     assert not attempt_dir.exists()
+    assert recovered_purge_dir.is_dir()
+    assert list(recovered_purge_dir.iterdir()) == []
 
     with service.SessionLocal() as session:
         entry = session.get(QuarantineEntry, entry_id)
