@@ -6,6 +6,7 @@ import { api } from '../src/api/client';
 import {
   getBulkSelectableEntryIds,
   getBulkRestoreAvailability,
+  isBulkPreviewFilterCurrent,
   isBulkPreviewSelectionCurrent,
 } from '../src/components/quarantine/quarantine_rules';
 import type { QuarantineEntry } from '../src/types';
@@ -116,5 +117,13 @@ describe('Gate6-A quarantine bulk selection safety rules', () => {
     assert.strictEqual(isBulkPreviewSelectionCurrent([1, 3], [1, 3, 5]), false);
     assert.strictEqual(isBulkPreviewSelectionCurrent([1, 3], [1]), false);
     assert.strictEqual(isBulkPreviewSelectionCurrent([1, 3], [1, 4]), false);
+  });
+
+  test('bulk preview filter identity changes only when active server-side filters change', () => {
+    const previewFilter = { state: 'active', query: 'movie' };
+    assert.strictEqual(isBulkPreviewFilterCurrent(previewFilter, { state: 'active', query: 'movie' }), true);
+    assert.strictEqual(isBulkPreviewFilterCurrent(previewFilter, { state: 'all', query: 'movie' }), false);
+    assert.strictEqual(isBulkPreviewFilterCurrent(previewFilter, { state: 'active', query: 'photo' }), false);
+    assert.strictEqual(isBulkPreviewFilterCurrent(previewFilter, { state: 'active', query: ' movie ' }), true);
   });
 });
