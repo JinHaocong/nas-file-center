@@ -1675,6 +1675,15 @@ class BatchPlanExecuteHandler(TaskHandler):
                         # Transactional QuarantineEntry: public quarantine view is presentation-only!
                         # Authority is: authoritative anchor + persisted frozen identity + worker lease + PathGuard
                         if is_gate6a_bulk_restore:
+                            if q_entry.state != "active" or q_entry.tx_phase != "active":
+                                row.state = "failed"
+                                row.reason = (
+                                    f"Quarantine entry #{q_entry.id} is no longer active at Execute "
+                                    f"(state={q_entry.state}, tx_phase={q_entry.tx_phase})"
+                                )
+                                session.commit()
+                                completed_or_skipped += 1
+                                continue
                             if not row.target_path:
                                 row.state = "failed"
                                 row.reason = "Gate6-A bulk restore is missing frozen target_path"
