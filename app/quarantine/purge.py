@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import os
 from pathlib import Path
+import stat
 from typing import Any, Callable
 
 from sqlalchemy import text
@@ -128,6 +130,26 @@ def _allocate_transactional_purge_attempt(
     return generation, attempt_dir, purge_dir
 
 
+def _purge_slot_name(alias: dict[str, Any]) -> str:
+    role = str(alias.get("role") or "")
+    slot_by_role = {
+        "authoritative_anchor": "current-anchor",
+        "captured_source": "captured-source",
+        "public_view": "public-view",
+    }
+    if role == "historical_conflict_candidate":
+        try:
+            owner_entry_id = int(alias.get("owner_entry_id"))
+        except (TypeError, ValueError):
+            raise StateConflictError("Historical purge alias is missing a valid owner entry id")
+        if owner_entry_id <= 0:
+            raise StateConflictError("Historical purge alias is missing a valid owner entry id")
+        return f"linked-conflict-{owner_entry_id}-anchor"
+    if role in slot_by_role:
+        return slot_by_role[role]
+    raise StateConflictError(f"Unsupported purge capture alias role: {role}")
+
+
 def execute_transactional_purge_capture(
     session_factory: Any,
     entry_id: int,
@@ -154,28 +176,10 @@ def execute_transactional_purge_capture(
         q_root,
     )
 
-    slot_by_role = {
-        "authoritative_anchor": "current-anchor",
-        "captured_source": "captured-source",
-        "public_view": "public-view",
-    }
     aliases = list(frozen_manifest.get("aliases") or [])
     for alias in aliases:
-        role = str(alias.get("role") or "")
-        if role == "historical_conflict_candidate":
-            try:
-                owner_entry_id = int(alias.get("owner_entry_id"))
-            except (TypeError, ValueError):
-                raise StateConflictError("Historical purge alias is missing a valid owner entry id")
-            if owner_entry_id <= 0:
-                raise StateConflictError("Historical purge alias is missing a valid owner entry id")
-            slot_name = f"linked-conflict-{owner_entry_id}-anchor"
-        elif role in slot_by_role:
-            slot_name = slot_by_role[role]
-        else:
-            raise StateConflictError(f"Unsupported purge capture alias role: {role}")
         source_path = Path(str(alias.get("path") or ""))
-        target_path = purge_dir / slot_name
+        target_path = purge_dir / _purge_slot_name(alias)
         with safe_open_parent_fd(source_path, valid_roots) as (src_dir_fd, src_leaf):
             with safe_open_parent_fd(target_path, valid_roots) as (dst_dir_fd, dst_leaf):
                 try:
@@ -191,3 +195,81 @@ def execute_transactional_purge_capture(
                     src_dir_fd=src_dir_fd,
                     dst_dir_fd=dst_dir_fd,
                 )
+
+
+def qualify_transactional_purge_capture(
+    session_factory: Any,
+    entry_id: int,
+    worker_id: str | None,
+    frozen_manifest: dict[str, Any],
+    quarantine_root: Path | str,
+    allowed_roots: list[Path | str],
+) -> list[Path]:
+    """Fully qualify every captured private slot without performing destructive unlink."""
+    if not worker_id or not str(worker_id).strip():
+        raise PermissionError("Transactional purge qualification requires valid worker authority")
+
+    worker = str(worker_id)
+    with session_factory() as session:
+        assert_active_worker_lease(session, worker)
+        entry = session.get(QuarantineEntry, entry_id)
+        if entry is None:
+            raise StateConflictError(f"Quarantine entry #{entry_id} not found")
+        if entry.state != "purging" or entry.tx_phase != "purging":
+            raise StateConflictError(
+                f"Quarantine entry #{entry_id} is not in purging state "
+                f"(state={entry.state}, tx_phase={entry.tx_phase})"
+            )
+        generation = int(entry.active_attempt_generation or 0)
+        expected_device = entry.device
+        expected_inode = entry.inode
+        expected_size = entry.size
+        expected_mtime_ns = entry.mtime_ns
+        expected_hash = (entry.content_hash or "").lower()
+
+    if generation <= 0 or not expected_hash:
+        raise StateConflictError("PURGE_QUALIFICATION_FAILED: missing frozen payload identity")
+
+    q_root = Path(quarantine_root)
+    valid_roots = [Path(root) for root in allowed_roots]
+    if q_root not in valid_roots:
+        valid_roots.append(q_root)
+    purge_dir = q_root / ".tx" / f"entry-{entry_id}" / f"attempt-{generation}" / "purge"
+
+    qualified: list[Path] = []
+    for alias in list(frozen_manifest.get("aliases") or []):
+        captured_path = purge_dir / _purge_slot_name(alias)
+        try:
+            with safe_open_parent_fd(captured_path, valid_roots) as (dir_fd, leaf):
+                flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                fd = os.open(leaf, flags, dir_fd=dir_fd)
+                try:
+                    st = os.fstat(fd)
+                    if not (
+                        stat.S_ISREG(st.st_mode)
+                        and st.st_dev == expected_device
+                        and st.st_ino == expected_inode
+                        and st.st_size == expected_size
+                        and st.st_mtime_ns == expected_mtime_ns
+                    ):
+                        raise StateConflictError(
+                            f"PURGE_QUALIFICATION_FAILED: captured slot identity mismatch: {captured_path}"
+                        )
+                    digest = hashlib.sha256()
+                    while chunk := os.read(fd, 1024 * 1024):
+                        digest.update(chunk)
+                    if digest.hexdigest().lower() != expected_hash:
+                        raise StateConflictError(
+                            f"PURGE_QUALIFICATION_FAILED: captured slot hash mismatch: {captured_path}"
+                        )
+                finally:
+                    os.close(fd)
+        except StateConflictError:
+            raise
+        except OSError as exc:
+            raise StateConflictError(
+                f"PURGE_QUALIFICATION_FAILED: cannot qualify captured slot {captured_path}: {exc}"
+            ) from exc
+        qualified.append(captured_path)
+
+    return qualified
