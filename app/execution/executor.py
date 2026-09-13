@@ -83,6 +83,35 @@ def execute_item(
                 "failed",
                 "EOPNOTSUPP: quarantine purge requires worker authority, session_factory, quarantine_entry_id, and frozen purge manifest",
             )
+        if item.expected_hash:
+            from app.models import QuarantineEntry
+
+            with session_factory() as session:
+                q_entry = session.get(QuarantineEntry, quarantine_entry_id)
+                if q_entry is None:
+                    return ItemResult(
+                        "failed",
+                        f"PURGE_FROZEN_IDENTITY_CHANGED: quarantine entry #{quarantine_entry_id} no longer exists",
+                    )
+                frozen_identity = (
+                    int(item.expected_device),
+                    int(item.expected_inode),
+                    int(item.expected_size),
+                    int(item.expected_mtime_ns),
+                    str(item.expected_hash).lower(),
+                )
+                current_identity = (
+                    int(q_entry.device or 0),
+                    int(q_entry.inode or 0),
+                    int(q_entry.size or 0),
+                    int(q_entry.mtime_ns or 0),
+                    str(q_entry.content_hash or "").lower(),
+                )
+                if current_identity != frozen_identity:
+                    return ItemResult(
+                        "failed",
+                        f"PURGE_FROZEN_IDENTITY_CHANGED: quarantine entry #{quarantine_entry_id} identity changed after Freeze",
+                    )
         try:
             from app.quarantine.purge import (
                 destroy_transactional_purge_capture,
