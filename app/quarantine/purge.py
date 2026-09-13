@@ -610,7 +610,13 @@ def execute_transactional_purge_capture(
 
     purge_dir: Path | None = None
     if current_state == "active" and current_tx_phase == "active":
-        _begin_transactional_purge_intent(session_factory, entry_id, worker)
+        _begin_transactional_purge_intent(
+            session_factory,
+            entry_id,
+            worker,
+            frozen_manifest,
+            q_root,
+        )
     elif current_state == "purging" and current_tx_phase == "purging":
         frozen_generation = _frozen_selected_attempt_generation(frozen_manifest, entry_id)
         if current_generation != frozen_generation:
