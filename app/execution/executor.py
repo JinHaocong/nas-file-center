@@ -69,13 +69,21 @@ def execute_item(
     session_factory: Any = None,
     worker_id: str | None = None,
     quarantine_entry_id: int | None = None,
+    purge_manifest: dict | None = None,
 ) -> ItemResult:
     if item.state == "completed":
         return ItemResult("completed", "already completed")
     if not allow_mutation:
         return _skip("filesystem mutation is disabled")
-    if item.operation in {"unlink", "rmdir_empty"} and not allow_delete:
+    if item.operation in {"unlink", "rmdir_empty", "quarantine_purge"} and not allow_delete:
         return _skip("permanent deletion is disabled")
+    if item.operation == "quarantine_purge":
+        if not session_factory or not worker_id or not quarantine_entry_id or purge_manifest is None:
+            return ItemResult(
+                "failed",
+                "EOPNOTSUPP: quarantine purge requires worker authority, session_factory, quarantine_entry_id, and frozen purge manifest",
+            )
+        return ItemResult("failed", "quarantine purge executor routing is not implemented yet")
     if item.operation not in {"rename", "move", "touch", "quarantine", "unlink", "restore", "rmdir_empty", "mkdir_empty", "restore_empty_dir"}:
         return _skip(f"unsupported operation: {item.operation}")
 
