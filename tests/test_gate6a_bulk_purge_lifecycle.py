@@ -167,3 +167,31 @@ def test_bulk_purge_freeze_rejects_new_shared_active_owner_after_draft(tmp_path:
     assert paths["captured_source"].exists()
     assert paths["public_view"].exists()
     assert owner_anchor.exists()
+
+
+def test_bulk_purge_validate_rejects_new_shared_active_owner_after_freeze(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    selected_id, paths = _active_entry(client)
+    plan_id = _purge_draft(client, selected_id)
+    service = client.app.state.service
+
+    frozen = service.freeze_plan(plan_id)
+    assert frozen.status == "frozen"
+
+    owner_id, owner_anchor = _add_shared_active_owner(client, paths["anchor"])
+    detail = service.validate_plan(plan_id)
+
+    assert detail["status"] == "stale"
+    assert detail["items"][0]["state"] == "stale"
+    assert detail["items"][0]["reason"] == "SHARED_ACTIVE_PAYLOAD"
+
+    with service.SessionLocal() as session:
+        selected = session.get(QuarantineEntry, selected_id)
+        owner = session.get(QuarantineEntry, owner_id)
+        assert selected is not None and selected.state == "active"
+        assert owner is not None and owner.state == "active"
+
+    assert paths["anchor"].exists()
+    assert paths["captured_source"].exists()
+    assert paths["public_view"].exists()
+    assert owner_anchor.exists()
