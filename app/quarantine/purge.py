@@ -205,6 +205,7 @@ def execute_transactional_purge_capture(
         current_tx_phase = entry.tx_phase
         current_generation = int(entry.active_attempt_generation or 0)
 
+    purge_dir: Path | None = None
     if current_state == "active" and current_tx_phase == "active":
         _begin_transactional_purge_intent(session_factory, entry_id, worker)
     elif current_state == "purging" and current_tx_phase == "purging":
@@ -217,7 +218,14 @@ def execute_transactional_purge_capture(
                 current_generation == frozen_generation + 1
                 and not os.path.lexists(current_attempt_dir)
             )
-            if not allocation_only_crash:
+            resumable_capture = (
+                current_generation == frozen_generation + 1
+                and current_attempt_dir.is_dir()
+                and (current_attempt_dir / "purge").is_dir()
+            )
+            if resumable_capture:
+                purge_dir = current_attempt_dir / "purge"
+            elif not allocation_only_crash:
                 raise StateConflictError(
                     "PURGE_RECOVERY_REQUIRED: purge capture generation already advanced "
                     f"(frozen={frozen_generation}, current={current_generation})"
@@ -228,17 +236,28 @@ def execute_transactional_purge_capture(
             f"(state={current_state}, tx_phase={current_tx_phase})"
         )
 
-    _, _, purge_dir = _allocate_transactional_purge_attempt(
-        session_factory,
-        entry_id,
-        worker,
-        q_root,
-    )
+    if purge_dir is None:
+        _, _, purge_dir = _allocate_transactional_purge_attempt(
+            session_factory,
+            entry_id,
+            worker,
+            q_root,
+        )
 
     aliases = list(frozen_manifest.get("aliases") or [])
     for alias in aliases:
         source_path = Path(str(alias.get("path") or ""))
         target_path = purge_dir / _purge_slot_name(alias)
+        source_exists = os.path.lexists(source_path)
+        target_exists = os.path.lexists(target_path)
+        if target_exists and not source_exists:
+            continue
+        if target_exists:
+            raise StateConflictError(f"Purge capture slot is occupied: {target_path}")
+        if not source_exists:
+            raise StateConflictError(
+                f"PURGE_RECOVERY_REQUIRED: purge source and captured slot are both missing: {source_path}"
+            )
         with safe_open_parent_fd(source_path, valid_roots) as (src_dir_fd, src_leaf):
             with safe_open_parent_fd(target_path, valid_roots) as (dst_dir_fd, dst_leaf):
                 try:
