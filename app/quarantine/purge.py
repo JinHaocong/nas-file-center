@@ -150,6 +150,33 @@ def _purge_slot_name(alias: dict[str, Any]) -> str:
     raise StateConflictError(f"Unsupported purge capture alias role: {role}")
 
 
+def _assert_no_unknown_purge_slots(
+    purge_dir: Path,
+    valid_roots: list[Path],
+    aliases: list[dict[str, Any]],
+) -> None:
+    """Fail closed if the exclusive purge namespace contains an unbound object."""
+    known_names = {_purge_slot_name(alias) for alias in aliases}
+    try:
+        with safe_open_parent_fd(purge_dir, valid_roots) as (parent_fd, leaf):
+            flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+            dir_fd = os.open(leaf, flags, dir_fd=parent_fd)
+            try:
+                actual_names = set(os.listdir(dir_fd))
+            finally:
+                os.close(dir_fd)
+    except OSError as exc:
+        raise StateConflictError(
+            f"PURGE_QUALIFICATION_FAILED: cannot inspect purge namespace {purge_dir}: {exc}"
+        ) from exc
+
+    unknown_names = sorted(actual_names - known_names)
+    if unknown_names:
+        raise StateConflictError(
+            f"UNKNOWN_PURGE_SLOT: unrecognized object in purge namespace: {unknown_names[0]}"
+        )
+
+
 def _frozen_selected_attempt_generation(
     frozen_manifest: dict[str, Any],
     entry_id: int,
@@ -327,6 +354,7 @@ def qualify_transactional_purge_capture(
     if q_root not in valid_roots:
         valid_roots.append(q_root)
     purge_dir = q_root / ".tx" / f"entry-{entry_id}" / f"attempt-{generation}" / "purge"
+    _assert_no_unknown_purge_slots(purge_dir, valid_roots, aliases)
 
     qualified: list[Path] = []
     for alias in aliases:
