@@ -62,10 +62,16 @@ class QuarantineBulkPlanRequest(QuarantineBulkPreviewRequest):
         return self
 
 
-def _compute_bulk_preview(service, payload: QuarantineBulkPreviewRequest) -> dict[str, object]:
+def _compute_bulk_preview(
+    service,
+    payload: QuarantineBulkPreviewRequest,
+    *,
+    include_internal: bool = False,
+) -> dict[str, object]:
     entry_ids = canonicalize_entry_ids(payload.entry_ids)
     items: list[dict[str, object]] = []
     digest_items: list[dict[str, object]] = []
+    db_identities: dict[int, dict[str, object]] = {}
     effective_conflict_policy = (payload.conflict_policy or "skip") if payload.action == "restore" else None
 
     with service.SessionLocal() as session:
@@ -82,6 +88,7 @@ def _compute_bulk_preview(service, payload: QuarantineBulkPreviewRequest) -> dic
                 continue
 
             identity = quarantine_entry_identity_material(entry)
+            db_identities[entry_id] = identity
             if entry.state != "active":
                 item = {
                     "entry_id": entry_id,
@@ -142,7 +149,7 @@ def _compute_bulk_preview(service, payload: QuarantineBulkPreviewRequest) -> dic
         "items": digest_items,
     }
     blocked_count = sum(1 for item in items if not item["eligible"])
-    return {
+    result: dict[str, object] = {
         "action": payload.action,
         "entry_ids": entry_ids,
         "eligible_count": len(items) - blocked_count,
@@ -150,6 +157,9 @@ def _compute_bulk_preview(service, payload: QuarantineBulkPreviewRequest) -> dic
         "items": items,
         "preview_digest": canonical_preview_digest(material),
     }
+    if include_internal:
+        result["_db_identities"] = db_identities
+    return result
 
 
 @router.post("/bulk-preview")
@@ -203,7 +213,11 @@ def generate_quarantine_bulk_plan(
         entry_ids=payload.entry_ids,
         conflict_policy=payload.conflict_policy,
     )
-    current_preview = _compute_bulk_preview(service, preview_payload)
+    current_preview = _compute_bulk_preview(
+        service,
+        preview_payload,
+        include_internal=True,
+    )
     actual_digest = str(current_preview["preview_digest"])
     if actual_digest != payload.expected_preview_digest:
         return JSONResponse(
@@ -238,6 +252,7 @@ def generate_quarantine_bulk_plan(
     preview_items = {int(item["entry_id"]): item for item in current_preview["items"]}
     entry_ids = canonicalize_entry_ids(payload.entry_ids)
     conflict_policy = (payload.conflict_policy or "skip") if payload.action == "restore" else None
+    expected_db_identities = current_preview["_db_identities"]
 
     try:
         plan_id, plan_kind = persist_bulk_draft(
@@ -247,6 +262,7 @@ def generate_quarantine_bulk_plan(
             preview_items=preview_items,
             preview_digest=actual_digest,
             conflict_policy=conflict_policy,
+            expected_db_identities=expected_db_identities,
         )
     except RuntimeError as exc:
         return JSONResponse(
