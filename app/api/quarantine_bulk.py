@@ -102,10 +102,16 @@ def _compute_bulk_preview(
                 continue
 
             if payload.action == "purge":
+                def owner_lookup(owner_id: int):
+                    owner = session.get(QuarantineEntry, owner_id)
+                    if owner is not None:
+                        db_identities[owner_id] = quarantine_entry_identity_material(owner)
+                    return owner
+
                 manifest = build_purge_topology_manifest(
                     entry,
                     service.settings.quarantine_root,
-                    owner_lookup=lambda owner_id: session.get(QuarantineEntry, owner_id),
+                    owner_lookup=owner_lookup,
                 )
                 blockers = manifest["blockers"]
                 item = {
