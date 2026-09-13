@@ -3,6 +3,11 @@ import assert from 'node:assert';
 
 import { quarantineApi } from '../src/api/quarantine';
 import { api } from '../src/api/client';
+import {
+  getBulkSelectableEntryIds,
+  getBulkRestoreAvailability,
+} from '../src/components/quarantine/quarantine_rules';
+import type { QuarantineEntry } from '../src/types';
 
 
 describe('Gate6-A quarantine bulk API contract', () => {
@@ -62,5 +67,46 @@ describe('Gate6-A quarantine bulk API contract', () => {
     } finally {
       api.post = originalPost;
     }
+  });
+});
+
+describe('Gate6-A quarantine bulk selection safety rules', () => {
+  const entry = (id: number, state: QuarantineEntry['state']): QuarantineEntry => ({
+    id,
+    original_path: `/data/${id}.bin`,
+    quarantine_path: `/trash/${id}.bin`,
+    task_id: null,
+    plan_item_id: null,
+    state,
+    size: 1,
+    hash: null,
+    mtime_ns: 1,
+    device: 1,
+    inode: id,
+    quarantined_at: null,
+    expires_at: null,
+    restored_at: null,
+    purged_at: null,
+    last_error: null,
+    created_at: null,
+    updated_at: null,
+  });
+
+  test('only active quarantine rows are eligible for bulk selection', () => {
+    const ids = getBulkSelectableEntryIds([
+      entry(1, 'active'),
+      entry(2, 'restored'),
+      entry(3, 'purging'),
+      entry(4, 'active'),
+      entry(5, 'inconsistent'),
+    ]);
+    assert.deepStrictEqual(ids, [1, 4]);
+  });
+
+  test('bulk restore accepts only skip or rename and never manual target mode', () => {
+    assert.deepStrictEqual(getBulkRestoreAvailability(false, 'skip'), { canRestore: true });
+    assert.deepStrictEqual(getBulkRestoreAvailability(false, 'rename'), { canRestore: true });
+    assert.strictEqual(getBulkRestoreAvailability(false, 'manual' as never).canRestore, false);
+    assert.strictEqual(getBulkRestoreAvailability(true, 'skip').canRestore, false);
   });
 });
