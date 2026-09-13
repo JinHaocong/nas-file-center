@@ -60,15 +60,6 @@ jobs:
           python /tmp/gate6a-task1-patch.py
           python -m py_compile app/quarantine/purge.py
 
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-          cache: pip
-
-      - name: Install test dependencies
-        run: python -m pip install -e '.[test]'
-
       - name: Verify Task 1 contract tests
         env:
           PYTHONPATH: .
