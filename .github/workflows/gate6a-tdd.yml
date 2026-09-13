@@ -50,4 +50,8 @@ jobs:
       - name: Run current Gate6-A focused tests
         env:
           PYTHONPATH: .
-        run: pytest tests/test_gate6a_bulk_*.py -v
+        run: >-
+          pytest
+          tests/test_gate6a_bulk_*.py
+          tests/test_gate6a_transactional_purge.py
+          -v
