@@ -7,9 +7,10 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 
+from app.auth.password import hash_password
 from app.config import Settings
 from app.main import create_app
-from app.models import BatchPlan, BatchPlanItem, QuarantineEntry, utcnow
+from app.models import BatchPlan, BatchPlanItem, QuarantineEntry, User, utcnow
 
 
 def _setup_client(
@@ -45,6 +46,28 @@ def _setup_client(
     )
     assert response.status_code == 200
     return client
+
+
+def _login_as_non_admin(client: TestClient) -> None:
+    service = client.app.state.service
+    with service.SessionLocal() as session:
+        session.add(
+            User(
+                username="member",
+                password_hash=hash_password("MemberPassword123!"),
+                role="user",
+                is_active=True,
+            )
+        )
+        session.commit()
+
+    response = client.post(
+        "/api/auth/login",
+        json={"username": "member", "password": "MemberPassword123!"},
+        headers={"Origin": "http://testserver"},
+    )
+    assert response.status_code == 200
+    assert response.json()["role"] == "user"
 
 
 def _seed_active_entry(client: TestClient) -> int:
@@ -182,4 +205,34 @@ def test_purge_bulk_plan_requires_allow_delete(tmp_path: Path) -> None:
 
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "DELETE_DISABLED"
+    assert _counts(client) == before
+
+
+def test_purge_bulk_plan_requires_admin_user(tmp_path: Path) -> None:
+    client = _setup_client(tmp_path, allow_mutation=True, allow_delete=True)
+    entry_id = _seed_active_entry(client)
+    _login_as_non_admin(client)
+
+    preview = client.post(
+        "/api/quarantine/bulk-preview",
+        json={"action": "purge", "entry_ids": [entry_id]},
+        headers={"Origin": "http://testserver"},
+    )
+    assert preview.status_code == 200
+    assert preview.json()["eligible_count"] == 1
+    before = _counts(client)
+
+    response = client.post(
+        "/api/quarantine/bulk-plan",
+        json={
+            "action": "purge",
+            "entry_ids": [entry_id],
+            "confirmation": "DELETE",
+            "expected_preview_digest": preview.json()["preview_digest"],
+        },
+        headers={"Origin": "http://testserver"},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "ADMIN_REQUIRED"
     assert _counts(client) == before
