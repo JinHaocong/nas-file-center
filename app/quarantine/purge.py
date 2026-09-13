@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from pathlib import Path
 import stat
@@ -240,6 +241,45 @@ def _purge_slot_name(alias: dict[str, Any]) -> str:
     raise StateConflictError(f"Unsupported purge capture alias role: {role}")
 
 
+_PURGE_DESTROY_MARKER = "destroy-intent.json"
+
+
+def _manifest_sha256(frozen_manifest: dict[str, Any]) -> str:
+    payload = json.dumps(
+        frozen_manifest,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _destroy_marker_material(
+    *,
+    entry_id: int,
+    generation: int,
+    expected_device: int | None,
+    expected_inode: int | None,
+    expected_size: int | None,
+    expected_mtime_ns: int | None,
+    expected_hash: str,
+    frozen_manifest: dict[str, Any],
+) -> dict[str, Any]:
+    aliases = list(frozen_manifest.get("aliases") or [])
+    return {
+        "schema_version": 1,
+        "entry_id": entry_id,
+        "generation": generation,
+        "device": expected_device,
+        "inode": expected_inode,
+        "original_size": expected_size,
+        "mtime_ns": expected_mtime_ns,
+        "content_hash": expected_hash.lower(),
+        "manifest_sha256": _manifest_sha256(frozen_manifest),
+        "slots": sorted(_purge_slot_name(alias) for alias in aliases),
+    }
+
+
 def _assert_no_unknown_purge_slots(
     purge_dir: Path,
     valid_roots: list[Path],
@@ -247,6 +287,7 @@ def _assert_no_unknown_purge_slots(
 ) -> None:
     """Fail closed if the exclusive purge namespace contains an unbound object."""
     known_names = {_purge_slot_name(alias) for alias in aliases}
+    known_names.add(_PURGE_DESTROY_MARKER)
     try:
         with safe_open_parent_fd(purge_dir, valid_roots) as (parent_fd, leaf):
             flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
@@ -265,6 +306,174 @@ def _assert_no_unknown_purge_slots(
         raise StateConflictError(
             f"UNKNOWN_PURGE_SLOT: unrecognized object in purge namespace: {unknown_names[0]}"
         )
+
+
+def _read_destroy_marker(
+    purge_dir: Path,
+    valid_roots: list[Path],
+    expected: dict[str, Any],
+) -> bool:
+    marker_path = purge_dir / _PURGE_DESTROY_MARKER
+    if not os.path.lexists(marker_path):
+        return False
+    try:
+        with safe_open_parent_fd(marker_path, valid_roots) as (dir_fd, leaf):
+            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            fd = os.open(leaf, flags, dir_fd=dir_fd)
+            try:
+                st = os.fstat(fd)
+                if not stat.S_ISREG(st.st_mode) or st.st_size <= 0 or st.st_size > 65536:
+                    raise StateConflictError("PURGE_RECOVERY_REQUIRED: invalid destroy-intent marker type/size")
+                chunks: list[bytes] = []
+                remaining = st.st_size
+                while remaining > 0:
+                    chunk = os.read(fd, min(remaining, 65536))
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                    remaining -= len(chunk)
+            finally:
+                os.close(fd)
+        actual = json.loads(b"".join(chunks).decode("utf-8"))
+    except StateConflictError:
+        raise
+    except Exception as exc:
+        raise StateConflictError(f"PURGE_RECOVERY_REQUIRED: invalid destroy-intent marker: {exc}") from exc
+    if actual != expected:
+        raise StateConflictError("PURGE_RECOVERY_REQUIRED: destroy-intent marker identity mismatch")
+    return True
+
+
+def _ensure_destroy_marker(
+    session_factory: Any,
+    worker_id: str,
+    purge_dir: Path,
+    valid_roots: list[Path],
+    expected: dict[str, Any],
+) -> None:
+    marker_path = purge_dir / _PURGE_DESTROY_MARKER
+    payload = json.dumps(
+        expected,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    renew_and_assert_worker_lease(session_factory, worker_id)
+    try:
+        with safe_open_parent_fd(marker_path, valid_roots) as (dir_fd, leaf):
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+            try:
+                fd = os.open(leaf, flags, 0o600, dir_fd=dir_fd)
+            except FileExistsError:
+                fd = None
+            if fd is not None:
+                try:
+                    offset = 0
+                    while offset < len(payload):
+                        offset += os.write(fd, payload[offset:])
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
+            os.fsync(dir_fd)
+    except FileExistsError:
+        pass
+    except OSError as exc:
+        raise StateConflictError(f"PURGE_RECOVERY_REQUIRED: cannot persist destroy-intent marker: {exc}") from exc
+    if not _read_destroy_marker(purge_dir, valid_roots, expected):
+        raise StateConflictError("PURGE_RECOVERY_REQUIRED: destroy-intent marker missing after creation")
+
+
+def _qualify_original_payload_fd(
+    fd: int,
+    *,
+    expected_device: int | None,
+    expected_inode: int | None,
+    expected_size: int | None,
+    expected_mtime_ns: int | None,
+    expected_hash: str,
+    failure_prefix: str,
+) -> os.stat_result:
+    st = os.fstat(fd)
+    if not (
+        stat.S_ISREG(st.st_mode)
+        and st.st_dev == expected_device
+        and st.st_ino == expected_inode
+        and st.st_size == expected_size
+        and st.st_mtime_ns == expected_mtime_ns
+    ):
+        raise StateConflictError(f"{failure_prefix}: payload identity mismatch")
+    os.lseek(fd, 0, os.SEEK_SET)
+    digest = hashlib.sha256()
+    while chunk := os.read(fd, 1024 * 1024):
+        digest.update(chunk)
+    if digest.hexdigest().lower() != expected_hash.lower():
+        raise StateConflictError(f"{failure_prefix}: payload hash mismatch")
+    return st
+
+
+def _assert_zeroized_closure(
+    purge_dir: Path,
+    valid_roots: list[Path],
+    aliases: list[dict[str, Any]],
+    *,
+    expected_device: int | None,
+    expected_inode: int | None,
+) -> None:
+    _assert_no_unknown_purge_slots(purge_dir, valid_roots, aliases)
+
+    for alias in aliases:
+        captured_path = purge_dir / _purge_slot_name(alias)
+        if not os.path.lexists(captured_path):
+            raise StateConflictError(
+                f"PURGE_RECOVERY_REQUIRED: expected private tombstone is missing: {captured_path}"
+            )
+        try:
+            with safe_open_parent_fd(captured_path, valid_roots) as (dir_fd, leaf):
+                fd = os.open(leaf, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=dir_fd)
+                try:
+                    st = os.fstat(fd)
+                finally:
+                    os.close(fd)
+        except OSError as exc:
+            raise StateConflictError(
+                f"PURGE_DESTRUCTION_FAILED: cannot inspect private tombstone {captured_path}: {exc}"
+            ) from exc
+        if not (
+            stat.S_ISREG(st.st_mode)
+            and st.st_dev == expected_device
+            and st.st_ino == expected_inode
+            and st.st_size == 0
+        ):
+            raise StateConflictError(
+                f"PURGE_DESTRUCTION_FAILED: private tombstone identity mismatch: {captured_path}"
+            )
+
+    for alias in aliases:
+        source_path = Path(str(alias.get("path") or ""))
+        if not os.path.lexists(source_path):
+            continue
+        try:
+            with safe_open_parent_fd(source_path, valid_roots) as (dir_fd, leaf):
+                fd = os.open(leaf, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=dir_fd)
+                try:
+                    st = os.fstat(fd)
+                finally:
+                    os.close(fd)
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise StateConflictError(
+                f"PURGE_DESTRUCTION_FAILED: cannot inspect frozen source tombstone {source_path}: {exc}"
+            ) from exc
+        if not (
+            stat.S_ISREG(st.st_mode)
+            and st.st_dev == expected_device
+            and st.st_ino == expected_inode
+            and st.st_size == 0
+        ):
+            raise StateConflictError(
+                f"PURGE_DESTRUCTION_FAILED: foreign object remains at frozen source: {source_path}"
+            )
 
 
 def _frozen_selected_attempt_generation(
@@ -369,7 +578,7 @@ def execute_transactional_purge_capture(
     quarantine_root: Path | str,
     allowed_roots: list[Path | str],
 ) -> None:
-    """Capture the frozen Gate6-A purge alias set into one exclusive private attempt."""
+    """Capture every frozen alias into an atomic no-overwrite private hard-link witness."""
     if not worker_id or not str(worker_id).strip():
         raise PermissionError("Transactional purge capture requires valid worker authority")
 
@@ -401,13 +610,7 @@ def execute_transactional_purge_capture(
 
     purge_dir: Path | None = None
     if current_state == "active" and current_tx_phase == "active":
-        _begin_transactional_purge_intent(
-            session_factory,
-            entry_id,
-            worker,
-            frozen_manifest=frozen_manifest,
-            quarantine_root=q_root,
-        )
+        _begin_transactional_purge_intent(session_factory, entry_id, worker)
     elif current_state == "purging" and current_tx_phase == "purging":
         frozen_generation = _frozen_selected_attempt_generation(frozen_manifest, entry_id)
         if current_generation != frozen_generation:
@@ -445,40 +648,36 @@ def execute_transactional_purge_capture(
         )
 
     aliases = list(frozen_manifest.get("aliases") or [])
-    any_source_exists = any(
-        os.path.lexists(Path(str(alias.get("path") or "")))
-        for alias in aliases
-    )
     for alias in aliases:
         source_path = Path(str(alias.get("path") or ""))
         target_path = purge_dir / _purge_slot_name(alias)
-        source_exists = os.path.lexists(source_path)
-        target_exists = os.path.lexists(target_path)
-        if target_exists and not source_exists:
+
+        # Existing write-once slots are recovery evidence. Never mutate or replace
+        # them here; qualification decides whether they are expected or foreign.
+        if os.path.lexists(target_path):
             continue
-        if target_exists:
-            raise StateConflictError(f"Purge capture slot is occupied: {target_path}")
-        if not source_exists:
-            if not any_source_exists:
-                continue
+        if not os.path.lexists(source_path):
             raise StateConflictError(
                 f"PURGE_RECOVERY_REQUIRED: purge source and captured slot are both missing: {source_path}"
             )
-        with safe_open_parent_fd(source_path, valid_roots) as (src_dir_fd, src_leaf):
-            with safe_open_parent_fd(target_path, valid_roots) as (dst_dir_fd, dst_leaf):
-                try:
-                    os.stat(dst_leaf, dir_fd=dst_dir_fd, follow_symlinks=False)
-                except FileNotFoundError:
-                    pass
-                else:
-                    raise StateConflictError(f"Purge capture slot is occupied: {target_path}")
-                renew_and_assert_worker_lease(session_factory, worker)
-                os.rename(
-                    src_leaf,
-                    dst_leaf,
-                    src_dir_fd=src_dir_fd,
-                    dst_dir_fd=dst_dir_fd,
-                )
+
+        try:
+            with safe_open_parent_fd(source_path, valid_roots) as (src_dir_fd, src_leaf):
+                with safe_open_parent_fd(target_path, valid_roots) as (dst_dir_fd, dst_leaf):
+                    renew_and_assert_worker_lease(session_factory, worker)
+                    os.link(
+                        src_leaf,
+                        dst_leaf,
+                        src_dir_fd=src_dir_fd,
+                        dst_dir_fd=dst_dir_fd,
+                        follow_symlinks=False,
+                    )
+        except FileExistsError as exc:
+            raise StateConflictError(f"Purge capture slot is occupied: {target_path}") from exc
+        except OSError as exc:
+            raise StateConflictError(
+                f"PURGE_CAPTURE_FAILED: cannot atomically capture {source_path} into {target_path}: {exc}"
+            ) from exc
 
 
 def qualify_transactional_purge_capture(
@@ -489,7 +688,7 @@ def qualify_transactional_purge_capture(
     quarantine_root: Path | str,
     allowed_roots: list[Path | str],
 ) -> list[Path]:
-    """Fully qualify every captured private slot without performing destructive unlink."""
+    """Fully qualify all private hard-link witnesses before irreversible zeroization."""
     if not worker_id or not str(worker_id).strip():
         raise PermissionError("Transactional purge qualification requires valid worker authority")
 
@@ -514,49 +713,64 @@ def qualify_transactional_purge_capture(
     if generation <= 0 or not expected_hash:
         raise StateConflictError("PURGE_QUALIFICATION_FAILED: missing frozen payload identity")
 
-    aliases = list(frozen_manifest.get("aliases") or [])
-    for alias in aliases:
-        source_path = Path(str(alias.get("path") or ""))
-        if os.path.lexists(source_path):
-            raise StateConflictError(
-                f"PURGE_QUALIFICATION_FAILED: frozen source still exists: {source_path}"
-            )
-
     q_root = Path(quarantine_root)
     valid_roots = [Path(root) for root in allowed_roots]
     if q_root not in valid_roots:
         valid_roots.append(q_root)
+    aliases = list(frozen_manifest.get("aliases") or [])
     purge_dir = q_root / ".tx" / f"entry-{entry_id}" / f"attempt-{generation}" / "purge"
     _assert_no_unknown_purge_slots(purge_dir, valid_roots, aliases)
+
+    # Existing source aliases are allowed because capture is a hard-link witness,
+    # not a pathname retirement. Any foreign replacement blocks before ftruncate.
+    for alias in aliases:
+        source_path = Path(str(alias.get("path") or ""))
+        if not os.path.lexists(source_path):
+            continue
+        try:
+            with safe_open_parent_fd(source_path, valid_roots) as (dir_fd, leaf):
+                fd = os.open(leaf, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=dir_fd)
+                try:
+                    _qualify_original_payload_fd(
+                        fd,
+                        expected_device=expected_device,
+                        expected_inode=expected_inode,
+                        expected_size=expected_size,
+                        expected_mtime_ns=expected_mtime_ns,
+                        expected_hash=expected_hash,
+                        failure_prefix=f"PURGE_QUALIFICATION_FAILED: frozen source {source_path}",
+                    )
+                finally:
+                    os.close(fd)
+        except StateConflictError:
+            raise
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise StateConflictError(
+                f"PURGE_QUALIFICATION_FAILED: cannot qualify frozen source {source_path}: {exc}"
+            ) from exc
 
     qualified: list[Path] = []
     for alias in aliases:
         captured_path = purge_dir / _purge_slot_name(alias)
         if not os.path.lexists(captured_path):
-            continue
+            raise StateConflictError(
+                f"PURGE_RECOVERY_REQUIRED: expected private capture is missing: {captured_path}"
+            )
         try:
             with safe_open_parent_fd(captured_path, valid_roots) as (dir_fd, leaf):
-                flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-                fd = os.open(leaf, flags, dir_fd=dir_fd)
+                fd = os.open(leaf, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=dir_fd)
                 try:
-                    st = os.fstat(fd)
-                    if not (
-                        stat.S_ISREG(st.st_mode)
-                        and st.st_dev == expected_device
-                        and st.st_ino == expected_inode
-                        and st.st_size == expected_size
-                        and st.st_mtime_ns == expected_mtime_ns
-                    ):
-                        raise StateConflictError(
-                            f"PURGE_QUALIFICATION_FAILED: captured slot identity mismatch: {captured_path}"
-                        )
-                    digest = hashlib.sha256()
-                    while chunk := os.read(fd, 1024 * 1024):
-                        digest.update(chunk)
-                    if digest.hexdigest().lower() != expected_hash:
-                        raise StateConflictError(
-                            f"PURGE_QUALIFICATION_FAILED: captured slot hash mismatch: {captured_path}"
-                        )
+                    _qualify_original_payload_fd(
+                        fd,
+                        expected_device=expected_device,
+                        expected_inode=expected_inode,
+                        expected_size=expected_size,
+                        expected_mtime_ns=expected_mtime_ns,
+                        expected_hash=expected_hash,
+                        failure_prefix=f"PURGE_QUALIFICATION_FAILED: captured slot {captured_path}",
+                    )
                 finally:
                     os.close(fd)
         except StateConflictError:
@@ -567,6 +781,8 @@ def qualify_transactional_purge_capture(
             ) from exc
         qualified.append(captured_path)
 
+    if not qualified:
+        raise StateConflictError("PURGE_RECOVERY_REQUIRED: no qualified private capture exists")
     return qualified
 
 
@@ -582,55 +798,41 @@ def _destroy_one_qualified_purge_slot(
     expected_mtime_ns: int | None,
     expected_hash: str,
 ) -> None:
-    """Re-qualify one captured slot under an open parent fd immediately before unlink."""
+    """Re-qualify one descriptor and irreversibly zeroize that exact inode."""
     try:
         with safe_open_parent_fd(captured_path, valid_roots) as (dir_fd, leaf):
-            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            flags = os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
             fd = os.open(leaf, flags, dir_fd=dir_fd)
             try:
-                st = os.fstat(fd)
-                if not (
-                    stat.S_ISREG(st.st_mode)
-                    and st.st_dev == expected_device
-                    and st.st_ino == expected_inode
-                    and st.st_size == expected_size
-                    and st.st_mtime_ns == expected_mtime_ns
-                ):
-                    raise StateConflictError(
-                        f"PURGE_DESTRUCTION_FAILED: captured slot identity changed: {captured_path}"
-                    )
-
-                digest = hashlib.sha256()
-                while chunk := os.read(fd, 1024 * 1024):
-                    digest.update(chunk)
-                if digest.hexdigest().lower() != expected_hash:
-                    raise StateConflictError(
-                        f"PURGE_DESTRUCTION_FAILED: captured slot hash changed: {captured_path}"
-                    )
-
-                # Preserve the per-mutation lease fence and bind the pathname back to
-                # the descriptor identity immediately before the one destructive syscall.
+                st = _qualify_original_payload_fd(
+                    fd,
+                    expected_device=expected_device,
+                    expected_inode=expected_inode,
+                    expected_size=expected_size,
+                    expected_mtime_ns=expected_mtime_ns,
+                    expected_hash=expected_hash,
+                    failure_prefix=f"PURGE_DESTRUCTION_FAILED: captured slot {captured_path}",
+                )
                 renew_and_assert_worker_lease(session_factory, worker_id)
-                live = os.stat(leaf, dir_fd=dir_fd, follow_symlinks=False)
+                os.ftruncate(fd, 0)
+                os.fsync(fd)
+                after = os.fstat(fd)
                 if not (
-                    stat.S_ISREG(live.st_mode)
-                    and live.st_dev == st.st_dev
-                    and live.st_ino == st.st_ino
-                    and live.st_size == st.st_size
-                    and live.st_mtime_ns == st.st_mtime_ns
+                    stat.S_ISREG(after.st_mode)
+                    and after.st_dev == st.st_dev
+                    and after.st_ino == st.st_ino
+                    and after.st_size == 0
                 ):
                     raise StateConflictError(
-                        f"PURGE_DESTRUCTION_FAILED: captured slot was replaced before unlink: {captured_path}"
+                        f"PURGE_DESTRUCTION_FAILED: descriptor zeroization did not close payload: {captured_path}"
                     )
-
-                os.unlink(leaf, dir_fd=dir_fd)
             finally:
                 os.close(fd)
     except StateConflictError:
         raise
     except OSError as exc:
         raise StateConflictError(
-            f"PURGE_DESTRUCTION_FAILED: cannot safely unlink captured slot {captured_path}: {exc}"
+            f"PURGE_DESTRUCTION_FAILED: cannot safely zeroize captured slot {captured_path}: {exc}"
         ) from exc
 
 
@@ -642,20 +844,11 @@ def destroy_transactional_purge_capture(
     quarantine_root: Path | str,
     allowed_roots: list[Path | str],
 ) -> None:
-    """Destroy only fully qualified captured payload slots, then commit terminal purged state."""
+    """Zeroize one fully qualified captured inode, prove tombstone closure, then commit purged."""
     if not worker_id or not str(worker_id).strip():
         raise PermissionError("Transactional purge destruction requires valid worker authority")
 
     worker = str(worker_id)
-    qualified = qualify_transactional_purge_capture(
-        session_factory,
-        entry_id,
-        worker,
-        frozen_manifest,
-        quarantine_root,
-        allowed_roots,
-    )
-
     with session_factory() as session:
         assert_active_worker_lease(session, worker)
         entry = session.get(QuarantineEntry, entry_id)
@@ -680,19 +873,64 @@ def destroy_transactional_purge_capture(
     valid_roots = [Path(root) for root in allowed_roots]
     if q_root not in valid_roots:
         valid_roots.append(q_root)
+    aliases = list(frozen_manifest.get("aliases") or [])
+    purge_dir = q_root / ".tx" / f"entry-{entry_id}" / f"attempt-{generation}" / "purge"
+    marker_expected = _destroy_marker_material(
+        entry_id=entry_id,
+        generation=generation,
+        expected_device=expected_device,
+        expected_inode=expected_inode,
+        expected_size=expected_size,
+        expected_mtime_ns=expected_mtime_ns,
+        expected_hash=expected_hash,
+        frozen_manifest=frozen_manifest,
+    )
 
-    for alias in list(frozen_manifest.get("aliases") or []):
-        source_path = Path(str(alias.get("path") or ""))
-        if os.path.lexists(source_path):
-            raise StateConflictError(
-                f"PURGE_DESTRUCTION_FAILED: frozen source reappeared: {source_path}"
+    marker_exists = _read_destroy_marker(purge_dir, valid_roots, marker_expected)
+    if marker_exists:
+        try:
+            _assert_zeroized_closure(
+                purge_dir,
+                valid_roots,
+                aliases,
+                expected_device=expected_device,
+                expected_inode=expected_inode,
             )
+        except StateConflictError:
+            # Marker can validly precede the one destructive syscall. In that
+            # state every capture must still fully qualify at original identity.
+            qualified = qualify_transactional_purge_capture(
+                session_factory,
+                entry_id,
+                worker,
+                frozen_manifest,
+                quarantine_root,
+                allowed_roots,
+            )
+        else:
+            qualified = []
+    else:
+        qualified = qualify_transactional_purge_capture(
+            session_factory,
+            entry_id,
+            worker,
+            frozen_manifest,
+            quarantine_root,
+            allowed_roots,
+        )
 
-    for captured_path in qualified:
+    if qualified:
+        _ensure_destroy_marker(
+            session_factory,
+            worker,
+            purge_dir,
+            valid_roots,
+            marker_expected,
+        )
         _destroy_one_qualified_purge_slot(
             session_factory,
             worker,
-            captured_path,
+            qualified[0],
             valid_roots,
             expected_device=expected_device,
             expected_inode=expected_inode,
@@ -700,21 +938,23 @@ def destroy_transactional_purge_capture(
             expected_mtime_ns=expected_mtime_ns,
             expected_hash=expected_hash,
         )
+        _assert_zeroized_closure(
+            purge_dir,
+            valid_roots,
+            aliases,
+            expected_device=expected_device,
+            expected_inode=expected_inode,
+        )
 
-    # Prove exact source + captured-slot closure before terminal DB state. This is
-    # read-only filesystem observation and intentionally occurs outside any SQLite write tx.
-    purge_dir = q_root / ".tx" / f"entry-{entry_id}" / f"attempt-{generation}" / "purge"
-    for alias in list(frozen_manifest.get("aliases") or []):
-        source_path = Path(str(alias.get("path") or ""))
-        captured_path = purge_dir / _purge_slot_name(alias)
-        if os.path.lexists(source_path):
-            raise StateConflictError(
-                f"PURGE_DESTRUCTION_FAILED: frozen source still exists: {source_path}"
-            )
-        if os.path.lexists(captured_path):
-            raise StateConflictError(
-                f"PURGE_DESTRUCTION_FAILED: captured slot still exists: {captured_path}"
-            )
+    if not _read_destroy_marker(purge_dir, valid_roots, marker_expected):
+        raise StateConflictError("PURGE_RECOVERY_REQUIRED: valid destroy-intent marker is required")
+    _assert_zeroized_closure(
+        purge_dir,
+        valid_roots,
+        aliases,
+        expected_device=expected_device,
+        expected_inode=expected_inode,
+    )
 
     with session_factory() as session:
         session.execute(text("BEGIN IMMEDIATE"))
