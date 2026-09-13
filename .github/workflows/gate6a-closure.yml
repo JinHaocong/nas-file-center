@@ -68,6 +68,37 @@ jobs:
         working-directory: frontend
         run: npm ci
 
+      - name: Record frontend npm audit evidence
+        shell: bash
+        working-directory: frontend
+        run: |
+          set +e
+          npm audit --json > ../frontend-npm-audit-all.json
+          ALL_RC=$?
+          npm audit --omit=dev --json > ../frontend-npm-audit-prod.json
+          PROD_RC=$?
+          set -e
+          node - <<'NODE' | tee ../frontend-npm-audit-summary.txt
+          const fs = require('fs');
+          for (const [label, path] of [
+            ['all', '../frontend-npm-audit-all.json'],
+            ['production', '../frontend-npm-audit-prod.json'],
+          ]) {
+            const data = JSON.parse(fs.readFileSync(path, 'utf8'));
+            const counts = data?.metadata?.vulnerabilities ?? {};
+            console.log(`${label}: ${JSON.stringify(counts)}`);
+            const vulns = data?.vulnerabilities ?? {};
+            for (const [name, detail] of Object.entries(vulns)) {
+              const via = Array.isArray(detail.via) ? detail.via.map((v) => typeof v === 'string' ? v : `${v.source ?? 'unknown'}:${v.title ?? 'untitled'}`) : [];
+              console.log(`${label}: ${name} severity=${detail.severity} direct=${detail.isDirect} range=${detail.range} via=${via.join('|')}`);
+            }
+          }
+          NODE
+          {
+            echo "npm_audit_all_exit=${ALL_RC}"
+            echo "npm_audit_production_exit=${PROD_RC}"
+          } | tee -a ../frontend-npm-audit-summary.txt
+
       - name: Run frontend tests
         shell: bash
         working-directory: frontend
@@ -151,6 +182,9 @@ jobs:
           path: |
             closure-identity.txt
             backend-full-regression.log
+            frontend-npm-audit-all.json
+            frontend-npm-audit-prod.json
+            frontend-npm-audit-summary.txt
             frontend-tests.log
             frontend-typecheck.log
             frontend-build.log
