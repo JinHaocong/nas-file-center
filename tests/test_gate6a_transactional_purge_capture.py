@@ -201,3 +201,90 @@ def test_transactional_purge_capture_moves_normal_alias_set_into_private_slots(t
         assert entry.state == "purging"
         assert entry.tx_phase == "purging"
         assert entry.active_attempt_generation == 2
+
+
+def test_transactional_purge_capture_preserves_occupied_private_slot(tmp_path: Path, monkeypatch) -> None:
+    import app.quarantine.purge as purge
+
+    SessionLocal = _session_factory(tmp_path)
+    data = tmp_path / "data"
+    quarantine_root = data / ".nas-file-center-trash"
+    attempt1 = quarantine_root / ".tx" / "entry-1" / "attempt-1"
+    attempt1.mkdir(parents=True)
+
+    payload = b"gate6a-occupied-slot-source"
+    anchor = attempt1 / "anchor"
+    captured_source = attempt1 / "captured_source"
+    public_view = quarantine_root / "occupied.q-1.bin"
+    original = data / "occupied.bin"
+    anchor.write_bytes(payload)
+    os.link(anchor, captured_source)
+    os.link(anchor, public_view)
+    st = anchor.stat(follow_symlinks=False)
+
+    with SessionLocal() as session:
+        session.execute(text("BEGIN IMMEDIATE"))
+        session.add(TaskLock(id=1, locked=True, owner="worker-1", acquired_at=utcnow()))
+        session.add(
+            QuarantineEntry(
+                id=1,
+                original_path=str(original),
+                quarantine_path=str(public_view),
+                state="active",
+                tx_phase="active",
+                authoritative_anchor_path=str(anchor),
+                active_attempt_generation=1,
+                device=st.st_dev,
+                inode=st.st_ino,
+                size=st.st_size,
+                mtime_ns=st.st_mtime_ns,
+                content_hash=hashlib.sha256(payload).hexdigest(),
+            )
+        )
+        session.commit()
+
+    with SessionLocal() as session:
+        entry = session.get(QuarantineEntry, 1)
+        assert entry is not None
+        frozen_manifest = purge.build_purge_topology_manifest(
+            entry,
+            quarantine_root,
+            owner_lookup=lambda _: None,
+        )
+        assert frozen_manifest["blockers"] == []
+
+    original_allocate = purge._allocate_transactional_purge_attempt
+    foreign_payload = b"foreign-private-slot-must-survive"
+    occupied_slot: Path | None = None
+
+    def allocate_then_occupy(*args, **kwargs):
+        nonlocal occupied_slot
+        result = original_allocate(*args, **kwargs)
+        occupied_slot = result[2] / "current-anchor"
+        occupied_slot.write_bytes(foreign_payload)
+        return result
+
+    monkeypatch.setattr(purge, "_allocate_transactional_purge_attempt", allocate_then_occupy)
+
+    with pytest.raises(StateConflictError, match="occupied"):
+        purge.execute_transactional_purge_capture(
+            SessionLocal,
+            entry_id=1,
+            worker_id="worker-1",
+            frozen_manifest=frozen_manifest,
+            quarantine_root=quarantine_root,
+            allowed_roots=[data],
+        )
+
+    assert occupied_slot is not None
+    assert occupied_slot.read_bytes() == foreign_payload
+    assert anchor.read_bytes() == payload
+    assert captured_source.read_bytes() == payload
+    assert public_view.read_bytes() == payload
+
+    with SessionLocal() as session:
+        entry = session.get(QuarantineEntry, 1)
+        assert entry is not None
+        assert entry.state == "purging"
+        assert entry.tx_phase == "purging"
+        assert entry.active_attempt_generation == 2
