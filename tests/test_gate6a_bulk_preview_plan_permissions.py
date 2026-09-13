@@ -12,7 +12,12 @@ from app.main import create_app
 from app.models import BatchPlan, BatchPlanItem, QuarantineEntry, utcnow
 
 
-def _setup_client(tmp_path: Path, *, allow_mutation: bool) -> TestClient:
+def _setup_client(
+    tmp_path: Path,
+    *,
+    allow_mutation: bool,
+    allow_delete: bool = True,
+) -> TestClient:
     data = tmp_path / "data"
     data.mkdir(parents=True, exist_ok=True)
     trash = data / ".nas-file-center-trash"
@@ -29,7 +34,7 @@ def _setup_client(tmp_path: Path, *, allow_mutation: bool) -> TestClient:
             initial_admin_username="admin",
             initial_admin_password="AdminPassword123!",
             allow_mutation=allow_mutation,
-            allow_delete=True,
+            allow_delete=allow_delete,
         )
     )
     client = TestClient(app)
@@ -148,4 +153,33 @@ def test_purge_bulk_plan_requires_delete_confirmation_token(tmp_path: Path) -> N
     )
 
     assert response.status_code == 422
+    assert _counts(client) == before
+
+
+def test_purge_bulk_plan_requires_allow_delete(tmp_path: Path) -> None:
+    client = _setup_client(tmp_path, allow_mutation=True, allow_delete=False)
+    entry_id = _seed_active_entry(client)
+
+    preview = client.post(
+        "/api/quarantine/bulk-preview",
+        json={"action": "purge", "entry_ids": [entry_id]},
+        headers={"Origin": "http://testserver"},
+    )
+    assert preview.status_code == 200
+    assert preview.json()["eligible_count"] == 1
+    before = _counts(client)
+
+    response = client.post(
+        "/api/quarantine/bulk-plan",
+        json={
+            "action": "purge",
+            "entry_ids": [entry_id],
+            "confirmation": "DELETE",
+            "expected_preview_digest": preview.json()["preview_digest"],
+        },
+        headers={"Origin": "http://testserver"},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "DELETE_DISABLED"
     assert _counts(client) == before
