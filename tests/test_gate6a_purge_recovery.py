@@ -65,18 +65,44 @@ def _frozen_manifest(purge, SessionLocal, quarantine_root: Path):
         return manifest
 
 
-def test_transactional_purge_resumes_after_one_qualified_slot_was_destroyed(
+def _private_slots(purge_dir: Path) -> list[Path]:
+    return [
+        purge_dir / "current-anchor",
+        purge_dir / "captured-source",
+        purge_dir / "public-view",
+    ]
+
+
+def _assert_original_payload(paths: list[Path], expected_size: int) -> None:
+    assert all(path.exists() for path in paths)
+    assert all(path.stat(follow_symlinks=False).st_size == expected_size for path in paths)
+
+
+def _assert_zero_tombstones(paths: list[Path], expected_inode: int) -> None:
+    assert all(path.exists() for path in paths)
+    assert all(path.stat(follow_symlinks=False).st_ino == expected_inode for path in paths)
+    assert all(path.stat(follow_symlinks=False).st_size == 0 for path in paths)
+
+
+def test_transactional_purge_resumes_after_marker_before_descriptor_zeroization(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
+    """A durable marker with untouched captures resumes; absence is never treated as proof."""
     import app.quarantine.purge as purge
 
+    payload = b"gate6a-marker-before-zeroization-recovery"
     SessionLocal, data, quarantine_root, anchor, captured_source, public_view = _setup_recovery_entry(
         tmp_path,
-        b"gate6a-partial-destruction-recovery",
+        payload,
         "recovery.db",
     )
     frozen_manifest = _frozen_manifest(purge, SessionLocal, quarantine_root)
+
+    with SessionLocal() as session:
+        entry = session.get(QuarantineEntry, 1)
+        assert entry is not None
+        expected_inode = int(entry.inode)
 
     purge.execute_transactional_purge_capture(
         SessionLocal,
@@ -88,21 +114,24 @@ def test_transactional_purge_resumes_after_one_qualified_slot_was_destroyed(
     )
 
     purge_dir = quarantine_root / ".tx" / "entry-1" / "attempt-2" / "purge"
-    assert len(list(purge_dir.iterdir())) == 3
+    slots = _private_slots(purge_dir)
+    source_aliases = [anchor, captured_source, public_view]
+    _assert_original_payload(slots + source_aliases, len(payload))
+    assert not (purge_dir / "destroy-intent.json").exists()
 
     original_renew = purge.renew_and_assert_worker_lease
     fence_calls = 0
 
-    def crash_before_second_destruction(*args, **kwargs):
+    def crash_at_zeroization_fence(*args, **kwargs):
         nonlocal fence_calls
         fence_calls += 1
         result = original_renew(*args, **kwargs)
         if fence_calls == 2:
-            raise RuntimeError("simulated crash after first qualified destruction")
+            raise RuntimeError("simulated crash before descriptor zeroization")
         return result
 
-    monkeypatch.setattr(purge, "renew_and_assert_worker_lease", crash_before_second_destruction)
-    with pytest.raises(RuntimeError, match="simulated crash"):
+    monkeypatch.setattr(purge, "renew_and_assert_worker_lease", crash_at_zeroization_fence)
+    with pytest.raises(RuntimeError, match="before descriptor zeroization"):
         purge.destroy_transactional_purge_capture(
             SessionLocal,
             entry_id=1,
@@ -113,19 +142,16 @@ def test_transactional_purge_resumes_after_one_qualified_slot_was_destroyed(
         )
     monkeypatch.setattr(purge, "renew_and_assert_worker_lease", original_renew)
 
-    assert len(list(purge_dir.iterdir())) == 2
-    assert not anchor.exists()
-    assert not captured_source.exists()
-    assert not public_view.exists()
+    assert (purge_dir / "destroy-intent.json").is_file()
+    _assert_original_payload(slots + source_aliases, len(payload))
+    with SessionLocal() as session:
+        entry = session.get(QuarantineEntry, 1)
+        assert entry is not None
+        assert entry.state == "purging"
+        assert entry.tx_phase == "purging"
+        assert entry.purged_at is None
+        assert entry.active_attempt_generation == 2
 
-    purge.execute_transactional_purge_capture(
-        SessionLocal,
-        entry_id=1,
-        worker_id="worker-1",
-        frozen_manifest=frozen_manifest,
-        quarantine_root=quarantine_root,
-        allowed_roots=[data],
-    )
     purge.destroy_transactional_purge_capture(
         SessionLocal,
         entry_id=1,
@@ -135,7 +161,8 @@ def test_transactional_purge_resumes_after_one_qualified_slot_was_destroyed(
         allowed_roots=[data],
     )
 
-    assert list(purge_dir.iterdir()) == []
+    assert (purge_dir / "destroy-intent.json").is_file()
+    _assert_zero_tombstones(slots + source_aliases, expected_inode)
     with SessionLocal() as session:
         entry = session.get(QuarantineEntry, 1)
         assert entry is not None
@@ -145,18 +172,25 @@ def test_transactional_purge_resumes_after_one_qualified_slot_was_destroyed(
         assert entry.active_attempt_generation == 2
 
 
-def test_transactional_purge_resumes_after_all_destruction_before_terminal_commit(
+def test_transactional_purge_resumes_after_zeroization_before_terminal_commit(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
+    """Marker + complete zero tombstones prove success without a second destructive syscall."""
     import app.quarantine.purge as purge
 
+    payload = b"gate6a-terminal-commit-recovery"
     SessionLocal, data, quarantine_root, anchor, captured_source, public_view = _setup_recovery_entry(
         tmp_path,
-        b"gate6a-terminal-commit-recovery",
+        payload,
         "terminal-recovery.db",
     )
     frozen_manifest = _frozen_manifest(purge, SessionLocal, quarantine_root)
+
+    with SessionLocal() as session:
+        entry = session.get(QuarantineEntry, 1)
+        assert entry is not None
+        expected_inode = int(entry.inode)
 
     purge.execute_transactional_purge_capture(
         SessionLocal,
@@ -168,6 +202,8 @@ def test_transactional_purge_resumes_after_all_destruction_before_terminal_commi
     )
 
     purge_dir = quarantine_root / ".tx" / "entry-1" / "attempt-2" / "purge"
+    slots = _private_slots(purge_dir)
+    source_aliases = [anchor, captured_source, public_view]
     original_assert = purge.assert_active_worker_lease
     assert_calls = 0
 
@@ -191,10 +227,8 @@ def test_transactional_purge_resumes_after_all_destruction_before_terminal_commi
         )
     monkeypatch.setattr(purge, "assert_active_worker_lease", original_assert)
 
-    assert not anchor.exists()
-    assert not captured_source.exists()
-    assert not public_view.exists()
-    assert list(purge_dir.iterdir()) == []
+    assert (purge_dir / "destroy-intent.json").is_file()
+    _assert_zero_tombstones(slots + source_aliases, expected_inode)
     with SessionLocal() as session:
         entry = session.get(QuarantineEntry, 1)
         assert entry is not None
@@ -203,14 +237,10 @@ def test_transactional_purge_resumes_after_all_destruction_before_terminal_commi
         assert entry.purged_at is None
         assert entry.active_attempt_generation == 2
 
-    purge.execute_transactional_purge_capture(
-        SessionLocal,
-        entry_id=1,
-        worker_id="worker-1",
-        frozen_manifest=frozen_manifest,
-        quarantine_root=quarantine_root,
-        allowed_roots=[data],
-    )
+    def destructive_retry_is_forbidden(*args, **kwargs):
+        raise AssertionError("recovery must not ftruncate an already-zeroized transaction")
+
+    monkeypatch.setattr(purge.os, "ftruncate", destructive_retry_is_forbidden)
     purge.destroy_transactional_purge_capture(
         SessionLocal,
         entry_id=1,
@@ -220,7 +250,7 @@ def test_transactional_purge_resumes_after_all_destruction_before_terminal_commi
         allowed_roots=[data],
     )
 
-    assert list(purge_dir.iterdir()) == []
+    _assert_zero_tombstones(slots + source_aliases, expected_inode)
     with SessionLocal() as session:
         entry = session.get(QuarantineEntry, 1)
         assert entry is not None
@@ -230,18 +260,25 @@ def test_transactional_purge_resumes_after_all_destruction_before_terminal_commi
         assert entry.active_attempt_generation == 2
 
 
-def test_stale_worker_stops_before_next_unlink_and_new_worker_resumes(
+def test_stale_worker_is_rejected_before_descriptor_zeroization_and_new_worker_resumes(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
+    """Lease takeover at the destructive fence leaves payload intact for the new owner."""
     import app.quarantine.purge as purge
 
+    payload = b"gate6a-worker-takeover-recovery"
     SessionLocal, data, quarantine_root, anchor, captured_source, public_view = _setup_recovery_entry(
         tmp_path,
-        b"gate6a-worker-takeover-recovery",
+        payload,
         "takeover-recovery.db",
     )
     frozen_manifest = _frozen_manifest(purge, SessionLocal, quarantine_root)
+
+    with SessionLocal() as session:
+        entry = session.get(QuarantineEntry, 1)
+        assert entry is not None
+        expected_inode = int(entry.inode)
 
     purge.execute_transactional_purge_capture(
         SessionLocal,
@@ -252,12 +289,14 @@ def test_stale_worker_stops_before_next_unlink_and_new_worker_resumes(
         allowed_roots=[data],
     )
     purge_dir = quarantine_root / ".tx" / "entry-1" / "attempt-2" / "purge"
-    assert len(list(purge_dir.iterdir())) == 3
+    slots = _private_slots(purge_dir)
+    source_aliases = [anchor, captured_source, public_view]
+    _assert_original_payload(slots + source_aliases, len(payload))
 
     original_renew = purge.renew_and_assert_worker_lease
     fence_calls = 0
 
-    def takeover_before_second_fence(session_factory, worker_id, *args, **kwargs):
+    def takeover_at_zeroization_fence(session_factory, worker_id, *args, **kwargs):
         nonlocal fence_calls
         fence_calls += 1
         if fence_calls == 2:
@@ -270,7 +309,7 @@ def test_stale_worker_stops_before_next_unlink_and_new_worker_resumes(
                 session.commit()
         return original_renew(session_factory, worker_id, *args, **kwargs)
 
-    monkeypatch.setattr(purge, "renew_and_assert_worker_lease", takeover_before_second_fence)
+    monkeypatch.setattr(purge, "renew_and_assert_worker_lease", takeover_at_zeroization_fence)
     with pytest.raises(JobLeaseLost, match="lost exclusive lease"):
         purge.destroy_transactional_purge_capture(
             SessionLocal,
@@ -282,19 +321,15 @@ def test_stale_worker_stops_before_next_unlink_and_new_worker_resumes(
         )
     monkeypatch.setattr(purge, "renew_and_assert_worker_lease", original_renew)
 
-    assert len(list(purge_dir.iterdir())) == 2
-    assert not anchor.exists()
-    assert not captured_source.exists()
-    assert not public_view.exists()
+    assert (purge_dir / "destroy-intent.json").is_file()
+    _assert_original_payload(slots + source_aliases, len(payload))
+    with SessionLocal() as session:
+        entry = session.get(QuarantineEntry, 1)
+        assert entry is not None
+        assert entry.state == "purging"
+        assert entry.tx_phase == "purging"
+        assert entry.purged_at is None
 
-    purge.execute_transactional_purge_capture(
-        SessionLocal,
-        entry_id=1,
-        worker_id="worker-2",
-        frozen_manifest=frozen_manifest,
-        quarantine_root=quarantine_root,
-        allowed_roots=[data],
-    )
     purge.destroy_transactional_purge_capture(
         SessionLocal,
         entry_id=1,
@@ -304,7 +339,7 @@ def test_stale_worker_stops_before_next_unlink_and_new_worker_resumes(
         allowed_roots=[data],
     )
 
-    assert list(purge_dir.iterdir()) == []
+    _assert_zero_tombstones(slots + source_aliases, expected_inode)
     with SessionLocal() as session:
         entry = session.get(QuarantineEntry, 1)
         assert entry is not None
