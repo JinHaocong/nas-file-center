@@ -30,18 +30,27 @@ def persist_bulk_draft(
 
     with service.SessionLocal() as session:
         session.execute(text("BEGIN IMMEDIATE"))
+
+        if expected_db_identities is not None:
+            for identity_entry_id, expected_identity in expected_db_identities.items():
+                current_entry = session.get(QuarantineEntry, identity_entry_id)
+                if current_entry is None:
+                    session.rollback()
+                    raise RuntimeError(
+                        f"preview identity owner disappeared for quarantine entry {identity_entry_id}"
+                    )
+                if quarantine_entry_identity_material(current_entry) != expected_identity:
+                    session.rollback()
+                    raise RuntimeError(
+                        f"preview identity changed for quarantine entry {identity_entry_id}"
+                    )
+
         entries: dict[int, QuarantineEntry] = {}
         for entry_id in entry_ids:
             entry = session.get(QuarantineEntry, entry_id)
             if entry is None or entry.state != "active":
                 session.rollback()
                 raise RuntimeError(f"preview changed for quarantine entry {entry_id}")
-            if expected_db_identities is not None:
-                expected_identity = expected_db_identities.get(entry_id)
-                current_identity = quarantine_entry_identity_material(entry)
-                if expected_identity is None or current_identity != expected_identity:
-                    session.rollback()
-                    raise RuntimeError(f"preview identity changed for quarantine entry {entry_id}")
             entries[entry_id] = entry
 
         plan = BatchPlan(
