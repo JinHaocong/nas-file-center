@@ -231,6 +231,17 @@ def execute_transactional_purge_capture(
         current_state = entry.state
         current_tx_phase = entry.tx_phase
         current_generation = int(entry.active_attempt_generation or 0)
+        if current_state == "active" and current_tx_phase == "active":
+            current_manifest = build_purge_topology_manifest(
+                entry,
+                q_root,
+                owner_lookup=lambda owner_id: session.get(QuarantineEntry, owner_id),
+            )
+            topology_reason = validate_purge_topology_manifest(frozen_manifest, current_manifest)
+            if topology_reason is not None:
+                raise StateConflictError(
+                    f"{topology_reason}: purge topology changed before Execute for quarantine entry #{entry_id}"
+                )
 
     purge_dir: Path | None = None
     if current_state == "active" and current_tx_phase == "active":
