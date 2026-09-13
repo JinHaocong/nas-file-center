@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from sqlalchemy import text
 
 from app.auth.dependencies import get_current_user
-from app.models import BatchPlan, BatchPlanItem, QuarantineEntry
+from app.models import BatchPlan, BatchPlanItem, QuarantineEntry, User
 from app.path_safety import validate_mutation_destination
 from app.quarantine.bulk import (
     build_purge_topology_manifest,
@@ -159,7 +159,11 @@ def preview_quarantine_bulk(request: Request, payload: QuarantineBulkPreviewRequ
 
 
 @router.post("/bulk-plan")
-def generate_quarantine_bulk_plan(request: Request, payload: QuarantineBulkPlanRequest):
+def generate_quarantine_bulk_plan(
+    request: Request,
+    payload: QuarantineBulkPlanRequest,
+    current_user: User = Depends(get_current_user),
+):
     service = request.app.state.service
     if not service.settings.allow_mutation:
         return JSONResponse(
@@ -179,6 +183,17 @@ def generate_quarantine_bulk_plan(request: Request, payload: QuarantineBulkPlanR
                 "error": {
                     "code": "DELETE_DISABLED",
                     "message": "Filesystem deletion is disabled",
+                    "details": {},
+                }
+            },
+        )
+    if payload.action == "purge" and current_user.role != "admin":
+        return JSONResponse(
+            status_code=403,
+            content={
+                "error": {
+                    "code": "ADMIN_REQUIRED",
+                    "message": "Admin privileges are required for permanent purge",
                     "details": {},
                 }
             },
