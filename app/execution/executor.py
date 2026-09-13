@@ -84,29 +84,29 @@ def execute_item(
                 "EOPNOTSUPP: quarantine purge requires worker authority, session_factory, quarantine_entry_id, and frozen purge manifest",
             )
         try:
-    from app.quarantine.purge import (
-        destroy_transactional_purge_capture,
-        execute_transactional_purge_capture,
-    )
-    execute_transactional_purge_capture(
-        session_factory,
-        quarantine_entry_id,
-        worker_id,
-        purge_manifest,
-        quarantine_root,
-        list(allowed_roots),
-    )
-    destroy_transactional_purge_capture(
-        session_factory,
-        quarantine_entry_id,
-        worker_id,
-        purge_manifest,
-        quarantine_root,
-        list(allowed_roots),
-    )
-except Exception as exc:
-    return ItemResult("failed", str(exc))
-return ItemResult("completed", "purged")
+            from app.quarantine.purge import (
+                destroy_transactional_purge_capture,
+                execute_transactional_purge_capture,
+            )
+            execute_transactional_purge_capture(
+                session_factory,
+                quarantine_entry_id,
+                worker_id,
+                purge_manifest,
+                quarantine_root,
+                list(allowed_roots),
+            )
+            destroy_transactional_purge_capture(
+                session_factory,
+                quarantine_entry_id,
+                worker_id,
+                purge_manifest,
+                quarantine_root,
+                list(allowed_roots),
+            )
+        except Exception as exc:
+            return ItemResult("failed", str(exc))
+        return ItemResult("completed", "purged")
     if item.operation not in {"rename", "move", "touch", "quarantine", "unlink", "restore", "rmdir_empty", "mkdir_empty", "restore_empty_dir"}:
         return _skip(f"unsupported operation: {item.operation}")
 
