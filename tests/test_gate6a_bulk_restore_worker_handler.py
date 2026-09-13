@@ -119,17 +119,10 @@ def _run_worker(service, job_id: int, worker_id: str) -> None:
         BatchPlanExecuteHandler().run(job, context, service.settings)
 
 
-def test_bulk_restore_worker_handler_uses_exact_frozen_rename_target(tmp_path: Path, monkeypatch) -> None:
-    client = _client(tmp_path)
-    service = client.app.state.service
-    entry_id, anchor, public_view, original = _active_entry(client)
-
-    foreign_payload = b"foreign-original-occupant-must-survive"
-    original.write_bytes(foreign_payload)
-
+def _bulk_restore_plan(client: TestClient, entry_id: int, conflict_policy: str) -> int:
     preview = client.post(
         "/api/quarantine/bulk-preview",
-        json={"action": "restore", "entry_ids": [entry_id], "conflict_policy": "rename"},
+        json={"action": "restore", "entry_ids": [entry_id], "conflict_policy": conflict_policy},
         headers={"Origin": "http://testserver"},
     )
     assert preview.status_code == 200
@@ -138,13 +131,23 @@ def test_bulk_restore_worker_handler_uses_exact_frozen_rename_target(tmp_path: P
         json={
             "action": "restore",
             "entry_ids": [entry_id],
-            "conflict_policy": "rename",
+            "conflict_policy": conflict_policy,
             "expected_preview_digest": preview.json()["preview_digest"],
         },
         headers={"Origin": "http://testserver"},
     )
     assert generated.status_code == 200
-    plan_id = int(generated.json()["id"])
+    return int(generated.json()["id"])
+
+
+def test_bulk_restore_worker_handler_uses_exact_frozen_rename_target(tmp_path: Path, monkeypatch) -> None:
+    client = _client(tmp_path)
+    service = client.app.state.service
+    entry_id, anchor, public_view, original = _active_entry(client)
+
+    foreign_payload = b"foreign-original-occupant-must-survive"
+    original.write_bytes(foreign_payload)
+    plan_id = _bulk_restore_plan(client, entry_id, "rename")
 
     frozen = service.freeze_plan(plan_id)
     assert frozen.status == "frozen"
@@ -191,25 +194,7 @@ def test_bulk_restore_worker_fails_closed_when_frozen_target_is_occupied_after_v
 
     original_foreign = b"original-foreign-owner"
     original.write_bytes(original_foreign)
-
-    preview = client.post(
-        "/api/quarantine/bulk-preview",
-        json={"action": "restore", "entry_ids": [entry_id], "conflict_policy": "rename"},
-        headers={"Origin": "http://testserver"},
-    )
-    assert preview.status_code == 200
-    generated = client.post(
-        "/api/quarantine/bulk-plan",
-        json={
-            "action": "restore",
-            "entry_ids": [entry_id],
-            "conflict_policy": "rename",
-            "expected_preview_digest": preview.json()["preview_digest"],
-        },
-        headers={"Origin": "http://testserver"},
-    )
-    assert generated.status_code == 200
-    plan_id = int(generated.json()["id"])
+    plan_id = _bulk_restore_plan(client, entry_id, "rename")
 
     assert service.freeze_plan(plan_id).status == "frozen"
     assert service.validate_plan(plan_id)["status"] == "ready"
@@ -246,5 +231,49 @@ def test_bulk_restore_worker_fails_closed_when_frozen_target_is_occupied_after_v
         entry = session.get(QuarantineEntry, entry_id)
         assert entry is not None
         assert entry.state != "restored"
+        item = session.query(BatchPlanItem).filter_by(plan_id=plan_id).one()
+        assert item.state != "completed"
+
+
+def test_bulk_restore_worker_rejects_entry_that_became_non_active_after_validate(tmp_path: Path, monkeypatch) -> None:
+    client = _client(tmp_path)
+    service = client.app.state.service
+    entry_id, anchor, public_view, original = _active_entry(client)
+    plan_id = _bulk_restore_plan(client, entry_id, "skip")
+
+    assert service.freeze_plan(plan_id).status == "frozen"
+    assert service.validate_plan(plan_id)["status"] == "ready"
+    assert not original.exists()
+
+    with service.SessionLocal() as session:
+        entry = session.get(QuarantineEntry, entry_id)
+        assert entry is not None
+        entry.state = "conflict"
+        entry.tx_phase = "conflict"
+        entry.last_error = "sentinel conflict before execute"
+        session.commit()
+
+    worker_id = "worker-gate6a-non-active"
+    job_id = _prepare_worker(service, plan_id, worker_id)
+
+    from app.quarantine.capability import MutationCapability
+
+    monkeypatch.setattr(
+        "app.quarantine.capability.resolve_mutation_capability",
+        lambda *args, **kwargs: MutationCapability.COMPAT_TRANSACTIONAL,
+    )
+
+    _run_worker(service, job_id, worker_id)
+
+    assert not original.exists()
+    assert public_view.exists()
+    assert anchor.exists()
+
+    with service.SessionLocal() as session:
+        entry = session.get(QuarantineEntry, entry_id)
+        assert entry is not None
+        assert entry.state == "conflict"
+        assert entry.tx_phase == "conflict"
+        assert entry.last_error == "sentinel conflict before execute"
         item = session.query(BatchPlanItem).filter_by(plan_id=plan_id).one()
         assert item.state != "completed"
