@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -221,7 +221,19 @@ def generate_quarantine_bulk_plan(
         )
 
     if int(current_preview["blocked_count"]) != 0:
-        raise HTTPException(status_code=501, detail="Gate6-A blocked bulk plan generation not implemented")
+        blocked_items = [
+            item for item in current_preview["items"] if not bool(item["eligible"])
+        ]
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": {
+                    "code": "BULK_SELECTION_BLOCKED",
+                    "message": "Selected quarantine entries are not eligible for this bulk action",
+                    "details": {"blocked_items": blocked_items},
+                }
+            },
+        )
 
     preview_items = {int(item["entry_id"]): item for item in current_preview["items"]}
     entry_ids = canonicalize_entry_ids(payload.entry_ids)
