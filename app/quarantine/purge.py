@@ -205,6 +205,72 @@ def _frozen_selected_attempt_generation(
     raise StateConflictError("PURGE_RECOVERY_REQUIRED: frozen authoritative attempt generation is invalid")
 
 
+def _execute_time_purge_ownership_reason(
+    session: Any,
+    entry: QuarantineEntry,
+    frozen_manifest: dict[str, Any],
+    quarantine_root: Path,
+) -> str | None:
+    """Revalidate ownership authority without defeating frozen capture-before-qualification semantics."""
+    current_manifest = build_purge_topology_manifest(
+        entry,
+        quarantine_root,
+        owner_lookup=lambda owner_id: session.get(QuarantineEntry, owner_id),
+    )
+
+    # Frozen §6.3 intentionally permits a known source pathname to be replaced
+    # after classification: Capture retires that object first, then private-slot
+    # qualification preserves it and fails closed. Do not turn that allowed race
+    # into an execute-time rejection. All other current blockers remain fatal.
+    current_blockers = [
+        str(reason)
+        for reason in list(current_manifest.get("blockers") or [])
+        if not str(reason).startswith("IDENTITY_MISMATCH:")
+    ]
+    if current_blockers:
+        return current_blockers[0]
+
+    frozen_historical = {
+        int(owner_id) for owner_id in list(frozen_manifest.get("historical_conflict_entry_ids") or [])
+    }
+    current_historical = {
+        int(owner_id) for owner_id in list(current_manifest.get("historical_conflict_entry_ids") or [])
+    }
+    if current_historical - frozen_historical:
+        return "PURGE_TOPOLOGY_CHANGED"
+
+    tx_root = quarantine_root / ".tx"
+    for alias in list(frozen_manifest.get("aliases") or []):
+        if alias.get("role") != "historical_conflict_candidate":
+            continue
+        try:
+            owner_id = int(alias.get("owner_entry_id"))
+        except (TypeError, ValueError):
+            return "UNKNOWN_PAYLOAD_OWNER"
+        owner = session.get(QuarantineEntry, owner_id)
+        if owner is None:
+            return "UNKNOWN_PAYLOAD_OWNER"
+        if owner.state == "active":
+            return "SHARED_ACTIVE_PAYLOAD"
+        if owner.state == "restoring":
+            return "SHARED_RESTORING_PAYLOAD"
+        if owner.state == "restored":
+            return "SHARED_RESTORED_PAYLOAD"
+        if not (
+            owner.state == "conflict"
+            and owner.tx_phase == "conflict"
+            and owner.authoritative_anchor_path is None
+        ):
+            return "UNKNOWN_PAYLOAD_OWNER_STATE"
+        if not _same_persisted_payload_identity(owner, entry):
+            return "HISTORICAL_CONFLICT_IDENTITY_MISMATCH"
+        expected_candidate = _expected_historical_candidate_path(owner, tx_root)
+        if expected_candidate is None or Path(str(alias.get("path") or "")) != expected_candidate:
+            return "HISTORICAL_CONFLICT_PATH_MISMATCH"
+
+    return None
+
+
 def execute_transactional_purge_capture(
     session_factory: Any,
     entry_id: int,
@@ -232,15 +298,15 @@ def execute_transactional_purge_capture(
         current_tx_phase = entry.tx_phase
         current_generation = int(entry.active_attempt_generation or 0)
         if current_state == "active" and current_tx_phase == "active":
-            current_manifest = build_purge_topology_manifest(
+            topology_reason = _execute_time_purge_ownership_reason(
+                session,
                 entry,
+                frozen_manifest,
                 q_root,
-                owner_lookup=lambda owner_id: session.get(QuarantineEntry, owner_id),
             )
-            topology_reason = validate_purge_topology_manifest(frozen_manifest, current_manifest)
             if topology_reason is not None:
                 raise StateConflictError(
-                    f"{topology_reason}: purge topology changed before Execute for quarantine entry #{entry_id}"
+                    f"{topology_reason}: purge ownership changed before Execute for quarantine entry #{entry_id}"
                 )
 
     purge_dir: Path | None = None
