@@ -45,12 +45,10 @@ class QuarantineBulkPreviewRequest(BaseModel):
         return self
 
 
-@router.post("/bulk-preview")
-def preview_quarantine_bulk(request: Request, payload: QuarantineBulkPreviewRequest):
+def _compute_bulk_preview(service, payload: QuarantineBulkPreviewRequest) -> dict[str, object]:
     entry_ids = canonicalize_entry_ids(payload.entry_ids)
     items: list[dict[str, object]] = []
     digest_items: list[dict[str, object]] = []
-    service = request.app.state.service
     effective_conflict_policy = (payload.conflict_policy or "skip") if payload.action == "restore" else None
 
     with service.SessionLocal() as session:
@@ -135,3 +133,8 @@ def preview_quarantine_bulk(request: Request, payload: QuarantineBulkPreviewRequ
         "items": items,
         "preview_digest": canonical_preview_digest(material),
     }
+
+
+@router.post("/bulk-preview")
+def preview_quarantine_bulk(request: Request, payload: QuarantineBulkPreviewRequest):
+    return _compute_bulk_preview(request.app.state.service, payload)
