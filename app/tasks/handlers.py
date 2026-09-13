@@ -1572,6 +1572,8 @@ class BatchPlanExecuteHandler(TaskHandler):
             # --- PHASE 1: DB INTENT ---
             q_entry_id = None
             q_restore_entry_id = None
+            q_purge_entry_id = None
+            purge_manifest = None
             target_path_str = None
             src_p = Path(item_meta.source_path)
             src_stat_dict = {}
@@ -1761,6 +1763,19 @@ class BatchPlanExecuteHandler(TaskHandler):
                         target_path_str = str(q_dest_p)
                         restore_expected_size = q_entry.size
                         restore_expected_hash = q_entry.content_hash
+                elif row.operation == "quarantine_purge":
+                    meta_dict = json.loads(row.metadata_json or "{}")
+                    qid = meta_dict.get("quarantine_entry_id")
+                    manifest = meta_dict.get("purge_topology_manifest")
+                    if not qid or not isinstance(manifest, dict):
+                        row.state = "failed"
+                        row.reason = "missing quarantine_entry_id or purge_topology_manifest for quarantine_purge"
+                        session.commit()
+                        completed_or_skipped += 1
+                        continue
+                    q_purge_entry_id = int(qid)
+                    purge_manifest = manifest
+                    target_path_str = row.target_path
                 else:
                     target_path_str = row.target_path
 
@@ -1928,7 +1943,8 @@ class BatchPlanExecuteHandler(TaskHandler):
                 plan_id=str(plan_id),
                 session_factory=context.SessionLocal,
                 worker_id=context.worker_id,
-                quarantine_entry_id=q_entry_id or q_restore_entry_id,
+                quarantine_entry_id=q_purge_entry_id or q_entry_id or q_restore_entry_id,
+                purge_manifest=purge_manifest,
             )
 
             after_size = None
