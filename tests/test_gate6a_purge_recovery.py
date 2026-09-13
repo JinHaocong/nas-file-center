@@ -9,6 +9,7 @@ from sqlalchemy import text
 
 from app.db import create_engine_and_session, init_db
 from app.models import QuarantineEntry, TaskLock, utcnow
+from app.tasks.state_machine import JobLeaseLost
 
 
 def _setup_recovery_entry(tmp_path: Path, payload: bytes, db_name: str):
@@ -214,6 +215,90 @@ def test_transactional_purge_resumes_after_all_destruction_before_terminal_commi
         SessionLocal,
         entry_id=1,
         worker_id="worker-1",
+        frozen_manifest=frozen_manifest,
+        quarantine_root=quarantine_root,
+        allowed_roots=[data],
+    )
+
+    assert list(purge_dir.iterdir()) == []
+    with SessionLocal() as session:
+        entry = session.get(QuarantineEntry, 1)
+        assert entry is not None
+        assert entry.state == "purged"
+        assert entry.tx_phase == "purged"
+        assert entry.purged_at is not None
+        assert entry.active_attempt_generation == 2
+
+
+def test_stale_worker_stops_before_next_unlink_and_new_worker_resumes(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    import app.quarantine.purge as purge
+
+    SessionLocal, data, quarantine_root, anchor, captured_source, public_view = _setup_recovery_entry(
+        tmp_path,
+        b"gate6a-worker-takeover-recovery",
+        "takeover-recovery.db",
+    )
+    frozen_manifest = _frozen_manifest(purge, SessionLocal, quarantine_root)
+
+    purge.execute_transactional_purge_capture(
+        SessionLocal,
+        entry_id=1,
+        worker_id="worker-1",
+        frozen_manifest=frozen_manifest,
+        quarantine_root=quarantine_root,
+        allowed_roots=[data],
+    )
+    purge_dir = quarantine_root / ".tx" / "entry-1" / "attempt-2" / "purge"
+    assert len(list(purge_dir.iterdir())) == 3
+
+    original_renew = purge.renew_and_assert_worker_lease
+    fence_calls = 0
+
+    def takeover_before_second_fence(session_factory, worker_id, *args, **kwargs):
+        nonlocal fence_calls
+        fence_calls += 1
+        if fence_calls == 2:
+            with SessionLocal() as session:
+                session.execute(text("BEGIN IMMEDIATE"))
+                lock = session.get(TaskLock, 1)
+                assert lock is not None
+                lock.owner = "worker-2"
+                lock.acquired_at = utcnow()
+                session.commit()
+        return original_renew(session_factory, worker_id, *args, **kwargs)
+
+    monkeypatch.setattr(purge, "renew_and_assert_worker_lease", takeover_before_second_fence)
+    with pytest.raises(JobLeaseLost, match="lost exclusive lease"):
+        purge.destroy_transactional_purge_capture(
+            SessionLocal,
+            entry_id=1,
+            worker_id="worker-1",
+            frozen_manifest=frozen_manifest,
+            quarantine_root=quarantine_root,
+            allowed_roots=[data],
+        )
+    monkeypatch.setattr(purge, "renew_and_assert_worker_lease", original_renew)
+
+    assert len(list(purge_dir.iterdir())) == 2
+    assert not anchor.exists()
+    assert not captured_source.exists()
+    assert not public_view.exists()
+
+    purge.execute_transactional_purge_capture(
+        SessionLocal,
+        entry_id=1,
+        worker_id="worker-2",
+        frozen_manifest=frozen_manifest,
+        quarantine_root=quarantine_root,
+        allowed_roots=[data],
+    )
+    purge.destroy_transactional_purge_capture(
+        SessionLocal,
+        entry_id=1,
+        worker_id="worker-2",
         frozen_manifest=frozen_manifest,
         quarantine_root=quarantine_root,
         allowed_roots=[data],
