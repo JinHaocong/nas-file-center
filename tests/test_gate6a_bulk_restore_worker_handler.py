@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from app.config import Settings
 from app.main import create_app
-from app.models import BatchPlanItem, QuarantineEntry, TaskLock, WorkJob, utcnow
+from app.models import AuditEvent, BatchPlan, BatchPlanItem, QuarantineEntry, TaskLock, WorkJob, utcnow
 from app.tasks.context import JobContext
 from app.tasks.handlers import BatchPlanExecuteHandler
 
@@ -119,10 +119,10 @@ def _run_worker(service, job_id: int, worker_id: str) -> None:
         BatchPlanExecuteHandler().run(job, context, service.settings)
 
 
-def _bulk_restore_plan(client: TestClient, entry_id: int, conflict_policy: str) -> int:
+def _bulk_restore_plan_many(client: TestClient, entry_ids: list[int], conflict_policy: str) -> int:
     preview = client.post(
         "/api/quarantine/bulk-preview",
-        json={"action": "restore", "entry_ids": [entry_id], "conflict_policy": conflict_policy},
+        json={"action": "restore", "entry_ids": entry_ids, "conflict_policy": conflict_policy},
         headers={"Origin": "http://testserver"},
     )
     assert preview.status_code == 200
@@ -130,7 +130,7 @@ def _bulk_restore_plan(client: TestClient, entry_id: int, conflict_policy: str) 
         "/api/quarantine/bulk-plan",
         json={
             "action": "restore",
-            "entry_ids": [entry_id],
+            "entry_ids": entry_ids,
             "conflict_policy": conflict_policy,
             "expected_preview_digest": preview.json()["preview_digest"],
         },
@@ -138,6 +138,10 @@ def _bulk_restore_plan(client: TestClient, entry_id: int, conflict_policy: str) 
     )
     assert generated.status_code == 200
     return int(generated.json()["id"])
+
+
+def _bulk_restore_plan(client: TestClient, entry_id: int, conflict_policy: str) -> int:
+    return _bulk_restore_plan_many(client, [entry_id], conflict_policy)
 
 
 def test_bulk_restore_worker_handler_uses_exact_frozen_rename_target(tmp_path: Path, monkeypatch) -> None:
@@ -277,3 +281,76 @@ def test_bulk_restore_worker_rejects_entry_that_became_non_active_after_validate
         assert entry.last_error == "sentinel conflict before execute"
         item = session.query(BatchPlanItem).filter_by(plan_id=plan_id).one()
         assert item.state != "completed"
+
+
+def test_bulk_restore_worker_continues_after_middle_failure_and_audits_each_success(tmp_path: Path, monkeypatch) -> None:
+    client = _client(tmp_path)
+    service = client.app.state.service
+    data = Path(service.settings.data_mount)
+
+    first_id, first_anchor, first_public, first_original = _active_entry(client)
+    second_id, second_anchor, second_public, _ = _active_entry(client)
+    third_id, third_anchor, third_public, _ = _active_entry(client)
+    second_original = data / "handler-restore-2.txt"
+    third_original = data / "handler-restore-3.txt"
+
+    with service.SessionLocal() as session:
+        second = session.get(QuarantineEntry, second_id)
+        third = session.get(QuarantineEntry, third_id)
+        assert second is not None and third is not None
+        second.original_path = str(second_original)
+        third.original_path = str(third_original)
+        session.commit()
+
+    plan_id = _bulk_restore_plan_many(client, [first_id, second_id, third_id], "skip")
+    assert service.freeze_plan(plan_id).status == "frozen"
+    assert service.validate_plan(plan_id)["status"] == "ready"
+
+    with service.SessionLocal() as session:
+        second = session.get(QuarantineEntry, second_id)
+        assert second is not None
+        second.state = "conflict"
+        second.tx_phase = "conflict"
+        second.last_error = "middle entry invalidated before execute"
+        session.commit()
+
+    worker_id = "worker-gate6a-partial"
+    job_id = _prepare_worker(service, plan_id, worker_id)
+
+    from app.quarantine.capability import MutationCapability
+
+    monkeypatch.setattr(
+        "app.quarantine.capability.resolve_mutation_capability",
+        lambda *args, **kwargs: MutationCapability.COMPAT_TRANSACTIONAL,
+    )
+
+    _run_worker(service, job_id, worker_id)
+
+    assert first_original.exists()
+    assert first_original.read_bytes() == first_anchor.read_bytes()
+    assert not first_public.exists()
+    assert not second_original.exists()
+    assert second_public.exists()
+    assert second_anchor.exists()
+    assert third_original.exists()
+    assert third_original.read_bytes() == third_anchor.read_bytes()
+    assert not third_public.exists()
+
+    with service.SessionLocal() as session:
+        first = session.get(QuarantineEntry, first_id)
+        second = session.get(QuarantineEntry, second_id)
+        third = session.get(QuarantineEntry, third_id)
+        assert first is not None and second is not None and third is not None
+        assert (first.state, first.tx_phase) == ("restored", "restored")
+        assert (second.state, second.tx_phase) == ("conflict", "conflict")
+        assert second.last_error == "middle entry invalidated before execute"
+        assert (third.state, third.tx_phase) == ("restored", "restored")
+
+        items = session.query(BatchPlanItem).filter_by(plan_id=plan_id).order_by(BatchPlanItem.sequence).all()
+        assert [item.state for item in items] == ["completed", "failed", "completed"]
+        plan = session.get(BatchPlan, plan_id)
+        assert plan is not None
+        assert plan.status == "partial"
+
+        completed_restore_audits = session.query(AuditEvent).filter_by(operation="restore", result="completed").all()
+        assert {event.path for event in completed_restore_audits} == {str(first_public), str(third_public)}
