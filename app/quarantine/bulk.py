@@ -66,6 +66,26 @@ def _private_owner_id(path: Path, tx_root: Path) -> int | None:
     return int(entry_match.group(1))
 
 
+def _same_persisted_payload_identity(left: Any, right: Any) -> bool:
+    left_hash = (left.content_hash or "").lower()
+    right_hash = (right.content_hash or "").lower()
+    return (
+        left.device == right.device
+        and left.inode == right.inode
+        and left.size == right.size
+        and left.mtime_ns == right.mtime_ns
+        and bool(left_hash)
+        and left_hash == right_hash
+    )
+
+
+def _expected_historical_candidate_path(owner: Any, tx_root: Path) -> Path | None:
+    generation = int(owner.active_attempt_generation or 0)
+    if generation <= 0:
+        return None
+    return tx_root / f"entry-{owner.id}" / f"attempt-{generation}" / "anchor"
+
+
 def build_purge_topology_manifest(
     entry: Any,
     quarantine_root: Path | str,
@@ -82,6 +102,7 @@ def build_purge_topology_manifest(
     public_view = _absolute_lexical(entry.quarantine_path)
     blockers: list[str] = []
     blocking_owner_entry_ids: set[int] = set()
+    historical_conflict_entry_ids: set[int] = set()
 
     def add_blocker(code: str) -> None:
         if code not in blockers:
@@ -166,10 +187,27 @@ def build_purge_topology_manifest(
                     and owner.tx_phase == "conflict"
                     and owner.authoritative_anchor_path is None
                 ):
-                    # Historical conflict candidates become eligible only after the
-                    # dedicated Gate6-A reclassification test freezes that contract.
-                    add_blocker("HISTORICAL_CONFLICT_ALIAS_UNCLASSIFIED")
-                    blocking_owner_entry_ids.add(owner_id)
+                    expected_candidate = _expected_historical_candidate_path(owner, tx_root)
+                    if expected_candidate is None or candidate != expected_candidate:
+                        add_blocker("HISTORICAL_CONFLICT_PATH_MISMATCH")
+                        blocking_owner_entry_ids.add(owner_id)
+                        continue
+                    if not _same_persisted_payload_identity(owner, entry):
+                        add_blocker("HISTORICAL_CONFLICT_IDENTITY_MISMATCH")
+                        blocking_owner_entry_ids.add(owner_id)
+                        continue
+                    if not _matches_persisted_identity(candidate, entry):
+                        add_blocker("HISTORICAL_CONFLICT_IDENTITY_MISMATCH")
+                        blocking_owner_entry_ids.add(owner_id)
+                        continue
+                    aliases.append(
+                        {
+                            "role": "historical_conflict_candidate",
+                            "owner_entry_id": owner_id,
+                            "path": str(candidate),
+                        }
+                    )
+                    historical_conflict_entry_ids.add(owner_id)
                 else:
                     add_blocker("UNKNOWN_PAYLOAD_OWNER_STATE")
                     blocking_owner_entry_ids.add(owner_id)
@@ -177,7 +215,7 @@ def build_purge_topology_manifest(
     return {
         "selected_entry_id": entry.id,
         "aliases": aliases,
-        "historical_conflict_entry_ids": [],
+        "historical_conflict_entry_ids": sorted(historical_conflict_entry_ids),
         "blocking_owner_entry_ids": sorted(blocking_owner_entry_ids),
         "blockers": blockers,
     }
