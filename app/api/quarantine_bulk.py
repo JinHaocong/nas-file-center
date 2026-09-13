@@ -172,6 +172,17 @@ def generate_quarantine_bulk_plan(request: Request, payload: QuarantineBulkPlanR
                 }
             },
         )
+    if payload.action == "purge" and not service.settings.allow_delete:
+        return JSONResponse(
+            status_code=403,
+            content={
+                "error": {
+                    "code": "DELETE_DISABLED",
+                    "message": "Filesystem deletion is disabled",
+                    "details": {},
+                }
+            },
+        )
 
     preview_payload = QuarantineBulkPreviewRequest(
         action=payload.action,
