@@ -7,10 +7,12 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from app.batch.plans import OperationItem
 from app.config import Settings
 from app.exceptions import StateConflictError
+from app.execution.executor import execute_item
 from app.main import create_app
-from app.models import BatchPlan, BatchPlanItem, QuarantineEntry, utcnow
+from app.models import BatchPlan, BatchPlanItem, QuarantineEntry, TaskLock, utcnow
 
 
 def _client(tmp_path: Path) -> TestClient:
@@ -194,3 +196,61 @@ def test_bulk_restore_validate_rejects_foreign_target_occupied_after_freeze(tmp_
 
     assert anchor.exists()
     assert public_view.exists()
+
+
+def test_bulk_restore_worker_compat_uses_exact_frozen_plan_target(tmp_path: Path, monkeypatch) -> None:
+    client = _client(tmp_path)
+    entry_id, anchor, public_view = _active_entry(client)
+    service = client.app.state.service
+    data = Path(service.settings.data_mount)
+    frozen_target = data / "frozen-rename-target.txt"
+    original_target = data / "restore-freeze.txt"
+
+    with service.SessionLocal() as session:
+        lock = session.get(TaskLock, 1)
+        if lock is None:
+            lock = TaskLock(id=1)
+            session.add(lock)
+        lock.locked = True
+        lock.owner = "worker-gate6a"
+        lock.acquired_at = utcnow()
+        session.commit()
+
+    from app.quarantine.capability import MutationCapability
+
+    monkeypatch.setattr(
+        "app.quarantine.capability.resolve_mutation_capability",
+        lambda *args, **kwargs: MutationCapability.COMPAT_TRANSACTIONAL,
+    )
+
+    st = anchor.stat(follow_symlinks=False)
+    item = OperationItem(
+        sequence=1,
+        operation="restore",
+        source=public_view,
+        target=frozen_target,
+        expected_size=st.st_size,
+        expected_hash=hashlib.sha256(anchor.read_bytes()).hexdigest(),
+        expected_device=st.st_dev,
+        expected_inode=st.st_ino,
+        expected_mtime_ns=st.st_mtime_ns,
+    )
+
+    result = execute_item(
+        item,
+        allowed_roots=[data],
+        allow_mutation=True,
+        allow_delete=True,
+        quarantine_root=service.settings.quarantine_root,
+        plan_id="gate6a-worker-restore",
+        session_factory=service.SessionLocal,
+        worker_id="worker-gate6a",
+        quarantine_entry_id=entry_id,
+    )
+
+    assert result.state == "completed"
+    assert result.result_path == frozen_target
+    assert frozen_target.exists()
+    assert frozen_target.read_bytes() == anchor.read_bytes()
+    assert not original_target.exists()
+    assert not public_view.exists()
