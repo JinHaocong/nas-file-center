@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   backend-tdd:
@@ -32,52 +32,6 @@ jobs:
       - name: Install test dependencies
         run: python -m pip install -e '.[test]'
 
-      - name: Apply Gate6-A bulk validate hook
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          path = Path("app/service.py")
-          text = path.read_text()
-          first_old = '            was_already_stale = (plan.status == "stale")\n            rows = list(session.scalars(select(BatchPlanItem).where(BatchPlanItem.plan_id == plan_id).order_by(BatchPlanItem.sequence)))\n'
-          first_new = '            was_already_stale = (plan.status == "stale")\n            plan_kind = plan.kind\n            rows = list(session.scalars(select(BatchPlanItem).where(BatchPlanItem.plan_id == plan_id).order_by(BatchPlanItem.sequence)))\n'
-          second_old = '        for row in rows:\n            if row.state == "completed":\n                continue\n\n            if row.operation == "restore":\n'
-          second_new = ('        for row in rows:\n'
-                        '            if row.state == "completed":\n'
-                        '                continue\n\n'
-                        '            if plan_kind in {"quarantine-bulk-restore", "quarantine-bulk-purge"}:\n'
-                        '                from app.quarantine.bulk_lifecycle import validate_bulk_plan_item\n'
-                        '                bulk_validation = validate_bulk_plan_item(self, plan_kind=plan_kind, item=row)\n'
-                        '                if bulk_validation is not None:\n'
-                        '                    bulk_state = str(bulk_validation["state"])\n'
-                        '                    bulk_reason = str(bulk_validation["reason"])\n'
-                        '                    if bulk_state == "stale":\n'
-                        '                        stale_detail = StaleItemDetail(\n'
-                        '                            item_id=row.id,\n'
-                        '                            source_path=row.source_path,\n'
-                        '                            reason=bulk_reason,\n'
-                        '                            expected={\n'
-                        '                                "device": row.expected_device,\n'
-                        '                                "inode": row.expected_inode,\n'
-                        '                                "size": row.expected_size,\n'
-                        '                                "mtime_ns": row.expected_mtime_ns,\n'
-                        '                                "hash": row.expected_hash,\n'
-                        '                                "target_path": row.target_path,\n'
-                        '                            },\n'
-                        '                            actual=bulk_validation.get("actual"),\n'
-                        '                        )\n'
-                        '                        stale_items.append(stale_detail)\n'
-                        '                        item_validations[row.id] = ("stale", bulk_reason, None)\n'
-                        '                    else:\n'
-                        '                        item_validations[row.id] = ("validated", bulk_reason, None)\n'
-                        '                    continue\n\n'
-                        '            if row.operation == "restore":\n')
-          if text.count(first_old) != 1:
-              raise SystemExit(f"unexpected validate plan-kind hook match count: {text.count(first_old)}")
-          if text.count(second_old) != 1:
-              raise SystemExit(f"unexpected validate item hook match count: {text.count(second_old)}")
-          path.write_text(text.replace(first_old, first_new, 1).replace(second_old, second_new, 1))
-          PY
-
       - name: Run preserved quarantine and Gate5-G regressions
         env:
           PYTHONPATH: .
@@ -99,15 +53,3 @@ jobs:
           tests/test_gate6a_bulk_preview*.py
           tests/test_gate6a_bulk_restore.py
           -v
-
-      - name: Commit Gate6-A validate hook
-        if: success()
-        run: |
-          if git diff --quiet -- app/service.py; then
-            exit 0
-          fi
-          git config user.name "Kerwin"
-          git config user.email "100753463+JinHaocong@users.noreply.github.com"
-          git add app/service.py
-          git commit -m "feat(gate6a): wire bulk lifecycle into validate"
-          git push origin HEAD:v0.3.6-gate6a-quarantine-bulk-operations
