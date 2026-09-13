@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.auth.dependencies import get_current_user
@@ -43,6 +43,15 @@ class QuarantineBulkPreviewRequest(BaseModel):
         if self.action == "purge" and self.conflict_policy is not None:
             raise ValueError("conflict_policy is only valid for restore")
         return self
+
+
+class QuarantineBulkPlanRequest(QuarantineBulkPreviewRequest):
+    expected_preview_digest: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+    confirmation: str | None = None
 
 
 def _compute_bulk_preview(service, payload: QuarantineBulkPreviewRequest) -> dict[str, object]:
@@ -138,3 +147,8 @@ def _compute_bulk_preview(service, payload: QuarantineBulkPreviewRequest) -> dic
 @router.post("/bulk-preview")
 def preview_quarantine_bulk(request: Request, payload: QuarantineBulkPreviewRequest):
     return _compute_bulk_preview(request.app.state.service, payload)
+
+
+@router.post("/bulk-plan")
+def generate_quarantine_bulk_plan(request: Request, payload: QuarantineBulkPlanRequest):
+    raise HTTPException(status_code=501, detail="Gate6-A bulk plan generation not implemented")
