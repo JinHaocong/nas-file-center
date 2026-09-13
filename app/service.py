@@ -1977,6 +1977,7 @@ class FileCenterService:
                 raise KeyError(plan_id)
             if plan.status != "draft":
                 raise ValueError(f"Only draft plans can be frozen, current status={plan.status}")
+            plan_kind = plan.kind
 
             items_data = [
                 {
@@ -2001,6 +2002,13 @@ class FileCenterService:
             item_id = it["id"]
             src_p = Path(it["source_path"])
             upd: dict[str, Any] = {}
+
+            if plan_kind in {"quarantine-bulk-restore", "quarantine-bulk-purge"}:
+                from app.quarantine.bulk_lifecycle import freeze_bulk_plan_item
+                bulk_update = freeze_bulk_plan_item(self, plan_kind=plan_kind, item=it)
+                if bulk_update is not None:
+                    item_updates[item_id] = bulk_update
+                    continue
 
             if it["operation"] == "rmdir_empty":
                 if self.settings.quarantine_root and is_reserved_quarantine_path(src_p, self.settings.quarantine_root):
