@@ -27,6 +27,22 @@ export const quarantineApi = {
     return api.get<QuarantineListResponse>(`/api/quarantine${qs ? `?${qs}` : ''}`);
   },
 
+  resolveBulkFilteredEntryIds: async (params?: { state?: string; search?: string; query?: string }) => {
+    const pageSize = 500;
+    const entryIds: number[] = [];
+    let page = 1;
+    let total = 0;
+
+    do {
+      const response = await quarantineApi.list({ ...params, page, pageSize });
+      total = response.total;
+      entryIds.push(...response.items.filter((entry) => entry.state === 'active').map((entry) => entry.id));
+      page += 1;
+    } while ((page - 1) * pageSize < total);
+
+    return entryIds;
+  },
+
   get: (id: number) => api.get<QuarantineEntry>(`/api/quarantine/${id}`),
 
   restore: (id: number, payload: QuarantineRestoreRequest = {}) =>
