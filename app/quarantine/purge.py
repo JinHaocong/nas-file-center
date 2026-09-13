@@ -245,6 +245,10 @@ def execute_transactional_purge_capture(
         )
 
     aliases = list(frozen_manifest.get("aliases") or [])
+    any_source_exists = any(
+        os.path.lexists(Path(str(alias.get("path") or "")))
+        for alias in aliases
+    )
     for alias in aliases:
         source_path = Path(str(alias.get("path") or ""))
         target_path = purge_dir / _purge_slot_name(alias)
@@ -255,6 +259,8 @@ def execute_transactional_purge_capture(
         if target_exists:
             raise StateConflictError(f"Purge capture slot is occupied: {target_path}")
         if not source_exists:
+            if not any_source_exists:
+                continue
             raise StateConflictError(
                 f"PURGE_RECOVERY_REQUIRED: purge source and captured slot are both missing: {source_path}"
             )
@@ -308,6 +314,14 @@ def qualify_transactional_purge_capture(
     if generation <= 0 or not expected_hash:
         raise StateConflictError("PURGE_QUALIFICATION_FAILED: missing frozen payload identity")
 
+    aliases = list(frozen_manifest.get("aliases") or [])
+    for alias in aliases:
+        source_path = Path(str(alias.get("path") or ""))
+        if os.path.lexists(source_path):
+            raise StateConflictError(
+                f"PURGE_QUALIFICATION_FAILED: frozen source still exists: {source_path}"
+            )
+
     q_root = Path(quarantine_root)
     valid_roots = [Path(root) for root in allowed_roots]
     if q_root not in valid_roots:
@@ -315,8 +329,10 @@ def qualify_transactional_purge_capture(
     purge_dir = q_root / ".tx" / f"entry-{entry_id}" / f"attempt-{generation}" / "purge"
 
     qualified: list[Path] = []
-    for alias in list(frozen_manifest.get("aliases") or []):
+    for alias in aliases:
         captured_path = purge_dir / _purge_slot_name(alias)
+        if not os.path.lexists(captured_path):
+            continue
         try:
             with safe_open_parent_fd(captured_path, valid_roots) as (dir_fd, leaf):
                 flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
@@ -392,6 +408,13 @@ def destroy_transactional_purge_capture(
     if q_root not in valid_roots:
         valid_roots.append(q_root)
 
+    for alias in list(frozen_manifest.get("aliases") or []):
+        source_path = Path(str(alias.get("path") or ""))
+        if os.path.lexists(source_path):
+            raise StateConflictError(
+                f"PURGE_DESTRUCTION_FAILED: frozen source reappeared: {source_path}"
+            )
+
     for captured_path in qualified:
         with safe_open_parent_fd(captured_path, valid_roots) as (dir_fd, leaf):
             renew_and_assert_worker_lease(session_factory, worker)
@@ -402,20 +425,20 @@ def destroy_transactional_purge_capture(
                     f"PURGE_DESTRUCTION_FAILED: cannot unlink qualified slot {captured_path}: {exc}"
                 ) from exc
 
-    # Prove exact captured-slot closure before terminal DB state. This is read-only
-    # filesystem observation and intentionally occurs outside any SQLite write tx.
-    for captured_path in qualified:
-        try:
-            with safe_open_parent_fd(captured_path, valid_roots) as (dir_fd, leaf):
-                try:
-                    os.stat(leaf, dir_fd=dir_fd, follow_symlinks=False)
-                except FileNotFoundError:
-                    continue
-                raise StateConflictError(
-                    f"PURGE_DESTRUCTION_FAILED: qualified slot still exists: {captured_path}"
-                )
-        except FileNotFoundError:
-            continue
+    # Prove exact source + captured-slot closure before terminal DB state. This is
+    # read-only filesystem observation and intentionally occurs outside any SQLite write tx.
+    purge_dir = q_root / ".tx" / f"entry-{entry_id}" / f"attempt-{generation}" / "purge"
+    for alias in list(frozen_manifest.get("aliases") or []):
+        source_path = Path(str(alias.get("path") or ""))
+        captured_path = purge_dir / _purge_slot_name(alias)
+        if os.path.lexists(source_path):
+            raise StateConflictError(
+                f"PURGE_DESTRUCTION_FAILED: frozen source still exists: {source_path}"
+            )
+        if os.path.lexists(captured_path):
+            raise StateConflictError(
+                f"PURGE_DESTRUCTION_FAILED: captured slot still exists: {captured_path}"
+            )
 
     with session_factory() as session:
         session.execute(text("BEGIN IMMEDIATE"))
