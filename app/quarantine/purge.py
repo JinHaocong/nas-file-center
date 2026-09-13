@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Callable
 
@@ -13,7 +14,8 @@ from app.quarantine.bulk import (
     _same_persisted_payload_identity,
     build_purge_topology_manifest as _build_preview_purge_topology_manifest,
 )
-from app.tasks.recovery import assert_active_worker_lease
+from app.quarantine.tx_allocator import allocate_and_create_attempt_dir
+from app.tasks.recovery import assert_active_worker_lease, renew_and_assert_worker_lease
 
 
 def build_purge_topology_manifest(
@@ -104,6 +106,25 @@ def _begin_transactional_purge_intent(
         entry.state = "purging"
         entry.tx_phase = "purging"
         session.commit()
+
+
+def _allocate_transactional_purge_attempt(
+    session_factory: Any,
+    entry_id: int,
+    worker_id: str,
+    quarantine_root: Path | str,
+) -> tuple[int, Path, Path]:
+    """Allocate a new monotonic exclusive attempt and its write-once purge namespace."""
+    generation, attempt_dir = allocate_and_create_attempt_dir(
+        session_factory,
+        entry_id,
+        worker_id,
+        quarantine_root=quarantine_root,
+    )
+    purge_dir = attempt_dir / "purge"
+    renew_and_assert_worker_lease(session_factory, worker_id)
+    os.mkdir(purge_dir, mode=0o700)
+    return generation, attempt_dir, purge_dir
 
 
 def execute_transactional_purge_capture(
