@@ -12,7 +12,7 @@ from app.exceptions import StateConflictError
 from app.models import QuarantineEntry, TaskLock, utcnow
 
 
-def test_qualified_capture_is_destroyed_before_terminal_purged_commit(tmp_path: Path) -> None:
+def test_qualified_capture_is_zeroized_before_terminal_purged_commit(tmp_path: Path) -> None:
     import app.quarantine.purge as purge
 
     engine, SessionLocal = create_engine_and_session(tmp_path / "destroy.db")
@@ -88,7 +88,16 @@ def test_qualified_capture_is_destroyed_before_terminal_purged_commit(tmp_path: 
         allowed_roots=[data],
     )
 
-    assert all(not path.exists() for path in known_slots)
+    # Gate6-A COMPAT destruction is descriptor-bound zeroization, not pathname
+    # unlink. The exact private leaves remain as durable same-transaction
+    # tombstone evidence and all NFC-owned aliases of the inode read as empty.
+    assert all(path.exists() for path in known_slots)
+    assert all(path.stat(follow_symlinks=False).st_ino == st.st_ino for path in known_slots)
+    assert all(path.stat(follow_symlinks=False).st_size == 0 for path in known_slots)
+    assert (purge_dir / "destroy-intent.json").is_file()
+    assert anchor.stat(follow_symlinks=False).st_size == 0
+    assert captured_source.stat(follow_symlinks=False).st_size == 0
+    assert public_view.stat(follow_symlinks=False).st_size == 0
 
     with SessionLocal() as session:
         entry = session.get(QuarantineEntry, 1)
