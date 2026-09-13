@@ -119,6 +119,49 @@ describe('Gate6-A quarantine bulk API contract', () => {
       api.get = originalGet;
     }
   });
+
+  test('resolveBulkFilteredEntryIds fails closed when active selection exceeds 5000', async () => {
+    const originalGet = api.get;
+    const makeEntry = (id: number): QuarantineEntry => ({
+      id,
+      original_path: `/data/${id}.bin`,
+      quarantine_path: `/trash/${id}.bin`,
+      task_id: null,
+      plan_item_id: null,
+      state: 'active',
+      size: 1,
+      hash: null,
+      mtime_ns: 1,
+      device: 1,
+      inode: id,
+      quarantined_at: null,
+      expires_at: null,
+      restored_at: null,
+      purged_at: null,
+      last_error: null,
+      created_at: null,
+      updated_at: null,
+    });
+
+    api.get = (async (url: string) => {
+      const parsed = new URL(url, 'http://testserver');
+      const page = Number(parsed.searchParams.get('page') || '1');
+      const start = (page - 1) * 500 + 1;
+      const remaining = 5001 - start + 1;
+      const count = Math.max(0, Math.min(500, remaining));
+      const items = Array.from({ length: count }, (_, index) => makeEntry(start + index));
+      return { items, total: 5001, page, page_size: 500 };
+    }) as typeof api.get;
+
+    try {
+      await assert.rejects(
+        () => quarantineApi.resolveBulkFilteredEntryIds({ state: 'active' }),
+        /5000/
+      );
+    } finally {
+      api.get = originalGet;
+    }
+  });
 });
 
 describe('Gate6-A quarantine bulk selection safety rules', () => {
