@@ -212,7 +212,7 @@ def test_bulk_purge_worker_resumes_after_crash_immediately_after_durable_purging
         assert entry.state == "purged"
         assert entry.tx_phase == "purged"
         assert entry.purged_at is not None
-        assert entry.active_attempt_generation > 1
+        assert entry.active_attempt_generation == 2
         item = session.query(BatchPlanItem).filter_by(plan_id=plan_id).one()
         assert item.state == "completed"
         assert item.reason == "purged"
