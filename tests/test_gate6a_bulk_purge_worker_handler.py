@@ -216,3 +216,58 @@ def test_bulk_purge_worker_resumes_after_crash_immediately_after_durable_purging
         item = session.query(BatchPlanItem).filter_by(plan_id=plan_id).one()
         assert item.state == "completed"
         assert item.reason == "purged"
+
+
+def test_bulk_purge_worker_resumes_after_generation_allocation_before_attempt_mkdir(tmp_path: Path) -> None:
+    from app.quarantine.purge import _begin_transactional_purge_intent
+    from app.quarantine.tx_allocator import allocate_next_generation
+
+    client = _client(tmp_path)
+    service = client.app.state.service
+    entry_id, anchor, captured_source, public_view = _active_entry(client)
+    plan_id = _bulk_purge_plan(client, entry_id)
+
+    worker_id = "worker-gate6a-purge-resume-generation"
+    job_id = _prepare_worker(service, plan_id, worker_id)
+
+    _begin_transactional_purge_intent(service.SessionLocal, entry_id, worker_id)
+    generation, attempt_dir = allocate_next_generation(
+        service.SessionLocal,
+        entry_id,
+        worker_id,
+        quarantine_root=service.settings.quarantine_root,
+    )
+    assert generation == 2
+    assert not attempt_dir.exists()
+
+    with service.SessionLocal() as session:
+        entry = session.get(QuarantineEntry, entry_id)
+        assert entry is not None
+        assert entry.state == "purging"
+        assert entry.tx_phase == "purging"
+        assert entry.active_attempt_generation == 2
+        item = session.query(BatchPlanItem).filter_by(plan_id=plan_id).one()
+        item.state = "executing"
+        session.commit()
+
+    assert anchor.exists()
+    assert captured_source.exists()
+    assert public_view.exists()
+
+    _run_worker(service, job_id, worker_id)
+
+    assert not anchor.exists()
+    assert not captured_source.exists()
+    assert not public_view.exists()
+    assert not attempt_dir.exists()
+
+    with service.SessionLocal() as session:
+        entry = session.get(QuarantineEntry, entry_id)
+        assert entry is not None
+        assert entry.state == "purged"
+        assert entry.tx_phase == "purged"
+        assert entry.purged_at is not None
+        assert entry.active_attempt_generation == 3
+        item = session.query(BatchPlanItem).filter_by(plan_id=plan_id).one()
+        assert item.state == "completed"
+        assert item.reason == "purged"
