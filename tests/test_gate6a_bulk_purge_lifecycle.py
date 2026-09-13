@@ -240,7 +240,7 @@ def test_bulk_purge_validate_rejects_same_size_same_mtime_hash_drift_after_freez
 
     assert detail["status"] == "stale"
     assert detail["items"][0]["state"] == "stale"
-    assert detail["items"][0]["reason"] == "purge_source_identity_changed"
+    assert detail["items"][0]["reason"] == "PURGE_QUALIFICATION_FAILED"
     assert anchor.exists()
     assert paths["captured_source"].exists()
     assert paths["public_view"].exists()
