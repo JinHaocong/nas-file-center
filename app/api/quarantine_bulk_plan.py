@@ -5,6 +5,7 @@ import json
 from sqlalchemy import text
 
 from app.models import BatchPlan, BatchPlanItem, QuarantineEntry
+from app.quarantine.bulk import quarantine_entry_identity_material
 
 
 def persist_bulk_draft(
@@ -15,6 +16,7 @@ def persist_bulk_draft(
     preview_items: dict[int, dict[str, object]],
     preview_digest: str,
     conflict_policy: str | None,
+    expected_db_identities: dict[int, dict[str, object]] | None = None,
 ) -> tuple[int, str]:
     is_restore = action == "restore"
     plan_kind = "quarantine-bulk-restore" if is_restore else "quarantine-bulk-purge"
@@ -34,6 +36,12 @@ def persist_bulk_draft(
             if entry is None or entry.state != "active":
                 session.rollback()
                 raise RuntimeError(f"preview changed for quarantine entry {entry_id}")
+            if expected_db_identities is not None:
+                expected_identity = expected_db_identities.get(entry_id)
+                current_identity = quarantine_entry_identity_material(entry)
+                if expected_identity is None or current_identity != expected_identity:
+                    session.rollback()
+                    raise RuntimeError(f"preview identity changed for quarantine entry {entry_id}")
             entries[entry_id] = entry
 
         plan = BatchPlan(
