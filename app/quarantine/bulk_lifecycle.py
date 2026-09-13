@@ -191,6 +191,79 @@ def freeze_bulk_plan_item(
 
 def validate_bulk_plan_item(service, *, plan_kind: str, item: Any) -> dict[str, Any] | None:
     """Validate one frozen Gate6-A item without mutating quarantine state or payload."""
+    if plan_kind == "quarantine-bulk-purge" and item.operation == "quarantine_purge":
+        metadata = json.loads(item.metadata_json or "{}")
+        entry_id = _entry_id(item.metadata_json)
+        frozen_manifest = metadata.get("frozen_purge_topology_manifest")
+        if not isinstance(frozen_manifest, dict):
+            return {
+                "state": "stale",
+                "reason": "PURGE_TOPOLOGY_CHANGED",
+                "actual": {"error": "missing frozen purge topology manifest"},
+            }
+
+        with service.SessionLocal() as session:
+            entry = session.get(QuarantineEntry, entry_id)
+            if entry is None:
+                return {
+                    "state": "stale",
+                    "reason": "PURGE_QUALIFICATION_FAILED",
+                    "actual": {"error": "quarantine entry missing"},
+                }
+            if entry.state != "active":
+                return {
+                    "state": "stale",
+                    "reason": "PURGE_QUALIFICATION_FAILED",
+                    "actual": {"state": entry.state, "tx_phase": entry.tx_phase},
+                }
+
+            current_manifest = build_purge_topology_manifest(
+                entry,
+                service.settings.quarantine_root,
+                owner_lookup=lambda owner_id: session.get(QuarantineEntry, owner_id),
+            )
+            blockers = list(current_manifest.get("blockers") or [])
+            if blockers:
+                return {
+                    "state": "stale",
+                    "reason": str(blockers[0]),
+                    "actual": {"purge_topology_manifest": current_manifest},
+                }
+            if current_manifest != frozen_manifest:
+                return {
+                    "state": "stale",
+                    "reason": "PURGE_TOPOLOGY_CHANGED",
+                    "actual": {"purge_topology_manifest": current_manifest},
+                }
+            if not entry.authoritative_anchor_path:
+                return {
+                    "state": "stale",
+                    "reason": "PURGE_QUALIFICATION_FAILED",
+                    "actual": {"error": "authoritative anchor missing"},
+                }
+            anchor_path = Path(entry.authoritative_anchor_path)
+
+        try:
+            _qualify_authoritative_anchor(
+                service,
+                entry_id=entry_id,
+                anchor_path=anchor_path,
+                expected_device=int(item.expected_device),
+                expected_inode=int(item.expected_inode),
+                expected_size=int(item.expected_size),
+                expected_mtime_ns=int(item.expected_mtime_ns),
+                expected_hash=str(item.expected_hash or ""),
+                phase="Validate",
+            )
+        except StateConflictError as exc:
+            return {
+                "state": "stale",
+                "reason": "PURGE_QUALIFICATION_FAILED",
+                "actual": {"error": str(exc)},
+            }
+
+        return {"state": "validated", "reason": "bulk purge validated", "actual": None}
+
     if plan_kind != "quarantine-bulk-restore" or item.operation != "restore":
         return None
 
