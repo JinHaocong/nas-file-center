@@ -1,4 +1,4 @@
-import { QuarantineConflictPolicy, Plan } from '../../types';
+import { QuarantineConflictPolicy, QuarantineEntry, Plan } from '../../types';
 
 export function canCreateUndoPlan(
   plan: Plan | { status: string; kind?: string } | null | undefined,
@@ -48,6 +48,23 @@ export function getQuarantineRestoreAvailability(
     if (!customTarget.trim().startsWith('/')) {
       return { canRestore: false, reason: '路径必须为以 / 开头的绝对路径' };
     }
+  }
+  return { canRestore: true };
+}
+
+export function getBulkSelectableEntryIds(entries: readonly QuarantineEntry[]): number[] {
+  return entries.filter((entry) => entry.state === 'active').map((entry) => entry.id);
+}
+
+export function getBulkRestoreAvailability(
+  isSafeMode: boolean,
+  policy: 'skip' | 'rename'
+): { canRestore: boolean; reason?: string } {
+  if (isSafeMode) {
+    return { canRestore: false, reason: '只读安全模式生效中，禁止执行批量恢复操作' };
+  }
+  if (policy !== 'skip' && policy !== 'rename') {
+    return { canRestore: false, reason: '批量恢复仅支持 skip 或 rename' };
   }
   return { canRestore: true };
 }
