@@ -288,3 +288,103 @@ def test_transactional_purge_capture_preserves_occupied_private_slot(tmp_path: P
         assert entry.state == "purging"
         assert entry.tx_phase == "purging"
         assert entry.active_attempt_generation == 2
+
+
+def test_transactional_purge_capture_retires_historical_conflict_candidate_into_linked_slot(tmp_path: Path) -> None:
+    from app.quarantine.purge import build_purge_topology_manifest, execute_transactional_purge_capture
+
+    SessionLocal = _session_factory(tmp_path)
+    data = tmp_path / "data"
+    quarantine_root = data / ".nas-file-center-trash"
+    selected_attempt = quarantine_root / ".tx" / "entry-1" / "attempt-1"
+    historical_attempt = quarantine_root / ".tx" / "entry-2" / "attempt-1"
+    selected_attempt.mkdir(parents=True)
+    historical_attempt.mkdir(parents=True)
+
+    payload = b"gate6a-historical-purge-capture"
+    anchor = selected_attempt / "anchor"
+    captured_source = selected_attempt / "captured_source"
+    public_view = quarantine_root / "selected.q-1.bin"
+    historical_anchor = historical_attempt / "anchor"
+    anchor.write_bytes(payload)
+    os.link(anchor, captured_source)
+    os.link(anchor, public_view)
+    os.link(anchor, historical_anchor)
+    st = anchor.stat(follow_symlinks=False)
+    content_hash = hashlib.sha256(payload).hexdigest()
+
+    with SessionLocal() as session:
+        session.execute(text("BEGIN IMMEDIATE"))
+        session.add(TaskLock(id=1, locked=True, owner="worker-1", acquired_at=utcnow()))
+        session.add(
+            QuarantineEntry(
+                id=1,
+                original_path=str(data / "selected.bin"),
+                quarantine_path=str(public_view),
+                state="active",
+                tx_phase="active",
+                authoritative_anchor_path=str(anchor),
+                active_attempt_generation=1,
+                device=st.st_dev,
+                inode=st.st_ino,
+                size=st.st_size,
+                mtime_ns=st.st_mtime_ns,
+                content_hash=content_hash,
+            )
+        )
+        session.add(
+            QuarantineEntry(
+                id=2,
+                original_path=str(data / "historical.bin"),
+                quarantine_path=str(quarantine_root / "historical.q-2.bin"),
+                state="conflict",
+                tx_phase="conflict",
+                authoritative_anchor_path=None,
+                active_attempt_generation=1,
+                device=st.st_dev,
+                inode=st.st_ino,
+                size=st.st_size,
+                mtime_ns=st.st_mtime_ns,
+                content_hash=content_hash,
+            )
+        )
+        session.commit()
+
+    with SessionLocal() as session:
+        selected = session.get(QuarantineEntry, 1)
+        historical = session.get(QuarantineEntry, 2)
+        assert selected is not None
+        assert historical is not None
+        frozen_manifest = build_purge_topology_manifest(
+            selected,
+            quarantine_root,
+            owner_lookup=lambda owner_id: historical if owner_id == 2 else None,
+        )
+        assert frozen_manifest["blockers"] == []
+        assert frozen_manifest["historical_conflict_entry_ids"] == [2]
+
+    execute_transactional_purge_capture(
+        SessionLocal,
+        entry_id=1,
+        worker_id="worker-1",
+        frozen_manifest=frozen_manifest,
+        quarantine_root=quarantine_root,
+        allowed_roots=[data],
+    )
+
+    purge_dir = quarantine_root / ".tx" / "entry-1" / "attempt-2" / "purge"
+    linked_slot = purge_dir / "linked-conflict-2-anchor"
+    assert linked_slot.read_bytes() == payload
+    assert not historical_anchor.exists()
+
+    with SessionLocal() as session:
+        selected = session.get(QuarantineEntry, 1)
+        historical = session.get(QuarantineEntry, 2)
+        assert selected is not None
+        assert historical is not None
+        assert selected.state == "purging"
+        assert selected.tx_phase == "purging"
+        assert selected.active_attempt_generation == 2
+        assert historical.state == "conflict"
+        assert historical.tx_phase == "conflict"
+        assert historical.authoritative_anchor_path is None
