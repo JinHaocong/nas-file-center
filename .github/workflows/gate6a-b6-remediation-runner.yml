@@ -1,0 +1,74 @@
+name: Gate6-A B6 Recovery Audit Remediation
+
+on:
+  push:
+    branches:
+      - v0.3.6-gate6a-quarantine-bulk-operations
+    paths:
+      - .github/workflows/gate6a-b6-remediation-runner.yml
+
+permissions:
+  contents: write
+
+jobs:
+  remediate-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TARGET_BRANCH: v0.3.6-gate6a-quarantine-bulk-operations
+      CONFIG_DIR: /tmp/nfc-config
+      DATA_MOUNT: /tmp/nfc-data
+      ALLOWED_ROOTS: /tmp/nfc-data
+      QUARANTINE_ROOT: /tmp/nfc-data/.nas-file-center-trash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          fetch-depth: 0
+          token: ${{ github.token }}
+
+      - name: Apply minimal B6 recovery audit fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' 'ZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCgpwYXRoID0gUGF0aCgiYXBwL3Rhc2tzL2hhbmRsZXJzLnB5IikKdGV4dCA9IHBhdGgucmVhZF90ZXh0KCkKb2xkID0gJycnICAgICAgICBpZiBub3QgYWxyZWFkeV9hdWRpdGVkOgogICAgICAgICAgICBzZXNzaW9uLmFkZChBdWRpdEV2ZW50KAogICAgICAgICAgICAgICAgb3BlcmF0aW9uPSJxdWFyYW50aW5lX3B1cmdlIiwKICAgICAgICAgICAgICAgIHBhdGg9aXRlbS5zb3VyY2VfcGF0aCwKICAgICAgICAgICAgICAgIHJlc3VsdD0iY29tcGxldGVkIiwKICAgICAgICAgICAgICAgIGRldGFpbHNfanNvbj1qc29uLmR1bXBzKHsKICAgICAgICAgICAgICAgICAgICAicGxhbl9pZCI6IHBsYW5faWQsCiAgICAgICAgICAgICAgICAgICAgIml0ZW1faWQiOiBpdGVtLmlkLAogICAgICAgICAgICAgICAgICAgICJ0YXNrX2lkIjogam9iX2lkLAogICAgICAgICAgICAgICAgICAgICJxdWFyYW50aW5lX2VudHJ5X2lkIjogcV9lbnRyeV9pZCwKICAgICAgICAgICAgICAgICAgICAicHJldmlld19kaWdlc3QiOiBwcmV2aWV3X2RpZ2VzdCwKICAgICAgICAgICAgICAgICAgICAicmVhc29uIjogcmVhc29uLAogICAgICAgICAgICAgICAgICAgICJ0YXJnZXQiOiBpdGVtLnRhcmdldF9wYXRoLAogICAgICAgICAgICAgICAgICAgICJyZXN1bHRfcGF0aCI6IE5vbmUsCiAgICAgICAgICAgICAgICB9LCBlbnN1cmVfYXNjaWk9RmFsc2UpLAogICAgICAgICAgICApKQogICAgICAgIHJldHVybgonJycKbmV3ID0gJycnICAgICAgICBpZiBub3QgYWxyZWFkeV9hdWRpdGVkOgogICAgICAgICAgICBzZXNzaW9uLmFkZChBdWRpdEV2ZW50KAogICAgICAgICAgICAgICAgb3BlcmF0aW9uPSJxdWFyYW50aW5lX3B1cmdlIiwKICAgICAgICAgICAgICAgIHBhdGg9aXRlbS5zb3VyY2VfcGF0aCwKICAgICAgICAgICAgICAgIHJlc3VsdD0iY29tcGxldGVkIiwKICAgICAgICAgICAgICAgIGRldGFpbHNfanNvbj1qc29uLmR1bXBzKHsKICAgICAgICAgICAgICAgICAgICAicGxhbl9pZCI6IHBsYW5faWQsCiAgICAgICAgICAgICAgICAgICAgIml0ZW1faWQiOiBpdGVtLmlkLAogICAgICAgICAgICAgICAgICAgICJ0YXNrX2lkIjogam9iX2lkLAogICAgICAgICAgICAgICAgICAgICJxdWFyYW50aW5lX2VudHJ5X2lkIjogcV9lbnRyeV9pZCwKICAgICAgICAgICAgICAgICAgICAicHJldmlld19kaWdlc3QiOiBwcmV2aWV3X2RpZ2VzdCwKICAgICAgICAgICAgICAgICAgICAicmVhc29uIjogcmVhc29uLAogICAgICAgICAgICAgICAgICAgICJ0YXJnZXQiOiBpdGVtLnRhcmdldF9wYXRoLAogICAgICAgICAgICAgICAgICAgICJyZXN1bHRfcGF0aCI6IE5vbmUsCiAgICAgICAgICAgICAgICB9LCBlbnN1cmVfYXNjaWk9RmFsc2UpLAogICAgICAgICAgICApKQoKICAgICAgICBoaXN0b3JpY2FsX2F1ZGl0X2tleXM6IHNldFt0dXBsZVtzdHIsIGludCB8IE5vbmVdXSA9IHNldCgpCiAgICAgICAgZm9yIGV2ZW50IGluIGV4aXN0aW5nX2F1ZGl0czoKICAgICAgICAgICAgdHJ5OgogICAgICAgICAgICAgICAgZGV0YWlscyA9IGpzb24ubG9hZHMoZXZlbnQuZGV0YWlsc19qc29uIG9yICJ7fSIpCiAgICAgICAgICAgIGV4Y2VwdCBFeGNlcHRpb246CiAgICAgICAgICAgICAgICBjb250aW51ZQogICAgICAgICAgICBpZiAoCiAgICAgICAgICAgICAgICBpc2luc3RhbmNlKGRldGFpbHMsIGRpY3QpCiAgICAgICAgICAgICAgICBhbmQgZGV0YWlscy5nZXQoInBsYW5faWQiKSA9PSBwbGFuX2lkCiAgICAgICAgICAgICAgICBhbmQgZGV0YWlscy5nZXQoIml0ZW1faWQiKSA9PSBpdGVtLmlkCiAgICAgICAgICAgICAgICBhbmQgZGV0YWlscy5nZXQoInF1YXJhbnRpbmVfZW50cnlfaWQiKSA9PSBxX2VudHJ5X2lkCiAgICAgICAgICAgICAgICBhbmQgZGV0YWlscy5nZXQoInByZXZpZXdfZGlnZXN0IikgPT0gcHJldmlld19kaWdlc3QKICAgICAgICAgICAgICAgIGFuZCBkZXRhaWxzLmdldCgicm9sZSIpID09ICJoaXN0b3JpY2FsX2NvbmZsaWN0X2NhbmRpZGF0ZSIKICAgICAgICAgICAgICAgIGFuZCBldmVudC5wYXRoCiAgICAgICAgICAgICk6CiAgICAgICAgICAgICAgICBoaXN0b3JpY2FsX2F1ZGl0X2tleXMuYWRkKAogICAgICAgICAgICAgICAgICAgIChzdHIoZXZlbnQucGF0aCksIGRldGFpbHMuZ2V0KCJsaW5rZWRfcXVhcmFudGluZV9lbnRyeV9pZCIpKQogICAgICAgICAgICAgICAgKQoKICAgICAgICB0b3BvbG9neSA9IG1ldGEuZ2V0KCJwdXJnZV90b3BvbG9neV9tYW5pZmVzdCIpCiAgICAgICAgaWYgaXNpbnN0YW5jZSh0b3BvbG9neSwgZGljdCk6CiAgICAgICAgICAgIGZvciBhbGlhcyBpbiB0b3BvbG9neS5nZXQoImFsaWFzZXMiKSBvciBbXToKICAgICAgICAgICAgICAgIGlmIG5vdCBpc2luc3RhbmNlKGFsaWFzLCBkaWN0KSBvciBhbGlhcy5nZXQoInJvbGUiKSAhPSAiaGlzdG9yaWNhbF9jb25mbGljdF9jYW5kaWRhdGUiOgogICAgICAgICAgICAgICAgICAgIGNvbnRpbnVlCiAgICAgICAgICAgICAgICBsaW5rZWRfcGF0aCA9IGFsaWFzLmdldCgicGF0aCIpCiAgICAgICAgICAgICAgICBpZiBub3QgbGlua2VkX3BhdGg6CiAgICAgICAgICAgICAgICAgICAgY29udGludWUKICAgICAgICAgICAgICAgIGxpbmtlZF9vd25lciA9IGFsaWFzLmdldCgib3duZXJfZW50cnlfaWQiKQogICAgICAgICAgICAgICAgYXVkaXRfa2V5ID0gKHN0cihsaW5rZWRfcGF0aCksIGxpbmtlZF9vd25lcikKICAgICAgICAgICAgICAgIGlmIGF1ZGl0X2tleSBpbiBoaXN0b3JpY2FsX2F1ZGl0X2tleXM6CiAgICAgICAgICAgICAgICAgICAgY29udGludWUKICAgICAgICAgICAgICAgIHNlc3Npb24uYWRkKEF1ZGl0RXZlbnQoCiAgICAgICAgICAgICAgICAgICAgb3BlcmF0aW9uPSJxdWFyYW50aW5lX3B1cmdlIiwKICAgICAgICAgICAgICAgICAgICBwYXRoPXN0cihsaW5rZWRfcGF0aCksCiAgICAgICAgICAgICAgICAgICAgcmVzdWx0PSJjb21wbGV0ZWQiLAogICAgICAgICAgICAgICAgICAgIGRldGFpbHNfanNvbj1qc29uLmR1bXBzKHsKICAgICAgICAgICAgICAgICAgICAgICAgInBsYW5faWQiOiBwbGFuX2lkLAogICAgICAgICAgICAgICAgICAgICAgICAiaXRlbV9pZCI6IGl0ZW0uaWQsCiAgICAgICAgICAgICAgICAgICAgICAgICJ0YXNrX2lkIjogam9iX2lkLAogICAgICAgICAgICAgICAgICAgICAgICAicXVhcmFudGluZV9lbnRyeV9pZCI6IHFfZW50cnlfaWQsCiAgICAgICAgICAgICAgICAgICAgICAgICJsaW5rZWRfcXVhcmFudGluZV9lbnRyeV9pZCI6IGxpbmtlZF9vd25lciwKICAgICAgICAgICAgICAgICAgICAgICAgInByZXZpZXdfZGlnZXN0IjogcHJldmlld19kaWdlc3QsCiAgICAgICAgICAgICAgICAgICAgICAgICJyb2xlIjogImhpc3RvcmljYWxfY29uZmxpY3RfY2FuZGlkYXRlIiwKICAgICAgICAgICAgICAgICAgICAgICAgInJlYXNvbiI6ICJyZXRpcmVkIGxpbmtlZCBoaXN0b3JpY2FsIGNvbmZsaWN0IGFsaWFzIiwKICAgICAgICAgICAgICAgICAgICB9LCBlbnN1cmVfYXNjaWk9RmFsc2UpLAogICAgICAgICAgICAgICAgKSkKICAgICAgICAgICAgICAgIGhpc3RvcmljYWxfYXVkaXRfa2V5cy5hZGQoYXVkaXRfa2V5KQogICAgICAgIHJldHVybgonJycKaWYgdGV4dC5jb3VudChvbGQpICE9IDE6CiAgICByYWlzZSBTeXN0ZW1FeGl0KGYiZXhwZWN0ZWQgZXhhY3RseSBvbmUgcmVjb25jaWxpYXRpb24gYXVkaXQgYW5jaG9yLCBmb3VuZCB7dGV4dC5jb3VudChvbGQpfSIpCnBhdGgud3JpdGVfdGV4dCh0ZXh0LnJlcGxhY2Uob2xkLCBuZXcsIDEpKQo=' | base64 -d > /tmp/apply_b6.py
+          python -m py_compile /tmp/apply_b6.py
+          python /tmp/apply_b6.py
+          python -m py_compile app/tasks/handlers.py
+          git diff --check -- app/tasks/handlers.py
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - run: python -m pip install -e '.[test]'
+
+      - name: Verify B6 RED-to-GREEN and preserved safety suites
+        env:
+          PYTHONPATH: .
+        run: >-
+          pytest
+          tests/test_quarantine_api.py
+          tests/test_quarantine_core.py
+          tests/test_quarantine_hardening.py
+          tests/test_gate5g_g7_task11_cleanup_gate.py
+          tests/test_gate5g_g7_task8_restore.py
+          tests/test_gate5g_g7_hotfix2_worker_restore_authority.py
+          tests/test_gate5g_g7_hotfix3_restore_takeover_generation.py
+          tests/test_v0351_zfuse_ctime_stability.py
+          tests/test_gate6a_bulk_*.py
+          tests/test_gate6a_transactional_purge*.py
+          tests/test_gate6a_purge_recovery*.py
+          -q
+
+      - name: Commit only after GREEN
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add app/tasks/handlers.py
+          git rm .github/workflows/gate6a-b6-remediation-runner.yml
+          git config user.name "Gate6-A remediation bot"
+          git config user.email "actions@users.noreply.github.com"
+          git commit -m "fix(gate6a): reconcile historical purge audits after crash"
+          git push origin "HEAD:$TARGET_BRANCH"
