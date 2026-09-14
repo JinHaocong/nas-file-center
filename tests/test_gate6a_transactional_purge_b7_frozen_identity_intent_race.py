@@ -4,11 +4,10 @@ import hashlib
 import os
 from pathlib import Path
 
+import pytest
 from sqlalchemy import text
 
-from app.batch.plans import OperationItem
 from app.db import create_engine_and_session, init_db
-from app.execution.executor import execute_item
 from app.models import QuarantineEntry, TaskLock, utcnow
 
 
@@ -74,6 +73,7 @@ def test_frozen_selected_identity_is_rechecked_inside_irreversible_intent_transa
             entry,
             quarantine_root,
             owner_lookup=lambda _: None,
+            include_payload_identity=True,
         )
         assert frozen_manifest["blockers"] == []
 
@@ -102,31 +102,17 @@ def test_frozen_selected_identity_is_rechecked_inside_irreversible_intent_transa
 
     monkeypatch.setattr(purge, "_begin_transactional_purge_intent", begin_after_selected_identity_drift)
 
-    result = execute_item(
-        OperationItem(
-            sequence=1,
-            operation="quarantine_purge",
-            source=public_view,
-            expected_device=frozen_st.st_dev,
-            expected_inode=frozen_st.st_ino,
-            expected_size=frozen_st.st_size,
-            expected_mtime_ns=frozen_st.st_mtime_ns,
-            expected_hash=frozen_hash,
-        ),
-        allowed_roots=[data],
-        allow_mutation=True,
-        allow_delete=True,
-        quarantine_root=quarantine_root,
-        plan_id="gate6a-b7-intent-race",
-        session_factory=SessionLocal,
-        worker_id="worker-1",
-        quarantine_entry_id=1,
-        purge_manifest=frozen_manifest,
-    )
+    with pytest.raises(Exception, match="PURGE_FROZEN_IDENTITY_CHANGED"):
+        purge.execute_transactional_purge_capture(
+            SessionLocal,
+            entry_id=1,
+            worker_id="worker-1",
+            frozen_manifest=frozen_manifest,
+            quarantine_root=quarantine_root,
+            allowed_roots=[data],
+        )
 
     assert injected is True
-    assert result.state == "failed"
-    assert "PURGE_FROZEN_IDENTITY_CHANGED" in result.reason
     assert frozen_control.read_bytes() == frozen_payload
     assert replacement_control.read_bytes() == replacement_payload
     assert anchor.read_bytes() == replacement_payload

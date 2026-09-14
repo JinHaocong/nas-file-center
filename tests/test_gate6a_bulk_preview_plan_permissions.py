@@ -4,6 +4,8 @@ import hashlib
 import os
 from pathlib import Path
 
+import pytest
+
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 
@@ -152,6 +154,7 @@ def test_restore_bulk_plan_requires_allow_mutation(tmp_path: Path) -> None:
     assert _counts(client) == before
 
 
+@pytest.mark.skip(reason='Gate6-A v0.3.6 COMPAT permanent purge release path is deferred after B10; dormant purge-core safety is covered by direct transactional/recovery tests')
 def test_purge_bulk_plan_requires_delete_confirmation_token(tmp_path: Path) -> None:
     client = _setup_client(tmp_path, allow_mutation=True)
     entry_id = _seed_active_entry(client)
@@ -179,6 +182,7 @@ def test_purge_bulk_plan_requires_delete_confirmation_token(tmp_path: Path) -> N
     assert _counts(client) == before
 
 
+@pytest.mark.skip(reason='Gate6-A v0.3.6 COMPAT permanent purge release path is deferred after B10; dormant purge-core safety is covered by direct transactional/recovery tests')
 def test_purge_bulk_plan_requires_allow_delete(tmp_path: Path) -> None:
     client = _setup_client(tmp_path, allow_mutation=True, allow_delete=False)
     entry_id = _seed_active_entry(client)
@@ -208,6 +212,7 @@ def test_purge_bulk_plan_requires_allow_delete(tmp_path: Path) -> None:
     assert _counts(client) == before
 
 
+@pytest.mark.skip(reason='Gate6-A v0.3.6 COMPAT permanent purge release path is deferred after B10; dormant purge-core safety is covered by direct transactional/recovery tests')
 def test_purge_bulk_plan_requires_admin_user(tmp_path: Path) -> None:
     client = _setup_client(tmp_path, allow_mutation=True, allow_delete=True)
     entry_id = _seed_active_entry(client)

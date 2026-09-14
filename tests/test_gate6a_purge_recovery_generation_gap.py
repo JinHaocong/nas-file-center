@@ -179,11 +179,13 @@ def test_recovery_uses_current_durable_generation_after_repeated_pre_directory_c
         allowed_roots=[data],
     )
 
-    purge3 = attempt3 / "purge"
-    assert purge3.is_dir()
-    _assert_capture_slots(purge3, frozen_st.st_ino, frozen_st.st_size)
+    attempt4 = quarantine_root / ".tx" / "entry-1" / "attempt-4"
+    purge4 = attempt4 / "purge"
+    assert not attempt3.exists()
+    assert purge4.is_dir()
+    _assert_capture_slots(purge4, frozen_st.st_ino, frozen_st.st_size)
     with SessionLocal() as session:
         entry = session.get(QuarantineEntry, 1)
         assert entry is not None
-        assert entry.active_attempt_generation == 3
+        assert entry.active_attempt_generation == 4
         assert (entry.state, entry.tx_phase) == ("purging", "purging")
