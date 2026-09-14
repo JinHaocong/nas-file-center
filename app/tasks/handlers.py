@@ -842,7 +842,7 @@ def _reconcile_executing_item(
                     (str(event.path), details.get("linked_quarantine_entry_id"))
                 )
 
-        topology = meta.get("purge_topology_manifest")
+        topology = meta.get("frozen_purge_topology_manifest")
         if isinstance(topology, dict):
             for alias in topology.get("aliases") or []:
                 if not isinstance(alias, dict) or alias.get("role") != "historical_conflict_candidate":
@@ -1600,7 +1600,7 @@ class BatchPlanExecuteHandler(TaskHandler):
             it for it in all_items
             if it.state not in ("completed", "skipped", "failed")
             and it.id not in reconciled_failed_item_ids
-            and it.operation != "restore"
+            and it.operation not in {"restore", "quarantine_purge"}
         ]
         worker_stale_items = []
         for it in unexecuted_items:
@@ -1667,7 +1667,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                     continue
 
             # Boundary Freshness Check
-            if item_meta.operation != "restore":
+            if item_meta.operation not in {"restore", "quarantine_purge"}:
                 is_fresh, stale_detail = _verify_plan_item_and_keep_freshness(item_meta, settings)
                 if not is_fresh:
                     stale_reason = f"Item stale: {stale_detail.reason if stale_detail else 'stale'}"
@@ -1911,10 +1911,10 @@ class BatchPlanExecuteHandler(TaskHandler):
                 elif row.operation == "quarantine_purge":
                     meta_dict = json.loads(row.metadata_json or "{}")
                     qid = meta_dict.get("quarantine_entry_id")
-                    manifest = meta_dict.get("purge_topology_manifest")
+                    manifest = meta_dict.get("frozen_purge_topology_manifest")
                     if not qid or not isinstance(manifest, dict):
                         row.state = "failed"
-                        row.reason = "missing quarantine_entry_id or purge_topology_manifest for quarantine_purge"
+                        row.reason = "missing quarantine_entry_id or frozen_purge_topology_manifest for quarantine_purge"
                         session.commit()
                         completed_or_skipped += 1
                         continue
@@ -2033,7 +2033,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                             session.commit()
                         completed_or_skipped += 1
                         continue
-            else:
+            elif item_meta.operation != "quarantine_purge":
                 final_fresh, final_stale_detail = _verify_plan_item_and_keep_freshness(item_meta, settings)
                 if not final_fresh:
                     stale_reason = f"Item stale: {final_stale_detail.reason if final_stale_detail else 'stale'}"
@@ -2286,7 +2286,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                     ))
 
                 if result.state == "completed" and row.operation == "quarantine_purge":
-                    topology = metadata.get("purge_topology_manifest")
+                    topology = metadata.get("frozen_purge_topology_manifest")
                     if isinstance(topology, dict):
                         for alias in topology.get("aliases") or []:
                             if not isinstance(alias, dict) or alias.get("role") != "historical_conflict_candidate":
