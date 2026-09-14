@@ -485,6 +485,7 @@ def _reconcile_preparing(
 def _resolve_gate6a_restore_target(session: Session, entry_id: int) -> tuple[Path | None, str | None]:
     """Recover durable Gate6-A frozen restore authority for an interrupted executing item."""
     matches: list[BatchPlanItem] = []
+    unresolved_gate6a_items: list[tuple[int, str]] = []
     executing_restores = list(session.scalars(
         select(BatchPlanItem).where(
             BatchPlanItem.operation == "restore",
@@ -492,24 +493,44 @@ def _resolve_gate6a_restore_target(session: Session, entry_id: int) -> tuple[Pat
         )
     ))
     for item in executing_restores:
+        plan = session.get(BatchPlan, item.plan_id)
+        if plan is None or plan.kind != "quarantine-bulk-restore":
+            continue
+
         try:
             meta = json.loads(item.metadata_json or "{}")
         except Exception:
+            unresolved_gate6a_items.append((int(item.id), "malformed metadata_json"))
             continue
-        undo_meta = meta.get("undo") if isinstance(meta, dict) else None
+        if not isinstance(meta, dict):
+            unresolved_gate6a_items.append((int(item.id), "metadata_json is not an object"))
+            continue
+
+        undo_meta = meta.get("undo")
         if not isinstance(undo_meta, dict):
             undo_meta = {}
-        raw_qid = meta.get("quarantine_entry_id") if isinstance(meta, dict) else None
+        raw_qid = meta.get("quarantine_entry_id")
         if raw_qid is None:
             raw_qid = undo_meta.get("quarantine_entry_id")
-        try:
-            if int(raw_qid) != entry_id:
-                continue
-        except (TypeError, ValueError):
+        if raw_qid is None:
+            unresolved_gate6a_items.append((int(item.id), "missing quarantine_entry_id"))
             continue
-        plan = session.get(BatchPlan, item.plan_id)
-        if plan is not None and plan.kind == "quarantine-bulk-restore":
+        try:
+            bound_qid = int(raw_qid)
+        except (TypeError, ValueError):
+            unresolved_gate6a_items.append((int(item.id), "invalid quarantine_entry_id"))
+            continue
+        if bound_qid == entry_id:
             matches.append(item)
+
+    if unresolved_gate6a_items:
+        details = ", ".join(
+            f"item #{item_id}: {reason}" for item_id, reason in unresolved_gate6a_items
+        )
+        return None, (
+            "Gate6-A restoring recovery lost frozen restore authority because an executing "
+            f"bulk-restore binding is unreadable or invalid ({details})"
+        )
 
     if not matches:
         return None, None
