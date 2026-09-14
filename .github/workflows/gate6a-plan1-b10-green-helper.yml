@@ -1,0 +1,74 @@
+name: Gate6-A Plan1 B10 Green Helper
+
+on:
+  push:
+    branches:
+      - v0.3.6-gate6a-plan1-b10-green-helper
+
+permissions:
+  contents: write
+
+jobs:
+  validate-and-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CONFIG_DIR: /tmp/nfc-config
+      DATA_MOUNT: /tmp/nfc-data
+      ALLOWED_ROOTS: /tmp/nfc-data
+      QUARANTINE_ROOT: /tmp/nfc-data/.nas-file-center-trash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install test dependencies
+        run: python -m pip install -e '.[test]'
+
+      - name: Apply exact B10 patch
+        run: python ops/gate6a-plan1/apply_b10.py
+
+      - name: Compile and diff gate
+        run: |
+          python -m py_compile app/api/quarantine_bulk.py app/execution/executor.py
+          git diff --check
+
+      - name: Run B10 release-withdrawal RED-to-GREEN tests
+        env:
+          PYTHONPATH: .
+        run: pytest tests/test_gate6a_bulk_plan1_scope_reduction.py -v
+
+      - name: Run preserved Gate5-G regressions
+        env:
+          PYTHONPATH: .
+        run: >-
+          pytest
+          tests/test_quarantine_api.py
+          tests/test_quarantine_core.py
+          tests/test_quarantine_hardening.py
+          tests/test_gate5g_g7_task11_cleanup_gate.py
+          tests/test_gate5g_g7_task8_restore.py
+          tests/test_gate5g_g7_hotfix2_worker_restore_authority.py
+          tests/test_gate5g_g7_hotfix3_restore_takeover_generation.py
+          tests/test_v0351_zfuse_ctime_stability.py
+          -q
+
+      - name: Run Bulk Restore regressions
+        env:
+          PYTHONPATH: .
+        run: pytest tests/test_gate6a_bulk_restore.py tests/test_gate6a_bulk_restore_worker_handler.py -q
+
+      - name: Commit only after GREEN
+        run: |
+          git config user.name "gate6a-remediation-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git rm ops/gate6a-plan1/apply_b10.py .github/workflows/gate6a-plan1-b10-green-helper.yml
+          git add app/api/quarantine_bulk.py app/execution/executor.py tests/test_gate6a_bulk_plan1_scope_reduction.py
+          git diff --cached --check
+          git commit -m "fix(gate6a): defer unsafe bulk permanent purge"
+          git push origin HEAD:v0.3.6-gate6a-plan1-b10-green-helper
