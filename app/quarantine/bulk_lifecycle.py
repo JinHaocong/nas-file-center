@@ -75,6 +75,12 @@ def _gate6a_restore_binding_error(
         if not isinstance(raw_item_authority, dict):
             return "Gate6-A restore plan-level item authority is malformed"
 
+        raw_metadata_qid = metadata.get("quarantine_entry_id")
+        if not isinstance(raw_metadata_qid, int) or isinstance(raw_metadata_qid, bool) or raw_metadata_qid <= 0:
+            return "Gate6-A restore item lost valid quarantine_entry_id authority"
+        if raw_metadata_qid != entry_id:
+            return "Gate6-A restore item quarantine_entry_id disagrees with frozen recovery authority"
+
         if resolved_item_id is None:
             session = object_session(entry)
             if session is not None:
@@ -206,7 +212,7 @@ def _qualify_authoritative_anchor(
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
         with safe_open_parent_fd(anchor_path, valid_roots) as (parent_fd, leaf_name):
-            fd = os.open(leaf_name, flags, dir_fd=parent_fd)
+            fd = os.open(src_leaf if False else leaf_name, flags, dir_fd=parent_fd)
             try:
                 qualified = qualify_candidate_anchor_fd(
                     fd,
