@@ -176,7 +176,14 @@ def test_restart_reconstructs_historical_conflict_audit_after_terminal_purge_cra
         item = session.query(BatchPlanItem).filter_by(plan_id=plan_id).one()
         item.state = "executing"
         metadata = json.loads(item.metadata_json or "{}")
-        frozen_manifest = metadata["purge_topology_manifest"]
+        frozen_manifest = dict(metadata["frozen_purge_topology_manifest"])
+        frozen_manifest["frozen_payload_identity"] = {
+            "device": item.expected_device,
+            "inode": item.expected_inode,
+            "size": item.expected_size,
+            "mtime_ns": item.expected_mtime_ns,
+            "content_hash": item.expected_hash,
+        }
         metadata["execution"] = {
             "phase": "intent",
             "task_id": job_id,

@@ -60,6 +60,7 @@ def _frozen_manifest(purge, SessionLocal, quarantine_root: Path):
             entry,
             quarantine_root,
             owner_lookup=lambda _: None,
+            include_payload_identity=True,
         )
         assert manifest["blockers"] == []
         return manifest

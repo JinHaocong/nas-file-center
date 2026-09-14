@@ -60,6 +60,7 @@ def test_post_capture_qualification_preserves_foreign_replacement(tmp_path: Path
             entry,
             quarantine_root,
             owner_lookup=lambda _: None,
+            include_payload_identity=True,
         )
         assert frozen_manifest["blockers"] == []
 

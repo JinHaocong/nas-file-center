@@ -30,6 +30,11 @@ def _insert_entry(SessionLocal, *, state: str, tx_phase: str) -> None:
                 state=state,
                 tx_phase=tx_phase,
                 active_attempt_generation=1,
+                device=11,
+                inode=12,
+                size=13,
+                mtime_ns=14,
+                content_hash="a" * 64,
             )
         )
         session.commit()
@@ -75,7 +80,21 @@ def test_purge_intent_commits_purging_before_capture_phase(tmp_path: Path) -> No
     SessionLocal = _session_factory(tmp_path)
     _insert_entry(SessionLocal, state="active", tx_phase="active")
 
-    _begin_transactional_purge_intent(SessionLocal, 1, "worker-1")
+    frozen_manifest = {
+        "frozen_payload_identity": {
+            "device": 11,
+            "inode": 12,
+            "size": 13,
+            "mtime_ns": 14,
+            "content_hash": "a" * 64,
+        }
+    }
+    _begin_transactional_purge_intent(
+        SessionLocal,
+        1,
+        "worker-1",
+        frozen_manifest=frozen_manifest,
+    )
 
     # A separate session observes the state immediately, proving the short write
     # transaction was committed before any later filesystem capture phase begins.
@@ -167,6 +186,7 @@ def test_transactional_purge_capture_moves_normal_alias_set_into_private_slots(t
             entry,
             quarantine_root,
             owner_lookup=lambda _: None,
+            include_payload_identity=True,
         )
         assert frozen_manifest["blockers"] == []
 
@@ -256,6 +276,7 @@ def test_transactional_purge_capture_preserves_occupied_private_slot(tmp_path: P
             entry,
             quarantine_root,
             owner_lookup=lambda _: None,
+            include_payload_identity=True,
         )
         assert frozen_manifest["blockers"] == []
 
@@ -376,6 +397,7 @@ def test_transactional_purge_capture_retires_historical_conflict_candidate_into_
             selected,
             quarantine_root,
             owner_lookup=lambda owner_id: historical if owner_id == 2 else None,
+            include_payload_identity=True,
         )
         assert frozen_manifest["blockers"] == []
         assert frozen_manifest["historical_conflict_entry_ids"] == [2]

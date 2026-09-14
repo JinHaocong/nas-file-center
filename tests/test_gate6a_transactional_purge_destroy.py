@@ -59,6 +59,7 @@ def test_qualified_capture_is_zeroized_before_terminal_purged_commit(tmp_path: P
             entry,
             quarantine_root,
             owner_lookup=lambda _: None,
+            include_payload_identity=True,
         )
         assert frozen_manifest["blockers"] == []
 
@@ -159,6 +160,7 @@ def test_destroy_preserves_foreign_replacement_after_qualification(
             entry,
             quarantine_root,
             owner_lookup=lambda _: None,
+            include_payload_identity=True,
         )
         assert frozen_manifest["blockers"] == []
 

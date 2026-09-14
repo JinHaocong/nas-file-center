@@ -27,14 +27,23 @@ def build_purge_topology_manifest(
     quarantine_root: Path | str,
     *,
     owner_lookup: Callable[[int], Any | None] | None = None,
+    include_payload_identity: bool = False,
 ) -> dict[str, Any]:
     """Build the read-only Gate6-A transactional purge topology manifest."""
-    return _build_preview_purge_topology_manifest(
+    manifest = _build_preview_purge_topology_manifest(
         entry,
         quarantine_root,
         owner_lookup=owner_lookup,
     )
-
+    if include_payload_identity:
+        manifest["frozen_payload_identity"] = {
+            "device": entry.device,
+            "inode": entry.inode,
+            "size": entry.size,
+            "mtime_ns": entry.mtime_ns,
+            "content_hash": str(entry.content_hash or "").lower(),
+        }
+    return manifest
 
 def validate_purge_topology_manifest(
     frozen_manifest: dict[str, Any],
@@ -48,6 +57,27 @@ def validate_purge_topology_manifest(
         return "PURGE_TOPOLOGY_CHANGED"
     return None
 
+
+def _require_frozen_payload_identity(
+    frozen_manifest: dict[str, Any],
+) -> tuple[int, int, int, int, str]:
+    raw = frozen_manifest.get("frozen_payload_identity")
+    if not isinstance(raw, dict):
+        raise StateConflictError("PURGE_FROZEN_IDENTITY_MISSING: frozen payload identity is required")
+    required = ("device", "inode", "size", "mtime_ns", "content_hash")
+    if any(raw.get(key) is None for key in required):
+        raise StateConflictError("PURGE_FROZEN_IDENTITY_MISSING: frozen payload identity is incomplete")
+    try:
+        device = int(raw["device"])
+        inode = int(raw["inode"])
+        size = int(raw["size"])
+        mtime_ns = int(raw["mtime_ns"])
+    except (TypeError, ValueError) as exc:
+        raise StateConflictError("PURGE_FROZEN_IDENTITY_MISSING: frozen payload identity is invalid") from exc
+    content_hash = str(raw.get("content_hash") or "").lower()
+    if not content_hash:
+        raise StateConflictError("PURGE_FROZEN_IDENTITY_MISSING: frozen payload hash is required")
+    return device, inode, size, mtime_ns, content_hash
 
 def classify_cross_entry_alias_owner(
     selected_entry: Any,
@@ -184,7 +214,23 @@ def _begin_transactional_purge_intent(
                 f"Quarantine entry #{entry_id} must still be active before purge "
                 f"(state={state}, tx_phase={tx_phase})"
             )
-        if frozen_manifest is not None and quarantine_root is not None:
+        if frozen_manifest is None:
+            session.rollback()
+            raise StateConflictError("PURGE_FROZEN_IDENTITY_MISSING: frozen purge authority is required")
+        expected_identity = _require_frozen_payload_identity(frozen_manifest)
+        current_identity = (
+            int(entry.device or 0),
+            int(entry.inode or 0),
+            int(entry.size or 0),
+            int(entry.mtime_ns or 0),
+            str(entry.content_hash or "").lower(),
+        )
+        if current_identity != expected_identity:
+            session.rollback()
+            raise StateConflictError(
+                f"PURGE_FROZEN_IDENTITY_CHANGED: quarantine entry #{entry_id} identity changed after Freeze"
+            )
+        if quarantine_root is not None:
             ownership_reason = _intent_time_purge_ownership_reason(
                 session,
                 entry,
@@ -200,7 +246,6 @@ def _begin_transactional_purge_intent(
         entry.state = "purging"
         entry.tx_phase = "purging"
         session.commit()
-
 
 def _allocate_transactional_purge_attempt(
     session_factory: Any,
@@ -710,13 +755,11 @@ def qualify_transactional_purge_capture(
                 f"(state={entry.state}, tx_phase={entry.tx_phase})"
             )
         generation = int(entry.active_attempt_generation or 0)
-        expected_device = entry.device
-        expected_inode = entry.inode
-        expected_size = entry.size
-        expected_mtime_ns = entry.mtime_ns
-        expected_hash = (entry.content_hash or "").lower()
 
-    if generation <= 0 or not expected_hash:
+    expected_device, expected_inode, expected_size, expected_mtime_ns, expected_hash = (
+        _require_frozen_payload_identity(frozen_manifest)
+    )
+    if generation <= 0:
         raise StateConflictError("PURGE_QUALIFICATION_FAILED: missing frozen payload identity")
 
     q_root = Path(quarantine_root)
@@ -866,13 +909,11 @@ def destroy_transactional_purge_capture(
                 f"(state={entry.state}, tx_phase={entry.tx_phase})"
             )
         generation = int(entry.active_attempt_generation or 0)
-        expected_device = entry.device
-        expected_inode = entry.inode
-        expected_size = entry.size
-        expected_mtime_ns = entry.mtime_ns
-        expected_hash = (entry.content_hash or "").lower()
 
-    if generation <= 0 or not expected_hash:
+    expected_device, expected_inode, expected_size, expected_mtime_ns, expected_hash = (
+        _require_frozen_payload_identity(frozen_manifest)
+    )
+    if generation <= 0:
         raise StateConflictError("PURGE_DESTRUCTION_FAILED: missing frozen payload identity")
 
     q_root = Path(quarantine_root)
@@ -983,6 +1024,24 @@ def destroy_transactional_purge_capture(
             raise StateConflictError(
                 f"Quarantine entry #{entry_id} purge generation changed "
                 f"(expected={generation}, current={current_generation})"
+            )
+        current_identity = (
+            int(entry.device or 0),
+            int(entry.inode or 0),
+            int(entry.size or 0),
+            int(entry.mtime_ns or 0),
+            str(entry.content_hash or "").lower(),
+        )
+        if current_identity != (
+            expected_device,
+            expected_inode,
+            expected_size,
+            expected_mtime_ns,
+            expected_hash,
+        ):
+            session.rollback()
+            raise StateConflictError(
+                f"PURGE_FROZEN_IDENTITY_CHANGED: quarantine entry #{entry_id} identity changed before terminal purge commit"
             )
         entry.state = "purged"
         entry.tx_phase = "purged"
