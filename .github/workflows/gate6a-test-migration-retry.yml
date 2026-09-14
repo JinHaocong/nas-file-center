@@ -37,6 +37,7 @@ jobs:
           sed -i -e "s/^''''$/'''/" -e "s/^'',$/''',/" -e "s/^'')$/''')/" /tmp/migrate_tests.py
           python -m py_compile /tmp/migrate_tests.py
           python /tmp/migrate_tests.py
+          sed -i 's/_assert_veroized_purge_closure/_assert_zeroized_purge_closure/g' tests/test_gate6a_bulk_purge_worker_handler.py
           python -m py_compile tests/test_gate6a_transactional_purge_capture.py tests/test_gate6a_transactional_purge_capture_fencing.py tests/test_gate6a_transactional_purge_executor.py tests/test_gate6a_bulk_purge_worker_handler.py tests/test_gate6a_bulk_purge_history_audit.py tests/test_gate6a_bulk_purge_partial.py tests/test_gate6a_purge_recovery_restart.py
           git diff --check -- tests
 
