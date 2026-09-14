@@ -53,6 +53,18 @@ def persist_bulk_draft(
                 raise RuntimeError(f"preview changed for quarantine entry {entry_id}")
             entries[entry_id] = entry
 
+        if is_restore:
+            plan_metadata["restore_skip_authority"] = {
+                str(entry_id): {
+                    "source_path": str(entries[entry_id].quarantine_path),
+                    "target_path": str(preview_items[entry_id]["target_path"]),
+                    "conflict_policy": conflict_policy,
+                    "preview_digest": preview_digest,
+                }
+                for entry_id in entry_ids
+                if preview_items[entry_id].get("skip_preexisting_target") is True
+            }
+
         plan = BatchPlan(
             name=plan_kind,
             kind=plan_kind,

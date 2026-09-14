@@ -1851,7 +1851,12 @@ class BatchPlanExecuteHandler(TaskHandler):
         ) -> None:
             if not is_gate6a_bulk_restore or row.operation != "restore":
                 return
-            audit_meta = json.loads(row.metadata_json or "{}")
+            try:
+                audit_meta = json.loads(row.metadata_json or "{}")
+            except Exception:
+                audit_meta = {}
+            if not isinstance(audit_meta, dict):
+                audit_meta = {}
             undo_meta = audit_meta.get("undo")
             if not isinstance(undo_meta, dict):
                 undo_meta = {}
@@ -1872,7 +1877,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                     "reason": reason,
                     "target": row.target_path,
                     "result_path": str(result_path) if result_path else None,
-                    "conflict_policy": audit_meta.get("conflict_policy"),
+                    "conflict_policy": audit_meta.get("conflict_policy") or plan_meta.get("conflict_policy"),
                 }, ensure_ascii=False),
             ))
 
@@ -2052,7 +2057,29 @@ class BatchPlanExecuteHandler(TaskHandler):
                 if row.operation == "touch":
                     target_touch_mtime_ns = row.expected_mtime_ns if (row.expected_mtime_ns and row.expected_mtime_ns > 0) else int(now.timestamp() * 1e9)
 
-                item_metadata = json.loads(row.metadata_json or "{}")
+                if is_gate6a_bulk_restore and row.operation == "restore":
+                    try:
+                        item_metadata = json.loads(row.metadata_json or "{}")
+                    except Exception:
+                        item_metadata = None
+                    if not isinstance(item_metadata, dict):
+                        source_qentry = session.scalar(
+                            select(QuarantineEntry).where(QuarantineEntry.quarantine_path == row.source_path)
+                        )
+                        row.state = "failed"
+                        row.reason = "Gate6-A bulk restore metadata_json is malformed or not an object"
+                        _add_gate6a_bulk_restore_audit(
+                            session,
+                            row,
+                            result="failed",
+                            reason=row.reason,
+                            quarantine_entry_id=(int(source_qentry.id) if source_qentry is not None else None),
+                        )
+                        session.commit()
+                        completed_or_skipped += 1
+                        continue
+                else:
+                    item_metadata = json.loads(row.metadata_json or "{}")
                 item_metadata["execution"] = {
                     "phase": "intent",
                     "task_id": job.id,
@@ -2095,8 +2122,28 @@ class BatchPlanExecuteHandler(TaskHandler):
                     row.target_path = str(q_target)
                     target_path_str = str(q_target)
                 elif row.operation == "restore":
-                    meta_dict = json.loads(row.metadata_json or "{}")
-                    qid = meta_dict.get("quarantine_entry_id") or meta_dict.get("undo", {}).get("quarantine_entry_id")
+                    meta_dict = item_metadata
+                    if is_gate6a_bulk_restore:
+                        raw_qid = meta_dict.get("quarantine_entry_id")
+                        if not isinstance(raw_qid, int) or isinstance(raw_qid, bool) or raw_qid <= 0:
+                            source_qentry = session.scalar(
+                                select(QuarantineEntry).where(QuarantineEntry.quarantine_path == row.source_path)
+                            )
+                            row.state = "failed"
+                            row.reason = "Gate6-A bulk restore has missing or invalid quarantine_entry_id authority"
+                            _add_gate6a_bulk_restore_audit(
+                                session,
+                                row,
+                                result="failed",
+                                reason=row.reason,
+                                quarantine_entry_id=(int(source_qentry.id) if source_qentry is not None else None),
+                            )
+                            session.commit()
+                            completed_or_skipped += 1
+                            continue
+                        qid = raw_qid
+                    else:
+                        qid = meta_dict.get("quarantine_entry_id") or meta_dict.get("undo", {}).get("quarantine_entry_id")
                     if not qid:
                         row.state = "failed"
                         row.reason = "missing quarantine_entry_id for restore operation"
@@ -2116,6 +2163,31 @@ class BatchPlanExecuteHandler(TaskHandler):
                         session.commit()
                         completed_or_skipped += 1
                         continue
+
+                    if is_gate6a_bulk_restore:
+                        from app.quarantine.bulk_lifecycle import _gate6a_restore_binding_error
+
+                        binding_error = _gate6a_restore_binding_error(
+                            plan_metadata=plan_meta,
+                            metadata=meta_dict,
+                            entry_id=int(qid),
+                            source_path=row.source_path,
+                            target_path=row.target_path,
+                            entry=q_entry,
+                        )
+                        if binding_error is not None:
+                            row.state = "failed"
+                            row.reason = binding_error
+                            _add_gate6a_bulk_restore_audit(
+                                session,
+                                row,
+                                result="failed",
+                                reason=row.reason,
+                                quarantine_entry_id=q_entry.id,
+                            )
+                            session.commit()
+                            completed_or_skipped += 1
+                            continue
 
                     is_tx = (q_entry.tx_phase not in (None, "legacy")) or (q_entry.authoritative_anchor_path is not None)
                     is_tx_restore = is_tx

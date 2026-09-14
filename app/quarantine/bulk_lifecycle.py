@@ -20,6 +20,69 @@ def _entry_id(metadata_json: str | None) -> int:
     return entry_id
 
 
+def _restore_metadata(metadata_json: str | None) -> dict[str, Any]:
+    try:
+        metadata = json.loads(metadata_json or "{}")
+    except Exception as exc:
+        raise StateConflictError("Gate6-A restore item metadata_json is malformed") from exc
+    if not isinstance(metadata, dict):
+        raise StateConflictError("Gate6-A restore item metadata_json is not an object")
+    return metadata
+
+
+def _gate6a_restore_binding_error(
+    *,
+    plan_metadata: dict[str, Any] | None,
+    metadata: dict[str, Any],
+    entry_id: int,
+    source_path: str,
+    target_path: str | None,
+    entry: QuarantineEntry,
+) -> str | None:
+    if str(source_path) != str(entry.quarantine_path):
+        return "Gate6-A restore source_path disagrees with quarantine_entry_id owner"
+
+    plan_meta = plan_metadata if isinstance(plan_metadata, dict) else {}
+    plan_policy = plan_meta.get("conflict_policy")
+    if plan_policy in {"skip", "rename"} and metadata.get("conflict_policy") != plan_policy:
+        return "Gate6-A restore conflict_policy disagrees with plan authority"
+
+    plan_preview_digest = plan_meta.get("preview_digest")
+    if isinstance(plan_preview_digest, str) and metadata.get("preview_digest") != plan_preview_digest:
+        return "Gate6-A restore preview_digest disagrees with plan authority"
+
+    raw_authority = plan_meta.get("restore_skip_authority", {})
+    if raw_authority is None:
+        raw_authority = {}
+    if not isinstance(raw_authority, dict):
+        return "Gate6-A restore plan-level skip authority is malformed"
+
+    authority = raw_authority.get(str(entry_id))
+    declared_skip = metadata.get("skip_preexisting_target") is True
+    authorized_skip = authority is not None
+    if declared_skip != authorized_skip:
+        return "Gate6-A restore frozen skip authority mismatch"
+    if not declared_skip:
+        return None
+    if not isinstance(authority, dict):
+        return "Gate6-A restore frozen skip authority record is malformed"
+
+    expected_authority = {
+        "source_path": str(source_path),
+        "target_path": str(target_path or ""),
+        "conflict_policy": metadata.get("conflict_policy"),
+        "preview_digest": metadata.get("preview_digest"),
+    }
+    for key, expected in expected_authority.items():
+        if authority.get(key) != expected:
+            return f"Gate6-A restore frozen skip authority disagrees on {key}"
+    if metadata.get("conflict_policy") != "skip":
+        return "Gate6-A restore frozen skip authority requires conflict_policy=skip"
+    if str(target_path or "") != str(entry.original_path):
+        return "Gate6-A restore frozen skip target disagrees with quarantine original_path"
+    return None
+
+
 def _qualify_authoritative_anchor(
     service,
     *,
@@ -82,6 +145,7 @@ def freeze_bulk_plan_item(
     *,
     plan_kind: str,
     item: dict[str, Any],
+    plan_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Return plan-item Freeze updates for Gate6-A kinds, or None when not owned here."""
     if plan_kind == "quarantine-bulk-purge" and item.get("operation") == "quarantine_purge":
@@ -152,6 +216,7 @@ def freeze_bulk_plan_item(
     if plan_kind != "quarantine-bulk-restore" or item.get("operation") != "restore":
         return None
 
+    metadata = _restore_metadata(item.get("metadata_json"))
     entry_id = _entry_id(item.get("metadata_json"))
 
     with service.SessionLocal() as session:
@@ -162,6 +227,16 @@ def freeze_bulk_plan_item(
             raise StateConflictError(
                 f"Quarantine entry #{entry_id} is no longer active at Freeze (state={entry.state})"
             )
+        binding_error = _gate6a_restore_binding_error(
+            plan_metadata=plan_metadata,
+            metadata=metadata,
+            entry_id=entry_id,
+            source_path=str(item.get("source_path") or ""),
+            target_path=item.get("target_path"),
+            entry=entry,
+        )
+        if binding_error is not None:
+            raise StateConflictError(binding_error)
         if not entry.authoritative_anchor_path:
             raise StateConflictError(f"Quarantine entry #{entry_id} lacks an authoritative anchor at Freeze")
         if not entry.content_hash:
@@ -189,7 +264,13 @@ def freeze_bulk_plan_item(
     return _frozen_identity_updates(frozen_stat, expected_hash)
 
 
-def validate_bulk_plan_item(service, *, plan_kind: str, item: Any) -> dict[str, Any] | None:
+def validate_bulk_plan_item(
+    service,
+    *,
+    plan_kind: str,
+    item: Any,
+    plan_metadata: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     """Validate one frozen Gate6-A item without mutating quarantine state or payload."""
     if plan_kind == "quarantine-bulk-purge" and item.operation == "quarantine_purge":
         metadata = json.loads(item.metadata_json or "{}")
@@ -261,7 +342,16 @@ def validate_bulk_plan_item(service, *, plan_kind: str, item: Any) -> dict[str, 
     if plan_kind != "quarantine-bulk-restore" or item.operation != "restore":
         return None
 
-    entry_id = _entry_id(item.metadata_json)
+    try:
+        metadata = _restore_metadata(item.metadata_json)
+        entry_id = _entry_id(item.metadata_json)
+    except StateConflictError as exc:
+        return {
+            "state": "stale",
+            "reason": "restore_frozen_authority_invalid",
+            "actual": {"error": str(exc)},
+        }
+
     with service.SessionLocal() as session:
         entry = session.get(QuarantineEntry, entry_id)
         if entry is None:
@@ -271,6 +361,20 @@ def validate_bulk_plan_item(service, *, plan_kind: str, item: Any) -> dict[str, 
                 "state": "stale",
                 "reason": "quarantine_entry_not_active",
                 "actual": {"state": entry.state, "tx_phase": entry.tx_phase},
+            }
+        binding_error = _gate6a_restore_binding_error(
+            plan_metadata=plan_metadata,
+            metadata=metadata,
+            entry_id=entry_id,
+            source_path=str(item.source_path),
+            target_path=item.target_path,
+            entry=entry,
+        )
+        if binding_error is not None:
+            return {
+                "state": "stale",
+                "reason": f"restore_frozen_authority_invalid: {binding_error}",
+                "actual": {"error": binding_error},
             }
         if not entry.authoritative_anchor_path:
             return {"state": "stale", "reason": "authoritative_anchor_missing", "actual": None}
@@ -298,14 +402,7 @@ def validate_bulk_plan_item(service, *, plan_kind: str, item: Any) -> dict[str, 
     if not item.target_path:
         return {"state": "stale", "reason": "restore_target_missing", "actual": None}
 
-    metadata = json.loads(item.metadata_json or "{}")
     if metadata.get("skip_preexisting_target") is True:
-        if metadata.get("conflict_policy") != "skip":
-            return {
-                "state": "stale",
-                "reason": "restore_frozen_skip_authority_invalid",
-                "actual": {"target_path": str(item.target_path)},
-            }
         return {
             "state": "validated",
             "reason": "bulk restore frozen pre-existing target skip",
