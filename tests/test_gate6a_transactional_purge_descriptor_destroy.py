@@ -66,6 +66,14 @@ def test_descriptor_bound_destroy_preserves_replacement_in_final_path_window(
             owner_lookup=lambda _: None,
         )
         assert frozen_manifest["blockers"] == []
+        frozen_manifest = dict(frozen_manifest)
+        frozen_manifest["frozen_payload_identity"] = {
+            "device": st.st_dev,
+            "inode": st.st_ino,
+            "size": st.st_size,
+            "mtime_ns": st.st_mtime_ns,
+            "content_hash": digest,
+        }
 
     purge.execute_transactional_purge_capture(
         SessionLocal,
