@@ -822,6 +822,54 @@ def _reconcile_executing_item(
                     "result_path": None,
                 }, ensure_ascii=False),
             ))
+
+        historical_audit_keys: set[tuple[str, int | None]] = set()
+        for event in existing_audits:
+            try:
+                details = json.loads(event.details_json or "{}")
+            except Exception:
+                continue
+            if (
+                isinstance(details, dict)
+                and details.get("plan_id") == plan_id
+                and details.get("item_id") == item.id
+                and details.get("quarantine_entry_id") == q_entry_id
+                and details.get("preview_digest") == preview_digest
+                and details.get("role") == "historical_conflict_candidate"
+                and event.path
+            ):
+                historical_audit_keys.add(
+                    (str(event.path), details.get("linked_quarantine_entry_id"))
+                )
+
+        topology = meta.get("purge_topology_manifest")
+        if isinstance(topology, dict):
+            for alias in topology.get("aliases") or []:
+                if not isinstance(alias, dict) or alias.get("role") != "historical_conflict_candidate":
+                    continue
+                linked_path = alias.get("path")
+                if not linked_path:
+                    continue
+                linked_owner = alias.get("owner_entry_id")
+                audit_key = (str(linked_path), linked_owner)
+                if audit_key in historical_audit_keys:
+                    continue
+                session.add(AuditEvent(
+                    operation="quarantine_purge",
+                    path=str(linked_path),
+                    result="completed",
+                    details_json=json.dumps({
+                        "plan_id": plan_id,
+                        "item_id": item.id,
+                        "task_id": job_id,
+                        "quarantine_entry_id": q_entry_id,
+                        "linked_quarantine_entry_id": linked_owner,
+                        "preview_digest": preview_digest,
+                        "role": "historical_conflict_candidate",
+                        "reason": "retired linked historical conflict alias",
+                    }, ensure_ascii=False),
+                ))
+                historical_audit_keys.add(audit_key)
         return
 
     elif item.operation == "restore":
