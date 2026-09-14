@@ -106,7 +106,7 @@ def test_recovery_resumes_when_attempt_dir_exists_but_purge_dir_was_not_created(
         assert entry.active_attempt_generation == 2
 
 
-def test_recovery_allows_generation_delta_greater_than_one_after_repeated_allocation_only_crashes(tmp_path: Path) -> None:
+def test_recovery_reuses_durable_generation_after_repeated_allocation_only_crashes(tmp_path: Path) -> None:
     import app.quarantine.purge as purge
 
     SessionLocal, data, quarantine_root, frozen_manifest = _setup_purging_entry(
@@ -114,7 +114,9 @@ def test_recovery_allows_generation_delta_greater_than_one_after_repeated_alloca
         current_generation=3,
     )
     attempt3 = quarantine_root / ".tx" / "entry-1" / "attempt-3"
+    attempt4 = quarantine_root / ".tx" / "entry-1" / "attempt-4"
     assert not attempt3.exists()
+    assert not attempt4.exists()
 
     purge.execute_transactional_purge_capture(
         SessionLocal,
@@ -128,7 +130,8 @@ def test_recovery_allows_generation_delta_greater_than_one_after_repeated_alloca
     with SessionLocal() as session:
         entry = session.get(QuarantineEntry, 1)
         assert entry is not None
-        assert entry.active_attempt_generation == 4
+        assert entry.active_attempt_generation == 3
         assert entry.state == "purging"
         assert entry.tx_phase == "purging"
-    _assert_capture_slots_exist(quarantine_root / ".tx" / "entry-1" / "attempt-4" / "purge")
+    _assert_capture_slots_exist(attempt3 / "purge")
+    assert not attempt4.exists()
