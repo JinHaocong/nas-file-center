@@ -1673,6 +1673,42 @@ class BatchPlanExecuteHandler(TaskHandler):
                     reconciled_failed_item_ids.add(it.id)
             session.commit()
 
+        def _add_gate6a_bulk_restore_audit(
+            session,
+            row: BatchPlanItem,
+            *,
+            result: str,
+            reason: str | None,
+            quarantine_entry_id: int | None = None,
+            result_path: Path | None = None,
+        ) -> None:
+            if not is_gate6a_bulk_restore or row.operation != "restore":
+                return
+            audit_meta = json.loads(row.metadata_json or "{}")
+            undo_meta = audit_meta.get("undo")
+            if not isinstance(undo_meta, dict):
+                undo_meta = {}
+            qid = (
+                quarantine_entry_id
+                if quarantine_entry_id is not None
+                else audit_meta.get("quarantine_entry_id") or undo_meta.get("quarantine_entry_id")
+            )
+            session.add(AuditEvent(
+                operation="restore",
+                path=row.source_path,
+                result=result,
+                details_json=json.dumps({
+                    "plan_id": plan_id,
+                    "item_id": row.id,
+                    "task_id": job.id,
+                    "quarantine_entry_id": qid,
+                    "reason": reason,
+                    "target": row.target_path,
+                    "result_path": str(result_path) if result_path else None,
+                    "conflict_policy": audit_meta.get("conflict_policy"),
+                }, ensure_ascii=False),
+            ))
+
         # 2. Query all plan items
         with context.SessionLocal() as session:
             all_items = list(session.scalars(
@@ -1897,6 +1933,9 @@ class BatchPlanExecuteHandler(TaskHandler):
                     if not qid:
                         row.state = "failed"
                         row.reason = "missing quarantine_entry_id for restore operation"
+                        _add_gate6a_bulk_restore_audit(
+                            session, row, result="failed", reason=row.reason
+                        )
                         session.commit()
                         completed_or_skipped += 1
                         continue
@@ -1904,6 +1943,9 @@ class BatchPlanExecuteHandler(TaskHandler):
                     if not q_entry:
                         row.state = "failed"
                         row.reason = f"Quarantine entry #{qid} not found"
+                        _add_gate6a_bulk_restore_audit(
+                            session, row, result="failed", reason=row.reason
+                        )
                         session.commit()
                         completed_or_skipped += 1
                         continue
@@ -1920,12 +1962,26 @@ class BatchPlanExecuteHandler(TaskHandler):
                                     f"Quarantine entry #{q_entry.id} is no longer active at Execute "
                                     f"(state={q_entry.state}, tx_phase={q_entry.tx_phase})"
                                 )
+                                _add_gate6a_bulk_restore_audit(
+                                    session,
+                                    row,
+                                    result="failed",
+                                    reason=row.reason,
+                                    quarantine_entry_id=q_entry.id,
+                                )
                                 session.commit()
                                 completed_or_skipped += 1
                                 continue
                             if not row.target_path:
                                 row.state = "failed"
                                 row.reason = "Gate6-A bulk restore is missing frozen target_path"
+                                _add_gate6a_bulk_restore_audit(
+                                    session,
+                                    row,
+                                    result="failed",
+                                    reason=row.reason,
+                                    quarantine_entry_id=q_entry.id,
+                                )
                                 session.commit()
                                 completed_or_skipped += 1
                                 continue
@@ -1955,6 +2011,13 @@ class BatchPlanExecuteHandler(TaskHandler):
                             q_entry.updated_at = now
                             row.state = "failed"
                             row.reason = str(exc)
+                            _add_gate6a_bulk_restore_audit(
+                                session,
+                                row,
+                                result="failed",
+                                reason=row.reason,
+                                quarantine_entry_id=q_entry.id,
+                            )
                             session.commit()
                             completed_or_skipped += 1
                             continue
@@ -1988,6 +2051,8 @@ class BatchPlanExecuteHandler(TaskHandler):
                                     "task_id": job.id,
                                     "quarantine_entry_id": q_entry.id,
                                     "reason": str(exc),
+                                    "target": row.target_path,
+                                    "conflict_policy": meta_dict.get("conflict_policy") if is_gate6a_bulk_restore else None,
                                 }, ensure_ascii=False),
                             ))
                             session.commit()
@@ -2051,7 +2116,13 @@ class BatchPlanExecuteHandler(TaskHandler):
                                 "plan_id": plan_id,
                                 "item_id": item_meta.id,
                                 "task_id": job.id,
+                                "quarantine_entry_id": q_restore_entry_id,
                                 "reason": str(exc),
+                                "target": item_meta.target_path,
+                                "conflict_policy": (
+                                    json.loads(item_meta.metadata_json or "{}").get("conflict_policy")
+                                    if is_gate6a_bulk_restore else None
+                                ),
                             }, ensure_ascii=False),
                         ))
                         session.commit()
@@ -2119,7 +2190,13 @@ class BatchPlanExecuteHandler(TaskHandler):
                                     "plan_id": plan_id,
                                     "item_id": item_meta.id,
                                     "task_id": job.id,
+                                    "quarantine_entry_id": q_restore_entry_id,
                                     "reason": str(exc),
+                                    "target": item_meta.target_path,
+                                    "conflict_policy": (
+                                        json.loads(item_meta.metadata_json or "{}").get("conflict_policy")
+                                        if is_gate6a_bulk_restore else None
+                                    ),
                                 }, ensure_ascii=False),
                             ))
                             session.commit()
@@ -2415,6 +2492,10 @@ class BatchPlanExecuteHandler(TaskHandler):
                         "reason": result.reason,
                         "target": row.target_path,
                         "result_path": str(result.result_path) if result.result_path else None,
+                        "conflict_policy": (
+                            metadata.get("conflict_policy")
+                            if row.operation == "restore" and is_gate6a_bulk_restore else None
+                        ),
                     }, ensure_ascii=False),
                 ))
                 session.commit()
