@@ -981,18 +981,70 @@ def _reconcile_executing_item(
                     allowed_roots=settings.allowed_roots,
                 )
                 session.refresh(q_entry)
+
+            plan = session.get(BatchPlan, plan_id)
+            is_gate6a_bulk_restore = bool(plan and plan.kind == "quarantine-bulk-restore")
+
+            def ensure_restore_reconciliation_audit(*, result: str, reason: str, result_path: Path | None = None) -> None:
+                if not is_gate6a_bulk_restore:
+                    return
+                existing = list(session.scalars(
+                    select(AuditEvent).where(AuditEvent.operation == "restore")
+                ))
+                for event in existing:
+                    try:
+                        details = json.loads(event.details_json or "{}")
+                    except Exception:
+                        continue
+                    if (
+                        isinstance(details, dict)
+                        and details.get("plan_id") == plan_id
+                        and details.get("item_id") == item.id
+                        and details.get("quarantine_entry_id") == q_entry.id
+                    ):
+                        return
+                session.add(AuditEvent(
+                    operation="restore",
+                    path=item.source_path,
+                    result=result,
+                    details_json=json.dumps({
+                        "plan_id": plan_id,
+                        "item_id": item.id,
+                        "task_id": job_id,
+                        "quarantine_entry_id": q_entry.id,
+                        "reason": reason,
+                        "target": item.target_path,
+                        "result_path": str(result_path) if result_path else None,
+                        "conflict_policy": meta.get("conflict_policy"),
+                        "recovery_phase": "transactional_restore_terminal_convergence",
+                    }, ensure_ascii=False),
+                ))
+
             if q_entry.state == "restored":
                 item.state = "completed"
                 item.reason = "reconciled transactional restore after crash"
+                ensure_restore_reconciliation_audit(
+                    result="completed",
+                    reason=item.reason,
+                    result_path=tgt,
+                )
             elif q_entry.state == "conflict":
                 item.state = "failed"
                 item.reason = f"reconciliation conflict after crash: {q_entry.last_error}"
+                ensure_restore_reconciliation_audit(
+                    result="failed",
+                    reason=item.reason,
+                )
             elif q_entry.state == "active":
                 item.state = "planned"
                 item.reason = None
             else:
                 item.state = "failed"
                 item.reason = f"reconciliation unexpected restore state: {q_entry.state}"
+                ensure_restore_reconciliation_audit(
+                    result="failed",
+                    reason=item.reason,
+                )
             return
         if tgt and tgt.exists() and not src.exists():
             st = tgt.stat(follow_symlinks=False)
