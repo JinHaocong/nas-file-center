@@ -747,6 +747,44 @@ def _reconcile_executing_item(
             return
 
         session.refresh(q_entry)
+        preview_digest = meta.get("preview_digest")
+
+        def ensure_purge_reconciliation_audit(*, result: str, recovery_phase: str, reason: str) -> None:
+            existing = list(session.scalars(
+                select(AuditEvent).where(
+                    AuditEvent.operation == "quarantine_purge",
+                    AuditEvent.result == result,
+                )
+            ))
+            for event in existing:
+                try:
+                    details = json.loads(event.details_json or "{}")
+                except Exception:
+                    continue
+                if (
+                    isinstance(details, dict)
+                    and details.get("plan_id") == plan_id
+                    and details.get("item_id") == item.id
+                    and details.get("quarantine_entry_id") == q_entry_id
+                    and details.get("preview_digest") == preview_digest
+                    and details.get("recovery_phase") == recovery_phase
+                ):
+                    return
+            session.add(AuditEvent(
+                operation="quarantine_purge",
+                path=item.source_path,
+                result=result,
+                details_json=json.dumps({
+                    "plan_id": plan_id,
+                    "item_id": item.id,
+                    "task_id": job_id,
+                    "quarantine_entry_id": q_entry_id,
+                    "preview_digest": preview_digest,
+                    "recovery_phase": recovery_phase,
+                    "reason": reason,
+                }, ensure_ascii=False),
+            ))
+
         if q_entry.state == "active" and q_entry.tx_phase == "active":
             recovery_reason = "reconciled transactional purge after crash before irreversible intent"
             existing_recovery_audits = list(session.scalars(
@@ -790,16 +828,28 @@ def _reconcile_executing_item(
             return
 
         if q_entry.state == "purging" and q_entry.tx_phase == "purging":
+            recovery_reason = "reconciled transactional purge after crash in purging state"
+            ensure_purge_reconciliation_audit(
+                result="recovered",
+                recovery_phase="post_intent",
+                reason=recovery_reason,
+            )
             item.state = "planned"
             item.reason = None
             return
 
         if q_entry.state != "purged" or q_entry.tx_phase != "purged":
-            item.state = "failed"
-            item.reason = (
+            failure_reason = (
                 "reconciliation unexpected transactional purge state: "
                 f"state={q_entry.state}, tx_phase={q_entry.tx_phase}"
             )
+            ensure_purge_reconciliation_audit(
+                result="failed",
+                recovery_phase="reconciliation_failed",
+                reason=failure_reason,
+            )
+            item.state = "failed"
+            item.reason = failure_reason
             return
 
         reason = "reconciled transactional purge after crash (purged)"
