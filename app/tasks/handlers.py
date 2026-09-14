@@ -727,6 +727,103 @@ def _reconcile_executing_item(
             item.state = "failed"
             item.reason = "reconciliation conflict after crash"
 
+    elif item.operation == "quarantine_purge":
+        qid = meta.get("quarantine_entry_id")
+        if not qid:
+            item.state = "failed"
+            item.reason = "reconciliation conflict after crash (missing quarantine_entry_id for purge)"
+            return
+        try:
+            q_entry_id = int(qid)
+        except (TypeError, ValueError):
+            item.state = "failed"
+            item.reason = "reconciliation conflict after crash (invalid quarantine_entry_id for purge)"
+            return
+
+        q_entry = session.get(QuarantineEntry, q_entry_id)
+        if q_entry is None:
+            item.state = "failed"
+            item.reason = f"reconciliation conflict after crash (quarantine entry #{q_entry_id} missing)"
+            return
+
+        session.refresh(q_entry)
+        if q_entry.state == "purging" and q_entry.tx_phase == "purging":
+            item.state = "planned"
+            item.reason = None
+            return
+
+        if q_entry.state != "purged" or q_entry.tx_phase != "purged":
+            item.state = "failed"
+            item.reason = (
+                "reconciliation unexpected transactional purge state: "
+                f"state={q_entry.state}, tx_phase={q_entry.tx_phase}"
+            )
+            return
+
+        reason = "reconciled transactional purge after crash (purged)"
+        item.state = "completed"
+        item.reason = reason
+
+        existing_journal = session.scalar(
+            select(OperationJournal).where(OperationJournal.plan_item_id == item.id)
+        )
+        if existing_journal is None:
+            session.add(OperationJournal(
+                operation=item.operation,
+                sequence=item.sequence,
+                plan_id=plan_id,
+                plan_item_id=item.id,
+                task_id=job_id,
+                user_id=user_id,
+                before_json=json.dumps({"path": item.source_path}, ensure_ascii=False),
+                after_json=json.dumps({"path": None}, ensure_ascii=False),
+                metadata_before_json=json.dumps(metadata_before or source_stat, ensure_ascii=False),
+                metadata_after_json=json.dumps({}, ensure_ascii=False),
+                created_at=now,
+            ))
+
+        preview_digest = meta.get("preview_digest")
+        existing_audits = list(session.scalars(
+            select(AuditEvent).where(
+                AuditEvent.operation == "quarantine_purge",
+                AuditEvent.result == "completed",
+            )
+        ))
+        already_audited = False
+        for event in existing_audits:
+            try:
+                details = json.loads(event.details_json or "{}")
+            except Exception:
+                continue
+            if (
+                isinstance(details, dict)
+                and details.get("plan_id") == plan_id
+                and details.get("item_id") == item.id
+                and details.get("quarantine_entry_id") == q_entry_id
+                and details.get("preview_digest") == preview_digest
+                and details.get("role") != "historical_conflict_candidate"
+            ):
+                already_audited = True
+                break
+
+        if not already_audited:
+            session.add(AuditEvent(
+                operation="quarantine_purge",
+                path=item.source_path,
+                result="completed",
+                details_json=json.dumps({
+                    "plan_id": plan_id,
+                    "item_id": item.id,
+                    "task_id": job_id,
+                    "quarantine_entry_id": q_entry_id,
+                    "preview_digest": preview_digest,
+                    "reason": reason,
+                    "target": item.target_path,
+                    "result_path": None,
+                }, ensure_ascii=False),
+            ))
+        return
+
     elif item.operation == "restore":
         tgt = Path(item.target_path) if item.target_path else None
         qid = meta.get("quarantine_entry_id") or meta.get("undo", {}).get("quarantine_entry_id")
