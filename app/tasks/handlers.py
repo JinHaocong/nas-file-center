@@ -1646,7 +1646,7 @@ class BatchPlanExecuteHandler(TaskHandler):
         # Precompute reconciliation evidence outside DB write lock.
         precomputed_evidence: dict[int, ReconcileEvidence] = {}
         tx_entries_to_reconcile: list[int] = []
-        gate6a_authority_loss: dict[int, tuple[int | None, str]] = {}
+        gate6a_authority_loss: dict[int, tuple[int | None, str | None, str | None, str]] = {}
         with context.SessionLocal() as session:
             recovery_plan = session.get(BatchPlan, plan_id)
             is_gate6a_restore_recovery = bool(
@@ -1677,51 +1677,78 @@ class BatchPlanExecuteHandler(TaskHandler):
                     qe = None
                     binding_error = None
                     if is_gate6a_restore_recovery:
-                        source_qe = session.scalar(
-                            select(QuarantineEntry).where(QuarantineEntry.quarantine_path == it.source_path)
-                        )
+                        from app.quarantine.bulk_lifecycle import _gate6a_restore_binding_error
+
+                        try:
+                            recovery_plan_meta = json.loads(recovery_plan.metadata_json or "{}")
+                        except Exception:
+                            recovery_plan_meta = {}
+                        if not isinstance(recovery_plan_meta, dict):
+                            recovery_plan_meta = {}
+                        authority_map = recovery_plan_meta.get("restore_item_authority")
+                        authority = authority_map.get(str(it.id)) if isinstance(authority_map, dict) else None
+
+                        frozen_qid = None
+                        frozen_source = None
+                        frozen_target = None
+                        binding_error = None
+                        if not isinstance(authority, dict):
+                            binding_error = "missing frozen restore_item_authority"
+                        else:
+                            raw_frozen_qid = authority.get("quarantine_entry_id")
+                            if not isinstance(raw_frozen_qid, int) or isinstance(raw_frozen_qid, bool) or raw_frozen_qid <= 0:
+                                binding_error = "invalid frozen quarantine_entry_id authority"
+                            else:
+                                frozen_qid = int(raw_frozen_qid)
+                            frozen_source = authority.get("source_path") if isinstance(authority.get("source_path"), str) else None
+                            frozen_target = authority.get("target_path") if isinstance(authority.get("target_path"), str) else None
+
+                        frozen_qe = session.get(QuarantineEntry, frozen_qid) if frozen_qid is not None else None
+                        if binding_error is None and frozen_qe is None:
+                            binding_error = f"frozen quarantine entry #{frozen_qid} is missing"
+
                         try:
                             meta = json.loads(it.metadata_json or "{}")
                         except Exception:
                             meta = None
-                            binding_error = "malformed metadata_json"
+                            if binding_error is None:
+                                binding_error = "malformed metadata_json"
                         if meta is not None and not isinstance(meta, dict):
                             meta = None
-                            binding_error = "metadata_json is not an object"
-                        raw_qid = None
-                        if isinstance(meta, dict):
-                            undo_meta = meta.get("undo")
-                            if not isinstance(undo_meta, dict):
-                                undo_meta = {}
-                            raw_qid = meta.get("quarantine_entry_id")
-                            if raw_qid is None:
-                                raw_qid = undo_meta.get("quarantine_entry_id")
-                            if raw_qid is None:
-                                binding_error = "missing quarantine_entry_id"
-                        bound_qid = None
-                        if raw_qid is not None:
-                            try:
-                                bound_qid = int(raw_qid)
-                            except (TypeError, ValueError):
-                                binding_error = "invalid quarantine_entry_id"
-                        if bound_qid is not None:
-                            qe = session.get(QuarantineEntry, bound_qid)
-                            if qe is None:
-                                binding_error = f"quarantine entry #{bound_qid} is missing"
-                            elif qe.quarantine_path != it.source_path:
-                                binding_error = "quarantine_entry_id disagrees with frozen source_path owner"
-                        if binding_error:
-                            affected_qe = source_qe
+                            if binding_error is None:
+                                binding_error = "metadata_json is not an object"
+
+                        if binding_error is None and isinstance(meta, dict) and frozen_qe is not None:
+                            binding_error = _gate6a_restore_binding_error(
+                                plan_metadata=recovery_plan_meta,
+                                metadata=meta,
+                                entry_id=int(frozen_qid),
+                                source_path=it.source_path,
+                                target_path=it.target_path,
+                                entry=frozen_qe,
+                                item_id=int(it.id),
+                                frozen_expected={
+                                    "device": it.expected_device,
+                                    "inode": it.expected_inode,
+                                    "size": it.expected_size,
+                                    "mtime_ns": it.expected_mtime_ns,
+                                    "content_hash": it.expected_hash,
+                                },
+                            )
+
+                        if binding_error is not None:
                             gate6a_authority_loss[int(it.id)] = (
-                                int(affected_qe.id) if affected_qe is not None else None,
+                                frozen_qid,
+                                frozen_source,
+                                frozen_target,
                                 f"Gate6-A restoring recovery lost frozen restore authority: {binding_error}",
                             )
-                            if affected_qe and (
-                                affected_qe.tx_phase is not None
-                                or affected_qe.authoritative_anchor_path is not None
-                            ):
-                                tx_entries_to_reconcile.append(int(affected_qe.id))
+                            # Never select a transactional recovery target from mutable qid/source.
+                            # The DB-only authority-loss convergence below marks the frozen owner
+                            # conflict and emits one terminal failed audit without filesystem mutation.
                             continue
+
+                        qe = frozen_qe
                     else:
                         meta = json.loads(it.metadata_json or "{}")
                         qid = meta.get("quarantine_entry_id") or meta.get("undo", {}).get("quarantine_entry_id")
@@ -1772,7 +1799,7 @@ class BatchPlanExecuteHandler(TaskHandler):
             for it in executing_items:
                 authority_loss = gate6a_authority_loss.get(int(it.id))
                 if is_gate6a_bulk_restore and it.operation == "restore" and authority_loss is not None:
-                    qentry_id, fallback_reason = authority_loss
+                    qentry_id, frozen_source, frozen_target, fallback_reason = authority_loss
                     qentry = session.get(QuarantineEntry, qentry_id) if qentry_id is not None else None
                     if qentry is not None and qentry.state not in ("conflict", "restored"):
                         qentry.state = "conflict"
@@ -1785,7 +1812,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                         reason = "reconciled transactional restore after crash with damaged item metadata"
                         it.state = "completed"
                         it.reason = reason
-                        result_path = it.target_path
+                        result_path = frozen_target
                     else:
                         result = "failed"
                         reason = (
@@ -1814,7 +1841,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                     if not already_audited:
                         session.add(AuditEvent(
                             operation="restore",
-                            path=it.source_path,
+                            path=frozen_source or it.source_path,
                             result=result,
                             details_json=json.dumps({
                                 "plan_id": plan_id,
@@ -1822,7 +1849,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                                 "task_id": job.id,
                                 "quarantine_entry_id": qentry_id,
                                 "reason": reason,
-                                "target": it.target_path,
+                                "target": frozen_target,
                                 "result_path": result_path,
                                 "conflict_policy": plan_meta.get("conflict_policy"),
                                 "recovery_phase": "gate6a_restore_authority_loss",
