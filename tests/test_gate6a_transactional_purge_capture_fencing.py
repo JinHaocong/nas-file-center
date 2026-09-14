@@ -30,6 +30,7 @@ def test_transactional_purge_capture_fences_each_link_without_open_write_transac
     os.link(anchor, captured_source)
     os.link(anchor, public_view)
     st = anchor.stat(follow_symlinks=False)
+    digest = hashlib.sha256(payload).hexdigest()
 
     with SessionLocal() as session:
         session.execute(text("BEGIN IMMEDIATE"))
@@ -47,7 +48,7 @@ def test_transactional_purge_capture_fences_each_link_without_open_write_transac
                 inode=st.st_ino,
                 size=st.st_size,
                 mtime_ns=st.st_mtime_ns,
-                content_hash=hashlib.sha256(payload).hexdigest(),
+                content_hash=digest,
             )
         )
         session.commit()
@@ -61,6 +62,14 @@ def test_transactional_purge_capture_fences_each_link_without_open_write_transac
             owner_lookup=lambda _: None,
         )
         assert frozen_manifest["blockers"] == []
+        frozen_manifest = dict(frozen_manifest)
+        frozen_manifest["frozen_payload_identity"] = {
+            "device": st.st_dev,
+            "inode": st.st_ino,
+            "size": st.st_size,
+            "mtime_ns": st.st_mtime_ns,
+            "content_hash": digest,
+        }
 
     original_renew = purge.renew_and_assert_worker_lease
     original_link = os.link
