@@ -1,5 +1,5 @@
 name: Gate6-A B7 Helper Verify
-# trigger after exact-indentation patch-script fix
+# trigger after helper test-environment parity fix
 
 on:
   push:
@@ -16,6 +16,12 @@ jobs:
   verify-and-commit:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      CONFIG_DIR: /tmp/nfc-config
+      DATA_MOUNT: /tmp/nfc-data
+      ALLOWED_ROOTS: /tmp/nfc-data
+      QUARANTINE_ROOT: /tmp/nfc-data/.nas-file-center-trash
+      PYTHONPATH: .
     steps:
       - uses: actions/checkout@v4
         with:
