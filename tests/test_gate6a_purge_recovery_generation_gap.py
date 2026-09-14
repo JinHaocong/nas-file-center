@@ -141,7 +141,7 @@ def test_recovery_resumes_attempt_directory_created_before_purge_subdir(
 def test_recovery_uses_current_durable_generation_after_repeated_pre_directory_crashes(
     tmp_path: Path,
 ) -> None:
-    """Recovery must use the durable current generation even when it is greater than frozen+1."""
+    """Recovery must recreate the durable current generation, never advance it."""
     import app.quarantine.purge as purge
 
     SessionLocal, data, quarantine_root, frozen_st = _setup_entry(tmp_path)
@@ -155,9 +155,10 @@ def test_recovery_uses_current_durable_generation_after_repeated_pre_directory_c
         quarantine_root,
     )
 
-    # Model two legal allocation-before-mkdir crashes from older recovery behavior:
+    # Model repeated legal allocation-before-mkdir crashes from older recovery behavior:
     # generation 2 was allocated and its empty attempt directory exists; generation 3
-    # was then durably allocated but its attempt directory was never created.
+    # was then durably allocated but its attempt directory was never created. Recovery
+    # must honor durable generation 3 rather than allocating generation 4.
     attempt2 = quarantine_root / ".tx" / "entry-1" / "attempt-2"
     attempt2.mkdir(mode=0o700)
     with SessionLocal() as session:
@@ -168,7 +169,9 @@ def test_recovery_uses_current_durable_generation_after_repeated_pre_directory_c
         session.commit()
 
     attempt3 = quarantine_root / ".tx" / "entry-1" / "attempt-3"
+    attempt4 = quarantine_root / ".tx" / "entry-1" / "attempt-4"
     assert not attempt3.exists()
+    assert not attempt4.exists()
 
     purge.execute_transactional_purge_capture(
         SessionLocal,
@@ -179,13 +182,12 @@ def test_recovery_uses_current_durable_generation_after_repeated_pre_directory_c
         allowed_roots=[data],
     )
 
-    attempt4 = quarantine_root / ".tx" / "entry-1" / "attempt-4"
-    purge4 = attempt4 / "purge"
-    assert not attempt3.exists()
-    assert purge4.is_dir()
-    _assert_capture_slots(purge4, frozen_st.st_ino, frozen_st.st_size)
+    purge3 = attempt3 / "purge"
+    assert purge3.is_dir()
+    assert not attempt4.exists()
+    _assert_capture_slots(purge3, frozen_st.st_ino, frozen_st.st_size)
     with SessionLocal() as session:
         entry = session.get(QuarantineEntry, 1)
         assert entry is not None
-        assert entry.active_attempt_generation == 4
+        assert entry.active_attempt_generation == 3
         assert (entry.state, entry.tx_phase) == ("purging", "purging")
