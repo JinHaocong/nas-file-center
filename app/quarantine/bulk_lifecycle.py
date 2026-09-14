@@ -212,7 +212,7 @@ def _qualify_authoritative_anchor(
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
         with safe_open_parent_fd(anchor_path, valid_roots) as (parent_fd, leaf_name):
-            fd = os.open(src_leaf if False else leaf_name, flags, dir_fd=parent_fd)
+            fd = os.open(leaf_name, flags, dir_fd=parent_fd)
             try:
                 qualified = qualify_candidate_anchor_fd(
                     fd,
