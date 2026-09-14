@@ -23,9 +23,11 @@ jobs:
           set -euo pipefail
           PAYLOAD="$(grep "base64 -d > /tmp/migrate_tests.py" .github/workflows/gate6a-test-migration-runner.yml | sed -E "s/.*echo '([^']+)'.*/\1/")"
           printf '%s' "$PAYLOAD" | base64 -d > /tmp/migrate_tests.py
-          echo '--- lines 210-240 ---'
-          nl -ba /tmp/migrate_tests.py | sed -n '210,240p'
-          echo '--- lines 490-530 ---'
-          nl -ba /tmp/migrate_tests.py | sed -n '490,530p'
+          for RANGE in 190,210 245,340 365,405 445,485 490,530; do
+            START="${RANGE%,*}"
+            END="${RANGE#*,}"
+            echo "--- lines $START-$END ---"
+            nl -ba /tmp/migrate_tests.py | sed -n "${START},${END}p"
+          done
           echo '--- suspicious quote-only lines ---'
           grep -nE "^'{2,5}[),]?$" /tmp/migrate_tests.py || true
