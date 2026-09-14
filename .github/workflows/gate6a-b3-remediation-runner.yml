@@ -1,4 +1,4 @@
-name: Gate6-A B4 Remediation Runner Registered
+name: Gate6-A B4 Remediation Runner
 
 on:
   push:
@@ -33,111 +33,13 @@ jobs:
           set -euo pipefail
           python - <<'PY'
           from pathlib import Path
-
+          import base64
           p = Path('app/tasks/handlers.py')
           s = p.read_text()
           marker = '    elif item.operation == "restore":\n'
           if s.count(marker) != 1:
               raise SystemExit(f'expected one restore reconcile branch, found {s.count(marker)}')
-
-          block = r'''    elif item.operation == "quarantine_purge":
-        qid = meta.get("quarantine_entry_id")
-        if not qid:
-            item.state = "failed"
-            item.reason = "reconciliation conflict after crash (missing quarantine_entry_id for purge)"
-            return
-        try:
-            q_entry_id = int(qid)
-        except (TypeError, ValueError):
-            item.state = "failed"
-            item.reason = "reconciliation conflict after crash (invalid quarantine_entry_id for purge)"
-            return
-
-        q_entry = session.get(QuarantineEntry, q_entry_id)
-        if q_entry is None:
-            item.state = "failed"
-            item.reason = f"reconciliation conflict after crash (quarantine entry #{q_entry_id} missing)"
-            return
-
-        session.refresh(q_entry)
-        if q_entry.state == "purging" and q_entry.tx_phase == "purging":
-            item.state = "planned"
-            item.reason = None
-            return
-
-        if q_entry.state != "purged" or q_entry.tx_phase != "purged":
-            item.state = "failed"
-            item.reason = (
-                "reconciliation unexpected transactional purge state: "
-                f"state={q_entry.state}, tx_phase={q_entry.tx_phase}"
-            )
-            return
-
-        reason = "reconciled transactional purge after crash (purged)"
-        item.state = "completed"
-        item.reason = reason
-
-        existing_journal = session.scalar(
-            select(OperationJournal).where(OperationJournal.plan_item_id == item.id)
-        )
-        if existing_journal is None:
-            session.add(OperationJournal(
-                operation=item.operation,
-                sequence=item.sequence,
-                plan_id=plan_id,
-                plan_item_id=item.id,
-                task_id=job_id,
-                user_id=user_id,
-                before_json=json.dumps({"path": item.source_path}, ensure_ascii=False),
-                after_json=json.dumps({"path": None}, ensure_ascii=False),
-                metadata_before_json=json.dumps(metadata_before or source_stat, ensure_ascii=False),
-                metadata_after_json=json.dumps({}, ensure_ascii=False),
-                created_at=now,
-            ))
-
-        preview_digest = meta.get("preview_digest")
-        existing_audits = list(session.scalars(
-            select(AuditEvent).where(
-                AuditEvent.operation == "quarantine_purge",
-                AuditEvent.result == "completed",
-            )
-        ))
-        already_audited = False
-        for event in existing_audits:
-            try:
-                details = json.loads(event.details_json or "{}")
-            except Exception:
-                continue
-            if (
-                isinstance(details, dict)
-                and details.get("plan_id") == plan_id
-                and details.get("item_id") == item.id
-                and details.get("quarantine_entry_id") == q_entry_id
-                and details.get("preview_digest") == preview_digest
-                and details.get("role") != "historical_conflict_candidate"
-            ):
-                already_audited = True
-                break
-
-        if not already_audited:
-            session.add(AuditEvent(
-                operation="quarantine_purge",
-                path=item.source_path,
-                result="completed",
-                details_json=json.dumps({
-                    "plan_id": plan_id,
-                    "item_id": item.id,
-                    "task_id": job_id,
-                    "quarantine_entry_id": q_entry_id,
-                    "preview_digest": preview_digest,
-                    "reason": reason,
-                    "target": item.target_path,
-                    "result_path": None,
-                }, ensure_ascii=False),
-            ))
-        return
-
-'''
+          block = base64.b64decode('ICAgIGVsaWYgaXRlbS5vcGVyYXRpb24gPT0gInF1YXJhbnRpbmVfcHVyZ2UiOgogICAgICAgIHFpZCA9IG1ldGEuZ2V0KCJxdWFyYW50aW5lX2VudHJ5X2lkIikKICAgICAgICBpZiBub3QgcWlkOgogICAgICAgICAgICBpdGVtLnN0YXRlID0gImZhaWxlZCIKICAgICAgICAgICAgaXRlbS5yZWFzb24gPSAicmVjb25jaWxpYXRpb24gY29uZmxpY3QgYWZ0ZXIgY3Jhc2ggKG1pc3NpbmcgcXVhcmFudGluZV9lbnRyeV9pZCBmb3IgcHVyZ2UpIgogICAgICAgICAgICByZXR1cm4KICAgICAgICB0cnk6CiAgICAgICAgICAgIHFfZW50cnlfaWQgPSBpbnQocWlkKQogICAgICAgIGV4Y2VwdCAoVHlwZUVycm9yLCBWYWx1ZUVycm9yKToKICAgICAgICAgICAgaXRlbS5zdGF0ZSA9ICJmYWlsZWQiCiAgICAgICAgICAgIGl0ZW0ucmVhc29uID0gInJlY29uY2lsaWF0aW9uIGNvbmZsaWN0IGFmdGVyIGNyYXNoIChpbnZhbGlkIHF1YXJhbnRpbmVfZW50cnlfaWQgZm9yIHB1cmdlKSIKICAgICAgICAgICAgcmV0dXJuCgogICAgICAgIHFfZW50cnkgPSBzZXNzaW9uLmdldChRdWFyYW50aW5lRW50cnksIHFfZW50cnlfaWQpCiAgICAgICAgaWYgcV9lbnRyeSBpcyBOb25lOgogICAgICAgICAgICBpdGVtLnN0YXRlID0gImZhaWxlZCIKICAgICAgICAgICAgaXRlbS5yZWFzb24gPSBmInJlY29uY2lsaWF0aW9uIGNvbmZsaWN0IGFmdGVyIGNyYXNoIChxdWFyYW50aW5lIGVudHJ5ICN7cV9lbnRyeV9pZH0gbWlzc2luZykiCiAgICAgICAgICAgIHJldHVybgoKICAgICAgICBzZXNzaW9uLnJlZnJlc2gocV9lbnRyeSkKICAgICAgICBpZiBxX2VudHJ5LnN0YXRlID09ICJwdXJnaW5nIiBhbmQgcV9lbnRyeS50eF9waGFzZSA9PSAicHVyZ2luZyI6CiAgICAgICAgICAgIGl0ZW0uc3RhdGUgPSAicGxhbm5lZCIKICAgICAgICAgICAgaXRlbS5yZWFzb24gPSBOb25lCiAgICAgICAgICAgIHJldHVybgoKICAgICAgICBpZiBxX2VudHJ5LnN0YXRlICE9ICJwdXJnZWQiIG9yIHFfZW50cnkudHhfcGhhc2UgIT0gInB1cmdlZCI6CiAgICAgICAgICAgIGl0ZW0uc3RhdGUgPSAiZmFpbGVkIgogICAgICAgICAgICBpdGVtLnJlYXNvbiA9ICgKICAgICAgICAgICAgICAgICJyZWNvbmNpbGlhdGlvbiB1bmV4cGVjdGVkIHRyYW5zYWN0aW9uYWwgcHVyZ2Ugc3RhdGU6ICIKICAgICAgICAgICAgICAgIGYic3RhdGU9e3FfZW50cnkuc3RhdGV9LCB0eF9waGFzZT17cV9lbnRyeS50eF9waGFzZX0iCiAgICAgICAgICAgICkKICAgICAgICAgICAgcmV0dXJuCgogICAgICAgIHJlYXNvbiA9ICJyZWNvbmNpbGVkIHRyYW5zYWN0aW9uYWwgcHVyZ2UgYWZ0ZXIgY3Jhc2ggKHB1cmdlZCkiCiAgICAgICAgaXRlbS5zdGF0ZSA9ICJjb21wbGV0ZWQiCiAgICAgICAgaXRlbS5yZWFzb24gPSByZWFzb24KCiAgICAgICAgZXhpc3Rpbmdfam91cm5hbCA9IHNlc3Npb24uc2NhbGFyKAogICAgICAgICAgICBzZWxlY3QoT3BlcmF0aW9uSm91cm5hbCkud2hlcmUoT3BlcmF0aW9uSm91cm5hbC5wbGFuX2l0ZW1faWQgPT0gaXRlbS5pZCkKICAgICAgICApCiAgICAgICAgaWYgZXhpc3Rpbmdfam91cm5hbCBpcyBOb25lOgogICAgICAgICAgICBzZXNzaW9uLmFkZChPcGVyYXRpb25Kb3VybmFsKAogICAgICAgICAgICAgICAgb3BlcmF0aW9uPWl0ZW0ub3BlcmF0aW9uLAogICAgICAgICAgICAgICAgc2VxdWVuY2U9aXRlbS5zZXF1ZW5jZSwKICAgICAgICAgICAgICAgIHBsYW5faWQ9cGxhbl9pZCwKICAgICAgICAgICAgICAgIHBsYW5faXRlbV9pZD1pdGVtLmlkLAogICAgICAgICAgICAgICAgdGFza19pZD1qb2JfaWQsCiAgICAgICAgICAgICAgICB1c2VyX2lkPXVzZXJfaWQsCiAgICAgICAgICAgICAgICBiZWZvcmVfanNvbj1qc29uLmR1bXBzKHsicGF0aCI6IGl0ZW0uc291cmNlX3BhdGh9LCBlbnN1cmVfYXNjaWk9RmFsc2UpLAogICAgICAgICAgICAgICAgYWZ0ZXJfanNvbj1qc29uLmR1bXBzKHsicGF0aCI6IE5vbmV9LCBlbnN1cmVfYXNjaWk9RmFsc2UpLAogICAgICAgICAgICAgICAgbWV0YWRhdGFfYmVmb3JlX2pzb249anNvbi5kdW1wcyhtZXRhZGF0YV9iZWZvcmUgb3Igc291cmNlX3N0YXQsIGVuc3VyZV9hc2NpaT1GYWxzZSksCiAgICAgICAgICAgICAgICBtZXRhZGF0YV9hZnRlcl9qc29uPWpzb24uZHVtcHMoe30sIGVuc3VyZV9hc2NpaT1GYWxzZSksCiAgICAgICAgICAgICAgICBjcmVhdGVkX2F0PW5vdywKICAgICAgICAgICAgKSkKCiAgICAgICAgcHJldmlld19kaWdlc3QgPSBtZXRhLmdldCgicHJldmlld19kaWdlc3QiKQogICAgICAgIGV4aXN0aW5nX2F1ZGl0cyA9IGxpc3Qoc2Vzc2lvbi5zY2FsYXJzKAogICAgICAgICAgICBzZWxlY3QoQXVkaXRFdmVudCkud2hlcmUoCiAgICAgICAgICAgICAgICBBdWRpdEV2ZW50Lm9wZXJhdGlvbiA9PSAicXVhcmFudGluZV9wdXJnZSIsCiAgICAgICAgICAgICAgICBBdWRpdEV2ZW50LnJlc3VsdCA9PSAiY29tcGxldGVkIiwKICAgICAgICAgICAgKQogICAgICAgICkpCiAgICAgICAgYWxyZWFkeV9hdWRpdGVkID0gRmFsc2UKICAgICAgICBmb3IgZXZlbnQgaW4gZXhpc3RpbmdfYXVkaXRzOgogICAgICAgICAgICB0cnk6CiAgICAgICAgICAgICAgICBkZXRhaWxzID0ganNvbi5sb2FkcyhldmVudC5kZXRhaWxzX2pzb24gb3IgInt9IikKICAgICAgICAgICAgZXhjZXB0IEV4Y2VwdGlvbjoKICAgICAgICAgICAgICAgIGNvbnRpbnVlCiAgICAgICAgICAgIGlmICgKICAgICAgICAgICAgICAgIGlzaW5zdGFuY2UoZGV0YWlscywgZGljdCkKICAgICAgICAgICAgICAgIGFuZCBkZXRhaWxzLmdldCgicGxhbl9pZCIpID09IHBsYW5faWQKICAgICAgICAgICAgICAgIGFuZCBkZXRhaWxzLmdldCgiaXRlbV9pZCIpID09IGl0ZW0uaWQKICAgICAgICAgICAgICAgIGFuZCBkZXRhaWxzLmdldCgicXVhcmFudGluZV9lbnRyeV9pZCIpID09IHFfZW50cnlfaWQKICAgICAgICAgICAgICAgIGFuZCBkZXRhaWxzLmdldCgicHJldmlld19kaWdlc3QiKSA9PSBwcmV2aWV3X2RpZ2VzdAogICAgICAgICAgICAgICAgYW5kIGRldGFpbHMuZ2V0KCJyb2xlIikgIT0gImhpc3RvcmljYWxfY29uZmxpY3RfY2FuZGlkYXRlIgogICAgICAgICAgICApOgogICAgICAgICAgICAgICAgYWxyZWFkeV9hdWRpdGVkID0gVHJ1ZQogICAgICAgICAgICAgICAgYnJlYWsKCiAgICAgICAgaWYgbm90IGFscmVhZHlfYXVkaXRlZDoKICAgICAgICAgICAgc2Vzc2lvbi5hZGQoQXVkaXRFdmVudCgKICAgICAgICAgICAgICAgIG9wZXJhdGlvbj0icXVhcmFudGluZV9wdXJnZSIsCiAgICAgICAgICAgICAgICBwYXRoPWl0ZW0uc291cmNlX3BhdGgsCiAgICAgICAgICAgICAgICByZXN1bHQ9ImNvbXBsZXRlZCIsCiAgICAgICAgICAgICAgICBkZXRhaWxzX2pzb249anNvbi5kdW1wcyh7CiAgICAgICAgICAgICAgICAgICAgInBsYW5faWQiOiBwbGFuX2lkLAogICAgICAgICAgICAgICAgICAgICJpdGVtX2lkIjogaXRlbS5pZCwKICAgICAgICAgICAgICAgICAgICAidGFza19pZCI6IGpvYl9pZCwKICAgICAgICAgICAgICAgICAgICAicXVhcmFudGluZV9lbnRyeV9pZCI6IHFfZW50cnlfaWQsCiAgICAgICAgICAgICAgICAgICAgInByZXZpZXdfZGlnZXN0IjogcHJldmlld19kaWdlc3QsCiAgICAgICAgICAgICAgICAgICAgInJlYXNvbiI6IHJlYXNvbiwKICAgICAgICAgICAgICAgICAgICAidGFyZ2V0IjogaXRlbS50YXJnZXRfcGF0aCwKICAgICAgICAgICAgICAgICAgICAicmVzdWx0X3BhdGgiOiBOb25lLAogICAgICAgICAgICAgICAgfSwgZW5zdXJlX2FzY2lpPUZhbHNlKSwKICAgICAgICAgICAgKSkKICAgICAgICByZXR1cm4KCg==').decode()
           p.write_text(s.replace(marker, block + marker, 1))
           PY
           python -m py_compile app/tasks/handlers.py
