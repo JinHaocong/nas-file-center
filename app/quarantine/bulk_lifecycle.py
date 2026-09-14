@@ -115,7 +115,23 @@ def _gate6a_restore_binding_error(
         entry_identity = item_authority.get("entry_identity")
         if not isinstance(entry_identity, dict):
             return "Gate6-A restore frozen qentry identity authority is malformed"
-        if quarantine_entry_identity_material(entry) != entry_identity:
+        current_entry_identity = quarantine_entry_identity_material(entry)
+        stable_identity_keys = (
+            "entry_id",
+            "original_path",
+            "quarantine_path",
+            "authoritative_anchor_path",
+            "active_attempt_generation",
+            "device",
+            "inode",
+            "size",
+            "mtime_ns",
+            "content_hash",
+        )
+        if any(
+            current_entry_identity.get(key) != entry_identity.get(key)
+            for key in stable_identity_keys
+        ):
             return "Gate6-A restore current qentry disagrees with frozen plan-item identity authority"
 
         effective_frozen_expected = frozen_expected
