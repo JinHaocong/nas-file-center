@@ -10,7 +10,7 @@ from app.db import create_engine_and_session, init_db
 from app.models import QuarantineEntry, TaskLock, utcnow
 
 
-def test_transactional_purge_capture_fences_each_rename_without_open_write_transaction(
+def test_transactional_purge_capture_fences_each_link_without_open_write_transaction(
     tmp_path: Path, monkeypatch
 ) -> None:
     import app.quarantine.purge as purge
@@ -63,7 +63,7 @@ def test_transactional_purge_capture_fences_each_rename_without_open_write_trans
         assert frozen_manifest["blockers"] == []
 
     original_renew = purge.renew_and_assert_worker_lease
-    original_rename = os.rename
+    original_link = os.link
     events: list[str] = []
 
     def fenced_renew(session_factory, worker_id):
@@ -71,23 +71,31 @@ def test_transactional_purge_capture_fences_each_rename_without_open_write_trans
         events.append("fence")
         return result
 
-    def observed_rename(src, dst, *, src_dir_fd=None, dst_dir_fd=None):
+    def observed_link(
+        src,
+        dst,
+        *,
+        src_dir_fd=None,
+        dst_dir_fd=None,
+        follow_symlinks=True,
+    ):
         assert events and events[-1] == "fence"
-        # A separate BEGIN IMMEDIATE must succeed here. If the capture path held
-        # a SQLite write transaction across the filesystem syscall, this would lock.
+        # A separate BEGIN IMMEDIATE must succeed here. If capture held a
+        # SQLite write transaction across the filesystem syscall, this would lock.
         with SessionLocal() as session:
             session.execute(text("BEGIN IMMEDIATE"))
             session.rollback()
-        events.append("rename")
-        return original_rename(
+        events.append("link")
+        return original_link(
             src,
             dst,
             src_dir_fd=src_dir_fd,
             dst_dir_fd=dst_dir_fd,
+            follow_symlinks=follow_symlinks,
         )
 
     monkeypatch.setattr(purge, "renew_and_assert_worker_lease", fenced_renew)
-    monkeypatch.setattr(purge.os, "rename", observed_rename)
+    monkeypatch.setattr(purge.os, "link", observed_link)
 
     purge.execute_transactional_purge_capture(
         SessionLocal,
@@ -98,4 +106,4 @@ def test_transactional_purge_capture_fences_each_rename_without_open_write_trans
         allowed_roots=[data],
     )
 
-    assert events[-6:] == ["fence", "rename", "fence", "rename", "fence", "rename"]
+    assert events[-6:] == ["fence", "link", "fence", "link", "fence", "link"]

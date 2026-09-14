@@ -100,9 +100,20 @@ def test_quarantine_purge_executor_routes_authorized_transaction_to_terminal_pur
 
     assert result.state == "completed"
     assert result.reason == "purged"
-    assert not anchor.exists()
-    assert not captured_source.exists()
-    assert not public_view.exists()
+    purge_dir = quarantine_root / ".tx" / "entry-1" / "attempt-2" / "purge"
+    marker = purge_dir / "destroy-intent.json"
+    assert marker.is_file()
+    for tombstone in (
+        anchor,
+        captured_source,
+        public_view,
+        purge_dir / "current-anchor",
+        purge_dir / "captured-source",
+        purge_dir / "public-view",
+    ):
+        tombstone_st = tombstone.stat(follow_symlinks=False)
+        assert tombstone_st.st_size == 0
+        assert (tombstone_st.st_dev, tombstone_st.st_ino) == (st.st_dev, st.st_ino)
 
     with SessionLocal() as session:
         entry = session.get(QuarantineEntry, 1)

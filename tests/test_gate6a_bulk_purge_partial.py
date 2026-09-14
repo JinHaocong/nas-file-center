@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from app.config import Settings
 from app.main import create_app
-from app.models import BatchPlan, BatchPlanItem, QuarantineEntry, TaskLock, WorkJob, utcnow
+from app.models import AuditEvent, BatchPlan, BatchPlanItem, QuarantineEntry, TaskLock, WorkJob, utcnow
 from app.tasks.context import JobContext
 from app.tasks.handlers import BatchPlanExecuteHandler
 
@@ -92,6 +92,9 @@ def test_bulk_purge_continues_after_one_entry_failure_and_finishes_partial(tmp_p
     first = _active_entry(client, "first")
     second = _active_entry(client, "second")
     third = _active_entry(client, "third")
+    first_st = first[1].stat(follow_symlinks=False)
+    second_st = second[1].stat(follow_symlinks=False)
+    third_st = third[1].stat(follow_symlinks=False)
     entry_ids = [first[0], second[0], third[0]]
 
     preview = client.post(
@@ -155,12 +158,18 @@ def test_bulk_purge_continues_after_one_entry_failure_and_finishes_partial(tmp_p
             service.settings,
         )
 
-    for path in first[1:]:
-        assert not path.exists()
-    for path in second[1:]:
-        assert path.exists()
-    for path in third[1:]:
-        assert not path.exists()
+    for tombstone in first[1:]:
+        tombstone_st = tombstone.stat(follow_symlinks=False)
+        assert tombstone_st.st_size == 0
+        assert (tombstone_st.st_dev, tombstone_st.st_ino) == (first_st.st_dev, first_st.st_ino)
+    for untouched in second[1:]:
+        untouched_st = untouched.stat(follow_symlinks=False)
+        assert untouched_st.st_size == second_st.st_size
+        assert (untouched_st.st_dev, untouched_st.st_ino) == (second_st.st_dev, second_st.st_ino)
+    for tombstone in third[1:]:
+        tombstone_st = tombstone.stat(follow_symlinks=False)
+        assert tombstone_st.st_size == 0
+        assert (tombstone_st.st_dev, tombstone_st.st_ino) == (third_st.st_dev, third_st.st_ino)
 
     with service.SessionLocal() as session:
         rows = list(
@@ -179,3 +188,19 @@ def test_bulk_purge_continues_after_one_entry_failure_and_finishes_partial(tmp_p
         assert first_entry is not None and first_entry.state == "purged"
         assert second_entry is not None and second_entry.state == "conflict"
         assert third_entry is not None and third_entry.state == "purged"
+
+        audits = list(
+            session.query(AuditEvent)
+            .filter(AuditEvent.operation == "quarantine_purge")
+            .order_by(AuditEvent.id)
+        )
+        selected_audits = []
+        for audit in audits:
+            details = json.loads(audit.details_json or "{}")
+            if details.get("quarantine_entry_id") in entry_ids and details.get("role") is None:
+                selected_audits.append((details.get("quarantine_entry_id"), audit.result))
+        assert selected_audits == [
+            (first[0], "completed"),
+            (second[0], "failed"),
+            (third[0], "completed"),
+        ]

@@ -124,6 +124,7 @@ def test_real_worker_restart_requeues_and_resumes_partial_purge_destruction(
     client = _client(tmp_path)
     service = client.app.state.service
     entry_id, anchor, captured_source, public_view = _active_entry(client)
+    frozen_st = anchor.stat(follow_symlinks=False)
     plan_id = _bulk_purge_plan(client, entry_id)
     old_worker = "worker-old"
     new_worker = "worker-new"
@@ -178,7 +179,7 @@ def test_real_worker_restart_requeues_and_resumes_partial_purge_destruction(
     original_renew = purge.renew_and_assert_worker_lease
     fence_calls = 0
 
-    def crash_before_second_unlink(*args, **kwargs):
+    def crash_after_durable_marker_before_descriptor_zeroization(*args, **kwargs):
         nonlocal fence_calls
         fence_calls += 1
         result = original_renew(*args, **kwargs)
@@ -186,7 +187,11 @@ def test_real_worker_restart_requeues_and_resumes_partial_purge_destruction(
             raise RuntimeError("simulated worker crash")
         return result
 
-    monkeypatch.setattr(purge, "renew_and_assert_worker_lease", crash_before_second_unlink)
+    monkeypatch.setattr(
+        purge,
+        "renew_and_assert_worker_lease",
+        crash_after_durable_marker_before_descriptor_zeroization,
+    )
     with pytest.raises(RuntimeError, match="simulated worker crash"):
         purge.destroy_transactional_purge_capture(
             service.SessionLocal,
@@ -198,10 +203,25 @@ def test_real_worker_restart_requeues_and_resumes_partial_purge_destruction(
         )
     monkeypatch.setattr(purge, "renew_and_assert_worker_lease", original_renew)
 
-    assert len(list(purge_dir.iterdir())) == 2
-    assert not anchor.exists()
-    assert not captured_source.exists()
-    assert not public_view.exists()
+    marker = purge_dir / "destroy-intent.json"
+    assert marker.is_file()
+    assert {p.name for p in purge_dir.iterdir()} == {
+        "current-anchor",
+        "captured-source",
+        "public-view",
+        "destroy-intent.json",
+    }
+    for payload_path in (
+        anchor,
+        captured_source,
+        public_view,
+        purge_dir / "current-anchor",
+        purge_dir / "captured-source",
+        purge_dir / "public-view",
+    ):
+        payload_st = payload_path.stat(follow_symlinks=False)
+        assert payload_st.st_size == frozen_st.st_size
+        assert (payload_st.st_dev, payload_st.st_ino) == (frozen_st.st_dev, frozen_st.st_ino)
 
     with service.SessionLocal() as session:
         lock = session.get(TaskLock, 1)
@@ -229,7 +249,18 @@ def test_real_worker_restart_requeues_and_resumes_partial_purge_destruction(
         worker_id=new_worker,
     ) is True
 
-    assert list(purge_dir.iterdir()) == []
+    assert marker.is_file()
+    for tombstone in (
+        anchor,
+        captured_source,
+        public_view,
+        purge_dir / "current-anchor",
+        purge_dir / "captured-source",
+        purge_dir / "public-view",
+    ):
+        tombstone_st = tombstone.stat(follow_symlinks=False)
+        assert tombstone_st.st_size == 0
+        assert (tombstone_st.st_dev, tombstone_st.st_ino) == (frozen_st.st_dev, frozen_st.st_ino)
     with service.SessionLocal() as session:
         entry = session.get(QuarantineEntry, entry_id)
         assert entry is not None

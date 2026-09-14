@@ -186,14 +186,20 @@ def test_transactional_purge_capture_moves_normal_alias_set_into_private_slots(t
         "public-view": purge_dir / "public-view",
     }
 
-    assert not anchor.exists()
-    assert not captured_source.exists()
-    assert not public_view.exists()
-    assert {name: path.read_bytes() for name, path in expected_slots.items()} == {
+    # Capture is now a no-overwrite hard-link witness: source aliases remain
+    # present and payload-bearing until descriptor-bound destruction.
+    for source_path in (anchor, captured_source, public_view):
+        assert source_path.read_bytes() == payload
+        source_st = source_path.stat(follow_symlinks=False)
+        assert (source_st.st_dev, source_st.st_ino) == (st.st_dev, st.st_ino)
+    assert {name: slot.read_bytes() for name, slot in expected_slots.items()} == {
         "current-anchor": payload,
         "captured-source": payload,
         "public-view": payload,
     }
+    for slot in expected_slots.values():
+        slot_st = slot.stat(follow_symlinks=False)
+        assert (slot_st.st_dev, slot_st.st_ino) == (st.st_dev, st.st_ino)
 
     with SessionLocal() as session:
         entry = session.get(QuarantineEntry, 1)
@@ -266,8 +272,19 @@ def test_transactional_purge_capture_preserves_occupied_private_slot(tmp_path: P
 
     monkeypatch.setattr(purge, "_allocate_transactional_purge_attempt", allocate_then_occupy)
 
-    with pytest.raises(StateConflictError, match="occupied"):
-        purge.execute_transactional_purge_capture(
+    purge.execute_transactional_purge_capture(
+        SessionLocal,
+        entry_id=1,
+        worker_id="worker-1",
+        frozen_manifest=frozen_manifest,
+        quarantine_root=quarantine_root,
+        allowed_roots=[data],
+    )
+
+    # An existing write-once slot is recovery evidence and is never replaced.
+    # Qualification must reject it before any irreversible descriptor mutation.
+    with pytest.raises(StateConflictError, match="captured slot"):
+        purge.qualify_transactional_purge_capture(
             SessionLocal,
             entry_id=1,
             worker_id="worker-1",
@@ -375,7 +392,11 @@ def test_transactional_purge_capture_retires_historical_conflict_candidate_into_
     purge_dir = quarantine_root / ".tx" / "entry-1" / "attempt-2" / "purge"
     linked_slot = purge_dir / "linked-conflict-2-anchor"
     assert linked_slot.read_bytes() == payload
-    assert not historical_anchor.exists()
+    linked_st = linked_slot.stat(follow_symlinks=False)
+    historical_st = historical_anchor.stat(follow_symlinks=False)
+    assert historical_anchor.read_bytes() == payload
+    assert (linked_st.st_dev, linked_st.st_ino) == (st.st_dev, st.st_ino)
+    assert (historical_st.st_dev, historical_st.st_ino) == (st.st_dev, st.st_ino)
 
     with SessionLocal() as session:
         selected = session.get(QuarantineEntry, 1)

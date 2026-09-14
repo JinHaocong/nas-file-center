@@ -146,19 +146,53 @@ def _run_worker(service, job_id: int, worker_id: str) -> None:
         BatchPlanExecuteHandler().run(job, context, service.settings)
 
 
+def _assert_zeroized_purge_closure(
+    service,
+    entry_id: int,
+    generation: int,
+    source_paths: tuple[Path, Path, Path],
+    expected_identity: tuple[int, int],
+) -> Path:
+    purge_dir = (
+        Path(service.settings.quarantine_root)
+        / ".tx"
+        / f"entry-{entry_id}"
+        / f"attempt-{generation}"
+        / "purge"
+    )
+    marker = purge_dir / "destroy-intent.json"
+    assert marker.is_file()
+    tombstones = [
+        *source_paths,
+        purge_dir / "current-anchor",
+        purge_dir / "captured-source",
+        purge_dir / "public-view",
+    ]
+    for tombstone in tombstones:
+        st = tombstone.stat(follow_symlinks=False)
+        assert st.st_size == 0
+        assert (st.st_dev, st.st_ino) == expected_identity
+    return purge_dir
+
+
 def test_bulk_purge_worker_handler_passes_entry_and_frozen_manifest_to_executor(tmp_path: Path) -> None:
     client = _client(tmp_path)
     service = client.app.state.service
     entry_id, anchor, captured_source, public_view = _active_entry(client)
     plan_id = _bulk_purge_plan(client, entry_id)
 
+    frozen_st = anchor.stat(follow_symlinks=False)
     worker_id = "worker-gate6a-purge-handler"
     job_id = _prepare_worker(service, plan_id, worker_id)
     _run_worker(service, job_id, worker_id)
 
-    assert not anchor.exists()
-    assert not captured_source.exists()
-    assert not public_view.exists()
+    _assert_zeroized_purge_closure(
+        service,
+        entry_id,
+        2,
+        (anchor, captured_source, public_view),
+        (frozen_st.st_dev, frozen_st.st_ino),
+    )
 
     with service.SessionLocal() as session:
         entry = session.get(QuarantineEntry, entry_id)
@@ -182,6 +216,7 @@ def test_bulk_purge_worker_resumes_after_crash_immediately_after_durable_purging
     entry_id, anchor, captured_source, public_view = _active_entry(client)
     plan_id = _bulk_purge_plan(client, entry_id)
 
+    frozen_st = anchor.stat(follow_symlinks=False)
     worker_id = "worker-gate6a-purge-resume-intent"
     job_id = _prepare_worker(service, plan_id, worker_id)
 
@@ -202,9 +237,13 @@ def test_bulk_purge_worker_resumes_after_crash_immediately_after_durable_purging
 
     _run_worker(service, job_id, worker_id)
 
-    assert not anchor.exists()
-    assert not captured_source.exists()
-    assert not public_view.exists()
+    _assert_zeroized_purge_closure(
+        service,
+        entry_id,
+        2,
+        (anchor, captured_source, public_view),
+        (frozen_st.st_dev, frozen_st.st_ino),
+    )
 
     with service.SessionLocal() as session:
         entry = session.get(QuarantineEntry, entry_id)
@@ -227,6 +266,7 @@ def test_bulk_purge_worker_resumes_after_generation_allocation_before_attempt_mk
     entry_id, anchor, captured_source, public_view = _active_entry(client)
     plan_id = _bulk_purge_plan(client, entry_id)
 
+    frozen_st = anchor.stat(follow_symlinks=False)
     worker_id = "worker-gate6a-purge-resume-generation"
     job_id = _prepare_worker(service, plan_id, worker_id)
 
@@ -263,12 +303,15 @@ def test_bulk_purge_worker_resumes_after_generation_allocation_before_attempt_mk
         / "attempt-3"
         / "purge"
     )
-    assert not anchor.exists()
-    assert not captured_source.exists()
-    assert not public_view.exists()
     assert not attempt_dir.exists()
     assert recovered_purge_dir.is_dir()
-    assert list(recovered_purge_dir.iterdir()) == []
+    assert _assert_zeroized_purge_closure(
+        service,
+        entry_id,
+        3,
+        (anchor, captured_source, public_view),
+        (frozen_st.st_dev, frozen_st.st_ino),
+     ) == recovered_purge_dir
 
     with service.SessionLocal() as session:
         entry = session.get(QuarantineEntry, entry_id)
@@ -290,6 +333,7 @@ def test_bulk_purge_worker_resumes_after_one_alias_was_captured(tmp_path: Path) 
     entry_id, anchor, captured_source, public_view = _active_entry(client)
     plan_id = _bulk_purge_plan(client, entry_id)
 
+    frozen_st = anchor.stat(follow_symlinks=False)
     worker_id = "worker-gate6a-purge-resume-partial-capture"
     job_id = _prepare_worker(service, plan_id, worker_id)
 
@@ -302,7 +346,7 @@ def test_bulk_purge_worker_resumes_after_one_alias_was_captured(tmp_path: Path) 
     )
     assert generation == 2
     captured_anchor = purge_dir / "current-anchor"
-    os.rename(anchor, captured_anchor)
+    os.link(anchor, captured_anchor)
 
     with service.SessionLocal() as session:
         entry = session.get(QuarantineEntry, entry_id)
@@ -314,18 +358,21 @@ def test_bulk_purge_worker_resumes_after_one_alias_was_captured(tmp_path: Path) 
         item.state = "executing"
         session.commit()
 
-    assert not anchor.exists()
+    assert anchor.exists()
     assert captured_anchor.exists()
     assert captured_source.exists()
     assert public_view.exists()
+    assert captured_anchor.read_bytes() == anchor.read_bytes()
 
     _run_worker(service, job_id, worker_id)
 
-    assert not anchor.exists()
-    assert not captured_source.exists()
-    assert not public_view.exists()
-    assert purge_dir.is_dir()
-    assert list(purge_dir.iterdir()) == []
+    assert _assert_zeroized_purge_closure(
+        service,
+        entry_id,
+        2,
+        (anchor, captured_source, public_view),
+        (frozen_st.st_dev, frozen_st.st_ino),
+    ) == purge_dir
 
     with service.SessionLocal() as session:
         entry = session.get(QuarantineEntry, entry_id)

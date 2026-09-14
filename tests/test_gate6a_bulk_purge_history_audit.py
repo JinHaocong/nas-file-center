@@ -157,7 +157,9 @@ def test_bulk_purge_audits_retired_historical_conflict_alias(tmp_path: Path) -> 
             service.settings,
         )
 
-    assert not historical_anchor.exists()
+    historical_tombstone = historical_anchor.stat(follow_symlinks=False)
+    assert historical_tombstone.st_size == 0
+    assert (historical_tombstone.st_dev, historical_tombstone.st_ino) == (st.st_dev, st.st_ino)
     with service.SessionLocal() as session:
         item = session.query(BatchPlanItem).filter_by(plan_id=plan_id).one()
         assert item.state == "completed"
