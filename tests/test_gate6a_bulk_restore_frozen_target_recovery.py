@@ -13,6 +13,8 @@ from app.models import AuditEvent, BatchPlanItem, QuarantineEntry, TaskLock, Wor
 from app.tasks.context import JobContext
 from app.tasks.handlers import BatchPlanExecuteHandler
 
+# Regression contract: restart reconciliation must bind stable per-item frozen authority before filesystem mutation.
+
 
 def _client(tmp_path: Path) -> TestClient:
     data = tmp_path / "data"
