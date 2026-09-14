@@ -483,10 +483,10 @@ def _reconcile_preparing(
 
 
 def _resolve_gate6a_restore_target(session: Session, entry_id: int) -> tuple[Path | None, str | None]:
-    # Recover and re-validate plan-level frozen Gate6-A restore authority.
+    """Recover Gate6-A restore target, enforcing stable authority when available."""
     entry = session.get(QuarantineEntry, entry_id)
     entry_quarantine_path = entry.quarantine_path if entry is not None else None
-    matches: list[tuple[BatchPlanItem, dict]] = []
+    matches: list[tuple[BatchPlanItem, str]] = []
     unresolved_gate6a_items: list[tuple[int, str]] = []
     executing_restores = list(session.scalars(
         select(BatchPlanItem).where(
@@ -495,25 +495,8 @@ def _resolve_gate6a_restore_target(session: Session, entry_id: int) -> tuple[Pat
         )
     ))
 
-    def mutable_row_mentions_entry(item: BatchPlanItem) -> bool:
-        if entry_quarantine_path and item.source_path == entry_quarantine_path:
-            return True
-        try:
-            metadata = json.loads(item.metadata_json or "{}")
-        except Exception:
-            return False
-        if not isinstance(metadata, dict):
-            return False
-        undo_meta = metadata.get("undo")
-        if not isinstance(undo_meta, dict):
-            undo_meta = {}
-        raw_qid = metadata.get("quarantine_entry_id")
-        if raw_qid is None:
-            raw_qid = undo_meta.get("quarantine_entry_id")
-        try:
-            return raw_qid is not None and int(raw_qid) == entry_id
-        except (TypeError, ValueError):
-            return False
+    def owns_legacy_source(item: BatchPlanItem) -> bool:
+        return bool(entry_quarantine_path and item.source_path == entry_quarantine_path)
 
     for item in executing_restores:
         plan = session.get(BatchPlan, item.plan_id)
@@ -525,62 +508,113 @@ def _resolve_gate6a_restore_target(session: Session, entry_id: int) -> tuple[Pat
         except Exception:
             plan_meta = None
         if not isinstance(plan_meta, dict):
-            if mutable_row_mentions_entry(item):
+            if owns_legacy_source(item):
                 unresolved_gate6a_items.append((int(item.id), "malformed plan metadata_json"))
             continue
 
         authority_map = plan_meta.get("restore_item_authority")
-        authority = authority_map.get(str(item.id)) if isinstance(authority_map, dict) else None
-        if not isinstance(authority, dict):
-            if mutable_row_mentions_entry(item):
-                unresolved_gate6a_items.append((int(item.id), "missing restore_item_authority"))
+        if isinstance(authority_map, dict):
+            authority = authority_map.get(str(item.id))
+            if not isinstance(authority, dict):
+                # A strict-plan item without its stable authority is relevant only when the
+                # mutable row still names this entry; never poison unrelated qentries.
+                if owns_legacy_source(item):
+                    unresolved_gate6a_items.append((int(item.id), "missing restore_item_authority"))
+                continue
+
+            raw_frozen_qid = authority.get("quarantine_entry_id")
+            if not isinstance(raw_frozen_qid, int) or isinstance(raw_frozen_qid, bool) or raw_frozen_qid <= 0:
+                if owns_legacy_source(item):
+                    unresolved_gate6a_items.append((int(item.id), "invalid frozen quarantine_entry_id authority"))
+                continue
+            frozen_qid = int(raw_frozen_qid)
+            if frozen_qid != entry_id:
+                continue
+
+            try:
+                metadata = json.loads(item.metadata_json or "{}")
+            except Exception:
+                unresolved_gate6a_items.append((int(item.id), "malformed metadata_json"))
+                continue
+            if not isinstance(metadata, dict):
+                unresolved_gate6a_items.append((int(item.id), "metadata_json is not an object"))
+                continue
+
+            frozen_entry = session.get(QuarantineEntry, frozen_qid)
+            if frozen_entry is None:
+                unresolved_gate6a_items.append((int(item.id), f"frozen quarantine entry #{frozen_qid} is missing"))
+                continue
+
+            from app.quarantine.bulk_lifecycle import _gate6a_restore_binding_error
+            binding_error = _gate6a_restore_binding_error(
+                plan_metadata=plan_meta,
+                metadata=metadata,
+                entry_id=frozen_qid,
+                source_path=item.source_path,
+                target_path=item.target_path,
+                entry=frozen_entry,
+                item_id=int(item.id),
+                frozen_expected={
+                    "device": item.expected_device,
+                    "inode": item.expected_inode,
+                    "size": item.expected_size,
+                    "mtime_ns": item.expected_mtime_ns,
+                    "content_hash": item.expected_hash,
+                },
+            )
+            if binding_error is not None:
+                unresolved_gate6a_items.append((int(item.id), binding_error))
+                continue
+
+            frozen_target = authority.get("target_path")
+            if not isinstance(frozen_target, str) or not frozen_target:
+                unresolved_gate6a_items.append((int(item.id), "missing frozen target_path"))
+                continue
+            if item.target_path != frozen_target:
+                unresolved_gate6a_items.append((int(item.id), "target_path mismatch"))
+                continue
+            matches.append((item, frozen_target))
             continue
 
-        raw_frozen_qid = authority.get("quarantine_entry_id")
-        if not isinstance(raw_frozen_qid, int) or isinstance(raw_frozen_qid, bool) or raw_frozen_qid <= 0:
-            if mutable_row_mentions_entry(item):
-                unresolved_gate6a_items.append((int(item.id), "invalid frozen quarantine_entry_id authority"))
-            continue
-        frozen_qid = int(raw_frozen_qid)
-        if frozen_qid != entry_id:
-            continue
-
+        # Legacy compatibility: preserve the pre-authority-map recovery contract for
+        # already-durable executing plans, including malformed/missing qid fail-closed.
         try:
-            metadata = json.loads(item.metadata_json or "{}")
+            meta = json.loads(item.metadata_json or "{}")
         except Exception:
-            unresolved_gate6a_items.append((int(item.id), "malformed metadata_json"))
+            if owns_legacy_source(item):
+                unresolved_gate6a_items.append((int(item.id), "malformed metadata_json"))
             continue
-        if not isinstance(metadata, dict):
-            unresolved_gate6a_items.append((int(item.id), "metadata_json is not an object"))
-            continue
-
-        frozen_entry = session.get(QuarantineEntry, frozen_qid)
-        if frozen_entry is None:
-            unresolved_gate6a_items.append((int(item.id), f"frozen quarantine entry #{frozen_qid} is missing"))
+        if not isinstance(meta, dict):
+            if owns_legacy_source(item):
+                unresolved_gate6a_items.append((int(item.id), "metadata_json is not an object"))
             continue
 
-        from app.quarantine.bulk_lifecycle import _gate6a_restore_binding_error
-        binding_error = _gate6a_restore_binding_error(
-            plan_metadata=plan_meta,
-            metadata=metadata,
-            entry_id=frozen_qid,
-            source_path=item.source_path,
-            target_path=item.target_path,
-            entry=frozen_entry,
-            item_id=int(item.id),
-            frozen_expected={
-                "device": item.expected_device,
-                "inode": item.expected_inode,
-                "size": item.expected_size,
-                "mtime_ns": item.expected_mtime_ns,
-                "content_hash": item.expected_hash,
-            },
-        )
-        if binding_error is not None:
-            unresolved_gate6a_items.append((int(item.id), binding_error))
+        undo_meta = meta.get("undo")
+        if not isinstance(undo_meta, dict):
+            undo_meta = {}
+        raw_qid = meta.get("quarantine_entry_id")
+        if raw_qid is None:
+            raw_qid = undo_meta.get("quarantine_entry_id")
+        if raw_qid is None:
+            if owns_legacy_source(item):
+                unresolved_gate6a_items.append((int(item.id), "missing quarantine_entry_id"))
+            continue
+        try:
+            bound_qid = int(raw_qid)
+        except (TypeError, ValueError):
+            if owns_legacy_source(item):
+                unresolved_gate6a_items.append((int(item.id), "invalid quarantine_entry_id"))
             continue
 
-        matches.append((item, authority))
+        if bound_qid == entry_id:
+            if entry_quarantine_path and item.source_path != entry_quarantine_path:
+                unresolved_gate6a_items.append((int(item.id), "frozen source_path does not match quarantine owner"))
+            elif not item.target_path:
+                unresolved_gate6a_items.append((int(item.id), "missing legacy target_path"))
+            else:
+                matches.append((item, item.target_path))
+        elif owns_legacy_source(item):
+            unresolved_gate6a_items.append((int(item.id), "quarantine_entry_id disagrees with frozen source_path owner"))
 
     if unresolved_gate6a_items:
         details = ", ".join(
@@ -588,7 +622,7 @@ def _resolve_gate6a_restore_target(session: Session, entry_id: int) -> tuple[Pat
         )
         return None, (
             "Gate6-A restoring recovery lost frozen restore authority because an executing "
-            f"bulk-restore binding no longer matches plan authority ({details})"
+            f"bulk-restore binding is unreadable or invalid ({details})"
         )
 
     if not matches:
@@ -599,19 +633,8 @@ def _resolve_gate6a_restore_target(session: Session, entry_id: int) -> tuple[Pat
             f"for quarantine entry #{entry_id}"
         )
 
-    item, authority = matches[0]
-    frozen_target = authority.get("target_path")
-    if not isinstance(frozen_target, str) or not frozen_target:
-        return None, (
-            "Gate6-A restoring recovery is missing frozen target_path "
-            f"for plan item #{item.id}"
-        )
-    if item.target_path != frozen_target:
-        return None, (
-            "Gate6-A restoring recovery lost frozen restore authority: "
-            f"target_path mismatch for plan item #{item.id}"
-        )
-    return Path(frozen_target), None
+    _item, target_path = matches[0]
+    return Path(target_path), None
 
 
 def _reconcile_restoring(
