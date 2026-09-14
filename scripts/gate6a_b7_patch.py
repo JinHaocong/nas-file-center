@@ -149,28 +149,24 @@ purge = replace_regex_once(
     label="purge begin intent",
 )
 
-mutable_identity = textwrap.dedent(
-    '''
-            generation = int(entry.active_attempt_generation or 0)
-            expected_device = entry.device
-            expected_inode = entry.inode
-            expected_size = entry.size
-            expected_mtime_ns = entry.mtime_ns
-            expected_hash = (entry.content_hash or "").lower()
-
-        if generation <= 0 or not expected_hash:
-    '''
-).lstrip("\n")
-frozen_identity = textwrap.dedent(
-    '''
-            generation = int(entry.active_attempt_generation or 0)
-
-        expected_device, expected_inode, expected_size, expected_mtime_ns, expected_hash = (
-            _require_frozen_payload_identity(frozen_manifest)
-        )
-        if generation <= 0:
-    '''
-).lstrip("\n")
+mutable_identity = (
+    "        generation = int(entry.active_attempt_generation or 0)\n"
+    "        expected_device = entry.device\n"
+    "        expected_inode = entry.inode\n"
+    "        expected_size = entry.size\n"
+    "        expected_mtime_ns = entry.mtime_ns\n"
+    "        expected_hash = (entry.content_hash or \"\").lower()\n"
+    "\n"
+    "    if generation <= 0 or not expected_hash:\n"
+)
+frozen_identity = (
+    "        generation = int(entry.active_attempt_generation or 0)\n"
+    "\n"
+    "    expected_device, expected_inode, expected_size, expected_mtime_ns, expected_hash = (\n"
+    "        _require_frozen_payload_identity(frozen_manifest)\n"
+    "    )\n"
+    "    if generation <= 0:\n"
+)
 count = purge.count(mutable_identity)
 if count != 2:
     raise SystemExit(f"purge mutable identity reads: expected two matches, got {count}")
@@ -179,28 +175,26 @@ purge = purge.replace(mutable_identity, frozen_identity)
 terminal_marker = '        entry.state = "purged"\n'
 if purge.count(terminal_marker) != 1:
     raise SystemExit(f"purge terminal marker count={purge.count(terminal_marker)}")
-terminal_check = textwrap.dedent(
-    '''
-            current_identity = (
-                int(entry.device or 0),
-                int(entry.inode or 0),
-                int(entry.size or 0),
-                int(entry.mtime_ns or 0),
-                str(entry.content_hash or "").lower(),
-            )
-            if current_identity != (
-                expected_device,
-                expected_inode,
-                expected_size,
-                expected_mtime_ns,
-                expected_hash,
-            ):
-                session.rollback()
-                raise StateConflictError(
-                    f"PURGE_FROZEN_IDENTITY_CHANGED: quarantine entry #{entry_id} identity changed before terminal purge commit"
-                )
-    '''
-).lstrip("\n")
+terminal_check = (
+    "        current_identity = (\n"
+    "            int(entry.device or 0),\n"
+    "            int(entry.inode or 0),\n"
+    "            int(entry.size or 0),\n"
+    "            int(entry.mtime_ns or 0),\n"
+    "            str(entry.content_hash or \"\").lower(),\n"
+    "        )\n"
+    "        if current_identity != (\n"
+    "            expected_device,\n"
+    "            expected_inode,\n"
+    "            expected_size,\n"
+    "            expected_mtime_ns,\n"
+    "            expected_hash,\n"
+    "        ):\n"
+    "            session.rollback()\n"
+    "            raise StateConflictError(\n"
+    "                f\"PURGE_FROZEN_IDENTITY_CHANGED: quarantine entry #{entry_id} identity changed before terminal purge commit\"\n"
+    "            )\n"
+)
 purge = purge.replace(terminal_marker, terminal_check + terminal_marker, 1)
 purge_path.write_text(purge)
 
