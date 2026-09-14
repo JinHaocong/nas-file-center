@@ -1643,10 +1643,15 @@ class BatchPlanExecuteHandler(TaskHandler):
         user_id = state.get("requested_by_user_id")
 
         # 1. Announce start & reconcile interrupted items
-        # Precompute reconciliation evidence outside DB write lock
+        # Precompute reconciliation evidence outside DB write lock.
         precomputed_evidence: dict[int, ReconcileEvidence] = {}
         tx_entries_to_reconcile: list[int] = []
+        gate6a_authority_loss: dict[int, tuple[int | None, str]] = {}
         with context.SessionLocal() as session:
+            recovery_plan = session.get(BatchPlan, plan_id)
+            is_gate6a_restore_recovery = bool(
+                recovery_plan and recovery_plan.kind == "quarantine-bulk-restore"
+            )
             exec_items = list(session.scalars(
                 select(BatchPlanItem)
                 .where(BatchPlanItem.plan_id == plan_id, BatchPlanItem.state == "executing")
@@ -1669,9 +1674,59 @@ class BatchPlanExecuteHandler(TaskHandler):
                             if ev:
                                 precomputed_evidence[it.id] = ev
                 elif it.operation == "restore":
-                    meta = json.loads(it.metadata_json or "{}")
-                    qid = meta.get("quarantine_entry_id") or meta.get("undo", {}).get("quarantine_entry_id")
-                    qe = session.get(QuarantineEntry, int(qid)) if qid else None
+                    qe = None
+                    binding_error = None
+                    if is_gate6a_restore_recovery:
+                        source_qe = session.scalar(
+                            select(QuarantineEntry).where(QuarantineEntry.quarantine_path == it.source_path)
+                        )
+                        try:
+                            meta = json.loads(it.metadata_json or "{}")
+                        except Exception:
+                            meta = None
+                            binding_error = "malformed metadata_json"
+                        if meta is not None and not isinstance(meta, dict):
+                            meta = None
+                            binding_error = "metadata_json is not an object"
+                        raw_qid = None
+                        if isinstance(meta, dict):
+                            undo_meta = meta.get("undo")
+                            if not isinstance(undo_meta, dict):
+                                undo_meta = {}
+                            raw_qid = meta.get("quarantine_entry_id")
+                            if raw_qid is None:
+                                raw_qid = undo_meta.get("quarantine_entry_id")
+                            if raw_qid is None:
+                                binding_error = "missing quarantine_entry_id"
+                        bound_qid = None
+                        if raw_qid is not None:
+                            try:
+                                bound_qid = int(raw_qid)
+                            except (TypeError, ValueError):
+                                binding_error = "invalid quarantine_entry_id"
+                        if bound_qid is not None:
+                            qe = session.get(QuarantineEntry, bound_qid)
+                            if qe is None:
+                                binding_error = f"quarantine entry #{bound_qid} is missing"
+                            elif qe.quarantine_path != it.source_path:
+                                binding_error = "quarantine_entry_id disagrees with frozen source_path owner"
+                        if binding_error:
+                            affected_qe = source_qe
+                            gate6a_authority_loss[int(it.id)] = (
+                                int(affected_qe.id) if affected_qe is not None else None,
+                                f"Gate6-A restoring recovery lost frozen restore authority: {binding_error}",
+                            )
+                            if affected_qe and (
+                                affected_qe.tx_phase is not None
+                                or affected_qe.authoritative_anchor_path is not None
+                            ):
+                                tx_entries_to_reconcile.append(int(affected_qe.id))
+                            continue
+                    else:
+                        meta = json.loads(it.metadata_json or "{}")
+                        qid = meta.get("quarantine_entry_id") or meta.get("undo", {}).get("quarantine_entry_id")
+                        qe = session.get(QuarantineEntry, int(qid)) if qid else None
+
                     if qe and (qe.tx_phase is not None or qe.authoritative_anchor_path is not None):
                         tx_entries_to_reconcile.append(qe.id)
                     else:
@@ -1682,8 +1737,8 @@ class BatchPlanExecuteHandler(TaskHandler):
                             if ev:
                                 precomputed_evidence[it.id] = ev
 
-        # Reconcile transactional entries OUTSIDE the outer SQLite write transaction
-        for qid in tx_entries_to_reconcile:
+        # Reconcile transactional entries OUTSIDE the outer SQLite write transaction.
+        for qid in dict.fromkeys(tx_entries_to_reconcile):
             from app.quarantine.reconcile import reconcile_quarantine_transaction
             reconcile_quarantine_transaction(
                 context.SessionLocal,
@@ -1715,6 +1770,66 @@ class BatchPlanExecuteHandler(TaskHandler):
                 .order_by(BatchPlanItem.sequence)
             ))
             for it in executing_items:
+                authority_loss = gate6a_authority_loss.get(int(it.id))
+                if is_gate6a_bulk_restore and it.operation == "restore" and authority_loss is not None:
+                    qentry_id, fallback_reason = authority_loss
+                    qentry = session.get(QuarantineEntry, qentry_id) if qentry_id is not None else None
+                    if qentry is not None and qentry.state not in ("conflict", "restored"):
+                        qentry.state = "conflict"
+                        qentry.tx_phase = "conflict"
+                        qentry.last_error = fallback_reason
+                        qentry.updated_at = now
+
+                    if qentry is not None and qentry.state == "restored":
+                        result = "completed"
+                        reason = "reconciled transactional restore after crash with damaged item metadata"
+                        it.state = "completed"
+                        it.reason = reason
+                        result_path = it.target_path
+                    else:
+                        result = "failed"
+                        reason = (
+                            f"reconciliation conflict after crash: {qentry.last_error}"
+                            if qentry is not None and qentry.last_error
+                            else fallback_reason
+                        )
+                        it.state = "failed"
+                        it.reason = reason
+                        result_path = None
+                        reconciled_failed_item_ids.add(int(it.id))
+
+                    already_audited = False
+                    for event in session.scalars(select(AuditEvent).where(AuditEvent.operation == "restore")):
+                        try:
+                            details = json.loads(event.details_json or "{}")
+                        except Exception:
+                            continue
+                        if (
+                            isinstance(details, dict)
+                            and details.get("plan_id") == plan_id
+                            and details.get("item_id") == it.id
+                        ):
+                            already_audited = True
+                            break
+                    if not already_audited:
+                        session.add(AuditEvent(
+                            operation="restore",
+                            path=it.source_path,
+                            result=result,
+                            details_json=json.dumps({
+                                "plan_id": plan_id,
+                                "item_id": it.id,
+                                "task_id": job.id,
+                                "quarantine_entry_id": qentry_id,
+                                "reason": reason,
+                                "target": it.target_path,
+                                "result_path": result_path,
+                                "conflict_policy": plan_meta.get("conflict_policy"),
+                                "recovery_phase": "gate6a_restore_authority_loss",
+                            }, ensure_ascii=False),
+                        ))
+                    continue
+
                 _reconcile_executing_item(
                     session, it, plan_id, job.id, user_id, settings, now,
                     precomputed_evidence=precomputed_evidence.get(it.id),
