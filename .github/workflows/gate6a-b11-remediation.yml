@@ -1,0 +1,68 @@
+name: Gate6-A B11 Remediation
+
+on:
+  push:
+    branches:
+      - v0.3.6-gate6a-quarantine-bulk-operations
+    paths:
+      - ops/gate6a-remediation/apply_b11_generation_recovery.py
+      - .github/workflows/gate6a-b11-remediation.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  remediate:
+    runs-on: ubuntu-latest
+    env:
+      CONFIG_DIR: /tmp/nfc-config
+      DATA_MOUNT: /tmp/nfc-data
+      ALLOWED_ROOTS: /tmp/nfc-data
+      QUARANTINE_ROOT: /tmp/nfc-data/.nas-file-center-trash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Verify expected staging head and apply patch
+        run: |
+          set -euo pipefail
+          python -m py_compile ops/gate6a-remediation/apply_b11_generation_recovery.py
+          python ops/gate6a-remediation/apply_b11_generation_recovery.py
+          python -m py_compile app/quarantine/purge.py
+          git diff --check
+      - name: Install tests
+        run: python -m pip install -e '.[test]'
+      - name: Run B11 and purge-core recovery regressions
+        run: |
+          pytest -q \
+            tests/test_gate6a_purge_recovery_generation_gap.py \
+            tests/test_gate6a_purge_recovery.py \
+            tests/test_gate6a_purge_recovery_foreign.py \
+            tests/test_gate6a_transactional_purge_capture.py \
+            tests/test_gate6a_transactional_purge_capture_fencing.py \
+            tests/test_gate6a_transactional_purge_capture_target_race.py
+      - name: Run preserved Gate5-G regressions
+        run: |
+          pytest -q \
+            tests/test_quarantine_api.py \
+            tests/test_quarantine_core.py \
+            tests/test_quarantine_hardening.py \
+            tests/test_gate5g_g7_task11_cleanup_gate.py \
+            tests/test_gate5g_g7_task8_restore.py \
+            tests/test_gate5g_g7_hotfix2_worker_restore_authority.py \
+            tests/test_gate5g_g7_hotfix3_restore_takeover_generation.py \
+            tests/test_v0351_zfuse_ctime_stability.py
+      - name: Commit only after GREEN
+        run: |
+          set -euo pipefail
+          git config user.name 'gate6a-remediation-bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add app/quarantine/purge.py
+          git rm ops/gate6a-remediation/apply_b11_generation_recovery.py .github/workflows/gate6a-b11-remediation.yml
+          git commit -m 'fix(gate6a): recover durable purge generation gaps'
+          git push origin HEAD:v0.3.6-gate6a-quarantine-bulk-operations
