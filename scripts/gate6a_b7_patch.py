@@ -19,9 +19,33 @@ def replace_exact_once(text: str, old: str, new: str, *, label: str) -> str:
     return text.replace(old, new, 1)
 
 
+def enable_test_destructive_authority(path: str) -> None:
+    p = Path(path)
+    text = p.read_text()
+    pattern = re.compile(
+        r'((?:purge\.)?build_purge_topology_manifest\(\n(?:[^\n]*\n)*?(?P<indent>\s*)owner_lookup=[^\n]+,\n)(?P<close>\s*\))'
+    )
+
+    def repl(match: re.Match[str]) -> str:
+        prefix = match.group(1)
+        indent = match.group("indent")
+        close = match.group("close")
+        if "include_payload_identity=True" in prefix:
+            return match.group(0)
+        return f"{prefix}{indent}include_payload_identity=True,\n{close}"
+
+    updated, count = pattern.subn(repl, text)
+    if count <= 0:
+        raise SystemExit(f"{path}: no build_purge_topology_manifest test calls were updated")
+    p.write_text(updated)
+
+
 purge_path = Path("app/quarantine/purge.py")
 purge = purge_path.read_text()
 
+# Keep the persisted topology manifest topology-only. Low-level core tests may
+# explicitly opt in to an ephemeral payload-identity envelope; production Worker
+# authority is injected from BatchPlanItem.expected_* in executor.py instead.
 build_fn = textwrap.dedent(
     '''
     def build_purge_topology_manifest(
@@ -29,6 +53,7 @@ build_fn = textwrap.dedent(
         quarantine_root: Path | str,
         *,
         owner_lookup: Callable[[int], Any | None] | None = None,
+        include_payload_identity: bool = False,
     ) -> dict[str, Any]:
         """Build the read-only Gate6-A transactional purge topology manifest."""
         manifest = _build_preview_purge_topology_manifest(
@@ -36,13 +61,14 @@ build_fn = textwrap.dedent(
             quarantine_root,
             owner_lookup=owner_lookup,
         )
-        manifest["frozen_payload_identity"] = {
-            "device": entry.device,
-            "inode": entry.inode,
-            "size": entry.size,
-            "mtime_ns": entry.mtime_ns,
-            "content_hash": str(entry.content_hash or "").lower(),
-        }
+        if include_payload_identity:
+            manifest["frozen_payload_identity"] = {
+                "device": entry.device,
+                "inode": entry.inode,
+                "size": entry.size,
+                "mtime_ns": entry.mtime_ns,
+                "content_hash": str(entry.content_hash or "").lower(),
+            }
         return manifest
     '''
 ).lstrip()
@@ -293,6 +319,7 @@ executor = replace_regex_once(
 )
 executor_path.write_text(executor)
 
+# Formal executor tests must model a frozen BatchPlanItem, not an ad-hoc item.
 executor_tests_path = Path("tests/test_gate6a_transactional_purge_executor.py")
 executor_tests = executor_tests_path.read_text()
 authorized_old = '''        OperationItem(sequence=1, operation="quarantine_purge", source=public_view),
@@ -350,3 +377,78 @@ executor_tests = replace_exact_once(
     label="executor owner-race test",
 )
 executor_tests_path.write_text(executor_tests)
+
+# Low-level purge-core tests deliberately bypass BatchPlanItem. Make that bypass
+# explicit by asking the test-only builder mode to attach the frozen payload
+# identity; production Freeze/Validate never uses this option.
+for low_level_test in (
+    "tests/test_gate6a_transactional_purge_capture.py",
+    "tests/test_gate6a_transactional_purge_qualification.py",
+    "tests/test_gate6a_transactional_purge_destroy.py",
+    "tests/test_gate6a_transactional_purge_intent_race.py",
+    "tests/test_gate6a_purge_recovery.py",
+    "tests/test_gate6a_purge_recovery_foreign.py",
+):
+    enable_test_destructive_authority(low_level_test)
+
+# The intent-only unit test has no real filesystem topology. Give its synthetic
+# row a complete frozen identity and pass that authority explicitly.
+capture_path = Path("tests/test_gate6a_transactional_purge_capture.py")
+capture_tests = capture_path.read_text()
+capture_tests = replace_exact_once(
+    capture_tests,
+    '''                active_attempt_generation=1,
+            )''',
+    '''                active_attempt_generation=1,
+                device=11,
+                inode=12,
+                size=13,
+                mtime_ns=14,
+                content_hash="a" * 64,
+            )''',
+    label="capture synthetic identity",
+)
+capture_tests = replace_exact_once(
+    capture_tests,
+    '''    _insert_entry(SessionLocal, state="active", tx_phase="active")
+
+    _begin_transactional_purge_intent(SessionLocal, 1, "worker-1")''',
+    '''    _insert_entry(SessionLocal, state="active", tx_phase="active")
+
+    frozen_manifest = {
+        "frozen_payload_identity": {
+            "device": 11,
+            "inode": 12,
+            "size": 13,
+            "mtime_ns": 14,
+            "content_hash": "a" * 64,
+        }
+    }
+    _begin_transactional_purge_intent(
+        SessionLocal,
+        1,
+        "worker-1",
+        frozen_manifest=frozen_manifest,
+    )''',
+    label="capture intent frozen authority",
+)
+capture_path.write_text(capture_tests)
+
+# Restart/crash tests that manually invoke the purge core must consume the same
+# authority pair as the real Worker: frozen topology + BatchPlanItem.expected_*.
+for recovery_path in Path("tests").glob("test_gate6a_purge_recovery*.py"):
+    text = recovery_path.read_text()
+    marker = '        frozen_manifest = metadata["purge_topology_manifest"]\n'
+    if marker not in text:
+        continue
+    replacement = '''        frozen_manifest = dict(metadata["frozen_purge_topology_manifest"])
+        frozen_manifest["frozen_payload_identity"] = {
+            "device": item.expected_device,
+            "inode": item.expected_inode,
+            "size": item.expected_size,
+            "mtime_ns": item.expected_mtime_ns,
+            "content_hash": item.expected_hash,
+        }
+'''
+    text = text.replace(marker, replacement)
+    recovery_path.write_text(text)
