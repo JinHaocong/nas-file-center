@@ -5,9 +5,12 @@ import os
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy.orm import object_session
+
 from app.batch_utilities.empty_dir_quarantine import safe_open_parent_fd
 from app.exceptions import StateConflictError
-from app.models import QuarantineEntry
+from app.models import BatchPlanItem, QuarantineEntry
+from app.quarantine.bulk import quarantine_entry_identity_material
 from app.quarantine.purge import build_purge_topology_manifest, validate_purge_topology_manifest
 from app.quarantine.candidate import qualify_candidate_anchor_fd
 
@@ -38,6 +41,8 @@ def _gate6a_restore_binding_error(
     source_path: str,
     target_path: str | None,
     entry: QuarantineEntry,
+    item_id: int | None = None,
+    frozen_expected: dict[str, Any] | None = None,
 ) -> str | None:
     if str(source_path) != str(entry.quarantine_path):
         return "Gate6-A restore source_path disagrees with quarantine_entry_id owner"
@@ -50,6 +55,88 @@ def _gate6a_restore_binding_error(
     plan_preview_digest = plan_meta.get("preview_digest")
     if isinstance(plan_preview_digest, str) and metadata.get("preview_digest") != plan_preview_digest:
         return "Gate6-A restore preview_digest disagrees with plan authority"
+
+    selected_entry_ids = plan_meta.get("entry_ids")
+    if selected_entry_ids is not None:
+        if not isinstance(selected_entry_ids, list):
+            return "Gate6-A restore plan entry_ids authority is malformed"
+        if entry_id not in selected_entry_ids:
+            return "Gate6-A restore quarantine_entry_id is not in the frozen plan selection"
+
+    # New Gate6-A plans persist authority outside mutable BatchPlanItem fields, keyed by
+    # the database-owned item id.  Freeze/Validate pass item_id explicitly.  At Execute,
+    # the resolved qentry and the exact executing row are identity-mapped in the same
+    # SQLAlchemy Session, so the helper can recover that stable row id without trusting
+    # metadata_json/source_path/target_path.
+    raw_item_authority = plan_meta.get("restore_item_authority")
+    worker_item: BatchPlanItem | None = None
+    resolved_item_id = item_id
+    if raw_item_authority is not None:
+        if not isinstance(raw_item_authority, dict):
+            return "Gate6-A restore plan-level item authority is malformed"
+
+        if resolved_item_id is None:
+            session = object_session(entry)
+            if session is not None:
+                executing_rows = [
+                    obj
+                    for obj in session.identity_map.values()
+                    if isinstance(obj, BatchPlanItem)
+                    and obj.operation == "restore"
+                    and obj.state == "executing"
+                ]
+                if len(executing_rows) == 1:
+                    worker_item = executing_rows[0]
+                    resolved_item_id = int(worker_item.id)
+                elif len(executing_rows) > 1:
+                    return "Gate6-A restore executing plan-item authority is ambiguous"
+
+        if resolved_item_id is None:
+            return "Gate6-A restore could not resolve frozen plan-item authority"
+
+        item_authority = raw_item_authority.get(str(resolved_item_id))
+        if not isinstance(item_authority, dict):
+            return "Gate6-A restore frozen plan-item authority record is missing or malformed"
+
+        if item_authority.get("quarantine_entry_id") != entry_id:
+            return "Gate6-A restore quarantine_entry_id disagrees with frozen plan-item authority"
+
+        expected_authority = {
+            "source_path": str(source_path),
+            "target_path": str(target_path or ""),
+            "conflict_policy": metadata.get("conflict_policy"),
+            "preview_digest": metadata.get("preview_digest"),
+            "skip_preexisting_target": metadata.get("skip_preexisting_target") is True,
+        }
+        for key, current in expected_authority.items():
+            if item_authority.get(key) != current:
+                return f"Gate6-A restore frozen plan-item authority disagrees on {key}"
+
+        entry_identity = item_authority.get("entry_identity")
+        if not isinstance(entry_identity, dict):
+            return "Gate6-A restore frozen qentry identity authority is malformed"
+        if quarantine_entry_identity_material(entry) != entry_identity:
+            return "Gate6-A restore current qentry disagrees with frozen plan-item identity authority"
+
+        effective_frozen_expected = frozen_expected
+        if effective_frozen_expected is None and worker_item is not None:
+            effective_frozen_expected = {
+                "device": worker_item.expected_device,
+                "inode": worker_item.expected_inode,
+                "size": worker_item.expected_size,
+                "mtime_ns": worker_item.expected_mtime_ns,
+                "content_hash": worker_item.expected_hash,
+            }
+        if effective_frozen_expected is not None:
+            authority_expected = {
+                "device": entry_identity.get("device"),
+                "inode": entry_identity.get("inode"),
+                "size": entry_identity.get("size"),
+                "mtime_ns": entry_identity.get("mtime_ns"),
+                "content_hash": entry_identity.get("content_hash"),
+            }
+            if effective_frozen_expected != authority_expected:
+                return "Gate6-A restore frozen expected_* identity disagrees with plan-item authority"
 
     raw_authority = plan_meta.get("restore_skip_authority", {})
     if raw_authority is None:
@@ -234,6 +321,7 @@ def freeze_bulk_plan_item(
             source_path=str(item.get("source_path") or ""),
             target_path=item.get("target_path"),
             entry=entry,
+            item_id=int(item.get("id")),
         )
         if binding_error is not None:
             raise StateConflictError(binding_error)
@@ -369,6 +457,14 @@ def validate_bulk_plan_item(
             source_path=str(item.source_path),
             target_path=item.target_path,
             entry=entry,
+            item_id=int(item.id),
+            frozen_expected={
+                "device": item.expected_device,
+                "inode": item.expected_inode,
+                "size": item.expected_size,
+                "mtime_ns": item.expected_mtime_ns,
+                "content_hash": item.expected_hash,
+            },
         )
         if binding_error is not None:
             return {
