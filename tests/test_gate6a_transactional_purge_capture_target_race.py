@@ -34,6 +34,7 @@ def test_transactional_purge_capture_preserves_slot_inserted_at_capture_syscall(
     os.link(anchor, captured_source)
     os.link(anchor, public_view)
     st = anchor.stat(follow_symlinks=False)
+    digest = hashlib.sha256(payload).hexdigest()
 
     engine, SessionLocal = create_engine_and_session(tmp_path / "capture-target-race.db")
     init_db(engine)
@@ -53,7 +54,7 @@ def test_transactional_purge_capture_preserves_slot_inserted_at_capture_syscall(
                 inode=st.st_ino,
                 size=st.st_size,
                 mtime_ns=st.st_mtime_ns,
-                content_hash=hashlib.sha256(payload).hexdigest(),
+                content_hash=digest,
             )
         )
         session.commit()
@@ -67,6 +68,14 @@ def test_transactional_purge_capture_preserves_slot_inserted_at_capture_syscall(
             owner_lookup=lambda _: None,
         )
         assert frozen_manifest["blockers"] == []
+        frozen_manifest = dict(frozen_manifest)
+        frozen_manifest["frozen_payload_identity"] = {
+            "device": st.st_dev,
+            "inode": st.st_ino,
+            "size": st.st_size,
+            "mtime_ns": st.st_mtime_ns,
+            "content_hash": digest,
+        }
 
     real_link = os.link
     injected = False
