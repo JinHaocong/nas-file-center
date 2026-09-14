@@ -1,0 +1,72 @@
+name: Gate6-A Plan1 B11 Helper
+
+on:
+  push:
+    branches:
+      - v0.3.6-gate6a-plan1-b11-helper
+
+permissions:
+  contents: write
+
+jobs:
+  red-green:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CONFIG_DIR: /tmp/nfc-config
+      DATA_MOUNT: /tmp/nfc-data
+      ALLOWED_ROOTS: /tmp/nfc-data
+      QUARANTINE_ROOT: /tmp/nfc-data/.nas-file-center-trash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install test dependencies
+        run: python -m pip install -e '.[test]'
+      - name: Observe B11 RED
+        run: |
+          set +e
+          pytest tests/test_gate6a_plan1_b11_generation_recovery.py -v > /tmp/b11-red.log 2>&1
+          rc=$?
+          set -e
+          cat /tmp/b11-red.log
+          if [ "$rc" -eq 0 ]; then
+            echo "Expected B11 regression tests to fail before production patch"
+            exit 1
+          fi
+          grep -q "PURGE_RECOVERY_REQUIRED" /tmp/b11-red.log
+      - name: Apply exact B11 patch
+        run: python ops/gate6a-plan1/apply_b11.py
+      - name: Compile and diff gate
+        run: |
+          python -m py_compile app/quarantine/purge.py
+          git diff --check
+      - name: Observe B11 GREEN
+        run: pytest tests/test_gate6a_plan1_b11_generation_recovery.py -v
+      - name: Run purge recovery regressions
+        run: pytest tests/test_gate6a_purge_recovery.py tests/test_gate6a_purge_recovery_restart.py tests/test_gate6a_purge_recovery_foreign.py -q
+      - name: Run preserved Gate5-G regressions
+        run: >-
+          pytest
+          tests/test_quarantine_api.py
+          tests/test_quarantine_core.py
+          tests/test_quarantine_hardening.py
+          tests/test_gate5g_g7_task11_cleanup_gate.py
+          tests/test_gate5g_g7_task8_restore.py
+          tests/test_gate5g_g7_hotfix2_worker_restore_authority.py
+          tests/test_gate5g_g7_hotfix3_restore_takeover_generation.py
+          tests/test_v0351_zfuse_ctime_stability.py
+          -q
+      - name: Commit only after RED then GREEN
+        run: |
+          git config user.name "gate6a-remediation-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git rm ops/gate6a-plan1/apply_b11.py .github/workflows/gate6a-plan1-b11-helper.yml
+          git add app/quarantine/purge.py tests/test_gate6a_plan1_b11_generation_recovery.py
+          git diff --cached --check
+          git commit -m "fix(gate6a): recover interrupted purge generation preparation"
+          git push origin HEAD:v0.3.6-gate6a-plan1-b11-helper
