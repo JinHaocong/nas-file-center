@@ -1,0 +1,76 @@
+name: Gate6-A Tombstone Test Migration Retry
+
+on:
+  push:
+    branches:
+      - v0.3.6-gate6a-quarantine-bulk-operations
+    paths:
+      - .github/workflows/gate6a-test-migration-retry.yml
+
+permissions:
+  contents: write
+
+jobs:
+  migrate-test-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TARGET_BRANCH: v0.3.6-gate6a-quarantine-bulk-operations
+      CONFIG_DIR: /tmp/nfc-config
+      DATA_MOUNT: /tmp/nfc-data
+      ALLOWED_ROOTS: /tmp/nfc-data
+      QUARANTINE_ROOT: /tmp/nfc-data/.nas-file-center-trash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          fetch-depth: 0
+          token: ${{ github.token }}
+
+      - name: Extract and fix audited migration payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          PAYLOAD="$(grep "base64 -d > /tmp/migrate_tests.py" .github/workflows/gate6a-test-migration-runner.yml | sed -E "s/.*echo '([^']+)'.*/\1/")"
+          test -n "$PAYLOAD"
+          printf '%s' "$PAYLOAD" | base64 -d > /tmp/migrate_tests.py
+          sed -i "s/^''''$/'''/" /tmp/migrate_tests.py
+          python -m py_compile /tmp/migrate_tests.py
+          python /tmp/migrate_tests.py
+          python -m py_compile tests/test_gate6a_transactional_purge_capture.py tests/test_gate6a_transactional_purge_capture_fencing.py tests/test_gate6a_transactional_purge_executor.py tests/test_gate6a_bulk_purge_worker_handler.py tests/test_gate6a_bulk_purge_history_audit.py tests/test_gate6a_bulk_purge_partial.py tests/test_gate6a_purge_recovery_restart.py
+          git diff --check -- tests
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - run: python -m pip install -e '.[test]'
+
+      - name: Verify migrated Gate6-A safety contract
+        env:
+          PYTHONPATH: .
+        run: >-
+          pytest
+          tests/test_quarantine_api.py
+          tests/test_quarantine_core.py
+          tests/test_quarantine_hardening.py
+          tests/test_gate5g_g7_task11_cleanup_gate.py
+          tests/test_gate5g_g7_task8_restore.py
+          tests/test_gate5g_g7_hotfix2_worker_restore_authority.py
+          tests/test_gate5g_g7_hotfix3_restore_takeover_generation.py
+          tests/test_v0351_zfuse_ctime_stability.py
+          tests/test_gate6a_bulk_*.py
+          tests/test_gate6a_transactional_purge*.py
+          tests/test_gate6a_purge_recovery*.py
+          -q
+
+      - name: Commit only after GREEN
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add tests
+          git config user.name "Gate6-A remediation bot"
+          git config user.email "actions@users.noreply.github.com"
+          git commit -m "test(gate6a): migrate purge assertions to tombstone protocol"
+          git push origin "HEAD:$TARGET_BRANCH"
