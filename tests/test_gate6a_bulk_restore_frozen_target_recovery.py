@@ -43,17 +43,20 @@ def _client(tmp_path: Path) -> TestClient:
     return client
 
 
-def _active_entry(client: TestClient) -> tuple[int, Path, Path, Path]:
+def _active_entry(
+    client: TestClient,
+    name: str = "crash-rename-restore.txt",
+    payload: bytes = b"gate6a-frozen-target-crash-recovery",
+) -> tuple[int, Path, Path, Path]:
     service = client.app.state.service
     data = Path(service.settings.data_mount)
     trash = Path(service.settings.quarantine_root)
-    original = data / "crash-rename-restore.txt"
-    payload = b"gate6a-frozen-target-crash-recovery"
+    original = data / name
 
     with service.SessionLocal() as session:
         entry = QuarantineEntry(
             original_path=str(original),
-            quarantine_path=str(trash / "pending-crash-rename.txt"),
+            quarantine_path=str(trash / f"pending-{name}"),
             state="active",
             tx_phase="active",
             active_attempt_generation=1,
@@ -72,7 +75,7 @@ def _active_entry(client: TestClient) -> tuple[int, Path, Path, Path]:
         attempt.mkdir(parents=True)
         anchor = attempt / "anchor"
         captured = attempt / "captured_source"
-        public_view = trash / f"crash-rename.q-{entry.id}.txt"
+        public_view = trash / f"{Path(name).stem}.q-{entry.id}{Path(name).suffix}"
         anchor.write_bytes(payload)
         os.link(anchor, captured)
         os.link(anchor, public_view)
@@ -204,7 +207,6 @@ def test_restoring_crash_rename_keeps_frozen_target_when_original_owner_disappea
     plan_id, frozen_target, _foreign_payload = _prepare_rename_plan(client, entry_id, original)
     item_id = _arm_crash_after_restore_intent(service, plan_id, entry_id)
 
-    # The foreign owner legitimately moves away after Freeze/Validate but before restart.
     original.unlink()
     assert not original.exists()
 
@@ -212,7 +214,6 @@ def test_restoring_crash_rename_keeps_frozen_target_when_original_owner_disappea
     job_id = _prepare_worker(service, plan_id, worker_id)
     _run_worker(service, job_id, worker_id)
 
-    # Recovery authority is the frozen BatchPlanItem target, never a re-selected original path.
     assert not original.exists()
     assert frozen_target.exists()
     assert frozen_target.read_bytes() == anchor.read_bytes()
@@ -259,7 +260,6 @@ def test_restoring_crash_after_frozen_target_publish_converges_idempotently_with
     plan_id, frozen_target, foreign_payload = _prepare_rename_plan(client, entry_id, original)
     item_id = _arm_crash_after_restore_intent(service, plan_id, entry_id)
 
-    # Simulate normal restore having already published the frozen target but crashing before terminal DB commit.
     os.link(anchor, frozen_target)
     assert frozen_target.exists()
 
@@ -280,3 +280,102 @@ def test_restoring_crash_after_frozen_target_publish_converges_idempotently_with
         frozen_target=frozen_target,
         job_id=job_id,
     )
+
+
+def test_restoring_crash_rejects_post_validate_target_rebind_before_filesystem_mutation(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    service = client.app.state.service
+    entry_id, anchor, public_view, original = _active_entry(client)
+    plan_id, frozen_target, foreign_payload = _prepare_rename_plan(client, entry_id, original)
+    item_id = _arm_crash_after_restore_intent(service, plan_id, entry_id)
+
+    forged_target = Path(service.settings.data_mount) / "forged-recovery-target.txt"
+    with service.SessionLocal() as session:
+        item = session.get(BatchPlanItem, item_id)
+        assert item is not None
+        item.target_path = str(forged_target)
+        session.commit()
+
+    worker_id = "worker-gate6a-recovery-target-rebind"
+    job_id = _prepare_worker(service, plan_id, worker_id)
+    _run_worker(service, job_id, worker_id)
+
+    assert original.read_bytes() == foreign_payload
+    assert not frozen_target.exists()
+    assert not forged_target.exists()
+    assert public_view.exists()
+    assert public_view.read_bytes() == anchor.read_bytes()
+
+    with service.SessionLocal() as session:
+        entry = session.get(QuarantineEntry, entry_id)
+        item = session.get(BatchPlanItem, item_id)
+        assert entry is not None and item is not None
+        assert entry.state == "conflict"
+        assert item.state == "failed"
+        assert item.reason and "authority" in item.reason.lower()
+        audits = session.query(AuditEvent).filter_by(operation="restore").all()
+        item_audits = []
+        for event in audits:
+            details = json.loads(event.details_json or "{}")
+            if details.get("item_id") == item_id:
+                item_audits.append((event, details))
+        assert len(item_audits) == 1
+        assert item_audits[0][0].result == "failed"
+        assert not any(event.result == "completed" for event, _details in item_audits)
+
+
+def test_restoring_crash_rejects_coordinated_qid_source_rebind_to_unselected_entry(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    service = client.app.state.service
+    selected_id, selected_anchor, selected_public, selected_original = _active_entry(
+        client, "selected-recovery-a.txt", b"selected-recovery-a"
+    )
+    unselected_id, unselected_anchor, unselected_public, unselected_original = _active_entry(
+        client, "unselected-recovery-b.txt", b"unselected-recovery-b"
+    )
+    plan_id, frozen_target, foreign_payload = _prepare_rename_plan(client, selected_id, selected_original)
+    item_id = _arm_crash_after_restore_intent(service, plan_id, selected_id)
+
+    with service.SessionLocal() as session:
+        item = session.get(BatchPlanItem, item_id)
+        assert item is not None
+        metadata = json.loads(item.metadata_json or "{}")
+        metadata["quarantine_entry_id"] = unselected_id
+        item.metadata_json = json.dumps(metadata, sort_keys=True)
+        item.source_path = str(unselected_public)
+        session.commit()
+
+    worker_id = "worker-gate6a-recovery-qid-source-rebind"
+    job_id = _prepare_worker(service, plan_id, worker_id)
+    _run_worker(service, job_id, worker_id)
+
+    assert selected_original.read_bytes() == foreign_payload
+    assert not frozen_target.exists()
+    assert selected_public.exists()
+    assert selected_public.read_bytes() == selected_anchor.read_bytes()
+    assert not unselected_original.exists()
+    assert unselected_public.exists()
+    assert unselected_public.read_bytes() == unselected_anchor.read_bytes()
+
+    with service.SessionLocal() as session:
+        selected = session.get(QuarantineEntry, selected_id)
+        unselected = session.get(QuarantineEntry, unselected_id)
+        item = session.get(BatchPlanItem, item_id)
+        assert selected is not None and unselected is not None and item is not None
+        assert selected.state == "conflict"
+        assert (unselected.state, unselected.tx_phase) == ("active", "active")
+        assert item.state == "failed"
+        assert item.reason and "authority" in item.reason.lower()
+        audits = session.query(AuditEvent).filter_by(operation="restore").all()
+        item_audits = []
+        for event in audits:
+            details = json.loads(event.details_json or "{}")
+            if details.get("item_id") == item_id:
+                item_audits.append((event, details))
+        assert len(item_audits) == 1
+        assert item_audits[0][0].result == "failed"
+        assert not any(
+            event.result in {"completed", "skipped"}
+            and details.get("quarantine_entry_id") == unselected_id
+            for event, details in item_audits
+        )
