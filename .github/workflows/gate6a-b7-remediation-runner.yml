@@ -1,0 +1,331 @@
+name: Gate6-A B7 Remediation Runner
+
+on:
+  push:
+    branches:
+      - v0.3.6-gate6a-quarantine-bulk-operations
+    paths:
+      - .github/workflows/gate6a-b7-remediation-runner.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  remediate-b7:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v0.3.6-gate6a-quarantine-bulk-operations
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Apply B7 frozen identity authority patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected exactly one match, got {count}")
+              p.write_text(text.replace(old, new, 1))
+
+          # app/quarantine/purge.py: make the manifest helper carry a frozen
+          # payload identity for direct core tests and bind that same authority
+          # throughout intent/qualification/destruction.
+          replace_once(
+              "app/quarantine/purge.py",
+              '''    return _build_preview_purge_topology_manifest(
+              entry,
+              quarantine_root,
+              owner_lookup=owner_lookup,
+          )''',
+              '''    manifest = _build_preview_purge_topology_manifest(
+              entry,
+              quarantine_root,
+              owner_lookup=owner_lookup,
+          )
+              manifest["frozen_payload_identity"] = {
+                  "device": entry.device,
+                  "inode": entry.inode,
+                  "size": entry.size,
+                  "mtime_ns": entry.mtime_ns,
+                  "content_hash": str(entry.content_hash or "").lower(),
+              }
+              return manifest''',
+          )
+
+          anchor = '''def validate_purge_topology_manifest(
+              frozen_manifest: dict[str, Any],
+              current_manifest: dict[str, Any],
+          ) -> str | None:
+              """Return the fail-closed reason for current topology, or None when unchanged."""
+              blockers = list(current_manifest.get("blockers") or [])
+              if blockers:
+                  return str(blockers[0])
+              if current_manifest != frozen_manifest:
+                  return "PURGE_TOPOLOGY_CHANGED"
+              return None
+          '''
+          helper = anchor + '''
+
+          def _require_frozen_payload_identity(
+              frozen_manifest: dict[str, Any],
+          ) -> tuple[int, int, int, int, str]:
+              raw = frozen_manifest.get("frozen_payload_identity")
+              if not isinstance(raw, dict):
+                  raise StateConflictError("PURGE_FROZEN_IDENTITY_MISSING: frozen payload identity is required")
+              required = ("device", "inode", "size", "mtime_ns", "content_hash")
+              if any(raw.get(key) is None for key in required):
+                  raise StateConflictError("PURGE_FROZEN_IDENTITY_MISSING: frozen payload identity is incomplete")
+              try:
+                  device = int(raw["device"])
+                  inode = int(raw["inode"])
+                  size = int(raw["size"])
+                  mtime_ns = int(raw["mtime_ns"])
+              except (TypeError, ValueError) as exc:
+                  raise StateConflictError("PURGE_FROZEN_IDENTITY_MISSING: frozen payload identity is invalid") from exc
+              content_hash = str(raw.get("content_hash") or "").lower()
+              if not content_hash:
+                  raise StateConflictError("PURGE_FROZEN_IDENTITY_MISSING: frozen payload hash is required")
+              return device, inode, size, mtime_ns, content_hash
+          '''
+          replace_once("app/quarantine/purge.py", anchor, helper)
+
+          replace_once(
+              "app/quarantine/purge.py",
+              '''        if frozen_manifest is not None and quarantine_root is not None:
+              ownership_reason = _intent_time_purge_ownership_reason(''',
+              '''        if frozen_manifest is None:
+              session.rollback()
+              raise StateConflictError("PURGE_FROZEN_IDENTITY_MISSING: frozen purge authority is required")
+          expected_identity = _require_frozen_payload_identity(frozen_manifest)
+          current_identity = (
+              int(entry.device or 0),
+              int(entry.inode or 0),
+              int(entry.size or 0),
+              int(entry.mtime_ns or 0),
+              str(entry.content_hash or "").lower(),
+          )
+          if current_identity != expected_identity:
+              session.rollback()
+              raise StateConflictError(
+                  f"PURGE_FROZEN_IDENTITY_CHANGED: quarantine entry #{entry_id} identity changed after Freeze"
+              )
+          if quarantine_root is not None:
+              ownership_reason = _intent_time_purge_ownership_reason(''',
+          )
+
+          old_identity_read = '''        generation = int(entry.active_attempt_generation or 0)
+              expected_device = entry.device
+              expected_inode = entry.inode
+              expected_size = entry.size
+              expected_mtime_ns = entry.mtime_ns
+              expected_hash = (entry.content_hash or "").lower()
+
+          if generation <= 0 or not expected_hash:'''
+          new_identity_read = '''        generation = int(entry.active_attempt_generation or 0)
+
+          expected_device, expected_inode, expected_size, expected_mtime_ns, expected_hash = (
+              _require_frozen_payload_identity(frozen_manifest)
+          )
+
+          if generation <= 0:'''
+          p = Path("app/quarantine/purge.py")
+          text = p.read_text()
+          count = text.count(old_identity_read)
+          if count != 2:
+              raise SystemExit(f"purge.py: expected two mutable identity reads, got {count}")
+          p.write_text(text.replace(old_identity_read, new_identity_read))
+
+          replace_once(
+              "app/quarantine/purge.py",
+              '''        if int(entry.active_attempt_generation or 0) != generation:
+              current_generation = int(entry.active_attempt_generation or 0)
+              session.rollback()
+              raise StateConflictError(
+                  f"Quarantine entry #{entry_id} purge generation changed "
+                  f"(expected={generation}, current={current_generation})"
+              )
+          entry.state = "purged"''',
+              '''        if int(entry.active_attempt_generation or 0) != generation:
+              current_generation = int(entry.active_attempt_generation or 0)
+              session.rollback()
+              raise StateConflictError(
+                  f"Quarantine entry #{entry_id} purge generation changed "
+                  f"(expected={generation}, current={current_generation})"
+              )
+          current_identity = (
+              int(entry.device or 0),
+              int(entry.inode or 0),
+              int(entry.size or 0),
+              int(entry.mtime_ns or 0),
+              str(entry.content_hash or "").lower(),
+          )
+          if current_identity != (
+              expected_device,
+              expected_inode,
+              expected_size,
+              expected_mtime_ns,
+              expected_hash,
+          ):
+              session.rollback()
+              raise StateConflictError(
+                  f"PURGE_FROZEN_IDENTITY_CHANGED: quarantine entry #{entry_id} identity changed before terminal purge commit"
+              )
+          entry.state = "purged"''',
+          )
+
+          # app/execution/executor.py: BatchPlanItem expected_* is the source of
+          # frozen payload authority. Inject it into a copy of the frozen topology
+          # manifest before any purge-engine call.
+          replace_once(
+              "app/execution/executor.py",
+              '''        if item.expected_hash:
+              from app.models import QuarantineEntry
+
+              with session_factory() as session:''',
+              '''        if (
+              item.expected_device is None
+              or item.expected_inode is None
+              or item.expected_size is None
+              or item.expected_mtime_ns is None
+              or not item.expected_hash
+          ):
+              return ItemResult("failed", "PURGE_FROZEN_IDENTITY_MISSING: BatchPlanItem.expected_* is required")
+          frozen_payload_identity = {
+              "device": int(item.expected_device),
+              "inode": int(item.expected_inode),
+              "size": int(item.expected_size),
+              "mtime_ns": int(item.expected_mtime_ns),
+              "content_hash": str(item.expected_hash).lower(),
+          }
+          frozen_purge_authority = dict(purge_manifest)
+          frozen_purge_authority["frozen_payload_identity"] = frozen_payload_identity
+
+          from app.models import QuarantineEntry
+
+          with session_factory() as session:''',
+          )
+
+          replace_once(
+              "app/execution/executor.py",
+              '''                purge_manifest,
+              quarantine_root,
+              list(allowed_roots),
+          )
+              destroy_transactional_purge_capture(
+              session_factory,
+              quarantine_entry_id,
+              worker_id,
+              purge_manifest,''',
+              '''                frozen_purge_authority,
+              quarantine_root,
+              list(allowed_roots),
+          )
+              destroy_transactional_purge_capture(
+              session_factory,
+              quarantine_entry_id,
+              worker_id,
+              frozen_purge_authority,''',
+          )
+
+          # Existing executor tests that model a formal Gate6-A frozen item need
+          # to provide the same expected_* authority the real Worker does.
+          p = Path("tests/test_gate6a_transactional_purge_executor.py")
+          text = p.read_text()
+          old = '''        OperationItem(sequence=1, operation="quarantine_purge", source=public_view),
+              allowed_roots=[data],
+              allow_mutation=True,
+              allow_delete=True,
+              quarantine_root=quarantine_root,
+              plan_id="gate6a-purge-authorized",'''
+          new = '''        OperationItem(
+              sequence=1,
+              operation="quarantine_purge",
+              source=public_view,
+              expected_device=st.st_dev,
+              expected_inode=st.st_ino,
+              expected_size=st.st_size,
+              expected_mtime_ns=st.st_mtime_ns,
+              expected_hash=hashlib.sha256(payload).hexdigest(),
+          ),
+              allowed_roots=[data],
+              allow_mutation=True,
+              allow_delete=True,
+              quarantine_root=quarantine_root,
+              plan_id="gate6a-purge-authorized",'''
+          if text.count(old) != 1:
+              raise SystemExit("executor test: authorized call pattern not found exactly once")
+          text = text.replace(old, new, 1)
+          old = '''        OperationItem(sequence=1, operation="quarantine_purge", source=public_view),
+              allowed_roots=[data],
+              allow_mutation=True,
+              allow_delete=True,
+              quarantine_root=quarantine_root,
+              plan_id="gate6a-purge-owner-race",'''
+          new = '''        OperationItem(
+              sequence=1,
+              operation="quarantine_purge",
+              source=public_view,
+              expected_device=st.st_dev,
+              expected_inode=st.st_ino,
+              expected_size=st.st_size,
+              expected_mtime_ns=st.st_mtime_ns,
+              expected_hash=payload_hash,
+          ),
+              allowed_roots=[data],
+              allow_mutation=True,
+              allow_delete=True,
+              quarantine_root=quarantine_root,
+              plan_id="gate6a-purge-owner-race",'''
+          if text.count(old) != 1:
+              raise SystemExit("executor test: owner-race call pattern not found exactly once")
+          p.write_text(text.replace(old, new, 1))
+          PY
+
+          python -m py_compile app/execution/executor.py app/quarantine/purge.py
+          git diff --check
+
+      - name: Install tests
+        run: python -m pip install -e '.[test]'
+
+      - name: Verify B7 and preserved destructive regressions
+        run: >-
+          pytest
+          tests/test_gate6a_transactional_purge_b7_frozen_identity_intent_race.py
+          tests/test_gate6a_transactional_purge_executor.py
+          tests/test_gate6a_transactional_purge_intent_race.py
+          tests/test_gate6a_transactional_purge_capture.py
+          tests/test_gate6a_transactional_purge_qualification.py
+          tests/test_gate6a_transactional_purge_destroy.py
+          tests/test_gate6a_purge_recovery*.py
+          tests/test_gate5g_g7_task11_cleanup_gate.py
+          tests/test_gate5g_g7_task8_restore.py
+          tests/test_gate5g_g7_hotfix2_worker_restore_authority.py
+          tests/test_gate5g_g7_hotfix3_restore_takeover_generation.py
+          tests/test_v0351_zfuse_ctime_stability.py
+          -v
+
+      - name: Commit only after GREEN
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/gate6a-b7-remediation-runner.yml
+          git diff --check
+          git config user.name "gate6a-remediation-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add app/execution/executor.py app/quarantine/purge.py tests/test_gate6a_transactional_purge_executor.py
+          git commit -m "fix(gate6a): bind frozen identity to purge intent"
+          git push origin HEAD:v0.3.6-gate6a-quarantine-bulk-operations
