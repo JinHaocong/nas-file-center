@@ -76,6 +76,7 @@ def persist_bulk_draft(
         session.add(plan)
         session.flush()
 
+        restore_items: list[tuple[BatchPlanItem, int]] = []
         for sequence, entry_id in enumerate(entry_ids, start=1):
             entry = entries[entry_id]
             preview_item = preview_items[entry_id]
@@ -101,23 +102,45 @@ def persist_bulk_draft(
                     "purge_topology_manifest": preview_item["purge_topology_manifest"],
                 }
 
-            session.add(
-                BatchPlanItem(
-                    plan_id=plan.id,
-                    sequence=sequence,
-                    operation=operation,
-                    source_path=entry.quarantine_path,
-                    target_path=target_path,
-                    keep_path=None,
-                    expected_size=0,
-                    expected_mtime_ns=0,
-                    expected_device=0,
-                    expected_inode=0,
-                    expected_hash=None,
-                    state="planned",
-                    metadata_json=json.dumps(item_metadata, ensure_ascii=False, sort_keys=True),
-                )
+            row = BatchPlanItem(
+                plan_id=plan.id,
+                sequence=sequence,
+                operation=operation,
+                source_path=entry.quarantine_path,
+                target_path=target_path,
+                keep_path=None,
+                expected_size=0,
+                expected_mtime_ns=0,
+                expected_device=0,
+                expected_inode=0,
+                expected_hash=None,
+                state="planned",
+                metadata_json=json.dumps(item_metadata, ensure_ascii=False, sort_keys=True),
             )
+            session.add(row)
+            if is_restore:
+                restore_items.append((row, entry_id))
+
+        if is_restore:
+            # Item ids are database-owned and stable.  Bind every restore row to plan-level
+            # authority so post-Freeze mutation of BatchPlanItem metadata/source/target cannot
+            # redefine which QuarantineEntry that exact row is allowed to restore.
+            session.flush()
+            plan_metadata["restore_item_authority"] = {
+                str(row.id): {
+                    "quarantine_entry_id": entry_id,
+                    "source_path": str(entries[entry_id].quarantine_path),
+                    "target_path": str(row.target_path or ""),
+                    "conflict_policy": conflict_policy,
+                    "preview_digest": preview_digest,
+                    "skip_preexisting_target": (
+                        preview_items[entry_id].get("skip_preexisting_target") is True
+                    ),
+                    "entry_identity": quarantine_entry_identity_material(entries[entry_id]),
+                }
+                for row, entry_id in restore_items
+            }
+            plan.metadata_json = json.dumps(plan_metadata, ensure_ascii=False, sort_keys=True)
 
         session.commit()
         return plan.id, plan_kind
