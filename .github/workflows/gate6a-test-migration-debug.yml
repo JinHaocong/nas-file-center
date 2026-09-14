@@ -1,0 +1,31 @@
+name: Gate6-A Tombstone Migration Debug
+
+on:
+  push:
+    branches:
+      - v0.3.6-gate6a-quarantine-bulk-operations
+    paths:
+      - .github/workflows/gate6a-test-migration-debug.yml
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-generator:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v0.3.6-gate6a-quarantine-bulk-operations
+      - name: Decode and print syntax neighborhoods
+        shell: bash
+        run: |
+          set -euo pipefail
+          PAYLOAD="$(grep "base64 -d > /tmp/migrate_tests.py" .github/workflows/gate6a-test-migration-runner.yml | sed -E "s/.*echo '([^']+)'.*/\1/")"
+          printf '%s' "$PAYLOAD" | base64 -d > /tmp/migrate_tests.py
+          echo '--- lines 210-240 ---'
+          nl -ba /tmp/migrate_tests.py | sed -n '210,240p'
+          echo '--- lines 490-530 ---'
+          nl -ba /tmp/migrate_tests.py | sed -n '490,530p'
+          echo '--- suspicious quote-only lines ---'
+          grep -nE "^'{2,5}[),]?$" /tmp/migrate_tests.py || true
