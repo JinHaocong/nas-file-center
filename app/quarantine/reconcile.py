@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Sequence
 from sqlalchemy import text, select
 from sqlalchemy.orm import Session, sessionmaker, object_session
 
-from app.models import QuarantineEntry, utcnow
+from app.models import BatchPlan, BatchPlanItem, QuarantineEntry, utcnow
 from app.tasks.recovery import assert_active_worker_lease, renew_and_assert_worker_lease
 from app.quarantine.candidate import qualify_candidate_anchor_fd
 from app.quarantine.tx_allocator import allocate_next_generation, allocate_and_create_attempt_dir
@@ -481,6 +482,52 @@ def _reconcile_preparing(
             session.commit()
 
 
+def _resolve_gate6a_restore_target(session: Session, entry_id: int) -> tuple[Path | None, str | None]:
+    """Recover durable Gate6-A frozen restore authority for an interrupted executing item."""
+    matches: list[BatchPlanItem] = []
+    executing_restores = list(session.scalars(
+        select(BatchPlanItem).where(
+            BatchPlanItem.operation == "restore",
+            BatchPlanItem.state == "executing",
+        )
+    ))
+    for item in executing_restores:
+        try:
+            meta = json.loads(item.metadata_json or "{}")
+        except Exception:
+            continue
+        undo_meta = meta.get("undo") if isinstance(meta, dict) else None
+        if not isinstance(undo_meta, dict):
+            undo_meta = {}
+        raw_qid = meta.get("quarantine_entry_id") if isinstance(meta, dict) else None
+        if raw_qid is None:
+            raw_qid = undo_meta.get("quarantine_entry_id")
+        try:
+            if int(raw_qid) != entry_id:
+                continue
+        except (TypeError, ValueError):
+            continue
+        plan = session.get(BatchPlan, item.plan_id)
+        if plan is not None and plan.kind == "quarantine-bulk-restore":
+            matches.append(item)
+
+    if not matches:
+        return None, None
+    if len(matches) != 1:
+        return None, (
+            "Gate6-A restoring recovery found ambiguous executing frozen restore authority "
+            f"for quarantine entry #{entry_id}"
+        )
+
+    item = matches[0]
+    if not item.target_path:
+        return None, (
+            "Gate6-A restoring recovery is missing frozen target_path "
+            f"for plan item #{item.id}"
+        )
+    return Path(item.target_path), None
+
+
 def _reconcile_restoring(
     session_factory: sessionmaker,
     entry_id: int,
@@ -491,6 +538,8 @@ def _reconcile_restoring(
     with session_factory() as session:
         entry = session.get(QuarantineEntry, entry_id)
         orig_path = Path(entry.original_path)
+        frozen_restore_path, frozen_target_error = _resolve_gate6a_restore_target(session, entry_id)
+        restore_path = frozen_restore_path or orig_path
         pub_path = Path(entry.quarantine_path)
         anchor_path_str = entry.authoritative_anchor_path
         dev = entry.device
@@ -498,6 +547,19 @@ def _reconcile_restoring(
         size = entry.size
         mtime_ns = entry.mtime_ns
         chash = entry.content_hash
+
+    if frozen_target_error:
+        with session_factory() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            if worker_id:
+                assert_active_worker_lease(session, worker_id)
+            e = session.get(QuarantineEntry, entry_id)
+            e.state = "conflict"
+            e.tx_phase = "conflict"
+            e.last_error = frozen_target_error
+            e.updated_at = utcnow()
+            session.commit()
+        return
 
     if not anchor_path_str:
         with session_factory() as session:
@@ -543,11 +605,12 @@ def _reconcile_restoring(
             roots = list(get_settings().allowed_roots)
         except Exception:
             roots = []
-        try:
-            if not any(orig_path.is_relative_to(Path(r)) for r in roots):
-                roots.append(orig_path.parent)
-        except Exception:
-            pass
+        for candidate_path in (orig_path, restore_path):
+            try:
+                if not any(candidate_path.is_relative_to(Path(r)) for r in roots):
+                    roots.append(candidate_path.parent)
+            except Exception:
+                pass
     else:
         roots = list(allowed_roots)
 
@@ -704,10 +767,10 @@ def _reconcile_restoring(
                 session.commit()
             return
 
-    # View retirement is confirmed valid. Ensure original destination is linked to authoritative anchor.
-    if orig_path.exists():
-        st_orig = os.lstat(str(orig_path))
-        if st_orig.st_dev != dev or st_orig.st_ino != ino:
+    # View retirement is confirmed valid. Converge only on the durable restore authority.
+    if restore_path.exists():
+        st_restore = os.lstat(str(restore_path))
+        if st_restore.st_dev != dev or st_restore.st_ino != ino:
             with session_factory() as session:
                 session.execute(text("BEGIN IMMEDIATE"))
                 if worker_id:
@@ -715,18 +778,18 @@ def _reconcile_restoring(
                 e = session.get(QuarantineEntry, entry_id)
                 e.state = "conflict"
                 e.tx_phase = "conflict"
-                e.last_error = f"Original destination occupied by foreign inode: {orig_path}"
+                e.last_error = f"Restore destination occupied by foreign inode: {restore_path}"
                 e.updated_at = utcnow()
                 session.commit()
             return
     else:
         try:
-            if not orig_path.parent.exists():
+            if not restore_path.parent.exists():
                 if worker_id:
                     renew_and_assert_worker_lease(session_factory, worker_id)
-                orig_path.parent.mkdir(parents=True, exist_ok=True)
+                restore_path.parent.mkdir(parents=True, exist_ok=True)
             with safe_open_parent_fd(anchor, valid_roots) as (src_dir_fd, src_leaf):
-                with safe_open_parent_fd(orig_path, valid_roots) as (dst_dir_fd, dst_leaf):
+                with safe_open_parent_fd(restore_path, valid_roots) as (dst_dir_fd, dst_leaf):
                     if worker_id:
                         renew_and_assert_worker_lease(session_factory, worker_id)
                     os.link(src_leaf, dst_leaf, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd)
@@ -738,7 +801,7 @@ def _reconcile_restoring(
                 e = session.get(QuarantineEntry, entry_id)
                 e.state = "conflict"
                 e.tx_phase = "conflict"
-                e.last_error = f"Failed to link original destination: {exc}"
+                e.last_error = f"Failed to link restore destination: {exc}"
                 e.updated_at = utcnow()
                 session.commit()
             return
