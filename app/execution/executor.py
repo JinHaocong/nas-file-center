@@ -78,6 +78,10 @@ def execute_item(
     if item.operation in {"unlink", "rmdir_empty", "quarantine_purge"} and not allow_delete:
         return _skip("permanent deletion is disabled")
     if item.operation == "quarantine_purge":
+        return ItemResult(
+            "failed",
+            "EOPNOTSUPP: Gate6-A bulk permanent purge is deferred because safe hard-link ownership scope cannot be proven",
+        )
         if not session_factory or not worker_id or not quarantine_entry_id or purge_manifest is None:
             return ItemResult(
                 "failed",

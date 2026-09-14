@@ -102,23 +102,10 @@ def _compute_bulk_preview(
                 continue
 
             if payload.action == "purge":
-                def owner_lookup(owner_id: int):
-                    owner = session.get(QuarantineEntry, owner_id)
-                    if owner is not None:
-                        db_identities[owner_id] = quarantine_entry_identity_material(owner)
-                    return owner
-
-                manifest = build_purge_topology_manifest(
-                    entry,
-                    service.settings.quarantine_root,
-                    owner_lookup=owner_lookup,
-                )
-                blockers = manifest["blockers"]
                 item = {
                     "entry_id": entry_id,
-                    "eligible": not blockers,
-                    "reason": blockers[0] if blockers else None,
-                    "purge_topology_manifest": manifest,
+                    "eligible": False,
+                    "reason": "PERMANENT_PURGE_DEFERRED_UNSAFE_HARDLINK_SCOPE",
                 }
                 items.append(item)
                 digest_items.append({**identity, **item})
