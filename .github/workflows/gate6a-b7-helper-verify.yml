@@ -1,4 +1,5 @@
 name: Gate6-A B7 Helper Verify
+# trigger after exact-indentation patch-script fix
 
 on:
   push:
