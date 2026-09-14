@@ -138,6 +138,22 @@ def _bulk_purge_plan(client: TestClient, entry_id: int) -> int:
     return plan_id
 
 
+def _frozen_purge_authority(service, plan_id: int) -> dict:
+    """Compose runtime purge authority from frozen topology plus BatchPlanItem identity."""
+    with service.SessionLocal() as session:
+        item = session.query(BatchPlanItem).filter_by(plan_id=plan_id).one()
+        metadata = json.loads(item.metadata_json or "{}")
+        authority = dict(metadata["frozen_purge_topology_manifest"])
+        authority["frozen_payload_identity"] = {
+            "device": item.expected_device,
+            "inode": item.expected_inode,
+            "size": item.expected_size,
+            "mtime_ns": item.expected_mtime_ns,
+            "content_hash": item.expected_hash,
+        }
+        return authority
+
+
 def _run_worker(service, job_id: int, worker_id: str) -> None:
     with service.SessionLocal() as session:
         job = session.get(WorkJob, job_id)
@@ -219,8 +235,15 @@ def test_bulk_purge_worker_resumes_after_crash_immediately_after_durable_purging
     frozen_st = anchor.stat(follow_symlinks=False)
     worker_id = "worker-gate6a-purge-resume-intent"
     job_id = _prepare_worker(service, plan_id, worker_id)
+    frozen_authority = _frozen_purge_authority(service, plan_id)
 
-    _begin_transactional_purge_intent(service.SessionLocal, entry_id, worker_id)
+    _begin_transactional_purge_intent(
+        service.SessionLocal,
+        entry_id,
+        worker_id,
+        frozen_authority,
+        service.settings.quarantine_root,
+    )
     with service.SessionLocal() as session:
         entry = session.get(QuarantineEntry, entry_id)
         assert entry is not None
@@ -269,8 +292,15 @@ def test_bulk_purge_worker_resumes_after_generation_allocation_before_attempt_mk
     frozen_st = anchor.stat(follow_symlinks=False)
     worker_id = "worker-gate6a-purge-resume-generation"
     job_id = _prepare_worker(service, plan_id, worker_id)
+    frozen_authority = _frozen_purge_authority(service, plan_id)
 
-    _begin_transactional_purge_intent(service.SessionLocal, entry_id, worker_id)
+    _begin_transactional_purge_intent(
+        service.SessionLocal,
+        entry_id,
+        worker_id,
+        frozen_authority,
+        service.settings.quarantine_root,
+    )
     generation, attempt_dir = allocate_next_generation(
         service.SessionLocal,
         entry_id,
@@ -336,8 +366,15 @@ def test_bulk_purge_worker_resumes_after_one_alias_was_captured(tmp_path: Path) 
     frozen_st = anchor.stat(follow_symlinks=False)
     worker_id = "worker-gate6a-purge-resume-partial-capture"
     job_id = _prepare_worker(service, plan_id, worker_id)
+    frozen_authority = _frozen_purge_authority(service, plan_id)
 
-    _begin_transactional_purge_intent(service.SessionLocal, entry_id, worker_id)
+    _begin_transactional_purge_intent(
+        service.SessionLocal,
+        entry_id,
+        worker_id,
+        frozen_authority,
+        service.settings.quarantine_root,
+    )
     generation, _, purge_dir = _allocate_transactional_purge_attempt(
         service.SessionLocal,
         entry_id,
