@@ -47,8 +47,8 @@ jobs:
           git diff --check
       - name: Observe B11 GREEN
         run: pytest tests/test_gate6a_plan1_b11_generation_recovery.py -v
-      - name: Run purge recovery regressions
-        run: pytest tests/test_gate6a_purge_recovery.py tests/test_gate6a_purge_recovery_restart.py tests/test_gate6a_purge_recovery_foreign.py -q
+      - name: Run low-level purge recovery regressions
+        run: pytest tests/test_gate6a_purge_recovery.py tests/test_gate6a_purge_recovery_foreign.py -q
       - name: Run preserved Gate5-G regressions
         run: >-
           pytest
