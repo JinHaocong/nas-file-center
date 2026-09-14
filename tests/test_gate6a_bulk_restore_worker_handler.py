@@ -190,6 +190,13 @@ def test_bulk_restore_worker_handler_uses_exact_frozen_rename_target(tmp_path: P
         item = session.query(BatchPlanItem).filter_by(plan_id=plan_id).one()
         assert item.state == "completed"
 
+        audits = session.query(AuditEvent).filter_by(operation="restore", result="completed").all()
+        assert len(audits) == 1
+        details = json.loads(audits[0].details_json or "{}")
+        assert details["quarantine_entry_id"] == entry_id
+        assert details["target"] == str(frozen_target)
+        assert details["conflict_policy"] == "rename"
+
 
 def test_bulk_restore_worker_fails_closed_when_frozen_target_is_occupied_after_validate(tmp_path: Path, monkeypatch) -> None:
     client = _client(tmp_path)
@@ -250,6 +257,10 @@ def test_bulk_restore_worker_rejects_entry_that_became_non_active_after_validate
     assert not original.exists()
 
     with service.SessionLocal() as session:
+        item = session.query(BatchPlanItem).filter_by(plan_id=plan_id).one()
+        assert item.target_path is not None
+        frozen_target = item.target_path
+
         entry = session.get(QuarantineEntry, entry_id)
         assert entry is not None
         entry.state = "conflict"
@@ -280,7 +291,15 @@ def test_bulk_restore_worker_rejects_entry_that_became_non_active_after_validate
         assert entry.tx_phase == "conflict"
         assert entry.last_error == "sentinel conflict before execute"
         item = session.query(BatchPlanItem).filter_by(plan_id=plan_id).one()
-        assert item.state != "completed"
+        assert item.state == "failed"
+
+        audits = session.query(AuditEvent).filter_by(operation="restore", result="failed").all()
+        assert len(audits) == 1
+        details = json.loads(audits[0].details_json or "{}")
+        assert details["quarantine_entry_id"] == entry_id
+        assert details["target"] == frozen_target
+        assert details["conflict_policy"] == "skip"
+        assert "no longer active at Execute" in details["reason"]
 
 
 def test_bulk_restore_worker_continues_after_middle_failure_and_audits_each_success(tmp_path: Path, monkeypatch) -> None:
@@ -352,5 +371,18 @@ def test_bulk_restore_worker_continues_after_middle_failure_and_audits_each_succ
         assert plan is not None
         assert plan.status == "partial"
 
-        completed_restore_audits = session.query(AuditEvent).filter_by(operation="restore", result="completed").all()
-        assert {event.path for event in completed_restore_audits} == {str(first_public), str(third_public)}
+        restore_audits = session.query(AuditEvent).filter_by(operation="restore").all()
+        assert len(restore_audits) == 3
+        by_entry_id = {
+            json.loads(event.details_json or "{}")["quarantine_entry_id"]: event
+            for event in restore_audits
+        }
+        assert set(by_entry_id) == {first_id, second_id, third_id}
+        assert by_entry_id[first_id].result == "completed"
+        assert by_entry_id[second_id].result == "failed"
+        assert by_entry_id[third_id].result == "completed"
+        for entry_id in (first_id, second_id, third_id):
+            details = json.loads(by_entry_id[entry_id].details_json or "{}")
+            item = next(item for item in items if json.loads(item.metadata_json or "{}").get("quarantine_entry_id") == entry_id)
+            assert details["target"] == item.target_path
+            assert details["conflict_policy"] == "skip"
