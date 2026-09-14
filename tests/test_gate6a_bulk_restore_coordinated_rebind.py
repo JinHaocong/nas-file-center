@@ -139,6 +139,15 @@ def _run_worker(service, job_id: int, worker_id: str) -> None:
         )
 
 
+def _compat(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.quarantine.capability import MutationCapability
+
+    monkeypatch.setattr(
+        "app.quarantine.capability.resolve_mutation_capability",
+        lambda *args, **kwargs: MutationCapability.COMPAT_TRANSACTIONAL,
+    )
+
+
 def test_post_validate_qid_and_source_rebind_cannot_restore_unselected_entry(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -183,17 +192,9 @@ def test_post_validate_qid_and_source_rebind_cannot_restore_unselected_entry(
         healthy_id = int(healthy.id)
         session.commit()
 
-    from app.quarantine.capability import MutationCapability
-
-    monkeypatch.setattr(
-        "app.quarantine.capability.resolve_mutation_capability",
-        lambda *args, **kwargs: MutationCapability.COMPAT_TRANSACTIONAL,
-    )
-
+    _compat(monkeypatch)
     _run_worker(service, _prepare_worker(service, plan_id, "worker-coordinated-rebind"), "worker-coordinated-rebind")
 
-    # The attacked item must fail before any filesystem mutation.  Neither the selected A
-    # nor the unselected B may be restored; a healthy selected sibling must still continue.
     assert not selected_original.exists()
     assert selected_public.exists()
     assert selected_public.read_bytes() == b"selected-a"
@@ -241,5 +242,85 @@ def test_post_validate_qid_and_source_rebind_cannot_restore_unselected_entry(
             and details.get("quarantine_entry_id") == unselected_id
             for event, details in attacked_audits
         )
+        assert len(healthy_audits) == 1
+        assert healthy_audits[0][0].result == "completed"
+
+
+def test_post_validate_target_rebind_cannot_change_frozen_restore_destination(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client(tmp_path)
+    service = client.app.state.service
+
+    selected_id, _selected_anchor, selected_public, selected_original = _active_entry(
+        client, "target-a.txt", b"target-a"
+    )
+    sibling_id, sibling_anchor, sibling_public, sibling_original = _active_entry(
+        client, "target-c.txt", b"target-c"
+    )
+
+    plan_id = _generate_restore_plan(client, [selected_id, sibling_id])
+    assert service.freeze_plan(plan_id).status == "frozen"
+    validation = service.validate_plan(plan_id)
+    assert validation["status"] == "ready"
+
+    forged_target = Path(service.settings.data_mount) / "forged-target.txt"
+    with service.SessionLocal() as session:
+        items = (
+            session.query(BatchPlanItem)
+            .filter_by(plan_id=plan_id)
+            .order_by(BatchPlanItem.sequence)
+            .all()
+        )
+        attacked = next(item for item in items if item.source_path == str(selected_public))
+        healthy = next(item for item in items if item.source_path == str(sibling_public))
+        assert attacked.target_path == str(selected_original)
+        attacked.target_path = str(forged_target)
+        attacked_id = int(attacked.id)
+        healthy_id = int(healthy.id)
+        session.commit()
+
+    _compat(monkeypatch)
+    _run_worker(service, _prepare_worker(service, plan_id, "worker-target-rebind"), "worker-target-rebind")
+
+    assert not selected_original.exists()
+    assert not forged_target.exists()
+    assert selected_public.exists()
+    assert selected_public.read_bytes() == b"target-a"
+    assert sibling_original.exists()
+    assert sibling_original.read_bytes() == sibling_anchor.read_bytes()
+    assert not sibling_public.exists()
+
+    with service.SessionLocal() as session:
+        attacked = session.get(BatchPlanItem, attacked_id)
+        healthy = session.get(BatchPlanItem, healthy_id)
+        assert attacked is not None and healthy is not None
+        assert attacked.state == "failed"
+        assert attacked.reason and (
+            "target" in attacked.reason.lower()
+            or "frozen" in attacked.reason.lower()
+            or "authority" in attacked.reason.lower()
+        )
+        assert healthy.state == "completed"
+
+        selected = session.get(QuarantineEntry, selected_id)
+        sibling = session.get(QuarantineEntry, sibling_id)
+        assert selected is not None and sibling is not None
+        assert (selected.state, selected.tx_phase) == ("active", "active")
+        assert (sibling.state, sibling.tx_phase) == ("restored", "restored")
+
+        audits = session.query(AuditEvent).filter_by(operation="restore").all()
+        attacked_audits = []
+        healthy_audits = []
+        for event in audits:
+            details = json.loads(event.details_json or "{}")
+            if details.get("item_id") == attacked_id:
+                attacked_audits.append((event, details))
+            if details.get("item_id") == healthy_id:
+                healthy_audits.append((event, details))
+
+        assert len(attacked_audits) == 1
+        assert attacked_audits[0][0].result == "failed"
         assert len(healthy_audits) == 1
         assert healthy_audits[0][0].result == "completed"
