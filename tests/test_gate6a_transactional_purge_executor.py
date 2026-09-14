@@ -86,7 +86,16 @@ def test_quarantine_purge_executor_routes_authorized_transaction_to_terminal_pur
         assert frozen_manifest["blockers"] == []
 
     result = execute_item(
-        OperationItem(sequence=1, operation="quarantine_purge", source=public_view),
+        OperationItem(
+            sequence=1,
+            operation="quarantine_purge",
+            source=public_view,
+            expected_device=st.st_dev,
+            expected_inode=st.st_ino,
+            expected_size=st.st_size,
+            expected_mtime_ns=st.st_mtime_ns,
+            expected_hash=hashlib.sha256(payload).hexdigest(),
+        ),
         allowed_roots=[data],
         allow_mutation=True,
         allow_delete=True,
@@ -205,7 +214,16 @@ def test_quarantine_purge_executor_revalidates_historical_owner_before_capture(t
         session.commit()
 
     result = execute_item(
-        OperationItem(sequence=1, operation="quarantine_purge", source=public_view),
+        OperationItem(
+            sequence=1,
+            operation="quarantine_purge",
+            source=public_view,
+            expected_device=st.st_dev,
+            expected_inode=st.st_ino,
+            expected_size=st.st_size,
+            expected_mtime_ns=st.st_mtime_ns,
+            expected_hash=payload_hash,
+        ),
         allowed_roots=[data],
         allow_mutation=True,
         allow_delete=True,

@@ -86,6 +86,7 @@ def test_owner_change_between_execute_revalidation_and_purge_intent_is_blocked_a
             selected,
             quarantine_root,
             owner_lookup=lambda owner_id: historical if owner_id == 2 else None,
+            include_payload_identity=True,
         )
         assert frozen_manifest["blockers"] == []
         assert frozen_manifest["historical_conflict_entry_ids"] == [2]

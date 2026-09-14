@@ -59,6 +59,7 @@ def test_purge_recovery_preserves_unknown_private_object_and_fails_closed(tmp_pa
             entry,
             quarantine_root,
             owner_lookup=lambda _: None,
+            include_payload_identity=True,
         )
         assert frozen_manifest["blockers"] == []
 

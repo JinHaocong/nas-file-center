@@ -83,35 +83,54 @@ def execute_item(
                 "failed",
                 "EOPNOTSUPP: quarantine purge requires worker authority, session_factory, quarantine_entry_id, and frozen purge manifest",
             )
-        if item.expected_hash:
-            from app.models import QuarantineEntry
+        if (
+            item.expected_device is None
+            or item.expected_inode is None
+            or item.expected_size is None
+            or item.expected_mtime_ns is None
+            or not item.expected_hash
+        ):
+            return ItemResult(
+                "failed",
+                "PURGE_FROZEN_IDENTITY_MISSING: BatchPlanItem.expected_* is required",
+            )
+        frozen_identity = (
+            int(item.expected_device),
+            int(item.expected_inode),
+            int(item.expected_size),
+            int(item.expected_mtime_ns),
+            str(item.expected_hash).lower(),
+        )
+        frozen_purge_authority = dict(purge_manifest)
+        frozen_purge_authority["frozen_payload_identity"] = {
+            "device": frozen_identity[0],
+            "inode": frozen_identity[1],
+            "size": frozen_identity[2],
+            "mtime_ns": frozen_identity[3],
+            "content_hash": frozen_identity[4],
+        }
 
-            with session_factory() as session:
-                q_entry = session.get(QuarantineEntry, quarantine_entry_id)
-                if q_entry is None:
-                    return ItemResult(
-                        "failed",
-                        f"PURGE_FROZEN_IDENTITY_CHANGED: quarantine entry #{quarantine_entry_id} no longer exists",
-                    )
-                frozen_identity = (
-                    int(item.expected_device),
-                    int(item.expected_inode),
-                    int(item.expected_size),
-                    int(item.expected_mtime_ns),
-                    str(item.expected_hash).lower(),
+        from app.models import QuarantineEntry
+
+        with session_factory() as session:
+            q_entry = session.get(QuarantineEntry, quarantine_entry_id)
+            if q_entry is None:
+                return ItemResult(
+                    "failed",
+                    f"PURGE_FROZEN_IDENTITY_CHANGED: quarantine entry #{quarantine_entry_id} no longer exists",
                 )
-                current_identity = (
-                    int(q_entry.device or 0),
-                    int(q_entry.inode or 0),
-                    int(q_entry.size or 0),
-                    int(q_entry.mtime_ns or 0),
-                    str(q_entry.content_hash or "").lower(),
+            current_identity = (
+                int(q_entry.device or 0),
+                int(q_entry.inode or 0),
+                int(q_entry.size or 0),
+                int(q_entry.mtime_ns or 0),
+                str(q_entry.content_hash or "").lower(),
+            )
+            if current_identity != frozen_identity:
+                return ItemResult(
+                    "failed",
+                    f"PURGE_FROZEN_IDENTITY_CHANGED: quarantine entry #{quarantine_entry_id} identity changed after Freeze",
                 )
-                if current_identity != frozen_identity:
-                    return ItemResult(
-                        "failed",
-                        f"PURGE_FROZEN_IDENTITY_CHANGED: quarantine entry #{quarantine_entry_id} identity changed after Freeze",
-                    )
         try:
             from app.quarantine.purge import (
                 destroy_transactional_purge_capture,
@@ -121,7 +140,7 @@ def execute_item(
                 session_factory,
                 quarantine_entry_id,
                 worker_id,
-                purge_manifest,
+                frozen_purge_authority,
                 quarantine_root,
                 list(allowed_roots),
             )
@@ -129,7 +148,7 @@ def execute_item(
                 session_factory,
                 quarantine_entry_id,
                 worker_id,
-                purge_manifest,
+                frozen_purge_authority,
                 quarantine_root,
                 list(allowed_roots),
             )
