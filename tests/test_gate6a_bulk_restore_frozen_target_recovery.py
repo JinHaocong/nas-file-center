@@ -14,6 +14,7 @@ from app.tasks.context import JobContext
 from app.tasks.handlers import BatchPlanExecuteHandler
 
 # Regression contract: restart reconciliation must bind stable per-item frozen authority before filesystem mutation.
+# Validation trigger: final strict-authority + legacy-recovery compatibility candidate.
 
 
 def _client(tmp_path: Path) -> TestClient:
