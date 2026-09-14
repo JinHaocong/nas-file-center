@@ -74,6 +74,11 @@ def persist_bulk_draft(
                     "quarantine_entry_id": entry_id,
                     "conflict_policy": conflict_policy,
                     "preview_digest": preview_digest,
+                    **(
+                        {"skip_preexisting_target": True}
+                        if preview_item.get("skip_preexisting_target") is True
+                        else {}
+                    ),
                 }
             else:
                 operation = "quarantine_purge"

@@ -117,6 +117,10 @@ def _compute_bulk_preview(
                 quarantine_root=service.settings.quarantine_root,
             )
             target_path = original_target
+            skip_preexisting_target = (
+                effective_conflict_policy == "skip"
+                and (original_target.exists() or original_target.is_symlink())
+            )
             if effective_conflict_policy == "rename" and (
                 original_target.exists() or original_target.is_symlink()
             ):
@@ -131,6 +135,7 @@ def _compute_bulk_preview(
                 "eligible": True,
                 "conflict_policy": effective_conflict_policy,
                 "target_path": str(target_path),
+                "skip_preexisting_target": skip_preexisting_target,
             }
             items.append(item)
             digest_items.append({**identity, **item})

@@ -298,6 +298,20 @@ def validate_bulk_plan_item(service, *, plan_kind: str, item: Any) -> dict[str, 
     if not item.target_path:
         return {"state": "stale", "reason": "restore_target_missing", "actual": None}
 
+    metadata = json.loads(item.metadata_json or "{}")
+    if metadata.get("skip_preexisting_target") is True:
+        if metadata.get("conflict_policy") != "skip":
+            return {
+                "state": "stale",
+                "reason": "restore_frozen_skip_authority_invalid",
+                "actual": {"target_path": str(item.target_path)},
+            }
+        return {
+            "state": "validated",
+            "reason": "bulk restore frozen pre-existing target skip",
+            "actual": {"target_path": str(item.target_path)},
+        }
+
     target = Path(item.target_path)
     if os.path.lexists(target):
         return {

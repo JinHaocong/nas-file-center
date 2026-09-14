@@ -2139,6 +2139,22 @@ class BatchPlanExecuteHandler(TaskHandler):
                                 session.commit()
                                 completed_or_skipped += 1
                                 continue
+                            if (
+                                meta_dict.get("conflict_policy") == "skip"
+                                and meta_dict.get("skip_preexisting_target") is True
+                            ):
+                                row.state = "skipped"
+                                row.reason = "pre-existing restore target conflict skipped by frozen policy"
+                                _add_gate6a_bulk_restore_audit(
+                                    session,
+                                    row,
+                                    result="skipped",
+                                    reason=row.reason,
+                                    quarantine_entry_id=q_entry.id,
+                                )
+                                session.commit()
+                                completed_or_skipped += 1
+                                continue
                             if not row.target_path:
                                 row.state = "failed"
                                 row.reason = "Gate6-A bulk restore is missing frozen target_path"
