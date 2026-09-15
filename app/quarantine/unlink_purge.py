@@ -1,12 +1,30 @@
 from __future__ import annotations
 
+import json
 import os
 import stat
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import select, text
+
+from app.batch_utilities.empty_dir_quarantine import safe_open_parent_fd
+from app.exceptions import StateConflictError
+from app.models import OperationJournal, QuarantineEntry, utcnow
+
 
 SEMANTICS_VERSION = "unlink_v1"
+OPERATION_ID = "quarantine_unlink_purge"
+_CANONICAL_ROLES = (
+    "authoritative_anchor",
+    "captured_source",
+    "public_view",
+)
+_ROLE_SEQUENCE = {
+    "authoritative_anchor": 1,
+    "captured_source": 2,
+    "public_view": 3,
+}
 
 
 def _absolute_lexical(path: Path | str) -> Path:
@@ -330,4 +348,555 @@ def _unlink_frozen_owned_paths(
         "purge_semantics": SEMANTICS_VERSION,
         "removed_count": len(removed_roles),
         "removed_roles": removed_roles,
+    }
+
+
+def _json_dumps(payload: dict[str, Any]) -> str:
+    return json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+
+
+def _journal_records_for_entry(session: Any, entry_id: int) -> list[tuple[OperationJournal, dict[str, Any]]]:
+    rows = list(
+        session.scalars(
+            select(OperationJournal)
+            .where(OperationJournal.operation == OPERATION_ID)
+            .order_by(OperationJournal.sequence.asc(), OperationJournal.id.asc())
+        )
+    )
+    records: list[tuple[OperationJournal, dict[str, Any]]] = []
+    for row in rows:
+        try:
+            payload = json.loads(row.before_json or "{}")
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict) or payload.get("entry_id") != entry_id:
+            continue
+        records.append((row, payload))
+    return records
+
+
+def _durable_authority_manifest(session: Any, entry_id: int) -> dict[str, Any]:
+    authorities = [
+        payload
+        for _, payload in _journal_records_for_entry(session, entry_id)
+        if payload.get("phase") == "authority"
+    ]
+    if len(authorities) != 1:
+        raise StateConflictError(
+            f"UNLINK_RECOVERY_AUTHORITY_INVALID: expected one durable authority record for entry #{entry_id}"
+        )
+    authority = authorities[0]
+    if authority.get("purge_semantics") != SEMANTICS_VERSION:
+        raise StateConflictError("UNLINK_RECOVERY_AUTHORITY_INVALID: semantics mismatch")
+    manifest = authority.get("manifest")
+    if not isinstance(manifest, dict):
+        raise StateConflictError("UNLINK_RECOVERY_AUTHORITY_INVALID: manifest missing")
+    if manifest.get("purge_semantics") != SEMANTICS_VERSION:
+        raise StateConflictError("UNLINK_RECOVERY_AUTHORITY_INVALID: frozen manifest semantics mismatch")
+    if manifest.get("selected_entry_id") != entry_id:
+        raise StateConflictError("UNLINK_RECOVERY_AUTHORITY_INVALID: selected entry mismatch")
+    return manifest
+
+
+def _validate_purging_authority(
+    entry: QuarantineEntry,
+    quarantine_root: Path | str,
+    manifest: dict[str, Any],
+) -> tuple[dict[str, Any], ...]:
+    root = _absolute_lexical(quarantine_root)
+    tx_root = root / ".tx"
+    generation = int(entry.active_attempt_generation or 0)
+    attempt = tx_root / f"entry-{entry.id}" / f"attempt-{generation}"
+    expected_paths = {
+        "authoritative_anchor": attempt / "anchor",
+        "captured_source": attempt / "captured_source",
+        "public_view": _absolute_lexical(entry.quarantine_path),
+    }
+
+    if entry.state != "purging" or entry.tx_phase != "purging":
+        raise StateConflictError(
+            f"UNLINK_RECOVERY_STATE_INVALID: entry #{entry.id} is not in Gate6-A2 purge-in-progress state"
+        )
+    if generation <= 0:
+        raise StateConflictError("UNLINK_RECOVERY_AUTHORITY_INVALID: generation missing")
+    if manifest.get("purge_semantics") != SEMANTICS_VERSION:
+        raise StateConflictError("UNLINK_RECOVERY_AUTHORITY_INVALID: semantics mismatch")
+    if manifest.get("selected_entry_id") != entry.id:
+        raise StateConflictError("UNLINK_RECOVERY_AUTHORITY_INVALID: selected entry mismatch")
+    if manifest.get("active_attempt_generation") != generation:
+        raise StateConflictError("UNLINK_RECOVERY_AUTHORITY_INVALID: generation mismatch")
+    if manifest.get("blockers"):
+        raise StateConflictError("UNLINK_RECOVERY_AUTHORITY_INVALID: frozen manifest was blocked")
+    if root.is_symlink() or tx_root.is_symlink() or attempt.is_symlink():
+        raise StateConflictError("UNLINK_RECOVERY_AUTHORITY_INVALID: unsafe quarantine namespace")
+    if not entry.authoritative_anchor_path:
+        raise StateConflictError("UNLINK_RECOVERY_AUTHORITY_INVALID: anchor authority missing")
+    if _absolute_lexical(entry.authoritative_anchor_path) != expected_paths["authoritative_anchor"]:
+        raise StateConflictError("UNLINK_RECOVERY_AUTHORITY_INVALID: anchor path mismatch")
+
+    public_view = expected_paths["public_view"]
+    if not _is_within(public_view, root) or _is_within(public_view, tx_root):
+        raise StateConflictError("UNLINK_RECOVERY_AUTHORITY_INVALID: public view scope mismatch")
+
+    if attempt.exists():
+        if attempt.is_symlink():
+            raise StateConflictError("UNLINK_RECOVERY_AUTHORITY_INVALID: symlinked attempt namespace")
+        try:
+            unknown = sorted(
+                child.name
+                for child in attempt.iterdir()
+                if child.name not in {"anchor", "captured_source"}
+            )
+        except OSError as exc:
+            raise StateConflictError(
+                f"UNLINK_RECOVERY_AUTHORITY_INVALID: private namespace unreadable: {exc}"
+            ) from exc
+        if unknown:
+            raise StateConflictError(
+                f"UNLINK_RECOVERY_AUTHORITY_INVALID: unrecognized private path {unknown[0]}"
+            )
+
+    frozen_items = manifest.get("owned_paths")
+    if not isinstance(frozen_items, list) or len(frozen_items) != len(_CANONICAL_ROLES):
+        raise StateConflictError("UNLINK_RECOVERY_AUTHORITY_INVALID: canonical owned paths missing")
+
+    observed_roles: list[str] = []
+    canonical_items: list[dict[str, Any]] = []
+    for raw in frozen_items:
+        if not isinstance(raw, dict):
+            raise StateConflictError("UNLINK_RECOVERY_AUTHORITY_INVALID: malformed frozen item")
+        role = raw.get("role")
+        if not isinstance(role, str) or role not in expected_paths:
+            raise StateConflictError("UNLINK_RECOVERY_AUTHORITY_INVALID: unknown frozen role")
+        if role in observed_roles:
+            raise StateConflictError("UNLINK_RECOVERY_AUTHORITY_INVALID: duplicate frozen role")
+        observed_roles.append(role)
+        if _absolute_lexical(raw.get("path", "")) != expected_paths[role]:
+            raise StateConflictError(f"UNLINK_RECOVERY_AUTHORITY_INVALID: path mismatch for {role}")
+        if raw.get("object_type") != "regular_file":
+            raise StateConflictError(f"UNLINK_RECOVERY_AUTHORITY_INVALID: object type mismatch for {role}")
+        if (
+            raw.get("device") != entry.device
+            or raw.get("inode") != entry.inode
+            or raw.get("size") != entry.size
+            or raw.get("mtime_ns") != entry.mtime_ns
+            or raw.get("content_hash") != entry.content_hash
+        ):
+            raise StateConflictError(f"UNLINK_RECOVERY_AUTHORITY_INVALID: identity mismatch for {role}")
+        canonical_items.append(dict(raw))
+
+    if tuple(observed_roles) != _CANONICAL_ROLES:
+        raise StateConflictError("UNLINK_RECOVERY_AUTHORITY_INVALID: noncanonical role order")
+    return tuple(canonical_items)
+
+
+def _persist_initial_authority(
+    session_factory: Any,
+    entry_id: int,
+    quarantine_root: Path | str,
+    frozen_manifest: dict[str, Any],
+) -> None:
+    with session_factory() as session:
+        session.execute(text("BEGIN IMMEDIATE"))
+        entry = session.get(QuarantineEntry, entry_id)
+        if entry is None:
+            session.rollback()
+            raise StateConflictError(f"Quarantine entry #{entry_id} not found")
+        if entry.state != "active" or entry.tx_phase != "active":
+            session.rollback()
+            raise StateConflictError(
+                f"UNLINK_PURGE_STATE_INVALID: entry #{entry_id} must be active before irreversible intent"
+            )
+
+        validation = revalidate_unlink_manifest(entry, quarantine_root, frozen_manifest)
+        if not validation["valid"]:
+            session.rollback()
+            raise StateConflictError(
+                "UNLINK_MANIFEST_INVALID:" + ",".join(validation["blockers"])
+            )
+
+        if _journal_records_for_entry(session, entry_id):
+            session.rollback()
+            raise StateConflictError(
+                f"UNLINK_RECOVERY_AUTHORITY_INVALID: unexpected prior Gate6-A2 journal for entry #{entry_id}"
+            )
+
+        authority = {
+            "phase": "authority",
+            "purge_semantics": SEMANTICS_VERSION,
+            "entry_id": entry_id,
+            "manifest": frozen_manifest,
+        }
+        session.add(
+            OperationJournal(
+                operation=OPERATION_ID,
+                sequence=0,
+                plan_id=None,
+                plan_item_id=None,
+                task_id=None,
+                user_id=None,
+                before_json=_json_dumps(authority),
+                after_json="{}",
+                metadata_before_json="{}",
+                metadata_after_json="{}",
+            )
+        )
+        entry.state = "purging"
+        entry.tx_phase = "purging"
+        entry.updated_at = utcnow()
+        session.commit()
+
+
+def _find_path_intent(
+    session: Any,
+    entry_id: int,
+    frozen: dict[str, Any],
+) -> OperationJournal | None:
+    role = str(frozen.get("role") or "")
+    path = str(_absolute_lexical(frozen.get("path", "")))
+    matches: list[OperationJournal] = []
+    for row, payload in _journal_records_for_entry(session, entry_id):
+        if payload.get("phase") != "unlink_intent":
+            continue
+        if (
+            payload.get("purge_semantics") == SEMANTICS_VERSION
+            and payload.get("role") == role
+            and payload.get("path") == path
+            and payload.get("frozen_identity") == {
+                "object_type": frozen.get("object_type"),
+                "device": frozen.get("device"),
+                "inode": frozen.get("inode"),
+                "size": frozen.get("size"),
+                "mtime_ns": frozen.get("mtime_ns"),
+                "content_hash": frozen.get("content_hash"),
+            }
+        ):
+            matches.append(row)
+    if len(matches) > 1:
+        raise StateConflictError(
+            f"UNLINK_RECOVERY_INTENT_INVALID: duplicate durable intent for role {role}"
+        )
+    return matches[0] if matches else None
+
+
+def _persist_path_intent(
+    session_factory: Any,
+    entry_id: int,
+    quarantine_root: Path | str,
+    frozen: dict[str, Any],
+) -> int:
+    role = str(frozen.get("role") or "")
+    if role not in _ROLE_SEQUENCE:
+        raise StateConflictError(f"UNLINK_RECOVERY_INTENT_INVALID: unsupported role {role}")
+
+    with session_factory() as session:
+        session.execute(text("BEGIN IMMEDIATE"))
+        entry = session.get(QuarantineEntry, entry_id)
+        if entry is None:
+            session.rollback()
+            raise StateConflictError(f"Quarantine entry #{entry_id} not found")
+        if entry.state != "purging" or entry.tx_phase != "purging":
+            session.rollback()
+            raise StateConflictError(
+                f"UNLINK_RECOVERY_STATE_INVALID: entry #{entry_id} left purge-in-progress state"
+            )
+        durable_manifest = _durable_authority_manifest(session, entry_id)
+        canonical_items = {
+            str(item["role"]): item
+            for item in _validate_purging_authority(entry, quarantine_root, durable_manifest)
+        }
+        # The caller performs the authoritative root-aware validation before this
+        # helper. Do not infer or widen a path from inode facts here.
+        if role not in canonical_items or canonical_items[role] != frozen:
+            session.rollback()
+            raise StateConflictError(
+                f"UNLINK_RECOVERY_INTENT_INVALID: frozen authority mismatch for role {role}"
+            )
+
+        existing = _find_path_intent(session, entry_id, frozen)
+        if existing is not None:
+            session.commit()
+            return int(existing.id)
+
+        payload = {
+            "phase": "unlink_intent",
+            "purge_semantics": SEMANTICS_VERSION,
+            "entry_id": entry_id,
+            "role": role,
+            "path": str(_absolute_lexical(frozen["path"])),
+            "frozen_identity": {
+                "object_type": frozen.get("object_type"),
+                "device": frozen.get("device"),
+                "inode": frozen.get("inode"),
+                "size": frozen.get("size"),
+                "mtime_ns": frozen.get("mtime_ns"),
+                "content_hash": frozen.get("content_hash"),
+            },
+        }
+        row = OperationJournal(
+            operation=OPERATION_ID,
+            sequence=_ROLE_SEQUENCE[role],
+            plan_id=None,
+            plan_item_id=None,
+            task_id=None,
+            user_id=None,
+            before_json=_json_dumps(payload),
+            after_json="{}",
+            metadata_before_json="{}",
+            metadata_after_json="{}",
+        )
+        session.add(row)
+        session.flush()
+        row_id = int(row.id)
+        session.commit()
+        return row_id
+
+
+def _mark_path_complete(
+    session_factory: Any,
+    journal_id: int,
+    entry_id: int,
+    frozen: dict[str, Any],
+) -> None:
+    with session_factory() as session:
+        session.execute(text("BEGIN IMMEDIATE"))
+        row = session.get(OperationJournal, journal_id)
+        if row is None or row.operation != OPERATION_ID:
+            session.rollback()
+            raise StateConflictError("UNLINK_RECOVERY_INTENT_INVALID: intent row disappeared")
+        try:
+            before = json.loads(row.before_json or "{}")
+        except (TypeError, json.JSONDecodeError) as exc:
+            session.rollback()
+            raise StateConflictError("UNLINK_RECOVERY_INTENT_INVALID: intent row malformed") from exc
+        if (
+            before.get("entry_id") != entry_id
+            or before.get("phase") != "unlink_intent"
+            or before.get("role") != frozen.get("role")
+            or before.get("path") != str(_absolute_lexical(frozen.get("path", "")))
+        ):
+            session.rollback()
+            raise StateConflictError("UNLINK_RECOVERY_INTENT_INVALID: intent row identity changed")
+        row.after_json = _json_dumps(
+            {
+                "phase": "unlinked",
+                "purge_semantics": SEMANTICS_VERSION,
+                "entry_id": entry_id,
+                "role": frozen.get("role"),
+                "path": str(_absolute_lexical(frozen.get("path", ""))),
+            }
+        )
+        session.commit()
+
+
+def _descriptor_unlink_frozen_path(
+    quarantine_root: Path | str,
+    frozen: dict[str, Any],
+) -> None:
+    root = _absolute_lexical(quarantine_root)
+    path = _absolute_lexical(frozen.get("path", ""))
+    if not _is_within(path, root):
+        raise StateConflictError(f"UNLINK_PATH_OUTSIDE_QUARANTINE_ROOT:{frozen.get('role')}")
+
+    try:
+        with safe_open_parent_fd(path, [root]) as (parent_fd, leaf):
+            st = os.stat(leaf, dir_fd=parent_fd, follow_symlinks=False)
+            if not stat.S_ISREG(st.st_mode):
+                raise StateConflictError(f"NOT_REGULAR_FILE:{frozen.get('role')}")
+            if (
+                st.st_dev != frozen.get("device")
+                or st.st_ino != frozen.get("inode")
+                or st.st_size != frozen.get("size")
+                or st.st_mtime_ns != frozen.get("mtime_ns")
+            ):
+                raise StateConflictError(f"IDENTITY_MISMATCH:{frozen.get('role')}")
+            os.unlink(leaf, dir_fd=parent_fd)
+            os.fsync(parent_fd)
+    except FileNotFoundError:
+        raise
+    except StateConflictError:
+        raise
+    except OSError as exc:
+        raise StateConflictError(
+            f"UNLINK_FAILED:{frozen.get('role')}:{exc}"
+        ) from exc
+
+
+def _commit_terminal_purged(
+    session_factory: Any,
+    entry_id: int,
+    quarantine_root: Path | str,
+) -> None:
+    with session_factory() as session:
+        session.execute(text("BEGIN IMMEDIATE"))
+        entry = session.get(QuarantineEntry, entry_id)
+        if entry is None:
+            session.rollback()
+            raise StateConflictError(f"Quarantine entry #{entry_id} not found")
+        manifest = _durable_authority_manifest(session, entry_id)
+        frozen_items = _validate_purging_authority(entry, quarantine_root, manifest)
+
+        for frozen in frozen_items:
+            path = _absolute_lexical(frozen["path"])
+            if os.path.lexists(path):
+                session.rollback()
+                raise StateConflictError(
+                    f"UNLINK_TERMINAL_INCOMPLETE: authorized path still exists for {frozen['role']}"
+                )
+            if _find_path_intent(session, entry_id, frozen) is None:
+                session.rollback()
+                raise StateConflictError(
+                    f"UNLINK_TERMINAL_UNPROVEN: missing path has no durable intent for {frozen['role']}"
+                )
+
+        now = utcnow()
+        entry.state = "purged"
+        entry.tx_phase = "purged"
+        entry.purged_at = now
+        entry.updated_at = now
+        session.add(
+            OperationJournal(
+                operation=OPERATION_ID,
+                sequence=1000,
+                plan_id=None,
+                plan_item_id=None,
+                task_id=None,
+                user_id=None,
+                before_json=_json_dumps(
+                    {
+                        "phase": "terminal",
+                        "purge_semantics": SEMANTICS_VERSION,
+                        "entry_id": entry_id,
+                    }
+                ),
+                after_json=_json_dumps(
+                    {
+                        "phase": "purged",
+                        "purge_semantics": SEMANTICS_VERSION,
+                        "entry_id": entry_id,
+                    }
+                ),
+                metadata_before_json="{}",
+                metadata_after_json="{}",
+            )
+        )
+        session.commit()
+
+
+def execute_journaled_unlink_purge(
+    session_factory: Any,
+    *,
+    entry_id: int,
+    quarantine_root: Path | str,
+    frozen_manifest: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Execute or resume pathname-scoped unlink purge with durable exact-path intent.
+
+    The first call must supply the frozen manifest while the entry is active.
+    It durably records new-operation authority and moves the entry to purging
+    before any unlink. Each pathname receives its own committed unlink-intent
+    record before mutation. Recovery may accept an absent frozen pathname only
+    when that exact durable intent exists.
+    """
+    root = _absolute_lexical(quarantine_root)
+
+    with session_factory() as session:
+        entry = session.get(QuarantineEntry, entry_id)
+        if entry is None:
+            raise StateConflictError(f"Quarantine entry #{entry_id} not found")
+        state = entry.state
+        phase = entry.tx_phase
+
+    if state == "active" and phase == "active":
+        if frozen_manifest is None:
+            raise StateConflictError("UNLINK_FROZEN_AUTHORITY_REQUIRED")
+        _persist_initial_authority(
+            session_factory,
+            entry_id,
+            root,
+            frozen_manifest,
+        )
+    elif state == "purging" and phase == "purging":
+        with session_factory() as session:
+            durable_manifest = _durable_authority_manifest(session, entry_id)
+        if frozen_manifest is not None and frozen_manifest != durable_manifest:
+            raise StateConflictError("UNLINK_RECOVERY_AUTHORITY_CHANGED")
+    elif state == "purged" and phase == "purged":
+        return {
+            "purge_semantics": SEMANTICS_VERSION,
+            "removed_count": 0,
+            "removed_roles": [],
+            "recovered_missing_roles": [],
+            "already_terminal": True,
+        }
+    else:
+        raise StateConflictError(
+            f"UNLINK_PURGE_STATE_INVALID: entry #{entry_id} state={state} tx_phase={phase}"
+        )
+
+    with session_factory() as session:
+        entry = session.get(QuarantineEntry, entry_id)
+        if entry is None:
+            raise StateConflictError(f"Quarantine entry #{entry_id} not found")
+        manifest = _durable_authority_manifest(session, entry_id)
+        frozen_items = _validate_purging_authority(entry, root, manifest)
+
+    removed_roles: list[str] = []
+    recovered_missing_roles: list[str] = []
+
+    for frozen in frozen_items:
+        role = str(frozen["role"])
+        path = _absolute_lexical(frozen["path"])
+
+        with session_factory() as session:
+            existing_intent = _find_path_intent(session, entry_id, frozen)
+
+        if not os.path.lexists(path):
+            if existing_intent is None:
+                raise StateConflictError(
+                    f"UNLINK_UNPROVEN_MISSING_PATH:{role}: absence predates durable exact-path intent"
+                )
+            recovered_missing_roles.append(role)
+            continue
+
+        # Revalidate while still in purge-in-progress state. This does not widen
+        # authority: the path/identity must exactly match the persisted manifest.
+        _revalidate_frozen_item_before_unlink(frozen)
+        intent_id = _persist_path_intent(
+            session_factory,
+            entry_id,
+            root,
+            frozen,
+        )
+
+        try:
+            _descriptor_unlink_frozen_path(root, frozen)
+        except FileNotFoundError:
+            # The exact path had durable intent before this attempt. A concurrent
+            # or resumed execution may therefore treat this exact absence as
+            # idempotent, but no other pathname is inferred or added.
+            recovered_missing_roles.append(role)
+            continue
+
+        removed_roles.append(role)
+        _mark_path_complete(
+            session_factory,
+            intent_id,
+            entry_id,
+            frozen,
+        )
+
+    _commit_terminal_purged(session_factory, entry_id, root)
+
+    return {
+        "purge_semantics": SEMANTICS_VERSION,
+        "removed_count": len(removed_roles),
+        "removed_roles": removed_roles,
+        "recovered_missing_roles": recovered_missing_roles,
+        "already_terminal": False,
     }
