@@ -6,7 +6,9 @@ import os
 from pathlib import Path
 from types import SimpleNamespace
 
+from app.batch.plans import OperationItem
 from app.db import create_engine_and_session, init_db
+from app.execution.executor import execute_item
 from app.models import QuarantineEntry, utcnow
 from app.quarantine.bulk import quarantine_entry_identity_material
 from app.quarantine.bulk_lifecycle import freeze_bulk_plan_item, validate_bulk_plan_item
@@ -166,3 +168,108 @@ def test_validate_rejects_unlink_authority_drift_after_freeze(tmp_path: Path) ->
     assert result["state"] == "stale"
     assert result["reason"] == "UNLINK_AUTHORITY_CHANGED"
     assert "IDENTITY_MISMATCH:public_view" in result["actual"]["blockers"]
+
+
+def test_executor_dispatches_only_new_unlink_operation_and_keeps_old_refusal(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    data = tmp_path / "data"
+    data.mkdir()
+    trash = data / ".nas-file-center-trash"
+    trash.mkdir()
+    source = trash / "selected.bin"
+    source.write_bytes(b"dispatch-only")
+    manifest = {
+        "purge_semantics": "unlink_v1",
+        "selected_entry_id": 7,
+        "active_attempt_generation": 1,
+        "owned_paths": [],
+        "blockers": [],
+    }
+    calls: list[dict[str, object]] = []
+
+    def fake_execute_journaled_unlink_purge(
+        session_factory,
+        *,
+        entry_id: int,
+        quarantine_root,
+        frozen_manifest,
+    ):
+        calls.append(
+            {
+                "session_factory": session_factory,
+                "entry_id": entry_id,
+                "quarantine_root": Path(quarantine_root),
+                "frozen_manifest": frozen_manifest,
+            }
+        )
+        return {
+            "purge_semantics": "unlink_v1",
+            "removed_count": 0,
+            "removed_roles": [],
+            "recovered_missing_roles": [],
+            "already_terminal": False,
+        }
+
+    import app.quarantine.unlink_purge as unlink_purge
+
+    monkeypatch.setattr(
+        unlink_purge,
+        "execute_journaled_unlink_purge",
+        fake_execute_journaled_unlink_purge,
+    )
+
+    def session_factory():
+        raise AssertionError("mock dispatch must not open a database session")
+
+    new_result = execute_item(
+        OperationItem(
+            sequence=1,
+            operation="quarantine_unlink_purge",
+            source=source,
+        ),
+        allowed_roots=[data],
+        allow_mutation=True,
+        allow_delete=True,
+        quarantine_root=trash,
+        plan_id="gate6a2-dispatch",
+        session_factory=session_factory,
+        worker_id="worker-1",
+        quarantine_entry_id=7,
+        unlink_manifest=manifest,
+    )
+
+    assert new_result.state == "completed"
+    assert new_result.reason == "purged"
+    assert calls == [
+        {
+            "session_factory": session_factory,
+            "entry_id": 7,
+            "quarantine_root": trash,
+            "frozen_manifest": manifest,
+        }
+    ]
+
+    old_result = execute_item(
+        OperationItem(
+            sequence=2,
+            operation="quarantine_purge",
+            source=source,
+        ),
+        allowed_roots=[data],
+        allow_mutation=True,
+        allow_delete=True,
+        quarantine_root=trash,
+        plan_id="gate6a-old-refusal",
+        session_factory=session_factory,
+        worker_id="worker-1",
+        quarantine_entry_id=7,
+        purge_manifest={"legacy": True},
+    )
+
+    assert old_result.state == "failed"
+    assert old_result.reason.startswith(
+        "EOPNOTSUPP: Gate6-A bulk permanent purge is deferred"
+    )
+    assert len(calls) == 1
