@@ -309,6 +309,22 @@ def generate_quarantine_bulk_plan(
             },
         )
 
+    # Preview can expose Gate6-A2 unlink eligibility before Draft generation is
+    # enabled. Keep purge Draft fail-closed until Task 6.3 persists the exact
+    # unlink manifest under the new operation identity; never fall through to
+    # the historical quarantine_purge draft shape.
+    if payload.action == "purge":
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": {
+                    "code": "BULK_SELECTION_BLOCKED",
+                    "message": "Gate6-A2 bulk purge Draft is not enabled yet",
+                    "details": {},
+                }
+            },
+        )
+
     preview_items = {int(item["entry_id"]): item for item in current_preview["items"]}
     entry_ids = canonicalize_entry_ids(payload.entry_ids)
     conflict_policy = (payload.conflict_policy or "skip") if payload.action == "restore" else None
