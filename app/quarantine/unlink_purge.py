@@ -11,7 +11,7 @@ from sqlalchemy import select, text
 from app.batch_utilities.empty_dir_quarantine import safe_open_parent_fd
 from app.exceptions import StateConflictError
 from app.models import OperationJournal, QuarantineEntry, utcnow
-from app.tasks.recovery import renew_and_assert_worker_lease
+from app.tasks.recovery import assert_active_worker_lease, renew_and_assert_worker_lease
 
 
 SEMANTICS_VERSION = "unlink_v1"
@@ -732,9 +732,21 @@ def _commit_terminal_purged(
     session_factory: Any,
     entry_id: int,
     quarantine_root: Path | str,
+    *,
+    worker_id: str | None = None,
 ) -> None:
+    # Refresh the worker lease immediately before entering the terminal write
+    # boundary. The authoritative lease assertion is repeated inside the same
+    # BEGIN IMMEDIATE transaction that publishes terminal success, closing the
+    # post-unlink/pre-terminal stale-worker window.
+    if worker_id is not None:
+        renew_and_assert_worker_lease(session_factory, worker_id)
+
     with session_factory() as session:
         session.execute(text("BEGIN IMMEDIATE"))
+        if worker_id is not None:
+            assert_active_worker_lease(session, worker_id, now=utcnow())
+
         entry = session.get(QuarantineEntry, entry_id)
         if entry is None:
             session.rollback()
@@ -896,7 +908,12 @@ def execute_journaled_unlink_purge(
             frozen,
         )
 
-    _commit_terminal_purged(session_factory, entry_id, root)
+    _commit_terminal_purged(
+        session_factory,
+        entry_id,
+        root,
+        worker_id=worker_id,
+    )
 
     return {
         "purge_semantics": SEMANTICS_VERSION,
