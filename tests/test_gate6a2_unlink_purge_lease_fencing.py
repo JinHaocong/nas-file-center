@@ -8,7 +8,9 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 
+from app.batch.plans import OperationItem
 from app.db import create_engine_and_session, init_db
+from app.execution.executor import execute_item
 from app.models import OperationJournal, QuarantineEntry
 from app.tasks.state_machine import JobLeaseLost
 
@@ -142,3 +144,54 @@ def test_lost_worker_lease_immediately_before_unlink_fences_mutation_and_termina
             after = json.loads(row.after_json or "{}")
             assert before.get("phase") != "terminal"
             assert after.get("phase") != "purged"
+
+
+def test_executor_does_not_swallow_job_lease_lost(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data = tmp_path / "data"
+    data.mkdir()
+    trash = data / ".nas-file-center-trash"
+    trash.mkdir()
+    source = trash / "selected.bin"
+    source.write_bytes(b"dispatch-lease-loss")
+    manifest = {
+        "purge_semantics": "unlink_v1",
+        "selected_entry_id": 7,
+        "active_attempt_generation": 1,
+        "owned_paths": [],
+        "blockers": [],
+    }
+
+    def lose_lease(*args, **kwargs):
+        raise JobLeaseLost("simulated executor lease loss")
+
+    import app.quarantine.unlink_purge as unlink_purge
+
+    monkeypatch.setattr(
+        unlink_purge,
+        "execute_journaled_unlink_purge",
+        lose_lease,
+    )
+
+    def session_factory():
+        raise AssertionError("mock core must not open a database session")
+
+    with pytest.raises(JobLeaseLost, match="executor lease loss"):
+        execute_item(
+            OperationItem(
+                sequence=1,
+                operation="quarantine_unlink_purge",
+                source=source,
+            ),
+            allowed_roots=[data],
+            allow_mutation=True,
+            allow_delete=True,
+            quarantine_root=trash,
+            plan_id="gate6a2-lease-propagation",
+            session_factory=session_factory,
+            worker_id="stale-worker",
+            quarantine_entry_id=7,
+            unlink_manifest=manifest,
+        )
