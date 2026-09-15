@@ -195,6 +195,7 @@ def test_executor_dispatches_only_new_unlink_operation_and_keeps_old_refusal(
         entry_id: int,
         quarantine_root,
         frozen_manifest,
+        worker_id: str,
     ):
         calls.append(
             {
@@ -202,6 +203,7 @@ def test_executor_dispatches_only_new_unlink_operation_and_keeps_old_refusal(
                 "entry_id": entry_id,
                 "quarantine_root": Path(quarantine_root),
                 "frozen_manifest": frozen_manifest,
+                "worker_id": worker_id,
             }
         )
         return {
@@ -248,6 +250,7 @@ def test_executor_dispatches_only_new_unlink_operation_and_keeps_old_refusal(
             "entry_id": 7,
             "quarantine_root": trash,
             "frozen_manifest": manifest,
+            "worker_id": "worker-1",
         }
     ]
 
