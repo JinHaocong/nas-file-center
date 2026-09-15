@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.models import DuplicateFile, DuplicateGroup, IndexedPath, IndexRoot
@@ -42,10 +43,27 @@ def discover_unlink_purge_advisory(
     scan/index data. That section is informational and may be stale; it is never
     mutation authority and never upgrades a path into the hard-link section.
     """
-    roots = sorted(
-        (_absolute_lexical(root) for root in session.scalars(select(IndexRoot.root)).all()),
-        key=str,
-    )
+    try:
+        roots = sorted(
+            (
+                _absolute_lexical(root)
+                for root in session.scalars(select(IndexRoot.root)).all()
+            ),
+            key=str,
+        )
+    except SQLAlchemyError:
+        return {
+            "scope": ADVISORY_SCOPE,
+            "status": "incomplete",
+            "hardlink_survivors": [],
+            "stale_candidates": [],
+            "out_of_scope_candidates": [],
+            "same_content_scope": SAME_CONTENT_SCOPE,
+            "same_content_status": "scan_index_unavailable",
+            "same_content_independent_copies": [],
+            "diagnostics": ["ADVISORY_DB_READ_FAILED"],
+        }
+
     excluded_paths = {
         str(_absolute_lexical(item.get("path", "")))
         for item in manifest.get("owned_paths", [])
