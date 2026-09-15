@@ -61,8 +61,23 @@ export interface QuarantinePurgeRequest {
 
 export interface QuarantinePurgeResponse {
   id: number;
+  entry_id?: number;
   state: 'purged';
   status: 'purged';
+  purged?: boolean;
+  purge_semantics?: 'unlink_v1' | string;
+  removed_count?: number;
+  removed_roles?: string[];
+  recovered_missing_roles?: string[];
+  survivor_scope?: string;
+  survivor_status?: string;
+  hardlink_survivor_count?: number;
+  hardlink_survivor_paths?: string[];
+  same_content_scope?: string;
+  same_content_status?: string;
+  independent_copy_count?: number;
+  independent_copy_paths?: string[];
+  advisory_diagnostics?: string[];
 }
 
 export type QuarantineBulkAction = 'restore' | 'purge';
@@ -88,6 +103,17 @@ export interface QuarantineBulkPreviewItem {
   conflict_policy?: QuarantineBulkConflictPolicy;
   target_path?: string;
   purge_topology_manifest?: Record<string, unknown>;
+  purge_semantics?: 'unlink_v1' | string;
+  mutation_blockers?: string[];
+  survivor_scope?: string;
+  survivor_status?: string;
+  hardlink_survivor_count?: number;
+  hardlink_survivor_paths?: string[];
+  same_content_scope?: string;
+  same_content_status?: string;
+  independent_copy_count?: number;
+  independent_copy_paths?: string[];
+  advisory_diagnostics?: string[];
 }
 
 export interface QuarantineBulkPreviewResponse {

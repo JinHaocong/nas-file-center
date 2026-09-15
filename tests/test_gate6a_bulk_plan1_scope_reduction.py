@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from pathlib import Path
 
@@ -90,7 +91,7 @@ def _seed_active_entry(client: TestClient) -> int:
         return entry.id
 
 
-def test_bulk_purge_preview_is_release_blocked_without_mutation(tmp_path: Path) -> None:
+def test_bulk_purge_preview_is_gate6a2_eligible_without_mutation(tmp_path: Path) -> None:
     client = _setup_admin_client(tmp_path)
     entry_id = _seed_active_entry(client)
     service = client.app.state.service
@@ -107,10 +108,11 @@ def test_bulk_purge_preview_is_release_blocked_without_mutation(tmp_path: Path) 
 
     assert response.status_code == 200
     body = response.json()
-    assert body["eligible_count"] == 0
-    assert body["blocked_count"] == 1
-    assert body["items"][0]["eligible"] is False
-    assert body["items"][0]["reason"] == DEFERRED_REASON
+    assert body["eligible_count"] == 1
+    assert body["blocked_count"] == 0
+    assert body["items"][0]["eligible"] is True
+    assert body["items"][0]["purge_semantics"] == "unlink_v1"
+    assert body["items"][0]["mutation_blockers"] == []
 
     with service.SessionLocal() as session:
         after = session.get(QuarantineEntry, entry_id)
@@ -118,7 +120,7 @@ def test_bulk_purge_preview_is_release_blocked_without_mutation(tmp_path: Path) 
         assert (after.state, after.tx_phase, after.active_attempt_generation) == snapshot
 
 
-def test_bulk_purge_plan_generation_creates_zero_plan_when_capability_deferred(tmp_path: Path) -> None:
+def test_bulk_purge_plan_generation_uses_gate6a2_unlink_operation(tmp_path: Path) -> None:
     client = _setup_admin_client(tmp_path)
     entry_id = _seed_active_entry(client)
     preview = client.post(
@@ -140,12 +142,18 @@ def test_bulk_purge_plan_generation_creates_zero_plan_when_capability_deferred(t
         headers={"Origin": "http://testserver"},
     )
 
-    assert response.status_code == 422
-    assert response.json()["error"]["code"] == "BULK_SELECTION_BLOCKED"
+    assert response.status_code == 200, response.text
     service = client.app.state.service
     with service.SessionLocal() as session:
-        assert session.query(BatchPlan).count() == 0
-        assert session.query(BatchPlanItem).count() == 0
+        assert session.query(BatchPlan).count() == 1
+        assert session.query(BatchPlanItem).count() == 1
+        item = session.query(BatchPlanItem).one()
+        assert item.operation == "quarantine_unlink_purge"
+        metadata = json.loads(item.metadata_json or "{}")
+        assert metadata["quarantine_entry_id"] == entry_id
+        assert metadata["preview_digest"] == digest
+        assert metadata["purge_semantics"] == "unlink_v1"
+        assert metadata["unlink_manifest"]["selected_entry_id"] == entry_id
 
 
 def test_worker_rejects_handcrafted_purge_and_preserves_external_hardlink(tmp_path: Path) -> None:

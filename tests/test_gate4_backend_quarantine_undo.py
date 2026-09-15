@@ -354,21 +354,29 @@ def test_purge_guard_rules(tmp_path: Path):
     assert "Permanent deletion is disabled" in resp_nd.text
     assert target_nd.exists()
 
-    # 4. Valid Admin + DELETE + ALLOW_DELETE=True -> Success
+    # 4. Valid Admin + DELETE + ALLOW_DELETE=True remains fail-closed for legacy entries
     resp_ok = admin_client.post(
         f"/api/quarantine/{entry_id}/purge",
         json={"confirmation": "DELETE"},
     )
-    assert resp_ok.status_code == 200
-    assert resp_ok.json()["state"] == "purged"
-    assert not purge_file.exists()
+    assert resp_ok.status_code == 409
+    assert "LEGACY_QUARANTINE_PURGE_UNSUPPORTED" in resp_ok.text
+    assert purge_file.exists()
+    assert purge_file.read_text(encoding="utf-8") == "data to purge"
+    with service.SessionLocal() as session:
+        persisted = session.get(QuarantineEntry, entry_id)
+        assert persisted is not None
+        assert persisted.state == "active"
+        assert persisted.quarantine_path == str(purge_file)
 
-    # 5. Purging non-active entry -> 409 StateConflictError
+    # 5. Repeating a valid legacy purge remains fail-closed and non-mutating
     resp_again = admin_client.post(
         f"/api/quarantine/{entry_id}/purge",
         json={"confirmation": "DELETE"},
     )
     assert resp_again.status_code == 409
+    assert "LEGACY_QUARANTINE_PURGE_UNSUPPORTED" in resp_again.text
+    assert purge_file.exists()
 
 
 # ==============================================================================
@@ -604,4 +612,3 @@ def test_quarantine_list_search_and_query_parameters(tmp_path: Path):
     resp_nomatch = client.get("/api/quarantine?query=nonexistent_xyz")
     assert resp_nomatch.status_code == 200
     assert resp_nomatch.json()["total"] == 0
-

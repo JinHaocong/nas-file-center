@@ -16,7 +16,7 @@ from app.auth.rate_limiter import LoginRateLimiter
 from app.auth.router import router as auth_router
 from app.config import Settings, get_settings
 from app.exceptions import PlanStaleError
-from app.service import FileCenterService
+from app.quarantine.service_adapter import Gate6A2FileCenterService
 from app.workflows.errors import WorkflowError
 from app.planning.dedupe_preview import DedupeError
 
@@ -37,7 +37,7 @@ def _sanitize_validation_errors(obj: Any) -> Any:
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
-    service = FileCenterService(settings)
+    service = Gate6A2FileCenterService(settings)
     rate_limiter = LoginRateLimiter()
 
     # Disable default public docs/openapi URLs

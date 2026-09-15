@@ -65,5 +65,5 @@ def test_compose_yaml_version():
 def test_compose_komodo_yaml_version():
     komodo_path = ROOT_DIR / "compose.komodo.yaml"
     content = komodo_path.read_text(encoding="utf-8")
-    assert "kerwinjhc/nas-file-center:0.3.5" in content, "compose.komodo.yaml must identify image kerwinjhc/nas-file-center:0.3.5"
+    assert "kerwinjhc/nas-file-center:0.3.6" in content, "compose.komodo.yaml must identify image kerwinjhc/nas-file-center:0.3.6"
     assert ":latest" not in content, "compose.komodo.yaml must not contain application :latest reference"

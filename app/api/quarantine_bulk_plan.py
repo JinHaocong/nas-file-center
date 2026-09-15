@@ -6,6 +6,7 @@ from sqlalchemy import text
 
 from app.models import BatchPlan, BatchPlanItem, QuarantineEntry
 from app.quarantine.bulk import quarantine_entry_identity_material
+from app.quarantine.unlink_purge import SEMANTICS_VERSION, revalidate_unlink_manifest
 
 
 def persist_bulk_draft(
@@ -27,6 +28,8 @@ def persist_bulk_draft(
     }
     if is_restore:
         plan_metadata["conflict_policy"] = conflict_policy
+    else:
+        plan_metadata["purge_semantics"] = SEMANTICS_VERSION
 
     with service.SessionLocal() as session:
         session.execute(text("BEGIN IMMEDIATE"))
@@ -52,6 +55,34 @@ def persist_bulk_draft(
                 session.rollback()
                 raise RuntimeError(f"preview changed for quarantine entry {entry_id}")
             entries[entry_id] = entry
+
+        if not is_restore:
+            quarantine_root = service.settings.quarantine_root
+            for entry_id in entry_ids:
+                preview_item = preview_items[entry_id]
+                manifest = preview_item.get("unlink_manifest")
+                if preview_item.get("purge_semantics") != SEMANTICS_VERSION:
+                    session.rollback()
+                    raise RuntimeError(
+                        f"preview unlink semantics changed for quarantine entry {entry_id}"
+                    )
+                if not isinstance(manifest, dict):
+                    session.rollback()
+                    raise RuntimeError(
+                        f"preview unlink manifest missing for quarantine entry {entry_id}"
+                    )
+
+                validation = revalidate_unlink_manifest(
+                    entries[entry_id],
+                    quarantine_root,
+                    manifest,
+                )
+                if not validation["valid"]:
+                    session.rollback()
+                    blockers = ",".join(validation["blockers"])
+                    raise RuntimeError(
+                        f"preview unlink authority changed for quarantine entry {entry_id}: {blockers}"
+                    )
 
         if is_restore:
             plan_metadata["restore_skip_authority"] = {
@@ -94,12 +125,51 @@ def persist_bulk_draft(
                     ),
                 }
             else:
-                operation = "quarantine_purge"
+                manifest = preview_item.get("unlink_manifest")
+                if preview_item.get("purge_semantics") != SEMANTICS_VERSION:
+                    session.rollback()
+                    raise RuntimeError(
+                        f"preview unlink semantics changed for quarantine entry {entry_id}"
+                    )
+                if not isinstance(manifest, dict):
+                    session.rollback()
+                    raise RuntimeError(
+                        f"preview unlink manifest missing for quarantine entry {entry_id}"
+                    )
+                if manifest.get("purge_semantics") != SEMANTICS_VERSION:
+                    session.rollback()
+                    raise RuntimeError(
+                        f"preview unlink manifest semantics changed for quarantine entry {entry_id}"
+                    )
+                if manifest.get("selected_entry_id") != entry_id:
+                    session.rollback()
+                    raise RuntimeError(
+                        f"preview unlink manifest owner changed for quarantine entry {entry_id}"
+                    )
+                if manifest.get("blockers"):
+                    session.rollback()
+                    raise RuntimeError(
+                        f"preview unlink manifest blocked for quarantine entry {entry_id}"
+                    )
+
+                operation = "quarantine_unlink_purge"
                 target_path = None
+                expected_identity = (
+                    expected_db_identities.get(entry_id)
+                    if expected_db_identities is not None
+                    else quarantine_entry_identity_material(entry)
+                )
+                if expected_identity is None:
+                    session.rollback()
+                    raise RuntimeError(
+                        f"preview identity missing for quarantine entry {entry_id}"
+                    )
                 item_metadata = {
                     "quarantine_entry_id": entry_id,
                     "preview_digest": preview_digest,
-                    "purge_topology_manifest": preview_item["purge_topology_manifest"],
+                    "purge_semantics": SEMANTICS_VERSION,
+                    "entry_identity": expected_identity,
+                    "unlink_manifest": manifest,
                 }
 
             row = BatchPlanItem(
@@ -122,7 +192,7 @@ def persist_bulk_draft(
                 restore_items.append((row, entry_id))
 
         if is_restore:
-            # Item ids are database-owned and stable.  Bind every restore row to plan-level
+            # Item ids are database-owned and stable. Bind every restore row to plan-level
             # authority so post-Freeze mutation of BatchPlanItem metadata/source/target cannot
             # redefine which QuarantineEntry that exact row is allowed to restore.
             session.flush()

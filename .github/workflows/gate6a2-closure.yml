@@ -1,0 +1,261 @@
+name: Gate6-A2 Closure Verification
+
+on:
+  push:
+    branches:
+      - feature/v0.3.6-gate6a2-unlink-purge
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  full-regression-build-security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      CONFIG_DIR: /tmp/nfc-config
+      DATA_MOUNT: /tmp/nfc-data
+      ALLOWED_ROOTS: /tmp/nfc-data
+      QUARANTINE_ROOT: /tmp/nfc-data/.nas-file-center-trash
+      BASELINE_SHA: 4abd312086c7ef0f363a4da4d13b51cb470d8cba
+
+    steps:
+      - name: Checkout exact candidate with history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Record candidate identity and merge-base
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "candidate_sha=$(git rev-parse HEAD)"
+            echo "candidate_branch=${GITHUB_REF_NAME}"
+            echo "baseline_sha=${BASELINE_SHA}"
+            echo "merge_base=$(git merge-base "${BASELINE_SHA}" HEAD)"
+            echo
+            git status --short
+          } | tee gate6a2-identity.txt
+          test "$(git merge-base "${BASELINE_SHA}" HEAD)" = "${BASELINE_SHA}"
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install backend test dependencies
+        run: python -m pip install -e '.[test]'
+
+      - name: Run focused Gate6-A2 regression
+        env:
+          PYTHONPATH: .
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          tests=(tests/test_gate6a2_*.py)
+          if ((${#tests[@]} == 0)); then
+            echo "Gate6-A2 tests are required for closure" >&2
+            exit 1
+          fi
+          pytest "${tests[@]}" -q 2>&1 | tee gate6a2-focused.log
+
+      - name: Run full backend regression
+        shell: bash
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          pytest --disable-warnings -q 2>&1 | tee backend-full-regression.log
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run frontend tests
+        shell: bash
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          npm test 2>&1 | tee ../frontend-tests.log
+
+      - name: Run frontend typecheck
+        shell: bash
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          npm run typecheck 2>&1 | tee ../frontend-typecheck.log
+
+      - name: Run frontend production build
+        shell: bash
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          npm run build 2>&1 | tee ../frontend-build.log
+
+      - name: Diff check and Gate6-A2 mutation safety scan
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check "${BASELINE_SHA}...HEAD"
+
+          {
+            echo "# Gate6-A2 diff stat"
+            git diff --stat "${BASELINE_SHA}...HEAD"
+            echo
+            echo "# Gate6-A2 changed files"
+            git diff --name-status "${BASELINE_SHA}...HEAD"
+            echo
+            echo "# All ftruncate occurrences in app (historical occurrences are evidence only)"
+            git grep -n 'ftruncate' -- app || true
+            echo
+            echo "# Added ftruncate lines relative to baseline"
+            git diff --unified=0 "${BASELINE_SHA}...HEAD" -- app | grep -E '^\+[^+].*ftruncate' || true
+            echo
+            echo "# Added recursive/direct delete sites relative to baseline"
+            git diff --unified=0 "${BASELINE_SHA}...HEAD" -- app | grep -E '^\+[^+].*(rmtree|os\.remove\(|os\.unlink\(|\.unlink\()' || true
+            echo
+            echo "# Added st_nlink references relative to baseline"
+            git diff --unified=0 "${BASELINE_SHA}...HEAD" -- app | grep -E '^\+[^+].*st_nlink' || true
+            echo
+            echo "# Operation identity references"
+            git grep -nE 'quarantine_unlink_purge|quarantine_purge|unlink_v1|EOPNOTSUPP' -- app/api app/execution app/quarantine app/tasks || true
+          } | tee gate6a2-security-review.txt
+
+          if git diff --unified=0 "${BASELINE_SHA}...HEAD" -- app | grep -Eq '^\+[^+].*ftruncate'; then
+            echo "BLOCKED: new ftruncate introduced relative to Gate6-A2 baseline" >&2
+            exit 1
+          fi
+          if git diff --unified=0 "${BASELINE_SHA}...HEAD" -- app | grep -Eq '^\+[^+].*(rmtree|os\.remove\()'; then
+            echo "BLOCKED: new recursive/direct remove primitive introduced relative to Gate6-A2 baseline" >&2
+            exit 1
+          fi
+          if git diff --unified=0 "${BASELINE_SHA}...HEAD" -- app | grep -Eq '^\+[^+].*st_nlink'; then
+            echo "BLOCKED: Gate6-A2 must not use st_nlink as destructive safety authority" >&2
+            exit 1
+          fi
+
+      - name: Verify operation identity and old purge fail-closed invariant
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY' | tee gate6a2-operation-invariants.txt
+          from pathlib import Path
+
+          unlink = Path('app/quarantine/unlink_purge.py').read_text()
+          executor = Path('app/execution/executor.py').read_text()
+          bulk_plan = Path('app/api/quarantine_bulk_plan.py').read_text()
+
+          if 'unlink_v1' not in unlink:
+              raise SystemExit('unlink_v1 semantics marker missing from new unlink core')
+          if 'ftruncate' in unlink:
+              raise SystemExit('new unlink core must never contain ftruncate')
+          if 'quarantine_unlink_purge' not in executor:
+              raise SystemExit('executor missing quarantine_unlink_purge dispatch')
+          if 'quarantine_unlink_purge' not in bulk_plan:
+              raise SystemExit('bulk Draft missing quarantine_unlink_purge operation')
+          if 'if item.operation == "quarantine_purge"' not in executor or 'EOPNOTSUPP' not in executor:
+              raise SystemExit('historical quarantine_purge must remain explicit fail-closed')
+
+          print('new_operation=quarantine_unlink_purge')
+          print('semantics=unlink_v1')
+          print('old_operation=quarantine_purge remains EOPNOTSUPP')
+          print('new_unlink_core_contains_ftruncate=false')
+          PY
+
+      - name: Verify API and worker deployment image references are identical
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY' | tee deployment-image-identity.txt
+          from pathlib import Path
+          import re
+
+          komodo = Path('compose.komodo.yaml').read_text()
+          images = re.findall(r'^\s*image:\s*(\S+)\s*$', komodo, flags=re.M)
+          if len(images) != 2:
+              raise SystemExit(f'expected exactly two explicit Komodo service images, got {images!r}')
+          if len(set(images)) != 1:
+              raise SystemExit(f'API/worker image mismatch: {images!r}')
+
+          compose = Path('compose.yaml').read_text()
+          common = re.findall(r'^\s*image:\s*(\S+)\s*$', compose, flags=re.M)
+          if len(common) != 1:
+              raise SystemExit(f'expected one shared compose image anchor, got {common!r}')
+
+          print(f'compose.komodo API/worker shared image: {images[0]}')
+          print(f'compose.yaml shared x-common image: {common[0]}')
+          PY
+
+      - name: Upload Gate6-A2 regression and safety evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate6a2-closure-regression-${{ github.sha }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            gate6a2-identity.txt
+            gate6a2-focused.log
+            backend-full-regression.log
+            frontend-tests.log
+            frontend-typecheck.log
+            frontend-build.log
+            gate6a2-security-review.txt
+            gate6a2-operation-invariants.txt
+            deployment-image-identity.txt
+
+  linux-amd64-docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build linux amd64 candidate image locally
+        shell: bash
+        run: |
+          set -euo pipefail
+          SHA7="${GITHUB_SHA::7}"
+          TAG="kerwinjhc/nas-file-center:0.3.6-gate6a2-${SHA7}"
+          echo "candidate_tag=${TAG}" | tee docker-evidence.txt
+          docker buildx build \
+            --platform linux/amd64 \
+            --load \
+            --tag "${TAG}" \
+            . 2>&1 | tee docker-build.log
+          {
+            echo
+            echo "# image inspect"
+            docker image inspect "${TAG}"
+            echo
+            echo "# platform"
+            docker image inspect --format 'id={{.Id}} os={{.Os}} arch={{.Architecture}} created={{.Created}}' "${TAG}"
+          } | tee -a docker-evidence.txt
+          test "$(docker image inspect --format '{{.Architecture}}' "${TAG}")" = "amd64"
+          test "$(docker image inspect --format '{{.Os}}' "${TAG}")" = "linux"
+
+      - name: Upload Gate6-A2 Docker evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate6a2-closure-docker-${{ github.sha }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            docker-build.log
+            docker-evidence.txt

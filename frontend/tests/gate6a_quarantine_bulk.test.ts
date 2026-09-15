@@ -1,5 +1,7 @@
 import test, { describe } from 'node:test';
 import assert from 'node:assert';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 import { quarantineApi } from '../src/api/quarantine';
 import { api } from '../src/api/client';
@@ -10,6 +12,11 @@ import {
   isBulkPreviewSelectionCurrent,
 } from '../src/components/quarantine/quarantine_rules';
 import type { QuarantineEntry } from '../src/types';
+
+const quarantineTypesSource = readFileSync(
+  resolve(process.cwd(), 'src/types/quarantine.ts'),
+  'utf8'
+);
 
 
 describe('Gate6-A quarantine bulk API contract', () => {
@@ -69,6 +76,20 @@ describe('Gate6-A quarantine bulk API contract', () => {
     } finally {
       api.post = originalPost;
     }
+  });
+
+  test('Gate6-A2 bulk preview type surface preserves advisory as separate informational fields', () => {
+    const match = quarantineTypesSource.match(
+      /export interface QuarantineBulkPreviewItem \{[\s\S]*?\n\}/
+    );
+    assert.ok(match);
+    const block = match[0];
+    assert.match(block, /purge_semantics\??:/);
+    assert.match(block, /mutation_blockers\??:/);
+    assert.match(block, /survivor_scope\??:/);
+    assert.match(block, /survivor_status\??:/);
+    assert.match(block, /hardlink_survivor_paths\??:/);
+    assert.match(block, /independent_copy_paths\??:/);
   });
 
   test('resolveBulkFilteredEntryIds paginates current filters into explicit active ids', async () => {

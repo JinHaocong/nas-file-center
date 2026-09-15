@@ -1,0 +1,96 @@
+name: Gate6-A2 TDD
+
+on:
+  push:
+    branches:
+      - feature/v0.3.6-gate6a2-unlink-purge
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  focused-tdd:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CONFIG_DIR: /tmp/nfc-config
+      DATA_MOUNT: /tmp/nfc-data
+      ALLOWED_ROOTS: /tmp/nfc-data
+      QUARANTINE_ROOT: /tmp/nfc-data/.nas-file-center-trash
+
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Record identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "candidate_sha=$(git rev-parse HEAD)"
+          echo "branch=${GITHUB_REF_NAME}"
+          echo "merge_base=$(git merge-base 4abd312086c7ef0f363a4da4d13b51cb470d8cba HEAD)"
+          test "$(git merge-base 4abd312086c7ef0f363a4da4d13b51cb470d8cba HEAD)" = "4abd312086c7ef0f363a4da4d13b51cb470d8cba"
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install backend test dependencies
+        run: python -m pip install -e '.[test]'
+
+      - name: Run preserved quarantine regressions
+        env:
+          PYTHONPATH: .
+        run: >-
+          pytest
+          tests/test_quarantine_api.py
+          tests/test_quarantine_core.py
+          tests/test_quarantine_hardening.py
+          tests/test_gate5g_g7_task11_cleanup_gate.py
+          tests/test_gate5g_g7_task8_restore.py
+          tests/test_gate5g_g7_hotfix2_worker_restore_authority.py
+          tests/test_gate5g_g7_hotfix3_restore_takeover_generation.py
+          tests/test_v0351_zfuse_ctime_stability.py
+          -q
+
+      - name: Run preserved Gate6-A focused regressions
+        env:
+          PYTHONPATH: .
+        shell: bash
+        run: |
+          set -euo pipefail
+          pytest tests/test_gate6a_bulk_*.py tests/test_gate6a_transactional_purge*.py tests/test_gate6a_purge_recovery*.py -q
+
+      - name: Run Gate6-A2 tests when present
+        env:
+          PYTHONPATH: .
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          tests=(tests/test_gate6a2_*.py)
+          if ((${#tests[@]} == 0)); then
+            echo "No Gate6-A2 tests yet; baseline verification only."
+            exit 0
+          fi
+          pytest "${tests[@]}" -q
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run frontend tests
+        working-directory: frontend
+        run: npm test

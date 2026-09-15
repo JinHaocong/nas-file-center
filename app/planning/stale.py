@@ -143,6 +143,26 @@ def verify_item_freshness(
         except Exception:
             meta = {}
 
+    # Gate6-A2 has its own stronger pathname-scoped freshness authority. Once a
+    # frozen unlink_v1 manifest is bound to the selected entry, the public view
+    # may legitimately disappear before a restarted worker reaches generic
+    # preflight. The journaled unlink engine revalidates the exact frozen
+    # manifest and per-path durable intent before any further mutation.
+    if operation == "quarantine_unlink_purge":
+        raw_qid = meta.get("quarantine_entry_id")
+        manifest = meta.get("unlink_manifest")
+        if (
+            isinstance(raw_qid, int)
+            and not isinstance(raw_qid, bool)
+            and raw_qid > 0
+            and meta.get("purge_semantics") == "unlink_v1"
+            and isinstance(manifest, dict)
+            and manifest.get("purge_semantics") == "unlink_v1"
+            and manifest.get("selected_entry_id") == raw_qid
+            and manifest.get("blockers") == []
+        ):
+            return True, None
+
     # Gate6-A purge recovery authority transfers to the transactional purge
     # engine only after Worker Phase-1 intent has been durably persisted.  At
     # that point the original source path may legitimately be absent because it

@@ -13,6 +13,7 @@ from app.models import BatchPlanItem, QuarantineEntry
 from app.quarantine.bulk import quarantine_entry_identity_material
 from app.quarantine.purge import build_purge_topology_manifest, validate_purge_topology_manifest
 from app.quarantine.candidate import qualify_candidate_anchor_fd
+from app.quarantine.unlink_purge import SEMANTICS_VERSION, revalidate_unlink_manifest
 
 
 def _entry_id(metadata_json: str | None) -> int:
@@ -31,6 +32,79 @@ def _restore_metadata(metadata_json: str | None) -> dict[str, Any]:
     if not isinstance(metadata, dict):
         raise StateConflictError("Gate6-A restore item metadata_json is not an object")
     return metadata
+
+
+def _unlink_metadata(metadata_json: str | None) -> dict[str, Any]:
+    try:
+        metadata = json.loads(metadata_json or "{}")
+    except Exception as exc:
+        raise StateConflictError("Gate6-A2 unlink item metadata_json is malformed") from exc
+    if not isinstance(metadata, dict):
+        raise StateConflictError("Gate6-A2 unlink item metadata_json is not an object")
+    return metadata
+
+
+def _gate6a2_unlink_binding_error(
+    *,
+    plan_metadata: dict[str, Any] | None,
+    metadata: dict[str, Any],
+    entry_id: int,
+    source_path: str,
+    entry: QuarantineEntry,
+    frozen_expected: dict[str, Any] | None = None,
+) -> str | None:
+    if metadata.get("purge_semantics") != SEMANTICS_VERSION:
+        return "Gate6-A2 unlink item purge_semantics is invalid"
+
+    manifest = metadata.get("unlink_manifest")
+    if not isinstance(manifest, dict):
+        return "Gate6-A2 unlink item lacks its frozen unlink_manifest"
+    if manifest.get("purge_semantics") != SEMANTICS_VERSION:
+        return "Gate6-A2 unlink manifest purge_semantics is invalid"
+    if manifest.get("selected_entry_id") != entry_id:
+        return "Gate6-A2 unlink manifest selected entry disagrees with item authority"
+    if manifest.get("blockers"):
+        return "Gate6-A2 unlink manifest is already blocked"
+
+    frozen_identity = metadata.get("entry_identity")
+    if not isinstance(frozen_identity, dict):
+        return "Gate6-A2 unlink item entry_identity is malformed"
+    if frozen_identity.get("entry_id") != entry_id:
+        return "Gate6-A2 unlink item entry_identity owner is invalid"
+
+    if str(source_path) != str(entry.quarantine_path):
+        return "Gate6-A2 unlink source_path disagrees with quarantine_entry_id owner"
+
+    plan_meta = plan_metadata if isinstance(plan_metadata, dict) else {}
+    if plan_meta.get("action") != "purge":
+        return "Gate6-A2 unlink plan action is invalid"
+    if plan_meta.get("purge_semantics") != SEMANTICS_VERSION:
+        return "Gate6-A2 unlink plan purge_semantics is invalid"
+    if metadata.get("preview_digest") != plan_meta.get("preview_digest"):
+        return "Gate6-A2 unlink preview_digest disagrees with plan authority"
+
+    selected_entry_ids = plan_meta.get("entry_ids")
+    if not isinstance(selected_entry_ids, list):
+        return "Gate6-A2 unlink plan entry_ids authority is malformed"
+    if entry_id not in selected_entry_ids:
+        return "Gate6-A2 unlink quarantine_entry_id is not in the frozen plan selection"
+
+    current_identity = quarantine_entry_identity_material(entry)
+    if current_identity != frozen_identity:
+        return "Gate6-A2 unlink current qentry disagrees with frozen entry_identity"
+
+    if frozen_expected is not None:
+        expected_from_identity = {
+            "device": frozen_identity.get("device"),
+            "inode": frozen_identity.get("inode"),
+            "size": frozen_identity.get("size"),
+            "mtime_ns": frozen_identity.get("mtime_ns"),
+            "content_hash": frozen_identity.get("content_hash"),
+        }
+        if frozen_expected != expected_from_identity:
+            return "Gate6-A2 unlink frozen expected_* identity disagrees with item authority"
+
+    return None
 
 
 def _gate6a_restore_binding_error(
@@ -249,6 +323,16 @@ def _frozen_identity_updates(frozen_stat, expected_hash: str) -> dict[str, Any]:
     }
 
 
+def _unlink_frozen_identity_updates(identity: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "expected_device": int(identity["device"]),
+        "expected_inode": int(identity["inode"]),
+        "expected_size": int(identity["size"]),
+        "expected_mtime_ns": int(identity["mtime_ns"]),
+        "expected_hash": identity.get("content_hash"),
+    }
+
+
 def freeze_bulk_plan_item(
     service,
     *,
@@ -257,6 +341,51 @@ def freeze_bulk_plan_item(
     plan_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Return plan-item Freeze updates for Gate6-A kinds, or None when not owned here."""
+    if plan_kind == "quarantine-bulk-purge" and item.get("operation") == "quarantine_unlink_purge":
+        metadata = _unlink_metadata(item.get("metadata_json"))
+        entry_id = _entry_id(item.get("metadata_json"))
+        manifest = metadata.get("unlink_manifest")
+
+        with service.SessionLocal() as session:
+            entry = session.get(QuarantineEntry, entry_id)
+            if entry is None:
+                raise StateConflictError(f"Quarantine entry #{entry_id} no longer exists at Freeze")
+            if entry.state != "active":
+                raise StateConflictError(
+                    f"Quarantine entry #{entry_id} is no longer active at Freeze (state={entry.state})"
+                )
+
+            binding_error = _gate6a2_unlink_binding_error(
+                plan_metadata=plan_metadata,
+                metadata=metadata,
+                entry_id=entry_id,
+                source_path=str(item.get("source_path") or ""),
+                entry=entry,
+            )
+            if binding_error is not None:
+                raise StateConflictError(binding_error)
+
+            assert isinstance(manifest, dict)
+            validation = revalidate_unlink_manifest(
+                entry,
+                service.settings.quarantine_root,
+                manifest,
+            )
+            if not validation["valid"]:
+                blockers = ",".join(validation["blockers"])
+                raise StateConflictError(
+                    f"UNLINK_AUTHORITY_CHANGED: unlink authority changed for quarantine entry #{entry_id}: {blockers}"
+                )
+
+            frozen_identity = metadata["entry_identity"]
+            assert isinstance(frozen_identity, dict)
+            updates = _unlink_frozen_identity_updates(frozen_identity)
+
+        return {
+            **updates,
+            "metadata_json": json.dumps(metadata, ensure_ascii=False, sort_keys=True),
+        }
+
     if plan_kind == "quarantine-bulk-purge" and item.get("operation") == "quarantine_purge":
         metadata = json.loads(item.get("metadata_json") or "{}")
         entry_id = _entry_id(item.get("metadata_json"))
@@ -382,6 +511,79 @@ def validate_bulk_plan_item(
     plan_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Validate one frozen Gate6-A item without mutating quarantine state or payload."""
+    if plan_kind == "quarantine-bulk-purge" and item.operation == "quarantine_unlink_purge":
+        try:
+            metadata = _unlink_metadata(item.metadata_json)
+            entry_id = _entry_id(item.metadata_json)
+        except StateConflictError as exc:
+            return {
+                "state": "stale",
+                "reason": "UNLINK_AUTHORITY_INVALID",
+                "actual": {"error": str(exc)},
+            }
+
+        manifest = metadata.get("unlink_manifest")
+        with service.SessionLocal() as session:
+            entry = session.get(QuarantineEntry, entry_id)
+            if entry is None:
+                return {
+                    "state": "stale",
+                    "reason": "UNLINK_AUTHORITY_CHANGED",
+                    "actual": {"blockers": ["QUARANTINE_ENTRY_MISSING"]},
+                }
+            if entry.state != "active":
+                return {
+                    "state": "stale",
+                    "reason": "UNLINK_AUTHORITY_CHANGED",
+                    "actual": {"blockers": ["ENTRY_NOT_ACTIVE"]},
+                }
+
+            binding_error = _gate6a2_unlink_binding_error(
+                plan_metadata=plan_metadata,
+                metadata=metadata,
+                entry_id=entry_id,
+                source_path=str(item.source_path),
+                entry=entry,
+                frozen_expected={
+                    "device": item.expected_device,
+                    "inode": item.expected_inode,
+                    "size": item.expected_size,
+                    "mtime_ns": item.expected_mtime_ns,
+                    "content_hash": item.expected_hash,
+                },
+            )
+            if binding_error is not None:
+                return {
+                    "state": "stale",
+                    "reason": "UNLINK_AUTHORITY_CHANGED",
+                    "actual": {"blockers": [binding_error]},
+                }
+
+            if not isinstance(manifest, dict):
+                return {
+                    "state": "stale",
+                    "reason": "UNLINK_AUTHORITY_CHANGED",
+                    "actual": {"blockers": ["INVALID_UNLINK_MANIFEST"]},
+                }
+
+            validation = revalidate_unlink_manifest(
+                entry,
+                service.settings.quarantine_root,
+                manifest,
+            )
+            if not validation["valid"]:
+                return {
+                    "state": "stale",
+                    "reason": "UNLINK_AUTHORITY_CHANGED",
+                    "actual": {"blockers": list(validation["blockers"])},
+                }
+
+        return {
+            "state": "validated",
+            "reason": "bulk unlink purge validated",
+            "actual": None,
+        }
+
     if plan_kind == "quarantine-bulk-purge" and item.operation == "quarantine_purge":
         metadata = json.loads(item.metadata_json or "{}")
         entry_id = _entry_id(item.metadata_json)
