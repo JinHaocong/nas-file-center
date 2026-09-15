@@ -1,10 +1,11 @@
 services:
   nas-file-center-api:
-    image: kerwinjhc/nas-file-center:0.3.5
+    image: kerwinjhc/nas-file-center:0.3.6
+    pull_policy: never
     container_name: nas-file-center-api
     volumes:
       - /tmp/zfsv3/nvme13/15246330601/data/NasFileCenter:/config
-      - /tmp/zfsv3/sata11/15246330601/data:/data:ro
+      - /tmp/zfsv3/sata11/15246330601/data:/data:rw
     networks:
       - nginx_network
     environment:
@@ -12,8 +13,8 @@ services:
       - DATA_MOUNT=/data
       - ALLOWED_ROOTS=/data
       - QUARANTINE_ROOT=/data/.nas-file-center-trash
-      - ALLOW_MUTATION=false
-      - ALLOW_DELETE=false
+      - ALLOW_MUTATION=true
+      - ALLOW_DELETE=true
       - PROTECT_LAST_FILE=true
       - FCLONES_BINARY=/usr/local/bin/fclones
       - MTIME_REFRESH_DELAY_SECONDS=2
@@ -29,7 +30,8 @@ services:
     restart: unless-stopped
 
   nas-file-center-worker:
-    image: kerwinjhc/nas-file-center:0.3.5
+    image: kerwinjhc/nas-file-center:0.3.6
+    pull_policy: never
     container_name: nas-file-center-worker
     command:
       - python
@@ -37,7 +39,7 @@ services:
       - app.worker
     volumes:
       - /tmp/zfsv3/nvme13/15246330601/data/NasFileCenter:/config
-      - /tmp/zfsv3/sata11/15246330601/data:/data:ro
+      - /tmp/zfsv3/sata11/15246330601/data:/data:rw
     networks:
       - nginx_network
     environment:
@@ -45,8 +47,8 @@ services:
       - DATA_MOUNT=/data
       - ALLOWED_ROOTS=/data
       - QUARANTINE_ROOT=/data/.nas-file-center-trash
-      - ALLOW_MUTATION=false
-      - ALLOW_DELETE=false
+      - ALLOW_MUTATION=true
+      - ALLOW_DELETE=true
       - PROTECT_LAST_FILE=true
       - FCLONES_BINARY=/usr/local/bin/fclones
       - MTIME_REFRESH_DELAY_SECONDS=2
