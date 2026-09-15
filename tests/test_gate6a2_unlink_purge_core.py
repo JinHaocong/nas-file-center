@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -168,3 +169,92 @@ def test_revalidate_unlink_manifest_blocks_aba_public_view_replacement(
     assert public_view.read_bytes() == payload
     assert anchor.read_bytes() == payload
     assert captured.read_bytes() == payload
+
+
+def test_exact_owned_paths_are_unlinked_without_inode_payload_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.quarantine.unlink_purge as unlink_purge
+
+    try:
+        unlink_owned_paths = unlink_purge._unlink_frozen_owned_paths
+    except AttributeError as exc:
+        pytest.fail(f"Gate6-A2 unlink mutation primitive is not implemented yet: {exc}")
+
+    data = tmp_path / "data"
+    indexed = data / "indexed"
+    indexed.mkdir(parents=True)
+    trash = data / ".nas-file-center-trash"
+    attempt = trash / ".tx" / "entry-1" / "attempt-1"
+    attempt.mkdir(parents=True)
+
+    anchor = attempt / "anchor"
+    captured = attempt / "captured_source"
+    public_view = trash / "selected.q-1.bin"
+    original = data / "selected.bin"
+    external_survivor = indexed / "external-hardlink.bin"
+    unrelated = indexed / "unrelated.bin"
+    payload = b"gate6a2-exact-owned-path-unlink"
+
+    anchor.write_bytes(payload)
+    os.link(anchor, captured)
+    os.link(anchor, public_view)
+    os.link(anchor, external_survivor)
+    unrelated.write_bytes(b"unrelated-must-survive")
+
+    entry = _entry(1, original, public_view, anchor)
+    manifest = unlink_purge.build_unlink_manifest(entry, trash)
+    assert manifest["blockers"] == []
+
+    authorized_paths = {item["path"] for item in manifest["owned_paths"]}
+    assert authorized_paths == {str(anchor), str(captured), str(public_view)}
+
+    survivor_before = external_survivor.stat(follow_symlinks=False)
+    survivor_bytes_before = external_survivor.read_bytes()
+    unrelated_bytes_before = unrelated.read_bytes()
+    real_unlink = os.unlink
+    unlink_calls: list[str] = []
+
+    def tracked_unlink(path, *args, **kwargs):
+        path_obj = Path(os.fspath(path))
+        dir_fd = kwargs.get("dir_fd")
+        if dir_fd is not None and not path_obj.is_absolute():
+            parent = Path(os.readlink(f"/proc/self/fd/{dir_fd}"))
+            path_obj = parent / path_obj
+        unlink_calls.append(str(path_obj))
+        return real_unlink(path, *args, **kwargs)
+
+    def forbidden_ftruncate(*args, **kwargs):
+        pytest.fail("Gate6-A2 unlink purge must never call os.ftruncate")
+
+    def forbidden_rmtree(*args, **kwargs):
+        pytest.fail("Gate6-A2 unlink purge must never recursively delete")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(unlink_purge.os, "unlink", tracked_unlink)
+        patch.setattr(unlink_purge.os, "ftruncate", forbidden_ftruncate)
+        patch.setattr(shutil, "rmtree", forbidden_rmtree)
+        result = unlink_owned_paths(entry, trash, manifest)
+
+    assert len(unlink_calls) == 3
+    assert set(unlink_calls) == authorized_paths
+    assert result["removed_count"] == 3
+    assert set(result["removed_roles"]) == {
+        "authoritative_anchor",
+        "captured_source",
+        "public_view",
+    }
+
+    assert not anchor.exists()
+    assert not captured.exists()
+    assert not public_view.exists()
+
+    survivor_after = external_survivor.stat(follow_symlinks=False)
+    assert external_survivor.read_bytes() == survivor_bytes_before == payload
+    assert (survivor_after.st_dev, survivor_after.st_ino) == (
+        survivor_before.st_dev,
+        survivor_before.st_ino,
+    )
+    assert unrelated.exists()
+    assert unrelated.read_bytes() == unrelated_bytes_before
