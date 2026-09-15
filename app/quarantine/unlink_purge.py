@@ -272,3 +272,62 @@ def revalidate_unlink_manifest(
         "active_attempt_generation": generation,
         "blockers": blockers,
     }
+
+
+def _revalidate_frozen_item_before_unlink(frozen: dict[str, Any]) -> Path:
+    """Revalidate one already-authorized frozen path immediately before unlink."""
+    role = frozen.get("role")
+    path = _absolute_lexical(frozen.get("path", ""))
+
+    if path.is_symlink() or os.path.islink(path):
+        raise RuntimeError(f"SYMLINK:{role}")
+
+    try:
+        st = path.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise RuntimeError(f"MISSING_OR_UNREADABLE:{role}") from exc
+
+    if not stat.S_ISREG(st.st_mode):
+        raise RuntimeError(f"NOT_REGULAR_FILE:{role}")
+
+    if (
+        st.st_dev != frozen.get("device")
+        or st.st_ino != frozen.get("inode")
+        or st.st_size != frozen.get("size")
+        or st.st_mtime_ns != frozen.get("mtime_ns")
+    ):
+        raise RuntimeError(f"IDENTITY_MISMATCH:{role}")
+
+    return path
+
+
+def _unlink_frozen_owned_paths(
+    entry: Any,
+    quarantine_root: Path | str,
+    manifest: dict[str, Any],
+) -> dict[str, Any]:
+    """Unlink only exact frozen NFC-owned leaf paths.
+
+    This is an internal mutation primitive, intentionally not routed from API,
+    executor, or service yet. Durable intent/recovery orchestration is added by
+    the later Gate6-A2 recovery steps before this primitive becomes reachable
+    from a production permanent-clear path.
+    """
+    validation = revalidate_unlink_manifest(entry, quarantine_root, manifest)
+    if not validation["valid"]:
+        blockers = ",".join(validation["blockers"])
+        raise RuntimeError(f"UNLINK_MANIFEST_INVALID:{blockers}")
+
+    frozen_items = tuple(dict(item) for item in manifest["owned_paths"])
+    removed_roles: list[str] = []
+
+    for frozen in frozen_items:
+        path = _revalidate_frozen_item_before_unlink(frozen)
+        os.unlink(path)
+        removed_roles.append(str(frozen["role"]))
+
+    return {
+        "purge_semantics": SEMANTICS_VERSION,
+        "removed_count": len(removed_roles),
+        "removed_roles": removed_roles,
+    }
