@@ -109,6 +109,53 @@ def _seed_transactional_entry_with_indexed_survivor(
     return entry_id, anchor, captured, public_view, survivor, payload
 
 
+def _seed_transactional_entry(
+    service: FileCenterService,
+    data: Path,
+    trash: Path,
+    *,
+    label: str,
+    add_unknown_private_path: bool = False,
+) -> int:
+    payload = f"gate6a2-{label}".encode()
+    with service.SessionLocal() as session:
+        entry = QuarantineEntry(
+            original_path=str(data / f"{label}.bin"),
+            quarantine_path=str(trash / f"pending-{label}.bin"),
+            state="active",
+            tx_phase="active",
+            active_attempt_generation=1,
+            size=len(payload),
+            content_hash=hashlib.sha256(payload).hexdigest(),
+            created_at=utcnow(),
+            updated_at=utcnow(),
+        )
+        session.add(entry)
+        session.flush()
+        entry_id = entry.id
+
+        attempt = trash / ".tx" / f"entry-{entry_id}" / "attempt-1"
+        attempt.mkdir(parents=True)
+        anchor = attempt / "anchor"
+        captured = attempt / "captured_source"
+        public_view = trash / f"{label}.q-{entry_id}.bin"
+        anchor.write_bytes(payload)
+        os.link(anchor, captured)
+        os.link(anchor, public_view)
+        if add_unknown_private_path:
+            os.link(anchor, attempt / "unexpected-hardlink")
+        st = anchor.stat(follow_symlinks=False)
+
+        entry.quarantine_path = str(public_view)
+        entry.authoritative_anchor_path = str(anchor)
+        entry.device = st.st_dev
+        entry.inode = st.st_ino
+        entry.size = st.st_size
+        entry.mtime_ns = st.st_mtime_ns
+        session.commit()
+    return entry_id
+
+
 def test_single_clear_uses_unlink_v1_and_reports_indexed_hardlink_survivor(tmp_path: Path) -> None:
     service, client, data, trash = _setup_api(tmp_path)
     entry_id, anchor, captured, public_view, survivor, payload = (
@@ -157,3 +204,57 @@ def test_single_clear_uses_unlink_v1_and_reports_indexed_hardlink_survivor(tmp_p
     rendered = str(result).lower()
     assert "secure erase" not in rendered
     assert "physical bytes definitely destroyed" not in rendered
+
+
+def test_bulk_purge_preview_uses_per_entry_unlink_eligibility_and_keeps_survivors_informational(
+    tmp_path: Path,
+) -> None:
+    service, client, data, trash = _setup_api(tmp_path)
+    eligible_id, _, _, _, survivor, _ = _seed_transactional_entry_with_indexed_survivor(
+        service, data, trash
+    )
+    blocked_id = _seed_transactional_entry(
+        service,
+        data,
+        trash,
+        label="blocked",
+        add_unknown_private_path=True,
+    )
+    unselected_id = _seed_transactional_entry(
+        service,
+        data,
+        trash,
+        label="unselected",
+    )
+
+    response = client.post(
+        "/api/quarantine/bulk-preview",
+        json={
+            "action": "purge",
+            "entry_ids": [blocked_id, eligible_id],
+        },
+        headers={"Origin": "http://testserver"},
+    )
+
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert set(result["entry_ids"]) == {eligible_id, blocked_id}
+    assert unselected_id not in result["entry_ids"]
+    assert result["eligible_count"] == 1
+    assert result["blocked_count"] == 1
+
+    items = {int(item["entry_id"]): item for item in result["items"]}
+    assert set(items) == {eligible_id, blocked_id}
+
+    eligible = items[eligible_id]
+    assert eligible["eligible"] is True
+    assert eligible["purge_semantics"] == "unlink_v1"
+    assert eligible["mutation_blockers"] == []
+    assert eligible["survivor_scope"] == "indexed_roots_only"
+    assert eligible["survivor_status"] == "found"
+    assert eligible["hardlink_survivor_paths"] == [str(survivor)]
+
+    blocked = items[blocked_id]
+    assert blocked["eligible"] is False
+    assert blocked["reason"] == "UNLINK_MANIFEST_BLOCKED"
+    assert "UNRECOGNIZED_PRIVATE_PATH" in blocked["mutation_blockers"]
