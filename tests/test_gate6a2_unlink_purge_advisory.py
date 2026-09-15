@@ -122,9 +122,10 @@ def test_indexed_scope_advisory_requires_live_lstat_for_hardlink_survivor(
         advisory = discover_unlink_purge_advisory(session, entry, manifest)
 
     assert advisory["scope"] == "indexed_roots_only"
-    assert advisory["status"] == "verified_found"
+    assert advisory["status"] == "incomplete"
     assert advisory["hardlink_survivors"] == [str(survivor)]
     assert str(stale) in advisory["stale_candidates"]
+    assert f"LIVE_LSTAT_MISSING:{stale}" in advisory["diagnostics"]
     assert {
         item["path"] for item in manifest["owned_paths"]
     }.isdisjoint(advisory["hardlink_survivors"])
