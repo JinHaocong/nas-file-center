@@ -97,6 +97,17 @@ def build_unlink_manifest(entry: Any, quarantine_root: Path | str) -> dict[str, 
     elif _is_within(public_view, tx_root):
         add_blocker("PUBLIC_VIEW_INSIDE_PRIVATE_NAMESPACE")
 
+    # Mutation authority is selected-entry pathname scoped. Inspect only the
+    # selected entry's current attempt directory so an unknown private object
+    # fails closed without scanning sibling entries or widening by inode.
+    if attempt.exists() and not attempt.is_symlink():
+        try:
+            for child in sorted(attempt.iterdir(), key=lambda path: path.name):
+                if child.name not in {"anchor", "captured_source"}:
+                    add_blocker("UNRECOGNIZED_PRIVATE_PATH")
+        except OSError:
+            add_blocker("PRIVATE_NAMESPACE_UNREADABLE")
+
     owned_paths: list[dict[str, Any]] = []
     for role, path in (
         ("authoritative_anchor", expected_anchor),
