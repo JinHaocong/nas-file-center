@@ -11,6 +11,7 @@ from sqlalchemy import select, text
 from app.batch_utilities.empty_dir_quarantine import safe_open_parent_fd
 from app.exceptions import StateConflictError
 from app.models import OperationJournal, QuarantineEntry, utcnow
+from app.tasks.recovery import renew_and_assert_worker_lease
 
 
 SEMANTICS_VERSION = "unlink_v1"
@@ -794,6 +795,7 @@ def execute_journaled_unlink_purge(
     entry_id: int,
     quarantine_root: Path | str,
     frozen_manifest: dict[str, Any] | None,
+    worker_id: str | None = None,
 ) -> dict[str, Any]:
     """Execute or resume pathname-scoped unlink purge with durable exact-path intent.
 
@@ -873,6 +875,9 @@ def execute_journaled_unlink_purge(
             root,
             frozen,
         )
+
+        if worker_id is not None:
+            renew_and_assert_worker_lease(session_factory, worker_id)
 
         try:
             _descriptor_unlink_frozen_path(root, frozen)
