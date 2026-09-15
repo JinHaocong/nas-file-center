@@ -155,6 +155,8 @@ def _compute_bulk_preview(
                 }
                 if mutation_blockers:
                     item["reason"] = "UNLINK_MANIFEST_BLOCKED"
+                if include_internal:
+                    item["unlink_manifest"] = manifest
                 items.append(item)
 
                 # The mutation digest deliberately excludes advisory evidence.
@@ -305,22 +307,6 @@ def generate_quarantine_bulk_plan(
                     "code": "BULK_SELECTION_BLOCKED",
                     "message": "Selected quarantine entries are not eligible for this bulk action",
                     "details": {"blocked_items": blocked_items},
-                }
-            },
-        )
-
-    # Preview can expose Gate6-A2 unlink eligibility before Draft generation is
-    # enabled. Keep purge Draft fail-closed until Task 6.3 persists the exact
-    # unlink manifest under the new operation identity; never fall through to
-    # the historical quarantine_purge draft shape.
-    if payload.action == "purge":
-        return JSONResponse(
-            status_code=422,
-            content={
-                "error": {
-                    "code": "BULK_SELECTION_BLOCKED",
-                    "message": "Gate6-A2 bulk purge Draft is not enabled yet",
-                    "details": {},
                 }
             },
         )
