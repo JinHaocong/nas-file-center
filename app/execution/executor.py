@@ -70,13 +70,32 @@ def execute_item(
     worker_id: str | None = None,
     quarantine_entry_id: int | None = None,
     purge_manifest: dict | None = None,
+    unlink_manifest: dict | None = None,
 ) -> ItemResult:
     if item.state == "completed":
         return ItemResult("completed", "already completed")
     if not allow_mutation:
         return _skip("filesystem mutation is disabled")
-    if item.operation in {"unlink", "rmdir_empty", "quarantine_purge"} and not allow_delete:
+    if item.operation in {"unlink", "rmdir_empty", "quarantine_purge", "quarantine_unlink_purge"} and not allow_delete:
         return _skip("permanent deletion is disabled")
+    if item.operation == "quarantine_unlink_purge":
+        if not session_factory or not worker_id or not quarantine_entry_id or unlink_manifest is None:
+            return ItemResult(
+                "failed",
+                "UNLINK_PURGE_AUTHORITY_MISSING: worker authority, session_factory, quarantine_entry_id, and frozen unlink manifest are required",
+            )
+        try:
+            from app.quarantine.unlink_purge import execute_journaled_unlink_purge
+
+            execute_journaled_unlink_purge(
+                session_factory,
+                entry_id=quarantine_entry_id,
+                quarantine_root=quarantine_root,
+                frozen_manifest=unlink_manifest,
+            )
+        except Exception as exc:
+            return ItemResult("failed", str(exc))
+        return ItemResult("completed", "purged")
     if item.operation == "quarantine_purge":
         return ItemResult(
             "failed",
