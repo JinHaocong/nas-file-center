@@ -1,16 +1,17 @@
 from __future__ import annotations
 
+from app.exceptions import StateConflictError
 from app.models import QuarantineEntry
 from app.quarantine.single_unlink_purge import purge_single_transactional_entry
 from app.service import FileCenterService
 
 
 class Gate6A2FileCenterService(FileCenterService):
-    """Incremental Gate6-A2 adapter for the public single Clear action.
+    """Gate6-A2 adapter for the public single Clear action.
 
-    Transactional quarantine entries use the new pathname-scoped unlink engine.
-    Truly legacy, non-transactional entries remain on the existing compatibility
-    path until their migration/closure semantics are handled explicitly.
+    Transactional quarantine entries use the pathname-scoped unlink_v1 engine.
+    Legacy/non-transactional entries have no frozen Gate6-A2 authority and must
+    fail closed rather than falling back to the historical purge implementation.
     """
 
     def purge_quarantine_entry(
@@ -38,8 +39,7 @@ class Gate6A2FileCenterService(FileCenterService):
                 is_admin=is_admin,
             )
 
-        return super().purge_quarantine_entry(
-            entry_id,
-            confirmation=confirmation,
-            is_admin=is_admin,
+        raise StateConflictError(
+            "LEGACY_QUARANTINE_PURGE_UNSUPPORTED: "
+            "Gate6-A2 permanent Clear requires transactional unlink_v1 authority"
         )
