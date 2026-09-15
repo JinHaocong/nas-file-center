@@ -145,31 +145,41 @@ def discover_unlink_purge_advisory(
 
     same_content_status = "scan_index_unavailable"
     if entry.content_hash:
-        copy_candidates = session.scalars(
-            select(DuplicateFile)
-            .join(DuplicateGroup, DuplicateFile.group_id == DuplicateGroup.id)
-            .where(DuplicateGroup.content_hash == entry.content_hash)
-            .order_by(DuplicateFile.absolute_path)
-        ).all()
+        try:
+            copy_candidates = session.scalars(
+                select(DuplicateFile)
+                .join(DuplicateGroup, DuplicateFile.group_id == DuplicateGroup.id)
+                .where(DuplicateGroup.content_hash == entry.content_hash)
+                .order_by(DuplicateFile.absolute_path)
+            ).all()
+        except SQLAlchemyError:
+            copy_candidates = []
+            same_content_status = "scan_index_incomplete"
+            diagnostics.append("SAME_CONTENT_DB_READ_FAILED")
+        else:
+            for candidate in copy_candidates:
+                path = _absolute_lexical(candidate.absolute_path)
+                path_text = str(path)
 
-        for candidate in copy_candidates:
-            path = _absolute_lexical(candidate.absolute_path)
-            path_text = str(path)
+                if path_text in excluded_paths:
+                    continue
+                if not any(_is_within(path, root) for root in roots):
+                    continue
+                if (candidate.device, candidate.inode) == (entry.device, entry.inode):
+                    continue
 
-            if path_text in excluded_paths:
-                continue
-            if not any(_is_within(path, root) for root in roots):
-                continue
-            if (candidate.device, candidate.inode) == (entry.device, entry.inode):
-                continue
+                same_content_independent_copies.append(path_text)
 
-            same_content_independent_copies.append(path_text)
+            same_content_independent_copies = sorted(
+                set(same_content_independent_copies)
+            )
+            same_content_status = (
+                "scan_index_found"
+                if same_content_independent_copies
+                else "scan_index_none"
+            )
 
-        same_content_independent_copies = sorted(set(same_content_independent_copies))
-        same_content_status = (
-            "scan_index_found" if same_content_independent_copies else "scan_index_none"
-        )
-
+    diagnostics = sorted(set(diagnostics))
     hardlink_status = (
         "incomplete"
         if diagnostics
