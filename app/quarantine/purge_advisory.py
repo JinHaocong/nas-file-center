@@ -56,6 +56,7 @@ def discover_unlink_purge_advisory(
     stale_candidates: list[str] = []
     out_of_scope_candidates: list[str] = []
     same_content_independent_copies: list[str] = []
+    diagnostics: list[str] = []
 
     if not roots:
         return {
@@ -89,8 +90,11 @@ def discover_unlink_purge_advisory(
 
         try:
             st = os.lstat(path)
-        except OSError:
+        except FileNotFoundError:
             stale_candidates.append(path_text)
+            continue
+        except OSError:
+            diagnostics.append(f"LIVE_LSTAT_FAILED:{path_text}")
             continue
 
         if not stat.S_ISREG(st.st_mode):
@@ -106,6 +110,7 @@ def discover_unlink_purge_advisory(
     hardlink_survivors = sorted(set(hardlink_survivors))
     stale_candidates = sorted(set(stale_candidates))
     out_of_scope_candidates = sorted(set(out_of_scope_candidates))
+    diagnostics = sorted(set(diagnostics))
 
     same_content_status = "scan_index_unavailable"
     if entry.content_hash:
@@ -134,14 +139,20 @@ def discover_unlink_purge_advisory(
             "scan_index_found" if same_content_independent_copies else "scan_index_none"
         )
 
+    hardlink_status = (
+        "incomplete"
+        if diagnostics
+        else ("verified_found" if hardlink_survivors else "verified_none")
+    )
+
     return {
         "scope": ADVISORY_SCOPE,
-        "status": "verified_found" if hardlink_survivors else "verified_none",
+        "status": hardlink_status,
         "hardlink_survivors": hardlink_survivors,
         "stale_candidates": stale_candidates,
         "out_of_scope_candidates": out_of_scope_candidates,
         "same_content_scope": SAME_CONTENT_SCOPE,
         "same_content_status": same_content_status,
         "same_content_independent_copies": same_content_independent_copies,
-        "diagnostics": [],
+        "diagnostics": diagnostics,
     }
