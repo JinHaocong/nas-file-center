@@ -123,6 +123,7 @@ def discover_unlink_purge_advisory(
             st = os.lstat(path)
         except FileNotFoundError:
             stale_candidates.append(path_text)
+            diagnostics.append(f"LIVE_LSTAT_MISSING:{path_text}")
             continue
         except OSError:
             diagnostics.append(f"LIVE_LSTAT_FAILED:{path_text}")
