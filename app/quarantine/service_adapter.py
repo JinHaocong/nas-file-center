@@ -21,6 +21,19 @@ class Gate6A2FileCenterService(FileCenterService):
         confirmation: str,
         is_admin: bool = False,
     ) -> dict:
+        # Preserve the established public validation order before deciding
+        # whether the entry has Gate6-A2 destructive authority. A legacy entry
+        # with an invalid request still reports the request error, while a valid
+        # permanent-clear request fails closed before any historical purge core.
+        if not is_admin:
+            raise PermissionError("Only administrator can purge quarantine entries")
+        if not self.settings.allow_mutation:
+            raise ValueError("Filesystem mutation is disabled")
+        if not self.settings.allow_delete:
+            raise ValueError("Permanent deletion is disabled")
+        if confirmation != "DELETE":
+            raise ValueError("Confirmation token must be 'DELETE'")
+
         with self.SessionLocal() as session:
             entry = session.get(QuarantineEntry, entry_id)
             if entry is None:
