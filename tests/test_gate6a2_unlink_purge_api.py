@@ -258,3 +258,44 @@ def test_bulk_purge_preview_uses_per_entry_unlink_eligibility_and_keeps_survivor
     assert blocked["eligible"] is False
     assert blocked["reason"] == "UNLINK_MANIFEST_BLOCKED"
     assert "UNRECOGNIZED_PRIVATE_PATH" in blocked["mutation_blockers"]
+
+
+def test_bulk_purge_preview_digest_excludes_advisory_drift_but_binds_owned_authority(
+    tmp_path: Path,
+) -> None:
+    service, client, data, trash = _setup_api(tmp_path)
+    entry_id, _, _, public_view, survivor, payload = (
+        _seed_transactional_entry_with_indexed_survivor(service, data, trash)
+    )
+
+    def preview() -> dict:
+        response = client.post(
+            "/api/quarantine/bulk-preview",
+            json={"action": "purge", "entry_ids": [entry_id]},
+            headers={"Origin": "http://testserver"},
+        )
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    first = preview()
+    first_item = first["items"][0]
+    assert first_item["eligible"] is True
+    assert first_item["survivor_status"] == "found"
+    assert first_item["hardlink_survivor_paths"] == [str(survivor)]
+    first_digest = first["preview_digest"]
+
+    survivor.unlink()
+    second = preview()
+    second_item = second["items"][0]
+    assert second_item["eligible"] is True
+    assert second_item["survivor_status"] == "none"
+    assert second_item["hardlink_survivor_paths"] == []
+    assert second["preview_digest"] == first_digest
+
+    public_view.unlink()
+    public_view.write_bytes(payload)
+    third = preview()
+    third_item = third["items"][0]
+    assert third_item["eligible"] is False
+    assert "IDENTITY_MISMATCH:public_view" in third_item["mutation_blockers"]
+    assert third["preview_digest"] != first_digest
