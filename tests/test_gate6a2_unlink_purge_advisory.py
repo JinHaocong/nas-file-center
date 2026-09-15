@@ -363,3 +363,62 @@ def test_db_advisory_failure_is_incomplete_and_preserves_manifest(
     assert "ADVISORY_DB_READ_FAILED" in advisory["diagnostics"]
     assert manifest == manifest_before
     assert manifest["blockers"] == []
+
+
+def test_indexed_candidate_query_failure_is_incomplete(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.quarantine.purge_advisory import discover_unlink_purge_advisory
+
+    data = tmp_path / "data"
+    indexed_root = data / "indexed"
+    indexed_root.mkdir(parents=True)
+    trash = data / ".nas-file-center-trash"
+    attempt = trash / ".tx" / "entry-1" / "attempt-1"
+    attempt.mkdir(parents=True)
+
+    anchor = attempt / "anchor"
+    captured = attempt / "captured_source"
+    public_view = trash / "selected.q-1.bin"
+    original = data / "selected.bin"
+
+    anchor.write_bytes(b"gate6a2-indexed-query-failure")
+    os.link(anchor, captured)
+    os.link(anchor, public_view)
+    entry = _entry(1, original, public_view, anchor)
+    manifest = build_unlink_manifest(entry, trash)
+    manifest_before = json.loads(json.dumps(manifest))
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'indexed-query-failure.db'}")
+    Base.metadata.create_all(engine)
+    SessionLocal = sessionmaker(bind=engine)
+
+    with SessionLocal() as session:
+        session.add(IndexRoot(root=str(indexed_root)))
+        session.commit()
+        real_scalars = session.scalars
+        calls = 0
+
+        def fail_indexed_query(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise OperationalError(
+                    "SELECT indexed_paths",
+                    {},
+                    RuntimeError("injected IndexedPath advisory failure"),
+                )
+            return real_scalars(*args, **kwargs)
+
+        monkeypatch.setattr(session, "scalars", fail_indexed_query)
+        advisory = discover_unlink_purge_advisory(session, entry, manifest)
+
+    assert calls == 2
+    assert advisory["scope"] == "indexed_roots_only"
+    assert advisory["status"] == "incomplete"
+    assert advisory["hardlink_survivors"] == []
+    assert advisory["same_content_status"] == "scan_index_unavailable"
+    assert "ADVISORY_DB_READ_FAILED" in advisory["diagnostics"]
+    assert manifest == manifest_before
+    assert manifest["blockers"] == []
