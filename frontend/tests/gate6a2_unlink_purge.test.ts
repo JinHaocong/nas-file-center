@@ -39,7 +39,9 @@ describe('Gate6-A2 unlink purge frontend contracts', () => {
 
     const canGenerateMatch = bulkSource.match(/const canGenerate = Boolean\([\s\S]*?\n  \);/);
     assert.ok(canGenerateMatch, 'BulkPurgeModal must keep an explicit Draft eligibility expression');
-    assert.doesNotMatch(canGenerateMatch[0], /survivor_status|hardlink_survivor|independent_copy/);
+    const canGenerate = canGenerateMatch?.[0] ?? '';
+    assert.ok(canGenerate, 'BulkPurgeModal Draft eligibility expression must be non-empty');
+    assert.doesNotMatch(canGenerate, /survivor_status|hardlink_survivor|independent_copy/);
   });
 
   test('wording is pathname-unlink truthful and never claims secure physical erasure', () => {
