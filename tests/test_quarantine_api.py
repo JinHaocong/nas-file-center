@@ -235,7 +235,7 @@ def test_api_restore_flow(tmp_path: Path):
 
 
 def test_api_purge_flow(tmp_path: Path):
-    """Purge endpoint permanently deletes file and requires confirmation='DELETE'."""
+    """Legacy purge validates confirmation, then fails closed without unlink_v1 authority."""
     env = _setup_api_env(tmp_path)
     client = env["admin_client"]
     service = env["service"]
@@ -262,7 +262,7 @@ def test_api_purge_flow(tmp_path: Path):
         session.commit()
         entry_id = entry.id
 
-    # Invalid confirmation
+    # Invalid confirmation remains a request-validation error.
     resp_bad = client.post(
         f"/api/quarantine/{entry_id}/purge",
         json={"confirmation": "NO"},
@@ -270,12 +270,20 @@ def test_api_purge_flow(tmp_path: Path):
     )
     assert resp_bad.status_code == 400
 
-    # Valid confirmation
-    resp_ok = client.post(
+    # A valid DELETE request must not fall through to the historical legacy
+    # purge core. This entry has no transactional unlink_v1 authority, so the
+    # release path fails closed and preserves both pathname and qentry state.
+    resp_blocked = client.post(
         f"/api/quarantine/{entry_id}/purge",
         json={"confirmation": "DELETE"},
         headers={"Origin": "http://testserver"},
     )
-    assert resp_ok.status_code == 200
-    assert resp_ok.json()["state"] == "purged"
-    assert not tgt.exists()
+    assert resp_blocked.status_code == 409
+    assert "LEGACY_QUARANTINE_PURGE_UNSUPPORTED" in resp_blocked.text
+    assert tgt.exists()
+    assert tgt.read_text() == "api purge content"
+
+    with service.SessionLocal() as session:
+        persisted = session.get(QuarantineEntry, entry_id)
+        assert persisted is not None
+        assert persisted.state == "active"
