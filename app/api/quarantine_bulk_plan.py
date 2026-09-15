@@ -6,7 +6,7 @@ from sqlalchemy import text
 
 from app.models import BatchPlan, BatchPlanItem, QuarantineEntry
 from app.quarantine.bulk import quarantine_entry_identity_material
-from app.quarantine.unlink_purge import SEMANTICS_VERSION
+from app.quarantine.unlink_purge import SEMANTICS_VERSION, revalidate_unlink_manifest
 
 
 def persist_bulk_draft(
@@ -55,6 +55,34 @@ def persist_bulk_draft(
                 session.rollback()
                 raise RuntimeError(f"preview changed for quarantine entry {entry_id}")
             entries[entry_id] = entry
+
+        if not is_restore:
+            quarantine_root = service.settings.quarantine_root
+            for entry_id in entry_ids:
+                preview_item = preview_items[entry_id]
+                manifest = preview_item.get("unlink_manifest")
+                if preview_item.get("purge_semantics") != SEMANTICS_VERSION:
+                    session.rollback()
+                    raise RuntimeError(
+                        f"preview unlink semantics changed for quarantine entry {entry_id}"
+                    )
+                if not isinstance(manifest, dict):
+                    session.rollback()
+                    raise RuntimeError(
+                        f"preview unlink manifest missing for quarantine entry {entry_id}"
+                    )
+
+                validation = revalidate_unlink_manifest(
+                    entries[entry_id],
+                    quarantine_root,
+                    manifest,
+                )
+                if not validation["valid"]:
+                    session.rollback()
+                    blockers = ",".join(validation["blockers"])
+                    raise RuntimeError(
+                        f"preview unlink authority changed for quarantine entry {entry_id}: {blockers}"
+                    )
 
         if is_restore:
             plan_metadata["restore_skip_authority"] = {
