@@ -177,7 +177,7 @@ export const QuarantinePage: React.FC = () => {
       ),
     },
     {
-      title: '隔离区物理路径',
+      title: '隔离区路径',
       dataIndex: 'quarantine_path',
       key: 'quarantine_path',
       render: (path: string) => (
@@ -249,12 +249,12 @@ export const QuarantinePage: React.FC = () => {
               <Tooltip
                 title={
                   !isAdmin
-                    ? '仅系统管理员允许彻底清除'
+                    ? '仅系统管理员允许永久清除'
                     : isSafeMode
                     ? '只读保护模式 (ALLOW_MUTATION=false) 生效中，禁止清除'
                     : !allowDelete
                     ? '系统禁用永久删除 (ALLOW_DELETE=false)'
-                    : '彻底从磁盘物理清除该文件'
+                    : '按普通文件删除（unlink）语义清除 NFC 拥有的隔离区路径'
                 }
               >
                 <Button
@@ -287,7 +287,7 @@ export const QuarantinePage: React.FC = () => {
             文件隔离区 (Quarantine)
           </Title>
           <Text type="secondary">
-            安全隔离潜在重复或待处理文件。支持零覆盖恢复与管理员强确认物理清除。
+            安全隔离潜在重复或待处理文件。支持零覆盖恢复与管理员强确认的普通文件删除（unlink）。
           </Text>
         </div>
         <Button icon={<ReloadOutlined />} onClick={() => refetch()} loading={isLoading}>
@@ -298,7 +298,7 @@ export const QuarantinePage: React.FC = () => {
       {isSafeMode && (
         <Alert
           message="只读安全保护模式生效中"
-          description="系统当前以 ALLOW_MUTATION=false 运行。所有文件物理移动与写入已被锁定，恢复操作当前不可用。"
+          description="系统当前以 ALLOW_MUTATION=false 运行。所有文件移动与写入已被锁定，恢复与清除操作当前不可用。"
           type="info"
           showIcon
           icon={<LockOutlined />}
@@ -380,11 +380,27 @@ export const QuarantinePage: React.FC = () => {
               批量恢复
             </Button>
           </Tooltip>
-          <Tooltip title="批量永久删除在 v0.3.6 已暂缓：当前无法安全证明 hard-link ownership scope，后端将 fail-closed">
+          <Tooltip
+            title={
+              selectedEntryIds.length === 0
+                ? '请先明确选择至少一个 active 条目'
+                : !isAdmin
+                ? '仅系统管理员允许永久删除'
+                : isSafeMode
+                ? 'ALLOW_MUTATION=false，禁止生成删除计划'
+                : !allowDelete
+                ? 'ALLOW_DELETE=false，服务端禁止永久删除'
+                : '先 Preview，再输入 DELETE 生成 unlink_v1 Draft'
+            }
+          >
             <Button
               danger
               icon={<DeleteOutlined />}
-              disabled={true}
+              disabled={selectedEntryIds.length === 0 || !isAdmin || isSafeMode || !allowDelete}
+              onClick={() => {
+                setBulkPurgeEntryIds([...selectedEntryIds]);
+                setBulkPurgeOpen(true);
+              }}
             >
               批量永久删除
             </Button>
@@ -439,7 +455,7 @@ export const QuarantinePage: React.FC = () => {
           setPurgeEntry(null);
         }}
         onSuccess={() => refetch()}
-        isAdmin={isAdmin}
+        isAdmin={Boolean(isAdmin)}
         allowMutation={!isSafeMode}
         allowDelete={allowDelete}
       />

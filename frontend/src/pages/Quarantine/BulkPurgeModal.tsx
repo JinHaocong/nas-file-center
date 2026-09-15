@@ -94,7 +94,7 @@ export const BulkPurgeModal: React.FC<Props> = ({
       return;
     }
     if (preview.blocked_count > 0) {
-      message.error('Preview 中存在 blocked 条目，按照 Gate6-A fail-closed 规则不能生成 Draft');
+      message.error('Preview 中存在 blocked 条目，按照 fail-closed 规则不能生成 Draft');
       return;
     }
     if (!canPurge) {
@@ -160,7 +160,7 @@ export const BulkPurgeModal: React.FC<Props> = ({
         </Button>,
       ]}
       destroyOnClose
-      width={700}
+      width={760}
     >
       {!isAdmin && (
         <Alert
@@ -193,13 +193,13 @@ export const BulkPurgeModal: React.FC<Props> = ({
         type="error"
         showIcon
         message={`不可逆操作：已明确选择 ${entryIds.length} 个 active 条目`}
-        description="此窗口不会立即删除文件；它只会为当前 Preview digest 生成 Draft。真正删除仍必须进入 Plan 页面执行 Freeze → Validate → Execute。执行后的永久删除不可撤销。"
+        description="此窗口只生成当前 Preview digest 对应的 Draft。真正执行仍必须经过 Freeze → Validate → Execute。执行语义是普通文件删除（unlink）：只移除 NFC 拥有并已冻结的隔离区路径，不覆盖文件内容，也不承诺安全擦除。"
         style={{ marginBottom: 16 }}
       />
 
       {!preview && (
         <Paragraph type="secondary">
-          先运行 Preview。服务端会重新核验每个选中条目的状态、身份与 zfuse COMPAT purge topology；任一 blocked 成员都会阻止整批 Draft 生成。
+          先运行 Preview。服务端会重新核验每个选中条目的状态、持久化身份与 unlink_v1 pathname authority；任一 mutation blocker 都会阻止整批 Draft。索引范围内的 hard link 与同内容独立副本仅作为 advisory，不会扩大或改变删除权限。
         </Paragraph>
       )}
 
@@ -220,16 +220,70 @@ export const BulkPurgeModal: React.FC<Props> = ({
                 <List.Item>
                   <Text type="danger">
                     #{item.entry_id}: {item.reason || 'blocked'}
+                    {item.mutation_blockers?.length ? ` (${item.mutation_blockers.join(', ')})` : ''}
                   </Text>
                 </List.Item>
               )}
             />
           )}
 
+          {preview.items
+            .filter((item) => item.eligible && item.purge_semantics === 'unlink_v1')
+            .map((item) => (
+              <div key={item.entry_id} style={{ border: '1px solid #d9d9d9', borderRadius: 8, padding: 12 }}>
+                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                  <Text strong>#{item.entry_id} · 普通文件删除（unlink_v1）</Text>
+                  {item.survivor_status === 'found' ? (
+                    <Alert
+                      type="warning"
+                      showIcon
+                      message="当前隔离副本可清除，但索引范围内仍发现存活 hard link"
+                      description={
+                        <List
+                          size="small"
+                          dataSource={item.hardlink_survivor_paths || []}
+                          renderItem={(path) => <List.Item><Text code>{path}</Text></List.Item>}
+                        />
+                      }
+                    />
+                  ) : item.survivor_status === 'incomplete' ? (
+                    <Alert
+                      type="warning"
+                      showIcon
+                      message="索引范围内 hard link 检查不完整"
+                      description={(item.advisory_diagnostics || []).join('; ') || '部分候选路径无法完成 live lstat 核验；这只是 advisory，不改变当前 unlink 权限。'}
+                    />
+                  ) : (
+                    <Alert
+                      type="success"
+                      showIcon
+                      message="索引范围内未发现存活 hard link"
+                      description={`检查范围：${item.survivor_scope || 'indexed_roots_only'}`}
+                    />
+                  )}
+
+                  {(item.independent_copy_paths?.length || 0) > 0 && (
+                    <Alert
+                      type="info"
+                      showIcon
+                      message="发现同内容但不同 inode 的独立副本"
+                      description={
+                        <List
+                          size="small"
+                          dataSource={item.independent_copy_paths || []}
+                          renderItem={(path) => <List.Item><Text code>{path}</Text></List.Item>}
+                        />
+                      }
+                    />
+                  )}
+                </Space>
+              </div>
+            ))}
+
           {preview.blocked_count === 0 && (
             <div style={{ background: '#fff2f0', border: '1px solid #ffccc7', borderRadius: 8, padding: 16 }}>
               <Paragraph style={{ marginBottom: 8, color: '#cf1322', fontWeight: 500 }}>
-                Preview 已冻结当前批次。若确认要生成这个不可逆操作的 Draft，请输入大写{' '}
+                Preview 已冻结当前批次。hard-link survivor / 独立副本只是提示，不属于 mutation authority。若确认生成 Draft，请输入大写{' '}
                 <Text code strong style={{ color: '#cf1322' }}>DELETE</Text>：
               </Paragraph>
               <Input
