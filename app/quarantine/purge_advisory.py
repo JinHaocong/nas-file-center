@@ -8,10 +8,11 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import IndexedPath, IndexRoot
+from app.models import DuplicateFile, DuplicateGroup, IndexedPath, IndexRoot
 
 
 ADVISORY_SCOPE = "indexed_roots_only"
+SAME_CONTENT_SCOPE = "duplicate_scan_index"
 
 
 def _absolute_lexical(path: Path | str) -> Path:
@@ -31,12 +32,15 @@ def discover_unlink_purge_advisory(
     entry: Any,
     manifest: dict[str, Any],
 ) -> dict[str, Any]:
-    """Return read-only indexed-scope evidence about surviving hard links.
+    """Return read-only indexed-scope evidence about purge survivors/copies.
 
-    Database rows are candidates only. A path is reported as a survivor only
-    after it is confirmed to be inside a currently configured IndexRoot and a
-    live lstat proves the exact selected (device, inode). Mutation authority is
-    never derived from this advisory result.
+    IndexedPath rows are candidates only. A path is reported as a hard-link
+    survivor only after it is confirmed inside a current IndexRoot and a live
+    lstat proves the exact selected (device, inode).
+
+    Same-content/different-inode copies are reported separately from duplicate
+    scan/index data. That section is informational and may be stale; it is never
+    mutation authority and never upgrades a path into the hard-link section.
     """
     roots = sorted(
         (_absolute_lexical(root) for root in session.scalars(select(IndexRoot.root)).all()),
@@ -51,6 +55,7 @@ def discover_unlink_purge_advisory(
     hardlink_survivors: list[str] = []
     stale_candidates: list[str] = []
     out_of_scope_candidates: list[str] = []
+    same_content_independent_copies: list[str] = []
 
     if not roots:
         return {
@@ -59,6 +64,9 @@ def discover_unlink_purge_advisory(
             "hardlink_survivors": [],
             "stale_candidates": [],
             "out_of_scope_candidates": [],
+            "same_content_scope": SAME_CONTENT_SCOPE,
+            "same_content_status": "scan_index_unavailable",
+            "same_content_independent_copies": [],
             "diagnostics": ["NO_INDEX_ROOTS"],
         }
 
@@ -99,11 +107,41 @@ def discover_unlink_purge_advisory(
     stale_candidates = sorted(set(stale_candidates))
     out_of_scope_candidates = sorted(set(out_of_scope_candidates))
 
+    same_content_status = "scan_index_unavailable"
+    if entry.content_hash:
+        copy_candidates = session.scalars(
+            select(DuplicateFile)
+            .join(DuplicateGroup, DuplicateFile.group_id == DuplicateGroup.id)
+            .where(DuplicateGroup.content_hash == entry.content_hash)
+            .order_by(DuplicateFile.absolute_path)
+        ).all()
+
+        for candidate in copy_candidates:
+            path = _absolute_lexical(candidate.absolute_path)
+            path_text = str(path)
+
+            if path_text in excluded_paths:
+                continue
+            if not any(_is_within(path, root) for root in roots):
+                continue
+            if (candidate.device, candidate.inode) == (entry.device, entry.inode):
+                continue
+
+            same_content_independent_copies.append(path_text)
+
+        same_content_independent_copies = sorted(set(same_content_independent_copies))
+        same_content_status = (
+            "scan_index_found" if same_content_independent_copies else "scan_index_none"
+        )
+
     return {
         "scope": ADVISORY_SCOPE,
         "status": "verified_found" if hardlink_survivors else "verified_none",
         "hardlink_survivors": hardlink_survivors,
         "stale_candidates": stale_candidates,
         "out_of_scope_candidates": out_of_scope_candidates,
+        "same_content_scope": SAME_CONTENT_SCOPE,
+        "same_content_status": same_content_status,
+        "same_content_independent_copies": same_content_independent_copies,
         "diagnostics": [],
     }
