@@ -89,12 +89,25 @@ def discover_unlink_purge_advisory(
             "diagnostics": ["NO_INDEX_ROOTS"],
         }
 
-    candidates = session.scalars(
-        select(IndexedPath)
-        .where(IndexedPath.device == entry.device)
-        .where(IndexedPath.inode == entry.inode)
-        .order_by(IndexedPath.absolute_path)
-    ).all()
+    try:
+        candidates = session.scalars(
+            select(IndexedPath)
+            .where(IndexedPath.device == entry.device)
+            .where(IndexedPath.inode == entry.inode)
+            .order_by(IndexedPath.absolute_path)
+        ).all()
+    except SQLAlchemyError:
+        return {
+            "scope": ADVISORY_SCOPE,
+            "status": "incomplete",
+            "hardlink_survivors": [],
+            "stale_candidates": [],
+            "out_of_scope_candidates": [],
+            "same_content_scope": SAME_CONTENT_SCOPE,
+            "same_content_status": "scan_index_unavailable",
+            "same_content_independent_copies": [],
+            "diagnostics": ["ADVISORY_DB_READ_FAILED"],
+        }
 
     for candidate in candidates:
         path = _absolute_lexical(candidate.absolute_path)
