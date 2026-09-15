@@ -1543,6 +1543,10 @@ class FileCenterService:
             if plan.status not in {"frozen", "partial", "ready", "stale"}:
                 raise StateConflictError(f"Plan must be frozen before validation, current status={plan.status}")
             was_already_stale = (plan.status == "stale")
+            plan_kind = plan.kind
+            plan_metadata = json.loads(plan.metadata_json or "{}")
+            if not isinstance(plan_metadata, dict):
+                raise StateConflictError(f"Plan #{plan_id} metadata is not an object")
             rows = list(session.scalars(select(BatchPlanItem).where(BatchPlanItem.plan_id == plan_id).order_by(BatchPlanItem.sequence)))
 
         # Validate items outside DB write lock
@@ -1554,6 +1558,38 @@ class FileCenterService:
         for row in rows:
             if row.state == "completed":
                 continue
+
+            if plan_kind in {"quarantine-bulk-restore", "quarantine-bulk-purge"}:
+                from app.quarantine.bulk_lifecycle import validate_bulk_plan_item
+                bulk_validation = validate_bulk_plan_item(
+                    self,
+                    plan_kind=plan_kind,
+                    item=row,
+                    plan_metadata=plan_metadata,
+                )
+                if bulk_validation is not None:
+                    bulk_state = str(bulk_validation["state"])
+                    bulk_reason = str(bulk_validation["reason"])
+                    if bulk_state == "stale":
+                        stale_detail = StaleItemDetail(
+                            item_id=row.id,
+                            source_path=row.source_path,
+                            reason=bulk_reason,
+                            expected={
+                                "device": row.expected_device,
+                                "inode": row.expected_inode,
+                                "size": row.expected_size,
+                                "mtime_ns": row.expected_mtime_ns,
+                                "hash": row.expected_hash,
+                                "target_path": row.target_path,
+                            },
+                            actual=bulk_validation.get("actual"),
+                        )
+                        stale_items.append(stale_detail)
+                        item_validations[row.id] = ("stale", bulk_reason, None)
+                    else:
+                        item_validations[row.id] = ("validated", bulk_reason, None)
+                    continue
 
             if row.operation == "restore":
                 meta = json.loads(row.metadata_json or "{}")
@@ -1977,6 +2013,10 @@ class FileCenterService:
                 raise KeyError(plan_id)
             if plan.status != "draft":
                 raise ValueError(f"Only draft plans can be frozen, current status={plan.status}")
+            plan_kind = plan.kind
+            plan_metadata = json.loads(plan.metadata_json or "{}")
+            if not isinstance(plan_metadata, dict):
+                raise StateConflictError(f"Plan #{plan_id} metadata is not an object")
 
             items_data = [
                 {
@@ -2001,6 +2041,18 @@ class FileCenterService:
             item_id = it["id"]
             src_p = Path(it["source_path"])
             upd: dict[str, Any] = {}
+
+            if plan_kind in {"quarantine-bulk-restore", "quarantine-bulk-purge"}:
+                from app.quarantine.bulk_lifecycle import freeze_bulk_plan_item
+                bulk_update = freeze_bulk_plan_item(
+                    self,
+                    plan_kind=plan_kind,
+                    item=it,
+                    plan_metadata=plan_metadata,
+                )
+                if bulk_update is not None:
+                    item_updates[item_id] = bulk_update
+                    continue
 
             if it["operation"] == "rmdir_empty":
                 if self.settings.quarantine_root and is_reserved_quarantine_path(src_p, self.settings.quarantine_root):

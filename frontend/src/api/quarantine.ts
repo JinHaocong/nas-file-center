@@ -6,6 +6,10 @@ import {
   QuarantineRestoreResponse,
   QuarantinePurgeRequest,
   QuarantinePurgeResponse,
+  QuarantineBulkPreviewRequest,
+  QuarantineBulkPreviewResponse,
+  QuarantineBulkPlanRequest,
+  QuarantineBulkPlanResponse,
   QuarantineRetentionPolicy,
 } from '../types';
 
@@ -23,6 +27,25 @@ export const quarantineApi = {
     return api.get<QuarantineListResponse>(`/api/quarantine${qs ? `?${qs}` : ''}`);
   },
 
+  resolveBulkFilteredEntryIds: async (params?: { state?: string; search?: string; query?: string }) => {
+    const pageSize = 500;
+    const entryIds: number[] = [];
+    let page = 1;
+    let total = 0;
+
+    do {
+      const response = await quarantineApi.list({ ...params, page, pageSize });
+      total = response.total;
+      entryIds.push(...response.items.filter((entry) => entry.state === 'active').map((entry) => entry.id));
+      if (entryIds.length > 5000) {
+        throw new Error('Gate6-A bulk selection exceeds maximum of 5000 active entries');
+      }
+      page += 1;
+    } while ((page - 1) * pageSize < total);
+
+    return entryIds;
+  },
+
   get: (id: number) => api.get<QuarantineEntry>(`/api/quarantine/${id}`),
 
   restore: (id: number, payload: QuarantineRestoreRequest = {}) =>
@@ -30,6 +53,12 @@ export const quarantineApi = {
 
   purge: (id: number, payload: QuarantinePurgeRequest) =>
     api.post<QuarantinePurgeResponse>(`/api/quarantine/${id}/purge`, payload),
+
+  bulkPreview: (payload: QuarantineBulkPreviewRequest) =>
+    api.post<QuarantineBulkPreviewResponse>('/api/quarantine/bulk-preview', payload),
+
+  bulkPlan: (payload: QuarantineBulkPlanRequest) =>
+    api.post<QuarantineBulkPlanResponse>('/api/quarantine/bulk-plan', payload),
 
   getRetentionPolicy: () => api.get<QuarantineRetentionPolicy>('/api/quarantine/retention-policy'),
 

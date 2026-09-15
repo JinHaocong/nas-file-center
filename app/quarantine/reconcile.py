@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Sequence
 from sqlalchemy import text, select
 from sqlalchemy.orm import Session, sessionmaker, object_session
 
-from app.models import QuarantineEntry, utcnow
+from app.models import BatchPlan, BatchPlanItem, QuarantineEntry, utcnow
 from app.tasks.recovery import assert_active_worker_lease, renew_and_assert_worker_lease
 from app.quarantine.candidate import qualify_candidate_anchor_fd
 from app.quarantine.tx_allocator import allocate_next_generation, allocate_and_create_attempt_dir
@@ -481,6 +482,161 @@ def _reconcile_preparing(
             session.commit()
 
 
+def _resolve_gate6a_restore_target(session: Session, entry_id: int) -> tuple[Path | None, str | None]:
+    """Recover Gate6-A restore target, enforcing stable authority when available."""
+    entry = session.get(QuarantineEntry, entry_id)
+    entry_quarantine_path = entry.quarantine_path if entry is not None else None
+    matches: list[tuple[BatchPlanItem, str]] = []
+    unresolved_gate6a_items: list[tuple[int, str]] = []
+    executing_restores = list(session.scalars(
+        select(BatchPlanItem).where(
+            BatchPlanItem.operation == "restore",
+            BatchPlanItem.state == "executing",
+        )
+    ))
+
+    def owns_legacy_source(item: BatchPlanItem) -> bool:
+        return bool(entry_quarantine_path and item.source_path == entry_quarantine_path)
+
+    for item in executing_restores:
+        plan = session.get(BatchPlan, item.plan_id)
+        if plan is None or plan.kind != "quarantine-bulk-restore":
+            continue
+
+        try:
+            plan_meta = json.loads(plan.metadata_json or "{}")
+        except Exception:
+            plan_meta = None
+        if not isinstance(plan_meta, dict):
+            if owns_legacy_source(item):
+                unresolved_gate6a_items.append((int(item.id), "malformed plan metadata_json"))
+            continue
+
+        authority_map = plan_meta.get("restore_item_authority")
+        if isinstance(authority_map, dict):
+            authority = authority_map.get(str(item.id))
+            if not isinstance(authority, dict):
+                # A strict-plan item without its stable authority is relevant only when the
+                # mutable row still names this entry; never poison unrelated qentries.
+                if owns_legacy_source(item):
+                    unresolved_gate6a_items.append((int(item.id), "missing restore_item_authority"))
+                continue
+
+            raw_frozen_qid = authority.get("quarantine_entry_id")
+            if not isinstance(raw_frozen_qid, int) or isinstance(raw_frozen_qid, bool) or raw_frozen_qid <= 0:
+                if owns_legacy_source(item):
+                    unresolved_gate6a_items.append((int(item.id), "invalid frozen quarantine_entry_id authority"))
+                continue
+            frozen_qid = int(raw_frozen_qid)
+            if frozen_qid != entry_id:
+                continue
+
+            try:
+                metadata = json.loads(item.metadata_json or "{}")
+            except Exception:
+                unresolved_gate6a_items.append((int(item.id), "malformed metadata_json"))
+                continue
+            if not isinstance(metadata, dict):
+                unresolved_gate6a_items.append((int(item.id), "metadata_json is not an object"))
+                continue
+
+            frozen_entry = session.get(QuarantineEntry, frozen_qid)
+            if frozen_entry is None:
+                unresolved_gate6a_items.append((int(item.id), f"frozen quarantine entry #{frozen_qid} is missing"))
+                continue
+
+            from app.quarantine.bulk_lifecycle import _gate6a_restore_binding_error
+            binding_error = _gate6a_restore_binding_error(
+                plan_metadata=plan_meta,
+                metadata=metadata,
+                entry_id=frozen_qid,
+                source_path=item.source_path,
+                target_path=item.target_path,
+                entry=frozen_entry,
+                item_id=int(item.id),
+                frozen_expected={
+                    "device": item.expected_device,
+                    "inode": item.expected_inode,
+                    "size": item.expected_size,
+                    "mtime_ns": item.expected_mtime_ns,
+                    "content_hash": item.expected_hash,
+                },
+            )
+            if binding_error is not None:
+                unresolved_gate6a_items.append((int(item.id), binding_error))
+                continue
+
+            frozen_target = authority.get("target_path")
+            if not isinstance(frozen_target, str) or not frozen_target:
+                unresolved_gate6a_items.append((int(item.id), "missing frozen target_path"))
+                continue
+            if item.target_path != frozen_target:
+                unresolved_gate6a_items.append((int(item.id), "target_path mismatch"))
+                continue
+            matches.append((item, frozen_target))
+            continue
+
+        # Legacy compatibility: preserve the pre-authority-map recovery contract for
+        # already-durable executing plans, including malformed/missing qid fail-closed.
+        try:
+            meta = json.loads(item.metadata_json or "{}")
+        except Exception:
+            if owns_legacy_source(item):
+                unresolved_gate6a_items.append((int(item.id), "malformed metadata_json"))
+            continue
+        if not isinstance(meta, dict):
+            if owns_legacy_source(item):
+                unresolved_gate6a_items.append((int(item.id), "metadata_json is not an object"))
+            continue
+
+        undo_meta = meta.get("undo")
+        if not isinstance(undo_meta, dict):
+            undo_meta = {}
+        raw_qid = meta.get("quarantine_entry_id")
+        if raw_qid is None:
+            raw_qid = undo_meta.get("quarantine_entry_id")
+        if raw_qid is None:
+            if owns_legacy_source(item):
+                unresolved_gate6a_items.append((int(item.id), "missing quarantine_entry_id"))
+            continue
+        try:
+            bound_qid = int(raw_qid)
+        except (TypeError, ValueError):
+            if owns_legacy_source(item):
+                unresolved_gate6a_items.append((int(item.id), "invalid quarantine_entry_id"))
+            continue
+
+        if bound_qid == entry_id:
+            if entry_quarantine_path and item.source_path != entry_quarantine_path:
+                unresolved_gate6a_items.append((int(item.id), "frozen source_path does not match quarantine owner"))
+            elif not item.target_path:
+                unresolved_gate6a_items.append((int(item.id), "missing legacy target_path"))
+            else:
+                matches.append((item, item.target_path))
+        elif owns_legacy_source(item):
+            unresolved_gate6a_items.append((int(item.id), "quarantine_entry_id disagrees with frozen source_path owner"))
+
+    if unresolved_gate6a_items:
+        details = ", ".join(
+            f"item #{item_id}: {reason}" for item_id, reason in unresolved_gate6a_items
+        )
+        return None, (
+            "Gate6-A restoring recovery lost frozen restore authority because an executing "
+            f"bulk-restore binding is unreadable or invalid ({details})"
+        )
+
+    if not matches:
+        return None, None
+    if len(matches) != 1:
+        return None, (
+            "Gate6-A restoring recovery found ambiguous executing frozen restore authority "
+            f"for quarantine entry #{entry_id}"
+        )
+
+    _item, target_path = matches[0]
+    return Path(target_path), None
+
+
 def _reconcile_restoring(
     session_factory: sessionmaker,
     entry_id: int,
@@ -491,6 +647,8 @@ def _reconcile_restoring(
     with session_factory() as session:
         entry = session.get(QuarantineEntry, entry_id)
         orig_path = Path(entry.original_path)
+        frozen_restore_path, frozen_target_error = _resolve_gate6a_restore_target(session, entry_id)
+        restore_path = frozen_restore_path or orig_path
         pub_path = Path(entry.quarantine_path)
         anchor_path_str = entry.authoritative_anchor_path
         dev = entry.device
@@ -498,6 +656,19 @@ def _reconcile_restoring(
         size = entry.size
         mtime_ns = entry.mtime_ns
         chash = entry.content_hash
+
+    if frozen_target_error:
+        with session_factory() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            if worker_id:
+                assert_active_worker_lease(session, worker_id)
+            e = session.get(QuarantineEntry, entry_id)
+            e.state = "conflict"
+            e.tx_phase = "conflict"
+            e.last_error = frozen_target_error
+            e.updated_at = utcnow()
+            session.commit()
+        return
 
     if not anchor_path_str:
         with session_factory() as session:
@@ -543,11 +714,12 @@ def _reconcile_restoring(
             roots = list(get_settings().allowed_roots)
         except Exception:
             roots = []
-        try:
-            if not any(orig_path.is_relative_to(Path(r)) for r in roots):
-                roots.append(orig_path.parent)
-        except Exception:
-            pass
+        for candidate_path in (orig_path, restore_path):
+            try:
+                if not any(candidate_path.is_relative_to(Path(r)) for r in roots):
+                    roots.append(candidate_path.parent)
+            except Exception:
+                pass
     else:
         roots = list(allowed_roots)
 
@@ -704,10 +876,10 @@ def _reconcile_restoring(
                 session.commit()
             return
 
-    # View retirement is confirmed valid. Ensure original destination is linked to authoritative anchor.
-    if orig_path.exists():
-        st_orig = os.lstat(str(orig_path))
-        if st_orig.st_dev != dev or st_orig.st_ino != ino:
+    # View retirement is confirmed valid. Converge only on the durable restore authority.
+    if restore_path.exists():
+        st_restore = os.lstat(str(restore_path))
+        if st_restore.st_dev != dev or st_restore.st_ino != ino:
             with session_factory() as session:
                 session.execute(text("BEGIN IMMEDIATE"))
                 if worker_id:
@@ -715,18 +887,18 @@ def _reconcile_restoring(
                 e = session.get(QuarantineEntry, entry_id)
                 e.state = "conflict"
                 e.tx_phase = "conflict"
-                e.last_error = f"Original destination occupied by foreign inode: {orig_path}"
+                e.last_error = f"Restore destination occupied by foreign inode: {restore_path}"
                 e.updated_at = utcnow()
                 session.commit()
             return
     else:
         try:
-            if not orig_path.parent.exists():
+            if not restore_path.parent.exists():
                 if worker_id:
                     renew_and_assert_worker_lease(session_factory, worker_id)
-                orig_path.parent.mkdir(parents=True, exist_ok=True)
+                restore_path.parent.mkdir(parents=True, exist_ok=True)
             with safe_open_parent_fd(anchor, valid_roots) as (src_dir_fd, src_leaf):
-                with safe_open_parent_fd(orig_path, valid_roots) as (dst_dir_fd, dst_leaf):
+                with safe_open_parent_fd(restore_path, valid_roots) as (dst_dir_fd, dst_leaf):
                     if worker_id:
                         renew_and_assert_worker_lease(session_factory, worker_id)
                     os.link(src_leaf, dst_leaf, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd)
@@ -738,7 +910,7 @@ def _reconcile_restoring(
                 e = session.get(QuarantineEntry, entry_id)
                 e.state = "conflict"
                 e.tx_phase = "conflict"
-                e.last_error = f"Failed to link original destination: {exc}"
+                e.last_error = f"Failed to link restore destination: {exc}"
                 e.updated_at = utcnow()
                 session.commit()
             return

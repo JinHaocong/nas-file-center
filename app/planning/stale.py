@@ -142,6 +142,23 @@ def verify_item_freshness(
             meta = json.loads(metadata_json)
         except Exception:
             meta = {}
+
+    # Gate6-A purge recovery authority transfers to the transactional purge
+    # engine only after Worker Phase-1 intent has been durably persisted.  At
+    # that point the original source path may legitimately be absent because it
+    # has already been captured into the exclusive purge generation.  The purge
+    # engine revalidates the frozen manifest, generation, private slots, payload
+    # identity/hash, and worker lease before any further destructive mutation.
+    if operation == "quarantine_purge":
+        execution = meta.get("execution")
+        if (
+            isinstance(execution, dict)
+            and execution.get("phase") == "intent"
+            and meta.get("quarantine_entry_id")
+            and isinstance(meta.get("purge_topology_manifest"), dict)
+        ):
+            return True, None
+
     snapshot: dict[str, Any] = meta.get("snapshot", {})
     is_chained = bool(meta.get("chained_target"))
 

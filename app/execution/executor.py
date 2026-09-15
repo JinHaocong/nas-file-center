@@ -69,13 +69,96 @@ def execute_item(
     session_factory: Any = None,
     worker_id: str | None = None,
     quarantine_entry_id: int | None = None,
+    purge_manifest: dict | None = None,
 ) -> ItemResult:
     if item.state == "completed":
         return ItemResult("completed", "already completed")
     if not allow_mutation:
         return _skip("filesystem mutation is disabled")
-    if item.operation in {"unlink", "rmdir_empty"} and not allow_delete:
+    if item.operation in {"unlink", "rmdir_empty", "quarantine_purge"} and not allow_delete:
         return _skip("permanent deletion is disabled")
+    if item.operation == "quarantine_purge":
+        return ItemResult(
+            "failed",
+            "EOPNOTSUPP: Gate6-A bulk permanent purge is deferred because safe hard-link ownership scope cannot be proven",
+        )
+        if not session_factory or not worker_id or not quarantine_entry_id or purge_manifest is None:
+            return ItemResult(
+                "failed",
+                "EOPNOTSUPP: quarantine purge requires worker authority, session_factory, quarantine_entry_id, and frozen purge manifest",
+            )
+        if (
+            item.expected_device is None
+            or item.expected_inode is None
+            or item.expected_size is None
+            or item.expected_mtime_ns is None
+            or not item.expected_hash
+        ):
+            return ItemResult(
+                "failed",
+                "PURGE_FROZEN_IDENTITY_MISSING: BatchPlanItem.expected_* is required",
+            )
+        frozen_identity = (
+            int(item.expected_device),
+            int(item.expected_inode),
+            int(item.expected_size),
+            int(item.expected_mtime_ns),
+            str(item.expected_hash).lower(),
+        )
+        frozen_purge_authority = dict(purge_manifest)
+        frozen_purge_authority["frozen_payload_identity"] = {
+            "device": frozen_identity[0],
+            "inode": frozen_identity[1],
+            "size": frozen_identity[2],
+            "mtime_ns": frozen_identity[3],
+            "content_hash": frozen_identity[4],
+        }
+
+        from app.models import QuarantineEntry
+
+        with session_factory() as session:
+            q_entry = session.get(QuarantineEntry, quarantine_entry_id)
+            if q_entry is None:
+                return ItemResult(
+                    "failed",
+                    f"PURGE_FROZEN_IDENTITY_CHANGED: quarantine entry #{quarantine_entry_id} no longer exists",
+                )
+            current_identity = (
+                int(q_entry.device or 0),
+                int(q_entry.inode or 0),
+                int(q_entry.size or 0),
+                int(q_entry.mtime_ns or 0),
+                str(q_entry.content_hash or "").lower(),
+            )
+            if current_identity != frozen_identity:
+                return ItemResult(
+                    "failed",
+                    f"PURGE_FROZEN_IDENTITY_CHANGED: quarantine entry #{quarantine_entry_id} identity changed after Freeze",
+                )
+        try:
+            from app.quarantine.purge import (
+                destroy_transactional_purge_capture,
+                execute_transactional_purge_capture,
+            )
+            execute_transactional_purge_capture(
+                session_factory,
+                quarantine_entry_id,
+                worker_id,
+                frozen_purge_authority,
+                quarantine_root,
+                list(allowed_roots),
+            )
+            destroy_transactional_purge_capture(
+                session_factory,
+                quarantine_entry_id,
+                worker_id,
+                frozen_purge_authority,
+                quarantine_root,
+                list(allowed_roots),
+            )
+        except Exception as exc:
+            return ItemResult("failed", str(exc))
+        return ItemResult("completed", "purged")
     if item.operation not in {"rename", "move", "touch", "quarantine", "unlink", "restore", "rmdir_empty", "mkdir_empty", "restore_empty_dir"}:
         return _skip(f"unsupported operation: {item.operation}")
 
@@ -187,6 +270,7 @@ def execute_item(
                         worker_id=worker_id,
                         allowed_roots=valid_roots,
                         quarantine_root=quarantine_root,
+                        custom_target=str(target),
                     )
                 except Exception as exc:
                     return ItemResult("failed", str(exc))

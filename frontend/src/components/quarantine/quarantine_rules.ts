@@ -1,4 +1,4 @@
-import { QuarantineConflictPolicy, Plan } from '../../types';
+import { QuarantineConflictPolicy, QuarantineEntry, Plan } from '../../types';
 
 export function canCreateUndoPlan(
   plan: Plan | { status: string; kind?: string } | null | undefined,
@@ -50,6 +50,43 @@ export function getQuarantineRestoreAvailability(
     }
   }
   return { canRestore: true };
+}
+
+export function getBulkSelectableEntryIds(entries: readonly QuarantineEntry[]): number[] {
+  return entries.filter((entry) => entry.state === 'active').map((entry) => entry.id);
+}
+
+export function getBulkRestoreAvailability(
+  isSafeMode: boolean,
+  policy: 'skip' | 'rename'
+): { canRestore: boolean; reason?: string } {
+  if (isSafeMode) {
+    return { canRestore: false, reason: '只读安全模式生效中，禁止执行批量恢复操作' };
+  }
+  if (policy !== 'skip' && policy !== 'rename') {
+    return { canRestore: false, reason: '批量恢复仅支持 skip 或 rename' };
+  }
+  return { canRestore: true };
+}
+
+export function isBulkPreviewSelectionCurrent(
+  previewEntryIds: readonly number[],
+  selectedEntryIds: readonly number[]
+): boolean {
+  if (previewEntryIds.length !== selectedEntryIds.length) return false;
+  const preview = [...previewEntryIds].sort((a, b) => a - b);
+  const selected = [...selectedEntryIds].sort((a, b) => a - b);
+  return preview.every((id, index) => id === selected[index]);
+}
+
+export function isBulkPreviewFilterCurrent(
+  previewFilter: { state: string; query: string },
+  currentFilter: { state: string; query: string }
+): boolean {
+  return (
+    previewFilter.state === currentFilter.state &&
+    previewFilter.query.trim() === currentFilter.query.trim()
+  );
 }
 
 export function validateQuarantineRetentionDays(days: any): { valid: boolean; error?: string } {

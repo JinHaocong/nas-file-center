@@ -65,6 +65,48 @@ export interface QuarantinePurgeResponse {
   status: 'purged';
 }
 
+export type QuarantineBulkAction = 'restore' | 'purge';
+export type QuarantineBulkConflictPolicy = 'skip' | 'rename';
+
+export interface QuarantineBulkPreviewRequest {
+  action: QuarantineBulkAction;
+  entry_ids: number[];
+  conflict_policy?: QuarantineBulkConflictPolicy;
+}
+
+export interface QuarantineBulkPlanRequest extends QuarantineBulkPreviewRequest {
+  expected_preview_digest: string;
+  confirmation?: 'DELETE';
+}
+
+export interface QuarantineBulkPreviewItem {
+  entry_id: number;
+  eligible: boolean;
+  reason?: string | null;
+  state?: string;
+  tx_phase?: string;
+  conflict_policy?: QuarantineBulkConflictPolicy;
+  target_path?: string;
+  purge_topology_manifest?: Record<string, unknown>;
+}
+
+export interface QuarantineBulkPreviewResponse {
+  action: QuarantineBulkAction;
+  entry_ids: number[];
+  eligible_count: number;
+  blocked_count: number;
+  items: QuarantineBulkPreviewItem[];
+  preview_digest: string;
+}
+
+export interface QuarantineBulkPlanResponse {
+  id: number;
+  kind: 'quarantine-bulk-restore' | 'quarantine-bulk-purge';
+  status: 'draft';
+  expected_changes: number;
+  preview_digest: string;
+}
+
 export interface QuarantineRetentionPolicy {
   quarantine_retention_days: number;
   updated_at: string | null;

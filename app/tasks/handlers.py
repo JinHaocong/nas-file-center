@@ -727,6 +727,243 @@ def _reconcile_executing_item(
             item.state = "failed"
             item.reason = "reconciliation conflict after crash"
 
+    elif item.operation == "quarantine_purge":
+        qid = meta.get("quarantine_entry_id")
+        if not qid:
+            item.state = "failed"
+            item.reason = "reconciliation conflict after crash (missing quarantine_entry_id for purge)"
+            return
+        try:
+            q_entry_id = int(qid)
+        except (TypeError, ValueError):
+            item.state = "failed"
+            item.reason = "reconciliation conflict after crash (invalid quarantine_entry_id for purge)"
+            return
+
+        q_entry = session.get(QuarantineEntry, q_entry_id)
+        if q_entry is None:
+            item.state = "failed"
+            item.reason = f"reconciliation conflict after crash (quarantine entry #{q_entry_id} missing)"
+            return
+
+        session.refresh(q_entry)
+        preview_digest = meta.get("preview_digest")
+
+        def ensure_purge_reconciliation_audit(*, result: str, recovery_phase: str, reason: str) -> None:
+            existing = list(session.scalars(
+                select(AuditEvent).where(
+                    AuditEvent.operation == "quarantine_purge",
+                    AuditEvent.result == result,
+                )
+            ))
+            for event in existing:
+                try:
+                    details = json.loads(event.details_json or "{}")
+                except Exception:
+                    continue
+                if (
+                    isinstance(details, dict)
+                    and details.get("plan_id") == plan_id
+                    and details.get("item_id") == item.id
+                    and details.get("quarantine_entry_id") == q_entry_id
+                    and details.get("preview_digest") == preview_digest
+                    and details.get("recovery_phase") == recovery_phase
+                ):
+                    return
+            session.add(AuditEvent(
+                operation="quarantine_purge",
+                path=item.source_path,
+                result=result,
+                details_json=json.dumps({
+                    "plan_id": plan_id,
+                    "item_id": item.id,
+                    "task_id": job_id,
+                    "quarantine_entry_id": q_entry_id,
+                    "preview_digest": preview_digest,
+                    "recovery_phase": recovery_phase,
+                    "reason": reason,
+                }, ensure_ascii=False),
+            ))
+
+        if q_entry.state == "active" and q_entry.tx_phase == "active":
+            recovery_reason = "reconciled transactional purge after crash before irreversible intent"
+            existing_recovery_audits = list(session.scalars(
+                select(AuditEvent).where(
+                    AuditEvent.operation == "quarantine_purge",
+                    AuditEvent.result == "recovered",
+                )
+            ))
+            already_recovery_audited = False
+            for event in existing_recovery_audits:
+                try:
+                    details = json.loads(event.details_json or "{}")
+                except Exception:
+                    continue
+                if (
+                    isinstance(details, dict)
+                    and details.get("plan_id") == plan_id
+                    and details.get("item_id") == item.id
+                    and details.get("quarantine_entry_id") == q_entry_id
+                    and details.get("recovery_phase") == "pre_intent"
+                ):
+                    already_recovery_audited = True
+                    break
+            if not already_recovery_audited:
+                session.add(AuditEvent(
+                    operation="quarantine_purge",
+                    path=item.source_path,
+                    result="recovered",
+                    details_json=json.dumps({
+                        "plan_id": plan_id,
+                        "item_id": item.id,
+                        "task_id": job_id,
+                        "quarantine_entry_id": q_entry_id,
+                        "preview_digest": meta.get("preview_digest"),
+                        "recovery_phase": "pre_intent",
+                        "reason": recovery_reason,
+                    }, ensure_ascii=False),
+                ))
+            item.state = "planned"
+            item.reason = None
+            return
+
+        if q_entry.state == "purging" and q_entry.tx_phase == "purging":
+            recovery_reason = "reconciled transactional purge after crash in purging state"
+            ensure_purge_reconciliation_audit(
+                result="recovered",
+                recovery_phase="post_intent",
+                reason=recovery_reason,
+            )
+            item.state = "planned"
+            item.reason = None
+            return
+
+        if q_entry.state != "purged" or q_entry.tx_phase != "purged":
+            failure_reason = (
+                "reconciliation unexpected transactional purge state: "
+                f"state={q_entry.state}, tx_phase={q_entry.tx_phase}"
+            )
+            ensure_purge_reconciliation_audit(
+                result="failed",
+                recovery_phase="reconciliation_failed",
+                reason=failure_reason,
+            )
+            item.state = "failed"
+            item.reason = failure_reason
+            return
+
+        reason = "reconciled transactional purge after crash (purged)"
+        item.state = "completed"
+        item.reason = reason
+
+        existing_journal = session.scalar(
+            select(OperationJournal).where(OperationJournal.plan_item_id == item.id)
+        )
+        if existing_journal is None:
+            session.add(OperationJournal(
+                operation=item.operation,
+                sequence=item.sequence,
+                plan_id=plan_id,
+                plan_item_id=item.id,
+                task_id=job_id,
+                user_id=user_id,
+                before_json=json.dumps({"path": item.source_path}, ensure_ascii=False),
+                after_json=json.dumps({"path": None}, ensure_ascii=False),
+                metadata_before_json=json.dumps(metadata_before or source_stat, ensure_ascii=False),
+                metadata_after_json=json.dumps({}, ensure_ascii=False),
+                created_at=now,
+            ))
+
+        preview_digest = meta.get("preview_digest")
+        existing_audits = list(session.scalars(
+            select(AuditEvent).where(
+                AuditEvent.operation == "quarantine_purge",
+                AuditEvent.result == "completed",
+            )
+        ))
+        already_audited = False
+        for event in existing_audits:
+            try:
+                details = json.loads(event.details_json or "{}")
+            except Exception:
+                continue
+            if (
+                isinstance(details, dict)
+                and details.get("plan_id") == plan_id
+                and details.get("item_id") == item.id
+                and details.get("quarantine_entry_id") == q_entry_id
+                and details.get("preview_digest") == preview_digest
+                and details.get("role") != "historical_conflict_candidate"
+            ):
+                already_audited = True
+                break
+
+        if not already_audited:
+            session.add(AuditEvent(
+                operation="quarantine_purge",
+                path=item.source_path,
+                result="completed",
+                details_json=json.dumps({
+                    "plan_id": plan_id,
+                    "item_id": item.id,
+                    "task_id": job_id,
+                    "quarantine_entry_id": q_entry_id,
+                    "preview_digest": preview_digest,
+                    "reason": reason,
+                    "target": item.target_path,
+                    "result_path": None,
+                }, ensure_ascii=False),
+            ))
+
+        historical_audit_keys: set[tuple[str, int | None]] = set()
+        for event in existing_audits:
+            try:
+                details = json.loads(event.details_json or "{}")
+            except Exception:
+                continue
+            if (
+                isinstance(details, dict)
+                and details.get("plan_id") == plan_id
+                and details.get("item_id") == item.id
+                and details.get("quarantine_entry_id") == q_entry_id
+                and details.get("preview_digest") == preview_digest
+                and details.get("role") == "historical_conflict_candidate"
+                and event.path
+            ):
+                historical_audit_keys.add(
+                    (str(event.path), details.get("linked_quarantine_entry_id"))
+                )
+
+        topology = meta.get("frozen_purge_topology_manifest")
+        if isinstance(topology, dict):
+            for alias in topology.get("aliases") or []:
+                if not isinstance(alias, dict) or alias.get("role") != "historical_conflict_candidate":
+                    continue
+                linked_path = alias.get("path")
+                if not linked_path:
+                    continue
+                linked_owner = alias.get("owner_entry_id")
+                audit_key = (str(linked_path), linked_owner)
+                if audit_key in historical_audit_keys:
+                    continue
+                session.add(AuditEvent(
+                    operation="quarantine_purge",
+                    path=str(linked_path),
+                    result="completed",
+                    details_json=json.dumps({
+                        "plan_id": plan_id,
+                        "item_id": item.id,
+                        "task_id": job_id,
+                        "quarantine_entry_id": q_entry_id,
+                        "linked_quarantine_entry_id": linked_owner,
+                        "preview_digest": preview_digest,
+                        "role": "historical_conflict_candidate",
+                        "reason": "retired linked historical conflict alias",
+                    }, ensure_ascii=False),
+                ))
+                historical_audit_keys.add(audit_key)
+        return
+
     elif item.operation == "restore":
         tgt = Path(item.target_path) if item.target_path else None
         qid = meta.get("quarantine_entry_id") or meta.get("undo", {}).get("quarantine_entry_id")
@@ -744,18 +981,70 @@ def _reconcile_executing_item(
                     allowed_roots=settings.allowed_roots,
                 )
                 session.refresh(q_entry)
+
+            plan = session.get(BatchPlan, plan_id)
+            is_gate6a_bulk_restore = bool(plan and plan.kind == "quarantine-bulk-restore")
+
+            def ensure_restore_reconciliation_audit(*, result: str, reason: str, result_path: Path | None = None) -> None:
+                if not is_gate6a_bulk_restore:
+                    return
+                existing = list(session.scalars(
+                    select(AuditEvent).where(AuditEvent.operation == "restore")
+                ))
+                for event in existing:
+                    try:
+                        details = json.loads(event.details_json or "{}")
+                    except Exception:
+                        continue
+                    if (
+                        isinstance(details, dict)
+                        and details.get("plan_id") == plan_id
+                        and details.get("item_id") == item.id
+                        and details.get("quarantine_entry_id") == q_entry.id
+                    ):
+                        return
+                session.add(AuditEvent(
+                    operation="restore",
+                    path=item.source_path,
+                    result=result,
+                    details_json=json.dumps({
+                        "plan_id": plan_id,
+                        "item_id": item.id,
+                        "task_id": job_id,
+                        "quarantine_entry_id": q_entry.id,
+                        "reason": reason,
+                        "target": item.target_path,
+                        "result_path": str(result_path) if result_path else None,
+                        "conflict_policy": meta.get("conflict_policy"),
+                        "recovery_phase": "transactional_restore_terminal_convergence",
+                    }, ensure_ascii=False),
+                ))
+
             if q_entry.state == "restored":
                 item.state = "completed"
                 item.reason = "reconciled transactional restore after crash"
+                ensure_restore_reconciliation_audit(
+                    result="completed",
+                    reason=item.reason,
+                    result_path=tgt,
+                )
             elif q_entry.state == "conflict":
                 item.state = "failed"
                 item.reason = f"reconciliation conflict after crash: {q_entry.last_error}"
+                ensure_restore_reconciliation_audit(
+                    result="failed",
+                    reason=item.reason,
+                )
             elif q_entry.state == "active":
                 item.state = "planned"
                 item.reason = None
             else:
                 item.state = "failed"
                 item.reason = f"reconciliation unexpected restore state: {q_entry.state}"
+                ensure_restore_reconciliation_audit(
+                    result="failed",
+                    reason=item.reason,
+                )
             return
         if tgt and tgt.exists() and not src.exists():
             st = tgt.stat(follow_symlinks=False)
@@ -1354,10 +1643,15 @@ class BatchPlanExecuteHandler(TaskHandler):
         user_id = state.get("requested_by_user_id")
 
         # 1. Announce start & reconcile interrupted items
-        # Precompute reconciliation evidence outside DB write lock
+        # Precompute reconciliation evidence outside DB write lock.
         precomputed_evidence: dict[int, ReconcileEvidence] = {}
         tx_entries_to_reconcile: list[int] = []
+        gate6a_authority_loss: dict[int, tuple[int | None, str | None, str | None, str]] = {}
         with context.SessionLocal() as session:
+            recovery_plan = session.get(BatchPlan, plan_id)
+            is_gate6a_restore_recovery = bool(
+                recovery_plan and recovery_plan.kind == "quarantine-bulk-restore"
+            )
             exec_items = list(session.scalars(
                 select(BatchPlanItem)
                 .where(BatchPlanItem.plan_id == plan_id, BatchPlanItem.state == "executing")
@@ -1380,9 +1674,138 @@ class BatchPlanExecuteHandler(TaskHandler):
                             if ev:
                                 precomputed_evidence[it.id] = ev
                 elif it.operation == "restore":
-                    meta = json.loads(it.metadata_json or "{}")
-                    qid = meta.get("quarantine_entry_id") or meta.get("undo", {}).get("quarantine_entry_id")
-                    qe = session.get(QuarantineEntry, int(qid)) if qid else None
+                    qe = None
+                    binding_error = None
+                    if is_gate6a_restore_recovery:
+                        from app.quarantine.bulk_lifecycle import _gate6a_restore_binding_error
+
+                        try:
+                            recovery_plan_meta = json.loads(recovery_plan.metadata_json or "{}")
+                        except Exception:
+                            recovery_plan_meta = {}
+                        if not isinstance(recovery_plan_meta, dict):
+                            recovery_plan_meta = {}
+                        authority_map = recovery_plan_meta.get("restore_item_authority")
+
+                        if isinstance(authority_map, dict):
+                            authority = authority_map.get(str(it.id))
+                            frozen_qid = None
+                            frozen_source = None
+                            frozen_target = None
+                            binding_error = None
+                            if not isinstance(authority, dict):
+                                binding_error = "missing frozen restore_item_authority"
+                            else:
+                                raw_frozen_qid = authority.get("quarantine_entry_id")
+                                if not isinstance(raw_frozen_qid, int) or isinstance(raw_frozen_qid, bool) or raw_frozen_qid <= 0:
+                                    binding_error = "invalid frozen quarantine_entry_id authority"
+                                else:
+                                    frozen_qid = int(raw_frozen_qid)
+                                frozen_source = authority.get("source_path") if isinstance(authority.get("source_path"), str) else None
+                                frozen_target = authority.get("target_path") if isinstance(authority.get("target_path"), str) else None
+
+                            frozen_qe = session.get(QuarantineEntry, frozen_qid) if frozen_qid is not None else None
+                            if binding_error is None and frozen_qe is None:
+                                binding_error = f"frozen quarantine entry #{frozen_qid} is missing"
+
+                            try:
+                                meta = json.loads(it.metadata_json or "{}")
+                            except Exception:
+                                meta = None
+                                if binding_error is None:
+                                    binding_error = "malformed metadata_json"
+                            if meta is not None and not isinstance(meta, dict):
+                                meta = None
+                                if binding_error is None:
+                                    binding_error = "metadata_json is not an object"
+
+                            if binding_error is None and isinstance(meta, dict) and frozen_qe is not None:
+                                binding_error = _gate6a_restore_binding_error(
+                                    plan_metadata=recovery_plan_meta,
+                                    metadata=meta,
+                                    entry_id=int(frozen_qid),
+                                    source_path=it.source_path,
+                                    target_path=it.target_path,
+                                    entry=frozen_qe,
+                                    item_id=int(it.id),
+                                    frozen_expected={
+                                        "device": it.expected_device,
+                                        "inode": it.expected_inode,
+                                        "size": it.expected_size,
+                                        "mtime_ns": it.expected_mtime_ns,
+                                        "content_hash": it.expected_hash,
+                                    },
+                                )
+
+                            if binding_error is not None:
+                                gate6a_authority_loss[int(it.id)] = (
+                                    frozen_qid,
+                                    frozen_source,
+                                    frozen_target,
+                                    f"Gate6-A restoring recovery lost frozen restore authority: {binding_error}",
+                                )
+                                # Strict plans must never select a transactional recovery target
+                                # from mutable qid/source after frozen authority no longer matches.
+                                continue
+
+                            qe = frozen_qe
+                        else:
+                            # Compatibility for durable executing plans created before stable
+                            # per-item restore_item_authority existed. Mutable qid/source are used
+                            # only to scope/fail-close the legacy recovery, never to override a
+                            # frozen authority map when one is present.
+                            source_qe = session.scalar(
+                                select(QuarantineEntry).where(QuarantineEntry.quarantine_path == it.source_path)
+                            )
+                            try:
+                                meta = json.loads(it.metadata_json or "{}")
+                            except Exception:
+                                meta = None
+                                binding_error = "malformed metadata_json"
+                            if meta is not None and not isinstance(meta, dict):
+                                meta = None
+                                binding_error = "metadata_json is not an object"
+                            raw_qid = None
+                            if isinstance(meta, dict):
+                                undo_meta = meta.get("undo")
+                                if not isinstance(undo_meta, dict):
+                                    undo_meta = {}
+                                raw_qid = meta.get("quarantine_entry_id")
+                                if raw_qid is None:
+                                    raw_qid = undo_meta.get("quarantine_entry_id")
+                                if raw_qid is None:
+                                    binding_error = "missing quarantine_entry_id"
+                            bound_qid = None
+                            if raw_qid is not None:
+                                try:
+                                    bound_qid = int(raw_qid)
+                                except (TypeError, ValueError):
+                                    binding_error = "invalid quarantine_entry_id"
+                            if bound_qid is not None:
+                                qe = session.get(QuarantineEntry, bound_qid)
+                                if qe is None:
+                                    binding_error = f"quarantine entry #{bound_qid} is missing"
+                                elif qe.quarantine_path != it.source_path:
+                                    binding_error = "quarantine_entry_id disagrees with frozen source_path owner"
+                            if binding_error:
+                                affected_qe = source_qe
+                                gate6a_authority_loss[int(it.id)] = (
+                                    int(affected_qe.id) if affected_qe is not None else None,
+                                    it.source_path,
+                                    it.target_path,
+                                    f"Gate6-A restoring recovery lost legacy restore authority: {binding_error}",
+                                )
+                                if affected_qe and (
+                                    affected_qe.tx_phase is not None
+                                    or affected_qe.authoritative_anchor_path is not None
+                                ):
+                                    tx_entries_to_reconcile.append(int(affected_qe.id))
+                                continue
+                    else:
+                        meta = json.loads(it.metadata_json or "{}")
+                        qid = meta.get("quarantine_entry_id") or meta.get("undo", {}).get("quarantine_entry_id")
+                        qe = session.get(QuarantineEntry, int(qid)) if qid else None
+
                     if qe and (qe.tx_phase is not None or qe.authoritative_anchor_path is not None):
                         tx_entries_to_reconcile.append(qe.id)
                     else:
@@ -1393,8 +1816,8 @@ class BatchPlanExecuteHandler(TaskHandler):
                             if ev:
                                 precomputed_evidence[it.id] = ev
 
-        # Reconcile transactional entries OUTSIDE the outer SQLite write transaction
-        for qid in tx_entries_to_reconcile:
+        # Reconcile transactional entries OUTSIDE the outer SQLite write transaction.
+        for qid in dict.fromkeys(tx_entries_to_reconcile):
             from app.quarantine.reconcile import reconcile_quarantine_transaction
             reconcile_quarantine_transaction(
                 context.SessionLocal,
@@ -1414,6 +1837,7 @@ class BatchPlanExecuteHandler(TaskHandler):
             plan = session.get(BatchPlan, plan_id)
             if not plan:
                 raise KeyError(f"Plan #{plan_id} not found")
+            is_gate6a_bulk_restore = plan.kind == "quarantine-bulk-restore"
             plan.status = "executing"
             plan_meta = json.loads(plan.metadata_json or "{}")
             is_organizer = plan_meta.get("is_organizer", False)
@@ -1425,6 +1849,66 @@ class BatchPlanExecuteHandler(TaskHandler):
                 .order_by(BatchPlanItem.sequence)
             ))
             for it in executing_items:
+                authority_loss = gate6a_authority_loss.get(int(it.id))
+                if is_gate6a_bulk_restore and it.operation == "restore" and authority_loss is not None:
+                    qentry_id, frozen_source, frozen_target, fallback_reason = authority_loss
+                    qentry = session.get(QuarantineEntry, qentry_id) if qentry_id is not None else None
+                    if qentry is not None and qentry.state not in ("conflict", "restored"):
+                        qentry.state = "conflict"
+                        qentry.tx_phase = "conflict"
+                        qentry.last_error = fallback_reason
+                        qentry.updated_at = now
+
+                    if qentry is not None and qentry.state == "restored":
+                        result = "completed"
+                        reason = "reconciled transactional restore after crash with damaged item metadata"
+                        it.state = "completed"
+                        it.reason = reason
+                        result_path = frozen_target
+                    else:
+                        result = "failed"
+                        reason = (
+                            f"reconciliation conflict after crash: {qentry.last_error}"
+                            if qentry is not None and qentry.last_error
+                            else fallback_reason
+                        )
+                        it.state = "failed"
+                        it.reason = reason
+                        result_path = None
+                        reconciled_failed_item_ids.add(int(it.id))
+
+                    already_audited = False
+                    for event in session.scalars(select(AuditEvent).where(AuditEvent.operation == "restore")):
+                        try:
+                            details = json.loads(event.details_json or "{}")
+                        except Exception:
+                            continue
+                        if (
+                            isinstance(details, dict)
+                            and details.get("plan_id") == plan_id
+                            and details.get("item_id") == it.id
+                        ):
+                            already_audited = True
+                            break
+                    if not already_audited:
+                        session.add(AuditEvent(
+                            operation="restore",
+                            path=frozen_source or it.source_path,
+                            result=result,
+                            details_json=json.dumps({
+                                "plan_id": plan_id,
+                                "item_id": it.id,
+                                "task_id": job.id,
+                                "quarantine_entry_id": qentry_id,
+                                "reason": reason,
+                                "target": frozen_target,
+                                "result_path": result_path,
+                                "conflict_policy": plan_meta.get("conflict_policy"),
+                                "recovery_phase": "gate6a_restore_authority_loss",
+                            }, ensure_ascii=False),
+                        ))
+                    continue
+
                 _reconcile_executing_item(
                     session, it, plan_id, job.id, user_id, settings, now,
                     precomputed_evidence=precomputed_evidence.get(it.id),
@@ -1434,6 +1918,47 @@ class BatchPlanExecuteHandler(TaskHandler):
                 if it.state == "failed":
                     reconciled_failed_item_ids.add(it.id)
             session.commit()
+
+        def _add_gate6a_bulk_restore_audit(
+            session,
+            row: BatchPlanItem,
+            *,
+            result: str,
+            reason: str | None,
+            quarantine_entry_id: int | None = None,
+            result_path: Path | None = None,
+        ) -> None:
+            if not is_gate6a_bulk_restore or row.operation != "restore":
+                return
+            try:
+                audit_meta = json.loads(row.metadata_json or "{}")
+            except Exception:
+                audit_meta = {}
+            if not isinstance(audit_meta, dict):
+                audit_meta = {}
+            undo_meta = audit_meta.get("undo")
+            if not isinstance(undo_meta, dict):
+                undo_meta = {}
+            qid = (
+                quarantine_entry_id
+                if quarantine_entry_id is not None
+                else audit_meta.get("quarantine_entry_id") or undo_meta.get("quarantine_entry_id")
+            )
+            session.add(AuditEvent(
+                operation="restore",
+                path=row.source_path,
+                result=result,
+                details_json=json.dumps({
+                    "plan_id": plan_id,
+                    "item_id": row.id,
+                    "task_id": job.id,
+                    "quarantine_entry_id": qid,
+                    "reason": reason,
+                    "target": row.target_path,
+                    "result_path": str(result_path) if result_path else None,
+                    "conflict_policy": audit_meta.get("conflict_policy") or plan_meta.get("conflict_policy"),
+                }, ensure_ascii=False),
+            ))
 
         # 2. Query all plan items
         with context.SessionLocal() as session:
@@ -1454,7 +1979,7 @@ class BatchPlanExecuteHandler(TaskHandler):
             it for it in all_items
             if it.state not in ("completed", "skipped", "failed")
             and it.id not in reconciled_failed_item_ids
-            and it.operation != "restore"
+            and it.operation not in {"restore", "quarantine_purge"}
         ]
         worker_stale_items = []
         for it in unexecuted_items:
@@ -1521,7 +2046,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                     continue
 
             # Boundary Freshness Check
-            if item_meta.operation != "restore":
+            if item_meta.operation not in {"restore", "quarantine_purge"}:
                 is_fresh, stale_detail = _verify_plan_item_and_keep_freshness(item_meta, settings)
                 if not is_fresh:
                     stale_reason = f"Item stale: {stale_detail.reason if stale_detail else 'stale'}"
@@ -1571,6 +2096,8 @@ class BatchPlanExecuteHandler(TaskHandler):
             # --- PHASE 1: DB INTENT ---
             q_entry_id = None
             q_restore_entry_id = None
+            q_purge_entry_id = None
+            purge_manifest = None
             target_path_str = None
             src_p = Path(item_meta.source_path)
             src_stat_dict = {}
@@ -1609,7 +2136,29 @@ class BatchPlanExecuteHandler(TaskHandler):
                 if row.operation == "touch":
                     target_touch_mtime_ns = row.expected_mtime_ns if (row.expected_mtime_ns and row.expected_mtime_ns > 0) else int(now.timestamp() * 1e9)
 
-                item_metadata = json.loads(row.metadata_json or "{}")
+                if is_gate6a_bulk_restore and row.operation == "restore":
+                    try:
+                        item_metadata = json.loads(row.metadata_json or "{}")
+                    except Exception:
+                        item_metadata = None
+                    if not isinstance(item_metadata, dict):
+                        source_qentry = session.scalar(
+                            select(QuarantineEntry).where(QuarantineEntry.quarantine_path == row.source_path)
+                        )
+                        row.state = "failed"
+                        row.reason = "Gate6-A bulk restore metadata_json is malformed or not an object"
+                        _add_gate6a_bulk_restore_audit(
+                            session,
+                            row,
+                            result="failed",
+                            reason=row.reason,
+                            quarantine_entry_id=(int(source_qentry.id) if source_qentry is not None else None),
+                        )
+                        session.commit()
+                        completed_or_skipped += 1
+                        continue
+                else:
+                    item_metadata = json.loads(row.metadata_json or "{}")
                 item_metadata["execution"] = {
                     "phase": "intent",
                     "task_id": job.id,
@@ -1652,11 +2201,34 @@ class BatchPlanExecuteHandler(TaskHandler):
                     row.target_path = str(q_target)
                     target_path_str = str(q_target)
                 elif row.operation == "restore":
-                    meta_dict = json.loads(row.metadata_json or "{}")
-                    qid = meta_dict.get("quarantine_entry_id") or meta_dict.get("undo", {}).get("quarantine_entry_id")
+                    meta_dict = item_metadata
+                    if is_gate6a_bulk_restore:
+                        raw_qid = meta_dict.get("quarantine_entry_id")
+                        if not isinstance(raw_qid, int) or isinstance(raw_qid, bool) or raw_qid <= 0:
+                            source_qentry = session.scalar(
+                                select(QuarantineEntry).where(QuarantineEntry.quarantine_path == row.source_path)
+                            )
+                            row.state = "failed"
+                            row.reason = "Gate6-A bulk restore has missing or invalid quarantine_entry_id authority"
+                            _add_gate6a_bulk_restore_audit(
+                                session,
+                                row,
+                                result="failed",
+                                reason=row.reason,
+                                quarantine_entry_id=(int(source_qentry.id) if source_qentry is not None else None),
+                            )
+                            session.commit()
+                            completed_or_skipped += 1
+                            continue
+                        qid = raw_qid
+                    else:
+                        qid = meta_dict.get("quarantine_entry_id") or meta_dict.get("undo", {}).get("quarantine_entry_id")
                     if not qid:
                         row.state = "failed"
                         row.reason = "missing quarantine_entry_id for restore operation"
+                        _add_gate6a_bulk_restore_audit(
+                            session, row, result="failed", reason=row.reason
+                        )
                         session.commit()
                         completed_or_skipped += 1
                         continue
@@ -1664,27 +2236,103 @@ class BatchPlanExecuteHandler(TaskHandler):
                     if not q_entry:
                         row.state = "failed"
                         row.reason = f"Quarantine entry #{qid} not found"
+                        _add_gate6a_bulk_restore_audit(
+                            session, row, result="failed", reason=row.reason
+                        )
                         session.commit()
                         completed_or_skipped += 1
                         continue
+
+                    if is_gate6a_bulk_restore:
+                        from app.quarantine.bulk_lifecycle import _gate6a_restore_binding_error
+
+                        binding_error = _gate6a_restore_binding_error(
+                            plan_metadata=plan_meta,
+                            metadata=meta_dict,
+                            entry_id=int(qid),
+                            source_path=row.source_path,
+                            target_path=row.target_path,
+                            entry=q_entry,
+                        )
+                        if binding_error is not None:
+                            row.state = "failed"
+                            row.reason = binding_error
+                            _add_gate6a_bulk_restore_audit(
+                                session,
+                                row,
+                                result="failed",
+                                reason=row.reason,
+                                quarantine_entry_id=q_entry.id,
+                            )
+                            session.commit()
+                            completed_or_skipped += 1
+                            continue
 
                     is_tx = (q_entry.tx_phase not in (None, "legacy")) or (q_entry.authoritative_anchor_path is not None)
                     is_tx_restore = is_tx
                     if is_tx:
                         # Transactional QuarantineEntry: public quarantine view is presentation-only!
                         # Authority is: authoritative anchor + persisted frozen identity + worker lease + PathGuard
-                        conflict_policy = meta_dict.get("conflict_policy", "skip")
-                        custom_target = meta_dict.get("custom_target")
-                        if conflict_policy == "manual":
-                            if not custom_target or not custom_target.strip():
+                        if is_gate6a_bulk_restore:
+                            if q_entry.state != "active" or q_entry.tx_phase != "active":
                                 row.state = "failed"
-                                row.reason = "custom_target is required when conflict_policy is 'manual'"
+                                row.reason = (
+                                    f"Quarantine entry #{q_entry.id} is no longer active at Execute "
+                                    f"(state={q_entry.state}, tx_phase={q_entry.tx_phase})"
+                                )
+                                _add_gate6a_bulk_restore_audit(
+                                    session,
+                                    row,
+                                    result="failed",
+                                    reason=row.reason,
+                                    quarantine_entry_id=q_entry.id,
+                                )
                                 session.commit()
                                 completed_or_skipped += 1
                                 continue
-                            dest_candidate = custom_target.strip()
+                            if (
+                                meta_dict.get("conflict_policy") == "skip"
+                                and meta_dict.get("skip_preexisting_target") is True
+                            ):
+                                row.state = "skipped"
+                                row.reason = "pre-existing restore target conflict skipped by frozen policy"
+                                _add_gate6a_bulk_restore_audit(
+                                    session,
+                                    row,
+                                    result="skipped",
+                                    reason=row.reason,
+                                    quarantine_entry_id=q_entry.id,
+                                )
+                                session.commit()
+                                completed_or_skipped += 1
+                                continue
+                            if not row.target_path:
+                                row.state = "failed"
+                                row.reason = "Gate6-A bulk restore is missing frozen target_path"
+                                _add_gate6a_bulk_restore_audit(
+                                    session,
+                                    row,
+                                    result="failed",
+                                    reason=row.reason,
+                                    quarantine_entry_id=q_entry.id,
+                                )
+                                session.commit()
+                                completed_or_skipped += 1
+                                continue
+                            dest_candidate = row.target_path
                         else:
-                            dest_candidate = q_entry.original_path
+                            conflict_policy = meta_dict.get("conflict_policy", "skip")
+                            custom_target = meta_dict.get("custom_target")
+                            if conflict_policy == "manual":
+                                if not custom_target or not custom_target.strip():
+                                    row.state = "failed"
+                                    row.reason = "custom_target is required when conflict_policy is 'manual'"
+                                    session.commit()
+                                    completed_or_skipped += 1
+                                    continue
+                                dest_candidate = custom_target.strip()
+                            else:
+                                dest_candidate = q_entry.original_path
 
                         try:
                             from app.path_safety import validate_mutation_destination
@@ -1697,6 +2345,13 @@ class BatchPlanExecuteHandler(TaskHandler):
                             q_entry.updated_at = now
                             row.state = "failed"
                             row.reason = str(exc)
+                            _add_gate6a_bulk_restore_audit(
+                                session,
+                                row,
+                                result="failed",
+                                reason=row.reason,
+                                quarantine_entry_id=q_entry.id,
+                            )
                             session.commit()
                             completed_or_skipped += 1
                             continue
@@ -1730,6 +2385,8 @@ class BatchPlanExecuteHandler(TaskHandler):
                                     "task_id": job.id,
                                     "quarantine_entry_id": q_entry.id,
                                     "reason": str(exc),
+                                    "target": row.target_path,
+                                    "conflict_policy": meta_dict.get("conflict_policy") if is_gate6a_bulk_restore else None,
                                 }, ensure_ascii=False),
                             ))
                             session.commit()
@@ -1742,6 +2399,19 @@ class BatchPlanExecuteHandler(TaskHandler):
                         target_path_str = str(q_dest_p)
                         restore_expected_size = q_entry.size
                         restore_expected_hash = q_entry.content_hash
+                elif row.operation == "quarantine_purge":
+                    meta_dict = json.loads(row.metadata_json or "{}")
+                    qid = meta_dict.get("quarantine_entry_id")
+                    manifest = meta_dict.get("frozen_purge_topology_manifest")
+                    if not qid or not isinstance(manifest, dict):
+                        row.state = "failed"
+                        row.reason = "missing quarantine_entry_id or frozen_purge_topology_manifest for quarantine_purge"
+                        session.commit()
+                        completed_or_skipped += 1
+                        continue
+                    q_purge_entry_id = int(qid)
+                    purge_manifest = manifest
+                    target_path_str = row.target_path
                 else:
                     target_path_str = row.target_path
 
@@ -1780,7 +2450,13 @@ class BatchPlanExecuteHandler(TaskHandler):
                                 "plan_id": plan_id,
                                 "item_id": item_meta.id,
                                 "task_id": job.id,
+                                "quarantine_entry_id": q_restore_entry_id,
                                 "reason": str(exc),
+                                "target": item_meta.target_path,
+                                "conflict_policy": (
+                                    json.loads(item_meta.metadata_json or "{}").get("conflict_policy")
+                                    if is_gate6a_bulk_restore else None
+                                ),
                             }, ensure_ascii=False),
                         ))
                         session.commit()
@@ -1848,13 +2524,19 @@ class BatchPlanExecuteHandler(TaskHandler):
                                     "plan_id": plan_id,
                                     "item_id": item_meta.id,
                                     "task_id": job.id,
+                                    "quarantine_entry_id": q_restore_entry_id,
                                     "reason": str(exc),
+                                    "target": item_meta.target_path,
+                                    "conflict_policy": (
+                                        json.loads(item_meta.metadata_json or "{}").get("conflict_policy")
+                                        if is_gate6a_bulk_restore else None
+                                    ),
                                 }, ensure_ascii=False),
                             ))
                             session.commit()
                         completed_or_skipped += 1
                         continue
-            else:
+            elif item_meta.operation != "quarantine_purge":
                 final_fresh, final_stale_detail = _verify_plan_item_and_keep_freshness(item_meta, settings)
                 if not final_fresh:
                     stale_reason = f"Item stale: {final_stale_detail.reason if final_stale_detail else 'stale'}"
@@ -1909,7 +2591,8 @@ class BatchPlanExecuteHandler(TaskHandler):
                 plan_id=str(plan_id),
                 session_factory=context.SessionLocal,
                 worker_id=context.worker_id,
-                quarantine_entry_id=q_entry_id or q_restore_entry_id,
+                quarantine_entry_id=q_purge_entry_id or q_entry_id or q_restore_entry_id,
+                purge_manifest=purge_manifest,
             )
 
             after_size = None
@@ -2105,6 +2788,31 @@ class BatchPlanExecuteHandler(TaskHandler):
                         created_at=now,
                     ))
 
+                if result.state == "completed" and row.operation == "quarantine_purge":
+                    topology = metadata.get("frozen_purge_topology_manifest")
+                    if isinstance(topology, dict):
+                        for alias in topology.get("aliases") or []:
+                            if not isinstance(alias, dict) or alias.get("role") != "historical_conflict_candidate":
+                                continue
+                            linked_path = alias.get("path")
+                            if not linked_path:
+                                continue
+                            session.add(AuditEvent(
+                                operation="quarantine_purge",
+                                path=str(linked_path),
+                                result="completed",
+                                details_json=json.dumps({
+                                    "plan_id": plan_id,
+                                    "item_id": row.id,
+                                    "task_id": job.id,
+                                    "quarantine_entry_id": q_purge_entry_id,
+                                    "linked_quarantine_entry_id": alias.get("owner_entry_id"),
+                                    "preview_digest": metadata.get("preview_digest"),
+                                    "role": "historical_conflict_candidate",
+                                    "reason": "retired linked historical conflict alias",
+                                }, ensure_ascii=False),
+                            ))
+
                 session.add(AuditEvent(
                     operation=row.operation,
                     path=row.source_path,
@@ -2113,10 +2821,15 @@ class BatchPlanExecuteHandler(TaskHandler):
                         "plan_id": plan_id,
                         "item_id": row.id,
                         "task_id": job.id,
-                        "quarantine_entry_id": q_entry_id,
+                        "quarantine_entry_id": q_purge_entry_id or q_entry_id or q_restore_entry_id,
+                        "preview_digest": metadata.get("preview_digest") if row.operation == "quarantine_purge" else None,
                         "reason": result.reason,
                         "target": row.target_path,
                         "result_path": str(result.result_path) if result.result_path else None,
+                        "conflict_policy": (
+                            metadata.get("conflict_policy")
+                            if row.operation == "restore" and is_gate6a_bulk_restore else None
+                        ),
                     }, ensure_ascii=False),
                 ))
                 session.commit()
