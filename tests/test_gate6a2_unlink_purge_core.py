@@ -91,3 +91,31 @@ def test_unlink_manifest_does_not_widen_authority_to_same_inode_other_entry(
     assert forbidden_other_entry_paths.isdisjoint(
         {item["path"] for item in manifest["owned_paths"]}
     )
+
+
+def test_unlink_manifest_blocks_unknown_payload_in_selected_private_namespace(
+    tmp_path: Path,
+) -> None:
+    from app.quarantine.unlink_purge import build_unlink_manifest
+
+    data = tmp_path / "data"
+    trash = data / ".nas-file-center-trash"
+    attempt = trash / ".tx" / "entry-1" / "attempt-1"
+    attempt.mkdir(parents=True)
+
+    anchor = attempt / "anchor"
+    captured = attempt / "captured_source"
+    public_view = trash / "selected.q-1.bin"
+    original = data / "selected.bin"
+    unexpected = attempt / "unexpected-hardlink"
+
+    anchor.write_bytes(b"gate6a2-unknown-selected-private-payload")
+    os.link(anchor, captured)
+    os.link(anchor, public_view)
+    os.link(anchor, unexpected)
+    entry = _entry(1, original, public_view, anchor)
+
+    manifest = build_unlink_manifest(entry, trash)
+
+    assert "UNRECOGNIZED_PRIVATE_PATH" in manifest["blockers"]
+    assert str(unexpected) not in {item["path"] for item in manifest["owned_paths"]}
