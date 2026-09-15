@@ -119,3 +119,52 @@ def test_unlink_manifest_blocks_unknown_payload_in_selected_private_namespace(
 
     assert "UNRECOGNIZED_PRIVATE_PATH" in manifest["blockers"]
     assert str(unexpected) not in {item["path"] for item in manifest["owned_paths"]}
+
+
+def test_revalidate_unlink_manifest_blocks_aba_public_view_replacement(
+    tmp_path: Path,
+) -> None:
+    from app.quarantine.unlink_purge import (
+        build_unlink_manifest,
+        revalidate_unlink_manifest,
+    )
+
+    data = tmp_path / "data"
+    trash = data / ".nas-file-center-trash"
+    attempt = trash / ".tx" / "entry-1" / "attempt-1"
+    attempt.mkdir(parents=True)
+
+    anchor = attempt / "anchor"
+    captured = attempt / "captured_source"
+    public_view = trash / "selected.q-1.bin"
+    original = data / "selected.bin"
+    payload = b"gate6a2-aba-replacement"
+
+    anchor.write_bytes(payload)
+    os.link(anchor, captured)
+    os.link(anchor, public_view)
+    entry = _entry(1, original, public_view, anchor)
+
+    manifest = build_unlink_manifest(entry, trash)
+    assert manifest["blockers"] == []
+
+    os.unlink(public_view)
+    public_view.write_bytes(payload)
+    os.utime(
+        public_view,
+        ns=(entry.mtime_ns, entry.mtime_ns),
+        follow_symlinks=False,
+    )
+    replacement_stat = public_view.stat(follow_symlinks=False)
+
+    assert replacement_stat.st_dev == entry.device
+    assert replacement_stat.st_size == entry.size
+    assert replacement_stat.st_mtime_ns == entry.mtime_ns
+    assert replacement_stat.st_ino != entry.inode
+
+    result = revalidate_unlink_manifest(entry, trash, manifest)
+
+    assert "IDENTITY_MISMATCH:public_view" in result["blockers"]
+    assert public_view.read_bytes() == payload
+    assert anchor.read_bytes() == payload
+    assert captured.read_bytes() == payload
