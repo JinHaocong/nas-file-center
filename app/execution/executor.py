@@ -92,8 +92,13 @@ def execute_item(
                 entry_id=quarantine_entry_id,
                 quarantine_root=quarantine_root,
                 frozen_manifest=unlink_manifest,
+                worker_id=worker_id,
             )
         except Exception as exc:
+            from app.tasks.state_machine import JobLeaseLost
+
+            if isinstance(exc, JobLeaseLost):
+                raise
             return ItemResult("failed", str(exc))
         return ItemResult("completed", "purged")
     if item.operation == "quarantine_purge":
