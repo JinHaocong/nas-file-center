@@ -3,11 +3,12 @@ from __future__ import annotations
 import contextlib
 from dataclasses import dataclass
 import errno
+import json
 import os
 from pathlib import Path
 import re
 import stat
-from typing import Iterable
+from typing import Any, Iterable
 
 from app.batch.plans import OperationItem
 from app.execution.verifier import verify_duplicate_pair
@@ -58,6 +59,93 @@ def _quarantine_target(source: Path, *, allowed_roots: Iterable[Path | str], qua
     return quarantine_root / _safe_plan_id(plan_id) / f"root-{index}" / relative
 
 
+def _resolve_frozen_unlink_purge_authority(
+    item: OperationItem,
+    *,
+    plan_id: str,
+    session_factory: Any,
+) -> tuple[int | None, dict | None, str | None]:
+    """Resolve only the exact frozen Gate6-A2 BatchPlanItem authority.
+
+    BatchPlanExecuteHandler historically passes quarantine-specific authority only
+    for legacy operations. Gate6-A2 recovery therefore resolves the already-frozen
+    item by the immutable plan/sequence/operation/source/identity binding. It never
+    derives authority from live filesystem topology and never consults the old
+    quarantine_purge manifest.
+    """
+    try:
+        numeric_plan_id = int(plan_id)
+    except (TypeError, ValueError):
+        return None, None, "UNLINK_PURGE_AUTHORITY_MISSING: invalid frozen plan id"
+
+    from app.models import BatchPlan, BatchPlanItem
+
+    with session_factory() as session:
+        plan = session.get(BatchPlan, numeric_plan_id)
+        if plan is None or plan.kind != "quarantine-bulk-purge":
+            return None, None, "UNLINK_PURGE_AUTHORITY_MISSING: Gate6-A2 bulk purge plan not found"
+
+        rows = list(
+            session.query(BatchPlanItem)
+            .filter(
+                BatchPlanItem.plan_id == numeric_plan_id,
+                BatchPlanItem.sequence == item.sequence,
+            )
+            .all()
+        )
+        if len(rows) != 1:
+            return None, None, "UNLINK_PURGE_AUTHORITY_MISSING: exact frozen plan item is not unique"
+        row = rows[0]
+        if row.operation != "quarantine_unlink_purge":
+            return None, None, "UNLINK_PURGE_AUTHORITY_CHANGED: frozen operation identity changed"
+        if row.source_path != os.fspath(item.source):
+            return None, None, "UNLINK_PURGE_AUTHORITY_CHANGED: frozen source binding changed"
+        if row.state != "executing":
+            return None, None, "UNLINK_PURGE_AUTHORITY_CHANGED: frozen plan item is not executing"
+
+        for attr in (
+            "expected_device",
+            "expected_inode",
+            "expected_size",
+            "expected_mtime_ns",
+            "expected_hash",
+        ):
+            if getattr(row, attr) != getattr(item, attr):
+                return None, None, f"UNLINK_PURGE_AUTHORITY_CHANGED: frozen {attr} binding changed"
+
+        try:
+            metadata = json.loads(row.metadata_json or "{}")
+            plan_metadata = json.loads(plan.metadata_json or "{}")
+        except Exception:
+            return None, None, "UNLINK_PURGE_AUTHORITY_MISSING: malformed frozen purge metadata"
+        if not isinstance(metadata, dict) or not isinstance(plan_metadata, dict):
+            return None, None, "UNLINK_PURGE_AUTHORITY_MISSING: malformed frozen purge metadata"
+
+        raw_entry_id = metadata.get("quarantine_entry_id")
+        if not isinstance(raw_entry_id, int) or isinstance(raw_entry_id, bool) or raw_entry_id <= 0:
+            return None, None, "UNLINK_PURGE_AUTHORITY_MISSING: invalid frozen quarantine_entry_id"
+        frozen_manifest = metadata.get("unlink_manifest")
+        if not isinstance(frozen_manifest, dict):
+            return None, None, "UNLINK_PURGE_AUTHORITY_MISSING: frozen unlink manifest is missing"
+        if metadata.get("purge_semantics") != "unlink_v1":
+            return None, None, "UNLINK_PURGE_AUTHORITY_CHANGED: item purge semantics changed"
+        if plan_metadata.get("action") != "purge" or plan_metadata.get("purge_semantics") != "unlink_v1":
+            return None, None, "UNLINK_PURGE_AUTHORITY_CHANGED: plan purge semantics changed"
+        if metadata.get("preview_digest") != plan_metadata.get("preview_digest"):
+            return None, None, "UNLINK_PURGE_AUTHORITY_CHANGED: preview digest binding changed"
+        entry_ids = plan_metadata.get("entry_ids")
+        if not isinstance(entry_ids, list) or raw_entry_id not in entry_ids:
+            return None, None, "UNLINK_PURGE_AUTHORITY_CHANGED: selected entry binding changed"
+        if frozen_manifest.get("purge_semantics") != "unlink_v1":
+            return None, None, "UNLINK_PURGE_AUTHORITY_CHANGED: unlink manifest semantics changed"
+        if frozen_manifest.get("selected_entry_id") != raw_entry_id:
+            return None, None, "UNLINK_PURGE_AUTHORITY_CHANGED: unlink manifest entry binding changed"
+        if frozen_manifest.get("blockers") != []:
+            return None, None, "UNLINK_PURGE_AUTHORITY_CHANGED: frozen unlink manifest is blocked"
+
+        return raw_entry_id, frozen_manifest, None
+
+
 def execute_item(
     item: OperationItem,
     *,
@@ -79,19 +167,37 @@ def execute_item(
     if item.operation in {"unlink", "rmdir_empty", "quarantine_purge", "quarantine_unlink_purge"} and not allow_delete:
         return _skip("permanent deletion is disabled")
     if item.operation == "quarantine_unlink_purge":
-        if not session_factory or not worker_id or not quarantine_entry_id or unlink_manifest is None:
+        if not session_factory or not worker_id:
             return ItemResult(
                 "failed",
-                "UNLINK_PURGE_AUTHORITY_MISSING: worker authority, session_factory, quarantine_entry_id, and frozen unlink manifest are required",
+                "UNLINK_PURGE_AUTHORITY_MISSING: worker authority and session_factory are required",
             )
+
+        resolved_entry_id = quarantine_entry_id
+        resolved_manifest = unlink_manifest
+        if resolved_entry_id is None or resolved_manifest is None:
+            frozen_entry_id, frozen_manifest, authority_error = _resolve_frozen_unlink_purge_authority(
+                item,
+                plan_id=plan_id,
+                session_factory=session_factory,
+            )
+            if authority_error is not None or frozen_entry_id is None or frozen_manifest is None:
+                return ItemResult("failed", authority_error or "UNLINK_PURGE_AUTHORITY_MISSING")
+            if resolved_entry_id is not None and resolved_entry_id != frozen_entry_id:
+                return ItemResult("failed", "UNLINK_PURGE_AUTHORITY_CHANGED: quarantine entry binding changed")
+            if resolved_manifest is not None and resolved_manifest != frozen_manifest:
+                return ItemResult("failed", "UNLINK_PURGE_AUTHORITY_CHANGED: unlink manifest binding changed")
+            resolved_entry_id = frozen_entry_id
+            resolved_manifest = frozen_manifest
+
         try:
             from app.quarantine.unlink_purge import execute_journaled_unlink_purge
 
             execute_journaled_unlink_purge(
                 session_factory,
-                entry_id=quarantine_entry_id,
+                entry_id=resolved_entry_id,
                 quarantine_root=quarantine_root,
-                frozen_manifest=unlink_manifest,
+                frozen_manifest=resolved_manifest,
                 worker_id=worker_id,
             )
         except Exception as exc:

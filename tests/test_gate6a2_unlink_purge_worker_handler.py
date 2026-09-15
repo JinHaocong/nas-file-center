@@ -254,9 +254,11 @@ def test_bulk_unlink_purge_worker_executes_exact_frozen_authority(tmp_path: Path
     )
 
 
+@pytest.mark.parametrize("crash_after", [1, 3])
 def test_bulk_unlink_purge_successor_worker_resumes_only_durable_exact_paths(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    crash_after: int,
 ) -> None:
     import app.quarantine.unlink_purge as unlink_purge
 
@@ -283,17 +285,17 @@ def test_bulk_unlink_purge_successor_worker_resumes_only_durable_exact_paths(
     real_unlink = unlink_purge.os.unlink
     unlink_calls = 0
 
-    def crash_after_first_authorized_unlink(path, *args, **kwargs):
+    def crash_after_authorized_unlink(path, *args, **kwargs):
         nonlocal unlink_calls
         result = real_unlink(path, *args, **kwargs)
         unlink_calls += 1
-        if unlink_calls == 1:
-            raise RuntimeError("simulated worker crash after first unlink")
+        if unlink_calls == crash_after:
+            raise RuntimeError(f"simulated worker crash after unlink {crash_after}")
         return result
 
     with monkeypatch.context() as patch:
-        patch.setattr(unlink_purge.os, "unlink", crash_after_first_authorized_unlink)
-        with pytest.raises(RuntimeError, match="simulated worker crash"):
+        patch.setattr(unlink_purge.os, "unlink", crash_after_authorized_unlink)
+        with pytest.raises(RuntimeError, match=f"simulated worker crash after unlink {crash_after}"):
             execute_journaled_unlink_purge(
                 service.SessionLocal,
                 entry_id=entry_id,
@@ -303,8 +305,12 @@ def test_bulk_unlink_purge_successor_worker_resumes_only_durable_exact_paths(
             )
 
     assert not anchor.exists()
-    assert captured.exists()
-    assert public_view.exists()
+    if crash_after == 1:
+        assert captured.exists()
+        assert public_view.exists()
+    else:
+        assert not captured.exists()
+        assert not public_view.exists()
     assert external_survivor.read_bytes() == payload
     assert unrelated.read_bytes() == b"must-survive"
 
