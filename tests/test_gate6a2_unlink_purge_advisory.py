@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import create_engine
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 
 from app.models import (
@@ -313,5 +314,52 @@ def test_lstat_advisory_failure_is_incomplete_not_verified_none(
     assert advisory["status"] == "incomplete"
     assert advisory["hardlink_survivors"] == []
     assert f"LIVE_LSTAT_FAILED:{candidate}" in advisory["diagnostics"]
+    assert manifest == manifest_before
+    assert manifest["blockers"] == []
+
+
+def test_db_advisory_failure_is_incomplete_and_preserves_manifest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.quarantine.purge_advisory import discover_unlink_purge_advisory
+
+    data = tmp_path / "data"
+    trash = data / ".nas-file-center-trash"
+    attempt = trash / ".tx" / "entry-1" / "attempt-1"
+    attempt.mkdir(parents=True)
+
+    anchor = attempt / "anchor"
+    captured = attempt / "captured_source"
+    public_view = trash / "selected.q-1.bin"
+    original = data / "selected.bin"
+
+    anchor.write_bytes(b"gate6a2-advisory-db-failure")
+    os.link(anchor, captured)
+    os.link(anchor, public_view)
+    entry = _entry(1, original, public_view, anchor)
+    manifest = build_unlink_manifest(entry, trash)
+    manifest_before = json.loads(json.dumps(manifest))
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'db-failure.db'}")
+    Base.metadata.create_all(engine)
+    SessionLocal = sessionmaker(bind=engine)
+
+    with SessionLocal() as session:
+        def denied_scalars(*args, **kwargs):
+            raise OperationalError(
+                "SELECT advisory",
+                {},
+                RuntimeError("injected advisory database read failure"),
+            )
+
+        monkeypatch.setattr(session, "scalars", denied_scalars)
+        advisory = discover_unlink_purge_advisory(session, entry, manifest)
+
+    assert advisory["scope"] == "indexed_roots_only"
+    assert advisory["status"] == "incomplete"
+    assert advisory["hardlink_survivors"] == []
+    assert advisory["same_content_status"] == "scan_index_unavailable"
+    assert "ADVISORY_DB_READ_FAILED" in advisory["diagnostics"]
     assert manifest == manifest_before
     assert manifest["blockers"] == []
