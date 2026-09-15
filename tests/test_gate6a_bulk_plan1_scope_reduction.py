@@ -90,7 +90,7 @@ def _seed_active_entry(client: TestClient) -> int:
         return entry.id
 
 
-def test_bulk_purge_preview_is_release_blocked_without_mutation(tmp_path: Path) -> None:
+def test_bulk_purge_preview_is_gate6a2_eligible_without_mutation(tmp_path: Path) -> None:
     client = _setup_admin_client(tmp_path)
     entry_id = _seed_active_entry(client)
     service = client.app.state.service
@@ -107,10 +107,11 @@ def test_bulk_purge_preview_is_release_blocked_without_mutation(tmp_path: Path) 
 
     assert response.status_code == 200
     body = response.json()
-    assert body["eligible_count"] == 0
-    assert body["blocked_count"] == 1
-    assert body["items"][0]["eligible"] is False
-    assert body["items"][0]["reason"] == DEFERRED_REASON
+    assert body["eligible_count"] == 1
+    assert body["blocked_count"] == 0
+    assert body["items"][0]["eligible"] is True
+    assert body["items"][0]["purge_semantics"] == "unlink_v1"
+    assert body["items"][0]["mutation_blockers"] == []
 
     with service.SessionLocal() as session:
         after = session.get(QuarantineEntry, entry_id)
