@@ -241,3 +241,77 @@ def test_same_content_different_inode_is_reported_separately_from_hardlinks(
     assert advisory["same_content_independent_copies"] == [str(independent_copy)]
     assert str(independent_copy) not in advisory["hardlink_survivors"]
     assert str(hardlink_survivor) not in advisory["same_content_independent_copies"]
+
+
+def test_lstat_advisory_failure_is_incomplete_not_verified_none(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.quarantine.purge_advisory as purge_advisory
+
+    data = tmp_path / "data"
+    indexed_root = data / "indexed"
+    indexed_root.mkdir(parents=True)
+    trash = data / ".nas-file-center-trash"
+    attempt = trash / ".tx" / "entry-1" / "attempt-1"
+    attempt.mkdir(parents=True)
+
+    anchor = attempt / "anchor"
+    captured = attempt / "captured_source"
+    public_view = trash / "selected.q-1.bin"
+    original = data / "selected.bin"
+    candidate = indexed_root / "candidate.bin"
+
+    anchor.write_bytes(b"gate6a2-advisory-lstat-failure")
+    os.link(anchor, captured)
+    os.link(anchor, public_view)
+    os.link(anchor, candidate)
+    entry = _entry(1, original, public_view, anchor)
+    manifest = build_unlink_manifest(entry, trash)
+    manifest_before = json.loads(json.dumps(manifest))
+    candidate_stat = candidate.stat(follow_symlinks=False)
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'lstat-failure.db'}")
+    Base.metadata.create_all(engine)
+    SessionLocal = sessionmaker(bind=engine)
+
+    with SessionLocal() as session:
+        session.add(IndexRoot(root=str(indexed_root)))
+        session.add(
+            IndexedPath(
+                root_key="indexed-root",
+                absolute_path=str(candidate),
+                relative_path="candidate.bin",
+                basename="candidate.bin",
+                stem="candidate",
+                suffix=".bin",
+                size=candidate_stat.st_size,
+                mtime_ns=candidate_stat.st_mtime_ns,
+                device=entry.device,
+                inode=entry.inode,
+                is_dir=False,
+                scan_generation="gate6a2-test",
+            )
+        )
+        session.commit()
+
+        real_lstat = purge_advisory.os.lstat
+
+        def denied_lstat(path: Path | str):
+            if os.fspath(path) == str(candidate):
+                raise PermissionError("injected advisory read failure")
+            return real_lstat(path)
+
+        monkeypatch.setattr(purge_advisory.os, "lstat", denied_lstat)
+        advisory = purge_advisory.discover_unlink_purge_advisory(
+            session,
+            entry,
+            manifest,
+        )
+
+    assert advisory["scope"] == "indexed_roots_only"
+    assert advisory["status"] == "incomplete"
+    assert advisory["hardlink_survivors"] == []
+    assert f"LIVE_LSTAT_FAILED:{candidate}" in advisory["diagnostics"]
+    assert manifest == manifest_before
+    assert manifest["blockers"] == []
