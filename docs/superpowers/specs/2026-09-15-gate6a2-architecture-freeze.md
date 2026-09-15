@@ -1,10 +1,10 @@
 # v0.3.6 Gate6-A2 — Safe Permanent Purge Architecture Freeze
 
-**Date:** 2026-09-15  
-**Status:** FROZEN — implementation must not deviate without an explicit architecture amendment  
-**Branch:** `feature/v0.3.6-gate6a2-unlink-purge`  
-**Baseline:** `main@4abd312086c7ef0f363a4da4d13b51cb470d8cba`  
-**Design:** `docs/superpowers/specs/2026-09-15-gate6a2-unlink-purge-design.md`  
+**Date:** 2026-09-15
+**Status:** FROZEN — implementation must not deviate without an explicit architecture amendment
+**Branch:** `feature/v0.3.6-gate6a2-unlink-purge`
+**Baseline:** `main@4abd312086c7ef0f363a4da4d13b51cb470d8cba`
+**Design:** `docs/superpowers/specs/2026-09-15-gate6a2-unlink-purge-design.md`
 **Plan:** `docs/superpowers/plans/2026-09-15-gate6a2-unlink-purge.md`
 
 ## Frozen product semantics

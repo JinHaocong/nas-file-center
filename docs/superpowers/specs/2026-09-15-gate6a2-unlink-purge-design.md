@@ -1,8 +1,8 @@
 # v0.3.6 Gate6-A2 — Unlink-Based Permanent Purge Design
 
-**Date:** 2026-09-15  
-**Status:** DESIGN APPROVED IN CHAT; IMPLEMENTATION NOT STARTED  
-**Branch:** `feature/v0.3.6-gate6a2-unlink-purge`  
+**Date:** 2026-09-15
+**Status:** DESIGN APPROVED IN CHAT; IMPLEMENTATION NOT STARTED
+**Branch:** `feature/v0.3.6-gate6a2-unlink-purge`
 **Base:** `main@4abd312086c7ef0f363a4da4d13b51cb470d8cba`
 
 ## 0. Roadmap position
