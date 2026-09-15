@@ -218,6 +218,14 @@ class DedupeStep(BaseModel):
         return data
 
 
+class SingleChildWrapperCollapseStep(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    type: Literal["single_child_wrapper_collapse"] = "single_child_wrapper_collapse"
+    root_id: int = Field(gt=0, strict=True)
+    subpath: str = ""
+
+
 WorkflowStep = Union[
     ScanStep,
     FilterStep,
@@ -227,13 +235,14 @@ WorkflowStep = Union[
     QuarantineStep,
     OrganizeStep,
     DedupeStep,
+    SingleChildWrapperCollapseStep,
 ]
 
 
 class WorkflowDefinition(BaseModel):
     model_config = ConfigDict(extra="forbid")
     schema_version: int = 1
-    mode: Literal["file", "organizer", "dedupe"]
+    mode: Literal["file", "organizer", "dedupe", "utility"]
     steps: list[WorkflowStep]
 
     @field_validator("steps", mode="before")
@@ -309,7 +318,7 @@ class WorkflowListItem(BaseModel):
     id: int
     name: str
     description: str
-    mode: Literal["file", "organizer", "dedupe"]
+    mode: Literal["file", "organizer", "dedupe", "utility"]
     current_revision: int
     is_builtin: bool
     archived_at: str | None = None
@@ -392,7 +401,7 @@ class WorkflowPreviewResponse(BaseModel):
     revision: int
     workflow_revision: int
     definition_sha256: str
-    workflow_mode: Literal["file", "organizer", "dedupe"] = "file"
+    workflow_mode: Literal["file", "organizer", "dedupe", "utility"] = "file"
     preview_source: Literal["index", "organizer-live-readonly", "completed-scan-readonly-safety"] = "index"
     live_filesystem_verified: Literal[False] = False
     compile_digest: str
