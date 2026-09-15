@@ -288,7 +288,7 @@ def test_bulk_purge_preview_digest_excludes_advisory_drift_but_binds_owned_autho
     second = preview()
     second_item = second["items"][0]
     assert second_item["eligible"] is True
-    assert second_item["survivor_status"] == "none"
+    assert second_item["survivor_status"] == "incomplete"
     assert second_item["hardlink_survivor_paths"] == []
     assert second["preview_digest"] == first_digest
 
