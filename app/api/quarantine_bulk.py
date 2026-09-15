@@ -17,6 +17,8 @@ from app.quarantine.bulk import (
     quarantine_entry_identity_material,
 )
 from app.quarantine.paths import build_restore_rename_path
+from app.quarantine.purge_advisory import discover_unlink_purge_advisory
+from app.quarantine.unlink_purge import SEMANTICS_VERSION, build_unlink_manifest
 
 
 router = APIRouter(
@@ -102,13 +104,73 @@ def _compute_bulk_preview(
                 continue
 
             if payload.action == "purge":
+                has_transaction_identity = (
+                    entry.authoritative_anchor_path is not None
+                    or entry.tx_phase is not None
+                    or int(entry.active_attempt_generation or 0) > 0
+                )
+                if not has_transaction_identity:
+                    # Preserve the historical fail-closed behavior for legacy
+                    # quarantine rows that do not have pathname-scoped NFC
+                    # transaction ownership. Gate6-A2 does not infer authority.
+                    item = {
+                        "entry_id": entry_id,
+                        "eligible": False,
+                        "reason": "PERMANENT_PURGE_DEFERRED_UNSAFE_HARDLINK_SCOPE",
+                    }
+                    items.append(item)
+                    digest_items.append({**identity, **item})
+                    continue
+
+                manifest = build_unlink_manifest(
+                    entry,
+                    service.settings.quarantine_root,
+                )
+                mutation_blockers = list(manifest.get("blockers") or [])
+                advisory = discover_unlink_purge_advisory(session, entry, manifest)
+                hardlink_paths = list(advisory.get("hardlink_survivors") or [])
+                independent_paths = list(
+                    advisory.get("same_content_independent_copies") or []
+                )
+                survivor_status = {
+                    "verified_found": "found",
+                    "verified_none": "none",
+                    "incomplete": "incomplete",
+                }.get(str(advisory.get("status") or ""), "incomplete")
+
                 item = {
                     "entry_id": entry_id,
-                    "eligible": False,
-                    "reason": "PERMANENT_PURGE_DEFERRED_UNSAFE_HARDLINK_SCOPE",
+                    "eligible": not mutation_blockers,
+                    "purge_semantics": SEMANTICS_VERSION,
+                    "mutation_blockers": mutation_blockers,
+                    "survivor_scope": advisory.get("scope"),
+                    "survivor_status": survivor_status,
+                    "hardlink_survivor_count": len(hardlink_paths),
+                    "hardlink_survivor_paths": hardlink_paths,
+                    "same_content_scope": advisory.get("same_content_scope"),
+                    "same_content_status": advisory.get("same_content_status"),
+                    "independent_copy_count": len(independent_paths),
+                    "independent_copy_paths": independent_paths,
+                    "advisory_diagnostics": list(advisory.get("diagnostics") or []),
                 }
+                if mutation_blockers:
+                    item["reason"] = "UNLINK_MANIFEST_BLOCKED"
                 items.append(item)
-                digest_items.append({**identity, **item})
+
+                # The mutation digest deliberately excludes advisory evidence.
+                # It binds only persisted entry identity plus the exact
+                # selected-entry pathname authority frozen by unlink_v1.
+                digest_item = {
+                    **identity,
+                    "entry_id": entry_id,
+                    "eligible": not mutation_blockers,
+                    "purge_semantics": SEMANTICS_VERSION,
+                    "mutation_blockers": mutation_blockers,
+                    "unlink_manifest": manifest,
+                }
+                if mutation_blockers:
+                    digest_item["reason"] = "UNLINK_MANIFEST_BLOCKED"
+                digest_items.append(digest_item)
                 continue
 
             original_target = validate_mutation_destination(
