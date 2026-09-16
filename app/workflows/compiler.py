@@ -164,11 +164,10 @@ class WorkflowCompiler:
                 code="INDEX_ROOT_NOT_FOUND",
             )
 
+        lexical_root = Path(root_obj.root).expanduser()
         try:
-            safe_root = require_unreserved_path(
-                require_allowed_path(root_obj.root, self.allowed_roots),
-                self.quarantine_root,
-            )
+            resolved_root = require_allowed_path(lexical_root, self.allowed_roots)
+            require_unreserved_path(resolved_root, self.quarantine_root)
         except Exception as exc:
             raise WorkflowValidationError(
                 f"Index root {step.root_id} is not allowed for utility workflow",
@@ -176,7 +175,9 @@ class WorkflowCompiler:
                 details={"root_id": step.root_id},
             ) from exc
 
-        authoritative_root = os.path.abspath(os.path.normpath(str(safe_root)))
+        # Keep the authoritative Index Root lexical so discovery can lstat each
+        # component and fail closed on a symlink instead of silently following it.
+        authoritative_root = os.path.abspath(os.path.normpath(str(lexical_root)))
         subpath = step.subpath.strip()
         scope_path = os.path.abspath(
             os.path.normpath(
