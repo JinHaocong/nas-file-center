@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+import app.batch_utilities.single_child_wrapper as single_child_wrapper_module
 from app.batch_utilities.errors import BatchUtilityInvalidConfigError, BatchUtilitySymlinkBlockedError
 from app.batch_utilities.single_child_wrapper import discover_single_child_wrappers
 
@@ -189,3 +190,32 @@ def test_wrapper_detach_after_open_before_scan_fails_closed(tmp_path, monkeypatc
     assert swapped is True
     assert (detached / "C").is_dir()
     assert (wrapper / "C").is_dir()
+
+
+def test_child_replacement_after_stat_before_decision_fails_closed(tmp_path, monkeypatch):
+    root = tmp_path / "root"
+    root.mkdir()
+    wrapper = root / "B"
+    child = wrapper / "C"
+    child.mkdir(parents=True)
+    detached = tmp_path / "detached-child"
+
+    real_entry_exists_at = single_child_wrapper_module._entry_exists_at
+    swapped = False
+
+    def swap_child_before_target_check(scope_fd, entry_name, target_path):
+        nonlocal swapped
+        if not swapped:
+            swapped = True
+            child.rename(detached)
+            child.mkdir()
+        return real_entry_exists_at(scope_fd, entry_name, target_path)
+
+    monkeypatch.setattr(single_child_wrapper_module, "_entry_exists_at", swap_child_before_target_check)
+
+    with pytest.raises(BatchUtilityInvalidConfigError, match="CHILD_IDENTITY_CHANGED"):
+        discover_single_child_wrappers(str(root), str(root))
+
+    assert swapped is True
+    assert detached.is_dir()
+    assert child.is_dir()
