@@ -64,6 +64,23 @@ jobs:
           test "$(docker image inspect --format '{{.Architecture}}' "${TAG}")" = "amd64"
           test "$(docker image inspect --format '{{.Os}}' "${TAG}")" = "linux"
 
+      - name: Package exact candidate image for isolated NAS acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          SHA7="$(git rev-parse --short=7 HEAD)"
+          TAG="kerwinjhc/nas-file-center:0.3.6-gate6b-${SHA7}"
+          OUT="gate6b-f98589ed-linux-amd64.tar"
+          docker save -o "${OUT}" "${TAG}"
+          sha256sum "${OUT}" | tee gate6b-nas-image.sha256
+          docker image inspect --format 'image_id={{.Id}} os={{.Os}} arch={{.Architecture}}' "${TAG}" | tee gate6b-nas-image-identity.txt
+          {
+            echo "candidate=f98589ed42af7f4f79ed862f727e607de2f3ac3a"
+            echo "independent_review_id=5224760730"
+            echo "candidate_tag=${TAG}"
+            echo "tar_file=${OUT}"
+          } >> gate6b-nas-image-identity.txt
+
       - name: Upload Gate6-B exact-candidate Docker evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -75,3 +92,15 @@ jobs:
             gate6b-release-identity.txt
             docker-build.log
             docker-evidence.txt
+
+      - name: Upload Gate6-B NAS acceptance image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate6b-nas-image-f98589ed-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+          path: |
+            gate6b-f98589ed-linux-amd64.tar
+            gate6b-nas-image.sha256
+            gate6b-nas-image-identity.txt
