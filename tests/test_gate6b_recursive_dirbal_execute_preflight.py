@@ -21,9 +21,9 @@ RECURSIVE_MODE = "recursive_directory_balanced_by_bytes"
 
 def _setup_service(tmp_path: Path):
     data_dir = tmp_path / "data"
-    quarantine_dir = tmp_path / "quarantine"
     config_dir = tmp_path / "config"
     data_dir.mkdir()
+    quarantine_dir = data_dir / ".nas-file-center-trash"
     quarantine_dir.mkdir()
     config_dir.mkdir()
 
