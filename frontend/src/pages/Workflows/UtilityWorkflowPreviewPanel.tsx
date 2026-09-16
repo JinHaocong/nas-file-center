@@ -72,8 +72,13 @@ export const UtilityWorkflowPreviewPanel: React.FC<Props> = ({ workflowId, revis
   });
 
   const candidates = previewData?.utility_summary?.candidates ?? [];
+  const unsupportedCandidates = candidates.filter(
+    (candidate) =>
+      candidate.state === 'UNSUPPORTED_FILESYSTEM'
+      && candidate.capability_reason === 'UTILITY_MOVE_UNSUPPORTED_FILESYSTEM',
+  );
   const canPreview = canPreviewWorkflow(isArchived) && !isDirty;
-  const canDraft = canGenerateDraft(isArchived) && !isDirty && Boolean(previewData?.compile_digest) && !previewMutation.isPending && !generateMutation.isPending;
+  const canDraft = canGenerateDraft(isArchived) && !isDirty && Boolean(previewData?.compile_digest) && selectedCandidateIds.length > 0 && !previewMutation.isPending && !generateMutation.isPending;
 
   const columns = [
     { title: '状态', dataIndex: 'state', key: 'state', width: 150, render: (state: string, record: WorkflowUtilityCandidate) => <Tag color={state === 'READY' ? 'success' : 'warning'}>{state}{record.selectable ? '' : ' / 不可选'}</Tag> },
@@ -99,6 +104,14 @@ export const UtilityWorkflowPreviewPanel: React.FC<Props> = ({ workflowId, revis
       {errorMessage && <Alert type="error" showIcon message="操作失败" description={errorMessage} closable onClose={() => setErrorMessage(null)} style={{ marginBottom: 16 }} />}
       {!isArchived && !isDirty && <>
         <Alert type="info" showIcon message="只读发现 + 显式选择" description="READY 候选默认勾选；冲突/不安全候选不可选择。Preview 不修改文件系统，也不发送 runtime root override。" style={{ marginBottom: 16 }} />
+        {unsupportedCandidates.length > 0 && <Alert
+          type="warning"
+          showIcon
+          icon={<WarningOutlined />}
+          message="当前文件系统不支持 Gate6-B Utility MOVE"
+          description="拓扑发现保持只读；当前文件系统不支持严格 no-overwrite MOVE。Gate6-B 不会尝试兼容 rename fallback，因此这些候选保持不可选择，也不会生成 Draft。"
+          style={{ marginBottom: 16 }}
+        />}
         <Input placeholder="自定义计划名称 (可选)" value={customPlanName} onChange={(event) => setCustomPlanName(event.target.value)} style={{ width: 300, marginBottom: 16 }} />
         {previewData && <>
           <Descriptions size="small" bordered column={3} style={{ marginBottom: 16 }}>
