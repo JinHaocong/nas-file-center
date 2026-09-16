@@ -95,34 +95,219 @@ def derive_canonical_top_level_dir(scan_root: str, relative_path: str) -> str:
     return norm_root
 
 
-def _count_real_regular_files_recursive(directory: str | Path) -> int:
-    """Count real regular-file pathnames recursively without following symlinks."""
-    root = Path(directory)
-    try:
-        if root.is_symlink() or os.path.islink(root) or not root.is_dir():
-            return 0
-    except OSError:
-        return 0
+@dataclass(frozen=True)
+class _RecursiveProtectionSnapshot:
+    count: int
+    stable: bool
+    device: int | None
+    inode: int | None
+    tree_identity_digest: str | None
 
+    def digest_payload(self) -> dict[str, Any]:
+        return {
+            "stable": self.stable,
+            "device": self.device,
+            "inode": self.inode,
+            "tree_identity_digest": self.tree_identity_digest,
+        }
+
+
+def _recursive_directory_open_flags() -> int | None:
+    if not hasattr(os, "O_NOFOLLOW") or not hasattr(os, "O_DIRECTORY"):
+        return None
+    if os.open not in os.supports_dir_fd:
+        return None
+    return os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+
+
+def _open_absolute_directory_nofollow(directory: str | Path) -> tuple[int, os.stat_result] | None:
+    flags = _recursive_directory_open_flags()
+    if flags is None:
+        return None
+
+    absolute = os.path.abspath(os.path.normpath(str(directory)))
+    if not absolute.startswith(os.sep):
+        return None
+
+    current_fd: int | None = None
+    try:
+        current_fd = os.open(os.sep, os.O_RDONLY | os.O_DIRECTORY)
+        for part in Path(absolute).parts[1:]:
+            next_fd = os.open(part, flags, dir_fd=current_fd)
+            os.close(current_fd)
+            current_fd = next_fd
+        opened_st = os.fstat(current_fd)
+        if not stat.S_ISDIR(opened_st.st_mode):
+            os.close(current_fd)
+            return None
+        return current_fd, opened_st
+    except OSError:
+        if current_fd is not None:
+            try:
+                os.close(current_fd)
+            except OSError:
+                pass
+        return None
+
+
+def _directory_binding_matches(directory: str | Path, expected_device: int, expected_inode: int) -> bool:
+    reopened = _open_absolute_directory_nofollow(directory)
+    if reopened is None:
+        return False
+    fd, st = reopened
+    try:
+        return int(st.st_dev) == expected_device and int(st.st_ino) == expected_inode
+    finally:
+        os.close(fd)
+
+
+def _unstable_recursive_snapshot(
+    *,
+    device: int | None = None,
+    inode: int | None = None,
+) -> _RecursiveProtectionSnapshot:
+    return _RecursiveProtectionSnapshot(
+        count=0,
+        stable=False,
+        device=device,
+        inode=inode,
+        tree_identity_digest=None,
+    )
+
+
+def _snapshot_real_regular_files_recursive(directory: str | Path) -> _RecursiveProtectionSnapshot:
+    """Descriptor-bound recursive regular-file snapshot; any authority race fails closed."""
+    opened = _open_absolute_directory_nofollow(directory)
+    if opened is None:
+        return _unstable_recursive_snapshot()
+
+    root_fd, root_st = opened
+    root_device = int(root_st.st_dev)
+    root_inode = int(root_st.st_ino)
+    dir_flags = _recursive_directory_open_flags()
+    if dir_flags is None:
+        os.close(root_fd)
+        return _unstable_recursive_snapshot(device=root_device, inode=root_inode)
+
+    regular_flags = os.O_RDONLY | os.O_NOFOLLOW
     count = 0
-    stack = [root]
-    while stack:
-        current = stack.pop()
+    stable = True
+    identity_rows: list[dict[str, Any]] = [
+        {
+            "path": ".",
+            "object_type": "directory",
+            "device": root_device,
+            "inode": root_inode,
+        }
+    ]
+    stack: list[tuple[int, str]] = [(root_fd, ".")]
+
+    while stack and stable:
+        current_fd, relative_dir = stack.pop()
         try:
-            with os.scandir(current) as entries:
-                for entry in entries:
+            try:
+                with os.scandir(current_fd) as iterator:
+                    entries = sorted(iterator, key=lambda entry: entry.name)
+            except OSError:
+                stable = False
+                continue
+
+            for entry in entries:
+                try:
+                    entry_st = entry.stat(follow_symlinks=False)
+                except OSError:
+                    stable = False
+                    break
+
+                relative_path = entry.name if relative_dir == "." else f"{relative_dir}/{entry.name}"
+                if stat.S_ISLNK(entry_st.st_mode):
+                    continue
+
+                if stat.S_ISREG(entry_st.st_mode):
                     try:
-                        if entry.is_symlink():
-                            continue
-                        if entry.is_file(follow_symlinks=False):
-                            count += 1
-                        elif entry.is_dir(follow_symlinks=False):
-                            stack.append(Path(entry.path))
+                        file_fd = os.open(entry.name, regular_flags, dir_fd=current_fd)
                     except OSError:
-                        continue
-        except OSError:
-            continue
-    return count
+                        stable = False
+                        break
+                    try:
+                        opened_file_st = os.fstat(file_fd)
+                    finally:
+                        os.close(file_fd)
+                    if (
+                        not stat.S_ISREG(opened_file_st.st_mode)
+                        or int(opened_file_st.st_dev) != int(entry_st.st_dev)
+                        or int(opened_file_st.st_ino) != int(entry_st.st_ino)
+                    ):
+                        stable = False
+                        break
+                    count += 1
+                    identity_rows.append(
+                        {
+                            "path": relative_path,
+                            "object_type": "file",
+                            "device": int(opened_file_st.st_dev),
+                            "inode": int(opened_file_st.st_ino),
+                        }
+                    )
+                    continue
+
+                if stat.S_ISDIR(entry_st.st_mode):
+                    try:
+                        child_fd = os.open(entry.name, dir_flags, dir_fd=current_fd)
+                    except OSError:
+                        stable = False
+                        break
+                    child_st = os.fstat(child_fd)
+                    if (
+                        not stat.S_ISDIR(child_st.st_mode)
+                        or int(child_st.st_dev) != int(entry_st.st_dev)
+                        or int(child_st.st_ino) != int(entry_st.st_ino)
+                    ):
+                        os.close(child_fd)
+                        stable = False
+                        break
+                    identity_rows.append(
+                        {
+                            "path": relative_path,
+                            "object_type": "directory",
+                            "device": int(child_st.st_dev),
+                            "inode": int(child_st.st_ino),
+                        }
+                    )
+                    stack.append((child_fd, relative_path))
+        finally:
+            try:
+                os.close(current_fd)
+            except OSError:
+                pass
+
+    if not stable:
+        for fd, _relative_dir in stack:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        return _unstable_recursive_snapshot(device=root_device, inode=root_inode)
+
+    if not _directory_binding_matches(directory, root_device, root_inode):
+        return _unstable_recursive_snapshot(device=root_device, inode=root_inode)
+
+    identity_rows.sort(key=lambda row: (row["path"], row["object_type"], row["device"], row["inode"]))
+    tree_identity_digest = hashlib.sha256(
+        canonical_json_dumps(identity_rows).encode("utf-8")
+    ).hexdigest()
+    return _RecursiveProtectionSnapshot(
+        count=count,
+        stable=True,
+        device=root_device,
+        inode=root_inode,
+        tree_identity_digest=tree_identity_digest,
+    )
+
+
+def _count_real_regular_files_recursive(directory: str | Path) -> int:
+    """Count real regular files recursively with descriptor-bound no-follow authority."""
+    return _snapshot_real_regular_files_recursive(directory).count
 
 
 @dataclass(frozen=True)
@@ -151,6 +336,7 @@ def compute_source_snapshot_digest(
     raw_groups_data: Sequence[Mapping[str, Any]],
     member_safety_facts: Mapping[str, Mapping[str, Any]],
     directory_file_counts: Mapping[str, int] | None,
+    directory_protection_snapshots: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> str:
     payload = {
         "scan_job_id": scan_job_id,
@@ -160,6 +346,10 @@ def compute_source_snapshot_digest(
         "member_safety_facts": {k: dict(sorted(v.items())) for k, v in sorted(member_safety_facts.items())},
         "directory_file_counts": dict(sorted(directory_file_counts.items())) if directory_file_counts is not None else None,
     }
+    if directory_protection_snapshots is not None:
+        payload["directory_protection_snapshots"] = {
+            k: dict(sorted(v.items())) for k, v in sorted(directory_protection_snapshots.items())
+        }
     return hashlib.sha256(canonical_json_dumps(payload).encode("utf-8")).hexdigest()
 
 
@@ -452,12 +642,21 @@ def compile_advanced_dedupe_preview(
         ))
 
     directory_file_counts: dict[str, int] | None = None
+    directory_protection_snapshots: dict[str, dict[str, Any]] | None = None
     effective_protection = bool(protect_last_file) or recursive_mode
     if effective_protection:
         directory_file_counts = {}
+        if recursive_mode:
+            directory_protection_snapshots = {}
         protected_dirs = recursive_protection_dirs if recursive_mode else distinct_top_dirs
         for directory in sorted(protected_dirs):
-            directory_file_counts[normalize_dedupe_path(directory)] = _count_real_regular_files_recursive(directory)
+            normalized_directory = normalize_dedupe_path(directory)
+            if recursive_mode:
+                protection_snapshot = _snapshot_real_regular_files_recursive(directory)
+                directory_file_counts[normalized_directory] = protection_snapshot.count
+                directory_protection_snapshots[normalized_directory] = protection_snapshot.digest_payload()
+            else:
+                directory_file_counts[normalized_directory] = _count_real_regular_files_recursive(directory)
 
     engine_result = run_advanced_dedupe(
         group_snapshots,
@@ -507,6 +706,7 @@ def compile_advanced_dedupe_preview(
         raw_groups_data=raw_groups_data,
         member_safety_facts=member_safety_facts,
         directory_file_counts=directory_file_counts,
+        directory_protection_snapshots=directory_protection_snapshots,
     )
     decision_digest = compute_decision_digest(
         scorer_config_digest=config_digest,
@@ -658,6 +858,7 @@ def build_preview_response(
                 if "RECURSIVE_PROTECT_LAST_FILE" in m.safety_reasons
                 else None
             )
+
             all_rows.append({
                 "group_provenance_id": g_prov_id,
                 "group_status": g_status,
