@@ -260,7 +260,7 @@ def test_amendment_a_real_generate_freeze_validate_execute_quarantine_and_undo_a
     status, item_state, reason, _metadata = _plan_item_state(env, plan_id)
     assert status == "completed"
     assert item_state == "completed"
-    assert reason in (None, "")
+    assert reason == "quarantined"
     assert not source.exists()
     assert keeper.exists()
     assert benign.exists()
