@@ -206,6 +206,35 @@ def test_two_recursive_plans_share_ancestor_first_executes_second_blocks_on_live
     assert reason is not None and "RECURSIVE_PROTECT_LAST_FILE" in reason
 
 
+def test_root_direct_quarantine_does_not_count_reserved_quarantine_as_survivor(tmp_path: Path):
+    service, settings, root, quarantine_root = _setup_service(tmp_path)
+    source_a = root / "a.bin"
+    source_b = root / "b.bin"
+    source_a.write_bytes(b"a")
+    source_b.write_bytes(b"b")
+
+    # A root-direct source has exactly one protected ancestor: the Scan Root.
+    # Both plans validate against the initial source-scope count=2.
+    plan_a = _create_ready_recursive_plan(service, settings, root, source_a, token="root-direct-a")
+    plan_b = _create_ready_recursive_plan(service, settings, root, source_b, token="root-direct-b")
+
+    _enqueue_and_run_worker(service, settings, plan_a, worker_id="gate6b-root-direct-a")
+    assert not source_a.exists()
+    assert source_b.exists()
+    assert any(path.is_file() for path in quarantine_root.rglob("*"))
+
+    _enqueue_and_run_worker(service, settings, plan_b, worker_id="gate6b-root-direct-b")
+
+    assert source_b.exists(), (
+        "reserved Quarantine storage must not count as a surviving regular file "
+        "for Recursive Last-File Protection"
+    )
+    plan_status, item_state, reason = _item_state(service, plan_b)
+    assert plan_status == "stale"
+    assert item_state == "failed"
+    assert reason is not None and "RECURSIVE_PROTECT_LAST_FILE" in reason
+
+
 def test_worker_recursive_preflight_unstable_read_blocks_before_execute_item(tmp_path: Path, monkeypatch):
     service, settings, root, _ = _setup_service(tmp_path)
     protected = root / "set"
