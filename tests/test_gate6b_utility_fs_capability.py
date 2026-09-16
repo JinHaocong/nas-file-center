@@ -11,10 +11,14 @@ def _open_dir(path) -> int:
     return os.open(path, os.O_RDONLY | os.O_DIRECTORY)
 
 
-def test_probe_eexist_means_native_support_and_does_not_change_namespace(tmp_path, monkeypatch):
+def test_probe_eexist_plus_cross_name_support_means_native_support_and_does_not_change_namespace(
+    tmp_path,
+    monkeypatch,
+):
     child = tmp_path / "C"
     child.mkdir()
     before = os.lstat(child)
+    confirmation_calls: list[int] = []
 
     def fake_rename_at(source_fd, source_name, target_fd, target_name):
         assert source_fd == target_fd
@@ -23,7 +27,13 @@ def test_probe_eexist_means_native_support_and_does_not_change_namespace(tmp_pat
         ctypes.set_errno(errno.EEXIST)
         return -1
 
+    def fake_cross_name_probe(*, dir_fd=None, **kwargs):
+        assert dir_fd is not None
+        confirmation_calls.append(dir_fd)
+        return True
+
     monkeypatch.setattr(fs_ops, "_RENAME_AT_IMPL", fake_rename_at)
+    monkeypatch.setattr(fs_ops, "_probe_rename_noreplace_supported", fake_cross_name_probe)
     fd = _open_dir(tmp_path)
     try:
         result = fs_ops.probe_existing_noreplace_capability_at(fd, "C")
@@ -32,6 +42,48 @@ def test_probe_eexist_means_native_support_and_does_not_change_namespace(tmp_pat
 
     after = os.lstat(child)
     assert result is True
+    assert len(confirmation_calls) == 1
+    assert (after.st_dev, after.st_ino, after.st_mode) == (
+        before.st_dev,
+        before.st_ino,
+        before.st_mode,
+    )
+    assert sorted(entry.name for entry in os.scandir(tmp_path)) == ["C"]
+
+
+def test_probe_same_entry_eexist_fails_closed_when_cross_name_probe_is_unsupported(
+    tmp_path,
+    monkeypatch,
+):
+    """Regression for real zfuse/fuseblk: same-entry EEXIST is not proof of MOVE support."""
+    child = tmp_path / "C"
+    child.mkdir()
+    before = os.lstat(child)
+    confirmation_calls: list[int] = []
+
+    def fake_rename_at(source_fd, source_name, target_fd, target_name):
+        assert source_fd == target_fd
+        assert source_name == b"C"
+        assert target_name == b"C"
+        ctypes.set_errno(errno.EEXIST)
+        return -1
+
+    def fake_cross_name_probe(*, dir_fd=None, **kwargs):
+        assert dir_fd is not None
+        confirmation_calls.append(dir_fd)
+        return False
+
+    monkeypatch.setattr(fs_ops, "_RENAME_AT_IMPL", fake_rename_at)
+    monkeypatch.setattr(fs_ops, "_probe_rename_noreplace_supported", fake_cross_name_probe)
+    fd = _open_dir(tmp_path)
+    try:
+        result = fs_ops.probe_existing_noreplace_capability_at(fd, "C")
+    finally:
+        os.close(fd)
+
+    after = os.lstat(child)
+    assert result is False
+    assert len(confirmation_calls) == 1
     assert (after.st_dev, after.st_ino, after.st_mode) == (
         before.st_dev,
         before.st_ino,
