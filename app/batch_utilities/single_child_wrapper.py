@@ -17,6 +17,7 @@ from app.batch_utilities.errors import (
     BatchUtilityScopeNotFoundError,
     BatchUtilitySymlinkBlockedError,
 )
+from app.fs_ops import probe_existing_noreplace_capability_at
 
 
 @dataclass(frozen=True)
@@ -30,6 +31,7 @@ class SingleChildWrapperDecision:
     wrapper_inode: int
     child_device: int | None = None
     child_inode: int | None = None
+    capability_reason: str | None = None
 
     @property
     def selectable(self) -> bool:
@@ -45,6 +47,7 @@ def _candidate_id(
     child_device: int | None,
     child_inode: int | None,
     target_path: str | None,
+    capability_reason: str | None,
 ) -> str:
     payload = {
         "wrapper_path": os.path.normpath(wrapper_path),
@@ -54,6 +57,7 @@ def _candidate_id(
         "child_device": child_device,
         "child_inode": child_inode,
         "target_path": os.path.normpath(target_path) if target_path else None,
+        "capability_reason": capability_reason,
     }
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
@@ -560,6 +564,7 @@ def _decision(
     child_path: str | None = None,
     child_st: os.stat_result | None = None,
     target_path: str | None = None,
+    capability_reason: str | None = None,
 ) -> SingleChildWrapperDecision:
     child_device = child_st.st_dev if child_st is not None else None
     child_inode = child_st.st_ino if child_st is not None else None
@@ -572,6 +577,7 @@ def _decision(
             child_device=child_device,
             child_inode=child_inode,
             target_path=target_path,
+            capability_reason=capability_reason,
         ),
         wrapper_path=wrapper_path,
         child_path=child_path,
@@ -581,6 +587,7 @@ def _decision(
         wrapper_inode=wrapper_st.st_ino,
         child_device=child_device,
         child_inode=child_inode,
+        capability_reason=capability_reason,
     )
 
 
@@ -661,6 +668,7 @@ def discover_single_child_wrappers(
                         child_path = os.path.join(wrapper_path, child.name)
                         target_path = os.path.join(scope, child.name)
                         child_st = child_stats[child.name]
+                        capability_reason: str | None = None
 
                         if stat.S_ISLNK(child_st.st_mode):
                             state = "CHILD_SYMLINK"
@@ -670,6 +678,12 @@ def discover_single_child_wrappers(
                             state = "UNSUPPORTED_CHILD"
                         elif _entry_exists_at(scope_fd, child.name, target_path):
                             state = "TARGET_EXISTS"
+                        elif int(child_st.st_dev) != int(scope_st.st_dev):
+                            state = "UNSUPPORTED_FILESYSTEM"
+                            capability_reason = "UTILITY_MOVE_UNSUPPORTED_FILESYSTEM"
+                        elif probe_existing_noreplace_capability_at(wrapper_fd, child.name) is not True:
+                            state = "UNSUPPORTED_FILESYSTEM"
+                            capability_reason = "UTILITY_MOVE_UNSUPPORTED_FILESYSTEM"
                         else:
                             state = "READY"
 
@@ -681,6 +695,7 @@ def discover_single_child_wrappers(
                                 child_path=child_path,
                                 child_st=child_st,
                                 target_path=target_path,
+                                capability_reason=capability_reason,
                             )
                         )
 
