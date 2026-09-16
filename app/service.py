@@ -2547,6 +2547,36 @@ class FileCenterService:
                 raise ValueError(f"Plan must be validated before execution (status must be 'ready' or 'partial'), current status={plan.status}")
             rows = list(session.scalars(select(BatchPlanItem).where(BatchPlanItem.plan_id == plan_id).order_by(BatchPlanItem.sequence)))
 
+            try:
+                direct_plan_meta = json.loads(plan.metadata_json or "{}")
+            except Exception:
+                direct_plan_meta = {}
+            recursive_direct_execute = (
+                isinstance(direct_plan_meta, dict)
+                and direct_plan_meta.get("selection_mode")
+                == "recursive_directory_balanced_by_bytes"
+            )
+            if not recursive_direct_execute:
+                for row in rows:
+                    try:
+                        row_meta = json.loads(row.metadata_json or "{}")
+                    except Exception:
+                        row_meta = None
+                    if (
+                        isinstance(row_meta, dict)
+                        and (
+                            "recursive_protection" in row_meta
+                            or "frozen_recursive_protection" in row_meta
+                        )
+                    ):
+                        recursive_direct_execute = True
+                        break
+            if recursive_direct_execute:
+                raise StateConflictError(
+                    "recursive directory balance execution requires the Worker live preflight; "
+                    "synchronous execute_plan is not an authorized mutation path"
+                )
+
         stale_items = []
         for row in rows:
             if row.state in ("completed", "skipped") or row.operation == "restore":

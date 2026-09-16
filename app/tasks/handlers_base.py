@@ -2582,6 +2582,95 @@ class BatchPlanExecuteHandler(TaskHandler):
                         session.commit()
                     break
 
+            if item_meta.operation == "quarantine":
+                try:
+                    recursive_item_meta = json.loads(item_meta.metadata_json or "{}")
+                except Exception:
+                    recursive_item_meta = None
+                has_recursive_authority = (
+                    isinstance(recursive_item_meta, dict)
+                    and (
+                        "recursive_protection" in recursive_item_meta
+                        or "frozen_recursive_protection" in recursive_item_meta
+                    )
+                )
+                if (
+                    plan_meta.get("selection_mode") == "recursive_directory_balanced_by_bytes"
+                    or has_recursive_authority
+                ):
+                    if context.worker_id is not None:
+                        with context.SessionLocal() as lease_session:
+                            assert_active_worker_lease(
+                                lease_session, context.worker_id, now=utcnow()
+                            )
+
+                    from app.planning.recursive_protection_authority import (
+                        evaluate_live_recursive_protection,
+                    )
+
+                    recursive_evaluation = evaluate_live_recursive_protection(
+                        item_meta.metadata_json or "{}",
+                        expected_source_path=item_meta.source_path,
+                        allowed_roots=settings.allowed_roots,
+                        quarantine_root=settings.quarantine_root,
+                    )
+                    if not recursive_evaluation.safe:
+                        recursive_reason = (
+                            recursive_evaluation.reason
+                            or "RECURSIVE_PROTECTION_UNSTABLE"
+                        )
+                        with context.SessionLocal() as session:
+                            session.execute(text("BEGIN IMMEDIATE"))
+                            now = utcnow()
+                            if context.worker_id is not None:
+                                assert_active_worker_lease(
+                                    session, context.worker_id, now=now
+                                )
+                            row = session.get(BatchPlanItem, item_meta.id)
+                            if row:
+                                row.state = "failed"
+                                row.reason = recursive_reason
+                            if q_entry_id:
+                                qe = session.get(QuarantineEntry, q_entry_id)
+                                if qe:
+                                    qe.state = "abandoned"
+                                    qe.last_error = recursive_reason
+                                    qe.updated_at = now
+
+                            plan = session.get(BatchPlan, plan_id)
+                            items = list(session.scalars(
+                                select(BatchPlanItem).where(BatchPlanItem.plan_id == plan_id)
+                            ))
+                            completed_count = sum(
+                                1 for it in items if it.state == "completed"
+                            )
+                            current_plan_meta = json.loads(plan.metadata_json or "{}")
+                            exec_meta = current_plan_meta.setdefault("execution", {})
+                            if completed_count > 0:
+                                plan.status = "partial"
+                                exec_meta["termination_reason"] = recursive_reason
+                            else:
+                                plan.status = "stale"
+                            plan.metadata_json = json.dumps(
+                                current_plan_meta, ensure_ascii=False
+                            )
+
+                            session.add(AuditEvent(
+                                operation=item_meta.operation,
+                                path=item_meta.source_path,
+                                result="failed",
+                                details_json=json.dumps({
+                                    "plan_id": plan_id,
+                                    "item_id": item_meta.id,
+                                    "task_id": job.id,
+                                    "quarantine_entry_id": q_entry_id,
+                                    "reason": recursive_reason,
+                                    "phase": "recursive_live_preflight",
+                                }, ensure_ascii=False),
+                            ))
+                            session.commit()
+                        break
+
             result = execute_item(
                 item_op,
                 allowed_roots=settings.allowed_roots,
