@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 
 from app.config import Settings
 from app.models import BatchPlan, BatchPlanItem, DuplicateFile, DuplicateGroup, ScanJob, utcnow
+from app.planning.dedupe_engine import directory_ancestors_to_scan_root
 from app.planning.dedupe_preview import DedupePreviewChangedError
 from app.service import FileCenterService
 
@@ -123,6 +124,15 @@ def _plan_counts(service: FileCenterService):
         )
 
 
+def _plan_items(service: FileCenterService, plan_id: int) -> list[BatchPlanItem]:
+    with service.SessionLocal() as session:
+        return list(session.scalars(
+            select(BatchPlanItem)
+            .where(BatchPlanItem.plan_id == plan_id)
+            .order_by(BatchPlanItem.sequence)
+        ))
+
+
 def test_recursive_generate_live_identity_aba_returns_preview_changed_and_zero_draft(service_env):
     scan_id = 911
     left, _right, _a_extra, _b_extra = _create_recursive_fixture(service_env, scan_id=scan_id)
@@ -161,3 +171,60 @@ def test_recursive_generate_ancestor_count_change_returns_preview_changed_and_ze
         )
 
     assert _plan_counts(service) == before_counts
+
+
+def test_recursive_generate_persists_exact_recursive_protection_authority(service_env):
+    scan_id = 913
+    _create_recursive_fixture(service_env, scan_id=scan_id)
+    service = service_env["service"]
+    config = _recursive_config()
+    preview = service.get_dedupe_preview(scan_id, scorer_config=config)
+
+    result = service.create_advanced_dedupe_plan(
+        scan_id,
+        scorer_config=config,
+        expected_preview_digest=preview["preview_digest"],
+    )
+
+    items = _plan_items(service, result["id"])
+    assert items
+    for item in items:
+        metadata = json.loads(item.metadata_json)
+        authority = metadata["recursive_protection"]
+
+        assert authority["schema_version"] == 1
+        assert authority["selection_mode"] == "recursive_directory_balanced_by_bytes"
+        assert authority["scan_job_id"] == scan_id
+        assert authority["scan_root_index"] == metadata["scan_root_index"]
+        assert authority["scan_root_path"] == metadata["scan_root_path"]
+        assert authority["source_path"] == item.source_path
+        assert authority["protected_ancestors"] == list(directory_ancestors_to_scan_root(
+            item.source_path,
+            metadata["scan_root_path"],
+        ))
+        assert authority["protected_ancestors"][-1] == metadata["scan_root_path"]
+        assert authority["protected_ancestors"][0] == str(Path(item.source_path).parent)
+        assert authority["group_provenance_id"] == metadata["group_provenance_id"]
+        assert authority["group_decision_fingerprint"] == metadata["group_decision_fingerprint"]
+        assert authority["preview_source_snapshot_digest"] == preview["source_snapshot_digest"]
+        assert authority["preview_db_lineage_digest"] == preview["db_lineage_digest"]
+
+
+def test_historical_generate_modes_do_not_persist_recursive_protection_authority(service_env):
+    scan_id = 914
+    _create_recursive_fixture(service_env, scan_id=scan_id)
+    service = service_env["service"]
+
+    for mode in ("weighted", "balanced_by_bytes"):
+        config = {"schema_version": 1, "selection_mode": mode, "factors": {}}
+        preview = service.get_dedupe_preview(scan_id, scorer_config=config)
+        result = service.create_advanced_dedupe_plan(
+            scan_id,
+            scorer_config=config,
+            expected_preview_digest=preview["preview_digest"],
+        )
+        items = _plan_items(service, result["id"])
+        assert items
+        for item in items:
+            metadata = json.loads(item.metadata_json)
+            assert "recursive_protection" not in metadata
