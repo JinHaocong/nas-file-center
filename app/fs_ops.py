@@ -160,6 +160,16 @@ def _normalize_dir_fd(dfd: int | None) -> int | None:
     return dfd
 
 
+def _cleanup_probe_name(path: str, *, dir_fd: int | None = None) -> bool:
+    try:
+        os.unlink(path, dir_fd=dir_fd)
+        return True
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+
+
 def probe_existing_noreplace_capability_at(dir_fd: int, entry_name: str) -> bool | None:
     """Probe native NOREPLACE support without mutating the candidate binding.
 
@@ -217,11 +227,12 @@ def _probe_rename_noreplace_supported(
     """
     Probes whether the filesystem at target directory or dir_fd supports atomic RENAME_NOREPLACE.
     Uses a valid, existing disposable temporary file to exercise the filesystem's handling
-    of the RENAME_NOREPLACE flag.
+    of the RENAME_NOREPLACE flag. A positive result is granted only after both disposable
+    probe names are confirmed cleaned up; unresolved cleanup fails closed as None.
     Returns:
-      True:  Filesystem supports RENAME_NOREPLACE (e.g. probe rename returned 0).
+      True:  Filesystem supports RENAME_NOREPLACE and probe cleanup completed.
       False: Filesystem rejects RENAME_NOREPLACE capability (e.g. returned EINVAL/ENOSYS/EOPNOTSUPP on existing source).
-      None:  Capability could not be safely established (fails closed).
+      None:  Capability or cleanup could not be safely established (fails closed).
     """
     if dir_fd is not None and _RENAME_AT_IMPL is not None:
         dfd_norm = _normalize_dir_fd(dir_fd)
@@ -241,6 +252,7 @@ def _probe_rename_noreplace_supported(
         except Exception:
             return None
 
+        capability: bool | None = None
         try:
             res = _RENAME_AT_IMPL(
                 raw_fd,
@@ -249,45 +261,8 @@ def _probe_rename_noreplace_supported(
                 os.fsencode(probe_dst_name),
             )
             if res == 0:
-                return True
-            perr = ctypes.get_errno()
-            if perr in (
-                errno.EINVAL,
-                errno.ENOSYS,
-                errno.EOPNOTSUPP,
-                getattr(errno, "ENOTSUP", errno.EOPNOTSUPP),
-            ):
-                return False
-            return None
-        finally:
-            try:
-                os.unlink(probe_src_name, dir_fd=dfd_norm)
-            except OSError:
-                pass
-            try:
-                os.unlink(probe_dst_name, dir_fd=dfd_norm)
-            except OSError:
-                pass
-
-    path = target if target is not None else dir_path
-    if path is not None and _RENAME_IMPL is not None:
-        try:
-            parent = os.path.dirname(os.fspath(path)) or "."
-            token = os.urandom(8).hex()
-            probe_src = os.path.join(parent, f".__probe_noreplace_src_{token}")
-            probe_dst = os.path.join(parent, f".__probe_noreplace_dst_{token}"
-            )
-
-            try:
-                fd = os.open(probe_src, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-                os.close(fd)
-            except Exception:
-                return None
-
-            try:
-                res = _RENAME_IMPL(os.fsencode(probe_src), os.fsencode(probe_dst))
-                if res == 0:
-                    return True
+                capability = True
+            else:
                 perr = ctypes.get_errno()
                 if perr in (
                     errno.EINVAL,
@@ -295,17 +270,50 @@ def _probe_rename_noreplace_supported(
                     errno.EOPNOTSUPP,
                     getattr(errno, "ENOTSUP", errno.EOPNOTSUPP),
                 ):
-                    return False
+                    capability = False
+        finally:
+            src_clean = _cleanup_probe_name(probe_src_name, dir_fd=dfd_norm)
+            dst_clean = _cleanup_probe_name(probe_dst_name, dir_fd=dfd_norm)
+
+        if not (src_clean and dst_clean):
+            return None
+        return capability
+
+    path = target if target is not None else dir_path
+    if path is not None and _RENAME_IMPL is not None:
+        try:
+            parent = os.path.dirname(os.fspath(path)) or "."
+            token = os.urandom(8).hex()
+            probe_src = os.path.join(parent, f".__probe_noreplace_src_{token}")
+            probe_dst = os.path.join(parent, f".__probe_noreplace_dst_{token}")
+
+            try:
+                fd = os.open(probe_src, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                os.close(fd)
+            except Exception:
                 return None
+
+            capability: bool | None = None
+            try:
+                res = _RENAME_IMPL(os.fsencode(probe_src), os.fsencode(probe_dst))
+                if res == 0:
+                    capability = True
+                else:
+                    perr = ctypes.get_errno()
+                    if perr in (
+                        errno.EINVAL,
+                        errno.ENOSYS,
+                        errno.EOPNOTSUPP,
+                        getattr(errno, "ENOTSUP", errno.EOPNOTSUPP),
+                    ):
+                        capability = False
             finally:
-                try:
-                    os.unlink(probe_src)
-                except OSError:
-                    pass
-                try:
-                    os.unlink(probe_dst)
-                except OSError:
-                    pass
+                src_clean = _cleanup_probe_name(probe_src)
+                dst_clean = _cleanup_probe_name(probe_dst)
+
+            if not (src_clean and dst_clean):
+                return None
+            return capability
         except Exception:
             return None
 
