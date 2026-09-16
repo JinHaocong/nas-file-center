@@ -213,6 +213,19 @@ class WorkflowCompiler:
                         "candidate_ids": unknown_ids,
                     },
                 )
+            unsupported_ids = [
+                candidate_id
+                for candidate_id in selected_candidate_ids
+                if decision_by_id[candidate_id].capability_reason
+                == "UTILITY_MOVE_UNSUPPORTED_FILESYSTEM"
+            ]
+            if unsupported_ids:
+                raise WorkflowValidationError(
+                    "Utility MOVE is unsupported on this filesystem",
+                    code="UTILITY_MOVE_UNSUPPORTED_FILESYSTEM",
+                    details={"candidate_ids": unsupported_ids},
+                    status_code=422,
+                )
             not_ready_ids = [
                 candidate_id
                 for candidate_id in selected_candidate_ids
