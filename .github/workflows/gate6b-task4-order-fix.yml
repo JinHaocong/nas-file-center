@@ -1,0 +1,57 @@
+name: Gate6-B Task4 Order Fix
+
+on:
+  push:
+    branches:
+      - v0.3.6-gate6b-utility-recursive-dirbal
+
+permissions:
+  contents: write
+
+jobs:
+  apply-order-fix:
+    if: "${{ github.event.head_commit.message == 'chore(gate6b): apply task4 order fix' }}"
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply exact order fix
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("app/service.py")
+          source = path.read_text(encoding="utf-8")
+          old = (
+              '                it["metadata_json"] = json.dumps(\n'
+              '                    recursive_meta,\n'
+              '                    ensure_ascii=False,\n'
+              '                    sort_keys=True,\n'
+              '                )\n'
+          )
+          new = (
+              '                it["metadata_json"] = json.dumps(\n'
+              '                    recursive_meta,\n'
+              '                    ensure_ascii=False,\n'
+              '                )\n'
+          )
+          count = source.count(old)
+          if count != 1:
+              raise SystemExit(f"Task4 order-fix anchor count must be 1, got {count}")
+          path.write_text(source.replace(old, new, 1), encoding="utf-8")
+          PY
+
+      - name: Remove one-time workflow
+        run: rm .github/workflows/gate6b-task4-order-fix.yml
+
+      - name: Commit fix
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/service.py .github/workflows/gate6b-task4-order-fix.yml
+          git diff --cached --check
+          git commit -m "fix(gate6b): preserve recursive freeze ancestor order"
+          git push origin HEAD:v0.3.6-gate6b-utility-recursive-dirbal
