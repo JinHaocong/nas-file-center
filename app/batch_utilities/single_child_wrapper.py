@@ -13,6 +13,7 @@ from app.batch_utilities.errors import (
     BatchUtilityCrossRootError,
     BatchUtilityInvalidConfigError,
     BatchUtilityLimitExceededError,
+    BatchUtilityPreviewChangedError,
     BatchUtilityScopeNotFoundError,
     BatchUtilitySymlinkBlockedError,
 )
@@ -389,6 +390,168 @@ def _entry_exists_at(scope_fd: int, entry_name: str, target_path: str) -> bool:
         ) from exc
 
 
+def _identity_row(name: str, st: os.stat_result) -> tuple[str, int, int, int]:
+    return (name, int(st.st_dev), int(st.st_ino), stat.S_IFMT(st.st_mode))
+
+
+def _snapshot_entries(
+    entries: list[os.DirEntry[str]],
+    *,
+    display_parent: str,
+) -> tuple[tuple[tuple[str, int, int, int], ...], dict[str, os.stat_result]]:
+    rows: list[tuple[str, int, int, int]] = []
+    stats_by_name: dict[str, os.stat_result] = {}
+    for entry in entries:
+        display_path = os.path.join(display_parent, entry.name)
+        try:
+            entry_st = entry.stat(follow_symlinks=False)
+        except OSError as exc:
+            raise BatchUtilityInvalidConfigError(
+                f"Failed to stat utility entry '{display_path}': {exc}",
+                details={"path": display_path, "errno": getattr(exc, "errno", None)},
+            ) from exc
+        rows.append(_identity_row(entry.name, entry_st))
+        stats_by_name[entry.name] = entry_st
+    rows.sort()
+    return tuple(rows), stats_by_name
+
+
+def _scan_identity_rows(dir_fd: int, *, display_parent: str) -> tuple[tuple[str, int, int, int], ...]:
+    try:
+        with os.scandir(dir_fd) as iterator:
+            entries = sorted(iterator, key=lambda entry: entry.name)
+    except OSError as exc:
+        raise BatchUtilityPreviewChangedError(
+            "UTILITY_DISCOVERY_CHANGED: Utility directory membership changed during discovery",
+            details={
+                "error": "UTILITY_DISCOVERY_CHANGED",
+                "path": display_parent,
+                "errno": getattr(exc, "errno", None),
+            },
+        ) from exc
+
+    try:
+        rows, _stats_by_name = _snapshot_entries(entries, display_parent=display_parent)
+    except BatchUtilityInvalidConfigError as exc:
+        raise BatchUtilityPreviewChangedError(
+            "UTILITY_DISCOVERY_CHANGED: Utility directory membership changed during discovery",
+            details={
+                "error": "UTILITY_DISCOVERY_CHANGED",
+                "path": display_parent,
+                "cause": exc.details,
+            },
+        ) from exc
+    return rows
+
+
+def _verify_discovery_snapshot(
+    *,
+    scope_path: str,
+    authoritative_root: str,
+    expected_scope_device: int,
+    expected_scope_inode: int,
+    expected_scope_rows: tuple[tuple[str, int, int, int], ...],
+    wrapper_child_rows: dict[str, tuple[tuple[str, int, int, int], ...]],
+) -> None:
+    _scope, _root, verify_scope_fd, verify_scope_st = _open_scope_fd(scope_path, authoritative_root)
+    try:
+        if (
+            int(verify_scope_st.st_dev) != int(expected_scope_device)
+            or int(verify_scope_st.st_ino) != int(expected_scope_inode)
+        ):
+            raise BatchUtilityPreviewChangedError(
+                "UTILITY_SCOPE_IDENTITY_CHANGED: Utility scope physical identity changed during discovery",
+                details={
+                    "error": "UTILITY_SCOPE_IDENTITY_CHANGED",
+                    "scope_path": scope_path,
+                    "expected_device": expected_scope_device,
+                    "expected_inode": expected_scope_inode,
+                    "current_device": int(verify_scope_st.st_dev),
+                    "current_inode": int(verify_scope_st.st_ino),
+                },
+            )
+
+        current_scope_rows = _scan_identity_rows(verify_scope_fd, display_parent=scope_path)
+        if current_scope_rows != expected_scope_rows:
+            expected_by_name = {row[0]: row for row in expected_scope_rows}
+            current_by_name = {row[0]: row for row in current_scope_rows}
+            changed_wrapper = next(
+                (
+                    name
+                    for name in sorted(wrapper_child_rows)
+                    if expected_by_name.get(name) != current_by_name.get(name)
+                ),
+                None,
+            )
+            if changed_wrapper is not None:
+                raise BatchUtilityPreviewChangedError(
+                    f"WRAPPER_IDENTITY_CHANGED: Wrapper '{os.path.join(scope_path, changed_wrapper)}' physical identity changed",
+                    details={
+                        "error": "WRAPPER_IDENTITY_CHANGED",
+                        "wrapper_path": os.path.join(scope_path, changed_wrapper),
+                        "expected_identity": expected_by_name.get(changed_wrapper),
+                        "current_identity": current_by_name.get(changed_wrapper),
+                    },
+                )
+            raise BatchUtilityPreviewChangedError(
+                "UTILITY_SCOPE_MEMBERSHIP_CHANGED: Utility scope membership changed during discovery",
+                details={
+                    "error": "UTILITY_SCOPE_MEMBERSHIP_CHANGED",
+                    "scope_path": scope_path,
+                    "expected_rows": expected_scope_rows,
+                    "current_rows": current_scope_rows,
+                },
+            )
+
+        scope_identity_by_name = {row[0]: row for row in expected_scope_rows}
+        flags = _directory_open_flags()
+        for wrapper_name, expected_children in sorted(wrapper_child_rows.items()):
+            wrapper_path = os.path.join(scope_path, wrapper_name)
+            expected_wrapper = scope_identity_by_name.get(wrapper_name)
+            try:
+                verify_wrapper_fd = os.open(wrapper_name, flags, dir_fd=verify_scope_fd)
+            except OSError as exc:
+                raise BatchUtilityPreviewChangedError(
+                    f"WRAPPER_IDENTITY_CHANGED: Wrapper '{wrapper_path}' binding changed during discovery",
+                    details={
+                        "error": "WRAPPER_IDENTITY_CHANGED",
+                        "wrapper_path": wrapper_path,
+                        "expected_identity": expected_wrapper,
+                        "errno": getattr(exc, "errno", None),
+                    },
+                ) from exc
+
+            try:
+                verify_wrapper_st = os.fstat(verify_wrapper_fd)
+                current_wrapper = _identity_row(wrapper_name, verify_wrapper_st)
+                if expected_wrapper != current_wrapper:
+                    raise BatchUtilityPreviewChangedError(
+                        f"WRAPPER_IDENTITY_CHANGED: Wrapper '{wrapper_path}' physical identity changed",
+                        details={
+                            "error": "WRAPPER_IDENTITY_CHANGED",
+                            "wrapper_path": wrapper_path,
+                            "expected_identity": expected_wrapper,
+                            "current_identity": current_wrapper,
+                        },
+                    )
+
+                current_children = _scan_identity_rows(verify_wrapper_fd, display_parent=wrapper_path)
+                if current_children != expected_children:
+                    raise BatchUtilityPreviewChangedError(
+                        f"CHILD_IDENTITY_CHANGED: Wrapper '{wrapper_path}' child membership changed",
+                        details={
+                            "error": "CHILD_IDENTITY_CHANGED",
+                            "wrapper_path": wrapper_path,
+                            "expected_rows": expected_children,
+                            "current_rows": current_children,
+                        },
+                    )
+            finally:
+                os.close(verify_wrapper_fd)
+    finally:
+        os.close(verify_scope_fd)
+
+
 def _decision(
     *,
     wrapper_path: str,
@@ -432,14 +595,16 @@ def discover_single_child_wrappers(
     The authoritative root and optional scope subpath are acquired component by
     component with descriptor-bound no-follow opens. Wrapper enumeration/open is
     then relative to the fixed scope descriptor, so parent-component ABA cannot
-    redirect discovery outside the managed authority boundary.
+    redirect discovery outside the managed authority boundary. A final repeated
+    lexical snapshot verification binds current scope/wrapper/child membership
+    before the discovery result can become authoritative.
     """
     if limit <= 0:
         raise BatchUtilityInvalidConfigError("Discovery limit must be positive")
 
     decisions: list[SingleChildWrapperDecision] = []
 
-    with _acquire_scope_dir(scope_path, authoritative_root) as (scope, _root, scope_fd, _scope_st):
+    with _acquire_scope_dir(scope_path, authoritative_root) as (scope, root, scope_fd, scope_st):
         try:
             with os.scandir(scope_fd) as iterator:
                 scope_entries = sorted(iterator, key=lambda entry: entry.name)
@@ -449,15 +614,12 @@ def discover_single_child_wrappers(
                 details={"scope_path": scope, "errno": getattr(exc, "errno", None)},
             ) from exc
 
+        scope_rows, scope_stats = _snapshot_entries(scope_entries, display_parent=scope)
+        wrapper_child_rows: dict[str, tuple[tuple[str, int, int, int], ...]] = {}
+
         for entry in scope_entries:
             wrapper_path = os.path.join(scope, entry.name)
-            try:
-                wrapper_st = entry.stat(follow_symlinks=False)
-            except OSError as exc:
-                raise BatchUtilityInvalidConfigError(
-                    f"Failed to stat utility scope entry '{wrapper_path}': {exc}",
-                    details={"path": wrapper_path, "errno": getattr(exc, "errno", None)},
-                ) from exc
+            wrapper_st = scope_stats[entry.name]
 
             if stat.S_ISLNK(wrapper_st.st_mode):
                 decisions.append(
@@ -483,6 +645,9 @@ def discover_single_child_wrappers(
                             details={"wrapper_path": wrapper_path, "errno": getattr(exc, "errno", None)},
                         ) from exc
 
+                    child_rows, child_stats = _snapshot_entries(children, display_parent=wrapper_path)
+                    wrapper_child_rows[entry.name] = child_rows
+
                     if len(children) != 1:
                         decisions.append(
                             _decision(
@@ -495,13 +660,7 @@ def discover_single_child_wrappers(
                         child = children[0]
                         child_path = os.path.join(wrapper_path, child.name)
                         target_path = os.path.join(scope, child.name)
-                        try:
-                            child_st = child.stat(follow_symlinks=False)
-                        except OSError as exc:
-                            raise BatchUtilityInvalidConfigError(
-                                f"Failed to stat wrapper child '{child_path}': {exc}",
-                                details={"child_path": child_path, "errno": getattr(exc, "errno", None)},
-                            ) from exc
+                        child_st = child_stats[child.name]
 
                         if stat.S_ISLNK(child_st.st_mode):
                             state = "CHILD_SYMLINK"
@@ -530,6 +689,21 @@ def discover_single_child_wrappers(
                     "Single-child wrapper discovery limit exceeded",
                     details={"limit": limit},
                 )
+
+        # A fixed descriptor can continue to see an object that has already
+        # been renamed out of the current lexical tree. Reacquire the scope and
+        # verify the complete direct scope/wrapper membership twice before the
+        # discovery result is accepted. Persistent wrapper/child replacement or
+        # detach therefore fails closed as PREVIEW_CHANGED.
+        for _ in range(2):
+            _verify_discovery_snapshot(
+                scope_path=scope,
+                authoritative_root=root,
+                expected_scope_device=int(scope_st.st_dev),
+                expected_scope_inode=int(scope_st.st_ino),
+                expected_scope_rows=scope_rows,
+                wrapper_child_rows=wrapper_child_rows,
+            )
 
         ready_targets = Counter(
             os.path.normpath(d.target_path)
