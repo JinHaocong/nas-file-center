@@ -327,29 +327,22 @@ def _identity_rows_still_bound(
         if directory_identities.get(".") != (root_device, root_inode):
             return False
 
-        for row in identity_rows:
-            relative = str(row.get("path", ""))
-            object_type = row.get("object_type")
-            expected_device = int(row["device"])
-            expected_inode = int(row["inode"])
-
-            if relative == ".":
-                if object_type != "directory":
-                    return False
-                continue
-            if not relative or os.path.isabs(relative):
-                return False
-
-            parts = Path(relative).parts
-            if not parts or any(part in ("", ".", "..") for part in parts):
-                return False
-
+        def row_still_bound(
+            parts: Sequence[str],
+            object_type: Any,
+            expected_device: int,
+            expected_inode: int,
+        ) -> bool:
             current_fd = os.dup(root_fd)
             current_relative = "."
             try:
                 for part in parts[:-1]:
                     next_fd = os.open(part, dir_flags, dir_fd=current_fd)
-                    next_st = os.fstat(next_fd)
+                    try:
+                        next_st = os.fstat(next_fd)
+                    except OSError:
+                        os.close(next_fd)
+                        return False
                     next_relative = part if current_relative == "." else f"{current_relative}/{part}"
                     expected_parent = directory_identities.get(next_relative)
                     os.close(current_fd)
@@ -384,11 +377,10 @@ def _identity_rows_still_bound(
                 else:
                     return False
 
-                if (
-                    int(leaf_st.st_dev) != expected_device
-                    or int(leaf_st.st_ino) != expected_inode
-                ):
-                    return False
+                return (
+                    int(leaf_st.st_dev) == expected_device
+                    and int(leaf_st.st_ino) == expected_inode
+                )
             except OSError:
                 return False
             finally:
@@ -396,6 +388,32 @@ def _identity_rows_still_bound(
                     os.close(current_fd)
                 except OSError:
                     pass
+
+        for row in identity_rows:
+            relative = str(row.get("path", ""))
+            object_type = row.get("object_type")
+            expected_device = int(row["device"])
+            expected_inode = int(row["inode"])
+
+            if relative == ".":
+                if object_type != "directory":
+                    return False
+                continue
+            if not relative or os.path.isabs(relative):
+                return False
+
+            parts = Path(relative).parts
+            if not parts or any(part in ("", ".", "..") for part in parts):
+                return False
+
+            if not row_still_bound(parts, object_type, expected_device, expected_inode):
+                return False
+            # A row may detach while its first lexical rebind is in progress.
+            # Repeat the complete root-relative binding check so a persistent
+            # rename/replacement during that first pass fails closed instead of
+            # being accepted through a stale parent directory fd.
+            if not row_still_bound(parts, object_type, expected_device, expected_inode):
+                return False
         return True
     finally:
         os.close(root_fd)
