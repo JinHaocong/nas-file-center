@@ -1,0 +1,105 @@
+name: Gate6-B Task4 Freeze Patch
+
+on:
+  push:
+    branches:
+      - v0.3.6-gate6b-utility-recursive-dirbal
+
+permissions:
+  contents: write
+
+jobs:
+  apply-exact-service-patch:
+    if: github.event.head_commit.message == 'chore(gate6b): apply task4 freeze patch'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply exact Task4 freeze patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("app/service.py")
+          source = path.read_text(encoding="utf-8")
+
+          old = '''        for it in items_data:
+              item_id = it["id"]
+              src_p = Path(it["source_path"])
+              upd: dict[str, Any] = {}
+  
+              if plan_kind in {"quarantine-bulk-restore", "quarantine-bulk-purge"}:
+          '''
+          new = '''        for it in items_data:
+              item_id = it["id"]
+              src_p = Path(it["source_path"])
+              upd: dict[str, Any] = {}
+  
+              if (
+                  plan_metadata.get("selection_mode") == "recursive_directory_balanced_by_bytes"
+                  and it["operation"] == "quarantine"
+              ):
+                  from app.planning.recursive_protection_authority import (
+                      RecursiveProtectionAuthorityError,
+                      build_frozen_recursive_protection,
+                  )
+  
+                  try:
+                      frozen_recursive_protection = build_frozen_recursive_protection(
+                          it["metadata_json"] or "{}",
+                          expected_source_path=it["source_path"],
+                          allowed_roots=self.settings.allowed_roots,
+                          quarantine_root=self.settings.quarantine_root,
+                      )
+                  except RecursiveProtectionAuthorityError as exc:
+                      raise StateConflictError(str(exc)) from exc
+  
+                  if frozen_recursive_protection is None:
+                      raise StateConflictError(
+                          "RECURSIVE_PROTECTION_AUTHORITY_MISSING: "
+                          "recursive dedupe quarantine item has no recursive_protection authority"
+                      )
+  
+                  recursive_meta = json.loads(it["metadata_json"] or "{}")
+                  recursive_meta["frozen_recursive_protection"] = frozen_recursive_protection
+                  it["metadata_json"] = json.dumps(
+                      recursive_meta,
+                      ensure_ascii=False,
+                      sort_keys=True,
+                  )
+  
+              if plan_kind in {"quarantine-bulk-restore", "quarantine-bulk-purge"}:
+          '''
+
+          # The strings above intentionally use two extra leading spaces on inner
+          # lines so YAML block indentation can be stripped predictably here.
+          old = old.replace("          ", "        ", 1)
+          new = new.replace("          ", "        ", 1)
+          # Normalize the remaining marker indentation exactly as it appears in source.
+          old = old.replace("              ", "            ")
+          new = new.replace("              ", "            ")
+
+          count = source.count(old)
+          if count != 1:
+              raise SystemExit(f"Task4 service.py anchor count must be 1, got {count}")
+
+          updated = source.replace(old, new, 1)
+          path.write_text(updated, encoding="utf-8")
+          PY
+
+      - name: Remove one-time patch workflow
+        run: rm .github/workflows/gate6b-task4-freeze-patch.yml
+
+      - name: Commit exact patch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/service.py .github/workflows/gate6b-task4-freeze-patch.yml
+          git diff --cached --check
+          git diff --cached --stat
+          git commit -m "feat(gate6b): seal recursive protection at freeze"
+          git push origin HEAD:v0.3.6-gate6b-utility-recursive-dirbal
