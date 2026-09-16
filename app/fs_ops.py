@@ -161,12 +161,14 @@ def _normalize_dir_fd(dfd: int | None) -> int | None:
 
 
 def probe_existing_noreplace_capability_at(dir_fd: int, entry_name: str) -> bool | None:
-    """Probe native NOREPLACE support without changing the directory namespace.
+    """Probe native NOREPLACE support without mutating the candidate binding.
 
-    The same existing binding is supplied as both source and destination. Native
-    strict no-replace implementations reject that request with EEXIST/ENOTEMPTY;
-    filesystems that do not support the flag reject it with an unsupported errno.
-    Any ambiguous result fails closed as None.
+    A same-entry call is used only as a non-destructive first signal. EEXIST,
+    ENOTEMPTY, or an unchanged successful no-op are not sufficient proof of
+    real cross-name MOVE support because COMPAT filesystems may special-case
+    source == destination. Any such positive-looking result must therefore be
+    confirmed by the isolated disposable cross-name probe before mutation
+    authority is granted. Ambiguous results fail closed as None.
     """
     if _RENAME_AT_IMPL is None:
         return False
@@ -190,11 +192,13 @@ def probe_existing_noreplace_capability_at(dir_fd: int, entry_name: str) -> bool
             return None
         before_identity = (before.st_dev, before.st_ino, stat.S_IFMT(before.st_mode))
         after_identity = (after.st_dev, after.st_ino, stat.S_IFMT(after.st_mode))
-        return True if after_identity == before_identity else None
+        if after_identity != before_identity:
+            return None
+        return _probe_rename_noreplace_supported(dir_fd=dir_fd)
 
     err = ctypes.get_errno()
     if err in (errno.EEXIST, errno.ENOTEMPTY):
-        return True
+        return _probe_rename_noreplace_supported(dir_fd=dir_fd)
     if err in (
         errno.ENOSYS,
         errno.EOPNOTSUPP,
@@ -271,7 +275,8 @@ def _probe_rename_noreplace_supported(
             parent = os.path.dirname(os.fspath(path)) or "."
             token = os.urandom(8).hex()
             probe_src = os.path.join(parent, f".__probe_noreplace_src_{token}")
-            probe_dst = os.path.join(parent, f".__probe_noreplace_dst_{token}")
+            probe_dst = os.path.join(parent, f".__probe_noreplace_dst_{token}"
+            )
 
             try:
                 fd = os.open(probe_src, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
