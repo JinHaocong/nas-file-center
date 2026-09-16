@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 
+import app.batch_utilities.single_child_wrapper as single_child_wrapper_module
 from app.config import Settings
 from app.models import BatchPlan, BatchPlanItem, IndexRoot
 from app.service import FileCenterService
@@ -219,6 +220,55 @@ def test_generate_wrapper_detach_during_recompile_is_preview_changed_with_zero_d
     assert _plan_count(env) == 0
     assert (detached / "C1").is_dir()
     assert (wrapper / "C1").is_dir()
+
+
+def test_generate_child_replacement_during_recompile_is_preview_changed_with_zero_draft(
+    utility_service_env,
+    monkeypatch,
+):
+    env = utility_service_env
+    root = env["root"]
+    wrapper = root / "B1"
+    child = wrapper / "C1"
+    child.mkdir(parents=True)
+
+    preview = _preview(env)
+    candidate = _candidate(preview, "B1")
+    assert _plan_count(env) == 0
+
+    detached = env["tmp_path"] / "detached-C1"
+    real_entry_exists_at = single_child_wrapper_module._entry_exists_at
+    swapped = False
+
+    def swap_child_before_generate_target_check(scope_fd, entry_name, target_path):
+        nonlocal swapped
+        if not swapped:
+            swapped = True
+            child.rename(detached)
+            child.mkdir()
+        return real_entry_exists_at(scope_fd, entry_name, target_path)
+
+    monkeypatch.setattr(
+        single_child_wrapper_module,
+        "_entry_exists_at",
+        swap_child_before_generate_target_check,
+    )
+
+    with pytest.raises(WorkflowDigestMismatchError) as exc:
+        env["service"].workflow_service.generate_plan(
+            None,
+            env["workflow_id"],
+            WorkflowGeneratePlanRequest(
+                expected_compile_digest=preview["compile_digest"],
+                selected_candidate_ids=[candidate["candidate_id"]],
+            ),
+        )
+
+    assert swapped is True
+    assert exc.value.code == "PREVIEW_CHANGED"
+    assert _plan_count(env) == 0
+    assert detached.is_dir()
+    assert child.is_dir()
 
 
 def test_candidate_id_from_another_preview_is_rejected(utility_service_env):
