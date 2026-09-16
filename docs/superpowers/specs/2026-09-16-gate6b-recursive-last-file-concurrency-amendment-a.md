@@ -1,7 +1,8 @@
 # Gate6-B Architecture Amendment A — Recursive Last-File Concurrency Contract
 
-**Status:** DESIGN APPROVED / PENDING FINAL SPEC REVIEW  
+**Status:** APPROVED / FROZEN  
 **Design approval date:** 2026-09-16  
+**Final spec approval date:** 2026-09-16  
 **Applies to:** Gate6-B Architecture Freeze `2026-09-16-gate6b-utility-recursive-dirbal-architecture-freeze.md`  
 **Canonical branch:** `v0.3.6-gate6b-utility-recursive-dirbal`  
 **Reason:** Repeated adversarial RED tests proved that finite user-space revalidation cannot provide an atomic recursive-tree snapshot against an uncooperative external writer that may mutate the tree between syscalls.
@@ -23,7 +24,7 @@ It does **not** reopen or change:
 - the prohibition on a second executor / Worker;
 - `ctime = diagnostic-only / non-authoritative` semantics.
 
-After final approval, this amendment takes precedence over conflicting interpretations of Sections 4, 5, 6, 8, and 10 of the original Gate6-B Architecture Freeze. All unaffected clauses of the original Freeze remain authoritative.
+This approved amendment takes precedence over conflicting interpretations of Sections 4, 5, 6, 8, and 10 of the original Gate6-B Architecture Freeze. All unaffected clauses of the original Freeze remain authoritative.
 
 ## 2. Problem statement
 
@@ -241,7 +242,7 @@ The acceptance evidence must state the exact candidate SHA and image identity as
 Gate6-B closure now requires:
 
 ```text
-Architecture Amendment A final spec approval / re-freeze
+Architecture Amendment A APPROVED / FROZEN
 -> new post-amendment Implementation Plan
 -> Strict TDD (RED -> GREEN -> REFACTOR)
 -> focused regression
@@ -255,4 +256,4 @@ Architecture Amendment A final spec approval / re-freeze
 -> Gate6-B PASS / CLOSED
 ```
 
-Until this amendment receives final written-spec approval, no post-amendment production implementation, merge, release Docker evidence, deployment, or NAS mutation is authorized.
+This amendment is **APPROVED / FROZEN**. The next authorized stage is the post-amendment Implementation Plan. Production implementation, merge, release Docker evidence, deployment, and NAS mutation remain unauthorized until the post-amendment plan is written and implementation resumes under Strict TDD.
