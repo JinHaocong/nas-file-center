@@ -54,7 +54,7 @@ export interface WorkflowUtilityCandidate {
   wrapper_device?: number | null; wrapper_inode?: number | null; child_device?: number | null; child_inode?: number | null;
 }
 export interface WorkflowUtilitySummary {
-  action: 'single_child_wrapper_collapse'; scope_path: string; candidate_count: number; ready_count: number;
+  utility_action: 'single_child_wrapper_collapse'; scope_path: string; candidate_count: number; ready_count: number;
   candidates: WorkflowUtilityCandidate[]; selected_candidate_ids: string[];
 }
 export interface WorkflowPreviewRequest {
