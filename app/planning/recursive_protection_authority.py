@@ -38,6 +38,13 @@ class RecursiveProtectionAuthority:
     scope_digest: str
 
 
+@dataclass(frozen=True)
+class LiveRecursiveProtectionEvaluation:
+    safe: bool
+    reason: str | None
+    current_ancestors: tuple[tuple[str, recursive_protection.RecursiveProtectionSnapshot], ...]
+
+
 def _fail(message: str) -> RecursiveProtectionAuthorityError:
     return RecursiveProtectionAuthorityError(message)
 
@@ -289,3 +296,134 @@ def build_frozen_recursive_protection(
         "scope_digest": authority.scope_digest,
         "frozen_ancestors": frozen_ancestors,
     }
+
+
+def _parse_frozen_recursive_protection(
+    metadata_json: str,
+    *,
+    authority: RecursiveProtectionAuthority,
+) -> dict[str, dict[str, object]]:
+    try:
+        metadata = json.loads(metadata_json)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise _fail("metadata_json is not valid JSON") from exc
+    if not isinstance(metadata, dict):
+        raise _fail("metadata_json must decode to an object")
+
+    frozen = metadata.get("frozen_recursive_protection")
+    if not isinstance(frozen, dict):
+        raise _fail("frozen_recursive_protection must be an object")
+    if frozen.get("schema_version") != 1 or isinstance(frozen.get("schema_version"), bool):
+        raise _fail("frozen_recursive_protection.schema_version must equal 1")
+
+    scope_digest = _sha256_string(
+        frozen.get("scope_digest"),
+        field="frozen_recursive_protection.scope_digest",
+    )
+    if scope_digest != authority.scope_digest:
+        raise _fail("frozen_recursive_protection.scope_digest does not match immutable authority")
+
+    raw_ancestors = frozen.get("frozen_ancestors")
+    if not isinstance(raw_ancestors, dict):
+        raise _fail("frozen_recursive_protection.frozen_ancestors must be an object")
+    if tuple(raw_ancestors.keys()) != authority.protected_ancestors:
+        raise _fail("frozen_recursive_protection.frozen_ancestors does not match exact authority order")
+
+    parsed: dict[str, dict[str, object]] = {}
+    for ancestor in authority.protected_ancestors:
+        raw_sample = raw_ancestors.get(ancestor)
+        if not isinstance(raw_sample, dict):
+            raise _fail(f"frozen recursive sample is missing for {ancestor}")
+        parsed[ancestor] = {
+            "count": _strict_non_negative_int(
+                raw_sample.get("count"),
+                field=f"frozen_recursive_protection.frozen_ancestors[{ancestor}].count",
+            ),
+            "device": _strict_non_negative_int(
+                raw_sample.get("device"),
+                field=f"frozen_recursive_protection.frozen_ancestors[{ancestor}].device",
+            ),
+            "inode": _strict_non_negative_int(
+                raw_sample.get("inode"),
+                field=f"frozen_recursive_protection.frozen_ancestors[{ancestor}].inode",
+            ),
+            "tree_identity_digest": _sha256_string(
+                raw_sample.get("tree_identity_digest"),
+                field=f"frozen_recursive_protection.frozen_ancestors[{ancestor}].tree_identity_digest",
+            ),
+        }
+    return parsed
+
+
+def evaluate_live_recursive_protection(
+    metadata_json: str,
+    *,
+    expected_source_path: str,
+    allowed_roots: Sequence[Path | str],
+    quarantine_root: Path | str | None,
+) -> LiveRecursiveProtectionEvaluation:
+    """Re-evaluate frozen recursive Last-File authority against current live state.
+
+    Freeze-time counts/tree digests are evidence, not a requirement that the tree stay
+    byte-for-byte unchanged. Validate requires the immutable scope to remain intact,
+    each protected directory identity to remain bound to the frozen directory, and the
+    current descriptor-bound count to permit this one-file Quarantine.
+    """
+
+    try:
+        authority = parse_recursive_protection_authority(
+            metadata_json,
+            expected_source_path=expected_source_path,
+            allowed_roots=allowed_roots,
+            quarantine_root=quarantine_root,
+        )
+        if authority is None:
+            raise _fail("recursive_protection authority is missing")
+        frozen_ancestors = _parse_frozen_recursive_protection(
+            metadata_json,
+            authority=authority,
+        )
+    except RecursiveProtectionAuthorityError as exc:
+        return LiveRecursiveProtectionEvaluation(
+            safe=False,
+            reason=f"RECURSIVE_PROTECTION_UNSTABLE: {exc}",
+            current_ancestors=(),
+        )
+
+    current: list[tuple[str, recursive_protection.RecursiveProtectionSnapshot]] = []
+    for ancestor in authority.protected_ancestors:
+        sample = recursive_protection.snapshot_recursive_regular_files(ancestor)
+        current.append((ancestor, sample))
+        frozen_sample = frozen_ancestors[ancestor]
+        if (
+            not sample.stable
+            or sample.device is None
+            or sample.inode is None
+            or not sample.tree_identity_digest
+        ):
+            return LiveRecursiveProtectionEvaluation(
+                safe=False,
+                reason=f"RECURSIVE_PROTECTION_UNSTABLE: {ancestor}",
+                current_ancestors=tuple(current),
+            )
+        if (
+            int(sample.device) != int(frozen_sample["device"])
+            or int(sample.inode) != int(frozen_sample["inode"])
+        ):
+            return LiveRecursiveProtectionEvaluation(
+                safe=False,
+                reason=f"RECURSIVE_PROTECTION_UNSTABLE: protected directory identity changed: {ancestor}",
+                current_ancestors=tuple(current),
+            )
+        if sample.count - 1 < 1:
+            return LiveRecursiveProtectionEvaluation(
+                safe=False,
+                reason=f"RECURSIVE_PROTECT_LAST_FILE: {ancestor}",
+                current_ancestors=tuple(current),
+            )
+
+    return LiveRecursiveProtectionEvaluation(
+        safe=True,
+        reason=None,
+        current_ancestors=tuple(current),
+    )
