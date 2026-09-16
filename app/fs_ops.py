@@ -16,7 +16,11 @@ from pathlib import Path
 import stat
 import sys
 
-__all__ = ["rename_noreplace", "rename_noreplace_at"]
+__all__ = [
+    "probe_existing_noreplace_capability_at",
+    "rename_noreplace",
+    "rename_noreplace_at",
+]
 
 _AT_FDCWD = -100
 _RENAME_NOREPLACE = 1
@@ -154,6 +158,50 @@ def _normalize_dir_fd(dfd: int | None) -> int | None:
     if dfd is None or dfd in (_AT_FDCWD, -2):
         return None
     return dfd
+
+
+def probe_existing_noreplace_capability_at(dir_fd: int, entry_name: str) -> bool | None:
+    """Probe native NOREPLACE support without changing the directory namespace.
+
+    The same existing binding is supplied as both source and destination. Native
+    strict no-replace implementations reject that request with EEXIST/ENOTEMPTY;
+    filesystems that do not support the flag reject it with an unsupported errno.
+    Any ambiguous result fails closed as None.
+    """
+    if _RENAME_AT_IMPL is None:
+        return False
+
+    try:
+        before = os.stat(entry_name, dir_fd=dir_fd, follow_symlinks=False)
+    except OSError:
+        return None
+
+    ctypes.set_errno(0)
+    result = _RENAME_AT_IMPL(
+        dir_fd,
+        os.fsencode(entry_name),
+        dir_fd,
+        os.fsencode(entry_name),
+    )
+    if result == 0:
+        try:
+            after = os.stat(entry_name, dir_fd=dir_fd, follow_symlinks=False)
+        except OSError:
+            return None
+        before_identity = (before.st_dev, before.st_ino, stat.S_IFMT(before.st_mode))
+        after_identity = (after.st_dev, after.st_ino, stat.S_IFMT(after.st_mode))
+        return True if after_identity == before_identity else None
+
+    err = ctypes.get_errno()
+    if err in (errno.EEXIST, errno.ENOTEMPTY):
+        return True
+    if err in (
+        errno.ENOSYS,
+        errno.EOPNOTSUPP,
+        getattr(errno, "ENOTSUP", errno.EOPNOTSUPP),
+    ):
+        return False
+    return None
 
 
 def _probe_rename_noreplace_supported(
