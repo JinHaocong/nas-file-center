@@ -251,7 +251,7 @@ def test_recursive_freeze_rejects_unstable_ancestor_without_partial_persistence(
     monkeypatch.setattr(
         recursive_protection,
         "snapshot_recursive_regular_files",
-        lambda _path: RecursiveProtectionSnapshot(
+        lambda _path, **_kwargs: RecursiveProtectionSnapshot(
             count=0,
             stable=False,
             device=None,
@@ -399,7 +399,7 @@ def test_recursive_validate_rejects_unstable_live_protection_read(service_env, m
     monkeypatch.setattr(
         recursive_protection,
         "snapshot_recursive_regular_files",
-        lambda _path: RecursiveProtectionSnapshot(
+        lambda _path, **_kwargs: RecursiveProtectionSnapshot(
             count=0,
             stable=False,
             device=None,
