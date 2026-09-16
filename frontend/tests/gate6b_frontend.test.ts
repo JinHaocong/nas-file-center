@@ -27,6 +27,7 @@ describe('Gate6-B Utility frontend contract', () => {
     assert.match(workflowTypesSource, /root_id:\s*number/);
     assert.match(workflowTypesSource, /subpath\?:\s*string/);
     assert.match(workflowTypesSource, /utility_summary/);
+    assert.match(workflowTypesSource, /utility_action:\s*'single_child_wrapper_collapse'/);
     assert.match(workflowTypesSource, /selected_candidate_ids/);
     assert.match(workflowTypesSource, /utility-live-readonly/);
   });
