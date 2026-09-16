@@ -239,6 +239,7 @@ class WorkflowCompiler:
                 "target_path": decision.target_path,
                 "state": decision.state,
                 "selectable": decision.selectable,
+                "capability_reason": decision.capability_reason,
                 "wrapper_device": decision.wrapper_device,
                 "wrapper_inode": decision.wrapper_inode,
                 "child_device": decision.child_device,
