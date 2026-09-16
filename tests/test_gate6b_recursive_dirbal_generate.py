@@ -102,6 +102,19 @@ def _create_recursive_fixture(env, *, scan_id: int):
     return left, right, a_extra, b_extra
 
 
+def _replace_with_same_bytes_new_inode(path: Path) -> tuple[os.stat_result, os.stat_result]:
+    before = os.lstat(path)
+    replacement = path.with_name(path.name + ".replacement")
+    replacement.write_bytes(path.read_bytes())
+    replacement_stat = os.lstat(replacement)
+    assert (replacement_stat.st_dev, replacement_stat.st_ino) != (before.st_dev, before.st_ino)
+    os.replace(replacement, path)
+    after = os.lstat(path)
+    assert (after.st_dev, after.st_ino) == (replacement_stat.st_dev, replacement_stat.st_ino)
+    assert (after.st_dev, after.st_ino) != (before.st_dev, before.st_ino)
+    return before, after
+
+
 def _plan_counts(service: FileCenterService):
     with service.SessionLocal() as session:
         return (
@@ -118,12 +131,7 @@ def test_recursive_generate_live_identity_aba_returns_preview_changed_and_zero_d
     preview = service.get_dedupe_preview(scan_id, scorer_config=config)
     before_counts = _plan_counts(service)
 
-    old_stat = os.lstat(left)
-    payload = left.read_bytes()
-    left.unlink()
-    left.write_bytes(payload)
-    new_stat = os.lstat(left)
-    assert (old_stat.st_dev, old_stat.st_ino) != (new_stat.st_dev, new_stat.st_ino)
+    _replace_with_same_bytes_new_inode(left)
 
     with pytest.raises(DedupePreviewChangedError):
         service.create_advanced_dedupe_plan(
