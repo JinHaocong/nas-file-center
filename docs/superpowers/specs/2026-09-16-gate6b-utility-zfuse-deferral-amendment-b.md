@@ -1,14 +1,16 @@
 # Gate6-B Architecture Amendment B — Utility zfuse Deferral + Empty-Wrapper Removal Authority
 
-**Status:** APPROVED / FROZEN  
-**Approval date:** 2026-09-16  
+**Status:** PROPOSED / AWAITING WRITTEN SPEC REVIEW  
+**Design-direction approval:** 2026-09-16  
 **Parent Freeze:** `2026-09-16-gate6b-utility-recursive-dirbal-architecture-freeze.md`  
 **Amendment A:** `2026-09-16-gate6b-recursive-last-file-concurrency-amendment-a.md`  
 **Baseline reviewed candidate before this amendment:** `fb120bfe2a760c1294c0ed650f95988dac1410ce`  
 **Canonical branch:** `v0.3.6-gate6b-utility-recursive-dirbal`  
 **Target platform:** 极空间 NAS / Linux amd64 / Docker / `zfuse.zfsv3`  
-**Authority:** User-approved architecture amendment after real-NAS acceptance blocker  
-**Implementation status:** NOT AUTHORIZED BY THIS DOCUMENT ALONE — implementation requires a post-amendment implementation plan and renewed review/validation chain.
+**Authority:** User-approved architecture direction after real-NAS acceptance blocker; written spec still requires explicit user review.  
+**Implementation status:** NOT AUTHORIZED — implementation requires written-spec approval, a post-amendment implementation plan, and a renewed review/validation chain.
+
+**Precedence:** After written-spec approval, Amendment B takes precedence over conflicting Utility execution/closure interpretations in the parent Gate6-B Freeze, especially the requirement that the target `zfuse.zfsv3` platform successfully execute Utility MOVE inside Gate6-B. Amendment A remains authoritative for Recursive Last-File semantics and is not modified by Amendment B.
 
 ---
 
@@ -83,7 +85,7 @@ Therefore Gate6-B MUST NOT silently weaken `NEVER overwrite`, MUST NOT introduce
 
 ## 3. Frozen decision A — defer COMPAT/zfuse Utility mutation
 
-For Gate6-B, Single-Child Wrapper Collapse execution support is frozen as:
+After written-spec approval, Gate6-B Single-Child Wrapper Collapse execution support is frozen as:
 
 ```text
 NATIVE_ATOMIC_NOREPLACE filesystem
@@ -91,38 +93,52 @@ NATIVE_ATOMIC_NOREPLACE filesystem
 
 COMPAT_TRANSACTIONAL / no native RENAME_NOREPLACE filesystem
     -> Utility filesystem mutation is NOT supported in Gate6-B.
-    -> fail closed before filesystem mutation.
+    -> fail closed during read-only Preview capability resolution.
+    -> candidate is not READY and is not selectable.
+    -> Generate cannot persist a Draft for that candidate.
     -> zero MOVE, zero RMDIR, zero OperationJournal mutation.
 ```
 
 This amendment intentionally narrows the Gate6-B delivery boundary on COMPAT filesystems rather than weakening target-exclusion safety.
 
-### 3.1 Truthful capability surface
+### 3.1 Truthful capability surface — exact V1 contract
 
-A COMPAT/zfuse Utility scope MUST NOT be presented as fully executable and then fail only after Worker mutation starts.
+For Utility Preview, the server MUST resolve whether the authoritative Utility scope supports the strict native no-replace MOVE primitive required by Gate6-B.
 
-Before a filesystem-mutating Utility Plan becomes executable, the system must resolve the mutation capability for the authoritative Utility scope.
-
-For Gate6-B on COMPAT filesystems, the product must expose an explicit unsupported/fail-closed state such as:
+For a valid wrapper topology on a COMPAT/zfuse scope, Preview MUST return the candidate as an explicit non-ready state:
 
 ```text
-UTILITY_MOVE_UNSUPPORTED_FILESYSTEM
+state      = UNSUPPORTED_FILESYSTEM
+selectable = false
+reason     = UTILITY_MOVE_UNSUPPORTED_FILESYSTEM
 ```
 
-or another stable, documented equivalent.
+Equivalent field naming is allowed only if the semantics and stable reason code remain unambiguous. The stable semantic reason is `UTILITY_MOVE_UNSUPPORTED_FILESYSTEM`.
 
 Required semantics:
 
 - Preview remains read-only.
-- Discovery may still explain the wrapper candidate topology.
-- The UI/API must make the COMPAT mutation limitation explicit.
-- Generate/Freeze/Validate/Execute MUST NOT create false mutation authority for an unsupported COMPAT Utility MOVE.
+- Discovery still explains the valid wrapper topology (`wrapper_path`, `child_path`, `target_path`).
+- The candidate MUST NOT be reported as `READY` on COMPAT/zfuse.
+- The candidate MUST NOT appear in `selected_candidate_ids`.
+- Generate MUST reject any request attempting to select such a candidate.
+- Generate rejection persists **zero Draft**.
+- Freeze/Validate/Execute can never receive mutation authority derived from an unsupported COMPAT Utility candidate.
+- UI/API must explain that topology is valid but mutation is unavailable on this filesystem in Gate6-B.
 - No ordinary `rename()` compatibility fallback is authorized by Gate6-B.
 - No overwrite, merge, auto-rename, copy-delete, recursive migration, or second executor is authorized.
 
-The exact product stage at which the unsupported state becomes terminal may be chosen during implementation, but it MUST be no later than Validate and MUST occur before Worker filesystem mutation authority. The preferred UX is Preview/Generate-time truthfulness when capability is already knowable.
+This exact Preview-time boundary replaces the earlier looser idea of allowing the unsupported state to remain latent until Validate.
 
-### 3.2 Native behavior remains unchanged
+### 3.2 Capability resolution safety
+
+Capability detection itself MUST be read-only with respect to user data and MUST NOT leave probe residue.
+
+If native no-replace support cannot be positively established, classification fails closed as unsupported for Utility mutation.
+
+Capability detection MUST NOT mutate the candidate wrapper, child, target, or any user payload. Any disposable capability probe must be isolated to safe temporary names and cleaned reliably; unresolved probe cleanup failure must surface as a safety error and must not grant mutation authority.
+
+### 3.3 Native behavior remains unchanged
 
 On filesystems where strict native `RENAME_NOREPLACE` is positively supported:
 
@@ -221,6 +237,8 @@ That authority MUST NOT broaden the meaning of `ALLOW_DELETE` for historical ope
 
 The safest implementation shape is operation/context-specific authorization derived from the frozen Utility Plan metadata, not a global setting that enables deletion generally.
 
+On COMPAT/zfuse in Gate6-B, this cleanup authority is never reached because the candidate is non-ready at Preview. It exists to preserve the complete native-filesystem Utility contract and to remove the incorrect dependency on broad permanent-delete authority.
+
 ---
 
 ## 6. Preserved Gate6-B invariants
@@ -233,7 +251,7 @@ This amendment does NOT reopen or weaken the following:
 - candidate discovery remains descriptor-bound / no-follow / identity-aware.
 - target collision never overwrites, merges, or auto-renames.
 - Preview performs zero filesystem mutation and zero Plan persistence.
-- Generate may persist only explicitly selected current READY candidates.
+- Generate persists only explicitly selected current `READY` candidates; COMPAT `UNSUPPORTED_FILESYSTEM` candidates are never eligible.
 - one Plan collapses at most one layer.
 - Workflow remains compiler/orchestrator, never filesystem executor.
 - existing Worker remains the sole execution authority.
@@ -256,15 +274,17 @@ Required real-NAS Utility acceptance for Gate6-B:
 
 ```text
 1. discover the valid A/B/C wrapper topology read-only;
-2. resolve filesystem mutation capability as COMPAT / no native no-replace;
-3. expose explicit unsupported Utility mutation state;
-4. do not create executable false authority for MOVE;
-5. source payload remains present and identity/hash unchanged;
-6. target remains absent;
-7. wrapper remains present;
-8. zero OperationJournal mutation;
-9. no recursive delete / no permanent file delete;
-10. production remains untouched.
+2. resolve filesystem mutation capability as COMPAT / no native no-replace during Preview;
+3. return candidate state UNSUPPORTED_FILESYSTEM and selectable=false;
+4. return stable reason UTILITY_MOVE_UNSUPPORTED_FILESYSTEM;
+5. selected_candidate_ids excludes the candidate;
+6. attempted Generate selection is rejected and persists zero Draft;
+7. source payload remains present and identity/hash unchanged;
+8. target remains absent;
+9. wrapper remains present;
+10. zero OperationJournal mutation;
+11. no recursive delete / no permanent file delete;
+12. production remains untouched.
 ```
 
 A separate native-filesystem regression MUST continue to prove the full successful Utility path:
@@ -287,12 +307,15 @@ At minimum, the post-Amendment-B implementation must add or update tests for:
 ### 8.1 COMPAT capability truthfulness
 
 - COMPAT filesystem candidate discovery remains read-only and explainable.
-- COMPAT Utility mutation is marked unsupported before Worker filesystem mutation.
-- no Draft/Ready/Execute state falsely claims executable mutation authority once unsupported capability is known.
+- COMPAT candidate state is `UNSUPPORTED_FILESYSTEM` and `selectable=false`.
+- stable reason is `UTILITY_MOVE_UNSUPPORTED_FILESYSTEM`.
+- unsupported candidate is absent from default selection.
+- Generate selection attempt is rejected with zero Draft persistence.
+- Freeze/Validate/Execute authority is unreachable from that unsupported candidate.
 - zero ordinary `rename()` fallback.
 - zero filesystem mutation.
 - zero OperationJournal mutation.
-- stable explicit reason/code.
+- capability probing leaves zero residue.
 
 ### 8.2 Native Utility execution
 
@@ -333,7 +356,7 @@ fb120bfe2a760c1294c0ed650f95988dac1410ce
 
 remains valid historical evidence for the work already reviewed and for the NAS acceptance observations obtained against that exact source/image.
 
-However, once Amendment B is committed and implementation changes begin, it is no longer closure authority for Gate6-B.
+Once Amendment B is approved and implementation changes begin, that candidate is no longer closure authority for Gate6-B.
 
 The post-Amendment-B candidate MUST rerun, in hard order:
 
@@ -399,6 +422,6 @@ This amendment does NOT authorize:
 
 Amendment B chooses safety-preserving scope reduction over a misleading or weaker COMPAT fallback.
 
-Gate6-B keeps its strict no-overwrite semantics and may complete with truthful COMPAT Utility non-support on the target `zfuse.zfsv3` platform. Actual COMPAT Single-Child Wrapper Collapse mutation becomes Gate6-B2 and requires a new Architecture Freeze.
+After written-spec approval, Gate6-B keeps its strict no-overwrite semantics and may complete with truthful COMPAT Utility non-support on the target `zfuse.zfsv3` platform. Actual COMPAT Single-Child Wrapper Collapse mutation becomes Gate6-B2 and requires a new Architecture Freeze.
 
 The only deletion-authority change inside Gate6-B is the narrowly bound `EMPTY_WRAPPER_STRUCTURAL_CLEANUP` that may remove the exact verified-empty wrapper directory after its paired Utility MOVE succeeds. It grants no authority over regular files, payloads, purge, recursive deletion, or unrelated directories.
