@@ -1,4 +1,5 @@
 name: Gate6-B Task6 Execute Preflight Patch
+# Activation push: workflow exists before this commit.
 
 on:
   push:
