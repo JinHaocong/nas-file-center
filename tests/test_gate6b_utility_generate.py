@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -68,6 +69,7 @@ def utility_service_env(tmp_path):
     return {
         "service": service,
         "workflow_id": workflow["id"],
+        "root_id": root_id,
         "root": root,
         "tmp_path": tmp_path,
     }
@@ -121,6 +123,12 @@ def test_generate_selected_subset_persists_exact_pair_and_no_filesystem_mutation
         plan = session.get(BatchPlan, generated["plan_id"])
         assert plan is not None
         assert plan.status == "draft"
+        metadata = json.loads(plan.metadata_json or "{}")
+        assert metadata["workflow_mode"] == "utility"
+        assert metadata["runtime_inputs"] == {
+            "root_id": env["root_id"],
+            "subpath": "",
+        }
         items = session.scalars(
             select(BatchPlanItem)
             .where(BatchPlanItem.plan_id == plan.id)
