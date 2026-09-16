@@ -1805,6 +1805,53 @@ class FileCenterService:
                 item_validations[row.id] = ("stale", stale_detail.reason, None)
                 continue
 
+            row_meta_for_recursive = json.loads(row.metadata_json or "{}")
+            has_recursive_authority = (
+                isinstance(row_meta_for_recursive, dict)
+                and (
+                    "recursive_protection" in row_meta_for_recursive
+                    or "frozen_recursive_protection" in row_meta_for_recursive
+                )
+            )
+            if (
+                row.operation == "quarantine"
+                and (
+                    plan_metadata.get("selection_mode") == "recursive_directory_balanced_by_bytes"
+                    or has_recursive_authority
+                )
+            ):
+                from app.planning.recursive_protection_authority import (
+                    evaluate_live_recursive_protection,
+                )
+
+                recursive_evaluation = evaluate_live_recursive_protection(
+                    row.metadata_json or "{}",
+                    expected_source_path=row.source_path,
+                    allowed_roots=self.settings.allowed_roots,
+                    quarantine_root=self.settings.quarantine_root,
+                )
+                if not recursive_evaluation.safe:
+                    recursive_reason = (
+                        recursive_evaluation.reason
+                        or "RECURSIVE_PROTECTION_UNSTABLE"
+                    )
+                    recursive_stale = StaleItemDetail(
+                        item_id=row.id,
+                        source_path=row.source_path,
+                        reason=recursive_reason,
+                        expected={
+                            "device": row.expected_device,
+                            "inode": row.expected_inode,
+                            "size": row.expected_size,
+                            "mtime_ns": row.expected_mtime_ns,
+                            "hash": row.expected_hash,
+                        },
+                        actual=None,
+                    )
+                    stale_items.append(recursive_stale)
+                    item_validations[row.id] = ("stale", recursive_reason, None)
+                    continue
+
             if row.keep_path:
                 result = verify_duplicate_pair(
                     row.keep_path,
