@@ -92,6 +92,29 @@ def _same_root_group(
     )
 
 
+def _cross_root_group(
+    members: tuple[tuple[str, int, str, int], ...],
+    *,
+    provenance_id: str,
+    file_size: int = 100,
+) -> DedupeGroupSnapshot:
+    return DedupeGroupSnapshot(
+        provenance_id=provenance_id,
+        content_hash=(provenance_id.encode("utf-8").hex() + "0" * 64)[:64],
+        file_size=file_size,
+        members=tuple(
+            _member(
+                path,
+                scan_root_index=root_index,
+                scan_root_path=root_path,
+                mtime_ns=mtime_ns,
+                size=file_size,
+            )
+            for path, root_index, root_path, mtime_ns in members
+        ),
+    )
+
+
 def test_historical_weighted_fixture_keeps_lexical_tie_break():
     config = validate_and_canonicalize_config(
         {"schema_version": 1, "selection_mode": "weighted", "factors": {}}
@@ -401,3 +424,110 @@ def test_lca_helpers_preserve_unicode_spaces_and_long_legal_components():
     assert lca == f"/root/媒体 库/{long_component}"
     assert derive_recursive_balance_bucket(left_parent, lca) == f"{lca}/左 分支"
     assert derive_recursive_balance_bucket(right_parent, lca) == f"{lca}/右 分支"
+
+
+def test_cross_root_balance_selects_root_before_directory_and_never_builds_cross_root_lca():
+    group = _cross_root_group(
+        (
+            ("/root0/A/a.bin", 0, "/root0", 100),
+            ("/root0/Z/z.bin", 0, "/root0", 100),
+            ("/root1/M/m.bin", 1, "/root1", 100),
+        ),
+        provenance_id="cross-root-hierarchy",
+    )
+
+    result = evaluate_group(
+        group,
+        _config(),
+        scan_roots=["/root0", "/root1"],
+        current_released_bytes={0: 1000, 1: 0},
+        current_released_bytes_by_directory={
+            "/root0/A": 0,
+            "/root0/Z": 1000,
+            "/root1/M": 0,
+        },
+    )
+
+    assert result.recommended_keep is not None
+    # Root 0 wins the existing Scan Root byte objective. Within root 0,
+    # recursive directory balance then keeps Z even though A is lexical-first.
+    assert result.recommended_keep.absolute_path == "/root0/Z/z.bin"
+    winner = next(m for m in result.members if m.recommended_keep)
+    info = winner.balance_info
+    assert info["selected_scan_root_index"] == 0
+    assert info["lca"] == "/root0"
+    assert info["bucket"] == "/root0/Z"
+    assert info["lca"].startswith("/root0")
+    assert not info["lca"].startswith("/root1")
+
+
+def test_cross_root_hierarchy_uses_normalized_path_only_after_root_and_directory_ties():
+    group = _cross_root_group(
+        (
+            ("/root0/B/b.bin", 0, "/root0", 100),
+            ("/root0/A/a.bin", 0, "/root0", 100),
+            ("/root1/M/m.bin", 1, "/root1", 100),
+        ),
+        provenance_id="cross-root-final-tie",
+        file_size=0,
+    )
+
+    result = evaluate_group(
+        group,
+        _config(),
+        scan_roots=["/root0", "/root1"],
+        current_released_bytes={0: 0, 1: 100},
+        current_released_bytes_by_directory={
+            "/root0/A": 0,
+            "/root0/B": 0,
+        },
+    )
+
+    assert result.recommended_keep is not None
+    assert result.recommended_keep.absolute_path == "/root0/A/a.bin"
+    winner = next(m for m in result.members if m.recommended_keep)
+    assert winner.balance_info["selected_scan_root_index"] == 0
+    assert winner.balance_info["lca"] == "/root0"
+
+
+def test_run_accumulates_scan_root_and_directory_bytes_for_later_cross_root_group():
+    groups = [
+        _cross_root_group(
+            (
+                ("/root0/A/history.bin", 0, "/root0", 100),
+                ("/root0/B/keep.bin", 0, "/root0", 200),
+                ("/root1/C/history.bin", 1, "/root1", 100),
+            ),
+            provenance_id="01-history",
+            file_size=500,
+        ),
+        _cross_root_group(
+            (
+                ("/root0/A/a2.bin", 0, "/root0", 100),
+                ("/root0/B/b2.bin", 0, "/root0", 100),
+                ("/root1/D/d2.bin", 1, "/root1", 100),
+            ),
+            provenance_id="02-later",
+            file_size=100,
+        ),
+    ]
+
+    result = run_advanced_dedupe(
+        groups,
+        _config(mtime=True),
+        scan_roots=["/root0", "/root1"],
+    )
+    later = next(g for g in result.groups if g.group_provenance_id == "02-later")
+
+    # First group releases 500 bytes in root0/A and root1/C. For the later
+    # group the root objective selects root0, then directory balance observes
+    # A=500/B=0 and therefore keeps A.
+    assert later.recommended_keep is not None
+    assert later.recommended_keep.absolute_path == "/root0/A/a2.bin"
+    winner = next(m for m in later.members if m.recommended_keep)
+    assert winner.balance_info["selected_scan_root_index"] == 0
+    assert winner.balance_info["bucket_released_bytes_before"] == {
+        "/root0/A": 500,
+        "/root0/B": 0,
+    }
+    assert result.released_bytes_by_scan_root == {0: 600, 1: 600}
