@@ -6,6 +6,7 @@ import json
 import math
 import os
 from pathlib import Path
+import stat
 from typing import Any, Mapping, Sequence
 
 from sqlalchemy import func, select
@@ -24,6 +25,7 @@ from app.planning.dedupe_engine import (
     DedupeGroupSnapshot,
     DedupeMemberSnapshot,
     GroupDecisionResult,
+    derive_recursive_balance_bucket,
     directory_ancestors_to_scan_root,
     normalize_dedupe_path,
     run_advanced_dedupe,
@@ -375,6 +377,28 @@ def compile_advanced_dedupe_preview(
                 elif not is_file:
                     member_fail_reason = "NOT_REGULAR_FILE"
 
+            live_identity: dict[str, Any] | None = None
+            if recursive_mode:
+                try:
+                    live_stat = os.lstat(abs_p)
+                    if stat.S_ISREG(live_stat.st_mode):
+                        object_type = "file"
+                    elif stat.S_ISDIR(live_stat.st_mode):
+                        object_type = "directory"
+                    elif stat.S_ISLNK(live_stat.st_mode):
+                        object_type = "symlink"
+                    else:
+                        object_type = "special"
+                    live_identity = {
+                        "device": int(live_stat.st_dev),
+                        "inode": int(live_stat.st_ino),
+                        "size": int(live_stat.st_size),
+                        "mtime_ns": int(live_stat.st_mtime_ns),
+                        "object_type": object_type,
+                    }
+                except OSError:
+                    live_identity = {"missing": True}
+
             if member_fail_reason is None and recursive_mode:
                 try:
                     candidate_group_recursive_dirs.update(directory_ancestors_to_scan_root(norm_abs, norm_root))
@@ -382,7 +406,7 @@ def compile_advanced_dedupe_preview(
                     member_fail_reason = "PATH_OUTSIDE_SCAN_ROOT"
 
             safety_reasons = (member_fail_reason,) if member_fail_reason else ()
-            member_safety_facts[norm_abs] = {
+            safety_facts: dict[str, Any] = {
                 "exists": exists,
                 "is_file": is_file,
                 "is_symlink": is_symlink,
@@ -390,6 +414,9 @@ def compile_advanced_dedupe_preview(
                 "is_reserved_quarantine": is_reserved_quarantine,
                 "safety_reasons": list(safety_reasons),
             }
+            if recursive_mode:
+                safety_facts["live_identity"] = live_identity
+            member_safety_facts[norm_abs] = safety_facts
             if member_fail_reason is not None and group_skip_reason is None:
                 if member_fail_reason in ("SOURCE_NOT_FOUND", "NOT_REGULAR_FILE"):
                     group_skip_reason = "SOURCE_SNAPSHOT_STALE"
@@ -574,6 +601,7 @@ def build_preview_response(
         effective_safety_policy=canonical_safety_policy,
     )
 
+    recursive_mode = compilation.scorer_config.selection_mode == "recursive_directory_balanced_by_bytes"
     all_rows: list[dict[str, Any]] = []
     for g in compilation.groups:
         g_prov_id = g.group_provenance_id
@@ -611,6 +639,25 @@ def build_preview_response(
                 }
                 for c in m.contributions
             ]
+
+            candidate_balance_bucket: str | None = None
+            if recursive_mode and isinstance(g_balance_info, dict):
+                lca = g_balance_info.get("lca")
+                selected_root_index = g_balance_info.get("selected_scan_root_index")
+                if isinstance(lca, str) and (
+                    selected_root_index is None or selected_root_index == m.scan_root_index
+                ):
+                    try:
+                        parent = normalize_dedupe_path(os.path.dirname(normalize_dedupe_path(m.absolute_path)))
+                        candidate_balance_bucket = derive_recursive_balance_bucket(parent, lca)
+                    except ValueError:
+                        candidate_balance_bucket = None
+
+            recursive_last_file_protection_reason = (
+                "RECURSIVE_PROTECT_LAST_FILE"
+                if "RECURSIVE_PROTECT_LAST_FILE" in m.safety_reasons
+                else None
+            )
             all_rows.append({
                 "group_provenance_id": g_prov_id,
                 "group_status": g_status,
@@ -633,6 +680,8 @@ def build_preview_response(
                 "member_decision": member_decision,
                 "selection_reason": m.selection_reason,
                 "balance_info": m.balance_info,
+                "candidate_balance_bucket": candidate_balance_bucket,
+                "recursive_last_file_protection_reason": recursive_last_file_protection_reason,
             })
 
     total_rows = len(all_rows)
