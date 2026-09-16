@@ -27,68 +27,55 @@ jobs:
           path = Path("app/service.py")
           source = path.read_text(encoding="utf-8")
 
-          old = '''        for it in items_data:
-              item_id = it["id"]
-              src_p = Path(it["source_path"])
-              upd: dict[str, Any] = {}
-  
-              if plan_kind in {"quarantine-bulk-restore", "quarantine-bulk-purge"}:
-          '''
-          new = '''        for it in items_data:
-              item_id = it["id"]
-              src_p = Path(it["source_path"])
-              upd: dict[str, Any] = {}
-  
-              if (
-                  plan_metadata.get("selection_mode") == "recursive_directory_balanced_by_bytes"
-                  and it["operation"] == "quarantine"
-              ):
-                  from app.planning.recursive_protection_authority import (
-                      RecursiveProtectionAuthorityError,
-                      build_frozen_recursive_protection,
-                  )
-  
-                  try:
-                      frozen_recursive_protection = build_frozen_recursive_protection(
-                          it["metadata_json"] or "{}",
-                          expected_source_path=it["source_path"],
-                          allowed_roots=self.settings.allowed_roots,
-                          quarantine_root=self.settings.quarantine_root,
-                      )
-                  except RecursiveProtectionAuthorityError as exc:
-                      raise StateConflictError(str(exc)) from exc
-  
-                  if frozen_recursive_protection is None:
-                      raise StateConflictError(
-                          "RECURSIVE_PROTECTION_AUTHORITY_MISSING: "
-                          "recursive dedupe quarantine item has no recursive_protection authority"
-                      )
-  
-                  recursive_meta = json.loads(it["metadata_json"] or "{}")
-                  recursive_meta["frozen_recursive_protection"] = frozen_recursive_protection
-                  it["metadata_json"] = json.dumps(
-                      recursive_meta,
-                      ensure_ascii=False,
-                      sort_keys=True,
-                  )
-  
-              if plan_kind in {"quarantine-bulk-restore", "quarantine-bulk-purge"}:
-          '''
-
-          # The strings above intentionally use two extra leading spaces on inner
-          # lines so YAML block indentation can be stripped predictably here.
-          old = old.replace("          ", "        ", 1)
-          new = new.replace("          ", "        ", 1)
-          # Normalize the remaining marker indentation exactly as it appears in source.
-          old = old.replace("              ", "            ")
-          new = new.replace("              ", "            ")
+          old = (
+              '            upd: dict[str, Any] = {}\n'
+              '\n'
+              '            if plan_kind in {"quarantine-bulk-restore", "quarantine-bulk-purge"}:\n'
+          )
+          new = (
+              '            upd: dict[str, Any] = {}\n'
+              '\n'
+              '            if (\n'
+              '                plan_metadata.get("selection_mode") == "recursive_directory_balanced_by_bytes"\n'
+              '                and it["operation"] == "quarantine"\n'
+              '            ):\n'
+              '                from app.planning.recursive_protection_authority import (\n'
+              '                    RecursiveProtectionAuthorityError,\n'
+              '                    build_frozen_recursive_protection,\n'
+              '                )\n'
+              '\n'
+              '                try:\n'
+              '                    frozen_recursive_protection = build_frozen_recursive_protection(\n'
+              '                        it["metadata_json"] or "{}",\n'
+              '                        expected_source_path=it["source_path"],\n'
+              '                        allowed_roots=self.settings.allowed_roots,\n'
+              '                        quarantine_root=self.settings.quarantine_root,\n'
+              '                    )\n'
+              '                except RecursiveProtectionAuthorityError as exc:\n'
+              '                    raise StateConflictError(str(exc)) from exc\n'
+              '\n'
+              '                if frozen_recursive_protection is None:\n'
+              '                    raise StateConflictError(\n'
+              '                        "RECURSIVE_PROTECTION_AUTHORITY_MISSING: "\n'
+              '                        "recursive dedupe quarantine item has no recursive_protection authority"\n'
+              '                    )\n'
+              '\n'
+              '                recursive_meta = json.loads(it["metadata_json"] or "{}")\n'
+              '                recursive_meta["frozen_recursive_protection"] = frozen_recursive_protection\n'
+              '                it["metadata_json"] = json.dumps(\n'
+              '                    recursive_meta,\n'
+              '                    ensure_ascii=False,\n'
+              '                    sort_keys=True,\n'
+              '                )\n'
+              '\n'
+              '            if plan_kind in {"quarantine-bulk-restore", "quarantine-bulk-purge"}:\n'
+          )
 
           count = source.count(old)
           if count != 1:
               raise SystemExit(f"Task4 service.py anchor count must be 1, got {count}")
 
-          updated = source.replace(old, new, 1)
-          path.write_text(updated, encoding="utf-8")
+          path.write_text(source.replace(old, new, 1), encoding="utf-8")
           PY
 
       - name: Remove one-time patch workflow
