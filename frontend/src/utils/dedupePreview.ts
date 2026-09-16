@@ -59,7 +59,15 @@ export function mapWorkflowPreviewItemsToDedupeRows(items: WorkflowPreviewItem[]
       recursive_last_file_protection_reason: typeof meta.recursive_last_file_protection_reason === 'string' ? meta.recursive_last_file_protection_reason : null,
     };
     if (!complete) return { ...common, member_decision: 'UNAVAILABLE' as const, incomplete: true };
-    return { ...common, member_decision: meta.member_decision, incomplete: false };
+    return {
+      ...common,
+      group_reclaimable_bytes: common.group_reclaimable_bytes ?? 0,
+      relative_path: common.relative_path || '',
+      scan_root_path: common.scan_root_path || '',
+      is_top_candidate: Boolean(common.is_top_candidate),
+      member_decision: meta.member_decision,
+      incomplete: false,
+    };
   });
 }
 
