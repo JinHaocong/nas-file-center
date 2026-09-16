@@ -12,7 +12,7 @@ permissions:
 jobs:
   backend-tdd:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     env:
       CONFIG_DIR: /tmp/nfc-config
       DATA_MOUNT: /tmp/nfc-data
@@ -60,6 +60,11 @@ jobs:
           tests/test_gate5e_e4_hotfix2.py
           tests/test_gate3_stale_plan.py
           -q
+
+      - name: Run full backend regression suite
+        env:
+          PYTHONPATH: .
+        run: pytest -q
 
   frontend-tdd:
     runs-on: ubuntu-latest
