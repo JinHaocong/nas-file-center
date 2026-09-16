@@ -2042,6 +2042,39 @@ class FileCenterService:
             src_p = Path(it["source_path"])
             upd: dict[str, Any] = {}
 
+            if (
+                plan_metadata.get("selection_mode") == "recursive_directory_balanced_by_bytes"
+                and it["operation"] == "quarantine"
+            ):
+                from app.planning.recursive_protection_authority import (
+                    RecursiveProtectionAuthorityError,
+                    build_frozen_recursive_protection,
+                )
+
+                try:
+                    frozen_recursive_protection = build_frozen_recursive_protection(
+                        it["metadata_json"] or "{}",
+                        expected_source_path=it["source_path"],
+                        allowed_roots=self.settings.allowed_roots,
+                        quarantine_root=self.settings.quarantine_root,
+                    )
+                except RecursiveProtectionAuthorityError as exc:
+                    raise StateConflictError(str(exc)) from exc
+
+                if frozen_recursive_protection is None:
+                    raise StateConflictError(
+                        "RECURSIVE_PROTECTION_AUTHORITY_MISSING: "
+                        "recursive dedupe quarantine item has no recursive_protection authority"
+                    )
+
+                recursive_meta = json.loads(it["metadata_json"] or "{}")
+                recursive_meta["frozen_recursive_protection"] = frozen_recursive_protection
+                it["metadata_json"] = json.dumps(
+                    recursive_meta,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+
             if plan_kind in {"quarantine-bulk-restore", "quarantine-bulk-purge"}:
                 from app.quarantine.bulk_lifecycle import freeze_bulk_plan_item
                 bulk_update = freeze_bulk_plan_item(
