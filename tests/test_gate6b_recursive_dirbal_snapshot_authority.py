@@ -73,6 +73,38 @@ def test_recursive_count_intermediate_parent_aba_fails_closed(tmp_path: Path, mo
     assert _count_real_regular_files_recursive(protected) == 0
 
 
+def test_recursive_count_descendant_directory_aba_after_open_fails_closed(tmp_path: Path, monkeypatch):
+    protected = tmp_path / "protected"
+    descendant = protected / "descendant"
+    descendant.mkdir(parents=True)
+    (descendant / "one.bin").write_bytes(b"one")
+    (descendant / "two.bin").write_bytes(b"two")
+
+    descendant_st = os.lstat(descendant)
+    detached = tmp_path / "detached-descendant"
+    real_scandir = os.scandir
+    swapped = False
+
+    def swap_after_descendant_fd_open(path):
+        nonlocal swapped
+        if not swapped and isinstance(path, int):
+            opened_st = os.fstat(path)
+            if (
+                int(opened_st.st_dev) == int(descendant_st.st_dev)
+                and int(opened_st.st_ino) == int(descendant_st.st_ino)
+            ):
+                swapped = True
+                descendant.rename(detached)
+                descendant.mkdir()
+        return real_scandir(path)
+
+    monkeypatch.setattr(os, "scandir", swap_after_descendant_fd_open)
+
+    assert _count_real_regular_files_recursive(protected) == 0
+    assert swapped is True
+    assert list(descendant.iterdir()) == []
+
+
 @pytest.fixture
 def service_env(tmp_path: Path):
     data_dir = tmp_path / "data"
@@ -99,11 +131,20 @@ def service_env(tmp_path: Path):
     }
 
 
-def _recursive_config():
+def _recursive_config(*, favor_b: bool = False):
+    factors = {}
+    if favor_b:
+        factors = {
+            "path_priority": {
+                "enabled": True,
+                "weight": 1000,
+                "rules": [{"scope": "absolute", "pattern": "*/B/*"}],
+            }
+        }
     return {
         "schema_version": 1,
         "selection_mode": "recursive_directory_balanced_by_bytes",
-        "factors": {},
+        "factors": factors,
     }
 
 
@@ -224,4 +265,63 @@ def test_recursive_generate_directory_identity_aba_returns_preview_changed_and_z
             expected_preview_digest=preview["preview_digest"],
         )
 
+    assert _plan_counts(service) == before_counts
+
+
+def test_recursive_generate_descendant_membership_aba_returns_preview_changed_and_zero_draft(
+    service_env,
+    monkeypatch,
+):
+    scan_id = 923
+    root, left, right, a_extra, _b_extra = _create_recursive_fixture(service_env, scan_id=scan_id)
+    service = service_env["service"]
+    config = _recursive_config(favor_b=True)
+
+    padding = left.parent / "padding"
+    padding.mkdir()
+    a_extra.rename(padding / "extra.bin")
+
+    preview = service.get_dedupe_preview(scan_id, scorer_config=config)
+    quarantine_paths = {
+        row["absolute_path"]
+        for row in preview["rows"]
+        if row["member_decision"] == "QUARANTINE"
+    }
+    assert str(left) in quarantine_paths
+    assert str(right) not in quarantine_paths
+
+    padding_st = os.lstat(padding)
+    detached = service_env["tmp_path"] / "detached-padding"
+    real_scandir = os.scandir
+    padding_scan_count = 0
+    swapped = False
+
+    def swap_on_third_padding_scan(path):
+        nonlocal padding_scan_count, swapped
+        if isinstance(path, int):
+            opened_st = os.fstat(path)
+            if (
+                int(opened_st.st_dev) == int(padding_st.st_dev)
+                and int(opened_st.st_ino) == int(padding_st.st_ino)
+            ):
+                padding_scan_count += 1
+                if padding_scan_count == 3:
+                    swapped = True
+                    padding.rename(detached)
+                    padding.mkdir()
+        return real_scandir(path)
+
+    monkeypatch.setattr(os, "scandir", swap_on_third_padding_scan)
+    before_counts = _plan_counts(service)
+
+    with pytest.raises(DedupePreviewChangedError):
+        service.create_advanced_dedupe_plan(
+            scan_id,
+            scorer_config=config,
+            expected_preview_digest=preview["preview_digest"],
+        )
+
+    assert swapped is True
+    assert list(padding.iterdir()) == []
+    assert left.exists()
     assert _plan_counts(service) == before_counts
