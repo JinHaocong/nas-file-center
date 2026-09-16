@@ -525,6 +525,43 @@ def evaluate_group(
                 "spread_before": spread_before,
                 "spread_after": best_sim[2],
             }
+    elif config.selection_mode == "recursive_directory_balanced_by_bytes":
+        if len(top_candidates) == 1:
+            # Scorer precedence remains authoritative. Recursive balancing is
+            # consulted only when multiple safe candidates share the top score.
+            winner = top_candidates[0]
+            winner_reason = "unique_top_score"
+        else:
+            # Task 5 establishes an explicit, isolated route for the new mode.
+            # At this stage it reuses the frozen Scan Root balance objective as
+            # the outer layer. Task 6/7 extend this branch with same-root dynamic
+            # LCA/directory buckets and cross-root hierarchical balance without
+            # modifying the historical balanced_by_bytes branch above.
+            sorted_roots = list(range(len(norm_scan_roots)))
+
+            curr_rel = dict(current_released_bytes or {})
+            vals_before = [curr_rel.get(r, 0) for r in sorted_roots]
+            spread_before = max(vals_before, default=0) - min(vals_before, default=0)
+
+            sim_options = []
+            for cand in top_candidates:
+                sim = dict(curr_rel)
+                for other in group.members:
+                    if other.absolute_path != cand.absolute_path:
+                        sim[other.scan_root_index] = sim.get(other.scan_root_index, 0) + group.file_size
+                vals = [sim.get(r, 0) for r in sorted_roots]
+                spread = max(vals, default=0) - min(vals, default=0)
+                sum_sq = sum(v ** 2 for v in vals)
+                tie_key = normalize_dedupe_path(cand.absolute_path)
+                sim_options.append(((spread, sum_sq, tie_key), cand, spread))
+
+            best_sim = min(sim_options, key=lambda opt: opt[0])
+            winner = best_sim[1]
+            winner_reason = "recursive_directory_balanced_by_bytes"
+            winner_balance_info = {
+                "spread_before": spread_before,
+                "spread_after": best_sim[2],
+            }
 
     # 5. Build Member Explanations
     explains = []
