@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 from typing import Sequence
 
+from app.planning import recursive_protection
 from app.planning.dedupe_engine import (
     directory_ancestors_to_scan_root,
     normalize_dedupe_path,
@@ -239,3 +240,52 @@ def parse_recursive_protection_authority(
         preview_db_lineage_digest=preview_db_lineage_digest,
         scope_digest=scope_digest,
     )
+
+
+def build_frozen_recursive_protection(
+    metadata_json: str,
+    *,
+    expected_source_path: str,
+    allowed_roots: Sequence[Path | str],
+    quarantine_root: Path | str | None,
+) -> dict[str, object] | None:
+    """Parse authority and capture Freeze-time live samples for every exact ancestor.
+
+    The samples are audit/evidence for the frozen authority. They are not the later
+    Validate/Execute mutation authority required by Architecture Amendment A.
+    """
+
+    authority = parse_recursive_protection_authority(
+        metadata_json,
+        expected_source_path=expected_source_path,
+        allowed_roots=allowed_roots,
+        quarantine_root=quarantine_root,
+    )
+    if authority is None:
+        return None
+
+    frozen_ancestors: dict[str, dict[str, object]] = {}
+    for ancestor in authority.protected_ancestors:
+        sample = recursive_protection.snapshot_recursive_regular_files(ancestor)
+        if (
+            not sample.stable
+            or sample.device is None
+            or sample.inode is None
+            or not sample.tree_identity_digest
+        ):
+            raise _fail(f"RECURSIVE_PROTECTION_UNSTABLE: {ancestor}")
+        if sample.count - 1 < 1:
+            raise _fail(f"RECURSIVE_PROTECT_LAST_FILE: {ancestor}")
+
+        frozen_ancestors[ancestor] = {
+            "count": int(sample.count),
+            "device": int(sample.device),
+            "inode": int(sample.inode),
+            "tree_identity_digest": str(sample.tree_identity_digest),
+        }
+
+    return {
+        "schema_version": 1,
+        "scope_digest": authority.scope_digest,
+        "frozen_ancestors": frozen_ancestors,
+    }
