@@ -50,7 +50,7 @@ export interface WorkflowRollbackRequest { target_revision: number; expected_cur
 export interface WorkflowPreviewItem { source_path: string; target_path?: string | null; operation: string; mtime_ns?: number | null; changed: boolean; metadata: Record<string, any>; }
 export interface WorkflowUtilityCandidate {
   candidate_id: string; wrapper_path: string; child_path?: string | null; target_path?: string | null;
-  state: string; selectable: boolean; selected: boolean;
+  state: string; selectable: boolean; selected: boolean; capability_reason?: string | null;
   wrapper_device?: number | null; wrapper_inode?: number | null; child_device?: number | null; child_inode?: number | null;
 }
 export interface WorkflowUtilitySummary {
