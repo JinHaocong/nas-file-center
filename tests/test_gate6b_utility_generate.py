@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import select
 
 import app.batch_utilities.single_child_wrapper as single_child_wrapper_module
+from app.batch_utilities.errors import BatchUtilityPreviewChangedError
 from app.config import Settings
 from app.models import BatchPlan, BatchPlanItem, IndexRoot
 from app.service import FileCenterService
@@ -205,7 +206,7 @@ def test_generate_wrapper_detach_during_recompile_is_preview_changed_with_zero_d
 
     monkeypatch.setattr(os, "scandir", swap_wrapper_before_generate_wrapper_scan)
 
-    with pytest.raises(WorkflowDigestMismatchError) as exc:
+    with pytest.raises(BatchUtilityPreviewChangedError) as exc:
         env["service"].workflow_service.generate_plan(
             None,
             env["workflow_id"],
@@ -254,7 +255,7 @@ def test_generate_child_replacement_during_recompile_is_preview_changed_with_zer
         swap_child_before_generate_target_check,
     )
 
-    with pytest.raises(WorkflowDigestMismatchError) as exc:
+    with pytest.raises(BatchUtilityPreviewChangedError) as exc:
         env["service"].workflow_service.generate_plan(
             None,
             env["workflow_id"],
