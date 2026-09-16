@@ -17,6 +17,17 @@ const RECURSIVE_MODE = 'recursive_directory_balanced_by_bytes';
 
 describe('Gate6-B Utility frontend contract', () => {
   const utilityStep: any = { id: 'utility-collapse-1', type: 'single_child_wrapper_collapse', root_id: 7, subpath: 'media/incoming' };
+  const unsupportedCandidate = {
+    candidate_id: 'a'.repeat(64),
+    wrapper_path: '/data/utility/A/B',
+    child_path: '/data/utility/A/B/C',
+    target_path: '/data/utility/A/C',
+    state: 'UNSUPPORTED_FILESYSTEM',
+    selectable: false,
+    selected: false,
+    capability_reason: 'UTILITY_MOVE_UNSUPPORTED_FILESYSTEM',
+  };
+
   test('utility is an explicit single-step workflow topology', () => {
     assert.strictEqual(validateWorkflowStepOrder([utilityStep], 'utility' as any).valid, true);
     assert.deepStrictEqual(getAllowedInsertions([utilityStep], 'utility' as any), []);
@@ -30,6 +41,7 @@ describe('Gate6-B Utility frontend contract', () => {
     assert.match(workflowTypesSource, /utility_action:\s*'single_child_wrapper_collapse'/);
     assert.match(workflowTypesSource, /selected_candidate_ids/);
     assert.match(workflowTypesSource, /utility-live-readonly/);
+    assert.match(workflowTypesSource, /capability_reason\?:\s*string\s*\|\s*null/);
   });
   test('builder exposes Utility mode backed by managed root plus optional subpath', () => {
     assert.match(builderSource, /value=["']utility["']/);
@@ -43,6 +55,18 @@ describe('Gate6-B Utility frontend contract', () => {
     assert.match(previewPanelSource, /selected_candidate_ids/);
     assert.match(previewPanelSource, /selectable/);
     assert.match(previewPanelSource, /READY/);
+  });
+  test('unsupported filesystem candidates are truthful, non-selectable, and cannot produce an empty Draft', () => {
+    assert.strictEqual(unsupportedCandidate.state, 'UNSUPPORTED_FILESYSTEM');
+    assert.strictEqual(unsupportedCandidate.selectable, false);
+    assert.strictEqual(unsupportedCandidate.capability_reason, 'UTILITY_MOVE_UNSUPPORTED_FILESYSTEM');
+    assert.match(previewPanelSource, /UNSUPPORTED_FILESYSTEM/);
+    assert.match(previewPanelSource, /UTILITY_MOVE_UNSUPPORTED_FILESYSTEM/);
+    assert.match(previewPanelSource, /unsupportedCandidates/);
+    assert.match(previewPanelSource, /selectedCandidateIds\.length\s*>\s*0/);
+    assert.match(previewPanelSource, /拓扑发现[^\n]*只读/);
+    assert.match(previewPanelSource, /no-overwrite MOVE/);
+    assert.match(previewPanelSource, /rename fallback/);
   });
 });
 
