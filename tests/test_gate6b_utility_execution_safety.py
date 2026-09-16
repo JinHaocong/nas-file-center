@@ -9,6 +9,7 @@ from sqlalchemy import select
 
 from app.batch.plans import OperationItem
 from app.config import Settings
+from app.exceptions import PlanStaleError
 from app.execution.executor import execute_item
 from app.models import BatchPlanItem, IndexRoot
 from app.service import FileCenterService
@@ -79,9 +80,9 @@ def utility_execution_env(tmp_path):
     }
 
 
-def _generate_frozen_plan(env) -> int:
+def _generate_frozen_plan(env, wrapper_name: str = "B", child_name: str = "C") -> int:
     root = env["root"]
-    (root / "B" / "C").mkdir(parents=True)
+    (root / wrapper_name / child_name).mkdir(parents=True)
 
     preview = env["service"].workflow_service.preview_workflow(
         env["workflow_id"],
@@ -90,7 +91,7 @@ def _generate_frozen_plan(env) -> int:
     candidate = next(
         item
         for item in preview["utility_summary"]["candidates"]
-        if Path(item["wrapper_path"]).name == "B"
+        if Path(item["wrapper_path"]).name == wrapper_name
     )
 
     generated = env["service"].workflow_service.generate_plan(
@@ -187,6 +188,27 @@ def test_target_appearing_after_freeze_marks_utility_plan_stale(utility_executio
     assert marker.read_text(encoding="utf-8") == "foreign target"
 
 
+def test_target_appearing_after_validate_is_rechecked_before_execute(utility_execution_env):
+    env = utility_execution_env
+    root = env["root"]
+    plan_id = _generate_frozen_plan(env)
+
+    validation = env["service"].validate_plan(plan_id)
+    assert validation["status"] == "ready"
+
+    target = root / "C"
+    target.mkdir()
+    marker = target / "foreign-after-validate.txt"
+    marker.write_text("foreign target", encoding="utf-8")
+
+    with pytest.raises(PlanStaleError) as exc:
+        env["service"].execute_plan(plan_id)
+
+    assert any(item["reason"] == "target_appeared" for item in exc.value.stale_items)
+    assert (root / "B" / "C").is_dir()
+    assert marker.read_text(encoding="utf-8") == "foreign target"
+
+
 def test_symlink_and_path_aba_after_freeze_fail_closed(utility_execution_env):
     env = utility_execution_env
     root = env["root"]
@@ -201,33 +223,7 @@ def test_symlink_and_path_aba_after_freeze_fail_closed(utility_execution_env):
     assert (root / "B" / "C").is_symlink()
     assert not (root / "C").exists()
 
-    # Fresh environment path for an inode/path ABA replacement.
-    root2 = env["data_root_2"] if "data_root_2" in env else None
-    if root2 is None:
-        # Rebuild this case under another direct child name without reusing the stale plan.
-        (root / "B2" / "C2").mkdir(parents=True)
-        preview = env["service"].workflow_service.preview_workflow(
-            env["workflow_id"],
-            WorkflowPreviewRequest(page=1, page_size=50),
-        )
-        candidate = next(
-            item
-            for item in preview["utility_summary"]["candidates"]
-            if Path(item["wrapper_path"]).name == "B2"
-        )
-        generated = env["service"].workflow_service.generate_plan(
-            None,
-            env["workflow_id"],
-            WorkflowGeneratePlanRequest(
-                expected_compile_digest=preview["compile_digest"],
-                selected_candidate_ids=[candidate["candidate_id"]],
-            ),
-        )
-        aba_plan_id = generated["plan_id"]
-        env["service"].freeze_plan(aba_plan_id)
-    else:
-        raise AssertionError("unexpected fixture state")
-
+    aba_plan_id = _generate_frozen_plan(env, wrapper_name="B2", child_name="C2")
     old_child = env["tmp_path"] / "old-C2"
     (root / "B2" / "C2").rename(old_child)
     (root / "B2" / "C2").mkdir()
