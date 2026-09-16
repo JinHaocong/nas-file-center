@@ -3,7 +3,8 @@
 **Status:** APPROVED / FROZEN  
 **Approval date:** 2026-09-16  
 **Baseline:** `7d9e248dae25d706d65a36bc864fb86f9a613d4d`  
-**Canonical branch:** `v0.3.6-gate6b-utility-recursive-dirbal`
+**Canonical branch:** `v0.3.6-gate6b-utility-recursive-dirbal`  
+**Amendment:** `2026-09-16-gate6b-recursive-last-file-concurrency-amendment-a.md` — **APPROVED / FROZEN** on 2026-09-16. For Recursive Last-File concurrency and final mutation authority, Amendment A takes precedence over conflicting interpretations of Sections 4, 5, 6, 8, and 10 below.
 
 ## 1. Scope
 
@@ -227,17 +228,19 @@ If all highest-score choices are blocked, the duplicate group is SKIPPED / fail-
 
 This protection does not remove empty directories and must not implicitly invoke `remove_empty_dirs`.
 
+**Amendment A precedence:** the read-only snapshot above is a descriptor-bound / no-follow / identity-bound sampled snapshot, not a linearizable recursive-tree transaction against arbitrary external writers. Final mutation authority is supplemented by the Amendment A Freeze / Validate / Execute live-protection chain.
+
 ## 5. Preview / Generate / Execute Safety Chain
 
-The complete authority chain remains:
+The authority chain, as amended by Amendment A, is:
 
 ```text
 Completed Scan Snapshot
--> Read-only Preview / Compile
+-> Read-only Preview / sampled protection compile
 -> Explicit Generate BatchPlan(draft)
--> Freeze
--> Validate
--> Execute
+-> Freeze file identity/hash + protection scope authority
+-> Validate file identity/hash + current protection scope
+-> Execute live Recursive Last-File preflight
 -> Quarantine
 ```
 
@@ -246,9 +249,11 @@ Hard requirements:
 - Preview = zero filesystem mutation.
 - Preview = zero BatchPlan persistence.
 - Generate creates only `BatchPlan(draft)`.
-- Freeze remains physical identity / SHA256 authority.
+- Freeze remains physical identity / SHA256 authority and additionally carries the recursive protection scope required by Amendment A.
 - stale Validate blocks Execute.
+- Validate rechecks the current recursive protection scope for `recursive_directory_balanced_by_bytes`.
 - Execute uses the existing Worker and existing Quarantine transactional authority.
+- Execute performs the Amendment A live Recursive Last-File preflight immediately before the actual Quarantine mutation.
 - no second dedupe or utility executor.
 - dedupe mutation remains Quarantine only; no permanent delete.
 
@@ -277,6 +282,8 @@ PREVIEW_CHANGED
 ```
 
 The server must not silently recompute and accept a different result. The user must request a new Preview.
+
+**Amendment A precedence:** digest equality is necessary for the sampled Preview / Generate authority but is not sufficient to authorize the final Quarantine mutation. Validate and Execute must perform the additional live protection checks defined by Amendment A.
 
 ## 7. Explain / UI
 
@@ -331,6 +338,11 @@ Tests must cover at least:
 - deterministic Preview digest.
 - `PREVIEW_CHANGED` persists zero Draft.
 - full Generate -> Freeze -> Validate -> Execute regression.
+- Amendment A protection-scope authority is carried into Freeze / Validate / Execute.
+- Last-File changes after Generate but before Validate fail closed.
+- Last-File changes after Validate but before Execute fail closed in Execute preflight.
+- live count `2` may allow one Quarantine while the resulting live count `1` blocks a later overlapping Quarantine.
+- external instability that is observable during live preflight fails closed.
 - Quarantine only / zero permanent delete.
 
 ## 9. Explicit non-goals
@@ -348,13 +360,15 @@ Gate6-B does not implement or authorize:
 - cross-root lexical LCA,
 - semantic changes to existing `balanced_by_bytes`,
 - balance overriding scorer priority,
-- automatic empty-directory cleanup during dedupe.
+- automatic empty-directory cleanup during dedupe,
+- a claim of atomic exclusion or linearizable recursive-tree snapshot semantics against an arbitrary uncooperative external writer without filesystem transaction / snapshot / mandatory-lock support.
 
 ## 10. Closure sequence
 
 ```text
 Architecture Freeze APPROVED
--> Implementation Plan
+-> Architecture Amendment A APPROVED / FROZEN
+-> post-amendment Implementation Plan
 -> Strict TDD (RED -> GREEN -> REFACTOR)
 -> focused regression
 -> full backend regression
@@ -363,7 +377,7 @@ Architecture Freeze APPROVED
 -> independent review
 -> exact-candidate validation
 -> linux/amd64 Docker
--> real NAS small-data acceptance
+-> real NAS small-data acceptance under documented no-independent-writer condition
 -> Gate6-B PASS / CLOSED
 ```
 
