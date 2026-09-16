@@ -52,7 +52,9 @@ jobs:
           tests/test_workflow_compiler.py
           tests/test_gate5d_advanced_dedupe_core.py
           tests/test_gate5d_dedupe_preview_compiler.py
+          tests/test_gate5d_dedupe_preview_api.py
           tests/test_gate5d_dedupe_generate.py
+          tests/test_gate5d_dedupe_generate_api.py
           tests/test_gate5e_e4_discovery.py
           tests/test_gate5e_e4_lifecycle.py
           tests/test_gate5e_e4_hotfix2.py
