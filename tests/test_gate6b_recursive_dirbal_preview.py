@@ -101,6 +101,19 @@ def _create_recursive_fixture(env, *, scan_id: int):
     return left, right, a_extra, b_extra
 
 
+def _replace_with_same_bytes_new_inode(path: Path) -> tuple[os.stat_result, os.stat_result]:
+    before = os.lstat(path)
+    replacement = path.with_name(path.name + ".replacement")
+    replacement.write_bytes(path.read_bytes())
+    replacement_stat = os.lstat(replacement)
+    assert (replacement_stat.st_dev, replacement_stat.st_ino) != (before.st_dev, before.st_ino)
+    os.replace(replacement, path)
+    after = os.lstat(path)
+    assert (after.st_dev, after.st_ino) == (replacement_stat.st_dev, replacement_stat.st_ino)
+    assert (after.st_dev, after.st_ino) != (before.st_dev, before.st_ino)
+    return before, after
+
+
 def test_recursive_preview_exposes_candidate_bucket_and_decision_explain(service_env):
     scan_id = 901
     left, right, _a_extra, _b_extra = _create_recursive_fixture(service_env, scan_id=scan_id)
@@ -143,13 +156,7 @@ def test_recursive_preview_digest_changes_on_live_file_identity_aba(service_env)
     service = service_env["service"]
 
     before = service.get_dedupe_preview(scan_id, scorer_config=_recursive_config())
-    before_stat = os.lstat(left)
-    payload = left.read_bytes()
-    left.unlink()
-    left.write_bytes(payload)
-    after_stat = os.lstat(left)
-    assert (after_stat.st_dev, after_stat.st_ino) != (before_stat.st_dev, before_stat.st_ino)
-
+    _replace_with_same_bytes_new_inode(left)
     after = service.get_dedupe_preview(scan_id, scorer_config=_recursive_config())
 
     assert after["source_snapshot_digest"] != before["source_snapshot_digest"]
