@@ -863,6 +863,8 @@ class WorkflowService:
                     "matched_count": res.matched_count,
                     "matched_bytes": res.matched_bytes,
                 }
+                if definition.mode == "utility":
+                    plan_metadata["workflow_mode"] = "utility"
 
                 plan = BatchPlan(
                     name=plan_name,
