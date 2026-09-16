@@ -273,7 +273,10 @@ def build_frozen_recursive_protection(
 
     frozen_ancestors: dict[str, dict[str, object]] = {}
     for ancestor in authority.protected_ancestors:
-        sample = recursive_protection.snapshot_recursive_regular_files(ancestor)
+        sample = recursive_protection.snapshot_recursive_regular_files(
+            ancestor,
+            quarantine_root=quarantine_root,
+        )
         if (
             not sample.stable
             or sample.device is None
@@ -392,7 +395,10 @@ def evaluate_live_recursive_protection(
 
     current: list[tuple[str, recursive_protection.RecursiveProtectionSnapshot]] = []
     for ancestor in authority.protected_ancestors:
-        sample = recursive_protection.snapshot_recursive_regular_files(ancestor)
+        sample = recursive_protection.snapshot_recursive_regular_files(
+            ancestor,
+            quarantine_root=quarantine_root,
+        )
         current.append((ancestor, sample))
         frozen_sample = frozen_ancestors[ancestor]
         if (
