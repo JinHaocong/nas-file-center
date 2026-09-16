@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   apply-exact-service-patch:
-    if: github.event.head_commit.message == 'chore(gate6b): apply task4 freeze patch'
+    if: "${{ github.event.head_commit.message == 'chore(gate6b): apply task4 freeze patch' }}"
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
