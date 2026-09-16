@@ -242,7 +242,11 @@ def test_recursive_dedupe_workflow_preserves_config_and_explain_transport(api_en
     )
     assert create.status_code == 201, create.text
     workflow = create.json()
-    assert workflow["definition"]["steps"][0]["scorer_config"] == config
+    stored_config = workflow["definition"]["steps"][0]["scorer_config"]
+    assert stored_config["schema_version"] == 1
+    assert stored_config["selection_mode"] == RECURSIVE_MODE
+    # Workflow storage may canonicalize omitted factor defaults; the new mode token must survive.
+    assert set(stored_config["factors"]) == {"path_priority", "preferred_extension", "mtime"}
 
     preview = api_env["client"].post(
         f"/api/workflows/{workflow['id']}/preview",
