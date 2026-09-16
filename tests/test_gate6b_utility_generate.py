@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -172,6 +173,52 @@ def test_generate_rejects_discovery_change_and_persists_zero_draft(utility_servi
 
     assert exc.value.code == "PREVIEW_CHANGED"
     assert _plan_count(env) == 0
+
+
+def test_generate_wrapper_detach_during_recompile_is_preview_changed_with_zero_draft(
+    utility_service_env,
+    monkeypatch,
+):
+    env = utility_service_env
+    root = env["root"]
+    wrapper = root / "B1"
+    (wrapper / "C1").mkdir(parents=True)
+
+    preview = _preview(env)
+    candidate = _candidate(preview, "B1")
+    assert _plan_count(env) == 0
+
+    detached = env["tmp_path"] / "detached-B1"
+    real_scandir = os.scandir
+    scandir_count = 0
+    swapped = False
+
+    def swap_wrapper_before_generate_wrapper_scan(path):
+        nonlocal scandir_count, swapped
+        scandir_count += 1
+        if scandir_count == 2:
+            swapped = True
+            wrapper.rename(detached)
+            (wrapper / "C1").mkdir(parents=True)
+        return real_scandir(path)
+
+    monkeypatch.setattr(os, "scandir", swap_wrapper_before_generate_wrapper_scan)
+
+    with pytest.raises(WorkflowDigestMismatchError) as exc:
+        env["service"].workflow_service.generate_plan(
+            None,
+            env["workflow_id"],
+            WorkflowGeneratePlanRequest(
+                expected_compile_digest=preview["compile_digest"],
+                selected_candidate_ids=[candidate["candidate_id"]],
+            ),
+        )
+
+    assert swapped is True
+    assert exc.value.code == "PREVIEW_CHANGED"
+    assert _plan_count(env) == 0
+    assert (detached / "C1").is_dir()
+    assert (wrapper / "C1").is_dir()
 
 
 def test_candidate_id_from_another_preview_is_rejected(utility_service_env):
