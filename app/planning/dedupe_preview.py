@@ -294,6 +294,113 @@ def _collect_recursive_identity_rows(
     return count, identity_rows
 
 
+def _identity_rows_still_bound(
+    directory: str | Path,
+    *,
+    root_device: int,
+    root_inode: int,
+    identity_rows: Sequence[Mapping[str, Any]],
+) -> bool:
+    """Rebind every recorded identity through the current lexical tree, no-follow."""
+    dir_flags = _recursive_directory_open_flags()
+    if dir_flags is None:
+        return False
+
+    opened = _open_absolute_directory_nofollow(directory)
+    if opened is None:
+        return False
+    root_fd, root_st = opened
+    try:
+        if (
+            int(root_st.st_dev) != root_device
+            or int(root_st.st_ino) != root_inode
+        ):
+            return False
+
+        directory_identities: dict[str, tuple[int, int]] = {}
+        for row in identity_rows:
+            if row.get("object_type") != "directory":
+                continue
+            relative = str(row.get("path", ""))
+            directory_identities[relative] = (int(row["device"]), int(row["inode"]))
+
+        if directory_identities.get(".") != (root_device, root_inode):
+            return False
+
+        for row in identity_rows:
+            relative = str(row.get("path", ""))
+            object_type = row.get("object_type")
+            expected_device = int(row["device"])
+            expected_inode = int(row["inode"])
+
+            if relative == ".":
+                if object_type != "directory":
+                    return False
+                continue
+            if not relative or os.path.isabs(relative):
+                return False
+
+            parts = Path(relative).parts
+            if not parts or any(part in ("", ".", "..") for part in parts):
+                return False
+
+            current_fd = os.dup(root_fd)
+            current_relative = "."
+            try:
+                for part in parts[:-1]:
+                    next_fd = os.open(part, dir_flags, dir_fd=current_fd)
+                    next_st = os.fstat(next_fd)
+                    next_relative = part if current_relative == "." else f"{current_relative}/{part}"
+                    expected_parent = directory_identities.get(next_relative)
+                    os.close(current_fd)
+                    current_fd = next_fd
+                    current_relative = next_relative
+                    if (
+                        expected_parent is None
+                        or not stat.S_ISDIR(next_st.st_mode)
+                        or int(next_st.st_dev) != expected_parent[0]
+                        or int(next_st.st_ino) != expected_parent[1]
+                    ):
+                        return False
+
+                leaf = parts[-1]
+                if object_type == "directory":
+                    leaf_fd = os.open(leaf, dir_flags, dir_fd=current_fd)
+                    try:
+                        leaf_st = os.fstat(leaf_fd)
+                    finally:
+                        os.close(leaf_fd)
+                    if not stat.S_ISDIR(leaf_st.st_mode):
+                        return False
+                elif object_type == "file":
+                    leaf_flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0)
+                    leaf_fd = os.open(leaf, leaf_flags, dir_fd=current_fd)
+                    try:
+                        leaf_st = os.fstat(leaf_fd)
+                    finally:
+                        os.close(leaf_fd)
+                    if not stat.S_ISREG(leaf_st.st_mode):
+                        return False
+                else:
+                    return False
+
+                if (
+                    int(leaf_st.st_dev) != expected_device
+                    or int(leaf_st.st_ino) != expected_inode
+                ):
+                    return False
+            except OSError:
+                return False
+            finally:
+                try:
+                    os.close(current_fd)
+                except OSError:
+                    pass
+        return True
+    finally:
+        os.close(root_fd)
+
+
 def _snapshot_real_regular_files_recursive(directory: str | Path) -> _RecursiveProtectionSnapshot:
     """Descriptor-bound recursive regular-file snapshot; any authority race fails closed."""
     opened = _open_absolute_directory_nofollow(directory)
@@ -315,8 +422,7 @@ def _snapshot_real_regular_files_recursive(directory: str | Path) -> _RecursiveP
     # Reacquire the lexical protected root and collect the tree again. The
     # first pass may have kept scanning a descendant fd after that descendant
     # was renamed out of the tree. Requiring an identical second descriptor-
-    # bound pass proves that every counted directory/file identity still
-    # belongs to the same current protected tree before the snapshot is used.
+    # bound pass catches persistent membership changes from the first pass.
     verification_opened = _open_absolute_directory_nofollow(directory)
     if verification_opened is None:
         return _unstable_recursive_snapshot(device=root_device, inode=root_inode)
@@ -337,6 +443,18 @@ def _snapshot_real_regular_files_recursive(directory: str | Path) -> _RecursiveP
         return _unstable_recursive_snapshot(device=root_device, inode=root_inode)
     verification_count, verification_rows = verification
     if verification_count != count or verification_rows != identity_rows:
+        return _unstable_recursive_snapshot(device=root_device, inode=root_inode)
+
+    # The verification pass itself can hold a child fd that becomes detached
+    # after open but before scan. Rebind every recorded row through a freshly
+    # reacquired lexical root so persistent descendant detach/replacement is
+    # rejected before this snapshot can be authoritative.
+    if not _identity_rows_still_bound(
+        directory,
+        root_device=root_device,
+        root_inode=root_inode,
+        identity_rows=identity_rows,
+    ):
         return _unstable_recursive_snapshot(device=root_device, inode=root_inode)
 
     if not _directory_binding_matches(directory, root_device, root_inode):
