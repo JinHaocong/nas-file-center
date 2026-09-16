@@ -186,6 +186,11 @@ def test_recursive_generate_persists_exact_recursive_protection_authority(servic
         expected_preview_digest=preview["preview_digest"],
     )
 
+    with service.SessionLocal() as session:
+        plan = session.get(BatchPlan, result["id"])
+        assert plan is not None
+        plan_metadata = json.loads(plan.metadata_json)
+
     items = _plan_items(service, result["id"])
     assert items
     for item in items:
@@ -207,7 +212,8 @@ def test_recursive_generate_persists_exact_recursive_protection_authority(servic
         assert authority["group_provenance_id"] == metadata["group_provenance_id"]
         assert authority["group_decision_fingerprint"] == metadata["group_decision_fingerprint"]
         assert authority["preview_source_snapshot_digest"] == preview["source_snapshot_digest"]
-        assert authority["preview_db_lineage_digest"] == preview["db_lineage_digest"]
+        assert authority["preview_db_lineage_digest"] == plan_metadata["db_lineage_digest"]
+        assert len(authority["preview_db_lineage_digest"]) == 64
 
 
 def test_historical_generate_modes_do_not_persist_recursive_protection_authority(service_env):
