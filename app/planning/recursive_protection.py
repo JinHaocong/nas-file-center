@@ -32,10 +32,17 @@ class RecursiveProtectionSnapshot:
         }
 
 
-def snapshot_recursive_regular_files(directory: str | Path) -> RecursiveProtectionSnapshot:
+def snapshot_recursive_regular_files(
+    directory: str | Path,
+    *,
+    quarantine_root: str | Path | None = None,
+) -> RecursiveProtectionSnapshot:
     """Read one descriptor-bound, no-follow sampled recursive file snapshot."""
 
-    snapshot = _snapshot_real_regular_files_recursive(directory)
+    snapshot = _snapshot_real_regular_files_recursive(
+        directory,
+        quarantine_root=quarantine_root,
+    )
     return RecursiveProtectionSnapshot(
         count=snapshot.count,
         stable=snapshot.stable,
