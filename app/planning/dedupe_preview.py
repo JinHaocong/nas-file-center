@@ -175,11 +175,41 @@ def _unstable_recursive_snapshot(
     )
 
 
+def _relative_reserved_quarantine_path(
+    directory: str | Path,
+    quarantine_root: str | Path | None,
+) -> str | None:
+    """Return the exact root-relative reserved Quarantine path, or '.' for invalid overlap."""
+    if quarantine_root is None:
+        return None
+
+    root = os.path.abspath(os.path.normpath(str(directory)))
+    reserved = os.path.abspath(os.path.normpath(str(quarantine_root)))
+    try:
+        common = os.path.commonpath([root, reserved])
+    except ValueError:
+        return None
+
+    # A protected scope may never be the Quarantine root or live below it.
+    # Authorized callers already reject this, but the reader fails closed too.
+    if common == reserved:
+        return "."
+    if common != root:
+        return None
+
+    relative = os.path.relpath(reserved, root)
+    parts = Path(relative).parts
+    if not parts or any(part in ("", ".", "..") for part in parts):
+        return "."
+    return "/".join(parts)
+
+
 def _collect_recursive_identity_rows(
     root_fd: int,
     *,
     root_device: int,
     root_inode: int,
+    excluded_relative_path: str | None = None,
 ) -> tuple[int, list[dict[str, Any]]] | None:
     """Consume root_fd and collect one descriptor-bound tree identity pass."""
     dir_flags = _recursive_directory_open_flags()
@@ -214,13 +244,16 @@ def _collect_recursive_identity_rows(
                 continue
 
             for entry in entries:
+                relative_path = entry.name if relative_dir == "." else f"{relative_dir}/{entry.name}"
+                if excluded_relative_path is not None and relative_path == excluded_relative_path:
+                    continue
+
                 try:
                     entry_st = entry.stat(follow_symlinks=False)
                 except OSError:
                     stable = False
                     break
 
-                relative_path = entry.name if relative_dir == "." else f"{relative_dir}/{entry.name}"
                 if stat.S_ISLNK(entry_st.st_mode):
                     continue
 
@@ -419,8 +452,16 @@ def _identity_rows_still_bound(
         os.close(root_fd)
 
 
-def _snapshot_real_regular_files_recursive(directory: str | Path) -> _RecursiveProtectionSnapshot:
+def _snapshot_real_regular_files_recursive(
+    directory: str | Path,
+    *,
+    quarantine_root: str | Path | None = None,
+) -> _RecursiveProtectionSnapshot:
     """Descriptor-bound recursive regular-file snapshot; any authority race fails closed."""
+    excluded_relative_path = _relative_reserved_quarantine_path(directory, quarantine_root)
+    if excluded_relative_path == ".":
+        return _unstable_recursive_snapshot()
+
     opened = _open_absolute_directory_nofollow(directory)
     if opened is None:
         return _unstable_recursive_snapshot()
@@ -432,6 +473,7 @@ def _snapshot_real_regular_files_recursive(directory: str | Path) -> _RecursiveP
         root_fd,
         root_device=root_device,
         root_inode=root_inode,
+        excluded_relative_path=excluded_relative_path,
     )
     if first is None:
         return _unstable_recursive_snapshot(device=root_device, inode=root_inode)
@@ -456,6 +498,7 @@ def _snapshot_real_regular_files_recursive(directory: str | Path) -> _RecursiveP
         verification_fd,
         root_device=root_device,
         root_inode=root_inode,
+        excluded_relative_path=excluded_relative_path,
     )
     if verification is None:
         return _unstable_recursive_snapshot(device=root_device, inode=root_inode)
@@ -837,7 +880,10 @@ def compile_advanced_dedupe_preview(
         for directory in sorted(protected_dirs):
             normalized_directory = normalize_dedupe_path(directory)
             if recursive_mode:
-                protection_snapshot = _snapshot_real_regular_files_recursive(directory)
+                protection_snapshot = _snapshot_real_regular_files_recursive(
+                    directory,
+                    quarantine_root=quarantine_root,
+                )
                 directory_file_counts[normalized_directory] = protection_snapshot.count
                 directory_protection_snapshots[normalized_directory] = protection_snapshot.digest_payload()
             else:
