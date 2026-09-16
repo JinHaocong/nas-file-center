@@ -17,6 +17,9 @@ from app.planning.dedupe_config import (
 )
 
 
+LCA_DIRECT = "LCA_DIRECT"
+
+
 def normalize_dedupe_path(path: str | Path) -> str:
     """Pure lexical normalization of POSIX path.
 
@@ -82,6 +85,100 @@ def _lexical_relpath(sub_path: str, root_path: str) -> str:
     if norm_sub.startswith(prefix):
         return norm_sub[len(prefix):]
     return os.path.relpath(norm_sub, norm_root)
+
+
+def directory_ancestors_to_scan_root(
+    file_path: str | Path,
+    scan_root_path: str | Path,
+) -> tuple[str, ...]:
+    """Return lexical directory ancestry from file parent through Scan Root."""
+    norm_file = normalize_dedupe_path(file_path)
+    norm_root = normalize_dedupe_path(scan_root_path)
+    if not norm_file.startswith("/") or not norm_root.startswith("/"):
+        raise ValueError("file_path and scan_root_path must be absolute paths")
+    if not _is_lexical_contained(norm_file, norm_root) or norm_file == norm_root:
+        raise ValueError("file_path must be a descendant of scan_root_path")
+
+    current = normalize_dedupe_path(os.path.dirname(norm_file))
+    if not _is_lexical_contained(current, norm_root):
+        raise ValueError("file parent is outside scan_root_path")
+
+    ancestry: list[str] = []
+    while True:
+        ancestry.append(current)
+        if current == norm_root:
+            break
+        parent = normalize_dedupe_path(os.path.dirname(current))
+        if parent == current or not _is_lexical_contained(parent, norm_root):
+            raise ValueError("directory ancestry escaped scan_root_path")
+        current = parent
+    return tuple(ancestry)
+
+
+def compute_same_root_lca(
+    parent_paths: Sequence[str | Path],
+    scan_root_path: str | Path,
+) -> str:
+    """Compute a deterministic lexical LCA inside one authoritative Scan Root."""
+    if not parent_paths:
+        raise ValueError("parent_paths must not be empty")
+    norm_root = normalize_dedupe_path(scan_root_path)
+    if not norm_root.startswith("/"):
+        raise ValueError("scan_root_path must be absolute")
+
+    normalized: list[str] = []
+    for parent in parent_paths:
+        norm_parent = normalize_dedupe_path(parent)
+        if not norm_parent.startswith("/") or not _is_lexical_contained(norm_parent, norm_root):
+            raise ValueError("all parent_paths must be inside the same authoritative scan root")
+        normalized.append(norm_parent)
+
+    try:
+        lca = normalize_dedupe_path(os.path.commonpath(normalized))
+    except ValueError as exc:
+        raise ValueError("parent_paths do not share one lexical root") from exc
+    if not _is_lexical_contained(lca, norm_root):
+        raise ValueError("computed LCA escaped authoritative scan root")
+    return lca
+
+
+def derive_recursive_balance_bucket(
+    parent_path: str | Path,
+    lca_path: str | Path,
+) -> str:
+    """Return the first real child from LCA, or synthetic LCA_DIRECT."""
+    parent = normalize_dedupe_path(parent_path)
+    lca = normalize_dedupe_path(lca_path)
+    if parent == lca:
+        return LCA_DIRECT
+    if not _is_lexical_contained(parent, lca):
+        raise ValueError("parent_path must be equal to or below lca_path")
+    rel = _lexical_relpath(parent, lca)
+    if not rel or rel == ".":
+        return LCA_DIRECT
+    first = rel.split("/", 1)[0]
+    if lca == "/":
+        return "/" + first
+    return normalize_dedupe_path(lca + "/" + first)
+
+
+def accumulate_recursive_released_bytes(
+    current: Mapping[str, int] | None,
+    *,
+    file_path: str | Path,
+    scan_root_path: str | Path,
+    file_size: int,
+) -> dict[str, int]:
+    """Purely add released bytes to the parent and every real ancestor to root."""
+    if type(file_size) is not int or isinstance(file_size, bool) or file_size < 0:
+        raise ValueError("file_size must be a non-negative integer")
+    updated = {
+        normalize_dedupe_path(path): int(value)
+        for path, value in dict(current or {}).items()
+    }
+    for directory in directory_ancestors_to_scan_root(file_path, scan_root_path):
+        updated[directory] = updated.get(directory, 0) + file_size
+    return updated
 
 
 @dataclass(frozen=True)
@@ -317,12 +414,80 @@ def make_skipped_group_result(
     return _make_skipped_group_result(group, skip_reason, selection_reason)
 
 
+def _recursive_same_root_balance(
+    group: DedupeGroupSnapshot,
+    top_candidates: Sequence[DedupeMemberSnapshot],
+    *,
+    norm_scan_roots: Sequence[str],
+    current_released_bytes_by_directory: Mapping[str, int] | None,
+    current_direct_released_bytes_by_directory: Mapping[str, int] | None,
+) -> tuple[DedupeMemberSnapshot, dict[str, Any]]:
+    root_index = group.members[0].scan_root_index
+    scan_root = norm_scan_roots[root_index]
+    parent_by_path = {
+        m.absolute_path: normalize_dedupe_path(os.path.dirname(normalize_dedupe_path(m.absolute_path)))
+        for m in group.members
+    }
+    lca = compute_same_root_lca(list(parent_by_path.values()), scan_root)
+    bucket_by_path = {
+        m.absolute_path: derive_recursive_balance_bucket(parent_by_path[m.absolute_path], lca)
+        for m in group.members
+    }
+    bucket_keys = sorted(set(bucket_by_path.values()), key=str)
+
+    current_dirs = {
+        normalize_dedupe_path(path): int(value)
+        for path, value in dict(current_released_bytes_by_directory or {}).items()
+    }
+    current_direct = {
+        normalize_dedupe_path(path): int(value)
+        for path, value in dict(current_direct_released_bytes_by_directory or {}).items()
+    }
+    before = {
+        bucket: (
+            current_direct.get(lca, 0)
+            if bucket == LCA_DIRECT
+            else current_dirs.get(bucket, 0)
+        )
+        for bucket in bucket_keys
+    }
+    before_values = list(before.values())
+    spread_before = max(before_values, default=0) - min(before_values, default=0)
+
+    sim_options = []
+    for cand in top_candidates:
+        sim = dict(before)
+        for other in group.members:
+            if other.absolute_path != cand.absolute_path:
+                bucket = bucket_by_path[other.absolute_path]
+                sim[bucket] = sim.get(bucket, 0) + group.file_size
+        vals = list(sim.values())
+        spread = max(vals, default=0) - min(vals, default=0)
+        sum_sq = sum(v ** 2 for v in vals)
+        tie_key = normalize_dedupe_path(cand.absolute_path)
+        sim_options.append(((spread, sum_sq, tie_key), cand, sim))
+
+    best_key, winner, best_after = min(sim_options, key=lambda opt: opt[0])
+    return winner, {
+        "selection_mode": "recursive_directory_balanced_by_bytes",
+        "lca": lca,
+        "bucket": bucket_by_path[winner.absolute_path],
+        "bucket_released_bytes_before": before,
+        "bucket_released_bytes_after": best_after,
+        "spread_before": spread_before,
+        "spread_after": best_key[0],
+        "sum_squares_after": best_key[1],
+    }
+
+
 def evaluate_group(
     group: DedupeGroupSnapshot,
     config: AdvancedDedupeConfig,
     *,
     scan_roots: Sequence[str],
     current_released_bytes: dict[int, int] | None = None,
+    current_released_bytes_by_directory: Mapping[str, int] | None = None,
+    current_direct_released_bytes_by_directory: Mapping[str, int] | None = None,
 ) -> GroupDecisionResult:
     config = validate_and_canonicalize_config(config)
 
@@ -531,12 +696,19 @@ def evaluate_group(
             # consulted only when multiple safe candidates share the top score.
             winner = top_candidates[0]
             winner_reason = "unique_top_score"
+        elif len({m.scan_root_index for m in group.members}) == 1:
+            winner, winner_balance_info = _recursive_same_root_balance(
+                group,
+                top_candidates,
+                norm_scan_roots=norm_scan_roots,
+                current_released_bytes_by_directory=current_released_bytes_by_directory,
+                current_direct_released_bytes_by_directory=current_direct_released_bytes_by_directory,
+            )
+            winner_reason = "recursive_directory_balanced_by_bytes"
         else:
-            # Task 5 establishes an explicit, isolated route for the new mode.
-            # At this stage it reuses the frozen Scan Root balance objective as
-            # the outer layer. Task 6/7 extend this branch with same-root dynamic
-            # LCA/directory buckets and cross-root hierarchical balance without
-            # modifying the historical balanced_by_bytes branch above.
+            # Task 5 established the explicit new mode using the frozen Scan Root
+            # balance objective. Task 7 will make the root->directory hierarchy
+            # explicit for cross-root ties without changing old modes.
             sorted_roots = list(range(len(norm_scan_roots)))
 
             curr_rel = dict(current_released_bytes or {})
@@ -657,6 +829,8 @@ def run_advanced_dedupe(
     )
 
     released_bytes_by_scan_root: dict[int, int] = {r: 0 for r in authoritative_indices}
+    released_bytes_by_directory: dict[str, int] = {}
+    direct_released_bytes_by_directory: dict[str, int] = {}
     scheduled_directory_deletes: Counter[str] = Counter()
 
     # 3. Evaluate groups sequentially, accumulating released bytes for balancer
@@ -739,6 +913,8 @@ def run_advanced_dedupe(
             group,
             config,
             current_released_bytes=released_bytes_by_scan_root,
+            current_released_bytes_by_directory=released_bytes_by_directory,
+            current_direct_released_bytes_by_directory=direct_released_bytes_by_directory,
             scan_roots=norm_scan_roots,
         )
         results.append(res)
@@ -751,6 +927,18 @@ def run_advanced_dedupe(
                 if res.recommended_keep and m.absolute_path != res.recommended_keep.absolute_path:
                     if m.scan_root_index in released_bytes_by_scan_root:
                         released_bytes_by_scan_root[m.scan_root_index] += group.file_size
+                    released_bytes_by_directory = accumulate_recursive_released_bytes(
+                        released_bytes_by_directory,
+                        file_path=m.absolute_path,
+                        scan_root_path=m.scan_root_path,
+                        file_size=group.file_size,
+                    )
+                    parent_dir = normalize_dedupe_path(
+                        os.path.dirname(normalize_dedupe_path(m.absolute_path))
+                    )
+                    direct_released_bytes_by_directory[parent_dir] = (
+                        direct_released_bytes_by_directory.get(parent_dir, 0) + group.file_size
+                    )
                     top_dir = m.top_level_dir
                     if not top_dir:
                         root_p = Path(m.scan_root_path)
