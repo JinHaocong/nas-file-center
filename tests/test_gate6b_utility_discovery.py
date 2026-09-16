@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from app.batch_utilities.errors import BatchUtilitySymlinkBlockedError
+from app.batch_utilities.errors import BatchUtilityInvalidConfigError, BatchUtilitySymlinkBlockedError
 from app.batch_utilities.single_child_wrapper import discover_single_child_wrappers
 
 
@@ -159,3 +159,33 @@ def test_intermediate_subpath_component_aba_fails_closed_instead_of_following_re
 
     with pytest.raises(BatchUtilitySymlinkBlockedError):
         discover_single_child_wrappers(str(scope), str(root))
+
+
+def test_wrapper_detach_after_open_before_scan_fails_closed(tmp_path, monkeypatch):
+    root = tmp_path / "root"
+    root.mkdir()
+    wrapper = root / "B"
+    (wrapper / "C").mkdir(parents=True)
+    detached = tmp_path / "detached-wrapper"
+
+    real_scandir = os.scandir
+    scandir_count = 0
+    swapped = False
+
+    def swap_wrapper_before_wrapper_scan(path):
+        nonlocal scandir_count, swapped
+        scandir_count += 1
+        if scandir_count == 2:
+            swapped = True
+            wrapper.rename(detached)
+            (wrapper / "C").mkdir(parents=True)
+        return real_scandir(path)
+
+    monkeypatch.setattr(os, "scandir", swap_wrapper_before_wrapper_scan)
+
+    with pytest.raises(BatchUtilityInvalidConfigError, match="WRAPPER_IDENTITY_CHANGED"):
+        discover_single_child_wrappers(str(root), str(root))
+
+    assert swapped is True
+    assert (detached / "C").is_dir()
+    assert (wrapper / "C").is_dir()
