@@ -52,8 +52,14 @@ export function validateScorerConfigForm(config: DedupeScorerConfig): ConfigVali
     errors.push('schema_version 必须为 1');
   }
 
-  if (config.selection_mode !== 'weighted' && config.selection_mode !== 'balanced_by_bytes') {
-    errors.push('selection_mode 必须为 weighted 或 balanced_by_bytes');
+  if (
+    config.selection_mode !== 'weighted' &&
+    config.selection_mode !== 'balanced_by_bytes' &&
+    config.selection_mode !== 'recursive_directory_balanced_by_bytes'
+  ) {
+    errors.push(
+      'selection_mode 必须为 weighted、balanced_by_bytes 或 recursive_directory_balanced_by_bytes'
+    );
   }
 
   const { path_priority, preferred_extension, mtime } = config.factors || {};
