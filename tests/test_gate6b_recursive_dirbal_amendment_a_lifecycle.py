@@ -15,6 +15,7 @@ from app.models import (
     BatchPlanItem,
     DuplicateFile,
     DuplicateGroup,
+    OperationJournal,
     QuarantineEntry,
     ScanJob,
     TaskLock,
@@ -68,7 +69,7 @@ def _recursive_config() -> dict:
     }
 
 
-def _create_completed_scan(env: dict, *, scan_id: int) -> tuple[Path, Path, Path, Path]:
+def _create_completed_scan(env: dict, *, scan_id: int) -> tuple[Path, Path]:
     root: Path = env["root"]
     left_dir = root / "A" / "deep"
     right_dir = root / "B" / "deep"
@@ -80,12 +81,9 @@ def _create_completed_scan(env: dict, *, scan_id: int) -> tuple[Path, Path, Path
     right = right_dir / "dup.bin"
     left.write_bytes(payload)
     right.write_bytes(payload)
-    left_extra = left_dir / "extra.bin"
-    right_extra = right_dir / "extra.bin"
-    left_extra.write_bytes(b"keep-left-subtree-alive")
-    right_extra.write_bytes(b"keep-right-subtree-alive")
+    (left_dir / "extra.bin").write_bytes(b"keep-left-subtree-alive")
+    (right_dir / "extra.bin").write_bytes(b"keep-right-subtree-alive")
 
-    content_hash = hashlib.sha256(payload).hexdigest()
     with env["SessionLocal"]() as session:
         session.add(
             ScanJob(
@@ -104,7 +102,7 @@ def _create_completed_scan(env: dict, *, scan_id: int) -> tuple[Path, Path, Path
         group = DuplicateGroup(
             id=scan_id * 10 + 1,
             scan_job_id=scan_id,
-            content_hash=content_hash,
+            content_hash=hashlib.sha256(payload).hexdigest(),
             file_size=len(payload),
             member_count=2,
         )
@@ -127,12 +125,11 @@ def _create_completed_scan(env: dict, *, scan_id: int) -> tuple[Path, Path, Path
                 )
             )
         session.commit()
-
-    return left, right, left_extra, right_extra
+    return left, right
 
 
 def _generate(env: dict, *, scan_id: int) -> dict:
-    left, right, left_extra, right_extra = _create_completed_scan(env, scan_id=scan_id)
+    left, right = _create_completed_scan(env, scan_id=scan_id)
     service: FileCenterService = env["service"]
     config = _recursive_config()
     preview = service.get_dedupe_preview(scan_id, scorer_config=config)
@@ -155,28 +152,23 @@ def _generate(env: dict, *, scan_id: int) -> dict:
         row = rows[0]
         metadata = json.loads(row.metadata_json or "{}")
         source = Path(row.source_path)
-        operation = row.operation
-        keep_path = row.keep_path
+        keeper = Path(row.keep_path or "")
+        assert row.operation == "quarantine"
 
     assert source in {left, right}
-    keeper = right if source == left else left
-    extra = left_extra if source.parent == left.parent else right_extra
+    assert keeper in {left, right}
+    assert keeper != source
     authority = metadata["recursive_protection"]
     assert authority["source_path"] == str(source)
     assert authority["scan_root_path"] == str(env["root"])
     assert authority["protected_ancestors"] == list(
         directory_ancestors_to_scan_root(str(source), str(env["root"]))
     )
-    assert operation == "quarantine"
-    assert keep_path == str(keeper)
 
     return {
         "plan_id": plan_id,
-        "preview": preview,
         "source": source,
         "keeper": keeper,
-        "extra": extra,
-        "metadata": metadata,
     }
 
 
@@ -193,7 +185,7 @@ def _acquire_lease(service: FileCenterService, worker_id: str) -> None:
         session.commit()
 
 
-def _execute_with_worker(env: dict, plan_id: int, *, worker_id: str) -> int:
+def _execute_with_worker(env: dict, plan_id: int, *, worker_id: str) -> None:
     service: FileCenterService = env["service"]
     enqueued = service.enqueue_plan_execution(plan_id)
     job_id = int(enqueued["work_job_id"])
@@ -210,6 +202,8 @@ def _execute_with_worker(env: dict, plan_id: int, *, worker_id: str) -> int:
         context = JobContext(service.engine, service.SessionLocal, job.id, worker_id=worker_id)
         handler.run(job, context, env["settings"])
 
+    # The production worker owns WorkJob terminalization around handler.run().
+    # This fixture calls the handler directly, so close the synthetic job here.
     with service.SessionLocal() as session:
         job = session.get(WorkJob, job_id)
         assert job is not None
@@ -217,7 +211,6 @@ def _execute_with_worker(env: dict, plan_id: int, *, worker_id: str) -> int:
             job.status = "completed"
             job.finished_at = utcnow()
             session.commit()
-    return job_id
 
 
 def _plan_item_state(env: dict, plan_id: int) -> tuple[str, str, str | None, dict]:
@@ -234,9 +227,7 @@ def _remove_other_regular_files(source: Path) -> None:
         if sibling != source and sibling.is_file() and not sibling.is_symlink():
             sibling.unlink()
     assert source.exists()
-    assert sum(
-        1 for p in source.parent.iterdir() if p.is_file() and not p.is_symlink()
-    ) == 1
+    assert sum(1 for p in source.parent.iterdir() if p.is_file() and not p.is_symlink()) == 1
 
 
 def test_amendment_a_real_generate_freeze_validate_execute_quarantine_and_undo_available(tmp_path: Path):
@@ -247,17 +238,16 @@ def test_amendment_a_real_generate_freeze_validate_execute_quarantine_and_undo_a
     source: Path = case["source"]
     keeper: Path = case["keeper"]
 
-    # Generate persisted exact recursive authority; Freeze must add immutable live scope sealing.
     service.freeze_plan(plan_id)
     status, item_state, _reason, metadata = _plan_item_state(env, plan_id)
     assert status == "frozen"
-    assert item_state == "frozen"
+    assert item_state == "planned", "Freeze seals the plan while items remain planned until Validate"
     authority = metadata["recursive_protection"]
     frozen = metadata["frozen_recursive_protection"]
     assert frozen["scope_digest"]
     assert list(frozen["frozen_ancestors"].keys()) == authority["protected_ancestors"]
 
-    # Amendment A permits safe live count/tree changes between Freeze and Validate.
+    # Safe count/tree changes are allowed: Validate checks current safety, not snapshot equality.
     benign = source.parent / "benign-after-freeze.bin"
     benign.write_bytes(b"benign-current-state-change")
     empty_child = source.parent / "empty-child-must-not-be-removed"
@@ -265,7 +255,6 @@ def test_amendment_a_real_generate_freeze_validate_execute_quarantine_and_undo_a
 
     validated = service.validate_plan(plan_id)
     assert validated["status"] == "ready"
-
     _execute_with_worker(env, plan_id, worker_id="gate6b-amendment-a-happy")
 
     status, item_state, reason, _metadata = _plan_item_state(env, plan_id)
@@ -278,14 +267,13 @@ def test_amendment_a_real_generate_freeze_validate_execute_quarantine_and_undo_a
     assert empty_child.exists(), "recursive dedupe must not auto-remove empty directories"
 
     with env["SessionLocal"]() as session:
-        rows = list(session.scalars(select(BatchPlanItem).where(BatchPlanItem.plan_id == plan_id)))
-        assert [row.operation for row in rows] == ["quarantine"]
-        qentry = session.scalar(
-            select(QuarantineEntry).where(QuarantineEntry.plan_item_id == rows[0].id)
-        )
-        assert qentry is not None
-        assert qentry.state == "active"
+        row = session.scalar(select(BatchPlanItem).where(BatchPlanItem.plan_id == plan_id))
+        assert row is not None and row.operation == "quarantine"
+        qentry = session.scalar(select(QuarantineEntry).where(QuarantineEntry.plan_item_id == row.id))
+        assert qentry is not None and qentry.state == "active"
         assert Path(qentry.quarantine_path).exists(), "completed dedupe is recoverable Quarantine, not permanent delete"
+        journal = session.scalar(select(OperationJournal).where(OperationJournal.plan_item_id == row.id))
+        assert journal is not None and journal.operation == "quarantine"
         qentry_id = qentry.id
 
     undo = service.create_undo_plan(plan_id)
@@ -319,11 +307,10 @@ def test_amendment_a_change_after_generate_before_validate_is_blocked_without_re
     assert source.exists()
     assert keeper.exists(), "Validate failure must not choose a lower-score fallback candidate"
     with env["SessionLocal"]() as session:
-        assert session.scalar(
-            select(QuarantineEntry).where(QuarantineEntry.plan_item_id.in_(
-                select(BatchPlanItem.id).where(BatchPlanItem.plan_id == plan_id)
-            ))
-        ) is None
+        item = session.scalar(select(BatchPlanItem).where(BatchPlanItem.plan_id == plan_id))
+        assert item is not None
+        assert session.scalar(select(QuarantineEntry).where(QuarantineEntry.plan_item_id == item.id)) is None
+        assert session.scalar(select(OperationJournal).where(OperationJournal.plan_item_id == item.id)) is None
 
 
 def test_amendment_a_change_after_validate_before_execute_is_blocked_by_live_preflight(tmp_path: Path):
@@ -335,8 +322,7 @@ def test_amendment_a_change_after_validate_before_execute_is_blocked_by_live_pre
     keeper: Path = case["keeper"]
 
     service.freeze_plan(plan_id)
-    validated = service.validate_plan(plan_id)
-    assert validated["status"] == "ready"
+    assert service.validate_plan(plan_id)["status"] == "ready"
 
     _remove_other_regular_files(source)
     _execute_with_worker(env, plan_id, worker_id="gate6b-amendment-a-stale-execute")
@@ -347,12 +333,19 @@ def test_amendment_a_change_after_validate_before_execute_is_blocked_by_live_pre
     assert reason is not None and "RECURSIVE_PROTECT_LAST_FILE" in reason
     assert source.exists(), "live Execute preflight must veto before filesystem mutation"
     assert keeper.exists(), "Execute veto must not replan to a lower-score candidate"
+
     with env["SessionLocal"]() as session:
         item = session.scalar(select(BatchPlanItem).where(BatchPlanItem.plan_id == plan_id))
         assert item is not None
-        assert session.scalar(
-            select(QuarantineEntry).where(QuarantineEntry.plan_item_id == item.id)
-        ) is None
+        qentry = session.scalar(select(QuarantineEntry).where(QuarantineEntry.plan_item_id == item.id))
+        # Phase 1 intentionally persists a Quarantine intent before the final live
+        # preflight. A veto must retire it as abandoned, never as an active move.
+        assert qentry is not None
+        assert qentry.state == "abandoned"
+        assert qentry.last_error is not None and "RECURSIVE_PROTECT_LAST_FILE" in qentry.last_error
+        assert qentry.quarantine_path
+        assert not Path(qentry.quarantine_path).exists()
+        assert session.scalar(select(OperationJournal).where(OperationJournal.plan_item_id == item.id)) is None
 
 
 def test_amendment_a_symlinked_protected_ancestry_fails_closed_before_freeze_persistence(tmp_path: Path):
@@ -378,6 +371,5 @@ def test_amendment_a_symlinked_protected_ancestry_fails_closed_before_freeze_per
     with env["SessionLocal"]() as session:
         item = session.scalar(select(BatchPlanItem).where(BatchPlanItem.plan_id == plan_id))
         assert item is not None
-        assert session.scalar(
-            select(QuarantineEntry).where(QuarantineEntry.plan_item_id == item.id)
-        ) is None
+        assert session.scalar(select(QuarantineEntry).where(QuarantineEntry.plan_item_id == item.id)) is None
+        assert session.scalar(select(OperationJournal).where(OperationJournal.plan_item_id == item.id)) is None
