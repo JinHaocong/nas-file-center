@@ -1,6 +1,9 @@
 import os
 from pathlib import Path
 
+import pytest
+
+from app.batch_utilities.errors import BatchUtilitySymlinkBlockedError
 from app.batch_utilities.single_child_wrapper import discover_single_child_wrappers
 
 
@@ -104,7 +107,7 @@ def test_duplicate_virtual_targets_are_fail_closed_and_ids_are_deterministic(tmp
     assert all(not d.selectable for d in first)
 
 
-def test_authoritative_root_aba_cannot_redirect_discovery_outside_root(tmp_path, monkeypatch):
+def test_authoritative_root_aba_fails_closed_instead_of_following_replacement_symlink(tmp_path, monkeypatch):
     root = tmp_path / "root"
     root.mkdir()
     (root / "B" / "C").mkdir(parents=True)
@@ -126,13 +129,11 @@ def test_authoritative_root_aba_cannot_redirect_discovery_outside_root(tmp_path,
 
     monkeypatch.setattr(os, "scandir", swap_root_before_first_scan)
 
-    decisions = discover_single_child_wrappers(str(root), str(root))
-
-    assert [Path(d.wrapper_path).name for d in decisions] == ["B"]
-    assert all("EVIL" not in d.wrapper_path and "PWN" not in (d.child_path or "") for d in decisions)
+    with pytest.raises(BatchUtilitySymlinkBlockedError):
+        discover_single_child_wrappers(str(root), str(root))
 
 
-def test_intermediate_subpath_component_aba_cannot_redirect_discovery_outside_root(tmp_path, monkeypatch):
+def test_intermediate_subpath_component_aba_fails_closed_instead_of_following_replacement_symlink(tmp_path, monkeypatch):
     root = tmp_path / "root"
     managed = root / "managed"
     scope = managed / "scope"
@@ -156,7 +157,5 @@ def test_intermediate_subpath_component_aba_cannot_redirect_discovery_outside_ro
 
     monkeypatch.setattr(os, "scandir", swap_parent_before_first_scan)
 
-    decisions = discover_single_child_wrappers(str(scope), str(root))
-
-    assert [Path(d.wrapper_path).name for d in decisions] == ["B"]
-    assert all("EVIL" not in d.wrapper_path and "PWN" not in (d.child_path or "") for d in decisions)
+    with pytest.raises(BatchUtilitySymlinkBlockedError):
+        discover_single_child_wrappers(str(scope), str(root))
