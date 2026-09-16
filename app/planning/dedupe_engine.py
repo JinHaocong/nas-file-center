@@ -480,6 +480,125 @@ def _recursive_same_root_balance(
     }
 
 
+def _project_scan_root_balance(
+    group: DedupeGroupSnapshot,
+    *,
+    keep_root_index: int,
+    norm_scan_roots: Sequence[str],
+    current_released_bytes: Mapping[int, int] | None,
+) -> tuple[dict[int, int], int, int]:
+    """Project Scan Root released bytes when one member in keep_root_index is kept."""
+    projected = {
+        index: int(dict(current_released_bytes or {}).get(index, 0))
+        for index in range(len(norm_scan_roots))
+    }
+    members_per_root = Counter(m.scan_root_index for m in group.members)
+    for root_index, member_count in members_per_root.items():
+        quarantine_count = member_count - (1 if root_index == keep_root_index else 0)
+        projected[root_index] = projected.get(root_index, 0) + quarantine_count * group.file_size
+    values = [projected.get(index, 0) for index in range(len(norm_scan_roots))]
+    spread = max(values, default=0) - min(values, default=0)
+    sum_sq = sum(value ** 2 for value in values)
+    return projected, spread, sum_sq
+
+
+def _recursive_cross_root_balance(
+    group: DedupeGroupSnapshot,
+    top_candidates: Sequence[DedupeMemberSnapshot],
+    *,
+    norm_scan_roots: Sequence[str],
+    current_released_bytes: Mapping[int, int] | None,
+    current_released_bytes_by_directory: Mapping[str, int] | None,
+    current_direct_released_bytes_by_directory: Mapping[str, int] | None,
+) -> tuple[DedupeMemberSnapshot, dict[str, Any]]:
+    """Apply root balance first, then directory balance inside tied chosen roots."""
+    root_before = {
+        index: int(dict(current_released_bytes or {}).get(index, 0))
+        for index in range(len(norm_scan_roots))
+    }
+    root_values_before = list(root_before.values())
+    root_spread_before = max(root_values_before, default=0) - min(root_values_before, default=0)
+
+    roots_with_top_candidates = sorted({m.scan_root_index for m in top_candidates})
+    root_options: list[tuple[tuple[int, int], int, dict[int, int]]] = []
+    for root_index in roots_with_top_candidates:
+        projected, spread, sum_sq = _project_scan_root_balance(
+            group,
+            keep_root_index=root_index,
+            norm_scan_roots=norm_scan_roots,
+            current_released_bytes=current_released_bytes,
+        )
+        root_options.append(((spread, sum_sq), root_index, projected))
+
+    best_root_metric = min(option[0] for option in root_options)
+    tied_root_options = [option for option in root_options if option[0] == best_root_metric]
+
+    concrete_options: list[
+        tuple[
+            tuple[int, int, str],
+            DedupeMemberSnapshot,
+            dict[str, Any],
+        ]
+    ] = []
+    for root_metric, root_index, projected_root_bytes in tied_root_options:
+        root_top_candidates = [m for m in top_candidates if m.scan_root_index == root_index]
+        root_members = tuple(m for m in group.members if m.scan_root_index == root_index)
+
+        if len(root_top_candidates) == 1:
+            candidate = root_top_candidates[0]
+            directory_metric = (0, 0)
+            directory_info: dict[str, Any] = {
+                "selection_mode": "recursive_directory_balanced_by_bytes",
+                "lca": None,
+                "bucket": None,
+                "bucket_released_bytes_before": {},
+                "bucket_released_bytes_after": {},
+                "spread_before": 0,
+                "spread_after": 0,
+                "sum_squares_after": 0,
+            }
+        else:
+            root_group = DedupeGroupSnapshot(
+                provenance_id=group.provenance_id,
+                content_hash=group.content_hash,
+                file_size=group.file_size,
+                members=root_members,
+            )
+            candidate, directory_info = _recursive_same_root_balance(
+                root_group,
+                root_top_candidates,
+                norm_scan_roots=norm_scan_roots,
+                current_released_bytes_by_directory=current_released_bytes_by_directory,
+                current_direct_released_bytes_by_directory=current_direct_released_bytes_by_directory,
+            )
+            directory_metric = (
+                int(directory_info["spread_after"]),
+                int(directory_info["sum_squares_after"]),
+            )
+
+        info = dict(directory_info)
+        info.update({
+            "selected_scan_root_index": root_index,
+            "scan_root_released_bytes_before": root_before,
+            "scan_root_released_bytes_after": projected_root_bytes,
+            "scan_root_spread_before": root_spread_before,
+            "scan_root_spread_after": root_metric[0],
+            "scan_root_sum_squares_after": root_metric[1],
+        })
+        concrete_options.append((
+            (
+                directory_metric[0],
+                directory_metric[1],
+                normalize_dedupe_path(candidate.absolute_path),
+            ),
+            candidate,
+            info,
+        ))
+
+    _key, winner, balance_info = min(concrete_options, key=lambda option: option[0])
+    return winner, balance_info
+
+
 def evaluate_group(
     group: DedupeGroupSnapshot,
     config: AdvancedDedupeConfig,
@@ -706,34 +825,15 @@ def evaluate_group(
             )
             winner_reason = "recursive_directory_balanced_by_bytes"
         else:
-            # Task 5 established the explicit new mode using the frozen Scan Root
-            # balance objective. Task 7 will make the root->directory hierarchy
-            # explicit for cross-root ties without changing old modes.
-            sorted_roots = list(range(len(norm_scan_roots)))
-
-            curr_rel = dict(current_released_bytes or {})
-            vals_before = [curr_rel.get(r, 0) for r in sorted_roots]
-            spread_before = max(vals_before, default=0) - min(vals_before, default=0)
-
-            sim_options = []
-            for cand in top_candidates:
-                sim = dict(curr_rel)
-                for other in group.members:
-                    if other.absolute_path != cand.absolute_path:
-                        sim[other.scan_root_index] = sim.get(other.scan_root_index, 0) + group.file_size
-                vals = [sim.get(r, 0) for r in sorted_roots]
-                spread = max(vals, default=0) - min(vals, default=0)
-                sum_sq = sum(v ** 2 for v in vals)
-                tie_key = normalize_dedupe_path(cand.absolute_path)
-                sim_options.append(((spread, sum_sq, tie_key), cand, spread))
-
-            best_sim = min(sim_options, key=lambda opt: opt[0])
-            winner = best_sim[1]
+            winner, winner_balance_info = _recursive_cross_root_balance(
+                group,
+                top_candidates,
+                norm_scan_roots=norm_scan_roots,
+                current_released_bytes=current_released_bytes,
+                current_released_bytes_by_directory=current_released_bytes_by_directory,
+                current_direct_released_bytes_by_directory=current_direct_released_bytes_by_directory,
+            )
             winner_reason = "recursive_directory_balanced_by_bytes"
-            winner_balance_info = {
-                "spread_before": spread_before,
-                "spread_after": best_sim[2],
-            }
 
     # 5. Build Member Explanations
     explains = []
