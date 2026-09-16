@@ -75,7 +75,7 @@ export const UtilityWorkflowPreviewPanel: React.FC<Props> = ({ workflowId, revis
   const unsupportedCandidates = candidates.filter(
     (candidate) =>
       candidate.state === 'UNSUPPORTED_FILESYSTEM'
-      && candidate.capability_reason === 'UTILITY_MOVE_UNSUPPORTED_FILESYSTEM',
+      || candidate.capability_reason === 'UTILITY_MOVE_UNSUPPORTED_FILESYSTEM',
   );
   const canPreview = canPreviewWorkflow(isArchived) && !isDirty;
   const canDraft = canGenerateDraft(isArchived) && !isDirty && Boolean(previewData?.compile_digest) && selectedCandidateIds.length > 0 && !previewMutation.isPending && !generateMutation.isPending;
