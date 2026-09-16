@@ -20,6 +20,7 @@ from app.organizers.profile_validation import (
     DEFAULT_ORGANIZER_STATISTICS_TEMPLATE,
 )
 from app.path_safety import require_allowed_path, require_unreserved_path
+from app.planning.dedupe_engine import derive_recursive_balance_bucket, normalize_dedupe_path
 from app.planning.dedupe_generate import build_advanced_dedupe_draft_intents
 from app.planning.dedupe_preview import (
     canonicalize_effective_safety_policy,
@@ -444,6 +445,7 @@ class WorkflowCompiler:
         }
         digest = compute_definition_sha256(compile_payload)
 
+        recursive_mode = compilation.scorer_config.selection_mode == "recursive_directory_balanced_by_bytes"
         all_rows = []
         for g in compilation.groups:
             g_prov_id = g.group_provenance_id
@@ -491,6 +493,27 @@ class WorkflowCompiler:
                     for c in m.contributions
                 ]
 
+                candidate_balance_bucket: str | None = None
+                if recursive_mode and isinstance(g_balance_info, dict):
+                    lca = g_balance_info.get("lca")
+                    selected_root_index = g_balance_info.get("selected_scan_root_index")
+                    if isinstance(lca, str) and (
+                        selected_root_index is None or selected_root_index == m.scan_root_index
+                    ):
+                        try:
+                            parent = normalize_dedupe_path(
+                                os.path.dirname(normalize_dedupe_path(m.absolute_path))
+                            )
+                            candidate_balance_bucket = derive_recursive_balance_bucket(parent, lca)
+                        except ValueError:
+                            candidate_balance_bucket = None
+
+                recursive_last_file_protection_reason = (
+                    "RECURSIVE_PROTECT_LAST_FILE"
+                    if "RECURSIVE_PROTECT_LAST_FILE" in m.safety_reasons
+                    else None
+                )
+
                 all_rows.append({
                     "source": m.absolute_path,
                     "target": None,
@@ -518,6 +541,8 @@ class WorkflowCompiler:
                     "member_decision": member_decision,
                     "selection_reason": m.selection_reason,
                     "balance_info": m.balance_info,
+                    "candidate_balance_bucket": candidate_balance_bucket,
+                    "recursive_last_file_protection_reason": recursive_last_file_protection_reason,
                     "keep_path": g_recommended_keep_path,
                 })
 
