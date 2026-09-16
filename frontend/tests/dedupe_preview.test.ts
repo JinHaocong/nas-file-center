@@ -91,6 +91,33 @@ describe('Gate5-D / D4 Dedupe Preview & Explain Primitives', () => {
       assert.strictEqual(rows[0].member_decision, 'KEEP');
       assert.strictEqual(rows[0].total_score, 100);
     });
+
+    test('preserves historical canonical-row defaults when optional display metadata is absent', () => {
+      const items: WorkflowPreviewItem[] = [
+        {
+          source_path: '/data/minimal.jpg',
+          target_path: null,
+          operation: 'keep',
+          changed: false,
+          metadata: {
+            group_provenance_id: 202,
+            group_status: 'actionable',
+            group_file_size: 4096,
+            scan_root_index: 0,
+            eligible_as_keep: true,
+            recommended_keep: true,
+            member_decision: 'KEEP',
+          },
+        },
+      ];
+
+      const [row] = mapWorkflowPreviewItemsToDedupeRows(items);
+      assert.strictEqual(row.incomplete, false);
+      assert.strictEqual(row.group_reclaimable_bytes, 0);
+      assert.strictEqual(row.relative_path, '');
+      assert.strictEqual(row.scan_root_path, '');
+      assert.strictEqual(row.is_top_candidate, false);
+    });
   });
 
   describe('Released Bytes by Scan Root Mapping', () => {
