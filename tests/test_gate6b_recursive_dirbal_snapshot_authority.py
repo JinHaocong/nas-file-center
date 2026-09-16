@@ -105,6 +105,45 @@ def test_recursive_count_descendant_directory_aba_after_open_fails_closed(tmp_pa
     assert list(descendant.iterdir()) == []
 
 
+def test_recursive_count_descendant_aba_during_verification_pass_fails_closed(
+    tmp_path: Path,
+    monkeypatch,
+):
+    protected = tmp_path / "protected"
+    descendant = protected / "descendant"
+    descendant.mkdir(parents=True)
+    (descendant / "one.bin").write_bytes(b"one")
+    (descendant / "two.bin").write_bytes(b"two")
+
+    descendant_st = os.lstat(descendant)
+    detached = tmp_path / "detached-descendant"
+    real_scandir = os.scandir
+    descendant_scan_count = 0
+    swapped = False
+
+    def swap_on_second_descendant_scan(path):
+        nonlocal descendant_scan_count, swapped
+        if isinstance(path, int):
+            opened_st = os.fstat(path)
+            if (
+                int(opened_st.st_dev) == int(descendant_st.st_dev)
+                and int(opened_st.st_ino) == int(descendant_st.st_ino)
+            ):
+                descendant_scan_count += 1
+                if descendant_scan_count == 2:
+                    swapped = True
+                    descendant.rename(detached)
+                    descendant.mkdir()
+        return real_scandir(path)
+
+    monkeypatch.setattr(os, "scandir", swap_on_second_descendant_scan)
+
+    assert _count_real_regular_files_recursive(protected) == 0
+    assert swapped is True
+    assert descendant_scan_count == 2
+    assert list(descendant.iterdir()) == []
+
+
 @pytest.fixture
 def service_env(tmp_path: Path):
     data_dir = tmp_path / "data"
