@@ -89,6 +89,7 @@ class WorkflowService:
         definition_sha256: str,
         override_root_ids: list[int] | None = None,
         scan_job_id: int | None = None,
+        selected_candidate_ids: list[str] | None = None,
         safety_snapshot: DedupeWorkflowSafetySnapshot | None = None,
     ):
         if safety_snapshot is not None:
@@ -114,6 +115,7 @@ class WorkflowService:
             definition_sha256=definition_sha256,
             override_root_ids=override_root_ids,
             scan_job_id=scan_job_id,
+            selected_candidate_ids=selected_candidate_ids,
             max_candidates=MAX_WORKFLOW_CANDIDATES,
             max_plan_items=MAX_WORKFLOW_PLAN_ITEMS,
         )
@@ -491,11 +493,20 @@ class WorkflowService:
             validate_raw_steps_types(def_dict.get("steps", []), mode=mode)
             definition = WorkflowDefinition.model_validate(def_dict)
 
-            scan_job_id, effective_root_ids = resolve_mode_runtime_inputs(
-                definition.mode,
-                payload.root_ids,
-                payload.runtime_inputs,
-            )
+            if definition.mode == "utility":
+                if payload.root_ids is not None or payload.runtime_inputs is not None:
+                    raise WorkflowValidationError(
+                        "Runtime root/scan overrides are forbidden in utility workflow mode",
+                        code="UTILITY_RUNTIME_INPUTS_FORBIDDEN",
+                        status_code=422,
+                    )
+                scan_job_id, effective_root_ids = None, None
+            else:
+                scan_job_id, effective_root_ids = resolve_mode_runtime_inputs(
+                    definition.mode,
+                    payload.root_ids,
+                    payload.runtime_inputs,
+                )
             safety_snapshot = self._capture_dedupe_safety_snapshot() if definition.mode == "dedupe" else None
 
             res = self.compile_workflow_definition(
@@ -576,11 +587,13 @@ class WorkflowService:
                     "total_pages": total_pages,
                     "items": preview_items,
                     "dedupe_summary": dedupe_summary,
+                    "utility_summary": None,
                 }
             else:
                 all_items = res.planned_operations
+                changed_operations = {"rename", "move", "quarantine", "rmdir_empty"}
                 if payload.only_changed:
-                    all_items = [item for item in all_items if item.get("operation") in {"rename", "move", "quarantine"}]
+                    all_items = [item for item in all_items if item.get("operation") in changed_operations]
 
                 total = len(all_items)
                 page_size = payload.page_size
@@ -595,11 +608,26 @@ class WorkflowService:
                         "target_path": item.get("target"),
                         "operation": item["operation"],
                         "mtime_ns": item.get("mtime_ns"),
-                        "changed": item.get("operation") in {"rename", "move", "quarantine"},
+                        "changed": item.get("operation") in changed_operations,
                         "metadata": {k: v for k, v in item.items() if k not in {"source", "target", "operation", "mtime_ns"}},
                     }
                     for item in page_items
                 ]
+
+                if definition.mode == "utility":
+                    candidates = res.compile_context.get("utility_candidates", [])
+                    utility_summary = {
+                        "utility_action": res.compile_context.get("utility_action"),
+                        "scope_path": res.compile_context.get("scope_path"),
+                        "candidate_count": len(candidates),
+                        "ready_count": sum(1 for candidate in candidates if candidate.get("selectable")),
+                        "candidates": candidates,
+                        "selected_candidate_ids": res.compile_context.get("selected_candidate_ids", []),
+                    }
+                    preview_source = "utility-live-readonly"
+                else:
+                    utility_summary = None
+                    preview_source = "organizer-live-readonly" if definition.mode == "organizer" else "index"
 
                 return {
                     "workflow_id": wf.id,
@@ -607,7 +635,7 @@ class WorkflowService:
                     "workflow_revision": target_revision,
                     "definition_sha256": rev.definition_sha256,
                     "workflow_mode": definition.mode,
-                    "preview_source": "organizer-live-readonly" if definition.mode == "organizer" else "index",
+                    "preview_source": preview_source,
                     "live_filesystem_verified": False,
                     "compile_digest": res.compile_digest,
                     "matched_count": res.matched_count,
@@ -618,6 +646,7 @@ class WorkflowService:
                     "total_pages": total_pages,
                     "items": preview_items,
                     "dedupe_summary": None,
+                    "utility_summary": utility_summary,
                 }
 
     def generate_plan(
@@ -648,11 +677,32 @@ class WorkflowService:
             validate_raw_steps_types(def_dict.get("steps", []), mode=mode)
             definition = WorkflowDefinition.model_validate(def_dict)
 
-            scan_job_id, effective_root_ids = resolve_mode_runtime_inputs(
-                definition.mode,
-                payload.root_ids,
-                payload.runtime_inputs,
-            )
+            if definition.mode == "utility":
+                if payload.root_ids is not None or payload.runtime_inputs is not None:
+                    raise WorkflowValidationError(
+                        "Runtime root/scan overrides are forbidden in utility workflow mode",
+                        code="UTILITY_RUNTIME_INPUTS_FORBIDDEN",
+                        status_code=422,
+                    )
+                if payload.selected_candidate_ids is None:
+                    raise WorkflowValidationError(
+                        "selected_candidate_ids is required for utility workflow Generate",
+                        code="UTILITY_SELECTION_REQUIRED",
+                        status_code=422,
+                    )
+                scan_job_id, effective_root_ids = None, None
+            else:
+                if payload.selected_candidate_ids is not None:
+                    raise WorkflowValidationError(
+                        "selected_candidate_ids is only valid for utility workflow mode",
+                        code="UTILITY_SELECTION_FORBIDDEN",
+                        status_code=422,
+                    )
+                scan_job_id, effective_root_ids = resolve_mode_runtime_inputs(
+                    definition.mode,
+                    payload.root_ids,
+                    payload.runtime_inputs,
+                )
             safety_snapshot = self._capture_dedupe_safety_snapshot() if definition.mode == "dedupe" else None
 
             # Phase A: Read-only recompile
@@ -664,6 +714,9 @@ class WorkflowService:
                 definition_sha256=rev.definition_sha256,
                 override_root_ids=effective_root_ids,
                 scan_job_id=scan_job_id,
+                selected_candidate_ids=(
+                    payload.selected_candidate_ids if definition.mode == "utility" else None
+                ),
                 safety_snapshot=safety_snapshot,
             )
 
