@@ -196,26 +196,12 @@ def parse_recursive_protection_authority(
         field="recursive_protection.preview_db_lineage_digest",
     )
 
-    # When the legacy/top-level copies are present, require them to agree with the
-    # immutable nested authority instead of allowing two contradictory truths.
-    mirrored_fields = {
-        "scan_job_id": scan_job_id,
-        "scan_root_index": scan_root_index,
-        "scan_root_path": scan_root_path,
-        "group_provenance_id": group_provenance_id,
-        "group_decision_fingerprint": group_decision_fingerprint,
-    }
-    for field, expected in mirrored_fields.items():
-        if field in metadata and metadata[field] != expected:
-            raise _fail(f"top-level {field} disagrees with recursive_protection authority")
-
     roots = _normalize_allowed_roots(allowed_roots)
     scoped_paths = (scan_root_path, source_path, *ancestors)
     for path in scoped_paths:
         if not any(_is_contained(path, root) for root in roots):
             raise _fail("recursive protection scope escaped configured allowed roots")
 
-    quarantine_norm: str | None = None
     if quarantine_root is not None:
         quarantine_text = str(quarantine_root)
         quarantine_norm = normalize_dedupe_path(quarantine_text)
