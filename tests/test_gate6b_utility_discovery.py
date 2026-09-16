@@ -132,28 +132,29 @@ def test_authoritative_root_aba_cannot_redirect_discovery_outside_root(tmp_path,
     assert all("EVIL" not in d.wrapper_path and "PWN" not in (d.child_path or "") for d in decisions)
 
 
-def test_subpath_component_aba_cannot_redirect_discovery_outside_root(tmp_path, monkeypatch):
+def test_intermediate_subpath_component_aba_cannot_redirect_discovery_outside_root(tmp_path, monkeypatch):
     root = tmp_path / "root"
-    scope = root / "managed" / "scope"
+    managed = root / "managed"
+    scope = managed / "scope"
     scope.mkdir(parents=True)
     (scope / "B" / "C").mkdir(parents=True)
 
     attacker = tmp_path / "attacker"
-    (attacker / "EVIL" / "PWN").mkdir(parents=True)
-    detached = root / "managed" / "detached-scope"
+    (attacker / "scope" / "EVIL" / "PWN").mkdir(parents=True)
+    detached = root / "detached-managed"
 
     real_scandir = os.scandir
     swapped = False
 
-    def swap_scope_before_first_scan(path):
+    def swap_parent_before_first_scan(path):
         nonlocal swapped
         if not swapped:
             swapped = True
-            scope.rename(detached)
-            os.symlink(attacker, scope)
+            managed.rename(detached)
+            os.symlink(attacker, managed)
         return real_scandir(path)
 
-    monkeypatch.setattr(os, "scandir", swap_scope_before_first_scan)
+    monkeypatch.setattr(os, "scandir", swap_parent_before_first_scan)
 
     decisions = discover_single_child_wrappers(str(scope), str(root))
 
