@@ -1,5 +1,8 @@
 from pathlib import Path
 
+import pytest
+
+from app.batch_utilities.errors import BatchUtilitySymlinkBlockedError
 from app.db import create_engine_and_session, init_db
 from app.models import IndexRoot
 from app.workflows.compiler import WorkflowCompiler
@@ -127,3 +130,31 @@ def test_utility_compile_explicit_selection_omits_deselected_candidate(tmp_path)
     assert selected.planned_operations[0]["target"] == str(root / "C2")
     assert selected.planned_operations[1]["source"] == str(root / "B2")
     assert all("B1" not in op["source"] for op in selected.planned_operations)
+
+
+def test_utility_compile_rejects_symlink_authoritative_index_root(tmp_path):
+    real_root = tmp_path / "real-root"
+    real_root.mkdir()
+    (real_root / "B" / "C").mkdir(parents=True)
+    linked_root = tmp_path / "linked-root"
+    linked_root.symlink_to(real_root, target_is_directory=True)
+    quarantine = tmp_path / "quarantine"
+    quarantine.mkdir()
+
+    db_path = tmp_path / "test.db"
+    engine, SessionLocal = create_engine_and_session(db_path)
+    init_db(engine, db_path=db_path)
+    with SessionLocal() as session:
+        idx = IndexRoot(root=str(linked_root))
+        session.add(idx)
+        session.commit()
+        root_id = idx.id
+
+    with SessionLocal() as session:
+        compiler = WorkflowCompiler(
+            session=session,
+            allowed_roots=[tmp_path],
+            quarantine_root=quarantine,
+        )
+        with pytest.raises(BatchUtilitySymlinkBlockedError):
+            compiler.compile(_utility(root_id))
