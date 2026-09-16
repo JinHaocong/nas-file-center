@@ -1,0 +1,77 @@
+name: Gate6-B Exact Candidate Release Evidence
+
+on:
+  push:
+    branches:
+      - evidence/gate6b-fb120bfe-linux-amd64
+
+permissions:
+  contents: read
+
+jobs:
+  linux-amd64-docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout independently reviewed exact candidate
+        uses: actions/checkout@v4
+        with:
+          ref: fb120bfe2a760c1294c0ed650f95988dac1410ce
+          fetch-depth: 1
+
+      - name: Lock exact source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED="fb120bfe2a760c1294c0ed650f95988dac1410ce"
+          ACTUAL="$(git rev-parse HEAD)"
+          test "${ACTUAL}" = "${EXPECTED}"
+          {
+            echo "gate=Gate6-B"
+            echo "review_verdict=PASS"
+            echo "independent_review_id=5222130698"
+            echo "expected_candidate=${EXPECTED}"
+            echo "checked_out_candidate=${ACTUAL}"
+            echo "trigger_ref=${GITHUB_REF}"
+            echo "trigger_sha=${GITHUB_SHA}"
+            echo "build_platform=linux/amd64"
+          } | tee gate6b-release-identity.txt
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build exact candidate linux amd64 image locally
+        shell: bash
+        run: |
+          set -euo pipefail
+          SHA7="$(git rev-parse --short=7 HEAD)"
+          TAG="kerwinjhc/nas-file-center:0.3.6-gate6b-${SHA7}"
+          echo "candidate_tag=${TAG}" | tee docker-evidence.txt
+          docker buildx build \
+            --platform linux/amd64 \
+            --load \
+            --tag "${TAG}" \
+            . 2>&1 | tee docker-build.log
+          {
+            echo
+            echo "# image inspect"
+            docker image inspect "${TAG}"
+            echo
+            echo "# platform"
+            docker image inspect --format 'id={{.Id}} os={{.Os}} arch={{.Architecture}} created={{.Created}}' "${TAG}"
+          } | tee -a docker-evidence.txt
+          test "$(docker image inspect --format '{{.Architecture}}' "${TAG}")" = "amd64"
+          test "$(docker image inspect --format '{{.Os}}' "${TAG}")" = "linux"
+
+      - name: Upload Gate6-B exact-candidate Docker evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate6b-linux-amd64-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            gate6b-release-identity.txt
+            docker-build.log
+            docker-evidence.txt
