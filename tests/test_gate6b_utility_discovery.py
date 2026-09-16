@@ -102,3 +102,60 @@ def test_duplicate_virtual_targets_are_fail_closed_and_ids_are_deterministic(tmp
     assert [d.candidate_id for d in first] == [d.candidate_id for d in second]
     assert len(set(d.candidate_id for d in first)) == 2
     assert all(not d.selectable for d in first)
+
+
+def test_authoritative_root_aba_cannot_redirect_discovery_outside_root(tmp_path, monkeypatch):
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "B" / "C").mkdir(parents=True)
+
+    attacker = tmp_path / "attacker"
+    (attacker / "EVIL" / "PWN").mkdir(parents=True)
+    detached = tmp_path / "detached-root"
+
+    real_scandir = os.scandir
+    swapped = False
+
+    def swap_root_before_first_scan(path):
+        nonlocal swapped
+        if not swapped:
+            swapped = True
+            root.rename(detached)
+            os.symlink(attacker, root)
+        return real_scandir(path)
+
+    monkeypatch.setattr(os, "scandir", swap_root_before_first_scan)
+
+    decisions = discover_single_child_wrappers(str(root), str(root))
+
+    assert [Path(d.wrapper_path).name for d in decisions] == ["B"]
+    assert all("EVIL" not in d.wrapper_path and "PWN" not in (d.child_path or "") for d in decisions)
+
+
+def test_subpath_component_aba_cannot_redirect_discovery_outside_root(tmp_path, monkeypatch):
+    root = tmp_path / "root"
+    scope = root / "managed" / "scope"
+    scope.mkdir(parents=True)
+    (scope / "B" / "C").mkdir(parents=True)
+
+    attacker = tmp_path / "attacker"
+    (attacker / "EVIL" / "PWN").mkdir(parents=True)
+    detached = root / "managed" / "detached-scope"
+
+    real_scandir = os.scandir
+    swapped = False
+
+    def swap_scope_before_first_scan(path):
+        nonlocal swapped
+        if not swapped:
+            swapped = True
+            scope.rename(detached)
+            os.symlink(attacker, scope)
+        return real_scandir(path)
+
+    monkeypatch.setattr(os, "scandir", swap_scope_before_first_scan)
+
+    decisions = discover_single_child_wrappers(str(scope), str(root))
+
+    assert [Path(d.wrapper_path).name for d in decisions] == ["B"]
+    assert all("EVIL" not in d.wrapper_path and "PWN" not in (d.child_path or "") for d in decisions)
