@@ -175,19 +175,20 @@ def _unstable_recursive_snapshot(
     )
 
 
-def _snapshot_real_regular_files_recursive(directory: str | Path) -> _RecursiveProtectionSnapshot:
-    """Descriptor-bound recursive regular-file snapshot; any authority race fails closed."""
-    opened = _open_absolute_directory_nofollow(directory)
-    if opened is None:
-        return _unstable_recursive_snapshot()
-
-    root_fd, root_st = opened
-    root_device = int(root_st.st_dev)
-    root_inode = int(root_st.st_ino)
+def _collect_recursive_identity_rows(
+    root_fd: int,
+    *,
+    root_device: int,
+    root_inode: int,
+) -> tuple[int, list[dict[str, Any]]] | None:
+    """Consume root_fd and collect one descriptor-bound tree identity pass."""
     dir_flags = _recursive_directory_open_flags()
     if dir_flags is None:
-        os.close(root_fd)
-        return _unstable_recursive_snapshot(device=root_device, inode=root_inode)
+        try:
+            os.close(root_fd)
+        except OSError:
+            pass
+        return None
 
     regular_flags = os.O_RDONLY | os.O_NOFOLLOW
     count = 0
@@ -287,12 +288,60 @@ def _snapshot_real_regular_files_recursive(directory: str | Path) -> _RecursiveP
                 os.close(fd)
             except OSError:
                 pass
+        return None
+
+    identity_rows.sort(key=lambda row: (row["path"], row["object_type"], row["device"], row["inode"]))
+    return count, identity_rows
+
+
+def _snapshot_real_regular_files_recursive(directory: str | Path) -> _RecursiveProtectionSnapshot:
+    """Descriptor-bound recursive regular-file snapshot; any authority race fails closed."""
+    opened = _open_absolute_directory_nofollow(directory)
+    if opened is None:
+        return _unstable_recursive_snapshot()
+
+    root_fd, root_st = opened
+    root_device = int(root_st.st_dev)
+    root_inode = int(root_st.st_ino)
+    first = _collect_recursive_identity_rows(
+        root_fd,
+        root_device=root_device,
+        root_inode=root_inode,
+    )
+    if first is None:
+        return _unstable_recursive_snapshot(device=root_device, inode=root_inode)
+    count, identity_rows = first
+
+    # Reacquire the lexical protected root and collect the tree again. The
+    # first pass may have kept scanning a descendant fd after that descendant
+    # was renamed out of the tree. Requiring an identical second descriptor-
+    # bound pass proves that every counted directory/file identity still
+    # belongs to the same current protected tree before the snapshot is used.
+    verification_opened = _open_absolute_directory_nofollow(directory)
+    if verification_opened is None:
+        return _unstable_recursive_snapshot(device=root_device, inode=root_inode)
+    verification_fd, verification_st = verification_opened
+    if (
+        int(verification_st.st_dev) != root_device
+        or int(verification_st.st_ino) != root_inode
+    ):
+        os.close(verification_fd)
+        return _unstable_recursive_snapshot(device=root_device, inode=root_inode)
+
+    verification = _collect_recursive_identity_rows(
+        verification_fd,
+        root_device=root_device,
+        root_inode=root_inode,
+    )
+    if verification is None:
+        return _unstable_recursive_snapshot(device=root_device, inode=root_inode)
+    verification_count, verification_rows = verification
+    if verification_count != count or verification_rows != identity_rows:
         return _unstable_recursive_snapshot(device=root_device, inode=root_inode)
 
     if not _directory_binding_matches(directory, root_device, root_inode):
         return _unstable_recursive_snapshot(device=root_device, inode=root_inode)
 
-    identity_rows.sort(key=lambda row: (row["path"], row["object_type"], row["device"], row["inode"]))
     tree_identity_digest = hashlib.sha256(
         canonical_json_dumps(identity_rows).encode("utf-8")
     ).hexdigest()
