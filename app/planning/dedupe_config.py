@@ -160,14 +160,21 @@ class DedupeFactorsConfig:
 @dataclass(frozen=True)
 class AdvancedDedupeConfig:
     schema_version: int = 1
-    selection_mode: Literal["weighted", "balanced_by_bytes"] = "weighted"
+    selection_mode: Literal["weighted", "balanced_by_bytes", "recursive_directory_balanced_by_bytes"] = "weighted"
     factors: DedupeFactorsConfig = field(default_factory=DedupeFactorsConfig)
 
     def __post_init__(self):
         if type(self.schema_version) is not int or isinstance(self.schema_version, bool) or self.schema_version != 1:
             raise ValueError(f"Invalid schema_version {self.schema_version}, must be integer 1")
-        if type(self.selection_mode) is not str or self.selection_mode not in {"weighted", "balanced_by_bytes"}:
-            raise ValueError(f"Invalid selection_mode {self.selection_mode}, must be 'weighted' or 'balanced_by_bytes'")
+        if type(self.selection_mode) is not str or self.selection_mode not in {
+            "weighted",
+            "balanced_by_bytes",
+            "recursive_directory_balanced_by_bytes",
+        }:
+            raise ValueError(
+                f"Invalid selection_mode {self.selection_mode}, must be 'weighted', 'balanced_by_bytes', or "
+                "'recursive_directory_balanced_by_bytes'"
+            )
         if not isinstance(self.factors, DedupeFactorsConfig):
             raise ValueError(f"factors must be a DedupeFactorsConfig instance, got {type(self.factors).__name__}")
 
@@ -198,8 +205,15 @@ def validate_and_canonicalize_config(raw: Any) -> AdvancedDedupeConfig:
         raise ValueError(f"schema_version must be integer 1, got {schema_version!r}")
 
     selection_mode = raw.get("selection_mode", "weighted")
-    if type(selection_mode) is not str or selection_mode not in {"weighted", "balanced_by_bytes"}:
-        raise ValueError(f"Invalid selection_mode {selection_mode}, must be 'weighted' or 'balanced_by_bytes'")
+    if type(selection_mode) is not str or selection_mode not in {
+        "weighted",
+        "balanced_by_bytes",
+        "recursive_directory_balanced_by_bytes",
+    }:
+        raise ValueError(
+            f"Invalid selection_mode {selection_mode}, must be 'weighted', 'balanced_by_bytes', or "
+            "'recursive_directory_balanced_by_bytes'"
+        )
 
     if "factors" in raw and raw["factors"] is None:
         raise ValueError("factors cannot be None; dict required")
