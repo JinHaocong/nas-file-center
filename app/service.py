@@ -2072,7 +2072,6 @@ class FileCenterService:
                 it["metadata_json"] = json.dumps(
                     recursive_meta,
                     ensure_ascii=False,
-                    sort_keys=True,
                 )
 
             if plan_kind in {"quarantine-bulk-restore", "quarantine-bulk-purge"}:
