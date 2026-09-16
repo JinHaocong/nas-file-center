@@ -12,7 +12,7 @@ import {
 } from '../src/utils/dedupeConfig.js';
 
 const workflowTypesSource = readFileSync(resolve(process.cwd(), 'src/types/workflow.ts'), 'utf8');
-const builderSource = readFileSync(resolve(process.cwd(), 'src/pages/Workflows/WorkflowBuilderPage.tsx'), 'utf8');
+const builderSource = readFileSync(resolve(process.cwd(), 'src/pages/Workflows/WorkflowBuilder.tsx'), 'utf8');
 const previewPanelSource = readFileSync(resolve(process.cwd(), 'src/pages/Workflows/WorkflowPreviewPanel.tsx'), 'utf8');
 const dedupeEditorSource = readFileSync(resolve(process.cwd(), 'src/components/dedupe/DedupeScorerConfigEditor.tsx'), 'utf8');
 const explainDrawerSource = readFileSync(resolve(process.cwd(), 'src/components/dedupe/DedupeExplainDrawer.tsx'), 'utf8');
