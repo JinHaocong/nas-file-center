@@ -252,7 +252,7 @@ def test_worker_recursive_preflight_unstable_read_blocks_before_execute_item(tmp
     monkeypatch.setattr(
         recursive_protection,
         "snapshot_recursive_regular_files",
-        lambda _path: RecursiveProtectionSnapshot(
+        lambda _path, **_kwargs: RecursiveProtectionSnapshot(
             count=0,
             stable=False,
             device=None,
@@ -301,9 +301,9 @@ def test_worker_recursive_preflight_order_is_after_final_freshness_and_before_ex
         events.append("freshness")
         return original_verify(*args, **kwargs)
 
-    def tracked_snapshot(path):
+    def tracked_snapshot(path, **kwargs):
         events.append("live_preflight")
-        return original_snapshot(path)
+        return original_snapshot(path, **kwargs)
 
     def tracked_execute(*args, **kwargs):
         events.append("execute")
