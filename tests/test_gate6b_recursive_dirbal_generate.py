@@ -1,0 +1,155 @@
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+
+import pytest
+from sqlalchemy import func, select
+
+from app.config import Settings
+from app.models import BatchPlan, BatchPlanItem, DuplicateFile, DuplicateGroup, ScanJob, utcnow
+from app.planning.dedupe_preview import DedupePreviewChangedError
+from app.service import FileCenterService
+
+
+@pytest.fixture
+def service_env(tmp_path: Path):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    quarantine_dir = tmp_path / "quarantine"
+    quarantine_dir.mkdir()
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    settings = Settings(
+        config_dir=config_dir,
+        data_mount=data_dir,
+        quarantine_root=quarantine_dir,
+        allowed_roots_raw=str(data_dir),
+        protect_last_file=True,
+        initial_admin_username="admin",
+        initial_admin_password="AdminPassword123!",
+    )
+    service = FileCenterService(settings)
+    return {
+        "service": service,
+        "SessionLocal": service.SessionLocal,
+        "settings": settings,
+        "data_dir": data_dir,
+    }
+
+
+def _recursive_config():
+    return {
+        "schema_version": 1,
+        "selection_mode": "recursive_directory_balanced_by_bytes",
+        "factors": {},
+    }
+
+
+def _create_recursive_fixture(env, *, scan_id: int):
+    root = env["data_dir"]
+    a_dir = root / "A" / "deep"
+    b_dir = root / "B" / "deep"
+    a_dir.mkdir(parents=True)
+    b_dir.mkdir(parents=True)
+    left = a_dir / "dup.bin"
+    right = b_dir / "dup.bin"
+    left.write_bytes(b"same-bytes")
+    right.write_bytes(b"same-bytes")
+    a_extra = a_dir / "extra.bin"
+    b_extra = b_dir / "extra.bin"
+    a_extra.write_bytes(b"keep-a-subtree-alive")
+    b_extra.write_bytes(b"keep-b-subtree-alive")
+
+    with env["SessionLocal"]() as session:
+        session.add(ScanJob(
+            id=scan_id,
+            name=f"scan-{scan_id}",
+            mode="normal",
+            roots_json=json.dumps([str(root)]),
+            status="completed",
+            started_at=utcnow(),
+            finished_at=utcnow(),
+            total_groups=1,
+            total_files_in_groups=2,
+            reclaimable_bytes=len(b"same-bytes"),
+        ))
+        group = DuplicateGroup(
+            id=scan_id * 10 + 1,
+            scan_job_id=scan_id,
+            content_hash=f"recursive-{scan_id}",
+            file_size=len(b"same-bytes"),
+            member_count=2,
+        )
+        session.add(group)
+        session.flush()
+        for path in (left, right):
+            st = os.lstat(path)
+            relative = path.relative_to(root)
+            session.add(DuplicateFile(
+                group_id=group.id,
+                root_id=0,
+                absolute_path=str(path),
+                relative_path=relative.as_posix(),
+                top_level_dir=str(root / relative.parts[0]),
+                size=st.st_size,
+                mtime_ns=st.st_mtime_ns,
+                device=st.st_dev,
+                inode=st.st_ino,
+            ))
+        session.commit()
+    return left, right, a_extra, b_extra
+
+
+def _plan_counts(service: FileCenterService):
+    with service.SessionLocal() as session:
+        return (
+            session.scalar(select(func.count(BatchPlan.id))) or 0,
+            session.scalar(select(func.count(BatchPlanItem.id))) or 0,
+        )
+
+
+def test_recursive_generate_live_identity_aba_returns_preview_changed_and_zero_draft(service_env):
+    scan_id = 911
+    left, _right, _a_extra, _b_extra = _create_recursive_fixture(service_env, scan_id=scan_id)
+    service = service_env["service"]
+    config = _recursive_config()
+    preview = service.get_dedupe_preview(scan_id, scorer_config=config)
+    before_counts = _plan_counts(service)
+
+    old_stat = os.lstat(left)
+    payload = left.read_bytes()
+    left.unlink()
+    left.write_bytes(payload)
+    new_stat = os.lstat(left)
+    assert (old_stat.st_dev, old_stat.st_ino) != (new_stat.st_dev, new_stat.st_ino)
+
+    with pytest.raises(DedupePreviewChangedError):
+        service.create_advanced_dedupe_plan(
+            scan_id,
+            scorer_config=config,
+            expected_preview_digest=preview["preview_digest"],
+        )
+
+    assert _plan_counts(service) == before_counts
+
+
+def test_recursive_generate_ancestor_count_change_returns_preview_changed_and_zero_draft(service_env):
+    scan_id = 912
+    _left, _right, a_extra, _b_extra = _create_recursive_fixture(service_env, scan_id=scan_id)
+    service = service_env["service"]
+    config = _recursive_config()
+    preview = service.get_dedupe_preview(scan_id, scorer_config=config)
+    before_counts = _plan_counts(service)
+
+    a_extra.unlink()
+
+    with pytest.raises(DedupePreviewChangedError):
+        service.create_advanced_dedupe_plan(
+            scan_id,
+            scorer_config=config,
+            expected_preview_digest=preview["preview_digest"],
+        )
+
+    assert _plan_counts(service) == before_counts
