@@ -15,8 +15,9 @@ from app.models import BatchPlan, BatchPlanItem
 def _exercise_cleanup(
     tmp_path: Path,
     *,
-    cleanup_device: int | None,
-    cleanup_inode: int | None,
+    cleanup_device: int | None = None,
+    cleanup_inode: int | None = None,
+    use_actual_identity: bool = False,
     predecessor_source_override: str | None = None,
     predecessor_target_override: str | None = None,
 ):
@@ -26,6 +27,11 @@ def _exercise_cleanup(
     child = wrapper / "C"
     target = data_root / "utility" / "A" / "C"
     candidate_id = "review-authority-binding"
+
+    if use_actual_identity:
+        st = os.lstat(wrapper)
+        cleanup_device = st.st_dev
+        cleanup_inode = st.st_ino
 
     db_path = tmp_path / "app.db"
     engine, SessionLocal = create_engine_and_session(db_path)
@@ -142,41 +148,24 @@ def test_cleanup_authority_requires_valid_frozen_wrapper_identity(
 
 
 def test_cleanup_authority_binds_completed_move_actual_source_path(tmp_path):
-    data_root = tmp_path / "data"
-    expected_wrapper = data_root / "utility" / "A" / "B"
-    expected_wrapper.mkdir(parents=True)
-    st = os.lstat(expected_wrapper)
-    # Recreate through the helper in a separate tmp subtree while preserving a valid identity.
-    inner = tmp_path / "case"
-    wrapper = inner / "data" / "utility" / "A" / "B"
-    wrapper.mkdir(parents=True)
-    st = os.lstat(wrapper)
-
-    result, actual_wrapper = _exercise_cleanup(
-        inner,
-        cleanup_device=st.st_dev,
-        cleanup_inode=st.st_ino,
-        predecessor_source_override=str(inner / "data" / "utility" / "WRONG"),
+    result, wrapper = _exercise_cleanup(
+        tmp_path,
+        use_actual_identity=True,
+        predecessor_source_override=str(tmp_path / "data" / "utility" / "WRONG"),
     )
 
     assert result.state == "skipped"
     assert result.reason == "permanent deletion is disabled"
-    assert actual_wrapper.exists()
+    assert wrapper.exists()
 
 
 def test_cleanup_authority_binds_completed_move_actual_target_path(tmp_path):
-    inner = tmp_path / "case"
-    wrapper = inner / "data" / "utility" / "A" / "B"
-    wrapper.mkdir(parents=True)
-    st = os.lstat(wrapper)
-
-    result, actual_wrapper = _exercise_cleanup(
-        inner,
-        cleanup_device=st.st_dev,
-        cleanup_inode=st.st_ino,
-        predecessor_target_override=str(inner / "data" / "utility" / "WRONG-TARGET"),
+    result, wrapper = _exercise_cleanup(
+        tmp_path,
+        use_actual_identity=True,
+        predecessor_target_override=str(tmp_path / "data" / "utility" / "WRONG-TARGET"),
     )
 
     assert result.state == "skipped"
     assert result.reason == "permanent deletion is disabled"
-    assert actual_wrapper.exists()
+    assert wrapper.exists()
