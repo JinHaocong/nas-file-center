@@ -33,24 +33,16 @@ jobs:
 
           path = Path("app/tasks/handlers_base.py")
           text = path.read_text(encoding="utf-8")
-          old = '''                context.checkpoint(
-                      progress_current=total_groups,
-                      progress_total=0,
-                      progress_message=f"Importing duplicate groups ({total_groups} found)...",
-                  )
-          '''
-          new = '''                context.checkpoint(
-                      progress_current=total_groups,
-                      progress_total=None,
-                      progress_message=f"Importing duplicate groups ({total_groups} found)...",
-                  )
-          '''
+          old = '''                    progress_total=0,
+                      progress_message=f"Importing duplicate groups ({total_groups} found)...",'''
+          new = '''                    progress_total=None,
+                      progress_message=f"Importing duplicate groups ({total_groups} found)...",'''
           if text.count(old) == 1:
               path.write_text(text.replace(old, new, 1), encoding="utf-8")
           elif text.count(new) == 1:
               print("minimal fix already present")
           else:
-              raise SystemExit("expected fclones import checkpoint not found exactly once")
+              raise SystemExit("expected fclones import progress pair not found exactly once")
           PY
           git diff --check
           git diff -- app/tasks/handlers_base.py
