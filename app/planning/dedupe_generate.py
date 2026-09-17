@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 
+from app.planning.dedupe_engine import directory_ancestors_to_scan_root
 from app.planning.dedupe_preview import DedupePreviewCompilation, derive_canonical_top_level_dir
 
 
@@ -26,6 +27,7 @@ def build_advanced_dedupe_draft_intents(
     protect_last_file: bool,
 ) -> tuple[DedupeDraftIntent, ...]:
     intents: list[DedupeDraftIntent] = []
+    recursive_mode = compilation.scorer_config.selection_mode == "recursive_directory_balanced_by_bytes"
 
     for group in compilation.groups:
         if group.status != "actionable":
@@ -62,6 +64,25 @@ def build_advanced_dedupe_draft_intents(
                     member.scan_root_path,
                     member.relative_path,
                 )
+
+            if recursive_mode:
+                protected_ancestors = directory_ancestors_to_scan_root(
+                    cleanup_path,
+                    member.scan_root_path,
+                )
+                metadata["recursive_protection"] = {
+                    "schema_version": 1,
+                    "selection_mode": "recursive_directory_balanced_by_bytes",
+                    "scan_job_id": compilation.scan_job_id,
+                    "scan_root_index": member.scan_root_index,
+                    "scan_root_path": member.scan_root_path,
+                    "source_path": cleanup_path,
+                    "protected_ancestors": list(protected_ancestors),
+                    "group_provenance_id": group.group_provenance_id,
+                    "group_decision_fingerprint": group.group_decision_fingerprint,
+                    "preview_source_snapshot_digest": compilation.source_snapshot_digest,
+                    "preview_db_lineage_digest": compilation.db_lineage_digest,
+                }
 
             intents.append(DedupeDraftIntent(
                 sequence=len(intents) + 1,

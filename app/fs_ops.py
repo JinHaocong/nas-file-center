@@ -16,11 +16,21 @@ from pathlib import Path
 import stat
 import sys
 
-__all__ = ["rename_noreplace", "rename_noreplace_at"]
+__all__ = [
+    "NoreplaceProbeCleanupError",
+    "probe_existing_noreplace_capability_at",
+    "rename_noreplace",
+    "rename_noreplace_at",
+]
 
 _AT_FDCWD = -100
 _RENAME_NOREPLACE = 1
 _RENAME_EXCL = 0x00000004
+
+
+class NoreplaceProbeCleanupError(RuntimeError):
+    """Raised when a disposable NOREPLACE capability probe cannot be fully cleaned up."""
+
 
 
 def _get_linux_rename_func():
@@ -156,6 +166,70 @@ def _normalize_dir_fd(dfd: int | None) -> int | None:
     return dfd
 
 
+def _cleanup_probe_name(path: str, *, dir_fd: int | None = None) -> bool:
+    try:
+        os.unlink(path, dir_fd=dir_fd)
+        return True
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+
+
+def _raise_probe_cleanup_error() -> None:
+    raise NoreplaceProbeCleanupError("RENAME_NOREPLACE probe cleanup failed")
+
+
+def probe_existing_noreplace_capability_at(dir_fd: int, entry_name: str) -> bool | None:
+    """Probe native NOREPLACE support without mutating the candidate binding.
+
+    A same-entry call is used only as a non-destructive first signal. EEXIST,
+    ENOTEMPTY, or an unchanged successful no-op are not sufficient proof of
+    real cross-name MOVE support because COMPAT filesystems may special-case
+    source == destination. Any such positive-looking result must therefore be
+    confirmed by the isolated disposable cross-name probe before mutation
+    authority is granted. Ambiguous results fail closed as None. A disposable
+    probe cleanup failure raises NoreplaceProbeCleanupError because namespace
+    residue is a safety failure, not ordinary capability ambiguity.
+    """
+    if _RENAME_AT_IMPL is None:
+        return False
+
+    try:
+        before = os.stat(entry_name, dir_fd=dir_fd, follow_symlinks=False)
+    except OSError:
+        return None
+
+    ctypes.set_errno(0)
+    result = _RENAME_AT_IMPL(
+        dir_fd,
+        os.fsencode(entry_name),
+        dir_fd,
+        os.fsencode(entry_name),
+    )
+    if result == 0:
+        try:
+            after = os.stat(entry_name, dir_fd=dir_fd, follow_symlinks=False)
+        except OSError:
+            return None
+        before_identity = (before.st_dev, before.st_ino, stat.S_IFMT(before.st_mode))
+        after_identity = (after.st_dev, after.st_ino, stat.S_IFMT(after.st_mode))
+        if after_identity != before_identity:
+            return None
+        return _probe_rename_noreplace_supported(dir_fd=dir_fd)
+
+    err = ctypes.get_errno()
+    if err in (errno.EEXIST, errno.ENOTEMPTY):
+        return _probe_rename_noreplace_supported(dir_fd=dir_fd)
+    if err in (
+        errno.ENOSYS,
+        errno.EOPNOTSUPP,
+        getattr(errno, "ENOTSUP", errno.EOPNOTSUPP),
+    ):
+        return False
+    return None
+
+
 def _probe_rename_noreplace_supported(
     target: Path | str | None = None,
     *,
@@ -165,11 +239,14 @@ def _probe_rename_noreplace_supported(
     """
     Probes whether the filesystem at target directory or dir_fd supports atomic RENAME_NOREPLACE.
     Uses a valid, existing disposable temporary file to exercise the filesystem's handling
-    of the RENAME_NOREPLACE flag.
+    of the RENAME_NOREPLACE flag. A positive result is granted only after both disposable
+    probe names are confirmed cleaned up; unresolved cleanup raises a safety error.
     Returns:
-      True:  Filesystem supports RENAME_NOREPLACE (e.g. probe rename returned 0).
+      True:  Filesystem supports RENAME_NOREPLACE and probe cleanup completed.
       False: Filesystem rejects RENAME_NOREPLACE capability (e.g. returned EINVAL/ENOSYS/EOPNOTSUPP on existing source).
-      None:  Capability could not be safely established (fails closed).
+      None:  Capability could not otherwise be safely established (fails closed).
+    Raises:
+      NoreplaceProbeCleanupError: Disposable probe namespace cleanup could not be confirmed.
     """
     if dir_fd is not None and _RENAME_AT_IMPL is not None:
         dfd_norm = _normalize_dir_fd(dir_fd)
@@ -185,10 +262,17 @@ def _probe_rename_noreplace_supported(
                 0o600,
                 dir_fd=dfd_norm,
             )
-            os.close(fd)
         except Exception:
             return None
 
+        try:
+            os.close(fd)
+        except Exception:
+            _cleanup_probe_name(probe_src_name, dir_fd=dfd_norm)
+            _cleanup_probe_name(probe_dst_name, dir_fd=dfd_norm)
+            _raise_probe_cleanup_error()
+
+        capability: bool | None = None
         try:
             res = _RENAME_AT_IMPL(
                 raw_fd,
@@ -197,25 +281,23 @@ def _probe_rename_noreplace_supported(
                 os.fsencode(probe_dst_name),
             )
             if res == 0:
-                return True
-            perr = ctypes.get_errno()
-            if perr in (
-                errno.EINVAL,
-                errno.ENOSYS,
-                errno.EOPNOTSUPP,
-                getattr(errno, "ENOTSUP", errno.EOPNOTSUPP),
-            ):
-                return False
-            return None
+                capability = True
+            else:
+                perr = ctypes.get_errno()
+                if perr in (
+                    errno.EINVAL,
+                    errno.ENOSYS,
+                    errno.EOPNOTSUPP,
+                    getattr(errno, "ENOTSUP", errno.EOPNOTSUPP),
+                ):
+                    capability = False
         finally:
-            try:
-                os.unlink(probe_src_name, dir_fd=dfd_norm)
-            except OSError:
-                pass
-            try:
-                os.unlink(probe_dst_name, dir_fd=dfd_norm)
-            except OSError:
-                pass
+            src_clean = _cleanup_probe_name(probe_src_name, dir_fd=dfd_norm)
+            dst_clean = _cleanup_probe_name(probe_dst_name, dir_fd=dfd_norm)
+
+        if not (src_clean and dst_clean):
+            _raise_probe_cleanup_error()
+        return capability
 
     path = target if target is not None else dir_path
     if path is not None and _RENAME_IMPL is not None:
@@ -227,32 +309,39 @@ def _probe_rename_noreplace_supported(
 
             try:
                 fd = os.open(probe_src, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-                os.close(fd)
             except Exception:
                 return None
 
             try:
+                os.close(fd)
+            except Exception:
+                _cleanup_probe_name(probe_src)
+                _cleanup_probe_name(probe_dst)
+                _raise_probe_cleanup_error()
+
+            capability: bool | None = None
+            try:
                 res = _RENAME_IMPL(os.fsencode(probe_src), os.fsencode(probe_dst))
                 if res == 0:
-                    return True
-                perr = ctypes.get_errno()
-                if perr in (
-                    errno.EINVAL,
-                    errno.ENOSYS,
-                    errno.EOPNOTSUPP,
-                    getattr(errno, "ENOTSUP", errno.EOPNOTSUPP),
-                ):
-                    return False
-                return None
+                    capability = True
+                else:
+                    perr = ctypes.get_errno()
+                    if perr in (
+                        errno.EINVAL,
+                        errno.ENOSYS,
+                        errno.EOPNOTSUPP,
+                        getattr(errno, "ENOTSUP", errno.EOPNOTSUPP),
+                    ):
+                        capability = False
             finally:
-                try:
-                    os.unlink(probe_src)
-                except OSError:
-                    pass
-                try:
-                    os.unlink(probe_dst)
-                except OSError:
-                    pass
+                src_clean = _cleanup_probe_name(probe_src)
+                dst_clean = _cleanup_probe_name(probe_dst)
+
+            if not (src_clean and dst_clean):
+                _raise_probe_cleanup_error()
+            return capability
+        except NoreplaceProbeCleanupError:
+            raise
         except Exception:
             return None
 

@@ -18,13 +18,24 @@ from app.workflows.schema import (
     RenameStep,
     RuntimeInputs,
     ScanStep,
+    SingleChildWrapperCollapseStep,
     TouchStep,
     WorkflowDefinition,
     WorkflowStep,
 )
 
 RESERVED_UNSUPPORTED_STEPS = frozenset({"copy", "delete", "remove", "unlink"})
-ALLOWED_STEP_TYPES = frozenset({"scan", "filter", "rename", "move", "touch", "quarantine", "organize", "dedupe"})
+ALLOWED_STEP_TYPES = frozenset({
+    "scan",
+    "filter",
+    "rename",
+    "move",
+    "touch",
+    "quarantine",
+    "organize",
+    "dedupe",
+    "single_child_wrapper_collapse",
+})
 
 
 def validate_raw_steps_types(raw_steps: list[Any], mode: str | None = None) -> None:
@@ -32,6 +43,8 @@ def validate_raw_steps_types(raw_steps: list[Any], mode: str | None = None) -> N
     reserved = frozenset({"copy", "delete", "remove", "unlink"})
     if mode != "dedupe":
         reserved = reserved | {"dedupe"}
+    if mode != "utility":
+        reserved = reserved | {"single_child_wrapper_collapse"}
     for idx, raw in enumerate(raw_steps):
         if hasattr(raw, "type"):
             step_type = str(getattr(raw, "type", "")).strip().lower()
@@ -86,11 +99,23 @@ def validate_workflow_definition(
                 "Step 0 in dedupe workflow must be 'dedupe'",
                 code="INVALID_PIPELINE_STRUCTURE",
             )
+    elif definition.mode == "utility":
+        if len(definition.steps) != 1:
+            raise WorkflowValidationError(
+                "Utility workflow V1 must contain exactly 1 step: 'single_child_wrapper_collapse'",
+                code="INVALID_PIPELINE_STRUCTURE",
+                details={"step_count": len(definition.steps)},
+            )
+        if not isinstance(definition.steps[0], SingleChildWrapperCollapseStep):
+            raise WorkflowValidationError(
+                "Step 0 in utility workflow V1 must be 'single_child_wrapper_collapse'",
+                code="INVALID_PIPELINE_STRUCTURE",
+            )
     elif definition.mode == "organizer":
         for idx, step in enumerate(definition.steps):
-            if isinstance(step, DedupeStep):
+            if isinstance(step, (DedupeStep, SingleChildWrapperCollapseStep)):
                 raise WorkflowValidationError(
-                    "Step 'dedupe' is only allowed in 'dedupe' mode workflows",
+                    f"Step '{step.type}' is not allowed in 'organizer' mode workflows",
                     code="INVALID_PIPELINE_STRUCTURE",
                     details={"index": idx},
                 )
@@ -112,9 +137,9 @@ def validate_workflow_definition(
             )
     elif definition.mode == "file":
         for idx, step in enumerate(definition.steps):
-            if isinstance(step, DedupeStep):
+            if isinstance(step, (DedupeStep, SingleChildWrapperCollapseStep)):
                 raise WorkflowValidationError(
-                    "Step 'dedupe' is only allowed in 'dedupe' mode workflows",
+                    f"Step '{step.type}' is not allowed in 'file' mode workflows",
                     code="INVALID_PIPELINE_STRUCTURE",
                     details={"index": idx},
                 )
@@ -183,6 +208,24 @@ def _validate_single_step(step: WorkflowStep, idx: int, session: Session | None 
                     f"Index root ID(s) not found: {sorted(missing)}",
                     code="INDEX_ROOT_NOT_FOUND",
                     details={"missing_root_ids": sorted(missing)},
+                )
+
+    elif isinstance(step, SingleChildWrapperCollapseStep):
+        if step.subpath:
+            sub = step.subpath.strip()
+            if ".." in sub or sub.startswith("/") or sub.startswith("\\"):
+                raise WorkflowValidationError(
+                    f"Utility subpath '{step.subpath}' must be a safe relative path",
+                    code="INVALID_SUBPATH",
+                    details={"index": idx, "step_id": step.id},
+                )
+        if session is not None:
+            root = session.scalar(select(IndexRoot.id).where(IndexRoot.id == step.root_id))
+            if not root:
+                raise WorkflowValidationError(
+                    f"Index root ID {step.root_id} not found",
+                    code="INDEX_ROOT_NOT_FOUND",
+                    details={"index": idx, "root_id": step.root_id},
                 )
 
     elif isinstance(step, FilterStep):

@@ -2,14 +2,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import os
 from pathlib import Path
 from typing import Any, Iterable
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
+from app.batch_utilities.single_child_wrapper import discover_single_child_wrappers
 from app.filters.compiler import compile_filter_to_sql
 from app.filters.excludes import DEFAULT_EXCLUDE_DIR_NAMES, build_exclude_predicates
 from app.filters.validation import validate_filter_ast
+from app.fs_ops import NoreplaceProbeCleanupError
 from app.models import FilterPolicy, IndexRoot, IndexedPath, ScanJob
 from app.organizers.engine import generate_organizer_proposals
 from app.organizers.planner import plan_organizer_operations
@@ -18,6 +21,7 @@ from app.organizers.profile_validation import (
     DEFAULT_ORGANIZER_STATISTICS_TEMPLATE,
 )
 from app.path_safety import require_allowed_path, require_unreserved_path
+from app.planning.dedupe_engine import derive_recursive_balance_bucket, normalize_dedupe_path
 from app.planning.dedupe_generate import build_advanced_dedupe_draft_intents
 from app.planning.dedupe_preview import (
     canonicalize_effective_safety_policy,
@@ -30,6 +34,7 @@ from app.planning.dedupe_preview import (
 from app.workflows.errors import (
     VirtualGraphCollisionError,
     VirtualGraphCycleError,
+    WorkflowDigestMismatchError,
     WorkflowSafetyLimitExceededError,
     WorkflowValidationError,
 )
@@ -43,6 +48,7 @@ from app.workflows.schema import (
     QuarantineStep,
     RenameStep,
     ScanStep,
+    SingleChildWrapperCollapseStep,
     TouchStep,
     WorkflowDefinition,
 )
@@ -93,6 +99,7 @@ class WorkflowCompiler:
         definition_sha256: str | None = None,
         override_root_ids: list[int] | None = None,
         scan_job_id: int | None = None,
+        selected_candidate_ids: list[str] | None = None,
         max_candidates: int = MAX_WORKFLOW_CANDIDATES,
         max_plan_items: int = MAX_WORKFLOW_PLAN_ITEMS,
     ) -> CompilationResult:
@@ -126,8 +133,231 @@ class WorkflowCompiler:
                 scan_job_id=scan_job_id,
                 max_plan_items=max_plan_items,
             )
+        elif definition.mode == "utility":
+            return self._compile_utility_workflow(
+                definition,
+                workflow_id=workflow_id,
+                workflow_revision=workflow_revision,
+                definition_sha256=definition_sha256,
+                selected_candidate_ids=selected_candidate_ids,
+                max_candidates=max_candidates,
+                max_plan_items=max_plan_items,
+            )
         else:
             raise WorkflowValidationError(f"Unsupported workflow mode: {definition.mode}")
+
+    def _compile_utility_workflow(
+        self,
+        definition: WorkflowDefinition,
+        *,
+        workflow_id: int | None = None,
+        workflow_revision: int | None = None,
+        definition_sha256: str | None = None,
+        selected_candidate_ids: list[str] | None = None,
+        max_candidates: int = MAX_WORKFLOW_CANDIDATES,
+        max_plan_items: int = MAX_WORKFLOW_PLAN_ITEMS,
+    ) -> CompilationResult:
+        step: SingleChildWrapperCollapseStep = definition.steps[0]  # type: ignore
+        root_obj = self.session.get(IndexRoot, step.root_id)
+        if not root_obj:
+            raise WorkflowValidationError(
+                f"Index root {step.root_id} not found",
+                code="INDEX_ROOT_NOT_FOUND",
+            )
+
+        lexical_root = Path(root_obj.root).expanduser()
+        try:
+            resolved_root = require_allowed_path(lexical_root, self.allowed_roots)
+            require_unreserved_path(resolved_root, self.quarantine_root)
+        except Exception as exc:
+            raise WorkflowValidationError(
+                f"Index root {step.root_id} is not allowed for utility workflow",
+                code="INDEX_ROOT_NOT_FOUND",
+                details={"root_id": step.root_id},
+            ) from exc
+
+        # Keep the authoritative Index Root lexical so discovery can lstat each
+        # component and fail closed on a symlink instead of silently following it.
+        authoritative_root = os.path.abspath(os.path.normpath(str(lexical_root)))
+        subpath = step.subpath.strip()
+        scope_path = os.path.abspath(
+            os.path.normpath(
+                os.path.join(authoritative_root, subpath)
+                if subpath
+                else authoritative_root
+            )
+        )
+        try:
+            decisions = discover_single_child_wrappers(
+                scope_path,
+                authoritative_root,
+                limit=max_candidates,
+            )
+        except NoreplaceProbeCleanupError as exc:
+            raise WorkflowValidationError(
+                "Utility capability probe cleanup failed",
+                code="UTILITY_CAPABILITY_PROBE_SAFETY_ERROR",
+                details={
+                    "reason": "probe_cleanup_failed",
+                    "scope_path": scope_path,
+                },
+                status_code=422,
+            ) from exc
+
+        decision_by_id = {decision.candidate_id: decision for decision in decisions}
+        default_selected_ids = [
+            decision.candidate_id for decision in decisions if decision.selectable
+        ]
+
+        if selected_candidate_ids is None:
+            selected_ids = default_selected_ids
+        else:
+            unknown_ids = [
+                candidate_id
+                for candidate_id in selected_candidate_ids
+                if candidate_id not in decision_by_id
+            ]
+            if unknown_ids:
+                raise WorkflowDigestMismatchError(
+                    "Selected utility candidate does not belong to the current Preview",
+                    details={
+                        "reason": "candidate_not_in_current_preview",
+                        "candidate_ids": unknown_ids,
+                    },
+                )
+            unsupported_ids = [
+                candidate_id
+                for candidate_id in selected_candidate_ids
+                if decision_by_id[candidate_id].capability_reason
+                == "UTILITY_MOVE_UNSUPPORTED_FILESYSTEM"
+            ]
+            if unsupported_ids:
+                raise WorkflowValidationError(
+                    "Utility MOVE is unsupported on this filesystem",
+                    code="UTILITY_MOVE_UNSUPPORTED_FILESYSTEM",
+                    details={"candidate_ids": unsupported_ids},
+                    status_code=422,
+                )
+            not_ready_ids = [
+                candidate_id
+                for candidate_id in selected_candidate_ids
+                if not decision_by_id[candidate_id].selectable
+            ]
+            if not_ready_ids:
+                raise WorkflowDigestMismatchError(
+                    "Selected utility candidate is no longer READY",
+                    details={
+                        "reason": "candidate_not_ready",
+                        "candidate_ids": not_ready_ids,
+                    },
+                )
+            selected_ids = list(selected_candidate_ids)
+
+        selected_set = set(selected_ids)
+        candidate_rows: list[dict[str, Any]] = []
+        identity_rows: list[dict[str, Any]] = []
+        for decision in decisions:
+            observed = {
+                "candidate_id": decision.candidate_id,
+                "wrapper_path": decision.wrapper_path,
+                "child_path": decision.child_path,
+                "target_path": decision.target_path,
+                "state": decision.state,
+                "selectable": decision.selectable,
+                "capability_reason": decision.capability_reason,
+                "wrapper_device": decision.wrapper_device,
+                "wrapper_inode": decision.wrapper_inode,
+                "child_device": decision.child_device,
+                "child_inode": decision.child_inode,
+            }
+            identity_rows.append(observed)
+            candidate_rows.append({
+                **observed,
+                "selected": decision.candidate_id in selected_set,
+            })
+
+        planned_operations: list[dict[str, Any]] = []
+        sequence = 1
+        for decision in decisions:
+            if decision.candidate_id not in selected_set:
+                continue
+            if decision.child_path is None or decision.target_path is None:
+                raise WorkflowDigestMismatchError(
+                    "Selected utility candidate no longer has a valid child/target pair",
+                    details={
+                        "reason": "candidate_shape_changed",
+                        "candidate_id": decision.candidate_id,
+                    },
+                )
+
+            metadata = {
+                "candidate_id": decision.candidate_id,
+                "utility_action": "single_child_wrapper_collapse",
+                "wrapper_path": decision.wrapper_path,
+                "wrapper_device": decision.wrapper_device,
+                "wrapper_inode": decision.wrapper_inode,
+                "child_path": decision.child_path,
+                "child_device": decision.child_device,
+                "child_inode": decision.child_inode,
+                "target_path": decision.target_path,
+            }
+            planned_operations.append({
+                "sequence": sequence,
+                "operation": "move",
+                "source": decision.child_path,
+                "target": decision.target_path,
+                **metadata,
+            })
+            sequence += 1
+            planned_operations.append({
+                "sequence": sequence,
+                "operation": "rmdir_empty",
+                "source": decision.wrapper_path,
+                "target": None,
+                **metadata,
+            })
+            sequence += 1
+
+        if len(planned_operations) > max_plan_items:
+            raise WorkflowSafetyLimitExceededError(
+                f"Planned operations count ({len(planned_operations)}) exceeds safety limit ({max_plan_items})",
+                details={
+                    "planned_operations_count": len(planned_operations),
+                    "limit": max_plan_items,
+                },
+            )
+
+        runtime_inputs = {
+            "root_id": step.root_id,
+            "subpath": step.subpath,
+        }
+        digest_payload = {
+            "workflow_id": workflow_id,
+            "workflow_revision": workflow_revision,
+            "definition_sha256": definition_sha256 or compute_definition_sha256(definition.model_dump()),
+            "utility_action": "single_child_wrapper_collapse",
+            "authoritative_root": authoritative_root,
+            "scope_path": scope_path,
+            "runtime_inputs": runtime_inputs,
+            "candidates": identity_rows,
+            "default_selected_candidate_ids": default_selected_ids,
+        }
+        digest = compute_definition_sha256(digest_payload)
+
+        return CompilationResult(
+            matched_count=len(decisions),
+            matched_bytes=0,
+            planned_operations=planned_operations,
+            compile_digest=digest,
+            runtime_inputs=runtime_inputs,
+            compile_context={
+                "utility_action": "single_child_wrapper_collapse",
+                "authoritative_root": authoritative_root,
+                "scope_path": scope_path,
+                "utility_candidates": candidate_rows,
+                "selected_candidate_ids": selected_ids,
+            },
+        )
 
     def _compile_dedupe_workflow(
         self,
@@ -242,6 +472,7 @@ class WorkflowCompiler:
         }
         digest = compute_definition_sha256(compile_payload)
 
+        recursive_mode = compilation.scorer_config.selection_mode == "recursive_directory_balanced_by_bytes"
         all_rows = []
         for g in compilation.groups:
             g_prov_id = g.group_provenance_id
@@ -289,6 +520,27 @@ class WorkflowCompiler:
                     for c in m.contributions
                 ]
 
+                candidate_balance_bucket: str | None = None
+                if recursive_mode and isinstance(g_balance_info, dict):
+                    lca = g_balance_info.get("lca")
+                    selected_root_index = g_balance_info.get("selected_scan_root_index")
+                    if isinstance(lca, str) and (
+                        selected_root_index is None or selected_root_index == m.scan_root_index
+                    ):
+                        try:
+                            parent = normalize_dedupe_path(
+                                os.path.dirname(normalize_dedupe_path(m.absolute_path))
+                            )
+                            candidate_balance_bucket = derive_recursive_balance_bucket(parent, lca)
+                        except ValueError:
+                            candidate_balance_bucket = None
+
+                recursive_last_file_protection_reason = (
+                    "RECURSIVE_PROTECT_LAST_FILE"
+                    if "RECURSIVE_PROTECT_LAST_FILE" in m.safety_reasons
+                    else None
+                )
+
                 all_rows.append({
                     "source": m.absolute_path,
                     "target": None,
@@ -316,6 +568,8 @@ class WorkflowCompiler:
                     "member_decision": member_decision,
                     "selection_reason": m.selection_reason,
                     "balance_info": m.balance_info,
+                    "candidate_balance_bucket": candidate_balance_bucket,
+                    "recursive_last_file_protection_reason": recursive_last_file_protection_reason,
                     "keep_path": g_recommended_keep_path,
                 })
 

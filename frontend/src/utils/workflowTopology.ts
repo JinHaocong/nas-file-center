@@ -13,6 +13,9 @@ export function validateWorkflowStepOrder(
     if (mode === 'dedupe') {
       return { valid: false, error: '去重模式 (Dedupe) 必须且只能包含一个去重步骤 (Dedupe)' };
     }
+    if (mode === 'utility') {
+      return { valid: false, error: '工具模式 (Utility) 必须且只能包含一个单子目录壳折叠步骤' };
+    }
     return { valid: false, error: '工作流至少需要包含一个扫描步骤 (Scan)' };
   }
 
@@ -22,6 +25,16 @@ export function validateWorkflowStepOrder(
     }
     if (steps[0].type !== 'dedupe') {
       return { valid: false, error: '去重模式 (Dedupe) 的唯一步骤必须是 Dedupe' };
+    }
+    return { valid: true };
+  }
+
+  if (mode === 'utility') {
+    if (steps.length !== 1) {
+      return { valid: false, error: '工具模式 (Utility) 必须且只能包含一个单子目录壳折叠步骤' };
+    }
+    if (steps[0].type !== 'single_child_wrapper_collapse') {
+      return { valid: false, error: '工具模式 (Utility) 的唯一步骤必须是 Single Child Wrapper Collapse' };
     }
     return { valid: true };
   }
@@ -56,8 +69,8 @@ export function validateWorkflowStepOrder(
 
   for (let i = 1; i < steps.length; i++) {
     const type = steps[i].type;
-    if (type === 'organize') {
-      return { valid: false, error: '文件模式下不允许包含 Organize 步骤' };
+    if (type === 'organize' || type === 'dedupe' || type === 'single_child_wrapper_collapse') {
+      return { valid: false, error: '文件模式下不允许包含当前专用步骤' };
     }
     if (type === 'rename' || type === 'move' || type === 'touch') {
       seenAction = true;
@@ -75,7 +88,7 @@ export function getAllowedInsertions(
   steps: WorkflowStep[],
   mode: WorkflowMode
 ): WorkflowStepType[] {
-  if (mode === 'organizer' || mode === 'dedupe') {
+  if (mode === 'organizer' || mode === 'dedupe' || mode === 'utility') {
     return [];
   }
 
@@ -101,7 +114,7 @@ export function canMoveStep(
   direction: 'up' | 'down',
   mode: WorkflowMode
 ): boolean {
-  if (mode === 'organizer' || mode === 'dedupe') {
+  if (mode === 'organizer' || mode === 'dedupe' || mode === 'utility') {
     return false;
   }
   if (index === 0) {
@@ -128,10 +141,10 @@ export function canDeleteStep(
   mode: WorkflowMode
 ): boolean {
   if (index === 0) {
-    // Scan or Dedupe step can never be deleted
+    // Scan, Dedupe, or Utility step can never be deleted
     return false;
   }
-  if (mode === 'organizer' || mode === 'dedupe') {
+  if (mode === 'organizer' || mode === 'dedupe' || mode === 'utility') {
     return false;
   }
   const remaining = steps.filter((_, i) => i !== index);

@@ -1,4 +1,7 @@
-export type DedupeSelectionMode = 'weighted' | 'balanced_by_bytes';
+export type DedupeSelectionMode =
+  | 'weighted'
+  | 'balanced_by_bytes'
+  | 'recursive_directory_balanced_by_bytes';
 
 export type DedupeMtimeMode = 'none' | 'newest' | 'oldest';
 
@@ -67,6 +70,14 @@ export interface FactorContribution {
 }
 
 export interface BalanceInfo {
+  balance_source?: string;
+  lca?: string;
+  lca_depth?: number;
+  anchor_root?: string;
+  parent_bucket?: string | null;
+  recursive_last_file_protection?: string;
+  bucket_released_bytes_before?: Record<string, number>;
+  bucket_released_bytes_after?: Record<string, number>;
   spread_before?: number;
   spread_after?: number;
   released_bytes_by_scan_root?: Record<string, number>;
@@ -97,6 +108,8 @@ export interface DedupePreviewMemberRow {
   member_decision?: MemberDecision;
   selection_reason?: string | null;
   balance_info?: BalanceInfo | null;
+  candidate_balance_bucket?: string | null;
+  recursive_last_file_protection_reason?: string | null;
   incomplete?: boolean;
 }
 

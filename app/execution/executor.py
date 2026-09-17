@@ -11,6 +11,7 @@ import stat
 from typing import Any, Iterable
 
 from app.batch.plans import OperationItem
+from app.execution.utility_structural_cleanup import remove_authorized_empty_wrapper
 from app.execution.verifier import verify_duplicate_pair
 from app.path_safety import UnsafePathError, is_reserved_quarantine_path, require_allowed_path
 
@@ -146,6 +147,135 @@ def _resolve_frozen_unlink_purge_authority(
         return raw_entry_id, frozen_manifest, None
 
 
+def _resolve_utility_empty_wrapper_cleanup_authority(
+    item: OperationItem,
+    *,
+    plan_id: str,
+    session_factory: Any,
+) -> bool:
+    """Authorize only the exact frozen Utility MOVE -> empty-wrapper cleanup pair."""
+    try:
+        numeric_plan_id = int(plan_id)
+    except (TypeError, ValueError):
+        return False
+
+    from sqlalchemy import select
+
+    from app.models import BatchPlan, BatchPlanItem
+
+    try:
+        with session_factory() as session:
+            plan = session.get(BatchPlan, numeric_plan_id)
+            if plan is None:
+                return False
+
+            try:
+                plan_metadata = json.loads(plan.metadata_json or "{}")
+            except Exception:
+                return False
+            if not isinstance(plan_metadata, dict):
+                return False
+            if plan_metadata.get("source") != "workflow":
+                return False
+            if plan_metadata.get("workflow_mode") != "utility":
+                return False
+            compile_context = plan_metadata.get("compile_context")
+            if not isinstance(compile_context, dict):
+                return False
+            if compile_context.get("utility_action") != "single_child_wrapper_collapse":
+                return False
+
+            current_rows = list(
+                session.scalars(
+                    select(BatchPlanItem).where(
+                        BatchPlanItem.plan_id == numeric_plan_id,
+                        BatchPlanItem.sequence == item.sequence,
+                    )
+                ).all()
+            )
+            if len(current_rows) != 1:
+                return False
+            current = current_rows[0]
+            if current.operation != "rmdir_empty":
+                return False
+            if current.source_path != os.fspath(item.source):
+                return False
+            for frozen_identity in (
+                current.expected_device,
+                current.expected_inode,
+                item.expected_device,
+                item.expected_inode,
+            ):
+                if (
+                    not isinstance(frozen_identity, int)
+                    or isinstance(frozen_identity, bool)
+                    or frozen_identity <= 0
+                ):
+                    return False
+            if current.expected_device != item.expected_device:
+                return False
+            if current.expected_inode != item.expected_inode:
+                return False
+
+            try:
+                current_metadata = json.loads(current.metadata_json or "{}")
+            except Exception:
+                return False
+            if not isinstance(current_metadata, dict):
+                return False
+            candidate_id = current_metadata.get("candidate_id")
+            wrapper_path = current_metadata.get("wrapper_path")
+            child_path = current_metadata.get("child_path")
+            target_path = current_metadata.get("target_path")
+            if not isinstance(candidate_id, str) or not candidate_id.strip():
+                return False
+            if wrapper_path != current.source_path:
+                return False
+            if not isinstance(child_path, str) or not child_path.strip():
+                return False
+            if not isinstance(target_path, str) or not target_path.strip():
+                return False
+
+            predecessor_rows = list(
+                session.scalars(
+                    select(BatchPlanItem).where(
+                        BatchPlanItem.plan_id == numeric_plan_id,
+                        BatchPlanItem.sequence == current.sequence - 1,
+                    )
+                ).all()
+            )
+            if len(predecessor_rows) != 1:
+                return False
+            predecessor = predecessor_rows[0]
+            if predecessor.operation != "move":
+                return False
+            if predecessor.state != "completed":
+                return False
+            if predecessor.source_path != child_path:
+                return False
+            if predecessor.target_path != target_path:
+                return False
+
+            try:
+                predecessor_metadata = json.loads(predecessor.metadata_json or "{}")
+            except Exception:
+                return False
+            if not isinstance(predecessor_metadata, dict):
+                return False
+            if predecessor_metadata.get("candidate_id") != candidate_id:
+                return False
+            if predecessor_metadata.get("wrapper_path") != wrapper_path:
+                return False
+            if predecessor_metadata.get("child_path") != child_path:
+                return False
+            if predecessor_metadata.get("target_path") != target_path:
+                return False
+
+            return True
+    except Exception:
+        return False
+
+
 def execute_item(
     item: OperationItem,
     *,
@@ -164,7 +294,20 @@ def execute_item(
         return ItemResult("completed", "already completed")
     if not allow_mutation:
         return _skip("filesystem mutation is disabled")
-    if item.operation in {"unlink", "rmdir_empty", "quarantine_purge", "quarantine_unlink_purge"} and not allow_delete:
+
+    utility_empty_cleanup_authorized = False
+    if item.operation == "rmdir_empty" and session_factory is not None:
+        utility_empty_cleanup_authorized = _resolve_utility_empty_wrapper_cleanup_authority(
+            item,
+            plan_id=plan_id,
+            session_factory=session_factory,
+        )
+
+    if (
+        item.operation in {"unlink", "rmdir_empty", "quarantine_purge", "quarantine_unlink_purge"}
+        and not allow_delete
+        and not utility_empty_cleanup_authorized
+    ):
         return _skip("permanent deletion is disabled")
     if item.operation == "quarantine_unlink_purge":
         if not session_factory or not worker_id:
@@ -512,6 +655,15 @@ def execute_item(
                         return _skip("source identity changed")
                 except OSError as exc:
                     return _skip(f"stat failed: {exc}")
+
+            if utility_empty_cleanup_authorized:
+                structural = remove_authorized_empty_wrapper(
+                    source,
+                    allowed_roots=allowed_roots,
+                    expected_device=item.expected_device,
+                    expected_inode=item.expected_inode,
+                )
+                return ItemResult(structural.state, structural.reason)
 
             from app.batch_utilities.empty_dir_quarantine import relocate_empty_dir_to_quarantine
 

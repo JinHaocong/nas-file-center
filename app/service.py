@@ -1805,6 +1805,53 @@ class FileCenterService:
                 item_validations[row.id] = ("stale", stale_detail.reason, None)
                 continue
 
+            row_meta_for_recursive = json.loads(row.metadata_json or "{}")
+            has_recursive_authority = (
+                isinstance(row_meta_for_recursive, dict)
+                and (
+                    "recursive_protection" in row_meta_for_recursive
+                    or "frozen_recursive_protection" in row_meta_for_recursive
+                )
+            )
+            if (
+                row.operation == "quarantine"
+                and (
+                    plan_metadata.get("selection_mode") == "recursive_directory_balanced_by_bytes"
+                    or has_recursive_authority
+                )
+            ):
+                from app.planning.recursive_protection_authority import (
+                    evaluate_live_recursive_protection,
+                )
+
+                recursive_evaluation = evaluate_live_recursive_protection(
+                    row.metadata_json or "{}",
+                    expected_source_path=row.source_path,
+                    allowed_roots=self.settings.allowed_roots,
+                    quarantine_root=self.settings.quarantine_root,
+                )
+                if not recursive_evaluation.safe:
+                    recursive_reason = (
+                        recursive_evaluation.reason
+                        or "RECURSIVE_PROTECTION_UNSTABLE"
+                    )
+                    recursive_stale = StaleItemDetail(
+                        item_id=row.id,
+                        source_path=row.source_path,
+                        reason=recursive_reason,
+                        expected={
+                            "device": row.expected_device,
+                            "inode": row.expected_inode,
+                            "size": row.expected_size,
+                            "mtime_ns": row.expected_mtime_ns,
+                            "hash": row.expected_hash,
+                        },
+                        actual=None,
+                    )
+                    stale_items.append(recursive_stale)
+                    item_validations[row.id] = ("stale", recursive_reason, None)
+                    continue
+
             if row.keep_path:
                 result = verify_duplicate_pair(
                     row.keep_path,
@@ -2041,6 +2088,38 @@ class FileCenterService:
             item_id = it["id"]
             src_p = Path(it["source_path"])
             upd: dict[str, Any] = {}
+
+            if (
+                plan_metadata.get("selection_mode") == "recursive_directory_balanced_by_bytes"
+                and it["operation"] == "quarantine"
+            ):
+                from app.planning.recursive_protection_authority import (
+                    RecursiveProtectionAuthorityError,
+                    build_frozen_recursive_protection,
+                )
+
+                try:
+                    frozen_recursive_protection = build_frozen_recursive_protection(
+                        it["metadata_json"] or "{}",
+                        expected_source_path=it["source_path"],
+                        allowed_roots=self.settings.allowed_roots,
+                        quarantine_root=self.settings.quarantine_root,
+                    )
+                except RecursiveProtectionAuthorityError as exc:
+                    raise StateConflictError(str(exc)) from exc
+
+                if frozen_recursive_protection is None:
+                    raise StateConflictError(
+                        "RECURSIVE_PROTECTION_AUTHORITY_MISSING: "
+                        "recursive dedupe quarantine item has no recursive_protection authority"
+                    )
+
+                recursive_meta = json.loads(it["metadata_json"] or "{}")
+                recursive_meta["frozen_recursive_protection"] = frozen_recursive_protection
+                it["metadata_json"] = json.dumps(
+                    recursive_meta,
+                    ensure_ascii=False,
+                )
 
             if plan_kind in {"quarantine-bulk-restore", "quarantine-bulk-purge"}:
                 from app.quarantine.bulk_lifecycle import freeze_bulk_plan_item
@@ -2467,6 +2546,36 @@ class FileCenterService:
             if plan.status not in {"ready", "partial"}:
                 raise ValueError(f"Plan must be validated before execution (status must be 'ready' or 'partial'), current status={plan.status}")
             rows = list(session.scalars(select(BatchPlanItem).where(BatchPlanItem.plan_id == plan_id).order_by(BatchPlanItem.sequence)))
+
+            try:
+                direct_plan_meta = json.loads(plan.metadata_json or "{}")
+            except Exception:
+                direct_plan_meta = {}
+            recursive_direct_execute = (
+                isinstance(direct_plan_meta, dict)
+                and direct_plan_meta.get("selection_mode")
+                == "recursive_directory_balanced_by_bytes"
+            )
+            if not recursive_direct_execute:
+                for row in rows:
+                    try:
+                        row_meta = json.loads(row.metadata_json or "{}")
+                    except Exception:
+                        row_meta = None
+                    if (
+                        isinstance(row_meta, dict)
+                        and (
+                            "recursive_protection" in row_meta
+                            or "frozen_recursive_protection" in row_meta
+                        )
+                    ):
+                        recursive_direct_execute = True
+                        break
+            if recursive_direct_execute:
+                raise StateConflictError(
+                    "recursive directory balance execution requires the Worker live preflight; "
+                    "synchronous execute_plan is not an authorized mutation path"
+                )
 
         stale_items = []
         for row in rows:

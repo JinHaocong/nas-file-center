@@ -218,6 +218,14 @@ class DedupeStep(BaseModel):
         return data
 
 
+class SingleChildWrapperCollapseStep(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    type: Literal["single_child_wrapper_collapse"] = "single_child_wrapper_collapse"
+    root_id: int = Field(gt=0, strict=True)
+    subpath: str = ""
+
+
 WorkflowStep = Union[
     ScanStep,
     FilterStep,
@@ -227,13 +235,14 @@ WorkflowStep = Union[
     QuarantineStep,
     OrganizeStep,
     DedupeStep,
+    SingleChildWrapperCollapseStep,
 ]
 
 
 class WorkflowDefinition(BaseModel):
     model_config = ConfigDict(extra="forbid")
     schema_version: int = 1
-    mode: Literal["file", "organizer", "dedupe"]
+    mode: Literal["file", "organizer", "dedupe", "utility"]
     steps: list[WorkflowStep]
 
     @field_validator("steps", mode="before")
@@ -309,7 +318,7 @@ class WorkflowListItem(BaseModel):
     id: int
     name: str
     description: str
-    mode: Literal["file", "organizer", "dedupe"]
+    mode: Literal["file", "organizer", "dedupe", "utility"]
     current_revision: int
     is_builtin: bool
     archived_at: str | None = None
@@ -392,8 +401,13 @@ class WorkflowPreviewResponse(BaseModel):
     revision: int
     workflow_revision: int
     definition_sha256: str
-    workflow_mode: Literal["file", "organizer", "dedupe"] = "file"
-    preview_source: Literal["index", "organizer-live-readonly", "completed-scan-readonly-safety"] = "index"
+    workflow_mode: Literal["file", "organizer", "dedupe", "utility"] = "file"
+    preview_source: Literal[
+        "index",
+        "organizer-live-readonly",
+        "completed-scan-readonly-safety",
+        "utility-live-readonly",
+    ] = "index"
     live_filesystem_verified: Literal[False] = False
     compile_digest: str
     matched_count: int
@@ -404,6 +418,7 @@ class WorkflowPreviewResponse(BaseModel):
     total_pages: int
     items: list[WorkflowPreviewItem]
     dedupe_summary: dict[str, Any] | None = None
+    utility_summary: dict[str, Any] | None = None
 
 
 class WorkflowGeneratePlanRequest(BaseModel):
@@ -412,7 +427,31 @@ class WorkflowGeneratePlanRequest(BaseModel):
     revision: int | None = Field(default=None, ge=1)
     runtime_inputs: RuntimeInputs | None = None
     root_ids: list[int] | None = None
+    selected_candidate_ids: list[str] | None = None
     plan_name: str | None = None
+
+    @field_validator("selected_candidate_ids", mode="before")
+    @classmethod
+    def validate_selected_candidate_ids(cls, v: Any) -> list[str] | None:
+        if v is None:
+            return None
+        if not isinstance(v, list):
+            raise ValueError("selected_candidate_ids must be a list")
+        seen: set[str] = set()
+        normalized: list[str] = []
+        for item in v:
+            if not isinstance(item, str) or len(item) != 64:
+                raise ValueError("selected_candidate_ids must contain 64-character hexadecimal candidate IDs")
+            try:
+                int(item, 16)
+            except ValueError as exc:
+                raise ValueError("selected_candidate_ids must contain 64-character hexadecimal candidate IDs") from exc
+            candidate_id = item.lower()
+            if candidate_id in seen:
+                raise ValueError("selected_candidate_ids must not contain duplicates")
+            seen.add(candidate_id)
+            normalized.append(candidate_id)
+        return normalized
 
     @model_validator(mode="after")
     def validate_root_contract(self) -> WorkflowGeneratePlanRequest:

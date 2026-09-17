@@ -197,6 +197,67 @@ def verify_item_freshness(
     if quarantine_root:
         roots.append(Path(quarantine_root))
 
+    # Gate6-B Single-Child Wrapper Collapse compiles MOVE with an explicit target
+    # that must remain absent from Preview/Generate through Validate and the
+    # Execute preflight.  This is intentionally scoped to the Utility action so
+    # historical file/organizer MOVE semantics remain unchanged.  The executor
+    # still uses RENAME_NOREPLACE as the final race-safe no-overwrite fence.
+    if operation == "move" and meta.get("utility_action") == "single_child_wrapper_collapse":
+        raw_target = meta.get("target_path")
+        expected_dict["target_must_be_absent"] = True
+        if not isinstance(raw_target, str) or not raw_target.strip():
+            return False, StaleItemDetail(
+                item_id=item_id,
+                source_path=source_path,
+                reason="target_binding_missing",
+                expected=expected_dict,
+                actual=None,
+            )
+
+        target = Path(raw_target)
+        expected_dict["target_path"] = str(target)
+
+        if os.path.lexists(target):
+            actual_target: dict[str, Any] = {
+                "target_path": str(target),
+                "exists": True,
+            }
+            try:
+                target_st = os.lstat(target)
+                if stat.S_ISLNK(target_st.st_mode):
+                    target_type = "symlink"
+                elif stat.S_ISDIR(target_st.st_mode):
+                    target_type = "directory"
+                elif stat.S_ISREG(target_st.st_mode):
+                    target_type = "file"
+                else:
+                    target_type = "special"
+                actual_target.update({
+                    "device": int(target_st.st_dev),
+                    "inode": int(target_st.st_ino),
+                    "object_type": target_type,
+                })
+            except OSError:
+                pass
+            return False, StaleItemDetail(
+                item_id=item_id,
+                source_path=source_path,
+                reason="target_appeared",
+                expected=expected_dict,
+                actual=actual_target,
+            )
+
+        try:
+            require_allowed_path(target, allowed_roots)
+        except (UnsafePathError, OSError, ValueError):
+            return False, StaleItemDetail(
+                item_id=item_id,
+                source_path=source_path,
+                reason="target_path_unsafe",
+                expected=expected_dict,
+                actual={"target_path": str(target), "exists": False},
+            )
+
     # 1. Symlink check
     if p.is_symlink() or os.path.islink(source_path):
         actual_dict = None
