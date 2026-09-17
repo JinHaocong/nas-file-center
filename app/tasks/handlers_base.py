@@ -401,7 +401,7 @@ class FclonesScanHandler(TaskHandler):
                 # 3. Checkpoint outside DB transaction (fences worker lease & checks cancel)
                 context.checkpoint(
                     progress_current=total_groups,
-                    progress_total=0,
+                    progress_total=None,
                     progress_message=f"Importing duplicate groups ({total_groups} found)...",
                 )
 
