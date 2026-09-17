@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import json
 import os
 from pathlib import Path
@@ -7,6 +8,7 @@ from pathlib import Path
 from app.batch.plans import OperationItem
 from app.db import create_engine_and_session, init_db
 from app.execution.executor import execute_item
+from app.execution.utility_structural_cleanup import remove_authorized_empty_wrapper
 from app.models import BatchPlan, BatchPlanItem
 
 
@@ -117,3 +119,39 @@ def test_paired_utility_cleanup_removes_empty_wrapper_without_quarantine_depende
     assert result.state == "completed"
     assert not wrapper.exists()
     assert not quarantine_root.exists()
+
+
+def test_structural_cleanup_stays_completed_if_wrapper_close_reports_error_after_rmdir(
+    tmp_path,
+    monkeypatch,
+):
+    """A post-rmdir descriptor-close error must not rewrite completed namespace truth as failed."""
+    data_root = tmp_path / "data"
+    wrapper = data_root / "utility" / "A" / "B"
+    wrapper.mkdir(parents=True)
+    st = os.lstat(wrapper)
+
+    real_close = os.close
+
+    def close_then_report_error(fd):
+        try:
+            fd_stat = os.fstat(fd)
+        except OSError:
+            return real_close(fd)
+        if fd_stat.st_dev == st.st_dev and fd_stat.st_ino == st.st_ino:
+            real_close(fd)
+            raise OSError(errno.EIO, "simulated wrapper close failure after successful rmdir")
+        return real_close(fd)
+
+    monkeypatch.setattr(os, "close", close_then_report_error)
+
+    result = remove_authorized_empty_wrapper(
+        wrapper,
+        allowed_roots=[data_root],
+        expected_device=st.st_dev,
+        expected_inode=st.st_ino,
+    )
+
+    assert not wrapper.exists()
+    assert result.state == "completed"
+    assert result.reason.startswith("empty wrapper structurally removed")
