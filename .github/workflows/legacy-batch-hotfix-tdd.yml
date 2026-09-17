@@ -1,0 +1,38 @@
+name: Legacy Batch Execution Hotfix TDD
+
+on:
+  push:
+    branches:
+      - hotfix/legacy-batch-execution-regressions
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  focused-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CONFIG_DIR: /tmp/nfc-config
+      DATA_MOUNT: /tmp/nfc-data
+      ALLOWED_ROOTS: /tmp/nfc-data
+      QUARANTINE_ROOT: /tmp/nfc-data/.nas-file-center-trash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install test dependencies
+        run: python -m pip install -e '.[test]'
+
+      - name: Run focused legacy batch regressions
+        env:
+          PYTHONPATH: .
+        run: pytest tests/test_legacy_batch_execution_regressions.py -v
