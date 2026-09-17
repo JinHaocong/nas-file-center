@@ -11,6 +11,7 @@ import stat
 from typing import Any, Iterable
 
 from app.batch.plans import OperationItem
+from app.execution.utility_structural_cleanup import remove_authorized_empty_wrapper
 from app.execution.verifier import verify_duplicate_pair
 from app.path_safety import UnsafePathError, is_reserved_quarantine_path, require_allowed_path
 
@@ -270,7 +271,7 @@ def execute_item(
         return _skip("filesystem mutation is disabled")
 
     utility_empty_cleanup_authorized = False
-    if item.operation == "rmdir_empty" and not allow_delete and session_factory is not None:
+    if item.operation == "rmdir_empty" and session_factory is not None:
         utility_empty_cleanup_authorized = _resolve_utility_empty_wrapper_cleanup_authority(
             item,
             plan_id=plan_id,
@@ -629,6 +630,15 @@ def execute_item(
                         return _skip("source identity changed")
                 except OSError as exc:
                     return _skip(f"stat failed: {exc}")
+
+            if utility_empty_cleanup_authorized:
+                structural = remove_authorized_empty_wrapper(
+                    source,
+                    allowed_roots=allowed_roots,
+                    expected_device=item.expected_device,
+                    expected_inode=item.expected_inode,
+                )
+                return ItemResult(structural.state, structural.reason)
 
             from app.batch_utilities.empty_dir_quarantine import relocate_empty_dir_to_quarantine
 
