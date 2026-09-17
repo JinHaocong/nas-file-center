@@ -182,24 +182,17 @@ def test_workflow_compile_surfaces_post_create_close_failure_as_safety_error(
 ):
     data, _root, SessionLocal, definition = _setup_compiler(tmp_path)
 
-    real_open = fs_ops.os.open
     real_close = fs_ops.os.close
-    probe_fds: set[int] = set()
-
-    def tracking_open(path, flags, mode=0o777, *, dir_fd=None):
-        fd = real_open(path, flags, mode, dir_fd=dir_fd)
-        if str(path).startswith(".__probe_noreplace_src_"):
-            probe_fds.add(fd)
-        return fd
 
     def close_probe_then_raise(fd):
-        if fd in probe_fds:
-            probe_fds.remove(fd)
-            real_close(fd)
+        try:
+            fd_target = fs_ops.os.readlink(f"/proc/self/fd/{fd}")
+        except OSError:
+            fd_target = ""
+        real_close(fd)
+        if "/.__probe_noreplace_src_" in fd_target:
             raise OSError(errno.EIO, "simulated probe close failure")
-        return real_close(fd)
 
-    monkeypatch.setattr(fs_ops.os, "open", tracking_open)
     monkeypatch.setattr(fs_ops.os, "close", close_probe_then_raise)
 
     with SessionLocal() as session:
