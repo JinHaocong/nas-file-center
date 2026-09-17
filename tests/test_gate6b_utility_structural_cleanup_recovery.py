@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from app.config import Settings
 from app.db import create_engine_and_session, init_db
-from app.models import BatchPlan, BatchPlanItem, OperationJournal, utcnow
+from app.models import BatchPlan, BatchPlanItem, OperationJournal, WorkJob, utcnow
 from app.tasks.handlers import _reconcile_executing_item
 
 
@@ -84,6 +84,13 @@ def _seed_executing_structural_cleanup(tmp_path):
         )
         session.add(plan)
         session.flush()
+        job = WorkJob(
+            kind="batch-plan-execute",
+            status="running",
+            state_json=json.dumps({"plan_id": plan.id}),
+        )
+        session.add(job)
+        session.flush()
         session.add_all([
             BatchPlanItem(
                 plan_id=plan.id,
@@ -125,11 +132,19 @@ def _seed_executing_structural_cleanup(tmp_path):
                 BatchPlanItem.sequence == 2,
             )
         )
-        return SessionLocal, int(plan.id), int(cleanup_id), wrapper, quarantine_root, settings
+        return (
+            SessionLocal,
+            int(plan.id),
+            int(cleanup_id),
+            int(job.id),
+            wrapper,
+            quarantine_root,
+            settings,
+        )
 
 
 def test_recovery_retries_authorized_empty_wrapper_without_quarantine_root(tmp_path):
-    SessionLocal, plan_id, cleanup_id, wrapper, quarantine_root, settings = _seed_executing_structural_cleanup(tmp_path)
+    SessionLocal, plan_id, cleanup_id, job_id, wrapper, quarantine_root, settings = _seed_executing_structural_cleanup(tmp_path)
 
     with SessionLocal() as session:
         item = session.get(BatchPlanItem, cleanup_id)
@@ -138,7 +153,7 @@ def test_recovery_retries_authorized_empty_wrapper_without_quarantine_root(tmp_p
             session,
             item,
             plan_id,
-            job_id=17,
+            job_id=job_id,
             user_id=None,
             settings=settings,
             now=utcnow(),
@@ -150,7 +165,7 @@ def test_recovery_retries_authorized_empty_wrapper_without_quarantine_root(tmp_p
 
 
 def test_recovery_converges_completed_structural_cleanup_without_quarantine_root(tmp_path):
-    SessionLocal, plan_id, cleanup_id, wrapper, quarantine_root, settings = _seed_executing_structural_cleanup(tmp_path)
+    SessionLocal, plan_id, cleanup_id, job_id, wrapper, quarantine_root, settings = _seed_executing_structural_cleanup(tmp_path)
     os.rmdir(wrapper)
     assert not wrapper.exists()
 
@@ -161,7 +176,7 @@ def test_recovery_converges_completed_structural_cleanup_without_quarantine_root
             session,
             item,
             plan_id,
-            job_id=18,
+            job_id=job_id,
             user_id=None,
             settings=settings,
             now=utcnow(),
