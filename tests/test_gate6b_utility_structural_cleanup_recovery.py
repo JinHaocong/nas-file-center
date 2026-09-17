@@ -9,7 +9,7 @@ from sqlalchemy import select
 from app.config import Settings
 from app.db import create_engine_and_session, init_db
 from app.models import BatchPlan, BatchPlanItem, OperationJournal, utcnow
-from app.tasks.handlers_base import _reconcile_executing_item
+from app.tasks.handlers import _reconcile_executing_item
 
 
 def _seed_executing_structural_cleanup(tmp_path):
