@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ctypes
+import errno
 from pathlib import Path
 
 import pytest
@@ -59,3 +61,41 @@ def test_delete_plan_allows_inactive_stale_or_expired_plan(tmp_path: Path, statu
 
     with service.SessionLocal() as session:
         assert session.get(BatchPlan, plan.id) is None
+
+
+def test_execute_rename_regular_file_survives_unsupported_native_noreplace(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regular-file rename must retain no-clobber semantics on COMPAT filesystems."""
+    from app.batch.plans import OperationItem
+    from app.execution.executor import execute_item
+    import app.fs_ops as fs_ops
+
+    root = tmp_path / "data"
+    root.mkdir()
+    trash = root / ".nas-file-center-trash"
+    trash.mkdir()
+    source = root / "source.webp"
+    target = root / "renamed.webp"
+    source.write_bytes(b"payload")
+
+    def unsupported_noreplace(_source: bytes, _target: bytes) -> int:
+        ctypes.set_errno(errno.EOPNOTSUPP)
+        return -1
+
+    monkeypatch.setattr(fs_ops, "_RENAME_IMPL", unsupported_noreplace)
+
+    result = execute_item(
+        OperationItem(sequence=1, operation="rename", source=source, target=target),
+        allowed_roots=[root],
+        allow_mutation=True,
+        allow_delete=True,
+        quarantine_root=trash,
+        plan_id="compat-rename",
+    )
+
+    assert result.state == "completed"
+    assert result.result_path == target
+    assert not source.exists()
+    assert target.read_bytes() == b"payload"
