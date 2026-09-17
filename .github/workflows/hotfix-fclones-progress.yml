@@ -33,16 +33,20 @@ jobs:
 
           path = Path("app/tasks/handlers_base.py")
           text = path.read_text(encoding="utf-8")
-          old = '''                    progress_total=0,
-                      progress_message=f"Importing duplicate groups ({total_groups} found)...",'''
-          new = '''                    progress_total=None,
-                      progress_message=f"Importing duplicate groups ({total_groups} found)...",'''
-          if text.count(old) == 1:
-              path.write_text(text.replace(old, new, 1), encoding="utf-8")
-          elif text.count(new) == 1:
+          marker = 'progress_message=f"Importing duplicate groups ({total_groups} found)...",'
+          marker_pos = text.find(marker)
+          if marker_pos == -1:
+              raise SystemExit("fclones import progress marker not found")
+          before = text[:marker_pos]
+          old_pos = before.rfind("progress_total=0,")
+          new_pos = before.rfind("progress_total=None,")
+          if old_pos != -1 and marker_pos - old_pos < 160:
+              text = text[:old_pos] + "progress_total=None," + text[old_pos + len("progress_total=0,"):]
+              path.write_text(text, encoding="utf-8")
+          elif new_pos != -1 and marker_pos - new_pos < 160:
               print("minimal fix already present")
           else:
-              raise SystemExit("expected fclones import progress pair not found exactly once")
+              raise SystemExit("nearby fclones import progress_total sentinel not found")
           PY
           git diff --check
           git diff -- app/tasks/handlers_base.py
