@@ -9,6 +9,7 @@ import pytest
 from app.batch.plans import OperationItem
 from app.db import create_engine_and_session, init_db
 from app.execution.executor import execute_item
+from app.execution.utility_structural_cleanup import remove_authorized_empty_wrapper
 from app.models import BatchPlan, BatchPlanItem
 
 
@@ -144,6 +145,33 @@ def test_cleanup_authority_requires_valid_frozen_wrapper_identity(
 
     assert result.state == "skipped"
     assert result.reason == "permanent deletion is disabled"
+    assert wrapper.exists()
+
+
+@pytest.mark.parametrize(
+    ("cleanup_device", "cleanup_inode"),
+    [
+        (None, None),
+        (0, 0),
+    ],
+)
+def test_structural_cleanup_helper_rejects_missing_or_zero_frozen_identity(
+    tmp_path,
+    cleanup_device,
+    cleanup_inode,
+):
+    data_root = tmp_path / "data"
+    wrapper = data_root / "utility" / "A" / "B"
+    wrapper.mkdir(parents=True)
+
+    result = remove_authorized_empty_wrapper(
+        wrapper,
+        allowed_roots=[data_root],
+        expected_device=cleanup_device,
+        expected_inode=cleanup_inode,
+    )
+
+    assert result.state == "failed"
     assert wrapper.exists()
 
 
