@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 import json
 from typing import Any
 
@@ -60,13 +61,20 @@ def _frozen_authority(row: BatchPlanItem) -> tuple[int, str, dict[str, Any], dic
     return int(raw_qid), preview_digest, manifest, metadata
 
 
-def _matching_terminal_events(session: Any, *, plan_id: int, item_id: int) -> list[tuple[AuditEvent, dict[str, Any]]]:
+def _matching_terminal_events(
+    session: Any,
+    *,
+    plan_id: int,
+    item_id: int,
+    plan_created_at: datetime,
+) -> list[tuple[AuditEvent, dict[str, Any]]]:
     matches: list[tuple[AuditEvent, dict[str, Any]]] = []
     events = list(
         session.scalars(
             select(AuditEvent).where(
                 AuditEvent.operation == OPERATION_ID,
                 AuditEvent.result == "completed",
+                AuditEvent.timestamp >= plan_created_at,
             )
         )
     )
@@ -124,6 +132,7 @@ def finalize_bulk_unlink_terminal_audits(
         plan = session.get(BatchPlan, plan_id)
         if plan is None:
             raise KeyError(f"Plan #{plan_id} not found")
+        plan_created_at = plan.created_at
 
         items = list(
             session.scalars(
@@ -142,6 +151,7 @@ def finalize_bulk_unlink_terminal_audits(
                 session,
                 plan_id=plan_id,
                 item_id=int(item.id),
+                plan_created_at=plan_created_at,
             )
             if len(events) > 1:
                 raise StateConflictError(
@@ -174,6 +184,7 @@ def finalize_bulk_unlink_terminal_audits(
                     "preview_digest": preview_digest,
                     "manifest": json.loads(json.dumps(manifest, sort_keys=True)),
                     "advisory": advisory,
+                    "plan_created_at": plan_created_at,
                 }
             )
 
@@ -185,6 +196,12 @@ def finalize_bulk_unlink_terminal_audits(
                 from app.tasks.recovery import assert_active_worker_lease
 
                 assert_active_worker_lease(session, worker_id, now=now)
+
+            plan = session.get(BatchPlan, plan_id)
+            if plan is None or plan.created_at != terminal["plan_created_at"]:
+                raise StateConflictError(
+                    f"UNLINK_PURGE_TERMINAL_PLAN_CHANGED: plan #{plan_id} generation changed"
+                )
 
             item = session.get(BatchPlanItem, terminal["item_id"])
             if item is None or item.plan_id != plan_id or item.operation != OPERATION_ID:
@@ -216,6 +233,7 @@ def finalize_bulk_unlink_terminal_audits(
                 session,
                 plan_id=plan_id,
                 item_id=int(item.id),
+                plan_created_at=terminal["plan_created_at"],
             )
             if len(events) > 1:
                 raise StateConflictError(
