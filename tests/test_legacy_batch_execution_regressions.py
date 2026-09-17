@@ -143,6 +143,7 @@ def test_unlink_purge_terminal_audit_is_scoped_to_current_plan_generation(
     import json
     from datetime import timedelta
 
+    from app.exceptions import StateConflictError
     from app.models import AuditEvent, BatchPlanItem, QuarantineEntry, utcnow
     import app.quarantine.bulk_unlink_terminal as bulk_terminal
     from app.quarantine.unlink_purge import OPERATION_ID, SEMANTICS_VERSION
@@ -295,6 +296,7 @@ def test_unlink_purge_terminal_audit_is_scoped_to_current_plan_generation(
         session.commit()
         current_event_id = int(current_event.id)
         new_entry_id = int(new_entry.id)
+        current_path = new_item.source_path
 
     bulk_terminal.finalize_bulk_unlink_terminal_audits(
         service.SessionLocal,
@@ -321,3 +323,36 @@ def test_unlink_purge_terminal_audit_is_scoped_to_current_plan_generation(
         assert current_details["quarantine_entry_id"] == new_entry_id
         assert current_details["terminal_result"] == "purged"
         assert current_metadata["terminal_advisory"] == advisory
+
+    # A second completed audit in the same plan generation is still corruption
+    # and must remain fail-closed. The historical generation above is ignored;
+    # this newly inserted current-generation duplicate must not be.
+    with service.SessionLocal() as session:
+        session.add(
+            AuditEvent(
+                operation=OPERATION_ID,
+                path=current_path,
+                result="completed",
+                details_json=json.dumps(
+                    {
+                        "plan_id": old_plan_id,
+                        "item_id": old_item_id,
+                        "task_id": 778,
+                        "quarantine_entry_id": new_entry_id,
+                        "preview_digest": new_digest,
+                        "reason": "purged",
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+            )
+        )
+        session.commit()
+
+    with pytest.raises(StateConflictError, match="UNLINK_PURGE_TERMINAL_AUDIT_DUPLICATE"):
+        bulk_terminal.finalize_bulk_unlink_terminal_audits(
+            service.SessionLocal,
+            plan_id=old_plan_id,
+            task_id=778,
+            worker_id=None,
+        )
