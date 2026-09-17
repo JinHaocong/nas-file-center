@@ -39,6 +39,36 @@ def _count_regular_files(root: Path) -> int:
     return count
 
 
+def _compat_regular_file_move_noreplace(source: Path, target: Path) -> None:
+    """Fallback for filesystems without native RENAME_NOREPLACE.
+
+    Hard-link publication provides atomic no-clobber target creation. The source
+    binding is removed only after publication succeeds. Directories and special
+    files remain unsupported so the fallback cannot silently weaken semantics.
+    """
+    source_stat = os.lstat(source)
+    if not stat.S_ISREG(source_stat.st_mode):
+        raise OSError(
+            errno.EOPNOTSUPP,
+            "COMPAT no-replace move supports regular files only",
+            os.fspath(source),
+        )
+
+    os.link(source, target, follow_symlinks=False)
+    try:
+        os.unlink(source)
+    except OSError as unlink_error:
+        try:
+            os.unlink(target)
+        except OSError as rollback_error:
+            raise OSError(
+                errno.EIO,
+                f"COMPAT no-replace move rollback failed: {rollback_error}",
+                os.fspath(source),
+            ) from unlink_error
+        raise
+
+
 def _containing_root(path: Path, roots: Iterable[Path | str]) -> tuple[int, Path] | None:
     resolved_roots = [Path(r).expanduser().resolve(strict=False) for r in roots]
     matches = [(i, r) for i, r in enumerate(resolved_roots) if path == r or path.is_relative_to(r)]
@@ -498,7 +528,12 @@ def execute_item(
             target.parent.mkdir(parents=True, exist_ok=True)
             try:
                 from app.fs_ops import rename_noreplace
-                rename_noreplace(source, target)
+                try:
+                    rename_noreplace(source, target)
+                except OSError as exc:
+                    if exc.errno != errno.EOPNOTSUPP:
+                        raise
+                    _compat_regular_file_move_noreplace(source, target)
             except FileExistsError:
                 return _skip("target already exists")
             except OSError as exc:
