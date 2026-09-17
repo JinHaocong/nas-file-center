@@ -12,6 +12,7 @@ from app.batch_utilities.single_child_wrapper import discover_single_child_wrapp
 from app.filters.compiler import compile_filter_to_sql
 from app.filters.excludes import DEFAULT_EXCLUDE_DIR_NAMES, build_exclude_predicates
 from app.filters.validation import validate_filter_ast
+from app.fs_ops import NoreplaceProbeCleanupError
 from app.models import FilterPolicy, IndexRoot, IndexedPath, ScanJob
 from app.organizers.engine import generate_organizer_proposals
 from app.organizers.planner import plan_organizer_operations
@@ -186,11 +187,22 @@ class WorkflowCompiler:
                 else authoritative_root
             )
         )
-        decisions = discover_single_child_wrappers(
-            scope_path,
-            authoritative_root,
-            limit=max_candidates,
-        )
+        try:
+            decisions = discover_single_child_wrappers(
+                scope_path,
+                authoritative_root,
+                limit=max_candidates,
+            )
+        except NoreplaceProbeCleanupError as exc:
+            raise WorkflowValidationError(
+                "Utility capability probe cleanup failed",
+                code="UTILITY_CAPABILITY_PROBE_SAFETY_ERROR",
+                details={
+                    "reason": "probe_cleanup_failed",
+                    "scope_path": scope_path,
+                },
+                status_code=422,
+            ) from exc
 
         decision_by_id = {decision.candidate_id: decision for decision in decisions}
         default_selected_ids = [

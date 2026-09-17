@@ -17,6 +17,7 @@ import stat
 import sys
 
 __all__ = [
+    "NoreplaceProbeCleanupError",
     "probe_existing_noreplace_capability_at",
     "rename_noreplace",
     "rename_noreplace_at",
@@ -25,6 +26,11 @@ __all__ = [
 _AT_FDCWD = -100
 _RENAME_NOREPLACE = 1
 _RENAME_EXCL = 0x00000004
+
+
+class NoreplaceProbeCleanupError(RuntimeError):
+    """Raised when a disposable NOREPLACE capability probe cannot be fully cleaned up."""
+
 
 
 def _get_linux_rename_func():
@@ -170,6 +176,10 @@ def _cleanup_probe_name(path: str, *, dir_fd: int | None = None) -> bool:
         return False
 
 
+def _raise_probe_cleanup_error() -> None:
+    raise NoreplaceProbeCleanupError("RENAME_NOREPLACE probe cleanup failed")
+
+
 def probe_existing_noreplace_capability_at(dir_fd: int, entry_name: str) -> bool | None:
     """Probe native NOREPLACE support without mutating the candidate binding.
 
@@ -178,7 +188,9 @@ def probe_existing_noreplace_capability_at(dir_fd: int, entry_name: str) -> bool
     real cross-name MOVE support because COMPAT filesystems may special-case
     source == destination. Any such positive-looking result must therefore be
     confirmed by the isolated disposable cross-name probe before mutation
-    authority is granted. Ambiguous results fail closed as None.
+    authority is granted. Ambiguous results fail closed as None. A disposable
+    probe cleanup failure raises NoreplaceProbeCleanupError because namespace
+    residue is a safety failure, not ordinary capability ambiguity.
     """
     if _RENAME_AT_IMPL is None:
         return False
@@ -228,11 +240,13 @@ def _probe_rename_noreplace_supported(
     Probes whether the filesystem at target directory or dir_fd supports atomic RENAME_NOREPLACE.
     Uses a valid, existing disposable temporary file to exercise the filesystem's handling
     of the RENAME_NOREPLACE flag. A positive result is granted only after both disposable
-    probe names are confirmed cleaned up; unresolved cleanup fails closed as None.
+    probe names are confirmed cleaned up; unresolved cleanup raises a safety error.
     Returns:
       True:  Filesystem supports RENAME_NOREPLACE and probe cleanup completed.
       False: Filesystem rejects RENAME_NOREPLACE capability (e.g. returned EINVAL/ENOSYS/EOPNOTSUPP on existing source).
-      None:  Capability or cleanup could not be safely established (fails closed).
+      None:  Capability could not otherwise be safely established (fails closed).
+    Raises:
+      NoreplaceProbeCleanupError: Disposable probe namespace cleanup could not be confirmed.
     """
     if dir_fd is not None and _RENAME_AT_IMPL is not None:
         dfd_norm = _normalize_dir_fd(dir_fd)
@@ -276,7 +290,7 @@ def _probe_rename_noreplace_supported(
             dst_clean = _cleanup_probe_name(probe_dst_name, dir_fd=dfd_norm)
 
         if not (src_clean and dst_clean):
-            return None
+            _raise_probe_cleanup_error()
         return capability
 
     path = target if target is not None else dir_path
@@ -312,8 +326,10 @@ def _probe_rename_noreplace_supported(
                 dst_clean = _cleanup_probe_name(probe_dst)
 
             if not (src_clean and dst_clean):
-                return None
+                _raise_probe_cleanup_error()
             return capability
+        except NoreplaceProbeCleanupError:
+            raise
         except Exception:
             return None
 

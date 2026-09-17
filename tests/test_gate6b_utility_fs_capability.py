@@ -4,6 +4,8 @@ import ctypes
 import errno
 import os
 
+import pytest
+
 import app.fs_ops as fs_ops
 
 
@@ -96,7 +98,7 @@ def test_probe_does_not_grant_support_when_cross_name_probe_cleanup_is_unresolve
     tmp_path,
     monkeypatch,
 ):
-    """A disposable probe that cannot be cleaned up must never grant Utility mutation authority."""
+    """A disposable probe with unresolved cleanup must raise a safety failure."""
     child = tmp_path / "C"
     child.mkdir()
     child_before = os.lstat(child)
@@ -134,12 +136,12 @@ def test_probe_does_not_grant_support_when_cross_name_probe_cleanup_is_unresolve
 
     fd = _open_dir(tmp_path)
     try:
-        result = fs_ops.probe_existing_noreplace_capability_at(fd, "C")
+        with pytest.raises(fs_ops.NoreplaceProbeCleanupError, match="probe cleanup"):
+            fs_ops.probe_existing_noreplace_capability_at(fd, "C")
     finally:
         os.close(fd)
 
     child_after = os.lstat(child)
-    assert result is None
     assert (child_after.st_dev, child_after.st_ino, child_after.st_mode) == (
         child_before.st_dev,
         child_before.st_ino,
