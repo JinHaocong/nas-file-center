@@ -279,5 +279,6 @@ jobs:
         run: >-
           pytest
           tests/test_legacy_batch_execution_regressions.py
+          tests/test_legacy_batch_recursive_rename_regressions.py
           tests/test_gate6a2_unlink_purge_terminal_audit.py
           -v
