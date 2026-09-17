@@ -149,6 +149,8 @@ PLAN_SINGLE_DELETE_ALLOWED = {
     "partial",
     "completed",
     "failed",
+    "stale",
+    "expired",
 }
 
 PLAN_DELETE_BLOCKED_ACTIVE = {
@@ -1925,7 +1927,32 @@ class FileCenterService:
 
 
     def rename_preview(self, paths: list[str], rule: RenameRule) -> list[dict]:
-        sources = [require_allowed_path(path, self.settings.allowed_roots) for path in paths]
+        requested_sources = [require_allowed_path(path, self.settings.allowed_roots) for path in paths]
+        sources: list[Path] = []
+        seen_sources: set[Path] = set()
+
+        for requested_source in requested_sources:
+            if requested_source.is_dir() and not requested_source.is_symlink():
+                for current, dirnames, filenames in os.walk(requested_source, followlinks=False):
+                    current_path = Path(current)
+                    dirnames[:] = sorted(
+                        name for name in dirnames
+                        if not (current_path / name).is_symlink()
+                    )
+                    for name in sorted(filenames):
+                        candidate = current_path / name
+                        if candidate.is_symlink() or not candidate.is_file():
+                            continue
+                        safe_candidate = require_allowed_path(candidate, self.settings.allowed_roots)
+                        if safe_candidate not in seen_sources:
+                            seen_sources.add(safe_candidate)
+                            sources.append(safe_candidate)
+                continue
+
+            if requested_source not in seen_sources:
+                seen_sources.add(requested_source)
+                sources.append(requested_source)
+
         sources.sort(key=str)
         source_set = set(sources)
         results = []
