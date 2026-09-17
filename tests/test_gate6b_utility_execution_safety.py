@@ -421,7 +421,7 @@ def test_symlink_and_path_aba_after_freeze_fail_closed(utility_execution_env):
     assert not (root / "C2").exists()
 
 
-def test_utility_empty_wrapper_removal_has_no_recursive_delete_path(
+def test_utility_empty_wrapper_removal_is_single_non_recursive_rmdir(
     utility_execution_env,
     monkeypatch,
 ):
@@ -435,8 +435,16 @@ def test_utility_empty_wrapper_removal_has_no_recursive_delete_path(
     assert (root / "B").is_dir()
     assert list((root / "B").iterdir()) == []
 
+    quarantine_before = sorted(p.name for p in env["quarantine"].iterdir())
+    real_rmdir = os.rmdir
+    rmdir_calls: list[tuple[object, object]] = []
+
+    def guarded_rmdir(path, *args, **kwargs):
+        rmdir_calls.append((path, kwargs.get("dir_fd")))
+        return real_rmdir(path, *args, **kwargs)
+
     monkeypatch.setattr(os, "unlink", lambda *a, **k: pytest.fail("FORBIDDEN: os.unlink"))
-    monkeypatch.setattr(os, "rmdir", lambda *a, **k: pytest.fail("FORBIDDEN: os.rmdir"))
+    monkeypatch.setattr(os, "rmdir", guarded_rmdir)
     monkeypatch.setattr(shutil, "rmtree", lambda *a, **k: pytest.fail("FORBIDDEN: shutil.rmtree"))
 
     removed = execute_item(
@@ -451,5 +459,6 @@ def test_utility_empty_wrapper_removal_has_no_recursive_delete_path(
 
     assert removed.state == "completed"
     assert not (root / "B").exists()
-    assert removed.result_path is not None
-    assert removed.result_path.is_dir()
+    assert removed.result_path is None
+    assert len(rmdir_calls) == 1
+    assert sorted(p.name for p in env["quarantine"].iterdir()) == quarantine_before
