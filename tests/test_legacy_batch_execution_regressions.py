@@ -33,6 +33,16 @@ def _make_service(tmp_path: Path) -> tuple[FileCenterService, Path]:
     return FileCenterService(settings), data_dir
 
 
+def _force_native_noreplace_unsupported(monkeypatch: pytest.MonkeyPatch) -> None:
+    import app.fs_ops as fs_ops
+
+    def unsupported_noreplace(_source: bytes, _target: bytes) -> int:
+        ctypes.set_errno(errno.EOPNOTSUPP)
+        return -1
+
+    monkeypatch.setattr(fs_ops, "_RENAME_IMPL", unsupported_noreplace)
+
+
 @pytest.mark.parametrize("status", ["stale", "expired"])
 def test_delete_plan_allows_inactive_stale_or_expired_plan(tmp_path: Path, status: str) -> None:
     service, data_dir = _make_service(tmp_path)
@@ -67,10 +77,8 @@ def test_execute_rename_regular_file_survives_unsupported_native_noreplace(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Regular-file rename must retain no-clobber semantics on COMPAT filesystems."""
     from app.batch.plans import OperationItem
     from app.execution.executor import execute_item
-    import app.fs_ops as fs_ops
 
     root = tmp_path / "data"
     root.mkdir()
@@ -79,12 +87,7 @@ def test_execute_rename_regular_file_survives_unsupported_native_noreplace(
     source = root / "source.webp"
     target = root / "renamed.webp"
     source.write_bytes(b"payload")
-
-    def unsupported_noreplace(_source: bytes, _target: bytes) -> int:
-        ctypes.set_errno(errno.EOPNOTSUPP)
-        return -1
-
-    monkeypatch.setattr(fs_ops, "_RENAME_IMPL", unsupported_noreplace)
+    _force_native_noreplace_unsupported(monkeypatch)
 
     result = execute_item(
         OperationItem(sequence=1, operation="rename", source=source, target=target),
@@ -99,3 +102,35 @@ def test_execute_rename_regular_file_survives_unsupported_native_noreplace(
     assert result.result_path == target
     assert not source.exists()
     assert target.read_bytes() == b"payload"
+
+
+def test_execute_rename_compat_fallback_never_clobbers_existing_target(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.batch.plans import OperationItem
+    from app.execution.executor import execute_item
+
+    root = tmp_path / "data"
+    root.mkdir()
+    trash = root / ".nas-file-center-trash"
+    trash.mkdir()
+    source = root / "source.webp"
+    target = root / "renamed.webp"
+    source.write_bytes(b"source")
+    target.write_bytes(b"existing-target")
+    _force_native_noreplace_unsupported(monkeypatch)
+
+    result = execute_item(
+        OperationItem(sequence=1, operation="rename", source=source, target=target),
+        allowed_roots=[root],
+        allow_mutation=True,
+        allow_delete=True,
+        quarantine_root=trash,
+        plan_id="compat-rename-collision",
+    )
+
+    assert result.state == "skipped"
+    assert result.reason == "target already exists"
+    assert source.read_bytes() == b"source"
+    assert target.read_bytes() == b"existing-target"
