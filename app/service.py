@@ -149,6 +149,8 @@ PLAN_SINGLE_DELETE_ALLOWED = {
     "partial",
     "completed",
     "failed",
+    "stale",
+    "expired",
 }
 
 PLAN_DELETE_BLOCKED_ACTIVE = {
