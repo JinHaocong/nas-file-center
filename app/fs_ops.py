@@ -262,9 +262,15 @@ def _probe_rename_noreplace_supported(
                 0o600,
                 dir_fd=dfd_norm,
             )
-            os.close(fd)
         except Exception:
             return None
+
+        try:
+            os.close(fd)
+        except Exception:
+            _cleanup_probe_name(probe_src_name, dir_fd=dfd_norm)
+            _cleanup_probe_name(probe_dst_name, dir_fd=dfd_norm)
+            _raise_probe_cleanup_error()
 
         capability: bool | None = None
         try:
@@ -303,9 +309,15 @@ def _probe_rename_noreplace_supported(
 
             try:
                 fd = os.open(probe_src, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-                os.close(fd)
             except Exception:
                 return None
+
+            try:
+                os.close(fd)
+            except Exception:
+                _cleanup_probe_name(probe_src)
+                _cleanup_probe_name(probe_dst)
+                _raise_probe_cleanup_error()
 
             capability: bool | None = None
             try:
