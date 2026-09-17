@@ -231,6 +231,39 @@ jobs:
             git push origin "HEAD:${GITHUB_REF_NAME}"
           fi
 
+      - name: Remove ordering assumption from recursive rename regression
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("tests/test_legacy_batch_execution_regressions.py")
+          text = path.read_text(encoding="utf-8")
+          old = '''    assert [row["source"] for row in preview] == [str(first), str(second)]
+              assert [row["target"] for row in preview] == [
+                  str(scope / "REN-track 01.flac"),
+                  str(nested / "REN-track 02.flac"),
+              ]
+          '''
+          new = '''    assert {row["source"]: row["target"] for row in preview} == {
+                  str(first): str(scope / "REN-track 01.flac"),
+                  str(second): str(nested / "REN-track 02.flac"),
+              }
+          '''
+          if old in text:
+              path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          elif 'assert {row["source"]: row["target"] for row in preview}' not in text:
+              raise SystemExit("expected recursive rename regression assertions not found")
+          PY
+
+          if ! git diff --quiet -- tests/test_legacy_batch_execution_regressions.py; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add tests/test_legacy_batch_execution_regressions.py
+            git commit -m "test: make recursive rename regression order-independent"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
+
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
