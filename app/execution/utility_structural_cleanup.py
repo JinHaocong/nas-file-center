@@ -41,6 +41,7 @@ def remove_authorized_empty_wrapper(
         )
 
     flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    removed = False
 
     try:
         with safe_open_parent_fd(source, allowed_roots) as (parent_fd, leaf_name):
@@ -90,6 +91,7 @@ def remove_authorized_empty_wrapper(
 
                 try:
                     os.rmdir(leaf_name, dir_fd=parent_fd)
+                    removed = True
                 except OSError as exc:
                     if exc.errno in (errno.ENOTEMPTY, errno.EEXIST):
                         return UtilityStructuralCleanupResult("skipped", "source directory is not empty")
@@ -99,6 +101,11 @@ def remove_authorized_empty_wrapper(
             finally:
                 os.close(wrapper_fd)
     except (OSError, ValueError) as exc:
+        if removed:
+            return UtilityStructuralCleanupResult(
+                "completed",
+                f"{UTILITY_EMPTY_WRAPPER_STRUCTURAL_CLEANUP_REASON} (post-mutation descriptor close warning: {exc})",
+            )
         return UtilityStructuralCleanupResult("failed", str(exc))
 
     return UtilityStructuralCleanupResult(
