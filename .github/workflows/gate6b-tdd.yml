@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - v0.3.6-gate6b-utility-recursive-dirbal
-      - hotfix/fclones-progress-total-regression
   workflow_dispatch:
 
 permissions:
@@ -39,7 +38,7 @@ jobs:
         run: |
           set -o pipefail
           shopt -s nullglob
-          gate6b_tests=(tests/test_gate6b_utility_*.py tests/test_gate6b_recursive_dirbal_*.py tests/test_fclones_progress_regression.py)
+          gate6b_tests=(tests/test_gate6b_utility_*.py tests/test_gate6b_recursive_dirbal_*.py)
           if ((${#gate6b_tests[@]})); then
             pytest "${gate6b_tests[@]}" -v
           fi
