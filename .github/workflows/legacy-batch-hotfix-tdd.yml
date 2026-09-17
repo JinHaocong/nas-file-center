@@ -174,6 +174,63 @@ jobs:
             git push origin "HEAD:${GITHUB_REF_NAME}"
           fi
 
+      - name: Apply recursive directory rename preview fix
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("app/service.py")
+          text = path.read_text(encoding="utf-8")
+          old = '''    def rename_preview(self, paths: list[str], rule: RenameRule) -> list[dict]:
+                  sources = [require_allowed_path(path, self.settings.allowed_roots) for path in paths]
+                  sources.sort(key=str)
+                  source_set = set(sources)
+          '''
+          new = '''    def rename_preview(self, paths: list[str], rule: RenameRule) -> list[dict]:
+                  requested_sources = [require_allowed_path(path, self.settings.allowed_roots) for path in paths]
+                  sources: list[Path] = []
+                  seen_sources: set[Path] = set()
+
+                  for requested_source in requested_sources:
+                      if requested_source.is_dir() and not requested_source.is_symlink():
+                          for current, dirnames, filenames in os.walk(requested_source, followlinks=False):
+                              current_path = Path(current)
+                              dirnames[:] = sorted(
+                                  name for name in dirnames
+                                  if not (current_path / name).is_symlink()
+                              )
+                              for name in sorted(filenames):
+                                  candidate = current_path / name
+                                  if candidate.is_symlink() or not candidate.is_file():
+                                      continue
+                                  safe_candidate = require_allowed_path(candidate, self.settings.allowed_roots)
+                                  if safe_candidate not in seen_sources:
+                                      seen_sources.add(safe_candidate)
+                                      sources.append(safe_candidate)
+                          continue
+
+                      if requested_source not in seen_sources:
+                          seen_sources.add(requested_source)
+                          sources.append(requested_source)
+
+                  sources.sort(key=str)
+                  source_set = set(sources)
+          '''
+          if old in text:
+              path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          elif "requested_sources = [require_allowed_path(path, self.settings.allowed_roots) for path in paths]" not in text:
+              raise SystemExit("expected rename_preview source expansion block not found")
+          PY
+
+          if ! git diff --quiet -- app/service.py; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add app/service.py
+            git commit -m "fix: recurse directory scopes for batch rename preview"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
+
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
