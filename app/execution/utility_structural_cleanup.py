@@ -39,6 +39,18 @@ def remove_authorized_empty_wrapper(
             "failed",
             "safe structural cleanup requires O_NOFOLLOW",
         )
+    if (
+        not isinstance(expected_device, int)
+        or isinstance(expected_device, bool)
+        or expected_device <= 0
+        or not isinstance(expected_inode, int)
+        or isinstance(expected_inode, bool)
+        or expected_inode <= 0
+    ):
+        return UtilityStructuralCleanupResult(
+            "failed",
+            "frozen wrapper identity is missing or invalid",
+        )
 
     flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
     removed = False
@@ -52,9 +64,7 @@ def remove_authorized_empty_wrapper(
 
             if stat.S_ISLNK(st_leaf.st_mode) or not stat.S_ISDIR(st_leaf.st_mode):
                 return UtilityStructuralCleanupResult("skipped", "source is not a directory")
-            if (expected_device and st_leaf.st_dev != expected_device) or (
-                expected_inode and st_leaf.st_ino != expected_inode
-            ):
+            if st_leaf.st_dev != expected_device or st_leaf.st_ino != expected_inode:
                 return UtilityStructuralCleanupResult("skipped", "source identity changed")
 
             try:
@@ -68,9 +78,7 @@ def remove_authorized_empty_wrapper(
                 st_open = os.fstat(wrapper_fd)
                 if not stat.S_ISDIR(st_open.st_mode) or stat.S_ISLNK(st_open.st_mode):
                     return UtilityStructuralCleanupResult("skipped", "source is not a directory")
-                if (expected_device and st_open.st_dev != expected_device) or (
-                    expected_inode and st_open.st_ino != expected_inode
-                ):
+                if st_open.st_dev != expected_device or st_open.st_ino != expected_inode:
                     return UtilityStructuralCleanupResult("skipped", "source identity changed")
                 if os.listdir(wrapper_fd):
                     return UtilityStructuralCleanupResult("skipped", "source directory is not empty")
