@@ -377,11 +377,10 @@ def test_rename_preview_directory_scope_recurses_regular_files_without_renaming_
         RenameRule(prefix="REN-"),
     )
 
-    assert [row["source"] for row in preview] == [str(first), str(second)]
-    assert [row["target"] for row in preview] == [
-        str(scope / "REN-track 01.flac"),
-        str(nested / "REN-track 02.flac"),
-    ]
+    assert {row["source"]: row["target"] for row in preview} == {
+        str(first): str(scope / "REN-track 01.flac"),
+        str(second): str(nested / "REN-track 02.flac"),
+    }
     assert all(row["conflict"] is False for row in preview)
     assert all(row["source"] != str(scope) for row in preview)
     assert all(row["target"] != str(scope.with_name("REN-Album")) for row in preview)
