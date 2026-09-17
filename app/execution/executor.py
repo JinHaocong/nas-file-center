@@ -200,6 +200,18 @@ def _resolve_utility_empty_wrapper_cleanup_authority(
                 return False
             if current.source_path != os.fspath(item.source):
                 return False
+            for frozen_identity in (
+                current.expected_device,
+                current.expected_inode,
+                item.expected_device,
+                item.expected_inode,
+            ):
+                if (
+                    not isinstance(frozen_identity, int)
+                    or isinstance(frozen_identity, bool)
+                    or frozen_identity <= 0
+                ):
+                    return False
             if current.expected_device != item.expected_device:
                 return False
             if current.expected_inode != item.expected_inode:
@@ -212,9 +224,16 @@ def _resolve_utility_empty_wrapper_cleanup_authority(
             if not isinstance(current_metadata, dict):
                 return False
             candidate_id = current_metadata.get("candidate_id")
+            wrapper_path = current_metadata.get("wrapper_path")
+            child_path = current_metadata.get("child_path")
+            target_path = current_metadata.get("target_path")
             if not isinstance(candidate_id, str) or not candidate_id.strip():
                 return False
-            if current_metadata.get("wrapper_path") != current.source_path:
+            if wrapper_path != current.source_path:
+                return False
+            if not isinstance(child_path, str) or not child_path.strip():
+                return False
+            if not isinstance(target_path, str) or not target_path.strip():
                 return False
 
             predecessor_rows = list(
@@ -232,6 +251,10 @@ def _resolve_utility_empty_wrapper_cleanup_authority(
                 return False
             if predecessor.state != "completed":
                 return False
+            if predecessor.source_path != child_path:
+                return False
+            if predecessor.target_path != target_path:
+                return False
 
             try:
                 predecessor_metadata = json.loads(predecessor.metadata_json or "{}")
@@ -241,9 +264,11 @@ def _resolve_utility_empty_wrapper_cleanup_authority(
                 return False
             if predecessor_metadata.get("candidate_id") != candidate_id:
                 return False
-            if predecessor_metadata.get("wrapper_path") != current_metadata.get("wrapper_path"):
+            if predecessor_metadata.get("wrapper_path") != wrapper_path:
                 return False
-            if predecessor_metadata.get("target_path") != current_metadata.get("target_path"):
+            if predecessor_metadata.get("child_path") != child_path:
+                return False
+            if predecessor_metadata.get("target_path") != target_path:
                 return False
 
             return True
