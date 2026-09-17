@@ -65,6 +65,115 @@ jobs:
             git push origin "HEAD:${GITHUB_REF_NAME}"
           fi
 
+      - name: Apply COMPAT regular-file rename fallback
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("app/execution/executor.py")
+          text = path.read_text(encoding="utf-8")
+
+          helper_old = '''def _count_regular_files(root: Path) -> int:
+              count = 0
+              for current, dirnames, filenames in os.walk(root, followlinks=False):
+                  current_path = Path(current)
+                  dirnames[:] = [d for d in dirnames if not (current_path / d).is_symlink()]
+                  for name in filenames:
+                      p = current_path / name
+                      if not p.is_symlink() and p.is_file():
+                          count += 1
+              return count
+
+
+          def _containing_root'''
+          helper_new = '''def _count_regular_files(root: Path) -> int:
+              count = 0
+              for current, dirnames, filenames in os.walk(root, followlinks=False):
+                  current_path = Path(current)
+                  dirnames[:] = [d for d in dirnames if not (current_path / d).is_symlink()]
+                  for name in filenames:
+                      p = current_path / name
+                      if not p.is_symlink() and p.is_file():
+                          count += 1
+              return count
+
+
+          def _compat_regular_file_move_noreplace(source: Path, target: Path) -> None:
+              """Fallback for filesystems without native RENAME_NOREPLACE.
+
+              Hard-link publication provides atomic no-clobber target creation. The source
+              binding is removed only after publication succeeds. Directories and special
+              files remain unsupported so the fallback cannot silently weaken semantics.
+              """
+              source_stat = os.lstat(source)
+              if not stat.S_ISREG(source_stat.st_mode):
+                  raise OSError(
+                      errno.EOPNOTSUPP,
+                      "COMPAT no-replace move supports regular files only",
+                      os.fspath(source),
+                  )
+
+              os.link(source, target, follow_symlinks=False)
+              try:
+                  os.unlink(source)
+              except OSError as unlink_error:
+                  try:
+                      os.unlink(target)
+                  except OSError as rollback_error:
+                      raise OSError(
+                          errno.EIO,
+                          f"COMPAT no-replace move rollback failed: {rollback_error}",
+                          os.fspath(source),
+                      ) from unlink_error
+                  raise
+
+
+          def _containing_root'''
+          if helper_old in text:
+              text = text.replace(helper_old, helper_new, 1)
+          elif "def _compat_regular_file_move_noreplace" not in text:
+              raise SystemExit("expected executor helper anchor not found")
+
+          rename_old = '''            try:
+                          from app.fs_ops import rename_noreplace
+                          rename_noreplace(source, target)
+                      except FileExistsError:
+                          return _skip("target already exists")
+                      except OSError as exc:
+                          return ItemResult("failed", str(exc))
+                      return ItemResult("completed", "moved", target)
+          '''
+          rename_new = '''            try:
+                          from app.fs_ops import rename_noreplace
+                          try:
+                              rename_noreplace(source, target)
+                          except OSError as exc:
+                              if exc.errno != errno.EOPNOTSUPP:
+                                  raise
+                              _compat_regular_file_move_noreplace(source, target)
+                      except FileExistsError:
+                          return _skip("target already exists")
+                      except OSError as exc:
+                          return ItemResult("failed", str(exc))
+                      return ItemResult("completed", "moved", target)
+          '''
+          if rename_old in text:
+              text = text.replace(rename_old, rename_new, 1)
+          elif "_compat_regular_file_move_noreplace(source, target)" not in text:
+              raise SystemExit("expected rename execution block not found")
+
+          path.write_text(text, encoding="utf-8")
+          PY
+
+          if ! git diff --quiet -- app/execution/executor.py; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add app/execution/executor.py
+            git commit -m "fix: support no-clobber file rename on compat filesystems"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
+
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
