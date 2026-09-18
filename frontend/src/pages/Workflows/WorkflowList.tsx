@@ -1,27 +1,22 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
-  Card,
-  Table,
   Button,
-  Tag,
-  Space,
-  Typography,
-  Switch,
+  Empty,
+  Pagination,
   Popconfirm,
+  Switch,
+  Table,
   message,
 } from 'antd';
 import {
+  DeleteOutlined,
+  EditOutlined,
+  HistoryOutlined,
   PlusOutlined,
   ReloadOutlined,
-  HistoryOutlined,
-  EditOutlined,
-  DeleteOutlined,
-  FileTextOutlined,
-  AppstoreOutlined,
-  ThunderboltOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { workflowApi } from '../../api/workflows';
 import { getStructuredApiError } from '../../api/errors';
 import { WorkflowListItem } from '../../types/workflow';
@@ -29,9 +24,19 @@ import { RevisionDrawer } from '../../components/workflows/RevisionDrawer';
 import { useTitle } from '../../hooks/useTitle';
 import { formatDateTime } from '../../utils/format';
 import { useAuth } from '../../contexts/AuthContext';
-import { canCreateWorkflow, canArchiveWorkflow } from '../../utils/workflowRbac';
+import { canArchiveWorkflow, canCreateWorkflow } from '../../utils/workflowRbac';
+import { PageHeader } from '../../components/ui/PageHeader';
+import { DataPanel } from '../../components/ui/DataPanel';
+import { ActionBar } from '../../components/ui/ActionBar';
+import { ResponsiveDataView } from '../../components/ui/ResponsiveDataView';
+import { StatusBadge } from '../../components/ui/StatusBadge';
 
-const { Title, Text } = Typography;
+const modeLabel = (mode: WorkflowListItem['mode']) => {
+  if (mode === 'dedupe') return '高级去重流';
+  if (mode === 'organizer') return '目录整理流';
+  if (mode === 'utility') return '目录工具流';
+  return '文件规则流';
+};
 
 export const WorkflowListPage: React.FC = () => {
   useTitle('工作流中心');
@@ -41,21 +46,20 @@ export const WorkflowListPage: React.FC = () => {
 
   const [includeArchived, setIncludeArchived] = useState(false);
   const [selectedWorkflowForRevision, setSelectedWorkflowForRevision] = useState<WorkflowListItem | null>(null);
+  const [page, setPage] = useState(1);
+  const pageSize = 15;
 
-  const {
-    data: workflows,
-    isLoading,
-    refetch,
-  } = useQuery({
+  const { data: workflows, isLoading, isFetching, refetch } = useQuery({
     queryKey: ['workflowsList', includeArchived],
     queryFn: () => workflowApi.listWorkflows(includeArchived),
   });
 
   const archiveMutation = useMutation({
-    mutationFn: (wf: WorkflowListItem) =>
-      workflowApi.archiveWorkflow(wf.id, wf.current_revision),
+    mutationFn: (workflow: WorkflowListItem) =>
+      workflowApi.archiveWorkflow(workflow.id, workflow.current_revision),
     onSuccess: () => {
       message.success('工作流已成功归档');
+      queryClient.invalidateQueries({ queryKey: ['workflowsList'] });
       refetch();
     },
     onError: (err) => {
@@ -64,180 +68,256 @@ export const WorkflowListPage: React.FC = () => {
     },
   });
 
+  const items = workflows || [];
+  const mobileItems = useMemo(
+    () => items.slice((page - 1) * pageSize, page * pageSize),
+    [items, page]
+  );
+
   const columns = [
     {
       title: 'ID',
       dataIndex: 'id',
       key: 'id',
-      width: 70,
-      render: (id: number) => <Text strong>#{id}</Text>,
+      width: 72,
+      render: (id: number) => <span className="nfc-mono">#{id}</span>,
     },
     {
-      title: '工作流名称',
+      title: '工作流',
       dataIndex: 'name',
       key: 'name',
       render: (name: string, record: WorkflowListItem) => (
-        <Space direction="vertical" size={2}>
-          <Text strong>
-            {name}
-          </Text>
-          {record.description && (
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              {record.description}
-            </Text>
-          )}
-        </Space>
+        <button
+          type="button"
+          className="nfc-workflow-name"
+          onClick={() => navigate(`/workflows/${record.id}`)}
+        >
+          <strong>{name}</strong>
+          {record.description && <span>{record.description}</span>}
+        </button>
       ),
     },
     {
-      title: '执行模式',
+      title: '模式',
       dataIndex: 'mode',
       key: 'mode',
-      width: 140,
-      render: (mode: WorkflowListItem['mode']) => {
-        if (mode === 'dedupe') {
-          return (
-            <Tag color="purple" icon={<ThunderboltOutlined />}>
-              高级去重流
-            </Tag>
-          );
-        }
-        return mode === 'file' ? (
-          <Tag color="blue" icon={<FileTextOutlined />}>
-            文件规则流
-          </Tag>
-        ) : (
-          <Tag color="magenta" icon={<AppstoreOutlined />}>
-            目录整理流
-          </Tag>
-        );
-      },
+      width: 130,
+      render: (mode: WorkflowListItem['mode']) => (
+        <span className="nfc-kind-badge">{modeLabel(mode)}</span>
+      ),
     },
     {
-      title: '当前版本',
+      title: '版本',
       dataIndex: 'current_revision',
       key: 'current_revision',
-      width: 90,
-      render: (rev: number) => <Tag color="geekblue">r{rev}</Tag>,
+      width: 84,
+      render: (revision: number) => <span className="nfc-mono">r{revision}</span>,
     },
     {
       title: '类别',
       dataIndex: 'is_builtin',
       key: 'is_builtin',
-      width: 90,
-      render: (builtin: boolean) =>
-        builtin ? <Tag color="gold">内置预置</Tag> : <Tag color="default">用户自建</Tag>,
+      width: 98,
+      render: (builtin: boolean) => (
+        <span className="nfc-kind-badge">{builtin ? 'builtin' : 'user'}</span>
+      ),
     },
     {
       title: '状态',
       dataIndex: 'archived_at',
       key: 'archived_at',
-      width: 100,
-      render: (archived: string | null) =>
-        archived ? <Tag color="error">已归档</Tag> : <Tag color="success">启用中</Tag>,
+      width: 108,
+      render: (archived: string | null) => (
+        <StatusBadge
+          status={archived ? 'stale' : 'completed'}
+          label={archived ? '已归档' : '启用中'}
+        />
+      ),
     },
     {
       title: '更新时间',
       dataIndex: 'updated_at',
       key: 'updated_at',
       width: 170,
-      render: (dt: string) => formatDateTime(dt),
+      render: (value: string) => <span className="nfc-table-meta">{formatDateTime(value)}</span>,
     },
     {
       title: '操作',
       key: 'action',
-      width: 200,
-      render: (_: any, record: WorkflowListItem) => (
-        <Space>
+      width: 230,
+      render: (_: unknown, record: WorkflowListItem) => (
+        <div className="nfc-row-actions">
           <Button
-            type="link"
+            type="text"
             size="small"
             icon={<EditOutlined />}
             onClick={() => navigate(`/workflows/${record.id}`)}
           >
             {record.is_builtin ? '查看/试运行' : '编排配置'}
           </Button>
-
           <Button
-            type="link"
+            type="text"
             size="small"
             icon={<HistoryOutlined />}
             onClick={() => setSelectedWorkflowForRevision(record)}
           >
             版本
           </Button>
-
-          {!record.is_builtin && !record.archived_at && canArchiveWorkflow(user?.role, Boolean(record.archived_at)) && (
-            <Popconfirm
-              title="确认归档此工作流？"
-              description="归档后工作流将进入只读封存态，不再执行任何计划构建。"
-              onConfirm={() => archiveMutation.mutate(record)}
-              okText="确认归档"
-              cancelText="取消"
-            >
-              <Button
-                type="link"
-                danger
-                size="small"
-                icon={<DeleteOutlined />}
-                loading={archiveMutation.isPending}
+          {!record.is_builtin &&
+            !record.archived_at &&
+            canArchiveWorkflow(user?.role, Boolean(record.archived_at)) && (
+              <Popconfirm
+                title="确认归档此工作流？"
+                description="归档后工作流进入只读封存态，不再执行任何计划构建。"
+                onConfirm={() => archiveMutation.mutate(record)}
+                okText="确认归档"
+                cancelText="取消"
               >
-                归档
-              </Button>
-            </Popconfirm>
-          )}
-        </Space>
+                <Button
+                  type="text"
+                  danger
+                  size="small"
+                  icon={<DeleteOutlined />}
+                  loading={archiveMutation.isPending}
+                >
+                  归档
+                </Button>
+              </Popconfirm>
+            )}
+        </div>
       ),
     },
   ];
 
+  const renderMobileActions = (record: WorkflowListItem) => (
+    <div className="nfc-mobile-record-actions">
+      <Button type="text" onClick={() => navigate(`/workflows/${record.id}`)}>
+        {record.is_builtin ? '查看/试运行' : '编排配置'}
+      </Button>
+      <Button type="text" onClick={() => setSelectedWorkflowForRevision(record)}>
+        版本历史
+      </Button>
+      {!record.is_builtin &&
+        !record.archived_at &&
+        canArchiveWorkflow(user?.role, Boolean(record.archived_at)) && (
+          <Popconfirm
+            title="确认归档此工作流？"
+            description="归档后工作流进入只读封存态。"
+            onConfirm={() => archiveMutation.mutate(record)}
+            okText="归档"
+            cancelText="取消"
+          >
+            <Button type="text" danger>归档</Button>
+          </Popconfirm>
+        )}
+    </div>
+  );
+
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <div>
-          <Title level={4} style={{ margin: 0 }}>
-            工作流编排中心 (Workflows)
-          </Title>
-          <Text type="secondary">
-            针对复杂 NAS 规则与整理方案的一站式无损编排、版本管理与计划构建引擎
-          </Text>
-        </div>
-
-        <Space>
-          <Space>
-            <Switch checked={includeArchived} onChange={setIncludeArchived} />
-            <Text type="secondary">包含已归档</Text>
-          </Space>
-
-          <Button icon={<ReloadOutlined />} onClick={() => refetch()} loading={isLoading}>
-            刷新
-          </Button>
-
-          {canCreateWorkflow(user?.role) && (
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={() => navigate('/workflows/new')}
-            >
-              新建工作流
+    <div className="nfc-operations-page">
+      <PageHeader
+        eyebrow="AUTOMATION"
+        title="工作流编排中心"
+        description="以版本化定义编排 NAS 文件规则、目录整理、高级去重和目录工具；Preview 与 Draft 都不会直接执行文件操作。"
+        actions={
+          <ActionBar compact>
+            <label className="nfc-inline-switch">
+              <Switch
+                size="small"
+                checked={includeArchived}
+                onChange={(checked) => {
+                  setIncludeArchived(checked);
+                  setPage(1);
+                }}
+              />
+              <span>包含已归档</span>
+            </label>
+            <Button icon={<ReloadOutlined />} onClick={() => refetch()} loading={isFetching}>
+              刷新
             </Button>
-          )}
-        </Space>
-      </div>
+            {canCreateWorkflow(user?.role) && (
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/workflows/new')}>
+                新建工作流
+              </Button>
+            )}
+          </ActionBar>
+        }
+      />
 
-      <Card bordered={false} style={{ borderRadius: 12 }}>
-        <Table
-          dataSource={workflows || []}
-          columns={columns}
-          rowKey="id"
-          loading={isLoading}
-          pagination={{ pageSize: 15 }}
+      <DataPanel
+        title="工作流定义"
+        description="工作流保存为修订版本；内置与归档定义保持只读。"
+        action={<span className="nfc-panel-count">{items.length} workflows</span>}
+        className="nfc-panel-flush"
+      >
+        <ResponsiveDataView
+          desktop={
+            <Table
+              dataSource={items}
+              columns={columns}
+              rowKey="id"
+              loading={isLoading}
+              pagination={{ pageSize }}
+            />
+          }
+          mobile={
+            <>
+              <div className="nfc-mobile-record-list">
+                {mobileItems.length === 0 ? (
+                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无工作流" />
+                ) : (
+                  mobileItems.map((workflow) => (
+                    <article className="nfc-workflow-mobile-card" key={workflow.id}>
+                      <div className="nfc-mobile-record-heading">
+                        <div className="nfc-plan-mobile-heading-copy">
+                          <button
+                            type="button"
+                            className="nfc-mobile-record-title"
+                            onClick={() => navigate(`/workflows/${workflow.id}`)}
+                          >
+                            {workflow.name}
+                          </button>
+                          <div className="nfc-inline-badges">
+                            <span className="nfc-kind-badge">{modeLabel(workflow.mode)}</span>
+                            <span className="nfc-kind-badge">
+                              {workflow.is_builtin ? 'builtin' : 'user'}
+                            </span>
+                          </div>
+                        </div>
+                        <StatusBadge
+                          status={workflow.archived_at ? 'stale' : 'completed'}
+                          label={workflow.archived_at ? '已归档' : '启用中'}
+                        />
+                      </div>
+                      {workflow.description && (
+                        <p className="nfc-mobile-record-note">{workflow.description}</p>
+                      )}
+                      <div className="nfc-mobile-record-facts">
+                        <span>版本 <b className="nfc-mono">r{workflow.current_revision}</b></span>
+                        <span>更新 <b>{formatDateTime(workflow.updated_at)}</b></span>
+                      </div>
+                      {renderMobileActions(workflow)}
+                    </article>
+                  ))
+                )}
+              </div>
+              <div className="nfc-mobile-pagination">
+                <Pagination
+                  current={page}
+                  pageSize={pageSize}
+                  total={items.length}
+                  showSizeChanger={false}
+                  onChange={setPage}
+                />
+              </div>
+            </>
+          }
         />
-      </Card>
+      </DataPanel>
 
       {selectedWorkflowForRevision && (
         <RevisionDrawer
-          open={!!selectedWorkflowForRevision}
+          open={Boolean(selectedWorkflowForRevision)}
           workflowId={selectedWorkflowForRevision.id}
           currentRevision={selectedWorkflowForRevision.current_revision}
           isBuiltin={selectedWorkflowForRevision.is_builtin}
