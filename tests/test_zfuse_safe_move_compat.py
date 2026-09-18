@@ -4,6 +4,8 @@ import errno
 import os
 from pathlib import Path
 
+import pytest
+
 import app.batch_utilities.single_child_wrapper as wrapper_module
 import app.fs_ops as fs_ops
 from app.batch.plans import OperationItem
@@ -173,3 +175,50 @@ def test_directory_compat_execution_still_fails_closed_when_runtime_probe_is_not
 
     assert source.is_dir()
     assert not target.exists()
+
+
+def test_plain_directory_probe_attempts_cleanup_for_every_owned_path(tmp_path, monkeypatch):
+    source_parent = tmp_path / "wrapper-cleanup"
+    target_parent = tmp_path / "scope-cleanup"
+    source_parent.mkdir()
+    target_parent.mkdir()
+
+    real_rename = os.rename
+
+    def no_clobber_rename(src, dst, *args, src_dir_fd=None, dst_dir_fd=None, **kwargs):
+        try:
+            os.stat(dst, dir_fd=dst_dir_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return real_rename(
+                src,
+                dst,
+                src_dir_fd=src_dir_fd,
+                dst_dir_fd=dst_dir_fd,
+            )
+        raise OSError(errno.EEXIST, "simulated zfuse no-clobber plain rename")
+
+    real_cleanup = fs_ops._cleanup_probe_entry
+    cleanup_calls = []
+
+    def cleanup_and_report_first_failure(path, *, dir_fd=None):
+        cleanup_calls.append((path, dir_fd))
+        cleaned = real_cleanup(path, dir_fd=dir_fd)
+        if len(cleanup_calls) == 1:
+            return False
+        return cleaned
+
+    monkeypatch.setattr(fs_ops.os, "rename", no_clobber_rename)
+    monkeypatch.setattr(fs_ops, "_cleanup_probe_entry", cleanup_and_report_first_failure)
+
+    src_fd = _open_dir(source_parent)
+    dst_fd = _open_dir(target_parent)
+    try:
+        with pytest.raises(fs_ops.NoreplaceProbeCleanupError):
+            fs_ops.probe_plain_directory_rename_noclobber_at(src_fd, dst_fd)
+    finally:
+        os.close(src_fd)
+        os.close(dst_fd)
+
+    assert len(cleanup_calls) >= 2
+    assert list(source_parent.iterdir()) == []
+    assert list(target_parent.iterdir()) == []
