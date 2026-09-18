@@ -8,14 +8,12 @@ import {
   Pagination,
   Popconfirm,
   Select,
-  Space,
   Switch,
   Table,
   Tag,
   Typography,
 } from "antd";
 import {
-  EyeOutlined,
   ReloadOutlined,
   ThunderboltOutlined,
   WarningOutlined,
