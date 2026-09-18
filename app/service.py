@@ -20,7 +20,7 @@ from sqlalchemy import Integer, and_, delete, func, or_, select, text
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from app.batch.plans import OperationItem
-from app.batch.rename import RenameCollisionError, RenameRule, _new_name, build_rename_plan
+from app.batch.rename import RenameCollisionError, RenameRule, _matches_source_extension, _new_name, build_rename_plan
 from app.batch.stats import collect_tree_stats
 from app.config import Settings
 from app.db import create_engine_and_session, init_db
@@ -1953,6 +1953,7 @@ class FileCenterService:
                 seen_sources.add(requested_source)
                 sources.append(requested_source)
 
+        sources = [source for source in sources if _matches_source_extension(source, rule)]
         sources.sort(key=str)
         source_set = set(sources)
         results = []
