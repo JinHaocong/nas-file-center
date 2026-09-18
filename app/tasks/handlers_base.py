@@ -1615,6 +1615,131 @@ def _utility_cleanup_pair_matches(
     )
 
 
+def _probe_utility_move_logical_binding_for_identity_rebase(
+    item_meta: Any,
+    settings: Settings,
+) -> dict[str, Any] | None:
+    """Return current live identities when a zfuse utility MOVE is logically unchanged.
+
+    This does not authorize a rebase by itself.  The caller must additionally
+    prove that an earlier single-child-wrapper pair completed in the same plan.
+    The probe deliberately keeps device/object/path topology authoritative while
+    allowing only inode churn for compatibility MOVE modes.
+    """
+    meta = _utility_single_child_meta(item_meta)
+    if item_meta.operation != "move" or meta is None:
+        return None
+
+    if meta.get("capability_reason") not in {
+        "UTILITY_MOVE_COMPAT_PLAIN_RENAME_NOCLOBBER",
+        "UTILITY_MOVE_COMPAT_DIRECTORY_TRANSPLANT",
+    }:
+        return None
+
+    wrapper = Path(meta["wrapper_path"])
+    child = Path(meta["child_path"])
+    target = Path(meta["target_path"])
+
+    if (
+        Path(item_meta.source_path) != child
+        or Path(item_meta.target_path or "") != target
+        or child.parent != wrapper
+        or target.parent != wrapper.parent
+        or target.name != child.name
+    ):
+        return None
+
+    if os.path.lexists(target):
+        return None
+
+    try:
+        require_allowed_path(wrapper, settings.allowed_roots)
+        require_allowed_path(child, settings.allowed_roots)
+        require_allowed_path(target, settings.allowed_roots)
+    except (UnsafePathError, OSError, ValueError):
+        return None
+
+    if settings.quarantine_root:
+        q_root = Path(settings.quarantine_root)
+        if (
+            is_reserved_quarantine_path(wrapper, q_root)
+            or is_reserved_quarantine_path(child, q_root)
+            or is_reserved_quarantine_path(target, q_root)
+        ):
+            return None
+
+    if not hasattr(os, "O_NOFOLLOW"):
+        return None
+
+    parent_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    wrapper_fd = None
+    child_fd = None
+    try:
+        wrapper_fd = os.open(wrapper, parent_flags)
+        names = os.listdir(wrapper_fd)
+        if names != [child.name] and sorted(names) != [child.name]:
+            return None
+
+        child_st_at = os.stat(child.name, dir_fd=wrapper_fd, follow_symlinks=False)
+        child_st_path = os.lstat(child)
+        if (
+            int(child_st_at.st_dev) != int(child_st_path.st_dev)
+            or int(child_st_at.st_ino) != int(child_st_path.st_ino)
+            or stat.S_IFMT(child_st_at.st_mode) != stat.S_IFMT(child_st_path.st_mode)
+        ):
+            return None
+
+        if stat.S_ISLNK(child_st_path.st_mode):
+            return None
+
+        expected_type = meta.get("child_object_type")
+        actual_type = (
+            "directory"
+            if stat.S_ISDIR(child_st_path.st_mode)
+            else "file"
+            if stat.S_ISREG(child_st_path.st_mode)
+            else "special"
+        )
+        if expected_type and actual_type != expected_type:
+            return None
+        if actual_type not in {"directory", "file"}:
+            return None
+
+        expected_dev = int(item_meta.expected_device or meta.get("child_device") or 0)
+        if expected_dev and int(child_st_path.st_dev) != expected_dev:
+            return None
+
+        # For regular files retain the existing non-inode frozen facts as a
+        # second authority fence. Directory size/mtime are intentionally not
+        # used by generic stale validation because namespace mutations can
+        # change them without changing directory contents.
+        if actual_type == "file":
+            if item_meta.expected_size is not None and int(child_st_path.st_size) != int(item_meta.expected_size):
+                return None
+            expected_mtime = int(item_meta.expected_mtime_ns or 0)
+            current_mtime = int(
+                getattr(child_st_path, "st_mtime_ns", int(child_st_path.st_mtime * 1e9))
+            )
+            if expected_mtime and current_mtime != expected_mtime:
+                return None
+
+        wrapper_st = os.fstat(wrapper_fd)
+        return {
+            "child_device": int(child_st_path.st_dev),
+            "child_inode": int(child_st_path.st_ino),
+            "wrapper_device": int(wrapper_st.st_dev),
+            "wrapper_inode": int(wrapper_st.st_ino),
+            "child_object_type": actual_type,
+        }
+    except OSError:
+        return None
+    finally:
+        if child_fd is not None:
+            os.close(child_fd)
+        if wrapper_fd is not None:
+            os.close(wrapper_fd)
+
+
 def _verify_plan_item_and_keep_freshness(
     item_meta: Any,
     settings: Settings,
@@ -2057,6 +2182,151 @@ class BatchPlanExecuteHandler(TaskHandler):
             progress_message=f"Executing plan #{plan_id} ({completed_or_skipped}/{total_count} processed)...",
         )
 
+        def _try_rebase_utility_move_identity(
+            item_meta: BatchPlanItem,
+            stale_detail: Any,
+        ) -> bool:
+            if (
+                stale_detail is None
+                or getattr(stale_detail, "reason", None) != "filesystem_identity_changed"
+            ):
+                return False
+
+            live = _probe_utility_move_logical_binding_for_identity_rebase(
+                item_meta,
+                settings,
+            )
+            if live is None:
+                return False
+
+            with context.SessionLocal() as session:
+                session.execute(text("BEGIN IMMEDIATE"))
+                now = utcnow()
+                if context.worker_id is not None:
+                    assert_active_worker_lease(session, context.worker_id, now=now)
+
+                row = session.get(BatchPlanItem, item_meta.id)
+                if row is None or row.state in {"completed", "skipped", "failed"}:
+                    session.rollback()
+                    return False
+
+                predecessor_rows = list(
+                    session.scalars(
+                        select(BatchPlanItem)
+                        .where(
+                            BatchPlanItem.plan_id == plan_id,
+                            BatchPlanItem.sequence < row.sequence,
+                            BatchPlanItem.operation == "rmdir_empty",
+                            BatchPlanItem.state == "completed",
+                        )
+                        .order_by(BatchPlanItem.sequence)
+                    )
+                )
+                trusted_predecessor = next(
+                    (
+                        prev
+                        for prev in predecessor_rows
+                        if _is_utility_single_child_cleanup(prev)
+                    ),
+                    None,
+                )
+                if trusted_predecessor is None:
+                    session.rollback()
+                    return False
+
+                move_meta = _utility_single_child_meta(row)
+                cleanup_row = session.scalar(
+                    select(BatchPlanItem).where(
+                        BatchPlanItem.plan_id == plan_id,
+                        BatchPlanItem.sequence == row.sequence + 1,
+                    )
+                )
+                if (
+                    move_meta is None
+                    or cleanup_row is None
+                    or not _utility_cleanup_pair_matches(row, cleanup_row, move_meta)
+                ):
+                    session.rollback()
+                    return False
+
+                old_device = int(row.expected_device or 0)
+                old_inode = int(row.expected_inode or 0)
+                old_wrapper_device = int(cleanup_row.expected_device or 0)
+                old_wrapper_inode = int(cleanup_row.expected_inode or 0)
+
+                row.expected_device = int(live["child_device"])
+                row.expected_inode = int(live["child_inode"])
+                cleanup_row.expected_device = int(live["wrapper_device"])
+                cleanup_row.expected_inode = int(live["wrapper_inode"])
+
+                row_meta = json.loads(row.metadata_json or "{}")
+                row_meta["identity_rebase"] = {
+                    "reason": "trusted_predecessor_completed_and_logical_binding_unchanged",
+                    "task_id": job.id,
+                    "predecessor_cleanup_item_id": int(trusted_predecessor.id),
+                    "old_device": old_device,
+                    "old_inode": old_inode,
+                    "new_device": int(live["child_device"]),
+                    "new_inode": int(live["child_inode"]),
+                }
+                row.metadata_json = json.dumps(row_meta, ensure_ascii=False)
+
+                cleanup_meta = json.loads(cleanup_row.metadata_json or "{}")
+                cleanup_meta["identity_rebase"] = {
+                    "reason": "paired_wrapper_identity_refreshed",
+                    "task_id": job.id,
+                    "old_device": old_wrapper_device,
+                    "old_inode": old_wrapper_inode,
+                    "new_device": int(live["wrapper_device"]),
+                    "new_inode": int(live["wrapper_inode"]),
+                }
+                cleanup_row.metadata_json = json.dumps(cleanup_meta, ensure_ascii=False)
+
+                session.add(
+                    AuditEvent(
+                        operation="utility.identity_rebase",
+                        path=row.source_path,
+                        result="completed",
+                        details_json=json.dumps(
+                            {
+                                "plan_id": plan_id,
+                                "item_id": row.id,
+                                "task_id": job.id,
+                                "predecessor_cleanup_item_id": int(trusted_predecessor.id),
+                                "capability_reason": move_meta.get("capability_reason"),
+                                "old_device": old_device,
+                                "old_inode": old_inode,
+                                "new_device": int(live["child_device"]),
+                                "new_inode": int(live["child_inode"]),
+                                "wrapper_old_device": old_wrapper_device,
+                                "wrapper_old_inode": old_wrapper_inode,
+                                "wrapper_new_device": int(live["wrapper_device"]),
+                                "wrapper_new_inode": int(live["wrapper_inode"]),
+                            },
+                            ensure_ascii=False,
+                        ),
+                    )
+                )
+                session.commit()
+
+                item_meta.expected_device = int(live["child_device"])
+                item_meta.expected_inode = int(live["child_inode"])
+                item_meta.metadata_json = row.metadata_json
+                cleanup_local = next(
+                    (
+                        candidate
+                        for candidate in all_items
+                        if candidate.id == cleanup_row.id
+                    ),
+                    None,
+                )
+                if cleanup_local is not None:
+                    cleanup_local.expected_device = int(live["wrapper_device"])
+                    cleanup_local.expected_inode = int(live["wrapper_inode"])
+                    cleanup_local.metadata_json = cleanup_row.metadata_json
+
+            return True
+
         # Worker Preflight Check: Verify freshness of unexecuted items before first mutation
         unexecuted_items = [
             it for it in all_items
@@ -2087,6 +2357,27 @@ class BatchPlanExecuteHandler(TaskHandler):
                 check_hash=True,
                 allow_deferred_chained_missing=True,
             )
+            if (
+                not is_fresh
+                and stale_detail
+                and _try_rebase_utility_move_identity(it, stale_detail)
+            ):
+                is_fresh, stale_detail = verify_item_freshness(
+                    item_id=it.id,
+                    source_path=it.source_path,
+                    operation=it.operation,
+                    expected_device=it.expected_device,
+                    expected_inode=it.expected_inode,
+                    expected_size=it.expected_size,
+                    expected_mtime_ns=it.expected_mtime_ns,
+                    expected_hash=it.expected_hash,
+                    metadata_json=it.metadata_json,
+                    allowed_roots=settings.allowed_roots,
+                    quarantine_root=settings.quarantine_root,
+                    check_hash=True,
+                    allow_deferred_chained_missing=True,
+                )
+
             if not is_fresh and stale_detail:
                 worker_stale_items.append(stale_detail)
             elif it.keep_path:
@@ -2140,6 +2431,15 @@ class BatchPlanExecuteHandler(TaskHandler):
                 and not _is_utility_single_child_cleanup(item_meta)
             ):
                 is_fresh, stale_detail = _verify_plan_item_and_keep_freshness(item_meta, settings)
+                if (
+                    not is_fresh
+                    and stale_detail
+                    and _try_rebase_utility_move_identity(item_meta, stale_detail)
+                ):
+                    is_fresh, stale_detail = _verify_plan_item_and_keep_freshness(
+                        item_meta,
+                        settings,
+                    )
                 if not is_fresh:
                     stale_reason = f"Item stale: {stale_detail.reason if stale_detail else 'stale'}"
                     with context.SessionLocal() as session:
@@ -2685,6 +2985,15 @@ class BatchPlanExecuteHandler(TaskHandler):
                 and not _is_utility_single_child_cleanup(item_meta)
             ):
                 final_fresh, final_stale_detail = _verify_plan_item_and_keep_freshness(item_meta, settings)
+                if (
+                    not final_fresh
+                    and final_stale_detail
+                    and _try_rebase_utility_move_identity(item_meta, final_stale_detail)
+                ):
+                    final_fresh, final_stale_detail = _verify_plan_item_and_keep_freshness(
+                        item_meta,
+                        settings,
+                    )
                 if not final_fresh:
                     stale_reason = f"Item stale: {final_stale_detail.reason if final_stale_detail else 'stale'}"
                     with context.SessionLocal() as session:

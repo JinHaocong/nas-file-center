@@ -13,7 +13,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.config import Settings, get_settings
 from app.db import create_engine_and_session, init_db
-from app.models import ScanJob, WorkJob, utcnow
+from app.models import BatchPlanItem, ScanJob, WorkJob, utcnow
 from app.tasks.context import JobContext
 from app.tasks.handlers import get_handler
 from app.tasks.logging import log_task_event
@@ -190,9 +190,30 @@ def process_work_job(
                     work.status = JobState.FAILED.value
                     work.finished_at = now
                     work.heartbeat_at = now
+                    problem_items = list(
+                        session.scalars(
+                            select(BatchPlanItem)
+                            .where(
+                                BatchPlanItem.plan_id == linked_plan.id,
+                                BatchPlanItem.state != "completed",
+                            )
+                            .order_by(BatchPlanItem.sequence)
+                            .limit(3)
+                        )
+                    )
+                    problem_summary = "; ".join(
+                        f"item #{item.sequence} {item.operation}: "
+                        f"{item.reason or item.state}"
+                        for item in problem_items
+                    )
                     work.error_text = (
                         f"Batch plan #{linked_plan.id} finished with status "
-                        f"{linked_plan.status}; inspect plan items for details"
+                        f"{linked_plan.status}"
+                        + (
+                            f"; {problem_summary}"
+                            if problem_summary
+                            else "; inspect plan items for details"
+                        )
                     )
                     work.error_code = "BATCH_PLAN_NOT_COMPLETED"
                     log_task_event(
