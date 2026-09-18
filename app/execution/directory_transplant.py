@@ -174,7 +174,92 @@ def _preflight_tree_fd(dir_fd: int, root_device: int) -> None:
                 os.close(child_fd)
 
 
-def directory_transplant_preflight(source: Path | str) -> bool:
+
+def _tree_has_regular_file_fd(dir_fd: int) -> bool:
+    with os.scandir(dir_fd) as entries:
+        for entry in entries:
+            st = entry.stat(follow_symlinks=False)
+            if stat.S_ISREG(st.st_mode):
+                return True
+            if stat.S_ISDIR(st.st_mode) and not stat.S_ISLNK(st.st_mode):
+                child_fd = os.open(
+                    entry.name,
+                    os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+                    dir_fd=dir_fd,
+                )
+                try:
+                    if _tree_has_regular_file_fd(child_fd):
+                        return True
+                finally:
+                    os.close(child_fd)
+    return False
+
+
+def _probe_hardlink_capability(source_dir: Path, target_parent: Path) -> bool:
+    token = os.urandom(10).hex()
+    src_name = f".__nfc_transplant_link_src_{token}"
+    dst_name = f".__nfc_transplant_link_dst_{token}"
+    src_fd = -1
+    dst_fd = -1
+    created_src = False
+    created_dst = False
+    cleanup_ok = True
+    try:
+        src_fd = _open_dir(source_dir)
+        dst_fd = _open_dir(target_parent)
+        probe_fd = os.open(
+            src_name,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+            dir_fd=src_fd,
+        )
+        created_src = True
+        try:
+            os.write(probe_fd, b"nfc-transplant-hardlink-probe")
+        finally:
+            os.close(probe_fd)
+
+        os.link(
+            src_name,
+            dst_name,
+            src_dir_fd=src_fd,
+            dst_dir_fd=dst_fd,
+            follow_symlinks=False,
+        )
+        created_dst = True
+        src_st = os.stat(src_name, dir_fd=src_fd, follow_symlinks=False)
+        dst_st = os.stat(dst_name, dir_fd=dst_fd, follow_symlinks=False)
+        return (
+            stat.S_ISREG(src_st.st_mode)
+            and stat.S_ISREG(dst_st.st_mode)
+            and _identity(src_st) == _identity(dst_st)
+        )
+    except OSError:
+        return False
+    finally:
+        if created_dst and dst_fd >= 0:
+            try:
+                os.unlink(dst_name, dir_fd=dst_fd)
+            except OSError:
+                cleanup_ok = False
+        if created_src and src_fd >= 0:
+            try:
+                os.unlink(src_name, dir_fd=src_fd)
+            except OSError:
+                cleanup_ok = False
+        if dst_fd >= 0:
+            os.close(dst_fd)
+        if src_fd >= 0:
+            os.close(src_fd)
+        if not cleanup_ok:
+            # Cleanup ambiguity must fail closed even if the probe operation worked.
+            pass
+
+
+def directory_transplant_preflight(
+    source: Path | str,
+    target_parent: Path | str | None = None,
+) -> bool:
     src = Path(source)
     try:
         src_st = os.lstat(src)
@@ -183,8 +268,21 @@ def directory_transplant_preflight(source: Path | str) -> bool:
         fd = _open_dir(src)
         try:
             _preflight_tree_fd(fd, int(src_st.st_dev))
+            needs_hardlink = _tree_has_regular_file_fd(fd)
         finally:
             os.close(fd)
+
+        if needs_hardlink and target_parent is not None:
+            target_parent_path = Path(target_parent)
+            target_st = os.lstat(target_parent_path)
+            if (
+                not stat.S_ISDIR(target_st.st_mode)
+                or stat.S_ISLNK(target_st.st_mode)
+                or int(target_st.st_dev) != int(src_st.st_dev)
+            ):
+                return False
+            if not _probe_hardlink_capability(src, target_parent_path):
+                return False
         return True
     except OSError:
         return False
