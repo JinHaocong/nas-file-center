@@ -6,11 +6,11 @@ import { resolve } from 'node:path';
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');
 
 describe('v0.4.2 Taste redesign contract', () => {
-  test('palette moves from generic SaaS blue to a graphite and jade product identity', () => {
-    const tokens = read('src/design/tokens.ts');
-    assert.match(tokens, /accent:\s*['"]#167a5c['"]/i);
-    assert.match(tokens, /accent:\s*['"]#4fd1a1['"]/i);
-    assert.doesNotMatch(tokens, /#335cff|#7f8cff/i);
+  test('v0.4.2 palette decision remains documented even when later releases supersede the skin', () => {
+    const design = read('../DESIGN.md');
+    assert.ok(design.includes('Graphite + Jade'));
+    assert.ok(design.includes('v0.4.3 Modern Console Reset'));
+    assert.ok(design.includes('supersedes the v0.4.2 Graphite + Jade'));
   });
 
   test('data typography uses optical hierarchy and tabular numerics', () => {
@@ -38,15 +38,19 @@ describe('v0.4.2 Taste redesign contract', () => {
     assert.ok(css.includes('.nfc-dashboard-rail'));
   });
 
-  test('sidebar and header gain a deliberate workspace chrome layer', () => {
+  test('sidebar and header retain a deliberate workspace chrome layer across later visual resets', () => {
     const sidebar = read('src/components/Sidebar.tsx');
     const header = read('src/components/Header.tsx');
     const css = read('src/index.css');
     assert.ok(sidebar.includes('nfc-sidebar-meta'));
     assert.ok(sidebar.includes('CONTROL PLANE'));
-    assert.ok(header.includes('nfc-header-product-mark'));
+    assert.ok(
+      header.includes('nfc-header-product-mark') || header.includes('nfc-header-brandline')
+    );
     assert.ok(css.includes('.nfc-sidebar-meta'));
-    assert.ok(css.includes('.nfc-header-product-mark'));
+    assert.ok(
+      css.includes('.nfc-header-product-mark') || css.includes('.nfc-header-brandline')
+    );
   });
 
   test('dashboard content removes all-caps AI-style eyebrow treatment', () => {
