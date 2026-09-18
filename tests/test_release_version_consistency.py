@@ -8,6 +8,7 @@ from app.main import create_app
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 RELEASE_VERSION = "0.4.0"
+KOMODO_IMAGE_VERSION = "0.4.0.1"
 
 
 def test_fastapi_backend_version():
@@ -61,5 +62,5 @@ def test_compose_yaml_version():
 
 def test_compose_komodo_yaml_version():
     content = (ROOT_DIR / "compose.komodo.yaml").read_text(encoding="utf-8")
-    assert f"kerwinjhc/nas-file-center:{RELEASE_VERSION}" in content
+    assert f"kerwinjhc/nas-file-center:{KOMODO_IMAGE_VERSION}" in content
     assert ":latest" not in content

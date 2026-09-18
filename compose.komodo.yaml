@@ -1,6 +1,6 @@
 services:
   nas-file-center-api:
-    image: kerwinjhc/nas-file-center:0.4.0
+    image: kerwinjhc/nas-file-center:0.4.0.1
     pull_policy: never
     container_name: nas-file-center-api
     volumes:
@@ -30,7 +30,7 @@ services:
     restart: unless-stopped
 
   nas-file-center-worker:
-    image: kerwinjhc/nas-file-center:0.4.0
+    image: kerwinjhc/nas-file-center:0.4.0.1
     pull_policy: never
     container_name: nas-file-center-worker
     command:
