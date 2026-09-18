@@ -8,7 +8,7 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import Settings
-from app.models import BatchPlan, BatchPlanItem, ScanJob, Workflow, WorkflowRevision, utcnow
+from app.models import AuditEvent, BatchPlan, BatchPlanItem, ScanJob, Workflow, WorkflowRevision, utcnow
 from app.planning.dedupe_config import canonical_config_dict, validate_and_canonicalize_config
 from app.planning.dedupe_preview import (
     canonicalize_effective_safety_policy,
@@ -415,6 +415,23 @@ class WorkflowService:
                 )
 
             deleted_revision_count = len(wf.revisions)
+            workflow_name = wf.name
+            session.add(
+                AuditEvent(
+                    operation="workflow.permanent_delete",
+                    path=f"workflow:{workflow_id}",
+                    result="deleted",
+                    details_json=json.dumps(
+                        {
+                            "workflow_id": workflow_id,
+                            "workflow_name": workflow_name,
+                            "deleted_revision_count": deleted_revision_count,
+                            "deleted_by_user_id": user_id,
+                        },
+                        ensure_ascii=False,
+                    ),
+                )
+            )
             session.delete(wf)
             session.commit()
             return {
