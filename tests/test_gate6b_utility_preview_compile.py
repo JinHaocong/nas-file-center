@@ -93,6 +93,50 @@ def test_utility_preview_compile_defaults_ready_candidates_selected_and_pairs_ac
     assert not any(op["source"] == str(root / "B1" / "C1" / "D1") for op in result.planned_operations)
 
 
+def test_utility_preview_compile_supports_regular_file_single_child(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    quarantine = tmp_path / "quarantine"
+    quarantine.mkdir()
+    wrapper = root / "001-1"
+    wrapper.mkdir()
+    child = wrapper / "001"
+    child.write_bytes(b"payload")
+
+    db_path = tmp_path / "test.db"
+    engine, SessionLocal = create_engine_and_session(db_path)
+    init_db(engine, db_path=db_path)
+    with SessionLocal() as session:
+        idx = IndexRoot(root=str(root))
+        session.add(idx)
+        session.commit()
+        root_id = idx.id
+
+    with SessionLocal() as session:
+        compiler = WorkflowCompiler(
+            session=session,
+            allowed_roots=[root],
+            quarantine_root=quarantine,
+        )
+        result = compiler.compile(_utility(root_id))
+
+    candidate = _by_wrapper_name(result)["001-1"]
+    assert candidate["state"] == "READY"
+    assert candidate["selectable"] is True
+    assert candidate["selected"] is True
+    assert candidate["child_object_type"] == "file"
+    assert candidate["child_path"] == str(child)
+    assert candidate["target_path"] == str(root / "001")
+
+    assert [
+        (op["operation"], op["source"], op.get("target"), op["child_object_type"])
+        for op in result.planned_operations
+    ] == [
+        ("move", str(child), str(root / "001"), "file"),
+        ("rmdir_empty", str(wrapper), None, "file"),
+    ]
+
+
 def test_utility_compile_explicit_selection_omits_deselected_candidate(tmp_path):
     root = tmp_path / "root"
     root.mkdir()
