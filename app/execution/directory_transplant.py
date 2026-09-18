@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import errno
+from dataclasses import dataclass
 import hashlib
 import json
 import os
@@ -15,6 +16,11 @@ _STATE_FILE = "state.json"
 
 class DirectoryTransplantConflict(OSError):
     pass
+
+
+@dataclass(frozen=True)
+class DirectoryTransplantResult:
+    metadata_warnings: tuple[str, ...] = ()
 
 
 def _safe_component(value: str) -> str:
@@ -87,9 +93,24 @@ def _entry_exists_at(fd: int, name: str) -> bool:
     return True
 
 
-def _copy_directory_metadata(src_fd: int, dst_fd: int) -> None:
+def _copy_directory_metadata(
+    src_fd: int,
+    dst_fd: int,
+    *,
+    rel_path: str,
+    warnings: list[str],
+) -> None:
+    """Best-effort metadata preservation.
+
+    Content publication/unlink is authoritative.  FUSE/zfuse may legitimately
+    reject ownership, mode, xattr or timestamp mutation after data movement.
+    Those failures must never turn an otherwise converged MOVE into a partial
+    namespace transaction.
+    """
     src_st = os.fstat(src_fd)
     dst_st = os.fstat(dst_fd)
+    label = rel_path or "."
+
     if (
         hasattr(os, "fchown")
         and (
@@ -97,35 +118,39 @@ def _copy_directory_metadata(src_fd: int, dst_fd: int) -> None:
             or int(dst_st.st_gid) != int(src_st.st_gid)
         )
     ):
-        os.fchown(dst_fd, int(src_st.st_uid), int(src_st.st_gid))
-    os.fchmod(dst_fd, stat.S_IMODE(src_st.st_mode))
+        try:
+            os.fchown(dst_fd, int(src_st.st_uid), int(src_st.st_gid))
+        except OSError as exc:
+            warnings.append(f"metadata chown warning at {label}: {exc}")
+
+    try:
+        os.fchmod(dst_fd, stat.S_IMODE(src_st.st_mode))
+    except OSError as exc:
+        warnings.append(f"metadata chmod warning at {label}: {exc}")
 
     if all(hasattr(os, name) for name in ("listxattr", "getxattr", "setxattr")):
         try:
             xattrs = os.listxattr(src_fd)
         except OSError as exc:
-            if exc.errno not in {errno.ENOTSUP, errno.EOPNOTSUPP}:
-                raise
+            warnings.append(f"metadata xattr-list warning at {label}: {exc}")
             xattrs = []
         for name in xattrs:
             try:
                 value = os.getxattr(src_fd, name)
                 os.setxattr(dst_fd, name, value)
             except OSError as exc:
-                if exc.errno in {errno.ENOTSUP, errno.EOPNOTSUPP}:
-                    raise OSError(
-                        errno.EOPNOTSUPP,
-                        f"Cannot preserve directory xattr {name!r} during compatibility MOVE",
-                    ) from exc
-                raise
+                warnings.append(f"metadata xattr warning at {label} ({name!r}): {exc}")
 
-    os.utime(
-        dst_fd,
-        ns=(
-            getattr(src_st, "st_atime_ns", int(src_st.st_atime * 1e9)),
-            getattr(src_st, "st_mtime_ns", int(src_st.st_mtime * 1e9)),
-        ),
-    )
+    try:
+        os.utime(
+            dst_fd,
+            ns=(
+                getattr(src_st, "st_atime_ns", int(src_st.st_atime * 1e9)),
+                getattr(src_st, "st_mtime_ns", int(src_st.st_mtime * 1e9)),
+            ),
+        )
+    except OSError as exc:
+        warnings.append(f"metadata utime warning at {label}: {exc}")
 
 
 def _preflight_tree_fd(dir_fd: int, root_device: int) -> None:
@@ -205,7 +230,7 @@ def _require_owned_dir(
         )
 
 
-def _move_regular_file(src_fd: int, dst_fd: int, name: str) -> None:
+def _move_regular_file(src_fd: int, dst_fd: int, name: str, *, rel_path: str) -> None:
     src_st = _stat_at(src_fd, name)
     if _entry_exists_at(dst_fd, name):
         dst_st = _stat_at(dst_fd, name)
@@ -214,16 +239,28 @@ def _move_regular_file(src_fd: int, dst_fd: int, name: str) -> None:
                 errno.EEXIST,
                 f"Foreign target entry appeared during directory MOVE: {name}",
             )
+        try:
         os.unlink(name, dir_fd=src_fd)
+    except OSError as exc:
+        raise OSError(
+            exc.errno or errno.EIO,
+            f"TRANSPLANT_SYMLINK_SOURCE_UNLINK_FAILED at {rel_path}: {exc}",
+        ) from exc
         return
 
-    os.link(
-        name,
-        name,
-        src_dir_fd=src_fd,
-        dst_dir_fd=dst_fd,
-        follow_symlinks=False,
-    )
+    try:
+        os.link(
+            name,
+            name,
+            src_dir_fd=src_fd,
+            dst_dir_fd=dst_fd,
+            follow_symlinks=False,
+        )
+    except OSError as exc:
+        raise OSError(
+            exc.errno or errno.EIO,
+            f"TRANSPLANT_LINK_FAILED at {rel_path}: {exc}",
+        ) from exc
     try:
         os.unlink(name, dir_fd=src_fd)
     except OSError:
@@ -234,7 +271,10 @@ def _move_regular_file(src_fd: int, dst_fd: int, name: str) -> None:
                 errno.EIO,
                 f"Directory MOVE file rollback failed for {name}: {rollback_error}",
             )
-        raise
+        raise OSError(
+            unlink_error.errno or errno.EIO,
+            f"TRANSPLANT_SOURCE_UNLINK_FAILED at {rel_path}: {unlink_error}",
+        ) from unlink_error
 
 
 def _move_symlink(
@@ -245,6 +285,7 @@ def _move_symlink(
     rel_path: str,
     state_path: Path,
     state: dict[str, Any],
+    metadata_warnings: list[str],
 ) -> None:
     link_text = os.readlink(name, dir_fd=src_fd)
     published = state.setdefault("published_symlinks", {})
@@ -264,7 +305,13 @@ def _move_symlink(
         os.unlink(name, dir_fd=src_fd)
         return
 
-    os.symlink(link_text, name, dir_fd=dst_fd)
+    try:
+        os.symlink(link_text, name, dir_fd=dst_fd)
+    except OSError as exc:
+        raise OSError(
+            exc.errno or errno.EIO,
+            f"TRANSPLANT_SYMLINK_PUBLISH_FAILED at {rel_path}: {exc}",
+        ) from exc
     published[rel_path] = link_text
     _save_state(state_path, state)
     os.unlink(name, dir_fd=src_fd)
@@ -291,7 +338,7 @@ def _move_directory_contents(
         mode = src_st.st_mode
 
         if stat.S_ISREG(mode):
-            _move_regular_file(src_fd, dst_fd, name)
+            _move_regular_file(src_fd, dst_fd, name, rel_path=rel_path)
             continue
 
         if stat.S_ISLNK(mode):
@@ -320,7 +367,13 @@ def _move_directory_contents(
                 )
             _require_owned_dir(state, rel_path, dst_st)
         else:
-            os.mkdir(name, mode=0o700, dir_fd=dst_fd)
+            try:
+                os.mkdir(name, mode=0o700, dir_fd=dst_fd)
+            except OSError as exc:
+                raise OSError(
+                    exc.errno or errno.EIO,
+                    f"TRANSPLANT_MKDIR_FAILED at {rel_path}: {exc}",
+                ) from exc
             dst_st = _stat_at(dst_fd, name)
             _record_created_dir(state_path, state, rel_path, dst_st)
 
@@ -347,13 +400,55 @@ def _move_directory_contents(
                 rel_prefix=rel_path,
                 state_path=state_path,
                 state=state,
+                metadata_warnings=metadata_warnings,
             )
-            _copy_directory_metadata(src_child_fd, dst_child_fd)
+            _copy_directory_metadata(
+                src_child_fd,
+                dst_child_fd,
+                rel_path=rel_path,
+                warnings=metadata_warnings,
+            )
         finally:
             os.close(dst_child_fd)
             os.close(src_child_fd)
 
-        os.rmdir(name, dir_fd=src_fd)
+        try:
+            os.rmdir(name, dir_fd=src_fd)
+        except OSError as exc:
+            raise OSError(
+                exc.errno or errno.EIO,
+                f"TRANSPLANT_SOURCE_RMDIR_FAILED at {rel_path}: {exc}",
+            ) from exc
+
+
+def _cleanup_owned_empty_target_dirs(dst: Path, state: dict[str, Any]) -> None:
+    """Best-effort cleanup for NFC-created target directories that remain empty."""
+    created = state.get("created_dirs") or {}
+    if not isinstance(created, dict):
+        return
+    rel_paths = sorted(
+        (str(rel) for rel in created.keys()),
+        key=lambda rel: len(Path(rel).parts) if rel else 0,
+        reverse=True,
+    )
+    for rel_path in rel_paths:
+        path = dst / rel_path if rel_path else dst
+        expected = created.get(rel_path)
+        if not isinstance(expected, list) or len(expected) != 2:
+            continue
+        try:
+            st = os.lstat(path)
+            if (
+                not stat.S_ISDIR(st.st_mode)
+                or stat.S_ISLNK(st.st_mode)
+                or [int(st.st_dev), int(st.st_ino)] != [int(expected[0]), int(expected[1])]
+            ):
+                continue
+            if os.listdir(path):
+                continue
+            os.rmdir(path)
+        except OSError:
+            continue
 
 
 def move_directory_tree_noreplace(
@@ -365,7 +460,7 @@ def move_directory_tree_noreplace(
     sequence: int,
     expected_device: int = 0,
     expected_inode: int = 0,
-) -> None:
+) -> DirectoryTransplantResult:
     src = Path(source)
     dst = Path(target)
     state_path = _state_path(quarantine_root, plan_id, sequence)
@@ -381,7 +476,10 @@ def move_directory_tree_noreplace(
             source=src,
             target=dst,
         ):
-            return
+            existing = _load_state(state_path) or {}
+            return DirectoryTransplantResult(
+                metadata_warnings=tuple(existing.get("metadata_warnings") or ())
+            )
         raise
 
     if not stat.S_ISDIR(src_st.st_mode) or stat.S_ISLNK(src_st.st_mode):
@@ -413,6 +511,7 @@ def move_directory_tree_noreplace(
             "source_inode": int(src_st.st_ino),
             "created_dirs": {},
             "published_symlinks": {},
+            "metadata_warnings": [],
         }
         _save_state(state_path, state)
     else:
@@ -454,6 +553,7 @@ def move_directory_tree_noreplace(
     state["phase"] = "migrating"
     _save_state(state_path, state)
 
+    metadata_warnings = list(state.get("metadata_warnings") or [])
     src_fd = _open_dir(src)
     dst_fd = _open_dir(dst)
     try:
@@ -473,15 +573,32 @@ def move_directory_tree_noreplace(
             rel_prefix="",
             state_path=state_path,
             state=state,
+            metadata_warnings=metadata_warnings,
         )
-        _copy_directory_metadata(src_fd, dst_fd)
+        _copy_directory_metadata(
+            src_fd,
+            dst_fd,
+            rel_path="",
+            warnings=metadata_warnings,
+        )
+    except Exception:
+        _cleanup_owned_empty_target_dirs(dst, state)
+        raise
     finally:
         os.close(dst_fd)
         os.close(src_fd)
 
-    os.rmdir(src)
+    try:
+        os.rmdir(src)
+    except OSError as exc:
+        raise OSError(
+            exc.errno or errno.EIO,
+            f"TRANSPLANT_SOURCE_RMDIR_FAILED at .: {exc}",
+        ) from exc
     state["phase"] = "transplanted"
+    state["metadata_warnings"] = metadata_warnings
     _save_state(state_path, state)
+    return DirectoryTransplantResult(metadata_warnings=tuple(metadata_warnings))
 
 
 def directory_transplant_reconciles_completed(
