@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import errno
+from dataclasses import dataclass
 import hashlib
 import json
 import os
@@ -15,6 +16,11 @@ _STATE_FILE = "state.json"
 
 class DirectoryTransplantConflict(OSError):
     pass
+
+
+@dataclass(frozen=True)
+class DirectoryTransplantResult:
+    metadata_warnings: tuple[str, ...] = ()
 
 
 def _safe_component(value: str) -> str:
@@ -87,9 +93,18 @@ def _entry_exists_at(fd: int, name: str) -> bool:
     return True
 
 
-def _copy_directory_metadata(src_fd: int, dst_fd: int) -> None:
+def _copy_directory_metadata(
+    src_fd: int,
+    dst_fd: int,
+    *,
+    rel_path: str,
+    warnings: list[str],
+) -> None:
+    """Best-effort directory metadata preservation for FUSE/zfuse."""
     src_st = os.fstat(src_fd)
     dst_st = os.fstat(dst_fd)
+    label = rel_path or "."
+
     if (
         hasattr(os, "fchown")
         and (
@@ -97,36 +112,39 @@ def _copy_directory_metadata(src_fd: int, dst_fd: int) -> None:
             or int(dst_st.st_gid) != int(src_st.st_gid)
         )
     ):
-        os.fchown(dst_fd, int(src_st.st_uid), int(src_st.st_gid))
-    os.fchmod(dst_fd, stat.S_IMODE(src_st.st_mode))
+        try:
+            os.fchown(dst_fd, int(src_st.st_uid), int(src_st.st_gid))
+        except OSError as exc:
+            warnings.append(f"metadata chown warning at {label}: {exc}")
+
+    try:
+        os.fchmod(dst_fd, stat.S_IMODE(src_st.st_mode))
+    except OSError as exc:
+        warnings.append(f"metadata chmod warning at {label}: {exc}")
 
     if all(hasattr(os, name) for name in ("listxattr", "getxattr", "setxattr")):
         try:
             xattrs = os.listxattr(src_fd)
         except OSError as exc:
-            if exc.errno not in {errno.ENOTSUP, errno.EOPNOTSUPP}:
-                raise
+            warnings.append(f"metadata xattr-list warning at {label}: {exc}")
             xattrs = []
         for name in xattrs:
             try:
                 value = os.getxattr(src_fd, name)
                 os.setxattr(dst_fd, name, value)
             except OSError as exc:
-                if exc.errno in {errno.ENOTSUP, errno.EOPNOTSUPP}:
-                    raise OSError(
-                        errno.EOPNOTSUPP,
-                        f"Cannot preserve directory xattr {name!r} during compatibility MOVE",
-                    ) from exc
-                raise
+                warnings.append(f"metadata xattr warning at {label} ({name!r}): {exc}")
 
-    os.utime(
-        dst_fd,
-        ns=(
-            getattr(src_st, "st_atime_ns", int(src_st.st_atime * 1e9)),
-            getattr(src_st, "st_mtime_ns", int(src_st.st_mtime * 1e9)),
-        ),
-    )
-
+    try:
+        os.utime(
+            dst_fd,
+            ns=(
+                getattr(src_st, "st_atime_ns", int(src_st.st_atime * 1e9)),
+                getattr(src_st, "st_mtime_ns", int(src_st.st_mtime * 1e9)),
+            ),
+        )
+    except OSError as exc:
+        warnings.append(f"metadata utime warning at {label}: {exc}")
 
 def _preflight_tree_fd(dir_fd: int, root_device: int) -> None:
     with os.scandir(dir_fd) as entries:
