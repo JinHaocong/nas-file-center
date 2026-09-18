@@ -65,8 +65,8 @@ describe('Gate6-B Utility frontend contract', () => {
     assert.match(previewPanelSource, /unsupportedCandidates/);
     assert.match(previewPanelSource, /selectedCandidateIds\.length\s*>\s*0/);
     assert.match(previewPanelSource, /拓扑发现[^\n]*只读/);
-    assert.match(previewPanelSource, /no-overwrite MOVE/);
-    assert.match(previewPanelSource, /rename fallback/);
+    assert.match(previewPanelSource, /安全无覆盖 MOVE/);
+    assert.match(previewPanelSource, /严格 no-clobber 运行时探测/);
   });
 });
 
