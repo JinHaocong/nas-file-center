@@ -26,8 +26,10 @@ jobs:
           cache: pip
       - name: Install backend + test dependencies
         run: python -m pip install -e '.[test]'
-      - name: Focused backend regression
-        run: pytest -q tests/test_gate6b_utility_discovery.py tests/test_gate6b_utility_preview_compile.py tests/test_gate6b_utility_generate.py
+      - name: Backend dependency consistency
+        run: python -m pip check
+      - name: Full backend regression
+        run: pytest -q
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -45,3 +47,7 @@ jobs:
       - name: Production build
         working-directory: frontend
         run: npm run build
+      - name: Build release-equivalent Docker image
+        run: docker build -t nfc-utility-regular-file-hotfix:test .
+      - name: Inspect Docker image
+        run: docker image inspect nfc-utility-regular-file-hotfix:test --format '{{json .Config.Labels}}'
