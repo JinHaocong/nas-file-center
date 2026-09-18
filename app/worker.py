@@ -13,7 +13,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.config import Settings, get_settings
 from app.db import create_engine_and_session, init_db
-from app.models import ScanJob, WorkJob, utcnow
+from app.models import BatchPlan, ScanJob, WorkJob, utcnow
 from app.tasks.context import JobContext
 from app.tasks.handlers import get_handler
 from app.tasks.logging import log_task_event
@@ -173,6 +173,50 @@ def process_work_job(
                 assert_active_worker_lease(session, worker_id, now=now)
 
             work = session.get(WorkJob, work_job_id)
+            if work and work.status == JobState.RUNNING.value and work.kind == "batch-plan-execute":
+                try:
+                    work_state = json.loads(work.state_json or "{}")
+                except Exception:
+                    work_state = {}
+                linked_plan_id = work_state.get("plan_id")
+                linked_plan = (
+                    session.get(BatchPlan, int(linked_plan_id))
+                    if linked_plan_id is not None
+                    else None
+                )
+                if linked_plan is None or linked_plan.status != "completed":
+                    validate_transition(work.status, JobState.FAILED.value)
+                    work.status = JobState.FAILED.value
+                    work.finished_at = now
+                    work.heartbeat_at = now
+                    observed_status = linked_plan.status if linked_plan is not None else "missing"
+                    work.error_code = "PLAN_NOT_COMPLETED"
+                    work.error_text = (
+                        f"Linked batch plan did not converge to completed "
+                        f"(status={observed_status})"
+                    )
+                    sync_batch_plan_status(
+                        session,
+                        work,
+                        "failed",
+                        finished_at=now,
+                        error_text=work.error_text,
+                    )
+                    log_task_event(
+                        session,
+                        job_id=work_job_id,
+                        event_type="failed",
+                        message=f"Job #{work_job_id} finished with non-completed plan status: {observed_status}",
+                        level="error",
+                        context={
+                            "error_code": work.error_code,
+                            "plan_status": observed_status,
+                            "plan_id": linked_plan_id,
+                        },
+                    )
+                    session.commit()
+                    return False
+
             if work and work.status == JobState.RUNNING.value:
                 validate_transition(work.status, JobState.COMPLETED.value)
                 work.status = JobState.COMPLETED.value
