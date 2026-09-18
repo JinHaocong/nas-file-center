@@ -183,9 +183,9 @@ export const ScansPage: React.FC = () => {
   ];
 
   return (
-    <div className="nfc-operations-page">
+    <div className="nfc-operations-page nfc-scans-page">
       <PageHeader
-        eyebrow="DATA & SCAN"
+        eyebrow="Duplicate intelligence"
         title="扫描去重"
         description="基于 fclones 的精确重复文件扫描；活动扫描自动刷新，扫描结果仅作为后续计划生成的只读快照。"
         actions={
