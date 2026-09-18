@@ -6926,3 +6926,134 @@ body,
     padding: 9px 10px !important;
   }
 }
+
+
+/* Remaining right-side overlay detail */
+.nfc-audit-detail-modal .nfc-audit-detail {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.nfc-audit-detail-modal .nfc-audit-detail > div {
+  min-width: 0;
+  padding: 11px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  border: 1px solid var(--nfc-shell-hairline);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--nfc-surface-2) 36%, transparent);
+}
+
+.nfc-audit-detail-modal .nfc-audit-detail > div > span {
+  color: var(--nfc-text-subtle);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.nfc-audit-detail-modal .nfc-audit-json {
+  grid-column: 1 / -1;
+}
+
+.nfc-index-create-modal .nfc-modal-form,
+.nfc-scan-create-modal form {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nfc-index-create-modal .nfc-form-note,
+.nfc-scan-create-modal .ant-form-item-extra {
+  color: var(--nfc-text-subtle);
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.nfc-scan-create-modal .nfc-modal-actions {
+  margin-top: 4px;
+  padding-top: 12px;
+  justify-content: flex-end;
+  border-top: 1px solid var(--nfc-shell-hairline);
+}
+
+.nfc-settings-confirm-modal .ant-modal-content {
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--nfc-danger) 18%, var(--nfc-hairline));
+  border-radius: 18px;
+  background: var(--nfc-surface-1);
+  box-shadow: 0 24px 80px rgba(10, 12, 18, 0.16);
+}
+
+.nfc-settings-confirm-modal .ant-modal-confirm-title {
+  color: var(--nfc-text);
+  font-size: 15px;
+  font-weight: 680;
+}
+
+.nfc-settings-confirm-modal .ant-modal-confirm-content {
+  color: var(--nfc-text-muted);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.nfc-danger-text,
+.nfc-danger-copy {
+  color: var(--nfc-danger);
+}
+
+.nfc-danger-copy {
+  font-size: 12px;
+  font-weight: 620;
+}
+
+.nfc-warning-copy {
+  color: var(--nfc-warning);
+  font-size: 12px;
+}
+
+.nfc-muted-copy {
+  color: var(--nfc-text-muted);
+  font-size: 12px;
+}
+
+@media (max-width: 767px) {
+  .nfc-audit-detail-modal .nfc-audit-detail {
+    grid-template-columns: 1fr;
+  }
+
+  .nfc-audit-detail-modal .nfc-audit-json {
+    grid-column: auto;
+  }
+
+  .nfc-index-create-modal .ant-modal-footer .ant-btn,
+  .nfc-scan-create-modal .nfc-modal-actions .ant-btn {
+    min-height: 44px;
+  }
+
+  .nfc-scan-create-modal .nfc-modal-actions {
+    width: 100%;
+  }
+
+  .nfc-scan-create-modal .nfc-modal-actions .ant-btn {
+    flex: 1 1 0;
+  }
+
+  .nfc-settings-confirm-modal {
+    width: calc(100vw - 12px) !important;
+    max-width: calc(100vw - 12px) !important;
+    top: 6px;
+  }
+
+  .nfc-settings-confirm-modal .ant-modal-confirm-btns {
+    display: flex;
+    gap: 8px;
+  }
+
+  .nfc-settings-confirm-modal .ant-modal-confirm-btns .ant-btn {
+    min-height: 42px;
+    flex: 1 1 0;
+  }
+}
