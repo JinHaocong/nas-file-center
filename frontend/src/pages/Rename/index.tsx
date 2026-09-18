@@ -1,26 +1,19 @@
 import React, { useState } from 'react';
 import {
-  Card,
+  Alert,
+  Button,
+  Checkbox,
+  Empty,
   Form,
   Input,
   InputNumber,
-  Checkbox,
-  Button,
-  Typography,
-  Space,
   Table,
-  Tag,
-  Row,
-  Col,
-  Alert,
   message,
 } from 'antd';
 import {
+  ArrowRightOutlined,
   EyeOutlined,
   ScheduleOutlined,
-  ArrowRightOutlined,
-  CheckCircleOutlined,
-  CloseCircleOutlined,
 } from '@ant-design/icons';
 import { useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
@@ -29,8 +22,12 @@ import { useTitle } from '../../hooks/useTitle';
 import { splitLines } from '../../utils/format';
 import { RenameProposal } from '../../types';
 import { DirectoryPicker } from '../../components/DirectoryPicker';
-
-const { Title, Text } = Typography;
+import { PageHeader } from '../../components/ui/PageHeader';
+import { DataPanel } from '../../components/ui/DataPanel';
+import { ActionBar } from '../../components/ui/ActionBar';
+import { ResponsiveDataView } from '../../components/ui/ResponsiveDataView';
+import { CodePath } from '../../components/ui/CodePath';
+import { StatusBadge } from '../../components/ui/StatusBadge';
 
 export const RenamePage: React.FC = () => {
   useTitle('批量重命名');
@@ -42,7 +39,7 @@ export const RenamePage: React.FC = () => {
     mutationFn: (payload: any) => batchApi.previewRename(payload),
     onSuccess: (res) => {
       setProposals(res.items);
-      const conflictCount = res.items.filter((i) => i.conflict).length;
+      const conflictCount = res.items.filter((item) => item.conflict).length;
       if (conflictCount > 0) {
         message.warning(`预览完成，但发现 ${conflictCount} 处重命名冲突！`);
       } else {
@@ -84,28 +81,29 @@ export const RenamePage: React.FC = () => {
         regex_replacement: values.regex_replacement || '',
         prefix: values.prefix || '',
         suffix: values.suffix || '',
-        number_start: values.number_start !== undefined ? values.number_start : null,
+        number_start:
+          values.number_start !== undefined ? values.number_start : null,
         number_width: values.number_width || 3,
         include_parent: values.include_parent || false,
         source_extension: values.source_extension || '',
         target_extension: values.target_extension || '',
       });
     } catch {
-      // Form validation error
+      // AntD handles validation.
     }
   };
 
   const handleGeneratePlan = () => {
     if (!proposals || proposals.length === 0) return;
-    const hasConflict = proposals.some((i) => i.conflict);
+    const hasConflict = proposals.some((item) => item.conflict);
     if (hasConflict) {
       message.error('存在命名冲突，禁止生成执行计划，请调整重命名规则！');
       return;
     }
-    const items = proposals.map((p) => ({
+    const items = proposals.map((proposal) => ({
       operation: 'rename',
-      source: p.source,
-      target: p.target,
+      source: proposal.source,
+      target: proposal.target,
     }));
     planMutation.mutate({
       name: '批量重命名计划',
@@ -114,61 +112,56 @@ export const RenamePage: React.FC = () => {
     });
   };
 
-  const hasConflicts = proposals?.some((p) => p.conflict);
+  const hasConflicts = proposals?.some((proposal) => proposal.conflict);
 
   const columns = [
     {
       title: '原完整路径',
       dataIndex: 'source',
       key: 'source',
-      render: (text: string) => <Text code copyable>{text}</Text>,
+      render: (value: string) => <CodePath value={value} />,
     },
     {
       title: '重命名后目标路径',
       dataIndex: 'target',
       key: 'target',
-      render: (text: string, record: RenameProposal) => (
-        <Space>
-          <ArrowRightOutlined style={{ color: '#1677ff' }} />
-          <Text code copyable style={{ color: record.conflict ? '#ff4d4f' : '#52c41a' }}>
-            {text}
-          </Text>
-        </Space>
+      render: (value: string, record: RenameProposal) => (
+        <div className="nfc-target-path">
+          <ArrowRightOutlined />
+          <CodePath value={value} muted={record.conflict} />
+        </div>
       ),
     },
     {
       title: '状态',
       key: 'conflict',
-      width: 140,
-      render: (_: any, record: RenameProposal) => {
-        if (record.conflict) {
-          return (
-            <Tag color="error" icon={<CloseCircleOutlined />}>
-              冲突: {record.conflict_reason || '目标已存在'}
-            </Tag>
-          );
-        }
-        return (
-          <Tag color="success" icon={<CheckCircleOutlined />}>
-            安全
-          </Tag>
-        );
-      },
+      width: 160,
+      render: (_: unknown, record: RenameProposal) => (
+        <StatusBadge
+          status={record.conflict ? 'failed' : 'completed'}
+          label={
+            record.conflict
+              ? `冲突: ${record.conflict_reason || '目标已存在'}`
+              : '安全'
+          }
+        />
+      ),
     },
   ];
 
   return (
-    <div>
-      <div style={{ marginBottom: 20 }}>
-        <Title level={4} style={{ margin: 0 }}>
-          批量重命名
-        </Title>
-        <Text type="secondary">
-          支持正则表达式、前后缀、父目录名拼接及自动编号补零，左右比对冲突后再生成计划
-        </Text>
-      </div>
+    <div className="nfc-operations-page">
+      <PageHeader
+        eyebrow="FILE TOOLS"
+        title="批量重命名"
+        description="组合正则、扩展名替换、前后缀、父目录名与编号规则；必须先 Preview，并在无冲突时生成 Rename Plan。"
+      />
 
-      <Card bordered={false} style={{ borderRadius: 12, marginBottom: 16 }}>
+      <DataPanel
+        title="重命名规则"
+        description="Preview 只计算目标路径与冲突；不会直接修改任何文件名。"
+        className="nfc-complex-form-panel nfc-file-tool-form"
+      >
         <Form
           form={form}
           layout="vertical"
@@ -180,128 +173,163 @@ export const RenamePage: React.FC = () => {
             rules={[{ required: true, message: '请选择或输入待重命名的路径' }]}
             extra="支持可视化选择目录或高级手动多行输入"
           >
-            <DirectoryPicker multiple placeholder="点击选择或添加待重命名目录..." />
+            <DirectoryPicker
+              multiple
+              placeholder="点击选择或添加待重命名目录..."
+            />
           </Form.Item>
 
-          <Row gutter={16}>
-            <Col xs={24} md={12}>
-              <Form.Item name="regex_pattern" label="正则查找 (Regex Pattern)">
-                <Input placeholder="例如：^DSC_(\d+)" />
-              </Form.Item>
-            </Col>
-            <Col xs={24} md={12}>
-              <Form.Item name="regex_replacement" label="正则替换 (Replacement)">
-                <Input placeholder="例如：Photo_$1" />
-              </Form.Item>
-            </Col>
-          </Row>
+          <div className="nfc-form-grid">
+            <Form.Item name="regex_pattern" label="正则查找 (Regex Pattern)">
+              <Input placeholder="例如：^DSC_(\d+)" />
+            </Form.Item>
+            <Form.Item name="regex_replacement" label="正则替换 (Replacement)">
+              <Input placeholder="例如：Photo_$1" />
+            </Form.Item>
+          </div>
 
-          <Row gutter={16}>
-            <Col xs={24} md={12}>
-              <Form.Item
-                name="source_extension"
-                label="原扩展名过滤"
-                extra="可填写 webp 或 .webp；匹配不区分大小写"
-              >
-                <Input placeholder="例如：.webp" />
-              </Form.Item>
-            </Col>
-            <Col xs={24} md={12}>
-              <Form.Item
-                name="target_extension"
-                label="目标扩展名"
-                extra="必须与原扩展名过滤同时填写"
-              >
-                <Input placeholder="例如：.jpg" />
-              </Form.Item>
-            </Col>
-          </Row>
+          <div className="nfc-form-grid">
+            <Form.Item
+              name="source_extension"
+              label="原扩展名过滤"
+              extra="可填写 webp 或 .webp；匹配不区分大小写"
+            >
+              <Input placeholder="例如：.webp" />
+            </Form.Item>
+            <Form.Item
+              name="target_extension"
+              label="目标扩展名"
+              extra="必须与原扩展名过滤同时填写"
+            >
+              <Input placeholder="例如：.jpg" />
+            </Form.Item>
+          </div>
 
           <Alert
             type="info"
             showIcon
             message="扩展名替换仅执行重命名"
             description="只修改文件名后缀，不会转换图片格式，也不会进行 WebP → JPEG 转码。"
-            style={{ marginBottom: 16 }}
+            className="nfc-page-alert"
           />
 
-          <Row gutter={16}>
-            <Col xs={24} md={12}>
-              <Form.Item name="prefix" label="添加前缀 (Prefix)">
-                <Input placeholder="例如：2026_" />
-              </Form.Item>
-            </Col>
-            <Col xs={24} md={12}>
-              <Form.Item name="suffix" label="添加后缀 (Suffix)">
-                <Input placeholder="例如：_backup" />
-              </Form.Item>
-            </Col>
-          </Row>
+          <div className="nfc-form-grid">
+            <Form.Item name="prefix" label="添加前缀 (Prefix)">
+              <Input placeholder="例如：2026_" />
+            </Form.Item>
+            <Form.Item name="suffix" label="添加后缀 (Suffix)">
+              <Input placeholder="例如：_backup" />
+            </Form.Item>
+          </div>
 
-          <Row gutter={16}>
-            <Col xs={24} md={12}>
-              <Form.Item name="number_start" label="起始数字序号 (可选，如 1)">
-                <InputNumber min={0} placeholder="留空不添加序号" style={{ width: '100%' }} />
-              </Form.Item>
-            </Col>
-            <Col xs={24} md={12}>
-              <Form.Item name="number_width" label="序号补零宽度 (位数)">
-                <InputNumber min={1} max={10} style={{ width: '100%' }} />
-              </Form.Item>
-            </Col>
-          </Row>
+          <div className="nfc-form-grid">
+            <Form.Item name="number_start" label="起始数字序号 (可选，如 1)">
+              <InputNumber
+                min={0}
+                placeholder="留空不添加序号"
+                className="nfc-full-width-control"
+              />
+            </Form.Item>
+            <Form.Item name="number_width" label="序号补零宽度 (位数)">
+              <InputNumber min={1} max={10} className="nfc-full-width-control" />
+            </Form.Item>
+          </div>
 
           <Form.Item name="include_parent" valuePropName="checked">
             <Checkbox>在文件名前拼入直接父文件夹名称</Checkbox>
           </Form.Item>
 
-          <Space style={{ marginTop: 8 }}>
+          <ActionBar className="nfc-file-tool-primary-actions">
             <Button
               type="primary"
               icon={<EyeOutlined />}
               onClick={handlePreview}
               loading={previewMutation.isPending}
             >
-              生成重命名预览
+              生成重命名 Preview
             </Button>
             {proposals && proposals.length > 0 && (
               <Button
-                type="dashed"
                 icon={<ScheduleOutlined />}
                 onClick={handleGeneratePlan}
                 loading={planMutation.isPending}
                 disabled={hasConflicts}
               >
-                生成执行 Plan (#{proposals.length} 项)
+                生成执行 Plan ({proposals.length} 项)
               </Button>
             )}
-          </Space>
+          </ActionBar>
         </Form>
-      </Card>
+      </DataPanel>
 
       {hasConflicts && (
         <Alert
           type="error"
           showIcon
           message="检测到重命名目标冲突"
-          description="部分文件重命名后的目标路径已存在或产生内部重名冲突，系统已自动锁定生成计划按钮，请修正重命名规则。"
-          style={{ marginBottom: 16 }}
+          description="目标路径已存在或产生内部重名冲突；生成 Plan 已锁定，请修正规则并重新 Preview。"
+          className="nfc-page-alert"
         />
       )}
 
       {proposals && (
-        <Card
-          bordered={false}
-          style={{ borderRadius: 12 }}
-          title={`重命名提议清单 (共 ${proposals.length} 项)`}
+        <DataPanel
+          title="重命名 Preview"
+          description="逐项检查 source → target 与冲突状态；只有全量安全时才能生成 Plan。"
+          action={<span className="nfc-panel-count">{proposals.length} proposals</span>}
+          className="nfc-panel-flush nfc-file-tool-result-panel"
         >
-          <Table
-            dataSource={proposals}
-            columns={columns}
-            rowKey="source"
-            pagination={{ pageSize: 20 }}
+          <ResponsiveDataView
+            desktop={
+              <Table
+                dataSource={proposals}
+                columns={columns}
+                rowKey="source"
+                pagination={{ pageSize: 20 }}
+              />
+            }
+            mobile={
+              <div className="nfc-mobile-record-list">
+                {proposals.length === 0 ? (
+                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="无重命名提议" />
+                ) : (
+                  proposals.map((proposal) => (
+                    <article
+                      className="nfc-rename-proposal-mobile-card"
+                      key={proposal.source}
+                    >
+                      <div className="nfc-mobile-record-heading">
+                        <span className="nfc-kind-badge">rename</span>
+                        <StatusBadge
+                          status={proposal.conflict ? 'failed' : 'completed'}
+                          label={proposal.conflict ? '冲突' : '安全'}
+                        />
+                      </div>
+                      <div className="nfc-plan-item-paths">
+                        <div className="nfc-plan-item-path-row">
+                          <span>源路径</span>
+                          <CodePath value={proposal.source} />
+                        </div>
+                        <div className="nfc-plan-item-path-row">
+                          <span>目标</span>
+                          <CodePath
+                            value={proposal.target}
+                            muted={proposal.conflict}
+                          />
+                        </div>
+                      </div>
+                      {proposal.conflict && (
+                        <p className="nfc-mobile-record-error">
+                          {proposal.conflict_reason || '目标已存在'}
+                        </p>
+                      )}
+                    </article>
+                  ))
+                )}
+              </div>
+            }
           />
-        </Card>
+        </DataPanel>
       )}
     </div>
   );
