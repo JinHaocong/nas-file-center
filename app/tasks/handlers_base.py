@@ -14,7 +14,7 @@ from sqlalchemy import delete, select, text
 
 from app.batch.plans import OperationItem
 from app.config import Settings
-from app.execution.executor import execute_item
+from app.execution.executor import ItemResult, execute_item
 from app.models import (
     AuditEvent,
     BatchPlan,
@@ -2067,6 +2067,37 @@ class BatchPlanExecuteHandler(TaskHandler):
             if item_meta.operation not in {"restore", "quarantine_purge"}:
                 is_fresh, stale_detail = _verify_plan_item_and_keep_freshness(item_meta, settings)
                 if not is_fresh:
+                    recovered_missing_cleanup = False
+                    if (
+                        item_meta.operation == "rmdir_empty"
+                        and stale_detail is not None
+                        and stale_detail.reason == "source_not_found"
+                    ):
+                        from app.tasks.utility_structural_cleanup_compat import (
+                            reconcile_utility_structural_cleanup,
+                        )
+                        with context.SessionLocal() as recovery_session:
+                            recovery_session.execute(text("BEGIN IMMEDIATE"))
+                            recovery_row = recovery_session.get(BatchPlanItem, item_meta.id)
+                            if recovery_row is not None:
+                                recovered_missing_cleanup = reconcile_utility_structural_cleanup(
+                                    recovery_session,
+                                    recovery_row,
+                                    plan_id,
+                                    job.id,
+                                    user_id,
+                                    settings,
+                                    utcnow(),
+                                )
+                                if recovered_missing_cleanup and recovery_row.state == "completed":
+                                    recovery_session.commit()
+                                else:
+                                    recovery_session.rollback()
+                                    recovered_missing_cleanup = False
+                    if recovered_missing_cleanup:
+                        completed_or_skipped += 1
+                        continue
+
                     stale_reason = f"Item stale: {stale_detail.reason if stale_detail else 'stale'}"
                     with context.SessionLocal() as session:
                         session.execute(text("BEGIN IMMEDIATE"))
@@ -2689,18 +2720,60 @@ class BatchPlanExecuteHandler(TaskHandler):
                             session.commit()
                         break
 
-            result = execute_item(
-                item_op,
-                allowed_roots=settings.allowed_roots,
-                allow_mutation=settings.allow_mutation,
-                allow_delete=settings.allow_delete,
-                quarantine_root=settings.quarantine_root,
-                plan_id=str(plan_id),
-                session_factory=context.SessionLocal,
-                worker_id=context.worker_id,
-                quarantine_entry_id=q_purge_entry_id or q_entry_id or q_restore_entry_id,
-                purge_manifest=purge_manifest,
-            )
+            paired_cleanup_guard = None
+            paired_cleanup_result = None
+            if item_meta.operation == "move":
+                try:
+                    from app.tasks.utility_structural_cleanup_compat import (
+                        prepare_utility_structural_cleanup_guard,
+                    )
+                    with context.SessionLocal() as guard_session:
+                        paired_cleanup_guard = prepare_utility_structural_cleanup_guard(
+                            guard_session,
+                            item_meta,
+                            plan_id,
+                            settings,
+                        )
+                except Exception as exc:
+                    result = ItemResult(
+                        "failed",
+                        f"UTILITY_WRAPPER_GUARD_FAILED: {exc}",
+                    )
+                else:
+                    try:
+                        result = execute_item(
+                            item_op,
+                            allowed_roots=settings.allowed_roots,
+                            allow_mutation=settings.allow_mutation,
+                            allow_delete=settings.allow_delete,
+                            quarantine_root=settings.quarantine_root,
+                            plan_id=str(plan_id),
+                            session_factory=context.SessionLocal,
+                            worker_id=context.worker_id,
+                            quarantine_entry_id=q_purge_entry_id or q_entry_id or q_restore_entry_id,
+                            purge_manifest=purge_manifest,
+                        )
+                        if (
+                            paired_cleanup_guard is not None
+                            and result.state == "completed"
+                        ):
+                            paired_cleanup_result = paired_cleanup_guard.cleanup_after_move()
+                    finally:
+                        if paired_cleanup_guard is not None:
+                            paired_cleanup_guard.close()
+            else:
+                result = execute_item(
+                    item_op,
+                    allowed_roots=settings.allowed_roots,
+                    allow_mutation=settings.allow_mutation,
+                    allow_delete=settings.allow_delete,
+                    quarantine_root=settings.quarantine_root,
+                    plan_id=str(plan_id),
+                    session_factory=context.SessionLocal,
+                    worker_id=context.worker_id,
+                    quarantine_entry_id=q_purge_entry_id or q_entry_id or q_restore_entry_id,
+                    purge_manifest=purge_manifest,
+                )
 
             after_size = None
             after_mtime_ns = None
@@ -2739,6 +2812,54 @@ class BatchPlanExecuteHandler(TaskHandler):
                 row = session.get(BatchPlanItem, item_meta.id)
                 row.state = result.state
                 row.reason = result.reason
+
+                if paired_cleanup_result is not None and paired_cleanup_guard is not None:
+                    cleanup_row = session.get(
+                        BatchPlanItem,
+                        paired_cleanup_guard.cleanup_item_id,
+                    )
+                    if cleanup_row is not None and cleanup_row.state not in ("completed", "failed"):
+                        cleanup_row.state = paired_cleanup_result.state
+                        cleanup_row.reason = paired_cleanup_result.reason
+                        session.add(AuditEvent(
+                            operation="rmdir_empty",
+                            path=cleanup_row.source_path,
+                            result=paired_cleanup_result.state,
+                            details_json=json.dumps({
+                                "plan_id": plan_id,
+                                "item_id": cleanup_row.id,
+                                "task_id": job.id,
+                                "reason": paired_cleanup_result.reason,
+                                "paired_move_item_id": row.id,
+                                "phase": "paired_post_move_cleanup",
+                            }, ensure_ascii=False),
+                        ))
+                        if paired_cleanup_result.state == "completed":
+                            session.add(OperationJournal(
+                                operation="rmdir_empty",
+                                sequence=cleanup_row.sequence,
+                                plan_id=plan_id,
+                                plan_item_id=cleanup_row.id,
+                                task_id=job.id,
+                                user_id=user_id,
+                                before_json=json.dumps({
+                                    "path": cleanup_row.source_path,
+                                    "object_type": "directory",
+                                }, ensure_ascii=False),
+                                after_json=json.dumps({
+                                    "logical_removed": True,
+                                    "preserved": False,
+                                    "removed": True,
+                                    "structural_cleanup": True,
+                                    "quarantine_path": None,
+                                }, ensure_ascii=False),
+                                metadata_before_json=json.dumps({
+                                    "device": cleanup_row.expected_device,
+                                    "inode": cleanup_row.expected_inode,
+                                }, ensure_ascii=False),
+                                metadata_after_json=json.dumps({}, ensure_ascii=False),
+                                created_at=now,
+                            ))
 
                 metadata = json.loads(row.metadata_json or "{}")
                 if result.result_path is not None:
@@ -2968,6 +3089,8 @@ class BatchPlanExecuteHandler(TaskHandler):
                 time.sleep(mtime_delay)
 
             completed_or_skipped += 1
+            if paired_cleanup_result is not None:
+                completed_or_skipped += 1
 
         # 4. Post-Loop Plan Status Finalization
         with context.SessionLocal() as session:
