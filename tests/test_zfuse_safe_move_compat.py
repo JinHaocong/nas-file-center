@@ -43,7 +43,7 @@ def test_plain_directory_rename_probe_positive_only_when_existing_targets_are_ne
     src_fd = _open_dir(source_parent)
     dst_fd = _open_dir(target_parent)
     try:
-        assert fs_ops.probe_plain_directory_rename_noclobber_at(src_fd, dst_fd) is True
+        assert fs_ops.probe_directory_rename_noreplace_compat_at(src_fd, dst_fd) is True
     finally:
         os.close(src_fd)
         os.close(dst_fd)
@@ -61,7 +61,7 @@ def test_plain_directory_rename_probe_rejects_posix_replace_semantics(tmp_path):
     src_fd = _open_dir(source_parent)
     dst_fd = _open_dir(target_parent)
     try:
-        assert fs_ops.probe_plain_directory_rename_noclobber_at(src_fd, dst_fd) is False
+        assert fs_ops.probe_directory_rename_noreplace_compat_at(src_fd, dst_fd) is False
     finally:
         os.close(src_fd)
         os.close(dst_fd)
@@ -85,7 +85,7 @@ def test_directory_candidate_becomes_ready_when_native_noreplace_is_missing_but_
     )
     monkeypatch.setattr(
         wrapper_module,
-        "probe_plain_directory_rename_noclobber_at",
+        "probe_directory_rename_noreplace_compat_at",
         lambda *_args, **_kwargs: True,
         raising=False,
     )
@@ -159,7 +159,7 @@ def test_directory_compat_execution_still_fails_closed_when_runtime_probe_is_not
 
     monkeypatch.setattr(
         fs_ops,
-        "probe_plain_directory_rename_noclobber_at",
+        "probe_directory_rename_noreplace_compat_at",
         lambda *_args, **_kwargs: False,
         raising=False,
     )
