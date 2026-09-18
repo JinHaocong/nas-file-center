@@ -358,7 +358,7 @@ export const ProfileList: React.FC<ProfileListProps> = ({
         confirmLoading={importMutation.isPending}
         okText="确认导入"
         cancelText="取消"
-        className="nfc-form-modal"
+        className="nfc-form-modal nfc-overlay-modal nfc-organizer-import-modal"
       >
         <p className="nfc-form-note">
           选择导出的 JSON 文件，或将 JSON 内容直接粘贴到文本框。
