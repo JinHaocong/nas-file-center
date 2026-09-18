@@ -527,13 +527,23 @@ def execute_item(
             target = require_allowed_path(target_raw, allowed_roots)
             target.parent.mkdir(parents=True, exist_ok=True)
             try:
-                from app.fs_ops import rename_noreplace
+                from app.fs_ops import rename_directory_noreplace_compat, rename_noreplace
                 try:
                     rename_noreplace(source, target)
                 except OSError as exc:
                     if exc.errno != errno.EOPNOTSUPP:
                         raise
-                    _compat_regular_file_move_noreplace(source, target)
+                    source_stat = os.lstat(source)
+                    if stat.S_ISDIR(source_stat.st_mode):
+                        rename_directory_noreplace_compat(source, target)
+                    elif stat.S_ISREG(source_stat.st_mode):
+                        _compat_regular_file_move_noreplace(source, target)
+                    else:
+                        raise OSError(
+                            errno.EOPNOTSUPP,
+                            "COMPAT no-replace move supports regular files and positively-probed directories only",
+                            os.fspath(source),
+                        )
             except FileExistsError:
                 return _skip("target already exists")
             except OSError as exc:
