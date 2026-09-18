@@ -40,9 +40,9 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({
         type="link"
         size="small"
         icon={<HomeOutlined />}
-        style={{ padding: '0 4px', fontWeight: 600 }}
+        className="nfc-path-breadcrumb-root"
       >
-        {baseRoot} <DownOutlined style={{ fontSize: 10 }} />
+        {baseRoot} <DownOutlined className="nfc-path-breadcrumb-chevron" />
       </Button>
     </Dropdown>
   ) : (
@@ -50,7 +50,7 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({
       type="link"
       size="small"
       icon={<HomeOutlined />}
-      style={{ padding: '0 4px', fontWeight: 600 }}
+      className="nfc-path-breadcrumb-root"
       onClick={() => onNavigate(baseRoot)}
     >
       {baseRoot}
@@ -80,15 +80,15 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({
 
       items.push({
         title: isLast ? (
-          <span style={{ fontWeight: 600, color: 'inherit', padding: '0 4px' }}>
-            <FolderOutlined style={{ marginRight: 4 }} />
+          <span className="nfc-path-breadcrumb-current">
+            <FolderOutlined className="nfc-path-breadcrumb-folder" />
             {seg}
           </span>
         ) : (
           <Button
             type="link"
             size="small"
-            style={{ padding: '0 4px' }}
+            className="nfc-path-breadcrumb-link"
             onClick={() => onNavigate(target)}
           >
             {seg}
@@ -99,7 +99,7 @@ export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({
   }
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+    <div className="nfc-path-breadcrumb">
       <Breadcrumb items={items} />
     </div>
   );
