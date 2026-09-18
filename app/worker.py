@@ -174,23 +174,48 @@ def process_work_job(
 
             work = session.get(WorkJob, work_job_id)
             if work and work.status == JobState.RUNNING.value:
-                validate_transition(work.status, JobState.COMPLETED.value)
-                work.status = JobState.COMPLETED.value
-                work.finished_at = now
-                work.heartbeat_at = now
-                work.error_text = None
-                work.error_code = None
-
                 sync_scan_job_status(session, work, "completed", finished_at=now)
-                sync_batch_plan_status(session, work, "completed", finished_at=now)
-
-                log_task_event(
+                linked_plan = sync_batch_plan_status(
                     session,
-                    job_id=work_job_id,
-                    event_type="completed",
-                    message=f"Job #{work_job_id} completed successfully",
-                    level="info",
+                    work,
+                    "completed",
+                    finished_at=now,
                 )
+
+                if (
+                    linked_plan is not None
+                    and linked_plan.status != "completed"
+                ):
+                    validate_transition(work.status, JobState.FAILED.value)
+                    work.status = JobState.FAILED.value
+                    work.finished_at = now
+                    work.heartbeat_at = now
+                    work.error_text = (
+                        f"Batch plan #{linked_plan.id} finished with status "
+                        f"{linked_plan.status}; inspect plan items for details"
+                    )
+                    work.error_code = "BATCH_PLAN_NOT_COMPLETED"
+                    log_task_event(
+                        session,
+                        job_id=work_job_id,
+                        event_type="failed",
+                        message=work.error_text,
+                        level="error",
+                    )
+                else:
+                    validate_transition(work.status, JobState.COMPLETED.value)
+                    work.status = JobState.COMPLETED.value
+                    work.finished_at = now
+                    work.heartbeat_at = now
+                    work.error_text = None
+                    work.error_code = None
+                    log_task_event(
+                        session,
+                        job_id=work_job_id,
+                        event_type="completed",
+                        message=f"Job #{work_job_id} completed successfully",
+                        level="info",
+                    )
                 session.commit()
             elif work and work.status == JobState.CANCEL_REQUESTED.value:
                 validate_transition(work.status, JobState.CANCELLED.value)
