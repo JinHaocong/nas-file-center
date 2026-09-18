@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,7 @@ from app.auth.password import hash_password
 from app.config import Settings
 from app.main import create_app
 from app.models import AuditEvent, BatchPlan, QuarantineEntry, User, Workflow, WorkflowRevision, utcnow
+import app.service as service_module
 from app.service import FileCenterService
 
 
@@ -147,6 +149,13 @@ def test_archived_workflow_permanent_delete_requires_admin_archive_confirmation_
         assert session.scalar(
             select(func.count(WorkflowRevision.id)).where(WorkflowRevision.workflow_id == workflow_id)
         ) == 0
+        audit = session.scalar(
+            select(AuditEvent)
+            .where(AuditEvent.operation == "workflow.permanent_delete")
+            .order_by(AuditEvent.id.desc())
+        )
+        assert audit is not None
+        assert audit.path == f"workflow:{workflow_id}"
 
 
 def _seed_quarantine_entry(env, *, state: str, name: str, payload_exists: bool = False) -> int:
@@ -172,7 +181,7 @@ def _seed_quarantine_entry(env, *, state: str, name: str, payload_exists: bool =
         return int(row.id)
 
 
-def test_quarantine_purged_record_delete_is_metadata_only_admin_and_payload_absence_guarded(maintenance_env):
+def test_quarantine_purged_record_delete_is_metadata_only_admin_and_payload_absence_guarded(maintenance_env, monkeypatch):
     env = maintenance_env
     admin = env["admin"]
     member = env["member"]
@@ -216,6 +225,27 @@ def test_quarantine_purged_record_delete_is_metadata_only_admin_and_payload_abse
     assert blocked_payload.status_code == 409
     with service.SessionLocal() as session:
         assert session.get(QuarantineEntry, reappeared_id) is not None
+
+    uncertain_id = _seed_quarantine_entry(env, state="purged", name="uncertain.txt")
+    with service.SessionLocal() as session:
+        uncertain = session.get(QuarantineEntry, uncertain_id)
+        assert uncertain is not None
+        uncertain_path = uncertain.quarantine_path
+
+    real_lstat = service_module.os.lstat
+
+    def uncertain_lstat(path, *args, **kwargs):
+        if str(path) == uncertain_path:
+            raise PermissionError(errno.EACCES, "simulated permission uncertainty", uncertain_path)
+        return real_lstat(path, *args, **kwargs)
+
+    monkeypatch.setattr(service_module.os, "lstat", uncertain_lstat)
+    blocked_uncertain = admin.delete(
+        f"/api/quarantine/{uncertain_id}/record?confirmation=DELETE_RECORD"
+    )
+    assert blocked_uncertain.status_code == 409
+    with service.SessionLocal() as session:
+        assert session.get(QuarantineEntry, uncertain_id) is not None
 
 
 def test_quarantine_bulk_record_delete_is_explicit_all_or_nothing(maintenance_env):
