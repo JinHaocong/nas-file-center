@@ -1,23 +1,25 @@
 import React, { useState } from 'react';
 import {
+  Button,
+  Descriptions,
   Drawer,
+  Empty,
+  Pagination,
+  Space,
   Table,
   Tag,
   Typography,
-  Space,
-  Empty,
-  Button,
-  Descriptions,
 } from 'antd';
 import {
+  ArrowRightOutlined,
   HistoryOutlined,
   ReloadOutlined,
-  ArrowRightOutlined,
 } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
 import { plansApi } from '../../api/domain';
 import { OperationJournalEntry } from '../../types';
 import { formatBytes, formatDateTime } from '../../utils/format';
+import { useResponsive } from '../../hooks/useResponsive';
 
 const { Text, Paragraph } = Typography;
 
@@ -36,7 +38,14 @@ const OP_COLORS: Record<string, string> = {
   delete: 'red',
 };
 
+const beforePath = (record: OperationJournalEntry) =>
+  record.before?.path || record.before?.original_path || record.before?.quarantine_path || '—';
+
+const afterPath = (record: OperationJournalEntry) =>
+  record.after?.path || record.after?.restored_path || record.after?.quarantine_path || '—';
+
 export const OperationJournalDrawer: React.FC<Props> = ({ planId, open, onClose }) => {
+  const { isMobile } = useResponsive();
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
 
@@ -55,48 +64,33 @@ export const OperationJournalDrawer: React.FC<Props> = ({ planId, open, onClose 
       render: (seq: number) => <Text strong>#{seq}</Text>,
     },
     {
-      title: '操作类型',
+      title: '操作',
       dataIndex: 'operation',
       key: 'operation',
       width: 100,
       render: (op: string) => <Tag color={OP_COLORS[op] || 'default'}>{op}</Tag>,
     },
     {
-      title: '物理变更详情 (Before → After)',
+      title: '物理变更',
       key: 'mutation_details',
-      render: (_: any, record: OperationJournalEntry) => {
-        const bPath = record.before?.path || record.before?.original_path || record.before?.quarantine_path || '-';
-        const aPath = record.after?.path || record.after?.restored_path || record.after?.quarantine_path || '-';
+      render: (_: unknown, record: OperationJournalEntry) => {
         const bSize = record.before?.size != null ? formatBytes(record.before.size) : null;
         const aSize = record.after?.size != null ? formatBytes(record.after.size) : null;
         const bInode = record.metadata_before?.inode;
         const aInode = record.metadata_after?.inode;
 
         return (
-          <Space direction="vertical" size={2} style={{ width: '100%' }}>
-            <Space align="start" wrap>
-              <Text code style={{ wordBreak: 'break-all' }}>
-                {bPath}
-              </Text>
-              <ArrowRightOutlined style={{ color: '#1677ff', margin: '0 4px' }} />
-              <Text code style={{ wordBreak: 'break-all', color: '#1677ff' }}>
-                {aPath}
-              </Text>
-            </Space>
-
-            <Space size="middle" wrap style={{ fontSize: 12, color: '#8c8c8c' }}>
-              {(bSize || aSize) && (
-                <span>
-                  大小: {bSize || '-'} → {aSize || '-'}
-                </span>
-              )}
-              {(bInode || aInode) && (
-                <span>
-                  inode: {bInode || '-'} → {aInode || '-'}
-                </span>
-              )}
-            </Space>
-          </Space>
+          <div className="nfc-journal-mutation">
+            <div className="nfc-journal-path-flow">
+              <Text code>{beforePath(record)}</Text>
+              <ArrowRightOutlined />
+              <Text code>{afterPath(record)}</Text>
+            </div>
+            <div className="nfc-journal-meta">
+              {(bSize || aSize) && <span>大小 {bSize || '—'} → {aSize || '—'}</span>}
+              {(bInode || aInode) && <span>inode {bInode || '—'} → {aInode || '—'}</span>}
+            </div>
+          </div>
         );
       },
     },
@@ -109,83 +103,128 @@ export const OperationJournalDrawer: React.FC<Props> = ({ planId, open, onClose 
     },
   ];
 
+  const records = data?.items || [];
+
   return (
     <Drawer
-        rootClassName="nfc-overlay-drawer"
+      rootClassName="nfc-overlay-drawer nfc-operation-journal-drawer"
       title={
-        <Space>
-          <HistoryOutlined style={{ color: '#1677ff' }} />
-          <span>计划 #{planId} 底层操作执行日志 (Operation Journal)</span>
-        </Space>
+        <div className="nfc-drawer-title">
+          <span className="nfc-drawer-title-kicker">Filesystem evidence</span>
+          <div className="nfc-drawer-title-row">
+            <HistoryOutlined />
+            <span>计划 #{planId} 操作日志</span>
+          </div>
+        </div>
       }
       placement="right"
-      width={860}
+      width={900}
       open={open}
       onClose={onClose}
       extra={
         <Button icon={<ReloadOutlined />} size="small" onClick={() => refetch()} loading={isLoading}>
-          刷新日志
+          刷新
         </Button>
       }
     >
-      <div style={{ marginBottom: 12 }}>
-        <Paragraph type="secondary" style={{ margin: 0, fontSize: 13 }}>
-          Operation Journal 记录 Worker 在真实文件系统执行的物理变更证据（包含变更前后的路径、大小、时间戳与 inode）。撤销计划（Undo Plan）即基于本日志逆向生成。
-        </Paragraph>
-      </div>
+      <div className="nfc-overlay-stack">
+        <section className="nfc-overlay-section">
+          <Paragraph type="secondary" className="nfc-overlay-intro">
+            Operation Journal 是 Worker 对真实文件系统变更的审计证据，包含路径、大小、时间戳与 inode；Undo Plan 会基于这些记录逆向生成。
+          </Paragraph>
+        </section>
 
-      <Table
-        dataSource={data?.items || []}
-        columns={columns}
-        rowKey="id"
-        loading={isLoading}
-        size="middle"
-        locale={{
-          emptyText: (
-            <Empty
-              image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description="当前计划暂无已完成的操作日志（计划执行中或完成后将自动记录每一项物理变更）"
+        <section className="nfc-overlay-section nfc-overlay-section-flush">
+          {isMobile ? (
+            <div className="nfc-journal-mobile-list">
+              {records.length === 0 ? (
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description="当前计划暂无已完成的操作日志"
+                />
+              ) : (
+                records.map((record: OperationJournalEntry) => (
+                  <article className="nfc-journal-mobile-card" key={record.id}>
+                    <div className="nfc-journal-mobile-topline">
+                      <div>
+                        <span className="nfc-mono">#{record.sequence}</span>
+                        <Tag color={OP_COLORS[record.operation] || 'default'}>{record.operation}</Tag>
+                      </div>
+                      <time>{formatDateTime(record.created_at)}</time>
+                    </div>
+                    <div className="nfc-journal-mobile-flow">
+                      <Text code>{beforePath(record)}</Text>
+                      <ArrowRightOutlined />
+                      <Text code>{afterPath(record)}</Text>
+                    </div>
+                    <details className="nfc-log-context">
+                      <summary>查看原始审计数据</summary>
+                      <div className="nfc-journal-json-grid">
+                        <pre className="nfc-code-block">{JSON.stringify(record.before, null, 2)}</pre>
+                        <pre className="nfc-code-block">{JSON.stringify(record.after, null, 2)}</pre>
+                        <pre className="nfc-code-block">{JSON.stringify(record.metadata_before, null, 2)}</pre>
+                        <pre className="nfc-code-block">{JSON.stringify(record.metadata_after, null, 2)}</pre>
+                      </div>
+                    </details>
+                  </article>
+                ))
+              )}
+            </div>
+          ) : (
+            <Table
+              className="nfc-embedded-table"
+              dataSource={records}
+              columns={columns}
+              rowKey="id"
+              loading={isLoading}
+              size="middle"
+              pagination={false}
+              locale={{
+                emptyText: (
+                  <Empty
+                    image={Empty.PRESENTED_IMAGE_SIMPLE}
+                    description="当前计划暂无已完成的操作日志"
+                  />
+                ),
+              }}
+              expandable={{
+                expandedRowRender: (record) => (
+                  <Descriptions className="nfc-journal-expanded" size="small" column={2}>
+                    <Descriptions.Item label="Before JSON" span={2}>
+                      <pre className="nfc-code-block">{JSON.stringify(record.before, null, 2)}</pre>
+                    </Descriptions.Item>
+                    <Descriptions.Item label="After JSON" span={2}>
+                      <pre className="nfc-code-block">{JSON.stringify(record.after, null, 2)}</pre>
+                    </Descriptions.Item>
+                    <Descriptions.Item label="Metadata Before">
+                      <pre className="nfc-code-block">{JSON.stringify(record.metadata_before, null, 2)}</pre>
+                    </Descriptions.Item>
+                    <Descriptions.Item label="Metadata After">
+                      <pre className="nfc-code-block">{JSON.stringify(record.metadata_after, null, 2)}</pre>
+                    </Descriptions.Item>
+                  </Descriptions>
+                ),
+              }}
             />
-          ),
-        }}
-        expandable={{
-          expandedRowRender: (record) => (
-            <Descriptions bordered size="small" column={2} style={{ margin: 8 }}>
-              <Descriptions.Item label="Before JSON" span={2}>
-                <pre style={{ margin: 0, maxHeight: 120, overflow: 'auto', fontSize: 11 }}>
-                  {JSON.stringify(record.before, null, 2)}
-                </pre>
-              </Descriptions.Item>
-              <Descriptions.Item label="After JSON" span={2}>
-                <pre style={{ margin: 0, maxHeight: 120, overflow: 'auto', fontSize: 11 }}>
-                  {JSON.stringify(record.after, null, 2)}
-                </pre>
-              </Descriptions.Item>
-              <Descriptions.Item label="Metadata Before Stat" span={1}>
-                <pre style={{ margin: 0, maxHeight: 120, overflow: 'auto', fontSize: 11 }}>
-                  {JSON.stringify(record.metadata_before, null, 2)}
-                </pre>
-              </Descriptions.Item>
-              <Descriptions.Item label="Metadata After Stat" span={1}>
-                <pre style={{ margin: 0, maxHeight: 120, overflow: 'auto', fontSize: 11 }}>
-                  {JSON.stringify(record.metadata_after, null, 2)}
-                </pre>
-              </Descriptions.Item>
-            </Descriptions>
-          ),
-        }}
-        pagination={{
-          current: page,
-          pageSize,
-          total: data?.total || 0,
-          showSizeChanger: true,
-          pageSizeOptions: ['10', '20', '50'],
-          onChange: (p, ps) => {
-            setPage(p);
-            setPageSize(ps);
-          },
-        }}
-      />
+          )}
+
+          {records.length > 0 && (
+            <Pagination
+              className="nfc-embedded-pagination"
+              current={page}
+              pageSize={pageSize}
+              total={data?.total || 0}
+              showSizeChanger={!isMobile}
+              pageSizeOptions={['10', '20', '50']}
+              simple={isMobile}
+              onChange={(p, ps) => {
+                setPage(p);
+                setPageSize(ps);
+              }}
+            />
+          )}
+        </section>
+      </div>
     </Drawer>
   );
 };
