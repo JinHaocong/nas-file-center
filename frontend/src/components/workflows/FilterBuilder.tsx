@@ -164,11 +164,11 @@ export const FilterBuilder: React.FC<FilterBuilderProps> = ({
     const isStringList = leaf.operator === 'in' || leaf.operator === 'nin';
 
     return (
-      <Card size="small" style={{ background: '#ffffff', marginBottom: 8, borderRadius: 6 }}>
+      <Card size="small" className="nfc-filter-builder nfc-filter-leaf-card">
         <Space wrap align="center">
           <Select
             value="leaf"
-            style={{ width: 110 }}
+            className="nfc-filter-type-select"
             disabled={readOnly}
             onChange={handleTypeChange}
             options={[
@@ -181,7 +181,7 @@ export const FilterBuilder: React.FC<FilterBuilderProps> = ({
 
           <Select
             value={leaf.field}
-            style={{ width: 160 }}
+            className="nfc-filter-field-select"
             disabled={readOnly}
             onChange={handleFieldChange}
             options={FIELD_OPTIONS}
@@ -189,7 +189,7 @@ export const FilterBuilder: React.FC<FilterBuilderProps> = ({
 
           <Select
             value={leaf.operator}
-            style={{ width: 150 }}
+            className="nfc-filter-operator-select"
             disabled={readOnly}
             onChange={(op: FilterLeafOperator) => {
               if (readOnly) return;
@@ -228,7 +228,7 @@ export const FilterBuilder: React.FC<FilterBuilderProps> = ({
                 disabled={readOnly}
                 value={typeof leaf.value === 'number' ? leaf.value : 0}
                 min={0}
-                style={{ width: 140 }}
+                className="nfc-filter-value-control"
                 onChange={(num) => {
                   if (readOnly) return;
                   onChange({ ...leaf, value: Math.floor(Math.max(0, num ?? 0)) });
@@ -242,7 +242,7 @@ export const FilterBuilder: React.FC<FilterBuilderProps> = ({
                 mode="multiple"
                 disabled={readOnly}
                 value={Array.isArray(leaf.value) ? leaf.value : []}
-                style={{ minWidth: 180 }}
+                className="nfc-filter-value-control nfc-filter-value-wide"
                 placeholder="选择媒体类型"
                 onChange={(vals) => {
                   if (readOnly) return;
@@ -254,7 +254,7 @@ export const FilterBuilder: React.FC<FilterBuilderProps> = ({
               <Select
                 disabled={readOnly}
                 value={typeof leaf.value === 'string' ? leaf.value : 'image'}
-                style={{ width: 140 }}
+                className="nfc-filter-value-control"
                 onChange={(val) => {
                   if (readOnly) return;
                   onChange({ ...leaf, value: val });
@@ -268,7 +268,7 @@ export const FilterBuilder: React.FC<FilterBuilderProps> = ({
               disabled={readOnly}
               value={Array.isArray(leaf.value) ? leaf.value : []}
               placeholder="输入标签列表"
-              style={{ minWidth: 160 }}
+              className="nfc-filter-value-control nfc-filter-value-wide"
               onChange={(tags) => {
                 if (readOnly) return;
                 const normalized = leaf.field === 'extension'
@@ -282,7 +282,7 @@ export const FilterBuilder: React.FC<FilterBuilderProps> = ({
               disabled={readOnly}
               value={String(leaf.value ?? '')}
               placeholder="匹配文本"
-              style={{ width: 160 }}
+              className="nfc-filter-value-control"
               onChange={(e) => {
                 if (readOnly) return;
                 const val = e.target.value;
@@ -303,7 +303,7 @@ export const FilterBuilder: React.FC<FilterBuilderProps> = ({
                   onChange({ ...leaf, case_sensitive: checked });
                 }}
               />
-              <Text type="secondary" style={{ fontSize: 12 }}>区分大小写</Text>
+              <Text type="secondary" className="nfc-filter-case-label">区分大小写</Text>
             </Space>
           )}
 
@@ -328,19 +328,14 @@ export const FilterBuilder: React.FC<FilterBuilderProps> = ({
     return (
       <Card
         size="small"
-        style={{
-          background: depth % 2 === 0 ? '#f6ffed' : '#e6f7ff',
-          borderColor: andOr.op === 'and' ? '#b7eb8f' : '#91caff',
-          marginBottom: 8,
-          borderRadius: 6,
-        }}
+        className={`nfc-filter-builder nfc-filter-group-card is-${andOr.op} depth-${depth % 2}`}
       >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <div className="nfc-filter-group-heading">
           <Space>
             <Select
               value={andOr.op}
               disabled={readOnly}
-              style={{ width: 120 }}
+              className="nfc-filter-type-select"
               onChange={(val: any) => {
                 if (readOnly) return;
                 if (val === 'leaf' || val === 'not') {
@@ -356,7 +351,7 @@ export const FilterBuilder: React.FC<FilterBuilderProps> = ({
                 { label: '改为取反 (NOT)', value: 'not', disabled: !canNest },
               ]}
             />
-            <Text type="secondary" style={{ fontSize: 12 }}>
+            <Text type="secondary" className="nfc-filter-group-help">
               {andOr.op === 'and' ? '需同时满足所有子条件' : '只需满足任一子条件'}
             </Text>
           </Space>
@@ -398,7 +393,7 @@ export const FilterBuilder: React.FC<FilterBuilderProps> = ({
           )}
         </div>
 
-        <div style={{ paddingLeft: 12 }}>
+        <div className="nfc-filter-nested">
           {andOr.children.map((cond, idx) => (
             <FilterBuilder
               key={idx}
@@ -431,19 +426,14 @@ export const FilterBuilder: React.FC<FilterBuilderProps> = ({
   return (
     <Card
       size="small"
-      style={{
-        background: '#fff1f0',
-        borderColor: '#ffa39e',
-        marginBottom: 8,
-        borderRadius: 6,
-      }}
+      className="nfc-filter-builder nfc-filter-not-card"
     >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+      <div className="nfc-filter-group-heading">
         <Space>
           <Select
             value="not"
             disabled={readOnly}
-            style={{ width: 120 }}
+            className="nfc-filter-type-select"
             onChange={handleTypeChange}
             options={[
               { label: '取反 (NOT)', value: 'not' },
@@ -452,7 +442,7 @@ export const FilterBuilder: React.FC<FilterBuilderProps> = ({
               { label: '叶子条件', value: 'leaf' },
             ]}
           />
-          <Text type="secondary" style={{ fontSize: 12 }}>
+          <Text type="secondary" className="nfc-filter-group-help">
             对内部条件进行逻辑取反
           </Text>
         </Space>
@@ -467,7 +457,7 @@ export const FilterBuilder: React.FC<FilterBuilderProps> = ({
         )}
       </div>
 
-      <div style={{ paddingLeft: 12 }}>
+      <div className="nfc-filter-nested">
         <FilterBuilder
           value={notNode.child}
           depth={depth + 1}

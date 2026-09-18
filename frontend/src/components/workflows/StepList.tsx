@@ -83,8 +83,8 @@ export const StepList: React.FC<StepListProps> = ({ steps, mode, readOnly = fals
           onChange={(updated) => handleStepChange(idx, updated)} onMoveUp={() => handleMoveUp(idx)} onMoveDown={() => handleMoveDown(idx)} onDelete={() => handleDelete(idx)} />
       ))}
       {!readOnly && mode !== 'dedupe' && mode !== 'utility' && (
-        <div style={{ marginTop: 16, textAlign: 'center' }}>
-          <Dropdown menu={{ items: menuItems }} placement="bottom"><Button type="dashed" icon={<PlusOutlined />} size="large">添加执行步骤</Button></Dropdown>
+        <div className="nfc-step-add-surface">
+          <Dropdown menu={{ items: menuItems }} placement="bottom"><Button className="nfc-step-add-button" type="dashed" icon={<PlusOutlined />} size="large">添加执行步骤</Button></Dropdown>
         </div>
       )}
     </div>

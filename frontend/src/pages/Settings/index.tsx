@@ -286,7 +286,7 @@ export const SettingsPage: React.FC = () => {
     Modal.confirm({
       className: 'nfc-settings-confirm-modal',
       title: '确认执行审计日志保留清理？',
-      icon: <ExclamationCircleOutlined style={{ color: '#ff4d4f' }} />,
+      icon: <ExclamationCircleOutlined className="nfc-danger-icon" />,
       content: (
         <div>
           <p>
@@ -376,9 +376,9 @@ export const SettingsPage: React.FC = () => {
         <Space>
           {ua.toLowerCase().includes('mobile') ? <MobileOutlined /> : <DesktopOutlined />}
           <div>
-            <Text style={{ fontSize: 13 }}>{ua}</Text>
+            <Text className="nfc-session-user-agent">{ua}</Text>
             {record.is_current && (
-              <Tag color="green" style={{ marginLeft: 8 }}>
+              <Tag color="green" className="nfc-current-session-tag">
                 当前设备
               </Tag>
             )}

@@ -133,7 +133,7 @@ export const BulkRestoreModal: React.FC<Props> = ({
       className="nfc-overlay-modal nfc-quarantine-bulk-restore-modal"
       title={
         <Space>
-          <UndoOutlined style={{ color: '#1677ff' }} />
+          <UndoOutlined className="nfc-accent-icon" />
           <span>批量恢复 — 生成安全 Draft</span>
         </Space>
       }
@@ -169,7 +169,7 @@ export const BulkRestoreModal: React.FC<Props> = ({
         showIcon
         message={`已明确选择 ${entryIds.length} 个 active 条目`}
         description="此窗口只执行 Preview 与 Draft 生成，不会直接恢复文件。Draft 生成后仍必须经过 Plan 的 Freeze → Validate → Execute。"
-        style={{ marginBottom: 16 }}
+        className="nfc-overlay-alert"
       />
 
       {isSafeMode && (
@@ -178,11 +178,11 @@ export const BulkRestoreModal: React.FC<Props> = ({
           showIcon
           message="ALLOW_MUTATION=false"
           description="当前只读安全模式禁止生成可执行的批量恢复计划。"
-          style={{ marginBottom: 16 }}
+          className="nfc-overlay-alert"
         />
       )}
 
-      <Space direction="vertical" size={8} style={{ width: '100%', marginBottom: 16 }}>
+      <Space className="nfc-quarantine-policy-panel" direction="vertical" size={8}>
         <Text strong>冲突处理</Text>
         <Radio.Group
           value={policy}
@@ -197,13 +197,13 @@ export const BulkRestoreModal: React.FC<Props> = ({
       </Space>
 
       {!preview && (
-        <Paragraph type="secondary" style={{ marginBottom: 0 }}>
+        <Paragraph type="secondary" className="nfc-zero-margin">
           先运行 Preview。任何 blocked 条目都会阻止整批 Draft 生成，不会静默丢弃成员。
         </Paragraph>
       )}
 
       {preview && (
-        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+        <Space className="nfc-quarantine-preview-stack" direction="vertical" size={12}>
           <Space wrap>
             <Tag color="blue">Eligible {preview.eligible_count}</Tag>
             <Tag color={preview.blocked_count > 0 ? 'red' : 'green'}>Blocked {preview.blocked_count}</Tag>

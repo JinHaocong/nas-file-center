@@ -31,7 +31,7 @@ export const SingleChildWrapperCollapseStepEditor: React.FC<Props> = ({ step, on
       <div>
         <Text strong>已管理根目录</Text>
         <Select
-          style={{ width: '100%', marginTop: 6 }}
+          className="nfc-workflow-full-control nfc-workflow-field-spaced"
           loading={isLoading}
           disabled={readOnly}
           placeholder="请选择一个已管理的 Index Root"
@@ -43,7 +43,7 @@ export const SingleChildWrapperCollapseStepEditor: React.FC<Props> = ({ step, on
       <div>
         <Text strong>可选相对子路径</Text>
         <Input
-          style={{ marginTop: 6 }}
+          className="nfc-workflow-field-spaced"
           disabled={readOnly}
           status={invalidSubpath ? 'error' : undefined}
           placeholder="例如 media/incoming；留空表示整个管理根目录"

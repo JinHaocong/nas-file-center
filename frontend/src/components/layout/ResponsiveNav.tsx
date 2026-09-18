@@ -26,7 +26,6 @@ export const ResponsiveNav: React.FC<ResponsiveNavProps> = ({
         onClose={onMobileClose}
         closable={false}
         className="nfc-mobile-nav-drawer"
-        styles={{ body: { padding: 0 } }}
       >
         <Sidebar
           collapsed={false}

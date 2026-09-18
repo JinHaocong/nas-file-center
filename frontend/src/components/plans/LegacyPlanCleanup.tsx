@@ -46,9 +46,9 @@ export const LegacyPlanCleanup: React.FC = () => {
       type="warning"
       showIcon
       icon={<InfoCircleOutlined />}
-      style={{ marginBottom: 16, borderRadius: 8 }}
+      className="nfc-legacy-plan-cleanup"
       message={
-        <Space style={{ justifyContent: 'space-between', width: '100%' }}>
+        <Space className="nfc-legacy-plan-cleanup-heading">
           <Text strong>检测到旧版计划记录 ({summary.plan_count} 个)</Text>
           <Popconfirm
             title="确认清理旧版计划记录？"
@@ -71,7 +71,7 @@ export const LegacyPlanCleanup: React.FC = () => {
         </Space>
       }
       description={
-        <div style={{ marginTop: 4 }}>
+        <div className="nfc-legacy-plan-cleanup-description">
           {formatLegacyAlertDescription(summary)}
         </div>
       }

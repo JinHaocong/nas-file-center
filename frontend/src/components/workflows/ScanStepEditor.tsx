@@ -51,7 +51,7 @@ export const ScanStepEditor: React.FC<ScanStepEditorProps> = ({
                 label: `${r.root} (ID: ${r.id})`,
                 value: r.id,
               }))}
-              style={{ width: '100%' }}
+              className="nfc-workflow-full-control"
             />
           ) : (
             <Select
@@ -66,7 +66,7 @@ export const ScanStepEditor: React.FC<ScanStepEditorProps> = ({
                 value: r.id,
                 disabled: !step.root_ids?.includes(r.id) && (step.root_ids?.length ?? 0) >= 16,
               }))}
-              style={{ width: '100%' }}
+              className="nfc-workflow-full-control"
             />
           )}
         </Form.Item>

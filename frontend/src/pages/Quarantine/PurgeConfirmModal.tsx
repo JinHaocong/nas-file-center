@@ -84,8 +84,8 @@ export const PurgeConfirmModal: React.FC<Props> = ({
       className="nfc-overlay-modal nfc-quarantine-purge-modal"
       title={
         <Space>
-          <ExclamationCircleOutlined style={{ color: '#ff4d4f' }} />
-          <span style={{ color: '#ff4d4f' }}>永久清除文件 #{entry.id}（普通文件删除）</span>
+          <ExclamationCircleOutlined className="nfc-danger-icon" />
+          <span className="nfc-danger-heading">永久清除文件 #{entry.id}（普通文件删除）</span>
         </Space>
       }
       open={open}
@@ -107,7 +107,7 @@ export const PurgeConfirmModal: React.FC<Props> = ({
           description="只有系统管理员 (admin) 允许执行隔离文件的永久清除操作。"
           type="error"
           showIcon
-          style={{ marginBottom: 16 }}
+          className="nfc-overlay-alert"
         />
       )}
 
@@ -118,7 +118,7 @@ export const PurgeConfirmModal: React.FC<Props> = ({
           type="warning"
           showIcon
           icon={<LockOutlined />}
-          style={{ marginBottom: 16 }}
+          className="nfc-overlay-alert"
         />
       )}
 
@@ -129,7 +129,7 @@ export const PurgeConfirmModal: React.FC<Props> = ({
           type="warning"
           showIcon
           icon={<LockOutlined />}
-          style={{ marginBottom: 16 }}
+          className="nfc-overlay-alert"
         />
       )}
 
@@ -139,18 +139,18 @@ export const PurgeConfirmModal: React.FC<Props> = ({
           description="此操作使用普通文件删除（unlink）语义，只删除 NFC 拥有并经过身份核验的隔离区路径；不会覆盖文件内容，也不会扩大到同 inode 的外部 hard link。若仍有其他 hard link，底层数据仍会被那些路径引用。"
           type="error"
           showIcon
-          style={{ marginBottom: 16 }}
+          className="nfc-overlay-alert"
         />
       )}
 
-      <Descriptions bordered size="small" column={1} style={{ marginBottom: 16 }}>
+      <Descriptions bordered size="small" column={1} className="nfc-overlay-alert">
         <Descriptions.Item label="原始路径">
-          <Text code copyable style={{ wordBreak: 'break-all' }}>
+          <Text code copyable className="nfc-breakall">
             {entry.original_path}
           </Text>
         </Descriptions.Item>
         <Descriptions.Item label="隔离区路径">
-          <Text code copyable style={{ wordBreak: 'break-all' }}>
+          <Text code copyable className="nfc-breakall">
             {entry.quarantine_path}
           </Text>
         </Descriptions.Item>
@@ -162,7 +162,7 @@ export const PurgeConfirmModal: React.FC<Props> = ({
       </Descriptions>
 
       {purgeResult ? (
-        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+        <Space className="nfc-quarantine-preview-stack" direction="vertical" size={12}>
           <Alert
             type="success"
             showIcon
@@ -215,9 +215,9 @@ export const PurgeConfirmModal: React.FC<Props> = ({
           )}
         </Space>
       ) : (
-        <div style={{ marginTop: 16, background: '#fff2f0', padding: 16, borderRadius: 8, border: '1px solid #ffccc7' }}>
-          <Paragraph style={{ margin: 0, marginBottom: 8, fontWeight: 500, color: '#cf1322' }}>
-            安全防呆核验：如确需永久删除，请在下方文本框中输入大写的 <Text code strong style={{ color: '#cf1322' }}>DELETE</Text>：
+        <div className="nfc-destructive-confirm">
+          <Paragraph className="nfc-destructive-confirm-copy">
+            安全防呆核验：如确需永久删除，请在下方文本框中输入大写的 <Text code strong className="nfc-danger-text">DELETE</Text>：
           </Paragraph>
           <Input
             placeholder="请输入 DELETE"
@@ -225,10 +225,10 @@ export const PurgeConfirmModal: React.FC<Props> = ({
             onChange={(e) => setConfirmInput(e.target.value)}
             disabled={!canPurge || purgeMutation.isPending}
             status={confirmInput && !isConfirmed ? 'error' : undefined}
-            prefix={<DeleteOutlined style={{ color: '#ff4d4f' }} />}
+            prefix={<DeleteOutlined className="nfc-danger-icon" />}
           />
           {confirmInput && !isConfirmed && (
-            <Text type="danger" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
+            <Text type="danger" className="nfc-form-error-hint">
               必须严格输入全大写字母 &quot;DELETE&quot;
             </Text>
           )}

@@ -130,8 +130,8 @@ export const BulkPurgeModal: React.FC<Props> = ({
       className="nfc-overlay-modal nfc-quarantine-bulk-purge-modal"
       title={
         <Space>
-          <ExclamationCircleOutlined style={{ color: '#ff4d4f' }} />
-          <span style={{ color: '#cf1322' }}>批量永久删除 — 生成安全 Draft</span>
+          <ExclamationCircleOutlined className="nfc-danger-icon" />
+          <span className="nfc-danger-heading">批量永久删除 — 生成安全 Draft</span>
         </Space>
       }
       open={open}
@@ -168,7 +168,7 @@ export const BulkPurgeModal: React.FC<Props> = ({
           type="error"
           showIcon
           message="仅系统管理员允许批量永久删除"
-          style={{ marginBottom: 12 }}
+          className="nfc-overlay-alert"
         />
       )}
       {!allowMutation && (
@@ -177,7 +177,7 @@ export const BulkPurgeModal: React.FC<Props> = ({
           showIcon
           icon={<LockOutlined />}
           message="ALLOW_MUTATION=false"
-          style={{ marginBottom: 12 }}
+          className="nfc-overlay-alert"
         />
       )}
       {!allowDelete && (
@@ -186,7 +186,7 @@ export const BulkPurgeModal: React.FC<Props> = ({
           showIcon
           icon={<LockOutlined />}
           message="ALLOW_DELETE=false"
-          style={{ marginBottom: 12 }}
+          className="nfc-overlay-alert"
         />
       )}
 
@@ -195,7 +195,7 @@ export const BulkPurgeModal: React.FC<Props> = ({
         showIcon
         message={`不可逆操作：已明确选择 ${entryIds.length} 个 active 条目`}
         description="此窗口只生成当前 Preview digest 对应的 Draft。真正执行仍必须经过 Freeze → Validate → Execute。执行语义是普通文件删除（unlink）：只移除 NFC 拥有并已冻结的隔离区路径，不覆盖文件内容，也不承诺安全擦除。"
-        style={{ marginBottom: 16 }}
+        className="nfc-overlay-alert"
       />
 
       {!preview && (
@@ -205,7 +205,7 @@ export const BulkPurgeModal: React.FC<Props> = ({
       )}
 
       {preview && (
-        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+        <Space className="nfc-quarantine-preview-stack" direction="vertical" size={12}>
           <Space wrap>
             <Tag color="blue">Eligible {preview.eligible_count}</Tag>
             <Tag color={preview.blocked_count > 0 ? 'red' : 'green'}>Blocked {preview.blocked_count}</Tag>
@@ -231,8 +231,8 @@ export const BulkPurgeModal: React.FC<Props> = ({
           {preview.items
             .filter((item) => item.eligible && item.purge_semantics === 'unlink_v1')
             .map((item) => (
-              <div key={item.entry_id} style={{ border: '1px solid #d9d9d9', borderRadius: 8, padding: 12 }}>
-                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+              <div key={item.entry_id} className="nfc-quarantine-preview-card">
+                <Space className="nfc-full-width-stack" direction="vertical" size={8}>
                   <Text strong>#{item.entry_id} · 普通文件删除（unlink_v1）</Text>
                   {item.survivor_status === 'found' ? (
                     <Alert
@@ -282,10 +282,10 @@ export const BulkPurgeModal: React.FC<Props> = ({
             ))}
 
           {preview.blocked_count === 0 && (
-            <div style={{ background: '#fff2f0', border: '1px solid #ffccc7', borderRadius: 8, padding: 16 }}>
-              <Paragraph style={{ marginBottom: 8, color: '#cf1322', fontWeight: 500 }}>
+            <div className="nfc-destructive-confirm">
+              <Paragraph className="nfc-destructive-confirm-copy">
                 Preview 已冻结当前批次。hard-link survivor / 独立副本只是提示，不属于 mutation authority。若确认生成 Draft，请输入大写{' '}
-                <Text code strong style={{ color: '#cf1322' }}>DELETE</Text>：
+                <Text code strong className="nfc-danger-text">DELETE</Text>：
               </Paragraph>
               <Input
                 value={confirmInput}
@@ -293,10 +293,10 @@ export const BulkPurgeModal: React.FC<Props> = ({
                 placeholder="请输入 DELETE"
                 disabled={!canPurge || planLoading}
                 status={confirmInput && !isConfirmed ? 'error' : undefined}
-                prefix={<DeleteOutlined style={{ color: '#ff4d4f' }} />}
+                prefix={<DeleteOutlined className="nfc-danger-icon" />}
               />
               {confirmInput && !isConfirmed && (
-                <Text type="danger" style={{ display: 'block', marginTop: 4, fontSize: 12 }}>
+                <Text type="danger" className="nfc-form-error-hint">
                   必须严格输入全大写 DELETE
                 </Text>
               )}

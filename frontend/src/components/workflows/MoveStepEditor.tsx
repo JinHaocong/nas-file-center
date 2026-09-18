@@ -38,7 +38,7 @@ export const MoveStepEditor: React.FC<MoveStepEditorProps> = ({ step, onChange, 
             label: `${r.root} (ID: ${r.id})`,
             value: r.id,
           }))}
-          style={{ width: '100%' }}
+          className="nfc-workflow-full-control"
         />
       </Form.Item>
 

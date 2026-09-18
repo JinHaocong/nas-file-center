@@ -44,13 +44,9 @@ describe('v0.4.2 Taste redesign contract', () => {
     const css = read('src/index.css');
     assert.ok(sidebar.includes('nfc-sidebar-meta'));
     assert.ok(sidebar.includes('CONTROL PLANE'));
-    assert.ok(
-      header.includes('nfc-header-product-mark') || header.includes('nfc-header-brandline')
-    );
+    assert.ok(header.includes('nfc-header-workspace'));
     assert.ok(css.includes('.nfc-sidebar-meta'));
-    assert.ok(
-      css.includes('.nfc-header-product-mark') || css.includes('.nfc-header-brandline')
-    );
+    assert.ok(css.includes('.nfc-header-workspace'));
   });
 
   test('dashboard content removes all-caps AI-style eyebrow treatment', () => {

@@ -122,7 +122,7 @@ export const TaskActionBar: React.FC<Props> = ({ task, onViewTask }) => {
       : '确认取消该任务？';
 
   return (
-    <Space wrap size={[12, 12]}>
+    <Space className="nfc-task-action-bar" wrap size={[8, 8]}>
       {/* 1. Pause Action */}
       <Tooltip title={!pauseAvail.enabled ? pauseAvail.reason : undefined}>
         <span>
@@ -157,7 +157,7 @@ export const TaskActionBar: React.FC<Props> = ({ task, onViewTask }) => {
           <Popconfirm
             title={`确认取消任务 #${task.id}？`}
             description={
-              <div style={{ maxWidth: 300, whiteSpace: 'pre-wrap' }}>
+              <div className="nfc-popconfirm-copy">
                 {cancelDescription}
               </div>
             }
@@ -185,7 +185,7 @@ export const TaskActionBar: React.FC<Props> = ({ task, onViewTask }) => {
           <Popconfirm
             title={`确认重试任务 #${task.id}？`}
             description={
-              <div style={{ maxWidth: 300, whiteSpace: 'pre-wrap' }}>
+              <div className="nfc-popconfirm-copy">
                 原失败任务会保留，系统将创建一个新的排队任务。
               </div>
             }

@@ -48,10 +48,9 @@ export const Header: React.FC<Props> = ({
       key: 'info',
       disabled: true,
       label: (
-        <div style={{ padding: '4px 0' }}>
+        <div className="nfc-user-menu-summary">
           <Text strong>{user?.username}</Text>
-          <br />
-          <Text type="secondary" style={{ fontSize: 12 }}>角色: {user?.role || '管理员'}</Text>
+          <span className="nfc-user-menu-role">角色: {user?.role || '管理员'}</span>
         </div>
       ),
     },
@@ -80,10 +79,9 @@ export const Header: React.FC<Props> = ({
             onClick={handleNavigationToggle}
           />
 
-          <div className="nfc-header-brandline">
-            <span className="nfc-header-brand-dot" aria-hidden="true" />
-            <span className="nfc-header-brand-name">NAS File Center</span>
-            <span className="nfc-header-brand-context">Control plane</span>
+          <div className="nfc-header-workspace" aria-label="当前工作区">
+            <span className="nfc-header-workspace-kicker">CONTROL PLANE</span>
+            <span className="nfc-header-workspace-name">Local operations</span>
           </div>
 
           <div className="nfc-header-status" aria-label="系统安全与任务状态">

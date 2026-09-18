@@ -72,14 +72,12 @@ export const DedupeExplainDrawer: React.FC<Props> = ({
 
   return (
     <Drawer
-        rootClassName="nfc-overlay-drawer"
+        rootClassName="nfc-overlay-drawer nfc-dedupe-explain-drawer"
       title={
-        <Space>
-          <span>去重决策分析 (Decision Explain)</span>
-          <Tag color={decisionCls.color} style={{ fontWeight: 600 }}>
+        <div className="nfc-drawer-title"><span className="nfc-drawer-title-kicker">Decision explain</span><div className="nfc-drawer-title-row"><span>去重决策分析</span>
+          <Tag color={decisionCls.color} className="nfc-decision-tag">
             {decisionCls.label}
-          </Tag>
-        </Space>
+          </Tag></div></div>
       }
       placement="right"
       width={680}
@@ -87,7 +85,7 @@ export const DedupeExplainDrawer: React.FC<Props> = ({
       onClose={onClose}
       destroyOnClose
     >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div className="nfc-overlay-stack nfc-dedupe-explain-stack">
         {member.incomplete && (
           <Alert
             type="warning"
@@ -97,16 +95,16 @@ export const DedupeExplainDrawer: React.FC<Props> = ({
           />
         )}
 
-        <Card size="small" title="文件基本信息" bordered={false} style={{ background: '#fafafa' }}>
-          <Descriptions column={1} size="small" bordered>
+        <Card size="small" title="文件基本信息" bordered={false} className="nfc-dedupe-surface-card">
+          <Descriptions className="nfc-detail-descriptions" column={1} size="small">
             <Descriptions.Item label="绝对路径">
-              <Text copyable strong style={{ wordBreak: 'break-all' }}>
+              <Text copyable strong className="nfc-breakall">
                 {member.absolute_path}
               </Text>
             </Descriptions.Item>
             {member.relative_path && (
               <Descriptions.Item label="相对路径">
-                <Text style={{ wordBreak: 'break-all' }}>{member.relative_path}</Text>
+                <Text className="nfc-breakall">{member.relative_path}</Text>
               </Descriptions.Item>
             )}
             <Descriptions.Item label="所属扫描根">
@@ -121,8 +119,8 @@ export const DedupeExplainDrawer: React.FC<Props> = ({
           </Descriptions>
         </Card>
 
-        <Card size="small" title="重复组级别摘要 (Group Summary)" bordered={false} style={{ background: '#fafafa' }}>
-          <Descriptions column={1} size="small" bordered>
+        <Card size="small" title="重复组级别摘要 (Group Summary)" bordered={false} className="nfc-dedupe-surface-card">
+          <Descriptions className="nfc-detail-descriptions" column={1} size="small">
             {member.group_status && (
               <Descriptions.Item label="组状态 (group_status)">
                 <Tag color={member.group_status === 'actionable' ? 'green' : 'orange'}>{member.group_status}</Tag>
@@ -135,11 +133,11 @@ export const DedupeExplainDrawer: React.FC<Props> = ({
             )}
             {member.group_recommended_keep_path && (
               <Descriptions.Item label="组推荐保留路径 (group_recommended_keep_path)">
-                <Text copyable strong style={{ wordBreak: 'break-all' }}>{member.group_recommended_keep_path}</Text>
+                <Text copyable strong className="nfc-breakall">{member.group_recommended_keep_path}</Text>
               </Descriptions.Item>
             )}
             <Descriptions.Item label="组可释放容量 (group_reclaimable_bytes)">
-              <Text strong style={{ color: '#52c41a' }}>{formatOptionalFileSize(member.group_reclaimable_bytes)}</Text>
+              <Text strong className="nfc-success-text">{formatOptionalFileSize(member.group_reclaimable_bytes)}</Text>
             </Descriptions.Item>
             {member.group_selection_reason && (
               <Descriptions.Item label="组选择原因 (group_selection_reason)">
@@ -149,11 +147,11 @@ export const DedupeExplainDrawer: React.FC<Props> = ({
           </Descriptions>
         </Card>
 
-        <Card size="small" title="决策与资格判定" bordered={false} style={{ background: '#fafafa' }}>
-          <Descriptions column={1} size="small" bordered>
+        <Card size="small" title="决策与资格判定" bordered={false} className="nfc-dedupe-surface-card">
+          <Descriptions className="nfc-detail-descriptions" column={1} size="small">
             <Descriptions.Item label="最终决策 (Decision)">
               <Space>
-                <Tag color={decisionCls.color} style={{ fontWeight: 600 }}>{decisionCls.label}</Tag>
+                <Tag color={decisionCls.color} className="nfc-decision-tag">{decisionCls.label}</Tag>
                 {member.recommended_keep && <Tag color="green">推荐保留项</Tag>}
                 {member.is_top_candidate && <Tag color="blue">最高候选者</Tag>}
               </Space>
@@ -173,7 +171,7 @@ export const DedupeExplainDrawer: React.FC<Props> = ({
               <Text>{member.selection_reason || member.group_selection_reason || '-'}</Text>
             </Descriptions.Item>
             <Descriptions.Item label="总评分 (Total Score)">
-              <Text strong style={{ fontSize: 16, color: '#1890ff' }}>
+              <Text strong className="nfc-dedupe-score-value">
                 {member.total_score !== undefined ? member.total_score.toLocaleString() : '-'}
               </Text>
             </Descriptions.Item>
@@ -194,13 +192,13 @@ export const DedupeExplainDrawer: React.FC<Props> = ({
           <Card
             size="small"
             title={
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div className="nfc-dedupe-config-heading">
                 <span>各因子打分明细 (Factor Contributions)</span>
-                <Text type="secondary" style={{ fontSize: 12 }}>加权评分层</Text>
+                <Text type="secondary" className="nfc-table-meta">加权评分层</Text>
               </div>
             }
             bordered={false}
-            style={{ background: '#fafafa' }}
+            className="nfc-dedupe-surface-card"
           >
             {factorContributions.length === 0 ? (
               <Alert type="info" message="当前无单独计分因子贡献项。" />
@@ -213,7 +211,7 @@ export const DedupeExplainDrawer: React.FC<Props> = ({
                 columns={[
                   { title: '因子名称', dataIndex: 'factor', key: 'factor', render: (f: string) => <Tag color="geekblue">{f}</Tag> },
                   { title: '配置权重', dataIndex: 'configured_weight', key: 'configured_weight', align: 'right', render: (w: number) => <Text>{w}</Text> },
-                  { title: '实际贡献分', dataIndex: 'actual_contribution', key: 'actual_contribution', align: 'right', render: (c: number) => <Text strong style={{ color: c > 0 ? '#52c41a' : '#8c8c8c' }}>+{c.toLocaleString()}</Text> },
+                  { title: '实际贡献分', dataIndex: 'actual_contribution', key: 'actual_contribution', align: 'right', render: (c: number) => <Text strong className={c > 0 ? 'nfc-success-text' : 'nfc-table-muted'}>+{c.toLocaleString()}</Text> },
                   { title: '说明 / 命中规则', dataIndex: 'reason', key: 'reason', render: (r?: string) => <Text type="secondary">{r || '-'}</Text> },
                 ]}
               />
@@ -226,21 +224,21 @@ export const DedupeExplainDrawer: React.FC<Props> = ({
             size="small"
             title={
               <Space>
-                <CompassOutlined style={{ color: '#fa8c16' }} />
+                <CompassOutlined className="nfc-warning-text" />
                 <span>容量平衡器分析 (Capacity Balancer)</span>
               </Space>
             }
             bordered={false}
-            style={{ background: '#fffbe6', border: '1px solid #ffe58f' }}
+            className="nfc-dedupe-surface-card nfc-dedupe-balancer-card"
           >
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div className="nfc-dedupe-balancer-stack">
               <Alert
                 type="warning"
                 showIcon
                 message={balanceInfo.lca ? '递归目录平衡器属于选择仲裁层，Recursive Last-File Protection 强制连续启用。' : '容量平衡器属于选择仲裁层，独立于因子权重计分之外。'}
-                style={{ marginBottom: 8 }}
+                className="nfc-overlay-alert"
               />
-              <Descriptions column={1} size="small" bordered style={{ background: '#fff' }}>
+              <Descriptions className="nfc-detail-descriptions" column={1} size="small">
                 {balanceInfo.balance_source && (
                   <Descriptions.Item label="平衡来源 (balance_source)"><Tag>{balanceInfo.balance_source}</Tag></Descriptions.Item>
                 )}
@@ -277,22 +275,22 @@ export const DedupeExplainDrawer: React.FC<Props> = ({
         )}
 
         {siblings.length > 0 && (
-          <Card size="small" title={`同组其他副本成员 (${siblings.length} 个)`} bordered={false} style={{ background: '#fafafa' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <Card size="small" title={`同组其他副本成员 (${siblings.length} 个)`} bordered={false} className="nfc-dedupe-surface-card">
+            <div className="nfc-dedupe-sibling-list">
               {siblings.map((sib, idx) => {
                 const sCls = classifyMemberDecision(sib.member_decision, sib.eligible_as_keep);
                 return (
-                  <div key={idx} style={{ background: '#fff', padding: 10, borderRadius: 6, border: '1px solid #f0f0f0' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <div key={idx} className="nfc-dedupe-sibling-card">
+                    <div className="nfc-dedupe-sibling-heading">
                       <Tag color={sCls.color}>{sCls.label}</Tag>
-                      <Text strong style={{ color: sib.total_score !== undefined && sib.total_score > 0 ? '#1890ff' : '#595959' }}>
+                      <Text strong className={sib.total_score !== undefined && sib.total_score > 0 ? 'nfc-accent-text' : 'nfc-table-muted'}>
                         评分: {sib.total_score !== undefined ? sib.total_score : '-'}
                       </Text>
                     </div>
-                    <Text ellipsis style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>{sib.absolute_path}</Text>
-                    <div style={{ fontSize: 12, color: '#8c8c8c' }}>
+                    <Text ellipsis className="nfc-dedupe-sibling-path">{sib.absolute_path}</Text>
+                    <div className="nfc-dedupe-sibling-meta">
                       <span>{formatScanRootLabel(sib.scan_root_index, sib.scan_root_path)}</span>
-                      {sib.selection_reason && <><span style={{ margin: '0 6px' }}>|</span><span>{sib.selection_reason}</span></>}
+                      {sib.selection_reason && <><span className="nfc-inline-separator">|</span><span>{sib.selection_reason}</span></>}
                     </div>
                   </div>
                 );
@@ -301,10 +299,10 @@ export const DedupeExplainDrawer: React.FC<Props> = ({
           </Card>
         )}
 
-        <Divider style={{ margin: '8px 0' }} />
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <InfoCircleOutlined style={{ color: '#8c8c8c' }} />
-          <Text type="secondary" style={{ fontSize: 12 }}>
+        <Divider className="nfc-compact-divider" />
+        <div className="nfc-dedupe-explain-footnote">
+          <InfoCircleOutlined className="nfc-table-muted" />
+          <Text type="secondary" className="nfc-table-meta">
             所有打分与决策数据均由后端去重引擎确定性产出，前端不进行任何打分计算。
           </Text>
         </div>

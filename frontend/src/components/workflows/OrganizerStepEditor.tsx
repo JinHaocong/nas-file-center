@@ -89,21 +89,13 @@ export const OrganizerStepEditor: React.FC<OrganizerStepEditorProps> = ({ step, 
   };
 
   return (
-    <div>
+    <div className="nfc-organizer-step-editor">
       {!readOnly && (
-        <div
-          style={{
-            marginBottom: 16,
-            padding: 12,
-            background: '#f6ffed',
-            border: '1px solid #b7eb8f',
-            borderRadius: 8,
-          }}
-        >
-          <Space direction="vertical" style={{ width: '100%' }}>
-            <Space align="center" style={{ width: '100%', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+        <div className="nfc-organizer-step-import">
+          <Space className="nfc-organizer-step-import-stack" direction="vertical">
+            <Space className="nfc-organizer-step-import-row" align="center">
               <Space>
-                <ImportOutlined style={{ color: '#52c41a' }} />
+                <ImportOutlined className="nfc-success-text" />
                 <Text strong>从现有整理方案导入配置 (Import from Profile)</Text>
               </Space>
               <Select
@@ -118,7 +110,7 @@ export const OrganizerStepEditor: React.FC<OrganizerStepEditorProps> = ({ step, 
                 }))}
               />
             </Space>
-            <Text type="secondary" style={{ fontSize: 12 }}>
+            <Text type="secondary" className="nfc-form-safety-note">
               说明：导入操作将把目标方案的配置复制为独立的不可变快照，后续原方案的修改不会影响本工作流。
             </Text>
           </Space>
@@ -126,6 +118,7 @@ export const OrganizerStepEditor: React.FC<OrganizerStepEditorProps> = ({ step, 
       )}
 
       <Form
+        className="nfc-workflow-step-form nfc-organizer-step-form"
         form={form}
         layout="vertical"
         disabled={readOnly}
