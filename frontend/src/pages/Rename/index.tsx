@@ -160,7 +160,7 @@ export const RenamePage: React.FC = () => {
       <DataPanel
         title="重命名规则"
         description="Preview 只计算目标路径与冲突；不会直接修改任何文件名。"
-        className="nfc-complex-form-panel nfc-file-tool-form"
+        className="nfc-complex-form-panel nfc-file-tool-form nfc-tool-workbench"
       >
         <Form
           form={form}
