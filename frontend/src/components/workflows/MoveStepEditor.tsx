@@ -23,7 +23,7 @@ export const MoveStepEditor: React.FC<MoveStepEditorProps> = ({ step, onChange, 
   const roots: IndexRoot[] = indexesData || [];
 
   return (
-    <Form layout="vertical" disabled={readOnly}>
+    <Form className="nfc-workflow-step-form" layout="vertical" disabled={readOnly}>
       <Form.Item
         label="目标根目录 (destination_root_id)"
         required
