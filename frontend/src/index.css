@@ -6536,3 +6536,225 @@ body,
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+
+/* Workflow composer detail system */
+.nfc-workflow-step-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.nfc-workflow-step-card.ant-card {
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--nfc-shell-hairline);
+  border-radius: 16px;
+  background: var(--nfc-surface-1);
+  box-shadow: none;
+}
+
+.nfc-workflow-step-card .ant-card-head {
+  min-height: 62px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--nfc-shell-hairline);
+  background: color-mix(in srgb, var(--nfc-surface-2) 40%, transparent);
+}
+
+.nfc-workflow-step-card.is-collapsed .ant-card-head {
+  border-bottom: 0;
+}
+
+.nfc-workflow-step-card .ant-card-head-title {
+  min-width: 0;
+  padding: 10px 0;
+}
+
+.nfc-workflow-step-card .ant-card-extra {
+  padding: 9px 0;
+}
+
+.nfc-workflow-step-card .ant-card-body {
+  padding: 0;
+}
+
+.nfc-workflow-step-heading {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nfc-step-toggle.ant-btn {
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  padding: 0;
+}
+
+.nfc-step-index {
+  flex: 0 0 auto;
+  color: var(--nfc-text-subtle);
+  font-family: var(--nfc-font-mono);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+}
+
+.nfc-step-heading-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.nfc-step-title-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.nfc-step-title-row strong {
+  overflow: hidden;
+  color: var(--nfc-text);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nfc-step-summary {
+  max-width: 560px;
+  overflow: hidden;
+  color: var(--nfc-text-subtle);
+  font-size: 10px;
+  font-weight: 450;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nfc-step-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.nfc-step-actions .ant-btn {
+  min-width: 30px;
+  min-height: 30px;
+  border-radius: 8px;
+}
+
+.nfc-workflow-step-editor {
+  padding: 16px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--nfc-accent-soft) 12%, transparent),
+      transparent 120px
+    ),
+    var(--nfc-surface-1);
+}
+
+.nfc-workflow-step-form,
+.nfc-workflow-step-editor-stack {
+  width: 100%;
+}
+
+.nfc-workflow-step-editor-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.nfc-workflow-step-form .ant-form-item:last-child {
+  margin-bottom: 0;
+}
+
+.nfc-workflow-step-form .ant-form-item-label > label,
+.nfc-step-editor-note {
+  color: var(--nfc-text-muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.nfc-step-editor-note {
+  margin-bottom: 8px;
+  line-height: 1.55;
+}
+
+.nfc-step-empty {
+  padding: 26px 12px;
+  border: 1px dashed var(--nfc-shell-hairline);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--nfc-surface-2) 30%, transparent);
+}
+
+.nfc-step-add-surface {
+  margin-top: 2px;
+  padding: 12px;
+  display: flex;
+  justify-content: center;
+  border: 1px dashed color-mix(in srgb, var(--nfc-accent) 18%, var(--nfc-hairline));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--nfc-accent-soft) 18%, transparent);
+}
+
+.nfc-step-add-button.ant-btn {
+  min-width: 180px;
+  border-radius: 10px;
+}
+
+@media (max-width: 767px) {
+  .nfc-workflow-step-card.ant-card {
+    border-radius: 14px;
+  }
+
+  .nfc-workflow-step-card .ant-card-head {
+    min-height: 58px;
+    padding: 0 8px;
+  }
+
+  .nfc-workflow-step-heading {
+    gap: 6px;
+  }
+
+  .nfc-step-index {
+    display: none;
+  }
+
+  .nfc-step-title-row {
+    gap: 5px;
+  }
+
+  .nfc-step-title-row strong {
+    font-size: 11px;
+  }
+
+  .nfc-step-summary {
+    max-width: 50vw;
+    font-size: 9px;
+  }
+
+  .nfc-step-actions {
+    gap: 0;
+  }
+
+  .nfc-step-actions .ant-btn {
+    min-width: 36px;
+    min-height: 36px;
+  }
+
+  .nfc-workflow-step-editor {
+    padding: 12px;
+  }
+
+  .nfc-workflow-step-form .ant-form-item {
+    margin-bottom: 14px;
+  }
+
+  .nfc-step-add-button.ant-btn {
+    width: 100%;
+    min-width: 0;
+  }
+}
