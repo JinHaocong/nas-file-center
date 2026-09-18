@@ -4266,3 +4266,246 @@ body {
     box-shadow: none;
   }
 }
+
+
+/* v0.4.2 Console Quality Gate */
+:root {
+  --nfc-console-row-height: 46px;
+  --nfc-console-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --nfc-console-ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --nfc-console-ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --nfc-sidebar-canvas: #121715;
+  --nfc-sidebar-surface: #171d1a;
+  --nfc-sidebar-hairline: #28312d;
+  --nfc-sidebar-text: #a9b4ae;
+  --nfc-sidebar-text-strong: #f1f6f3;
+}
+
+[data-theme='dark'] {
+  --nfc-sidebar-canvas: #0d110f;
+  --nfc-sidebar-surface: #131815;
+  --nfc-sidebar-hairline: #242c28;
+  --nfc-sidebar-text: #9eaaa4;
+  --nfc-sidebar-text-strong: #eef5f1;
+}
+
+/* Console chrome stays crisp: no glass layer over operational status. */
+.nfc-header.nfc-header {
+  background: var(--nfc-surface-1);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: 0 1px 0 var(--nfc-panel-separator);
+}
+
+.nfc-header-product-mark {
+  border-left-color: var(--nfc-panel-separator);
+}
+
+.nfc-header-status .ant-tag {
+  background: var(--nfc-surface-1);
+}
+
+/* Navigation carries product identity; the working canvas remains neutral. */
+.nfc-sidebar,
+.nfc-mobile-sidebar {
+  background: var(--nfc-sidebar-canvas) !important;
+  border-color: var(--nfc-sidebar-hairline) !important;
+  color: var(--nfc-sidebar-text);
+}
+
+.nfc-mobile-nav-drawer .ant-drawer-content,
+.nfc-mobile-nav-drawer .ant-drawer-body {
+  background: var(--nfc-sidebar-canvas) !important;
+}
+
+.nfc-sidebar .nfc-brand,
+.nfc-mobile-sidebar .nfc-brand {
+  border-bottom-color: var(--nfc-sidebar-hairline);
+}
+
+.nfc-sidebar .nfc-brand:hover,
+.nfc-mobile-sidebar .nfc-brand:hover {
+  background: var(--nfc-sidebar-surface);
+}
+
+.nfc-sidebar .nfc-brand-title,
+.nfc-mobile-sidebar .nfc-brand-title {
+  color: var(--nfc-sidebar-text-strong);
+}
+
+.nfc-sidebar .nfc-sidebar-meta,
+.nfc-mobile-sidebar .nfc-sidebar-meta,
+.nfc-sidebar .nfc-nav-group-label,
+.nfc-mobile-sidebar .nfc-nav-group-label {
+  color: color-mix(in srgb, var(--nfc-sidebar-text) 72%, transparent);
+}
+
+.nfc-sidebar .nfc-brand-mark,
+.nfc-mobile-sidebar .nfc-brand-mark {
+  background: color-mix(in srgb, var(--nfc-accent) 16%, var(--nfc-sidebar-surface));
+  border-color: color-mix(in srgb, var(--nfc-accent) 24%, var(--nfc-sidebar-hairline));
+  color: var(--nfc-accent);
+}
+
+.nfc-sidebar-menu {
+  background: transparent !important;
+}
+
+.nfc-sidebar-menu .ant-menu-item,
+.nfc-sidebar-menu .ant-menu-submenu-title {
+  color: var(--nfc-sidebar-text) !important;
+}
+
+.nfc-sidebar-menu .ant-menu-item .anticon,
+.nfc-sidebar-menu .ant-menu-submenu-title .anticon {
+  color: color-mix(in srgb, var(--nfc-sidebar-text) 82%, transparent);
+}
+
+.nfc-sidebar-menu .ant-menu-item:hover,
+.nfc-sidebar-menu .ant-menu-submenu-title:hover {
+  background: var(--nfc-sidebar-surface) !important;
+  color: var(--nfc-sidebar-text-strong) !important;
+}
+
+.nfc-sidebar-menu .ant-menu-item-selected {
+  background: color-mix(in srgb, var(--nfc-accent) 14%, var(--nfc-sidebar-surface)) !important;
+  color: var(--nfc-sidebar-text-strong) !important;
+}
+
+.nfc-sidebar-menu .ant-menu-item-selected .anticon {
+  color: var(--nfc-accent) !important;
+}
+
+.nfc-sidebar-menu .ant-menu-item-selected::before {
+  background: var(--nfc-accent);
+  box-shadow: none;
+}
+
+/* Dense console pages use one page entrance only; nested lists stay immediately scannable. */
+.nfc-page-header-copy > *,
+.nfc-metric-grid .nfc-metric-card,
+.nfc-dashboard-layout > *,
+.nfc-mobile-record-list > * {
+  animation: none;
+}
+
+/* Complete interaction states for the shared Ant infrastructure. */
+.ant-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--nfc-control-ring) !important;
+}
+
+.ant-btn:disabled {
+  background: var(--nfc-surface-2) !important;
+  border-color: var(--nfc-hairline) !important;
+  color: var(--nfc-text-subtle) !important;
+  opacity: 0.68;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.ant-btn:not(:disabled):hover {
+  transition-timing-function: var(--nfc-console-ease-out);
+}
+
+.ant-btn:not(:disabled):active {
+  transform: scale(0.98);
+}
+
+.ant-input:focus-visible,
+.ant-input-affix-wrapper:focus-within,
+.ant-input-number:focus-within,
+.ant-picker:focus-within,
+.ant-select-focused .ant-select-selector {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--nfc-control-ring) !important;
+}
+
+.ant-input:disabled,
+.ant-input-affix-wrapper-disabled,
+.ant-input-number-disabled,
+.ant-picker-disabled {
+  background: var(--nfc-surface-2) !important;
+  border-color: var(--nfc-hairline) !important;
+  color: var(--nfc-text-subtle) !important;
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.ant-select-disabled .ant-select-selector {
+  background: var(--nfc-surface-2) !important;
+  border-color: var(--nfc-hairline) !important;
+  color: var(--nfc-text-subtle) !important;
+  cursor: not-allowed !important;
+  opacity: 0.72;
+}
+
+.ant-switch:focus-visible,
+.ant-checkbox-input:focus-visible + .ant-checkbox-inner {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--nfc-control-ring) !important;
+}
+
+.ant-switch-disabled,
+.ant-checkbox-wrapper-disabled {
+  opacity: 0.62;
+}
+
+/* Scan-friendly operational table rhythm. */
+.nfc-data-panel .ant-table-tbody > tr {
+  height: var(--nfc-console-row-height);
+}
+
+.nfc-data-panel .ant-table-tbody > tr > td {
+  vertical-align: middle;
+  font-variant-numeric: tabular-nums;
+}
+
+.nfc-data-panel .ant-table-thead > tr {
+  height: 40px;
+}
+
+.nfc-data-panel .ant-table-thead > tr > th {
+  vertical-align: middle;
+}
+
+.nfc-mono {
+  font-feature-settings: "tnum" 1, "zero" 1;
+}
+
+/* Shared operational surfaces use separators and spacing before elevation. */
+.nfc-filter-bar,
+.nfc-action-bar,
+.nfc-responsive-descriptions {
+  border-color: var(--nfc-panel-separator);
+}
+
+.nfc-row-actions .ant-btn {
+  min-height: 32px;
+}
+
+@media (max-width: 767px) {
+  .nfc-sidebar,
+  .nfc-mobile-sidebar {
+    --nfc-sidebar-text: #b5c0ba;
+  }
+
+  .nfc-page-content > * {
+    animation-duration: 180ms;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nfc-page-content > * {
+    animation: none !important;
+  }
+
+  .ant-btn,
+  .ant-input,
+  .ant-input-affix-wrapper,
+  .ant-input-number,
+  .ant-picker,
+  .ant-select-selector {
+    transition: none !important;
+  }
+}
