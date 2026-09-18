@@ -94,14 +94,14 @@ export const AuditPage: React.FC = () => {
         />
       </DataPanel>
 
-      <Modal title={`审计事件详情 #${selectedEvent?.id}`} open={!!selectedEvent} onCancel={() => setSelectedEvent(null)} footer={<Button onClick={() => setSelectedEvent(null)}>关闭</Button>} width={680}>
+      <Modal className="nfc-overlay-modal nfc-audit-detail-modal" title={`审计事件详情 #${selectedEvent?.id}`} open={!!selectedEvent} onCancel={() => setSelectedEvent(null)} footer={<Button onClick={() => setSelectedEvent(null)}>关闭</Button>} width={680}>
         {selectedEvent && (
           <div className="nfc-audit-detail">
             <div><span>操作类型</span><strong className="nfc-operation-badge">{selectedEvent.operation}</strong></div>
             <div><span>执行时间</span><strong>{formatDateTime(selectedEvent.timestamp)}</strong></div>
             <div><span>执行结果</span><StatusBadge status={isSuccessResult(selectedEvent.result) ? 'completed' : 'failed'} label={selectedEvent.result} /></div>
             <div><span>涉及路径</span><CodePath value={selectedEvent.path} /></div>
-            <div className="nfc-audit-json"><span>详细元数据 JSON</span><pre>{JSON.stringify(selectedEvent.details, null, 2)}</pre></div>
+            <div className="nfc-audit-json"><span>详细元数据 JSON</span><pre className="nfc-code-block">{JSON.stringify(selectedEvent.details, null, 2)}</pre></div>
           </div>
         )}
       </Modal>
