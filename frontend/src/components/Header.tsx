@@ -3,6 +3,7 @@ import { Layout, Button, Dropdown, Space, Avatar, Typography, MenuProps } from '
 import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
+  MenuOutlined,
   UserOutlined,
   LogoutOutlined,
   KeyOutlined,
@@ -22,9 +23,16 @@ const { Text } = Typography;
 interface Props {
   collapsed: boolean;
   onToggle: () => void;
+  isMobile?: boolean;
+  onOpenNavigation?: () => void;
 }
 
-export const Header: React.FC<Props> = ({ collapsed, onToggle }) => {
+export const Header: React.FC<Props> = ({
+  collapsed,
+  onToggle,
+  isMobile = false,
+  onOpenNavigation,
+}) => {
   const { user, logout } = useAuth();
   const { mode, setMode } = useTheme();
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
@@ -80,47 +88,61 @@ export const Header: React.FC<Props> = ({ collapsed, onToggle }) => {
     },
   ];
 
+  const handleNavigationToggle = () => {
+    if (isMobile) {
+      onOpenNavigation?.();
+      return;
+    }
+    onToggle();
+  };
+
   return (
     <>
-      <AntHeader
-        style={{
-          padding: '0 20px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          position: 'sticky',
-          top: 0,
-          zIndex: 10,
-          borderBottom: '1px solid rgba(0, 0, 0, 0.06)',
-        }}
-      >
-        <Space size="middle">
+      <AntHeader className="nfc-header">
+        <div className="nfc-header-left">
           <Button
             type="text"
-            icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-            onClick={onToggle}
-            style={{ fontSize: 16 }}
+            className="nfc-touch-button"
+            aria-label={isMobile ? '打开导航菜单' : collapsed ? '展开侧边导航' : '收起侧边导航'}
+            icon={
+              isMobile ? (
+                <MenuOutlined />
+              ) : collapsed ? (
+                <MenuUnfoldOutlined />
+              ) : (
+                <MenuFoldOutlined />
+              )
+            }
+            onClick={handleNavigationToggle}
           />
-          <SafeModeBadge />
-          <WorkerStatusBadge />
-        </Space>
 
-        <Space size="middle">
+          <div className="nfc-header-status" aria-label="系统安全与任务状态">
+            <SafeModeBadge />
+            <WorkerStatusBadge />
+          </div>
+        </div>
+
+        <div className="nfc-header-actions">
           <Dropdown menu={{ items: themeMenuItems, selectedKeys: [mode] }} trigger={['click']}>
-            <Button type="text" icon={mode === 'dark' ? <MoonOutlined /> : mode === 'light' ? <SunOutlined /> : <DesktopOutlined />}>
-              <span style={{ marginLeft: 4, textTransform: 'capitalize' }}>{mode}</span>
+            <Button
+              type="text"
+              className="nfc-touch-button"
+              aria-label="切换界面主题"
+              icon={mode === 'dark' ? <MoonOutlined /> : mode === 'light' ? <SunOutlined /> : <DesktopOutlined />}
+            >
+              {!isMobile && <span className="nfc-header-action-label">{mode}</span>}
             </Button>
           </Dropdown>
 
           <Dropdown menu={{ items: userMenuItems }} trigger={['click']}>
-            <Button type="text" style={{ padding: '0 8px', height: 40 }}>
-              <Space>
-                <Avatar size="small" icon={<UserOutlined />} style={{ backgroundColor: '#1677ff' }} />
-                <Text strong>{user?.username || 'Admin'}</Text>
+            <Button type="text" className="nfc-touch-button" aria-label="打开管理员菜单">
+              <Space size={8}>
+                <Avatar size="small" icon={<UserOutlined />} className="nfc-user-avatar" />
+                {!isMobile && <Text strong>{user?.username || 'Admin'}</Text>}
               </Space>
             </Button>
           </Dropdown>
-        </Space>
+        </div>
       </AntHeader>
 
       <ChangePasswordModal open={passwordModalOpen} onClose={() => setPasswordModalOpen(false)} />
