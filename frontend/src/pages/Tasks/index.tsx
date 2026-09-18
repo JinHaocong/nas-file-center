@@ -263,7 +263,7 @@ export const TasksPage: React.FC = () => {
   );
 
   return (
-    <div className="nfc-operations-page">
+    <div className="nfc-operations-page nfc-tasks-page">
       <PageHeader
         eyebrow="Operations"
         title="任务中心"
