@@ -142,7 +142,7 @@ export const PathMatchPage: React.FC = () => {
       <DataPanel
         title="匹配规则"
         description="至少选择两个根目录；路径必须位于 ALLOWED_ROOTS。"
-        className="nfc-complex-form-panel nfc-file-tool-form"
+        className="nfc-complex-form-panel nfc-file-tool-form nfc-tool-workbench"
       >
         <Form
           form={form}
