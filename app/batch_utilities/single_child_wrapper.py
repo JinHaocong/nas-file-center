@@ -17,7 +17,10 @@ from app.batch_utilities.errors import (
     BatchUtilityScopeNotFoundError,
     BatchUtilitySymlinkBlockedError,
 )
-from app.fs_ops import probe_existing_noreplace_capability_at
+from app.fs_ops import (
+    probe_directory_rename_noreplace_compat_at,
+    probe_existing_noreplace_capability_at,
+)
 
 
 @dataclass(frozen=True)
@@ -692,15 +695,24 @@ def discover_single_child_wrappers(
                         elif int(child_st.st_dev) != int(scope_st.st_dev):
                             state = "UNSUPPORTED_FILESYSTEM"
                             capability_reason = "UTILITY_MOVE_UNSUPPORTED_FILESYSTEM"
-                        elif (
-                            stat.S_ISDIR(child_st.st_mode)
-                            and probe_existing_noreplace_capability_at(wrapper_fd, child.name) is not True
-                        ):
-                            # Directory MOVE has no compatibility fallback. Regular
-                            # files may use the executor's hard-link no-clobber
-                            # fallback when native RENAME_NOREPLACE is unavailable.
-                            state = "UNSUPPORTED_FILESYSTEM"
-                            capability_reason = "UTILITY_MOVE_UNSUPPORTED_FILESYSTEM"
+                        elif stat.S_ISDIR(child_st.st_mode):
+                            native_noreplace = probe_existing_noreplace_capability_at(
+                                wrapper_fd,
+                                child.name,
+                            )
+                            if native_noreplace is True:
+                                state = "READY"
+                            else:
+                                compat_noclobber = probe_directory_rename_noreplace_compat_at(
+                                    wrapper_fd,
+                                    scope_fd,
+                                )
+                                if compat_noclobber is True:
+                                    state = "READY"
+                                    capability_reason = "UTILITY_MOVE_COMPAT_PLAIN_RENAME_NOCLOBBER"
+                                else:
+                                    state = "UNSUPPORTED_FILESYSTEM"
+                                    capability_reason = "UTILITY_MOVE_UNSUPPORTED_FILESYSTEM"
                         else:
                             state = "READY"
 

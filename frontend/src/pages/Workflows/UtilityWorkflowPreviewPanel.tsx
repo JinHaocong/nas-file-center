@@ -279,8 +279,8 @@ export const UtilityWorkflowPreviewPanel: React.FC<Props> = ({
                 type="warning"
                 showIcon
                 icon={<WarningOutlined />}
-                message="当前文件系统不支持 Utility MOVE"
-                description="拓扑发现保持只读；当前文件系统不支持严格 no-overwrite MOVE。Gate6-B 不会尝试兼容 rename fallback，因此这些候选保持不可选择，也不会生成 Draft。"
+                message="当前存储未通过安全无覆盖 MOVE 能力验证"
+                description="NAS 可能支持普通移动，但当前存储既不支持原生 RENAME_NOREPLACE，也未通过普通目录 rename 的严格 no-clobber 运行时探测。为避免覆盖并发出现的目标，这些候选保持不可选择，也不会生成 Draft。"
               />
             )}
 

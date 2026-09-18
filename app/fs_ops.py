@@ -19,6 +19,9 @@ import sys
 __all__ = [
     "NoreplaceProbeCleanupError",
     "probe_existing_noreplace_capability_at",
+    "probe_directory_rename_noreplace_compat_at",
+    "probe_plain_directory_rename_noclobber_at",
+    "rename_directory_noreplace_compat",
     "rename_noreplace",
     "rename_noreplace_at",
 ]
@@ -178,6 +181,325 @@ def _cleanup_probe_name(path: str, *, dir_fd: int | None = None) -> bool:
 
 def _raise_probe_cleanup_error() -> None:
     raise NoreplaceProbeCleanupError("RENAME_NOREPLACE probe cleanup failed")
+
+
+def _cleanup_probe_entry(path: str, *, dir_fd: int | None = None) -> bool:
+    """Remove one disposable probe pathname without following symlinks."""
+    try:
+        st = os.stat(path, dir_fd=dir_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+
+    try:
+        if stat.S_ISDIR(st.st_mode):
+            os.rmdir(path, dir_fd=dir_fd)
+        else:
+            os.unlink(path, dir_fd=dir_fd)
+        return True
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+
+
+def _probe_mkdir_at(dir_fd: int | None, name: str) -> os.stat_result:
+    os.mkdir(name, 0o700, dir_fd=dir_fd)
+    return os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+
+
+def _probe_file_at(dir_fd: int | None, name: str) -> os.stat_result:
+    fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=dir_fd)
+    try:
+        os.write(fd, b"nfc-probe")
+    finally:
+        os.close(fd)
+    return os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+
+
+def _probe_symlink_at(dir_fd: int | None, name: str, token: str) -> os.stat_result:
+    os.symlink(f".__nfc_probe_nonexistent_{token}", name, dir_fd=dir_fd)
+    return os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+
+
+def _probe_identity(st: os.stat_result) -> tuple[int, int, int]:
+    return (int(st.st_dev), int(st.st_ino), int(stat.S_IFMT(st.st_mode)))
+
+
+def probe_directory_rename_noreplace_compat_at(
+    source_parent_fd: int,
+    target_parent_fd: int,
+) -> bool | None:
+    """Positive-probe whether plain directory rename is itself strict no-clobber.
+
+    Some NAS/FUSE implementations reject native RENAME_NOREPLACE while their
+    ordinary directory rename operation still refuses every existing target.
+    This function grants compatibility authority only after disposable runtime
+    probes prove that exact behavior on the actual source/target parents.
+
+    Required proof:
+      1. directory -> existing empty directory is refused and preserves both;
+      2. directory -> existing regular file is refused and preserves both;
+      3. directory -> existing symlink is refused and preserves both;
+      4. directory -> absent target succeeds and preserves source identity.
+
+    Any namespace mutation on a collision probe, unexpected errno, identity
+    mismatch, or unresolved probe cleanup fails closed.  A False result means
+    the filesystem definitely does not provide the required behavior; None
+    means authority could not be established safely.
+    """
+    src_fd = _normalize_dir_fd(source_parent_fd)
+    dst_fd = _normalize_dir_fd(target_parent_fd)
+    token = os.urandom(10).hex()
+
+    acceptable_collision_errnos = {
+        errno.EEXIST,
+        errno.ENOTEMPTY,
+        errno.EISDIR,
+        errno.ENOTDIR,
+    }
+    unsupported_errnos = {
+        errno.EXDEV,
+        errno.ENOSYS,
+        errno.EOPNOTSUPP,
+        getattr(errno, "ENOTSUP", errno.EOPNOTSUPP),
+    }
+
+    def cleanup(names: list[tuple[str, int | None]]) -> None:
+        cleanup_results = [
+            _cleanup_probe_entry(name, dir_fd=dfd)
+            for name, dfd in names
+        ]
+        if not all(cleanup_results):
+            _raise_probe_cleanup_error()
+
+    collision_specs = ("directory", "file", "symlink")
+    for index, target_kind in enumerate(collision_specs):
+        src_name = f".__probe_plain_move_src_{token}_{index}"
+        dst_name = f".__probe_plain_move_dst_{token}_{index}"
+        owned = [(src_name, src_fd), (dst_name, dst_fd)]
+        try:
+            src_before = _probe_mkdir_at(src_fd, src_name)
+            if target_kind == "directory":
+                dst_before = _probe_mkdir_at(dst_fd, dst_name)
+            elif target_kind == "file":
+                dst_before = _probe_file_at(dst_fd, dst_name)
+            else:
+                dst_before = _probe_symlink_at(dst_fd, dst_name, token)
+
+            try:
+                os.rename(
+                    src_name,
+                    dst_name,
+                    src_dir_fd=src_fd,
+                    dst_dir_fd=dst_fd,
+                )
+            except OSError as exc:
+                if exc.errno in unsupported_errnos:
+                    cleanup(owned)
+                    return False
+                if exc.errno not in acceptable_collision_errnos:
+                    cleanup(owned)
+                    return None
+
+                try:
+                    src_after = os.stat(src_name, dir_fd=src_fd, follow_symlinks=False)
+                    dst_after = os.stat(dst_name, dir_fd=dst_fd, follow_symlinks=False)
+                except OSError:
+                    cleanup(owned)
+                    return None
+
+                if _probe_identity(src_after) != _probe_identity(src_before):
+                    cleanup(owned)
+                    return None
+                if _probe_identity(dst_after) != _probe_identity(dst_before):
+                    cleanup(owned)
+                    return None
+            else:
+                # Plain POSIX rename may replace an empty directory. Any
+                # successful collision mutation proves no-clobber is absent.
+                cleanup(owned)
+                return False
+        except NoreplaceProbeCleanupError:
+            raise
+        except Exception:
+            cleanup(owned)
+            return None
+        cleanup(owned)
+
+    src_name = f".__probe_plain_move_src_{token}_success"
+    dst_name = f".__probe_plain_move_dst_{token}_success"
+    owned = [(src_name, src_fd), (dst_name, dst_fd)]
+    try:
+        src_before = _probe_mkdir_at(src_fd, src_name)
+        try:
+            os.rename(
+                src_name,
+                dst_name,
+                src_dir_fd=src_fd,
+                dst_dir_fd=dst_fd,
+            )
+        except OSError as exc:
+            cleanup(owned)
+            if exc.errno in unsupported_errnos:
+                return False
+            return None
+
+        try:
+            os.stat(src_name, dir_fd=src_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            cleanup(owned)
+            return None
+        else:
+            cleanup(owned)
+            return None
+
+        try:
+            dst_after = os.stat(dst_name, dir_fd=dst_fd, follow_symlinks=False)
+        except OSError:
+            cleanup(owned)
+            return None
+
+        if _probe_identity(dst_after) != _probe_identity(src_before):
+            cleanup(owned)
+            return None
+    except NoreplaceProbeCleanupError:
+        raise
+    except Exception:
+        cleanup(owned)
+        return None
+
+    cleanup(owned)
+    return True
+
+
+# Backward-compatible descriptive alias used by early hotfix tests.
+probe_plain_directory_rename_noclobber_at = probe_directory_rename_noreplace_compat_at
+
+
+def _open_probe_parent(path: Path) -> int:
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    return os.open(path, flags)
+
+
+def rename_directory_noreplace_compat(source: Path | str, target: Path | str) -> None:
+    """Move one directory with no-clobber semantics on positively-probed COMPAT filesystems.
+
+    This is deliberately *not* an exists()+rename fallback. The ordinary rename
+    call is authorized only when a runtime disposable probe on the same source
+    and target parents proves that this filesystem's plain directory rename
+    refuses existing targets. Unknown/ambiguous capability fails closed.
+    """
+    src = Path(source)
+    dst = Path(target)
+
+    try:
+        source_before = os.lstat(src)
+    except OSError:
+        raise
+    if not stat.S_ISDIR(source_before.st_mode) or stat.S_ISLNK(source_before.st_mode):
+        raise OSError(
+            errno.EOPNOTSUPP,
+            "COMPAT plain-rename no-replace supports directories only",
+            os.fspath(src),
+        )
+
+    src_parent_fd = _open_probe_parent(src.parent)
+    try:
+        dst_parent_fd = _open_probe_parent(dst.parent)
+    except Exception:
+        os.close(src_parent_fd)
+        raise
+
+    try:
+        capability = probe_directory_rename_noreplace_compat_at(
+            src_parent_fd,
+            dst_parent_fd,
+        )
+        if capability is not True:
+            raise OSError(
+                errno.EOPNOTSUPP,
+                "Plain directory rename no-clobber semantics are not positively proven",
+                os.fspath(src),
+            )
+
+        try:
+            os.stat(dst.name, dir_fd=dst_parent_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        else:
+            raise FileExistsError(
+                errno.EEXIST,
+                f"Target path already exists: {dst}",
+                os.fspath(dst),
+            )
+
+        current_source = os.stat(
+            src.name,
+            dir_fd=src_parent_fd,
+            follow_symlinks=False,
+        )
+        if _probe_identity(current_source) != _probe_identity(source_before):
+            raise OSError(
+                errno.ESTALE if hasattr(errno, "ESTALE") else errno.EIO,
+                "Source directory identity changed before COMPAT move",
+                os.fspath(src),
+            )
+
+        try:
+            os.rename(
+                src.name,
+                dst.name,
+                src_dir_fd=src_parent_fd,
+                dst_dir_fd=dst_parent_fd,
+            )
+        except OSError as exc:
+            if exc.errno in {
+                errno.EEXIST,
+                errno.ENOTEMPTY,
+                errno.EISDIR,
+                errno.ENOTDIR,
+            }:
+                raise FileExistsError(
+                    errno.EEXIST,
+                    f"Target path already exists: {dst}",
+                    os.fspath(dst),
+                ) from exc
+            raise
+
+        try:
+            moved = os.stat(dst.name, dir_fd=dst_parent_fd, follow_symlinks=False)
+        except OSError as exc:
+            raise OSError(
+                errno.EIO,
+                f"COMPAT move postcondition failed: target unavailable: {exc}",
+                os.fspath(dst),
+            ) from exc
+
+        if _probe_identity(moved) != _probe_identity(source_before):
+            raise OSError(
+                errno.EIO,
+                "COMPAT move postcondition failed: target identity mismatch",
+                os.fspath(dst),
+            )
+        try:
+            os.stat(src.name, dir_fd=src_parent_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        else:
+            raise OSError(
+                errno.EIO,
+                "COMPAT move postcondition failed: source binding still exists",
+                os.fspath(src),
+            )
+    finally:
+        os.close(dst_parent_fd)
+        os.close(src_parent_fd)
 
 
 def probe_existing_noreplace_capability_at(dir_fd: int, entry_name: str) -> bool | None:
