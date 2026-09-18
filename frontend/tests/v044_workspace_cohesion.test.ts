@@ -66,4 +66,17 @@ describe('v0.4.4 workspace cohesion audit', () => {
     assert.match(css, /\.nfc-app-shell \.ant-alert,[\s\S]*box-shadow:\s*none !important/s);
   });
 
+
+  test('settings uses explicit desktop areas so tall lifecycle content cannot create a blank left row', () => {
+    const page = read('src/pages/Settings/index.tsx');
+    const css = read('src/index.css');
+
+    assert.match(page, /nfc-settings-panel-runtime/);
+    assert.match(page, /nfc-settings-panel-lifecycle/);
+    assert.match(page, /nfc-settings-panel-resource/);
+    assert.match(page, /nfc-settings-panel-sessions/);
+    assert.match(css, /grid-template-areas:[\s\S]*"runtime lifecycle"[\s\S]*"resource lifecycle"[\s\S]*"sessions sessions"/s);
+    assert.match(css, /@media \(max-width: 1199px\)[\s\S]*"runtime"[\s\S]*"lifecycle"[\s\S]*"resource"[\s\S]*"sessions"/s);
+  });
+
 });
