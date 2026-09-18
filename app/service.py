@@ -4381,23 +4381,39 @@ class FileCenterService:
                 "status": "purged",
             }
 
-    @staticmethod
-    def _assert_quarantine_record_deletable(entry: QuarantineEntry) -> None:
-        if entry.state != "purged":
+    def _assert_quarantine_record_deletable(self, entry: QuarantineEntry) -> None:
+        deletable_states = {"purged", "abandoned", "conflict"}
+        if entry.state not in deletable_states:
             raise StateConflictError(
-                f"Quarantine entry #{entry.id} must be permanently purged before deleting its record"
+                f"Quarantine entry #{entry.id} is not a terminal cleanup state "
+                f"(state={entry.state}; allowed={sorted(deletable_states)})"
             )
-        try:
-            os.lstat(entry.quarantine_path)
-        except FileNotFoundError:
-            return
-        except OSError as exc:
+
+        def require_absent(path_value: str | None, *, label: str) -> None:
+            if not path_value:
+                return
+            try:
+                os.lstat(path_value)
+            except FileNotFoundError:
+                return
+            except OSError as exc:
+                raise StateConflictError(
+                    f"Cannot prove {label} absence for quarantine entry #{entry.id}: {exc}"
+                ) from exc
             raise StateConflictError(
-                f"Cannot prove quarantine payload absence for entry #{entry.id}: {exc}"
-            ) from exc
-        raise StateConflictError(
-            f"Quarantine payload path reappeared for entry #{entry.id}; record deletion is blocked"
-        )
+                f"{label} still exists for quarantine entry #{entry.id}; record deletion is blocked"
+            )
+
+        require_absent(entry.quarantine_path, label="quarantine payload")
+
+        if entry.state in {"abandoned", "conflict"}:
+            require_absent(entry.authoritative_anchor_path, label="authoritative anchor")
+            tx_entry_root = (
+                Path(self.settings.quarantine_root)
+                / ".tx"
+                / f"entry-{entry.id}"
+            )
+            require_absent(str(tx_entry_root), label="transaction artifacts")
 
     def delete_quarantine_record(
         self,
@@ -4431,6 +4447,7 @@ class FileCenterService:
                             "quarantine_entry_id": entry_id,
                             "original_path": original_path,
                             "quarantine_path": quarantine_path,
+                            "state": entry.state,
                             "metadata_only": True,
                         },
                         ensure_ascii=False,
@@ -4482,6 +4499,7 @@ class FileCenterService:
                     "id": int(entry.id),
                     "original_path": entry.original_path,
                     "quarantine_path": entry.quarantine_path,
+                    "state": entry.state,
                 }
                 for entry in ordered_rows
             ]
