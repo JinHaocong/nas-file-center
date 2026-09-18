@@ -116,6 +116,11 @@ export const Header: React.FC<Props> = ({
             onClick={handleNavigationToggle}
           />
 
+          <div className="nfc-header-product-mark" aria-hidden="true">
+            <span className="nfc-header-product-dot" />
+            <span>Local operations</span>
+          </div>
+
           <div className="nfc-header-status" aria-label="系统安全与任务状态">
             <SafeModeBadge />
             <WorkerStatusBadge />
