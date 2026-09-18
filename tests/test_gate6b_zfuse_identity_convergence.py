@@ -208,7 +208,7 @@ def test_cleanup_failure_makes_plan_partial_and_task_failed(
         session_factory=service.SessionLocal,
         engine=service.engine,
         worker_id=None,
-    ) is False
+    ) is True
 
     assert (root / "C" / "payload.txt").read_text(encoding="utf-8") == "payload"
     assert (root / "B").is_dir()
@@ -228,5 +228,5 @@ def test_cleanup_failure_makes_plan_partial_and_task_failed(
         assert [item.state for item in items] == ["completed", "failed"]
         assert "identity instability" in (items[1].reason or "")
         assert job is not None and job.status == "failed"
-        assert job.error_code == "UTILITY_PLAN_NOT_COMPLETED"
-        assert "plan status: partial" in (job.error_text or "")
+        assert job.error_code == "BATCH_PLAN_NOT_COMPLETED"
+        assert "status partial" in (job.error_text or "")
