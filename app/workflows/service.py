@@ -8,7 +8,7 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import Settings
-from app.models import BatchPlan, BatchPlanItem, ScanJob, Workflow, WorkflowRevision, utcnow
+from app.models import AuditEvent, BatchPlan, BatchPlanItem, ScanJob, Workflow, WorkflowRevision, utcnow
 from app.planning.dedupe_config import canonical_config_dict, validate_and_canonicalize_config
 from app.planning.dedupe_preview import (
     canonicalize_effective_safety_policy,
@@ -26,6 +26,8 @@ from app.workflows.errors import (
     BuiltinWorkflowImmutableError,
     RecipeRevisionNotFoundError,
     WorkflowArchivedError,
+    WorkflowNotArchivedError,
+    WorkflowActivePlanDependencyError,
     WorkflowDigestMismatchError,
     WorkflowNotFoundError,
     WorkflowRevisionConflictError,
@@ -357,6 +359,87 @@ class WorkflowService:
             wf.archived_at = utcnow()
             wf.updated_at = utcnow()
             session.commit()
+
+    def permanent_delete_workflow(
+        self,
+        user_id: int | None,
+        workflow_id: int,
+        *,
+        expected_current_revision: int,
+        confirmation: str,
+    ) -> dict[str, Any]:
+        if confirmation != "DELETE":
+            raise WorkflowValidationError(
+                "Permanent workflow deletion requires confirmation token DELETE",
+                code="WORKFLOW_DELETE_CONFIRMATION_REQUIRED",
+                status_code=400,
+            )
+
+        with self.SessionLocal() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            wf = session.get(Workflow, workflow_id)
+            if not wf:
+                raise WorkflowNotFoundError(f"Workflow {workflow_id} not found")
+            if wf.is_builtin:
+                raise BuiltinWorkflowImmutableError(
+                    f"Built-in workflow {workflow_id} cannot be permanently deleted"
+                )
+            if wf.archived_at is None:
+                raise WorkflowNotArchivedError(
+                    f"Workflow {workflow_id} must be archived before permanent deletion"
+                )
+            if expected_current_revision != wf.current_revision:
+                raise WorkflowRevisionConflictError(
+                    f"Workflow revision conflict: expected {expected_current_revision}, got {wf.current_revision}",
+                    details={
+                        "expected_revision": expected_current_revision,
+                        "current_revision": wf.current_revision,
+                    },
+                )
+
+            active_statuses = ("draft", "frozen", "ready", "validating", "executing")
+            active_plan_ids = list(
+                session.scalars(
+                    select(BatchPlan.id)
+                    .where(
+                        BatchPlan.kind == f"workflow-{workflow_id}",
+                        BatchPlan.status.in_(active_statuses),
+                    )
+                    .order_by(BatchPlan.id.asc())
+                ).all()
+            )
+            if active_plan_ids:
+                raise WorkflowActivePlanDependencyError(
+                    f"Workflow {workflow_id} still has active plans and cannot be permanently deleted",
+                    details={"plan_ids": [int(plan_id) for plan_id in active_plan_ids]},
+                )
+
+            deleted_revision_count = len(wf.revisions)
+            workflow_name = wf.name
+            session.add(
+                AuditEvent(
+                    operation="workflow.permanent_delete",
+                    path=f"workflow:{workflow_id}",
+                    result="deleted",
+                    details_json=json.dumps(
+                        {
+                            "workflow_id": workflow_id,
+                            "workflow_name": workflow_name,
+                            "deleted_revision_count": deleted_revision_count,
+                            "deleted_by_user_id": user_id,
+                        },
+                        ensure_ascii=False,
+                    ),
+                )
+            )
+            session.delete(wf)
+            session.commit()
+            return {
+                "status": "ok",
+                "deleted": True,
+                "workflow_id": workflow_id,
+                "deleted_revision_count": deleted_revision_count,
+            }
 
     def rollback_workflow(
         self,

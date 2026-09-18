@@ -1039,6 +1039,38 @@ class FileCenterService:
                 "remaining_count": remaining_count,
             }
 
+    def clear_audit_history(self, *, confirmation: str) -> dict:
+        if confirmation != "CLEAR":
+            raise ValueError("Audit history clear requires confirmation token 'CLEAR'")
+
+        with self.SessionLocal() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            total_count = session.scalar(select(func.count(AuditEvent.id))) or 0
+            session.execute(delete(AuditEvent))
+            now = utcnow()
+            session.add(
+                AuditEvent(
+                    timestamp=now,
+                    operation="audit.clear",
+                    path=None,
+                    result="success",
+                    details_json=json.dumps(
+                        {
+                            "deleted_count": int(total_count),
+                            "self_audit_preserved": True,
+                        },
+                        ensure_ascii=False,
+                    ),
+                )
+            )
+            session.flush()
+            remaining_count = session.scalar(select(func.count(AuditEvent.id))) or 0
+            session.commit()
+            return {
+                "deleted_count": int(total_count),
+                "remaining_count": int(remaining_count),
+            }
+
     def list_index_roots(self, *, page: int = 1, page_size: int = 20, limit: int | None = None) -> dict:
         if limit is not None:
             page_size = limit
@@ -4347,6 +4379,136 @@ class FileCenterService:
                 "id": entry.id,
                 "state": "purged",
                 "status": "purged",
+            }
+
+    @staticmethod
+    def _assert_quarantine_record_deletable(entry: QuarantineEntry) -> None:
+        if entry.state != "purged":
+            raise StateConflictError(
+                f"Quarantine entry #{entry.id} must be permanently purged before deleting its record"
+            )
+        try:
+            os.lstat(entry.quarantine_path)
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            raise StateConflictError(
+                f"Cannot prove quarantine payload absence for entry #{entry.id}: {exc}"
+            ) from exc
+        raise StateConflictError(
+            f"Quarantine payload path reappeared for entry #{entry.id}; record deletion is blocked"
+        )
+
+    def delete_quarantine_record(
+        self,
+        entry_id: int,
+        *,
+        confirmation: str,
+        is_admin: bool = False,
+    ) -> dict:
+        if not is_admin:
+            raise PermissionError("Only administrator can delete quarantine records")
+        if confirmation != "DELETE_RECORD":
+            raise ValueError("Quarantine record deletion requires confirmation token 'DELETE_RECORD'")
+
+        with self.SessionLocal() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            entry = session.get(QuarantineEntry, entry_id)
+            if entry is None:
+                raise KeyError(f"Quarantine entry #{entry_id} not found")
+            self._assert_quarantine_record_deletable(entry)
+
+            original_path = entry.original_path
+            quarantine_path = entry.quarantine_path
+            session.delete(entry)
+            session.add(
+                AuditEvent(
+                    operation="quarantine.record_delete",
+                    path=original_path,
+                    result="deleted",
+                    details_json=json.dumps(
+                        {
+                            "quarantine_entry_id": entry_id,
+                            "original_path": original_path,
+                            "quarantine_path": quarantine_path,
+                            "metadata_only": True,
+                        },
+                        ensure_ascii=False,
+                    ),
+                )
+            )
+            session.commit()
+            return {"status": "ok", "deleted": True, "id": entry_id}
+
+    def bulk_delete_quarantine_records(
+        self,
+        entry_ids: list[int],
+        *,
+        confirmation: str,
+        is_admin: bool = False,
+    ) -> dict:
+        if not is_admin:
+            raise PermissionError("Only administrator can delete quarantine records")
+        if confirmation != "DELETE_RECORDS":
+            raise ValueError("Bulk quarantine record deletion requires confirmation token 'DELETE_RECORDS'")
+        if not entry_ids:
+            raise ValueError("entry_ids must not be empty")
+        if len(entry_ids) > 5000:
+            raise ValueError("entry_ids exceeds maximum of 5000")
+        normalized_ids = [int(entry_id) for entry_id in entry_ids]
+        if any(entry_id <= 0 for entry_id in normalized_ids):
+            raise ValueError("entry_ids must contain positive integers")
+        if len(set(normalized_ids)) != len(normalized_ids):
+            raise ValueError("entry_ids must be unique")
+
+        with self.SessionLocal() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            rows = list(
+                session.scalars(
+                    select(QuarantineEntry).where(QuarantineEntry.id.in_(normalized_ids))
+                ).all()
+            )
+            by_id = {int(row.id): row for row in rows}
+            missing = [entry_id for entry_id in normalized_ids if entry_id not in by_id]
+            if missing:
+                raise KeyError(f"Quarantine entries not found: {missing}")
+
+            ordered_rows = [by_id[entry_id] for entry_id in normalized_ids]
+            for entry in ordered_rows:
+                self._assert_quarantine_record_deletable(entry)
+
+            audit_rows = [
+                {
+                    "id": int(entry.id),
+                    "original_path": entry.original_path,
+                    "quarantine_path": entry.quarantine_path,
+                }
+                for entry in ordered_rows
+            ]
+            for entry in ordered_rows:
+                session.delete(entry)
+
+            session.add(
+                AuditEvent(
+                    operation="quarantine.record_bulk_delete",
+                    path=None,
+                    result="deleted",
+                    details_json=json.dumps(
+                        {
+                            "entry_ids": normalized_ids,
+                            "deleted_count": len(normalized_ids),
+                            "entries": audit_rows,
+                            "metadata_only": True,
+                        },
+                        ensure_ascii=False,
+                    ),
+                )
+            )
+            session.commit()
+            return {
+                "status": "ok",
+                "deleted_count": len(normalized_ids),
+                "deleted_ids": normalized_ids,
             }
 
     def get_quarantine_retention_policy(self) -> dict:

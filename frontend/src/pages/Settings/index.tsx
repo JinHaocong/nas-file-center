@@ -218,6 +218,39 @@ export const SettingsPage: React.FC = () => {
     },
   });
 
+  const clearAuditMutation = useMutation({
+    mutationFn: () => {
+      if (!isAdmin) {
+        throw new Error('仅系统管理员允许立即清空审计历史');
+      }
+      return auditApi.clearHistory();
+    },
+    onSuccess: (res) => {
+      message.success(`审计历史已清空，共删除 ${res.deleted_count} 条；系统保留 1 条本次清空操作审计记录`);
+      queryClient.invalidateQueries({ queryKey: ['auditRetentionPreview'] });
+      queryClient.invalidateQueries({ queryKey: ['auditEvents'] });
+    },
+    onError: (err: any) => {
+      message.error(err.message || '立即清空审计历史失败');
+    },
+  });
+
+  const handleClearAuditHistory = () => {
+    if (!isAdmin) {
+      message.error('仅系统管理员允许立即清空审计历史');
+      return;
+    }
+    Modal.confirm({
+      title: '立即清空全部审计历史？',
+      icon: <ExclamationCircleOutlined />,
+      content: '该操作不受当前保留天数限制，会立即删除现有 Audit 历史。系统会保留 1 条 audit.clear 自审计记录，用于证明本次清空动作发生过。',
+      okText: '立即清空',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: () => clearAuditMutation.mutateAsync(),
+    });
+  };
+
   const handleSavePolicy = () => {
     if (!isAdmin) {
       message.error('仅系统管理员允许修改审计保留策略');
@@ -599,6 +632,19 @@ export const SettingsPage: React.FC = () => {
                       </Button>
                     </span>
                   </Tooltip>
+                  <Tooltip title={!isAdmin ? '仅系统管理员允许立即清空全部审计历史' : '忽略保留期，立即删除全部现有审计历史，并保留 1 条本次清空操作记录'}>
+                    <span>
+                      <Button
+                        danger
+                        icon={<DeleteOutlined />}
+                        disabled={!isAdmin || clearAuditMutation.isPending}
+                        loading={clearAuditMutation.isPending}
+                        onClick={handleClearAuditHistory}
+                      >
+                        立即清空
+                      </Button>
+                    </span>
+                  </Tooltip>
                 </ActionBar>
               </div>
               <ResponsiveDescriptions
@@ -609,6 +655,7 @@ export const SettingsPage: React.FC = () => {
                   { label: '拟删除记录数', value: String(retentionPreview?.delete_count ?? 0), emphasis: true },
                   { label: '拟保留记录数', value: String(retentionPreview?.keep_count ?? retentionPreview?.total_count ?? 0), emphasis: true },
                   { label: '最早记录时间', value: retentionPreview?.oldest_timestamp ? formatDateTime(retentionPreview.oldest_timestamp) : '—' },
+                  { label: '立即清空说明', value: '管理员可忽略保留期直接清空历史；系统固定保留 1 条 audit.clear 自审计记录' },
                 ]}
               />
             </section>

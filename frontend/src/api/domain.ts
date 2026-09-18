@@ -160,6 +160,10 @@ export const auditApi = {
   },
   getRetentionPreview: () => api.get<AuditRetentionPreview>('/api/audit/retention-preview'),
   applyRetention: () => api.post<AuditRetentionApplyResult>('/api/audit/apply-retention'),
+  clearHistory: () =>
+    api.post<{ deleted_count: number; remaining_count: number }>('/api/audit/clear', {
+      confirmation: 'CLEAR',
+    }),
 };
 
 export const dataLifecycleApi = {

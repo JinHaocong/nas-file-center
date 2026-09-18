@@ -12,6 +12,13 @@ export function canArchiveWorkflow(role?: string, isArchived: boolean = false): 
   return role === 'admin';
 }
 
+export function canPermanentlyDeleteWorkflow(role?: string, isArchived: boolean = false, isBuiltin: boolean = false): boolean {
+  if (role !== 'admin') return false;
+  if (!isArchived) return false;
+  if (isBuiltin) return false;
+  return true;
+}
+
 export function canRollbackWorkflow(role?: string, isArchived: boolean = false): boolean {
   if (isArchived) return false;
   return role === 'admin';
