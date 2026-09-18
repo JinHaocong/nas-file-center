@@ -203,6 +203,7 @@ def _probe_hardlink_capability(source_dir: Path, target_parent: Path) -> bool:
     dst_fd = -1
     created_src = False
     created_dst = False
+    result = False
     cleanup_ok = True
     try:
         src_fd = _open_dir(source_dir)
@@ -229,13 +230,13 @@ def _probe_hardlink_capability(source_dir: Path, target_parent: Path) -> bool:
         created_dst = True
         src_st = os.stat(src_name, dir_fd=src_fd, follow_symlinks=False)
         dst_st = os.stat(dst_name, dir_fd=dst_fd, follow_symlinks=False)
-        return (
+        result = (
             stat.S_ISREG(src_st.st_mode)
             and stat.S_ISREG(dst_st.st_mode)
             and _identity(src_st) == _identity(dst_st)
         )
     except OSError:
-        return False
+        result = False
     finally:
         if created_dst and dst_fd >= 0:
             try:
@@ -251,10 +252,8 @@ def _probe_hardlink_capability(source_dir: Path, target_parent: Path) -> bool:
             os.close(dst_fd)
         if src_fd >= 0:
             os.close(src_fd)
-        if not cleanup_ok:
-            # Cleanup ambiguity must fail closed even if the probe operation worked.
-            pass
 
+    return result and cleanup_ok
 
 def directory_transplant_preflight(
     source: Path | str,
