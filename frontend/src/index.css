@@ -5016,7 +5016,8 @@ body {
   }
 
   .nfc-page-content {
-    padding: 26px 14px calc(26px + var(--nfc-mobile-dock-height) + env(safe-area-inset-bottom));
+    padding: 26px 14px;
+    padding-bottom: calc(26px + var(--nfc-mobile-dock-height) + env(safe-area-inset-bottom));
   }
 
   .nfc-page-header {
