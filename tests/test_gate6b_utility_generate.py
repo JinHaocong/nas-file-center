@@ -1,3 +1,4 @@
+import errno
 import json
 import os
 from pathlib import Path
@@ -142,6 +143,72 @@ def test_generate_selected_subset_persists_exact_pair_and_no_filesystem_mutation
             ("rmdir_empty", str(root / "B2"), None),
         ]
         assert all("B1" not in item.source_path for item in items)
+
+
+def test_regular_file_wrapper_generate_freeze_validate_execute_with_no_clobber_fallback(
+    utility_service_env,
+    monkeypatch,
+):
+    env = utility_service_env
+    service = env["service"]
+    root = env["root"]
+    wrapper = root / "001-1"
+    wrapper.mkdir()
+    child = wrapper / "001"
+    child.write_bytes(b"payload")
+
+    preview = _preview(env)
+    candidate = _candidate(preview, "001-1")
+    assert candidate["state"] == "READY"
+    assert candidate["selectable"] is True
+    assert candidate["child_object_type"] == "file"
+
+    generated = service.workflow_service.generate_plan(
+        None,
+        env["workflow_id"],
+        WorkflowGeneratePlanRequest(
+            expected_compile_digest=preview["compile_digest"],
+            selected_candidate_ids=[candidate["candidate_id"]],
+        ),
+    )
+    plan_id = generated["plan_id"]
+    assert generated["status"] == "draft"
+
+    with service.SessionLocal() as session:
+        rows = session.scalars(
+            select(BatchPlanItem)
+            .where(BatchPlanItem.plan_id == plan_id)
+            .order_by(BatchPlanItem.sequence.asc())
+        ).all()
+        assert len(rows) == 2
+        move_meta = json.loads(rows[0].metadata_json or "{}")
+        remove_meta = json.loads(rows[1].metadata_json or "{}")
+        assert move_meta["child_object_type"] == "file"
+        assert remove_meta["child_object_type"] == "file"
+
+    frozen = service.freeze_plan(plan_id)
+    assert frozen.status == "frozen"
+
+    validated = service.validate_plan(plan_id)
+    assert validated["status"] == "ready"
+
+    service.settings.allow_mutation = True
+
+    def no_native_noreplace(*_args, **_kwargs):
+        raise OSError(errno.EOPNOTSUPP, "forced compat path")
+
+    import app.fs_ops as fs_ops_module
+
+    monkeypatch.setattr(fs_ops_module, "rename_noreplace", no_native_noreplace)
+
+    result = service.execute_plan(plan_id)
+
+    assert result["status"] == "completed"
+    target = root / "001"
+    assert target.is_file()
+    assert target.read_bytes() == b"payload"
+    assert not child.exists()
+    assert not wrapper.exists()
 
 
 @pytest.mark.parametrize("mutation", ["target", "hidden", "aba"])
