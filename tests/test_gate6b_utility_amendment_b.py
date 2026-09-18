@@ -42,7 +42,7 @@ def test_valid_wrapper_is_nonselectable_when_native_noreplace_is_unavailable(
     monkeypatch.setattr(
         single_child_wrapper_module,
         "directory_transplant_preflight",
-        lambda _path: False,
+        lambda _path, _target_parent=None: False,
         raising=False,
     )
 
@@ -79,7 +79,7 @@ def test_utility_preview_transports_unsupported_capability_and_plans_zero_operat
     monkeypatch.setattr(
         single_child_wrapper_module,
         "directory_transplant_preflight",
-        lambda _path: False,
+        lambda _path, _target_parent=None: False,
         raising=False,
     )
 
@@ -184,7 +184,7 @@ def test_generate_forced_unsupported_candidate_rejects_stable_code_and_persists_
     monkeypatch.setattr(
         single_child_wrapper_module,
         "directory_transplant_preflight",
-        lambda _path: False,
+        lambda _path, _target_parent=None: False,
         raising=False,
     )
 
