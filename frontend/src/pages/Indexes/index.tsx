@@ -161,9 +161,9 @@ export const IndexesPage: React.FC = () => {
   ];
 
   return (
-    <div className="nfc-operations-page">
+    <div className="nfc-operations-page nfc-indexes-page">
       <PageHeader
-        eyebrow="DATA"
+        eyebrow="Index roots"
         title="文件索引"
         description="维护大型 NAS 目录的增量元数据索引。移除操作只清理 NFC 索引元数据，不触碰真实文件。"
         actions={
