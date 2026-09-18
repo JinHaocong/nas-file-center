@@ -92,7 +92,7 @@ export const RestoreModal: React.FC<Props> = ({
       className="nfc-overlay-modal nfc-quarantine-restore-modal"
       title={
         <Space>
-          <UndoOutlined style={{ color: '#1677ff' }} />
+          <UndoOutlined className="nfc-accent-icon" />
           <span>恢复隔离文件 #{entry.id}</span>
         </Space>
       }
@@ -115,18 +115,18 @@ export const RestoreModal: React.FC<Props> = ({
           type="warning"
           showIcon
           icon={<LockOutlined />}
-          style={{ marginBottom: 16 }}
+          className="nfc-overlay-alert"
         />
       )}
 
-      <Descriptions bordered size="small" column={1} style={{ marginBottom: 16 }}>
+      <Descriptions bordered size="small" column={1} className="nfc-quarantine-descriptions">
         <Descriptions.Item label="原始文件路径">
-          <Text code copyable style={{ wordBreak: 'break-all' }}>
+          <Text code copyable className="nfc-breakall">
             {entry.original_path}
           </Text>
         </Descriptions.Item>
         <Descriptions.Item label="当前隔离路径">
-          <Text code copyable style={{ wordBreak: 'break-all' }}>
+          <Text code copyable className="nfc-breakall">
             {entry.quarantine_path}
           </Text>
         </Descriptions.Item>
@@ -135,21 +135,21 @@ export const RestoreModal: React.FC<Props> = ({
         </Descriptions.Item>
         {entry.hash && (
           <Descriptions.Item label="内容 SHA256">
-            <Text code copyable style={{ fontSize: 12 }}>
+            <Text code copyable className="nfc-mono-break">
               {entry.hash}
             </Text>
           </Descriptions.Item>
         )}
       </Descriptions>
 
-      <Form form={form} layout="vertical" initialValues={{ conflict_policy: 'skip' }}>
+      <Form className="nfc-quarantine-restore-form" form={form} layout="vertical" initialValues={{ conflict_policy: 'skip' }}>
         <Form.Item
           name="conflict_policy"
           label={
             <Space>
               <Text strong>目标路径冲突处理策略</Text>
               <Tooltip title="当原路径已存在其他文件或目录时系统的处理方式。系统严禁直接覆盖目标文件。">
-                <ExclamationCircleOutlined style={{ color: '#8c8c8c' }} />
+                <ExclamationCircleOutlined className="nfc-muted-icon" />
               </Tooltip>
             </Space>
           }
@@ -159,7 +159,7 @@ export const RestoreModal: React.FC<Props> = ({
             onChange={(e) => setConflictPolicy(e.target.value)}
             disabled={isSafeMode || restoreMutation.isPending}
           >
-            <Space direction="vertical" align="start">
+            <Space className="nfc-radio-stack" direction="vertical" align="start">
               <Radio value="skip">
                 <span>
                   <strong>跳过 (Skip - 默认)</strong>：若目标路径已存在同名实体，取消本次恢复，保持隔离状态不变。
