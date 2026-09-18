@@ -48,6 +48,10 @@ describe('v0.4.0 C5A workflows and organizer surfaces contract', () => {
       assert.match(source, new RegExp(semantic));
     }
     assert.match(source, /nfc-utility-candidate-mobile-card/);
+    assert.match(source, /唯一子项 C/);
+    assert.match(source, /child_object_type/);
+    const types = read('src/types/workflow.ts');
+    assert.match(types, /child_object_type\?: 'file' \| 'directory' \| 'special'/);
     assert.doesNotMatch(source, /<Card\b/);
   });
 
