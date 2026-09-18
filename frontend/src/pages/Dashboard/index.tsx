@@ -1,27 +1,32 @@
 import React from 'react';
-import { Row, Col, Card, Statistic, Table, Tag, Typography, Button, Space, Empty, Alert } from 'antd';
+import { Button, Empty, Table } from 'antd';
 import {
-  FileTextOutlined,
-  ScanOutlined,
+  ArrowRightOutlined,
+  DatabaseOutlined,
   DeleteOutlined,
-  ScheduleOutlined,
+  FolderOpenOutlined,
+  FolderViewOutlined,
+  InfoCircleOutlined,
   ReloadOutlined,
+  ScanOutlined,
+  ScheduleOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import ReactECharts from 'echarts-for-react';
 import { dashboardApi, scansApi, tasksApi } from '../../api/domain';
-import { useTheme } from '../../contexts/ThemeContext';
+import { PageHeader } from '../../components/ui/PageHeader';
+import { MetricCard } from '../../components/ui/MetricCard';
+import { DataPanel } from '../../components/ui/DataPanel';
+import { StatusBadge } from '../../components/ui/StatusBadge';
+import { useResponsive } from '../../hooks/useResponsive';
 import { useTitle } from '../../hooks/useTitle';
 import { formatBytes, formatDateTime } from '../../utils/format';
-import { STATUS_MAP } from '../../utils/constants';
-
-const { Title, Text } = Typography;
 
 export const DashboardPage: React.FC = () => {
   useTitle('系统概览');
   const navigate = useNavigate();
-  const { isDark } = useTheme();
+  const { isMobile } = useResponsive();
 
   const { data: summary, isLoading: summaryLoading, refetch: refetchSummary } = useQuery({
     queryKey: ['dashboardSummary'],
@@ -40,89 +45,48 @@ export const DashboardPage: React.FC = () => {
     refetchInterval: 5000,
   });
 
-  const chartOption = {
-    backgroundColor: 'transparent',
-    tooltip: {
-      trigger: 'item',
-      formatter: '{b}: {c} ({d}%)',
-    },
-    legend: {
-      bottom: '5%',
-      left: 'center',
-      textStyle: { color: isDark ? '#ddd' : '#333' },
-    },
-    series: [
-      {
-        name: '文件与去重分布',
-        type: 'pie',
-        radius: ['45%', '70%'],
-        avoidLabelOverlap: false,
-        itemStyle: {
-          borderRadius: 8,
-          borderColor: isDark ? '#141414' : '#fff',
-          borderWidth: 2,
-        },
-        label: {
-          show: false,
-          position: 'center',
-        },
-        emphasis: {
-          label: {
-            show: true,
-            fontSize: 16,
-            fontWeight: 'bold',
-            color: isDark ? '#fff' : '#333',
-          },
-        },
-        data: [
-          { value: summary?.indexed_files || 0, name: '索引文件数', itemStyle: { color: '#1677ff' } },
-          { value: summary?.indexed_folders || 0, name: '索引目录数', itemStyle: { color: '#52c41a' } },
-          { value: summary?.duplicate_group_count || 0, name: '最新扫描重复组', itemStyle: { color: '#fa8c16' } },
-          { value: summary?.plan_count || 0, name: '批处理计划', itemStyle: { color: '#722ed1' } },
-        ],
-      },
-    ],
-  };
-
   const scanColumns = [
     {
       title: '扫描名称',
       dataIndex: 'name',
       key: 'name',
       render: (text: string, record: any) => (
-        <a onClick={() => navigate(`/scans/${record.id}`)} style={{ fontWeight: 500 }}>
+        <button
+          type="button"
+          className="nfc-table-link"
+          onClick={() => navigate(`/scans/${record.id}`)}
+        >
           {text}
-        </a>
+        </button>
       ),
     },
     {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
-      render: (status: string) => {
-        const item = STATUS_MAP[status] || { label: status, color: 'default' };
-        return <Tag color={item.color}>{item.label}</Tag>;
-      },
+      width: 132,
+      render: (status: string) => <StatusBadge status={status} />,
     },
     {
       title: '重复组',
       dataIndex: 'total_groups',
       key: 'total_groups',
+      width: 86,
     },
     {
       title: '可释放空间',
       dataIndex: 'reclaimable_bytes',
       key: 'reclaimable_bytes',
+      width: 112,
       render: (bytes: number) => (
-        <Text type={bytes > 0 ? 'success' : undefined} strong={bytes > 0}>
-          {formatBytes(bytes)}
-        </Text>
+        <span className={bytes > 0 ? 'nfc-data-emphasis' : undefined}>{formatBytes(bytes)}</span>
       ),
     },
     {
       title: '时间',
       dataIndex: 'created_at',
       key: 'created_at',
+      width: 168,
       render: (val: string) => formatDateTime(val),
     },
   ];
@@ -132,7 +96,8 @@ export const DashboardPage: React.FC = () => {
       title: 'ID',
       dataIndex: 'id',
       key: 'id',
-      width: 60,
+      width: 68,
+      render: (id: number) => <span className="nfc-mono">#{id}</span>,
     },
     {
       title: '任务类型',
@@ -143,208 +108,269 @@ export const DashboardPage: React.FC = () => {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
-      render: (status: string) => {
-        const item = STATUS_MAP[status] || { label: status, color: 'default' };
-        return <Tag color={item.color}>{item.label}</Tag>;
-      },
+      width: 132,
+      render: (status: string) => <StatusBadge status={status} />,
     },
     {
       title: '进度',
       key: 'progress',
+      width: 150,
       render: (_: any, record: any) => {
         if (record.progress_total > 0) {
           const pct = Math.round((record.progress_current / record.progress_total) * 100);
-          return `${record.progress_current}/${record.progress_total} (${pct}%)`;
+          return `${record.progress_current}/${record.progress_total} · ${pct}%`;
         }
-        return record.progress_current > 0 ? `${record.progress_current} 项` : '-';
+        return record.progress_current > 0 ? `${record.progress_current} 项` : '—';
       },
     },
     {
       title: '创建时间',
       dataIndex: 'created_at',
       key: 'created_at',
+      width: 168,
       render: (val: string) => formatDateTime(val),
     },
   ];
 
-  return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-        <div>
-          <Title level={4} style={{ margin: 0 }}>
-            系统概览
-          </Title>
-          <Text type="secondary">NAS 文件中心核心运行状态与数据指标</Text>
-        </div>
-        <Button icon={<ReloadOutlined />} onClick={() => refetchSummary()} loading={summaryLoading}>
-          刷新
-        </Button>
-      </div>
+  const quickActions = [
+    {
+      title: '开始精确扫描',
+      description: '使用 fclones 发现完全重复文件。',
+      icon: <ScanOutlined />,
+      onClick: () => navigate('/scans'),
+    },
+    {
+      title: '更新文件索引',
+      description: '刷新大型目录的增量元数据索引。',
+      icon: <FolderOpenOutlined />,
+      onClick: () => navigate('/indexes'),
+    },
+    {
+      title: '整理目录结构',
+      description: '进入 Organizer 预览和规划目录整理。',
+      icon: <FolderViewOutlined />,
+      onClick: () => navigate('/organizer'),
+    },
+  ];
 
-      {/* Snapshot Semantics Notice */}
-      <Alert
-        type="info"
-        showIcon
-        message="扫描快照时效说明"
-        description="系统概览中的重复组与可释放空间基于最近一次已完成扫描任务的快照结果；如需获取最新 NAS 去重状态，请前往扫描页面发起新任务。"
-        style={{ marginBottom: 16, borderRadius: 10 }}
-        closable
+  const scanItems = scansData?.items || [];
+  const taskItems = tasksData?.items || [];
+
+  return (
+    <div className="nfc-dashboard">
+      <PageHeader
+        eyebrow="OVERVIEW"
+        title="系统概览"
+        description="NAS 文件中心的索引、扫描、执行计划与后台任务状态。"
+        actions={
+          <Button
+            icon={<ReloadOutlined />}
+            onClick={() => refetchSummary()}
+            loading={summaryLoading}
+            className="nfc-secondary-action"
+          >
+            刷新
+          </Button>
+        }
       />
 
-      {/* Statistics Cards */}
-      <Row gutter={[16, 16]}>
-        <Col xs={24} sm={12} lg={6}>
-          <Card bordered={false} style={{ borderRadius: 12 }}>
-            <Statistic
-              title="已索引文件 / 目录"
-              value={summary?.indexed_files || 0}
-              suffix={`/ ${summary?.indexed_folders || 0}`}
-              prefix={<FileTextOutlined style={{ color: '#1677ff' }} />}
-            />
-            <div style={{ marginTop: 6 }}>
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                已构建元数据索引库
-              </Text>
-            </div>
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} lg={6}>
-          <Card bordered={false} style={{ borderRadius: 12 }}>
-            <Statistic
-              title="最近一次扫描发现"
-              value={summary?.latest_scan_id ? (summary?.duplicate_group_count || 0) : '—'}
-              suffix={summary?.latest_scan_id ? '组' : undefined}
-              prefix={<ScanOutlined style={{ color: '#fa8c16' }} />}
-            />
-            <div style={{ marginTop: 6 }}>
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                {summary?.latest_scan_id
-                  ? `基于: ${summary.latest_scan_name || `扫描 #${summary.latest_scan_id}`} (${summary.latest_scan_finished_at ? formatDateTime(summary.latest_scan_finished_at) : '已完成'})`
-                  : '暂无已完成扫描'}
-              </Text>
-            </div>
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} lg={6}>
-          <Card bordered={false} style={{ borderRadius: 12 }}>
-            <Statistic
-              title="最近一次扫描预计可释放"
-              value={summary?.latest_scan_id ? formatBytes(summary?.latest_reclaimable_bytes || 0) : '—'}
-              prefix={<DeleteOutlined style={{ color: '#52c41a' }} />}
-              valueStyle={{ color: summary?.latest_scan_id ? '#52c41a' : undefined }}
-            />
-            <div style={{ marginTop: 6 }}>
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                {summary?.latest_scan_id
-                  ? '单次扫描潜在释放量快照'
-                  : '暂无已完成扫描'}
-              </Text>
-            </div>
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} lg={6}>
-          <Card bordered={false} style={{ borderRadius: 12 }}>
-            <Statistic
-              title="批处理计划总数"
-              value={summary?.plan_count || 0}
-              prefix={<ScheduleOutlined style={{ color: '#722ed1' }} />}
-            />
-            <div style={{ marginTop: 6 }}>
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                去重与整理执行计划
-              </Text>
-            </div>
-          </Card>
-        </Col>
-      </Row>
+      <div className="nfc-snapshot-note" role="note">
+        <InfoCircleOutlined />
+        <div>
+          <strong>扫描快照</strong>
+          <span>
+            重复组和可释放空间来自最近一次已完成扫描；需要最新结果时请重新发起扫描。
+          </span>
+        </div>
+      </div>
 
-      {/* Charts & Summaries */}
-      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
-        <Col xs={24} lg={12}>
-          <Card
-            title="系统数据概览"
-            bordered={false}
-            style={{ borderRadius: 12, minHeight: 340 }}
+      <section className="nfc-metric-grid" aria-label="核心运行指标">
+        <MetricCard
+          label="已索引文件"
+          value={summary?.indexed_files || 0}
+          meta={`${summary?.indexed_folders || 0} 个目录`}
+          icon={<DatabaseOutlined />}
+        />
+        <MetricCard
+          label="最近一次扫描发现"
+          value={summary?.latest_scan_id ? summary?.duplicate_group_count || 0 : '—'}
+          meta={
+            summary?.latest_scan_id
+              ? summary.latest_scan_name || `扫描 #${summary.latest_scan_id}`
+              : '暂无已完成扫描'
+          }
+          icon={<ScanOutlined />}
+          tone="attention"
+        />
+        <MetricCard
+          label="最近一次扫描预计可释放"
+          value={summary?.latest_scan_id ? formatBytes(summary?.latest_reclaimable_bytes || 0) : '—'}
+          meta={
+            summary?.latest_scan_finished_at
+              ? formatDateTime(summary.latest_scan_finished_at)
+              : '等待扫描快照'
+          }
+          icon={<DeleteOutlined />}
+          tone={summary?.latest_reclaimable_bytes ? 'success' : 'default'}
+        />
+        <MetricCard
+          label="执行计划"
+          value={summary?.plan_count || 0}
+          meta="当前计划总数"
+          icon={<ScheduleOutlined />}
+        />
+      </section>
+
+      <div className="nfc-dashboard-layout">
+        <main className="nfc-dashboard-main-column">
+          <DataPanel
+            title="最近扫描"
+            description="最近的重复文件扫描及其快照结果。"
+            action={
+              <Button type="link" onClick={() => navigate('/scans')}>
+                查看全部 <ArrowRightOutlined />
+              </Button>
+            }
           >
-            {summary && (summary.indexed_files > 0 || summary.duplicate_group_count > 0) ? (
-              <ReactECharts option={chartOption} style={{ height: 260 }} />
+            {isMobile ? (
+              <div className="nfc-mobile-activity-list">
+                {scanItems.length === 0 ? (
+                  <Empty description="暂无扫描任务" />
+                ) : (
+                  scanItems.map((item: any) => (
+                    <button
+                      type="button"
+                      key={item.id}
+                      className="nfc-mobile-activity-card"
+                      onClick={() => navigate(`/scans/${item.id}`)}
+                    >
+                      <div className="nfc-mobile-activity-topline">
+                        <strong>{item.name}</strong>
+                        <StatusBadge status={item.status} />
+                      </div>
+                      <div className="nfc-mobile-activity-grid">
+                        <span>重复组 <b>{item.total_groups ?? 0}</b></span>
+                        <span>可释放 <b>{formatBytes(item.reclaimable_bytes || 0)}</b></span>
+                      </div>
+                      <div className="nfc-mobile-activity-meta">
+                        {item.created_at ? formatDateTime(item.created_at) : '—'}
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
             ) : (
-              <Empty description="暂无索引或去重数据" style={{ marginTop: 40 }} />
+              <Table
+                dataSource={scanItems}
+                columns={scanColumns}
+                rowKey="id"
+                pagination={false}
+                loading={scansLoading}
+                size="small"
+                locale={{ emptyText: <Empty description="暂无扫描任务" /> }}
+              />
             )}
-          </Card>
-        </Col>
-        <Col xs={24} lg={12}>
-          <Card
-            title="快速操作"
-            bordered={false}
-            style={{ borderRadius: 12, minHeight: 340 }}
-          >
-            <Space direction="vertical" style={{ width: '100%' }} size="middle">
-              <Card
-                type="inner"
-                title="新建 fclones 精确扫描"
-                extra={<Button type="link" onClick={() => navigate('/scans')}>前往扫描 &gt;</Button>}
-              >
-                基于 Rust fclones 快速发现重复文件组，安全隔离与清理。
-              </Card>
-              <Card
-                type="inner"
-                title="增量文件索引"
-                extra={<Button type="link" onClick={() => navigate('/indexes')}>前往索引 &gt;</Button>}
-              >
-                针对几十 TB 目录建立增量索引，支持秒级路径查询与匹配。
-              </Card>
-              <Card
-                type="inner"
-                title="Organizer 目录整理"
-                extra={<Button type="link" onClick={() => navigate('/organizer')}>整理 &gt;</Button>}
-              >
-                按真实照片/视频统计自动重命名并规范目录结构。
-              </Card>
-            </Space>
-          </Card>
-        </Col>
-      </Row>
+          </DataPanel>
 
-      {/* Recent Scans & Tasks */}
-      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
-        <Col xs={24} lg={12}>
-          <Card
-            title="最近扫描任务"
-            bordered={false}
-            style={{ borderRadius: 12 }}
-            extra={<Button type="link" onClick={() => navigate('/scans')}>全部扫描 &gt;</Button>}
-          >
-            <Table
-              dataSource={scansData?.items || []}
-              columns={scanColumns}
-              rowKey="id"
-              pagination={false}
-              loading={scansLoading}
-              size="small"
-              locale={{ emptyText: <Empty description="暂无扫描任务" /> }}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} lg={12}>
-          <Card
+          <DataPanel
             title="后台执行队列"
-            bordered={false}
-            style={{ borderRadius: 12 }}
-            extra={<Button type="link" onClick={() => navigate('/tasks')}>全部任务 &gt;</Button>}
+            description="Worker 正在处理或等待处理的任务。"
+            action={
+              <Button type="link" onClick={() => navigate('/tasks')}>
+                查看全部 <ArrowRightOutlined />
+              </Button>
+            }
           >
-            <Table
-              dataSource={tasksData?.items || []}
-              columns={taskColumns}
-              rowKey="id"
-              pagination={false}
-              loading={tasksLoading}
-              size="small"
-              locale={{ emptyText: <Empty description="暂无执行中任务" /> }}
-            />
-          </Card>
-        </Col>
-      </Row>
+            {isMobile ? (
+              <div className="nfc-mobile-activity-list">
+                {taskItems.length === 0 ? (
+                  <Empty description="暂无执行中任务" />
+                ) : (
+                  taskItems.map((item: any) => (
+                    <div key={item.id} className="nfc-mobile-activity-card">
+                      <div className="nfc-mobile-activity-topline">
+                        <strong>{item.kind}</strong>
+                        <StatusBadge status={item.status} />
+                      </div>
+                      <div className="nfc-mobile-activity-grid">
+                        <span className="nfc-mono">#{item.id}</span>
+                        <span>
+                          进度{' '}
+                          <b>
+                            {item.progress_total > 0
+                              ? `${item.progress_current}/${item.progress_total}`
+                              : item.progress_current > 0
+                                ? `${item.progress_current} 项`
+                                : '—'}
+                          </b>
+                        </span>
+                      </div>
+                      <div className="nfc-mobile-activity-meta">
+                        {item.created_at ? formatDateTime(item.created_at) : '—'}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            ) : (
+              <Table
+                dataSource={taskItems}
+                columns={taskColumns}
+                rowKey="id"
+                pagination={false}
+                loading={tasksLoading}
+                size="small"
+                locale={{ emptyText: <Empty description="暂无执行中任务" /> }}
+              />
+            )}
+          </DataPanel>
+        </main>
+
+        <aside className="nfc-dashboard-rail">
+          <DataPanel
+            title="快速操作"
+            description="进入最常用的 NAS 工作流。"
+          >
+            <div className="nfc-quick-actions">
+              {quickActions.map((action) => (
+                <button
+                  type="button"
+                  key={action.title}
+                  className="nfc-quick-action"
+                  onClick={action.onClick}
+                >
+                  <span className="nfc-quick-action-icon" aria-hidden="true">{action.icon}</span>
+                  <span className="nfc-quick-action-copy">
+                    <strong>{action.title}</strong>
+                    <span>{action.description}</span>
+                  </span>
+                  <ArrowRightOutlined className="nfc-quick-action-arrow" />
+                </button>
+              ))}
+            </div>
+          </DataPanel>
+
+          <DataPanel
+            title="运行摘要"
+            description="用于快速判断当前系统是否需要关注。"
+          >
+            <div className="nfc-summary-list">
+              <div className="nfc-summary-row">
+                <span><ThunderboltOutlined /> 活跃任务</span>
+                <strong>{summary?.queued_or_running_jobs || 0}</strong>
+              </div>
+              <div className="nfc-summary-row">
+                <span><ScanOutlined /> 扫描总数</span>
+                <strong>{summary?.scan_count || 0}</strong>
+              </div>
+              <div className="nfc-summary-row">
+                <span><ScheduleOutlined /> 执行计划</span>
+                <strong>{summary?.plan_count || 0}</strong>
+              </div>
+            </div>
+          </DataPanel>
+        </aside>
+      </div>
     </div>
   );
 };
