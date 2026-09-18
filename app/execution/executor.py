@@ -535,7 +535,21 @@ def execute_item(
                         raise
                     source_stat = os.lstat(source)
                     if stat.S_ISDIR(source_stat.st_mode):
-                        rename_directory_noreplace_compat(source, target)
+                        try:
+                            rename_directory_noreplace_compat(source, target)
+                        except OSError as compat_exc:
+                            if compat_exc.errno != errno.EOPNOTSUPP:
+                                raise
+                            from app.execution.directory_transplant import move_directory_tree_noreplace
+                            move_directory_tree_noreplace(
+                                source,
+                                target,
+                                quarantine_root=quarantine_root,
+                                plan_id=plan_id,
+                                sequence=item.sequence,
+                                expected_device=item.expected_device,
+                                expected_inode=item.expected_inode,
+                            )
                     elif stat.S_ISREG(source_stat.st_mode):
                         _compat_regular_file_move_noreplace(source, target)
                     else:
