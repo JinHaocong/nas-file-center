@@ -223,37 +223,58 @@ def _require_owned_dir(
         )
 
 
-def _move_regular_file(src_fd: int, dst_fd: int, name: str) -> None:
+def _move_regular_file(
+    src_fd: int,
+    dst_fd: int,
+    name: str,
+    *,
+    rel_path: str,
+) -> None:
     src_st = _stat_at(src_fd, name)
     if _entry_exists_at(dst_fd, name):
         dst_st = _stat_at(dst_fd, name)
         if _identity(src_st) != _identity(dst_st) or not stat.S_ISREG(dst_st.st_mode):
             raise DirectoryTransplantConflict(
                 errno.EEXIST,
-                f"Foreign target entry appeared during directory MOVE: {name}",
+                f"Foreign target entry appeared during directory MOVE: {rel_path}",
             )
-        os.unlink(name, dir_fd=src_fd)
+        try:
+            os.unlink(name, dir_fd=src_fd)
+        except OSError as exc:
+            raise OSError(
+                exc.errno or errno.EIO,
+                f"TRANSPLANT_SOURCE_UNLINK_FAILED at {rel_path}: {exc}",
+            ) from exc
         return
 
-    os.link(
-        name,
-        name,
-        src_dir_fd=src_fd,
-        dst_dir_fd=dst_fd,
-        follow_symlinks=False,
-    )
+    try:
+        os.link(
+            name,
+            name,
+            src_dir_fd=src_fd,
+            dst_dir_fd=dst_fd,
+            follow_symlinks=False,
+        )
+    except OSError as exc:
+        raise OSError(
+            exc.errno or errno.EIO,
+            f"TRANSPLANT_LINK_FAILED at {rel_path}: {exc}",
+        ) from exc
+
     try:
         os.unlink(name, dir_fd=src_fd)
-    except OSError:
+    except OSError as unlink_error:
         try:
             os.unlink(name, dir_fd=dst_fd)
         except OSError as rollback_error:
             raise OSError(
                 errno.EIO,
-                f"Directory MOVE file rollback failed for {name}: {rollback_error}",
-            )
-        raise
-
+                f"TRANSPLANT_ROLLBACK_FAILED at {rel_path}: {rollback_error}",
+            ) from unlink_error
+        raise OSError(
+            unlink_error.errno or errno.EIO,
+            f"TRANSPLANT_SOURCE_UNLINK_FAILED at {rel_path}: {unlink_error}",
+        ) from unlink_error
 
 def _move_symlink(
     src_fd: int,
