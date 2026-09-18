@@ -1,15 +1,12 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
-  Card,
-  Descriptions,
-  Table,
-  Tag,
-  Button,
-  Space,
-  Typography,
   Alert,
+  Button,
+  Empty,
+  Pagination,
   Spin,
+  Table,
   Tooltip,
   message,
 } from 'antd';
@@ -17,19 +14,22 @@ import {
   ArrowLeftOutlined,
   ReloadOutlined,
   ScheduleOutlined,
-  CheckCircleOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { scansApi } from '../../api/domain';
 import { useTitle } from '../../hooks/useTitle';
 import { formatBytes, formatDateTime } from '../../utils/format';
-import { STATUS_MAP } from '../../utils/constants';
 import { DedupePlanModal } from './DedupePlanModal';
 import { DuplicateGroup } from '../../types';
 import { ScanDeleteButton } from '../../components/scans/ScanDeleteButton';
-
-const { Title, Text } = Typography;
+import { PageHeader } from '../../components/ui/PageHeader';
+import { DataPanel } from '../../components/ui/DataPanel';
+import { ActionBar } from '../../components/ui/ActionBar';
+import { ResponsiveDescriptions } from '../../components/ui/ResponsiveDescriptions';
+import { ResponsiveDataView } from '../../components/ui/ResponsiveDataView';
+import { StatusBadge } from '../../components/ui/StatusBadge';
+import { CodePath } from '../../components/ui/CodePath';
 
 export const ScanDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -55,8 +55,7 @@ export const ScanDetailPage: React.FC = () => {
     },
   });
 
-
-  const { data: scan, isLoading: scanLoading, refetch: refetchScan } = useQuery({
+  const { data: scan, isLoading: scanLoading, isFetching: scanFetching, refetch: refetchScan } = useQuery({
     queryKey: ['scanDetail', scanId],
     queryFn: () => scansApi.getScanDetail(scanId),
     refetchInterval: (query) => {
@@ -73,7 +72,7 @@ export const ScanDetailPage: React.FC = () => {
 
   if (scanLoading) {
     return (
-      <div style={{ textAlign: 'center', padding: 60 }}>
+      <div className="nfc-centered-state">
         <Spin size="large" />
       </div>
     );
@@ -91,24 +90,21 @@ export const ScanDetailPage: React.FC = () => {
     );
   }
 
-  const statusConfig = STATUS_MAP[scan.status] || { label: scan.status, color: 'default' };
-
   const groupColumns = [
     {
       title: '组 ID',
       dataIndex: 'id',
       key: 'id',
-      width: 80,
+      width: 82,
+      render: (value: number) => <span className="nfc-mono">#{value}</span>,
     },
     {
-      title: '内容哈希 (Hash)',
+      title: '内容哈希',
       dataIndex: 'content_hash',
       key: 'content_hash',
       render: (hash: string) => (
         <Tooltip title={hash}>
-          <Text code copyable={{ text: hash }}>
-            {hash.substring(0, 16)}...
-          </Text>
+          <span className="nfc-mono nfc-hash-value">{hash.slice(0, 18)}…</span>
         </Tooltip>
       ),
     },
@@ -116,113 +112,131 @@ export const ScanDetailPage: React.FC = () => {
       title: '单文件大小',
       dataIndex: 'file_size',
       key: 'file_size',
+      width: 118,
       render: (bytes: number) => formatBytes(bytes),
     },
     {
-      title: '重复副本数',
+      title: '重复副本',
       dataIndex: 'member_count',
       key: 'member_count',
-      render: (count: number) => <Tag color="blue">{count} 份</Tag>,
+      width: 100,
+      render: (count: number) => <span className="nfc-mono">{count} 份</span>,
     },
     {
       title: '预计可释放',
       dataIndex: 'reclaimable_bytes',
       key: 'reclaimable_bytes',
-      render: (bytes: number) => (
-        <Text type="success" strong>
-          {formatBytes(bytes)}
-        </Text>
-      ),
+      width: 130,
+      render: (bytes: number) => <span className="nfc-data-emphasis">{formatBytes(bytes)}</span>,
     },
   ];
 
-  const expandedRowRender = (record: DuplicateGroup) => {
-    const memberColumns = [
-      {
-        title: '根目录 ID',
-        dataIndex: 'root_id',
-        key: 'root_id',
-        width: 100,
-        render: (rId: number) => <Tag>Root #{rId}</Tag>,
-      },
-      {
-        title: '相对路径',
-        dataIndex: 'relative_path',
-        key: 'relative_path',
-        render: (p: string) => <Text copyable>{p}</Text>,
-      },
-      {
-        title: '完整绝对路径',
-        dataIndex: 'path',
-        key: 'path',
-        render: (p: string) => <Text code copyable>{p}</Text>,
-      },
-      {
-        title: '大小',
-        dataIndex: 'size',
-        key: 'size',
-        width: 120,
-        render: (bytes: number) => formatBytes(bytes),
-      },
-    ];
-
-    return (
+  const expandedRowRender = (record: DuplicateGroup) => (
+    <div className="nfc-duplicate-member-table">
       <Table
-        columns={memberColumns}
+        columns={[
+          {
+            title: 'Root',
+            dataIndex: 'root_id',
+            key: 'root_id',
+            width: 86,
+            render: (rootId: number) => <span className="nfc-kind-badge">root #{rootId}</span>,
+          },
+          {
+            title: '相对路径',
+            dataIndex: 'relative_path',
+            key: 'relative_path',
+            render: (value: string) => <CodePath value={value} />,
+          },
+          {
+            title: '完整路径',
+            dataIndex: 'path',
+            key: 'path',
+            render: (value: string) => <CodePath value={value} />,
+          },
+          {
+            title: '大小',
+            dataIndex: 'size',
+            key: 'size',
+            width: 110,
+            render: (bytes: number) => formatBytes(bytes),
+          },
+        ]}
         dataSource={record.members}
         pagination={false}
         rowKey="id"
         size="small"
       />
-    );
-  };
+    </div>
+  );
+
+  const descriptionItems = [
+    { label: '任务 ID', value: <span className="nfc-mono">#{scan.id}</span> },
+    {
+      label: '扫描模式',
+      value: <span className="nfc-kind-badge">{scan.mode === 'isolate' ? 'A/B isolate' : 'standard'}</span>,
+    },
+    { label: '创建时间', value: formatDateTime(scan.created_at) },
+    { label: '开始时间', value: scan.started_at ? formatDateTime(scan.started_at) : '—' },
+    { label: '完成时间', value: scan.finished_at ? formatDateTime(scan.finished_at) : '—' },
+    { label: '发现重复组数', value: `${scan.total_groups.toLocaleString()} 组`, emphasis: true },
+    { label: '重复文件总数', value: `${scan.total_files_in_groups.toLocaleString()} 个`, emphasis: true },
+    { label: '预计可释放容量', value: formatBytes(scan.reclaimable_bytes), emphasis: true },
+  ];
+
+  const groupItems = groupsData?.items || [];
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-        <Space>
-          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/scans')}>
-            返回列表
-          </Button>
-          <Title level={4} style={{ margin: 0 }}>
-            扫描详情: {scan.name}
-          </Title>
-          <Tag color={statusConfig.color} style={{ fontSize: 13, padding: '2px 8px' }}>
-            {statusConfig.label}
-          </Tag>
-          {scan.has_dependent_plan && (
-            <Tag color="gold" style={{ fontSize: 13, padding: '2px 8px' }}>
-              已生成关联计划
-            </Tag>
-          )}
-        </Space>
-        <Space>
-          <Button icon={<ReloadOutlined />} onClick={() => { refetchScan(); refetchGroups(); }}>
-            刷新
-          </Button>
-          <ScanDeleteButton
-            scan={scan}
-            onDelete={() => deleteScanMutation.mutate()}
-            loading={deleteScanMutation.isPending}
-            buttonText="删除扫描"
-            type="default"
-          />
-          {scan.status === 'completed' && scan.total_groups > 0 && (
-            <>
-              <Button icon={<ScheduleOutlined />} onClick={() => setPlanModalOpen(true)}>
-                经典去重计划
-              </Button>
-              <Button
-                type="primary"
-                icon={<ThunderboltOutlined />}
-                onClick={() => navigate(`/scans/${scan.id}/dedupe`)}
-              >
-                高级去重 (推荐)
-              </Button>
-            </>
-          )}
-        </Space>
-      </div>
+    <div className="nfc-operations-page">
+      <PageHeader
+        eyebrow="SCAN SNAPSHOT"
+        title={scan.name}
+        description={
+          <div className="nfc-plan-header-meta">
+            <span className="nfc-mono">Scan #{scan.id}</span>
+            <StatusBadge status={scan.status} />
+            {scan.has_dependent_plan && <span className="nfc-kind-badge">dependent plan</span>}
+          </div>
+        }
+        actions={
+          <ActionBar compact>
+            <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/scans')}>
+              返回列表
+            </Button>
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={() => {
+                refetchScan();
+                refetchGroups();
+              }}
+              loading={scanFetching}
+            >
+              刷新
+            </Button>
+            <ScanDeleteButton
+              scan={scan}
+              onDelete={() => deleteScanMutation.mutate()}
+              loading={deleteScanMutation.isPending}
+              buttonText="删除扫描"
+              type="default"
+            />
+            {scan.status === 'completed' && scan.total_groups > 0 && (
+              <>
+                <Button icon={<ScheduleOutlined />} onClick={() => setPlanModalOpen(true)}>
+                  经典去重计划
+                </Button>
+                <Button
+                  type="primary"
+                  icon={<ThunderboltOutlined />}
+                  onClick={() => navigate(`/scans/${scan.id}/dedupe`)}
+                >
+                  高级去重 (Advanced Dedupe)
+                </Button>
+              </>
+            )}
+          </ActionBar>
+        }
+      />
 
       {scan.error && (
         <Alert
@@ -230,69 +244,106 @@ export const ScanDetailPage: React.FC = () => {
           description={scan.error}
           type="error"
           showIcon
-          style={{ marginBottom: 16 }}
+          className="nfc-page-alert"
         />
       )}
 
-      <Card bordered={false} style={{ borderRadius: 12, marginBottom: 16 }}>
-        <Descriptions bordered column={{ xs: 1, sm: 2, md: 3 }}>
-          <Descriptions.Item label="任务 ID">#{scan.id}</Descriptions.Item>
-          <Descriptions.Item label="扫描模式">
-            <Tag color={scan.mode === 'isolate' ? 'purple' : 'blue'}>
-              {scan.mode === 'isolate' ? 'A/B 跨目录隔离' : '标准扫描'}
-            </Tag>
-          </Descriptions.Item>
-          <Descriptions.Item label="创建时间">{formatDateTime(scan.created_at)}</Descriptions.Item>
-          <Descriptions.Item label="开始时间">{scan.started_at ? formatDateTime(scan.started_at) : '-'}</Descriptions.Item>
-          <Descriptions.Item label="完成时间">{scan.finished_at ? formatDateTime(scan.finished_at) : '-'}</Descriptions.Item>
-          <Descriptions.Item label="发现重复组数">
-            <Text strong style={{ fontSize: 16, color: '#fa8c16' }}>
-              {scan.total_groups.toLocaleString()} 组
-            </Text>
-          </Descriptions.Item>
-          <Descriptions.Item label="重复文件总数">
-            <Text strong style={{ fontSize: 16 }}>
-              {scan.total_files_in_groups.toLocaleString()} 个
-            </Text>
-          </Descriptions.Item>
-          <Descriptions.Item label="预计可释放容量">
-            <Text strong style={{ fontSize: 16, color: '#52c41a' }}>
-              {formatBytes(scan.reclaimable_bytes)}
-            </Text>
-          </Descriptions.Item>
-          <Descriptions.Item label="扫描根目录" span={3}>
-            <Space wrap>
-              {scan.roots.map((root, idx) => (
-                <Tag key={idx} icon={<CheckCircleOutlined />} color="cyan">
-                  {root}
-                </Tag>
-              ))}
-            </Space>
-          </Descriptions.Item>
-        </Descriptions>
-      </Card>
+      <DataPanel
+        title="扫描摘要"
+        description="扫描结果是只读快照；后续文件操作必须通过 Plan 生命周期。"
+        className="nfc-panel-flush nfc-scan-summary"
+      >
+        <ResponsiveDescriptions items={descriptionItems} />
+        <div className="nfc-root-list">
+          <span className="nfc-root-list-label">扫描根目录</span>
+          <div className="nfc-root-list-values">
+            {scan.roots.map((root, idx) => (
+              <CodePath value={root} key={idx} />
+            ))}
+          </div>
+        </div>
+      </DataPanel>
 
       {scan.status === 'completed' && (
-        <Card title={`重复文件组列表 (${groupsData?.total || 0} 组)`} bordered={false} style={{ borderRadius: 12 }}>
-          <Table
-            dataSource={groupsData?.items || []}
-            columns={groupColumns}
-            rowKey="id"
-            loading={groupsLoading}
-            expandable={{ expandedRowRender }}
-            pagination={{
-              current: page,
-              pageSize,
-              total: groupsData?.total || 0,
-              showSizeChanger: true,
-              pageSizeOptions: ['10', '20', '50', '100'],
-              onChange: (p, ps) => {
-                setPage(p);
-                setPageSize(ps);
-              },
-            }}
+        <DataPanel
+          title="重复文件组"
+          description="展开组可查看每个成员；这里只展示扫描快照，不会直接修改文件。"
+          action={<span className="nfc-panel-count">{groupsData?.total || 0} groups</span>}
+          className="nfc-panel-flush"
+        >
+          <ResponsiveDataView
+            desktop={
+              <Table
+                dataSource={groupItems}
+                columns={groupColumns}
+                rowKey="id"
+                loading={groupsLoading}
+                expandable={{ expandedRowRender }}
+                pagination={{
+                  current: page,
+                  pageSize,
+                  total: groupsData?.total || 0,
+                  showSizeChanger: true,
+                  pageSizeOptions: ['10', '20', '50', '100'],
+                  onChange: (p, ps) => {
+                    setPage(p);
+                    setPageSize(ps);
+                  },
+                }}
+              />
+            }
+            mobile={
+              <>
+                <div className="nfc-mobile-record-list">
+                  {groupItems.length === 0 ? (
+                    <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无重复文件组" />
+                  ) : (
+                    groupItems.map((group) => (
+                      <article className="nfc-duplicate-group-mobile-card" key={group.id}>
+                        <div className="nfc-mobile-record-heading">
+                          <div>
+                            <span className="nfc-mobile-record-title nfc-mono">Group #{group.id}</span>
+                            <span className="nfc-kind-badge">{group.member_count} copies</span>
+                          </div>
+                          <span className="nfc-data-emphasis">{formatBytes(group.reclaimable_bytes)}</span>
+                        </div>
+                        <div className="nfc-mobile-record-facts">
+                          <span>单文件大小 <b>{formatBytes(group.file_size)}</b></span>
+                          <span>Hash <b className="nfc-mono">{group.content_hash.slice(0, 14)}…</b></span>
+                        </div>
+                        <details className="nfc-duplicate-member-list">
+                          <summary>查看 {group.members.length} 个成员</summary>
+                          <div>
+                            {group.members.map((member) => (
+                              <div className="nfc-duplicate-member" key={member.id}>
+                                <span className="nfc-kind-badge">root #{member.root_id}</span>
+                                <CodePath value={member.path} />
+                                <span className="nfc-table-meta">{formatBytes(member.size)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </details>
+                      </article>
+                    ))
+                  )}
+                </div>
+                <div className="nfc-mobile-pagination">
+                  <Pagination
+                    current={page}
+                    pageSize={pageSize}
+                    total={groupsData?.total || 0}
+                    showSizeChanger
+                    pageSizeOptions={['10', '20', '50', '100']}
+                    onChange={(p, ps) => {
+                      setPage(p);
+                      setPageSize(ps);
+                    }}
+                  />
+                </div>
+              </>
+            }
           />
-        </Card>
+        </DataPanel>
       )}
 
       <DedupePlanModal scanId={scanId} open={planModalOpen} onClose={() => setPlanModalOpen(false)} />
