@@ -58,3 +58,14 @@ jobs:
         working-directory: frontend
         continue-on-error: true
         run: npm audit --omit=dev --audit-level=low
+
+  container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build release Docker image
+        run: docker build -t nas-file-center:0.4.0 .
+      - name: Inspect release Docker image
+        run: |
+          docker image inspect nas-file-center:0.4.0 --format '{{.Id}} {{.Architecture}} {{.Os}}'
