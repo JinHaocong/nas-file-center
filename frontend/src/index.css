@@ -6758,3 +6758,171 @@ body,
     min-width: 0;
   }
 }
+
+
+/* Organizer, Directory Picker and Quarantine overlays */
+.nfc-organizer-profile-modal .ant-modal-body {
+  padding-top: 12px;
+}
+
+.nfc-organizer-profile-tabs .ant-tabs-nav {
+  margin-bottom: 14px;
+}
+
+.nfc-organizer-profile-tabs .ant-tabs-tab {
+  padding: 8px 10px;
+  border-radius: 10px;
+}
+
+.nfc-organizer-profile-tabs .ant-tabs-tab-active {
+  background: var(--nfc-accent-soft);
+}
+
+.nfc-organizer-profile-tabs .ant-form-item {
+  margin-bottom: 15px;
+}
+
+.nfc-organizer-profile-tabs .ant-divider {
+  margin: 10px 0 14px !important;
+  color: var(--nfc-text-subtle);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.nfc-organizer-profile-tabs .ant-alert,
+.nfc-organizer-profile-tabs .ant-card {
+  border-color: var(--nfc-shell-hairline) !important;
+  border-radius: 14px !important;
+  background: color-mix(in srgb, var(--nfc-surface-2) 38%, var(--nfc-surface-1)) !important;
+  box-shadow: none !important;
+}
+
+.nfc-organizer-profile-tabs .ant-input-number {
+  width: 100%;
+}
+
+.nfc-directory-picker-modal .ant-modal-body {
+  padding-top: 12px;
+}
+
+.nfc-directory-picker-modal .nfc-directory-browser-toolbar {
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--nfc-shell-hairline);
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--nfc-surface-2) 46%, transparent);
+}
+
+.nfc-directory-picker-modal .ant-tabs-nav {
+  margin-bottom: 10px;
+}
+
+.nfc-directory-picker-modal .ant-list {
+  border-color: var(--nfc-shell-hairline) !important;
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.nfc-directory-picker-modal .ant-list-item {
+  border-block-end-color: var(--nfc-shell-hairline) !important;
+}
+
+.nfc-directory-picker-modal .ant-list-item:hover {
+  background: color-mix(in srgb, var(--nfc-accent) 5%, var(--nfc-surface-1));
+}
+
+.nfc-directory-picker-modal .ant-modal-footer {
+  background: var(--nfc-surface-1);
+}
+
+.nfc-quarantine-restore-modal .ant-modal-content {
+  border-color: color-mix(in srgb, var(--nfc-accent) 14%, var(--nfc-hairline));
+}
+
+.nfc-quarantine-purge-modal .ant-modal-content,
+.nfc-quarantine-bulk-purge-modal .ant-modal-content {
+  border-color: color-mix(in srgb, var(--nfc-danger) 20%, var(--nfc-hairline));
+}
+
+.nfc-quarantine-bulk-restore-modal .ant-modal-content {
+  border-color: color-mix(in srgb, var(--nfc-success) 16%, var(--nfc-hairline));
+}
+
+.nfc-quarantine-restore-modal .ant-descriptions,
+.nfc-quarantine-purge-modal .ant-descriptions {
+  margin-bottom: 14px !important;
+}
+
+.nfc-quarantine-restore-modal .ant-descriptions-view,
+.nfc-quarantine-purge-modal .ant-descriptions-view {
+  overflow: hidden;
+  border-color: var(--nfc-shell-hairline) !important;
+  border-radius: 13px;
+}
+
+.nfc-quarantine-purge-modal .ant-alert,
+.nfc-quarantine-bulk-purge-modal .ant-alert,
+.nfc-quarantine-bulk-restore-modal .ant-alert,
+.nfc-quarantine-restore-modal .ant-alert {
+  border-radius: 13px;
+}
+
+.nfc-quarantine-bulk-purge-modal .ant-list-bordered,
+.nfc-quarantine-bulk-restore-modal .ant-list-bordered {
+  border-color: var(--nfc-shell-hairline);
+  border-radius: 13px;
+  overflow: hidden;
+}
+
+.nfc-quarantine-bulk-purge-modal .ant-input,
+.nfc-quarantine-purge-modal .ant-input {
+  min-height: 42px;
+  border-color: color-mix(in srgb, var(--nfc-danger) 20%, var(--nfc-hairline));
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--nfc-danger-soft) 34%, var(--nfc-surface-1));
+}
+
+@media (max-width: 767px) {
+  .nfc-organizer-profile-tabs .ant-tabs-nav-wrap,
+  .nfc-directory-picker-modal .ant-tabs-nav-wrap {
+    overflow-x: auto;
+  }
+
+  .nfc-organizer-profile-tabs .ant-tabs-nav-list,
+  .nfc-directory-picker-modal .ant-tabs-nav-list {
+    min-width: max-content;
+  }
+
+  .nfc-directory-picker-modal .nfc-directory-browser-toolbar {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .nfc-directory-picker-modal .nfc-directory-browser-toolbar .ant-btn {
+    min-height: 40px;
+  }
+
+  .nfc-directory-picker-modal .ant-list-item {
+    padding: 11px 10px !important;
+  }
+
+  .nfc-directory-picker-modal .ant-list-item-meta-description,
+  .nfc-directory-picker-modal .ant-list-item-meta-title {
+    word-break: break-all;
+  }
+
+  .nfc-quarantine-purge-modal .ant-modal-footer,
+  .nfc-quarantine-bulk-purge-modal .ant-modal-footer,
+  .nfc-quarantine-bulk-restore-modal .ant-modal-footer {
+    flex-wrap: nowrap;
+  }
+
+  .nfc-quarantine-purge-modal .ant-descriptions-item-label,
+  .nfc-quarantine-purge-modal .ant-descriptions-item-content,
+  .nfc-quarantine-restore-modal .ant-descriptions-item-label,
+  .nfc-quarantine-restore-modal .ant-descriptions-item-content {
+    padding: 9px 10px !important;
+  }
+}
