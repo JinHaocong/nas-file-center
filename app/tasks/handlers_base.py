@@ -14,7 +14,8 @@ from sqlalchemy import delete, select, text
 
 from app.batch.plans import OperationItem
 from app.config import Settings
-from app.execution.executor import execute_item
+from app.execution.executor import ItemResult, execute_item
+from app.execution.utility_wrapper_pair import open_utility_wrapper_live_guard
 from app.models import (
     AuditEvent,
     BatchPlan,
@@ -1549,6 +1550,70 @@ def _reconcile_executing_item(
                     metadata_after_json=json.dumps(res_stat, ensure_ascii=False),
                     created_at=now,
                 ))
+
+
+def _utility_single_child_meta(item_meta: Any) -> dict[str, Any] | None:
+    if item_meta.operation not in {"move", "rmdir_empty"}:
+        return None
+    try:
+        meta = json.loads(item_meta.metadata_json or "{}")
+    except Exception:
+        return None
+    if not isinstance(meta, dict):
+        return None
+    if meta.get("utility_action") != "single_child_wrapper_collapse":
+        return None
+    wrapper_path = meta.get("wrapper_path")
+    child_path = meta.get("child_path")
+    target_path = meta.get("target_path")
+    candidate_id = meta.get("candidate_id")
+    if (
+        not isinstance(wrapper_path, str)
+        or not wrapper_path
+        or not isinstance(child_path, str)
+        or not child_path
+        or not isinstance(target_path, str)
+        or not target_path
+        or not isinstance(candidate_id, str)
+        or not candidate_id
+    ):
+        return None
+    return meta
+
+
+def _is_utility_single_child_cleanup(item_meta: Any) -> bool:
+    meta = _utility_single_child_meta(item_meta)
+    return bool(
+        item_meta.operation == "rmdir_empty"
+        and meta is not None
+        and meta.get("wrapper_path") == item_meta.source_path
+    )
+
+
+def _utility_cleanup_pair_matches(
+    move_row: BatchPlanItem,
+    cleanup_row: BatchPlanItem,
+    move_meta: dict[str, Any],
+) -> bool:
+    if cleanup_row.operation != "rmdir_empty":
+        return False
+    if cleanup_row.sequence != move_row.sequence + 1:
+        return False
+    try:
+        cleanup_meta = json.loads(cleanup_row.metadata_json or "{}")
+    except Exception:
+        return False
+    if not isinstance(cleanup_meta, dict):
+        return False
+    for key in ("candidate_id", "wrapper_path", "child_path", "target_path"):
+        if cleanup_meta.get(key) != move_meta.get(key):
+            return False
+    return (
+        cleanup_row.source_path == move_meta.get("wrapper_path")
+        and move_row.source_path == move_meta.get("child_path")
+        and move_row.target_path == move_meta.get("target_path")
+    )
+
 
 def _verify_plan_item_and_keep_freshness(
     item_meta: Any,
