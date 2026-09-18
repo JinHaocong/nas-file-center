@@ -71,3 +71,45 @@ def test_build_rename_plan_rejects_collisions(tmp_path):
             rule=RenameRule(regex_pattern=r"^[ab]", regex_replacement="same"),
             allowed_roots=[root],
         )
+
+
+def test_build_rename_plan_filters_and_replaces_extension_case_insensitively(tmp_path):
+    root = tmp_path / "data"
+    root.mkdir()
+    lower = root / "cover.webp"
+    upper = root / "poster.WEBP"
+    other = root / "keep.png"
+    lower.write_bytes(b"lower")
+    upper.write_bytes(b"upper")
+    other.write_bytes(b"other")
+
+    from app.batch.rename import RenameRule, build_rename_plan
+
+    proposals = build_rename_plan(
+        [lower, upper, other],
+        rule=RenameRule(source_extension="webp", target_extension=".jpg"),
+        allowed_roots=[root],
+    )
+
+    assert {p.source.name: p.target.name for p in proposals} == {
+        "cover.webp": "cover.jpg",
+        "poster.WEBP": "poster.jpg",
+    }
+
+
+def test_build_rename_plan_extension_replacement_preserves_no_clobber_collision_check(tmp_path):
+    root = tmp_path / "data"
+    root.mkdir()
+    source = root / "cover.webp"
+    target = root / "cover.jpg"
+    source.write_bytes(b"webp")
+    target.write_bytes(b"existing")
+
+    from app.batch.rename import RenameCollisionError, RenameRule, build_rename_plan
+
+    with pytest.raises(RenameCollisionError):
+        build_rename_plan(
+            [source],
+            rule=RenameRule(source_extension=".webp", target_extension="jpg"),
+            allowed_roots=[root],
+        )

@@ -100,3 +100,30 @@ def test_recursive_rename_preview_children_become_plan_items(tmp_path: Path) -> 
     }
     assert all(row.operation == "rename" for row in rows)
     assert all(row.source_path != str(scope) for row in rows)
+
+
+def test_recursive_rename_extension_filter_only_proposes_matching_files(tmp_path: Path) -> None:
+    from app.batch.rename import RenameRule
+
+    service, data_dir = _make_service(tmp_path)
+    scope = data_dir / "Images"
+    nested = scope / "Nested"
+    nested.mkdir(parents=True)
+
+    first = scope / "cover.webp"
+    second = nested / "poster.WEBP"
+    untouched = scope / "photo.png"
+    first.write_bytes(b"one")
+    second.write_bytes(b"two")
+    untouched.write_bytes(b"png")
+
+    preview = service.rename_preview(
+        [str(scope)],
+        RenameRule(source_extension=".webp", target_extension=".jpg"),
+    )
+
+    assert {row["source"]: row["target"] for row in preview} == {
+        str(first): str(scope / "cover.jpg"),
+        str(second): str(nested / "poster.jpg"),
+    }
+    assert str(untouched) not in {row["source"] for row in preview}
