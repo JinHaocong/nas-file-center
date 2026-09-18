@@ -4387,10 +4387,17 @@ class FileCenterService:
             raise StateConflictError(
                 f"Quarantine entry #{entry.id} must be permanently purged before deleting its record"
             )
-        if os.path.lexists(entry.quarantine_path):
+        try:
+            os.lstat(entry.quarantine_path)
+        except FileNotFoundError:
+            return
+        except OSError as exc:
             raise StateConflictError(
-                f"Quarantine payload path reappeared for entry #{entry.id}; record deletion is blocked"
-            )
+                f"Cannot prove quarantine payload absence for entry #{entry.id}: {exc}"
+            ) from exc
+        raise StateConflictError(
+            f"Quarantine payload path reappeared for entry #{entry.id}; record deletion is blocked"
+        )
 
     def delete_quarantine_record(
         self,
