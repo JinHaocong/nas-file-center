@@ -1,5 +1,5 @@
 import React from 'react';
-import { Layout, Menu, Typography } from 'antd';
+import { Layout, Menu } from 'antd';
 import type { MenuProps } from 'antd';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
@@ -20,8 +20,6 @@ import {
 } from '@ant-design/icons';
 
 const { Sider } = Layout;
-const { Text } = Typography;
-
 interface Props {
   collapsed: boolean;
   onCollapse: (collapsed: boolean) => void;
@@ -110,9 +108,7 @@ export const Sidebar: React.FC<Props> = ({
         </span>
         {(!collapsed || embedded) && (
           <span className="nfc-brand-copy">
-            <Text strong className="nfc-brand-title">
-              NAS File Center
-            </Text>
+            <span className="nfc-brand-title">NAS File Center</span>
             <span className="nfc-sidebar-meta">
               <span>CONTROL PLANE</span>
               <span className="nfc-sidebar-meta-separator" aria-hidden="true">/</span>
