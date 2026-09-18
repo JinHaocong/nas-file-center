@@ -465,3 +465,23 @@ Console rhythm:
 - the shared easing reference is `cubic-bezier(0.16, 1, 0.3, 1)`, without bounce or overshoot.
 
 The source design system is guidance, not runtime dependency. React 18 + TypeScript + Vite + Ant Design 5 remain unchanged.
+
+
+### v0.4.2 closure
+
+Manual acceptance:
+- User explicitly approved merge on 2026-09-18 after the Taste × Feihong Console redesign pass.
+- Real-browser visual acceptance is treated as user-owned approval; automated tests remain evidence for structural UI contracts only.
+
+Verification evidence:
+- Taste RED: Actions `35311300882`
+- Taste GREEN: Actions `35311577378`
+- Taste final refactor validation: Actions `35311699878`
+- Feihong Console Quality Gate RED: Actions `35312162194`
+- Combined GREEN: Actions `35312349148`
+- Final combined automated result: 463 / 463 frontend tests PASS, TypeScript PASS, production build PASS.
+
+Release boundary:
+- v0.4.2 remains UI / design-system / visual-regression scope only.
+- No backend, API, Worker, executor, fs_ops, Quarantine, Plan lifecycle, PathGuard, RBAC or destructive-confirmation semantics were intentionally changed.
+- The temporary v0.4.2 PR-only TDD workflow is removed at closure; the regression contracts remain in the frontend test runner.
