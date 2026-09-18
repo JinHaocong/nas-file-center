@@ -13,6 +13,11 @@ jobs:
   backend:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      CONFIG_DIR: /tmp/nfc-config
+      DATA_MOUNT: /tmp/nfc-data
+      ALLOWED_ROOTS: /tmp/nfc-data
+      QUARANTINE_ROOT: /tmp/nfc-data/.nas-file-center-trash
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
