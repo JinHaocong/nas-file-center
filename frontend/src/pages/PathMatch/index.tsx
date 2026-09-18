@@ -1,5 +1,13 @@
 import React, { useState } from 'react';
-import { Card, Form, Input, Select, Button, Typography, Space, Table, Tag, Row, Col, message } from 'antd';
+import {
+  Button,
+  Empty,
+  Form,
+  Input,
+  Select,
+  Table,
+  message,
+} from 'antd';
 import { PlayCircleOutlined, ScheduleOutlined } from '@ant-design/icons';
 import { useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
@@ -7,8 +15,12 @@ import { batchApi, plansApi } from '../../api/domain';
 import { useTitle } from '../../hooks/useTitle';
 import { splitLines } from '../../utils/format';
 import { DirectoryPicker } from '../../components/DirectoryPicker';
-
-const { Title, Text } = Typography;
+import { PageHeader } from '../../components/ui/PageHeader';
+import { DataPanel } from '../../components/ui/DataPanel';
+import { ActionBar } from '../../components/ui/ActionBar';
+import { ResponsiveDataView } from '../../components/ui/ResponsiveDataView';
+import { CodePath } from '../../components/ui/CodePath';
+import { StatusBadge } from '../../components/ui/StatusBadge';
 
 export const PathMatchPage: React.FC = () => {
   useTitle('路径匹配');
@@ -59,7 +71,7 @@ export const PathMatchPage: React.FC = () => {
         normalize_replacement: values.normalize_replacement || '',
       });
     } catch {
-      // Validation error
+      // AntD handles validation.
     }
   };
 
@@ -68,7 +80,6 @@ export const PathMatchPage: React.FC = () => {
     const items: any[] = [];
     groups.forEach((g) => {
       if (g.members && g.members.length > 1) {
-        // keep first path, quarantine rest
         const keep = g.members[0].path;
         for (let i = 1; i < g.members.length; i++) {
           items.push({
@@ -93,40 +104,46 @@ export const PathMatchPage: React.FC = () => {
 
   const columns = [
     {
-      title: '匹配键 (Key)',
+      title: '匹配键',
       dataIndex: 'key',
       key: 'key',
-      render: (key: string) => <Text strong>{key}</Text>,
+      width: 260,
+      render: (key: string) => <span className="nfc-mono">{key}</span>,
     },
     {
-      title: '匹配路径清单',
+      title: '匹配路径',
       dataIndex: 'members',
       key: 'members',
       render: (members: any[]) => (
-        <Space direction="vertical" style={{ width: '100%' }}>
-          {(members || []).map((m, idx) => (
-            <div key={idx}>
-              <Tag color={idx === 0 ? 'green' : 'orange'}>
-                {idx === 0 ? '保留首选' : `副本 #${idx}`} ({m.root})
-              </Tag>
-              <Text code copyable>{m.path}</Text>
+        <div className="nfc-path-match-members">
+          {(members || []).map((member, index) => (
+            <div className="nfc-path-match-member" key={`${member.path}-${index}`}>
+              <StatusBadge
+                status={index === 0 ? 'completed' : 'paused'}
+                label={index === 0 ? '保留首选' : `副本 #${index}`}
+              />
+              <span className="nfc-kind-badge">{member.root}</span>
+              <CodePath value={member.path} />
             </div>
           ))}
-        </Space>
+        </div>
       ),
     },
   ];
 
   return (
-    <div>
-      <div style={{ marginBottom: 20 }}>
-        <Title level={4} style={{ margin: 0 }}>
-          跨目录路径匹配
-        </Title>
-        <Text type="secondary">按相对路径、文件名 (basename) 或正则归一化跨目录匹配同名文件</Text>
-      </div>
+    <div className="nfc-operations-page">
+      <PageHeader
+        eyebrow="FILE TOOLS"
+        title="跨目录路径匹配"
+        description="按相对路径、basename、stem 或正则归一化跨根目录匹配；Preview 只读，生成 Plan 后仍需完整生命周期校验。"
+      />
 
-      <Card bordered={false} style={{ borderRadius: 12, marginBottom: 16 }}>
+      <DataPanel
+        title="匹配规则"
+        description="至少选择两个根目录；路径必须位于 ALLOWED_ROOTS。"
+        className="nfc-complex-form-panel nfc-file-tool-form"
+      >
         <Form
           form={form}
           layout="vertical"
@@ -136,9 +153,11 @@ export const PathMatchPage: React.FC = () => {
             name="roots"
             label="比对根目录（至少 2 个）"
             rules={[{ required: true, message: '请至少选择 2 个比对根目录' }]}
-            extra="支持可视化选择目录或高级手动输入，路径必须在 ALLOWED_ROOTS 白名单内"
           >
-            <DirectoryPicker multiple placeholder="点击选择或添加待比对根目录 (至少2个)..." />
+            <DirectoryPicker
+              multiple
+              placeholder="点击选择或添加待比对根目录 (至少2个)..."
+            />
           </Form.Item>
 
           <Form.Item name="mode" label="匹配模式">
@@ -153,65 +172,105 @@ export const PathMatchPage: React.FC = () => {
           </Form.Item>
 
           {selectedMode === 'normalized' && (
-            <Row gutter={16}>
-              <Col xs={24} md={12}>
-                <Form.Item
-                  name="normalize_pattern"
-                  label="归一化正则查找 (Pattern)"
-                  rules={[{ required: true, message: 'normalized 模式必须输入正则查找 Pattern' }]}
-                  tooltip="例如：\[\d+P\s*\d+V\] 或 _backup"
-                >
-                  <Input placeholder="例如：\[\d+P.*?\]" />
-                </Form.Item>
-              </Col>
-              <Col xs={24} md={12}>
-                <Form.Item
-                  name="normalize_replacement"
-                  label="正则替换内容 (Replacement)"
-                  tooltip="默认为空，即直接清除匹配内容"
-                >
-                  <Input placeholder="替换为（默认留空清除）" />
-                </Form.Item>
-              </Col>
-            </Row>
+            <div className="nfc-form-grid">
+              <Form.Item
+                name="normalize_pattern"
+                label="归一化正则查找"
+                rules={[
+                  {
+                    required: true,
+                    message: 'normalized 模式必须输入正则查找 Pattern',
+                  },
+                ]}
+                tooltip="例如：\[\d+P\s*\d+V\] 或 _backup"
+              >
+                <Input placeholder="例如：\[\d+P.*?\]" />
+              </Form.Item>
+              <Form.Item
+                name="normalize_replacement"
+                label="正则替换内容"
+                tooltip="默认为空，即直接清除匹配内容"
+              >
+                <Input placeholder="替换为（默认留空清除）" />
+              </Form.Item>
+            </div>
           )}
 
-          <Space style={{ marginTop: 8 }}>
+          <ActionBar className="nfc-file-tool-primary-actions">
             <Button
               type="primary"
               icon={<PlayCircleOutlined />}
               onClick={handlePreview}
               loading={matchMutation.isPending}
             >
-              开始路径比对预览
+              开始只读比对
             </Button>
             {groups && groups.length > 0 && (
               <Button
-                type="dashed"
                 icon={<ScheduleOutlined />}
                 onClick={handleGeneratePlan}
                 loading={planMutation.isPending}
               >
-                生成去重 Plan (#{groups.length} 组)
+                生成去重 Plan ({groups.length} 组)
               </Button>
             )}
-          </Space>
+          </ActionBar>
         </Form>
-      </Card>
+      </DataPanel>
 
       {groups && (
-        <Card
-          bordered={false}
-          style={{ borderRadius: 12 }}
-          title={`比对结果 (共发现 ${groups.length} 组重复匹配)`}
+        <DataPanel
+          title="路径匹配 Preview"
+          description="每组第一个成员作为 keep，后续成员作为 Quarantine Plan 候选；此处尚未修改文件。"
+          action={<span className="nfc-panel-count">{groups.length} groups</span>}
+          className="nfc-panel-flush nfc-file-tool-result-panel"
         >
-          <Table
-            dataSource={groups}
-            columns={columns}
-            rowKey="key"
-            pagination={{ pageSize: 20 }}
+          <ResponsiveDataView
+            desktop={
+              <Table
+                dataSource={groups}
+                columns={columns}
+                rowKey="key"
+                pagination={{ pageSize: 20 }}
+              />
+            }
+            mobile={
+              <div className="nfc-mobile-record-list">
+                {groups.length === 0 ? (
+                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="未发现匹配组" />
+                ) : (
+                  groups.map((group) => (
+                    <article className="nfc-path-match-mobile-card" key={group.key}>
+                      <div className="nfc-mobile-record-heading">
+                        <strong className="nfc-mobile-record-title nfc-mono">
+                          {group.key}
+                        </strong>
+                        <span className="nfc-panel-count">
+                          {group.members?.length || 0} members
+                        </span>
+                      </div>
+                      <div className="nfc-path-match-members">
+                        {(group.members || []).map((member: any, index: number) => (
+                          <div
+                            className="nfc-path-match-member"
+                            key={`${member.path}-${index}`}
+                          >
+                            <StatusBadge
+                              status={index === 0 ? 'completed' : 'paused'}
+                              label={index === 0 ? '保留首选' : `副本 #${index}`}
+                            />
+                            <span className="nfc-kind-badge">{member.root}</span>
+                            <CodePath value={member.path} />
+                          </div>
+                        ))}
+                      </div>
+                    </article>
+                  ))
+                )}
+              </div>
+            }
           />
-        </Card>
+        </DataPanel>
       )}
     </div>
   );
