@@ -38,15 +38,19 @@ describe('v0.4.2 Taste redesign contract', () => {
     assert.ok(css.includes('.nfc-dashboard-rail'));
   });
 
-  test('sidebar and header gain a deliberate workspace chrome layer', () => {
+  test('sidebar and header retain a deliberate workspace chrome layer across later visual resets', () => {
     const sidebar = read('src/components/Sidebar.tsx');
     const header = read('src/components/Header.tsx');
     const css = read('src/index.css');
     assert.ok(sidebar.includes('nfc-sidebar-meta'));
     assert.ok(sidebar.includes('CONTROL PLANE'));
-    assert.ok(header.includes('nfc-header-product-mark'));
+    assert.ok(
+      header.includes('nfc-header-product-mark') || header.includes('nfc-header-brandline')
+    );
     assert.ok(css.includes('.nfc-sidebar-meta'));
-    assert.ok(css.includes('.nfc-header-product-mark'));
+    assert.ok(
+      css.includes('.nfc-header-product-mark') || css.includes('.nfc-header-brandline')
+    );
   });
 
   test('dashboard content removes all-caps AI-style eyebrow treatment', () => {
