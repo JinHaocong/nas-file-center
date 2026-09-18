@@ -553,3 +553,71 @@ The left navigation rail and top command bar are intentionally unchanged because
 ### Safety boundaries
 
 This pass is presentation-only. It does not change API contracts, RBAC, destructive confirmations, Worker/executor/fs_ops ownership, Quarantine semantics, or Preview → Draft → Freeze → Validate → Execute.
+
+
+## v0.4.4 Detail Pass 2 — Deep Component & Mobile Contract
+
+This pass keeps the accepted floating left workspace rail and top command bar. It focuses on the right-side product surface and treats every detail route and overlay as part of the product, not as secondary Ant Design chrome.
+
+### Coverage
+
+Primary pages:
+- Dashboard
+- Indexes
+- Scans
+- Path Match
+- Rename
+- Batch
+- Organizer
+- Workflows
+- Plans
+- Quarantine
+- Tasks
+- Audit
+- Settings
+
+Detail / builder routes:
+- Scan Detail
+- Advanced Dedupe
+- Plan Detail
+- Workflow Builder
+- Organizer Preview
+
+Embedded product components:
+- Task Detail + Task Logs
+- Operation Journal
+- Stale Plan Rebuild
+- Workflow Revision History
+- Workflow Step Composer and step editors
+- Organizer Profile editor
+- Directory Picker
+- Quarantine restore / purge / bulk dialogs
+- Audit detail
+- Index / Scan creation dialogs
+- Settings destructive confirmation
+
+### Mobile contract
+
+Mobile is not allowed to be a shrunk desktop layout.
+
+- Shared Drawer overlays become full viewport width.
+- Shared Modal overlays use near-fullscreen width and safe-area-aware footers.
+- Task logs, operation journals, workflow revisions and stale-plan previews use mobile cards/lists instead of desktop tables.
+- Touch targets are at least 44px for page controls.
+- Forms collapse to one column.
+- Page actions may scroll horizontally when the action set cannot safely wrap.
+- Tables that already have page-level mobile card implementations continue to use those implementations.
+- Bottom Dock safe-area spacing remains authoritative.
+- Long paths, hashes and JSON evidence must wrap/scroll within their own surface rather than expanding the viewport.
+
+### Visual contract
+
+- Data density remains high, but hierarchy comes from typography, spacing, hairlines and semantic surfaces rather than gray card stacking.
+- Detail drawers use sectioned evidence surfaces.
+- Code/JSON evidence uses a shared mono code block.
+- Workflow editing uses a consistent step-composer model.
+- Quarantine destructive dialogs use semantic danger borders/controls without tinting the entire application red.
+- Settings destructive actions are visually isolated from normal configuration controls.
+- Inline one-off visual chrome should be replaced by reusable semantic classes when a component is revisited.
+
+No API, RBAC, filesystem, Worker, Plan lifecycle or destructive-operation semantics are changed by this pass.
