@@ -443,6 +443,6 @@ def test_first_compat_move_identity_change_still_fails_closed(
     with service.SessionLocal() as session:
         plan = session.get(BatchPlan, plan_id)
         job = session.get(WorkJob, job_id)
-        assert plan is not None and plan.status == "stale"
+        assert plan is not None and plan.status == "partial"
         assert job is not None and job.status == "failed"
         assert "filesystem_identity_changed" in (job.error_text or "")
