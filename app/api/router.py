@@ -265,6 +265,8 @@ class RenamePreviewRequest(BaseModel):
     number_start: int | None = None
     number_width: int = 3
     include_parent: bool = False
+    source_extension: str | None = None
+    target_extension: str | None = None
 
 
 class PlanItemInput(BaseModel):
@@ -952,6 +954,8 @@ def rename_preview(request: Request, payload: RenamePreviewRequest):
             number_start=payload.number_start,
             number_width=payload.number_width,
             include_parent=payload.include_parent,
+            source_extension=payload.source_extension,
+            target_extension=payload.target_extension,
         )
         return {"items": request.app.state.service.rename_preview(payload.paths, rule)}
     except (ValueError, OSError) as exc:
