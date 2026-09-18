@@ -7,6 +7,7 @@ export type QuarantineState =
   | 'purged'
   | 'inconsistent'
   | 'abandoned'
+  | 'conflict'
   | 'skipped';
 
 export interface QuarantineEntry {

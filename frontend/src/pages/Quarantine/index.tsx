@@ -43,6 +43,7 @@ const STATE_CONFIG: Record<QuarantineState, { label: string; status: string }> =
   purged: { label: '已清除', status: 'cancelled' },
   inconsistent: { label: '异常不一致', status: 'failed' },
   abandoned: { label: '已废弃', status: 'stale' },
+  conflict: { label: '冲突', status: 'failed' },
   skipped: { label: '已跳过', status: 'skipped' },
 };
 
@@ -69,7 +70,7 @@ export const QuarantinePage: React.FC = () => {
   const [bulkRestoreOpen, setBulkRestoreOpen] = useState(false);
   const [bulkPurgeEntryIds, setBulkPurgeEntryIds] = useState<number[]>([]);
   const [bulkPurgeOpen, setBulkPurgeOpen] = useState(false);
-  const [resolvingPurgedRecords, setResolvingPurgedRecords] = useState(false);
+  const [resolvingTerminalRecords, setResolvingTerminalRecords] = useState(false);
 
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: () => settingsApi.getSettings() });
   const isSafeMode = !settings?.allow_mutation;
@@ -97,7 +98,7 @@ export const QuarantinePage: React.FC = () => {
   const bulkDeleteRecordsMutation = useMutation({
     mutationFn: (entryIds: number[]) => quarantineApi.bulkDeleteRecords(entryIds),
     onSuccess: (result) => {
-      message.success(`已删除 ${result.deleted_count} 条已清除隔离记录`);
+      message.success(`已删除 ${result.deleted_count} 条终态隔离记录`);
       queryClient.invalidateQueries({ queryKey: ['quarantineList'] });
       queryClient.invalidateQueries({ queryKey: ['auditEvents'] });
       refetch();
@@ -149,24 +150,24 @@ export const QuarantinePage: React.FC = () => {
     getCheckboxProps: (record: QuarantineEntry) => ({ disabled: record.state !== 'active', name: `quarantine-entry-${record.id}` }),
   };
 
-  const handleDeleteFilteredPurgedRecords = async () => {
+  const handleDeleteFilteredTerminalRecords = async () => {
     if (!isAdmin) {
       message.error('仅系统管理员允许删除隔离记录');
       return;
     }
-    setResolvingPurgedRecords(true);
+    setResolvingTerminalRecords(true);
     try {
-      const entryIds = await quarantineApi.resolvePurgedFilteredEntryIds({
+      const entryIds = await quarantineApi.resolveTerminalCleanupFilteredEntryIds({
         state: stateFilter,
         query: activeSearch,
       });
       if (entryIds.length === 0) {
-        message.info('当前筛选结果中没有可删除的已清除记录');
+        message.info('当前筛选结果中没有可删除的终态记录');
         return;
       }
       Modal.confirm({
-        title: `批量删除 ${entryIds.length} 条已清除记录？`,
-        content: '只删除数据库中的隔离历史记录，不会执行文件系统删除。服务端仍会逐条确认 state=purged 且隔离 payload 路径不存在；任一条不满足时整批拒绝。',
+        title: `批量删除 ${entryIds.length} 条终态记录？`,
+        content: '只删除数据库记录，不执行文件系统删除。仅 purged / abandoned / conflict 终态可清理；服务端会确认隔离 payload、authoritative anchor 与 conflict transaction artifacts 均不存在，任一条不满足时整批拒绝。',
         okText: '删除记录',
         okButtonProps: { danger: true },
         cancelText: '取消',
@@ -174,9 +175,9 @@ export const QuarantinePage: React.FC = () => {
       });
     } catch (err) {
       const structured = getStructuredApiError(err);
-      message.error(structured.message || '解析已清除记录失败');
+      message.error(structured.message || '解析终态记录失败');
     } finally {
-      setResolvingPurgedRecords(false);
+      setResolvingTerminalRecords(false);
     }
   };
 
@@ -185,7 +186,7 @@ export const QuarantinePage: React.FC = () => {
   const confirmDeleteRecord = (record: QuarantineEntry) => {
     Modal.confirm({
       title: `删除隔离记录 #${record.id}？`,
-      content: '仅删除已经永久清除后的数据库记录；不会再次操作文件系统，审计事件仍会保留。',
+      content: '仅删除 purged / abandoned / conflict 的数据库记录，不执行文件系统删除。服务端会再次确认没有 payload、authoritative anchor 或 transaction artifacts；审计事件仍会保留。',
       okText: '删除记录',
       okButtonProps: { danger: true },
       cancelText: '取消',
@@ -196,7 +197,7 @@ export const QuarantinePage: React.FC = () => {
   const actionButtons = (record: QuarantineEntry, compact = true) => {
     const canRestore = record.state === 'active';
     const canPurge = record.state === 'active';
-    const canDeleteRecord = record.state === 'purged';
+    const canDeleteRecord = ['purged', 'abandoned', 'conflict'].includes(record.state);
     if (!canRestore && !canPurge && !canDeleteRecord) return <span className="nfc-table-muted">—</span>;
     return (
       <div className="nfc-row-actions">
@@ -211,7 +212,7 @@ export const QuarantinePage: React.FC = () => {
           </Tooltip>
         )}
         {canDeleteRecord && (
-          <Tooltip title={!isAdmin ? '仅系统管理员允许删除已清除记录' : '仅删除数据库记录；不会再次触碰文件系统'}>
+          <Tooltip title={!isAdmin ? '仅系统管理员允许删除终态记录' : '仅删除数据库记录；服务端会确认没有剩余 payload / anchor / transaction artifacts'}>
             <Button
               size={compact ? 'small' : 'middle'}
               type="text"
@@ -261,7 +262,7 @@ export const QuarantinePage: React.FC = () => {
             options={[
               {label:'全部状态',value:'all'},{label:'已隔离 (active)',value:'active'},{label:'已恢复 (restored)',value:'restored'},
               {label:'已清除 (purged)',value:'purged'},{label:'准备中 (preparing)',value:'preparing'},
-              {label:'异常 (inconsistent)',value:'inconsistent'},{label:'已废弃 (abandoned)',value:'abandoned'},
+              {label:'异常 (inconsistent)',value:'inconsistent'},{label:'已废弃 (abandoned)',value:'abandoned'},{label:'冲突 (conflict)',value:'conflict'},
             ]}
           />
         </ActionBar>
@@ -275,15 +276,15 @@ export const QuarantinePage: React.FC = () => {
           <Tooltip title={selectedEntryIds.length===0 ? '请先明确选择至少一个 active 条目' : !isAdmin ? '仅系统管理员允许永久删除' : isSafeMode ? 'ALLOW_MUTATION=false，禁止生成删除计划' : !allowDelete ? 'ALLOW_DELETE=false，服务端禁止永久删除' : '先 Preview，再输入 DELETE 生成 unlink_v1 Draft'}>
             <Button danger icon={<DeleteOutlined />} disabled={selectedEntryIds.length===0 || !isAdmin || isSafeMode || !allowDelete} onClick={()=>{setBulkPurgeEntryIds([...selectedEntryIds]);setBulkPurgeOpen(true);}}>批量永久删除</Button>
           </Tooltip>
-          <Tooltip title={!isAdmin ? '仅系统管理员允许删除隔离记录' : '删除当前筛选结果中的全部 purged 数据库记录；不执行文件系统操作'}>
+          <Tooltip title={!isAdmin ? '仅系统管理员允许删除隔离记录' : '删除当前筛选结果中的 purged / abandoned / conflict 数据库记录；不执行文件系统操作'}>
             <Button
               danger
               icon={<DeleteOutlined />}
-              disabled={!isAdmin || resolvingPurgedRecords || bulkDeleteRecordsMutation.isPending}
-              loading={resolvingPurgedRecords || bulkDeleteRecordsMutation.isPending}
-              onClick={handleDeleteFilteredPurgedRecords}
+              disabled={!isAdmin || resolvingTerminalRecords || bulkDeleteRecordsMutation.isPending}
+              loading={resolvingTerminalRecords || bulkDeleteRecordsMutation.isPending}
+              onClick={handleDeleteFilteredTerminalRecords}
             >
-              批量删除已清除记录
+              批量删除终态记录
             </Button>
           </Tooltip>
         </ActionBar>
