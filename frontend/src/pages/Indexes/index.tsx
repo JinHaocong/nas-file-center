@@ -1,18 +1,16 @@
 import React, { useState } from 'react';
 import {
-  Card,
-  Table,
   Button,
-  Modal,
+  Empty,
   Form,
-  Typography,
-  Space,
-  message,
-  Tag,
-  Tooltip,
+  Modal,
+  Pagination,
   Popconfirm,
+  Table,
+  Tooltip,
+  message,
 } from 'antd';
-import { PlusOutlined, ReloadOutlined, FolderOpenOutlined } from '@ant-design/icons';
+import { FolderOpenOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { indexesApi } from '../../api/domain';
 import { useTitle } from '../../hooks/useTitle';
@@ -20,8 +18,14 @@ import { formatDateTime } from '../../utils/format';
 import { IndexRoot } from '../../types';
 import { DirectoryPicker } from '../../components/DirectoryPicker';
 import { getIndexPathStatePresentation } from '../../components/indexes/index_lifecycle';
+import { PageHeader } from '../../components/ui/PageHeader';
+import { DataPanel } from '../../components/ui/DataPanel';
+import { ActionBar } from '../../components/ui/ActionBar';
+import { ResponsiveDataView } from '../../components/ui/ResponsiveDataView';
+import { CodePath } from '../../components/ui/CodePath';
 
-const { Title, Text } = Typography;
+const stateClass = (state: string) =>
+  state === 'available' ? 'nfc-status-success' : state === 'blocked' ? 'nfc-status-danger' : 'nfc-status-warning';
 
 export const IndexesPage: React.FC = () => {
   useTitle('文件索引');
@@ -31,7 +35,7 @@ export const IndexesPage: React.FC = () => {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
 
-  const { data, isLoading, refetch } = useQuery({
+  const { data, isLoading, isFetching, refetch } = useQuery({
     queryKey: ['indexesList', page, pageSize],
     queryFn: () => indexesApi.listIndexes(page, pageSize),
   });
@@ -45,9 +49,7 @@ export const IndexesPage: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['indexesList'] });
       queryClient.invalidateQueries({ queryKey: ['dashboardSummary'] });
     },
-    onError: (err: any) => {
-      message.error(err.message || '加入索引队列失败');
-    },
+    onError: (err: any) => message.error(err.message || '加入索引队列失败'),
   });
 
   const deleteMutation = useMutation({
@@ -56,9 +58,7 @@ export const IndexesPage: React.FC = () => {
       message.success('已安全移除索引元数据');
       queryClient.invalidateQueries({ queryKey: ['indexesList'] });
       queryClient.invalidateQueries({ queryKey: ['dashboardSummary'] });
-      if (page > 1 && data?.items?.length === 1) {
-        setPage(page - 1);
-      }
+      if (page > 1 && data?.items?.length === 1) setPage(page - 1);
     },
     onError: (err: any) => {
       message.error(err.message || '移除索引失败');
@@ -70,123 +70,80 @@ export const IndexesPage: React.FC = () => {
     try {
       const values = await form.validateFields();
       const rootVal = typeof values.root === 'string' ? values.root.trim() : values.root;
-      if (rootVal) {
-        createMutation.mutate(rootVal);
-      }
+      if (rootVal) createMutation.mutate(rootVal);
     } catch {
-      // Form validation error
+      // validation stays inside AntD form
     }
   };
 
+  const items = data?.items || [];
+
   const columns = [
     {
-      title: '已索引根目录',
+      title: '索引根目录',
       dataIndex: 'root',
       key: 'root',
-      render: (text: string) => (
-        <Space>
-          <FolderOpenOutlined style={{ color: '#1677ff' }} />
-          <Text strong copyable>{text}</Text>
-        </Space>
+      render: (root: string) => (
+        <div className="nfc-path-cell"><FolderOpenOutlined /><CodePath value={root} /></div>
       ),
     },
     {
       title: '目录状态',
       dataIndex: 'path_state',
       key: 'path_state',
-      render: (val: string) => {
-        const pres = getIndexPathStatePresentation(val);
-        const tag = <Tag color={pres.color}>{pres.label}</Tag>;
-        return pres.tooltip ? <Tooltip title={pres.tooltip}>{tag}</Tooltip> : tag;
+      width: 120,
+      render: (value: string) => {
+        const pres = getIndexPathStatePresentation(value);
+        const badge = <span className={`nfc-status-badge ${stateClass(value)}`}><span className="nfc-status-dot" />{pres.label}</span>;
+        return pres.tooltip ? <Tooltip title={pres.tooltip}>{badge}</Tooltip> : badge;
       },
     },
-    {
-      title: '保存文件数',
-      dataIndex: 'files',
-      key: 'files',
-      render: (val: number) => <Tag color="blue">{val.toLocaleString()} 个</Tag>,
-    },
-    {
-      title: '保存目录数',
-      dataIndex: 'folders',
-      key: 'folders',
-      render: (val: number) => <Tag color="green">{val.toLocaleString()} 个</Tag>,
-    },
+    { title: '文件', dataIndex: 'files', key: 'files', width: 100, render: (v: number) => <span className="nfc-mono">{v.toLocaleString()}</span> },
+    { title: '目录', dataIndex: 'folders', key: 'folders', width: 100, render: (v: number) => <span className="nfc-mono">{v.toLocaleString()}</span> },
     {
       title: '最近成功索引',
       dataIndex: 'last_indexed_at',
       key: 'last_indexed_at',
-      render: (val: string | null) =>
-        val ? formatDateTime(val) : <Text type="secondary">尚未完成索引</Text>,
+      width: 174,
+      render: (v: string | null) => <span className="nfc-table-meta">{v ? formatDateTime(v) : '尚未完成索引'}</span>,
     },
     {
       title: '任务状态',
       key: 'active_job',
-      render: (_: any, record: IndexRoot) => {
-        if (record.has_active_job && record.active_job_id) {
-          return (
-            <Tag color="processing">
-              #{record.active_job_id} {record.active_job_status}
-            </Tag>
-          );
-        }
-        return <Text type="secondary">-</Text>;
-      },
+      width: 145,
+      render: (_: unknown, record: IndexRoot) =>
+        record.has_active_job && record.active_job_id ? (
+          <span className="nfc-kind-badge">#{record.active_job_id} {record.active_job_status}</span>
+        ) : <span className="nfc-table-muted">—</span>,
     },
     {
       title: '操作',
       key: 'action',
-      render: (_: any, record: IndexRoot) => {
+      width: 172,
+      render: (_: unknown, record: IndexRoot) => {
         const isAvailable = record.path_state === 'available';
         const reindexBtn = (
-          <Button
-            size="small"
-            type="link"
-            disabled={!isAvailable}
-            onClick={() => createMutation.mutate(record.root)}
-            loading={createMutation.isPending && createMutation.variables === record.root}
-          >
+          <Button size="small" type="text" disabled={!isAvailable} onClick={() => createMutation.mutate(record.root)} loading={createMutation.isPending && createMutation.variables === record.root}>
             重新索引
           </Button>
         );
-
         const removeBtn = (
-          <Button
-            size="small"
-            type="link"
-            danger
-            disabled={!record.can_remove}
-            loading={deleteMutation.isPending && deleteMutation.variables === record.id}
-          >
+          <Button size="small" type="text" danger disabled={!record.can_remove} loading={deleteMutation.isPending && deleteMutation.variables === record.id}>
             移除索引
           </Button>
         );
-
         return (
-          <Space size="middle">
-            {!isAvailable ? (
-              <Tooltip title="目录当前不可用或被阻止，无法重新索引">
-                {reindexBtn}
-              </Tooltip>
-            ) : (
-              reindexBtn
-            )}
-
+          <div className="nfc-row-actions">
+            {!isAvailable ? <Tooltip title="目录当前不可用或被阻止，无法重新索引">{reindexBtn}</Tooltip> : reindexBtn}
             {!record.can_remove ? (
-              <Tooltip title="该根目录仍存在未结束的索引任务，请先等待任务结束。">
-                {removeBtn}
-              </Tooltip>
+              <Tooltip title="该根目录仍存在未结束的索引任务，请先等待任务结束。">{removeBtn}</Tooltip>
             ) : (
               <Popconfirm
                 title="确认移除索引？"
                 description={
-                  <div style={{ maxWidth: 360 }}>
-                    <p>
-                      将删除 NAS File Center 保存的该根目录索引元数据，包括该 Root 对应的 IndexedPath 记录。
-                    </p>
-                    <p style={{ color: '#8c8c8c', margin: 0 }}>
-                      不会删除 NAS 上的任何真实文件或目录，且不会删除 Task、Scan、Plan 或 Audit 历史记录。
-                    </p>
+                  <div className="nfc-confirm-copy">
+                    <p>将删除 NAS File Center 保存的该根目录索引元数据，包括该 Root 对应的 IndexedPath 记录。</p>
+                    <p>不会删除 NAS 上的任何真实文件或目录，且不会删除 Task、Scan、Plan 或 Audit 历史记录。</p>
                   </div>
                 }
                 onConfirm={() => deleteMutation.mutate(record.id)}
@@ -197,83 +154,80 @@ export const IndexesPage: React.FC = () => {
                 {removeBtn}
               </Popconfirm>
             )}
-          </Space>
+          </div>
         );
       },
     },
   ];
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-        <div>
-          <Title level={4} style={{ margin: 0 }}>
-            文件索引管理
-          </Title>
-          <Text type="secondary">维护 NAS 目录的增量元数据索引，支持秒级路径查询与模式匹配</Text>
-        </div>
-        <Space>
-          <Button icon={<ReloadOutlined />} onClick={() => refetch()} loading={isLoading}>
-            刷新
-          </Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
-            加入索引队列
-          </Button>
-        </Space>
-      </div>
+    <div className="nfc-operations-page">
+      <PageHeader
+        eyebrow="DATA"
+        title="文件索引"
+        description="维护大型 NAS 目录的增量元数据索引。移除操作只清理 NFC 索引元数据，不触碰真实文件。"
+        actions={
+          <ActionBar compact>
+            <Button icon={<ReloadOutlined />} onClick={() => refetch()} loading={isFetching}>刷新</Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>加入索引队列</Button>
+          </ActionBar>
+        }
+      />
 
-      <Card bordered={false} style={{ borderRadius: 12 }}>
-        <Table
-          dataSource={data?.items || []}
-          columns={columns}
-          rowKey="root"
-          loading={isLoading}
-          pagination={{
-            current: page,
-            pageSize,
-            total: data?.total || 0,
-            showSizeChanger: true,
-            pageSizeOptions: ['10', '20', '50', '100'],
-            onChange: (p, ps) => {
-              setPage(p);
-              setPageSize(ps);
-            },
-          }}
+      <DataPanel title="索引根目录" description="目录状态、索引规模与后台任务一览。" action={<span className="nfc-panel-count">{data?.total ?? 0} roots</span>} className="nfc-panel-flush">
+        <ResponsiveDataView
+          desktop={<Table dataSource={items} columns={columns} rowKey="root" loading={isLoading} pagination={{ current: page, pageSize, total: data?.total || 0, showSizeChanger: true, pageSizeOptions: ['10','20','50','100'], onChange: (p, ps) => { setPage(p); setPageSize(ps); } }} />}
+          mobile={
+            <>
+              <div className="nfc-mobile-record-list">
+                {items.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无索引根目录" /> : items.map((root) => {
+                  const pres = getIndexPathStatePresentation(root.path_state);
+                  const isAvailable = root.path_state === 'available';
+                  return (
+                    <article className="nfc-index-mobile-card" key={root.root}>
+                      <div className="nfc-mobile-record-heading">
+                        <div className="nfc-index-mobile-path"><FolderOpenOutlined /><CodePath value={root.root} /></div>
+                        <span className={`nfc-status-badge ${stateClass(root.path_state)}`}><span className="nfc-status-dot" />{pres.label}</span>
+                      </div>
+                      <div className="nfc-mobile-record-facts nfc-mobile-record-facts-3">
+                        <span>文件 <b>{root.files.toLocaleString()}</b></span>
+                        <span>目录 <b>{root.folders.toLocaleString()}</b></span>
+                        <span>最近索引 <b>{root.last_indexed_at ? formatDateTime(root.last_indexed_at) : '尚未完成'}</b></span>
+                      </div>
+                      {root.has_active_job && root.active_job_id && <div className="nfc-mobile-record-note">任务 #{root.active_job_id} · {root.active_job_status}</div>}
+                      <div className="nfc-mobile-record-actions">
+                        <Button type="text" disabled={!isAvailable} onClick={() => createMutation.mutate(root.root)}>重新索引</Button>
+                        {root.can_remove ? (
+                          <Popconfirm
+                            title="确认移除索引？"
+                            description="不会删除 NAS 上的任何真实文件或目录，仅删除 NFC 保存的索引元数据。"
+                            onConfirm={() => deleteMutation.mutate(root.id)}
+                            okText="移除"
+                            cancelText="取消"
+                            okButtonProps={{ danger: true }}
+                          >
+                            <Button type="text" danger>移除索引</Button>
+                          </Popconfirm>
+                        ) : <Tooltip title="该根目录仍存在未结束的索引任务，请先等待任务结束。"><Button type="text" danger disabled>移除索引</Button></Tooltip>}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+              <div className="nfc-mobile-pagination"><Pagination current={page} pageSize={pageSize} total={data?.total || 0} showSizeChanger pageSizeOptions={['10','20','50','100']} onChange={(p,ps)=>{setPage(p);setPageSize(ps);}} /></div>
+            </>
+          }
         />
-      </Card>
+      </DataPanel>
 
-      <Modal
-        title="创建增量文件索引"
-        open={modalOpen}
-        onOk={handleCreate}
-        onCancel={() => {
-          form.resetFields();
-          setModalOpen(false);
-        }}
-        confirmLoading={createMutation.isPending}
-        okText="加入队列"
-        cancelText="取消"
-        destroyOnClose
-      >
-        <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
-          <Form.Item
-            name="root"
-            label="目录路径"
-            tooltip="必须位于 ALLOWED_ROOTS 允许的挂载目录下（例如 /data/Download）"
-            rules={[{ required: true, message: '请选择或输入要索引的目录绝对路径' }]}
-          >
-            <DirectoryPicker
-              multiple={false}
-              allowManualInput={true}
-              placeholder="点击选择要建立索引的根目录..."
-            />
+      <Modal title="创建增量文件索引" open={modalOpen} onOk={handleCreate} onCancel={() => { form.resetFields(); setModalOpen(false); }} confirmLoading={createMutation.isPending} okText="加入队列" cancelText="取消" destroyOnClose>
+        <Form form={form} layout="vertical" className="nfc-modal-form">
+          <Form.Item name="root" label="目录路径" tooltip="必须位于 ALLOWED_ROOTS 允许的挂载目录下" rules={[{ required: true, message: '请选择或输入要索引的目录绝对路径' }]}>
+            <DirectoryPicker multiple={false} allowManualInput={true} placeholder="点击选择要建立索引的根目录..." />
           </Form.Item>
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            提示：后台 Worker 将异步遍历该目录并生成 SQLite 增量索引，不会阻塞当前界面。
-          </Text>
+          <p className="nfc-form-note">后台 Worker 将异步遍历该目录并生成 SQLite 增量索引，不会阻塞当前界面。</p>
         </Form>
       </Modal>
     </div>
   );
 };
-
