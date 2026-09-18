@@ -508,17 +508,26 @@ export const WorkflowBuilderPage: React.FC = () => {
               disabled={!canSwitchMode}
               className="nfc-workflow-mode-grid"
             >
-              {(['file', 'organizer', 'dedupe', 'utility'] as WorkflowMode[]).map(
-                (candidate) => (
-                  <Radio.Button value={candidate} key={candidate}>
-                    <span className="nfc-workflow-mode-option">
-                      {modeIcon(candidate)}
-                      <span>{modeLabel(candidate)}</span>
-                      <small>{candidate}</small>
-                    </span>
-                  </Radio.Button>
-                )
-              )}
+              <Radio.Button value="file">
+                <span className="nfc-workflow-mode-option">
+                  {modeIcon('file')}<span>{modeLabel('file')}</span><small>file</small>
+                </span>
+              </Radio.Button>
+              <Radio.Button value="organizer">
+                <span className="nfc-workflow-mode-option">
+                  {modeIcon('organizer')}<span>{modeLabel('organizer')}</span><small>organizer</small>
+                </span>
+              </Radio.Button>
+              <Radio.Button value="dedupe">
+                <span className="nfc-workflow-mode-option">
+                  {modeIcon('dedupe')}<span>{modeLabel('dedupe')}</span><small>dedupe</small>
+                </span>
+              </Radio.Button>
+              <Radio.Button value="utility">
+                <span className="nfc-workflow-mode-option">
+                  {modeIcon('utility')}<span>{modeLabel('utility')}</span><small>utility</small>
+                </span>
+              </Radio.Button>
             </Radio.Group>
           </Form.Item>
         </Form>
