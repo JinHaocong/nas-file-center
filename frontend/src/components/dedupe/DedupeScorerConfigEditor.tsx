@@ -185,14 +185,14 @@ export const DedupeScorerConfigEditor: React.FC<Props> = ({
   const isRecursiveDirectoryBalance = config.selection_mode === 'recursive_directory_balanced_by_bytes';
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div className="nfc-dedupe-scorer-editor">
       {!validation.valid && (
         <Alert
           type="error"
           showIcon
           message="配置校验错误"
           description={
-            <ul style={{ margin: 0, paddingLeft: 20 }}>
+            <ul className="nfc-validation-list">
               {validation.errors.map((err, idx) => (
                 <li key={idx}>{err}</li>
               ))}
@@ -201,8 +201,8 @@ export const DedupeScorerConfigEditor: React.FC<Props> = ({
         />
       )}
 
-      <Card size="small" title="选择与平衡模式 (Selection Mode)" bordered={false} style={{ background: '#fafafa' }}>
-        <Paragraph type="secondary" style={{ marginBottom: 12 }}>
+      <Card size="small" title="选择与平衡模式 (Selection Mode)" bordered={false} className="nfc-dedupe-config-card">
+        <Paragraph type="secondary" className="nfc-dedupe-config-intro">
           决定如何在重复项中权衡保留目标。
         </Paragraph>
         <Radio.Group
@@ -213,19 +213,19 @@ export const DedupeScorerConfigEditor: React.FC<Props> = ({
           <Space direction="vertical">
             <Radio value="weighted">
               <Text strong>加权评分模式 (Weighted)</Text>
-              <span style={{ color: '#8c8c8c', marginLeft: 8 }}>
+              <span className="nfc-dedupe-radio-help">
                 根据路径、扩展名及修改时间等多因子加权计算最高分胜出者作为保留项。
               </span>
             </Radio>
             <Radio value="balanced_by_bytes">
               <Text strong>扫描根字节平衡 (Balanced by Scan Root)</Text>
-              <span style={{ color: '#8c8c8c', marginLeft: 8 }}>
+              <span className="nfc-dedupe-radio-help">
                 平衡各个扫描根目录的释放空间，权衡容量分布；因子权重用于根内部择优。
               </span>
             </Radio>
             <Radio value="recursive_directory_balanced_by_bytes">
               <Text strong>递归目录字节平衡 (Recursive Directory Balanced by Bytes)</Text>
-              <span style={{ color: '#8c8c8c', marginLeft: 8 }}>
+              <span className="nfc-dedupe-radio-help">
                 以重复组 LCA 下的目录桶为单位递归平衡释放字节；评分层仍先确定候选资格与优先关系。
               </span>
             </Radio>
@@ -237,7 +237,7 @@ export const DedupeScorerConfigEditor: React.FC<Props> = ({
             showIcon
             message="Recursive Last-File Protection — 强制启用"
             description="递归目录模式持续保护每个受约束目录桶的最后文件。该保护不可关闭，前端不提供禁用开关。"
-            style={{ marginTop: 12 }}
+            className="nfc-overlay-alert nfc-dedupe-recursive-alert"
           />
         )}
       </Card>
@@ -245,7 +245,7 @@ export const DedupeScorerConfigEditor: React.FC<Props> = ({
       <Card
         size="small"
         title={
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div className="nfc-dedupe-config-heading">
             <Space>
               <span>路径优先级规则 (Path Priority)</span>
               <Tag color={path_priority.enabled ? 'blue' : 'default'}>
@@ -256,28 +256,28 @@ export const DedupeScorerConfigEditor: React.FC<Props> = ({
           </div>
         }
         bordered={false}
-        style={{ background: '#fafafa' }}
+        className="nfc-dedupe-config-card"
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+        <div className="nfc-dedupe-weight-row">
           <Text>因子权重 (0 - {MAX_WEIGHT}):</Text>
-          <InputNumber min={0} max={MAX_WEIGHT} value={path_priority.weight} onChange={handlePathPriorityWeightChange} disabled={disabled || !path_priority.enabled} style={{ width: 120 }} />
+          <InputNumber min={0} max={MAX_WEIGHT} value={path_priority.weight} onChange={handlePathPriorityWeightChange} disabled={disabled || !path_priority.enabled} className="nfc-dedupe-weight-input" />
           <Text type="secondary">高优先级路径匹配成功将赋予该权重分值</Text>
         </div>
         {path_priority.enabled && (
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <div className="nfc-dedupe-rule-toolbar">
               <Text strong>匹配规则列表 ({path_priority.rules.length} / {MAX_RULES_COUNT})</Text>
               <Button type="dashed" size="small" icon={<PlusOutlined />} onClick={handleAddPathRule} disabled={disabled || path_priority.rules.length >= MAX_RULES_COUNT}>添加路径规则</Button>
             </div>
             {path_priority.rules.length === 0 ? (
               <Alert type="info" message="尚未添加路径规则。点击上方按钮添加按路径前缀匹配的规则。" />
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div className="nfc-dedupe-rule-list">
                 {path_priority.rules.map((rule, idx) => (
-                  <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fff', padding: '6px 12px', borderRadius: 6, border: '1px solid #f0f0f0' }}>
-                    <Text type="secondary" style={{ width: 24 }}>#{idx + 1}</Text>
-                    <Select<PathPriorityScope> value={rule.scope} onChange={(val) => handleUpdatePathRule(idx, 'scope', val)} disabled={disabled} style={{ width: 110 }} options={[{ label: '绝对路径', value: 'absolute' }, { label: '相对路径', value: 'relative' }]} />
-                    <Input value={rule.pattern} onChange={(e) => handleUpdatePathRule(idx, 'pattern', e.target.value)} placeholder={rule.scope === 'absolute' ? '/volume1/archive/*' : 'archive/*'} disabled={disabled} style={{ flex: 1 }} />
+                  <div key={idx} className="nfc-dedupe-rule-row">
+                    <Text type="secondary" className="nfc-dedupe-rule-index">#{idx + 1}</Text>
+                    <Select<PathPriorityScope> value={rule.scope} onChange={(val) => handleUpdatePathRule(idx, 'scope', val)} disabled={disabled} className="nfc-dedupe-scope-select" options={[{ label: '绝对路径', value: 'absolute' }, { label: '相对路径', value: 'relative' }]} />
+                    <Input value={rule.pattern} onChange={(e) => handleUpdatePathRule(idx, 'pattern', e.target.value)} placeholder={rule.scope === 'absolute' ? '/volume1/archive/*' : 'archive/*'} disabled={disabled} className="nfc-dedupe-rule-input" />
                     <Space size={4}>
                       <Button type="text" size="small" icon={<ArrowUpOutlined />} disabled={disabled || idx === 0} onClick={() => handleMovePathRule(idx, 'up')} />
                       <Button type="text" size="small" icon={<ArrowDownOutlined />} disabled={disabled || idx === path_priority.rules.length - 1} onClick={() => handleMovePathRule(idx, 'down')} />
@@ -294,7 +294,7 @@ export const DedupeScorerConfigEditor: React.FC<Props> = ({
       <Card
         size="small"
         title={
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div className="nfc-dedupe-config-heading">
             <Space>
               <span>优先扩展名 (Preferred Extension)</span>
               <Tag color={preferred_extension.enabled ? 'blue' : 'default'}>{preferred_extension.enabled ? '已启用' : '已停用'}</Tag>
@@ -303,27 +303,27 @@ export const DedupeScorerConfigEditor: React.FC<Props> = ({
           </div>
         }
         bordered={false}
-        style={{ background: '#fafafa' }}
+        className="nfc-dedupe-config-card"
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+        <div className="nfc-dedupe-weight-row">
           <Text>因子权重 (0 - {MAX_WEIGHT}):</Text>
-          <InputNumber min={0} max={MAX_WEIGHT} value={preferred_extension.weight} onChange={handleExtWeightChange} disabled={disabled || !preferred_extension.enabled} style={{ width: 120 }} />
+          <InputNumber min={0} max={MAX_WEIGHT} value={preferred_extension.weight} onChange={handleExtWeightChange} disabled={disabled || !preferred_extension.enabled} className="nfc-dedupe-weight-input" />
           <Text type="secondary">匹配列表中扩展名的文件将获得优先得分（排序越前优先级越高）</Text>
         </div>
         {preferred_extension.enabled && (
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <div className="nfc-dedupe-rule-toolbar">
               <Text strong>扩展名优先级列表 ({preferred_extension.extensions.length} / {MAX_EXTENSIONS_COUNT})</Text>
               <Button type="dashed" size="small" icon={<PlusOutlined />} onClick={handleAddExtension} disabled={disabled || preferred_extension.extensions.length >= MAX_EXTENSIONS_COUNT}>添加扩展名</Button>
             </div>
             {preferred_extension.extensions.length === 0 ? (
               <Alert type="info" message="尚未添加优先扩展名。如 .flac、.mkv、.raw 等。" />
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div className="nfc-dedupe-rule-list">
                 {preferred_extension.extensions.map((ext, idx) => (
-                  <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fff', padding: '6px 12px', borderRadius: 6, border: '1px solid #f0f0f0' }}>
-                    <Text type="secondary" style={{ width: 24 }}>#{idx + 1}</Text>
-                    <Input value={ext} onChange={(e) => handleUpdateExtension(idx, e.target.value)} placeholder="例如 .flac 或 mp4" disabled={disabled} style={{ flex: 1 }} />
+                  <div key={idx} className="nfc-dedupe-rule-row">
+                    <Text type="secondary" className="nfc-dedupe-rule-index">#{idx + 1}</Text>
+                    <Input value={ext} onChange={(e) => handleUpdateExtension(idx, e.target.value)} placeholder="例如 .flac 或 mp4" disabled={disabled} className="nfc-dedupe-rule-input" />
                     <Space size={4}>
                       <Button type="text" size="small" icon={<ArrowUpOutlined />} disabled={disabled || idx === 0} onClick={() => handleMoveExtension(idx, 'up')} />
                       <Button type="text" size="small" icon={<ArrowDownOutlined />} disabled={disabled || idx === preferred_extension.extensions.length - 1} onClick={() => handleMoveExtension(idx, 'down')} />
@@ -337,9 +337,9 @@ export const DedupeScorerConfigEditor: React.FC<Props> = ({
         )}
       </Card>
 
-      <Card size="small" title="修改时间偏好 (Modification Time)" bordered={false} style={{ background: '#fafafa' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <Card size="small" title="修改时间偏好 (Modification Time)" bordered={false} className="nfc-dedupe-config-card">
+        <div className="nfc-dedupe-mtime-stack">
+          <div className="nfc-dedupe-weight-row">
             <Text>时间偏好策略:</Text>
             <Radio.Group value={mtime.mode} onChange={(e) => handleMtimeModeChange(e.target.value)} disabled={disabled}>
               <Radio value="none">不参与排序 (None)</Radio>
@@ -347,17 +347,17 @@ export const DedupeScorerConfigEditor: React.FC<Props> = ({
               <Radio value="oldest">偏好最旧文件 (Oldest)</Radio>
             </Radio.Group>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div className="nfc-dedupe-weight-row">
             <Text>因子权重 (0 - {MAX_WEIGHT}):</Text>
-            <InputNumber min={0} max={MAX_WEIGHT} value={mtime.weight} onChange={handleMtimeWeightChange} disabled={disabled || mtime.mode === 'none'} style={{ width: 120 }} />
+            <InputNumber min={0} max={MAX_WEIGHT} value={mtime.weight} onChange={handleMtimeWeightChange} disabled={disabled || mtime.mode === 'none'} className="nfc-dedupe-weight-input" />
             <Text type="secondary">偏好方向上的时间差加权计分</Text>
           </div>
         </div>
       </Card>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 8 }}>
-        <Text type="secondary" style={{ fontSize: 12 }}>
-          <InfoCircleOutlined style={{ marginRight: 4 }} />
+      <div className="nfc-dedupe-config-footer">
+        <Text type="secondary" className="nfc-form-safety-note">
+          <InfoCircleOutlined className="nfc-inline-icon" />
           NAS 去重 V1 标准规范：仅包含通用文件系统打分因子（路径、扩展名、修改时间），排除媒体特定字段。
         </Text>
         {showReset && !disabled && <Button icon={<ReloadOutlined />} onClick={handleReset} size="small">重置为默认值</Button>}
