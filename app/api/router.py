@@ -61,6 +61,24 @@ class QuarantinePurgeRequest(BaseModel):
     confirmation: str
 
 
+class QuarantineRecordBulkDeleteRequest(BaseModel):
+    entry_ids: list[int] = Field(min_length=1, max_length=5000)
+    confirmation: str
+
+    @field_validator("entry_ids")
+    @classmethod
+    def validate_entry_ids(cls, values: list[int]) -> list[int]:
+        if any(isinstance(value, bool) or not isinstance(value, int) or value <= 0 for value in values):
+            raise ValueError("entry_ids must contain positive integers")
+        if len(set(values)) != len(values):
+            raise ValueError("entry_ids must be unique")
+        return values
+
+
+class AuditClearRequest(BaseModel):
+    confirmation: str
+
+
 class QuarantineRetentionPolicyUpdateRequest(BaseModel):
     quarantine_retention_days: int
 
@@ -1208,6 +1226,20 @@ def preview_audit_retention(request: Request):
     return request.app.state.service.preview_audit_retention()
 
 
+@router.post("/audit/clear")
+def clear_audit_history(
+    request: Request,
+    payload: AuditClearRequest,
+    admin_user: User = Depends(require_admin_user),
+):
+    try:
+        return request.app.state.service.clear_audit_history(
+            confirmation=payload.confirmation,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @router.post("/audit/apply-retention")
 def apply_audit_retention(
     request: Request,
@@ -1316,6 +1348,28 @@ def update_quarantine_retention_policy(
         raise HTTPException(400, str(exc)) from exc
 
 
+@router.post("/quarantine/records/bulk-delete")
+def bulk_delete_quarantine_records(
+    request: Request,
+    payload: QuarantineRecordBulkDeleteRequest,
+    admin_user: User = Depends(require_admin_user),
+):
+    try:
+        return request.app.state.service.bulk_delete_quarantine_records(
+            payload.entry_ids,
+            confirmation=payload.confirmation,
+            is_admin=True,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except StateConflictError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @router.get("/quarantine/{id}")
 def get_quarantine_entry(request: Request, id: int):
     try:
@@ -1346,6 +1400,29 @@ def restore_quarantine_entry(
         raise HTTPException(400, str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(500, str(exc)) from exc
+
+
+@router.delete("/quarantine/{id}/record")
+def delete_quarantine_record(
+    request: Request,
+    id: int,
+    confirmation: str = Query(...),
+    admin_user: User = Depends(require_admin_user),
+):
+    try:
+        return request.app.state.service.delete_quarantine_record(
+            id,
+            confirmation=confirmation,
+            is_admin=True,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except StateConflictError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @router.post("/quarantine/{id}/purge")
@@ -1422,6 +1499,22 @@ def archive_workflow(
         expected_current_revision=expected_current_revision,
     )
     return {"status": "ok", "archived": True}
+
+
+@router.delete("/workflows/{workflow_id}/permanent")
+def permanently_delete_workflow(
+    request: Request,
+    workflow_id: int,
+    expected_current_revision: int = Query(...),
+    confirmation: str = Query(...),
+    admin_user: User = Depends(require_admin_user),
+):
+    return request.app.state.service.workflow_service.permanent_delete_workflow(
+        admin_user.id,
+        workflow_id,
+        expected_current_revision=expected_current_revision,
+        confirmation=confirmation,
+    )
 
 
 @router.post("/workflows/{workflow_id}/rollback", response_model=WorkflowResponse)
