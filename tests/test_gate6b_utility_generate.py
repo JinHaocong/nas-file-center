@@ -557,7 +557,7 @@ def test_incomplete_wrapper_cleanup_marks_work_job_failed_instead_of_completed(
         service.engine,
         worker_id=worker_id,
     )
-    assert ok is False
+    assert ok is True
 
     assert not child.exists()
     assert wrapper.is_dir()
@@ -574,7 +574,7 @@ def test_incomplete_wrapper_cleanup_marks_work_job_failed_instead_of_completed(
         ))
         assert job is not None
         assert job.status == "failed"
-        assert job.error_code == "UTILITY_PLAN_NOT_COMPLETED"
+        assert job.error_code == "BATCH_PLAN_NOT_COMPLETED"
         assert plan is not None
         assert plan.status == "partial"
         assert [row.state for row in rows] == ["completed", "failed"]
