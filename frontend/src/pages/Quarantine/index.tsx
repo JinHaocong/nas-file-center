@@ -241,9 +241,9 @@ export const QuarantinePage: React.FC = () => {
   ];
 
   return (
-    <div className="nfc-operations-page">
+    <div className="nfc-operations-page nfc-quarantine-page">
       <PageHeader
-        eyebrow="SAFETY"
+        eyebrow="Safety boundary"
         title="文件隔离区"
         description="Quarantine-first 文件安全边界。恢复遵循零覆盖语义；永久删除同时受管理员、ALLOW_MUTATION 与 ALLOW_DELETE 约束。"
         actions={<ActionBar compact><Button icon={<ReloadOutlined />} onClick={() => refetch()} loading={isFetching}>刷新</Button></ActionBar>}
