@@ -52,7 +52,7 @@ describe('v0.4.0 C6B overlay consistency contract', () => {
     }
 
     const restore = read('src/pages/Quarantine/BulkRestoreModal.tsx');
-    for (const semantic of ['expected_preview_digest', 'blocked_count === 0', 'conflict_strategy']) {
+    for (const semantic of ['expected_preview_digest', 'blocked_count === 0', 'conflict_policy']) {
       assert.ok(restore.includes(semantic), `BulkRestore missing ${semantic}`);
     }
   });
