@@ -711,7 +711,7 @@ def discover_single_child_wrappers(
                                 if compat_noclobber is True:
                                     state = "READY"
                                     capability_reason = "UTILITY_MOVE_COMPAT_PLAIN_RENAME_NOCLOBBER"
-                                elif directory_transplant_preflight(child_path):
+                                elif directory_transplant_preflight(child_path, Path(target_path).parent):
                                     state = "READY"
                                     capability_reason = "UTILITY_MOVE_COMPAT_DIRECTORY_TRANSPLANT"
                                 else:
