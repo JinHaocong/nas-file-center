@@ -2066,6 +2066,12 @@ class BatchPlanExecuteHandler(TaskHandler):
         ]
         worker_stale_items = []
         for it in unexecuted_items:
+            # The exact single-child-wrapper cleanup is authorized by its paired
+            # MOVE and is finalized under a live descriptor held across that MOVE.
+            # Do not reject it here using a frozen directory inode that may drift
+            # on zfuse after namespace mutation.
+            if _is_utility_single_child_cleanup(it):
+                continue
             is_fresh, stale_detail = verify_item_freshness(
                 item_id=it.id,
                 source_path=it.source_path,
@@ -2129,7 +2135,10 @@ class BatchPlanExecuteHandler(TaskHandler):
                     continue
 
             # Boundary Freshness Check
-            if item_meta.operation not in {"restore", "quarantine_purge"}:
+            if (
+                item_meta.operation not in {"restore", "quarantine_purge"}
+                and not _is_utility_single_child_cleanup(item_meta)
+            ):
                 is_fresh, stale_detail = _verify_plan_item_and_keep_freshness(item_meta, settings)
                 if not is_fresh:
                     stale_reason = f"Item stale: {stale_detail.reason if stale_detail else 'stale'}"
@@ -2619,7 +2628,10 @@ class BatchPlanExecuteHandler(TaskHandler):
                             session.commit()
                         completed_or_skipped += 1
                         continue
-            elif item_meta.operation != "quarantine_purge":
+            elif (
+                item_meta.operation != "quarantine_purge"
+                and not _is_utility_single_child_cleanup(item_meta)
+            ):
                 final_fresh, final_stale_detail = _verify_plan_item_and_keep_freshness(item_meta, settings)
                 if not final_fresh:
                     stale_reason = f"Item stale: {final_stale_detail.reason if final_stale_detail else 'stale'}"
