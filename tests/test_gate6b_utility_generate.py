@@ -9,8 +9,10 @@ from sqlalchemy import select
 import app.batch_utilities.single_child_wrapper as single_child_wrapper_module
 from app.batch_utilities.errors import BatchUtilityPreviewChangedError
 from app.config import Settings
-from app.models import BatchPlan, BatchPlanItem, IndexRoot
+from app.models import BatchPlan, BatchPlanItem, IndexRoot, TaskLock, WorkJob, utcnow
 from app.service import FileCenterService
+from app.tasks.context import JobContext
+from app.tasks.handlers import get_handler
 from app.workflows.errors import WorkflowDigestMismatchError
 from app.workflows.schema import (
     SingleChildWrapperCollapseStep,
@@ -193,6 +195,7 @@ def test_regular_file_wrapper_generate_freeze_validate_execute_with_no_clobber_f
     assert validated["status"] == "ready"
 
     service.settings.allow_mutation = True
+    assert service.settings.allow_delete is False
 
     def no_native_noreplace(*_args, **_kwargs):
         raise OSError(errno.EOPNOTSUPP, "forced compat path")
@@ -201,14 +204,57 @@ def test_regular_file_wrapper_generate_freeze_validate_execute_with_no_clobber_f
 
     monkeypatch.setattr(fs_ops_module, "rename_noreplace", no_native_noreplace)
 
-    result = service.execute_plan(plan_id)
+    worker_id = "utility-regular-file-worker"
+    with service.SessionLocal() as session:
+        lock = session.get(TaskLock, 1)
+        if lock is None:
+            lock = TaskLock(id=1)
+            session.add(lock)
+        lock.locked = True
+        lock.owner = worker_id
+        lock.acquired_at = utcnow()
 
-    assert result["status"] == "completed"
+        job = WorkJob(
+            kind="batch-plan-execute",
+            status="running",
+            state_json=json.dumps({"plan_id": plan_id}),
+            started_at=utcnow(),
+            heartbeat_at=utcnow(),
+        )
+        session.add(job)
+        session.commit()
+        job_id = int(job.id)
+
+    handler = get_handler("batch-plan-execute")
+    assert handler is not None
+
+    with service.SessionLocal() as session:
+        job = session.get(WorkJob, job_id)
+        assert job is not None
+        context = JobContext(
+            service.engine,
+            service.SessionLocal,
+            job_id,
+            worker_id=worker_id,
+        )
+        handler.run(job, context, service.settings)
+
     target = root / "001"
     assert target.is_file()
     assert target.read_bytes() == b"payload"
     assert not child.exists()
     assert not wrapper.exists()
+
+    with service.SessionLocal() as session:
+        plan = session.get(BatchPlan, plan_id)
+        assert plan is not None
+        assert plan.status == "completed"
+        rows = session.scalars(
+            select(BatchPlanItem)
+            .where(BatchPlanItem.plan_id == plan_id)
+            .order_by(BatchPlanItem.sequence.asc())
+        ).all()
+        assert [row.state for row in rows] == ["completed", "completed"]
 
 
 @pytest.mark.parametrize("mutation", ["target", "hidden", "aba"])
