@@ -205,7 +205,7 @@ export const DedupePreviewTable: React.FC<Props> = ({
     </ActionBar>
   );
 
-  const mobilePagination = pagination && pagination !== false ? (
+  const mobilePagination = pagination ? (
     <div className="nfc-mobile-pagination">
       <Pagination
         current={pagination.current}
