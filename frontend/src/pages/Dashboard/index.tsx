@@ -159,7 +159,7 @@ export const DashboardPage: React.FC = () => {
   return (
     <div className="nfc-dashboard">
       <PageHeader
-        eyebrow="OVERVIEW"
+        eyebrow="Operations overview"
         title="系统概览"
         description="NAS 文件中心的索引、扫描、执行计划与后台任务状态。"
         actions={

@@ -396,3 +396,92 @@ Not changed:
 - filesystem mutation / validation behavior.
 
 Manual browser visual review remains separate from automated acceptance.
+
+
+## v0.4.2 Taste-Skill Redesign
+
+This pass is based on the audit-first `redesign-existing-projects` guidance from `Leonxlnx/taste-skill`. The default taste skill is not treated as the primary authority for this product because it explicitly excludes dashboards, data tables and multi-step product UI.
+
+Design read:
+- technical NAS operations console for an experienced administrator,
+- restrained developer-tool language rather than a marketing surface,
+- Graphite + Jade identity,
+- Ant Design remains infrastructure, not visual identity.
+
+Taste dials:
+- DESIGN_VARIANCE: 5
+- MOTION_INTENSITY: 4
+- VISUAL_DENSITY: 7
+
+### Audit findings
+
+The v0.4.1 pass improved polish but still retained recognizable generic SaaS / Ant Design signals:
+- default system-font hierarchy without a deliberate display/data treatment,
+- generic bright SaaS blue as the product accent,
+- four equal metric cards on Dashboard,
+- persistent border + shadow card chrome across shared panels,
+- navigation/header chrome that still reads as a conventional Ant Design application shell,
+- all-caps Dashboard eyebrow treatment.
+
+### v0.4.2 direction
+
+The redesign must:
+- use a graphite neutral family with one restrained jade accent,
+- use tabular numerics and stronger optical hierarchy for operational data,
+- reduce generic card chrome and use separators / negative space where elevation is not meaningful,
+- make Dashboard metrics asymmetric on desktop while preserving responsive collapse,
+- make Sidebar and Header feel like one deliberate workspace chrome system,
+- keep semantic success / warning / danger colors functional and separate from the product accent,
+- retain purposeful motion only and continue honoring `prefers-reduced-motion`,
+- preserve all API, Worker, Plan, Quarantine, filesystem and destructive-action semantics.
+
+No framework migration is authorized. React 18, TypeScript, Vite and Ant Design 5 remain the implementation stack.
+
+
+### Feihong Console Quality Gate
+
+This quality gate adapts the Console/Admin discipline from `ifeihong/feihong-design-system` without importing Feihong's personal-brand skin.
+
+Adopted principles:
+- function before decoration,
+- navigation carries product identity while the work canvas stays neutral,
+- operational controls expose hover / active / focus / disabled states,
+- dense data surfaces use a stable scan rhythm,
+- data and identifiers use tabular / mono treatment where appropriate,
+- motion must be purposeful, restrained and reduced-motion safe,
+- desktop, tablet and mobile remain first-class layouts.
+
+NAS-specific adaptation:
+- the existing Graphite + Jade identity remains authoritative instead of Feihong Royal Blue / Gold / Burgundy,
+- semantic colors remain authoritative: success stays green, warning stays amber, danger / irreversible stays red,
+- no Feihong wax-seal, fleuron, editorial ornament, luxury serif branding or decorative gold is imported,
+- terminal green remains reserved for genuine terminal/code semantics if introduced later,
+- Header chrome is crisp rather than glassmorphic so safety and Worker state remain immediately legible.
+
+Console rhythm:
+- primary operational table rows target 46px on desktop,
+- nested decorative entrance animations are removed from dense data regions,
+- one page-level entrance plus genuine live/progress motion is the default ceiling,
+- the shared easing reference is `cubic-bezier(0.16, 1, 0.3, 1)`, without bounce or overshoot.
+
+The source design system is guidance, not runtime dependency. React 18 + TypeScript + Vite + Ant Design 5 remain unchanged.
+
+
+### v0.4.2 closure
+
+Manual acceptance:
+- User explicitly approved merge on 2026-09-18 after the Taste × Feihong Console redesign pass.
+- Real-browser visual acceptance is treated as user-owned approval; automated tests remain evidence for structural UI contracts only.
+
+Verification evidence:
+- Taste RED: Actions `35311300882`
+- Taste GREEN: Actions `35311577378`
+- Taste final refactor validation: Actions `35311699878`
+- Feihong Console Quality Gate RED: Actions `35312162194`
+- Combined GREEN: Actions `35312349148`
+- Final combined automated result: 463 / 463 frontend tests PASS, TypeScript PASS, production build PASS.
+
+Release boundary:
+- v0.4.2 remains UI / design-system / visual-regression scope only.
+- No backend, API, Worker, executor, fs_ops, Quarantine, Plan lifecycle, PathGuard, RBAC or destructive-confirmation semantics were intentionally changed.
+- The temporary v0.4.2 PR-only TDD workflow is removed at closure; the regression contracts remain in the frontend test runner.
