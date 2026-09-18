@@ -111,6 +111,7 @@ export const OperationJournalDrawer: React.FC<Props> = ({ planId, open, onClose 
 
   return (
     <Drawer
+        rootClassName="nfc-overlay-drawer"
       title={
         <Space>
           <HistoryOutlined style={{ color: '#1677ff' }} />

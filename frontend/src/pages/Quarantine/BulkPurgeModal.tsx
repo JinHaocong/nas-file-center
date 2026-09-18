@@ -127,6 +127,7 @@ export const BulkPurgeModal: React.FC<Props> = ({
 
   return (
     <Modal
+      className="nfc-overlay-modal"
       title={
         <Space>
           <ExclamationCircleOutlined style={{ color: '#ff4d4f' }} />

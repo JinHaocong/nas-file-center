@@ -89,6 +89,7 @@ export const RestoreModal: React.FC<Props> = ({
 
   return (
     <Modal
+      className="nfc-overlay-modal"
       title={
         <Space>
           <UndoOutlined style={{ color: '#1677ff' }} />

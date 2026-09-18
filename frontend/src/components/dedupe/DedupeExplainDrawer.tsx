@@ -72,6 +72,7 @@ export const DedupeExplainDrawer: React.FC<Props> = ({
 
   return (
     <Drawer
+        rootClassName="nfc-overlay-drawer"
       title={
         <Space>
           <span>去重决策分析 (Decision Explain)</span>

@@ -164,6 +164,7 @@ export const RevisionDrawer: React.FC<RevisionDrawerProps> = ({
   return (
     <>
       <Drawer
+        rootClassName="nfc-overlay-drawer"
         title={
           <Space>
             <HistoryOutlined />
@@ -194,6 +195,7 @@ export const RevisionDrawer: React.FC<RevisionDrawerProps> = ({
       </Drawer>
 
       <Modal
+        className="nfc-overlay-modal"
         title={`工作流定义详情 (r${inspectRevision?.revision})`}
         open={!!inspectRevision}
         onCancel={() => setInspectRevision(null)}
