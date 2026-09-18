@@ -6,11 +6,11 @@ import { resolve } from 'node:path';
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');
 
 describe('v0.4.2 Taste redesign contract', () => {
-  test('palette moves from generic SaaS blue to a graphite and jade product identity', () => {
-    const tokens = read('src/design/tokens.ts');
-    assert.match(tokens, /accent:\s*['"]#167a5c['"]/i);
-    assert.match(tokens, /accent:\s*['"]#4fd1a1['"]/i);
-    assert.doesNotMatch(tokens, /#335cff|#7f8cff/i);
+  test('v0.4.2 palette decision remains documented even when later releases supersede the skin', () => {
+    const design = read('../DESIGN.md');
+    assert.ok(design.includes('Graphite + Jade'));
+    assert.ok(design.includes('v0.4.3 Modern Console Reset'));
+    assert.ok(design.includes('supersedes the v0.4.2 Graphite + Jade'));
   });
 
   test('data typography uses optical hierarchy and tabular numerics', () => {
