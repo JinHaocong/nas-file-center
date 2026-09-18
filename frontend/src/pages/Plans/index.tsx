@@ -127,7 +127,7 @@ export const PlansPage: React.FC = () => {
   return (
     <div className="nfc-operations-page">
       <PageHeader
-        eyebrow="EXECUTION"
+        eyebrow="Execution control"
         title="执行计划"
         description="Dry Run 计划生命周期：Draft → Frozen → Validate → Execute。任何真实文件变更都必须经过计划链路。"
         actions={
