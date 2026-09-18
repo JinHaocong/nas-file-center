@@ -44,10 +44,10 @@ describe('v0.4.3 modern console reset', () => {
   test('header becomes a compact command bar rather than a traditional admin toolbar', () => {
     const header = read('src/components/Header.tsx');
     const css = read('src/index.css');
-    assert.match(header, /nfc-header-brandline/);
+    assert.match(header, /nfc-header-workspace/);
     assert.match(header, /nfc-header-command-cluster/);
     assert.ok(css.includes('.nfc-header.nfc-header'));
-    assert.ok(css.includes('border: 1px solid var(--nfc-shell-hairline)'));
+    assert.ok(css.includes('border: 1px solid var(--nfc-workspace-hairline)'));
   });
 
   test('data surfaces avoid heavy gray table chrome', () => {
