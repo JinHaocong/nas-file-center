@@ -366,3 +366,33 @@ Motion is functional and spatial:
 
 Representative acceptance surfaces for this pass:
 Dashboard, Plans, Workflows, shared shell, shared DataPanel/MetricCard, Ant Design control chrome, Modal/Drawer.
+
+
+### v0.4.1 Premium Visual Pass closure — 2026-09-18
+
+Automated acceptance:
+- RED: Actions `35309248747` — 7 / 7 premium visual contract assertions failed as expected.
+- Foundation GREEN: Actions `35309382366` — frontend regression, typecheck and production build PASS.
+- Representative-page RED: Actions `35309466791` — premium representative-surface polish assertion failed as expected.
+- Final GREEN: Actions `35309541463` — 446 / 446 frontend tests PASS, typecheck PASS, production build PASS.
+
+Implemented:
+- theme-aware xs/sm/md depth hierarchy,
+- shared motion curves and page/surface entrance,
+- Sidebar selected-state motion,
+- DataPanel / MetricCard / quick-action interaction depth,
+- live-state pulse for running / executing / validating only,
+- refined Button / Input / Select / Table / Modal / Drawer / Dropdown chrome,
+- staggered Dashboard / mobile record entrance,
+- refined Switch / Checkbox / Tabs / Pagination / tooltip / scrollbar behavior,
+- complete prefers-reduced-motion fallback.
+
+Not changed:
+- routes,
+- backend APIs,
+- Worker ownership,
+- Plan / Task lifecycle semantics,
+- Quarantine authority,
+- filesystem mutation / validation behavior.
+
+Manual browser visual review remains separate from automated acceptance.
