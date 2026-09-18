@@ -1,0 +1,62 @@
+name: Rename Extension + Stale Plan Delete TDD
+
+on:
+  push:
+    branches:
+      - hotfix/rename-extension-stale-plan-delete
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend-focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CONFIG_DIR: /tmp/nfc-config
+      DATA_MOUNT: /tmp/nfc-data
+      ALLOWED_ROOTS: /tmp/nfc-data
+      QUARANTINE_ROOT: /tmp/nfc-data/.nas-file-center-trash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install test dependencies
+        run: python -m pip install -e '.[test]'
+      - name: Run focused backend RED/GREEN tests
+        env:
+          PYTHONPATH: .
+        run: pytest tests/test_batch_rename.py tests/test_legacy_batch_recursive_rename_regressions.py tests/test_legacy_batch_execution_regressions.py -q
+
+  frontend-focused:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Compile focused frontend tests
+        working-directory: frontend
+        run: >-
+          ./node_modules/.bin/tsc
+          --outDir dist-hotfix-test
+          --module commonjs
+          --target es2022
+          --moduleResolution node
+          --esModuleInterop
+          tests/plan_cleanup.test.ts
+          tests/rename_extension.test.ts
+      - name: Run focused frontend RED/GREEN tests
+        working-directory: frontend
+        run: |
+          printf '{"type":"commonjs"}' > dist-hotfix-test/package.json
+          node --test             dist-hotfix-test/tests/plan_cleanup.test.js             dist-hotfix-test/tests/rename_extension.test.js
