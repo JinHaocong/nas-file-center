@@ -93,7 +93,7 @@ export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose, onVie
   };
 
   return (
-    <Drawer
+    <Drawer\n        rootClassName="nfc-overlay-drawer"
       title={
         <Space>
           <span>任务详情</span>
