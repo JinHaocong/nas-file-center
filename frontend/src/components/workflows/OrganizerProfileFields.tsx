@@ -80,6 +80,7 @@ export const OrganizerProfileFields: React.FC<OrganizerProfileFieldsProps> = ({
 
   return (
     <Tabs
+      className="nfc-organizer-profile-tabs"
       defaultActiveKey="basic"
       items={[
         {
@@ -123,20 +124,20 @@ export const OrganizerProfileFields: React.FC<OrganizerProfileFieldsProps> = ({
               <Alert
                 message="模板可用变量说明"
                 description={
-                  <div style={{ fontSize: 13, lineHeight: '22px' }}>
+                  <div className="nfc-organizer-template-help">
                     <div>
                       <Tag color="blue">{'{name}'}</Tag> 原目录名（已清理旧尾巴）&nbsp;
                       <Tag color="blue">{'{index}'}</Tag> 序列编号&nbsp;
                       <Tag color="blue">{'{statistics}'}</Tag> 统计标签字符串&nbsp;
                       <Tag color="blue">{'{size}'}</Tag> 容量统计（如 1.5GB）
                     </div>
-                    <div style={{ marginTop: 4 }}>
+                    <div className="nfc-organizer-template-help-row">
                       <Tag color="cyan">{'{images}'}</Tag> 图片数 (P)&nbsp;
                       <Tag color="cyan">{'{videos}'}</Tag> 视频数 (V)&nbsp;
                       <Tag color="cyan">{'{files}'}</Tag> 文件总数&nbsp;
                       <Tag color="cyan">{'{folders}'}</Tag> 子文件夹数
                     </div>
-                    <div style={{ marginTop: 4 }}>
+                    <div className="nfc-organizer-template-help-row">
                       <Tag color="purple">{'{?videos: {videos}V}'}</Tag> 条件语法（当视频数 &gt; 0 时显示，为 0 时自动省略）
                     </div>
                   </div>
@@ -144,7 +145,7 @@ export const OrganizerProfileFields: React.FC<OrganizerProfileFieldsProps> = ({
                 type="info"
                 showIcon
                 icon={<InfoCircleOutlined />}
-                style={{ marginBottom: 16 }}
+                className="nfc-organizer-template-alert"
               />
 
               <Form.Item
@@ -169,17 +170,17 @@ export const OrganizerProfileFields: React.FC<OrganizerProfileFieldsProps> = ({
                 size="small"
                 title={
                   <Space>
-                    <ThunderboltOutlined style={{ color: '#faad14' }} />
+                    <ThunderboltOutlined className="nfc-organizer-preview-icon" />
                     <span>实时命名渲染预览 (Live Preview)</span>
                   </Space>
                 }
-                style={{ background: '#f8fafc', borderColor: '#e2e8f0', marginBottom: 8 }}
+                className="nfc-organizer-live-preview"
               >
-                <div style={{ padding: '4px 0' }}>
-                  <Text type="secondary" style={{ marginRight: 8 }}>
+                <div className="nfc-organizer-live-preview-row">
+                  <Text type="secondary" className="nfc-organizer-live-preview-label">
                     目标名称示例：
                   </Text>
-                  <Text code strong style={{ fontSize: 14, color: '#1677ff' }}>
+                  <Text code strong className="nfc-organizer-live-preview-value">
                     {previewExample}
                   </Text>
                 </div>
@@ -247,7 +248,7 @@ export const OrganizerProfileFields: React.FC<OrganizerProfileFieldsProps> = ({
           label: '编号与时间戳 (mtime)',
           children: (
             <>
-              <Divider orientation="left" style={{ margin: '8px 0 16px' }}>
+              <Divider orientation="left" className="nfc-organizer-section-divider">
                 序列编号设置
               </Divider>
               <Row gutter={16}>
@@ -263,17 +264,17 @@ export const OrganizerProfileFields: React.FC<OrganizerProfileFieldsProps> = ({
                 </Col>
                 <Col span={8}>
                   <Form.Item name={getName('numbering_start')} label="起始编号">
-                    <InputNumber min={0} style={{ width: '100%' }} />
+                    <InputNumber min={0} className="nfc-full-width-control" />
                   </Form.Item>
                 </Col>
                 <Col span={8}>
                   <Form.Item name={getName('numbering_padding')} label="补零位数 (Padding)">
-                    <InputNumber min={1} max={10} style={{ width: '100%' }} />
+                    <InputNumber min={1} max={10} className="nfc-full-width-control" />
                   </Form.Item>
                 </Col>
               </Row>
 
-              <Divider orientation="left" style={{ margin: '8px 0 16px' }}>
+              <Divider orientation="left" className="nfc-organizer-section-divider">
                 时间戳 (mtime) 刷新规则
               </Divider>
               <Row gutter={16}>
@@ -289,7 +290,7 @@ export const OrganizerProfileFields: React.FC<OrganizerProfileFieldsProps> = ({
                 </Col>
                 <Col span={12}>
                   <Form.Item name={getName('mtime_delay_seconds')} label="排序刷新间隔秒数">
-                    <InputNumber min={0} max={60} step={0.5} style={{ width: '100%' }} />
+                    <InputNumber min={0} max={60} step={0.5} className="nfc-full-width-control" />
                   </Form.Item>
                 </Col>
               </Row>
