@@ -2254,3 +2254,81 @@ button.nfc-mobile-activity-card:hover {
     padding-bottom: 8px;
   }
 }
+
+
+.nfc-workflow-preview-item-mobile-card {
+  padding: 14px;
+  border-bottom: 1px solid var(--nfc-hairline);
+  background: var(--nfc-surface-1);
+}
+
+.nfc-workflow-preview-item-mobile-card:last-child {
+  border-bottom: 0;
+}
+
+.nfc-workflow-preview-state {
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+}
+
+.nfc-workflow-runtime-bar {
+  padding: 10px 0;
+  border-top: 1px solid var(--nfc-hairline);
+  border-bottom: 1px solid var(--nfc-hairline);
+}
+
+.nfc-form-inline-label {
+  color: var(--nfc-text-subtle);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.nfc-workflow-root-select {
+  min-width: min(360px, 100%);
+}
+
+.nfc-workflow-preview-subsection {
+  border: 1px solid var(--nfc-hairline);
+  border-radius: var(--nfc-radius-md);
+  overflow: hidden;
+  background: var(--nfc-surface-1);
+}
+
+.nfc-workflow-preview-subheader {
+  min-height: 54px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--nfc-hairline);
+}
+
+.nfc-workflow-preview-subheader strong,
+.nfc-workflow-preview-subheader span {
+  display: block;
+}
+
+.nfc-workflow-preview-subheader strong {
+  color: var(--nfc-text);
+  font-size: 12px;
+}
+
+.nfc-workflow-preview-subheader span {
+  margin-top: 2px;
+  color: var(--nfc-text-subtle);
+  font-size: 10px;
+}
+
+@media (max-width: 767px) {
+  .nfc-workflow-runtime-bar {
+    display: grid;
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .nfc-workflow-root-select,
+  .nfc-workflow-plan-name-input {
+    width: 100%;
+    min-width: 0;
+  }
+}
