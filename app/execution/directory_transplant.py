@@ -476,7 +476,7 @@ def move_directory_tree_noreplace(
     sequence: int,
     expected_device: int = 0,
     expected_inode: int = 0,
-) -> None:
+) -> DirectoryTransplantResult:
     src = Path(source)
     dst = Path(target)
     state_path = _state_path(quarantine_root, plan_id, sequence)
@@ -492,7 +492,10 @@ def move_directory_tree_noreplace(
             source=src,
             target=dst,
         ):
-            return
+            existing = _load_state(state_path) or {}
+            return DirectoryTransplantResult(
+                metadata_warnings=tuple(existing.get("metadata_warnings") or ())
+            )
         raise
 
     if not stat.S_ISDIR(src_st.st_mode) or stat.S_ISLNK(src_st.st_mode):
@@ -524,6 +527,7 @@ def move_directory_tree_noreplace(
             "source_inode": int(src_st.st_ino),
             "created_dirs": {},
             "published_symlinks": {},
+            "metadata_warnings": [],
         }
         _save_state(state_path, state)
     else:
@@ -544,10 +548,12 @@ def move_directory_tree_noreplace(
     if dst.exists() or dst.is_symlink():
         dst_st = os.lstat(dst)
         expected_root = (state.get("created_dirs") or {}).get("")
-        if not isinstance(expected_root, list) or [int(dst_st.st_dev), int(dst_st.st_ino)] != [
-            int(expected_root[0]),
-            int(expected_root[1]),
-        ]:
+        if (
+            not isinstance(expected_root, list)
+            or len(expected_root) != 2
+            or [int(dst_st.st_dev), int(dst_st.st_ino)]
+            != [int(expected_root[0]), int(expected_root[1])]
+        ):
             raise FileExistsError(errno.EEXIST, f"Target path already exists: {dst}", str(dst))
         if not stat.S_ISDIR(dst_st.st_mode) or stat.S_ISLNK(dst_st.st_mode):
             raise DirectoryTransplantConflict(errno.EEXIST, "Target root is no longer a directory")
@@ -565,17 +571,23 @@ def move_directory_tree_noreplace(
     state["phase"] = "migrating"
     _save_state(state_path, state)
 
+    metadata_warnings = list(state.get("metadata_warnings") or [])
     src_fd = _open_dir(src)
     dst_fd = _open_dir(dst)
     try:
         if _identity(os.fstat(src_fd)) != _identity(src_st):
-            raise OSError(getattr(errno, "ESTALE", errno.EIO), "Source root identity changed")
+            raise OSError(
+                getattr(errno, "ESTALE", errno.EIO),
+                "TRANSPLANT_SOURCE_IDENTITY_CHANGED at .",
+            )
         root_expected = (state.get("created_dirs") or {}).get("")
         dst_st = os.fstat(dst_fd)
-        if not isinstance(root_expected, list) or [int(dst_st.st_dev), int(dst_st.st_ino)] != [
-            int(root_expected[0]),
-            int(root_expected[1]),
-        ]:
+        if (
+            not isinstance(root_expected, list)
+            or len(root_expected) != 2
+            or [int(dst_st.st_dev), int(dst_st.st_ino)]
+            != [int(root_expected[0]), int(root_expected[1])]
+        ):
             raise DirectoryTransplantConflict(errno.EEXIST, "Target root identity changed")
 
         _move_directory_contents(
@@ -584,16 +596,33 @@ def move_directory_tree_noreplace(
             rel_prefix="",
             state_path=state_path,
             state=state,
+            metadata_warnings=metadata_warnings,
         )
-        _copy_directory_metadata(src_fd, dst_fd)
+        _copy_directory_metadata(
+            src_fd,
+            dst_fd,
+            rel_path="",
+            warnings=metadata_warnings,
+        )
+    except Exception:
+        _cleanup_owned_empty_target_dirs(dst, state)
+        raise
     finally:
         os.close(dst_fd)
         os.close(src_fd)
 
-    os.rmdir(src)
-    state["phase"] = "transplanted"
-    _save_state(state_path, state)
+    try:
+        os.rmdir(src)
+    except OSError as exc:
+        raise OSError(
+            exc.errno or errno.EIO,
+            f"TRANSPLANT_SOURCE_RMDIR_FAILED at .: {exc}",
+        ) from exc
 
+    state["phase"] = "transplanted"
+    state["metadata_warnings"] = metadata_warnings
+    _save_state(state_path, state)
+    return DirectoryTransplantResult(metadata_warnings=tuple(metadata_warnings))
 
 def directory_transplant_reconciles_completed(
     quarantine_root: Path | str,
