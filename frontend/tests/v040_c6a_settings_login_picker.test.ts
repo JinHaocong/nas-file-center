@@ -11,7 +11,8 @@ describe('v0.4.0 C6A settings login and directory picker contract', () => {
     assert.match(source, /nfc-login-shell/);
     assert.match(source, /nfc-login-panel/);
     assert.match(source, /nfc-login-brand/);
-    assert.match(source, /NAS File Center v0\.4\.0/);
+    const packageJson = JSON.parse(read('package.json')) as { version: string };
+    assert.ok(source.includes(`NAS File Center v${packageJson.version}`));
     assert.doesNotMatch(source, /<Card\b/);
     assert.doesNotMatch(source, /linear-gradient/);
   });
