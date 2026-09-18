@@ -601,7 +601,8 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
                       size="small"
                       dataSource={recentData.items}
                       renderItem={(rec) => (
-                        <List.Item className="nfc-directory-secondary-item">
+                        <List.Item
+                          className="nfc-directory-secondary-item"
                           actions={[
                             <Button
                               key="jump"
