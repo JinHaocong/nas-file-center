@@ -150,9 +150,9 @@ export const RenamePage: React.FC = () => {
   ];
 
   return (
-    <div className="nfc-operations-page">
+    <div className="nfc-operations-page nfc-rename-page">
       <PageHeader
-        eyebrow="FILE TOOLS"
+        eyebrow="Rename workspace"
         title="批量重命名"
         description="组合正则、扩展名替换、前后缀、父目录名与编号规则；必须先 Preview，并在无冲突时生成 Rename Plan。"
       />
