@@ -63,20 +63,28 @@ def test_wrapper_and_child_symlinks_are_never_followed(tmp_path):
     assert not any("secret" in (d.child_path or "") for d in decisions)
 
 
-def test_regular_or_special_sole_child_is_not_directory_candidate(tmp_path):
+def test_regular_file_sole_child_is_ready_while_special_child_is_blocked(tmp_path):
     root = tmp_path / "root"
     root.mkdir()
     (root / "B_file").mkdir()
-    (root / "B_file" / "file.jpg").write_text("x")
+    (root / "B_file" / "001").write_text("payload")
     (root / "B_fifo").mkdir()
     os.mkfifo(root / "B_fifo" / "pipe")
 
     decisions = discover_single_child_wrappers(str(root), str(root))
     by_name = {Path(d.wrapper_path).name: d for d in decisions}
 
-    assert by_name["B_file"].state == "CHILD_NOT_DIRECTORY"
-    assert by_name["B_fifo"].state == "UNSUPPORTED_CHILD"
-    assert all(not d.selectable for d in decisions)
+    file_candidate = by_name["B_file"]
+    assert file_candidate.state == "READY"
+    assert file_candidate.selectable is True
+    assert file_candidate.child_object_type == "file"
+    assert file_candidate.child_path == str(root / "B_file" / "001")
+    assert file_candidate.target_path == str(root / "001")
+
+    fifo_candidate = by_name["B_fifo"]
+    assert fifo_candidate.state == "UNSUPPORTED_CHILD"
+    assert fifo_candidate.selectable is False
+    assert fifo_candidate.child_object_type == "special"
 
 
 def test_existing_target_is_explicit_nonselectable_conflict(tmp_path):
