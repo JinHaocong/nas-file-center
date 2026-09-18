@@ -8767,3 +8767,152 @@ body {
 .nfc-mobile-nav-drawer .ant-drawer-body {
   padding: 0;
 }
+
+
+/* v0.4.4 Sidebar Visual Language Parity Lock
+ * Major workspace surfaces inherit the exact desktop navigation shell tokens.
+ * Nested controls/cards follow the navigation-item rhythm instead of inventing
+ * a second radius/shadow/background system.
+ */
+:root {
+  --nfc-workspace-surface: var(--nfc-nav-surface);
+  --nfc-workspace-surface-strong: var(--nfc-nav-surface);
+  --nfc-workspace-hairline: var(--nfc-shell-hairline);
+  --nfc-workspace-radius: var(--nfc-shell-radius);
+  --nfc-workspace-radius-inner: 11px;
+  --nfc-workspace-shadow: var(--nfc-shell-shadow);
+}
+
+.nfc-header.nfc-header,
+.nfc-page-header,
+.nfc-data-panel,
+.nfc-metric-card,
+.nfc-login-panel,
+.nfc-worker-panel,
+.nfc-tool-workbench,
+.nfc-complex-form-panel,
+.nfc-plan-action-surface,
+.nfc-dedupe-plan-surface,
+.nfc-mobile-dock-surface,
+.nfc-overlay-modal .ant-modal-content,
+.nfc-form-modal .ant-modal-content,
+.nfc-directory-picker-modal .ant-modal-content,
+.nfc-overlay-drawer .ant-drawer-content {
+  border-color: var(--nfc-workspace-hairline) !important;
+  border-radius: var(--nfc-workspace-radius) !important;
+  background: var(--nfc-workspace-surface) !important;
+  box-shadow: var(--nfc-workspace-shadow) !important;
+}
+
+.nfc-page-header,
+.nfc-data-panel,
+.nfc-metric-card,
+.nfc-worker-panel,
+.nfc-tool-workbench,
+.nfc-complex-form-panel,
+.nfc-plan-action-surface,
+.nfc-dedupe-plan-surface,
+.nfc-login-panel {
+  overflow: hidden;
+}
+
+.nfc-operations-page .ant-card,
+.nfc-overlay-modal .ant-card,
+.nfc-overlay-drawer .ant-card,
+.nfc-settings-subpanel,
+.nfc-workflow-mode-option,
+.nfc-root-list,
+.nfc-lifecycle-strip,
+.nfc-overlay-section,
+.nfc-page-alert,
+.nfc-snapshot-note,
+.nfc-bulk-action-bar,
+.nfc-selection-notice,
+.nfc-directory-picker-selection,
+.nfc-directory-browser-toolbar,
+.nfc-audit-json,
+.nfc-code-block,
+.nfc-responsive-descriptions {
+  border-color: var(--nfc-workspace-hairline) !important;
+  border-radius: var(--nfc-workspace-radius-inner) !important;
+  background: color-mix(in srgb, var(--nfc-surface-2) 34%, var(--nfc-workspace-surface)) !important;
+  box-shadow: none !important;
+}
+
+.nfc-page-actions .nfc-action-bar,
+.nfc-header-command-cluster,
+.nfc-filter-bar,
+.nfc-row-actions,
+.nfc-workflow-mode-grid .ant-radio-button-wrapper,
+.nfc-operations-page .ant-input,
+.nfc-operations-page .ant-input-affix-wrapper,
+.nfc-operations-page .ant-input-number,
+.nfc-operations-page .ant-select-selector,
+.nfc-operations-page .ant-picker,
+.nfc-overlay-modal .ant-input,
+.nfc-overlay-modal .ant-input-affix-wrapper,
+.nfc-overlay-modal .ant-input-number,
+.nfc-overlay-modal .ant-select-selector,
+.nfc-overlay-modal .ant-picker,
+.nfc-overlay-drawer .ant-input,
+.nfc-overlay-drawer .ant-input-affix-wrapper,
+.nfc-overlay-drawer .ant-input-number,
+.nfc-overlay-drawer .ant-select-selector,
+.nfc-overlay-drawer .ant-picker {
+  border-color: var(--nfc-workspace-hairline) !important;
+  border-radius: var(--nfc-workspace-radius-inner) !important;
+  box-shadow: none;
+}
+
+.nfc-page-actions .ant-btn,
+.nfc-command-button.ant-btn,
+.nfc-header-nav-toggle.ant-btn,
+.nfc-operations-page .ant-btn:not(.ant-btn-circle),
+.nfc-overlay-modal .ant-btn:not(.ant-btn-circle),
+.nfc-overlay-drawer .ant-btn:not(.ant-btn-circle) {
+  border-radius: var(--nfc-workspace-radius-inner);
+}
+
+.nfc-mobile-record-list > * {
+  border-color: var(--nfc-workspace-hairline) !important;
+  background: var(--nfc-workspace-surface) !important;
+  box-shadow: none !important;
+}
+
+.nfc-data-panel .ant-table,
+.nfc-data-panel .ant-table-container,
+.nfc-data-panel .ant-table-content,
+.nfc-data-panel .ant-table-tbody > tr > td {
+  background: transparent;
+}
+
+.nfc-data-panel .ant-table-thead > tr > th,
+.nfc-filter-bar,
+.nfc-bulk-action-bar {
+  background: color-mix(in srgb, var(--nfc-surface-2) 34%, var(--nfc-workspace-surface)) !important;
+}
+
+@media (max-width: 767px) {
+  .nfc-header.nfc-header,
+  .nfc-page-header,
+  .nfc-data-panel,
+  .nfc-metric-card,
+  .nfc-worker-panel,
+  .nfc-tool-workbench,
+  .nfc-complex-form-panel,
+  .nfc-plan-action-surface,
+  .nfc-dedupe-plan-surface,
+  .nfc-login-panel,
+  .nfc-mobile-dock-surface {
+    border-radius: 16px !important;
+    box-shadow: none !important;
+  }
+
+  .nfc-overlay-modal .ant-modal-content,
+  .nfc-form-modal .ant-modal-content,
+  .nfc-directory-picker-modal .ant-modal-content,
+  .nfc-overlay-drawer .ant-drawer-content {
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+}

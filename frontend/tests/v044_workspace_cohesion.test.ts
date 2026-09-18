@@ -44,4 +44,16 @@ describe('v0.4.4 workspace cohesion audit', () => {
     assert.match(css, /@media \(max-width: 767px\)[\s\S]*\.nfc-page-actions[\s\S]*width:\s*100%/s);
     assert.match(css, /@media \(max-width: 767px\)[\s\S]*\.nfc-metric-grid[\s\S]*grid-template-columns:\s*repeat\(2/s);
   });
+
+  test('background, shadow and radius inherit the sidebar visual language', () => {
+    const css = read('src/index.css');
+    assert.match(css, /--nfc-workspace-surface:\s*var\(--nfc-nav-surface\)/);
+    assert.match(css, /--nfc-workspace-hairline:\s*var\(--nfc-shell-hairline\)/);
+    assert.match(css, /--nfc-workspace-radius:\s*var\(--nfc-shell-radius\)/);
+    assert.match(css, /--nfc-workspace-shadow:\s*var\(--nfc-shell-shadow\)/);
+    assert.match(css, /--nfc-workspace-radius-inner:\s*11px/);
+    assert.match(css, /\.nfc-login-panel,[\s\S]*\.nfc-overlay-modal \.ant-modal-content[\s\S]*var\(--nfc-workspace-surface\)/s);
+    assert.match(css, /\.nfc-operations-page \.ant-card,[\s\S]*box-shadow:\s*none !important/s);
+  });
+
 });
