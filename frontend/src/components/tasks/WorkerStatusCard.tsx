@@ -42,33 +42,33 @@ export const WorkerStatusCard: React.FC = () => {
   const badgeConfig = WORKER_STATUS_BADGE_MAP[workerStatus] || WORKER_STATUS_BADGE_MAP.offline;
 
   return (
-    <section className="nfc-worker-panel" aria-label="调度 Worker 状态">
-      <div className="nfc-worker-identity">
-        <div>
-          <div className="nfc-worker-eyebrow">SCHEDULER</div>
-          <strong>调度 Worker</strong>
-        </div>
-        <span className={`nfc-worker-status nfc-worker-status-${workerStatus}`}>
+    <section className="nfc-worker-panel nfc-worker-status-strip" aria-label="调度 Worker 状态">
+      <div className="nfc-worker-primary">
+        <span className={'nfc-worker-status nfc-worker-status-' + workerStatus}>
           <span className="nfc-status-dot" aria-hidden="true" />
           {badgeConfig.label}
         </span>
+        <div>
+          <div className="nfc-worker-eyebrow">Scheduler</div>
+          <strong>调度 Worker</strong>
+        </div>
       </div>
 
-      <div className="nfc-worker-facts">
-        <div>
+      <div className="nfc-worker-stats">
+        <div className="nfc-worker-stat">
           <span>Worker ID</span>
           <strong className="nfc-mono">{data?.worker_id || '—'}</strong>
         </div>
-        <div>
+        <div className="nfc-worker-stat">
           <span>启动时间</span>
           <strong>{formatDateTime(data?.started_at)}</strong>
         </div>
-        <div>
+        <div className="nfc-worker-stat">
           <span>最近心跳</span>
           <strong>{formatDateTime(data?.heartbeat_at)}</strong>
         </div>
-        <div>
-          <span>心跳延迟</span>
+        <div className="nfc-worker-stat">
+          <span>延迟</span>
           <strong>{formatHeartbeatAge(data?.heartbeat_age_seconds)}</strong>
         </div>
       </div>
