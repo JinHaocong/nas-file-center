@@ -1,18 +1,20 @@
 import React, { useState } from 'react';
-import { Card, Table, Button, Typography, Space, Tag, message } from 'antd';
-import { ScheduleOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Button, Empty, message, Pagination, Table } from 'antd';
+import { ReloadOutlined, ScheduleOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { plansApi } from '../../api/domain';
 import { useTitle } from '../../hooks/useTitle';
 import { formatBytes, formatDateTime } from '../../utils/format';
-import { STATUS_MAP } from '../../utils/constants';
 import { PlanDeleteButton } from '../../components/plans/PlanDeleteButton';
 import { PlanHistoryCleanupModal } from '../../components/plans/PlanHistoryCleanupModal';
 import { LegacyPlanCleanup } from '../../components/plans/LegacyPlanCleanup';
 import { invalidatePlanDeleteFailure } from '../../components/plans/plan_cleanup';
-
-const { Title, Text } = Typography;
+import { PageHeader } from '../../components/ui/PageHeader';
+import { DataPanel } from '../../components/ui/DataPanel';
+import { ActionBar } from '../../components/ui/ActionBar';
+import { ResponsiveDataView } from '../../components/ui/ResponsiveDataView';
+import { StatusBadge } from '../../components/ui/StatusBadge';
 
 export const PlansPage: React.FC = () => {
   useTitle('执行计划');
@@ -22,7 +24,7 @@ export const PlansPage: React.FC = () => {
   const [pageSize, setPageSize] = useState(20);
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
-  const { data, isLoading, refetch } = useQuery({
+  const { data, isLoading, isFetching, refetch } = useQuery({
     queryKey: ['plansList', page, pageSize],
     queryFn: () => plansApi.listPlans(page, pageSize),
     refetchInterval: (query) => {
@@ -51,115 +53,182 @@ export const PlansPage: React.FC = () => {
     onSettled: () => setDeletingId(null),
   });
 
+  const items = data?.items || [];
+
   const columns = [
     {
       title: '计划名称',
       dataIndex: 'name',
       key: 'name',
       render: (text: string, record: any) => (
-        <Space>
-          <ScheduleOutlined style={{ color: '#1677ff' }} />
-          <a onClick={() => navigate(`/plans/${record.id}`)} style={{ fontWeight: 600 }}>
-            {text}
-          </a>
-        </Space>
+        <button type="button" className="nfc-plan-name" onClick={() => navigate(`/plans/${record.id}`)}>
+          <ScheduleOutlined />
+          <span>{text}</span>
+        </button>
       ),
     },
     {
-      title: '计划类型',
+      title: '类型',
       dataIndex: 'kind',
       key: 'kind',
-      render: (kind: string) => <Tag color="geekblue">{kind}</Tag>,
+      width: 130,
+      render: (kind: string) => <span className="nfc-kind-badge">{kind}</span>,
     },
     {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
-      render: (status: string) => {
-        const item = STATUS_MAP[status] || { label: status, color: 'default' };
-        return <Tag color={item.color}>{item.label}</Tag>;
-      },
+      width: 142,
+      render: (status: string) => <StatusBadge status={status} />,
     },
     {
-      title: '变更文件项数',
+      title: '变更项',
       dataIndex: 'expected_changes',
       key: 'expected_changes',
-      render: (val: number) => `${val.toLocaleString()} 项`,
+      width: 108,
+      render: (val: number) => <span className="nfc-mono">{val.toLocaleString()} 项</span>,
     },
     {
-      title: '预计可释放容量',
+      title: '预计可释放',
       dataIndex: 'expected_reclaim_bytes',
       key: 'expected_reclaim_bytes',
+      width: 126,
       render: (bytes: number) => (
-        <Text type={bytes > 0 ? 'success' : undefined} strong={bytes > 0}>
-          {formatBytes(bytes)}
-        </Text>
+        <span className={bytes > 0 ? 'nfc-data-emphasis' : 'nfc-table-muted'}>{formatBytes(bytes)}</span>
       ),
     },
     {
       title: '创建时间',
       dataIndex: 'created_at',
       key: 'created_at',
-      render: (val: string) => formatDateTime(val),
+      width: 174,
+      render: (val: string) => <span className="nfc-table-meta">{formatDateTime(val)}</span>,
     },
     {
       title: '操作',
       key: 'action',
+      width: 170,
       render: (_: any, record: any) => (
-        <Space size="small">
-          <Button size="small" type="link" onClick={() => navigate(`/plans/${record.id}`)}>
+        <div className="nfc-row-actions">
+          <Button size="small" type="text" onClick={() => navigate(`/plans/${record.id}`)}>
             查看与执行
           </Button>
           <PlanDeleteButton
             plan={record}
             onDelete={() => deletePlanMutation.mutate(record.id)}
             loading={deletingId === record.id}
+            type="text"
           />
-        </Space>
+        </div>
       ),
     },
   ];
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-        <div>
-          <Title level={4} style={{ margin: 0 }}>
-            执行计划管理
-          </Title>
-          <Text type="secondary">
-            所有文件操作均严格遵循 Dry Run 计划生命周期：Draft → Frozen → Validate → Execute
-          </Text>
-        </div>
-        <Space>
-          <Button icon={<ReloadOutlined />} onClick={() => refetch()} loading={isLoading}>
-            刷新
-          </Button>
-          <PlanHistoryCleanupModal />
-        </Space>
-      </div>
+    <div className="nfc-operations-page">
+      <PageHeader
+        eyebrow="EXECUTION"
+        title="执行计划"
+        description="Dry Run 计划生命周期：Draft → Frozen → Validate → Execute。任何真实文件变更都必须经过计划链路。"
+        actions={
+          <ActionBar compact>
+            <Button icon={<ReloadOutlined />} onClick={() => refetch()} loading={isFetching}>
+              刷新
+            </Button>
+            <PlanHistoryCleanupModal />
+          </ActionBar>
+        }
+      />
 
       <LegacyPlanCleanup />
 
-      <Card bordered={false} style={{ borderRadius: 12 }}>
-        <Table
-          dataSource={data?.items || []}
-          columns={columns}
-          rowKey="id"
-          loading={isLoading}
-          pagination={{
-            current: page,
-            pageSize,
-            total: data?.total || 0,
-            showSizeChanger: true,
-            pageSizeOptions: ['10', '20', '50', '100'],
-            onChange: (p, ps) => {
-              setPage(p);
-              setPageSize(ps);
-            },
-          }}
+      <DataPanel
+        title="计划列表"
+        description="计划状态、预期变更与可释放容量均来自当前 BatchPlan。"
+        action={<span className="nfc-panel-count">{data?.total ?? 0} plans</span>}
+        className="nfc-panel-flush"
+      >
+        <ResponsiveDataView
+          desktop={
+            <Table
+              dataSource={items}
+              columns={columns}
+              rowKey="id"
+              loading={isLoading}
+              pagination={{
+                current: page,
+                pageSize,
+                total: data?.total || 0,
+                showSizeChanger: true,
+                pageSizeOptions: ['10', '20', '50', '100'],
+                onChange: (p, ps) => {
+                  setPage(p);
+                  setPageSize(ps);
+                },
+              }}
+            />
+          }
+          mobile={
+            <>
+              <div className="nfc-mobile-record-list">
+                {items.length === 0 ? (
+                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无执行计划" />
+                ) : (
+                  items.map((plan: any) => (
+                    <article className="nfc-plan-mobile-card" key={plan.id}>
+                      <div className="nfc-mobile-record-heading">
+                        <div className="nfc-plan-mobile-heading-copy">
+                          <button
+                            type="button"
+                            className="nfc-mobile-record-title"
+                            onClick={() => navigate(`/plans/${plan.id}`)}
+                          >
+                            {plan.name}
+                          </button>
+                          <span className="nfc-kind-badge">{plan.kind}</span>
+                        </div>
+                        <StatusBadge status={plan.status} />
+                      </div>
+
+                      <div className="nfc-mobile-record-facts nfc-mobile-record-facts-3">
+                        <span>变更项 <b>{plan.expected_changes?.toLocaleString?.() ?? plan.expected_changes}</b></span>
+                        <span>可释放 <b>{formatBytes(plan.expected_reclaim_bytes || 0)}</b></span>
+                        <span>创建 <b>{formatDateTime(plan.created_at)}</b></span>
+                      </div>
+
+                      <div className="nfc-mobile-record-actions">
+                        <Button type="text" onClick={() => navigate(`/plans/${plan.id}`)}>
+                          查看与执行
+                        </Button>
+                        <PlanDeleteButton
+                          plan={plan}
+                          onDelete={() => deletePlanMutation.mutate(plan.id)}
+                          loading={deletingId === plan.id}
+                          type="text"
+                          size="middle"
+                        />
+                      </div>
+                    </article>
+                  ))
+                )}
+              </div>
+              <div className="nfc-mobile-pagination">
+                <Pagination
+                  current={page}
+                  pageSize={pageSize}
+                  total={data?.total || 0}
+                  showSizeChanger
+                  pageSizeOptions={['10', '20', '50', '100']}
+                  onChange={(p, ps) => {
+                    setPage(p);
+                    setPageSize(ps);
+                  }}
+                />
+              </div>
+            </>
+          }
         />
-      </Card>
+      </DataPanel>
     </div>
   );
 };
