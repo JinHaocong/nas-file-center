@@ -11,6 +11,8 @@ export const PLAN_SINGLE_DELETE_ALLOWED = new Set([
   'partial',
   'completed',
   'failed',
+  'stale',
+  'expired',
 ]);
 
 export const PLAN_DELETE_BLOCKED_ACTIVE = new Set([
