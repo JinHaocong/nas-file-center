@@ -220,7 +220,7 @@ export const IndexesPage: React.FC = () => {
         />
       </DataPanel>
 
-      <Modal title="创建增量文件索引" open={modalOpen} onOk={handleCreate} onCancel={() => { form.resetFields(); setModalOpen(false); }} confirmLoading={createMutation.isPending} okText="加入队列" cancelText="取消" destroyOnClose>
+      <Modal className="nfc-overlay-modal nfc-index-create-modal" title="创建增量文件索引" open={modalOpen} onOk={handleCreate} onCancel={() => { form.resetFields(); setModalOpen(false); }} confirmLoading={createMutation.isPending} okText="加入队列" cancelText="取消" destroyOnClose>
         <Form form={form} layout="vertical" className="nfc-modal-form">
           <Form.Item name="root" label="目录路径" tooltip="必须位于 ALLOWED_ROOTS 允许的挂载目录下" rules={[{ required: true, message: '请选择或输入要索引的目录绝对路径' }]}>
             <DirectoryPicker multiple={false} allowManualInput={true} placeholder="点击选择要建立索引的根目录..." />
