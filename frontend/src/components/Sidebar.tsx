@@ -113,9 +113,11 @@ export const Sidebar: React.FC<Props> = ({
             <Text strong className="nfc-brand-title">
               NAS File Center
             </Text>
-            <Text type="secondary" className="nfc-brand-version">
-              v0.4.0 · Operations
-            </Text>
+            <span className="nfc-sidebar-meta">
+              <span>CONTROL PLANE</span>
+              <span className="nfc-sidebar-meta-separator" aria-hidden="true">/</span>
+              <span>v0.4</span>
+            </span>
           </span>
         )}
       </button>
