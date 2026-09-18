@@ -436,3 +436,32 @@ The redesign must:
 - preserve all API, Worker, Plan, Quarantine, filesystem and destructive-action semantics.
 
 No framework migration is authorized. React 18, TypeScript, Vite and Ant Design 5 remain the implementation stack.
+
+
+### Feihong Console Quality Gate
+
+This quality gate adapts the Console/Admin discipline from `ifeihong/feihong-design-system` without importing Feihong's personal-brand skin.
+
+Adopted principles:
+- function before decoration,
+- navigation carries product identity while the work canvas stays neutral,
+- operational controls expose hover / active / focus / disabled states,
+- dense data surfaces use a stable scan rhythm,
+- data and identifiers use tabular / mono treatment where appropriate,
+- motion must be purposeful, restrained and reduced-motion safe,
+- desktop, tablet and mobile remain first-class layouts.
+
+NAS-specific adaptation:
+- the existing Graphite + Jade identity remains authoritative instead of Feihong Royal Blue / Gold / Burgundy,
+- semantic colors remain authoritative: success stays green, warning stays amber, danger / irreversible stays red,
+- no Feihong wax-seal, fleuron, editorial ornament, luxury serif branding or decorative gold is imported,
+- terminal green remains reserved for genuine terminal/code semantics if introduced later,
+- Header chrome is crisp rather than glassmorphic so safety and Worker state remain immediately legible.
+
+Console rhythm:
+- primary operational table rows target 46px on desktop,
+- nested decorative entrance animations are removed from dense data regions,
+- one page-level entrance plus genuine live/progress motion is the default ceiling,
+- the shared easing reference is `cubic-bezier(0.16, 1, 0.3, 1)`, without bounce or overshoot.
+
+The source design system is guidance, not runtime dependency. React 18 + TypeScript + Vite + Ant Design 5 remain unchanged.
