@@ -18,8 +18,8 @@ from app.batch_utilities.errors import (
     BatchUtilitySymlinkBlockedError,
 )
 from app.fs_ops import (
+    probe_directory_rename_noreplace_compat_at,
     probe_existing_noreplace_capability_at,
-    probe_plain_directory_rename_noclobber_at,
 )
 
 
@@ -703,7 +703,7 @@ def discover_single_child_wrappers(
                             if native_noreplace is True:
                                 state = "READY"
                             else:
-                                compat_noclobber = probe_plain_directory_rename_noclobber_at(
+                                compat_noclobber = probe_directory_rename_noreplace_compat_at(
                                     wrapper_fd,
                                     scope_fd,
                                 )
