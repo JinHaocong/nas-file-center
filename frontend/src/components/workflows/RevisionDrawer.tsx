@@ -1,17 +1,17 @@
 import React, { useState } from 'react';
 import {
-  Drawer,
-  Table,
+  Alert,
   Button,
-  Tag,
-  Typography,
-  Space,
+  Drawer,
   Modal,
   Popconfirm,
+  Space,
+  Table,
+  Tag,
+  Typography,
   message,
-  Alert,
 } from 'antd';
-import { HistoryOutlined, RollbackOutlined, EyeOutlined, ExportOutlined } from '@ant-design/icons';
+import { ExportOutlined, EyeOutlined, HistoryOutlined, RollbackOutlined } from '@ant-design/icons';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { workflowApi } from '../../api/workflows';
@@ -20,6 +20,7 @@ import { WorkflowRevisionResponse, WorkflowResponse } from '../../types/workflow
 import { formatDateTime } from '../../utils/format';
 import { useAuth } from '../../contexts/AuthContext';
 import { canRollbackWorkflow } from '../../utils/workflowRbac';
+import { useResponsive } from '../../hooks/useResponsive';
 
 const { Text } = Typography;
 
@@ -44,6 +45,7 @@ export const RevisionDrawer: React.FC<RevisionDrawerProps> = ({
 }) => {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { isMobile } = useResponsive();
   const [inspectRevision, setInspectRevision] = useState<WorkflowRevisionResponse | null>(null);
 
   const {
@@ -75,27 +77,37 @@ export const RevisionDrawer: React.FC<RevisionDrawerProps> = ({
     },
   });
 
+  const canRollbackRevision = (record: WorkflowRevisionResponse) =>
+    !isBuiltin &&
+    record.revision !== currentRevision &&
+    canRollbackWorkflow(user?.role, isArchived);
+
+  const jumpToRevision = (revision: number) => {
+    onClose();
+    navigate(`/workflows/${workflowId}?revision=${revision}`);
+  };
+
   const columns = [
     {
-      title: '版本号',
+      title: '版本',
       dataIndex: 'revision',
       key: 'revision',
-      width: 90,
+      width: 110,
       render: (rev: number) => (
         <Space>
           <Text strong>r{rev}</Text>
-          {rev === currentRevision && <Tag color="blue">当前生效</Tag>}
+          {rev === currentRevision && <Tag color="blue">当前</Tag>}
         </Space>
       ),
     },
     {
-      title: 'SHA256 校验和',
+      title: 'Definition SHA256',
       dataIndex: 'definition_sha256',
       key: 'definition_sha256',
       ellipsis: true,
       render: (sha: string) => (
         <Text code copyable={{ text: sha }}>
-          {sha ? `${sha.slice(0, 10)}...${sha.slice(-6)}` : '-'}
+          {sha ? `${sha.slice(0, 10)}…${sha.slice(-6)}` : '—'}
         </Text>
       ),
     },
@@ -110,93 +122,124 @@ export const RevisionDrawer: React.FC<RevisionDrawerProps> = ({
       title: '操作',
       key: 'actions',
       width: 220,
-      render: (_: any, record: WorkflowRevisionResponse) => {
-        const isCurrent = record.revision === currentRevision;
-        const canRollback = !isBuiltin && !isCurrent && canRollbackWorkflow(user?.role, isArchived);
-        return (
-          <Space>
-            <Button
-              size="small"
-              icon={<EyeOutlined />}
-              onClick={() => setInspectRevision(record)}
-            >
-              查看定义
+      render: (_: unknown, record: WorkflowRevisionResponse) => (
+        <Space>
+          <Button size="small" icon={<EyeOutlined />} onClick={() => setInspectRevision(record)}>
+            查看
+          </Button>
+          {record.revision !== currentRevision && (
+            <Button size="small" icon={<ExportOutlined />} onClick={() => jumpToRevision(record.revision)}>
+              跳转
             </Button>
-
-            {!isCurrent && (
+          )}
+          {canRollbackRevision(record) && (
+            <Popconfirm
+              title="确认回滚至该历史版本？"
+              description={`系统将生成新修订版本并恢复至第 r${record.revision} 版定义。`}
+              onConfirm={() => rollbackMutation.mutate(record.revision)}
+              okText="确认回滚"
+              cancelText="取消"
+            >
               <Button
                 size="small"
-                icon={<ExportOutlined />}
-                onClick={() => {
-                  onClose();
-                  navigate(`/workflows/${workflowId}?revision=${record.revision}`);
-                }}
+                danger
+                icon={<RollbackOutlined />}
+                loading={rollbackMutation.isPending}
               >
-                跳转查看
+                回滚
               </Button>
-            )}
-
-            {canRollback && (
-              <Popconfirm
-                title="确认回滚至该历史版本？"
-                description={`系统将生成新修订版本并恢复至第 r${record.revision} 版定义。`}
-                onConfirm={() => rollbackMutation.mutate(record.revision)}
-                okText="确认回滚"
-                cancelText="取消"
-              >
-                <Button
-                  size="small"
-                  type="link"
-                  danger
-                  icon={<RollbackOutlined />}
-                  loading={rollbackMutation.isPending}
-                >
-                  回滚
-                </Button>
-              </Popconfirm>
-            )}
-          </Space>
-        );
-      },
+            </Popconfirm>
+          )}
+        </Space>
+      ),
     },
   ];
+
+  const revisionItems = revisions || [];
 
   return (
     <>
       <Drawer
-        rootClassName="nfc-overlay-drawer"
+        rootClassName="nfc-overlay-drawer nfc-revision-drawer"
         title={
-          <Space>
-            <HistoryOutlined />
-            <span>版本历史与审计 (Workflow #{workflowId})</span>
-          </Space>
+          <div className="nfc-drawer-title">
+            <span className="nfc-drawer-title-kicker">Revision history</span>
+            <div className="nfc-drawer-title-row">
+              <HistoryOutlined />
+              <span>Workflow #{workflowId}</span>
+            </div>
+          </div>
         }
         open={open}
         onClose={onClose}
-        width={720}
+        width={760}
       >
         {isError && (
           <Alert
+            className="nfc-overlay-alert"
             type="error"
             message="获取版本历史失败"
             description={getStructuredApiError(error).message}
-            style={{ marginBottom: 16 }}
           />
         )}
 
-        <Table
-          dataSource={revisions || []}
-          columns={columns}
-          rowKey="revision"
-          loading={isLoading}
-          pagination={false}
-          size="small"
-        />
+        {isMobile ? (
+          <div className="nfc-revision-mobile-list">
+            {revisionItems.map((record) => (
+              <article className="nfc-revision-mobile-card" key={record.revision}>
+                <div className="nfc-revision-mobile-topline">
+                  <div>
+                    <strong>r{record.revision}</strong>
+                    {record.revision === currentRevision && <Tag color="blue">当前</Tag>}
+                  </div>
+                  <time>{formatDateTime(record.created_at)}</time>
+                </div>
+                <Text code copyable={{ text: record.definition_sha256 }}>
+                  {record.definition_sha256
+                    ? `${record.definition_sha256.slice(0, 12)}…${record.definition_sha256.slice(-8)}`
+                    : '—'}
+                </Text>
+                <div className="nfc-mobile-record-actions">
+                  <Button size="small" icon={<EyeOutlined />} onClick={() => setInspectRevision(record)}>
+                    查看定义
+                  </Button>
+                  {record.revision !== currentRevision && (
+                    <Button size="small" icon={<ExportOutlined />} onClick={() => jumpToRevision(record.revision)}>
+                      跳转
+                    </Button>
+                  )}
+                  {canRollbackRevision(record) && (
+                    <Popconfirm
+                      title="确认回滚至该历史版本？"
+                      onConfirm={() => rollbackMutation.mutate(record.revision)}
+                      okText="确认回滚"
+                      cancelText="取消"
+                    >
+                      <Button size="small" danger icon={<RollbackOutlined />}>
+                        回滚
+                      </Button>
+                    </Popconfirm>
+                  )}
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <Table
+            className="nfc-embedded-table"
+            dataSource={revisionItems}
+            columns={columns}
+            rowKey="revision"
+            loading={isLoading}
+            pagination={false}
+            size="small"
+          />
+        )}
       </Drawer>
 
       <Modal
-        className="nfc-overlay-modal"
-        title={`工作流定义详情 (r${inspectRevision?.revision})`}
+        className="nfc-overlay-modal nfc-definition-modal"
+        title={`工作流定义 · r${inspectRevision?.revision || '—'}`}
         open={!!inspectRevision}
         onCancel={() => setInspectRevision(null)}
         footer={[
@@ -204,24 +247,15 @@ export const RevisionDrawer: React.FC<RevisionDrawerProps> = ({
             关闭
           </Button>,
         ]}
-        width={680}
+        width={720}
       >
         {inspectRevision && (
-          <div>
-            <div style={{ marginBottom: 12 }}>
-              <Text type="secondary">Definition SHA256: </Text>
+          <div className="nfc-definition-inspector">
+            <div className="nfc-definition-sha">
+              <span>Definition SHA256</span>
               <Text code copyable>{inspectRevision.definition_sha256}</Text>
             </div>
-            <pre
-              style={{
-                background: '#f5f5f5',
-                padding: 12,
-                borderRadius: 6,
-                maxHeight: 400,
-                overflow: 'auto',
-                fontSize: 12,
-              }}
-            >
+            <pre className="nfc-code-block nfc-code-block-large">
               {JSON.stringify(inspectRevision.definition, null, 2)}
             </pre>
           </div>
