@@ -2182,6 +2182,151 @@ class BatchPlanExecuteHandler(TaskHandler):
             progress_message=f"Executing plan #{plan_id} ({completed_or_skipped}/{total_count} processed)...",
         )
 
+        def _try_rebase_utility_move_identity(
+            item_meta: BatchPlanItem,
+            stale_detail: Any,
+        ) -> bool:
+            if (
+                stale_detail is None
+                or getattr(stale_detail, "reason", None) != "filesystem_identity_changed"
+            ):
+                return False
+
+            live = _probe_utility_move_logical_binding_for_identity_rebase(
+                item_meta,
+                settings,
+            )
+            if live is None:
+                return False
+
+            with context.SessionLocal() as session:
+                session.execute(text("BEGIN IMMEDIATE"))
+                now = utcnow()
+                if context.worker_id is not None:
+                    assert_active_worker_lease(session, context.worker_id, now=now)
+
+                row = session.get(BatchPlanItem, item_meta.id)
+                if row is None or row.state in {"completed", "skipped", "failed"}:
+                    session.rollback()
+                    return False
+
+                predecessor_rows = list(
+                    session.scalars(
+                        select(BatchPlanItem)
+                        .where(
+                            BatchPlanItem.plan_id == plan_id,
+                            BatchPlanItem.sequence < row.sequence,
+                            BatchPlanItem.operation == "rmdir_empty",
+                            BatchPlanItem.state == "completed",
+                        )
+                        .order_by(BatchPlanItem.sequence)
+                    )
+                )
+                trusted_predecessor = next(
+                    (
+                        prev
+                        for prev in predecessor_rows
+                        if _is_utility_single_child_cleanup(prev)
+                    ),
+                    None,
+                )
+                if trusted_predecessor is None:
+                    session.rollback()
+                    return False
+
+                move_meta = _utility_single_child_meta(row)
+                cleanup_row = session.scalar(
+                    select(BatchPlanItem).where(
+                        BatchPlanItem.plan_id == plan_id,
+                        BatchPlanItem.sequence == row.sequence + 1,
+                    )
+                )
+                if (
+                    move_meta is None
+                    or cleanup_row is None
+                    or not _utility_cleanup_pair_matches(row, cleanup_row, move_meta)
+                ):
+                    session.rollback()
+                    return False
+
+                old_device = int(row.expected_device or 0)
+                old_inode = int(row.expected_inode or 0)
+                old_wrapper_device = int(cleanup_row.expected_device or 0)
+                old_wrapper_inode = int(cleanup_row.expected_inode or 0)
+
+                row.expected_device = int(live["child_device"])
+                row.expected_inode = int(live["child_inode"])
+                cleanup_row.expected_device = int(live["wrapper_device"])
+                cleanup_row.expected_inode = int(live["wrapper_inode"])
+
+                row_meta = json.loads(row.metadata_json or "{}")
+                row_meta["identity_rebase"] = {
+                    "reason": "trusted_predecessor_completed_and_logical_binding_unchanged",
+                    "task_id": job.id,
+                    "predecessor_cleanup_item_id": int(trusted_predecessor.id),
+                    "old_device": old_device,
+                    "old_inode": old_inode,
+                    "new_device": int(live["child_device"]),
+                    "new_inode": int(live["child_inode"]),
+                }
+                row.metadata_json = json.dumps(row_meta, ensure_ascii=False)
+
+                cleanup_meta = json.loads(cleanup_row.metadata_json or "{}")
+                cleanup_meta["identity_rebase"] = {
+                    "reason": "paired_wrapper_identity_refreshed",
+                    "task_id": job.id,
+                    "old_device": old_wrapper_device,
+                    "old_inode": old_wrapper_inode,
+                    "new_device": int(live["wrapper_device"]),
+                    "new_inode": int(live["wrapper_inode"]),
+                }
+                cleanup_row.metadata_json = json.dumps(cleanup_meta, ensure_ascii=False)
+
+                session.add(
+                    AuditEvent(
+                        operation="utility.identity_rebase",
+                        path=row.source_path,
+                        result="completed",
+                        details_json=json.dumps(
+                            {
+                                "plan_id": plan_id,
+                                "item_id": row.id,
+                                "task_id": job.id,
+                                "predecessor_cleanup_item_id": int(trusted_predecessor.id),
+                                "capability_reason": move_meta.get("capability_reason"),
+                                "old_device": old_device,
+                                "old_inode": old_inode,
+                                "new_device": int(live["child_device"]),
+                                "new_inode": int(live["child_inode"]),
+                                "wrapper_old_device": old_wrapper_device,
+                                "wrapper_old_inode": old_wrapper_inode,
+                                "wrapper_new_device": int(live["wrapper_device"]),
+                                "wrapper_new_inode": int(live["wrapper_inode"]),
+                            },
+                            ensure_ascii=False,
+                        ),
+                    )
+                )
+                session.commit()
+
+                item_meta.expected_device = int(live["child_device"])
+                item_meta.expected_inode = int(live["child_inode"])
+                item_meta.metadata_json = row.metadata_json
+                cleanup_local = next(
+                    (
+                        candidate
+                        for candidate in all_items
+                        if candidate.id == cleanup_row.id
+                    ),
+                    None,
+                )
+                if cleanup_local is not None:
+                    cleanup_local.expected_device = int(live["wrapper_device"])
+                    cleanup_local.expected_inode = int(live["wrapper_inode"])
+                    cleanup_local.metadata_json = cleanup_row.metadata_json
+
+            return True
+
         # Worker Preflight Check: Verify freshness of unexecuted items before first mutation
         unexecuted_items = [
             it for it in all_items
@@ -2212,6 +2357,27 @@ class BatchPlanExecuteHandler(TaskHandler):
                 check_hash=True,
                 allow_deferred_chained_missing=True,
             )
+            if (
+                not is_fresh
+                and stale_detail
+                and _try_rebase_utility_move_identity(it, stale_detail)
+            ):
+                is_fresh, stale_detail = verify_item_freshness(
+                    item_id=it.id,
+                    source_path=it.source_path,
+                    operation=it.operation,
+                    expected_device=it.expected_device,
+                    expected_inode=it.expected_inode,
+                    expected_size=it.expected_size,
+                    expected_mtime_ns=it.expected_mtime_ns,
+                    expected_hash=it.expected_hash,
+                    metadata_json=it.metadata_json,
+                    allowed_roots=settings.allowed_roots,
+                    quarantine_root=settings.quarantine_root,
+                    check_hash=True,
+                    allow_deferred_chained_missing=True,
+                )
+
             if not is_fresh and stale_detail:
                 worker_stale_items.append(stale_detail)
             elif it.keep_path:
@@ -2265,6 +2431,15 @@ class BatchPlanExecuteHandler(TaskHandler):
                 and not _is_utility_single_child_cleanup(item_meta)
             ):
                 is_fresh, stale_detail = _verify_plan_item_and_keep_freshness(item_meta, settings)
+                if (
+                    not is_fresh
+                    and stale_detail
+                    and _try_rebase_utility_move_identity(item_meta, stale_detail)
+                ):
+                    is_fresh, stale_detail = _verify_plan_item_and_keep_freshness(
+                        item_meta,
+                        settings,
+                    )
                 if not is_fresh:
                     stale_reason = f"Item stale: {stale_detail.reason if stale_detail else 'stale'}"
                     with context.SessionLocal() as session:
@@ -2810,6 +2985,15 @@ class BatchPlanExecuteHandler(TaskHandler):
                 and not _is_utility_single_child_cleanup(item_meta)
             ):
                 final_fresh, final_stale_detail = _verify_plan_item_and_keep_freshness(item_meta, settings)
+                if (
+                    not final_fresh
+                    and final_stale_detail
+                    and _try_rebase_utility_move_identity(item_meta, final_stale_detail)
+                ):
+                    final_fresh, final_stale_detail = _verify_plan_item_and_keep_freshness(
+                        item_meta,
+                        settings,
+                    )
                 if not final_fresh:
                     stale_reason = f"Item stale: {final_stale_detail.reason if final_stale_detail else 'stale'}"
                     with context.SessionLocal() as session:
