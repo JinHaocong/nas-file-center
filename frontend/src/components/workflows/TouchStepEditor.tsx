@@ -11,7 +11,7 @@ interface TouchStepEditorProps {
 
 export const TouchStepEditor: React.FC<TouchStepEditorProps> = ({ step, onChange, readOnly = false }) => {
   return (
-    <Form layout="vertical" disabled={readOnly}>
+    <Form className="nfc-workflow-step-form" layout="vertical" disabled={readOnly}>
       <Form.Item
         label="更新为当前时间 (touch_now)"
         extra="开启后将在执行时刷新为 NAS 服务端当前系统时间戳"
