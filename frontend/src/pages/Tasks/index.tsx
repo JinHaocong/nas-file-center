@@ -265,7 +265,7 @@ export const TasksPage: React.FC = () => {
   return (
     <div className="nfc-operations-page">
       <PageHeader
-        eyebrow="OPERATIONS"
+        eyebrow="Operations"
         title="任务中心"
         description="实时观察 Worker 的扫描、索引与计划执行任务；活动任务会自动刷新。"
         actions={
