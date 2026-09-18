@@ -36,9 +36,10 @@ interface StatusBadgeProps {
 export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, label }) => {
   const tone = toneByStatus[status] || 'neutral';
   const resolvedLabel = label || STATUS_MAP[status]?.label || fallbackLabels[status] || status;
+  const isLive = status === 'running' || status === 'executing' || status === 'validating';
 
   return (
-    <span className={`nfc-status-badge nfc-status-${tone}`}>
+    <span className={`nfc-status-badge nfc-status-${tone}${isLive ? ' nfc-status-live' : ''}`}>
       <span className="nfc-status-dot" aria-hidden="true" />
       {resolvedLabel}
     </span>
