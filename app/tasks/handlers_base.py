@@ -14,7 +14,8 @@ from sqlalchemy import delete, select, text
 
 from app.batch.plans import OperationItem
 from app.config import Settings
-from app.execution.executor import execute_item
+from app.execution.executor import ItemResult, execute_item
+from app.execution.utility_wrapper_pair import open_utility_wrapper_live_guard
 from app.models import (
     AuditEvent,
     BatchPlan,
@@ -1550,6 +1551,70 @@ def _reconcile_executing_item(
                     created_at=now,
                 ))
 
+
+def _utility_single_child_meta(item_meta: Any) -> dict[str, Any] | None:
+    if item_meta.operation not in {"move", "rmdir_empty"}:
+        return None
+    try:
+        meta = json.loads(item_meta.metadata_json or "{}")
+    except Exception:
+        return None
+    if not isinstance(meta, dict):
+        return None
+    if meta.get("utility_action") != "single_child_wrapper_collapse":
+        return None
+    wrapper_path = meta.get("wrapper_path")
+    child_path = meta.get("child_path")
+    target_path = meta.get("target_path")
+    candidate_id = meta.get("candidate_id")
+    if (
+        not isinstance(wrapper_path, str)
+        or not wrapper_path
+        or not isinstance(child_path, str)
+        or not child_path
+        or not isinstance(target_path, str)
+        or not target_path
+        or not isinstance(candidate_id, str)
+        or not candidate_id
+    ):
+        return None
+    return meta
+
+
+def _is_utility_single_child_cleanup(item_meta: Any) -> bool:
+    meta = _utility_single_child_meta(item_meta)
+    return bool(
+        item_meta.operation == "rmdir_empty"
+        and meta is not None
+        and meta.get("wrapper_path") == item_meta.source_path
+    )
+
+
+def _utility_cleanup_pair_matches(
+    move_row: BatchPlanItem,
+    cleanup_row: BatchPlanItem,
+    move_meta: dict[str, Any],
+) -> bool:
+    if cleanup_row.operation != "rmdir_empty":
+        return False
+    if cleanup_row.sequence != move_row.sequence + 1:
+        return False
+    try:
+        cleanup_meta = json.loads(cleanup_row.metadata_json or "{}")
+    except Exception:
+        return False
+    if not isinstance(cleanup_meta, dict):
+        return False
+    for key in ("candidate_id", "wrapper_path", "child_path", "target_path"):
+        if cleanup_meta.get(key) != move_meta.get(key):
+            return False
+    return (
+        cleanup_row.source_path == move_meta.get("wrapper_path")
+        and move_row.source_path == move_meta.get("child_path")
+        and move_row.target_path == move_meta.get("target_path")
+    )
+
+
 def _verify_plan_item_and_keep_freshness(
     item_meta: Any,
     settings: Settings,
@@ -2001,6 +2066,12 @@ class BatchPlanExecuteHandler(TaskHandler):
         ]
         worker_stale_items = []
         for it in unexecuted_items:
+            # The exact single-child-wrapper cleanup is authorized by its paired
+            # MOVE and is finalized under a live descriptor held across that MOVE.
+            # Do not reject it here using a frozen directory inode that may drift
+            # on zfuse after namespace mutation.
+            if _is_utility_single_child_cleanup(it):
+                continue
             is_fresh, stale_detail = verify_item_freshness(
                 item_id=it.id,
                 source_path=it.source_path,
@@ -2064,7 +2135,10 @@ class BatchPlanExecuteHandler(TaskHandler):
                     continue
 
             # Boundary Freshness Check
-            if item_meta.operation not in {"restore", "quarantine_purge"}:
+            if (
+                item_meta.operation not in {"restore", "quarantine_purge"}
+                and not _is_utility_single_child_cleanup(item_meta)
+            ):
                 is_fresh, stale_detail = _verify_plan_item_and_keep_freshness(item_meta, settings)
                 if not is_fresh:
                     stale_reason = f"Item stale: {stale_detail.reason if stale_detail else 'stale'}"
@@ -2123,6 +2197,8 @@ class BatchPlanExecuteHandler(TaskHandler):
             restore_expected_size = None
             restore_expected_hash = None
             is_tx_restore = False
+            paired_cleanup_item_id: int | None = None
+            utility_cleanup_result = None
             try:
                 if src_p.exists():
                     st = src_p.stat(follow_symlinks=False)
@@ -2177,6 +2253,56 @@ class BatchPlanExecuteHandler(TaskHandler):
                         continue
                 else:
                     item_metadata = json.loads(row.metadata_json or "{}")
+
+                if (
+                    row.operation == "move"
+                    and isinstance(item_metadata, dict)
+                    and item_metadata.get("utility_action") == "single_child_wrapper_collapse"
+                ):
+                    cleanup_rows = list(
+                        session.scalars(
+                            select(BatchPlanItem).where(
+                                BatchPlanItem.plan_id == plan_id,
+                                BatchPlanItem.sequence == row.sequence + 1,
+                            )
+                        ).all()
+                    )
+                    if (
+                        len(cleanup_rows) != 1
+                        or not _utility_cleanup_pair_matches(row, cleanup_rows[0], item_metadata)
+                    ):
+                        row.state = "failed"
+                        row.reason = "Utility structural cleanup pair is missing or changed"
+                        session.add(AuditEvent(
+                            operation=row.operation,
+                            path=row.source_path,
+                            result="failed",
+                            details_json=json.dumps({
+                                "plan_id": plan_id,
+                                "item_id": row.id,
+                                "task_id": job.id,
+                                "reason": row.reason,
+                            }, ensure_ascii=False),
+                        ))
+                        session.commit()
+                        completed_or_skipped += 1
+                        continue
+
+                    cleanup_row = cleanup_rows[0]
+                    cleanup_meta = json.loads(cleanup_row.metadata_json or "{}")
+                    cleanup_meta["paired_move_intent"] = {
+                        "phase": "intent",
+                        "task_id": job.id,
+                        "move_item_id": row.id,
+                        "move_sequence": row.sequence,
+                        "candidate_id": item_metadata.get("candidate_id"),
+                        "wrapper_path": item_metadata.get("wrapper_path"),
+                        "child_path": item_metadata.get("child_path"),
+                        "target_path": item_metadata.get("target_path"),
+                    }
+                    cleanup_row.metadata_json = json.dumps(cleanup_meta, ensure_ascii=False)
+                    paired_cleanup_item_id = int(cleanup_row.id)
+
                 item_metadata["execution"] = {
                     "phase": "intent",
                     "task_id": job.id,
@@ -2554,7 +2680,10 @@ class BatchPlanExecuteHandler(TaskHandler):
                             session.commit()
                         completed_or_skipped += 1
                         continue
-            elif item_meta.operation != "quarantine_purge":
+            elif (
+                item_meta.operation != "quarantine_purge"
+                and not _is_utility_single_child_cleanup(item_meta)
+            ):
                 final_fresh, final_stale_detail = _verify_plan_item_and_keep_freshness(item_meta, settings)
                 if not final_fresh:
                     stale_reason = f"Item stale: {final_stale_detail.reason if final_stale_detail else 'stale'}"
@@ -2689,18 +2818,51 @@ class BatchPlanExecuteHandler(TaskHandler):
                             session.commit()
                         break
 
-            result = execute_item(
-                item_op,
-                allowed_roots=settings.allowed_roots,
-                allow_mutation=settings.allow_mutation,
-                allow_delete=settings.allow_delete,
-                quarantine_root=settings.quarantine_root,
-                plan_id=str(plan_id),
-                session_factory=context.SessionLocal,
-                worker_id=context.worker_id,
-                quarantine_entry_id=q_purge_entry_id or q_entry_id or q_restore_entry_id,
-                purge_manifest=purge_manifest,
+            utility_pair_meta = (
+                _utility_single_child_meta(item_meta)
+                if paired_cleanup_item_id is not None and item_meta.operation == "move"
+                else None
             )
+            try:
+                if utility_pair_meta is not None:
+                    with open_utility_wrapper_live_guard(
+                        wrapper_path=utility_pair_meta["wrapper_path"],
+                        child_path=utility_pair_meta["child_path"],
+                        allowed_roots=settings.allowed_roots,
+                        quarantine_root=settings.quarantine_root,
+                    ) as wrapper_guard:
+                        result = execute_item(
+                            item_op,
+                            allowed_roots=settings.allowed_roots,
+                            allow_mutation=settings.allow_mutation,
+                            allow_delete=settings.allow_delete,
+                            quarantine_root=settings.quarantine_root,
+                            plan_id=str(plan_id),
+                            session_factory=context.SessionLocal,
+                            worker_id=context.worker_id,
+                            quarantine_entry_id=q_purge_entry_id or q_entry_id or q_restore_entry_id,
+                            purge_manifest=purge_manifest,
+                        )
+                        if result.state == "completed":
+                            utility_cleanup_result = wrapper_guard.remove_if_empty()
+                else:
+                    result = execute_item(
+                        item_op,
+                        allowed_roots=settings.allowed_roots,
+                        allow_mutation=settings.allow_mutation,
+                        allow_delete=settings.allow_delete,
+                        quarantine_root=settings.quarantine_root,
+                        plan_id=str(plan_id),
+                        session_factory=context.SessionLocal,
+                        worker_id=context.worker_id,
+                        quarantine_entry_id=q_purge_entry_id or q_entry_id or q_restore_entry_id,
+                        purge_manifest=purge_manifest,
+                    )
+            except Exception as exc:
+                result = ItemResult(
+                    "failed",
+                    f"Utility live wrapper binding failed: {exc}",
+                )
 
             after_size = None
             after_mtime_ns = None
@@ -2741,6 +2903,93 @@ class BatchPlanExecuteHandler(TaskHandler):
                 row.reason = result.reason
 
                 metadata = json.loads(row.metadata_json or "{}")
+
+                if paired_cleanup_item_id is not None and row.operation == "move":
+                    cleanup_row = session.get(BatchPlanItem, paired_cleanup_item_id)
+                    move_meta = _utility_single_child_meta(row)
+                    pair_valid = bool(
+                        cleanup_row is not None
+                        and move_meta is not None
+                        and _utility_cleanup_pair_matches(row, cleanup_row, move_meta)
+                    )
+                    if not pair_valid:
+                        if result.state == "completed":
+                            row.reason = (
+                                f"{result.reason}; paired structural cleanup binding changed"
+                            )
+                    elif result.state != "completed":
+                        cleanup_row.state = "failed"
+                        cleanup_row.reason = (
+                            f"paired MOVE did not complete: {result.reason}"
+                        )
+                    elif utility_cleanup_result is None:
+                        cleanup_row.state = "failed"
+                        cleanup_row.reason = (
+                            "paired MOVE completed but live wrapper cleanup produced no outcome"
+                        )
+                    else:
+                        cleanup_row.state = utility_cleanup_result.state
+                        cleanup_row.reason = utility_cleanup_result.reason
+                        cleanup_meta = json.loads(cleanup_row.metadata_json or "{}")
+                        cleanup_meta["paired_move_result"] = {
+                            "phase": "finalized",
+                            "task_id": job.id,
+                            "move_item_id": row.id,
+                            "move_sequence": row.sequence,
+                            "move_state": result.state,
+                            "cleanup_state": utility_cleanup_result.state,
+                            "cleanup_reason": utility_cleanup_result.reason,
+                        }
+                        cleanup_row.metadata_json = json.dumps(cleanup_meta, ensure_ascii=False)
+
+                        if utility_cleanup_result.state == "completed":
+                            existing_cleanup_journal = session.scalar(
+                                select(OperationJournal).where(
+                                    OperationJournal.plan_item_id == cleanup_row.id
+                                )
+                            )
+                            if existing_cleanup_journal is None:
+                                session.add(OperationJournal(
+                                    operation="rmdir_empty",
+                                    sequence=cleanup_row.sequence,
+                                    plan_id=plan_id,
+                                    plan_item_id=cleanup_row.id,
+                                    task_id=job.id,
+                                    user_id=user_id,
+                                    before_json=json.dumps({
+                                        "path": cleanup_row.source_path,
+                                        "object_type": "directory",
+                                        "paired_move_item_id": row.id,
+                                    }, ensure_ascii=False),
+                                    after_json=json.dumps({
+                                        "logical_removed": True,
+                                        "preserved": False,
+                                        "removed": True,
+                                        "structural_cleanup": True,
+                                        "quarantine_path": None,
+                                        "paired_move_item_id": row.id,
+                                    }, ensure_ascii=False),
+                                    metadata_before_json=json.dumps(
+                                        cleanup_meta.get("execution", {}).get("metadata_before", {}),
+                                        ensure_ascii=False,
+                                    ),
+                                    metadata_after_json=json.dumps({}, ensure_ascii=False),
+                                    created_at=now,
+                                ))
+
+                        session.add(AuditEvent(
+                            operation="rmdir_empty",
+                            path=cleanup_row.source_path,
+                            result=cleanup_row.state,
+                            details_json=json.dumps({
+                                "plan_id": plan_id,
+                                "item_id": cleanup_row.id,
+                                "task_id": job.id,
+                                "paired_move_item_id": row.id,
+                                "reason": cleanup_row.reason,
+                                "structural_cleanup": True,
+                            }, ensure_ascii=False),
+                        ))
                 if result.result_path is not None:
                     metadata["result_path"] = str(result.result_path)
                     row.metadata_json = json.dumps(metadata, ensure_ascii=False)
@@ -2895,6 +3144,94 @@ class BatchPlanExecuteHandler(TaskHandler):
                         created_at=now,
                     ))
 
+                if paired_cleanup_item_id is not None:
+                    cleanup_row = session.get(BatchPlanItem, paired_cleanup_item_id)
+                    if cleanup_row is not None:
+                        try:
+                            cleanup_meta = json.loads(cleanup_row.metadata_json or "{}")
+                        except Exception:
+                            cleanup_meta = {}
+                        if not isinstance(cleanup_meta, dict):
+                            cleanup_meta = {}
+
+                        if result.state != "completed":
+                            cleanup_row.state = "failed"
+                            cleanup_row.reason = (
+                                "paired MOVE did not complete; structural cleanup was not attempted"
+                            )
+                        elif utility_cleanup_result is None:
+                            cleanup_row.state = "failed"
+                            cleanup_row.reason = (
+                                "paired MOVE completed without a structural cleanup result"
+                            )
+                        else:
+                            cleanup_row.state = utility_cleanup_result.state
+                            cleanup_row.reason = utility_cleanup_result.reason
+
+                        cleanup_execution = cleanup_meta.setdefault("execution", {})
+                        if not isinstance(cleanup_execution, dict):
+                            cleanup_execution = {}
+                            cleanup_meta["execution"] = cleanup_execution
+                        cleanup_execution.update({
+                            "phase": cleanup_row.state,
+                            "task_id": job.id,
+                            "operation": "rmdir_empty",
+                            "authority": "paired_live_wrapper_descriptor",
+                            "paired_move_item_id": row.id,
+                        })
+                        cleanup_row.metadata_json = json.dumps(
+                            cleanup_meta,
+                            ensure_ascii=False,
+                        )
+
+                        if cleanup_row.state == "completed":
+                            existing_cleanup_journal = session.scalar(
+                                select(OperationJournal).where(
+                                    OperationJournal.plan_item_id == cleanup_row.id
+                                )
+                            )
+                            if existing_cleanup_journal is None:
+                                session.add(OperationJournal(
+                                    operation="rmdir_empty",
+                                    sequence=cleanup_row.sequence,
+                                    plan_id=plan_id,
+                                    plan_item_id=cleanup_row.id,
+                                    task_id=job.id,
+                                    user_id=user_id,
+                                    before_json=json.dumps({
+                                        "path": cleanup_row.source_path,
+                                        "object_type": "directory",
+                                        "authority": "paired_live_wrapper_descriptor",
+                                    }, ensure_ascii=False),
+                                    after_json=json.dumps({
+                                        "logical_removed": True,
+                                        "preserved": False,
+                                        "removed": True,
+                                        "structural_cleanup": True,
+                                        "quarantine_path": None,
+                                    }, ensure_ascii=False),
+                                    metadata_before_json=json.dumps({
+                                        "device": cleanup_row.expected_device,
+                                        "inode": cleanup_row.expected_inode,
+                                    }, ensure_ascii=False),
+                                    metadata_after_json=json.dumps({}, ensure_ascii=False),
+                                    created_at=now,
+                                ))
+
+                        session.add(AuditEvent(
+                            operation="rmdir_empty",
+                            path=cleanup_row.source_path,
+                            result=cleanup_row.state,
+                            details_json=json.dumps({
+                                "plan_id": plan_id,
+                                "item_id": cleanup_row.id,
+                                "task_id": job.id,
+                                "paired_move_item_id": row.id,
+                                "authority": "paired_live_wrapper_descriptor",
+                                "reason": cleanup_row.reason,
+                            }, ensure_ascii=False),
+                        ))
+
                 if result.state == "completed" and row.operation == "quarantine_purge":
                     topology = metadata.get("frozen_purge_topology_manifest")
                     if isinstance(topology, dict):
@@ -2995,10 +3332,13 @@ class BatchPlanExecuteHandler(TaskHandler):
             else:
                 plan.status = "stale" if any(it.state in ("stale", "failed") for it in items) else "partial"
             plan.metadata_json = json.dumps(plan_meta, ensure_ascii=False)
+            final_plan_status = plan.status
             session.commit()
 
         context.checkpoint(
             progress_current=total_count,
             progress_total=total_count,
-            progress_message=f"Plan #{plan_id} execution finished (status: {plan.status})",
+            progress_message=(
+                f"Plan #{plan_id} execution finished (status: {final_plan_status})"
+            ),
         )

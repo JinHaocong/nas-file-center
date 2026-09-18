@@ -705,6 +705,13 @@ def execute_item(
         if item.operation == "rmdir_empty":
             if quarantine_root and is_reserved_quarantine_path(source, quarantine_root):
                 return _skip("source is in reserved quarantine storage")
+
+            if utility_empty_cleanup_authorized and not os.path.lexists(source):
+                return ItemResult(
+                    "completed",
+                    "paired Utility wrapper cleanup already converged",
+                )
+
             if source.is_symlink() or os.path.islink(source) or not source.is_dir():
                 return _skip("source is not a directory")
             if item.expected_device or item.expected_inode:
