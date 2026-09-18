@@ -273,7 +273,7 @@ export const UtilityWorkflowPreviewPanel: React.FC<Props> = ({
                 showIcon
                 icon={<WarningOutlined />}
                 message="当前文件系统不支持 Utility MOVE"
-                description="拓扑发现仍保持只读；不支持严格 no-overwrite MOVE 的候选不可选择，也不会生成 Draft。"
+                description="拓扑发现保持只读；当前文件系统不支持严格 no-overwrite MOVE。Gate6-B 不会尝试兼容 rename fallback，因此这些候选保持不可选择，也不会生成 Draft。"
               />
             )}
 
