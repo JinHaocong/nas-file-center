@@ -21,6 +21,8 @@ class RenameRule:
     number_start: int | None = None
     number_width: int = 3
     include_parent: bool = False
+    source_extension: str | None = None
+    target_extension: str | None = None
 
 
 @dataclass(frozen=True)
@@ -29,9 +31,42 @@ class RenameProposal:
     target: Path
 
 
+def _normalize_extension(value: str | None) -> str | None:
+    if value is None:
+        return None
+    extension = value.strip()
+    if not extension:
+        return None
+    if "/" in extension or "\\" in extension:
+        raise ValueError("Extension must not contain path separators")
+    if not extension.startswith("."):
+        extension = f".{extension}"
+    if extension in {".", ".."}:
+        raise ValueError("Extension must include at least one character")
+    return extension
+
+
+def _extension_pair(rule: RenameRule) -> tuple[str | None, str | None]:
+    source_extension = _normalize_extension(rule.source_extension)
+    target_extension = _normalize_extension(rule.target_extension)
+    if (source_extension is None) != (target_extension is None):
+        raise ValueError("source_extension and target_extension must be provided together")
+    return source_extension, target_extension
+
+
+def _matches_source_extension(source: Path, rule: RenameRule) -> bool:
+    source_extension, _ = _extension_pair(rule)
+    if source_extension is None:
+        return True
+    return source.suffix.casefold() == source_extension.casefold()
+
+
 def _new_name(source: Path, rule: RenameRule, index: int) -> str:
     is_file = source.is_file()
+    source_extension, target_extension = _extension_pair(rule)
     extension = source.suffix if is_file else ""
+    if is_file and source_extension is not None:
+        extension = target_extension or extension
     base = source.stem if is_file else source.name
     if rule.regex_pattern:
         base = re.sub(rule.regex_pattern, rule.regex_replacement, base)
@@ -51,14 +86,24 @@ def build_rename_plan(
     allowed_roots: Iterable[Path | str],
 ) -> list[RenameProposal]:
     sources = [require_allowed_path(path, allowed_roots) for path in paths]
+    for source in sources:
+        if source.is_symlink() or not source.exists():
+            raise ValueError(f"Rename source must exist and not be a symlink: {source}")
+
+    source_extension, _ = _extension_pair(rule)
+    if source_extension is not None:
+        sources = [
+            source
+            for source in sources
+            if source.is_file() and source.suffix.casefold() == source_extension.casefold()
+        ]
+
     sources.sort(key=str)
     source_set = set(sources)
     proposals: list[RenameProposal] = []
     targets: set[Path] = set()
 
     for index, source in enumerate(sources):
-        if source.is_symlink() or not source.exists():
-            raise ValueError(f"Rename source must exist and not be a symlink: {source}")
         target = source.with_name(_new_name(source, rule, index))
         require_allowed_path(target, allowed_roots)
         if target in targets:
