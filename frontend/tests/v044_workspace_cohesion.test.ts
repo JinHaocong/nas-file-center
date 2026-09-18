@@ -56,4 +56,14 @@ describe('v0.4.4 workspace cohesion audit', () => {
     assert.match(css, /\.nfc-operations-page \.ant-card,[\s\S]*box-shadow:\s*none !important/s);
   });
 
+
+  test('shared dropdowns and Ant component substrates follow sidebar chrome', () => {
+    const css = read('src/index.css');
+    assert.match(css, /\.ant-dropdown \.ant-dropdown-menu,[\s\S]*var\(--nfc-workspace-surface\)/s);
+    assert.match(css, /\.ant-select-dropdown,[\s\S]*var\(--nfc-workspace-shadow\)/s);
+    assert.match(css, /\.ant-modal-content,[\s\S]*background:\s*var\(--nfc-workspace-surface\)/s);
+    assert.match(css, /\.nfc-app-shell \.ant-card,[\s\S]*border-radius:\s*var\(--nfc-workspace-radius-inner\)/s);
+    assert.match(css, /\.nfc-app-shell \.ant-alert,[\s\S]*box-shadow:\s*none !important/s);
+  });
+
 });

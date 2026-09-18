@@ -8916,3 +8916,73 @@ body {
     box-shadow: none !important;
   }
 }
+
+
+/* v0.4.4 shared component substrate parity */
+.ant-dropdown .ant-dropdown-menu,
+.ant-select-dropdown,
+.ant-picker-dropdown .ant-picker-panel-container,
+.ant-popover .ant-popover-inner {
+  border: 1px solid var(--nfc-workspace-hairline);
+  border-radius: var(--nfc-workspace-radius-inner) !important;
+  background: var(--nfc-workspace-surface) !important;
+  box-shadow: var(--nfc-workspace-shadow) !important;
+}
+
+.ant-dropdown .ant-dropdown-menu-item,
+.ant-dropdown .ant-dropdown-menu-submenu-title,
+.ant-select-dropdown .ant-select-item {
+  border-radius: 9px;
+}
+
+.ant-dropdown .ant-dropdown-menu-item:hover,
+.ant-dropdown .ant-dropdown-menu-submenu-title:hover,
+.ant-select-dropdown .ant-select-item-option-active:not(.ant-select-item-option-disabled),
+.ant-select-dropdown .ant-select-item-option-selected:not(.ant-select-item-option-disabled) {
+  background: color-mix(in srgb, var(--nfc-accent-soft) 62%, var(--nfc-workspace-surface)) !important;
+}
+
+.ant-modal-content,
+.ant-drawer-content {
+  border-color: var(--nfc-workspace-hairline) !important;
+  background: var(--nfc-workspace-surface) !important;
+}
+
+.nfc-app-shell .ant-card,
+.nfc-login-shell .ant-card,
+.ant-modal-content .ant-card,
+.ant-drawer-content .ant-card,
+.nfc-app-shell .ant-alert,
+.ant-modal-content .ant-alert,
+.ant-drawer-content .ant-alert,
+.nfc-app-shell .ant-descriptions-view,
+.ant-modal-content .ant-descriptions-view,
+.ant-drawer-content .ant-descriptions-view,
+.nfc-app-shell .ant-list-bordered,
+.ant-modal-content .ant-list-bordered,
+.ant-drawer-content .ant-list-bordered {
+  border-color: var(--nfc-workspace-hairline) !important;
+  border-radius: var(--nfc-workspace-radius-inner) !important;
+  box-shadow: none !important;
+}
+
+.nfc-app-shell .ant-card,
+.nfc-login-shell .ant-card,
+.ant-modal-content .ant-card,
+.ant-drawer-content .ant-card {
+  background: color-mix(in srgb, var(--nfc-surface-2) 28%, var(--nfc-workspace-surface)) !important;
+}
+
+.ant-modal-content .ant-modal-header,
+.ant-modal-content .ant-modal-footer,
+.ant-drawer-content .ant-drawer-header {
+  border-color: var(--nfc-workspace-hairline) !important;
+  background: color-mix(in srgb, var(--nfc-surface-2) 30%, var(--nfc-workspace-surface)) !important;
+}
+
+@media (max-width: 767px) {
+  .ant-modal-content,
+  .ant-drawer-content {
+    box-shadow: none !important;
+  }
+}
