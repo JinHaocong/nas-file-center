@@ -603,13 +603,31 @@ def _reconcile_executing_item(
         tgt = Path(item.target_path) if item.target_path else None
         if tgt and tgt.exists() and not src.exists():
             st = tgt.stat(follow_symlinks=False)
-            if not _check_target_identity(tgt, source_stat):
+            identity_matches = _check_target_identity(tgt, source_stat)
+            transplant_matches = False
+            if not identity_matches and item.operation == "move" and tgt.is_dir():
+                try:
+                    from app.execution.directory_transplant import directory_transplant_reconciles_completed
+                    transplant_matches = directory_transplant_reconciles_completed(
+                        settings.quarantine_root,
+                        plan_id,
+                        item.sequence,
+                        source=src,
+                        target=tgt,
+                    )
+                except Exception:
+                    transplant_matches = False
+            if not identity_matches and not transplant_matches:
                 item.state = "failed"
                 item.reason = "reconciliation conflict after crash (target identity mismatch)"
                 return
 
             item.state = "completed"
-            item.reason = "reconciled after crash (target exists)"
+            item.reason = (
+                "reconciled after crash (directory transplant completed)"
+                if transplant_matches
+                else "reconciled after crash (target exists)"
+            )
             existing_j = session.scalar(select(OperationJournal).where(OperationJournal.plan_item_id == item.id))
             if not existing_j:
                 res_stat = _build_stat_dict(tgt, st)
@@ -2922,6 +2940,29 @@ class BatchPlanExecuteHandler(TaskHandler):
                     }, ensure_ascii=False),
                 ))
                 session.commit()
+
+            if item_meta.operation == "move" and result.state == "completed":
+                try:
+                    from app.execution.directory_transplant import (
+                        cleanup_directory_transplant_state,
+                        directory_transplant_reconciles_completed,
+                    )
+                    if directory_transplant_reconciles_completed(
+                        settings.quarantine_root,
+                        plan_id,
+                        item_meta.sequence,
+                        source=Path(item_meta.source_path),
+                        target=Path(item_meta.target_path) if item_meta.target_path else Path(item_meta.source_path),
+                    ):
+                        cleanup_directory_transplant_state(
+                            settings.quarantine_root,
+                            plan_id,
+                            item_meta.sequence,
+                        )
+                except Exception:
+                    # Completion is already committed. Residual NFC-owned transaction
+                    # metadata is safe and can be reconciled/cleaned on a later pass.
+                    pass
 
             if is_organizer and item_meta.operation == "touch" and result.state == "completed" and mtime_delay > 0:
                 time.sleep(mtime_delay)
