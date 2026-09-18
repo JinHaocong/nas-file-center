@@ -297,7 +297,7 @@ export const ScansPage: React.FC = () => {
         onCancel={() => setIsModalOpen(false)}
         footer={null}
         width={640}
-        className="nfc-form-modal"
+        className="nfc-form-modal nfc-overlay-modal nfc-scan-create-modal"
       >
         <Form form={form} layout="vertical" onFinish={(vals) => createScanMutation.mutate(vals)}>
           <Form.Item
