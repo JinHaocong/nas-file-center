@@ -3460,3 +3460,244 @@ button.nfc-mobile-activity-card:hover {
     transform: none !important;
   }
 }
+
+
+/* v0.4.1 Premium Visual Pass — representative surface polish */
+.nfc-data-panel-title {
+  position: relative;
+  padding-inline-start: 12px;
+}
+
+.nfc-data-panel-title::before {
+  content: '';
+  position: absolute;
+  inset-inline-start: 0;
+  top: 50%;
+  width: 3px;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--nfc-accent);
+  opacity: 0.72;
+  transform: translateY(-50%);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--nfc-accent) 20%, transparent);
+}
+
+.nfc-metric-grid .nfc-metric-card {
+  animation: nfc-enter var(--nfc-motion-enter) var(--nfc-ease-emphasized) both;
+}
+
+.nfc-metric-grid .nfc-metric-card:nth-child(2) {
+  animation-delay: 36ms;
+}
+
+.nfc-metric-grid .nfc-metric-card:nth-child(3) {
+  animation-delay: 72ms;
+}
+
+.nfc-metric-grid .nfc-metric-card:nth-child(4) {
+  animation-delay: 108ms;
+}
+
+.nfc-dashboard-layout > * {
+  animation: nfc-enter var(--nfc-motion-enter) var(--nfc-ease-emphasized) both;
+}
+
+.nfc-dashboard-layout > :nth-child(2) {
+  animation-delay: 72ms;
+}
+
+.nfc-mobile-record-list > * {
+  animation: nfc-enter var(--nfc-motion-enter) var(--nfc-ease-emphasized) both;
+}
+
+.nfc-mobile-record-list > :nth-child(2) {
+  animation-delay: 28ms;
+}
+
+.nfc-mobile-record-list > :nth-child(3) {
+  animation-delay: 48ms;
+}
+
+.nfc-mobile-record-list > :nth-child(4) {
+  animation-delay: 68ms;
+}
+
+.nfc-task-mobile-card,
+.nfc-plan-mobile-card,
+.nfc-plan-item-mobile-card,
+.nfc-workflow-mobile-card,
+.nfc-mobile-activity-card {
+  transition:
+    background var(--nfc-motion-fast) var(--nfc-ease-standard),
+    border-color var(--nfc-motion-fast) var(--nfc-ease-standard),
+    box-shadow var(--nfc-motion-fast) var(--nfc-ease-standard),
+    transform var(--nfc-motion-fast) var(--nfc-ease-emphasized);
+}
+
+.nfc-task-mobile-card:hover,
+.nfc-plan-mobile-card:hover,
+.nfc-plan-item-mobile-card:hover,
+.nfc-workflow-mobile-card:hover,
+button.nfc-mobile-activity-card:hover {
+  background: color-mix(in srgb, var(--nfc-surface-2) 86%, var(--nfc-accent) 2%);
+}
+
+.nfc-task-mobile-card:active,
+.nfc-plan-mobile-card:active,
+.nfc-plan-item-mobile-card:active,
+.nfc-workflow-mobile-card:active,
+button.nfc-mobile-activity-card:active {
+  transform: scale(0.995);
+}
+
+.nfc-header-actions .ant-btn,
+.nfc-header-left > .ant-btn {
+  border-radius: var(--nfc-radius-md);
+  transition:
+    color var(--nfc-motion-fast) var(--nfc-ease-standard),
+    background var(--nfc-motion-fast) var(--nfc-ease-standard),
+    transform var(--nfc-motion-fast) var(--nfc-ease-emphasized);
+}
+
+.nfc-header-actions .ant-btn:hover,
+.nfc-header-left > .ant-btn:hover {
+  background: var(--nfc-surface-2);
+}
+
+.nfc-header-actions .ant-btn:active,
+.nfc-header-left > .ant-btn:active {
+  transform: scale(0.97);
+}
+
+.ant-switch {
+  border: 1px solid color-mix(in srgb, var(--nfc-hairline-strong) 82%, transparent);
+  box-shadow: inset 0 1px 2px rgb(15 23 42 / 0.06);
+  transition:
+    background var(--nfc-motion-fast) var(--nfc-ease-standard),
+    border-color var(--nfc-motion-fast) var(--nfc-ease-standard),
+    box-shadow var(--nfc-motion-fast) var(--nfc-ease-standard);
+}
+
+.ant-switch:hover:not(.ant-switch-disabled) {
+  border-color: color-mix(in srgb, var(--nfc-accent) 34%, var(--nfc-hairline));
+}
+
+.ant-switch-checked {
+  box-shadow:
+    inset 0 1px 2px rgb(15 23 42 / 0.08),
+    0 0 0 2px color-mix(in srgb, var(--nfc-accent) 8%, transparent);
+}
+
+.ant-switch-handle::before {
+  box-shadow: var(--nfc-shadow-xs) !important;
+}
+
+.ant-checkbox-wrapper {
+  transition:
+    color var(--nfc-motion-fast) var(--nfc-ease-standard),
+    transform var(--nfc-motion-fast) var(--nfc-ease-emphasized);
+}
+
+.ant-checkbox-wrapper:hover {
+  color: var(--nfc-text);
+}
+
+.ant-checkbox-inner {
+  border-color: var(--nfc-hairline-strong) !important;
+  border-radius: 5px !important;
+  transition:
+    background var(--nfc-motion-fast) var(--nfc-ease-standard),
+    border-color var(--nfc-motion-fast) var(--nfc-ease-standard),
+    box-shadow var(--nfc-motion-fast) var(--nfc-ease-standard) !important;
+}
+
+.ant-checkbox-input:focus-visible + .ant-checkbox-inner {
+  box-shadow: 0 0 0 3px var(--nfc-control-ring);
+}
+
+.ant-tabs-nav::before {
+  border-bottom-color: var(--nfc-hairline) !important;
+}
+
+.ant-tabs-tab {
+  transition:
+    color var(--nfc-motion-fast) var(--nfc-ease-standard),
+    background var(--nfc-motion-fast) var(--nfc-ease-standard),
+    transform var(--nfc-motion-fast) var(--nfc-ease-emphasized) !important;
+}
+
+.ant-tabs-tab:hover {
+  transform: translateY(-1px);
+}
+
+.ant-tabs-ink-bar {
+  height: 2px !important;
+  border-radius: 999px 999px 0 0;
+  box-shadow: 0 0 10px color-mix(in srgb, var(--nfc-accent) 24%, transparent);
+}
+
+.ant-tooltip-inner {
+  border: 1px solid color-mix(in srgb, var(--nfc-hairline) 78%, transparent);
+  box-shadow: var(--nfc-shadow-sm);
+  font-size: 12px;
+}
+
+.ant-popover-inner,
+.ant-popconfirm .ant-popover-inner {
+  border: 1px solid var(--nfc-hairline);
+  box-shadow: var(--nfc-shadow-sm);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--nfc-hairline-strong) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--nfc-hairline-strong);
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--nfc-text-subtle) 72%, var(--nfc-hairline));
+  background-clip: padding-box;
+}
+
+@media (hover: hover) {
+  .nfc-data-panel-header {
+    background: color-mix(in srgb, var(--nfc-surface-1) 96%, var(--nfc-surface-2));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nfc-metric-grid .nfc-metric-card,
+  .nfc-dashboard-layout > *,
+  .nfc-mobile-record-list > * {
+    animation: none !important;
+  }
+
+  .nfc-task-mobile-card,
+  .nfc-plan-mobile-card,
+  .nfc-plan-item-mobile-card,
+  .nfc-workflow-mobile-card,
+  .nfc-mobile-activity-card,
+  .nfc-header-actions .ant-btn,
+  .nfc-header-left > .ant-btn,
+  .ant-switch,
+  .ant-checkbox-wrapper,
+  .ant-tabs-tab {
+    transition: none !important;
+    transform: none !important;
+  }
+}
