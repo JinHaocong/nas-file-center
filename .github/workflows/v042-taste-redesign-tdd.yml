@@ -1,13 +1,14 @@
 name: v0.4.2 Taste Redesign TDD
 
 on:
-  push:
-    branches:
-      - v0.4.2-taste-redesign-pass
   pull_request:
     branches:
       - main
   workflow_dispatch:
+
+concurrency:
+  group: v042-taste-redesign-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
