@@ -60,7 +60,7 @@ export const ProfileFormModal: React.FC<ProfileFormModalProps> = ({
   };
 
   return (
-    <Modal
+    <Modal\n      className="nfc-overlay-modal"
       title={editingProfile ? `编辑方案: ${editingProfile.name}` : '新建整理方案'}
       open={open}
       onOk={handleOk}

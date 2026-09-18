@@ -65,7 +65,7 @@ export const TaskHistoryCleanupModal: React.FC<Props> = ({ onCleaned }) => {
         清理历史
       </Button>
 
-      <Modal
+      <Modal\n      className="nfc-overlay-modal"
         title="清理任务历史"
         open={open}
         onCancel={handleClose}
