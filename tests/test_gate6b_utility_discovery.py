@@ -87,7 +87,7 @@ def test_regular_file_sole_child_is_ready_while_special_child_is_blocked(tmp_pat
     assert fifo_candidate.child_object_type == "special"
 
 
-def test_regular_file_can_use_compat_move_when_native_noreplace_is_unavailable(tmp_path, monkeypatch):
+def test_file_and_directory_can_use_compat_paths_when_native_noreplace_is_unavailable(tmp_path, monkeypatch):
     root = tmp_path / "root"
     root.mkdir()
     (root / "B_file").mkdir()
@@ -107,9 +107,10 @@ def test_regular_file_can_use_compat_move_when_native_noreplace_is_unavailable(t
     assert by_name["B_file"].selectable is True
     assert by_name["B_file"].child_object_type == "file"
 
-    assert by_name["B_dir"].state == "UNSUPPORTED_FILESYSTEM"
-    assert by_name["B_dir"].selectable is False
+    assert by_name["B_dir"].state == "READY"
+    assert by_name["B_dir"].selectable is True
     assert by_name["B_dir"].child_object_type == "directory"
+    assert by_name["B_dir"].capability_reason == "UTILITY_MOVE_COMPAT_DIRECTORY_TRANSPLANT"
 
 
 def test_regular_file_existing_target_remains_nonselectable(tmp_path):
