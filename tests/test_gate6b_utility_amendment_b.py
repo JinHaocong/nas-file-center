@@ -83,13 +83,6 @@ def test_utility_preview_transports_unsupported_capability_and_plans_zero_operat
         raising=False,
     )
 
-    monkeypatch.setattr(
-        single_child_wrapper_module,
-        "directory_transplant_preflight",
-        lambda _path: False,
-        raising=False,
-    )
-
     db_path = tmp_path / "test.db"
     engine, SessionLocal = create_engine_and_session(db_path)
     init_db(engine, db_path=db_path)
@@ -186,6 +179,13 @@ def test_generate_forced_unsupported_candidate_rejects_stable_code_and_persists_
         single_child_wrapper_module,
         "probe_existing_noreplace_capability_at",
         lambda dir_fd, entry_name: False,
+    )
+
+    monkeypatch.setattr(
+        single_child_wrapper_module,
+        "directory_transplant_preflight",
+        lambda _path: False,
+        raising=False,
     )
 
     preview = service.workflow_service.preview_workflow(
