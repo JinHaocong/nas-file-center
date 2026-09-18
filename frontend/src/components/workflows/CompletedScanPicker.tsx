@@ -77,8 +77,8 @@ export const CompletedScanPicker: React.FC<Props> = ({
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+    <div className="nfc-completed-scan-picker">
+      <div className="nfc-completed-scan-picker-controls">
         {!manualMode ? (
           <Select<number>
             value={value}
@@ -89,7 +89,7 @@ export const CompletedScanPicker: React.FC<Props> = ({
             placeholder="请选择已完成的扫描任务..."
             loading={isLoading}
             disabled={disabled}
-            style={{ width: 380 }}
+            className="nfc-completed-scan-select"
             allowClear
             showSearch
             filterOption={(input, option) =>
@@ -103,7 +103,7 @@ export const CompletedScanPicker: React.FC<Props> = ({
             }))}
           />
         ) : (
-          <Space>
+          <Space className="nfc-completed-scan-manual">
             <InputNumber
               value={manualInputId}
               onChange={(val) => {
@@ -117,7 +117,7 @@ export const CompletedScanPicker: React.FC<Props> = ({
               placeholder="输入 Scan Job ID"
               disabled={disabled || verifying}
               min={1}
-              style={{ width: 180 }}
+              className="nfc-completed-scan-id-input"
             />
             <Button
               type="primary"
@@ -147,12 +147,12 @@ export const CompletedScanPicker: React.FC<Props> = ({
       </div>
 
       {activeScan && (
-        <div style={{ fontSize: 12, color: "#8c8c8c" }}>
+        <div className="nfc-completed-scan-summary">
           <Space wrap size={6}>
             <Tag color={activeScan.status === "completed" ? "green" : "orange"}>
               {activeScan.status}
             </Tag>
-            <span style={{ fontWeight: 500 }}>Scan #{activeScan.id}</span>
+            <span className="nfc-completed-scan-id">Scan #{activeScan.id}</span>
             <span>|</span>
             <span>名称: {activeScan.name}</span>
             <span>|</span>
