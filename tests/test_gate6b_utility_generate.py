@@ -579,3 +579,30 @@ def test_incomplete_wrapper_cleanup_marks_work_job_failed_instead_of_completed(
         assert plan.status == "partial"
         assert [row.state for row in rows] == ["completed", "failed"]
         assert rows[1].reason == "simulated live cleanup failure"
+
+
+def test_live_wrapper_guard_rejects_aba_replacement_before_rmdir(tmp_path):
+    root = tmp_path / "root"
+    wrapper = root / "B"
+    child = wrapper / "C"
+    target = root / "C"
+    child.mkdir(parents=True)
+
+    with utility_wrapper_pair_module.open_utility_wrapper_live_guard(
+        wrapper_path=wrapper,
+        child_path=child,
+        allowed_roots=[root],
+        quarantine_root=tmp_path / "quarantine",
+    ) as guard:
+        os.rename(child, target)
+        detached = root / "B-detached"
+        os.rename(wrapper, detached)
+        wrapper.mkdir()
+
+        result = guard.remove_if_empty()
+
+    assert result.state == "failed"
+    assert "no longer matches" in result.reason
+    assert wrapper.is_dir()
+    assert detached.is_dir()
+    assert target.is_dir()
