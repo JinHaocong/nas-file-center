@@ -87,6 +87,8 @@ export const RenamePage: React.FC = () => {
         number_start: values.number_start !== undefined ? values.number_start : null,
         number_width: values.number_width || 3,
         include_parent: values.include_parent || false,
+        source_extension: values.source_extension || '',
+        target_extension: values.target_extension || '',
       });
     } catch {
       // Form validation error
@@ -193,6 +195,35 @@ export const RenamePage: React.FC = () => {
               </Form.Item>
             </Col>
           </Row>
+
+          <Row gutter={16}>
+            <Col xs={24} md={12}>
+              <Form.Item
+                name="source_extension"
+                label="原扩展名过滤"
+                extra="可填写 webp 或 .webp；匹配不区分大小写"
+              >
+                <Input placeholder="例如：.webp" />
+              </Form.Item>
+            </Col>
+            <Col xs={24} md={12}>
+              <Form.Item
+                name="target_extension"
+                label="目标扩展名"
+                extra="必须与原扩展名过滤同时填写"
+              >
+                <Input placeholder="例如：.jpg" />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Alert
+            type="info"
+            showIcon
+            message="扩展名替换仅执行重命名"
+            description="只修改文件名后缀，不会转换图片格式，也不会进行 WebP → JPEG 转码。"
+            style={{ marginBottom: 16 }}
+          />
 
           <Row gutter={16}>
             <Col xs={24} md={12}>
