@@ -1,9 +1,9 @@
 import React from 'react';
-import { Card, Row, Col, Statistic, Typography, Table, Alert, Space, Tag } from 'antd';
+import { Alert, Tag, Typography } from 'antd';
 import {
-  FolderOutlined,
-  FileTextOutlined,
   DeleteOutlined,
+  FileTextOutlined,
+  FolderOutlined,
   SaveOutlined,
   CheckCircleOutlined,
   InfoCircleOutlined,
@@ -36,135 +36,101 @@ export const DedupePreviewSummaryPanel: React.FC<Props> = ({
     summary.released_bytes_by_scan_root,
     scanRoots.length > 0 ? scanRoots : summary.scan_roots
   );
-
   const mode = selectionMode || summary.selection_mode;
 
+  const metrics = [
+    {
+      key: 'groups',
+      label: '重复组数',
+      value: `${summary.group_count ?? summary.actionable_group_count ?? 0}`,
+      suffix: '组',
+      meta: `可处理 ${summary.actionable_group_count ?? 0} · 跳过 ${summary.skipped_group_count ?? 0}`,
+      icon: <FolderOutlined />,
+      tone: 'success',
+    },
+    {
+      key: 'members',
+      label: '重复副本总数',
+      value: `${summary.candidate_member_count ?? 0}`,
+      suffix: '个',
+      meta: '候选文件总数',
+      icon: <FileTextOutlined />,
+      tone: 'accent',
+    },
+    {
+      key: 'quarantine',
+      label: '计划隔离副本',
+      value: `${summary.planned_quarantine_count ?? 0}`,
+      suffix: '个',
+      meta: '执行后进入隔离区',
+      icon: <DeleteOutlined />,
+      tone: 'warning',
+    },
+    {
+      key: 'reclaim',
+      label: '预计释放容量',
+      value: formatBytes(summary.expected_reclaim_bytes ?? 0),
+      suffix: '',
+      meta: '去重后净收益容量',
+      icon: <SaveOutlined />,
+      tone: 'neutral',
+    },
+  ];
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      {/* 1. Metric Cards */}
-      <Row gutter={[16, 16]}>
-        <Col xs={24} sm={12} md={6}>
-          <Card size="small" bordered={false} style={{ background: '#f6ffed', borderRadius: 8 }}>
-            <Statistic
-              title="重复组数"
-              value={summary.group_count ?? summary.actionable_group_count ?? 0}
-              suffix="组"
-              prefix={<FolderOutlined style={{ color: '#52c41a' }} />}
-              valueStyle={{ color: '#389e0d', fontWeight: 'bold' }}
-            />
-            <div style={{ marginTop: 4, fontSize: 12, color: '#8c8c8c' }}>
-              可处理: {summary.actionable_group_count ?? 0} | 跳过: {summary.skipped_group_count ?? 0}
+    <div className="nfc-dedupe-summary-panel">
+      <div className="nfc-dedupe-summary-grid">
+        {metrics.map((metric) => (
+          <article className={`nfc-dedupe-summary-metric tone-${metric.tone}`} key={metric.key}>
+            <div className="nfc-dedupe-summary-metric-topline">
+              <span>{metric.label}</span>
+              <span className="nfc-dedupe-summary-metric-icon">{metric.icon}</span>
             </div>
-          </Card>
-        </Col>
-
-        <Col xs={24} sm={12} md={6}>
-          <Card size="small" bordered={false} style={{ background: '#e6f7ff', borderRadius: 8 }}>
-            <Statistic
-              title="重复副本总数"
-              value={summary.candidate_member_count ?? 0}
-              suffix="个"
-              prefix={<FileTextOutlined style={{ color: '#1890ff' }} />}
-              valueStyle={{ color: '#096dd9', fontWeight: 'bold' }}
-            />
-            <div style={{ marginTop: 4, fontSize: 12, color: '#8c8c8c' }}>
-              候选文件总数
+            <div className="nfc-dedupe-summary-value">
+              {metric.value}
+              {metric.suffix && <small>{metric.suffix}</small>}
             </div>
-          </Card>
-        </Col>
+            <div className="nfc-dedupe-summary-meta">{metric.meta}</div>
+          </article>
+        ))}
+      </div>
 
-        <Col xs={24} sm={12} md={6}>
-          <Card size="small" bordered={false} style={{ background: '#fff7e6', borderRadius: 8 }}>
-            <Statistic
-              title="计划隔离副本"
-              value={summary.planned_quarantine_count ?? 0}
-              suffix="个"
-              prefix={<DeleteOutlined style={{ color: '#fa8c16' }} />}
-              valueStyle={{ color: '#d46b08', fontWeight: 'bold' }}
-            />
-            <div style={{ marginTop: 4, fontSize: 12, color: '#8c8c8c' }}>
-              执行后将移入隔离区
-            </div>
-          </Card>
-        </Col>
-
-        <Col xs={24} sm={12} md={6}>
-          <Card size="small" bordered={false} style={{ background: '#f9f0ff', borderRadius: 8 }}>
-            <Statistic
-              title="预计释放容量"
-              value={formatBytes(summary.expected_reclaim_bytes ?? 0)}
-              prefix={<SaveOutlined style={{ color: '#722ed1' }} />}
-              valueStyle={{ color: '#531dab', fontWeight: 'bold' }}
-            />
-            <div style={{ marginTop: 4, fontSize: 12, color: '#8c8c8c' }}>
-              去重后净收益容量
-            </div>
-          </Card>
-        </Col>
-      </Row>
-
-      {/* 2. Balancer Callout */}
       {mode === 'balanced_by_bytes' && (
         <Alert
+          className="nfc-overlay-alert"
           type="info"
           showIcon
           icon={<InfoCircleOutlined />}
           message="根目录字节平衡模式已生效"
-          description="Balanced by Bytes 使用 backend released_bytes 作为跨组选择层，在候选允许的情况下尽量均衡各 Scan Root 的累计计划释放字节。注意：此机制独立于因子权重计分之外，不是 score factor，不产生打分贡献。"
+          description="Balanced by Bytes 使用 backend released_bytes 作为跨组选择层，在候选允许的情况下尽量均衡各 Scan Root 的累计计划释放字节。该机制独立于因子权重计分之外。"
         />
       )}
 
-      {/* 3. Released Bytes by Scan Root */}
       {rootEntries.length > 0 && (
-        <Card
-          size="small"
-          title={
-            <Space>
-              <span>各扫描根目录预计释放容量</span>
-              <Tag color="blue">容量分布</Tag>
-            </Space>
-          }
-          bordered={false}
-          style={{ background: '#fafafa' }}
-        >
-          <Table
-            dataSource={rootEntries}
-            rowKey="rootIndex"
-            size="small"
-            pagination={false}
-            columns={[
-              {
-                title: '扫描根目录',
-                dataIndex: 'rootPath',
-                key: 'rootPath',
-                render: (val: string, r) => (
-                  <Text strong>{formatScanRootLabel(r.rootIndex, val)}</Text>
-                ),
-              },
-              {
-                title: '预计释放大小',
-                dataIndex: 'releasedBytes',
-                key: 'releasedBytes',
-                align: 'right',
-                render: (bytes: number) => (
-                  <Text strong style={{ color: bytes > 0 ? '#fa8c16' : '#8c8c8c' }}>
-                    {formatBytes(bytes)}
-                  </Text>
-                ),
-              },
-            ]}
-          />
-        </Card>
+        <section className="nfc-dedupe-root-release-panel">
+          <header className="nfc-embedded-section-header">
+            <div>
+              <div className="nfc-embedded-section-kicker">Capacity distribution</div>
+              <h3>各扫描根目录预计释放容量</h3>
+            </div>
+            <Tag color="blue">容量分布</Tag>
+          </header>
+          <div className="nfc-dedupe-root-release-list">
+            {rootEntries.map((entry) => (
+              <div className="nfc-dedupe-root-release-row" key={entry.rootIndex}>
+                <Text strong>{formatScanRootLabel(entry.rootIndex, entry.rootPath)}</Text>
+                <Text strong className={entry.releasedBytes > 0 ? 'nfc-warning-text' : 'nfc-table-muted'}>
+                  {formatBytes(entry.releasedBytes)}
+                </Text>
+              </div>
+            ))}
+          </div>
+        </section>
       )}
 
-      {/* 4. Safety Guarantee Callout */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <CheckCircleOutlined
-          style={{
-            color: policy?.protect_last_file ? '#52c41a' : '#faad14',
-          }}
-        />
-        <Text type="secondary" style={{ fontSize: 12 }}>
+      <div className="nfc-dedupe-safety-footnote">
+        <CheckCircleOutlined className={policy?.protect_last_file ? 'is-safe' : 'is-warning'} />
+        <Text type="secondary">
           {policy && policy.protect_last_file !== undefined
             ? getProtectLastFileDescription(policy.protect_last_file)
             : '去重安全保护策略 (protect_last_file): 未配置。'}
