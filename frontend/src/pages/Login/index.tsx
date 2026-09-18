@@ -1,24 +1,23 @@
 import React, { useState } from 'react';
-import { Card, Form, Input, Button, Typography, Alert, Dropdown, MenuProps } from 'antd';
+import { Alert, Button, Dropdown, Form, Input } from 'antd';
+import type { MenuProps } from 'antd';
 import {
-  UserOutlined,
-  LockOutlined,
-  HddOutlined,
-  SunOutlined,
-  MoonOutlined,
   DesktopOutlined,
+  HddOutlined,
+  LockOutlined,
+  MoonOutlined,
+  SunOutlined,
+  UserOutlined,
 } from '@ant-design/icons';
-import { useNavigate, Navigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useTitle } from '../../hooks/useTitle';
 
-const { Title, Text } = Typography;
-
 export const LoginPage: React.FC = () => {
   useTitle('用户登录');
   const { login, isAuthenticated } = useAuth();
-  const { mode, setMode, isDark } = useTheme();
+  const { mode, setMode } = useTheme();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -47,67 +46,33 @@ export const LoginPage: React.FC = () => {
   ];
 
   return (
-    <div
-      style={{
-        minHeight: '100vh',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'center',
-        alignItems: 'center',
-        background: isDark
-          ? 'linear-gradient(135deg, #0d1117 0%, #161b22 100%)'
-          : 'linear-gradient(135deg, #f0f5ff 0%, #e6f4ff 100%)',
-        position: 'relative',
-        padding: 24,
-      }}
-    >
-      <div style={{ position: 'absolute', top: 24, right: 24 }}>
+    <main className="nfc-login-shell">
+      <div className="nfc-login-theme">
         <Dropdown menu={{ items: themeMenuItems, selectedKeys: [mode] }} trigger={['click']}>
           <Button
             type="text"
+            className="nfc-touch-button"
+            aria-label="切换登录页主题"
             icon={mode === 'dark' ? <MoonOutlined /> : mode === 'light' ? <SunOutlined /> : <DesktopOutlined />}
           >
-            <span style={{ marginLeft: 4, textTransform: 'capitalize' }}>{mode}</span>
+            <span className="nfc-login-theme-label">{mode}</span>
           </Button>
         </Dropdown>
       </div>
 
-      <Card
-        style={{
-          width: '100%',
-          maxWidth: 420,
-          borderRadius: 16,
-          boxShadow: isDark
-            ? '0 8px 24px rgba(0, 0, 0, 0.5)'
-            : '0 8px 24px rgba(22, 119, 255, 0.08)',
-        }}
-        bodyStyle={{ padding: '36px 32px' }}
-      >
-        <div style={{ textAlign: 'center', marginBottom: 28 }}>
-          <div
-            style={{
-              width: 52,
-              height: 52,
-              borderRadius: 14,
-              background: 'linear-gradient(135deg, #1677ff 0%, #0958d9 100%)',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#fff',
-              fontSize: 26,
-              marginBottom: 12,
-              boxShadow: '0 4px 12px rgba(22, 119, 255, 0.3)',
-            }}
-          >
+      <section className="nfc-login-panel" aria-labelledby="nfc-login-title">
+        <div className="nfc-login-brand">
+          <span className="nfc-login-brand-mark" aria-hidden="true">
             <HddOutlined />
+          </span>
+          <div>
+            <div className="nfc-page-eyebrow">NAS OPERATIONS CONSOLE</div>
+            <h1 id="nfc-login-title">NAS File Center</h1>
+            <p>面向大容量 NAS 数据的扫描、计划、隔离与安全批处理中心。</p>
           </div>
-          <Title level={3} style={{ margin: 0 }}>
-            NAS File Center
-          </Title>
-          <Text type="secondary" style={{ fontSize: 13, marginTop: 4, display: 'block' }}>
-            面向几十 TB NAS 数据的去重与批处理中心
-          </Text>
         </div>
+
+        <div className="nfc-login-divider" />
 
         {errorMessage && (
           <Alert
@@ -116,7 +81,7 @@ export const LoginPage: React.FC = () => {
             showIcon
             closable
             onClose={() => setErrorMessage(null)}
-            style={{ marginBottom: 20 }}
+            className="nfc-login-alert"
           />
         )}
 
@@ -126,7 +91,7 @@ export const LoginPage: React.FC = () => {
             label="管理员账号"
             rules={[{ required: true, message: '请输入管理员账号' }]}
           >
-            <Input prefix={<UserOutlined style={{ color: '#8c8c8c' }} />} placeholder="用户名" />
+            <Input prefix={<UserOutlined />} placeholder="用户名" autoComplete="username" />
           </Form.Item>
 
           <Form.Item
@@ -134,22 +99,20 @@ export const LoginPage: React.FC = () => {
             label="管理密码"
             rules={[{ required: true, message: '请输入管理密码' }]}
           >
-            <Input.Password prefix={<LockOutlined style={{ color: '#8c8c8c' }} />} placeholder="密码" />
+            <Input.Password prefix={<LockOutlined />} placeholder="密码" autoComplete="current-password" />
           </Form.Item>
 
-          <Form.Item style={{ marginTop: 24, marginBottom: 8 }}>
-            <Button type="primary" htmlType="submit" loading={loading} block style={{ height: 44 }}>
-              安全登录
-            </Button>
-          </Form.Item>
+          <Button type="primary" htmlType="submit" loading={loading} block className="nfc-login-submit">
+            安全登录
+          </Button>
         </Form>
-      </Card>
 
-      <div style={{ marginTop: 24, textAlign: 'center' }}>
-        <Text type="secondary" style={{ fontSize: 12 }}>
-          NAS File Center v0.3.5 • 极空间 / Zoraxy / Docker
-        </Text>
-      </div>
-    </div>
+        <div className="nfc-login-security-note">
+          登录后所有真实文件变更仍受 Safe Mode、Plan 生命周期和服务端安全策略约束。
+        </div>
+      </section>
+
+      <footer className="nfc-login-footer">NAS File Center v0.4.0 · Docker / NAS</footer>
+    </main>
   );
 };

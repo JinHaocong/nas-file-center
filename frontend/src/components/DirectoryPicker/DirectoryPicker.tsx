@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { Button, Input, Tag, Card, theme } from 'antd';
+import { Button, Input } from 'antd';
 import {
-  FolderOpenOutlined,
-  EditOutlined,
   CloseCircleOutlined,
+  EditOutlined,
+  FolderOpenOutlined,
   PlusOutlined,
 } from '@ant-design/icons';
+import { CodePath } from '../ui/CodePath';
 import { DirectoryPickerProps } from './types';
 import { DirectoryPickerModal } from './DirectoryPickerModal';
 
@@ -17,11 +18,9 @@ export const DirectoryPicker: React.FC<DirectoryPickerProps> = ({
   placeholder = '请选择或输入目录路径',
   allowManualInput = true,
 }) => {
-  const { token } = theme.useToken();
   const [modalOpen, setModalOpen] = useState(false);
   const [showManual, setShowManual] = useState(false);
 
-  // Normalize current values
   const currentValues: string[] = React.useMemo(() => {
     if (!value) return [];
     if (Array.isArray(value)) return value.filter(Boolean);
@@ -42,8 +41,7 @@ export const DirectoryPicker: React.FC<DirectoryPickerProps> = ({
 
   const handleRemovePath = (pathToRemove: string) => {
     if (multiple) {
-      const updated = currentValues.filter((p) => p !== pathToRemove);
-      onChange?.(updated);
+      onChange?.(currentValues.filter((p) => p !== pathToRemove));
     } else {
       onChange?.('');
     }
@@ -52,42 +50,24 @@ export const DirectoryPicker: React.FC<DirectoryPickerProps> = ({
   const handleManualChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const text = e.target.value;
     if (multiple) {
-      const lines = text
-        .split('\n')
-        .map((l) => l.trim())
-        .filter(Boolean);
-      onChange?.(lines);
+      onChange?.(
+        text
+          .split('\n')
+          .map((line) => line.trim())
+          .filter(Boolean)
+      );
     } else {
       onChange?.(text.trim());
     }
   };
 
   return (
-    <div style={{ width: '100%' }}>
-      {/* Primary Visual Picker Display */}
+    <div className="nfc-directory-picker">
       {multiple ? (
-        <Card
-          size="small"
-          style={{
-            borderColor: token.colorBorderSecondary,
-            background: token.colorBgContainer,
-            marginBottom: allowManualInput ? 8 : 0,
-          }}
-        >
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              marginBottom: currentValues.length > 0 ? 8 : 0,
-            }}
-          >
-            <span style={{ fontSize: 13, color: token.colorTextSecondary }}>
-              已选择目录 ({currentValues.length})
-            </span>
+        <div className="nfc-directory-picker-selection">
+          <div className="nfc-directory-picker-heading">
+            <span>已选择目录 <strong>{currentValues.length}</strong></span>
             <Button
-              type="primary"
-              ghost
               size="small"
               icon={<FolderOpenOutlined />}
               disabled={disabled}
@@ -98,59 +78,53 @@ export const DirectoryPicker: React.FC<DirectoryPickerProps> = ({
           </div>
 
           {currentValues.length === 0 ? (
-            <div
-              style={{
-                color: token.colorTextTertiary,
-                fontSize: 13,
-                padding: '8px 0',
-                cursor: disabled ? 'not-allowed' : 'pointer',
-              }}
-              onClick={() => !disabled && setModalOpen(true)}
+            <button
+              type="button"
+              className="nfc-directory-picker-empty"
+              disabled={disabled}
+              onClick={() => setModalOpen(true)}
             >
-              <PlusOutlined style={{ marginRight: 6 }} />
-              {placeholder}
-            </div>
+              <PlusOutlined />
+              <span>{placeholder}</span>
+            </button>
           ) : (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {currentValues.map((p) => (
-                <Tag
-                  key={p}
-                  color="blue"
-                  closable={!disabled}
-                  onClose={() => handleRemovePath(p)}
-                  style={{
-                    fontSize: 13,
-                    padding: '2px 8px',
-                    display: 'flex',
-                    alignItems: 'center',
-                  }}
-                >
-                  <FolderOpenOutlined style={{ marginRight: 4 }} />
-                  {p}
-                </Tag>
+            <div className="nfc-directory-picker-paths">
+              {currentValues.map((path) => (
+                <div className="nfc-directory-picker-path-row" key={path}>
+                  <FolderOpenOutlined aria-hidden="true" />
+                  <CodePath value={path} />
+                  {!disabled && (
+                    <Button
+                      type="text"
+                      size="small"
+                      danger
+                      aria-label={"移除目录 " + path}
+                      icon={<CloseCircleOutlined />}
+                      onClick={() => handleRemovePath(path)}
+                    />
+                  )}
+                </div>
               ))}
             </div>
           )}
-        </Card>
+        </div>
       ) : (
-        <div style={{ display: 'flex', gap: 8, width: '100%' }}>
+        <div className="nfc-directory-picker-single">
           <Input
             value={singleValue}
             placeholder={placeholder}
             disabled={disabled}
             onChange={(e) => onChange?.(e.target.value)}
-            style={{ flex: 1 }}
             suffix={
               singleValue && !disabled ? (
                 <CloseCircleOutlined
-                  style={{ color: token.colorTextQuaternary, cursor: 'pointer' }}
+                  className="nfc-directory-picker-clear"
                   onClick={() => onChange?.('')}
                 />
               ) : null
             }
           />
           <Button
-            type="primary"
             icon={<FolderOpenOutlined />}
             disabled={disabled}
             onClick={() => setModalOpen(true)}
@@ -160,33 +134,28 @@ export const DirectoryPicker: React.FC<DirectoryPickerProps> = ({
         </div>
       )}
 
-      {/* Advanced Manual Input Accordion for Power Users */}
       {allowManualInput && multiple && (
-        <div style={{ marginTop: 4 }}>
+        <div className="nfc-directory-picker-manual">
           <Button
             type="link"
             size="small"
             icon={<EditOutlined />}
-            style={{ padding: 0, fontSize: 12 }}
             onClick={() => setShowManual(!showManual)}
           >
             {showManual ? '收起手动输入' : '高级：手动多行输入路径'}
           </Button>
           {showManual && (
-            <div style={{ marginTop: 6 }}>
-              <Input.TextArea
-                rows={3}
-                placeholder="每行输入一个绝对路径，例如：/data/Download"
-                value={currentValues.join('\n')}
-                onChange={handleManualChange}
-                disabled={disabled}
-              />
-            </div>
+            <Input.TextArea
+              rows={3}
+              placeholder="每行输入一个绝对路径，例如：/data/Download"
+              value={currentValues.join('\n')}
+              onChange={handleManualChange}
+              disabled={disabled}
+            />
           )}
         </div>
       )}
 
-      {/* Directory Picker Modal */}
       <DirectoryPickerModal
         open={modalOpen}
         onCancel={() => setModalOpen(false)}
