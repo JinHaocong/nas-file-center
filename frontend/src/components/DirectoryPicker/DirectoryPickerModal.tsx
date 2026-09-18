@@ -15,7 +15,6 @@ import {
   Tabs,
   message,
   Popconfirm,
-  Card,
   Pagination,
   theme,
 } from 'antd';
@@ -37,6 +36,7 @@ import { filesystemApi } from '../../api/filesystem';
 import { DirectoryPickerModalProps } from './types';
 import { PathBreadcrumb } from './PathBreadcrumb';
 import { formatDateTime } from '../../utils/format';
+import { useResponsive } from '../../hooks/useResponsive';
 
 const { Text } = Typography;
 
@@ -50,6 +50,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
 }) => {
   const { token } = theme.useToken();
   const queryClient = useQueryClient();
+  const { isMobile } = useResponsive();
 
   const [currentPath, setCurrentPath] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -243,7 +244,8 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
       }
       open={open}
       onCancel={onCancel}
-      width={760}
+      className="nfc-directory-picker-modal"
+      width={isMobile ? 'calc(100vw - 16px)' : 760}
       destroyOnClose
       footer={
         <div
@@ -300,14 +302,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
     >
       <div style={{ marginBottom: 12 }}>
         {/* Navigation Bar */}
-        <Card
-          size="small"
-          style={{
-            background: token.colorFillAlter,
-            marginBottom: 12,
-            borderColor: token.colorBorderSecondary,
-          }}
-        >
+        <div className="nfc-directory-browser-toolbar">
           <div
             style={{
               display: 'flex',
@@ -383,7 +378,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
               </Button>
             </div>
           )}
-        </Card>
+        </div>
 
         {/* Tabs for Browser, Favorites, Recent */}
         <Tabs

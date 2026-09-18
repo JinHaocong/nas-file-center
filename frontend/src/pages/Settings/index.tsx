@@ -1,7 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Card,
-  Descriptions,
   Table,
   Tag,
   Button,
@@ -44,8 +42,14 @@ import {
   validateResourcePolicyUpdate,
   getProfileDisplay,
 } from '../../components/settings/resource_policy';
+import { PageHeader } from '../../components/ui/PageHeader';
+import { DataPanel } from '../../components/ui/DataPanel';
+import { ActionBar } from '../../components/ui/ActionBar';
+import { ResponsiveDescriptions } from '../../components/ui/ResponsiveDescriptions';
+import { ResponsiveDataView } from '../../components/ui/ResponsiveDataView';
+import { CodePath } from '../../components/ui/CodePath';
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 
 export const SettingsPage: React.FC = () => {
   useTitle('系统设置');
@@ -392,463 +396,401 @@ export const SettingsPage: React.FC = () => {
   ];
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-        <div>
-          <Title level={4} style={{ margin: 0 }}>
-            系统设置与安全中心
-          </Title>
-          <Text type="secondary">查看安全模式策略及管理当前管理员活动会话</Text>
-        </div>
-        <Button
-          icon={<ReloadOutlined />}
-          onClick={() => {
-            refetchSettings();
-            refetchSessions();
-            refetchPolicy();
-            refetchPreview();
-            refetchQuarantinePolicy();
-          }}
-        >
-          刷新
-        </Button>
-      </div>
-
-      {/* Safety Policy Display */}
-      <Card title="全局文件安全运行参数" bordered={false} style={{ borderRadius: 12, marginBottom: 20 }}>
-        <Alert
-          message="安全机制提示"
-          description="为确保几十 TB 核心数据安全，危险开关（如 ALLOW_MUTATION、ALLOW_DELETE）只能通过宿主机 Docker Compose 环境变量配置，禁止在 Web 界面一键开启，防止误触导致数据丢失。"
-          type="info"
-          showIcon
-          style={{ marginBottom: 16 }}
-        />
-
-        <Descriptions bordered column={{ xs: 1, sm: 2 }}>
-          <Descriptions.Item label="只读安全模式 (ALLOW_MUTATION)">
-            {settings?.allow_mutation ? (
-              <Tag color="warning">开启写入 (true)</Tag>
-            ) : (
-              <Tag color="success">只读保护 (false)</Tag>
-            )}
-          </Descriptions.Item>
-
-          <Descriptions.Item label="永久删除开关 (ALLOW_DELETE)">
-            {settings?.allow_delete ? (
-              <Tag color="error">允许永久删除 (true)</Tag>
-            ) : (
-              <Tag color="success">禁用删除 (false - 仅隔离)</Tag>
-            )}
-          </Descriptions.Item>
-
-          <Descriptions.Item label="最后副本保护 (PROTECT_LAST_FILE)">
-            {settings?.protect_last_file ? (
-              <Tag color="success">已启用 (保留至少一份)</Tag>
-            ) : (
-              <Tag color="error">未启用</Tag>
-            )}
-          </Descriptions.Item>
-
-          <Descriptions.Item label="去重校验哈希">
-            <Tag color="blue">{settings?.verification_hash?.toUpperCase() || 'SHA256'}</Tag>
-          </Descriptions.Item>
-
-          <Descriptions.Item label="隔离区根目录 (QUARANTINE_ROOT)" span={2}>
-            <Text code copyable>{settings?.quarantine_root}</Text>
-          </Descriptions.Item>
-
-          <Descriptions.Item label="允许访问路径白名单 (ALLOWED_ROOTS)" span={2}>
-            <Space wrap>
-              {settings?.allowed_roots.map((root, idx) => (
-                <Tag key={idx} color="cyan">{root}</Tag>
-              ))}
-            </Space>
-          </Descriptions.Item>
-        </Descriptions>
-      </Card>
-
-      {/* Data Lifecycle & Audit Retention Card */}
-      <Card
-        title="数据生命周期与审计保留策略"
-        bordered={false}
-        style={{ borderRadius: 12, marginBottom: 20 }}
-        extra={
-          <Space>
-            {lifecyclePolicy && (
-              <Tag color={lifecyclePolicy.audit_retention_days === 0 ? 'default' : 'blue'}>
-                审计策略: {formatAuditRetention(lifecyclePolicy.audit_retention_days)}
-              </Tag>
-            )}
-            {quarantinePolicy && (
-              <Tag color={quarantinePolicy.quarantine_retention_days === 0 ? 'default' : 'orange'}>
-                隔离区保留: {quarantinePolicy.quarantine_retention_days === 0 ? '永久保留' : `${quarantinePolicy.quarantine_retention_days} 天`}
-              </Tag>
-            )}
-          </Space>
+    <div className="nfc-operations-page nfc-settings-page">
+      <PageHeader
+        eyebrow="SYSTEM"
+        title="系统设置与安全中心"
+        description="集中查看文件安全开关、数据保留、资源控制与管理员会话。危险文件开关仍只能通过宿主机环境变量配置。"
+        actions={
+          <ActionBar compact>
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={() => {
+                refetchSettings();
+                refetchSessions();
+                refetchPolicy();
+                refetchPreview();
+                refetchQuarantinePolicy();
+                if (isAdmin) refetchResourcePolicy();
+              }}
+            >
+              刷新全部
+            </Button>
+          </ActionBar>
         }
-      >
-        <Alert
-          message="数据生命周期与保留安全原则"
-          description={
-            <div>
-              <div>1. <strong>保存策略 ≠ 执行删除</strong>：保存保留策略仅将参数持久化至数据库，不会触发任何历史数据删除。</div>
-              <div>2. <strong>0 天 = 永久保留</strong>：保留天数设置为 0 时表示永久保留全部审计日志，系统将禁止任何自动或手动清理。</div>
-              <div>3. <strong>预览 ≠ 执行</strong>：清理预览仅根据已保存策略计算拟清理范围，点击“执行审计清理”并在弹窗确认后才会安全执行。</div>
-            </div>
-          }
-          type="info"
-          showIcon
-          style={{ marginBottom: 16 }}
-        />
+      />
 
-        <div style={{ background: '#fafafa', padding: '16px 20px', borderRadius: 8, marginBottom: 20, border: '1px solid #f0f0f0' }}>
-          <div style={{ marginBottom: 12, fontWeight: 500 }}>审计日志保留策略配置</div>
-          <Space wrap align="center" style={{ marginBottom: 12 }}>
-            <Text>保留天数：</Text>
-            <InputNumber
-              min={0}
-              max={3650}
-              precision={0}
-              step={1}
-              value={retentionDaysInput}
-              onChange={(val) => setRetentionDaysInput(val)}
-              style={{ width: 140 }}
-              addonAfter="天"
-            />
-            <Space wrap>
-              <Button size="small" onClick={() => setRetentionDaysInput(0)}>永久保留 (0)</Button>
-              <Button size="small" onClick={() => setRetentionDaysInput(30)}>30 天</Button>
-              <Button size="small" onClick={() => setRetentionDaysInput(90)}>90 天</Button>
-              <Button size="small" onClick={() => setRetentionDaysInput(180)}>180 天</Button>
-              <Button size="small" onClick={() => setRetentionDaysInput(365)}>365 天</Button>
-            </Space>
-            <Tooltip title={!auditSaveAvail.canSave ? auditSaveAvail.disabledReason : undefined}>
-              <span>
-                <Button
-                  type="primary"
-                  icon={<SaveOutlined />}
-                  disabled={!auditSaveAvail.canSave}
-                  loading={savePolicyMutation.isPending}
-                  onClick={handleSavePolicy}
-                >
-                  保存策略
-                </Button>
-              </span>
-            </Tooltip>
-          </Space>
-          <div>
-            <Text type="secondary" style={{ fontSize: 13 }}>
-              {retentionDaysInput === 0
-                ? '提示：设置为 0 表示永久保留全部审计日志，系统绝不主动或被动清理历史记录。'
-                : `提示：保存后将以 ${retentionDaysInput} 天为周期计算过期日志（严格保留 ${retentionDaysInput} 天内及截止点时刻的记录）。`}
-              {lifecyclePolicy?.updated_at && (
-                <span style={{ marginLeft: 12 }}>
-                  (上次保存于: {formatDateTime(lifecyclePolicy.updated_at)})
-                </span>
-              )}
-            </Text>
-          </div>
-        </div>
-
-        {/* Quarantine Retention Policy Configuration */}
-        <div style={{ background: '#fafafa', padding: '16px 20px', borderRadius: 8, marginBottom: 20, border: '1px solid #f0f0f0' }}>
-          <div style={{ marginBottom: 12, fontWeight: 500 }}>文件隔离区保留策略配置 (Quarantine Retention)</div>
-          <Space wrap align="center" style={{ marginBottom: 12 }}>
-            <Text>保留周期：</Text>
-            <Select
-              value={quarantineDaysInput}
-              onChange={(val) => setQuarantineDaysInput(val)}
-              style={{ width: 180 }}
-              options={[
-                { label: '永久保留 (0 天)', value: 0 },
-                { label: '保留 7 天 (7 days)', value: 7 },
-                { label: '保留 30 天 (30 days)', value: 30 },
-                { label: '保留 90 天 (90 days)', value: 90 },
-              ]}
-            />
-            <Tooltip title={!quarantineSaveAvail.canSave ? quarantineSaveAvail.disabledReason : undefined}>
-              <span>
-                <Button
-                  type="primary"
-                  icon={<SaveOutlined />}
-                  disabled={!quarantineSaveAvail.canSave}
-                  loading={saveQuarantinePolicyMutation.isPending}
-                  onClick={() => saveQuarantinePolicyMutation.mutate(quarantineDaysInput)}
-                >
-                  保存隔离区策略
-                </Button>
-              </span>
-            </Tooltip>
-          </Space>
-          <div>
-            <Text type="secondary" style={{ fontSize: 13 }}>
-              {quarantineDaysInput === 0
-                ? '提示：设置为 0 表示永久保留全部隔离文件，系统绝不标记过期时间。'
-                : `提示：保存后新进入隔离区的文件将自动记录 ${quarantineDaysInput} 天后过期。`}
-              {quarantinePolicy?.updated_at && (
-                <span style={{ marginLeft: 12 }}>
-                  (上次保存于: {formatDateTime(quarantinePolicy.updated_at)})
-                </span>
-              )}
-            </Text>
-            <div style={{ marginTop: 6, fontSize: 12, color: '#8c8c8c' }}>
-              安全约束：保存策略仅记录元数据与到期时间戳，系统绝不启动后台静默自动删除线程。如需清理过期隔离文件，必须由管理员在文件隔离区页面人工审阅并确认清除。
-            </div>
-          </div>
-        </div>
-
-        <div style={{ background: '#fafafa', padding: '16px 20px', borderRadius: 8, border: '1px solid #f0f0f0' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <div style={{ fontWeight: 500 }}>审计日志保留清理预览</div>
-            <Space>
-              <Button
-                size="small"
-                icon={<ReloadOutlined />}
-                loading={previewLoading}
-                onClick={() => refetchPreview()}
-              >
-                刷新预览
-              </Button>
-              <Tooltip title={!availability.canApply ? availability.disabledReason : undefined}>
-                <span>
-                  <Button
-                    danger
-                    type="primary"
-                    icon={<DeleteOutlined />}
-                    disabled={!availability.canApply}
-                    loading={applyRetentionMutation.isPending || prepareApplyPending}
-                    onClick={handlePrepareApply}
-                  >
-                    执行审计清理
-                  </Button>
-                </span>
-              </Tooltip>
-            </Space>
-          </div>
-
-          <Descriptions bordered size="small" column={{ xs: 1, sm: 2, md: 3 }}>
-            <Descriptions.Item label="当前生效保留期">
-              {formatAuditRetention(retentionPreview?.retention_days ?? lifecyclePolicy?.audit_retention_days)}
-            </Descriptions.Item>
-            <Descriptions.Item label="审计日志总数">
-              <Text strong>{retentionPreview?.total_count ?? 0}</Text> 条
-            </Descriptions.Item>
-            <Descriptions.Item label="清理截止时间点">
-              {retentionPreview?.cutoff ? (
-                <Text code>{formatDateTime(retentionPreview.cutoff)}</Text>
-              ) : (
-                <Tag>无（永久保留）</Tag>
-              )}
-            </Descriptions.Item>
-            <Descriptions.Item label="拟删除记录数">
-              <Text type={retentionPreview?.delete_count ? 'danger' : 'secondary'} strong>
-                {retentionPreview?.delete_count ?? 0}
-              </Text>{' '}
-              条
-            </Descriptions.Item>
-            <Descriptions.Item label="拟保留记录数">
-              <Text type="success" strong>
-                {retentionPreview?.keep_count ?? retentionPreview?.total_count ?? 0}
-              </Text>{' '}
-              条
-            </Descriptions.Item>
-            <Descriptions.Item label="最早记录时间">
-              {retentionPreview?.oldest_timestamp ? formatDateTime(retentionPreview.oldest_timestamp) : '-'}
-            </Descriptions.Item>
-          </Descriptions>
-        </div>
-      </Card>
-
-      {/* Resource Control */}
-      {isAdmin && (
-        <Card
-          title="资源控制 / Resource Control"
-          bordered={false}
-          style={{ borderRadius: 12 }}
-          extra={
-            <Space>
-              <Button
-                icon={<ReloadOutlined />}
-                loading={policyLoading}
-                onClick={() => refetchResourcePolicy()}
-              >
-                刷新
-              </Button>
-              <Button
-                type="primary"
-                icon={<SaveOutlined />}
-                loading={saveResourcePolicyMutation.isPending}
-                onClick={handleSaveResourcePolicy}
-              >
-                保存资源策略
-              </Button>
-            </Space>
-          }
+      <div className="nfc-settings-grid">
+        <DataPanel
+          title="全局文件安全运行参数"
+          description="这些开关来自服务端运行环境，Web UI 只读展示，防止误触扩大文件修改权限。"
+          className="nfc-panel-flush"
         >
-          <div style={{ marginBottom: 20 }}>
+          <div className="nfc-settings-panel-body">
             <Alert
+              message="安全机制提示"
+              description="为确保大容量核心数据安全，ALLOW_MUTATION、ALLOW_DELETE 等危险开关只能通过宿主机 Docker Compose 环境变量配置，禁止在 Web 界面一键开启。"
               type="info"
               showIcon
-              message="资源控制说明与约束提示"
-              description={
-                <div style={{ fontSize: 13, lineHeight: '20px' }}>
-                  <div>• <strong>应用层并发控制：</strong>I/O 压力与线程限制为应用层并发节流控制，并非保证性的 MB/s 或 IOPS 硬件限速。</div>
-                  <div>• <strong>无后台自动调度：</strong>窗口外暂停模式（Pause）不包含后台定时调度创建机制，仅在窗口外阻止排队的扫描/索引任务被 Worker 认领。</div>
-                  <div>• <strong>安全降级：</strong>文件组织器、批量删除及隔离还原等变动任务不受资源策略限制，始终保证优先处理。</div>
-                </div>
-              }
-              style={{ marginBottom: 20 }}
+            />
+          </div>
+          <ResponsiveDescriptions
+            items={[
+              {
+                label: '只读安全模式 (ALLOW_MUTATION)',
+                value: settings?.allow_mutation ? <Tag color="warning">开启写入 (true)</Tag> : <Tag color="success">只读保护 (false)</Tag>,
+              },
+              {
+                label: '永久删除开关 (ALLOW_DELETE)',
+                value: settings?.allow_delete ? <Tag color="error">允许永久删除 (true)</Tag> : <Tag color="success">禁用删除 (false - 仅隔离)</Tag>,
+              },
+              {
+                label: '最后副本保护 (PROTECT_LAST_FILE)',
+                value: settings?.protect_last_file ? <Tag color="success">已启用</Tag> : <Tag color="error">未启用</Tag>,
+              },
+              {
+                label: '去重校验哈希',
+                value: <span className="nfc-kind-badge">{settings?.verification_hash?.toUpperCase() || 'SHA256'}</span>,
+              },
+              {
+                label: '隔离区根目录 (QUARANTINE_ROOT)',
+                value: <CodePath value={settings?.quarantine_root} />,
+              },
+              {
+                label: '允许访问路径白名单 (ALLOWED_ROOTS)',
+                value: (
+                  <div className="nfc-settings-path-list">
+                    {settings?.allowed_roots.map((root, idx) => <CodePath value={root} key={idx} />)}
+                  </div>
+                ),
+              },
+            ]}
+          />
+        </DataPanel>
+
+        <DataPanel
+          title="数据生命周期与审计保留策略"
+          description="保存策略不会自动删除数据；审计清理始终需要重新获取最新预览并显式确认。"
+          action={
+            <ActionBar compact>
+              {lifecyclePolicy && <span className="nfc-kind-badge">Audit · {formatAuditRetention(lifecyclePolicy.audit_retention_days)}</span>}
+              {quarantinePolicy && <span className="nfc-kind-badge">Quarantine · {quarantinePolicy.quarantine_retention_days === 0 ? '永久' : quarantinePolicy.quarantine_retention_days + ' 天'}</span>}
+            </ActionBar>
+          }
+        >
+          <div className="nfc-settings-stack">
+            <Alert
+              message="数据生命周期安全原则"
+              description="保存策略 ≠ 执行删除；0 天 = 永久保留；预览 ≠ 执行。只有点击执行审计清理并确认后才会真正清理符合条件的 Audit 历史。"
+              type="info"
+              showIcon
             />
 
-            {resourcePolicy && (
-              <div style={{ background: '#fafafa', padding: '16px 20px', borderRadius: 8, border: '1px solid #f0f0f0', marginBottom: 20 }}>
-                <div style={{ fontWeight: 500, marginBottom: 12 }}>当前生效状态 (Effective Now)</div>
-                <Descriptions bordered size="small" column={{ xs: 1, sm: 2, md: 4 }}>
-                  <Descriptions.Item label="当前配置版本 (Revision)">
-                    <Text strong>rev.{resourcePolicy.revision}</Text>
-                  </Descriptions.Item>
-                  <Descriptions.Item label="当前生效模式 (Profile)">
-                    {(() => {
-                      const disp = getProfileDisplay(resourcePolicy.effective_now.profile);
-                      return <Tag color={disp.color}>{disp.text}</Tag>;
-                    })()}
-                  </Descriptions.Item>
-                  <Descriptions.Item label="有效并发线程上限">
-                    <Text strong>{resourcePolicy.effective_now.effective_thread_cap}</Text> 线程
-                  </Descriptions.Item>
-                  <Descriptions.Item label="资源任务认领许可">
-                    {resourcePolicy.effective_now.resource_jobs_admitted ? (
-                      <Tag color="success">允许认领</Tag>
-                    ) : (
-                      <Tag color="error">队列保持 (Held)</Tag>
-                    )}
-                  </Descriptions.Item>
-                </Descriptions>
-              </div>
-            )}
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px' }}>
-              <div>
-                <Text strong style={{ display: 'block', marginBottom: 6 }}>扫描线程上限 (1..32):</Text>
-                <InputNumber
-                  min={1}
-                  max={32}
-                  value={scanThreadsInput}
-                  onChange={(v) => setScanThreadsInput(v || 1)}
-                  style={{ width: '100%' }}
-                />
-              </div>
-
-              <div>
-                <Text strong style={{ display: 'block', marginBottom: 6 }}>哈希线程上限 (1..32):</Text>
-                <InputNumber
-                  min={1}
-                  max={32}
-                  value={hashThreadsInput}
-                  onChange={(v) => setHashThreadsInput(v || 1)}
-                  style={{ width: '100%' }}
-                />
-              </div>
-
-              <div>
-                <Text strong style={{ display: 'block', marginBottom: 6 }}>I/O 压力模式 (IO Limit):</Text>
-                <Select
-                  value={ioLimitInput}
-                  onChange={setIoLimitInput}
-                  style={{ width: '100%' }}
-                  options={[
-                    { value: 'low', label: '低压模式 (Low - 上限 1 线程)' },
-                    { value: 'normal', label: '标准模式 (Normal - 上限 2 线程)' },
-                    { value: 'unlimited', label: '无上限模式 (Unlimited - 上限 32 线程)' },
-                  ]}
-                />
-              </div>
-
-              <div>
-                <Text strong style={{ display: 'block', marginBottom: 6 }}>任务调度优先级 (Job Priority):</Text>
-                <Select
-                  value={jobPriorityInput}
-                  onChange={setJobPriorityInput}
-                  style={{ width: '100%' }}
-                  options={[
-                    { value: 'normal', label: '标准先进先出 (Normal FIFO)' },
-                    { value: 'background', label: '后台让步 (Background - 优先变动任务)' },
-                  ]}
-                />
-              </div>
-            </div>
-
-            <div style={{ marginTop: 24, padding: '16px 20px', borderRadius: 8, border: '1px solid #f0f0f0' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <section className="nfc-settings-subpanel">
+              <div className="nfc-settings-subpanel-header">
                 <div>
-                  <div style={{ fontWeight: 500 }}>活跃时间窗口限制 (Active Window)</div>
-                  <Text type="secondary" style={{ fontSize: 13 }}>
-                    启用后，仅在指定时间窗口内全速执行；窗口外将自动降速或暂停扫描认领。
-                  </Text>
+                  <strong>审计日志保留策略</strong>
+                  <span>仅保存参数，不触发清理。</span>
                 </div>
-                <Switch
-                  checked={windowEnabledInput}
-                  onChange={setWindowEnabledInput}
-                />
+              </div>
+              <ActionBar>
+                <label className="nfc-settings-inline-control">
+                  <span>保留天数</span>
+                  <InputNumber
+                    min={0}
+                    max={3650}
+                    precision={0}
+                    step={1}
+                    value={retentionDaysInput}
+                    onChange={(val) => setRetentionDaysInput(val)}
+                    addonAfter="天"
+                  />
+                </label>
+                <Button size="small" onClick={() => setRetentionDaysInput(0)}>永久保留</Button>
+                <Button size="small" onClick={() => setRetentionDaysInput(30)}>30 天</Button>
+                <Button size="small" onClick={() => setRetentionDaysInput(90)}>90 天</Button>
+                <Button size="small" onClick={() => setRetentionDaysInput(180)}>180 天</Button>
+                <Button size="small" onClick={() => setRetentionDaysInput(365)}>365 天</Button>
+                <Tooltip title={!auditSaveAvail.canSave ? auditSaveAvail.disabledReason : undefined}>
+                  <span>
+                    <Button
+                      type="primary"
+                      icon={<SaveOutlined />}
+                      disabled={!auditSaveAvail.canSave}
+                      loading={savePolicyMutation.isPending}
+                      onClick={handleSavePolicy}
+                    >
+                      保存策略
+                    </Button>
+                  </span>
+                </Tooltip>
+              </ActionBar>
+              <p className="nfc-settings-help">
+                {retentionDaysInput === 0
+                  ? '0 天表示永久保留全部审计日志。'
+                  : '保存后按所选天数计算过期日志；保存动作本身不会删除历史记录。'}
+                {lifecyclePolicy?.updated_at ? ' 上次保存：' + formatDateTime(lifecyclePolicy.updated_at) : ''}
+              </p>
+            </section>
+
+            <section className="nfc-settings-subpanel">
+              <div className="nfc-settings-subpanel-header">
+                <div>
+                  <strong>文件隔离区保留策略</strong>
+                  <span>仅记录到期元数据，不启动后台静默删除线程。</span>
+                </div>
+              </div>
+              <ActionBar>
+                <label className="nfc-settings-inline-control">
+                  <span>保留周期</span>
+                  <Select
+                    value={quarantineDaysInput}
+                    onChange={(val) => setQuarantineDaysInput(val)}
+                    options={[
+                      { label: '永久保留 (0 天)', value: 0 },
+                      { label: '保留 7 天', value: 7 },
+                      { label: '保留 30 天', value: 30 },
+                      { label: '保留 90 天', value: 90 },
+                    ]}
+                  />
+                </label>
+                <Tooltip title={!quarantineSaveAvail.canSave ? quarantineSaveAvail.disabledReason : undefined}>
+                  <span>
+                    <Button
+                      type="primary"
+                      icon={<SaveOutlined />}
+                      disabled={!quarantineSaveAvail.canSave}
+                      loading={saveQuarantinePolicyMutation.isPending}
+                      onClick={() => saveQuarantinePolicyMutation.mutate(quarantineDaysInput)}
+                    >
+                      保存隔离区策略
+                    </Button>
+                  </span>
+                </Tooltip>
+              </ActionBar>
+              <p className="nfc-settings-help">
+                {quarantineDaysInput === 0
+                  ? '永久保留全部隔离文件；系统不会标记过期时间。'
+                  : '新进入隔离区的文件将记录对应到期时间；过期后仍需管理员人工审阅并确认清除。'}
+              </p>
+            </section>
+
+            <section className="nfc-settings-subpanel nfc-settings-subpanel-danger">
+              <div className="nfc-settings-subpanel-header">
+                <div>
+                  <strong>审计日志保留清理预览</strong>
+                  <span>执行前会强制刷新策略与预览，最终删除数量以执行时数据为准。</span>
+                </div>
+                <ActionBar compact>
+                  <Button size="small" icon={<ReloadOutlined />} loading={previewLoading} onClick={() => refetchPreview()}>
+                    刷新预览
+                  </Button>
+                  <Tooltip title={!availability.canApply ? availability.disabledReason : undefined}>
+                    <span>
+                      <Button
+                        danger
+                        type="primary"
+                        icon={<DeleteOutlined />}
+                        disabled={!availability.canApply}
+                        loading={applyRetentionMutation.isPending || prepareApplyPending}
+                        onClick={handlePrepareApply}
+                      >
+                        执行审计清理
+                      </Button>
+                    </span>
+                  </Tooltip>
+                </ActionBar>
+              </div>
+              <ResponsiveDescriptions
+                items={[
+                  { label: '当前生效保留期', value: formatAuditRetention(retentionPreview?.retention_days ?? lifecyclePolicy?.audit_retention_days) },
+                  { label: '审计日志总数', value: String(retentionPreview?.total_count ?? 0), emphasis: true },
+                  { label: '清理截止时间点', value: retentionPreview?.cutoff ? formatDateTime(retentionPreview.cutoff) : '无（永久保留）' },
+                  { label: '拟删除记录数', value: String(retentionPreview?.delete_count ?? 0), emphasis: true },
+                  { label: '拟保留记录数', value: String(retentionPreview?.keep_count ?? retentionPreview?.total_count ?? 0), emphasis: true },
+                  { label: '最早记录时间', value: retentionPreview?.oldest_timestamp ? formatDateTime(retentionPreview.oldest_timestamp) : '—' },
+                ]}
+              />
+            </section>
+          </div>
+        </DataPanel>
+
+        {isAdmin && (
+          <DataPanel
+            title="资源控制"
+            description="控制扫描/哈希并发和时间窗口；不会改变文件安全与变动任务的优先安全语义。"
+            action={
+              <ActionBar compact>
+                <Button icon={<ReloadOutlined />} loading={policyLoading} onClick={() => refetchResourcePolicy()}>
+                  刷新
+                </Button>
+                <Button
+                  type="primary"
+                  icon={<SaveOutlined />}
+                  loading={saveResourcePolicyMutation.isPending}
+                  onClick={handleSaveResourcePolicy}
+                >
+                  保存资源策略
+                </Button>
+              </ActionBar>
+            }
+          >
+            <div className="nfc-settings-stack">
+              <Alert
+                type="info"
+                showIcon
+                message="资源控制说明"
+                description="I/O 压力与线程限制属于应用层并发节流；窗口外 Pause 只阻止资源型任务被 Worker 认领，不创建后台自动调度。文件变动任务不受该资源策略降级。"
+              />
+
+              {resourcePolicy && (
+                <section className="nfc-settings-subpanel">
+                  <div className="nfc-settings-subpanel-header"><strong>当前生效状态</strong></div>
+                  <ResponsiveDescriptions
+                    items={[
+                      { label: '配置版本', value: 'rev.' + resourcePolicy.revision },
+                      {
+                        label: '生效模式',
+                        value: (() => {
+                          const disp = getProfileDisplay(resourcePolicy.effective_now.profile);
+                          return <Tag color={disp.color}>{disp.text}</Tag>;
+                        })(),
+                      },
+                      { label: '有效并发线程上限', value: resourcePolicy.effective_now.effective_thread_cap + ' 线程', emphasis: true },
+                      {
+                        label: '资源任务认领许可',
+                        value: resourcePolicy.effective_now.resource_jobs_admitted ? <Tag color="success">允许认领</Tag> : <Tag color="error">队列保持 (Held)</Tag>,
+                      },
+                    ]}
+                  />
+                </section>
+              )}
+
+              <div className="nfc-settings-control-grid">
+                <label className="nfc-settings-control">
+                  <span>扫描线程上限 (1..32)</span>
+                  <InputNumber min={1} max={32} value={scanThreadsInput} onChange={(v) => setScanThreadsInput(v || 1)} />
+                </label>
+                <label className="nfc-settings-control">
+                  <span>哈希线程上限 (1..32)</span>
+                  <InputNumber min={1} max={32} value={hashThreadsInput} onChange={(v) => setHashThreadsInput(v || 1)} />
+                </label>
+                <label className="nfc-settings-control">
+                  <span>I/O 压力模式</span>
+                  <Select
+                    value={ioLimitInput}
+                    onChange={setIoLimitInput}
+                    options={[
+                      { value: 'low', label: '低压模式 (Low - 上限 1 线程)' },
+                      { value: 'normal', label: '标准模式 (Normal - 上限 2 线程)' },
+                      { value: 'unlimited', label: '无上限模式 (Unlimited - 上限 32 线程)' },
+                    ]}
+                  />
+                </label>
+                <label className="nfc-settings-control">
+                  <span>任务调度优先级</span>
+                  <Select
+                    value={jobPriorityInput}
+                    onChange={setJobPriorityInput}
+                    options={[
+                      { value: 'normal', label: '标准先进先出 (Normal FIFO)' },
+                      { value: 'background', label: '后台让步 (Background)' },
+                    ]}
+                  />
+                </label>
               </div>
 
-              {windowEnabledInput && (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginTop: 12 }}>
+              <section className="nfc-settings-subpanel">
+                <div className="nfc-settings-window-header">
                   <div>
-                    <Text strong style={{ display: 'block', marginBottom: 6 }}>窗口起始时间 (HH:MM):</Text>
-                    <Input
-                      placeholder="01:00"
-                      value={windowStartInput}
-                      onChange={(e) => setWindowStartInput(e.target.value)}
-                    />
+                    <strong>活跃时间窗口</strong>
+                    <span>窗口外自动降速或暂停扫描/索引任务认领。</span>
                   </div>
-                  <div>
-                    <Text strong style={{ display: 'block', marginBottom: 6 }}>窗口结束时间 (HH:MM):</Text>
-                    <Input
-                      placeholder="07:00"
-                      value={windowEndInput}
-                      onChange={(e) => setWindowEndInput(e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <Text strong style={{ display: 'block', marginBottom: 6 }}>时区 (IANA Timezone):</Text>
-                    <Select
-                      showSearch
-                      value={windowTimezoneInput}
-                      onChange={setWindowTimezoneInput}
-                      style={{ width: '100%' }}
-                      options={COMMON_TIMEZONES.map((tz) => ({ value: tz, label: tz }))}
-                    />
-                  </div>
-                  <div>
-                    <Text strong style={{ display: 'block', marginBottom: 6 }}>窗口外行为模式 (Outside Mode):</Text>
-                    <Select
-                      value={outsideModeInput}
-                      onChange={setOutsideModeInput}
-                      style={{ width: '100%' }}
-                      options={[
-                        { value: 'limited', label: '降速运行 (Limited - 1 线程)' },
-                        { value: 'pause', label: '暂停认领 (Pause - 队列等待)' },
-                      ]}
-                    />
-                  </div>
+                  <Switch checked={windowEnabledInput} onChange={setWindowEnabledInput} />
                 </div>
-              )}
+                {windowEnabledInput && (
+                  <div className="nfc-settings-control-grid">
+                    <label className="nfc-settings-control">
+                      <span>窗口起始时间</span>
+                      <Input value={windowStartInput} onChange={(e) => setWindowStartInput(e.target.value)} placeholder="01:00" />
+                    </label>
+                    <label className="nfc-settings-control">
+                      <span>窗口结束时间</span>
+                      <Input value={windowEndInput} onChange={(e) => setWindowEndInput(e.target.value)} placeholder="07:00" />
+                    </label>
+                    <label className="nfc-settings-control">
+                      <span>时区</span>
+                      <Select showSearch value={windowTimezoneInput} onChange={setWindowTimezoneInput} options={COMMON_TIMEZONES.map((tz) => ({ value: tz, label: tz }))} />
+                    </label>
+                    <label className="nfc-settings-control">
+                      <span>窗口外行为模式</span>
+                      <Select
+                        value={outsideModeInput}
+                        onChange={setOutsideModeInput}
+                        options={[
+                          { value: 'limited', label: '降速运行 (Limited)' },
+                          { value: 'pause', label: '暂停认领 (Pause)' },
+                        ]}
+                      />
+                    </label>
+                  </div>
+                )}
+              </section>
             </div>
-          </div>
-        </Card>
-      )}
+          </DataPanel>
+        )}
 
-      {/* Active Sessions */}
-      <Card title="管理员活动会话管理" bordered={false} style={{ borderRadius: 12 }}>
-        <Table
-          dataSource={sessionsData?.sessions || []}
-          columns={sessionColumns}
-          rowKey="id"
-          loading={sessionsLoading}
-          pagination={false}
-        />
-      </Card>
+        <DataPanel
+          title="管理员活动会话"
+          description="当前设备不可在此强制注销；其他会话可由管理员显式下线。"
+          action={<span className="nfc-panel-count">{sessionsData?.sessions?.length ?? 0} sessions</span>}
+          className="nfc-panel-flush"
+        >
+          <ResponsiveDataView
+            desktop={
+              <Table
+                dataSource={sessionsData?.sessions || []}
+                columns={sessionColumns}
+                rowKey="id"
+                loading={sessionsLoading}
+                pagination={false}
+              />
+            }
+            mobile={
+              <div className="nfc-mobile-record-list">
+                {(sessionsData?.sessions || []).map((session) => (
+                  <article className="nfc-session-mobile-card" key={session.id}>
+                    <div className="nfc-mobile-record-heading">
+                      <div>
+                        {session.user_agent.toLowerCase().includes('mobile') ? <MobileOutlined /> : <DesktopOutlined />}
+                        <strong className="nfc-session-device">{session.user_agent}</strong>
+                      </div>
+                      {session.is_current ? <Tag color="success">当前设备</Tag> : <span className="nfc-kind-badge">remote</span>}
+                    </div>
+                    <div className="nfc-mobile-record-facts">
+                      <span>IP <b className="nfc-mono">{session.ip_address}</b></span>
+                      <span>首次登录 <b>{formatDateTime(session.created_at)}</b></span>
+                      <span>最近活动 <b>{formatDateTime(session.last_seen_at)}</b></span>
+                    </div>
+                    {!session.is_current && (
+                      <div className="nfc-mobile-record-actions">
+                        <Popconfirm
+                          title="确认强制注销该设备？"
+                          onConfirm={() => revokeMutation.mutate(session.id)}
+                          okText="注销"
+                          cancelText="取消"
+                        >
+                          <Button danger type="text" loading={revokeMutation.isPending}>强制下线</Button>
+                        </Popconfirm>
+                      </div>
+                    )}
+                  </article>
+                ))}
+              </div>
+            }
+          />
+        </DataPanel>
+      </div>
     </div>
   );
 };
