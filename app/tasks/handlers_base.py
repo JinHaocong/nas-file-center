@@ -2907,6 +2907,93 @@ class BatchPlanExecuteHandler(TaskHandler):
                 row.reason = result.reason
 
                 metadata = json.loads(row.metadata_json or "{}")
+
+                if paired_cleanup_item_id is not None and row.operation == "move":
+                    cleanup_row = session.get(BatchPlanItem, paired_cleanup_item_id)
+                    move_meta = _utility_single_child_meta(row)
+                    pair_valid = bool(
+                        cleanup_row is not None
+                        and move_meta is not None
+                        and _utility_cleanup_pair_matches(row, cleanup_row, move_meta)
+                    )
+                    if not pair_valid:
+                        if result.state == "completed":
+                            row.reason = (
+                                f"{result.reason}; paired structural cleanup binding changed"
+                            )
+                    elif result.state != "completed":
+                        cleanup_row.state = "failed"
+                        cleanup_row.reason = (
+                            f"paired MOVE did not complete: {result.reason}"
+                        )
+                    elif utility_cleanup_result is None:
+                        cleanup_row.state = "failed"
+                        cleanup_row.reason = (
+                            "paired MOVE completed but live wrapper cleanup produced no outcome"
+                        )
+                    else:
+                        cleanup_row.state = utility_cleanup_result.state
+                        cleanup_row.reason = utility_cleanup_result.reason
+                        cleanup_meta = json.loads(cleanup_row.metadata_json or "{}")
+                        cleanup_meta["paired_move_result"] = {
+                            "phase": "finalized",
+                            "task_id": job.id,
+                            "move_item_id": row.id,
+                            "move_sequence": row.sequence,
+                            "move_state": result.state,
+                            "cleanup_state": utility_cleanup_result.state,
+                            "cleanup_reason": utility_cleanup_result.reason,
+                        }
+                        cleanup_row.metadata_json = json.dumps(cleanup_meta, ensure_ascii=False)
+
+                        if utility_cleanup_result.state == "completed":
+                            existing_cleanup_journal = session.scalar(
+                                select(OperationJournal).where(
+                                    OperationJournal.plan_item_id == cleanup_row.id
+                                )
+                            )
+                            if existing_cleanup_journal is None:
+                                session.add(OperationJournal(
+                                    operation="rmdir_empty",
+                                    sequence=cleanup_row.sequence,
+                                    plan_id=plan_id,
+                                    plan_item_id=cleanup_row.id,
+                                    task_id=job.id,
+                                    user_id=user_id,
+                                    before_json=json.dumps({
+                                        "path": cleanup_row.source_path,
+                                        "object_type": "directory",
+                                        "paired_move_item_id": row.id,
+                                    }, ensure_ascii=False),
+                                    after_json=json.dumps({
+                                        "logical_removed": True,
+                                        "preserved": False,
+                                        "removed": True,
+                                        "structural_cleanup": True,
+                                        "quarantine_path": None,
+                                        "paired_move_item_id": row.id,
+                                    }, ensure_ascii=False),
+                                    metadata_before_json=json.dumps(
+                                        cleanup_meta.get("execution", {}).get("metadata_before", {}),
+                                        ensure_ascii=False,
+                                    ),
+                                    metadata_after_json=json.dumps({}, ensure_ascii=False),
+                                    created_at=now,
+                                ))
+
+                        session.add(AuditEvent(
+                            operation="rmdir_empty",
+                            path=cleanup_row.source_path,
+                            result=cleanup_row.state,
+                            details_json=json.dumps({
+                                "plan_id": plan_id,
+                                "item_id": cleanup_row.id,
+                                "task_id": job.id,
+                                "paired_move_item_id": row.id,
+                                "reason": cleanup_row.reason,
+                                "structural_cleanup": True,
+                            }, ensure_ascii=False),
+                        ))
                 if result.result_path is not None:
                     metadata["result_path"] = str(result.result_path)
                     row.metadata_json = json.dumps(metadata, ensure_ascii=False)
