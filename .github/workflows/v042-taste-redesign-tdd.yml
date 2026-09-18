@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - v0.4.2-taste-redesign-pass
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
