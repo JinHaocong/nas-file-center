@@ -50,6 +50,15 @@ export const workflowApi = {
     );
   },
 
+  permanentlyDeleteWorkflow: async (
+    id: number,
+    expectedCurrentRevision: number
+  ): Promise<{ status: string; deleted: boolean; workflow_id: number; deleted_revision_count: number }> => {
+    return api.delete<{ status: string; deleted: boolean; workflow_id: number; deleted_revision_count: number }>(
+      `/api/workflows/${id}/permanent?expected_current_revision=${expectedCurrentRevision}&confirmation=DELETE`
+    );
+  },
+
   rollbackWorkflow: async (
     id: number,
     data: WorkflowRollbackRequest
