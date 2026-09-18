@@ -24,7 +24,7 @@ import { RevisionDrawer } from '../../components/workflows/RevisionDrawer';
 import { useTitle } from '../../hooks/useTitle';
 import { formatDateTime } from '../../utils/format';
 import { useAuth } from '../../contexts/AuthContext';
-import { canArchiveWorkflow, canCreateWorkflow } from '../../utils/workflowRbac';
+import { canArchiveWorkflow, canCreateWorkflow, canPermanentlyDeleteWorkflow } from '../../utils/workflowRbac';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { DataPanel } from '../../components/ui/DataPanel';
 import { ActionBar } from '../../components/ui/ActionBar';
@@ -65,6 +65,23 @@ export const WorkflowListPage: React.FC = () => {
     onError: (err) => {
       const structured = getStructuredApiError(err);
       message.error(structured.message || '归档失败');
+    },
+  });
+
+  const permanentDeleteMutation = useMutation({
+    mutationFn: (workflow: WorkflowListItem) =>
+      workflowApi.permanentlyDeleteWorkflow(workflow.id, workflow.current_revision),
+    onSuccess: (_, workflow) => {
+      message.success(`工作流「${workflow.name}」及其版本历史已彻底删除`);
+      if (selectedWorkflowForRevision?.id === workflow.id) {
+        setSelectedWorkflowForRevision(null);
+      }
+      queryClient.invalidateQueries({ queryKey: ['workflowsList'] });
+      refetch();
+    },
+    onError: (err) => {
+      const structured = getStructuredApiError(err);
+      message.error(structured.message || '彻底删除工作流失败');
     },
   });
 
@@ -184,6 +201,26 @@ export const WorkflowListPage: React.FC = () => {
                 </Button>
               </Popconfirm>
             )}
+          {canPermanentlyDeleteWorkflow(user?.role, Boolean(record.archived_at), record.is_builtin) && (
+            <Popconfirm
+              title="彻底删除此已归档工作流？"
+              description="工作流定义和全部修订版本将从数据库删除。若仍有可执行计划依赖，服务端会拒绝本操作。"
+              onConfirm={() => permanentDeleteMutation.mutate(record)}
+              okText="彻底删除"
+              okButtonProps={{ danger: true }}
+              cancelText="取消"
+            >
+              <Button
+                type="text"
+                danger
+                size="small"
+                icon={<DeleteOutlined />}
+                loading={permanentDeleteMutation.isPending}
+              >
+                彻底删除
+              </Button>
+            </Popconfirm>
+          )}
         </div>
       ),
     },
@@ -210,6 +247,18 @@ export const WorkflowListPage: React.FC = () => {
             <Button type="text" danger>归档</Button>
           </Popconfirm>
         )}
+      {canPermanentlyDeleteWorkflow(user?.role, Boolean(record.archived_at), record.is_builtin) && (
+        <Popconfirm
+          title="彻底删除此已归档工作流？"
+          description="会删除工作流定义和全部版本历史；活动计划存在时服务端会阻止。"
+          onConfirm={() => permanentDeleteMutation.mutate(record)}
+          okText="彻底删除"
+          okButtonProps={{ danger: true }}
+          cancelText="取消"
+        >
+          <Button type="text" danger loading={permanentDeleteMutation.isPending}>彻底删除</Button>
+        </Popconfirm>
+      )}
     </div>
   );
 
