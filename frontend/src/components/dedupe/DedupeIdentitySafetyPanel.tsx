@@ -55,7 +55,7 @@ export const DedupeIdentitySafetyPanel: React.FC<Props> = ({
     : "工作流编译摘要 (compile_digest)";
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+    <div className="nfc-dedupe-identity-panel">
       {/* 1. Pre-freeze Draft Advisory Banner */}
       <Alert
         type={liveFilesystemVerified ? "success" : "info"}
@@ -77,9 +77,9 @@ export const DedupeIdentitySafetyPanel: React.FC<Props> = ({
       <Card
         size="small"
         title={
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div className="nfc-dedupe-section-heading">
             <Space>
-              <KeyOutlined style={{ color: "#1890ff" }} />
+              <KeyOutlined className="nfc-accent-icon" />
               <span>身份凭证与安全摘要 (Identity & Safety Lineage)</span>
             </Space>
             {engineVersion && (
@@ -87,22 +87,22 @@ export const DedupeIdentitySafetyPanel: React.FC<Props> = ({
             )}
           </div>
         }
+        className="nfc-dedupe-surface-card"
         bordered={false}
-        style={{ background: "#fafafa" }}
       >
-        <Descriptions column={{ xs: 1, sm: 2 }} size="small" bordered>
+        <Descriptions className="nfc-detail-descriptions nfc-dedupe-identity-descriptions" column={{ xs: 1, sm: 2 }} size="small">
           <Descriptions.Item
             label={
               <Tooltip title={isDirectScan ? "直接扫描生成计划必须提交的权威验证摘要" : "工作流生成计划必须提交的权威编译摘要"}>
                 <Space size={4}>
                   <Text strong>{authorityLabel}</Text>
-                  <InfoCircleOutlined style={{ color: "#1890ff" }} />
+                  <InfoCircleOutlined className="nfc-accent-icon" />
                 </Space>
               </Tooltip>
             }
             span={2}
           >
-            <Text code copyable strong style={{ fontSize: 13, color: "#096dd9" }}>
+            <Text code copyable strong className="nfc-dedupe-authority-digest">
               {authorityDigest || "-"}
             </Text>
           </Descriptions.Item>
@@ -113,13 +113,13 @@ export const DedupeIdentitySafetyPanel: React.FC<Props> = ({
                 <Tooltip title="底层去重步骤独立计算的算法与组结果摘要">
                   <Space size={4}>
                     <Text strong>去重预览摘要 (dedupe_preview_digest)</Text>
-                    <InfoCircleOutlined style={{ color: "#1890ff" }} />
+                    <InfoCircleOutlined className="nfc-accent-icon" />
                   </Space>
                 </Tooltip>
               }
               span={2}
             >
-              <Text code copyable strong style={{ fontSize: 13, color: "#722ed1" }}>
+              <Text code copyable strong className="nfc-dedupe-secondary-digest">
                 {dedupePreviewDigest}
               </Text>
             </Descriptions.Item>
@@ -145,7 +145,7 @@ export const DedupeIdentitySafetyPanel: React.FC<Props> = ({
 
           {scorerConfigDigest && (
             <Descriptions.Item label="打分配置摘要 (scorer_config_digest)">
-              <Text code copyable style={{ fontSize: 12 }}>
+              <Text code copyable className="nfc-dedupe-digest">
                 {scorerConfigDigest}
               </Text>
             </Descriptions.Item>
@@ -153,7 +153,7 @@ export const DedupeIdentitySafetyPanel: React.FC<Props> = ({
 
           {sourceSnapshotDigest && (
             <Descriptions.Item label="源快照摘要 (source_snapshot_digest)">
-              <Text code copyable style={{ fontSize: 12 }}>
+              <Text code copyable className="nfc-dedupe-digest">
                 {sourceSnapshotDigest}
               </Text>
             </Descriptions.Item>
@@ -161,7 +161,7 @@ export const DedupeIdentitySafetyPanel: React.FC<Props> = ({
 
           {decisionDigest && (
             <Descriptions.Item label="决策摘要 (decision_digest)">
-              <Text code copyable style={{ fontSize: 12 }}>
+              <Text code copyable className="nfc-dedupe-digest">
                 {decisionDigest}
               </Text>
             </Descriptions.Item>
@@ -169,7 +169,7 @@ export const DedupeIdentitySafetyPanel: React.FC<Props> = ({
 
           {definitionSha256 && (
             <Descriptions.Item label="定义哈希 (definition_sha256)" span={2}>
-              <Text code copyable style={{ fontSize: 12 }}>
+              <Text code copyable className="nfc-dedupe-digest">
                 {definitionSha256}
               </Text>
             </Descriptions.Item>
@@ -187,7 +187,7 @@ export const DedupeIdentitySafetyPanel: React.FC<Props> = ({
                 <Tooltip title={getProtectLastFileDescription(effectiveSafetyPolicy.protect_last_file)}>
                   <Space size={4}>
                     <span>保留最后文件保护 (protect_last_file)</span>
-                    <InfoCircleOutlined style={{ color: "#1890ff" }} />
+                    <InfoCircleOutlined className="nfc-accent-icon" />
                   </Space>
                 </Tooltip>
               }
@@ -200,7 +200,7 @@ export const DedupeIdentitySafetyPanel: React.FC<Props> = ({
 
           {effectiveSafetyPolicy && (
             <Descriptions.Item label="隔离区根目录 (quarantine_root)" span={2}>
-              <Text code={Boolean(effectiveSafetyPolicy.quarantine_root)} style={{ fontSize: 12 }}>
+              <Text code={Boolean(effectiveSafetyPolicy.quarantine_root)} className="nfc-dedupe-digest">
                 {formatQuarantineRootPresentation(effectiveSafetyPolicy.quarantine_root)}
               </Text>
             </Descriptions.Item>
@@ -210,7 +210,7 @@ export const DedupeIdentitySafetyPanel: React.FC<Props> = ({
             <Descriptions.Item label="允许扫描根目录 (allowed_roots)" span={2}>
               <Space direction="vertical" size={2}>
                 {effectiveSafetyPolicy.allowed_roots.map((root, idx) => (
-                  <Text key={idx} code style={{ fontSize: 12 }}>
+                  <Text key={idx} code className="nfc-dedupe-digest">
                     {formatAllowedRootPresentation(idx, root)}
                   </Text>
                 ))}
