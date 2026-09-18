@@ -71,7 +71,8 @@ export const DedupeExplainDrawer: React.FC<Props> = ({
   const siblings = findDuplicateGroupSiblings(member, groupMembers);
 
   return (
-    <Drawer\n        rootClassName="nfc-overlay-drawer"
+    <Drawer
+        rootClassName="nfc-overlay-drawer"
       title={
         <Space>
           <span>去重决策分析 (Decision Explain)</span>

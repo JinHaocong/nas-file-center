@@ -182,7 +182,8 @@ export const StaleRebuildDrawer: React.FC<StaleRebuildDrawerProps> = ({
   ];
 
   return (
-    <Drawer\n        rootClassName="nfc-overlay-drawer"
+    <Drawer
+        rootClassName="nfc-overlay-drawer"
       title={
         <Space>
           <BuildOutlined />
