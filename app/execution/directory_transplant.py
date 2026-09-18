@@ -89,7 +89,14 @@ def _entry_exists_at(fd: int, name: str) -> bool:
 
 def _copy_directory_metadata(src_fd: int, dst_fd: int) -> None:
     src_st = os.fstat(src_fd)
-    if hasattr(os, "fchown"):
+    dst_st = os.fstat(dst_fd)
+    if (
+        hasattr(os, "fchown")
+        and (
+            int(dst_st.st_uid) != int(src_st.st_uid)
+            or int(dst_st.st_gid) != int(src_st.st_gid)
+        )
+    ):
         os.fchown(dst_fd, int(src_st.st_uid), int(src_st.st_gid))
     os.fchmod(dst_fd, stat.S_IMODE(src_st.st_mode))
 
