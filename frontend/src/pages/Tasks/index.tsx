@@ -1,17 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Card,
-  Table,
-  Typography,
-  Tag,
-  Button,
-  Space,
-  Select,
   Alert,
-  Tooltip,
+  Button,
   Empty,
+  Pagination,
+  Select,
+  Table,
+  Tooltip,
 } from 'antd';
-import { ReloadOutlined, EyeOutlined } from '@ant-design/icons';
+import { EyeOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
 import dayjs from 'dayjs';
 import { tasksApi } from '../../api/tasks';
@@ -19,13 +16,32 @@ import { useTitle } from '../../hooks/useTitle';
 import { formatDateTime, formatElapsed } from '../../utils/format';
 import { TaskItem, TaskStatus } from '../../types/task';
 import { WorkerStatusCard } from '../../components/tasks/WorkerStatusCard';
-import { TaskStatusTag } from '../../components/tasks/TaskStatusTag';
 import { TaskProgress } from '../../components/tasks/TaskProgress';
 import { TaskDetailDrawer } from '../../components/tasks/TaskDetailDrawer';
 import { TaskDeleteButton } from '../../components/tasks/TaskDeleteButton';
 import { TaskHistoryCleanupModal } from '../../components/tasks/TaskHistoryCleanupModal';
+import { PageHeader } from '../../components/ui/PageHeader';
+import { DataPanel } from '../../components/ui/DataPanel';
+import { ActionBar } from '../../components/ui/ActionBar';
+import { ResponsiveDataView } from '../../components/ui/ResponsiveDataView';
+import { StatusBadge } from '../../components/ui/StatusBadge';
 
-const { Title, Text } = Typography;
+const STATUS_OPTIONS = [
+  { label: '全部状态', value: 'all' },
+  { label: '排队中 (queued)', value: 'queued' },
+  { label: '执行中 (running)', value: 'running' },
+  { label: '已暂停 (paused)', value: 'paused' },
+  { label: '取消中 (cancel_requested)', value: 'cancel_requested' },
+  { label: '已取消 (cancelled)', value: 'cancelled' },
+  { label: '已失败 (failed)', value: 'failed' },
+  { label: '已完成 (completed)', value: 'completed' },
+];
+
+const JOB_TYPE_OPTIONS = [
+  { label: '全部类型', value: 'all' },
+  { label: 'fclones-scan', value: 'fclones-scan' },
+  { label: 'index-root', value: 'index-root' },
+];
 
 export const TasksPage: React.FC = () => {
   useTitle('任务中心');
@@ -55,7 +71,6 @@ export const TasksPage: React.FC = () => {
     },
   });
 
-  // Local elapsed ticker: ticks once per second ONLY if any task is currently running
   useEffect(() => {
     const hasRunning = data?.items?.some((j) => j.status === 'running');
     if (!hasRunning) return;
@@ -75,42 +90,48 @@ export const TasksPage: React.FC = () => {
     setPage(1);
   };
 
+  const handleDeleted = (taskId: number) => {
+    if (page > 1 && data?.items?.length === 1) {
+      setPage((prev) => Math.max(1, prev - 1));
+    }
+    if (selectedTaskId === taskId) {
+      setSelectedTaskId(null);
+    }
+  };
+
   const isFiltered = statusFilter !== 'all' || jobTypeFilter !== 'all';
+  const items = data?.items || [];
 
   const columns = [
     {
       title: '任务 ID',
       dataIndex: 'id',
       key: 'id',
-      width: 90,
+      width: 88,
       render: (id: number) => (
-        <Button
-          type="link"
-          style={{ padding: 0, fontWeight: 600 }}
-          onClick={() => setSelectedTaskId(id)}
-        >
+        <button type="button" className="nfc-table-link nfc-mono" onClick={() => setSelectedTaskId(id)}>
           #{id}
-        </Button>
+        </button>
       ),
     },
     {
       title: '任务类型',
       dataIndex: 'job_type',
       key: 'job_type',
-      width: 130,
-      render: (type: string) => <Tag color="blue">{type}</Tag>,
+      width: 138,
+      render: (type: string) => <span className="nfc-kind-badge">{type}</span>,
     },
     {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
-      width: 100,
-      render: (status: TaskStatus) => <TaskStatusTag status={status} />,
+      width: 118,
+      render: (status: TaskStatus) => <StatusBadge status={status} />,
     },
     {
       title: '进度',
       key: 'progress',
-      width: 220,
+      width: 230,
       render: (_: unknown, record: TaskItem) => (
         <TaskProgress
           progress={record.progress}
@@ -124,54 +145,31 @@ export const TasksPage: React.FC = () => {
       title: '创建时间',
       dataIndex: 'created_at',
       key: 'created_at',
-      width: 160,
-      render: (val: string | null) => (
-        <Text style={{ fontSize: 12 }}>{formatDateTime(val)}</Text>
-      ),
-    },
-    {
-      title: '开始时间',
-      dataIndex: 'started_at',
-      key: 'started_at',
-      width: 160,
-      render: (val: string | null) => (
-        <Text style={{ fontSize: 12 }}>{formatDateTime(val)}</Text>
-      ),
-    },
-    {
-      title: '完成时间',
-      dataIndex: 'finished_at',
-      key: 'finished_at',
-      width: 160,
-      render: (val: string | null) => (
-        <Text style={{ fontSize: 12 }}>{formatDateTime(val)}</Text>
-      ),
+      width: 158,
+      render: (val: string | null) => <span className="nfc-table-meta">{formatDateTime(val)}</span>,
     },
     {
       title: '执行耗时',
       key: 'elapsed',
-      width: 110,
-      render: (_: unknown, record: TaskItem) => {
-        const elapsedStr = formatElapsed(record.started_at, record.finished_at, currentTime);
-        return <Text style={{ fontSize: 12 }}>{elapsedStr}</Text>;
-      },
+      width: 108,
+      render: (_: unknown, record: TaskItem) => (
+        <span className="nfc-table-meta">{formatElapsed(record.started_at, record.finished_at, currentTime)}</span>
+      ),
     },
     {
-      title: '错误信息',
+      title: '错误',
       key: 'error',
-      width: 180,
+      width: 190,
       render: (_: unknown, record: TaskItem) => {
-        if (!record.error && !record.error_code) {
-          return <Text type="secondary">-</Text>;
-        }
+        if (!record.error && !record.error_code) return <span className="nfc-table-muted">—</span>;
         const fullErr = record.error || record.error_code || '';
-        const displayErr = fullErr.length > 25 ? `${fullErr.slice(0, 25)}...` : fullErr;
+        const displayErr = fullErr.length > 28 ? `${fullErr.slice(0, 28)}…` : fullErr;
         return (
           <Tooltip title={fullErr}>
-            <Text type="danger" style={{ fontSize: 12, cursor: 'pointer' }}>
+            <span className="nfc-table-error">
               {record.error_code ? `[${record.error_code}] ` : ''}
               {displayErr}
-            </Text>
+            </span>
           </Tooltip>
         );
       },
@@ -179,13 +177,13 @@ export const TasksPage: React.FC = () => {
     {
       title: '操作',
       key: 'action',
-      width: 140,
+      width: 142,
       fixed: 'right' as const,
       render: (_: unknown, record: TaskItem) => (
-        <Space size={4}>
+        <div className="nfc-row-actions">
           <Button
             size="small"
-            type="link"
+            type="text"
             icon={<EyeOutlined />}
             onClick={() => setSelectedTaskId(record.id)}
           >
@@ -194,68 +192,104 @@ export const TasksPage: React.FC = () => {
           <TaskDeleteButton
             task={record}
             size="small"
-            type="link"
-            onSuccess={() => {
-              if (page > 1 && data?.items?.length === 1) {
-                setPage((prev) => Math.max(1, prev - 1));
-              }
-              if (selectedTaskId === record.id) {
-                setSelectedTaskId(null);
-              }
-            }}
+            type="text"
+            onSuccess={() => handleDeleted(record.id)}
           />
-        </Space>
+        </div>
       ),
     },
   ];
 
-  return (
-    <div>
-      {/* Header */}
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: 16,
-          flexWrap: 'wrap',
-          gap: 12,
-        }}
-      >
-        <div>
-          <Title level={4} style={{ margin: 0 }}>
-            任务中心
-          </Title>
-          <Text type="secondary">
-            实时监控后台 Worker 扫描、索引与计划任务状态
-          </Text>
-        </div>
-        <Space size={8}>
-          <TaskHistoryCleanupModal
-            onCleaned={() => {
-              setPage(1);
-              setSelectedTaskId(null);
-            }}
-          />
-          <Button
-            icon={<ReloadOutlined />}
-            onClick={() => refetch()}
-            loading={isFetching}
-          >
-            刷新
-          </Button>
-        </Space>
-      </div>
+  const mobileCards = (
+    <div className="nfc-mobile-record-list">
+      {items.length === 0 ? (
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description={isFiltered ? '无匹配任务 (No matching tasks)' : '暂无任务 (No tasks yet)'}
+        />
+      ) : (
+        items.map((task) => (
+          <article className="nfc-task-mobile-card" key={task.id}>
+            <div className="nfc-mobile-record-heading">
+              <div>
+                <button
+                  type="button"
+                  className="nfc-mobile-record-title nfc-mono"
+                  onClick={() => setSelectedTaskId(task.id)}
+                >
+                  #{task.id}
+                </button>
+                <span className="nfc-kind-badge">{task.job_type}</span>
+              </div>
+              <StatusBadge status={task.status} />
+            </div>
 
-      {/* Top Worker Status Banner */}
+            <div className="nfc-mobile-record-progress">
+              <TaskProgress
+                progress={task.progress}
+                status={task.status}
+                startedAt={task.started_at}
+                now={currentTime}
+                showDetails
+              />
+            </div>
+
+            <div className="nfc-mobile-record-facts">
+              <span>创建 <b>{formatDateTime(task.created_at)}</b></span>
+              <span>耗时 <b>{formatElapsed(task.started_at, task.finished_at, currentTime)}</b></span>
+            </div>
+
+            {(task.error || task.error_code) && (
+              <div className="nfc-mobile-record-error">
+                {task.error_code ? `[${task.error_code}] ` : ''}
+                {task.error || task.error_code}
+              </div>
+            )}
+
+            <div className="nfc-mobile-record-actions">
+              <Button type="text" icon={<EyeOutlined />} onClick={() => setSelectedTaskId(task.id)}>
+                查看详情
+              </Button>
+              <TaskDeleteButton
+                task={task}
+                type="text"
+                onSuccess={() => handleDeleted(task.id)}
+              />
+            </div>
+          </article>
+        ))
+      )}
+    </div>
+  );
+
+  return (
+    <div className="nfc-operations-page">
+      <PageHeader
+        eyebrow="OPERATIONS"
+        title="任务中心"
+        description="实时观察 Worker 的扫描、索引与计划执行任务；活动任务会自动刷新。"
+        actions={
+          <ActionBar compact>
+            <TaskHistoryCleanupModal
+              onCleaned={() => {
+                setPage(1);
+                setSelectedTaskId(null);
+              }}
+            />
+            <Button icon={<ReloadOutlined />} onClick={() => refetch()} loading={isFetching}>
+              刷新
+            </Button>
+          </ActionBar>
+        }
+      />
+
       <WorkerStatusCard />
 
-      {/* Error alert if task list fails */}
       {isError && (
         <Alert
           type="error"
           showIcon
-          style={{ marginBottom: 16 }}
+          className="nfc-page-alert"
           message="任务列表加载失败"
           description={
             typeof error === 'object' && error && 'message' in error
@@ -265,96 +299,84 @@ export const TasksPage: React.FC = () => {
         />
       )}
 
-      {/* Main Table Card with Filters */}
-      <Card bordered={false} style={{ borderRadius: 12 }}>
-        {/* Filters Toolbar */}
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: 16,
-            flexWrap: 'wrap',
-            gap: 12,
-          }}
-        >
-          <Space wrap size={12}>
-            <Space size={6}>
-              <Text type="secondary" style={{ fontSize: 13 }}>
-                状态筛选:
-              </Text>
-              <Select
-                value={statusFilter}
-                onChange={handleStatusFilterChange}
-                style={{ width: 130 }}
-                options={[
-                  { label: '全部状态', value: 'all' },
-                  { label: '排队中 (queued)', value: 'queued' },
-                  { label: '执行中 (running)', value: 'running' },
-                  { label: '已暂停 (paused)', value: 'paused' },
-                  { label: '取消中 (cancel_requested)', value: 'cancel_requested' },
-                  { label: '已取消 (cancelled)', value: 'cancelled' },
-                  { label: '已失败 (failed)', value: 'failed' },
-                  { label: '已完成 (completed)', value: 'completed' },
-                ]}
-              />
-            </Space>
+      <DataPanel
+        title="任务队列"
+        description="按状态和任务类型筛选；正在运行的任务会保留实时进度与 ETA。"
+        action={<span className="nfc-panel-count">{data?.total ?? 0} tasks</span>}
+        className="nfc-panel-flush"
+      >
+        <ActionBar className="nfc-filter-bar">
+          <label className="nfc-filter-control">
+            <span>状态</span>
+            <Select
+              value={statusFilter}
+              onChange={handleStatusFilterChange}
+              options={STATUS_OPTIONS}
+              popupMatchSelectWidth={false}
+            />
+          </label>
+          <label className="nfc-filter-control">
+            <span>任务类型</span>
+            <Select
+              value={jobTypeFilter}
+              onChange={handleJobTypeFilterChange}
+              options={JOB_TYPE_OPTIONS}
+              popupMatchSelectWidth={false}
+            />
+          </label>
+        </ActionBar>
 
-            <Space size={6}>
-              <Text type="secondary" style={{ fontSize: 13 }}>
-                任务类型:
-              </Text>
-              <Select
-                value={jobTypeFilter}
-                onChange={handleJobTypeFilterChange}
-                style={{ width: 140 }}
-                options={[
-                  { label: '全部类型', value: 'all' },
-                  { label: 'fclones-scan', value: 'fclones-scan' },
-                  { label: 'index-root', value: 'index-root' },
-                ]}
-              />
-            </Space>
-          </Space>
-
-          {data?.total !== undefined && (
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              共 {data.total} 个任务
-            </Text>
-          )}
-        </div>
-
-        {/* Tasks Table with Server-Side Pagination */}
-        <Table
-          dataSource={data?.items || []}
-          columns={columns}
-          rowKey="id"
-          loading={isLoading}
-          scroll={{ x: 1200 }}
-          locale={{
-            emptyText: (
-              <Empty
-                image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description={isFiltered ? '无匹配任务 (No matching tasks)' : '暂无任务 (No tasks yet)'}
-              />
-            ),
-          }}
-          pagination={{
-            current: page,
-            pageSize,
-            total: data?.total || 0,
-            showSizeChanger: true,
-            pageSizeOptions: ['20', '50', '100', '200'],
-            showTotal: (total) => `共 ${total} 条记录`,
-            onChange: (p, ps) => {
-              setPage(p);
-              setPageSize(ps);
-            },
-          }}
+        <ResponsiveDataView
+          desktop={
+            <Table
+              dataSource={items}
+              columns={columns}
+              rowKey="id"
+              loading={isLoading}
+              scroll={{ x: 1160 }}
+              locale={{
+                emptyText: (
+                  <Empty
+                    image={Empty.PRESENTED_IMAGE_SIMPLE}
+                    description={isFiltered ? '无匹配任务 (No matching tasks)' : '暂无任务 (No tasks yet)'}
+                  />
+                ),
+              }}
+              pagination={{
+                current: page,
+                pageSize,
+                total: data?.total || 0,
+                showSizeChanger: true,
+                pageSizeOptions: ['20', '50', '100', '200'],
+                showTotal: (total) => `共 ${total} 条记录`,
+                onChange: (p, ps) => {
+                  setPage(p);
+                  setPageSize(ps);
+                },
+              }}
+            />
+          }
+          mobile={
+            <>
+              {mobileCards}
+              <div className="nfc-mobile-pagination">
+                <Pagination
+                  current={page}
+                  pageSize={pageSize}
+                  total={data?.total || 0}
+                  showSizeChanger
+                  pageSizeOptions={['20', '50', '100', '200']}
+                  onChange={(p, ps) => {
+                    setPage(p);
+                    setPageSize(ps);
+                  }}
+                />
+              </div>
+            </>
+          }
         />
-      </Card>
+      </DataPanel>
 
-      {/* Task Detail Drawer */}
       <TaskDetailDrawer
         taskId={selectedTaskId}
         open={selectedTaskId !== null}
