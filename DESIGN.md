@@ -396,3 +396,43 @@ Not changed:
 - filesystem mutation / validation behavior.
 
 Manual browser visual review remains separate from automated acceptance.
+
+
+## v0.4.2 Taste-Skill Redesign
+
+This pass is based on the audit-first `redesign-existing-projects` guidance from `Leonxlnx/taste-skill`. The default taste skill is not treated as the primary authority for this product because it explicitly excludes dashboards, data tables and multi-step product UI.
+
+Design read:
+- technical NAS operations console for an experienced administrator,
+- restrained developer-tool language rather than a marketing surface,
+- Graphite + Jade identity,
+- Ant Design remains infrastructure, not visual identity.
+
+Taste dials:
+- DESIGN_VARIANCE: 5
+- MOTION_INTENSITY: 4
+- VISUAL_DENSITY: 7
+
+### Audit findings
+
+The v0.4.1 pass improved polish but still retained recognizable generic SaaS / Ant Design signals:
+- default system-font hierarchy without a deliberate display/data treatment,
+- generic bright SaaS blue as the product accent,
+- four equal metric cards on Dashboard,
+- persistent border + shadow card chrome across shared panels,
+- navigation/header chrome that still reads as a conventional Ant Design application shell,
+- all-caps Dashboard eyebrow treatment.
+
+### v0.4.2 direction
+
+The redesign must:
+- use a graphite neutral family with one restrained jade accent,
+- use tabular numerics and stronger optical hierarchy for operational data,
+- reduce generic card chrome and use separators / negative space where elevation is not meaningful,
+- make Dashboard metrics asymmetric on desktop while preserving responsive collapse,
+- make Sidebar and Header feel like one deliberate workspace chrome system,
+- keep semantic success / warning / danger colors functional and separate from the product accent,
+- retain purposeful motion only and continue honoring `prefers-reduced-motion`,
+- preserve all API, Worker, Plan, Quarantine, filesystem and destructive-action semantics.
+
+No framework migration is authorized. React 18, TypeScript, Vite and Ant Design 5 remain the implementation stack.
