@@ -17,6 +17,7 @@ from app.batch_utilities.errors import (
     BatchUtilityScopeNotFoundError,
     BatchUtilitySymlinkBlockedError,
 )
+from app.execution.directory_transplant import directory_transplant_preflight
 from app.fs_ops import (
     probe_directory_rename_noreplace_compat_at,
     probe_existing_noreplace_capability_at,
@@ -710,6 +711,9 @@ def discover_single_child_wrappers(
                                 if compat_noclobber is True:
                                     state = "READY"
                                     capability_reason = "UTILITY_MOVE_COMPAT_PLAIN_RENAME_NOCLOBBER"
+                                elif directory_transplant_preflight(child_path):
+                                    state = "READY"
+                                    capability_reason = "UTILITY_MOVE_COMPAT_DIRECTORY_TRANSPLANT"
                                 else:
                                     state = "UNSUPPORTED_FILESYSTEM"
                                     capability_reason = "UTILITY_MOVE_UNSUPPORTED_FILESYSTEM"
