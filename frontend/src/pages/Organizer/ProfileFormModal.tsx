@@ -61,7 +61,7 @@ export const ProfileFormModal: React.FC<ProfileFormModalProps> = ({
 
   return (
     <Modal
-      className="nfc-overlay-modal"
+      className="nfc-overlay-modal nfc-organizer-profile-modal"
       title={editingProfile ? `编辑方案: ${editingProfile.name}` : '新建整理方案'}
       open={open}
       onOk={handleOk}
