@@ -485,3 +485,38 @@ Release boundary:
 - v0.4.2 remains UI / design-system / visual-regression scope only.
 - No backend, API, Worker, executor, fs_ops, Quarantine, Plan lifecycle, PathGuard, RBAC or destructive-confirmation semantics were intentionally changed.
 - The temporary v0.4.2 PR-only TDD workflow is removed at closure; the regression contracts remain in the frontend test runner.
+
+
+## v0.4.3 Modern Console Reset
+
+The v0.4.3 visual reset supersedes the v0.4.2 Graphite + Jade **brand skin** while preserving its product-safety and anti-slop lessons.
+
+Research references:
+- Vercel Geist: high-contrast neutral foundations, developer-tool typography, grid discipline, compact functional surfaces.
+- Raycast: fast tool ergonomics, command-oriented chrome, restrained high-signal interaction.
+- Ant Design remains infrastructure for accessible controls, tables, overlays and responsive primitives; it is not the visual identity.
+- Feihong Console guidance remains useful for function before decoration, explicit states and density, but its brand palette is not used.
+
+### New product direction
+
+- Neutral Graphite canvas + Electric Blue product accent.
+- Light floating workspace rail on desktop instead of a permanent dark navigation slab.
+- Compact command-bar Header with low chrome and clear system-state grouping.
+- Rounded premium operational surfaces use whitespace, hairlines and subtle elevation instead of heavy gray table chrome.
+- Table headers are transparent and scanning hierarchy comes from typography and rhythm.
+- Worker status is a compact status strip rather than a traditional four-column admin card.
+- Mobile is a distinct interaction model, not a scaled-down desktop.
+- Primary mobile navigation uses a persistent mobile bottom dock for Overview / Scans / Plans / Tasks, with More opening the full navigation drawer.
+- Mobile content reserves safe-area space for the dock; task rows become touch-friendly cards with separate action regions.
+
+### Safety and behavior boundaries
+
+This reset is presentation-only:
+- API contracts unchanged.
+- Worker / executor / fs_ops ownership unchanged.
+- Quarantine and destructive confirmations unchanged.
+- Preview → Draft → Freeze → Validate → Execute unchanged.
+- PathGuard / symlink / no-clobber / stale checks unchanged.
+- RBAC unchanged.
+
+The earlier v0.4.2 Graphite + Jade assertions are historical design evidence, not a permanent palette lock. The v0.4.3 Electric Blue identity intentionally supersedes that palette while retaining semantic success / warning / danger colors.
