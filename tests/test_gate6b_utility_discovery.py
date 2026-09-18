@@ -87,6 +87,47 @@ def test_regular_file_sole_child_is_ready_while_special_child_is_blocked(tmp_pat
     assert fifo_candidate.child_object_type == "special"
 
 
+def test_regular_file_can_use_compat_move_when_native_noreplace_is_unavailable(tmp_path, monkeypatch):
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "B_file").mkdir()
+    (root / "B_file" / "001").write_text("payload")
+    (root / "B_dir" / "C").mkdir(parents=True)
+
+    monkeypatch.setattr(
+        single_child_wrapper_module,
+        "probe_existing_noreplace_capability_at",
+        lambda *_args, **_kwargs: False,
+    )
+
+    decisions = discover_single_child_wrappers(str(root), str(root))
+    by_name = {Path(d.wrapper_path).name: d for d in decisions}
+
+    assert by_name["B_file"].state == "READY"
+    assert by_name["B_file"].selectable is True
+    assert by_name["B_file"].child_object_type == "file"
+
+    assert by_name["B_dir"].state == "UNSUPPORTED_FILESYSTEM"
+    assert by_name["B_dir"].selectable is False
+    assert by_name["B_dir"].child_object_type == "directory"
+
+
+def test_regular_file_existing_target_remains_nonselectable(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "B" ).mkdir()
+    (root / "B" / "001").write_text("source")
+    (root / "001").write_text("existing-target")
+
+    decisions = discover_single_child_wrappers(str(root), str(root))
+    decision = next(d for d in decisions if Path(d.wrapper_path).name == "B")
+
+    assert decision.state == "TARGET_EXISTS"
+    assert decision.selectable is False
+    assert decision.child_object_type == "file"
+    assert decision.target_path == str(root / "001")
+
+
 def test_existing_target_is_explicit_nonselectable_conflict(tmp_path):
     root = tmp_path / "root"
     root.mkdir()
