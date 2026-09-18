@@ -300,14 +300,35 @@ def _move_symlink(
                 errno.EEXIST,
                 f"Target symlink changed during directory MOVE: {rel_path}",
             )
-        os.unlink(name, dir_fd=src_fd)
+        try:
+            os.unlink(name, dir_fd=src_fd)
+        except OSError as exc:
+            raise OSError(
+                exc.errno or errno.EIO,
+                f"TRANSPLANT_SYMLINK_SOURCE_UNLINK_FAILED at {rel_path}: {exc}",
+            ) from exc
         return
 
-    os.symlink(link_text, name, dir_fd=dst_fd)
+    try:
+        os.symlink(link_text, name, dir_fd=dst_fd)
+    except OSError as exc:
+        raise OSError(
+            exc.errno or errno.EIO,
+            f"TRANSPLANT_SYMLINK_PUBLISH_FAILED at {rel_path}: {exc}",
+        ) from exc
     published[rel_path] = link_text
     _save_state(state_path, state)
-    os.unlink(name, dir_fd=src_fd)
-
+    try:
+        os.unlink(name, dir_fd=src_fd)
+    except OSError as exc:
+        try:
+            os.unlink(name, dir_fd=dst_fd)
+        except OSError:
+            pass
+        raise OSError(
+            exc.errno or errno.EIO,
+            f"TRANSPLANT_SYMLINK_SOURCE_UNLINK_FAILED at {rel_path}: {exc}",
+        ) from exc
 
 def _move_directory_contents(
     src_fd: int,
@@ -316,6 +337,7 @@ def _move_directory_contents(
     rel_prefix: str,
     state_path: Path,
     state: dict[str, Any],
+    metadata_warnings: list[str],
 ) -> None:
     with os.scandir(src_fd) as entries:
         names = sorted(entry.name for entry in entries)
@@ -330,7 +352,7 @@ def _move_directory_contents(
         mode = src_st.st_mode
 
         if stat.S_ISREG(mode):
-            _move_regular_file(src_fd, dst_fd, name)
+            _move_regular_file(src_fd, dst_fd, name, rel_path=rel_path)
             continue
 
         if stat.S_ISLNK(mode):
@@ -347,7 +369,7 @@ def _move_directory_contents(
         if not stat.S_ISDIR(mode):
             raise OSError(
                 errno.EOPNOTSUPP,
-                f"Special filesystem entry is unsupported during MOVE: {rel_path}",
+                f"TRANSPLANT_UNSUPPORTED_OBJECT at {rel_path}",
             )
 
         if _entry_exists_at(dst_fd, name):
@@ -359,7 +381,13 @@ def _move_directory_contents(
                 )
             _require_owned_dir(state, rel_path, dst_st)
         else:
-            os.mkdir(name, mode=0o700, dir_fd=dst_fd)
+            try:
+                os.mkdir(name, mode=0o700, dir_fd=dst_fd)
+            except OSError as exc:
+                raise OSError(
+                    exc.errno or errno.EIO,
+                    f"TRANSPLANT_MKDIR_FAILED at {rel_path}: {exc}",
+                ) from exc
             dst_st = _stat_at(dst_fd, name)
             _record_created_dir(state_path, state, rel_path, dst_st)
 
@@ -378,7 +406,7 @@ def _move_directory_contents(
             if _identity(current_src_st) != _identity(src_st):
                 raise OSError(
                     getattr(errno, "ESTALE", errno.EIO),
-                    f"Source directory identity changed during MOVE: {rel_path}",
+                    f"TRANSPLANT_SOURCE_IDENTITY_CHANGED at {rel_path}",
                 )
             _move_directory_contents(
                 src_child_fd,
@@ -386,14 +414,58 @@ def _move_directory_contents(
                 rel_prefix=rel_path,
                 state_path=state_path,
                 state=state,
+                metadata_warnings=metadata_warnings,
             )
-            _copy_directory_metadata(src_child_fd, dst_child_fd)
+            _copy_directory_metadata(
+                src_child_fd,
+                dst_child_fd,
+                rel_path=rel_path,
+                warnings=metadata_warnings,
+            )
         finally:
             os.close(dst_child_fd)
             os.close(src_child_fd)
 
-        os.rmdir(name, dir_fd=src_fd)
+        try:
+            os.rmdir(name, dir_fd=src_fd)
+        except OSError as exc:
+            raise OSError(
+                exc.errno or errno.EIO,
+                f"TRANSPLANT_SOURCE_RMDIR_FAILED at {rel_path}: {exc}",
+            ) from exc
 
+
+def _cleanup_owned_empty_target_dirs(dst: Path, state: dict[str, Any]) -> None:
+    created = state.get("created_dirs") or {}
+    if not isinstance(created, dict):
+        return
+
+    rel_paths = sorted(
+        (str(rel) for rel in created),
+        key=lambda rel: len(Path(rel).parts) if rel else 0,
+        reverse=True,
+    )
+    for rel_path in rel_paths:
+        expected = created.get(rel_path)
+        if not isinstance(expected, list) or len(expected) != 2:
+            continue
+        path = dst / rel_path if rel_path else dst
+        try:
+            st = os.lstat(path)
+        except OSError:
+            continue
+        if (
+            not stat.S_ISDIR(st.st_mode)
+            or stat.S_ISLNK(st.st_mode)
+            or [int(st.st_dev), int(st.st_ino)] != [int(expected[0]), int(expected[1])]
+        ):
+            continue
+        try:
+            if os.listdir(path):
+                continue
+            os.rmdir(path)
+        except OSError:
+            continue
 
 def move_directory_tree_noreplace(
     source: Path | str,
