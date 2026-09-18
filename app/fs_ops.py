@@ -19,6 +19,7 @@ import sys
 __all__ = [
     "NoreplaceProbeCleanupError",
     "probe_existing_noreplace_capability_at",
+    "probe_directory_rename_noreplace_compat_at",
     "probe_plain_directory_rename_noclobber_at",
     "rename_directory_noreplace_compat",
     "rename_noreplace",
@@ -226,7 +227,7 @@ def _probe_identity(st: os.stat_result) -> tuple[int, int, int]:
     return (int(st.st_dev), int(st.st_ino), int(stat.S_IFMT(st.st_mode)))
 
 
-def probe_plain_directory_rename_noclobber_at(
+def probe_directory_rename_noreplace_compat_at(
     source_parent_fd: int,
     target_parent_fd: int,
 ) -> bool | None:
@@ -266,7 +267,11 @@ def probe_plain_directory_rename_noclobber_at(
     }
 
     def cleanup(names: list[tuple[str, int | None]]) -> None:
-        if not all(_cleanup_probe_entry(name, dir_fd=dfd) for name, dfd in names):
+        cleanup_results = [
+            _cleanup_probe_entry(name, dir_fd=dfd)
+            for name, dfd in names
+        ]
+        if not all(cleanup_results):
             _raise_probe_cleanup_error()
 
     collision_specs = ("directory", "file", "symlink")
@@ -371,6 +376,10 @@ def probe_plain_directory_rename_noclobber_at(
     return True
 
 
+# Backward-compatible descriptive alias used by early hotfix tests.
+probe_plain_directory_rename_noclobber_at = probe_directory_rename_noreplace_compat_at
+
+
 def _open_probe_parent(path: Path) -> int:
     flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
     if hasattr(os, "O_NOFOLLOW"):
@@ -408,7 +417,7 @@ def rename_directory_noreplace_compat(source: Path | str, target: Path | str) ->
         raise
 
     try:
-        capability = probe_plain_directory_rename_noclobber_at(
+        capability = probe_directory_rename_noreplace_compat_at(
             src_parent_fd,
             dst_parent_fd,
         )
