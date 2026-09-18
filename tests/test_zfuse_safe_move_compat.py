@@ -222,3 +222,26 @@ def test_plain_directory_probe_attempts_cleanup_for_every_owned_path(tmp_path, m
     assert len(cleanup_calls) >= 2
     assert list(source_parent.iterdir()) == []
     assert list(target_parent.iterdir()) == []
+
+
+def test_plain_directory_probe_ambiguous_error_fails_closed_and_cleans(tmp_path, monkeypatch):
+    source_parent = tmp_path / "wrapper-ambiguous"
+    target_parent = tmp_path / "scope-ambiguous"
+    source_parent.mkdir()
+    target_parent.mkdir()
+
+    def ambiguous_rename(*_args, **_kwargs):
+        raise OSError(errno.EIO, "simulated ambiguous zfuse I/O error")
+
+    monkeypatch.setattr(fs_ops.os, "rename", ambiguous_rename)
+
+    src_fd = _open_dir(source_parent)
+    dst_fd = _open_dir(target_parent)
+    try:
+        assert fs_ops.probe_plain_directory_rename_noclobber_at(src_fd, dst_fd) is None
+    finally:
+        os.close(src_fd)
+        os.close(dst_fd)
+
+    assert list(source_parent.iterdir()) == []
+    assert list(target_parent.iterdir()) == []
