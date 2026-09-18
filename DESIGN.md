@@ -330,3 +330,39 @@ Don't:
 - hide destructive state for visual cleanliness,
 - rely on horizontal scrolling for every mobile table,
 - change backend/filesystem semantics as part of visual refactoring.
+
+
+## v0.4.1 Premium Visual Pass
+
+This amendment refines the frozen v0.4.0 system without changing product, API, Worker, Plan, Quarantine or filesystem semantics.
+
+Visual target:
+- Linear-level restraint with stronger depth hierarchy,
+- Vercel-level typography and control precision,
+- Supabase-level developer-tool density,
+- Raycast-like interaction polish without decorative spectacle.
+
+Ant Design is infrastructure, not visual identity. Shared NFC tokens and chrome must make buttons, inputs, selects, tables and overlays read as one product rather than stock Ant Design.
+
+### Surface hierarchy
+
+Persistent surfaces may use subtle elevation in addition to hairlines:
+- xs: static control / compact floating affordance,
+- sm: interactive panel hover and dropdown,
+- md: Modal / Drawer / elevated transient surface.
+
+Shadow must remain low-opacity and theme-aware. Depth is supporting hierarchy, not a decorative card effect.
+
+### Motion hierarchy
+
+Motion is functional and spatial:
+- 120–180ms: hover, pressed, focus and selection response,
+- 180–260ms: page/panel entrance and local state transition,
+- 220–320ms: Drawer / Modal / major navigation transition,
+- live operational states may use a restrained status-dot pulse,
+- no decorative infinite motion outside genuine live/progress state,
+- transforms stay within 1–4px and must not move layout,
+- prefers-reduced-motion disables entrance, pulse and transform effects.
+
+Representative acceptance surfaces for this pass:
+Dashboard, Plans, Workflows, shared shell, shared DataPanel/MetricCard, Ant Design control chrome, Modal/Drawer.

@@ -69,6 +69,42 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             fontSize: 14,
             fontFamily: nfcTheme.fontFamily,
           },
+          components: {
+            Button: {
+              fontWeight: 560,
+              defaultShadow: 'none',
+              primaryShadow: 'none',
+              dangerShadow: 'none',
+            },
+            Input: {
+              activeBorderColor: palette.accent,
+              hoverBorderColor: palette.hairlineStrong,
+              activeShadow: 'none',
+            },
+            Select: {
+              activeBorderColor: palette.accent,
+              hoverBorderColor: palette.hairlineStrong,
+              activeOutlineColor: 'transparent',
+            },
+            Table: {
+              headerBg: palette.surface2,
+              headerColor: palette.textSubtle,
+              rowHoverBg: palette.surface2,
+              borderColor: palette.hairline,
+            },
+            Modal: {
+              contentBg: palette.surfaceRaised,
+              headerBg: palette.surfaceRaised,
+              titleColor: palette.text,
+            },
+            Drawer: {
+              colorBgElevated: palette.surfaceRaised,
+            },
+            Dropdown: {
+              colorBgElevated: palette.surfaceRaised,
+              controlItemBgHover: palette.surface2,
+            },
+          },
         }}
       >
         {children}
