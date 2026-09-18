@@ -526,6 +526,7 @@ def execute_item(
                 return _skip("target symlink is not allowed")
             target = require_allowed_path(target_raw, allowed_roots)
             target.parent.mkdir(parents=True, exist_ok=True)
+            move_reason = "moved"
             try:
                 from app.fs_ops import rename_directory_noreplace_compat, rename_noreplace
                 try:
@@ -541,7 +542,7 @@ def execute_item(
                             if compat_exc.errno != errno.EOPNOTSUPP:
                                 raise
                             from app.execution.directory_transplant import move_directory_tree_noreplace
-                            move_directory_tree_noreplace(
+                            transplant_result = move_directory_tree_noreplace(
                                 source,
                                 target,
                                 quarantine_root=quarantine_root,
@@ -550,6 +551,11 @@ def execute_item(
                                 expected_device=item.expected_device,
                                 expected_inode=item.expected_inode,
                             )
+                            if transplant_result.metadata_warnings:
+                                move_reason = (
+                                    "moved with metadata warnings: "
+                                    + " | ".join(transplant_result.metadata_warnings)
+                                )
                     elif stat.S_ISREG(source_stat.st_mode):
                         _compat_regular_file_move_noreplace(source, target)
                     else:
@@ -562,7 +568,7 @@ def execute_item(
                 return _skip("target already exists")
             except OSError as exc:
                 return ItemResult("failed", str(exc))
-            return ItemResult("completed", "moved", target)
+            return ItemResult("completed", move_reason, target)
 
         if item.operation == "restore":
             if item.target is None:
