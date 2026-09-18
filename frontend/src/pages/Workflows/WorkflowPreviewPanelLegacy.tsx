@@ -1,21 +1,19 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
-  Card,
-  Table,
-  Button,
-  Tag,
-  Space,
-  Typography,
   Alert,
-  Descriptions,
+  Button,
+  Empty,
   Input,
   message,
+  Pagination,
   Popconfirm,
   Select,
   Switch,
+  Table,
+  Tag,
+  Typography,
 } from "antd";
 import {
-  EyeOutlined,
   ReloadOutlined,
   ThunderboltOutlined,
   WarningOutlined,
@@ -54,6 +52,12 @@ import {
   DedupePreviewTable,
   DedupeExplainDrawer,
 } from "../../components/dedupe";
+import { DataPanel } from "../../components/ui/DataPanel";
+import { ActionBar } from "../../components/ui/ActionBar";
+import { ResponsiveDescriptions } from "../../components/ui/ResponsiveDescriptions";
+import { ResponsiveDataView } from "../../components/ui/ResponsiveDataView";
+import { CodePath } from "../../components/ui/CodePath";
+import { StatusBadge } from "../../components/ui/StatusBadge";
 
 const { Text } = Typography;
 
@@ -425,18 +429,11 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
     });
 
   return (
-    <Card
-      title={
-        <Space>
-          <EyeOutlined style={{ color: "#1677ff" }} />
-          <span>执行预览与批处理计划生成 (Workflow Preview & Generate Plan)</span>
-          {getStateTag()}
-        </Space>
-      }
-      bordered={false}
-      style={{ borderRadius: 12, marginTop: 16 }}
-      extra={
-        <Space>
+    <DataPanel
+      title="执行预览与批处理计划生成"
+      description="Preview 基于已保存 revision 与显式 runtime inputs 生成权威 compile digest；Generate 只创建 Draft。"
+      action={
+        <ActionBar compact>
           <Button
             icon={<ReloadOutlined />}
             onClick={() => triggerPreview()}
@@ -445,7 +442,6 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
           >
             {previewData ? "刷新预览" : "生成预览"}
           </Button>
-
           <Popconfirm
             title="确认基于此预览生成批处理计划草稿？"
             description="计划生成为只读草稿态，仍需冻结与校验后方可执行。"
@@ -460,254 +456,339 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
               disabled={!canDraft}
               loading={generatePlanMutation.isPending}
             >
-              生成批处理计划草稿 (Draft)
+              生成计划草稿
             </Button>
           </Popconfirm>
-        </Space>
+        </ActionBar>
       }
+      className="nfc-workflow-preview-panel"
     >
-      {isArchived ? (
-        <Alert
-          type="info"
-          showIcon
-          message="工作流已归档"
-          description="此工作流已被归档封存，处于只读模式，不可执行预览或生成批处理计划。"
-          style={{ marginBottom: 16 }}
-        />
-      ) : isDirty ? (
-        <Alert
-          type="warning"
-          showIcon
-          icon={<WarningOutlined />}
-          message="检测到工作流定义有未保存的变动"
-          description="为保障编译与计划生成的权威性及版本一致性，系统禁止在草稿未保存状态下进行预览或生成计划。请先点击上方“保存新版本”按钮。"
-          style={{ marginBottom: 16 }}
-        />
-      ) : (
-        <>
-          {errorMessage && (
-            <Alert
-              type="error"
-              showIcon
-              message="操作失败"
-              description={errorMessage}
-              closable
-              onClose={() => setErrorMessage(null)}
-              style={{ marginBottom: 16 }}
-            />
-          )}
+      <div className="nfc-workflow-preview-body">
+        <div className="nfc-workflow-preview-state">{getStateTag()}</div>
 
-          {previewError && (
-            <Alert
-              type="error"
-              showIcon
-              message="工作流预览失败"
-              description={previewError}
-              style={{ marginBottom: 16 }}
-            />
-          )}
-
-          {isDedupe && previewData && !previewData.dedupe_summary && (
-            <Alert
-              type="error"
-              showIcon
-              message="缺少去重权威摘要 (dedupe_summary)"
-              description="后端返回的预览数据中未包含权威 dedupe_summary，无法验证去重统计与安全性，系统已禁止生成计划草案。"
-              style={{ marginBottom: 16 }}
-            />
-          )}
-
-          {/* Runtime Inputs Selector */}
-          <div
-            style={{
-              display: "flex",
-              gap: 16,
-              marginBottom: 16,
-              alignItems: "center",
-              flexWrap: "wrap",
-            }}
-          >
-            {isDedupe ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                <Text type="secondary">指定扫描任务 (纯运行时参数):</Text>
-                <CompletedScanPicker
-                  value={selectedScanJobId}
-                  onChange={handleScanJobChange}
-                  disabled={previewMutation.isPending || generatePlanMutation.isPending}
-                />
-                <Space align="center" style={{ marginLeft: 8 }}>
-                  <Switch
-                    checked={onlyChanged}
-                    onChange={(checked) => {
-                      setOnlyChanged(checked);
-                      if (selectedScanJobId) {
-                        triggerPreview({ page: 1, pageSize, onlyChanged: checked, scanJobId: selectedScanJobId });
-                      }
-                    }}
-                    disabled={previewMutation.isPending || generatePlanMutation.isPending}
-                  />
-                  <Text type="secondary" style={{ fontSize: 13 }}>
-                    仅显示将隔离项 (only_changed)
-                  </Text>
-                </Space>
-              </div>
-            ) : (
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <Text type="secondary">覆盖根目录 (可选):</Text>
-                {isOrganizer ? (
-                  <Select
-                    placeholder="覆盖单一根目录 (整理模式仅限 1 个)"
-                    value={selectedRoots?.[0]}
-                    onChange={(val) => handleRootsChange(val ? [val] : undefined)}
-                    style={{ minWidth: 260 }}
-                    options={(scanRoots || []).map((r) => ({
-                      label: `${r.root} (ID: ${r.id})`,
-                      value: r.id,
-                    }))}
-                    allowClear
-                  />
-                ) : (
-                  <Select
-                    mode="multiple"
-                    maxCount={16}
-                    placeholder="使用步骤预设根目录 (最多16个)"
-                    value={selectedRoots}
-                    onChange={handleRootsChange}
-                    style={{ minWidth: 260 }}
-                    options={(scanRoots || []).map((r) => ({
-                      label: `${r.root} (ID: ${r.id})`,
-                      value: r.id,
-                      disabled:
-                        !selectedRoots?.includes(r.id) &&
-                        (selectedRoots?.length ?? 0) >= 16,
-                    }))}
-                    allowClear
-                  />
-                )}
-              </div>
+        {isArchived ? (
+          <Alert
+            type="info"
+            showIcon
+            message="工作流已归档"
+            description="此工作流已被归档封存，处于只读模式，不可执行预览或生成批处理计划。"
+          />
+        ) : isDirty ? (
+          <Alert
+            type="warning"
+            showIcon
+            icon={<WarningOutlined />}
+            message="检测到工作流定义有未保存的变动"
+            description="为保障编译与计划生成的权威性及版本一致性，草稿未保存时禁止 Preview 与 Generate。请先保存新版本。"
+          />
+        ) : (
+          <>
+            {errorMessage && (
+              <Alert
+                type="error"
+                showIcon
+                message="操作失败"
+                description={errorMessage}
+                closable
+                onClose={() => setErrorMessage(null)}
+              />
             )}
 
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: "auto" }}>
+            {previewError && (
+              <Alert
+                type="error"
+                showIcon
+                message="工作流预览失败"
+                description={previewError}
+              />
+            )}
+
+            {isDedupe && previewData && !previewData.dedupe_summary && (
+              <Alert
+                type="error"
+                showIcon
+                message="缺少去重权威摘要 (dedupe_summary)"
+                description="后端预览未包含权威 dedupe_summary，无法验证去重统计与安全性，已禁止生成计划草稿。"
+              />
+            )}
+
+            <ActionBar className="nfc-workflow-runtime-bar">
+              {isDedupe ? (
+                <>
+                  <span className="nfc-form-inline-label">扫描任务</span>
+                  <CompletedScanPicker
+                    value={selectedScanJobId}
+                    onChange={handleScanJobChange}
+                    disabled={previewMutation.isPending || generatePlanMutation.isPending}
+                  />
+                  <label className="nfc-inline-switch">
+                    <Switch
+                      checked={onlyChanged}
+                      onChange={(checked) => {
+                        setOnlyChanged(checked);
+                        if (selectedScanJobId) {
+                          triggerPreview({
+                            page: 1,
+                            pageSize,
+                            onlyChanged: checked,
+                            scanJobId: selectedScanJobId,
+                          });
+                        }
+                      }}
+                      disabled={previewMutation.isPending || generatePlanMutation.isPending}
+                    />
+                    <span>仅显示将隔离项</span>
+                  </label>
+                </>
+              ) : (
+                <>
+                  <span className="nfc-form-inline-label">覆盖根目录（可选）</span>
+                  {isOrganizer ? (
+                    <Select
+                      placeholder="覆盖单一根目录"
+                      value={selectedRoots?.[0]}
+                      onChange={(value) =>
+                        handleRootsChange(value ? [value] : undefined)
+                      }
+                      className="nfc-workflow-root-select"
+                      options={(scanRoots || []).map((root) => ({
+                        label: `${root.root} (ID: ${root.id})`,
+                        value: root.id,
+                      }))}
+                      allowClear
+                    />
+                  ) : (
+                    <Select
+                      mode="multiple"
+                      maxCount={16}
+                      placeholder="使用步骤预设根目录 (最多16个)"
+                      value={selectedRoots}
+                      onChange={handleRootsChange}
+                      className="nfc-workflow-root-select"
+                      options={(scanRoots || []).map((root) => ({
+                        label: `${root.root} (ID: ${root.id})`,
+                        value: root.id,
+                        disabled:
+                          !selectedRoots?.includes(root.id) &&
+                          (selectedRoots?.length ?? 0) >= 16,
+                      }))}
+                      allowClear
+                    />
+                  )}
+                </>
+              )}
+
               <Input
                 placeholder="自定义计划名称 (可选)"
                 value={customPlanName}
-                onChange={(e) => setCustomPlanName(e.target.value)}
-                style={{ width: 260 }}
+                onChange={(event) => setCustomPlanName(event.target.value)}
+                className="nfc-workflow-plan-name-input"
               />
-            </div>
-          </div>
+            </ActionBar>
 
-          {/* Results Section */}
-          {previewData && (
-            isDedupe ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                <DedupeIdentitySafetyPanel
-                  authorityDigest={previewData.compile_digest}
-                  authorityType="compile_digest"
-                  dedupePreviewDigest={dedupeSummary?.preview_digest}
-                  workflowRevision={previewData.workflow_revision}
-                  definitionSha256={previewData.definition_sha256}
-                  runtimeScanJobId={selectedScanJobId}
-                  previewSource={previewData.preview_source}
-                  liveFilesystemVerified={previewData.live_filesystem_verified}
-                  scorerConfigDigest={dedupeSummary?.scorer_config_digest}
-                  sourceSnapshotDigest={dedupeSummary?.source_snapshot_digest}
-                  decisionDigest={dedupeSummary?.decision_digest}
-                  engineVersion={dedupeSummary?.dedupe_engine_version}
-                  effectiveSafetyPolicy={dedupeSummary?.effective_safety_policy}
-                />
-
-                {dedupeSummary && (
-                  <DedupePreviewSummaryPanel summary={dedupeSummary} />
-                )}
-
-                <Card
-                  title={
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <span>去重流水线预览明细 (Dedupe Preview Items)</span>
-                      <Text type="secondary" style={{ fontSize: 13 }}>
-                        共 {previewData.items?.length || 0} 项
-                      </Text>
-                    </div>
-                  }
-                  size="small"
-                  bordered={false}
-                  style={{ background: "#fff", borderRadius: 8 }}
-                >
-                  <DedupePreviewTable
-                    rows={dedupeRows}
-                    loading={previewMutation.isPending}
-                    onSelectMember={(member) => {
-                      setSelectedDedupeMember(member);
-                      setExplainOpen(true);
-                    }}
-                    pagination={{
-                      current: page,
-                      pageSize,
-                      total: computeWorkflowDedupeTableTotal(previewData, onlyChanged),
-                      onChange: (p, ps) => {
-                        triggerPreview({ page: p, pageSize: ps });
-                      },
-                    }}
+            {previewData &&
+              (isDedupe ? (
+                <div className="nfc-dedupe-stage-stack">
+                  <DedupeIdentitySafetyPanel
+                    authorityDigest={previewData.compile_digest}
+                    authorityType="compile_digest"
+                    dedupePreviewDigest={dedupeSummary?.preview_digest}
+                    workflowRevision={previewData.workflow_revision}
+                    definitionSha256={previewData.definition_sha256}
+                    runtimeScanJobId={selectedScanJobId}
+                    previewSource={previewData.preview_source}
+                    liveFilesystemVerified={previewData.live_filesystem_verified}
+                    scorerConfigDigest={dedupeSummary?.scorer_config_digest}
+                    sourceSnapshotDigest={dedupeSummary?.source_snapshot_digest}
+                    decisionDigest={dedupeSummary?.decision_digest}
+                    engineVersion={dedupeSummary?.dedupe_engine_version}
+                    effectiveSafetyPolicy={dedupeSummary?.effective_safety_policy}
                   />
-                </Card>
 
-                <DedupeExplainDrawer
-                  open={explainOpen}
-                  onClose={() => setExplainOpen(false)}
-                  member={selectedDedupeMember}
-                  groupMembers={dedupeRows}
-                />
-              </div>
-            ) : (
-              <>
-                <Card size="small" style={{ marginBottom: 16, background: "#fafafa" }}>
-                  <Descriptions size="small" column={3} bordered>
-                    <Descriptions.Item label="匹配文件/目录数">
-                      <Text strong>{previewData.matched_count}</Text>
-                    </Descriptions.Item>
-                    <Descriptions.Item label="计划操作总数">
-                      <Text strong style={{ color: "#1677ff" }}>
-                        {previewData.planned_operations_count} 项
-                      </Text>
-                    </Descriptions.Item>
-                    <Descriptions.Item label="预览数据源">
-                      <Tag color={previewData.preview_source === "index" ? "blue" : "purple"}>
-                        {previewData.preview_source}
-                      </Tag>
-                    </Descriptions.Item>
-                    <Descriptions.Item label="编译摘要 (Compile Digest)" span={3}>
-                      <Text code copyable style={{ fontSize: 12 }}>
-                        {previewData.compile_digest || "(已失效，请重新生成预览)"}
-                      </Text>
-                    </Descriptions.Item>
-                  </Descriptions>
-                </Card>
+                  {dedupeSummary && (
+                    <DedupePreviewSummaryPanel summary={dedupeSummary} />
+                  )}
 
-                <Table
-                  dataSource={previewData?.items || []}
-                  columns={columns}
-                  rowKey={(r, idx) => `${r.source_path}-${r.operation}-${idx}`}
-                  loading={previewMutation.isPending}
-                  size="small"
-                  pagination={{
-                    current: page,
-                    pageSize,
-                    total: previewData?.planned_operations_count ?? 0,
-                    showSizeChanger: true,
-                    pageSizeOptions: ["20", "50", "100"],
-                    onChange: (p, ps) => {
-                      if (previewState === "PREVIEW_READY") {
-                        triggerPreview({ page: p, pageSize: ps });
-                      }
-                    },
-                  }}
-                />
-              </>
-            )
-          )}
-        </>
-      )}
-    </Card>
+                  <section className="nfc-workflow-preview-subsection">
+                    <div className="nfc-workflow-preview-subheader">
+                      <div>
+                        <strong>去重流水线预览明细</strong>
+                        <span>当前页 {previewData.items?.length || 0} 项</span>
+                      </div>
+                    </div>
+                    <DedupePreviewTable
+                      rows={dedupeRows}
+                      loading={previewMutation.isPending}
+                      onSelectMember={(member) => {
+                        setSelectedDedupeMember(member);
+                        setExplainOpen(true);
+                      }}
+                      pagination={{
+                        current: page,
+                        pageSize,
+                        total: computeWorkflowDedupeTableTotal(
+                          previewData,
+                          onlyChanged
+                        ),
+                        onChange: (nextPage, nextPageSize) => {
+                          triggerPreview({
+                            page: nextPage,
+                            pageSize: nextPageSize,
+                          });
+                        },
+                      }}
+                    />
+                  </section>
+
+                  <DedupeExplainDrawer
+                    open={explainOpen}
+                    onClose={() => setExplainOpen(false)}
+                    member={selectedDedupeMember}
+                    groupMembers={dedupeRows}
+                  />
+                </div>
+              ) : (
+                <>
+                  <ResponsiveDescriptions
+                    items={[
+                      {
+                        label: "匹配文件/目录数",
+                        value: previewData.matched_count,
+                        emphasis: true,
+                      },
+                      {
+                        label: "计划操作总数",
+                        value: previewData.planned_operations_count,
+                        emphasis: true,
+                      },
+                      {
+                        label: "预览数据源",
+                        value: (
+                          <span className="nfc-kind-badge">
+                            {previewData.preview_source}
+                          </span>
+                        ),
+                      },
+                      {
+                        label: "Compile Digest",
+                        value: (
+                          <span className="nfc-mono nfc-digest-value">
+                            {previewData.compile_digest ||
+                              "(已失效，请重新生成预览)"}
+                          </span>
+                        ),
+                      },
+                    ]}
+                  />
+
+                  <ResponsiveDataView
+                    desktop={
+                      <Table
+                        dataSource={previewData.items || []}
+                        columns={columns}
+                        rowKey={(row, index) =>
+                          `${row.source_path}-${row.operation}-${index}`
+                        }
+                        loading={previewMutation.isPending}
+                        size="small"
+                        pagination={{
+                          current: page,
+                          pageSize,
+                          total: previewData.planned_operations_count ?? 0,
+                          showSizeChanger: true,
+                          pageSizeOptions: ["20", "50", "100"],
+                          onChange: (nextPage, nextPageSize) => {
+                            if (previewState === "PREVIEW_READY") {
+                              triggerPreview({
+                                page: nextPage,
+                                pageSize: nextPageSize,
+                              });
+                            }
+                          },
+                        }}
+                      />
+                    }
+                    mobile={
+                      <>
+                        <div className="nfc-mobile-record-list">
+                          {(previewData.items || []).length === 0 ? (
+                            <Empty
+                              image={Empty.PRESENTED_IMAGE_SIMPLE}
+                              description="当前预览无操作项"
+                            />
+                          ) : (
+                            (previewData.items || []).map((item, index) => (
+                              <article
+                                className="nfc-workflow-preview-item-mobile-card"
+                                key={`${item.source_path}-${item.operation}-${index}`}
+                              >
+                                <div className="nfc-mobile-record-heading">
+                                  <div className="nfc-inline-badges">
+                                    <span className={`nfc-operation-badge nfc-operation-${item.operation}`}>
+                                      {item.operation}
+                                    </span>
+                                    <span className="nfc-mono">
+                                      #{computePreviewRowIndex(page, pageSize, index)}
+                                    </span>
+                                  </div>
+                                  <StatusBadge
+                                    status={item.changed ? "validating" : "completed"}
+                                    label={item.changed ? "有变更" : "保持/更新"}
+                                  />
+                                </div>
+                                <div className="nfc-plan-item-paths">
+                                  <div className="nfc-plan-item-path-row">
+                                    <span>源路径</span>
+                                    <CodePath value={item.source_path} />
+                                  </div>
+                                  <div className="nfc-plan-item-path-row">
+                                    <span>
+                                      {item.operation === "touch"
+                                        ? "mtime"
+                                        : "目标"}
+                                    </span>
+                                    {item.operation === "touch" ? (
+                                      <span className="nfc-table-meta">
+                                        {item.mtime_ns
+                                          ? new Date(
+                                              item.mtime_ns / 1e6
+                                            ).toLocaleString()
+                                          : "当前时间"}
+                                      </span>
+                                    ) : (
+                                      <CodePath value={item.target_path} muted />
+                                    )}
+                                  </div>
+                                </div>
+                              </article>
+                            ))
+                          )}
+                        </div>
+                        <div className="nfc-mobile-pagination">
+                          <Pagination
+                            current={page}
+                            pageSize={pageSize}
+                            total={previewData.planned_operations_count ?? 0}
+                            showSizeChanger
+                            pageSizeOptions={["20", "50", "100"]}
+                            onChange={(nextPage, nextPageSize) => {
+                              if (previewState === "PREVIEW_READY") {
+                                triggerPreview({
+                                  page: nextPage,
+                                  pageSize: nextPageSize,
+                                });
+                              }
+                            }}
+                          />
+                        </div>
+                      </>
+                    }
+                  />
+                </>
+              ))}
+          </>
+        )}
+      </div>
+    </DataPanel>
   );
 };

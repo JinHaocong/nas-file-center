@@ -1,55 +1,59 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  Card,
-  Form,
-  Button,
-  Typography,
-  Space,
-  Table,
-  Tag,
-  Row,
-  Col,
-  Statistic,
-  Radio,
-  message,
   Alert,
+  Button,
+  Empty,
+  Form,
+  Pagination,
+  Radio,
+  Table,
   Tooltip,
+  message,
 } from 'antd';
 import {
   ArrowLeftOutlined,
+  ArrowRightOutlined,
   EyeOutlined,
   ScheduleOutlined,
-  ArrowRightOutlined,
-  ExclamationCircleOutlined,
-  CheckCircleOutlined,
-  WarningOutlined,
 } from '@ant-design/icons';
 import { useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { organizerProfilesApi } from '../../api/organizerProfiles';
-import { OrganizerProfile, OrganizerProposal, OrganizerPreviewSummary } from '../../types';
+import {
+  OrganizerPreviewSummary,
+  OrganizerProfile,
+  OrganizerProposal,
+} from '../../types';
 import { DirectoryPicker } from '../../components/DirectoryPicker';
 import { formatBytes } from '../../utils/format';
-
-const { Title, Text } = Typography;
+import { PageHeader } from '../../components/ui/PageHeader';
+import { DataPanel } from '../../components/ui/DataPanel';
+import { ActionBar } from '../../components/ui/ActionBar';
+import { MetricCard } from '../../components/ui/MetricCard';
+import { ResponsiveDataView } from '../../components/ui/ResponsiveDataView';
+import { CodePath } from '../../components/ui/CodePath';
+import { StatusBadge } from '../../components/ui/StatusBadge';
 
 interface ProfilePreviewProps {
   profile: OrganizerProfile;
   onBack: () => void;
 }
 
-export const ProfilePreview: React.FC<ProfilePreviewProps> = ({ profile, onBack }) => {
+export const ProfilePreview: React.FC<ProfilePreviewProps> = ({
+  profile,
+  onBack,
+}) => {
   const navigate = useNavigate();
   const [form] = Form.useForm();
-  const [currentRoot, setCurrentRoot] = useState<string>(profile.root || '');
-  const [page, setPage] = useState<number>(1);
-  const [pageSize, setPageSize] = useState<number>(50);
+  const [currentRoot, setCurrentRoot] = useState(profile.root || '');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
   const [filterMode, setFilterMode] = useState<'all' | 'changed' | 'conflicts'>('all');
 
   const [proposals, setProposals] = useState<OrganizerProposal[]>([]);
   const [summary, setSummary] = useState<OrganizerPreviewSummary | null>(null);
-  const [totalItems, setTotalItems] = useState<number>(0);
-  const [hasPreviewed, setHasPreviewed] = useState<boolean>(false);
+  const [totalItems, setTotalItems] = useState(0);
+  const [hasPreviewed, setHasPreviewed] = useState(false);
   const [snapshotId, setSnapshotId] = useState<string | undefined>(undefined);
 
   useEffect(() => {
@@ -74,13 +78,13 @@ export const ProfilePreview: React.FC<ProfilePreviewProps> = ({ profile, onBack 
         only_conflicts: params.onlyConflicts,
         snapshot_id: params.snapshotId,
       }),
-    onSuccess: (res) => {
-      setProposals(res.proposals);
-      setSummary(res.summary);
-      setTotalItems(res.total);
+    onSuccess: (result) => {
+      setProposals(result.proposals);
+      setSummary(result.summary);
+      setTotalItems(result.total);
       setHasPreviewed(true);
-      if (res.snapshot_id) {
-        setSnapshotId(res.snapshot_id);
+      if (result.snapshot_id) {
+        setSnapshotId(result.snapshot_id);
       }
     },
     onError: (err: any) => {
@@ -94,9 +98,9 @@ export const ProfilePreview: React.FC<ProfilePreviewProps> = ({ profile, onBack 
         root,
         include_touch: profile.mtime_mode === 'ordered',
       }),
-    onSuccess: (res) => {
-      message.success(`已生成整理计划 #${res.id}`);
-      navigate(`/plans/${res.id}`);
+    onSuccess: (result) => {
+      message.success(`已生成整理计划 #${result.id}`);
+      navigate(`/plans/${result.id}`);
     },
     onError: (err: any) => {
       message.error(err.message || '生成计划失败');
@@ -104,22 +108,22 @@ export const ProfilePreview: React.FC<ProfilePreviewProps> = ({ profile, onBack 
   });
 
   const fetchPreview = (
-    targetPage: number = page,
-    targetPageSize: number = pageSize,
-    mode: 'all' | 'changed' | 'conflicts' = filterMode,
+    targetPage = page,
+    targetPageSize = pageSize,
+    selectedFilter: 'all' | 'changed' | 'conflicts' = filterMode,
     currentSnapshotId: string | undefined = snapshotId
   ) => {
-    const rootVal = (form.getFieldValue('root') || currentRoot || '').trim();
-    if (!rootVal) {
+    const rootValue = (form.getFieldValue('root') || currentRoot || '').trim();
+    if (!rootValue) {
       message.warning('请先选择或输入整理根目录');
       return;
     }
     previewMutation.mutate({
-      root: rootVal,
+      root: rootValue,
       page: targetPage,
       pageSize: targetPageSize,
-      onlyChanged: mode === 'changed',
-      onlyConflicts: mode === 'conflicts',
+      onlyChanged: selectedFilter === 'changed',
+      onlyConflicts: selectedFilter === 'conflicts',
       snapshotId: currentSnapshotId,
     });
   };
@@ -132,22 +136,22 @@ export const ProfilePreview: React.FC<ProfilePreviewProps> = ({ profile, onBack 
       setSnapshotId(undefined);
       fetchPreview(1, pageSize, filterMode, undefined);
     } catch {
-      // Form validation failed
+      // AntD handles validation presentation.
     }
   };
 
-  const handleFilterChange = (mode: 'all' | 'changed' | 'conflicts') => {
-    setFilterMode(mode);
+  const handleFilterChange = (selectedFilter: 'all' | 'changed' | 'conflicts') => {
+    setFilterMode(selectedFilter);
     setPage(1);
     if (hasPreviewed) {
-      fetchPreview(1, pageSize, mode, snapshotId);
+      fetchPreview(1, pageSize, selectedFilter, snapshotId);
     }
   };
 
-  const handlePageChange = (newPage: number, newPageSize: number) => {
-    setPage(newPage);
-    setPageSize(newPageSize);
-    fetchPreview(newPage, newPageSize, filterMode, snapshotId);
+  const handlePageChange = (nextPage: number, nextPageSize: number) => {
+    setPage(nextPage);
+    setPageSize(nextPageSize);
+    fetchPreview(nextPage, nextPageSize, filterMode, snapshotId);
   };
 
   const canGeneratePlan =
@@ -157,8 +161,8 @@ export const ProfilePreview: React.FC<ProfilePreviewProps> = ({ profile, onBack 
       (profile.mtime_mode === 'ordered' && summary!.total_directories > 0));
 
   const handleGeneratePlan = () => {
-    const rootVal = (form.getFieldValue('root') || currentRoot || '').trim();
-    if (!rootVal) {
+    const rootValue = (form.getFieldValue('root') || currentRoot || '').trim();
+    if (!rootValue) {
       message.warning('请选择整理根目录');
       return;
     }
@@ -170,7 +174,17 @@ export const ProfilePreview: React.FC<ProfilePreviewProps> = ({ profile, onBack 
       message.info('当前没有需要执行的整理操作');
       return;
     }
-    planMutation.mutate(rootVal);
+    planMutation.mutate(rootValue);
+  };
+
+  const statusForProposal = (proposal: OrganizerProposal) => {
+    if (proposal.conflict) {
+      return <StatusBadge status="failed" label="冲突" />;
+    }
+    if (proposal.changed) {
+      return <StatusBadge status="validating" label="需改名" />;
+    }
+    return <StatusBadge status="completed" label="已规范" />;
   };
 
   const columns = [
@@ -178,104 +192,90 @@ export const ProfilePreview: React.FC<ProfilePreviewProps> = ({ profile, onBack 
       title: '原目录路径',
       dataIndex: 'source',
       key: 'source',
-      render: (text: string) => <Text code copyable>{text}</Text>,
+      render: (value: string) => <CodePath value={value} />,
     },
     {
-      title: '预计重命名目标',
+      title: '预计目标',
       dataIndex: 'target',
       key: 'target',
-      render: (text: string, record: OrganizerProposal) => (
-        <Space>
-          {record.changed && <ArrowRightOutlined style={{ color: '#1677ff' }} />}
-          <Text
-            code
-            copyable
-            style={{
-              color: record.conflict ? '#ff4d4f' : record.changed ? '#1677ff' : undefined,
-            }}
-          >
-            {text}
-          </Text>
-        </Space>
+      render: (value: string, record: OrganizerProposal) => (
+        <div className="nfc-target-path">
+          {record.changed && <ArrowRightOutlined />}
+          <CodePath value={value} muted={!record.changed} />
+        </div>
       ),
     },
     {
-      title: '实际统计指标',
+      title: '统计',
       key: 'stats',
-      render: (_: any, record: OrganizerProposal) => (
-        <Space size={4} wrap>
-          <Tag color="blue">{record.images} P</Tag>
-          {record.videos > 0 && <Tag color="purple">{record.videos} V</Tag>}
-          <Tag color="cyan">{formatBytes(record.total_bytes)}</Tag>
-          {record.preserved_tags?.map((t) => (
-            <Tag color="warning" key={t}>
-              {t}
-            </Tag>
+      width: 230,
+      render: (_: unknown, record: OrganizerProposal) => (
+        <div className="nfc-inline-badges">
+          <span className="nfc-kind-badge">{record.images} P</span>
+          {record.videos > 0 && (
+            <span className="nfc-kind-badge">{record.videos} V</span>
+          )}
+          <span className="nfc-kind-badge">{formatBytes(record.total_bytes)}</span>
+          {record.preserved_tags?.map((tag) => (
+            <span className="nfc-kind-badge" key={tag}>{tag}</span>
           ))}
-        </Space>
+        </div>
       ),
     },
     {
       title: '状态',
       key: 'status',
-      width: 140,
-      render: (_: any, record: OrganizerProposal) => {
-        if (record.conflict) {
-          return (
-            <Tooltip title={record.conflict_reason || '重命名冲突'}>
-              <Tag color="error" icon={<ExclamationCircleOutlined />}>
-                冲突
-              </Tag>
-            </Tooltip>
-          );
-        }
-        if (record.changed) {
-          return (
-            <Tag color="processing" icon={<WarningOutlined />}>
-              需改名
-            </Tag>
-          );
-        }
-        return (
-          <Tag color="default" icon={<CheckCircleOutlined />}>
-            已规范
-          </Tag>
-        );
-      },
+      width: 120,
+      render: (_: unknown, record: OrganizerProposal) =>
+        record.conflict ? (
+          <Tooltip title={record.conflict_reason || '重命名冲突'}>
+            {statusForProposal(record)}
+          </Tooltip>
+        ) : (
+          statusForProposal(record)
+        ),
     },
   ];
 
   return (
-    <div>
-      <div style={{ marginBottom: 16 }}>
-        <Space align="center" style={{ marginBottom: 8 }}>
-          <Button icon={<ArrowLeftOutlined />} onClick={onBack}>
-            返回方案列表
-          </Button>
-          <Title level={4} style={{ margin: 0 }}>
-            {profile.name}
-          </Title>
-          {profile.is_builtin && <Tag color="purple">内置 Built-in</Tag>}
-        </Space>
-        {profile.description && (
-          <div>
-            <Text type="secondary">{profile.description}</Text>
+    <div className="nfc-organizer-preview">
+      <PageHeader
+        eyebrow="ORGANIZER PREVIEW"
+        title={profile.name}
+        description={
+          <div className="nfc-plan-header-meta">
+            {profile.is_builtin && <span className="nfc-kind-badge">builtin</span>}
+            {profile.description && <span>{profile.description}</span>}
           </div>
-        )}
-      </div>
+        }
+        actions={
+          <ActionBar compact>
+            <Button icon={<ArrowLeftOutlined />} onClick={onBack}>
+              返回方案列表
+            </Button>
+          </ActionBar>
+        }
+      />
 
-      <Card bordered={false} style={{ borderRadius: 12, marginBottom: 16 }}>
+      <DataPanel
+        title="整理目标"
+        description="先生成只读 snapshot Preview；只有无冲突且存在变更时才允许生成 Plan。"
+        className="nfc-complex-form-panel"
+      >
         <Form form={form} layout="vertical">
           <Form.Item
             name="root"
             label="整理目标根目录"
             rules={[{ required: true, message: '请选择整理根目录' }]}
-            extra="支持可视化选择目录或手动输入，路径必须在 ALLOWED_ROOTS 白名单内"
+            extra="路径必须在 ALLOWED_ROOTS 白名单内"
           >
-            <DirectoryPicker multiple={false} placeholder="点击选择整理根目录..." />
+            <DirectoryPicker
+              multiple={false}
+              placeholder="点击选择整理根目录..."
+            />
           </Form.Item>
 
-          <Space>
+          <ActionBar>
             <Button
               type="primary"
               icon={<EyeOutlined />}
@@ -284,20 +284,14 @@ export const ProfilePreview: React.FC<ProfilePreviewProps> = ({ profile, onBack 
             >
               执行只读预览
             </Button>
-
             {hasPreviewed && summary && (
               <Button
-                type="primary"
                 icon={<ScheduleOutlined />}
                 onClick={handleGeneratePlan}
                 loading={planMutation.isPending}
                 disabled={!canGeneratePlan}
-                style={{
-                  background: canGeneratePlan ? '#52c41a' : undefined,
-                  borderColor: canGeneratePlan ? '#52c41a' : undefined,
-                }}
               >
-                生成整理计划
+                生成整理 Plan
                 {summary.changed_directories > 0
                   ? ` (${summary.changed_directories} 项待变更)`
                   : profile.mtime_mode === 'ordered'
@@ -305,93 +299,156 @@ export const ProfilePreview: React.FC<ProfilePreviewProps> = ({ profile, onBack 
                   : ''}
               </Button>
             )}
-          </Space>
+            {snapshotId && (
+              <span className="nfc-panel-count">
+                snapshot {snapshotId.slice(0, 12)}
+              </span>
+            )}
+          </ActionBar>
         </Form>
-      </Card>
+      </DataPanel>
 
       {summary && (
         <>
-          <Row gutter={16} style={{ marginBottom: 16 }}>
-            <Col span={6}>
-              <Card bordered={false} style={{ borderRadius: 12, textAlign: 'center' }}>
-                <Statistic title="检测目录总数" value={summary.total_directories} />
-              </Card>
-            </Col>
-            <Col span={6}>
-              <Card bordered={false} style={{ borderRadius: 12, textAlign: 'center' }}>
-                <Statistic
-                  title="待重命名规范"
-                  value={summary.changed_directories}
-                  valueStyle={{ color: '#1677ff' }}
-                />
-              </Card>
-            </Col>
-            <Col span={6}>
-              <Card bordered={false} style={{ borderRadius: 12, textAlign: 'center' }}>
-                <Statistic
-                  title="检测到命名冲突"
-                  value={summary.conflicts}
-                  valueStyle={{ color: summary.conflicts > 0 ? '#ff4d4f' : '#52c41a' }}
-                />
-              </Card>
-            </Col>
-            <Col span={6}>
-              <Card bordered={false} style={{ borderRadius: 12, textAlign: 'center' }}>
-                <Statistic
-                  title="扫描内容总容量"
-                  value={formatBytes(summary.total_bytes)}
-                  valueStyle={{ color: '#13c2c2' }}
-                />
-              </Card>
-            </Col>
-          </Row>
+          <div className="nfc-metric-grid nfc-organizer-metric-grid">
+            <MetricCard
+              label="检测目录"
+              value={summary.total_directories.toLocaleString()}
+              meta="当前 snapshot"
+            />
+            <MetricCard
+              label="待重命名"
+              value={summary.changed_directories.toLocaleString()}
+              meta="需要生成操作"
+              tone="attention"
+            />
+            <MetricCard
+              label="命名冲突"
+              value={summary.conflicts.toLocaleString()}
+              meta={summary.conflicts > 0 ? 'Plan 已锁定' : '无阻塞冲突'}
+              tone={summary.conflicts > 0 ? 'danger' : 'success'}
+            />
+            <MetricCard
+              label="扫描容量"
+              value={formatBytes(summary.total_bytes)}
+              meta="只读统计"
+            />
+          </div>
 
           {summary.conflicts > 0 && (
             <Alert
               type="error"
               showIcon
               message={`检测到 ${summary.conflicts} 个目标命名冲突`}
-              description="存在目标名称碰撞或重名冲突，系统已禁止生成执行计划，请调整命名模板或解决磁盘同名文件。"
-              style={{ marginBottom: 16 }}
+              description="存在目标名称碰撞或重名冲突，系统已禁止生成执行计划。"
+              className="nfc-page-alert"
             />
           )}
 
-          <Card bordered={false} style={{ borderRadius: 12 }}>
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                marginBottom: 16,
-              }}
-            >
+          <DataPanel
+            title="整理提议"
+            description="同一 snapshot 下切换过滤和分页，避免预览口径漂移。"
+            action={<span className="nfc-panel-count">{totalItems} proposals</span>}
+            className="nfc-panel-flush"
+          >
+            <ActionBar className="nfc-filter-bar nfc-organizer-preview-filter">
               <Radio.Group
                 value={filterMode}
-                onChange={(e) => handleFilterChange(e.target.value)}
-                buttonStyle="solid"
+                onChange={(event) => handleFilterChange(event.target.value)}
               >
-                <Radio.Button value="all">全部子目录 ({summary.total_directories})</Radio.Button>
+                <Radio.Button value="all">
+                  全部 ({summary.total_directories})
+                </Radio.Button>
                 <Radio.Button value="changed">
                   待重命名 ({summary.changed_directories})
                 </Radio.Button>
-                <Radio.Button value="conflicts">冲突项 ({summary.conflicts})</Radio.Button>
+                <Radio.Button value="conflicts">
+                  冲突 ({summary.conflicts})
+                </Radio.Button>
               </Radio.Group>
-            </div>
+            </ActionBar>
 
-            <Table
-              dataSource={proposals}
-              columns={columns}
-              rowKey="source"
-              loading={previewMutation.isPending}
-              pagination={{
-                current: page,
-                pageSize,
-                total: totalItems,
-                showSizeChanger: true,
-                onChange: handlePageChange,
-              }}
+            <ResponsiveDataView
+              desktop={
+                <Table
+                  dataSource={proposals}
+                  columns={columns}
+                  rowKey="source"
+                  loading={previewMutation.isPending}
+                  pagination={{
+                    current: page,
+                    pageSize,
+                    total: totalItems,
+                    showSizeChanger: true,
+                    onChange: handlePageChange,
+                  }}
+                />
+              }
+              mobile={
+                <>
+                  <div className="nfc-mobile-record-list">
+                    {proposals.length === 0 ? (
+                      <Empty
+                        image={Empty.PRESENTED_IMAGE_SIMPLE}
+                        description="当前过滤下无整理提议"
+                      />
+                    ) : (
+                      proposals.map((proposal) => (
+                        <article
+                          className="nfc-organizer-proposal-mobile-card"
+                          key={proposal.source}
+                        >
+                          <div className="nfc-mobile-record-heading">
+                            <div className="nfc-inline-badges">
+                              <span className="nfc-kind-badge">
+                                {proposal.images} P
+                              </span>
+                              {proposal.videos > 0 && (
+                                <span className="nfc-kind-badge">
+                                  {proposal.videos} V
+                                </span>
+                              )}
+                              <span className="nfc-kind-badge">
+                                {formatBytes(proposal.total_bytes)}
+                              </span>
+                            </div>
+                            {statusForProposal(proposal)}
+                          </div>
+                          <div className="nfc-plan-item-paths">
+                            <div className="nfc-plan-item-path-row">
+                              <span>源目录</span>
+                              <CodePath value={proposal.source} />
+                            </div>
+                            <div className="nfc-plan-item-path-row">
+                              <span>目标</span>
+                              <CodePath
+                                value={proposal.target}
+                                muted={!proposal.changed}
+                              />
+                            </div>
+                          </div>
+                          {proposal.conflict && (
+                            <p className="nfc-mobile-record-error">
+                              {proposal.conflict_reason || '重命名冲突'}
+                            </p>
+                          )}
+                        </article>
+                      ))
+                    )}
+                  </div>
+                  <div className="nfc-mobile-pagination">
+                    <Pagination
+                      current={page}
+                      pageSize={pageSize}
+                      total={totalItems}
+                      showSizeChanger
+                      onChange={handlePageChange}
+                    />
+                  </div>
+                </>
+              }
             />
-          </Card>
+          </DataPanel>
         </>
       )}
     </div>
