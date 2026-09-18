@@ -8986,3 +8986,48 @@ body {
     box-shadow: none !important;
   }
 }
+
+
+/* v0.4.4 Settings desktop topology follow-up
+ * Keep the tall lifecycle panel spanning both compact left-column panels so
+ * resource controls rise directly beneath runtime safety instead of waiting
+ * for the right column's height.
+ */
+.nfc-system-controls-page .nfc-settings-grid {
+  grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+  grid-template-areas:
+    "runtime lifecycle"
+    "resource lifecycle"
+    "sessions sessions";
+  align-items: start;
+  gap: 16px;
+}
+
+.nfc-settings-panel-runtime {
+  grid-area: runtime;
+}
+
+.nfc-settings-panel-lifecycle {
+  grid-area: lifecycle;
+  align-self: start;
+}
+
+.nfc-settings-panel-resource {
+  grid-area: resource;
+  align-self: start;
+}
+
+.nfc-settings-panel-sessions {
+  grid-area: sessions;
+}
+
+@media (max-width: 1199px) {
+  .nfc-system-controls-page .nfc-settings-grid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "runtime"
+      "lifecycle"
+      "resource"
+      "sessions";
+  }
+}

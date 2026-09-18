@@ -458,7 +458,7 @@ export const SettingsPage: React.FC = () => {
         <DataPanel
           title="全局文件安全运行参数"
           description="这些开关来自服务端运行环境，Web UI 只读展示，防止误触扩大文件修改权限。"
-          className="nfc-panel-flush"
+          className="nfc-panel-flush nfc-settings-panel-runtime"
         >
           <div className="nfc-settings-panel-body">
             <Alert
@@ -505,6 +505,7 @@ export const SettingsPage: React.FC = () => {
         <DataPanel
           title="数据生命周期与审计保留策略"
           description="保存策略不会自动删除数据；审计清理始终需要重新获取最新预览并显式确认。"
+          className="nfc-settings-panel-lifecycle"
           action={
             <ActionBar compact>
               {lifecyclePolicy && <span className="nfc-kind-badge">Audit · {formatAuditRetention(lifecyclePolicy.audit_retention_days)}</span>}
@@ -666,6 +667,7 @@ export const SettingsPage: React.FC = () => {
         {isAdmin && (
           <DataPanel
             title="资源控制"
+            className="nfc-settings-panel-resource"
             description="控制扫描/哈希并发和时间窗口；不会改变文件安全与变动任务的优先安全语义。"
             action={
               <ActionBar compact>
@@ -792,7 +794,7 @@ export const SettingsPage: React.FC = () => {
           title="管理员活动会话"
           description="当前设备不可在此强制注销；其他会话可由管理员显式下线。"
           action={<span className="nfc-panel-count">{sessionsData?.sessions?.length ?? 0} sessions</span>}
-          className="nfc-panel-flush"
+          className="nfc-panel-flush nfc-settings-panel-sessions"
         >
           <ResponsiveDataView
             desktop={
