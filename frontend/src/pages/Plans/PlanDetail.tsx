@@ -1,38 +1,34 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
-  Card,
-  Descriptions,
-  Table,
-  Tag,
-  Button,
-  Space,
-  Typography,
   Alert,
-  Spin,
-  Tooltip,
+  Button,
+  Empty,
   message,
+  Pagination,
   Popconfirm,
+  Spin,
+  Table,
+  Tooltip,
 } from 'antd';
 import {
   ArrowLeftOutlined,
-  ReloadOutlined,
-  LockOutlined,
-  CheckCircleOutlined,
-  PlayCircleOutlined,
   ArrowRightOutlined,
-  HistoryOutlined,
-  RollbackOutlined,
   BuildOutlined,
+  CheckCircleOutlined,
+  HistoryOutlined,
+  LockOutlined,
+  PlayCircleOutlined,
+  ReloadOutlined,
+  RollbackOutlined,
 } from '@ant-design/icons';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { OperationJournalDrawer } from './OperationJournalDrawer';
 import { StaleRebuildDrawer } from '../../components/plans/StaleRebuildDrawer';
 import { isWorkflowPlanMetadata, WorkflowPlanMetadata } from '../../types/workflow';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { plansApi, settingsApi } from '../../api/domain';
 import { useTitle } from '../../hooks/useTitle';
 import { formatBytes, formatDateTime } from '../../utils/format';
-import { STATUS_MAP } from '../../utils/constants';
 import { PlanItem } from '../../types';
 import { PlanDeleteButton } from '../../components/plans/PlanDeleteButton';
 import {
@@ -40,8 +36,28 @@ import {
   getPlanDetailRenderState,
   getPlanDetailView,
 } from '../../components/plans/plan_cleanup';
+import { PageHeader } from '../../components/ui/PageHeader';
+import { DataPanel } from '../../components/ui/DataPanel';
+import { ActionBar } from '../../components/ui/ActionBar';
+import { ResponsiveDataView } from '../../components/ui/ResponsiveDataView';
+import { ResponsiveDescriptions } from '../../components/ui/ResponsiveDescriptions';
+import { CodePath } from '../../components/ui/CodePath';
+import { StatusBadge } from '../../components/ui/StatusBadge';
 
-const { Title, Text } = Typography;
+const lifecycleSteps = [
+  { key: 'draft', label: 'Draft', caption: '预览草稿' },
+  { key: 'frozen', label: 'Frozen', caption: '参数冻结' },
+  { key: 'validate', label: 'Validate', caption: '实时校验' },
+  { key: 'execute', label: 'Execute', caption: '任务执行' },
+];
+
+const getLifecycleIndex = (status: string) => {
+  if (status === 'draft') return 0;
+  if (status === 'frozen' || status === 'validating') return 1;
+  if (status === 'ready' || status === 'stale') return 2;
+  if (['executing', 'completed', 'partial', 'failed'].includes(status)) return 3;
+  return 0;
+};
 
 export const PlanDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -66,6 +82,7 @@ export const PlanDetailPage: React.FC = () => {
     isError,
     error,
     refetch,
+    isFetching,
   } = useQuery({
     queryKey: ['planDetail', planId, page, pageSize],
     queryFn: () => plansApi.getPlanDetail(planId, page, pageSize),
@@ -155,12 +172,11 @@ export const PlanDetailPage: React.FC = () => {
     error,
     hasPlan: !!plan,
   });
-
   const view = getPlanDetailView(renderState, !!plan);
 
   if (view === 'loading') {
     return (
-      <div style={{ textAlign: 'center', padding: 60 }}>
+      <div className="nfc-centered-state">
         <Spin size="large" />
       </div>
     );
@@ -205,86 +221,72 @@ export const PlanDetailPage: React.FC = () => {
   const isSafeMode = !settings?.allow_mutation;
   const hasActiveJob = Boolean(plan.active_work_job_id);
   const executeDisabled = isSafeMode || hasActiveJob;
-  const statusConfig = STATUS_MAP[plan.status] || { label: plan.status, color: 'default' };
 
-  const journalTotal = (!isJournalLoading && !isJournalError) ? (journalData?.total ?? 0) : 0;
+  const journalTotal = !isJournalLoading && !isJournalError ? (journalData?.total ?? 0) : 0;
   const canCreateUndo =
     (plan.status === 'completed' || plan.status === 'partial') &&
     journalTotal > 0 &&
     !isJournalLoading &&
     !isJournalError;
 
-  const isWorkflowPlan = Boolean(plan && isWorkflowPlanMetadata(plan.metadata));
+  const isWorkflowPlan = Boolean(isWorkflowPlanMetadata(plan.metadata));
   const workflowMeta = isWorkflowPlan ? (plan.metadata as WorkflowPlanMetadata) : null;
   const isDedupeWorkflowPlan = Boolean(
     workflowMeta && workflowMeta.workflow_mode === 'dedupe'
   );
   const isStaleWorkflowPlan = Boolean(
-    plan && plan.status === 'stale' && isWorkflowPlan && !isDedupeWorkflowPlan
+    plan.status === 'stale' && isWorkflowPlan && !isDedupeWorkflowPlan
   );
   const isStaleDedupePlan = Boolean(
-    plan && plan.status === 'stale' && (isDedupeWorkflowPlan || plan.kind === 'dedupe')
+    plan.status === 'stale' && (isDedupeWorkflowPlan || plan.kind === 'dedupe')
   );
+
+  const lifecycleIndex = getLifecycleIndex(plan.status);
 
   const columns = [
     {
       title: '序号',
       dataIndex: 'sequence',
       key: 'sequence',
-      width: 70,
-      render: (seq: number) => <Text strong>#{seq}</Text>,
+      width: 72,
+      render: (seq: number) => <span className="nfc-mono">#{seq}</span>,
     },
     {
-      title: '操作类型',
+      title: '操作',
       dataIndex: 'operation',
       key: 'operation',
-      width: 110,
-      render: (op: string) => {
-        const colors: Record<string, string> = {
-          quarantine: 'orange',
-          touch: 'blue',
-          move: 'purple',
-          rename: 'cyan',
-          delete: 'red',
-        };
-        return <Tag color={colors[op] || 'default'}>{op}</Tag>;
-      },
+      width: 112,
+      render: (op: string) => (
+        <span className={`nfc-operation-badge nfc-operation-${op}`}>{op}</span>
+      ),
     },
     {
       title: '源文件 / 待操作路径',
       dataIndex: 'source',
       key: 'source',
-      render: (text: string) => (
-        <Text code copyable>
-          {text}
-        </Text>
-      ),
+      render: (value: string) => <CodePath value={value} />,
     },
     {
       title: '目标路径 / 保留副本',
       key: 'target_or_keep',
-      render: (_: any, record: PlanItem) => {
+      render: (_: unknown, record: PlanItem) => {
         if (record.target) {
           return (
-            <Space>
-              <ArrowRightOutlined style={{ color: '#1677ff' }} />
-              <Text code copyable style={{ color: '#1677ff' }}>
-                {record.target}
-              </Text>
-            </Space>
+            <div className="nfc-target-path">
+              <ArrowRightOutlined />
+              <CodePath value={record.target} />
+            </div>
           );
         }
         if (record.keep) {
           return (
-            <Space>
-              <Tag color="green">保留首选</Tag>
-              <Text code copyable>
-                {record.keep}
-              </Text>
-            </Space>
+            <div className="nfc-target-path">
+              <span className="nfc-kind-badge">keep</span>
+              <CodePath value={record.keep} />
+            </div>
           );
         }
-        return '-';
+        return <span className="nfc-table-muted">—</span>;
       },
     },
     {
@@ -292,53 +294,146 @@ export const PlanDetailPage: React.FC = () => {
       dataIndex: 'expected_size',
       key: 'expected_size',
       width: 110,
-      render: (bytes: number) => (bytes > 0 ? formatBytes(bytes) : '-'),
+      render: (bytes: number) => (bytes > 0 ? formatBytes(bytes) : '—'),
     },
     {
       title: '校验状态',
       dataIndex: 'state',
       key: 'state',
-      width: 100,
-      render: (state: string) => {
-        const item = STATUS_MAP[state] || { label: state, color: 'default' };
-        return <Tag color={item.color}>{item.label}</Tag>;
-      },
+      width: 122,
+      render: (state: string) => <StatusBadge status={state} />,
     },
     {
       title: '执行备注',
       dataIndex: 'reason',
       key: 'reason',
-      render: (reason: string) => reason || '-',
+      width: 180,
+      render: (reason: string) => reason || <span className="nfc-table-muted">—</span>,
     },
   ];
 
+  const summaryItems = [
+    { label: '计划 ID', value: <span className="nfc-mono">#{plan.id}</span> },
+    {
+      label: '计划类型',
+      value: (
+        <div className="nfc-inline-badges">
+          <span className="nfc-kind-badge">
+            {plan.kind === 'undo' ? 'undo · 撤销计划' : plan.kind}
+          </span>
+          {(plan.metadata?.undo_of_plan_id || plan.metadata?.undo_for_plan_id) && (
+            <span className="nfc-kind-badge">
+              源计划 #{plan.metadata?.undo_of_plan_id || plan.metadata?.undo_for_plan_id}
+            </span>
+          )}
+        </div>
+      ),
+    },
+    { label: '创建时间', value: formatDateTime(plan.created_at) },
+    { label: '预计变更项数', value: `${plan.expected_changes.toLocaleString()} 项`, emphasis: true },
+    {
+      label: '预计可释放容量',
+      value: formatBytes(plan.expected_reclaim_bytes),
+      emphasis: true,
+    },
+    {
+      label: '冻结时间',
+      value: plan.frozen_at ? formatDateTime(plan.frozen_at) : '未冻结',
+    },
+  ];
+
+  const mobileItems = (
+    <div className="nfc-mobile-record-list">
+      {(plan.items || []).length === 0 ? (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无计划项" />
+      ) : (
+        (plan.items || []).map((item: PlanItem) => (
+          <article className="nfc-plan-item-mobile-card" key={item.id || `${item.source}_${item.sequence}`}>
+            <div className="nfc-mobile-record-heading">
+              <div>
+                <span className="nfc-mobile-record-title nfc-mono">#{item.sequence}</span>
+                <span className={`nfc-operation-badge nfc-operation-${item.operation}`}>
+                  {item.operation}
+                </span>
+              </div>
+              <StatusBadge status={item.state} />
+            </div>
+
+            <div className="nfc-plan-item-paths">
+              <div className="nfc-plan-item-path-row">
+                <span>源路径</span>
+                <CodePath value={item.source} />
+              </div>
+              {(item.target || item.keep) && (
+                <div className="nfc-plan-item-path-row">
+                  <span>{item.target ? '目标路径' : '保留副本'}</span>
+                  <CodePath value={item.target || item.keep} />
+                </div>
+              )}
+            </div>
+
+            <div className="nfc-plan-item-meta">
+              <span>
+                预估容量
+                <b>{item.expected_size > 0 ? formatBytes(item.expected_size) : '—'}</b>
+              </span>
+              <span>
+                执行备注
+                <b>{item.reason || '—'}</b>
+              </span>
+            </div>
+          </article>
+        ))
+      )}
+    </div>
+  );
+
   return (
-    <div>
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: 20,
-        }}
-      >
-        <Space>
-          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/plans')}>
-            返回列表
-          </Button>
-          <Title level={4} style={{ margin: 0 }}>
-            计划详情: {plan.name}
-          </Title>
-          <Tag color={statusConfig.color} style={{ fontSize: 13, padding: '2px 8px' }}>
-            {statusConfig.label}
-          </Tag>
-        </Space>
+    <div className="nfc-operations-page">
+      <PageHeader
+        eyebrow="EXECUTION PLAN"
+        title={plan.name}
+        description={
+          <div className="nfc-plan-header-meta">
+            <span className="nfc-mono">Plan #{plan.id}</span>
+            <span className="nfc-kind-badge">{plan.kind}</span>
+            <StatusBadge status={plan.status} />
+          </div>
+        }
+        actions={
+          <ActionBar compact>
+            <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/plans')}>
+              返回列表
+            </Button>
+            <Button icon={<ReloadOutlined />} onClick={() => refetch()} loading={isFetching}>
+              刷新
+            </Button>
+          </ActionBar>
+        }
+      />
 
-        <Space>
-          <Button icon={<ReloadOutlined />} onClick={() => refetch()}>
-            刷新
-          </Button>
+      <div className="nfc-lifecycle-strip" aria-label="计划生命周期">
+        {lifecycleSteps.map((step, index) => {
+          const stateClass =
+            index < lifecycleIndex
+              ? 'nfc-lifecycle-step-complete'
+              : index === lifecycleIndex
+                ? 'nfc-lifecycle-step-active'
+                : '';
+          return (
+            <div className={`nfc-lifecycle-step ${stateClass}`.trim()} key={step.key}>
+              <span className="nfc-lifecycle-step-index">{index + 1}</span>
+              <span className="nfc-lifecycle-step-copy">
+                <strong>{step.label}</strong>
+                <span>{step.caption}</span>
+              </span>
+            </div>
+          );
+        })}
+      </div>
 
+      <section className="nfc-plan-action-surface" aria-label="计划安全操作">
+        <ActionBar>
           {plan.status === 'draft' && (
             <Button
               icon={<LockOutlined />}
@@ -349,7 +444,10 @@ export const PlanDetailPage: React.FC = () => {
             </Button>
           )}
 
-          {(plan.status === 'frozen' || plan.status === 'ready' || plan.status === 'partial' || plan.status === 'stale') && (
+          {(plan.status === 'frozen' ||
+            plan.status === 'ready' ||
+            plan.status === 'partial' ||
+            plan.status === 'stale') && (
             <Tooltip
               title={
                 hasActiveJob
@@ -359,8 +457,6 @@ export const PlanDetailPage: React.FC = () => {
             >
               <span>
                 <Button
-                  type="primary"
-                  ghost
                   icon={<CheckCircleOutlined />}
                   onClick={() => validateMutation.mutate()}
                   loading={validateMutation.isPending}
@@ -434,8 +530,6 @@ export const PlanDetailPage: React.FC = () => {
                   cancelText="取消"
                 >
                   <Button
-                    type="primary"
-                    ghost
                     icon={<RollbackOutlined />}
                     loading={undoPlanMutation.isPending}
                     disabled={hasActiveJob}
@@ -449,7 +543,6 @@ export const PlanDetailPage: React.FC = () => {
 
           {isStaleWorkflowPlan && (
             <Button
-              type="primary"
               icon={<BuildOutlined />}
               onClick={() => setRebuildDrawerOpen(true)}
             >
@@ -459,7 +552,6 @@ export const PlanDetailPage: React.FC = () => {
 
           {isStaleDedupePlan && workflowMeta && (
             <Button
-              type="primary"
               icon={<ArrowLeftOutlined />}
               onClick={() => navigate(`/workflows/${workflowMeta.workflow_id}`)}
             >
@@ -474,155 +566,162 @@ export const PlanDetailPage: React.FC = () => {
             type="default"
             size="middle"
           />
-        </Space>
-      </div>
+        </ActionBar>
+      </section>
 
-      {(plan.kind === 'undo' || plan.metadata?.is_undo) && (
-        <Alert
-          message={`撤销还原计划 (Undo Plan for #${plan.metadata?.undo_of_plan_id || plan.metadata?.undo_for_plan_id || 'Unknown'})`}
-          description={
-            <div>
-              本计划为计划 #{plan.metadata?.undo_of_plan_id || plan.metadata?.undo_for_plan_id} 的撤销还原计划。所有操作项已根据底层操作日志严格倒序排布。
-              <div style={{ marginTop: 4, fontWeight: 500, color: '#1677ff' }}>
-                安全声明：Undo 计划绝不支持直接原地执行，必须严格按照常规生命周期完成 Freeze 冻结与实时 SHA256 校验后方可通过任务中心安全执行。
-              </div>
-            </div>
-          }
-          type="info"
-          showIcon
-          icon={<RollbackOutlined />}
-          action={
-            (plan.metadata?.undo_of_plan_id || plan.metadata?.undo_for_plan_id) ? (
-              <Button
-                size="small"
-                onClick={() => navigate(`/plans/${plan.metadata?.undo_of_plan_id || plan.metadata?.undo_for_plan_id}`)}
-              >
-                查看原计划
-              </Button>
-            ) : undefined
-          }
-          style={{ marginBottom: 16 }}
-        />
-      )}
-
-      {plan.status === 'stale' && (
-        <Alert
-          message={
-            isStaleDedupePlan
-              ? "去重执行计划已过期锁定 (PLAN_STALE)"
-              : isStaleWorkflowPlan
-              ? "工作流计划已过期 (PLAN_STALE)"
-              : "计划已过期 (PLAN_STALE)"
-          }
-          description={
-            isStaleDedupePlan ? (
+      <div className="nfc-plan-alert-stack">
+        {(plan.kind === 'undo' || plan.metadata?.is_undo) && (
+          <Alert
+            message={`撤销还原计划 (Undo Plan for #${plan.metadata?.undo_of_plan_id || plan.metadata?.undo_for_plan_id || 'Unknown'})`}
+            description={
               <div>
-                去重候选文件已被外部修改、移动、删除或哈希变动。去重计划涉及数据安全，严禁原地增量重建。
-                <div style={{ marginTop: 4 }}>
-                  处置建议：请先重新执行全量扫描任务以获取最新重复组快照，然后
-                  {workflowMeta ? (
-                    <span>返回关联工作流（#{workflowMeta.workflow_id}）重新生成去重计划。</span>
-                  ) : (
-                    <span>前往高级去重页面重新生成计划草案。</span>
-                  )}
+                本计划为计划 #{plan.metadata?.undo_of_plan_id || plan.metadata?.undo_for_plan_id} 的撤销还原计划。所有操作项已根据底层操作日志严格倒序排布。
+                <div className="nfc-alert-emphasis">
+                  安全声明：Undo 计划绝不支持直接原地执行，必须严格按照常规生命周期完成 Freeze 冻结与实时 SHA256 校验后方可通过任务中心安全执行。
                 </div>
               </div>
-            ) : isStaleWorkflowPlan ? (
-              "计划中的源文件已被外部修改、移动、删除或替换。为保障 NAS 数据安全，该计划已被锁定。由于此计划源自工作流，您可以基于原始工作流历史版本与快照参数重新构建全新草稿。"
-            ) : (
-              "计划中的源文件已被外部修改、移动、删除或替换。为保障 NAS 数据安全，该计划已被锁定，严禁执行。如需继续操作，请删除此计划并重新生成。"
-            )
-          }
-          type="error"
-          showIcon
-          action={
-            isStaleDedupePlan ? (
-              <Space>
-                {workflowMeta && (
-                  <Button
-                    type="primary"
-                    onClick={() => navigate(`/workflows/${workflowMeta.workflow_id}`)}
-                  >
-                    返回关联工作流
-                  </Button>
-                )}
-                <Button onClick={() => navigate('/scans')}>前往扫描任务</Button>
-              </Space>
-            ) : isStaleWorkflowPlan ? (
-              <Button type="primary" onClick={() => setRebuildDrawerOpen(true)}>
-                重建计划预览
-              </Button>
-            ) : undefined
-          }
-          style={{ marginBottom: 16 }}
-        />
-      )}
+            }
+            type="info"
+            showIcon
+            icon={<RollbackOutlined />}
+            action={
+              plan.metadata?.undo_of_plan_id || plan.metadata?.undo_for_plan_id ? (
+                <Button
+                  size="small"
+                  onClick={() =>
+                    navigate(
+                      `/plans/${plan.metadata?.undo_of_plan_id || plan.metadata?.undo_for_plan_id}`
+                    )
+                  }
+                >
+                  查看原计划
+                </Button>
+              ) : undefined
+            }
+          />
+        )}
 
-      {isSafeMode && (
-        <Alert
-          message="只读安全保护模式生效中"
-          description="系统当前以 ALLOW_MUTATION=false 运行。您可以安全进行 Dry Run 计划生成与 SHA256 校验，但无法直接触发 Execute 执行。"
-          type="info"
-          showIcon
-          icon={<LockOutlined />}
-          style={{ marginBottom: 16 }}
-        />
-      )}
+        {plan.status === 'stale' && (
+          <Alert
+            message={
+              isStaleDedupePlan
+                ? '去重执行计划已过期锁定 (PLAN_STALE)'
+                : isStaleWorkflowPlan
+                  ? '工作流计划已过期 (PLAN_STALE)'
+                  : '计划已过期 (PLAN_STALE)'
+            }
+            description={
+              isStaleDedupePlan ? (
+                <div>
+                  去重候选文件已被外部修改、移动、删除或哈希变动。去重计划涉及数据安全，严禁原地增量重建。
+                  <div className="nfc-alert-followup">
+                    处置建议：请先重新执行全量扫描任务以获取最新重复组快照，然后
+                    {workflowMeta ? (
+                      <span>返回关联工作流（#{workflowMeta.workflow_id}）重新生成去重计划。</span>
+                    ) : (
+                      <span>前往高级去重页面重新生成计划草案。</span>
+                    )}
+                  </div>
+                </div>
+              ) : isStaleWorkflowPlan ? (
+                '计划中的源文件已被外部修改、移动、删除或替换。为保障 NAS 数据安全，该计划已被锁定。由于此计划源自工作流，您可以基于原始工作流历史版本与快照参数重新构建全新草稿。'
+              ) : (
+                '计划中的源文件已被外部修改、移动、删除或替换。为保障 NAS 数据安全，该计划已被锁定，严禁执行。如需继续操作，请删除此计划并重新生成。'
+              )
+            }
+            type="error"
+            showIcon
+            action={
+              isStaleDedupePlan ? (
+                <ActionBar compact>
+                  {workflowMeta && (
+                    <Button
+                      type="primary"
+                      onClick={() => navigate(`/workflows/${workflowMeta.workflow_id}`)}
+                    >
+                      返回关联工作流
+                    </Button>
+                  )}
+                  <Button onClick={() => navigate('/scans')}>前往扫描任务</Button>
+                </ActionBar>
+              ) : isStaleWorkflowPlan ? (
+                <Button type="primary" onClick={() => setRebuildDrawerOpen(true)}>
+                  重建计划预览
+                </Button>
+              ) : undefined
+            }
+          />
+        )}
 
-      <Card bordered={false} style={{ borderRadius: 12, marginBottom: 16 }}>
-        <Descriptions bordered column={{ xs: 1, sm: 2, md: 3 }}>
-          <Descriptions.Item label="计划 ID">#{plan.id}</Descriptions.Item>
-          <Descriptions.Item label="计划类型">
-            <Space wrap>
-              <Tag color={plan.kind === 'undo' ? 'magenta' : 'geekblue'}>
-                {plan.kind === 'undo' ? 'undo (撤销计划)' : plan.kind}
-              </Tag>
-              {(plan.metadata?.undo_of_plan_id || plan.metadata?.undo_for_plan_id) && (
-                <Tag color="cyan">
-                  源计划: #{plan.metadata?.undo_of_plan_id || plan.metadata?.undo_for_plan_id}
-                </Tag>
-              )}
-            </Space>
-          </Descriptions.Item>
-          <Descriptions.Item label="创建时间">{formatDateTime(plan.created_at)}</Descriptions.Item>
-          <Descriptions.Item label="预计变更项数">
-            <Text strong style={{ fontSize: 16 }}>
-              {plan.expected_changes} 项
-            </Text>
-          </Descriptions.Item>
-          <Descriptions.Item label="预计可释放容量">
-            <Text strong style={{ fontSize: 16, color: '#52c41a' }}>
-              {formatBytes(plan.expected_reclaim_bytes)}
-            </Text>
-          </Descriptions.Item>
-          <Descriptions.Item label="冻结时间">
-            {plan.frozen_at ? formatDateTime(plan.frozen_at) : <Text type="secondary">未冻结</Text>}
-          </Descriptions.Item>
-        </Descriptions>
-      </Card>
+        {isSafeMode && (
+          <Alert
+            message="只读安全保护模式生效中"
+            description="系统当前以 ALLOW_MUTATION=false 运行。您可以安全进行 Dry Run 计划生成与 SHA256 校验，但无法直接触发 Execute 执行。"
+            type="info"
+            showIcon
+            icon={<LockOutlined />}
+          />
+        )}
+      </div>
 
-      <Card
-        title={`计划项清单 (共 ${plan.total_items ?? plan.expected_changes} 项)`}
-        bordered={false}
-        style={{ borderRadius: 12 }}
+      <DataPanel
+        title="计划摘要"
+        description="冻结参数、预期变更与执行前安全上下文。"
+        className="nfc-plan-summary nfc-panel-flush"
       >
-        <Table
-          dataSource={plan.items || []}
-          columns={columns}
-          rowKey={(r) => r.id || `${r.source}_${r.sequence}`}
-          pagination={{
-            current: page,
-            pageSize,
-            total: plan.total_items ?? plan.expected_changes,
-            showSizeChanger: true,
-            pageSizeOptions: ['20', '50', '100', '200'],
-            onChange: (p, ps) => {
-              setPage(p);
-              setPageSize(ps);
-            },
-          }}
+        <ResponsiveDescriptions items={summaryItems} />
+      </DataPanel>
+
+      <DataPanel
+        title="计划项清单"
+        description="每一项真实文件操作都必须在校验后由既有 Worker 执行链处理。"
+        action={
+          <span className="nfc-panel-count">
+            {plan.total_items ?? plan.expected_changes} items
+          </span>
+        }
+        className="nfc-panel-flush"
+      >
+        <ResponsiveDataView
+          desktop={
+            <Table
+              dataSource={plan.items || []}
+              columns={columns}
+              rowKey={(record) => record.id || `${record.source}_${record.sequence}`}
+              scroll={{ x: 1180 }}
+              pagination={{
+                current: page,
+                pageSize,
+                total: plan.total_items ?? plan.expected_changes,
+                showSizeChanger: true,
+                pageSizeOptions: ['20', '50', '100', '200'],
+                onChange: (p, ps) => {
+                  setPage(p);
+                  setPageSize(ps);
+                },
+              }}
+            />
+          }
+          mobile={
+            <>
+              {mobileItems}
+              <div className="nfc-mobile-pagination">
+                <Pagination
+                  current={page}
+                  pageSize={pageSize}
+                  total={plan.total_items ?? plan.expected_changes}
+                  showSizeChanger
+                  pageSizeOptions={['20', '50', '100', '200']}
+                  onChange={(p, ps) => {
+                    setPage(p);
+                    setPageSize(ps);
+                  }}
+                />
+              </div>
+            </>
+          }
         />
-      </Card>
+      </DataPanel>
 
       <OperationJournalDrawer
         planId={planId}

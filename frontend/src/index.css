@@ -1550,3 +1550,50 @@ button.nfc-mobile-activity-card:hover {
     min-height: 40px;
   }
 }
+
+
+.nfc-centered-state {
+  min-height: 300px;
+  display: grid;
+  place-items: center;
+}
+
+.nfc-plan-header-meta,
+.nfc-inline-badges,
+.nfc-target-path {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.nfc-plan-header-meta {
+  margin-top: 2px;
+}
+
+.nfc-target-path {
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+
+.nfc-target-path > .anticon {
+  flex: 0 0 auto;
+  color: var(--nfc-text-subtle);
+  font-size: 10px;
+}
+
+.nfc-alert-emphasis {
+  margin-top: 5px;
+  color: var(--nfc-info);
+  font-weight: 600;
+}
+
+.nfc-alert-followup {
+  margin-top: 5px;
+}
+
+@media (max-width: 767px) {
+  .nfc-plan-header-meta {
+    align-items: flex-start;
+  }
+}
