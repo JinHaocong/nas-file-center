@@ -56,7 +56,7 @@ export const DedupePlanModal: React.FC<Props> = ({ scanId, open, onClose }) => {
   };
 
   return (
-    <Modal
+    <Modal\n      className="nfc-overlay-modal"
       title="生成经典去重计划 (Classic Dedupe Plan)"
       open={open}
       onOk={handleCreate}

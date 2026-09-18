@@ -80,7 +80,7 @@ export const PurgeConfirmModal: React.FC<Props> = ({
   const independentCopyPaths = purgeResult?.independent_copy_paths || [];
 
   return (
-    <Modal
+    <Modal\n      className="nfc-overlay-modal"
       title={
         <Space>
           <ExclamationCircleOutlined style={{ color: '#ff4d4f' }} />
