@@ -520,3 +520,36 @@ This reset is presentation-only:
 - RBAC unchanged.
 
 The earlier v0.4.2 Graphite + Jade assertions are historical design evidence, not a permanent palette lock. The v0.4.3 Electric Blue identity intentionally supersedes that palette while retaining semantic success / warning / danger colors.
+
+
+## v0.4.4 Page Detail Pass
+
+The Modern Console shell is retained. This pass refines only the right-side product surfaces and desktop scroll behavior.
+
+### Shell behavior
+
+- Desktop uses a fixed 100dvh application shell.
+- The right application pane is the primary vertical scroll container.
+- The left workspace rail stays bound to the viewport and only its own menu scrolls when navigation content exceeds available height.
+- Mobile keeps native document scrolling and the existing Bottom Dock safe-area model.
+
+### Page-specific detail language
+
+- Indexes: operational root registry with compact status hierarchy.
+- Scans: scan history emphasizes snapshot scale and reclaimable capacity.
+- Path Match: rule-building workbench separated from Preview results.
+- Rename: transformation workbench separated from conflict/result review.
+- Batch: operation selection reads as a tool palette rather than a generic radio form.
+- Organizer: reusable profiles remain automation-oriented with lighter tab hierarchy.
+- Workflows: versioned definitions emphasize mode/revision/state rather than generic table chrome.
+- Plans: lifecycle and expected-change information remain primary.
+- Quarantine: destructive/bulk actions are visually distinct from ordinary controls.
+- Tasks: Worker state, filters and execution rows remain an operations surface.
+- Audit: event browsing uses a more forensic / monospace treatment.
+- Settings: ordinary controls and destructive policy actions are visually separated.
+
+The left navigation rail and top command bar are intentionally unchanged because that shell direction is already accepted.
+
+### Safety boundaries
+
+This pass is presentation-only. It does not change API contracts, RBAC, destructive confirmations, Worker/executor/fs_ops ownership, Quarantine semantics, or Preview → Draft → Freeze → Validate → Execute.

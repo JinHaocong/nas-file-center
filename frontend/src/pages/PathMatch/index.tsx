@@ -132,9 +132,9 @@ export const PathMatchPage: React.FC = () => {
   ];
 
   return (
-    <div className="nfc-operations-page">
+    <div className="nfc-operations-page nfc-path-match-page">
       <PageHeader
-        eyebrow="FILE TOOLS"
+        eyebrow="Path matching"
         title="跨目录路径匹配"
         description="按相对路径、basename、stem 或正则归一化跨根目录匹配；Preview 只读，生成 Plan 后仍需完整生命周期校验。"
       />
@@ -142,7 +142,7 @@ export const PathMatchPage: React.FC = () => {
       <DataPanel
         title="匹配规则"
         description="至少选择两个根目录；路径必须位于 ALLOWED_ROOTS。"
-        className="nfc-complex-form-panel nfc-file-tool-form"
+        className="nfc-complex-form-panel nfc-file-tool-form nfc-tool-workbench"
       >
         <Form
           form={form}

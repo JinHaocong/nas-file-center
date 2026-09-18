@@ -44,9 +44,9 @@ export const AuditPage: React.FC = () => {
   ];
 
   return (
-    <div className="nfc-operations-page">
+    <div className="nfc-operations-page nfc-audit-page">
       <PageHeader
-        eyebrow="SAFETY & OPERATIONS"
+        eyebrow="Forensics"
         title="审计日志"
         description="按系统数据生命周期保留策略记录文件操作、隔离变更与执行校验事件。"
         actions={

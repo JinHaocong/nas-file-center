@@ -263,7 +263,7 @@ export const WorkflowListPage: React.FC = () => {
   );
 
   return (
-    <div className="nfc-operations-page">
+    <div className="nfc-operations-page nfc-workflows-page">
       <PageHeader
         eyebrow="Automation workflows"
         title="工作流编排中心"
