@@ -11,7 +11,7 @@ interface FilterStepEditorProps {
 export const FilterStepEditor: React.FC<FilterStepEditorProps> = ({ step, onChange, readOnly = false }) => {
   return (
     <div>
-      <div style={{ marginBottom: 8, fontSize: 13, color: '#595959' }}>
+      <div className="nfc-step-editor-note">
         配置过滤树（支持文件名、后缀、大小、修改时间、媒体类型等组合条件）：
       </div>
       <FilterBuilder
