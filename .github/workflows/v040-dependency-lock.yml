@@ -6,6 +6,7 @@ on:
       - v0.4.0-release-closure
     paths:
       - frontend/package.json
+      - frontend/vite.config.ts
 
 permissions:
   contents: write
