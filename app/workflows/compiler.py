@@ -301,6 +301,7 @@ class WorkflowCompiler:
                 "child_device": decision.child_device,
                 "child_inode": decision.child_inode,
                 "child_object_type": decision.child_object_type,
+                "capability_reason": decision.capability_reason,
                 "target_path": decision.target_path,
             }
             planned_operations.append({
