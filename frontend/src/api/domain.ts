@@ -134,6 +134,8 @@ export const batchApi = {
     number_start?: number | null;
     number_width?: number;
     include_parent?: boolean;
+    source_extension?: string;
+    target_extension?: string;
   }) => api.post<{ items: RenameProposal[] }>('/api/rename/preview', payload),
   previewPathMatch: (payload: {
     roots: string[];
