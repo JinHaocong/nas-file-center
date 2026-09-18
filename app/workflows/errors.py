@@ -48,6 +48,16 @@ class WorkflowArchivedError(WorkflowError):
         super().__init__(message=message, code="WORKFLOW_ARCHIVED", details=details, status_code=409)
 
 
+class WorkflowNotArchivedError(WorkflowError):
+    def __init__(self, message: str = "Workflow must be archived before permanent deletion", details: Any = None):
+        super().__init__(message=message, code="WORKFLOW_NOT_ARCHIVED", details=details, status_code=409)
+
+
+class WorkflowActivePlanDependencyError(WorkflowError):
+    def __init__(self, message: str = "Workflow still has active execution plans", details: Any = None):
+        super().__init__(message=message, code="WORKFLOW_ACTIVE_PLAN_DEPENDENCY", details=details, status_code=409)
+
+
 class BuiltinWorkflowImmutableError(WorkflowError):
     def __init__(self, message: str = "Builtin workflow cannot be modified or archived", details: Any = None):
         super().__init__(message=message, code="BUILTIN_WORKFLOW_IMMUTABLE", details=details, status_code=409)
