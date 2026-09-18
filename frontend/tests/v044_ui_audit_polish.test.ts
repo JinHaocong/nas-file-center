@@ -45,4 +45,22 @@ describe('v0.4.4 UI audit polish', () => {
     assert.match(css, /@media \(max-width: 767px\)[\s\S]*\.nfc-completed-scan-picker/s);
     assert.match(css, /@media \(max-width: 767px\)[\s\S]*\.nfc-task-progress/s);
   });
+
+  test('workflow editors and mobile navigation keep visual layout in semantic CSS', () => {
+    const scan = read('src/components/workflows/ScanStepEditor.tsx');
+    const move = read('src/components/workflows/MoveStepEditor.tsx');
+    const utility = read('src/components/workflows/SingleChildWrapperCollapseStepEditor.tsx');
+    const nav = read('src/components/layout/ResponsiveNav.tsx');
+    const css = read('src/index.css');
+
+    assert.match(scan, /nfc-workflow-full-control/);
+    assert.match(move, /nfc-workflow-full-control/);
+    assert.match(utility, /nfc-workflow-field-spaced/);
+    assert.doesNotMatch(scan, /style=\{\{/);
+    assert.doesNotMatch(move, /style=\{\{/);
+    assert.doesNotMatch(utility, /style=\{\{/);
+    assert.doesNotMatch(nav, /styles=\{\{/);
+    assert.match(css, /\.nfc-mobile-nav-drawer \.ant-drawer-body\s*\{[^}]*padding:\s*0/s);
+  });
+
 });

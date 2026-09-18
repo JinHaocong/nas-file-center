@@ -8753,3 +8753,17 @@ body {
     padding: 12px 13px;
   }
 }
+
+
+/* v0.4.4 final component audit residue */
+.nfc-workflow-full-control {
+  width: 100%;
+}
+
+.nfc-workflow-field-spaced {
+  margin-top: 6px;
+}
+
+.nfc-mobile-nav-drawer .ant-drawer-body {
+  padding: 0;
+}
