@@ -30,6 +30,10 @@ jobs:
         env:
           PYTHONPATH: .
         run: pytest tests/test_batch_rename.py tests/test_legacy_batch_recursive_rename_regressions.py tests/test_legacy_batch_execution_regressions.py -q
+      - name: Run full backend regression suite
+        env:
+          PYTHONPATH: .
+        run: pytest -q
 
   frontend-focused:
     runs-on: ubuntu-latest
