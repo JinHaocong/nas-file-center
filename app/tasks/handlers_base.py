@@ -1552,10 +1552,6 @@ def _reconcile_executing_item(
                 ))
 
 
-class UtilityPlanDidNotConvergeError(RuntimeError):
-    error_code = "UTILITY_PLAN_NOT_COMPLETED"
-
-
 def _utility_single_child_meta(item_meta: Any) -> dict[str, Any] | None:
     if item_meta.operation not in {"move", "rmdir_empty"}:
         return None
@@ -3337,13 +3333,6 @@ class BatchPlanExecuteHandler(TaskHandler):
                 plan.status = "stale" if any(it.state in ("stale", "failed") for it in items) else "partial"
             plan.metadata_json = json.dumps(plan_meta, ensure_ascii=False)
             final_plan_status = plan.status
-            compile_context = plan_meta.get("compile_context")
-            is_single_child_utility_plan = bool(
-                plan_meta.get("workflow_mode") == "utility"
-                and isinstance(compile_context, dict)
-                and compile_context.get("utility_action")
-                == "single_child_wrapper_collapse"
-            )
             session.commit()
 
         context.checkpoint(
@@ -3353,9 +3342,3 @@ class BatchPlanExecuteHandler(TaskHandler):
                 f"Plan #{plan_id} execution finished (status: {final_plan_status})"
             ),
         )
-
-        if is_single_child_utility_plan and final_plan_status != "completed":
-            raise UtilityPlanDidNotConvergeError(
-                f"Single-child wrapper collapse did not fully converge "
-                f"(plan status: {final_plan_status})"
-            )
