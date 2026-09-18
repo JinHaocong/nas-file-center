@@ -60,6 +60,11 @@ describe('v0.4.4 deep UI detail and mobile system', () => {
       ['src/pages/Tasks/index.tsx', 'nfc-tasks-page'],
       ['src/pages/Audit/index.tsx', 'nfc-audit-page'],
       ['src/pages/Settings/index.tsx', 'nfc-system-controls-page'],
+      ['src/pages/Scans/ScanDetail.tsx', 'nfc-scan-detail-page'],
+      ['src/pages/Scans/AdvancedDedupePage.tsx', 'nfc-advanced-dedupe-page'],
+      ['src/pages/Plans/PlanDetail.tsx', 'nfc-plan-detail-page'],
+      ['src/pages/Workflows/WorkflowBuilder.tsx', 'nfc-workflow-builder-page'],
+      ['src/pages/Organizer/ProfilePreview.tsx', 'nfc-organizer-preview-page'],
     ]);
     for (const [path, className] of expected) {
       assert.ok(read(path).includes(className), `${path} should contain ${className}`);
