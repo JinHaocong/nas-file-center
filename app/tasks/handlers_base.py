@@ -2941,6 +2941,29 @@ class BatchPlanExecuteHandler(TaskHandler):
                 ))
                 session.commit()
 
+            if item_meta.operation == "move" and result.state == "completed":
+                try:
+                    from app.execution.directory_transplant import (
+                        cleanup_directory_transplant_state,
+                        directory_transplant_reconciles_completed,
+                    )
+                    if directory_transplant_reconciles_completed(
+                        settings.quarantine_root,
+                        plan_id,
+                        item_meta.sequence,
+                        source=Path(item_meta.source_path),
+                        target=Path(item_meta.target_path) if item_meta.target_path else Path(item_meta.source_path),
+                    ):
+                        cleanup_directory_transplant_state(
+                            settings.quarantine_root,
+                            plan_id,
+                            item_meta.sequence,
+                        )
+                except Exception:
+                    # Completion is already committed. Residual NFC-owned transaction
+                    # metadata is safe and can be reconciled/cleaned on a later pass.
+                    pass
+
             if is_organizer and item_meta.operation == "touch" and result.state == "completed" and mtime_delay > 0:
                 time.sleep(mtime_delay)
 
