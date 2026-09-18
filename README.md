@@ -1,6 +1,6 @@
-# NAS File Center v0.3.3
+# NAS File Center v0.4.0
 
-> **说明**：当前版本为 **NAS File Center v0.3.3 正式版**，建立完整的任务生命周期、扫描去重历史治理、执行计划清理与兼容、持久化索引根目录体系与数据生命周期保留机制。
+> **说明**：当前版本为 **NAS File Center v0.4.0**。本版本在既有安全执行、Plan 生命周期、Quarantine、审计与 Worker 架构不变的前提下，完成全站响应式 UI/UX 重构、设计系统统一、移动端数据视图、复杂工具与 Overlay 收口，并完成 release regression、依赖安全与 Docker 构建验证。
 
 面向几十 TB NAS 数据的**中文 Web 文件批处理与精确去重中心**。
 
@@ -8,7 +8,18 @@
 
 ---
 
-## v0.3.2 核心更新与亮点
+## v0.4.0 核心更新与亮点
+
+### v0.4.0 UI / Responsive
+
+- 项目拥有独立的 `/DESIGN.md`，视觉方向以 Linear / Supabase 的克制 surface、hairline hierarchy 为主，并吸收 Carbon 的高密度数据与状态表达。
+- Dashboard、Task Center、Plans、Scans、Advanced Dedupe、Quarantine、Audit、Indexes、Workflows、Organizer、Batch、Path Match、Rename、Settings、Login 与各类 Modal/Drawer 已迁移到统一视觉系统。
+- Desktop / Tablet / Mobile 使用统一响应式合同；数据密集页面在移动端使用专用 card/list 视图，不再强行压缩宽表格。
+- Light / Dark / System 主题继续支持；安全状态、Worker 状态、Plan 生命周期与危险操作门禁保持可见。
+- 前端 release regression：438 / 438 tests PASS、TypeScript typecheck PASS、production build PASS。
+- Runtime dependency audit：0 vulnerabilities。
+- Release Docker image 已在 CI 完成 linux/amd64 构建验证；正式 Docker Hub 推送与 Komodo/NAS 部署由发布者在 merge 后执行。
+
 
 1. **Organizer Profile 通用化体系 (v0.3.2-step2)**：
    - 全面支持通用整理方案（Organizer Profiles）的**创建、编辑、克隆、删除、导入、导出、只读预览与生成执行计划**。
@@ -59,7 +70,7 @@ nas-file-center-api:8080 (容器内 HTTP 端口，禁止直接映射宿主机端
 ```yaml
 services:
   nas-file-center-api:
-    image: kerwinjhc/nas-file-center:latest
+    image: kerwinjhc/nas-file-center:0.4.0
     container_name: nas-file-center-api
     volumes:
       - /tmp/zfsv3/nvme13/15246330601/data/NasFileCenter:/config
@@ -88,7 +99,7 @@ services:
     restart: unless-stopped
 
   nas-file-center-worker:
-    image: kerwinjhc/nas-file-center:latest
+    image: kerwinjhc/nas-file-center:0.4.0
     container_name: nas-file-center-worker
     command:
       - python
@@ -126,13 +137,13 @@ networks:
 
 ---
 
-## 2. 从旧版本 (v0.2 / v0.3.1) 升级到 v0.3.2 步骤
+## 2. 升级到 v0.4.0
 
 1. 在构建机器构建 `linux/amd64` 镜像并推送：
    ```bash
    docker buildx build \
      --platform linux/amd64 \
-     -t kerwinjhc/nas-file-center:latest \
+     -t kerwinjhc/nas-file-center:0.4.0 \
      --push \
      .
    ```
@@ -205,7 +216,7 @@ npm run build
 ```bash
 docker buildx build \
   --platform linux/amd64 \
-  -t nas-file-center:v0.3.3 \
+  -t nas-file-center:0.4.0 \
   --load \
   .
 ```
