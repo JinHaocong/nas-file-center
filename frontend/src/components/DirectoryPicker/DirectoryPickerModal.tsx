@@ -16,7 +16,6 @@ import {
   message,
   Popconfirm,
   Pagination,
-  theme,
 } from 'antd';
 import {
   FolderOutlined,
@@ -48,7 +47,6 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
   initialPath,
   selectedValues,
 }) => {
-  const { token } = theme.useToken();
   const queryClient = useQueryClient();
   const { isMobile } = useResponsive();
 
