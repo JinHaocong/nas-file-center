@@ -104,7 +104,7 @@ export const DedupeExplainDrawer: React.FC<Props> = ({
             </Descriptions.Item>
             {member.relative_path && (
               <Descriptions.Item label="相对路径">
-                <Text style={{ wordBreak: 'break-all' }}>{member.relative_path}</Text>
+                <Text className="nfc-breakall">{member.relative_path}</Text>
               </Descriptions.Item>
             )}
             <Descriptions.Item label="所属扫描根">
@@ -151,7 +151,7 @@ export const DedupeExplainDrawer: React.FC<Props> = ({
           <Descriptions className="nfc-detail-descriptions" column={1} size="small">
             <Descriptions.Item label="最终决策 (Decision)">
               <Space>
-                <Tag color={decisionCls.color} style={{ fontWeight: 600 }}>{decisionCls.label}</Tag>
+                <Tag color={decisionCls.color} className="nfc-decision-tag">{decisionCls.label}</Tag>
                 {member.recommended_keep && <Tag color="green">推荐保留项</Tag>}
                 {member.is_top_candidate && <Tag color="blue">最高候选者</Tag>}
               </Space>
