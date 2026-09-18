@@ -221,7 +221,7 @@ export const QuarantinePage: React.FC = () => {
       </DataPanel>
 
       <RestoreModal entry={restoreEntry} open={restoreModalOpen} onClose={()=>{setRestoreModalOpen(false);setRestoreEntry(null);}} onSuccess={()=>refetch()} isSafeMode={isSafeMode} />
-      <PurgeConfirmModal entry={purgeEntry} open={purgeModalOpen} onClose={()=>{setPurgeModalOpen(false);setPurgeEntry(null);}} onSuccess={()=>refetch()} isSafeMode={isSafeMode} isAdmin={Boolean(isAdmin)} allowMutation={!isSafeMode} allowDelete={allowDelete} />
+      <PurgeConfirmModal entry={purgeEntry} open={purgeModalOpen} onClose={()=>{setPurgeModalOpen(false);setPurgeEntry(null);}} onSuccess={()=>refetch()} isAdmin={Boolean(isAdmin)} allowMutation={!isSafeMode} allowDelete={allowDelete} />
       <BulkRestoreModal open={bulkRestoreOpen} entryIds={bulkRestoreEntryIds} isSafeMode={isSafeMode} onClose={()=>{setBulkRestoreOpen(false);setBulkRestoreEntryIds([]);}} onPlanCreated={(plan)=>{setBulkRestoreOpen(false);setBulkRestoreEntryIds([]);clearBulkSelection();navigate(`/plans/${plan.id}`);}} />
       <BulkPurgeModal open={bulkPurgeOpen} entryIds={bulkPurgeEntryIds} isAdmin={Boolean(isAdmin)} allowMutation={!isSafeMode} allowDelete={allowDelete} onClose={()=>{setBulkPurgeOpen(false);setBulkPurgeEntryIds([]);}} onPlanCreated={(plan)=>{setBulkPurgeOpen(false);setBulkPurgeEntryIds([]);clearBulkSelection();navigate(`/plans/${plan.id}`);}} />
     </div>
