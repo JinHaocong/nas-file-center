@@ -81,7 +81,10 @@ def remove_authorized_empty_wrapper(
                 if st_open.st_dev != expected_device or st_open.st_ino != expected_inode:
                     return UtilityStructuralCleanupResult("skipped", "source identity changed")
                 if os.listdir(wrapper_fd):
-                    return UtilityStructuralCleanupResult("skipped", "source directory is not empty")
+                    return UtilityStructuralCleanupResult(
+                        "failed",
+                        "authorized structural cleanup blocked: source directory is not empty",
+                    )
 
                 # Re-check the pathname binding immediately before rmdir so an
                 # ABA replacement cannot substitute a different empty directory.
@@ -102,7 +105,10 @@ def remove_authorized_empty_wrapper(
                     removed = True
                 except OSError as exc:
                     if exc.errno in (errno.ENOTEMPTY, errno.EEXIST):
-                        return UtilityStructuralCleanupResult("skipped", "source directory is not empty")
+                        return UtilityStructuralCleanupResult(
+                            "failed",
+                            "authorized structural cleanup blocked: source directory is not empty",
+                        )
                     if exc.errno == errno.ENOENT:
                         return UtilityStructuralCleanupResult("skipped", "source does not exist")
                     return UtilityStructuralCleanupResult("failed", str(exc))
