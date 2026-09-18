@@ -52,6 +52,7 @@ export interface WorkflowUtilityCandidate {
   candidate_id: string; wrapper_path: string; child_path?: string | null; target_path?: string | null;
   state: string; selectable: boolean; selected: boolean; capability_reason?: string | null;
   wrapper_device?: number | null; wrapper_inode?: number | null; child_device?: number | null; child_inode?: number | null;
+  child_object_type?: 'file' | 'directory' | 'special' | null;
 }
 export interface WorkflowUtilitySummary {
   utility_action: 'single_child_wrapper_collapse'; scope_path: string; candidate_count: number; ready_count: number;

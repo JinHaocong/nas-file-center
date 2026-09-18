@@ -6,6 +6,8 @@
 **Canonical branch:** `v0.3.6-gate6b-utility-recursive-dirbal`  
 **Amendment:** `2026-09-16-gate6b-recursive-last-file-concurrency-amendment-a.md` — **APPROVED / FROZEN** on 2026-09-16. For Recursive Last-File concurrency and final mutation authority, Amendment A takes precedence over conflicting interpretations of Sections 4, 5, 6, 8, and 10 below.
 
+**2026-09-18 Utility amendment:** Single-Child Wrapper Collapse now permits the sole child `C` to be either a real directory or a regular file. Symlinks and special inodes remain blocked. Regular-file MOVE may use the existing executor compatibility no-clobber fallback when native `RENAME_NOREPLACE` is unavailable; directory MOVE still requires native no-replace capability.
+
 ## 1. Scope
 
 Gate6-B adds two capability domains without reopening CLOSED Gate5-D / Gate5-E semantics:
@@ -50,9 +52,9 @@ For selected scope directory `A`, only direct child directory `B` may become a c
 - `B` is a real directory and direct child of `A`.
 - `B` is not a symlink.
 - `B`'s real direct filesystem entry count is exactly 1.
-- The sole entry `C` is a real directory.
+- The sole entry `C` is either a real directory or a regular file.
 - `C` is not a symlink or special inode.
-- `B` contains no regular file, hidden file, second directory, or other object.
+- `B` contains no hidden second entry, second directory/file, or other additional object.
 - Target `A/C` does not exist.
 - Source and target remain inside the authoritative root.
 - No overwrite, implicit merge, or automatic rename is allowed.
@@ -81,12 +83,14 @@ Generate may accept only candidate IDs that:
 
 ### 2.6 Compilation and execution contract
 
-Each selected candidate compiles to exactly this ordered pair:
+Each selected candidate compiles to exactly this ordered pair, regardless of whether `C` is a directory or regular file:
 
 ```text
 1. MOVE A/B/C -> A/C
 2. REMOVE_EMPTY_DIR A/B
 ```
+
+Candidate identity and compile authority include the observed child object type (`directory` or `file`). A type/binding change requires a fresh Preview before Generate can succeed.
 
 Execution semantics are fixed:
 

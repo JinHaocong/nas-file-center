@@ -150,10 +150,17 @@ export const UtilityWorkflowPreviewPanel: React.FC<Props> = ({
       render: (value: string) => <CodePath value={value} />,
     },
     {
-      title: '唯一子目录 C',
+      title: '唯一子项 C',
       dataIndex: 'child_path',
       key: 'child_path',
-      render: (value?: string | null) => <CodePath value={value} muted={!value} />,
+      render: (value: string | null | undefined, record: WorkflowUtilityCandidate) => (
+        <div className="nfc-inline-badges">
+          {record.child_object_type && (
+            <span className="nfc-kind-badge">{record.child_object_type.toUpperCase()}</span>
+          )}
+          <CodePath value={value} muted={!value} />
+        </div>
+      ),
     },
     {
       title: '移动目标 A/C',
@@ -342,7 +349,12 @@ export const UtilityWorkflowPreviewPanel: React.FC<Props> = ({
                                 <CodePath value={candidate.wrapper_path} />
                               </div>
                               <div className="nfc-plan-item-path-row">
-                                <span>Child C</span>
+                                <span>
+                                  Child C
+                                  {candidate.child_object_type
+                                    ? ` · ${candidate.child_object_type.toUpperCase()}`
+                                    : ''}
+                                </span>
                                 <CodePath value={candidate.child_path} muted />
                               </div>
                               <div className="nfc-plan-item-path-row">
