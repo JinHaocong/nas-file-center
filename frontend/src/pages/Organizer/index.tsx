@@ -46,11 +46,11 @@ export const OrganizerPage: React.FC = () => {
   };
 
   return (
-    <div className="nfc-operations-page">
+    <div className="nfc-operations-page nfc-organizer-page">
       {!activeProfile ? (
         <>
           <PageHeader
-            eyebrow="AUTOMATION"
+            eyebrow="Organizer profiles"
             title="Organizer 整理方案"
             description="保存可复用的目录统计、命名、编号、标签与 mtime 规则；先只读 Preview，再生成 Plan。"
           />
