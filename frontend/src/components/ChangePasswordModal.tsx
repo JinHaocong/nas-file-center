@@ -37,7 +37,8 @@ export const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
   };
 
   return (
-    <Modal\n      className="nfc-overlay-modal"
+    <Modal
+      className="nfc-overlay-modal"
       title="修改管理员密码"
       open={open}
       onOk={handleSubmit}
