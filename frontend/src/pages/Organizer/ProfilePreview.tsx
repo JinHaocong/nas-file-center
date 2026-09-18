@@ -238,7 +238,7 @@ export const ProfilePreview: React.FC<ProfilePreviewProps> = ({
   ];
 
   return (
-    <div className="nfc-organizer-preview">
+    <div className="nfc-organizer-preview nfc-organizer-preview-page nfc-operations-page">
       <PageHeader
         eyebrow="ORGANIZER PREVIEW"
         title={profile.name}
