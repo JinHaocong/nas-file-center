@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
@@ -14,11 +15,200 @@ from app.execution.executor import _resolve_utility_empty_wrapper_cleanup_author
 from app.models import BatchPlan, BatchPlanItem, OperationJournal
 from app.path_safety import UnsafePathError, is_reserved_quarantine_path, require_allowed_path
 from app.batch_utilities.empty_dir_quarantine import safe_open_parent_fd
+from app.execution.utility_structural_cleanup import UtilityStructuralCleanupResult
 
 
 RECOVERED_UTILITY_STRUCTURAL_CLEANUP_REASON = (
     "reconciled after crash (utility structural cleanup completed)"
 )
+
+
+
+@dataclass
+class PreparedUtilityStructuralCleanup:
+    parent_context: Any
+    parent_fd: int
+    wrapper_fd: int
+    leaf_name: str
+    cleanup_item_id: int
+
+    def close(self) -> None:
+        try:
+            os.close(self.wrapper_fd)
+        finally:
+            self.parent_context.__exit__(None, None, None)
+
+    def cleanup_after_move(self) -> UtilityStructuralCleanupResult:
+        try:
+            st_open = os.fstat(self.wrapper_fd)
+            st_path = os.stat(
+                self.leaf_name,
+                dir_fd=self.parent_fd,
+                follow_symlinks=False,
+            )
+        except OSError as exc:
+            return UtilityStructuralCleanupResult(
+                "failed",
+                f"post-move wrapper binding inspection failed: {exc}",
+            )
+
+        if (
+            not stat.S_ISDIR(st_open.st_mode)
+            or stat.S_ISLNK(st_open.st_mode)
+            or not stat.S_ISDIR(st_path.st_mode)
+            or stat.S_ISLNK(st_path.st_mode)
+        ):
+            return UtilityStructuralCleanupResult(
+                "failed",
+                "post-move wrapper binding is no longer a directory",
+            )
+
+        if (
+            int(st_open.st_dev) != int(st_path.st_dev)
+            or int(st_open.st_ino) != int(st_path.st_ino)
+        ):
+            return UtilityStructuralCleanupResult(
+                "failed",
+                "post-move wrapper path binding changed",
+            )
+
+        try:
+            if os.listdir(self.wrapper_fd):
+                return UtilityStructuralCleanupResult(
+                    "failed",
+                    "post-move wrapper is not empty",
+                )
+            os.rmdir(self.leaf_name, dir_fd=self.parent_fd)
+        except OSError as exc:
+            return UtilityStructuralCleanupResult(
+                "failed",
+                f"post-move wrapper cleanup failed: {exc}",
+            )
+
+        return UtilityStructuralCleanupResult(
+            "completed",
+            "empty wrapper structurally removed in paired MOVE transaction",
+        )
+
+
+def prepare_utility_structural_cleanup_guard(
+    session: Any,
+    move_item: BatchPlanItem,
+    plan_id: int,
+    settings: Any,
+) -> PreparedUtilityStructuralCleanup | None:
+    if move_item.operation != "move":
+        return None
+
+    try:
+        move_meta = json.loads(move_item.metadata_json or "{}")
+    except Exception:
+        return None
+    if not isinstance(move_meta, dict):
+        return None
+
+    candidate_id = move_meta.get("candidate_id")
+    wrapper_path = move_meta.get("wrapper_path")
+    child_path = move_meta.get("child_path")
+    target_path = move_meta.get("target_path")
+    if (
+        not isinstance(candidate_id, str)
+        or not candidate_id.strip()
+        or not isinstance(wrapper_path, str)
+        or child_path != move_item.source_path
+        or target_path != move_item.target_path
+    ):
+        return None
+
+    plan = session.get(BatchPlan, plan_id)
+    if plan is None:
+        return None
+    try:
+        plan_meta = json.loads(plan.metadata_json or "{}")
+    except Exception:
+        return None
+    compile_context = plan_meta.get("compile_context") if isinstance(plan_meta, dict) else None
+    if (
+        not isinstance(plan_meta, dict)
+        or plan_meta.get("source") != "workflow"
+        or plan_meta.get("workflow_mode") != "utility"
+        or not isinstance(compile_context, dict)
+        or compile_context.get("utility_action") != "single_child_wrapper_collapse"
+    ):
+        return None
+
+    cleanup = session.scalar(
+        select(BatchPlanItem).where(
+            BatchPlanItem.plan_id == plan_id,
+            BatchPlanItem.sequence == move_item.sequence + 1,
+        )
+    )
+    if cleanup is None or cleanup.operation != "rmdir_empty":
+        return None
+    try:
+        cleanup_meta = json.loads(cleanup.metadata_json or "{}")
+    except Exception:
+        return None
+    if (
+        not isinstance(cleanup_meta, dict)
+        or cleanup_meta.get("candidate_id") != candidate_id
+        or cleanup_meta.get("wrapper_path") != wrapper_path
+        or cleanup_meta.get("child_path") != child_path
+        or cleanup_meta.get("target_path") != target_path
+        or cleanup.source_path != wrapper_path
+        or not isinstance(cleanup.expected_device, int)
+        or cleanup.expected_device <= 0
+        or not isinstance(cleanup.expected_inode, int)
+        or cleanup.expected_inode <= 0
+    ):
+        return None
+
+    source = Path(wrapper_path)
+    require_allowed_path(source, settings.allowed_roots)
+    if settings.quarantine_root and is_reserved_quarantine_path(
+        source, settings.quarantine_root
+    ):
+        raise RuntimeError("wrapper cleanup path is reserved quarantine storage")
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise RuntimeError("safe paired wrapper cleanup requires O_NOFOLLOW")
+
+    parent_context = safe_open_parent_fd(source, settings.allowed_roots)
+    parent_fd, leaf_name = parent_context.__enter__()
+    wrapper_fd = -1
+    try:
+        st_path = os.stat(leaf_name, dir_fd=parent_fd, follow_symlinks=False)
+        if (
+            stat.S_ISLNK(st_path.st_mode)
+            or not stat.S_ISDIR(st_path.st_mode)
+            or int(st_path.st_dev) != int(cleanup.expected_device)
+            or int(st_path.st_ino) != int(cleanup.expected_inode)
+        ):
+            raise RuntimeError(
+                "pre-move wrapper identity no longer matches frozen cleanup authority"
+            )
+        wrapper_fd = os.open(
+            leaf_name,
+            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+            dir_fd=parent_fd,
+        )
+        st_open = os.fstat(wrapper_fd)
+        if (
+            int(st_open.st_dev) != int(st_path.st_dev)
+            or int(st_open.st_ino) != int(st_path.st_ino)
+        ):
+            raise RuntimeError("pre-move wrapper path binding changed while opening")
+        return PreparedUtilityStructuralCleanup(
+            parent_context=parent_context,
+            parent_fd=parent_fd,
+            wrapper_fd=wrapper_fd,
+            leaf_name=leaf_name,
+            cleanup_item_id=int(cleanup.id),
+        )
+    except Exception:
+        if wrapper_fd >= 0:
+            os.close(wrapper_fd)
+        parent_context.__exit__(None, None, None)
+        raise
 
 
 def _operation_item_from_row(item: BatchPlanItem) -> OperationItem:
