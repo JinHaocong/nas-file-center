@@ -215,3 +215,28 @@ def test_executor_falls_back_to_directory_transplant_on_standard_posix_rename(
     assert result.state == "completed"
     assert not source.exists()
     assert (target / "nested" / "payload.txt").read_text(encoding="utf-8") == "payload"
+
+
+def test_directory_transplant_state_is_kept_outside_user_target_tree(tmp_path: Path):
+    root = tmp_path / "root"
+    source = root / "B" / "C"
+    target = root / "C"
+    quarantine = root / ".nas-file-center-trash"
+    source.mkdir(parents=True)
+    (source / "payload.txt").write_text("payload", encoding="utf-8")
+
+    st = os.lstat(source)
+    move_directory_tree_noreplace(
+        source,
+        target,
+        quarantine_root=quarantine,
+        plan_id="plan-5",
+        sequence=7,
+        expected_device=st.st_dev,
+        expected_inode=st.st_ino,
+    )
+
+    state_file = quarantine / ".utility-move-tx" / "plan-5" / "item-7" / "state.json"
+    assert state_file.is_file()
+    assert not any(path.name.startswith(".nfc") for path in target.rglob("*"))
+    assert not any(path.name == "state.json" for path in target.rglob("*"))
