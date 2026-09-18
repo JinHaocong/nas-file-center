@@ -216,7 +216,7 @@ export const WorkflowListPage: React.FC = () => {
   return (
     <div className="nfc-operations-page">
       <PageHeader
-        eyebrow="AUTOMATION"
+        eyebrow="Automation workflows"
         title="工作流编排中心"
         description="以版本化定义编排 NAS 文件规则、目录整理、高级去重和目录工具；Preview 与 Draft 都不会直接执行文件操作。"
         actions={
