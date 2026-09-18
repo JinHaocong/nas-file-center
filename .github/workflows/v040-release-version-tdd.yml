@@ -1,0 +1,29 @@
+name: v0.4.0 Release Version TDD
+
+on:
+  push:
+    branches:
+      - v0.4.0-release-closure
+
+permissions:
+  contents: read
+
+jobs:
+  version-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CONFIG_DIR: /tmp/nfc-config
+      DATA_MOUNT: /tmp/nfc-data
+      ALLOWED_ROOTS: /tmp/nfc-data
+      QUARANTINE_ROOT: /tmp/nfc-data/.nas-file-center-trash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install backend test dependencies
+        run: python -m pip install -e '.[test]'
+      - name: Release version consistency
+        run: pytest tests/test_release_version_consistency.py -q

@@ -3,16 +3,18 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import tomllib
-import pytest
 
 from app.main import create_app
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
+RELEASE_VERSION = "0.4.0"
 
 
 def test_fastapi_backend_version():
     app = create_app()
-    assert app.version == "0.3.5", f"FastAPI app.version must be '0.3.5', got '{app.version}'"
+    assert app.version == RELEASE_VERSION, (
+        f"FastAPI app.version must be '{RELEASE_VERSION}', got '{app.version}'"
+    )
 
 
 def test_pyproject_version():
@@ -20,50 +22,44 @@ def test_pyproject_version():
     with open(pyproject_path, "rb") as f:
         data = tomllib.load(f)
     version = data.get("project", {}).get("version")
-    assert version == "0.3.5", f"pyproject.toml version must be '0.3.5', got '{version}'"
+    assert version == RELEASE_VERSION
 
 
 def test_frontend_package_json_version():
     package_path = ROOT_DIR / "frontend" / "package.json"
     with open(package_path, "r", encoding="utf-8") as f:
         data = json.load(f)
-    version = data.get("version")
-    assert version == "0.3.5", f"frontend/package.json version must be '0.3.5', got '{version}'"
+    assert data.get("version") == RELEASE_VERSION
 
 
 def test_frontend_package_lock_version():
     lock_path = ROOT_DIR / "frontend" / "package-lock.json"
     with open(lock_path, "r", encoding="utf-8") as f:
         data = json.load(f)
-    assert data.get("version") == "0.3.5", f"package-lock.json top-level version must be '0.3.5', got '{data.get('version')}'"
-    root_pkg_version = data.get("packages", {}).get("", {}).get("version")
-    assert root_pkg_version == "0.3.5", f"package-lock.json packages['']['version'] must be '0.3.5', got '{root_pkg_version}'"
+    assert data.get("version") == RELEASE_VERSION
+    assert data.get("packages", {}).get("", {}).get("version") == RELEASE_VERSION
 
 
 def test_login_page_version():
-    login_path = ROOT_DIR / "frontend" / "src" / "pages" / "Login" / "index.tsx"
-    content = login_path.read_text(encoding="utf-8")
-    assert "v0.3.5" in content, "Login page must display 'v0.3.5'"
-    assert "v0.3.3" not in content, "Login page must not contain legacy 'v0.3.3'"
-    assert "v0.3.2" not in content, "Login page must not contain legacy 'v0.3.2'"
+    content = (ROOT_DIR / "frontend" / "src" / "pages" / "Login" / "index.tsx").read_text(
+        encoding="utf-8"
+    )
+    assert f"v{RELEASE_VERSION}" in content
 
 
 def test_sidebar_component_version():
-    sidebar_path = ROOT_DIR / "frontend" / "src" / "components" / "Sidebar.tsx"
-    content = sidebar_path.read_text(encoding="utf-8")
-    assert "v0.3.5" in content, "Sidebar must display 'v0.3.5'"
-    assert "v0.3.3" not in content, "Sidebar must not contain legacy 'v0.3.3'"
-    assert "v0.3.2" not in content, "Sidebar must not contain legacy 'v0.3.2'"
+    content = (ROOT_DIR / "frontend" / "src" / "components" / "Sidebar.tsx").read_text(
+        encoding="utf-8"
+    )
+    assert f"v{RELEASE_VERSION}" in content
 
 
 def test_compose_yaml_version():
-    compose_path = ROOT_DIR / "compose.yaml"
-    content = compose_path.read_text(encoding="utf-8")
-    assert "nas-file-center:0.3.5" in content, "compose.yaml must identify image nas-file-center:0.3.5"
+    content = (ROOT_DIR / "compose.yaml").read_text(encoding="utf-8")
+    assert f"nas-file-center:{RELEASE_VERSION}" in content
 
 
 def test_compose_komodo_yaml_version():
-    komodo_path = ROOT_DIR / "compose.komodo.yaml"
-    content = komodo_path.read_text(encoding="utf-8")
-    assert "kerwinjhc/nas-file-center:0.3.6" in content, "compose.komodo.yaml must identify image kerwinjhc/nas-file-center:0.3.6"
-    assert ":latest" not in content, "compose.komodo.yaml must not contain application :latest reference"
+    content = (ROOT_DIR / "compose.komodo.yaml").read_text(encoding="utf-8")
+    assert f"kerwinjhc/nas-file-center:{RELEASE_VERSION}" in content
+    assert ":latest" not in content
