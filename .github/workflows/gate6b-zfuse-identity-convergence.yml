@@ -32,6 +32,7 @@ jobs:
       - name: Focused Gate6-B identity convergence
         run: >
           pytest
+          tests/test_gate6b_zfuse_identity_convergence.py
           tests/test_gate6b_utility_generate.py
           tests/test_gate6b_utility_execution_safety.py
           tests/test_gate6b_utility_structural_cleanup_recovery.py
