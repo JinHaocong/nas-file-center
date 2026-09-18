@@ -130,7 +130,7 @@ export const BulkRestoreModal: React.FC<Props> = ({
 
   return (
     <Modal
-      className="nfc-overlay-modal"
+      className="nfc-overlay-modal nfc-quarantine-bulk-restore-modal"
       title={
         <Space>
           <UndoOutlined style={{ color: '#1677ff' }} />

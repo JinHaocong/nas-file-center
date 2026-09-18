@@ -31,7 +31,7 @@ export const ScanStepEditor: React.FC<ScanStepEditorProps> = ({
 
   return (
     <div>
-      <Form layout="vertical" disabled={readOnly}>
+      <Form className="nfc-workflow-step-form" layout="vertical" disabled={readOnly}>
         <Form.Item
           label="扫描索引根目录 (root_ids)"
           required

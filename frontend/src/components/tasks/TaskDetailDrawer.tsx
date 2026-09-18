@@ -1,14 +1,13 @@
 import React from 'react';
 import {
-  Drawer,
+  Alert,
+  Collapse,
   Descriptions,
+  Drawer,
+  Space,
+  Spin,
   Tag,
   Typography,
-  Alert,
-  Divider,
-  Collapse,
-  Spin,
-  Space,
 } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import { tasksApi } from '../../api/tasks';
@@ -43,73 +42,58 @@ export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose, onVie
   });
 
   const renderCapabilities = () => {
-    if (!task) return '-';
+    if (!task) return '—';
     const caps = task.capabilities || {
       supports_pause: false,
       supports_resume: false,
       supports_cancel: false,
       supports_retry: false,
     };
-
     return (
       <Space wrap size={[6, 6]}>
-        <Tag color={caps.supports_pause ? 'green' : 'default'}>
-          暂停: {caps.supports_pause ? '支持' : '不支持'}
-        </Tag>
-        <Tag color={caps.supports_resume ? 'green' : 'default'}>
-          恢复: {caps.supports_resume ? '支持' : '不支持'}
-        </Tag>
-        <Tag color={caps.supports_cancel ? 'green' : 'default'}>
-          取消: {caps.supports_cancel ? '支持' : '不支持'}
-        </Tag>
-        <Tag color={caps.supports_retry ? 'green' : 'default'}>
-          重试: {caps.supports_retry ? '支持' : '不支持'}
-        </Tag>
+        <Tag color={caps.supports_pause ? 'green' : 'default'}>暂停 {caps.supports_pause ? '支持' : '不支持'}</Tag>
+        <Tag color={caps.supports_resume ? 'green' : 'default'}>恢复 {caps.supports_resume ? '支持' : '不支持'}</Tag>
+        <Tag color={caps.supports_cancel ? 'green' : 'default'}>取消 {caps.supports_cancel ? '支持' : '不支持'}</Tag>
+        <Tag color={caps.supports_retry ? 'green' : 'default'}>重试 {caps.supports_retry ? '支持' : '不支持'}</Tag>
       </Space>
     );
   };
 
-  const renderJsonBlock = (data: Record<string, unknown> | null | undefined, emptyLabel: string) => {
+  const renderJsonBlock = (
+    data: Record<string, unknown> | null | undefined,
+    emptyLabel: string,
+  ) => {
     if (!data || Object.keys(data).length === 0) {
       return <Text type="secondary">{emptyLabel}</Text>;
     }
-    const sanitized = sanitizeContext(data);
     return (
-      <pre
-        style={{
-          margin: 0,
-          padding: '8px 12px',
-          background: '#f8fafc',
-          border: '1px solid #e2e8f0',
-          borderRadius: 6,
-          fontSize: 12,
-          maxHeight: 220,
-          overflow: 'auto',
-        }}
-      >
-        {JSON.stringify(sanitized, null, 2)}
+      <pre className="nfc-code-block">
+        {JSON.stringify(sanitizeContext(data), null, 2)}
       </pre>
     );
   };
 
   return (
     <Drawer
-        rootClassName="nfc-overlay-drawer"
+      rootClassName="nfc-overlay-drawer nfc-task-detail-drawer"
       title={
-        <Space>
-          <span>任务详情</span>
-          {task && <Text code>#{task.id}</Text>}
-          {task && <TaskStatusTag status={task.status} />}
-        </Space>
+        <div className="nfc-drawer-title">
+          <span className="nfc-drawer-title-kicker">Task inspector</span>
+          <div className="nfc-drawer-title-row">
+            <span>任务详情</span>
+            {task && <Text code>#{task.id}</Text>}
+            {task && <TaskStatusTag status={task.status} />}
+          </div>
+        </div>
       }
       placement="right"
-      width={720}
+      width={760}
       onClose={onClose}
       open={open}
       destroyOnClose
     >
       {isLoading && (
-        <div style={{ textAlign: 'center', padding: '40px 0' }}>
+        <div className="nfc-overlay-loading">
           <Spin tip="正在加载任务详情..." />
         </div>
       )}
@@ -124,98 +108,98 @@ export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose, onVie
       )}
 
       {task && (
-        <div>
+        <div className="nfc-overlay-stack">
           {task.error && (
             <Alert
+              className="nfc-overlay-alert"
               type="error"
               showIcon
-              style={{ marginBottom: 16 }}
-              message={
-                task.error_code ? `错误 [${task.error_code}]` : '任务执行失败 / 异常'
-              }
+              message={task.error_code ? `错误 [${task.error_code}]` : '任务执行失败 / 异常'}
               description={
-                <div style={{ wordBreak: 'break-word', whiteSpace: 'pre-wrap', marginTop: 4 }}>
+                <div className="nfc-prewrap-error">
                   {task.error}
                 </div>
               }
             />
           )}
 
-          <Descriptions
-            bordered
-            size="small"
-            column={{ xxl: 2, xl: 2, lg: 2, md: 1, sm: 1, xs: 1 }}
-          >
-            <Descriptions.Item label="任务 ID">
-              <Text strong>#{task.id}</Text>
-            </Descriptions.Item>
-            <Descriptions.Item label="任务类型">
-              <Tag color="blue">{task.job_type}</Tag>
-            </Descriptions.Item>
-            <Descriptions.Item label="当前状态">
-              <TaskStatusTag status={task.status} />
-            </Descriptions.Item>
-            <Descriptions.Item label="原始任务 (Retry Of)">
-              {task.retry_of ? <Text strong>#{task.retry_of}</Text> : '-'}
-            </Descriptions.Item>
+          <section className="nfc-overlay-section">
+            <header className="nfc-overlay-section-header">
+              <div>
+                <span>Execution</span>
+                <h3>执行状态</h3>
+              </div>
+            </header>
+            <Descriptions
+              className="nfc-detail-descriptions"
+              size="small"
+              column={{ xxl: 2, xl: 2, lg: 2, md: 1, sm: 1, xs: 1 }}
+            >
+              <Descriptions.Item label="任务 ID">
+                <Text strong>#{task.id}</Text>
+              </Descriptions.Item>
+              <Descriptions.Item label="任务类型">
+                <Tag>{task.job_type}</Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="当前状态">
+                <TaskStatusTag status={task.status} />
+              </Descriptions.Item>
+              <Descriptions.Item label="原始任务">
+                {task.retry_of ? <Text strong>#{task.retry_of}</Text> : '—'}
+              </Descriptions.Item>
+              <Descriptions.Item label="任务能力" span={2}>
+                {renderCapabilities()}
+              </Descriptions.Item>
+              <Descriptions.Item label="执行进度" span={2}>
+                <TaskProgress
+                  progress={task.progress}
+                  status={task.status}
+                  startedAt={task.started_at}
+                  showDetails
+                />
+              </Descriptions.Item>
+            </Descriptions>
+          </section>
 
-            <Descriptions.Item label="任务能力 (Capabilities)" span={2}>
-              {renderCapabilities()}
-            </Descriptions.Item>
-
-            <Descriptions.Item label="执行进度" span={2}>
-              <TaskProgress
-                progress={task.progress}
-                status={task.status}
-                startedAt={task.started_at}
-                showDetails
-              />
-            </Descriptions.Item>
-
-            <Descriptions.Item label="创建时间">
-              {formatDateTime(task.created_at)}
-            </Descriptions.Item>
-            <Descriptions.Item label="开始执行时间">
-              {formatDateTime(task.started_at)}
-            </Descriptions.Item>
-            <Descriptions.Item label="结束完成时间">
-              {formatDateTime(task.finished_at)}
-            </Descriptions.Item>
-            <Descriptions.Item label="最近心跳时间">
-              {formatDateTime(task.heartbeat_at)}
-            </Descriptions.Item>
-            <Descriptions.Item label="总执行耗时">
-              <Text strong>{formatElapsed(task.started_at, task.finished_at)}</Text>
-            </Descriptions.Item>
-            <Descriptions.Item label="预计剩余 (ETA)">
-              <Text strong>
-                {
-                  calculateTaskEta(
+          <section className="nfc-overlay-section">
+            <header className="nfc-overlay-section-header">
+              <div>
+                <span>Timeline</span>
+                <h3>运行时间</h3>
+              </div>
+            </header>
+            <Descriptions
+              className="nfc-detail-descriptions"
+              size="small"
+              column={{ xxl: 2, xl: 2, lg: 2, md: 1, sm: 1, xs: 1 }}
+            >
+              <Descriptions.Item label="创建">{formatDateTime(task.created_at)}</Descriptions.Item>
+              <Descriptions.Item label="开始">{formatDateTime(task.started_at)}</Descriptions.Item>
+              <Descriptions.Item label="结束">{formatDateTime(task.finished_at)}</Descriptions.Item>
+              <Descriptions.Item label="最近心跳">{formatDateTime(task.heartbeat_at)}</Descriptions.Item>
+              <Descriptions.Item label="总耗时">
+                <Text strong>{formatElapsed(task.started_at, task.finished_at)}</Text>
+              </Descriptions.Item>
+              <Descriptions.Item label="预计剩余">
+                <Text strong>
+                  {calculateTaskEta(
                     task.status,
                     task.progress?.current,
                     task.progress?.total,
                     task.started_at,
-                    task.progress?.percent
-                  ).text
-                }
-              </Text>
-            </Descriptions.Item>
-          </Descriptions>
+                    task.progress?.percent,
+                  ).text}
+                </Text>
+              </Descriptions.Item>
+            </Descriptions>
+          </section>
 
-          <Divider style={{ margin: '16px 0' }} />
-
-          <div style={{ marginBottom: 16 }}>
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                marginBottom: 8,
-              }}
-            >
-              <Text strong style={{ fontSize: 13, color: '#475569' }}>
-                任务操作 (Task Actions)
-              </Text>
+          <section className="nfc-overlay-section">
+            <header className="nfc-overlay-section-header nfc-overlay-section-header-actions">
+              <div>
+                <span>Controls</span>
+                <h3>任务操作</h3>
+              </div>
               <TaskDeleteButton
                 task={task}
                 size="small"
@@ -223,33 +207,38 @@ export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose, onVie
                 danger
                 onSuccess={onClose}
               />
-            </div>
+            </header>
             <TaskActionBar task={task} onViewTask={onViewTask} />
-          </div>
+          </section>
 
-          <Divider style={{ margin: '16px 0' }} />
+          <section className="nfc-overlay-section">
+            <header className="nfc-overlay-section-header">
+              <div>
+                <span>Recovery</span>
+                <h3>执行上下文</h3>
+              </div>
+            </header>
+            <Collapse
+              className="nfc-detail-collapse"
+              size="small"
+              items={[
+                {
+                  key: 'checkpoint',
+                  label: '断点恢复快照',
+                  children: renderJsonBlock(task.checkpoint, '无断点数据'),
+                },
+                {
+                  key: 'payload',
+                  label: '任务参数状态',
+                  children: renderJsonBlock(task.payload, '无参数状态数据'),
+                },
+              ]}
+            />
+          </section>
 
-          <Collapse
-            size="small"
-            items={[
-              {
-                key: 'checkpoint',
-                label: '断点恢复快照 (Checkpoint Data)',
-                children: renderJsonBlock(task.checkpoint, '无断点数据'),
-              },
-              {
-                key: 'payload',
-                label: '任务参数状态 (Payload / State Data)',
-                children: renderJsonBlock(task.payload, '无参数状态数据'),
-              },
-            ]}
-            style={{ marginBottom: 16 }}
-          />
-
-          <Divider style={{ margin: '16px 0' }} />
-
-          {/* Embedded Task Logs */}
-          <TaskLogTable taskId={task.id} />
+          <section className="nfc-overlay-section nfc-overlay-section-flush">
+            <TaskLogTable taskId={task.id} />
+          </section>
         </div>
       )}
     </Drawer>

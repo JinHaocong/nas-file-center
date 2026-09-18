@@ -10,7 +10,7 @@ interface RenameStepEditorProps {
 
 export const RenameStepEditor: React.FC<RenameStepEditorProps> = ({ step, onChange, readOnly = false }) => {
   return (
-    <Form layout="vertical" disabled={readOnly}>
+    <Form className="nfc-workflow-step-form" layout="vertical" disabled={readOnly}>
       <Form.Item
         label="字面量匹配文本 (pattern)"
         required

@@ -157,7 +157,7 @@ export const DashboardPage: React.FC = () => {
   const taskItems = tasksData?.items || [];
 
   return (
-    <div className="nfc-dashboard">
+    <div className="nfc-dashboard nfc-dashboard-page nfc-operations-page">
       <PageHeader
         eyebrow="Operations overview"
         title="系统概览"

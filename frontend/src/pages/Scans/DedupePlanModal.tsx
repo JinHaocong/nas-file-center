@@ -57,7 +57,7 @@ export const DedupePlanModal: React.FC<Props> = ({ scanId, open, onClose }) => {
 
   return (
     <Modal
-      className="nfc-overlay-modal"
+      className="nfc-overlay-modal nfc-dedupe-plan-modal"
       title="生成经典去重计划 (Classic Dedupe Plan)"
       open={open}
       onOk={handleCreate}
@@ -75,13 +75,13 @@ export const DedupePlanModal: React.FC<Props> = ({ scanId, open, onClose }) => {
         showIcon
         message="经典去重策略"
         description="此模态框使用经典单一策略。如需多因子加权评分、路径优先级、实时预览与解释分析，推荐使用『高级精确去重』页面。"
-        style={{ marginTop: 8, marginBottom: 12 }}
+        className="nfc-overlay-alert"
       />
       <Form
         form={form}
         layout="vertical"
         initialValues={{ policy: 'balanced-roots' }}
-        style={{ marginTop: 16 }}
+        className="nfc-dedupe-plan-form"
       >
         <Form.Item
           name="policy"
@@ -111,7 +111,7 @@ export const DedupePlanModal: React.FC<Props> = ({ scanId, open, onClose }) => {
           </Form.Item>
         )}
 
-        <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
+        <Text type="secondary" className="nfc-form-safety-note">
           安全保障：生成计划不会直接删除文件，系统将生成一份不可篡改的草稿计划供您审阅并执行 SHA256 校验。
         </Text>
       </Form>

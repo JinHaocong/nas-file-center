@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { Table, Tag, Typography, Select, Space, Empty, Spin } from 'antd';
+import { Empty, Pagination, Select, Spin, Table, Tag, Typography } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import { tasksApi } from '../../api/tasks';
 import { TaskEvent, TaskLogLevel } from '../../types/task';
 import { formatDateTime } from '../../utils/format';
 import { sanitizeContext } from '../../utils/sanitize';
+import { useResponsive } from '../../hooks/useResponsive';
 import { TASK_LOG_LEVEL_MAP } from './task_utils';
 
 const { Text } = Typography;
@@ -14,6 +15,7 @@ interface Props {
 }
 
 export const TaskLogTable: React.FC<Props> = ({ taskId }) => {
+  const { isMobile } = useResponsive();
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [level, setLevel] = useState<string>('all');
@@ -35,7 +37,7 @@ export const TaskLogTable: React.FC<Props> = ({ taskId }) => {
       dataIndex: 'timestamp',
       key: 'timestamp',
       width: 170,
-      render: (val: string) => <Text style={{ fontSize: 12 }}>{formatDateTime(val)}</Text>,
+      render: (val: string) => <Text className="nfc-table-secondary">{formatDateTime(val)}</Text>,
     },
     {
       title: '级别',
@@ -52,13 +54,13 @@ export const TaskLogTable: React.FC<Props> = ({ taskId }) => {
       dataIndex: 'event_type',
       key: 'event_type',
       width: 140,
-      render: (type: string) => <Text code style={{ fontSize: 12 }}>{type}</Text>,
+      render: (type: string) => <Text code>{type}</Text>,
     },
     {
       title: '消息内容',
       dataIndex: 'message',
       key: 'message',
-      render: (msg: string) => <Text style={{ fontSize: 12 }}>{msg || '-'}</Text>,
+      render: (msg: string) => <Text>{msg || '-'}</Text>,
     },
   ];
 
@@ -67,28 +69,39 @@ export const TaskLogTable: React.FC<Props> = ({ taskId }) => {
     setPage(1);
   };
 
+  const items = data?.items || [];
+
+  const pagination = (
+    <Pagination
+      className="nfc-embedded-pagination"
+      current={page}
+      pageSize={pageSize}
+      total={data?.total || 0}
+      showSizeChanger={!isMobile}
+      pageSizeOptions={['20', '50', '100']}
+      showTotal={isMobile ? undefined : (total) => `共 ${total} 条日志`}
+      size="small"
+      simple={isMobile}
+      onChange={(p, ps) => {
+        setPage(p);
+        setPageSize(ps);
+      }}
+    />
+  );
+
   return (
-    <div style={{ marginTop: 12 }}>
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: 12,
-        }}
-      >
-        <Text strong style={{ fontSize: 14 }}>
-          事件日志
-        </Text>
-        <Space>
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            日志级别:
-          </Text>
+    <section className="nfc-task-log-panel">
+      <header className="nfc-embedded-section-header">
+        <div>
+          <div className="nfc-embedded-section-kicker">Event stream</div>
+          <h3>事件日志</h3>
+        </div>
+        <label className="nfc-inline-filter">
+          <span>级别</span>
           <Select
             size="small"
             value={level}
             onChange={handleLevelChange}
-            style={{ width: 110 }}
             options={[
               { label: '全部级别', value: 'all' },
               { label: 'INFO', value: 'info' },
@@ -97,72 +110,86 @@ export const TaskLogTable: React.FC<Props> = ({ taskId }) => {
               { label: 'DEBUG', value: 'debug' },
             ]}
           />
-        </Space>
-      </div>
+        </label>
+      </header>
 
       {isError && (
-        <div style={{ padding: '16px 0', textAlign: 'center' }}>
-          <Text type="danger" style={{ fontSize: 12 }}>
-            加载日志失败: {error instanceof Error ? error.message : '网络异常'}
-          </Text>
+        <div className="nfc-inline-error">
+          加载日志失败: {error instanceof Error ? error.message : '网络异常'}
         </div>
       )}
 
-      <Table
-        dataSource={data?.items || []}
-        columns={columns}
-        rowKey="id"
-        size="small"
-        loading={isLoading}
-        expandable={{
-          expandedRowKeys,
-          onExpandedRowsChange: (keys) => setExpandedRowKeys(keys),
-          rowExpandable: (record: TaskEvent) =>
-            Boolean(record.context && Object.keys(record.context).length > 0),
-          expandedRowRender: (record: TaskEvent) => {
-            const sanitized = sanitizeContext(record.context);
-            return (
-              <pre
-                style={{
-                  margin: 0,
-                  padding: '8px 12px',
-                  background: '#f8fafc',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: 6,
-                  fontSize: 11,
-                  maxHeight: 180,
-                  overflow: 'auto',
-                }}
-              >
-                {JSON.stringify(sanitized, null, 2)}
-              </pre>
-            );
-          },
-        }}
-        locale={{
-          emptyText: isLoading ? (
-            <Spin size="small" />
-          ) : (
+      {isMobile ? (
+        <div className="nfc-task-log-mobile-list">
+          {isLoading ? (
+            <div className="nfc-overlay-loading"><Spin size="small" /></div>
+          ) : items.length === 0 ? (
             <Empty
               image={Empty.PRESENTED_IMAGE_SIMPLE}
               description={level === 'all' ? '暂无事件日志' : '当前级别无匹配日志'}
             />
-          ),
-        }}
-        pagination={{
-          current: page,
-          pageSize,
-          total: data?.total || 0,
-          showSizeChanger: true,
-          pageSizeOptions: ['20', '50', '100'],
-          showTotal: (total) => `共 ${total} 条日志`,
-          size: 'small',
-          onChange: (p, ps) => {
-            setPage(p);
-            setPageSize(ps);
-          },
-        }}
-      />
-    </div>
+          ) : (
+            items.map((record: TaskEvent) => {
+              const config = TASK_LOG_LEVEL_MAP[record.level] || { color: 'default', label: record.level };
+              const context = sanitizeContext(record.context);
+              const hasContext = Boolean(context && Object.keys(context).length > 0);
+              return (
+                <article className="nfc-task-log-mobile-card" key={record.id}>
+                  <div className="nfc-task-log-mobile-topline">
+                    <Tag color={config.color}>{config.label}</Tag>
+                    <time>{formatDateTime(record.timestamp)}</time>
+                  </div>
+                  <div className="nfc-task-log-mobile-event">{record.event_type}</div>
+                  <p>{record.message || '—'}</p>
+                  {hasContext && (
+                    <details className="nfc-log-context">
+                      <summary>查看上下文</summary>
+                      <pre className="nfc-code-block">
+                        {JSON.stringify(context, null, 2)}
+                      </pre>
+                    </details>
+                  )}
+                </article>
+              );
+            })
+          )}
+          {items.length > 0 && pagination}
+        </div>
+      ) : (
+        <>
+          <Table
+            className="nfc-embedded-table"
+            dataSource={items}
+            columns={columns}
+            rowKey="id"
+            size="small"
+            loading={isLoading}
+            expandable={{
+              expandedRowKeys,
+              onExpandedRowsChange: (keys) => setExpandedRowKeys(keys),
+              rowExpandable: (record: TaskEvent) =>
+                Boolean(record.context && Object.keys(record.context).length > 0),
+              expandedRowRender: (record: TaskEvent) => (
+                <pre className="nfc-code-block">
+                  {JSON.stringify(sanitizeContext(record.context), null, 2)}
+                </pre>
+              ),
+            }}
+            locale={{
+              emptyText: isLoading ? (
+                <Spin size="small" />
+              ) : (
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description={level === 'all' ? '暂无事件日志' : '当前级别无匹配日志'}
+                />
+              ),
+            }}
+            pagination={false}
+          />
+          {items.length > 0 && pagination}
+        </>
+      )}
+    </section>
   );
 };

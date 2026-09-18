@@ -76,7 +76,7 @@ export const StepList: React.FC<StepListProps> = ({ steps, mode, readOnly = fals
   return (
     <div>
       {steps.length === 0 ? (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无工作流步骤，请点击下方按钮添加步骤" style={{ padding: '24px 0' }} />
+        <div className="nfc-step-empty"><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无工作流步骤，请从下方添加执行步骤" /></div>
       ) : steps.map((step, idx) => (
         <StepCard key={step.id || idx} step={step} index={idx} totalSteps={steps.length} mode={mode} readOnly={readOnly}
           canMoveUp={canMoveStep(steps, idx, 'up', mode)} canMoveDown={canMoveStep(steps, idx, 'down', mode)} canDelete={canDeleteStep(steps, idx, mode)}

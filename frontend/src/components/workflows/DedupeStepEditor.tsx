@@ -26,7 +26,7 @@ export const DedupeStepEditor: React.FC<DedupeStepEditorProps> = ({
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <div className="nfc-workflow-step-editor-stack">
       <Alert
         type="info"
         showIcon

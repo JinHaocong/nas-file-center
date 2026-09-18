@@ -10,7 +10,7 @@ interface QuarantineStepEditorProps {
 
 export const QuarantineStepEditor: React.FC<QuarantineStepEditorProps> = ({ step, onChange, readOnly = false }) => {
   return (
-    <Form layout="vertical" disabled={readOnly}>
+    <Form className="nfc-workflow-step-form" layout="vertical" disabled={readOnly}>
       <Form.Item
         label="隔离归档原因 (reason)"
         required

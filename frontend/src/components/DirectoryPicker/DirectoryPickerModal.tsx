@@ -16,7 +16,6 @@ import {
   message,
   Popconfirm,
   Pagination,
-  theme,
 } from 'antd';
 import {
   FolderOutlined,
@@ -48,7 +47,6 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
   initialPath,
   selectedValues,
 }) => {
-  const { token } = theme.useToken();
   const queryClient = useQueryClient();
   const { isMobile } = useResponsive();
 
@@ -237,8 +235,8 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
   return (
     <Modal
       title={
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <FolderOpenOutlined style={{ color: token.colorPrimary, fontSize: 20 }} />
+        <div className="nfc-directory-picker-title">
+          <FolderOpenOutlined className="nfc-directory-picker-title-icon" />
           <span>选择目录 ({multiple ? '多选' : '单选'})</span>
         </div>
       }
@@ -248,28 +246,21 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
       width={isMobile ? 'calc(100vw - 16px)' : 760}
       destroyOnClose
       footer={
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            width: '100%',
-          }}
-        >
-          <div style={{ textAlign: 'left', flex: 1, marginRight: 16 }}>
+        <div className="nfc-directory-picker-footer">
+          <div className="nfc-directory-picker-selection">
             {multiple ? (
               <div>
-                <Text type="secondary" style={{ fontSize: 13 }}>
+                <Text type="secondary" className="nfc-directory-picker-selection-count">
                   已选 <Text strong>{selectedPaths.length}</Text> 个目录
                 </Text>
                 {selectedPaths.length > 0 && (
-                  <div style={{ marginTop: 4, maxHeight: 60, overflowY: 'auto' }}>
+                  <div className="nfc-directory-picker-selected-tags">
                     {selectedPaths.map((p) => (
                       <Tag
                         key={p}
                         closable
                         onClose={() => setSelectedPaths(selectedPaths.filter((item) => item !== p))}
-                        style={{ marginBottom: 4 }}
+                        className="nfc-directory-picker-selected-tag"
                       >
                         {p}
                       </Tag>
@@ -278,7 +269,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
                 )}
               </div>
             ) : (
-              <Text ellipsis style={{ maxWidth: 400, display: 'inline-block' }}>
+              <Text ellipsis className="nfc-directory-picker-current-selection">
                 当前选择：
                 <Text strong code>
                   {selectedPaths.length > 0 ? selectedPaths[0] : effectiveCurrentPath}
@@ -286,7 +277,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
               </Text>
             )}
           </div>
-          <Space>
+          <Space className="nfc-directory-picker-footer-actions">
             <Button onClick={onCancel}>取消</Button>
             <Button
               type="primary"
@@ -300,18 +291,10 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
         </div>
       }
     >
-      <div style={{ marginBottom: 12 }}>
+      <div className="nfc-directory-picker-body">
         {/* Navigation Bar */}
         <div className="nfc-directory-browser-toolbar">
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              flexWrap: 'wrap',
-              gap: 8,
-            }}
-          >
+          <div className="nfc-directory-browser-row">
             <PathBreadcrumb
               currentPath={effectiveCurrentPath}
               allowedRoots={dirData?.allowed_roots || []}
@@ -337,7 +320,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
               <Tooltip title={isCurrentFavorite ? '已收藏' : '收藏当前目录'}>
                 <Button
                   size="small"
-                  icon={isCurrentFavorite ? <StarFilled style={{ color: '#faad14' }} /> : <StarOutlined />}
+                  icon={isCurrentFavorite ? <StarFilled className="nfc-favorite-active-icon" /> : <StarOutlined />}
                   disabled={!effectiveCurrentPath}
                   onClick={() => setIsAddingFavorite(!isAddingFavorite)}
                 />
@@ -355,13 +338,13 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
           </div>
 
           {isAddingFavorite && effectiveCurrentPath && (
-            <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div className="nfc-directory-favorite-editor">
               <Input
                 size="small"
                 placeholder="收藏别名 (可选，如：影视库)"
                 value={favoriteLabel}
                 onChange={(e) => setFavoriteLabel(e.target.value)}
-                style={{ width: 220 }}
+                className="nfc-directory-favorite-input"
               />
               <Button
                 size="small"
@@ -395,11 +378,11 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
               ),
               children: (
                 <div>
-                  <div style={{ marginBottom: 8 }}>
+                  <div className="nfc-directory-search-row">
                     <Input
                       size="small"
                       placeholder="搜索子目录 (如: Download, Photos)..."
-                      prefix={<SearchOutlined style={{ color: token.colorTextTertiary }} />}
+                      prefix={<SearchOutlined className="nfc-directory-search-icon" />}
                       value={searchQuery}
                       onChange={(e) => {
                         setSearchQuery(e.target.value);
@@ -420,10 +403,10 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
                           重试
                         </Button>
                       }
-                      style={{ marginTop: 12 }}
+                      className="nfc-directory-error"
                     />
                   ) : isDirLoading ? (
-                    <div style={{ textAlign: 'center', padding: '40px 0' }}>
+                    <div className="nfc-directory-loading">
                       <Spin tip="加载目录中..." />
                     </div>
                   ) : !dirData?.items || dirData.items.length === 0 ? (
@@ -437,14 +420,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
                     />
                   ) : (
                     <div>
-                      <div
-                        style={{
-                          maxHeight: 300,
-                          overflowY: 'auto',
-                          border: `1px solid ${token.colorBorderSecondary}`,
-                          borderRadius: token.borderRadiusSM,
-                        }}
-                      >
+                      <div className="nfc-directory-list-viewport">
                         <List
                           size="small"
                           dataSource={dirData.items}
@@ -452,20 +428,13 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
                             const isSelected = selectedPaths.includes(item.path);
                             return (
                               <List.Item
-                                style={{
-                                  cursor: 'pointer',
-                                  padding: '8px 12px',
-                                  background: isSelected
-                                    ? token.colorPrimaryBg
-                                    : undefined,
-                                  transition: 'background 0.2s',
-                                }}
+                                className={isSelected ? 'nfc-directory-item is-selected' : 'nfc-directory-item'}
                                 actions={[
                                   multiple ? (
                                     <div
                                       key="chk"
                                       onClick={(e) => e.stopPropagation()}
-                                      style={{ display: 'inline-flex', alignItems: 'center' }}
+                                      className="nfc-directory-item-checkbox"
                                     >
                                       <Checkbox
                                         checked={isSelected}
@@ -492,28 +461,16 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
                                 <List.Item.Meta
                                   avatar={
                                     <FolderOutlined
-                                      style={{
-                                        fontSize: 18,
-                                        color: isSelected
-                                          ? token.colorPrimary
-                                          : token.colorWarning,
-                                        marginTop: 2,
-                                      }}
+                                      className={isSelected ? 'nfc-directory-item-icon is-selected' : 'nfc-directory-item-icon'}
                                     />
                                   }
                                   title={
-                                    <Text
-                                      strong={isSelected}
-                                      style={{ color: 'inherit' }}
-                                    >
+                                    <Text strong={isSelected} className="nfc-directory-item-name">
                                       {item.name}
                                     </Text>
                                   }
                                   description={
-                                    <Text
-                                      type="secondary"
-                                      style={{ fontSize: 12 }}
-                                    >
+                                    <Text type="secondary" className="nfc-directory-item-path">
                                       {item.path}
                                     </Text>
                                   }
@@ -525,16 +482,8 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
                       </div>
 
                       {/* Pagination Bar */}
-                      <div
-                        style={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          marginTop: 8,
-                          padding: '0 4px',
-                        }}
-                      >
-                        <Text type="secondary" style={{ fontSize: 12 }}>
+                      <div className="nfc-directory-pagination-row">
+                        <Text type="secondary" className="nfc-directory-pagination-count">
                           共 {dirData.total} 个目录
                         </Text>
                         {dirData.total > pageSize && (
@@ -561,7 +510,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
                 </span>
               ),
               children: (
-                <div style={{ maxHeight: 350, overflowY: 'auto' }}>
+                <div className="nfc-directory-secondary-list">
                   {!favData?.items || favData.items.length === 0 ? (
                     <Empty
                       image={Empty.PRESENTED_IMAGE_SIMPLE}
@@ -573,11 +522,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
                       dataSource={favData.items}
                       renderItem={(fav) => (
                         <List.Item
-                          style={{
-                            cursor: fav.exists ? 'pointer' : 'not-allowed',
-                            padding: '8px 12px',
-                            opacity: fav.exists ? 1 : 0.6,
-                          }}
+                          className={fav.exists ? 'nfc-directory-secondary-item' : 'nfc-directory-secondary-item is-missing'}
                           actions={[
                             <Button
                               key="jump"
@@ -594,7 +539,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
                             <div
                               key="del"
                               onClick={(e) => e.stopPropagation()}
-                              style={{ display: 'inline-flex' }}
+                              className="nfc-directory-item-checkbox"
                             >
                               <Popconfirm
                                 title="确认删除该收藏？"
@@ -615,11 +560,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
                           <List.Item.Meta
                             avatar={
                               <StarFilled
-                                style={{
-                                  fontSize: 18,
-                                  color: fav.exists ? '#faad14' : token.colorTextDisabled,
-                                  marginTop: 2,
-                                }}
+                                className={fav.exists ? 'nfc-directory-favorite-icon' : 'nfc-directory-favorite-icon is-disabled'}
                               />
                             }
                             title={
@@ -629,7 +570,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
                               </Space>
                             }
                             description={
-                              <Text type="secondary" style={{ fontSize: 12 }}>
+                              <Text type="secondary" className="nfc-directory-item-path">
                                 {fav.path}
                               </Text>
                             }
@@ -649,7 +590,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
                 </span>
               ),
               children: (
-                <div style={{ maxHeight: 350, overflowY: 'auto' }}>
+                <div className="nfc-directory-secondary-list">
                   {!recentData?.items || recentData.items.length === 0 ? (
                     <Empty
                       image={Empty.PRESENTED_IMAGE_SIMPLE}
@@ -661,10 +602,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
                       dataSource={recentData.items}
                       renderItem={(rec) => (
                         <List.Item
-                          style={{
-                            cursor: 'pointer',
-                            padding: '8px 12px',
-                          }}
+                          className="nfc-directory-secondary-item"
                           actions={[
                             <Button
                               key="jump"
@@ -681,7 +619,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
                               <div
                                 key="chk"
                                 onClick={(e) => e.stopPropagation()}
-                                style={{ display: 'inline-flex', alignItems: 'center' }}
+                                className="nfc-directory-item-checkbox"
                               >
                                 <Checkbox
                                   checked={selectedPaths.includes(rec.path)}
@@ -707,17 +645,11 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
                         >
                           <List.Item.Meta
                             avatar={
-                              <HistoryOutlined
-                                style={{
-                                  fontSize: 18,
-                                  color: token.colorPrimary,
-                                  marginTop: 2,
-                                }}
-                              />
+                              <HistoryOutlined className="nfc-directory-recent-icon" />
                             }
                             title={<Text strong>{rec.path}</Text>}
                             description={
-                              <Text type="secondary" style={{ fontSize: 12 }}>
+                              <Text type="secondary" className="nfc-directory-item-path">
                                 最近使用时间：{formatDateTime(rec.last_used_at)}
                               </Text>
                             }

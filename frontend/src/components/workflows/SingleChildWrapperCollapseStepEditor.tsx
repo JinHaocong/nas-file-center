@@ -21,7 +21,7 @@ export const SingleChildWrapperCollapseStepEditor: React.FC<Props> = ({ step, on
   const invalidSubpath = subpath.startsWith('/') || subpath.startsWith('\\') || /(^|[\\/])\.\.([\\/]|$)/.test(subpath);
 
   return (
-    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+    <Space className="nfc-workflow-step-editor-stack" direction="vertical" size={12}>
       <Alert
         type="info"
         showIcon

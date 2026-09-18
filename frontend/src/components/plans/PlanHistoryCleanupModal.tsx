@@ -64,7 +64,7 @@ export const PlanHistoryCleanupModal: React.FC<Props> = ({ onCleaned }) => {
       </Button>
 
       <Modal
-      className="nfc-overlay-modal"
+      className="nfc-overlay-modal nfc-history-cleanup-modal nfc-plan-history-cleanup-modal"
         title="清理计划历史"
         open={open}
         onCancel={handleClose}
@@ -85,7 +85,7 @@ export const PlanHistoryCleanupModal: React.FC<Props> = ({ onCleaned }) => {
         ]}
         destroyOnClose
       >
-        <Space direction="vertical" size={16} style={{ width: '100%', marginTop: 8 }}>
+        <Space className="nfc-history-cleanup-stack" direction="vertical" size={16}>
           <Alert
             type="warning"
             showIcon
@@ -94,7 +94,7 @@ export const PlanHistoryCleanupModal: React.FC<Props> = ({ onCleaned }) => {
           />
 
           <div>
-            <Text strong style={{ display: 'block', marginBottom: 8 }}>
+            <Text strong className="nfc-history-cleanup-label">
               选择要清理的历史计划状态：
             </Text>
             <Checkbox.Group
@@ -104,26 +104,17 @@ export const PlanHistoryCleanupModal: React.FC<Props> = ({ onCleaned }) => {
             />
           </div>
 
-          <div
-            style={{
-              background: '#f8fafc',
-              padding: '12px 16px',
-              borderRadius: 8,
-              border: '1px solid #e2e8f0',
-              fontSize: 12,
-              color: '#64748b',
-            }}
-          >
-            <Text strong style={{ color: '#334155' }}>
+          <div className="nfc-history-cleanup-note">
+            <Text strong className="nfc-history-cleanup-note-title">
               影响与安全说明：
             </Text>
-            <ul style={{ margin: '6px 0 0 16px', padding: 0 }}>
+            <ul className="nfc-history-cleanup-list">
               <li>选中的终态计划元数据及操作条目将被永久删除。</li>
               <li>
-                <strong style={{ color: '#059669' }}>绝不会删除或修改</strong> NAS 存储上的任何文件。
+                <strong className="nfc-success-text">绝不会删除或修改</strong> NAS 存储上的任何文件。
               </li>
               <li>
-                <strong style={{ color: '#059669' }}>绝不会删除</strong> Audit 审计记录与关联的任务。
+                <strong className="nfc-success-text">绝不会删除</strong> Audit 审计记录与关联的任务。
               </li>
               <li>草稿 (draft)、已冻结 (frozen)、已就绪 (ready) 及运行中 (validating / executing) 的计划受系统保护，不受影响。</li>
             </ul>

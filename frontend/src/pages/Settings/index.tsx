@@ -284,6 +284,7 @@ export const SettingsPage: React.FC = () => {
     freshPreview: { delete_count: number; cutoff?: string | null }
   ) => {
     Modal.confirm({
+      className: 'nfc-settings-confirm-modal',
       title: '确认执行审计日志保留清理？',
       icon: <ExclamationCircleOutlined style={{ color: '#ff4d4f' }} />,
       content: (
@@ -292,15 +293,15 @@ export const SettingsPage: React.FC = () => {
             当前已保存策略：<strong>{formatAuditRetention(freshPolicy.audit_retention_days)}</strong>
           </p>
           <p>
-            当前最新预览：预计清理 <strong style={{ color: '#ff4d4f' }}>{freshPreview.delete_count}</strong> 条 Audit 历史记录。
+            当前最新预览：预计清理 <strong className="nfc-danger-text">{freshPreview.delete_count}</strong> 条 Audit 历史记录。
           </p>
-          <p style={{ color: '#d48806', fontSize: 13 }}>
+          <p className="nfc-warning-copy">
             提示：当前预览仅为预计结果。实际执行时将根据数据库中最新保存的保留策略以及执行时最新的审计数据重新计算，最终删除数量可能与当前预览不同。
           </p>
-          <p style={{ fontSize: 13, color: '#595959' }}>
+          <p className="nfc-muted-copy">
             安全边界：本操作仅清理符合保留期条件的 Audit 历史记录。不会删除 NAS 上的真实文件或目录，也不会删除 Task、Scan、Plan 或 Index 数据。
           </p>
-          <p style={{ color: '#ff4d4f', fontWeight: 500, fontSize: 13 }}>
+          <p className="nfc-danger-copy">
             审计历史清理不可撤销。
           </p>
         </div>
