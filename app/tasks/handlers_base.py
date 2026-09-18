@@ -2197,6 +2197,8 @@ class BatchPlanExecuteHandler(TaskHandler):
             restore_expected_size = None
             restore_expected_hash = None
             is_tx_restore = False
+            paired_cleanup_item_id: int | None = None
+            utility_cleanup_result = None
             try:
                 if src_p.exists():
                     st = src_p.stat(follow_symlinks=False)
@@ -2251,6 +2253,56 @@ class BatchPlanExecuteHandler(TaskHandler):
                         continue
                 else:
                     item_metadata = json.loads(row.metadata_json or "{}")
+
+                if (
+                    row.operation == "move"
+                    and isinstance(item_metadata, dict)
+                    and item_metadata.get("utility_action") == "single_child_wrapper_collapse"
+                ):
+                    cleanup_rows = list(
+                        session.scalars(
+                            select(BatchPlanItem).where(
+                                BatchPlanItem.plan_id == plan_id,
+                                BatchPlanItem.sequence == row.sequence + 1,
+                            )
+                        ).all()
+                    )
+                    if (
+                        len(cleanup_rows) != 1
+                        or not _utility_cleanup_pair_matches(row, cleanup_rows[0], item_metadata)
+                    ):
+                        row.state = "failed"
+                        row.reason = "Utility structural cleanup pair is missing or changed"
+                        session.add(AuditEvent(
+                            operation=row.operation,
+                            path=row.source_path,
+                            result="failed",
+                            details_json=json.dumps({
+                                "plan_id": plan_id,
+                                "item_id": row.id,
+                                "task_id": job.id,
+                                "reason": row.reason,
+                            }, ensure_ascii=False),
+                        ))
+                        session.commit()
+                        completed_or_skipped += 1
+                        continue
+
+                    cleanup_row = cleanup_rows[0]
+                    cleanup_meta = json.loads(cleanup_row.metadata_json or "{}")
+                    cleanup_meta["paired_move_intent"] = {
+                        "phase": "intent",
+                        "task_id": job.id,
+                        "move_item_id": row.id,
+                        "move_sequence": row.sequence,
+                        "candidate_id": item_metadata.get("candidate_id"),
+                        "wrapper_path": item_metadata.get("wrapper_path"),
+                        "child_path": item_metadata.get("child_path"),
+                        "target_path": item_metadata.get("target_path"),
+                    }
+                    cleanup_row.metadata_json = json.dumps(cleanup_meta, ensure_ascii=False)
+                    paired_cleanup_item_id = int(cleanup_row.id)
+
                 item_metadata["execution"] = {
                     "phase": "intent",
                     "task_id": job.id,
@@ -2766,18 +2818,51 @@ class BatchPlanExecuteHandler(TaskHandler):
                             session.commit()
                         break
 
-            result = execute_item(
-                item_op,
-                allowed_roots=settings.allowed_roots,
-                allow_mutation=settings.allow_mutation,
-                allow_delete=settings.allow_delete,
-                quarantine_root=settings.quarantine_root,
-                plan_id=str(plan_id),
-                session_factory=context.SessionLocal,
-                worker_id=context.worker_id,
-                quarantine_entry_id=q_purge_entry_id or q_entry_id or q_restore_entry_id,
-                purge_manifest=purge_manifest,
+            utility_pair_meta = (
+                _utility_single_child_meta(item_meta)
+                if paired_cleanup_item_id is not None and item_meta.operation == "move"
+                else None
             )
+            try:
+                if utility_pair_meta is not None:
+                    with open_utility_wrapper_live_guard(
+                        wrapper_path=utility_pair_meta["wrapper_path"],
+                        child_path=utility_pair_meta["child_path"],
+                        allowed_roots=settings.allowed_roots,
+                        quarantine_root=settings.quarantine_root,
+                    ) as wrapper_guard:
+                        result = execute_item(
+                            item_op,
+                            allowed_roots=settings.allowed_roots,
+                            allow_mutation=settings.allow_mutation,
+                            allow_delete=settings.allow_delete,
+                            quarantine_root=settings.quarantine_root,
+                            plan_id=str(plan_id),
+                            session_factory=context.SessionLocal,
+                            worker_id=context.worker_id,
+                            quarantine_entry_id=q_purge_entry_id or q_entry_id or q_restore_entry_id,
+                            purge_manifest=purge_manifest,
+                        )
+                        if result.state == "completed":
+                            utility_cleanup_result = wrapper_guard.remove_if_empty()
+                else:
+                    result = execute_item(
+                        item_op,
+                        allowed_roots=settings.allowed_roots,
+                        allow_mutation=settings.allow_mutation,
+                        allow_delete=settings.allow_delete,
+                        quarantine_root=settings.quarantine_root,
+                        plan_id=str(plan_id),
+                        session_factory=context.SessionLocal,
+                        worker_id=context.worker_id,
+                        quarantine_entry_id=q_purge_entry_id or q_entry_id or q_restore_entry_id,
+                        purge_manifest=purge_manifest,
+                    )
+            except Exception as exc:
+                result = ItemResult(
+                    "failed",
+                    f"Utility live wrapper binding failed: {exc}",
+                )
 
             after_size = None
             after_mtime_ns = None
