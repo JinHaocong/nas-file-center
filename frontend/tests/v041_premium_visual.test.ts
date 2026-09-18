@@ -77,6 +77,23 @@ describe('v0.4.1 premium visual pass contract', () => {
     }
   });
 
+  test('representative surfaces add stagger, section accents and refined interaction chrome', () => {
+    const css = read('src/index.css');
+    for (const selector of [
+      '.nfc-data-panel-title::before',
+      '.nfc-metric-grid .nfc-metric-card:nth-child(2)',
+      '.nfc-dashboard-layout > :nth-child(2)',
+      '.nfc-mobile-record-list > *',
+      '.nfc-header-actions .ant-btn',
+      '.ant-switch',
+      '.ant-checkbox-wrapper',
+      '.ant-tabs-tab',
+      '::-webkit-scrollbar',
+    ]) {
+      assert.ok(css.includes(selector), selector);
+    }
+  });
+
   test('frozen design contract has a v0.4.1 premium visual amendment', () => {
     const source = read('../DESIGN.md');
     assert.ok(source.includes('v0.4.1 Premium Visual Pass'));
