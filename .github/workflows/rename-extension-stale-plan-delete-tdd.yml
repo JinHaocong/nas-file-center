@@ -64,3 +64,15 @@ jobs:
         run: |
           printf '{"type":"commonjs"}' > dist-hotfix-test/package.json
           node --test             dist-hotfix-test/tests/plan_cleanup.test.js             dist-hotfix-test/tests/rename_extension.test.js
+
+      - name: Run full frontend tests
+        working-directory: frontend
+        run: npm test
+
+      - name: Typecheck frontend
+        working-directory: frontend
+        run: npm run typecheck
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
