@@ -51,6 +51,20 @@ describe('v0.4.0 C5A workflows and organizer surfaces contract', () => {
     assert.doesNotMatch(source, /<Card\b/);
   });
 
+
+  test('Legacy workflow preview is migrated to shared responsive surfaces', () => {
+    const source = read('src/pages/Workflows/WorkflowPreviewPanelLegacy.tsx');
+    for (const symbol of ['DataPanel', 'ActionBar', 'ResponsiveDescriptions', 'ResponsiveDataView', 'CodePath']) {
+      assert.match(source, new RegExp(symbol));
+    }
+    for (const semantic of ['compile_digest', 'PREVIEW_CHANGED', 'transitionPreviewState', 'canGenerateDraft', 'canPreviewWorkflow']) {
+      assert.match(source, new RegExp(semantic));
+    }
+    assert.match(source, /nfc-workflow-preview-item-mobile-card/);
+    assert.doesNotMatch(source, /<Card\\b/);
+    assert.doesNotMatch(source, /<Descriptions\\b/);
+  });
+
   test('Organizer shell and profile list use shared responsive surfaces', () => {
     const page = read('src/pages/Organizer/index.tsx');
     const list = read('src/pages/Organizer/ProfileList.tsx');
