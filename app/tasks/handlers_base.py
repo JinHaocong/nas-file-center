@@ -1552,6 +1552,10 @@ def _reconcile_executing_item(
                 ))
 
 
+class UtilityPlanDidNotConvergeError(RuntimeError):
+    error_code = "UTILITY_PLAN_NOT_COMPLETED"
+
+
 def _utility_single_child_meta(item_meta: Any) -> dict[str, Any] | None:
     if item_meta.operation not in {"move", "rmdir_empty"}:
         return None
@@ -3057,6 +3061,94 @@ class BatchPlanExecuteHandler(TaskHandler):
                         created_at=now,
                     ))
 
+                if paired_cleanup_item_id is not None:
+                    cleanup_row = session.get(BatchPlanItem, paired_cleanup_item_id)
+                    if cleanup_row is not None:
+                        try:
+                            cleanup_meta = json.loads(cleanup_row.metadata_json or "{}")
+                        except Exception:
+                            cleanup_meta = {}
+                        if not isinstance(cleanup_meta, dict):
+                            cleanup_meta = {}
+
+                        if result.state != "completed":
+                            cleanup_row.state = "failed"
+                            cleanup_row.reason = (
+                                "paired MOVE did not complete; structural cleanup was not attempted"
+                            )
+                        elif utility_cleanup_result is None:
+                            cleanup_row.state = "failed"
+                            cleanup_row.reason = (
+                                "paired MOVE completed without a structural cleanup result"
+                            )
+                        else:
+                            cleanup_row.state = utility_cleanup_result.state
+                            cleanup_row.reason = utility_cleanup_result.reason
+
+                        cleanup_execution = cleanup_meta.setdefault("execution", {})
+                        if not isinstance(cleanup_execution, dict):
+                            cleanup_execution = {}
+                            cleanup_meta["execution"] = cleanup_execution
+                        cleanup_execution.update({
+                            "phase": cleanup_row.state,
+                            "task_id": job.id,
+                            "operation": "rmdir_empty",
+                            "authority": "paired_live_wrapper_descriptor",
+                            "paired_move_item_id": row.id,
+                        })
+                        cleanup_row.metadata_json = json.dumps(
+                            cleanup_meta,
+                            ensure_ascii=False,
+                        )
+
+                        if cleanup_row.state == "completed":
+                            existing_cleanup_journal = session.scalar(
+                                select(OperationJournal).where(
+                                    OperationJournal.plan_item_id == cleanup_row.id
+                                )
+                            )
+                            if existing_cleanup_journal is None:
+                                session.add(OperationJournal(
+                                    operation="rmdir_empty",
+                                    sequence=cleanup_row.sequence,
+                                    plan_id=plan_id,
+                                    plan_item_id=cleanup_row.id,
+                                    task_id=job.id,
+                                    user_id=user_id,
+                                    before_json=json.dumps({
+                                        "path": cleanup_row.source_path,
+                                        "object_type": "directory",
+                                        "authority": "paired_live_wrapper_descriptor",
+                                    }, ensure_ascii=False),
+                                    after_json=json.dumps({
+                                        "logical_removed": True,
+                                        "preserved": False,
+                                        "removed": True,
+                                        "structural_cleanup": True,
+                                        "quarantine_path": None,
+                                    }, ensure_ascii=False),
+                                    metadata_before_json=json.dumps({
+                                        "device": cleanup_row.expected_device,
+                                        "inode": cleanup_row.expected_inode,
+                                    }, ensure_ascii=False),
+                                    metadata_after_json=json.dumps({}, ensure_ascii=False),
+                                    created_at=now,
+                                ))
+
+                        session.add(AuditEvent(
+                            operation="rmdir_empty",
+                            path=cleanup_row.source_path,
+                            result=cleanup_row.state,
+                            details_json=json.dumps({
+                                "plan_id": plan_id,
+                                "item_id": cleanup_row.id,
+                                "task_id": job.id,
+                                "paired_move_item_id": row.id,
+                                "authority": "paired_live_wrapper_descriptor",
+                                "reason": cleanup_row.reason,
+                            }, ensure_ascii=False),
+                        ))
+
                 if result.state == "completed" and row.operation == "quarantine_purge":
                     topology = metadata.get("frozen_purge_topology_manifest")
                     if isinstance(topology, dict):
@@ -3157,10 +3249,26 @@ class BatchPlanExecuteHandler(TaskHandler):
             else:
                 plan.status = "stale" if any(it.state in ("stale", "failed") for it in items) else "partial"
             plan.metadata_json = json.dumps(plan_meta, ensure_ascii=False)
+            final_plan_status = plan.status
+            compile_context = plan_meta.get("compile_context")
+            is_single_child_utility_plan = bool(
+                plan_meta.get("workflow_mode") == "utility"
+                and isinstance(compile_context, dict)
+                and compile_context.get("utility_action")
+                == "single_child_wrapper_collapse"
+            )
             session.commit()
 
         context.checkpoint(
             progress_current=total_count,
             progress_total=total_count,
-            progress_message=f"Plan #{plan_id} execution finished (status: {plan.status})",
+            progress_message=(
+                f"Plan #{plan_id} execution finished (status: {final_plan_status})"
+            ),
         )
+
+        if is_single_child_utility_plan and final_plan_status != "completed":
+            raise UtilityPlanDidNotConvergeError(
+                f"Single-child wrapper collapse did not fully converge "
+                f"(plan status: {final_plan_status})"
+            )
