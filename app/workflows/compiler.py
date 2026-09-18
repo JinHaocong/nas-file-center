@@ -269,6 +269,7 @@ class WorkflowCompiler:
                 "wrapper_inode": decision.wrapper_inode,
                 "child_device": decision.child_device,
                 "child_inode": decision.child_inode,
+                "child_object_type": decision.child_object_type,
             }
             identity_rows.append(observed)
             candidate_rows.append({
@@ -299,6 +300,7 @@ class WorkflowCompiler:
                 "child_path": decision.child_path,
                 "child_device": decision.child_device,
                 "child_inode": decision.child_inode,
+                "child_object_type": decision.child_object_type,
                 "target_path": decision.target_path,
             }
             planned_operations.append({

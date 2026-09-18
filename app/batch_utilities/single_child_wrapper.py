@@ -31,6 +31,7 @@ class SingleChildWrapperDecision:
     wrapper_inode: int
     child_device: int | None = None
     child_inode: int | None = None
+    child_object_type: str | None = None
     capability_reason: str | None = None
 
     @property
@@ -46,6 +47,7 @@ def _candidate_id(
     child_path: str | None,
     child_device: int | None,
     child_inode: int | None,
+    child_object_type: str | None,
     target_path: str | None,
     capability_reason: str | None,
 ) -> str:
@@ -56,6 +58,7 @@ def _candidate_id(
         "child_path": os.path.normpath(child_path) if child_path else None,
         "child_device": child_device,
         "child_inode": child_inode,
+        "child_object_type": child_object_type,
         "target_path": os.path.normpath(target_path) if target_path else None,
         "capability_reason": capability_reason,
     }
@@ -568,6 +571,14 @@ def _decision(
 ) -> SingleChildWrapperDecision:
     child_device = child_st.st_dev if child_st is not None else None
     child_inode = child_st.st_ino if child_st is not None else None
+    child_object_type: str | None = None
+    if child_st is not None:
+        if stat.S_ISREG(child_st.st_mode):
+            child_object_type = "file"
+        elif stat.S_ISDIR(child_st.st_mode):
+            child_object_type = "directory"
+        else:
+            child_object_type = "special"
     return SingleChildWrapperDecision(
         candidate_id=_candidate_id(
             wrapper_path=wrapper_path,
@@ -576,6 +587,7 @@ def _decision(
             child_path=child_path,
             child_device=child_device,
             child_inode=child_inode,
+            child_object_type=child_object_type,
             target_path=target_path,
             capability_reason=capability_reason,
         ),
@@ -587,6 +599,7 @@ def _decision(
         wrapper_inode=wrapper_st.st_ino,
         child_device=child_device,
         child_inode=child_inode,
+        child_object_type=child_object_type,
         capability_reason=capability_reason,
     )
 
@@ -672,16 +685,20 @@ def discover_single_child_wrappers(
 
                         if stat.S_ISLNK(child_st.st_mode):
                             state = "CHILD_SYMLINK"
-                        elif stat.S_ISREG(child_st.st_mode):
-                            state = "CHILD_NOT_DIRECTORY"
-                        elif not stat.S_ISDIR(child_st.st_mode):
+                        elif not (stat.S_ISREG(child_st.st_mode) or stat.S_ISDIR(child_st.st_mode)):
                             state = "UNSUPPORTED_CHILD"
                         elif _entry_exists_at(scope_fd, child.name, target_path):
                             state = "TARGET_EXISTS"
                         elif int(child_st.st_dev) != int(scope_st.st_dev):
                             state = "UNSUPPORTED_FILESYSTEM"
                             capability_reason = "UTILITY_MOVE_UNSUPPORTED_FILESYSTEM"
-                        elif probe_existing_noreplace_capability_at(wrapper_fd, child.name) is not True:
+                        elif (
+                            stat.S_ISDIR(child_st.st_mode)
+                            and probe_existing_noreplace_capability_at(wrapper_fd, child.name) is not True
+                        ):
+                            # Directory MOVE has no compatibility fallback. Regular
+                            # files may use the executor's hard-link no-clobber
+                            # fallback when native RENAME_NOREPLACE is unavailable.
                             state = "UNSUPPORTED_FILESYSTEM"
                             capability_reason = "UTILITY_MOVE_UNSUPPORTED_FILESYSTEM"
                         else:

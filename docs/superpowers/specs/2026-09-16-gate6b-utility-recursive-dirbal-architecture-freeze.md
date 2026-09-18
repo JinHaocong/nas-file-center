@@ -6,6 +6,8 @@
 **Canonical branch:** `v0.3.6-gate6b-utility-recursive-dirbal`  
 **Amendment:** `2026-09-16-gate6b-recursive-last-file-concurrency-amendment-a.md` — **APPROVED / FROZEN** on 2026-09-16. For Recursive Last-File concurrency and final mutation authority, Amendment A takes precedence over conflicting interpretations of Sections 4, 5, 6, 8, and 10 below.
 
+**2026-09-18 Utility amendment:** Single-Child Wrapper Collapse now permits the sole child `C` to be either a real directory or a regular file. Symlinks and special inodes remain blocked. Regular-file MOVE may use the existing executor compatibility no-clobber fallback when native `RENAME_NOREPLACE` is unavailable; directory MOVE still requires native no-replace capability.
+
 ## 1. Scope
 
 Gate6-B adds two capability domains without reopening CLOSED Gate5-D / Gate5-E semantics:
@@ -50,9 +52,9 @@ For selected scope directory `A`, only direct child directory `B` may become a c
 - `B` is a real directory and direct child of `A`.
 - `B` is not a symlink.
 - `B`'s real direct filesystem entry count is exactly 1.
-- The sole entry `C` is a real directory.
+- The sole entry `C` is either a real directory or a regular file.
 - `C` is not a symlink or special inode.
-- `B` contains no regular file, hidden file, second directory, or other object.
+- `B` contains no hidden second entry, second directory/file, or other additional object.
 - Target `A/C` does not exist.
 - Source and target remain inside the authoritative root.
 - No overwrite, implicit merge, or automatic rename is allowed.
@@ -81,12 +83,14 @@ Generate may accept only candidate IDs that:
 
 ### 2.6 Compilation and execution contract
 
-Each selected candidate compiles to exactly this ordered pair:
+Each selected candidate compiles to exactly this ordered pair, regardless of whether `C` is a directory or regular file:
 
 ```text
 1. MOVE A/B/C -> A/C
 2. REMOVE_EMPTY_DIR A/B
 ```
+
+Candidate identity and compile authority include the observed child object type (`directory` or `file`). A type/binding change requires a fresh Preview before Generate can succeed.
 
 Execution semantics are fixed:
 
@@ -382,3 +386,27 @@ Architecture Freeze APPROVED
 ```
 
 Production NAS is outside development authority and is not touched during implementation.
+
+
+## 13. 2026-09-18 Utility Regular-File Sole-Child Amendment Closure
+
+The approved Utility amendment is implemented for `single_child_wrapper_collapse`:
+
+- sole child `C` may be a real directory or a regular file;
+- regular-file candidates are `READY` / selectable when all other safety checks pass;
+- symlink and special inode children remain blocked;
+- an existing `A/C` target remains `TARGET_EXISTS` and non-selectable;
+- `child_object_type` is frozen into candidate identity, compile digest context, and generated Plan item metadata;
+- directory MOVE still requires native strict no-replace capability;
+- regular-file MOVE may use the existing executor hard-link publication fallback when native `RENAME_NOREPLACE` returns `EOPNOTSUPP`;
+- empty wrapper removal remains authorized only by the exact frozen Utility MOVE -> `rmdir_empty` pair on the Worker path; `ALLOW_DELETE=false` is not relaxed.
+
+TDD / verification evidence:
+
+- RED `35306255860`: discovery and compile tests failed on `CHILD_NOT_DIRECTORY != READY`;
+- RED `35306301621`: frontend contract also failed on missing “唯一子项 C / child_object_type” presentation;
+- focused GREEN `35306467420`: backend focused regression, 438/438 frontend tests, typecheck, and production build passed;
+- Worker lifecycle GREEN `35306713449`: Generate -> Freeze -> Validate -> Worker Execute passed for a regular-file sole child with `ALLOW_DELETE=false` and forced regular-file compatibility no-clobber MOVE;
+- final full verification `35306812349`: full backend regression, `pip check`, 438/438 frontend tests, TypeScript typecheck, production build, Docker build, and Docker image inspect all passed.
+
+Verified full candidate: `5bfef898373bb8db778e7d7aa19123ae625055fa`.

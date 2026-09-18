@@ -1,3 +1,4 @@
+import errno
 import json
 import os
 from pathlib import Path
@@ -8,8 +9,10 @@ from sqlalchemy import select
 import app.batch_utilities.single_child_wrapper as single_child_wrapper_module
 from app.batch_utilities.errors import BatchUtilityPreviewChangedError
 from app.config import Settings
-from app.models import BatchPlan, BatchPlanItem, IndexRoot
+from app.models import BatchPlan, BatchPlanItem, IndexRoot, TaskLock, WorkJob, utcnow
 from app.service import FileCenterService
+from app.tasks.context import JobContext
+from app.tasks.handlers import get_handler
 from app.workflows.errors import WorkflowDigestMismatchError
 from app.workflows.schema import (
     SingleChildWrapperCollapseStep,
@@ -142,6 +145,116 @@ def test_generate_selected_subset_persists_exact_pair_and_no_filesystem_mutation
             ("rmdir_empty", str(root / "B2"), None),
         ]
         assert all("B1" not in item.source_path for item in items)
+
+
+def test_regular_file_wrapper_generate_freeze_validate_execute_with_no_clobber_fallback(
+    utility_service_env,
+    monkeypatch,
+):
+    env = utility_service_env
+    service = env["service"]
+    root = env["root"]
+    wrapper = root / "001-1"
+    wrapper.mkdir()
+    child = wrapper / "001"
+    child.write_bytes(b"payload")
+
+    preview = _preview(env)
+    candidate = _candidate(preview, "001-1")
+    assert candidate["state"] == "READY"
+    assert candidate["selectable"] is True
+    assert candidate["child_object_type"] == "file"
+
+    generated = service.workflow_service.generate_plan(
+        None,
+        env["workflow_id"],
+        WorkflowGeneratePlanRequest(
+            expected_compile_digest=preview["compile_digest"],
+            selected_candidate_ids=[candidate["candidate_id"]],
+        ),
+    )
+    plan_id = generated["plan_id"]
+    assert generated["status"] == "draft"
+
+    with service.SessionLocal() as session:
+        rows = session.scalars(
+            select(BatchPlanItem)
+            .where(BatchPlanItem.plan_id == plan_id)
+            .order_by(BatchPlanItem.sequence.asc())
+        ).all()
+        assert len(rows) == 2
+        move_meta = json.loads(rows[0].metadata_json or "{}")
+        remove_meta = json.loads(rows[1].metadata_json or "{}")
+        assert move_meta["child_object_type"] == "file"
+        assert remove_meta["child_object_type"] == "file"
+
+    frozen = service.freeze_plan(plan_id)
+    assert frozen.status == "frozen"
+
+    validated = service.validate_plan(plan_id)
+    assert validated["status"] == "ready"
+
+    service.settings.allow_mutation = True
+    assert service.settings.allow_delete is False
+
+    def no_native_noreplace(*_args, **_kwargs):
+        raise OSError(errno.EOPNOTSUPP, "forced compat path")
+
+    import app.fs_ops as fs_ops_module
+
+    monkeypatch.setattr(fs_ops_module, "rename_noreplace", no_native_noreplace)
+
+    worker_id = "utility-regular-file-worker"
+    with service.SessionLocal() as session:
+        lock = session.get(TaskLock, 1)
+        if lock is None:
+            lock = TaskLock(id=1)
+            session.add(lock)
+        lock.locked = True
+        lock.owner = worker_id
+        lock.acquired_at = utcnow()
+
+        job = WorkJob(
+            kind="batch-plan-execute",
+            status="running",
+            state_json=json.dumps({"plan_id": plan_id}),
+            started_at=utcnow(),
+            heartbeat_at=utcnow(),
+        )
+        session.add(job)
+        session.commit()
+        job_id = int(job.id)
+
+    handler = get_handler("batch-plan-execute")
+    assert handler is not None
+
+    with service.SessionLocal() as session:
+        job = session.get(WorkJob, job_id)
+        assert job is not None
+        context = JobContext(
+            service.engine,
+            service.SessionLocal,
+            job_id,
+            worker_id=worker_id,
+        )
+        handler.run(job, context, service.settings)
+
+    target = root / "001"
+    assert target.is_file()
+    assert target.read_bytes() == b"payload"
+    assert not child.exists()
+    assert not wrapper.exists()
+
+    with service.SessionLocal() as session:
+        plan = session.get(BatchPlan, plan_id)
+        assert plan is not None
+        assert plan.status == "completed"
+        rows = session.scalars(
+            select(BatchPlanItem)
+            .where(BatchPlanItem.plan_id == plan_id)
+            .order_by(BatchPlanItem.sequence.asc())
+        ).all()
+        assert [row.state for row in rows] == ["completed", "completed"]
 
 
 @pytest.mark.parametrize("mutation", ["target", "hidden", "aba"])
