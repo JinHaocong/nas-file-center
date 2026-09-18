@@ -318,3 +318,15 @@ describe('Plan Lifecycle Cleanup: Policy Matrix & API Contract Tests', () => {
     });
   });
 });
+
+
+describe('Hotfix: stale/expired deletion frontend policy', () => {
+  test('stale and expired plans are deletable when there is no active execution job', () => {
+    for (const status of ['stale', 'expired']) {
+      const res = getPlanDeleteAvailability({ status });
+      assert.strictEqual(res.canDelete, true, `${status} should be deletable`);
+      assert.strictEqual(res.hasExecutionHistory, false);
+      assert.strictEqual(res.reason, undefined);
+    }
+  });
+});
