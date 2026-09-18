@@ -603,13 +603,31 @@ def _reconcile_executing_item(
         tgt = Path(item.target_path) if item.target_path else None
         if tgt and tgt.exists() and not src.exists():
             st = tgt.stat(follow_symlinks=False)
-            if not _check_target_identity(tgt, source_stat):
+            identity_matches = _check_target_identity(tgt, source_stat)
+            transplant_matches = False
+            if not identity_matches and item.operation == "move" and tgt.is_dir():
+                try:
+                    from app.execution.directory_transplant import directory_transplant_reconciles_completed
+                    transplant_matches = directory_transplant_reconciles_completed(
+                        settings.quarantine_root,
+                        plan_id,
+                        item.sequence,
+                        source=src,
+                        target=tgt,
+                    )
+                except Exception:
+                    transplant_matches = False
+            if not identity_matches and not transplant_matches:
                 item.state = "failed"
                 item.reason = "reconciliation conflict after crash (target identity mismatch)"
                 return
 
             item.state = "completed"
-            item.reason = "reconciled after crash (target exists)"
+            item.reason = (
+                "reconciled after crash (directory transplant completed)"
+                if transplant_matches
+                else "reconciled after crash (target exists)"
+            )
             existing_j = session.scalar(select(OperationJournal).where(OperationJournal.plan_item_id == item.id))
             if not existing_j:
                 res_stat = _build_stat_dict(tgt, st)
