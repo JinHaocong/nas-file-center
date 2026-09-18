@@ -39,6 +39,13 @@ def test_valid_wrapper_is_nonselectable_when_native_noreplace_is_unavailable(
         raising=False,
     )
 
+    monkeypatch.setattr(
+        single_child_wrapper_module,
+        "directory_transplant_preflight",
+        lambda _path: False,
+        raising=False,
+    )
+
     before = sorted(str(path.relative_to(root)) for path in root.rglob("*"))
     decisions = discover_single_child_wrappers(str(scope), str(root))
     after = sorted(str(path.relative_to(root)) for path in root.rglob("*"))
@@ -67,6 +74,20 @@ def test_utility_preview_transports_unsupported_capability_and_plans_zero_operat
         single_child_wrapper_module,
         "probe_existing_noreplace_capability_at",
         lambda dir_fd, entry_name: False,
+    )
+
+    monkeypatch.setattr(
+        single_child_wrapper_module,
+        "directory_transplant_preflight",
+        lambda _path: False,
+        raising=False,
+    )
+
+    monkeypatch.setattr(
+        single_child_wrapper_module,
+        "directory_transplant_preflight",
+        lambda _path: False,
+        raising=False,
     )
 
     db_path = tmp_path / "test.db"
