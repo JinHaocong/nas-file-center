@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { ConfigProvider, theme as antdTheme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
+import { nfcTheme } from '../design/tokens';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 
@@ -41,9 +42,11 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const isDark = mode === 'dark' || (mode === 'system' && systemDark);
+  const palette = isDark ? nfcTheme.dark : nfcTheme.light;
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
+    document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
   }, [isDark]);
 
   return (
@@ -53,10 +56,18 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         theme={{
           algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
           token: {
-            colorPrimary: '#1677ff',
+            colorPrimary: palette.accent,
+            colorBgLayout: palette.canvas,
+            colorBgContainer: palette.surface1,
+            colorBgElevated: palette.surfaceRaised,
+            colorBorderSecondary: palette.hairline,
+            colorText: palette.text,
+            colorTextSecondary: palette.textMuted,
             borderRadius: 8,
-            fontFamily:
-              '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif',
+            borderRadiusLG: 10,
+            controlHeight: 36,
+            fontSize: 14,
+            fontFamily: nfcTheme.fontFamily,
           },
         }}
       >
