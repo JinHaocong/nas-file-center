@@ -7057,3 +7057,95 @@ body,
     flex: 1 1 0;
   }
 }
+
+
+/* Organizer profile field refinements */
+.nfc-organizer-template-alert {
+  margin-bottom: 16px;
+  border-color: var(--nfc-shell-hairline) !important;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--nfc-accent-soft) 24%, var(--nfc-surface-1)) !important;
+}
+
+.nfc-organizer-template-help {
+  color: var(--nfc-text-muted);
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.nfc-organizer-template-help-row {
+  margin-top: 5px;
+}
+
+.nfc-organizer-preview-icon {
+  color: var(--nfc-warning);
+}
+
+.nfc-organizer-live-preview.ant-card {
+  margin-bottom: 8px;
+  border-color: color-mix(in srgb, var(--nfc-accent) 14%, var(--nfc-hairline));
+  border-radius: 14px;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--nfc-accent-soft) 30%, var(--nfc-surface-1)),
+      var(--nfc-surface-1) 58%
+    );
+  box-shadow: none;
+}
+
+.nfc-organizer-live-preview .ant-card-head {
+  min-height: 44px;
+  border-bottom-color: var(--nfc-shell-hairline);
+}
+
+.nfc-organizer-live-preview-row {
+  min-width: 0;
+  padding: 2px 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.nfc-organizer-live-preview-label {
+  flex: 0 0 auto;
+}
+
+.nfc-organizer-live-preview-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--nfc-accent) !important;
+  font-size: 13px;
+}
+
+.nfc-full-width-control {
+  width: 100% !important;
+}
+
+.nfc-organizer-section-divider {
+  margin: 8px 0 16px !important;
+  color: var(--nfc-text-subtle) !important;
+  font-size: 10px !important;
+  font-weight: 650 !important;
+}
+
+@media (max-width: 767px) {
+  .nfc-organizer-live-preview-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .nfc-organizer-profile-tabs .ant-row {
+    row-gap: 0 !important;
+  }
+
+  .nfc-organizer-profile-tabs .ant-col {
+    max-width: 100% !important;
+    flex: 0 0 100% !important;
+  }
+
+  .nfc-organizer-template-help {
+    font-size: 10px;
+  }
+}
