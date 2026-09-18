@@ -1,8 +1,46 @@
-from tests.test_admin_maintenance_controls import maintenance_env
 from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from app.config import Settings
+from app.main import create_app
 from app.models import QuarantineEntry
+from app.service import FileCenterService
+
+
+@pytest.fixture
+def maintenance_env(tmp_path: Path):
+    data = tmp_path / "data"
+    data.mkdir(parents=True)
+    trash = data / ".nas-file-center-trash"
+    trash.mkdir()
+    config = tmp_path / "config"
+    config.mkdir()
+
+    settings = Settings(
+        config_dir=config,
+        data_mount=data,
+        allowed_roots_raw=str(data),
+        quarantine_root=trash,
+        initial_admin_username="admin",
+        initial_admin_password="AdminPassword123!",
+        allow_mutation=True,
+        allow_delete=True,
+    )
+    service = FileCenterService(settings)
+    app = create_app(settings)
+    client = TestClient(app)
+    client.headers["Origin"] = "http://testserver"
+    response = client.post(
+        "/api/auth/login",
+        json={"username": "admin", "password": "AdminPassword123!"},
+        headers={"Origin": "http://testserver"},
+    )
+    assert response.status_code == 200
+
+    return {"service": service, "data": data, "trash": trash, "admin": client}
 
 
 def _seed(service, data: Path, trash: Path, *, state: str, name: str) -> int:
