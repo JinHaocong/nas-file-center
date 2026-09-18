@@ -389,7 +389,7 @@ export const PlanDetailPage: React.FC = () => {
   );
 
   return (
-    <div className="nfc-operations-page">
+    <div className="nfc-operations-page nfc-plan-detail-page">
       <PageHeader
         eyebrow="EXECUTION PLAN"
         title={plan.name}
