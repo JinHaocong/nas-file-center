@@ -434,6 +434,12 @@ def move_directory_tree_noreplace(
         if not stat.S_ISDIR(dst_st.st_mode) or stat.S_ISLNK(dst_st.st_mode):
             raise DirectoryTransplantConflict(errno.EEXIST, "Target root is no longer a directory")
     else:
+        existing_root = (state.get("created_dirs") or {}).get("")
+        if existing_root is not None:
+            raise DirectoryTransplantConflict(
+                errno.ENOENT,
+                "Owned target root disappeared during directory MOVE transaction",
+            )
         os.mkdir(dst, mode=0o700)
         dst_st = os.lstat(dst)
         _record_created_dir(state_path, state, "", dst_st)
