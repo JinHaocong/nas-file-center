@@ -88,9 +88,9 @@ export const BatchPage: React.FC = () => {
   };
 
   return (
-    <div className="nfc-operations-page">
+    <div className="nfc-operations-page nfc-batch-page">
       <PageHeader
-        eyebrow="FILE TOOLS"
+        eyebrow="Batch operations"
         title="批量文件处理"
         description="批量隔离、Touch、Move 与 Rename 统一先创建 Plan；真正文件操作仍通过 Freeze → Validate → Execute。"
       />
