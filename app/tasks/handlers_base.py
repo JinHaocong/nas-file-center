@@ -1743,6 +1743,8 @@ def _probe_utility_move_logical_binding_for_identity_rebase(
 def _verify_plan_item_and_keep_freshness(
     item_meta: Any,
     settings: Settings,
+    *,
+    check_hash: bool = True,
 ) -> tuple[bool, Any]:
     if item_meta.operation == "rmdir_empty":
         if settings.quarantine_root and is_reserved_quarantine_path(Path(item_meta.source_path), settings.quarantine_root):
@@ -1766,7 +1768,7 @@ def _verify_plan_item_and_keep_freshness(
         metadata_json=item_meta.metadata_json,
         allowed_roots=settings.allowed_roots,
         quarantine_root=None if item_meta.operation in ("rmdir_empty", "mkdir_empty") else settings.quarantine_root,
-        check_hash=False if item_meta.operation in ("rmdir_empty", "mkdir_empty") else True,
+        check_hash=False if item_meta.operation in ("rmdir_empty", "mkdir_empty") else check_hash,
     )
     if not is_fresh:
         return False, stale_detail
@@ -1825,7 +1827,7 @@ def _verify_plan_item_and_keep_freshness(
                 metadata_json=json.dumps({"snapshot": keep_snap}),
                 allowed_roots=settings.allowed_roots,
                 quarantine_root=settings.quarantine_root,
-                check_hash=True,
+                check_hash=check_hash,
             )
             if not k_fresh:
                 return False, k_stale
@@ -2335,7 +2337,25 @@ class BatchPlanExecuteHandler(TaskHandler):
             and it.operation not in {"restore", "quarantine_purge"}
         ]
         worker_stale_items = []
-        for it in unexecuted_items:
+        preflight_total = len(unexecuted_items)
+        for preflight_index, it in enumerate(unexecuted_items, start=1):
+            if (
+                preflight_total >= 50
+                and (
+                    preflight_index == 1
+                    or preflight_index == preflight_total
+                    or preflight_index % 25 == 0
+                )
+            ):
+                context.checkpoint(
+                    progress_current=completed_or_skipped,
+                    progress_total=total_count,
+                    progress_message=(
+                        f"Safety preflight SHA256 {preflight_index}/{preflight_total} "
+                        f"before Plan #{plan_id} mutation..."
+                    ),
+                )
+
             # The exact single-child-wrapper cleanup is authorized by its paired
             # MOVE and is finalized under a live descriptor held across that MOVE.
             # Do not reject it here using a frozen directory inode that may drift
@@ -2425,21 +2445,47 @@ class BatchPlanExecuteHandler(TaskHandler):
                 if row is None or row.state in ("completed", "skipped", "failed") or row.id in reconciled_failed_item_ids:
                     continue
 
+            # Duplicate quarantine/unlink performs the authoritative SHA256
+            # pair verification in execute_item immediately before mutation.
+            # Keep the earlier boundary fences identity/stat based to avoid
+            # re-reading both payloads several times before that final hash.
+            defer_duplicate_hash_to_execute = bool(
+                item_meta.keep_path
+                and item_meta.operation in {"quarantine", "unlink"}
+            )
+
             # Boundary Freshness Check
             if (
                 item_meta.operation not in {"restore", "quarantine_purge"}
                 and not _is_utility_single_child_cleanup(item_meta)
             ):
-                is_fresh, stale_detail = _verify_plan_item_and_keep_freshness(item_meta, settings)
+                if defer_duplicate_hash_to_execute:
+                    is_fresh, stale_detail = _verify_plan_item_and_keep_freshness(
+                        item_meta,
+                        settings,
+                        check_hash=False,
+                    )
+                else:
+                    is_fresh, stale_detail = _verify_plan_item_and_keep_freshness(
+                        item_meta,
+                        settings,
+                    )
                 if (
                     not is_fresh
                     and stale_detail
                     and _try_rebase_utility_move_identity(item_meta, stale_detail)
                 ):
-                    is_fresh, stale_detail = _verify_plan_item_and_keep_freshness(
-                        item_meta,
-                        settings,
-                    )
+                    if defer_duplicate_hash_to_execute:
+                        is_fresh, stale_detail = _verify_plan_item_and_keep_freshness(
+                            item_meta,
+                            settings,
+                            check_hash=False,
+                        )
+                    else:
+                        is_fresh, stale_detail = _verify_plan_item_and_keep_freshness(
+                            item_meta,
+                            settings,
+                        )
                 if not is_fresh:
                     stale_reason = f"Item stale: {stale_detail.reason if stale_detail else 'stale'}"
                     with context.SessionLocal() as session:
@@ -2984,16 +3030,33 @@ class BatchPlanExecuteHandler(TaskHandler):
                 item_meta.operation != "quarantine_purge"
                 and not _is_utility_single_child_cleanup(item_meta)
             ):
-                final_fresh, final_stale_detail = _verify_plan_item_and_keep_freshness(item_meta, settings)
+                if defer_duplicate_hash_to_execute:
+                    final_fresh, final_stale_detail = _verify_plan_item_and_keep_freshness(
+                        item_meta,
+                        settings,
+                        check_hash=False,
+                    )
+                else:
+                    final_fresh, final_stale_detail = _verify_plan_item_and_keep_freshness(
+                        item_meta,
+                        settings,
+                    )
                 if (
                     not final_fresh
                     and final_stale_detail
                     and _try_rebase_utility_move_identity(item_meta, final_stale_detail)
                 ):
-                    final_fresh, final_stale_detail = _verify_plan_item_and_keep_freshness(
-                        item_meta,
-                        settings,
-                    )
+                    if defer_duplicate_hash_to_execute:
+                        final_fresh, final_stale_detail = _verify_plan_item_and_keep_freshness(
+                            item_meta,
+                            settings,
+                            check_hash=False,
+                        )
+                    else:
+                        final_fresh, final_stale_detail = _verify_plan_item_and_keep_freshness(
+                            item_meta,
+                            settings,
+                        )
                 if not final_fresh:
                     stale_reason = f"Item stale: {final_stale_detail.reason if final_stale_detail else 'stale'}"
                     with context.SessionLocal() as session:

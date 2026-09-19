@@ -89,7 +89,10 @@ def _create_ready_recursive_plan(
         row = session.scalar(select(BatchPlanItem).where(BatchPlanItem.plan_id == plan.id))
         assert row is not None
         row.metadata_json = json.dumps(
-            {"recursive_protection": _recursive_authority(source, root, token=token)},
+            {
+                "protected_dir": str(source.parent),
+                "recursive_protection": _recursive_authority(source, root, token=token),
+            },
             ensure_ascii=False,
         )
         session.commit()
@@ -358,3 +361,73 @@ def test_nonrecursive_synchronous_execute_plan_remains_compatible(tmp_path: Path
 
     assert result["status"] == "completed"
     assert not source.exists()
+
+def test_worker_recursive_preflight_keeps_final_legacy_last_file_fence(tmp_path: Path, monkeypatch):
+    service, settings, root, _ = _setup_service(tmp_path)
+    protected = root / "set"
+    protected.mkdir()
+    source = protected / "delete.bin"
+    sibling = protected / "keep.bin"
+    source.write_bytes(b"duplicate")
+    sibling.write_bytes(b"survivor")
+
+    plan_id = _create_ready_recursive_plan(service, settings, root, source, token="final-last-file-fence")
+
+    import app.execution.executor as executor
+
+    recount_calls: list[str] = []
+    real_count = executor._count_regular_files
+
+    def tracked_count(path):
+        recount_calls.append(str(path))
+        return real_count(path)
+
+    monkeypatch.setattr(executor, "_count_regular_files", tracked_count)
+
+    _enqueue_and_run_worker(service, settings, plan_id, worker_id="gate6b-final-last-file-fence")
+
+    assert recount_calls == [str(protected)]
+    assert not source.exists()
+    assert sibling.exists()
+
+
+def test_worker_duplicate_boundary_defers_sha256_until_execute_fence(tmp_path: Path, monkeypatch):
+    service, settings, root, _ = _setup_service(tmp_path)
+    keep = root / "keep.bin"
+    source = root / "delete.bin"
+    payload = b"same-payload" * 1000
+    keep.write_bytes(payload)
+    source.write_bytes(payload)
+
+    plan = service.create_plan(
+        name="dedupe hash deferral",
+        kind="dedupe",
+        items=[
+            {
+                "source": str(source),
+                "keep": str(keep),
+                "operation": "quarantine",
+            }
+        ],
+    )
+    service.freeze_plan(plan.id)
+    detail = service.validate_plan(plan.id)
+    assert detail["status"] == "ready"
+
+    import app.tasks.handlers_base as handlers_base
+
+    original_verify = handlers_base._verify_plan_item_and_keep_freshness
+    worker_hash_modes: list[bool] = []
+
+    def tracked_verify(*args, **kwargs):
+        worker_hash_modes.append(bool(kwargs.get("check_hash", True)))
+        return original_verify(*args, **kwargs)
+
+    monkeypatch.setattr(handlers_base, "_verify_plan_item_and_keep_freshness", tracked_verify)
+
+    _enqueue_and_run_worker(service, settings, int(plan.id), worker_id="dedupe-hash-deferral")
+
+    assert worker_hash_modes.count(False) >= 2, worker_hash_modes
+    assert True not in worker_hash_modes, worker_hash_modes
+    assert not source.exists()
+    assert keep.exists()

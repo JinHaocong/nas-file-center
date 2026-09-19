@@ -6,6 +6,7 @@ on:
       - v0.3.6-gate6b-utility-recursive-dirbal
       - hotfix/freeze-recursive-protection-*
       - hotfix/recursive-validate-*
+      - hotfix/execute-dedupe-*
   workflow_dispatch:
 
 permissions:
@@ -40,7 +41,11 @@ jobs:
         run: |
           set -o pipefail
           shopt -s nullglob
-          gate6b_tests=(tests/test_gate6b_utility_*.py tests/test_gate6b_recursive_dirbal_*.py)
+          gate6b_tests=(
+            tests/test_gate6b_utility_*.py
+            tests/test_gate6b_recursive_dirbal_*.py
+            tests/test_gate6b_zfuse_*.py
+          )
           if ((${#gate6b_tests[@]})); then
             pytest "${gate6b_tests[@]}" -v
           fi

@@ -92,3 +92,57 @@ def test_protected_directory_last_file_is_not_quarantined(tmp_path):
     item = OperationItem(1, "quarantine", src, expected_size=1, protected_dir=protected)
     result = execute_item(item, allowed_roots=[root], allow_mutation=True, allow_delete=False, quarantine_root=root / ".trash", plan_id="p")
     assert result.state == "skipped" and "last file" in result.reason and src.exists()
+
+
+def test_protected_directory_count_stops_after_two_regular_files(tmp_path, monkeypatch):
+    protected = tmp_path / "set"
+    protected.mkdir()
+    (protected / "a.bin").write_bytes(b"a")
+    (protected / "b.bin").write_bytes(b"b")
+
+    import app.execution.executor as executor
+
+    def guarded_walk(root, *, followlinks=False):
+        assert Path(root) == protected
+        assert followlinks is False
+        yield str(protected), [], ["a.bin", "b.bin"]
+        raise AssertionError("count must stop once two regular files are proven")
+
+    monkeypatch.setattr(executor.os, "walk", guarded_walk)
+
+    assert executor._count_regular_files(protected) == 2
+
+
+def test_protected_directory_pathguard_still_applies_with_bounded_count(tmp_path):
+    root = tmp_path / "data"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    keep = root / "keep.bin"
+    delete = root / "delete.bin"
+    keep.write_bytes(b"same")
+    delete.write_bytes(b"same")
+
+    from app.batch.plans import OperationItem
+    from app.execution.executor import execute_item
+
+    item = OperationItem(
+        sequence=1,
+        operation="quarantine",
+        source=delete,
+        keep=keep,
+        expected_size=4,
+        expected_hash=H(b"same"),
+        protected_dir=outside,
+    )
+    result = execute_item(
+        item,
+        allowed_roots=[root],
+        allow_mutation=True,
+        allow_delete=False,
+        quarantine_root=root / ".trash",
+        plan_id="bounded-count-pathguard",
+    )
+
+    assert result.state == "skipped"
+    assert delete.exists()

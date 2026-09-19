@@ -28,6 +28,12 @@ def _skip(reason: str) -> ItemResult:
 
 
 def _count_regular_files(root: Path) -> int:
+    """Return enough information for the Last-File fence without a full tree count.
+
+    The only caller needs to distinguish 0/1 regular files from 2-or-more.
+    Stop immediately at two so healthy protected trees do not get recursively
+    walked to completion for every Execute item.
+    """
     count = 0
     for current, dirnames, filenames in os.walk(root, followlinks=False):
         current_path = Path(current)
@@ -36,6 +42,8 @@ def _count_regular_files(root: Path) -> int:
             p = current_path / name
             if not p.is_symlink() and p.is_file():
                 count += 1
+                if count >= 2:
+                    return count
     return count
 
 
