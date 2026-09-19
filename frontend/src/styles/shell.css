@@ -124,3 +124,21 @@
   backdrop-filter: blur(var(--nfc-blur-shell)) saturate(130%);
   -webkit-backdrop-filter: blur(var(--nfc-blur-shell)) saturate(130%);
 }
+
+
+.nfc-header-status-badge.ant-tag {
+  margin-inline-end: 0;
+  padding: 1px 7px;
+  border-radius: var(--nfc-radius-pill);
+  font-size: 10px;
+  font-weight: 620;
+  line-height: 20px;
+}
+
+.nfc-header-status-badge.is-danger {
+  font-weight: 700;
+}
+
+.nfc-header-status-badge .anticon {
+  font-size: 11px;
+}
