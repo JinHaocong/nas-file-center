@@ -1014,3 +1014,125 @@
     flex-direction: column;
   }
 }
+
+
+/* Advanced dedupe semantic details moved from legacy index.css. */
+.nfc-dedupe-identity-panel,
+.nfc-dedupe-summary-panel,
+.nfc-dedupe-scorer-editor,
+.nfc-dedupe-explain-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.nfc-dedupe-section-heading {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.nfc-accent-icon {
+  color: var(--nfc-accent);
+}
+
+.nfc-dedupe-authority-digest,
+.nfc-dedupe-secondary-digest,
+.nfc-dedupe-digest {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  font-family: var(--nfc-font-mono, ui-monospace, monospace);
+  font-size: 10.5px;
+}
+
+.nfc-dedupe-authority-digest {
+  color: var(--nfc-accent) !important;
+}
+
+.nfc-dedupe-secondary-digest {
+  color: color-mix(in srgb, var(--nfc-accent) 70%, var(--nfc-text)) !important;
+}
+
+.nfc-dedupe-root-release-list,
+.nfc-dedupe-mtime-stack,
+.nfc-dedupe-balancer-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.nfc-dedupe-config-intro {
+  margin-bottom: 10px !important;
+  font-size: 11px;
+}
+
+.nfc-dedupe-radio-help {
+  margin-left: 8px;
+  color: var(--nfc-text-subtle);
+  font-size: 10.5px;
+  line-height: 1.55;
+}
+
+.nfc-dedupe-weight-input {
+  width: 120px !important;
+}
+
+.nfc-dedupe-recursive-alert {
+  margin-top: 10px;
+}
+
+.nfc-decision-tag {
+  font-weight: 650;
+}
+
+.nfc-dedupe-score-value {
+  color: var(--nfc-accent) !important;
+  font-size: 16px;
+}
+
+.nfc-dedupe-balancer-card.ant-card {
+  border-color: color-mix(in srgb, var(--nfc-warning) 22%, var(--nfc-hairline)) !important;
+}
+
+.nfc-task-progress-message {
+  max-width: 100%;
+  color: var(--nfc-text-subtle);
+  font-size: 9.5px;
+}
+
+.nfc-task-progress-muted .nfc-task-progress-status {
+  color: var(--nfc-text-muted);
+}
+
+.nfc-path-breadcrumb-folder {
+  margin-right: 4px;
+  color: var(--nfc-accent);
+}
+
+.nfc-path-breadcrumb-chevron {
+  font-size: 9px;
+}
+
+@media (max-width: 767px) {
+  .nfc-dedupe-scorer-editor .ant-radio-wrapper {
+    width: 100%;
+    align-items: flex-start;
+    margin-inline-end: 0;
+  }
+
+  .nfc-dedupe-scorer-editor .ant-radio-wrapper > span:last-child {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .nfc-dedupe-radio-help {
+    display: block;
+    margin: 4px 0 0;
+  }
+
+  .nfc-dedupe-weight-input {
+    width: 100% !important;
+  }
+}
