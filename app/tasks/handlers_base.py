@@ -1851,6 +1851,11 @@ class BatchPlanExecuteHandler(TaskHandler):
         if not plan_id:
             raise ValueError("Job state missing 'plan_id'")
         user_id = state.get("requested_by_user_id")
+        # Re-probing zfuse/FUSE NOREPLACE support creates disposable files for
+        # every item. A negative result is fail-closed and safe to reuse for the
+        # lifetime of this one Worker job, while descriptor/path/device checks
+        # still run for every mutation.
+        negative_capability_probe_cache: set[int] = set()
 
         # 1. Announce start & reconcile interrupted items
         # Precompute reconciliation evidence outside DB write lock.
@@ -3215,6 +3220,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                             worker_id=context.worker_id,
                             quarantine_entry_id=q_purge_entry_id or q_entry_id or q_restore_entry_id,
                             purge_manifest=purge_manifest,
+                            negative_capability_probe_cache=negative_capability_probe_cache,
                         )
                         if result.state == "completed":
                             utility_cleanup_result = wrapper_guard.remove_if_empty()
@@ -3230,6 +3236,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                         worker_id=context.worker_id,
                         quarantine_entry_id=q_purge_entry_id or q_entry_id or q_restore_entry_id,
                         purge_manifest=purge_manifest,
+                        negative_capability_probe_cache=negative_capability_probe_cache,
                     )
             except Exception as exc:
                 result = ItemResult(
