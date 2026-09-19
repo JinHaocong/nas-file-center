@@ -1,0 +1,119 @@
+name: Release Validation
+
+on:
+  push:
+    branches:
+      - release/v0.4.7
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-validation-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CONFIG_DIR: /tmp/nfc-config
+      DATA_MOUNT: /tmp/nfc-data
+      ALLOWED_ROOTS: /tmp/nfc-data
+      QUARANTINE_ROOT: /tmp/nfc-data/.nas-file-center-trash
+
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Record candidate identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD
+          git status --short
+          git diff --check
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install backend test dependencies
+        run: python -m pip install -e '.[test]'
+
+      - name: Verify release version consistency
+        env:
+          PYTHONPATH: .
+        run: pytest tests/test_release_version_consistency.py -q
+
+      - name: Run full backend regression
+        env:
+          PYTHONPATH: .
+        run: pytest --disable-warnings -q
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run frontend tests
+        working-directory: frontend
+        run: npm test
+
+      - name: Typecheck frontend
+        working-directory: frontend
+        run: npm run typecheck
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+  linux-amd64-docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build linux amd64 release candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="kerwinjhc/nas-file-center:0.4.7-rc-${GITHUB_SHA::7}"
+          echo "candidate_tag=${TAG}" | tee docker-evidence.txt
+          docker buildx build \
+            --platform linux/amd64 \
+            --load \
+            --tag "${TAG}" \
+            . 2>&1 | tee docker-build.log
+          docker image inspect --format 'id={{.Id}} os={{.Os}} arch={{.Architecture}} created={{.Created}}' "${TAG}" | tee -a docker-evidence.txt
+          test "$(docker image inspect --format '{{.Architecture}}' "${TAG}")" = "amd64"
+          test "$(docker image inspect --format '{{.Os}}' "${TAG}")" = "linux"
+
+      - name: Upload Docker evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-v047-docker-${{ github.sha }}
+          retention-days: 14
+          path: |
+            docker-build.log
+            docker-evidence.txt

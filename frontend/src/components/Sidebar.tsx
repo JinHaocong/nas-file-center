@@ -112,7 +112,7 @@ export const Sidebar: React.FC<Props> = ({
             <span className="nfc-sidebar-meta">
               <span>CONTROL PLANE</span>
               <span className="nfc-sidebar-meta-separator" aria-hidden="true">/</span>
-              <span>v0.4.4</span>
+              <span>v0.4.7</span>
             </span>
           </span>
         )}
