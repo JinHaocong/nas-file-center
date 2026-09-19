@@ -21,6 +21,7 @@ from app.models import (
 from app.quarantine.unlink_purge import (
     OPERATION_ID,
     SEMANTICS_VERSION,
+    _journal_records_for_entry,
     build_unlink_manifest,
     execute_journaled_unlink_purge,
 )
@@ -173,16 +174,17 @@ def _durable_terminal_recovery_evidence(
     quarantine_unlink_purge / unlink_v1.
     """
     entry_id = int(entry.id)
-    rows = list(
-        session.scalars(
-            select(OperationJournal)
-            .where(OperationJournal.operation == OPERATION_ID)
-            .order_by(OperationJournal.sequence.asc(), OperationJournal.id.asc())
-        )
-    )
+    generation = int(entry.active_attempt_generation or 0)
+    if generation <= 0:
+        raise StateConflictError("UNLINK_SINGLE_TERMINAL_PROOF_INVALID: generation binding")
+
     records = [
-        (row, _parse_json_object(row.before_json), _parse_json_object(row.after_json))
-        for row in rows
+        (row, before, _parse_json_object(row.after_json))
+        for row, before in _journal_records_for_entry(
+            session,
+            entry_id,
+            attempt_generation=generation,
+        )
     ]
 
     authorities = [
@@ -207,8 +209,7 @@ def _durable_terminal_recovery_evidence(
     ):
         raise StateConflictError("UNLINK_SINGLE_TERMINAL_PROOF_INVALID: manifest binding")
 
-    generation = int(entry.active_attempt_generation or 0)
-    if generation <= 0 or manifest.get("active_attempt_generation") != generation:
+    if manifest.get("active_attempt_generation") != generation:
         raise StateConflictError("UNLINK_SINGLE_TERMINAL_PROOF_INVALID: generation binding")
 
     root = _absolute_lexical(quarantine_root)
