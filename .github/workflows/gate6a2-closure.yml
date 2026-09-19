@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/v0.3.6-gate6a2-unlink-purge
+      - hotfix/gate6a2-*
   workflow_dispatch:
 
 permissions:
@@ -18,7 +19,7 @@ jobs:
       DATA_MOUNT: /tmp/nfc-data
       ALLOWED_ROOTS: /tmp/nfc-data
       QUARANTINE_ROOT: /tmp/nfc-data/.nas-file-center-trash
-      BASELINE_SHA: 4abd312086c7ef0f363a4da4d13b51cb470d8cba
+      BASELINE_SHA: ${{ startsWith(github.ref_name, 'hotfix/gate6a2-') && 'ddb55f61951736429a40ddf55a6c13548f1c5a37' || '4abd312086c7ef0f363a4da4d13b51cb470d8cba' }}
 
     steps:
       - name: Checkout exact candidate with history

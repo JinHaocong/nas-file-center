@@ -361,15 +361,50 @@ def _json_dumps(payload: dict[str, Any]) -> str:
     )
 
 
-def _journal_records_for_entry(session: Any, entry_id: int) -> list[tuple[OperationJournal, dict[str, Any]]]:
+def _positive_generation(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None
+    return int(value)
+
+
+def _journal_records_for_entry(
+    session: Any,
+    entry_id: int,
+    *,
+    attempt_generation: int | None = None,
+) -> list[tuple[OperationJournal, dict[str, Any]]]:
+    """Return Gate6-A2 journal records scoped to one entry incarnation.
+
+    OperationJournal is durable history and can outlive a QuarantineEntry row.
+    SQLite may later reuse the numeric entry id; the quarantine transaction
+    allocator then advances to a new attempt generation because the prior
+    attempt namespace is still present.  Therefore entry_id alone is not a
+    sufficient recovery key.
+
+    Legacy unlink_v1 intent/terminal rows did not persist the generation at the
+    top level.  They are still recoverable because journal ids are chronological:
+    an authority row starts an epoch and its manifest carries the generation.
+    Subsequent rows for the same entry inherit that epoch until the next
+    authority row.  New rows also persist active_attempt_generation explicitly.
+    """
+    requested_generation = (
+        _positive_generation(attempt_generation)
+        if attempt_generation is not None
+        else None
+    )
+    if attempt_generation is not None and requested_generation is None:
+        return []
+
     rows = list(
         session.scalars(
             select(OperationJournal)
             .where(OperationJournal.operation == OPERATION_ID)
-            .order_by(OperationJournal.sequence.asc(), OperationJournal.id.asc())
+            .order_by(OperationJournal.id.asc())
         )
     )
     records: list[tuple[OperationJournal, dict[str, Any]]] = []
+    epoch_generation: int | None = None
+
     for row in rows:
         try:
             payload = json.loads(row.before_json or "{}")
@@ -377,14 +412,45 @@ def _journal_records_for_entry(session: Any, entry_id: int) -> list[tuple[Operat
             continue
         if not isinstance(payload, dict) or payload.get("entry_id") != entry_id:
             continue
+
+        explicit_generation = _positive_generation(
+            payload.get("active_attempt_generation")
+        )
+        if payload.get("phase") == "authority":
+            manifest = payload.get("manifest")
+            manifest_generation = (
+                _positive_generation(manifest.get("active_attempt_generation"))
+                if isinstance(manifest, dict)
+                else None
+            )
+            epoch_generation = explicit_generation or manifest_generation
+            record_generation = epoch_generation
+        else:
+            record_generation = explicit_generation or epoch_generation
+
+        if (
+            requested_generation is not None
+            and record_generation != requested_generation
+        ):
+            continue
         records.append((row, payload))
+
     return records
 
 
-def _durable_authority_manifest(session: Any, entry_id: int) -> dict[str, Any]:
+def _durable_authority_manifest(
+    session: Any,
+    entry_id: int,
+    *,
+    attempt_generation: int,
+) -> dict[str, Any]:
     authorities = [
         payload
-        for _, payload in _journal_records_for_entry(session, entry_id)
+        for _, payload in _journal_records_for_entry(
+            session,
+            entry_id,
+            attempt_generation=attempt_generation,
+        )
         if payload.get("phase") == "authority"
     ]
     if len(authorities) != 1:
@@ -521,16 +587,29 @@ def _persist_initial_authority(
                 "UNLINK_MANIFEST_INVALID:" + ",".join(validation["blockers"])
             )
 
-        if _journal_records_for_entry(session, entry_id):
+        generation = int(entry.active_attempt_generation or 0)
+        if generation <= 0:
             session.rollback()
             raise StateConflictError(
-                f"UNLINK_RECOVERY_AUTHORITY_INVALID: unexpected prior Gate6-A2 journal for entry #{entry_id}"
+                f"UNLINK_RECOVERY_AUTHORITY_INVALID: generation missing for entry #{entry_id}"
+            )
+
+        if _journal_records_for_entry(
+            session,
+            entry_id,
+            attempt_generation=generation,
+        ):
+            session.rollback()
+            raise StateConflictError(
+                f"UNLINK_RECOVERY_AUTHORITY_INVALID: unexpected prior Gate6-A2 journal "
+                f"for entry #{entry_id} generation #{generation}"
             )
 
         authority = {
             "phase": "authority",
             "purge_semantics": SEMANTICS_VERSION,
             "entry_id": entry_id,
+            "active_attempt_generation": generation,
             "manifest": frozen_manifest,
         }
         session.add(
@@ -557,11 +636,17 @@ def _find_path_intent(
     session: Any,
     entry_id: int,
     frozen: dict[str, Any],
+    *,
+    attempt_generation: int,
 ) -> OperationJournal | None:
     role = str(frozen.get("role") or "")
     path = str(_absolute_lexical(frozen.get("path", "")))
     matches: list[OperationJournal] = []
-    for row, payload in _journal_records_for_entry(session, entry_id):
+    for row, payload in _journal_records_for_entry(
+        session,
+        entry_id,
+        attempt_generation=attempt_generation,
+    ):
         if payload.get("phase") != "unlink_intent":
             continue
         if (
@@ -606,7 +691,12 @@ def _persist_path_intent(
             raise StateConflictError(
                 f"UNLINK_RECOVERY_STATE_INVALID: entry #{entry_id} left purge-in-progress state"
             )
-        durable_manifest = _durable_authority_manifest(session, entry_id)
+        generation = int(entry.active_attempt_generation or 0)
+        durable_manifest = _durable_authority_manifest(
+            session,
+            entry_id,
+            attempt_generation=generation,
+        )
         canonical_items = {
             str(item["role"]): item
             for item in _validate_purging_authority(entry, quarantine_root, durable_manifest)
@@ -619,7 +709,12 @@ def _persist_path_intent(
                 f"UNLINK_RECOVERY_INTENT_INVALID: frozen authority mismatch for role {role}"
             )
 
-        existing = _find_path_intent(session, entry_id, frozen)
+        existing = _find_path_intent(
+            session,
+            entry_id,
+            frozen,
+            attempt_generation=generation,
+        )
         if existing is not None:
             session.commit()
             return int(existing.id)
@@ -628,6 +723,7 @@ def _persist_path_intent(
             "phase": "unlink_intent",
             "purge_semantics": SEMANTICS_VERSION,
             "entry_id": entry_id,
+            "active_attempt_generation": generation,
             "role": role,
             "path": str(_absolute_lexical(frozen["path"])),
             "frozen_identity": {
@@ -663,6 +759,8 @@ def _mark_path_complete(
     journal_id: int,
     entry_id: int,
     frozen: dict[str, Any],
+    *,
+    attempt_generation: int,
 ) -> None:
     with session_factory() as session:
         session.execute(text("BEGIN IMMEDIATE"))
@@ -680,6 +778,10 @@ def _mark_path_complete(
             or before.get("phase") != "unlink_intent"
             or before.get("role") != frozen.get("role")
             or before.get("path") != str(_absolute_lexical(frozen.get("path", "")))
+            or (
+                before.get("active_attempt_generation") is not None
+                and before.get("active_attempt_generation") != attempt_generation
+            )
         ):
             session.rollback()
             raise StateConflictError("UNLINK_RECOVERY_INTENT_INVALID: intent row identity changed")
@@ -688,6 +790,7 @@ def _mark_path_complete(
                 "phase": "unlinked",
                 "purge_semantics": SEMANTICS_VERSION,
                 "entry_id": entry_id,
+                "active_attempt_generation": attempt_generation,
                 "role": frozen.get("role"),
                 "path": str(_absolute_lexical(frozen.get("path", ""))),
             }
@@ -751,7 +854,12 @@ def _commit_terminal_purged(
         if entry is None:
             session.rollback()
             raise StateConflictError(f"Quarantine entry #{entry_id} not found")
-        manifest = _durable_authority_manifest(session, entry_id)
+        generation = int(entry.active_attempt_generation or 0)
+        manifest = _durable_authority_manifest(
+            session,
+            entry_id,
+            attempt_generation=generation,
+        )
         frozen_items = _validate_purging_authority(entry, quarantine_root, manifest)
 
         for frozen in frozen_items:
@@ -761,7 +869,12 @@ def _commit_terminal_purged(
                 raise StateConflictError(
                     f"UNLINK_TERMINAL_INCOMPLETE: authorized path still exists for {frozen['role']}"
                 )
-            if _find_path_intent(session, entry_id, frozen) is None:
+            if _find_path_intent(
+                session,
+                entry_id,
+                frozen,
+                attempt_generation=generation,
+            ) is None:
                 session.rollback()
                 raise StateConflictError(
                     f"UNLINK_TERMINAL_UNPROVEN: missing path has no durable intent for {frozen['role']}"
@@ -785,6 +898,7 @@ def _commit_terminal_purged(
                         "phase": "terminal",
                         "purge_semantics": SEMANTICS_VERSION,
                         "entry_id": entry_id,
+                        "active_attempt_generation": generation,
                     }
                 ),
                 after_json=_json_dumps(
@@ -792,6 +906,7 @@ def _commit_terminal_purged(
                         "phase": "purged",
                         "purge_semantics": SEMANTICS_VERSION,
                         "entry_id": entry_id,
+                        "active_attempt_generation": generation,
                     }
                 ),
                 metadata_before_json="{}",
@@ -825,6 +940,7 @@ def execute_journaled_unlink_purge(
             raise StateConflictError(f"Quarantine entry #{entry_id} not found")
         state = entry.state
         phase = entry.tx_phase
+        generation = int(entry.active_attempt_generation or 0)
 
     if state == "active" and phase == "active":
         if frozen_manifest is None:
@@ -837,7 +953,11 @@ def execute_journaled_unlink_purge(
         )
     elif state == "purging" and phase == "purging":
         with session_factory() as session:
-            durable_manifest = _durable_authority_manifest(session, entry_id)
+            durable_manifest = _durable_authority_manifest(
+                session,
+                entry_id,
+                attempt_generation=generation,
+            )
         if frozen_manifest is not None and frozen_manifest != durable_manifest:
             raise StateConflictError("UNLINK_RECOVERY_AUTHORITY_CHANGED")
     elif state == "purged" and phase == "purged":
@@ -857,7 +977,12 @@ def execute_journaled_unlink_purge(
         entry = session.get(QuarantineEntry, entry_id)
         if entry is None:
             raise StateConflictError(f"Quarantine entry #{entry_id} not found")
-        manifest = _durable_authority_manifest(session, entry_id)
+        generation = int(entry.active_attempt_generation or 0)
+        manifest = _durable_authority_manifest(
+            session,
+            entry_id,
+            attempt_generation=generation,
+        )
         frozen_items = _validate_purging_authority(entry, root, manifest)
 
     removed_roles: list[str] = []
@@ -868,7 +993,12 @@ def execute_journaled_unlink_purge(
         path = _absolute_lexical(frozen["path"])
 
         with session_factory() as session:
-            existing_intent = _find_path_intent(session, entry_id, frozen)
+            existing_intent = _find_path_intent(
+                session,
+                entry_id,
+                frozen,
+                attempt_generation=generation,
+            )
 
         if not os.path.lexists(path):
             if existing_intent is None:
@@ -906,6 +1036,7 @@ def execute_journaled_unlink_purge(
             intent_id,
             entry_id,
             frozen,
+            attempt_generation=generation,
         )
 
     _commit_terminal_purged(
