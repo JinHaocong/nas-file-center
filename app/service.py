@@ -1588,6 +1588,7 @@ class FileCenterService:
         item_validations: dict[int, tuple[str, str, str | None]] = {}
         has_error = False
         planned_mkdir_targets: set[Path] = set()
+        recursive_protection_snapshot_cache: dict[str, Any] = {}
 
         for row in rows:
             if row.state == "completed":
@@ -1863,6 +1864,7 @@ class FileCenterService:
                     expected_source_path=row.source_path,
                     allowed_roots=self.settings.allowed_roots,
                     quarantine_root=self.settings.quarantine_root,
+                    snapshot_cache=recursive_protection_snapshot_cache,
                 )
                 if not recursive_evaluation.safe:
                     recursive_reason = (

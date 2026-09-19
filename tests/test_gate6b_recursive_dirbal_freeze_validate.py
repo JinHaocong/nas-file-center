@@ -389,6 +389,83 @@ def test_nonrecursive_freeze_path_remains_compatible(service_env):
     assert "frozen_recursive_protection" not in metadata
 
 
+def test_recursive_validate_plan_reuses_shared_ancestor_snapshots_per_call(service_env, monkeypatch):
+    plan_id = _freeze_recursive_plan(service_env, scan_id=1306)
+    service = service_env["service"]
+
+    with service_env["SessionLocal"]() as session:
+        first = session.scalar(
+            select(BatchPlanItem)
+            .where(BatchPlanItem.plan_id == plan_id)
+            .order_by(BatchPlanItem.sequence)
+        )
+        assert first is not None
+        session.add(
+            BatchPlanItem(
+                plan_id=plan_id,
+                sequence=2,
+                operation=first.operation,
+                source_path=first.source_path,
+                target_path=first.target_path,
+                keep_path=first.keep_path,
+                expected_size=first.expected_size,
+                expected_hash=first.expected_hash,
+                expected_mtime_ns=first.expected_mtime_ns,
+                expected_device=first.expected_device,
+                expected_inode=first.expected_inode,
+                state="planned",
+                metadata_json=first.metadata_json,
+            )
+        )
+        session.commit()
+        first_metadata = first.metadata_json
+        first_source = first.source_path
+
+    authority = parse_recursive_protection_authority(
+        first_metadata,
+        expected_source_path=first_source,
+        allowed_roots=service_env["settings"].allowed_roots,
+        quarantine_root=service_env["settings"].quarantine_root,
+    )
+    assert authority is not None
+    assert authority.protected_ancestors
+
+    import app.planning.recursive_protection as recursive_protection
+
+    real_snapshot = recursive_protection.snapshot_recursive_regular_files
+    calls: list[str] = []
+
+    def counted_snapshot(path, **kwargs):
+        calls.append(str(path))
+        return real_snapshot(path, **kwargs)
+
+    monkeypatch.setattr(
+        recursive_protection,
+        "snapshot_recursive_regular_files",
+        counted_snapshot,
+    )
+
+    service.validate_plan(plan_id)
+
+    assert calls == list(authority.protected_ancestors)
+    with service_env["SessionLocal"]() as session:
+        plan = session.get(BatchPlan, plan_id)
+        items = list(
+            session.scalars(
+                select(BatchPlanItem)
+                .where(BatchPlanItem.plan_id == plan_id)
+                .order_by(BatchPlanItem.sequence)
+            )
+        )
+        assert plan is not None and plan.status == "ready"
+        assert [item.state for item in items] == ["validated", "validated"]
+
+    # A later Validate call must take a fresh live sample; the cache is scoped
+    # only to one validate_plan invocation and never persists across requests.
+    service.validate_plan(plan_id)
+    assert calls == list(authority.protected_ancestors) * 2
+
+
 @pytest.mark.parametrize(
     "tamper_kind",
     ["source", "root", "ancestors", "scope_digest"],
