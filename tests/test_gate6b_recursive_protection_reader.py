@@ -126,3 +126,97 @@ def test_recursive_protection_reader_digest_is_deterministic_and_ctime_free(tmp_
     payload = first.digest_payload()
     assert set(payload) == {"stable", "device", "inode", "tree_identity_digest"}
     assert "ctime" not in json.dumps(payload).lower()
+
+
+def test_execute_chain_reader_counts_nested_ancestors_with_two_root_passes(
+    tmp_path: Path,
+    monkeypatch,
+):
+    module = importlib.import_module("app.planning.recursive_protection")
+    chain_reader = getattr(module, "live_count_recursive_regular_file_chain")
+    real_pass = module._count_live_regular_files_chain_pass
+
+    root = tmp_path / "root"
+    parent = root / "A"
+    deep = parent / "deep"
+    deep.mkdir(parents=True)
+    (deep / "one.bin").write_bytes(b"1")
+    (deep / "two.bin").write_bytes(b"2")
+    (parent / "parent.bin").write_bytes(b"3")
+    (root / "root.bin").write_bytes(b"4")
+
+    pass_calls = []
+
+    def tracked_pass(root_fd, **kwargs):
+        pass_calls.append(tuple(kwargs["protected_relative_dirs"]))
+        return real_pass(root_fd, **kwargs)
+
+    monkeypatch.setattr(module, "_count_live_regular_files_chain_pass", tracked_pass)
+
+    result = chain_reader([str(deep), str(parent), str(root)])
+
+    assert result.stable is True
+    assert result.failure_path is None
+    assert [path for path, _sample in result.samples] == [
+        str(deep),
+        str(parent),
+        str(root),
+    ]
+    assert [sample.count for _path, sample in result.samples] == [2, 3, 4]
+    assert all(sample.stable for _path, sample in result.samples)
+    assert len(pass_calls) == 2
+    assert pass_calls[0] == pass_calls[1] == ("A/deep", "A", ".")
+
+
+def test_execute_chain_reader_excludes_reserved_quarantine_subtree(tmp_path: Path):
+    module = importlib.import_module("app.planning.recursive_protection")
+    chain_reader = getattr(module, "live_count_recursive_regular_file_chain")
+
+    root = tmp_path / "root"
+    protected = root / "A"
+    protected.mkdir(parents=True)
+    quarantine = root / ".nas-file-center-trash"
+    quarantine.mkdir()
+    (protected / "keep.bin").write_bytes(b"keep")
+    (protected / "delete.bin").write_bytes(b"delete")
+    (root / "root-extra.bin").write_bytes(b"root")
+    (quarantine / "already-quarantined.bin").write_bytes(b"old")
+
+    result = chain_reader(
+        [str(protected), str(root)],
+        quarantine_root=quarantine,
+    )
+
+    assert result.stable is True
+    assert [sample.count for _path, sample in result.samples] == [2, 3]
+
+
+def test_execute_chain_reader_count_change_between_passes_fails_closed(
+    tmp_path: Path,
+    monkeypatch,
+):
+    module = importlib.import_module("app.planning.recursive_protection")
+    chain_reader = getattr(module, "live_count_recursive_regular_file_chain")
+
+    root = tmp_path / "root"
+    protected = root / "A"
+    protected.mkdir(parents=True)
+    (protected / "one.bin").write_bytes(b"1")
+    (protected / "two.bin").write_bytes(b"2")
+
+    calls = 0
+
+    def drifting_pass(root_fd, **_kwargs):
+        nonlocal calls
+        calls += 1
+        os.close(root_fd)
+        return (2, 2) if calls == 1 else (1, 2)
+
+    monkeypatch.setattr(module, "_count_live_regular_files_chain_pass", drifting_pass)
+
+    result = chain_reader([str(protected), str(root)])
+
+    assert calls == 2
+    assert result.stable is False
+    assert result.failure_path == str(protected)
+    assert all(sample.stable is False for _path, sample in result.samples)
