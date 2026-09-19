@@ -3132,6 +3132,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                         expected_source_path=item_meta.source_path,
                         allowed_roots=settings.allowed_roots,
                         quarantine_root=settings.quarantine_root,
+                        execute_count_only=True,
                     )
                     if not recursive_evaluation.safe:
                         recursive_reason = (
