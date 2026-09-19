@@ -128,9 +128,9 @@ def build_restore_rename_path(
     )
 
 
-def safe_quarantine_hash(file_path: Path | str, chunk_size: int = 1024 * 1024) -> str:
+def safe_quarantine_hash(file_path: Path | str, chunk_size: int = 8 * 1024 * 1024) -> str:
     """
-    Calculate SHA256 hash using streaming chunks (default 1MiB)
+    Calculate SHA256 hash using streaming chunks (default 8MiB)
     to avoid high memory consumption for large files.
     """
     h = hashlib.sha256()
