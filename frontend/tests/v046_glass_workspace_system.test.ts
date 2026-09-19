@@ -93,4 +93,46 @@ describe('v0.4.6 glass workspace system foundation', () => {
       assert.match(read(path), /variant="dense"/);
     }
   });
+  test('all routed workspaces retain a semantic page root for global composition', () => {
+    const pages: Array<[string, RegExp]> = [
+      ['src/pages/Dashboard/index.tsx', /nfc-dashboard-page/],
+      ['src/pages/Indexes/index.tsx', /nfc-indexes-page/],
+      ['src/pages/Scans/index.tsx', /nfc-scans-page/],
+      ['src/pages/Scans/ScanDetail.tsx', /nfc-scan-detail-page/],
+      ['src/pages/Scans/AdvancedDedupePage.tsx', /nfc-advanced-dedupe-page/],
+      ['src/pages/PathMatch/index.tsx', /nfc-path-match-page/],
+      ['src/pages/Rename/index.tsx', /nfc-rename-page/],
+      ['src/pages/Batch/index.tsx', /nfc-batch-page/],
+      ['src/pages/Organizer/index.tsx', /nfc-organizer-page/],
+      ['src/pages/Plans/index.tsx', /nfc-plans-page/],
+      ['src/pages/Plans/PlanDetail.tsx', /nfc-plan-detail-page/],
+      ['src/pages/Quarantine/index.tsx', /nfc-quarantine-page/],
+      ['src/pages/Tasks/index.tsx', /nfc-tasks-page/],
+      ['src/pages/Audit/index.tsx', /nfc-audit-page/],
+      ['src/pages/Settings/index.tsx', /nfc-settings-page/],
+      ['src/pages/Workflows/WorkflowList.tsx', /nfc-workflows-page/],
+      ['src/pages/Workflows/WorkflowBuilder.tsx', /nfc-workflow-builder-page/],
+      ['src/pages/Login/index.tsx', /nfc-login-shell/],
+    ];
+
+    for (const [path, root] of pages) {
+      assert.match(read(path), root, path);
+    }
+  });
+
+  test('page style entry covers dashboard, operations, details, tools, organizer, workflows, settings and login', () => {
+    const entry = read('src/styles/v046.css');
+    for (const file of [
+      'pages/dashboard.css',
+      'pages/operations.css',
+      'pages/details.css',
+      'pages/tools.css',
+      'pages/organizer.css',
+      'pages/workflows.css',
+      'pages/settings.css',
+      'pages/login.css',
+    ]) {
+      assert.match(entry, new RegExp(file.replace('.', '\\.')));
+    }
+  });
 });
