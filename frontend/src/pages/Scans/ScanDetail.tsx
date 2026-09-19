@@ -270,6 +270,7 @@ export const ScanDetailPage: React.FC = () => {
           description="展开组可查看每个成员；这里只展示扫描快照，不会直接修改文件。"
           action={<span className="nfc-panel-count">{groupsData?.total || 0} groups</span>}
           className="nfc-panel-flush"
+          variant="dense"
         >
           <ResponsiveDataView
             desktop={
