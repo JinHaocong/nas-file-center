@@ -1743,6 +1743,8 @@ def _probe_utility_move_logical_binding_for_identity_rebase(
 def _verify_plan_item_and_keep_freshness(
     item_meta: Any,
     settings: Settings,
+    *,
+    check_hash: bool = True,
 ) -> tuple[bool, Any]:
     if item_meta.operation == "rmdir_empty":
         if settings.quarantine_root and is_reserved_quarantine_path(Path(item_meta.source_path), settings.quarantine_root):
@@ -1766,7 +1768,7 @@ def _verify_plan_item_and_keep_freshness(
         metadata_json=item_meta.metadata_json,
         allowed_roots=settings.allowed_roots,
         quarantine_root=None if item_meta.operation in ("rmdir_empty", "mkdir_empty") else settings.quarantine_root,
-        check_hash=False if item_meta.operation in ("rmdir_empty", "mkdir_empty") else True,
+        check_hash=False if item_meta.operation in ("rmdir_empty", "mkdir_empty") else check_hash,
     )
     if not is_fresh:
         return False, stale_detail
@@ -1825,7 +1827,7 @@ def _verify_plan_item_and_keep_freshness(
                 metadata_json=json.dumps({"snapshot": keep_snap}),
                 allowed_roots=settings.allowed_roots,
                 quarantine_root=settings.quarantine_root,
-                check_hash=True,
+                check_hash=check_hash,
             )
             if not k_fresh:
                 return False, k_stale
@@ -2425,12 +2427,25 @@ class BatchPlanExecuteHandler(TaskHandler):
                 if row is None or row.state in ("completed", "skipped", "failed") or row.id in reconciled_failed_item_ids:
                     continue
 
+            # Duplicate quarantine/unlink performs the authoritative SHA256
+            # pair verification in execute_item immediately before mutation.
+            # Keep the earlier boundary fences identity/stat based to avoid
+            # re-reading both payloads several times before that final hash.
+            defer_duplicate_hash_to_execute = bool(
+                item_meta.keep_path
+                and item_meta.operation in {"quarantine", "unlink"}
+            )
+
             # Boundary Freshness Check
             if (
                 item_meta.operation not in {"restore", "quarantine_purge"}
                 and not _is_utility_single_child_cleanup(item_meta)
             ):
-                is_fresh, stale_detail = _verify_plan_item_and_keep_freshness(item_meta, settings)
+                is_fresh, stale_detail = _verify_plan_item_and_keep_freshness(
+                    item_meta,
+                    settings,
+                    check_hash=not defer_duplicate_hash_to_execute,
+                )
                 if (
                     not is_fresh
                     and stale_detail
@@ -2439,6 +2454,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                     is_fresh, stale_detail = _verify_plan_item_and_keep_freshness(
                         item_meta,
                         settings,
+                        check_hash=not defer_duplicate_hash_to_execute,
                     )
                 if not is_fresh:
                     stale_reason = f"Item stale: {stale_detail.reason if stale_detail else 'stale'}"
@@ -2939,6 +2955,9 @@ class BatchPlanExecuteHandler(TaskHandler):
                         lock.acquired_at = now
                     session.commit()
 
+            recursive_evaluation = None
+            recursive_protection_prevalidated = False
+
             # Final immediate source identity/stat check before mutation
             if item_meta.operation == "restore" and not is_tx_restore:
                 if verified_restore_stat is not None:
@@ -2984,7 +3003,11 @@ class BatchPlanExecuteHandler(TaskHandler):
                 item_meta.operation != "quarantine_purge"
                 and not _is_utility_single_child_cleanup(item_meta)
             ):
-                final_fresh, final_stale_detail = _verify_plan_item_and_keep_freshness(item_meta, settings)
+                final_fresh, final_stale_detail = _verify_plan_item_and_keep_freshness(
+                    item_meta,
+                    settings,
+                    check_hash=not defer_duplicate_hash_to_execute,
+                )
                 if (
                     not final_fresh
                     and final_stale_detail
@@ -2993,6 +3016,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                     final_fresh, final_stale_detail = _verify_plan_item_and_keep_freshness(
                         item_meta,
                         settings,
+                        check_hash=not defer_duplicate_hash_to_execute,
                     )
                 if not final_fresh:
                     stale_reason = f"Item stale: {final_stale_detail.reason if final_stale_detail else 'stale'}"
@@ -3127,6 +3151,17 @@ class BatchPlanExecuteHandler(TaskHandler):
                             session.commit()
                         break
 
+            if recursive_evaluation is not None and recursive_evaluation.safe:
+                protected_dir_raw = meta.get("protected_dir")
+                covered_ancestors = {
+                    ancestor_path
+                    for ancestor_path, _sample in recursive_evaluation.current_ancestors
+                }
+                recursive_protection_prevalidated = bool(
+                    isinstance(protected_dir_raw, str)
+                    and protected_dir_raw in covered_ancestors
+                )
+
             utility_pair_meta = (
                 _utility_single_child_meta(item_meta)
                 if paired_cleanup_item_id is not None and item_meta.operation == "move"
@@ -3151,6 +3186,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                             worker_id=context.worker_id,
                             quarantine_entry_id=q_purge_entry_id or q_entry_id or q_restore_entry_id,
                             purge_manifest=purge_manifest,
+                            recursive_protection_prevalidated=recursive_protection_prevalidated,
                         )
                         if result.state == "completed":
                             utility_cleanup_result = wrapper_guard.remove_if_empty()
@@ -3166,6 +3202,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                         worker_id=context.worker_id,
                         quarantine_entry_id=q_purge_entry_id or q_entry_id or q_restore_entry_id,
                         purge_manifest=purge_manifest,
+                        recursive_protection_prevalidated=recursive_protection_prevalidated,
                     )
             except Exception as exc:
                 result = ItemResult(
