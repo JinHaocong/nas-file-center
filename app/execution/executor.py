@@ -332,6 +332,7 @@ def execute_item(
     quarantine_entry_id: int | None = None,
     purge_manifest: dict | None = None,
     unlink_manifest: dict | None = None,
+    negative_capability_probe_cache: set[int] | None = None,
 ) -> ItemResult:
     if item.state == "completed":
         return ItemResult("completed", "already completed")
@@ -592,7 +593,13 @@ def execute_item(
             if quarantine_root:
                 valid_roots.append(Path(quarantine_root).resolve())
             probe_src = tx_anchor_p if (is_tx_restore and tx_anchor_p and tx_anchor_p.exists()) else source
-            capability = resolve_mutation_capability(probe_src, target.parent, quarantine_root, valid_roots)
+            capability = resolve_mutation_capability(
+                probe_src,
+                target.parent,
+                quarantine_root,
+                valid_roots,
+                negative_probe_cache=negative_capability_probe_cache,
+            )
 
             if capability == MutationCapability.COMPAT_TRANSACTIONAL:
                 if not session_factory or not quarantine_entry_id:
@@ -684,7 +691,13 @@ def execute_item(
             valid_roots = list(allowed_roots)
             if quarantine_root:
                 valid_roots.append(Path(quarantine_root).resolve())
-            capability = resolve_mutation_capability(source, target.parent, quarantine_root, valid_roots)
+            capability = resolve_mutation_capability(
+                source,
+                target.parent,
+                quarantine_root,
+                valid_roots,
+                negative_probe_cache=negative_capability_probe_cache,
+            )
 
             if capability == MutationCapability.COMPAT_TRANSACTIONAL and session_factory and worker_id and quarantine_entry_id:
                 try:
