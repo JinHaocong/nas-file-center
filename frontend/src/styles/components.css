@@ -1,4 +1,4 @@
-/* v0.4.6 deep component pass */
+/* v0.4.7 deep component system */
 
 /* Directory picker */
 .nfc-directory-picker-modal .ant-modal-body {
@@ -26,7 +26,7 @@
   overflow: hidden;
   border: 1px solid var(--nfc-border-soft);
   border-radius: var(--nfc-radius-inner);
-  background: color-mix(in srgb, var(--nfc-dense-surface-bg) 92%, transparent);
+  background: var(--nfc-surface-1);
 }
 
 .nfc-directory-browser-row {
@@ -182,10 +182,9 @@
   display: grid;
   grid-template-columns: minmax(220px, 0.65fr) minmax(0, 1.35fr);
   border: 1px solid var(--nfc-border-soft) !important;
-  background: var(--nfc-glass-workspace-bg);
-  box-shadow: var(--nfc-shadow-workspace) !important;
-  backdrop-filter: blur(var(--nfc-blur-workspace)) saturate(132%);
-  -webkit-backdrop-filter: blur(var(--nfc-blur-workspace)) saturate(132%);
+  border-radius: var(--nfc-radius-workspace);
+  background: var(--nfc-surface-1);
+  box-shadow: none !important;
 }
 
 .nfc-worker-primary {
