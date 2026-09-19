@@ -1,7 +1,7 @@
 /* v0.4.6 Frosted Control Plane — single CSS surface authority */
 :root {
-  --nfc-accent: #335cff;
-  --nfc-accent-soft: #eef1ff;
+  --nfc-accent: #0a84ff;
+  --nfc-accent-soft: #eaf3ff;
   --nfc-canvas: #f3f5f8;
   --nfc-surface-1: #ffffff;
   --nfc-surface-2: #f1f3f7;
@@ -13,7 +13,7 @@
   --nfc-text-muted: #5d6673;
   --nfc-text-subtle: #87909d;
 
-  --nfc-canvas-tint-a: rgba(51, 92, 255, 0.095);
+  --nfc-canvas-tint-a: rgba(10, 132, 255, 0.095);
   --nfc-canvas-tint-b: rgba(46, 170, 140, 0.055);
 
   --nfc-glass-shell-bg: rgba(248, 250, 252, 0.72);
@@ -68,8 +68,8 @@
 }
 
 [data-theme='dark'] {
-  --nfc-accent: #8d98ff;
-  --nfc-accent-soft: #1a2042;
+  --nfc-accent: #4da3ff;
+  --nfc-accent-soft: #10243a;
   --nfc-canvas: #0b0e12;
   --nfc-surface-1: #12161b;
   --nfc-surface-2: #191e25;
@@ -81,7 +81,7 @@
   --nfc-text-muted: #afb8c3;
   --nfc-text-subtle: #7f8a98;
 
-  --nfc-canvas-tint-a: rgba(116, 128, 255, 0.13);
+  --nfc-canvas-tint-a: rgba(77, 163, 255, 0.13);
   --nfc-canvas-tint-b: rgba(50, 168, 140, 0.065);
 
   --nfc-glass-shell-bg: rgba(16, 21, 26, 0.72);
