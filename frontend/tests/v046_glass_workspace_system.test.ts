@@ -71,4 +71,26 @@ describe('v0.4.6 glass workspace system foundation', () => {
     const legacy = read('src/index.css');
     assert.match(legacy, /grid-template-areas:[\s\S]*"runtime lifecycle"[\s\S]*"resource lifecycle"[\s\S]*"sessions sessions"/);
   });
+  test('deep component surfaces cover directory picker, task runtime and destructive flows', () => {
+    const css = read('src/styles/components.css');
+    assert.match(css, /\.nfc-directory-browser-toolbar[\s\S]*var\(--nfc-dense-surface-bg\)/);
+    assert.match(css, /\.nfc-worker-status-strip[\s\S]*var\(--nfc-glass-workspace-bg\)/);
+    assert.match(css, /\.nfc-overlay-section[\s\S]*var\(--nfc-dense-surface-bg\)/);
+    assert.match(css, /\.nfc-destructive-confirm[\s\S]*var\(--nfc-danger-soft\)/);
+    assert.match(css, /@media \(max-width: 767px\)[\s\S]*\.nfc-task-action-bar/);
+  });
+
+  test('operational table pages opt into dense data surfaces', () => {
+    for (const path of [
+      'src/pages/Indexes/index.tsx',
+      'src/pages/Scans/index.tsx',
+      'src/pages/Plans/index.tsx',
+      'src/pages/Quarantine/index.tsx',
+      'src/pages/Tasks/index.tsx',
+      'src/pages/Audit/index.tsx',
+      'src/pages/Workflows/WorkflowList.tsx',
+    ]) {
+      assert.match(read(path), /variant="dense"/);
+    }
+  });
 });
