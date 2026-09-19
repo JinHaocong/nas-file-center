@@ -77,3 +77,68 @@
   border-color: var(--nfc-border-soft);
   background: color-mix(in srgb, var(--nfc-surface-2) 48%, transparent);
 }
+
+.nfc-step-empty {
+  padding: 24px 14px;
+  border: 1px dashed var(--nfc-border-soft);
+  border-radius: var(--nfc-radius-inner);
+  background: color-mix(in srgb, var(--nfc-surface-2) 36%, transparent);
+}
+
+.nfc-step-add-surface {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px dashed var(--nfc-border-soft);
+  border-radius: var(--nfc-radius-inner);
+  background: color-mix(in srgb, var(--nfc-surface-2) 28%, transparent);
+}
+
+.nfc-step-add-button.ant-btn {
+  width: 100%;
+  min-height: 44px;
+  border-color: var(--nfc-border-soft);
+  background: color-mix(in srgb, var(--nfc-dense-surface-bg) 84%, transparent);
+}
+
+.nfc-step-add-button.ant-btn:hover {
+  border-color: var(--nfc-border-accent);
+  background: color-mix(in srgb, var(--nfc-accent-soft) 38%, var(--nfc-dense-surface-bg));
+}
+
+.nfc-workflow-step-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.nfc-workflow-step-form .ant-form-item {
+  margin-bottom: 12px;
+}
+
+.nfc-workflow-full-control {
+  width: 100%;
+}
+
+.nfc-workflow-field-spaced {
+  margin-top: 6px;
+}
+
+@media (max-width: 767px) {
+  .nfc-workflow-step-card {
+    border-radius: 12px !important;
+  }
+
+  .nfc-workflow-step-heading {
+    min-height: 54px;
+    padding-inline: 10px;
+  }
+
+  .nfc-step-actions {
+    max-width: 42vw;
+    overflow-x: auto;
+  }
+
+  .nfc-step-add-surface {
+    padding: 8px;
+  }
+}
