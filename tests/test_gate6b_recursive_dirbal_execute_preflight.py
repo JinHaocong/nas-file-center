@@ -362,7 +362,7 @@ def test_nonrecursive_synchronous_execute_plan_remains_compatible(tmp_path: Path
     assert result["status"] == "completed"
     assert not source.exists()
 
-def test_worker_recursive_preflight_authorizes_skip_of_covered_legacy_recount(tmp_path: Path, monkeypatch):
+def test_worker_recursive_preflight_keeps_final_legacy_last_file_fence(tmp_path: Path, monkeypatch):
     service, settings, root, _ = _setup_service(tmp_path)
     protected = root / "set"
     protected.mkdir()
@@ -371,30 +371,22 @@ def test_worker_recursive_preflight_authorizes_skip_of_covered_legacy_recount(tm
     source.write_bytes(b"duplicate")
     sibling.write_bytes(b"survivor")
 
-    plan_id = _create_ready_recursive_plan(service, settings, root, source, token="covered-recount")
+    plan_id = _create_ready_recursive_plan(service, settings, root, source, token="final-last-file-fence")
 
     import app.execution.executor as executor
-    import app.tasks.handlers_base as handlers_base
 
     recount_calls: list[str] = []
-    original_execute = handlers_base.execute_item
-    execute_flags: list[bool] = []
+    real_count = executor._count_regular_files
 
-    def fail_recount(path):
+    def tracked_count(path):
         recount_calls.append(str(path))
-        raise AssertionError("covered protected_dir must not use legacy os.walk recount")
+        return real_count(path)
 
-    def tracked_execute(*args, **kwargs):
-        execute_flags.append(bool(kwargs.get("recursive_protection_prevalidated")))
-        return original_execute(*args, **kwargs)
+    monkeypatch.setattr(executor, "_count_regular_files", tracked_count)
 
-    monkeypatch.setattr(executor, "_count_regular_files", fail_recount)
-    monkeypatch.setattr(handlers_base, "execute_item", tracked_execute)
+    _enqueue_and_run_worker(service, settings, plan_id, worker_id="gate6b-final-last-file-fence")
 
-    _enqueue_and_run_worker(service, settings, plan_id, worker_id="gate6b-covered-recount")
-
-    assert execute_flags == [True]
-    assert recount_calls == []
+    assert recount_calls == [str(protected)]
     assert not source.exists()
     assert sibling.exists()
 
