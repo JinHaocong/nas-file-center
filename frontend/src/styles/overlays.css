@@ -53,6 +53,10 @@
   -webkit-backdrop-filter: none;
 }
 
+.nfc-mobile-nav-drawer .ant-drawer-body {
+  padding: 0;
+}
+
 .ant-message .ant-message-notice-content,
 .ant-notification .ant-notification-notice {
   border: 1px solid var(--nfc-border-strong);

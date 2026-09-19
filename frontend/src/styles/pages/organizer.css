@@ -1,13 +1,14 @@
 .nfc-organizer-page,
 .nfc-organizer-preview-page {
-  gap: 16px;
+  gap: 18px;
 }
 
 .nfc-organizer-profile-toolbar,
 .nfc-organizer-preview-filter {
-  min-height: 56px;
-  padding: 9px 12px;
-  background: color-mix(in srgb, var(--nfc-dense-surface-bg) 92%, transparent);
+  min-height: 50px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--nfc-border-soft);
+  background: var(--nfc-surface-1);
 }
 
 .nfc-profile-name-cell {
@@ -38,7 +39,7 @@
 .nfc-organizer-import-modal textarea {
   min-height: min(42dvh, 360px) !important;
   border-color: var(--nfc-border-soft) !important;
-  background: var(--nfc-dense-surface-bg) !important;
+  background: var(--nfc-surface-1) !important;
   font-family: var(--nfc-font-mono, ui-monospace, monospace);
   font-size: 11px;
   line-height: 1.5;
@@ -46,7 +47,7 @@
 
 .nfc-upload-trigger {
   border-color: var(--nfc-border-soft);
-  background: color-mix(in srgb, var(--nfc-surface-2) 52%, transparent);
+  background: var(--nfc-surface-2);
 }
 
 .nfc-organizer-step-editor {
@@ -56,10 +57,10 @@
 }
 
 .nfc-organizer-step-import {
-  padding: 12px;
+  padding: 11px 12px;
   border: 1px solid var(--nfc-border-soft);
-  border-radius: var(--nfc-radius-inner);
-  background: color-mix(in srgb, var(--nfc-surface-2) 42%, transparent);
+  border-radius: var(--nfc-radius-control);
+  background: var(--nfc-surface-2);
 }
 
 .nfc-organizer-step-import-stack {

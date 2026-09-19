@@ -4,7 +4,7 @@
 .nfc-quarantine-page,
 .nfc-tasks-page,
 .nfc-audit-page {
-  --nfc-list-row-hover: color-mix(in srgb, var(--nfc-accent) 4.5%, var(--nfc-surface-2));
+  --nfc-list-row-hover: color-mix(in srgb, var(--nfc-accent) 3.4%, var(--nfc-surface-1));
 }
 
 .nfc-indexes-page .nfc-filter-bar,
@@ -13,23 +13,25 @@
 .nfc-quarantine-page .nfc-filter-bar,
 .nfc-tasks-page .nfc-filter-bar,
 .nfc-audit-page .nfc-filter-bar {
-  min-height: 56px;
-  padding: 9px 12px;
+  min-height: 50px;
+  padding: 7px 10px;
+  border: 0;
   border-bottom: 1px solid var(--nfc-border-soft);
-  background: color-mix(in srgb, var(--nfc-dense-surface-bg) 92%, transparent);
+  border-radius: 0;
+  background: var(--nfc-surface-1);
 }
 
 .nfc-quarantine-page .nfc-bulk-action-bar {
-  margin: 10px 12px;
-  padding: 8px 10px;
+  margin: 8px 10px;
+  padding: 7px 9px;
   border: 1px solid var(--nfc-border-soft);
-  border-radius: var(--nfc-radius-inner);
-  background: color-mix(in srgb, var(--nfc-surface-2) 72%, transparent);
+  border-radius: var(--nfc-radius-control);
+  background: color-mix(in srgb, var(--nfc-accent-soft) 28%, var(--nfc-surface-1));
 }
 
 .nfc-quarantine-page .nfc-selection-count {
-  min-height: 30px;
-  padding-inline: 10px;
+  min-height: 28px;
+  padding-inline: 9px;
   border-radius: var(--nfc-radius-pill);
 }
 
@@ -46,23 +48,23 @@
 .nfc-plan-action-surface,
 .nfc-lifecycle-strip {
   border-color: var(--nfc-border-soft) !important;
-  border-radius: var(--nfc-radius-inner) !important;
+  border-radius: var(--nfc-radius-control) !important;
 }
 
 .nfc-plan-detail-page .nfc-lifecycle-strip {
-  padding: 8px;
-  background: color-mix(in srgb, var(--nfc-dense-surface-bg) 88%, transparent);
+  padding: 7px;
+  background: var(--nfc-surface-2);
 }
 
 .nfc-plan-detail-page .nfc-lifecycle-step {
-  border-radius: var(--nfc-radius-control);
+  border-radius: 6px;
 }
 
 .nfc-audit-page .nfc-operation-badge,
 .nfc-plans-page .nfc-kind-badge,
 .nfc-scans-page .nfc-kind-badge,
 .nfc-tasks-page .nfc-kind-badge {
-  background: color-mix(in srgb, var(--nfc-surface-2) 76%, transparent);
+  background: var(--nfc-surface-2);
 }
 
 .nfc-mobile-record-list {

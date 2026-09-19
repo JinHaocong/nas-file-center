@@ -1,4 +1,4 @@
-/* v0.4.6 deep component pass */
+/* v0.4.7 deep component system */
 
 /* Directory picker */
 .nfc-directory-picker-modal .ant-modal-body {
@@ -24,9 +24,10 @@
 
 .nfc-directory-browser-toolbar {
   overflow: hidden;
-  border: 1px solid var(--nfc-border-soft);
-  border-radius: var(--nfc-radius-inner);
-  background: color-mix(in srgb, var(--nfc-dense-surface-bg) 92%, transparent);
+  border: 0;
+  border-bottom: 1px solid var(--nfc-border-soft);
+  border-radius: 0;
+  background: transparent;
 }
 
 .nfc-directory-browser-row {
@@ -76,10 +77,10 @@
 }
 
 .nfc-directory-favorite-editor {
-  padding: 8px;
+  padding: 8px 2px;
   display: flex;
   gap: 8px;
-  background: color-mix(in srgb, var(--nfc-accent-soft) 28%, transparent);
+  background: transparent;
 }
 
 .nfc-directory-search-row {
@@ -91,8 +92,8 @@
   overflow: auto;
   max-height: min(46vh, 430px);
   border: 1px solid var(--nfc-border-soft);
-  border-radius: var(--nfc-radius-inner);
-  background: var(--nfc-dense-surface-bg);
+  border-radius: var(--nfc-radius-control);
+  background: var(--nfc-surface-1);
 }
 
 .nfc-directory-item.ant-list-item {
@@ -182,10 +183,9 @@
   display: grid;
   grid-template-columns: minmax(220px, 0.65fr) minmax(0, 1.35fr);
   border: 1px solid var(--nfc-border-soft) !important;
-  background: var(--nfc-glass-workspace-bg);
-  box-shadow: var(--nfc-shadow-workspace) !important;
-  backdrop-filter: blur(var(--nfc-blur-workspace)) saturate(132%);
-  -webkit-backdrop-filter: blur(var(--nfc-blur-workspace)) saturate(132%);
+  border-radius: var(--nfc-radius-workspace);
+  background: var(--nfc-surface-1);
+  box-shadow: none !important;
 }
 
 .nfc-worker-primary {
@@ -664,14 +664,14 @@
 }
 
 .nfc-embedded-section-header {
-  min-height: 54px;
-  padding: 10px 12px;
+  min-height: 50px;
+  padding: 9px 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
   border-bottom: 1px solid var(--nfc-border-soft);
-  background: color-mix(in srgb, var(--nfc-surface-2) 42%, transparent);
+  background: transparent;
 }
 
 .nfc-embedded-section-kicker {
@@ -735,17 +735,26 @@
 
 /* Dedupe inspector and scoring controls */
 .nfc-dedupe-summary-grid {
+  overflow: hidden;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
+  gap: 0;
+  border: 1px solid var(--nfc-border-soft);
+  border-radius: var(--nfc-radius-control);
+  background: var(--nfc-surface-1);
 }
 
 .nfc-dedupe-summary-metric {
   min-width: 0;
-  padding: 12px;
-  border: 1px solid var(--nfc-border-soft);
-  border-radius: var(--nfc-radius-inner);
-  background: var(--nfc-dense-surface-bg);
+  padding: 12px 13px;
+  border: 0;
+  border-right: 1px solid var(--nfc-border-soft);
+  border-radius: 0;
+  background: transparent;
+}
+
+.nfc-dedupe-summary-metric:last-child {
+  border-right: 0;
 }
 
 .nfc-dedupe-summary-metric-topline {
@@ -777,8 +786,8 @@
   margin-top: 10px;
   overflow: hidden;
   border: 1px solid var(--nfc-border-soft);
-  border-radius: var(--nfc-radius-inner);
-  background: var(--nfc-dense-surface-bg);
+  border-radius: var(--nfc-radius-control);
+  background: var(--nfc-surface-1);
 }
 
 .nfc-dedupe-root-release-row {
@@ -793,9 +802,11 @@
 
 .nfc-dedupe-config-card.ant-card,
 .nfc-dedupe-surface-card.ant-card {
-  border: 1px solid var(--nfc-border-soft) !important;
-  border-radius: var(--nfc-radius-inner) !important;
-  background: var(--nfc-dense-surface-bg) !important;
+  border: 0 !important;
+  border-top: 1px solid var(--nfc-border-soft) !important;
+  border-bottom: 1px solid var(--nfc-border-soft) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
 }
 
 .nfc-dedupe-config-card .ant-card-head,
@@ -967,11 +978,21 @@
 
   .nfc-dedupe-summary-grid {
     grid-template-columns: 1fr 1fr;
-    gap: 7px;
+    gap: 0;
   }
 
   .nfc-dedupe-summary-metric {
     padding: 10px;
+    border-right: 0;
+    border-bottom: 1px solid var(--nfc-border-soft);
+  }
+
+  .nfc-dedupe-summary-metric:nth-child(odd) {
+    border-right: 1px solid var(--nfc-border-soft);
+  }
+
+  .nfc-dedupe-summary-metric:nth-last-child(-n + 2) {
+    border-bottom: 0;
   }
 
   .nfc-dedupe-summary-value {
@@ -991,5 +1012,127 @@
   .nfc-dedupe-config-heading {
     align-items: stretch;
     flex-direction: column;
+  }
+}
+
+
+/* Advanced dedupe semantic details moved from legacy index.css. */
+.nfc-dedupe-identity-panel,
+.nfc-dedupe-summary-panel,
+.nfc-dedupe-scorer-editor,
+.nfc-dedupe-explain-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.nfc-dedupe-section-heading {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.nfc-accent-icon {
+  color: var(--nfc-accent);
+}
+
+.nfc-dedupe-authority-digest,
+.nfc-dedupe-secondary-digest,
+.nfc-dedupe-digest {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  font-family: var(--nfc-font-mono, ui-monospace, monospace);
+  font-size: 10.5px;
+}
+
+.nfc-dedupe-authority-digest {
+  color: var(--nfc-accent) !important;
+}
+
+.nfc-dedupe-secondary-digest {
+  color: color-mix(in srgb, var(--nfc-accent) 70%, var(--nfc-text)) !important;
+}
+
+.nfc-dedupe-root-release-list,
+.nfc-dedupe-mtime-stack,
+.nfc-dedupe-balancer-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.nfc-dedupe-config-intro {
+  margin-bottom: 10px !important;
+  font-size: 11px;
+}
+
+.nfc-dedupe-radio-help {
+  margin-left: 8px;
+  color: var(--nfc-text-subtle);
+  font-size: 10.5px;
+  line-height: 1.55;
+}
+
+.nfc-dedupe-weight-input {
+  width: 120px !important;
+}
+
+.nfc-dedupe-recursive-alert {
+  margin-top: 10px;
+}
+
+.nfc-decision-tag {
+  font-weight: 650;
+}
+
+.nfc-dedupe-score-value {
+  color: var(--nfc-accent) !important;
+  font-size: 16px;
+}
+
+.nfc-dedupe-balancer-card.ant-card {
+  border-color: color-mix(in srgb, var(--nfc-warning) 22%, var(--nfc-hairline)) !important;
+}
+
+.nfc-task-progress-message {
+  max-width: 100%;
+  color: var(--nfc-text-subtle);
+  font-size: 9.5px;
+}
+
+.nfc-task-progress-muted .nfc-task-progress-status {
+  color: var(--nfc-text-muted);
+}
+
+.nfc-path-breadcrumb-folder {
+  margin-right: 4px;
+  color: var(--nfc-accent);
+}
+
+.nfc-path-breadcrumb-chevron {
+  font-size: 9px;
+}
+
+@media (max-width: 767px) {
+  .nfc-dedupe-scorer-editor .ant-radio-wrapper {
+    width: 100%;
+    align-items: flex-start;
+    margin-inline-end: 0;
+  }
+
+  .nfc-dedupe-scorer-editor .ant-radio-wrapper > span:last-child {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .nfc-dedupe-radio-help {
+    display: block;
+    margin: 4px 0 0;
+  }
+
+  .nfc-dedupe-weight-input {
+    width: 100% !important;
   }
 }

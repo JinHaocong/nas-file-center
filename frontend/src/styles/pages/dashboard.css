@@ -1,37 +1,51 @@
 .nfc-dashboard-page {
-  gap: 18px;
+  gap: 20px;
 }
 
 .nfc-dashboard-page .nfc-snapshot-note {
-  border-color: var(--nfc-border-soft);
-  border-radius: var(--nfc-radius-inner);
-  background: color-mix(in srgb, var(--nfc-dense-surface-bg) 84%, transparent);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--nfc-glass-highlight) 40%, transparent);
+  border: 0;
+  border-left: 2px solid color-mix(in srgb, var(--nfc-accent) 42%, var(--nfc-border-soft));
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .nfc-dashboard-page .nfc-dashboard-layout {
-  gap: 16px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(300px, 0.72fr);
+  gap: 22px;
+  align-items: start;
 }
 
 .nfc-dashboard-page .nfc-dashboard-main-column,
 .nfc-dashboard-page .nfc-dashboard-rail {
-  gap: 16px;
+  gap: 18px;
+}
+
+.nfc-dashboard-page .nfc-dashboard-rail {
+  position: sticky;
+  top: 76px;
 }
 
 .nfc-dashboard-page .nfc-quick-action {
-  min-height: 72px;
+  min-height: 64px;
   border-bottom-color: var(--nfc-border-soft);
 }
 
 .nfc-dashboard-page .nfc-quick-action:hover {
-  background: color-mix(in srgb, var(--nfc-accent) 4%, var(--nfc-surface-2));
+  background: color-mix(in srgb, var(--nfc-accent) 3.2%, var(--nfc-surface-1));
 }
 
 .nfc-dashboard-page .nfc-quick-action-icon {
-  border-color: var(--nfc-border-soft);
-  background: color-mix(in srgb, var(--nfc-dense-surface-bg) 84%, transparent);
+  border: 0;
+  background: var(--nfc-surface-2);
 }
 
 .nfc-dashboard-page .nfc-summary-row {
+  min-height: 44px;
   border-bottom-color: var(--nfc-border-soft);
+}
+
+.nfc-dashboard-page .nfc-data-panel-header {
+  padding-inline: 14px;
 }

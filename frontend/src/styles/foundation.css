@@ -4,19 +4,19 @@ html {
 
 body {
   background:
-    radial-gradient(54rem 38rem at 102% -8%, var(--nfc-canvas-tint-a), transparent 68%),
-    radial-gradient(44rem 30rem at 24% 110%, var(--nfc-canvas-tint-b), transparent 72%),
+    radial-gradient(58rem 34rem at 100% 0%, var(--nfc-canvas-tint-a), transparent 72%),
+    radial-gradient(46rem 28rem at 16% 100%, var(--nfc-canvas-tint-b), transparent 76%),
     var(--nfc-canvas);
   color: var(--nfc-text);
 }
 
 ::selection {
-  background: color-mix(in srgb, var(--nfc-accent) 22%, transparent);
+  background: color-mix(in srgb, var(--nfc-accent) 20%, transparent);
   color: var(--nfc-text);
 }
 
 :focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--nfc-accent) 72%, white 12%);
+  outline: 2px solid color-mix(in srgb, var(--nfc-accent) 68%, white 10%);
   outline-offset: 2px;
 }
 
@@ -32,7 +32,7 @@ body {
 .nfc-page-content {
   position: relative;
   z-index: 1;
-  padding: 18px var(--nfc-page-gutter) 42px;
+  padding: 22px var(--nfc-page-gutter) 46px;
 }
 
 .nfc-page-content::before {
@@ -41,18 +41,17 @@ body {
   z-index: -1;
   inset: 0;
   pointer-events: none;
-  background:
-    linear-gradient(125deg, transparent 18%, color-mix(in srgb, var(--nfc-accent) 2.4%, transparent) 52%, transparent 78%);
+  background: linear-gradient(120deg, transparent 12%, color-mix(in srgb, var(--nfc-accent) 1.2%, transparent) 56%, transparent 84%);
 }
 
 .nfc-operations-page,
 .nfc-dashboard {
-  width: min(100%, 1500px);
+  width: min(100%, var(--nfc-content-max));
   margin-inline: auto;
 }
 
 .nfc-operations-page {
-  gap: 18px;
+  gap: 20px;
 }
 
 .nfc-mono,
@@ -64,7 +63,7 @@ pre {
 }
 
 * {
-  scrollbar-color: color-mix(in srgb, var(--nfc-text-subtle) 25%, transparent) transparent;
+  scrollbar-color: color-mix(in srgb, var(--nfc-text-subtle) 24%, transparent) transparent;
 }
 
 *::-webkit-scrollbar {
@@ -75,6 +74,6 @@ pre {
 *::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
   border-radius: var(--nfc-radius-pill);
-  background: color-mix(in srgb, var(--nfc-text-subtle) 30%, transparent);
+  background: color-mix(in srgb, var(--nfc-text-subtle) 28%, transparent);
   background-clip: padding-box;
 }
