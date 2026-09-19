@@ -135,4 +135,33 @@ describe('v0.4.6 glass workspace system foundation', () => {
       assert.match(entry, new RegExp(file.replace('.', '\\.')));
     }
   });
+  test('final component audit covers security history tasks dedupe and workflow editors', () => {
+    const components = read('src/styles/components.css');
+    const workflows = read('src/styles/pages/workflows.css');
+    for (const selector of [
+      '.nfc-history-cleanup-note',
+      '.nfc-task-log-panel',
+      '.nfc-dedupe-summary-grid',
+      '.nfc-dedupe-rule-row',
+      '.nfc-definition-inspector',
+      '.nfc-revision-mobile-card',
+    ]) {
+      assert.match(components, new RegExp(selector.replace('.', '\\.')));
+    }
+    for (const selector of [
+      '.nfc-completed-scan-picker',
+      '.nfc-filter-builder.ant-card',
+      '.nfc-filter-nested',
+    ]) {
+      assert.match(workflows, new RegExp(selector.replace('.', '\\.')));
+    }
+  });
+
+  test('legacy terminal v0.4.4 workspace override ledgers are removed from index css', () => {
+    const legacy = read('src/index.css');
+    assert.doesNotMatch(legacy, /v0\.4\.4 Workspace Cohesion Pass/);
+    assert.doesNotMatch(legacy, /v0\.4\.4 Sidebar Visual Language Parity Lock/);
+    assert.doesNotMatch(legacy, /v0\.4\.4 shared component substrate parity/);
+    assert.doesNotMatch(legacy, /v0\.4\.4 Settings desktop topology follow-up/);
+  });
 });
