@@ -1,0 +1,56 @@
+.nfc-system-controls-page .nfc-settings-grid {
+  gap: 16px;
+}
+
+.nfc-system-controls-page .nfc-settings-subpanel {
+  overflow: hidden;
+  border: 1px solid var(--nfc-border-soft);
+  border-radius: var(--nfc-radius-inner);
+  background: var(--nfc-dense-surface-bg);
+}
+
+.nfc-system-controls-page .nfc-settings-subpanel-header,
+.nfc-system-controls-page .nfc-settings-window-header {
+  gap: 14px;
+  padding: 12px 14px;
+  border-bottom-color: var(--nfc-border-soft);
+}
+
+.nfc-system-controls-page .nfc-settings-subpanel-header strong,
+.nfc-system-controls-page .nfc-settings-window-header strong {
+  color: var(--nfc-text);
+  font-weight: 660;
+}
+
+.nfc-system-controls-page .nfc-settings-subpanel-header span,
+.nfc-system-controls-page .nfc-settings-window-header span,
+.nfc-system-controls-page .nfc-settings-help {
+  color: var(--nfc-text-subtle);
+}
+
+.nfc-system-controls-page .nfc-settings-control-grid {
+  gap: 10px;
+}
+
+.nfc-system-controls-page .nfc-settings-control,
+.nfc-system-controls-page .nfc-settings-inline-control {
+  gap: 6px;
+}
+
+.nfc-system-controls-page .nfc-settings-control > span,
+.nfc-system-controls-page .nfc-settings-inline-control > span {
+  color: var(--nfc-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.nfc-system-controls-page .nfc-settings-subpanel-danger {
+  border-color: color-mix(in srgb, var(--nfc-danger) 24%, var(--nfc-border-soft));
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--nfc-danger-soft) 38%, transparent), transparent 48%),
+    var(--nfc-dense-surface-bg);
+}
+
+.nfc-system-controls-page .nfc-session-user-agent {
+  color: var(--nfc-text-subtle);
+}
