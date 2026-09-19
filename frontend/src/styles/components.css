@@ -592,3 +592,404 @@
     padding: 9px;
   }
 }
+
+/* Final component audit */
+
+/* Account/security and historical cleanup */
+.nfc-change-password-modal .ant-modal-body,
+.nfc-history-cleanup-modal .ant-modal-body {
+  padding-top: 8px;
+}
+
+.nfc-security-form .ant-form-item {
+  margin-bottom: 14px;
+}
+
+.nfc-history-cleanup-stack {
+  width: 100%;
+}
+
+.nfc-history-cleanup-label {
+  color: var(--nfc-text);
+  font-size: 12px;
+}
+
+.nfc-history-cleanup-note {
+  padding: 12px 13px;
+  border: 1px solid var(--nfc-border-soft);
+  border-radius: var(--nfc-radius-inner);
+  background: color-mix(in srgb, var(--nfc-surface-2) 42%, transparent);
+}
+
+.nfc-history-cleanup-note-title {
+  display: block;
+  margin-bottom: 7px;
+}
+
+.nfc-history-cleanup-list {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--nfc-text-muted);
+  line-height: 1.7;
+}
+
+.nfc-legacy-plan-cleanup {
+  overflow: hidden;
+  border: 1px solid var(--nfc-border-soft);
+  border-radius: var(--nfc-radius-inner);
+  background: var(--nfc-dense-surface-bg);
+}
+
+.nfc-legacy-plan-cleanup-heading {
+  min-height: 58px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid var(--nfc-border-soft);
+}
+
+.nfc-legacy-plan-cleanup-description {
+  padding: 11px 12px;
+  color: var(--nfc-text-muted);
+  line-height: 1.55;
+}
+
+/* Task event stream */
+.nfc-task-log-panel {
+  overflow: hidden;
+  border-top: 1px solid var(--nfc-border-soft);
+  background: var(--nfc-dense-surface-bg);
+}
+
+.nfc-embedded-section-header {
+  min-height: 54px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid var(--nfc-border-soft);
+  background: color-mix(in srgb, var(--nfc-surface-2) 42%, transparent);
+}
+
+.nfc-embedded-section-kicker {
+  color: var(--nfc-text-subtle);
+  font-size: 9px;
+  font-weight: 720;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.nfc-inline-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--nfc-text-muted);
+  font-size: 11px;
+}
+
+.nfc-inline-error {
+  margin: 10px 12px;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--nfc-danger) 22%, var(--nfc-border-soft));
+  border-radius: var(--nfc-radius-control);
+  background: color-mix(in srgb, var(--nfc-danger-soft) 38%, transparent);
+  color: var(--nfc-danger);
+}
+
+.nfc-task-log-mobile-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.nfc-task-log-mobile-card {
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--nfc-border-soft);
+  background: transparent;
+}
+
+.nfc-task-log-mobile-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.nfc-task-log-mobile-event {
+  margin-top: 7px;
+  color: var(--nfc-text);
+  font-weight: 620;
+}
+
+.nfc-log-context {
+  margin-top: 8px;
+}
+
+.nfc-log-context > summary {
+  color: var(--nfc-text-muted);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+/* Dedupe inspector and scoring controls */
+.nfc-dedupe-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.nfc-dedupe-summary-metric {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--nfc-border-soft);
+  border-radius: var(--nfc-radius-inner);
+  background: var(--nfc-dense-surface-bg);
+}
+
+.nfc-dedupe-summary-metric-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.nfc-dedupe-summary-metric-icon {
+  color: var(--nfc-accent);
+}
+
+.nfc-dedupe-summary-value {
+  margin-top: 9px;
+  color: var(--nfc-text);
+  font-size: 21px;
+  font-weight: 670;
+  letter-spacing: -0.025em;
+}
+
+.nfc-dedupe-summary-meta {
+  margin-top: 5px;
+  color: var(--nfc-text-subtle);
+  font-size: 10px;
+}
+
+.nfc-dedupe-root-release-panel {
+  margin-top: 10px;
+  overflow: hidden;
+  border: 1px solid var(--nfc-border-soft);
+  border-radius: var(--nfc-radius-inner);
+  background: var(--nfc-dense-surface-bg);
+}
+
+.nfc-dedupe-root-release-row {
+  min-height: 44px;
+  padding: 8px 11px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-top: 1px solid var(--nfc-border-soft);
+}
+
+.nfc-dedupe-config-card.ant-card,
+.nfc-dedupe-surface-card.ant-card {
+  border: 1px solid var(--nfc-border-soft) !important;
+  border-radius: var(--nfc-radius-inner) !important;
+  background: var(--nfc-dense-surface-bg) !important;
+}
+
+.nfc-dedupe-config-card .ant-card-head,
+.nfc-dedupe-surface-card .ant-card-head {
+  min-height: 48px;
+  border-bottom-color: var(--nfc-border-soft);
+}
+
+.nfc-dedupe-rule-toolbar,
+.nfc-dedupe-weight-row,
+.nfc-dedupe-config-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.nfc-dedupe-weight-row,
+.nfc-dedupe-config-heading {
+  justify-content: space-between;
+}
+
+.nfc-dedupe-rule-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.nfc-dedupe-rule-row {
+  padding: 8px;
+  display: grid;
+  grid-template-columns: auto minmax(110px, 0.34fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--nfc-border-soft);
+  border-radius: var(--nfc-radius-control);
+  background: color-mix(in srgb, var(--nfc-surface-2) 42%, transparent);
+}
+
+.nfc-dedupe-rule-index {
+  font-family: var(--nfc-font-mono, ui-monospace, monospace);
+  font-size: 10px;
+}
+
+.nfc-dedupe-scope-select {
+  min-width: 110px;
+}
+
+.nfc-dedupe-rule-input {
+  min-width: 0;
+}
+
+.nfc-dedupe-config-footer,
+.nfc-dedupe-safety-footnote,
+.nfc-dedupe-explain-footnote {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--nfc-border-soft);
+}
+
+.nfc-dedupe-sibling-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.nfc-dedupe-sibling-card {
+  padding: 9px 10px;
+  border: 1px solid var(--nfc-border-soft);
+  border-radius: var(--nfc-radius-control);
+  background: color-mix(in srgb, var(--nfc-surface-2) 38%, transparent);
+}
+
+.nfc-dedupe-sibling-heading,
+.nfc-dedupe-sibling-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.nfc-dedupe-sibling-path {
+  display: block;
+  margin-top: 5px;
+  font-family: var(--nfc-font-mono, ui-monospace, monospace);
+  font-size: 10px;
+}
+
+/* Definition/revision inspector */
+.nfc-definition-inspector {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.nfc-definition-sha {
+  padding: 9px 10px;
+  border: 1px solid var(--nfc-border-soft);
+  border-radius: var(--nfc-radius-control);
+  background: color-mix(in srgb, var(--nfc-surface-2) 44%, transparent);
+  color: var(--nfc-text-muted);
+  font-family: var(--nfc-font-mono, ui-monospace, monospace);
+  font-size: 10px;
+}
+
+.nfc-code-block-large {
+  max-height: 58dvh;
+}
+
+.nfc-revision-mobile-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.nfc-revision-mobile-card {
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--nfc-border-soft);
+}
+
+.nfc-revision-mobile-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+@media (max-width: 900px) {
+  .nfc-dedupe-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .nfc-dedupe-rule-row {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .nfc-dedupe-scope-select {
+    grid-column: 2;
+    min-width: 0;
+  }
+
+  .nfc-dedupe-rule-input {
+    grid-column: 2;
+  }
+}
+
+@media (max-width: 767px) {
+  .nfc-history-cleanup-note {
+    padding: 10px;
+  }
+
+  .nfc-legacy-plan-cleanup-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .nfc-legacy-plan-cleanup-heading .ant-btn {
+    width: 100%;
+    min-height: 42px;
+  }
+
+  .nfc-embedded-section-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .nfc-inline-filter {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .nfc-dedupe-summary-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 7px;
+  }
+
+  .nfc-dedupe-summary-metric {
+    padding: 10px;
+  }
+
+  .nfc-dedupe-summary-value {
+    font-size: 18px;
+  }
+
+  .nfc-dedupe-rule-row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .nfc-dedupe-rule-row > .ant-btn {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .nfc-dedupe-weight-row,
+  .nfc-dedupe-config-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
