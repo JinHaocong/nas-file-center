@@ -3258,8 +3258,13 @@ class BatchPlanExecuteHandler(TaskHandler):
                             q_stat_ino = st.st_ino
                             if res_p.is_dir():
                                 q_content_hash = None
-                            else:
+                            elif not result.quarantine_identity_authoritative:
                                 q_content_hash = safe_quarantine_hash(res_p)
+                            # COMPAT transactional quarantine has already
+                            # performed authoritative SHA256 qualification both
+                            # before and after source capture. Its QuarantineEntry
+                            # owns that frozen identity, so this handler must not
+                            # reread the payload only to discard the result below.
                 except OSError:
                     pass
 
