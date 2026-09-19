@@ -370,6 +370,7 @@ def evaluate_live_recursive_protection(
     expected_source_path: str,
     allowed_roots: Sequence[Path | str],
     quarantine_root: Path | str | None,
+    snapshot_cache: dict[str, recursive_protection.RecursiveProtectionSnapshot] | None = None,
 ) -> LiveRecursiveProtectionEvaluation:
     """Re-evaluate frozen recursive Last-File authority against current live state.
 
@@ -401,10 +402,14 @@ def evaluate_live_recursive_protection(
 
     current: list[tuple[str, recursive_protection.RecursiveProtectionSnapshot]] = []
     for ancestor in authority.protected_ancestors:
-        sample = recursive_protection.snapshot_recursive_regular_files(
-            ancestor,
-            quarantine_root=quarantine_root,
-        )
+        sample = snapshot_cache.get(ancestor) if snapshot_cache is not None else None
+        if sample is None:
+            sample = recursive_protection.snapshot_recursive_regular_files(
+                ancestor,
+                quarantine_root=quarantine_root,
+            )
+            if snapshot_cache is not None:
+                snapshot_cache.setdefault(ancestor, sample)
         current.append((ancestor, sample))
         frozen_sample = frozen_ancestors[ancestor]
         if (
