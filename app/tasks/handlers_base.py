@@ -2337,7 +2337,22 @@ class BatchPlanExecuteHandler(TaskHandler):
             and it.operation not in {"restore", "quarantine_purge"}
         ]
         worker_stale_items = []
-        for it in unexecuted_items:
+        preflight_total = len(unexecuted_items)
+        for preflight_index, it in enumerate(unexecuted_items, start=1):
+            if (
+                preflight_index == 1
+                or preflight_index == preflight_total
+                or preflight_index % 25 == 0
+            ):
+                context.checkpoint(
+                    progress_current=completed_or_skipped,
+                    progress_total=total_count,
+                    progress_message=(
+                        f"Safety preflight SHA256 {preflight_index}/{preflight_total} "
+                        f"before Plan #{plan_id} mutation..."
+                    ),
+                )
+
             # The exact single-child-wrapper cleanup is authorized by its paired
             # MOVE and is finalized under a live descriptor held across that MOVE.
             # Do not reject it here using a frozen directory inode that may drift
