@@ -21,6 +21,8 @@ def resolve_mutation_capability(
     target_dir: Path | str,
     quarantine_root: Path | str,
     allowed_roots: Sequence[Path | str],
+    *,
+    negative_probe_cache: set[int] | None = None,
 ) -> MutationCapability:
     """
     Resolves mutation capability without imposing transaction overhead on native filesystems.
@@ -36,11 +38,21 @@ def resolve_mutation_capability(
     except OSError:
         return MutationCapability.UNSUPPORTED
 
-    # Open target directory descriptor safely using safe_open_parent_fd context manager
+    # Open target directory descriptor safely using safe_open_parent_fd context manager.
+    # A task-local cache may remember only negative filesystem capability. Reusing a
+    # negative result is fail-closed: it can select the stronger transactional
+    # compatibility path, but it can never grant native mutation authority.
     probe_leaf = ".__probe_noreplace_anchor"
     try:
         with safe_open_parent_fd(Path(target_dir) / probe_leaf, allowed_roots) as (target_dfd, _):
-            probe_result = _probe_rename_noreplace_supported(dir_fd=target_dfd)
+            target_fd_st = os.fstat(target_dfd)
+            target_device = int(target_fd_st.st_dev)
+            if negative_probe_cache is not None and target_device in negative_probe_cache:
+                probe_result = False
+            else:
+                probe_result = _probe_rename_noreplace_supported(dir_fd=target_dfd)
+                if probe_result is False and negative_probe_cache is not None:
+                    negative_probe_cache.add(target_device)
     except Exception:
         return MutationCapability.UNSUPPORTED
 
