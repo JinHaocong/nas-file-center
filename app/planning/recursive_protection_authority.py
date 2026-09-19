@@ -291,10 +291,7 @@ def build_frozen_recursive_protection(
             not sample.stable
             or sample.device is None
             or sample.inode is None
-            or (
-                not execute_count_only
-                and not getattr(sample, "tree_identity_digest", None)
-            )
+            or not sample.tree_identity_digest
         ):
             raise _fail(f"RECURSIVE_PROTECTION_UNSTABLE: {ancestor}")
         if sample.count - 1 < 1:
