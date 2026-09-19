@@ -1,0 +1,79 @@
+.nfc-workflows-page .nfc-data-panel-dense,
+.nfc-workflow-builder-page .nfc-complex-form-panel {
+  background: var(--nfc-dense-surface-bg);
+}
+
+.nfc-workflow-builder-page {
+  gap: 16px;
+}
+
+.nfc-workflow-builder-page .nfc-complex-form-panel {
+  border-radius: var(--nfc-radius-workspace) !important;
+}
+
+.nfc-workflow-step-card {
+  overflow: hidden;
+  border: 1px solid var(--nfc-border-soft) !important;
+  border-radius: var(--nfc-radius-inner) !important;
+  background: var(--nfc-dense-surface-bg) !important;
+  box-shadow: none !important;
+  transition:
+    border-color var(--nfc-motion-fast, 160ms) ease,
+    background var(--nfc-motion-fast, 160ms) ease;
+}
+
+.nfc-workflow-step-card.is-expanded {
+  border-color: var(--nfc-border-accent) !important;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--nfc-accent-soft) 35%, transparent), transparent 42%),
+    var(--nfc-dense-surface-bg) !important;
+}
+
+.nfc-workflow-step-heading {
+  min-height: 58px;
+  border-bottom-color: var(--nfc-border-soft);
+}
+
+.nfc-step-index {
+  color: var(--nfc-text-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+.nfc-workflow-step-editor {
+  border-top-color: var(--nfc-border-soft);
+  background: color-mix(in srgb, var(--nfc-surface-2) 36%, transparent);
+}
+
+.nfc-workflow-mode-grid {
+  gap: 10px;
+}
+
+.nfc-workflow-mode-option {
+  border: 1px solid var(--nfc-border-soft);
+  border-radius: var(--nfc-radius-inner);
+  background: color-mix(in srgb, var(--nfc-dense-surface-bg) 90%, transparent);
+}
+
+.nfc-dedupe-identity-panel,
+.nfc-dedupe-scorer-editor,
+.nfc-dedupe-summary-panel,
+.nfc-dedupe-explain-drawer {
+  --nfc-dedupe-surface: var(--nfc-dense-surface-bg);
+}
+
+.nfc-dedupe-surface-card,
+.nfc-dedupe-config-card,
+.nfc-dedupe-summary-metric,
+.nfc-dedupe-root-release-panel {
+  border-color: var(--nfc-border-soft) !important;
+  border-radius: var(--nfc-radius-inner) !important;
+  background: var(--nfc-dedupe-surface) !important;
+  box-shadow: none !important;
+}
+
+.nfc-dedupe-rule-row,
+.nfc-dedupe-sibling-card,
+.nfc-completed-scan-summary {
+  border-color: var(--nfc-border-soft);
+  background: color-mix(in srgb, var(--nfc-surface-2) 48%, transparent);
+}
