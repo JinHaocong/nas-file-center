@@ -2340,9 +2340,12 @@ class BatchPlanExecuteHandler(TaskHandler):
         preflight_total = len(unexecuted_items)
         for preflight_index, it in enumerate(unexecuted_items, start=1):
             if (
-                preflight_index == 1
-                or preflight_index == preflight_total
-                or preflight_index % 25 == 0
+                preflight_total >= 50
+                and (
+                    preflight_index == 1
+                    or preflight_index == preflight_total
+                    or preflight_index % 25 == 0
+                )
             ):
                 context.checkpoint(
                     progress_current=completed_or_skipped,
