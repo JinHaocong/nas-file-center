@@ -2985,9 +2985,6 @@ class BatchPlanExecuteHandler(TaskHandler):
                         lock.acquired_at = now
                     session.commit()
 
-            recursive_evaluation = None
-            recursive_protection_prevalidated = False
-
             # Final immediate source identity/stat check before mutation
             if item_meta.operation == "restore" and not is_tx_restore:
                 if verified_restore_stat is not None:
@@ -3193,17 +3190,6 @@ class BatchPlanExecuteHandler(TaskHandler):
                             session.commit()
                         break
 
-            if recursive_evaluation is not None and recursive_evaluation.safe:
-                protected_dir_raw = meta.get("protected_dir")
-                covered_ancestors = {
-                    ancestor_path
-                    for ancestor_path, _sample in recursive_evaluation.current_ancestors
-                }
-                recursive_protection_prevalidated = bool(
-                    isinstance(protected_dir_raw, str)
-                    and protected_dir_raw in covered_ancestors
-                )
-
             utility_pair_meta = (
                 _utility_single_child_meta(item_meta)
                 if paired_cleanup_item_id is not None and item_meta.operation == "move"
@@ -3228,7 +3214,6 @@ class BatchPlanExecuteHandler(TaskHandler):
                             worker_id=context.worker_id,
                             quarantine_entry_id=q_purge_entry_id or q_entry_id or q_restore_entry_id,
                             purge_manifest=purge_manifest,
-                            recursive_protection_prevalidated=recursive_protection_prevalidated,
                         )
                         if result.state == "completed":
                             utility_cleanup_result = wrapper_guard.remove_if_empty()
@@ -3244,7 +3229,6 @@ class BatchPlanExecuteHandler(TaskHandler):
                         worker_id=context.worker_id,
                         quarantine_entry_id=q_purge_entry_id or q_entry_id or q_restore_entry_id,
                         purge_manifest=purge_manifest,
-                        recursive_protection_prevalidated=recursive_protection_prevalidated,
                     )
             except Exception as exc:
                 result = ItemResult(
