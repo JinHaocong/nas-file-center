@@ -412,3 +412,125 @@ def test_legacy_generationless_intents_recover_from_authority_epoch(
     )
     assert recovered["purge_semantics"] == "unlink_v1"
     assert "authoritative_anchor" in recovered["recovered_missing_roles"]
+
+
+def test_completed_same_generation_historical_epoch_does_not_poison_reused_entry_id(
+    tmp_path: Path,
+) -> None:
+    import app.quarantine.unlink_purge as unlink_purge
+
+    (
+        SessionLocal,
+        trash,
+        old_anchor,
+        old_captured,
+        old_public_view,
+        external_survivor,
+        old_payload,
+    ) = _setup_recovery_entry(tmp_path)
+
+    with SessionLocal() as session:
+        entry = session.get(QuarantineEntry, 1)
+        assert entry is not None
+        first_manifest = unlink_purge.build_unlink_manifest(entry, trash)
+
+    first = unlink_purge.execute_journaled_unlink_purge(
+        SessionLocal,
+        entry_id=1,
+        quarantine_root=trash,
+        frozen_manifest=first_manifest,
+    )
+    assert first["purge_semantics"] == "unlink_v1"
+    assert not old_anchor.exists()
+    assert not old_captured.exists()
+    assert not old_public_view.exists()
+    assert external_survivor.read_bytes() == old_payload
+
+    # Terminal record cleanup may delete QuarantineEntry metadata while durable
+    # OperationJournal history intentionally remains. If the empty historical
+    # namespace is also cleaned later, SQLite can reuse id=1 and the new
+    # transactional quarantine can legitimately begin at attempt generation 1.
+    with SessionLocal() as session:
+        old_entry = session.get(QuarantineEntry, 1)
+        assert old_entry is not None
+        session.delete(old_entry)
+        session.commit()
+
+    old_attempt = trash / ".tx" / "entry-1" / "attempt-1"
+    assert old_attempt.is_dir()
+    old_attempt.rmdir()
+    old_attempt.parent.rmdir()
+
+    new_payload = b"gate6a2-same-generation-reused-entry-id"
+    new_attempt = trash / ".tx" / "entry-1" / "attempt-1"
+    new_attempt.mkdir(parents=True)
+    new_anchor = new_attempt / "anchor"
+    new_captured = new_attempt / "captured_source"
+    new_public = trash / "new-selected.q-1.bin"
+    new_anchor.write_bytes(new_payload)
+    os.link(new_anchor, new_captured)
+    os.link(new_anchor, new_public)
+    new_st = new_anchor.stat(follow_symlinks=False)
+
+    with SessionLocal() as session:
+        session.add(
+            QuarantineEntry(
+                id=1,
+                original_path=str(trash.parent / "new-selected.bin"),
+                quarantine_path=str(new_public),
+                state="active",
+                tx_phase="active",
+                authoritative_anchor_path=str(new_anchor),
+                active_attempt_generation=1,
+                device=new_st.st_dev,
+                inode=new_st.st_ino,
+                size=new_st.st_size,
+                mtime_ns=new_st.st_mtime_ns,
+                content_hash=hashlib.sha256(new_payload).hexdigest(),
+            )
+        )
+        session.commit()
+
+        current = session.get(QuarantineEntry, 1)
+        assert current is not None
+        second_manifest = unlink_purge.build_unlink_manifest(current, trash)
+
+    assert second_manifest["active_attempt_generation"] == 1
+    assert second_manifest != first_manifest
+
+    second = unlink_purge.execute_journaled_unlink_purge(
+        SessionLocal,
+        entry_id=1,
+        quarantine_root=trash,
+        frozen_manifest=second_manifest,
+    )
+
+    assert second["purge_semantics"] == "unlink_v1"
+    assert second["removed_count"] == 3
+    assert not new_anchor.exists()
+    assert not new_captured.exists()
+    assert not new_public.exists()
+    assert external_survivor.read_bytes() == old_payload
+
+    with SessionLocal() as session:
+        entry = session.get(QuarantineEntry, 1)
+        assert entry is not None
+        assert entry.state == "purged"
+        assert entry.tx_phase == "purged"
+
+        authority_manifests = []
+        rows = list(
+            session.scalars(
+                select(OperationJournal)
+                .where(OperationJournal.operation == "quarantine_unlink_purge")
+                .order_by(OperationJournal.id.asc())
+            )
+        )
+        for row in rows:
+            before = json.loads(row.before_json or "{}")
+            if before.get("entry_id") == 1 and before.get("phase") == "authority":
+                authority_manifests.append(before.get("manifest"))
+
+        assert len(authority_manifests) == 2
+        assert authority_manifests[0] == first_manifest
+        assert authority_manifests[1] == second_manifest

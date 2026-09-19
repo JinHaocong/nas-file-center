@@ -367,34 +367,21 @@ def _positive_generation(value: Any) -> int | None:
     return int(value)
 
 
-def _journal_records_for_entry(
+def _journal_epochs_for_entry(
     session: Any,
     entry_id: int,
-    *,
-    attempt_generation: int | None = None,
-) -> list[tuple[OperationJournal, dict[str, Any]]]:
-    """Return Gate6-A2 journal records scoped to one entry incarnation.
+) -> list[tuple[int | None, list[tuple[OperationJournal, dict[str, Any]]]]]:
+    """Return chronological Gate6-A2 authority epochs for one numeric entry id.
 
-    OperationJournal is durable history and can outlive a QuarantineEntry row.
-    SQLite may later reuse the numeric entry id; the quarantine transaction
-    allocator then advances to a new attempt generation because the prior
-    attempt namespace is still present.  Therefore entry_id alone is not a
-    sufficient recovery key.
+    OperationJournal intentionally outlives QuarantineEntry metadata. SQLite can
+    later reuse a deleted numeric id, and maintenance may also remove the now-empty
+    old transaction namespace. In that case a new entry can legitimately start at
+    the same attempt generation as a completed historical incarnation.
 
-    Legacy unlink_v1 intent/terminal rows did not persist the generation at the
-    top level.  They are still recoverable because journal ids are chronological:
-    an authority row starts an epoch and its manifest carries the generation.
-    Subsequent rows for the same entry inherit that epoch until the next
-    authority row.  New rows also persist active_attempt_generation explicitly.
+    An authority row therefore starts an epoch. Generation scopes the epoch, but
+    generation is not assumed globally unique across all future incarnations of the
+    same numeric entry id.
     """
-    requested_generation = (
-        _positive_generation(attempt_generation)
-        if attempt_generation is not None
-        else None
-    )
-    if attempt_generation is not None and requested_generation is None:
-        return []
-
     rows = list(
         session.scalars(
             select(OperationJournal)
@@ -402,8 +389,12 @@ def _journal_records_for_entry(
             .order_by(OperationJournal.id.asc())
         )
     )
-    records: list[tuple[OperationJournal, dict[str, Any]]] = []
-    epoch_generation: int | None = None
+
+    epochs: list[
+        tuple[int | None, list[tuple[OperationJournal, dict[str, Any]]]]
+    ] = []
+    current_generation: int | None = None
+    current_records: list[tuple[OperationJournal, dict[str, Any]]] | None = None
 
     for row in rows:
         try:
@@ -416,6 +407,7 @@ def _journal_records_for_entry(
         explicit_generation = _positive_generation(
             payload.get("active_attempt_generation")
         )
+
         if payload.get("phase") == "authority":
             manifest = payload.get("manifest")
             manifest_generation = (
@@ -423,20 +415,101 @@ def _journal_records_for_entry(
                 if isinstance(manifest, dict)
                 else None
             )
-            epoch_generation = explicit_generation or manifest_generation
-            record_generation = epoch_generation
-        else:
-            record_generation = explicit_generation or epoch_generation
-
-        if (
-            requested_generation is not None
-            and record_generation != requested_generation
-        ):
+            current_generation = explicit_generation or manifest_generation
+            current_records = []
+            epochs.append((current_generation, current_records))
+        elif current_records is None:
+            # A row without a preceding authority cannot safely establish an
+            # incarnation boundary. Ignore it here; recovery will never infer
+            # authority from a free-standing intent/terminal record.
             continue
-        records.append((row, payload))
+        elif (
+            explicit_generation is not None
+            and current_generation is not None
+            and explicit_generation != current_generation
+        ):
+            # Malformed cross-generation row: leave it out of the established
+            # epoch so it cannot silently widen recovery authority.
+            continue
 
-    return records
+        assert current_records is not None
+        current_records.append((row, payload))
 
+    return epochs
+
+
+def _journal_records_for_entry(
+    session: Any,
+    entry_id: int,
+    *,
+    attempt_generation: int | None = None,
+) -> list[tuple[OperationJournal, dict[str, Any]]]:
+    """Return Gate6-A2 records for the latest authority epoch in a generation.
+
+    Legacy intent/terminal rows may omit the generation; they inherit it from the
+    authority row that opened their epoch. If a terminal historical incarnation
+    and a later incarnation reuse the same numeric entry id *and* generation, the
+    later authority row starts a new epoch and recovery binds only to that latest
+    epoch rather than merging both histories.
+    """
+    requested_generation = (
+        _positive_generation(attempt_generation)
+        if attempt_generation is not None
+        else None
+    )
+    if attempt_generation is not None and requested_generation is None:
+        return []
+
+    epochs = _journal_epochs_for_entry(session, entry_id)
+    if requested_generation is None:
+        return [
+            record
+            for _generation, records in epochs
+            for record in records
+        ]
+
+    matching = [
+        records
+        for generation, records in epochs
+        if generation == requested_generation
+    ]
+    return matching[-1] if matching else []
+
+
+def _journal_epoch_terminal_purged(
+    records: list[tuple[OperationJournal, dict[str, Any]]],
+    *,
+    entry_id: int,
+    attempt_generation: int,
+) -> bool:
+    """Prove that one prior authority epoch reached durable terminal purged state."""
+    terminals: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    for row, before in records:
+        if before.get("phase") != "terminal":
+            continue
+        try:
+            after = json.loads(row.after_json or "{}")
+        except (TypeError, json.JSONDecodeError):
+            return False
+        if not isinstance(after, dict):
+            return False
+        terminals.append((before, after))
+
+    if len(terminals) != 1:
+        return False
+
+    before, after = terminals[0]
+    return (
+        before.get("purge_semantics") == SEMANTICS_VERSION
+        and before.get("entry_id") == entry_id
+        and _positive_generation(before.get("active_attempt_generation"))
+        == attempt_generation
+        and after.get("phase") == "purged"
+        and after.get("purge_semantics") == SEMANTICS_VERSION
+        and after.get("entry_id") == entry_id
+        and _positive_generation(after.get("active_attempt_generation"))
+        == attempt_generation
+    )
 
 def _durable_authority_manifest(
     session: Any,
@@ -594,16 +667,38 @@ def _persist_initial_authority(
                 f"UNLINK_RECOVERY_AUTHORITY_INVALID: generation missing for entry #{entry_id}"
             )
 
-        if _journal_records_for_entry(
+        prior_records = _journal_records_for_entry(
             session,
             entry_id,
             attempt_generation=generation,
-        ):
-            session.rollback()
-            raise StateConflictError(
-                f"UNLINK_RECOVERY_AUTHORITY_INVALID: unexpected prior Gate6-A2 journal "
-                f"for entry #{entry_id} generation #{generation}"
+        )
+        if prior_records:
+            prior_authorities = [
+                payload
+                for _row, payload in prior_records
+                if payload.get("phase") == "authority"
+            ]
+            prior_manifest = (
+                prior_authorities[0].get("manifest")
+                if len(prior_authorities) == 1
+                and isinstance(prior_authorities[0].get("manifest"), dict)
+                else None
             )
+            reusable_historical_epoch = (
+                prior_manifest is not None
+                and prior_manifest != frozen_manifest
+                and _journal_epoch_terminal_purged(
+                    prior_records,
+                    entry_id=entry_id,
+                    attempt_generation=generation,
+                )
+            )
+            if not reusable_historical_epoch:
+                session.rollback()
+                raise StateConflictError(
+                    f"UNLINK_RECOVERY_AUTHORITY_INVALID: unexpected prior Gate6-A2 journal "
+                    f"for entry #{entry_id} generation #{generation}"
+                )
 
         authority = {
             "phase": "authority",
