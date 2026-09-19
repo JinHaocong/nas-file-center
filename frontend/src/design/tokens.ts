@@ -6,8 +6,8 @@ export const nfcTheme = {
   fontFamilyMono:
     '"SFMono-Regular", "Cascadia Code", "Roboto Mono", ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", monospace',
   light: {
-    accent: '#335CFF',
-    accentSoft: '#EEF1FF',
+    accent: '#0A84FF',
+    accentSoft: '#EAF3FF',
     canvas: '#F3F5F8',
     surface1: '#FFFFFF',
     surface2: '#F1F3F7',
@@ -20,8 +20,8 @@ export const nfcTheme = {
     textSubtle: '#87909D',
   },
   dark: {
-    accent: '#8D98FF',
-    accentSoft: '#1A2042',
+    accent: '#4DA3FF',
+    accentSoft: '#10243A',
     canvas: '#0B0E12',
     surface1: '#12161B',
     surface2: '#191E25',
