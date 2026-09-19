@@ -39,7 +39,7 @@ describe('v0.4.4 UI audit polish', () => {
   });
 
   test('mobile audit styles explicitly cover scorer, filter builder, scan picker and task progress', () => {
-    const css = read('src/index.css');
+    const css = read('src/styles/components.css') + read('src/styles/pages/workflows.css');
     assert.match(css, /@media \(max-width: 767px\)[\s\S]*\.nfc-dedupe-scorer-editor/s);
     assert.match(css, /@media \(max-width: 767px\)[\s\S]*\.nfc-filter-builder/s);
     assert.match(css, /@media \(max-width: 767px\)[\s\S]*\.nfc-completed-scan-picker/s);
@@ -51,7 +51,7 @@ describe('v0.4.4 UI audit polish', () => {
     const move = read('src/components/workflows/MoveStepEditor.tsx');
     const utility = read('src/components/workflows/SingleChildWrapperCollapseStepEditor.tsx');
     const nav = read('src/components/layout/ResponsiveNav.tsx');
-    const css = read('src/index.css');
+    const css = read('src/styles/pages/workflows.css') + read('src/styles/overlays.css');
 
     assert.match(scan, /nfc-workflow-full-control/);
     assert.match(move, /nfc-workflow-full-control/);
