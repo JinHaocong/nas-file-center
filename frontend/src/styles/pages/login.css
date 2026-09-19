@@ -8,12 +8,10 @@
 .nfc-login-panel {
   position: relative;
   overflow: hidden;
-  border: 1px solid var(--nfc-border-strong);
-  border-radius: var(--nfc-radius-shell);
-  background: var(--nfc-glass-workspace-strong-bg);
-  box-shadow: var(--nfc-shadow-overlay);
-  backdrop-filter: blur(var(--nfc-blur-overlay)) saturate(145%);
-  -webkit-backdrop-filter: blur(var(--nfc-blur-overlay)) saturate(145%);
+  border: 1px solid var(--nfc-border-soft);
+  border-radius: 16px;
+  background: var(--nfc-surface-1);
+  box-shadow: var(--nfc-shadow-shell);
 }
 
 .nfc-login-panel::before {
@@ -32,7 +30,7 @@
 
 .nfc-login-brand-mark {
   border: 1px solid var(--nfc-border-soft);
-  background: color-mix(in srgb, var(--nfc-dense-surface-bg) 82%, transparent);
+  background: var(--nfc-surface-2);
   box-shadow: inset 0 1px 0 var(--nfc-glass-highlight);
 }
 
