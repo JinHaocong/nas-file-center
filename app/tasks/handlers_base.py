@@ -2459,21 +2459,33 @@ class BatchPlanExecuteHandler(TaskHandler):
                 item_meta.operation not in {"restore", "quarantine_purge"}
                 and not _is_utility_single_child_cleanup(item_meta)
             ):
-                is_fresh, stale_detail = _verify_plan_item_and_keep_freshness(
-                    item_meta,
-                    settings,
-                    check_hash=not defer_duplicate_hash_to_execute,
-                )
+                if defer_duplicate_hash_to_execute:
+                    is_fresh, stale_detail = _verify_plan_item_and_keep_freshness(
+                        item_meta,
+                        settings,
+                        check_hash=False,
+                    )
+                else:
+                    is_fresh, stale_detail = _verify_plan_item_and_keep_freshness(
+                        item_meta,
+                        settings,
+                    )
                 if (
                     not is_fresh
                     and stale_detail
                     and _try_rebase_utility_move_identity(item_meta, stale_detail)
                 ):
-                    is_fresh, stale_detail = _verify_plan_item_and_keep_freshness(
-                        item_meta,
-                        settings,
-                        check_hash=not defer_duplicate_hash_to_execute,
-                    )
+                    if defer_duplicate_hash_to_execute:
+                        is_fresh, stale_detail = _verify_plan_item_and_keep_freshness(
+                            item_meta,
+                            settings,
+                            check_hash=False,
+                        )
+                    else:
+                        is_fresh, stale_detail = _verify_plan_item_and_keep_freshness(
+                            item_meta,
+                            settings,
+                        )
                 if not is_fresh:
                     stale_reason = f"Item stale: {stale_detail.reason if stale_detail else 'stale'}"
                     with context.SessionLocal() as session:
@@ -3021,21 +3033,33 @@ class BatchPlanExecuteHandler(TaskHandler):
                 item_meta.operation != "quarantine_purge"
                 and not _is_utility_single_child_cleanup(item_meta)
             ):
-                final_fresh, final_stale_detail = _verify_plan_item_and_keep_freshness(
-                    item_meta,
-                    settings,
-                    check_hash=not defer_duplicate_hash_to_execute,
-                )
+                if defer_duplicate_hash_to_execute:
+                    final_fresh, final_stale_detail = _verify_plan_item_and_keep_freshness(
+                        item_meta,
+                        settings,
+                        check_hash=False,
+                    )
+                else:
+                    final_fresh, final_stale_detail = _verify_plan_item_and_keep_freshness(
+                        item_meta,
+                        settings,
+                    )
                 if (
                     not final_fresh
                     and final_stale_detail
                     and _try_rebase_utility_move_identity(item_meta, final_stale_detail)
                 ):
-                    final_fresh, final_stale_detail = _verify_plan_item_and_keep_freshness(
-                        item_meta,
-                        settings,
-                        check_hash=not defer_duplicate_hash_to_execute,
-                    )
+                    if defer_duplicate_hash_to_execute:
+                        final_fresh, final_stale_detail = _verify_plan_item_and_keep_freshness(
+                            item_meta,
+                            settings,
+                            check_hash=False,
+                        )
+                    else:
+                        final_fresh, final_stale_detail = _verify_plan_item_and_keep_freshness(
+                            item_meta,
+                            settings,
+                        )
                 if not final_fresh:
                     stale_reason = f"Item stale: {final_stale_detail.reason if final_stale_detail else 'stale'}"
                     with context.SessionLocal() as session:
