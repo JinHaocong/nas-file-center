@@ -24,9 +24,10 @@
 
 .nfc-directory-browser-toolbar {
   overflow: hidden;
-  border: 1px solid var(--nfc-border-soft);
-  border-radius: var(--nfc-radius-inner);
-  background: var(--nfc-surface-1);
+  border: 0;
+  border-bottom: 1px solid var(--nfc-border-soft);
+  border-radius: 0;
+  background: transparent;
 }
 
 .nfc-directory-browser-row {
@@ -76,10 +77,10 @@
 }
 
 .nfc-directory-favorite-editor {
-  padding: 8px;
+  padding: 8px 2px;
   display: flex;
   gap: 8px;
-  background: color-mix(in srgb, var(--nfc-accent-soft) 28%, transparent);
+  background: transparent;
 }
 
 .nfc-directory-search-row {
@@ -91,8 +92,8 @@
   overflow: auto;
   max-height: min(46vh, 430px);
   border: 1px solid var(--nfc-border-soft);
-  border-radius: var(--nfc-radius-inner);
-  background: var(--nfc-dense-surface-bg);
+  border-radius: var(--nfc-radius-control);
+  background: var(--nfc-surface-1);
 }
 
 .nfc-directory-item.ant-list-item {
@@ -663,14 +664,14 @@
 }
 
 .nfc-embedded-section-header {
-  min-height: 54px;
-  padding: 10px 12px;
+  min-height: 50px;
+  padding: 9px 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
   border-bottom: 1px solid var(--nfc-border-soft);
-  background: color-mix(in srgb, var(--nfc-surface-2) 42%, transparent);
+  background: transparent;
 }
 
 .nfc-embedded-section-kicker {
@@ -734,17 +735,26 @@
 
 /* Dedupe inspector and scoring controls */
 .nfc-dedupe-summary-grid {
+  overflow: hidden;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
+  gap: 0;
+  border: 1px solid var(--nfc-border-soft);
+  border-radius: var(--nfc-radius-control);
+  background: var(--nfc-surface-1);
 }
 
 .nfc-dedupe-summary-metric {
   min-width: 0;
-  padding: 12px;
-  border: 1px solid var(--nfc-border-soft);
-  border-radius: var(--nfc-radius-inner);
-  background: var(--nfc-dense-surface-bg);
+  padding: 12px 13px;
+  border: 0;
+  border-right: 1px solid var(--nfc-border-soft);
+  border-radius: 0;
+  background: transparent;
+}
+
+.nfc-dedupe-summary-metric:last-child {
+  border-right: 0;
 }
 
 .nfc-dedupe-summary-metric-topline {
@@ -776,8 +786,8 @@
   margin-top: 10px;
   overflow: hidden;
   border: 1px solid var(--nfc-border-soft);
-  border-radius: var(--nfc-radius-inner);
-  background: var(--nfc-dense-surface-bg);
+  border-radius: var(--nfc-radius-control);
+  background: var(--nfc-surface-1);
 }
 
 .nfc-dedupe-root-release-row {
@@ -792,9 +802,11 @@
 
 .nfc-dedupe-config-card.ant-card,
 .nfc-dedupe-surface-card.ant-card {
-  border: 1px solid var(--nfc-border-soft) !important;
-  border-radius: var(--nfc-radius-inner) !important;
-  background: var(--nfc-dense-surface-bg) !important;
+  border: 0 !important;
+  border-top: 1px solid var(--nfc-border-soft) !important;
+  border-bottom: 1px solid var(--nfc-border-soft) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
 }
 
 .nfc-dedupe-config-card .ant-card-head,
@@ -966,11 +978,21 @@
 
   .nfc-dedupe-summary-grid {
     grid-template-columns: 1fr 1fr;
-    gap: 7px;
+    gap: 0;
   }
 
   .nfc-dedupe-summary-metric {
     padding: 10px;
+    border-right: 0;
+    border-bottom: 1px solid var(--nfc-border-soft);
+  }
+
+  .nfc-dedupe-summary-metric:nth-child(odd) {
+    border-right: 1px solid var(--nfc-border-soft);
+  }
+
+  .nfc-dedupe-summary-metric:nth-last-child(-n + 2) {
+    border-bottom: 0;
   }
 
   .nfc-dedupe-summary-value {
