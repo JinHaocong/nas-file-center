@@ -5,6 +5,7 @@ on:
     branches:
       - v0.3.6-gate6b-utility-recursive-dirbal
       - hotfix/freeze-recursive-protection-*
+      - hotfix/recursive-validate-*
   workflow_dispatch:
 
 permissions:
