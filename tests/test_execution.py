@@ -146,3 +146,58 @@ def test_protected_directory_pathguard_still_applies_with_bounded_count(tmp_path
 
     assert result.state == "skipped"
     assert delete.exists()
+
+
+
+def test_transactional_quarantine_marks_persisted_identity_authoritative(tmp_path, monkeypatch):
+    root = tmp_path / "data"
+    root.mkdir()
+    quarantine = root / ".trash"
+    quarantine.mkdir()
+    keep = root / "keep.bin"
+    delete = root / "delete.bin"
+    payload = b"same-payload"
+    keep.write_bytes(payload)
+    delete.write_bytes(payload)
+
+    from app.batch.plans import OperationItem
+    from app.execution.executor import execute_item
+    import app.quarantine.capability as capability_module
+    import app.quarantine.engine as engine_module
+
+    monkeypatch.setattr(
+        capability_module,
+        "resolve_mutation_capability",
+        lambda *_args, **_kwargs: capability_module.MutationCapability.COMPAT_TRANSACTIONAL,
+    )
+    transaction_calls = []
+    monkeypatch.setattr(
+        engine_module,
+        "execute_transactional_quarantine",
+        lambda *args, **kwargs: transaction_calls.append((args, kwargs)),
+    )
+
+    item = OperationItem(
+        sequence=1,
+        operation="quarantine",
+        source=delete,
+        keep=keep,
+        target=quarantine / "delete.q-1.bin",
+        expected_size=len(payload),
+        expected_hash=H(payload),
+    )
+    result = execute_item(
+        item,
+        allowed_roots=[root],
+        allow_mutation=True,
+        allow_delete=False,
+        quarantine_root=quarantine,
+        plan_id="tx-authoritative",
+        session_factory=object(),
+        worker_id="worker-1",
+        quarantine_entry_id=1,
+    )
+
+    assert result.state == "completed"
+    assert result.quarantine_identity_authoritative is True
+    assert len(transaction_calls) == 1
