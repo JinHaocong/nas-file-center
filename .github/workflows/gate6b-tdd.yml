@@ -6,6 +6,7 @@ on:
       - v0.3.6-gate6b-utility-recursive-dirbal
       - hotfix/freeze-recursive-protection-*
       - hotfix/recursive-validate-*
+      - hotfix/execute-dedupe-*
   workflow_dispatch:
 
 permissions:
