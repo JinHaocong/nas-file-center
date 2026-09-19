@@ -446,7 +446,10 @@ def evaluate_live_recursive_protection(
             not sample.stable
             or sample.device is None
             or sample.inode is None
-            or not sample.tree_identity_digest
+            or (
+                not execute_count_only
+                and not getattr(sample, "tree_identity_digest", None)
+            )
         ):
             return LiveRecursiveProtectionEvaluation(
                 safe=False,
