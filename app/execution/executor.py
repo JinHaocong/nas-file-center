@@ -21,6 +21,11 @@ class ItemResult:
     state: str
     reason: str
     result_path: Path | None = None
+    # COMPAT transactional quarantine already performs authoritative pre/post
+    # capture SHA256 qualification and persists the frozen identity on the
+    # QuarantineEntry. Callers may therefore skip a redundant pathname hash
+    # that would otherwise reread the same payload only for discarded data.
+    quarantine_identity_authoritative: bool = False
 
 
 def _skip(reason: str) -> ItemResult:
@@ -693,7 +698,12 @@ def execute_item(
                     )
                 except Exception as exc:
                     return ItemResult("failed", str(exc))
-                return ItemResult("completed", "quarantined", target)
+                return ItemResult(
+                    "completed",
+                    "quarantined",
+                    target,
+                    quarantine_identity_authoritative=True,
+                )
             elif capability == MutationCapability.UNSUPPORTED:
                 return ItemResult("failed", "unsupported mutation capability")
             else:
