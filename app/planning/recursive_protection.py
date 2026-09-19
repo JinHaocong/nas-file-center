@@ -91,12 +91,13 @@ def _unstable_live_count(
     )
 
 
-def _count_live_regular_files_pass(
+def _count_live_regular_files_chain_pass(
     root_fd: int,
     *,
+    protected_relative_dirs: tuple[str, ...],
     excluded_relative_path: str | None,
-) -> int | None:
-    """Consume root_fd and return one exact descriptor-bound regular-file count."""
+) -> tuple[int, ...] | None:
+    """Consume root_fd and return exact counts for one nested ancestor chain."""
 
     dir_flags = _recursive_directory_open_flags()
     if dir_flags is None:
@@ -107,7 +108,7 @@ def _count_live_regular_files_pass(
         return None
 
     regular_flags = os.O_RDONLY | os.O_NOFOLLOW
-    count = 0
+    counts = [0 for _ in protected_relative_dirs]
     stable = True
     stack: list[tuple[int, str]] = [(root_fd, ".")]
 
@@ -163,7 +164,13 @@ def _count_live_regular_files_pass(
                         ):
                             stable = False
                             break
-                        count += 1
+
+                        for index, protected_relative in enumerate(protected_relative_dirs):
+                            if (
+                                protected_relative == "."
+                                or relative_path.startswith(protected_relative + "/")
+                            ):
+                                counts[index] += 1
                         continue
 
                     if stat.S_ISDIR(entry_st.st_mode):
@@ -202,8 +209,22 @@ def _count_live_regular_files_pass(
                 pass
         return None
 
-    return count
+    return tuple(counts)
 
+
+def _count_live_regular_files_pass(
+    root_fd: int,
+    *,
+    excluded_relative_path: str | None,
+) -> int | None:
+    """Consume root_fd and return one exact descriptor-bound regular-file count."""
+
+    counts = _count_live_regular_files_chain_pass(
+        root_fd,
+        protected_relative_dirs=(".",),
+        excluded_relative_path=excluded_relative_path,
+    )
+    return counts[0] if counts is not None else None
 
 def live_count_recursive_regular_files(
     directory: str | Path,
@@ -267,4 +288,211 @@ def live_count_recursive_regular_files(
         stable=True,
         device=root_device,
         inode=root_inode,
+    )
+
+
+@dataclass(frozen=True)
+class RecursiveProtectionLiveChain:
+    """One Execute-time sampled count for an exact nested protected-ancestor chain."""
+
+    stable: bool
+    failure_path: str | None
+    samples: tuple[tuple[str, RecursiveProtectionLiveCount], ...]
+
+
+def _unstable_live_chain(
+    paths: tuple[str, ...],
+    *,
+    failure_path: str,
+    identities: dict[str, tuple[int, int]] | None = None,
+) -> RecursiveProtectionLiveChain:
+    identities = identities or {}
+    samples = tuple(
+        (
+            path,
+            _unstable_live_count(
+                device=(identities.get(path) or (None, None))[0],
+                inode=(identities.get(path) or (None, None))[1],
+            ),
+        )
+        for path in paths
+    )
+    return RecursiveProtectionLiveChain(
+        stable=False,
+        failure_path=failure_path,
+        samples=samples,
+    )
+
+
+def live_count_recursive_regular_file_chain(
+    directories: tuple[str | Path, ...] | list[str | Path],
+    *,
+    quarantine_root: str | Path | None = None,
+) -> RecursiveProtectionLiveChain:
+    """Count every nested protected ancestor with only two widest-root traversals.
+
+    Recursive-mode authority is a strict source-parent -> ... -> Scan Root chain.
+    Scanning each ancestor independently rereads overlapping subtrees. Since the
+    widest Scan Root traversal already visits every narrower ancestor, one sampled
+    pass can accumulate exact counts for the whole chain. We perform two freshly
+    reacquired descriptor-bound/no-follow passes, compare every ancestor count, and
+    finally rebind every protected directory to the identity captured before the
+    passes. No result is reused across Execute items.
+    """
+
+    if not directories:
+        return RecursiveProtectionLiveChain(stable=False, failure_path=None, samples=())
+
+    raw_paths = tuple(str(path) for path in directories)
+    normalized_paths = tuple(os.path.normpath(path) for path in raw_paths)
+    for raw, normalized in zip(raw_paths, normalized_paths):
+        if not os.path.isabs(raw) or raw != normalized:
+            return _unstable_live_chain(
+                normalized_paths,
+                failure_path=raw,
+            )
+
+    if len(set(normalized_paths)) != len(normalized_paths):
+        return _unstable_live_chain(
+            normalized_paths,
+            failure_path=normalized_paths[0],
+        )
+
+    scan_root = normalized_paths[-1]
+    for index, path in enumerate(normalized_paths):
+        try:
+            if os.path.commonpath([path, scan_root]) != scan_root:
+                return _unstable_live_chain(
+                    normalized_paths,
+                    failure_path=path,
+                )
+            if index + 1 < len(normalized_paths):
+                parent = normalized_paths[index + 1]
+                if os.path.commonpath([path, parent]) != parent:
+                    return _unstable_live_chain(
+                        normalized_paths,
+                        failure_path=path,
+                    )
+        except ValueError:
+            return _unstable_live_chain(
+                normalized_paths,
+                failure_path=path,
+            )
+
+    identities: dict[str, tuple[int, int]] = {}
+    for path in normalized_paths:
+        opened = _open_absolute_directory_nofollow(path)
+        if opened is None:
+            return _unstable_live_chain(
+                normalized_paths,
+                failure_path=path,
+                identities=identities,
+            )
+        fd, st = opened
+        try:
+            identities[path] = (int(st.st_dev), int(st.st_ino))
+        finally:
+            os.close(fd)
+
+    excluded_relative_path = _relative_reserved_quarantine_path(
+        scan_root,
+        quarantine_root,
+    )
+    if excluded_relative_path == ".":
+        return _unstable_live_chain(
+            normalized_paths,
+            failure_path=scan_root,
+            identities=identities,
+        )
+
+    protected_relative_dirs: list[str] = []
+    for path in normalized_paths:
+        relative = os.path.relpath(path, scan_root)
+        if relative == ".":
+            protected_relative_dirs.append(".")
+            continue
+        parts = Path(relative).parts
+        if not parts or any(part in ("", ".", "..") for part in parts):
+            return _unstable_live_chain(
+                normalized_paths,
+                failure_path=path,
+                identities=identities,
+            )
+        protected_relative_dirs.append("/".join(parts))
+    protected_relative_tuple = tuple(protected_relative_dirs)
+
+    def collect_pass() -> tuple[int, ...] | None:
+        opened = _open_absolute_directory_nofollow(scan_root)
+        if opened is None:
+            return None
+        root_fd, root_st = opened
+        expected_root = identities[scan_root]
+        if (
+            int(root_st.st_dev) != expected_root[0]
+            or int(root_st.st_ino) != expected_root[1]
+        ):
+            os.close(root_fd)
+            return None
+        return _count_live_regular_files_chain_pass(
+            root_fd,
+            protected_relative_dirs=protected_relative_tuple,
+            excluded_relative_path=excluded_relative_path,
+        )
+
+    first_counts = collect_pass()
+    if first_counts is None:
+        return _unstable_live_chain(
+            normalized_paths,
+            failure_path=scan_root,
+            identities=identities,
+        )
+
+    second_counts = collect_pass()
+    if second_counts is None:
+        return _unstable_live_chain(
+            normalized_paths,
+            failure_path=scan_root,
+            identities=identities,
+        )
+
+    if first_counts != second_counts:
+        mismatch_index = next(
+            (
+                index
+                for index, (first, second) in enumerate(zip(first_counts, second_counts))
+                if first != second
+            ),
+            len(normalized_paths) - 1,
+        )
+        return _unstable_live_chain(
+            normalized_paths,
+            failure_path=normalized_paths[mismatch_index],
+            identities=identities,
+        )
+
+    for path in normalized_paths:
+        expected_device, expected_inode = identities[path]
+        if not _directory_binding_matches(path, expected_device, expected_inode):
+            return _unstable_live_chain(
+                normalized_paths,
+                failure_path=path,
+                identities=identities,
+            )
+
+    samples = tuple(
+        (
+            path,
+            RecursiveProtectionLiveCount(
+                count=int(second_counts[index]),
+                stable=True,
+                device=identities[path][0],
+                inode=identities[path][1],
+            ),
+        )
+        for index, path in enumerate(normalized_paths)
+    )
+    return RecursiveProtectionLiveChain(
+        stable=True,
+        failure_path=None,
+        samples=samples,
     )
