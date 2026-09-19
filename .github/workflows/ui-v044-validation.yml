@@ -16,6 +16,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ui-validation-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   backend-regression:
     runs-on: ubuntu-latest
