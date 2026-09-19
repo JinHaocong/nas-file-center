@@ -142,3 +142,118 @@
     padding: 8px;
   }
 }
+
+.nfc-completed-scan-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.nfc-completed-scan-picker-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nfc-completed-scan-select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.nfc-completed-scan-manual {
+  flex: 0 0 auto;
+}
+
+.nfc-completed-scan-summary {
+  padding: 10px 11px;
+  border: 1px solid var(--nfc-border-soft);
+  border-radius: var(--nfc-radius-control);
+  background: color-mix(in srgb, var(--nfc-surface-2) 42%, transparent);
+}
+
+.nfc-completed-scan-id {
+  color: var(--nfc-accent);
+  font-family: var(--nfc-font-mono, ui-monospace, monospace);
+  font-weight: 650;
+}
+
+.nfc-filter-builder.ant-card {
+  border: 1px solid var(--nfc-border-soft) !important;
+  border-radius: var(--nfc-radius-inner) !important;
+  background: var(--nfc-dense-surface-bg) !important;
+  box-shadow: none !important;
+}
+
+.nfc-filter-group-card,
+.nfc-filter-not-card {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--nfc-accent-soft) 20%, transparent), transparent 46%),
+    var(--nfc-dense-surface-bg) !important;
+}
+
+.nfc-filter-group-heading {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nfc-filter-group-help {
+  margin-left: auto;
+  font-size: 10px;
+}
+
+.nfc-filter-nested {
+  margin-top: 8px;
+  padding-left: 12px;
+  border-left: 2px solid color-mix(in srgb, var(--nfc-accent) 20%, var(--nfc-border-soft));
+}
+
+.nfc-filter-leaf-card .ant-card-body {
+  display: grid;
+  grid-template-columns: minmax(96px, 0.2fr) minmax(120px, 0.22fr) minmax(110px, 0.2fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.nfc-filter-value-control,
+.nfc-filter-value-wide {
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .nfc-filter-leaf-card .ant-card-body {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .nfc-filter-value-wide {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 767px) {
+  .nfc-completed-scan-picker-controls {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .nfc-completed-scan-manual {
+    width: 100%;
+  }
+
+  .nfc-completed-scan-id-input {
+    width: 100%;
+  }
+
+  .nfc-filter-leaf-card .ant-card-body {
+    grid-template-columns: 1fr;
+  }
+
+  .nfc-filter-value-wide {
+    grid-column: auto;
+  }
+
+  .nfc-filter-nested {
+    padding-left: 8px;
+  }
+}
