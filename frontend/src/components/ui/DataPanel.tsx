@@ -1,11 +1,14 @@
 import React from 'react';
 
+export type DataPanelVariant = 'default' | 'dense' | 'quiet' | 'danger' | 'floating';
+
 interface DataPanelProps {
   title: string;
   description?: React.ReactNode;
   action?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
+  variant?: DataPanelVariant;
 }
 
 export const DataPanel: React.FC<DataPanelProps> = ({
@@ -14,10 +17,11 @@ export const DataPanel: React.FC<DataPanelProps> = ({
   action,
   children,
   className = '',
+  variant = 'default',
 }) => (
-  <section className={`nfc-data-panel ${className}`.trim()}>
+  <section className={`nfc-data-panel nfc-data-panel-${variant} ${className}`.trim()}>
     <header className="nfc-data-panel-header">
-      <div>
+      <div className="nfc-data-panel-heading">
         <h2 className="nfc-data-panel-title">{title}</h2>
         {description && <div className="nfc-data-panel-description">{description}</div>}
       </div>
