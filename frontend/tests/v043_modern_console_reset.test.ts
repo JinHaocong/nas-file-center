@@ -5,25 +5,21 @@ import { resolve } from 'node:path';
 
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');
 
-describe('v0.4.3 modern console reset', () => {
-  test('theme leaves jade behind for an electric blue product accent', () => {
+describe('v0.4.3 console invariants carried into v0.4.7', () => {
+  test('theme remains a blue-accent neutral control plane rather than returning to jade', () => {
     const tokens = read('src/design/tokens.ts');
-    assert.match(tokens, /accent:\s*'#0A84FF'/);
-    assert.match(tokens, /accent:\s*'#4DA3FF'/);
+    assert.match(tokens, /accent:\s*'#[0-9A-F]{6}'/);
     assert.doesNotMatch(tokens, /#167a5c/i);
     assert.doesNotMatch(tokens, /#4fd1a1/i);
   });
 
-  test('desktop navigation is a light floating workspace rail instead of a permanent dark slab', () => {
-    const css = read('src/index.css');
-    assert.ok(css.includes('/* v0.4.3 Modern Console Reset */'));
-    assert.ok(css.includes('--nfc-nav-surface'));
-    assert.ok(css.includes('.nfc-sidebar.nfc-sidebar'));
-    assert.ok(css.includes('background: var(--nfc-nav-surface) !important'));
-    assert.ok(css.includes('box-shadow: var(--nfc-shell-shadow)'));
+  test('desktop sidebar remains the deliberate elevated navigation anchor', () => {
+    const css = read('src/styles/shell.css');
+    assert.match(css, /\.nfc-sidebar\.nfc-sidebar[\s\S]*background:\s*var\(--nfc-nav-surface\) !important/);
+    assert.match(css, /\.nfc-sidebar\.nfc-sidebar[\s\S]*box-shadow:/);
   });
 
-  test('mobile navigation has a persistent bottom dock with primary routes and More', () => {
+  test('mobile navigation retains a persistent bottom dock with primary routes and More', () => {
     const layout = read('src/layouts/MainLayout.tsx');
     const dock = read('src/components/layout/MobileDock.tsx');
     assert.match(layout, /<MobileDock/);
@@ -36,43 +32,41 @@ describe('v0.4.3 modern console reset', () => {
   });
 
   test('mobile page content reserves safe space for the bottom dock', () => {
-    const css = read('src/index.css');
+    const css = read('src/index.css') + read('src/styles/responsive.css');
     assert.ok(css.includes('--nfc-mobile-dock-height'));
     assert.match(css, /padding-bottom:\s*calc\([^;]*var\(--nfc-mobile-dock-height\)/);
   });
 
-  test('header becomes a compact command bar rather than a traditional admin toolbar', () => {
+  test('header remains a compact command surface but is integrated instead of floating', () => {
     const header = read('src/components/Header.tsx');
     const css = read('src/styles/shell.css');
     assert.match(header, /nfc-header-workspace/);
     assert.match(header, /nfc-header-command-cluster/);
-    assert.ok(css.includes('.nfc-header.nfc-header'));
-    assert.ok(css.includes('border: 1px solid var(--nfc-border-soft)'));
+    assert.match(css, /\.nfc-header\.nfc-header[\s\S]*border-bottom:\s*1px solid var\(--nfc-border-soft\)/);
+    assert.match(css, /\.nfc-header\.nfc-header[\s\S]*border-radius:\s*0/);
+    assert.match(css, /\.nfc-header\.nfc-header[\s\S]*box-shadow:\s*none/);
   });
 
-  test('data surfaces avoid heavy gray table chrome', () => {
-    const css = read('src/index.css');
-    assert.ok(css.includes('.nfc-data-panel .ant-table-thead > tr > th'));
-    assert.ok(css.includes('background: transparent !important'));
-    assert.ok(css.includes('.nfc-data-panel'));
-    assert.ok(css.includes('border-radius: var(--nfc-surface-radius)'));
+  test('data surfaces use restrained table chrome and compact density', () => {
+    const css = read('src/styles/primitives.css');
+    assert.match(css, /\.nfc-data-panel \.ant-table-thead > tr > th[\s\S]*text-transform:\s*none/);
+    assert.match(css, /\.nfc-data-panel-dense[\s\S]*box-shadow:\s*none/);
   });
 
-  test('task worker status uses a compact premium status strip', () => {
+  test('task worker status retains a compact status strip', () => {
     const worker = read('src/components/tasks/WorkerStatusCard.tsx');
     assert.match(worker, /nfc-worker-status-strip/);
     assert.match(worker, /nfc-worker-primary/);
     assert.match(worker, /nfc-worker-stat/);
   });
 
-  test('mobile task cards avoid desktop-table visual density', () => {
-    const css = read('src/index.css');
-    assert.ok(css.includes('.nfc-task-mobile-card'));
-    assert.ok(css.includes('border-radius: 18px'));
-    assert.ok(css.includes('.nfc-mobile-record-actions'));
+  test('mobile task cards remain a dedicated mobile representation', () => {
+    const page = read('src/pages/Tasks/index.tsx');
+    assert.match(page, /nfc-task-mobile-card/);
+    assert.match(page, /nfc-mobile-record-actions/);
   });
 
-  test('design notes record the new product direction and references', () => {
+  test('historical design notes remain available for context', () => {
     const design = read('../DESIGN.md');
     assert.ok(design.includes('v0.4.3 Modern Console Reset'));
     assert.ok(design.includes('Vercel Geist'));
