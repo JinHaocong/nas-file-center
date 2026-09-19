@@ -151,3 +151,58 @@
     transition: none;
   }
 }
+
+@media (max-width: 420px) {
+  :root {
+    --nfc-page-gutter: 10px;
+  }
+
+  .nfc-header.nfc-header {
+    margin-inline: 6px;
+  }
+
+  .nfc-header-status {
+    max-width: calc(100vw - 150px);
+  }
+
+  .nfc-page-content {
+    padding-inline: 10px;
+  }
+
+  .nfc-page-header {
+    padding: 14px;
+  }
+
+  .nfc-page-title {
+    font-size: 21px;
+  }
+
+  .nfc-metric-grid {
+    gap: 7px;
+  }
+
+  .nfc-metric-card {
+    min-height: 108px;
+    padding: 12px 10px;
+  }
+
+  .nfc-metric-value {
+    font-size: 21px;
+  }
+
+  .nfc-data-panel-header {
+    padding-inline: 12px;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --nfc-glass-shell-bg: var(--nfc-nav-surface);
+    --nfc-glass-workspace-bg: var(--nfc-surface-1);
+    --nfc-glass-workspace-strong-bg: var(--nfc-surface-1);
+    --nfc-overlay-surface-bg: var(--nfc-surface-raised);
+    --nfc-blur-shell: 0px;
+    --nfc-blur-workspace: 0px;
+    --nfc-blur-overlay: 0px;
+  }
+}
