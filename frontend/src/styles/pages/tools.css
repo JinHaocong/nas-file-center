@@ -1,0 +1,42 @@
+.nfc-path-match-page .nfc-tool-workbench,
+.nfc-rename-page .nfc-tool-workbench,
+.nfc-batch-page .nfc-tool-workbench {
+  padding: 18px;
+}
+
+.nfc-file-tool-form .nfc-form-grid {
+  gap: 12px;
+}
+
+.nfc-file-tool-primary-actions {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--nfc-border-soft);
+}
+
+.nfc-file-tool-result-panel.nfc-data-panel-dense {
+  background: var(--nfc-dense-surface-bg);
+}
+
+.nfc-batch-page .nfc-batch-operation-grid {
+  gap: 10px;
+}
+
+.nfc-batch-page .nfc-batch-operation-grid .ant-radio-button-wrapper {
+  min-height: 64px;
+  border-color: var(--nfc-border-soft);
+  border-radius: var(--nfc-radius-inner) !important;
+  background: color-mix(in srgb, var(--nfc-dense-surface-bg) 90%, transparent);
+}
+
+.nfc-batch-page .nfc-batch-operation-grid .ant-radio-button-wrapper-checked {
+  border-color: var(--nfc-border-accent) !important;
+  background: color-mix(in srgb, var(--nfc-accent-soft) 72%, var(--nfc-dense-surface-bg));
+}
+
+.nfc-organizer-page .nfc-organizer-profile-mobile-card,
+.nfc-organizer-preview-page .nfc-organizer-proposal-mobile-card {
+  border-color: var(--nfc-border-soft);
+  border-radius: var(--nfc-radius-inner);
+  background: var(--nfc-dense-surface-bg);
+}
