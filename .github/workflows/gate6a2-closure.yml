@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/v0.3.6-gate6a2-unlink-purge
+      - hotfix/gate6a2-*
   workflow_dispatch:
 
 permissions:
