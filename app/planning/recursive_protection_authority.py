@@ -388,9 +388,10 @@ def evaluate_live_recursive_protection(
     current descriptor-bound count to permit this one-file Quarantine.
 
     Execute may set execute_count_only=True to use the dedicated exact live-count
-    reader. That path still rechecks every protected ancestor and its frozen directory
-    identity immediately before mutation, but avoids rebuilding Preview-only tree
-    digests and rebinding every tree row for each Quarantine item.
+    reader. That path rechecks the whole exact protected-ancestor chain and every
+    frozen directory identity immediately before mutation, while accumulating all
+    ancestor counts from two widest-Scan-Root traversals instead of rereading each
+    overlapping subtree independently.
     """
 
     try:
@@ -420,14 +421,28 @@ def evaluate_live_recursive_protection(
             | recursive_protection.RecursiveProtectionLiveCount,
         ]
     ] = []
+    execute_samples: dict[str, recursive_protection.RecursiveProtectionLiveCount] | None = None
+    if execute_count_only:
+        # Execute must observe the live filesystem for every mutation; never reuse
+        # a prior item/Validate snapshot. The exact nested chain can be counted from
+        # one widest-root traversal pair instead of rescanning overlapping ancestors.
+        chain = recursive_protection.live_count_recursive_regular_file_chain(
+            list(authority.protected_ancestors),
+            quarantine_root=quarantine_root,
+        )
+        if not chain.stable:
+            failure_path = chain.failure_path or authority.scan_root_path
+            return LiveRecursiveProtectionEvaluation(
+                safe=False,
+                reason=f"RECURSIVE_PROTECTION_UNSTABLE: {failure_path}",
+                current_ancestors=chain.samples,
+            )
+        execute_samples = dict(chain.samples)
+
     for ancestor in authority.protected_ancestors:
         if execute_count_only:
-            # Execute must observe the live filesystem for every mutation; never
-            # reuse a prior item/Validate snapshot here.
-            sample = recursive_protection.live_count_recursive_regular_files(
-                ancestor,
-                quarantine_root=quarantine_root,
-            )
+            assert execute_samples is not None
+            sample = execute_samples[ancestor]
         else:
             sample = snapshot_cache.get(ancestor) if snapshot_cache is not None else None
             if sample is None:
