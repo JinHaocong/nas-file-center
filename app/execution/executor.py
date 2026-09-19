@@ -319,6 +319,7 @@ def execute_item(
     quarantine_entry_id: int | None = None,
     purge_manifest: dict | None = None,
     unlink_manifest: dict | None = None,
+    recursive_protection_prevalidated: bool = False,
 ) -> ItemResult:
     if item.state == "completed":
         return ItemResult("completed", "already completed")
@@ -503,7 +504,11 @@ def execute_item(
             protected = require_allowed_path(protected, allowed_roots)
         except UnsafePathError as exc:
             return _skip(str(exc))
-        if source.is_relative_to(protected) and _count_regular_files(protected) <= 1:
+        if (
+            not recursive_protection_prevalidated
+            and source.is_relative_to(protected)
+            and _count_regular_files(protected) <= 1
+        ):
             return _skip("protected directory last file")
 
     if item.keep is not None and item.operation in {"quarantine", "unlink"}:
