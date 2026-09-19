@@ -332,3 +332,31 @@
 .nfc-app-shell .ant-skeleton .ant-skeleton-content .ant-skeleton-paragraph > li {
   background: color-mix(in srgb, var(--nfc-surface-2) 86%, transparent);
 }
+
+
+/* Shared semantic helpers owned by the v0.4.7 primitive layer. */
+.nfc-breakall {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.nfc-accent-text {
+  color: var(--nfc-accent) !important;
+}
+
+.nfc-warning-text {
+  color: var(--nfc-warning) !important;
+}
+
+.nfc-inline-separator {
+  margin: 0 6px;
+  color: var(--nfc-text-subtle);
+}
+
+.nfc-inline-icon {
+  margin-right: 4px;
+}
+
+.nfc-compact-divider {
+  margin: 8px 0 !important;
+}
