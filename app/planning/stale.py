@@ -398,7 +398,7 @@ def verify_item_freshness(
             st_before = os.lstat(source_path)
             h = hashlib.sha256()
             with open(source_path, "rb") as f:
-                while chunk := f.read(1024 * 1024):
+                while chunk := f.read(8 * 1024 * 1024):
                     h.update(chunk)
             st_after = os.lstat(source_path)
             if (
