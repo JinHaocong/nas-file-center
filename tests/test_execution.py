@@ -92,3 +92,85 @@ def test_protected_directory_last_file_is_not_quarantined(tmp_path):
     item = OperationItem(1, "quarantine", src, expected_size=1, protected_dir=protected)
     result = execute_item(item, allowed_roots=[root], allow_mutation=True, allow_delete=False, quarantine_root=root / ".trash", plan_id="p")
     assert result.state == "skipped" and "last file" in result.reason and src.exists()
+
+
+def test_recursive_prevalidated_executor_skips_legacy_tree_recount(tmp_path, monkeypatch):
+    root = tmp_path / "data"
+    protected = root / "set"
+    protected.mkdir(parents=True)
+    keep = protected / "keep.bin"
+    delete = protected / "delete.bin"
+    payload = b"same-content" * 1000
+    keep.write_bytes(payload)
+    delete.write_bytes(payload)
+
+    import app.execution.executor as executor
+    from app.batch.plans import OperationItem
+
+    recount_calls: list[str] = []
+
+    def fail_recount(path):
+        recount_calls.append(str(path))
+        raise AssertionError("legacy protected tree recount must not run after recursive live preflight")
+
+    monkeypatch.setattr(executor, "_count_regular_files", fail_recount)
+
+    item = OperationItem(
+        sequence=1,
+        operation="quarantine",
+        source=delete,
+        keep=keep,
+        expected_size=len(payload),
+        expected_hash=H(payload),
+        protected_dir=protected,
+    )
+    result = executor.execute_item(
+        item,
+        allowed_roots=[root],
+        allow_mutation=True,
+        allow_delete=False,
+        quarantine_root=root / ".trash",
+        plan_id="recursive-prevalidated",
+        recursive_protection_prevalidated=True,
+    )
+
+    assert result.state == "completed"
+    assert recount_calls == []
+    assert keep.exists()
+    assert not delete.exists()
+
+
+def test_recursive_prevalidated_executor_still_pathguards_protected_dir(tmp_path):
+    root = tmp_path / "data"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    keep = root / "keep.bin"
+    delete = root / "delete.bin"
+    keep.write_bytes(b"same")
+    delete.write_bytes(b"same")
+
+    from app.batch.plans import OperationItem
+    from app.execution.executor import execute_item
+
+    item = OperationItem(
+        sequence=1,
+        operation="quarantine",
+        source=delete,
+        keep=keep,
+        expected_size=4,
+        expected_hash=H(b"same"),
+        protected_dir=outside,
+    )
+    result = execute_item(
+        item,
+        allowed_roots=[root],
+        allow_mutation=True,
+        allow_delete=False,
+        quarantine_root=root / ".trash",
+        plan_id="recursive-pathguard",
+        recursive_protection_prevalidated=True,
+    )
+
+    assert result.state == "skipped"
+    assert delete.exists()
