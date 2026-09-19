@@ -94,53 +94,26 @@ def test_protected_directory_last_file_is_not_quarantined(tmp_path):
     assert result.state == "skipped" and "last file" in result.reason and src.exists()
 
 
-def test_recursive_prevalidated_executor_skips_legacy_tree_recount(tmp_path, monkeypatch):
-    root = tmp_path / "data"
-    protected = root / "set"
-    protected.mkdir(parents=True)
-    keep = protected / "keep.bin"
-    delete = protected / "delete.bin"
-    payload = b"same-content" * 1000
-    keep.write_bytes(payload)
-    delete.write_bytes(payload)
+def test_protected_directory_count_stops_after_two_regular_files(tmp_path, monkeypatch):
+    protected = tmp_path / "set"
+    protected.mkdir()
+    (protected / "a.bin").write_bytes(b"a")
+    (protected / "b.bin").write_bytes(b"b")
 
     import app.execution.executor as executor
-    from app.batch.plans import OperationItem
 
-    recount_calls: list[str] = []
+    def guarded_walk(root, *, followlinks=False):
+        assert Path(root) == protected
+        assert followlinks is False
+        yield str(protected), [], ["a.bin", "b.bin"]
+        raise AssertionError("count must stop once two regular files are proven")
 
-    def fail_recount(path):
-        recount_calls.append(str(path))
-        raise AssertionError("legacy protected tree recount must not run after recursive live preflight")
+    monkeypatch.setattr(executor.os, "walk", guarded_walk)
 
-    monkeypatch.setattr(executor, "_count_regular_files", fail_recount)
-
-    item = OperationItem(
-        sequence=1,
-        operation="quarantine",
-        source=delete,
-        keep=keep,
-        expected_size=len(payload),
-        expected_hash=H(payload),
-        protected_dir=protected,
-    )
-    result = executor.execute_item(
-        item,
-        allowed_roots=[root],
-        allow_mutation=True,
-        allow_delete=False,
-        quarantine_root=root / ".trash",
-        plan_id="recursive-prevalidated",
-        recursive_protection_prevalidated=True,
-    )
-
-    assert result.state == "completed"
-    assert recount_calls == []
-    assert keep.exists()
-    assert not delete.exists()
+    assert executor._count_regular_files(protected) == 2
 
 
-def test_recursive_prevalidated_executor_still_pathguards_protected_dir(tmp_path):
+def test_protected_directory_pathguard_still_applies_with_bounded_count(tmp_path):
     root = tmp_path / "data"
     root.mkdir()
     outside = tmp_path / "outside"
@@ -168,8 +141,7 @@ def test_recursive_prevalidated_executor_still_pathguards_protected_dir(tmp_path
         allow_mutation=True,
         allow_delete=False,
         quarantine_root=root / ".trash",
-        plan_id="recursive-pathguard",
-        recursive_protection_prevalidated=True,
+        plan_id="bounded-count-pathguard",
     )
 
     assert result.state == "skipped"
