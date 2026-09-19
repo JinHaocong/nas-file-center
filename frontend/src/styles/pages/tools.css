@@ -1,7 +1,11 @@
 .nfc-path-match-page .nfc-tool-workbench,
 .nfc-rename-page .nfc-tool-workbench,
 .nfc-batch-page .nfc-tool-workbench {
-  padding: 18px;
+  padding: 18px 2px 20px;
+  border-left: 0 !important;
+  border-right: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
 }
 
 .nfc-file-tool-form .nfc-form-grid {
@@ -10,33 +14,37 @@
 
 .nfc-file-tool-primary-actions {
   margin-top: 16px;
-  padding-top: 14px;
+  padding-top: 12px;
   border-top: 1px solid var(--nfc-border-soft);
 }
 
 .nfc-file-tool-result-panel.nfc-data-panel-dense {
-  background: var(--nfc-dense-surface-bg);
+  background: var(--nfc-surface-1);
 }
 
 .nfc-batch-page .nfc-batch-operation-grid {
-  gap: 10px;
+  gap: 8px;
 }
 
 .nfc-batch-page .nfc-batch-operation-grid .ant-radio-button-wrapper {
-  min-height: 64px;
+  min-height: 60px;
   border-color: var(--nfc-border-soft);
-  border-radius: var(--nfc-radius-inner) !important;
-  background: color-mix(in srgb, var(--nfc-dense-surface-bg) 90%, transparent);
+  border-radius: var(--nfc-radius-control) !important;
+  background: var(--nfc-surface-1);
+}
+
+.nfc-batch-page .nfc-batch-operation-grid .ant-radio-button-wrapper:hover {
+  background: var(--nfc-surface-2);
 }
 
 .nfc-batch-page .nfc-batch-operation-grid .ant-radio-button-wrapper-checked {
   border-color: var(--nfc-border-accent) !important;
-  background: color-mix(in srgb, var(--nfc-accent-soft) 72%, var(--nfc-dense-surface-bg));
+  background: color-mix(in srgb, var(--nfc-accent-soft) 54%, var(--nfc-surface-1));
 }
 
 .nfc-organizer-page .nfc-organizer-profile-mobile-card,
 .nfc-organizer-preview-page .nfc-organizer-proposal-mobile-card {
   border-color: var(--nfc-border-soft);
-  border-radius: var(--nfc-radius-inner);
-  background: var(--nfc-dense-surface-bg);
+  border-radius: var(--nfc-radius-control);
+  background: var(--nfc-surface-1);
 }
