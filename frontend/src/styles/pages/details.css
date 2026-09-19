@@ -3,7 +3,7 @@
 .nfc-advanced-dedupe-page,
 .nfc-organizer-preview-page,
 .nfc-workflow-builder-page {
-  gap: 16px;
+  gap: 18px;
 }
 
 .nfc-plan-header-meta {
@@ -13,12 +13,13 @@
 .nfc-plan-detail-page .nfc-plan-summary,
 .nfc-scan-detail-page .nfc-scan-summary,
 .nfc-advanced-dedupe-page > .nfc-data-panel:first-of-type {
-  background: var(--nfc-glass-workspace-bg);
+  background: var(--nfc-surface-1);
+  box-shadow: none;
 }
 
 .nfc-root-list {
   border-top-color: var(--nfc-border-soft);
-  background: color-mix(in srgb, var(--nfc-dense-surface-bg) 88%, transparent);
+  background: transparent;
 }
 
 .nfc-root-list-values {
@@ -26,21 +27,23 @@
 }
 
 .nfc-plan-detail-page .nfc-plan-action-surface {
-  padding: 12px;
-  border: 1px solid var(--nfc-border-soft);
-  background: var(--nfc-dense-surface-bg);
+  padding: 10px 12px;
+  border: 0;
+  border-left: 2px solid var(--nfc-border-accent);
+  border-radius: 0 !important;
+  background: color-mix(in srgb, var(--nfc-accent-soft) 18%, transparent);
 }
 
 .nfc-plan-detail-page .nfc-plan-alert-stack,
 .nfc-advanced-dedupe-page .nfc-dedupe-stage-stack {
-  gap: 10px;
+  gap: 9px;
 }
 
 .nfc-plan-detail-page .nfc-page-alert,
 .nfc-scan-detail-page .nfc-page-alert,
 .nfc-advanced-dedupe-page .nfc-page-alert {
   border-color: var(--nfc-border-soft);
-  border-radius: var(--nfc-radius-inner);
+  border-radius: var(--nfc-radius-control);
 }
 
 .nfc-duplicate-member-table,
@@ -55,30 +58,30 @@
 }
 
 .nfc-dedupe-editor-wrap {
-  padding: 14px;
+  padding: 14px 2px;
   border-top: 1px solid var(--nfc-border-soft);
   border-bottom: 1px solid var(--nfc-border-soft);
-  background: color-mix(in srgb, var(--nfc-surface-2) 34%, transparent);
+  background: transparent;
 }
 
 .nfc-dedupe-config-actions {
-  padding: 12px 14px;
+  padding: 10px 2px;
   border-top-color: var(--nfc-border-soft);
-  background: var(--nfc-dense-surface-bg);
+  background: transparent;
 }
 
 .nfc-dedupe-plan-surface {
   border-color: var(--nfc-border-soft);
-  border-radius: var(--nfc-radius-inner);
-  background: var(--nfc-dense-surface-bg);
+  border-radius: var(--nfc-radius-control);
+  background: var(--nfc-surface-1);
 }
 
 .nfc-workflow-preview-panel {
   overflow: hidden;
   border: 1px solid var(--nfc-border-soft);
   border-radius: var(--nfc-radius-workspace);
-  background: var(--nfc-dense-surface-bg);
-  box-shadow: var(--nfc-shadow-workspace);
+  background: var(--nfc-surface-1);
+  box-shadow: none;
 }
 
 .nfc-workflow-preview-body {
@@ -86,21 +89,21 @@
 }
 
 .nfc-organizer-preview-page .nfc-organizer-metric-grid {
-  margin-top: 12px;
+  margin-top: 10px;
 }
 
 .nfc-organizer-preview-page .nfc-organizer-preview-filter {
-  background: color-mix(in srgb, var(--nfc-dense-surface-bg) 92%, transparent);
+  background: var(--nfc-surface-1);
 }
 
 .nfc-overlay-section {
   border-color: var(--nfc-border-soft) !important;
-  border-radius: var(--nfc-radius-inner) !important;
-  background: color-mix(in srgb, var(--nfc-dense-surface-bg) 94%, transparent) !important;
+  border-radius: var(--nfc-radius-control) !important;
+  background: var(--nfc-surface-1) !important;
 }
 
 .nfc-code-block {
   border: 1px solid var(--nfc-border-soft);
-  border-radius: var(--nfc-radius-inner);
-  background: color-mix(in srgb, var(--nfc-surface-2) 68%, transparent);
+  border-radius: var(--nfc-radius-control);
+  background: var(--nfc-surface-2);
 }
