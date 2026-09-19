@@ -10,7 +10,10 @@ from sqlalchemy import select
 from app.config import Settings
 from app.models import BatchPlan, BatchPlanItem, DuplicateFile, DuplicateGroup, ScanJob, utcnow
 from app.planning.recursive_protection import RecursiveProtectionSnapshot
-from app.planning.recursive_protection_authority import parse_recursive_protection_authority
+from app.planning.recursive_protection_authority import (
+    build_frozen_recursive_protection,
+    parse_recursive_protection_authority,
+)
 from app.service import FileCenterService
 
 
@@ -197,6 +200,85 @@ def test_recursive_freeze_seals_exact_scope_and_live_ancestor_samples(service_en
         assert isinstance(sample["tree_identity_digest"], str)
         assert len(sample["tree_identity_digest"]) == 64
 
+
+
+def test_recursive_freeze_snapshot_cache_reuses_shared_ancestors(service_env, monkeypatch):
+    plan_id = _generate_recursive_plan(service_env, scan_id=1206)
+    settings = service_env["settings"]
+    item = _first_item(service_env, plan_id)
+    metadata = json.loads(item.metadata_json or "{}")
+    authority = parse_recursive_protection_authority(
+        item.metadata_json,
+        expected_source_path=item.source_path,
+        allowed_roots=settings.allowed_roots,
+        quarantine_root=settings.quarantine_root,
+    )
+    assert authority is not None
+    assert authority.protected_ancestors
+
+    second_source = str(Path(item.source_path).with_name("same-parent-second-candidate.bin"))
+    second_metadata = json.loads(item.metadata_json or "{}")
+    second_metadata["recursive_protection"]["source_path"] = second_source
+    second_metadata_json = json.dumps(second_metadata, ensure_ascii=False, sort_keys=True)
+
+    import app.planning.recursive_protection as recursive_protection
+
+    real_snapshot = recursive_protection.snapshot_recursive_regular_files
+    calls: list[str] = []
+
+    def counted_snapshot(path, **kwargs):
+        calls.append(str(path))
+        return real_snapshot(path, **kwargs)
+
+    monkeypatch.setattr(
+        recursive_protection,
+        "snapshot_recursive_regular_files",
+        counted_snapshot,
+    )
+
+    cache: dict[str, RecursiveProtectionSnapshot] = {}
+    first = build_frozen_recursive_protection(
+        item.metadata_json,
+        expected_source_path=item.source_path,
+        allowed_roots=settings.allowed_roots,
+        quarantine_root=settings.quarantine_root,
+        snapshot_cache=cache,
+    )
+    second = build_frozen_recursive_protection(
+        second_metadata_json,
+        expected_source_path=second_source,
+        allowed_roots=settings.allowed_roots,
+        quarantine_root=settings.quarantine_root,
+        snapshot_cache=cache,
+    )
+
+    assert first is not None
+    assert second is not None
+    assert set(cache) == set(authority.protected_ancestors)
+    assert calls == list(authority.protected_ancestors)
+
+
+def test_recursive_freeze_plan_passes_one_shared_snapshot_cache(service_env, monkeypatch):
+    plan_id = _generate_recursive_plan(service_env, scan_id=1207)
+    service = service_env["service"]
+
+    import app.planning.recursive_protection_authority as authority_module
+
+    real_build = authority_module.build_frozen_recursive_protection
+    seen_cache_ids: list[int] = []
+
+    def wrapped_build(*args, **kwargs):
+        cache = kwargs.get("snapshot_cache")
+        assert isinstance(cache, dict)
+        seen_cache_ids.append(id(cache))
+        return real_build(*args, **kwargs)
+
+    monkeypatch.setattr(authority_module, "build_frozen_recursive_protection", wrapped_build)
+
+    service.freeze_plan(plan_id)
+
+    assert seen_cache_ids
+    assert len(set(seen_cache_ids)) == 1
 
 def test_recursive_freeze_rejects_missing_authority_without_freezing(service_env):
     plan_id = _generate_recursive_plan(service_env, scan_id=1202)
