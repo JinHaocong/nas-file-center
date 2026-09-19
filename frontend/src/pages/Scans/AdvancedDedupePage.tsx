@@ -472,6 +472,7 @@ export const AdvancedDedupePage: React.FC = () => {
             description="每个成员的选择、评分、保留资格与安全排除都可追溯解释。"
             action={<span className="nfc-panel-count">{previewData.total_rows} candidates</span>}
             className="nfc-panel-flush"
+            variant="dense"
           >
             <DedupePreviewTable
               rows={previewData.rows}
