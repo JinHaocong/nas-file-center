@@ -251,7 +251,7 @@ export const QuarantinePage: React.FC = () => {
 
       {isSafeMode && <Alert className="nfc-page-alert" message="只读安全保护模式生效中" description="系统当前以 ALLOW_MUTATION=false 运行。所有文件移动与写入已被锁定，恢复与清除操作当前不可用。" type="info" showIcon icon={<LockOutlined />} />}
 
-      <DataPanel title="隔离文件" description="筛选、显式选择并生成恢复或永久删除计划。" action={<span className="nfc-panel-count">{quarantineData?.total ?? 0} entries</span>} className="nfc-panel-flush">
+      <DataPanel title="隔离文件" description="筛选、显式选择并生成恢复或永久删除计划。" action={<span className="nfc-panel-count">{quarantineData?.total ?? 0} entries</span>} className="nfc-panel-flush" variant="dense">
         <ActionBar className="nfc-filter-bar nfc-quarantine-filter-bar">
           <Input className="nfc-search-input" placeholder="搜索原始路径或隔离路径..." value={searchInput} onChange={(e)=>setSearchInput(e.target.value)} onPressEnter={handleSearch} prefix={<SearchOutlined />} allowClear />
           <Button type="primary" onClick={handleSearch}>搜索</Button>
