@@ -298,6 +298,7 @@ export const WorkflowListPage: React.FC = () => {
         description="工作流保存为修订版本；内置与归档定义保持只读。"
         action={<span className="nfc-panel-count">{items.length} workflows</span>}
         className="nfc-panel-flush"
+        variant="dense"
       >
         <ResponsiveDataView
           desktop={
