@@ -19,7 +19,7 @@ jobs:
       DATA_MOUNT: /tmp/nfc-data
       ALLOWED_ROOTS: /tmp/nfc-data
       QUARANTINE_ROOT: /tmp/nfc-data/.nas-file-center-trash
-      BASELINE_SHA: ${{ startsWith(github.ref_name, 'hotfix/gate6a2-') && 'ddb55f61951736429a40ddf55a6c13548f1c5a37' || '4abd312086c7ef0f363a4da4d13b51cb470d8cba' }}
+      BASELINE_SHA: 4abd312086c7ef0f363a4da4d13b51cb470d8cba
 
     steps:
       - name: Checkout exact candidate with history
@@ -31,15 +31,25 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          resolved_baseline="${BASELINE_SHA}"
+          if [[ "${GITHUB_REF_NAME}" == hotfix/gate6a2-* ]]; then
+            # Hotfix branches are cut from the current integrated main, not the
+            # historical Gate6-A2 feature baseline. Security diff checks must
+            # review only the hotfix delta, otherwise unrelated later UI/backend
+            # commits can make this closure lane fail for pre-existing whitespace.
+            git fetch --no-tags origin main
+            resolved_baseline="$(git merge-base origin/main HEAD)"
+            echo "BASELINE_SHA=${resolved_baseline}" >> "${GITHUB_ENV}"
+          fi
           {
             echo "candidate_sha=$(git rev-parse HEAD)"
             echo "candidate_branch=${GITHUB_REF_NAME}"
-            echo "baseline_sha=${BASELINE_SHA}"
-            echo "merge_base=$(git merge-base "${BASELINE_SHA}" HEAD)"
+            echo "baseline_sha=${resolved_baseline}"
+            echo "merge_base=$(git merge-base "${resolved_baseline}" HEAD)"
             echo
             git status --short
           } | tee gate6a2-identity.txt
-          test "$(git merge-base "${BASELINE_SHA}" HEAD)" = "${BASELINE_SHA}"
+          test "$(git merge-base "${resolved_baseline}" HEAD)" = "${resolved_baseline}"
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
