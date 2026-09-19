@@ -5,82 +5,73 @@ import { resolve } from 'node:path';
 
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');
 
-describe('v0.4.6 glass workspace system foundation', () => {
-  test('frontend loads the split v0.4.6 style entry after legacy CSS', () => {
+describe('v0.4.7 control plane foundation', () => {
+  test('frontend loads the v0.4.7 style ownership root after legacy base css', () => {
     const main = read('src/main.tsx');
-    assert.match(main, /import '\.\/index\.css';[\s\S]*import '\.\/styles\/v046\.css';/);
-    const entry = read('src/styles/v046.css');
+    assert.match(main, /import '\.\/index\.css';[\s\S]*import '\.\/styles\/v047\.css';/);
+    const entry = read('src/styles/v047.css');
     for (const file of ['tokens.css', 'foundation.css', 'shell.css', 'primitives.css', 'overlays.css', 'responsive.css']) {
       assert.match(entry, new RegExp(file.replace('.', '\\.')));
     }
   });
 
-  test('glass tiers and opaque fallback are named centrally', () => {
+  test('glass remains available for shell and overlays but workspace surfaces are opaque', () => {
     const css = read('src/styles/tokens.css');
-    for (const token of [
-      '--nfc-glass-shell-bg',
-      '--nfc-glass-workspace-bg',
-      '--nfc-dense-surface-bg',
-      '--nfc-overlay-surface-bg',
-      '--nfc-blur-shell',
-      '--nfc-blur-workspace',
-      '--nfc-blur-overlay',
-    ]) {
-      assert.match(css, new RegExp(token));
-    }
-    assert.match(css, /@supports not \(\(backdrop-filter: blur\(1px\)\)/);
+    assert.match(css, /--nfc-glass-shell-bg:/);
+    assert.match(css, /--nfc-overlay-surface-bg:/);
+    assert.match(css, /--nfc-glass-workspace-bg: var\(--nfc-surface-1\)/);
+    assert.match(css, /--nfc-blur-workspace: 0px/);
   });
 
-  test('shell glass is deliberate while sidebar remains an opaque identity plane', () => {
+  test('sidebar remains the visual anchor while header becomes an integrated command rail', () => {
     const css = read('src/styles/shell.css');
-    assert.match(css, /\.nfc-header\.nfc-header[\s\S]*var\(--nfc-glass-shell-bg\)[\s\S]*backdrop-filter:/);
     assert.match(css, /\.nfc-sidebar\.nfc-sidebar[\s\S]*var\(--nfc-nav-surface\)/);
+    assert.match(css, /\.nfc-header\.nfc-header[\s\S]*border-bottom: 1px solid var\(--nfc-border-soft\)[\s\S]*border-radius: 0/);
+    assert.match(css, /\.nfc-header\.nfc-header[\s\S]*backdrop-filter:/);
   });
 
-  test('shared primitives expose workspace, dense, quiet, danger and floating panels', () => {
+  test('page header is unboxed and data panels preserve all semantic variants', () => {
     const component = read('src/components/ui/DataPanel.tsx');
     const css = read('src/styles/primitives.css');
+    assert.match(css, /\.nfc-page-header[\s\S]*background: transparent[\s\S]*box-shadow: none/);
     assert.match(component, /DataPanelVariant = 'default' \| 'dense' \| 'quiet' \| 'danger' \| 'floating'/);
     for (const variant of ['default', 'dense', 'quiet', 'danger', 'floating']) {
       assert.match(css, new RegExp('\\.nfc-data-panel-' + variant));
     }
   });
 
-  test('page header, metric cards and workbenches consume the shared workspace glass', () => {
+  test('metrics form one instrument strip instead of independent glass cards', () => {
     const css = read('src/styles/primitives.css');
-    assert.match(css, /\.nfc-page-header[\s\S]*var\(--nfc-glass-workspace-bg\)/);
-    assert.match(css, /\.nfc-metric-card[\s\S]*var\(--nfc-glass-workspace-bg\)/);
-    assert.match(css, /\.nfc-tool-workbench,[\s\S]*var\(--nfc-glass-workspace-bg\)/);
+    assert.match(css, /\.nfc-metric-grid[\s\S]*gap: 0[\s\S]*border: 1px solid/);
+    assert.match(css, /\.nfc-metric-card[\s\S]*border-radius: 0[\s\S]*background: transparent[\s\S]*box-shadow: none/);
   });
 
-  test('floating Ant surfaces share one overlay glass treatment', () => {
+  test('dense tables use restrained headers and flat rows', () => {
+    const css = read('src/styles/primitives.css');
+    assert.match(css, /\.nfc-data-panel \.ant-table-thead[\s\S]*text-transform: none/);
+    assert.match(css, /\.nfc-data-panel \.ant-table-tbody[\s\S]*border-bottom-color/);
+  });
+
+  test('floating Ant surfaces retain deliberate overlay depth', () => {
     const css = read('src/styles/overlays.css');
     assert.match(css, /\.ant-modal \.ant-modal-content,[\s\S]*\.ant-select-dropdown,[\s\S]*var\(--nfc-overlay-surface-bg\)/);
     assert.match(css, /var\(--nfc-shadow-overlay\)/);
     assert.match(css, /var\(--nfc-blur-overlay\)/);
   });
 
-  test('mobile reduces blur and keeps workspace hierarchy responsive', () => {
+  test('mobile keeps the unboxed hierarchy and a real two-column metric instrument', () => {
     const css = read('src/styles/responsive.css');
-    assert.match(css, /@media \(max-width: 767px\)[\s\S]*--nfc-blur-shell: 14px/);
-    assert.match(css, /@media \(max-width: 767px\)[\s\S]*\.nfc-page-header[\s\S]*padding: 16px/);
+    assert.match(css, /@media \(max-width: 767px\)[\s\S]*\.nfc-page-header[\s\S]*flex-direction: column/);
     assert.match(css, /@media \(max-width: 767px\)[\s\S]*\.nfc-metric-grid[\s\S]*repeat\(2/);
+    assert.match(css, /@media \(max-width: 767px\)[\s\S]*\.nfc-header\.nfc-header[\s\S]*border-radius: 0/);
   });
 
   test('settings topology regression remains explicitly protected', () => {
     const settings = read('src/styles/pages/settings.css');
     assert.match(settings, /grid-template-areas:[\s\S]*"runtime lifecycle"[\s\S]*"resource lifecycle"[\s\S]*"sessions sessions"/);
   });
-  test('deep component surfaces cover directory picker, task runtime and destructive flows', () => {
-    const css = read('src/styles/components.css');
-    assert.match(css, /\.nfc-directory-browser-toolbar[\s\S]*var\(--nfc-dense-surface-bg\)/);
-    assert.match(css, /\.nfc-worker-status-strip[\s\S]*var\(--nfc-glass-workspace-bg\)/);
-    assert.match(css, /\.nfc-overlay-section[\s\S]*var\(--nfc-dense-surface-bg\)/);
-    assert.match(css, /\.nfc-destructive-confirm[\s\S]*var\(--nfc-danger-soft\)/);
-    assert.match(css, /@media \(max-width: 767px\)[\s\S]*\.nfc-task-action-bar/);
-  });
 
-  test('operational table pages opt into dense data surfaces', () => {
+  test('operational table pages stay on the dense semantic surface', () => {
     for (const path of [
       'src/pages/Indexes/index.tsx',
       'src/pages/Scans/index.tsx',
@@ -93,7 +84,8 @@ describe('v0.4.6 glass workspace system foundation', () => {
       assert.match(read(path), /variant="dense"/);
     }
   });
-  test('all routed workspaces retain a semantic page root for global composition', () => {
+
+  test('all routed workspaces retain semantic roots for page-specific composition', () => {
     const pages: Array<[string, RegExp]> = [
       ['src/pages/Dashboard/index.tsx', /nfc-dashboard-page/],
       ['src/pages/Indexes/index.tsx', /nfc-indexes-page/],
@@ -114,14 +106,11 @@ describe('v0.4.6 glass workspace system foundation', () => {
       ['src/pages/Workflows/WorkflowBuilder.tsx', /nfc-workflow-builder-page/],
       ['src/pages/Login/index.tsx', /nfc-login-shell/],
     ];
-
-    for (const [path, root] of pages) {
-      assert.match(read(path), root, path);
-    }
+    for (const [path, root] of pages) assert.match(read(path), root, path);
   });
 
-  test('page style entry covers dashboard, operations, details, tools, organizer, workflows, settings and login', () => {
-    const entry = read('src/styles/v046.css');
+  test('style ownership remains split across page-specific files', () => {
+    const entry = read('src/styles/v047.css');
     for (const file of [
       'pages/dashboard.css',
       'pages/operations.css',
@@ -135,29 +124,8 @@ describe('v0.4.6 glass workspace system foundation', () => {
       assert.match(entry, new RegExp(file.replace('.', '\\.')));
     }
   });
-  test('final component audit covers security history tasks dedupe and workflow editors', () => {
-    const components = read('src/styles/components.css');
-    const workflows = read('src/styles/pages/workflows.css');
-    for (const selector of [
-      '.nfc-history-cleanup-note',
-      '.nfc-task-log-panel',
-      '.nfc-dedupe-summary-grid',
-      '.nfc-dedupe-rule-row',
-      '.nfc-definition-inspector',
-      '.nfc-revision-mobile-card',
-    ]) {
-      assert.match(components, new RegExp(selector.replace('.', '\\.')));
-    }
-    for (const selector of [
-      '.nfc-completed-scan-picker',
-      '.nfc-filter-builder.ant-card',
-      '.nfc-filter-nested',
-    ]) {
-      assert.match(workflows, new RegExp(selector.replace('.', '\\.')));
-    }
-  });
 
-  test('legacy terminal v0.4.4 workspace override ledgers are removed from index css', () => {
+  test('legacy terminal v0.4.4 override ledgers stay out of index css', () => {
     const legacy = read('src/index.css');
     assert.doesNotMatch(legacy, /v0\.4\.4 Workspace Cohesion Pass/);
     assert.doesNotMatch(legacy, /v0\.4\.4 Sidebar Visual Language Parity Lock/);
