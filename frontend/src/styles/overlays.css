@@ -52,3 +52,26 @@
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
+
+.ant-message .ant-message-notice-content,
+.ant-notification .ant-notification-notice {
+  border: 1px solid var(--nfc-border-strong);
+  border-radius: var(--nfc-radius-inner);
+  background: var(--nfc-overlay-surface-bg);
+  box-shadow: var(--nfc-shadow-overlay);
+  backdrop-filter: blur(var(--nfc-blur-overlay)) saturate(145%);
+  -webkit-backdrop-filter: blur(var(--nfc-blur-overlay)) saturate(145%);
+}
+
+.ant-tooltip .ant-tooltip-inner {
+  border: 1px solid color-mix(in srgb, var(--nfc-border-strong) 82%, transparent);
+  border-radius: calc(var(--nfc-radius-control) - 2px);
+  background: color-mix(in srgb, var(--nfc-text) 94%, transparent);
+  box-shadow: 0 8px 26px color-mix(in srgb, #000 18%, transparent);
+  color: var(--nfc-surface-1);
+}
+
+[data-theme='dark'] .ant-tooltip .ant-tooltip-inner {
+  background: color-mix(in srgb, #05070a 92%, transparent);
+  color: var(--nfc-text);
+}
