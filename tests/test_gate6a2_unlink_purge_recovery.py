@@ -412,4 +412,3 @@ def test_legacy_generationless_intents_recover_from_authority_epoch(
     )
     assert recovered["purge_semantics"] == "unlink_v1"
     assert "authoritative_anchor" in recovered["recovered_missing_roles"]
-
