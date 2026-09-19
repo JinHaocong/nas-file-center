@@ -718,3 +718,47 @@ It does not intentionally change:
 - PathGuard / symlink / stale identity checks.
 
 Destructive workflows retain stronger semantic hierarchy, but their authorization and execution semantics are unchanged.
+
+## v0.4.7 Control Plane Redesign
+
+v0.4.7 supersedes the v0.4.6 right-workspace skin. The v0.4.6 information architecture and safety boundaries remain valid, but ordinary workspace content is no longer required to look frosted, floating or card-based.
+
+### Open-source research synthesis
+
+The direction was rebuilt from production-grade open-source interfaces rather than a single visual reference:
+
+- Supabase Studio: explicit page/container/section ownership, dense developer tooling, restrained section hierarchy.
+- Twenty: sidebar-first workspace, view/table-centric primary content, command surfaces and side-panel inspection.
+- Plane: compact operational hierarchy and low-chrome work-item surfaces.
+- Immich: application-shell discipline and high information density for self-hosted media operations.
+- Open WebUI: desktop-like navigation, settings navigation and focused workspace composition.
+- CasaOS / Runtipi / Homarr: self-hosted/NAS status context and approachable operational navigation.
+- Portainer: infrastructure-console vocabulary, status/action separation and table-first operations.
+
+No one project is treated as a template. NAS File Center combines these patterns around its own safety-heavy file-operation lifecycle.
+
+### Current visual hierarchy
+
+- Sidebar is the stable identity/elevation anchor.
+- Header is an integrated sticky command rail, not a floating rounded card.
+- PageHeader is an unboxed title/action band separated by a hairline.
+- Tables and workbenches are allowed to become the primary page surface.
+- Metrics form joined instrument strips where possible instead of decks of small cards.
+- Default and dense DataPanel surfaces are opaque and restrained.
+- Glass/blur is reserved for shell chrome and transient overlays.
+- Shadows communicate actual elevation; they are not default decoration.
+- Radius is smaller and less frequent in normal workspace content.
+- Settings reads like system preferences with ruled sections and isolated destructive controls.
+- Workflow/Dedupe tools read as editors and analysis workbenches rather than generic admin cards.
+- Mobile keeps route-specific card/list views where useful, but title/actions and metrics are recomposed rather than blindly stacked.
+
+### CSS ownership
+
+`src/styles/v047.css` is the active release entry. Existing page/component style owners remain split under `src/styles/`.
+
+The terminal v0.4.4 audit/override ledger has been removed from `index.css`; migrated selectors now live under their semantic owners. New UI work must continue this ownership model instead of reintroducing a release-specific override tail.
+
+### Safety boundary
+
+This redesign does not change filesystem, Plan, Worker, Quarantine, purge, RBAC or API semantics. Preview → Draft → Freeze → Validate → Execute and all fail-closed identity protections remain authoritative.
+
