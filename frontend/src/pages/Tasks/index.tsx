@@ -304,6 +304,7 @@ export const TasksPage: React.FC = () => {
         description="按状态和任务类型筛选；正在运行的任务会保留实时进度与 ETA。"
         action={<span className="nfc-panel-count">{data?.total ?? 0} tasks</span>}
         className="nfc-panel-flush"
+        variant="dense"
       >
         <ActionBar className="nfc-filter-bar">
           <label className="nfc-filter-control">
