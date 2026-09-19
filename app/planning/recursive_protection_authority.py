@@ -42,7 +42,14 @@ class RecursiveProtectionAuthority:
 class LiveRecursiveProtectionEvaluation:
     safe: bool
     reason: str | None
-    current_ancestors: tuple[tuple[str, recursive_protection.RecursiveProtectionSnapshot], ...]
+    current_ancestors: tuple[
+        tuple[
+            str,
+            recursive_protection.RecursiveProtectionSnapshot
+            | recursive_protection.RecursiveProtectionLiveCount,
+        ],
+        ...,
+    ]
 
 
 def _fail(message: str) -> RecursiveProtectionAuthorityError:
@@ -284,7 +291,10 @@ def build_frozen_recursive_protection(
             not sample.stable
             or sample.device is None
             or sample.inode is None
-            or not sample.tree_identity_digest
+            or (
+                not execute_count_only
+                and not getattr(sample, "tree_identity_digest", None)
+            )
         ):
             raise _fail(f"RECURSIVE_PROTECTION_UNSTABLE: {ancestor}")
         if sample.count - 1 < 1:
@@ -371,6 +381,7 @@ def evaluate_live_recursive_protection(
     allowed_roots: Sequence[Path | str],
     quarantine_root: Path | str | None,
     snapshot_cache: dict[str, recursive_protection.RecursiveProtectionSnapshot] | None = None,
+    execute_count_only: bool = False,
 ) -> LiveRecursiveProtectionEvaluation:
     """Re-evaluate frozen recursive Last-File authority against current live state.
 
@@ -378,6 +389,11 @@ def evaluate_live_recursive_protection(
     byte-for-byte unchanged. Validate requires the immutable scope to remain intact,
     each protected directory identity to remain bound to the frozen directory, and the
     current descriptor-bound count to permit this one-file Quarantine.
+
+    Execute may set execute_count_only=True to use the dedicated exact live-count
+    reader. That path still rechecks every protected ancestor and its frozen directory
+    identity immediately before mutation, but avoids rebuilding Preview-only tree
+    digests and rebinding every tree row for each Quarantine item.
     """
 
     try:
@@ -400,16 +416,30 @@ def evaluate_live_recursive_protection(
             current_ancestors=(),
         )
 
-    current: list[tuple[str, recursive_protection.RecursiveProtectionSnapshot]] = []
+    current: list[
+        tuple[
+            str,
+            recursive_protection.RecursiveProtectionSnapshot
+            | recursive_protection.RecursiveProtectionLiveCount,
+        ]
+    ] = []
     for ancestor in authority.protected_ancestors:
-        sample = snapshot_cache.get(ancestor) if snapshot_cache is not None else None
-        if sample is None:
-            sample = recursive_protection.snapshot_recursive_regular_files(
+        if execute_count_only:
+            # Execute must observe the live filesystem for every mutation; never
+            # reuse a prior item/Validate snapshot here.
+            sample = recursive_protection.live_count_recursive_regular_files(
                 ancestor,
                 quarantine_root=quarantine_root,
             )
-            if snapshot_cache is not None:
-                snapshot_cache.setdefault(ancestor, sample)
+        else:
+            sample = snapshot_cache.get(ancestor) if snapshot_cache is not None else None
+            if sample is None:
+                sample = recursive_protection.snapshot_recursive_regular_files(
+                    ancestor,
+                    quarantine_root=quarantine_root,
+                )
+                if snapshot_cache is not None:
+                    snapshot_cache.setdefault(ancestor, sample)
         current.append((ancestor, sample))
         frozen_sample = frozen_ancestors[ancestor]
         if (
