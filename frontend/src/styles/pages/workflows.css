@@ -255,3 +255,32 @@
     padding-left: 8px;
   }
 }
+
+
+/* Filter editor dimensions and labels belong to the workflow page layer. */
+.nfc-filter-case-label {
+  color: var(--nfc-text-subtle);
+  font-size: 10px;
+}
+
+.nfc-filter-type-select {
+  width: 120px;
+}
+
+.nfc-filter-field-select {
+  width: 160px;
+}
+
+.nfc-filter-operator-select {
+  width: 150px;
+}
+
+@media (max-width: 767px) {
+  .nfc-filter-builder .nfc-filter-type-select,
+  .nfc-filter-builder .nfc-filter-field-select,
+  .nfc-filter-builder .nfc-filter-operator-select,
+  .nfc-filter-builder .nfc-filter-value-control {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+}
