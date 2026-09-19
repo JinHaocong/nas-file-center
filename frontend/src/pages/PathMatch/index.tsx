@@ -224,6 +224,7 @@ export const PathMatchPage: React.FC = () => {
           description="每组第一个成员作为 keep，后续成员作为 Quarantine Plan 候选；此处尚未修改文件。"
           action={<span className="nfc-panel-count">{groups.length} groups</span>}
           className="nfc-panel-flush nfc-file-tool-result-panel"
+          variant="dense"
         >
           <ResponsiveDataView
             desktop={
