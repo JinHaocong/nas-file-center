@@ -57,7 +57,7 @@ export const AuditPage: React.FC = () => {
         }
       />
 
-      <DataPanel title="审计事件" description="按操作、路径和服务端可搜索字段检索。" action={<span className="nfc-panel-count">{data?.total ?? 0} events</span>} className="nfc-panel-flush">
+      <DataPanel title="审计事件" description="按操作、路径和服务端可搜索字段检索。" action={<span className="nfc-panel-count">{data?.total ?? 0} events</span>} className="nfc-panel-flush" variant="dense">
         <ActionBar className="nfc-filter-bar">
           <Input
             className="nfc-search-input"
