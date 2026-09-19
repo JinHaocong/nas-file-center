@@ -147,6 +147,7 @@ export const PlansPage: React.FC = () => {
         description="计划状态、预期变更与可释放容量均来自当前 BatchPlan。"
         action={<span className="nfc-panel-count">{data?.total ?? 0} plans</span>}
         className="nfc-panel-flush"
+        variant="dense"
       >
         <ResponsiveDataView
           desktop={
