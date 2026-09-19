@@ -389,10 +389,6 @@ def test_nonrecursive_freeze_path_remains_compatible(service_env):
     assert "frozen_recursive_protection" not in metadata
 
 
-@pytest.mark.parametrize(
-    "tamper_kind",
-    ["source", "root", "ancestors", "scope_digest"],
-)
 def test_recursive_validate_plan_reuses_shared_ancestor_snapshots_per_call(service_env, monkeypatch):
     plan_id = _freeze_recursive_plan(service_env, scan_id=1306)
     service = service_env["service"]
@@ -470,6 +466,10 @@ def test_recursive_validate_plan_reuses_shared_ancestor_snapshots_per_call(servi
     assert calls == list(authority.protected_ancestors) * 2
 
 
+@pytest.mark.parametrize(
+    "tamper_kind",
+    ["source", "root", "ancestors", "scope_digest"],
+)
 def test_recursive_validate_rejects_authority_tampering_after_freeze(service_env, tamper_kind):
     plan_id = _freeze_recursive_plan(service_env, scan_id=1301)
     service = service_env["service"]
