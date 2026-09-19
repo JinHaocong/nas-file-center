@@ -1,0 +1,275 @@
+.nfc-page-header {
+  position: relative;
+  overflow: hidden;
+  min-height: 110px;
+  margin: 0 auto 2px;
+  padding: 20px 22px;
+  border: 1px solid var(--nfc-border-soft);
+  border-radius: var(--nfc-radius-workspace);
+  background: var(--nfc-glass-workspace-bg);
+  box-shadow: var(--nfc-shadow-workspace);
+  backdrop-filter: blur(var(--nfc-blur-workspace)) saturate(135%);
+  -webkit-backdrop-filter: blur(var(--nfc-blur-workspace)) saturate(135%);
+}
+
+.nfc-page-header::after,
+.nfc-data-panel-default::after,
+.nfc-metric-card::after,
+.nfc-tool-workbench::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  box-shadow: inset 0 1px 0 var(--nfc-glass-highlight);
+}
+
+.nfc-page-header-copy,
+.nfc-page-actions,
+.nfc-data-panel-header > *,
+.nfc-data-panel-body,
+.nfc-metric-card > *,
+.nfc-tool-workbench > * {
+  position: relative;
+  z-index: 1;
+}
+
+.nfc-page-eyebrow {
+  margin-bottom: 7px;
+  color: var(--nfc-text-subtle);
+  font-size: 9px;
+  font-weight: 760;
+  letter-spacing: 0.14em;
+}
+
+.nfc-page-title {
+  font-size: clamp(23px, 2.2vw, 30px);
+  font-weight: 670;
+  letter-spacing: -0.035em;
+}
+
+.nfc-page-description {
+  max-width: 780px;
+  margin-top: 8px;
+  color: var(--nfc-text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.nfc-page-actions {
+  align-self: center;
+  gap: 8px;
+  padding: 4px;
+  border: 1px solid var(--nfc-border-soft);
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--nfc-dense-surface-bg) 72%, transparent);
+}
+
+.nfc-data-panel {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--nfc-border-soft);
+  border-radius: var(--nfc-radius-workspace);
+  color: var(--nfc-text);
+}
+
+.nfc-data-panel-default {
+  background: var(--nfc-glass-workspace-bg);
+  box-shadow: var(--nfc-shadow-workspace);
+  backdrop-filter: blur(var(--nfc-blur-workspace)) saturate(132%);
+  -webkit-backdrop-filter: blur(var(--nfc-blur-workspace)) saturate(132%);
+}
+
+.nfc-data-panel-dense {
+  background: var(--nfc-dense-surface-bg);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--nfc-text) 4%, transparent);
+}
+
+.nfc-data-panel-quiet {
+  background: color-mix(in srgb, var(--nfc-surface-2) 62%, transparent);
+  box-shadow: none;
+}
+
+.nfc-data-panel-danger {
+  border-color: color-mix(in srgb, var(--nfc-danger) 24%, var(--nfc-border-soft));
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--nfc-danger-soft) 42%, transparent), transparent 34%),
+    var(--nfc-dense-surface-bg);
+}
+
+.nfc-data-panel-floating {
+  background: var(--nfc-overlay-surface-bg);
+  box-shadow: var(--nfc-shadow-overlay);
+  backdrop-filter: blur(var(--nfc-blur-overlay)) saturate(145%);
+  -webkit-backdrop-filter: blur(var(--nfc-blur-overlay)) saturate(145%);
+}
+
+.nfc-data-panel-header {
+  min-height: 68px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--nfc-border-soft);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--nfc-glass-highlight) 38%, transparent), transparent 90%);
+}
+
+.nfc-data-panel-heading {
+  min-width: 0;
+}
+
+.nfc-data-panel-title {
+  font-size: 14px;
+  font-weight: 670;
+  letter-spacing: -0.016em;
+}
+
+.nfc-data-panel-description {
+  margin-top: 4px;
+  color: var(--nfc-text-subtle);
+  line-height: 1.5;
+}
+
+.nfc-panel-flush .nfc-data-panel-body {
+  padding: 0;
+}
+
+.nfc-metric-grid {
+  gap: 12px;
+  border: 0;
+  background: transparent;
+}
+
+.nfc-metric-card {
+  position: relative;
+  overflow: hidden;
+  min-height: 132px;
+  border: 1px solid var(--nfc-border-soft);
+  border-radius: 16px;
+  background: var(--nfc-glass-workspace-bg);
+  box-shadow: var(--nfc-shadow-workspace);
+  backdrop-filter: blur(var(--nfc-blur-workspace)) saturate(132%);
+  -webkit-backdrop-filter: blur(var(--nfc-blur-workspace)) saturate(132%);
+  transition:
+    transform var(--nfc-motion-fast, 160ms) ease,
+    border-color var(--nfc-motion-fast, 160ms) ease,
+    box-shadow var(--nfc-motion-fast, 160ms) ease;
+}
+
+.nfc-metric-card:hover {
+  transform: translateY(-1px);
+  border-color: var(--nfc-border-strong);
+  box-shadow: 0 16px 42px color-mix(in srgb, var(--nfc-text) 8%, transparent);
+}
+
+.nfc-metric-label {
+  color: var(--nfc-text-muted);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+.nfc-metric-value {
+  margin-top: 18px;
+  font-size: clamp(24px, 2.4vw, 34px);
+  font-weight: 660;
+}
+
+.nfc-action-bar {
+  gap: 8px;
+}
+
+.nfc-filter-bar,
+.nfc-bulk-action-bar {
+  border-color: var(--nfc-border-soft);
+  background: color-mix(in srgb, var(--nfc-dense-surface-bg) 86%, transparent);
+}
+
+.nfc-filter-bar {
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.nfc-tool-workbench,
+.nfc-complex-form-panel {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--nfc-border-soft) !important;
+  border-radius: var(--nfc-radius-workspace) !important;
+  background: var(--nfc-glass-workspace-bg) !important;
+  box-shadow: var(--nfc-shadow-workspace) !important;
+  backdrop-filter: blur(var(--nfc-blur-workspace)) saturate(132%);
+  -webkit-backdrop-filter: blur(var(--nfc-blur-workspace)) saturate(132%);
+}
+
+.nfc-settings-subpanel,
+.nfc-plan-action-surface,
+.nfc-responsive-descriptions,
+.nfc-worker-panel {
+  border-color: var(--nfc-border-soft) !important;
+  background: var(--nfc-dense-surface-bg);
+  box-shadow: none !important;
+}
+
+.nfc-data-panel .ant-table,
+.nfc-data-panel .ant-table-container,
+.nfc-data-panel .ant-table-content {
+  background: transparent;
+}
+
+.nfc-data-panel .ant-table-thead > tr > th {
+  background: color-mix(in srgb, var(--nfc-surface-2) 76%, transparent) !important;
+  border-bottom-color: var(--nfc-border-soft) !important;
+  color: var(--nfc-text-subtle);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+.nfc-data-panel .ant-table-tbody > tr > td {
+  border-bottom-color: var(--nfc-border-soft) !important;
+}
+
+.nfc-data-panel .ant-table-tbody > tr:hover > td {
+  background: color-mix(in srgb, var(--nfc-accent) 4.5%, var(--nfc-surface-2)) !important;
+}
+
+.nfc-app-shell .ant-btn,
+.nfc-app-shell .ant-input,
+.nfc-app-shell .ant-input-affix-wrapper,
+.nfc-app-shell .ant-input-number,
+.nfc-app-shell .ant-select-selector,
+.nfc-app-shell .ant-picker {
+  border-radius: var(--nfc-radius-control) !important;
+}
+
+.nfc-app-shell .ant-input,
+.nfc-app-shell .ant-input-affix-wrapper,
+.nfc-app-shell .ant-input-number,
+.nfc-app-shell .ant-select-selector,
+.nfc-app-shell .ant-picker {
+  border-color: var(--nfc-border-soft) !important;
+  background: color-mix(in srgb, var(--nfc-dense-surface-bg) 94%, transparent) !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--nfc-glass-highlight) 40%, transparent);
+}
+
+.nfc-app-shell .ant-input:hover,
+.nfc-app-shell .ant-input-affix-wrapper:hover,
+.nfc-app-shell .ant-input-number:hover,
+.nfc-app-shell .ant-select:hover .ant-select-selector,
+.nfc-app-shell .ant-picker:hover {
+  border-color: var(--nfc-border-strong) !important;
+}
+
+.nfc-app-shell .ant-card,
+.nfc-app-shell .ant-alert {
+  border-color: var(--nfc-border-soft);
+  border-radius: var(--nfc-radius-inner);
+}
+
+.nfc-status-badge,
+.nfc-kind-badge,
+.nfc-operation-badge,
+.nfc-retention-badge {
+  border-color: var(--nfc-border-soft);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--nfc-glass-highlight) 45%, transparent);
+}
