@@ -174,7 +174,7 @@ export const IndexesPage: React.FC = () => {
         }
       />
 
-      <DataPanel title="索引根目录" description="目录状态、索引规模与后台任务一览。" action={<span className="nfc-panel-count">{data?.total ?? 0} roots</span>} className="nfc-panel-flush">
+      <DataPanel title="索引根目录" description="目录状态、索引规模与后台任务一览。" action={<span className="nfc-panel-count">{data?.total ?? 0} roots</span>} className="nfc-panel-flush" variant="dense">
         <ResponsiveDataView
           desktop={<Table dataSource={items} columns={columns} rowKey="root" loading={isLoading} pagination={{ current: page, pageSize, total: data?.total || 0, showSizeChanger: true, pageSizeOptions: ['10','20','50','100'], onChange: (p, ps) => { setPage(p); setPageSize(ps); } }} />}
           mobile={
