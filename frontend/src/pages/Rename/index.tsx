@@ -278,6 +278,7 @@ export const RenamePage: React.FC = () => {
           description="逐项检查 source → target 与冲突状态；只有全量安全时才能生成 Plan。"
           action={<span className="nfc-panel-count">{proposals.length} proposals</span>}
           className="nfc-panel-flush nfc-file-tool-result-panel"
+          variant="dense"
         >
           <ResponsiveDataView
             desktop={
