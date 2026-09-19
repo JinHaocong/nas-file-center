@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy import select
 
 from app.db import create_engine_and_session, init_db
+from app.exceptions import StateConflictError
 from app.models import OperationJournal, QuarantineEntry
 
 
@@ -329,7 +330,7 @@ def test_same_generation_prior_journal_still_fails_closed(
         session.commit()
 
     with pytest.raises(
-        Exception,
+        StateConflictError,
         match=r"unexpected prior Gate6-A2 journal.*generation #1",
     ):
         unlink_purge.execute_journaled_unlink_purge(
