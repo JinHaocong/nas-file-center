@@ -68,8 +68,8 @@ describe('v0.4.6 glass workspace system foundation', () => {
   });
 
   test('settings topology regression remains explicitly protected', () => {
-    const legacy = read('src/index.css');
-    assert.match(legacy, /grid-template-areas:[\s\S]*"runtime lifecycle"[\s\S]*"resource lifecycle"[\s\S]*"sessions sessions"/);
+    const settings = read('src/styles/pages/settings.css');
+    assert.match(settings, /grid-template-areas:[\s\S]*"runtime lifecycle"[\s\S]*"resource lifecycle"[\s\S]*"sessions sessions"/);
   });
   test('deep component surfaces cover directory picker, task runtime and destructive flows', () => {
     const css = read('src/styles/components.css');
