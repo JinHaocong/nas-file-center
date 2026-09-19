@@ -10,7 +10,7 @@ from app.config import Settings
 from app.exceptions import StateConflictError
 from app.models import BatchPlan, BatchPlanItem, QuarantineEntry, TaskLock, WorkJob, utcnow
 from app.planning.dedupe_engine import directory_ancestors_to_scan_root
-from app.planning.recursive_protection import RecursiveProtectionLiveCount, RecursiveProtectionSnapshot
+from app.planning.recursive_protection import RecursiveProtectionLiveChain, RecursiveProtectionLiveCount
 from app.service import FileCenterService
 from app.tasks.context import JobContext
 from app.tasks.handlers import get_handler
@@ -254,12 +254,22 @@ def test_worker_recursive_preflight_unstable_read_blocks_before_execute_item(tmp
 
     monkeypatch.setattr(
         recursive_protection,
-        "live_count_recursive_regular_files",
-        lambda _path, **_kwargs: RecursiveProtectionLiveCount(
-            count=0,
+        "live_count_recursive_regular_file_chain",
+        lambda paths, **_kwargs: RecursiveProtectionLiveChain(
             stable=False,
-            device=None,
-            inode=None,
+            failure_path=str(protected),
+            samples=tuple(
+                (
+                    str(path),
+                    RecursiveProtectionLiveCount(
+                        count=0,
+                        stable=False,
+                        device=None,
+                        inode=None,
+                    ),
+                )
+                for path in paths
+            ),
         ),
     )
     execute_calls: list[str] = []
@@ -296,23 +306,23 @@ def test_worker_recursive_preflight_order_is_after_final_freshness_and_before_ex
 
     events: list[str] = []
     original_verify = handlers_base._verify_plan_item_and_keep_freshness
-    original_live_count = recursive_protection.live_count_recursive_regular_files
+    original_chain_count = recursive_protection.live_count_recursive_regular_file_chain
     original_execute = handlers_base.execute_item
 
     def tracked_verify(*args, **kwargs):
         events.append("freshness")
         return original_verify(*args, **kwargs)
 
-    def tracked_live_count(path, **kwargs):
+    def tracked_chain_count(paths, **kwargs):
         events.append("live_preflight")
-        return original_live_count(path, **kwargs)
+        return original_chain_count(paths, **kwargs)
 
     def tracked_execute(*args, **kwargs):
         events.append("execute")
         return original_execute(*args, **kwargs)
 
     monkeypatch.setattr(handlers_base, "_verify_plan_item_and_keep_freshness", tracked_verify)
-    monkeypatch.setattr(recursive_protection, "live_count_recursive_regular_files", tracked_live_count)
+    monkeypatch.setattr(recursive_protection, "live_count_recursive_regular_file_chain", tracked_chain_count)
     monkeypatch.setattr(handlers_base, "execute_item", tracked_execute)
 
     _enqueue_and_run_worker(service, settings, plan_id, worker_id="gate6b-ordering")
@@ -338,22 +348,27 @@ def test_worker_execute_uses_count_only_reader_not_preview_snapshot_reader(tmp_p
 
     import app.planning.recursive_protection as recursive_protection
 
-    live_calls: list[str] = []
-    original_live_count = recursive_protection.live_count_recursive_regular_files
+    live_calls: list[tuple[str, ...]] = []
+    original_chain_count = recursive_protection.live_count_recursive_regular_file_chain
 
     def forbidden_snapshot(*_args, **_kwargs):
         raise AssertionError("Execute must not rebuild Preview/Validate tree-identity snapshots")
 
-    def tracked_live_count(path, **kwargs):
-        live_calls.append(str(path))
-        return original_live_count(path, **kwargs)
+    def forbidden_single_count(*_args, **_kwargs):
+        raise AssertionError("Execute must share one count pass across the frozen ancestor chain")
+
+    def tracked_chain_count(paths, **kwargs):
+        live_calls.append(tuple(str(path) for path in paths))
+        return original_chain_count(paths, **kwargs)
 
     monkeypatch.setattr(recursive_protection, "snapshot_recursive_regular_files", forbidden_snapshot)
-    monkeypatch.setattr(recursive_protection, "live_count_recursive_regular_files", tracked_live_count)
+    monkeypatch.setattr(recursive_protection, "live_count_recursive_regular_files", forbidden_single_count)
+    monkeypatch.setattr(recursive_protection, "live_count_recursive_regular_file_chain", tracked_chain_count)
 
     _enqueue_and_run_worker(service, settings, plan_id, worker_id="gate6b-count-only-reader")
 
-    assert live_calls
+    assert len(live_calls) == 1
+    assert live_calls[0][-1] == str(root)
     assert not source.exists()
     assert sibling.exists()
 
