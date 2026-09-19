@@ -3,6 +3,7 @@
 @import './shell.css';
 @import './primitives.css';
 @import './overlays.css';
+@import './components.css';
 @import './responsive.css';
 @import './pages/dashboard.css';
 @import './pages/operations.css';
