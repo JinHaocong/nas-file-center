@@ -2144,6 +2144,7 @@ class FileCenterService:
 
         planned_producers: list[dict[str, Any]] = []
         item_updates: dict[int, dict[str, Any]] = {}
+        recursive_protection_snapshot_cache: dict[str, Any] = {}
         for it in items_data:
             item_id = it["id"]
             src_p = Path(it["source_path"])
@@ -2164,6 +2165,7 @@ class FileCenterService:
                         expected_source_path=it["source_path"],
                         allowed_roots=self.settings.allowed_roots,
                         quarantine_root=self.settings.quarantine_root,
+                        snapshot_cache=recursive_protection_snapshot_cache,
                     )
                 except RecursiveProtectionAuthorityError as exc:
                     raise StateConflictError(str(exc)) from exc

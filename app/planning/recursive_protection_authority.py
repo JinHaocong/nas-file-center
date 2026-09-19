@@ -255,6 +255,7 @@ def build_frozen_recursive_protection(
     expected_source_path: str,
     allowed_roots: Sequence[Path | str],
     quarantine_root: Path | str | None,
+    snapshot_cache: dict[str, recursive_protection.RecursiveProtectionSnapshot] | None = None,
 ) -> dict[str, object] | None:
     """Parse authority and capture Freeze-time live samples for every exact ancestor.
 
@@ -273,10 +274,12 @@ def build_frozen_recursive_protection(
 
     frozen_ancestors: dict[str, dict[str, object]] = {}
     for ancestor in authority.protected_ancestors:
-        sample = recursive_protection.snapshot_recursive_regular_files(
-            ancestor,
-            quarantine_root=quarantine_root,
-        )
+        sample = snapshot_cache.get(ancestor) if snapshot_cache is not None else None
+        if sample is None:
+            sample = recursive_protection.snapshot_recursive_regular_files(
+                ancestor,
+                quarantine_root=quarantine_root,
+            )
         if (
             not sample.stable
             or sample.device is None
@@ -286,6 +289,9 @@ def build_frozen_recursive_protection(
             raise _fail(f"RECURSIVE_PROTECTION_UNSTABLE: {ancestor}")
         if sample.count - 1 < 1:
             raise _fail(f"RECURSIVE_PROTECT_LAST_FILE: {ancestor}")
+
+        if snapshot_cache is not None:
+            snapshot_cache.setdefault(ancestor, sample)
 
         frozen_ancestors[ancestor] = {
             "count": int(sample.count),
