@@ -10,7 +10,7 @@ from app.config import Settings
 from app.exceptions import StateConflictError
 from app.models import BatchPlan, BatchPlanItem, QuarantineEntry, TaskLock, WorkJob, utcnow
 from app.planning.dedupe_engine import directory_ancestors_to_scan_root
-from app.planning.recursive_protection import RecursiveProtectionSnapshot
+from app.planning.recursive_protection import RecursiveProtectionLiveCount, RecursiveProtectionSnapshot
 from app.service import FileCenterService
 from app.tasks.context import JobContext
 from app.tasks.handlers import get_handler
@@ -254,13 +254,12 @@ def test_worker_recursive_preflight_unstable_read_blocks_before_execute_item(tmp
 
     monkeypatch.setattr(
         recursive_protection,
-        "snapshot_recursive_regular_files",
-        lambda _path, **_kwargs: RecursiveProtectionSnapshot(
+        "live_count_recursive_regular_files",
+        lambda _path, **_kwargs: RecursiveProtectionLiveCount(
             count=0,
             stable=False,
             device=None,
             inode=None,
-            tree_identity_digest=None,
         ),
     )
     execute_calls: list[str] = []
@@ -297,23 +296,23 @@ def test_worker_recursive_preflight_order_is_after_final_freshness_and_before_ex
 
     events: list[str] = []
     original_verify = handlers_base._verify_plan_item_and_keep_freshness
-    original_snapshot = recursive_protection.snapshot_recursive_regular_files
+    original_live_count = recursive_protection.live_count_recursive_regular_files
     original_execute = handlers_base.execute_item
 
     def tracked_verify(*args, **kwargs):
         events.append("freshness")
         return original_verify(*args, **kwargs)
 
-    def tracked_snapshot(path, **kwargs):
+    def tracked_live_count(path, **kwargs):
         events.append("live_preflight")
-        return original_snapshot(path, **kwargs)
+        return original_live_count(path, **kwargs)
 
     def tracked_execute(*args, **kwargs):
         events.append("execute")
         return original_execute(*args, **kwargs)
 
     monkeypatch.setattr(handlers_base, "_verify_plan_item_and_keep_freshness", tracked_verify)
-    monkeypatch.setattr(recursive_protection, "snapshot_recursive_regular_files", tracked_snapshot)
+    monkeypatch.setattr(recursive_protection, "live_count_recursive_regular_files", tracked_live_count)
     monkeypatch.setattr(handlers_base, "execute_item", tracked_execute)
 
     _enqueue_and_run_worker(service, settings, plan_id, worker_id="gate6b-ordering")
@@ -324,6 +323,39 @@ def test_worker_recursive_preflight_order_is_after_final_freshness_and_before_ex
     assert len(freshness_indices) >= 2, events
     assert live_indices, events
     assert max(freshness_indices) < min(live_indices) < execute_index, events
+
+
+def test_worker_execute_uses_count_only_reader_not_preview_snapshot_reader(tmp_path: Path, monkeypatch):
+    service, settings, root, _ = _setup_service(tmp_path)
+    protected = root / "set"
+    protected.mkdir()
+    source = protected / "delete.bin"
+    sibling = protected / "keep.bin"
+    source.write_bytes(b"duplicate")
+    sibling.write_bytes(b"survivor")
+
+    plan_id = _create_ready_recursive_plan(service, settings, root, source, token="count-only-reader")
+
+    import app.planning.recursive_protection as recursive_protection
+
+    live_calls: list[str] = []
+    original_live_count = recursive_protection.live_count_recursive_regular_files
+
+    def forbidden_snapshot(*_args, **_kwargs):
+        raise AssertionError("Execute must not rebuild Preview/Validate tree-identity snapshots")
+
+    def tracked_live_count(path, **kwargs):
+        live_calls.append(str(path))
+        return original_live_count(path, **kwargs)
+
+    monkeypatch.setattr(recursive_protection, "snapshot_recursive_regular_files", forbidden_snapshot)
+    monkeypatch.setattr(recursive_protection, "live_count_recursive_regular_files", tracked_live_count)
+
+    _enqueue_and_run_worker(service, settings, plan_id, worker_id="gate6b-count-only-reader")
+
+    assert live_calls
+    assert not source.exists()
+    assert sibling.exists()
 
 
 def test_recursive_plan_cannot_bypass_worker_via_synchronous_execute_plan(tmp_path: Path):
