@@ -5,7 +5,7 @@
     "resource lifecycle"
     "sessions sessions";
   align-items: start;
-  gap: 16px;
+  gap: 22px;
 }
 
 .nfc-settings-panel-runtime {
@@ -28,22 +28,25 @@
 
 .nfc-system-controls-page .nfc-settings-subpanel {
   overflow: hidden;
-  border: 1px solid var(--nfc-border-soft);
-  border-radius: var(--nfc-radius-inner);
-  background: var(--nfc-dense-surface-bg);
+  border: 0;
+  border-top: 1px solid var(--nfc-border-soft);
+  border-bottom: 1px solid var(--nfc-border-soft);
+  border-radius: 0;
+  background: transparent;
 }
 
 .nfc-system-controls-page .nfc-settings-subpanel-header,
 .nfc-system-controls-page .nfc-settings-window-header {
   gap: 14px;
-  padding: 12px 14px;
+  padding: 13px 2px 11px;
   border-bottom-color: var(--nfc-border-soft);
+  background: transparent;
 }
 
 .nfc-system-controls-page .nfc-settings-subpanel-header strong,
 .nfc-system-controls-page .nfc-settings-window-header strong {
   color: var(--nfc-text);
-  font-weight: 660;
+  font-weight: 680;
 }
 
 .nfc-system-controls-page .nfc-settings-subpanel-header span,
@@ -53,7 +56,8 @@
 }
 
 .nfc-system-controls-page .nfc-settings-control-grid {
-  gap: 10px;
+  gap: 8px;
+  padding-block: 4px;
 }
 
 .nfc-system-controls-page .nfc-settings-control,
@@ -65,14 +69,14 @@
 .nfc-system-controls-page .nfc-settings-inline-control > span {
   color: var(--nfc-text-muted);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 610;
 }
 
 .nfc-system-controls-page .nfc-settings-subpanel-danger {
-  border-color: color-mix(in srgb, var(--nfc-danger) 24%, var(--nfc-border-soft));
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--nfc-danger-soft) 38%, transparent), transparent 48%),
-    var(--nfc-dense-surface-bg);
+  padding-inline: 12px;
+  border: 1px solid color-mix(in srgb, var(--nfc-danger) 24%, var(--nfc-border-soft));
+  border-radius: var(--nfc-radius-workspace);
+  background: color-mix(in srgb, var(--nfc-danger-soft) 28%, var(--nfc-surface-1));
 }
 
 .nfc-system-controls-page .nfc-session-user-agent {
@@ -87,5 +91,6 @@
       "lifecycle"
       "resource"
       "sessions";
+    gap: 18px;
   }
 }
