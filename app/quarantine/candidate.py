@@ -56,7 +56,7 @@ def qualify_candidate_anchor_fd(
     try:
         os.lseek(candidate_fd, 0, os.SEEK_SET)
         h = hashlib.sha256()
-        while chunk := os.read(candidate_fd, 1024 * 1024):
+        while chunk := os.read(candidate_fd, 8 * 1024 * 1024):
             h.update(chunk)
     except OSError:
         return False
