@@ -350,6 +350,7 @@ export const ProfilePreview: React.FC<ProfilePreviewProps> = ({
             description="同一 snapshot 下切换过滤和分页，避免预览口径漂移。"
             action={<span className="nfc-panel-count">{totalItems} proposals</span>}
             className="nfc-panel-flush"
+            variant="dense"
           >
             <ActionBar className="nfc-filter-bar nfc-organizer-preview-filter">
               <Radio.Group

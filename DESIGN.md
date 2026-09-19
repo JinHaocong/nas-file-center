@@ -621,3 +621,100 @@ Mobile is not allowed to be a shrunk desktop layout.
 - Inline one-off visual chrome should be replaced by reusable semantic classes when a component is revisited.
 
 No API, RBAC, filesystem, Worker, Plan lifecycle or destructive-operation semantics are changed by this pass.
+
+## v0.4.6 Frosted Control Plane
+
+This pass supersedes the v0.4.4 right-side workspace skin while preserving its accepted information architecture, mobile behavior and safety boundaries.
+
+### Product direction
+
+- Sidebar remains the stable opaque product identity plane.
+- Header, PageHeader, major workspace panels and floating overlays use restrained frosted translucency.
+- Dense operational content — tables, logs, forms, journal evidence, destructive review and settings controls — remains near-opaque for sustained readability.
+- Electric Blue remains the product accent; semantic success / warning / danger colors remain independent.
+- Visual hierarchy is expressed through named surface tiers, spacing, hairlines and optical depth rather than page-specific card decoration.
+- Glass is a material system, not a decoration applied everywhere.
+
+### Surface tiers
+
+- G0 Canvas: neutral operational background with subtle depth tint.
+- G1 Shell Glass: Header and Mobile Dock.
+- G2 Workspace Glass: PageHeader, metric tiles, primary DataPanels and tool workbenches.
+- G3 Dense Surface: tables, logs, forms, settings, journals and destructive review.
+- G4 Floating Glass: Modal, Drawer, Dropdown, Select, Popover, Message and Notification.
+
+All tiers have light/dark variants, reduced-transparency behavior and opaque fallback when backdrop filters are unavailable.
+
+### Architecture
+
+The accepted style ownership is now:
+
+```
+src/styles/
+  tokens.css
+  foundation.css
+  shell.css
+  primitives.css
+  overlays.css
+  components.css
+  responsive.css
+  pages/
+    dashboard.css
+    operations.css
+    details.css
+    tools.css
+    organizer.css
+    workflows.css
+    settings.css
+    login.css
+```
+
+`index.css` remains a legacy compatibility substrate while selectors are migrated. New release-specific UI work must not append another global override ledger to its end.
+
+The superseded terminal v0.4.4 Workspace Cohesion, Sidebar Parity, shared substrate and Settings topology override blocks were removed. Their still-valid contracts now live with the v0.4.6 style owners.
+
+### Coverage
+
+Every routed surface participates in the system:
+
+- Dashboard
+- Indexes
+- Scans / Scan Detail / Advanced Dedupe
+- Path Match
+- Rename
+- Batch
+- Organizer / Organizer Preview
+- Workflows / Workflow Builder / Revision and Definition inspectors
+- Plans / Plan Detail / Operation Journal / Stale Rebuild
+- Quarantine / Restore / Purge / Bulk Purge
+- Tasks / Worker status / Task Detail / Task Logs
+- Audit
+- Settings
+- Login
+- Directory Picker and shared transient overlays
+
+### Responsive and accessibility
+
+- 320px and 375px compact mobile layouts are first-class.
+- Tablet and desktop maintain dense operational information without horizontal body overflow.
+- Blur and large shadows are reduced on mobile.
+- `prefers-reduced-motion` and `prefers-reduced-transparency` are honored.
+- Focus-visible treatment remains explicit.
+- Unsupported backdrop-filter environments fall back to opaque surfaces without functional change.
+
+### Safety boundary
+
+This release is UI / design-system scope only.
+
+It does not intentionally change:
+- API contracts,
+- RBAC,
+- Worker / executor ownership,
+- filesystem mutation semantics,
+- Quarantine authority,
+- permanent-delete authority,
+- Plan lifecycle,
+- Preview → Draft → Freeze → Validate → Execute,
+- PathGuard / symlink / stale identity checks.
+
+Destructive workflows retain stronger semantic hierarchy, but their authorization and execution semantics are unchanged.

@@ -64,8 +64,9 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             colorText: palette.text,
             colorTextSecondary: palette.textMuted,
             borderRadius: 10,
-            borderRadiusLG: 14,
+            borderRadiusLG: 16,
             controlHeight: 38,
+            controlHeightLG: 42,
             fontSize: 14,
             fontFamily: nfcTheme.fontFamily,
           },
@@ -87,14 +88,16 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               activeOutlineColor: 'transparent',
             },
             Table: {
-              headerBg: 'transparent',
+              headerBg: palette.surface2,
               headerColor: palette.textSubtle,
               rowHoverBg: palette.surface2,
               borderColor: palette.hairline,
+              cellPaddingBlock: 11,
+              cellPaddingInline: 12,
             },
             Modal: {
               contentBg: palette.surfaceRaised,
-              headerBg: palette.surfaceRaised,
+              headerBg: 'transparent',
               titleColor: palette.text,
             },
             Drawer: {
@@ -103,6 +106,15 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             Dropdown: {
               colorBgElevated: palette.surfaceRaised,
               controlItemBgHover: palette.surface2,
+            },
+            Card: {
+              colorBgContainer: palette.surface1,
+              headerBg: 'transparent',
+            },
+            Tabs: {
+              itemSelectedColor: palette.text,
+              itemHoverColor: palette.accent,
+              inkBarColor: palette.accent,
             },
           },
         }}

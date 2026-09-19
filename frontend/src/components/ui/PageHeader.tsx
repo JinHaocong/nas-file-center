@@ -5,6 +5,7 @@ interface PageHeaderProps {
   description?: React.ReactNode;
   eyebrow?: string;
   actions?: React.ReactNode;
+  className?: string;
 }
 
 export const PageHeader: React.FC<PageHeaderProps> = ({
@@ -12,8 +13,9 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
   description,
   eyebrow,
   actions,
+  className = '',
 }) => (
-  <header className="nfc-page-header">
+  <header className={`nfc-page-header ${className}`.trim()}>
     <div className="nfc-page-header-copy">
       {eyebrow && <div className="nfc-page-eyebrow">{eyebrow}</div>}
       <h1 className="nfc-page-title">{title}</h1>

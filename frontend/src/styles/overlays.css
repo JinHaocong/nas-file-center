@@ -1,0 +1,77 @@
+.ant-modal-mask,
+.ant-drawer-mask {
+  background: color-mix(in srgb, #071019 38%, transparent) !important;
+  backdrop-filter: blur(4px) saturate(112%);
+  -webkit-backdrop-filter: blur(4px) saturate(112%);
+}
+
+.ant-modal .ant-modal-content,
+.ant-drawer .ant-drawer-content,
+.ant-dropdown .ant-dropdown-menu,
+.ant-select-dropdown,
+.ant-popover .ant-popover-inner,
+.ant-popconfirm .ant-popover-inner {
+  border: 1px solid var(--nfc-border-strong) !important;
+  background: var(--nfc-overlay-surface-bg) !important;
+  box-shadow: var(--nfc-shadow-overlay) !important;
+  backdrop-filter: blur(var(--nfc-blur-overlay)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--nfc-blur-overlay)) saturate(150%);
+}
+
+.ant-modal .ant-modal-content,
+.ant-drawer .ant-drawer-content {
+  border-radius: var(--nfc-radius-workspace) !important;
+}
+
+.ant-modal .ant-modal-header,
+.ant-drawer .ant-drawer-header {
+  border-bottom-color: var(--nfc-border-soft) !important;
+  background: transparent !important;
+}
+
+.ant-modal .ant-modal-footer,
+.ant-drawer .ant-drawer-footer {
+  border-top-color: var(--nfc-border-soft) !important;
+  background: transparent !important;
+}
+
+.ant-dropdown .ant-dropdown-menu,
+.ant-select-dropdown,
+.ant-popover .ant-popover-inner {
+  border-radius: var(--nfc-radius-inner) !important;
+}
+
+.ant-dropdown-menu-item,
+.ant-select-item {
+  border-radius: calc(var(--nfc-radius-control) - 2px) !important;
+}
+
+.nfc-mobile-nav-drawer .ant-drawer-content,
+.nfc-mobile-nav-drawer .ant-drawer-body {
+  background: var(--nfc-nav-surface) !important;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.ant-message .ant-message-notice-content,
+.ant-notification .ant-notification-notice {
+  border: 1px solid var(--nfc-border-strong);
+  border-radius: var(--nfc-radius-inner);
+  background: var(--nfc-overlay-surface-bg);
+  box-shadow: var(--nfc-shadow-overlay);
+  backdrop-filter: blur(var(--nfc-blur-overlay)) saturate(145%);
+  -webkit-backdrop-filter: blur(var(--nfc-blur-overlay)) saturate(145%);
+}
+
+.ant-tooltip .ant-tooltip-inner {
+  border: 1px solid color-mix(in srgb, var(--nfc-border-strong) 82%, transparent);
+  border-radius: calc(var(--nfc-radius-control) - 2px);
+  background: color-mix(in srgb, var(--nfc-text) 94%, transparent);
+  box-shadow: 0 8px 26px color-mix(in srgb, #000 18%, transparent);
+  color: var(--nfc-surface-1);
+}
+
+[data-theme='dark'] .ant-tooltip .ant-tooltip-inner {
+  background: color-mix(in srgb, #05070a 92%, transparent);
+  color: var(--nfc-text);
+}

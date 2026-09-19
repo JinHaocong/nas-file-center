@@ -1,0 +1,111 @@
+/* v0.4.6 Frosted Control Plane — single CSS surface authority */
+:root {
+  --nfc-accent: #0a84ff;
+  --nfc-accent-soft: #eaf3ff;
+  --nfc-canvas: #f3f5f8;
+  --nfc-surface-1: #ffffff;
+  --nfc-surface-2: #f1f3f7;
+  --nfc-surface-raised: #ffffff;
+  --nfc-nav-surface: #f8fafc;
+  --nfc-hairline: #e1e5ec;
+  --nfc-hairline-strong: #c9d0da;
+  --nfc-text: #15181d;
+  --nfc-text-muted: #5d6673;
+  --nfc-text-subtle: #87909d;
+
+  --nfc-canvas-tint-a: rgba(10, 132, 255, 0.095);
+  --nfc-canvas-tint-b: rgba(46, 170, 140, 0.055);
+
+  --nfc-glass-shell-bg: rgba(248, 250, 252, 0.72);
+  --nfc-glass-workspace-bg: rgba(255, 255, 255, 0.73);
+  --nfc-glass-workspace-strong-bg: rgba(255, 255, 255, 0.86);
+  --nfc-dense-surface-bg: rgba(255, 255, 255, 0.95);
+  --nfc-overlay-surface-bg: rgba(255, 255, 255, 0.84);
+  --nfc-glass-highlight: rgba(255, 255, 255, 0.72);
+
+  --nfc-border-soft: rgba(26, 35, 50, 0.075);
+  --nfc-border-strong: rgba(26, 35, 50, 0.12);
+  --nfc-border-accent: color-mix(in srgb, var(--nfc-accent) 28%, var(--nfc-border-soft));
+
+  --nfc-shadow-shell: 0 18px 52px rgba(24, 32, 48, 0.09), 0 2px 10px rgba(24, 32, 48, 0.035);
+  --nfc-shadow-workspace: 0 12px 38px rgba(24, 32, 48, 0.065), 0 1px 2px rgba(24, 32, 48, 0.025);
+  --nfc-shadow-overlay: 0 28px 80px rgba(19, 26, 40, 0.19), 0 8px 28px rgba(19, 26, 40, 0.08);
+
+  --nfc-blur-shell: 22px;
+  --nfc-blur-workspace: 17px;
+  --nfc-blur-overlay: 28px;
+
+  --nfc-radius-shell: 20px;
+  --nfc-radius-workspace: 18px;
+  --nfc-radius-inner: 12px;
+  --nfc-radius-control: 10px;
+  --nfc-radius-pill: 999px;
+
+  --nfc-space-1: 4px;
+  --nfc-space-2: 8px;
+  --nfc-space-3: 12px;
+  --nfc-space-4: 16px;
+  --nfc-space-5: 20px;
+  --nfc-space-6: 24px;
+  --nfc-space-7: 32px;
+
+  --nfc-control-height: 38px;
+  --nfc-control-height-touch: 44px;
+  --nfc-page-gutter: 24px;
+
+  /* Legacy bridge while the older stylesheet is migrated section-by-section. */
+  --nfc-shell-hairline: var(--nfc-border-soft);
+  --nfc-shell-shadow: var(--nfc-shadow-shell);
+  --nfc-surface-shadow: var(--nfc-shadow-workspace);
+  --nfc-surface-radius: var(--nfc-radius-workspace);
+  --nfc-shell-radius: var(--nfc-radius-shell);
+  --nfc-workspace-surface: var(--nfc-glass-workspace-bg);
+  --nfc-workspace-surface-strong: var(--nfc-glass-workspace-strong-bg);
+  --nfc-workspace-hairline: var(--nfc-border-soft);
+  --nfc-workspace-radius: var(--nfc-radius-workspace);
+  --nfc-workspace-radius-inner: var(--nfc-radius-inner);
+  --nfc-workspace-shadow: var(--nfc-shadow-workspace);
+}
+
+[data-theme='dark'] {
+  --nfc-accent: #4da3ff;
+  --nfc-accent-soft: #10243a;
+  --nfc-canvas: #0b0e12;
+  --nfc-surface-1: #12161b;
+  --nfc-surface-2: #191e25;
+  --nfc-surface-raised: #1b2028;
+  --nfc-nav-surface: #10151a;
+  --nfc-hairline: #29313a;
+  --nfc-hairline-strong: #3b4652;
+  --nfc-text: #f2f5f7;
+  --nfc-text-muted: #afb8c3;
+  --nfc-text-subtle: #7f8a98;
+
+  --nfc-canvas-tint-a: rgba(77, 163, 255, 0.13);
+  --nfc-canvas-tint-b: rgba(50, 168, 140, 0.065);
+
+  --nfc-glass-shell-bg: rgba(16, 21, 26, 0.72);
+  --nfc-glass-workspace-bg: rgba(18, 22, 27, 0.76);
+  --nfc-glass-workspace-strong-bg: rgba(20, 25, 31, 0.9);
+  --nfc-dense-surface-bg: rgba(18, 22, 27, 0.96);
+  --nfc-overlay-surface-bg: rgba(24, 29, 36, 0.88);
+  --nfc-glass-highlight: rgba(255, 255, 255, 0.055);
+
+  --nfc-border-soft: rgba(255, 255, 255, 0.075);
+  --nfc-border-strong: rgba(255, 255, 255, 0.13);
+  --nfc-shadow-shell: 0 20px 58px rgba(0, 0, 0, 0.34), 0 2px 12px rgba(0, 0, 0, 0.18);
+  --nfc-shadow-workspace: 0 14px 42px rgba(0, 0, 0, 0.24), 0 1px 2px rgba(0, 0, 0, 0.18);
+  --nfc-shadow-overlay: 0 32px 90px rgba(0, 0, 0, 0.48), 0 10px 32px rgba(0, 0, 0, 0.28);
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root {
+    --nfc-glass-shell-bg: var(--nfc-nav-surface);
+    --nfc-glass-workspace-bg: var(--nfc-surface-1);
+    --nfc-glass-workspace-strong-bg: var(--nfc-surface-1);
+    --nfc-overlay-surface-bg: var(--nfc-surface-raised);
+    --nfc-blur-shell: 0px;
+    --nfc-blur-workspace: 0px;
+    --nfc-blur-overlay: 0px;
+  }
+}

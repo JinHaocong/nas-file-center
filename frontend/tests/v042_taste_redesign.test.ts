@@ -41,7 +41,7 @@ describe('v0.4.2 Taste redesign contract', () => {
   test('sidebar and header retain a deliberate workspace chrome layer across later visual resets', () => {
     const sidebar = read('src/components/Sidebar.tsx');
     const header = read('src/components/Header.tsx');
-    const css = read('src/index.css');
+    const css = read('src/index.css') + read('src/styles/shell.css');
     assert.ok(sidebar.includes('nfc-sidebar-meta'));
     assert.ok(sidebar.includes('CONTROL PLANE'));
     assert.ok(header.includes('nfc-header-workspace'));

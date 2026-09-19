@@ -1,0 +1,89 @@
+.nfc-organizer-page,
+.nfc-organizer-preview-page {
+  gap: 16px;
+}
+
+.nfc-organizer-profile-toolbar,
+.nfc-organizer-preview-filter {
+  min-height: 56px;
+  padding: 9px 12px;
+  background: color-mix(in srgb, var(--nfc-dense-surface-bg) 92%, transparent);
+}
+
+.nfc-profile-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.nfc-organizer-page .nfc-organizer-profile-mobile-card,
+.nfc-organizer-preview-page .nfc-organizer-proposal-mobile-card {
+  border-bottom-color: var(--nfc-border-soft) !important;
+  background: transparent !important;
+}
+
+.nfc-organizer-profile-modal .ant-modal-body,
+.nfc-organizer-import-modal .ant-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.nfc-organizer-profile-modal .ant-form-item,
+.nfc-organizer-import-modal .ant-form-item {
+  margin-bottom: 14px;
+}
+
+.nfc-organizer-import-modal textarea {
+  min-height: min(42dvh, 360px) !important;
+  border-color: var(--nfc-border-soft) !important;
+  background: var(--nfc-dense-surface-bg) !important;
+  font-family: var(--nfc-font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.nfc-upload-trigger {
+  border-color: var(--nfc-border-soft);
+  background: color-mix(in srgb, var(--nfc-surface-2) 52%, transparent);
+}
+
+.nfc-organizer-step-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.nfc-organizer-step-import {
+  padding: 12px;
+  border: 1px solid var(--nfc-border-soft);
+  border-radius: var(--nfc-radius-inner);
+  background: color-mix(in srgb, var(--nfc-surface-2) 42%, transparent);
+}
+
+.nfc-organizer-step-import-stack {
+  width: 100%;
+}
+
+.nfc-organizer-step-import-row {
+  width: 100%;
+  justify-content: space-between;
+}
+
+@media (max-width: 767px) {
+  .nfc-organizer-profile-toolbar,
+  .nfc-organizer-preview-filter {
+    overflow-x: auto;
+  }
+
+  .nfc-organizer-profile-modal .ant-form-item,
+  .nfc-organizer-import-modal .ant-form-item {
+    margin-bottom: 12px;
+  }
+
+  .nfc-organizer-step-import-row {
+    align-items: stretch !important;
+    flex-direction: column;
+  }
+}

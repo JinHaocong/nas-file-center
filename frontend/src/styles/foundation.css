@@ -1,0 +1,80 @@
+html {
+  background: var(--nfc-canvas);
+}
+
+body {
+  background:
+    radial-gradient(54rem 38rem at 102% -8%, var(--nfc-canvas-tint-a), transparent 68%),
+    radial-gradient(44rem 30rem at 24% 110%, var(--nfc-canvas-tint-b), transparent 72%),
+    var(--nfc-canvas);
+  color: var(--nfc-text);
+}
+
+::selection {
+  background: color-mix(in srgb, var(--nfc-accent) 22%, transparent);
+  color: var(--nfc-text);
+}
+
+:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--nfc-accent) 72%, white 12%);
+  outline-offset: 2px;
+}
+
+.nfc-app-shell,
+.nfc-app-main {
+  background: transparent !important;
+}
+
+.nfc-app-main {
+  min-width: 0;
+}
+
+.nfc-page-content {
+  position: relative;
+  z-index: 1;
+  padding: 18px var(--nfc-page-gutter) 42px;
+}
+
+.nfc-page-content::before {
+  content: '';
+  position: fixed;
+  z-index: -1;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(125deg, transparent 18%, color-mix(in srgb, var(--nfc-accent) 2.4%, transparent) 52%, transparent 78%);
+}
+
+.nfc-operations-page,
+.nfc-dashboard {
+  width: min(100%, 1500px);
+  margin-inline: auto;
+}
+
+.nfc-operations-page {
+  gap: 18px;
+}
+
+.nfc-mono,
+.nfc-kind-badge,
+.nfc-operation-badge,
+code,
+pre {
+  font-variant-numeric: tabular-nums;
+}
+
+* {
+  scrollbar-color: color-mix(in srgb, var(--nfc-text-subtle) 25%, transparent) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: var(--nfc-radius-pill);
+  background: color-mix(in srgb, var(--nfc-text-subtle) 30%, transparent);
+  background-clip: padding-box;
+}

@@ -205,6 +205,7 @@ export const ScansPage: React.FC = () => {
         description="查看扫描状态、重复组规模与快照可释放容量。"
         action={<span className="nfc-panel-count">{data?.total ?? 0} scans</span>}
         className="nfc-panel-flush"
+        variant="dense"
       >
         <ResponsiveDataView
           desktop={

@@ -681,6 +681,7 @@ export const PlanDetailPage: React.FC = () => {
           </span>
         }
         className="nfc-panel-flush"
+        variant="dense"
       >
         <ResponsiveDataView
           desktop={
