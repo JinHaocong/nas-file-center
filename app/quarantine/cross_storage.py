@@ -137,7 +137,7 @@ def _qualify_fd_payload(
     return after
 
 
-def _ensure_safe_quarantine_parent(quarantine_root: Path | str, target: Path | str) -> None:
+def ensure_safe_quarantine_parent(quarantine_root: Path | str, target: Path | str) -> None:
     q_root_abs = Path(quarantine_root).expanduser().absolute()
     target_abs = Path(target).expanduser().absolute()
     try:
@@ -380,7 +380,7 @@ def execute_cross_storage_quarantine(
         entry.updated_at = utcnow()
         session.commit()
 
-    _ensure_safe_quarantine_parent(q_root, quarantine_path)
+    ensure_safe_quarantine_parent(q_root, quarantine_path)
     generation, attempt_dir = allocate_and_create_attempt_dir(
         session_factory,
         entry_id,
@@ -645,7 +645,7 @@ def reconcile_cross_storage_quarantine(
                     )
                 finally:
                     os.close(fd)
-            _ensure_safe_quarantine_parent(q_root, quarantine_path)
+            ensure_safe_quarantine_parent(q_root, quarantine_path)
             with safe_open_parent_fd(staging_path, valid_roots) as (src_parent_fd, src_leaf):
                 with safe_open_parent_fd(quarantine_path, valid_roots) as (dst_parent_fd, dst_leaf):
                     renew_and_assert_worker_lease(session_factory, worker_id)
