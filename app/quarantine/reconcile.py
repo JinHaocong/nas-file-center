@@ -81,6 +81,44 @@ def _run_reconciliation_flow(
 
         state = entry.state
         tx_phase = entry.tx_phase
+        transaction_mode = entry.transaction_mode
+
+    # Gate6-C entries have different source/destination inode authority and must
+    # never enter the same-inode hard-link reconciliation below.
+    if transaction_mode == "cross_storage_transactional" and state not in ("active", "restored", "conflict", "purged"):
+        if not worker_id or not str(worker_id).strip():
+            raise PermissionError("Cross-storage reconciliation requires valid worker authority / lease")
+        if allowed_roots is None:
+            from app.config import get_settings
+            roots = list(get_settings().allowed_roots)
+        else:
+            roots = list(allowed_roots)
+        if quarantine_root is None:
+            from app.config import get_settings
+            q_root = Path(get_settings().quarantine_root)
+        else:
+            q_root = Path(quarantine_root)
+
+        if state == "restoring":
+            from app.quarantine.cross_storage import reconcile_cross_storage_restore
+            reconcile_cross_storage_restore(
+                session_factory,
+                entry_id,
+                worker_id,
+                allowed_roots=roots,
+                quarantine_root=q_root,
+            )
+            return
+        if state == "preparing":
+            from app.quarantine.cross_storage import reconcile_cross_storage_quarantine
+            reconcile_cross_storage_quarantine(
+                session_factory,
+                entry_id,
+                worker_id,
+                allowed_roots=roots,
+                quarantine_root=q_root,
+            )
+            return
 
     # If already in terminal or stable state, nothing to reconcile
     if state in ("active", "restored", "conflict", "purged"):
