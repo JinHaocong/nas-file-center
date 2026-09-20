@@ -161,6 +161,21 @@ class QuarantineEntry(Base):
     tx_phase: Mapped[str | None] = mapped_column(String(32), nullable=True)
     authoritative_anchor_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     active_attempt_generation: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    transaction_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    # Original source identity remains in device/inode. Cross-storage transactions
+    # persist the independently-created quarantine payload identity here.
+    quarantine_device: Mapped[int | None] = mapped_column(FilesystemId(), nullable=True)
+    quarantine_inode: Mapped[int | None] = mapped_column(FilesystemId(), nullable=True)
+    quarantine_mtime_ns: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+    # Cross-storage restore publishes a new inode on the destination filesystem.
+    # Persist it before retiring the public quarantine copy so recovery can
+    # distinguish our published file from a later pathname replacement.
+    restore_target_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    restore_device: Mapped[int | None] = mapped_column(FilesystemId(), nullable=True)
+    restore_inode: Mapped[int | None] = mapped_column(FilesystemId(), nullable=True)
+    restore_mtime_ns: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     size: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     content_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)

@@ -13,6 +13,7 @@ from app.fs_ops import _probe_rename_noreplace_supported
 class MutationCapability(str, Enum):
     NATIVE_ATOMIC_NOREPLACE = "native_atomic_noreplace"
     COMPAT_TRANSACTIONAL = "compat_transactional"
+    CROSS_STORAGE_TRANSACTIONAL = "cross_storage_transactional"
     UNSUPPORTED = "unsupported"
 
 
@@ -56,6 +57,29 @@ def resolve_mutation_capability(
     except Exception:
         return MutationCapability.UNSUPPORTED
 
+    try:
+        st_target = os.stat(target_dir)
+        st_quar = os.stat(quarantine_root)
+    except OSError:
+        return MutationCapability.UNSUPPORTED
+
+    source_device = int(st_src.st_dev)
+    target_device = int(st_target.st_dev)
+    quarantine_device = int(st_quar.st_dev)
+
+    # Gate6-C: a source/target device split is a separate transactional mode.
+    # The configured quarantine storage must participate in the transfer on one
+    # side (quarantine: target side, restore: source side), and the target
+    # filesystem must positively prove native NOREPLACE publication.
+    if source_device != target_device:
+        if not stat.S_ISREG(st_src.st_mode):
+            return MutationCapability.UNSUPPORTED
+        if quarantine_device not in {source_device, target_device}:
+            return MutationCapability.UNSUPPORTED
+        if probe_result is True:
+            return MutationCapability.CROSS_STORAGE_TRANSACTIONAL
+        return MutationCapability.UNSUPPORTED
+
     if probe_result is True:
         return MutationCapability.NATIVE_ATOMIC_NOREPLACE
     elif probe_result is False:
@@ -63,13 +87,8 @@ def resolve_mutation_capability(
         if not stat.S_ISREG(st_src.st_mode):
             return MutationCapability.UNSUPPORTED
 
-        # Enforce device parity across source, target dir, and quarantine root
-        try:
-            st_target = os.stat(target_dir)
-            st_quar = os.stat(quarantine_root)
-            if st_src.st_dev != st_target.st_dev or st_src.st_dev != st_quar.st_dev:
-                return MutationCapability.UNSUPPORTED
-        except OSError:
+        # Same-storage COMPAT retains the existing strict three-way device parity.
+        if source_device != quarantine_device:
             return MutationCapability.UNSUPPORTED
 
         return MutationCapability.COMPAT_TRANSACTIONAL

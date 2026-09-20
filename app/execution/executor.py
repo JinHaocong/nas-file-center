@@ -601,6 +601,26 @@ def execute_item(
                 negative_probe_cache=negative_capability_probe_cache,
             )
 
+            if capability == MutationCapability.CROSS_STORAGE_TRANSACTIONAL:
+                if not session_factory or not worker_id or not quarantine_entry_id:
+                    return ItemResult(
+                        "failed",
+                        "EOPNOTSUPP: cross-storage restore requires worker authority, session_factory and quarantine_entry_id",
+                    )
+                try:
+                    from app.quarantine.cross_storage import execute_cross_storage_restore
+                    execute_cross_storage_restore(
+                        session_factory,
+                        quarantine_entry_id,
+                        worker_id,
+                        allowed_roots=list(allowed_roots),
+                        quarantine_root=quarantine_root,
+                        destination=target,
+                    )
+                except Exception as exc:
+                    return ItemResult("failed", str(exc))
+                return ItemResult("completed", "restored", target)
+
             if capability == MutationCapability.COMPAT_TRANSACTIONAL:
                 if not session_factory or not quarantine_entry_id:
                     return ItemResult("failed", "EOPNOTSUPP: transactional restore requires session_factory and quarantine_entry_id")
@@ -672,42 +692,75 @@ def execute_item(
             return ItemResult("completed", "mtime refreshed", source)
 
         if item.operation == "quarantine":
+            quarantine = Path(quarantine_root).expanduser().resolve(strict=False)
+            quarantine_valid_roots = list(allowed_roots)
+            resolved_allowed_roots = [Path(r).expanduser().resolve(strict=False) for r in quarantine_valid_roots]
+
+            if not quarantine.exists():
+                # Backward compatibility: an in-tree same-storage quarantine root may
+                # still be created lazily. An external Gate6-C root must already exist
+                # so a missing NAS/NVMe mount cannot silently turn into local storage.
+                if any(quarantine == root or quarantine.is_relative_to(root) for root in resolved_allowed_roots):
+                    quarantine.mkdir(parents=True, exist_ok=True)
+                else:
+                    return ItemResult(
+                        "failed",
+                        "external quarantine root is missing; refusing to create an unmounted cross-storage directory",
+                    )
+
+            if quarantine not in resolved_allowed_roots:
+                quarantine_valid_roots.append(quarantine)
+
             if item.target is not None:
                 target_raw = Path(item.target)
                 if target_raw.is_symlink():
                     return _skip("target symlink is not allowed")
-                target = target_raw.resolve(strict=False)
-                require_allowed_path(target, allowed_roots)
-                if not is_reserved_quarantine_path(target, quarantine_root):
+                target = require_allowed_path(target_raw, quarantine_valid_roots)
+                if not is_reserved_quarantine_path(target, quarantine):
                     return _skip("quarantine target must be within quarantine root")
             else:
-                quarantine = require_allowed_path(quarantine_root, allowed_roots)
-                target = _quarantine_target(source, allowed_roots=allowed_roots, quarantine_root=quarantine, plan_id=plan_id)
-                require_allowed_path(target, allowed_roots)
+                target = _quarantine_target(
+                    source,
+                    allowed_roots=allowed_roots,
+                    quarantine_root=quarantine,
+                    plan_id=plan_id,
+                )
+                require_allowed_path(target, quarantine_valid_roots)
 
-            target.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                from app.quarantine.cross_storage import ensure_safe_quarantine_parent
+                ensure_safe_quarantine_parent(quarantine, target)
+            except Exception as exc:
+                return ItemResult("failed", f"invalid quarantine storage path: {exc}")
 
             from app.quarantine.capability import MutationCapability, resolve_mutation_capability
-            valid_roots = list(allowed_roots)
-            if quarantine_root:
-                valid_roots.append(Path(quarantine_root).resolve())
             capability = resolve_mutation_capability(
                 source,
                 target.parent,
-                quarantine_root,
-                valid_roots,
+                quarantine,
+                quarantine_valid_roots,
                 negative_probe_cache=negative_capability_probe_cache,
             )
 
-            if capability == MutationCapability.COMPAT_TRANSACTIONAL and session_factory and worker_id and quarantine_entry_id:
+            if capability == MutationCapability.CROSS_STORAGE_TRANSACTIONAL:
+                if not session_factory or not worker_id or not quarantine_entry_id:
+                    return ItemResult(
+                        "failed",
+                        "EOPNOTSUPP: cross-storage quarantine requires worker authority, session_factory and quarantine_entry_id",
+                    )
                 try:
-                    from app.quarantine.engine import execute_transactional_quarantine
-                    execute_transactional_quarantine(
+                    from app.quarantine.cross_storage import execute_cross_storage_quarantine
+                    execute_cross_storage_quarantine(
                         session_factory,
                         quarantine_entry_id,
                         worker_id,
-                        allowed_roots=valid_roots,
-                        quarantine_root=quarantine_root,
+                        allowed_roots=list(allowed_roots),
+                        quarantine_root=quarantine,
+                        expected_device=item.expected_device,
+                        expected_inode=item.expected_inode,
+                        expected_size=item.expected_size,
+                        expected_mtime_ns=item.expected_mtime_ns,
+                        expected_hash=item.expected_hash,
                     )
                 except Exception as exc:
                     return ItemResult("failed", str(exc))
@@ -717,21 +770,46 @@ def execute_item(
                     target,
                     quarantine_identity_authoritative=True,
                 )
-            elif capability == MutationCapability.UNSUPPORTED:
-                return ItemResult("failed", "unsupported mutation capability")
-            else:
+
+            if capability == MutationCapability.COMPAT_TRANSACTIONAL:
+                if not session_factory or not worker_id or not quarantine_entry_id:
+                    return ItemResult(
+                        "failed",
+                        "EOPNOTSUPP: transactional quarantine requires worker authority, session_factory and quarantine_entry_id",
+                    )
                 try:
-                    from app.fs_ops import rename_noreplace
-                    rename_noreplace(source, target)
-                except FileExistsError:
-                    return _skip("quarantine target already exists")
-                except OSError as exc:
-                    if exc.errno == errno.EXDEV:
-                        return ItemResult("failed", "cross-filesystem quarantine is not supported")
-                    if exc.errno == errno.EOPNOTSUPP:
-                        return ItemResult("failed", "unsupported filesystem operation: RENAME_NOREPLACE")
+                    from app.quarantine.engine import execute_transactional_quarantine
+                    execute_transactional_quarantine(
+                        session_factory,
+                        quarantine_entry_id,
+                        worker_id,
+                        allowed_roots=quarantine_valid_roots,
+                        quarantine_root=quarantine,
+                    )
+                except Exception as exc:
                     return ItemResult("failed", str(exc))
-                return ItemResult("completed", "quarantined", target)
+                return ItemResult(
+                    "completed",
+                    "quarantined",
+                    target,
+                    quarantine_identity_authoritative=True,
+                )
+
+            if capability == MutationCapability.UNSUPPORTED:
+                return ItemResult("failed", "unsupported mutation capability")
+
+            try:
+                from app.fs_ops import rename_noreplace
+                rename_noreplace(source, target)
+            except FileExistsError:
+                return _skip("quarantine target already exists")
+            except OSError as exc:
+                if exc.errno == errno.EXDEV:
+                    return ItemResult("failed", "cross-filesystem quarantine requires Gate6-C transactional capability")
+                if exc.errno == errno.EOPNOTSUPP:
+                    return ItemResult("failed", "unsupported filesystem operation: RENAME_NOREPLACE")
+                return ItemResult("failed", str(exc))
+            return ItemResult("completed", "quarantined", target)
 
         if item.operation == "rmdir_empty":
             if quarantine_root and is_reserved_quarantine_path(source, quarantine_root):

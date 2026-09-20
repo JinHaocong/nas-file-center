@@ -1,0 +1,12 @@
+services:
+  api:
+    environment:
+      QUARANTINE_ROOT: /quarantine/.nas-file-center-trash
+    volumes:
+      - ${HOST_QUARANTINE_DIR:?Set HOST_QUARANTINE_DIR for cross-storage quarantine}:/quarantine:rw
+
+  worker:
+    environment:
+      QUARANTINE_ROOT: /quarantine/.nas-file-center-trash
+    volumes:
+      - ${HOST_QUARANTINE_DIR:?Set HOST_QUARANTINE_DIR for cross-storage quarantine}:/quarantine:rw
