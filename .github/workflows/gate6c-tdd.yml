@@ -40,6 +40,17 @@ jobs:
           PYTHONPATH: .
         run: pytest tests/test_gate6c_cross_storage.py tests/test_execution.py -q
 
+      - name: Validate cross-storage Compose overlays
+        env:
+          HOST_DATA_DIR: /tmp/nfc-data
+          HOST_QUARANTINE_DIR: /tmp/nfc-quarantine
+        run: |
+          mkdir -p /tmp/nfc-data /tmp/nfc-quarantine
+          docker compose -f compose.yaml -f compose.cross-storage.yaml config >/tmp/gate6c-compose.yaml
+          docker compose -f compose.komodo.yaml -f compose.komodo.cross-storage.yaml config >/tmp/gate6c-komodo.yaml
+          grep -q '/quarantine/.nas-file-center-trash' /tmp/gate6c-compose.yaml
+          grep -q '/quarantine/.nas-file-center-trash' /tmp/gate6c-komodo.yaml
+
   backend-regression:
     runs-on: ubuntu-latest
     timeout-minutes: 45
