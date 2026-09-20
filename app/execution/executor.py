@@ -601,6 +601,26 @@ def execute_item(
                 negative_probe_cache=negative_capability_probe_cache,
             )
 
+            if capability == MutationCapability.CROSS_STORAGE_TRANSACTIONAL:
+                if not session_factory or not worker_id or not quarantine_entry_id:
+                    return ItemResult(
+                        "failed",
+                        "EOPNOTSUPP: cross-storage restore requires worker authority, session_factory and quarantine_entry_id",
+                    )
+                try:
+                    from app.quarantine.cross_storage import execute_cross_storage_restore
+                    execute_cross_storage_restore(
+                        session_factory,
+                        quarantine_entry_id,
+                        worker_id,
+                        allowed_roots=list(allowed_roots),
+                        quarantine_root=quarantine_root,
+                        destination=target,
+                    )
+                except Exception as exc:
+                    return ItemResult("failed", str(exc))
+                return ItemResult("completed", "restored", target)
+
             if capability == MutationCapability.COMPAT_TRANSACTIONAL:
                 if not session_factory or not quarantine_entry_id:
                     return ItemResult("failed", "EOPNOTSUPP: transactional restore requires session_factory and quarantine_entry_id")
