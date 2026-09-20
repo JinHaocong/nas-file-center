@@ -874,8 +874,6 @@ def execute_cross_storage_restore(
 
     if not destination_path.parent.exists() or destination_path.parent.is_symlink():
         raise StateConflictError("CROSS_STORAGE_RESTORE_TARGET_PARENT_INVALID")
-    if os.path.lexists(destination_path):
-        raise FileExistsError(errno.EEXIST, f"Restore destination already exists: {destination_path}")
 
     valid_roots = list(roots)
     if q_root not in valid_roots:
@@ -908,6 +906,9 @@ def execute_cross_storage_restore(
                 destination=destination_path,
             )
             return
+
+        if os.path.lexists(destination_path):
+            raise FileExistsError(errno.EEXIST, f"Restore destination already exists: {destination_path}")
 
         q_path = Path(entry.quarantine_path)
         size = int(entry.size)
