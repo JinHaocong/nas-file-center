@@ -141,6 +141,10 @@ def init_db(
                 ("quarantine_device", "BIGINT"),
                 ("quarantine_inode", "BIGINT"),
                 ("quarantine_mtime_ns", "BIGINT"),
+                ("restore_target_path", "TEXT"),
+                ("restore_device", "BIGINT"),
+                ("restore_inode", "BIGINT"),
+                ("restore_mtime_ns", "BIGINT"),
             ]
             missing_quarantine_cols = [(col, ctype) for col, ctype in expected_new_cols if col not in current_quarantine_cols]
 
