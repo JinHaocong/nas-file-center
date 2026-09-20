@@ -50,6 +50,10 @@ def test_gate6c_schema_columns_are_created(tmp_path):
         "quarantine_device",
         "quarantine_inode",
         "quarantine_mtime_ns",
+        "restore_target_path",
+        "restore_device",
+        "restore_inode",
+        "restore_mtime_ns",
     }.issubset(cols)
 
 
@@ -243,5 +247,259 @@ def test_cross_storage_target_collision_preserves_source(tmp_path):
             assert entry is not None
             assert entry.state == "conflict"
             assert entry.tx_phase == "conflict"
+    finally:
+        shutil.rmtree(q_root, ignore_errors=True)
+
+
+
+def test_true_cross_storage_restore_copies_back_without_overwrite(tmp_path):
+    from app.quarantine.cross_storage import (
+        execute_cross_storage_quarantine,
+        execute_cross_storage_restore,
+    )
+
+    worker_id = "gate6c-worker"
+    _engine, SessionLocal = _session_with_worker(tmp_path, worker_id)
+    data_root = tmp_path / "data"
+    data_root.mkdir()
+    source = data_root / "restore.bin"
+    payload = b"restore-me-" * 32768
+    source.write_bytes(payload)
+    src_stat = source.stat()
+    q_root = _second_filesystem_dir(tmp_path)
+
+    try:
+        target = q_root / "task-1" / "root-0" / "restore.q-1.bin"
+        with SessionLocal() as session:
+            entry = QuarantineEntry(
+                original_path=str(source),
+                quarantine_path=str(target),
+                state="preparing",
+                size=len(payload),
+                content_hash=_sha256(payload),
+                mtime_ns=src_stat.st_mtime_ns,
+                device=src_stat.st_dev,
+                inode=src_stat.st_ino,
+            )
+            session.add(entry)
+            session.commit()
+            entry_id = entry.id
+
+        execute_cross_storage_quarantine(
+            SessionLocal,
+            entry_id,
+            worker_id,
+            allowed_roots=[data_root],
+            quarantine_root=q_root,
+        )
+        assert not source.exists()
+        assert target.exists()
+
+        execute_cross_storage_restore(
+            SessionLocal,
+            entry_id,
+            worker_id,
+            allowed_roots=[data_root],
+            quarantine_root=q_root,
+            destination=source,
+        )
+
+        assert source.read_bytes() == payload
+        assert not target.exists()
+        restored_stat = source.stat()
+        with SessionLocal() as session:
+            entry = session.get(QuarantineEntry, entry_id)
+            assert entry is not None
+            assert entry.state == "restored"
+            assert entry.tx_phase == "restored"
+            assert entry.restore_target_path == str(source.absolute())
+            assert entry.restore_device == restored_stat.st_dev
+            assert entry.restore_inode == restored_stat.st_ino
+            assert entry.restore_mtime_ns == restored_stat.st_mtime_ns
+    finally:
+        shutil.rmtree(q_root, ignore_errors=True)
+
+
+def test_cross_storage_restore_never_overwrites_replacement(tmp_path):
+    from app.quarantine.cross_storage import (
+        execute_cross_storage_quarantine,
+        execute_cross_storage_restore,
+    )
+
+    worker_id = "gate6c-worker"
+    _engine, SessionLocal = _session_with_worker(tmp_path, worker_id)
+    data_root = tmp_path / "data"
+    data_root.mkdir()
+    source = data_root / "restore-collision.bin"
+    payload = b"quarantined"
+    source.write_bytes(payload)
+    src_stat = source.stat()
+    q_root = _second_filesystem_dir(tmp_path)
+
+    try:
+        target = q_root / "task-1" / "root-0" / "restore-collision.q-1.bin"
+        with SessionLocal() as session:
+            entry = QuarantineEntry(
+                original_path=str(source),
+                quarantine_path=str(target),
+                state="preparing",
+                size=len(payload),
+                content_hash=_sha256(payload),
+                mtime_ns=src_stat.st_mtime_ns,
+                device=src_stat.st_dev,
+                inode=src_stat.st_ino,
+            )
+            session.add(entry)
+            session.commit()
+            entry_id = entry.id
+
+        execute_cross_storage_quarantine(
+            SessionLocal,
+            entry_id,
+            worker_id,
+            allowed_roots=[data_root],
+            quarantine_root=q_root,
+        )
+        source.write_bytes(b"replacement")
+
+        with pytest.raises(FileExistsError):
+            execute_cross_storage_restore(
+                SessionLocal,
+                entry_id,
+                worker_id,
+                allowed_roots=[data_root],
+                quarantine_root=q_root,
+                destination=source,
+            )
+
+        assert source.read_bytes() == b"replacement"
+        assert target.read_bytes() == payload
+    finally:
+        shutil.rmtree(q_root, ignore_errors=True)
+
+
+def test_cross_storage_recovery_preserves_source_path_replacement(tmp_path, monkeypatch):
+    import app.quarantine.cross_storage as cross
+    from app.exceptions import StateConflictError
+
+    worker_id = "gate6c-worker"
+    _engine, SessionLocal = _session_with_worker(tmp_path, worker_id)
+    data_root = tmp_path / "data"
+    data_root.mkdir()
+    source = data_root / "aba.bin"
+    payload = b"original-authority"
+    source.write_bytes(payload)
+    src_stat = source.stat()
+    q_root = _second_filesystem_dir(tmp_path)
+
+    try:
+        target = q_root / "task-1" / "root-0" / "aba.q-1.bin"
+        with SessionLocal() as session:
+            entry = QuarantineEntry(
+                original_path=str(source),
+                quarantine_path=str(target),
+                state="preparing",
+                size=len(payload),
+                content_hash=_sha256(payload),
+                mtime_ns=src_stat.st_mtime_ns,
+                device=src_stat.st_dev,
+                inode=src_stat.st_ino,
+            )
+            session.add(entry)
+            session.commit()
+            entry_id = entry.id
+
+        real_unlink = cross._verify_and_unlink_source
+        monkeypatch.setattr(
+            cross,
+            "_verify_and_unlink_source",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("crash-before-unlink")),
+        )
+
+        with pytest.raises(RuntimeError, match="crash-before-unlink"):
+            cross.execute_cross_storage_quarantine(
+                SessionLocal,
+                entry_id,
+                worker_id,
+                allowed_roots=[data_root],
+                quarantine_root=q_root,
+            )
+
+        monkeypatch.setattr(cross, "_verify_and_unlink_source", real_unlink)
+        assert source.exists()
+        assert target.exists()
+
+        source.unlink()
+        source.write_bytes(b"replacement")
+
+        with pytest.raises(StateConflictError, match="SOURCE_REPLACEMENT"):
+            cross.reconcile_cross_storage_quarantine(
+                SessionLocal,
+                entry_id,
+                worker_id,
+                allowed_roots=[data_root],
+                quarantine_root=q_root,
+            )
+
+        assert source.read_bytes() == b"replacement"
+        assert target.read_bytes() == payload
+        with SessionLocal() as session:
+            entry = session.get(QuarantineEntry, entry_id)
+            assert entry is not None
+            assert entry.state == "conflict"
+            assert entry.tx_phase == "conflict"
+    finally:
+        shutil.rmtree(q_root, ignore_errors=True)
+
+
+def test_cross_storage_unlink_manifest_is_public_view_only(tmp_path):
+    from app.quarantine.cross_storage import execute_cross_storage_quarantine
+    from app.quarantine.unlink_purge import build_unlink_manifest, revalidate_unlink_manifest
+
+    worker_id = "gate6c-worker"
+    _engine, SessionLocal = _session_with_worker(tmp_path, worker_id)
+    data_root = tmp_path / "data"
+    data_root.mkdir()
+    source = data_root / "purge.bin"
+    payload = b"purge-cross-storage"
+    source.write_bytes(payload)
+    src_stat = source.stat()
+    q_root = _second_filesystem_dir(tmp_path)
+
+    try:
+        target = q_root / "task-1" / "root-0" / "purge.q-1.bin"
+        with SessionLocal() as session:
+            entry = QuarantineEntry(
+                original_path=str(source),
+                quarantine_path=str(target),
+                state="preparing",
+                size=len(payload),
+                content_hash=_sha256(payload),
+                mtime_ns=src_stat.st_mtime_ns,
+                device=src_stat.st_dev,
+                inode=src_stat.st_ino,
+            )
+            session.add(entry)
+            session.commit()
+            entry_id = entry.id
+
+        execute_cross_storage_quarantine(
+            SessionLocal,
+            entry_id,
+            worker_id,
+            allowed_roots=[data_root],
+            quarantine_root=q_root,
+        )
+
+        with SessionLocal() as session:
+            entry = session.get(QuarantineEntry, entry_id)
+            manifest = build_unlink_manifest(entry, q_root)
+            assert manifest["blockers"] == []
+            assert [item["role"] for item in manifest["owned_paths"]] == ["public_view"]
+            assert manifest["owned_paths"][0]["device"] == entry.quarantine_device
+            assert manifest["owned_paths"][0]["inode"] == entry.quarantine_inode
+
+            validation = revalidate_unlink_manifest(entry, q_root, manifest)
+            assert validation["blockers"] == []
     finally:
         shutil.rmtree(q_root, ignore_errors=True)
