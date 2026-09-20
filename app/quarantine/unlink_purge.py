@@ -40,6 +40,44 @@ def _is_within(path: Path, root: Path) -> bool:
     return True
 
 
+def _is_cross_storage_entry(entry: Any) -> bool:
+    return getattr(entry, "transaction_mode", None) == "cross_storage_transactional"
+
+
+def _entry_quarantine_identity(entry: Any) -> tuple[int | None, int | None, int | None]:
+    if _is_cross_storage_entry(entry):
+        raw_dev = getattr(entry, "quarantine_device", None)
+        raw_ino = getattr(entry, "quarantine_inode", None)
+        raw_mtime = getattr(entry, "quarantine_mtime_ns", None)
+        return (
+            int(raw_dev) if raw_dev is not None else None,
+            int(raw_ino) if raw_ino is not None else None,
+            int(raw_mtime) if raw_mtime is not None else None,
+        )
+    return (
+        int(entry.device) if entry.device is not None else None,
+        int(entry.inode) if entry.inode is not None else None,
+        int(entry.mtime_ns) if entry.mtime_ns is not None else None,
+    )
+
+
+def _expected_unlink_paths(entry: Any, attempt: Path) -> dict[str, Path]:
+    public_view = _absolute_lexical(entry.quarantine_path)
+    if _is_cross_storage_entry(entry):
+        return {"public_view": public_view}
+    return {
+        "authoritative_anchor": attempt / "anchor",
+        "captured_source": attempt / "captured_source",
+        "public_view": public_view,
+    }
+
+
+def _allowed_private_names(entry: Any) -> set[str]:
+    if _is_cross_storage_entry(entry):
+        return set()
+    return {"anchor", "captured_source"}
+
+
 def _identity_item(role: str, path: Path, entry: Any) -> tuple[dict[str, Any] | None, str | None]:
     if path.is_symlink() or os.path.islink(path):
         return None, f"SYMLINK:{role}"
@@ -52,11 +90,15 @@ def _identity_item(role: str, path: Path, entry: Any) -> tuple[dict[str, Any] | 
     if not stat.S_ISREG(st.st_mode):
         return None, f"NOT_REGULAR_FILE:{role}"
 
+    expected_device, expected_inode, expected_mtime_ns = _entry_quarantine_identity(entry)
     if (
-        st.st_dev != entry.device
-        or st.st_ino != entry.inode
-        or st.st_size != entry.size
-        or st.st_mtime_ns != entry.mtime_ns
+        expected_device is None
+        or expected_inode is None
+        or expected_mtime_ns is None
+        or int(st.st_dev) != expected_device
+        or int(st.st_ino) != expected_inode
+        or int(st.st_size) != int(entry.size)
+        or int(st.st_mtime_ns) != expected_mtime_ns
     ):
         return None, f"IDENTITY_MISMATCH:{role}"
 
@@ -87,9 +129,8 @@ def build_unlink_manifest(entry: Any, quarantine_root: Path | str) -> dict[str, 
     tx_root = root / ".tx"
     generation = int(entry.active_attempt_generation or 0)
     attempt = tx_root / f"entry-{entry.id}" / f"attempt-{generation}"
-    expected_anchor = attempt / "anchor"
-    captured_source = attempt / "captured_source"
-    public_view = _absolute_lexical(entry.quarantine_path)
+    expected_paths = _expected_unlink_paths(entry, attempt)
+    public_view = expected_paths["public_view"]
 
     blockers: list[str] = []
 
@@ -106,10 +147,16 @@ def build_unlink_manifest(entry: Any, quarantine_root: Path | str) -> dict[str, 
     if root.is_symlink() or tx_root.is_symlink():
         add_blocker("UNSAFE_QUARANTINE_NAMESPACE")
 
-    if not entry.authoritative_anchor_path:
-        add_blocker("MISSING_AUTHORITATIVE_ANCHOR")
-    elif _absolute_lexical(entry.authoritative_anchor_path) != expected_anchor:
-        add_blocker("ANCHOR_PATH_MISMATCH")
+    if not _is_cross_storage_entry(entry):
+        expected_anchor = expected_paths["authoritative_anchor"]
+        if not entry.authoritative_anchor_path:
+            add_blocker("MISSING_AUTHORITATIVE_ANCHOR")
+        elif _absolute_lexical(entry.authoritative_anchor_path) != expected_anchor:
+            add_blocker("ANCHOR_PATH_MISMATCH")
+    else:
+        q_device, q_inode, q_mtime = _entry_quarantine_identity(entry)
+        if q_device is None or q_inode is None or q_mtime is None:
+            add_blocker("MISSING_CROSS_STORAGE_QUARANTINE_IDENTITY")
 
     if not _is_within(public_view, root):
         add_blocker("PUBLIC_VIEW_OUTSIDE_QUARANTINE_ROOT")
@@ -122,17 +169,13 @@ def build_unlink_manifest(entry: Any, quarantine_root: Path | str) -> dict[str, 
     if attempt.exists() and not attempt.is_symlink():
         try:
             for child in sorted(attempt.iterdir(), key=lambda path: path.name):
-                if child.name not in {"anchor", "captured_source"}:
+                if child.name not in _allowed_private_names(entry):
                     add_blocker("UNRECOGNIZED_PRIVATE_PATH")
         except OSError:
             add_blocker("PRIVATE_NAMESPACE_UNREADABLE")
 
     owned_paths: list[dict[str, Any]] = []
-    for role, path in (
-        ("authoritative_anchor", expected_anchor),
-        ("captured_source", captured_source),
-        ("public_view", public_view),
-    ):
+    for role, path in expected_paths.items():
         item, blocker = _identity_item(role, path, entry)
         if blocker is not None:
             add_blocker(blocker)
@@ -164,11 +207,7 @@ def revalidate_unlink_manifest(
     tx_root = root / ".tx"
     generation = int(entry.active_attempt_generation or 0)
     attempt = tx_root / f"entry-{entry.id}" / f"attempt-{generation}"
-    expected_paths = {
-        "authoritative_anchor": attempt / "anchor",
-        "captured_source": attempt / "captured_source",
-        "public_view": _absolute_lexical(entry.quarantine_path),
-    }
+    expected_paths = _expected_unlink_paths(entry, attempt)
     canonical_roles = tuple(expected_paths)
 
     blockers: list[str] = []
@@ -193,11 +232,16 @@ def revalidate_unlink_manifest(
     if root.is_symlink() or tx_root.is_symlink() or attempt.is_symlink():
         add_blocker("UNSAFE_QUARANTINE_NAMESPACE")
 
-    expected_anchor = expected_paths["authoritative_anchor"]
-    if not entry.authoritative_anchor_path:
-        add_blocker("MISSING_AUTHORITATIVE_ANCHOR")
-    elif _absolute_lexical(entry.authoritative_anchor_path) != expected_anchor:
-        add_blocker("ANCHOR_PATH_MISMATCH")
+    if not _is_cross_storage_entry(entry):
+        expected_anchor = expected_paths["authoritative_anchor"]
+        if not entry.authoritative_anchor_path:
+            add_blocker("MISSING_AUTHORITATIVE_ANCHOR")
+        elif _absolute_lexical(entry.authoritative_anchor_path) != expected_anchor:
+            add_blocker("ANCHOR_PATH_MISMATCH")
+    else:
+        q_device, q_inode, q_mtime = _entry_quarantine_identity(entry)
+        if q_device is None or q_inode is None or q_mtime is None:
+            add_blocker("MISSING_CROSS_STORAGE_QUARANTINE_IDENTITY")
 
     public_view = expected_paths["public_view"]
     if not _is_within(public_view, root):
@@ -208,7 +252,7 @@ def revalidate_unlink_manifest(
     if attempt.exists() and not attempt.is_symlink():
         try:
             for child in sorted(attempt.iterdir(), key=lambda path: path.name):
-                if child.name not in {"anchor", "captured_source"}:
+                if child.name not in _allowed_private_names(entry):
                     add_blocker("UNRECOGNIZED_PRIVATE_PATH")
         except OSError:
             add_blocker("PRIVATE_NAMESPACE_UNREADABLE")
@@ -246,11 +290,15 @@ def revalidate_unlink_manifest(
         if frozen.get("object_type") != "regular_file":
             add_blocker(f"FROZEN_OBJECT_TYPE_MISMATCH:{role}")
 
+        expected_device, expected_inode, expected_mtime_ns = _entry_quarantine_identity(entry)
         if (
-            frozen.get("device") != entry.device
-            or frozen.get("inode") != entry.inode
+            expected_device is None
+            or expected_inode is None
+            or expected_mtime_ns is None
+            or frozen.get("device") != expected_device
+            or frozen.get("inode") != expected_inode
             or frozen.get("size") != entry.size
-            or frozen.get("mtime_ns") != entry.mtime_ns
+            or frozen.get("mtime_ns") != expected_mtime_ns
             or frozen.get("content_hash") != entry.content_hash
         ):
             add_blocker(f"FROZEN_IDENTITY_MISMATCH:{role}")
@@ -552,11 +600,7 @@ def _validate_purging_authority(
     tx_root = root / ".tx"
     generation = int(entry.active_attempt_generation or 0)
     attempt = tx_root / f"entry-{entry.id}" / f"attempt-{generation}"
-    expected_paths = {
-        "authoritative_anchor": attempt / "anchor",
-        "captured_source": attempt / "captured_source",
-        "public_view": _absolute_lexical(entry.quarantine_path),
-    }
+    expected_paths = _expected_unlink_paths(entry, attempt)
 
     if entry.state != "purging" or entry.tx_phase != "purging":
         raise StateConflictError(
@@ -574,10 +618,15 @@ def _validate_purging_authority(
         raise StateConflictError("UNLINK_RECOVERY_AUTHORITY_INVALID: frozen manifest was blocked")
     if root.is_symlink() or tx_root.is_symlink() or attempt.is_symlink():
         raise StateConflictError("UNLINK_RECOVERY_AUTHORITY_INVALID: unsafe quarantine namespace")
-    if not entry.authoritative_anchor_path:
-        raise StateConflictError("UNLINK_RECOVERY_AUTHORITY_INVALID: anchor authority missing")
-    if _absolute_lexical(entry.authoritative_anchor_path) != expected_paths["authoritative_anchor"]:
-        raise StateConflictError("UNLINK_RECOVERY_AUTHORITY_INVALID: anchor path mismatch")
+    if not _is_cross_storage_entry(entry):
+        if not entry.authoritative_anchor_path:
+            raise StateConflictError("UNLINK_RECOVERY_AUTHORITY_INVALID: anchor authority missing")
+        if _absolute_lexical(entry.authoritative_anchor_path) != expected_paths["authoritative_anchor"]:
+            raise StateConflictError("UNLINK_RECOVERY_AUTHORITY_INVALID: anchor path mismatch")
+    else:
+        q_device, q_inode, q_mtime = _entry_quarantine_identity(entry)
+        if q_device is None or q_inode is None or q_mtime is None:
+            raise StateConflictError("UNLINK_RECOVERY_AUTHORITY_INVALID: cross-storage identity missing")
 
     public_view = expected_paths["public_view"]
     if not _is_within(public_view, root) or _is_within(public_view, tx_root):
@@ -590,7 +639,7 @@ def _validate_purging_authority(
             unknown = sorted(
                 child.name
                 for child in attempt.iterdir()
-                if child.name not in {"anchor", "captured_source"}
+                if child.name not in _allowed_private_names(entry)
             )
         except OSError as exc:
             raise StateConflictError(
@@ -602,7 +651,8 @@ def _validate_purging_authority(
             )
 
     frozen_items = manifest.get("owned_paths")
-    if not isinstance(frozen_items, list) or len(frozen_items) != len(_CANONICAL_ROLES):
+    canonical_roles = tuple(expected_paths)
+    if not isinstance(frozen_items, list) or len(frozen_items) != len(canonical_roles):
         raise StateConflictError("UNLINK_RECOVERY_AUTHORITY_INVALID: canonical owned paths missing")
 
     observed_roles: list[str] = []
@@ -620,17 +670,21 @@ def _validate_purging_authority(
             raise StateConflictError(f"UNLINK_RECOVERY_AUTHORITY_INVALID: path mismatch for {role}")
         if raw.get("object_type") != "regular_file":
             raise StateConflictError(f"UNLINK_RECOVERY_AUTHORITY_INVALID: object type mismatch for {role}")
+        expected_device, expected_inode, expected_mtime_ns = _entry_quarantine_identity(entry)
         if (
-            raw.get("device") != entry.device
-            or raw.get("inode") != entry.inode
+            expected_device is None
+            or expected_inode is None
+            or expected_mtime_ns is None
+            or raw.get("device") != expected_device
+            or raw.get("inode") != expected_inode
             or raw.get("size") != entry.size
-            or raw.get("mtime_ns") != entry.mtime_ns
+            or raw.get("mtime_ns") != expected_mtime_ns
             or raw.get("content_hash") != entry.content_hash
         ):
             raise StateConflictError(f"UNLINK_RECOVERY_AUTHORITY_INVALID: identity mismatch for {role}")
         canonical_items.append(dict(raw))
 
-    if tuple(observed_roles) != _CANONICAL_ROLES:
+    if tuple(observed_roles) != canonical_roles:
         raise StateConflictError("UNLINK_RECOVERY_AUTHORITY_INVALID: noncanonical role order")
     return tuple(canonical_items)
 
