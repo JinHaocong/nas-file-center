@@ -211,6 +211,23 @@ def execute_transactional_restore(
         entry = session.get(QuarantineEntry, entry_id)
         if not entry:
             raise ValueError(f"QuarantineEntry {entry_id} not found")
+
+        if entry.transaction_mode == "cross_storage_transactional":
+            target_candidate = custom_target if custom_target else entry.original_path
+            session.rollback()
+            if q_root is None:
+                raise StateConflictError("Cross-storage restore requires a configured quarantine root")
+            from app.quarantine.cross_storage import execute_cross_storage_restore
+            execute_cross_storage_restore(
+                session_factory,
+                entry_id,
+                worker_id,
+                allowed_roots=roots,
+                quarantine_root=q_root,
+                destination=target_candidate,
+            )
+            return
+
         if not entry.authoritative_anchor_path:
             raise StateConflictError(f"Entry {entry_id} lacks authoritative anchor")
         anchor_path = Path(entry.authoritative_anchor_path)
