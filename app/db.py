@@ -137,6 +137,10 @@ def init_db(
                 ("tx_phase", "VARCHAR(32)"),
                 ("authoritative_anchor_path", "TEXT"),
                 ("active_attempt_generation", "INTEGER DEFAULT 0 NOT NULL"),
+                ("transaction_mode", "VARCHAR(32)"),
+                ("quarantine_device", "BIGINT"),
+                ("quarantine_inode", "BIGINT"),
+                ("quarantine_mtime_ns", "BIGINT"),
             ]
             missing_quarantine_cols = [(col, ctype) for col, ctype in expected_new_cols if col not in current_quarantine_cols]
 
