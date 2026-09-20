@@ -1,0 +1,12 @@
+services:
+  nas-file-center-api:
+    environment:
+      QUARANTINE_ROOT: /quarantine/.nas-file-center-trash
+    volumes:
+      - ${HOST_QUARANTINE_DIR:?Set HOST_QUARANTINE_DIR in Komodo stack variables}:/quarantine:rw
+
+  nas-file-center-worker:
+    environment:
+      QUARANTINE_ROOT: /quarantine/.nas-file-center-trash
+    volumes:
+      - ${HOST_QUARANTINE_DIR:?Set HOST_QUARANTINE_DIR in Komodo stack variables}:/quarantine:rw
