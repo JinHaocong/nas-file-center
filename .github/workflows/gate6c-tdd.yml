@@ -13,6 +13,8 @@ on:
       - 'app/models.py'
       - 'app/db.py'
       - 'tests/test_gate6c_cross_storage.py'
+      - 'compose.cross-storage.yaml'
+      - 'compose.komodo.cross-storage.yaml'
       - '.github/workflows/gate6c-tdd.yml'
   workflow_dispatch:
 
@@ -27,6 +29,11 @@ jobs:
   gate6c-focused:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      CONFIG_DIR: /tmp/nfc-config
+      DATA_MOUNT: /tmp/nfc-data
+      ALLOWED_ROOTS: /tmp/nfc-data
+      QUARANTINE_ROOT: /tmp/nfc-data/.nas-file-center-trash
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -45,6 +52,7 @@ jobs:
           HOST_DATA_DIR: /tmp/nfc-data
           HOST_QUARANTINE_DIR: /tmp/nfc-quarantine
         run: |
+          touch .env
           mkdir -p /tmp/nfc-data /tmp/nfc-quarantine
           docker compose -f compose.yaml -f compose.cross-storage.yaml config >/tmp/gate6c-compose.yaml
           docker compose -f compose.komodo.yaml -f compose.komodo.cross-storage.yaml config >/tmp/gate6c-komodo.yaml
@@ -54,6 +62,11 @@ jobs:
   backend-regression:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      CONFIG_DIR: /tmp/nfc-config
+      DATA_MOUNT: /tmp/nfc-data
+      ALLOWED_ROOTS: /tmp/nfc-data
+      QUARANTINE_ROOT: /tmp/nfc-data/.nas-file-center-trash
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
