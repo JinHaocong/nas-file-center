@@ -674,7 +674,21 @@ def execute_item(
         if item.operation == "quarantine":
             quarantine = Path(quarantine_root).expanduser().resolve(strict=False)
             quarantine_valid_roots = list(allowed_roots)
-            if quarantine not in [Path(r).expanduser().resolve(strict=False) for r in quarantine_valid_roots]:
+            resolved_allowed_roots = [Path(r).expanduser().resolve(strict=False) for r in quarantine_valid_roots]
+
+            if not quarantine.exists():
+                # Backward compatibility: an in-tree same-storage quarantine root may
+                # still be created lazily. An external Gate6-C root must already exist
+                # so a missing NAS/NVMe mount cannot silently turn into local storage.
+                if any(quarantine == root or quarantine.is_relative_to(root) for root in resolved_allowed_roots):
+                    quarantine.mkdir(parents=True, exist_ok=True)
+                else:
+                    return ItemResult(
+                        "failed",
+                        "external quarantine root is missing; refusing to create an unmounted cross-storage directory",
+                    )
+
+            if quarantine not in resolved_allowed_roots:
                 quarantine_valid_roots.append(quarantine)
 
             if item.target is not None:
