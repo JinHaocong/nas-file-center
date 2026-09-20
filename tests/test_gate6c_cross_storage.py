@@ -503,3 +503,75 @@ def test_cross_storage_unlink_manifest_is_public_view_only(tmp_path):
             assert validation["blockers"] == []
     finally:
         shutil.rmtree(q_root, ignore_errors=True)
+
+
+
+def test_cross_storage_unlink_v1_purges_only_public_quarantine_payload(tmp_path):
+    from app.quarantine.cross_storage import execute_cross_storage_quarantine
+    from app.quarantine.unlink_purge import build_unlink_manifest, execute_journaled_unlink_purge
+
+    worker_id = "gate6c-worker"
+    _engine, SessionLocal = _session_with_worker(tmp_path, worker_id)
+    data_root = tmp_path / "data"
+    data_root.mkdir()
+    source = data_root / "purge-exec.bin"
+    sibling = data_root / "keep.bin"
+    payload = b"purge-exec-cross-storage"
+    source.write_bytes(payload)
+    sibling.write_bytes(payload)
+    src_stat = source.stat()
+    sibling_stat = sibling.stat()
+    q_root = _second_filesystem_dir(tmp_path)
+
+    try:
+        target = q_root / "task-1" / "root-0" / "purge-exec.q-1.bin"
+        with SessionLocal() as session:
+            entry = QuarantineEntry(
+                original_path=str(source),
+                quarantine_path=str(target),
+                state="preparing",
+                size=len(payload),
+                content_hash=_sha256(payload),
+                mtime_ns=src_stat.st_mtime_ns,
+                device=src_stat.st_dev,
+                inode=src_stat.st_ino,
+            )
+            session.add(entry)
+            session.commit()
+            entry_id = entry.id
+
+        execute_cross_storage_quarantine(
+            SessionLocal,
+            entry_id,
+            worker_id,
+            allowed_roots=[data_root],
+            quarantine_root=q_root,
+        )
+
+        with SessionLocal() as session:
+            entry = session.get(QuarantineEntry, entry_id)
+            manifest = build_unlink_manifest(entry, q_root)
+            assert manifest["blockers"] == []
+
+        result = execute_journaled_unlink_purge(
+            SessionLocal,
+            entry_id=entry_id,
+            quarantine_root=q_root,
+            frozen_manifest=manifest,
+            worker_id=worker_id,
+        )
+
+        assert result["removed_roles"] == ["public_view"]
+        assert not target.exists()
+        assert sibling.exists()
+        assert sibling.stat().st_dev == sibling_stat.st_dev
+        assert sibling.stat().st_ino == sibling_stat.st_ino
+        assert sibling.read_bytes() == payload
+
+        with SessionLocal() as session:
+            entry = session.get(QuarantineEntry, entry_id)
+            assert entry is not None
+            assert entry.state == "purged"
+            assert entry.tx_phase == "purged"
+    finally:
+        shutil.rmtree(q_root, ignore_errors=True)
