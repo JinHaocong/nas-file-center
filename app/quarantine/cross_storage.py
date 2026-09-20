@@ -725,3 +725,554 @@ def reconcile_cross_storage_quarantine(
         return
 
     raise StateConflictError(f"CROSS_STORAGE_RECOVERY_UNKNOWN_PHASE: {phase}")
+
+
+def _restore_staging_path(
+    destination: Path,
+    *,
+    entry_id: int,
+    generation: int,
+    tx_token: str,
+) -> Path:
+    token = "".join(ch for ch in tx_token if ch.isalnum())[:12] or "tx"
+    return destination.parent / f".nfc-r-{entry_id}-{generation}-{token}.tmp"
+
+
+def _persist_restore_phase(
+    session_factory: sessionmaker,
+    entry_id: int,
+    worker_id: str,
+    phase: str,
+    *,
+    destination: Path | None = None,
+    dest_stat: os.stat_result | None = None,
+) -> None:
+    with session_factory() as session:
+        session.execute(text("BEGIN IMMEDIATE"))
+        assert_active_worker_lease(session, worker_id)
+        entry = session.get(QuarantineEntry, entry_id)
+        if entry is None:
+            raise StateConflictError(f"QuarantineEntry {entry_id} not found")
+        entry.transaction_mode = CROSS_STORAGE_MODE
+        entry.state = "restoring"
+        entry.tx_phase = phase
+        if destination is not None:
+            entry.restore_target_path = str(destination)
+        if dest_stat is not None:
+            entry.restore_device = int(dest_stat.st_dev)
+            entry.restore_inode = int(dest_stat.st_ino)
+            entry.restore_mtime_ns = _mtime_ns(dest_stat)
+        entry.updated_at = utcnow()
+        session.commit()
+
+
+def _finalize_restored(session_factory: sessionmaker, entry_id: int, worker_id: str) -> None:
+    with session_factory() as session:
+        session.execute(text("BEGIN IMMEDIATE"))
+        assert_active_worker_lease(session, worker_id)
+        entry = session.get(QuarantineEntry, entry_id)
+        if entry is None:
+            raise StateConflictError(f"QuarantineEntry {entry_id} not found")
+        now = utcnow()
+        entry.state = "restored"
+        entry.tx_phase = "restored"
+        entry.restored_at = entry.restored_at or now
+        entry.updated_at = now
+        entry.last_error = None
+        session.commit()
+
+
+def _verify_restore_destination(
+    path: Path,
+    allowed_roots: Sequence[Path | str],
+    *,
+    size: int,
+    content_hash: str,
+    device: int,
+    inode: int,
+    mtime_ns: int,
+) -> None:
+    with safe_open_parent_fd(path, allowed_roots) as (parent_fd, leaf):
+        fd = os.open(leaf, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=parent_fd)
+        try:
+            _qualify_fd_payload(
+                fd,
+                size=size,
+                expected_hash=content_hash,
+                expected_device=device,
+                expected_inode=inode,
+                expected_mtime_ns=mtime_ns,
+                failure_prefix="CROSS_STORAGE_RESTORE_DESTINATION_CHANGED",
+            )
+        finally:
+            os.close(fd)
+
+
+def _retire_public_quarantine(
+    path: Path,
+    valid_roots: Sequence[Path | str],
+    *,
+    session_factory: sessionmaker,
+    worker_id: str,
+    size: int,
+    content_hash: str,
+    q_device: int,
+    q_inode: int,
+    q_mtime_ns: int,
+) -> None:
+    with safe_open_parent_fd(path, valid_roots) as (parent_fd, leaf):
+        fd = os.open(leaf, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=parent_fd)
+        try:
+            _qualify_fd_payload(
+                fd,
+                size=size,
+                expected_hash=content_hash,
+                expected_device=q_device,
+                expected_inode=q_inode,
+                expected_mtime_ns=q_mtime_ns,
+                failure_prefix="CROSS_STORAGE_RESTORE_QUARANTINE_CHANGED",
+            )
+            renew_and_assert_worker_lease(session_factory, worker_id)
+            immediate = os.stat(leaf, dir_fd=parent_fd, follow_symlinks=False)
+            if (
+                not stat.S_ISREG(immediate.st_mode)
+                or int(immediate.st_dev) != q_device
+                or int(immediate.st_ino) != q_inode
+                or int(immediate.st_size) != size
+                or _mtime_ns(immediate) != q_mtime_ns
+            ):
+                raise StateConflictError(
+                    "CROSS_STORAGE_RESTORE_QUARANTINE_CHANGED: public quarantine binding changed before retirement"
+                )
+            os.unlink(leaf, dir_fd=parent_fd)
+            os.fsync(parent_fd)
+        finally:
+            os.close(fd)
+
+
+def execute_cross_storage_restore(
+    session_factory: sessionmaker,
+    entry_id: int,
+    worker_id: str,
+    *,
+    allowed_roots: Sequence[Path | str],
+    quarantine_root: Path | str,
+    destination: Path | str,
+) -> None:
+    """Restore a cross-storage quarantine entry with copy-verify-publish-retire semantics."""
+
+    if not worker_id or not str(worker_id).strip():
+        raise PermissionError("Cross-storage restore requires valid worker authority / lease")
+
+    q_root = Path(quarantine_root).expanduser().absolute()
+    destination_path = Path(destination).expanduser().absolute()
+    roots = [Path(r).expanduser().absolute() for r in allowed_roots]
+    if not any(destination_path == root or destination_path.is_relative_to(root) for root in roots):
+        raise StateConflictError("CROSS_STORAGE_RESTORE_TARGET_OUTSIDE_ALLOWED_ROOTS")
+    if destination_path == q_root or destination_path.is_relative_to(q_root):
+        raise StateConflictError("CROSS_STORAGE_RESTORE_TARGET_IN_QUARANTINE")
+
+    if not destination_path.parent.exists() or destination_path.parent.is_symlink():
+        raise StateConflictError("CROSS_STORAGE_RESTORE_TARGET_PARENT_INVALID")
+    if os.path.lexists(destination_path):
+        raise FileExistsError(errno.EEXIST, f"Restore destination already exists: {destination_path}")
+
+    valid_roots = list(roots)
+    if q_root not in valid_roots:
+        valid_roots.append(q_root)
+
+    with session_factory() as session:
+        session.execute(text("BEGIN IMMEDIATE"))
+        assert_active_worker_lease(session, worker_id)
+        entry = session.get(QuarantineEntry, entry_id)
+        if entry is None:
+            raise StateConflictError(f"QuarantineEntry {entry_id} not found")
+        if entry.transaction_mode != CROSS_STORAGE_MODE:
+            raise StateConflictError("CROSS_STORAGE_RESTORE_MODE_MISMATCH")
+        if entry.state not in {"active", "restoring"}:
+            raise StateConflictError(f"Cannot restore quarantine entry in state '{entry.state}'")
+        if entry.tx_phase not in {"active", "cross_restore_copying", "cross_restore_staging_verified", "cross_restore_published", "cross_restore_retire_authorized"}:
+            raise StateConflictError(f"CROSS_STORAGE_RESTORE_PHASE_INVALID: {entry.tx_phase}")
+
+        if entry.tx_phase != "active":
+            frozen_target = Path(entry.restore_target_path) if entry.restore_target_path else destination_path
+            if frozen_target != destination_path:
+                raise StateConflictError("CROSS_STORAGE_RESTORE_TARGET_CHANGED")
+            session.rollback()
+            reconcile_cross_storage_restore(
+                session_factory,
+                entry_id,
+                worker_id,
+                allowed_roots=allowed_roots,
+                quarantine_root=q_root,
+                destination=destination_path,
+            )
+            return
+
+        q_path = Path(entry.quarantine_path)
+        size = int(entry.size)
+        content_hash = str(entry.content_hash or "").lower()
+        if (
+            entry.quarantine_device is None
+            or entry.quarantine_inode is None
+            or entry.quarantine_mtime_ns is None
+            or len(content_hash) != 64
+        ):
+            raise StateConflictError("CROSS_STORAGE_RESTORE_AUTHORITY_MISSING")
+        q_device = int(entry.quarantine_device)
+        q_inode = int(entry.quarantine_inode)
+        q_mtime = int(entry.quarantine_mtime_ns)
+        entry.tx_token = entry.tx_token or uuid.uuid4().hex
+        tx_token = entry.tx_token
+        entry.state = "restoring"
+        entry.tx_phase = "cross_restore_copying"
+        entry.restore_target_path = str(destination_path)
+        entry.restore_device = None
+        entry.restore_inode = None
+        entry.restore_mtime_ns = None
+        entry.updated_at = utcnow()
+        session.commit()
+
+    generation, _attempt_dir = allocate_and_create_attempt_dir(
+        session_factory,
+        entry_id,
+        worker_id,
+        quarantine_root=q_root,
+    )
+    staging_path = _restore_staging_path(
+        destination_path,
+        entry_id=entry_id,
+        generation=generation,
+        tx_token=tx_token,
+    )
+
+    try:
+        with safe_open_parent_fd(q_path, valid_roots) as (src_parent_fd, src_leaf):
+            src_fd = os.open(src_leaf, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=src_parent_fd)
+            try:
+                _qualify_fd_payload(
+                    src_fd,
+                    size=size,
+                    expected_hash=content_hash,
+                    expected_device=q_device,
+                    expected_inode=q_inode,
+                    expected_mtime_ns=q_mtime,
+                    failure_prefix="CROSS_STORAGE_RESTORE_QUARANTINE_CHANGED",
+                )
+
+                with safe_open_parent_fd(staging_path, roots) as (dst_parent_fd, dst_leaf):
+                    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+                    dst_fd = os.open(dst_leaf, flags, 0o600, dir_fd=dst_parent_fd)
+                    copied = 0
+                    digest = hashlib.sha256()
+                    try:
+                        os.lseek(src_fd, 0, os.SEEK_SET)
+                        while True:
+                            chunk = os.read(src_fd, _COPY_CHUNK_SIZE)
+                            if not chunk:
+                                break
+                            _write_all(dst_fd, chunk)
+                            digest.update(chunk)
+                            copied += len(chunk)
+                        os.fsync(dst_fd)
+                    finally:
+                        os.close(dst_fd)
+
+                if copied != size or digest.hexdigest().lower() != content_hash:
+                    raise StateConflictError("CROSS_STORAGE_RESTORE_COPY_VERIFY_FAILED")
+
+                _qualify_fd_payload(
+                    src_fd,
+                    size=size,
+                    expected_hash=content_hash,
+                    expected_device=q_device,
+                    expected_inode=q_inode,
+                    expected_mtime_ns=q_mtime,
+                    failure_prefix="CROSS_STORAGE_RESTORE_QUARANTINE_CHANGED",
+                )
+            finally:
+                os.close(src_fd)
+
+        with safe_open_parent_fd(staging_path, roots) as (parent_fd, leaf):
+            fd = os.open(leaf, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=parent_fd)
+            try:
+                dest_stat = _qualify_fd_payload(
+                    fd,
+                    size=size,
+                    expected_hash=content_hash,
+                    failure_prefix="CROSS_STORAGE_RESTORE_COPY_VERIFY_FAILED",
+                )
+            finally:
+                os.close(fd)
+
+        if int(dest_stat.st_dev) == q_device:
+            raise StateConflictError("CROSS_STORAGE_RESTORE_TOPOLOGY_CHANGED: restore target is not cross-storage")
+
+        _persist_restore_phase(
+            session_factory,
+            entry_id,
+            worker_id,
+            "cross_restore_staging_verified",
+            destination=destination_path,
+            dest_stat=dest_stat,
+        )
+
+        with safe_open_parent_fd(staging_path, roots) as (src_parent_fd, src_leaf):
+            with safe_open_parent_fd(destination_path, roots) as (dst_parent_fd, dst_leaf):
+                renew_and_assert_worker_lease(session_factory, worker_id)
+                rename_noreplace_at(src_parent_fd, src_leaf, dst_parent_fd, dst_leaf)
+                os.fsync(dst_parent_fd)
+
+        _persist_restore_phase(
+            session_factory,
+            entry_id,
+            worker_id,
+            "cross_restore_published",
+            destination=destination_path,
+        )
+
+        _verify_restore_destination(
+            destination_path,
+            roots,
+            size=size,
+            content_hash=content_hash,
+            device=int(dest_stat.st_dev),
+            inode=int(dest_stat.st_ino),
+            mtime_ns=_mtime_ns(dest_stat),
+        )
+
+        _persist_restore_phase(
+            session_factory,
+            entry_id,
+            worker_id,
+            "cross_restore_retire_authorized",
+            destination=destination_path,
+        )
+
+        _retire_public_quarantine(
+            q_path,
+            valid_roots,
+            session_factory=session_factory,
+            worker_id=worker_id,
+            size=size,
+            content_hash=content_hash,
+            q_device=q_device,
+            q_inode=q_inode,
+            q_mtime_ns=q_mtime,
+        )
+
+        _finalize_restored(session_factory, entry_id, worker_id)
+    except Exception as exc:
+        try:
+            with session_factory() as session:
+                session.execute(text("BEGIN IMMEDIATE"))
+                assert_active_worker_lease(session, worker_id)
+                entry = session.get(QuarantineEntry, entry_id)
+                if entry is not None:
+                    entry.last_error = str(exc)
+                    entry.updated_at = utcnow()
+                    session.commit()
+        except Exception:
+            pass
+        raise
+
+
+def reconcile_cross_storage_restore(
+    session_factory: sessionmaker,
+    entry_id: int,
+    worker_id: str,
+    *,
+    allowed_roots: Sequence[Path | str],
+    quarantine_root: Path | str,
+    destination: Path | str | None = None,
+) -> None:
+    """Converge an interrupted cross-storage restore while preserving replacements."""
+
+    q_root = Path(quarantine_root).expanduser().absolute()
+    roots = [Path(r).expanduser().absolute() for r in allowed_roots]
+    valid_roots = list(roots)
+    if q_root not in valid_roots:
+        valid_roots.append(q_root)
+
+    with session_factory() as session:
+        entry = session.get(QuarantineEntry, entry_id)
+        if entry is None:
+            raise StateConflictError(f"QuarantineEntry {entry_id} not found")
+        if entry.transaction_mode != CROSS_STORAGE_MODE:
+            raise StateConflictError("CROSS_STORAGE_RESTORE_MODE_MISMATCH")
+        if entry.tx_phase == "restored" and entry.state == "restored":
+            return
+
+        frozen_target = Path(entry.restore_target_path) if entry.restore_target_path else None
+        if destination is not None:
+            requested = Path(destination).expanduser().absolute()
+            if frozen_target is not None and frozen_target != requested:
+                raise StateConflictError("CROSS_STORAGE_RESTORE_TARGET_CHANGED")
+            frozen_target = requested
+        if frozen_target is None:
+            raise StateConflictError("CROSS_STORAGE_RESTORE_TARGET_MISSING")
+        destination_path = frozen_target
+
+        q_path = Path(entry.quarantine_path)
+        size = int(entry.size)
+        content_hash = str(entry.content_hash or "").lower()
+        if (
+            entry.quarantine_device is None
+            or entry.quarantine_inode is None
+            or entry.quarantine_mtime_ns is None
+            or len(content_hash) != 64
+        ):
+            raise StateConflictError("CROSS_STORAGE_RESTORE_AUTHORITY_MISSING")
+        q_device = int(entry.quarantine_device)
+        q_inode = int(entry.quarantine_inode)
+        q_mtime = int(entry.quarantine_mtime_ns)
+        generation = int(entry.active_attempt_generation or 0)
+        tx_token = str(entry.tx_token or "")
+        phase = entry.tx_phase
+        restore_device = entry.restore_device
+        restore_inode = entry.restore_inode
+        restore_mtime = entry.restore_mtime_ns
+
+    staging_path = _restore_staging_path(
+        destination_path,
+        entry_id=entry_id,
+        generation=generation,
+        tx_token=tx_token,
+    )
+
+    if phase == "cross_restore_copying":
+        if os.path.lexists(destination_path):
+            _mark_conflict(
+                session_factory,
+                entry_id,
+                worker_id,
+                "CROSS_STORAGE_RESTORE_RECOVERY_AMBIGUOUS_DESTINATION",
+            )
+            raise StateConflictError("CROSS_STORAGE_RESTORE_RECOVERY_AMBIGUOUS_DESTINATION")
+        if os.path.lexists(staging_path):
+            with safe_open_parent_fd(staging_path, roots) as (parent_fd, leaf):
+                st = os.stat(leaf, dir_fd=parent_fd, follow_symlinks=False)
+                if not stat.S_ISREG(st.st_mode):
+                    _mark_conflict(
+                        session_factory,
+                        entry_id,
+                        worker_id,
+                        "CROSS_STORAGE_RESTORE_RECOVERY_AMBIGUOUS_STAGING",
+                    )
+                    raise StateConflictError("CROSS_STORAGE_RESTORE_RECOVERY_AMBIGUOUS_STAGING")
+                renew_and_assert_worker_lease(session_factory, worker_id)
+                os.unlink(leaf, dir_fd=parent_fd)
+                os.fsync(parent_fd)
+
+        with session_factory() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            assert_active_worker_lease(session, worker_id)
+            entry = session.get(QuarantineEntry, entry_id)
+            entry.state = "active"
+            entry.tx_phase = "active"
+            entry.updated_at = utcnow()
+            session.commit()
+        execute_cross_storage_restore(
+            session_factory,
+            entry_id,
+            worker_id,
+            allowed_roots=allowed_roots,
+            quarantine_root=q_root,
+            destination=destination_path,
+        )
+        return
+
+    if restore_device is None or restore_inode is None or restore_mtime is None:
+        raise StateConflictError("CROSS_STORAGE_RESTORE_DESTINATION_AUTHORITY_MISSING")
+    restore_device_i = int(restore_device)
+    restore_inode_i = int(restore_inode)
+    restore_mtime_i = int(restore_mtime)
+
+    if phase == "cross_restore_staging_verified":
+        staging_exists = os.path.lexists(staging_path)
+        dest_exists = os.path.lexists(destination_path)
+        if staging_exists and dest_exists:
+            _mark_conflict(
+                session_factory,
+                entry_id,
+                worker_id,
+                "CROSS_STORAGE_RESTORE_RECOVERY_AMBIGUOUS_PUBLICATION",
+            )
+            raise StateConflictError("CROSS_STORAGE_RESTORE_RECOVERY_AMBIGUOUS_PUBLICATION")
+
+        if staging_exists:
+            _verify_restore_destination(
+                staging_path,
+                roots,
+                size=size,
+                content_hash=content_hash,
+                device=restore_device_i,
+                inode=restore_inode_i,
+                mtime_ns=restore_mtime_i,
+            )
+            with safe_open_parent_fd(staging_path, roots) as (src_parent_fd, src_leaf):
+                with safe_open_parent_fd(destination_path, roots) as (dst_parent_fd, dst_leaf):
+                    renew_and_assert_worker_lease(session_factory, worker_id)
+                    rename_noreplace_at(src_parent_fd, src_leaf, dst_parent_fd, dst_leaf)
+                    os.fsync(dst_parent_fd)
+        elif dest_exists:
+            _verify_restore_destination(
+                destination_path,
+                roots,
+                size=size,
+                content_hash=content_hash,
+                device=restore_device_i,
+                inode=restore_inode_i,
+                mtime_ns=restore_mtime_i,
+            )
+        else:
+            raise StateConflictError("CROSS_STORAGE_RESTORE_RECOVERY_DESTINATION_MISSING")
+
+        _persist_restore_phase(
+            session_factory,
+            entry_id,
+            worker_id,
+            "cross_restore_published",
+            destination=destination_path,
+        )
+        phase = "cross_restore_published"
+
+    if phase in {"cross_restore_published", "cross_restore_retire_authorized"}:
+        _verify_restore_destination(
+            destination_path,
+            roots,
+            size=size,
+            content_hash=content_hash,
+            device=restore_device_i,
+            inode=restore_inode_i,
+            mtime_ns=restore_mtime_i,
+        )
+
+        if not os.path.lexists(q_path):
+            _finalize_restored(session_factory, entry_id, worker_id)
+            return
+
+        if phase != "cross_restore_retire_authorized":
+            _persist_restore_phase(
+                session_factory,
+                entry_id,
+                worker_id,
+                "cross_restore_retire_authorized",
+                destination=destination_path,
+            )
+
+        _retire_public_quarantine(
+            q_path,
+            valid_roots,
+            session_factory=session_factory,
+            worker_id=worker_id,
+            size=size,
+            content_hash=content_hash,
+            q_device=q_device,
+            q_inode=q_inode,
+            q_mtime_ns=q_mtime,
+        )
+        _finalize_restored(session_factory, entry_id, worker_id)
+        return
+
+    raise StateConflictError(f"CROSS_STORAGE_RESTORE_RECOVERY_UNKNOWN_PHASE: {phase}")
