@@ -4118,17 +4118,28 @@ class FileCenterService:
                         allowed_roots=self.settings.allowed_roots,
                         quarantine_root=self.settings.quarantine_root,
                     )
-                from app.quarantine.restore import execute_transactional_restore
-                execute_transactional_restore(
-                    self.SessionLocal,
-                    entry_id,
-                    worker_id=worker_id,
-                    allowed_roots=self.settings.allowed_roots,
-                    quarantine_root=self.settings.quarantine_root,
-                    custom_target=custom_target,
-                )
-                session.refresh(entry)
                 dest_str = custom_target or entry.original_path
+                if entry.transaction_mode == "cross_storage_transactional":
+                    from app.quarantine.cross_storage import execute_cross_storage_restore
+                    execute_cross_storage_restore(
+                        self.SessionLocal,
+                        entry_id,
+                        worker_id,
+                        allowed_roots=self.settings.allowed_roots,
+                        quarantine_root=self.settings.quarantine_root,
+                        destination=dest_str,
+                    )
+                else:
+                    from app.quarantine.restore import execute_transactional_restore
+                    execute_transactional_restore(
+                        self.SessionLocal,
+                        entry_id,
+                        worker_id=worker_id,
+                        allowed_roots=self.settings.allowed_roots,
+                        quarantine_root=self.settings.quarantine_root,
+                        custom_target=custom_target,
+                    )
+                session.refresh(entry)
                 return {
                     "id": entry.id,
                     "state": entry.state,
