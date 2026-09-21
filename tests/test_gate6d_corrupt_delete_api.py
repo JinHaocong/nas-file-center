@@ -334,3 +334,61 @@ def test_non_admin_cannot_manage_corrupt_delete_plan_lifecycle(tmp_path: Path):
     assert client.post(f"/api/tasks/{resume_job_id}/resume").status_code == 403
     assert client.post(f"/api/tasks/{retry_job_id}/retry").status_code == 403
     assert source.exists()
+
+
+
+def test_hash_drift_after_enqueue_cannot_create_durable_intent(tmp_path: Path):
+    client, service, settings, data, _trash = _env(tmp_path)
+    source = data / "post-enqueue-drift.jpg"
+    source.write_bytes(b"AAAA1111")
+    asset_id = _seed_media(service, source, status="corrupt")
+
+    preview = client.post(
+        "/api/media/corrupt-delete/preview",
+        json={"media_asset_ids": [asset_id]},
+    ).json()
+    created = client.post(
+        "/api/media/corrupt-delete/plan",
+        json={
+            "media_asset_ids": [asset_id],
+            "expected_preview_digest": preview["preview_digest"],
+            "confirmation": "DELETE_CORRUPT_FILES",
+        },
+    )
+    plan_id = int(created.json()["id"])
+    assert client.post(f"/api/plans/{plan_id}/freeze").status_code == 200
+    assert client.post(f"/api/plans/{plan_id}/validate").json()["status"] == "ready"
+
+    queued = client.post(f"/api/plans/{plan_id}/execute")
+    assert queued.status_code == 200
+    job_id = int(queued.json()["work_job_id"])
+
+    # Change content after enqueue while preserving the frozen pathname,
+    # inode, size and mtime. Only the authoritative SHA256 can detect this.
+    frozen = os.stat(source, follow_symlinks=False)
+    source.write_bytes(b"BBBB2222")
+    os.utime(
+        source,
+        ns=(int(frozen.st_atime_ns), int(frozen.st_mtime_ns)),
+        follow_symlinks=False,
+    )
+
+    assert _run_worker(service, settings, job_id) is True
+    assert source.read_bytes() == b"BBBB2222"
+
+    with service.SessionLocal() as session:
+        journals = list(
+            session.scalars(
+                select(OperationJournal).where(
+                    OperationJournal.operation == "media_corrupt_unlink_delete"
+                )
+            )
+        )
+        assert journals == []
+        item = session.scalar(
+            select(BatchPlanItem).where(BatchPlanItem.plan_id == plan_id)
+        )
+        assert item is not None
+        assert item.state == "failed"
+        assert item.reason is not None
+        assert "SOURCE_HASH_CHANGED" in item.reason
