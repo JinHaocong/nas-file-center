@@ -1,4 +1,5 @@
 import hashlib
+import json
 import os
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from app.models import (
     QuarantineEntry,
     TaskLock,
     User,
+    WorkJob,
     utcnow,
 )
 from app.service import FileCenterService
@@ -305,6 +307,22 @@ def test_non_admin_cannot_manage_corrupt_delete_plan_lifecycle(tmp_path: Path):
     plan_id = int(created.json()["id"])
 
     with service.SessionLocal() as session:
+        resume_job = WorkJob(
+            kind="batch-plan-execute",
+            status="paused",
+            state_json=json.dumps({"plan_id": plan_id}),
+            checkpoint_json=json.dumps({"schema_version": 1}),
+        )
+        retry_job = WorkJob(
+            kind="batch-plan-execute",
+            status="failed",
+            state_json=json.dumps({"plan_id": plan_id}),
+        )
+        session.add_all([resume_job, retry_job])
+        session.flush()
+        resume_job_id = int(resume_job.id)
+        retry_job_id = int(retry_job.id)
+
         admin = session.scalar(select(User).where(User.username == "admin"))
         assert admin is not None
         admin.role = "user"
@@ -313,4 +331,6 @@ def test_non_admin_cannot_manage_corrupt_delete_plan_lifecycle(tmp_path: Path):
     assert client.post(f"/api/plans/{plan_id}/freeze").status_code == 403
     assert client.post(f"/api/plans/{plan_id}/validate").status_code == 403
     assert client.post(f"/api/plans/{plan_id}/execute").status_code == 403
+    assert client.post(f"/api/tasks/{resume_job_id}/resume").status_code == 403
+    assert client.post(f"/api/tasks/{retry_job_id}/retry").status_code == 403
     assert source.exists()
