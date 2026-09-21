@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import stat
 import subprocess
+import tempfile
 import time
 from typing import Any, Callable
 
@@ -344,45 +345,82 @@ def run_ffprobe(
         "stream=codec_type,codec_name,width,height,avg_frame_rate,r_frame_rate,duration,bit_rate",
         os.fspath(path),
     ]
-    try:
-        proc = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            shell=False,
-        )
-    except FileNotFoundError as exc:
-        return _unknown("video", "FFPROBE_UNAVAILABLE", str(exc))
-    except OSError as exc:
-        return _unknown("video", "FFPROBE_START_FAILED", str(exc))
 
-    deadline = time.monotonic() + max(1.0, float(timeout_seconds))
-    stdout = ""
-    stderr = ""
-    try:
-        while True:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
+    # ffprobe output is redirected into bounded temporary files instead of
+    # subprocess.PIPE. communicate() can accumulate arbitrary output in RAM
+    # before a post-hoc size check; this loop observes file sizes while the
+    # child is running and terminates it as soon as either stream exceeds the
+    # Gate6-D output budget.
+    with tempfile.TemporaryFile(mode="w+b") as stdout_file, tempfile.TemporaryFile(
+        mode="w+b"
+    ) as stderr_file:
+        try:
+            proc = subprocess.Popen(
+                command,
+                stdout=stdout_file,
+                stderr=stderr_file,
+                text=False,
+                shell=False,
+            )
+        except FileNotFoundError as exc:
+            return _unknown("video", "FFPROBE_UNAVAILABLE", str(exc))
+        except OSError as exc:
+            return _unknown("video", "FFPROBE_START_FAILED", str(exc))
+
+        deadline = time.monotonic() + max(1.0, float(timeout_seconds))
+        try:
+            while proc.poll() is None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    proc.kill()
+                    proc.wait()
+                    return _unknown("video", "FFPROBE_TIMEOUT", "ffprobe timed out")
+
+                stdout_size = os.fstat(stdout_file.fileno()).st_size
+                stderr_size = os.fstat(stderr_file.fileno()).st_size
+                if (
+                    stdout_size > _MAX_PROBE_OUTPUT_BYTES
+                    or stderr_size > _MAX_PROBE_OUTPUT_BYTES
+                ):
+                    proc.kill()
+                    proc.wait()
+                    return _unknown(
+                        "video",
+                        "FFPROBE_OUTPUT_TOO_LARGE",
+                        "ffprobe output exceeded limit",
+                    )
+
+                try:
+                    proc.wait(timeout=min(0.25, remaining))
+                except subprocess.TimeoutExpired:
+                    if checkpoint is not None:
+                        checkpoint()
+        except BaseException:
+            if proc.poll() is None:
                 proc.kill()
-                stdout, stderr = proc.communicate()
-                return _unknown("video", "FFPROBE_TIMEOUT", "ffprobe timed out")
-            try:
-                stdout, stderr = proc.communicate(timeout=min(0.25, remaining))
-                break
-            except subprocess.TimeoutExpired:
-                if checkpoint is not None:
-                    checkpoint()
-    except BaseException:
-        if proc.poll() is None:
-            proc.kill()
-            proc.communicate()
-        raise
+            proc.wait()
+            raise
 
-    if len(stdout.encode("utf-8", errors="replace")) > _MAX_PROBE_OUTPUT_BYTES:
-        return _unknown("video", "FFPROBE_OUTPUT_TOO_LARGE", "ffprobe stdout exceeded limit")
-    if len(stderr.encode("utf-8", errors="replace")) > _MAX_PROBE_OUTPUT_BYTES:
-        stderr = stderr[-_MAX_PROBE_OUTPUT_BYTES:]
+        stdout_size = os.fstat(stdout_file.fileno()).st_size
+        stderr_size = os.fstat(stderr_file.fileno()).st_size
+        if (
+            stdout_size > _MAX_PROBE_OUTPUT_BYTES
+            or stderr_size > _MAX_PROBE_OUTPUT_BYTES
+        ):
+            return _unknown(
+                "video",
+                "FFPROBE_OUTPUT_TOO_LARGE",
+                "ffprobe output exceeded limit",
+            )
+
+        stdout_file.seek(0)
+        stderr_file.seek(0)
+        stdout = stdout_file.read(_MAX_PROBE_OUTPUT_BYTES + 1).decode(
+            "utf-8", errors="replace"
+        )
+        stderr = stderr_file.read(_MAX_PROBE_OUTPUT_BYTES + 1).decode(
+            "utf-8", errors="replace"
+        )
 
     if proc.returncode != 0:
         lowered = stderr.lower()
