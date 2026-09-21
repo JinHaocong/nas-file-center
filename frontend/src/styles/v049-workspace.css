@@ -2118,3 +2118,64 @@ body,
     -webkit-backdrop-filter: none;
   }
 }
+
+
+/* Confirmation dialogs and semantic overlays need their own spacing contract. */
+.ant-modal-confirm .ant-modal-body {
+  padding: 22px 22px 20px !important;
+}
+
+.ant-modal-confirm .ant-modal-confirm-title {
+  color: var(--nfc-text);
+  font-size: 14px;
+  font-weight: 680;
+  line-height: 1.45;
+  letter-spacing: -0.012em;
+}
+
+.ant-modal-confirm .ant-modal-confirm-content {
+  margin-top: 9px;
+  color: var(--nfc-text-muted);
+  font-size: 11.5px;
+  line-height: 1.68;
+}
+
+.ant-modal-confirm .ant-modal-confirm-btns {
+  margin-top: 20px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.ant-modal-confirm .ant-modal-confirm-btns .ant-btn + .ant-btn {
+  margin-inline-start: 0;
+}
+
+.nfc-quarantine-purge-modal .ant-modal-content,
+.nfc-quarantine-bulk-purge-modal .ant-modal-content,
+.nfc-settings-confirm-modal .ant-modal-content {
+  border-color: color-mix(in srgb, var(--nfc-danger) 24%, var(--nfc-border-strong)) !important;
+}
+
+.nfc-quarantine-bulk-restore-modal .ant-modal-content {
+  border-color: color-mix(in srgb, var(--nfc-success) 20%, var(--nfc-border-strong)) !important;
+}
+
+.nfc-quarantine-restore-modal .ant-modal-content {
+  border-color: color-mix(in srgb, var(--nfc-accent) 18%, var(--nfc-border-strong)) !important;
+}
+
+@media (max-width: 767px) {
+  .ant-modal-confirm .ant-modal-body {
+    padding: 18px 17px 17px !important;
+  }
+
+  .ant-modal-confirm .ant-modal-confirm-btns {
+    margin-top: 18px;
+  }
+
+  .ant-modal-confirm .ant-modal-confirm-btns .ant-btn {
+    min-height: 42px;
+    flex: 1 1 0;
+  }
+}
