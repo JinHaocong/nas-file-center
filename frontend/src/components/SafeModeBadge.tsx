@@ -12,14 +12,14 @@ export const SafeModeBadge: React.FC = () => {
   });
 
   if (!settings) {
-    return <Tag color="default" className="nfc-header-status-badge">加载安全模式...</Tag>;
+    return <Tag color="default" className="nfc-header-status-badge is-loading">安全状态…</Tag>;
   }
 
   if (settings.allow_delete) {
     return (
       <Tooltip title="危险：ALLOW_DELETE=true，系统允许永久删除文件，请务必谨慎操作！">
         <Tag color="error" icon={<AlertOutlined />} className="nfc-header-status-badge is-danger">
-          永久删除已开启
+          永久删除
         </Tag>
       </Tooltip>
     );
@@ -29,7 +29,7 @@ export const SafeModeBadge: React.FC = () => {
     return (
       <Tooltip title="ALLOW_MUTATION=true，允许隔离/移动/重命名等文件变更操作">
         <Tag color="warning" icon={<WarningOutlined />} className="nfc-header-status-badge is-warning">
-          允许文件修改 (隔离模式)
+          隔离写入
         </Tag>
       </Tooltip>
     );
@@ -38,7 +38,7 @@ export const SafeModeBadge: React.FC = () => {
   return (
     <Tooltip title="ALLOW_MUTATION=false，只读安全保护模式生效中，禁止任何修改和删除操作">
       <Tag color="success" icon={<LockOutlined />} className="nfc-header-status-badge is-safe">
-        只读安全模式
+        只读
       </Tag>
     </Tooltip>
   );

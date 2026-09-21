@@ -9,8 +9,12 @@ describe('v0.4.4 cohesion invariants carried into the v0.4.7 control plane', () 
   test('header uses workspace context instead of duplicating sidebar brand', () => {
     const header = read('src/components/Header.tsx');
     assert.match(header, /nfc-header-workspace/);
+    assert.match(header, /resolveWorkspaceContext/);
+    assert.match(header, /useLocation/);
     assert.match(header, /CONTROL PLANE/);
-    assert.match(header, /Local operations/);
+    assert.match(header, /系统概览/);
+    assert.match(header, /高级去重工作台/);
+    assert.doesNotMatch(header, /Local operations/);
     assert.doesNotMatch(header, /nfc-header-brand-dot/);
     assert.doesNotMatch(header, /style=\{\{/);
   });

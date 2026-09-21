@@ -17,7 +17,7 @@ export const WorkerStatusBadge: React.FC = () => {
     return (
       <Tooltip title={`当前任务队列有 ${activeJobs} 个进行中或等待中的任务`}>
         <Tag color="processing" icon={<SyncOutlined spin />} className="nfc-header-status-badge is-processing">
-          任务队列: {activeJobs} 进行中/等待中
+          队列 {activeJobs}
         </Tag>
       </Tooltip>
     );
@@ -25,8 +25,8 @@ export const WorkerStatusBadge: React.FC = () => {
 
   return (
     <Tooltip title="当前任务队列空闲">
-      <Tag color="default" icon={<CheckCircleOutlined className="nfc-success-text" />} className="nfc-header-status-badge is-idle">
-        任务队列: 空闲
+      <Tag color="default" icon={<CheckCircleOutlined />} className="nfc-header-status-badge is-idle">
+        队列空闲
       </Tag>
     </Tooltip>
   );

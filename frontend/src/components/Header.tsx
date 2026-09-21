@@ -11,6 +11,7 @@ import {
   MoonOutlined,
   DesktopOutlined,
 } from '@ant-design/icons';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { SafeModeBadge } from './SafeModeBadge';
@@ -27,6 +28,41 @@ interface Props {
   onOpenNavigation?: () => void;
 }
 
+interface WorkspaceContext {
+  kicker: string;
+  name: string;
+}
+
+const resolveWorkspaceContext = (pathname: string): WorkspaceContext => {
+  if (pathname.startsWith('/scans/')) {
+    return pathname.endsWith('/dedupe')
+      ? { kicker: 'DATA & SCAN', name: '高级去重工作台' }
+      : { kicker: 'DATA & SCAN', name: '扫描详情' };
+  }
+
+  if (pathname.startsWith('/plans/')) return { kicker: 'SAFETY & RUN', name: '执行计划详情' };
+  if (pathname.startsWith('/workflows/')) return { kicker: 'AUTOMATION', name: '工作流编辑器' };
+
+  const root = '/' + pathname.split('/').filter(Boolean)[0];
+  const contexts: Record<string, WorkspaceContext> = {
+    '/dashboard': { kicker: 'OVERVIEW', name: '系统概览' },
+    '/indexes': { kicker: 'DATA & SCAN', name: '文件索引' },
+    '/scans': { kicker: 'DATA & SCAN', name: '扫描去重' },
+    '/path-match': { kicker: 'FILE TOOLS', name: '路径匹配' },
+    '/rename': { kicker: 'FILE TOOLS', name: '批量重命名' },
+    '/batch': { kicker: 'FILE TOOLS', name: '批量处理' },
+    '/organizer': { kicker: 'FILE TOOLS', name: 'Organizer 整理' },
+    '/workflows': { kicker: 'AUTOMATION', name: '工作流中心' },
+    '/plans': { kicker: 'SAFETY & RUN', name: '执行计划' },
+    '/quarantine': { kicker: 'SAFETY & RUN', name: '文件隔离区' },
+    '/tasks': { kicker: 'SAFETY & RUN', name: '任务中心' },
+    '/audit': { kicker: 'SAFETY & RUN', name: '审计日志' },
+    '/settings': { kicker: 'SYSTEM', name: '系统设置' },
+  };
+
+  return contexts[root] || { kicker: 'CONTROL PLANE', name: 'NAS File Center' };
+};
+
 export const Header: React.FC<Props> = ({
   collapsed,
   onToggle,
@@ -35,7 +71,9 @@ export const Header: React.FC<Props> = ({
 }) => {
   const { user, logout } = useAuth();
   const { mode, setMode } = useTheme();
+  const location = useLocation();
   const [passwordModalOpen, setPasswordModalOpen] = useState(false);
+  const workspace = resolveWorkspaceContext(location.pathname);
 
   const themeMenuItems: MenuProps['items'] = [
     { key: 'light', icon: <SunOutlined />, label: '浅色模式 (Light)', onClick: () => setMode('light') },
@@ -80,8 +118,8 @@ export const Header: React.FC<Props> = ({
           />
 
           <div className="nfc-header-workspace" aria-label="当前工作区">
-            <span className="nfc-header-workspace-kicker">CONTROL PLANE</span>
-            <span className="nfc-header-workspace-name">Local operations</span>
+            <span className="nfc-header-workspace-kicker">{workspace.kicker}</span>
+            <span className="nfc-header-workspace-name">{workspace.name}</span>
           </div>
 
           <div className="nfc-header-status" aria-label="系统安全与任务状态">

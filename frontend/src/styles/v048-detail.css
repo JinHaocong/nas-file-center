@@ -1,0 +1,661 @@
+/* v0.4.8 detail polish
+ * Third-pass micro refinement for the right workspace.
+ * Navigation/sidebar selectors are intentionally forbidden here.
+ */
+
+:root {
+  --nfc-detail-row: 46px;
+  --nfc-detail-soft-fill: color-mix(in srgb, var(--nfc-premium-surface-subtle) 62%, transparent);
+  --nfc-detail-hover-fill: color-mix(in srgb, var(--nfc-premium-accent) 3.6%, transparent);
+  --nfc-detail-focus: 0 0 0 3px var(--nfc-premium-accent-soft);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Route-aware command rail                                                   */
+/* -------------------------------------------------------------------------- */
+
+.nfc-header.nfc-header {
+  min-height: 60px;
+}
+
+.nfc-header-workspace {
+  min-width: 138px;
+  max-width: 220px;
+  padding-right: 16px;
+}
+
+.nfc-header-workspace-kicker {
+  overflow: hidden;
+  color: var(--nfc-premium-subtle);
+  font-size: 8px;
+  font-weight: 720;
+  letter-spacing: 0.13em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nfc-header-workspace-name {
+  overflow: hidden;
+  margin-top: 4px;
+  color: var(--nfc-premium-text);
+  font-size: 11.5px;
+  font-weight: 650;
+  letter-spacing: -0.012em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nfc-header-status {
+  gap: 5px;
+  padding: 3px;
+  border: 1px solid var(--nfc-premium-line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--nfc-premium-surface-strong) 52%, transparent);
+}
+
+.nfc-header-status-badge.ant-tag,
+.nfc-header-status .ant-tag {
+  min-height: 22px;
+  padding: 0 7px;
+  border: 0 !important;
+  border-radius: 999px;
+  background: transparent !important;
+  font-size: 9.5px;
+  font-weight: 650;
+  line-height: 22px;
+}
+
+.nfc-header-status-badge .anticon {
+  margin-inline-end: 4px;
+  font-size: 10px;
+}
+
+.nfc-header-status-badge.is-safe {
+  color: var(--nfc-success) !important;
+  background: color-mix(in srgb, var(--nfc-success-soft) 54%, transparent) !important;
+}
+
+.nfc-header-status-badge.is-warning {
+  color: var(--nfc-warning) !important;
+  background: color-mix(in srgb, var(--nfc-warning-soft) 56%, transparent) !important;
+}
+
+.nfc-header-status-badge.is-danger {
+  color: var(--nfc-danger) !important;
+  background: color-mix(in srgb, var(--nfc-danger-soft) 60%, transparent) !important;
+}
+
+.nfc-header-status-badge.is-processing {
+  color: var(--nfc-premium-accent) !important;
+  background: var(--nfc-premium-accent-soft) !important;
+}
+
+.nfc-header-status-badge.is-idle,
+.nfc-header-status-badge.is-loading {
+  color: var(--nfc-premium-muted) !important;
+}
+
+.nfc-command-button.ant-btn .ant-typography {
+  color: inherit;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.nfc-header-command-cluster {
+  gap: 2px;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Page header precision                                                      */
+/* -------------------------------------------------------------------------- */
+
+.nfc-page-header-copy {
+  max-width: min(920px, 72vw);
+}
+
+.nfc-page-title {
+  text-wrap: balance;
+}
+
+.nfc-page-description {
+  text-wrap: pretty;
+}
+
+.nfc-page-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.nfc-page-actions .nfc-action-bar {
+  justify-content: flex-end;
+}
+
+.nfc-page-actions .ant-btn-link {
+  padding-inline: 8px;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Definition/spec surfaces                                                   */
+/* -------------------------------------------------------------------------- */
+
+.nfc-responsive-descriptions {
+  overflow: hidden;
+  border: 0 !important;
+  border-top: 1px solid var(--nfc-premium-line) !important;
+  border-bottom: 1px solid var(--nfc-premium-line) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.nfc-description-item {
+  min-height: 76px;
+  padding: 14px 16px 13px;
+  border-right: 1px solid var(--nfc-premium-line);
+  border-bottom: 1px solid var(--nfc-premium-line);
+  background: transparent;
+}
+
+.nfc-description-item:nth-child(3n) {
+  border-right: 0;
+}
+
+.nfc-description-item:nth-last-child(-n + 3) {
+  border-bottom: 0;
+}
+
+.nfc-description-item dt {
+  margin-bottom: 7px;
+  color: var(--nfc-premium-subtle);
+  font-size: 9px;
+  font-weight: 680;
+  letter-spacing: 0.025em;
+}
+
+.nfc-description-item dd {
+  color: var(--nfc-premium-muted);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.nfc-description-item dd.nfc-description-emphasis {
+  color: var(--nfc-premium-text);
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -0.018em;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Dense tables / row actions                                                 */
+/* -------------------------------------------------------------------------- */
+
+.nfc-data-panel .ant-table-tbody > tr {
+  height: var(--nfc-detail-row);
+}
+
+.nfc-data-panel .ant-table-tbody > tr > td {
+  transition: background 120ms ease;
+}
+
+.nfc-data-panel .ant-table-tbody > tr:hover > td {
+  background: var(--nfc-detail-hover-fill) !important;
+}
+
+.nfc-data-panel .ant-table-thead > tr > th::before {
+  background-color: var(--nfc-premium-line) !important;
+}
+
+.nfc-row-actions {
+  gap: 1px;
+  opacity: 0.78;
+  transition: opacity 120ms ease;
+}
+
+.nfc-data-panel .ant-table-tbody > tr:hover .nfc-row-actions,
+.nfc-row-actions:focus-within {
+  opacity: 1;
+}
+
+.nfc-row-actions .ant-btn.ant-btn-text {
+  min-width: 30px;
+  min-height: 30px;
+  padding-inline: 7px;
+  border-radius: 8px !important;
+  color: var(--nfc-premium-muted);
+}
+
+.nfc-row-actions .ant-btn.ant-btn-text:hover {
+  color: var(--nfc-premium-text) !important;
+  background: var(--nfc-premium-surface-subtle) !important;
+}
+
+.nfc-data-panel .ant-checkbox-inner {
+  width: 15px;
+  height: 15px;
+  border-color: var(--nfc-premium-line-strong) !important;
+  border-radius: 5px !important;
+}
+
+.nfc-data-panel .ant-table-selection-column {
+  padding-inline: 10px 6px !important;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Status, path and metadata                                                  */
+/* -------------------------------------------------------------------------- */
+
+.nfc-status-badge {
+  gap: 5px;
+  min-height: 22px;
+  padding: 1px 7px;
+  font-size: 9.5px;
+  font-weight: 640;
+}
+
+.nfc-status-dot {
+  width: 5px;
+  height: 5px;
+  box-shadow: none;
+}
+
+.nfc-status-live .nfc-status-dot {
+  position: relative;
+}
+
+.nfc-status-live .nfc-status-dot::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  opacity: 0.28;
+  animation: nfc-detail-live-pulse 1.8s ease-out infinite;
+}
+
+@keyframes nfc-detail-live-pulse {
+  0% { transform: scale(0.7); opacity: 0.34; }
+  75%, 100% { transform: scale(1.45); opacity: 0; }
+}
+
+.nfc-kind-badge,
+.nfc-operation-badge {
+  min-height: 21px;
+  padding: 1px 6px;
+  border: 0 !important;
+  background: var(--nfc-detail-soft-fill);
+  font-size: 9px;
+  font-weight: 650;
+}
+
+.nfc-code-path {
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.nfc-target-path,
+.nfc-plan-item-path-row,
+.nfc-path-match-member {
+  gap: 8px;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Alerts and notices                                                         */
+/* -------------------------------------------------------------------------- */
+
+.nfc-page-alert.ant-alert,
+.nfc-app-shell .ant-alert {
+  padding: 10px 12px;
+  border: 0 !important;
+  border-left: 2px solid var(--nfc-premium-line-strong) !important;
+  border-radius: 0 var(--nfc-premium-radius-md) var(--nfc-premium-radius-md) 0;
+  background: var(--nfc-detail-soft-fill) !important;
+}
+
+.nfc-app-shell .ant-alert-info {
+  border-left-color: color-mix(in srgb, var(--nfc-premium-accent) 52%, var(--nfc-premium-line)) !important;
+}
+
+.nfc-app-shell .ant-alert-success {
+  border-left-color: color-mix(in srgb, var(--nfc-success) 58%, var(--nfc-premium-line)) !important;
+}
+
+.nfc-app-shell .ant-alert-warning {
+  border-left-color: color-mix(in srgb, var(--nfc-warning) 62%, var(--nfc-premium-line)) !important;
+}
+
+.nfc-app-shell .ant-alert-error {
+  border-left-color: color-mix(in srgb, var(--nfc-danger) 64%, var(--nfc-premium-line)) !important;
+}
+
+.nfc-app-shell .ant-alert-message {
+  color: var(--nfc-premium-text);
+  font-size: 11px;
+  font-weight: 640;
+}
+
+.nfc-app-shell .ant-alert-description {
+  color: var(--nfc-premium-muted);
+  font-size: 10.5px;
+  line-height: 1.55;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Empty, loading and pagination                                              */
+/* -------------------------------------------------------------------------- */
+
+.nfc-data-panel .ant-empty {
+  margin-block: 0;
+  padding: 36px 16px;
+}
+
+.nfc-data-panel .ant-empty-image {
+  height: 42px;
+  opacity: 0.58;
+}
+
+.nfc-data-panel .ant-empty-description {
+  color: var(--nfc-premium-subtle);
+  font-size: 10.5px;
+}
+
+.nfc-centered-state {
+  min-height: 260px;
+  color: var(--nfc-premium-muted);
+}
+
+.nfc-app-shell .ant-spin-text {
+  color: var(--nfc-premium-subtle);
+  font-size: 10.5px;
+}
+
+.nfc-mobile-pagination,
+.nfc-data-panel .ant-table-pagination {
+  min-height: 52px;
+  padding: 10px 4px;
+  border-top: 1px solid var(--nfc-premium-line);
+  background: transparent;
+}
+
+.nfc-app-shell .ant-pagination-item,
+.nfc-app-shell .ant-pagination-prev,
+.nfc-app-shell .ant-pagination-next {
+  min-width: 30px;
+  height: 30px;
+  line-height: 30px;
+}
+
+.nfc-app-shell .ant-pagination-item-active {
+  box-shadow: inset 0 0 0 1px var(--nfc-premium-line);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Inputs and selectors                                                       */
+/* -------------------------------------------------------------------------- */
+
+.nfc-app-shell textarea.ant-input {
+  padding: 9px 11px;
+  line-height: 1.55;
+}
+
+.nfc-app-shell .ant-select-selection-placeholder,
+.nfc-app-shell .ant-input::placeholder,
+.nfc-app-shell textarea.ant-input::placeholder {
+  color: color-mix(in srgb, var(--nfc-premium-subtle) 82%, transparent);
+}
+
+.nfc-app-shell .ant-select-selection-item,
+.nfc-app-shell .ant-input,
+.nfc-app-shell .ant-input-number-input {
+  font-size: 11.5px;
+}
+
+.nfc-app-shell .ant-switch {
+  min-width: 34px;
+  box-shadow: none;
+}
+
+.nfc-app-shell .ant-radio-button-wrapper {
+  font-size: 11px;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Modal / drawer polish                                                      */
+/* -------------------------------------------------------------------------- */
+
+.ant-modal .ant-modal-content {
+  padding: 0 !important;
+  overflow: clip;
+}
+
+.ant-modal .ant-modal-header {
+  margin: 0 !important;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--nfc-premium-line) !important;
+}
+
+.ant-modal .ant-modal-title {
+  color: var(--nfc-premium-text);
+  font-size: 13px;
+  font-weight: 670;
+  letter-spacing: -0.012em;
+}
+
+.ant-modal .ant-modal-body {
+  padding: 18px 20px;
+}
+
+.ant-modal .ant-modal-footer {
+  margin: 0 !important;
+  padding: 12px 20px 16px;
+  border-top: 1px solid var(--nfc-premium-line) !important;
+}
+
+.ant-modal .ant-modal-close {
+  top: 12px;
+  inset-inline-end: 12px;
+  border-radius: 8px;
+  color: var(--nfc-premium-subtle);
+}
+
+.ant-modal .ant-modal-close:hover {
+  color: var(--nfc-premium-text);
+  background: var(--nfc-premium-surface-subtle);
+}
+
+.ant-drawer .ant-drawer-header {
+  border-bottom-color: var(--nfc-premium-line);
+}
+
+.ant-drawer .ant-drawer-footer {
+  border-top-color: var(--nfc-premium-line);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Page-specific finishing                                                    */
+/* -------------------------------------------------------------------------- */
+
+.nfc-dashboard-page .nfc-metric-card {
+  min-height: 108px;
+}
+
+.nfc-dashboard-page .nfc-metric-icon {
+  color: color-mix(in srgb, var(--nfc-premium-subtle) 84%, transparent);
+  font-size: 14px;
+}
+
+.nfc-dashboard-page .nfc-metric-value {
+  margin-top: 13px;
+}
+
+.nfc-dashboard-page .nfc-dashboard-main-column > .nfc-data-panel {
+  border-radius: 12px !important;
+}
+
+.nfc-plan-detail-page .nfc-plan-header-meta,
+.nfc-scan-detail-page .nfc-plan-header-meta,
+.nfc-workflow-builder-page .nfc-plan-header-meta {
+  align-items: center;
+  gap: 6px;
+}
+
+.nfc-plan-detail-page .nfc-lifecycle-step-copy strong {
+  color: var(--nfc-premium-text);
+  font-size: 10.5px;
+  font-weight: 650;
+}
+
+.nfc-plan-detail-page .nfc-lifecycle-step-copy span {
+  color: var(--nfc-premium-subtle);
+  font-size: 9.5px;
+}
+
+.nfc-workflow-builder-page .nfc-workflow-step-heading {
+  gap: 10px;
+}
+
+.nfc-workflow-builder-page .nfc-step-index {
+  width: 24px;
+  color: var(--nfc-premium-subtle);
+  font-size: 10px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.nfc-system-controls-page .nfc-settings-grid > .nfc-data-panel > .nfc-data-panel-header {
+  align-items: flex-end;
+}
+
+.nfc-system-controls-page .nfc-settings-grid > .nfc-data-panel .nfc-data-panel-title {
+  font-size: 14px;
+}
+
+.nfc-system-controls-page .nfc-settings-grid > .nfc-data-panel .nfc-data-panel-description {
+  max-width: 58ch;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Responsive                                                                 */
+/* -------------------------------------------------------------------------- */
+
+@media (max-width: 1199px) {
+  .nfc-page-header-copy {
+    max-width: min(760px, 68vw);
+  }
+
+  .nfc-header-workspace {
+    min-width: 120px;
+    max-width: 170px;
+  }
+}
+
+@media (max-width: 767px) {
+  .nfc-header-status {
+    max-width: calc(100vw - 152px);
+    padding: 2px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .nfc-header-status::-webkit-scrollbar {
+    display: none;
+  }
+
+  .nfc-header-status-badge.ant-tag {
+    flex: 0 0 auto;
+  }
+
+  .nfc-page-header-copy {
+    max-width: 100%;
+  }
+
+  .nfc-page-actions {
+    justify-content: flex-start;
+  }
+
+  .nfc-page-actions .nfc-action-bar {
+    justify-content: flex-start;
+  }
+
+  .nfc-responsive-descriptions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .nfc-description-item {
+    min-height: 70px;
+    padding: 12px;
+    border-right: 1px solid var(--nfc-premium-line);
+  }
+
+  .nfc-description-item:nth-child(3n) {
+    border-right: 1px solid var(--nfc-premium-line);
+  }
+
+  .nfc-description-item:nth-child(2n) {
+    border-right: 0;
+  }
+
+  .nfc-description-item:nth-last-child(-n + 3) {
+    border-bottom: 1px solid var(--nfc-premium-line);
+  }
+
+  .nfc-description-item:nth-last-child(-n + 2) {
+    border-bottom: 0;
+  }
+
+  .nfc-row-actions {
+    opacity: 1;
+  }
+
+  .nfc-data-panel .ant-empty {
+    padding-block: 28px;
+  }
+
+  .ant-modal .ant-modal-header {
+    padding: 16px 16px 13px;
+  }
+
+  .ant-modal .ant-modal-body {
+    padding: 16px;
+  }
+
+  .ant-modal .ant-modal-footer {
+    padding: 11px 16px max(14px, env(safe-area-inset-bottom));
+  }
+}
+
+@media (max-width: 420px) {
+  .nfc-responsive-descriptions {
+    grid-template-columns: 1fr;
+  }
+
+  .nfc-description-item,
+  .nfc-description-item:nth-child(2n),
+  .nfc-description-item:nth-child(3n) {
+    min-height: 64px;
+    border-right: 0;
+    border-bottom: 1px solid var(--nfc-premium-line);
+  }
+
+  .nfc-description-item:nth-last-child(-n + 2) {
+    border-bottom: 1px solid var(--nfc-premium-line);
+  }
+
+  .nfc-description-item:last-child {
+    border-bottom: 0;
+  }
+
+  .nfc-header-status {
+    max-width: calc(100vw - 136px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nfc-status-live .nfc-status-dot::after {
+    animation: none;
+  }
+
+  .nfc-row-actions,
+  .nfc-data-panel .ant-table-tbody > tr > td {
+    transition: none;
+  }
+}
