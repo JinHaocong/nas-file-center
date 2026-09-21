@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 import os
 from pathlib import Path
@@ -575,3 +576,122 @@ def test_cross_storage_unlink_v1_purges_only_public_quarantine_payload(tmp_path)
             assert entry.tx_phase == "purged"
     finally:
         shutil.rmtree(q_root, ignore_errors=True)
+
+
+def test_same_device_exdev_falls_back_to_verified_copy_and_restores(tmp_path, monkeypatch):
+    """Bind/NAS mount boundaries may return EXDEV even when st_dev is equal."""
+
+    from app.batch.plans import OperationItem
+    from app.execution.executor import execute_item
+    from app.quarantine import capability as cap
+    from app.quarantine.cross_storage import CROSS_STORAGE_MODE
+    import app.quarantine.engine as compat_engine
+
+    worker_id = "gate6c-worker"
+    _engine, SessionLocal = _session_with_worker(tmp_path, worker_id)
+    data_root = tmp_path / "data"
+    data_root.mkdir()
+    q_root = tmp_path / "quarantine"
+    q_root.mkdir()
+
+    source = data_root / "mount-boundary.bin"
+    payload = b"same-device-exdev-" * 8192
+    source.write_bytes(payload)
+    src_stat = source.stat()
+    target = q_root / "task-1" / "root-0" / "mount-boundary.q-1.bin"
+
+    with SessionLocal() as session:
+        entry = QuarantineEntry(
+            original_path=str(source),
+            quarantine_path=str(target),
+            state="preparing",
+            size=len(payload),
+            content_hash=_sha256(payload),
+            mtime_ns=src_stat.st_mtime_ns,
+            device=src_stat.st_dev,
+            inode=src_stat.st_ino,
+        )
+        session.add(entry)
+        session.commit()
+        entry_id = int(entry.id)
+
+    # Reproduce the production topology: the device-number probe chooses COMPAT,
+    # but the first descriptor-relative hard link crosses a mount boundary.
+    monkeypatch.setattr(
+        cap,
+        "resolve_mutation_capability",
+        lambda *_args, **_kwargs: cap.MutationCapability.COMPAT_TRANSACTIONAL,
+    )
+
+    def _raise_exdev(*_args, **_kwargs):
+        raise OSError(errno.EXDEV, "Invalid cross-device link")
+
+    monkeypatch.setattr(compat_engine.os, "link", _raise_exdev)
+
+    quarantine_item = OperationItem(
+        sequence=1,
+        operation="quarantine",
+        source=source,
+        target=target,
+        expected_size=len(payload),
+        expected_mtime_ns=src_stat.st_mtime_ns,
+        expected_device=src_stat.st_dev,
+        expected_inode=src_stat.st_ino,
+        expected_hash=_sha256(payload),
+    )
+    result = execute_item(
+        quarantine_item,
+        allowed_roots=[data_root],
+        allow_mutation=True,
+        allow_delete=False,
+        quarantine_root=q_root,
+        plan_id="same-device-exdev",
+        session_factory=SessionLocal,
+        worker_id=worker_id,
+        quarantine_entry_id=entry_id,
+    )
+
+    assert result.state == "completed"
+    assert result.quarantine_identity_authoritative is True
+    assert not source.exists()
+    assert target.read_bytes() == payload
+    assert target.stat().st_dev == src_stat.st_dev
+
+    with SessionLocal() as session:
+        entry = session.get(QuarantineEntry, entry_id)
+        assert entry is not None
+        assert entry.state == "active"
+        assert entry.tx_phase == "active"
+        assert entry.transaction_mode == CROSS_STORAGE_MODE
+        assert entry.quarantine_device == target.stat().st_dev
+
+    # Persisted verified-copy mode must also control restore. A fresh st_dev
+    # probe would still say COMPAT on this synthetic same-device topology.
+    restore_item = OperationItem(
+        sequence=1,
+        operation="restore",
+        source=target,
+        target=source,
+        expected_size=len(payload),
+        expected_hash=_sha256(payload),
+    )
+    restored = execute_item(
+        restore_item,
+        allowed_roots=[data_root],
+        allow_mutation=True,
+        allow_delete=False,
+        quarantine_root=q_root,
+        plan_id="same-device-exdev-restore",
+        session_factory=SessionLocal,
+        worker_id=worker_id,
+        quarantine_entry_id=entry_id,
+    )
+
+    assert restored.state == "completed"
+    assert source.read_bytes() == payload
+    assert not target.exists()
+    with SessionLocal() as session:
+        entry = session.get(QuarantineEntry, entry_id)
+        assert entry is not None
+        assert entry.state == "restored"
+        assert entry.tx_phase == "restored"
