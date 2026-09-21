@@ -92,6 +92,11 @@ from app.quarantine.paths import (
     build_restore_rename_path,
     safe_quarantine_hash,
 )
+from app.quarantine.restored_cleanup import (
+    RestoredCleanupPlan,
+    build_restored_cleanup_plan,
+    execute_restored_cleanup_plan,
+)
 from app.batch_utilities.empty_dir_quarantine import safe_open_parent_fd
 from app.quarantine.restore import (
     validate_quarantine_for_restore,
@@ -4421,55 +4426,32 @@ class FileCenterService:
 
         require_absent(entry.quarantine_path, label="quarantine payload")
 
-        tx_entry_root = (
-            Path(self.settings.quarantine_root)
-            / ".tx"
-            / f"entry-{entry.id}"
-        )
-
-        if entry.state == "restored":
-            # Restored means the user-visible file has already left quarantine.
-            # Record cleanup is metadata-only and must never unlink a restored
-            # destination or payload-bearing transactional evidence. Empty
-            # generation directories are harmless and may remain on disk.
-            require_absent(entry.authoritative_anchor_path, label="authoritative anchor")
-            try:
-                root_stat = os.lstat(tx_entry_root)
-            except FileNotFoundError:
-                root_stat = None
-            except OSError as exc:
-                raise StateConflictError(
-                    f"Cannot inspect restored transaction artifacts for quarantine entry #{entry.id}: {exc}"
-                ) from exc
-
-            if root_stat is not None:
-                if stat.S_ISLNK(root_stat.st_mode) or not stat.S_ISDIR(root_stat.st_mode):
-                    raise StateConflictError(
-                        f"Restored transaction namespace is not a safe directory for quarantine entry #{entry.id}"
-                    )
-                for dirpath, dirnames, filenames in os.walk(tx_entry_root, followlinks=False):
-                    for dirname in dirnames:
-                        candidate = Path(dirpath) / dirname
-                        try:
-                            child_stat = os.lstat(candidate)
-                        except OSError as exc:
-                            raise StateConflictError(
-                                f"Cannot inspect restored transaction artifacts for quarantine entry #{entry.id}: {exc}"
-                            ) from exc
-                        if stat.S_ISLNK(child_stat.st_mode):
-                            raise StateConflictError(
-                                f"Restored transaction artifact symlink still exists for quarantine entry #{entry.id}; "
-                                "record deletion is blocked"
-                            )
-                    if filenames:
-                        raise StateConflictError(
-                            f"Restored transaction payload artifacts still exist for quarantine entry #{entry.id}; "
-                            "record deletion is blocked"
-                        )
-
         if entry.state in {"abandoned", "conflict"}:
             require_absent(entry.authoritative_anchor_path, label="authoritative anchor")
+            tx_entry_root = (
+                Path(self.settings.quarantine_root)
+                / ".tx"
+                / f"entry-{entry.id}"
+            )
             require_absent(str(tx_entry_root), label="transaction artifacts")
+
+    def _build_restored_cleanup_plan(self, entry: QuarantineEntry) -> RestoredCleanupPlan:
+        if not self.settings.allow_mutation:
+            raise ValueError("Filesystem mutation is disabled")
+        if not self.settings.allow_delete:
+            raise ValueError("Permanent deletion is disabled")
+        return build_restored_cleanup_plan(
+            entry,
+            allowed_roots=self.settings.allowed_roots,
+            quarantine_root=self.settings.quarantine_root,
+        )
+
+    def _execute_restored_cleanup_plan(self, plan: RestoredCleanupPlan) -> dict[str, int]:
+        return execute_restored_cleanup_plan(
+            plan,
+            allowed_roots=self.settings.allowed_roots,
+            quarantine_root=self.settings.quarantine_root,
+        )
 
     def delete_quarantine_record(
         self,
@@ -4484,14 +4466,49 @@ class FileCenterService:
             raise ValueError("Quarantine record deletion requires confirmation token 'DELETE_RECORD'")
 
         with self.SessionLocal() as session:
-            session.execute(text("BEGIN IMMEDIATE"))
             entry = session.get(QuarantineEntry, entry_id)
             if entry is None:
                 raise KeyError(f"Quarantine entry #{entry_id} not found")
             self._assert_quarantine_record_deletable(entry)
+            state = str(entry.state)
+            original_path = str(entry.original_path)
+            quarantine_path = str(entry.quarantine_path)
+            cleanup_plan = (
+                self._build_restored_cleanup_plan(entry)
+                if state == "restored"
+                else None
+            )
 
-            original_path = entry.original_path
-            quarantine_path = entry.quarantine_path
+        cleanup_result = {
+            "removed_artifact_count": 0,
+            "removed_logical_bytes": 0,
+        }
+        if cleanup_plan is not None:
+            cleanup_result = self._execute_restored_cleanup_plan(cleanup_plan)
+
+        with self.SessionLocal() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            entry = session.get(QuarantineEntry, entry_id)
+            if entry is None:
+                session.rollback()
+                raise KeyError(f"Quarantine entry #{entry_id} not found")
+            if entry.state != state:
+                session.rollback()
+                raise StateConflictError(
+                    f"Quarantine entry #{entry_id} changed state during record cleanup "
+                    f"(expected={state}, actual={entry.state})"
+                )
+            self._assert_quarantine_record_deletable(entry)
+            if state == "restored":
+                # Revalidate the restored target and prove the private namespace
+                # has converged to empty before deleting the authority record.
+                remaining = self._build_restored_cleanup_plan(entry)
+                if remaining.artifacts:
+                    session.rollback()
+                    raise StateConflictError(
+                        f"RESTORED_CLEANUP_INCOMPLETE: entry #{entry_id} still has private artifacts"
+                    )
+
             session.delete(entry)
             session.add(
                 AuditEvent(
@@ -4503,15 +4520,21 @@ class FileCenterService:
                             "quarantine_entry_id": entry_id,
                             "original_path": original_path,
                             "quarantine_path": quarantine_path,
-                            "state": entry.state,
-                            "metadata_only": True,
+                            "state": state,
+                            "metadata_only": state != "restored",
+                            "restored_cleanup": cleanup_result if state == "restored" else None,
                         },
                         ensure_ascii=False,
                     ),
                 )
             )
             session.commit()
-            return {"status": "ok", "deleted": True, "id": entry_id}
+            return {
+                "status": "ok",
+                "deleted": True,
+                "id": entry_id,
+                **cleanup_result,
+            }
 
     def bulk_delete_quarantine_records(
         self,
@@ -4535,7 +4558,6 @@ class FileCenterService:
             raise ValueError("entry_ids must be unique")
 
         with self.SessionLocal() as session:
-            session.execute(text("BEGIN IMMEDIATE"))
             rows = list(
                 session.scalars(
                     select(QuarantineEntry).where(QuarantineEntry.id.in_(normalized_ids))
@@ -4547,21 +4569,73 @@ class FileCenterService:
                 raise KeyError(f"Quarantine entries not found: {missing}")
 
             ordered_rows = [by_id[entry_id] for entry_id in normalized_ids]
+            snapshots: dict[int, dict[str, Any]] = {}
+            cleanup_plans: dict[int, RestoredCleanupPlan] = {}
             for entry in ordered_rows:
                 self._assert_quarantine_record_deletable(entry)
-
-            audit_rows = [
-                {
-                    "id": int(entry.id),
-                    "original_path": entry.original_path,
-                    "quarantine_path": entry.quarantine_path,
-                    "state": entry.state,
+                entry_id = int(entry.id)
+                snapshots[entry_id] = {
+                    "state": str(entry.state),
+                    "original_path": str(entry.original_path),
+                    "quarantine_path": str(entry.quarantine_path),
                 }
-                for entry in ordered_rows
-            ]
+                if entry.state == "restored":
+                    cleanup_plans[entry_id] = self._build_restored_cleanup_plan(entry)
+
+        cleanup_results: dict[int, dict[str, int]] = {}
+        for entry_id in normalized_ids:
+            plan = cleanup_plans.get(entry_id)
+            if plan is None:
+                continue
+            cleanup_results[entry_id] = self._execute_restored_cleanup_plan(plan)
+
+        with self.SessionLocal() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            rows = list(
+                session.scalars(
+                    select(QuarantineEntry).where(QuarantineEntry.id.in_(normalized_ids))
+                ).all()
+            )
+            by_id = {int(row.id): row for row in rows}
+            missing = [entry_id for entry_id in normalized_ids if entry_id not in by_id]
+            if missing:
+                session.rollback()
+                raise KeyError(f"Quarantine entries disappeared during cleanup: {missing}")
+
+            ordered_rows = [by_id[entry_id] for entry_id in normalized_ids]
+            audit_rows: list[dict[str, Any]] = []
+            for entry in ordered_rows:
+                entry_id = int(entry.id)
+                expected = snapshots[entry_id]
+                if entry.state != expected["state"]:
+                    session.rollback()
+                    raise StateConflictError(
+                        f"Quarantine entry #{entry_id} changed state during bulk record cleanup "
+                        f"(expected={expected['state']}, actual={entry.state})"
+                    )
+                self._assert_quarantine_record_deletable(entry)
+                if entry.state == "restored":
+                    remaining = self._build_restored_cleanup_plan(entry)
+                    if remaining.artifacts:
+                        session.rollback()
+                        raise StateConflictError(
+                            f"RESTORED_CLEANUP_INCOMPLETE: entry #{entry_id} still has private artifacts"
+                        )
+
+                audit_rows.append(
+                    {
+                        "id": entry_id,
+                        "original_path": expected["original_path"],
+                        "quarantine_path": expected["quarantine_path"],
+                        "state": expected["state"],
+                        "restored_cleanup": cleanup_results.get(entry_id),
+                    }
+                )
+
             for entry in ordered_rows:
                 session.delete(entry)
 
+            restored_ids = sorted(cleanup_plans)
             session.add(
                 AuditEvent(
                     operation="quarantine.record_bulk_delete",
@@ -4572,7 +4646,16 @@ class FileCenterService:
                             "entry_ids": normalized_ids,
                             "deleted_count": len(normalized_ids),
                             "entries": audit_rows,
-                            "metadata_only": True,
+                            "metadata_only": not bool(restored_ids),
+                            "restored_cleanup_entry_ids": restored_ids,
+                            "removed_artifact_count": sum(
+                                result.get("removed_artifact_count", 0)
+                                for result in cleanup_results.values()
+                            ),
+                            "removed_logical_bytes": sum(
+                                result.get("removed_logical_bytes", 0)
+                                for result in cleanup_results.values()
+                            ),
                         },
                         ensure_ascii=False,
                     ),
@@ -4583,6 +4666,15 @@ class FileCenterService:
                 "status": "ok",
                 "deleted_count": len(normalized_ids),
                 "deleted_ids": normalized_ids,
+                "restored_cleanup_entry_ids": restored_ids,
+                "removed_artifact_count": sum(
+                    result.get("removed_artifact_count", 0)
+                    for result in cleanup_results.values()
+                ),
+                "removed_logical_bytes": sum(
+                    result.get("removed_logical_bytes", 0)
+                    for result in cleanup_results.values()
+                ),
             }
 
     def get_quarantine_retention_policy(self) -> dict:
