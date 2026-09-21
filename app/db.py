@@ -11,7 +11,7 @@ from sqlalchemy import Engine, create_engine, delete, event, func, inspect, sele
 from sqlalchemy.orm import sessionmaker
 
 from app.auth.password import hash_password
-from app.models import Base, FilterPolicy, IndexRoot, IndexedPath, OrganizerProfile, User, Workflow, WorkflowRevision, WorkJob
+from app.models import Base, FilterPolicy, IndexRoot, IndexedPath, MediaAsset, OrganizerProfile, User, Workflow, WorkflowRevision, WorkJob
 
 
 @contextmanager
@@ -100,6 +100,7 @@ def init_db(
             "data_lifecycle_policy",
             "quarantine_entries",
             "operation_journal",
+            "media_assets",
             "filter_policy",
             "workflows",
             "workflow_revisions",
