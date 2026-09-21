@@ -7,9 +7,12 @@ from pathlib import Path
 import stat
 from typing import Sequence
 
+from sqlalchemy.orm import sessionmaker
+
 from app.batch_utilities.empty_dir_quarantine import safe_open_parent_fd
 from app.exceptions import StateConflictError
 from app.models import QuarantineEntry
+from app.tasks.recovery import renew_and_assert_worker_lease
 
 
 _CROSS_STORAGE_MODE = "cross_storage_transactional"
@@ -310,7 +313,12 @@ def execute_restored_cleanup_plan(
     *,
     allowed_roots: Sequence[Path | str],
     quarantine_root: Path | str,
+    session_factory: sessionmaker,
+    worker_id: str,
 ) -> dict[str, int]:
+    if not worker_id or not str(worker_id).strip():
+        raise PermissionError("Restored quarantine cleanup requires active Worker authority")
+
     q_root = _absolute(quarantine_root)
     valid_roots = [_absolute(root) for root in allowed_roots]
     if q_root not in valid_roots:
@@ -320,6 +328,7 @@ def execute_restored_cleanup_plan(
     removed_logical_bytes = 0
 
     for artifact in plan.artifacts:
+        renew_and_assert_worker_lease(session_factory, worker_id)
         _assert_target_still_bound(plan, allowed_roots=allowed_roots)
         if not _is_within(_absolute(artifact.path), plan.tx_entry_root):
             raise StateConflictError(
@@ -354,6 +363,7 @@ def execute_restored_cleanup_plan(
                         raise StateConflictError(
                             f"RESTORED_CLEANUP_ARTIFACT_HASH_CHANGED: private artifact changed before unlink: {artifact.path}"
                         )
+                renew_and_assert_worker_lease(session_factory, worker_id)
                 os.unlink(leaf, dir_fd=parent_fd)
                 os.fsync(parent_fd)
         except FileNotFoundError:
@@ -379,6 +389,7 @@ def execute_restored_cleanup_plan(
                     f"RESTORED_CLEANUP_TX_CHANGED: transaction namespace changed for entry #{plan.entry_id}: {path}"
                 )
             try:
+                renew_and_assert_worker_lease(session_factory, worker_id)
                 os.rmdir(path)
             except FileNotFoundError:
                 continue
