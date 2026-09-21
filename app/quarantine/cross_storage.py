@@ -452,8 +452,11 @@ def execute_cross_storage_quarantine(
             finally:
                 os.close(verify_fd)
 
-        if int(q_stat.st_dev) == device:
-            raise StateConflictError("CROSS_STORAGE_TOPOLOGY_CHANGED: quarantine payload is not on a different filesystem")
+        # EXDEV can occur across distinct Linux mount objects even when both
+        # paths report the same st_dev (for example bind mounts or NAS mount
+        # layouts). The verified-copy protocol is therefore valid for both
+        # different-device and same-device/non-linkable topologies. Do not use
+        # device inequality as an authorization requirement here.
 
         _persist_phase(
             session_factory,
@@ -1006,8 +1009,9 @@ def execute_cross_storage_restore(
             finally:
                 os.close(fd)
 
-        if int(dest_stat.st_dev) == q_device:
-            raise StateConflictError("CROSS_STORAGE_RESTORE_TOPOLOGY_CHANGED: restore target is not cross-storage")
+        # See the quarantine-side note above: persisted CROSS_STORAGE_MODE may
+        # represent an EXDEV mount boundary with identical st_dev values. The
+        # copy/verify authority is sufficient; device inequality is not.
 
         _persist_restore_phase(
             session_factory,

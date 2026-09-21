@@ -516,12 +516,14 @@ def execute_item(
         return _skip(str(exc))
     is_tx_restore = False
     tx_anchor_p = None
+    tx_transaction_mode = None
     if item.operation == "restore" and session_factory and quarantine_entry_id:
         with session_factory() as session:
             from app.models import QuarantineEntry
             qe = session.get(QuarantineEntry, quarantine_entry_id)
             if qe and ((qe.tx_phase not in (None, "legacy")) or (qe.authoritative_anchor_path is not None)):
                 is_tx_restore = True
+                tx_transaction_mode = qe.transaction_mode
                 if qe.authoritative_anchor_path:
                     tx_anchor_p = Path(qe.authoritative_anchor_path)
 
@@ -614,17 +616,28 @@ def execute_item(
                 return _skip("restore target cannot be within quarantine root")
 
             from app.quarantine.capability import MutationCapability, resolve_mutation_capability
+            from app.quarantine.cross_storage import CROSS_STORAGE_MODE
             valid_roots = list(allowed_roots)
             if quarantine_root:
                 valid_roots.append(Path(quarantine_root).resolve())
             probe_src = tx_anchor_p if (is_tx_restore and tx_anchor_p and tx_anchor_p.exists()) else source
-            capability = resolve_mutation_capability(
-                probe_src,
-                target.parent,
-                quarantine_root,
-                valid_roots,
-                negative_probe_cache=negative_capability_probe_cache,
-            )
+
+            # A prior quarantine may have entered the verified-copy transaction
+            # because linkat()/rename crossed a mount boundary even when st_dev
+            # was identical (common with bind mounts / NAS mount layouts).
+            # Persisted transaction mode is stronger evidence than a later
+            # device-number-only capability probe, so restoration must use the
+            # matching copy-verify-publish-retire protocol.
+            if tx_transaction_mode == CROSS_STORAGE_MODE:
+                capability = MutationCapability.CROSS_STORAGE_TRANSACTIONAL
+            else:
+                capability = resolve_mutation_capability(
+                    probe_src,
+                    target.parent,
+                    quarantine_root,
+                    valid_roots,
+                    negative_probe_cache=negative_capability_probe_cache,
+                )
 
             if capability == MutationCapability.CROSS_STORAGE_TRANSACTIONAL:
                 if not session_factory or not worker_id or not quarantine_entry_id:
@@ -811,6 +824,47 @@ def execute_item(
                         allowed_roots=quarantine_valid_roots,
                         quarantine_root=quarantine,
                     )
+                except OSError as exc:
+                    if exc.errno != errno.EXDEV:
+                        return ItemResult("failed", str(exc))
+
+                    # st_dev parity does not prove hard-link/rename reachability
+                    # across Linux mount boundaries. Automatic fallback is safe
+                    # only if COMPAT failed at its first candidate-anchor link:
+                    # tx_phase remains "preparing" and no authoritative anchor
+                    # has been promoted. Later EXDEV failures are deliberately
+                    # left for transactional recovery instead of widening
+                    # mutation authority.
+                    with session_factory() as session:
+                        from app.models import QuarantineEntry
+                        fallback_entry = session.get(QuarantineEntry, quarantine_entry_id)
+                        fallback_safe = bool(
+                            fallback_entry is not None
+                            and fallback_entry.tx_phase == "preparing"
+                            and fallback_entry.authoritative_anchor_path is None
+                        )
+                    if not fallback_safe:
+                        return ItemResult(
+                            "failed",
+                            f"EXDEV_AFTER_TRANSACTION_START: {exc}",
+                        )
+
+                    try:
+                        from app.quarantine.cross_storage import execute_cross_storage_quarantine
+                        execute_cross_storage_quarantine(
+                            session_factory,
+                            quarantine_entry_id,
+                            worker_id,
+                            allowed_roots=list(allowed_roots),
+                            quarantine_root=quarantine,
+                            expected_device=item.expected_device,
+                            expected_inode=item.expected_inode,
+                            expected_size=item.expected_size,
+                            expected_mtime_ns=item.expected_mtime_ns,
+                            expected_hash=item.expected_hash,
+                        )
+                    except Exception as fallback_exc:
+                        return ItemResult("failed", str(fallback_exc))
                 except Exception as exc:
                     return ItemResult("failed", str(exc))
                 return ItemResult(
