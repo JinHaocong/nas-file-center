@@ -498,3 +498,128 @@ def test_abandoned_cross_storage_staging_cleanup_blocks_if_source_changed(mainte
     assert staging.exists()
     with service.SessionLocal() as session:
         assert session.get(QuarantineEntry, entry_id) is not None
+
+def _seed_abandoned_cross_storage_verified_missing_source(
+    service,
+    data: Path,
+    trash: Path,
+    *,
+    name: str,
+    generation: int = 2,
+) -> tuple[int, bytes]:
+    payload = (f"legacy-abandoned-{name}").encode("utf-8")
+    missing_source = data / name
+    quarantine_path = trash / "legacy" / (name + ".q")
+    with service.SessionLocal() as session:
+        row = QuarantineEntry(
+            original_path=str(missing_source),
+            quarantine_path=str(quarantine_path),
+            state="abandoned",
+            tx_phase="cross_staging_verified",
+            transaction_mode="cross_storage_transactional",
+            active_attempt_generation=generation,
+            size=len(payload),
+            content_hash=hashlib.sha256(payload).hexdigest(),
+            mtime_ns=333,
+            device=111,
+            inode=222,
+        )
+        session.add(row)
+        session.commit()
+        return int(row.id), payload
+
+
+def test_abandoned_cross_storage_missing_source_without_tx_namespace_allows_record_cleanup(
+    maintenance_env,
+):
+    env = maintenance_env
+    admin = env["admin"]
+    service = env["service"]
+    data = env["data"]
+    trash = env["trash"]
+
+    entry_id, _payload = _seed_abandoned_cross_storage_verified_missing_source(
+        service,
+        data,
+        trash,
+        name="missing-source-no-tx.bin",
+    )
+
+    response = admin.delete(
+        f"/api/quarantine/{entry_id}/record?confirmation=DELETE_RECORD"
+    )
+    assert response.status_code == 200, response.text
+    assert not (trash / ".tx" / f"entry-{entry_id}").exists()
+
+    with service.SessionLocal() as session:
+        assert session.get(QuarantineEntry, entry_id) is None
+
+
+def test_abandoned_cross_storage_missing_source_with_empty_tx_namespace_allows_record_cleanup(
+    maintenance_env,
+):
+    env = maintenance_env
+    admin = env["admin"]
+    service = env["service"]
+    data = env["data"]
+    trash = env["trash"]
+
+    entry_id, _payload = _seed_abandoned_cross_storage_verified_missing_source(
+        service,
+        data,
+        trash,
+        name="missing-source-empty-tx.bin",
+    )
+    tx_entry_root = trash / ".tx" / f"entry-{entry_id}"
+    (tx_entry_root / "attempt-2").mkdir(parents=True)
+
+    response = admin.delete(
+        f"/api/quarantine/{entry_id}/record?confirmation=DELETE_RECORD"
+    )
+    assert response.status_code == 200, response.text
+    assert not tx_entry_root.exists()
+
+    with service.SessionLocal() as session:
+        assert session.get(QuarantineEntry, entry_id) is None
+
+
+def test_abandoned_cross_storage_missing_source_with_verified_staging_remains_blocked(
+    maintenance_env,
+):
+    env = maintenance_env
+    admin = env["admin"]
+    service = env["service"]
+    data = env["data"]
+    trash = env["trash"]
+
+    entry_id, payload = _seed_abandoned_cross_storage_verified_missing_source(
+        service,
+        data,
+        trash,
+        name="missing-source-with-staging.bin",
+    )
+    attempt = trash / ".tx" / f"entry-{entry_id}" / "attempt-2"
+    attempt.mkdir(parents=True)
+    staging = attempt / "cross-storage-staging"
+    staging.write_bytes(payload)
+    staging_stat = staging.stat()
+
+    with service.SessionLocal() as session:
+        row = session.get(QuarantineEntry, entry_id)
+        assert row is not None
+        row.quarantine_device = int(staging_stat.st_dev)
+        row.quarantine_inode = int(staging_stat.st_ino)
+        row.quarantine_mtime_ns = int(staging_stat.st_mtime_ns)
+        session.commit()
+
+    response = admin.delete(
+        f"/api/quarantine/{entry_id}/record?confirmation=DELETE_RECORD"
+    )
+    assert response.status_code == 409
+    assert "staging may be the only remaining copy" in response.text
+    assert staging.exists()
+    assert staging.read_bytes() == payload
+
+    with service.SessionLocal() as session:
+        assert session.get(QuarantineEntry, entry_id) is not None
+

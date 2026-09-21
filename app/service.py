@@ -4489,9 +4489,56 @@ class FileCenterService:
                 "verified staging cleanup is blocked"
             )
 
+        quarantine_root = Path(self.settings.quarantine_root)
+        generation = int(entry.active_attempt_generation or 0)
+        if generation <= 0:
+            raise StateConflictError(
+                f"Active transaction generation is missing for quarantine entry #{entry.id}"
+            )
+
+        tx_entry_root = quarantine_root / ".tx" / f"entry-{entry.id}"
+        staging_path = tx_entry_root / f"attempt-{generation}" / "cross-storage-staging"
+        if not os.path.lexists(tx_entry_root):
+            return
+
+        allowed_file = staging_path.absolute()
+        directories: list[Path] = []
+        discovered_staging = False
+        for current, dirnames, filenames in os.walk(tx_entry_root, topdown=True, followlinks=False):
+            current_path = Path(current)
+            current_stat = os.lstat(current_path)
+            if not stat.S_ISDIR(current_stat.st_mode) or stat.S_ISLNK(current_stat.st_mode):
+                raise StateConflictError(
+                    f"Transaction artifacts for quarantine entry #{entry.id} contain a non-directory object"
+                )
+            directories.append(current_path)
+
+            for dirname in dirnames:
+                child = current_path / dirname
+                child_stat = os.lstat(child)
+                if not stat.S_ISDIR(child_stat.st_mode) or stat.S_ISLNK(child_stat.st_mode):
+                    raise StateConflictError(
+                        f"Transaction artifacts for quarantine entry #{entry.id} contain a symlink or non-directory object"
+                    )
+
+            for filename in filenames:
+                artifact = (current_path / filename).absolute()
+                if artifact != allowed_file:
+                    raise StateConflictError(
+                        f"Transaction artifacts for quarantine entry #{entry.id} contain unexpected evidence"
+                    )
+                artifact_stat = os.lstat(artifact)
+                if not stat.S_ISREG(artifact_stat.st_mode) or stat.S_ISLNK(artifact_stat.st_mode):
+                    raise StateConflictError(
+                        f"Verified staging artifact is not a regular file for quarantine entry #{entry.id}"
+                    )
+                discovered_staging = True
+
+        if not discovered_staging:
+            return
+
         source_path = Path(entry.original_path)
         valid_roots = list(self.settings.allowed_roots)
-        quarantine_root = Path(self.settings.quarantine_root)
         if quarantine_root not in [Path(root) for root in valid_roots]:
             valid_roots.append(quarantine_root)
 
@@ -4554,53 +4601,6 @@ class FileCenterService:
                 f"Original source is missing for quarantine entry #{entry.id}; "
                 "staging may be the only remaining copy"
             ) from exc
-
-        generation = int(entry.active_attempt_generation or 0)
-        if generation <= 0:
-            raise StateConflictError(
-                f"Active transaction generation is missing for quarantine entry #{entry.id}"
-            )
-
-        tx_entry_root = quarantine_root / ".tx" / f"entry-{entry.id}"
-        staging_path = tx_entry_root / f"attempt-{generation}" / "cross-storage-staging"
-        if not os.path.lexists(tx_entry_root):
-            return
-
-        allowed_file = staging_path.absolute()
-        directories: list[Path] = []
-        discovered_staging = False
-        for current, dirnames, filenames in os.walk(tx_entry_root, topdown=True, followlinks=False):
-            current_path = Path(current)
-            current_stat = os.lstat(current_path)
-            if not stat.S_ISDIR(current_stat.st_mode) or stat.S_ISLNK(current_stat.st_mode):
-                raise StateConflictError(
-                    f"Transaction artifacts for quarantine entry #{entry.id} contain a non-directory object"
-                )
-            directories.append(current_path)
-
-            for dirname in dirnames:
-                child = current_path / dirname
-                child_stat = os.lstat(child)
-                if not stat.S_ISDIR(child_stat.st_mode) or stat.S_ISLNK(child_stat.st_mode):
-                    raise StateConflictError(
-                        f"Transaction artifacts for quarantine entry #{entry.id} contain a symlink or non-directory object"
-                    )
-
-            for filename in filenames:
-                artifact = (current_path / filename).absolute()
-                if artifact != allowed_file:
-                    raise StateConflictError(
-                        f"Transaction artifacts for quarantine entry #{entry.id} contain unexpected evidence"
-                    )
-                artifact_stat = os.lstat(artifact)
-                if not stat.S_ISREG(artifact_stat.st_mode) or stat.S_ISLNK(artifact_stat.st_mode):
-                    raise StateConflictError(
-                        f"Verified staging artifact is not a regular file for quarantine entry #{entry.id}"
-                    )
-                discovered_staging = True
-
-        if not discovered_staging:
-            return
 
         q_device = int(entry.quarantine_device or 0)
         q_inode = int(entry.quarantine_inode or 0)
