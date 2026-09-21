@@ -32,6 +32,10 @@ class RestoredArtifact:
 class RestoredCleanupPlan:
     entry_id: int
     target_path: Path
+    target_device: int
+    target_inode: int
+    target_size: int
+    target_mtime_ns: int
     tx_entry_root: Path
     artifacts: tuple[RestoredArtifact, ...]
 
@@ -165,6 +169,10 @@ def build_restored_cleanup_plan(
         return RestoredCleanupPlan(
             entry_id=int(entry.id),
             target_path=target,
+            target_device=expected_device,
+            target_inode=expected_inode,
+            target_size=expected_size,
+            target_mtime_ns=expected_mtime_ns,
             tx_entry_root=tx_entry_root,
             artifacts=(),
         )
@@ -232,10 +240,44 @@ def build_restored_cleanup_plan(
     return RestoredCleanupPlan(
         entry_id=int(entry.id),
         target_path=target,
+        target_device=expected_device,
+        target_inode=expected_inode,
+        target_size=expected_size,
+        target_mtime_ns=expected_mtime_ns,
         tx_entry_root=tx_entry_root,
         artifacts=tuple(artifacts),
     )
 
+
+
+def _assert_target_still_bound(
+    plan: RestoredCleanupPlan,
+    *,
+    allowed_roots: Sequence[Path | str],
+) -> None:
+    roots = [_absolute(root) for root in allowed_roots]
+    try:
+        with safe_open_parent_fd(plan.target_path, roots) as (parent_fd, leaf):
+            fd = os.open(leaf, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=parent_fd)
+            try:
+                st = os.fstat(fd)
+            finally:
+                os.close(fd)
+    except Exception as exc:
+        raise StateConflictError(
+            f"RESTORED_CLEANUP_TARGET_INVALID: cannot reverify restored target for entry #{plan.entry_id}: {exc}"
+        ) from exc
+
+    if (
+        not stat.S_ISREG(st.st_mode)
+        or int(st.st_dev) != plan.target_device
+        or int(st.st_ino) != plan.target_inode
+        or int(st.st_size) != plan.target_size
+        or _mtime_ns(st) != plan.target_mtime_ns
+    ):
+        raise StateConflictError(
+            f"RESTORED_CLEANUP_TARGET_CHANGED: restored target changed before private artifact cleanup for entry #{plan.entry_id}"
+        )
 
 def execute_restored_cleanup_plan(
     plan: RestoredCleanupPlan,
@@ -252,6 +294,7 @@ def execute_restored_cleanup_plan(
     removed_logical_bytes = 0
 
     for artifact in plan.artifacts:
+        _assert_target_still_bound(plan, allowed_roots=allowed_roots)
         if not _is_within(_absolute(artifact.path), plan.tx_entry_root):
             raise StateConflictError(
                 f"RESTORED_CLEANUP_SCOPE_INVALID: artifact escaped entry namespace: {artifact.path}"
