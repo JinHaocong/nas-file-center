@@ -474,7 +474,13 @@ def evaluate_live_recursive_protection(
         ):
             return LiveRecursiveProtectionEvaluation(
                 safe=False,
-                reason=f"RECURSIVE_PROTECTION_UNSTABLE: protected directory identity changed: {ancestor}",
+                reason=(
+                    "RECURSIVE_PROTECTION_UNSTABLE: protected directory identity changed "
+                    f"after plan freeze: {ancestor} "
+                    f"(frozen dev:ino={int(frozen_sample['device'])}:{int(frozen_sample['inode'])}, "
+                    f"current dev:ino={int(sample.device)}:{int(sample.inode)}); "
+                    "regenerate the plan from a fresh scan"
+                ),
                 current_ancestors=tuple(current),
             )
         if sample.count - 1 < 1:
