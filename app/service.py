@@ -4460,6 +4460,78 @@ class FileCenterService:
                 "status": "purged",
             }
 
+    def _cleanup_empty_terminal_tx_artifacts(self, entry: QuarantineEntry) -> None:
+        """Remove directory-only transaction residue for explicit record cleanup.
+
+        An EXDEV failure can happen before the candidate anchor is created. In
+        that case allocation has already created .tx/entry-N/attempt-M, but the
+        tree contains no owned payload at all. Terminal record deletion may
+        remove only that provably-empty directory tree. Any file, symlink, or
+        non-directory object keeps the existing fail-closed behavior.
+        """
+        if entry.state not in {"abandoned", "conflict"}:
+            return
+
+        tx_entry_root = (
+            Path(self.settings.quarantine_root)
+            / ".tx"
+            / f"entry-{entry.id}"
+        )
+        try:
+            root_stat = os.lstat(tx_entry_root)
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            raise StateConflictError(
+                f"Cannot inspect transaction artifacts for quarantine entry #{entry.id}: {exc}"
+            ) from exc
+
+        if not stat.S_ISDIR(root_stat.st_mode) or stat.S_ISLNK(root_stat.st_mode):
+            raise StateConflictError(
+                f"Transaction artifact root for quarantine entry #{entry.id} is not a plain directory"
+            )
+
+        directories: list[Path] = []
+        for current, dirnames, filenames in os.walk(tx_entry_root, topdown=True, followlinks=False):
+            current_path = Path(current)
+            try:
+                current_stat = os.lstat(current_path)
+            except OSError as exc:
+                raise StateConflictError(
+                    f"Cannot inspect transaction artifacts for quarantine entry #{entry.id}: {exc}"
+                ) from exc
+            if not stat.S_ISDIR(current_stat.st_mode) or stat.S_ISLNK(current_stat.st_mode):
+                raise StateConflictError(
+                    f"Transaction artifacts for quarantine entry #{entry.id} contain a non-directory object"
+                )
+            if filenames:
+                raise StateConflictError(
+                    f"Transaction artifacts for quarantine entry #{entry.id} still contain owned payload/evidence"
+                )
+            for dirname in dirnames:
+                child = current_path / dirname
+                try:
+                    child_stat = os.lstat(child)
+                except OSError as exc:
+                    raise StateConflictError(
+                        f"Cannot inspect transaction artifacts for quarantine entry #{entry.id}: {exc}"
+                    ) from exc
+                if not stat.S_ISDIR(child_stat.st_mode) or stat.S_ISLNK(child_stat.st_mode):
+                    raise StateConflictError(
+                        f"Transaction artifacts for quarantine entry #{entry.id} contain a symlink or non-directory object"
+                    )
+            directories.append(current_path)
+
+        for directory in reversed(directories):
+            try:
+                os.rmdir(directory)
+            except FileNotFoundError:
+                continue
+            except OSError as exc:
+                raise StateConflictError(
+                    f"Transaction artifacts for quarantine entry #{entry.id} are not safely empty: {exc}"
+                ) from exc
+
     def _assert_quarantine_record_deletable(self, entry: QuarantineEntry) -> None:
         deletable_states = {"restored", "purged", "abandoned", "conflict"}
         if entry.state not in deletable_states:
@@ -4559,6 +4631,7 @@ class FileCenterService:
 
             ordered_rows = [by_id[entry_id] for entry_id in normalized_ids]
             for entry in ordered_rows:
+                self._cleanup_empty_terminal_tx_artifacts(entry)
                 self._assert_quarantine_record_deletable(entry)
 
             if not any(entry.state == "restored" for entry in ordered_rows):
@@ -4630,6 +4703,7 @@ class FileCenterService:
             ordered_rows = [by_id[entry_id] for entry_id in normalized_ids]
             audit_rows: list[dict[str, Any]] = []
             for entry in ordered_rows:
+                self._cleanup_empty_terminal_tx_artifacts(entry)
                 self._assert_quarantine_record_deletable(entry)
                 if entry.state == "restored":
                     session.rollback()
@@ -4689,6 +4763,7 @@ class FileCenterService:
             entry = session.get(QuarantineEntry, entry_id)
             if entry is None:
                 raise KeyError(f"Quarantine entry #{entry_id} not found")
+            self._cleanup_empty_terminal_tx_artifacts(entry)
             self._assert_quarantine_record_deletable(entry)
             state = str(entry.state)
 
@@ -4731,6 +4806,7 @@ class FileCenterService:
                 raise KeyError(f"Quarantine entries not found: {missing}")
             ordered_rows = [by_id[entry_id] for entry_id in normalized_ids]
             for entry in ordered_rows:
+                self._cleanup_empty_terminal_tx_artifacts(entry)
                 self._assert_quarantine_record_deletable(entry)
             has_restored = any(entry.state == "restored" for entry in ordered_rows)
 
