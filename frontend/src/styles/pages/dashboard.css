@@ -150,7 +150,6 @@
 
   .nfc-dashboard-page .nfc-dashboard-rail > .nfc-data-panel + .nfc-data-panel {
     padding-left: 0;
-    border-left: 1px solid var(--nfc-v49-line, var(--nfc-border-soft)) !important;
   }
 }
 
@@ -163,10 +162,6 @@
 
   .nfc-dashboard-page .nfc-dashboard-rail {
     grid-template-columns: 1fr;
-  }
-
-  .nfc-dashboard-page .nfc-dashboard-rail > .nfc-data-panel + .nfc-data-panel {
-    border-left: 1px solid var(--nfc-v49-line, var(--nfc-border-soft)) !important;
   }
 
   .nfc-dashboard-page .nfc-dashboard-rail .nfc-data-panel-header {
