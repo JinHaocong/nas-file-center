@@ -864,8 +864,12 @@ def reconcile_cross_storage_quarantine(
             with safe_open_parent_fd(staging_path, valid_roots) as (src_parent_fd, src_leaf):
                 with safe_open_parent_fd(quarantine_path, valid_roots) as (dst_parent_fd, dst_leaf):
                     renew_and_assert_worker_lease(session_factory, worker_id)
-                    rename_noreplace_at(src_parent_fd, src_leaf, dst_parent_fd, dst_leaf)
-                    os.fsync(dst_parent_fd)
+                    _publish_verified_staging_noreplace(
+                        src_parent_fd,
+                        src_leaf,
+                        dst_parent_fd,
+                        dst_leaf,
+                    )
         elif public_exists:
             _verify_public_quarantine(
                 quarantine_path,
@@ -1447,8 +1451,12 @@ def reconcile_cross_storage_restore(
             with safe_open_parent_fd(staging_path, roots) as (src_parent_fd, src_leaf):
                 with safe_open_parent_fd(destination_path, roots) as (dst_parent_fd, dst_leaf):
                     renew_and_assert_worker_lease(session_factory, worker_id)
-                    rename_noreplace_at(src_parent_fd, src_leaf, dst_parent_fd, dst_leaf)
-                    os.fsync(dst_parent_fd)
+                    _publish_verified_staging_noreplace(
+                        src_parent_fd,
+                        src_leaf,
+                        dst_parent_fd,
+                        dst_leaf,
+                    )
         elif dest_exists:
             _verify_restore_destination(
                 destination_path,
