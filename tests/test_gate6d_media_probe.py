@@ -10,7 +10,9 @@ from app.media.probe import (
     VIDEO_EXTENSIONS,
     classify_media_kind,
     parse_ffprobe_payload,
+    probe_image,
     probe_media_file,
+    run_ffprobe,
 )
 
 
@@ -116,3 +118,64 @@ def test_ffprobe_no_video_stream_is_unknown_not_corrupt():
     )
     assert result.integrity_status == "unknown"
     assert result.integrity_reason_code == "VIDEO_STREAM_NOT_FOUND"
+
+
+
+def test_image_runtime_oserror_stays_unknown(monkeypatch, tmp_path: Path):
+    path = tmp_path / "io.jpg"
+    path.write_bytes(b"placeholder")
+
+    def fail_open(*_args, **_kwargs):
+        raise OSError(5, "Input/output error")
+
+    monkeypatch.setattr("app.media.probe.Image.open", fail_open)
+    result = probe_image(path)
+
+    assert result.integrity_status == "unknown"
+    assert result.integrity_reason_code == "IMAGE_DECODE_AMBIGUOUS"
+    assert result.corrupt_sha256 is None
+
+
+class _FakeFfprobeProcess:
+    def __init__(self, stderr: str):
+        self.returncode = 1
+        self._stderr = stderr
+
+    def communicate(self, timeout=None):
+        return "", self._stderr
+
+    def kill(self):
+        return None
+
+    def poll(self):
+        return self.returncode
+
+
+def test_ffprobe_ambiguous_nonzero_exit_stays_unknown(monkeypatch, tmp_path: Path):
+    path = tmp_path / "ambiguous.mp4"
+    path.write_bytes(b"x")
+
+    monkeypatch.setattr(
+        "app.media.probe.subprocess.Popen",
+        lambda *_args, **_kwargs: _FakeFfprobeProcess("Unknown decoder library failure"),
+    )
+    result = run_ffprobe(path)
+
+    assert result.integrity_status == "unknown"
+    assert result.integrity_reason_code == "FFPROBE_FAILED_AMBIGUOUS"
+
+
+def test_ffprobe_explicit_invalid_data_is_corrupt(monkeypatch, tmp_path: Path):
+    path = tmp_path / "invalid.mp4"
+    path.write_bytes(b"x")
+
+    monkeypatch.setattr(
+        "app.media.probe.subprocess.Popen",
+        lambda *_args, **_kwargs: _FakeFfprobeProcess(
+            "Invalid data found when processing input"
+        ),
+    )
+    result = run_ffprobe(path)
+
+    assert result.integrity_status == "corrupt"
+    assert result.integrity_reason_code == "FFPROBE_FAILED"
