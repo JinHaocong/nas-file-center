@@ -11,7 +11,6 @@ from app.media.catalog import MEDIA_EXTENSIONS, validate_media_root_keys
 from app.media.probe import MediaProbeResult, classify_media_kind, probe_media_file
 from app.models import IndexedPath, MediaAsset, WorkJob, utcnow
 from app.tasks.handlers_base import TaskHandler, register_handler
-from app.tasks.recovery import assert_active_worker_lease
 
 
 _ANALYSIS_BATCH_SIZE = 25
@@ -53,6 +52,10 @@ class MediaAnalysisHandler(TaskHandler):
     supports_resume = True
 
     def run(self, job: WorkJob, context, settings) -> None:
+        # Imported lazily to avoid recovery -> handlers -> media.handler -> recovery
+        # during application/test module initialization.
+        from app.tasks.recovery import assert_active_worker_lease
+
         state = json.loads(job.state_json or "{}")
         root_keys_raw = state.get("root_keys")
         if not isinstance(root_keys_raw, list) or not all(isinstance(x, str) for x in root_keys_raw):
