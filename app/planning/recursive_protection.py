@@ -292,6 +292,133 @@ def live_count_recursive_regular_files(
 
 
 @dataclass(frozen=True)
+class RecursiveProtectionBindingChain:
+    """Stable lexical bindings for a nested protected-ancestor chain."""
+
+    stable: bool
+    failure_path: str | None
+    bindings: tuple[tuple[str, int, int], ...]
+
+
+def capture_recursive_directory_binding_chain(
+    directories: tuple[str | Path, ...] | list[str | Path],
+) -> RecursiveProtectionBindingChain:
+    """Capture lightweight no-follow directory bindings after a trusted NFC mutation.
+
+    Unlike the live recursive count reader this does not traverse file payloads.
+    It reopens every exact protected directory twice and performs a final lexical
+    rebind. This is intended only for rolling Execute authority after a completed
+    mutation in the same serialized Worker plan.
+    """
+
+    if not directories:
+        return RecursiveProtectionBindingChain(
+            stable=False,
+            failure_path=None,
+            bindings=(),
+        )
+
+    raw_paths = tuple(str(path) for path in directories)
+    normalized_paths = tuple(os.path.normpath(path) for path in raw_paths)
+    for raw, normalized in zip(raw_paths, normalized_paths):
+        if not os.path.isabs(raw) or raw != normalized:
+            return RecursiveProtectionBindingChain(
+                stable=False,
+                failure_path=raw,
+                bindings=(),
+            )
+
+    if len(set(normalized_paths)) != len(normalized_paths):
+        return RecursiveProtectionBindingChain(
+            stable=False,
+            failure_path=normalized_paths[0],
+            bindings=(),
+        )
+
+    scan_root = normalized_paths[-1]
+    for index, path in enumerate(normalized_paths):
+        try:
+            if os.path.commonpath([path, scan_root]) != scan_root:
+                return RecursiveProtectionBindingChain(
+                    stable=False,
+                    failure_path=path,
+                    bindings=(),
+                )
+            if index + 1 < len(normalized_paths):
+                parent = normalized_paths[index + 1]
+                if os.path.commonpath([path, parent]) != parent:
+                    return RecursiveProtectionBindingChain(
+                        stable=False,
+                        failure_path=path,
+                        bindings=(),
+                    )
+        except ValueError:
+            return RecursiveProtectionBindingChain(
+                stable=False,
+                failure_path=path,
+                bindings=(),
+            )
+
+    def collect() -> tuple[tuple[str, int, int], ...] | None:
+        rows: list[tuple[str, int, int]] = []
+        for path in normalized_paths:
+            opened = _open_absolute_directory_nofollow(path)
+            if opened is None:
+                return None
+            fd, st = opened
+            try:
+                if not stat.S_ISDIR(st.st_mode):
+                    return None
+                rows.append((path, int(st.st_dev), int(st.st_ino)))
+            finally:
+                os.close(fd)
+        return tuple(rows)
+
+    first = collect()
+    if first is None:
+        return RecursiveProtectionBindingChain(
+            stable=False,
+            failure_path=scan_root,
+            bindings=(),
+        )
+    second = collect()
+    if second is None:
+        return RecursiveProtectionBindingChain(
+            stable=False,
+            failure_path=scan_root,
+            bindings=first,
+        )
+    if first != second:
+        mismatch = next(
+            (
+                first_row[0]
+                for first_row, second_row in zip(first, second)
+                if first_row != second_row
+            ),
+            scan_root,
+        )
+        return RecursiveProtectionBindingChain(
+            stable=False,
+            failure_path=mismatch,
+            bindings=second,
+        )
+
+    for path, device, inode in second:
+        if not _directory_binding_matches(path, device, inode):
+            return RecursiveProtectionBindingChain(
+                stable=False,
+                failure_path=path,
+                bindings=second,
+            )
+
+    return RecursiveProtectionBindingChain(
+        stable=True,
+        failure_path=None,
+        bindings=second,
+    )
+
+
+@dataclass(frozen=True)
 class RecursiveProtectionLiveChain:
     """One Execute-time sampled count for an exact nested protected-ancestor chain."""
 
