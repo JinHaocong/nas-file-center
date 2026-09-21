@@ -489,6 +489,35 @@ def _assert_live_media_evidence(
         raise StateConflictError("MEDIA_CORRUPT_DELETE_EVIDENCE_CHANGED: digest")
 
 
+
+def assert_corrupt_delete_frozen_evidence_current(
+    session_factory: sessionmaker,
+    settings: Settings,
+    *,
+    plan_id: int,
+    item_id: int,
+) -> dict[str, Any]:
+    """Read-only evidence fence used by Plan Validate before generic SHA256 freshness."""
+    with session_factory() as session:
+        _plan, row, _plan_meta, item_meta, manifest = _load_frozen_row(
+            session,
+            plan_id=plan_id,
+            item_id=item_id,
+        )
+        _assert_live_media_evidence(
+            session,
+            row=row,
+            item_meta=item_meta,
+            manifest=manifest,
+        )
+    _source_stat_exact(
+        manifest["identity"],
+        allowed_roots=settings.allowed_roots,
+        quarantine_root=settings.quarantine_root,
+    )
+    return manifest
+
+
 def _journal_payload(row: OperationJournal) -> dict[str, Any]:
     try:
         value = json.loads(row.before_json or "{}")
