@@ -52,6 +52,196 @@ def _write_all(fd: int, payload: bytes) -> None:
         view = view[written:]
 
 
+
+_UNSUPPORTED_NOREPLACE_ERRNOS = {
+    errno.ENOSYS,
+    errno.EOPNOTSUPP,
+    getattr(errno, "ENOTSUP", errno.EOPNOTSUPP),
+}
+
+
+def _publish_verified_staging_noreplace(
+    source_parent_fd: int,
+    source_name: str,
+    target_parent_fd: int,
+    target_name: str,
+) -> str:
+    """Publish a verified regular file without ever replacing an existing name.
+
+    Native renameat2(RENAME_NOREPLACE) remains the preferred path. Some NAS/FUSE
+    filesystems reject that Linux-specific flag even though descriptor-relative
+    hard links are available. In that case linkat semantics provide an atomic
+    no-clobber namespace publication: an existing target makes link() fail with
+    EEXIST. The private staging link is retired only after the public directory
+    has been fsynced and both bindings are proven to reference the same inode.
+
+    Returns the publication strategy ("rename_noreplace" or "link_noreplace").
+    """
+    try:
+        rename_noreplace_at(
+            source_parent_fd,
+            source_name,
+            target_parent_fd,
+            target_name,
+        )
+    except NotImplementedError:
+        use_link_fallback = True
+    except OSError as exc:
+        if exc.errno not in _UNSUPPORTED_NOREPLACE_ERRNOS:
+            raise
+        use_link_fallback = True
+    else:
+        os.fsync(target_parent_fd)
+        if source_parent_fd != target_parent_fd:
+            os.fsync(source_parent_fd)
+        return "rename_noreplace"
+
+    before = os.stat(
+        source_name,
+        dir_fd=source_parent_fd,
+        follow_symlinks=False,
+    )
+    if not stat.S_ISREG(before.st_mode):
+        raise StateConflictError(
+            "CROSS_STORAGE_PUBLISH_STAGING_INVALID: staging is not a regular file"
+        )
+
+    try:
+        os.link(
+            source_name,
+            target_name,
+            src_dir_fd=source_parent_fd,
+            dst_dir_fd=target_parent_fd,
+            follow_symlinks=False,
+        )
+    except FileExistsError:
+        raise
+    except OSError as exc:
+        if exc.errno in {errno.EEXIST, errno.ENOTEMPTY}:
+            raise FileExistsError(
+                errno.EEXIST,
+                f"Target path already exists: {target_name}",
+                target_name,
+            ) from exc
+        if exc.errno in {
+            errno.EXDEV,
+            errno.EPERM,
+            errno.ENOSYS,
+            errno.EOPNOTSUPP,
+            getattr(errno, "ENOTSUP", errno.EOPNOTSUPP),
+        }:
+            raise OSError(
+                errno.EOPNOTSUPP,
+                "Atomic no-replace publish is unsupported: renameat2 and linkat are unavailable",
+                source_name,
+            ) from exc
+        raise
+
+    # Durably publish the new namespace binding before retiring staging.
+    os.fsync(target_parent_fd)
+
+    source_after = os.stat(
+        source_name,
+        dir_fd=source_parent_fd,
+        follow_symlinks=False,
+    )
+    target_after = os.stat(
+        target_name,
+        dir_fd=target_parent_fd,
+        follow_symlinks=False,
+    )
+    source_identity = (
+        int(source_after.st_dev),
+        int(source_after.st_ino),
+        int(source_after.st_size),
+        _mtime_ns(source_after),
+    )
+    target_identity = (
+        int(target_after.st_dev),
+        int(target_after.st_ino),
+        int(target_after.st_size),
+        _mtime_ns(target_after),
+    )
+    before_identity = (
+        int(before.st_dev),
+        int(before.st_ino),
+        int(before.st_size),
+        _mtime_ns(before),
+    )
+    if source_identity != before_identity or target_identity != before_identity:
+        raise StateConflictError(
+            "CROSS_STORAGE_PUBLISH_IDENTITY_MISMATCH: link publication did not preserve staging identity"
+        )
+
+    os.unlink(source_name, dir_fd=source_parent_fd)
+    os.fsync(source_parent_fd)
+    return "link_noreplace"
+
+
+def _retire_duplicate_staging_alias(
+    staging_path: Path,
+    public_path: Path,
+    valid_roots: Sequence[Path | str],
+    *,
+    size: int,
+    content_hash: str,
+    device: int,
+    inode: int,
+    mtime_ns: int,
+    failure_prefix: str,
+) -> bool:
+    """Retire a crash-window staging hardlink when both names are the same payload."""
+
+    with safe_open_parent_fd(staging_path, valid_roots) as (st_parent_fd, st_leaf):
+        st_fd = os.open(
+            st_leaf,
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+            dir_fd=st_parent_fd,
+        )
+        try:
+            staging_stat = _qualify_fd_payload(
+                st_fd,
+                size=size,
+                expected_hash=content_hash,
+                expected_device=device,
+                expected_inode=inode,
+                expected_mtime_ns=mtime_ns,
+                failure_prefix=f"{failure_prefix}_STAGING_CHANGED",
+            )
+        finally:
+            os.close(st_fd)
+
+        with safe_open_parent_fd(public_path, valid_roots) as (pub_parent_fd, pub_leaf):
+            pub_fd = os.open(
+                pub_leaf,
+                os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=pub_parent_fd,
+            )
+            try:
+                public_stat = _qualify_fd_payload(
+                    pub_fd,
+                    size=size,
+                    expected_hash=content_hash,
+                    expected_device=device,
+                    expected_inode=inode,
+                    expected_mtime_ns=mtime_ns,
+                    failure_prefix=f"{failure_prefix}_PUBLIC_CHANGED",
+                )
+            finally:
+                os.close(pub_fd)
+
+            if (
+                int(staging_stat.st_dev) != int(public_stat.st_dev)
+                or int(staging_stat.st_ino) != int(public_stat.st_ino)
+            ):
+                return False
+
+            os.unlink(st_leaf, dir_fd=st_parent_fd)
+            os.fsync(st_parent_fd)
+            os.fsync(pub_parent_fd)
+            return True
+
+
 def _source_authority(
     entry: QuarantineEntry,
     *,
@@ -469,8 +659,12 @@ def execute_cross_storage_quarantine(
         with safe_open_parent_fd(staging_path, valid_roots) as (src_parent_fd, src_leaf):
             with safe_open_parent_fd(quarantine_path, valid_roots) as (dst_parent_fd, dst_leaf):
                 renew_and_assert_worker_lease(session_factory, worker_id)
-                rename_noreplace_at(src_parent_fd, src_leaf, dst_parent_fd, dst_leaf)
-                os.fsync(dst_parent_fd)
+                _publish_verified_staging_noreplace(
+                    src_parent_fd,
+                    src_leaf,
+                    dst_parent_fd,
+                    dst_leaf,
+                )
 
         _persist_phase(session_factory, entry_id, worker_id, "cross_public_published")
 
@@ -631,8 +825,26 @@ def reconcile_cross_storage_quarantine(
         public_exists = os.path.lexists(quarantine_path)
 
         if staging_exists and public_exists:
-            _mark_conflict(session_factory, entry_id, worker_id, "CROSS_STORAGE_RECOVERY_AMBIGUOUS_PUBLICATION")
-            raise StateConflictError("CROSS_STORAGE_RECOVERY_AMBIGUOUS_PUBLICATION")
+            retired = _retire_duplicate_staging_alias(
+                staging_path,
+                quarantine_path,
+                valid_roots,
+                size=size,
+                content_hash=content_hash,
+                device=q_device_i,
+                inode=q_inode_i,
+                mtime_ns=q_mtime_i,
+                failure_prefix="CROSS_STORAGE_RECOVERY",
+            )
+            if not retired:
+                _mark_conflict(
+                    session_factory,
+                    entry_id,
+                    worker_id,
+                    "CROSS_STORAGE_RECOVERY_AMBIGUOUS_PUBLICATION",
+                )
+                raise StateConflictError("CROSS_STORAGE_RECOVERY_AMBIGUOUS_PUBLICATION")
+            staging_exists = False
         if staging_exists:
             with safe_open_parent_fd(staging_path, valid_roots) as (parent_fd, leaf):
                 fd = os.open(leaf, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=parent_fd)
@@ -1025,8 +1237,12 @@ def execute_cross_storage_restore(
         with safe_open_parent_fd(staging_path, roots) as (src_parent_fd, src_leaf):
             with safe_open_parent_fd(destination_path, roots) as (dst_parent_fd, dst_leaf):
                 renew_and_assert_worker_lease(session_factory, worker_id)
-                rename_noreplace_at(src_parent_fd, src_leaf, dst_parent_fd, dst_leaf)
-                os.fsync(dst_parent_fd)
+                _publish_verified_staging_noreplace(
+                    src_parent_fd,
+                    src_leaf,
+                    dst_parent_fd,
+                    dst_leaf,
+                )
 
         _persist_restore_phase(
             session_factory,
@@ -1197,13 +1413,26 @@ def reconcile_cross_storage_restore(
         staging_exists = os.path.lexists(staging_path)
         dest_exists = os.path.lexists(destination_path)
         if staging_exists and dest_exists:
-            _mark_conflict(
-                session_factory,
-                entry_id,
-                worker_id,
-                "CROSS_STORAGE_RESTORE_RECOVERY_AMBIGUOUS_PUBLICATION",
+            retired = _retire_duplicate_staging_alias(
+                staging_path,
+                destination_path,
+                roots,
+                size=size,
+                content_hash=content_hash,
+                device=restore_device_i,
+                inode=restore_inode_i,
+                mtime_ns=restore_mtime_i,
+                failure_prefix="CROSS_STORAGE_RESTORE_RECOVERY",
             )
-            raise StateConflictError("CROSS_STORAGE_RESTORE_RECOVERY_AMBIGUOUS_PUBLICATION")
+            if not retired:
+                _mark_conflict(
+                    session_factory,
+                    entry_id,
+                    worker_id,
+                    "CROSS_STORAGE_RESTORE_RECOVERY_AMBIGUOUS_PUBLICATION",
+                )
+                raise StateConflictError("CROSS_STORAGE_RESTORE_RECOVERY_AMBIGUOUS_PUBLICATION")
+            staging_exists = False
 
         if staging_exists:
             _verify_restore_destination(
