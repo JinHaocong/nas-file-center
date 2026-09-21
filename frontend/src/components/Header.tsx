@@ -47,6 +47,7 @@ const resolveWorkspaceContext = (pathname: string): WorkspaceContext => {
   const contexts: Record<string, WorkspaceContext> = {
     '/dashboard': { kicker: 'OVERVIEW', name: '系统概览' },
     '/indexes': { kicker: 'DATA & SCAN', name: '文件索引' },
+    '/media': { kicker: 'DATA & SCAN', name: '媒体完整性' },
     '/scans': { kicker: 'DATA & SCAN', name: '扫描去重' },
     '/path-match': { kicker: 'FILE TOOLS', name: '路径匹配' },
     '/rename': { kicker: 'FILE TOOLS', name: '批量重命名' },
