@@ -619,6 +619,67 @@ def _hash_open_fd(fd: int, *, session_factory: sessionmaker, worker_id: str) -> 
     return digest.hexdigest()
 
 
+def _assert_exact_source_hash_before_intent(
+    manifest: dict[str, Any],
+    *,
+    allowed_roots: Iterable[Path | str],
+    quarantine_root: Path | str,
+    session_factory: sessionmaker,
+    worker_id: str,
+) -> None:
+    """Qualify the exact opened source before durable unlink authority exists.
+
+    This deliberately performs descriptor-bound identity + SHA256 validation
+    before the intent journal is committed. The unlink path re-validates and
+    re-hashes again after intent, so a post-intent race cannot widen authority.
+    """
+    identity = manifest["identity"]
+    raw_path = Path(identity["path"])
+    if raw_path.is_symlink() or os.path.islink(raw_path):
+        raise StateConflictError("MEDIA_CORRUPT_DELETE_SOURCE_SYMLINK")
+
+    source = require_allowed_path(raw_path, allowed_roots)
+    if is_reserved_quarantine_path(source, quarantine_root):
+        raise StateConflictError("MEDIA_CORRUPT_DELETE_SOURCE_IN_QUARANTINE")
+
+    with safe_open_parent_fd(source, allowed_roots) as (parent_fd, leaf):
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            fd = os.open(leaf, flags, dir_fd=parent_fd)
+        except FileNotFoundError as exc:
+            raise StateConflictError("MEDIA_CORRUPT_DELETE_SOURCE_MISSING") from exc
+
+        try:
+            before = os.fstat(fd)
+            if (
+                not stat.S_ISREG(before.st_mode)
+                or int(before.st_dev) != int(identity["device"])
+                or int(before.st_ino) != int(identity["inode"])
+                or int(before.st_size) != int(identity["size"])
+                or _mtime_ns(before) != int(identity["mtime_ns"])
+            ):
+                raise StateConflictError("MEDIA_CORRUPT_DELETE_SOURCE_IDENTITY_CHANGED")
+
+            actual_hash = _hash_open_fd(
+                fd,
+                session_factory=session_factory,
+                worker_id=worker_id,
+            )
+            after = os.fstat(fd)
+            if (
+                not stat.S_ISREG(after.st_mode)
+                or int(after.st_dev) != int(identity["device"])
+                or int(after.st_ino) != int(identity["inode"])
+                or int(after.st_size) != int(identity["size"])
+                or _mtime_ns(after) != int(identity["mtime_ns"])
+            ):
+                raise StateConflictError("MEDIA_CORRUPT_DELETE_SOURCE_CHANGED_DURING_HASH")
+            if actual_hash != identity["sha256"]:
+                raise StateConflictError("MEDIA_CORRUPT_DELETE_SOURCE_HASH_CHANGED")
+        finally:
+            os.close(fd)
+
+
 def _unlink_exact_manifest(
     manifest: dict[str, Any],
     *,
@@ -845,7 +906,8 @@ def execute_corrupt_media_delete(
             return row.reason
 
         intent = _phase_journal(journals, phase="intent", manifest=manifest)
-        if intent is None:
+        needs_intent = intent is None
+        if needs_intent:
             _assert_live_media_evidence(
                 session,
                 row=row,
@@ -857,23 +919,67 @@ def execute_corrupt_media_delete(
                 allowed_roots=allowed_roots,
                 quarantine_root=quarantine_root,
             )
-            session.add(OperationJournal(
-                operation=OPERATION_ID,
-                sequence=int(row.sequence),
-                plan_id=numeric_plan_id,
-                plan_item_id=int(row.id),
-                task_id=task_id,
-                user_id=user_id,
-                before_json=_json({
-                    "phase": "intent",
-                    "manifest": manifest,
-                }),
-                after_json="{}",
-                metadata_before_json=_json(manifest["identity"]),
-                metadata_after_json="{}",
-                created_at=now,
-            ))
         session.commit()
+
+    if needs_intent:
+        # Architecture freeze requires the exact opened regular file to pass
+        # the frozen SHA256 check before durable unlink intent exists.
+        _assert_exact_source_hash_before_intent(
+            manifest,
+            allowed_roots=allowed_roots,
+            quarantine_root=quarantine_root,
+            session_factory=session_factory,
+            worker_id=worker_id,
+        )
+
+        with session_factory() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            now = utcnow()
+            assert_active_worker_lease(session, worker_id, now=now)
+            _plan, row, plan_meta, item_meta, frozen_manifest = _load_frozen_row(
+                session,
+                plan_id=numeric_plan_id,
+                item_id=manifest["item_id"],
+            )
+            if frozen_manifest != manifest:
+                raise StateConflictError(
+                    "MEDIA_CORRUPT_DELETE_AUTHORITY_CHANGED: intent manifest"
+                )
+            task_id, user_id = _task_user_authority(plan_meta, item_meta)
+            journals = _journals(session, int(row.id))
+            if _phase_journal(journals, phase="terminal", manifest=manifest) is not None:
+                raise StateConflictError(
+                    "MEDIA_CORRUPT_DELETE_AUTHORITY_CHANGED: terminal appeared before intent"
+                )
+            if _phase_journal(journals, phase="intent", manifest=manifest) is None:
+                _assert_live_media_evidence(
+                    session,
+                    row=row,
+                    item_meta=item_meta,
+                    manifest=manifest,
+                )
+                _source_stat_exact(
+                    manifest["identity"],
+                    allowed_roots=allowed_roots,
+                    quarantine_root=quarantine_root,
+                )
+                session.add(OperationJournal(
+                    operation=OPERATION_ID,
+                    sequence=int(row.sequence),
+                    plan_id=numeric_plan_id,
+                    plan_item_id=int(row.id),
+                    task_id=task_id,
+                    user_id=user_id,
+                    before_json=_json({
+                        "phase": "intent",
+                        "manifest": manifest,
+                    }),
+                    after_json="{}",
+                    metadata_before_json=_json(manifest["identity"]),
+                    metadata_after_json="{}",
+                    created_at=now,
+                ))
+            session.commit()
 
     terminal_result = _unlink_exact_manifest(
         manifest,
