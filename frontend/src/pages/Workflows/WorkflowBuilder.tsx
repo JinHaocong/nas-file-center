@@ -466,7 +466,9 @@ export const WorkflowBuilderPage: React.FC = () => {
         )}
       </div>
 
-      <DataPanel
+      <div className="nfc-workflow-editor-layout">
+        <aside className="nfc-workflow-definition-rail">
+          <DataPanel
         title="基础信息与执行模式"
         description="模式切换会重置为对应模式的标准拓扑，并需要保存为新的 revision。"
         className="nfc-complex-form-panel"
@@ -531,9 +533,11 @@ export const WorkflowBuilderPage: React.FC = () => {
             </Radio.Group>
           </Form.Item>
         </Form>
-      </DataPanel>
+          </DataPanel>
+        </aside>
 
-      <DataPanel
+        <main className="nfc-workflow-pipeline-canvas">
+          <DataPanel
         title="流水线执行步骤"
         description="步骤严格自上而下线性执行；Preview 使用已保存 revision 作为权威定义。"
       >
@@ -543,7 +547,9 @@ export const WorkflowBuilderPage: React.FC = () => {
           readOnly={!canEdit}
           onChange={handleStepChange}
         />
-      </DataPanel>
+          </DataPanel>
+        </main>
+      </div>
 
       {!isNew &&
         workflow &&
