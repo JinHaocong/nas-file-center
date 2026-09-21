@@ -105,10 +105,17 @@ def test_executor_allows_quarantine_root_outside_allowed_roots_and_routes_cross_
         lambda *_args, **_kwargs: cap.MutationCapability.CROSS_STORAGE_TRANSACTIONAL,
     )
     calls = []
+
+    def fake_cross_storage(*args, **kwargs):
+        calls.append((args, kwargs))
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(source.read_bytes())
+        source.unlink()
+
     monkeypatch.setattr(
         cross,
         "execute_cross_storage_quarantine",
-        lambda *args, **kwargs: calls.append((args, kwargs)),
+        fake_cross_storage,
     )
 
     target = q_root / "task-1" / "root-0" / "x.q-1.bin"
@@ -828,3 +835,120 @@ def test_cross_storage_restore_publish_falls_back_to_linkat_when_rename_noreplac
         assert entry is not None
         assert entry.state == "restored"
         assert entry.tx_phase == "restored"
+
+
+def test_executor_never_reports_completed_when_quarantine_backend_leaves_source(tmp_path, monkeypatch):
+    from app.batch.plans import OperationItem
+    from app.execution.executor import execute_item
+    from app.quarantine import capability as cap
+    import app.quarantine.cross_storage as cross
+
+    data_root = tmp_path / "data"
+    data_root.mkdir()
+    q_root = tmp_path / "quarantine"
+    q_root.mkdir()
+    source = data_root / "source-still-visible.bin"
+    payload = b"source-retirement-postcondition"
+    source.write_bytes(payload)
+    st = source.stat()
+    target = q_root / "task-1" / "root-0" / "source-still-visible.q.bin"
+
+    monkeypatch.setattr(
+        cap,
+        "resolve_mutation_capability",
+        lambda *_args, **_kwargs: cap.MutationCapability.CROSS_STORAGE_TRANSACTIONAL,
+    )
+
+    def fake_copy_only(*_args, **_kwargs):
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(payload)
+
+    monkeypatch.setattr(cross, "execute_cross_storage_quarantine", fake_copy_only)
+
+    result = execute_item(
+        OperationItem(
+            sequence=1,
+            operation="quarantine",
+            source=source,
+            target=target,
+            expected_size=len(payload),
+            expected_mtime_ns=st.st_mtime_ns,
+            expected_device=st.st_dev,
+            expected_inode=st.st_ino,
+            expected_hash=_sha256(payload),
+        ),
+        allowed_roots=[data_root],
+        allow_mutation=True,
+        allow_delete=False,
+        quarantine_root=q_root,
+        plan_id="source-postcondition",
+        session_factory=object(),
+        worker_id="worker",
+        quarantine_entry_id=1,
+    )
+
+    assert result.state == "failed"
+    assert "QUARANTINE_SOURCE_RETIREMENT_UNCONFIRMED" in result.reason
+    assert source.read_bytes() == payload
+    assert target.read_bytes() == payload
+
+
+def test_cross_storage_does_not_finalize_active_until_source_name_is_absent(
+    tmp_path, monkeypatch
+):
+    from app.exceptions import StateConflictError
+    import app.quarantine.cross_storage as cross
+
+    worker_id = "gate6c-worker"
+    _engine, SessionLocal = _session_with_worker(tmp_path, worker_id)
+    data_root = tmp_path / "data"
+    data_root.mkdir()
+    q_root = tmp_path / "quarantine"
+    q_root.mkdir()
+
+    source = data_root / "retirement.bin"
+    payload = b"retirement-must-be-visible-" * 4096
+    source.write_bytes(payload)
+    st = source.stat()
+    target = q_root / "task-1" / "root-0" / "retirement.q.bin"
+
+    with SessionLocal() as session:
+        entry = QuarantineEntry(
+            original_path=str(source),
+            quarantine_path=str(target),
+            state="preparing",
+            size=len(payload),
+            content_hash=_sha256(payload),
+            mtime_ns=st.st_mtime_ns,
+            device=st.st_dev,
+            inode=st.st_ino,
+        )
+        session.add(entry)
+        session.commit()
+        entry_id = int(entry.id)
+
+    real_unlink = cross.os.unlink
+
+    def fake_source_unlink(path, *args, dir_fd=None, **kwargs):
+        if str(path) == source.name:
+            return None
+        return real_unlink(path, *args, dir_fd=dir_fd, **kwargs)
+
+    monkeypatch.setattr(cross.os, "unlink", fake_source_unlink)
+
+    with pytest.raises(StateConflictError, match="SOURCE_UNLINK_NOT_VISIBLE"):
+        cross.execute_cross_storage_quarantine(
+            SessionLocal,
+            entry_id,
+            worker_id,
+            allowed_roots=[data_root],
+            quarantine_root=q_root,
+        )
+
+    assert source.read_bytes() == payload
+    assert target.read_bytes() == payload
+    with SessionLocal() as session:
+        entry = session.get(QuarantineEntry, entry_id)
+        assert entry is not None
+        assert entry.state != "active"
+        assert entry.tx_phase == "cross_source_unlink_authorized"

@@ -500,7 +500,29 @@ def _verify_and_unlink_source(
             os.unlink(leaf, dir_fd=parent_fd)
             os.fsync(parent_fd)
         finally:
+            # Some NAS/FUSE layers defer namespace retirement until the last
+            # open handle is closed. The success postcondition must therefore
+            # be checked only after this authority fd is released.
             os.close(fd)
+
+        try:
+            visible = os.stat(leaf, dir_fd=parent_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return
+
+        if (
+            stat.S_ISREG(visible.st_mode)
+            and int(visible.st_dev) == device
+            and int(visible.st_ino) == inode
+        ):
+            raise StateConflictError(
+                "CROSS_STORAGE_SOURCE_UNLINK_NOT_VISIBLE: source pathname still "
+                "resolves to the frozen file after unlink"
+            )
+        raise StateConflictError(
+            "CROSS_STORAGE_SOURCE_REPLACEMENT_DETECTED: source pathname was "
+            "repopulated after unlink; replacement preserved"
+        )
 
 
 def execute_cross_storage_quarantine(

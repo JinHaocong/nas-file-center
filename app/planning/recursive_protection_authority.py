@@ -5,7 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
-from typing import Sequence
+from typing import Mapping, Sequence
 
 from app.planning import recursive_protection
 from app.planning.dedupe_engine import (
@@ -379,6 +379,7 @@ def evaluate_live_recursive_protection(
     quarantine_root: Path | str | None,
     snapshot_cache: dict[str, recursive_protection.RecursiveProtectionSnapshot] | None = None,
     execute_count_only: bool = False,
+    expected_directory_identities: Mapping[str, tuple[int, int]] | None = None,
 ) -> LiveRecursiveProtectionEvaluation:
     """Re-evaluate frozen recursive Last-File authority against current live state.
 
@@ -468,16 +469,40 @@ def evaluate_live_recursive_protection(
                 reason=f"RECURSIVE_PROTECTION_UNSTABLE: {ancestor}",
                 current_ancestors=tuple(current),
             )
+        expected_device = int(frozen_sample["device"])
+        expected_inode = int(frozen_sample["inode"])
+        expected_label = "frozen"
+        if expected_directory_identities is not None and ancestor in expected_directory_identities:
+            runtime_identity = expected_directory_identities[ancestor]
+            if (
+                not isinstance(runtime_identity, tuple)
+                or len(runtime_identity) != 2
+                or type(runtime_identity[0]) is not int
+                or type(runtime_identity[1]) is not int
+                or runtime_identity[0] <= 0
+                or runtime_identity[1] <= 0
+            ):
+                return LiveRecursiveProtectionEvaluation(
+                    safe=False,
+                    reason=(
+                        "RECURSIVE_PROTECTION_UNSTABLE: invalid trusted runtime directory "
+                        f"binding for {ancestor}"
+                    ),
+                    current_ancestors=tuple(current),
+                )
+            expected_device, expected_inode = runtime_identity
+            expected_label = "runtime"
+
         if (
-            int(sample.device) != int(frozen_sample["device"])
-            or int(sample.inode) != int(frozen_sample["inode"])
+            int(sample.device) != expected_device
+            or int(sample.inode) != expected_inode
         ):
             return LiveRecursiveProtectionEvaluation(
                 safe=False,
                 reason=(
                     "RECURSIVE_PROTECTION_UNSTABLE: protected directory identity changed "
                     f"after plan freeze: {ancestor} "
-                    f"(frozen dev:ino={int(frozen_sample['device'])}:{int(frozen_sample['inode'])}, "
+                    f"({expected_label} dev:ino={expected_device}:{expected_inode}, "
                     f"current dev:ino={int(sample.device)}:{int(sample.inode)}); "
                     "regenerate the plan from a fresh scan"
                 ),
