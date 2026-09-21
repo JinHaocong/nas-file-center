@@ -2361,7 +2361,6 @@ class BatchPlanExecuteHandler(TaskHandler):
             if not isinstance(raw_bindings, dict):
                 return {}, "RECURSIVE_PROTECTION_UNSTABLE: runtime binding authority is malformed"
 
-            items_by_id = {int(candidate.id): candidate for candidate in all_items}
             expected: dict[str, tuple[int, int]] = {}
             verified_predecessors: dict[int, bool] = {}
 
@@ -2395,9 +2394,10 @@ class BatchPlanExecuteHandler(TaskHandler):
                             f"binding provenance for {ancestor}"
                         )
 
-                    predecessor = items_by_id.get(after_item_id)
+                    predecessor = session.get(BatchPlanItem, after_item_id)
                     if (
                         predecessor is None
+                        or int(predecessor.plan_id) != int(plan_id)
                         or int(predecessor.sequence) != after_sequence
                         or predecessor.operation != "quarantine"
                         or predecessor.state != "completed"
