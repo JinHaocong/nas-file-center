@@ -1,3 +1,5 @@
+import hashlib
+import os
 from pathlib import Path
 
 import pytest
@@ -58,6 +60,59 @@ def _seed(service, data: Path, trash: Path, *, state: str, name: str) -> int:
         session.commit()
         return int(row.id)
 
+
+
+def _seed_restored_with_artifacts(
+    service,
+    data: Path,
+    trash: Path,
+    *,
+    name: str,
+    mode: str = "compat_transactional",
+    artifact_names: tuple[str, ...] = ("anchor", "captured_source", "captured_quarantine_view"),
+) -> tuple[int, Path, Path]:
+    target = data / name
+    payload = (f"restored-payload-{name}").encode("utf-8")
+    target.write_bytes(payload)
+    target_stat = os.lstat(target)
+    content_hash = hashlib.sha256(payload).hexdigest()
+
+    with service.SessionLocal() as session:
+        row = QuarantineEntry(
+            original_path=str(target),
+            quarantine_path=str(trash / (name + ".q")),
+            state="restored",
+            tx_phase="restored",
+            transaction_mode=mode,
+            size=len(payload),
+            content_hash=content_hash,
+            mtime_ns=int(target_stat.st_mtime_ns),
+            device=int(target_stat.st_dev),
+            inode=int(target_stat.st_ino),
+            restore_target_path=str(target),
+            restore_device=int(target_stat.st_dev),
+            restore_inode=int(target_stat.st_ino),
+            restore_mtime_ns=int(target_stat.st_mtime_ns),
+        )
+        session.add(row)
+        session.commit()
+        entry_id = int(row.id)
+
+    attempt = trash / ".tx" / f"entry-{entry_id}" / "attempt-1"
+    attempt.mkdir(parents=True)
+
+    if mode == "cross_storage_transactional":
+        for artifact_name in artifact_names:
+            (attempt / artifact_name).write_bytes(payload)
+    else:
+        for artifact_name in artifact_names:
+            os.link(target, attempt / artifact_name)
+        with service.SessionLocal() as session:
+            row = session.get(QuarantineEntry, entry_id)
+            row.authoritative_anchor_path = str(attempt / "anchor")
+            session.commit()
+
+    return entry_id, target, attempt
 
 def test_terminal_record_cleanup_accepts_abandoned_and_conflict(maintenance_env):
     env = maintenance_env
