@@ -361,3 +361,25 @@ def test_restored_cleanup_blocks_unknown_private_artifact(maintenance_env):
         job = session.get(WorkJob, job_id)
         assert job is not None
         assert job.status == "failed"
+
+
+def test_abandoned_record_cleanup_removes_empty_transaction_residue(maintenance_env):
+    env = maintenance_env
+    admin = env["admin"]
+    service = env["service"]
+    data = env["data"]
+    trash = env["trash"]
+
+    entry_id = _seed(service, data, trash, state="abandoned", name="abandoned-empty-tx")
+    tx_entry_root = trash / ".tx" / f"entry-{entry_id}"
+    (tx_entry_root / "attempt-1").mkdir(parents=True)
+    (tx_entry_root / "attempt-2" / "nested").mkdir(parents=True)
+
+    response = admin.delete(
+        f"/api/quarantine/{entry_id}/record?confirmation=DELETE_RECORD"
+    )
+    assert response.status_code == 200
+    assert not tx_entry_root.exists()
+
+    with service.SessionLocal() as session:
+        assert session.get(QuarantineEntry, entry_id) is None
