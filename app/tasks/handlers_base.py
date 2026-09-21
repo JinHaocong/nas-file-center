@@ -2334,6 +2334,187 @@ class BatchPlanExecuteHandler(TaskHandler):
 
             return True
 
+        def _trusted_recursive_runtime_identities(
+            item_meta: BatchPlanItem,
+        ) -> tuple[dict[str, tuple[int, int]], str | None]:
+            """Resolve only runtime bindings proven by an earlier completed item."""
+
+            try:
+                item_metadata = json.loads(item_meta.metadata_json or "{}")
+            except Exception:
+                return {}, "RECURSIVE_PROTECTION_UNSTABLE: malformed item metadata"
+            if not isinstance(item_metadata, dict):
+                return {}, "RECURSIVE_PROTECTION_UNSTABLE: item metadata is not an object"
+            authority = item_metadata.get("recursive_protection")
+            if not isinstance(authority, dict):
+                return {}, None
+            ancestors = authority.get("protected_ancestors")
+            if not isinstance(ancestors, list) or not all(isinstance(path, str) for path in ancestors):
+                return {}, "RECURSIVE_PROTECTION_UNSTABLE: protected ancestor authority is malformed"
+
+            execution_meta = plan_meta.get("execution")
+            if not isinstance(execution_meta, dict):
+                return {}, None
+            raw_bindings = execution_meta.get("recursive_runtime_bindings")
+            if raw_bindings is None:
+                return {}, None
+            if not isinstance(raw_bindings, dict):
+                return {}, "RECURSIVE_PROTECTION_UNSTABLE: runtime binding authority is malformed"
+
+            items_by_id = {int(candidate.id): candidate for candidate in all_items}
+            expected: dict[str, tuple[int, int]] = {}
+            verified_predecessors: dict[int, bool] = {}
+
+            with context.SessionLocal() as session:
+                for ancestor in ancestors:
+                    raw = raw_bindings.get(ancestor)
+                    if raw is None:
+                        continue
+                    if not isinstance(raw, dict):
+                        return {}, (
+                            "RECURSIVE_PROTECTION_UNSTABLE: malformed runtime directory "
+                            f"binding for {ancestor}"
+                        )
+                    device = raw.get("device")
+                    inode = raw.get("inode")
+                    after_sequence = raw.get("after_sequence")
+                    after_item_id = raw.get("after_item_id")
+                    if (
+                        type(device) is not int
+                        or type(inode) is not int
+                        or type(after_sequence) is not int
+                        or type(after_item_id) is not int
+                        or device <= 0
+                        or inode <= 0
+                        or after_sequence <= 0
+                        or after_item_id <= 0
+                        or after_sequence >= int(item_meta.sequence)
+                    ):
+                        return {}, (
+                            "RECURSIVE_PROTECTION_UNSTABLE: invalid runtime directory "
+                            f"binding provenance for {ancestor}"
+                        )
+
+                    predecessor = items_by_id.get(after_item_id)
+                    if (
+                        predecessor is None
+                        or int(predecessor.sequence) != after_sequence
+                        or predecessor.operation != "quarantine"
+                        or predecessor.state != "completed"
+                    ):
+                        return {}, (
+                            "RECURSIVE_PROTECTION_UNSTABLE: runtime directory binding "
+                            f"for {ancestor} is not backed by a completed predecessor"
+                        )
+
+                    try:
+                        predecessor_metadata = json.loads(predecessor.metadata_json or "{}")
+                    except Exception:
+                        predecessor_metadata = None
+                    predecessor_authority = (
+                        predecessor_metadata.get("recursive_protection")
+                        if isinstance(predecessor_metadata, dict)
+                        else None
+                    )
+                    predecessor_ancestors = (
+                        predecessor_authority.get("protected_ancestors")
+                        if isinstance(predecessor_authority, dict)
+                        else None
+                    )
+                    if (
+                        not isinstance(predecessor_ancestors, list)
+                        or ancestor not in predecessor_ancestors
+                    ):
+                        return {}, (
+                            "RECURSIVE_PROTECTION_UNSTABLE: runtime directory binding "
+                            f"for {ancestor} is outside predecessor authority"
+                        )
+
+                    predecessor_source = Path(predecessor.source_path)
+                    ancestor_path = Path(ancestor)
+                    try:
+                        if not predecessor_source.is_relative_to(ancestor_path):
+                            return {}, (
+                                "RECURSIVE_PROTECTION_UNSTABLE: completed predecessor "
+                                f"does not mutate protected ancestor {ancestor}"
+                            )
+                    except ValueError:
+                        return {}, (
+                            "RECURSIVE_PROTECTION_UNSTABLE: runtime directory binding "
+                            f"scope mismatch for {ancestor}"
+                        )
+
+                    if os.path.lexists(predecessor.source_path):
+                        return {}, (
+                            "RECURSIVE_PROTECTION_UNSTABLE: completed predecessor source "
+                            f"still exists: {predecessor.source_path}"
+                        )
+
+                    if after_item_id not in verified_predecessors:
+                        qentry = session.scalar(
+                            select(QuarantineEntry).where(
+                                QuarantineEntry.plan_item_id == after_item_id
+                            )
+                        )
+                        verified_predecessors[after_item_id] = bool(
+                            qentry is not None
+                            and qentry.state == "active"
+                            and qentry.quarantine_path
+                            and os.path.lexists(qentry.quarantine_path)
+                        )
+                    if not verified_predecessors[after_item_id]:
+                        return {}, (
+                            "RECURSIVE_PROTECTION_UNSTABLE: completed predecessor lacks "
+                            "an active quarantine payload"
+                        )
+
+                    expected[ancestor] = (device, inode)
+
+            return expected, None
+
+        def _capture_recursive_runtime_bindings(
+            item_meta: BatchPlanItem,
+        ) -> tuple[dict[str, dict[str, int]] | None, str | None]:
+            try:
+                item_metadata = json.loads(item_meta.metadata_json or "{}")
+            except Exception:
+                return None, "malformed recursive item metadata after mutation"
+            authority = (
+                item_metadata.get("recursive_protection")
+                if isinstance(item_metadata, dict)
+                else None
+            )
+            ancestors = (
+                authority.get("protected_ancestors")
+                if isinstance(authority, dict)
+                else None
+            )
+            if not isinstance(ancestors, list) or not all(
+                isinstance(path, str) for path in ancestors
+            ):
+                return None, None
+
+            from app.planning.recursive_protection import (
+                capture_recursive_directory_binding_chain,
+            )
+
+            captured = capture_recursive_directory_binding_chain(ancestors)
+            if not captured.stable:
+                return None, (
+                    "RECURSIVE_PROTECTION_RUNTIME_REBIND_UNSTABLE: "
+                    f"{captured.failure_path or authority.get('scan_root_path')}"
+                )
+
+            return {
+                path: {
+                    "device": int(device),
+                    "inode": int(inode),
+                    "after_sequence": int(item_meta.sequence),
+                    "after_item_id": int(item_meta.id),
+                }
+                for path, device, inode in captured.bindings
+            }, None
+
         # Worker Preflight Check: Verify freshness of unexecuted items before first mutation
         unexecuted_items = [
             it for it in all_items
@@ -2441,6 +2622,8 @@ class BatchPlanExecuteHandler(TaskHandler):
 
         # 3. Item-by-item 3-phase execution
         for item_meta in all_items:
+            fail_closed_stop_after_item = False
+
             # Check current status in DB before starting Phase 1
             if item_meta.id in reconciled_failed_item_ids:
                 continue
@@ -3132,18 +3315,27 @@ class BatchPlanExecuteHandler(TaskHandler):
                         evaluate_live_recursive_protection,
                     )
 
-                    recursive_evaluation = evaluate_live_recursive_protection(
-                        item_meta.metadata_json or "{}",
-                        expected_source_path=item_meta.source_path,
-                        allowed_roots=settings.allowed_roots,
-                        quarantine_root=settings.quarantine_root,
-                        execute_count_only=True,
+                    runtime_identities, runtime_identity_error = (
+                        _trusted_recursive_runtime_identities(item_meta)
                     )
-                    if not recursive_evaluation.safe:
+                    if runtime_identity_error is not None:
+                        recursive_evaluation = None
+                        recursive_reason = runtime_identity_error
+                    else:
+                        recursive_evaluation = evaluate_live_recursive_protection(
+                            item_meta.metadata_json or "{}",
+                            expected_source_path=item_meta.source_path,
+                            allowed_roots=settings.allowed_roots,
+                            quarantine_root=settings.quarantine_root,
+                            execute_count_only=True,
+                            expected_directory_identities=runtime_identities,
+                        )
                         recursive_reason = (
                             recursive_evaluation.reason
                             or "RECURSIVE_PROTECTION_UNSTABLE"
                         )
+
+                    if recursive_evaluation is None or not recursive_evaluation.safe:
                         with context.SessionLocal() as session:
                             session.execute(text("BEGIN IMMEDIATE"))
                             now = utcnow()
@@ -3245,6 +3437,34 @@ class BatchPlanExecuteHandler(TaskHandler):
                     "failed",
                     f"Filesystem operation failed: {exc}",
                 )
+
+            recursive_runtime_capture: dict[str, dict[str, int]] | None = None
+            recursive_runtime_capture_error: str | None = None
+
+            if result.state == "completed" and item_meta.operation == "quarantine":
+                source_still_exists = os.path.lexists(src_p)
+                quarantine_missing = (
+                    result.result_path is None
+                    or not os.path.lexists(result.result_path)
+                )
+                if source_still_exists or quarantine_missing:
+                    details = []
+                    if source_still_exists:
+                        details.append("source pathname still exists")
+                    if quarantine_missing:
+                        details.append("quarantine payload is missing")
+                    result = ItemResult(
+                        "failed",
+                        "QUARANTINE_SOURCE_RETIREMENT_UNCONFIRMED: " + "; ".join(details),
+                        result.result_path,
+                        quarantine_identity_authoritative=result.quarantine_identity_authoritative,
+                    )
+                    fail_closed_stop_after_item = True
+                else:
+                    (
+                        recursive_runtime_capture,
+                        recursive_runtime_capture_error,
+                    ) = _capture_recursive_runtime_bindings(item_meta)
 
             after_size = None
             after_mtime_ns = None
@@ -3402,12 +3622,59 @@ class BatchPlanExecuteHandler(TaskHandler):
                                 q_entry.tx_phase = "active"
                             q_entry.updated_at = now
                         else:
-                            if is_tx and (q_entry.state == "conflict" or q_entry.tx_phase == "conflict"):
+                            if result.reason.startswith("QUARANTINE_SOURCE_RETIREMENT_UNCONFIRMED"):
+                                q_entry.state = "conflict"
+                                if is_tx:
+                                    q_entry.tx_phase = "conflict"
+                            elif is_tx and (q_entry.state == "conflict" or q_entry.tx_phase == "conflict"):
                                 pass
                             else:
                                 q_entry.state = "abandoned"
                             q_entry.last_error = result.reason
                             q_entry.updated_at = now
+
+                if recursive_runtime_capture is not None:
+                    plan_row = session.get(BatchPlan, plan_id)
+                    if plan_row is not None:
+                        current_plan_meta = json.loads(plan_row.metadata_json or "{}")
+                        if not isinstance(current_plan_meta, dict):
+                            current_plan_meta = {}
+                        runtime_exec_meta = current_plan_meta.setdefault("execution", {})
+                        if not isinstance(runtime_exec_meta, dict):
+                            runtime_exec_meta = {}
+                            current_plan_meta["execution"] = runtime_exec_meta
+                        runtime_bindings = runtime_exec_meta.setdefault(
+                            "recursive_runtime_bindings",
+                            {},
+                        )
+                        if not isinstance(runtime_bindings, dict):
+                            runtime_bindings = {}
+                            runtime_exec_meta["recursive_runtime_bindings"] = runtime_bindings
+                        runtime_bindings.update(recursive_runtime_capture)
+                        runtime_exec_meta.pop("recursive_runtime_binding_error", None)
+                        plan_row.metadata_json = json.dumps(
+                            current_plan_meta,
+                            ensure_ascii=False,
+                        )
+                        plan_meta = current_plan_meta
+                elif recursive_runtime_capture_error is not None:
+                    plan_row = session.get(BatchPlan, plan_id)
+                    if plan_row is not None:
+                        current_plan_meta = json.loads(plan_row.metadata_json or "{}")
+                        if not isinstance(current_plan_meta, dict):
+                            current_plan_meta = {}
+                        runtime_exec_meta = current_plan_meta.setdefault("execution", {})
+                        if not isinstance(runtime_exec_meta, dict):
+                            runtime_exec_meta = {}
+                            current_plan_meta["execution"] = runtime_exec_meta
+                        runtime_exec_meta["recursive_runtime_binding_error"] = (
+                            recursive_runtime_capture_error
+                        )
+                        plan_row.metadata_json = json.dumps(
+                            current_plan_meta,
+                            ensure_ascii=False,
+                        )
+                        plan_meta = current_plan_meta
 
                 if q_restore_entry_id is not None:
                     q_entry = session.get(QuarantineEntry, q_restore_entry_id)
@@ -3696,6 +3963,8 @@ class BatchPlanExecuteHandler(TaskHandler):
                 time.sleep(mtime_delay)
 
             completed_or_skipped += 1
+            if fail_closed_stop_after_item:
+                break
 
         # 4. Post-Loop Plan Status Finalization
         with context.SessionLocal() as session:
