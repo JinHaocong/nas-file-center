@@ -80,12 +80,24 @@ export const quarantineApi = {
     api.post<QuarantineBulkPlanResponse>('/api/quarantine/bulk-plan', payload),
 
   deleteRecord: (id: number) =>
-    api.delete<{ status: string; deleted: boolean; id: number }>(
-      `/api/quarantine/${id}/record?confirmation=DELETE_RECORD`
-    ),
+    api.delete<{
+      status: string;
+      deleted?: boolean;
+      id?: number;
+      work_job_id?: number;
+      requested_count?: number;
+      entry_ids?: number[];
+    }>(`/api/quarantine/${id}/record?confirmation=DELETE_RECORD`),
 
   bulkDeleteRecords: (entryIds: number[]) =>
-    api.post<{ status: string; deleted_count: number; deleted_ids: number[] }>(
+    api.post<{
+      status: string;
+      deleted_count?: number;
+      deleted_ids?: number[];
+      work_job_id?: number;
+      requested_count?: number;
+      entry_ids?: number[];
+    }>(
       '/api/quarantine/records/bulk-delete',
       { entry_ids: entryIds, confirmation: 'DELETE_RECORDS' }
     ),
