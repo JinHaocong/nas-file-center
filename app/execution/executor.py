@@ -829,10 +829,26 @@ def execute_item(
                         return ItemResult("failed", str(exc))
 
                     # st_dev parity does not prove hard-link/rename reachability
-                    # across Linux mount boundaries. If COMPAT discovers EXDEV
-                    # at the first candidate-anchor link, no source mutation has
-                    # happened yet, so safely fall back to Gate6-C's verified
-                    # copy transaction instead of leaving a partial plan.
+                    # across Linux mount boundaries. Automatic fallback is safe
+                    # only if COMPAT failed at its first candidate-anchor link:
+                    # tx_phase remains "preparing" and no authoritative anchor
+                    # has been promoted. Later EXDEV failures are deliberately
+                    # left for transactional recovery instead of widening
+                    # mutation authority.
+                    with session_factory() as session:
+                        from app.models import QuarantineEntry
+                        fallback_entry = session.get(QuarantineEntry, quarantine_entry_id)
+                        fallback_safe = bool(
+                            fallback_entry is not None
+                            and fallback_entry.tx_phase == "preparing"
+                            and fallback_entry.authoritative_anchor_path is None
+                        )
+                    if not fallback_safe:
+                        return ItemResult(
+                            "failed",
+                            f"EXDEV_AFTER_TRANSACTION_START: {exc}",
+                        )
+
                     try:
                         from app.quarantine.cross_storage import execute_cross_storage_quarantine
                         execute_cross_storage_quarantine(
