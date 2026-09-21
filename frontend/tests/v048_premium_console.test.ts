@@ -180,6 +180,13 @@ describe('v0.4.9 full workspace overhaul', () => {
     assert.doesNotMatch(css, /\.ant-drawer \.ant-drawer-(?:content|header|body|footer)/);
   });
 
+  test('uses a restrained right-workspace radius hierarchy', () => {
+    const css = read('src/styles/v049-workspace.css');
+    assert.match(css, /--nfc-v49-radius-xl:\s*14px/);
+    assert.match(css, /--nfc-v49-radius-lg:\s*10px/);
+    assert.match(css, /--nfc-v49-radius-md:\s*8px/);
+  });
+
   test('resets global right-workspace gutter and content width', () => {
     const css = read('src/styles/v049-workspace.css');
     assert.match(css, /--nfc-v49-content-max:\s*1480px/);
