@@ -617,12 +617,14 @@ body,
 .nfc-dashboard-page .nfc-dashboard-rail {
   position: sticky;
   top: 78px;
-  gap: 14px;
+  gap: 12px;
 }
 
 .nfc-dashboard-page .nfc-dashboard-rail > .nfc-data-panel {
+  border: 1px solid var(--nfc-v49-line) !important;
   border-radius: var(--nfc-v49-radius-lg) !important;
-  background: var(--nfc-v49-surface) !important;
+  background: color-mix(in srgb, var(--nfc-v49-surface) 76%, transparent) !important;
+  box-shadow: none !important;
 }
 
 .nfc-dashboard-page .nfc-quick-action {
