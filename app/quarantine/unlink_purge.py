@@ -78,6 +78,109 @@ def _allowed_private_names(entry: Any) -> set[str]:
     return {"anchor", "captured_source"}
 
 
+_METADATA_ONLY_ORPHAN_MODE = "cross_storage_missing_payload_v1"
+
+
+def _prove_absent(path: Path, *, label: str) -> str | None:
+    try:
+        os.lstat(path)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        return f"ORPHAN_ABSENCE_UNPROVEN:{label}:{exc.errno}"
+    return f"ORPHAN_PATH_PRESENT:{label}"
+
+
+def _metadata_only_orphan_material(
+    entry: Any,
+    quarantine_root: Path | str,
+) -> tuple[dict[str, str] | None, list[str]]:
+    """Prove the legacy cross-storage row owns no remaining filesystem object.
+
+    This is a metadata-only compatibility authority for historical rows created
+    by early Gate6-C builds. It never infers a replacement payload and never
+    authorizes unlink of another path. The mode is available only when the exact
+    original path, public quarantine view, and the entire selected entry private
+    transaction namespace are all proven absent.
+    """
+
+    blockers: list[str] = []
+    if not _is_cross_storage_entry(entry):
+        return None, ["ORPHAN_MODE_REQUIRES_CROSS_STORAGE"]
+
+    root = _absolute_lexical(quarantine_root)
+    tx_root = root / ".tx"
+    generation = int(entry.active_attempt_generation or 0)
+    tx_entry_root = tx_root / f"entry-{entry.id}"
+    public_view = _absolute_lexical(entry.quarantine_path)
+    original_raw = Path(os.fspath(entry.original_path))
+
+    if not original_raw.is_absolute():
+        blockers.append("ORPHAN_ORIGINAL_PATH_NOT_ABSOLUTE")
+        original = _absolute_lexical(original_raw)
+    else:
+        original = _absolute_lexical(original_raw)
+
+    if generation <= 0:
+        blockers.append("INVALID_ACTIVE_GENERATION")
+    if entry.authoritative_anchor_path:
+        blockers.append("ORPHAN_AUTHORITATIVE_ANCHOR_DECLARED")
+
+    q_device, q_inode, q_mtime = _entry_quarantine_identity(entry)
+    if q_device is None or q_inode is None or q_mtime is None:
+        blockers.append("MISSING_CROSS_STORAGE_QUARANTINE_IDENTITY")
+
+    if root.is_symlink() or tx_root.is_symlink():
+        blockers.append("UNSAFE_QUARANTINE_NAMESPACE")
+
+    if not _is_within(public_view, root):
+        blockers.append("PUBLIC_VIEW_OUTSIDE_QUARANTINE_ROOT")
+    elif _is_within(public_view, tx_root):
+        blockers.append("PUBLIC_VIEW_INSIDE_PRIVATE_NAMESPACE")
+
+    for path, label in (
+        (original, "original_path"),
+        (public_view, "public_view"),
+        (tx_entry_root, "tx_entry_root"),
+    ):
+        blocker = _prove_absent(path, label=label)
+        if blocker is not None:
+            blockers.append(blocker)
+
+    if blockers:
+        return None, blockers
+
+    return (
+        {
+            "mode": _METADATA_ONLY_ORPHAN_MODE,
+            "original_path": str(original),
+            "public_view": str(public_view),
+            "tx_entry_root": str(tx_entry_root),
+        },
+        [],
+    )
+
+
+def _validate_metadata_only_orphan_manifest(
+    entry: Any,
+    quarantine_root: Path | str,
+    manifest: dict[str, Any],
+) -> list[str]:
+    material, blockers = _metadata_only_orphan_material(entry, quarantine_root)
+    if blockers:
+        return blockers
+    if material is None:
+        return ["ORPHAN_AUTHORITY_MISSING"]
+    if manifest.get("metadata_only_orphan") is not True:
+        return ["ORPHAN_MANIFEST_MODE_MISSING"]
+    if manifest.get("orphan_absence") != material:
+        return ["ORPHAN_ABSENCE_AUTHORITY_CHANGED"]
+    owned_paths = manifest.get("owned_paths")
+    if owned_paths != []:
+        return ["ORPHAN_MANIFEST_OWNED_PATHS_INVALID"]
+    return []
+
+
 def _identity_item(role: str, path: Path, entry: Any) -> tuple[dict[str, Any] | None, str | None]:
     if path.is_symlink() or os.path.islink(path):
         return None, f"SYMLINK:{role}"
@@ -162,6 +265,22 @@ def build_unlink_manifest(entry: Any, quarantine_root: Path | str) -> dict[str, 
         add_blocker("PUBLIC_VIEW_OUTSIDE_QUARANTINE_ROOT")
     elif _is_within(public_view, tx_root):
         add_blocker("PUBLIC_VIEW_INSIDE_PRIVATE_NAMESPACE")
+
+    if _is_cross_storage_entry(entry):
+        orphan_material, orphan_blockers = _metadata_only_orphan_material(
+            entry,
+            root,
+        )
+        if orphan_material is not None and not orphan_blockers:
+            return {
+                "purge_semantics": SEMANTICS_VERSION,
+                "selected_entry_id": entry.id,
+                "active_attempt_generation": generation,
+                "metadata_only_orphan": True,
+                "orphan_absence": orphan_material,
+                "owned_paths": [],
+                "blockers": [],
+            }
 
     # Mutation authority is selected-entry pathname scoped. Inspect only the
     # selected entry's current attempt directory so an unknown private object
@@ -248,6 +367,21 @@ def revalidate_unlink_manifest(
         add_blocker("PUBLIC_VIEW_OUTSIDE_QUARANTINE_ROOT")
     elif _is_within(public_view, tx_root):
         add_blocker("PUBLIC_VIEW_INSIDE_PRIVATE_NAMESPACE")
+
+    if manifest.get("metadata_only_orphan") is True:
+        for blocker in _validate_metadata_only_orphan_manifest(
+            entry,
+            root,
+            manifest,
+        ):
+            add_blocker(blocker)
+        return {
+            "valid": not blockers,
+            "purge_semantics": SEMANTICS_VERSION,
+            "selected_entry_id": entry.id,
+            "active_attempt_generation": generation,
+            "blockers": blockers,
+        }
 
     if attempt.exists() and not attempt.is_symlink():
         try:
@@ -397,6 +531,7 @@ def _unlink_frozen_owned_paths(
         "purge_semantics": SEMANTICS_VERSION,
         "removed_count": len(removed_roles),
         "removed_roles": removed_roles,
+        "metadata_only_orphan": manifest.get("metadata_only_orphan") is True,
     }
 
 
@@ -631,6 +766,19 @@ def _validate_purging_authority(
     public_view = expected_paths["public_view"]
     if not _is_within(public_view, root) or _is_within(public_view, tx_root):
         raise StateConflictError("UNLINK_RECOVERY_AUTHORITY_INVALID: public view scope mismatch")
+
+    if manifest.get("metadata_only_orphan") is True:
+        orphan_blockers = _validate_metadata_only_orphan_manifest(
+            entry,
+            root,
+            manifest,
+        )
+        if orphan_blockers:
+            raise StateConflictError(
+                "UNLINK_RECOVERY_AUTHORITY_INVALID: "
+                + ",".join(orphan_blockers)
+            )
+        return ()
 
     if attempt.exists():
         if attempt.is_symlink():
