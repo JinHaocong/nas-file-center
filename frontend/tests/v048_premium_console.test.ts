@@ -241,6 +241,15 @@ describe('v0.4.9 full workspace overhaul', () => {
     assert.match(css, /@media \(max-width: 420px\)/);
   });
 
+
+
+  test('uses distinct width hierarchy for ledgers, detail workspaces and focused tools', () => {
+    const css = read('src/styles/v049-workspace.css');
+    assert.match(css, /\.nfc-indexes-page,[\s\S]*var\(--nfc-v49-content-max\)/);
+    assert.match(css, /\.nfc-plan-detail-page,[\s\S]*1320px/);
+    assert.match(css, /\.nfc-path-match-page,[\s\S]*1180px/);
+  });
+
   test('settings, workflow and dedupe have dedicated composition rather than generic card fallback', () => {
     const css = read('src/styles/v049-workspace.css');
     assert.match(css, /\.nfc-system-controls-page \.nfc-settings-grid/);
