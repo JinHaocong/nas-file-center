@@ -182,7 +182,27 @@ def probe_image(path: Path | str) -> MediaProbeResult:
         return _unknown("image", "IMAGE_SOURCE_UNAVAILABLE", str(exc))
     except Image.DecompressionBombError as exc:
         return _unknown("image", "IMAGE_RESOURCE_LIMIT", str(exc))
-    except (UnidentifiedImageError, OSError, SyntaxError, ValueError) as exc:
+    except UnidentifiedImageError as exc:
+        return _corrupt("image", "IMAGE_DECODE_FAILED", str(exc))
+    except OSError as exc:
+        # Pillow also uses OSError for host/runtime failures (EIO, ESTALE,
+        # descriptor exhaustion, etc.). Only message patterns that identify a
+        # deterministic decoder/container failure are allowed to mint corrupt
+        # deletion authority. System errno or ambiguous decoder failures stay
+        # unknown and therefore cannot be permanently deleted via Gate6-D.
+        lowered = str(exc).lower()
+        deterministic_decode_markers = (
+            "truncated",
+            "broken data stream",
+            "not enough image data",
+            "decoder error",
+            "cannot decode",
+            "invalid image",
+        )
+        if exc.errno is None and any(marker in lowered for marker in deterministic_decode_markers):
+            return _corrupt("image", "IMAGE_DECODE_FAILED", str(exc))
+        return _unknown("image", "IMAGE_DECODE_AMBIGUOUS", str(exc))
+    except (SyntaxError, ValueError) as exc:
         return _corrupt("image", "IMAGE_DECODE_FAILED", str(exc))
 
 
@@ -368,13 +388,42 @@ def run_ffprobe(
         lowered = stderr.lower()
         unavailable_markers = (
             "permission denied",
+            "operation not permitted",
             "no such file",
             "resource temporarily unavailable",
+            "device or resource busy",
             "input/output error",
+            "stale file handle",
+            "too many open files",
+            "cannot allocate memory",
+            "interrupted system call",
+            "timed out",
         )
         if any(marker in lowered for marker in unavailable_markers):
             return _unknown("video", "VIDEO_SOURCE_UNAVAILABLE", stderr.strip() or None)
-        return _corrupt("video", "FFPROBE_FAILED", stderr.strip() or f"ffprobe exit {proc.returncode}")
+
+        deterministic_invalid_data_markers = (
+            "invalid data found when processing input",
+            "moov atom not found",
+            "invalid atom size",
+            "error reading header",
+        )
+        if any(marker in lowered for marker in deterministic_invalid_data_markers):
+            return _corrupt(
+                "video",
+                "FFPROBE_FAILED",
+                stderr.strip() or f"ffprobe exit {proc.returncode}",
+            )
+
+        # A generic non-zero ffprobe exit is not enough evidence to grant
+        # irreversible deletion authority. Unsupported runtime conditions,
+        # transient decoder/library errors and other ambiguous failures remain
+        # unknown unless they match a deterministic invalid-data signature.
+        return _unknown(
+            "video",
+            "FFPROBE_FAILED_AMBIGUOUS",
+            stderr.strip() or f"ffprobe exit {proc.returncode}",
+        )
 
     try:
         payload = json.loads(stdout or "{}")
