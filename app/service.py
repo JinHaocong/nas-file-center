@@ -4254,6 +4254,10 @@ class FileCenterService:
         with self.SessionLocal() as session:
             entry = session.get(QuarantineEntry, entry_id)
             entry.state = "restored"
+            entry.restore_target_path = str(dest)
+            entry.restore_device = int(dest_stat.st_dev)
+            entry.restore_inode = int(dest_stat.st_ino)
+            entry.restore_mtime_ns = int(getattr(dest_stat, "st_mtime_ns", dest_stat.st_mtime * 1e9))
             entry.restored_at = now
             entry.updated_at = now
 
