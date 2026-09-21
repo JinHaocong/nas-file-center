@@ -1,0 +1,653 @@
+/* v0.5.1 product polish
+ * Fine-grained interaction, dense list, tool workspace and overlay refinement.
+ * The approved sidebar remains untouched.
+ */
+
+/* -------------------------------------------------------------------------- */
+/* Shared operational tables / row actions                                   */
+/* -------------------------------------------------------------------------- */
+
+.nfc-indexes-page .ant-table-tbody > tr > td,
+.nfc-scans-page .ant-table-tbody > tr > td,
+.nfc-audit-page .ant-table-tbody > tr > td,
+.nfc-workflows-page .ant-table-tbody > tr > td,
+.nfc-organizer-page .ant-table-tbody > tr > td,
+.nfc-organizer-preview-page .ant-table-tbody > tr > td,
+.nfc-path-match-page .ant-table-tbody > tr > td,
+.nfc-rename-page .ant-table-tbody > tr > td {
+  transition: background 140ms ease, border-color 140ms ease;
+}
+
+.nfc-indexes-page .ant-table-tbody > tr:hover > td,
+.nfc-scans-page .ant-table-tbody > tr:hover > td,
+.nfc-audit-page .ant-table-tbody > tr:hover > td,
+.nfc-workflows-page .ant-table-tbody > tr:hover > td,
+.nfc-organizer-page .ant-table-tbody > tr:hover > td,
+.nfc-organizer-preview-page .ant-table-tbody > tr:hover > td,
+.nfc-path-match-page .ant-table-tbody > tr:hover > td,
+.nfc-rename-page .ant-table-tbody > tr:hover > td {
+  background: color-mix(in srgb, var(--nfc-accent) 3.8%, var(--nfc-ui-panel-bg-strong)) !important;
+}
+
+.nfc-row-actions {
+  gap: 4px;
+  opacity: 0.76;
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.ant-table-row:hover .nfc-row-actions,
+.nfc-row-actions:focus-within {
+  opacity: 1;
+}
+
+.nfc-row-actions .ant-btn {
+  min-height: 30px !important;
+  height: 30px;
+  padding-inline: 9px;
+  border-radius: 8px !important;
+}
+
+.nfc-table-link,
+.nfc-scan-name,
+.nfc-workflow-name,
+.nfc-plan-name {
+  text-underline-offset: 3px;
+  transition: color 140ms ease, opacity 140ms ease;
+}
+
+.nfc-table-link:hover,
+.nfc-scan-name:hover,
+.nfc-workflow-name:hover,
+.nfc-plan-name:hover {
+  color: var(--nfc-accent);
+}
+
+/* Empty / loading states --------------------------------------------------- */
+
+.nfc-app-shell .ant-empty {
+  margin-block: 34px;
+}
+
+.nfc-app-shell .ant-empty-description {
+  color: var(--nfc-text-muted);
+  font-size: 11px;
+}
+
+.nfc-data-panel .ant-table-placeholder > td {
+  padding-block: 30px !important;
+}
+
+.nfc-centered-state,
+.nfc-overlay-loading {
+  min-height: 180px;
+  padding: 28px;
+  display: grid;
+  place-items: center;
+  color: var(--nfc-text-muted);
+}
+
+.nfc-overlay-loading .ant-spin-text {
+  margin-top: 10px;
+  font-size: 10.5px;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Indexes / Scans / Audit / Workflows list                                  */
+/* -------------------------------------------------------------------------- */
+
+.nfc-indexes-page > .nfc-data-panel,
+.nfc-scans-page > .nfc-data-panel,
+.nfc-audit-page > .nfc-data-panel,
+.nfc-workflows-page > .nfc-data-panel {
+  overflow: clip;
+}
+
+.nfc-indexes-page .nfc-data-panel-header,
+.nfc-scans-page .nfc-data-panel-header,
+.nfc-audit-page .nfc-data-panel-header,
+.nfc-workflows-page .nfc-data-panel-header {
+  min-height: 64px;
+}
+
+.nfc-indexes-page .nfc-path-cell,
+.nfc-indexes-page .nfc-index-mobile-path {
+  gap: 8px;
+}
+
+.nfc-indexes-page .nfc-path-cell > .anticon,
+.nfc-indexes-page .nfc-index-mobile-path > .anticon {
+  color: var(--nfc-accent);
+  opacity: 0.72;
+}
+
+.nfc-scans-page .nfc-data-emphasis {
+  font-weight: 700;
+}
+
+.nfc-audit-page .nfc-filter-bar {
+  padding: 10px 12px;
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto;
+  gap: 8px;
+}
+
+.nfc-audit-page .nfc-search-input {
+  width: min(100%, 640px);
+}
+
+.nfc-audit-page .nfc-retention-badge {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  border: 1px solid var(--nfc-border-soft);
+  border-radius: 999px;
+  color: var(--nfc-text-muted);
+  background: var(--nfc-ui-panel-bg-soft);
+  font-size: 10px;
+}
+
+.nfc-workflows-page .nfc-inline-switch {
+  min-height: 34px;
+  padding: 0 9px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--nfc-border-soft);
+  border-radius: 10px;
+  background: var(--nfc-ui-panel-bg-soft);
+  color: var(--nfc-text-muted);
+  font-size: 10px;
+}
+
+.nfc-workflows-page .nfc-workflow-name {
+  font-weight: 650;
+}
+
+/* -------------------------------------------------------------------------- */
+/* File tool workspaces: Batch / PathMatch / Rename                          */
+/* -------------------------------------------------------------------------- */
+
+.nfc-batch-page .nfc-tool-workbench,
+.nfc-path-match-page .nfc-tool-workbench,
+.nfc-rename-page .nfc-tool-workbench {
+  overflow: clip;
+  max-width: 1180px;
+}
+
+.nfc-batch-page .nfc-tool-workbench > .nfc-data-panel-header,
+.nfc-path-match-page .nfc-tool-workbench > .nfc-data-panel-header,
+.nfc-rename-page .nfc-tool-workbench > .nfc-data-panel-header {
+  min-height: 66px;
+  background:
+    radial-gradient(circle at 94% 0%, color-mix(in srgb, var(--nfc-accent) 6%, transparent), transparent 44%),
+    var(--nfc-ui-panel-bg-soft);
+}
+
+.nfc-file-tool-form .ant-form {
+  padding: 18px 20px 0;
+}
+
+.nfc-file-tool-form .ant-form-item {
+  margin-bottom: 18px;
+}
+
+.nfc-file-tool-form .ant-form-item-label > label {
+  font-size: 10.5px;
+  font-weight: 660;
+  color: var(--nfc-text);
+}
+
+.nfc-file-tool-form .nfc-form-grid {
+  gap: 14px;
+}
+
+.nfc-batch-page .nfc-batch-operation-grid {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.nfc-batch-page .nfc-batch-operation-grid .ant-radio-button-wrapper {
+  min-height: 66px;
+  height: auto;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  border: 1px solid var(--nfc-border-soft) !important;
+  border-radius: 12px !important;
+  background: var(--nfc-ui-panel-bg-soft);
+  box-shadow: none !important;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.nfc-batch-page .nfc-batch-operation-grid .ant-radio-button-wrapper::before {
+  display: none;
+}
+
+.nfc-batch-page .nfc-batch-operation-grid .ant-radio-button-wrapper small {
+  margin-top: 3px;
+  color: var(--nfc-text-subtle);
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.nfc-batch-page .nfc-batch-operation-grid .ant-radio-button-wrapper-checked {
+  border-color: color-mix(in srgb, var(--nfc-accent) 32%, var(--nfc-border-soft)) !important;
+  background: color-mix(in srgb, var(--nfc-accent-soft) 58%, var(--nfc-surface-1));
+}
+
+.nfc-file-tool-primary-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  margin-inline: -20px;
+  padding: 12px 20px 14px;
+  border-top: 1px solid var(--nfc-border-soft);
+  background: color-mix(in srgb, var(--nfc-nav-surface) 90%, transparent);
+  backdrop-filter: blur(18px) saturate(125%);
+  -webkit-backdrop-filter: blur(18px) saturate(125%);
+}
+
+.nfc-file-tool-primary-actions .nfc-form-note {
+  margin-left: auto;
+  max-width: 58ch;
+  color: var(--nfc-text-subtle);
+  font-size: 9.5px;
+  line-height: 1.5;
+  text-align: right;
+}
+
+.nfc-file-tool-result-panel {
+  margin-top: 18px;
+  overflow: clip;
+}
+
+.nfc-path-match-page .nfc-path-match-members {
+  display: grid;
+  gap: 6px;
+}
+
+.nfc-path-match-page .nfc-path-match-member {
+  min-height: 42px;
+  padding: 7px 9px;
+  border: 1px solid var(--nfc-border-soft);
+  border-radius: 10px;
+  background: var(--nfc-ui-panel-bg-soft);
+}
+
+.nfc-rename-page .nfc-target-path {
+  min-width: 0;
+}
+
+.nfc-rename-page > .nfc-page-alert {
+  margin: 14px 0 0;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Organizer                                                                  */
+/* -------------------------------------------------------------------------- */
+
+.nfc-organizer-page .nfc-organizer-profile-toolbar,
+.nfc-organizer-preview-page .nfc-organizer-preview-filter {
+  padding: 10px 12px;
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.nfc-organizer-page .nfc-organizer-profile-toolbar .nfc-search-input {
+  width: 100%;
+  max-width: 620px;
+}
+
+.nfc-organizer-preview-page .nfc-organizer-metric-grid {
+  margin-bottom: 16px;
+}
+
+.nfc-organizer-preview-page .nfc-organizer-metric-grid .nfc-metric-card {
+  min-height: 106px;
+}
+
+.nfc-organizer-preview-page > .nfc-complex-form-panel {
+  max-width: 1120px;
+}
+
+.nfc-organizer-preview-page > .nfc-complex-form-panel .ant-form {
+  padding: 16px 18px 4px;
+}
+
+.nfc-organizer-preview-page .nfc-organizer-preview-filter {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+/* -------------------------------------------------------------------------- */
+/* Mobile record cards                                                        */
+/* -------------------------------------------------------------------------- */
+
+.nfc-index-mobile-card,
+.nfc-scan-mobile-card,
+.nfc-audit-mobile-card,
+.nfc-workflow-mobile-card,
+.nfc-organizer-profile-mobile-card,
+.nfc-organizer-proposal-mobile-card,
+.nfc-path-match-mobile-card,
+.nfc-rename-proposal-mobile-card {
+  transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
+}
+
+.nfc-mobile-record-heading {
+  gap: 10px;
+}
+
+.nfc-mobile-record-title {
+  font-weight: 670;
+  line-height: 1.35;
+}
+
+.nfc-mobile-record-facts {
+  margin-top: 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--nfc-border-soft);
+  border-radius: 10px;
+  background: var(--nfc-ui-panel-bg-soft);
+}
+
+.nfc-mobile-record-facts > span {
+  min-width: 0;
+}
+
+.nfc-mobile-record-actions {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--nfc-border-soft);
+}
+
+.nfc-mobile-record-actions .ant-btn {
+  min-height: 36px !important;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Drawers / inspectors                                                       */
+/* -------------------------------------------------------------------------- */
+
+.nfc-overlay-drawer .ant-drawer-content-wrapper {
+  padding: 10px 10px 10px 0;
+  box-shadow: none !important;
+}
+
+.nfc-overlay-drawer .ant-drawer-content {
+  overflow: hidden;
+  border: 1px solid var(--nfc-border-strong);
+  border-radius: 18px 0 0 18px;
+}
+
+.nfc-overlay-drawer .ant-drawer-header {
+  min-height: 72px;
+  padding: 14px 18px;
+  background:
+    radial-gradient(circle at 92% -40%, color-mix(in srgb, var(--nfc-accent) 8%, transparent), transparent 52%),
+    color-mix(in srgb, var(--nfc-nav-surface) 82%, transparent);
+}
+
+.nfc-overlay-drawer .ant-drawer-title {
+  min-width: 0;
+}
+
+.nfc-drawer-title {
+  min-width: 0;
+}
+
+.nfc-drawer-title-kicker {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--nfc-text-subtle);
+  font-size: 8px;
+  font-weight: 720;
+  letter-spacing: .13em;
+  text-transform: uppercase;
+}
+
+.nfc-drawer-title-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--nfc-text);
+  font-size: 13px;
+  font-weight: 680;
+}
+
+.nfc-drawer-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.nfc-overlay-drawer .ant-drawer-body {
+  padding: 16px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--nfc-nav-surface) 40%, transparent), transparent 180px),
+    var(--nfc-v49-canvas);
+}
+
+.nfc-overlay-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.nfc-overlay-section {
+  overflow: clip;
+}
+
+.nfc-overlay-section-header {
+  min-height: 52px;
+  padding: 11px 13px;
+}
+
+.nfc-overlay-section:not(.nfc-overlay-section-flush) > :not(.nfc-overlay-section-header) {
+  padding-inline: 13px;
+}
+
+.nfc-task-detail-drawer .nfc-detail-descriptions,
+.nfc-stale-rebuild-drawer .nfc-detail-descriptions {
+  padding: 8px 12px 12px;
+}
+
+.nfc-revision-drawer .nfc-embedded-table,
+.nfc-operation-journal-drawer .nfc-embedded-table,
+.nfc-stale-rebuild-drawer .nfc-embedded-table {
+  border-radius: 0;
+}
+
+.nfc-revision-mobile-card,
+.nfc-rebuild-mobile-card,
+.nfc-journal-mobile-card {
+  margin: 8px;
+  padding: 11px 12px;
+  border: 1px solid var(--nfc-border-soft);
+  border-radius: 12px;
+  background: var(--nfc-ui-panel-bg-strong);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Modal detail polish                                                        */
+/* -------------------------------------------------------------------------- */
+
+.nfc-index-create-modal .ant-modal-body,
+.nfc-scan-create-modal .ant-modal-body,
+.nfc-organizer-import-modal .ant-modal-body,
+.nfc-audit-detail-modal .ant-modal-body,
+.nfc-definition-modal .ant-modal-body {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--nfc-nav-surface) 42%, transparent), transparent 140px);
+}
+
+.nfc-scan-create-modal .ant-form-item,
+.nfc-index-create-modal .ant-form-item {
+  margin-bottom: 15px;
+}
+
+.nfc-scan-create-modal .nfc-modal-actions {
+  position: sticky;
+  bottom: -18px;
+  margin: 4px -22px -22px;
+  padding: 13px 22px 18px;
+  justify-content: flex-end;
+  border-top: 1px solid var(--nfc-border-soft);
+  background: color-mix(in srgb, var(--nfc-overlay-surface-bg) 94%, transparent);
+  backdrop-filter: blur(16px);
+}
+
+.nfc-audit-detail {
+  display: grid;
+  gap: 8px;
+}
+
+.nfc-audit-detail > div:not(.nfc-audit-json) {
+  min-height: 44px;
+  padding: 9px 11px;
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--nfc-border-soft);
+  border-radius: 10px;
+  background: var(--nfc-ui-panel-bg-soft);
+}
+
+.nfc-audit-detail > div > span:first-child {
+  color: var(--nfc-text-subtle);
+  font-size: 9.5px;
+}
+
+.nfc-audit-json {
+  margin-top: 4px;
+}
+
+.nfc-code-block {
+  border: 1px solid var(--nfc-border-soft);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--nfc-v49-canvas) 80%, var(--nfc-surface-1));
+}
+
+/* -------------------------------------------------------------------------- */
+/* Responsive                                                                 */
+/* -------------------------------------------------------------------------- */
+
+@media (max-width: 900px) {
+  .nfc-batch-page .nfc-batch-operation-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .nfc-organizer-page .nfc-organizer-profile-toolbar {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+}
+
+@media (max-width: 767px) {
+  .nfc-row-actions {
+    opacity: 1;
+  }
+
+  .nfc-file-tool-form .ant-form {
+    padding: 13px 13px 0;
+  }
+
+  .nfc-file-tool-primary-actions {
+    position: static;
+    margin-inline: -13px;
+    padding: 11px 13px 13px;
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .nfc-file-tool-primary-actions .ant-btn {
+    width: 100%;
+    min-height: 42px !important;
+  }
+
+  .nfc-file-tool-primary-actions .nfc-form-note {
+    margin-left: 0;
+    max-width: none;
+    text-align: left;
+  }
+
+  .nfc-batch-page .nfc-batch-operation-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .nfc-audit-page .nfc-filter-bar,
+  .nfc-organizer-page .nfc-organizer-profile-toolbar,
+  .nfc-organizer-preview-page .nfc-organizer-preview-filter {
+    grid-template-columns: 1fr;
+  }
+
+  .nfc-audit-page .nfc-search-input,
+  .nfc-organizer-page .nfc-organizer-profile-toolbar .nfc-search-input {
+    width: 100%;
+    max-width: none;
+  }
+
+  .nfc-organizer-page .nfc-organizer-profile-toolbar .ant-btn {
+    width: 100%;
+  }
+
+  .nfc-overlay-drawer .ant-drawer-content-wrapper {
+    padding: 0;
+  }
+
+  .nfc-overlay-drawer .ant-drawer-content {
+    border-inline: 0;
+    border-bottom: 0;
+    border-radius: 16px 16px 0 0;
+  }
+
+  .nfc-overlay-drawer .ant-drawer-header {
+    min-height: 64px;
+    padding: 12px 14px;
+  }
+
+  .nfc-overlay-drawer .ant-drawer-body {
+    padding: 12px;
+  }
+
+  .nfc-drawer-actions .ant-btn:not(.ant-btn-primary) {
+    display: none;
+  }
+
+  .nfc-audit-detail > div:not(.nfc-audit-json) {
+    grid-template-columns: 1fr;
+    gap: 3px;
+  }
+}
+
+@media (max-width: 420px) {
+  .nfc-batch-page .nfc-batch-operation-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .nfc-batch-page .nfc-batch-operation-grid .ant-radio-button-wrapper {
+    min-height: 58px;
+  }
+}
+
+@media (hover: hover) {
+  .nfc-index-mobile-card:hover,
+  .nfc-scan-mobile-card:hover,
+  .nfc-audit-mobile-card:hover,
+  .nfc-workflow-mobile-card:hover,
+  .nfc-organizer-profile-mobile-card:hover,
+  .nfc-organizer-proposal-mobile-card:hover,
+  .nfc-path-match-mobile-card:hover,
+  .nfc-rename-proposal-mobile-card:hover {
+    transform: translateY(-1px);
+    border-color: color-mix(in srgb, var(--nfc-accent) 18%, var(--nfc-border-soft));
+  }
+}
