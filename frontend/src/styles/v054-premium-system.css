@@ -51,10 +51,7 @@
   padding-bottom: 54px;
 }
 
-.nfc-app-main .nfc-operations-page,
 .nfc-app-main .nfc-dashboard {
-  display: flex;
-  flex-direction: column;
   gap: var(--nfc-v54-section-gap);
 }
 
@@ -950,20 +947,20 @@
 /* Overlay refinement                                                         */
 /* -------------------------------------------------------------------------- */
 .ant-modal .ant-modal-content,
-.ant-drawer .ant-drawer-content {
+.nfc-overlay-drawer .ant-drawer-content {
   border-color: color-mix(in srgb, var(--nfc-border-strong) 88%, transparent) !important;
   border-radius: 15px !important;
 }
 
 .ant-modal .ant-modal-header,
-.ant-drawer .ant-drawer-header {
+.nfc-overlay-drawer .ant-drawer-header {
   min-height: 62px;
   padding: 15px 18px 13px;
   border-bottom-color: var(--nfc-border-soft) !important;
 }
 
 .ant-modal .ant-modal-title,
-.ant-drawer .ant-drawer-title {
+.nfc-overlay-drawer .ant-drawer-title {
   color: var(--nfc-text);
   font-size: 13.5px;
   font-weight: 700;
@@ -971,12 +968,12 @@
 }
 
 .ant-modal .ant-modal-body,
-.ant-drawer .ant-drawer-body {
+.nfc-overlay-drawer .ant-drawer-body {
   scrollbar-gutter: stable;
 }
 
 .ant-modal .ant-modal-footer,
-.ant-drawer .ant-drawer-footer {
+.nfc-overlay-drawer .ant-drawer-footer {
   padding: 12px 18px 14px;
   border-top-color: var(--nfc-border-soft) !important;
 }
