@@ -10,6 +10,7 @@ import './styles/v050-layout.css';
 import './styles/v051-product-polish.css';
 import './styles/v052-final-audit.css';
 import './styles/v053-settings-layout.css';
+import './styles/v054-premium-system.css';
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
