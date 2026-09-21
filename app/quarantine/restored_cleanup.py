@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,6 +17,7 @@ _ALLOWED_RESTORED_PAYLOAD_NAMES = {
     "anchor",
     "captured_source",
     "captured_quarantine_view",
+    "cross-storage-staging",
 }
 
 
@@ -26,6 +28,7 @@ class RestoredArtifact:
     inode: int
     size: int
     mtime_ns: int
+    content_hash: str | None = None
 
 
 @dataclass(frozen=True)
@@ -62,6 +65,24 @@ def _is_within(path: Path, root: Path) -> bool:
         return False
     return True
 
+
+
+def _hash_regular_path(path: Path, *, roots: Sequence[Path | str]) -> str:
+    digest = hashlib.sha256()
+    with safe_open_parent_fd(path, roots) as (parent_fd, leaf):
+        fd = os.open(leaf, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=parent_fd)
+        try:
+            st = os.fstat(fd)
+            if not stat.S_ISREG(st.st_mode):
+                raise StateConflictError(f"RESTORED_CLEANUP_ARTIFACT_INVALID: {path}")
+            while True:
+                chunk = os.read(fd, 8 * 1024 * 1024)
+                if not chunk:
+                    break
+                digest.update(chunk)
+        finally:
+            os.close(fd)
+    return digest.hexdigest()
 
 def _resolve_restored_target(
     entry: QuarantineEntry,
@@ -209,15 +230,19 @@ def build_restored_cleanup_plan(
                     f"RESTORED_CLEANUP_ARTIFACT_INVALID: entry #{entry.id}: {candidate}"
                 )
 
+            artifact_hash: str | None = None
             if entry.transaction_mode == _CROSS_STORAGE_MODE:
-                # A completed cross-storage restore has already retired its
-                # public quarantine payload and should leave only empty attempt
-                # directories. Never guess authority for an unexpected payload.
-                raise StateConflictError(
-                    f"RESTORED_CLEANUP_CROSS_STORAGE_ARTIFACT_PRESENT: entry #{entry.id}: {candidate}"
-                )
-
-            if (
+                expected_hash = str(entry.content_hash or "").lower()
+                if len(expected_hash) != 64 or int(child_stat.st_size) != expected_size:
+                    raise StateConflictError(
+                        f"RESTORED_CLEANUP_CROSS_STORAGE_ARTIFACT_INVALID: entry #{entry.id}: {candidate}"
+                    )
+                artifact_hash = _hash_regular_path(candidate, roots=[q_root])
+                if artifact_hash != expected_hash:
+                    raise StateConflictError(
+                        f"RESTORED_CLEANUP_CROSS_STORAGE_ARTIFACT_HASH_MISMATCH: entry #{entry.id}: {candidate}"
+                    )
+            elif (
                 int(child_stat.st_dev) != expected_device
                 or int(child_stat.st_ino) != expected_inode
                 or int(child_stat.st_size) != expected_size
@@ -234,6 +259,7 @@ def build_restored_cleanup_plan(
                     inode=int(child_stat.st_ino),
                     size=int(child_stat.st_size),
                     mtime_ns=_mtime_ns(child_stat),
+                    content_hash=artifact_hash,
                 )
             )
 
@@ -313,6 +339,21 @@ def execute_restored_cleanup_plan(
                     raise StateConflictError(
                         f"RESTORED_CLEANUP_ARTIFACT_CHANGED: private artifact changed before unlink: {artifact.path}"
                     )
+                if artifact.content_hash is not None:
+                    digest = hashlib.sha256()
+                    fd = os.open(leaf, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=parent_fd)
+                    try:
+                        while True:
+                            chunk = os.read(fd, 8 * 1024 * 1024)
+                            if not chunk:
+                                break
+                            digest.update(chunk)
+                    finally:
+                        os.close(fd)
+                    if digest.hexdigest() != artifact.content_hash:
+                        raise StateConflictError(
+                            f"RESTORED_CLEANUP_ARTIFACT_HASH_CHANGED: private artifact changed before unlink: {artifact.path}"
+                        )
                 os.unlink(leaf, dir_fd=parent_fd)
                 os.fsync(parent_fd)
         except FileNotFoundError:
