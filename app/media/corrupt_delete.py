@@ -108,21 +108,25 @@ def _live_identity_blockers(
     if raw_path.is_symlink() or os.path.islink(raw_path):
         return ["SOURCE_SYMLINK"]
 
+    # Resolve only as a coarse containment check. The authoritative namespace
+    # walk below must use the frozen lexical pathname so a parent component
+    # replaced by a symlink cannot be normalized away before O_NOFOLLOW checks.
     try:
-        source = require_allowed_path(raw_path, settings.allowed_roots)
+        require_allowed_path(raw_path, settings.allowed_roots)
     except Exception:
         return ["SOURCE_OUTSIDE_ALLOWED_ROOTS"]
 
-    if is_reserved_quarantine_path(source, settings.quarantine_root):
+    if is_reserved_quarantine_path(raw_path, settings.quarantine_root):
         blockers.append("SOURCE_IN_QUARANTINE")
 
     try:
-        st = os.lstat(source)
+        with safe_open_parent_fd(raw_path, settings.allowed_roots) as (parent_fd, leaf):
+            st = os.stat(leaf, dir_fd=parent_fd, follow_symlinks=False)
     except FileNotFoundError:
         blockers.append("SOURCE_MISSING")
         return blockers
-    except OSError:
-        blockers.append("SOURCE_UNREADABLE")
+    except (OSError, ValueError):
+        blockers.append("SOURCE_UNSAFE_ANCESTOR")
         return blockers
 
     if stat.S_ISLNK(st.st_mode):
@@ -583,14 +587,24 @@ def _source_stat_exact(
     raw_path = Path(str(identity["path"]))
     if raw_path.is_symlink() or os.path.islink(raw_path):
         raise StateConflictError("MEDIA_CORRUPT_DELETE_SOURCE_SYMLINK")
-    source = require_allowed_path(raw_path, allowed_roots)
-    if is_reserved_quarantine_path(source, quarantine_root):
+    try:
+        require_allowed_path(raw_path, allowed_roots)
+    except Exception as exc:
+        raise StateConflictError(
+            "MEDIA_CORRUPT_DELETE_SOURCE_OUTSIDE_ALLOWED_ROOTS"
+        ) from exc
+    if is_reserved_quarantine_path(raw_path, quarantine_root):
         raise StateConflictError("MEDIA_CORRUPT_DELETE_SOURCE_IN_QUARANTINE")
 
     try:
-        st = os.lstat(source)
+        with safe_open_parent_fd(raw_path, allowed_roots) as (parent_fd, leaf):
+            st = os.stat(leaf, dir_fd=parent_fd, follow_symlinks=False)
     except FileNotFoundError as exc:
         raise StateConflictError("MEDIA_CORRUPT_DELETE_SOURCE_MISSING") from exc
+    except (OSError, ValueError) as exc:
+        raise StateConflictError(
+            "MEDIA_CORRUPT_DELETE_SOURCE_UNSAFE_ANCESTOR"
+        ) from exc
     if (
         not stat.S_ISREG(st.st_mode)
         or stat.S_ISLNK(st.st_mode)
@@ -638,11 +652,16 @@ def _assert_exact_source_hash_before_intent(
     if raw_path.is_symlink() or os.path.islink(raw_path):
         raise StateConflictError("MEDIA_CORRUPT_DELETE_SOURCE_SYMLINK")
 
-    source = require_allowed_path(raw_path, allowed_roots)
-    if is_reserved_quarantine_path(source, quarantine_root):
+    try:
+        require_allowed_path(raw_path, allowed_roots)
+    except Exception as exc:
+        raise StateConflictError(
+            "MEDIA_CORRUPT_DELETE_SOURCE_OUTSIDE_ALLOWED_ROOTS"
+        ) from exc
+    if is_reserved_quarantine_path(raw_path, quarantine_root):
         raise StateConflictError("MEDIA_CORRUPT_DELETE_SOURCE_IN_QUARANTINE")
 
-    with safe_open_parent_fd(source, allowed_roots) as (parent_fd, leaf):
+    with safe_open_parent_fd(raw_path, allowed_roots) as (parent_fd, leaf):
         flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
         try:
             fd = os.open(leaf, flags, dir_fd=parent_fd)
@@ -695,11 +714,16 @@ def _unlink_exact_manifest(
     if raw_path.is_symlink() or os.path.islink(raw_path):
         raise StateConflictError("MEDIA_CORRUPT_DELETE_SOURCE_SYMLINK")
 
-    source = require_allowed_path(raw_path, allowed_roots)
-    if is_reserved_quarantine_path(source, quarantine_root):
+    try:
+        require_allowed_path(raw_path, allowed_roots)
+    except Exception as exc:
+        raise StateConflictError(
+            "MEDIA_CORRUPT_DELETE_SOURCE_OUTSIDE_ALLOWED_ROOTS"
+        ) from exc
+    if is_reserved_quarantine_path(raw_path, quarantine_root):
         raise StateConflictError("MEDIA_CORRUPT_DELETE_SOURCE_IN_QUARANTINE")
 
-    with safe_open_parent_fd(source, allowed_roots) as (parent_fd, leaf):
+    with safe_open_parent_fd(raw_path, allowed_roots) as (parent_fd, leaf):
         flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
         try:
             fd = os.open(leaf, flags, dir_fd=parent_fd)
