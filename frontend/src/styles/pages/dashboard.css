@@ -1,51 +1,171 @@
 .nfc-dashboard-page {
-  gap: 20px;
+  gap: 18px;
 }
 
 .nfc-dashboard-page .nfc-snapshot-note {
-  border: 0;
-  border-left: 2px solid color-mix(in srgb, var(--nfc-accent) 42%, var(--nfc-border-soft));
-  border-radius: 0;
-  background: transparent;
+  margin-bottom: 16px;
+  padding: 9px 12px;
+  border: 1px solid var(--nfc-v49-line, var(--nfc-border-soft));
+  border-radius: var(--nfc-v49-radius-md, var(--nfc-radius-control));
+  background: color-mix(in srgb, var(--nfc-v49-surface-soft, var(--nfc-surface-2)) 82%, transparent);
   box-shadow: none;
+}
+
+.nfc-dashboard-page .nfc-snapshot-note strong {
+  color: var(--nfc-v49-text, var(--nfc-text));
+  font-weight: 640;
+}
+
+.nfc-dashboard-page .nfc-snapshot-note span {
+  color: var(--nfc-v49-subtle, var(--nfc-text-subtle));
 }
 
 .nfc-dashboard-page .nfc-dashboard-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.7fr) minmax(300px, 0.72fr);
+  grid-template-columns: minmax(0, 1.82fr) minmax(284px, 0.58fr);
   gap: 22px;
   align-items: start;
 }
 
-.nfc-dashboard-page .nfc-dashboard-main-column,
-.nfc-dashboard-page .nfc-dashboard-rail {
+.nfc-dashboard-page .nfc-dashboard-main-column {
   gap: 18px;
 }
 
 .nfc-dashboard-page .nfc-dashboard-rail {
   position: sticky;
-  top: 76px;
+  top: 78px;
+  gap: 12px;
+  padding-left: 0;
+  border-left: 0;
+}
+
+.nfc-dashboard-page .nfc-dashboard-rail > .nfc-data-panel {
+  overflow: hidden;
+  border: 1px solid var(--nfc-v49-line, var(--nfc-border-soft)) !important;
+  border-radius: var(--nfc-v49-radius-lg, var(--nfc-radius-workspace)) !important;
+  background: color-mix(in srgb, var(--nfc-v49-surface, var(--nfc-surface-1)) 76%, transparent) !important;
+  box-shadow: none !important;
+}
+
+.nfc-dashboard-page .nfc-dashboard-rail > .nfc-data-panel + .nfc-data-panel {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 1px solid var(--nfc-v49-line, var(--nfc-border-soft)) !important;
+}
+
+.nfc-dashboard-page .nfc-dashboard-rail .nfc-data-panel-header {
+  min-height: 58px;
+  padding: 12px 14px 11px;
+  border-bottom: 1px solid color-mix(in srgb, var(--nfc-v49-line, var(--nfc-border-soft)) 72%, transparent);
+  background: color-mix(in srgb, var(--nfc-v49-surface-soft, var(--nfc-surface-2)) 52%, transparent);
+}
+
+.nfc-dashboard-page .nfc-dashboard-rail .nfc-data-panel-title {
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.nfc-dashboard-page .nfc-dashboard-rail .nfc-data-panel-description {
+  max-width: 34ch;
+  margin-top: 3px;
+  font-size: 9.75px;
+  line-height: 1.45;
+}
+
+.nfc-dashboard-page .nfc-dashboard-rail .nfc-data-panel-body {
+  background: transparent;
 }
 
 .nfc-dashboard-page .nfc-quick-action {
-  min-height: 64px;
-  border-bottom-color: var(--nfc-border-soft);
+  min-height: 58px;
+  padding: 9px 13px;
+  border-radius: 0;
+  border-bottom-color: color-mix(in srgb, var(--nfc-v49-line, var(--nfc-border-soft)) 76%, transparent);
+  background: transparent;
+  transform: none;
 }
 
 .nfc-dashboard-page .nfc-quick-action:hover {
-  background: color-mix(in srgb, var(--nfc-accent) 3.2%, var(--nfc-surface-1));
+  background: color-mix(in srgb, var(--nfc-accent) 3.2%, transparent);
+  transform: none;
 }
 
 .nfc-dashboard-page .nfc-quick-action-icon {
+  width: 28px;
+  height: 28px;
   border: 0;
-  background: var(--nfc-surface-2);
+  border-radius: 8px;
+  color: var(--nfc-v49-muted, var(--nfc-text-muted));
+  background: color-mix(in srgb, var(--nfc-v49-surface-muted, var(--nfc-surface-2)) 74%, transparent);
+}
+
+.nfc-dashboard-page .nfc-quick-action-copy {
+  gap: 2px;
+}
+
+.nfc-dashboard-page .nfc-quick-action-copy strong {
+  font-size: 11px;
+  font-weight: 630;
+}
+
+.nfc-dashboard-page .nfc-quick-action-copy span {
+  color: var(--nfc-v49-subtle, var(--nfc-text-subtle));
+  font-size: 9.5px;
+  line-height: 1.4;
+}
+
+.nfc-dashboard-page .nfc-quick-action-arrow {
+  color: var(--nfc-v49-subtle, var(--nfc-text-subtle));
+  opacity: 0.78;
 }
 
 .nfc-dashboard-page .nfc-summary-row {
-  min-height: 44px;
-  border-bottom-color: var(--nfc-border-soft);
+  min-height: 43px;
+  padding-inline: 13px;
+  border-bottom-color: color-mix(in srgb, var(--nfc-v49-line, var(--nfc-border-soft)) 76%, transparent);
+  background: transparent;
+  font-size: 10.5px;
+}
+
+.nfc-dashboard-page .nfc-summary-row strong {
+  font-size: 11.5px;
+  font-weight: 650;
 }
 
 .nfc-dashboard-page .nfc-data-panel-header {
-  padding-inline: 14px;
+  padding-inline: 16px;
+}
+
+@media (max-width: 1199px) {
+  .nfc-dashboard-page .nfc-dashboard-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .nfc-dashboard-page .nfc-dashboard-rail {
+    position: static;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .nfc-dashboard-page .nfc-dashboard-rail > .nfc-data-panel + .nfc-data-panel {
+    padding-left: 0;
+  }
+}
+
+@media (max-width: 767px) {
+  .nfc-dashboard-page .nfc-dashboard-layout,
+  .nfc-dashboard-page .nfc-dashboard-main-column,
+  .nfc-dashboard-page .nfc-dashboard-rail {
+    gap: 12px;
+  }
+
+  .nfc-dashboard-page .nfc-dashboard-rail {
+    grid-template-columns: 1fr;
+  }
+
+  .nfc-dashboard-page .nfc-dashboard-rail .nfc-data-panel-header {
+    min-height: 54px;
+    padding: 10px 12px;
+  }
 }

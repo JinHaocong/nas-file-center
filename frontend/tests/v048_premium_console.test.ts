@@ -67,45 +67,32 @@ describe('v0.4.8 premium console visual system', () => {
 });
 
 
-describe('v0.4.8 page composition pass', () => {
-  test('page composition layer loads after the global premium console layer', () => {
+describe('v0.4.8 page composition retirement', () => {
+  test('legacy page composition file is no longer loaded at runtime', () => {
     const main = read('src/main.tsx');
-    assert.match(
-      main,
-      /import '\.\/styles\/v048\.css';[\s\S]*import '\.\/styles\/v048-pages\.css';/
-    );
+    assert.doesNotMatch(main, /v048-pages\.css/);
+    assert.match(main, /import '\.\/styles\/v048\.css';[\s\S]*import '\.\/styles\/v048-detail\.css';/);
   });
 
-  test('page composition layer keeps the approved navigation untouched', () => {
+  test('retired page layer still keeps navigation selectors out of its historical source', () => {
     const css = read('src/styles/v048-pages.css');
     assert.doesNotMatch(css, /\.nfc-sidebar(?:\b|\.)/);
     assert.doesNotMatch(css, /\.nfc-sidebar-menu(?:\b|\.)/);
     assert.doesNotMatch(css, /\.nfc-brand(?:\b|\.)/);
   });
 
-  test('dashboard uses a contextual rail instead of stacked right-side cards', () => {
-    const css = read('src/styles/v048-pages.css');
-    assert.match(css, /\.nfc-dashboard-page \.nfc-dashboard-rail[\s\S]*border-left: 1px solid var\(--nfc-premium-line\)/);
-    assert.match(css, /\.nfc-dashboard-page \.nfc-dashboard-rail > \.nfc-data-panel[\s\S]*border: 0 !important[\s\S]*background: transparent !important/);
+  test('dashboard rail chrome is owned by current dashboard source instead of v0.4.8 overrides', () => {
+    const css = read('src/styles/pages/dashboard.css');
+    assert.match(css, /\.nfc-dashboard-page \.nfc-dashboard-rail[\s\S]*padding-left:\s*0[\s\S]*border-left:\s*0/);
+    assert.match(css, /\.nfc-dashboard-page \.nfc-dashboard-rail > \.nfc-data-panel[\s\S]*76%, transparent/);
+    assert.match(css, /\.nfc-dashboard-page \.nfc-quick-action[\s\S]*border-radius:\s*0/);
+    assert.match(css, /\.nfc-dashboard-page \.nfc-dashboard-rail \.nfc-data-panel-body[\s\S]*background:\s*transparent/);
   });
 
-  test('dense operational pages are continuous ledgers', () => {
-    const css = read('src/styles/v048-pages.css');
-    assert.match(css, /\.nfc-indexes-page > \.nfc-data-panel-dense/);
-    assert.match(css, /\.nfc-quarantine-page > \.nfc-data-panel-dense/);
-    assert.match(css, /border-radius: 0 !important/);
-  });
-
-  test('workflow steps become one editing flow instead of card stack chrome', () => {
-    const css = read('src/styles/v048-pages.css');
-    assert.match(css, /\.nfc-workflow-builder-page \.nfc-workflow-step-card[\s\S]*border-bottom: 1px solid var\(--nfc-premium-line\)/);
-    assert.match(css, /\.nfc-workflow-builder-page \.nfc-workflow-step-card\.is-expanded[\s\S]*border-left: 2px solid/);
-  });
-
-  test('settings top-level panels are editorial columns while danger stays explicit', () => {
-    const css = read('src/styles/v048-pages.css');
-    assert.match(css, /\.nfc-system-controls-page \.nfc-settings-grid > \.nfc-data-panel[\s\S]*border: 0 !important/);
-    assert.match(css, /\.nfc-system-controls-page \.nfc-settings-subpanel-danger[\s\S]*border: 1px solid/);
+  test('current page sources own operational, workflow and settings composition', () => {
+    assert.match(read('src/styles/pages/operations.css'), /\.nfc-quarantine-page \.nfc-bulk-action-bar/);
+    assert.match(read('src/styles/pages/workflows.css'), /\.nfc-workflow-step-card\.is-expanded/);
+    assert.match(read('src/styles/pages/settings.css'), /\.nfc-settings-subpanel:last-child/);
   });
 });
 
@@ -115,7 +102,7 @@ describe('v0.4.8 detail polish pass', () => {
     const main = read('src/main.tsx');
     assert.match(
       main,
-      /import '\.\/styles\/v048-pages\.css';[\s\S]*import '\.\/styles\/v048-detail\.css';/
+      /import '\.\/styles\/v048\.css';[\s\S]*import '\.\/styles\/v048-detail\.css';/
     );
 
     const css = read('src/styles/v048-detail.css');
@@ -193,6 +180,13 @@ describe('v0.4.9 full workspace overhaul', () => {
     assert.doesNotMatch(css, /\.ant-drawer \.ant-drawer-(?:content|header|body|footer)/);
   });
 
+  test('uses a restrained right-workspace radius hierarchy', () => {
+    const css = read('src/styles/v049-workspace.css');
+    assert.match(css, /--nfc-v49-radius-xl:\s*14px/);
+    assert.match(css, /--nfc-v49-radius-lg:\s*10px/);
+    assert.match(css, /--nfc-v49-radius-md:\s*8px/);
+  });
+
   test('resets global right-workspace gutter and content width', () => {
     const css = read('src/styles/v049-workspace.css');
     assert.match(css, /--nfc-v49-content-max:\s*1480px/);
@@ -257,5 +251,58 @@ describe('v0.4.9 full workspace overhaul', () => {
     assert.match(css, /\.nfc-system-controls-page \.nfc-settings-grid/);
     assert.match(css, /\.nfc-workflow-builder-page \.nfc-workflow-step-card\.is-expanded/);
     assert.match(css, /\.nfc-advanced-dedupe-page \.nfc-dedupe-editor-wrap/);
+  });
+});
+
+
+describe('v0.4.9 source-level visual polish', () => {
+  test('focused tools no longer fight the workspace layer with flat zero-radius shells', () => {
+    const css = read('src/styles/pages/tools.css');
+    assert.doesNotMatch(css, /border-radius:\s*0\s*!important/);
+    assert.doesNotMatch(css, /border-left:\s*0\s*!important/);
+    assert.match(css, /\.nfc-path-match-page \.nfc-tool-workbench[\s\S]*padding:\s*20px 22px 22px/);
+    assert.match(css, /var\(--nfc-v49-radius-lg/);
+  });
+
+  test('workflow builder source uses the same continuous editor topology as v0.4.9', () => {
+    const css = read('src/styles/pages/workflows.css');
+    assert.match(css, /\.nfc-workflow-builder-page \.nfc-complex-form-panel[\s\S]*var\(--nfc-v49-radius-lg/);
+    assert.match(css, /\.nfc-workflow-step-card[\s\S]*border-top:\s*1px solid/);
+    assert.match(css, /\.nfc-workflow-step-card\.is-expanded[\s\S]*inset 2px 0 0/);
+  });
+
+  test('detail source no longer forces plan actions into an obsolete left-rail treatment', () => {
+    const css = read('src/styles/pages/details.css');
+    assert.doesNotMatch(css, /\.nfc-plan-detail-page \.nfc-plan-action-surface[\s\S]*border-left:\s*2px/);
+    assert.match(css, /\.nfc-plan-detail-page \.nfc-plan-action-surface[\s\S]*var\(--nfc-v49-radius-md/);
+    assert.match(css, /\.nfc-dedupe-editor-wrap[\s\S]*padding:\s*18px/);
+  });
+
+  test('settings source has one consistent subpanel divider rhythm', () => {
+    const css = read('src/styles/pages/settings.css');
+    assert.doesNotMatch(css, /border-top:\s*1px solid/);
+    assert.match(css, /\.nfc-settings-subpanel:last-child[\s\S]*border-bottom:\s*0/);
+    assert.match(css, /\.nfc-settings-control-grid[\s\S]*padding:\s*11px 0 14px/);
+  });
+
+  test('screenshot rail regression stays compact, integrated and softly translucent', () => {
+    const source = read('src/styles/pages/dashboard.css');
+    const terminal = read('src/styles/v049-workspace.css');
+    assert.match(source, /\.nfc-dashboard-page \.nfc-dashboard-rail[\s\S]*gap:\s*12px/);
+    assert.match(source, /\.nfc-dashboard-page \.nfc-dashboard-rail \.nfc-data-panel-header[\s\S]*padding:\s*12px 14px 11px/);
+    assert.match(source, /\.nfc-dashboard-page \.nfc-quick-action[\s\S]*min-height:\s*58px[\s\S]*padding:\s*9px 13px/);
+    assert.match(source, /\.nfc-quick-action-arrow[\s\S]*opacity:\s*0\.78/);
+    assert.match(terminal, /\.nfc-dashboard-page \.nfc-dashboard-rail > \.nfc-data-panel[\s\S]*76%, transparent/);
+  });
+
+  test('dashboard, operational pages, organizer and login use v0.4.9 source tokens', () => {
+    for (const file of [
+      'src/styles/pages/dashboard.css',
+      'src/styles/pages/operations.css',
+      'src/styles/pages/organizer.css',
+      'src/styles/pages/login.css',
+    ]) {
+      assert.match(read(file), /--nfc-v49-|var\(--nfc-v49-/);
+    }
   });
 });

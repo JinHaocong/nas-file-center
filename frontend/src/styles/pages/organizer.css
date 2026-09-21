@@ -5,10 +5,10 @@
 
 .nfc-organizer-profile-toolbar,
 .nfc-organizer-preview-filter {
-  min-height: 50px;
-  padding: 7px 10px;
-  border-bottom: 1px solid var(--nfc-border-soft);
-  background: var(--nfc-surface-1);
+  min-height: 52px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--nfc-v49-line, var(--nfc-border-soft));
+  background: var(--nfc-v49-surface-soft, var(--nfc-surface-2));
 }
 
 .nfc-profile-name-cell {
@@ -20,7 +20,7 @@
 
 .nfc-organizer-page .nfc-organizer-profile-mobile-card,
 .nfc-organizer-preview-page .nfc-organizer-proposal-mobile-card {
-  border-bottom-color: var(--nfc-border-soft) !important;
+  border-bottom-color: var(--nfc-v49-line, var(--nfc-border-soft)) !important;
   background: transparent !important;
 }
 
@@ -38,16 +38,16 @@
 
 .nfc-organizer-import-modal textarea {
   min-height: min(42dvh, 360px) !important;
-  border-color: var(--nfc-border-soft) !important;
-  background: var(--nfc-surface-1) !important;
+  border-color: var(--nfc-v49-line, var(--nfc-border-soft)) !important;
+  background: var(--nfc-v49-surface, var(--nfc-surface-1)) !important;
   font-family: var(--nfc-font-mono, ui-monospace, monospace);
   font-size: 11px;
   line-height: 1.5;
 }
 
 .nfc-upload-trigger {
-  border-color: var(--nfc-border-soft);
-  background: var(--nfc-surface-2);
+  border-color: var(--nfc-v49-line, var(--nfc-border-soft));
+  background: var(--nfc-v49-surface-soft, var(--nfc-surface-2));
 }
 
 .nfc-organizer-step-editor {
@@ -58,9 +58,9 @@
 
 .nfc-organizer-step-import {
   padding: 11px 12px;
-  border: 1px solid var(--nfc-border-soft);
-  border-radius: var(--nfc-radius-control);
-  background: var(--nfc-surface-2);
+  border: 1px solid var(--nfc-v49-line, var(--nfc-border-soft));
+  border-radius: var(--nfc-v49-radius-md, var(--nfc-radius-control));
+  background: var(--nfc-v49-surface-soft, var(--nfc-surface-2));
 }
 
 .nfc-organizer-step-import-stack {

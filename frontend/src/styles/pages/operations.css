@@ -4,7 +4,7 @@
 .nfc-quarantine-page,
 .nfc-tasks-page,
 .nfc-audit-page {
-  --nfc-list-row-hover: color-mix(in srgb, var(--nfc-accent) 3.4%, var(--nfc-surface-1));
+  --nfc-list-row-hover: color-mix(in srgb, var(--nfc-accent) 3.2%, transparent);
 }
 
 .nfc-indexes-page .nfc-filter-bar,
@@ -13,26 +13,28 @@
 .nfc-quarantine-page .nfc-filter-bar,
 .nfc-tasks-page .nfc-filter-bar,
 .nfc-audit-page .nfc-filter-bar {
-  min-height: 50px;
-  padding: 7px 10px;
+  min-height: 54px;
+  padding: 8px 12px;
   border: 0;
-  border-bottom: 1px solid var(--nfc-border-soft);
+  border-bottom: 1px solid var(--nfc-v49-line, var(--nfc-border-soft));
   border-radius: 0;
-  background: var(--nfc-surface-1);
+  background: var(--nfc-v49-surface-soft, var(--nfc-surface-2));
+  box-shadow: none;
 }
 
 .nfc-quarantine-page .nfc-bulk-action-bar {
-  margin: 8px 10px;
-  padding: 7px 9px;
-  border: 1px solid var(--nfc-border-soft);
-  border-radius: var(--nfc-radius-control);
-  background: color-mix(in srgb, var(--nfc-accent-soft) 28%, var(--nfc-surface-1));
+  margin: 0;
+  padding: 8px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--nfc-v49-line, var(--nfc-border-soft));
+  border-radius: 0;
+  background: color-mix(in srgb, var(--nfc-accent) 3%, var(--nfc-v49-surface-soft, var(--nfc-surface-2)));
 }
 
 .nfc-quarantine-page .nfc-selection-count {
-  min-height: 28px;
-  padding-inline: 9px;
-  border-radius: var(--nfc-radius-pill);
+  min-height: 22px;
+  padding: 1px 7px;
+  border-radius: 999px;
 }
 
 .nfc-quarantine-page .nfc-selection-count-active {
@@ -41,30 +43,31 @@
 }
 
 .nfc-worker-panel {
-  border-radius: var(--nfc-radius-workspace) !important;
+  border-radius: var(--nfc-v49-radius-lg, var(--nfc-radius-workspace)) !important;
 }
 
 .nfc-task-progress,
 .nfc-plan-action-surface,
 .nfc-lifecycle-strip {
-  border-color: var(--nfc-border-soft) !important;
-  border-radius: var(--nfc-radius-control) !important;
+  border-color: var(--nfc-v49-line, var(--nfc-border-soft)) !important;
 }
 
 .nfc-plan-detail-page .nfc-lifecycle-strip {
-  padding: 7px;
-  background: var(--nfc-surface-2);
+  padding: 0;
+  overflow: hidden;
+  border-radius: var(--nfc-v49-radius-lg, var(--nfc-radius-workspace)) !important;
+  background: var(--nfc-v49-surface, var(--nfc-surface-1));
 }
 
 .nfc-plan-detail-page .nfc-lifecycle-step {
-  border-radius: 6px;
+  border-radius: 0;
 }
 
 .nfc-audit-page .nfc-operation-badge,
 .nfc-plans-page .nfc-kind-badge,
 .nfc-scans-page .nfc-kind-badge,
 .nfc-tasks-page .nfc-kind-badge {
-  background: var(--nfc-surface-2);
+  background: var(--nfc-v49-surface-soft, var(--nfc-surface-2));
 }
 
 .nfc-mobile-record-list {
@@ -77,6 +80,6 @@
 .nfc-quarantine-mobile-card,
 .nfc-task-mobile-card,
 .nfc-audit-mobile-card {
-  border-bottom-color: var(--nfc-border-soft) !important;
+  border-bottom-color: var(--nfc-v49-line, var(--nfc-border-soft)) !important;
   background: transparent !important;
 }

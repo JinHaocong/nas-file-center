@@ -1,17 +1,23 @@
 .nfc-login-shell {
+  padding: 28px;
   background:
-    radial-gradient(46rem 32rem at 82% -6%, var(--nfc-canvas-tint-a), transparent 70%),
-    radial-gradient(36rem 28rem at 12% 108%, var(--nfc-canvas-tint-b), transparent 72%),
-    var(--nfc-canvas);
+    radial-gradient(circle at 75% 10%, color-mix(in srgb, var(--nfc-accent) 5%, transparent), transparent 32rem),
+    var(--nfc-v49-canvas, var(--nfc-canvas));
 }
 
 .nfc-login-panel {
   position: relative;
   overflow: hidden;
-  border: 1px solid var(--nfc-border-soft);
-  border-radius: 16px;
-  background: var(--nfc-surface-1);
-  box-shadow: var(--nfc-shadow-shell);
+  width: min(408px, 100%);
+  padding: 28px;
+  border: 1px solid var(--nfc-v49-line, var(--nfc-border-soft));
+  border-radius: var(--nfc-v49-radius-xl, 16px);
+  background: var(--nfc-v49-surface, var(--nfc-surface-1));
+  box-shadow: 0 24px 78px rgba(10, 15, 22, 0.1);
+}
+
+[data-theme='dark'] .nfc-login-panel {
+  box-shadow: 0 28px 86px rgba(0, 0, 0, 0.38);
 }
 
 .nfc-login-panel::before {
@@ -20,7 +26,8 @@
   inset: 0;
   pointer-events: none;
   border-radius: inherit;
-  box-shadow: inset 0 1px 0 var(--nfc-glass-highlight);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 38%, transparent);
+  opacity: 0.38;
 }
 
 .nfc-login-panel > * {
@@ -28,18 +35,33 @@
   z-index: 1;
 }
 
+.nfc-login-brand {
+  gap: 12px;
+}
+
 .nfc-login-brand-mark {
-  border: 1px solid var(--nfc-border-soft);
-  background: var(--nfc-surface-2);
-  box-shadow: inset 0 1px 0 var(--nfc-glass-highlight);
+  border: 1px solid var(--nfc-v49-line, var(--nfc-border-soft));
+  background: var(--nfc-v49-surface-soft, var(--nfc-surface-2));
+  box-shadow: none;
 }
 
 .nfc-login-divider {
-  background: var(--nfc-border-soft);
+  margin-block: 20px;
+  background: var(--nfc-v49-line, var(--nfc-border-soft));
 }
 
 .nfc-login-security-note {
-  border-color: var(--nfc-border-soft);
-  border-radius: var(--nfc-radius-inner);
-  background: color-mix(in srgb, var(--nfc-surface-2) 56%, transparent);
+  border-color: var(--nfc-v49-line, var(--nfc-border-soft));
+  border-radius: var(--nfc-v49-radius-md, var(--nfc-radius-inner));
+  background: var(--nfc-v49-surface-soft, var(--nfc-surface-2));
+}
+
+@media (max-width: 767px) {
+  .nfc-login-shell {
+    padding: 16px;
+  }
+
+  .nfc-login-panel {
+    padding: 24px 20px;
+  }
 }

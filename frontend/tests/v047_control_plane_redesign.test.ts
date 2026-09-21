@@ -125,15 +125,18 @@ describe('v0.4.7 control plane foundation', () => {
     }
   });
 
-  test('page composition deliberately removes the all-card treatment', () => {
+  test('page composition keeps deliberate hierarchy without conflicting legacy overrides', () => {
     const dashboard = read('src/styles/pages/dashboard.css');
     const tools = read('src/styles/pages/tools.css');
     const settings = read('src/styles/pages/settings.css');
     const workflows = read('src/styles/pages/workflows.css');
-    assert.match(dashboard, /grid-template-columns: minmax\(0, 1\.7fr\)/);
-    assert.match(tools, /\.nfc-tool-workbench[\s\S]*border-left: 0 !important[\s\S]*border-radius: 0 !important/);
-    assert.match(settings, /\.nfc-settings-subpanel[\s\S]*border-top: 1px solid[\s\S]*border-radius: 0/);
-    assert.match(workflows, /\.nfc-complex-form-panel[\s\S]*border-left: 0 !important[\s\S]*background: transparent !important/);
+    assert.match(dashboard, /grid-template-columns: minmax\(0, 1\.82fr\) minmax\(284px, 0\.58fr\)/);
+    assert.match(tools, /\.nfc-path-match-page \.nfc-tool-workbench[\s\S]*var\(--nfc-v49-radius-lg/);
+    assert.doesNotMatch(tools, /border-radius: 0 !important/);
+    assert.match(settings, /\.nfc-settings-subpanel:last-child[\s\S]*border-bottom: 0/);
+    assert.doesNotMatch(settings, /border-top: 1px solid/);
+    assert.match(workflows, /\.nfc-workflow-builder-page \.nfc-complex-form-panel[\s\S]*var\(--nfc-v49-radius-lg/);
+    assert.match(workflows, /\.nfc-workflow-step-card[\s\S]*border-top: 1px solid/);
   });
 
   test('legacy terminal v0.4.4 override ledgers stay out of index css', () => {

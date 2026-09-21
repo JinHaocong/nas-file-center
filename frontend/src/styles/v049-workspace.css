@@ -15,9 +15,9 @@
   --nfc-v49-line-strong: rgba(21, 27, 35, 0.145);
   --nfc-v49-accent: #315ee8;
   --nfc-v49-accent-soft: rgba(49, 94, 232, 0.075);
-  --nfc-v49-radius-xl: 16px;
-  --nfc-v49-radius-lg: 12px;
-  --nfc-v49-radius-md: 9px;
+  --nfc-v49-radius-xl: 14px;
+  --nfc-v49-radius-lg: 10px;
+  --nfc-v49-radius-md: 8px;
   --nfc-v49-control: 36px;
   --nfc-v49-content-max: 1480px;
   --nfc-v49-reading-max: 1040px;
@@ -617,12 +617,14 @@ body,
 .nfc-dashboard-page .nfc-dashboard-rail {
   position: sticky;
   top: 78px;
-  gap: 14px;
+  gap: 12px;
 }
 
 .nfc-dashboard-page .nfc-dashboard-rail > .nfc-data-panel {
+  border: 1px solid var(--nfc-v49-line) !important;
   border-radius: var(--nfc-v49-radius-lg) !important;
-  background: var(--nfc-v49-surface) !important;
+  background: color-mix(in srgb, var(--nfc-v49-surface) 76%, transparent) !important;
+  box-shadow: none !important;
 }
 
 .nfc-dashboard-page .nfc-quick-action {

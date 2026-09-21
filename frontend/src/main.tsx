@@ -4,7 +4,6 @@ import App from './App';
 import './index.css';
 import './styles/v047.css';
 import './styles/v048.css';
-import './styles/v048-pages.css';
 import './styles/v048-detail.css';
 import './styles/v049-workspace.css';
 
