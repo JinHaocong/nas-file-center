@@ -171,10 +171,17 @@ def test_transactional_quarantine_marks_persisted_identity_authoritative(tmp_pat
         lambda *_args, **_kwargs: capability_module.MutationCapability.COMPAT_TRANSACTIONAL,
     )
     transaction_calls = []
+
+    def fake_transactional_quarantine(*args, **kwargs):
+        transaction_calls.append((args, kwargs))
+        target = quarantine / "delete.q-1.bin"
+        target.write_bytes(delete.read_bytes())
+        delete.unlink()
+
     monkeypatch.setattr(
         engine_module,
         "execute_transactional_quarantine",
-        lambda *args, **kwargs: transaction_calls.append((args, kwargs)),
+        fake_transactional_quarantine,
     )
 
     item = OperationItem(
