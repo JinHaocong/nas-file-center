@@ -8,8 +8,9 @@ from sqlalchemy import select
 
 from app.config import Settings
 from app.main import create_app
-from app.models import QuarantineEntry
+from app.models import QuarantineEntry, TaskLock, WorkJob, utcnow
 from app.service import FileCenterService
+from app.worker import process_work_job
 
 
 @pytest.fixture
@@ -42,7 +43,13 @@ def maintenance_env(tmp_path: Path):
     )
     assert response.status_code == 200
 
-    return {"service": service, "data": data, "trash": trash, "admin": client}
+    return {
+        "service": service,
+        "settings": settings,
+        "data": data,
+        "trash": trash,
+        "admin": client,
+    }
 
 
 def _seed(service, data: Path, trash: Path, *, state: str, name: str) -> int:
@@ -113,6 +120,34 @@ def _seed_restored_with_artifacts(
             session.commit()
 
     return entry_id, target, attempt
+
+
+def _run_cleanup_job(env: dict, job_id: int, *, worker_id: str = "cleanup-test-worker") -> bool:
+    service = env["service"]
+    with service.SessionLocal() as session:
+        session.execute("BEGIN IMMEDIATE")
+        lock = session.get(TaskLock, 1)
+        if lock is None:
+            lock = TaskLock(
+                id=1,
+                locked=True,
+                owner=worker_id,
+                acquired_at=utcnow(),
+            )
+            session.add(lock)
+        else:
+            lock.locked = True
+            lock.owner = worker_id
+            lock.acquired_at = utcnow()
+        session.commit()
+
+    return process_work_job(
+        env["settings"],
+        job_id,
+        session_factory=service.SessionLocal,
+        engine=service.engine,
+        worker_id=worker_id,
+    )
 
 def test_terminal_record_cleanup_accepts_abandoned_and_conflict(maintenance_env):
     env = maintenance_env
@@ -207,14 +242,19 @@ def test_bulk_cleanup_restored_same_storage_reclaims_private_artifacts(maintenan
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["deleted_ids"] == [entry_id]
-    assert body["restored_cleanup_entry_ids"] == [entry_id]
-    assert body["removed_artifact_count"] == 3
+    assert body["status"] == "queued"
+    assert body["entry_ids"] == [entry_id]
+    job_id = int(body["work_job_id"])
+
+    assert _run_cleanup_job(env, job_id) is True
     assert target.exists()
     assert not tx_entry_root.exists()
 
     with service.SessionLocal() as session:
         assert session.get(QuarantineEntry, entry_id) is None
+        job = session.get(WorkJob, job_id)
+        assert job is not None
+        assert job.status == "completed"
 
 
 def test_bulk_cleanup_restored_cross_storage_hash_verifies_payload(maintenance_env):
@@ -240,9 +280,16 @@ def test_bulk_cleanup_restored_cross_storage_hash_verifies_payload(maintenance_e
         headers={"Origin": "http://testserver"},
     )
     assert response.status_code == 200
-    assert response.json()["removed_artifact_count"] == 1
+    body = response.json()
+    assert body["status"] == "queued"
+    job_id = int(body["work_job_id"])
+    assert _run_cleanup_job(env, job_id) is True
     assert target.exists()
     assert not artifact.exists()
+    with service.SessionLocal() as session:
+        job = session.get(WorkJob, job_id)
+        assert job is not None
+        assert job.status == "completed"
 
 
 def test_restored_cleanup_blocks_when_restore_target_identity_changed(maintenance_env):
@@ -267,11 +314,18 @@ def test_restored_cleanup_blocks_when_restore_target_identity_changed(maintenanc
         json={"entry_ids": [entry_id], "confirmation": "DELETE_RECORDS"},
         headers={"Origin": "http://testserver"},
     )
-    assert response.status_code == 409
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "queued"
+    job_id = int(body["work_job_id"])
+    assert _run_cleanup_job(env, job_id) is False
     assert target.read_bytes() == b"replacement"
     assert (attempt / "anchor").exists()
     with service.SessionLocal() as session:
         assert session.get(QuarantineEntry, entry_id) is not None
+        job = session.get(WorkJob, job_id)
+        assert job is not None
+        assert job.status == "failed"
 
 
 def test_restored_cleanup_blocks_unknown_private_artifact(maintenance_env):
@@ -294,9 +348,16 @@ def test_restored_cleanup_blocks_unknown_private_artifact(maintenance_env):
         json={"entry_ids": [entry_id], "confirmation": "DELETE_RECORDS"},
         headers={"Origin": "http://testserver"},
     )
-    assert response.status_code == 409
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "queued"
+    job_id = int(body["work_job_id"])
+    assert _run_cleanup_job(env, job_id) is False
     assert target.exists()
     assert (attempt / "unexpected.bin").exists()
     assert (attempt / "anchor").exists()
     with service.SessionLocal() as session:
         assert session.get(QuarantineEntry, entry_id) is not None
+        job = session.get(WorkJob, job_id)
+        assert job is not None
+        assert job.status == "failed"
