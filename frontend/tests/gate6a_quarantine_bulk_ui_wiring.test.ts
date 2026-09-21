@@ -39,4 +39,18 @@ describe('Gate6-A quarantine page wiring contract', () => {
   test('bulk restore routes draft generation into the existing plan safety lifecycle', () => {
     assert.match(quarantinePageSource, /navigate\(`\/plans\/\$\{[^}]+\}`\)/);
   });
+
+  test('restored records participate in safe terminal cleanup through Worker tasks', () => {
+    const apiSource = readFileSync(
+      resolve(process.cwd(), 'src/api/quarantine.ts'),
+      'utf8'
+    );
+    assert.match(apiSource, /\['restored', 'purged', 'abandoned', 'conflict'\]/);
+    assert.match(quarantinePageSource, /canDeleteRecord = \['restored', 'purged', 'abandoned', 'conflict'\]/);
+    assert.match(quarantinePageSource, /\.nas-file-center-trash/);
+    assert.match(quarantinePageSource, /work_job_id/);
+    assert.match(quarantinePageSource, /任务中心/);
+    assert.match(quarantinePageSource, /批量删除记录/);
+  });
+
 });

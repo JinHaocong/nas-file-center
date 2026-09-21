@@ -83,8 +83,13 @@ export const QuarantinePage: React.FC = () => {
 
   const deleteRecordMutation = useMutation({
     mutationFn: (entryId: number) => quarantineApi.deleteRecord(entryId),
-    onSuccess: (_, entryId) => {
-      message.success(`隔离记录 #${entryId} 已删除（仅删除数据库记录）`);
+    onSuccess: (result, entryId) => {
+      if (result.status === 'queued' && result.work_job_id) {
+        message.success(`已恢复记录 #${entryId} 的安全清理任务 #${result.work_job_id} 已进入任务中心`);
+        queryClient.invalidateQueries({ queryKey: ['tasks'] });
+        return;
+      }
+      message.success(`隔离记录 #${entryId} 已删除`);
       queryClient.invalidateQueries({ queryKey: ['quarantineList'] });
       queryClient.invalidateQueries({ queryKey: ['auditEvents'] });
       refetch();
@@ -98,7 +103,12 @@ export const QuarantinePage: React.FC = () => {
   const bulkDeleteRecordsMutation = useMutation({
     mutationFn: (entryIds: number[]) => quarantineApi.bulkDeleteRecords(entryIds),
     onSuccess: (result) => {
-      message.success(`已删除 ${result.deleted_count} 条终态隔离记录`);
+      if (result.status === 'queued' && result.work_job_id) {
+        message.success(`安全清理任务 #${result.work_job_id} 已进入任务中心；Worker 将回收已恢复记录的 .nas-file-center-trash 私有副本`);
+        queryClient.invalidateQueries({ queryKey: ['tasks'] });
+        return;
+      }
+      message.success(`已删除 ${result.deleted_count ?? 0} 条隔离记录`);
       queryClient.invalidateQueries({ queryKey: ['quarantineList'] });
       queryClient.invalidateQueries({ queryKey: ['auditEvents'] });
       refetch();
@@ -167,7 +177,7 @@ export const QuarantinePage: React.FC = () => {
       }
       Modal.confirm({
         title: `批量删除 ${entryIds.length} 条终态记录？`,
-        content: '只删除数据库记录，不执行文件系统删除。仅 purged / abandoned / conflict 终态可清理；服务端会确认隔离 payload、authoritative anchor 与 conflict transaction artifacts 均不存在，任一条不满足时整批拒绝。',
+        content: '支持 restored / purged / abandoned / conflict。restored 会先验证恢复目标仍保持原身份，再删除 .nas-file-center-trash 中该 entry 的 NFC 私有事务副本并释放空间，最后删除记录；恢复后的正式文件不会被删除。其他终态仍按 metadata-only 规则清理。任一条无法证明安全时整批拒绝。',
         okText: '删除记录',
         okButtonProps: { danger: true },
         cancelText: '取消',
@@ -186,7 +196,7 @@ export const QuarantinePage: React.FC = () => {
   const confirmDeleteRecord = (record: QuarantineEntry) => {
     Modal.confirm({
       title: `删除隔离记录 #${record.id}？`,
-      content: '仅删除 purged / abandoned / conflict 的数据库记录，不执行文件系统删除。服务端会再次确认没有 payload、authoritative anchor 或 transaction artifacts；审计事件仍会保留。',
+      content: '支持 restored / purged / abandoned / conflict。若为 restored，会验证恢复目标后清理 .nas-file-center-trash 中该 entry 的 NFC 私有事务副本，再删除记录；恢复后的正式文件不会被删除。审计事件仍会保留。',
       okText: '删除记录',
       okButtonProps: { danger: true },
       cancelText: '取消',
@@ -197,7 +207,7 @@ export const QuarantinePage: React.FC = () => {
   const actionButtons = (record: QuarantineEntry, compact = true) => {
     const canRestore = record.state === 'active';
     const canPurge = record.state === 'active';
-    const canDeleteRecord = ['purged', 'abandoned', 'conflict'].includes(record.state);
+    const canDeleteRecord = ['restored', 'purged', 'abandoned', 'conflict'].includes(record.state);
     if (!canRestore && !canPurge && !canDeleteRecord) return <span className="nfc-table-muted">—</span>;
     return (
       <div className="nfc-row-actions">
@@ -212,13 +222,13 @@ export const QuarantinePage: React.FC = () => {
           </Tooltip>
         )}
         {canDeleteRecord && (
-          <Tooltip title={!isAdmin ? '仅系统管理员允许删除终态记录' : '仅删除数据库记录；服务端会确认没有剩余 payload / anchor / transaction artifacts'}>
+          <Tooltip title={!isAdmin ? '仅系统管理员允许删除终态记录' : record.state === 'restored' ? '验证恢复目标后，清理 NFC 私有隔离副本并删除记录；不会删除恢复后的正式文件' : '删除终态数据库记录；服务端会确认不存在剩余 payload / anchor / transaction artifacts'}>
             <Button
               size={compact ? 'small' : 'middle'}
               type="text"
               danger
               icon={<DeleteOutlined />}
-              disabled={!isAdmin || deleteRecordMutation.isPending}
+              disabled={!isAdmin || deleteRecordMutation.isPending || (record.state === 'restored' && (isSafeMode || !allowDelete))}
               onClick={() => confirmDeleteRecord(record)}
             >
               删除记录
@@ -276,7 +286,7 @@ export const QuarantinePage: React.FC = () => {
           <Tooltip title={selectedEntryIds.length===0 ? '请先明确选择至少一个 active 条目' : !isAdmin ? '仅系统管理员允许永久删除' : isSafeMode ? 'ALLOW_MUTATION=false，禁止生成删除计划' : !allowDelete ? 'ALLOW_DELETE=false，服务端禁止永久删除' : '先 Preview，再输入 DELETE 生成 unlink_v1 Draft'}>
             <Button danger icon={<DeleteOutlined />} disabled={selectedEntryIds.length===0 || !isAdmin || isSafeMode || !allowDelete} onClick={()=>{setBulkPurgeEntryIds([...selectedEntryIds]);setBulkPurgeOpen(true);}}>批量永久删除</Button>
           </Tooltip>
-          <Tooltip title={!isAdmin ? '仅系统管理员允许删除隔离记录' : '删除当前筛选结果中的 purged / abandoned / conflict 数据库记录；不执行文件系统操作'}>
+          <Tooltip title={!isAdmin ? '仅系统管理员允许删除隔离记录' : '批量清理当前筛选结果中的 restored / purged / abandoned / conflict；restored 会额外释放 .nas-file-center-trash 私有副本空间'}>
             <Button
               danger
               icon={<DeleteOutlined />}
@@ -284,7 +294,7 @@ export const QuarantinePage: React.FC = () => {
               loading={resolvingTerminalRecords || bulkDeleteRecordsMutation.isPending}
               onClick={handleDeleteFilteredTerminalRecords}
             >
-              批量删除终态记录
+              批量删除记录
             </Button>
           </Tooltip>
         </ActionBar>

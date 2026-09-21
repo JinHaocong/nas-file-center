@@ -11,16 +11,16 @@ describe('quarantine terminal record cleanup', () => {
     assert.match(source, /\| 'conflict'/);
   });
 
-  test('filtered record cleanup resolves purged abandoned and conflict', () => {
+  test('filtered record cleanup resolves restored and terminal cleanup states', () => {
     const source = read('src/api/quarantine.ts');
     assert.match(source, /resolveTerminalCleanupFilteredEntryIds/);
-    assert.match(source, /'purged', 'abandoned', 'conflict'/);
+    assert.match(source, /'restored', 'purged', 'abandoned', 'conflict'/);
   });
 
   test('single-record cleanup is exposed for all supported terminal states', () => {
     const source = read('src/pages/Quarantine/index.tsx');
-    assert.match(source, /\['purged', 'abandoned', 'conflict'\]\.includes\(record\.state\)/);
+    assert.match(source, /\['restored', 'purged', 'abandoned', 'conflict'\]\.includes\(record\.state\)/);
     assert.match(source, /冲突 \(conflict\)/);
-    assert.match(source, /批量删除终态记录/);
+    assert.match(source, /批量删除记录/);
   });
 });

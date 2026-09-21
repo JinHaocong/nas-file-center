@@ -357,6 +357,7 @@ def execute_transactional_restore(
                     renew_and_assert_worker_lease(session_factory, worker_id)
                     os.link(src_leaf, dst_leaf, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd)
 
+        dest_stat = os.lstat(dest_path)
         with session_factory() as session:
             session.execute(text("BEGIN IMMEDIATE"))
             assert_active_worker_lease(session, worker_id)
@@ -364,6 +365,10 @@ def execute_transactional_restore(
             now = utcnow()
             entry.state = "restored"
             entry.tx_phase = "restored"
+            entry.restore_target_path = str(dest_path)
+            entry.restore_device = int(dest_stat.st_dev)
+            entry.restore_inode = int(dest_stat.st_ino)
+            entry.restore_mtime_ns = int(getattr(dest_stat, "st_mtime_ns", dest_stat.st_mtime * 1e9))
             entry.restored_at = now
             entry.updated_at = now
             session.commit()
@@ -427,6 +432,7 @@ def execute_transactional_restore(
             is_retired_valid = False
 
         if is_retired_valid:
+            dest_stat = os.lstat(dest_path)
             with session_factory() as session:
                 session.execute(text("BEGIN IMMEDIATE"))
                 assert_active_worker_lease(session, worker_id)
@@ -434,6 +440,10 @@ def execute_transactional_restore(
                 now = utcnow()
                 entry.state = "restored"
                 entry.tx_phase = "restored"
+                entry.restore_target_path = str(dest_path)
+                entry.restore_device = int(dest_stat.st_dev)
+                entry.restore_inode = int(dest_stat.st_ino)
+                entry.restore_mtime_ns = int(getattr(dest_stat, "st_mtime_ns", dest_stat.st_mtime * 1e9))
                 entry.restored_at = now
                 entry.updated_at = now
                 session.commit()

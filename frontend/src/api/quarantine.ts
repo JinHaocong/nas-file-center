@@ -55,7 +55,7 @@ export const quarantineApi = {
     do {
       const response = await quarantineApi.list({ ...params, page, pageSize });
       total = response.total;
-      entryIds.push(...response.items.filter((entry) => ['purged', 'abandoned', 'conflict'].includes(entry.state)).map((entry) => entry.id));
+      entryIds.push(...response.items.filter((entry) => ['restored', 'purged', 'abandoned', 'conflict'].includes(entry.state)).map((entry) => entry.id));
       if (entryIds.length > 5000) {
         throw new Error('批量删除隔离记录最多支持 5000 条');
       }
@@ -80,12 +80,24 @@ export const quarantineApi = {
     api.post<QuarantineBulkPlanResponse>('/api/quarantine/bulk-plan', payload),
 
   deleteRecord: (id: number) =>
-    api.delete<{ status: string; deleted: boolean; id: number }>(
-      `/api/quarantine/${id}/record?confirmation=DELETE_RECORD`
-    ),
+    api.delete<{
+      status: string;
+      deleted?: boolean;
+      id?: number;
+      work_job_id?: number;
+      requested_count?: number;
+      entry_ids?: number[];
+    }>(`/api/quarantine/${id}/record?confirmation=DELETE_RECORD`),
 
   bulkDeleteRecords: (entryIds: number[]) =>
-    api.post<{ status: string; deleted_count: number; deleted_ids: number[] }>(
+    api.post<{
+      status: string;
+      deleted_count?: number;
+      deleted_ids?: number[];
+      work_job_id?: number;
+      requested_count?: number;
+      entry_ids?: number[];
+    }>(
       '/api/quarantine/records/bulk-delete',
       { entry_ids: entryIds, confirmation: 'DELETE_RECORDS' }
     ),
