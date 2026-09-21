@@ -14,6 +14,7 @@ from app.models import (
     OperationJournal,
     QuarantineEntry,
     TaskLock,
+    User,
     utcnow,
 )
 from app.service import FileCenterService
@@ -280,3 +281,36 @@ def test_source_hash_drift_blocks_execution_before_unlink(tmp_path: Path):
         )
         assert item is not None
         assert item.state == "stale"
+
+
+def test_non_admin_cannot_manage_corrupt_delete_plan_lifecycle(tmp_path: Path):
+    client, service, _settings, data, _trash = _env(tmp_path)
+    source = data / "admin-only-broken.jpg"
+    source.write_bytes(b"corrupt-admin-only")
+    asset_id = _seed_media(service, source, status="corrupt")
+
+    preview = client.post(
+        "/api/media/corrupt-delete/preview",
+        json={"media_asset_ids": [asset_id]},
+    ).json()
+    created = client.post(
+        "/api/media/corrupt-delete/plan",
+        json={
+            "media_asset_ids": [asset_id],
+            "expected_preview_digest": preview["preview_digest"],
+            "confirmation": "DELETE_CORRUPT_FILES",
+        },
+    )
+    assert created.status_code == 200
+    plan_id = int(created.json()["id"])
+
+    with service.SessionLocal() as session:
+        admin = session.scalar(select(User).where(User.username == "admin"))
+        assert admin is not None
+        admin.role = "user"
+        session.commit()
+
+    assert client.post(f"/api/plans/{plan_id}/freeze").status_code == 403
+    assert client.post(f"/api/plans/{plan_id}/validate").status_code == 403
+    assert client.post(f"/api/plans/{plan_id}/execute").status_code == 403
+    assert source.exists()
