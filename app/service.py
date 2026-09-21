@@ -4397,7 +4397,7 @@ class FileCenterService:
             }
 
     def _assert_quarantine_record_deletable(self, entry: QuarantineEntry) -> None:
-        deletable_states = {"purged", "abandoned", "conflict"}
+        deletable_states = {"restored", "purged", "abandoned", "conflict"}
         if entry.state not in deletable_states:
             raise StateConflictError(
                 f"Quarantine entry #{entry.id} is not a terminal cleanup state "
@@ -4421,13 +4421,54 @@ class FileCenterService:
 
         require_absent(entry.quarantine_path, label="quarantine payload")
 
+        tx_entry_root = (
+            Path(self.settings.quarantine_root)
+            / ".tx"
+            / f"entry-{entry.id}"
+        )
+
+        if entry.state == "restored":
+            # Restored means the user-visible file has already left quarantine.
+            # Record cleanup is metadata-only and must never unlink a restored
+            # destination or payload-bearing transactional evidence. Empty
+            # generation directories are harmless and may remain on disk.
+            require_absent(entry.authoritative_anchor_path, label="authoritative anchor")
+            try:
+                root_stat = os.lstat(tx_entry_root)
+            except FileNotFoundError:
+                root_stat = None
+            except OSError as exc:
+                raise StateConflictError(
+                    f"Cannot inspect restored transaction artifacts for quarantine entry #{entry.id}: {exc}"
+                ) from exc
+
+            if root_stat is not None:
+                if stat.S_ISLNK(root_stat.st_mode) or not stat.S_ISDIR(root_stat.st_mode):
+                    raise StateConflictError(
+                        f"Restored transaction namespace is not a safe directory for quarantine entry #{entry.id}"
+                    )
+                for dirpath, dirnames, filenames in os.walk(tx_entry_root, followlinks=False):
+                    for dirname in dirnames:
+                        candidate = Path(dirpath) / dirname
+                        try:
+                            child_stat = os.lstat(candidate)
+                        except OSError as exc:
+                            raise StateConflictError(
+                                f"Cannot inspect restored transaction artifacts for quarantine entry #{entry.id}: {exc}"
+                            ) from exc
+                        if stat.S_ISLNK(child_stat.st_mode):
+                            raise StateConflictError(
+                                f"Restored transaction artifact symlink still exists for quarantine entry #{entry.id}; "
+                                "record deletion is blocked"
+                            )
+                    if filenames:
+                        raise StateConflictError(
+                            f"Restored transaction payload artifacts still exist for quarantine entry #{entry.id}; "
+                            "record deletion is blocked"
+                        )
+
         if entry.state in {"abandoned", "conflict"}:
             require_absent(entry.authoritative_anchor_path, label="authoritative anchor")
-            tx_entry_root = (
-                Path(self.settings.quarantine_root)
-                / ".tx"
-                / f"entry-{entry.id}"
-            )
             require_absent(str(tx_entry_root), label="transaction artifacts")
 
     def delete_quarantine_record(
