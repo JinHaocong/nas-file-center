@@ -32,6 +32,22 @@ def _skip(reason: str) -> ItemResult:
     return ItemResult("skipped", reason)
 
 
+def _quarantine_completion_postcondition(source: Path, target: Path) -> str | None:
+    """A Quarantine move is complete only when the source name is retired."""
+
+    if os.path.lexists(source):
+        return (
+            "QUARANTINE_SOURCE_RETIREMENT_UNCONFIRMED: source pathname still "
+            f"exists after quarantine mutation: {source}"
+        )
+    if not os.path.lexists(target):
+        return (
+            "QUARANTINE_PUBLICATION_UNCONFIRMED: quarantine payload is missing "
+            f"after quarantine mutation: {target}"
+        )
+    return None
+
+
 def _count_regular_files(root: Path) -> int:
     """Return enough information for the Last-File fence without a full tree count.
 
@@ -802,6 +818,14 @@ def execute_item(
                     )
                 except Exception as exc:
                     return ItemResult("failed", str(exc))
+                postcondition_error = _quarantine_completion_postcondition(source, target)
+                if postcondition_error is not None:
+                    return ItemResult(
+                        "failed",
+                        postcondition_error,
+                        target if os.path.lexists(target) else None,
+                        quarantine_identity_authoritative=True,
+                    )
                 return ItemResult(
                     "completed",
                     "quarantined",
@@ -867,6 +891,14 @@ def execute_item(
                         return ItemResult("failed", str(fallback_exc))
                 except Exception as exc:
                     return ItemResult("failed", str(exc))
+                postcondition_error = _quarantine_completion_postcondition(source, target)
+                if postcondition_error is not None:
+                    return ItemResult(
+                        "failed",
+                        postcondition_error,
+                        target if os.path.lexists(target) else None,
+                        quarantine_identity_authoritative=True,
+                    )
                 return ItemResult(
                     "completed",
                     "quarantined",
