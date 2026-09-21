@@ -108,3 +108,67 @@ describe('v0.4.8 page composition pass', () => {
     assert.match(css, /\.nfc-system-controls-page \.nfc-settings-subpanel-danger[\s\S]*border: 1px solid/);
   });
 });
+
+
+describe('v0.4.8 detail polish pass', () => {
+  test('detail layer loads last and leaves approved navigation untouched', () => {
+    const main = read('src/main.tsx');
+    assert.match(
+      main,
+      /import '\.\/styles\/v048-pages\.css';[\s\S]*import '\.\/styles\/v048-detail\.css';/
+    );
+
+    const css = read('src/styles/v048-detail.css');
+    assert.doesNotMatch(css, /\.nfc-sidebar(?:\b|\.)/);
+    assert.doesNotMatch(css, /\.nfc-sidebar-menu(?:\b|\.)/);
+    assert.doesNotMatch(css, /\.nfc-brand(?:\b|\.)/);
+  });
+
+  test('command rail is route-aware instead of using static template copy', () => {
+    const header = read('src/components/Header.tsx');
+    assert.match(header, /useLocation/);
+    assert.match(header, /resolveWorkspaceContext/);
+    assert.match(header, /高级去重工作台/);
+    assert.match(header, /执行计划详情/);
+    assert.match(header, /工作流编辑器/);
+    assert.doesNotMatch(header, /Local operations/);
+  });
+
+  test('command rail status copy is compact while tooltips retain detail', () => {
+    const safe = read('src/components/SafeModeBadge.tsx');
+    const worker = read('src/components/WorkerStatusBadge.tsx');
+    assert.match(safe, />\s*永久删除\s*</);
+    assert.match(safe, />\s*隔离写入\s*</);
+    assert.match(safe, />\s*只读\s*</);
+    assert.match(worker, /队列 \{activeJobs\}/);
+    assert.match(worker, />\s*队列空闲\s*</);
+  });
+
+  test('status island restores semantic safety and queue tones', () => {
+    const css = read('src/styles/v048-detail.css');
+    assert.match(css, /\.nfc-header-status[\s\S]*border-radius: 999px/);
+    assert.match(css, /\.nfc-header-status-badge\.is-safe[\s\S]*var\(--nfc-success\)/);
+    assert.match(css, /\.nfc-header-status-badge\.is-danger[\s\S]*var\(--nfc-danger\)/);
+    assert.match(css, /\.nfc-header-status-badge\.is-processing[\s\S]*var\(--nfc-premium-accent\)/);
+  });
+
+  test('descriptions, alerts and empty states use the refined editorial treatment', () => {
+    const css = read('src/styles/v048-detail.css');
+    assert.match(css, /\.nfc-responsive-descriptions[\s\S]*border-radius: 0 !important/);
+    assert.match(css, /\.nfc-page-alert\.ant-alert,[\s\S]*border-left: 2px solid/);
+    assert.match(css, /\.nfc-data-panel \.ant-empty[\s\S]*padding: 36px 16px/);
+  });
+
+  test('row actions remain accessible while becoming quieter at rest', () => {
+    const css = read('src/styles/v048-detail.css');
+    assert.match(css, /\.nfc-row-actions[\s\S]*opacity: 0\.78/);
+    assert.match(css, /\.nfc-row-actions:focus-within[\s\S]*opacity: 1/);
+    assert.match(css, /@media \(max-width: 767px\)[\s\S]*\.nfc-row-actions[\s\S]*opacity: 1/);
+  });
+
+  test('live status motion respects reduced-motion preference', () => {
+    const css = read('src/styles/v048-detail.css');
+    assert.match(css, /@keyframes nfc-detail-live-pulse/);
+    assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*animation: none/);
+  });
+});
