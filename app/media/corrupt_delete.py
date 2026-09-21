@@ -25,7 +25,6 @@ from app.models import (
     utcnow,
 )
 from app.path_safety import is_reserved_quarantine_path, require_allowed_path
-from app.tasks.recovery import assert_active_worker_lease, renew_and_assert_worker_lease
 
 
 OPERATION_ID = "media_corrupt_unlink_delete"
@@ -605,6 +604,8 @@ def _source_stat_exact(
 
 
 def _hash_open_fd(fd: int, *, session_factory: sessionmaker, worker_id: str) -> str:
+    from app.tasks.recovery import renew_and_assert_worker_lease
+
     digest = hashlib.sha256()
     last_fence = time.monotonic()
     while True:
@@ -626,6 +627,8 @@ def _unlink_exact_manifest(
     session_factory: sessionmaker,
     worker_id: str,
 ) -> str:
+    from app.tasks.recovery import renew_and_assert_worker_lease
+
     identity = manifest["identity"]
     raw_path = Path(identity["path"])
     if raw_path.is_symlink() or os.path.islink(raw_path):
@@ -809,6 +812,8 @@ def execute_corrupt_media_delete(
     session_factory: sessionmaker,
     worker_id: str,
 ) -> str:
+    from app.tasks.recovery import assert_active_worker_lease
+
     try:
         numeric_plan_id = int(plan_id)
     except (TypeError, ValueError) as exc:
