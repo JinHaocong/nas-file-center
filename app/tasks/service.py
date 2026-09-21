@@ -29,6 +29,7 @@ RETRY_WHITELISTS: dict[str, set[str]] = {
         "exclude_patterns",
     },
     "batch-plan-execute": {"plan_id"},
+    "media-analysis": {"root_keys"},
 }
 
 
