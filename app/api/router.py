@@ -22,6 +22,7 @@ from app.batch_utilities.errors import (
 )
 from app.models import User
 from app.media.catalog import enqueue_media_analysis, list_media_assets, media_summary
+from app.media.corrupt_delete import build_corrupt_delete_preview, create_corrupt_delete_plan
 from app.path_safety import UnsafePathError
 from app.service import StateConflictError
 from app.planning.dedupe_preview import (
@@ -106,6 +107,16 @@ class IndexMatchRequest(BaseModel):
 
 class MediaAnalyzeRequest(BaseModel):
     root_keys: list[str] = Field(min_length=1, max_length=100)
+
+class MediaCorruptDeletePreviewRequest(BaseModel):
+    media_asset_ids: list[int] = Field(min_length=1, max_length=5000)
+
+
+class MediaCorruptDeletePlanRequest(BaseModel):
+    media_asset_ids: list[int] = Field(min_length=1, max_length=5000)
+    expected_preview_digest: str = Field(min_length=64, max_length=64)
+    confirmation: str
+
 
 
 
@@ -563,6 +574,44 @@ def analyze_media(request: Request, payload: MediaAnalyzeRequest):
             request.app.state.settings,
             payload.root_keys,
         )
+    except (ValueError, OSError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+
+@router.post("/media/corrupt-delete/preview")
+def preview_corrupt_media_delete(
+    request: Request,
+    payload: MediaCorruptDeletePreviewRequest,
+    _admin_user: User = Depends(require_admin_user),
+):
+    try:
+        return build_corrupt_delete_preview(
+            request.app.state.service.SessionLocal,
+            request.app.state.settings,
+            payload.media_asset_ids,
+        )
+    except (ValueError, OSError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.post("/media/corrupt-delete/plan")
+def create_corrupt_media_delete_plan(
+    request: Request,
+    payload: MediaCorruptDeletePlanRequest,
+    admin_user: User = Depends(require_admin_user),
+):
+    try:
+        return create_corrupt_delete_plan(
+            request.app.state.service.SessionLocal,
+            request.app.state.settings,
+            asset_ids=payload.media_asset_ids,
+            expected_preview_digest=payload.expected_preview_digest,
+            confirmation=payload.confirmation,
+            requested_by_user_id=admin_user.id,
+        )
+    except StateConflictError as exc:
+        raise HTTPException(409, str(exc)) from exc
     except (ValueError, OSError) as exc:
         raise HTTPException(422, str(exc)) from exc
 
