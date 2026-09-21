@@ -347,7 +347,9 @@ export const AdvancedDedupePage: React.FC = () => {
         }
       />
 
-      <DataPanel
+      <div className="nfc-dedupe-cockpit">
+        <div className="nfc-dedupe-context-rail">
+          <DataPanel
         title="扫描上下文"
         description="高级去重基于此已完成扫描快照进行评分和选择。"
         className="nfc-panel-flush"
@@ -361,9 +363,11 @@ export const AdvancedDedupePage: React.FC = () => {
             ))}
           </div>
         </div>
-      </DataPanel>
+          </DataPanel>
+        </div>
 
-      <DataPanel
+        <div className="nfc-dedupe-strategy-stage">
+          <DataPanel
         title="1. 评分策略与偏好配置"
         description="所有配置变化都会使已接受的 preview digest 失效，必须重新 Preview。"
       >
@@ -397,7 +401,9 @@ export const AdvancedDedupePage: React.FC = () => {
             服务端只读计算权威预览；不会创建 BatchPlan，也不会修改真实文件。
           </span>
         </ActionBar>
-      </DataPanel>
+          </DataPanel>
+        </div>
+      </div>
 
       {previewData && (
         <>
