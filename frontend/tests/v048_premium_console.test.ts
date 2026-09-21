@@ -189,6 +189,8 @@ describe('v0.4.9 full workspace overhaul', () => {
     assert.doesNotMatch(css, /\.nfc-sidebar-menu(?:\b|\.)/);
     assert.doesNotMatch(css, /\.nfc-brand(?:\b|\.)/);
     assert.doesNotMatch(css, /\.nfc-nav-group-label(?:\b|\.)/);
+    assert.doesNotMatch(css, /\.nfc-mobile-nav-drawer(?:\b|\.)/);
+    assert.doesNotMatch(css, /\.ant-drawer \.ant-drawer-(?:content|header|body|footer)/);
   });
 
   test('resets global right-workspace gutter and content width', () => {
@@ -229,7 +231,7 @@ describe('v0.4.9 full workspace overhaul', () => {
     assert.match(css, /\.nfc-data-panel \.ant-table-tbody > tr[\s\S]*height:\s*44px/);
     assert.match(css, /\.nfc-app-shell \.ant-form-item[\s\S]*margin-bottom:\s*16px/);
     assert.match(css, /\.ant-modal \.ant-modal-body[\s\S]*padding:\s*16px 18px 18px/);
-    assert.match(css, /\.ant-drawer \.ant-drawer-body[\s\S]*padding:\s*15px/);
+    assert.match(css, /\.nfc-overlay-drawer \.ant-drawer-body[\s\S]*padding:\s*15px/);
     assert.match(css, /\.nfc-directory-item\.ant-list-item[\s\S]*min-height:\s*46px/);
   });
 
