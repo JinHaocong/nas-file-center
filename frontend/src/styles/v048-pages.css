@@ -3,86 +3,10 @@
  * Deliberately contains no sidebar/nav selectors.
  */
 
-/* Dashboard — primary ledger + quiet contextual rail */
-.nfc-dashboard-page .nfc-dashboard-layout {
-  grid-template-columns: minmax(0, 1.86fr) minmax(292px, 0.58fr);
-  gap: 30px;
-}
-
-.nfc-dashboard-page .nfc-dashboard-main-column {
-  gap: 22px;
-}
-
-.nfc-dashboard-page .nfc-dashboard-rail {
-  position: sticky;
-  top: 82px;
-  gap: 0;
-  padding-left: 22px;
-  border-left: 1px solid var(--nfc-premium-line);
-}
-
-.nfc-dashboard-page .nfc-dashboard-rail > .nfc-data-panel {
-  border: 0 !important;
-  border-radius: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
-}
-
-.nfc-dashboard-page .nfc-dashboard-rail > .nfc-data-panel + .nfc-data-panel {
-  margin-top: 18px;
-  padding-top: 18px;
-  border-top: 1px solid var(--nfc-premium-line) !important;
-}
-
-.nfc-dashboard-page .nfc-dashboard-rail .nfc-data-panel-header {
-  min-height: auto;
-  padding: 0 0 10px;
-  border: 0;
-}
-
-.nfc-dashboard-page .nfc-dashboard-rail .nfc-data-panel-title {
-  font-size: 11.5px;
-  letter-spacing: 0;
-}
-
-.nfc-dashboard-page .nfc-dashboard-rail .nfc-data-panel-description {
-  max-width: 31ch;
-}
-
-.nfc-dashboard-page .nfc-dashboard-rail .nfc-quick-action {
-  min-height: 62px;
-  padding: 11px 0;
-  border-bottom-color: var(--nfc-premium-line);
-}
-
-.nfc-dashboard-page .nfc-dashboard-rail .nfc-quick-action-icon {
-  width: 28px;
-  height: 28px;
-  border: 0;
-  background: var(--nfc-premium-surface-subtle);
-}
-
-.nfc-dashboard-page .nfc-dashboard-rail .nfc-summary-row {
-  padding-inline: 0;
-}
-
-.nfc-dashboard-page .nfc-snapshot-note {
-  margin-bottom: 18px;
-  padding: 9px 0 9px 13px;
-  border: 0;
-  border-left: 2px solid color-mix(in srgb, var(--nfc-premium-accent) 42%, var(--nfc-premium-line));
-  border-radius: 0;
-  background: transparent;
-}
-
-.nfc-dashboard-page .nfc-snapshot-note strong {
-  color: var(--nfc-premium-text);
-  font-weight: 620;
-}
-
-.nfc-dashboard-page .nfc-snapshot-note span {
-  color: var(--nfc-premium-subtle);
-}
+/* Dashboard composition is owned by pages/dashboard.css from v0.4.9 onward.
+ * Keep this historical layer out of rail borders, panel chrome and row radius
+ * so the current source styles do not have to fight an intermediate override.
+ */
 
 /* Dense operational pages — continuous ledger instead of cards */
 .nfc-indexes-page > .nfc-data-panel-dense,
@@ -448,45 +372,12 @@
 
 /* Responsive page composition */
 @media (max-width: 1199px) {
-  .nfc-dashboard-page .nfc-dashboard-layout {
-    grid-template-columns: 1fr;
-  }
-
-  .nfc-dashboard-page .nfc-dashboard-rail {
-    position: static;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 22px;
-    padding-left: 0;
-    border-left: 0;
-  }
-
-  .nfc-dashboard-page .nfc-dashboard-rail > .nfc-data-panel + .nfc-data-panel {
-    margin-top: 0;
-    padding-top: 0;
-    padding-left: 22px;
-    border-top: 0 !important;
-    border-left: 1px solid var(--nfc-premium-line) !important;
-  }
-
   .nfc-system-controls-page .nfc-settings-grid {
     gap: 26px;
   }
 }
 
 @media (max-width: 767px) {
-  .nfc-dashboard-page .nfc-dashboard-rail {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 18px;
-  }
-
-  .nfc-dashboard-page .nfc-dashboard-rail > .nfc-data-panel + .nfc-data-panel {
-    padding-top: 18px;
-    padding-left: 0;
-    border-top: 1px solid var(--nfc-premium-line) !important;
-    border-left: 0 !important;
-  }
-
   .nfc-plan-detail-page .nfc-lifecycle-strip {
     grid-template-columns: 1fr 1fr;
   }
