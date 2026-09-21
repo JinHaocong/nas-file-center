@@ -378,6 +378,10 @@ def test_hash_drift_after_enqueue_cannot_create_durable_intent(monkeypatch, tmp_
     # executor must still hash the exact opened file before it commits durable
     # unlink intent.
     monkeypatch.setattr(
+        "app.tasks.handlers_base.verify_item_freshness",
+        lambda *_args, **_kwargs: (True, None),
+    )
+    monkeypatch.setattr(
         "app.tasks.handlers_base._verify_plan_item_and_keep_freshness",
         lambda *_args, **_kwargs: (True, None),
     )
