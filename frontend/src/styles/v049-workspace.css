@@ -301,17 +301,6 @@ body,
   min-width: 0;
 }
 
-.nfc-operations-page > * + *,
-.nfc-dashboard-page > * + *,
-.nfc-organizer-preview-page > * + *,
-.nfc-workflow-builder-page > * + *,
-.nfc-plan-detail-page > * + *,
-.nfc-scan-detail-page > * + *,
-.nfc-advanced-dedupe-page > * + *,
-.nfc-system-controls-page > * + * {
-  margin-top: var(--nfc-v49-section-gap);
-}
-
 .nfc-operations-page > .nfc-page-header,
 .nfc-dashboard-page > .nfc-page-header,
 .nfc-organizer-preview-page > .nfc-page-header,
