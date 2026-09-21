@@ -1146,7 +1146,7 @@ body,
 /* Overlays ---------------------------------------------------------------- */
 
 .ant-modal .ant-modal-content,
-.ant-drawer .ant-drawer-content,
+.nfc-overlay-drawer .ant-drawer-content,
 .ant-dropdown .ant-dropdown-menu,
 .ant-popover .ant-popover-inner,
 .ant-select-dropdown {
@@ -1184,13 +1184,13 @@ body,
   border-top: 1px solid var(--nfc-v49-line) !important;
 }
 
-.ant-drawer .ant-drawer-header {
+.nfc-overlay-drawer .ant-drawer-header {
   min-height: 60px;
   padding: 12px 15px;
   border-bottom-color: var(--nfc-v49-line);
 }
 
-.ant-drawer .ant-drawer-body {
+.nfc-overlay-drawer .ant-drawer-body {
   padding: 15px;
 }
 
@@ -1491,7 +1491,7 @@ body,
     padding: 10px 15px max(13px, env(safe-area-inset-bottom));
   }
 
-  .ant-drawer .ant-drawer-body {
+  .nfc-overlay-drawer .ant-drawer-body {
     padding: 12px;
   }
 
