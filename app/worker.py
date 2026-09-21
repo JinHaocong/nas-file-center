@@ -36,6 +36,43 @@ from app.tasks.state_machine import (
 from app.tasks.sync import sync_batch_plan_status, sync_scan_job_status
 
 
+def _build_incomplete_plan_error_text(
+    plan_id: int,
+    plan_status: str,
+    items: list[BatchPlanItem],
+) -> str:
+    """Build a concise failure summary without mislabeling unexecuted validated rows."""
+
+    failed_items = [item for item in items if item.state == "failed"]
+    if failed_items:
+        problem_items = failed_items[:3]
+    else:
+        problem_items = [item for item in items if item.state != "completed"][:3]
+
+    parts = [f"Batch plan #{plan_id} finished with status {plan_status}"]
+    if problem_items:
+        parts.extend(
+            f"item #{item.sequence} {item.operation}: {item.reason or item.state}"
+            for item in problem_items
+        )
+    else:
+        parts.append("inspect plan items for details")
+
+    if failed_items:
+        remaining_unexecuted = sum(
+            1
+            for item in items
+            if item.state not in {"completed", "failed"}
+        )
+        if remaining_unexecuted:
+            suffix = "item" if remaining_unexecuted == 1 else "items"
+            parts.append(
+                f"{remaining_unexecuted} remaining {suffix} were not executed after the fail-closed stop"
+            )
+
+    return "; ".join(parts)
+
+
 def process_work_job(
     settings: Settings,
     work_job_id: int,
@@ -190,30 +227,17 @@ def process_work_job(
                     work.status = JobState.FAILED.value
                     work.finished_at = now
                     work.heartbeat_at = now
-                    problem_items = list(
+                    plan_items = list(
                         session.scalars(
                             select(BatchPlanItem)
-                            .where(
-                                BatchPlanItem.plan_id == linked_plan.id,
-                                BatchPlanItem.state != "completed",
-                            )
+                            .where(BatchPlanItem.plan_id == linked_plan.id)
                             .order_by(BatchPlanItem.sequence)
-                            .limit(3)
                         )
                     )
-                    problem_summary = "; ".join(
-                        f"item #{item.sequence} {item.operation}: "
-                        f"{item.reason or item.state}"
-                        for item in problem_items
-                    )
-                    work.error_text = (
-                        f"Batch plan #{linked_plan.id} finished with status "
-                        f"{linked_plan.status}"
-                        + (
-                            f"; {problem_summary}"
-                            if problem_summary
-                            else "; inspect plan items for details"
-                        )
+                    work.error_text = _build_incomplete_plan_error_text(
+                        linked_plan.id,
+                        linked_plan.status,
+                        plan_items,
                     )
                     work.error_code = "BATCH_PLAN_NOT_COMPLETED"
                     log_task_event(
