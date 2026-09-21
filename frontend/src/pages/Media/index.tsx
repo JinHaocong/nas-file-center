@@ -294,7 +294,7 @@ export const MediaPage: React.FC = () => {
         className="nfc-panel-flush"
         action={<span className="nfc-panel-count">{mediaQuery.data?.total ?? 0} assets</span>}
       >
-        <div className="nfc-filter-toolbar">
+        <div className="nfc-filter-bar">
           <Select
             allowClear
             showSearch
@@ -337,7 +337,7 @@ export const MediaPage: React.FC = () => {
             style={{ minWidth: 240 }}
           />
           <Button onClick={() => { setSearchApplied(search.trim()); setPage(1); }}>搜索</Button>
-          <div className="nfc-toolbar-spacer" />
+          <div style={{ marginLeft: 'auto' }} />
           <Tooltip title={!isAdmin ? '仅管理员可以永久删除损坏媒体' : selectedIds.length === 0 ? '请选择可永久删除的 corrupt 条目' : '不会进入隔离区，将直接永久 unlink 原文件'}>
             <Button
               danger
@@ -356,7 +356,7 @@ export const MediaPage: React.FC = () => {
           showIcon
           message="永久删除会绕过文件隔离区"
           description="仅 corrupt + frozen SHA256 证据有效的条目可选；执行阶段再次校验 identity 与 SHA256。healthy / unknown 永远不会进入此删除动作。"
-          className="nfc-inline-alert"
+          className="nfc-page-alert"
         />
 
         <ResponsiveDataView
@@ -394,7 +394,7 @@ export const MediaPage: React.FC = () => {
                 {rows.length === 0 ? (
                   <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无媒体分析结果" />
                 ) : rows.map((record) => (
-                  <article className="nfc-mobile-record-card" key={record.id}>
+                  <article className="nfc-index-mobile-card" key={record.id}>
                     <div className="nfc-mobile-record-heading">
                       <div className="nfc-path-cell">
                         {record.media_kind === 'image' ? <PictureOutlined /> : <VideoCameraOutlined />}
