@@ -1359,6 +1359,7 @@ def bulk_delete_quarantine_records(
             payload.entry_ids,
             confirmation=payload.confirmation,
             is_admin=True,
+            user_id=admin_user.id,
         )
     except KeyError as exc:
         raise HTTPException(404, str(exc)) from exc
@@ -1414,6 +1415,7 @@ def delete_quarantine_record(
             id,
             confirmation=confirmation,
             is_admin=True,
+            user_id=admin_user.id,
         )
     except KeyError as exc:
         raise HTTPException(404, str(exc)) from exc
