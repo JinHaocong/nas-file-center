@@ -30,7 +30,7 @@ describe('v0.4.2 taste principles carried into the current control plane', () =>
 
   test('dashboard retains a deliberate main-column and operational rail composition', () => {
     const css = read('src/styles/pages/dashboard.css');
-    assert.match(css, /grid-template-columns:\s*minmax\(0, 1\.7fr\)\s+minmax\(300px, 0\.72fr\)/);
+    assert.match(css, /grid-template-columns:\\s*minmax\\(0, 1\\.82fr\\)\\s+minmax\\(284px, 0\\.58fr\\)/);
     assert.ok(css.includes('.nfc-dashboard-rail'));
   });
 
