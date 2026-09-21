@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.config import Settings
 from app.main import create_app
@@ -125,7 +125,7 @@ def _seed_restored_with_artifacts(
 def _run_cleanup_job(env: dict, job_id: int, *, worker_id: str = "cleanup-test-worker") -> bool:
     service = env["service"]
     with service.SessionLocal() as session:
-        session.execute("BEGIN IMMEDIATE")
+        session.execute(text("BEGIN IMMEDIATE"))
         lock = session.get(TaskLock, 1)
         if lock is None:
             lock = TaskLock(
