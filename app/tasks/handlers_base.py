@@ -3727,3 +3727,57 @@ class BatchPlanExecuteHandler(TaskHandler):
                 f"Plan #{plan_id} execution finished (status: {final_plan_status})"
             ),
         )
+
+
+@register_handler
+class QuarantineRecordCleanupHandler(TaskHandler):
+    job_type = "quarantine-record-cleanup"
+    supports_pause = False
+    supports_cancel = False
+    supports_retry = False
+    supports_resume = False
+
+    def run(self, job: WorkJob, context: JobContext, settings: Settings) -> None:
+        if not context.worker_id:
+            raise PermissionError("Quarantine record cleanup requires active Worker authority")
+
+        state = json.loads(job.state_json or "{}")
+        raw_ids = state.get("entry_ids")
+        if not isinstance(raw_ids, list) or not raw_ids:
+            raise ValueError("Quarantine cleanup job is missing entry_ids")
+        entry_ids = [int(value) for value in raw_ids]
+        user_id = state.get("requested_by_user_id")
+
+        context.checkpoint(
+            progress_current=0,
+            progress_total=len(entry_ids),
+            progress_message=f"Cleaning {len(entry_ids)} quarantine records...",
+        )
+
+        from app.service import FileCenterService
+
+        service = FileCenterService(settings)
+        result = service.execute_quarantine_record_cleanup_job(
+            entry_ids,
+            worker_id=context.worker_id,
+            job_id=int(job.id),
+            user_id=user_id,
+        )
+
+        context.checkpoint(
+            progress_current=len(entry_ids),
+            progress_total=len(entry_ids),
+            progress_message=(
+                f"Quarantine cleanup completed: {result['deleted_count']} records, "
+                f"{result['removed_artifact_count']} private artifacts retired"
+            ),
+            checkpoint_data={
+                "schema_version": 1,
+                "result": result,
+            },
+        )
+        context.log(
+            "quarantine_record_cleanup_completed",
+            "Restored quarantine cleanup completed",
+            context=result,
+        )
