@@ -55,7 +55,7 @@ export const quarantineApi = {
     do {
       const response = await quarantineApi.list({ ...params, page, pageSize });
       total = response.total;
-      entryIds.push(...response.items.filter((entry) => ['purged', 'abandoned', 'conflict'].includes(entry.state)).map((entry) => entry.id));
+      entryIds.push(...response.items.filter((entry) => ['restored', 'purged', 'abandoned', 'conflict'].includes(entry.state)).map((entry) => entry.id));
       if (entryIds.length > 5000) {
         throw new Error('批量删除隔离记录最多支持 5000 条');
       }
