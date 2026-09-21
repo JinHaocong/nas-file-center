@@ -65,3 +65,46 @@ describe('v0.4.8 premium console visual system', () => {
     assert.match(css, /\[data-theme='dark'\][\s\S]*--nfc-premium-line:/);
   });
 });
+
+
+describe('v0.4.8 page composition pass', () => {
+  test('page composition layer loads after the global premium console layer', () => {
+    const main = read('src/main.tsx');
+    assert.match(
+      main,
+      /import '\.\/styles\/v048\.css';[\s\S]*import '\.\/styles\/v048-pages\.css';/
+    );
+  });
+
+  test('page composition layer keeps the approved navigation untouched', () => {
+    const css = read('src/styles/v048-pages.css');
+    assert.doesNotMatch(css, /\.nfc-sidebar(?:\b|\.)/);
+    assert.doesNotMatch(css, /\.nfc-sidebar-menu(?:\b|\.)/);
+    assert.doesNotMatch(css, /\.nfc-brand(?:\b|\.)/);
+  });
+
+  test('dashboard uses a contextual rail instead of stacked right-side cards', () => {
+    const css = read('src/styles/v048-pages.css');
+    assert.match(css, /\.nfc-dashboard-page \.nfc-dashboard-rail[\s\S]*border-left: 1px solid var\(--nfc-premium-line\)/);
+    assert.match(css, /\.nfc-dashboard-page \.nfc-dashboard-rail > \.nfc-data-panel[\s\S]*border: 0 !important[\s\S]*background: transparent !important/);
+  });
+
+  test('dense operational pages are continuous ledgers', () => {
+    const css = read('src/styles/v048-pages.css');
+    assert.match(css, /\.nfc-indexes-page > \.nfc-data-panel-dense/);
+    assert.match(css, /\.nfc-quarantine-page > \.nfc-data-panel-dense/);
+    assert.match(css, /border-radius: 0 !important/);
+  });
+
+  test('workflow steps become one editing flow instead of card stack chrome', () => {
+    const css = read('src/styles/v048-pages.css');
+    assert.match(css, /\.nfc-workflow-builder-page \.nfc-workflow-step-card[\s\S]*border-bottom: 1px solid var\(--nfc-premium-line\)/);
+    assert.match(css, /\.nfc-workflow-builder-page \.nfc-workflow-step-card\.is-expanded[\s\S]*border-left: 2px solid/);
+  });
+
+  test('settings top-level panels are editorial columns while danger stays explicit', () => {
+    const css = read('src/styles/v048-pages.css');
+    assert.match(css, /\.nfc-system-controls-page \.nfc-settings-grid > \.nfc-data-panel[\s\S]*border: 0 !important/);
+    assert.match(css, /\.nfc-system-controls-page \.nfc-settings-subpanel-danger[\s\S]*border: 1px solid/);
+  });
+});
