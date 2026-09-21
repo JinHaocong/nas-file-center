@@ -243,7 +243,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
       open={open}
       onCancel={onCancel}
       className="nfc-directory-picker-modal nfc-overlay-modal"
-      width={isMobile ? 'calc(100vw - 16px)' : 760}
+      width={isMobile ? 'calc(100vw - 16px)' : 860}
       destroyOnClose
       footer={
         <div className="nfc-directory-picker-footer">
