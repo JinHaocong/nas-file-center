@@ -348,11 +348,36 @@ def execute_item(
         )
 
     if (
-        item.operation in {"unlink", "rmdir_empty", "quarantine_purge", "quarantine_unlink_purge"}
+        item.operation in {"unlink", "rmdir_empty", "quarantine_purge", "quarantine_unlink_purge", "media_corrupt_unlink_delete"}
         and not allow_delete
         and not utility_empty_cleanup_authorized
     ):
         return _skip("permanent deletion is disabled")
+    if item.operation == "media_corrupt_unlink_delete":
+        if not session_factory or not worker_id:
+            return ItemResult(
+                "failed",
+                "MEDIA_CORRUPT_DELETE_AUTHORITY_MISSING: worker authority and session_factory are required",
+            )
+        try:
+            from app.media.corrupt_delete import execute_corrupt_media_delete
+
+            reason = execute_corrupt_media_delete(
+                item,
+                plan_id=plan_id,
+                allowed_roots=allowed_roots,
+                quarantine_root=quarantine_root,
+                session_factory=session_factory,
+                worker_id=worker_id,
+            )
+        except Exception as exc:
+            from app.tasks.state_machine import JobLeaseLost
+
+            if isinstance(exc, JobLeaseLost):
+                raise
+            return ItemResult("failed", str(exc))
+        return ItemResult("completed", reason)
+
     if item.operation == "quarantine_unlink_purge":
         if not session_factory or not worker_id:
             return ItemResult(
