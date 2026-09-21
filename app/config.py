@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     quarantine_root: Path = Field(default=Path("/data/.nas-file-center-trash"), validation_alias="QUARANTINE_ROOT")
     protect_last_file: bool = Field(default=True, validation_alias="PROTECT_LAST_FILE")
     fclones_binary: str = Field(default="fclones", validation_alias="FCLONES_BINARY")
+    ffprobe_binary: str = Field(default="ffprobe", validation_alias="FFPROBE_BINARY")
     fclones_threads: str | None = Field(default=None, validation_alias="FCLONES_THREADS")
     verification_hash: str = Field(default="sha256", validation_alias="VERIFICATION_HASH")
     mtime_refresh_delay_seconds: float = Field(default=2.0, validation_alias="MTIME_REFRESH_DELAY_SECONDS")

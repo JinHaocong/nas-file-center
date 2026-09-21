@@ -1825,6 +1825,52 @@ class FileCenterService:
                 item_validations[row.id] = ("validated", "mkdir_empty destination validated", None)
                 continue
 
+            if plan_kind == "media-corrupt-delete":
+                if row.operation != "media_corrupt_unlink_delete":
+                    media_reason = "MEDIA_CORRUPT_DELETE_AUTHORITY_CHANGED: unexpected operation"
+                    stale_items.append(StaleItemDetail(
+                        item_id=row.id,
+                        source_path=row.source_path,
+                        reason=media_reason,
+                        expected={
+                            "device": row.expected_device,
+                            "inode": row.expected_inode,
+                            "size": row.expected_size,
+                            "mtime_ns": row.expected_mtime_ns,
+                            "hash": row.expected_hash,
+                        },
+                        actual=None,
+                    ))
+                    item_validations[row.id] = ("stale", media_reason, None)
+                    continue
+                try:
+                    from app.media.corrupt_delete import (
+                        assert_corrupt_delete_frozen_evidence_current,
+                    )
+                    assert_corrupt_delete_frozen_evidence_current(
+                        self.SessionLocal,
+                        self.settings,
+                        plan_id=plan_id,
+                        item_id=int(row.id),
+                    )
+                except Exception as exc:
+                    media_reason = str(exc)
+                    stale_items.append(StaleItemDetail(
+                        item_id=row.id,
+                        source_path=row.source_path,
+                        reason=media_reason,
+                        expected={
+                            "device": row.expected_device,
+                            "inode": row.expected_inode,
+                            "size": row.expected_size,
+                            "mtime_ns": row.expected_mtime_ns,
+                            "hash": row.expected_hash,
+                        },
+                        actual=None,
+                    ))
+                    item_validations[row.id] = ("stale", media_reason, None)
+                    continue
+
             is_fresh, stale_detail = verify_item_freshness(
                 item_id=row.id,
                 source_path=row.source_path,
@@ -2070,6 +2116,10 @@ class FileCenterService:
                     raise ValueError("Operation 'unlink' is deprecated and cannot be used in new plans. Use 'quarantine' instead.")
                 if operation == "restore":
                     raise ValueError("Operation 'restore' is reserved for system undo plans")
+                if operation == "media_corrupt_unlink_delete":
+                    raise ValueError(
+                        "Operation 'media_corrupt_unlink_delete' is reserved for the Gate6-D media evidence API"
+                    )
 
                 source = require_unreserved_path(
                     require_allowed_path(raw["source"], self.settings.allowed_roots),
@@ -2643,6 +2693,11 @@ class FileCenterService:
             if recursive_direct_execute:
                 raise StateConflictError(
                     "recursive directory balance execution requires the Worker live preflight; "
+                    "synchronous execute_plan is not an authorized mutation path"
+                )
+            if plan.kind == "media-corrupt-delete":
+                raise StateConflictError(
+                    "corrupt-media permanent deletion requires the Worker durable unlink authority; "
                     "synchronous execute_plan is not an authorized mutation path"
                 )
 

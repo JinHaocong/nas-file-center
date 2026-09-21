@@ -364,3 +364,5 @@ export * from './task';
 export * from './quarantine';
 export * from './journal';
 export * from './workflow';
+
+export * from './media';

@@ -3238,10 +3238,12 @@ class BatchPlanExecuteHandler(TaskHandler):
                         purge_manifest=purge_manifest,
                         negative_capability_probe_cache=negative_capability_probe_cache,
                     )
+            except JobLeaseLost:
+                raise
             except Exception as exc:
                 result = ItemResult(
                     "failed",
-                    f"Utility live wrapper binding failed: {exc}",
+                    f"Filesystem operation failed: {exc}",
                 )
 
             after_size = None
@@ -3433,7 +3435,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                             q_entry.last_error = result.reason
                             q_entry.updated_at = now
 
-                if result.state == "completed":
+                if result.state == "completed" and row.operation != "media_corrupt_unlink_delete":
                     if row.operation == "rmdir_empty":
                         item_meta_json = json.loads(row.metadata_json or "{}")
                         b_json = json.dumps({
@@ -3642,25 +3644,29 @@ class BatchPlanExecuteHandler(TaskHandler):
                                 }, ensure_ascii=False),
                             ))
 
-                session.add(AuditEvent(
-                    operation=row.operation,
-                    path=row.source_path,
-                    result=result.state,
-                    details_json=json.dumps({
-                        "plan_id": plan_id,
-                        "item_id": row.id,
-                        "task_id": job.id,
-                        "quarantine_entry_id": q_purge_entry_id or q_entry_id or q_restore_entry_id,
-                        "preview_digest": metadata.get("preview_digest") if row.operation == "quarantine_purge" else None,
-                        "reason": result.reason,
-                        "target": row.target_path,
-                        "result_path": str(result.result_path) if result.result_path else None,
-                        "conflict_policy": (
-                            metadata.get("conflict_policy")
-                            if row.operation == "restore" and is_gate6a_bulk_restore else None
-                        ),
-                    }, ensure_ascii=False),
-                ))
+                if not (
+                    row.operation == "media_corrupt_unlink_delete"
+                    and result.state == "completed"
+                ):
+                    session.add(AuditEvent(
+                        operation=row.operation,
+                        path=row.source_path,
+                        result=result.state,
+                        details_json=json.dumps({
+                            "plan_id": plan_id,
+                            "item_id": row.id,
+                            "task_id": job.id,
+                            "quarantine_entry_id": q_purge_entry_id or q_entry_id or q_restore_entry_id,
+                            "preview_digest": metadata.get("preview_digest") if row.operation == "quarantine_purge" else None,
+                            "reason": result.reason,
+                            "target": row.target_path,
+                            "result_path": str(result.result_path) if result.result_path else None,
+                            "conflict_policy": (
+                                metadata.get("conflict_policy")
+                                if row.operation == "restore" and is_gate6a_bulk_restore else None
+                            ),
+                        }, ensure_ascii=False),
+                    ))
                 session.commit()
 
             if item_meta.operation == "move" and result.state == "completed":

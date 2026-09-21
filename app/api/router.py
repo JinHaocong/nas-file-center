@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from typing import Any, Literal
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
@@ -20,7 +21,9 @@ from app.batch_utilities.errors import (
     BatchUtilityError,
     BatchUtilityInvalidConfigError,
 )
-from app.models import User
+from app.models import BatchPlan, User, WorkJob
+from app.media.catalog import enqueue_media_analysis, list_media_assets, media_summary
+from app.media.corrupt_delete import build_corrupt_delete_preview, create_corrupt_delete_plan
 from app.path_safety import UnsafePathError
 from app.service import StateConflictError
 from app.planning.dedupe_preview import (
@@ -50,6 +53,32 @@ from app.workflows.schema import (
 
 
 router = APIRouter(prefix="/api", tags=["file-center"], dependencies=[Depends(get_current_user)])
+
+
+def _require_media_corrupt_plan_admin(request: Request, plan_id: int, user: User) -> None:
+    """Keep generic plan permissions unchanged while fencing irreversible Gate6-D plans."""
+    with request.app.state.service.SessionLocal() as session:
+        plan = session.get(BatchPlan, plan_id)
+        if plan is not None and plan.kind == "media-corrupt-delete" and user.role != "admin":
+            raise HTTPException(403, "Only administrator can manage corrupt-media permanent-delete plans")
+
+
+def _require_media_corrupt_task_admin(request: Request, task_id: int, user: User) -> None:
+    """Fence resume/retry of an irreversible Gate6-D plan execution."""
+    with request.app.state.service.SessionLocal() as session:
+        task = session.get(WorkJob, task_id)
+        if task is None or task.kind != "batch-plan-execute":
+            return
+        try:
+            payload = json.loads(task.state_json or "{}")
+        except Exception:
+            return
+        raw_plan_id = payload.get("plan_id") if isinstance(payload, dict) else None
+        if not isinstance(raw_plan_id, int) or isinstance(raw_plan_id, bool):
+            return
+        plan = session.get(BatchPlan, raw_plan_id)
+        if plan is not None and plan.kind == "media-corrupt-delete" and user.role != "admin":
+            raise HTTPException(403, "Only administrator can resume or retry corrupt-media permanent-delete tasks")
 
 
 class QuarantineRestoreRequest(BaseModel):
@@ -101,6 +130,21 @@ class IndexMatchRequest(BaseModel):
     mode: str = "relative-path"
     normalize_pattern: str | None = None
     normalize_replacement: str = ""
+
+
+class MediaAnalyzeRequest(BaseModel):
+    root_keys: list[str] = Field(min_length=1, max_length=100)
+
+class MediaCorruptDeletePreviewRequest(BaseModel):
+    media_asset_ids: list[int] = Field(min_length=1, max_length=5000)
+
+
+class MediaCorruptDeletePlanRequest(BaseModel):
+    media_asset_ids: list[int] = Field(min_length=1, max_length=5000)
+    expected_preview_digest: str = Field(min_length=64, max_length=64)
+    confirmation: str
+
+
 
 
 class ScanCreateRequest(BaseModel):
@@ -518,6 +562,88 @@ def index_match(request: Request, payload: IndexMatchRequest):
         raise HTTPException(400, str(exc)) from exc
 
 
+
+# Media Metadata + Integrity
+@router.get("/media")
+def list_media(
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+    root_key: str | None = Query(default=None),
+    media_kind: str | None = Query(default=None),
+    integrity_status: str | None = Query(default=None),
+    search: str | None = Query(default=None),
+):
+    try:
+        return list_media_assets(
+            request.app.state.service.SessionLocal,
+            page=page,
+            page_size=page_size,
+            root_key=root_key,
+            media_kind=media_kind,
+            integrity_status=integrity_status,
+            search=search,
+        )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.get("/media/summary")
+def get_media_summary(request: Request):
+    return media_summary(request.app.state.service.SessionLocal)
+
+
+@router.post("/media/analyze")
+def analyze_media(request: Request, payload: MediaAnalyzeRequest):
+    try:
+        return enqueue_media_analysis(
+            request.app.state.service.SessionLocal,
+            request.app.state.settings,
+            payload.root_keys,
+        )
+    except (ValueError, OSError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+
+@router.post("/media/corrupt-delete/preview")
+def preview_corrupt_media_delete(
+    request: Request,
+    payload: MediaCorruptDeletePreviewRequest,
+    _admin_user: User = Depends(require_admin_user),
+):
+    try:
+        return build_corrupt_delete_preview(
+            request.app.state.service.SessionLocal,
+            request.app.state.settings,
+            payload.media_asset_ids,
+        )
+    except (ValueError, OSError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.post("/media/corrupt-delete/plan")
+def create_corrupt_media_delete_plan(
+    request: Request,
+    payload: MediaCorruptDeletePlanRequest,
+    admin_user: User = Depends(require_admin_user),
+):
+    try:
+        return create_corrupt_delete_plan(
+            request.app.state.service.SessionLocal,
+            request.app.state.settings,
+            asset_ids=payload.media_asset_ids,
+            expected_preview_digest=payload.expected_preview_digest,
+            confirmation=payload.confirmation,
+            requested_by_user_id=admin_user.id,
+        )
+    except StateConflictError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except (ValueError, OSError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+
 # Scans
 @router.get("/scans")
 def list_scans(
@@ -693,7 +819,12 @@ def pause_task(request: Request, task_id: int):
 
 
 @router.post("/tasks/{task_id}/resume")
-def resume_task(request: Request, task_id: int):
+def resume_task(
+    request: Request,
+    task_id: int,
+    current_user: User = Depends(get_current_user),
+):
+    _require_media_corrupt_task_admin(request, task_id, current_user)
     try:
         return request.app.state.service.resume_task(task_id)
     except KeyError as exc:
@@ -718,6 +849,7 @@ def retry_task(
     task_id: int,
     current_user: User = Depends(get_current_user),
 ):
+    _require_media_corrupt_task_admin(request, task_id, current_user)
     try:
         return request.app.state.service.retry_task(task_id, user_id=current_user.id)
     except KeyError as exc:
@@ -1053,7 +1185,12 @@ def plan_items(
 
 
 @router.post("/plans/{plan_id}/freeze")
-def freeze(request: Request, plan_id: int):
+def freeze(
+    request: Request,
+    plan_id: int,
+    current_user: User = Depends(get_current_user),
+):
+    _require_media_corrupt_plan_admin(request, plan_id, current_user)
     try:
         plan = request.app.state.service.freeze_plan(plan_id)
         return {"id": plan.id, "status": plan.status}
@@ -1064,7 +1201,12 @@ def freeze(request: Request, plan_id: int):
 
 
 @router.post("/plans/{plan_id}/validate")
-def validate(request: Request, plan_id: int):
+def validate(
+    request: Request,
+    plan_id: int,
+    current_user: User = Depends(get_current_user),
+):
+    _require_media_corrupt_plan_admin(request, plan_id, current_user)
     try:
         return request.app.state.service.validate_plan(plan_id)
     except KeyError as exc:
@@ -1079,6 +1221,7 @@ def execute(
     plan_id: int,
     current_user: User = Depends(get_current_user),
 ):
+    _require_media_corrupt_plan_admin(request, plan_id, current_user)
     try:
         return request.app.state.service.enqueue_plan_execution(plan_id, user_id=current_user.id)
     except PlanStaleError as exc:

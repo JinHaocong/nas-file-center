@@ -237,6 +237,52 @@ class IndexedPath(Base):
     scan_generation: Mapped[str] = mapped_column(String(128), index=True)
 
 
+class MediaAsset(Base):
+    __tablename__ = "media_assets"
+    __table_args__ = (
+        Index("ix_media_assets_kind", "media_kind"),
+        Index("ix_media_assets_integrity", "integrity_status"),
+        Index("ix_media_assets_probed_at", "probed_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    indexed_path_id: Mapped[int] = mapped_column(
+        ForeignKey("indexed_paths.id", ondelete="CASCADE"),
+        unique=True,
+        nullable=False,
+        index=True,
+    )
+    media_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+
+    width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    format: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    date_taken: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    camera: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    orientation: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    codec: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    bitrate: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    fps: Mapped[float | None] = mapped_column(Float, nullable=True)
+    audio_codec: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+    integrity_status: Mapped[str] = mapped_column(String(16), default="unknown", nullable=False, index=True)
+    integrity_reason_code: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    integrity_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    observed_device: Mapped[int] = mapped_column(FilesystemId(), default=0, nullable=False)
+    observed_inode: Mapped[int] = mapped_column(FilesystemId(), default=0, nullable=False)
+    observed_size: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    observed_mtime_ns: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    corrupt_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    source_scan_generation: Mapped[str] = mapped_column(String(128), nullable=False)
+    probe_generation: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    probed_at: Mapped[datetime] = mapped_column(default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow, nullable=False)
+
+
 class BatchPlan(Base):
     __tablename__ = "batch_plans"
 

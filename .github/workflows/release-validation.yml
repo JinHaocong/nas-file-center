@@ -107,6 +107,8 @@ jobs:
           docker image inspect --format 'id={{.Id}} os={{.Os}} arch={{.Architecture}} created={{.Created}}' "${TAG}" | tee -a docker-evidence.txt
           test "$(docker image inspect --format '{{.Architecture}}' "${TAG}")" = "amd64"
           test "$(docker image inspect --format '{{.Os}}' "${TAG}")" = "linux"
+          docker run --rm --entrypoint ffprobe "${TAG}" -version | tee -a docker-evidence.txt
+          docker run --rm --entrypoint python "${TAG}" -c "from PIL import Image; print('Pillow', Image.__version__)" | tee -a docker-evidence.txt
 
       - name: Upload Docker evidence
         if: always()
