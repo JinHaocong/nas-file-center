@@ -4489,6 +4489,7 @@ class FileCenterService:
                 "verified staging cleanup is blocked"
             )
 
+        quarantine_root = Path(self.settings.quarantine_root)
         generation = int(entry.active_attempt_generation or 0)
         if generation <= 0:
             raise StateConflictError(
@@ -4538,7 +4539,6 @@ class FileCenterService:
 
         source_path = Path(entry.original_path)
         valid_roots = list(self.settings.allowed_roots)
-        quarantine_root = Path(self.settings.quarantine_root)
         if quarantine_root not in [Path(root) for root in valid_roots]:
             valid_roots.append(quarantine_root)
 
