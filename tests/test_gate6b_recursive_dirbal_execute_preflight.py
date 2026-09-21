@@ -10,7 +10,11 @@ from app.config import Settings
 from app.exceptions import StateConflictError
 from app.models import BatchPlan, BatchPlanItem, QuarantineEntry, TaskLock, WorkJob, utcnow
 from app.planning.dedupe_engine import directory_ancestors_to_scan_root
-from app.planning.recursive_protection import RecursiveProtectionLiveChain, RecursiveProtectionLiveCount
+from app.planning.recursive_protection import (
+    RecursiveProtectionBindingChain,
+    RecursiveProtectionLiveChain,
+    RecursiveProtectionLiveCount,
+)
 from app.service import FileCenterService
 from app.tasks.context import JobContext
 from app.tasks.handlers import get_handler
@@ -95,6 +99,52 @@ def _create_ready_recursive_plan(
             },
             ensure_ascii=False,
         )
+        session.commit()
+
+    service.freeze_plan(plan.id)
+    detail = service.validate_plan(plan.id)
+    assert detail["status"] == "ready"
+    return int(plan.id)
+
+
+def _create_ready_recursive_multi_plan(
+    service: FileCenterService,
+    settings: Settings,
+    root: Path,
+    sources: list[Path],
+    *,
+    token: str,
+) -> int:
+    plan = service.create_plan(
+        name=f"recursive execute {token}",
+        kind="dedupe",
+        items=[
+            {"source": str(source), "operation": "quarantine"}
+            for source in sources
+        ],
+        metadata={"selection_mode": RECURSIVE_MODE},
+    )
+    with service.SessionLocal() as session:
+        rows = list(
+            session.scalars(
+                select(BatchPlanItem)
+                .where(BatchPlanItem.plan_id == plan.id)
+                .order_by(BatchPlanItem.sequence)
+            )
+        )
+        assert len(rows) == len(sources)
+        for row, source in zip(rows, sources):
+            row.metadata_json = json.dumps(
+                {
+                    "protected_dir": str(source.parent),
+                    "recursive_protection": _recursive_authority(
+                        source,
+                        root,
+                        token=f"{token}-{row.sequence}",
+                    ),
+                },
+                ensure_ascii=False,
+            )
         session.commit()
 
     service.freeze_plan(plan.id)
@@ -522,3 +572,127 @@ def test_worker_recursive_preflight_reports_directory_replacement_identity(tmp_p
     assert "frozen dev:ino=" in reason
     assert "current dev:ino=" in reason
     assert "regenerate the plan from a fresh scan" in reason
+
+
+def test_recursive_worker_rolls_trusted_directory_binding_after_completed_quarantine(
+    tmp_path: Path,
+    monkeypatch,
+):
+    """NAS/FUSE directory inode remaps caused by NFC's own unlink must not stale item N+1."""
+
+    from app.planning import recursive_protection
+
+    service, settings, root, _ = _setup_service(tmp_path)
+    protected = root / "set"
+    protected.mkdir()
+    source_a = protected / "a.bin"
+    source_b = protected / "b.bin"
+    survivor = protected / "keep.bin"
+    source_a.write_bytes(b"a")
+    source_b.write_bytes(b"b")
+    survivor.write_bytes(b"keep")
+
+    plan_id = _create_ready_recursive_multi_plan(
+        service,
+        settings,
+        root,
+        [source_a, source_b],
+        token="rolling-dir-binding",
+    )
+
+    real_live = recursive_protection.live_count_recursive_regular_file_chain
+    real_capture = recursive_protection.capture_recursive_directory_binding_chain
+    inode_offset = 10_000_000
+
+    def live_with_nas_inode_remap(directories, *, quarantine_root=None):
+        chain = real_live(directories, quarantine_root=quarantine_root)
+        if source_a.exists() or not chain.stable:
+            return chain
+        remapped = tuple(
+            (
+                path,
+                RecursiveProtectionLiveCount(
+                    count=sample.count,
+                    stable=sample.stable,
+                    device=sample.device,
+                    inode=(
+                        int(sample.inode) + inode_offset
+                        if path == str(protected) and sample.inode is not None
+                        else sample.inode
+                    ),
+                ),
+            )
+            for path, sample in chain.samples
+        )
+        return RecursiveProtectionLiveChain(
+            stable=True,
+            failure_path=None,
+            samples=remapped,
+        )
+
+    def capture_with_nas_inode_remap(directories):
+        captured = real_capture(directories)
+        if not captured.stable:
+            return captured
+        return RecursiveProtectionBindingChain(
+            stable=True,
+            failure_path=None,
+            bindings=tuple(
+                (
+                    path,
+                    device,
+                    inode + inode_offset if path == str(protected) else inode,
+                )
+                for path, device, inode in captured.bindings
+            ),
+        )
+
+    monkeypatch.setattr(
+        recursive_protection,
+        "live_count_recursive_regular_file_chain",
+        live_with_nas_inode_remap,
+    )
+    monkeypatch.setattr(
+        recursive_protection,
+        "capture_recursive_directory_binding_chain",
+        capture_with_nas_inode_remap,
+    )
+
+    _enqueue_and_run_worker(
+        service,
+        settings,
+        plan_id,
+        worker_id="gate6b-runtime-rebind",
+    )
+
+    assert not source_a.exists()
+    assert not source_b.exists()
+    assert survivor.exists()
+
+    with service.SessionLocal() as session:
+        plan = session.get(BatchPlan, plan_id)
+        assert plan is not None
+        assert plan.status == "completed"
+        rows = list(
+            session.scalars(
+                select(BatchPlanItem)
+                .where(BatchPlanItem.plan_id == plan_id)
+                .order_by(BatchPlanItem.sequence)
+            )
+        )
+        assert [row.state for row in rows] == ["completed", "completed"]
+        metadata = json.loads(plan.metadata_json or "{}")
+        runtime = metadata["execution"]["recursive_runtime_bindings"]
+        assert runtime[str(protected)]["after_sequence"] == 2
+        assert runtime[str(protected)]["inode"] > 0
+
+        for row in rows:
+            qentry = session.scalar(
+                select(QuarantineEntry).where(
+                    QuarantineEntry.plan_item_id == row.id
+                )
+            )
+            assert qentry is not None
+            assert qentry.state == "active"
+            assert not Path(qentry.original_path).exists()
+            assert Path(qentry.quarantine_path).exists()
