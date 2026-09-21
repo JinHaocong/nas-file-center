@@ -299,3 +299,105 @@ def test_bulk_purge_preview_digest_excludes_advisory_drift_but_binds_owned_autho
     assert third_item["eligible"] is False
     assert "IDENTITY_MISMATCH:public_view" in third_item["mutation_blockers"]
     assert third["preview_digest"] != first_digest
+
+
+def _seed_cross_storage_missing_payload_entry(
+    service: FileCenterService,
+    data: Path,
+    trash: Path,
+) -> int:
+    with service.SessionLocal() as session:
+        entry = QuarantineEntry(
+            original_path=str(data / "legacy-missing-source.bin"),
+            quarantine_path=str(trash / "legacy-missing-public.q.bin"),
+            state="active",
+            tx_phase="active",
+            transaction_mode="cross_storage_transactional",
+            active_attempt_generation=2,
+            size=8192,
+            content_hash=hashlib.sha256(b"legacy-missing-payload").hexdigest(),
+            mtime_ns=1003,
+            device=1001,
+            inode=1002,
+            quarantine_device=2001,
+            quarantine_inode=2002,
+            quarantine_mtime_ns=2003,
+            created_at=utcnow(),
+            updated_at=utcnow(),
+        )
+        session.add(entry)
+        session.commit()
+        return int(entry.id)
+
+
+def test_bulk_purge_preview_and_draft_accept_legacy_cross_storage_missing_payload(
+    tmp_path: Path,
+) -> None:
+    service, client, data, trash = _setup_api(tmp_path)
+    entry_id = _seed_cross_storage_missing_payload_entry(service, data, trash)
+
+    preview_response = client.post(
+        "/api/quarantine/bulk-preview",
+        json={"action": "purge", "entry_ids": [entry_id]},
+        headers={"Origin": "http://testserver"},
+    )
+    assert preview_response.status_code == 200, preview_response.text
+    preview = preview_response.json()
+    assert preview["eligible_count"] == 1
+    assert preview["blocked_count"] == 0
+    item = preview["items"][0]
+    assert item["entry_id"] == entry_id
+    assert item["eligible"] is True
+    assert item["mutation_blockers"] == []
+
+    plan_response = client.post(
+        "/api/quarantine/bulk-plan",
+        json={
+            "action": "purge",
+            "entry_ids": [entry_id],
+            "expected_preview_digest": preview["preview_digest"],
+            "confirmation": "DELETE",
+        },
+        headers={"Origin": "http://testserver"},
+    )
+    assert plan_response.status_code == 200, plan_response.text
+    assert plan_response.json()["kind"] == "quarantine-bulk-purge"
+
+
+def test_journaled_purge_terminalizes_legacy_cross_storage_missing_payload_without_unlink(
+    tmp_path: Path,
+) -> None:
+    from app.quarantine.unlink_purge import (
+        build_unlink_manifest,
+        execute_journaled_unlink_purge,
+    )
+
+    service, _client, data, trash = _setup_api(tmp_path)
+    entry_id = _seed_cross_storage_missing_payload_entry(service, data, trash)
+
+    with service.SessionLocal() as session:
+        entry = session.get(QuarantineEntry, entry_id)
+        assert entry is not None
+        manifest = build_unlink_manifest(entry, trash)
+        assert manifest["metadata_only_orphan"] is True
+        assert manifest["owned_paths"] == []
+
+    result = execute_journaled_unlink_purge(
+        service.SessionLocal,
+        entry_id=entry_id,
+        quarantine_root=trash,
+        frozen_manifest=manifest,
+        worker_id=None,
+    )
+
+    assert result["removed_count"] == 0
+    assert result["removed_roles"] == []
+    assert not Path(data / "legacy-missing-source.bin").exists()
+    assert not Path(trash / "legacy-missing-public.q.bin").exists()
+    assert not (trash / ".tx" / f"entry-{entry_id}").exists()
+
+    with service.SessionLocal() as session:
+        entry = session.get(QuarantineEntry, entry_id)
+        assert entry is not None
+        assert entry.state == "purged"
+        assert entry.tx_phase == "purged"
