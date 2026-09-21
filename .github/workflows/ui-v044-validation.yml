@@ -6,6 +6,7 @@ on:
       - ui/v0.4.4-audit-polish
       - ui/v0.4.6-*
       - ui/v0.4.7-*
+      - ui/v0.4.9-*
   pull_request:
     branches:
       - main

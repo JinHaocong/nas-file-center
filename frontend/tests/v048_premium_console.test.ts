@@ -172,3 +172,90 @@ describe('v0.4.8 detail polish pass', () => {
     assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*animation: none/);
   });
 });
+
+
+describe('v0.4.9 full workspace overhaul', () => {
+  test('loads after every v0.4.8 layer', () => {
+    const main = read('src/main.tsx');
+    assert.match(
+      main,
+      /import '\.\/styles\/v048-detail\.css';[\s\S]*import '\.\/styles\/v049-workspace\.css';/
+    );
+  });
+
+  test('does not override the approved left navigation', () => {
+    const css = read('src/styles/v049-workspace.css');
+    assert.doesNotMatch(css, /\.nfc-sidebar(?:\b|\.)/);
+    assert.doesNotMatch(css, /\.nfc-sidebar-menu(?:\b|\.)/);
+    assert.doesNotMatch(css, /\.nfc-brand(?:\b|\.)/);
+    assert.doesNotMatch(css, /\.nfc-nav-group-label(?:\b|\.)/);
+    assert.doesNotMatch(css, /\.nfc-mobile-nav-drawer(?:\b|\.)/);
+    assert.doesNotMatch(css, /\.ant-drawer \.ant-drawer-(?:content|header|body|footer)/);
+  });
+
+  test('resets global right-workspace gutter and content width', () => {
+    const css = read('src/styles/v049-workspace.css');
+    assert.match(css, /--nfc-v49-content-max:\s*1480px/);
+    assert.match(css, /\.nfc-page-content[\s\S]*padding:\s*28px 34px 56px/);
+    assert.match(css, /\.nfc-page-content > \*[\s\S]*var\(--nfc-v49-content-max\)/);
+  });
+
+  test('covers every major routed workspace family', () => {
+    const css = read('src/styles/v049-workspace.css');
+    for (const selector of [
+      '.nfc-dashboard-page',
+      '.nfc-indexes-page',
+      '.nfc-scans-page',
+      '.nfc-advanced-dedupe-page',
+      '.nfc-path-match-page',
+      '.nfc-rename-page',
+      '.nfc-batch-page',
+      '.nfc-organizer-page',
+      '.nfc-organizer-preview-page',
+      '.nfc-workflows-page',
+      '.nfc-workflow-builder-page',
+      '.nfc-plans-page',
+      '.nfc-plan-detail-page',
+      '.nfc-quarantine-page',
+      '.nfc-tasks-page',
+      '.nfc-audit-page',
+      '.nfc-system-controls-page',
+      '.nfc-login-shell',
+    ]) {
+      assert.ok(css.includes(selector), `missing v0.4.9 coverage for ${selector}`);
+    }
+  });
+
+  test('unifies shared table, form, modal, drawer and directory picker density', () => {
+    const css = read('src/styles/v049-workspace.css');
+    assert.match(css, /\.nfc-data-panel \.ant-table-tbody > tr[\s\S]*height:\s*44px/);
+    assert.match(css, /\.nfc-app-shell \.ant-form-item[\s\S]*margin-bottom:\s*16px/);
+    assert.match(css, /\.ant-modal \.ant-modal-body[\s\S]*padding:\s*16px 18px 18px/);
+    assert.match(css, /\.nfc-overlay-drawer \.ant-drawer-body[\s\S]*padding:\s*15px/);
+    assert.match(css, /\.nfc-directory-item\.ant-list-item[\s\S]*min-height:\s*46px/);
+  });
+
+  test('has explicit desktop, tablet and mobile spacing systems', () => {
+    const css = read('src/styles/v049-workspace.css');
+    assert.match(css, /@media \(min-width: 1600px\)/);
+    assert.match(css, /@media \(max-width: 1199px\)/);
+    assert.match(css, /@media \(max-width: 767px\)/);
+    assert.match(css, /@media \(max-width: 420px\)/);
+  });
+
+
+
+  test('uses distinct width hierarchy for ledgers, detail workspaces and focused tools', () => {
+    const css = read('src/styles/v049-workspace.css');
+    assert.match(css, /\.nfc-indexes-page,[\s\S]*var\(--nfc-v49-content-max\)/);
+    assert.match(css, /\.nfc-plan-detail-page,[\s\S]*1320px/);
+    assert.match(css, /\.nfc-path-match-page,[\s\S]*1180px/);
+  });
+
+  test('settings, workflow and dedupe have dedicated composition rather than generic card fallback', () => {
+    const css = read('src/styles/v049-workspace.css');
+    assert.match(css, /\.nfc-system-controls-page \.nfc-settings-grid/);
+    assert.match(css, /\.nfc-workflow-builder-page \.nfc-workflow-step-card\.is-expanded/);
+    assert.match(css, /\.nfc-advanced-dedupe-page \.nfc-dedupe-editor-wrap/);
+  });
+});
