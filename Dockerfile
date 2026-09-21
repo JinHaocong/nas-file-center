@@ -19,6 +19,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     CONFIG_DIR=/config \
     DATA_MOUNT=/data
 WORKDIR /app
+RUN apt-get update \\
+    && apt-get install -y --no-install-recommends ffmpeg \\
+    && rm -rf /var/lib/apt/lists/*
 COPY --from=fclones-builder /usr/local/cargo/bin/fclones /usr/local/bin/fclones
 COPY --from=frontend-builder /build/dist /app/frontend/dist
 COPY pyproject.toml /app/pyproject.toml
