@@ -441,6 +441,7 @@ body,
 /* Dense operational list pages -------------------------------------------- */
 
 .nfc-indexes-page > .nfc-data-panel-dense,
+.nfc-media-page > .nfc-data-panel-dense,
 .nfc-scans-page > .nfc-data-panel-dense,
 .nfc-plans-page > .nfc-data-panel-dense,
 .nfc-quarantine-page > .nfc-data-panel-dense,
@@ -455,6 +456,7 @@ body,
 }
 
 .nfc-indexes-page .nfc-filter-bar,
+.nfc-media-page .nfc-filter-bar,
 .nfc-scans-page .nfc-filter-bar,
 .nfc-plans-page .nfc-filter-bar,
 .nfc-quarantine-page .nfc-filter-bar,
