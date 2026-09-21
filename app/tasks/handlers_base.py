@@ -3622,7 +3622,14 @@ class BatchPlanExecuteHandler(TaskHandler):
                                 q_entry.tx_phase = "active"
                             q_entry.updated_at = now
                         else:
-                            if result.reason.startswith("QUARANTINE_SOURCE_RETIREMENT_UNCONFIRMED"):
+                            source_retirement_failure = result.reason.startswith(
+                                (
+                                    "QUARANTINE_SOURCE_RETIREMENT_UNCONFIRMED",
+                                    "CROSS_STORAGE_SOURCE_UNLINK_NOT_VISIBLE",
+                                    "CROSS_STORAGE_SOURCE_REPLACEMENT_DETECTED",
+                                )
+                            )
+                            if source_retirement_failure:
                                 q_entry.state = "conflict"
                                 if is_tx:
                                     q_entry.tx_phase = "conflict"
