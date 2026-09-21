@@ -137,12 +137,13 @@ def test_image_runtime_oserror_stays_unknown(monkeypatch, tmp_path: Path):
 
 
 class _FakeFfprobeProcess:
-    def __init__(self, stderr: str):
+    def __init__(self, stderr: str, stderr_stream):
         self.returncode = 1
-        self._stderr = stderr
+        stderr_stream.write(stderr.encode("utf-8"))
+        stderr_stream.flush()
 
-    def communicate(self, timeout=None):
-        return "", self._stderr
+    def wait(self, timeout=None):
+        return self.returncode
 
     def kill(self):
         return None
@@ -157,7 +158,9 @@ def test_ffprobe_ambiguous_nonzero_exit_stays_unknown(monkeypatch, tmp_path: Pat
 
     monkeypatch.setattr(
         "app.media.probe.subprocess.Popen",
-        lambda *_args, **_kwargs: _FakeFfprobeProcess("Unknown decoder library failure"),
+        lambda *_args, **kwargs: _FakeFfprobeProcess(
+            "Unknown decoder library failure", kwargs["stderr"]
+        ),
     )
     result = run_ffprobe(path)
 
@@ -171,11 +174,41 @@ def test_ffprobe_explicit_invalid_data_is_corrupt(monkeypatch, tmp_path: Path):
 
     monkeypatch.setattr(
         "app.media.probe.subprocess.Popen",
-        lambda *_args, **_kwargs: _FakeFfprobeProcess(
-            "Invalid data found when processing input"
+        lambda *_args, **kwargs: _FakeFfprobeProcess(
+            "Invalid data found when processing input", kwargs["stderr"]
         ),
     )
     result = run_ffprobe(path)
 
     assert result.integrity_status == "corrupt"
     assert result.integrity_reason_code == "FFPROBE_FAILED"
+
+
+
+def test_ffprobe_output_budget_is_enforced_while_child_runs(monkeypatch, tmp_path: Path):
+    path = tmp_path / "oversized.mp4"
+    path.write_bytes(b"x")
+
+    class OversizedProcess:
+        def __init__(self, stdout_stream):
+            self.returncode = 1
+            stdout_stream.write(b"x" * (300 * 1024))
+            stdout_stream.flush()
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, timeout=None):
+            return self.returncode
+
+        def kill(self):
+            return None
+
+    monkeypatch.setattr(
+        "app.media.probe.subprocess.Popen",
+        lambda *_args, **kwargs: OversizedProcess(kwargs["stdout"]),
+    )
+    result = run_ffprobe(path)
+
+    assert result.integrity_status == "unknown"
+    assert result.integrity_reason_code == "FFPROBE_OUTPUT_TOO_LARGE"
