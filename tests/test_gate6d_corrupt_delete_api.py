@@ -392,3 +392,64 @@ def test_hash_drift_after_enqueue_cannot_create_durable_intent(tmp_path: Path):
         assert item.state == "failed"
         assert item.reason is not None
         assert "SOURCE_HASH_CHANGED" in item.reason
+
+
+
+def test_parent_symlink_rebind_after_enqueue_is_fail_closed(tmp_path: Path):
+    client, service, settings, data, _trash = _env(tmp_path)
+    folder = data / "album"
+    folder.mkdir()
+    source = folder / "broken.jpg"
+    source.write_bytes(b"corrupt-parent-rebind")
+    asset_id = _seed_media(service, source, status="corrupt")
+
+    preview = client.post(
+        "/api/media/corrupt-delete/preview",
+        json={"media_asset_ids": [asset_id]},
+    ).json()
+    created = client.post(
+        "/api/media/corrupt-delete/plan",
+        json={
+            "media_asset_ids": [asset_id],
+            "expected_preview_digest": preview["preview_digest"],
+            "confirmation": "DELETE_CORRUPT_FILES",
+        },
+    )
+    plan_id = int(created.json()["id"])
+    assert client.post(f"/api/plans/{plan_id}/freeze").status_code == 200
+    assert client.post(f"/api/plans/{plan_id}/validate").json()["status"] == "ready"
+
+    queued = client.post(f"/api/plans/{plan_id}/execute")
+    assert queued.status_code == 200
+    job_id = int(queued.json()["work_job_id"])
+
+    # Rebind a frozen ancestor through a symlink while keeping the exact same
+    # leaf inode/content reachable. Resolving the path before the no-follow
+    # walk would hide this namespace ABA and wrongly authorize an unlink.
+    moved = data / "album-moved"
+    folder.rename(moved)
+    folder.symlink_to(moved, target_is_directory=True)
+    rebound_source = moved / "broken.jpg"
+    assert source.exists()
+    assert rebound_source.exists()
+
+    _run_worker(service, settings, job_id)
+
+    assert rebound_source.exists()
+    assert rebound_source.read_bytes() == b"corrupt-parent-rebind"
+    with service.SessionLocal() as session:
+        journals = list(
+            session.scalars(
+                select(OperationJournal).where(
+                    OperationJournal.operation == "media_corrupt_unlink_delete"
+                )
+            )
+        )
+        assert journals == []
+        item = session.scalar(
+            select(BatchPlanItem).where(BatchPlanItem.plan_id == plan_id)
+        )
+        assert item is not None
+        assert item.state == "failed"
+        assert item.reason is not None
+        assert "UNSAFE_ANCESTOR" in item.reason
