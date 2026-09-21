@@ -695,3 +695,136 @@ def test_same_device_exdev_falls_back_to_verified_copy_and_restores(tmp_path, mo
         assert entry is not None
         assert entry.state == "restored"
         assert entry.tx_phase == "restored"
+
+
+def test_cross_storage_publish_falls_back_to_linkat_when_rename_noreplace_is_unsupported(
+    tmp_path, monkeypatch
+):
+    import app.quarantine.cross_storage as cross
+
+    worker_id = "gate6c-worker"
+    _engine, SessionLocal = _session_with_worker(tmp_path, worker_id)
+    data_root = tmp_path / "data"
+    data_root.mkdir()
+    q_root = tmp_path / "quarantine"
+    q_root.mkdir()
+
+    source = data_root / "rename-unsupported.bin"
+    payload = b"rename-noreplace-unsupported-" * 4096
+    source.write_bytes(payload)
+    src_stat = source.stat()
+    target = q_root / "task-1" / "root-0" / "rename-unsupported.q-1.bin"
+
+    with SessionLocal() as session:
+        entry = QuarantineEntry(
+            original_path=str(source),
+            quarantine_path=str(target),
+            state="preparing",
+            size=len(payload),
+            content_hash=_sha256(payload),
+            mtime_ns=src_stat.st_mtime_ns,
+            device=src_stat.st_dev,
+            inode=src_stat.st_ino,
+        )
+        session.add(entry)
+        session.commit()
+        entry_id = int(entry.id)
+
+    def _unsupported(*_args, **_kwargs):
+        raise OSError(
+            errno.EOPNOTSUPP,
+            "Atomic no-replace renameat2 not supported by filesystem",
+            "cross-storage-staging",
+        )
+
+    monkeypatch.setattr(cross, "rename_noreplace_at", _unsupported)
+
+    cross.execute_cross_storage_quarantine(
+        SessionLocal,
+        entry_id,
+        worker_id,
+        allowed_roots=[data_root],
+        quarantine_root=q_root,
+    )
+
+    assert not source.exists()
+    assert target.read_bytes() == payload
+    target_stat = target.stat()
+
+    with SessionLocal() as session:
+        entry = session.get(QuarantineEntry, entry_id)
+        assert entry is not None
+        assert entry.state == "active"
+        assert entry.tx_phase == "active"
+        assert entry.transaction_mode == cross.CROSS_STORAGE_MODE
+        assert entry.quarantine_device == target_stat.st_dev
+        assert entry.quarantine_inode == target_stat.st_ino
+
+    tx_root = q_root / ".tx" / f"entry-{entry_id}"
+    assert not list(tx_root.rglob("cross-storage-staging"))
+
+
+def test_cross_storage_restore_publish_falls_back_to_linkat_when_rename_noreplace_is_unsupported(
+    tmp_path, monkeypatch
+):
+    import app.quarantine.cross_storage as cross
+
+    worker_id = "gate6c-worker"
+    _engine, SessionLocal = _session_with_worker(tmp_path, worker_id)
+    data_root = tmp_path / "data"
+    data_root.mkdir()
+    q_root = tmp_path / "quarantine"
+    q_root.mkdir()
+
+    destination = data_root / "restore-rename-unsupported.bin"
+    payload = b"restore-rename-noreplace-unsupported-" * 4096
+    quarantine_path = q_root / "task-1" / "root-0" / "restore.q-1.bin"
+    quarantine_path.parent.mkdir(parents=True)
+    quarantine_path.write_bytes(payload)
+    q_stat = quarantine_path.stat()
+
+    with SessionLocal() as session:
+        entry = QuarantineEntry(
+            original_path=str(destination),
+            quarantine_path=str(quarantine_path),
+            state="active",
+            tx_phase="active",
+            transaction_mode=cross.CROSS_STORAGE_MODE,
+            size=len(payload),
+            content_hash=_sha256(payload),
+            mtime_ns=q_stat.st_mtime_ns,
+            device=q_stat.st_dev,
+            inode=q_stat.st_ino,
+            quarantine_device=q_stat.st_dev,
+            quarantine_inode=q_stat.st_ino,
+            quarantine_mtime_ns=q_stat.st_mtime_ns,
+        )
+        session.add(entry)
+        session.commit()
+        entry_id = int(entry.id)
+
+    def _unsupported(*_args, **_kwargs):
+        raise OSError(
+            errno.EOPNOTSUPP,
+            "Atomic no-replace renameat2 not supported by filesystem",
+            "cross-restore-staging",
+        )
+
+    monkeypatch.setattr(cross, "rename_noreplace_at", _unsupported)
+
+    cross.execute_cross_storage_restore(
+        SessionLocal,
+        entry_id,
+        worker_id,
+        destination=destination,
+        allowed_roots=[data_root],
+        quarantine_root=q_root,
+    )
+
+    assert destination.read_bytes() == payload
+    assert not quarantine_path.exists()
+    with SessionLocal() as session:
+        entry = session.get(QuarantineEntry, entry_id)
+        assert entry is not None
+        assert entry.state == "restored"
+        assert entry.tx_phase == "restored"
