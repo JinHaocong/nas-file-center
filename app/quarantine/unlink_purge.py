@@ -271,7 +271,7 @@ def build_unlink_manifest(entry: Any, quarantine_root: Path | str) -> dict[str, 
             entry,
             root,
         )
-        if orphan_material is not None and not orphan_blockers:
+        if orphan_material is not None and not orphan_blockers and not blockers:
             return {
                 "purge_semantics": SEMANTICS_VERSION,
                 "selected_entry_id": entry.id,
