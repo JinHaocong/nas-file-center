@@ -383,3 +383,118 @@ def test_abandoned_record_cleanup_removes_empty_transaction_residue(maintenance_
 
     with service.SessionLocal() as session:
         assert session.get(QuarantineEntry, entry_id) is None
+
+
+def test_abandoned_cross_storage_verified_staging_is_reclaimed_on_record_delete(maintenance_env):
+    env = maintenance_env
+    admin = env["admin"]
+    service = env["service"]
+    data = env["data"]
+    trash = env["trash"]
+
+    source = data / "abandoned-cross-storage.bin"
+    payload = b"verified-private-staging-" * 4096
+    source.write_bytes(payload)
+    source_stat = source.stat()
+    content_hash = hashlib.sha256(payload).hexdigest()
+    quarantine_path = trash / "task-2" / "root-0" / "abandoned-cross-storage.q.bin"
+
+    with service.SessionLocal() as session:
+        row = QuarantineEntry(
+            original_path=str(source),
+            quarantine_path=str(quarantine_path),
+            state="abandoned",
+            tx_phase="cross_staging_verified",
+            transaction_mode="cross_storage_transactional",
+            active_attempt_generation=1,
+            size=len(payload),
+            content_hash=content_hash,
+            mtime_ns=int(source_stat.st_mtime_ns),
+            device=int(source_stat.st_dev),
+            inode=int(source_stat.st_ino),
+        )
+        session.add(row)
+        session.commit()
+        entry_id = int(row.id)
+
+    attempt = trash / ".tx" / f"entry-{entry_id}" / "attempt-1"
+    attempt.mkdir(parents=True)
+    staging = attempt / "cross-storage-staging"
+    staging.write_bytes(payload)
+    staging_stat = staging.stat()
+
+    with service.SessionLocal() as session:
+        row = session.get(QuarantineEntry, entry_id)
+        assert row is not None
+        row.quarantine_device = int(staging_stat.st_dev)
+        row.quarantine_inode = int(staging_stat.st_ino)
+        row.quarantine_mtime_ns = int(staging_stat.st_mtime_ns)
+        session.commit()
+
+    assert staging.exists()
+    assert staging.stat().st_size == len(payload)
+
+    response = admin.delete(
+        f"/api/quarantine/{entry_id}/record?confirmation=DELETE_RECORD"
+    )
+    assert response.status_code == 200
+
+    assert source.read_bytes() == payload
+    assert not (trash / ".tx" / f"entry-{entry_id}").exists()
+    with service.SessionLocal() as session:
+        assert session.get(QuarantineEntry, entry_id) is None
+
+
+def test_abandoned_cross_storage_staging_cleanup_blocks_if_source_changed(maintenance_env):
+    env = maintenance_env
+    admin = env["admin"]
+    service = env["service"]
+    data = env["data"]
+    trash = env["trash"]
+
+    source = data / "abandoned-cross-storage-changed.bin"
+    original_payload = b"original-authority-" * 2048
+    source.write_bytes(original_payload)
+    source_stat = source.stat()
+    content_hash = hashlib.sha256(original_payload).hexdigest()
+    quarantine_path = trash / "task-2" / "root-0" / "changed.q.bin"
+
+    with service.SessionLocal() as session:
+        row = QuarantineEntry(
+            original_path=str(source),
+            quarantine_path=str(quarantine_path),
+            state="abandoned",
+            tx_phase="cross_staging_verified",
+            transaction_mode="cross_storage_transactional",
+            active_attempt_generation=1,
+            size=len(original_payload),
+            content_hash=content_hash,
+            mtime_ns=int(source_stat.st_mtime_ns),
+            device=int(source_stat.st_dev),
+            inode=int(source_stat.st_ino),
+        )
+        session.add(row)
+        session.commit()
+        entry_id = int(row.id)
+
+    attempt = trash / ".tx" / f"entry-{entry_id}" / "attempt-1"
+    attempt.mkdir(parents=True)
+    staging = attempt / "cross-storage-staging"
+    staging.write_bytes(original_payload)
+    staging_stat = staging.stat()
+    with service.SessionLocal() as session:
+        row = session.get(QuarantineEntry, entry_id)
+        row.quarantine_device = int(staging_stat.st_dev)
+        row.quarantine_inode = int(staging_stat.st_ino)
+        row.quarantine_mtime_ns = int(staging_stat.st_mtime_ns)
+        session.commit()
+
+    source.write_bytes(b"changed-source")
+
+    response = admin.delete(
+        f"/api/quarantine/{entry_id}/record?confirmation=DELETE_RECORD"
+    )
+    assert response.status_code == 409
+    assert staging.exists()
+    with service.SessionLocal() as session:
+        assert session.get(QuarantineEntry, entry_id) is not None
