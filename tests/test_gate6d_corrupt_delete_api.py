@@ -337,7 +337,7 @@ def test_non_admin_cannot_manage_corrupt_delete_plan_lifecycle(tmp_path: Path):
 
 
 
-def test_hash_drift_after_enqueue_cannot_create_durable_intent(tmp_path: Path):
+def test_hash_drift_after_enqueue_cannot_create_durable_intent(monkeypatch, tmp_path: Path):
     client, service, settings, data, _trash = _env(tmp_path)
     source = data / "post-enqueue-drift.jpg"
     source.write_bytes(b"AAAA1111")
@@ -371,6 +371,15 @@ def test_hash_drift_after_enqueue_cannot_create_durable_intent(tmp_path: Path):
         source,
         ns=(int(frozen.st_atime_ns), int(frozen.st_mtime_ns)),
         follow_symlinks=False,
+    )
+
+    # Bypass the generic BatchPlan freshness guard in this regression so the
+    # test exercises the dedicated Gate6-D boundary itself. The direct-delete
+    # executor must still hash the exact opened file before it commits durable
+    # unlink intent.
+    monkeypatch.setattr(
+        "app.tasks.handlers_base._verify_plan_item_and_keep_freshness",
+        lambda *_args, **_kwargs: (True, None),
     )
 
     assert _run_worker(service, settings, job_id) is True
