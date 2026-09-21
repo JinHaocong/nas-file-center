@@ -20,7 +20,7 @@ from app.batch_utilities.errors import (
     BatchUtilityError,
     BatchUtilityInvalidConfigError,
 )
-from app.models import User
+from app.models import BatchPlan, User
 from app.media.catalog import enqueue_media_analysis, list_media_assets, media_summary
 from app.media.corrupt_delete import build_corrupt_delete_preview, create_corrupt_delete_plan
 from app.path_safety import UnsafePathError
@@ -52,6 +52,14 @@ from app.workflows.schema import (
 
 
 router = APIRouter(prefix="/api", tags=["file-center"], dependencies=[Depends(get_current_user)])
+
+
+def _require_media_corrupt_plan_admin(request: Request, plan_id: int, user: User) -> None:
+    """Keep generic plan permissions unchanged while fencing irreversible Gate6-D plans."""
+    with request.app.state.service.SessionLocal() as session:
+        plan = session.get(BatchPlan, plan_id)
+        if plan is not None and plan.kind == "media-corrupt-delete" and user.role != "admin":
+            raise HTTPException(403, "Only administrator can manage corrupt-media permanent-delete plans")
 
 
 class QuarantineRestoreRequest(BaseModel):
@@ -1152,7 +1160,12 @@ def plan_items(
 
 
 @router.post("/plans/{plan_id}/freeze")
-def freeze(request: Request, plan_id: int):
+def freeze(
+    request: Request,
+    plan_id: int,
+    current_user: User = Depends(get_current_user),
+):
+    _require_media_corrupt_plan_admin(request, plan_id, current_user)
     try:
         plan = request.app.state.service.freeze_plan(plan_id)
         return {"id": plan.id, "status": plan.status}
@@ -1163,7 +1176,12 @@ def freeze(request: Request, plan_id: int):
 
 
 @router.post("/plans/{plan_id}/validate")
-def validate(request: Request, plan_id: int):
+def validate(
+    request: Request,
+    plan_id: int,
+    current_user: User = Depends(get_current_user),
+):
+    _require_media_corrupt_plan_admin(request, plan_id, current_user)
     try:
         return request.app.state.service.validate_plan(plan_id)
     except KeyError as exc:
@@ -1178,6 +1196,7 @@ def execute(
     plan_id: int,
     current_user: User = Depends(get_current_user),
 ):
+    _require_media_corrupt_plan_admin(request, plan_id, current_user)
     try:
         return request.app.state.service.enqueue_plan_execution(plan_id, user_id=current_user.id)
     except PlanStaleError as exc:
