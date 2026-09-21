@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from typing import Any, Literal
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
@@ -20,7 +21,7 @@ from app.batch_utilities.errors import (
     BatchUtilityError,
     BatchUtilityInvalidConfigError,
 )
-from app.models import BatchPlan, User
+from app.models import BatchPlan, User, WorkJob
 from app.media.catalog import enqueue_media_analysis, list_media_assets, media_summary
 from app.media.corrupt_delete import build_corrupt_delete_preview, create_corrupt_delete_plan
 from app.path_safety import UnsafePathError
@@ -60,6 +61,24 @@ def _require_media_corrupt_plan_admin(request: Request, plan_id: int, user: User
         plan = session.get(BatchPlan, plan_id)
         if plan is not None and plan.kind == "media-corrupt-delete" and user.role != "admin":
             raise HTTPException(403, "Only administrator can manage corrupt-media permanent-delete plans")
+
+
+def _require_media_corrupt_task_admin(request: Request, task_id: int, user: User) -> None:
+    """Fence resume/retry of an irreversible Gate6-D plan execution."""
+    with request.app.state.service.SessionLocal() as session:
+        task = session.get(WorkJob, task_id)
+        if task is None or task.kind != "batch-plan-execute":
+            return
+        try:
+            payload = json.loads(task.state_json or "{}")
+        except Exception:
+            return
+        raw_plan_id = payload.get("plan_id") if isinstance(payload, dict) else None
+        if not isinstance(raw_plan_id, int) or isinstance(raw_plan_id, bool):
+            return
+        plan = session.get(BatchPlan, raw_plan_id)
+        if plan is not None and plan.kind == "media-corrupt-delete" and user.role != "admin":
+            raise HTTPException(403, "Only administrator can resume or retry corrupt-media permanent-delete tasks")
 
 
 class QuarantineRestoreRequest(BaseModel):
@@ -800,7 +819,12 @@ def pause_task(request: Request, task_id: int):
 
 
 @router.post("/tasks/{task_id}/resume")
-def resume_task(request: Request, task_id: int):
+def resume_task(
+    request: Request,
+    task_id: int,
+    current_user: User = Depends(get_current_user),
+):
+    _require_media_corrupt_task_admin(request, task_id, current_user)
     try:
         return request.app.state.service.resume_task(task_id)
     except KeyError as exc:
@@ -825,6 +849,7 @@ def retry_task(
     task_id: int,
     current_user: User = Depends(get_current_user),
 ):
+    _require_media_corrupt_task_admin(request, task_id, current_user)
     try:
         return request.app.state.service.retry_task(task_id, user_id=current_user.id)
     except KeyError as exc:
