@@ -181,3 +181,65 @@ def test_bulk_terminal_record_cleanup_accepts_mixed_states(maintenance_env):
         assert list(
             session.scalars(select(QuarantineEntry).where(QuarantineEntry.id.in_(ids)))
         ) == []
+
+
+def test_bulk_cleanup_restored_same_storage_reclaims_private_artifacts(maintenance_env):
+    env = maintenance_env
+    admin = env["admin"]
+    service = env["service"]
+    data = env["data"]
+    trash = env["trash"]
+
+    entry_id, target, attempt = _seed_restored_with_artifacts(
+        service,
+        data,
+        trash,
+        name="restored-same-storage.bin",
+    )
+    tx_entry_root = trash / ".tx" / f"entry-{entry_id}"
+    assert target.exists()
+    assert (attempt / "anchor").exists()
+
+    response = admin.post(
+        "/api/quarantine/records/bulk-delete",
+        json={"entry_ids": [entry_id], "confirmation": "DELETE_RECORDS"},
+        headers={"Origin": "http://testserver"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["deleted_ids"] == [entry_id]
+    assert body["restored_cleanup_entry_ids"] == [entry_id]
+    assert body["removed_artifact_count"] == 3
+    assert target.exists()
+    assert not tx_entry_root.exists()
+
+    with service.SessionLocal() as session:
+        assert session.get(QuarantineEntry, entry_id) is None
+
+
+def test_bulk_cleanup_restored_cross_storage_hash_verifies_payload(maintenance_env):
+    env = maintenance_env
+    admin = env["admin"]
+    service = env["service"]
+    data = env["data"]
+    trash = env["trash"]
+
+    entry_id, target, attempt = _seed_restored_with_artifacts(
+        service,
+        data,
+        trash,
+        name="restored-cross-storage.bin",
+        mode="cross_storage_transactional",
+        artifact_names=("cross-storage-staging",),
+    )
+    artifact = attempt / "cross-storage-staging"
+
+    response = admin.post(
+        "/api/quarantine/records/bulk-delete",
+        json={"entry_ids": [entry_id], "confirmation": "DELETE_RECORDS"},
+        headers={"Origin": "http://testserver"},
+    )
+    assert response.status_code == 200
+    assert response.json()["removed_artifact_count"] == 1
+    assert target.exists()
+    assert not artifact.exists()
