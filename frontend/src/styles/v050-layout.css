@@ -719,3 +719,217 @@
     grid-column: 1;
   }
 }
+
+
+/* -------------------------------------------------------------------------- */
+/* Detail pages: lifecycle and evidence hierarchy                             */
+/* -------------------------------------------------------------------------- */
+
+.nfc-plan-detail-page .nfc-lifecycle-strip {
+  margin-bottom: 12px;
+  padding: 6px;
+  gap: 4px;
+  border-radius: 16px !important;
+  background: var(--nfc-ui-panel-bg-soft) !important;
+}
+
+.nfc-plan-detail-page .nfc-lifecycle-step {
+  min-height: 62px;
+  padding: 9px 11px;
+  border: 0;
+  border-radius: 11px;
+}
+
+.nfc-plan-detail-page .nfc-lifecycle-step-active {
+  border: 1px solid color-mix(in srgb, var(--nfc-accent) 20%, var(--nfc-border-soft));
+  background: color-mix(in srgb, var(--nfc-accent-soft) 56%, var(--nfc-surface-1));
+  box-shadow: 0 5px 16px color-mix(in srgb, var(--nfc-accent) 6%, transparent);
+}
+
+.nfc-plan-detail-page .nfc-lifecycle-step-complete {
+  background: color-mix(in srgb, var(--nfc-success-soft) 48%, transparent);
+}
+
+.nfc-plan-detail-page .nfc-plan-action-surface {
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border-radius: 14px !important;
+  background: var(--nfc-ui-panel-bg-soft) !important;
+  box-shadow: none !important;
+}
+
+.nfc-plan-detail-page .nfc-plan-action-surface > .nfc-action-bar {
+  width: 100%;
+  align-items: center;
+}
+
+.nfc-plan-detail-page .nfc-plan-alert-stack {
+  margin-bottom: 14px;
+  display: grid;
+  gap: 9px;
+}
+
+.nfc-plan-detail-page .nfc-plan-summary {
+  margin-bottom: 14px;
+}
+
+.nfc-plan-detail-page .nfc-plan-summary .nfc-responsive-descriptions {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.nfc-plan-detail-page .nfc-plan-summary .nfc-description-item {
+  min-height: 68px;
+}
+
+/* Scan snapshot reads as evidence, not another generic card. */
+.nfc-scan-detail-page .nfc-scan-summary {
+  margin-bottom: 16px;
+}
+
+.nfc-scan-detail-page .nfc-scan-summary .nfc-responsive-descriptions {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.nfc-scan-detail-page .nfc-scan-summary .nfc-description-item {
+  min-height: 68px;
+}
+
+.nfc-scan-detail-page .nfc-root-list {
+  margin: 0 14px 14px;
+  padding: 11px 12px;
+  border: 1px solid var(--nfc-border-soft);
+  border-radius: 12px;
+  background: var(--nfc-ui-panel-bg-soft);
+}
+
+.nfc-scan-detail-page > .nfc-data-panel:last-of-type {
+  overflow: clip;
+}
+
+/* Media integrity is an inspection surface with a guarded destructive lane. */
+.nfc-media-page > .nfc-metric-grid {
+  margin-bottom: 18px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.nfc-media-page > .nfc-metric-grid .nfc-metric-card {
+  min-height: 104px;
+}
+
+.nfc-media-page .nfc-filter-bar {
+  padding: 12px;
+  display: grid;
+  grid-template-columns:
+    minmax(180px, 220px)
+    minmax(110px, 130px)
+    minmax(110px, 130px)
+    minmax(220px, 1fr)
+    auto
+    minmax(18px, 1fr)
+    auto;
+  align-items: center;
+  gap: 8px;
+  border: 0 !important;
+  border-bottom: 1px solid var(--nfc-border-soft) !important;
+  background: var(--nfc-ui-panel-bg-soft) !important;
+}
+
+.nfc-media-page .nfc-filter-bar .ant-select,
+.nfc-media-page .nfc-filter-bar .ant-input-affix-wrapper {
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+.nfc-media-page .nfc-filter-bar .ant-btn-dangerous {
+  min-width: max-content;
+}
+
+.nfc-media-page .nfc-page-alert {
+  margin: 10px 12px 12px;
+  border-left-color: var(--nfc-warning) !important;
+}
+
+/* Dense list pages share the same operational table framing. */
+.nfc-plans-page > .nfc-data-panel,
+.nfc-quarantine-page > .nfc-data-panel,
+.nfc-tasks-page > .nfc-data-panel,
+.nfc-media-page > .nfc-data-panel,
+.nfc-scan-detail-page > .nfc-data-panel,
+.nfc-plan-detail-page > .nfc-data-panel {
+  overflow: clip;
+}
+
+@media (max-width: 1199px) {
+  .nfc-plan-detail-page .nfc-plan-summary .nfc-responsive-descriptions,
+  .nfc-scan-detail-page .nfc-scan-summary .nfc-responsive-descriptions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .nfc-media-page .nfc-filter-bar {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .nfc-media-page .nfc-filter-bar > div[style*="margin-left"] {
+    display: none;
+  }
+}
+
+@media (max-width: 767px) {
+  .nfc-plan-detail-page .nfc-lifecycle-strip {
+    padding: 5px;
+  }
+
+  .nfc-plan-detail-page .nfc-lifecycle-step {
+    min-height: 52px;
+  }
+
+  .nfc-plan-detail-page .nfc-plan-action-surface > .nfc-action-bar {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .nfc-plan-detail-page .nfc-plan-action-surface .ant-btn,
+  .nfc-plan-detail-page .nfc-plan-action-surface .ant-tooltip-open {
+    width: 100%;
+  }
+
+  .nfc-plan-detail-page .nfc-plan-summary .nfc-responsive-descriptions,
+  .nfc-scan-detail-page .nfc-scan-summary .nfc-responsive-descriptions {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .nfc-media-page > .nfc-metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .nfc-media-page .nfc-filter-bar {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .nfc-media-page .nfc-filter-bar > * {
+    min-width: 0;
+  }
+
+  .nfc-media-page .nfc-filter-bar .ant-input-affix-wrapper {
+    grid-column: 1 / -1;
+  }
+
+  .nfc-media-page .nfc-filter-bar .ant-btn-dangerous {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+}
+
+@media (max-width: 420px) {
+  .nfc-plan-detail-page .nfc-plan-summary .nfc-responsive-descriptions,
+  .nfc-scan-detail-page .nfc-scan-summary .nfc-responsive-descriptions,
+  .nfc-media-page > .nfc-metric-grid,
+  .nfc-media-page .nfc-filter-bar {
+    grid-template-columns: 1fr;
+  }
+
+  .nfc-media-page .nfc-filter-bar > * {
+    grid-column: 1;
+  }
+}
