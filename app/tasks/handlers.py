@@ -11,6 +11,7 @@ from .utility_structural_cleanup_compat import (
     normalize_structural_cleanup_journal,
     reconcile_utility_structural_cleanup,
 )
+from app.media.corrupt_delete import reconcile_corrupt_media_delete
 
 
 # Keep the existing handler implementation byte-for-byte intact in
@@ -35,6 +36,17 @@ if not getattr(_impl._reconcile_executing_item, "_gate6b_structural_cleanup_wrap
         now,
         **kwargs,
     ):
+        if reconcile_corrupt_media_delete(
+            session,
+            item,
+            plan_id,
+            job_id,
+            user_id,
+            settings,
+            now,
+            **kwargs,
+        ):
+            return
         if reconcile_utility_structural_cleanup(
             session,
             item,
