@@ -243,3 +243,60 @@ def test_bulk_cleanup_restored_cross_storage_hash_verifies_payload(maintenance_e
     assert response.json()["removed_artifact_count"] == 1
     assert target.exists()
     assert not artifact.exists()
+
+
+def test_restored_cleanup_blocks_when_restore_target_identity_changed(maintenance_env):
+    env = maintenance_env
+    admin = env["admin"]
+    service = env["service"]
+    data = env["data"]
+    trash = env["trash"]
+
+    entry_id, target, attempt = _seed_restored_with_artifacts(
+        service,
+        data,
+        trash,
+        name="restored-replaced.bin",
+    )
+    previous = target.with_suffix(".previous")
+    target.rename(previous)
+    target.write_bytes(b"replacement")
+
+    response = admin.post(
+        "/api/quarantine/records/bulk-delete",
+        json={"entry_ids": [entry_id], "confirmation": "DELETE_RECORDS"},
+        headers={"Origin": "http://testserver"},
+    )
+    assert response.status_code == 409
+    assert target.read_bytes() == b"replacement"
+    assert (attempt / "anchor").exists()
+    with service.SessionLocal() as session:
+        assert session.get(QuarantineEntry, entry_id) is not None
+
+
+def test_restored_cleanup_blocks_unknown_private_artifact(maintenance_env):
+    env = maintenance_env
+    admin = env["admin"]
+    service = env["service"]
+    data = env["data"]
+    trash = env["trash"]
+
+    entry_id, target, attempt = _seed_restored_with_artifacts(
+        service,
+        data,
+        trash,
+        name="restored-unknown.bin",
+    )
+    (attempt / "unexpected.bin").write_bytes(b"unknown")
+
+    response = admin.post(
+        "/api/quarantine/records/bulk-delete",
+        json={"entry_ids": [entry_id], "confirmation": "DELETE_RECORDS"},
+        headers={"Origin": "http://testserver"},
+    )
+    assert response.status_code == 409
+    assert target.exists()
+    assert (attempt / "unexpected.bin").exists()
+    assert (attempt / "anchor").exists()
+    with service.SessionLocal() as session:
+        assert session.get(QuarantineEntry, entry_id) is not None
