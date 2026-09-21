@@ -85,11 +85,10 @@ def _publish_verified_staging_noreplace(
             target_name,
         )
     except NotImplementedError:
-        use_link_fallback = True
+        pass
     except OSError as exc:
         if exc.errno not in _UNSUPPORTED_NOREPLACE_ERRNOS:
             raise
-        use_link_fallback = True
     else:
         os.fsync(target_parent_fd)
         if source_parent_fd != target_parent_fd:
@@ -212,13 +211,25 @@ def _retire_duplicate_staging_alias(
             os.close(st_fd)
 
         with safe_open_parent_fd(public_path, valid_roots) as (pub_parent_fd, pub_leaf):
+            public_binding = os.stat(
+                pub_leaf,
+                dir_fd=pub_parent_fd,
+                follow_symlinks=False,
+            )
+            if (
+                not stat.S_ISREG(public_binding.st_mode)
+                or int(staging_stat.st_dev) != int(public_binding.st_dev)
+                or int(staging_stat.st_ino) != int(public_binding.st_ino)
+            ):
+                return False
+
             pub_fd = os.open(
                 pub_leaf,
                 os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
                 dir_fd=pub_parent_fd,
             )
             try:
-                public_stat = _qualify_fd_payload(
+                _qualify_fd_payload(
                     pub_fd,
                     size=size,
                     expected_hash=content_hash,
@@ -229,12 +240,6 @@ def _retire_duplicate_staging_alias(
                 )
             finally:
                 os.close(pub_fd)
-
-            if (
-                int(staging_stat.st_dev) != int(public_stat.st_dev)
-                or int(staging_stat.st_ino) != int(public_stat.st_ino)
-            ):
-                return False
 
             os.unlink(st_leaf, dir_fd=st_parent_fd)
             os.fsync(st_parent_fd)
