@@ -4460,6 +4460,204 @@ class FileCenterService:
                 "status": "purged",
             }
 
+    def _cleanup_abandoned_cross_storage_staging(self, entry: QuarantineEntry) -> None:
+        """Retire a verified, never-published Gate6-C staging copy.
+
+        Batch execution may mark an entry abandoned after the copy+SHA256 phase
+        if the quarantine filesystem rejects the publication primitive. The
+        private staging copy is safe to delete only when the original source is
+        still the exact frozen authority, the public quarantine path is absent,
+        and the staging object itself still matches the recorded verified
+        quarantine identity. Any ambiguity remains fail-closed.
+        """
+        if entry.state not in {"abandoned", "conflict"}:
+            return
+        if entry.transaction_mode != "cross_storage_transactional":
+            return
+        if entry.tx_phase != "cross_staging_verified":
+            return
+
+        quarantine_path = Path(entry.quarantine_path)
+        if os.path.lexists(quarantine_path):
+            raise StateConflictError(
+                f"Quarantine payload still exists for quarantine entry #{entry.id}; "
+                "verified staging cleanup is blocked"
+            )
+        if entry.authoritative_anchor_path and os.path.lexists(entry.authoritative_anchor_path):
+            raise StateConflictError(
+                f"Authoritative anchor still exists for quarantine entry #{entry.id}; "
+                "verified staging cleanup is blocked"
+            )
+
+        source_path = Path(entry.original_path)
+        valid_roots = list(self.settings.allowed_roots)
+        quarantine_root = Path(self.settings.quarantine_root)
+        if quarantine_root not in [Path(root) for root in valid_roots]:
+            valid_roots.append(quarantine_root)
+
+        expected_device = int(entry.device or 0)
+        expected_inode = int(entry.inode or 0)
+        expected_size = int(entry.size if entry.size is not None else -1)
+        expected_mtime_ns = int(entry.mtime_ns or 0)
+        expected_hash = str(entry.content_hash or "").lower()
+        if (
+            expected_device <= 0
+            or expected_inode <= 0
+            or expected_size < 0
+            or expected_mtime_ns <= 0
+            or len(expected_hash) != 64
+        ):
+            raise StateConflictError(
+                f"Frozen source authority is incomplete for quarantine entry #{entry.id}"
+            )
+
+        try:
+            with safe_open_parent_fd(source_path, valid_roots) as (parent_fd, leaf):
+                src_fd = os.open(
+                    leaf,
+                    os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+                    dir_fd=parent_fd,
+                )
+                try:
+                    src_stat = os.fstat(src_fd)
+                    if not stat.S_ISREG(src_stat.st_mode):
+                        raise StateConflictError(
+                            f"Original source is not a regular file for quarantine entry #{entry.id}"
+                        )
+                    src_mtime_ns = int(
+                        getattr(src_stat, "st_mtime_ns", int(src_stat.st_mtime * 1_000_000_000))
+                    )
+                    if (
+                        int(src_stat.st_dev) != expected_device
+                        or int(src_stat.st_ino) != expected_inode
+                        or int(src_stat.st_size) != expected_size
+                        or src_mtime_ns != expected_mtime_ns
+                    ):
+                        raise StateConflictError(
+                            f"Original source identity changed for quarantine entry #{entry.id}"
+                        )
+
+                    digest = hashlib.sha256()
+                    while True:
+                        chunk = os.read(src_fd, 8 * 1024 * 1024)
+                        if not chunk:
+                            break
+                        digest.update(chunk)
+                    if digest.hexdigest().lower() != expected_hash:
+                        raise StateConflictError(
+                            f"Original source SHA256 changed for quarantine entry #{entry.id}"
+                        )
+                finally:
+                    os.close(src_fd)
+        except FileNotFoundError as exc:
+            raise StateConflictError(
+                f"Original source is missing for quarantine entry #{entry.id}; "
+                "staging may be the only remaining copy"
+            ) from exc
+
+        generation = int(entry.active_attempt_generation or 0)
+        if generation <= 0:
+            raise StateConflictError(
+                f"Active transaction generation is missing for quarantine entry #{entry.id}"
+            )
+
+        tx_entry_root = quarantine_root / ".tx" / f"entry-{entry.id}"
+        staging_path = tx_entry_root / f"attempt-{generation}" / "cross-storage-staging"
+        if not os.path.lexists(tx_entry_root):
+            return
+
+        allowed_file = staging_path.absolute()
+        directories: list[Path] = []
+        discovered_staging = False
+        for current, dirnames, filenames in os.walk(tx_entry_root, topdown=True, followlinks=False):
+            current_path = Path(current)
+            current_stat = os.lstat(current_path)
+            if not stat.S_ISDIR(current_stat.st_mode) or stat.S_ISLNK(current_stat.st_mode):
+                raise StateConflictError(
+                    f"Transaction artifacts for quarantine entry #{entry.id} contain a non-directory object"
+                )
+            directories.append(current_path)
+
+            for dirname in dirnames:
+                child = current_path / dirname
+                child_stat = os.lstat(child)
+                if not stat.S_ISDIR(child_stat.st_mode) or stat.S_ISLNK(child_stat.st_mode):
+                    raise StateConflictError(
+                        f"Transaction artifacts for quarantine entry #{entry.id} contain a symlink or non-directory object"
+                    )
+
+            for filename in filenames:
+                artifact = (current_path / filename).absolute()
+                if artifact != allowed_file:
+                    raise StateConflictError(
+                        f"Transaction artifacts for quarantine entry #{entry.id} contain unexpected evidence"
+                    )
+                artifact_stat = os.lstat(artifact)
+                if not stat.S_ISREG(artifact_stat.st_mode) or stat.S_ISLNK(artifact_stat.st_mode):
+                    raise StateConflictError(
+                        f"Verified staging artifact is not a regular file for quarantine entry #{entry.id}"
+                    )
+                discovered_staging = True
+
+        if not discovered_staging:
+            return
+
+        q_device = int(entry.quarantine_device or 0)
+        q_inode = int(entry.quarantine_inode or 0)
+        q_mtime_ns = int(entry.quarantine_mtime_ns or 0)
+        if q_device <= 0 or q_inode <= 0 or q_mtime_ns <= 0:
+            raise StateConflictError(
+                f"Verified staging authority is incomplete for quarantine entry #{entry.id}"
+            )
+
+        with safe_open_parent_fd(staging_path, valid_roots) as (parent_fd, leaf):
+            staging_fd = os.open(
+                leaf,
+                os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=parent_fd,
+            )
+            try:
+                staging_stat = os.fstat(staging_fd)
+                staging_mtime_ns = int(
+                    getattr(staging_stat, "st_mtime_ns", int(staging_stat.st_mtime * 1_000_000_000))
+                )
+                if (
+                    not stat.S_ISREG(staging_stat.st_mode)
+                    or int(staging_stat.st_dev) != q_device
+                    or int(staging_stat.st_ino) != q_inode
+                    or int(staging_stat.st_size) != expected_size
+                    or staging_mtime_ns != q_mtime_ns
+                ):
+                    raise StateConflictError(
+                        f"Verified staging identity changed for quarantine entry #{entry.id}"
+                    )
+
+                digest = hashlib.sha256()
+                while True:
+                    chunk = os.read(staging_fd, 8 * 1024 * 1024)
+                    if not chunk:
+                        break
+                    digest.update(chunk)
+                if digest.hexdigest().lower() != expected_hash:
+                    raise StateConflictError(
+                        f"Verified staging SHA256 changed for quarantine entry #{entry.id}"
+                    )
+            finally:
+                os.close(staging_fd)
+
+            os.unlink(leaf, dir_fd=parent_fd)
+            os.fsync(parent_fd)
+
+        for directory in reversed(directories):
+            try:
+                os.rmdir(directory)
+            except FileNotFoundError:
+                continue
+            except OSError as exc:
+                raise StateConflictError(
+                    f"Transaction artifacts for quarantine entry #{entry.id} are not safely empty: {exc}"
+                ) from exc
+
     def _cleanup_empty_terminal_tx_artifacts(self, entry: QuarantineEntry) -> None:
         """Remove directory-only transaction residue for explicit record cleanup.
 
@@ -4471,6 +4669,8 @@ class FileCenterService:
         """
         if entry.state not in {"abandoned", "conflict"}:
             return
+
+        self._cleanup_abandoned_cross_storage_staging(entry)
 
         tx_entry_root = (
             Path(self.settings.quarantine_root)
