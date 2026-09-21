@@ -4450,107 +4450,22 @@ class FileCenterService:
             quarantine_root=self.settings.quarantine_root,
         )
 
-    def _execute_restored_cleanup_plan(self, plan: RestoredCleanupPlan) -> dict[str, int]:
+    def _execute_restored_cleanup_plan(
+        self,
+        plan: RestoredCleanupPlan,
+        *,
+        worker_id: str,
+    ) -> dict[str, int]:
         return execute_restored_cleanup_plan(
             plan,
             allowed_roots=self.settings.allowed_roots,
             quarantine_root=self.settings.quarantine_root,
+            session_factory=self.SessionLocal,
+            worker_id=worker_id,
         )
 
-    def delete_quarantine_record(
-        self,
-        entry_id: int,
-        *,
-        confirmation: str,
-        is_admin: bool = False,
-    ) -> dict:
-        if not is_admin:
-            raise PermissionError("Only administrator can delete quarantine records")
-        if confirmation != "DELETE_RECORD":
-            raise ValueError("Quarantine record deletion requires confirmation token 'DELETE_RECORD'")
-
-        with self.SessionLocal() as session:
-            entry = session.get(QuarantineEntry, entry_id)
-            if entry is None:
-                raise KeyError(f"Quarantine entry #{entry_id} not found")
-            self._assert_quarantine_record_deletable(entry)
-            state = str(entry.state)
-            original_path = str(entry.original_path)
-            quarantine_path = str(entry.quarantine_path)
-            cleanup_plan = (
-                self._build_restored_cleanup_plan(entry)
-                if state == "restored"
-                else None
-            )
-
-        cleanup_result = {
-            "removed_artifact_count": 0,
-            "removed_logical_bytes": 0,
-        }
-        if cleanup_plan is not None:
-            cleanup_result = self._execute_restored_cleanup_plan(cleanup_plan)
-
-        with self.SessionLocal() as session:
-            session.execute(text("BEGIN IMMEDIATE"))
-            entry = session.get(QuarantineEntry, entry_id)
-            if entry is None:
-                session.rollback()
-                raise KeyError(f"Quarantine entry #{entry_id} not found")
-            if entry.state != state:
-                session.rollback()
-                raise StateConflictError(
-                    f"Quarantine entry #{entry_id} changed state during record cleanup "
-                    f"(expected={state}, actual={entry.state})"
-                )
-            self._assert_quarantine_record_deletable(entry)
-            if state == "restored":
-                # Revalidate the restored target and prove the private namespace
-                # has converged to empty before deleting the authority record.
-                remaining = self._build_restored_cleanup_plan(entry)
-                if remaining.artifacts:
-                    session.rollback()
-                    raise StateConflictError(
-                        f"RESTORED_CLEANUP_INCOMPLETE: entry #{entry_id} still has private artifacts"
-                    )
-
-            session.delete(entry)
-            session.add(
-                AuditEvent(
-                    operation="quarantine.record_delete",
-                    path=original_path,
-                    result="deleted",
-                    details_json=json.dumps(
-                        {
-                            "quarantine_entry_id": entry_id,
-                            "original_path": original_path,
-                            "quarantine_path": quarantine_path,
-                            "state": state,
-                            "metadata_only": state != "restored",
-                            "restored_cleanup": cleanup_result if state == "restored" else None,
-                        },
-                        ensure_ascii=False,
-                    ),
-                )
-            )
-            session.commit()
-            return {
-                "status": "ok",
-                "deleted": True,
-                "id": entry_id,
-                **cleanup_result,
-            }
-
-    def bulk_delete_quarantine_records(
-        self,
-        entry_ids: list[int],
-        *,
-        confirmation: str,
-        is_admin: bool = False,
-    ) -> dict:
-        if not is_admin:
-            raise PermissionError("Only administrator can delete quarantine records")
-        if confirmation != "DELETE_RECORDS":
-            raise ValueError("Bulk quarantine record deletion requires confirmation token 'DELETE_RECORDS'")
+    @staticmethod
+    def _normalize_quarantine_cleanup_ids(entry_ids: list[int]) -> list[int]:
         if not entry_ids:
             raise ValueError("entry_ids must not be empty")
         if len(entry_ids) > 5000:
@@ -4560,6 +4475,239 @@ class FileCenterService:
             raise ValueError("entry_ids must contain positive integers")
         if len(set(normalized_ids)) != len(normalized_ids):
             raise ValueError("entry_ids must be unique")
+        return normalized_ids
+
+    def _enqueue_quarantine_record_cleanup(
+        self,
+        entry_ids: list[int],
+        *,
+        user_id: int | None,
+    ) -> dict:
+        if not self.settings.allow_mutation:
+            raise ValueError("Filesystem mutation is disabled")
+        if not self.settings.allow_delete:
+            raise ValueError("Permanent deletion is disabled")
+
+        normalized_ids = self._normalize_quarantine_cleanup_ids(entry_ids)
+        with self.SessionLocal() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            rows = list(
+                session.scalars(
+                    select(QuarantineEntry).where(QuarantineEntry.id.in_(normalized_ids))
+                ).all()
+            )
+            by_id = {int(row.id): row for row in rows}
+            missing = [entry_id for entry_id in normalized_ids if entry_id not in by_id]
+            if missing:
+                session.rollback()
+                raise KeyError(f"Quarantine entries not found: {missing}")
+
+            ordered_rows = [by_id[entry_id] for entry_id in normalized_ids]
+            for entry in ordered_rows:
+                self._assert_quarantine_record_deletable(entry)
+
+            if not any(entry.state == "restored" for entry in ordered_rows):
+                session.rollback()
+                raise StateConflictError(
+                    "Worker cleanup queue is only required when at least one restored entry is selected"
+                )
+
+            job = WorkJob(
+                kind="quarantine-record-cleanup",
+                status="queued",
+                state_json=json.dumps(
+                    {
+                        "entry_ids": normalized_ids,
+                        "requested_by_user_id": user_id,
+                    },
+                    ensure_ascii=False,
+                ),
+                progress_current=0,
+                progress_total=len(normalized_ids),
+                progress_message=f"Queued cleanup for {len(normalized_ids)} quarantine records",
+                created_at=utcnow(),
+            )
+            session.add(job)
+            session.flush()
+            session.add(
+                AuditEvent(
+                    operation="quarantine.record_cleanup_enqueue",
+                    path=None,
+                    result="queued",
+                    details_json=json.dumps(
+                        {
+                            "entry_ids": normalized_ids,
+                            "requested_count": len(normalized_ids),
+                            "work_job_id": int(job.id),
+                            "user_id": user_id,
+                        },
+                        ensure_ascii=False,
+                    ),
+                )
+            )
+            session.commit()
+            return {
+                "status": "queued",
+                "work_job_id": int(job.id),
+                "entry_ids": normalized_ids,
+                "requested_count": len(normalized_ids),
+            }
+
+    def _delete_quarantine_metadata_rows(
+        self,
+        normalized_ids: list[int],
+        *,
+        operation: str,
+    ) -> dict:
+        with self.SessionLocal() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            rows = list(
+                session.scalars(
+                    select(QuarantineEntry).where(QuarantineEntry.id.in_(normalized_ids))
+                ).all()
+            )
+            by_id = {int(row.id): row for row in rows}
+            missing = [entry_id for entry_id in normalized_ids if entry_id not in by_id]
+            if missing:
+                session.rollback()
+                raise KeyError(f"Quarantine entries not found: {missing}")
+
+            ordered_rows = [by_id[entry_id] for entry_id in normalized_ids]
+            audit_rows: list[dict[str, Any]] = []
+            for entry in ordered_rows:
+                self._assert_quarantine_record_deletable(entry)
+                if entry.state == "restored":
+                    session.rollback()
+                    raise StateConflictError(
+                        "Restored quarantine records require Worker cleanup authority"
+                    )
+                audit_rows.append(
+                    {
+                        "id": int(entry.id),
+                        "original_path": str(entry.original_path),
+                        "quarantine_path": str(entry.quarantine_path),
+                        "state": str(entry.state),
+                    }
+                )
+
+            for entry in ordered_rows:
+                session.delete(entry)
+
+            session.add(
+                AuditEvent(
+                    operation=operation,
+                    path=audit_rows[0]["original_path"] if len(audit_rows) == 1 else None,
+                    result="deleted",
+                    details_json=json.dumps(
+                        {
+                            "entry_ids": normalized_ids,
+                            "deleted_count": len(normalized_ids),
+                            "entries": audit_rows,
+                            "metadata_only": True,
+                        },
+                        ensure_ascii=False,
+                    ),
+                )
+            )
+            session.commit()
+            return {
+                "status": "ok",
+                "deleted_count": len(normalized_ids),
+                "deleted_ids": normalized_ids,
+            }
+
+    def delete_quarantine_record(
+        self,
+        entry_id: int,
+        *,
+        confirmation: str,
+        is_admin: bool = False,
+        user_id: int | None = None,
+    ) -> dict:
+        if not is_admin:
+            raise PermissionError("Only administrator can delete quarantine records")
+        if confirmation != "DELETE_RECORD":
+            raise ValueError("Quarantine record deletion requires confirmation token 'DELETE_RECORD'")
+
+        entry_id = int(entry_id)
+        with self.SessionLocal() as session:
+            entry = session.get(QuarantineEntry, entry_id)
+            if entry is None:
+                raise KeyError(f"Quarantine entry #{entry_id} not found")
+            self._assert_quarantine_record_deletable(entry)
+            state = str(entry.state)
+
+        if state == "restored":
+            return self._enqueue_quarantine_record_cleanup([entry_id], user_id=user_id)
+
+        result = self._delete_quarantine_metadata_rows(
+            [entry_id],
+            operation="quarantine.record_delete",
+        )
+        return {
+            "status": result["status"],
+            "deleted": True,
+            "id": entry_id,
+        }
+
+    def bulk_delete_quarantine_records(
+        self,
+        entry_ids: list[int],
+        *,
+        confirmation: str,
+        is_admin: bool = False,
+        user_id: int | None = None,
+    ) -> dict:
+        if not is_admin:
+            raise PermissionError("Only administrator can delete quarantine records")
+        if confirmation != "DELETE_RECORDS":
+            raise ValueError("Bulk quarantine record deletion requires confirmation token 'DELETE_RECORDS'")
+
+        normalized_ids = self._normalize_quarantine_cleanup_ids(entry_ids)
+        with self.SessionLocal() as session:
+            rows = list(
+                session.scalars(
+                    select(QuarantineEntry).where(QuarantineEntry.id.in_(normalized_ids))
+                ).all()
+            )
+            by_id = {int(row.id): row for row in rows}
+            missing = [entry_id for entry_id in normalized_ids if entry_id not in by_id]
+            if missing:
+                raise KeyError(f"Quarantine entries not found: {missing}")
+            ordered_rows = [by_id[entry_id] for entry_id in normalized_ids]
+            for entry in ordered_rows:
+                self._assert_quarantine_record_deletable(entry)
+            has_restored = any(entry.state == "restored" for entry in ordered_rows)
+
+        if has_restored:
+            return self._enqueue_quarantine_record_cleanup(
+                normalized_ids,
+                user_id=user_id,
+            )
+
+        return self._delete_quarantine_metadata_rows(
+            normalized_ids,
+            operation="quarantine.record_bulk_delete",
+        )
+
+    def execute_quarantine_record_cleanup_job(
+        self,
+        entry_ids: list[int],
+        *,
+        worker_id: str,
+        job_id: int,
+        user_id: int | None = None,
+    ) -> dict:
+        if not worker_id or not str(worker_id).strip():
+            raise PermissionError("Quarantine record cleanup requires active Worker authority")
+        if not self.settings.allow_mutation:
+            raise ValueError("Filesystem mutation is disabled")
+        if not self.settings.allow_delete:
+            raise ValueError("Permanent deletion is disabled")
+
+        from app.tasks.recovery import assert_active_worker_lease
+
+        normalized_ids = self._normalize_quarantine_cleanup_ids(entry_ids)
 
         with self.SessionLocal() as session:
             rows = list(
@@ -4591,10 +4739,14 @@ class FileCenterService:
             plan = cleanup_plans.get(entry_id)
             if plan is None:
                 continue
-            cleanup_results[entry_id] = self._execute_restored_cleanup_plan(plan)
+            cleanup_results[entry_id] = self._execute_restored_cleanup_plan(
+                plan,
+                worker_id=worker_id,
+            )
 
         with self.SessionLocal() as session:
             session.execute(text("BEGIN IMMEDIATE"))
+            assert_active_worker_lease(session, worker_id)
             rows = list(
                 session.scalars(
                     select(QuarantineEntry).where(QuarantineEntry.id.in_(normalized_ids))
@@ -4614,7 +4766,7 @@ class FileCenterService:
                 if entry.state != expected["state"]:
                     session.rollback()
                     raise StateConflictError(
-                        f"Quarantine entry #{entry_id} changed state during bulk record cleanup "
+                        f"Quarantine entry #{entry_id} changed state during Worker cleanup "
                         f"(expected={expected['state']}, actual={entry.state})"
                     )
                 self._assert_quarantine_record_deletable(entry)
@@ -4625,7 +4777,6 @@ class FileCenterService:
                         raise StateConflictError(
                             f"RESTORED_CLEANUP_INCOMPLETE: entry #{entry_id} still has private artifacts"
                         )
-
                 audit_rows.append(
                     {
                         "id": entry_id,
@@ -4640,6 +4791,14 @@ class FileCenterService:
                 session.delete(entry)
 
             restored_ids = sorted(cleanup_plans)
+            removed_artifact_count = sum(
+                result.get("removed_artifact_count", 0)
+                for result in cleanup_results.values()
+            )
+            removed_logical_bytes = sum(
+                result.get("removed_logical_bytes", 0)
+                for result in cleanup_results.values()
+            )
             session.add(
                 AuditEvent(
                     operation="quarantine.record_bulk_delete",
@@ -4650,36 +4809,33 @@ class FileCenterService:
                             "entry_ids": normalized_ids,
                             "deleted_count": len(normalized_ids),
                             "entries": audit_rows,
-                            "metadata_only": not bool(restored_ids),
+                            "metadata_only": False,
                             "restored_cleanup_entry_ids": restored_ids,
-                            "removed_artifact_count": sum(
-                                result.get("removed_artifact_count", 0)
-                                for result in cleanup_results.values()
-                            ),
-                            "removed_logical_bytes": sum(
-                                result.get("removed_logical_bytes", 0)
-                                for result in cleanup_results.values()
-                            ),
+                            "removed_artifact_count": removed_artifact_count,
+                            "removed_logical_bytes": removed_logical_bytes,
+                            "work_job_id": int(job_id),
+                            "user_id": user_id,
                         },
                         ensure_ascii=False,
                     ),
                 )
             )
             session.commit()
-            return {
-                "status": "ok",
-                "deleted_count": len(normalized_ids),
-                "deleted_ids": normalized_ids,
-                "restored_cleanup_entry_ids": restored_ids,
-                "removed_artifact_count": sum(
-                    result.get("removed_artifact_count", 0)
-                    for result in cleanup_results.values()
-                ),
-                "removed_logical_bytes": sum(
-                    result.get("removed_logical_bytes", 0)
-                    for result in cleanup_results.values()
-                ),
-            }
+
+        return {
+            "status": "ok",
+            "deleted_count": len(normalized_ids),
+            "deleted_ids": normalized_ids,
+            "restored_cleanup_entry_ids": sorted(cleanup_plans),
+            "removed_artifact_count": sum(
+                result.get("removed_artifact_count", 0)
+                for result in cleanup_results.values()
+            ),
+            "removed_logical_bytes": sum(
+                result.get("removed_logical_bytes", 0)
+                for result in cleanup_results.values()
+            ),
+        }
 
     def get_quarantine_retention_policy(self) -> dict:
         with self.SessionLocal() as session:
