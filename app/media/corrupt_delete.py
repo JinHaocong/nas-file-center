@@ -6,9 +6,9 @@ import os
 from pathlib import Path
 import stat
 import time
-from typing import Any
+from typing import Any, Iterable
 
-from sqlalchemy import delete, select, text
+from sqlalchemy import select, text
 from sqlalchemy.orm import sessionmaker
 
 from app.batch.plans import OperationItem
@@ -231,7 +231,11 @@ def build_corrupt_delete_preview(
         "items": items,
         "eligible_count": sum(1 for item in items if item.get("eligible")),
         "blocked_count": sum(1 for item in items if not item.get("eligible")),
-        "total_bytes": sum(int(item.get("size") or 0) for item in items if item.get("eligible")),
+        "total_bytes": sum(
+            int(item.get("size") or 0)
+            for item in items
+            if item.get("eligible")
+        ),
         "preview_digest": _digest(preview_material),
     }
 
@@ -342,61 +346,124 @@ def create_corrupt_delete_plan(
         }
 
 
-def _load_frozen_authority(
+def _load_frozen_row(
     session,
     *,
     plan_id: int,
-    operation_item: OperationItem,
-) -> tuple[BatchPlan, BatchPlanItem, MediaAsset, IndexedPath, dict[str, Any]]:
+    operation_item: OperationItem | None = None,
+    item_id: int | None = None,
+) -> tuple[BatchPlan, BatchPlanItem, dict[str, Any], dict[str, Any], dict[str, Any]]:
     plan = session.get(BatchPlan, plan_id)
     if plan is None or plan.kind != PLAN_KIND:
         raise StateConflictError("MEDIA_CORRUPT_DELETE_AUTHORITY_MISSING: plan")
 
-    rows = list(
-        session.scalars(
-            select(BatchPlanItem).where(
-                BatchPlanItem.plan_id == plan_id,
-                BatchPlanItem.sequence == operation_item.sequence,
-                BatchPlanItem.operation == OPERATION_ID,
-            )
-        )
-    )
-    if len(rows) != 1:
-        raise StateConflictError("MEDIA_CORRUPT_DELETE_AUTHORITY_MISSING: item")
-    row = rows[0]
-    if row.source_path != str(operation_item.source):
-        raise StateConflictError("MEDIA_CORRUPT_DELETE_AUTHORITY_CHANGED: source")
-    if (
-        int(row.expected_device) != int(operation_item.expected_device)
-        or int(row.expected_inode) != int(operation_item.expected_inode)
-        or int(row.expected_size) != int(operation_item.expected_size)
-        or int(row.expected_mtime_ns) != int(operation_item.expected_mtime_ns)
-        or row.expected_hash != operation_item.expected_hash
-    ):
-        raise StateConflictError("MEDIA_CORRUPT_DELETE_AUTHORITY_CHANGED: item identity")
-
     try:
         plan_meta = json.loads(plan.metadata_json or "{}")
-        item_meta = json.loads(row.metadata_json or "{}")
     except Exception as exc:
-        raise StateConflictError("MEDIA_CORRUPT_DELETE_AUTHORITY_INVALID: malformed metadata") from exc
-    if not isinstance(plan_meta, dict) or not isinstance(item_meta, dict):
-        raise StateConflictError("MEDIA_CORRUPT_DELETE_AUTHORITY_INVALID: metadata")
+        raise StateConflictError("MEDIA_CORRUPT_DELETE_AUTHORITY_INVALID: plan metadata") from exc
+    if not isinstance(plan_meta, dict):
+        raise StateConflictError("MEDIA_CORRUPT_DELETE_AUTHORITY_INVALID: plan metadata")
     if (
         plan_meta.get("semantics") != SEMANTICS_VERSION
-        or item_meta.get("delete_semantics") != SEMANTICS_VERSION
-        or plan_meta.get("preview_digest") != item_meta.get("preview_digest")
-        or not _valid_sha256(row.expected_hash)
+        or plan_meta.get("action") != "permanent_delete_corrupt_media"
+        or plan_meta.get("bypasses_quarantine") is not True
     ):
-        raise StateConflictError("MEDIA_CORRUPT_DELETE_AUTHORITY_CHANGED: semantics")
+        raise StateConflictError("MEDIA_CORRUPT_DELETE_AUTHORITY_CHANGED: plan semantics")
+
+    if item_id is not None:
+        row = session.get(BatchPlanItem, int(item_id))
+        rows = [row] if row is not None and row.plan_id == plan_id else []
+    elif operation_item is not None:
+        rows = list(
+            session.scalars(
+                select(BatchPlanItem).where(
+                    BatchPlanItem.plan_id == plan_id,
+                    BatchPlanItem.sequence == operation_item.sequence,
+                    BatchPlanItem.operation == OPERATION_ID,
+                )
+            )
+        )
+    else:
+        raise StateConflictError("MEDIA_CORRUPT_DELETE_AUTHORITY_MISSING: item selector")
+
+    if len(rows) != 1 or rows[0] is None:
+        raise StateConflictError("MEDIA_CORRUPT_DELETE_AUTHORITY_MISSING: item")
+    row = rows[0]
+    if row.operation != OPERATION_ID:
+        raise StateConflictError("MEDIA_CORRUPT_DELETE_AUTHORITY_CHANGED: operation")
+
+    if operation_item is not None:
+        if row.source_path != str(operation_item.source):
+            raise StateConflictError("MEDIA_CORRUPT_DELETE_AUTHORITY_CHANGED: source")
+        for attr in (
+            "expected_device",
+            "expected_inode",
+            "expected_size",
+            "expected_mtime_ns",
+            "expected_hash",
+        ):
+            if getattr(row, attr) != getattr(operation_item, attr):
+                raise StateConflictError(
+                    f"MEDIA_CORRUPT_DELETE_AUTHORITY_CHANGED: {attr}"
+                )
+
+    try:
+        item_meta = json.loads(row.metadata_json or "{}")
+    except Exception as exc:
+        raise StateConflictError("MEDIA_CORRUPT_DELETE_AUTHORITY_INVALID: item metadata") from exc
+    if not isinstance(item_meta, dict):
+        raise StateConflictError("MEDIA_CORRUPT_DELETE_AUTHORITY_INVALID: item metadata")
 
     asset_id = item_meta.get("media_asset_id")
     indexed_id = item_meta.get("indexed_path_id")
-    if not isinstance(asset_id, int) or not isinstance(indexed_id, int):
-        raise StateConflictError("MEDIA_CORRUPT_DELETE_AUTHORITY_INVALID: evidence ids")
+    if (
+        not isinstance(asset_id, int)
+        or isinstance(asset_id, bool)
+        or asset_id <= 0
+        or not isinstance(indexed_id, int)
+        or isinstance(indexed_id, bool)
+        or indexed_id <= 0
+        or item_meta.get("delete_semantics") != SEMANTICS_VERSION
+        or item_meta.get("preview_digest") != plan_meta.get("preview_digest")
+        or item_meta.get("bypasses_quarantine") is not True
+        or not _valid_sha256(row.expected_hash)
+    ):
+        raise StateConflictError("MEDIA_CORRUPT_DELETE_AUTHORITY_CHANGED: item semantics")
 
-    asset = session.get(MediaAsset, asset_id)
-    indexed = session.get(IndexedPath, indexed_id)
+    manifest = {
+        "semantics": SEMANTICS_VERSION,
+        "plan_id": int(plan.id),
+        "item_id": int(row.id),
+        "sequence": int(row.sequence),
+        "media_asset_id": int(asset_id),
+        "indexed_path_id": int(indexed_id),
+        "preview_digest": item_meta.get("preview_digest"),
+        "evidence_digest": item_meta.get("evidence_digest"),
+        "probe_generation": item_meta.get("probe_generation"),
+        "integrity_reason_code": item_meta.get("integrity_reason_code"),
+        "identity": _identity_payload(
+            path=row.source_path,
+            device=row.expected_device,
+            inode=row.expected_inode,
+            size=row.expected_size,
+            mtime_ns=row.expected_mtime_ns,
+            content_hash=str(row.expected_hash),
+        ),
+    }
+    if not isinstance(manifest["evidence_digest"], str) or len(manifest["evidence_digest"]) != 64:
+        raise StateConflictError("MEDIA_CORRUPT_DELETE_AUTHORITY_CHANGED: evidence digest")
+    return plan, row, plan_meta, item_meta, manifest
+
+
+def _assert_live_media_evidence(
+    session,
+    *,
+    row: BatchPlanItem,
+    item_meta: dict[str, Any],
+    manifest: dict[str, Any],
+) -> None:
+    asset = session.get(MediaAsset, manifest["media_asset_id"])
+    indexed = session.get(IndexedPath, manifest["indexed_path_id"])
     if asset is None or indexed is None or int(asset.indexed_path_id) != int(indexed.id):
         raise StateConflictError("MEDIA_CORRUPT_DELETE_EVIDENCE_MISSING")
     if asset.integrity_status != "corrupt":
@@ -413,32 +480,13 @@ def _load_frozen_authority(
         or int(indexed.inode) != int(row.expected_inode)
         or int(indexed.size) != int(row.expected_size)
         or int(indexed.mtime_ns) != int(row.expected_mtime_ns)
+        or asset.source_scan_generation != indexed.scan_generation
     ):
         raise StateConflictError("MEDIA_CORRUPT_DELETE_EVIDENCE_CHANGED: identity")
 
     evidence = _build_evidence(asset, indexed)
-    if _digest(evidence) != item_meta.get("evidence_digest"):
+    if _digest(evidence) != manifest["evidence_digest"]:
         raise StateConflictError("MEDIA_CORRUPT_DELETE_EVIDENCE_CHANGED: digest")
-
-    manifest = {
-        "semantics": SEMANTICS_VERSION,
-        "plan_id": int(plan.id),
-        "item_id": int(row.id),
-        "sequence": int(row.sequence),
-        "media_asset_id": int(asset.id),
-        "indexed_path_id": int(indexed.id),
-        "preview_digest": item_meta.get("preview_digest"),
-        "evidence_digest": item_meta.get("evidence_digest"),
-        "identity": _identity_payload(
-            path=row.source_path,
-            device=row.expected_device,
-            inode=row.expected_inode,
-            size=row.expected_size,
-            mtime_ns=row.expected_mtime_ns,
-            content_hash=str(row.expected_hash),
-        ),
-    }
-    return plan, row, asset, indexed, manifest
 
 
 def _journal_payload(row: OperationJournal) -> dict[str, Any]:
@@ -462,30 +510,69 @@ def _journals(session, item_id: int) -> list[OperationJournal]:
     )
 
 
-def _matching_intent(rows: list[OperationJournal], manifest: dict[str, Any]) -> OperationJournal | None:
-    found = []
+def _phase_journal(
+    rows: list[OperationJournal],
+    *,
+    phase: str,
+    manifest: dict[str, Any],
+) -> OperationJournal | None:
+    found: list[OperationJournal] = []
     for row in rows:
         payload = _journal_payload(row)
-        if payload.get("phase") == "intent":
-            if payload.get("manifest") != manifest:
-                raise StateConflictError("MEDIA_CORRUPT_DELETE_JOURNAL_AUTHORITY_CHANGED")
-            found.append(row)
+        if payload.get("phase") != phase:
+            continue
+        if payload.get("manifest") != manifest:
+            raise StateConflictError("MEDIA_CORRUPT_DELETE_JOURNAL_AUTHORITY_CHANGED")
+        found.append(row)
     if len(found) > 1:
-        raise StateConflictError("MEDIA_CORRUPT_DELETE_JOURNAL_DUPLICATE_INTENT")
+        raise StateConflictError(f"MEDIA_CORRUPT_DELETE_JOURNAL_DUPLICATE_{phase.upper()}")
     return found[0] if found else None
 
 
-def _matching_terminal(rows: list[OperationJournal], manifest: dict[str, Any]) -> OperationJournal | None:
-    found = []
-    for row in rows:
-        payload = _journal_payload(row)
-        if payload.get("phase") == "terminal":
-            if payload.get("manifest") != manifest:
-                raise StateConflictError("MEDIA_CORRUPT_DELETE_JOURNAL_AUTHORITY_CHANGED")
-            found.append(row)
-    if len(found) > 1:
-        raise StateConflictError("MEDIA_CORRUPT_DELETE_JOURNAL_DUPLICATE_TERMINAL")
-    return found[0] if found else None
+def _task_user_authority(
+    plan_meta: dict[str, Any],
+    item_meta: dict[str, Any],
+) -> tuple[int, int | None]:
+    execution = item_meta.get("execution")
+    task_id = execution.get("task_id") if isinstance(execution, dict) else None
+    if not isinstance(task_id, int) or isinstance(task_id, bool) or task_id <= 0:
+        raise StateConflictError("MEDIA_CORRUPT_DELETE_TASK_AUTHORITY_MISSING")
+    raw_user = plan_meta.get("requested_by_user_id")
+    user_id = (
+        int(raw_user)
+        if isinstance(raw_user, int) and not isinstance(raw_user, bool) and raw_user > 0
+        else None
+    )
+    return task_id, user_id
+
+
+def _source_stat_exact(
+    identity: dict[str, Any],
+    *,
+    allowed_roots: Iterable[Path | str],
+    quarantine_root: Path | str,
+) -> os.stat_result:
+    raw_path = Path(str(identity["path"]))
+    if raw_path.is_symlink() or os.path.islink(raw_path):
+        raise StateConflictError("MEDIA_CORRUPT_DELETE_SOURCE_SYMLINK")
+    source = require_allowed_path(raw_path, allowed_roots)
+    if is_reserved_quarantine_path(source, quarantine_root):
+        raise StateConflictError("MEDIA_CORRUPT_DELETE_SOURCE_IN_QUARANTINE")
+
+    try:
+        st = os.lstat(source)
+    except FileNotFoundError as exc:
+        raise StateConflictError("MEDIA_CORRUPT_DELETE_SOURCE_MISSING") from exc
+    if (
+        not stat.S_ISREG(st.st_mode)
+        or stat.S_ISLNK(st.st_mode)
+        or int(st.st_dev) != int(identity["device"])
+        or int(st.st_ino) != int(identity["inode"])
+        or int(st.st_size) != int(identity["size"])
+        or _mtime_ns(st) != int(identity["mtime_ns"])
+    ):
+        raise StateConflictError("MEDIA_CORRUPT_DELETE_SOURCE_IDENTITY_CHANGED")
+    return st
 
 
 def _hash_open_fd(fd: int, *, session_factory: sessionmaker, worker_id: str) -> str:
@@ -505,7 +592,8 @@ def _hash_open_fd(fd: int, *, session_factory: sessionmaker, worker_id: str) -> 
 def _unlink_exact_manifest(
     manifest: dict[str, Any],
     *,
-    settings: Settings,
+    allowed_roots: Iterable[Path | str],
+    quarantine_root: Path | str,
     session_factory: sessionmaker,
     worker_id: str,
 ) -> str:
@@ -514,11 +602,11 @@ def _unlink_exact_manifest(
     if raw_path.is_symlink() or os.path.islink(raw_path):
         raise StateConflictError("MEDIA_CORRUPT_DELETE_SOURCE_SYMLINK")
 
-    source = require_allowed_path(raw_path, settings.allowed_roots)
-    if is_reserved_quarantine_path(source, settings.quarantine_root):
+    source = require_allowed_path(raw_path, allowed_roots)
+    if is_reserved_quarantine_path(source, quarantine_root):
         raise StateConflictError("MEDIA_CORRUPT_DELETE_SOURCE_IN_QUARANTINE")
 
-    with safe_open_parent_fd(source, settings.allowed_roots) as (parent_fd, leaf):
+    with safe_open_parent_fd(source, allowed_roots) as (parent_fd, leaf):
         flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
         try:
             fd = os.open(leaf, flags, dir_fd=parent_fd)
@@ -555,7 +643,10 @@ def _unlink_exact_manifest(
             os.close(fd)
 
         renew_and_assert_worker_lease(session_factory, worker_id)
-        immediate = os.stat(leaf, dir_fd=parent_fd, follow_symlinks=False)
+        try:
+            immediate = os.stat(leaf, dir_fd=parent_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return "absent_after_intent"
         if (
             not stat.S_ISREG(immediate.st_mode)
             or int(immediate.st_dev) != int(identity["device"])
@@ -612,6 +703,7 @@ def _ensure_terminal_audit(
             "indexed_path_id": manifest["indexed_path_id"],
             "preview_digest": manifest["preview_digest"],
             "evidence_digest": manifest["evidence_digest"],
+            "integrity_reason_code": manifest["integrity_reason_code"],
             "semantics": SEMANTICS_VERSION,
             "terminal_result": terminal_result,
             "bypassed_quarantine": True,
@@ -631,7 +723,7 @@ def _finalize_terminal(
     now,
 ) -> None:
     journals = _journals(session, int(row.id))
-    if _matching_terminal(journals, manifest) is None:
+    if _phase_journal(journals, phase="terminal", manifest=manifest) is None:
         session.add(OperationJournal(
             operation=OPERATION_ID,
             sequence=int(row.sequence),
@@ -683,7 +775,8 @@ def execute_corrupt_media_delete(
     operation_item: OperationItem,
     *,
     plan_id: str,
-    settings: Settings,
+    allowed_roots: Iterable[Path | str],
+    quarantine_root: Path | str,
     session_factory: sessionmaker,
     worker_id: str,
 ) -> str:
@@ -696,28 +789,47 @@ def execute_corrupt_media_delete(
         session.execute(text("BEGIN IMMEDIATE"))
         now = utcnow()
         assert_active_worker_lease(session, worker_id, now=now)
-        _plan, row, _asset, _indexed, manifest = _load_frozen_authority(
+        plan, row, plan_meta, item_meta, manifest = _load_frozen_row(
             session,
             plan_id=numeric_plan_id,
             operation_item=operation_item,
         )
+        task_id, user_id = _task_user_authority(plan_meta, item_meta)
         journals = _journals(session, int(row.id))
-        terminal = _matching_terminal(journals, manifest)
+        terminal = _phase_journal(journals, phase="terminal", manifest=manifest)
         if terminal is not None:
             row.state = "completed"
             row.reason = "already permanently deleted corrupt media"
+            _ensure_terminal_audit(
+                session,
+                manifest=manifest,
+                task_id=task_id,
+                user_id=user_id,
+                terminal_result="terminal_recovered",
+            )
             session.commit()
             return row.reason
 
-        intent = _matching_intent(journals, manifest)
+        intent = _phase_journal(journals, phase="intent", manifest=manifest)
         if intent is None:
+            _assert_live_media_evidence(
+                session,
+                row=row,
+                item_meta=item_meta,
+                manifest=manifest,
+            )
+            _source_stat_exact(
+                manifest["identity"],
+                allowed_roots=allowed_roots,
+                quarantine_root=quarantine_root,
+            )
             session.add(OperationJournal(
                 operation=OPERATION_ID,
                 sequence=int(row.sequence),
                 plan_id=numeric_plan_id,
                 plan_item_id=int(row.id),
-                task_id=None,
-                user_id=None,
+                task_id=task_id,
+                user_id=user_id,
                 before_json=_json({
                     "phase": "intent",
                     "manifest": manifest,
@@ -731,7 +843,8 @@ def execute_corrupt_media_delete(
 
     terminal_result = _unlink_exact_manifest(
         manifest,
-        settings=settings,
+        allowed_roots=allowed_roots,
+        quarantine_root=quarantine_root,
         session_factory=session_factory,
         worker_id=worker_id,
     )
@@ -740,18 +853,23 @@ def execute_corrupt_media_delete(
         session.execute(text("BEGIN IMMEDIATE"))
         now = utcnow()
         assert_active_worker_lease(session, worker_id, now=now)
-        row = session.get(BatchPlanItem, manifest["item_id"])
-        if row is None or row.plan_id != numeric_plan_id or row.operation != OPERATION_ID:
-            raise StateConflictError("MEDIA_CORRUPT_DELETE_AUTHORITY_CHANGED: terminal item")
+        _plan, row, plan_meta, item_meta, frozen_manifest = _load_frozen_row(
+            session,
+            plan_id=numeric_plan_id,
+            item_id=manifest["item_id"],
+        )
+        if frozen_manifest != manifest:
+            raise StateConflictError("MEDIA_CORRUPT_DELETE_AUTHORITY_CHANGED: terminal manifest")
+        task_id, user_id = _task_user_authority(plan_meta, item_meta)
         journals = _journals(session, int(row.id))
-        if _matching_intent(journals, manifest) is None:
+        if _phase_journal(journals, phase="intent", manifest=manifest) is None:
             raise StateConflictError("MEDIA_CORRUPT_DELETE_INTENT_MISSING")
         _finalize_terminal(
             session,
             row=row,
             manifest=manifest,
-            task_id=0,
-            user_id=None,
+            task_id=task_id,
+            user_id=user_id,
             terminal_result=terminal_result,
             now=now,
         )
@@ -778,56 +896,53 @@ def reconcile_corrupt_media_delete(
         return False
 
     try:
-        operation_item = OperationItem(
-            sequence=int(item.sequence),
-            operation=item.operation,
-            source=Path(item.source_path),
-            expected_size=int(item.expected_size),
-            expected_hash=item.expected_hash,
-            expected_mtime_ns=int(item.expected_mtime_ns),
-            expected_device=int(item.expected_device),
-            expected_inode=int(item.expected_inode),
-            state=item.state,
-        )
-        _plan, row, _asset, _indexed, manifest = _load_frozen_authority(
+        _plan, row, _plan_meta, item_meta, manifest = _load_frozen_row(
             session,
             plan_id=plan_id,
-            operation_item=operation_item,
+            item_id=int(item.id),
         )
+        if row.source_path != item.source_path:
+            raise StateConflictError("MEDIA_CORRUPT_DELETE_AUTHORITY_CHANGED: recovery source")
+        journals = _journals(session, int(item.id))
+        terminal = _phase_journal(journals, phase="terminal", manifest=manifest)
+        intent = _phase_journal(journals, phase="intent", manifest=manifest)
     except Exception as exc:
         item.state = "failed"
         item.reason = f"corrupt-media delete reconciliation authority invalid: {exc}"
         return True
 
-    journals = _journals(session, int(item.id))
-    try:
-        terminal = _matching_terminal(journals, manifest)
-        intent = _matching_intent(journals, manifest)
-    except Exception as exc:
-        item.state = "failed"
-        item.reason = f"corrupt-media delete journal invalid: {exc}"
-        return True
-
     if terminal is not None:
-        item.state = "completed"
-        item.reason = "reconciled durable corrupt-media delete terminal"
-        _ensure_terminal_audit(
+        _finalize_terminal(
             session,
+            row=row,
             manifest=manifest,
             task_id=job_id,
             user_id=user_id,
             terminal_result="terminal_recovered",
+            now=now,
         )
         return True
 
     source = Path(item.source_path)
     if intent is None:
-        if os.path.lexists(source):
-            item.state = "planned"
-            item.reason = None
-        else:
+        try:
+            _assert_live_media_evidence(
+                session,
+                row=row,
+                item_meta=item_meta,
+                manifest=manifest,
+            )
+            _source_stat_exact(
+                manifest["identity"],
+                allowed_roots=settings.allowed_roots,
+                quarantine_root=settings.quarantine_root,
+            )
+        except Exception as exc:
             item.state = "failed"
-            item.reason = "source missing before durable corrupt-media delete intent"
+            item.reason = f"corrupt-media delete reconciliation before intent failed: {exc}"
+            return True
+        item.state = "planned"
+        item.reason = None
         return True
 
     if not os.path.lexists(source):
@@ -843,24 +958,16 @@ def reconcile_corrupt_media_delete(
         return True
 
     try:
-        st = os.lstat(source)
-    except OSError as exc:
+        _source_stat_exact(
+            manifest["identity"],
+            allowed_roots=settings.allowed_roots,
+            quarantine_root=settings.quarantine_root,
+        )
+    except Exception as exc:
         item.state = "failed"
-        item.reason = f"cannot inspect source after corrupt-media delete intent: {exc}"
+        item.reason = f"source changed after durable corrupt-media delete intent: {exc}"
         return True
 
-    identity = manifest["identity"]
-    if (
-        stat.S_ISREG(st.st_mode)
-        and not stat.S_ISLNK(st.st_mode)
-        and int(st.st_dev) == int(identity["device"])
-        and int(st.st_ino) == int(identity["inode"])
-        and int(st.st_size) == int(identity["size"])
-        and _mtime_ns(st) == int(identity["mtime_ns"])
-    ):
-        item.state = "planned"
-        item.reason = None
-    else:
-        item.state = "failed"
-        item.reason = "source identity changed after durable corrupt-media delete intent"
+    item.state = "planned"
+    item.reason = None
     return True
