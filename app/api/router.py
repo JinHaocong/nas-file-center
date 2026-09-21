@@ -21,6 +21,7 @@ from app.batch_utilities.errors import (
     BatchUtilityInvalidConfigError,
 )
 from app.models import User
+from app.media.catalog import enqueue_media_analysis, list_media_assets, media_summary
 from app.path_safety import UnsafePathError
 from app.service import StateConflictError
 from app.planning.dedupe_preview import (
@@ -101,6 +102,11 @@ class IndexMatchRequest(BaseModel):
     mode: str = "relative-path"
     normalize_pattern: str | None = None
     normalize_replacement: str = ""
+
+
+class MediaAnalyzeRequest(BaseModel):
+    root_keys: list[str] = Field(min_length=1, max_length=100)
+
 
 
 class ScanCreateRequest(BaseModel):
@@ -516,6 +522,50 @@ def index_match(request: Request, payload: IndexMatchRequest):
         return {"groups": groups, "count": len(groups)}
     except (ValueError, OSError) as exc:
         raise HTTPException(400, str(exc)) from exc
+
+
+
+# Media Metadata + Integrity
+@router.get("/media")
+def list_media(
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=500),
+    root_key: str | None = Query(default=None),
+    media_kind: str | None = Query(default=None),
+    integrity_status: str | None = Query(default=None),
+    search: str | None = Query(default=None),
+):
+    try:
+        return list_media_assets(
+            request.app.state.service.SessionLocal,
+            page=page,
+            page_size=page_size,
+            root_key=root_key,
+            media_kind=media_kind,
+            integrity_status=integrity_status,
+            search=search,
+        )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.get("/media/summary")
+def get_media_summary(request: Request):
+    return media_summary(request.app.state.service.SessionLocal)
+
+
+@router.post("/media/analyze")
+def analyze_media(request: Request, payload: MediaAnalyzeRequest):
+    try:
+        return enqueue_media_analysis(
+            request.app.state.service.SessionLocal,
+            request.app.state.settings,
+            payload.root_keys,
+        )
+    except (ValueError, OSError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+
 
 
 # Scans
