@@ -258,3 +258,91 @@ def test_exact_owned_paths_are_unlinked_without_inode_payload_mutation(
     )
     assert unrelated.exists()
     assert unrelated.read_bytes() == unrelated_bytes_before
+
+
+def _cross_storage_orphan(entry_id: int, data: Path, trash: Path):
+    return SimpleNamespace(
+        id=entry_id,
+        state="active",
+        tx_phase="active",
+        transaction_mode="cross_storage_transactional",
+        original_path=str(data / f"missing-original-{entry_id}.bin"),
+        quarantine_path=str(trash / f"missing-public-{entry_id}.q.bin"),
+        authoritative_anchor_path=None,
+        active_attempt_generation=2,
+        device=101,
+        inode=202,
+        size=4096,
+        mtime_ns=303,
+        content_hash=hashlib.sha256(b"legacy-orphan").hexdigest(),
+        quarantine_device=404,
+        quarantine_inode=505,
+        quarantine_mtime_ns=606,
+    )
+
+
+def test_cross_storage_missing_payload_builds_metadata_only_orphan_manifest(
+    tmp_path: Path,
+) -> None:
+    from app.quarantine.unlink_purge import (
+        build_unlink_manifest,
+        revalidate_unlink_manifest,
+    )
+
+    data = tmp_path / "data"
+    trash = data / ".nas-file-center-trash"
+    trash.mkdir(parents=True)
+    entry = _cross_storage_orphan(41, data, trash)
+
+    manifest = build_unlink_manifest(entry, trash)
+
+    assert manifest["blockers"] == []
+    assert manifest["metadata_only_orphan"] is True
+    assert manifest["owned_paths"] == []
+    assert manifest["orphan_absence"] == {
+        "mode": "cross_storage_missing_payload_v1",
+        "original_path": entry.original_path,
+        "public_view": entry.quarantine_path,
+        "tx_entry_root": str(trash / ".tx" / "entry-41"),
+    }
+
+    validation = revalidate_unlink_manifest(entry, trash, manifest)
+    assert validation["valid"] is True
+    assert validation["blockers"] == []
+
+
+@pytest.mark.parametrize("reappearing_role", ["original_path", "public_view", "tx_entry_root"])
+def test_metadata_only_orphan_revalidation_blocks_reappearing_path(
+    tmp_path: Path,
+    reappearing_role: str,
+) -> None:
+    from app.quarantine.unlink_purge import (
+        build_unlink_manifest,
+        revalidate_unlink_manifest,
+    )
+
+    data = tmp_path / "data"
+    trash = data / ".nas-file-center-trash"
+    trash.mkdir(parents=True)
+    entry = _cross_storage_orphan(42, data, trash)
+    manifest = build_unlink_manifest(entry, trash)
+    assert manifest["metadata_only_orphan"] is True
+
+    if reappearing_role == "original_path":
+        path = Path(entry.original_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"replacement")
+    elif reappearing_role == "public_view":
+        path = Path(entry.quarantine_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"replacement")
+    else:
+        path = trash / ".tx" / f"entry-{entry.id}"
+        path.mkdir(parents=True)
+
+    validation = revalidate_unlink_manifest(entry, trash, manifest)
+    assert validation["valid"] is False
+    assert any(
+        blocker.startswith(f"ORPHAN_PATH_PRESENT:{reappearing_role}")
+        for blocker in validation["blockers"]
+    )
