@@ -174,17 +174,9 @@ export const DashboardPage: React.FC = () => {
         }
       />
 
-      <div className="nfc-snapshot-note" role="note">
-        <InfoCircleOutlined />
-        <div>
-          <strong>扫描快照</strong>
-          <span>
-            重复组和可释放空间来自最近一次已完成扫描；需要最新结果时请重新发起扫描。
-          </span>
-        </div>
-      </div>
-
-      <section className="nfc-metric-grid" aria-label="核心运行指标">
+      <section className="nfc-dashboard-command-deck" aria-label="运行概览">
+        <div className="nfc-dashboard-metrics-zone">
+          <section className="nfc-metric-grid" aria-label="核心运行指标">
         <MetricCard
           label="已索引文件"
           value={summary?.indexed_files || 0}
@@ -219,6 +211,18 @@ export const DashboardPage: React.FC = () => {
           meta="当前计划总数"
           icon={<ScheduleOutlined />}
         />
+          </section>
+        </div>
+
+        <div className="nfc-snapshot-note" role="note">
+          <InfoCircleOutlined />
+          <div>
+            <strong>扫描快照</strong>
+            <span>
+              重复组和可释放空间来自最近一次已完成扫描；需要最新结果时请重新发起扫描。
+            </span>
+          </div>
+        </div>
       </section>
 
       <div className="nfc-dashboard-layout">
