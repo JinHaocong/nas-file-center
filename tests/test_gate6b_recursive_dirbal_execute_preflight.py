@@ -478,3 +478,47 @@ def test_worker_duplicate_boundary_defers_sha256_until_execute_fence(tmp_path: P
     assert True not in worker_hash_modes, worker_hash_modes
     assert not source.exists()
     assert keep.exists()
+
+
+def test_worker_recursive_preflight_reports_directory_replacement_identity(tmp_path: Path):
+    service, settings, root, _ = _setup_service(tmp_path)
+    protected = root / "set"
+    protected.mkdir()
+    source = protected / "delete.bin"
+    sibling = protected / "keep.bin"
+    source.write_bytes(b"duplicate")
+    sibling.write_bytes(b"survivor")
+
+    plan_id = _create_ready_recursive_plan(
+        service,
+        settings,
+        root,
+        source,
+        token="directory-identity-replaced",
+    )
+
+    # Preserve the file objects while replacing only the protected directory
+    # binding. Gate3 file freshness therefore still passes, but Recursive
+    # Protection must reject the same-path/new-inode directory ABA.
+    detached = root / "detached-set"
+    protected.rename(detached)
+    protected.mkdir()
+    (detached / source.name).rename(protected / source.name)
+    (detached / sibling.name).rename(protected / sibling.name)
+
+    _enqueue_and_run_worker(
+        service,
+        settings,
+        plan_id,
+        worker_id="gate6b-directory-identity-replaced",
+    )
+
+    plan_status, item_state, reason = _item_state(service, plan_id)
+    assert plan_status == "stale"
+    assert item_state == "failed"
+    assert (protected / source.name).exists()
+    assert reason is not None
+    assert "protected directory identity changed after plan freeze" in reason
+    assert "frozen dev:ino=" in reason
+    assert "current dev:ino=" in reason
+    assert "regenerate the plan from a fresh scan" in reason
