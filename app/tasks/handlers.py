@@ -101,6 +101,9 @@ if not getattr(_impl.BatchPlanExecuteHandler.run, "_gate6a2_terminal_wrapped", F
 
 BatchPlanExecuteHandler = _impl.BatchPlanExecuteHandler
 
+# Gate6-D registers the media-analysis handler on the canonical handler registry.
+from app.media.handler import MediaAnalysisHandler as MediaAnalysisHandler
+
 
 class _HandlerCompatibilityModule(types.ModuleType):
     """Preserve the historical app.tasks.handlers patch seam.
