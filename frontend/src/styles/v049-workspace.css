@@ -1534,3 +1534,52 @@ body,
     transition-duration: 0.01ms !important;
   }
 }
+
+
+/* Content-width hierarchy -------------------------------------------------- */
+
+/* Data ledgers use the full operational width. */
+.nfc-indexes-page,
+.nfc-scans-page,
+.nfc-plans-page,
+.nfc-quarantine-page,
+.nfc-tasks-page,
+.nfc-audit-page,
+.nfc-workflows-page,
+.nfc-organizer-page,
+.nfc-dashboard-page {
+  width: min(100%, var(--nfc-v49-content-max));
+}
+
+/* Detail and configuration workspaces read better at a narrower measure. */
+.nfc-plan-detail-page,
+.nfc-scan-detail-page,
+.nfc-workflow-builder-page,
+.nfc-advanced-dedupe-page,
+.nfc-system-controls-page,
+.nfc-organizer-preview-page {
+  width: min(100%, 1320px);
+}
+
+/* Focused utilities should not stretch controls across an ultrawide display. */
+.nfc-path-match-page,
+.nfc-rename-page,
+.nfc-batch-page {
+  width: min(100%, 1180px);
+}
+
+/* Mobile bottom actions belong to the workspace, so tune them without touching navigation. */
+.nfc-mobile-dock {
+  padding: 8px 10px max(8px, env(safe-area-inset-bottom));
+}
+
+.nfc-mobile-dock-surface {
+  border-color: var(--nfc-v49-line);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--nfc-v49-surface) 94%, transparent);
+  box-shadow: 0 14px 36px rgba(10, 15, 22, 0.12);
+}
+
+[data-theme='dark'] .nfc-mobile-dock-surface {
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.36);
+}
