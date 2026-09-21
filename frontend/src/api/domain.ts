@@ -23,6 +23,9 @@ import {
   UndoPlanResponse,
   ResourcePolicy,
   ResourcePolicyUpdate,
+  MediaAsset,
+  MediaSummary,
+  CorruptDeletePreview,
 } from '../types';
 import {
   DirectDedupePreviewRequest,
@@ -63,6 +66,52 @@ export const scansApi = {
   createAdvancedDedupePlan: (scanJobId: number, payload: DirectAdvancedDedupeGenerateRequest) =>
     api.post<DirectAdvancedDedupeGenerateResponse>(`/api/scans/${scanJobId}/dedupe-plan`, payload),
   deleteScan: (id: number) => api.delete<{ deleted: boolean; id: number }>(`/api/scans/${id}`),
+};
+
+export const mediaApi = {
+  list: (params: {
+    page?: number;
+    pageSize?: number;
+    rootKey?: string;
+    mediaKind?: 'image' | 'video';
+    integrityStatus?: 'healthy' | 'corrupt' | 'unknown';
+    search?: string;
+  } = {}) => {
+    const query = new URLSearchParams({
+      page: String(params.page ?? 1),
+      page_size: String(params.pageSize ?? 50),
+    });
+    if (params.rootKey) query.set('root_key', params.rootKey);
+    if (params.mediaKind) query.set('media_kind', params.mediaKind);
+    if (params.integrityStatus) query.set('integrity_status', params.integrityStatus);
+    if (params.search) query.set('search', params.search);
+    return api.get<PaginatedResponse<MediaAsset>>(`/api/media?${query.toString()}`);
+  },
+  summary: () => api.get<MediaSummary>('/api/media/summary'),
+  analyze: (rootKeys: string[]) =>
+    api.post<{ work_job_id: number; status: string; root_keys: string[] }>(
+      '/api/media/analyze',
+      { root_keys: rootKeys },
+    ),
+  previewCorruptDelete: (mediaAssetIds: number[]) =>
+    api.post<CorruptDeletePreview>('/api/media/corrupt-delete/preview', {
+      media_asset_ids: mediaAssetIds,
+    }),
+  createCorruptDeletePlan: (
+    mediaAssetIds: number[],
+    expectedPreviewDigest: string,
+  ) =>
+    api.post<{
+      id: number;
+      status: string;
+      expected_changes: number;
+      expected_reclaim_bytes: number;
+      preview_digest: string;
+    }>('/api/media/corrupt-delete/plan', {
+      media_asset_ids: mediaAssetIds,
+      expected_preview_digest: expectedPreviewDigest,
+      confirmation: 'DELETE_CORRUPT_FILES',
+    }),
 };
 
 export const indexesApi = {
