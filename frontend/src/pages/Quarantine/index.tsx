@@ -83,8 +83,13 @@ export const QuarantinePage: React.FC = () => {
 
   const deleteRecordMutation = useMutation({
     mutationFn: (entryId: number) => quarantineApi.deleteRecord(entryId),
-    onSuccess: (_, entryId) => {
-      message.success(`隔离记录 #${entryId} 已删除；如为已恢复记录，NFC 私有隔离残留也已安全清理`);
+    onSuccess: (result, entryId) => {
+      if (result.status === 'queued' && result.work_job_id) {
+        message.success(`已恢复记录 #${entryId} 的安全清理任务 #${result.work_job_id} 已进入任务中心`);
+        queryClient.invalidateQueries({ queryKey: ['tasks'] });
+        return;
+      }
+      message.success(`隔离记录 #${entryId} 已删除`);
       queryClient.invalidateQueries({ queryKey: ['quarantineList'] });
       queryClient.invalidateQueries({ queryKey: ['auditEvents'] });
       refetch();
@@ -98,7 +103,12 @@ export const QuarantinePage: React.FC = () => {
   const bulkDeleteRecordsMutation = useMutation({
     mutationFn: (entryIds: number[]) => quarantineApi.bulkDeleteRecords(entryIds),
     onSuccess: (result) => {
-      message.success(`已删除 ${result.deleted_count} 条隔离记录；已恢复记录的 NFC 私有隔离残留已同步清理`);
+      if (result.status === 'queued' && result.work_job_id) {
+        message.success(`安全清理任务 #${result.work_job_id} 已进入任务中心；Worker 将回收已恢复记录的 .nas-file-center-trash 私有副本`);
+        queryClient.invalidateQueries({ queryKey: ['tasks'] });
+        return;
+      }
+      message.success(`已删除 ${result.deleted_count ?? 0} 条隔离记录`);
       queryClient.invalidateQueries({ queryKey: ['quarantineList'] });
       queryClient.invalidateQueries({ queryKey: ['auditEvents'] });
       refetch();
@@ -284,7 +294,7 @@ export const QuarantinePage: React.FC = () => {
               loading={resolvingTerminalRecords || bulkDeleteRecordsMutation.isPending}
               onClick={handleDeleteFilteredTerminalRecords}
             >
-              批量删除终态记录
+              批量删除记录
             </Button>
           </Tooltip>
         </ActionBar>
