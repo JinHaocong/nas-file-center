@@ -259,3 +259,46 @@ describe('v0.4.9 full workspace overhaul', () => {
     assert.match(css, /\.nfc-advanced-dedupe-page \.nfc-dedupe-editor-wrap/);
   });
 });
+
+
+describe('v0.4.9 source-level visual polish', () => {
+  test('focused tools no longer fight the workspace layer with flat zero-radius shells', () => {
+    const css = read('src/styles/pages/tools.css');
+    assert.doesNotMatch(css, /border-radius:\s*0\s*!important/);
+    assert.doesNotMatch(css, /border-left:\s*0\s*!important/);
+    assert.match(css, /\.nfc-path-match-page \.nfc-tool-workbench[\s\S]*padding:\s*20px 22px 22px/);
+    assert.match(css, /var\(--nfc-v49-radius-lg/);
+  });
+
+  test('workflow builder source uses the same continuous editor topology as v0.4.9', () => {
+    const css = read('src/styles/pages/workflows.css');
+    assert.match(css, /\.nfc-workflow-builder-page \.nfc-complex-form-panel[\s\S]*var\(--nfc-v49-radius-lg/);
+    assert.match(css, /\.nfc-workflow-step-card[\s\S]*border-top:\s*1px solid/);
+    assert.match(css, /\.nfc-workflow-step-card\.is-expanded[\s\S]*inset 2px 0 0/);
+  });
+
+  test('detail source no longer forces plan actions into an obsolete left-rail treatment', () => {
+    const css = read('src/styles/pages/details.css');
+    assert.doesNotMatch(css, /\.nfc-plan-detail-page \.nfc-plan-action-surface[\s\S]*border-left:\s*2px/);
+    assert.match(css, /\.nfc-plan-detail-page \.nfc-plan-action-surface[\s\S]*var\(--nfc-v49-radius-md/);
+    assert.match(css, /\.nfc-dedupe-editor-wrap[\s\S]*padding:\s*18px/);
+  });
+
+  test('settings source has one consistent subpanel divider rhythm', () => {
+    const css = read('src/styles/pages/settings.css');
+    assert.doesNotMatch(css, /border-top:\s*1px solid/);
+    assert.match(css, /\.nfc-settings-subpanel:last-child[\s\S]*border-bottom:\s*0/);
+    assert.match(css, /\.nfc-settings-control-grid[\s\S]*padding:\s*11px 0 14px/);
+  });
+
+  test('dashboard, operational pages, organizer and login use v0.4.9 source tokens', () => {
+    for (const file of [
+      'src/styles/pages/dashboard.css',
+      'src/styles/pages/operations.css',
+      'src/styles/pages/organizer.css',
+      'src/styles/pages/login.css',
+    ]) {
+      assert.match(read(file), /--nfc-v49-|var\(--nfc-v49-/);
+    }
+  });
+});
