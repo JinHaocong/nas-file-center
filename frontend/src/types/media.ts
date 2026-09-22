@@ -22,6 +22,10 @@ export interface MediaAsset {
   integrity_status: 'healthy' | 'corrupt' | 'unknown';
   integrity_reason_code: string | null;
   integrity_detail: string | null;
+  verification_status: 'unverified' | 'baseline' | 'verified' | 'changed' | 'unknown';
+  verification_reason_code: string | null;
+  verification_detail: string | null;
+  verification_checked_at: string | null;
   can_direct_delete: boolean;
   probed_at: string | null;
 }
@@ -33,6 +37,11 @@ export interface MediaSummary {
   healthy: number;
   corrupt: number;
   unknown: number;
+  verification_unverified: number;
+  verification_baseline: number;
+  verification_verified: number;
+  verification_changed: number;
+  verification_unknown: number;
 }
 
 export interface CorruptDeletePreviewItem {
