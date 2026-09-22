@@ -115,8 +115,8 @@ def test_integrity_verification_does_not_mint_baseline_for_index_identity_drift(
     client, data, settings, app = _client(tmp_path)
     root = data / "photos"
     root.mkdir()
-    path = root / "photo.png"
-    Image.new("RGB", (10, 10), (1, 2, 3)).save(path, format="PNG")
+    path = root / "photo.bmp"
+    Image.new("RGB", (10, 10), (1, 2, 3)).save(path, format="BMP")
 
     _index_and_analyze(client, settings, root)
 
