@@ -1,4 +1,5 @@
 from pathlib import Path
+import sqlite3
 
 from sqlalchemy import delete, inspect, select
 
@@ -96,3 +97,79 @@ def test_gate6d_media_assets_schema_is_additive_and_cascades_with_index(tmp_path
 
     with SessionLocal() as session:
         assert session.scalar(select(MediaAsset).where(MediaAsset.id == asset_id)) is None
+
+
+
+def test_gate6d_integrity_columns_migrate_additively_with_backup(tmp_path: Path):
+    db_path = tmp_path / "config" / "app.db"
+    db_path.parent.mkdir(parents=True)
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE media_assets (
+            id INTEGER PRIMARY KEY,
+            indexed_path_id INTEGER NOT NULL,
+            media_kind VARCHAR(16) NOT NULL,
+            width INTEGER,
+            height INTEGER,
+            format VARCHAR(64),
+            date_taken VARCHAR(64),
+            camera VARCHAR(255),
+            orientation INTEGER,
+            duration_seconds FLOAT,
+            codec VARCHAR(128),
+            bitrate BIGINT,
+            fps FLOAT,
+            audio_codec VARCHAR(128),
+            integrity_status VARCHAR(16) NOT NULL DEFAULT 'unknown',
+            integrity_reason_code VARCHAR(128),
+            integrity_detail TEXT,
+            observed_device BIGINT NOT NULL DEFAULT 0,
+            observed_inode BIGINT NOT NULL DEFAULT 0,
+            observed_size BIGINT NOT NULL DEFAULT 0,
+            observed_mtime_ns BIGINT NOT NULL DEFAULT 0,
+            corrupt_sha256 VARCHAR(64),
+            source_scan_generation VARCHAR(128) NOT NULL,
+            probe_generation VARCHAR(128) NOT NULL,
+            probed_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO media_assets (
+            id, indexed_path_id, media_kind, integrity_status,
+            observed_device, observed_inode, observed_size, observed_mtime_ns,
+            source_scan_generation, probe_generation, probed_at, updated_at
+        ) VALUES (1, 1, 'image', 'healthy', 1, 2, 3, 4, 'scan-a', 'probe-a',
+                  CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    engine, _SessionLocal = create_engine_and_session(db_path)
+    backups = tmp_path / "backups"
+    init_db(engine, db_path=db_path, backups_dir=backups)
+
+    columns = {c["name"] for c in inspect(engine).get_columns("media_assets")}
+    assert {
+        "verification_sha256",
+        "verification_device",
+        "verification_inode",
+        "verification_size",
+        "verification_mtime_ns",
+        "verification_status",
+        "verification_reason_code",
+        "verification_detail",
+        "verification_observed_sha256",
+        "verification_checked_at",
+    }.issubset(columns)
+
+    with engine.connect() as db:
+        status = db.exec_driver_sql(
+            "SELECT verification_status FROM media_assets WHERE id = 1"
+        ).scalar_one()
+    assert status == "unverified"
+    assert list(backups.glob("nas-file-center-*.db"))
