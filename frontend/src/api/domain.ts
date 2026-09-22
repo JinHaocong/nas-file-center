@@ -75,6 +75,7 @@ export const mediaApi = {
     rootKey?: string;
     mediaKind?: 'image' | 'video';
     integrityStatus?: 'healthy' | 'corrupt' | 'unknown';
+    verificationStatus?: 'unverified' | 'baseline' | 'verified' | 'changed' | 'unknown';
     search?: string;
   } = {}) => {
     const query = new URLSearchParams({
@@ -84,6 +85,7 @@ export const mediaApi = {
     if (params.rootKey) query.set('root_key', params.rootKey);
     if (params.mediaKind) query.set('media_kind', params.mediaKind);
     if (params.integrityStatus) query.set('integrity_status', params.integrityStatus);
+    if (params.verificationStatus) query.set('verification_status', params.verificationStatus);
     if (params.search) query.set('search', params.search);
     return api.get<PaginatedResponse<MediaAsset>>(`/api/media?${query.toString()}`);
   },
@@ -91,6 +93,11 @@ export const mediaApi = {
   analyze: (rootKeys: string[]) =>
     api.post<{ work_job_id: number; status: string; root_keys: string[] }>(
       '/api/media/analyze',
+      { root_keys: rootKeys },
+    ),
+  verifyIntegrity: (rootKeys: string[]) =>
+    api.post<{ work_job_id: number; status: string; root_keys: string[] }>(
+      '/api/media/integrity/verify',
       { root_keys: rootKeys },
     ),
   previewCorruptDelete: (mediaAssetIds: number[]) =>
