@@ -38,6 +38,20 @@ describe('Gate6-D media metadata + integrity UI', () => {
     assert.match(api, /confirmation: 'DELETE_CORRUPT_FILES'/);
   });
 
+  test('TASK-036-11 exposes immutable-baseline SHA256 verification through the media workspace', () => {
+    const page = read('src/pages/Media/index.tsx');
+    const api = read('src/api/domain.ts');
+    const types = read('src/types/media.ts');
+
+    assert.match(api, /\/api\/media\/integrity\/verify/);
+    assert.match(api, /verification_status/);
+    assert.match(page, /SHA256 完整性校验/);
+    assert.match(page, /基线已建立/);
+    assert.match(page, /内容变化/);
+    assert.match(page, /verification_changed/);
+    assert.match(types, /verification_status: 'unverified' \| 'baseline' \| 'verified' \| 'changed' \| 'unknown'/);
+  });
+
   test('v0.4.9 workspace density covers the new media page without touching sidebar selectors', () => {
     const css = read('src/styles/v049-workspace.css');
 

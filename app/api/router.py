@@ -22,7 +22,12 @@ from app.batch_utilities.errors import (
     BatchUtilityInvalidConfigError,
 )
 from app.models import BatchPlan, User, WorkJob
-from app.media.catalog import enqueue_media_analysis, list_media_assets, media_summary
+from app.media.catalog import (
+    enqueue_media_analysis,
+    enqueue_media_integrity_verification,
+    list_media_assets,
+    media_summary,
+)
 from app.media.corrupt_delete import build_corrupt_delete_preview, create_corrupt_delete_plan
 from app.path_safety import UnsafePathError
 from app.service import StateConflictError
@@ -134,6 +139,11 @@ class IndexMatchRequest(BaseModel):
 
 class MediaAnalyzeRequest(BaseModel):
     root_keys: list[str] = Field(min_length=1, max_length=100)
+
+
+class MediaIntegrityVerifyRequest(BaseModel):
+    root_keys: list[str] = Field(min_length=1, max_length=100)
+
 
 class MediaCorruptDeletePreviewRequest(BaseModel):
     media_asset_ids: list[int] = Field(min_length=1, max_length=5000)
@@ -572,6 +582,7 @@ def list_media(
     root_key: str | None = Query(default=None),
     media_kind: str | None = Query(default=None),
     integrity_status: str | None = Query(default=None),
+    verification_status: str | None = Query(default=None),
     search: str | None = Query(default=None),
 ):
     try:
@@ -582,6 +593,7 @@ def list_media(
             root_key=root_key,
             media_kind=media_kind,
             integrity_status=integrity_status,
+            verification_status=verification_status,
             search=search,
         )
     except ValueError as exc:
@@ -604,6 +616,17 @@ def analyze_media(request: Request, payload: MediaAnalyzeRequest):
     except (ValueError, OSError) as exc:
         raise HTTPException(422, str(exc)) from exc
 
+
+@router.post("/media/integrity/verify")
+def verify_media_integrity(request: Request, payload: MediaIntegrityVerifyRequest):
+    try:
+        return enqueue_media_integrity_verification(
+            request.app.state.service.SessionLocal,
+            request.app.state.settings,
+            payload.root_keys,
+        )
+    except (ValueError, OSError) as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @router.post("/media/corrupt-delete/preview")

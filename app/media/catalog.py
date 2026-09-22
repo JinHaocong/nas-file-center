@@ -66,11 +66,33 @@ def enqueue_media_analysis(
         }
 
 
+def enqueue_media_integrity_verification(
+    session_factory: sessionmaker,
+    settings: Settings,
+    root_keys: list[str],
+) -> dict[str, Any]:
+    normalized = validate_media_root_keys(session_factory, settings, root_keys)
+    with session_factory() as session:
+        work = WorkJob(
+            kind="media-integrity-verify",
+            status="queued",
+            state_json=json.dumps({"root_keys": normalized}, ensure_ascii=False),
+        )
+        session.add(work)
+        session.commit()
+        return {
+            "work_job_id": int(work.id),
+            "status": str(work.status),
+            "root_keys": normalized,
+        }
+
+
 def _media_filters(
     *,
     root_key: str | None,
     media_kind: str | None,
     integrity_status: str | None,
+    verification_status: str | None,
     search: str | None,
 ):
     filters = [IndexedPath.id == MediaAsset.indexed_path_id]
@@ -84,6 +106,12 @@ def _media_filters(
         if integrity_status not in {"healthy", "corrupt", "unknown"}:
             raise ValueError("integrity_status must be healthy, corrupt, or unknown")
         filters.append(MediaAsset.integrity_status == integrity_status)
+    if verification_status:
+        if verification_status not in {"unverified", "baseline", "verified", "changed", "unknown"}:
+            raise ValueError(
+                "verification_status must be unverified, baseline, verified, changed, or unknown"
+            )
+        filters.append(MediaAsset.verification_status == verification_status)
     if search:
         needle = f"%{search.strip()}%"
         if needle != "%%":
@@ -104,6 +132,7 @@ def list_media_assets(
     root_key: str | None = None,
     media_kind: str | None = None,
     integrity_status: str | None = None,
+    verification_status: str | None = None,
     search: str | None = None,
 ) -> dict[str, Any]:
     page = max(1, int(page))
@@ -113,6 +142,7 @@ def list_media_assets(
         root_key=root_key,
         media_kind=media_kind,
         integrity_status=integrity_status,
+        verification_status=verification_status,
         search=search,
     )
 
@@ -159,6 +189,14 @@ def list_media_assets(
                 "integrity_status": asset.integrity_status,
                 "integrity_reason_code": asset.integrity_reason_code,
                 "integrity_detail": asset.integrity_detail,
+                "verification_status": asset.verification_status,
+                "verification_reason_code": asset.verification_reason_code,
+                "verification_detail": asset.verification_detail,
+                "verification_checked_at": (
+                    asset.verification_checked_at.isoformat()
+                    if asset.verification_checked_at
+                    else None
+                ),
                 "can_direct_delete": (
                     asset.integrity_status == "corrupt"
                     and isinstance(asset.corrupt_sha256, str)
@@ -198,6 +236,21 @@ def media_summary(session_factory: sessionmaker) -> dict[str, int]:
         unknown = session.scalar(
             select(func.count(MediaAsset.id)).where(MediaAsset.integrity_status == "unknown")
         ) or 0
+        verification_unverified = session.scalar(
+            select(func.count(MediaAsset.id)).where(MediaAsset.verification_status == "unverified")
+        ) or 0
+        verification_baseline = session.scalar(
+            select(func.count(MediaAsset.id)).where(MediaAsset.verification_status == "baseline")
+        ) or 0
+        verification_verified = session.scalar(
+            select(func.count(MediaAsset.id)).where(MediaAsset.verification_status == "verified")
+        ) or 0
+        verification_changed = session.scalar(
+            select(func.count(MediaAsset.id)).where(MediaAsset.verification_status == "changed")
+        ) or 0
+        verification_unknown = session.scalar(
+            select(func.count(MediaAsset.id)).where(MediaAsset.verification_status == "unknown")
+        ) or 0
     return {
         "total": int(total),
         "image": int(image),
@@ -205,4 +258,9 @@ def media_summary(session_factory: sessionmaker) -> dict[str, int]:
         "healthy": int(healthy),
         "corrupt": int(corrupt),
         "unknown": int(unknown),
+        "verification_unverified": int(verification_unverified),
+        "verification_baseline": int(verification_baseline),
+        "verification_verified": int(verification_verified),
+        "verification_changed": int(verification_changed),
+        "verification_unknown": int(verification_unknown),
     }

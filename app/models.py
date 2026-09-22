@@ -277,6 +277,20 @@ class MediaAsset(Base):
     observed_mtime_ns: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     corrupt_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
+    # TASK-036-11 read-only integrity verification authority. The baseline hash
+    # is immutable once established; later checks only update observed/result
+    # fields so a mismatch cannot silently bless new content.
+    verification_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    verification_device: Mapped[int | None] = mapped_column(FilesystemId(), nullable=True)
+    verification_inode: Mapped[int | None] = mapped_column(FilesystemId(), nullable=True)
+    verification_size: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    verification_mtime_ns: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    verification_status: Mapped[str] = mapped_column(String(16), default="unverified", nullable=False, index=True)
+    verification_reason_code: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    verification_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    verification_observed_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    verification_checked_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
     source_scan_generation: Mapped[str] = mapped_column(String(128), nullable=False)
     probe_generation: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     probed_at: Mapped[datetime] = mapped_column(default=utcnow, nullable=False)

@@ -149,6 +149,28 @@ def init_db(
             ]
             missing_quarantine_cols = [(col, ctype) for col, ctype in expected_new_cols if col not in current_quarantine_cols]
 
+        # TASK-036-11 adds read-only SHA256 verification metadata to the
+        # existing media_assets table. Existing databases must be upgraded
+        # additively and backed up before ALTER TABLE.
+        missing_media_cols: list[tuple[str, str]] = []
+        if "media_assets" in existing_tables:
+            current_media_cols = {c["name"] for c in inspector.get_columns("media_assets")}
+            expected_media_cols = [
+                ("verification_sha256", "VARCHAR(64)"),
+                ("verification_device", "BIGINT"),
+                ("verification_inode", "BIGINT"),
+                ("verification_size", "BIGINT"),
+                ("verification_mtime_ns", "BIGINT"),
+                ("verification_status", "VARCHAR(16) DEFAULT 'unverified' NOT NULL"),
+                ("verification_reason_code", "VARCHAR(128)"),
+                ("verification_detail", "TEXT"),
+                ("verification_observed_sha256", "VARCHAR(64)"),
+                ("verification_checked_at", "DATETIME"),
+            ]
+            missing_media_cols = [
+                (col, ctype) for col, ctype in expected_media_cols if col not in current_media_cols
+            ]
+
         needs_backup = bool(
             existing_tables
             and (
@@ -156,6 +178,7 @@ def init_db(
                 or bool(missing_work_job_cols)
                 or bool(missing_dlp_cols)
                 or bool(missing_quarantine_cols)
+                or bool(missing_media_cols)
             )
         )
         if needs_backup and db_path and backups_dir:
@@ -182,6 +205,13 @@ def init_db(
                     conn.execute(text(f"ALTER TABLE quarantine_entries ADD COLUMN {col} {ctype}"))
                 conn.commit()
 
+        # Migrate TASK-036-11 integrity verification columns.
+        if missing_media_cols:
+            with engine.connect() as conn:
+                for col, ctype in missing_media_cols:
+                    conn.execute(text(f"ALTER TABLE media_assets ADD COLUMN {col} {ctype}"))
+                conn.commit()
+
         # Create all newly defined tables / columns / indexes
         Base.metadata.create_all(engine)
 
@@ -192,6 +222,7 @@ def init_db(
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_work_jobs_heartbeat_at ON work_jobs(heartbeat_at)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_quarantine_entries_tx_token ON quarantine_entries(tx_token)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_quarantine_entries_tx_phase ON quarantine_entries(tx_phase)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_media_assets_verification_status ON media_assets(verification_status)"))
             conn.commit()
 
         SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, future=True)
