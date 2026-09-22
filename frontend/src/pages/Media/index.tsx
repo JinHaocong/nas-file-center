@@ -20,6 +20,7 @@ import {
   QuestionCircleOutlined,
   ReloadOutlined,
   SearchOutlined,
+  SafetyCertificateOutlined,
   VideoCameraOutlined,
   WarningOutlined,
 } from '@ant-design/icons';
@@ -64,6 +65,22 @@ const integrityBadge = (record: MediaAsset) => {
   return <Tag icon={<QuestionCircleOutlined />}>未知</Tag>;
 };
 
+const verificationBadge = (record: MediaAsset) => {
+  if (record.verification_status === 'verified') {
+    return <Tag color="success" icon={<SafetyCertificateOutlined />}>SHA256 通过</Tag>;
+  }
+  if (record.verification_status === 'changed') {
+    return <Tag color="error" icon={<WarningOutlined />}>内容变化</Tag>;
+  }
+  if (record.verification_status === 'baseline') {
+    return <Tag color="processing" icon={<SafetyCertificateOutlined />}>基线已建立</Tag>;
+  }
+  if (record.verification_status === 'unknown') {
+    return <Tag icon={<QuestionCircleOutlined />}>无法校验</Tag>;
+  }
+  return <Tag>未建立基线</Tag>;
+};
+
 export const MediaPage: React.FC = () => {
   useTitle('媒体完整性');
   const { user } = useAuth();
@@ -75,11 +92,14 @@ export const MediaPage: React.FC = () => {
   const [rootKey, setRootKey] = useState<string | undefined>();
   const [mediaKind, setMediaKind] = useState<'image' | 'video' | undefined>();
   const [integrityStatus, setIntegrityStatus] = useState<'healthy' | 'corrupt' | 'unknown' | undefined>();
+  const [verificationStatus, setVerificationStatus] = useState<'unverified' | 'baseline' | 'verified' | 'changed' | 'unknown' | undefined>();
   const [search, setSearch] = useState('');
   const [searchApplied, setSearchApplied] = useState('');
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [analyzeOpen, setAnalyzeOpen] = useState(false);
   const [analyzeRoots, setAnalyzeRoots] = useState<string[]>([]);
+  const [verifyOpen, setVerifyOpen] = useState(false);
+  const [verifyRoots, setVerifyRoots] = useState<string[]>([]);
 
   const summaryQuery = useQuery({
     queryKey: ['mediaSummary'],
@@ -87,13 +107,14 @@ export const MediaPage: React.FC = () => {
   });
 
   const mediaQuery = useQuery({
-    queryKey: ['mediaList', page, pageSize, rootKey, mediaKind, integrityStatus, searchApplied],
+    queryKey: ['mediaList', page, pageSize, rootKey, mediaKind, integrityStatus, verificationStatus, searchApplied],
     queryFn: () => mediaApi.list({
       page,
       pageSize,
       rootKey,
       mediaKind,
       integrityStatus,
+      verificationStatus,
       search: searchApplied || undefined,
     }),
   });
@@ -113,6 +134,18 @@ export const MediaPage: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['mediaList'] });
     },
     onError: (error: any) => message.error(error?.message || '媒体分析任务创建失败'),
+  });
+
+  const verifyMutation = useMutation({
+    mutationFn: (roots: string[]) => mediaApi.verifyIntegrity(roots),
+    onSuccess: (result) => {
+      message.success('SHA256 完整性任务 #' + result.work_job_id + ' 已加入后台队列');
+      setVerifyOpen(false);
+      setVerifyRoots([]);
+      queryClient.invalidateQueries({ queryKey: ['mediaSummary'] });
+      queryClient.invalidateQueries({ queryKey: ['mediaList'] });
+    },
+    onError: (error: any) => message.error(error?.message || 'SHA256 完整性任务创建失败'),
   });
 
   const deleteMutation = useMutation({
@@ -210,6 +243,16 @@ export const MediaPage: React.FC = () => {
       ),
     },
     {
+      title: 'SHA256 校验',
+      key: 'verification',
+      width: 150,
+      render: (_: unknown, record: MediaAsset) => (
+        <Tooltip title={record.verification_detail || record.verification_reason_code || undefined}>
+          {verificationBadge(record)}
+        </Tooltip>
+      ),
+    },
+    {
       title: '尺寸 / 时长',
       key: 'dimensions',
       width: 150,
@@ -260,7 +303,7 @@ export const MediaPage: React.FC = () => {
       <PageHeader
         eyebrow="Media metadata + integrity"
         title="媒体完整性"
-        description="独立分析已索引的图片与视频元数据。检测失败不会影响普通文件索引；只有已确认 corrupt 且证据仍有效的文件才允许永久删除。"
+        description="独立分析图片/视频元数据，并可建立 SHA256 基线后重复校验以发现静默内容变化。媒体探测与哈希校验都不会修改源文件。"
         actions={
           <ActionBar compact>
             <Button
@@ -272,6 +315,9 @@ export const MediaPage: React.FC = () => {
               loading={mediaQuery.isFetching || summaryQuery.isFetching}
             >
               刷新
+            </Button>
+            <Button icon={<SafetyCertificateOutlined />} onClick={() => setVerifyOpen(true)}>
+              SHA256 校验
             </Button>
             <Button type="primary" icon={<PlayCircleOutlined />} onClick={() => setAnalyzeOpen(true)}>
               分析媒体
@@ -285,6 +331,7 @@ export const MediaPage: React.FC = () => {
         <MetricCard label="正常" value={(summary?.healthy ?? 0).toLocaleString()} tone="success" icon={<CheckCircleOutlined />} />
         <MetricCard label="损坏" value={(summary?.corrupt ?? 0).toLocaleString()} tone="danger" icon={<WarningOutlined />} />
         <MetricCard label="未知" value={(summary?.unknown ?? 0).toLocaleString()} tone="attention" icon={<QuestionCircleOutlined />} />
+        <MetricCard label="SHA256 变化" value={(summary?.verification_changed ?? 0).toLocaleString()} tone="danger" icon={<SafetyCertificateOutlined />} />
       </div>
 
       <DataPanel
@@ -326,6 +373,20 @@ export const MediaPage: React.FC = () => {
             ]}
             onChange={(value) => { setIntegrityStatus(value); setPage(1); setSelectedRowKeys([]); }}
             style={{ width: 130 }}
+          />
+          <Select
+            allowClear
+            placeholder="SHA256 校验"
+            value={verificationStatus}
+            options={[
+              { value: 'unverified', label: '未建立' },
+              { value: 'baseline', label: '基线已建立' },
+              { value: 'verified', label: '校验通过' },
+              { value: 'changed', label: '内容变化' },
+              { value: 'unknown', label: '无法校验' },
+            ]}
+            onChange={(value) => { setVerificationStatus(value); setPage(1); setSelectedRowKeys([]); }}
+            style={{ width: 150 }}
           />
           <Input
             allowClear
@@ -400,7 +461,10 @@ export const MediaPage: React.FC = () => {
                         {record.media_kind === 'image' ? <PictureOutlined /> : <VideoCameraOutlined />}
                         <CodePath value={record.path} />
                       </div>
-                      {integrityBadge(record)}
+                      <div>
+                        {integrityBadge(record)}
+                        {verificationBadge(record)}
+                      </div>
                     </div>
                     <div className="nfc-mobile-record-facts nfc-mobile-record-facts-3">
                       <span>大小 <b>{formatBytes(record.size)}</b></span>
@@ -455,6 +519,34 @@ export const MediaPage: React.FC = () => {
           value={analyzeRoots}
           options={rootOptions}
           onChange={setAnalyzeRoots}
+          style={{ width: '100%' }}
+          optionFilterProp="label"
+        />
+      </Modal>
+
+      <Modal
+        title="SHA256 完整性校验"
+        open={verifyOpen}
+        onCancel={() => setVerifyOpen(false)}
+        onOk={() => verifyMutation.mutate(verifyRoots)}
+        okText="加入校验队列"
+        cancelText="取消"
+        confirmLoading={verifyMutation.isPending}
+        okButtonProps={{ disabled: verifyRoots.length === 0 }}
+        className="nfc-overlay-modal"
+      >
+        <p className="nfc-form-note">
+          首次运行会在索引身份仍匹配时建立不可自动覆盖的 SHA256 基线；后续运行重新读取文件并对比。
+          dev/inode/size/mtime 变化会直接报告内容变化，相同元数据下的 SHA256 不一致也会报告变化。
+        </p>
+        <Select
+          mode="multiple"
+          showSearch
+          allowClear
+          placeholder="选择已索引根目录"
+          value={verifyRoots}
+          options={rootOptions}
+          onChange={setVerifyRoots}
           style={{ width: '100%' }}
           optionFilterProp="label"
         />
