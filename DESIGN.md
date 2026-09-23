@@ -762,3 +762,69 @@ The terminal v0.4.4 audit/override ledger has been removed from `index.css`; mig
 
 This redesign does not change filesystem, Plan, Worker, Quarantine, purge, RBAC or API semantics. Preview → Draft → Freeze → Validate → Execute and all fail-closed identity protections remain authoritative.
 
+
+
+## v0.5.6 Right Workspace v2 — Calm NAS Workbench
+
+This pass supersedes the accumulated right-side workspace skins while preserving the accepted left navigation, mobile dock and every file-operation safety boundary.
+
+### Design intent
+
+The right workspace is no longer treated as a collection of equally weighted admin cards.
+
+- The sidebar remains the product identity/navigation anchor and is intentionally unchanged.
+- The sticky Header is now a utility/status bar only: navigation toggle, Safe Mode, Worker state, theme and user controls.
+- Route/page identity belongs to PageHeader. The previous duplicated Header workspace name and English kicker are removed from the rendered hierarchy.
+- PageHeader becomes a quiet title/action band rather than a hero card.
+- Section headings live in page flow; DataPanel owns one calm content surface underneath instead of nesting heading chrome inside another card.
+- Operational list pages read as ledgers: stronger primary rows, larger type, 52px row rhythm, restrained status treatment and fewer colored pills.
+- Metrics are quieter supporting instruments rather than the dominant visual language.
+- Glass is constrained to actual floating/chrome surfaces: utility Header, overlays and contextual bulk-action surfaces.
+- Normal content is opaque and optimized for long NAS administration sessions.
+
+### Typography and density
+
+The previous 8.5–11px right-workspace microtype is no longer the default hierarchy.
+
+- Page title: 28–36px
+- Body/control text: ~12.5–13.5px
+- Table body: 12.75px
+- Supporting metadata: ~11.5px
+- Standard control height: 38px
+- Operational table rhythm: 52px
+
+### Page composition
+
+- Dashboard: cockpit with calm metrics, a strong primary column and a sticky operational rail.
+- Indexes / Media / Scans / Plans / Tasks / Audit: ledger-oriented operational surfaces.
+- Quarantine: recovery command center with contextual sticky bulk actions.
+- Settings: preference-pane hierarchy with ruled sub-sections and an isolated danger area.
+- Rename / Batch / Path Match: focused tool workbenches.
+- Advanced Dedupe: context rail + strategy work area.
+- Workflow Builder: stable definition rail + pipeline canvas.
+- Plan / Scan details: lifecycle, action/evidence and ledger hierarchy.
+- Mobile: keeps route-specific card/list representations with the same larger type and calmer hierarchy.
+
+### CSS ownership
+
+`src/styles/v056-right-workspace-v2.css` is a deliberate one-time terminal migration layer loaded after the older v047–v055 compatibility skins. It includes a narrowly scoped specificity bridge for selectors previously locked behind `.nfc-app-main`.
+
+It MUST NOT style Sidebar, brand, mobile sidebar or MobileDock selectors. Regression tests enforce this boundary.
+
+Future right-workspace refinements should modify v056 or migrate rules back into semantic owners; they should not create a new v057/v058 override ladder.
+
+### Safety boundary
+
+This redesign is presentation-only.
+
+It does not change:
+- API contracts,
+- routes or user flows,
+- RBAC,
+- Worker / executor / fs_ops ownership,
+- Plan lifecycle,
+- Quarantine / restore / permanent-delete authority,
+- Cross-storage transaction semantics,
+- Media integrity or direct-delete semantics,
+- Preview → Draft → Freeze → Validate → Execute,
+- path / symlink / identity / stale-data fail-closed protections.
