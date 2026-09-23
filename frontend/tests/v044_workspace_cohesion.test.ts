@@ -6,15 +6,16 @@ import { resolve } from 'node:path';
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');
 
 describe('v0.4.4 cohesion invariants carried into the v0.4.7 control plane', () => {
-  test('header uses workspace context instead of duplicating sidebar brand', () => {
+  test('header delegates page identity to PageHeader and keeps only utility controls', () => {
     const header = read('src/components/Header.tsx');
-    assert.match(header, /nfc-header-workspace/);
-    assert.match(header, /resolveWorkspaceContext/);
-    assert.match(header, /useLocation/);
-    assert.match(header, /CONTROL PLANE/);
-    assert.match(header, /系统概览/);
-    assert.match(header, /高级去重工作台/);
-    assert.doesNotMatch(header, /Local operations/);
+    const pageHeader = read('src/components/ui/PageHeader.tsx');
+    const workspaceV2 = read('src/styles/v056-right-workspace-v2.css');
+    assert.match(header, /nfc-header-command-cluster/);
+    assert.match(header, /SafeModeBadge/);
+    assert.match(header, /WorkerStatusBadge/);
+    assert.doesNotMatch(header, /nfc-header-workspace|resolveWorkspaceContext|useLocation/);
+    assert.match(pageHeader, /nfc-page-title/);
+    assert.match(workspaceV2, /\.nfc-page-eyebrow\s*\{[\s\S]*display:\s*none/);
     assert.doesNotMatch(header, /nfc-header-brand-dot/);
     assert.doesNotMatch(header, /style=\{\{/);
   });
