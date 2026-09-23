@@ -34,15 +34,19 @@ describe('v0.4.2 taste principles carried into the current control plane', () =>
     assert.ok(css.includes('.nfc-dashboard-rail'));
   });
 
-  test('sidebar and header retain explicit workspace chrome semantics', () => {
+  test('sidebar remains the navigation anchor while header is reduced to utility chrome', () => {
     const sidebar = read('src/components/Sidebar.tsx');
     const header = read('src/components/Header.tsx');
     const shell = read('src/styles/shell.css');
+    const workspaceV2 = read('src/styles/v056-right-workspace-v2.css');
     assert.ok(sidebar.includes('nfc-sidebar-meta'));
     assert.ok(sidebar.includes('CONTROL PLANE'));
-    assert.ok(header.includes('nfc-header-workspace'));
     assert.ok(shell.includes('.nfc-sidebar.nfc-sidebar'));
-    assert.ok(shell.includes('.nfc-header-workspace'));
+    assert.ok(header.includes('nfc-header-command-cluster'));
+    assert.ok(header.includes('SafeModeBadge'));
+    assert.ok(header.includes('WorkerStatusBadge'));
+    assert.doesNotMatch(header, /nfc-header-workspace|resolveWorkspaceContext/);
+    assert.match(workspaceV2, /\.nfc-header\.nfc-header[\s\S]*backdrop-filter:\s*blur\(22px\)/);
   });
 
   test('dashboard content avoids a generic all-caps overview label', () => {
