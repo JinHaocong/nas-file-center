@@ -970,3 +970,193 @@ body,
     margin: 8px;
   }
 }
+
+
+/* Specificity bridge -------------------------------------------------------
+ * v0.5.5 intentionally used .nfc-app-main scoping. v2 is loaded last and
+ * repeats the few structural selectors at equal-or-higher specificity so the
+ * new hierarchy wins without using broad !important rules or touching nav.
+ */
+
+.nfc-app-main .nfc-page-content {
+  padding: 30px 38px 64px;
+}
+
+.nfc-app-main .nfc-page-content > * {
+  width: min(100%, var(--nfc-w2-content-max));
+  margin-inline: auto;
+}
+
+.nfc-app-main .nfc-page-content > .nfc-quarantine-page,
+.nfc-app-main .nfc-page-content > .nfc-tasks-page,
+.nfc-app-main .nfc-page-content > .nfc-media-page,
+.nfc-app-main .nfc-page-content > .nfc-plans-page,
+.nfc-app-main .nfc-page-content > .nfc-scan-detail-page,
+.nfc-app-main .nfc-page-content > .nfc-plan-detail-page {
+  width: min(100%, var(--nfc-w2-content-max));
+}
+
+.nfc-app-main .nfc-page-header {
+  min-height: 0;
+  margin: 0 0 30px;
+  padding: 0 0 22px;
+  align-items: flex-end;
+  gap: 28px;
+  border: 0;
+  border-bottom: 1px solid var(--nfc-w2-hairline);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.nfc-app-main .nfc-page-header::after {
+  display: none;
+}
+
+.nfc-app-main .nfc-page-header-copy {
+  max-width: min(920px, 72vw);
+}
+
+.nfc-app-main .nfc-page-eyebrow {
+  display: none;
+}
+
+.nfc-app-main .nfc-page-title {
+  font-size: clamp(28px, 2.3vw, 36px);
+  line-height: 1.08;
+}
+
+.nfc-app-main .nfc-page-description {
+  max-width: 78ch;
+  margin-top: 9px;
+  font-size: 13.5px;
+  line-height: 1.68;
+}
+
+.nfc-app-main .nfc-page-actions {
+  align-self: flex-end;
+  padding: 0 0 1px;
+}
+
+.nfc-app-main .nfc-page-actions .ant-btn {
+  min-height: var(--nfc-w2-control);
+  padding-inline: 14px;
+}
+
+.nfc-app-main .nfc-data-panel-header {
+  min-height: 0;
+  padding: 0 0 12px;
+  border: 0;
+  background: transparent;
+}
+
+.nfc-app-main .nfc-data-panel-body:not(:empty) {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--nfc-w2-hairline);
+  border-radius: var(--nfc-w2-radius-md);
+  background: var(--nfc-w2-surface);
+}
+
+.nfc-app-main .nfc-dashboard-page .nfc-dashboard-command-deck {
+  margin-bottom: 26px;
+  gap: 16px;
+}
+
+.nfc-app-main .nfc-dashboard-page .nfc-dashboard-command-deck .nfc-metric-grid {
+  gap: 12px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.nfc-app-main .nfc-dashboard-page .nfc-dashboard-command-deck .nfc-metric-card {
+  min-height: 104px;
+  padding: 16px 17px;
+  border: 1px solid var(--nfc-w2-hairline);
+  border-radius: var(--nfc-w2-radius-md);
+}
+
+.nfc-app-main .nfc-dashboard-page .nfc-dashboard-command-deck .nfc-snapshot-note {
+  padding: 11px 14px;
+  border-radius: var(--nfc-w2-radius-sm);
+}
+
+.nfc-app-main .nfc-dashboard-page .nfc-dashboard-layout {
+  gap: 30px;
+}
+
+.nfc-app-main .nfc-dashboard-page .nfc-dashboard-main-column {
+  gap: 26px;
+}
+
+.nfc-app-main .nfc-dashboard-page .nfc-dashboard-rail {
+  gap: 22px;
+}
+
+.nfc-app-main .nfc-system-controls-page .nfc-settings-grid {
+  gap: 30px;
+}
+
+.nfc-app-main .nfc-system-controls-page .nfc-settings-grid > .nfc-data-panel > .nfc-data-panel-header {
+  padding: 0 0 12px;
+}
+
+.nfc-app-main .nfc-system-controls-page .nfc-settings-panel-body {
+  padding: 18px 18px 0;
+}
+
+.nfc-app-main .nfc-system-controls-page .nfc-settings-stack {
+  gap: 20px;
+  padding: 18px;
+}
+
+.nfc-app-main .nfc-system-controls-page .nfc-settings-control-grid {
+  gap: 18px 22px;
+  padding: 18px;
+}
+
+.nfc-app-main .nfc-media-page .nfc-page-alert {
+  margin: 14px 0 18px;
+}
+
+.nfc-app-main .nfc-quarantine-command-center {
+  padding: 0;
+  gap: 12px;
+  background: transparent;
+  border: 0;
+}
+
+.nfc-app-main .nfc-quarantine-command-center .nfc-bulk-action-bar {
+  padding-top: 10px;
+  gap: 8px;
+}
+
+@media (max-width: 1199px) {
+  .nfc-app-main .nfc-page-content {
+    padding: 24px 24px 56px;
+  }
+
+  .nfc-app-main .nfc-page-header {
+    min-height: 0;
+  }
+}
+
+@media (max-width: 767px) {
+  .nfc-app-main .nfc-page-content {
+    padding: 18px 14px max(34px, calc(var(--nfc-mobile-dock-height, 78px) + 20px + env(safe-area-inset-bottom)));
+  }
+
+  .nfc-app-main .nfc-page-header {
+    min-height: 0;
+    margin-bottom: 22px;
+    padding: 0 0 18px;
+    border-radius: 0;
+    gap: 15px;
+  }
+
+  .nfc-app-main .nfc-page-header-copy {
+    max-width: 100%;
+  }
+}
