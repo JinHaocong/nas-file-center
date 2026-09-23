@@ -37,14 +37,17 @@ describe('v0.4.3 console invariants carried into v0.4.7', () => {
     assert.match(css, /padding-bottom:\s*calc\([^;]*var\(--nfc-mobile-dock-height\)/);
   });
 
-  test('header remains a compact command surface but is integrated instead of floating', () => {
+  test('header remains a compact integrated utility surface without duplicating page identity', () => {
     const header = read('src/components/Header.tsx');
     const css = read('src/styles/shell.css');
-    assert.match(header, /nfc-header-workspace/);
+    const workspaceV2 = read('src/styles/v056-right-workspace-v2.css');
     assert.match(header, /nfc-header-command-cluster/);
+    assert.match(header, /nfc-header-status/);
+    assert.doesNotMatch(header, /nfc-header-workspace|resolveWorkspaceContext/);
     assert.match(css, /\.nfc-header\.nfc-header[\s\S]*border-bottom:\s*1px solid var\(--nfc-border-soft\)/);
     assert.match(css, /\.nfc-header\.nfc-header[\s\S]*border-radius:\s*0/);
     assert.match(css, /\.nfc-header\.nfc-header[\s\S]*box-shadow:\s*none/);
+    assert.match(workspaceV2, /\.nfc-header\.nfc-header[\s\S]*min-height:\s*54px/);
   });
 
   test('data surfaces use restrained table chrome and compact density', () => {
