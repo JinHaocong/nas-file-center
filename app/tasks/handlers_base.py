@@ -1578,6 +1578,31 @@ def _utility_single_child_meta(item_meta: Any) -> dict[str, Any] | None:
         or not candidate_id
     ):
         return None
+    try:
+        wrapper_device = int(meta.get("wrapper_device") or 0)
+        wrapper_inode = int(meta.get("wrapper_inode") or 0)
+        child_device = int(meta.get("child_device") or 0)
+        child_inode = int(meta.get("child_inode") or 0)
+    except (TypeError, ValueError):
+        return None
+
+    from app.batch_utilities.single_child_wrapper import (
+        matches_single_child_wrapper_candidate_id,
+    )
+
+    if not matches_single_child_wrapper_candidate_id(
+        candidate_id=candidate_id,
+        wrapper_path=wrapper_path,
+        wrapper_device=wrapper_device,
+        wrapper_inode=wrapper_inode,
+        child_path=child_path,
+        child_device=child_device,
+        child_inode=child_inode,
+        child_object_type=meta.get("child_object_type"),
+        target_path=target_path,
+        capability_reason=meta.get("capability_reason"),
+    ):
+        return None
     return meta
 
 
@@ -1599,19 +1624,29 @@ def _utility_cleanup_pair_matches(
         return False
     if cleanup_row.sequence != move_row.sequence + 1:
         return False
-    try:
-        cleanup_meta = json.loads(cleanup_row.metadata_json or "{}")
-    except Exception:
+
+    validated_move_meta = _utility_single_child_meta(move_row)
+    validated_cleanup_meta = _utility_single_child_meta(cleanup_row)
+    if validated_move_meta is None or validated_cleanup_meta is None:
         return False
-    if not isinstance(cleanup_meta, dict):
-        return False
-    for key in ("candidate_id", "wrapper_path", "child_path", "target_path"):
-        if cleanup_meta.get(key) != move_meta.get(key):
+    for key in (
+        "candidate_id",
+        "wrapper_path",
+        "wrapper_device",
+        "wrapper_inode",
+        "child_path",
+        "child_device",
+        "child_inode",
+        "child_object_type",
+        "capability_reason",
+        "target_path",
+    ):
+        if validated_cleanup_meta.get(key) != validated_move_meta.get(key):
             return False
     return (
-        cleanup_row.source_path == move_meta.get("wrapper_path")
-        and move_row.source_path == move_meta.get("child_path")
-        and move_row.target_path == move_meta.get("target_path")
+        cleanup_row.source_path == validated_move_meta.get("wrapper_path")
+        and move_row.source_path == validated_move_meta.get("child_path")
+        and move_row.target_path == validated_move_meta.get("target_path")
     )
 
 
