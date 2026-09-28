@@ -267,7 +267,7 @@
   display: grid;
   grid-template-columns: auto minmax(110px, 1fr);
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .nfc-tasks-page .nfc-filter-control > span {
@@ -512,6 +512,21 @@
 /* -------------------------------------------------------------------------- */
 /* Responsive                                                                 */
 /* -------------------------------------------------------------------------- */
+
+@media (max-width: 1499px) {
+  .nfc-media-page .nfc-filter-bar {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .nfc-media-page .nfc-filter-bar .ant-input-affix-wrapper {
+    grid-column: span 2;
+  }
+
+  .nfc-media-page .nfc-filter-bar .nfc-media-destructive-action {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+}
 
 @media (max-width: 1199px) {
   .nfc-dashboard-command-deck {
@@ -817,15 +832,15 @@
 }
 
 .nfc-media-page .nfc-filter-bar {
-  padding: 12px;
+  padding: 14px 16px;
   display: grid;
   grid-template-columns:
-    minmax(180px, 220px)
-    minmax(110px, 130px)
-    minmax(110px, 130px)
-    minmax(220px, 1fr)
+    minmax(200px, 260px)
+    minmax(120px, 150px)
+    minmax(120px, 150px)
+    minmax(200px, 260px)
+    minmax(240px, 1fr)
     auto
-    minmax(18px, 1fr)
     auto;
   align-items: center;
   gap: 8px;
@@ -842,6 +857,10 @@
 
 .nfc-media-page .nfc-filter-bar .ant-btn-dangerous {
   min-width: max-content;
+}
+
+.nfc-media-page .nfc-filter-bar .nfc-media-destructive-action {
+  justify-self: end;
 }
 
 .nfc-media-page .nfc-page-alert {

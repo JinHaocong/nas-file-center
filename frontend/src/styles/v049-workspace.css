@@ -707,8 +707,8 @@ body,
 .nfc-path-match-page .nfc-tool-workbench > .nfc-data-panel-header,
 .nfc-rename-page .nfc-tool-workbench > .nfc-data-panel-header,
 .nfc-batch-page .nfc-tool-workbench > .nfc-data-panel-header {
-  margin: -20px -22px 18px;
-  padding: 14px 22px 13px;
+  margin: 0;
+  padding: 0 4px 14px;
 }
 
 .nfc-file-tool-form {
@@ -857,7 +857,7 @@ body,
 
 .nfc-workflow-builder-page > .nfc-complex-form-panel > .nfc-data-panel-header {
   margin: 0;
-  padding: 14px 16px;
+  padding: 0 4px 14px;
 }
 
 .nfc-workflow-builder-page .nfc-workflow-step-card {
@@ -1438,8 +1438,8 @@ body,
   .nfc-path-match-page .nfc-tool-workbench > .nfc-data-panel-header,
   .nfc-rename-page .nfc-tool-workbench > .nfc-data-panel-header,
   .nfc-batch-page .nfc-tool-workbench > .nfc-data-panel-header {
-    margin: -16px -12px 15px;
-    padding: 12px;
+    margin: 0;
+    padding: 0 2px 12px;
   }
 
   .nfc-advanced-dedupe-page .nfc-dedupe-editor-wrap {

@@ -135,8 +135,9 @@ describe('v0.4.7 control plane foundation', () => {
     const settings = read('src/styles/pages/settings.css');
     const workflows = read('src/styles/pages/workflows.css');
     assert.match(dashboard, /grid-template-columns: minmax\(0, 1\.82fr\) minmax\(284px, 0\.58fr\)/);
-    assert.match(tools, /\.nfc-path-match-page \.nfc-tool-workbench[\s\S]*var\(--nfc-v49-radius-lg/);
-    assert.doesNotMatch(tools, /border-radius: 0 !important/);
+    assert.match(tools, /\.nfc-path-match-page \.nfc-tool-workbench[\s\S]*padding:\s*0;[\s\S]*border:\s*0 !important/);
+    assert.match(tools, /\.nfc-path-match-page \.nfc-tool-workbench > \.nfc-data-panel-header[\s\S]*margin:\s*0;[\s\S]*padding:\s*0 4px 14px/);
+    assert.doesNotMatch(tools, /margin:\s*-\d/);
     assert.match(settings, /\.nfc-settings-subpanel:last-child[\s\S]*border-bottom: 0/);
     assert.doesNotMatch(settings, /border-top: 1px solid/);
     assert.match(workflows, /\.nfc-workflow-builder-page \.nfc-complex-form-panel[\s\S]*var\(--nfc-v49-radius-lg/);

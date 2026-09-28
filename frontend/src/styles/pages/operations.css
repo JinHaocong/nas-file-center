@@ -13,8 +13,8 @@
 .nfc-quarantine-page .nfc-filter-bar,
 .nfc-tasks-page .nfc-filter-bar,
 .nfc-audit-page .nfc-filter-bar {
-  min-height: 54px;
-  padding: 8px 12px;
+  min-height: 60px;
+  padding: 11px 14px;
   border: 0;
   border-bottom: 1px solid var(--nfc-v49-line, var(--nfc-border-soft));
   border-radius: 0;
@@ -24,7 +24,7 @@
 
 .nfc-quarantine-page .nfc-bulk-action-bar {
   margin: 0;
-  padding: 8px 12px;
+  padding: 10px 14px;
   border: 0;
   border-bottom: 1px solid var(--nfc-v49-line, var(--nfc-border-soft));
   border-radius: 0;

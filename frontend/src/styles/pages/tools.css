@@ -1,19 +1,19 @@
 .nfc-path-match-page .nfc-tool-workbench,
 .nfc-rename-page .nfc-tool-workbench,
 .nfc-batch-page .nfc-tool-workbench {
-  padding: 20px 22px 22px;
-  overflow: hidden;
-  border: 1px solid var(--nfc-v49-line, var(--nfc-border-soft)) !important;
-  border-radius: var(--nfc-v49-radius-lg, var(--nfc-radius-workspace)) !important;
-  background: var(--nfc-v49-surface, var(--nfc-surface-1)) !important;
-  box-shadow: var(--nfc-v49-shadow-soft, none) !important;
+  padding: 0;
+  overflow: visible;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
 }
 
 .nfc-path-match-page .nfc-tool-workbench > .nfc-data-panel-header,
 .nfc-rename-page .nfc-tool-workbench > .nfc-data-panel-header,
 .nfc-batch-page .nfc-tool-workbench > .nfc-data-panel-header {
-  margin: -20px -22px 18px;
-  padding: 14px 22px 13px;
+  margin: 0;
+  padding: 0 4px 14px;
 }
 
 .nfc-file-tool-form {
@@ -66,13 +66,13 @@
   .nfc-path-match-page .nfc-tool-workbench,
   .nfc-rename-page .nfc-tool-workbench,
   .nfc-batch-page .nfc-tool-workbench {
-    padding: 16px 12px 18px;
+    padding: 0;
   }
 
   .nfc-path-match-page .nfc-tool-workbench > .nfc-data-panel-header,
   .nfc-rename-page .nfc-tool-workbench > .nfc-data-panel-header,
   .nfc-batch-page .nfc-tool-workbench > .nfc-data-panel-header {
-    margin: -16px -12px 15px;
-    padding: 12px;
+    margin: 0;
+    padding: 0 2px 12px;
   }
 }

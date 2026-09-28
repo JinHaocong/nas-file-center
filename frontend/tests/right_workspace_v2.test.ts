@@ -40,8 +40,10 @@ describe('Right Workspace v2 design system', () => {
 
     assert.match(css, /--nfc-w2-control: 38px/);
     assert.match(css, /\.nfc-page-eyebrow\s*\{[\s\S]*display:\s*none/);
-    assert.match(css, /\.nfc-page-title[\s\S]*font-size:\s*clamp\(28px/);
+    assert.match(css, /\.nfc-page-title[\s\S]*font-size:\s*clamp\(30px/);
     assert.match(css, /\.nfc-data-panel-body[\s\S]*border-radius:\s*var\(--nfc-w2-radius-md\)/);
+    assert.match(css, /\.nfc-metric-grid[\s\S]*grid-template-columns:\s*repeat\(4/);
+    assert.match(css, /\.nfc-metric-grid > \.nfc-metric-card[\s\S]*grid-column:\s*auto !important/);
     assert.match(css, /\.nfc-data-panel \.ant-table-tbody > tr > td[\s\S]*font-size:\s*12\.75px/);
     assert.match(css, /\.nfc-dashboard-page/);
     assert.match(css, /\.nfc-quarantine-page/);
@@ -153,7 +155,8 @@ describe('Right Workspace v2 design system', () => {
   test('responsive cascade keeps semantic page widths authoritative', () => {
     const css = read('src/styles/v056-right-workspace-v2.css');
 
-    assert.match(css, /padding:\s*30px clamp\(24px, 2\.15vw, 42px\) 64px/);
+    assert.match(css, /--nfc-w2-page-bottom:\s*clamp\(96px, 8vh, 128px\)/);
+    assert.match(css, /padding:\s*30px clamp\(24px, 2\.15vw, 42px\) var\(--nfc-w2-page-bottom\)/);
     assert.doesNotMatch(
       css,
       /\.nfc-app-main \.nfc-page-content > \.nfc-quarantine-page,/
@@ -162,6 +165,8 @@ describe('Right Workspace v2 design system', () => {
       css,
       /@media \(max-width: 1199px\)[\s\S]*\.nfc-app-main \.nfc-page-header[\s\S]*flex-wrap:\s*wrap/
     );
+    assert.match(css, /@media \(max-width: 767px\)[\s\S]*\.nfc-app-main \.nfc-page-title[\s\S]*font-size:\s*26px/);
+    assert.match(css, /@media \(max-width: 420px\)[\s\S]*\.nfc-app-main \.nfc-page-title[\s\S]*font-size:\s*24px/);
     assert.match(
       css,
       /\.nfc-page-layout-ledger \.nfc-search-input[\s\S]*flex-basis:\s*100%/
@@ -169,6 +174,40 @@ describe('Right Workspace v2 design system', () => {
 
     const main = read('src/main.tsx');
     assert.doesNotMatch(main, /v057|v058/);
+  });
+
+  test('global visual rhythm keeps section titles clear and restores intentional padding', () => {
+    const css = read('src/styles/v056-right-workspace-v2.css');
+    const toolsCss = read('src/styles/pages/tools.css');
+    const workspaceV49 = read('src/styles/v049-workspace.css');
+
+    assert.match(css, /--nfc-w2-panel-pad-x:\s*clamp\(18px, 1\.2vw, 24px\)/);
+    assert.match(css, /\.nfc-data-panel-header[\s\S]*margin:\s*0;[\s\S]*padding:\s*0 4px 14px/);
+    assert.match(css, /\.nfc-data-panel-title[\s\S]*line-height:\s*1\.4/);
+    assert.match(
+      css,
+      /\.nfc-data-panel:not\(\.nfc-panel-flush\):not\(\.nfc-tool-workbench\)[\s\S]*padding:\s*var\(--nfc-w2-panel-pad-y\) var\(--nfc-w2-panel-pad-x\)/
+    );
+    assert.match(css, /\.nfc-rename-page \.nfc-data-panel-body,[\s\S]*padding:\s*26px 28px/);
+    assert.doesNotMatch(toolsCss, /margin:\s*-20px -22px 18px/);
+    assert.doesNotMatch(toolsCss, /margin:\s*-16px -12px 15px/);
+    assert.doesNotMatch(workspaceV49, /margin:\s*-20px -22px 18px/);
+    assert.doesNotMatch(workspaceV49, /margin:\s*-16px -12px 15px/);
+    assert.match(css, /\.nfc-system-controls-page \.nfc-settings-grid > \.nfc-data-panel > \.nfc-data-panel-header[\s\S]*min-height:\s*0/);
+    assert.match(toolsCss, /\.nfc-rename-page \.nfc-tool-workbench > \.nfc-data-panel-header[\s\S]*margin:\s*0;[\s\S]*padding:\s*0 4px 14px/);
+  });
+
+  test('media filter command grid keeps search and destructive actions proportionate', () => {
+    const media = read('src/pages/Media/index.tsx');
+    const layout = read('src/styles/v050-layout.css');
+    const operations = read('src/styles/pages/operations.css');
+
+    assert.doesNotMatch(media, /style=\{\{ marginLeft: 'auto' \}\}/);
+    assert.match(media, /nfc-media-destructive-action/);
+    assert.match(layout, /\.nfc-media-page \.nfc-filter-bar[\s\S]*minmax\(240px, 1fr\)[\s\S]*auto[\s\S]*auto/);
+    assert.match(layout, /@media \(max-width: 1499px\)[\s\S]*\.nfc-media-destructive-action[\s\S]*grid-column:\s*1 \/ -1/);
+    assert.match(layout, /\.nfc-media-page \.nfc-filter-bar[\s\S]*padding:\s*14px 16px/);
+    assert.match(operations, /\.nfc-tasks-page \.nfc-filter-bar[\s\S]*min-height:\s*60px[\s\S]*padding:\s*11px 14px/);
   });
 
   test('glass treatment is constrained to utility and overlay surfaces', () => {
