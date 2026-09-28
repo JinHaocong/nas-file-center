@@ -18,18 +18,46 @@ export interface MoveStep { id: string; type: 'move'; destination_root_id: numbe
 export interface TouchStep { id: string; type: 'touch'; mtime_ns: number | null; touch_now: boolean; }
 export interface QuarantineStep { id: string; type: 'quarantine'; reason: string; }
 
+export interface OrganizerDirectoryDepthRule {
+  enabled: boolean; rename_from_depth: number;
+}
+export interface OrganizerFileNumberingRule {
+  enabled: boolean; start: number; padding: number; sort: 'natural_name'; extension_mode: 'preserve';
+}
+export interface OrganizerLatestChildPrefixRule {
+  enabled: boolean; prefix: string; timestamp: 'mtime_ns';
+}
+export interface OrganizerSingleChildWrapperCollapseRule {
+  enabled: boolean; wrapper_depth: 2; child_type: 'directory';
+}
+export interface OrganizerAdvancedRules {
+  version: 1;
+  directory_depth: OrganizerDirectoryDepthRule;
+  file_numbering: OrganizerFileNumberingRule;
+  latest_child_prefix: OrganizerLatestChildPrefixRule;
+  single_child_wrapper_collapse: OrganizerSingleChildWrapperCollapseRule;
+}
+
 export interface OrganizerProfileSnapshot {
   name: string; description?: string | null; root?: string | null; recursive?: boolean;
   image_extensions?: string[]; video_extensions?: string[]; rename_template?: string;
   statistics_template?: string; preserve_tags?: string[]; cleanup_patterns?: string[];
   numbering_mode?: 'none' | 'sequential'; numbering_start?: number; numbering_padding?: number;
   mtime_mode?: 'none' | 'ordered'; mtime_delay_seconds?: number;
+  advanced_rules?: OrganizerAdvancedRules;
 }
 export const CANONICAL_ORGANIZER_SNAPSHOT_DEFAULTS: OrganizerProfileSnapshot = {
   name: '', description: '', root: '', recursive: false,
   image_extensions: ['jpg', 'jpeg', 'png', 'webp'], video_extensions: ['mp4', 'mov', 'mkv'],
   rename_template: '{name}', statistics_template: '[{images}P {videos}V {size}]', preserve_tags: [], cleanup_patterns: [],
   numbering_mode: 'none', numbering_start: 1, numbering_padding: 3, mtime_mode: 'none', mtime_delay_seconds: 2.0,
+  advanced_rules: {
+    version: 1,
+    directory_depth: { enabled: false, rename_from_depth: 2 },
+    file_numbering: { enabled: false, start: 1, padding: 3, sort: 'natural_name', extension_mode: 'preserve' },
+    latest_child_prefix: { enabled: false, prefix: 'New ', timestamp: 'mtime_ns' },
+    single_child_wrapper_collapse: { enabled: false, wrapper_depth: 2, child_type: 'directory' },
+  },
 };
 export interface OrganizeStep { id: string; type: 'organize'; profile_snapshot: OrganizerProfileSnapshot; }
 export interface DedupeStep { id: string; type: 'dedupe'; scorer_config: DedupeScorerConfig; }
@@ -58,6 +86,24 @@ export interface WorkflowUtilitySummary {
   utility_action: 'single_child_wrapper_collapse'; scope_path: string; candidate_count: number; ready_count: number;
   candidates: WorkflowUtilityCandidate[]; selected_candidate_ids: string[];
 }
+export interface WorkflowOrganizerSummary {
+  preview_digest?: string | null;
+  source_snapshot_digest?: string | null;
+  config_digest?: string | null;
+  summary: {
+    total_directories?: number;
+    changed_directories?: number;
+    conflicts?: number;
+    total_bytes?: number;
+    advanced_changes?: number;
+    file_rename_candidates?: number;
+    wrapper_candidates?: number;
+    structural_required?: boolean;
+    [key: string]: any;
+  };
+  advanced_enabled: boolean;
+  structural_required: boolean;
+}
 export interface WorkflowPreviewRequest {
   revision?: number; runtime_inputs?: { root_ids?: number[]; scan_job_id?: number; [key: string]: any; };
   root_ids?: number[]; page?: number; page_size?: number; only_changed?: boolean;
@@ -67,10 +113,10 @@ export interface WorkflowPreviewResponse {
   preview_source: 'index' | 'organizer-live-readonly' | 'completed-scan-readonly-safety' | 'utility-live-readonly';
   live_filesystem_verified: boolean; compile_digest: string; matched_count: number; matched_bytes: number; planned_operations_count: number;
   page: number; page_size: number; total_pages: number; items: WorkflowPreviewItem[];
-  dedupe_summary?: DedupeSummary | null; utility_summary?: WorkflowUtilitySummary | null;
+  dedupe_summary?: DedupeSummary | null; utility_summary?: WorkflowUtilitySummary | null; organizer_summary?: WorkflowOrganizerSummary | null;
 }
 export interface WorkflowGeneratePlanRequest {
-  expected_compile_digest: string; revision?: number;
+  expected_compile_digest: string; expected_preview_digest?: string; revision?: number;
   runtime_inputs?: { root_ids?: number[]; scan_job_id?: number; [key: string]: any; };
   root_ids?: number[]; selected_candidate_ids?: string[]; plan_name?: string;
 }
@@ -82,7 +128,7 @@ export interface PlanRebuildPreviewResponse {
   runtime_inputs: { root_ids?: number[]; scan_job_id?: number; root_id?: number; subpath?: string; [key: string]: any; };
   preview_source: 'index' | 'organizer-live-readonly' | 'completed-scan-readonly-safety' | 'utility-live-readonly';
   live_filesystem_verified: boolean; compile_digest: string; matched_count: number; matched_bytes: number; planned_operations_count: number;
-  page: number; page_size: number; total_pages: number; items: WorkflowPreviewItem[]; dedupe_summary?: DedupeSummary | null; utility_summary?: WorkflowUtilitySummary | null;
+  page: number; page_size: number; total_pages: number; items: WorkflowPreviewItem[]; dedupe_summary?: DedupeSummary | null; utility_summary?: WorkflowUtilitySummary | null; organizer_summary?: WorkflowOrganizerSummary | null;
 }
 export interface PlanRebuildRequest { expected_compile_digest: string; plan_name?: string; }
 export interface PlanRebuildResponse { id: number; plan_id: number; name: string; status: string; rebuild_of_plan_id: number; expected_changes: number; compile_digest: string; }
