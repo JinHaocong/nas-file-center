@@ -198,11 +198,14 @@ describe('Right Workspace v2 design system', () => {
   test('media filter command grid keeps search and destructive actions proportionate', () => {
     const media = read('src/pages/Media/index.tsx');
     const layout = read('src/styles/v050-layout.css');
+    const operations = read('src/styles/pages/operations.css');
 
     assert.doesNotMatch(media, /style=\{\{ marginLeft: 'auto' \}\}/);
     assert.match(media, /nfc-media-destructive-action/);
     assert.match(layout, /\.nfc-media-page \.nfc-filter-bar[\s\S]*minmax\(240px, 1fr\)[\s\S]*auto[\s\S]*auto/);
     assert.match(layout, /@media \(max-width: 1499px\)[\s\S]*\.nfc-media-destructive-action[\s\S]*grid-column:\s*1 \/ -1/);
+    assert.match(layout, /\.nfc-media-page \.nfc-filter-bar[\s\S]*padding:\s*14px 16px/);
+    assert.match(operations, /\.nfc-tasks-page \.nfc-filter-bar[\s\S]*min-height:\s*60px[\s\S]*padding:\s*11px 14px/);
   });
 
   test('glass treatment is constrained to utility and overlay surfaces', () => {
