@@ -50,6 +50,21 @@ describe('Right Workspace v2 design system', () => {
     assert.match(css, /\.nfc-advanced-dedupe-page/);
   });
 
+  test('workspace width modes prevent workbench forms from collapsing into a left-aligned reading column', () => {
+    const css = read('src/styles/v056-right-workspace-v2.css');
+    const pathMatch = read('src/pages/PathMatch/index.tsx');
+
+    assert.match(css, /--nfc-w2-workspace-max:\s*2100px/);
+    assert.match(css, /\.nfc-page-content > \.nfc-page-layout-workbench/);
+    assert.match(
+      css,
+      /\.nfc-page-layout-workbench \.nfc-file-tool-form[\s\S]*max-width:\s*none/
+    );
+    assert.match(pathMatch, /nfc-path-match-page nfc-page-layout-workbench/);
+    assert.match(pathMatch, /className="nfc-path-match-form"/);
+    assert.doesNotMatch(pathMatch, /eyebrow="Path matching"/);
+  });
+
   test('glass treatment is constrained to utility and overlay surfaces', () => {
     const css = read('src/styles/v056-right-workspace-v2.css');
 
