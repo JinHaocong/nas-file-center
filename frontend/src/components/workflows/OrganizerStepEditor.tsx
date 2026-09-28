@@ -82,7 +82,7 @@ export const OrganizerStepEditor: React.FC<OrganizerStepEditorProps> = ({ step, 
       numbering_padding: Number(allValues.numbering_padding ?? 3),
       mtime_mode: allValues.mtime_mode || 'none',
       mtime_delay_seconds: Number(allValues.mtime_delay_seconds ?? 2.0),
-      advanced_rules: allValues.advanced_rules || defaults.advanced_rules,
+      advanced_rules: allValues.advanced_rules || createDefaultOrganizerSnapshot().advanced_rules,
     };
     onChange({
       ...step,
