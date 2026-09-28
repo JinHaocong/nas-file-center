@@ -43,6 +43,7 @@ export const OrganizerStepEditor: React.FC<OrganizerStepEditorProps> = ({ step, 
       numbering_padding: step.profile_snapshot.numbering_padding ?? defaults.numbering_padding,
       mtime_mode: step.profile_snapshot.mtime_mode ?? defaults.mtime_mode,
       mtime_delay_seconds: step.profile_snapshot.mtime_delay_seconds ?? defaults.mtime_delay_seconds,
+      advanced_rules: step.profile_snapshot.advanced_rules ?? defaults.advanced_rules,
     });
   }, [step.profile_snapshot, form]);
 
@@ -81,6 +82,7 @@ export const OrganizerStepEditor: React.FC<OrganizerStepEditorProps> = ({ step, 
       numbering_padding: Number(allValues.numbering_padding ?? 3),
       mtime_mode: allValues.mtime_mode || 'none',
       mtime_delay_seconds: Number(allValues.mtime_delay_seconds ?? 2.0),
+      advanced_rules: allValues.advanced_rules || defaults.advanced_rules,
     };
     onChange({
       ...step,
