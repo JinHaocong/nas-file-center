@@ -72,6 +72,72 @@
   justify-content: space-between;
 }
 
+
+.nfc-organizer-advanced-rules {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.nfc-organizer-advanced-alert {
+  margin: 0;
+}
+
+.nfc-organizer-advanced-collapse {
+  overflow: hidden;
+  border: 1px solid var(--nfc-v49-line, var(--nfc-border-soft));
+  border-radius: var(--nfc-v49-radius-md, var(--nfc-radius-control));
+  background: var(--nfc-v49-surface, var(--nfc-surface-1));
+}
+
+.nfc-organizer-advanced-collapse .ant-collapse-item {
+  border-bottom-color: var(--nfc-v49-line, var(--nfc-border-soft));
+}
+
+.nfc-organizer-advanced-collapse .ant-collapse-header,
+.nfc-organizer-advanced-collapse .ant-collapse-content,
+.nfc-organizer-advanced-collapse .ant-collapse-content-box {
+  color: var(--nfc-v49-text, var(--nfc-text));
+  background: var(--nfc-v49-surface, var(--nfc-surface-1));
+}
+
+.nfc-organizer-advanced-collapse .ant-collapse-content {
+  border-top-color: var(--nfc-v49-line, var(--nfc-border-soft));
+}
+
+.nfc-organizer-preview-digest {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--nfc-v49-line, var(--nfc-border-soft));
+  border-radius: var(--nfc-v49-radius-md, var(--nfc-radius-control));
+  background: var(--nfc-v49-surface-soft, var(--nfc-surface-2));
+}
+
+.nfc-organizer-preview-digest code {
+  min-width: 0;
+  color: var(--nfc-v49-text-muted, var(--nfc-text-muted));
+  font-family: var(--nfc-font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.nfc-organizer-stage-alert {
+  margin: 0;
+}
+
+[data-theme='dark'] .nfc-organizer-advanced-collapse,
+[data-theme='dark'] .nfc-organizer-advanced-collapse .ant-collapse-header,
+[data-theme='dark'] .nfc-organizer-advanced-collapse .ant-collapse-content,
+[data-theme='dark'] .nfc-organizer-advanced-collapse .ant-collapse-content-box,
+[data-theme='dark'] .nfc-organizer-preview-digest {
+  background: var(--nfc-v49-surface, var(--nfc-surface-1));
+  border-color: var(--nfc-v49-line, var(--nfc-border-soft));
+}
+
 @media (max-width: 767px) {
   .nfc-organizer-profile-toolbar,
   .nfc-organizer-preview-filter {
@@ -85,6 +151,19 @@
 
   .nfc-organizer-step-import-row {
     align-items: stretch !important;
+    flex-direction: column;
+  }
+
+  .nfc-organizer-advanced-collapse .ant-collapse-header {
+    padding-inline: 12px !important;
+  }
+
+  .nfc-organizer-advanced-collapse .ant-collapse-content-box {
+    padding: 12px !important;
+  }
+
+  .nfc-organizer-preview-digest {
+    align-items: flex-start;
     flex-direction: column;
   }
 }
