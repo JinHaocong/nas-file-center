@@ -1,3 +1,5 @@
+import type { OrganizerAdvancedRules } from './workflow';
+
 export interface User {
   id: number;
   username: string;
@@ -278,6 +280,7 @@ export interface OrganizerProfile {
   numbering_padding: number;
   mtime_mode: 'none' | 'ordered';
   mtime_delay_seconds: number;
+  advanced_rules: OrganizerAdvancedRules;
   is_builtin: boolean;
   created_at: string | null;
   updated_at: string | null;
@@ -297,6 +300,9 @@ export interface OrganizerProposal {
   conflict: boolean;
   conflict_reason: string | null;
   expected_mtime_order: number | null;
+  proposal_type: 'directory_rename' | 'file_rename' | 'latest_child_prefix' | 'wrapper_collapse' | 'touch' | string;
+  object_type: 'directory' | 'file' | string;
+  metadata: Record<string, any>;
 }
 
 export interface OrganizerPreviewSummary {
@@ -304,6 +310,10 @@ export interface OrganizerPreviewSummary {
   changed_directories: number;
   conflicts: number;
   total_bytes: number;
+  advanced_changes?: number;
+  file_rename_candidates?: number;
+  wrapper_candidates?: number;
+  structural_required?: boolean;
 }
 
 export interface OrganizerPreviewResponse {
@@ -313,6 +323,10 @@ export interface OrganizerPreviewResponse {
   root: string;
   summary: OrganizerPreviewSummary;
   proposals: OrganizerProposal[];
+  preview_digest?: string;
+  source_snapshot_digest?: string;
+  advanced_enabled?: boolean;
+  structural_required?: boolean;
   page: number;
   page_size: number;
   total: number;
