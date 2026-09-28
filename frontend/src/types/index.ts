@@ -280,7 +280,7 @@ export interface OrganizerProfile {
   numbering_padding: number;
   mtime_mode: 'none' | 'ordered';
   mtime_delay_seconds: number;
-  advanced_rules: OrganizerAdvancedRules;
+  advanced_rules?: OrganizerAdvancedRules;
   is_builtin: boolean;
   created_at: string | null;
   updated_at: string | null;
