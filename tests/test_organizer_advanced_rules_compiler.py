@@ -81,6 +81,25 @@ def test_depth_rule_preserves_depth1_and_renames_depth2(tmp_path: Path):
     assert by_source[str(depth2)].changed is True
 
 
+def test_advanced_preview_orders_child_renames_before_parent_renames(tmp_path: Path):
+    root = tmp_path / "root"
+    depth2 = root / "Keep" / "Parent"
+    depth3 = depth2 / "Child"
+    depth3.mkdir(parents=True)
+
+    compilation = _compile(
+        root,
+        _advanced_rules(directory_depth={"enabled": True, "rename_from_depth": 2}),
+    )
+    rename_sources = [
+        row["source"]
+        for row in compilation.preview_operations
+        if row["operation"] == "rename"
+    ]
+
+    assert rename_sources.index(str(depth3)) < rename_sources.index(str(depth2))
+
+
 def test_file_numbering_resets_per_parent_and_preserves_final_suffix_case(tmp_path: Path):
     root = tmp_path / "root"
     parent_a = root / "A"
