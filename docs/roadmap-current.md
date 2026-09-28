@@ -98,7 +98,7 @@ sequence.
 
 ## 5. CURRENT — Organizer Advanced Rules
 
-**Status: C2 CLOSED / C3 STRUCTURAL WRAPPER AUTHORITY CURRENT**
+**Status: C0 CLOSED / C1 CLOSED / C2 CLOSED / C3 CURRENT — STRUCTURAL WRAPPER AUTHORITY**
 
 This is the next product-development phase.
 
@@ -155,7 +155,7 @@ C0 established:
 
 ### Implementation progress
 
-- **C1 CLOSED** — advanced-rules schema, additive migration, V1/V2 profile
+- **C0 CLOSED** — Architecture Freeze / scope and safety authority frozen.\n- **C1 CLOSED** — advanced-rules schema, additive migration, V1/V2 profile
   compatibility and shared read-only Organizer compiler.
 - **C2 CLOSED** — digest-bound standalone/Workflow Organizer rename-stage Plan
   generation with Generate → Freeze source binding.
