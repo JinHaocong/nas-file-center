@@ -267,7 +267,7 @@
   display: grid;
   grid-template-columns: auto minmax(110px, 1fr);
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .nfc-tasks-page .nfc-filter-control > span {
@@ -832,7 +832,7 @@
 }
 
 .nfc-media-page .nfc-filter-bar {
-  padding: 12px;
+  padding: 14px 16px;
   display: grid;
   grid-template-columns:
     minmax(200px, 260px)
