@@ -70,14 +70,18 @@ describe('v0.4.4 cohesion invariants carried into the v0.4.7 control plane', () 
     assert.match(css, /\.ant-modal \.ant-modal-content,[\s\S]*var\(--nfc-overlay-surface-bg\)/s);
   });
 
-  test('settings keeps explicit desktop areas so tall lifecycle content cannot create a blank left row', () => {
+  test('settings keeps an explicit desktop preference grid without blank rows', () => {
     const page = read('src/pages/Settings/index.tsx');
     const css = read('src/styles/pages/settings.css');
     assert.match(page, /nfc-settings-panel-runtime/);
     assert.match(page, /nfc-settings-panel-lifecycle/);
     assert.match(page, /nfc-settings-panel-resource/);
     assert.match(page, /nfc-settings-panel-sessions/);
-    assert.match(css, /grid-template-areas:[\s\S]*"runtime lifecycle"[\s\S]*"resource lifecycle"[\s\S]*"sessions sessions"/s);
-    assert.match(css, /@media \(max-width: 1199px\)[\s\S]*"runtime"[\s\S]*"lifecycle"[\s\S]*"resource"[\s\S]*"sessions"/s);
+    assert.match(css, /grid-template-columns:\s*repeat\(12, minmax\(0, 1fr\)\)/);
+    assert.match(css, /\.nfc-settings-panel-runtime[\s\S]*grid-column:\s*1 \/ -1/);
+    assert.match(css, /\.nfc-settings-panel-lifecycle[\s\S]*grid-column:\s*1 \/ span 7/);
+    assert.match(css, /\.nfc-settings-panel-resource[\s\S]*grid-column:\s*8 \/ -1/);
+    assert.match(css, /\.nfc-settings-panel-sessions[\s\S]*grid-column:\s*1 \/ -1/);
+    assert.match(css, /@media \(max-width: 1199px\)[\s\S]*grid-template-columns:\s*1fr[\s\S]*grid-column:\s*1/s);
   });
 });
