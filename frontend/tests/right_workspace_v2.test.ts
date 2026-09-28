@@ -130,6 +130,26 @@ describe('Right Workspace v2 design system', () => {
     assert.match(css, /grid-template-columns:\s*minmax\(320px, 360px\) minmax\(0, 1fr\)/);
   });
 
+  test('dashboard settings login and overlays have dedicated composition rules', () => {
+    const dashboard = read('src/pages/Dashboard/index.tsx');
+    const settings = read('src/pages/Settings/index.tsx');
+    const loginCss = read('src/styles/pages/login.css');
+    const settingsCss = read('src/styles/pages/settings.css');
+    const css = read('src/styles/v056-right-workspace-v2.css');
+
+    assert.match(dashboard, /nfc-page-layout-dashboard/);
+    assert.match(settings, /nfc-page-layout-workbench/);
+    assert.doesNotMatch(dashboard, /eyebrow="Operations overview"/);
+    assert.doesNotMatch(settings, /eyebrow="System controls"/);
+
+    assert.match(css, /--nfc-w2-dashboard-max:\s*1800px/);
+    assert.match(css, /minmax\(300px, 340px\)/);
+    assert.match(css, /\.ant-modal-footer[\s\S]*border-top:/);
+    assert.match(settingsCss, /grid-template-columns:\s*repeat\(12/);
+    assert.match(loginCss, /width:\s*min\(432px, 100%\)/);
+    assert.match(loginCss, /\.nfc-login-security-note[\s\S]*border:\s*1px solid/);
+  });
+
   test('glass treatment is constrained to utility and overlay surfaces', () => {
     const css = read('src/styles/v056-right-workspace-v2.css');
 
