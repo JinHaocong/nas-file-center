@@ -22,6 +22,7 @@ from app.batch_utilities.errors import (
     BatchUtilityInvalidConfigError,
 )
 from app.models import BatchPlan, User, WorkJob
+from app.organizers.advanced_rules import OrganizerAdvancedRules
 from app.media.catalog import (
     enqueue_media_analysis,
     enqueue_media_integrity_verification,
@@ -281,6 +282,7 @@ class OrganizerProfileCreateRequest(BaseModel):
     numbering_padding: int = 3
     mtime_mode: str = "none"
     mtime_delay_seconds: float = Field(default=2.0, ge=0.0, le=60.0)
+    advanced_rules: OrganizerAdvancedRules | None = None
 
 
 class OrganizerProfileUpdateRequest(BaseModel):
@@ -299,6 +301,7 @@ class OrganizerProfileUpdateRequest(BaseModel):
     numbering_padding: int = 3
     mtime_mode: str = "none"
     mtime_delay_seconds: float = Field(default=2.0, ge=0.0, le=60.0)
+    advanced_rules: OrganizerAdvancedRules | None = None
 
 
 class OrganizerProfilePreviewRequest(BaseModel):
