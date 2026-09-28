@@ -147,6 +147,9 @@ from app.batch_utilities.errors import (
 )
 
 
+from app.batch_utilities.single_child_wrapper import matches_single_child_wrapper_candidate_id
+
+
 PLAN_SINGLE_DELETE_ALLOWED = {
     "draft",
     "frozen",
@@ -2272,15 +2275,38 @@ class FileCenterService:
                         "STRUCTURAL_CANDIDATE_BINDING_MISSING: incomplete single-child wrapper metadata"
                     )
 
+                try:
+                    wrapper_device = int(structural_meta.get("wrapper_device") or 0)
+                    wrapper_inode = int(structural_meta.get("wrapper_inode") or 0)
+                    child_device = int(structural_meta.get("child_device") or 0)
+                    child_inode = int(structural_meta.get("child_inode") or 0)
+                except (TypeError, ValueError) as exc:
+                    raise StateConflictError(
+                        "STRUCTURAL_CANDIDATE_BINDING_MISSING: invalid single-child wrapper identity metadata"
+                    ) from exc
+
+                if not matches_single_child_wrapper_candidate_id(
+                    candidate_id=candidate_id,
+                    wrapper_path=wrapper_path,
+                    wrapper_device=wrapper_device,
+                    wrapper_inode=wrapper_inode,
+                    child_path=child_path,
+                    child_device=child_device,
+                    child_inode=child_inode,
+                    child_object_type=structural_meta.get("child_object_type"),
+                    target_path=target_path,
+                    capability_reason=structural_meta.get("capability_reason"),
+                ):
+                    raise StateConflictError(
+                        "STRUCTURAL_CANDIDATE_DIGEST_MISMATCH: single-child wrapper candidate facts do not match candidate_id"
+                    )
+
                 wrapper_snap = capture_source_snapshot(
                     wrapper_path,
                     allowed_roots=self.settings.allowed_roots,
                     quarantine_root=None,
                 )
-                expected_wrapper = (
-                    int(structural_meta.get("wrapper_device") or 0),
-                    int(structural_meta.get("wrapper_inode") or 0),
-                )
+                expected_wrapper = (wrapper_device, wrapper_inode)
                 if (
                     wrapper_snap["object_type"] != "directory"
                     or expected_wrapper[0] <= 0
@@ -2301,10 +2327,7 @@ class FileCenterService:
                         allowed_roots=self.settings.allowed_roots,
                         quarantine_root=None,
                     )
-                    expected_child = (
-                        int(structural_meta.get("child_device") or 0),
-                        int(structural_meta.get("child_inode") or 0),
-                    )
+                    expected_child = (child_device, child_inode)
                     expected_child_type = structural_meta.get("child_object_type")
                     if expected_child_type not in {"file", "directory"}:
                         raise StateConflictError(
