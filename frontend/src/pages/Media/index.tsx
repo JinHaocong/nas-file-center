@@ -299,7 +299,7 @@ export const MediaPage: React.FC = () => {
   const summary = summaryQuery.data;
 
   return (
-    <div className="nfc-operations-page nfc-media-page">
+    <div className="nfc-operations-page nfc-media-page nfc-page-layout-ledger">
       <PageHeader
         eyebrow="Media metadata + integrity"
         title="媒体完整性"

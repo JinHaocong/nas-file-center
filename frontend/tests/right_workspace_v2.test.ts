@@ -66,6 +66,27 @@ describe('Right Workspace v2 design system', () => {
     assert.doesNotMatch(pathMatch, /eyebrow="Path matching"/);
   });
 
+  test('data ledgers opt into the wide workspace mode', () => {
+    const ledgerFiles = [
+      'src/pages/Indexes/index.tsx',
+      'src/pages/Media/index.tsx',
+      'src/pages/Scans/index.tsx',
+      'src/pages/Plans/index.tsx',
+      'src/pages/Quarantine/index.tsx',
+      'src/pages/Tasks/index.tsx',
+      'src/pages/Audit/index.tsx',
+      'src/pages/Workflows/WorkflowList.tsx',
+    ];
+
+    for (const path of ledgerFiles) {
+      assert.match(read(path), /nfc-page-layout-ledger/);
+    }
+
+    const css = read('src/styles/v056-right-workspace-v2.css');
+    assert.match(css, /\.nfc-page-layout-ledger \.nfc-filter-bar[\s\S]*flex-wrap:\s*wrap/);
+    assert.match(css, /\.nfc-page-layout-ledger \.nfc-search-input[\s\S]*max-width:\s*560px/);
+  });
+
   test('glass treatment is constrained to utility and overlay surfaces', () => {
     const css = read('src/styles/v056-right-workspace-v2.css');
 

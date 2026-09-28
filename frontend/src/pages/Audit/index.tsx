@@ -44,7 +44,7 @@ export const AuditPage: React.FC = () => {
   ];
 
   return (
-    <div className="nfc-operations-page nfc-audit-page">
+    <div className="nfc-operations-page nfc-audit-page nfc-page-layout-ledger">
       <PageHeader
         eyebrow="Forensics"
         title="审计日志"

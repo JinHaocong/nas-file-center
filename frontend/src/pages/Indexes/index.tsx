@@ -161,7 +161,7 @@ export const IndexesPage: React.FC = () => {
   ];
 
   return (
-    <div className="nfc-operations-page nfc-indexes-page">
+    <div className="nfc-operations-page nfc-indexes-page nfc-page-layout-ledger">
       <PageHeader
         eyebrow="Index roots"
         title="文件索引"
