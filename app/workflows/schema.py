@@ -430,11 +430,18 @@ class WorkflowPreviewResponse(BaseModel):
     items: list[WorkflowPreviewItem]
     dedupe_summary: dict[str, Any] | None = None
     utility_summary: dict[str, Any] | None = None
+    organizer_summary: dict[str, Any] | None = None
 
 
 class WorkflowGeneratePlanRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     expected_compile_digest: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-fA-F]{64}$")
+    expected_preview_digest: str | None = Field(
+        default=None,
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-fA-F]{64}$",
+    )
     revision: int | None = Field(default=None, ge=1)
     runtime_inputs: RuntimeInputs | None = None
     root_ids: list[int] | None = None

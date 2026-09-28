@@ -316,6 +316,12 @@ class OrganizerProfilePreviewRequest(BaseModel):
 class OrganizerProfilePlanRequest(BaseModel):
     root: str | None = None
     include_touch: bool = True
+    expected_preview_digest: str | None = Field(
+        default=None,
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-fA-F]{64}$",
+    )
 
 
 class OrganizerProfileImportRequest(BaseModel):
@@ -1097,6 +1103,7 @@ def create_organizer_plan(
             user_id=current_user.id,
             root_override=payload.root,
             include_touch=payload.include_touch,
+            expected_preview_digest=payload.expected_preview_digest,
         )
         return {"id": plan.id, "name": plan.name, "kind": plan.kind, "status": plan.status}
     except PermissionError as exc:

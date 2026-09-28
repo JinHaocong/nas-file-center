@@ -613,22 +613,54 @@ def compile_organizer_preview(
     }
     config_digest = _sha256_json(config_payload)
 
-    proposal_rows = [
-        proposal.to_dict()
-        for proposal in sorted(
-            proposals,
-            key=lambda proposal: (
-                os.path.normpath(proposal.source),
-                proposal.proposal_type,
-                os.path.normpath(proposal.target),
-            ),
+    sorted_proposals = sorted(
+        proposals,
+        key=lambda proposal: (
+            os.path.normpath(proposal.source),
+            proposal.proposal_type,
+            os.path.normpath(proposal.target),
+        ),
+    )
+    proposal_rows = [proposal.to_dict() for proposal in sorted_proposals]
+    proposal_digest = _sha256_json(proposal_rows)
+
+    source_snapshot_rows: list[dict[str, Any]] = []
+    for proposal in sorted_proposals:
+        source = Path(proposal.source)
+        try:
+            source_st = os.lstat(source)
+        except OSError as exc:
+            raise ValueError(
+                f"Organizer source changed during Preview compilation: {source}"
+            ) from exc
+
+        if stat.S_ISLNK(source_st.st_mode):
+            source_type = "symlink"
+        elif stat.S_ISDIR(source_st.st_mode):
+            source_type = "directory"
+        elif stat.S_ISREG(source_st.st_mode):
+            source_type = "file"
+        else:
+            source_type = "special"
+
+        source_snapshot_rows.append(
+            {
+                "source": str(source),
+                "device": int(source_st.st_dev),
+                "inode": int(source_st.st_ino),
+                "size": int(source_st.st_size),
+                "mtime_ns": int(source_st.st_mtime_ns),
+                "ctime_ns": int(source_st.st_ctime_ns),
+                "object_type": source_type,
+            }
         )
-    ]
-    source_snapshot_digest = _sha256_json(proposal_rows)
+
+    source_snapshot_digest = _sha256_json(source_snapshot_rows)
     preview_digest = _sha256_json(
         {
             "config_digest": config_digest,
             "source_snapshot_digest": source_snapshot_digest,
+            "proposal_digest": proposal_digest,
             "summary": summary,
         }
     )
