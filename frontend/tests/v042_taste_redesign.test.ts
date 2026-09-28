@@ -49,10 +49,11 @@ describe('v0.4.2 taste principles carried into the current control plane', () =>
     assert.match(workspaceV2, /\.nfc-header\.nfc-header[\s\S]*backdrop-filter:\s*blur\(22px\)/);
   });
 
-  test('dashboard content avoids a generic all-caps overview label', () => {
+  test('dashboard page identity stays singular in the current workspace', () => {
     const dashboard = read('src/pages/Dashboard/index.tsx');
     assert.doesNotMatch(dashboard, /eyebrow=["']OVERVIEW["']/);
-    assert.match(dashboard, /eyebrow=["']Operations overview["']/);
+    assert.doesNotMatch(dashboard, /eyebrow=["']Operations overview["']/);
+    assert.match(dashboard, /nfc-page-layout-dashboard/);
   });
 
   test('current responsive layer preserves reduced-motion behavior', () => {
