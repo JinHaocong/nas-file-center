@@ -1222,6 +1222,11 @@ def freeze(
         return {"id": plan.id, "status": plan.status}
     except KeyError as exc:
         raise HTTPException(404, "plan not found") from exc
+    except OSError as exc:
+        # A draft Plan can become unfrozen-able when a source disappears,
+        # permissions change, or the backing filesystem can no longer stat it.
+        # This is a state conflict, not an internal server error.
+        raise HTTPException(409, f"计划源文件状态已变化，无法冻结: {exc}") from exc
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
 
