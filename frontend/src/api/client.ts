@@ -4,6 +4,46 @@ export interface ApiError {
   detail?: any;
 }
 
+export async function readApiErrorResponse(response: Response): Promise<ApiError> {
+  // Response bodies are one-shot streams. Read exactly once, then decide
+  // whether the payload is JSON or plain text. Calling json() and then text()
+  // on the same response masks the real backend error with "body stream
+  // already read".
+  const rawBody = await response.text();
+  let errorData: any = {};
+
+  if (rawBody) {
+    try {
+      errorData = JSON.parse(rawBody);
+    } catch {
+      errorData = { detail: rawBody };
+    }
+  }
+
+  const detail = errorData?.detail;
+  const nestedMessage =
+    detail &&
+    typeof detail === 'object' &&
+    !Array.isArray(detail) &&
+    detail.error &&
+    typeof detail.error.message === 'string'
+      ? detail.error.message
+      : undefined;
+
+  const errorMsg =
+    (typeof detail === 'string' && detail) ||
+    nestedMessage ||
+    (typeof errorData?.message === 'string' && errorData.message) ||
+    (typeof errorData?.error?.message === 'string' && errorData.error.message) ||
+    `请求失败 (${response.status})`;
+
+  return {
+    status: response.status,
+    message: errorMsg,
+    detail: errorData,
+  };
+}
+
 class ApiClient {
   private onUnauthorizedCallback?: () => void;
 
@@ -39,18 +79,7 @@ class ApiClient {
       }
 
       if (!response.ok) {
-        let errorData: any = {};
-        try {
-          errorData = await response.json();
-        } catch {
-          errorData = { detail: await response.text() };
-        }
-        const errorMsg = errorData.detail || errorData.message || `请求失败 (${response.status})`;
-        throw {
-          status: response.status,
-          message: errorMsg,
-          detail: errorData,
-        } as ApiError;
+        throw await readApiErrorResponse(response);
       }
 
       // Handle 204 No Content
