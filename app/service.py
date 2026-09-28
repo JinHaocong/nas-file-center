@@ -168,6 +168,7 @@ PLAN_HISTORY_STATES = {
     "failed",
 }
 
+from app.organizers.advanced_rules import normalize_advanced_rules
 from app.organizers.engine import generate_organizer_proposals
 from app.organizers.planner import plan_organizer_operations
 from app.organizers.profile_validation import (
@@ -3517,6 +3518,7 @@ class FileCenterService:
             "numbering_padding": profile.numbering_padding,
             "mtime_mode": profile.mtime_mode,
             "mtime_delay_seconds": profile.mtime_delay_seconds,
+            "advanced_rules": json.loads(profile.advanced_rules_json or "{}"),
             "is_builtin": bool(profile.is_builtin),
             "created_at": profile.created_at.isoformat() if profile.created_at else None,
             "updated_at": profile.updated_at.isoformat() if profile.updated_at else None,
@@ -3534,6 +3536,8 @@ class FileCenterService:
             clean_root = str(safe_root)
         else:
             clean_root = None
+
+        recursive = bool(payload.get("recursive", False))
 
         image_extensions = validate_and_normalize_image_extensions(payload.get("image_extensions"))
         video_extensions = validate_and_normalize_video_extensions(payload.get("video_extensions"))
@@ -3573,11 +3577,17 @@ class FileCenterService:
         except (ValueError, TypeError) as exc:
             raise ValueError(f"无效的 mtime_delay_seconds (必须在 0 到 60 之间): {exc}") from exc
 
+        advanced_rules = normalize_advanced_rules(
+            payload.get("advanced_rules"),
+            recursive=recursive,
+            mtime_mode=mtime_mode,
+        )
+
         return {
             "name": name,
             "description": str(payload.get("description") or "").strip() or None,
             "root": clean_root,
-            "recursive": bool(payload.get("recursive", False)),
+            "recursive": recursive,
             "image_extensions": json.dumps(image_extensions),
             "video_extensions": json.dumps(video_extensions),
             "rename_template": rename_template,
@@ -3589,6 +3599,7 @@ class FileCenterService:
             "numbering_padding": numbering_padding,
             "mtime_mode": mtime_mode,
             "mtime_delay_seconds": mtime_delay_seconds,
+            "advanced_rules_json": json.dumps(advanced_rules, ensure_ascii=False, sort_keys=True),
         }
 
     def list_organizer_profiles(
@@ -3657,7 +3668,10 @@ class FileCenterService:
             if profile.user_id != user_id:
                 raise PermissionError("无权修改其他用户的方案")
 
-            validated = self._validate_profile_payload(payload)
+            payload_for_validation = dict(payload)
+            if payload_for_validation.get("advanced_rules") is None:
+                payload_for_validation["advanced_rules"] = json.loads(profile.advanced_rules_json or "{}")
+            validated = self._validate_profile_payload(payload_for_validation)
             for k, v in validated.items():
                 setattr(profile, k, v)
             profile.updated_at = utcnow()
@@ -3720,6 +3734,7 @@ class FileCenterService:
                 numbering_padding=profile.numbering_padding,
                 mtime_mode=profile.mtime_mode,
                 mtime_delay_seconds=profile.mtime_delay_seconds,
+                advanced_rules_json=profile.advanced_rules_json or "{}",
                 created_at=now,
                 updated_at=now,
             )
@@ -3737,7 +3752,7 @@ class FileCenterService:
                 raise PermissionError("无权导出该方案")
 
             return {
-                "schema_version": 1,
+                "schema_version": 2,
                 "profile": {
                     "name": profile.name,
                     "description": profile.description,
@@ -3754,6 +3769,7 @@ class FileCenterService:
                     "numbering_padding": profile.numbering_padding,
                     "mtime_mode": profile.mtime_mode,
                     "mtime_delay_seconds": profile.mtime_delay_seconds,
+                    "advanced_rules": json.loads(profile.advanced_rules_json or "{}"),
                 },
             }
 
@@ -3761,8 +3777,9 @@ class FileCenterService:
         if not isinstance(payload, dict):
             raise ValueError("导入格式无效")
 
-        if payload.get("schema_version") != 1:
-            raise ValueError(f"不支持的 Schema 版本: {payload.get('schema_version')}，仅支持版本 1")
+        schema_version = payload.get("schema_version")
+        if schema_version not in {1, 2}:
+            raise ValueError(f"不支持的 Schema 版本: {schema_version}，仅支持版本 1 或 2")
 
         extra_top_level = set(payload.keys()) - {"schema_version", "profile"}
         if extra_top_level:
@@ -3794,6 +3811,8 @@ class FileCenterService:
             "mtime_mode",
             "mtime_delay_seconds",
         }
+        if schema_version == 2:
+            allowed_keys.add("advanced_rules")
         unknown_keys = set(p_data.keys()) - allowed_keys
         if unknown_keys:
             raise ValueError(f"导入配置包含未知字段: {', '.join(sorted(unknown_keys))}")
