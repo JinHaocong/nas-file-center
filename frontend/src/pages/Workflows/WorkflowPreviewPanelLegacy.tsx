@@ -279,8 +279,16 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
         });
       }
 
+      const organizerSummary = isOrganizer ? previewData.organizer_summary : null;
+      if (organizerSummary?.advanced_enabled && !organizerSummary.preview_digest) {
+        throw new Error("Organizer Advanced Preview 缺少 preview digest，请重新 Preview");
+      }
       return workflowApi.generatePlan(workflowId, {
         expected_compile_digest: previewData.compile_digest,
+        expected_preview_digest:
+          organizerSummary?.advanced_enabled && organizerSummary.preview_digest
+            ? organizerSummary.preview_digest
+            : undefined,
         revision,
         runtime_inputs:
           selectedRoots && selectedRoots.length > 0
@@ -290,7 +298,12 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
       });
     },
     onSuccess: (data) => {
-      message.success(`批处理计划草稿 #${data.plan_id} 生成成功`);
+      const stageMessage = isOrganizer && previewData?.organizer_summary?.advanced_enabled
+        ? previewData.organizer_summary.structural_required
+          ? `Organizer Stage A 结构计划草稿 #${data.plan_id} 已生成；执行后必须重新 Preview`
+          : `Organizer Stage B 重命名计划草稿 #${data.plan_id} 已生成`
+        : `批处理计划草稿 #${data.plan_id} 生成成功`;
+      message.success(stageMessage);
       queryClient.invalidateQueries({ queryKey: ["plansList"] });
       onGeneratePlanSuccess(data.plan_id);
     },
@@ -334,6 +347,12 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
   const dedupeSummary: DedupeSummary | null = isDedupe
     ? (previewData?.dedupe_summary ?? null)
     : null;
+
+  const organizerSummary = isOrganizer ? (previewData?.organizer_summary ?? null) : null;
+  const organizerAdvanced = Boolean(organizerSummary?.advanced_enabled);
+  const organizerStructuralRequired = Boolean(organizerSummary?.structural_required);
+  const organizerPreviewDigest = organizerSummary?.preview_digest || undefined;
+  const organizerConflicts = Number(organizerSummary?.summary?.conflicts ?? 0);
 
   const columns = [
     {
@@ -426,7 +445,8 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
       isDedupe,
       selectedScanJobId,
       hasDedupeSummary: Boolean(previewData?.dedupe_summary),
-    });
+    }) &&
+    (!organizerAdvanced || (Boolean(organizerPreviewDigest) && organizerConflicts === 0));
 
   return (
     <DataPanel
@@ -443,8 +463,14 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
             {previewData ? "刷新预览" : "生成预览"}
           </Button>
           <Popconfirm
-            title="确认基于此预览生成批处理计划草稿？"
-            description="计划生成为只读草稿态，仍需冻结与校验后方可执行。"
+            title={organizerStructuralRequired
+              ? "确认生成 Organizer Stage A 结构计划草稿？"
+              : organizerAdvanced
+              ? "确认生成 Organizer Stage B 重命名计划草稿？"
+              : "确认基于此预览生成批处理计划草稿？"}
+            description={organizerStructuralRequired
+              ? "Stage A 仍只创建 Draft；执行完成后当前 Preview 作废，必须 fresh Preview 才能进入 Stage B。"
+              : "计划生成为只读草稿态，仍需冻结与校验后方可执行。"}
             onConfirm={() => generatePlanMutation.mutate()}
             disabled={!canDraft}
             okText="生成草稿"
@@ -456,7 +482,11 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
               disabled={!canDraft}
               loading={generatePlanMutation.isPending}
             >
-              生成计划草稿
+              {organizerStructuralRequired
+                ? "生成 Stage A 结构草稿"
+                : organizerAdvanced
+                ? "生成 Stage B 重命名草稿"
+                : "生成计划草稿"}
             </Button>
           </Popconfirm>
         </ActionBar>
@@ -509,6 +539,33 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
                 showIcon
                 message="缺少去重权威摘要 (dedupe_summary)"
                 description="后端预览未包含权威 dedupe_summary，无法验证去重统计与安全性，已禁止生成计划草稿。"
+              />
+            )}
+
+            {isOrganizer && organizerAdvanced && organizerStructuralRequired && (
+              <Alert
+                type="warning"
+                showIcon
+                message="Organizer Stage A Structural Preview"
+                description="当前存在 wrapper collapse 结构候选。Stage B rename/file/prefix 计划已锁定；Stage A 执行完成后必须重新 Preview 获取新的 preview digest。"
+              />
+            )}
+
+            {isOrganizer && organizerAdvanced && !organizerStructuralRequired && previewData && (
+              <Alert
+                type="success"
+                showIcon
+                message="Organizer Stage B Rename Preview"
+                description="当前 fresh Preview 无需结构变更，可基于 organizer preview digest 生成 Stage B 草稿。"
+              />
+            )}
+
+            {isOrganizer && organizerConflicts > 0 && (
+              <Alert
+                type="error"
+                showIcon
+                message={`Organizer Preview 存在 ${organizerConflicts} 个 blocking conflict`}
+                description="冲突未清零前禁止 Generate；请修正配置或源树后重新 Preview。"
               />
             )}
 
@@ -651,6 +708,23 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
                 <>
                   <ResponsiveDescriptions
                     items={[
+                      ...(isOrganizer && organizerAdvanced
+                        ? [
+                            {
+                              label: "Organizer Stage",
+                              value: organizerStructuralRequired ? "Stage A · Structural" : "Stage B · Rename",
+                              emphasis: true,
+                            },
+                            {
+                              label: "Preview Digest",
+                              value: (
+                                <span className="nfc-mono nfc-digest-value">
+                                  {organizerPreviewDigest || "(缺失，请重新 Preview)"}
+                                </span>
+                              ),
+                            },
+                          ]
+                        : []),
                       {
                         label: "匹配文件/目录数",
                         value: previewData.matched_count,
