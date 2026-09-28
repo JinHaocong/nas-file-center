@@ -125,7 +125,7 @@ export const PlansPage: React.FC = () => {
   ];
 
   return (
-    <div className="nfc-operations-page nfc-plans-page">
+    <div className="nfc-operations-page nfc-plans-page nfc-page-layout-ledger">
       <PageHeader
         eyebrow="Execution control"
         title="执行计划"
