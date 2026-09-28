@@ -183,7 +183,7 @@ export const ScansPage: React.FC = () => {
   ];
 
   return (
-    <div className="nfc-operations-page nfc-scans-page">
+    <div className="nfc-operations-page nfc-scans-page nfc-page-layout-ledger">
       <PageHeader
         eyebrow="Duplicate intelligence"
         title="扫描去重"
