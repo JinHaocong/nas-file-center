@@ -4,14 +4,19 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');
-const escapeRegex = (value: string) => value.replace(/[.*+?^\${}()|[\]\\]/g, '\\const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');');
+
+const includesAll = (source: string, semantics: string[]) => {
+  for (const semantic of semantics) {
+    assert.ok(source.includes(semantic), `missing contract semantic: ${semantic}`);
+  }
+};
 
 describe('Organizer Advanced Rules C4 frontend contract', () => {
   test('frontend types preserve the advanced profile and staged preview authority', () => {
     const workflowTypes = read('src/types/workflow.ts');
     const rootTypes = read('src/types/index.ts');
 
-    for (const semantic of [
+    includesAll(workflowTypes, [
       'OrganizerAdvancedRules',
       'directory_depth',
       'file_numbering',
@@ -21,11 +26,9 @@ describe('Organizer Advanced Rules C4 frontend contract', () => {
       'WorkflowOrganizerSummary',
       'organizer_summary?: WorkflowOrganizerSummary',
       'expected_preview_digest?: string',
-    ]) {
-      assert.match(workflowTypes, new RegExp(escapeRegex(semantic)));
-    }
+    ]);
 
-    for (const semantic of [
+    includesAll(rootTypes, [
       'advanced_rules?: OrganizerAdvancedRules',
       'preview_digest?: string',
       'advanced_enabled?: boolean',
@@ -33,15 +36,13 @@ describe('Organizer Advanced Rules C4 frontend contract', () => {
       'proposal_type:',
       'wrapper_candidates?: number',
       'advanced_changes?: number',
-    ]) {
-      assert.match(rootTypes, new RegExp(escapeRegex(semantic)));
-    }
+    ]);
   });
 
   test('shared Organizer editor exposes all V1 advanced rules collapsed behind safety validation', () => {
     const source = read('src/components/workflows/OrganizerProfileFields.tsx');
 
-    for (const semantic of [
+    includesAll(source, [
       "key: 'advanced-rules'",
       'Advanced Rules 使用分阶段安全流程',
       "getAdvancedName('directory_depth'",
@@ -52,19 +53,17 @@ describe('Organizer Advanced Rules C4 frontend contract', () => {
       "mtimeMode === 'ordered'",
       'MOVE → rmdir_empty',
       '<Collapse',
-    ]) {
-      assert.match(source, new RegExp(escapeRegex(semantic)));
-    }
-    assert.doesNotMatch(source, /defaultActiveKey=/);
-    assert.doesNotMatch(source, /execute now/i);
+    ]);
+    assert.ok(!source.includes('defaultActiveKey='), 'Advanced Rules collapse must be closed by default');
+    assert.ok(!/execute now/i.test(source), 'Advanced Rules must not expose execute-now authority');
   });
 
   test('standalone Organizer Preview binds Generate to preview digest and stages structural before rename', () => {
     const api = read('src/api/organizerProfiles.ts');
     const source = read('src/pages/Organizer/ProfilePreview.tsx');
 
-    assert.match(api, /expected_preview_digest\?: string/);
-    for (const semantic of [
+    assert.ok(api.includes('expected_preview_digest?: string'));
+    includesAll(source, [
       'result.preview_digest',
       'result.structural_required',
       'summary.advanced_changes',
@@ -76,15 +75,13 @@ describe('Organizer Advanced Rules C4 frontend contract', () => {
       '必须重新 Preview',
       'proposal_type',
       'summary!.conflicts === 0',
-    ]) {
-      assert.match(source, new RegExp(escapeRegex(semantic)));
-    }
+    ]);
   });
 
   test('Workflow Organizer carries organizer preview digest and blocks conflicted staged Generate', () => {
     const source = read('src/pages/Workflows/WorkflowPreviewPanelLegacy.tsx');
 
-    for (const semantic of [
+    includesAll(source, [
       'previewData.organizer_summary',
       'expected_preview_digest:',
       'organizerSummary.preview_digest',
@@ -93,9 +90,7 @@ describe('Organizer Advanced Rules C4 frontend contract', () => {
       'Organizer Stage B Rename Preview',
       'Stage B rename/file/prefix 计划已锁定',
       '必须重新 Preview',
-    ]) {
-      assert.match(source, new RegExp(escapeRegex(semantic)));
-    }
+    ]);
   });
 
   test('profile and workflow snapshot paths preserve advanced rules instead of dropping them', () => {
@@ -103,25 +98,23 @@ describe('Organizer Advanced Rules C4 frontend contract', () => {
     const modal = read('src/pages/Organizer/ProfileFormModal.tsx');
     const workflowEditor = read('src/components/workflows/OrganizerStepEditor.tsx');
 
-    assert.match(defaults, /cloneOrganizerAdvancedRules/);
-    assert.match(defaults, /advanced_rules: cloneOrganizerAdvancedRules/);
-    assert.match(modal, /advanced_rules: editingProfile\.advanced_rules/);
-    assert.match(workflowEditor, /advanced_rules: step\.profile_snapshot\.advanced_rules/);
-    assert.match(workflowEditor, /advanced_rules: allValues\.advanced_rules/);
+    assert.ok(defaults.includes('cloneOrganizerAdvancedRules'));
+    assert.ok(defaults.includes('advanced_rules: cloneOrganizerAdvancedRules'));
+    assert.ok(modal.includes('advanced_rules: editingProfile.advanced_rules'));
+    assert.ok(workflowEditor.includes('advanced_rules: step.profile_snapshot.advanced_rules'));
+    assert.ok(workflowEditor.includes('advanced_rules: allValues.advanced_rules'));
   });
 
   test('C4 styles cover mobile and dark staged surfaces', () => {
     const css = read('src/styles/pages/organizer.css');
 
-    for (const selector of [
+    includesAll(css, [
       '.nfc-organizer-advanced-rules',
       '.nfc-organizer-advanced-collapse',
       '.nfc-organizer-preview-digest',
       '.nfc-organizer-stage-alert',
       "[data-theme='dark'] .nfc-organizer-advanced-collapse",
       '@media (max-width: 767px)',
-    ]) {
-      assert.match(css, new RegExp(escapeRegex(selector)));
-    }
+    ]);
   });
 });
