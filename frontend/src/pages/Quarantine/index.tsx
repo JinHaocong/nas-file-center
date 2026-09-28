@@ -251,7 +251,7 @@ export const QuarantinePage: React.FC = () => {
   ];
 
   return (
-    <div className="nfc-operations-page nfc-quarantine-page">
+    <div className="nfc-operations-page nfc-quarantine-page nfc-page-layout-ledger">
       <PageHeader
         eyebrow="Safety boundary"
         title="文件隔离区"
