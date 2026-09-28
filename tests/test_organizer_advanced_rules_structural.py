@@ -826,3 +826,76 @@ def test_stage_a_completion_invalidates_old_preview_for_stage_b(
     fresh = client.post(f"/api/organizer-profiles/{profile_id}/preview")
     assert fresh.status_code == 200
     assert fresh.json()["preview_digest"] != old_digest
+
+
+def test_stage_a_validate_rejects_hidden_entry_added_after_freeze(
+    tmp_path: Path,
+    monkeypatch,
+):
+    _force_native_probe(monkeypatch)
+    app, client, data, _settings = _client(tmp_path)
+    root = data / "Organizer"
+    wrapper = root / "A" / "Wrapper"
+    (wrapper / "Child").mkdir(parents=True)
+
+    profile_id = _profile(client, root)
+    preview = client.post(f"/api/organizer-profiles/{profile_id}/preview").json()
+    created = client.post(
+        f"/api/organizer-profiles/{profile_id}/plan",
+        json={"expected_preview_digest": preview["preview_digest"]},
+    )
+    plan_id = created.json()["id"]
+    assert client.post(f"/api/plans/{plan_id}/freeze").status_code == 200
+
+    (wrapper / ".hidden-after-freeze").write_text("must block move")
+    validation = app.state.service.validate_plan(plan_id)
+    assert validation["status"] == "stale"
+    move = next(item for item in validation["items"] if item["operation"] == "move")
+    assert move["reason"] == "wrapper_shape_changed"
+    assert (wrapper / "Child").is_dir()
+    assert not (root / "A" / "Child").exists()
+
+
+def test_stage_a_execute_rejects_candidate_digest_drift_without_moving_child(
+    tmp_path: Path,
+    monkeypatch,
+):
+    _force_native_probe(monkeypatch)
+    app, client, data, settings = _client(tmp_path)
+    root = data / "Organizer"
+    wrapper = root / "A" / "Wrapper"
+    child = wrapper / "Child"
+    child.mkdir(parents=True)
+
+    profile_id = _profile(client, root)
+    preview = client.post(f"/api/organizer-profiles/{profile_id}/preview").json()
+    created = client.post(
+        f"/api/organizer-profiles/{profile_id}/plan",
+        json={"expected_preview_digest": preview["preview_digest"]},
+    )
+    plan_id = created.json()["id"]
+    assert client.post(f"/api/plans/{plan_id}/freeze").status_code == 200
+    assert client.post(f"/api/plans/{plan_id}/validate").json()["status"] == "ready"
+
+    with app.state.service.SessionLocal() as session:
+        rows = list(
+            session.scalars(
+                select(BatchPlanItem)
+                .where(BatchPlanItem.plan_id == plan_id)
+                .order_by(BatchPlanItem.sequence)
+            )
+        )
+        assert len(rows) == 2
+        for row in rows:
+            meta = json.loads(row.metadata_json)
+            meta["candidate_id"] = "f" * 64
+            row.metadata_json = json.dumps(meta)
+        session.commit()
+
+    execution = client.post(f"/api/plans/{plan_id}/execute")
+    assert execution.status_code == 200
+    ok = process_work_job(settings, execution.json()["work_job_id"])
+    assert ok is False
+    assert child.is_dir()
+    assert wrapper.is_dir()
+    assert not (root / "A" / "Child").exists()
