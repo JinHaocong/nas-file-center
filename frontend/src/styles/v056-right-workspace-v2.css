@@ -25,7 +25,9 @@
   --nfc-w2-radius-lg: 16px;
   --nfc-w2-control: 38px;
   --nfc-w2-row: 52px;
-  --nfc-w2-content-max: 1540px;
+  --nfc-w2-content-max: 1720px;
+  --nfc-w2-workspace-max: 2100px;
+  --nfc-w2-focused-max: 1180px;
   --nfc-w2-reading-max: 1080px;
   --nfc-w2-shadow-float: 0 24px 70px rgba(18, 24, 33, 0.14);
 }
@@ -71,6 +73,18 @@ body,
 .nfc-page-content > * {
   width: min(100%, var(--nfc-w2-content-max));
   margin-inline: auto;
+}
+
+/* Width authority: pages opt into a semantic composition instead of
+ * inheriting one max-width for every screen. Workbench/ledger pages may use
+ * the available NAS console width; focused pages intentionally stay narrow. */
+.nfc-page-content > .nfc-page-layout-workbench,
+.nfc-page-content > .nfc-page-layout-ledger {
+  width: min(100%, var(--nfc-w2-workspace-max));
+}
+
+.nfc-page-content > .nfc-page-layout-focused {
+  width: min(100%, var(--nfc-w2-focused-max));
 }
 
 .nfc-operations-page,
@@ -638,6 +652,24 @@ body,
   max-width: var(--nfc-w2-reading-max);
 }
 
+/* A workbench owns its horizontal space. Reading-width caps remain available
+ * for focused forms, but must not shrink the primary work surface. */
+.nfc-page-layout-workbench .nfc-file-tool-form,
+.nfc-page-layout-workbench .nfc-tool-workbench {
+  width: 100%;
+  max-width: none;
+}
+
+.nfc-path-match-page .nfc-path-match-form {
+  width: 100%;
+}
+
+.nfc-path-match-page .nfc-file-tool-primary-actions {
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+}
+
 .nfc-form-grid {
   gap: 16px 22px;
 }
@@ -985,6 +1017,15 @@ body,
 .nfc-app-main .nfc-page-content > * {
   width: min(100%, var(--nfc-w2-content-max));
   margin-inline: auto;
+}
+
+.nfc-app-main .nfc-page-content > .nfc-page-layout-workbench,
+.nfc-app-main .nfc-page-content > .nfc-page-layout-ledger {
+  width: min(100%, var(--nfc-w2-workspace-max));
+}
+
+.nfc-app-main .nfc-page-content > .nfc-page-layout-focused {
+  width: min(100%, var(--nfc-w2-focused-max));
 }
 
 .nfc-app-main .nfc-page-content > .nfc-quarantine-page,
