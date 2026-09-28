@@ -157,9 +157,8 @@ export const DashboardPage: React.FC = () => {
   const taskItems = tasksData?.items || [];
 
   return (
-    <div className="nfc-dashboard nfc-dashboard-page nfc-operations-page">
+    <div className="nfc-dashboard nfc-dashboard-page nfc-operations-page nfc-page-layout-dashboard">
       <PageHeader
-        eyebrow="Operations overview"
         title="系统概览"
         description="NAS 文件中心的索引、扫描、执行计划与后台任务状态。"
         actions={
