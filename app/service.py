@@ -1640,6 +1640,77 @@ class FileCenterService:
                         item_validations[row.id] = ("validated", bulk_reason, None)
                     continue
 
+            if row.operation == "move":
+                try:
+                    structural_meta = json.loads(row.metadata_json or "{}")
+                except Exception:
+                    structural_meta = {}
+                if (
+                    isinstance(structural_meta, dict)
+                    and structural_meta.get("utility_action") == "single_child_wrapper_collapse"
+                ):
+                    candidate_id = structural_meta.get("candidate_id")
+                    wrapper_path = structural_meta.get("wrapper_path")
+                    child_path = structural_meta.get("child_path")
+                    target_path = structural_meta.get("target_path")
+                    binding_ok = all(
+                        isinstance(value, str) and value.strip()
+                        for value in (candidate_id, wrapper_path, child_path, target_path)
+                    )
+                    if binding_ok:
+                        try:
+                            binding_ok = matches_single_child_wrapper_candidate_id(
+                                candidate_id=candidate_id,
+                                wrapper_path=wrapper_path,
+                                wrapper_device=int(structural_meta.get("wrapper_device") or 0),
+                                wrapper_inode=int(structural_meta.get("wrapper_inode") or 0),
+                                child_path=child_path,
+                                child_device=int(structural_meta.get("child_device") or 0),
+                                child_inode=int(structural_meta.get("child_inode") or 0),
+                                child_object_type=structural_meta.get("child_object_type"),
+                                target_path=target_path,
+                                capability_reason=structural_meta.get("capability_reason"),
+                            )
+                        except (TypeError, ValueError):
+                            binding_ok = False
+                    if not binding_ok:
+                        detail = StaleItemDetail(
+                            item_id=row.id,
+                            source_path=row.source_path,
+                            reason="candidate_digest_mismatch",
+                            expected={"candidate_id": candidate_id},
+                            actual=None,
+                        )
+                        stale_items.append(detail)
+                        item_validations[row.id] = ("stale", detail.reason, None)
+                        continue
+
+                    from app.execution.utility_wrapper_pair import open_utility_wrapper_live_guard
+
+                    try:
+                        with open_utility_wrapper_live_guard(
+                            wrapper_path=wrapper_path,
+                            child_path=child_path,
+                            allowed_roots=self.settings.allowed_roots,
+                            quarantine_root=self.settings.quarantine_root,
+                        ):
+                            pass
+                    except Exception:
+                        detail = StaleItemDetail(
+                            item_id=row.id,
+                            source_path=row.source_path,
+                            reason="wrapper_shape_changed",
+                            expected={
+                                "wrapper_path": wrapper_path,
+                                "child_path": child_path,
+                                "candidate_id": candidate_id,
+                            },
+                            actual=None,
+                        )
+                        stale_items.append(detail)
+                        item_validations[row.id] = ("stale", detail.reason, None)
+                        continue
+
             if row.operation == "restore":
                 meta = json.loads(row.metadata_json or "{}")
                 qid = meta.get("quarantine_entry_id") or meta.get("undo", {}).get("quarantine_entry_id")
@@ -2300,6 +2371,22 @@ class FileCenterService:
                     raise StateConflictError(
                         "STRUCTURAL_CANDIDATE_DIGEST_MISMATCH: single-child wrapper candidate facts do not match candidate_id"
                     )
+
+                if it["operation"] == "move":
+                    from app.execution.utility_wrapper_pair import open_utility_wrapper_live_guard
+
+                    try:
+                        with open_utility_wrapper_live_guard(
+                            wrapper_path=wrapper_path,
+                            child_path=child_path,
+                            allowed_roots=self.settings.allowed_roots,
+                            quarantine_root=self.settings.quarantine_root,
+                        ):
+                            pass
+                    except Exception as exc:
+                        raise StateConflictError(
+                            "WRAPPER_SHAPE_CHANGED: wrapper no longer contains exactly the bound child"
+                        ) from exc
 
                 wrapper_snap = capture_source_snapshot(
                     wrapper_path,
