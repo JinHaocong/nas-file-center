@@ -7,6 +7,8 @@ from fastapi.testclient import TestClient
 import pytest
 from sqlalchemy import func, select
 
+import app.batch_utilities.single_child_wrapper as single_child_wrapper_module
+
 from app.config import Settings
 from app.exceptions import StateConflictError
 from app.main import create_app
@@ -190,7 +192,12 @@ def test_advanced_rename_plan_uses_dedicated_metadata_and_preserves_suffix(tmp_p
         assert item_meta["organizer_generated_snapshot"]["inode"] > 0
 
 
-def test_wrapper_stage_blocks_rename_plan_and_persists_zero_draft(tmp_path: Path):
+def test_wrapper_stage_generates_stage_a_structural_draft(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(
+        single_child_wrapper_module,
+        "probe_existing_noreplace_capability_at",
+        lambda dir_fd, entry_name: True,
+    )
     app, client, data = _client(tmp_path)
     root = data / "Organizer"
     (root / "A" / "Wrapper" / "Child").mkdir(parents=True)
@@ -206,9 +213,22 @@ def test_wrapper_stage_blocks_rename_plan_and_persists_zero_draft(tmp_path: Path
         f"/api/organizer-profiles/{profile_id}/plan",
         json={"expected_preview_digest": preview["preview_digest"]},
     )
-    assert created.status_code == 400
-    assert "Stage A" in created.json()["detail"]
-    assert _plan_count(app) == before
+    assert created.status_code == 200, created.text
+    assert _plan_count(app) == before + 1
+
+    with app.state.service.SessionLocal() as session:
+        plan = session.get(BatchPlan, created.json()["id"])
+        assert plan is not None
+        metadata = json.loads(plan.metadata_json)
+        assert metadata["organizer_stage"] == "structural"
+        items = list(
+            session.scalars(
+                select(BatchPlanItem)
+                .where(BatchPlanItem.plan_id == plan.id)
+                .order_by(BatchPlanItem.sequence)
+            )
+        )
+        assert [item.operation for item in items] == ["move", "rmdir_empty"]
 
 
 def test_freeze_rejects_source_identity_change_after_advanced_plan_generation(tmp_path: Path):
