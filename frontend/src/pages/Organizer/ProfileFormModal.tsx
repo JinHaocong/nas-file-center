@@ -42,6 +42,7 @@ export const ProfileFormModal: React.FC<ProfileFormModalProps> = ({
           numbering_padding: editingProfile.numbering_padding ?? defaults.numbering_padding,
           mtime_mode: editingProfile.mtime_mode ?? defaults.mtime_mode,
           mtime_delay_seconds: editingProfile.mtime_delay_seconds ?? defaults.mtime_delay_seconds,
+          advanced_rules: editingProfile.advanced_rules ?? defaults.advanced_rules,
         });
       } else {
         form.resetFields();
