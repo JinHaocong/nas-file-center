@@ -316,6 +316,32 @@ def _resolve_utility_empty_wrapper_cleanup_authority(
             if not isinstance(target_path, str) or not target_path.strip():
                 return False
 
+            try:
+                wrapper_device = int(current_metadata.get("wrapper_device") or 0)
+                wrapper_inode = int(current_metadata.get("wrapper_inode") or 0)
+                child_device = int(current_metadata.get("child_device") or 0)
+                child_inode = int(current_metadata.get("child_inode") or 0)
+            except (TypeError, ValueError):
+                return False
+
+            from app.batch_utilities.single_child_wrapper import (
+                matches_single_child_wrapper_candidate_id,
+            )
+
+            if not matches_single_child_wrapper_candidate_id(
+                candidate_id=candidate_id,
+                wrapper_path=wrapper_path,
+                wrapper_device=wrapper_device,
+                wrapper_inode=wrapper_inode,
+                child_path=child_path,
+                child_device=child_device,
+                child_inode=child_inode,
+                child_object_type=current_metadata.get("child_object_type"),
+                target_path=target_path,
+                capability_reason=current_metadata.get("capability_reason"),
+            ):
+                return False
+
             predecessor_rows = list(
                 session.scalars(
                     select(BatchPlanItem).where(
@@ -342,14 +368,20 @@ def _resolve_utility_empty_wrapper_cleanup_authority(
                 return False
             if not isinstance(predecessor_metadata, dict):
                 return False
-            if predecessor_metadata.get("candidate_id") != candidate_id:
-                return False
-            if predecessor_metadata.get("wrapper_path") != wrapper_path:
-                return False
-            if predecessor_metadata.get("child_path") != child_path:
-                return False
-            if predecessor_metadata.get("target_path") != target_path:
-                return False
+            for binding_key in (
+                "candidate_id",
+                "wrapper_path",
+                "wrapper_device",
+                "wrapper_inode",
+                "child_path",
+                "child_device",
+                "child_inode",
+                "child_object_type",
+                "capability_reason",
+                "target_path",
+            ):
+                if predecessor_metadata.get(binding_key) != current_metadata.get(binding_key):
+                    return False
 
             return True
     except Exception:
