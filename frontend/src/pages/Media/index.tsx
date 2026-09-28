@@ -398,9 +398,9 @@ export const MediaPage: React.FC = () => {
             style={{ minWidth: 240 }}
           />
           <Button onClick={() => { setSearchApplied(search.trim()); setPage(1); }}>搜索</Button>
-          <div style={{ marginLeft: 'auto' }} />
           <Tooltip title={!isAdmin ? '仅管理员可以永久删除损坏媒体' : selectedIds.length === 0 ? '请选择可永久删除的 corrupt 条目' : '不会进入隔离区，将直接永久 unlink 原文件'}>
             <Button
+              className="nfc-media-destructive-action"
               danger
               icon={<DeleteOutlined />}
               disabled={!isAdmin || selectedIds.length === 0}
