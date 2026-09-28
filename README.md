@@ -5,6 +5,8 @@
 面向几十 TB NAS 数据的**中文 Web 文件批处理与精确去重中心**。
 
 > **版本权威**：当前产品 / Python package / Docker image 版本统一为 **0.4.7**。
+>
+> 当前开发顺序以 [`docs/roadmap-current.md`](docs/roadmap-current.md) 为准；旧 roadmap 仅作历史证据。
 
 核心原则：**fclones 负责高性能重复发现；NAS File Center 负责规则、Dry Run、SHA256 二次校验、安全执行、审计和可视化操作。** fclones 永远不会被调用 `remove/link/dedupe` 等破坏性子命令。
 
