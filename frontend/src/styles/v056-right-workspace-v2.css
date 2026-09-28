@@ -1214,6 +1214,43 @@ body,
 
 /* Page-specific composition ------------------------------------------------ */
 
+/* Ledger width/density contract ------------------------------------------------
+ * Data-heavy pages use the workspace width, while their controls still wrap
+ * before horizontal pressure turns into a visually off-center command rail. */
+.nfc-app-main .nfc-page-layout-ledger {
+  min-width: 0;
+}
+
+.nfc-app-main .nfc-page-layout-ledger > .nfc-page-header {
+  margin-bottom: 26px;
+}
+
+.nfc-app-main .nfc-page-layout-ledger > .nfc-data-panel,
+.nfc-app-main .nfc-page-layout-ledger > .nfc-metric-grid {
+  width: 100%;
+}
+
+.nfc-app-main .nfc-page-layout-ledger .nfc-data-panel-body,
+.nfc-app-main .nfc-page-layout-ledger .ant-table-wrapper {
+  width: 100%;
+  min-width: 0;
+}
+
+.nfc-app-main .nfc-page-layout-ledger .nfc-filter-bar {
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.nfc-app-main .nfc-page-layout-ledger .nfc-search-input {
+  flex: 1 1 280px;
+  min-width: min(280px, 100%);
+  max-width: 560px;
+}
+
+.nfc-app-main .nfc-page-layout-ledger .nfc-row-actions {
+  white-space: nowrap;
+}
+
 /* Operational ledgers: Indexes / Media / Scans / Plans / Tasks / Audit */
 .nfc-app-main .nfc-indexes-page > .nfc-data-panel,
 .nfc-app-main .nfc-media-page > .nfc-data-panel,
