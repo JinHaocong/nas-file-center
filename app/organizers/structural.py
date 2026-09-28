@@ -34,6 +34,17 @@ def _norm(path: str | Path) -> str:
     return os.path.normpath(os.fspath(path))
 
 
+def _proposal_value(proposal: Any, key: str, default: Any = None) -> Any:
+    if isinstance(proposal, dict):
+        return proposal.get(key, default)
+    return getattr(proposal, key, default)
+
+
+def _proposal_metadata(proposal: Any) -> dict[str, Any]:
+    value = _proposal_value(proposal, "metadata", {})
+    return value if isinstance(value, dict) else {}
+
+
 def compile_organizer_structural_stage(
     root: Path | str,
     *,
@@ -60,9 +71,9 @@ def compile_organizer_structural_stage(
     wrapper_proposals = [
         proposal
         for proposal in proposals
-        if getattr(proposal, "proposal_type", None) == "wrapper_collapse"
-        and getattr(proposal, "changed", False)
-        and not getattr(proposal, "conflict", False)
+        if _proposal_value(proposal, "proposal_type") == "wrapper_collapse"
+        and bool(_proposal_value(proposal, "changed", False))
+        and not bool(_proposal_value(proposal, "conflict", False))
     ]
     if not wrapper_proposals:
         return OrganizerStructuralCompilation(
@@ -77,7 +88,7 @@ def compile_organizer_structural_stage(
 
     scopes = sorted(
         {
-            _norm(Path(proposal.metadata["wrapper_path"]).parent)
+            _norm(Path(_proposal_metadata(proposal)["wrapper_path"]).parent)
             for proposal in wrapper_proposals
         }
     )
@@ -103,12 +114,12 @@ def compile_organizer_structural_stage(
 
     for proposal in sorted(
         wrapper_proposals,
-        key=lambda row: _norm(row.metadata["wrapper_path"]),
+        key=lambda row: _norm(_proposal_metadata(row)["wrapper_path"]),
     ):
-        metadata = proposal.metadata
+        metadata = _proposal_metadata(proposal)
         wrapper_path = _norm(metadata["wrapper_path"])
-        child_path = _norm(proposal.source)
-        target_path = _norm(proposal.target)
+        child_path = _norm(_proposal_value(proposal, "source"))
+        target_path = _norm(_proposal_value(proposal, "target"))
 
         decision = authoritative.get(wrapper_path)
         if decision is None:
