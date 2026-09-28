@@ -69,7 +69,7 @@ body,
   position: relative;
   width: 100%;
   min-width: 0;
-  padding: 30px 38px 64px;
+  padding: 30px clamp(24px, 2.15vw, 42px) 64px;
 }
 
 .nfc-page-content > * {
@@ -1067,7 +1067,7 @@ body,
  */
 
 .nfc-app-main .nfc-page-content {
-  padding: 30px 38px 64px;
+  padding: 30px clamp(24px, 2.15vw, 42px) 64px;
 }
 
 .nfc-app-main .nfc-page-content > * {
@@ -1090,15 +1090,6 @@ body,
 
 .nfc-app-main .nfc-page-content > .nfc-page-layout-dashboard {
   width: min(100%, var(--nfc-w2-dashboard-max));
-}
-
-.nfc-app-main .nfc-page-content > .nfc-quarantine-page,
-.nfc-app-main .nfc-page-content > .nfc-tasks-page,
-.nfc-app-main .nfc-page-content > .nfc-media-page,
-.nfc-app-main .nfc-page-content > .nfc-plans-page,
-.nfc-app-main .nfc-page-content > .nfc-scan-detail-page,
-.nfc-app-main .nfc-page-content > .nfc-plan-detail-page {
-  width: min(100%, var(--nfc-w2-content-max));
 }
 
 .nfc-app-main .nfc-page-header {
@@ -1245,6 +1236,17 @@ body,
 
   .nfc-app-main .nfc-page-header {
     min-height: 0;
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .nfc-app-main .nfc-page-header-copy {
+    flex: 1 1 620px;
+    max-width: 100%;
+  }
+
+  .nfc-app-main .nfc-page-actions {
+    margin-left: auto;
   }
 }
 
@@ -1689,6 +1691,16 @@ body,
   .nfc-app-main .nfc-batch-page .nfc-batch-operation-grid,
   .nfc-app-main .nfc-organizer-preview-page .nfc-organizer-metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .nfc-app-main .nfc-page-layout-ledger .nfc-search-input {
+    width: 100%;
+    max-width: none;
+    flex-basis: 100%;
+  }
+
+  .nfc-app-main .nfc-page-layout-ledger .nfc-filter-bar {
+    align-items: stretch;
   }
 
   .nfc-app-main .nfc-system-controls-page .nfc-settings-subpanel-danger {
