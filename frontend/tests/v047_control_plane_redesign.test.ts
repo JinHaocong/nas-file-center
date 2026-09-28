@@ -68,7 +68,11 @@ describe('v0.4.7 control plane foundation', () => {
 
   test('settings topology regression remains explicitly protected', () => {
     const settings = read('src/styles/pages/settings.css');
-    assert.match(settings, /grid-template-areas:[\s\S]*"runtime lifecycle"[\s\S]*"resource lifecycle"[\s\S]*"sessions sessions"/);
+    assert.match(settings, /grid-template-columns:\s*repeat\(12, minmax\(0, 1fr\)\)/);
+    assert.match(settings, /\.nfc-settings-panel-runtime[\s\S]*grid-column:\s*1 \/ -1/);
+    assert.match(settings, /\.nfc-settings-panel-lifecycle[\s\S]*grid-column:\s*1 \/ span 7/);
+    assert.match(settings, /\.nfc-settings-panel-resource[\s\S]*grid-column:\s*8 \/ -1/);
+    assert.match(settings, /\.nfc-settings-panel-sessions[\s\S]*grid-column:\s*1 \/ -1/);
   });
 
   test('operational table pages stay on the dense semantic surface', () => {
