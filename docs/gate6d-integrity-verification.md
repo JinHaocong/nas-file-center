@@ -1,6 +1,6 @@
 # Gate6-D / TASK-036-11 — SHA256 Integrity Verification
 
-Status: IMPLEMENTED SOURCE CANDIDATE (PR #72)
+Status: MERGED / SOURCE-COMPLETE (PR #72)
 
 ## Product scope
 
@@ -13,9 +13,11 @@ The product decision for the remaining historical 036 backlog is:
 - Advanced Auth (API Token / TOTP / Recovery Codes): DEFERRED, not part of 036 closure
 - Hardlink / Reflink capability expansion: DEFERRED, not part of 036 closure
 
-After this integrity-verification candidate passes CI and is merged, the 036
-feature track is source-complete. Production-verified closure still requires the
-normal exact-image / real-NAS acceptance boundary.
+PR #72 is merged. The 036 feature track is therefore source-complete at the
+repository level. Similarity and Notifications are not implicit next gates;
+Advanced Auth and Hardlink/Reflink remain deferred until separately re-scoped.
+Any future production-verified release closure still uses the normal exact-image /
+real-NAS acceptance boundary.
 
 ## Integrity semantics
 
