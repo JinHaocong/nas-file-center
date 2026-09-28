@@ -327,9 +327,8 @@ export const AdvancedDedupePage: React.FC = () => {
   ];
 
   return (
-    <div className="nfc-operations-page nfc-dedupe-stage-stack nfc-advanced-dedupe-page">
+    <div className="nfc-operations-page nfc-dedupe-stage-stack nfc-advanced-dedupe-page nfc-page-layout-workbench">
       <PageHeader
-        eyebrow="ADVANCED DEDUPE"
         title="高级精确去重"
         description={
           <div className="nfc-plan-header-meta">

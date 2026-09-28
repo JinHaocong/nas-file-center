@@ -109,6 +109,27 @@ describe('Right Workspace v2 design system', () => {
     assert.match(css, /\.nfc-batch-page \.nfc-batch-operation-grid[\s\S]*repeat\(3/);
   });
 
+  test('complex editors and detail pages use dedicated width contracts', () => {
+    const advanced = read('src/pages/Scans/AdvancedDedupePage.tsx');
+    const builder = read('src/pages/Workflows/WorkflowBuilder.tsx');
+    const scanDetail = read('src/pages/Scans/ScanDetail.tsx');
+    const planDetail = read('src/pages/Plans/PlanDetail.tsx');
+    const css = read('src/styles/v056-right-workspace-v2.css');
+
+    assert.match(advanced, /nfc-page-layout-workbench/);
+    assert.match(builder, /nfc-page-layout-workbench/);
+    assert.match(scanDetail, /nfc-page-layout-detail/);
+    assert.match(planDetail, /nfc-page-layout-detail/);
+    assert.doesNotMatch(advanced, /eyebrow="ADVANCED DEDUPE"/);
+    assert.doesNotMatch(builder, /eyebrow="WORKFLOW BUILDER"/);
+    assert.doesNotMatch(scanDetail, /eyebrow="SCAN SNAPSHOT"/);
+    assert.doesNotMatch(planDetail, /eyebrow="EXECUTION PLAN"/);
+
+    assert.match(css, /--nfc-w2-detail-max:\s*1880px/);
+    assert.match(css, /grid-template-columns:\s*minmax\(300px, 340px\) minmax\(0, 1fr\)/);
+    assert.match(css, /grid-template-columns:\s*minmax\(320px, 360px\) minmax\(0, 1fr\)/);
+  });
+
   test('glass treatment is constrained to utility and overlay surfaces', () => {
     const css = read('src/styles/v056-right-workspace-v2.css');
 

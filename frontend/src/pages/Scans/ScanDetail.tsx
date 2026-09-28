@@ -187,9 +187,8 @@ export const ScanDetailPage: React.FC = () => {
   const groupItems = groupsData?.items || [];
 
   return (
-    <div className="nfc-operations-page nfc-scan-detail-page">
+    <div className="nfc-operations-page nfc-scan-detail-page nfc-page-layout-detail">
       <PageHeader
-        eyebrow="SCAN SNAPSHOT"
         title={scan.name}
         description={
           <div className="nfc-plan-header-meta">
