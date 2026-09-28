@@ -149,6 +149,14 @@ def init_db(
             ]
             missing_quarantine_cols = [(col, ctype) for col, ctype in expected_new_cols if col not in current_quarantine_cols]
 
+        # Organizer Advanced Rules add a versioned JSON configuration while
+        # preserving legacy profiles as advanced_rules_json='{}'.
+        missing_organizer_cols: list[tuple[str, str]] = []
+        if "organizer_profiles" in existing_tables:
+            current_organizer_cols = {c["name"] for c in inspector.get_columns("organizer_profiles")}
+            if "advanced_rules_json" not in current_organizer_cols:
+                missing_organizer_cols.append(("advanced_rules_json", "TEXT DEFAULT '{}' NOT NULL"))
+
         # TASK-036-11 adds read-only SHA256 verification metadata to the
         # existing media_assets table. Existing databases must be upgraded
         # additively and backed up before ALTER TABLE.
@@ -178,6 +186,7 @@ def init_db(
                 or bool(missing_work_job_cols)
                 or bool(missing_dlp_cols)
                 or bool(missing_quarantine_cols)
+                or bool(missing_organizer_cols)
                 or bool(missing_media_cols)
             )
         )
@@ -203,6 +212,13 @@ def init_db(
             with engine.connect() as conn:
                 for col, ctype in missing_quarantine_cols:
                     conn.execute(text(f"ALTER TABLE quarantine_entries ADD COLUMN {col} {ctype}"))
+                conn.commit()
+
+        # Migrate Organizer Advanced Rules profile storage.
+        if missing_organizer_cols:
+            with engine.connect() as conn:
+                for col, ctype in missing_organizer_cols:
+                    conn.execute(text(f"ALTER TABLE organizer_profiles ADD COLUMN {col} {ctype}"))
                 conn.commit()
 
         # Migrate TASK-036-11 integrity verification columns.
