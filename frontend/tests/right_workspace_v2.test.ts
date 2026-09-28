@@ -42,6 +42,8 @@ describe('Right Workspace v2 design system', () => {
     assert.match(css, /\.nfc-page-eyebrow\s*\{[\s\S]*display:\s*none/);
     assert.match(css, /\.nfc-page-title[\s\S]*font-size:\s*clamp\(30px/);
     assert.match(css, /\.nfc-data-panel-body[\s\S]*border-radius:\s*var\(--nfc-w2-radius-md\)/);
+    assert.match(css, /\.nfc-metric-grid[\s\S]*grid-template-columns:\s*repeat\(4/);
+    assert.match(css, /\.nfc-metric-grid > \.nfc-metric-card[\s\S]*grid-column:\s*auto !important/);
     assert.match(css, /\.nfc-data-panel \.ant-table-tbody > tr > td[\s\S]*font-size:\s*12\.75px/);
     assert.match(css, /\.nfc-dashboard-page/);
     assert.match(css, /\.nfc-quarantine-page/);
