@@ -73,3 +73,53 @@ def test_strict_plan_lifecycle_draft_frozen_ready_execution(tmp_path: Path):
     plan_after = client.get(f"/api/plans/{plan_id}").json()
     assert plan_after["status"] == "completed"
     assert plan_after["items"][0]["state"] == "completed"
+
+
+def test_freeze_missing_source_returns_json_conflict(tmp_path: Path):
+    data = tmp_path / "data"
+    data.mkdir()
+    config = tmp_path / "config"
+    config.mkdir()
+
+    source = data / "disappears-before-freeze.txt"
+    source.write_text("sample content")
+
+    settings = Settings(
+        config_dir=config,
+        data_mount=data,
+        allowed_roots_raw=str(data),
+        allow_mutation=True,
+        allow_delete=False,
+        initial_admin_username="admin",
+        initial_admin_password="AdminPassword123!",
+    )
+    client = TestClient(create_app(settings))
+    client.headers.update({"Origin": "http://testserver"})
+    login = client.post(
+        "/api/auth/login",
+        json={"username": "admin", "password": "AdminPassword123!"},
+    )
+    assert login.status_code == 200
+
+    create_resp = client.post(
+        "/api/plans",
+        json={
+            "name": "Missing Source Freeze",
+            "kind": "touch",
+            "items": [{"operation": "touch", "source": str(source)}],
+        },
+    )
+    assert create_resp.status_code == 200
+    plan_id = create_resp.json()["id"]
+
+    source.unlink()
+
+    freeze_resp = client.post(f"/api/plans/{plan_id}/freeze")
+    assert freeze_resp.status_code == 409
+    payload = freeze_resp.json()
+    assert isinstance(payload["detail"], str)
+    assert "无法冻结" in payload["detail"]
+    assert str(source) in payload["detail"]
+
+    plan_after = client.get(f"/api/plans/{plan_id}").json()
+    assert plan_after["status"] == "draft"
