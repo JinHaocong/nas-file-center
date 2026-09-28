@@ -424,12 +424,18 @@ body,
 .nfc-metric-grid {
   margin-bottom: 26px;
   display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   overflow: visible;
   border: 0;
   border-radius: 0;
   background: transparent;
   box-shadow: none;
+}
+
+.nfc-metric-grid > .nfc-metric-card {
+  grid-column: auto !important;
+  grid-row: auto !important;
 }
 
 .nfc-metric-card {
@@ -1681,6 +1687,11 @@ body,
 }
 
 @media (max-width: 1199px) {
+  .nfc-app-main .nfc-dashboard-page .nfc-dashboard-command-deck .nfc-metric-grid,
+  .nfc-app-main .nfc-organizer-preview-page .nfc-metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .nfc-app-main .nfc-media-page .nfc-metric-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
