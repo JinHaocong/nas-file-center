@@ -40,7 +40,7 @@ describe('Right Workspace v2 design system', () => {
 
     assert.match(css, /--nfc-w2-control: 38px/);
     assert.match(css, /\.nfc-page-eyebrow\s*\{[\s\S]*display:\s*none/);
-    assert.match(css, /\.nfc-page-title[\s\S]*font-size:\s*clamp\(28px/);
+    assert.match(css, /\.nfc-page-title[\s\S]*font-size:\s*clamp\(27px/);
     assert.match(css, /\.nfc-data-panel-body[\s\S]*border-radius:\s*var\(--nfc-w2-radius-md\)/);
     assert.match(css, /\.nfc-metric-grid[\s\S]*grid-template-columns:\s*repeat\(4/);
     assert.match(css, /\.nfc-metric-grid > \.nfc-metric-card[\s\S]*grid-column:\s*auto !important/);
@@ -165,8 +165,8 @@ describe('Right Workspace v2 design system', () => {
       css,
       /@media \(max-width: 1199px\)[\s\S]*\.nfc-app-main \.nfc-page-header[\s\S]*flex-wrap:\s*wrap/
     );
-    assert.match(css, /@media \(max-width: 767px\)[\s\S]*\.nfc-app-main \.nfc-page-title[\s\S]*font-size:\s*25px/);
-    assert.match(css, /@media \(max-width: 420px\)[\s\S]*\.nfc-app-main \.nfc-page-title[\s\S]*font-size:\s*23px/);
+    assert.match(css, /@media \(max-width: 767px\)[\s\S]*\.nfc-app-main \.nfc-page-title[\s\S]*font-size:\s*24px/);
+    assert.match(css, /@media \(max-width: 420px\)[\s\S]*\.nfc-app-main \.nfc-page-title[\s\S]*font-size:\s*22px/);
     assert.match(
       css,
       /\.nfc-page-layout-ledger \.nfc-search-input[\s\S]*flex-basis:\s*100%/
@@ -183,7 +183,8 @@ describe('Right Workspace v2 design system', () => {
 
     assert.match(css, /--nfc-w2-panel-pad-x:\s*clamp\(18px, 1\.2vw, 24px\)/);
     assert.match(css, /--nfc-w2-panel-header-x:\s*18px/);
-    assert.match(css, /\.nfc-data-panel-header[\s\S]*margin:\s*0;[\s\S]*padding:\s*0 var\(--nfc-w2-panel-header-x\) var\(--nfc-w2-panel-header-bottom\)/);
+    assert.match(css, /--nfc-w2-panel-header-top:\s*15px/);
+    assert.match(css, /\.nfc-data-panel-header[\s\S]*margin:\s*0;[\s\S]*padding:\s*var\(--nfc-w2-panel-header-top\) var\(--nfc-w2-panel-header-x\) var\(--nfc-w2-panel-header-bottom\)/);
     assert.match(css, /\.nfc-data-panel-title[\s\S]*line-height:\s*1\.4/);
     assert.match(
       css,
@@ -262,6 +263,20 @@ describe('Right Workspace v2 design system', () => {
     );
     assert.match(css, /\.nfc-tool-workbench::after[\s\S]*content:\s*none !important/);
     assert.match(css, /@media \(max-width: 767px\)[\s\S]*\.nfc-app-main \.nfc-data-panel-header[\s\S]*padding:\s*0 14px 10px/);
+  });
+
+  test('global title system is visually calm and gives section headers real top inset', () => {
+    const css = read('src/styles/v056-right-workspace-v2.css');
+
+    assert.match(css, /\.nfc-app-main \.nfc-page-title[\s\S]*font-size:\s*clamp\(27px[\s\S]*font-weight:\s*620[\s\S]*line-height:\s*1\.18/);
+    assert.match(css, /\.nfc-app-main \.nfc-data-panel-title[\s\S]*font-size:\s*14px[\s\S]*font-weight:\s*620/);
+    assert.match(css, /\.nfc-app-main \.nfc-data-panel-title::before[\s\S]*content:\s*none !important/);
+    assert.match(css, /--nfc-w2-panel-header-top:\s*15px/);
+    assert.match(
+      css,
+      /\.nfc-page-layout-ledger > \.nfc-data-panel > \.nfc-data-panel-header[\s\S]*padding:\s*var\(--nfc-w2-panel-header-top\) var\(--nfc-w2-panel-header-x\) var\(--nfc-w2-panel-header-bottom\)/
+    );
+    assert.match(css, /@media \(max-width: 767px\)[\s\S]*\.nfc-app-main \.nfc-data-panel-header[\s\S]*padding:\s*13px 14px 11px/);
   });
 
   test('glass treatment is constrained to utility and overlay surfaces', () => {
