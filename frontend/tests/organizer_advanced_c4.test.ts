@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');
+const escapeRegex = (value: string) => value.replace(/[.*+?^\${}()|[\]\\]/g, '\\const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');');
 
 describe('Organizer Advanced Rules C4 frontend contract', () => {
   test('frontend types preserve the advanced profile and staged preview authority', () => {
@@ -21,7 +22,7 @@ describe('Organizer Advanced Rules C4 frontend contract', () => {
       'organizer_summary?: WorkflowOrganizerSummary',
       'expected_preview_digest?: string',
     ]) {
-      assert.match(workflowTypes, new RegExp(semantic.replace(/[.*+?^$()|[\\]\\\\]/g, '\\$&')));
+      assert.match(workflowTypes, new RegExp(escapeRegex(semantic)));
     }
 
     for (const semantic of [
@@ -33,7 +34,7 @@ describe('Organizer Advanced Rules C4 frontend contract', () => {
       'wrapper_candidates?: number',
       'advanced_changes?: number',
     ]) {
-      assert.match(rootTypes, new RegExp(semantic.replace(/[.*+?^$()|[\\]\\\\]/g, '\\$&')));
+      assert.match(rootTypes, new RegExp(escapeRegex(semantic)));
     }
   });
 
@@ -52,7 +53,7 @@ describe('Organizer Advanced Rules C4 frontend contract', () => {
       'MOVE → rmdir_empty',
       '<Collapse',
     ]) {
-      assert.match(source, new RegExp(semantic.replace(/[.*+?^$()|[\\]\\\\]/g, '\\$&')));
+      assert.match(source, new RegExp(escapeRegex(semantic)));
     }
     assert.doesNotMatch(source, /defaultActiveKey=/);
     assert.doesNotMatch(source, /execute now/i);
@@ -76,7 +77,7 @@ describe('Organizer Advanced Rules C4 frontend contract', () => {
       'proposal_type',
       'summary!.conflicts === 0',
     ]) {
-      assert.match(source, new RegExp(semantic.replace(/[.*+?^$()|[\\]\\\\]/g, '\\$&')));
+      assert.match(source, new RegExp(escapeRegex(semantic)));
     }
   });
 
@@ -93,7 +94,7 @@ describe('Organizer Advanced Rules C4 frontend contract', () => {
       'Stage B rename/file/prefix 计划已锁定',
       '必须重新 Preview',
     ]) {
-      assert.match(source, new RegExp(semantic.replace(/[.*+?^$()|[\\]\\\\]/g, '\\$&')));
+      assert.match(source, new RegExp(escapeRegex(semantic)));
     }
   });
 
@@ -120,7 +121,7 @@ describe('Organizer Advanced Rules C4 frontend contract', () => {
       "[data-theme='dark'] .nfc-organizer-advanced-collapse",
       '@media (max-width: 767px)',
     ]) {
-      assert.match(css, new RegExp(selector.replace(/[.*+?^$()|[\\]\\\\]/g, '\\$&')));
+      assert.match(css, new RegExp(escapeRegex(selector)));
     }
   });
 });
