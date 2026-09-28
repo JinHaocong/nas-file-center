@@ -99,6 +99,15 @@ body,
   max-width: var(--nfc-w2-content-max) !important;
 }
 
+.nfc-operations-page.nfc-page-layout-workbench,
+.nfc-operations-page.nfc-page-layout-ledger {
+  max-width: var(--nfc-w2-workspace-max) !important;
+}
+
+.nfc-operations-page.nfc-page-layout-focused {
+  max-width: var(--nfc-w2-focused-max) !important;
+}
+
 /* Utility bar -------------------------------------------------------------- */
 
 .nfc-header.nfc-header {
