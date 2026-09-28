@@ -45,6 +45,19 @@
   box-shadow: none;
 }
 
+.nfc-login-brand h1 {
+  font-size: 21px;
+  font-weight: 620;
+  line-height: 1.2;
+  letter-spacing: -0.014em;
+}
+
+.nfc-login-brand p {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.52;
+}
+
 .nfc-login-divider {
   margin-block: 20px;
   background: var(--nfc-v49-line, var(--nfc-border-soft));
