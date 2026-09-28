@@ -2258,6 +2258,72 @@ class FileCenterService:
                     item_updates[item_id] = bulk_update
                     continue
 
+            structural_meta = json.loads(it["metadata_json"] or "{}")
+            if structural_meta.get("utility_action") == "single_child_wrapper_collapse":
+                wrapper_path = structural_meta.get("wrapper_path")
+                child_path = structural_meta.get("child_path")
+                target_path = structural_meta.get("target_path")
+                candidate_id = structural_meta.get("candidate_id")
+                if not all(
+                    isinstance(value, str) and value.strip()
+                    for value in (wrapper_path, child_path, target_path, candidate_id)
+                ):
+                    raise StateConflictError(
+                        "STRUCTURAL_CANDIDATE_BINDING_MISSING: incomplete single-child wrapper metadata"
+                    )
+
+                wrapper_snap = capture_source_snapshot(
+                    wrapper_path,
+                    allowed_roots=self.settings.allowed_roots,
+                    quarantine_root=None,
+                )
+                expected_wrapper = (
+                    int(structural_meta.get("wrapper_device") or 0),
+                    int(structural_meta.get("wrapper_inode") or 0),
+                )
+                if (
+                    wrapper_snap["object_type"] != "directory"
+                    or expected_wrapper[0] <= 0
+                    or expected_wrapper[1] <= 0
+                    or (wrapper_snap["device"], wrapper_snap["inode"]) != expected_wrapper
+                ):
+                    raise StateConflictError(
+                        f"WRAPPER_IDENTITY_CHANGED: {wrapper_path} changed after Generate"
+                    )
+
+                if it["operation"] == "move":
+                    if os.path.normpath(it["source_path"]) != os.path.normpath(child_path):
+                        raise StateConflictError("STRUCTURAL_CHILD_BINDING_CHANGED: MOVE source does not match candidate")
+                    if not it["target_path"] or os.path.normpath(it["target_path"]) != os.path.normpath(target_path):
+                        raise StateConflictError("STRUCTURAL_TARGET_BINDING_CHANGED: MOVE target does not match candidate")
+                    child_snap = capture_source_snapshot(
+                        child_path,
+                        allowed_roots=self.settings.allowed_roots,
+                        quarantine_root=None,
+                    )
+                    expected_child = (
+                        int(structural_meta.get("child_device") or 0),
+                        int(structural_meta.get("child_inode") or 0),
+                    )
+                    if (
+                        child_snap["object_type"] != "directory"
+                        or structural_meta.get("child_object_type") != "directory"
+                        or expected_child[0] <= 0
+                        or expected_child[1] <= 0
+                        or (child_snap["device"], child_snap["inode"]) != expected_child
+                    ):
+                        raise StateConflictError(
+                            f"WRAPPER_CHILD_IDENTITY_CHANGED: {child_path} changed after Generate"
+                        )
+                    if os.path.lexists(target_path):
+                        raise StateConflictError(
+                            f"WRAPPER_TARGET_EXISTS: structural target appeared before Freeze: {target_path}"
+                        )
+
+                if it["operation"] == "rmdir_empty":
+                    if os.path.normpath(it["source_path"]) != os.path.normpath(wrapper_path):
+                        raise StateConflictError("STRUCTURAL_WRAPPER_BINDING_CHANGED: rmdir source does not match candidate")
+
             if it["operation"] == "rmdir_empty":
                 if self.settings.quarantine_root and is_reserved_quarantine_path(src_p, self.settings.quarantine_root):
                     raise ValueError(f"Source path is in reserved quarantine storage: {src_p}")
