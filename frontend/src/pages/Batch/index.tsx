@@ -88,9 +88,8 @@ export const BatchPage: React.FC = () => {
   };
 
   return (
-    <div className="nfc-operations-page nfc-batch-page">
+    <div className="nfc-operations-page nfc-batch-page nfc-page-layout-workbench">
       <PageHeader
-        eyebrow="Batch operations"
         title="批量文件处理"
         description="批量隔离、Touch、Move 与 Rename 统一先创建 Plan；真正文件操作仍通过 Freeze → Validate → Execute。"
       />
@@ -101,6 +100,7 @@ export const BatchPage: React.FC = () => {
         className="nfc-complex-form-panel nfc-file-tool-form nfc-tool-workbench"
       >
         <Form
+          className="nfc-batch-form"
           form={form}
           layout="vertical"
           initialValues={{ operation: 'quarantine', name: '批量处理' }}

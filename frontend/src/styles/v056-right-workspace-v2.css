@@ -1501,19 +1501,66 @@ body,
 }
 
 /* File tools + Organizer */
+.nfc-app-main .nfc-page-layout-workbench {
+  min-width: 0;
+}
+
+.nfc-app-main .nfc-page-layout-workbench > .nfc-data-panel,
+.nfc-app-main .nfc-page-layout-workbench .nfc-file-tool-result-panel {
+  width: 100%;
+}
+
 .nfc-app-main .nfc-rename-page .nfc-data-panel-body,
 .nfc-app-main .nfc-batch-page .nfc-data-panel-body,
 .nfc-app-main .nfc-path-match-page .nfc-data-panel-body {
-  padding: 20px 22px;
+  padding: 24px 26px;
 }
 
-.nfc-app-main .nfc-file-tool-result-panel .nfc-data-panel-body {
+.nfc-app-main .nfc-page-layout-workbench .nfc-file-tool-result-panel .nfc-data-panel-body {
   padding: 0;
+}
+
+.nfc-app-main .nfc-page-layout-workbench .nfc-form-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px 24px;
+}
+
+.nfc-app-main .nfc-page-layout-workbench .nfc-file-tool-primary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+}
+
+.nfc-app-main .nfc-batch-page .nfc-batch-operation-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.nfc-app-main .nfc-batch-page .nfc-batch-operation-grid .ant-radio-button-wrapper {
+  min-height: 64px;
+  padding: 10px 12px;
 }
 
 .nfc-app-main .nfc-organizer-page .nfc-data-panel-body,
 .nfc-app-main .nfc-organizer-preview-page .nfc-data-panel-body {
   border-radius: var(--nfc-w2-radius-md);
+}
+
+.nfc-app-main .nfc-organizer-preview-page > .nfc-complex-form-panel .nfc-data-panel-body {
+  padding: 22px 24px;
+}
+
+.nfc-app-main .nfc-organizer-preview-page .nfc-organizer-metric-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.nfc-app-main .nfc-organizer-page .nfc-organizer-profile-toolbar,
+.nfc-app-main .nfc-organizer-preview-page .nfc-organizer-preview-filter {
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 /* Dense destructive / safety messaging */
@@ -1555,6 +1602,16 @@ body,
   .nfc-app-main .nfc-batch-page .nfc-data-panel-body,
   .nfc-app-main .nfc-path-match-page .nfc-data-panel-body {
     padding: 14px;
+  }
+
+  .nfc-app-main .nfc-page-layout-workbench .nfc-form-grid {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .nfc-app-main .nfc-batch-page .nfc-batch-operation-grid,
+  .nfc-app-main .nfc-organizer-preview-page .nfc-organizer-metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .nfc-app-main .nfc-system-controls-page .nfc-settings-subpanel-danger {

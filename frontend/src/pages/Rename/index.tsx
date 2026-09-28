@@ -150,9 +150,8 @@ export const RenamePage: React.FC = () => {
   ];
 
   return (
-    <div className="nfc-operations-page nfc-rename-page">
+    <div className="nfc-operations-page nfc-rename-page nfc-page-layout-workbench">
       <PageHeader
-        eyebrow="Rename workspace"
         title="批量重命名"
         description="组合正则、扩展名替换、前后缀、父目录名与编号规则；必须先 Preview，并在无冲突时生成 Rename Plan。"
       />
@@ -163,6 +162,7 @@ export const RenamePage: React.FC = () => {
         className="nfc-complex-form-panel nfc-file-tool-form nfc-tool-workbench"
       >
         <Form
+          className="nfc-rename-form"
           form={form}
           layout="vertical"
           initialValues={{ number_width: 3, include_parent: false }}

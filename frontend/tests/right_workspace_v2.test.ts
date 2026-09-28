@@ -87,6 +87,28 @@ describe('Right Workspace v2 design system', () => {
     assert.match(css, /\.nfc-page-layout-ledger \.nfc-search-input[\s\S]*max-width:\s*560px/);
   });
 
+  test('file tools and organizer use the workbench width contract', () => {
+    const workbenchFiles = [
+      'src/pages/PathMatch/index.tsx',
+      'src/pages/Rename/index.tsx',
+      'src/pages/Batch/index.tsx',
+      'src/pages/Organizer/index.tsx',
+      'src/pages/Organizer/ProfilePreview.tsx',
+    ];
+
+    for (const path of workbenchFiles) {
+      assert.match(read(path), /nfc-page-layout-workbench/);
+    }
+
+    assert.doesNotMatch(read('src/pages/Rename/index.tsx'), /eyebrow="Rename workspace"/);
+    assert.doesNotMatch(read('src/pages/Batch/index.tsx'), /eyebrow="Batch operations"/);
+    assert.doesNotMatch(read('src/pages/Organizer/index.tsx'), /eyebrow="Organizer profiles"/);
+
+    const css = read('src/styles/v056-right-workspace-v2.css');
+    assert.match(css, /\.nfc-page-layout-workbench \.nfc-form-grid[\s\S]*repeat\(2/);
+    assert.match(css, /\.nfc-batch-page \.nfc-batch-operation-grid[\s\S]*repeat\(3/);
+  });
+
   test('glass treatment is constrained to utility and overlay surfaces', () => {
     const css = read('src/styles/v056-right-workspace-v2.css');
 
