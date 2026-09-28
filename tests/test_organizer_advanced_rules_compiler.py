@@ -265,7 +265,7 @@ def test_workflow_organizer_uses_shared_advanced_preview_compiler(tmp_path: Path
                             "name": "advanced-workflow",
                             "recursive": True,
                             "rename_template": "{name}",
-                            "statistics_template": "",
+                            "statistics_template": "[{files}F]",
                             "advanced_rules": _advanced_rules(
                                 file_numbering={"enabled": True}
                             ),
