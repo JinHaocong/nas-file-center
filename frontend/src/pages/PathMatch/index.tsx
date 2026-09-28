@@ -132,9 +132,8 @@ export const PathMatchPage: React.FC = () => {
   ];
 
   return (
-    <div className="nfc-operations-page nfc-path-match-page">
+    <div className="nfc-operations-page nfc-path-match-page nfc-page-layout-workbench">
       <PageHeader
-        eyebrow="Path matching"
         title="跨目录路径匹配"
         description="按相对路径、basename、stem 或正则归一化跨根目录匹配；Preview 只读，生成 Plan 后仍需完整生命周期校验。"
       />
@@ -145,6 +144,7 @@ export const PathMatchPage: React.FC = () => {
         className="nfc-complex-form-panel nfc-file-tool-form nfc-tool-workbench"
       >
         <Form
+          className="nfc-path-match-form"
           form={form}
           layout="vertical"
           initialValues={{ mode: 'relative-path', normalize_replacement: '' }}
