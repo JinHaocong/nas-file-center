@@ -172,6 +172,10 @@ from app.organizers.advanced_rules import advanced_rules_enabled, normalize_adva
 from app.organizers.compiler import compile_organizer_preview
 from app.organizers.engine import generate_organizer_proposals
 from app.organizers.planner import plan_organizer_operations
+from app.organizers.structural import (
+    STRUCTURAL_ACTION as ORGANIZER_STRUCTURAL_ACTION,
+    compile_organizer_structural_stage,
+)
 from app.organizers.profile_validation import (
     normalize_preserve_tags,
     validate_and_normalize_image_extensions,
@@ -4110,6 +4114,96 @@ class FileCenterService:
             write_session.refresh(plan)
             return plan
 
+    def _persist_organizer_advanced_structural_plan(
+        self,
+        *,
+        profile: OrganizerProfile,
+        safe_root: Path,
+        compilation,
+        structural,
+    ) -> BatchPlan:
+        plan_kind = f"organizer-advanced-structural-{profile.slug or profile.id}"
+        plan_name = f"整理结构计划 - {profile.name}"
+        plan_metadata = {
+            "source": "organizer",
+            "is_organizer": True,
+            "organizer_advanced": True,
+            "organizer_stage": "structural",
+            "organizer_structural_action": ORGANIZER_STRUCTURAL_ACTION,
+            "organizer_profile_id": profile.id,
+            "organizer_profile_name": profile.name,
+            "root": str(safe_root),
+            "advanced_rules_version": 1,
+            "advanced_rules": compilation.advanced_rules,
+            "config_digest": compilation.config_digest,
+            "source_snapshot_digest": compilation.source_snapshot_digest,
+            "preview_digest": compilation.preview_digest,
+            "structural_digest": structural.structural_digest,
+            "structural_candidates": list(structural.candidate_rows),
+        }
+
+        with self.SessionLocal() as write_session:
+            plan = BatchPlan(
+                name=plan_name,
+                kind=plan_kind,
+                status="draft",
+                expected_changes=len(structural.operations),
+                expected_reclaim_bytes=0,
+                metadata_json=json.dumps(plan_metadata, ensure_ascii=False, sort_keys=True),
+            )
+            write_session.add(plan)
+            write_session.flush()
+
+            for raw in structural.operations:
+                source = require_unreserved_path(
+                    require_allowed_path(raw["source"], self.settings.allowed_roots),
+                    self.settings.quarantine_root,
+                )
+                raw_target = raw.get("target")
+                target = (
+                    str(
+                        validate_mutation_destination(
+                            raw_target,
+                            self.settings.allowed_roots,
+                            quarantine_root=self.settings.quarantine_root,
+                        )
+                    )
+                    if raw_target
+                    else None
+                )
+                item_metadata = {
+                    key: value
+                    for key, value in raw.items()
+                    if key not in {"source", "target", "operation", "sequence"}
+                }
+                item_metadata.update({
+                    "organizer_advanced": True,
+                    "organizer_stage": "structural",
+                    "organizer_structural_action": ORGANIZER_STRUCTURAL_ACTION,
+                    "preview_only": False,
+                })
+                write_session.add(
+                    BatchPlanItem(
+                        plan_id=plan.id,
+                        sequence=int(raw["sequence"]),
+                        operation=raw["operation"],
+                        source_path=str(source),
+                        target_path=target,
+                        keep_path=None,
+                        expected_size=0,
+                        expected_mtime_ns=0,
+                        expected_device=0,
+                        expected_inode=0,
+                        expected_hash=None,
+                        state="planned",
+                        metadata_json=json.dumps(item_metadata, ensure_ascii=False, sort_keys=True),
+                    )
+                )
+
+            write_session.commit()
+            write_session.refresh(plan)
+            return plan
+
     def create_organizer_plan(
         self,
         profile_id: int,
@@ -4181,9 +4275,23 @@ class FileCenterService:
                     )
 
                 if compilation.structural_required:
-                    raise ValueError(
-                        "当前 Preview 包含 Single-Child Wrapper Collapse；"
-                        "必须先完成 Stage A 结构计划并重新 Preview，才能生成 Stage B 重命名计划"
+                    structural = compile_organizer_structural_stage(
+                        safe_root,
+                        proposals=compilation.proposals,
+                        allowed_roots=self.settings.allowed_roots,
+                        quarantine_root=self.settings.quarantine_root,
+                        preview_digest=compilation.preview_digest,
+                        source_snapshot_digest=compilation.source_snapshot_digest,
+                    )
+                    if not structural.operations:
+                        raise ValueError(
+                            "Organizer Stage A 没有可执行的结构操作；请重新 Preview"
+                        )
+                    return self._persist_organizer_advanced_structural_plan(
+                        profile=profile,
+                        safe_root=safe_root,
+                        compilation=compilation,
+                        structural=structural,
                     )
 
                 if compilation.summary.get("conflicts", 0) > 0:
