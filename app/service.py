@@ -2305,9 +2305,20 @@ class FileCenterService:
                         int(structural_meta.get("child_device") or 0),
                         int(structural_meta.get("child_inode") or 0),
                     )
+                    expected_child_type = structural_meta.get("child_object_type")
+                    if expected_child_type not in {"file", "directory"}:
+                        raise StateConflictError(
+                            "STRUCTURAL_CHILD_TYPE_MISSING: candidate child type is invalid"
+                        )
                     if (
-                        child_snap["object_type"] != "directory"
-                        or structural_meta.get("child_object_type") != "directory"
+                        structural_meta.get("organizer_structural") is True
+                        and expected_child_type != "directory"
+                    ):
+                        raise StateConflictError(
+                            "ORGANIZER_STRUCTURAL_CHILD_TYPE_CHANGED: Organizer wrapper child must be a directory"
+                        )
+                    if (
+                        child_snap["object_type"] != expected_child_type
                         or expected_child[0] <= 0
                         or expected_child[1] <= 0
                         or (child_snap["device"], child_snap["inode"]) != expected_child
