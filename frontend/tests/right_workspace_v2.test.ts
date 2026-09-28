@@ -186,7 +186,7 @@ describe('Right Workspace v2 design system', () => {
     assert.match(css, /\.nfc-rename-page \.nfc-data-panel-body,[\s\S]*padding:\s*26px 28px/);
     assert.doesNotMatch(toolsCss, /margin:\s*-20px -22px 18px/);
     assert.doesNotMatch(toolsCss, /margin:\s*-16px -12px 15px/);
-    assert.match(toolsCss, /\.nfc-rename-page \.nfc-tool-workbench > \.nfc-data-panel-header[\s\S]*margin:\s*0 0 14px/);
+    assert.match(toolsCss, /\.nfc-rename-page \.nfc-tool-workbench > \.nfc-data-panel-header[\s\S]*margin:\s*0;[\s\S]*padding:\s*0 4px 14px/);
   });
 
   test('glass treatment is constrained to utility and overlay surfaces', () => {
