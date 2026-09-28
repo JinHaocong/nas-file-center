@@ -634,23 +634,115 @@ def compile_organizer_preview(
     )
 
     if is_advanced:
-        preview_operations = tuple(
-            {
-                "sequence": index,
-                "operation": (
-                    "move" if proposal.proposal_type == "wrapper_collapse" else "rename"
-                ),
-                "source": proposal.source,
-                "target": proposal.target,
-                "changed": proposal.changed,
-                "conflict": proposal.conflict,
-                "proposal_type": proposal.proposal_type,
-                "preview_only": True,
-                **proposal.metadata,
-            }
-            for index, proposal in enumerate(proposals, start=1)
-            if proposal.changed or proposal.conflict
+        rename_proposals = [
+            proposal
+            for proposal in proposals
+            if proposal.proposal_type != "wrapper_collapse"
+        ]
+        ordered_renames, cycle_sources = plan_organizer_operations(
+            rename_proposals,
+            include_touch=False,
+            mtime_mode=mtime_mode,
         )
+        if cycle_sources:
+            raise ValueError(
+                f"Detected rename cycle in Advanced Organizer Preview: {sorted(cycle_sources)}"
+            )
+
+        proposal_by_source = {proposal.source: proposal for proposal in rename_proposals}
+        operation_rows: list[dict[str, Any]] = []
+        sequence = 1
+
+        for item in ordered_renames:
+            proposal = proposal_by_source.get(item["source"])
+            if proposal is None:
+                continue
+            operation_rows.append(
+                {
+                    "sequence": sequence,
+                    "operation": "rename",
+                    "source": item["source"],
+                    "target": item["target"],
+                    "changed": True,
+                    "conflict": False,
+                    "proposal_type": proposal.proposal_type,
+                    "object_type": proposal.object_type,
+                    "preview_only": True,
+                    **proposal.metadata,
+                }
+            )
+            sequence += 1
+
+        if mtime_mode == "ordered":
+            directory_proposals = [
+                proposal
+                for proposal in rename_proposals
+                if proposal.object_type == "directory"
+            ]
+            touch_plan, touch_cycles = plan_organizer_operations(
+                directory_proposals,
+                include_touch=True,
+                mtime_mode=mtime_mode,
+            )
+            if touch_cycles:
+                raise ValueError(
+                    f"Detected touch ordering cycle in Advanced Organizer Preview: {sorted(touch_cycles)}"
+                )
+            for item in touch_plan:
+                if item.get("operation") != "touch":
+                    continue
+                operation_rows.append(
+                    {
+                        "sequence": sequence,
+                        "operation": "touch",
+                        "source": item["source"],
+                        "target": None,
+                        "changed": True,
+                        "conflict": False,
+                        "proposal_type": "touch",
+                        "object_type": "directory",
+                        "preview_only": True,
+                    }
+                )
+                sequence += 1
+
+        for proposal in proposals:
+            if proposal.proposal_type == "wrapper_collapse" and (proposal.changed or proposal.conflict):
+                operation_rows.append(
+                    {
+                        "sequence": sequence,
+                        "operation": "move",
+                        "source": proposal.source,
+                        "target": proposal.target,
+                        "changed": proposal.changed,
+                        "conflict": proposal.conflict,
+                        "conflict_reason": proposal.conflict_reason,
+                        "proposal_type": proposal.proposal_type,
+                        "object_type": proposal.object_type,
+                        "preview_only": True,
+                        **proposal.metadata,
+                    }
+                )
+                sequence += 1
+            elif proposal.conflict and proposal.proposal_type != "wrapper_collapse":
+                operation_rows.append(
+                    {
+                        "sequence": sequence,
+                        "operation": "conflict",
+                        "source": proposal.source,
+                        "target": proposal.target,
+                        "changed": False,
+                        "conflict": True,
+                        "conflict_reason": proposal.conflict_reason,
+                        "proposal_type": proposal.proposal_type,
+                        "object_type": proposal.object_type,
+                        "preview_only": True,
+                        **proposal.metadata,
+                    }
+                )
+                sequence += 1
+
+        preview_operations = tuple(operation_rows)
     else:
         legacy_plan_items, cycle_sources = plan_organizer_operations(
             directory_proposals,
