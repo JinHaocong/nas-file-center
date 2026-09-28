@@ -147,6 +147,9 @@ from app.batch_utilities.errors import (
 )
 
 
+from app.batch_utilities.single_child_wrapper import matches_single_child_wrapper_candidate_id
+
+
 PLAN_SINGLE_DELETE_ALLOWED = {
     "draft",
     "frozen",
@@ -172,6 +175,10 @@ from app.organizers.advanced_rules import advanced_rules_enabled, normalize_adva
 from app.organizers.compiler import compile_organizer_preview
 from app.organizers.engine import generate_organizer_proposals
 from app.organizers.planner import plan_organizer_operations
+from app.organizers.structural import (
+    STRUCTURAL_ACTION as ORGANIZER_STRUCTURAL_ACTION,
+    compile_organizer_structural_stage,
+)
 from app.organizers.profile_validation import (
     normalize_preserve_tags,
     validate_and_normalize_image_extensions,
@@ -1633,6 +1640,78 @@ class FileCenterService:
                         item_validations[row.id] = ("validated", bulk_reason, None)
                     continue
 
+            if row.operation == "move":
+                try:
+                    structural_meta = json.loads(row.metadata_json or "{}")
+                except Exception:
+                    structural_meta = {}
+                if (
+                    isinstance(structural_meta, dict)
+                    and structural_meta.get("utility_action") == "single_child_wrapper_collapse"
+                    and structural_meta.get("organizer_structural") is True
+                ):
+                    candidate_id = structural_meta.get("candidate_id")
+                    wrapper_path = structural_meta.get("wrapper_path")
+                    child_path = structural_meta.get("child_path")
+                    target_path = structural_meta.get("target_path")
+                    binding_ok = all(
+                        isinstance(value, str) and value.strip()
+                        for value in (candidate_id, wrapper_path, child_path, target_path)
+                    )
+                    if binding_ok:
+                        try:
+                            binding_ok = matches_single_child_wrapper_candidate_id(
+                                candidate_id=candidate_id,
+                                wrapper_path=wrapper_path,
+                                wrapper_device=int(structural_meta.get("wrapper_device") or 0),
+                                wrapper_inode=int(structural_meta.get("wrapper_inode") or 0),
+                                child_path=child_path,
+                                child_device=int(structural_meta.get("child_device") or 0),
+                                child_inode=int(structural_meta.get("child_inode") or 0),
+                                child_object_type=structural_meta.get("child_object_type"),
+                                target_path=target_path,
+                                capability_reason=structural_meta.get("capability_reason"),
+                            )
+                        except (TypeError, ValueError):
+                            binding_ok = False
+                    if not binding_ok:
+                        detail = StaleItemDetail(
+                            item_id=row.id,
+                            source_path=row.source_path,
+                            reason="candidate_digest_mismatch",
+                            expected={"candidate_id": candidate_id},
+                            actual=None,
+                        )
+                        stale_items.append(detail)
+                        item_validations[row.id] = ("stale", detail.reason, None)
+                        continue
+
+                    from app.execution.utility_wrapper_pair import open_utility_wrapper_live_guard
+
+                    try:
+                        with open_utility_wrapper_live_guard(
+                            wrapper_path=wrapper_path,
+                            child_path=child_path,
+                            allowed_roots=self.settings.allowed_roots,
+                            quarantine_root=self.settings.quarantine_root,
+                        ):
+                            pass
+                    except Exception:
+                        detail = StaleItemDetail(
+                            item_id=row.id,
+                            source_path=row.source_path,
+                            reason="wrapper_shape_changed",
+                            expected={
+                                "wrapper_path": wrapper_path,
+                                "child_path": child_path,
+                                "candidate_id": candidate_id,
+                            },
+                            actual=None,
+                        )
+                        stale_items.append(detail)
+                        item_validations[row.id] = ("stale", detail.reason, None)
+                        continue
+
             if row.operation == "restore":
                 meta = json.loads(row.metadata_json or "{}")
                 qid = meta.get("quarantine_entry_id") or meta.get("undo", {}).get("quarantine_entry_id")
@@ -2253,6 +2332,120 @@ class FileCenterService:
                 if bulk_update is not None:
                     item_updates[item_id] = bulk_update
                     continue
+
+            structural_meta = json.loads(it["metadata_json"] or "{}")
+            if structural_meta.get("utility_action") == "single_child_wrapper_collapse":
+                wrapper_path = structural_meta.get("wrapper_path")
+                child_path = structural_meta.get("child_path")
+                target_path = structural_meta.get("target_path")
+                candidate_id = structural_meta.get("candidate_id")
+                if not all(
+                    isinstance(value, str) and value.strip()
+                    for value in (wrapper_path, child_path, target_path, candidate_id)
+                ):
+                    raise StateConflictError(
+                        "STRUCTURAL_CANDIDATE_BINDING_MISSING: incomplete single-child wrapper metadata"
+                    )
+
+                try:
+                    wrapper_device = int(structural_meta.get("wrapper_device") or 0)
+                    wrapper_inode = int(structural_meta.get("wrapper_inode") or 0)
+                    child_device = int(structural_meta.get("child_device") or 0)
+                    child_inode = int(structural_meta.get("child_inode") or 0)
+                except (TypeError, ValueError) as exc:
+                    raise StateConflictError(
+                        "STRUCTURAL_CANDIDATE_BINDING_MISSING: invalid single-child wrapper identity metadata"
+                    ) from exc
+
+                is_organizer_structural = structural_meta.get("organizer_structural") is True
+                if is_organizer_structural and not matches_single_child_wrapper_candidate_id(
+                    candidate_id=candidate_id,
+                    wrapper_path=wrapper_path,
+                    wrapper_device=wrapper_device,
+                    wrapper_inode=wrapper_inode,
+                    child_path=child_path,
+                    child_device=child_device,
+                    child_inode=child_inode,
+                    child_object_type=structural_meta.get("child_object_type"),
+                    target_path=target_path,
+                    capability_reason=structural_meta.get("capability_reason"),
+                ):
+                    raise StateConflictError(
+                        "STRUCTURAL_CANDIDATE_DIGEST_MISMATCH: single-child wrapper candidate facts do not match candidate_id"
+                    )
+
+                if is_organizer_structural and it["operation"] == "move":
+                    from app.execution.utility_wrapper_pair import open_utility_wrapper_live_guard
+
+                    try:
+                        with open_utility_wrapper_live_guard(
+                            wrapper_path=wrapper_path,
+                            child_path=child_path,
+                            allowed_roots=self.settings.allowed_roots,
+                            quarantine_root=self.settings.quarantine_root,
+                        ):
+                            pass
+                    except Exception as exc:
+                        raise StateConflictError(
+                            "WRAPPER_SHAPE_CHANGED: wrapper no longer contains exactly the bound child"
+                        ) from exc
+
+                wrapper_snap = capture_source_snapshot(
+                    wrapper_path,
+                    allowed_roots=self.settings.allowed_roots,
+                    quarantine_root=None,
+                )
+                expected_wrapper = (wrapper_device, wrapper_inode)
+                if (
+                    wrapper_snap["object_type"] != "directory"
+                    or expected_wrapper[0] <= 0
+                    or expected_wrapper[1] <= 0
+                    or (wrapper_snap["device"], wrapper_snap["inode"]) != expected_wrapper
+                ):
+                    raise StateConflictError(
+                        f"WRAPPER_IDENTITY_CHANGED: {wrapper_path} changed after Generate"
+                    )
+
+                if it["operation"] == "move":
+                    if os.path.normpath(it["source_path"]) != os.path.normpath(child_path):
+                        raise StateConflictError("STRUCTURAL_CHILD_BINDING_CHANGED: MOVE source does not match candidate")
+                    if not it["target_path"] or os.path.normpath(it["target_path"]) != os.path.normpath(target_path):
+                        raise StateConflictError("STRUCTURAL_TARGET_BINDING_CHANGED: MOVE target does not match candidate")
+                    child_snap = capture_source_snapshot(
+                        child_path,
+                        allowed_roots=self.settings.allowed_roots,
+                        quarantine_root=None,
+                    )
+                    expected_child = (child_device, child_inode)
+                    expected_child_type = structural_meta.get("child_object_type")
+                    if expected_child_type not in {"file", "directory"}:
+                        raise StateConflictError(
+                            "STRUCTURAL_CHILD_TYPE_MISSING: candidate child type is invalid"
+                        )
+                    if (
+                        structural_meta.get("organizer_structural") is True
+                        and expected_child_type != "directory"
+                    ):
+                        raise StateConflictError(
+                            "ORGANIZER_STRUCTURAL_CHILD_TYPE_CHANGED: Organizer wrapper child must be a directory"
+                        )
+                    if (
+                        child_snap["object_type"] != expected_child_type
+                        or expected_child[0] <= 0
+                        or expected_child[1] <= 0
+                        or (child_snap["device"], child_snap["inode"]) != expected_child
+                    ):
+                        raise StateConflictError(
+                            f"WRAPPER_CHILD_IDENTITY_CHANGED: {child_path} changed after Generate"
+                        )
+                    if os.path.lexists(target_path):
+                        raise StateConflictError(
+                            f"WRAPPER_TARGET_EXISTS: structural target appeared before Freeze: {target_path}"
+                        )
+
+                if it["operation"] == "rmdir_empty":
+                    if os.path.normpath(it["source_path"]) != os.path.normpath(wrapper_path):
+                        raise StateConflictError("STRUCTURAL_WRAPPER_BINDING_CHANGED: rmdir source does not match candidate")
 
             if it["operation"] == "rmdir_empty":
                 if self.settings.quarantine_root and is_reserved_quarantine_path(src_p, self.settings.quarantine_root):
@@ -4110,6 +4303,96 @@ class FileCenterService:
             write_session.refresh(plan)
             return plan
 
+    def _persist_organizer_advanced_structural_plan(
+        self,
+        *,
+        profile: OrganizerProfile,
+        safe_root: Path,
+        compilation,
+        structural,
+    ) -> BatchPlan:
+        plan_kind = f"organizer-advanced-structural-{profile.slug or profile.id}"
+        plan_name = f"整理结构计划 - {profile.name}"
+        plan_metadata = {
+            "source": "organizer",
+            "is_organizer": True,
+            "organizer_advanced": True,
+            "organizer_stage": "structural",
+            "organizer_structural_action": ORGANIZER_STRUCTURAL_ACTION,
+            "organizer_profile_id": profile.id,
+            "organizer_profile_name": profile.name,
+            "root": str(safe_root),
+            "advanced_rules_version": 1,
+            "advanced_rules": compilation.advanced_rules,
+            "config_digest": compilation.config_digest,
+            "source_snapshot_digest": compilation.source_snapshot_digest,
+            "preview_digest": compilation.preview_digest,
+            "structural_digest": structural.structural_digest,
+            "structural_candidates": list(structural.candidate_rows),
+        }
+
+        with self.SessionLocal() as write_session:
+            plan = BatchPlan(
+                name=plan_name,
+                kind=plan_kind,
+                status="draft",
+                expected_changes=len(structural.operations),
+                expected_reclaim_bytes=0,
+                metadata_json=json.dumps(plan_metadata, ensure_ascii=False, sort_keys=True),
+            )
+            write_session.add(plan)
+            write_session.flush()
+
+            for raw in structural.operations:
+                source = require_unreserved_path(
+                    require_allowed_path(raw["source"], self.settings.allowed_roots),
+                    self.settings.quarantine_root,
+                )
+                raw_target = raw.get("target")
+                target = (
+                    str(
+                        validate_mutation_destination(
+                            raw_target,
+                            self.settings.allowed_roots,
+                            quarantine_root=self.settings.quarantine_root,
+                        )
+                    )
+                    if raw_target
+                    else None
+                )
+                item_metadata = {
+                    key: value
+                    for key, value in raw.items()
+                    if key not in {"source", "target", "operation", "sequence"}
+                }
+                item_metadata.update({
+                    "organizer_advanced": True,
+                    "organizer_stage": "structural",
+                    "organizer_structural_action": ORGANIZER_STRUCTURAL_ACTION,
+                    "preview_only": False,
+                })
+                write_session.add(
+                    BatchPlanItem(
+                        plan_id=plan.id,
+                        sequence=int(raw["sequence"]),
+                        operation=raw["operation"],
+                        source_path=str(source),
+                        target_path=target,
+                        keep_path=None,
+                        expected_size=0,
+                        expected_mtime_ns=0,
+                        expected_device=0,
+                        expected_inode=0,
+                        expected_hash=None,
+                        state="planned",
+                        metadata_json=json.dumps(item_metadata, ensure_ascii=False, sort_keys=True),
+                    )
+                )
+
+            write_session.commit()
+            write_session.refresh(plan)
+            return plan
+
     def create_organizer_plan(
         self,
         profile_id: int,
@@ -4180,12 +4463,6 @@ class FileCenterService:
                         "Organizer Preview 已变化，禁止生成计划；请重新 Preview 后再试"
                     )
 
-                if compilation.structural_required:
-                    raise ValueError(
-                        "当前 Preview 包含 Single-Child Wrapper Collapse；"
-                        "必须先完成 Stage A 结构计划并重新 Preview，才能生成 Stage B 重命名计划"
-                    )
-
                 if compilation.summary.get("conflicts", 0) > 0:
                     conflict_reasons = [
                         proposal.conflict_reason
@@ -4195,6 +4472,26 @@ class FileCenterService:
                     raise ValueError(
                         f"存在 {compilation.summary['conflicts']} 个冲突项，禁止生成计划: "
                         f"{'; '.join(conflict_reasons[:3])}"
+                    )
+
+                if compilation.structural_required:
+                    structural = compile_organizer_structural_stage(
+                        safe_root,
+                        proposals=compilation.proposals,
+                        allowed_roots=self.settings.allowed_roots,
+                        quarantine_root=self.settings.quarantine_root,
+                        preview_digest=compilation.preview_digest,
+                        source_snapshot_digest=compilation.source_snapshot_digest,
+                    )
+                    if not structural.operations:
+                        raise ValueError(
+                            "Organizer Stage A 没有可执行的结构操作；请重新 Preview"
+                        )
+                    return self._persist_organizer_advanced_structural_plan(
+                        profile=profile,
+                        safe_root=safe_root,
+                        compilation=compilation,
+                        structural=structural,
                     )
 
                 rename_proposals = [

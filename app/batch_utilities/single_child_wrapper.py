@@ -70,6 +70,36 @@ def _candidate_id(
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
+def matches_single_child_wrapper_candidate_id(
+    *,
+    candidate_id: str,
+    wrapper_path: str,
+    wrapper_device: int,
+    wrapper_inode: int,
+    child_path: str | None,
+    child_device: int | None,
+    child_inode: int | None,
+    child_object_type: str | None,
+    target_path: str | None,
+    capability_reason: str | None,
+) -> bool:
+    """Recompute the Gate6-B candidate digest from its frozen identity facts."""
+
+    if not isinstance(candidate_id, str) or not candidate_id.strip():
+        return False
+    return candidate_id == _candidate_id(
+        wrapper_path=wrapper_path,
+        wrapper_device=wrapper_device,
+        wrapper_inode=wrapper_inode,
+        child_path=child_path,
+        child_device=child_device,
+        child_inode=child_inode,
+        child_object_type=child_object_type,
+        target_path=target_path,
+        capability_reason=capability_reason,
+    )
+
+
 def _normalize_scope_paths(scope_path: str, authoritative_root: str) -> tuple[str, str]:
     root = os.path.abspath(os.path.normpath(authoritative_root))
     scope = os.path.abspath(os.path.normpath(scope_path))

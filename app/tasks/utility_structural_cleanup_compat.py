@@ -10,14 +10,17 @@ from typing import Any
 from sqlalchemy import select
 
 from app.batch.plans import OperationItem
-from app.execution.executor import _resolve_utility_empty_wrapper_cleanup_authority
+from app.execution.executor import (
+    _is_single_child_wrapper_cleanup_plan_context,
+    _resolve_utility_empty_wrapper_cleanup_authority,
+)
 from app.models import BatchPlan, BatchPlanItem, OperationJournal
 from app.path_safety import UnsafePathError, is_reserved_quarantine_path, require_allowed_path
 from app.batch_utilities.empty_dir_quarantine import safe_open_parent_fd
 
 
 RECOVERED_UTILITY_STRUCTURAL_CLEANUP_REASON = (
-    "reconciled after crash (utility structural cleanup completed)"
+    "reconciled after crash (structural cleanup completed)"
 )
 
 
@@ -231,13 +234,9 @@ def normalize_structural_cleanup_journal(connection: Any, target: OperationJourn
         current_meta = json.loads(current_row.metadata_json or "{}")
     except Exception:
         return
-    compile_context = plan_meta.get("compile_context") if isinstance(plan_meta, dict) else None
     if (
         not isinstance(plan_meta, dict)
-        or plan_meta.get("source") != "workflow"
-        or plan_meta.get("workflow_mode") != "utility"
-        or not isinstance(compile_context, dict)
-        or compile_context.get("utility_action") != "single_child_wrapper_collapse"
+        or not _is_single_child_wrapper_cleanup_plan_context(plan_meta)
         or not isinstance(current_meta, dict)
         or current_meta.get("wrapper_path") != current_row.source_path
     ):

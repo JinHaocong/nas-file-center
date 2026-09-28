@@ -98,7 +98,7 @@ sequence.
 
 ## 5. CURRENT — Organizer Advanced Rules
 
-**Status: C0 ARCHITECTURE FROZEN / C1 SCHEMA + SHARED READ-ONLY COMPILER NEXT**
+**Status: C0 CLOSED / C1 CLOSED / C2 CLOSED / C3 CLOSED / C4 CURRENT — FRONTEND**
 
 This is the next product-development phase.
 
@@ -153,7 +153,22 @@ C0 established:
 - stale / conflict / rollback semantics;
 - TDD matrix, Docker validation plan and real-NAS acceptance plan.
 
-Implementation may now proceed to C1. C1 is schema + shared read-only compiler only; it does not add new filesystem mutation authority.
+### Implementation progress
+
+- **C0 CLOSED** — Architecture Freeze / scope and safety authority frozen.
+- **C1 CLOSED** — advanced-rules schema, additive migration, V1/V2 profile
+  compatibility and shared read-only Organizer compiler.
+- **C2 CLOSED** — digest-bound standalone/Workflow Organizer rename-stage Plan
+  generation with Generate → Freeze source binding.
+- **C3 CLOSED** — Single-Child Wrapper Collapse structural Stage A reuses
+  the existing Gate6-B descriptor-bound discovery/capability probe and exact
+  `MOVE → rmdir_empty` primitive, extends cleanup authority only to the explicit
+  Organizer structural Plan context, and keeps global delete disabled.
+- **C4 CURRENT** — Advanced Rules UI and staged Stage A → fresh Preview → Stage B UX.
+- **C5 NEXT** — full closure / Docker / isolated real-NAS acceptance.
+
+C3 does not authorize generic delete, recursive rmdir, shell move, or a second
+filesystem executor.
 
 ## 6. After Organizer Advanced Rules
 
