@@ -155,7 +155,8 @@ C0 established:
 
 ### Implementation progress
 
-- **C0 CLOSED** — Architecture Freeze / scope and safety authority frozen.\n- **C1 CLOSED** — advanced-rules schema, additive migration, V1/V2 profile
+- **C0 CLOSED** — Architecture Freeze / scope and safety authority frozen.
+- **C1 CLOSED** — advanced-rules schema, additive migration, V1/V2 profile
   compatibility and shared read-only Organizer compiler.
 - **C2 CLOSED** — digest-bound standalone/Workflow Organizer rename-stage Plan
   generation with Generate → Freeze source binding.
