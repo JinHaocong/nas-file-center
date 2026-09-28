@@ -128,10 +128,14 @@ def _apply_depth_rule(
     proposals: list[OrganizerProposal],
     rules: OrganizerAdvancedRules,
 ) -> None:
-    if not rules.directory_depth.enabled:
-        return
-
-    threshold = rules.directory_depth.rename_from_depth
+    # Advanced Organizer always preserves depth-1 directory names. The
+    # directory_depth rule may move the rename threshold deeper, but can never
+    # relax it below depth 2.
+    threshold = (
+        rules.directory_depth.rename_from_depth
+        if rules.directory_depth.enabled
+        else 2
+    )
     for proposal in proposals:
         if proposal.object_type != "directory":
             continue
