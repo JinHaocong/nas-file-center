@@ -430,9 +430,8 @@ export const SettingsPage: React.FC = () => {
   ];
 
   return (
-    <div className="nfc-operations-page nfc-settings-page nfc-system-controls-page">
+    <div className="nfc-operations-page nfc-settings-page nfc-system-controls-page nfc-page-layout-workbench">
       <PageHeader
-        eyebrow="System controls"
         title="系统设置与安全中心"
         description="集中查看文件安全开关、数据保留、资源控制与管理员会话。危险文件开关仍只能通过宿主机环境变量配置。"
         actions={
