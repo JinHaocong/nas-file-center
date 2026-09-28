@@ -354,6 +354,25 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
   const organizerPreviewDigest = organizerSummary?.preview_digest || undefined;
   const organizerConflicts = Number(organizerSummary?.summary?.conflicts ?? 0);
 
+  const organizerItemStage = (item: WorkflowPreviewItem) => {
+    if (!organizerAdvanced) return "Standard";
+    if (item.metadata?.conflict) return "Blocking conflict";
+    if (item.metadata?.proposal_type === "wrapper_collapse") return "Stage A";
+    return organizerStructuralRequired ? "Stage B · locked" : "Stage B";
+  };
+
+  const organizerRuleLabel = (item: WorkflowPreviewItem) => {
+    const proposalType = String(item.metadata?.proposal_type || "");
+    const labels: Record<string, string> = {
+      wrapper_collapse: "Wrapper collapse",
+      directory_rename: "Directory rename",
+      file_rename: "File numbering",
+      latest_child_prefix: "Latest prefix",
+      touch: "mtime",
+    };
+    return labels[proposalType] || proposalType || item.operation;
+  };
+
   const columns = [
     {
       title: "序号",
@@ -361,6 +380,19 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
       width: 60,
       render: (_: any, __: any, idx: number) => computePreviewRowIndex(page, pageSize, idx),
     },
+    ...(isOrganizer && organizerAdvanced
+      ? [{
+          title: "阶段 / 规则",
+          key: "organizer_stage",
+          width: 190,
+          render: (_: unknown, record: WorkflowPreviewItem) => (
+            <div className="nfc-inline-badges">
+              <span className="nfc-kind-badge">{organizerItemStage(record)}</span>
+              <span className="nfc-kind-badge">{organizerRuleLabel(record)}</span>
+            </div>
+          ),
+        }]
+      : []),
     {
       title: "操作类型",
       dataIndex: "operation",
@@ -798,6 +830,12 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
                               >
                                 <div className="nfc-mobile-record-heading">
                                   <div className="nfc-inline-badges">
+                                    {isOrganizer && organizerAdvanced && (
+                                      <>
+                                        <span className="nfc-kind-badge">{organizerItemStage(item)}</span>
+                                        <span className="nfc-kind-badge">{organizerRuleLabel(item)}</span>
+                                      </>
+                                    )}
                                     <span className={`nfc-operation-badge nfc-operation-${item.operation}`}>
                                       {item.operation}
                                     </span>
