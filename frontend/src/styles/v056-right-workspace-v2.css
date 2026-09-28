@@ -27,6 +27,7 @@
   --nfc-w2-row: 52px;
   --nfc-w2-content-max: 1720px;
   --nfc-w2-workspace-max: 2100px;
+  --nfc-w2-dashboard-max: 1800px;
   --nfc-w2-detail-max: 1880px;
   --nfc-w2-focused-max: 1180px;
   --nfc-w2-reading-max: 1080px;
@@ -92,6 +93,10 @@ body,
   width: min(100%, var(--nfc-w2-detail-max));
 }
 
+.nfc-page-content > .nfc-page-layout-dashboard {
+  width: min(100%, var(--nfc-w2-dashboard-max));
+}
+
 .nfc-operations-page,
 .nfc-dashboard,
 .nfc-dashboard-page,
@@ -115,6 +120,10 @@ body,
 
 .nfc-operations-page.nfc-page-layout-detail {
   max-width: var(--nfc-w2-detail-max) !important;
+}
+
+.nfc-operations-page.nfc-page-layout-dashboard {
+  max-width: var(--nfc-w2-dashboard-max) !important;
 }
 
 /* Utility bar -------------------------------------------------------------- */
@@ -602,7 +611,7 @@ body,
 
 .nfc-dashboard-page .nfc-dashboard-layout {
   margin-top: 24px;
-  grid-template-columns: minmax(0, 1.75fr) minmax(300px, 0.62fr);
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 340px);
   gap: 30px;
 }
 
@@ -833,6 +842,35 @@ body,
   font-size: 12.75px;
 }
 
+.ant-modal-header,
+.ant-drawer-header {
+  border-bottom: 1px solid var(--nfc-w2-hairline) !important;
+  background: transparent !important;
+}
+
+.ant-modal-header {
+  margin-bottom: 18px !important;
+  padding-bottom: 14px !important;
+}
+
+.ant-modal-footer {
+  margin-top: 20px !important;
+  padding-top: 14px !important;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  border-top: 1px solid var(--nfc-w2-hairline);
+}
+
+.ant-drawer-header {
+  padding: 16px 18px !important;
+}
+
+.ant-drawer-body {
+  padding: 18px !important;
+}
+
 /* Quarantine --------------------------------------------------------------- */
 
 .nfc-quarantine-page .nfc-bulk-action-bar {
@@ -1048,6 +1086,10 @@ body,
 
 .nfc-app-main .nfc-page-content > .nfc-page-layout-detail {
   width: min(100%, var(--nfc-w2-detail-max));
+}
+
+.nfc-app-main .nfc-page-content > .nfc-page-layout-dashboard {
+  width: min(100%, var(--nfc-w2-dashboard-max));
 }
 
 .nfc-app-main .nfc-page-content > .nfc-quarantine-page,
