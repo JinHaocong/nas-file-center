@@ -56,6 +56,7 @@ describe('Right Workspace v2 design system', () => {
 
     assert.match(css, /--nfc-w2-workspace-max:\s*2100px/);
     assert.match(css, /\.nfc-page-content > \.nfc-page-layout-workbench/);
+    assert.match(css, /\.nfc-operations-page\.nfc-page-layout-workbench[\s\S]*max-width:\s*var\(--nfc-w2-workspace-max\)/);
     assert.match(
       css,
       /\.nfc-page-layout-workbench \.nfc-file-tool-form[\s\S]*max-width:\s*none/
