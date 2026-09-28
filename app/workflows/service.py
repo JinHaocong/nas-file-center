@@ -16,6 +16,7 @@ from app.planning.dedupe_preview import (
     compute_current_dedupe_db_lineage_digest,
     DedupeEmptyPlanError,
 )
+from app.planning.stale import capture_source_snapshot
 from app.workflows.compiler import (
     DedupeWorkflowSafetySnapshot,
     MAX_WORKFLOW_CANDIDATES,
@@ -671,6 +672,7 @@ class WorkflowService:
                     "items": preview_items,
                     "dedupe_summary": dedupe_summary,
                     "utility_summary": None,
+                    "organizer_summary": None,
                 }
             else:
                 all_items = res.planned_operations
@@ -707,10 +709,23 @@ class WorkflowService:
                         "candidates": candidates,
                         "selected_candidate_ids": res.compile_context.get("selected_candidate_ids", []),
                     }
+                    organizer_summary = None
                     preview_source = "utility-live-readonly"
+                elif definition.mode == "organizer":
+                    utility_summary = None
+                    organizer_summary = {
+                        "preview_digest": res.compile_context.get("organizer_preview_digest"),
+                        "source_snapshot_digest": res.compile_context.get("organizer_source_snapshot_digest"),
+                        "config_digest": res.compile_context.get("organizer_config_digest"),
+                        "summary": res.compile_context.get("organizer_summary") or {},
+                        "advanced_enabled": bool(res.compile_context.get("organizer_advanced_readonly", False)),
+                        "structural_required": bool(res.compile_context.get("organizer_structural_required", False)),
+                    }
+                    preview_source = "organizer-live-readonly"
                 else:
                     utility_summary = None
-                    preview_source = "organizer-live-readonly" if definition.mode == "organizer" else "index"
+                    organizer_summary = None
+                    preview_source = "index"
 
                 return {
                     "workflow_id": wf.id,
@@ -730,6 +745,7 @@ class WorkflowService:
                     "items": preview_items,
                     "dedupe_summary": None,
                     "utility_summary": utility_summary,
+                    "organizer_summary": organizer_summary,
                 }
 
     def generate_plan(
@@ -812,15 +828,47 @@ class WorkflowService:
                     },
                 )
 
-            if (
+            organizer_advanced = (
                 definition.mode == "organizer"
                 and res.compile_context.get("organizer_advanced_readonly") is True
-            ):
-                raise WorkflowValidationError(
-                    "Organizer Advanced Rules 当前处于 C1 只读 Preview 阶段，禁止生成工作流执行计划",
-                    code="ORGANIZER_ADVANCED_READONLY",
-                    status_code=409,
-                )
+            )
+            organizer_generated_snapshots: dict[str, dict[str, Any]] = {}
+            if organizer_advanced:
+                actual_preview_digest = res.compile_context.get("organizer_preview_digest")
+                if (
+                    not payload.expected_preview_digest
+                    or payload.expected_preview_digest.lower() != str(actual_preview_digest).lower()
+                ):
+                    raise WorkflowDigestMismatchError(
+                        "Organizer preview digest mismatch",
+                        details={
+                            "expected_preview_digest": payload.expected_preview_digest,
+                            "actual_preview_digest": actual_preview_digest,
+                        },
+                    )
+
+                if res.compile_context.get("organizer_structural_required") is True:
+                    raise WorkflowValidationError(
+                        "Organizer Advanced Rules requires Stage A structural collapse before rename Plan generation",
+                        code="ORGANIZER_STRUCTURAL_STAGE_REQUIRED",
+                        status_code=409,
+                    )
+
+                organizer_summary = res.compile_context.get("organizer_summary") or {}
+                if int(organizer_summary.get("conflicts", 0) or 0) > 0:
+                    raise WorkflowValidationError(
+                        "Organizer Advanced Rules preview contains blocking conflicts",
+                        code="ORGANIZER_ADVANCED_CONFLICT",
+                        status_code=409,
+                    )
+
+                for op in res.planned_operations:
+                    if op.get("operation") == "rename":
+                        organizer_generated_snapshots[op["source"]] = capture_source_snapshot(
+                            op["source"],
+                            allowed_roots=self.settings.allowed_roots,
+                            quarantine_root=self.settings.quarantine_root,
+                        )
 
             if not res.planned_operations:
                 if definition.mode == "dedupe":
@@ -958,6 +1006,15 @@ class WorkflowService:
                 }
                 if definition.mode == "utility":
                     plan_metadata["workflow_mode"] = "utility"
+                elif organizer_advanced:
+                    plan_metadata.update({
+                        "workflow_mode": "organizer",
+                        "organizer_advanced": True,
+                        "organizer_stage": "rename",
+                        "organizer_preview_digest": res.compile_context.get("organizer_preview_digest"),
+                        "organizer_source_snapshot_digest": res.compile_context.get("organizer_source_snapshot_digest"),
+                        "organizer_config_digest": res.compile_context.get("organizer_config_digest"),
+                    })
 
                 plan = BatchPlan(
                     name=plan_name,
@@ -972,6 +1029,13 @@ class WorkflowService:
 
                 for op in res.planned_operations:
                     item_metadata = {k: v for k, v in op.items() if k not in {"source", "target", "operation", "sequence"}}
+                    if organizer_advanced:
+                        item_metadata["organizer_advanced"] = True
+                        item_metadata["organizer_stage"] = "rename"
+                        item_metadata["preview_only"] = False
+                        generated_snapshot = organizer_generated_snapshots.get(op["source"])
+                        if generated_snapshot is not None:
+                            item_metadata["organizer_generated_snapshot"] = generated_snapshot
                     item = BatchPlanItem(
                         plan_id=plan.id,
                         sequence=op.get("sequence", 0),

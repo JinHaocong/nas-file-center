@@ -2356,6 +2356,28 @@ class FileCenterService:
                         is_chained = True
 
                 meta = json.loads(it["metadata_json"] or "{}")
+
+                generated_snapshot = meta.get("organizer_generated_snapshot")
+                if (
+                    it["operation"] == "rename"
+                    and meta.get("organizer_advanced") is True
+                    and isinstance(generated_snapshot, dict)
+                ):
+                    current_generated_source = capture_source_snapshot(
+                        src_p,
+                        allowed_roots=self.settings.allowed_roots,
+                        quarantine_root=self.settings.quarantine_root,
+                    )
+                    generated_keys = ("device", "inode", "size", "mtime_ns", "object_type")
+                    if any(
+                        current_generated_source.get(key) != generated_snapshot.get(key)
+                        for key in generated_keys
+                    ):
+                        raise StateConflictError(
+                            "ORGANIZER_SOURCE_CHANGED_SINCE_GENERATE: "
+                            f"{src_p} changed after the digest-bound Organizer Plan was generated"
+                        )
+
                 if is_chained and producer_match is not None and matched_origin is not None:
                     snap = capture_source_snapshot(
                         matched_origin,
@@ -3985,12 +4007,116 @@ class FileCenterService:
                 "total": total,
             }
 
+    def _persist_organizer_advanced_rename_plan(
+        self,
+        *,
+        profile: OrganizerProfile,
+        safe_root: Path,
+        compilation,
+        items: list[dict[str, Any]],
+    ) -> BatchPlan:
+        plan_kind = f"organizer-advanced-{profile.slug or profile.id}"
+        plan_name = f"整理计划 - {profile.name}"
+        plan_metadata = {
+            "is_organizer": True,
+            "organizer_advanced": True,
+            "organizer_stage": "rename",
+            "organizer_profile_id": profile.id,
+            "organizer_profile_name": profile.name,
+            "root": str(safe_root),
+            "advanced_rules_version": 1,
+            "advanced_rules": compilation.advanced_rules,
+            "config_digest": compilation.config_digest,
+            "source_snapshot_digest": compilation.source_snapshot_digest,
+            "preview_digest": compilation.preview_digest,
+            "mtime_delay_seconds": profile.mtime_delay_seconds,
+        }
+
+        proposal_by_source = {
+            proposal.source: proposal
+            for proposal in compilation.proposals
+            if proposal.proposal_type != "wrapper_collapse"
+        }
+
+        with self.SessionLocal() as write_session:
+            plan = BatchPlan(
+                name=plan_name,
+                kind=plan_kind,
+                status="draft",
+                expected_changes=len(items),
+                expected_reclaim_bytes=0,
+                metadata_json=json.dumps(plan_metadata, ensure_ascii=False, sort_keys=True),
+            )
+            write_session.add(plan)
+            write_session.flush()
+
+            for sequence, raw in enumerate(items, start=1):
+                operation = raw["operation"]
+                source = require_unreserved_path(
+                    require_allowed_path(raw["source"], self.settings.allowed_roots),
+                    self.settings.quarantine_root,
+                )
+                raw_target = raw.get("target")
+                target = (
+                    str(
+                        validate_mutation_destination(
+                            raw_target,
+                            self.settings.allowed_roots,
+                            quarantine_root=self.settings.quarantine_root,
+                        )
+                    )
+                    if raw_target
+                    else None
+                )
+
+                proposal = proposal_by_source.get(str(source))
+                item_metadata: dict[str, Any] = {
+                    "organizer_advanced": True,
+                    "organizer_stage": "rename",
+                    "preview_digest": compilation.preview_digest,
+                    "source_snapshot_digest": compilation.source_snapshot_digest,
+                    "proposal_type": proposal.proposal_type if proposal else "touch",
+                    "object_type": proposal.object_type if proposal else "directory",
+                    "proposal_metadata": proposal.metadata if proposal else {},
+                }
+
+                if operation == "rename":
+                    generated_snapshot = capture_source_snapshot(
+                        source,
+                        allowed_roots=self.settings.allowed_roots,
+                        quarantine_root=self.settings.quarantine_root,
+                    )
+                    item_metadata["organizer_generated_snapshot"] = generated_snapshot
+
+                write_session.add(
+                    BatchPlanItem(
+                        plan_id=plan.id,
+                        sequence=int(raw.get("sequence", sequence)),
+                        operation=operation,
+                        source_path=str(source),
+                        target_path=target,
+                        keep_path=None,
+                        expected_size=0,
+                        expected_mtime_ns=0,
+                        expected_device=0,
+                        expected_inode=0,
+                        expected_hash=None,
+                        state="planned",
+                        metadata_json=json.dumps(item_metadata, ensure_ascii=False, sort_keys=True),
+                    )
+                )
+
+            write_session.commit()
+            write_session.refresh(plan)
+            return plan
+
     def create_organizer_plan(
         self,
         profile_id: int,
         user_id: int,
         root_override: str | None = None,
         include_touch: bool = True,
+        expected_preview_digest: str | None = None,
     ) -> BatchPlan:
         with self.SessionLocal() as session:
             profile = session.get(OrganizerProfile, profile_id)
@@ -3998,12 +4124,6 @@ class FileCenterService:
                 raise ValueError(f"方案不存在 (id={profile_id})")
             if not profile.is_builtin and profile.user_id != user_id:
                 raise PermissionError("无权访问该方案")
-
-            advanced_rules = json.loads(profile.advanced_rules_json or "{}")
-            if advanced_rules_enabled(advanced_rules):
-                raise ValueError(
-                    "Organizer Advanced Rules 当前处于 C1 只读 Preview 阶段，禁止生成执行计划"
-                )
 
             target_root = (root_override or profile.root or "").strip()
             if not target_root:
@@ -4018,8 +4138,116 @@ class FileCenterService:
             video_extensions = json.loads(profile.video_extensions or "[]")
             preserve_tags = json.loads(profile.preserve_tags or "[]")
             cleanup_patterns = json.loads(profile.cleanup_patterns or "[]")
-
             quarantine_ex = [self.settings.quarantine_root] if getattr(self.settings, "quarantine_root", None) else None
+
+            advanced_rules = json.loads(profile.advanced_rules_json or "{}")
+            if advanced_rules_enabled(advanced_rules):
+                if not expected_preview_digest:
+                    raise ValueError("Organizer Advanced Rules 生成计划必须提供 expected_preview_digest")
+
+                policy = session.get(FilterPolicy, 1)
+                if policy and policy.exclude_dir_names_json:
+                    try:
+                        exclude_dir_names = json.loads(policy.exclude_dir_names_json)
+                    except Exception:
+                        exclude_dir_names = list(DEFAULT_EXCLUDE_DIR_NAMES)
+                else:
+                    exclude_dir_names = list(DEFAULT_EXCLUDE_DIR_NAMES)
+
+                compilation = compile_organizer_preview(
+                    safe_root,
+                    allowed_roots=self.settings.allowed_roots,
+                    quarantine_root=self.settings.quarantine_root,
+                    image_extensions=image_extensions,
+                    video_extensions=video_extensions,
+                    rename_template=profile.rename_template,
+                    statistics_template=profile.statistics_template,
+                    preserve_tags=preserve_tags,
+                    cleanup_patterns=cleanup_patterns,
+                    numbering_mode=profile.numbering_mode,
+                    numbering_start=profile.numbering_start,
+                    numbering_padding=profile.numbering_padding,
+                    mtime_mode=profile.mtime_mode,
+                    mtime_delay_seconds=profile.mtime_delay_seconds,
+                    recursive=profile.recursive,
+                    advanced_rules=advanced_rules,
+                    excluded_roots=quarantine_ex,
+                    exclude_dir_names=exclude_dir_names,
+                )
+
+                if compilation.preview_digest.lower() != expected_preview_digest.lower():
+                    raise ValueError(
+                        "Organizer Preview 已变化，禁止生成计划；请重新 Preview 后再试"
+                    )
+
+                if compilation.structural_required:
+                    raise ValueError(
+                        "当前 Preview 包含 Single-Child Wrapper Collapse；"
+                        "必须先完成 Stage A 结构计划并重新 Preview，才能生成 Stage B 重命名计划"
+                    )
+
+                if compilation.summary.get("conflicts", 0) > 0:
+                    conflict_reasons = [
+                        proposal.conflict_reason
+                        for proposal in compilation.proposals
+                        if proposal.conflict and proposal.conflict_reason
+                    ]
+                    raise ValueError(
+                        f"存在 {compilation.summary['conflicts']} 个冲突项，禁止生成计划: "
+                        f"{'; '.join(conflict_reasons[:3])}"
+                    )
+
+                rename_proposals = [
+                    proposal
+                    for proposal in compilation.proposals
+                    if proposal.proposal_type != "wrapper_collapse"
+                ]
+                items, cycle_sources = plan_organizer_operations(
+                    rename_proposals,
+                    include_touch=False,
+                    mtime_mode=profile.mtime_mode,
+                )
+                if cycle_sources:
+                    raise ValueError(
+                        "检测到循环重命名依赖，禁止生成计划: "
+                        + ", ".join(sorted(cycle_sources))
+                    )
+
+                if include_touch and profile.mtime_mode == "ordered":
+                    directory_proposals = [
+                        proposal
+                        for proposal in rename_proposals
+                        if proposal.object_type == "directory"
+                    ]
+                    touch_plan, touch_cycles = plan_organizer_operations(
+                        directory_proposals,
+                        include_touch=True,
+                        mtime_mode=profile.mtime_mode,
+                    )
+                    if touch_cycles:
+                        raise ValueError(
+                            "检测到目录时间排序循环依赖，禁止生成计划: "
+                            + ", ".join(sorted(touch_cycles))
+                        )
+                    touch_items = [
+                        item for item in touch_plan if item.get("operation") == "touch"
+                    ]
+                    next_sequence = len(items) + 1
+                    for item in touch_items:
+                        item["sequence"] = next_sequence
+                        next_sequence += 1
+                    items.extend(touch_items)
+
+                if not items:
+                    raise ValueError("当前没有需要执行的操作")
+
+                return self._persist_organizer_advanced_rename_plan(
+                    profile=profile,
+                    safe_root=safe_root,
+                    compilation=compilation,
+                    items=items,
+                )
+
             summary, proposals = generate_organizer_proposals(
                 safe_root,
                 allowed_roots=self.settings.allowed_roots,

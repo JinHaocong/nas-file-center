@@ -193,7 +193,7 @@ def test_wrapper_shape_preview_is_namespace_read_only_and_capability_unverified(
     assert compilation.structural_required is True
 
 
-def test_advanced_preview_has_digest_but_standalone_plan_persists_zero_draft(tmp_path: Path):
+def test_advanced_preview_requires_digest_for_plan_and_persists_zero_draft_without_it(tmp_path: Path):
     data = tmp_path / "data"
     root = data / "Organizer"
     (root / "A").mkdir(parents=True)
@@ -245,7 +245,7 @@ def test_advanced_preview_has_digest_but_standalone_plan_persists_zero_draft(tmp
 
     plan = client.post(f"/api/organizer-profiles/{profile_id}/plan")
     assert plan.status_code == 400
-    assert "C1" in plan.json()["detail"]
+    assert "expected_preview_digest" in plan.json()["detail"]
 
     with app.state.service.SessionLocal() as session:
         after = session.scalar(select(func.count()).select_from(BatchPlan)) or 0
