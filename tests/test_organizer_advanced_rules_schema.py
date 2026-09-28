@@ -160,6 +160,21 @@ def test_export_v2_and_import_v1_v2_are_compatible(tmp_path: Path):
     assert imported_v1.json()["advanced_rules"] == {}
 
 
+def test_v2_import_rejects_string_recursive_coercion(tmp_path: Path):
+    client = _client(tmp_path)
+    payload = {
+        "schema_version": 2,
+        "profile": {
+            "name": "strict-recursive",
+            "recursive": "false",
+            "advanced_rules": _advanced_rules(),
+        },
+    }
+    response = client.post("/api/organizer-profiles/import", json=payload)
+    assert response.status_code == 400
+    assert "recursive" in response.json()["detail"]
+
+
 def test_workflow_snapshot_accepts_legacy_and_validates_advanced_rules():
     legacy = OrganizerProfileSnapshot(name="legacy")
     assert legacy.advanced_rules is None

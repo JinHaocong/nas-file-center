@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 import os
 from pathlib import Path
 import re
@@ -37,6 +37,9 @@ class OrganizerProposal:
     conflict: bool
     conflict_reason: str | None = None
     expected_mtime_order: int | None = None
+    proposal_type: str = "directory_rename"
+    object_type: str = "directory"
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -230,6 +233,7 @@ def generate_organizer_proposals(
     mtime_mode: str = "none",
     mtime_delay_seconds: float = 2.0,
     recursive: bool = False,
+    rename_from_depth: int | None = None,
     excluded_roots: Iterable[Path | str] | None = None,
     exclude_dir_names: Iterable[str] | None = None,
 ) -> tuple[dict[str, Any], list[OrganizerProposal]]:
@@ -255,6 +259,12 @@ def generate_organizer_proposals(
             safe_root, img_exts, vid_exts, excluded_roots=excluded_roots, exclude_dir_names=exclude_dir_names
         )
         candidates.sort(key=lambda p: (len(p.parts), natural_sort_key(p.name)))
+        if rename_from_depth is not None:
+            root_depth = len(safe_root.parts)
+            candidates = [
+                p for p in candidates
+                if len(p.parts) - root_depth >= rename_from_depth
+            ]
     else:
         with os.scandir(safe_root) as it:
             for entry in it:

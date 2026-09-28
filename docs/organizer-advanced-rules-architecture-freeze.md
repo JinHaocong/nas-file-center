@@ -307,8 +307,24 @@ Requirements:
 - target `root/depth1/<child-name>` must not exist;
 - filesystem/capability probe must report a supported no-clobber path.
 
-Discovery MUST reuse `discover_single_child_wrappers()`, scoped once per
-preserved depth-1 parent, then filter to directory-only READY candidates.
+C1 source audit found an important boundary in the existing Gate6-B helper:
+`discover_single_child_wrappers()` performs disposable capability probes that
+temporarily create and clean probe entries. Those probes are correct for
+authoritative utility compilation, but they are not compatible with the stricter
+Organizer C1 promise that Preview performs zero namespace writes.
+
+Therefore the freeze is amended as follows:
+
+- **C1 Preview** performs probe-free, descriptor/non-following shape discovery
+  only and reports eligible-looking wrappers as `CAPABILITY_UNVERIFIED`;
+- C1 never treats a wrapper candidate as mutation-authorized;
+- **C3 structural Plan compilation** MUST re-run the existing authoritative
+  Gate6-B discovery/capability path and bind its candidate digest immediately
+  before draft generation;
+- no capability result from C1 Preview may be cached or promoted into execution
+  authority.
+
+This is a safety tightening, not a new mutation path.
 
 ### Structural operation staging
 
