@@ -165,6 +165,8 @@ describe('Right Workspace v2 design system', () => {
       css,
       /@media \(max-width: 1199px\)[\s\S]*\.nfc-app-main \.nfc-page-header[\s\S]*flex-wrap:\s*wrap/
     );
+    assert.match(css, /@media \(max-width: 767px\)[\s\S]*\.nfc-app-main \.nfc-page-title[\s\S]*font-size:\s*26px/);
+    assert.match(css, /@media \(max-width: 420px\)[\s\S]*\.nfc-app-main \.nfc-page-title[\s\S]*font-size:\s*24px/);
     assert.match(
       css,
       /\.nfc-page-layout-ledger \.nfc-search-input[\s\S]*flex-basis:\s*100%/
