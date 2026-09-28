@@ -102,6 +102,12 @@ def test_file_numbering_resets_per_parent_and_preserves_final_suffix_case(tmp_pa
         if proposal.proposal_type == "file_rename"
     ]
     targets = {proposal.source: Path(proposal.target).name for proposal in rows}
+    by_source = {proposal.source: proposal for proposal in compilation.proposals}
+
+    # Any enabled Advanced Rules profile preserves depth-1 directory names,
+    # even when the directory_depth sub-rule itself is disabled.
+    assert by_source[str(parent_a)].target == str(parent_a)
+    assert by_source[str(parent_a)].changed is False
 
     assert targets[str(parent_a / "file2.txt")] == "001.txt"
     assert targets[str(parent_a / "file10.TXT")] == "002.TXT"
