@@ -1,16 +1,18 @@
-# NAS File Center v0.4.0
+# NAS File Center v0.4.7
 
-> **说明**：当前版本为 **NAS File Center v0.4.0**。本版本在既有安全执行、Plan 生命周期、Quarantine、审计与 Worker 架构不变的前提下，完成全站响应式 UI/UX 重构、设计系统统一、移动端数据视图、复杂工具与 Overlay 收口，并完成 release regression、依赖安全与 Docker 构建验证。
+> **说明**：当前版本为 **NAS File Center v0.4.7**。本版本在既有安全执行、Plan 生命周期、Quarantine、审计与 Worker 架构不变的前提下，完成全站响应式 UI/UX 重构、设计系统统一、移动端数据视图、复杂工具与 Overlay 收口，并完成 release regression、依赖安全与 Docker 构建验证。
 
 面向几十 TB NAS 数据的**中文 Web 文件批处理与精确去重中心**。
+
+> **版本权威**：当前产品 / Python package / Docker image 版本统一为 **0.4.7**。
 
 核心原则：**fclones 负责高性能重复发现；NAS File Center 负责规则、Dry Run、SHA256 二次校验、安全执行、审计和可视化操作。** fclones 永远不会被调用 `remove/link/dedupe` 等破坏性子命令。
 
 ---
 
-## v0.4.0 核心更新与亮点
+## v0.4.7 核心更新与亮点
 
-### v0.4.0 UI / Responsive
+### v0.4.7 UI / Responsive
 
 - 项目拥有独立的 `/DESIGN.md`，视觉方向以 Linear / Supabase 的克制 surface、hairline hierarchy 为主，并吸收 Carbon 的高密度数据与状态表达。
 - Dashboard、Task Center、Plans、Scans、Advanced Dedupe、Quarantine、Audit、Indexes、Workflows、Organizer、Batch、Path Match、Rename、Settings、Login 与各类 Modal/Drawer 已迁移到统一视觉系统。
@@ -70,7 +72,7 @@ nas-file-center-api:8080 (容器内 HTTP 端口，禁止直接映射宿主机端
 ```yaml
 services:
   nas-file-center-api:
-    image: kerwinjhc/nas-file-center:0.4.0
+    image: kerwinjhc/nas-file-center:0.4.7
     container_name: nas-file-center-api
     volumes:
       - /tmp/zfsv3/nvme13/15246330601/data/NasFileCenter:/config
@@ -99,7 +101,7 @@ services:
     restart: unless-stopped
 
   nas-file-center-worker:
-    image: kerwinjhc/nas-file-center:0.4.0
+    image: kerwinjhc/nas-file-center:0.4.7
     container_name: nas-file-center-worker
     command:
       - python
@@ -137,13 +139,13 @@ networks:
 
 ---
 
-## 2. 升级到 v0.4.0
+## 2. 升级到 v0.4.7
 
 1. 在构建机器构建 `linux/amd64` 镜像并推送：
    ```bash
    docker buildx build \
      --platform linux/amd64 \
-     -t kerwinjhc/nas-file-center:0.4.0 \
+     -t kerwinjhc/nas-file-center:0.4.7 \
      --push \
      .
    ```
@@ -216,7 +218,7 @@ npm run build
 ```bash
 docker buildx build \
   --platform linux/amd64 \
-  -t nas-file-center:0.4.0 \
+  -t nas-file-center:0.4.7 \
   --load \
   .
 ```
