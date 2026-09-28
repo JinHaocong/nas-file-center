@@ -270,6 +270,9 @@ describe('Right Workspace v2 design system', () => {
 
     assert.match(css, /\.nfc-app-main \.nfc-page-title[\s\S]*font-size:\s*clamp\(27px[\s\S]*font-weight:\s*620[\s\S]*line-height:\s*1\.18/);
     assert.match(css, /\.nfc-app-main \.nfc-data-panel-title[\s\S]*font-size:\s*14px[\s\S]*font-weight:\s*620/);
+    const loginCss = read('src/styles/pages/login.css');
+    assert.match(loginCss, /\.nfc-login-brand h1[\s\S]*font-size:\s*21px[\s\S]*font-weight:\s*620/);
+    assert.match(css, /\.nfc-dashboard-page \.nfc-dashboard-rail \.nfc-data-panel-title[\s\S]*font-size:\s*12\.5px[\s\S]*font-weight:\s*620/);
     assert.match(css, /\.nfc-app-main \.nfc-data-panel-title::before[\s\S]*content:\s*none !important/);
     assert.match(css, /--nfc-w2-panel-header-top:\s*15px/);
     assert.match(
