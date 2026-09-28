@@ -714,12 +714,18 @@ class WorkflowCompiler:
         compile_context = {
             "effective_exclude_dir_names": sorted(list(set(excludes))),
             "filter_policy_updated_at": policy.updated_at.isoformat() if policy and policy.updated_at else None,
+            "organizer_root": str(safe_root),
             "organizer_preview_digest": compilation.preview_digest,
             "organizer_source_snapshot_digest": compilation.source_snapshot_digest,
             "organizer_config_digest": compilation.config_digest,
             "organizer_summary": summary,
             "organizer_advanced_readonly": compilation.advanced_enabled,
             "organizer_structural_required": compilation.structural_required,
+            "organizer_wrapper_proposals": [
+                proposal.to_dict()
+                for proposal in compilation.proposals
+                if proposal.proposal_type == "wrapper_collapse"
+            ],
         }
 
         digest_payload = {
