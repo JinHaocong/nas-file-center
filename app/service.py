@@ -4340,6 +4340,17 @@ class FileCenterService:
                         "Organizer Preview 已变化，禁止生成计划；请重新 Preview 后再试"
                     )
 
+                if compilation.summary.get("conflicts", 0) > 0:
+                    conflict_reasons = [
+                        proposal.conflict_reason
+                        for proposal in compilation.proposals
+                        if proposal.conflict and proposal.conflict_reason
+                    ]
+                    raise ValueError(
+                        f"存在 {compilation.summary['conflicts']} 个冲突项，禁止生成计划: "
+                        f"{'; '.join(conflict_reasons[:3])}"
+                    )
+
                 if compilation.structural_required:
                     structural = compile_organizer_structural_stage(
                         safe_root,
@@ -4358,17 +4369,6 @@ class FileCenterService:
                         safe_root=safe_root,
                         compilation=compilation,
                         structural=structural,
-                    )
-
-                if compilation.summary.get("conflicts", 0) > 0:
-                    conflict_reasons = [
-                        proposal.conflict_reason
-                        for proposal in compilation.proposals
-                        if proposal.conflict and proposal.conflict_reason
-                    ]
-                    raise ValueError(
-                        f"存在 {compilation.summary['conflicts']} 个冲突项，禁止生成计划: "
-                        f"{'; '.join(conflict_reasons[:3])}"
                     )
 
                 rename_proposals = [
