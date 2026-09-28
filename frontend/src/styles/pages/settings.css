@@ -1,29 +1,25 @@
 .nfc-system-controls-page .nfc-settings-grid {
-  grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
-  grid-template-areas:
-    "runtime lifecycle"
-    "resource lifecycle"
-    "sessions sessions";
+  grid-template-columns: repeat(12, minmax(0, 1fr));
   align-items: start;
-  gap: 22px 26px;
+  gap: 28px;
 }
 
 .nfc-settings-panel-runtime {
-  grid-area: runtime;
+  grid-column: 1 / -1;
 }
 
 .nfc-settings-panel-lifecycle {
-  grid-area: lifecycle;
+  grid-column: 1 / span 7;
   align-self: start;
 }
 
 .nfc-settings-panel-resource {
-  grid-area: resource;
+  grid-column: 8 / -1;
   align-self: start;
 }
 
 .nfc-settings-panel-sessions {
-  grid-area: sessions;
+  grid-column: 1 / -1;
 }
 
 .nfc-system-controls-page .nfc-settings-subpanel {
@@ -90,12 +86,14 @@
 
 @media (max-width: 1199px) {
   .nfc-system-controls-page .nfc-settings-grid {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-areas:
-      "runtime"
-      "lifecycle"
-      "resource"
-      "sessions";
+    grid-template-columns: 1fr;
     gap: 18px;
+  }
+
+  .nfc-settings-panel-runtime,
+  .nfc-settings-panel-lifecycle,
+  .nfc-settings-panel-resource,
+  .nfc-settings-panel-sessions {
+    grid-column: 1;
   }
 }
