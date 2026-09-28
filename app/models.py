@@ -496,6 +496,8 @@ class OrganizerProfile(Base):
     mtime_mode: Mapped[str] = mapped_column(String(32), default="none")
     mtime_delay_seconds: Mapped[float] = mapped_column(Float, default=2.0)
 
+    advanced_rules_json: Mapped[str] = mapped_column(Text, default="{}")
+
     is_builtin: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
