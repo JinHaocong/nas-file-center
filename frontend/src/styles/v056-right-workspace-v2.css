@@ -27,6 +27,7 @@
   --nfc-w2-row: 52px;
   --nfc-w2-content-max: 1720px;
   --nfc-w2-workspace-max: 2100px;
+  --nfc-w2-detail-max: 1880px;
   --nfc-w2-focused-max: 1180px;
   --nfc-w2-reading-max: 1080px;
   --nfc-w2-shadow-float: 0 24px 70px rgba(18, 24, 33, 0.14);
@@ -87,6 +88,10 @@ body,
   width: min(100%, var(--nfc-w2-focused-max));
 }
 
+.nfc-page-content > .nfc-page-layout-detail {
+  width: min(100%, var(--nfc-w2-detail-max));
+}
+
 .nfc-operations-page,
 .nfc-dashboard,
 .nfc-dashboard-page,
@@ -106,6 +111,10 @@ body,
 
 .nfc-operations-page.nfc-page-layout-focused {
   max-width: var(--nfc-w2-focused-max) !important;
+}
+
+.nfc-operations-page.nfc-page-layout-detail {
+  max-width: var(--nfc-w2-detail-max) !important;
 }
 
 /* Utility bar -------------------------------------------------------------- */
@@ -1037,6 +1046,10 @@ body,
   width: min(100%, var(--nfc-w2-focused-max));
 }
 
+.nfc-app-main .nfc-page-content > .nfc-page-layout-detail {
+  width: min(100%, var(--nfc-w2-detail-max));
+}
+
 .nfc-app-main .nfc-page-content > .nfc-quarantine-page,
 .nfc-app-main .nfc-page-content > .nfc-tasks-page,
 .nfc-app-main .nfc-page-content > .nfc-media-page,
@@ -1446,10 +1459,32 @@ body,
   font-size: 12px;
 }
 
+/* Detail pages: lifecycle, safety actions and ledgers share one aligned rail. */
+.nfc-app-main .nfc-page-layout-detail {
+  min-width: 0;
+}
+
+.nfc-app-main .nfc-page-layout-detail > .nfc-page-header,
+.nfc-app-main .nfc-page-layout-detail > .nfc-data-panel,
+.nfc-app-main .nfc-page-layout-detail > .nfc-lifecycle-strip,
+.nfc-app-main .nfc-page-layout-detail > .nfc-plan-action-surface,
+.nfc-app-main .nfc-page-layout-detail > .nfc-plan-alert-stack {
+  width: 100%;
+}
+
+.nfc-app-main .nfc-page-layout-detail .nfc-page-actions .nfc-action-bar,
+.nfc-app-main .nfc-page-layout-detail .nfc-plan-action-surface {
+  flex-wrap: wrap;
+}
+
+.nfc-app-main .nfc-page-layout-detail .nfc-page-actions .nfc-action-bar {
+  justify-content: flex-end;
+}
+
 /* Advanced dedupe: cockpit rail + strategy work area */
 .nfc-app-main .nfc-advanced-dedupe-page .nfc-dedupe-cockpit {
   display: grid;
-  grid-template-columns: minmax(250px, 0.55fr) minmax(0, 1.45fr);
+  grid-template-columns: minmax(300px, 340px) minmax(0, 1fr);
   gap: 28px;
   align-items: start;
 }
@@ -1479,7 +1514,7 @@ body,
 /* Workflow builder: stable definition rail + pipeline canvas */
 .nfc-app-main .nfc-workflow-editor-layout {
   display: grid;
-  grid-template-columns: minmax(280px, 0.62fr) minmax(0, 1.38fr);
+  grid-template-columns: minmax(320px, 360px) minmax(0, 1fr);
   gap: 28px;
   align-items: start;
 }
