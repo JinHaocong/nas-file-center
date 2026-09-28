@@ -5,6 +5,7 @@ from typing import Any, Literal, Union
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
 from app.filters.schema import FilterNode
+from app.organizers.advanced_rules import OrganizerAdvancedRules, normalize_advanced_rules
 from app.organizers.profile_validation import (
     DEFAULT_ORGANIZER_CLEANUP_PATTERNS,
     DEFAULT_ORGANIZER_IMAGE_EXTENSIONS,
@@ -98,6 +99,7 @@ class OrganizerProfileSnapshot(BaseModel):
     numbering_padding: int = DEFAULT_ORGANIZER_NUMBERING_PADDING
     mtime_mode: Literal["none", "ordered"] = DEFAULT_ORGANIZER_MTIME_MODE
     mtime_delay_seconds: float = DEFAULT_ORGANIZER_MTIME_DELAY_SECONDS
+    advanced_rules: OrganizerAdvancedRules | None = None
 
     @field_validator("name", mode="before")
     @classmethod
@@ -170,6 +172,15 @@ class OrganizerProfileSnapshot(BaseModel):
     @classmethod
     def validate_stats_tmpl(cls, v: Any) -> str:
         return validate_statistics_template(v)
+
+    @model_validator(mode="after")
+    def validate_advanced_rules_compatibility(self):
+        normalize_advanced_rules(
+            self.advanced_rules,
+            recursive=self.recursive,
+            mtime_mode=self.mtime_mode,
+        )
+        return self
 
 
 class OrganizeStep(BaseModel):
