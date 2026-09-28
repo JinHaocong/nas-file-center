@@ -1222,6 +1222,7 @@ body,
 }
 
 .nfc-app-main .nfc-system-controls-page .nfc-settings-grid > .nfc-data-panel > .nfc-data-panel-header {
+  min-height: 0;
   padding: 0 4px 14px;
 }
 
