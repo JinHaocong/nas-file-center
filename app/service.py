@@ -168,7 +168,8 @@ PLAN_HISTORY_STATES = {
     "failed",
 }
 
-from app.organizers.advanced_rules import normalize_advanced_rules
+from app.organizers.advanced_rules import advanced_rules_enabled, normalize_advanced_rules
+from app.organizers.compiler import compile_organizer_preview
 from app.organizers.engine import generate_organizer_proposals
 from app.organizers.planner import plan_organizer_operations
 from app.organizers.profile_validation import (
@@ -3881,21 +3882,42 @@ class FileCenterService:
             for k in expired_keys:
                 self._preview_snapshots.pop(k, None)
 
+            profile_revision = profile.updated_at.isoformat() if profile.updated_at else None
             cached = self._preview_snapshots.get(snapshot_id) if snapshot_id else None
-            if cached and cached.get("profile_id") == profile.id and cached.get("root") == str(safe_root):
+            if (
+                cached
+                and cached.get("profile_id") == profile.id
+                and cached.get("root") == str(safe_root)
+                and cached.get("profile_revision") == profile_revision
+            ):
                 summary = cached["summary"]
                 proposals = cached["proposals"]
+                preview_digest = cached["preview_digest"]
+                source_snapshot_digest = cached["source_snapshot_digest"]
+                advanced_enabled = bool(cached.get("advanced_enabled", False))
+                structural_required = bool(cached.get("structural_required", False))
                 active_snapshot_id = snapshot_id
             else:
                 image_extensions = json.loads(profile.image_extensions or "[]")
                 video_extensions = json.loads(profile.video_extensions or "[]")
                 preserve_tags = json.loads(profile.preserve_tags or "[]")
                 cleanup_patterns = json.loads(profile.cleanup_patterns or "[]")
+                advanced_rules = json.loads(profile.advanced_rules_json or "{}")
+
+                policy = session.get(FilterPolicy, 1)
+                if policy and policy.exclude_dir_names_json:
+                    try:
+                        exclude_dir_names = json.loads(policy.exclude_dir_names_json)
+                    except Exception:
+                        exclude_dir_names = list(DEFAULT_EXCLUDE_DIR_NAMES)
+                else:
+                    exclude_dir_names = list(DEFAULT_EXCLUDE_DIR_NAMES)
 
                 quarantine_ex = [self.settings.quarantine_root] if getattr(self.settings, "quarantine_root", None) else None
-                summary, proposals = generate_organizer_proposals(
+                compilation = compile_organizer_preview(
                     safe_root,
                     allowed_roots=self.settings.allowed_roots,
+                    quarantine_root=self.settings.quarantine_root,
                     image_extensions=image_extensions,
                     video_extensions=video_extensions,
                     rename_template=profile.rename_template,
@@ -3908,15 +3930,28 @@ class FileCenterService:
                     mtime_mode=profile.mtime_mode,
                     mtime_delay_seconds=profile.mtime_delay_seconds,
                     recursive=profile.recursive,
+                    advanced_rules=advanced_rules,
                     excluded_roots=quarantine_ex,
+                    exclude_dir_names=exclude_dir_names,
                 )
+                summary = compilation.summary
+                proposals = list(compilation.proposals)
+                preview_digest = compilation.preview_digest
+                source_snapshot_digest = compilation.source_snapshot_digest
+                advanced_enabled = compilation.advanced_enabled
+                structural_required = compilation.structural_required
                 active_snapshot_id = uuid4().hex
                 self._preview_snapshots[active_snapshot_id] = {
                     "created_at": now,
                     "profile_id": profile.id,
+                    "profile_revision": profile_revision,
                     "root": str(safe_root),
                     "summary": summary,
                     "proposals": proposals,
+                    "preview_digest": preview_digest,
+                    "source_snapshot_digest": source_snapshot_digest,
+                    "advanced_enabled": advanced_enabled,
+                    "structural_required": structural_required,
                 }
 
             # Filtering
@@ -3938,6 +3973,10 @@ class FileCenterService:
                 "root": str(safe_root),
                 "summary": summary,
                 "proposals": [p.to_dict() for p in page_proposals],
+                "preview_digest": preview_digest,
+                "source_snapshot_digest": source_snapshot_digest,
+                "advanced_enabled": advanced_enabled,
+                "structural_required": structural_required,
                 "page": page,
                 "page_size": page_size,
                 "total": total,
@@ -3956,6 +3995,12 @@ class FileCenterService:
                 raise ValueError(f"方案不存在 (id={profile_id})")
             if not profile.is_builtin and profile.user_id != user_id:
                 raise PermissionError("无权访问该方案")
+
+            advanced_rules = json.loads(profile.advanced_rules_json or "{}")
+            if advanced_rules_enabled(advanced_rules):
+                raise ValueError(
+                    "Organizer Advanced Rules 当前处于 C1 只读 Preview 阶段，禁止生成执行计划"
+                )
 
             target_root = (root_override or profile.root or "").strip()
             if not target_root:
