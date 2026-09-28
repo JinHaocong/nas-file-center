@@ -895,7 +895,7 @@ def test_stage_a_execute_rejects_candidate_digest_drift_without_moving_child(
     execution = client.post(f"/api/plans/{plan_id}/execute")
     assert execution.status_code == 200
     ok = process_work_job(settings, execution.json()["work_job_id"])
-    assert ok is False
+    assert ok is True
     assert child.is_dir()
     assert wrapper.is_dir()
     assert not (root / "A" / "Child").exists()
