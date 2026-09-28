@@ -1293,6 +1293,35 @@ body,
   .nfc-app-main .nfc-page-header-copy {
     max-width: 100%;
   }
+
+  .nfc-app-main .nfc-page-title {
+    font-size: 26px;
+    line-height: 1.16;
+  }
+
+  .nfc-app-main .nfc-page-description {
+    font-size: 12.75px;
+    line-height: 1.6;
+  }
+
+  .nfc-app-main .nfc-data-panel-header {
+    padding: 0 2px 12px;
+    align-items: flex-start;
+  }
+
+  .nfc-app-main .nfc-data-panel-title {
+    font-size: 14px;
+  }
+}
+
+@media (max-width: 420px) {
+  .nfc-app-main .nfc-page-content {
+    padding-inline: 12px;
+  }
+
+  .nfc-app-main .nfc-page-title {
+    font-size: 24px;
+  }
 }
 
 
