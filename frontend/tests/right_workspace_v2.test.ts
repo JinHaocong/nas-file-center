@@ -182,7 +182,8 @@ describe('Right Workspace v2 design system', () => {
     const workspaceV49 = read('src/styles/v049-workspace.css');
 
     assert.match(css, /--nfc-w2-panel-pad-x:\s*clamp\(18px, 1\.2vw, 24px\)/);
-    assert.match(css, /\.nfc-data-panel-header[\s\S]*margin:\s*0;[\s\S]*padding:\s*0 3px 11px/);
+    assert.match(css, /--nfc-w2-panel-header-x:\s*18px/);
+    assert.match(css, /\.nfc-data-panel-header[\s\S]*margin:\s*0;[\s\S]*padding:\s*0 var\(--nfc-w2-panel-header-x\) var\(--nfc-w2-panel-header-bottom\)/);
     assert.match(css, /\.nfc-data-panel-title[\s\S]*line-height:\s*1\.4/);
     assert.match(
       css,
@@ -245,6 +246,22 @@ describe('Right Workspace v2 design system', () => {
     assert.match(organizer, /title="目录整理方案"/);
     assert.match(profileList, /title="整理方案"/);
     assert.doesNotMatch(organizer, /Organizer 整理方案/);
+  });
+
+  test('ledger and workbench panel headings share one inset and no legacy accent strip', () => {
+    const css = read('src/styles/v056-right-workspace-v2.css');
+
+    assert.match(css, /--nfc-w2-panel-header-x:\s*18px/);
+    assert.match(
+      css,
+      /\.nfc-page-layout-ledger > \.nfc-data-panel > \.nfc-data-panel-header[\s\S]*padding:\s*0 var\(--nfc-w2-panel-header-x\) var\(--nfc-w2-panel-header-bottom\)/
+    );
+    assert.match(
+      css,
+      /\.nfc-path-match-page \.nfc-tool-workbench > \.nfc-data-panel-header[\s\S]*padding:\s*0 var\(--nfc-w2-panel-header-x\) var\(--nfc-w2-panel-header-bottom\)[\s\S]*background:\s*transparent !important/
+    );
+    assert.match(css, /\.nfc-tool-workbench::after[\s\S]*content:\s*none !important/);
+    assert.match(css, /@media \(max-width: 767px\)[\s\S]*\.nfc-app-main \.nfc-data-panel-header[\s\S]*padding:\s*0 14px 10px/);
   });
 
   test('glass treatment is constrained to utility and overlay surfaces', () => {

@@ -34,6 +34,8 @@
   --nfc-w2-page-bottom: clamp(96px, 8vh, 128px);
   --nfc-w2-panel-pad-x: clamp(18px, 1.2vw, 24px);
   --nfc-w2-panel-pad-y: 20px;
+  --nfc-w2-panel-header-x: 18px;
+  --nfc-w2-panel-header-bottom: 12px;
   --nfc-w2-shadow-float: 0 24px 70px rgba(18, 24, 33, 0.14);
 }
 
@@ -360,7 +362,7 @@ body,
 .nfc-data-panel-header {
   min-height: 0;
   margin: 0;
-  padding: 0 4px 14px;
+  padding: 0 var(--nfc-w2-panel-header-x) var(--nfc-w2-panel-header-bottom);
   align-items: flex-end;
   gap: 18px;
   border: 0;
@@ -1167,7 +1169,7 @@ body,
 .nfc-app-main .nfc-data-panel-header {
   min-height: 0;
   margin: 0;
-  padding: 0 3px 11px;
+  padding: 0 var(--nfc-w2-panel-header-x) var(--nfc-w2-panel-header-bottom);
   border: 0;
   background: transparent;
 }
@@ -1223,7 +1225,7 @@ body,
 
 .nfc-app-main .nfc-system-controls-page .nfc-settings-grid > .nfc-data-panel > .nfc-data-panel-header {
   min-height: 0;
-  padding: 0 4px 14px;
+  padding: 0 var(--nfc-w2-panel-header-x) var(--nfc-w2-panel-header-bottom);
 }
 
 .nfc-app-main .nfc-system-controls-page .nfc-settings-panel-body {
@@ -1305,8 +1307,14 @@ body,
   }
 
   .nfc-app-main .nfc-data-panel-header {
-    padding: 0 2px 12px;
+    padding: 0 14px 10px;
     align-items: flex-start;
+  }
+
+  .nfc-app-main .nfc-path-match-page .nfc-tool-workbench > .nfc-data-panel-header,
+  .nfc-app-main .nfc-rename-page .nfc-tool-workbench > .nfc-data-panel-header,
+  .nfc-app-main .nfc-batch-page .nfc-tool-workbench > .nfc-data-panel-header {
+    padding: 0 14px 10px;
   }
 
   .nfc-app-main .nfc-data-panel-title {
@@ -1362,7 +1370,7 @@ body,
 }
 
 .nfc-app-main .nfc-page-layout-ledger > .nfc-data-panel > .nfc-data-panel-header {
-  padding: 0 3px 10px;
+  padding: 0 var(--nfc-w2-panel-header-x) var(--nfc-w2-panel-header-bottom);
 }
 
 .nfc-app-main .nfc-page-layout-ledger .ant-table-tbody > tr.ant-table-placeholder > td {
@@ -1873,6 +1881,25 @@ body,
   border-color: var(--nfc-w2-hairline);
   border-radius: var(--nfc-w2-radius-sm);
   background: var(--nfc-w2-surface-soft);
+}
+
+/* Shared panel-header authority ------------------------------------------------
+ * All primary content panels share the same horizontal inset. This neutralizes
+ * older ledger/workbench selectors that used incompatible 2–4px insets or
+ * decorative gradients. Compact dashboard rails remain their own composition. */
+.nfc-app-main .nfc-path-match-page .nfc-tool-workbench > .nfc-data-panel-header,
+.nfc-app-main .nfc-rename-page .nfc-tool-workbench > .nfc-data-panel-header,
+.nfc-app-main .nfc-batch-page .nfc-tool-workbench > .nfc-data-panel-header {
+  min-height: 0;
+  margin: 0;
+  padding: 0 var(--nfc-w2-panel-header-x) var(--nfc-w2-panel-header-bottom);
+  border: 0 !important;
+  background: transparent !important;
+}
+
+.nfc-app-main .nfc-tool-workbench::after {
+  content: none !important;
+  display: none !important;
 }
 
 /* File tools + Organizer */
