@@ -181,6 +181,9 @@ export const ProfilePreview: React.FC<ProfilePreviewProps> = ({
       actionableChanges > 0 ||
       (profile.mtime_mode === 'ordered' && summary!.total_directories > 0));
 
+  const stageActionCount = structuralRequired
+    ? (summary?.wrapper_candidates ?? 0)
+    : actionableChanges;
   const previewStageLabel = structuralRequired
     ? 'Stage A · Structural'
     : advancedEnabled
@@ -215,13 +218,24 @@ export const ProfilePreview: React.FC<ProfilePreviewProps> = ({
     if (proposal.conflict) {
       return <StatusBadge status="failed" label="冲突" />;
     }
-    if (proposal.proposal_type === 'wrapper_collapse' && proposal.changed) {
+    if (advancedEnabled && proposal.proposal_type === 'wrapper_collapse' && proposal.changed) {
       return <StatusBadge status="validating" label="Stage A" />;
     }
-    if (proposal.changed) {
+    if (advancedEnabled && structuralRequired && proposal.changed) {
+      return <StatusBadge status="validating" label="Stage B 锁定" />;
+    }
+    if (advancedEnabled && proposal.changed) {
       return <StatusBadge status="validating" label="Stage B" />;
     }
+    if (proposal.changed) {
+      return <StatusBadge status="validating" label="需改名" />;
+    }
     return <StatusBadge status="completed" label="已规范" />;
+  };
+
+  const proposalStageLabel = (proposal: OrganizerProposal) => {
+    if (!advancedEnabled) return 'Standard';
+    return proposal.proposal_type === 'wrapper_collapse' ? 'Stage A' : 'Stage B';
   };
 
   const proposalRuleLabel = (proposal: OrganizerProposal) => {
@@ -243,7 +257,7 @@ export const ProfilePreview: React.FC<ProfilePreviewProps> = ({
       render: (_: unknown, record: OrganizerProposal) => (
         <div className="nfc-inline-badges">
           <span className="nfc-kind-badge">
-            {record.proposal_type === 'wrapper_collapse' ? 'Stage A' : 'Stage B'}
+            {proposalStageLabel(record)}
           </span>
           <span className="nfc-kind-badge">{proposalRuleLabel(record)}</span>
         </div>
@@ -356,8 +370,8 @@ export const ProfilePreview: React.FC<ProfilePreviewProps> = ({
                   : advancedEnabled
                   ? '生成 Stage B 重命名 Plan'
                   : '生成整理 Plan'}
-                {actionableChanges > 0
-                  ? ` (${actionableChanges} 项待变更)`
+                {stageActionCount > 0
+                  ? ` (${stageActionCount} 项待变更)`
                   : profile.mtime_mode === 'ordered'
                   ? ` (${summary.total_directories} 项 mtime 刷新)`
                   : ''}
@@ -409,7 +423,7 @@ export const ProfilePreview: React.FC<ProfilePreviewProps> = ({
             />
             <MetricCard
               label={structuralRequired ? "Stage A 候选" : "待变更"}
-              value={(structuralRequired ? (summary.wrapper_candidates ?? 0) : actionableChanges).toLocaleString()}
+              value={stageActionCount.toLocaleString()}
               meta={structuralRequired ? "仅结构阶段可生成" : "Stage B / 标准操作"}
               tone="attention"
             />
@@ -495,7 +509,7 @@ export const ProfilePreview: React.FC<ProfilePreviewProps> = ({
                           <div className="nfc-mobile-record-heading">
                             <div className="nfc-inline-badges">
                               <span className="nfc-kind-badge">
-                                {proposal.proposal_type === 'wrapper_collapse' ? 'Stage A' : 'Stage B'}
+                                {proposalStageLabel(proposal)}
                               </span>
                               <span className="nfc-kind-badge">{proposalRuleLabel(proposal)}</span>
                               <span className="nfc-kind-badge">
