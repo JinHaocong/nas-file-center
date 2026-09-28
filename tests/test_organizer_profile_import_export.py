@@ -47,7 +47,7 @@ def test_export_and_import_roundtrip(tmp_path: Path):
     export_resp = client.get(f"/api/organizer-profiles/{profile_id}/export")
     assert export_resp.status_code == 200
     exported_data = export_resp.json()
-    assert exported_data["schema_version"] == 1
+    assert exported_data["schema_version"] == 2
     assert "profile" in exported_data
     assert exported_data["profile"]["name"] == "导出导入测试方案"
 
