@@ -225,7 +225,7 @@ export const ProfileList: React.FC<ProfileListProps> = ({
   return (
     <>
       <DataPanel
-        title="整理 Profile"
+        title="整理方案"
         description="内置 Profile 只读；复制后可编辑为个人方案。导入/导出使用 JSON 配置。"
         action={<span className="nfc-panel-count">{data?.total || 0} profiles</span>}
         className="nfc-panel-flush"
@@ -260,13 +260,13 @@ export const ProfileList: React.FC<ProfileListProps> = ({
               loading={isLoading}
               locale={{
                 emptyText: (
-                  <Empty description="暂无整理配置">
+                  <Empty description="暂无整理方案">
                     <Button
                       type="primary"
                       icon={<PlusOutlined />}
                       onClick={onCreateProfile}
                     >
-                      新建 Profile
+                      新建方案
                     </Button>
                   </Empty>
                 ),
