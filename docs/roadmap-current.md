@@ -165,7 +165,7 @@ C0 established:
   `MOVE → rmdir_empty` primitive, extends cleanup authority only to the explicit
   Organizer structural Plan context, and keeps global delete disabled.
 - **C4 CLOSED** — shared Advanced Rules editor, digest-bound standalone/Workflow staged Preview, blocking-conflict UI, explicit Stage A/Stage B row separation, and fresh Preview gating after Stage A.
-- **C5 CURRENT** — full closure / Docker / isolated real-NAS acceptance.
+- **C5 CURRENT** — full closure / Docker / isolated real-NAS acceptance. Repository closure harness and dedicated C5 workflow are implemented; final closure remains blocked on passing the same harness on the actual NAS filesystem with zero residue. Closure record: [`organizer-advanced-rules-c5-closure.md`](organizer-advanced-rules-c5-closure.md).
 
 C3 does not authorize generic delete, recursive rmdir, shell move, or a second
 filesystem executor.
