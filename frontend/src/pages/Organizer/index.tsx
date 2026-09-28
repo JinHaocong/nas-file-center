@@ -50,7 +50,7 @@ export const OrganizerPage: React.FC = () => {
       {!activeProfile ? (
         <>
           <PageHeader
-            title="Organizer 整理方案"
+            title="目录整理方案"
             description="保存可复用的目录统计、命名、编号、标签与 mtime 规则；先只读 Preview，再生成 Plan。"
           />
           <ProfileList
