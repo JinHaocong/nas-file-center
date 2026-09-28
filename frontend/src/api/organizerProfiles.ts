@@ -64,6 +64,7 @@ export const organizerProfilesApi = {
     data: {
       root?: string;
       include_touch?: boolean;
+      expected_preview_digest?: string;
     }
   ) => {
     return api.post<{ id: number; name: string; kind: string; status: string }>(

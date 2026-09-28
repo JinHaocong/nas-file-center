@@ -98,7 +98,7 @@ sequence.
 
 ## 5. CURRENT — Organizer Advanced Rules
 
-**Status: C0 CLOSED / C1 CLOSED / C2 CLOSED / C3 CLOSED / C4 CURRENT — FRONTEND**
+**Status: C0 CLOSED / C1 CLOSED / C2 CLOSED / C3 CLOSED / C4 CLOSED / C5 CURRENT — CLOSURE**
 
 This is the next product-development phase.
 
@@ -164,8 +164,8 @@ C0 established:
   the existing Gate6-B descriptor-bound discovery/capability probe and exact
   `MOVE → rmdir_empty` primitive, extends cleanup authority only to the explicit
   Organizer structural Plan context, and keeps global delete disabled.
-- **C4 CURRENT** — Advanced Rules UI and staged Stage A → fresh Preview → Stage B UX.
-- **C5 NEXT** — full closure / Docker / isolated real-NAS acceptance.
+- **C4 CLOSED** — shared Advanced Rules editor, digest-bound standalone/Workflow staged Preview, blocking-conflict UI, explicit Stage A/Stage B row separation, and fresh Preview gating after Stage A.
+- **C5 CURRENT** — full closure / Docker / isolated real-NAS acceptance.
 
 C3 does not authorize generic delete, recursive rmdir, shell move, or a second
 filesystem executor.
