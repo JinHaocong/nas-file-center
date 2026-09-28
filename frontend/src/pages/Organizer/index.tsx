@@ -10,7 +10,7 @@ import { ProfileFormModal } from './ProfileFormModal';
 import { PageHeader } from '../../components/ui/PageHeader';
 
 export const OrganizerPage: React.FC = () => {
-  useTitle('Organizer 整理方案');
+  useTitle('目录整理方案');
   const queryClient = useQueryClient();
 
   const [activeProfile, setActiveProfile] = useState<OrganizerProfile | null>(null);
