@@ -1648,6 +1648,7 @@ class FileCenterService:
                 if (
                     isinstance(structural_meta, dict)
                     and structural_meta.get("utility_action") == "single_child_wrapper_collapse"
+                    and structural_meta.get("organizer_structural") is True
                 ):
                     candidate_id = structural_meta.get("candidate_id")
                     wrapper_path = structural_meta.get("wrapper_path")
@@ -2356,7 +2357,8 @@ class FileCenterService:
                         "STRUCTURAL_CANDIDATE_BINDING_MISSING: invalid single-child wrapper identity metadata"
                     ) from exc
 
-                if not matches_single_child_wrapper_candidate_id(
+                is_organizer_structural = structural_meta.get("organizer_structural") is True
+                if is_organizer_structural and not matches_single_child_wrapper_candidate_id(
                     candidate_id=candidate_id,
                     wrapper_path=wrapper_path,
                     wrapper_device=wrapper_device,
@@ -2372,7 +2374,7 @@ class FileCenterService:
                         "STRUCTURAL_CANDIDATE_DIGEST_MISMATCH: single-child wrapper candidate facts do not match candidate_id"
                     )
 
-                if it["operation"] == "move":
+                if is_organizer_structural and it["operation"] == "move":
                     from app.execution.utility_wrapper_pair import open_utility_wrapper_live_guard
 
                     try:
