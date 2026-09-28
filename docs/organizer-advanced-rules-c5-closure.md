@@ -1,8 +1,8 @@
 # Organizer Advanced Rules — C5 Closure Record
 
-Status: **C5 CURRENT — REPOSITORY CLOSURE / REAL-NAS ACCEPTANCE PENDING**  
-Product baseline: **v0.4.7**  
-C4 integrated baseline: `main@00a0ddb7db115f4299ae3f38643dac1be569ac84`  
+Status: **C5 CURRENT — REPOSITORY CLOSURE / REAL-NAS ACCEPTANCE PENDING**
+Product baseline: **v0.4.7**
+C4 integrated baseline: `main@00a0ddb7db115f4299ae3f38643dac1be569ac84`
 Architecture authority: [`organizer-advanced-rules-architecture-freeze.md`](organizer-advanced-rules-architecture-freeze.md)
 
 ## 1. Closure boundary
@@ -17,7 +17,7 @@ C5 closes Organizer Advanced Rules only when all frozen C0 acceptance conditions
 6. no C5 change expands product mutation authority;
 7. the final evidence is bound to the exact candidate commit.
 
-Repository CI can prove items 1–3, 5 in the synthetic runner harness, and 6.  
+Repository CI can prove items 1–3, 5 in the synthetic runner harness, and 6.
 It **cannot** prove item 4 unless the actual NAS filesystem is mounted or the harness is run on that NAS. GitHub-hosted runner evidence must not be relabeled as real-NAS evidence.
 
 ## 2. C5 acceptance harness
