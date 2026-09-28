@@ -14,8 +14,7 @@ from app.filters.excludes import DEFAULT_EXCLUDE_DIR_NAMES, build_exclude_predic
 from app.filters.validation import validate_filter_ast
 from app.fs_ops import NoreplaceProbeCleanupError
 from app.models import FilterPolicy, IndexRoot, IndexedPath, ScanJob
-from app.organizers.engine import generate_organizer_proposals
-from app.organizers.planner import plan_organizer_operations
+from app.organizers.compiler import compile_organizer_preview
 from app.organizers.profile_validation import (
     DEFAULT_ORGANIZER_RENAME_TEMPLATE,
     DEFAULT_ORGANIZER_STATISTICS_TEMPLATE,
@@ -669,9 +668,10 @@ class WorkflowCompiler:
         if m_delay is None:
             m_delay = 2.0
 
-        summary, proposals = generate_organizer_proposals(
+        compilation = compile_organizer_preview(
             safe_root,
             allowed_roots=self.allowed_roots,
+            quarantine_root=self.quarantine_root,
             image_extensions=image_extensions,
             video_extensions=video_extensions,
             rename_template=snapshot.get("rename_template") or DEFAULT_ORGANIZER_RENAME_TEMPLATE,
@@ -684,34 +684,23 @@ class WorkflowCompiler:
             mtime_mode=snapshot.get("mtime_mode") or "none",
             mtime_delay_seconds=float(m_delay),
             recursive=bool(snapshot.get("recursive", False)),
+            advanced_rules=snapshot.get("advanced_rules"),
             excluded_roots=quarantine_ex,
             exclude_dir_names=excludes,
+            max_proposals=max_candidates,
         )
 
-        if len(proposals) > max_candidates:
-            raise WorkflowSafetyLimitExceededError(
-                f"Candidate count ({len(proposals)}) exceeds safety limit ({max_candidates})",
-                details={"candidates": len(proposals), "limit": max_candidates},
-            )
+        proposals = list(compilation.proposals)
+        summary = compilation.summary
 
-        if summary.get("conflicts", 0) > 0:
+        if not compilation.advanced_enabled and summary.get("conflicts", 0) > 0:
             conflict_reasons = [p.conflict_reason for p in proposals if p.conflict and p.conflict_reason]
             raise VirtualGraphCollisionError(
                 f"Organizer proposals contain {summary['conflicts']} conflicts",
                 details={"conflicts": conflict_reasons[:5]},
             )
 
-        items, cycle_sources = plan_organizer_operations(
-            proposals,
-            include_touch=True,
-            mtime_mode=snapshot.get("mtime_mode") or "none",
-        )
-        if cycle_sources:
-            raise VirtualGraphCycleError(
-                f"Detected rename cycle in organizer proposals: {sorted(cycle_sources)}",
-                details={"cycle_sources": sorted(cycle_sources)},
-            )
-
+        items = list(compilation.preview_operations)
         if len(items) > max_plan_items:
             raise WorkflowSafetyLimitExceededError(
                 f"Planned operations count ({len(items)}) exceeds safety limit ({max_plan_items})",
@@ -725,6 +714,12 @@ class WorkflowCompiler:
         compile_context = {
             "effective_exclude_dir_names": sorted(list(set(excludes))),
             "filter_policy_updated_at": policy.updated_at.isoformat() if policy and policy.updated_at else None,
+            "organizer_preview_digest": compilation.preview_digest,
+            "organizer_source_snapshot_digest": compilation.source_snapshot_digest,
+            "organizer_config_digest": compilation.config_digest,
+            "organizer_summary": summary,
+            "organizer_advanced_readonly": compilation.advanced_enabled,
+            "organizer_structural_required": compilation.structural_required,
         }
 
         digest_payload = {
@@ -738,8 +733,8 @@ class WorkflowCompiler:
         digest = compute_definition_sha256(digest_payload)
 
         return CompilationResult(
-            matched_count=summary.get("total_directories", len(proposals)),
-            matched_bytes=summary.get("total_size", 0),
+            matched_count=len(proposals),
+            matched_bytes=summary.get("total_bytes", 0),
             planned_operations=items,
             compile_digest=digest,
             runtime_inputs=runtime_inputs,
