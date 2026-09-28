@@ -3538,7 +3538,10 @@ class FileCenterService:
         else:
             clean_root = None
 
-        recursive = bool(payload.get("recursive", False))
+        recursive_raw = payload.get("recursive", False)
+        if not isinstance(recursive_raw, bool):
+            raise ValueError("recursive 必须为布尔值")
+        recursive = recursive_raw
 
         image_extensions = validate_and_normalize_image_extensions(payload.get("image_extensions"))
         video_extensions = validate_and_normalize_video_extensions(payload.get("video_extensions"))
