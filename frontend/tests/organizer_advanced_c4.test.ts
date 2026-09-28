@@ -74,6 +74,8 @@ describe('Organizer Advanced Rules C4 frontend contract', () => {
       'Stage B 已锁定',
       '必须重新 Preview',
       'proposal_type',
+      "if (!advancedEnabled) return 'Standard'",
+      'Stage B 锁定',
       'summary!.conflicts === 0',
     ]);
   });
@@ -88,6 +90,8 @@ describe('Organizer Advanced Rules C4 frontend contract', () => {
       'organizerConflicts === 0',
       'Organizer Stage A Structural Preview',
       'Organizer Stage B Rename Preview',
+      'Stage B · locked',
+      'key: "organizer_stage"',
       'Stage B rename/file/prefix 计划已锁定',
       '必须重新 Preview',
     ]);
