@@ -206,13 +206,43 @@ def _resolve_frozen_unlink_purge_authority(
         return raw_entry_id, frozen_manifest, None
 
 
+def _is_single_child_wrapper_cleanup_plan_context(plan_metadata: dict[str, Any]) -> bool:
+    """Return True only for the two frozen plan contexts allowed to remove a wrapper."""
+    if not isinstance(plan_metadata, dict):
+        return False
+
+    compile_context = plan_metadata.get("compile_context")
+    utility_context = (
+        plan_metadata.get("source") == "workflow"
+        and plan_metadata.get("workflow_mode") == "utility"
+        and isinstance(compile_context, dict)
+        and compile_context.get("utility_action") == "single_child_wrapper_collapse"
+    )
+    if utility_context:
+        return True
+
+    organizer_context = (
+        plan_metadata.get("organizer_advanced") is True
+        and plan_metadata.get("organizer_stage") == "structural"
+        and plan_metadata.get("organizer_structural_action") == "single_child_wrapper_collapse"
+        and (
+            plan_metadata.get("source") == "organizer"
+            or (
+                plan_metadata.get("source") == "workflow"
+                and plan_metadata.get("workflow_mode") == "organizer"
+            )
+        )
+    )
+    return organizer_context
+
+
 def _resolve_utility_empty_wrapper_cleanup_authority(
     item: OperationItem,
     *,
     plan_id: str,
     session_factory: Any,
 ) -> bool:
-    """Authorize only the exact frozen Utility MOVE -> empty-wrapper cleanup pair."""
+    """Authorize only an exact frozen single-child MOVE -> empty-wrapper cleanup pair."""
     try:
         numeric_plan_id = int(plan_id)
     except (TypeError, ValueError):
@@ -232,16 +262,7 @@ def _resolve_utility_empty_wrapper_cleanup_authority(
                 plan_metadata = json.loads(plan.metadata_json or "{}")
             except Exception:
                 return False
-            if not isinstance(plan_metadata, dict):
-                return False
-            if plan_metadata.get("source") != "workflow":
-                return False
-            if plan_metadata.get("workflow_mode") != "utility":
-                return False
-            compile_context = plan_metadata.get("compile_context")
-            if not isinstance(compile_context, dict):
-                return False
-            if compile_context.get("utility_action") != "single_child_wrapper_collapse":
+            if not _is_single_child_wrapper_cleanup_plan_context(plan_metadata):
                 return False
 
             current_rows = list(
@@ -929,7 +950,7 @@ def execute_item(
             if utility_empty_cleanup_authorized and not os.path.lexists(source):
                 return ItemResult(
                     "completed",
-                    "paired Utility wrapper cleanup already converged",
+                    "paired wrapper cleanup already converged",
                 )
 
             if source.is_symlink() or os.path.islink(source) or not source.is_dir():
