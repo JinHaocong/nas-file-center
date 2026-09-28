@@ -17,6 +17,10 @@ from app.planning.dedupe_preview import (
     DedupeEmptyPlanError,
 )
 from app.planning.stale import capture_source_snapshot
+from app.organizers.structural import (
+    STRUCTURAL_ACTION as ORGANIZER_STRUCTURAL_ACTION,
+    compile_organizer_structural_stage,
+)
 from app.workflows.compiler import (
     DedupeWorkflowSafetySnapshot,
     MAX_WORKFLOW_CANDIDATES,
@@ -833,6 +837,8 @@ class WorkflowService:
                 and res.compile_context.get("organizer_advanced_readonly") is True
             )
             organizer_generated_snapshots: dict[str, dict[str, Any]] = {}
+            organizer_structural = None
+            plan_operations = list(res.planned_operations)
             if organizer_advanced:
                 actual_preview_digest = res.compile_context.get("organizer_preview_digest")
                 if (
@@ -847,13 +853,6 @@ class WorkflowService:
                         },
                     )
 
-                if res.compile_context.get("organizer_structural_required") is True:
-                    raise WorkflowValidationError(
-                        "Organizer Advanced Rules requires Stage A structural collapse before rename Plan generation",
-                        code="ORGANIZER_STRUCTURAL_STAGE_REQUIRED",
-                        status_code=409,
-                    )
-
                 organizer_summary = res.compile_context.get("organizer_summary") or {}
                 if int(organizer_summary.get("conflicts", 0) or 0) > 0:
                     raise WorkflowValidationError(
@@ -862,15 +861,35 @@ class WorkflowService:
                         status_code=409,
                     )
 
-                for op in res.planned_operations:
-                    if op.get("operation") == "rename":
-                        organizer_generated_snapshots[op["source"]] = capture_source_snapshot(
-                            op["source"],
-                            allowed_roots=self.settings.allowed_roots,
-                            quarantine_root=self.settings.quarantine_root,
+                if res.compile_context.get("organizer_structural_required") is True:
+                    organizer_structural = compile_organizer_structural_stage(
+                        res.compile_context.get("organizer_root") or "",
+                        proposals=res.compile_context.get("organizer_wrapper_proposals") or [],
+                        allowed_roots=self.settings.allowed_roots,
+                        quarantine_root=self.settings.quarantine_root,
+                        preview_digest=str(actual_preview_digest),
+                        source_snapshot_digest=str(
+                            res.compile_context.get("organizer_source_snapshot_digest") or ""
+                        ),
+                        limit=MAX_WORKFLOW_CANDIDATES,
+                    )
+                    plan_operations = list(organizer_structural.operations)
+                    if not plan_operations:
+                        raise WorkflowValidationError(
+                            "Organizer Stage A has no actionable structural operations",
+                            code="ORGANIZER_STRUCTURAL_EMPTY",
+                            status_code=409,
                         )
+                else:
+                    for op in plan_operations:
+                        if op.get("operation") == "rename":
+                            organizer_generated_snapshots[op["source"]] = capture_source_snapshot(
+                                op["source"],
+                                allowed_roots=self.settings.allowed_roots,
+                                quarantine_root=self.settings.quarantine_root,
+                            )
 
-            if not res.planned_operations:
+            if not plan_operations:
                 if definition.mode == "dedupe":
                     raise DedupeEmptyPlanError("Dedupe plan has no operations to execute")
                 raise WorkflowValidationError("No operations planned in this workflow", code="EMPTY_PLAN")
@@ -1007,32 +1026,42 @@ class WorkflowService:
                 if definition.mode == "utility":
                     plan_metadata["workflow_mode"] = "utility"
                 elif organizer_advanced:
+                    organizer_stage = "structural" if organizer_structural is not None else "rename"
                     plan_metadata.update({
                         "workflow_mode": "organizer",
                         "organizer_advanced": True,
-                        "organizer_stage": "rename",
+                        "organizer_stage": organizer_stage,
                         "organizer_preview_digest": res.compile_context.get("organizer_preview_digest"),
                         "organizer_source_snapshot_digest": res.compile_context.get("organizer_source_snapshot_digest"),
                         "organizer_config_digest": res.compile_context.get("organizer_config_digest"),
                     })
+                    if organizer_structural is not None:
+                        plan_metadata.update({
+                            "organizer_structural_action": ORGANIZER_STRUCTURAL_ACTION,
+                            "organizer_structural_digest": organizer_structural.structural_digest,
+                            "organizer_structural_candidates": list(organizer_structural.candidate_rows),
+                        })
 
                 plan = BatchPlan(
                     name=plan_name,
                     kind=f"workflow-{wf_b.id}",
                     status="draft",
-                    expected_changes=len(res.planned_operations),
+                    expected_changes=len(plan_operations),
                     expected_reclaim_bytes=0,
                     metadata_json=json.dumps(plan_metadata, ensure_ascii=False),
                 )
                 write_session.add(plan)
                 write_session.flush()
 
-                for op in res.planned_operations:
+                for op in plan_operations:
                     item_metadata = {k: v for k, v in op.items() if k not in {"source", "target", "operation", "sequence"}}
                     if organizer_advanced:
+                        organizer_stage = "structural" if organizer_structural is not None else "rename"
                         item_metadata["organizer_advanced"] = True
-                        item_metadata["organizer_stage"] = "rename"
+                        item_metadata["organizer_stage"] = organizer_stage
                         item_metadata["preview_only"] = False
+                        if organizer_structural is not None:
+                            item_metadata["organizer_structural_action"] = ORGANIZER_STRUCTURAL_ACTION
                         generated_snapshot = organizer_generated_snapshots.get(op["source"])
                         if generated_snapshot is not None:
                             item_metadata["organizer_generated_snapshot"] = generated_snapshot
