@@ -177,6 +177,7 @@ describe('Right Workspace v2 design system', () => {
   test('global visual rhythm keeps section titles clear and restores intentional padding', () => {
     const css = read('src/styles/v056-right-workspace-v2.css');
     const toolsCss = read('src/styles/pages/tools.css');
+    const workspaceV49 = read('src/styles/v049-workspace.css');
 
     assert.match(css, /--nfc-w2-panel-pad-x:\s*clamp\(18px, 1\.2vw, 24px\)/);
     assert.match(css, /\.nfc-data-panel-header[\s\S]*margin:\s*0;[\s\S]*padding:\s*0 4px 14px/);
@@ -188,6 +189,9 @@ describe('Right Workspace v2 design system', () => {
     assert.match(css, /\.nfc-rename-page \.nfc-data-panel-body,[\s\S]*padding:\s*26px 28px/);
     assert.doesNotMatch(toolsCss, /margin:\s*-20px -22px 18px/);
     assert.doesNotMatch(toolsCss, /margin:\s*-16px -12px 15px/);
+    assert.doesNotMatch(workspaceV49, /margin:\s*-20px -22px 18px/);
+    assert.doesNotMatch(workspaceV49, /margin:\s*-16px -12px 15px/);
+    assert.match(css, /\.nfc-system-controls-page \.nfc-settings-grid > \.nfc-data-panel > \.nfc-data-panel-header[\s\S]*min-height:\s*0/);
     assert.match(toolsCss, /\.nfc-rename-page \.nfc-tool-workbench > \.nfc-data-panel-header[\s\S]*margin:\s*0;[\s\S]*padding:\s*0 4px 14px/);
   });
 
