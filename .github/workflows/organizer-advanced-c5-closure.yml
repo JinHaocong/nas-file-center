@@ -1,0 +1,215 @@
+name: Organizer Advanced C5 Closure
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'app/organizers/**'
+      - 'app/execution/**'
+      - 'app/tasks/**'
+      - 'app/service.py'
+      - 'tests/test_organizer_advanced_rules_*.py'
+      - 'frontend/**'
+      - 'scripts/organizer_advanced_c5_acceptance.py'
+      - 'docs/organizer-advanced-rules-*.md'
+      - 'docs/roadmap-current.md'
+      - 'Dockerfile'
+      - '.github/workflows/organizer-advanced-c5-closure.yml'
+  push:
+    branches:
+      - feature/organizer-advanced-c5-closure
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: organizer-advanced-c5-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  closure-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      CONFIG_DIR: /tmp/nfc-config
+      DATA_MOUNT: /tmp/nfc-data
+      ALLOWED_ROOTS: /tmp/nfc-data
+      QUARANTINE_ROOT: /tmp/nfc-data/.nas-file-center-trash
+      C4_BASELINE_SHA: 00a0ddb7db115f4299ae3f38643dac1be569ac84
+
+    steps:
+      - name: Checkout exact candidate with history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Record candidate identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "candidate_sha=$(git rev-parse HEAD)"
+            echo "candidate_ref=${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
+            echo "c4_baseline_sha=${C4_BASELINE_SHA}"
+            echo "merge_base=$(git merge-base "${C4_BASELINE_SHA}" HEAD)"
+          } | tee organizer-c5-identity.txt
+          test "$(git merge-base "${C4_BASELINE_SHA}" HEAD)" = "${C4_BASELINE_SHA}"
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install backend test dependencies
+        run: python -m pip install -e '.[test]'
+
+      - name: Compile acceptance harness
+        run: python -m py_compile scripts/organizer_advanced_c5_acceptance.py
+
+      - name: Run focused Organizer Advanced Rules suite
+        shell: bash
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          pytest tests/test_organizer_advanced_rules_*.py -q 2>&1 | tee organizer-c5-focused.log
+
+      - name: Run standalone isolated acceptance harness
+        shell: bash
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          ACCEPT_ROOT="${RUNNER_TEMP}/nfc-organizer-c5-acceptance"
+          mkdir "${ACCEPT_ROOT}"
+          python scripts/organizer_advanced_c5_acceptance.py             --project-test-root "${ACCEPT_ROOT}"             --confirm-synthetic-only YES             --evidence-json organizer-c5-synthetic-acceptance.json             2>&1 | tee organizer-c5-synthetic-acceptance.log
+          test -z "$(find "${ACCEPT_ROOT}" -mindepth 1 -maxdepth 1 -print -quit)"
+          rmdir "${ACCEPT_ROOT}"
+
+      - name: Run full backend regression
+        shell: bash
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          pytest --disable-warnings -q 2>&1 | tee backend-full-regression.log
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run frontend tests
+        shell: bash
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          npm test 2>&1 | tee ../frontend-tests.log
+
+      - name: Typecheck frontend
+        shell: bash
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          npm run typecheck 2>&1 | tee ../frontend-typecheck.log
+
+      - name: Build frontend
+        shell: bash
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          npm run build 2>&1 | tee ../frontend-build.log
+
+      - name: Verify C5 scope and mutation-authority containment
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check "${C4_BASELINE_SHA}...HEAD"
+
+          {
+            echo "# C5 diff stat"
+            git diff --stat "${C4_BASELINE_SHA}...HEAD"
+            echo
+            echo "# C5 changed files"
+            git diff --name-status "${C4_BASELINE_SHA}...HEAD"
+            echo
+            echo "# Product app changes relative to C4 baseline"
+            git diff --name-only "${C4_BASELINE_SHA}...HEAD" -- app
+            echo
+            echo "# New recursive-delete primitives in product app"
+            git diff --unified=0 "${C4_BASELINE_SHA}...HEAD" -- app |
+              grep -E '^\+[^+].*(rmtree|rm -rf|os\.remove\(|os\.unlink\()' || true
+          } | tee organizer-c5-scope-review.txt
+
+          if git diff --name-only "${C4_BASELINE_SHA}...HEAD" -- app | grep -q .; then
+            echo "BLOCKED: C5 closure must not expand or modify product app mutation authority" >&2
+            exit 1
+          fi
+
+          if git diff --unified=0 "${C4_BASELINE_SHA}...HEAD" -- app |
+             grep -Eq '^\+[^+].*(rmtree|rm -rf|os\.remove\(|os\.unlink\()'; then
+            echo "BLOCKED: C5 introduced a new destructive primitive in product app" >&2
+            exit 1
+          fi
+
+      - name: Upload C5 closure evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: organizer-c5-closure-${{ github.sha }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            organizer-c5-identity.txt
+            organizer-c5-focused.log
+            organizer-c5-synthetic-acceptance.json
+            organizer-c5-synthetic-acceptance.log
+            backend-full-regression.log
+            frontend-tests.log
+            frontend-typecheck.log
+            frontend-build.log
+            organizer-c5-scope-review.txt
+
+  linux-amd64-docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build linux amd64 Organizer C5 candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="nas-file-center:organizer-c5-${GITHUB_SHA::7}"
+          echo "candidate_tag=${TAG}" | tee organizer-c5-docker-evidence.txt
+          docker buildx build             --platform linux/amd64             --load             --tag "${TAG}"             . 2>&1 | tee organizer-c5-docker-build.log
+          docker image inspect             --format 'id={{.Id}} os={{.Os}} arch={{.Architecture}} created={{.Created}}'             "${TAG}" | tee -a organizer-c5-docker-evidence.txt
+          test "$(docker image inspect --format '{{.Architecture}}' "${TAG}")" = "amd64"
+          test "$(docker image inspect --format '{{.Os}}' "${TAG}")" = "linux"
+          docker run --rm --entrypoint python "${TAG}" -c             "from app.organizers.compiler import compile_organizer_preview; print('organizer_compiler_import=ok')" |
+            tee -a organizer-c5-docker-evidence.txt
+
+      - name: Upload C5 Docker evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: organizer-c5-docker-${{ github.sha }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            organizer-c5-docker-build.log
+            organizer-c5-docker-evidence.txt
