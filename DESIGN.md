@@ -1,7 +1,9 @@
 # NAS File Center Design System
 
-> Status: v0.4.0 C0 FROZEN
+> Product release authority: **v0.4.7**
+> Historical design baseline: v0.4.0 C0 FROZEN
 > Baseline: `main@08ce4046a556e7f3dec1d2de1a7d4ea37c610f7f`
+> Design amendment labels are visual-history identifiers unless explicitly promoted by release metadata; e.g. **v0.5.6 Right Workspace v2 does not mean the package/image version is 0.5.6**.
 > Reference corpus pin: `VoltAgent/awesome-design-md@8147538b4226ae41e2487a9179e3bcc1f68e8554`
 > Runtime dependency: none
 > Implementation layer: React 18 + TypeScript + Vite + Ant Design 5
@@ -765,6 +767,8 @@ This redesign does not change filesystem, Plan, Worker, Quarantine, purge, RBAC 
 
 
 ## v0.5.6 Right Workspace v2 — Calm NAS Workbench
+
+> **Design revision only**: this heading is retained as design-history provenance. The current product/package/Docker release remains **v0.4.7**.
 
 This pass supersedes the accumulated right-side workspace skins while preserving the accepted left navigation, mobile dock and every file-operation safety boundary.
 
