@@ -262,7 +262,7 @@ describe('Right Workspace v2 design system', () => {
       /\.nfc-path-match-page \.nfc-tool-workbench > \.nfc-data-panel-header[\s\S]*padding:\s*var\(--nfc-w2-panel-header-top\) var\(--nfc-w2-panel-header-x\) var\(--nfc-w2-panel-header-bottom\)[\s\S]*background:\s*transparent !important/
     );
     assert.match(css, /\.nfc-tool-workbench::after[\s\S]*content:\s*none !important/);
-    assert.match(css, /@media \(max-width: 767px\)[\s\S]*\.nfc-app-main \.nfc-data-panel-header[\s\S]*padding:\s*0 14px 10px/);
+    assert.match(css, /@media \(max-width: 767px\)[\s\S]*\.nfc-app-main \.nfc-data-panel-header[\s\S]*padding:\s*13px 14px 11px/);
   });
 
   test('global title system is visually calm and gives section headers real top inset', () => {
