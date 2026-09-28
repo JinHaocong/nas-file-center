@@ -8,8 +8,8 @@
 .nfc-login-panel {
   position: relative;
   overflow: hidden;
-  width: min(408px, 100%);
-  padding: 28px;
+  width: min(432px, 100%);
+  padding: 30px;
   border: 1px solid var(--nfc-v49-line, var(--nfc-border-soft));
   border-radius: var(--nfc-v49-radius-xl, 16px);
   background: var(--nfc-v49-surface, var(--nfc-surface-1));
@@ -50,8 +50,21 @@
   background: var(--nfc-v49-line, var(--nfc-border-soft));
 }
 
+.nfc-login-panel .ant-input,
+.nfc-login-panel .ant-input-affix-wrapper {
+  min-height: 42px;
+  border-radius: var(--nfc-radius-control);
+}
+
+.nfc-login-submit {
+  min-height: 44px;
+  border-radius: var(--nfc-radius-control);
+}
+
 .nfc-login-security-note {
-  border-color: var(--nfc-v49-line, var(--nfc-border-soft));
+  margin-top: 18px;
+  padding: 12px 14px;
+  border: 1px solid var(--nfc-v49-line, var(--nfc-border-soft));
   border-radius: var(--nfc-v49-radius-md, var(--nfc-radius-inner));
   background: var(--nfc-v49-surface-soft, var(--nfc-surface-2));
 }
@@ -63,5 +76,6 @@
 
   .nfc-login-panel {
     padding: 24px 20px;
+    border-radius: 14px;
   }
 }
