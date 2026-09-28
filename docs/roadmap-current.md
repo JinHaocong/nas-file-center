@@ -98,16 +98,18 @@ sequence.
 
 ## 5. CURRENT — Organizer Advanced Rules
 
-**Status: C0 ARCHITECTURE FREEZE / SOURCE AUDIT NEXT**
+**Status: C0 ARCHITECTURE FROZEN / C1 SCHEMA + SHARED READ-ONLY COMPILER NEXT**
 
 This is the next product-development phase.
 
 The intended product direction is to extend the existing Organizer Profile /
 Preview / Plan pipeline without introducing a second mutation authority.
 
-### C0 goals
+### C0 closure
 
-Source-audit and freeze the following proposed rules before implementation:
+Architecture freeze: [`organizer-advanced-rules-architecture-freeze.md`](organizer-advanced-rules-architecture-freeze.md)
+
+C0 source-audited and froze the following rules:
 
 1. **Depth-aware directory rules**
    - root depth = 0;
@@ -137,9 +139,9 @@ Source-audit and freeze the following proposed rules before implementation:
      revalidated as truly empty;
    - preserve rollback/audit/Plan safety boundaries.
 
-### Required C0 outputs
+### Frozen C0 outputs
 
-Before implementation begins, C0 must produce:
+C0 established:
 
 - current Organizer source ownership map;
 - Profile schema compatibility decision;
@@ -151,7 +153,7 @@ Before implementation begins, C0 must produce:
 - stale / conflict / rollback semantics;
 - TDD matrix, Docker validation plan and real-NAS acceptance plan.
 
-No direct filesystem implementation is authorized until C0 is frozen.
+Implementation may now proceed to C1. C1 is schema + shared read-only compiler only; it does not add new filesystem mutation authority.
 
 ## 6. After Organizer Advanced Rules
 
