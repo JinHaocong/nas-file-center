@@ -812,6 +812,16 @@ class WorkflowService:
                     },
                 )
 
+            if (
+                definition.mode == "organizer"
+                and res.compile_context.get("organizer_advanced_readonly") is True
+            ):
+                raise WorkflowValidationError(
+                    "Organizer Advanced Rules 当前处于 C1 只读 Preview 阶段，禁止生成工作流执行计划",
+                    code="ORGANIZER_ADVANCED_READONLY",
+                    status_code=409,
+                )
+
             if not res.planned_operations:
                 if definition.mode == "dedupe":
                     raise DedupeEmptyPlanError("Dedupe plan has no operations to execute")
