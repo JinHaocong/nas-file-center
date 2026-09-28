@@ -150,6 +150,27 @@ describe('Right Workspace v2 design system', () => {
     assert.match(loginCss, /\.nfc-login-security-note[\s\S]*border:\s*1px solid/);
   });
 
+  test('responsive cascade keeps semantic page widths authoritative', () => {
+    const css = read('src/styles/v056-right-workspace-v2.css');
+
+    assert.match(css, /padding:\s*30px clamp\(24px, 2\.15vw, 42px\) 64px/);
+    assert.doesNotMatch(
+      css,
+      /\.nfc-app-main \.nfc-page-content > \.nfc-quarantine-page,/
+    );
+    assert.match(
+      css,
+      /@media \(max-width: 1199px\)[\s\S]*\.nfc-app-main \.nfc-page-header[\s\S]*flex-wrap:\s*wrap/
+    );
+    assert.match(
+      css,
+      /\.nfc-page-layout-ledger \.nfc-search-input[\s\S]*flex-basis:\s*100%/
+    );
+
+    const main = read('src/main.tsx');
+    assert.doesNotMatch(main, /v057|v058/);
+  });
+
   test('glass treatment is constrained to utility and overlay surfaces', () => {
     const css = read('src/styles/v056-right-workspace-v2.css');
 
