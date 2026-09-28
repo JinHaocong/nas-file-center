@@ -160,19 +160,20 @@ def run_acceptance(project_root: Path) -> dict:
         "zero_residue": False,
     }
 
-    settings = Settings(
-        config_dir=config,
-        data_mount=data,
-        allowed_roots_raw=str(data),
-        quarantine_root=data / ".trash",
-        allow_mutation=True,
-        allow_delete=False,
-        initial_admin_username="admin",
-        initial_admin_password="AdminPassword123!",
-    )
-    app = create_app(settings)
-
+    app = None
     try:
+        settings = Settings(
+            config_dir=config,
+            data_mount=data,
+            allowed_roots_raw=str(data),
+            quarantine_root=data / ".trash",
+            allow_mutation=True,
+            allow_delete=False,
+            initial_admin_username="admin",
+            initial_admin_password="AdminPassword123!",
+        )
+        app = create_app(settings)
+
         with TestClient(app) as client:
             client.headers.update({"Origin": "http://testserver"})
             _assert_status(
@@ -398,9 +399,10 @@ def run_acceptance(project_root: Path) -> dict:
             }
             evidence["result"] = "PASS"
     finally:
-        engine = getattr(app.state.service, "engine", None)
-        if engine is not None:
-            engine.dispose()
+        if app is not None:
+            engine = getattr(app.state.service, "engine", None)
+            if engine is not None:
+                engine.dispose()
         _remove_owned_tree(run_root, project_root)
         evidence["zero_residue"] = len(list(project_root.iterdir())) == 0
 
