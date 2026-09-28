@@ -221,7 +221,13 @@ def _is_single_child_wrapper_cleanup_plan_context(plan_metadata: dict[str, Any])
     if utility_context:
         return True
 
-    organizer_context = (
+    return _is_organizer_single_child_wrapper_cleanup_plan_context(plan_metadata)
+
+
+def _is_organizer_single_child_wrapper_cleanup_plan_context(
+    plan_metadata: dict[str, Any],
+) -> bool:
+    return bool(
         plan_metadata.get("organizer_advanced") is True
         and plan_metadata.get("organizer_stage") == "structural"
         and plan_metadata.get("organizer_structural_action") == "single_child_wrapper_collapse"
@@ -233,7 +239,6 @@ def _is_single_child_wrapper_cleanup_plan_context(plan_metadata: dict[str, Any])
             )
         )
     )
-    return organizer_context
 
 
 def _resolve_utility_empty_wrapper_cleanup_authority(
@@ -316,31 +321,35 @@ def _resolve_utility_empty_wrapper_cleanup_authority(
             if not isinstance(target_path, str) or not target_path.strip():
                 return False
 
-            try:
-                wrapper_device = int(current_metadata.get("wrapper_device") or 0)
-                wrapper_inode = int(current_metadata.get("wrapper_inode") or 0)
-                child_device = int(current_metadata.get("child_device") or 0)
-                child_inode = int(current_metadata.get("child_inode") or 0)
-            except (TypeError, ValueError):
-                return False
-
-            from app.batch_utilities.single_child_wrapper import (
-                matches_single_child_wrapper_candidate_id,
+            organizer_structural_context = (
+                _is_organizer_single_child_wrapper_cleanup_plan_context(plan_metadata)
             )
+            if organizer_structural_context:
+                try:
+                    wrapper_device = int(current_metadata.get("wrapper_device") or 0)
+                    wrapper_inode = int(current_metadata.get("wrapper_inode") or 0)
+                    child_device = int(current_metadata.get("child_device") or 0)
+                    child_inode = int(current_metadata.get("child_inode") or 0)
+                except (TypeError, ValueError):
+                    return False
 
-            if not matches_single_child_wrapper_candidate_id(
-                candidate_id=candidate_id,
-                wrapper_path=wrapper_path,
-                wrapper_device=wrapper_device,
-                wrapper_inode=wrapper_inode,
-                child_path=child_path,
-                child_device=child_device,
-                child_inode=child_inode,
-                child_object_type=current_metadata.get("child_object_type"),
-                target_path=target_path,
-                capability_reason=current_metadata.get("capability_reason"),
-            ):
-                return False
+                from app.batch_utilities.single_child_wrapper import (
+                    matches_single_child_wrapper_candidate_id,
+                )
+
+                if not matches_single_child_wrapper_candidate_id(
+                    candidate_id=candidate_id,
+                    wrapper_path=wrapper_path,
+                    wrapper_device=wrapper_device,
+                    wrapper_inode=wrapper_inode,
+                    child_path=child_path,
+                    child_device=child_device,
+                    child_inode=child_inode,
+                    child_object_type=current_metadata.get("child_object_type"),
+                    target_path=target_path,
+                    capability_reason=current_metadata.get("capability_reason"),
+                ):
+                    return False
 
             predecessor_rows = list(
                 session.scalars(
@@ -368,18 +377,26 @@ def _resolve_utility_empty_wrapper_cleanup_authority(
                 return False
             if not isinstance(predecessor_metadata, dict):
                 return False
-            for binding_key in (
+            binding_keys = (
                 "candidate_id",
                 "wrapper_path",
-                "wrapper_device",
-                "wrapper_inode",
                 "child_path",
-                "child_device",
-                "child_inode",
-                "child_object_type",
-                "capability_reason",
                 "target_path",
-            ):
+            )
+            if organizer_structural_context:
+                binding_keys = (
+                    "candidate_id",
+                    "wrapper_path",
+                    "wrapper_device",
+                    "wrapper_inode",
+                    "child_path",
+                    "child_device",
+                    "child_inode",
+                    "child_object_type",
+                    "capability_reason",
+                    "target_path",
+                )
+            for binding_key in binding_keys:
                 if predecessor_metadata.get(binding_key) != current_metadata.get(binding_key):
                     return False
 
