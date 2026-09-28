@@ -2088,3 +2088,178 @@ body,
     padding: 13px !important;
   }
 }
+
+
+/* Responsive spacing correction — deployed mobile + dashboard QA */
+
+/* The 1199px rule gives page-header-copy a 620px flex basis for wrapped
+ * desktop/tablet headers. Once the header becomes a column on phones that
+ * basis turns into vertical height. Reset it at the phone breakpoint and
+ * explicitly start the column instead of inheriting space-between. */
+@media (max-width: 767px) {
+  .nfc-app-main .nfc-page-header {
+    justify-content: flex-start;
+  }
+
+  .nfc-app-main .nfc-page-header-copy {
+    width: 100%;
+    max-width: 100%;
+    flex: 0 1 auto;
+  }
+
+  .nfc-app-main .nfc-page-actions {
+    margin-left: 0;
+    align-self: stretch;
+  }
+
+  .nfc-app-main .nfc-operations-page {
+    gap: 12px;
+  }
+
+  .nfc-app-main .nfc-page-layout-ledger > .nfc-page-header {
+    margin-bottom: 0 !important;
+    padding-bottom: 12px;
+    gap: 10px;
+  }
+
+  .nfc-app-main .nfc-indexes-page .nfc-page-actions .nfc-action-bar {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+}
+
+/* Dashboard uses one spacing authority. Earlier generations accumulated
+ * command-deck margin + dashboard margin + operations-page gap, which made
+ * the overview feel fragmented on both desktop and mobile. */
+.nfc-app-main .nfc-dashboard-page {
+  gap: 18px;
+}
+
+.nfc-app-main .nfc-dashboard-page > .nfc-page-header {
+  margin-bottom: 0 !important;
+  padding-bottom: 18px;
+}
+
+.nfc-app-main .nfc-dashboard-page .nfc-dashboard-command-deck {
+  margin: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.nfc-app-main .nfc-dashboard-page .nfc-dashboard-command-deck .nfc-metric-grid {
+  gap: 10px;
+}
+
+.nfc-app-main .nfc-dashboard-page .nfc-dashboard-command-deck .nfc-metric-card {
+  min-height: 96px;
+  padding: 14px 15px;
+}
+
+.nfc-app-main .nfc-dashboard-page .nfc-dashboard-command-deck .nfc-snapshot-note {
+  margin: 0;
+  padding: 10px 12px;
+}
+
+.nfc-app-main .nfc-dashboard-page .nfc-dashboard-layout {
+  margin-top: 0;
+  gap: 18px;
+}
+
+.nfc-app-main .nfc-dashboard-page .nfc-dashboard-main-column {
+  gap: 18px;
+}
+
+.nfc-app-main .nfc-dashboard-page .nfc-dashboard-rail {
+  gap: 14px;
+}
+
+.nfc-app-main .nfc-dashboard-page .nfc-dashboard-main-column > .nfc-data-panel {
+  min-height: 0;
+}
+
+@media (max-width: 1199px) {
+  .nfc-app-main .nfc-dashboard-page {
+    gap: 16px;
+  }
+
+  .nfc-app-main .nfc-dashboard-page .nfc-dashboard-layout,
+  .nfc-app-main .nfc-dashboard-page .nfc-dashboard-main-column {
+    gap: 16px;
+  }
+
+  .nfc-app-main .nfc-dashboard-page .nfc-dashboard-rail {
+    gap: 12px;
+  }
+}
+
+@media (max-width: 767px) {
+  .nfc-app-main .nfc-dashboard-page {
+    gap: 12px;
+  }
+
+  .nfc-app-main .nfc-dashboard-page > .nfc-page-header {
+    padding-bottom: 12px;
+  }
+
+  .nfc-app-main .nfc-dashboard-page .nfc-dashboard-command-deck {
+    gap: 8px;
+  }
+
+  .nfc-app-main .nfc-dashboard-page .nfc-dashboard-command-deck .nfc-metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .nfc-app-main .nfc-dashboard-page .nfc-dashboard-command-deck .nfc-metric-card {
+    min-height: 86px;
+    padding: 11px 12px;
+  }
+
+  .nfc-app-main .nfc-dashboard-page .nfc-dashboard-command-deck .nfc-snapshot-note {
+    padding: 9px 11px;
+    font-size: 11.5px;
+  }
+
+  .nfc-app-main .nfc-dashboard-page .nfc-dashboard-layout {
+    margin-top: 0;
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  /* Put the concise navigation/health rail before long activity histories on
+   * phones. Desktop keeps the rail on the right. */
+  .nfc-app-main .nfc-dashboard-page .nfc-dashboard-rail {
+    order: -1;
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .nfc-app-main .nfc-dashboard-page .nfc-dashboard-main-column {
+    gap: 12px;
+  }
+
+  .nfc-app-main .nfc-dashboard-page .nfc-dashboard-rail .nfc-data-panel-header {
+    padding: 10px 12px 8px;
+  }
+
+  .nfc-app-main .nfc-dashboard-page .nfc-quick-action {
+    min-height: 58px;
+    padding: 9px 12px;
+  }
+
+  .nfc-app-main .nfc-dashboard-page .nfc-summary-row {
+    min-height: 43px;
+    padding-inline: 12px;
+  }
+}
+
+@media (max-width: 420px) {
+  .nfc-app-main .nfc-dashboard-page .nfc-dashboard-command-deck .nfc-metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .nfc-app-main .nfc-dashboard-page .nfc-dashboard-command-deck .nfc-metric-value {
+    font-size: 20px;
+  }
+}
