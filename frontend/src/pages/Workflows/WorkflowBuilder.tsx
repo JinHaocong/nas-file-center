@@ -382,9 +382,8 @@ export const WorkflowBuilderPage: React.FC = () => {
     : `r${workflow?.current_revision}`;
 
   return (
-    <div className="nfc-operations-page nfc-workflow-builder-grid nfc-workflow-builder-page">
+    <div className="nfc-operations-page nfc-workflow-builder-grid nfc-workflow-builder-page nfc-page-layout-workbench">
       <PageHeader
-        eyebrow="WORKFLOW BUILDER"
         title={isNew ? '新建工作流' : workflow?.name || `工作流 #${workflowId}`}
         description={
           <div className="nfc-plan-header-meta">
