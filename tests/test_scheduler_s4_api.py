@@ -120,7 +120,7 @@ def test_scheduler_api_rbac_read_write_boundary(scheduler_api_env):
     assert member.post(f"/api/schedules/{schedule_id}/run-now").status_code == 403
     assert (
         member.post(
-            "/api/schedules/recurrence-preview",
+            "/api/schedules/recurrence/preview",
             json={
                 "cron_expression": "0 * * * *",
                 "timezone": "UTC",
@@ -143,7 +143,7 @@ def test_scheduler_api_crud_revision_preview_and_manual_run(scheduler_api_env):
     assert created["next_scheduled_for_utc"] is not None
 
     preview = admin.post(
-        "/api/schedules/recurrence-preview",
+        "/api/schedules/recurrence/preview",
         json={
             "cron_expression": "30 2 * * *",
             "timezone": "America/New_York",
@@ -215,7 +215,7 @@ def test_scheduler_api_rejects_destructive_or_invalid_targets(scheduler_api_env)
     assert destructive.status_code == 422
 
     bad_cron = admin.post(
-        "/api/schedules/recurrence-preview",
+        "/api/schedules/recurrence/preview",
         json={
             "cron_expression": "@daily",
             "timezone": "UTC",
@@ -225,7 +225,7 @@ def test_scheduler_api_rejects_destructive_or_invalid_targets(scheduler_api_env)
     assert bad_cron.status_code == 422
 
     bad_timezone = admin.post(
-        "/api/schedules/recurrence-preview",
+        "/api/schedules/recurrence/preview",
         json={
             "cron_expression": "0 * * * *",
             "timezone": "Mars/Phobos",
