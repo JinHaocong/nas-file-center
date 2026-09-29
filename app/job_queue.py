@@ -85,18 +85,21 @@ def enqueue_scan_work(
     min_size: str | None = None,
     name_patterns: list[str] | None = None,
     exclude_patterns: list[str] | None = None,
+    require_existing_dirs: bool = False,
+    require_unique_roots: bool = False,
 ) -> EnqueuedJob:
     safe_roots = [_normalize_allowed_unreserved_root(settings, root) for root in roots]
     if not safe_roots:
         raise ValueError("At least one root is required")
-    if len(set(safe_roots)) != len(safe_roots):
+    if require_unique_roots and len(set(safe_roots)) != len(safe_roots):
         raise ValueError("Scan roots must be unique")
     if isolate and len(safe_roots) < 2:
         raise ValueError("Isolate scan requires at least two roots")
 
-    for root in safe_roots:
-        if not require_allowed_path(root, settings.allowed_roots).is_dir():
-            raise ValueError(f"Not a directory: {root}")
+    if require_existing_dirs:
+        for root in safe_roots:
+            if not require_allowed_path(root, settings.allowed_roots).is_dir():
+                raise ValueError(f"Not a directory: {root}")
 
     scan = ScanJob(
         name=name,
