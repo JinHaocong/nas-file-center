@@ -3,7 +3,7 @@
 Status: CANONICAL CURRENT ROADMAP  
 Release authority: **v0.4.7**  
 Source authority: **default branch `main`**  
-Last reconciled: 2026-09-28
+Last reconciled: 2026-09-29
 
 ## 1. Authority order
 
@@ -170,9 +170,60 @@ C0 established:
 C3 does not authorize generic delete, recursive rmdir, shell move, or a second
 filesystem executor.
 
-## 6. After Organizer Advanced Rules
+## 6. NEXT CURRENT — Scheduler / Cron
 
-After Organizer Advanced Rules is implemented, tested and closed, choose the
-next feature through a fresh scope decision. Candidate tracks include Similarity,
-Notifications, Advanced Auth, capability expansion and Scheduler, but none is
-pre-authorized by this roadmap.
+**Status: S0 CLOSED / S1 CURRENT — PERSISTENCE + DISPATCH LEDGER**
+
+Fresh scope decision: **Scheduler / Cron**.
+
+Architecture freeze:
+[`scheduler-s0-architecture-freeze.md`](scheduler-s0-architecture-freeze.md)
+
+The next track was selected from the deferred candidate set after a source-level
+ownership audit. Scheduler has the best fit with the current architecture
+because it can reuse the existing WorkJob queue, Worker state machine, Workflow
+revision model and timezone-aware Resource Policy without introducing a second
+filesystem executor.
+
+Frozen V1 authority:
+
+- Scheduler is a time-trigger / dispatch ledger, not a mutation executor.
+- S1/S2 dispatch only allowlisted resource-oriented jobs: index, exact duplicate
+  scan, media analysis and media integrity verification.
+- arbitrary WorkJob kinds, shell commands and arbitrary endpoint invocation are
+  forbidden.
+- mutation-plan execution, quarantine purge/restore, permanent delete, audit
+  deletion and Organizer execution are not schedulable V1 targets.
+- future Workflow scheduling is pinned to an exact revision + definition SHA and
+  may only reach Preview / Draft; it cannot automatically Freeze, Validate or
+  Execute.
+- `missed_run_policy = skip` and
+  `overlap_policy = skip_if_active` are frozen for V1.
+- one durable unique `(schedule_id, scheduled_for_utc)` run identity is the
+  final duplicate-dispatch fence.
+
+Implementation sequence:
+
+- **S0 CLOSED** — scope decision, authority boundary, cron/timezone semantics,
+  idempotency, lease, RBAC, TDD and closure plan frozen.
+- **S1 CURRENT** — additive schedule/run schema, strict cron parser, recurrence
+  engine and scheduler lease/idempotency core.
+- **S2 NEXT** — safe allowlisted dispatch for index/scan/media jobs.
+- **S3 LATER** — exact-revision Workflow Preview/Draft-only scheduling.
+- **S4 LATER** — Scheduler desktop/mobile frontend.
+- **S5 LATER** — closure, Docker, restart/concurrency and isolated NAS acceptance.
+
+Scheduler S0/S1 authorization does not fabricate or imply Organizer Advanced
+Rules C5 closure. The Organizer real-NAS closure evidence remains an independent
+record until supplied and committed.
+
+## 7. Other deferred candidate tracks
+
+The following remain deferred behind the Scheduler scope decision:
+
+- Similarity / pHash / video similarity;
+- Notifications / webhook delivery;
+- Advanced Auth (API token / TOTP / recovery codes);
+- Hardlink / Reflink capability expansion.
+
+Any later activation still requires its own fresh Scope + Architecture Freeze.
