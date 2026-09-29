@@ -68,6 +68,109 @@ def backup_database(db_path: Path, backups_dir: Path) -> Path | None:
     return backup_file
 
 
+def _upgrade_scheduler_target_constraint(engine: Engine) -> None:
+    """Expand schedules.target_type CHECK to include the pinned workflow target.
+
+    SQLite cannot ALTER a CHECK constraint in place. Rebuild only the schedules
+    table while foreign-key enforcement is temporarily disabled on this one
+    locked connection, preserve every row/ID verbatim, then restore enforcement
+    and verify the whole database before startup continues.
+    """
+    raw = engine.raw_connection()
+    cursor = raw.cursor()
+    try:
+        cursor.execute("PRAGMA foreign_keys=OFF")
+        cursor.execute("BEGIN IMMEDIATE")
+        cursor.execute("DROP TABLE IF EXISTS schedules_s3_upgrade")
+        cursor.execute(
+            """
+            CREATE TABLE schedules_s3_upgrade (
+                id INTEGER NOT NULL PRIMARY KEY,
+                name VARCHAR(128) NOT NULL,
+                description TEXT NOT NULL,
+                enabled BOOLEAN NOT NULL,
+                target_type VARCHAR(64) NOT NULL,
+                target_json TEXT NOT NULL,
+                cron_expression VARCHAR(128) NOT NULL,
+                timezone VARCHAR(64) NOT NULL,
+                overlap_policy VARCHAR(32) NOT NULL,
+                missed_run_policy VARCHAR(32) NOT NULL,
+                created_by_user_id INTEGER,
+                revision INTEGER NOT NULL,
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL,
+                last_scheduled_for_utc DATETIME,
+                next_scheduled_for_utc DATETIME,
+                CONSTRAINT ck_schedules_target_type CHECK (
+                    target_type IN (
+                        'index_root',
+                        'fclones_scan',
+                        'media_analysis',
+                        'media_integrity_verification',
+                        'workflow'
+                    )
+                ),
+                CONSTRAINT ck_schedules_overlap_policy CHECK (
+                    overlap_policy = 'skip_if_active'
+                ),
+                CONSTRAINT ck_schedules_missed_run_policy CHECK (
+                    missed_run_policy = 'skip'
+                ),
+                CONSTRAINT ck_schedules_revision CHECK (revision >= 1),
+                FOREIGN KEY(created_by_user_id)
+                    REFERENCES users (id) ON DELETE SET NULL
+            )
+            """
+        )
+        cursor.execute(
+            """
+            INSERT INTO schedules_s3_upgrade (
+                id, name, description, enabled, target_type, target_json,
+                cron_expression, timezone, overlap_policy, missed_run_policy,
+                created_by_user_id, revision, created_at, updated_at,
+                last_scheduled_for_utc, next_scheduled_for_utc
+            )
+            SELECT
+                id, name, description, enabled, target_type, target_json,
+                cron_expression, timezone, overlap_policy, missed_run_policy,
+                created_by_user_id, revision, created_at, updated_at,
+                last_scheduled_for_utc, next_scheduled_for_utc
+            FROM schedules
+            """
+        )
+        cursor.execute("DROP TABLE schedules")
+        cursor.execute("ALTER TABLE schedules_s3_upgrade RENAME TO schedules")
+        cursor.execute(
+            "CREATE INDEX ix_schedules_enabled_next "
+            "ON schedules (enabled, next_scheduled_for_utc)"
+        )
+        cursor.execute(
+            "CREATE INDEX ix_schedules_created_by_user_id "
+            "ON schedules (created_by_user_id)"
+        )
+        raw.commit()
+
+        cursor.execute("PRAGMA foreign_keys=ON")
+        violations = cursor.execute("PRAGMA foreign_key_check").fetchall()
+        if violations:
+            raise RuntimeError(
+                f"Scheduler S3 migration foreign-key check failed: {violations!r}"
+            )
+    except Exception:
+        try:
+            raw.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        try:
+            cursor.execute("PRAGMA foreign_keys=ON")
+        except Exception:
+            pass
+        cursor.close()
+        raw.close()
+
+
 def init_db(
     engine: Engine,
     db_path: Path | None = None,
@@ -160,6 +263,24 @@ def init_db(
             if "advanced_rules_json" not in current_organizer_cols:
                 missing_organizer_cols.append(("advanced_rules_json", "TEXT DEFAULT '{}' NOT NULL"))
 
+        # Scheduler S3 expands the frozen target discriminator with one pinned
+        # workflow target. Existing S1/S2 databases carry a CHECK constraint
+        # that must be rebuilt because SQLite cannot ALTER CHECK in place.
+        schedule_target_constraint_needs_upgrade = False
+        if "schedules" in existing_tables:
+            schedule_checks = inspector.get_check_constraints("schedules")
+            target_check = next(
+                (
+                    item
+                    for item in schedule_checks
+                    if item.get("name") == "ck_schedules_target_type"
+                ),
+                None,
+            )
+            if target_check is not None:
+                target_sql = str(target_check.get("sqltext") or "")
+                schedule_target_constraint_needs_upgrade = "'workflow'" not in target_sql
+
         # TASK-036-11 adds read-only SHA256 verification metadata to the
         # existing media_assets table. Existing databases must be upgraded
         # additively and backed up before ALTER TABLE.
@@ -191,6 +312,7 @@ def init_db(
                 or bool(missing_quarantine_cols)
                 or bool(missing_organizer_cols)
                 or bool(missing_media_cols)
+                or schedule_target_constraint_needs_upgrade
             )
         )
         if needs_backup and db_path and backups_dir:
@@ -230,6 +352,9 @@ def init_db(
                 for col, ctype in missing_media_cols:
                     conn.execute(text(f"ALTER TABLE media_assets ADD COLUMN {col} {ctype}"))
                 conn.commit()
+
+        if schedule_target_constraint_needs_upgrade:
+            _upgrade_scheduler_target_constraint(engine)
 
         # Create all newly defined tables / columns / indexes
         Base.metadata.create_all(engine)
