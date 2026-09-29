@@ -128,6 +128,22 @@ def test_cron_dom_dow_uses_standard_or_semantics_when_both_restricted():
     assert cron.matches_date(monday) is True
 
 
+def test_stepped_day_of_month_is_restricted_for_dom_dow_semantics():
+    cron = parse_cron_expression("0 0 */2 * 1")
+    assert cron.day_of_month.wildcard is False
+
+    # Pick a Tuesday that is not selected by the stepped DOM values. It must
+    # not match merely because the source field started with '*'.
+    cursor = date(2026, 1, 1)
+    candidate = next(
+        cursor + timedelta(days=offset)
+        for offset in range(90)
+        if (cursor + timedelta(days=offset)).weekday() == 1
+        and (cursor + timedelta(days=offset)).day not in cron.day_of_month.values
+    )
+    assert cron.matches_date(candidate) is False
+
+
 def test_timezone_validation_requires_iana_zone():
     assert resolve_scheduler_timezone("Asia/Shanghai").key == "Asia/Shanghai"
     with pytest.raises(CronValidationError):
