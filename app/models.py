@@ -582,7 +582,7 @@ class Schedule(Base):
     __tablename__ = "schedules"
     __table_args__ = (
         CheckConstraint(
-            "target_type IN ('index_root', 'fclones_scan', 'media_analysis', 'media_integrity_verification')",
+            "target_type IN ('index_root', 'fclones_scan', 'media_analysis', 'media_integrity_verification', 'workflow')",
             name="ck_schedules_target_type",
         ),
         CheckConstraint("overlap_policy = 'skip_if_active'", name="ck_schedules_overlap_policy"),
