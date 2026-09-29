@@ -28,6 +28,7 @@ from app.execution.executor import execute_item
 from app.execution.verifier import verify_duplicate_pair
 from app.indexing.indexer import IndexedEntry, iter_root, scan_root
 from app.indexing.matcher import match_entries
+from app.job_queue import enqueue_index_work, enqueue_scan_work
 from app.models import (
     AuditEvent,
     BatchPlan,
@@ -1334,33 +1335,23 @@ class FileCenterService:
 
 
     def enqueue_index(self, root: str) -> dict:
-        safe_root = require_allowed_path(root, self.settings.allowed_roots)
-        require_unreserved_path(safe_root, self.settings.quarantine_root)
-        if not safe_root.is_dir():
-            raise ValueError(f"Not a directory: {safe_root}")
-        root_str = str(safe_root)
         with self.SessionLocal() as session:
             session.execute(text("BEGIN IMMEDIATE"))
-            idx_root = session.scalar(select(IndexRoot).where(IndexRoot.root == root_str))
-            created = False
-            if idx_root is None:
-                idx_root = IndexRoot(root=root_str, created_at=utcnow())
-                session.add(idx_root)
-                session.flush()
-                created = True
-            work = WorkJob(
-                kind="index-root",
-                status="queued",
-                state_json=json.dumps({"root": root_str}, ensure_ascii=False),
+            queued = enqueue_index_work(
+                session,
+                self.settings,
+                root=root,
+                allow_create_index_root=True,
             )
-            session.add(work)
             session.commit()
+            idx_root = queued.index_root
+            work = queued.work_job
             return {
-                "index_root_id": idx_root.id,
+                "index_root_id": idx_root.id if idx_root is not None else None,
                 "work_job_id": work.id,
                 "status": work.status,
-                "root": root_str,
-                "created": created,
+                "root": queued.normalized_roots[0],
+                "created": idx_root is not None and idx_root.created_at == work.created_at,
             }
 
     def delete_index_root(self, index_root_id: int) -> dict:
@@ -1432,37 +1423,26 @@ class FileCenterService:
         name_patterns: list[str] | None = None,
         exclude_patterns: list[str] | None = None,
     ) -> dict:
-        safe_roots = [
-            require_unreserved_path(require_allowed_path(root, self.settings.allowed_roots), self.settings.quarantine_root)
-            for root in roots
-        ]
-        if not safe_roots:
-            raise ValueError("At least one root is required")
-        if isolate and len(safe_roots) < 2:
-            raise ValueError("Isolate scan requires at least two roots")
         with self.SessionLocal() as session:
-            scan = ScanJob(
+            session.execute(text("BEGIN IMMEDIATE"))
+            queued = enqueue_scan_work(
+                session,
+                self.settings,
                 name=name,
-                mode="isolate" if isolate else "normal",
-                roots_json=json.dumps([str(r) for r in safe_roots], ensure_ascii=False),
-                status="queued",
-                fclones_args_json=json.dumps({"min_size": min_size, "name_patterns": name_patterns, "exclude_patterns": exclude_patterns}, ensure_ascii=False),
+                roots=roots,
+                isolate=isolate,
+                min_size=min_size,
+                name_patterns=name_patterns,
+                exclude_patterns=exclude_patterns,
             )
-            session.add(scan); session.flush()
-            work = WorkJob(
-                kind="fclones-scan",
-                status="queued",
-                state_json=json.dumps({
-                    "scan_job_id": scan.id,
-                    "roots": [str(r) for r in safe_roots],
-                    "isolate": isolate,
-                    "min_size": min_size,
-                    "name_patterns": name_patterns,
-                    "exclude_patterns": exclude_patterns,
-                }, ensure_ascii=False),
-            )
-            session.add(work); session.commit()
-            return {"scan_job_id": scan.id, "work_job_id": work.id, "status": "queued"}
+            session.commit()
+            scan = queued.scan_job
+            work = queued.work_job
+            return {
+                "scan_job_id": scan.id if scan is not None else None,
+                "work_job_id": work.id,
+                "status": "queued",
+            }
 
     def scan_detail(self, scan_job_id: int) -> dict:
         with self.SessionLocal() as session:
