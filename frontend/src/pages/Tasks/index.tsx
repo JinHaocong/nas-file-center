@@ -10,6 +10,7 @@ import {
 } from 'antd';
 import { EyeOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import dayjs from 'dayjs';
 import { tasksApi } from '../../api/tasks';
 import { useTitle } from '../../hooks/useTitle';
@@ -50,8 +51,27 @@ export const TasksPage: React.FC = () => {
   const [pageSize, setPageSize] = useState(50);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [jobTypeFilter, setJobTypeFilter] = useState<string>('all');
+  const [searchParams, setSearchParams] = useSearchParams();
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
   const [currentTime, setCurrentTime] = useState<dayjs.Dayjs>(() => dayjs());
+
+  useEffect(() => {
+    const raw = searchParams.get('task');
+    if (!raw) return;
+    const taskId = Number(raw);
+    if (Number.isInteger(taskId) && taskId > 0) {
+      setSelectedTaskId(taskId);
+    }
+  }, [searchParams]);
+
+  const closeTaskDetail = () => {
+    setSelectedTaskId(null);
+    if (searchParams.has('task')) {
+      const next = new URLSearchParams(searchParams);
+      next.delete('task');
+      setSearchParams(next, { replace: true });
+    }
+  };
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ['tasksList', page, pageSize, statusFilter, jobTypeFilter],
@@ -381,7 +401,7 @@ export const TasksPage: React.FC = () => {
       <TaskDetailDrawer
         taskId={selectedTaskId}
         open={selectedTaskId !== null}
-        onClose={() => setSelectedTaskId(null)}
+        onClose={closeTaskDetail}
         onViewTask={(newId) => setSelectedTaskId(newId)}
       />
     </div>
