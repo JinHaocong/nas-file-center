@@ -28,8 +28,10 @@ from app.scheduler.schema import (
     WorkflowScheduleTarget,
 )
 from app.scheduler.service import (
+    ScheduleNotFoundError,
     acquire_scheduler_lease,
     assert_scheduler_lease,
+    serialize_schedule_run,
 )
 from app.tasks.state_machine import TERMINAL_STATES
 from app.workflows.schema import WorkflowDefinition
@@ -504,3 +506,93 @@ def run_scheduler_tick(
         failed=counts["failed"],
         duplicate_slots=counts["duplicate_slot"],
     )
+
+
+
+def run_schedule_now(
+    session_factory: sessionmaker,
+    settings: Settings,
+    *,
+    schedule_id: int,
+    requested_at_utc: datetime | None = None,
+) -> dict[str, Any]:
+    """Dispatch one administrator-requested run using the same target path.
+
+    Manual runs are durable ScheduleRun rows, honor overlap policy and target
+    revalidation, and never alter the schedule's cron recurrence pointer.
+    """
+    now = _as_utc(requested_at_utc or utcnow())
+
+    with session_factory() as session:
+        session.execute(text("BEGIN IMMEDIATE"))
+        schedule = session.get(Schedule, schedule_id)
+        if schedule is None:
+            session.rollback()
+            raise ScheduleNotFoundError(schedule_id)
+
+        active = _active_prior_run(session, schedule.id)
+        run = ScheduleRun(
+            schedule_id=schedule.id,
+            schedule_revision=schedule.revision,
+            scheduled_for_utc=now,
+            dispatched_at=None,
+            status="pending",
+            work_job_id=None,
+            error_code=None,
+            error_text=None,
+            target_snapshot_json=schedule.target_json,
+            created_at=now,
+        )
+        session.add(run)
+        try:
+            session.flush()
+        except IntegrityError as exc:
+            session.rollback()
+            raise RuntimeError("Manual schedule run collided with an existing run identity") from exc
+
+        if active is not None:
+            prior_run, prior_work = active
+            run.status = "skipped_overlap"
+            run.error_code = "OVERLAP_ACTIVE"
+            run.error_text = (
+                f"Skipped because schedule run #{prior_run.id} is still active"
+                + (
+                    f" via WorkJob #{prior_work.id} ({prior_work.status})"
+                    if prior_work is not None
+                    else ""
+                )
+            )
+            session.commit()
+            session.refresh(run)
+            return serialize_schedule_run(run)
+
+        try:
+            target = _parse_target(schedule)
+            with session.begin_nested():
+                queued = _enqueue_target(
+                    session,
+                    settings,
+                    schedule=schedule,
+                    run=run,
+                    target=target,
+                    slot=now,
+                )
+                session.flush()
+        except Exception as exc:
+            run.status = "failed"
+            run.error_code = "SCHEDULE_TARGET_INVALID"
+            run.error_text = str(exc)[:4000]
+            run.work_job_id = None
+            run.dispatched_at = None
+            session.commit()
+            session.refresh(run)
+            return serialize_schedule_run(run)
+
+        run.work_job_id = int(queued.work_job.id)
+        run.status = "dispatched"
+        run.dispatched_at = now
+        run.error_code = None
+        run.error_text = None
+        session.commit()
+        session.refresh(run)
+        return serialize_schedule_run(run)
