@@ -68,6 +68,17 @@ The S5 Architecture Freeze requires an isolated NAS run for scheduled index + sc
 
 Organizer Advanced Rules C5 real-NAS acceptance is a separate matter. Scheduler evidence cannot be used to claim Organizer C5 real-NAS closure.
 
+## Protected real-NAS entry
+
+The shared manual acceptance entry is `.github/workflows/real-nas-acceptance.yml`.
+It can run only on a self-hosted Linux x64 runner carrying the custom
+`nas-file-center-acceptance` label. The procedure and safety boundary are
+recorded in [`real-nas-acceptance.md`](real-nas-acceptance.md).
+
+This entry does not itself close S5. S5 remains CURRENT until the workflow is
+actually executed on the target NAS filesystem, passes with zero residue, and
+the observed evidence is committed into this closure record.
+
 ## Final candidate
 
 The exact final candidate SHA, final-head Actions run IDs, Docker identity and merge commit are recorded only after the final PR head is green. This avoids treating an intermediate document commit as final authority.

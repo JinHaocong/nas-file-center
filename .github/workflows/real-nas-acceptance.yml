@@ -1,0 +1,182 @@
+name: Real NAS Acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Exact merged main commit to validate
+        required: true
+        type: string
+      organizer_root:
+        description: Empty actual-NAS directory ending in /nfc-organizer-c5-acceptance
+        required: true
+        type: string
+      scheduler_root:
+        description: Empty actual-NAS directory ending in /nfc-scheduler-s5-acceptance
+        required: true
+        type: string
+      confirmation:
+        description: Type I_UNDERSTAND_REAL_NAS_ISOLATED_SYNTHETIC_ONLY
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: real-nas-acceptance
+  cancel-in-progress: false
+
+jobs:
+  actual-nas-filesystem:
+    # This custom label is intentional: GitHub-hosted runners must never satisfy
+    # the real-NAS acceptance gate.
+    runs-on: [self-hosted, linux, x64, nas-file-center-acceptance]
+    timeout-minutes: 90
+    env:
+      CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+      ORGANIZER_ROOT: ${{ inputs.organizer_root }}
+      SCHEDULER_ROOT: ${{ inputs.scheduler_root }}
+      CONFIRMATION: ${{ inputs.confirmation }}
+
+    steps:
+      - name: Checkout exact merged candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          fetch-depth: 0
+
+      - name: Preflight exact candidate and isolated NAS roots
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${CONFIRMATION}" = "I_UNDERSTAND_REAL_NAS_ISOLATED_SYNTHETIC_ONLY"
+
+          ACTUAL_SHA="$(git rev-parse HEAD)"
+          test "${ACTUAL_SHA}" = "${CANDIDATE_SHA}"
+
+          validate_root() {
+            local path="$1"
+            local expected_basename="$2"
+            test -n "${path}"
+            [[ "${path}" = /* ]]
+            test ! -L "${path}"
+            test -d "${path}"
+            test "$(basename "${path}")" = "${expected_basename}"
+            test -z "$(find "${path}" -mindepth 1 -maxdepth 1 -print -quit)"
+            realpath "${path}"
+          }
+
+          validate_root "${ORGANIZER_ROOT}" "nfc-organizer-c5-acceptance"
+          validate_root "${SCHEDULER_ROOT}" "nfc-scheduler-s5-acceptance"
+          test "$(realpath "${ORGANIZER_ROOT}")" != "$(realpath "${SCHEDULER_ROOT}")"
+
+          {
+            echo "candidate_sha=${ACTUAL_SHA}"
+            echo "runner_name=${RUNNER_NAME}"
+            echo "runner_os=${RUNNER_OS}"
+            echo "runner_arch=${RUNNER_ARCH}"
+            echo "organizer_root=$(realpath "${ORGANIZER_ROOT}")"
+            echo "organizer_fs=$(stat -f -c '%T' "${ORGANIZER_ROOT}")"
+            echo "scheduler_root=$(realpath "${SCHEDULER_ROOT}")"
+            echo "scheduler_fs=$(stat -f -c '%T' "${SCHEDULER_ROOT}")"
+            echo "synthetic_fixture_only=true"
+            echo "actual_nas_filesystem=true"
+          } | tee real-nas-identity.txt
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build exact linux amd64 candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="nas-file-center:real-nas-${CANDIDATE_SHA::7}"
+          echo "TAG=${TAG}" >> "${GITHUB_ENV}"
+          docker version | tee real-nas-docker-version.txt
+          docker buildx build \
+            --platform linux/amd64 \
+            --load \
+            --tag "${TAG}" \
+            . 2>&1 | tee real-nas-docker-build.log
+          test "$(docker image inspect --format '{{.Architecture}}' "${TAG}")" = "amd64"
+          test "$(docker image inspect --format '{{.Os}}' "${TAG}")" = "linux"
+
+      - name: Run Organizer C5 on actual NAS filesystem
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p real-nas-evidence
+          docker run --rm \
+            --platform linux/amd64 \
+            -v "${PWD}/scripts/organizer_advanced_c5_acceptance.py:/tmp/organizer_advanced_c5_acceptance.py:ro" \
+            -v "${ORGANIZER_ROOT}:/nas/nfc-organizer-c5-acceptance" \
+            -v "${PWD}/real-nas-evidence:/evidence" \
+            "${TAG}" \
+            python /tmp/organizer_advanced_c5_acceptance.py \
+              --project-test-root /nas/nfc-organizer-c5-acceptance \
+              --confirm-synthetic-only YES \
+              --evidence-json /evidence/organizer-c5-real-nas.json \
+            2>&1 | tee real-nas-organizer-c5.log
+          test -z "$(find "${ORGANIZER_ROOT}" -mindepth 1 -maxdepth 1 -print -quit)"
+
+      - name: Run Scheduler S5 on actual NAS filesystem
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            --platform linux/amd64 \
+            -v "${PWD}/scripts/scheduler_s5_acceptance.py:/tmp/scheduler_s5_acceptance.py:ro" \
+            -v "${SCHEDULER_ROOT}:/nas/nfc-scheduler-s5-acceptance" \
+            -v "${PWD}/real-nas-evidence:/evidence" \
+            "${TAG}" \
+            python /tmp/scheduler_s5_acceptance.py \
+              --project-test-root /nas/nfc-scheduler-s5-acceptance \
+              --confirm-synthetic-only YES \
+              --execute-jobs \
+              --candidate-sha "${CANDIDATE_SHA}" \
+              --evidence-json /evidence/scheduler-s5-real-nas.json \
+            2>&1 | tee real-nas-scheduler-s5.log
+          test -z "$(find "${SCHEDULER_ROOT}" -mindepth 1 -maxdepth 1 -print -quit)"
+
+      - name: Verify evidence and zero residue
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          for name in ("organizer-c5-real-nas.json", "scheduler-s5-real-nas.json"):
+              payload = json.loads((Path("real-nas-evidence") / name).read_text())
+              if payload.get("result") != "PASS":
+                  raise SystemExit(f"{name}: result is not PASS")
+              if payload.get("zero_residue") is not True:
+                  raise SystemExit(f"{name}: zero_residue is not true")
+
+          scheduler = json.loads((Path("real-nas-evidence") / "scheduler-s5-real-nas.json").read_text())
+          if scheduler.get("candidate_sha") != __import__('os').environ["CANDIDATE_SHA"]:
+              raise SystemExit("Scheduler evidence is not bound to the requested candidate SHA")
+          PY
+          test -z "$(find "${ORGANIZER_ROOT}" -mindepth 1 -maxdepth 1 -print -quit)"
+          test -z "$(find "${SCHEDULER_ROOT}" -mindepth 1 -maxdepth 1 -print -quit)"
+
+      - name: Upload real-NAS evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-nas-acceptance-${{ inputs.candidate_sha }}
+          retention-days: 30
+          if-no-files-found: warn
+          path: |
+            real-nas-identity.txt
+            real-nas-docker-version.txt
+            real-nas-docker-build.log
+            real-nas-organizer-c5.log
+            real-nas-scheduler-s5.log
+            real-nas-evidence/
+
+      - name: Remove local candidate image
+        if: always()
+        shell: bash
+        run: docker image rm "${TAG:-nas-file-center:real-nas-${CANDIDATE_SHA::7}}" >/dev/null 2>&1 || true
