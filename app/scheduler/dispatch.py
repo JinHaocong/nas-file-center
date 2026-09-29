@@ -17,7 +17,7 @@ from app.job_queue import (
     enqueue_media_work,
     enqueue_scan_work,
 )
-from app.models import IndexRoot, Schedule, ScheduleRun, WorkJob, Workflow, WorkflowRevision, utcnow
+from app.models import IndexRoot, ScanJob, Schedule, ScheduleRun, WorkJob, Workflow, WorkflowRevision, utcnow
 from app.scheduler.cron import next_occurrence
 from app.scheduler.schema import (
     FclonesScanScheduleTarget,
@@ -33,7 +33,7 @@ from app.scheduler.service import (
 )
 from app.tasks.state_machine import TERMINAL_STATES
 from app.workflows.schema import WorkflowDefinition
-from app.workflows.validation import validate_raw_steps_types
+from app.workflows.validation import validate_raw_steps_types, validate_workflow_definition
 
 
 _TARGET_ADAPTER = TypeAdapter(ScheduleTarget)
@@ -211,6 +211,7 @@ def _enqueue_target(
                 mode=raw_definition.get("mode"),
             )
             definition = WorkflowDefinition.model_validate(raw_definition)
+            validate_workflow_definition(definition, session)
         except Exception as exc:
             raise ValueError(f"Pinned workflow definition is invalid: {exc}") from exc
 
@@ -232,6 +233,15 @@ def _enqueue_target(
                 raise ValueError(
                     "Dedupe workflow schedule requires only runtime_inputs.scan_job_id"
                 )
+            scan = session.get(ScanJob, target.runtime_inputs.scan_job_id)
+            if scan is None:
+                raise ValueError(
+                    f"Scheduled dedupe ScanJob #{target.runtime_inputs.scan_job_id} not found"
+                )
+            if scan.status != "completed":
+                raise ValueError(
+                    f"Scheduled dedupe ScanJob #{scan.id} is {scan.status!r}, expected 'completed'"
+                )
         elif definition.mode in {"file", "organizer"}:
             if (
                 target.runtime_inputs is not None
@@ -240,6 +250,26 @@ def _enqueue_target(
                 raise ValueError(
                     "File/Organizer workflow schedule forbids runtime_inputs.scan_job_id"
                 )
+            override_root_ids = (
+                target.runtime_inputs.root_ids
+                if target.runtime_inputs is not None
+                else None
+            )
+            if override_root_ids is not None:
+                if len(set(override_root_ids)) != len(override_root_ids):
+                    raise ValueError(
+                        "Scheduled Workflow runtime root IDs must be unique"
+                    )
+                existing_root_ids = set(
+                    session.scalars(
+                        select(IndexRoot.id).where(IndexRoot.id.in_(override_root_ids))
+                    ).all()
+                )
+                missing_root_ids = sorted(set(override_root_ids) - existing_root_ids)
+                if missing_root_ids:
+                    raise ValueError(
+                        f"Scheduled Workflow root ID(s) not found: {missing_root_ids}"
+                    )
 
         work = WorkJob(
             kind="workflow-scheduled",
