@@ -176,6 +176,27 @@ describe('Right Workspace v2 design system', () => {
     assert.doesNotMatch(main, /v057|v058/);
   });
 
+  test('desktop utility rail aligns with the approved sidebar shell while mobile stays edge-to-edge', () => {
+    const css = read('src/styles/v056-right-workspace-v2.css');
+
+    assert.match(
+      css,
+      /\.nfc-header\.nfc-header\s*\{[^}]*top:\s*12px;[^}]*min-height:\s*68px;[^}]*margin:\s*12px 12px 0;[^}]*border:\s*1px solid var\(--nfc-border-soft\);[^}]*border-radius:\s*var\(--nfc-radius-shell\);[^}]*background:\s*var\(--nfc-nav-surface\);/s
+    );
+    assert.match(
+      css,
+      /\.nfc-header\.nfc-header\s*\{[^}]*box-shadow:\s*0 10px 34px color-mix\(in srgb, var\(--nfc-text\) 7%, transparent\);/s
+    );
+    assert.match(
+      css,
+      /\.nfc-app-main \.nfc-page-content\s*\{[^}]*padding:\s*18px clamp\(24px, 2\.15vw, 42px\) var\(--nfc-w2-page-bottom\);/s
+    );
+    assert.match(
+      css,
+      /@media \(max-width: 767px\)[\s\S]*\.nfc-header\.nfc-header\s*\{[^}]*top:\s*0;[^}]*margin:\s*0;[^}]*border-radius:\s*0;/s
+    );
+  });
+
   test('global visual rhythm keeps section titles clear and restores intentional padding', () => {
     const css = read('src/styles/v056-right-workspace-v2.css');
     const toolsCss = read('src/styles/pages/tools.css');
