@@ -146,6 +146,8 @@ def validate_media_roots_in_session(
     session: Session,
     settings: Settings,
     root_keys: list[str],
+    *,
+    require_unreserved: bool = False,
 ) -> list[str]:
     if not root_keys:
         raise ValueError("At least one indexed root is required")
@@ -153,7 +155,10 @@ def validate_media_roots_in_session(
     normalized: list[str] = []
     seen: set[str] = set()
     for raw in root_keys:
-        root = _normalize_allowed_unreserved_root(settings, raw)
+        safe = require_allowed_path(raw, settings.allowed_roots)
+        if require_unreserved:
+            safe = require_unreserved_path(safe, settings.quarantine_root)
+        root = str(safe)
         if root not in seen:
             seen.add(root)
             normalized.append(root)
@@ -175,11 +180,17 @@ def enqueue_media_work(
     *,
     kind: str,
     root_keys: list[str],
+    require_unreserved: bool = False,
 ) -> EnqueuedJob:
     if kind not in {"media-analysis", "media-integrity-verify"}:
         raise ValueError(f"Unsupported media work kind: {kind}")
 
-    normalized = validate_media_roots_in_session(session, settings, root_keys)
+    normalized = validate_media_roots_in_session(
+        session,
+        settings,
+        root_keys,
+        require_unreserved=require_unreserved,
+    )
     work = WorkJob(
         kind=kind,
         status="queued",
