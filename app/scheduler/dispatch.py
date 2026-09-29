@@ -166,6 +166,7 @@ def _enqueue_target(
             settings,
             kind="media-analysis",
             root_keys=target.root_keys,
+            require_unreserved=True,
         )
     elif isinstance(target, MediaIntegrityVerificationScheduleTarget):
         queued = enqueue_media_work(
@@ -173,6 +174,7 @@ def _enqueue_target(
             settings,
             kind="media-integrity-verify",
             root_keys=target.root_keys,
+            require_unreserved=True,
         )
     else:  # pragma: no cover - TypeAdapter + closed union make this unreachable.
         raise ValueError(f"Unsupported schedule target: {type(target).__name__}")
