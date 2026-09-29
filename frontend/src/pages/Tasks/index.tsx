@@ -42,6 +42,9 @@ const JOB_TYPE_OPTIONS = [
   { label: '全部类型', value: 'all' },
   { label: 'fclones-scan', value: 'fclones-scan' },
   { label: 'index-root', value: 'index-root' },
+  { label: 'workflow-scheduled', value: 'workflow-scheduled' },
+  { label: 'media-analysis', value: 'media-analysis' },
+  { label: 'media-integrity-verify', value: 'media-integrity-verify' },
 ];
 
 export const TasksPage: React.FC = () => {
