@@ -99,7 +99,23 @@ def _active_prior_run(session: Session, schedule_id: int) -> tuple[ScheduleRun, 
     )
     for run in rows:
         if run.status == "pending":
-            return run, None
+            # S2 dispatch commits ScheduleRun + WorkJob binding atomically, so a
+            # durable pending row without an active bound WorkJob is interrupted
+            # recovery state rather than a legitimate overlap. Fail it closed
+            # in the caller's existing BEGIN IMMEDIATE transaction so an old
+            # reservation/crash artifact cannot block this schedule forever.
+            work = session.get(WorkJob, run.work_job_id) if run.work_job_id is not None else None
+            if work is not None and work.status not in TERMINAL_STATES:
+                return run, work
+            run.status = "failed"
+            run.error_code = "SCHEDULER_DISPATCH_INTERRUPTED"
+            run.error_text = (
+                "Recovered durable pending ScheduleRun without an active WorkJob binding"
+            )
+            run.work_job_id = None
+            run.dispatched_at = None
+            continue
+
         # Dispatched runs are atomically bound to a WorkJob. A later NULL link
         # is the expected result of terminal task-history deletion via
         # ON DELETE SET NULL, so it must not block the schedule forever.

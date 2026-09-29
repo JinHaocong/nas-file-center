@@ -225,7 +225,7 @@ Implementation sequence:
   update locking, durable Run now, Cron/IANA next-run preview, desktop ledger,
   mobile cards, closed target editor, visible Workflow revision/SHA pinning,
   run-history Task linkage and read-only member UX.
-- **S5 CURRENT** — closure, Docker, restart/concurrency and isolated NAS acceptance.
+- **S5 CURRENT** — closure, Docker, restart/concurrency and isolated NAS acceptance. Dedicated S5 restart/concurrency recovery tests, synthetic-only acceptance harness and closure workflow are now implemented on the S5 branch; real-NAS acceptance remains separate and must not be inferred from CI/synthetic evidence.
 
 Scheduler S0/S1 authorization does not fabricate or imply Organizer Advanced
 Rules C5 closure. The Organizer real-NAS closure evidence remains an independent
