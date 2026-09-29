@@ -18,6 +18,7 @@ class EnqueuedJob:
     index_root: IndexRoot | None = None
     scan_job: ScanJob | None = None
     normalized_roots: tuple[str, ...] = ()
+    index_root_created: bool = False
 
 
 def _normalize_allowed_unreserved_root(settings: Settings, raw: str) -> str:
@@ -40,6 +41,7 @@ def enqueue_index_work(
         raise ValueError(f"Not a directory: {safe_root}")
 
     idx_root: IndexRoot | None
+    created = False
     if existing_index_root_id is not None:
         idx_root = session.get(IndexRoot, existing_index_root_id)
         if idx_root is None:
@@ -56,6 +58,7 @@ def enqueue_index_work(
             idx_root = IndexRoot(root=root_str, created_at=utcnow())
             session.add(idx_root)
             session.flush()
+            created = True
 
     work = WorkJob(
         kind="index-root",
@@ -68,6 +71,7 @@ def enqueue_index_work(
         work_job=work,
         index_root=idx_root,
         normalized_roots=(root_str,),
+        index_root_created=created,
     )
 
 
