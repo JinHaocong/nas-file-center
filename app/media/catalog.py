@@ -4,12 +4,13 @@ import json
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import sessionmaker
 
 from app.config import Settings
 from app.media.probe import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
 from app.models import IndexRoot, IndexedPath, MediaAsset, WorkJob
+from app.job_queue import enqueue_media_work, validate_media_roots_in_session
 from app.path_safety import require_allowed_path
 
 
@@ -21,28 +22,8 @@ def validate_media_root_keys(
     settings: Settings,
     root_keys: list[str],
 ) -> list[str]:
-    if not root_keys:
-        raise ValueError("At least one indexed root is required")
-
-    normalized: list[str] = []
-    seen: set[str] = set()
-    for raw in root_keys:
-        safe = require_allowed_path(raw, settings.allowed_roots)
-        value = str(safe)
-        if value not in seen:
-            seen.add(value)
-            normalized.append(value)
-
     with session_factory() as session:
-        known = set(
-            session.scalars(
-                select(IndexRoot.root).where(IndexRoot.root.in_(normalized))
-            ).all()
-        )
-    missing = [root for root in normalized if root not in known]
-    if missing:
-        raise ValueError(f"Indexed roots not found: {missing}")
-    return normalized
+        return validate_media_roots_in_session(session, settings, root_keys)
 
 
 def enqueue_media_analysis(
@@ -50,19 +31,19 @@ def enqueue_media_analysis(
     settings: Settings,
     root_keys: list[str],
 ) -> dict[str, Any]:
-    normalized = validate_media_root_keys(session_factory, settings, root_keys)
     with session_factory() as session:
-        work = WorkJob(
+        session.execute(text("BEGIN IMMEDIATE"))
+        queued = enqueue_media_work(
+            session,
+            settings,
             kind="media-analysis",
-            status="queued",
-            state_json=json.dumps({"root_keys": normalized}, ensure_ascii=False),
+            root_keys=root_keys,
         )
-        session.add(work)
         session.commit()
         return {
-            "work_job_id": int(work.id),
-            "status": str(work.status),
-            "root_keys": normalized,
+            "work_job_id": int(queued.work_job.id),
+            "status": str(queued.work_job.status),
+            "root_keys": list(queued.normalized_roots),
         }
 
 
@@ -71,19 +52,19 @@ def enqueue_media_integrity_verification(
     settings: Settings,
     root_keys: list[str],
 ) -> dict[str, Any]:
-    normalized = validate_media_root_keys(session_factory, settings, root_keys)
     with session_factory() as session:
-        work = WorkJob(
+        session.execute(text("BEGIN IMMEDIATE"))
+        queued = enqueue_media_work(
+            session,
+            settings,
             kind="media-integrity-verify",
-            status="queued",
-            state_json=json.dumps({"root_keys": normalized}, ensure_ascii=False),
+            root_keys=root_keys,
         )
-        session.add(work)
         session.commit()
         return {
-            "work_job_id": int(work.id),
-            "status": str(work.status),
-            "root_keys": normalized,
+            "work_job_id": int(queued.work_job.id),
+            "status": str(queued.work_job.status),
+            "root_keys": list(queued.normalized_roots),
         }
 
 
