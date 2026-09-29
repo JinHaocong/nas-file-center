@@ -162,3 +162,14 @@ C5 remains **CURRENT** until the exact merged candidate is run on the actual NAS
 under the isolated project test root and zero-residue evidence is captured.
 Repository CI success alone is necessary but not sufficient to mark Organizer
 Advanced Rules fully closed.
+
+## 7. Protected real-NAS entry
+
+The shared manual acceptance entry is `.github/workflows/real-nas-acceptance.yml`.
+It can run only on a self-hosted Linux x64 runner carrying the custom
+`nas-file-center-acceptance` label. The procedure and safety boundary are
+recorded in [`real-nas-acceptance.md`](real-nas-acceptance.md).
+
+This entry does not itself close C5. C5 remains CURRENT until the workflow is
+actually executed on the target NAS filesystem, passes with zero residue, and
+the observed evidence is committed into this closure record.
