@@ -46,6 +46,16 @@ def _service(tmp_path: Path):
     db_file = tmp_path / "scheduler.db"
     engine, SessionLocal = create_engine_and_session(db_file)
     init_db(engine, db_path=db_file, backups_dir=tmp_path / "backups")
+    with SessionLocal() as session:
+        session.add(
+            User(
+                username="scheduler-admin",
+                password_hash="hash",
+                role="admin",
+                is_active=True,
+            )
+        )
+        session.commit()
     return engine, SessionLocal, SchedulerService(SessionLocal)
 
 
