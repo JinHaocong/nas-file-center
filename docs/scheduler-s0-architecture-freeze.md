@@ -1,6 +1,6 @@
 # Scheduler / Cron — S0 Architecture Freeze
 
-Status: **S0 CLOSED / S1 CLOSED / S2 CLOSED — S3 CURRENT (PINNED WORKFLOW PREVIEW/DRAFT)**
+Status: **S0 CLOSED / S1 CLOSED / S2 CLOSED / S3 CLOSED — S4 CURRENT (SCHEDULER FRONTEND)**
 Source authority: `main` baseline `f604eb47dc17fdb935d396968aab3518629e3db2`
 Product baseline: **v0.4.7**
 
@@ -458,8 +458,8 @@ S5 — closure:
 S0  Scope + Architecture Freeze                         CLOSED
 S1  Schema + cron parser + recurrence + lease/run log  CLOSED
 S2  Safe target dispatch (index/scan/media)            CLOSED
-S3  Workflow pinned Preview/Draft-only scheduling      CURRENT
-S4  Scheduler frontend / mobile                        LATER
+S3  Workflow pinned Preview/Draft-only scheduling      CLOSED
+S4  Scheduler frontend / mobile                        CURRENT
 S5  Closure / Docker / isolated NAS acceptance         LATER
 ```
 
@@ -488,6 +488,33 @@ S2 closes the safe dispatch layer with these source-enforced properties:
   minute; API processes do not run scheduler timers;
 - scheduled index/scan jobs still enter the existing queue and therefore remain
   subject to Resource Policy claim gating.
+
+
+### S3 closure notes
+
+S3 closes pinned Workflow scheduling with these source-enforced properties:
+
+- Scheduler target `workflow` binds one exact `workflow_id`, revision and
+  definition SHA256; later Workflow revisions never silently move the binding;
+- archived, missing, SHA-mismatched or structurally stale Workflow targets fail
+  closed before a Workflow WorkJob is created;
+- Scheduler tick only enqueues `workflow-scheduled`; expensive Workflow
+  compilation never runs under the Scheduler dispatch write transaction;
+- Worker revalidates the same workflow/revision/SHA pin before any Preview;
+- `action=preview` uses the existing read-only Preview path and creates zero
+  BatchPlans;
+- `action=draft` first captures the current compile digest (and Organizer
+  Advanced Preview digest where applicable), then calls the existing Generate
+  path and verifies the resulting Plan remains `draft`;
+- Scheduler S3 never calls Freeze, Validate or Execute and never creates a
+  `batch-plan-execute` WorkJob;
+- utility Workflow schedules are Preview-only because utility Generate requires
+  explicit per-Preview candidate selection; Scheduler does not silently select
+  candidates;
+- `workflow-scheduled` is Resource-Policy-controlled, so active-window pause
+  remains authoritative for scheduled live Preview/Draft work;
+- the SQLite schedule target CHECK migration is backup-bound, preserves existing
+  schedule IDs/rows, restores FK enforcement and runs `foreign_key_check`.
 
 
 ## 17. Organizer C5 independence
