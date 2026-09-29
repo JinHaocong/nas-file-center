@@ -32,6 +32,7 @@ import {
   DirectDedupePreviewResponse,
   DirectAdvancedDedupeGenerateRequest,
   DirectAdvancedDedupeGenerateResponse,
+  DedupeDiagnosticResponse,
 } from '../types/dedupe';
 export { quarantineApi } from './quarantine';
 
@@ -53,6 +54,8 @@ export const scansApi = {
     name_patterns?: string[] | null;
     exclude_patterns?: string[] | null;
   }) => api.post<{ scan_job_id: number; work_job_id: number }>('/api/scans', payload),
+  diagnosePair: (payload: { path_a: string; path_b: string; scan_job_id?: number | null }) =>
+    api.post<DedupeDiagnosticResponse>('/api/scans/diagnose-pair', payload),
   createDedupePlan: (
     scanId: number,
     payload: {
