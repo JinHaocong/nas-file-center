@@ -578,6 +578,105 @@ class WorkflowRevision(Base):
     workflow: Mapped[Workflow] = relationship(back_populates="revisions")
 
 
+class Schedule(Base):
+    __tablename__ = "schedules"
+    __table_args__ = (
+        CheckConstraint(
+            "target_type IN ('index_root', 'fclones_scan', 'media_analysis', 'media_integrity_verification')",
+            name="ck_schedules_target_type",
+        ),
+        CheckConstraint("overlap_policy = 'skip_if_active'", name="ck_schedules_overlap_policy"),
+        CheckConstraint("missed_run_policy = 'skip'", name="ck_schedules_missed_run_policy"),
+        CheckConstraint("revision >= 1", name="ck_schedules_revision"),
+        Index("ix_schedules_enabled_next", "enabled", "next_scheduled_for_utc"),
+        Index("ix_schedules_created_by_user_id", "created_by_user_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    target_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    target_json: Mapped[str] = mapped_column(Text, nullable=False)
+    cron_expression: Mapped[str] = mapped_column(String(128), nullable=False)
+    timezone: Mapped[str] = mapped_column(String(64), nullable=False)
+    overlap_policy: Mapped[str] = mapped_column(String(32), default="skip_if_active", nullable=False)
+    missed_run_policy: Mapped[str] = mapped_column(String(32), default="skip", nullable=False)
+    created_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    revision: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utcnow,
+        onupdate=utcnow,
+        nullable=False,
+    )
+    last_scheduled_for_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_scheduled_for_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    runs: Mapped[list["ScheduleRun"]] = relationship(
+        back_populates="schedule",
+        cascade="all, delete-orphan",
+        order_by="ScheduleRun.scheduled_for_utc.desc()",
+    )
+
+
+class ScheduleRun(Base):
+    __tablename__ = "schedule_runs"
+    __table_args__ = (
+        UniqueConstraint("schedule_id", "scheduled_for_utc", name="uq_schedule_runs_schedule_slot"),
+        CheckConstraint(
+            "status IN ('pending', 'dispatched', 'skipped_overlap', 'failed')",
+            name="ck_schedule_runs_status",
+        ),
+        CheckConstraint("schedule_revision >= 1", name="ck_schedule_runs_revision"),
+        Index("ix_schedule_runs_schedule_time", "schedule_id", "scheduled_for_utc"),
+        Index("ix_schedule_runs_work_job_id", "work_job_id"),
+        Index("ix_schedule_runs_status", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    schedule_id: Mapped[int] = mapped_column(
+        ForeignKey("schedules.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    schedule_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    scheduled_for_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False)
+    work_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("work_jobs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    error_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    target_snapshot_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    schedule: Mapped[Schedule] = relationship(back_populates="runs")
+
+
+class SchedulerState(Base):
+    __tablename__ = "scheduler_state"
+    __table_args__ = (
+        CheckConstraint("id = 1", name="ck_scheduler_state_singleton_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    owner: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utcnow,
+        onupdate=utcnow,
+        nullable=False,
+    )
+
+
 class ResourcePolicy(Base):
     __tablename__ = "resource_policy"
 
