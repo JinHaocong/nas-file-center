@@ -37,6 +37,7 @@ const leafMenuItems: NonNullable<MenuProps['items']> = [
   { key: '/batch', icon: <AppstoreOutlined />, label: '批量处理' },
   { key: '/organizer', icon: <FolderViewOutlined />, label: 'Organizer 整理' },
   { key: '/workflows', icon: <DeploymentUnitOutlined />, label: '工作流中心' },
+  { key: '/schedules', icon: <ScheduleOutlined />, label: '计划任务' },
   { key: '/plans', icon: <ScheduleOutlined />, label: '执行计划' },
   { key: '/quarantine', icon: <SafetyCertificateOutlined />, label: '文件隔离区' },
   { key: '/tasks', icon: <ThunderboltOutlined />, label: '任务中心' },
@@ -56,7 +57,7 @@ const groupedMenuItems: MenuProps['items'] = [
   {
     type: 'group',
     label: groupLabel('数据与扫描'),
-    children: [leafMenuItems[1], leafMenuItems[2], leafMenuItems[13]],
+    children: [leafMenuItems[1], leafMenuItems[2], leafMenuItems[14]],
   },
   {
     type: 'group',
@@ -66,17 +67,17 @@ const groupedMenuItems: MenuProps['items'] = [
   {
     type: 'group',
     label: groupLabel('自动化'),
-    children: [leafMenuItems[7]],
+    children: [leafMenuItems[7], leafMenuItems[8]],
   },
   {
     type: 'group',
     label: groupLabel('安全与运行'),
-    children: [leafMenuItems[8], leafMenuItems[9], leafMenuItems[10], leafMenuItems[11]],
+    children: [leafMenuItems[9], leafMenuItems[10], leafMenuItems[11], leafMenuItems[12]],
   },
   {
     type: 'group',
     label: groupLabel('系统'),
-    children: [leafMenuItems[12]],
+    children: [leafMenuItems[13]],
   },
 ];
 
