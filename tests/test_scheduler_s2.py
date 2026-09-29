@@ -347,6 +347,48 @@ def test_overlap_skips_second_slot_until_prior_workjob_terminal(tmp_path: Path):
         assert session.scalar(select(func.count()).select_from(WorkJob)) == 2
 
 
+def test_deleted_terminal_workjob_link_does_not_block_future_slots(tmp_path: Path):
+    settings, _, SessionLocal, service, data_dir, admin_id = _env(tmp_path)
+    root = data_dir / "history-cleanup"
+    root_id = _register_root(SessionLocal, root)
+    _create_schedule(
+        service,
+        admin_id,
+        {"type": "index_root", "root_id": root_id},
+    )
+
+    first = run_scheduler_tick(
+        SessionLocal,
+        settings,
+        owner="worker-a",
+        now_utc=_dt(12, 1, 5),
+    )
+    assert first.dispatched == 1
+
+    with SessionLocal() as session:
+        work = session.scalar(select(WorkJob))
+        assert work is not None
+        work.status = "completed"
+        work.finished_at = _dt(12, 1, 30)
+        session.commit()
+        session.delete(work)
+        session.commit()
+
+        first_run = session.scalar(select(ScheduleRun))
+        assert first_run is not None
+        assert first_run.status == "dispatched"
+        assert first_run.work_job_id is None
+
+    second = run_scheduler_tick(
+        SessionLocal,
+        settings,
+        owner="worker-a",
+        now_utc=_dt(12, 2, 5),
+    )
+    assert second.dispatched == 1
+    assert second.skipped_overlap == 0
+
+
 def test_missed_slots_are_not_replayed_or_recorded(tmp_path: Path):
     settings, _, SessionLocal, service, data_dir, admin_id = _env(tmp_path)
     root = data_dir / "missed"
