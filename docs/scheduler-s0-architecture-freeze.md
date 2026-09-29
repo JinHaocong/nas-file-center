@@ -1,6 +1,6 @@
 # Scheduler / Cron — S0 Architecture Freeze
 
-Status: **S0 CLOSED — S1 CURRENT (PERSISTENCE + DISPATCH LEDGER)**
+Status: **S0 CLOSED / S1 CLOSED — S2 CURRENT (SAFE TARGET DISPATCH)**
 Source authority: `main` baseline `f604eb47dc17fdb935d396968aab3518629e3db2`
 Product baseline: **v0.4.7**
 
@@ -456,8 +456,8 @@ S5 — closure:
 
 ```text
 S0  Scope + Architecture Freeze                         CLOSED
-S1  Schema + cron parser + recurrence + lease/run log  CURRENT
-S2  Safe target dispatch (index/scan/media)            NEXT
+S1  Schema + cron parser + recurrence + lease/run log  CLOSED
+S2  Safe target dispatch (index/scan/media)            CURRENT
 S3  Workflow pinned Preview/Draft-only scheduling      LATER
 S4  Scheduler frontend / mobile                        LATER
 S5  Closure / Docker / isolated NAS acceptance         LATER
