@@ -156,7 +156,7 @@ describe('Right Workspace v2 design system', () => {
     const css = read('src/styles/v056-right-workspace-v2.css');
 
     assert.match(css, /--nfc-w2-page-bottom:\s*clamp\(96px, 8vh, 128px\)/);
-    assert.match(css, /padding:\s*26px clamp\(24px, 2\.15vw, 42px\) var\(--nfc-w2-page-bottom\)/);
+    assert.match(css, /padding:\s*18px clamp\(24px, 2\.15vw, 42px\) var\(--nfc-w2-page-bottom\)/);
     assert.doesNotMatch(
       css,
       /\.nfc-app-main \.nfc-page-content > \.nfc-quarantine-page,/
