@@ -164,7 +164,7 @@ def run_now(request: Request, schedule_id: int):
 
 
 @router.post(
-    "/recurrence-preview",
+    "/recurrence/preview",
     dependencies=[Depends(require_admin_user)],
 )
 def preview_recurrence(
