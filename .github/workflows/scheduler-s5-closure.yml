@@ -1,0 +1,242 @@
+name: Scheduler S5 Closure
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'app/scheduler/**'
+      - 'app/worker.py'
+      - 'app/job_queue.py'
+      - 'app/models.py'
+      - 'tests/test_scheduler_*.py'
+      - 'frontend/src/pages/Scheduler/**'
+      - 'frontend/src/api/scheduler.ts'
+      - 'frontend/src/types/scheduler.ts'
+      - 'frontend/tests/scheduler_s4.test.ts'
+      - 'scripts/scheduler_s5_acceptance.py'
+      - 'docs/scheduler-s5-closure.md'
+      - 'docs/roadmap-current.md'
+      - 'docs/scheduler-s0-architecture-freeze.md'
+      - 'Dockerfile'
+      - '.github/workflows/scheduler-s5-closure.yml'
+  push:
+    branches:
+      - feature/scheduler-s5-closure
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scheduler-s5-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  closure-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env:
+      CONFIG_DIR: /tmp/nfc-config
+      DATA_MOUNT: /tmp/nfc-data
+      ALLOWED_ROOTS: /tmp/nfc-data
+      QUARANTINE_ROOT: /tmp/nfc-data/.nas-file-center-trash
+      PR_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+
+    steps:
+      - name: Checkout exact candidate with history
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Record candidate identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "candidate_sha=$(git rev-parse HEAD)"
+            echo "candidate_ref=${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
+            echo "pr_base_sha=${PR_BASE_SHA}"
+            if [ -n "${PR_BASE_SHA}" ]; then
+              echo "merge_base=$(git merge-base "${PR_BASE_SHA}" HEAD)"
+            fi
+            echo "synthetic_only=true"
+            echo "real_nas_acceptance=false"
+          } | tee scheduler-s5-identity.txt
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install backend test dependencies
+        run: python -m pip install -e '.[test]'
+
+      - name: Compile Scheduler S5 acceptance harness
+        run: python -m py_compile scripts/scheduler_s5_acceptance.py
+
+      - name: Run focused Scheduler S1-S5 suite
+        shell: bash
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          pytest             tests/test_scheduler_s1.py             tests/test_scheduler_s2.py             tests/test_scheduler_s3.py             tests/test_scheduler_s4_api.py             tests/test_scheduler_s5_closure.py             -q 2>&1 | tee scheduler-s5-focused.log
+
+      - name: Run standalone synthetic-only Scheduler acceptance
+        shell: bash
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          ACCEPT_ROOT="${RUNNER_TEMP}/nfc-scheduler-s5-acceptance"
+          mkdir "${ACCEPT_ROOT}"
+          python scripts/scheduler_s5_acceptance.py             --project-test-root "${ACCEPT_ROOT}"             --confirm-synthetic-only YES             --candidate-sha "${GITHUB_SHA}"             --evidence-json scheduler-s5-synthetic-acceptance.json             2>&1 | tee scheduler-s5-synthetic-acceptance.log
+          test -z "$(find "${ACCEPT_ROOT}" -mindepth 1 -maxdepth 1 -print -quit)"
+          rmdir "${ACCEPT_ROOT}"
+
+      - name: Run full backend regression
+        shell: bash
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          pytest --disable-warnings -q 2>&1 | tee scheduler-s5-backend-full.log
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run frontend tests
+        shell: bash
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          npm test 2>&1 | tee ../scheduler-s5-frontend-tests.log
+
+      - name: Typecheck frontend
+        shell: bash
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          npm run typecheck 2>&1 | tee ../scheduler-s5-frontend-typecheck.log
+
+      - name: Build frontend
+        shell: bash
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          npm run build 2>&1 | tee ../scheduler-s5-frontend-build.log
+
+      - name: Verify current change scope and Scheduler authority containment
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${PR_BASE_SHA}" ]; then
+            DIFF_BASE="${PR_BASE_SHA}"
+          else
+            DIFF_BASE="$(git rev-parse HEAD^)"
+          fi
+
+          git diff --check "${DIFF_BASE}...HEAD"
+          {
+            echo "# Scheduler S5 diff base"
+            echo "diff_base=${DIFF_BASE}"
+            echo
+            echo "# Changed files"
+            git diff --name-status "${DIFF_BASE}...HEAD"
+            echo
+            echo "# Added Scheduler/Worker authority lines"
+            git diff --unified=0 "${DIFF_BASE}...HEAD" --               app/scheduler app/worker.py app/job_queue.py app/models.py |
+              grep -E '^\+[^+]' || true
+          } | tee scheduler-s5-scope-review.txt
+
+          if git diff --unified=0 "${DIFF_BASE}...HEAD" --                app/scheduler app/worker.py app/job_queue.py app/models.py |
+             grep -E '^\+[^+]' |
+             grep -Eiq '(shell=True|os\.system\(|subprocess\.|batch-plan-execute|quarantine[-_ ].*(purge|restore)|permanent[-_ ]?delete|organizer[-_ ].*execute|ALLOW_DELETE)'; then
+            echo "BLOCKED: S5 change expands Scheduler V1 execution/destructive authority" >&2
+            exit 1
+          fi
+
+      - name: Upload Scheduler S5 closure evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scheduler-s5-closure-${{ github.sha }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            scheduler-s5-identity.txt
+            scheduler-s5-focused.log
+            scheduler-s5-synthetic-acceptance.json
+            scheduler-s5-synthetic-acceptance.log
+            scheduler-s5-backend-full.log
+            scheduler-s5-frontend-tests.log
+            scheduler-s5-frontend-typecheck.log
+            scheduler-s5-frontend-build.log
+            scheduler-s5-scope-review.txt
+
+  linux-amd64-docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build linux amd64 Scheduler S5 candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="nas-file-center:scheduler-s5-${GITHUB_SHA::7}"
+          echo "candidate_tag=${TAG}" | tee scheduler-s5-docker-evidence.txt
+          docker buildx build             --platform linux/amd64             --load             --tag "${TAG}"             . 2>&1 | tee scheduler-s5-docker-build.log
+          docker image inspect             --format 'id={{.Id}} os={{.Os}} arch={{.Architecture}} created={{.Created}}'             "${TAG}" | tee -a scheduler-s5-docker-evidence.txt
+          test "$(docker image inspect --format '{{.Architecture}}' "${TAG}")" = "amd64"
+          test "$(docker image inspect --format '{{.Os}}' "${TAG}")" = "linux"
+          docker run --rm --entrypoint fclones "${TAG}" --version |
+            tee -a scheduler-s5-docker-evidence.txt
+
+      - name: Run linux amd64 synthetic scheduled index + scan
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="nas-file-center:scheduler-s5-${GITHUB_SHA::7}"
+          ACCEPT_ROOT="${RUNNER_TEMP}/nfc-scheduler-s5-acceptance"
+          EVIDENCE_ROOT="${RUNNER_TEMP}/nfc-scheduler-s5-evidence"
+          mkdir "${ACCEPT_ROOT}" "${EVIDENCE_ROOT}"
+
+          docker run --rm             --platform linux/amd64             -v "${PWD}/scripts/scheduler_s5_acceptance.py:/tmp/scheduler_s5_acceptance.py:ro"             -v "${ACCEPT_ROOT}:/tmp/nfc-scheduler-s5-acceptance"             -v "${EVIDENCE_ROOT}:/evidence"             "${TAG}"             python /tmp/scheduler_s5_acceptance.py               --project-test-root /tmp/nfc-scheduler-s5-acceptance               --confirm-synthetic-only YES               --execute-jobs               --candidate-sha "${GITHUB_SHA}"               --evidence-json /evidence/scheduler-s5-docker-acceptance.json             2>&1 | tee scheduler-s5-docker-acceptance.log
+
+          cp "${EVIDENCE_ROOT}/scheduler-s5-docker-acceptance.json" .
+          test -z "$(find "${ACCEPT_ROOT}" -mindepth 1 -maxdepth 1 -print -quit)"
+          rmdir "${ACCEPT_ROOT}"
+          rm "${EVIDENCE_ROOT}/scheduler-s5-docker-acceptance.json"
+          rmdir "${EVIDENCE_ROOT}"
+
+      - name: Upload Scheduler S5 Docker evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scheduler-s5-docker-${{ github.sha }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            scheduler-s5-docker-build.log
+            scheduler-s5-docker-evidence.txt
+            scheduler-s5-docker-acceptance.log
+            scheduler-s5-docker-acceptance.json
