@@ -84,6 +84,50 @@ The fixture also verifies that file bytes survive both stages and that
 
 Release Validation remains an independent second full-regression/Docker gate.
 
+## 3.1 NAS directory-MOVE transaction compatibility hardening
+
+The current source also includes a production/NAS compatibility correction for
+Single-Child Wrapper Collapse directory MOVE transactions.
+
+The original transplant recovery namespace used only `plan_id + sequence`.
+That can collide when the application database is rebuilt or restored while the
+NAS-side quarantine storage still contains an older
+`.utility-move-tx/<plan>/item-<sequence>/state.json`. A newly-created Plan #1
+could therefore encounter unrelated historical transaction state and fail
+closed with:
+
+```text
+[Errno 17] Existing directory MOVE transaction does not match this frozen item
+```
+
+The correction keeps the fail-closed transaction checks but adds a durable
+per-item directory-MOVE transaction id, persists it in BatchPlan execution
+metadata across Worker recovery, namespaces transplant state by that id, and
+threads the same identity through reconcile and cleanup. Unrelated legacy state
+is preserved as forensic evidence rather than silently deleted.
+
+Relevant source commits include:
+
+```text
+7eb8bf3  fix: namespace directory transplant transactions
+18fe442  fix: bind directory move execution to transaction id
+0ebd6cf  fix: persist move transaction id across worker recovery
+3c73e3a  fix: reconcile namespaced transplant after source retirement
+29be0b4  test: cover namespaced transplant reentry
+c7f93f8  test: cover reused plan id transplant collision
+```
+
+Regression coverage is in
+`tests/test_gate6b_zfuse_identity_convergence.py` and
+`tests/test_zfuse_safe_move_compat.py`. The exact `29be0b4...` candidate
+completed Release Validation, Organizer Advanced C5 Closure, Gate6-C TDD and
+Gate6-D TDD successfully. The later reused-plan-id regression remains subject
+to its own final-head CI before merge.
+
+This source-level correction does **not** count as real-NAS C5 acceptance.
+The actual target NAS filesystem must still pass the isolated harness with zero
+residue before C5 can be marked CLOSED.
+
 ## 4. Real-NAS execution procedure
 
 Create a dedicated empty test directory on the NAS. Do not point this command at
