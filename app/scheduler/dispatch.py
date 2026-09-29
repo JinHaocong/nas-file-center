@@ -17,7 +17,7 @@ from app.job_queue import (
     enqueue_media_work,
     enqueue_scan_work,
 )
-from app.models import IndexRoot, Schedule, ScheduleRun, WorkJob, utcnow
+from app.models import IndexRoot, Schedule, ScheduleRun, WorkJob, Workflow, WorkflowRevision, utcnow
 from app.scheduler.cron import next_occurrence
 from app.scheduler.schema import (
     FclonesScanScheduleTarget,
@@ -25,12 +25,15 @@ from app.scheduler.schema import (
     MediaAnalysisScheduleTarget,
     MediaIntegrityVerificationScheduleTarget,
     ScheduleTarget,
+    WorkflowScheduleTarget,
 )
 from app.scheduler.service import (
     acquire_scheduler_lease,
     assert_scheduler_lease,
 )
 from app.tasks.state_machine import TERMINAL_STATES
+from app.workflows.schema import WorkflowDefinition
+from app.workflows.validation import validate_raw_steps_types
 
 
 _TARGET_ADAPTER = TypeAdapter(ScheduleTarget)
@@ -179,6 +182,88 @@ def _enqueue_target(
             root_keys=target.root_keys,
             require_unreserved=True,
         )
+    elif isinstance(target, WorkflowScheduleTarget):
+        workflow = session.get(Workflow, target.workflow_id)
+        if workflow is None:
+            raise ValueError(f"Workflow #{target.workflow_id} not found")
+        if workflow.archived_at is not None:
+            raise ValueError(f"Workflow #{target.workflow_id} is archived")
+
+        revision = session.scalar(
+            select(WorkflowRevision).where(
+                WorkflowRevision.workflow_id == target.workflow_id,
+                WorkflowRevision.revision == target.workflow_revision,
+            )
+        )
+        if revision is None:
+            raise ValueError(
+                f"Workflow #{target.workflow_id} revision {target.workflow_revision} not found"
+            )
+        if revision.definition_sha256.lower() != target.definition_sha256.lower():
+            raise ValueError(
+                "Pinned workflow definition SHA no longer matches stored revision"
+            )
+
+        try:
+            raw_definition = json.loads(revision.definition_json)
+            validate_raw_steps_types(
+                raw_definition.get("steps", []),
+                mode=raw_definition.get("mode"),
+            )
+            definition = WorkflowDefinition.model_validate(raw_definition)
+        except Exception as exc:
+            raise ValueError(f"Pinned workflow definition is invalid: {exc}") from exc
+
+        if definition.mode == "utility":
+            if target.runtime_inputs is not None:
+                raise ValueError(
+                    "Utility workflow schedules do not accept runtime_inputs"
+                )
+            if target.action == "draft":
+                raise ValueError(
+                    "Utility workflow schedules are Preview-only in Scheduler S3"
+                )
+        elif definition.mode == "dedupe":
+            if (
+                target.runtime_inputs is None
+                or target.runtime_inputs.scan_job_id is None
+                or target.runtime_inputs.root_ids is not None
+            ):
+                raise ValueError(
+                    "Dedupe workflow schedule requires only runtime_inputs.scan_job_id"
+                )
+        elif definition.mode in {"file", "organizer"}:
+            if (
+                target.runtime_inputs is not None
+                and target.runtime_inputs.scan_job_id is not None
+            ):
+                raise ValueError(
+                    "File/Organizer workflow schedule forbids runtime_inputs.scan_job_id"
+                )
+
+        work = WorkJob(
+            kind="workflow-scheduled",
+            status="queued",
+            state_json=json.dumps(
+                {
+                    "workflow_id": target.workflow_id,
+                    "workflow_revision": target.workflow_revision,
+                    "definition_sha256": target.definition_sha256.lower(),
+                    "action": target.action,
+                    "runtime_inputs": (
+                        target.runtime_inputs.model_dump(mode="json")
+                        if target.runtime_inputs is not None
+                        else None
+                    ),
+                    "requested_by_user_id": schedule.created_by_user_id,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+        )
+        session.add(work)
+        session.flush()
+        queued = EnqueuedJob(work_job=work)
     else:  # pragma: no cover - TypeAdapter + closed union make this unreachable.
         raise ValueError(f"Unsupported schedule target: {type(target).__name__}")
 
