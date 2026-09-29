@@ -245,14 +245,15 @@ def test_s3_migrates_old_schedule_constraint_with_backup_and_preserves_rows(tmp_
                     next_scheduled_for_utc
                 ) VALUES (
                     7, 'legacy index', '', 1, 'index_root',
-                    '{"type":"index_root","root_id":1}',
+                    :target_json,
                     '0 * * * *', 'UTC', 'skip_if_active', 'skip',
                     NULL, 3, '2026-09-29 00:00:00',
                     '2026-09-29 00:00:00', NULL,
                     '2026-09-29 01:00:00'
                 )
                 """
-            )
+            ),
+            {"target_json": json.dumps({"type": "index_root", "root_id": 1})},
         )
     legacy_engine.dispose()
 
