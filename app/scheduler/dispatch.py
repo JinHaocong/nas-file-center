@@ -95,10 +95,13 @@ def _active_prior_run(session: Session, schedule_id: int) -> tuple[ScheduleRun, 
     for run in rows:
         if run.status == "pending":
             return run, None
+        # Dispatched runs are atomically bound to a WorkJob. A later NULL link
+        # is the expected result of terminal task-history deletion via
+        # ON DELETE SET NULL, so it must not block the schedule forever.
         if run.work_job_id is None:
-            return run, None
+            continue
         work = session.get(WorkJob, run.work_job_id)
-        if work is None or work.status not in TERMINAL_STATES:
+        if work is not None and work.status not in TERMINAL_STATES:
             return run, work
     return None
 
