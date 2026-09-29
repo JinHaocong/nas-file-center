@@ -1,7 +1,7 @@
 # Scheduler / Cron — S0 Architecture Freeze
 
-Status: **S0 CLOSED — S1 CURRENT (PERSISTENCE + DISPATCH LEDGER)**  
-Source authority: `main` baseline `f604eb47dc17fdb935d396968aab3518629e3db2`  
+Status: **S0 CLOSED — S1 CURRENT (PERSISTENCE + DISPATCH LEDGER)**
+Source authority: `main` baseline `f604eb47dc17fdb935d396968aab3518629e3db2`
 Product baseline: **v0.4.7**
 
 ## 1. Scope decision
