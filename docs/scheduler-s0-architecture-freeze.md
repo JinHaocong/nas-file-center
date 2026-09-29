@@ -1,6 +1,6 @@
 # Scheduler / Cron — S0 Architecture Freeze
 
-Status: **S0 CLOSED — S1 CURRENT (PERSISTENCE + DISPATCH LEDGER)**
+Status: **S0 CLOSED / S1 CLOSED — S2 CURRENT (SAFE TARGET DISPATCH)**
 Source authority: `main` baseline `f604eb47dc17fdb935d396968aab3518629e3db2`
 Product baseline: **v0.4.7**
 
@@ -216,6 +216,18 @@ DST semantics are frozen:
 - stored run identity is always the resolved UTC instant.
 
 Cron matching is minute-granularity. Seconds are always zero.
+
+S1 clarification for day matching follows standard cron semantics:
+
+- "wildcard" in this rule means the field is exactly `*`; stepped forms such
+  as `*/2` are restricted fields because they select only a subset of values;
+- if both day-of-month and day-of-week are wildcard, every otherwise matching
+  calendar day is eligible;
+- if one is wildcard, the restricted field controls the day;
+- if both are restricted, **either** day-of-month or day-of-week may match.
+
+This OR rule is part of the frozen recurrence contract and prevents later
+implementations from silently switching to AND semantics.
 
 ## 7. Missed-run and overlap semantics
 
@@ -444,8 +456,8 @@ S5 — closure:
 
 ```text
 S0  Scope + Architecture Freeze                         CLOSED
-S1  Schema + cron parser + recurrence + lease/run log  CURRENT
-S2  Safe target dispatch (index/scan/media)            NEXT
+S1  Schema + cron parser + recurrence + lease/run log  CLOSED
+S2  Safe target dispatch (index/scan/media)            CURRENT
 S3  Workflow pinned Preview/Draft-only scheduling      LATER
 S4  Scheduler frontend / mobile                        LATER
 S5  Closure / Docker / isolated NAS acceptance         LATER

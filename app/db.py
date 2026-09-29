@@ -105,6 +105,9 @@ def init_db(
             "workflows",
             "workflow_revisions",
             "resource_policy",
+            "schedules",
+            "schedule_runs",
+            "scheduler_state",
         }
 
         # Check existing columns in work_jobs
@@ -320,6 +323,19 @@ def init_db(
                         1, 2, 2, 'normal', 'normal',
                         0, NULL, NULL,
                         NULL, 'limited', 1, CURRENT_TIMESTAMP
+                    )
+                """)
+            )
+            session.commit()
+
+        # Seed singleton SchedulerState lease row if not exists.
+        with SessionLocal() as session:
+            session.execute(
+                text("""
+                    INSERT OR IGNORE INTO scheduler_state (
+                        id, owner, lease_expires_at, heartbeat_at, updated_at
+                    ) VALUES (
+                        1, NULL, NULL, NULL, CURRENT_TIMESTAMP
                     )
                 """)
             )

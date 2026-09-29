@@ -172,7 +172,7 @@ filesystem executor.
 
 ## 6. NEXT CURRENT — Scheduler / Cron
 
-**Status: S0 CLOSED / S1 CURRENT — PERSISTENCE + DISPATCH LEDGER**
+**Status: S0 CLOSED / S1 CLOSED / S2 CURRENT — SAFE TARGET DISPATCH**
 
 Fresh scope decision: **Scheduler / Cron**.
 
@@ -206,9 +206,12 @@ Implementation sequence:
 
 - **S0 CLOSED** — scope decision, authority boundary, cron/timezone semantics,
   idempotency, lease, RBAC, TDD and closure plan frozen.
-- **S1 CURRENT** — additive schedule/run schema, strict cron parser, recurrence
-  engine and scheduler lease/idempotency core.
-- **S2 NEXT** — safe allowlisted dispatch for index/scan/media jobs.
+- **S1 CLOSED** — additive schedule/run + scheduler-state schema, strict
+  five-field cron parser, IANA timezone/DST recurrence, optimistic schedule
+  revision locking, immutable run snapshots, unique run-slot idempotency and
+  DB-backed scheduler lease core. S1 creates no WorkJobs.
+- **S2 CURRENT** — safe allowlisted dispatch for index/scan/media jobs using
+  the S1 transaction and duplicate-dispatch fences.
 - **S3 LATER** — exact-revision Workflow Preview/Draft-only scheduling.
 - **S4 LATER** — Scheduler desktop/mobile frontend.
 - **S5 LATER** — closure, Docker, restart/concurrency and isolated NAS acceptance.
