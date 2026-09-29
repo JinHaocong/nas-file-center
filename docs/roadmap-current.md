@@ -165,7 +165,7 @@ C0 established:
   `MOVE → rmdir_empty` primitive, extends cleanup authority only to the explicit
   Organizer structural Plan context, and keeps global delete disabled.
 - **C4 CLOSED** — shared Advanced Rules editor, digest-bound standalone/Workflow staged Preview, blocking-conflict UI, explicit Stage A/Stage B row separation, and fresh Preview gating after Stage A.
-- **C5 CURRENT** — full closure / Docker / isolated real-NAS acceptance. Repository closure harness and dedicated C5 workflow are implemented; final closure remains blocked on passing the same harness on the actual NAS filesystem with zero residue. Closure record: [`organizer-advanced-rules-c5-closure.md`](organizer-advanced-rules-c5-closure.md).
+- **C5 CURRENT** — full closure / Docker / isolated real-NAS acceptance. Repository closure harness and dedicated C5 workflow are implemented; final closure remains blocked on passing the same harness on the actual NAS filesystem with zero residue. A protected shared self-hosted acceptance entry is documented in [`real-nas-acceptance.md`](real-nas-acceptance.md). Closure record: [`organizer-advanced-rules-c5-closure.md`](organizer-advanced-rules-c5-closure.md).
 
 C3 does not authorize generic delete, recursive rmdir, shell move, or a second
 filesystem executor.
@@ -225,7 +225,7 @@ Implementation sequence:
   update locking, durable Run now, Cron/IANA next-run preview, desktop ledger,
   mobile cards, closed target editor, visible Workflow revision/SHA pinning,
   run-history Task linkage and read-only member UX.
-- **S5 CURRENT** — closure, Docker, restart/concurrency and isolated NAS acceptance. Dedicated S5 restart/concurrency recovery tests, synthetic-only acceptance harness and closure workflow are now implemented on the S5 branch; real-NAS acceptance remains separate and must not be inferred from CI/synthetic evidence.
+- **S5 CURRENT** — closure, Docker, restart/concurrency and isolated NAS acceptance. Dedicated S5 restart/concurrency recovery tests, synthetic-only acceptance harness and closure workflow are merged; a protected shared self-hosted acceptance entry is documented in [`real-nas-acceptance.md`](real-nas-acceptance.md). Real-NAS acceptance remains separate and must not be inferred from CI/synthetic evidence.
 
 Scheduler S0/S1 authorization does not fabricate or imply Organizer Advanced
 Rules C5 closure. The Organizer real-NAS closure evidence remains an independent
