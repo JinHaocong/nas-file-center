@@ -9,6 +9,7 @@ import time
 from datetime import timedelta
 from pathlib import Path
 from typing import Any, Type
+from uuid import uuid4
 
 from sqlalchemy import delete, select, text
 
@@ -595,6 +596,13 @@ def _reconcile_executing_item(
     src = Path(item.source_path)
     meta = json.loads(item.metadata_json or "{}")
     exec_meta = meta.get("execution") or {}
+    directory_move_transaction_id = (
+        exec_meta.get("directory_move_transaction_id")
+        if isinstance(exec_meta, dict)
+        and isinstance(exec_meta.get("directory_move_transaction_id"), str)
+        and exec_meta.get("directory_move_transaction_id")
+        else None
+    )
     source_stat = exec_meta.get("source_stat") or {}
     metadata_before = exec_meta.get("metadata_before") or source_stat
 
@@ -615,6 +623,7 @@ def _reconcile_executing_item(
                         item.sequence,
                         source=src,
                         target=tgt,
+                        transaction_id=directory_move_transaction_id,
                     )
                 except Exception:
                     transplant_matches = False
@@ -2775,6 +2784,7 @@ class BatchPlanExecuteHandler(TaskHandler):
             is_tx_restore = False
             paired_cleanup_item_id: int | None = None
             utility_cleanup_result = None
+            directory_move_transaction_id: str | None = None
             try:
                 if src_p.exists():
                     st = src_p.stat(follow_symlinks=False)
@@ -2830,6 +2840,18 @@ class BatchPlanExecuteHandler(TaskHandler):
                 else:
                     item_metadata = json.loads(row.metadata_json or "{}")
 
+                if row.operation == "move" and isinstance(item_metadata, dict):
+                    existing_execution = item_metadata.get("execution")
+                    existing_transaction_id = (
+                        existing_execution.get("directory_move_transaction_id")
+                        if isinstance(existing_execution, dict)
+                        else None
+                    )
+                    if isinstance(existing_transaction_id, str) and existing_transaction_id:
+                        directory_move_transaction_id = existing_transaction_id
+                    else:
+                        directory_move_transaction_id = uuid4().hex
+
                 if (
                     row.operation == "move"
                     and isinstance(item_metadata, dict)
@@ -2879,7 +2901,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                     cleanup_row.metadata_json = json.dumps(cleanup_meta, ensure_ascii=False)
                     paired_cleanup_item_id = int(cleanup_row.id)
 
-                item_metadata["execution"] = {
+                execution_intent = {
                     "phase": "intent",
                     "task_id": job.id,
                     "operation": row.operation,
@@ -2887,6 +2909,11 @@ class BatchPlanExecuteHandler(TaskHandler):
                     "metadata_before": src_stat_dict,
                     "target_mtime_ns": target_touch_mtime_ns,
                 }
+                if directory_move_transaction_id is not None:
+                    execution_intent["directory_move_transaction_id"] = (
+                        directory_move_transaction_id
+                    )
+                item_metadata["execution"] = execution_intent
                 row.metadata_json = json.dumps(item_metadata, ensure_ascii=False)
 
                 if row.operation == "quarantine":
@@ -3455,6 +3482,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                             quarantine_entry_id=q_purge_entry_id or q_entry_id or q_restore_entry_id,
                             purge_manifest=purge_manifest,
                             negative_capability_probe_cache=negative_capability_probe_cache,
+                            directory_move_transaction_id=directory_move_transaction_id,
                         )
                         if result.state == "completed":
                             utility_cleanup_result = wrapper_guard.remove_if_empty()
@@ -3471,6 +3499,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                         quarantine_entry_id=q_purge_entry_id or q_entry_id or q_restore_entry_id,
                         purge_manifest=purge_manifest,
                         negative_capability_probe_cache=negative_capability_probe_cache,
+                        directory_move_transaction_id=directory_move_transaction_id,
                     )
             except JobLeaseLost:
                 raise
@@ -3997,11 +4026,13 @@ class BatchPlanExecuteHandler(TaskHandler):
                         item_meta.sequence,
                         source=Path(item_meta.source_path),
                         target=Path(item_meta.target_path) if item_meta.target_path else Path(item_meta.source_path),
+                        transaction_id=directory_move_transaction_id,
                     ):
                         cleanup_directory_transplant_state(
                             settings.quarantine_root,
                             plan_id,
                             item_meta.sequence,
+                            transaction_id=directory_move_transaction_id,
                         )
                 except Exception:
                     # Completion is already committed. Residual NFC-owned transaction
