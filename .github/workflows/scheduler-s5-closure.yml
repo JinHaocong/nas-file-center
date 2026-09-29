@@ -92,7 +92,7 @@ jobs:
           set -euo pipefail
           ACCEPT_ROOT="${RUNNER_TEMP}/nfc-scheduler-s5-acceptance"
           mkdir "${ACCEPT_ROOT}"
-          python scripts/scheduler_s5_acceptance.py             --project-test-root "${ACCEPT_ROOT}"             --confirm-synthetic-only YES             --candidate-sha "${GITHUB_SHA}"             --evidence-json scheduler-s5-synthetic-acceptance.json             2>&1 | tee scheduler-s5-synthetic-acceptance.log
+          python scripts/scheduler_s5_acceptance.py             --project-test-root "${ACCEPT_ROOT}"             --confirm-synthetic-only YES             --candidate-sha "${CANDIDATE_SHA}"             --evidence-json scheduler-s5-synthetic-acceptance.json             2>&1 | tee scheduler-s5-synthetic-acceptance.log
           test -z "$(find "${ACCEPT_ROOT}" -mindepth 1 -maxdepth 1 -print -quit)"
           rmdir "${ACCEPT_ROOT}"
 
@@ -222,7 +222,7 @@ jobs:
           EVIDENCE_ROOT="${RUNNER_TEMP}/nfc-scheduler-s5-evidence"
           mkdir "${ACCEPT_ROOT}" "${EVIDENCE_ROOT}"
 
-          docker run --rm             --platform linux/amd64             -v "${PWD}/scripts/scheduler_s5_acceptance.py:/tmp/scheduler_s5_acceptance.py:ro"             -v "${ACCEPT_ROOT}:/tmp/nfc-scheduler-s5-acceptance"             -v "${EVIDENCE_ROOT}:/evidence"             "${TAG}"             python /tmp/scheduler_s5_acceptance.py               --project-test-root /tmp/nfc-scheduler-s5-acceptance               --confirm-synthetic-only YES               --execute-jobs               --candidate-sha "${GITHUB_SHA}"               --evidence-json /evidence/scheduler-s5-docker-acceptance.json             2>&1 | tee scheduler-s5-docker-acceptance.log
+          docker run --rm             --platform linux/amd64             -v "${PWD}/scripts/scheduler_s5_acceptance.py:/tmp/scheduler_s5_acceptance.py:ro"             -v "${ACCEPT_ROOT}:/tmp/nfc-scheduler-s5-acceptance"             -v "${EVIDENCE_ROOT}:/evidence"             "${TAG}"             python /tmp/scheduler_s5_acceptance.py               --project-test-root /tmp/nfc-scheduler-s5-acceptance               --confirm-synthetic-only YES               --execute-jobs               --candidate-sha "${CANDIDATE_SHA}"               --evidence-json /evidence/scheduler-s5-docker-acceptance.json             2>&1 | tee scheduler-s5-docker-acceptance.log
 
           cp "${EVIDENCE_ROOT}/scheduler-s5-docker-acceptance.json" .
           test -z "$(find "${ACCEPT_ROOT}" -mindepth 1 -maxdepth 1 -print -quit)"
