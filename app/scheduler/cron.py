@@ -73,7 +73,7 @@ def _parse_field(raw: str, *, field_name: str, minimum: int, maximum: int) -> Cr
     if not raw or raw.strip() != raw or any(ch.isspace() for ch in raw):
         raise CronValidationError(f"{field_name} contains invalid whitespace")
 
-    wildcard = raw == "*" or raw.startswith("*/")
+    wildcard = raw == "*"
     values: set[int] = set()
 
     for part in raw.split(","):
