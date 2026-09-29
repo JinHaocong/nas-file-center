@@ -419,6 +419,7 @@ def execute_item(
     purge_manifest: dict | None = None,
     unlink_manifest: dict | None = None,
     negative_capability_probe_cache: set[int] | None = None,
+    directory_move_transaction_id: str | None = None,
 ) -> ItemResult:
     if item.state == "completed":
         return ItemResult("completed", "already completed")
@@ -676,6 +677,7 @@ def execute_item(
                                 sequence=item.sequence,
                                 expected_device=item.expected_device,
                                 expected_inode=item.expected_inode,
+                                transaction_id=directory_move_transaction_id,
                             )
                     elif stat.S_ISREG(source_stat.st_mode):
                         _compat_regular_file_move_noreplace(source, target)

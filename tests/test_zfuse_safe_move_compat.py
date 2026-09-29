@@ -10,6 +10,10 @@ import app.batch_utilities.single_child_wrapper as wrapper_module
 import app.fs_ops as fs_ops
 from app.batch.plans import OperationItem
 from app.batch_utilities.single_child_wrapper import discover_single_child_wrappers
+from app.execution.directory_transplant import (
+    cleanup_directory_transplant_state,
+    move_directory_tree_noreplace,
+)
 from app.execution.executor import execute_item
 
 
@@ -245,3 +249,56 @@ def test_plain_directory_probe_ambiguous_error_fails_closed_and_cleans(tmp_path,
 
     assert list(source_parent.iterdir()) == []
     assert list(target_parent.iterdir()) == []
+
+
+def test_namespaced_directory_transplant_reenters_after_source_retirement(tmp_path):
+    root = tmp_path / "root"
+    source = root / "B" / "C"
+    target = root / "C"
+    quarantine = root / ".nas-file-center-trash"
+    source.mkdir(parents=True)
+    quarantine.mkdir()
+    (source / "payload.txt").write_text("payload", encoding="utf-8")
+
+    source_stat = os.lstat(source)
+    transaction_id = "0123456789abcdef0123456789abcdef"
+
+    move_directory_tree_noreplace(
+        source,
+        target,
+        quarantine_root=quarantine,
+        plan_id="1",
+        sequence=1,
+        expected_device=int(source_stat.st_dev),
+        expected_inode=int(source_stat.st_ino),
+        transaction_id=transaction_id,
+    )
+
+    assert not source.exists()
+    assert (target / "payload.txt").read_text(encoding="utf-8") == "payload"
+
+    # A worker crash after source retirement but before DB finalize must be
+    # idempotent when it re-enters the exact same persisted transaction.
+    move_directory_tree_noreplace(
+        source,
+        target,
+        quarantine_root=quarantine,
+        plan_id="1",
+        sequence=1,
+        expected_device=int(source_stat.st_dev),
+        expected_inode=int(source_stat.st_ino),
+        transaction_id=transaction_id,
+    )
+
+    cleanup_directory_transplant_state(
+        quarantine,
+        "1",
+        1,
+        transaction_id=transaction_id,
+    )
+    assert not (
+        quarantine
+        / ".utility-move-tx"
+        / "1"
+        / f"item-1-{transaction_id}"
+    ).exists()

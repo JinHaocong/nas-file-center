@@ -21,17 +21,30 @@ def _safe_component(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", value) or "plan"
 
 
-def _tx_dir(quarantine_root: Path | str, plan_id: str, sequence: int) -> Path:
+def _tx_dir(
+    quarantine_root: Path | str,
+    plan_id: str,
+    sequence: int,
+    transaction_id: str | None = None,
+) -> Path:
+    item_name = f"item-{int(sequence)}"
+    if transaction_id:
+        item_name += f"-{_safe_component(transaction_id)[:48]}"
     return (
         Path(quarantine_root)
         / ".utility-move-tx"
         / _safe_component(str(plan_id))
-        / f"item-{int(sequence)}"
+        / item_name
     )
 
 
-def _state_path(quarantine_root: Path | str, plan_id: str, sequence: int) -> Path:
-    return _tx_dir(quarantine_root, plan_id, sequence) / _STATE_FILE
+def _state_path(
+    quarantine_root: Path | str,
+    plan_id: str,
+    sequence: int,
+    transaction_id: str | None = None,
+) -> Path:
+    return _tx_dir(quarantine_root, plan_id, sequence, transaction_id) / _STATE_FILE
 
 
 def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -365,10 +378,16 @@ def move_directory_tree_noreplace(
     sequence: int,
     expected_device: int = 0,
     expected_inode: int = 0,
+    transaction_id: str | None = None,
 ) -> None:
     src = Path(source)
     dst = Path(target)
-    state_path = _state_path(quarantine_root, plan_id, sequence)
+    state_path = _state_path(
+        quarantine_root,
+        plan_id,
+        sequence,
+        transaction_id,
+    )
     state = _load_state(state_path)
 
     try:
@@ -380,6 +399,7 @@ def move_directory_tree_noreplace(
             sequence,
             source=src,
             target=dst,
+            transaction_id=transaction_id,
         ):
             return
         raise
@@ -399,13 +419,17 @@ def move_directory_tree_noreplace(
         os.close(src_fd)
 
     token = hashlib.sha256(
-        f"{plan_id}:{sequence}:{src}:{dst}:{src_st.st_dev}:{src_st.st_ino}".encode("utf-8")
+        (
+            f"{transaction_id or 'legacy'}:{plan_id}:{sequence}:"
+            f"{src}:{dst}:{src_st.st_dev}:{src_st.st_ino}"
+        ).encode("utf-8")
     ).hexdigest()
 
     if state is None:
         state = {
             "version": 1,
             "token": token,
+            "transaction_id": transaction_id,
             "phase": "initializing",
             "source": str(src),
             "target": str(dst),
@@ -491,10 +515,18 @@ def directory_transplant_reconciles_completed(
     *,
     source: Path | str,
     target: Path | str,
+    transaction_id: str | None = None,
 ) -> bool:
     src = Path(source)
     dst = Path(target)
-    state = _load_state(_state_path(quarantine_root, str(plan_id), sequence))
+    state = _load_state(
+        _state_path(
+            quarantine_root,
+            str(plan_id),
+            sequence,
+            transaction_id,
+        )
+    )
     if not state:
         return False
     if state.get("source") != str(src) or state.get("target") != str(dst):
@@ -521,8 +553,15 @@ def cleanup_directory_transplant_state(
     quarantine_root: Path | str,
     plan_id: str | int,
     sequence: int,
+    *,
+    transaction_id: str | None = None,
 ) -> None:
-    tx_dir = _tx_dir(quarantine_root, str(plan_id), sequence)
+    tx_dir = _tx_dir(
+        quarantine_root,
+        str(plan_id),
+        sequence,
+        transaction_id,
+    )
     state_file = tx_dir / _STATE_FILE
     try:
         state_file.unlink()
