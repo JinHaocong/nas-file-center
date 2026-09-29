@@ -31,6 +31,7 @@ from app.media.catalog import (
 )
 from app.media.corrupt_delete import build_corrupt_delete_preview, create_corrupt_delete_plan
 from app.path_safety import UnsafePathError
+from app.scanners.diagnostics import diagnose_duplicate_pair
 from app.service import StateConflictError
 from app.planning.dedupe_preview import (
     DedupeEmptyPlanError,
@@ -165,6 +166,14 @@ class ScanCreateRequest(BaseModel):
     min_size: str | None = None
     name_patterns: list[str] | None = None
     exclude_patterns: list[str] | None = None
+
+
+class DedupeDiagnosticRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    path_a: str = Field(min_length=1, max_length=4096)
+    path_b: str = Field(min_length=1, max_length=4096)
+    scan_job_id: int | None = Field(default=None, ge=1)
 
 
 class DedupePreviewRequest(BaseModel):
@@ -697,6 +706,22 @@ def create_scan(request: Request, payload: ScanCreateRequest):
             name_patterns=payload.name_patterns,
             exclude_patterns=payload.exclude_patterns,
         )
+    except (ValueError, OSError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/scans/diagnose-pair")
+def diagnose_scan_pair(request: Request, payload: DedupeDiagnosticRequest):
+    try:
+        return diagnose_duplicate_pair(
+            request.app.state.service.SessionLocal,
+            request.app.state.settings,
+            path_a=payload.path_a,
+            path_b=payload.path_b,
+            scan_job_id=payload.scan_job_id,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, "scan not found") from exc
     except (ValueError, OSError) as exc:
         raise HTTPException(400, str(exc)) from exc
 

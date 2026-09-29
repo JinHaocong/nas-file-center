@@ -2419,3 +2419,112 @@ body,
     box-shadow: none !important;
   }
 }
+
+/* Duplicate pair diagnostics ---------------------------------------------- */
+.nfc-dedupe-diagnostic-stack {
+  display: grid;
+  gap: 18px;
+}
+
+.nfc-dedupe-diagnostic-result {
+  display: grid;
+  gap: 16px;
+}
+
+.nfc-dedupe-diagnostic-path-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.nfc-dedupe-diagnostic-path,
+.nfc-dedupe-diagnostic-scan {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--nfc-w2-hairline);
+  border-radius: var(--nfc-w2-radius-md);
+  background: var(--nfc-w2-surface-soft);
+}
+
+.nfc-dedupe-diagnostic-path-heading,
+.nfc-dedupe-diagnostic-section-heading {
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.nfc-dedupe-diagnostic-path-heading {
+  justify-content: flex-start;
+}
+
+.nfc-dedupe-diagnostic-section-heading > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.nfc-dedupe-diagnostic-section-heading span,
+.nfc-dedupe-diagnostic-filter-note,
+.nfc-dedupe-diagnostic-scan-path span {
+  color: var(--nfc-w2-text-subtle);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.nfc-dedupe-diagnostic-path .nfc-code-path {
+  margin-bottom: 12px;
+}
+
+.nfc-dedupe-diagnostic-path .ant-descriptions,
+.nfc-dedupe-diagnostic-result > .ant-descriptions {
+  margin-top: 10px;
+}
+
+.nfc-dedupe-diagnostic-path .ant-typography {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.nfc-dedupe-diagnostic-scan-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.nfc-dedupe-diagnostic-scan-path {
+  min-width: 0;
+  padding: 11px 12px;
+  display: grid;
+  gap: 5px;
+  border: 1px solid var(--nfc-w2-hairline);
+  border-radius: var(--nfc-w2-radius-sm);
+  background: var(--nfc-w2-surface);
+}
+
+.nfc-dedupe-diagnostic-filter-note {
+  margin-top: 12px;
+  padding-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  border-top: 1px solid var(--nfc-w2-hairline);
+}
+
+@media (max-width: 767px) {
+  .nfc-dedupe-diagnostic-path-grid,
+  .nfc-dedupe-diagnostic-scan-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .nfc-dedupe-diagnostic-path,
+  .nfc-dedupe-diagnostic-scan {
+    padding: 12px;
+  }
+
+  .nfc-dedupe-diagnostic-section-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

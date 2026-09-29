@@ -167,3 +167,75 @@ export interface DirectDedupePreviewResponse {
     quarantine_root?: string | null;
   };
 }
+
+
+export interface DedupeDiagnosticPath {
+  requested_path: string;
+  resolved_path: string | null;
+  allowed: boolean;
+  exists: boolean;
+  is_symlink: boolean;
+  is_regular_file: boolean;
+  in_quarantine: boolean;
+  device: number | null;
+  inode: number | null;
+  size: number | null;
+  mtime_ns: number | null;
+  sha256: string | null;
+  hash_error: string | null;
+}
+
+export interface DedupeDiagnosticScanPath {
+  resolved_path: string | null;
+  scan_root_index: number | null;
+  included_in_duplicate_snapshot: boolean;
+  memberships: Array<{
+    duplicate_file_id: number;
+    group_id: number;
+    root_id: number;
+    snapshot_size: number;
+    snapshot_mtime_ns: number;
+    snapshot_device: number;
+    snapshot_inode: number;
+    discovery_hash: string;
+  }>;
+  reasons: string[];
+}
+
+export interface DedupeDiagnosticScanContext {
+  scan_job_id: number;
+  name: string;
+  status: string;
+  mode: string;
+  roots: string[];
+  fclones_args: {
+    min_size: string | null;
+    name_patterns: string[] | null;
+    exclude_patterns: string[] | null;
+    match_links: boolean;
+    hidden: boolean;
+    no_ignore: boolean;
+  };
+  paths: DedupeDiagnosticScanPath[];
+  same_duplicate_group: boolean;
+  shared_group_ids: number[];
+}
+
+export interface DedupeDiagnosticResponse {
+  diagnosis:
+    | 'PATH_OUTSIDE_CONFIGURED_ROOTS'
+    | 'PATH_NOT_FOUND'
+    | 'SYMLINK_UNSUPPORTED'
+    | 'NOT_REGULAR_FILE'
+    | 'SAME_FILESYSTEM_ENTRY'
+    | 'DIFFERENT_SIZE'
+    | 'DIFFERENT_CONTENT'
+    | 'EXACT_CONTENT_DUPLICATE'
+    | 'INDETERMINATE';
+  same_filesystem_entry: boolean;
+  size_match: boolean | null;
+  sha256_match: boolean | null;
+  exact_duplicate_copies: boolean;
+  paths: [DedupeDiagnosticPath, DedupeDiagnosticPath];
+  scan: DedupeDiagnosticScanContext | null;
+}

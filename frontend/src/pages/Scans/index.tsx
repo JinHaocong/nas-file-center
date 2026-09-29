@@ -10,7 +10,7 @@ import {
   Table,
   message,
 } from 'antd';
-import { PlusOutlined, ReloadOutlined, ScanOutlined } from '@ant-design/icons';
+import { PlusOutlined, ReloadOutlined, ScanOutlined, SearchOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { scansApi } from '../../api/domain';
@@ -23,6 +23,7 @@ import { DataPanel } from '../../components/ui/DataPanel';
 import { ActionBar } from '../../components/ui/ActionBar';
 import { ResponsiveDataView } from '../../components/ui/ResponsiveDataView';
 import { StatusBadge } from '../../components/ui/StatusBadge';
+import { DedupeDiagnosticModal } from '../../components/dedupe/DedupeDiagnosticModal';
 
 const { TextArea } = Input;
 
@@ -31,6 +32,7 @@ export const ScansPage: React.FC = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [diagnosticOpen, setDiagnosticOpen] = useState(false);
   const [form] = Form.useForm();
 
   const [page, setPage] = useState(1);
@@ -193,6 +195,9 @@ export const ScansPage: React.FC = () => {
             <Button icon={<ReloadOutlined />} onClick={() => refetch()} loading={isFetching}>
               刷新
             </Button>
+            <Button icon={<SearchOutlined />} onClick={() => setDiagnosticOpen(true)}>
+              重复诊断
+            </Button>
             <Button type="primary" icon={<PlusOutlined />} onClick={() => setIsModalOpen(true)}>
               新建扫描
             </Button>
@@ -348,6 +353,11 @@ export const ScansPage: React.FC = () => {
           </ActionBar>
         </Form>
       </Modal>
+
+      <DedupeDiagnosticModal
+        open={diagnosticOpen}
+        onClose={() => setDiagnosticOpen(false)}
+      />
     </div>
   );
 };
