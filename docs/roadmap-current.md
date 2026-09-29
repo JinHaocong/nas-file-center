@@ -172,7 +172,7 @@ filesystem executor.
 
 ## 6. NEXT CURRENT — Scheduler / Cron
 
-**Status: S0 CLOSED / S1 CLOSED / S2 CLOSED / S3 CURRENT — PINNED WORKFLOW PREVIEW/DRAFT**
+**Status: S0 CLOSED / S1 CLOSED / S2 CLOSED / S3 CLOSED / S4 CURRENT — SCHEDULER FRONTEND / MOBILE**
 
 Fresh scope decision: **Scheduler / Cron**.
 
@@ -215,11 +215,14 @@ Implementation sequence:
   revalidation, stale-target fail-closed runs, overlap skip, no-catch-up missed
   slots, Worker-owned minute ticking and Resource Policy no-bypass. S2 adds no
   destructive or arbitrary dispatch authority.
-- **S3 CURRENT** — exact-revision Workflow Preview/Draft-only scheduling. A
-  schedule must pin workflow id + revision + definition SHA; updates do not
-  silently follow current revision, and Scheduler cannot automatically Freeze,
-  Validate or Execute.
-- **S4 LATER** — Scheduler desktop/mobile frontend.
+- **S3 CLOSED** — exact-revision Workflow Preview/Draft-only scheduling. A
+  schedule stays pinned to workflow id + revision + definition SHA; updates do
+  not silently follow current revision. Preview creates no Plan; Draft reuses
+  the existing digest-bound Generate path and remains Draft-only. Utility
+  scheduling is Preview-only, and Scheduler never automatically Freezes,
+  Validates or Executes.
+- **S4 CURRENT** — Scheduler API/RBAC plus desktop/mobile schedule ledger,
+  editor, next-run preview, run history/task linkage and responsive UX.
 - **S5 LATER** — closure, Docker, restart/concurrency and isolated NAS acceptance.
 
 Scheduler S0/S1 authorization does not fabricate or imply Organizer Advanced

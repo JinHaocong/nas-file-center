@@ -6,6 +6,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.scheduler.cron import parse_cron_expression, resolve_scheduler_timezone
+from app.workflows.schema import RuntimeInputs
 
 
 class SchedulerValidationError(ValueError):
@@ -80,11 +81,30 @@ class MediaIntegrityVerificationScheduleTarget(_StrictModel):
         return cleaned
 
 
+class WorkflowScheduleTarget(_StrictModel):
+    type: Literal["workflow"] = "workflow"
+    workflow_id: int = Field(gt=0)
+    workflow_revision: int = Field(gt=0)
+    definition_sha256: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-fA-F]{64}$",
+    )
+    action: Literal["preview", "draft"] = "preview"
+    runtime_inputs: RuntimeInputs | None = None
+
+    @field_validator("definition_sha256")
+    @classmethod
+    def normalize_definition_sha256(cls, value: str) -> str:
+        return value.lower()
+
+
 ScheduleTarget = Annotated[
     IndexRootScheduleTarget
     | FclonesScanScheduleTarget
     | MediaAnalysisScheduleTarget
-    | MediaIntegrityVerificationScheduleTarget,
+    | MediaIntegrityVerificationScheduleTarget
+    | WorkflowScheduleTarget,
     Field(discriminator="type"),
 ]
 

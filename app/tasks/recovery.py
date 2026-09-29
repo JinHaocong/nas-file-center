@@ -24,6 +24,11 @@ logger = logging.getLogger(__name__)
 WORKER_ONLINE_THRESHOLD_SECONDS = 30.0
 WORKER_STALE_THRESHOLD_SECONDS = 90.0
 WORKER_LEASE_TIMEOUT_SECONDS: float = 30.0
+RESOURCE_CONTROLLED_JOB_KINDS: tuple[str, ...] = (
+    "index-root",
+    "fclones-scan",
+    "workflow-scheduled",
+)
 
 
 def assert_active_worker_lease(
@@ -292,7 +297,7 @@ def claim_next_job(
                     select(WorkJob.id)
                     .where(
                         WorkJob.status == JobState.QUEUED.value,
-                        WorkJob.kind.not_in(["index-root", "fclones-scan"]),
+                        WorkJob.kind.not_in(RESOURCE_CONTROLLED_JOB_KINDS),
                     )
                     .order_by(WorkJob.id)
                     .limit(1)
@@ -302,7 +307,7 @@ def claim_next_job(
                     select(WorkJob.id)
                     .where(
                         WorkJob.status == JobState.QUEUED.value,
-                        WorkJob.kind.not_in(["index-root", "fclones-scan"]),
+                        WorkJob.kind.not_in(RESOURCE_CONTROLLED_JOB_KINDS),
                     )
                     .order_by(WorkJob.id)
                     .limit(1)
@@ -312,7 +317,7 @@ def claim_next_job(
                         select(WorkJob.id)
                         .where(
                             WorkJob.status == JobState.QUEUED.value,
-                            WorkJob.kind.in_(["index-root", "fclones-scan"]),
+                            WorkJob.kind.in_(RESOURCE_CONTROLLED_JOB_KINDS),
                         )
                         .order_by(WorkJob.id)
                         .limit(1)
@@ -360,7 +365,7 @@ def claim_next_job(
             select(WorkJob.id)
             .where(
                 WorkJob.status == JobState.QUEUED.value,
-                WorkJob.kind.not_in(["index-root", "fclones-scan"]),
+                WorkJob.kind.not_in(RESOURCE_CONTROLLED_JOB_KINDS),
             )
             .order_by(WorkJob.id)
             .limit(1)
