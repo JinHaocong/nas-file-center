@@ -20,9 +20,6 @@ on:
       - 'docs/scheduler-s0-architecture-freeze.md'
       - 'Dockerfile'
       - '.github/workflows/scheduler-s5-closure.yml'
-  push:
-    branches:
-      - feature/scheduler-s5-closure
   workflow_dispatch:
 
 permissions:
@@ -54,8 +51,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          CANDIDATE_SHA="$(git rev-parse HEAD)"
+          echo "CANDIDATE_SHA=${CANDIDATE_SHA}" >> "${GITHUB_ENV}"
           {
-            echo "candidate_sha=$(git rev-parse HEAD)"
+            echo "candidate_sha=${CANDIDATE_SHA}"
             echo "candidate_ref=${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
             echo "pr_base_sha=${PR_BASE_SHA}"
             if [ -n "${PR_BASE_SHA}" ]; then
@@ -202,8 +201,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          TAG="nas-file-center:scheduler-s5-${GITHUB_SHA::7}"
-          echo "candidate_tag=${TAG}" | tee scheduler-s5-docker-evidence.txt
+          CANDIDATE_SHA="$(git rev-parse HEAD)"
+          echo "CANDIDATE_SHA=${CANDIDATE_SHA}" >> "${GITHUB_ENV}"
+          TAG="nas-file-center:scheduler-s5-${CANDIDATE_SHA::7}"
+          echo "candidate_sha=${CANDIDATE_SHA}" | tee scheduler-s5-docker-evidence.txt
+          echo "candidate_tag=${TAG}" | tee -a scheduler-s5-docker-evidence.txt
           docker buildx build             --platform linux/amd64             --load             --tag "${TAG}"             . 2>&1 | tee scheduler-s5-docker-build.log
           docker image inspect             --format 'id={{.Id}} os={{.Os}} arch={{.Architecture}} created={{.Created}}'             "${TAG}" | tee -a scheduler-s5-docker-evidence.txt
           test "$(docker image inspect --format '{{.Architecture}}' "${TAG}")" = "amd64"
@@ -215,7 +217,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          TAG="nas-file-center:scheduler-s5-${GITHUB_SHA::7}"
+          TAG="nas-file-center:scheduler-s5-${CANDIDATE_SHA::7}"
           ACCEPT_ROOT="${RUNNER_TEMP}/nfc-scheduler-s5-acceptance"
           EVIDENCE_ROOT="${RUNNER_TEMP}/nfc-scheduler-s5-evidence"
           mkdir "${ACCEPT_ROOT}" "${EVIDENCE_ROOT}"
