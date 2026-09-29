@@ -303,6 +303,48 @@ describe('Right Workspace v2 design system', () => {
     assert.match(css, /@media \(max-width: 767px\)[\s\S]*\.nfc-app-main \.nfc-data-panel-header[\s\S]*padding:\s*13px 14px 11px/);
   });
 
+
+  test('desktop shell keeps only the lower-right workspace scrollable and aligns its bottom gutter with sidebar', () => {
+    const css = read('src/styles/v056-right-workspace-v2.css');
+
+    assert.match(
+      css,
+      /@media \(min-width: 768px\)[\s\S]*\.nfc-app-shell\s*\{[^}]*height:\s*100dvh;[^}]*overflow:\s*hidden;/
+    );
+    assert.match(
+      css,
+      /@media \(min-width: 768px\)[\s\S]*\.nfc-app-main\s*\{[^}]*height:\s*100dvh;[^}]*overflow:\s*hidden;/
+    );
+    assert.match(
+      css,
+      /\.nfc-app-main \.nfc-page-content\s*\{[^}]*margin:\s*12px 12px 12px;[^}]*overflow-y:\s*auto;[^}]*scrollbar-gutter:\s*stable;/s
+    );
+    assert.match(
+      css,
+      /@media \(max-width: 767px\)[\s\S]*\.nfc-app-main \.nfc-page-content\s*\{[^}]*margin:\s*0;/
+    );
+  });
+
+  test('workspace cards share the sidebar and utility-rail shell language', () => {
+    const css = read('src/styles/v056-right-workspace-v2.css');
+
+    assert.match(css, /--nfc-shell-card-bg:\s*var\(--nfc-nav-surface\)/);
+    assert.match(css, /--nfc-shell-card-radius:\s*var\(--nfc-radius-shell\)/);
+    assert.match(
+      css,
+      /\.nfc-app-main \.nfc-data-panel,[\s\S]*\.nfc-app-main \.ant-card\s*\{[^}]*border:\s*1px solid var\(--nfc-shell-card-border\) !important;[^}]*border-radius:\s*var\(--nfc-shell-card-radius\) !important;[^}]*background:\s*var\(--nfc-shell-card-bg\) !important;[^}]*box-shadow:\s*var\(--nfc-shell-card-shadow\) !important;/s
+    );
+    assert.match(
+      css,
+      /\.nfc-app-main \.nfc-data-panel > \.nfc-data-panel-body,[\s\S]*background:\s*transparent !important;/
+    );
+    assert.match(
+      css,
+      /\.nfc-app-main \.nfc-metric-card\s*\{[^}]*border-radius:\s*var\(--nfc-shell-card-radius\);[^}]*background:\s*var\(--nfc-shell-card-bg\);[^}]*box-shadow:\s*var\(--nfc-shell-card-shadow\);/s
+    );
+  });
+
+
   test('glass treatment is constrained to utility and overlay surfaces', () => {
     const css = read('src/styles/v056-right-workspace-v2.css');
 
