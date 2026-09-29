@@ -117,6 +117,7 @@ BatchPlanExecuteHandler = _impl.BatchPlanExecuteHandler
 # on the canonical handler registry.
 from app.media.handler import MediaAnalysisHandler as MediaAnalysisHandler
 from app.media.integrity_handler import MediaIntegrityVerifyHandler as MediaIntegrityVerifyHandler
+from app.workflows.scheduled_handler import ScheduledWorkflowHandler as ScheduledWorkflowHandler
 
 
 class _HandlerCompatibilityModule(types.ModuleType):
