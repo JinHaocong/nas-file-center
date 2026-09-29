@@ -219,6 +219,8 @@ Cron matching is minute-granularity. Seconds are always zero.
 
 S1 clarification for day matching follows standard cron semantics:
 
+- "wildcard" in this rule means the field is exactly `*`; stepped forms such
+  as `*/2` are restricted fields because they select only a subset of values;
 - if both day-of-month and day-of-week are wildcard, every otherwise matching
   calendar day is eligible;
 - if one is wildcard, the restricted field controls the day;
