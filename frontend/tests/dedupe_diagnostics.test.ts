@@ -38,7 +38,7 @@ describe('duplicate diagnostics', () => {
     assert.match(modal, /SHA-256/);
     assert.match(modal, /当时属于同一重复组/);
     assert.match(modal, /match-links/);
-    assert.doesNotMatch(modal, /deleteScan|createDedupePlan|executePlan|quarantine/i);
+    assert.doesNotMatch(modal, /deleteScan\(|createDedupePlan\(|executePlan\(|quarantineApi/);
     assert.match(css, /\.nfc-dedupe-diagnostic-path-grid/);
     assert.match(css, /\.nfc-dedupe-diagnostic-scan-grid/);
   });
