@@ -14,6 +14,7 @@ import {
   ArrowLeftOutlined,
   ReloadOutlined,
   ScheduleOutlined,
+  SearchOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -30,6 +31,7 @@ import { ResponsiveDescriptions } from '../../components/ui/ResponsiveDescriptio
 import { ResponsiveDataView } from '../../components/ui/ResponsiveDataView';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { CodePath } from '../../components/ui/CodePath';
+import { DedupeDiagnosticModal } from '../../components/dedupe/DedupeDiagnosticModal';
 
 export const ScanDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -39,6 +41,7 @@ export const ScanDetailPage: React.FC = () => {
   useTitle(`扫描详情 #${scanId}`);
 
   const [planModalOpen, setPlanModalOpen] = useState(false);
+  const [diagnosticOpen, setDiagnosticOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
 
@@ -212,6 +215,9 @@ export const ScanDetailPage: React.FC = () => {
             >
               刷新
             </Button>
+            <Button icon={<SearchOutlined />} onClick={() => setDiagnosticOpen(true)}>
+              重复诊断
+            </Button>
             <ScanDeleteButton
               scan={scan}
               onDelete={() => deleteScanMutation.mutate()}
@@ -347,6 +353,11 @@ export const ScanDetailPage: React.FC = () => {
       )}
 
       <DedupePlanModal scanId={scanId} open={planModalOpen} onClose={() => setPlanModalOpen(false)} />
+      <DedupeDiagnosticModal
+        open={diagnosticOpen}
+        onClose={() => setDiagnosticOpen(false)}
+        scanJobId={scanId}
+      />
     </div>
   );
 };
