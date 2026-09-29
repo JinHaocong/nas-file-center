@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import json
 from pathlib import Path
 
@@ -8,6 +9,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 import app.batch_utilities.single_child_wrapper as single_child_wrapper_module
+import app.fs_ops as fs_ops
 import app.tasks.handlers_base as handlers_base
 from app.config import Settings
 from app.execution.utility_wrapper_pair import (
@@ -446,3 +448,125 @@ def test_first_compat_move_identity_change_still_fails_closed(
         assert plan is not None and plan.status == "partial"
         assert job is not None and job.status == "failed"
         assert "filesystem_identity_changed" in (job.error_text or "")
+
+
+def test_directory_transplant_transaction_namespace_survives_reused_plan_id(
+    tmp_path: Path,
+    monkeypatch,
+):
+    client, service, settings, root, workflow_id = _setup(tmp_path, monkeypatch)
+
+    # Force the exact NAS/zfuse fallback that owns the durable transplant state.
+    monkeypatch.setattr(
+        single_child_wrapper_module,
+        "probe_existing_noreplace_capability_at",
+        lambda *_args, **_kwargs: False,
+    )
+    monkeypatch.setattr(
+        single_child_wrapper_module,
+        "probe_directory_rename_noreplace_compat_at",
+        lambda *_args, **_kwargs: False,
+    )
+    monkeypatch.setattr(
+        single_child_wrapper_module,
+        "directory_transplant_preflight",
+        lambda *_args, **_kwargs: True,
+    )
+
+    def unsupported_noreplace(*_args, **_kwargs):
+        raise OSError(errno.EOPNOTSUPP, "simulated NAS noreplace fallback")
+
+    monkeypatch.setattr(fs_ops, "rename_noreplace", unsupported_noreplace)
+    monkeypatch.setattr(
+        fs_ops,
+        "rename_directory_noreplace_compat",
+        unsupported_noreplace,
+    )
+
+    plan_id, job_id = _enqueue_single_wrapper(
+        client,
+        service,
+        workflow_id,
+        root,
+    )
+
+    with service.SessionLocal() as session:
+        move_row = session.scalar(
+            select(BatchPlanItem).where(
+                BatchPlanItem.plan_id == plan_id,
+                BatchPlanItem.operation == "move",
+            )
+        )
+        assert move_row is not None
+        move_sequence = int(move_row.sequence)
+
+    # Reproduce a NAS that retained transaction metadata from an older database
+    # whose autoincrement IDs also started at Plan #1 / item #1. Before this
+    # fix, the new move loads this legacy state solely by plan_id + sequence and
+    # fails with:
+    #   EEXIST Existing directory MOVE transaction does not match this frozen item
+    legacy_tx_dir = (
+        Path(settings.quarantine_root)
+        / ".utility-move-tx"
+        / str(plan_id)
+        / f"item-{move_sequence}"
+    )
+    legacy_tx_dir.mkdir(parents=True)
+    legacy_state = {
+        "version": 1,
+        "token": "historical-plan-id-reuse",
+        "phase": "migrating",
+        "source": str(root / "historical" / "child"),
+        "target": str(root / "historical-child"),
+        "source_device": 999,
+        "source_inode": 999,
+        "created_dirs": {"": [999, 999]},
+        "published_symlinks": {},
+    }
+    legacy_state_path = legacy_tx_dir / "state.json"
+    legacy_state_path.write_text(
+        json.dumps(legacy_state),
+        encoding="utf-8",
+    )
+
+    assert process_work_job(
+        settings,
+        job_id,
+        session_factory=service.SessionLocal,
+        engine=service.engine,
+        worker_id=None,
+    ) is True
+
+    assert not (root / "B").exists()
+    assert (root / "C" / "payload.txt").read_text(encoding="utf-8") == "payload"
+
+    with service.SessionLocal() as session:
+        plan = session.get(BatchPlan, plan_id)
+        job = session.get(WorkJob, job_id)
+        items = list(
+            session.scalars(
+                select(BatchPlanItem)
+                .where(BatchPlanItem.plan_id == plan_id)
+                .order_by(BatchPlanItem.sequence)
+            )
+        )
+        assert plan is not None and plan.status == "completed"
+        assert job is not None and job.status == "completed"
+        assert [item.state for item in items] == ["completed", "completed"]
+
+        move_meta = json.loads(items[0].metadata_json or "{}")
+        transaction_id = move_meta["execution"]["directory_move_transaction_id"]
+        assert isinstance(transaction_id, str)
+        assert len(transaction_id) == 32
+
+    # The live transaction used a unique namespace and was cleaned after
+    # completion. The unrelated legacy state is deliberately retained as
+    # forensic evidence rather than being silently deleted.
+    live_tx_dir = (
+        Path(settings.quarantine_root)
+        / ".utility-move-tx"
+        / str(plan_id)
+        / f"item-{move_sequence}-{transaction_id}"
+    )
+    assert not live_tx_dir.exists()
+    assert json.loads(legacy_state_path.read_text(encoding="utf-8")) == legacy_state
