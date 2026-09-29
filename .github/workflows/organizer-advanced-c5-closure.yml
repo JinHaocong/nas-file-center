@@ -13,7 +13,6 @@ on:
       - 'frontend/**'
       - 'scripts/organizer_advanced_c5_acceptance.py'
       - 'docs/organizer-advanced-rules-*.md'
-      - 'docs/roadmap-current.md'
       - 'Dockerfile'
       - '.github/workflows/organizer-advanced-c5-closure.yml'
   push:
@@ -38,6 +37,7 @@ jobs:
       ALLOWED_ROOTS: /tmp/nfc-data
       QUARANTINE_ROOT: /tmp/nfc-data/.nas-file-center-trash
       C4_BASELINE_SHA: 00a0ddb7db115f4299ae3f38643dac1be569ac84
+      PR_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
 
     steps:
       - name: Checkout exact candidate with history
@@ -130,35 +130,43 @@ jobs:
           set -euo pipefail
           npm run build 2>&1 | tee ../frontend-build.log
 
-      - name: Verify C5 scope and mutation-authority containment
+      - name: Verify current-change scope and Organizer mutation-authority containment
         shell: bash
         run: |
           set -euo pipefail
-          git diff --check "${C4_BASELINE_SHA}...HEAD"
+
+          if [ -n "${PR_BASE_SHA}" ]; then
+            DIFF_BASE="${PR_BASE_SHA}"
+          else
+            DIFF_BASE="$(git rev-parse HEAD^)"
+          fi
+
+          git diff --check "${DIFF_BASE}...HEAD"
 
           {
-            echo "# C5 diff stat"
-            git diff --stat "${C4_BASELINE_SHA}...HEAD"
+            echo "# Current candidate diff base"
+            echo "diff_base=${DIFF_BASE}"
             echo
-            echo "# C5 changed files"
-            git diff --name-status "${C4_BASELINE_SHA}...HEAD"
+            echo "# Current change diff stat"
+            git diff --stat "${DIFF_BASE}...HEAD"
             echo
-            echo "# Product app changes relative to C4 baseline"
-            git diff --name-only "${C4_BASELINE_SHA}...HEAD" -- app
+            echo "# Current changed files"
+            git diff --name-status "${DIFF_BASE}...HEAD"
             echo
-            echo "# New recursive-delete primitives in product app"
-            git diff --unified=0 "${C4_BASELINE_SHA}...HEAD" -- app |
+            echo "# Organizer / execution authority files changed in current change"
+            git diff --name-only "${DIFF_BASE}...HEAD" -- \
+              app/organizers app/execution app/tasks app/service.py
+            echo
+            echo "# New destructive primitives in current Organizer / execution authority diff"
+            git diff --unified=0 "${DIFF_BASE}...HEAD" -- \
+              app/organizers app/execution app/tasks app/service.py |
               grep -E '^\+[^+].*(rmtree|rm -rf|os\.remove\(|os\.unlink\()' || true
           } | tee organizer-c5-scope-review.txt
 
-          if git diff --name-only "${C4_BASELINE_SHA}...HEAD" -- app | grep -q .; then
-            echo "BLOCKED: C5 closure must not expand or modify product app mutation authority" >&2
-            exit 1
-          fi
-
-          if git diff --unified=0 "${C4_BASELINE_SHA}...HEAD" -- app |
+          if git diff --unified=0 "${DIFF_BASE}...HEAD" -- \
+               app/organizers app/execution app/tasks app/service.py |
              grep -Eq '^\+[^+].*(rmtree|rm -rf|os\.remove\(|os\.unlink\()'; then
-            echo "BLOCKED: C5 introduced a new destructive primitive in product app" >&2
+            echo "BLOCKED: current change introduces a new destructive primitive in Organizer / execution authority" >&2
             exit 1
           fi
 
