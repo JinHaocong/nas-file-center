@@ -217,6 +217,16 @@ DST semantics are frozen:
 
 Cron matching is minute-granularity. Seconds are always zero.
 
+S1 clarification for day matching follows standard cron semantics:
+
+- if both day-of-month and day-of-week are wildcard, every otherwise matching
+  calendar day is eligible;
+- if one is wildcard, the restricted field controls the day;
+- if both are restricted, **either** day-of-month or day-of-week may match.
+
+This OR rule is part of the frozen recurrence contract and prevents later
+implementations from silently switching to AND semantics.
+
 ## 7. Missed-run and overlap semantics
 
 V1 supports one value for each policy:
