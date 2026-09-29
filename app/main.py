@@ -17,6 +17,7 @@ from app.auth.router import router as auth_router
 from app.config import Settings, get_settings
 from app.exceptions import PlanStaleError
 from app.quarantine.service_adapter import Gate6A2FileCenterService
+from app.scheduler.router import router as scheduler_router
 from app.workflows.errors import WorkflowError
 from app.planning.dedupe_preview import DedupeError
 
@@ -131,6 +132,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # registered before the legacy /quarantine/{id} dynamic routes.
     app.include_router(auth_router)
     app.include_router(quarantine_bulk_router)
+    app.include_router(scheduler_router)
     app.include_router(api_router)
 
     # React Frontend SPA Hosting (TASK-031-03)

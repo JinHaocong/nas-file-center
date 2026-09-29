@@ -172,7 +172,7 @@ filesystem executor.
 
 ## 6. NEXT CURRENT — Scheduler / Cron
 
-**Status: S0 CLOSED / S1 CLOSED / S2 CLOSED / S3 CLOSED / S4 CURRENT — SCHEDULER FRONTEND / MOBILE**
+**Status: S0 CLOSED / S1 CLOSED / S2 CLOSED / S3 CLOSED / S4 CLOSED / S5 CURRENT — CLOSURE**
 
 Fresh scope decision: **Scheduler / Cron**.
 
@@ -221,9 +221,11 @@ Implementation sequence:
   the existing digest-bound Generate path and remains Draft-only. Utility
   scheduling is Preview-only, and Scheduler never automatically Freezes,
   Validates or Executes.
-- **S4 CURRENT** — Scheduler API/RBAC plus desktop/mobile schedule ledger,
-  editor, next-run preview, run history/task linkage and responsive UX.
-- **S5 LATER** — closure, Docker, restart/concurrency and isolated NAS acceptance.
+- **S4 CLOSED** — authenticated read/admin-write Scheduler API, optimistic
+  update locking, durable Run now, Cron/IANA next-run preview, desktop ledger,
+  mobile cards, closed target editor, visible Workflow revision/SHA pinning,
+  run-history Task linkage and read-only member UX.
+- **S5 CURRENT** — closure, Docker, restart/concurrency and isolated NAS acceptance.
 
 Scheduler S0/S1 authorization does not fabricate or imply Organizer Advanced
 Rules C5 closure. The Organizer real-NAS closure evidence remains an independent

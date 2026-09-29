@@ -19,6 +19,7 @@ import { AuditPage } from '../pages/Audit';
 import { SettingsPage } from '../pages/Settings';
 import { QuarantinePage } from '../pages/Quarantine';
 import { WorkflowListPage, WorkflowBuilderPage } from '../pages/Workflows';
+import { SchedulerPage } from '../pages/Scheduler';
 
 export const AppRouter: React.FC = () => {
   return (
@@ -38,6 +39,7 @@ export const AppRouter: React.FC = () => {
         <Route path="organizer" element={<OrganizerPage />} />
         <Route path="workflows" element={<WorkflowListPage />} />
         <Route path="workflows/:id" element={<WorkflowBuilderPage />} />
+        <Route path="schedules" element={<SchedulerPage />} />
         <Route path="plans" element={<PlansPage />} />
         <Route path="plans/:id" element={<PlanDetailPage />} />
         <Route path="quarantine" element={<QuarantinePage />} />
