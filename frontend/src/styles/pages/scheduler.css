@@ -1,0 +1,216 @@
+.nfc-scheduler-page {
+  --nfc-scheduler-gap: 14px;
+}
+
+.nfc-scheduler-name-cell,
+.nfc-scheduler-target-cell,
+.nfc-scheduler-time-cell {
+  display: grid;
+  gap: 4px;
+}
+
+.nfc-scheduler-name-cell > span,
+.nfc-scheduler-target-cell > code,
+.nfc-scheduler-time-cell > span {
+  color: var(--nfc-text-tertiary);
+  font-size: 12px;
+}
+
+.nfc-scheduler-target-cell > code,
+.nfc-scheduler-time-cell > code {
+  font-size: 12px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.nfc-scheduler-form-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 0.44fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.nfc-scheduler-pin-panel {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 10px;
+  margin: -2px 0 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--nfc-border-soft);
+  border-radius: 12px;
+  background: var(--nfc-surface-2);
+}
+
+.nfc-scheduler-pin-panel > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.nfc-scheduler-pin-panel span {
+  color: var(--nfc-text-tertiary);
+  font-size: 11px;
+}
+
+.nfc-scheduler-pin-panel code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.nfc-scheduler-boundary-alert {
+  margin-bottom: 16px;
+}
+
+.nfc-scheduler-time-preview {
+  display: grid;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.nfc-scheduler-preview-error {
+  color: var(--ant-color-error, #ff4d4f);
+  font-size: 12px;
+}
+
+.nfc-scheduler-occurrences {
+  display: grid;
+  gap: 5px;
+  padding: 10px 12px;
+  border: 1px solid var(--nfc-border-soft);
+  border-radius: 10px;
+  background: var(--nfc-surface-2);
+}
+
+.nfc-scheduler-occurrences code {
+  font-size: 12px;
+}
+
+.nfc-scheduler-run-list {
+  display: grid;
+  gap: 10px;
+}
+
+.nfc-scheduler-run-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--nfc-border-soft);
+  border-radius: 12px;
+  background: var(--nfc-surface-1);
+}
+
+.nfc-scheduler-run-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.nfc-scheduler-run-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  align-items: center;
+  color: var(--nfc-text-secondary);
+  font-size: 12px;
+}
+
+.nfc-scheduler-history-loading {
+  padding: 24px 0;
+  text-align: center;
+  color: var(--nfc-text-tertiary);
+}
+
+.nfc-scheduler-mobile-list {
+  padding: 0 14px;
+}
+
+.nfc-scheduler-mobile-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--nfc-border-soft);
+}
+
+.nfc-scheduler-mobile-id {
+  display: block;
+  margin-top: 2px;
+  color: var(--nfc-text-tertiary);
+  font-size: 11px;
+}
+
+.nfc-scheduler-mobile-primary {
+  display: grid;
+  gap: 3px;
+}
+
+.nfc-scheduler-mobile-primary > span {
+  color: var(--nfc-text-tertiary);
+  font-size: 11px;
+}
+
+.nfc-scheduler-mobile-primary > b {
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.nfc-scheduler-mobile-cron {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.nfc-scheduler-mobile-cron code {
+  padding: 3px 7px;
+  border-radius: 7px;
+  background: var(--nfc-surface-2);
+  font-size: 12px;
+}
+
+.nfc-scheduler-mobile-cron span {
+  color: var(--nfc-text-secondary);
+  font-size: 12px;
+}
+
+@media (max-width: 767px) {
+  .nfc-scheduler-page {
+    gap: 12px;
+  }
+
+  .nfc-scheduler-form-grid {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .nfc-scheduler-pin-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .nfc-scheduler-editor .ant-modal {
+    max-width: calc(100vw - 20px);
+    margin: 10px auto;
+    top: 0;
+  }
+
+  .nfc-scheduler-editor .ant-modal-content {
+    padding: 14px;
+  }
+
+  .nfc-scheduler-history-drawer .ant-drawer-content-wrapper {
+    width: 100vw !important;
+  }
+
+  .nfc-scheduler-run-facts {
+    display: grid;
+    gap: 6px;
+  }
+
+  .nfc-scheduler-mobile-card .nfc-mobile-record-actions {
+    overflow-x: auto;
+    justify-content: flex-start;
+  }
+}
