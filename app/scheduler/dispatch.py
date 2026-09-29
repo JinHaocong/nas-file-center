@@ -157,6 +157,8 @@ def _enqueue_target(
             min_size=target.min_size,
             name_patterns=target.name_patterns,
             exclude_patterns=target.exclude_patterns,
+            require_existing_dirs=True,
+            require_unique_roots=True,
         )
     elif isinstance(target, MediaAnalysisScheduleTarget):
         queued = enqueue_media_work(
