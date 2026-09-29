@@ -399,6 +399,7 @@ def move_directory_tree_noreplace(
             sequence,
             source=src,
             target=dst,
+            transaction_id=transaction_id,
         ):
             return
         raise
