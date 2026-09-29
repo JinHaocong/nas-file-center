@@ -16,7 +16,6 @@ import {
   Switch,
   Table,
   Tag,
-  Typography,
   message,
 } from 'antd';
 import {
@@ -140,7 +139,7 @@ const ScheduleEditorModal: React.FC<EditorProps> = ({ open, schedule, onClose })
   const workflowRevision = Form.useWatch('workflow_revision', form) as number | undefined;
   const workflowSha = Form.useWatch('definition_sha256', form) as string | undefined;
   const selectedWorkflow = workflows?.find((item) => item.id === workflowId);
-  const effectiveWorkflowMode = boundWorkflowMode || effectiveWorkflowMode || null;
+  const effectiveWorkflowMode = boundWorkflowMode || selectedWorkflow?.mode || null;
 
   useEffect(() => {
     if (!open) return;
