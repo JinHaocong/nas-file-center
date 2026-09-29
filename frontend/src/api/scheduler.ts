@@ -30,7 +30,7 @@ export const schedulerApi = {
     api.post<ScheduleRun>(`/api/schedules/${id}/run-now`),
 
   previewRecurrence: (cronExpression: string, timezone: string, count = 5) =>
-    api.post<RecurrencePreview>('/api/schedules/recurrence-preview', {
+    api.post<RecurrencePreview>('/api/schedules/recurrence/preview', {
       cron_expression: cronExpression,
       timezone,
       count,
