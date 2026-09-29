@@ -75,7 +75,7 @@ body,
   position: relative;
   width: 100%;
   min-width: 0;
-  padding: 26px clamp(24px, 2.15vw, 42px) var(--nfc-w2-page-bottom);
+  padding: 18px clamp(24px, 2.15vw, 42px) var(--nfc-w2-page-bottom);
 }
 
 .nfc-page-content > * {
@@ -136,16 +136,15 @@ body,
 
 .nfc-header.nfc-header {
   position: sticky;
-  top: 0;
+  top: 12px;
   z-index: 30;
-  min-height: 54px;
-  margin: 0;
-  padding: 8px 24px 7px 18px;
-  border: 0;
-  border-bottom: 1px solid var(--nfc-w2-hairline);
-  border-radius: 0;
-  background: color-mix(in srgb, var(--nfc-w2-canvas) 86%, transparent);
-  box-shadow: none;
+  min-height: 68px;
+  margin: 12px 12px 0;
+  padding: 8px 12px;
+  border: 1px solid var(--nfc-border-soft);
+  border-radius: var(--nfc-radius-shell);
+  background: var(--nfc-nav-surface);
+  box-shadow: 0 10px 34px color-mix(in srgb, var(--nfc-text) 7%, transparent);
   backdrop-filter: blur(22px) saturate(120%);
   -webkit-backdrop-filter: blur(22px) saturate(120%);
 }
@@ -179,8 +178,8 @@ body,
   min-width: 36px;
   height: 36px;
   padding-inline: 9px;
-  border: 0 !important;
-  border-radius: var(--nfc-w2-radius-sm) !important;
+  border: 1px solid transparent !important;
+  border-radius: var(--nfc-radius-control) !important;
   color: var(--nfc-w2-text-muted);
   background: transparent !important;
   box-shadow: none !important;
@@ -188,8 +187,9 @@ body,
 
 .nfc-header-nav-toggle.ant-btn:hover,
 .nfc-command-button.ant-btn:hover {
-  color: var(--nfc-w2-text) !important;
-  background: color-mix(in srgb, var(--nfc-w2-surface) 80%, transparent) !important;
+  color: var(--nfc-text) !important;
+  border-color: var(--nfc-border-soft) !important;
+  background: color-mix(in srgb, var(--nfc-text) 4%, transparent) !important;
 }
 
 .nfc-header-action-label {
@@ -959,8 +959,15 @@ body,
   }
 
   .nfc-header.nfc-header {
+    top: 0;
     min-height: 52px;
+    margin: 0;
     padding: 5px 8px;
+    border: 0;
+    border-bottom: 1px solid var(--nfc-w2-hairline);
+    border-radius: 0;
+    background: color-mix(in srgb, var(--nfc-w2-canvas) 86%, transparent);
+    box-shadow: none;
     flex-wrap: nowrap;
   }
 
@@ -1095,7 +1102,7 @@ body,
  */
 
 .nfc-app-main .nfc-page-content {
-  padding: 26px clamp(24px, 2.15vw, 42px) var(--nfc-w2-page-bottom);
+  padding: 18px clamp(24px, 2.15vw, 42px) var(--nfc-w2-page-bottom);
   scroll-padding-bottom: var(--nfc-w2-page-bottom);
 }
 
@@ -1308,7 +1315,7 @@ body,
 
 @media (max-width: 1199px) {
   .nfc-app-main .nfc-page-content {
-    padding: 22px 24px 88px;
+    padding: 18px 24px 88px;
   }
 
   .nfc-app-main .nfc-page-header {
