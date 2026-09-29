@@ -1,6 +1,6 @@
 # Scheduler / Cron — S0 Architecture Freeze
 
-Status: **S0 CLOSED / S1 CLOSED — S2 CURRENT (SAFE TARGET DISPATCH)**
+Status: **S0 CLOSED / S1 CLOSED / S2 CLOSED — S3 CURRENT (PINNED WORKFLOW PREVIEW/DRAFT)**
 Source authority: `main` baseline `f604eb47dc17fdb935d396968aab3518629e3db2`
 Product baseline: **v0.4.7**
 
@@ -457,14 +457,38 @@ S5 — closure:
 ```text
 S0  Scope + Architecture Freeze                         CLOSED
 S1  Schema + cron parser + recurrence + lease/run log  CLOSED
-S2  Safe target dispatch (index/scan/media)            CURRENT
-S3  Workflow pinned Preview/Draft-only scheduling      LATER
+S2  Safe target dispatch (index/scan/media)            CLOSED
+S3  Workflow pinned Preview/Draft-only scheduling      CURRENT
 S4  Scheduler frontend / mobile                        LATER
 S5  Closure / Docker / isolated NAS acceptance         LATER
 ```
 
 No S1+ change may expand the frozen target allowlist without a new architecture
 amendment.
+
+### S2 closure notes
+
+S2 closes the safe dispatch layer with these source-enforced properties:
+
+- existing manual Index / Scan / Media APIs and Scheduler share transaction-aware
+  queue helpers, while Scheduler alone enables the stricter current-state
+  revalidation required by this architecture;
+- a due slot is processed under one SQLite `BEGIN IMMEDIATE` transaction from
+  unique run identity through target validation, WorkJob/ScanJob creation and
+  `schedule_run.work_job_id` binding;
+- queue-helper failure is isolated by SAVEPOINT so a failed scheduled target
+  cannot leak a partial ScanJob or WorkJob;
+- only the four frozen target discriminators map to WorkJob kinds, and a stored
+  target corrupted into a destructive/arbitrary kind fails closed;
+- stale/missing targets create a failed ScheduleRun with zero WorkJobs;
+- active previous work produces `skipped_overlap`; legitimate deletion of a
+  terminal historical WorkJob does not permanently block future slots;
+- `missed_run_policy=skip` advances old slots without replay or catch-up rows;
+- Worker is the sole scheduler-tick owner and attempts at most one tick per UTC
+  minute; API processes do not run scheduler timers;
+- scheduled index/scan jobs still enter the existing queue and therefore remain
+  subject to Resource Policy claim gating.
+
 
 ## 17. Organizer C5 independence
 
