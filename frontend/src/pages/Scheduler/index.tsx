@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
+  AutoComplete,
   Button,
   Divider,
   Drawer,
@@ -115,6 +116,7 @@ const ScheduleEditorModal: React.FC<EditorProps> = ({ open, schedule, onClose })
   const [previewTimes, setPreviewTimes] = useState<string[]>([]);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [boundWorkflowMode, setBoundWorkflowMode] = useState<WorkflowListItem['mode'] | null>(null);
 
   const { data: indexes } = useQuery({
     queryKey: ['scheduler-index-roots'],
@@ -135,7 +137,10 @@ const ScheduleEditorModal: React.FC<EditorProps> = ({ open, schedule, onClose })
   const targetType = Form.useWatch('target_type', form) as ScheduleTargetType | undefined;
   const workflowId = Form.useWatch('workflow_id', form) as number | undefined;
   const workflowAction = Form.useWatch('workflow_action', form) as 'preview' | 'draft' | undefined;
+  const workflowRevision = Form.useWatch('workflow_revision', form) as number | undefined;
+  const workflowSha = Form.useWatch('definition_sha256', form) as string | undefined;
   const selectedWorkflow = workflows?.find((item) => item.id === workflowId);
+  const effectiveWorkflowMode = boundWorkflowMode || effectiveWorkflowMode || null;
 
   useEffect(() => {
     if (!open) return;
@@ -145,6 +150,7 @@ const ScheduleEditorModal: React.FC<EditorProps> = ({ open, schedule, onClose })
 
     if (!schedule) {
       form.resetFields();
+      setBoundWorkflowMode(null);
       form.setFieldsValue({
         enabled: true,
         target_type: 'index_root',
@@ -189,6 +195,14 @@ const ScheduleEditorModal: React.FC<EditorProps> = ({ open, schedule, onClose })
     }
 
     form.setFieldsValue(base);
+    if (target.type === 'workflow') {
+      workflowApi
+        .getWorkflowRevision(target.workflow_id, target.workflow_revision)
+        .then((revision) => setBoundWorkflowMode(revision.definition.mode))
+        .catch(() => setBoundWorkflowMode(null));
+    } else {
+      setBoundWorkflowMode(null);
+    }
   }, [open, schedule, form]);
 
   const completedScans = useMemo(
@@ -220,6 +234,7 @@ const ScheduleEditorModal: React.FC<EditorProps> = ({ open, schedule, onClose })
   const bindWorkflowCurrent = async (id: number) => {
     const detail = await workflowApi.getWorkflow(id);
     const listItem = workflows?.find((item) => item.id === id);
+    setBoundWorkflowMode(listItem?.mode || detail.definition?.mode || null);
     form.setFieldsValue({
       workflow_revision: detail.current_revision,
       definition_sha256: detail.definition_sha256 || '',
@@ -249,7 +264,7 @@ const ScheduleEditorModal: React.FC<EditorProps> = ({ open, schedule, onClose })
           root_keys: values.media_root_keys || [],
         };
       case 'workflow': {
-        const mode = selectedWorkflow?.mode;
+        const mode = effectiveWorkflowMode;
         let runtimeInputs: { root_ids?: number[]; scan_job_id?: number } | null = null;
         if (mode === 'dedupe') {
           runtimeInputs = { scan_job_id: values.workflow_scan_job_id };
@@ -445,11 +460,11 @@ const ScheduleEditorModal: React.FC<EditorProps> = ({ open, schedule, onClose })
             <div className="nfc-scheduler-pin-panel">
               <div>
                 <span>固定版本</span>
-                <b>r{Form.useWatch('workflow_revision', form) || '—'}</b>
+                <b>r{workflowRevision || '—'}</b>
               </div>
               <div>
                 <span>Definition SHA</span>
-                <code>{Form.useWatch('definition_sha256', form) || '—'}</code>
+                <code>{workflowSha || '—'}</code>
               </div>
             </div>
             <Form.Item name="workflow_revision" hidden>
@@ -464,7 +479,7 @@ const ScheduleEditorModal: React.FC<EditorProps> = ({ open, schedule, onClose })
               name="workflow_action"
               rules={[{ required: true }]}
               extra={
-                selectedWorkflow?.mode === 'utility'
+                effectiveWorkflowMode === 'utility'
                   ? 'Utility 工作流在 Scheduler S3/S4 中仅允许 Preview。'
                   : 'Draft 只生成草稿 Plan，不会自动 Freeze / Validate / Execute。'
               }
@@ -475,13 +490,13 @@ const ScheduleEditorModal: React.FC<EditorProps> = ({ open, schedule, onClose })
                   {
                     value: 'draft',
                     label: 'Draft（生成草稿 Plan）',
-                    disabled: selectedWorkflow?.mode === 'utility',
+                    disabled: effectiveWorkflowMode === 'utility',
                   },
                 ]}
               />
             </Form.Item>
 
-            {selectedWorkflow?.mode === 'dedupe' && (
+            {effectiveWorkflowMode === 'dedupe' && (
               <Form.Item
                 label="固定完成扫描"
                 name="workflow_scan_job_id"
@@ -496,8 +511,8 @@ const ScheduleEditorModal: React.FC<EditorProps> = ({ open, schedule, onClose })
               </Form.Item>
             )}
 
-            {(selectedWorkflow?.mode === 'file' ||
-              selectedWorkflow?.mode === 'organizer') && (
+            {(effectiveWorkflowMode === 'file' ||
+              effectiveWorkflowMode === 'organizer') && (
               <Form.Item
                 label="运行时根目录覆盖（可选）"
                 name="workflow_root_ids"
@@ -541,10 +556,12 @@ const ScheduleEditorModal: React.FC<EditorProps> = ({ open, schedule, onClose })
             name="timezone"
             rules={[{ required: true, message: '请输入 IANA 时区' }]}
           >
-            <Select
-              showSearch
-              mode={undefined}
-              options={COMMON_TIMEZONES.map((value) => ({ value, label: value }))}
+            <AutoComplete
+              options={COMMON_TIMEZONES.map((value) => ({ value }))}
+              placeholder="例如 Asia/Shanghai"
+              filterOption={(input, option) =>
+                String(option?.value || '').toLowerCase().includes(input.toLowerCase())
+              }
             />
           </Form.Item>
         </div>
