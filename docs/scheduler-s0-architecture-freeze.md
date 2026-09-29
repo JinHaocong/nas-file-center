@@ -1,6 +1,6 @@
 # Scheduler / Cron — S0 Architecture Freeze
 
-Status: **S0 CLOSED / S1 CLOSED / S2 CLOSED / S3 CLOSED — S4 CURRENT (SCHEDULER FRONTEND)**
+Status: **S0 CLOSED / S1 CLOSED / S2 CLOSED / S3 CLOSED / S4 CLOSED — S5 CURRENT (CLOSURE)**
 Source authority: `main` baseline `f604eb47dc17fdb935d396968aab3518629e3db2`
 Product baseline: **v0.4.7**
 
@@ -459,8 +459,8 @@ S0  Scope + Architecture Freeze                         CLOSED
 S1  Schema + cron parser + recurrence + lease/run log  CLOSED
 S2  Safe target dispatch (index/scan/media)            CLOSED
 S3  Workflow pinned Preview/Draft-only scheduling      CLOSED
-S4  Scheduler frontend / mobile                        CURRENT
-S5  Closure / Docker / isolated NAS acceptance         LATER
+S4  Scheduler frontend / mobile                        CLOSED
+S5  Closure / Docker / isolated NAS acceptance         CURRENT
 ```
 
 No S1+ change may expand the frozen target allowlist without a new architecture
@@ -516,6 +516,31 @@ S3 closes pinned Workflow scheduling with these source-enforced properties:
 - the SQLite schedule target CHECK migration is backup-bound, preserves existing
   schedule IDs/rows, restores FK enforcement and runs `foreign_key_check`.
 
+
+### S4 closure notes
+
+S4 closes the product/API surface with these source-enforced properties:
+
+- all authenticated users may read the schedule ledger and durable run history;
+  create, update, enable/disable, Run now and recurrence preview are
+  administrator-only and retain the existing authenticated CSRF/origin checks;
+- optimistic `expected_revision` locking remains authoritative for edits;
+- Run now creates a durable ScheduleRun and reuses the same S2/S3 target
+  validation, overlap and WorkJob binding path without changing the Cron
+  recurrence pointer;
+- the dedicated desktop ledger exposes enabled state, target, Cron, timezone,
+  next/previous run and actions; the mobile surface uses dense cards without a
+  horizontal-table dependency;
+- the editor contains only the closed server target allowlist and reuses indexed
+  root, completed scan and Workflow selectors;
+- Workflow schedules visibly preserve exact revision + definition SHA binding;
+  utility remains Preview-only and Draft UI explicitly states that Freeze,
+  Validate and Execute are never automatic;
+- Cron/IANA input can be validated against the backend recurrence engine and
+  previews the next five UTC-backed occurrences;
+- run history exposes linked WorkJob state and deep-links into Task detail;
+- member sessions receive a read-only UI while the server remains the
+  authoritative RBAC boundary.
 
 ## 17. Organizer C5 independence
 
