@@ -1351,7 +1351,7 @@ class FileCenterService:
                 "work_job_id": work.id,
                 "status": work.status,
                 "root": queued.normalized_roots[0],
-                "created": idx_root is not None and idx_root.created_at == work.created_at,
+                "created": queued.index_root_created,
             }
 
     def delete_index_root(self, index_root_id: int) -> dict:
