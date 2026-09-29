@@ -43,7 +43,7 @@ def test_duplicate_diagnostics_distinguishes_exact_copy_hardlink_and_different_c
     first.write_bytes(b"same-payload")
     second.write_bytes(b"same-payload")
     os.link(first, hardlink)
-    different.write_bytes(b"other-payload")
+    different.write_bytes(b"diff-payload")
 
     exact = diagnose_duplicate_pair(
         service.SessionLocal,
@@ -73,7 +73,7 @@ def test_duplicate_diagnostics_distinguishes_exact_copy_hardlink_and_different_c
         path_a=str(first),
         path_b=str(different),
     )
-    assert mismatch["diagnosis"] == "DIFFERENT_SIZE"
+    assert mismatch["diagnosis"] == "DIFFERENT_CONTENT"
     assert mismatch["exact_duplicate_copies"] is False
 
 
