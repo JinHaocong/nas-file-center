@@ -2272,6 +2272,154 @@ body,
 }
 
 
+/* Desktop shell scroll ownership + unified card language -------------------
+ * Desktop owns exactly one right-side scroller: the workspace below the
+ * utility rail. The rail stays fixed, while the scroller keeps the same 12px
+ * bottom gutter as the approved sidebar shell.
+ */
+@media (min-width: 768px) {
+  .nfc-app-shell {
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .nfc-app-main {
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .nfc-header.nfc-header {
+    flex: 0 0 auto;
+  }
+
+  .nfc-app-main .nfc-page-content {
+    flex: 1 1 auto;
+    min-height: 0;
+    margin: 12px 12px 12px;
+    padding: 6px clamp(12px, 1.45vw, 30px) 28px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    scroll-padding-top: 6px;
+    scroll-padding-bottom: 28px;
+  }
+}
+
+/* One visual family for workspace cards, matching sidebar + utility rail. */
+.nfc-app-main {
+  --nfc-shell-card-bg: var(--nfc-nav-surface);
+  --nfc-shell-card-border: var(--nfc-border-soft);
+  --nfc-shell-card-radius: var(--nfc-radius-shell);
+  --nfc-shell-card-shadow: 0 10px 34px color-mix(in srgb, var(--nfc-text) 7%, transparent);
+}
+
+.nfc-app-main .nfc-data-panel,
+.nfc-app-main .nfc-tool-workbench,
+.nfc-app-main .nfc-complex-form-panel,
+.nfc-app-main .nfc-worker-panel,
+.nfc-app-main .nfc-worker-status-strip,
+.nfc-app-main .nfc-plan-action-surface,
+.nfc-app-main .nfc-settings-subpanel,
+.nfc-app-main .nfc-responsive-descriptions,
+.nfc-app-main .ant-card {
+  overflow: hidden;
+  border: 1px solid var(--nfc-shell-card-border) !important;
+  border-radius: var(--nfc-shell-card-radius) !important;
+  background: var(--nfc-shell-card-bg) !important;
+  box-shadow: var(--nfc-shell-card-shadow) !important;
+}
+
+.nfc-app-main .nfc-data-panel + .nfc-data-panel,
+.nfc-app-main .nfc-data-panel + .nfc-complex-form-panel,
+.nfc-app-main .nfc-complex-form-panel + .nfc-data-panel {
+  margin-top: 18px;
+}
+
+.nfc-app-main .nfc-data-panel > .nfc-data-panel-header,
+.nfc-app-main .nfc-tool-workbench > .nfc-data-panel-header,
+.nfc-app-main .nfc-complex-form-panel > .nfc-data-panel-header {
+  border-bottom: 1px solid var(--nfc-shell-card-border) !important;
+  background: transparent !important;
+}
+
+.nfc-app-main .nfc-data-panel > .nfc-data-panel-body,
+.nfc-app-main .nfc-tool-workbench > .nfc-data-panel-body,
+.nfc-app-main .nfc-complex-form-panel > .nfc-data-panel-body {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+}
+
+.nfc-app-main .nfc-metric-grid {
+  gap: 12px;
+}
+
+.nfc-app-main .nfc-metric-card {
+  overflow: hidden;
+  border: 1px solid var(--nfc-shell-card-border);
+  border-radius: var(--nfc-shell-card-radius);
+  background: var(--nfc-shell-card-bg);
+  box-shadow: var(--nfc-shell-card-shadow);
+}
+
+.nfc-app-main .nfc-metric-card:last-child {
+  border-right: 1px solid var(--nfc-shell-card-border);
+}
+
+.nfc-app-main .nfc-metric-card:hover {
+  border-color: var(--nfc-border-strong);
+  background: color-mix(in srgb, var(--nfc-accent) 2.5%, var(--nfc-shell-card-bg));
+  box-shadow: var(--nfc-shell-card-shadow);
+}
+
+.nfc-app-main .nfc-snapshot-note,
+.nfc-app-main .nfc-filter-bar,
+.nfc-app-main .nfc-bulk-action-bar {
+  border: 1px solid var(--nfc-shell-card-border);
+  border-radius: var(--nfc-radius-workspace);
+  background: var(--nfc-shell-card-bg);
+  box-shadow: var(--nfc-shadow-workspace);
+}
+
+.nfc-app-main .ant-alert {
+  border-color: var(--nfc-shell-card-border);
+  border-radius: var(--nfc-radius-workspace);
+  box-shadow: var(--nfc-shadow-workspace);
+}
+
+.nfc-app-main .nfc-dashboard-page .nfc-dashboard-rail {
+  position: static;
+}
+
+@media (max-width: 767px) {
+  .nfc-app-main {
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+  }
+
+  .nfc-app-main .nfc-page-content {
+    margin: 0;
+  }
+
+  .nfc-app-main .nfc-data-panel,
+  .nfc-app-main .nfc-tool-workbench,
+  .nfc-app-main .nfc-complex-form-panel,
+  .nfc-app-main .nfc-worker-panel,
+  .nfc-app-main .nfc-worker-status-strip,
+  .nfc-app-main .nfc-plan-action-surface,
+  .nfc-app-main .nfc-settings-subpanel,
+  .nfc-app-main .nfc-responsive-descriptions,
+  .nfc-app-main .ant-card,
+  .nfc-app-main .nfc-metric-card {
+    border-radius: var(--nfc-radius-workspace) !important;
+    box-shadow: none !important;
+  }
+}
+
 /* Duplicate pair diagnostics ---------------------------------------------- */
 .nfc-dedupe-diagnostic-stack {
   display: grid;
