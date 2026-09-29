@@ -172,7 +172,7 @@ filesystem executor.
 
 ## 6. NEXT CURRENT — Scheduler / Cron
 
-**Status: S0 CLOSED / S1 CLOSED / S2 CURRENT — SAFE TARGET DISPATCH**
+**Status: S0 CLOSED / S1 CLOSED / S2 CLOSED / S3 CURRENT — PINNED WORKFLOW PREVIEW/DRAFT**
 
 Fresh scope decision: **Scheduler / Cron**.
 
@@ -210,9 +210,15 @@ Implementation sequence:
   five-field cron parser, IANA timezone/DST recurrence, optimistic schedule
   revision locking, immutable run snapshots, unique run-slot idempotency and
   DB-backed scheduler lease core. S1 creates no WorkJobs.
-- **S2 CURRENT** — safe allowlisted dispatch for index/scan/media jobs using
-  the S1 transaction and duplicate-dispatch fences.
-- **S3 LATER** — exact-revision Workflow Preview/Draft-only scheduling.
+- **S2 CLOSED** — transaction-aware shared queue helpers, atomic due-slot
+  dispatch, exact allowlist mapping for index/scan/media jobs, current target
+  revalidation, stale-target fail-closed runs, overlap skip, no-catch-up missed
+  slots, Worker-owned minute ticking and Resource Policy no-bypass. S2 adds no
+  destructive or arbitrary dispatch authority.
+- **S3 CURRENT** — exact-revision Workflow Preview/Draft-only scheduling. A
+  schedule must pin workflow id + revision + definition SHA; updates do not
+  silently follow current revision, and Scheduler cannot automatically Freeze,
+  Validate or Execute.
 - **S4 LATER** — Scheduler desktop/mobile frontend.
 - **S5 LATER** — closure, Docker, restart/concurrency and isolated NAS acceptance.
 

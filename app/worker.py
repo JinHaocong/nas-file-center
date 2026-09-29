@@ -13,6 +13,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.config import Settings, get_settings
 from app.db import create_engine_and_session, init_db
+from app.scheduler.dispatch import run_scheduler_tick
 from app.models import BatchPlanItem, ScanJob, WorkJob, utcnow
 from app.tasks.context import JobContext
 from app.tasks.handlers import get_handler
@@ -474,6 +475,8 @@ def worker_loop(
     if acquired:
         recover_interrupted_jobs(engine, SessionLocal, worker_id=worker_id)
 
+    last_scheduler_tick_minute = None
+
     try:
         while True:
             if stop_event.is_set():
@@ -489,6 +492,25 @@ def worker_loop(
                     time.sleep(poll_seconds)
                     continue
                 recover_interrupted_jobs(engine, SessionLocal, worker_id=worker_id)
+
+            scheduler_now = utcnow()
+            scheduler_minute = scheduler_now.replace(second=0, microsecond=0)
+            if scheduler_minute != last_scheduler_tick_minute:
+                # The Worker owns ticking; API processes never start a scheduler
+                # background timer. Mark the minute before execution so this
+                # worker attempts at most one scheduler tick per UTC minute.
+                last_scheduler_tick_minute = scheduler_minute
+                try:
+                    run_scheduler_tick(
+                        SessionLocal,
+                        settings,
+                        owner=worker_id,
+                        now_utc=scheduler_now,
+                    )
+                except Exception:
+                    # Scheduler failure is fail-closed for dispatch and must not
+                    # terminate the existing WorkJob worker loop.
+                    pass
 
             try:
                 claimed_id = claim_next_job(engine, SessionLocal, worker_id=worker_id)
