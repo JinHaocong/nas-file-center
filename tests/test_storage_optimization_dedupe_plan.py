@@ -8,7 +8,11 @@ from sqlalchemy import select
 
 from app.config import Settings
 from app.models import BatchPlan, BatchPlanItem, DuplicateFile, DuplicateGroup, ScanJob, utcnow
-from app.planning.dedupe_preview import DedupePreviewChangedError
+from app.planning.dedupe_preview import DedupeEmptyPlanError, DedupePreviewChangedError
+from app.storage_optimization.capability import (
+    CapabilityProbeResult,
+    StorageOptimizationCapability,
+)
 from app.service import FileCenterService
 
 
@@ -28,6 +32,7 @@ def storage_dedupe_env(tmp_path: Path):
         protect_last_file=True,
         initial_admin_username="admin",
         initial_admin_password="AdminPassword123!",
+        allow_mutation=True,
     )
     service = FileCenterService(settings)
     return service, data
@@ -162,3 +167,148 @@ def test_default_storage_action_remains_quarantine(storage_dedupe_env):
         )
         assert item is not None
         assert item.operation == "quarantine"
+
+
+def _supported_probe(operation: str) -> CapabilityProbeResult:
+    return CapabilityProbeResult(
+        capability=StorageOptimizationCapability.SUPPORTED,
+        operation=operation,
+        reason=f"{operation}_test_supported",
+    )
+
+
+@pytest.mark.parametrize(
+    ("storage_action", "operation", "probe_name"),
+    [
+        ("hardlink", "hardlink_optimize", "probe_hardlink_between"),
+        ("reflink", "reflink_optimize", "probe_reflink_between"),
+    ],
+)
+def test_optimization_freeze_and_validate_require_frozen_metadata_and_live_capability(
+    storage_dedupe_env,
+    monkeypatch,
+    storage_action: str,
+    operation: str,
+    probe_name: str,
+):
+    service, data = storage_dedupe_env
+    _seed_duplicate(service, data)
+
+    preview = service.get_dedupe_preview(
+        900,
+        scorer_config={},
+        storage_action=storage_action,
+    )
+    result = service.create_advanced_dedupe_plan(
+        900,
+        scorer_config={},
+        storage_action=storage_action,
+        expected_preview_digest=preview["preview_digest"],
+    )
+
+    frozen = service.freeze_plan(result["id"])
+    assert frozen.status == "frozen"
+
+    with service.SessionLocal() as session:
+        item = session.scalar(
+            select(BatchPlanItem).where(BatchPlanItem.plan_id == result["id"])
+        )
+        assert item is not None
+        assert item.operation == operation
+        assert item.expected_hash is not None
+        assert len(item.expected_hash) == 64
+        metadata = json.loads(item.metadata_json)
+        tx_id = metadata["storage_optimization_transaction_id"]
+        assert isinstance(tx_id, str) and tx_id
+        frozen_opt = metadata["storage_optimization"]
+        assert frozen_opt["transaction_id"] == tx_id
+        assert frozen_opt["operation"] == operation
+        assert frozen_opt["frozen_source_metadata"]["size"] == 1024
+        assert frozen_opt["frozen_keep_metadata"]["size"] == 1024
+
+    monkeypatch.setattr(
+        f"app.service.{probe_name}",
+        lambda *_args, **_kwargs: _supported_probe(storage_action),
+    )
+
+    validated = service.validate_plan(result["id"])
+    assert validated["status"] == "ready"
+    with service.SessionLocal() as session:
+        item = session.scalar(
+            select(BatchPlanItem).where(BatchPlanItem.plan_id == result["id"])
+        )
+        assert item is not None
+        assert item.state == "validated"
+        assert "capability verified" in (item.reason or "")
+
+
+def test_hardlink_metadata_mismatch_is_visible_in_preview_and_not_generated(
+    storage_dedupe_env,
+):
+    service, data = storage_dedupe_env
+    left, right = _seed_duplicate(service, data)
+    left.chmod(0o600)
+    right.chmod(0o644)
+
+    preview = service.get_dedupe_preview(
+        900,
+        scorer_config={},
+        storage_action="hardlink",
+    )
+
+    assert preview["planned_action_count"] == 0
+    assert preview["storage_blocked_count"] == 1
+    blocked = [
+        row for row in preview["rows"]
+        if row["member_decision"] == "SKIPPED"
+        and row["storage_blocking_reason"]
+    ]
+    assert len(blocked) == 1
+    assert blocked[0]["storage_blocking_reason"].startswith(
+        "HARDLINK_METADATA_MISMATCH:mode"
+    )
+
+    with pytest.raises(DedupeEmptyPlanError):
+        service.create_advanced_dedupe_plan(
+            900,
+            scorer_config={},
+            storage_action="hardlink",
+            expected_preview_digest=preview["preview_digest"],
+        )
+
+
+def test_validate_blocks_unsupported_live_capability(storage_dedupe_env, monkeypatch):
+    service, data = storage_dedupe_env
+    _seed_duplicate(service, data)
+
+    preview = service.get_dedupe_preview(
+        900,
+        scorer_config={},
+        storage_action="hardlink",
+    )
+    result = service.create_advanced_dedupe_plan(
+        900,
+        scorer_config={},
+        storage_action="hardlink",
+        expected_preview_digest=preview["preview_digest"],
+    )
+    service.freeze_plan(result["id"])
+
+    monkeypatch.setattr(
+        "app.service.probe_hardlink_between",
+        lambda *_args, **_kwargs: CapabilityProbeResult(
+            capability=StorageOptimizationCapability.UNSUPPORTED,
+            operation="hardlink",
+            reason="synthetic_cross_area_unsupported",
+        ),
+    )
+
+    validated = service.validate_plan(result["id"])
+    assert validated["status"] == "partial"
+    with service.SessionLocal() as session:
+        item = session.scalar(
+            select(BatchPlanItem).where(BatchPlanItem.plan_id == result["id"])
+        )
+        assert item is not None
+        assert item.state == "skipped"
+        assert "CAPABILITY_UNSUPPORTED" in (item.reason or "")
