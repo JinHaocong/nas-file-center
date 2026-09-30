@@ -48,6 +48,7 @@ describe('Hardlink / Reflink Advanced Dedupe UI', () => {
 
   test('preview table exposes optimization decisions and blocking reasons', () => {
     const table = read('src/components/dedupe/DedupePreviewTable.tsx');
+    const drawer = read('src/components/dedupe/DedupeExplainDrawer.tsx');
     const preview = read('src/utils/dedupePreview.ts');
 
     assert.match(preview, /norm === 'HARDLINK'/);
@@ -56,6 +57,9 @@ describe('Hardlink / Reflink Advanced Dedupe UI', () => {
     assert.match(table, /storage_capability/);
     assert.match(table, /Hardlink/);
     assert.match(table, /Reflink/);
+    assert.match(drawer, /存储优化判定/);
+    assert.match(drawer, /storage_blocking_reason/);
+    assert.match(drawer, /storage_capability/);
   });
 
   test('generate availability uses generic planned action count', () => {
