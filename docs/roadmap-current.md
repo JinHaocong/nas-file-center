@@ -3,7 +3,7 @@
 Status: CANONICAL CURRENT ROADMAP  
 Release authority: **v0.4.7**  
 Source authority: **default branch `main`**  
-Last reconciled: 2026-09-29
+Last reconciled: 2026-09-30
 
 ## 1. Authority order
 
@@ -231,13 +231,49 @@ Scheduler S0/S1 authorization does not fabricate or imply Organizer Advanced
 Rules C5 closure. The Organizer real-NAS closure evidence remains an independent
 record until supplied and committed.
 
-## 7. Other deferred candidate tracks
+## 7. CURRENT NEW TRACK — Hardlink / Reflink Storage Optimization
 
-The following remain deferred behind the Scheduler scope decision:
+**Status: H0 CLOSED — H1 NEXT**
 
-- Similarity / pHash / video similarity;
-- Notifications / webhook delivery;
-- Advanced Auth (API token / TOTP / recovery codes);
-- Hardlink / Reflink capability expansion.
+Product decision on 2026-09-30 explicitly activates Hardlink / Reflink as the
+next implementation track.
 
-Any later activation still requires its own fresh Scope + Architecture Freeze.
+Architecture freeze:
+[`storage-optimization-h0-architecture-freeze.md`](storage-optimization-h0-architecture-freeze.md)
+
+Frozen V1 direction:
+
+- existing exact-dedupe default remains **Quarantine**;
+- Hardlink and Reflink are explicit opt-in storage actions only;
+- both reuse Preview → Draft → Freeze → Validate → Worker Execute;
+- no automatic conversion after Scan;
+- no Scheduler target and no Workflow side effect in V1;
+- runtime filesystem capability must be positively probed; filesystem names and
+  `st_dev` equality are not authority;
+- Hardlink must clearly expose shared-inode semantics;
+- Reflink must prove independent-inode copy-on-write behavior;
+- no second executor and no `fclones link` mutation authority.
+
+Implementation sequence:
+
+- **H0 CLOSED** — scope, authority, capability probes, metadata policy,
+  transaction/recovery semantics and TDD matrix frozen.
+- **H1 NEXT** — runtime Hardlink/Reflink capability primitives.
+- **H2** — Advanced Dedupe Preview/Generate/Freeze/Validate integration.
+- **H3** — transactional Worker execution and restart recovery.
+- **H4** — frontend, Docker and isolated filesystem closure.
+
+Organizer C5 and Scheduler S5 real-NAS acceptance remain separate pending
+closure items. Their pending acceptance does not block source implementation of
+this new track and must not be silently marked CLOSED.
+
+## 8. Cancelled / deferred product tracks
+
+Product decisions remain authoritative:
+
+- Similarity / pHash / video similarity — **CANCELLED / OUT OF SCOPE**;
+- Notifications / webhook delivery — **CANCELLED / OUT OF SCOPE**;
+- Advanced Auth (API token / TOTP / recovery codes) — **DEFERRED**.
+
+Cancelled tracks must not be restarted unless the user explicitly reopens them.
+Advanced Auth requires its own fresh Scope + Architecture Freeze if activated.
