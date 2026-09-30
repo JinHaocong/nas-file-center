@@ -6,6 +6,7 @@ import {
   Button,
   message,
   Modal,
+  Select,
   Spin,
 } from 'antd';
 import {
@@ -19,6 +20,7 @@ import { scansApi } from '../../api/domain';
 import { formatDedupeErrorMessage, getStructuredApiError } from '../../api/errors';
 import {
   DedupeScorerConfig,
+  DedupeStorageAction,
   DirectDedupePreviewResponse,
   DedupePreviewMemberRow,
 } from '../../types/dedupe';
@@ -57,7 +59,10 @@ export const AdvancedDedupePage: React.FC = () => {
   const [scorerConfig, setScorerConfig] = useState<DedupeScorerConfig>(
     createDefaultDedupeScorerConfig()
   );
+  const [storageAction, setStorageAction] = useState<DedupeStorageAction>('quarantine');
   const [previewedConfig, setPreviewedConfig] = useState<DedupeScorerConfig | null>(null);
+  const [previewedStorageAction, setPreviewedStorageAction] =
+    useState<DedupeStorageAction | null>(null);
   const [previewData, setPreviewData] = useState<DirectDedupePreviewResponse | null>(null);
   const [page, setPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(50);
@@ -79,8 +84,15 @@ export const AdvancedDedupePage: React.FC = () => {
     dispatch({ type: 'CONFIG_EDITED' });
   };
 
+  const handleStorageActionChange = (action: DedupeStorageAction) => {
+    if (action === storageAction) return;
+    setStorageAction(action);
+    dispatch({ type: 'CONFIG_EDITED' });
+  };
+
   interface PreviewMutationVariables {
     cfg: DedupeScorerConfig;
+    storageAction: DedupeStorageAction;
     generation: number;
     page: number;
     pageSize: number;
@@ -90,6 +102,7 @@ export const AdvancedDedupePage: React.FC = () => {
     mutationFn: (variables: PreviewMutationVariables) =>
       scansApi.dedupePreview(scanId, {
         scorer_config: variables.cfg,
+        storage_action: variables.storageAction,
         page: variables.page,
         page_size: variables.pageSize,
       }),
@@ -106,6 +119,7 @@ export const AdvancedDedupePage: React.FC = () => {
       setPageSize(variables.pageSize);
       setPreviewData(data);
       setPreviewedConfig(JSON.parse(JSON.stringify(variables.cfg)));
+      setPreviewedStorageAction(variables.storageAction);
       dispatch({
         type: 'PREVIEW_SUCCESS',
         digest: data.preview_digest,
@@ -128,6 +142,7 @@ export const AdvancedDedupePage: React.FC = () => {
       return scansApi.createAdvancedDedupePlan(scanId, {
         scorer_config: previewedConfig,
         expected_preview_digest: dedupeState.acceptedPreviewDigest,
+        storage_action: previewedStorageAction || 'quarantine',
       });
     },
     onSuccess: (res) => {
@@ -209,7 +224,8 @@ export const AdvancedDedupePage: React.FC = () => {
   const isDirty =
     dedupeState.status === 'PREVIEW_STALE' ||
     dedupeState.acceptedPreviewDigest === null ||
-    (previewedConfig ? isScorerConfigDirty(scorerConfig, previewedConfig) : true);
+    (previewedConfig ? isScorerConfigDirty(scorerConfig, previewedConfig) : true) ||
+    previewedStorageAction !== storageAction;
 
   const validation = validateScorerConfigForm(scorerConfig);
 
@@ -222,6 +238,7 @@ export const AdvancedDedupePage: React.FC = () => {
     dispatch({ type: 'PREVIEW_STARTED' });
     previewMutation.mutate({
       cfg: scorerConfig,
+      storageAction,
       generation: currentGen,
       page: 1,
       pageSize,
@@ -229,12 +246,35 @@ export const AdvancedDedupePage: React.FC = () => {
   };
 
   const handleConfirmGeneratePlan = () => {
+    const action = previewedStorageAction || 'quarantine';
+    const isHardlink = action === 'hardlink';
+    const isReflink = action === 'reflink';
     Modal.confirm({
-      title: '确认生成精确去重计划草案？',
+      title: isHardlink
+        ? '确认生成 Hardlink 空间优化草案？'
+        : isReflink
+          ? '确认生成 Reflink 空间优化草案？'
+          : '确认生成精确去重计划草案？',
       icon: <ExclamationCircleOutlined />,
       content: (
         <div>
           <p>将提交当前权威预览摘要以原子方式创建执行计划草案。</p>
+          {isHardlink && (
+            <Alert
+              type="warning"
+              showIcon
+              message="Hardlink 会让两个路径共享同一个 inode"
+              description="执行成功后，未来通过任一路径写入都会修改同一份文件内容。这不是两个独立副本。"
+            />
+          )}
+          {isReflink && (
+            <Alert
+              type="info"
+              showIcon
+              message="Reflink 使用写时复制语义"
+              description="目标路径保持独立 inode；是否支持会在 Validate 和 Execute 时对实际文件系统再次现场验证。"
+            />
+          )}
           <p className="nfc-modal-support-copy">
             生成后仅创建 Draft 状态计划，底层物理文件不会发生任何改变。后续仍需完成
             <strong> Freeze -&gt; Validate -&gt; Execute </strong>
@@ -242,7 +282,7 @@ export const AdvancedDedupePage: React.FC = () => {
           </p>
         </div>
       ),
-      okText: '确认生成草案',
+      okText: isHardlink ? '我理解共享 inode，生成草案' : '确认生成草案',
       cancelText: '取消',
       onOk: () => {
         dispatch({ type: 'GENERATE_STARTED' });
@@ -256,6 +296,7 @@ export const AdvancedDedupePage: React.FC = () => {
     dispatch({ type: 'PREVIEW_STARTED' });
     previewMutation.mutate({
       cfg: scorerConfig,
+      storageAction,
       generation: currentGen,
       page: newPage,
       pageSize: newPageSize,
@@ -378,6 +419,37 @@ export const AdvancedDedupePage: React.FC = () => {
           />
         </div>
 
+        <div className="nfc-dedupe-storage-action">
+          <strong>重复副本处理方式</strong>
+          <Select<DedupeStorageAction>
+            value={storageAction}
+            onChange={handleStorageActionChange}
+            disabled={previewMutation.isPending || generateMutation.isPending}
+            style={{ minWidth: 240 }}
+            options={[
+              { value: 'quarantine', label: '隔离（默认，保留可撤销路径）' },
+              { value: 'hardlink', label: 'Hardlink 空间优化' },
+              { value: 'reflink', label: 'Reflink / CoW 空间优化' },
+            ]}
+          />
+          {storageAction === 'hardlink' && (
+            <Alert
+              type="warning"
+              showIcon
+              message="Hardlink 是共享 inode，不是独立副本"
+              description="Preview 只做只读 metadata 资格检查；Validate / Execute 会现场验证实际文件系统能力。"
+            />
+          )}
+          {storageAction === 'reflink' && (
+            <Alert
+              type="info"
+              showIcon
+              message="Reflink 保持独立 inode，并依赖底层文件系统 CoW"
+              description="Preview 不会创建探测文件；Validate / Execute 才会在实际父目录正向 probe。"
+            />
+          )}
+        </div>
+
         <ActionBar className="nfc-dedupe-config-actions">
           <ActionBar compact>
             <Button
@@ -463,7 +535,8 @@ export const AdvancedDedupePage: React.FC = () => {
                   disabled={
                     !canGeneratePlan(dedupeState) ||
                     previewMutation.isPending ||
-                    previewData.planned_quarantine_count === 0
+                    (previewData.planned_action_count ??
+                      previewData.planned_quarantine_count) === 0
                   }
                 >
                   生成执行计划草案
@@ -473,8 +546,8 @@ export const AdvancedDedupePage: React.FC = () => {
           </section>
 
           <DataPanel
-            title="去重候选与隔离决策"
-            description="每个成员的选择、评分、保留资格与安全排除都可追溯解释。"
+            title="去重候选与存储决策"
+            description="每个成员的 KEEP / 隔离 / Hardlink / Reflink 决策、评分、资格与阻断原因都可追溯解释。"
             action={<span className="nfc-panel-count">{previewData.total_rows} candidates</span>}
             className="nfc-panel-flush"
             variant="dense"
