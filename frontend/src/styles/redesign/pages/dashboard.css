@@ -182,7 +182,7 @@
 
 .nfc-dashboard-page .nfc-quick-action-copy span {
   color: var(--nfc-text-subtle);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.45;
 }
 
@@ -203,7 +203,7 @@
 
 .nfc-dashboard-task-identity .nfc-mono {
   color: var(--nfc-text-subtle);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .nfc-dashboard-page .nfc-mobile-activity-list {
@@ -252,7 +252,7 @@
 
 .nfc-dashboard-page .nfc-mobile-activity-meta {
   color: var(--nfc-text-subtle);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 @media (max-width: 1100px) {

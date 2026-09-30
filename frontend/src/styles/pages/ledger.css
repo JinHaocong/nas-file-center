@@ -36,7 +36,7 @@
   justify-content: flex-end;
   gap: 7px;
   color: var(--nfc-text-subtle);
-  font-size: 11.5px;
+  font-size: 12px;
 }
 
 .nfc-ledger-safety-note .anticon {
@@ -123,7 +123,7 @@
   flex-direction: column;
   gap: 2px;
   color: var(--nfc-text-subtle);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .nfc-mobile-record-facts b {
@@ -139,7 +139,7 @@
   border-radius: 8px;
   background: var(--nfc-bg-subtle);
   color: var(--nfc-text-muted);
-  font-size: 11.5px;
+  font-size: 12px;
 }
 
 .nfc-mobile-record-actions {
@@ -236,7 +236,7 @@
   border-radius: 7px;
   background: var(--nfc-bg-subtle);
   color: var(--nfc-text-muted);
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 620;
 }
 

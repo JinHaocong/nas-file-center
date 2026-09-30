@@ -114,7 +114,7 @@
 .nfc-batch-operation-grid .ant-radio-button-wrapper small {
   margin-top: 3px;
   color: var(--nfc-text-subtle);
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: 500;
 }
 
@@ -150,7 +150,7 @@
 .nfc-profile-name-cell small {
   grid-column: 1 / -1;
   color: var(--nfc-text-subtle);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.45;
 }
 
@@ -171,7 +171,7 @@
   overflow: hidden;
   color: var(--nfc-text-muted);
   font-family: "SFMono-Regular", "Cascadia Code", ui-monospace, monospace;
-  font-size: 11px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

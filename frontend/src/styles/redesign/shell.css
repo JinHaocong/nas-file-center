@@ -76,7 +76,7 @@
 
 .nfc-sidebar-meta {
   color: var(--nfc-text-subtle);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.3;
 }
 
@@ -94,7 +94,7 @@
 
 .nfc-nav-group-label {
   color: var(--nfc-text-subtle);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0;
 }
@@ -175,7 +175,7 @@
 
 .nfc-header-location-label {
   color: var(--nfc-text-subtle);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .nfc-header-location strong {

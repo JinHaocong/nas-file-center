@@ -56,7 +56,7 @@
 .nfc-workflow-mode-option small {
   grid-column: 2;
   color: var(--nfc-text-subtle);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .nfc-workflow-name {
@@ -81,7 +81,7 @@
   overflow: hidden;
   max-width: 560px;
   color: var(--nfc-text-subtle);
-  font-size: 11.5px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -104,7 +104,7 @@
 .nfc-scheduler-target-cell code,
 .nfc-scheduler-time-cell span {
   color: var(--nfc-text-subtle);
-  font-size: 11.5px;
+  font-size: 12px;
 }
 
 .nfc-scheduler-history-drawer .ant-drawer-body {
