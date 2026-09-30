@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import ExitStack
+from dataclasses import replace
 import fcntl
 import hashlib
 import json
@@ -66,6 +67,29 @@ def _stat_optional(parent_fd: int, name: str) -> os.stat_result | None:
         return os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
     except FileNotFoundError:
         return None
+
+
+def _reflink_owned_link_count(
+    source_parent_fd: int,
+    st: os.stat_result,
+    manifest: dict[str, Any],
+) -> int:
+    """Count only NFC-owned names for a reflink replacement inode."""
+    owned_names = {
+        str(manifest["new_name"]),
+        Path(str(manifest["source_path"])).name,
+    }
+    count = 0
+    for name in owned_names:
+        alias_stat = _stat_optional(source_parent_fd, name)
+        if alias_stat is not None and (
+            int(alias_stat.st_dev),
+            int(alias_stat.st_ino),
+        ) == (int(st.st_dev), int(st.st_ino)):
+            count += 1
+    if count < 1:
+        raise StateConflictError("STORAGE_OPTIMIZATION_REFLINK_OWNED_ALIAS_MISSING")
+    return count
 
 
 def _hash_fd(
@@ -505,7 +529,15 @@ def _qualify_new(
                 manifest["frozen_source_metadata"]
             )
             actual_metadata = capture_file_metadata_fd(fd)
-            if not replacement_metadata_matches(actual_metadata, frozen_source):
+            expected_metadata = replace(
+                frozen_source,
+                link_count=_reflink_owned_link_count(
+                    source_parent_fd,
+                    before,
+                    manifest,
+                ),
+            )
+            if not replacement_metadata_matches(actual_metadata, expected_metadata):
                 raise StateConflictError("STORAGE_OPTIMIZATION_NEW_METADATA_CHANGED")
         return before
     finally:
@@ -555,7 +587,15 @@ def _qualify_published(
                 manifest["frozen_source_metadata"]
             )
             actual_metadata = capture_file_metadata_fd(fd)
-            if not replacement_metadata_matches(actual_metadata, frozen_source):
+            expected_metadata = replace(
+                frozen_source,
+                link_count=_reflink_owned_link_count(
+                    source_parent_fd,
+                    actual,
+                    manifest,
+                ),
+            )
+            if not replacement_metadata_matches(actual_metadata, expected_metadata):
                 raise StateConflictError(
                     "STORAGE_OPTIMIZATION_PUBLISHED_METADATA_CHANGED"
                 )
