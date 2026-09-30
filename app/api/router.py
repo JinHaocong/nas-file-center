@@ -32,6 +32,10 @@ from app.media.catalog import (
 from app.media.corrupt_delete import build_corrupt_delete_preview, create_corrupt_delete_plan
 from app.path_safety import UnsafePathError
 from app.scanners.diagnostics import diagnose_duplicate_pair
+from app.storage_optimization.capability import (
+    probe_storage_optimization_between,
+    probe_storage_optimization_capabilities,
+)
 from app.service import StateConflictError
 from app.planning.dedupe_preview import (
     DedupeEmptyPlanError,
@@ -174,6 +178,34 @@ class DedupeDiagnosticRequest(BaseModel):
     path_a: str = Field(min_length=1, max_length=4096)
     path_b: str = Field(min_length=1, max_length=4096)
     scan_job_id: int | None = Field(default=None, ge=1)
+
+
+class StorageOptimizationCapabilityRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    directory: str | None = Field(default=None, min_length=1, max_length=4096)
+    source_directory: str | None = Field(default=None, min_length=1, max_length=4096)
+    destination_directory: str | None = Field(default=None, min_length=1, max_length=4096)
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_probe_shape(cls, raw: Any) -> Any:
+        if not isinstance(raw, dict):
+            return raw
+        directory = raw.get("directory")
+        source = raw.get("source_directory")
+        destination = raw.get("destination_directory")
+        if directory is not None:
+            if source is not None or destination is not None:
+                raise ValueError(
+                    "directory cannot be mixed with source_directory/destination_directory"
+                )
+            return raw
+        if source is None or destination is None:
+            raise ValueError(
+                "provide directory or both source_directory and destination_directory"
+            )
+        return raw
 
 
 class DedupePreviewRequest(BaseModel):
@@ -724,6 +756,34 @@ def diagnose_scan_pair(request: Request, payload: DedupeDiagnosticRequest):
         raise HTTPException(404, "scan not found") from exc
     except (ValueError, OSError) as exc:
         raise HTTPException(400, str(exc)) from exc
+
+
+@router.post(
+    "/storage-optimization/capabilities",
+    dependencies=[Depends(require_admin_user)],
+)
+def storage_optimization_capabilities(
+    request: Request,
+    payload: StorageOptimizationCapabilityRequest,
+):
+    settings = request.app.state.settings
+    if not settings.allow_mutation:
+        raise HTTPException(
+            status_code=409,
+            detail="Storage capability probe requires ALLOW_MUTATION=true",
+        )
+    if payload.directory is not None:
+        return probe_storage_optimization_capabilities(
+            payload.directory,
+            settings.allowed_roots,
+        )
+    assert payload.source_directory is not None
+    assert payload.destination_directory is not None
+    return probe_storage_optimization_between(
+        payload.source_directory,
+        payload.destination_directory,
+        settings.allowed_roots,
+    )
 
 
 @router.get("/scans/{scan_job_id}")
