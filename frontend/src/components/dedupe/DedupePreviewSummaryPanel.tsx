@@ -37,6 +37,39 @@ export const DedupePreviewSummaryPanel: React.FC<Props> = ({
     scanRoots.length > 0 ? scanRoots : summary.scan_roots
   );
   const mode = selectionMode || summary.selection_mode;
+  const storageAction = summary.storage_action || 'quarantine';
+  const plannedActionCount =
+    summary.planned_action_count ?? summary.planned_quarantine_count ?? 0;
+  const actionMetric =
+    storageAction === 'hardlink'
+      ? {
+          key: 'storage-action',
+          label: '计划 Hardlink 优化',
+          value: `${plannedActionCount}`,
+          suffix: '个',
+          meta: `共享 inode · 阻断 ${summary.storage_blocked_count ?? 0}`,
+          icon: <SaveOutlined />,
+          tone: 'warning',
+        }
+      : storageAction === 'reflink'
+        ? {
+            key: 'storage-action',
+            label: '计划 Reflink 优化',
+            value: `${plannedActionCount}`,
+            suffix: '个',
+            meta: `独立 inode / CoW · 阻断 ${summary.storage_blocked_count ?? 0}`,
+            icon: <SaveOutlined />,
+            tone: 'accent',
+          }
+        : {
+            key: 'quarantine',
+            label: '计划隔离副本',
+            value: `${summary.planned_quarantine_count ?? 0}`,
+            suffix: '个',
+            meta: '执行后进入隔离区',
+            icon: <DeleteOutlined />,
+            tone: 'warning',
+          };
 
   const metrics = [
     {
@@ -57,15 +90,7 @@ export const DedupePreviewSummaryPanel: React.FC<Props> = ({
       icon: <FileTextOutlined />,
       tone: 'accent',
     },
-    {
-      key: 'quarantine',
-      label: '计划隔离副本',
-      value: `${summary.planned_quarantine_count ?? 0}`,
-      suffix: '个',
-      meta: '执行后进入隔离区',
-      icon: <DeleteOutlined />,
-      tone: 'warning',
-    },
+    actionMetric,
     {
       key: 'reclaim',
       label: '预计释放容量',
@@ -94,6 +119,26 @@ export const DedupePreviewSummaryPanel: React.FC<Props> = ({
           </article>
         ))}
       </div>
+
+      {storageAction === 'hardlink' && (
+        <Alert
+          className="nfc-overlay-alert"
+          type="warning"
+          showIcon
+          message="Hardlink 优化会让路径共享同一个 inode"
+          description="预计释放容量只统计当前 SOURCE link_count=1 且 metadata 兼容的候选；Validate / Execute 仍会现场复核 SHA-256、link_count 与文件系统能力。"
+        />
+      )}
+
+      {storageAction === 'reflink' && (
+        <Alert
+          className="nfc-overlay-alert"
+          type="info"
+          showIcon
+          message="Reflink 优化保留独立 inode"
+          description="预计释放容量只统计当前满足 metadata/所有权条件的候选；底层 CoW 能力必须在 Validate / Execute 对实际目录再次验证。"
+        />
+      )}
 
       {mode === 'balanced_by_bytes' && (
         <Alert
