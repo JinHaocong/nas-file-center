@@ -608,6 +608,15 @@ def _reconcile_executing_item(
 
     evidence = precomputed_evidence
 
+    if item.operation in {"hardlink_optimize", "reflink_optimize"}:
+        # Recovery authority lives in the storage-optimization transaction
+        # journal and deterministic .new/.old sibling names. Reconciliation
+        # performs zero filesystem mutation and simply schedules an idempotent
+        # replay under the newly acquired Worker lease.
+        item.state = "planned"
+        item.reason = None
+        return
+
     if item.operation in ("rename", "move"):
         tgt = Path(item.target_path) if item.target_path else None
         if tgt and tgt.exists() and not src.exists():
@@ -2690,7 +2699,12 @@ class BatchPlanExecuteHandler(TaskHandler):
             # re-reading both payloads several times before that final hash.
             defer_duplicate_hash_to_execute = bool(
                 item_meta.keep_path
-                and item_meta.operation in {"quarantine", "unlink"}
+                and item_meta.operation in {
+                    "quarantine",
+                    "unlink",
+                    "hardlink_optimize",
+                    "reflink_optimize",
+                }
             )
 
             # Boundary Freshness Check
@@ -3780,7 +3794,14 @@ class BatchPlanExecuteHandler(TaskHandler):
                             q_entry.last_error = result.reason
                             q_entry.updated_at = now
 
-                if result.state == "completed" and row.operation != "media_corrupt_unlink_delete":
+                if (
+                    result.state == "completed"
+                    and row.operation not in {
+                        "media_corrupt_unlink_delete",
+                        "hardlink_optimize",
+                        "reflink_optimize",
+                    }
+                ):
                     if row.operation == "rmdir_empty":
                         item_meta_json = json.loads(row.metadata_json or "{}")
                         b_json = json.dumps({
@@ -3990,8 +4011,12 @@ class BatchPlanExecuteHandler(TaskHandler):
                             ))
 
                 if not (
-                    row.operation == "media_corrupt_unlink_delete"
-                    and result.state == "completed"
+                    result.state == "completed"
+                    and row.operation in {
+                        "media_corrupt_unlink_delete",
+                        "hardlink_optimize",
+                        "reflink_optimize",
+                    }
                 ):
                     session.add(AuditEvent(
                         operation=row.operation,
