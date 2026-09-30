@@ -67,6 +67,18 @@ from app.workflows.errors import (
     WorkflowNotFoundError,
 )
 from app.planning.dedupe_config import canonical_config_dict
+from app.storage_optimization.capability import (
+    StorageOptimizationCapability,
+    probe_hardlink_between,
+    probe_reflink_between,
+)
+from app.storage_optimization.metadata import (
+    FrozenFileMetadata,
+    StorageMetadataError,
+    capture_file_metadata,
+    hardlink_metadata_compatibility,
+    ownership_can_be_preserved,
+)
 from app.planning.dedupe_generate import DedupeDraftIntent, build_advanced_dedupe_draft_intents
 from app.planning.dedupe_preview import (
     DedupeEmptyPlanError,
@@ -2009,7 +2021,132 @@ class FileCenterService:
                     expected_size=row.expected_size,
                     expected_hash=row.expected_hash,
                 )
-                if result.ok:
+                if result.ok and row.operation in {"hardlink_optimize", "reflink_optimize"}:
+                    if not self.settings.allow_mutation:
+                        has_error = True
+                        item_validations[row.id] = (
+                            "skipped",
+                            "STORAGE_OPTIMIZATION_MUTATION_DISABLED",
+                            None,
+                        )
+                        continue
+
+                    try:
+                        optimization_meta = json.loads(row.metadata_json or "{}")
+                        frozen_opt = optimization_meta.get("storage_optimization")
+                        if not isinstance(frozen_opt, dict):
+                            raise StorageMetadataError(
+                                "frozen storage optimization metadata missing"
+                            )
+                        transaction_id = frozen_opt.get("transaction_id")
+                        if not isinstance(transaction_id, str) or not transaction_id.strip():
+                            raise StorageMetadataError("transaction id missing")
+                        frozen_source_metadata = FrozenFileMetadata.from_json_dict(
+                            frozen_opt["frozen_source_metadata"]
+                        )
+                        frozen_keep_metadata = FrozenFileMetadata.from_json_dict(
+                            frozen_opt["frozen_keep_metadata"]
+                        )
+                        live_source_metadata = capture_file_metadata(row.source_path)
+                        live_keep_metadata = capture_file_metadata(row.keep_path)
+                    except (KeyError, TypeError, StorageMetadataError) as exc:
+                        has_error = True
+                        item_validations[row.id] = (
+                            "skipped",
+                            f"STORAGE_OPTIMIZATION_METADATA_UNAVAILABLE:{exc}",
+                            None,
+                        )
+                        continue
+
+                    def _stable_metadata_tuple(metadata: FrozenFileMetadata):
+                        return (
+                            metadata.mode,
+                            metadata.uid,
+                            metadata.gid,
+                            metadata.size,
+                            metadata.mtime_ns,
+                            metadata.xattrs,
+                        )
+
+                    if (
+                        _stable_metadata_tuple(live_source_metadata)
+                        != _stable_metadata_tuple(frozen_source_metadata)
+                        or _stable_metadata_tuple(live_keep_metadata)
+                        != _stable_metadata_tuple(frozen_keep_metadata)
+                    ):
+                        metadata_stale = StaleItemDetail(
+                            item_id=row.id,
+                            source_path=row.source_path,
+                            reason="STORAGE_OPTIMIZATION_METADATA_CHANGED",
+                            expected={
+                                "source_metadata": frozen_source_metadata.to_json_dict(),
+                                "keep_metadata": frozen_keep_metadata.to_json_dict(),
+                            },
+                            actual={
+                                "source_metadata": live_source_metadata.to_json_dict(),
+                                "keep_metadata": live_keep_metadata.to_json_dict(),
+                            },
+                        )
+                        stale_items.append(metadata_stale)
+                        item_validations[row.id] = (
+                            "stale",
+                            metadata_stale.reason,
+                            None,
+                        )
+                        continue
+
+                    if row.operation == "hardlink_optimize":
+                        try:
+                            compatible, metadata_reason, _, _ = hardlink_metadata_compatibility(
+                                row.keep_path,
+                                row.source_path,
+                            )
+                        except StorageMetadataError as exc:
+                            compatible = False
+                            metadata_reason = f"HARDLINK_METADATA_UNAVAILABLE:{exc}"
+                        if not compatible:
+                            has_error = True
+                            item_validations[row.id] = (
+                                "skipped",
+                                metadata_reason,
+                                None,
+                            )
+                            continue
+                        capability = probe_hardlink_between(
+                            Path(row.keep_path).parent,
+                            Path(row.source_path).parent,
+                            self.settings.allowed_roots,
+                        )
+                    else:
+                        if not ownership_can_be_preserved(live_source_metadata):
+                            has_error = True
+                            item_validations[row.id] = (
+                                "skipped",
+                                "REFLINK_OWNERSHIP_UNPRESERVABLE",
+                                None,
+                            )
+                            continue
+                        capability = probe_reflink_between(
+                            Path(row.keep_path).parent,
+                            Path(row.source_path).parent,
+                            self.settings.allowed_roots,
+                        )
+
+                    if capability.capability is not StorageOptimizationCapability.SUPPORTED:
+                        has_error = True
+                        item_validations[row.id] = (
+                            "skipped",
+                            f"STORAGE_OPTIMIZATION_CAPABILITY_{capability.capability.value.upper()}:{capability.reason}",
+                            None,
+                        )
+                        continue
+
+                    item_validations[row.id] = (
+                        "validated",
+                        f"SHA256 verified; {row.operation} capability verified",
+                        result.sha256,
+                    )
+                elif result.ok:
                     item_validations[row.id] = ("validated", "SHA256 verified", result.sha256)
                 else:
                     has_error = True
@@ -2685,6 +2822,50 @@ class FileCenterService:
                         meta["keep_snapshot"] = snap_k
                     except Exception:
                         pass
+
+                if it["operation"] in {"hardlink_optimize", "reflink_optimize"}:
+                    if not it["keep_path"]:
+                        raise StateConflictError(
+                            "STORAGE_OPTIMIZATION_KEEP_MISSING: optimization item requires KEEP"
+                        )
+                    if not computed_hash:
+                        raise StateConflictError(
+                            "STORAGE_OPTIMIZATION_HASH_MISSING: optimization item requires frozen SHA256"
+                        )
+                    try:
+                        source_metadata = capture_file_metadata(src_p)
+                        keep_metadata = capture_file_metadata(it["keep_path"])
+                    except StorageMetadataError as exc:
+                        raise StateConflictError(
+                            f"STORAGE_OPTIMIZATION_METADATA_UNAVAILABLE: {exc}"
+                        ) from exc
+
+                    if it["operation"] == "hardlink_optimize":
+                        compatible, metadata_reason, keep_metadata, source_metadata = (
+                            hardlink_metadata_compatibility(it["keep_path"], src_p)
+                        )
+                        if not compatible:
+                            raise StateConflictError(metadata_reason)
+                    else:
+                        metadata_reason = "REFLINK_SOURCE_METADATA_FROZEN"
+                        if not ownership_can_be_preserved(source_metadata):
+                            raise StateConflictError(
+                                "REFLINK_OWNERSHIP_UNPRESERVABLE: current runtime cannot preserve source uid/gid"
+                            )
+
+                    tx_id = meta.get("storage_optimization_transaction_id")
+                    if not isinstance(tx_id, str) or not tx_id.strip():
+                        tx_id = str(uuid4())
+                    meta["storage_optimization_transaction_id"] = tx_id
+                    meta["storage_optimization"] = {
+                        "schema_version": 1,
+                        "transaction_id": tx_id,
+                        "operation": it["operation"],
+                        "frozen_source_metadata": source_metadata.to_json_dict(),
+                        "frozen_keep_metadata": keep_metadata.to_json_dict(),
+                        "metadata_reason": metadata_reason,
+                    }
+
                 upd["metadata_json"] = json.dumps(meta, ensure_ascii=False)
 
                 if it["target_path"]:
