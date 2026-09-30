@@ -6,13 +6,16 @@ import { resolve } from 'node:path';
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');
 
 describe('Right Workspace v2 design system', () => {
-  test('v2 stylesheet is loaded last so it owns the right workspace cascade', () => {
+  test('v2 remains the global workspace base while Settings has semantic page ownership', () => {
     const main = read('src/main.tsx');
     const v055 = main.indexOf("import './styles/v055-workspace-breathing.css';");
     const v056 = main.indexOf("import './styles/v056-right-workspace-v2.css';");
+    const settings = main.indexOf("import './styles/pages/settings.css';");
 
     assert.ok(v055 >= 0);
     assert.ok(v056 > v055);
+    assert.ok(settings > v056);
+    assert.doesNotMatch(main, /v053-settings-layout|v057-settings-polish/);
   });
 
   test('v2 intentionally leaves the approved sidebar and mobile navigation untouched', () => {
@@ -147,7 +150,10 @@ describe('Right Workspace v2 design system', () => {
     assert.match(css, /--nfc-w2-dashboard-max:\s*1800px/);
     assert.match(css, /minmax\(300px, 340px\)/);
     assert.match(css, /\.ant-modal-footer[\s\S]*border-top:/);
-    assert.match(settingsCss, /grid-template-columns:\s*repeat\(12/);
+    assert.match(settingsCss, /grid-template-columns:\s*minmax\(0, 1fr\)/);
+    assert.match(settingsCss, /\.nfc-settings-policy-card/);
+    assert.match(settingsCss, /\.nfc-settings-resource-controls/);
+    assert.doesNotMatch(css, /nfc-settings-(?:grid|subpanel|control-grid)/);
     assert.match(loginCss, /width:\s*min\(432px, 100%\)/);
     assert.match(loginCss, /\.nfc-login-security-note[\s\S]*border:\s*1px solid/);
   });
@@ -216,7 +222,8 @@ describe('Right Workspace v2 design system', () => {
     assert.doesNotMatch(toolsCss, /margin:\s*-16px -12px 15px/);
     assert.doesNotMatch(workspaceV49, /margin:\s*-20px -22px 18px/);
     assert.doesNotMatch(workspaceV49, /margin:\s*-16px -12px 15px/);
-    assert.match(css, /\.nfc-system-controls-page \.nfc-settings-grid > \.nfc-data-panel > \.nfc-data-panel-header[\s\S]*min-height:\s*0/);
+    const settingsCss = read('src/styles/pages/settings.css');
+    assert.match(settingsCss, /\.nfc-settings-grid > \.nfc-data-panel > \.nfc-data-panel-header[\s\S]*min-height:\s*68px/);
     assert.match(toolsCss, /\.nfc-rename-page \.nfc-tool-workbench > \.nfc-data-panel-header[\s\S]*margin:\s*0;[\s\S]*padding:\s*0 4px 14px/);
   });
 
