@@ -576,7 +576,7 @@ class FileCenterService:
             total = session.scalar(select(func.count(BatchPlan.id))) or 0
             rows = list(session.scalars(select(BatchPlan).order_by(BatchPlan.id.desc()).limit(page_size).offset(offset)))
             plan_ids = [row.id for row in rows]
-            active_jobs_map: dict[int, int] = {}
+            active_jobs_map: dict[int, WorkJob] = {}
             if plan_ids:
                 active_jobs = session.scalars(
                     select(WorkJob)
@@ -585,13 +585,14 @@ class FileCenterService:
                         WorkJob.status.in_(ACTIVE_EXECUTION_JOB_STATUSES),
                         func.cast(func.json_extract(WorkJob.state_json, "$.plan_id"), Integer).in_(plan_ids),
                     )
+                    .order_by(WorkJob.id.desc())
                 ).all()
                 for aj in active_jobs:
                     try:
                         st = json.loads(aj.state_json or "{}")
                         pid = st.get("plan_id")
                         if pid is not None and int(pid) not in active_jobs_map:
-                            active_jobs_map[int(pid)] = aj.id
+                            active_jobs_map[int(pid)] = aj
                     except Exception:
                         pass
 
@@ -600,7 +601,8 @@ class FileCenterService:
                 "name": row.name,
                 "kind": row.kind,
                 "status": row.status,
-                "active_work_job_id": active_jobs_map.get(row.id),
+                "active_work_job_id": active_jobs_map[row.id].id if row.id in active_jobs_map else None,
+                "active_work_job_status": active_jobs_map[row.id].status if row.id in active_jobs_map else None,
                 "expected_changes": row.expected_changes,
                 "expected_reclaim_bytes": row.expected_reclaim_bytes,
                 "metadata": json.loads(row.metadata_json or "{}"),
@@ -3356,6 +3358,7 @@ class FileCenterService:
                 "kind": plan.kind,
                 "status": plan.status,
                 "active_work_job_id": active_job.id if active_job else None,
+                "active_work_job_status": active_job.status if active_job else None,
                 "expected_changes": plan.expected_changes,
                 "expected_reclaim_bytes": plan.expected_reclaim_bytes,
                 "created_at": plan.created_at,
@@ -3391,6 +3394,39 @@ class FileCenterService:
         }
 
     def delete_plan(self, plan_id: int) -> dict:
+        """Delete plan metadata without racing an active filesystem execution.
+
+        A queued or paused batch-plan task is not executing filesystem syscalls,
+        so it may be cancelled first using the existing TaskService state
+        machine. Running/cancel-requested jobs remain fail-closed.
+        """
+        cancellable_job_id: int | None = None
+
+        with self.SessionLocal() as session:
+            plan = session.get(BatchPlan, plan_id)
+            if plan is None:
+                raise KeyError(plan_id)
+
+            active_job = _get_active_execution_job(session, plan_id)
+            if active_job is not None:
+                if active_job.status in {"queued", "paused"}:
+                    cancellable_job_id = int(active_job.id)
+                else:
+                    raise StateConflictError(
+                        f"Cannot delete plan #{plan_id}: active execution task #{active_job.id} "
+                        f"(status: {active_job.status})"
+                    )
+
+        cancelled_work_job_id: int | None = None
+        if cancellable_job_id is not None:
+            # TaskService performs queued/paused -> cancelled atomically and
+            # synchronizes the linked BatchPlan. If the Worker wins the race and
+            # claims the queued job first, cancellation becomes cancel_requested;
+            # the second active-job check below then blocks deletion safely.
+            cancelled = self.task_service.cancel_task(cancellable_job_id)
+            if cancelled.get("status") == "cancelled":
+                cancelled_work_job_id = cancellable_job_id
+
         with self.SessionLocal() as session:
             session.execute(text("BEGIN IMMEDIATE"))
             plan = session.get(BatchPlan, plan_id)
@@ -3400,7 +3436,8 @@ class FileCenterService:
             active_job = _get_active_execution_job(session, plan_id)
             if active_job is not None:
                 raise StateConflictError(
-                    f"Cannot delete plan #{plan_id}: active execution task #{active_job.id} (status: {active_job.status})"
+                    f"Cannot delete plan #{plan_id}: active execution task #{active_job.id} "
+                    f"(status: {active_job.status})"
                 )
 
             if plan.status in PLAN_DELETE_BLOCKED_ACTIVE or plan.status not in PLAN_SINGLE_DELETE_ALLOWED:
@@ -3409,7 +3446,11 @@ class FileCenterService:
             session.execute(delete(BatchPlanItem).where(BatchPlanItem.plan_id == plan_id))
             session.delete(plan)
             session.commit()
-            return {"deleted": True, "id": plan_id}
+            return {
+                "deleted": True,
+                "id": plan_id,
+                "cancelled_work_job_id": cancelled_work_job_id,
+            }
 
     def clear_plan_history(self, statuses: list[str] | None) -> dict:
         if statuses is None or len(statuses) == 0:

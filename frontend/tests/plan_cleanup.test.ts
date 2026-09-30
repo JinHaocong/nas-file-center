@@ -56,13 +56,45 @@ describe('Plan Lifecycle Cleanup: Policy Matrix & API Contract Tests', () => {
       }
     });
 
-    test('plan with active_work_job_id is blocked from deletion even in deletable statuses', () => {
+    test('active_work_job_id without a trustworthy status remains fail-closed', () => {
       const testStatuses = ['draft', 'frozen', 'ready', 'partial', 'completed', 'failed'];
       for (const status of testStatuses) {
         const res = getPlanDeleteAvailability({ status, active_work_job_id: 123 });
-        assert.strictEqual(res.canDelete, false, `Status ${status} with active_work_job_id must be blocked`);
-        assert.strictEqual(res.reason, '计划正在任务队列中执行，禁止删除');
+        assert.strictEqual(res.canDelete, false, `Status ${status} with unknown active task status must be blocked`);
+        assert.strictEqual(res.reason, '计划存在活动执行任务，当前状态无法安全删除');
       }
+    });
+
+    test('queued or paused interrupted execution can be cancelled as part of plan deletion', () => {
+      for (const taskStatus of ['queued', 'paused']) {
+        const res = getPlanDeleteAvailability({
+          status: 'executing',
+          active_work_job_id: 123,
+          active_work_job_status: taskStatus,
+        });
+        assert.strictEqual(res.canDelete, true);
+        assert.strictEqual(res.hasExecutionHistory, true);
+        assert.strictEqual(res.willCancelIdleExecution, true);
+        assert.strictEqual(res.reason, undefined);
+      }
+    });
+
+    test('running and cancel_requested execution remain fail-closed', () => {
+      const running = getPlanDeleteAvailability({
+        status: 'executing',
+        active_work_job_id: 123,
+        active_work_job_status: 'running',
+      });
+      assert.strictEqual(running.canDelete, false);
+      assert.ok(running.reason?.includes('仍在运行'));
+
+      const cancelling = getPlanDeleteAvailability({
+        status: 'executing',
+        active_work_job_id: 123,
+        active_work_job_status: 'cancel_requested',
+      });
+      assert.strictEqual(cancelling.canDelete, false);
+      assert.ok(cancelling.reason?.includes('等待安全取消'));
     });
 
     test('unknown or unrecognized statuses fail closed', () => {
@@ -139,6 +171,18 @@ describe('Plan Lifecycle Cleanup: Policy Matrix & API Contract Tests', () => {
           'Must clearly state executed operations are not reverted'
         );
       }
+    });
+
+    test('interrupted queued execution confirmation explains task cancellation and no undo', () => {
+      const content = getPlanDeleteConfirmationContent({
+        id: 789,
+        status: 'executing',
+        active_work_job_id: 55,
+        active_work_job_status: 'queued',
+      });
+      assert.ok(content.description.includes('先安全取消该任务'));
+      assert.ok(content.description.includes('Delete ≠ Undo'));
+      assert.ok(content.description.includes('Audit 审计记录仍会保留'));
     });
 
     test('pre-execution plan confirmation clarifies Audit is unaffected and NAS files untouched', () => {

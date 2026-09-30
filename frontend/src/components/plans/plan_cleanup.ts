@@ -2,6 +2,7 @@ export interface PlanDeleteAvailability {
   canDelete: boolean;
   reason?: string;
   hasExecutionHistory?: boolean;
+  willCancelIdleExecution?: boolean;
 }
 
 export const PLAN_SINGLE_DELETE_ALLOWED = new Set([
@@ -29,13 +30,29 @@ export const PLAN_EXECUTED_STATES = new Set([
 export function getPlanDeleteAvailability(plan?: {
   status?: string;
   active_work_job_id?: number | null;
+  active_work_job_status?: string | null;
 } | null): PlanDeleteAvailability {
   if (!plan || !plan.status) {
     return { canDelete: false, reason: '无效的计划状态' };
   }
+
   if (plan.active_work_job_id) {
-    return { canDelete: false, reason: '计划正在任务队列中执行，禁止删除' };
+    if (plan.active_work_job_status === 'queued' || plan.active_work_job_status === 'paused') {
+      return {
+        canDelete: true,
+        hasExecutionHistory: true,
+        willCancelIdleExecution: true,
+      };
+    }
+    if (plan.active_work_job_status === 'running') {
+      return { canDelete: false, reason: '关联执行任务仍在运行，请先等待完成或在任务中心取消' };
+    }
+    if (plan.active_work_job_status === 'cancel_requested') {
+      return { canDelete: false, reason: '关联执行任务正在等待安全取消，完成后即可删除' };
+    }
+    return { canDelete: false, reason: '计划存在活动执行任务，当前状态无法安全删除' };
   }
+
   if (PLAN_DELETE_BLOCKED_ACTIVE.has(plan.status)) {
     return { canDelete: false, reason: '计划正在校验或执行中，禁止删除' };
   }
@@ -57,9 +74,18 @@ export function getPlanDeleteConfirmationContent(plan: {
   id: number;
   status?: string;
   name?: string;
+  active_work_job_id?: number | null;
+  active_work_job_status?: string | null;
 }): PlanDeleteConfirmationContent {
-  const { hasExecutionHistory } = getPlanDeleteAvailability(plan);
+  const { hasExecutionHistory, willCancelIdleExecution } = getPlanDeleteAvailability(plan);
   const title = `确认删除计划 #${plan.id}？`;
+  if (willCancelIdleExecution) {
+    return {
+      title,
+      description:
+        '关联执行任务当前处于等待或暂停状态，将先安全取消该任务，再删除计划及计划条目元数据。已经执行的 NAS 文件操作不会被撤销（Delete ≠ Undo），Audit 审计记录仍会保留。',
+    };
+  }
   const description = hasExecutionHistory
     ? '该计划可能包含已经执行过的文件操作。删除仅清理计划及计划条目元数据，不会撤销已经执行的 NAS 文件操作（Delete ≠ Undo）。Audit 审计记录仍会保留。'
     : '仅删除该计划及其计划条目元数据，不会修改 NAS 上的任何真实文件。Audit 审计记录不会受到影响。';
