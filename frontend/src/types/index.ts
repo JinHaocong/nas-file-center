@@ -119,6 +119,7 @@ export type PlanHistoryStatus = 'completed' | 'failed';
 export interface DeletePlanResponse {
   deleted: boolean;
   id: number;
+  cancelled_work_job_id?: number | null;
 }
 
 export interface ClearPlanHistoryResponse {
@@ -152,6 +153,8 @@ export interface Plan {
   page_size?: number;
   items?: PlanItem[];
   active_work_job_id?: number | null;
+  active_work_job_status?: 'queued' | 'running' | 'paused' | 'cancel_requested' | null;
+  active_work_job_recovered_after_restart?: boolean;
 }
 
 export interface WorkJob {
