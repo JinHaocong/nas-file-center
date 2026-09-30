@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from pydantic import ValidationError
 
 from app.api.router import PlanItemInput, _plan_requires_admin
 from app.auth.dependencies import get_current_user
@@ -35,9 +34,48 @@ def test_public_generic_plan_accepts_only_exposed_operations(operation: str) -> 
         "unlink",
     ],
 )
-def test_public_generic_plan_rejects_reserved_internal_operations(operation: str) -> None:
-    with pytest.raises(ValidationError):
-        PlanItemInput(operation=operation, source="/data/example")
+def test_public_generic_plan_rejects_reserved_internal_operations(
+    tmp_path: Path,
+    operation: str,
+) -> None:
+    data = tmp_path / "data"
+    config = tmp_path / "config"
+    data.mkdir()
+    config.mkdir()
+    app = create_app(
+        Settings(
+            config_dir=config,
+            data_mount=data,
+            allowed_roots_raw=str(data),
+        )
+    )
+    member = User(
+        id=998,
+        username="generic-plan-member",
+        password_hash="unused",
+        role="user",
+        is_active=True,
+    )
+    app.dependency_overrides[get_current_user] = lambda: member
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/plans",
+        json={
+            "name": "blocked-generic-plan",
+            "kind": "custom",
+            "items": [
+                {
+                    "operation": operation,
+                    "source": str(data / "example"),
+                }
+            ],
+        },
+        headers={"Origin": "http://testserver"},
+    )
+
+    assert response.status_code == 400
+    assert "Unsupported generic plan operation" in response.text
 
 
 def test_existing_reserved_optimization_item_remains_admin_restricted(tmp_path: Path) -> None:

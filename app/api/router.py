@@ -67,6 +67,8 @@ from app.workflows.schema import (
 router = APIRouter(prefix="/api", tags=["file-center"], dependencies=[Depends(get_current_user)])
 
 
+_PUBLIC_GENERIC_PLAN_OPERATIONS = frozenset({"quarantine", "touch", "move", "rename"})
+
 _ADMIN_ONLY_PLAN_OPERATIONS = frozenset({
     "hardlink_optimize",
     "reflink_optimize",
@@ -436,7 +438,7 @@ class RenamePreviewRequest(BaseModel):
 
 
 class PlanItemInput(BaseModel):
-    operation: Literal["quarantine", "touch", "move", "rename"]
+    operation: str
     source: str
     target: str | None = None
     keep: str | None = None
@@ -1336,6 +1338,16 @@ def list_plans(
 
 @router.post("/plans")
 def create_plan(request: Request, payload: PlanCreateRequest):
+    unsupported_operations = sorted({
+        item.operation
+        for item in payload.items
+        if item.operation not in _PUBLIC_GENERIC_PLAN_OPERATIONS
+    })
+    if unsupported_operations:
+        raise HTTPException(
+            400,
+            "Unsupported generic plan operation(s): " + ", ".join(unsupported_operations),
+        )
     try:
         plan = request.app.state.service.create_plan(
             name=payload.name,
