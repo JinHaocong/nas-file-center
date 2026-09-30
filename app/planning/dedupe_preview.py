@@ -1010,6 +1010,7 @@ def compute_preview_digest(
     decision_digest: str,
     effective_safety_policy: Mapping[str, Any],
     storage_action: str = "quarantine",
+    storage_action_snapshot_digest: str | None = None,
     dedupe_engine_version: int = 1,
 ) -> str:
     storage_action = normalize_storage_action(storage_action)
@@ -1020,6 +1021,7 @@ def compute_preview_digest(
         "source_snapshot_digest": source_snapshot_digest,
         "decision_digest": decision_digest,
         "storage_action": storage_action,
+        "storage_action_snapshot_digest": storage_action_snapshot_digest,
         "effective_safety_policy": dict(sorted(effective_safety_policy.items())),
     }
     return hashlib.sha256(canonical_json_dumps(payload).encode("utf-8")).hexdigest()
@@ -1032,6 +1034,8 @@ def build_preview_response(
     allowed_roots: Sequence[str | Path] | None = None,
     quarantine_root: str | Path | None = None,
     storage_action: str = "quarantine",
+    storage_action_snapshot: Mapping[str, Mapping[str, Any]] | None = None,
+    storage_action_snapshot_digest: str | None = None,
     page: int = 1,
     page_size: int = 50,
 ) -> dict[str, Any]:
@@ -1048,9 +1052,11 @@ def build_preview_response(
         decision_digest=compilation.decision_digest,
         effective_safety_policy=canonical_safety_policy,
         storage_action=storage_action,
+        storage_action_snapshot_digest=storage_action_snapshot_digest,
     )
 
     recursive_mode = compilation.scorer_config.selection_mode == "recursive_directory_balanced_by_bytes"
+    storage_action_snapshot = storage_action_snapshot or {}
     all_rows: list[dict[str, Any]] = []
     for g in compilation.groups:
         g_prov_id = g.group_provenance_id
@@ -1076,12 +1082,20 @@ def build_preview_response(
             elif m.recommended_keep:
                 member_decision = "KEEP"
             elif m.absolute_path in g_quarantine_set:
-                member_decision = {
-                    "quarantine": "QUARANTINE",
-                    "hardlink": "HARDLINK",
-                    "reflink": "REFLINK",
-                }[storage_action]
+                storage_info = storage_action_snapshot.get(m.absolute_path, {})
+                if (
+                    storage_action != "quarantine"
+                    and storage_info.get("actionable") is not True
+                ):
+                    member_decision = "SKIPPED"
+                else:
+                    member_decision = {
+                        "quarantine": "QUARANTINE",
+                        "hardlink": "HARDLINK",
+                        "reflink": "REFLINK",
+                    }[storage_action]
             else:
+                storage_info = {}
                 member_decision = "SKIPPED"
             contrib_list = [
                 {
@@ -1136,6 +1150,26 @@ def build_preview_response(
                 "balance_info": m.balance_info,
                 "candidate_balance_bucket": candidate_balance_bucket,
                 "recursive_last_file_protection_reason": recursive_last_file_protection_reason,
+                "storage_action": storage_action,
+                "storage_capability": (
+                    storage_info.get("capability")
+                    if isinstance(storage_info, Mapping)
+                    else None
+                ),
+                "storage_metadata_compatible": (
+                    storage_info.get("actionable")
+                    if storage_action != "quarantine"
+                    and isinstance(storage_info, Mapping)
+                    and m.absolute_path in g_quarantine_set
+                    else None
+                ),
+                "storage_blocking_reason": (
+                    storage_info.get("reason")
+                    if storage_action != "quarantine"
+                    and isinstance(storage_info, Mapping)
+                    and storage_info.get("actionable") is not True
+                    else None
+                ),
             })
 
     total_rows = len(all_rows)
@@ -1147,6 +1181,24 @@ def build_preview_response(
         str(i): compilation.released_bytes_by_scan_root.get(i, 0)
         for i in range(len(compilation.scan_roots))
     }
+    if storage_action == "quarantine":
+        planned_action_count = compilation.planned_quarantine_count
+        storage_blocked_count = 0
+        action_expected_reclaim_bytes = compilation.expected_reclaim_bytes
+    else:
+        planned_action_count = sum(
+            1 for info in storage_action_snapshot.values()
+            if info.get("actionable") is True
+        )
+        storage_blocked_count = sum(
+            1 for info in storage_action_snapshot.values()
+            if info.get("actionable") is not True
+        )
+        action_expected_reclaim_bytes = sum(
+            int(info.get("expected_size") or 0)
+            for info in storage_action_snapshot.values()
+            if info.get("actionable") is True
+        )
     summary_data = {
         "selection_mode": compilation.summary.get("selection_mode", compilation.scorer_config.selection_mode),
         "group_count": len(compilation.groups),
@@ -1154,9 +1206,10 @@ def build_preview_response(
         "actionable_group_count": compilation.actionable_group_count,
         "skipped_group_count": compilation.skipped_group_count,
         "storage_action": storage_action,
-        "planned_action_count": compilation.planned_quarantine_count,
+        "planned_action_count": planned_action_count,
+        "storage_blocked_count": storage_blocked_count,
         "planned_quarantine_count": compilation.planned_quarantine_count if storage_action == "quarantine" else 0,
-        "expected_reclaim_bytes": compilation.expected_reclaim_bytes,
+        "expected_reclaim_bytes": action_expected_reclaim_bytes,
         "released_bytes_by_scan_root": released_bytes_by_scan_root_formatted,
     }
     return {
@@ -1175,6 +1228,7 @@ def build_preview_response(
         "scorer_config_digest": compilation.scorer_config_digest,
         "source_snapshot_digest": compilation.source_snapshot_digest,
         "decision_digest": compilation.decision_digest,
+        "storage_action_snapshot_digest": storage_action_snapshot_digest,
         "preview_digest": preview_digest,
         "effective_safety_policy": canonical_safety_policy,
         "preview_source": "completed-scan-readonly-safety",
