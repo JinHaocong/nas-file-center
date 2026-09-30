@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+import json
 import threading
 import time
 import pytest
 from sqlalchemy import select
 
 from app.db import create_engine_and_session, init_db
-from app.models import WorkJob, WorkerState, TaskLock, TaskEvent, utcnow
+from app.models import BatchPlan, BatchPlanItem, WorkJob, WorkerState, TaskLock, TaskEvent, utcnow
 from app.tasks.recovery import (
     acquire_worker_ownership,
     recover_interrupted_jobs,
@@ -176,3 +177,124 @@ def test_worker_restart_recovery_rules(tmp_path: Path):
 
         completed = session.get(WorkJob, ids["completed"])
         assert completed.status == JobState.COMPLETED.value
+
+
+
+def _make_executing_plan_with_job(
+    SessionLocal,
+    *,
+    job_status: str,
+    checkpoint_json: str | None = None,
+):
+    with SessionLocal() as session:
+        plan = BatchPlan(
+            name="Restart recovery plan",
+            kind="organize",
+            status="executing",
+            expected_changes=1,
+        )
+        session.add(plan)
+        session.flush()
+        item = BatchPlanItem(
+            plan_id=plan.id,
+            sequence=1,
+            operation="move",
+            source_path="/data/source",
+            target_path="/data/target",
+            state="validated",
+        )
+        session.add(item)
+        job = WorkJob(
+            kind="batch-plan-execute",
+            status=job_status,
+            state_json=json.dumps({"plan_id": plan.id}),
+            checkpoint_json=checkpoint_json,
+        )
+        session.add(job)
+        session.commit()
+        return plan.id, job.id
+
+
+def test_worker_restart_failure_synchronizes_batch_plan(tmp_path: Path):
+    db_path = tmp_path / "test_plan_recovery.db"
+    engine, SessionLocal = create_engine_and_session(db_path)
+    init_db(engine, db_path=db_path)
+
+    plan_id, job_id = _make_executing_plan_with_job(
+        SessionLocal,
+        job_status=JobState.RUNNING.value,
+        checkpoint_json=None,
+    )
+
+    assert acquire_worker_ownership(engine, SessionLocal, worker_id="worker-plan-recovery") is True
+    stats = recover_interrupted_jobs(
+        engine,
+        SessionLocal,
+        worker_id="worker-plan-recovery",
+    )
+
+    assert stats["failed_interrupted"] == 1
+    with SessionLocal() as session:
+        job = session.get(WorkJob, job_id)
+        plan = session.get(BatchPlan, plan_id)
+        assert job is not None
+        assert plan is not None
+        assert job.status == JobState.FAILED.value
+        assert job.error_code == "WORKER_INTERRUPTED"
+        assert plan.status == "failed"
+
+
+def test_worker_restart_repairs_historical_orphaned_executing_plan(tmp_path: Path):
+    db_path = tmp_path / "test_orphan_plan_recovery.db"
+    engine, SessionLocal = create_engine_and_session(db_path)
+    init_db(engine, db_path=db_path)
+
+    plan_id, job_id = _make_executing_plan_with_job(
+        SessionLocal,
+        job_status=JobState.FAILED.value,
+    )
+    with SessionLocal() as session:
+        job = session.get(WorkJob, job_id)
+        assert job is not None
+        job.error_code = "WORKER_INTERRUPTED"
+        job.error_text = "Worker restarted while job was running"
+        job.finished_at = utcnow()
+        session.commit()
+
+    assert acquire_worker_ownership(engine, SessionLocal, worker_id="worker-orphan-recovery") is True
+    stats = recover_interrupted_jobs(
+        engine,
+        SessionLocal,
+        worker_id="worker-orphan-recovery",
+    )
+
+    assert stats["repaired_orphan_plans"] == 1
+    with SessionLocal() as session:
+        plan = session.get(BatchPlan, plan_id)
+        assert plan is not None
+        assert plan.status == "failed"
+
+
+def test_worker_restart_does_not_repair_plan_with_active_execution_job(tmp_path: Path):
+    db_path = tmp_path / "test_active_plan_recovery.db"
+    engine, SessionLocal = create_engine_and_session(db_path)
+    init_db(engine, db_path=db_path)
+
+    plan_id, _ = _make_executing_plan_with_job(
+        SessionLocal,
+        job_status=JobState.QUEUED.value,
+        checkpoint_json='{"schema_version": 1}',
+    )
+
+    assert acquire_worker_ownership(engine, SessionLocal, worker_id="worker-active-plan") is True
+    stats = recover_interrupted_jobs(
+        engine,
+        SessionLocal,
+        worker_id="worker-active-plan",
+    )
+
+    assert stats["repaired_orphan_plans"] == 0
+    with SessionLocal() as session:
+        plan = session.get(BatchPlan, plan_id)
+        assert plan is not None
+        assert plan.status == "executing"

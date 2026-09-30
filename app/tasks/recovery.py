@@ -4,10 +4,10 @@ from datetime import datetime, timezone
 import json
 import logging
 from typing import Any
-from sqlalchemy import select, update, text
+from sqlalchemy import Integer, func, select, update, text
 from sqlalchemy.orm import sessionmaker
 
-from app.models import ResourcePolicy, ScanJob, TaskLock, TaskEvent, WorkJob, WorkerState, utcnow
+from app.models import BatchPlan, ResourcePolicy, ScanJob, TaskLock, TaskEvent, WorkJob, WorkerState, utcnow
 from app.resource_control import (
     ResourcePolicySnapshot,
     evaluate_resource_policy,
@@ -392,6 +392,117 @@ def claim_next_job(
         return None
 
 
+def _linked_plan_id_expr():
+    return func.cast(func.json_extract(WorkJob.state_json, "$.plan_id"), Integer)
+
+
+def _repair_orphaned_executing_plans(
+    session_factory: sessionmaker,
+    *,
+    worker_id: str | None = None,
+    timeout_seconds: float = WORKER_LEASE_TIMEOUT_SECONDS,
+) -> int:
+    """Repair historical plans left in executing after their WorkJob became terminal.
+
+    This is intentionally conservative: an executing plan is only rewritten when
+    no active execution WorkJob exists and a linked terminal execution WorkJob is
+    available as durable evidence. Plans without such evidence remain untouched.
+    """
+    from app.tasks.sync import sync_batch_plan_status
+
+    with session_factory() as session:
+        candidate_ids = list(
+            session.scalars(
+                select(BatchPlan.id)
+                .where(BatchPlan.status == "executing")
+                .order_by(BatchPlan.id)
+            )
+        )
+
+    repaired = 0
+    active_statuses = (
+        JobState.QUEUED.value,
+        JobState.RUNNING.value,
+        JobState.PAUSED.value,
+        JobState.CANCEL_REQUESTED.value,
+    )
+    terminal_statuses = (
+        JobState.COMPLETED.value,
+        JobState.FAILED.value,
+        JobState.CANCELLED.value,
+    )
+
+    for plan_id in candidate_ids:
+        with session_factory() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            now = utcnow()
+            if worker_id is not None:
+                try:
+                    assert_active_worker_lease(
+                        session,
+                        worker_id,
+                        now=now,
+                        timeout_seconds=timeout_seconds,
+                    )
+                except JobLeaseLost:
+                    session.rollback()
+                    return repaired
+
+            plan = session.get(BatchPlan, plan_id)
+            if plan is None or plan.status != "executing":
+                session.rollback()
+                continue
+
+            active_job = session.scalars(
+                select(WorkJob)
+                .where(
+                    WorkJob.kind == "batch-plan-execute",
+                    WorkJob.status.in_(active_statuses),
+                    _linked_plan_id_expr() == plan_id,
+                )
+                .order_by(WorkJob.id.desc())
+            ).first()
+            if active_job is not None:
+                session.rollback()
+                continue
+
+            terminal_job = session.scalars(
+                select(WorkJob)
+                .where(
+                    WorkJob.kind == "batch-plan-execute",
+                    WorkJob.status.in_(terminal_statuses),
+                    _linked_plan_id_expr() == plan_id,
+                )
+                .order_by(WorkJob.id.desc())
+            ).first()
+            if terminal_job is None:
+                session.rollback()
+                continue
+
+            sync_batch_plan_status(
+                session,
+                terminal_job,
+                terminal_job.status,
+                finished_at=terminal_job.finished_at,
+                error_text=terminal_job.error_text,
+            )
+            log_task_event(
+                session,
+                job_id=terminal_job.id,
+                event_type="plan_recovered_after_worker_restart",
+                message=(
+                    f"Plan #{plan_id} recovered from orphaned executing state "
+                    f"using terminal task #{terminal_job.id} ({terminal_job.status})"
+                ),
+                level="warning",
+                context={"plan_id": plan_id, "work_job_id": terminal_job.id},
+            )
+            session.commit()
+            repaired += 1
+
+    return repaired
+
+
 def recover_interrupted_jobs(
     engine: Any,
     session_factory: sessionmaker,
@@ -412,9 +523,10 @@ def recover_interrupted_jobs(
         "recovered_requeued": 0,
         "failed_interrupted": 0,
         "cancelled": 0,
+        "repaired_orphan_plans": 0,
     }
 
-    from app.tasks.sync import sync_scan_job_status
+    from app.tasks.sync import sync_batch_plan_status, sync_scan_job_status
 
     # 1. Initial lease validation & fetch candidate job IDs
     with session_factory() as session:
@@ -423,7 +535,12 @@ def recover_interrupted_jobs(
             try:
                 assert_active_worker_lease(session, worker_id, now=now, timeout_seconds=timeout_seconds)
             except JobLeaseLost:
-                return stats
+                stats["repaired_orphan_plans"] = _repair_orphaned_executing_plans(
+        session_factory,
+        worker_id=worker_id,
+        timeout_seconds=timeout_seconds,
+    )
+    return stats
 
         candidate_ids = list(
             session.scalars(
@@ -462,6 +579,13 @@ def recover_interrupted_jobs(
                     finished_at=mutation_now,
                     error_text="Cancelled by user",
                     cleanup_partial_results=True,
+                )
+                sync_batch_plan_status(
+                    session,
+                    job,
+                    "cancelled",
+                    finished_at=mutation_now,
+                    error_text="Cancelled by user",
                 )
                 log_task_event(
                     session,
@@ -504,6 +628,13 @@ def recover_interrupted_jobs(
                         finished_at=mutation_now,
                         error_text="Worker restarted while job was running",
                         cleanup_partial_results=True,
+                    )
+                    sync_batch_plan_status(
+                        session,
+                        job,
+                        "failed",
+                        finished_at=mutation_now,
+                        error_text="Worker restarted while job was running",
                     )
                     log_task_event(
                         session,
