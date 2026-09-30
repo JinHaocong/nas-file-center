@@ -55,6 +55,12 @@ def _identity(st: os.stat_result) -> dict[str, int]:
     }
 
 
+def _assert_link_count(st: os.stat_result, expected: int, reason: str) -> None:
+    actual = int(st.st_nlink)
+    if actual != int(expected):
+        raise StateConflictError(f"{reason}: expected nlink={expected}, actual={actual}")
+
+
 def _stat_optional(parent_fd: int, name: str) -> os.stat_result | None:
     try:
         return os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
@@ -825,13 +831,18 @@ def execute_storage_optimization(
             and _stat_optional(source_parent_fd, old_name) is None
             and "prepared_new" not in journals
         ):
-            _qualify_original(
+            fresh_source_stat = _qualify_original(
                 source_parent_fd,
                 source_name,
                 manifest,
                 session_factory=session_factory,
                 worker_id=worker_id,
                 failure_prefix="STORAGE_OPTIMIZATION_SOURCE",
+            )
+            _assert_link_count(
+                fresh_source_stat,
+                1,
+                "STORAGE_OPTIMIZATION_SOURCE_HAS_ADDITIONAL_HARDLINKS",
             )
             _ensure_initial_capability(manifest, allowed_roots=allowed_roots)
 
@@ -864,13 +875,18 @@ def execute_storage_optimization(
                 raise StateConflictError(
                     "STORAGE_OPTIMIZATION_SOURCE_AND_OLD_MISSING_BEFORE_CAPTURE"
                 )
-            _qualify_original(
+            source_before_anchor = _qualify_original(
                 source_parent_fd,
                 source_name,
                 manifest,
                 session_factory=session_factory,
                 worker_id=worker_id,
                 failure_prefix="STORAGE_OPTIMIZATION_SOURCE",
+            )
+            _assert_link_count(
+                source_before_anchor,
+                1,
+                "STORAGE_OPTIMIZATION_SOURCE_HAS_ADDITIONAL_HARDLINKS",
             )
             renew_and_assert_worker_lease(session_factory, worker_id)
             os.link(
@@ -889,6 +905,11 @@ def execute_storage_optimization(
                 worker_id=worker_id,
                 failure_prefix="STORAGE_OPTIMIZATION_OLD",
             )
+            _assert_link_count(
+                old_stat,
+                2,
+                "STORAGE_OPTIMIZATION_CAPTURE_LINK_COUNT_CHANGED",
+            )
         else:
             old_stat = _qualify_original(
                 source_parent_fd,
@@ -902,13 +923,29 @@ def execute_storage_optimization(
                 int(source_stat.st_dev),
                 int(source_stat.st_ino),
             ) == (int(old_stat.st_dev), int(old_stat.st_ino)):
-                _qualify_original(
+                source_original_stat = _qualify_original(
                     source_parent_fd,
                     source_name,
                     manifest,
                     session_factory=session_factory,
                     worker_id=worker_id,
                     failure_prefix="STORAGE_OPTIMIZATION_SOURCE",
+                )
+                _assert_link_count(
+                    source_original_stat,
+                    2,
+                    "STORAGE_OPTIMIZATION_CAPTURE_LINK_COUNT_CHANGED",
+                )
+                _assert_link_count(
+                    old_stat,
+                    2,
+                    "STORAGE_OPTIMIZATION_CAPTURE_LINK_COUNT_CHANGED",
+                )
+            else:
+                _assert_link_count(
+                    old_stat,
+                    1,
+                    "STORAGE_OPTIMIZATION_OLD_HAS_ADDITIONAL_HARDLINKS",
                 )
 
         _phase_journal(
@@ -941,7 +978,7 @@ def execute_storage_optimization(
                 user_id=user_id,
                 after={},
             )
-            _qualify_original(
+            source_before_retire = _qualify_original(
                 source_parent_fd,
                 source_name,
                 manifest,
@@ -949,9 +986,27 @@ def execute_storage_optimization(
                 worker_id=worker_id,
                 failure_prefix="STORAGE_OPTIMIZATION_SOURCE",
             )
+            _assert_link_count(
+                source_before_retire,
+                2,
+                "STORAGE_OPTIMIZATION_SOURCE_LINK_COUNT_CHANGED_BEFORE_RETIRE",
+            )
             renew_and_assert_worker_lease(session_factory, worker_id)
             os.unlink(source_name, dir_fd=source_parent_fd)
             os.fsync(source_parent_fd)
+            old_after_retire = _qualify_original(
+                source_parent_fd,
+                old_name,
+                manifest,
+                session_factory=session_factory,
+                worker_id=worker_id,
+                failure_prefix="STORAGE_OPTIMIZATION_OLD",
+            )
+            _assert_link_count(
+                old_after_retire,
+                1,
+                "STORAGE_OPTIMIZATION_OLD_HAS_ADDITIONAL_HARDLINKS",
+            )
             _phase_journal(
                 session_factory,
                 worker_id=worker_id,
@@ -1084,13 +1139,18 @@ def execute_storage_optimization(
 
         old_stat = _stat_optional(source_parent_fd, old_name)
         if old_stat is not None:
-            _qualify_original(
+            old_before_final_retire = _qualify_original(
                 source_parent_fd,
                 old_name,
                 manifest,
                 session_factory=session_factory,
                 worker_id=worker_id,
                 failure_prefix="STORAGE_OPTIMIZATION_OLD",
+            )
+            _assert_link_count(
+                old_before_final_retire,
+                1,
+                "STORAGE_OPTIMIZATION_OLD_HAS_ADDITIONAL_HARDLINKS",
             )
             # Re-verify the published optimized pathname immediately before the
             # only payload-destroying unlink in this transaction.
