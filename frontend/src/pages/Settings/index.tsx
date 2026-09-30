@@ -520,7 +520,7 @@ export const SettingsPage: React.FC = () => {
               showIcon
             />
 
-            <section className="nfc-settings-subpanel">
+            <section className="nfc-settings-subpanel nfc-settings-policy-card">
               <div className="nfc-settings-subpanel-header">
                 <div>
                   <strong>审计日志保留策略</strong>
@@ -567,7 +567,7 @@ export const SettingsPage: React.FC = () => {
               </p>
             </section>
 
-            <section className="nfc-settings-subpanel">
+            <section className="nfc-settings-subpanel nfc-settings-policy-card">
               <div className="nfc-settings-subpanel-header">
                 <div>
                   <strong>文件隔离区保留策略</strong>
@@ -693,7 +693,7 @@ export const SettingsPage: React.FC = () => {
               />
 
               {resourcePolicy && (
-                <section className="nfc-settings-subpanel">
+                <section className="nfc-settings-subpanel nfc-settings-status-card">
                   <div className="nfc-settings-subpanel-header"><strong>当前生效状态</strong></div>
                   <ResponsiveDescriptions
                     items={[
@@ -715,7 +715,7 @@ export const SettingsPage: React.FC = () => {
                 </section>
               )}
 
-              <div className="nfc-settings-control-grid">
+              <div className="nfc-settings-control-grid nfc-settings-resource-controls">
                 <label className="nfc-settings-control">
                   <span>扫描线程上限 (1..32)</span>
                   <InputNumber min={1} max={32} value={scanThreadsInput} onChange={(v) => setScanThreadsInput(v || 1)} />
@@ -749,7 +749,7 @@ export const SettingsPage: React.FC = () => {
                 </label>
               </div>
 
-              <section className="nfc-settings-subpanel">
+              <section className="nfc-settings-subpanel nfc-settings-window-card">
                 <div className="nfc-settings-window-header">
                   <div>
                     <strong>活跃时间窗口</strong>
