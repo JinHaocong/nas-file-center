@@ -732,6 +732,91 @@ def execute_storage_optimization(
                 raise StateConflictError("STORAGE_OPTIMIZATION_COMPLETED_OLD_ANCHOR_REAPPEARED")
             return f"{manifest['storage_action']} optimization already completed"
 
+        # Once publication has a durable journal, recovery must never create a
+        # fresh .new candidate. The published pathname itself is now the
+        # authoritative optimized copy; only NFC-owned aliases may remain.
+        if published is not None:
+            published_identity = published[1].get("published_identity")
+            if not isinstance(published_identity, dict):
+                raise StateConflictError("STORAGE_OPTIMIZATION_PUBLISHED_IDENTITY_MISSING")
+            _qualify_published(
+                source_parent_fd,
+                source_name,
+                keep_stat,
+                manifest,
+                published_identity,
+                session_factory=session_factory,
+                worker_id=worker_id,
+            )
+
+            new_stat = _stat_optional(source_parent_fd, new_name)
+            if new_stat is not None:
+                source_stat = os.stat(
+                    source_name,
+                    dir_fd=source_parent_fd,
+                    follow_symlinks=False,
+                )
+                if (int(new_stat.st_dev), int(new_stat.st_ino)) != (
+                    int(source_stat.st_dev),
+                    int(source_stat.st_ino),
+                ):
+                    raise StateConflictError("STORAGE_OPTIMIZATION_NEW_ALIAS_FOREIGN")
+                _qualify_new(
+                    source_parent_fd,
+                    new_name,
+                    keep_stat,
+                    manifest,
+                    session_factory=session_factory,
+                    worker_id=worker_id,
+                )
+                renew_and_assert_worker_lease(session_factory, worker_id)
+                os.unlink(new_name, dir_fd=source_parent_fd)
+                os.fsync(source_parent_fd)
+
+            _phase_journal(
+                session_factory,
+                worker_id=worker_id,
+                manifest=manifest,
+                phase="old_retire_intent",
+                task_id=task_id,
+                user_id=user_id,
+                after={},
+            )
+            old_stat = _stat_optional(source_parent_fd, old_name)
+            if old_stat is not None:
+                _qualify_original(
+                    source_parent_fd,
+                    old_name,
+                    manifest,
+                    session_factory=session_factory,
+                    worker_id=worker_id,
+                    failure_prefix="STORAGE_OPTIMIZATION_OLD",
+                )
+                _qualify_published(
+                    source_parent_fd,
+                    source_name,
+                    keep_stat,
+                    manifest,
+                    published_identity,
+                    session_factory=session_factory,
+                    worker_id=worker_id,
+                )
+                renew_and_assert_worker_lease(session_factory, worker_id)
+                os.unlink(old_name, dir_fd=source_parent_fd)
+                os.fsync(source_parent_fd)
+
+            _phase_journal(
+                session_factory,
+                worker_id=worker_id,
+                manifest=manifest,
+                phase="completed",
+                task_id=task_id,
+                user_id=user_id,
+                after={"published_identity": published_identity},
+                terminal_audit=True,
+            )
+            return f"{manifest['storage_action']} optimization recovered after publication"
+
         # A fresh transaction must prove capability immediately before creating
         # its first private optimized candidate. Recovery of an already-created
         # .new/.old transaction never invents new capability authority.
