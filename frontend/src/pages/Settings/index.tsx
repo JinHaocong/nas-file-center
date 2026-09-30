@@ -610,15 +610,28 @@ export const SettingsPage: React.FC = () => {
             </section>
 
             <section className="nfc-settings-subpanel nfc-settings-subpanel-danger">
-              <div className="nfc-settings-subpanel-header">
-                <div>
+              <div className="nfc-settings-subpanel-header nfc-settings-retention-header">
+                <div className="nfc-settings-retention-copy">
                   <strong>审计日志保留清理预览</strong>
                   <span>执行前会强制刷新策略与预览，最终删除数量以执行时数据为准。</span>
                 </div>
-                <ActionBar compact>
+                <ActionBar compact className="nfc-settings-retention-actions">
                   <Button size="small" icon={<ReloadOutlined />} loading={previewLoading} onClick={() => refetchPreview()}>
                     刷新预览
                   </Button>
+                  <Tooltip title={!isAdmin ? '仅系统管理员允许立即清空全部审计历史' : '忽略保留期，立即删除全部现有审计历史，并保留 1 条本次清空操作记录'}>
+                    <span>
+                      <Button
+                        danger
+                        icon={<DeleteOutlined />}
+                        disabled={!isAdmin || clearAuditMutation.isPending}
+                        loading={clearAuditMutation.isPending}
+                        onClick={handleClearAuditHistory}
+                      >
+                        立即清空
+                      </Button>
+                    </span>
+                  </Tooltip>
                   <Tooltip title={!availability.canApply ? availability.disabledReason : undefined}>
                     <span>
                       <Button
@@ -630,19 +643,6 @@ export const SettingsPage: React.FC = () => {
                         onClick={handlePrepareApply}
                       >
                         执行审计清理
-                      </Button>
-                    </span>
-                  </Tooltip>
-                  <Tooltip title={!isAdmin ? '仅系统管理员允许立即清空全部审计历史' : '忽略保留期，立即删除全部现有审计历史，并保留 1 条本次清空操作记录'}>
-                    <span>
-                      <Button
-                        danger
-                        icon={<DeleteOutlined />}
-                        disabled={!isAdmin || clearAuditMutation.isPending}
-                        loading={clearAuditMutation.isPending}
-                        onClick={handleClearAuditHistory}
-                      >
-                        立即清空
                       </Button>
                     </span>
                   </Tooltip>

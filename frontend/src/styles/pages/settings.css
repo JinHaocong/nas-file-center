@@ -219,6 +219,48 @@
   background: color-mix(in srgb, var(--nfc-w2-danger) 6%, var(--nfc-w2-surface-strong));
 }
 
+.nfc-app-main .nfc-system-controls-page .nfc-settings-retention-header {
+  min-height: 0;
+  padding: 14px 16px;
+  align-items: center;
+  gap: 18px;
+}
+
+.nfc-app-main .nfc-system-controls-page .nfc-settings-retention-header > .nfc-settings-retention-copy {
+  min-width: 0;
+  flex: 1 1 360px;
+  display: grid;
+  gap: 3px;
+}
+
+.nfc-app-main .nfc-system-controls-page .nfc-settings-retention-header > .nfc-settings-retention-actions {
+  min-width: 0;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.nfc-app-main .nfc-system-controls-page .nfc-settings-retention-actions > span {
+  color: inherit;
+  font-size: inherit;
+  line-height: normal;
+}
+
+.nfc-app-main .nfc-system-controls-page .nfc-settings-retention-actions .ant-btn {
+  min-height: 34px;
+  height: 34px;
+  padding-inline: 12px;
+}
+
+.nfc-app-main .nfc-system-controls-page .nfc-settings-retention-actions .ant-btn > span {
+  color: inherit;
+  font-size: 12px;
+  line-height: 1;
+}
+
 .nfc-app-main .nfc-system-controls-page .nfc-settings-subpanel-danger .nfc-responsive-descriptions,
 .nfc-app-main .nfc-system-controls-page .nfc-settings-status-card .nfc-responsive-descriptions {
   padding: 12px 14px 14px;
@@ -323,6 +365,19 @@
   }
 }
 
+@media (max-width: 900px) {
+  .nfc-app-main .nfc-system-controls-page .nfc-settings-retention-header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .nfc-app-main .nfc-system-controls-page .nfc-settings-retention-header > .nfc-settings-retention-actions {
+    width: 100%;
+    flex: 1 1 100%;
+    justify-content: flex-start;
+  }
+}
+
 @media (max-width: 767px) {
   .nfc-app-main .nfc-system-controls-page .nfc-settings-grid {
     gap: 14px;
@@ -383,6 +438,18 @@
   .nfc-app-main .nfc-system-controls-page .nfc-settings-subpanel-danger .nfc-responsive-descriptions,
   .nfc-app-main .nfc-system-controls-page .nfc-settings-status-card .nfc-responsive-descriptions {
     padding: 10px 12px 12px;
+  }
+}
+
+@media (max-width: 520px) {
+  .nfc-app-main .nfc-system-controls-page .nfc-settings-retention-header > .nfc-settings-retention-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .nfc-app-main .nfc-system-controls-page .nfc-settings-retention-actions > span,
+  .nfc-app-main .nfc-system-controls-page .nfc-settings-retention-actions .ant-btn {
+    width: 100%;
   }
 }
 
