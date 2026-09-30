@@ -46,6 +46,66 @@ def test_image_probe_extracts_metadata_and_is_healthy(tmp_path: Path):
     assert result.corrupt_sha256 is None
 
 
+def test_image_probe_calls_verify_immediately_after_first_open(monkeypatch, tmp_path: Path):
+    path = tmp_path / "strict.jpg"
+    path.write_bytes(b"placeholder")
+    calls: list[str] = []
+
+    class _Verifier:
+        def __enter__(self):
+            calls.append("enter-verifier")
+            return self
+
+        def __exit__(self, *_args):
+            calls.append("exit-verifier")
+            return False
+
+        def verify(self):
+            calls.append("verify")
+
+        @property
+        def size(self):
+            raise AssertionError("size must not be read before verify")
+
+        def getexif(self):
+            raise AssertionError("EXIF must not be read before verify")
+
+    class _Decoded:
+        size = (11, 7)
+        format = "JPEG"
+
+        def __enter__(self):
+            calls.append("enter-decoded")
+            return self
+
+        def __exit__(self, *_args):
+            calls.append("exit-decoded")
+            return False
+
+        def getexif(self):
+            calls.append("getexif")
+            return {}
+
+        def load(self):
+            calls.append("load")
+
+    opened = iter((_Verifier(), _Decoded()))
+
+    def strict_open(*_args, **_kwargs):
+        calls.append("open")
+        return next(opened)
+
+    monkeypatch.setattr("app.media.probe.Image.open", strict_open)
+
+    result = probe_image(path)
+
+    assert result.integrity_status == "healthy"
+    assert result.width == 11
+    assert result.height == 7
+    assert calls[:4] == ["open", "enter-verifier", "verify", "exit-verifier"]
+    assert calls[4:] == ["open", "enter-decoded", "getexif", "load", "exit-decoded"]
+
+
 def test_truncated_supported_image_is_corrupt_and_gets_delete_authority_hash(tmp_path: Path):
     path = tmp_path / "broken.jpg"
     image = Image.new("RGB", (64, 64), (200, 100, 20))
