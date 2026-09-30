@@ -171,9 +171,13 @@ def test_delete_plan_allowed_statuses(plan_cleanup_setup, status: str):
         assert session.get(BatchPlan, plan_id) is None
 
 
-@pytest.mark.parametrize("blocked_status", ["validating", "executing", "unknown_status"])
+@pytest.mark.parametrize("blocked_status", ["validating", "unknown_status"])
 def test_delete_plan_blocked_statuses(plan_cleanup_setup, blocked_status: str):
-    """Cases G~I: Single delete strictly blocked (409 Conflict) for validating, executing, and unknown statuses."""
+    """Single delete remains blocked for validation-in-progress and unknown statuses.
+
+    Orphaned executing plans without an active WorkJob are covered separately by
+    test_interrupted_plan_delete.py and are intentionally deletable metadata.
+    """
     client = plan_cleanup_setup["client"]
     SessionLocal = plan_cleanup_setup["SessionLocal"]
 
