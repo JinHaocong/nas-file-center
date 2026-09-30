@@ -426,6 +426,49 @@ def execute_item(
     if not allow_mutation:
         return _skip("filesystem mutation is disabled")
 
+    if item.operation in {"hardlink_optimize", "reflink_optimize"}:
+        if not session_factory or not worker_id:
+            return ItemResult(
+                "failed",
+                "STORAGE_OPTIMIZATION_AUTHORITY_MISSING: worker authority and session_factory are required",
+            )
+        if item.keep is None:
+            return ItemResult(
+                "failed",
+                "STORAGE_OPTIMIZATION_KEEP_MISSING: optimization item requires KEEP",
+            )
+
+        verified = verify_duplicate_pair(
+            item.keep,
+            item.source,
+            allowed_roots=allowed_roots,
+            expected_size=item.expected_size,
+            expected_hash=item.expected_hash,
+        )
+        if not verified.ok:
+            return ItemResult(
+                "failed",
+                f"STORAGE_OPTIMIZATION_DUPLICATE_VERIFY_FAILED:{verified.reason}",
+            )
+
+        try:
+            from app.storage_optimization.executor import execute_storage_optimization
+
+            reason = execute_storage_optimization(
+                item,
+                plan_id=plan_id,
+                allowed_roots=allowed_roots,
+                session_factory=session_factory,
+                worker_id=worker_id,
+            )
+        except Exception as exc:
+            from app.tasks.state_machine import JobLeaseLost
+
+            if isinstance(exc, JobLeaseLost):
+                raise
+            return ItemResult("failed", str(exc))
+        return ItemResult("completed", reason, Path(item.source))
+
     utility_empty_cleanup_authorized = False
     if item.operation == "rmdir_empty" and session_factory is not None:
         utility_empty_cleanup_authorized = _resolve_utility_empty_wrapper_cleanup_authority(
