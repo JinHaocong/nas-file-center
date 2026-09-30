@@ -21,6 +21,7 @@ import { DataPanel } from '../../components/ui/DataPanel';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { useResponsive } from '../../hooks/useResponsive';
 import { useTitle } from '../../hooks/useTitle';
+import type { ScanJob, WorkJob } from '../../types';
 import { formatBytes, formatDateTime } from '../../utils/format';
 
 export const DashboardPage: React.FC = () => {
@@ -50,7 +51,7 @@ export const DashboardPage: React.FC = () => {
       title: '扫描名称',
       dataIndex: 'name',
       key: 'name',
-      render: (text: string, record: any) => (
+      render: (text: string, record: ScanJob) => (
         <button
           type="button"
           className="nfc-table-link"
@@ -99,7 +100,7 @@ export const DashboardPage: React.FC = () => {
       title: '任务',
       dataIndex: 'kind',
       key: 'kind',
-      render: (kind: string, record: any) => (
+      render: (kind: string, record: WorkJob) => (
         <div className="nfc-dashboard-task-identity">
           <strong>{kind}</strong>
           <span className="nfc-mono">#{record.id}</span>
@@ -117,7 +118,7 @@ export const DashboardPage: React.FC = () => {
       title: '进度',
       key: 'progress',
       width: 150,
-      render: (_: unknown, record: any) => {
+      render: (_: unknown, record: WorkJob) => {
         if (record.progress_total > 0) {
           const pct = Math.round((record.progress_current / record.progress_total) * 100);
           return <span className="nfc-mono">{record.progress_current}/{record.progress_total} · {pct}%</span>;
@@ -250,7 +251,7 @@ export const DashboardPage: React.FC = () => {
                 {scanItems.length === 0 ? (
                   <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无扫描任务" />
                 ) : (
-                  scanItems.map((item: any) => (
+                  scanItems.map((item: ScanJob) => (
                     <button
                       type="button"
                       key={item.id}
@@ -300,7 +301,7 @@ export const DashboardPage: React.FC = () => {
                 {taskItems.length === 0 ? (
                   <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无后台任务" />
                 ) : (
-                  taskItems.map((item: any) => (
+                  taskItems.map((item: WorkJob) => (
                     <div key={item.id} className="nfc-mobile-activity-card">
                       <div className="nfc-mobile-activity-topline">
                         <strong>{item.kind}</strong>
