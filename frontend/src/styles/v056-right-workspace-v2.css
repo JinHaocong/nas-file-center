@@ -344,8 +344,7 @@ body,
 .nfc-tool-workbench,
 .nfc-worker-panel,
 .nfc-worker-status-strip,
-.nfc-plan-action-surface,
-.nfc-settings-subpanel {
+.nfc-plan-action-surface {
   border: 0 !important;
   background: transparent !important;
   box-shadow: none !important;
@@ -412,8 +411,7 @@ body,
   padding: var(--nfc-w2-panel-pad-y) var(--nfc-w2-panel-pad-x);
 }
 
-.nfc-app-main .nfc-dashboard-page .nfc-data-panel > .nfc-data-panel-body,
-.nfc-app-main .nfc-system-controls-page .nfc-data-panel > .nfc-data-panel-body {
+.nfc-app-main .nfc-dashboard-page .nfc-data-panel > .nfc-data-panel-body {
   padding: 0;
 }
 
@@ -914,23 +912,6 @@ body,
   -webkit-backdrop-filter: blur(18px);
 }
 
-/* Settings ----------------------------------------------------------------- */
-
-.nfc-settings-page .nfc-settings-subpanel,
-.nfc-system-controls-page .nfc-settings-subpanel {
-  padding: 0 !important;
-}
-
-.nfc-settings-page .nfc-settings-subpanel + .nfc-settings-subpanel,
-.nfc-system-controls-page .nfc-settings-subpanel + .nfc-settings-subpanel {
-  margin-top: 28px;
-}
-
-.nfc-settings-page .ant-divider,
-.nfc-system-controls-page .ant-divider {
-  border-color: var(--nfc-w2-hairline);
-}
-
 /* Mobile ------------------------------------------------------------------- */
 
 @media (max-width: 1199px) {
@@ -1274,29 +1255,6 @@ body,
   gap: 22px;
 }
 
-.nfc-app-main .nfc-system-controls-page .nfc-settings-grid {
-  gap: 30px;
-}
-
-.nfc-app-main .nfc-system-controls-page .nfc-settings-grid > .nfc-data-panel > .nfc-data-panel-header {
-  min-height: 0;
-  padding: var(--nfc-w2-panel-header-top) var(--nfc-w2-panel-header-x) var(--nfc-w2-panel-header-bottom);
-}
-
-.nfc-app-main .nfc-system-controls-page .nfc-settings-panel-body {
-  padding: 18px 18px 0;
-}
-
-.nfc-app-main .nfc-system-controls-page .nfc-settings-stack {
-  gap: 20px;
-  padding: 18px;
-}
-
-.nfc-app-main .nfc-system-controls-page .nfc-settings-control-grid {
-  gap: 18px 22px;
-  padding: 18px;
-}
-
 .nfc-app-main .nfc-media-page .nfc-page-alert {
   margin: 14px 0 18px;
 }
@@ -1543,20 +1501,6 @@ body,
   gap: 24px;
 }
 
-/* Settings */
-.nfc-app-main .nfc-system-controls-page .nfc-settings-grid {
-  gap: 24px;
-}
-
-.nfc-app-main .nfc-system-controls-page .nfc-settings-panel-body {
-  padding: 16px 18px 0;
-}
-
-.nfc-app-main .nfc-system-controls-page .nfc-settings-stack,
-.nfc-app-main .nfc-system-controls-page .nfc-settings-control-grid {
-  padding: 16px 18px;
-}
-
 /* Dashboard */
 .nfc-app-main .nfc-dashboard-page .nfc-dashboard-command-deck {
   margin-bottom: 20px;
@@ -1777,42 +1721,6 @@ body,
   font-size: 11px;
   letter-spacing: 0;
   text-transform: none;
-}
-
-/* Settings Preference Pane */
-.nfc-app-main .nfc-system-controls-page .nfc-settings-grid {
-  align-items: start;
-}
-
-.nfc-app-main .nfc-system-controls-page .nfc-settings-subpanel {
-  padding: 18px 0 !important;
-  border-top: 1px solid var(--nfc-w2-hairline) !important;
-}
-
-.nfc-app-main .nfc-system-controls-page .nfc-settings-subpanel:first-child {
-  border-top: 0 !important;
-}
-
-.nfc-app-main .nfc-system-controls-page .nfc-settings-subpanel-header {
-  margin-bottom: 12px;
-}
-
-.nfc-app-main .nfc-system-controls-page .nfc-settings-help {
-  color: var(--nfc-w2-text-subtle);
-  font-size: 11.5px;
-  line-height: 1.6;
-}
-
-.nfc-app-main .nfc-system-controls-page .nfc-settings-inline-control,
-.nfc-app-main .nfc-system-controls-page .nfc-settings-control {
-  min-height: 46px;
-}
-
-.nfc-app-main .nfc-system-controls-page .nfc-settings-subpanel-danger {
-  padding: 16px !important;
-  border: 1px solid color-mix(in srgb, var(--nfc-w2-danger) 16%, var(--nfc-w2-hairline)) !important;
-  border-radius: var(--nfc-w2-radius-md);
-  background: color-mix(in srgb, var(--nfc-w2-danger) 4%, var(--nfc-w2-surface)) !important;
 }
 
 /* Plan / Scan details: lifecycle + facts + ledger hierarchy */
@@ -2091,9 +1999,6 @@ body,
     align-items: stretch;
   }
 
-  .nfc-app-main .nfc-system-controls-page .nfc-settings-subpanel-danger {
-    padding: 13px !important;
-  }
 }
 
 
@@ -2322,7 +2227,6 @@ body,
 .nfc-app-main .nfc-worker-panel,
 .nfc-app-main .nfc-worker-status-strip,
 .nfc-app-main .nfc-plan-action-surface,
-.nfc-app-main .nfc-settings-subpanel,
 .nfc-app-main .nfc-responsive-descriptions,
 .nfc-app-main .ant-card {
   overflow: hidden;
@@ -2411,7 +2315,6 @@ body,
   .nfc-app-main .nfc-worker-panel,
   .nfc-app-main .nfc-worker-status-strip,
   .nfc-app-main .nfc-plan-action-surface,
-  .nfc-app-main .nfc-settings-subpanel,
   .nfc-app-main .nfc-responsive-descriptions,
   .nfc-app-main .ant-card,
   .nfc-app-main .nfc-metric-card {

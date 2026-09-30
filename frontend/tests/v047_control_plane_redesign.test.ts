@@ -67,12 +67,15 @@ describe('v0.4.7 control plane foundation', () => {
   });
 
   test('settings topology regression remains explicitly protected', () => {
+    const page = read('src/pages/Settings/index.tsx');
     const settings = read('src/styles/pages/settings.css');
-    assert.match(settings, /grid-template-columns:\s*repeat\(12, minmax\(0, 1fr\)\)/);
-    assert.match(settings, /\.nfc-settings-panel-runtime[\s\S]*grid-column:\s*1 \/ -1/);
-    assert.match(settings, /\.nfc-settings-panel-lifecycle[\s\S]*grid-column:\s*1 \/ span 7/);
-    assert.match(settings, /\.nfc-settings-panel-resource[\s\S]*grid-column:\s*8 \/ -1/);
-    assert.match(settings, /\.nfc-settings-panel-sessions[\s\S]*grid-column:\s*1 \/ -1/);
+    assert.match(settings, /\.nfc-settings-grid[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\)/);
+    assert.match(settings, /\.nfc-settings-panel-lifecycle[\s\S]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/);
+    assert.match(settings, /\.nfc-settings-resource-controls[\s\S]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/);
+    assert.match(settings, /\.nfc-settings-window-card > \.nfc-settings-control-grid/);
+    assert.match(page, /nfc-settings-policy-card/);
+    assert.match(page, /nfc-settings-status-card/);
+    assert.doesNotMatch(settings, /repeat\(12, minmax\(0, 1fr\)\)/);
   });
 
   test('operational table pages stay on the dense semantic surface', () => {
@@ -122,11 +125,13 @@ describe('v0.4.7 control plane foundation', () => {
       'pages/tools.css',
       'pages/organizer.css',
       'pages/workflows.css',
-      'pages/settings.css',
       'pages/login.css',
     ]) {
       assert.match(entry, new RegExp(file.replace('.', '\\.')));
     }
+    const main = read('src/main.tsx');
+    assert.match(main, /import '\.\/styles\/pages\/settings\.css';/);
+    assert.doesNotMatch(entry, /pages\/settings\.css/);
   });
 
   test('page composition keeps deliberate hierarchy without conflicting legacy overrides', () => {
@@ -138,8 +143,9 @@ describe('v0.4.7 control plane foundation', () => {
     assert.match(tools, /\.nfc-path-match-page \.nfc-tool-workbench[\s\S]*padding:\s*0;[\s\S]*border:\s*0 !important/);
     assert.match(tools, /\.nfc-path-match-page \.nfc-tool-workbench > \.nfc-data-panel-header[\s\S]*margin:\s*0;[\s\S]*padding:\s*0 4px 14px/);
     assert.doesNotMatch(tools, /margin:\s*-\d/);
-    assert.match(settings, /\.nfc-settings-subpanel:last-child[\s\S]*border-bottom: 0/);
-    assert.doesNotMatch(settings, /border-top: 1px solid/);
+    assert.match(settings, /\.nfc-settings-subpanel[\s\S]*border:\s*1px solid var\(--nfc-w2-hairline\)/);
+    assert.match(settings, /\.nfc-settings-policy-card[\s\S]*height:\s*100%/);
+    assert.doesNotMatch(settings, /grid-template-columns:\s*repeat\(12/);
     assert.match(workflows, /\.nfc-workflow-builder-page \.nfc-complex-form-panel[\s\S]*var\(--nfc-v49-radius-lg/);
     assert.match(workflows, /\.nfc-workflow-step-card[\s\S]*border-top: 1px solid/);
   });
