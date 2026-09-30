@@ -145,3 +145,76 @@ def ownership_can_be_preserved(metadata: FrozenFileMetadata) -> bool:
     except OSError:
         return False
     return metadata.gid in groups
+
+
+def apply_frozen_metadata_fd(fd: int, metadata: FrozenFileMetadata) -> None:
+    """Apply SOURCE-facing metadata to a newly-created reflink inode.
+
+    The caller owns the new inode exclusively. Any failure occurs before the
+    original SOURCE binding is retired, so callers must fail closed.
+    """
+    try:
+        current = os.fstat(fd)
+        if int(current.st_uid) != metadata.uid or int(current.st_gid) != metadata.gid:
+            os.fchown(fd, metadata.uid, metadata.gid)
+        os.fchmod(fd, metadata.mode)
+
+        if not hasattr(os, "setxattr"):
+            if metadata.xattrs:
+                raise StorageMetadataError("extended attribute write API is unavailable")
+        else:
+            for name, value in metadata.xattrs:
+                os.setxattr(fd, name, value)
+
+        os.utime(fd, ns=(metadata.atime_ns, metadata.mtime_ns))
+    except (OSError, TypeError, ValueError) as exc:
+        raise StorageMetadataError(f"cannot preserve reflink source metadata: {exc}") from exc
+
+
+def capture_file_metadata_fd(fd: int) -> FrozenFileMetadata:
+    try:
+        st = os.fstat(fd)
+    except OSError as exc:
+        raise StorageMetadataError(f"cannot stat file descriptor metadata: {exc}") from exc
+    if not stat.S_ISREG(st.st_mode):
+        raise StorageMetadataError("storage optimization metadata requires a regular file descriptor")
+
+    if not hasattr(os, "listxattr") or not hasattr(os, "getxattr"):
+        raise StorageMetadataError("extended attribute APIs are unavailable")
+    try:
+        names = os.listxattr(fd)
+        xattrs = tuple(
+            (str(name), bytes(os.getxattr(fd, name)))
+            for name in sorted(names)
+        )
+    except OSError as exc:
+        raise StorageMetadataError(f"cannot read descriptor extended attributes: {exc}") from exc
+
+    return FrozenFileMetadata(
+        mode=stat.S_IMODE(st.st_mode),
+        uid=int(st.st_uid),
+        gid=int(st.st_gid),
+        size=int(st.st_size),
+        atime_ns=int(getattr(st, "st_atime_ns", int(st.st_atime * 1e9))),
+        mtime_ns=int(getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))),
+        xattrs=xattrs,
+    )
+
+
+def replacement_metadata_matches(
+    actual: FrozenFileMetadata,
+    expected: FrozenFileMetadata,
+) -> bool:
+    """Compare metadata that must survive replacement.
+
+    atime is intentionally excluded because content verification itself may
+    advance it on strict-atime filesystems before this check.
+    """
+    return (
+        actual.mode == expected.mode
+        and actual.uid == expected.uid
+        and actual.gid == expected.gid
+        and actual.size == expected.size
+        and actual.mtime_ns == expected.mtime_ns
+        and actual.xattrs == expected.xattrs
+    )
