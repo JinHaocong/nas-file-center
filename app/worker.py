@@ -36,6 +36,7 @@ from app.tasks.state_machine import (
     validate_transition,
 )
 from app.tasks.sync import sync_batch_plan_status, sync_scan_job_status
+from app.transaction_residue import cleanup_transaction_residue
 
 
 logger = logging.getLogger(__name__)
@@ -478,6 +479,15 @@ def worker_loop(
 
     if acquired:
         recover_interrupted_jobs(engine, SessionLocal, worker_id=worker_id)
+        if settings.allow_mutation and settings.allow_delete:
+            try:
+                cleanup_transaction_residue(
+                    SessionLocal,
+                    quarantine_root=settings.quarantine_root,
+                    worker_id=worker_id,
+                )
+            except Exception:
+                logger.exception("Transaction residue cleanup failed during worker startup")
 
     last_scheduler_tick_minute = None
 
@@ -496,6 +506,15 @@ def worker_loop(
                     time.sleep(poll_seconds)
                     continue
                 recover_interrupted_jobs(engine, SessionLocal, worker_id=worker_id)
+                if settings.allow_mutation and settings.allow_delete:
+                    try:
+                        cleanup_transaction_residue(
+                            SessionLocal,
+                            quarantine_root=settings.quarantine_root,
+                            worker_id=worker_id,
+                        )
+                    except Exception:
+                        logger.exception("Transaction residue cleanup failed after worker lease takeover")
 
             scheduler_now = utcnow()
             scheduler_minute = scheduler_now.replace(second=0, microsecond=0)
