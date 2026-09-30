@@ -136,10 +136,18 @@ def _camera_name(make: Any, model: Any) -> str | None:
 def probe_image(path: Path | str) -> MediaProbeResult:
     source = Path(path)
     try:
-        with Image.open(source) as image:
-            width, height = map(int, image.size)
-            image_format = str(image.format) if image.format else None
-            exif = image.getexif()
+        # Pillow requires verify() to be called directly after Image.open().
+        # Keep the verification handle side-effect free, then reopen for
+        # metadata extraction and full decode.
+        with Image.open(source) as verifier:
+            verifier.verify()
+
+        # Reopen after verify(): verify() invalidates the image handle and
+        # metadata access before verify() can violate Pillow's call contract.
+        with Image.open(source) as decoded:
+            width, height = map(int, decoded.size)
+            image_format = str(decoded.format) if decoded.format else None
+            exif = decoded.getexif()
             date_taken = _normalize_exif_datetime(
                 exif.get(36867) or exif.get(36868) or exif.get(306)
             )
@@ -151,11 +159,6 @@ def probe_image(path: Path | str) -> MediaProbeResult:
                 and 1 <= int(raw_orientation) <= 8
                 else None
             )
-            image.verify()
-
-        # verify() checks container structure without decoding all pixel data.
-        # Reopen and load one decoded image/frame so truncated payloads fail.
-        with Image.open(source) as decoded:
             decoded.load()
 
         if width <= 0 or height <= 0:
