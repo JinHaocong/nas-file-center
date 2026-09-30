@@ -17,7 +17,8 @@ describe('Right Workspace v2 design system', () => {
     assert.ok(foundation > settings);
     assert.ok(shell > foundation);
     assert.ok(components > shell);
-    assert.doesNotMatch(main, /v054-premium-system|v055-workspace-breathing|v056-right-workspace-v2/);
+    assert.doesNotMatch(main, /v052-final-audit|v054-premium-system|v055-workspace-breathing|v056-right-workspace-v2/);
+    assert.match(main, /styles\/redesign\/compat\.css/);
     assert.match(main, /styles\/redesign\/pages\/dashboard\.css/);
     assert.match(main, /styles\/redesign\/pages\/detail\.css/);
     assert.match(main, /styles\/redesign\/pages\/system\.css/);
