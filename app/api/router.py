@@ -66,16 +66,32 @@ from app.workflows.schema import (
 router = APIRouter(prefix="/api", tags=["file-center"], dependencies=[Depends(get_current_user)])
 
 
-def _require_media_corrupt_plan_admin(request: Request, plan_id: int, user: User) -> None:
-    """Keep generic plan permissions unchanged while fencing irreversible Gate6-D plans."""
+def _plan_requires_admin(plan: BatchPlan | None) -> bool:
+    if plan is None:
+        return False
+    if plan.kind == "media-corrupt-delete":
+        return True
+    try:
+        metadata = json.loads(plan.metadata_json or "{}")
+    except Exception:
+        return False
+    return (
+        isinstance(metadata, dict)
+        and metadata.get("source") == "dedupe"
+        and metadata.get("storage_action") in {"hardlink", "reflink"}
+    )
+
+
+def _require_restricted_plan_admin(request: Request, plan_id: int, user: User) -> None:
+    """Fence destructive or inode-changing plan management to administrators."""
     with request.app.state.service.SessionLocal() as session:
         plan = session.get(BatchPlan, plan_id)
-        if plan is not None and plan.kind == "media-corrupt-delete" and user.role != "admin":
-            raise HTTPException(403, "Only administrator can manage corrupt-media permanent-delete plans")
+        if _plan_requires_admin(plan) and user.role != "admin":
+            raise HTTPException(403, "Only administrator can manage this plan")
 
 
-def _require_media_corrupt_task_admin(request: Request, task_id: int, user: User) -> None:
-    """Fence resume/retry of an irreversible Gate6-D plan execution."""
+def _require_restricted_task_admin(request: Request, task_id: int, user: User) -> None:
+    """Fence resume/retry of restricted BatchPlan execution tasks."""
     with request.app.state.service.SessionLocal() as session:
         task = session.get(WorkJob, task_id)
         if task is None or task.kind != "batch-plan-execute":
@@ -88,8 +104,8 @@ def _require_media_corrupt_task_admin(request: Request, task_id: int, user: User
         if not isinstance(raw_plan_id, int) or isinstance(raw_plan_id, bool):
             return
         plan = session.get(BatchPlan, raw_plan_id)
-        if plan is not None and plan.kind == "media-corrupt-delete" and user.role != "admin":
-            raise HTTPException(403, "Only administrator can resume or retry corrupt-media permanent-delete tasks")
+        if _plan_requires_admin(plan) and user.role != "admin":
+            raise HTTPException(403, "Only administrator can resume or retry this task")
 
 
 class QuarantineRestoreRequest(BaseModel):
@@ -212,6 +228,7 @@ class DedupePreviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     scorer_config: dict[str, Any] | None = None
+    storage_action: Literal["quarantine", "hardlink", "reflink"] = "quarantine"
     page: int = 1
     page_size: int = 50
 
@@ -249,6 +266,7 @@ class DedupePlanRequest(BaseModel):
     relative_path_priority_patterns: list[str] | None = None
     scorer_config: dict[str, Any] | None = None
     expected_preview_digest: str | None = None
+    storage_action: Literal["quarantine", "hardlink", "reflink"] = "quarantine"
 
     @model_validator(mode="before")
     @classmethod
@@ -267,7 +285,7 @@ class DedupePlanRequest(BaseModel):
                     details={"field": "scorer_config"},
                 )
 
-            allowed_advanced_keys = {"scorer_config", "expected_preview_digest"}
+            allowed_advanced_keys = {"scorer_config", "expected_preview_digest", "storage_action"}
             extra_or_mixed = [k for k in raw.keys() if k not in allowed_advanced_keys]
             if extra_or_mixed:
                 legacy_fields = {
@@ -298,6 +316,11 @@ class DedupePlanRequest(BaseModel):
             raise DedupeInvalidConfigError(
                 "expected_preview_digest requires scorer_config",
                 details={"field": "expected_preview_digest"},
+            )
+        if raw.get("storage_action", "quarantine") != "quarantine":
+            raise DedupeInvalidConfigError(
+                "hardlink/reflink storage_action requires advanced scorer_config",
+                details={"field": "storage_action"},
             )
 
         return raw
@@ -818,6 +841,7 @@ def dedupe_preview(
         return service.get_dedupe_preview(
             scan_job_id=scan_job_id,
             scorer_config=payload.scorer_config,
+            storage_action=payload.storage_action,
             page=payload.page,
             page_size=payload.page_size,
         )
@@ -835,17 +859,28 @@ def dedupe_preview(
 
 
 @router.post("/scans/{scan_job_id}/dedupe-plan")
-def create_dedupe_plan(request: Request, scan_job_id: int, payload: DedupePlanRequest):
+def create_dedupe_plan(
+    request: Request,
+    scan_job_id: int,
+    payload: DedupePlanRequest,
+    current_user: User = Depends(get_current_user),
+):
     service = request.app.state.service
     try:
         if payload.is_advanced:
             assert payload.scorer_config is not None
             assert payload.expected_preview_digest is not None
+            if payload.storage_action in {"hardlink", "reflink"} and current_user.role != "admin":
+                raise HTTPException(
+                    403,
+                    "Only administrator can generate Hardlink/Reflink optimization plans",
+                )
             try:
                 return service.create_advanced_dedupe_plan(
                     scan_job_id,
                     scorer_config=payload.scorer_config,
                     expected_preview_digest=payload.expected_preview_digest,
+                    storage_action=payload.storage_action,
                 )
             except ValueError as exc:
                 msg = str(exc)
@@ -941,7 +976,7 @@ def resume_task(
     task_id: int,
     current_user: User = Depends(get_current_user),
 ):
-    _require_media_corrupt_task_admin(request, task_id, current_user)
+    _require_restricted_task_admin(request, task_id, current_user)
     try:
         return request.app.state.service.resume_task(task_id)
     except KeyError as exc:
@@ -966,7 +1001,7 @@ def retry_task(
     task_id: int,
     current_user: User = Depends(get_current_user),
 ):
-    _require_media_corrupt_task_admin(request, task_id, current_user)
+    _require_restricted_task_admin(request, task_id, current_user)
     try:
         return request.app.state.service.retry_task(task_id, user_id=current_user.id)
     except KeyError as exc:
@@ -1308,7 +1343,7 @@ def freeze(
     plan_id: int,
     current_user: User = Depends(get_current_user),
 ):
-    _require_media_corrupt_plan_admin(request, plan_id, current_user)
+    _require_restricted_plan_admin(request, plan_id, current_user)
     try:
         plan = request.app.state.service.freeze_plan(plan_id)
         return {"id": plan.id, "status": plan.status}
@@ -1329,7 +1364,7 @@ def validate(
     plan_id: int,
     current_user: User = Depends(get_current_user),
 ):
-    _require_media_corrupt_plan_admin(request, plan_id, current_user)
+    _require_restricted_plan_admin(request, plan_id, current_user)
     try:
         return request.app.state.service.validate_plan(plan_id)
     except KeyError as exc:
@@ -1344,7 +1379,7 @@ def execute(
     plan_id: int,
     current_user: User = Depends(get_current_user),
 ):
-    _require_media_corrupt_plan_admin(request, plan_id, current_user)
+    _require_restricted_plan_admin(request, plan_id, current_user)
     try:
         return request.app.state.service.enqueue_plan_execution(plan_id, user_id=current_user.id)
     except PlanStaleError as exc:
