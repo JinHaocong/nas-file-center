@@ -23,6 +23,8 @@ export function classifyMemberDecision(rawDecision?: string | MemberDecision, el
   const norm = (rawDecision || '').toUpperCase().replace(/[\s-]+/g, '_');
   if (norm === 'KEEP') return { label: 'KEEP', color: 'success', kind: 'KEEP' };
   if (norm === 'QUARANTINE') return { label: 'QUARANTINE', color: 'error', kind: 'QUARANTINE' };
+  if (norm === 'HARDLINK') return { label: 'HARDLINK', color: 'warning', kind: 'HARDLINK' };
+  if (norm === 'REFLINK') return { label: 'REFLINK', color: 'success', kind: 'REFLINK' };
   if (norm === 'UNAVAILABLE') return { label: 'UNAVAILABLE', color: 'default', kind: 'UNAVAILABLE' };
   if (norm === 'SAFETY_EXCLUDED' || norm === 'SAFETYEXCLUDED' || eligibleAsKeep === false) return { label: 'SAFETY EXCLUDED', color: 'warning', kind: 'SAFETY_EXCLUDED' };
   return { label: 'SKIPPED', color: 'default', kind: 'SKIPPED' };

@@ -146,8 +146,18 @@ export const DedupePreviewTable: React.FC<Props> = ({
       width: 190,
       ellipsis: true,
       render: (reason: string | null, record) => {
-        const text = reason || record.group_selection_reason || '—';
-        return <Tooltip title={text}><span className="nfc-table-meta">{text}</span></Tooltip>;
+        const text =
+          record.storage_blocking_reason ||
+          reason ||
+          record.group_selection_reason ||
+          '—';
+        return (
+          <Tooltip title={text}>
+            <span className={record.storage_blocking_reason ? 'nfc-warning-text' : 'nfc-table-meta'}>
+              {text}
+            </span>
+          </Tooltip>
+        );
       },
     },
     {
@@ -184,6 +194,8 @@ export const DedupePreviewTable: React.FC<Props> = ({
           { label: '全部决策', value: 'ALL' },
           { label: '保留 (KEEP)', value: 'KEEP' },
           { label: '隔离 (QUARANTINE)', value: 'QUARANTINE' },
+          { label: 'Hardlink 优化', value: 'HARDLINK' },
+          { label: 'Reflink 优化', value: 'REFLINK' },
           { label: '安全排除', value: 'SAFETY_EXCLUDED' },
           { label: '已跳过 (SKIPPED)', value: 'SKIPPED' },
         ]}
