@@ -481,3 +481,66 @@ def test_lease_loss_before_first_mutation_preserves_both_payloads(
     assert env["source"].read_bytes() == env["payload"]
     assert env["keep"].read_bytes() == env["payload"]
     assert env["source"].stat().st_ino == env["source_original_inode"]
+
+
+def test_late_source_hardlink_blocks_reclaim_before_transaction_starts(tmp_path: Path):
+    env = _seed(tmp_path, operation="hardlink_optimize")
+    alias = env["source"].parent / "late-source-alias.bin"
+    os.link(env["source"], alias)
+    assert env["source"].stat().st_nlink == 2
+
+    with pytest.raises(Exception, match="SOURCE_HAS_ADDITIONAL_HARDLINKS"):
+        execute_storage_optimization(
+            env["item"],
+            plan_id=str(env["plan_id"]),
+            allowed_roots=env["settings"].allowed_roots,
+            session_factory=env["service"].SessionLocal,
+            worker_id=WORKER_ID,
+        )
+
+    assert env["source"].read_bytes() == env["payload"]
+    assert alias.read_bytes() == env["payload"]
+    assert env["keep"].read_bytes() == env["payload"]
+    parent = env["source"].parent
+    assert not (parent / f".__nfc_opt_{env['tx_id']}.old").exists()
+
+
+def test_hardlink_added_after_old_capture_blocks_source_retirement(
+    tmp_path: Path,
+    monkeypatch,
+):
+    env = _seed(tmp_path, operation="hardlink_optimize")
+    import app.storage_optimization.executor as executor_module
+
+    original_phase_journal = executor_module._phase_journal
+    alias = env["source"].parent / "race-source-alias.bin"
+    injected = {"value": False}
+
+    def inject_alias_after_capture(*args, **kwargs):
+        result = original_phase_journal(*args, **kwargs)
+        if kwargs.get("phase") == "captured_old" and not injected["value"]:
+            injected["value"] = True
+            os.link(env["source"], alias)
+        return result
+
+    monkeypatch.setattr(
+        executor_module,
+        "_phase_journal",
+        inject_alias_after_capture,
+    )
+
+    with pytest.raises(Exception, match="SOURCE_LINK_COUNT_CHANGED_BEFORE_RETIRE"):
+        execute_storage_optimization(
+            env["item"],
+            plan_id=str(env["plan_id"]),
+            allowed_roots=env["settings"].allowed_roots,
+            session_factory=env["service"].SessionLocal,
+            worker_id=WORKER_ID,
+        )
+
+    assert env["source"].read_bytes() == env["payload"]
+    assert alias.read_bytes() == env["payload"]
+    assert env["keep"].read_bytes() == env["payload"]
+    old_anchor = env["source"].parent / f".__nfc_opt_{env['tx_id']}.old"
+    assert old_anchor.exists()
+    assert old_anchor.read_bytes() == env["payload"]
