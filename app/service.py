@@ -3115,15 +3115,6 @@ class FileCenterService:
                     "Hardlink/Reflink optimization requires the Worker journaled transaction authority; "
                     "synchronous execute_plan is not an authorized mutation path"
                 )
-            if (
-                isinstance(direct_plan_meta, dict)
-                and direct_plan_meta.get("source") == "dedupe"
-                and direct_plan_meta.get("storage_action") in {"hardlink", "reflink"}
-            ):
-                raise StateConflictError(
-                    "Hardlink/Reflink storage optimization requires the Worker journaled "
-                    "transaction authority; synchronous execute_plan is not authorized"
-                )
 
         stale_items = []
         for row in rows:
@@ -6402,8 +6393,12 @@ class FileCenterService:
                 allowed_roots=effective_allowed_roots,
                 quarantine_root=effective_quarantine_root,
             )
-        action_snapshot = build_storage_action_snapshot(compilation, storage_action)
-        action_snapshot_digest = storage_action_snapshot_digest(action_snapshot)
+        if storage_action == "quarantine":
+            action_snapshot = {}
+            action_snapshot_digest = None
+        else:
+            action_snapshot = build_storage_action_snapshot(compilation, storage_action)
+            action_snapshot_digest = storage_action_snapshot_digest(action_snapshot)
         return build_preview_response(
             compilation=compilation,
             protect_last_file=effective_protect_last_file,
@@ -6466,8 +6461,12 @@ class FileCenterService:
                 quarantine_root=quarantine_root,
             )
 
-        action_snapshot = build_storage_action_snapshot(compilation, storage_action)
-        action_snapshot_digest = storage_action_snapshot_digest(action_snapshot)
+        if storage_action == "quarantine":
+            action_snapshot = {}
+            action_snapshot_digest = None
+        else:
+            action_snapshot = build_storage_action_snapshot(compilation, storage_action)
+            action_snapshot_digest = storage_action_snapshot_digest(action_snapshot)
         action_paths = actionable_storage_paths(action_snapshot)
 
         actual_preview_digest = compute_preview_digest(
@@ -6545,7 +6544,7 @@ class FileCenterService:
         preview_digest: str,
         effective_safety_policy: dict[str, Any],
         storage_action: str,
-        storage_action_snapshot_digest: str,
+        storage_action_snapshot_digest: str | None,
         storage_action_reclaim_bytes_value: int,
         intents: tuple[DedupeDraftIntent, ...],
     ) -> BatchPlan:

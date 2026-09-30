@@ -1020,10 +1020,14 @@ def compute_preview_digest(
         "scorer_config_digest": scorer_config_digest,
         "source_snapshot_digest": source_snapshot_digest,
         "decision_digest": decision_digest,
-        "storage_action": storage_action,
-        "storage_action_snapshot_digest": storage_action_snapshot_digest,
         "effective_safety_policy": dict(sorted(effective_safety_policy.items())),
     }
+    # Quarantine is the historical default and must preserve the exact legacy
+    # preview digest contract. Only the new optimization modes extend digest
+    # authority with storage-action-specific fields.
+    if storage_action != "quarantine":
+        payload["storage_action"] = storage_action
+        payload["storage_action_snapshot_digest"] = storage_action_snapshot_digest
     return hashlib.sha256(canonical_json_dumps(payload).encode("utf-8")).hexdigest()
 
 
@@ -1077,6 +1081,7 @@ def build_preview_response(
             g_balance_info = None
 
         for m in g.members:
+            storage_info: Mapping[str, Any] = {}
             if g_status == "skipped":
                 member_decision = "SKIPPED"
             elif m.recommended_keep:
@@ -1221,9 +1226,10 @@ def build_preview_response(
         "actionable_group_count": compilation.actionable_group_count,
         "skipped_group_count": compilation.skipped_group_count,
         "storage_action": storage_action,
-        "planned_action_count": compilation.planned_quarantine_count,
+        "planned_action_count": planned_action_count,
+        "storage_blocked_count": storage_blocked_count,
         "planned_quarantine_count": compilation.planned_quarantine_count if storage_action == "quarantine" else 0,
-        "expected_reclaim_bytes": compilation.expected_reclaim_bytes,
+        "expected_reclaim_bytes": action_expected_reclaim_bytes,
         "released_bytes_by_scan_root": released_bytes_by_scan_root_formatted,
         "scorer_config_digest": compilation.scorer_config_digest,
         "source_snapshot_digest": compilation.source_snapshot_digest,
