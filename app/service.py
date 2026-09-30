@@ -79,6 +79,12 @@ from app.storage_optimization.metadata import (
     hardlink_metadata_compatibility,
     ownership_can_be_preserved,
 )
+from app.storage_optimization.planning import (
+    actionable_storage_paths,
+    build_storage_action_snapshot,
+    storage_action_reclaim_bytes,
+    storage_action_snapshot_digest,
+)
 from app.planning.dedupe_generate import DedupeDraftIntent, build_advanced_dedupe_draft_intents
 from app.planning.dedupe_preview import (
     DedupeEmptyPlanError,
@@ -6347,6 +6353,7 @@ class FileCenterService:
             else None
         )
 
+        storage_action = normalize_storage_action(storage_action)
         with self.SessionLocal() as session:
             compilation = compile_advanced_dedupe_preview(
                 session=session,
@@ -6356,15 +6363,19 @@ class FileCenterService:
                 allowed_roots=effective_allowed_roots,
                 quarantine_root=effective_quarantine_root,
             )
-            return build_preview_response(
-                compilation=compilation,
-                protect_last_file=effective_protect_last_file,
-                allowed_roots=effective_allowed_roots,
-                quarantine_root=effective_quarantine_root,
-                storage_action=normalize_storage_action(storage_action),
-                page=page,
-                page_size=page_size,
-            )
+        action_snapshot = build_storage_action_snapshot(compilation, storage_action)
+        action_snapshot_digest = storage_action_snapshot_digest(action_snapshot)
+        return build_preview_response(
+            compilation=compilation,
+            protect_last_file=effective_protect_last_file,
+            allowed_roots=effective_allowed_roots,
+            quarantine_root=effective_quarantine_root,
+            storage_action=storage_action,
+            storage_action_snapshot=action_snapshot,
+            storage_action_snapshot_digest=action_snapshot_digest,
+            page=page,
+            page_size=page_size,
+        )
 
     def _capture_effective_dedupe_safety_snapshot(self) -> tuple[bool, tuple[Path, ...], Path | None, dict[str, Any]]:
         protect_last_file = bool(getattr(self.settings, "protect_last_file", True))
@@ -6416,6 +6427,10 @@ class FileCenterService:
                 quarantine_root=quarantine_root,
             )
 
+        action_snapshot = build_storage_action_snapshot(compilation, storage_action)
+        action_snapshot_digest = storage_action_snapshot_digest(action_snapshot)
+        action_paths = actionable_storage_paths(action_snapshot)
+
         actual_preview_digest = compute_preview_digest(
             scan_job_id=compilation.scan_job_id,
             scorer_config_digest=compilation.scorer_config_digest,
@@ -6423,6 +6438,7 @@ class FileCenterService:
             decision_digest=compilation.decision_digest,
             effective_safety_policy=effective_safety_policy,
             storage_action=storage_action,
+            storage_action_snapshot_digest=action_snapshot_digest,
         )
         if actual_preview_digest.lower() != expected_preview_digest.lower():
             raise DedupePreviewChangedError(details={
@@ -6430,22 +6446,33 @@ class FileCenterService:
                 "actual_preview_digest": actual_preview_digest,
             })
 
-        if compilation.planned_quarantine_count == 0:
-            raise DedupeEmptyPlanError(details={
-                "scan_job_id": scan_job_id,
-                "preview_digest": actual_preview_digest,
-            })
+        planned_action_count = (
+            compilation.planned_quarantine_count
+            if storage_action == "quarantine"
+            else len(action_paths)
+        )
+        if planned_action_count == 0:
+            raise DedupeEmptyPlanError(
+                "DEDUPE_EMPTY_PLAN: selected storage action produced no actionable intents",
+                details={
+                    "scan_job_id": scan_job_id,
+                    "storage_action": storage_action,
+                    "preview_digest": actual_preview_digest,
+                },
+            )
 
         intents = build_advanced_dedupe_draft_intents(
             compilation,
             protect_last_file=protect_last_file,
             storage_action=storage_action,
+            actionable_source_paths=action_paths,
         )
-        if len(intents) != compilation.planned_quarantine_count:
+        if len(intents) != planned_action_count:
             raise DedupeInvalidConfigError(
-                "Advanced dedupe intent count does not match compilation summary",
+                "Advanced dedupe intent count does not match storage-action preview",
                 details={
-                    "planned_quarantine_count": compilation.planned_quarantine_count,
+                    "storage_action": storage_action,
+                    "planned_action_count": planned_action_count,
                     "intent_count": len(intents),
                 },
             )
@@ -6456,6 +6483,8 @@ class FileCenterService:
             preview_digest=actual_preview_digest,
             effective_safety_policy=effective_safety_policy,
             storage_action=storage_action,
+            storage_action_snapshot_digest=action_snapshot_digest,
+            storage_action_reclaim_bytes_value=storage_action_reclaim_bytes(action_snapshot),
             intents=intents,
         )
 
@@ -6477,6 +6506,8 @@ class FileCenterService:
         preview_digest: str,
         effective_safety_policy: dict[str, Any],
         storage_action: str,
+        storage_action_snapshot_digest: str,
+        storage_action_reclaim_bytes_value: int,
         intents: tuple[DedupeDraftIntent, ...],
     ) -> BatchPlan:
         metadata = {
@@ -6491,6 +6522,7 @@ class FileCenterService:
             "db_lineage_digest": compilation.db_lineage_digest,
             "selection_mode": compilation.summary.get("selection_mode"),
             "storage_action": storage_action,
+            "storage_action_snapshot_digest": storage_action_snapshot_digest,
             "effective_safety_policy": effective_safety_policy,
             "summary": {
                 "actionable_group_count": compilation.actionable_group_count,
@@ -6498,7 +6530,16 @@ class FileCenterService:
                 "storage_action": storage_action,
                 "planned_action_count": len(intents),
                 "planned_quarantine_count": compilation.planned_quarantine_count if storage_action == "quarantine" else 0,
-                "expected_reclaim_bytes": compilation.expected_reclaim_bytes,
+                "storage_blocked_count": (
+                    max(0, compilation.planned_quarantine_count - len(intents))
+                    if storage_action != "quarantine"
+                    else 0
+                ),
+                "expected_reclaim_bytes": (
+                    compilation.expected_reclaim_bytes
+                    if storage_action == "quarantine"
+                    else storage_action_reclaim_bytes_value
+                ),
                 "released_bytes_by_scan_root": {
                     str(key): value
                     for key, value in sorted(compilation.released_bytes_by_scan_root.items())
@@ -6523,7 +6564,11 @@ class FileCenterService:
                 kind="dedupe",
                 status="draft",
                 expected_changes=len(intents),
-                expected_reclaim_bytes=compilation.expected_reclaim_bytes,
+                expected_reclaim_bytes=(
+                    compilation.expected_reclaim_bytes
+                    if storage_action == "quarantine"
+                    else storage_action_reclaim_bytes_value
+                ),
                 metadata_json=json.dumps(metadata, ensure_ascii=False, sort_keys=True),
             )
             session.add(plan)
