@@ -618,12 +618,12 @@ const ScheduleHistoryDrawer: React.FC<HistoryProps> = ({ schedule, onClose }) =>
           {data.items.map((run) => (
             <article key={run.id} className="nfc-scheduler-run-card">
               <div className="nfc-scheduler-run-heading">
-                <strong>Run #{run.id}</strong>
+                <strong>运行 #{run.id}</strong>
                 {runStatusTag(run.status)}
               </div>
               <div className="nfc-scheduler-run-facts">
                 <span>触发：{formatDateTime(run.scheduled_for_utc)}</span>
-                <span>Schedule revision：r{run.schedule_revision}</span>
+                <span>计划版本：r{run.schedule_revision}</span>
                 {run.work_job_id && (
                   <Button
                     type="link"
@@ -689,7 +689,7 @@ export const SchedulerPage: React.FC = () => {
       await queryClient.invalidateQueries({ queryKey: ['schedules'] });
       await queryClient.invalidateQueries({ queryKey: ['schedule-runs'] });
     },
-    onError: (err: any) => message.error(err?.message || 'Run now 失败'),
+    onError: (err: any) => message.error(err?.message || '立即运行 失败'),
   });
 
   const items = data?.items || [];
@@ -798,7 +798,7 @@ export const SchedulerPage: React.FC = () => {
                   icon={<PlayCircleOutlined />}
                   loading={runMutation.isPending && runMutation.variables?.id === row.id}
                 >
-                  Run now
+                  立即运行
                 </Button>
               </Popconfirm>
             </>
@@ -851,7 +851,7 @@ export const SchedulerPage: React.FC = () => {
                     title="立即运行？"
                     onConfirm={() => runMutation.mutate(row)}
                   >
-                    <Button type="text" icon={<PlayCircleOutlined />}>Run now</Button>
+                    <Button type="text" icon={<PlayCircleOutlined />}>立即运行</Button>
                   </Popconfirm>
                 </>
               )}
@@ -865,9 +865,8 @@ export const SchedulerPage: React.FC = () => {
   return (
     <div className="nfc-operations-page nfc-scheduler-page nfc-page-layout-ledger">
       <PageHeader
-        eyebrow="Automation"
-        title="计划任务"
-        description="用 Cron + IANA 时区定时派发索引、扫描、媒体任务与固定版本的 Workflow Preview/Draft。"
+          title="计划任务"
+        description="用 Cron 和 IANA 时区定时派发索引、扫描、媒体任务与固定版本的工作流预览或草稿生成。"
         actions={
           <ActionBar compact>
             {isAdmin && (
@@ -888,7 +887,7 @@ export const SchedulerPage: React.FC = () => {
           showIcon
           className="nfc-page-alert"
           message="只读模式"
-          description="普通成员可以查看计划任务与运行历史；创建、编辑、启停和 Run now 仅限管理员。"
+          description="普通成员可以查看计划任务与运行历史；创建、编辑、启停和 立即运行 仅限管理员。"
         />
       )}
 
@@ -903,12 +902,21 @@ export const SchedulerPage: React.FC = () => {
       )}
 
       <DataPanel
-        title="Scheduler ledger"
-        description="Missed run = skip；同一 schedule 有活跃任务时 skip_if_active；Run now 同样写入 durable run history。"
-        action={<span className="nfc-panel-count">{data?.total ?? 0} schedules</span>}
-        className="nfc-panel-flush"
+        title="计划任务列表"
+        description="错过的触发会跳过；同一计划仍有活跃任务时按既有 overlap policy 跳过；立即运行也会写入持久化运行历史。"
+        className="nfc-panel-flush nfc-ledger-panel"
         variant="dense"
       >
+        <div className="nfc-ledger-toolbar">
+          <div className="nfc-ledger-result">
+            <strong>{data?.total ?? 0}</strong>
+            <span>个计划任务</span>
+          </div>
+          <div className="nfc-ledger-safety-note">
+            <span>创建、编辑、启停和立即运行保持管理员权限边界。</span>
+          </div>
+        </div>
+
         <ResponsiveDataView
           desktop={
             <Table
