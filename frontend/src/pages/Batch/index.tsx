@@ -91,13 +91,13 @@ export const BatchPage: React.FC = () => {
     <div className="nfc-operations-page nfc-batch-page nfc-page-layout-workbench">
       <PageHeader
         title="批量文件处理"
-        description="批量隔离、Touch、Move 与 Rename 统一先创建 Plan；真正文件操作仍通过 Freeze → Validate → Execute。"
+        description="选择对象和批量操作类型后创建执行计划。这里不会直接触发文件变更，真实执行仍需经过冻结、校验与明确确认。"
       />
 
       <DataPanel
         title="批量操作定义"
         description="选择操作类型并明确输入源路径/映射。这里创建 Plan，不会立即执行文件系统变更。"
-        className="nfc-complex-form-panel nfc-file-tool-form nfc-tool-workbench"
+        className="nfc-complex-form-panel nfc-file-tool-form nfc-tool-workbench nfc-workbench-primary-panel"
       >
         <Form
           className="nfc-batch-form"
@@ -174,10 +174,10 @@ export const BatchPage: React.FC = () => {
               onClick={handleGeneratePlan}
               loading={planMutation.isPending}
             >
-              生成批量处理 Plan
+              生成批量处理计划
             </Button>
             <span className="nfc-form-note">
-              Plan 创建后仍需在计划详情完成 Freeze、Validate 与 Execute。
+              计划创建后仍需在计划详情完成冻结、校验与执行确认。
             </span>
           </ActionBar>
         </Form>

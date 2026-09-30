@@ -334,7 +334,7 @@ export const ProfilePreview: React.FC<ProfilePreviewProps> = ({
       <DataPanel
         title="整理目标"
         description="Advanced Rules 使用 digest-bound staged Preview：Stage A 结构整理完成后必须 fresh Preview，才会进入 Stage B。"
-        className="nfc-complex-form-panel"
+        className="nfc-complex-form-panel nfc-workbench-primary-panel"
       >
         <Form form={form} layout="vertical">
           <Form.Item
@@ -455,8 +455,8 @@ export const ProfilePreview: React.FC<ProfilePreviewProps> = ({
             description={structuralRequired
               ? "Wrapper collapse 标记为 Stage A；其余 rename/file/prefix 提议属于 Stage B，仅供参考并被锁定，必须在 Stage A 完成后重新 Preview。"
               : "同一 snapshot 下切换过滤和分页，保持 digest 与预览口径一致。" }
-            action={<span className="nfc-panel-count">{totalItems} proposals</span>}
-            className="nfc-panel-flush"
+            action={<span className="nfc-panel-count">{totalItems} 项提议</span>}
+            className="nfc-panel-flush nfc-workbench-result-panel"
             variant="dense"
           >
             <ActionBar className="nfc-filter-bar nfc-organizer-preview-filter">
@@ -483,6 +483,7 @@ export const ProfilePreview: React.FC<ProfilePreviewProps> = ({
                   columns={columns}
                   rowKey="source"
                   loading={previewMutation.isPending}
+                  scroll={{ x: 1120 }}
                   pagination={{
                     current: page,
                     pageSize,

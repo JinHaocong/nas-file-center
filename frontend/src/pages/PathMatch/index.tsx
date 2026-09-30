@@ -135,13 +135,13 @@ export const PathMatchPage: React.FC = () => {
     <div className="nfc-operations-page nfc-path-match-page nfc-page-layout-workbench">
       <PageHeader
         title="跨目录路径匹配"
-        description="按相对路径、basename、stem 或正则归一化跨根目录匹配；Preview 只读，生成 Plan 后仍需完整生命周期校验。"
+        description="选择来源目录与匹配规则，先执行只读比对，再决定是否生成去重执行计划。预览阶段不会修改任何文件。"
       />
 
       <DataPanel
         title="匹配规则"
         description="至少选择两个根目录；路径必须位于 ALLOWED_ROOTS。"
-        className="nfc-complex-form-panel nfc-file-tool-form nfc-tool-workbench"
+        className="nfc-complex-form-panel nfc-file-tool-form nfc-tool-workbench nfc-workbench-primary-panel"
       >
         <Form
           className="nfc-path-match-form"
@@ -163,10 +163,10 @@ export const PathMatchPage: React.FC = () => {
           <Form.Item name="mode" label="匹配模式">
             <Select
               options={[
-                { value: 'relative-path', label: '相对路径完全匹配 (Relative Path)' },
-                { value: 'basename', label: '文件名匹配 (Basename)' },
-                { value: 'stem', label: '去除后缀主名匹配 (Stem)' },
-                { value: 'normalized', label: '正则归一化路径匹配 (Normalized Regex)' },
+                { value: 'relative-path', label: '相对路径完全匹配' },
+                { value: 'basename', label: '文件名匹配' },
+                { value: 'stem', label: '去除扩展名后匹配' },
+                { value: 'normalized', label: '正则归一化路径匹配' },
               ]}
             />
           </Form.Item>
@@ -211,7 +211,7 @@ export const PathMatchPage: React.FC = () => {
                 onClick={handleGeneratePlan}
                 loading={planMutation.isPending}
               >
-                生成去重 Plan ({groups.length} 组)
+                生成去重执行计划 ({groups.length} 组)
               </Button>
             )}
           </ActionBar>
@@ -221,9 +221,9 @@ export const PathMatchPage: React.FC = () => {
       {groups && (
         <DataPanel
           title="路径匹配 Preview"
-          description="每组第一个成员作为 keep，后续成员作为 Quarantine Plan 候选；此处尚未修改文件。"
-          action={<span className="nfc-panel-count">{groups.length} groups</span>}
-          className="nfc-panel-flush nfc-file-tool-result-panel"
+          description="每组第一个成员作为保留首选，其余成员仅作为隔离计划候选；此处仍未修改文件。"
+          action={<span className="nfc-panel-count">{groups.length} 组匹配</span>}
+          className="nfc-panel-flush nfc-file-tool-result-panel nfc-workbench-result-panel"
           variant="dense"
         >
           <ResponsiveDataView
@@ -232,6 +232,7 @@ export const PathMatchPage: React.FC = () => {
                 dataSource={groups}
                 columns={columns}
                 rowKey="key"
+                scroll={{ x: 920 }}
                 pagination={{ pageSize: 20 }}
               />
             }
@@ -247,7 +248,7 @@ export const PathMatchPage: React.FC = () => {
                           {group.key}
                         </strong>
                         <span className="nfc-panel-count">
-                          {group.members?.length || 0} members
+                          {group.members?.length || 0} 个路径
                         </span>
                       </div>
                       <div className="nfc-path-match-members">

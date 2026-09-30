@@ -15,6 +15,7 @@ import './styles/shell.css';
 import './styles/components.css';
 import './styles/pages/dashboard.css';
 import './styles/pages/ledger.css';
+import './styles/pages/workbench.css';
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
