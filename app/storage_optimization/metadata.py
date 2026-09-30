@@ -18,6 +18,7 @@ class FrozenFileMetadata:
     uid: int
     gid: int
     size: int
+    link_count: int
     atime_ns: int
     mtime_ns: int
     xattrs: tuple[tuple[str, bytes], ...]
@@ -28,6 +29,7 @@ class FrozenFileMetadata:
             "uid": self.uid,
             "gid": self.gid,
             "size": self.size,
+            "link_count": self.link_count,
             "atime_ns": self.atime_ns,
             "mtime_ns": self.mtime_ns,
             "xattrs": [
@@ -59,6 +61,7 @@ class FrozenFileMetadata:
                 uid=int(raw["uid"]),
                 gid=int(raw["gid"]),
                 size=int(raw["size"]),
+                link_count=int(raw["link_count"]),
                 atime_ns=int(raw["atime_ns"]),
                 mtime_ns=int(raw["mtime_ns"]),
                 xattrs=tuple(sorted(xattrs)),
@@ -100,6 +103,7 @@ def capture_file_metadata(path: Path | str) -> FrozenFileMetadata:
         uid=int(st.st_uid),
         gid=int(st.st_gid),
         size=int(st.st_size),
+        link_count=int(st.st_nlink),
         atime_ns=int(getattr(st, "st_atime_ns", int(st.st_atime * 1e9))),
         mtime_ns=int(getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))),
         xattrs=_read_xattrs(source),
