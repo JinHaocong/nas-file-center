@@ -7,7 +7,7 @@ import pytest
 
 from app.config import Settings
 from app.exceptions import StateConflictError
-from app.models import BatchPlan, BatchPlanItem, WorkJob
+from app.models import BatchPlan, BatchPlanItem, TaskEvent, WorkJob
 from app.service import FileCenterService
 
 
@@ -25,7 +25,12 @@ def _service(tmp_path: Path) -> FileCenterService:
     )
 
 
-def _executing_plan(service: FileCenterService, *, job_status: str) -> tuple[int, int]:
+def _executing_plan(
+    service: FileCenterService,
+    *,
+    job_status: str,
+    recovered_after_restart: bool = False,
+) -> tuple[int, int]:
     with service.SessionLocal() as session:
         plan = BatchPlan(
             name="Interrupted plan",
@@ -50,6 +55,16 @@ def _executing_plan(service: FileCenterService, *, job_status: str) -> tuple[int
             state_json=json.dumps({"plan_id": plan.id}),
         )
         session.add(job)
+        session.flush()
+        if recovered_after_restart:
+            session.add(
+                TaskEvent(
+                    job_id=job.id,
+                    event_type="recovered_after_worker_restart",
+                    message="Resumable job requeued after worker restart",
+                    level="info",
+                )
+            )
         session.commit()
         return int(plan.id), int(job.id)
 
@@ -60,7 +75,11 @@ def test_delete_interrupted_plan_cancels_idle_execution_task(
     job_status: str,
 ) -> None:
     service = _service(tmp_path)
-    plan_id, job_id = _executing_plan(service, job_status=job_status)
+    plan_id, job_id = _executing_plan(
+        service,
+        job_status=job_status,
+        recovered_after_restart=True,
+    )
 
     result = service.delete_plan(plan_id)
 
@@ -95,10 +114,33 @@ def test_delete_plan_still_blocks_live_execution_task(
 
 def test_plan_list_exposes_active_execution_status(tmp_path: Path) -> None:
     service = _service(tmp_path)
-    plan_id, job_id = _executing_plan(service, job_status="queued")
+    plan_id, job_id = _executing_plan(
+        service,
+        job_status="queued",
+        recovered_after_restart=True,
+    )
 
     listing = service.list_plans()
     row = next(item for item in listing["items"] if item["id"] == plan_id)
 
     assert row["active_work_job_id"] == job_id
     assert row["active_work_job_status"] == "queued"
+    assert row["active_work_job_recovered_after_restart"] is True
+
+
+def test_fresh_queued_execution_still_blocks_plan_delete(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    plan_id, job_id = _executing_plan(
+        service,
+        job_status="queued",
+        recovered_after_restart=False,
+    )
+
+    with pytest.raises(StateConflictError, match="active execution task"):
+        service.delete_plan(plan_id)
+
+    with service.SessionLocal() as session:
+        assert session.get(BatchPlan, plan_id) is not None
+        job = session.get(WorkJob, job_id)
+        assert job is not None
+        assert job.status == "queued"

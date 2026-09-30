@@ -31,13 +31,17 @@ export function getPlanDeleteAvailability(plan?: {
   status?: string;
   active_work_job_id?: number | null;
   active_work_job_status?: string | null;
+  active_work_job_recovered_after_restart?: boolean;
 } | null): PlanDeleteAvailability {
   if (!plan || !plan.status) {
     return { canDelete: false, reason: '无效的计划状态' };
   }
 
   if (plan.active_work_job_id) {
-    if (plan.active_work_job_status === 'queued' || plan.active_work_job_status === 'paused') {
+    if (
+      (plan.active_work_job_status === 'queued' || plan.active_work_job_status === 'paused') &&
+      plan.active_work_job_recovered_after_restart === true
+    ) {
       return {
         canDelete: true,
         hasExecutionHistory: true,
@@ -76,6 +80,7 @@ export function getPlanDeleteConfirmationContent(plan: {
   name?: string;
   active_work_job_id?: number | null;
   active_work_job_status?: string | null;
+  active_work_job_recovered_after_restart?: boolean;
 }): PlanDeleteConfirmationContent {
   const { hasExecutionHistory, willCancelIdleExecution } = getPlanDeleteAvailability(plan);
   const title = `确认删除计划 #${plan.id}？`;

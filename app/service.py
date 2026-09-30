@@ -270,6 +270,17 @@ def _get_active_execution_job(session, plan_id: int) -> WorkJob | None:
     ).first()
 
 
+def _is_restart_recovered_execution_job(session, work_job_id: int) -> bool:
+    return session.scalar(
+        select(TaskEvent.id)
+        .where(
+            TaskEvent.job_id == work_job_id,
+            TaskEvent.event_type == "recovered_after_worker_restart",
+        )
+        .limit(1)
+    ) is not None
+
+
 def _descriptor_sha256(fd: int) -> str:
     h = hashlib.sha256()
     os.lseek(fd, 0, os.SEEK_SET)
@@ -596,6 +607,12 @@ class FileCenterService:
                     except Exception:
                         pass
 
+            recovered_active_job_ids = {
+                int(job.id)
+                for job in active_jobs_map.values()
+                if _is_restart_recovered_execution_job(session, int(job.id))
+            }
+
             items = [{
                 "id": row.id,
                 "name": row.name,
@@ -603,6 +620,10 @@ class FileCenterService:
                 "status": row.status,
                 "active_work_job_id": active_jobs_map[row.id].id if row.id in active_jobs_map else None,
                 "active_work_job_status": active_jobs_map[row.id].status if row.id in active_jobs_map else None,
+                "active_work_job_recovered_after_restart": (
+                    int(active_jobs_map[row.id].id) in recovered_active_job_ids
+                    if row.id in active_jobs_map else False
+                ),
                 "expected_changes": row.expected_changes,
                 "expected_reclaim_bytes": row.expected_reclaim_bytes,
                 "metadata": json.loads(row.metadata_json or "{}"),
@@ -3359,6 +3380,10 @@ class FileCenterService:
                 "status": plan.status,
                 "active_work_job_id": active_job.id if active_job else None,
                 "active_work_job_status": active_job.status if active_job else None,
+                "active_work_job_recovered_after_restart": (
+                    _is_restart_recovered_execution_job(session, int(active_job.id))
+                    if active_job else False
+                ),
                 "expected_changes": plan.expected_changes,
                 "expected_reclaim_bytes": plan.expected_reclaim_bytes,
                 "created_at": plan.created_at,
@@ -3409,7 +3434,11 @@ class FileCenterService:
 
             active_job = _get_active_execution_job(session, plan_id)
             if active_job is not None:
-                if active_job.status in {"queued", "paused"}:
+                restart_recovered = _is_restart_recovered_execution_job(
+                    session,
+                    int(active_job.id),
+                )
+                if active_job.status in {"queued", "paused"} and restart_recovered:
                     cancellable_job_id = int(active_job.id)
                 else:
                     raise StateConflictError(
@@ -3446,11 +3475,13 @@ class FileCenterService:
             session.execute(delete(BatchPlanItem).where(BatchPlanItem.plan_id == plan_id))
             session.delete(plan)
             session.commit()
-            return {
+            result = {
                 "deleted": True,
                 "id": plan_id,
-                "cancelled_work_job_id": cancelled_work_job_id,
             }
+            if cancelled_work_job_id is not None:
+                result["cancelled_work_job_id"] = cancelled_work_job_id
+            return result
 
     def clear_plan_history(self, statuses: list[str] | None) -> dict:
         if statuses is None or len(statuses) == 0:

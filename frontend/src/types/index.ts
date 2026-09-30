@@ -154,6 +154,7 @@ export interface Plan {
   items?: PlanItem[];
   active_work_job_id?: number | null;
   active_work_job_status?: 'queued' | 'running' | 'paused' | 'cancel_requested' | null;
+  active_work_job_recovered_after_restart?: boolean;
 }
 
 export interface WorkJob {

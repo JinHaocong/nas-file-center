@@ -71,6 +71,7 @@ describe('Plan Lifecycle Cleanup: Policy Matrix & API Contract Tests', () => {
           status: 'executing',
           active_work_job_id: 123,
           active_work_job_status: taskStatus,
+          active_work_job_recovered_after_restart: true,
         });
         assert.strictEqual(res.canDelete, true);
         assert.strictEqual(res.hasExecutionHistory, true);
@@ -79,11 +80,23 @@ describe('Plan Lifecycle Cleanup: Policy Matrix & API Contract Tests', () => {
       }
     });
 
+    test('ordinary queued execution remains blocked without restart-recovery evidence', () => {
+      const res = getPlanDeleteAvailability({
+        status: 'executing',
+        active_work_job_id: 123,
+        active_work_job_status: 'queued',
+        active_work_job_recovered_after_restart: false,
+      });
+      assert.strictEqual(res.canDelete, false);
+      assert.strictEqual(res.reason, '计划存在活动执行任务，当前状态无法安全删除');
+    });
+
     test('running and cancel_requested execution remain fail-closed', () => {
       const running = getPlanDeleteAvailability({
         status: 'executing',
         active_work_job_id: 123,
         active_work_job_status: 'running',
+        active_work_job_recovered_after_restart: true,
       });
       assert.strictEqual(running.canDelete, false);
       assert.ok(running.reason?.includes('仍在运行'));
@@ -92,6 +105,7 @@ describe('Plan Lifecycle Cleanup: Policy Matrix & API Contract Tests', () => {
         status: 'executing',
         active_work_job_id: 123,
         active_work_job_status: 'cancel_requested',
+        active_work_job_recovered_after_restart: true,
       });
       assert.strictEqual(cancelling.canDelete, false);
       assert.ok(cancelling.reason?.includes('等待安全取消'));
@@ -179,6 +193,7 @@ describe('Plan Lifecycle Cleanup: Policy Matrix & API Contract Tests', () => {
         status: 'executing',
         active_work_job_id: 55,
         active_work_job_status: 'queued',
+        active_work_job_recovered_after_restart: true,
       });
       assert.ok(content.description.includes('先安全取消该任务'));
       assert.ok(content.description.includes('Delete ≠ Undo'));
