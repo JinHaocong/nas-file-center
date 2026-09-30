@@ -1136,3 +1136,8 @@
     width: 100% !important;
   }
 }
+
+/* Global Ant Design table pagination spacing. */
+.ant-table-wrapper .ant-table-pagination.ant-pagination {
+  margin: 0;
+}
