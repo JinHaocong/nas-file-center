@@ -440,7 +440,7 @@ def _cleanup_transaction_residue_after_recovery(
     worker_id: str,
 ) -> None:
     """Best-effort retirement of NFC-owned terminal transaction metadata."""
-    if not settings.allow_mutation:
+    if not settings.allow_mutation or not settings.allow_delete:
         return
     try:
         from app.quarantine.transaction_residue import cleanup_terminal_transaction_residue

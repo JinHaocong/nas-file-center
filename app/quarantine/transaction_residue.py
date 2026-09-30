@@ -21,7 +21,7 @@ from app.tasks.recovery import assert_active_worker_lease
 _ENTRY_DIR_RE = re.compile(r"^entry-(\d+)$")
 _ITEM_DIR_RE = re.compile(r"^item-(\d+)(?:-.+)?$")
 _ACTIVE_EXECUTION_STATUSES = ("queued", "running", "paused", "cancel_requested")
-_TERMINAL_EMPTY_TX_STATES = {"purged", "abandoned", "conflict"}
+_TERMINAL_EMPTY_TX_STATES = {"purged"}
 
 
 def _is_plain_directory(path: Path) -> bool:
@@ -207,26 +207,24 @@ def _cleanup_utility_move_tx(
                         or item.target_path != target
                     ):
                         continue
-                    require_completed_filesystem = True
-                else:
-                    # No durable plan remains that can ever resume this metadata.
-                    # The state file itself is NFC-owned and contains no payload.
-                    require_completed_filesystem = False
 
-            if require_completed_filesystem:
-                try:
-                    completed = directory_transplant_reconciles_completed(
-                        quarantine_root,
-                        plan_id,
-                        sequence,
-                        source=Path(source),
-                        target=Path(target),
-                        transaction_id=transaction_id,
-                    )
-                except Exception:
-                    completed = False
-                if not completed:
-                    continue
+            # A missing DB plan is not enough authority to delete recovery
+            # metadata. Always require the transaction state plus current
+            # filesystem identity to prove the MOVE reached its completed
+            # namespace state.
+            try:
+                completed = directory_transplant_reconciles_completed(
+                    quarantine_root,
+                    plan_id,
+                    sequence,
+                    source=Path(source),
+                    target=Path(target),
+                    transaction_id=transaction_id,
+                )
+            except Exception:
+                completed = False
+            if not completed:
+                continue
 
             try:
                 cleanup_directory_transplant_state(
