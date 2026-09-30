@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -258,6 +259,8 @@ def test_hardlink_metadata_mismatch_is_visible_in_preview_and_not_generated(
 
     assert preview["planned_action_count"] == 0
     assert preview["storage_blocked_count"] == 1
+    assert preview["expected_reclaim_bytes"] == 0
+    assert sum(preview["released_bytes_by_scan_root"].values()) == 0
     blocked = [
         row for row in preview["rows"]
         if row["member_decision"] == "SKIPPED"
@@ -312,3 +315,42 @@ def test_validate_blocks_unsupported_live_capability(storage_dedupe_env, monkeyp
         assert item is not None
         assert item.state == "skipped"
         assert "CAPABILITY_UNSUPPORTED" in (item.reason or "")
+
+
+@pytest.mark.parametrize("storage_action", ["hardlink", "reflink"])
+def test_existing_source_hardlink_blocks_false_reclaim_estimate(
+    storage_dedupe_env,
+    storage_action: str,
+):
+    service, data = storage_dedupe_env
+    _seed_duplicate(service, data)
+
+    baseline = service.get_dedupe_preview(
+        900,
+        scorer_config={},
+        storage_action="quarantine",
+    )
+    source_row = next(
+        row for row in baseline["rows"]
+        if row["member_decision"] == "QUARANTINE"
+    )
+    source_path = Path(source_row["absolute_path"])
+    alias = data / "preexisting-source-hardlink.bin"
+    os.link(source_path, alias)
+    assert source_path.stat().st_nlink == 2
+
+    preview = service.get_dedupe_preview(
+        900,
+        scorer_config={},
+        storage_action=storage_action,
+    )
+
+    assert preview["planned_action_count"] == 0
+    assert preview["storage_blocked_count"] == 1
+    assert preview["expected_reclaim_bytes"] == 0
+    assert sum(preview["released_bytes_by_scan_root"].values()) == 0
+    blocked = [
+        row for row in preview["rows"]
+        if row.get("storage_blocking_reason") == "SOURCE_HAS_MULTIPLE_HARDLINKS"
+    ]
+    assert len(blocked) == 1
