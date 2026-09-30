@@ -6314,7 +6314,9 @@ class FileCenterService:
             "summary": {
                 "actionable_group_count": compilation.actionable_group_count,
                 "skipped_group_count": compilation.skipped_group_count,
-                "planned_quarantine_count": compilation.planned_quarantine_count,
+                "storage_action": storage_action,
+                "planned_action_count": len(intents),
+                "planned_quarantine_count": compilation.planned_quarantine_count if storage_action == "quarantine" else 0,
                 "expected_reclaim_bytes": compilation.expected_reclaim_bytes,
                 "released_bytes_by_scan_root": {
                     str(key): value
