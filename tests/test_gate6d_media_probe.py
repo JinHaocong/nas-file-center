@@ -181,6 +181,29 @@ def test_ffprobe_no_video_stream_is_unknown_not_corrupt():
 
 
 
+def test_image_runtime_error_stays_unknown_and_does_not_abort_analysis(monkeypatch, tmp_path: Path):
+    path = tmp_path / "runtime.jpg"
+    path.write_bytes(b"placeholder")
+
+    class RuntimeFailImage:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def verify(self):
+            raise RuntimeError("decoder runtime state failure")
+
+    monkeypatch.setattr("app.media.probe.Image.open", lambda *_args, **_kwargs: RuntimeFailImage())
+
+    result = probe_image(path)
+
+    assert result.integrity_status == "unknown"
+    assert result.integrity_reason_code == "IMAGE_DECODE_AMBIGUOUS"
+    assert result.corrupt_sha256 is None
+
+
 def test_image_runtime_oserror_stays_unknown(monkeypatch, tmp_path: Path):
     path = tmp_path / "io.jpg"
     path.write_bytes(b"placeholder")
