@@ -2699,7 +2699,12 @@ class BatchPlanExecuteHandler(TaskHandler):
             # re-reading both payloads several times before that final hash.
             defer_duplicate_hash_to_execute = bool(
                 item_meta.keep_path
-                and item_meta.operation in {"quarantine", "unlink"}
+                and item_meta.operation in {
+                    "quarantine",
+                    "unlink",
+                    "hardlink_optimize",
+                    "reflink_optimize",
+                }
             )
 
             # Boundary Freshness Check
