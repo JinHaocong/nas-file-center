@@ -535,12 +535,7 @@ def recover_interrupted_jobs(
             try:
                 assert_active_worker_lease(session, worker_id, now=now, timeout_seconds=timeout_seconds)
             except JobLeaseLost:
-                stats["repaired_orphan_plans"] = _repair_orphaned_executing_plans(
-        session_factory,
-        worker_id=worker_id,
-        timeout_seconds=timeout_seconds,
-    )
-    return stats
+                return stats
 
         candidate_ids = list(
             session.scalars(
@@ -648,4 +643,9 @@ def recover_interrupted_jobs(
             else:
                 session.rollback()
 
+    stats["repaired_orphan_plans"] = _repair_orphaned_executing_plans(
+        session_factory,
+        worker_id=worker_id,
+        timeout_seconds=timeout_seconds,
+    )
     return stats
