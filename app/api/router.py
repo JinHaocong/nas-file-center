@@ -982,7 +982,12 @@ def get_task_detail(request: Request, task_id: int):
 
 
 @router.post("/tasks/{task_id}/pause")
-def pause_task(request: Request, task_id: int):
+def pause_task(
+    request: Request,
+    task_id: int,
+    current_user: User = Depends(get_current_user),
+):
+    _require_restricted_task_admin(request, task_id, current_user)
     try:
         return request.app.state.service.pause_task(task_id)
     except KeyError as exc:
@@ -1007,7 +1012,12 @@ def resume_task(
 
 
 @router.post("/tasks/{task_id}/cancel")
-def cancel_task(request: Request, task_id: int):
+def cancel_task(
+    request: Request,
+    task_id: int,
+    current_user: User = Depends(get_current_user),
+):
+    _require_restricted_task_admin(request, task_id, current_user)
     try:
         return request.app.state.service.cancel_task(task_id)
     except KeyError as exc:
@@ -1032,7 +1042,12 @@ def retry_task(
 
 
 @router.delete("/tasks/{task_id}")
-def delete_task(request: Request, task_id: int):
+def delete_task(
+    request: Request,
+    task_id: int,
+    current_user: User = Depends(get_current_user),
+):
+    _require_restricted_task_admin(request, task_id, current_user)
     try:
         return request.app.state.service.delete_task(task_id)
     except KeyError as exc:
