@@ -3,3 +3,4 @@ export { DedupePreviewTable } from "./DedupePreviewTable";
 export { DedupePreviewSummaryPanel } from "./DedupePreviewSummaryPanel";
 export { DedupeExplainDrawer } from "./DedupeExplainDrawer";
 export { DedupeIdentitySafetyPanel } from "./DedupeIdentitySafetyPanel";
+export { DedupeStorageActionPanel } from "./DedupeStorageActionPanel";

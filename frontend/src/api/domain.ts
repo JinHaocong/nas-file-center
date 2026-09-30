@@ -33,6 +33,8 @@ import {
   DirectAdvancedDedupeGenerateRequest,
   DirectAdvancedDedupeGenerateResponse,
   DedupeDiagnosticResponse,
+  StorageOptimizationCapabilitiesResponse,
+  StorageOptimizationCapabilityRequest,
 } from '../types/dedupe';
 export { quarantineApi } from './quarantine';
 
@@ -69,6 +71,14 @@ export const scansApi = {
   createAdvancedDedupePlan: (scanJobId: number, payload: DirectAdvancedDedupeGenerateRequest) =>
     api.post<DirectAdvancedDedupeGenerateResponse>(`/api/scans/${scanJobId}/dedupe-plan`, payload),
   deleteScan: (id: number) => api.delete<{ deleted: boolean; id: number }>(`/api/scans/${id}`),
+};
+
+export const storageOptimizationApi = {
+  probeCapabilities: (payload: StorageOptimizationCapabilityRequest) =>
+    api.post<StorageOptimizationCapabilitiesResponse>(
+      '/api/storage-optimization/capabilities',
+      payload,
+    ),
 };
 
 export const mediaApi = {
