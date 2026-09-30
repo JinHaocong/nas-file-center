@@ -21,6 +21,7 @@ import { DataPanel } from '../../components/ui/DataPanel';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { useResponsive } from '../../hooks/useResponsive';
 import { useTitle } from '../../hooks/useTitle';
+import type { ScanJob, WorkJob } from '../../types';
 import { formatBytes, formatDateTime } from '../../utils/format';
 
 export const DashboardPage: React.FC = () => {
@@ -50,7 +51,7 @@ export const DashboardPage: React.FC = () => {
       title: '扫描名称',
       dataIndex: 'name',
       key: 'name',
-      render: (text: string, record: any) => (
+      render: (text: string, record: ScanJob) => (
         <button
           type="button"
           className="nfc-table-link"
@@ -64,63 +65,67 @@ export const DashboardPage: React.FC = () => {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
-      width: 132,
+      width: 124,
       render: (status: string) => <StatusBadge status={status} />,
     },
     {
       title: '重复组',
       dataIndex: 'total_groups',
       key: 'total_groups',
-      width: 86,
+      width: 88,
+      render: (value: number) => <span className="nfc-mono">{value ?? 0}</span>,
     },
     {
       title: '可释放空间',
       dataIndex: 'reclaimable_bytes',
       key: 'reclaimable_bytes',
-      width: 112,
+      width: 122,
       render: (bytes: number) => (
-        <span className={bytes > 0 ? 'nfc-data-emphasis' : undefined}>{formatBytes(bytes)}</span>
+        <span className={bytes > 0 ? 'nfc-data-emphasis' : 'nfc-table-muted'}>
+          {formatBytes(bytes || 0)}
+        </span>
       ),
     },
     {
-      title: '时间',
+      title: '创建时间',
       dataIndex: 'created_at',
       key: 'created_at',
       width: 168,
-      render: (val: string) => formatDateTime(val),
+      render: (val: string) => <span className="nfc-table-meta">{formatDateTime(val)}</span>,
     },
   ];
 
   const taskColumns = [
     {
-      title: 'ID',
-      dataIndex: 'id',
-      key: 'id',
-      width: 68,
-      render: (id: number) => <span className="nfc-mono">#{id}</span>,
-    },
-    {
-      title: '任务类型',
+      title: '任务',
       dataIndex: 'kind',
       key: 'kind',
+      render: (kind: string, record: WorkJob) => (
+        <div className="nfc-dashboard-task-identity">
+          <strong>{kind}</strong>
+          <span className="nfc-mono">#{record.id}</span>
+        </div>
+      ),
     },
     {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
-      width: 132,
+      width: 124,
       render: (status: string) => <StatusBadge status={status} />,
     },
     {
       title: '进度',
       key: 'progress',
       width: 150,
-      render: (_: any, record: any) => {
+      render: (_: unknown, record: WorkJob) => {
         if (record.progress_total > 0) {
           const pct = Math.round((record.progress_current / record.progress_total) * 100);
-          return `${record.progress_current}/${record.progress_total} · ${pct}%`;
+          return <span className="nfc-mono">{record.progress_current}/{record.progress_total} · {pct}%</span>;
         }
-        return record.progress_current > 0 ? `${record.progress_current} 项` : '—';
+        return record.progress_current > 0
+          ? <span className="nfc-mono">{record.progress_current} 项</span>
+          : <span className="nfc-table-muted">等待进度</span>;
       },
     },
     {
@@ -128,14 +133,14 @@ export const DashboardPage: React.FC = () => {
       dataIndex: 'created_at',
       key: 'created_at',
       width: 168,
-      render: (val: string) => formatDateTime(val),
+      render: (val: string) => <span className="nfc-table-meta">{formatDateTime(val)}</span>,
     },
   ];
 
   const quickActions = [
     {
       title: '开始精确扫描',
-      description: '使用 fclones 发现完全重复文件。',
+      description: '发现完全重复文件并生成只读扫描快照。',
       icon: <ScanOutlined />,
       onClick: () => navigate('/scans'),
     },
@@ -147,7 +152,7 @@ export const DashboardPage: React.FC = () => {
     },
     {
       title: '整理目录结构',
-      description: '进入 Organizer 预览和规划目录整理。',
+      description: '进入目录整理的配置、预览与计划流程。',
       icon: <FolderViewOutlined />,
       onClick: () => navigate('/organizer'),
     },
@@ -155,27 +160,52 @@ export const DashboardPage: React.FC = () => {
 
   const scanItems = scansData?.items || [];
   const taskItems = tasksData?.items || [];
+  const activeJobs = summary?.queued_or_running_jobs || 0;
 
   return (
     <div className="nfc-dashboard nfc-dashboard-page nfc-operations-page nfc-page-layout-dashboard">
       <PageHeader
         title="系统概览"
-        description="NAS 文件中心的索引、扫描、执行计划与后台任务状态。"
+        description="先查看当前运行状态和需要继续处理的工作，再进入索引、扫描或执行计划。"
         actions={
           <Button
             icon={<ReloadOutlined />}
             onClick={() => refetchSummary()}
             loading={summaryLoading}
-            className="nfc-secondary-action"
           >
-            刷新
+            刷新状态
           </Button>
         }
       />
 
-      <section className="nfc-dashboard-command-deck" aria-label="运行概览">
-        <div className="nfc-dashboard-metrics-zone">
-          <section className="nfc-metric-grid" aria-label="核心运行指标">
+      <section className="nfc-dashboard-priority" aria-label="当前运行状态">
+        <div className="nfc-dashboard-priority-main">
+          <div className="nfc-dashboard-priority-label">
+            <ThunderboltOutlined />
+            <span>后台任务</span>
+          </div>
+          <strong>{activeJobs > 0 ? `${activeJobs} 个任务正在运行或等待` : '当前没有运行中的后台任务'}</strong>
+          <span>{activeJobs > 0 ? '可前往任务中心查看进度、日志和失败信息。' : '可以安全开始新的索引、扫描或计划工作。'}</span>
+        </div>
+        <Button type={activeJobs > 0 ? 'primary' : 'default'} onClick={() => navigate('/tasks')}>
+          查看任务中心
+        </Button>
+      </section>
+
+      <section className="nfc-dashboard-snapshot" aria-label="扫描快照说明">
+        <InfoCircleOutlined />
+        <div>
+          <strong>最近扫描快照</strong>
+          <span>
+            {summary?.latest_scan_id
+              ? `${summary.latest_scan_name || `扫描 #${summary.latest_scan_id}`} · ${summary.duplicate_group_count || 0} 个重复组 · 预计可释放 ${formatBytes(summary.latest_reclaimable_bytes || 0)}`
+              : '尚无已完成扫描。重复组和可释放空间将在扫描完成后显示。'}
+          </span>
+        </div>
+        <Button type="link" onClick={() => navigate('/scans')}>进入扫描去重</Button>
+      </section>
+
+      <section className="nfc-metric-grid nfc-dashboard-metric-grid" aria-label="运行摘要">
         <MetricCard
           label="已索引文件"
           value={summary?.indexed_files || 0}
@@ -183,24 +213,16 @@ export const DashboardPage: React.FC = () => {
           icon={<DatabaseOutlined />}
         />
         <MetricCard
-          label="最近一次扫描发现"
+          label="重复组"
           value={summary?.latest_scan_id ? summary?.duplicate_group_count || 0 : '—'}
-          meta={
-            summary?.latest_scan_id
-              ? summary.latest_scan_name || `扫描 #${summary.latest_scan_id}`
-              : '暂无已完成扫描'
-          }
+          meta={summary?.latest_scan_finished_at ? formatDateTime(summary.latest_scan_finished_at) : '等待扫描快照'}
           icon={<ScanOutlined />}
           tone="attention"
         />
         <MetricCard
-          label="最近一次扫描预计可释放"
+          label="预计可释放"
           value={summary?.latest_scan_id ? formatBytes(summary?.latest_reclaimable_bytes || 0) : '—'}
-          meta={
-            summary?.latest_scan_finished_at
-              ? formatDateTime(summary.latest_scan_finished_at)
-              : '等待扫描快照'
-          }
+          meta="来自最近一次已完成扫描"
           icon={<DeleteOutlined />}
           tone={summary?.latest_reclaimable_bytes ? 'success' : 'default'}
         />
@@ -210,37 +232,26 @@ export const DashboardPage: React.FC = () => {
           meta="当前计划总数"
           icon={<ScheduleOutlined />}
         />
-          </section>
-        </div>
-
-        <div className="nfc-snapshot-note" role="note">
-          <InfoCircleOutlined />
-          <div>
-            <strong>扫描快照</strong>
-            <span>
-              重复组和可释放空间来自最近一次已完成扫描；需要最新结果时请重新发起扫描。
-            </span>
-          </div>
-        </div>
       </section>
 
       <div className="nfc-dashboard-layout">
         <main className="nfc-dashboard-main-column">
           <DataPanel
             title="最近扫描"
-            description="最近的重复文件扫描及其快照结果。"
+            description="查看最近的扫描状态和结果快照。"
             action={
               <Button type="link" onClick={() => navigate('/scans')}>
                 查看全部 <ArrowRightOutlined />
               </Button>
             }
+            className="nfc-panel-flush"
           >
             {isMobile ? (
               <div className="nfc-mobile-activity-list">
                 {scanItems.length === 0 ? (
-                  <Empty description="暂无扫描任务" />
+                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无扫描任务" />
                 ) : (
-                  scanItems.map((item: any) => (
+                  scanItems.map((item: ScanJob) => (
                     <button
                       type="button"
                       key={item.id}
@@ -270,26 +281,27 @@ export const DashboardPage: React.FC = () => {
                 pagination={false}
                 loading={scansLoading}
                 size="small"
-                locale={{ emptyText: <Empty description="暂无扫描任务" /> }}
+                locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无扫描任务" /> }}
               />
             )}
           </DataPanel>
 
           <DataPanel
             title="后台执行队列"
-            description="Worker 正在处理或等待处理的任务。"
+            description="正在运行或最近进入队列的 Worker 任务。"
             action={
               <Button type="link" onClick={() => navigate('/tasks')}>
                 查看全部 <ArrowRightOutlined />
               </Button>
             }
+            className="nfc-panel-flush"
           >
             {isMobile ? (
               <div className="nfc-mobile-activity-list">
                 {taskItems.length === 0 ? (
-                  <Empty description="暂无执行中任务" />
+                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无后台任务" />
                 ) : (
-                  taskItems.map((item: any) => (
+                  taskItems.map((item: WorkJob) => (
                     <div key={item.id} className="nfc-mobile-activity-card">
                       <div className="nfc-mobile-activity-topline">
                         <strong>{item.kind}</strong>
@@ -323,17 +335,18 @@ export const DashboardPage: React.FC = () => {
                 pagination={false}
                 loading={tasksLoading}
                 size="small"
-                locale={{ emptyText: <Empty description="暂无执行中任务" /> }}
+                locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无后台任务" /> }}
               />
             )}
           </DataPanel>
         </main>
 
         <aside className="nfc-dashboard-rail">
-          <DataPanel
-            title="快速操作"
-            description="进入最常用的 NAS 工作流。"
-          >
+          <section className="nfc-dashboard-quick-section" aria-labelledby="nfc-dashboard-quick-title">
+            <div className="nfc-dashboard-section-heading">
+              <h2 id="nfc-dashboard-quick-title">常用入口</h2>
+              <span>进入下一步工作</span>
+            </div>
             <div className="nfc-quick-actions">
               {quickActions.map((action) => (
                 <button
@@ -351,27 +364,7 @@ export const DashboardPage: React.FC = () => {
                 </button>
               ))}
             </div>
-          </DataPanel>
-
-          <DataPanel
-            title="运行摘要"
-            description="用于快速判断当前系统是否需要关注。"
-          >
-            <div className="nfc-summary-list">
-              <div className="nfc-summary-row">
-                <span><ThunderboltOutlined /> 活跃任务</span>
-                <strong>{summary?.queued_or_running_jobs || 0}</strong>
-              </div>
-              <div className="nfc-summary-row">
-                <span><ScanOutlined /> 扫描总数</span>
-                <strong>{summary?.scan_count || 0}</strong>
-              </div>
-              <div className="nfc-summary-row">
-                <span><ScheduleOutlined /> 执行计划</span>
-                <strong>{summary?.plan_count || 0}</strong>
-              </div>
-            </div>
-          </DataPanel>
+          </section>
         </aside>
       </div>
     </div>

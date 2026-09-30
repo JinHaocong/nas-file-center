@@ -6,10 +6,10 @@ import { resolve } from 'node:path';
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');
 
 describe('v0.4.0 C2A visual prototype contract', () => {
-  test('sidebar groups navigation by product domain instead of one flat menu', () => {
+  test('sidebar groups navigation by the redesigned product domains instead of one flat menu', () => {
     const source = read('src/components/Sidebar.tsx');
     assert.match(source, /type:\s*['"]group['"]/);
-    for (const label of ['数据与扫描', '文件工具', '自动化', '安全与运行', '系统']) {
+    for (const label of ['概览', '文件管理', '处理工具', '自动化', '运行与安全', '系统']) {
       assert.match(source, new RegExp(label));
     }
   });
@@ -25,11 +25,11 @@ describe('v0.4.0 C2A visual prototype contract', () => {
     assert.doesNotMatch(source, /type=["']inner["']/);
   });
 
-  test('dashboard preserves snapshot freshness and operational entry points', () => {
+  test('dashboard preserves snapshot freshness, active-work priority and operational entry points', () => {
     const source = read('src/pages/Dashboard/index.tsx');
-    assert.match(source, /扫描快照/);
-    assert.match(source, /最近一次扫描发现/);
-    assert.match(source, /最近一次扫描预计可释放/);
+    assert.match(source, /最近扫描快照/);
+    assert.match(source, /后台任务/);
+    assert.match(source, /预计可释放/);
     assert.match(source, /navigate\(['"]\/scans['"]\)/);
     assert.match(source, /navigate\(['"]\/tasks['"]\)/);
     assert.match(source, /navigate\(['"]\/indexes['"]\)/);

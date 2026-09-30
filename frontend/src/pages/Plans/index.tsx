@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Button, Empty, message, Pagination, Table } from 'antd';
-import { ReloadOutlined, ScheduleOutlined } from '@ant-design/icons';
+import { ReloadOutlined, SafetyCertificateOutlined, ScheduleOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { plansApi } from '../../api/domain';
@@ -107,7 +107,8 @@ export const PlansPage: React.FC = () => {
     {
       title: '操作',
       key: 'action',
-      width: 170,
+      width: 176,
+      fixed: 'right' as const,
       render: (_: any, record: any) => (
         <div className="nfc-row-actions">
           <Button size="small" type="text" onClick={() => navigate(`/plans/${record.id}`)}>
@@ -127,9 +128,8 @@ export const PlansPage: React.FC = () => {
   return (
     <div className="nfc-operations-page nfc-plans-page nfc-page-layout-ledger">
       <PageHeader
-        eyebrow="Execution control"
-        title="执行计划"
-        description="Dry Run 计划生命周期：Draft → Frozen → Validate → Execute。任何真实文件变更都必须经过计划链路。"
+          title="执行计划"
+        description="查看变更计划、风险与执行状态。真实文件变更必须经过冻结、校验和明确执行步骤，不能绕过计划链路。"
         actions={
           <ActionBar compact>
             <Button icon={<ReloadOutlined />} onClick={() => refetch()} loading={isFetching}>
@@ -145,10 +145,20 @@ export const PlansPage: React.FC = () => {
       <DataPanel
         title="计划列表"
         description="计划状态、预期变更与可释放容量均来自当前 BatchPlan。"
-        action={<span className="nfc-panel-count">{data?.total ?? 0} plans</span>}
-        className="nfc-panel-flush"
+        className="nfc-panel-flush nfc-ledger-panel"
         variant="dense"
       >
+        <div className="nfc-ledger-toolbar">
+          <div className="nfc-ledger-result">
+            <strong>{data?.total ?? 0}</strong>
+            <span>个执行计划</span>
+          </div>
+          <div className="nfc-ledger-safety-note">
+            <SafetyCertificateOutlined />
+            <span>计划列表只展示状态和影响摘要；真实执行仍需进入计划详情完成校验与确认。</span>
+          </div>
+        </div>
+
         <ResponsiveDataView
           desktop={
             <Table
@@ -156,11 +166,13 @@ export const PlansPage: React.FC = () => {
               columns={columns}
               rowKey="id"
               loading={isLoading}
+              scroll={{ x: 980 }}
               pagination={{
                 current: page,
                 pageSize,
                 total: data?.total || 0,
                 showSizeChanger: true,
+                showTotal: (total) => `共 ${total} 项`,
                 pageSizeOptions: ['10', '20', '50', '100'],
                 onChange: (p, ps) => {
                   setPage(p);

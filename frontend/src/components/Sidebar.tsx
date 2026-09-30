@@ -21,6 +21,7 @@ import {
 } from '@ant-design/icons';
 
 const { Sider } = Layout;
+
 interface Props {
   collapsed: boolean;
   onCollapse: (collapsed: boolean) => void;
@@ -32,53 +33,29 @@ const leafMenuItems: NonNullable<MenuProps['items']> = [
   { key: '/dashboard', icon: <DashboardOutlined />, label: '系统概览' },
   { key: '/indexes', icon: <FolderOpenOutlined />, label: '文件索引' },
   { key: '/scans', icon: <ScanOutlined />, label: '扫描去重' },
+  { key: '/media', icon: <FileImageOutlined />, label: '媒体完整性' },
   { key: '/path-match', icon: <BranchesOutlined />, label: '路径匹配' },
   { key: '/rename', icon: <EditOutlined />, label: '批量重命名' },
   { key: '/batch', icon: <AppstoreOutlined />, label: '批量处理' },
-  { key: '/organizer', icon: <FolderViewOutlined />, label: 'Organizer 整理' },
+  { key: '/organizer', icon: <FolderViewOutlined />, label: '目录整理' },
   { key: '/workflows', icon: <DeploymentUnitOutlined />, label: '工作流中心' },
   { key: '/schedules', icon: <ScheduleOutlined />, label: '计划任务' },
   { key: '/plans', icon: <ScheduleOutlined />, label: '执行计划' },
-  { key: '/quarantine', icon: <SafetyCertificateOutlined />, label: '文件隔离区' },
   { key: '/tasks', icon: <ThunderboltOutlined />, label: '任务中心' },
+  { key: '/quarantine', icon: <SafetyCertificateOutlined />, label: '文件隔离区' },
   { key: '/audit', icon: <AuditOutlined />, label: '审计日志' },
   { key: '/settings', icon: <SettingOutlined />, label: '系统设置' },
-  { key: '/media', icon: <FileImageOutlined />, label: '媒体完整性' },
 ];
 
 const groupLabel = (label: string) => <span className="nfc-nav-group-label">{label}</span>;
 
 const groupedMenuItems: MenuProps['items'] = [
-  {
-    type: 'group',
-    label: groupLabel('概览'),
-    children: [leafMenuItems[0]],
-  },
-  {
-    type: 'group',
-    label: groupLabel('数据与扫描'),
-    children: [leafMenuItems[1], leafMenuItems[2], leafMenuItems[14]],
-  },
-  {
-    type: 'group',
-    label: groupLabel('文件工具'),
-    children: [leafMenuItems[3], leafMenuItems[4], leafMenuItems[5], leafMenuItems[6]],
-  },
-  {
-    type: 'group',
-    label: groupLabel('自动化'),
-    children: [leafMenuItems[7], leafMenuItems[8]],
-  },
-  {
-    type: 'group',
-    label: groupLabel('安全与运行'),
-    children: [leafMenuItems[9], leafMenuItems[10], leafMenuItems[11], leafMenuItems[12]],
-  },
-  {
-    type: 'group',
-    label: groupLabel('系统'),
-    children: [leafMenuItems[13]],
-  },
+  { type: 'group', label: groupLabel('概览'), children: [leafMenuItems[0]] },
+  { type: 'group', label: groupLabel('文件管理'), children: [leafMenuItems[1], leafMenuItems[2], leafMenuItems[3]] },
+  { type: 'group', label: groupLabel('处理工具'), children: [leafMenuItems[4], leafMenuItems[5], leafMenuItems[6], leafMenuItems[7]] },
+  { type: 'group', label: groupLabel('自动化'), children: [leafMenuItems[8], leafMenuItems[9]] },
+  { type: 'group', label: groupLabel('运行与安全'), children: [leafMenuItems[10], leafMenuItems[11], leafMenuItems[12], leafMenuItems[13]] },
+  { type: 'group', label: groupLabel('系统'), children: [leafMenuItems[14]] },
 ];
 
 export const Sidebar: React.FC<Props> = ({
@@ -89,7 +66,6 @@ export const Sidebar: React.FC<Props> = ({
 }) => {
   const location = useLocation();
   const navigate = useNavigate();
-
   const selectedKey = '/' + location.pathname.split('/')[1];
   const menuItems = collapsed && !embedded ? leafMenuItems : groupedMenuItems;
 
@@ -112,11 +88,7 @@ export const Sidebar: React.FC<Props> = ({
         {(!collapsed || embedded) && (
           <span className="nfc-brand-copy">
             <span className="nfc-brand-title">NAS File Center</span>
-            <span className="nfc-sidebar-meta">
-              <span>CONTROL PLANE</span>
-              <span className="nfc-sidebar-meta-separator" aria-hidden="true">/</span>
-              <span>v0.4.7</span>
-            </span>
+            <span className="nfc-sidebar-meta">文件工作台 · v0.4.7</span>
           </span>
         )}
       </button>
@@ -141,7 +113,7 @@ export const Sidebar: React.FC<Props> = ({
       trigger={null}
       collapsed={collapsed}
       onCollapse={onCollapse}
-      width={232}
+      width={224}
       theme="light"
       className="nfc-sidebar"
     >

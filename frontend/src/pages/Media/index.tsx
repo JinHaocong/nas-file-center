@@ -243,7 +243,7 @@ export const MediaPage: React.FC = () => {
       ),
     },
     {
-      title: 'SHA256 校验',
+      title: 'SHA-256 校验',
       key: 'verification',
       width: 150,
       render: (_: unknown, record: MediaAsset) => (
@@ -301,9 +301,8 @@ export const MediaPage: React.FC = () => {
   return (
     <div className="nfc-operations-page nfc-media-page nfc-page-layout-ledger">
       <PageHeader
-        eyebrow="Media metadata + integrity"
-        title="媒体完整性"
-        description="独立分析图片/视频元数据，并可建立 SHA256 基线后重复校验以发现静默内容变化。媒体探测与哈希校验都不会修改源文件。"
+          title="媒体完整性"
+        description="分析图片和视频元数据，并用 SHA-256 基线重复校验以发现静默内容变化。媒体探测和哈希校验不会修改源文件。"
         actions={
           <ActionBar compact>
             <Button
@@ -331,16 +330,19 @@ export const MediaPage: React.FC = () => {
         <MetricCard label="正常" value={(summary?.healthy ?? 0).toLocaleString()} tone="success" icon={<CheckCircleOutlined />} />
         <MetricCard label="损坏" value={(summary?.corrupt ?? 0).toLocaleString()} tone="danger" icon={<WarningOutlined />} />
         <MetricCard label="未知" value={(summary?.unknown ?? 0).toLocaleString()} tone="attention" icon={<QuestionCircleOutlined />} />
-        <MetricCard label="SHA256 变化" value={(summary?.verification_changed ?? 0).toLocaleString()} tone="danger" icon={<SafetyCertificateOutlined />} />
+        <MetricCard label="SHA-256 变化" value={(summary?.verification_changed ?? 0).toLocaleString()} tone="danger" icon={<SafetyCertificateOutlined />} />
       </div>
 
       <DataPanel
         title="媒体目录"
         description="图片/视频 metadata 与完整性结果；unknown 不会被当作 corrupt。"
         variant="dense"
-        className="nfc-panel-flush"
-        action={<span className="nfc-panel-count">{mediaQuery.data?.total ?? 0} assets</span>}
+        className="nfc-panel-flush nfc-ledger-panel"
       >
+        <div className="nfc-ledger-toolbar">
+          <div className="nfc-ledger-result"><strong>{mediaQuery.data?.total ?? 0}</strong><span>个媒体文件</span></div>
+          <div className="nfc-ledger-safety-note"><span>未知状态不会视为损坏；永久删除仍要求管理员与冻结的 SHA-256 证据。</span></div>
+        </div>
         <div className="nfc-filter-bar">
           <Select
             allowClear
@@ -427,6 +429,7 @@ export const MediaPage: React.FC = () => {
               loading={mediaQuery.isLoading}
               dataSource={rows}
               columns={columns}
+              scroll={{ x: 1180 }}
               rowSelection={{
                 selectedRowKeys,
                 onChange: setSelectedRowKeys,

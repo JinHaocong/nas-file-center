@@ -46,9 +46,8 @@ export const AuditPage: React.FC = () => {
   return (
     <div className="nfc-operations-page nfc-audit-page nfc-page-layout-ledger">
       <PageHeader
-        eyebrow="Forensics"
-        title="审计日志"
-        description="按系统数据生命周期保留策略记录文件操作、隔离变更与执行校验事件。"
+          title="审计日志"
+        description="按系统数据生命周期保留策略记录文件操作、隔离变更与执行校验事件，并提供可追溯详情。"
         actions={
           <ActionBar compact>
             {lifecyclePolicy && <span className="nfc-retention-badge">保留 {formatAuditRetention(lifecyclePolicy.audit_retention_days)}</span>}
@@ -57,7 +56,11 @@ export const AuditPage: React.FC = () => {
         }
       />
 
-      <DataPanel title="审计事件" description="按操作、路径和服务端可搜索字段检索。" action={<span className="nfc-panel-count">{data?.total ?? 0} events</span>} className="nfc-panel-flush" variant="dense">
+      <DataPanel title="审计事件" description="按操作、路径和服务端可搜索字段检索。" className="nfc-panel-flush nfc-ledger-panel" variant="dense">
+        <div className="nfc-ledger-toolbar">
+          <div className="nfc-ledger-result"><strong>{data?.total ?? 0}</strong><span>条审计事件</span></div>
+          <div className="nfc-ledger-safety-note"><span>事件详情与原始元数据保持可追溯，不会因结果状态被隐藏。</span></div>
+        </div>
         <ActionBar className="nfc-filter-bar">
           <Input
             className="nfc-search-input"
@@ -69,7 +72,7 @@ export const AuditPage: React.FC = () => {
           />
         </ActionBar>
         <ResponsiveDataView
-          desktop={<Table dataSource={items} columns={columns} rowKey="id" loading={isLoading} pagination={{ current: page, pageSize, total: data?.total || 0, showSizeChanger: true, pageSizeOptions: ['10','20','50','100'], onChange: (p,ps)=>{setPage(p);setPageSize(ps);} }} />}
+          desktop={<Table dataSource={items} columns={columns} rowKey="id" loading={isLoading} scroll={{ x: 860 }} pagination={{ current: page, pageSize, total: data?.total || 0, showSizeChanger: true, pageSizeOptions: ['10','20','50','100'], onChange: (p,ps)=>{setPage(p);setPageSize(ps);} }} />}
           mobile={
             <>
               <div className="nfc-mobile-record-list">

@@ -54,9 +54,7 @@ export const LoginPage: React.FC = () => {
             className="nfc-touch-button"
             aria-label="切换登录页主题"
             icon={mode === 'dark' ? <MoonOutlined /> : mode === 'light' ? <SunOutlined /> : <DesktopOutlined />}
-          >
-            <span className="nfc-login-theme-label">{mode}</span>
-          </Button>
+          />
         </Dropdown>
       </div>
 
@@ -66,9 +64,8 @@ export const LoginPage: React.FC = () => {
             <HddOutlined />
           </span>
           <div>
-            <div className="nfc-page-eyebrow">NAS OPERATIONS CONSOLE</div>
             <h1 id="nfc-login-title">NAS File Center</h1>
-            <p>面向大容量 NAS 数据的扫描、计划、隔离与安全批处理中心。</p>
+            <p>登录后管理索引、扫描、执行计划与文件安全操作。</p>
           </div>
         </div>
 
@@ -108,11 +105,11 @@ export const LoginPage: React.FC = () => {
         </Form>
 
         <div className="nfc-login-security-note">
-          登录后所有真实文件变更仍受 Safe Mode、Plan 生命周期和服务端安全策略约束。
+          登录不会改变系统安全边界；真实文件变更仍受只读模式、执行计划生命周期和服务端策略约束。
         </div>
       </section>
 
-      <footer className="nfc-login-footer">NAS File Center v0.4.7 · Docker / NAS</footer>
+      <footer className="nfc-login-footer">NAS File Center v0.4.7</footer>
     </main>
   );
 };
