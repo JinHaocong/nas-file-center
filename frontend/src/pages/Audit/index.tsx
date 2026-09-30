@@ -47,7 +47,7 @@ export const AuditPage: React.FC = () => {
     <div className="nfc-operations-page nfc-audit-page nfc-page-layout-ledger">
       <PageHeader
           title="审计日志"
-        description="查看文件操作、隔离变更与执行校验事件。日志保留周期由系统数据生命周期策略控制。"
+        description="按系统数据生命周期保留策略记录文件操作、隔离变更与执行校验事件，并提供可追溯详情。"
         actions={
           <ActionBar compact>
             {lifecyclePolicy && <span className="nfc-retention-badge">保留 {formatAuditRetention(lifecyclePolicy.audit_retention_days)}</span>}

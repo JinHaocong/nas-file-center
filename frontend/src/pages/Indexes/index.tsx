@@ -377,7 +377,7 @@ export const IndexesPage: React.FC = () => {
           >
             <DirectoryPicker
               multiple={false}
-              allowManualInput
+              allowManualInput={true}
               placeholder="选择要建立索引的根目录..."
             />
           </Form.Item>
