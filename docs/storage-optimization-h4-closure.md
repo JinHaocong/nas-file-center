@@ -1,7 +1,7 @@
 # Storage Optimization H4 — Frontend / Closure Contract
 
-Status: **H4 CURRENT — PR #114 CANDIDATE; FINAL EXACT-HEAD CI REQUIRED**  
-Product baseline: **v0.4.7**  
+Status: **H4 CURRENT — PR #114 CANDIDATE; FINAL EXACT-HEAD CI REQUIRED**
+Product baseline: **v0.4.7**
 Architecture authority: [storage-optimization-h0-architecture-freeze.md](storage-optimization-h0-architecture-freeze.md)
 
 ## 1. Merged prerequisite authority
