@@ -4,7 +4,11 @@ from dataclasses import dataclass
 import json
 
 from app.planning.dedupe_engine import directory_ancestors_to_scan_root
-from app.planning.dedupe_preview import DedupePreviewCompilation, derive_canonical_top_level_dir
+from app.planning.dedupe_preview import (
+    DedupePreviewCompilation,
+    derive_canonical_top_level_dir,
+    normalize_storage_action,
+)
 
 
 @dataclass(frozen=True)
@@ -25,7 +29,15 @@ def build_advanced_dedupe_draft_intents(
     compilation: DedupePreviewCompilation,
     *,
     protect_last_file: bool,
+    storage_action: str = "quarantine",
+    actionable_source_paths: frozenset[str] | None = None,
 ) -> tuple[DedupeDraftIntent, ...]:
+    storage_action = normalize_storage_action(storage_action)
+    operation = {
+        "quarantine": "quarantine",
+        "hardlink": "hardlink_optimize",
+        "reflink": "reflink_optimize",
+    }[storage_action]
     intents: list[DedupeDraftIntent] = []
     recursive_mode = compilation.scorer_config.selection_mode == "recursive_directory_balanced_by_bytes"
 
@@ -45,6 +57,12 @@ def build_advanced_dedupe_draft_intents(
 
         members_by_path = {member.absolute_path: member for member in group.members}
         for cleanup_path in group.quarantine_candidates:
+            if (
+                storage_action != "quarantine"
+                and actionable_source_paths is not None
+                and cleanup_path not in actionable_source_paths
+            ):
+                continue
             member = members_by_path.get(cleanup_path)
             if member is None:
                 raise ValueError(f"Quarantine candidate is absent from group decision rows: {cleanup_path}")
@@ -58,6 +76,7 @@ def build_advanced_dedupe_draft_intents(
                 "keep_scan_root_index": group.recommended_keep.scan_root_index,
                 "keep_scan_root_path": group.recommended_keep.scan_root_path,
                 "selection_reason": keep_explain.selection_reason,
+                "storage_action": storage_action,
             }
             if protect_last_file:
                 metadata["protected_dir"] = derive_canonical_top_level_dir(
@@ -86,7 +105,7 @@ def build_advanced_dedupe_draft_intents(
 
             intents.append(DedupeDraftIntent(
                 sequence=len(intents) + 1,
-                operation="quarantine",
+                operation=operation,
                 source_path=cleanup_path,
                 keep_path=keep_path,
                 expected_size=group.file_size,

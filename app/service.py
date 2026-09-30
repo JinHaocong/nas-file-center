@@ -67,6 +67,26 @@ from app.workflows.errors import (
     WorkflowNotFoundError,
 )
 from app.planning.dedupe_config import canonical_config_dict
+from app.storage_optimization.capability import (
+    StorageOptimizationCapability,
+    probe_hardlink_between,
+    probe_hardlink_capability,
+    probe_reflink_between,
+)
+from app.storage_optimization.metadata import (
+    FrozenFileMetadata,
+    StorageMetadataError,
+    capture_file_metadata,
+    hardlink_metadata_compatibility,
+    ownership_can_be_preserved,
+)
+from app.storage_optimization.planning import (
+    actionable_storage_paths,
+    build_storage_action_snapshot,
+    storage_action_reclaim_bytes,
+    storage_action_released_bytes_by_scan_root,
+    storage_action_snapshot_digest,
+)
 from app.planning.dedupe_generate import DedupeDraftIntent, build_advanced_dedupe_draft_intents
 from app.planning.dedupe_preview import (
     DedupeEmptyPlanError,
@@ -83,6 +103,7 @@ from app.planning.dedupe_preview import (
     compile_advanced_dedupe_preview,
     compute_current_dedupe_db_lineage_digest,
     compute_preview_digest,
+    normalize_storage_action,
 )
 from app.workflows.schema import WorkflowDefinition
 from app.workflows.validation import validate_raw_steps_types
@@ -2008,7 +2029,153 @@ class FileCenterService:
                     expected_size=row.expected_size,
                     expected_hash=row.expected_hash,
                 )
-                if result.ok:
+                if result.ok and row.operation in {"hardlink_optimize", "reflink_optimize"}:
+                    if not self.settings.allow_mutation:
+                        has_error = True
+                        item_validations[row.id] = (
+                            "skipped",
+                            "STORAGE_OPTIMIZATION_MUTATION_DISABLED",
+                            None,
+                        )
+                        continue
+
+                    try:
+                        optimization_meta = json.loads(row.metadata_json or "{}")
+                        frozen_opt = optimization_meta.get("storage_optimization")
+                        if not isinstance(frozen_opt, dict):
+                            raise StorageMetadataError(
+                                "frozen storage optimization metadata missing"
+                            )
+                        transaction_id = frozen_opt.get("transaction_id")
+                        if not isinstance(transaction_id, str) or not transaction_id.strip():
+                            raise StorageMetadataError("transaction id missing")
+                        frozen_source_metadata = FrozenFileMetadata.from_json_dict(
+                            frozen_opt["frozen_source_metadata"]
+                        )
+                        frozen_keep_metadata = FrozenFileMetadata.from_json_dict(
+                            frozen_opt["frozen_keep_metadata"]
+                        )
+                        live_source_metadata = capture_file_metadata(row.source_path)
+                        live_keep_metadata = capture_file_metadata(row.keep_path)
+                    except (KeyError, TypeError, StorageMetadataError) as exc:
+                        has_error = True
+                        item_validations[row.id] = (
+                            "skipped",
+                            f"STORAGE_OPTIMIZATION_METADATA_UNAVAILABLE:{exc}",
+                            None,
+                        )
+                        continue
+
+                    def _stable_metadata_tuple(metadata: FrozenFileMetadata):
+                        return (
+                            metadata.mode,
+                            metadata.uid,
+                            metadata.gid,
+                            metadata.size,
+                            metadata.link_count,
+                            metadata.mtime_ns,
+                            metadata.xattrs,
+                        )
+
+                    if (
+                        _stable_metadata_tuple(live_source_metadata)
+                        != _stable_metadata_tuple(frozen_source_metadata)
+                        or _stable_metadata_tuple(live_keep_metadata)
+                        != _stable_metadata_tuple(frozen_keep_metadata)
+                    ):
+                        metadata_stale = StaleItemDetail(
+                            item_id=row.id,
+                            source_path=row.source_path,
+                            reason="STORAGE_OPTIMIZATION_METADATA_CHANGED",
+                            expected={
+                                "source_metadata": frozen_source_metadata.to_json_dict(),
+                                "keep_metadata": frozen_keep_metadata.to_json_dict(),
+                            },
+                            actual={
+                                "source_metadata": live_source_metadata.to_json_dict(),
+                                "keep_metadata": live_keep_metadata.to_json_dict(),
+                            },
+                        )
+                        stale_items.append(metadata_stale)
+                        item_validations[row.id] = (
+                            "stale",
+                            metadata_stale.reason,
+                            None,
+                        )
+                        continue
+
+                    if row.operation == "hardlink_optimize":
+                        try:
+                            compatible, metadata_reason, _, _ = hardlink_metadata_compatibility(
+                                row.keep_path,
+                                row.source_path,
+                            )
+                        except StorageMetadataError as exc:
+                            compatible = False
+                            metadata_reason = f"HARDLINK_METADATA_UNAVAILABLE:{exc}"
+                        if not compatible:
+                            has_error = True
+                            item_validations[row.id] = (
+                                "skipped",
+                                metadata_reason,
+                                None,
+                            )
+                            continue
+                        capability = probe_hardlink_between(
+                            Path(row.keep_path).parent,
+                            Path(row.source_path).parent,
+                            self.settings.allowed_roots,
+                        )
+                    else:
+                        if not ownership_can_be_preserved(live_source_metadata):
+                            has_error = True
+                            item_validations[row.id] = (
+                                "skipped",
+                                "REFLINK_OWNERSHIP_UNPRESERVABLE",
+                                None,
+                            )
+                            continue
+                        capability = probe_reflink_between(
+                            Path(row.keep_path).parent,
+                            Path(row.source_path).parent,
+                            self.settings.allowed_roots,
+                        )
+
+                    if capability.capability is not StorageOptimizationCapability.SUPPORTED:
+                        has_error = True
+                        item_validations[row.id] = (
+                            "skipped",
+                            f"STORAGE_OPTIMIZATION_CAPABILITY_{capability.capability.value.upper()}:{capability.reason}",
+                            None,
+                        )
+                        continue
+
+                    # H3 publication/capture uses atomic local hard-link
+                    # no-clobber anchors in the SOURCE parent even for Reflink.
+                    local_publish_capability = probe_hardlink_capability(
+                        Path(row.source_path).parent,
+                        self.settings.allowed_roots,
+                    )
+                    if (
+                        local_publish_capability.capability
+                        is not StorageOptimizationCapability.SUPPORTED
+                    ):
+                        has_error = True
+                        item_validations[row.id] = (
+                            "skipped",
+                            "STORAGE_OPTIMIZATION_LOCAL_PUBLISH_"
+                            f"{local_publish_capability.capability.value.upper()}:"
+                            f"{local_publish_capability.reason}",
+                            None,
+                        )
+                        continue
+
+                    item_validations[row.id] = (
+                        "validated",
+                        f"SHA256 verified; {row.operation} capability verified",
+                        result.sha256,
+                    )
+                elif result.ok:
                     item_validations[row.id] = ("validated", "SHA256 verified", result.sha256)
                 else:
                     has_error = True
@@ -2684,6 +2851,55 @@ class FileCenterService:
                         meta["keep_snapshot"] = snap_k
                     except Exception:
                         pass
+
+                if it["operation"] in {"hardlink_optimize", "reflink_optimize"}:
+                    if not it["keep_path"]:
+                        raise StateConflictError(
+                            "STORAGE_OPTIMIZATION_KEEP_MISSING: optimization item requires KEEP"
+                        )
+                    if not computed_hash:
+                        raise StateConflictError(
+                            "STORAGE_OPTIMIZATION_HASH_MISSING: optimization item requires frozen SHA256"
+                        )
+                    try:
+                        source_metadata = capture_file_metadata(src_p)
+                        keep_metadata = capture_file_metadata(it["keep_path"])
+                    except StorageMetadataError as exc:
+                        raise StateConflictError(
+                            f"STORAGE_OPTIMIZATION_METADATA_UNAVAILABLE: {exc}"
+                        ) from exc
+
+                    if source_metadata.link_count != 1:
+                        raise StateConflictError(
+                            "SOURCE_HAS_MULTIPLE_HARDLINKS: optimization requires a singly-linked SOURCE inode"
+                        )
+
+                    if it["operation"] == "hardlink_optimize":
+                        compatible, metadata_reason, keep_metadata, source_metadata = (
+                            hardlink_metadata_compatibility(it["keep_path"], src_p)
+                        )
+                        if not compatible:
+                            raise StateConflictError(metadata_reason)
+                    else:
+                        metadata_reason = "REFLINK_SOURCE_METADATA_FROZEN"
+                        if not ownership_can_be_preserved(source_metadata):
+                            raise StateConflictError(
+                                "REFLINK_OWNERSHIP_UNPRESERVABLE: current runtime cannot preserve source uid/gid"
+                            )
+
+                    tx_id = meta.get("storage_optimization_transaction_id")
+                    if not isinstance(tx_id, str) or not tx_id.strip():
+                        tx_id = str(uuid4())
+                    meta["storage_optimization_transaction_id"] = tx_id
+                    meta["storage_optimization"] = {
+                        "schema_version": 1,
+                        "transaction_id": tx_id,
+                        "operation": it["operation"],
+                        "frozen_source_metadata": source_metadata.to_json_dict(),
+                        "frozen_keep_metadata": keep_metadata.to_json_dict(),
+                        "metadata_reason": metadata_reason,
+                    }
+
                 upd["metadata_json"] = json.dumps(meta, ensure_ascii=False)
 
                 if it["target_path"]:
@@ -6142,6 +6358,7 @@ class FileCenterService:
         self,
         scan_job_id: int,
         scorer_config: dict[str, Any] | None = None,
+        storage_action: str = "quarantine",
         page: int = 1,
         page_size: int = 50,
     ) -> dict[str, Any]:
@@ -6164,6 +6381,7 @@ class FileCenterService:
             else None
         )
 
+        storage_action = normalize_storage_action(storage_action)
         with self.SessionLocal() as session:
             compilation = compile_advanced_dedupe_preview(
                 session=session,
@@ -6173,14 +6391,23 @@ class FileCenterService:
                 allowed_roots=effective_allowed_roots,
                 quarantine_root=effective_quarantine_root,
             )
-            return build_preview_response(
-                compilation=compilation,
-                protect_last_file=effective_protect_last_file,
-                allowed_roots=effective_allowed_roots,
-                quarantine_root=effective_quarantine_root,
-                page=page,
-                page_size=page_size,
-            )
+        if storage_action == "quarantine":
+            action_snapshot = {}
+            action_snapshot_digest = None
+        else:
+            action_snapshot = build_storage_action_snapshot(compilation, storage_action)
+            action_snapshot_digest = storage_action_snapshot_digest(action_snapshot)
+        return build_preview_response(
+            compilation=compilation,
+            protect_last_file=effective_protect_last_file,
+            allowed_roots=effective_allowed_roots,
+            quarantine_root=effective_quarantine_root,
+            storage_action=storage_action,
+            storage_action_snapshot=action_snapshot,
+            storage_action_snapshot_digest=action_snapshot_digest,
+            page=page,
+            page_size=page_size,
+        )
 
     def _capture_effective_dedupe_safety_snapshot(self) -> tuple[bool, tuple[Path, ...], Path | None, dict[str, Any]]:
         protect_last_file = bool(getattr(self.settings, "protect_last_file", True))
@@ -6215,7 +6442,9 @@ class FileCenterService:
         *,
         scorer_config: dict[str, Any],
         expected_preview_digest: str,
+        storage_action: str = "quarantine",
     ) -> dict[str, Any]:
+        storage_action = normalize_storage_action(storage_action)
         protect_last_file, allowed_roots, quarantine_root, effective_safety_policy = (
             self._capture_effective_dedupe_safety_snapshot()
         )
@@ -6230,12 +6459,22 @@ class FileCenterService:
                 quarantine_root=quarantine_root,
             )
 
+        if storage_action == "quarantine":
+            action_snapshot = {}
+            action_snapshot_digest = None
+        else:
+            action_snapshot = build_storage_action_snapshot(compilation, storage_action)
+            action_snapshot_digest = storage_action_snapshot_digest(action_snapshot)
+        action_paths = actionable_storage_paths(action_snapshot)
+
         actual_preview_digest = compute_preview_digest(
             scan_job_id=compilation.scan_job_id,
             scorer_config_digest=compilation.scorer_config_digest,
             source_snapshot_digest=compilation.source_snapshot_digest,
             decision_digest=compilation.decision_digest,
             effective_safety_policy=effective_safety_policy,
+            storage_action=storage_action,
+            storage_action_snapshot_digest=action_snapshot_digest,
         )
         if actual_preview_digest.lower() != expected_preview_digest.lower():
             raise DedupePreviewChangedError(details={
@@ -6243,21 +6482,33 @@ class FileCenterService:
                 "actual_preview_digest": actual_preview_digest,
             })
 
-        if compilation.planned_quarantine_count == 0:
-            raise DedupeEmptyPlanError(details={
-                "scan_job_id": scan_job_id,
-                "preview_digest": actual_preview_digest,
-            })
+        planned_action_count = (
+            compilation.planned_quarantine_count
+            if storage_action == "quarantine"
+            else len(action_paths)
+        )
+        if planned_action_count == 0:
+            raise DedupeEmptyPlanError(
+                "DEDUPE_EMPTY_PLAN: selected storage action produced no actionable intents",
+                details={
+                    "scan_job_id": scan_job_id,
+                    "storage_action": storage_action,
+                    "preview_digest": actual_preview_digest,
+                },
+            )
 
         intents = build_advanced_dedupe_draft_intents(
             compilation,
             protect_last_file=protect_last_file,
+            storage_action=storage_action,
+            actionable_source_paths=action_paths,
         )
-        if len(intents) != compilation.planned_quarantine_count:
+        if len(intents) != planned_action_count:
             raise DedupeInvalidConfigError(
-                "Advanced dedupe intent count does not match compilation summary",
+                "Advanced dedupe intent count does not match storage-action preview",
                 details={
-                    "planned_quarantine_count": compilation.planned_quarantine_count,
+                    "storage_action": storage_action,
+                    "planned_action_count": planned_action_count,
                     "intent_count": len(intents),
                 },
             )
@@ -6267,6 +6518,22 @@ class FileCenterService:
             compilation=compilation,
             preview_digest=actual_preview_digest,
             effective_safety_policy=effective_safety_policy,
+            storage_action=storage_action,
+            storage_action_snapshot_digest=action_snapshot_digest,
+            storage_action_reclaim_bytes_value=storage_action_reclaim_bytes(action_snapshot),
+            storage_action_released_bytes_by_root_value=(
+                {
+                    str(key): value
+                    for key, value in sorted(
+                        compilation.released_bytes_by_scan_root.items()
+                    )
+                }
+                if storage_action == "quarantine"
+                else storage_action_released_bytes_by_scan_root(
+                    action_snapshot,
+                    len(compilation.scan_roots),
+                )
+            ),
             intents=intents,
         )
 
@@ -6287,6 +6554,10 @@ class FileCenterService:
         compilation,
         preview_digest: str,
         effective_safety_policy: dict[str, Any],
+        storage_action: str,
+        storage_action_snapshot_digest: str | None,
+        storage_action_reclaim_bytes_value: int,
+        storage_action_released_bytes_by_root_value: dict[str, int],
         intents: tuple[DedupeDraftIntent, ...],
     ) -> BatchPlan:
         metadata = {
@@ -6300,16 +6571,26 @@ class FileCenterService:
             "preview_digest": preview_digest,
             "db_lineage_digest": compilation.db_lineage_digest,
             "selection_mode": compilation.summary.get("selection_mode"),
+            "storage_action": storage_action,
+            "storage_action_snapshot_digest": storage_action_snapshot_digest,
             "effective_safety_policy": effective_safety_policy,
             "summary": {
                 "actionable_group_count": compilation.actionable_group_count,
                 "skipped_group_count": compilation.skipped_group_count,
-                "planned_quarantine_count": compilation.planned_quarantine_count,
-                "expected_reclaim_bytes": compilation.expected_reclaim_bytes,
-                "released_bytes_by_scan_root": {
-                    str(key): value
-                    for key, value in sorted(compilation.released_bytes_by_scan_root.items())
-                },
+                "storage_action": storage_action,
+                "planned_action_count": len(intents),
+                "planned_quarantine_count": compilation.planned_quarantine_count if storage_action == "quarantine" else 0,
+                "storage_blocked_count": (
+                    max(0, compilation.planned_quarantine_count - len(intents))
+                    if storage_action != "quarantine"
+                    else 0
+                ),
+                "expected_reclaim_bytes": (
+                    compilation.expected_reclaim_bytes
+                    if storage_action == "quarantine"
+                    else storage_action_reclaim_bytes_value
+                ),
+                "released_bytes_by_scan_root": storage_action_released_bytes_by_root_value,
             },
         }
 
@@ -6330,7 +6611,11 @@ class FileCenterService:
                 kind="dedupe",
                 status="draft",
                 expected_changes=len(intents),
-                expected_reclaim_bytes=compilation.expected_reclaim_bytes,
+                expected_reclaim_bytes=(
+                    compilation.expected_reclaim_bytes
+                    if storage_action == "quarantine"
+                    else storage_action_reclaim_bytes_value
+                ),
                 metadata_json=json.dumps(metadata, ensure_ascii=False, sort_keys=True),
             )
             session.add(plan)

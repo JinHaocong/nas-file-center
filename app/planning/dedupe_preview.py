@@ -38,6 +38,18 @@ from app.planning.dedupe_engine import (
 MAX_DEDUPE_CANDIDATES = 50_000
 MAX_PLANNED_QUARANTINE = 100_000
 
+STORAGE_ACTIONS = frozenset({"quarantine", "hardlink", "reflink"})
+
+
+def normalize_storage_action(value: str | None) -> str:
+    action = "quarantine" if value is None else str(value).strip().lower()
+    if action not in STORAGE_ACTIONS:
+        raise DedupeInvalidConfigError(
+            "storage_action must be one of quarantine, hardlink, reflink",
+            details={"field": "storage_action", "value": value},
+        )
+    return action
+
 
 class DedupeError(Exception):
     def __init__(self, message: str, code: str, details: Any = None, status_code: int = 400):
@@ -997,8 +1009,11 @@ def compute_preview_digest(
     source_snapshot_digest: str,
     decision_digest: str,
     effective_safety_policy: Mapping[str, Any],
+    storage_action: str = "quarantine",
+    storage_action_snapshot_digest: str | None = None,
     dedupe_engine_version: int = 1,
 ) -> str:
+    storage_action = normalize_storage_action(storage_action)
     payload = {
         "dedupe_engine_version": dedupe_engine_version,
         "scan_job_id": scan_job_id,
@@ -1007,6 +1022,12 @@ def compute_preview_digest(
         "decision_digest": decision_digest,
         "effective_safety_policy": dict(sorted(effective_safety_policy.items())),
     }
+    # Quarantine is the historical default and must preserve the exact legacy
+    # preview digest contract. Only the new optimization modes extend digest
+    # authority with storage-action-specific fields.
+    if storage_action != "quarantine":
+        payload["storage_action"] = storage_action
+        payload["storage_action_snapshot_digest"] = storage_action_snapshot_digest
     return hashlib.sha256(canonical_json_dumps(payload).encode("utf-8")).hexdigest()
 
 
@@ -1016,9 +1037,13 @@ def build_preview_response(
     protect_last_file: bool = True,
     allowed_roots: Sequence[str | Path] | None = None,
     quarantine_root: str | Path | None = None,
+    storage_action: str = "quarantine",
+    storage_action_snapshot: Mapping[str, Mapping[str, Any]] | None = None,
+    storage_action_snapshot_digest: str | None = None,
     page: int = 1,
     page_size: int = 50,
 ) -> dict[str, Any]:
+    storage_action = normalize_storage_action(storage_action)
     canonical_safety_policy = canonicalize_effective_safety_policy(
         protect_last_file=protect_last_file,
         allowed_roots=allowed_roots,
@@ -1030,9 +1055,12 @@ def build_preview_response(
         source_snapshot_digest=compilation.source_snapshot_digest,
         decision_digest=compilation.decision_digest,
         effective_safety_policy=canonical_safety_policy,
+        storage_action=storage_action,
+        storage_action_snapshot_digest=storage_action_snapshot_digest,
     )
 
     recursive_mode = compilation.scorer_config.selection_mode == "recursive_directory_balanced_by_bytes"
+    storage_action_snapshot = storage_action_snapshot or {}
     all_rows: list[dict[str, Any]] = []
     for g in compilation.groups:
         g_prov_id = g.group_provenance_id
@@ -1053,13 +1081,26 @@ def build_preview_response(
             g_balance_info = None
 
         for m in g.members:
+            storage_info: Mapping[str, Any] = {}
             if g_status == "skipped":
                 member_decision = "SKIPPED"
             elif m.recommended_keep:
                 member_decision = "KEEP"
             elif m.absolute_path in g_quarantine_set:
-                member_decision = "QUARANTINE"
+                storage_info = storage_action_snapshot.get(m.absolute_path, {})
+                if (
+                    storage_action != "quarantine"
+                    and storage_info.get("actionable") is not True
+                ):
+                    member_decision = "SKIPPED"
+                else:
+                    member_decision = {
+                        "quarantine": "QUARANTINE",
+                        "hardlink": "HARDLINK",
+                        "reflink": "REFLINK",
+                    }[storage_action]
             else:
+                storage_info = {}
                 member_decision = "SKIPPED"
             contrib_list = [
                 {
@@ -1114,6 +1155,26 @@ def build_preview_response(
                 "balance_info": m.balance_info,
                 "candidate_balance_bucket": candidate_balance_bucket,
                 "recursive_last_file_protection_reason": recursive_last_file_protection_reason,
+                "storage_action": storage_action,
+                "storage_capability": (
+                    storage_info.get("capability")
+                    if isinstance(storage_info, Mapping)
+                    else None
+                ),
+                "storage_metadata_compatible": (
+                    storage_info.get("actionable")
+                    if storage_action != "quarantine"
+                    and isinstance(storage_info, Mapping)
+                    and m.absolute_path in g_quarantine_set
+                    else None
+                ),
+                "storage_blocking_reason": (
+                    storage_info.get("reason")
+                    if storage_action != "quarantine"
+                    and isinstance(storage_info, Mapping)
+                    and storage_info.get("actionable") is not True
+                    else None
+                ),
             })
 
     total_rows = len(all_rows)
@@ -1125,14 +1186,49 @@ def build_preview_response(
         str(i): compilation.released_bytes_by_scan_root.get(i, 0)
         for i in range(len(compilation.scan_roots))
     }
+    if storage_action == "quarantine":
+        planned_action_count = compilation.planned_quarantine_count
+        storage_blocked_count = 0
+        action_expected_reclaim_bytes = compilation.expected_reclaim_bytes
+    else:
+        planned_action_count = sum(
+            1 for info in storage_action_snapshot.values()
+            if info.get("actionable") is True
+        )
+        storage_blocked_count = sum(
+            1 for info in storage_action_snapshot.values()
+            if info.get("actionable") is not True
+        )
+        action_expected_reclaim_bytes = sum(
+            int(info.get("expected_size") or 0)
+            for info in storage_action_snapshot.values()
+            if info.get("actionable") is True
+        )
+        released_bytes_by_scan_root_formatted = {
+            str(i): 0 for i in range(len(compilation.scan_roots))
+        }
+        for info in storage_action_snapshot.values():
+            if info.get("actionable") is not True:
+                continue
+            raw_index = info.get("scan_root_index")
+            if not isinstance(raw_index, int) or isinstance(raw_index, bool):
+                continue
+            key = str(raw_index)
+            if key in released_bytes_by_scan_root_formatted:
+                released_bytes_by_scan_root_formatted[key] += int(
+                    info.get("expected_size") or 0
+                )
     summary_data = {
         "selection_mode": compilation.summary.get("selection_mode", compilation.scorer_config.selection_mode),
         "group_count": len(compilation.groups),
         "candidate_member_count": compilation.candidate_member_count,
         "actionable_group_count": compilation.actionable_group_count,
         "skipped_group_count": compilation.skipped_group_count,
-        "planned_quarantine_count": compilation.planned_quarantine_count,
-        "expected_reclaim_bytes": compilation.expected_reclaim_bytes,
+        "storage_action": storage_action,
+        "planned_action_count": planned_action_count,
+        "storage_blocked_count": storage_blocked_count,
+        "planned_quarantine_count": compilation.planned_quarantine_count if storage_action == "quarantine" else 0,
+        "expected_reclaim_bytes": action_expected_reclaim_bytes,
         "released_bytes_by_scan_root": released_bytes_by_scan_root_formatted,
     }
     return {
@@ -1143,12 +1239,16 @@ def build_preview_response(
         "candidate_member_count": compilation.candidate_member_count,
         "actionable_group_count": compilation.actionable_group_count,
         "skipped_group_count": compilation.skipped_group_count,
-        "planned_quarantine_count": compilation.planned_quarantine_count,
-        "expected_reclaim_bytes": compilation.expected_reclaim_bytes,
+        "storage_action": storage_action,
+        "planned_action_count": planned_action_count,
+        "storage_blocked_count": storage_blocked_count,
+        "planned_quarantine_count": compilation.planned_quarantine_count if storage_action == "quarantine" else 0,
+        "expected_reclaim_bytes": action_expected_reclaim_bytes,
         "released_bytes_by_scan_root": released_bytes_by_scan_root_formatted,
         "scorer_config_digest": compilation.scorer_config_digest,
         "source_snapshot_digest": compilation.source_snapshot_digest,
         "decision_digest": compilation.decision_digest,
+        "storage_action_snapshot_digest": storage_action_snapshot_digest,
         "preview_digest": preview_digest,
         "effective_safety_policy": canonical_safety_policy,
         "preview_source": "completed-scan-readonly-safety",
