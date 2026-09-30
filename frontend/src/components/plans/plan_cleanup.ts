@@ -3,6 +3,7 @@ export interface PlanDeleteAvailability {
   reason?: string;
   hasExecutionHistory?: boolean;
   willCancelIdleExecution?: boolean;
+  orphanedExecution?: boolean;
 }
 
 export const PLAN_SINGLE_DELETE_ALLOWED = new Set([
@@ -57,6 +58,13 @@ export function getPlanDeleteAvailability(plan?: {
     return { canDelete: false, reason: '计划存在活动执行任务，当前状态无法安全删除' };
   }
 
+  if (plan.status === 'executing') {
+    return {
+      canDelete: true,
+      hasExecutionHistory: true,
+      orphanedExecution: true,
+    };
+  }
   if (PLAN_DELETE_BLOCKED_ACTIVE.has(plan.status)) {
     return { canDelete: false, reason: '计划正在校验或执行中，禁止删除' };
   }
@@ -82,13 +90,20 @@ export function getPlanDeleteConfirmationContent(plan: {
   active_work_job_status?: string | null;
   active_work_job_recovered_after_restart?: boolean;
 }): PlanDeleteConfirmationContent {
-  const { hasExecutionHistory, willCancelIdleExecution } = getPlanDeleteAvailability(plan);
+  const { hasExecutionHistory, willCancelIdleExecution, orphanedExecution } = getPlanDeleteAvailability(plan);
   const title = `确认删除计划 #${plan.id}？`;
   if (willCancelIdleExecution) {
     return {
       title,
       description:
         '关联执行任务当前处于等待或暂停状态，将先安全取消该任务，再删除计划及计划条目元数据。已经执行的 NAS 文件操作不会被撤销（Delete ≠ Undo），Audit 审计记录仍会保留。',
+    };
+  }
+  if (orphanedExecution) {
+    return {
+      title,
+      description:
+        '该计划仍标记为执行中，但已经没有活动执行任务，属于中断后遗留状态。删除仅清理计划及计划条目元数据，不会继续执行，也不会撤销已经发生的 NAS 文件操作（Delete ≠ Undo）。Audit 审计记录仍会保留。',
     };
   }
   const description = hasExecutionHistory

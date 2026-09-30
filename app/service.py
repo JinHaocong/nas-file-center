@@ -3470,7 +3470,14 @@ class FileCenterService:
                     f"(status: {active_job.status})"
                 )
 
-            if plan.status in PLAN_DELETE_BLOCKED_ACTIVE or plan.status not in PLAN_SINGLE_DELETE_ALLOWED:
+            orphaned_executing = plan.status == "executing"
+            if (
+                not orphaned_executing
+                and (
+                    plan.status in PLAN_DELETE_BLOCKED_ACTIVE
+                    or plan.status not in PLAN_SINGLE_DELETE_ALLOWED
+                )
+            ):
                 raise ValueError(f"Plan with status '{plan.status}' cannot be deleted")
 
             session.execute(delete(BatchPlanItem).where(BatchPlanItem.plan_id == plan_id))

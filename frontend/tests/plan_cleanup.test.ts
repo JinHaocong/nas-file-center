@@ -47,13 +47,19 @@ describe('Plan Lifecycle Cleanup: Policy Matrix & API Contract Tests', () => {
       }
     });
 
-    test('active execution states (validating, executing) are blocked from deletion', () => {
-      const activeStatuses = ['validating', 'executing'];
-      for (const status of activeStatuses) {
-        const res = getPlanDeleteAvailability({ status });
-        assert.strictEqual(res.canDelete, false, `Active status ${status} must be blocked`);
-        assert.strictEqual(res.reason, '计划正在校验或执行中，禁止删除');
-      }
+    test('validating remains blocked while orphan executing without active job is deletable', () => {
+      const validating = getPlanDeleteAvailability({ status: 'validating' });
+      assert.strictEqual(validating.canDelete, false);
+      assert.strictEqual(validating.reason, '计划正在校验或执行中，禁止删除');
+
+      const orphan = getPlanDeleteAvailability({
+        status: 'executing',
+        active_work_job_id: null,
+      });
+      assert.strictEqual(orphan.canDelete, true);
+      assert.strictEqual(orphan.hasExecutionHistory, true);
+      assert.strictEqual(orphan.orphanedExecution, true);
+      assert.strictEqual(orphan.reason, undefined);
     });
 
     test('active_work_job_id without a trustworthy status remains fail-closed', () => {
@@ -185,6 +191,18 @@ describe('Plan Lifecycle Cleanup: Policy Matrix & API Contract Tests', () => {
           'Must clearly state executed operations are not reverted'
         );
       }
+    });
+
+    test('orphan executing confirmation explains metadata-only cleanup and no undo', () => {
+      const content = getPlanDeleteConfirmationContent({
+        id: 790,
+        status: 'executing',
+        active_work_job_id: null,
+      });
+      assert.ok(content.description.includes('没有活动执行任务'));
+      assert.ok(content.description.includes('仅清理计划及计划条目元数据'));
+      assert.ok(content.description.includes('Delete ≠ Undo'));
+      assert.ok(content.description.includes('Audit 审计记录仍会保留'));
     });
 
     test('interrupted queued execution confirmation explains task cancellation and no undo', () => {
