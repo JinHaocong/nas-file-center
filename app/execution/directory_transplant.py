@@ -578,4 +578,10 @@ def cleanup_directory_transplant_state(
     try:
         parent.rmdir()
     except OSError:
+        return
+
+    root = parent.parent
+    try:
+        root.rmdir()
+    except OSError:
         pass

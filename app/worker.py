@@ -433,6 +433,28 @@ def recover_running_jobs(settings: Settings) -> int:
     return 0
 
 
+def _cleanup_transaction_residue_after_recovery(
+    settings: Settings,
+    session_factory: sessionmaker,
+    worker_id: str,
+) -> None:
+    """Best-effort retirement of NFC-owned terminal transaction metadata."""
+    try:
+        from app.quarantine.transaction_residue import cleanup_terminal_transaction_residue
+
+        stats = cleanup_terminal_transaction_residue(
+            settings=settings,
+            session_factory=session_factory,
+            worker_id=worker_id,
+        )
+        if any(stats.values()):
+            logger.info("Retired terminal transaction residue: %s", stats)
+    except Exception:
+        # Residue cleanup is maintenance only. Unknown or unsafe artifacts are
+        # intentionally retained; a cleanup failure must never stop the Worker.
+        logger.exception("Terminal transaction residue cleanup failed closed")
+
+
 def worker_loop(
     settings: Settings | None = None,
     *,
@@ -478,6 +500,7 @@ def worker_loop(
 
     if acquired:
         recover_interrupted_jobs(engine, SessionLocal, worker_id=worker_id)
+        _cleanup_transaction_residue_after_recovery(settings, SessionLocal, worker_id)
 
     last_scheduler_tick_minute = None
 
@@ -496,6 +519,7 @@ def worker_loop(
                     time.sleep(poll_seconds)
                     continue
                 recover_interrupted_jobs(engine, SessionLocal, worker_id=worker_id)
+                _cleanup_transaction_residue_after_recovery(settings, SessionLocal, worker_id)
 
             scheduler_now = utcnow()
             scheduler_minute = scheduler_now.replace(second=0, microsecond=0)
