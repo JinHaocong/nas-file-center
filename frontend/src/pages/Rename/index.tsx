@@ -153,13 +153,13 @@ export const RenamePage: React.FC = () => {
     <div className="nfc-operations-page nfc-rename-page nfc-page-layout-workbench">
       <PageHeader
         title="批量重命名"
-        description="先定义重命名规则并生成名称预览，直接对照原路径与目标路径；只有全部无冲突时才能生成执行计划。"
+        description="组合正则、扩展名替换、前后缀、父目录名与编号规则；必须先 Preview，并在无冲突时生成 Rename Plan。"
       />
 
       <DataPanel
         title="重命名规则"
         description="Preview 只计算目标路径与冲突；不会直接修改任何文件名。"
-        className="nfc-complex-form-panel nfc-file-tool-form nfc-tool-workbench nfc-workbench-primary-panel"
+        className="nfc-complex-form-panel nfc-file-tool-form nfc-tool-workbench"
       >
         <Form
           className="nfc-rename-form"
@@ -246,7 +246,7 @@ export const RenamePage: React.FC = () => {
               onClick={handlePreview}
               loading={previewMutation.isPending}
             >
-              生成名称预览
+              生成重命名 Preview
             </Button>
             {proposals && proposals.length > 0 && (
               <Button
@@ -255,7 +255,7 @@ export const RenamePage: React.FC = () => {
                 loading={planMutation.isPending}
                 disabled={hasConflicts}
               >
-                生成执行计划 ({proposals.length} 项)
+                生成执行 Plan ({proposals.length} 项)
               </Button>
             )}
           </ActionBar>
@@ -274,10 +274,10 @@ export const RenamePage: React.FC = () => {
 
       {proposals && (
         <DataPanel
-          title="名称预览"
-          description="逐项检查原路径 → 目标路径与冲突状态；只有全量安全时才能生成执行计划。"
-          action={<span className="nfc-panel-count">{proposals.length} 项预览</span>}
-          className="nfc-panel-flush nfc-file-tool-result-panel nfc-workbench-result-panel"
+          title="重命名 Preview"
+          description="逐项检查 source → target 与冲突状态；只有全量安全时才能生成 Plan。"
+          action={<span className="nfc-panel-count">{proposals.length} proposals</span>}
+          className="nfc-panel-flush nfc-file-tool-result-panel"
           variant="dense"
         >
           <ResponsiveDataView
@@ -286,7 +286,6 @@ export const RenamePage: React.FC = () => {
                 dataSource={proposals}
                 columns={columns}
                 rowKey="source"
-                scroll={{ x: 940 }}
                 pagination={{ pageSize: 20 }}
               />
             }

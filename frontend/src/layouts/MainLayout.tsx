@@ -4,6 +4,7 @@ import { Outlet, Navigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Header } from '../components/Header';
 import { ResponsiveNav } from '../components/layout/ResponsiveNav';
+import { MobileDock } from '../components/layout/MobileDock';
 import { useResponsive } from '../hooks/useResponsive';
 
 const { Content } = Layout;
@@ -46,6 +47,7 @@ export const MainLayout: React.FC = () => {
         <Content className="nfc-page-content">
           <Outlet />
         </Content>
+        {isMobile && <MobileDock onMore={() => setMobileNavOpen(true)} />}
       </Layout>
     </Layout>
   );

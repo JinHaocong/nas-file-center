@@ -253,25 +253,15 @@ export const QuarantinePage: React.FC = () => {
   return (
     <div className="nfc-operations-page nfc-quarantine-page nfc-page-layout-ledger">
       <PageHeader
-          title="文件隔离区"
-        description="隔离区是所有文件恢复与永久清理的安全边界。恢复遵循零覆盖语义；永久删除仍受管理员、ALLOW_MUTATION 与 ALLOW_DELETE 共同约束。"
+        eyebrow="Safety boundary"
+        title="文件隔离区"
+        description="Quarantine-first 文件安全边界。恢复遵循零覆盖语义；永久删除同时受管理员、ALLOW_MUTATION 与 ALLOW_DELETE 约束。"
         actions={<ActionBar compact><Button icon={<ReloadOutlined />} onClick={() => refetch()} loading={isFetching}>刷新</Button></ActionBar>}
       />
 
       {isSafeMode && <Alert className="nfc-page-alert" message="只读安全保护模式生效中" description="系统当前以 ALLOW_MUTATION=false 运行。所有文件移动与写入已被锁定，恢复与清除操作当前不可用。" type="info" showIcon icon={<LockOutlined />} />}
 
-      <DataPanel title="隔离文件" description="筛选、显式选择并生成恢复或永久删除计划。" className="nfc-panel-flush nfc-ledger-panel" variant="dense">
-        <div className="nfc-ledger-toolbar">
-          <div className="nfc-ledger-result">
-            <strong>{quarantineData?.total ?? 0}</strong>
-            <span>个隔离条目</span>
-          </div>
-          <div className="nfc-ledger-safety-note">
-            <LockOutlined />
-            <span>{isSafeMode ? '当前为只读保护模式，恢复与清除已锁定。' : '恢复和永久清除仍需满足现有权限与安全开关。'}</span>
-          </div>
-        </div>
-
+      <DataPanel title="隔离文件" description="筛选、显式选择并生成恢复或永久删除计划。" action={<span className="nfc-panel-count">{quarantineData?.total ?? 0} entries</span>} className="nfc-panel-flush" variant="dense">
         <div className="nfc-quarantine-command-center">
           <ActionBar className="nfc-filter-bar nfc-quarantine-filter-bar">
           <Input className="nfc-search-input" placeholder="搜索原始路径或隔离路径..." value={searchInput} onChange={(e)=>setSearchInput(e.target.value)} onPressEnter={handleSearch} prefix={<SearchOutlined />} allowClear />

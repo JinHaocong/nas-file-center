@@ -228,7 +228,7 @@ export const TasksPage: React.FC = () => {
       {items.length === 0 ? (
         <Empty
           image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description={isFiltered ? '当前筛选条件下没有任务' : '暂无后台任务'}
+          description={isFiltered ? '无匹配任务 (No matching tasks)' : '暂无任务 (No tasks yet)'}
         />
       ) : (
         items.map((task) => (
@@ -288,8 +288,9 @@ export const TasksPage: React.FC = () => {
   return (
     <div className="nfc-operations-page nfc-tasks-page nfc-page-layout-ledger">
       <PageHeader
-          title="任务中心"
-        description="查看后台 Worker 的运行、失败和完成状态。活动任务自动刷新，错误信息和任务详情始终保留可见。"
+        eyebrow="Operations"
+        title="任务中心"
+        description="实时观察 Worker 的扫描、索引与计划执行任务；活动任务会自动刷新。"
         actions={
           <ActionBar compact>
             <TaskHistoryCleanupModal
@@ -324,19 +325,10 @@ export const TasksPage: React.FC = () => {
       <DataPanel
         title="任务队列"
         description="按状态和任务类型筛选；正在运行的任务会保留实时进度与 ETA。"
-        className="nfc-panel-flush nfc-ledger-panel"
+        action={<span className="nfc-panel-count">{data?.total ?? 0} tasks</span>}
+        className="nfc-panel-flush"
         variant="dense"
       >
-        <div className="nfc-ledger-toolbar">
-          <div className="nfc-ledger-result">
-            <strong>{data?.total ?? 0}</strong>
-            <span>个后台任务</span>
-          </div>
-          <div className="nfc-ledger-safety-note">
-            <span>运行中的任务每 3 秒自动刷新；失败信息不会被成功状态覆盖。</span>
-          </div>
-        </div>
-
         <ActionBar className="nfc-filter-bar">
           <label className="nfc-filter-control">
             <span>状态</span>
@@ -370,7 +362,7 @@ export const TasksPage: React.FC = () => {
                 emptyText: (
                   <Empty
                     image={Empty.PRESENTED_IMAGE_SIMPLE}
-                    description={isFiltered ? '当前筛选条件下没有任务' : '暂无后台任务'}
+                    description={isFiltered ? '无匹配任务 (No matching tasks)' : '暂无任务 (No tasks yet)'}
                   />
                 ),
               }}

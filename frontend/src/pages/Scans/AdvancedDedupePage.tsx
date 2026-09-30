@@ -411,7 +411,7 @@ export const AdvancedDedupePage: React.FC = () => {
           <div className="nfc-plan-header-meta">
             <span className="nfc-mono">Scan #{scanId}</span>
             <StatusBadge status={scan.status} />
-            <span>只读评分预览 → 生成草稿计划；预览本身不会修改文件系统。</span>
+            <span>只读评分预览 → Draft；Preview 本身不会修改文件系统。</span>
           </div>
         }
         actions={
@@ -423,12 +423,12 @@ export const AdvancedDedupePage: React.FC = () => {
         }
       />
 
-      <div className="nfc-dedupe-cockpit nfc-detail-workbench">
+      <div className="nfc-dedupe-cockpit">
         <div className="nfc-dedupe-context-rail">
           <DataPanel
         title="扫描上下文"
         description="高级去重基于此已完成扫描快照进行评分和选择。"
-        className="nfc-panel-flush nfc-detail-summary-panel"
+        className="nfc-panel-flush"
       >
         <ResponsiveDescriptions items={scanSummary} />
         <div className="nfc-root-list">
@@ -444,8 +444,8 @@ export const AdvancedDedupePage: React.FC = () => {
 
         <div className="nfc-dedupe-strategy-stage">
           <DataPanel
-            title="1. 选择存储动作"
-            description="隔离保持默认；Hardlink / Reflink 需要显式选择，且任何动作变化都会使已有预览失效。"
+            title="1. 存储动作"
+            description="Quarantine 保持默认；Hardlink / Reflink 需要显式选择，且任何动作变化都会使已有 Preview 失效。"
           >
             <DedupeStorageActionPanel
               value={storageAction}
@@ -461,8 +461,8 @@ export const AdvancedDedupePage: React.FC = () => {
           </DataPanel>
 
           <DataPanel
-        title="2. 配置评分策略"
-        description="任何配置变化都会使已接受的 preview digest 失效，必须重新运行预览。"
+        title="2. 评分策略与偏好配置"
+        description="所有配置变化都会使已接受的 preview digest 失效，必须重新 Preview。"
       >
         <div className="nfc-dedupe-editor-wrap">
           <DedupeScorerConfigEditor
@@ -481,7 +481,7 @@ export const AdvancedDedupePage: React.FC = () => {
               loading={previewMutation.isPending}
               disabled={!validation.valid}
             >
-              运行高级预览
+              运行高级预览 (Preview)
             </Button>
             {isDirty && (
               <span className="nfc-status-badge nfc-status-warning">
@@ -491,7 +491,7 @@ export const AdvancedDedupePage: React.FC = () => {
             )}
           </ActionBar>
           <span className="nfc-dedupe-config-note">
-            服务端只读计算权威预览；不会创建执行计划，也不会修改真实文件。
+            服务端只读计算权威预览；不会创建 BatchPlan，也不会修改真实文件。
           </span>
         </ActionBar>
           </DataPanel>

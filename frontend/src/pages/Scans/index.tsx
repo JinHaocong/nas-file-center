@@ -10,7 +10,7 @@ import {
   Table,
   message,
 } from 'antd';
-import { PlusOutlined, ReloadOutlined, SafetyCertificateOutlined, ScanOutlined, SearchOutlined } from '@ant-design/icons';
+import { PlusOutlined, ReloadOutlined, ScanOutlined, SearchOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { scansApi } from '../../api/domain';
@@ -121,7 +121,7 @@ export const ScansPage: React.FC = () => {
       width: 150,
       render: (mode: string) => (
         <span className="nfc-kind-badge">
-          {mode === 'isolate' ? '跨目录隔离' : '标准扫描'}
+          {mode === 'isolate' ? 'A/B isolate' : 'standard'}
         </span>
       ),
     },
@@ -167,8 +167,7 @@ export const ScansPage: React.FC = () => {
     {
       title: '操作',
       key: 'action',
-      width: 168,
-      fixed: 'right' as const,
+      width: 158,
       render: (_: any, record: any) => (
         <div className="nfc-row-actions">
           <Button size="small" type="text" onClick={() => navigate(`/scans/${record.id}`)}>
@@ -188,8 +187,9 @@ export const ScansPage: React.FC = () => {
   return (
     <div className="nfc-operations-page nfc-scans-page nfc-page-layout-ledger">
       <PageHeader
-          title="扫描去重"
-        description="发起精确重复文件扫描并查看结果快照。活动扫描会自动刷新；真实文件变更仍必须进入后续执行计划。"
+        eyebrow="Duplicate intelligence"
+        title="扫描去重"
+        description="基于 fclones 的精确重复文件扫描；活动扫描自动刷新，扫描结果仅作为后续计划生成的只读快照。"
         actions={
           <ActionBar compact>
             <Button icon={<ReloadOutlined />} onClick={() => refetch()} loading={isFetching}>
@@ -208,20 +208,10 @@ export const ScansPage: React.FC = () => {
       <DataPanel
         title="扫描历史"
         description="查看扫描状态、重复组规模与快照可释放容量。"
-        className="nfc-panel-flush nfc-ledger-panel"
+        action={<span className="nfc-panel-count">{data?.total ?? 0} scans</span>}
+        className="nfc-panel-flush"
         variant="dense"
       >
-        <div className="nfc-ledger-toolbar">
-          <div className="nfc-ledger-result">
-            <strong>{data?.total ?? 0}</strong>
-            <span>个扫描任务</span>
-          </div>
-          <div className="nfc-ledger-safety-note">
-            <SafetyCertificateOutlined />
-            <span>扫描结果是只读快照；任何真实文件变更都必须通过执行计划。</span>
-          </div>
-        </div>
-
         <ResponsiveDataView
           desktop={
             <Table
@@ -229,13 +219,11 @@ export const ScansPage: React.FC = () => {
               columns={columns}
               rowKey="id"
               loading={isLoading}
-              scroll={{ x: 1060 }}
               pagination={{
                 current: page,
                 pageSize,
                 total: data?.total || 0,
                 showSizeChanger: true,
-                showTotal: (total) => `共 ${total} 项`,
                 pageSizeOptions: ['10', '20', '50', '100'],
                 onChange: (p, ps) => {
                   setPage(p);
@@ -262,7 +250,7 @@ export const ScansPage: React.FC = () => {
                             {scan.name}
                           </button>
                           <span className="nfc-kind-badge">
-                            {scan.mode === 'isolate' ? '跨目录隔离' : '标准扫描'}
+                            {scan.mode === 'isolate' ? 'A/B isolate' : 'standard'}
                           </span>
                         </div>
                         <StatusBadge status={scan.status} />
@@ -310,7 +298,7 @@ export const ScansPage: React.FC = () => {
       </DataPanel>
 
       <Modal
-        title="新建精确重复扫描"
+        title="新建 fclones 精确扫描任务"
         open={isModalOpen}
         onCancel={() => setIsModalOpen(false)}
         footer={null}

@@ -376,9 +376,9 @@ export const WorkflowBuilderPage: React.FC = () => {
   }
 
   const versionLabel = isNew
-    ? '未保存'
+    ? 'unsaved'
     : isHistoricalView
-    ? `历史版本 r${targetRevision}`
+    ? `historical r${targetRevision}`
     : `r${workflow?.current_revision}`;
 
   return (
@@ -390,7 +390,7 @@ export const WorkflowBuilderPage: React.FC = () => {
             <span className="nfc-kind-badge">{versionLabel}</span>
             <span className="nfc-kind-badge">{modeLabel(mode)}</span>
             {isArchived && <span className="nfc-status-badge nfc-status-danger"><span className="nfc-status-dot" />已归档</span>}
-            {isBuiltin && <span className="nfc-kind-badge">内置 / 只读</span>}
+            {isBuiltin && <span className="nfc-kind-badge">builtin / readonly</span>}
             {isDirty && <span className="nfc-status-badge nfc-status-warning"><span className="nfc-status-dot" />未保存修改</span>}
           </div>
         }
@@ -444,7 +444,7 @@ export const WorkflowBuilderPage: React.FC = () => {
             type="error"
             showIcon
             message="工作流已被归档封存"
-            description="归档态完全只读：禁止编辑、保存新版本、回滚、预览与生成计划。"
+            description="归档态完全只读：禁止编辑、保存新版本、回滚、Preview 与 Generate。"
           />
         )}
         {isHistoricalView && (
@@ -452,7 +452,7 @@ export const WorkflowBuilderPage: React.FC = () => {
             type="info"
             showIcon
             message={`正在查看历史版本 r${targetRevision}`}
-            description="历史版本只读；可在允许条件下基于此版本预览或生成草稿计划，也可由管理员回滚。"
+            description="历史版本只读；可在允许条件下基于此版本 Preview / Generate Draft，或由管理员回滚。"
           />
         )}
         {!isNew && !canEdit && !isArchived && !isHistoricalView && (
@@ -460,17 +460,17 @@ export const WorkflowBuilderPage: React.FC = () => {
             type="warning"
             showIcon
             message="普通成员权限提示"
-            description="可查看、预览与生成草稿计划，但不能修改步骤、保存修订或归档。"
+            description="可查看、Preview 与 Generate Draft，但不能修改步骤、保存修订或归档。"
           />
         )}
       </div>
 
-      <div className="nfc-workflow-editor-layout nfc-automation-editor-layout">
+      <div className="nfc-workflow-editor-layout">
         <aside className="nfc-workflow-definition-rail">
           <DataPanel
         title="基础信息与执行模式"
-        description="模式切换会重置为对应模式的标准拓扑，并需要保存为新的修订版本。"
-        className="nfc-complex-form-panel nfc-workbench-primary-panel"
+        description="模式切换会重置为对应模式的标准拓扑，并需要保存为新的 revision。"
+        className="nfc-complex-form-panel"
       >
         <Form
           form={form}
@@ -538,7 +538,7 @@ export const WorkflowBuilderPage: React.FC = () => {
         <main className="nfc-workflow-pipeline-canvas">
           <DataPanel
         title="流水线执行步骤"
-        description="步骤严格自上而下线性执行；预览使用已保存修订版本作为权威定义。"
+        description="步骤严格自上而下线性执行；Preview 使用已保存 revision 作为权威定义。"
       >
         <StepList
           steps={steps}

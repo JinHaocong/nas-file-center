@@ -57,15 +57,13 @@ describe('v0.4.2 console quality gate', () => {
     assert.ok(css.includes('animation: none'));
   });
 
-  test('representative pages remove decorative English eyebrow labels', () => {
-    const pageHeader = read('src/components/ui/PageHeader.tsx');
+  test('representative page eyebrows read as product context instead of all-caps labels', () => {
     const plans = read('src/pages/Plans/index.tsx');
     const workflows = read('src/pages/Workflows/WorkflowList.tsx');
-    assert.doesNotMatch(pageHeader, /nfc-page-eyebrow/);
-    assert.doesNotMatch(plans, /eyebrow=/);
-    assert.doesNotMatch(workflows, /eyebrow=/);
-    assert.match(plans, /title="执行计划"/);
-    assert.match(workflows, /title="工作流中心"/);
+    assert.match(plans, /eyebrow=["']Execution control["']/);
+    assert.match(workflows, /eyebrow=["']Automation workflows["']/);
+    assert.doesNotMatch(plans, /eyebrow=["']EXECUTION["']/);
+    assert.doesNotMatch(workflows, /eyebrow=["']AUTOMATION["']/);
   });
 
   test('semantic safety colors remain independent from the jade product accent', () => {

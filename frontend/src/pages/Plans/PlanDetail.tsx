@@ -45,10 +45,10 @@ import { CodePath } from '../../components/ui/CodePath';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 
 const lifecycleSteps = [
-  { key: 'draft', label: '草稿', caption: '确认计划内容' },
-  { key: 'frozen', label: '已冻结', caption: '参数不可变更' },
-  { key: 'validate', label: '实时校验', caption: '复核文件状态' },
-  { key: 'execute', label: '执行', caption: '进入后台任务' },
+  { key: 'draft', label: 'Draft', caption: '预览草稿' },
+  { key: 'frozen', label: 'Frozen', caption: '参数冻结' },
+  { key: 'validate', label: 'Validate', caption: '实时校验' },
+  { key: 'execute', label: 'Execute', caption: '任务执行' },
 ];
 
 const getLifecycleIndex = (status: string) => {
@@ -454,7 +454,7 @@ export const PlanDetailPage: React.FC = () => {
         })}
       </div>
 
-      <section className="nfc-plan-action-surface nfc-detail-primary-actions" aria-label="计划安全操作">
+      <section className="nfc-plan-action-surface" aria-label="计划安全操作">
         <ActionBar>
           {plan.status === 'draft' && (
             <Button
@@ -462,7 +462,7 @@ export const PlanDetailPage: React.FC = () => {
               onClick={() => freezeMutation.mutate()}
               loading={freezeMutation.isPending}
             >
-              冻结计划
+              冻结计划 (Freeze)
             </Button>
           )}
 
@@ -484,7 +484,7 @@ export const PlanDetailPage: React.FC = () => {
                   loading={validateMutation.isPending}
                   disabled={hasActiveJob}
                 >
-                  SHA-256 实时校验
+                  SHA256 实时校验 (Validate)
                 </Button>
               </span>
             </Tooltip>
@@ -517,7 +517,7 @@ export const PlanDetailPage: React.FC = () => {
                     disabled={executeDisabled}
                     loading={executeMutation.isPending}
                   >
-                    执行计划
+                    执行计划 (Execute)
                   </Button>
                 </Popconfirm>
               </span>
@@ -556,7 +556,7 @@ export const PlanDetailPage: React.FC = () => {
                     loading={undoPlanMutation.isPending}
                     disabled={hasActiveJob}
                   >
-                    生成撤销计划
+                    生成撤销计划 (Undo)
                   </Button>
                 </Popconfirm>
               </span>
@@ -568,7 +568,7 @@ export const PlanDetailPage: React.FC = () => {
               icon={<BuildOutlined />}
               onClick={() => setRebuildDrawerOpen(true)}
             >
-              重建工作流计划
+              重建工作流计划 (Rebuild Plan)
             </Button>
           )}
 

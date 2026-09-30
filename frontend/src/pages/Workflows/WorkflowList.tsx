@@ -136,7 +136,7 @@ export const WorkflowListPage: React.FC = () => {
       key: 'is_builtin',
       width: 98,
       render: (builtin: boolean) => (
-        <span className="nfc-kind-badge">{builtin ? '内置' : '个人'}</span>
+        <span className="nfc-kind-badge">{builtin ? 'builtin' : 'user'}</span>
       ),
     },
     {
@@ -265,8 +265,9 @@ export const WorkflowListPage: React.FC = () => {
   return (
     <div className="nfc-operations-page nfc-workflows-page nfc-page-layout-ledger">
       <PageHeader
-          title="工作流中心"
-        description="管理版本化的文件规则、目录整理、高级去重和目录工具流程。预览与草稿生成都不会直接执行文件操作。"
+        eyebrow="Automation workflows"
+        title="工作流编排中心"
+        description="以版本化定义编排 NAS 文件规则、目录整理、高级去重和目录工具；Preview 与 Draft 都不会直接执行文件操作。"
         actions={
           <ActionBar compact>
             <label className="nfc-inline-switch">
@@ -295,19 +296,10 @@ export const WorkflowListPage: React.FC = () => {
       <DataPanel
         title="工作流定义"
         description="工作流保存为修订版本；内置与归档定义保持只读。"
-        className="nfc-panel-flush nfc-ledger-panel"
+        action={<span className="nfc-panel-count">{items.length} workflows</span>}
+        className="nfc-panel-flush"
         variant="dense"
       >
-        <div className="nfc-ledger-toolbar">
-          <div className="nfc-ledger-result">
-            <strong>{items.length}</strong>
-            <span>个工作流</span>
-          </div>
-          <div className="nfc-ledger-safety-note">
-            <span>内置与归档定义保持只读；生成草稿不会直接执行文件操作。</span>
-          </div>
-        </div>
-
         <ResponsiveDataView
           desktop={
             <Table
@@ -315,7 +307,6 @@ export const WorkflowListPage: React.FC = () => {
               columns={columns}
               rowKey="id"
               loading={isLoading}
-              scroll={{ x: 1040 }}
               pagination={{ pageSize }}
             />
           }
@@ -339,7 +330,7 @@ export const WorkflowListPage: React.FC = () => {
                           <div className="nfc-inline-badges">
                             <span className="nfc-kind-badge">{modeLabel(workflow.mode)}</span>
                             <span className="nfc-kind-badge">
-                              {workflow.is_builtin ? '内置' : '个人'}
+                              {workflow.is_builtin ? 'builtin' : 'user'}
                             </span>
                           </div>
                         </div>

@@ -6,22 +6,16 @@ import { resolve } from 'node:path';
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');
 
 describe('Right Workspace v2 design system', () => {
-  test('semantic redesign layers replace terminal workspace overrides while Settings keeps page ownership', () => {
+  test('v2 remains the global workspace base while Settings has semantic page ownership', () => {
     const main = read('src/main.tsx');
+    const v055 = main.indexOf("import './styles/v055-workspace-breathing.css';");
+    const v056 = main.indexOf("import './styles/v056-right-workspace-v2.css';");
     const settings = main.indexOf("import './styles/pages/settings.css';");
-    const foundation = main.indexOf("import './styles/redesign/foundation.css';");
-    const shell = main.indexOf("import './styles/redesign/shell.css';");
-    const components = main.indexOf("import './styles/redesign/components.css';");
 
-    assert.ok(settings >= 0);
-    assert.ok(foundation > settings);
-    assert.ok(shell > foundation);
-    assert.ok(components > shell);
-    assert.doesNotMatch(main, /v052-final-audit|v054-premium-system|v055-workspace-breathing|v056-right-workspace-v2/);
-    assert.match(main, /styles\/redesign\/compat\.css/);
-    assert.match(main, /styles\/redesign\/pages\/dashboard\.css/);
-    assert.match(main, /styles\/redesign\/pages\/detail\.css/);
-    assert.match(main, /styles\/redesign\/pages\/system\.css/);
+    assert.ok(v055 >= 0);
+    assert.ok(v056 > v055);
+    assert.ok(settings > v056);
+    assert.doesNotMatch(main, /v053-settings-layout|v057-settings-polish/);
   });
 
   test('v2 intentionally leaves the approved sidebar and mobile navigation untouched', () => {

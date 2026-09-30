@@ -51,7 +51,7 @@ export const OrganizerPage: React.FC = () => {
         <>
           <PageHeader
             title="目录整理方案"
-            description="管理可复用的目录整理方案。先选择或创建规则，再执行只读预览，确认冲突和变更后生成执行计划。"
+            description="保存可复用的目录统计、命名、编号、标签与 mtime 规则；先只读 Preview，再生成 Plan。"
           />
           <ProfileList
             onSelectProfile={setActiveProfile}

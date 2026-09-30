@@ -6,19 +6,16 @@ import { resolve } from 'node:path';
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');
 
 describe('v0.4.4 cohesion invariants carried into the v0.4.7 control plane', () => {
-  test('header keeps utility controls plus a compact current-area cue while PageHeader owns the page title', () => {
+  test('header delegates page identity to PageHeader and keeps only utility controls', () => {
     const header = read('src/components/Header.tsx');
     const pageHeader = read('src/components/ui/PageHeader.tsx');
-    const shell = read('src/styles/redesign/shell.css');
+    const workspaceV2 = read('src/styles/v056-right-workspace-v2.css');
     assert.match(header, /nfc-header-command-cluster/);
     assert.match(header, /SafeModeBadge/);
     assert.match(header, /WorkerStatusBadge/);
-    assert.match(header, /useLocation/);
-    assert.match(header, /nfc-header-location/);
-    assert.doesNotMatch(header, /nfc-header-workspace|resolveWorkspaceContext/);
+    assert.doesNotMatch(header, /nfc-header-workspace|resolveWorkspaceContext|useLocation/);
     assert.match(pageHeader, /nfc-page-title/);
-    assert.doesNotMatch(pageHeader, /nfc-page-eyebrow/);
-    assert.match(shell, /\.nfc-header-location/);
+    assert.match(workspaceV2, /\.nfc-page-eyebrow\s*\{[\s\S]*display:\s*none/);
     assert.doesNotMatch(header, /nfc-header-brand-dot/);
     assert.doesNotMatch(header, /style=\{\{/);
   });

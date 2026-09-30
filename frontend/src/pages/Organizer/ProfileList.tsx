@@ -190,7 +190,7 @@ export const ProfileList: React.FC<ProfileListProps> = ({
         <div className="nfc-profile-name-cell">
           <strong>{record.name}</strong>
           <span className="nfc-kind-badge">
-            {record.is_builtin ? '内置' : '个人'}
+            {record.is_builtin ? 'builtin' : 'user'}
           </span>
           {record.description && <small>{record.description}</small>}
         </div>
@@ -226,20 +226,11 @@ export const ProfileList: React.FC<ProfileListProps> = ({
     <>
       <DataPanel
         title="整理方案"
-        description="内置方案保持只读；复制后可编辑为个人方案。导入和导出继续使用现有 JSON 配置格式。"
-        className="nfc-panel-flush nfc-ledger-panel"
+        description="内置 Profile 只读；复制后可编辑为个人方案。导入/导出使用 JSON 配置。"
+        action={<span className="nfc-panel-count">{data?.total || 0} profiles</span>}
+        className="nfc-panel-flush"
         variant="dense"
       >
-        <div className="nfc-ledger-toolbar">
-          <div className="nfc-ledger-result">
-            <strong>{data?.total || 0}</strong>
-            <span>个整理方案</span>
-          </div>
-          <div className="nfc-ledger-safety-note">
-            <span>内置方案不可直接修改；需要调整时先复制为个人方案。</span>
-          </div>
-        </div>
-
         <ActionBar className="nfc-filter-bar nfc-organizer-profile-toolbar">
           <Input
             placeholder="搜索方案名称或描述..."
@@ -267,7 +258,6 @@ export const ProfileList: React.FC<ProfileListProps> = ({
               columns={columns}
               rowKey="id"
               loading={isLoading}
-              scroll={{ x: 980 }}
               locale={{
                 emptyText: (
                   <Empty description="暂无整理方案">
@@ -310,7 +300,7 @@ export const ProfileList: React.FC<ProfileListProps> = ({
                             {profile.name}
                           </strong>
                           <span className="nfc-kind-badge">
-                            {profile.is_builtin ? '内置' : '个人'}
+                            {profile.is_builtin ? 'builtin' : 'user'}
                           </span>
                         </div>
                       </div>

@@ -293,7 +293,7 @@ export const SettingsPage: React.FC = () => {
             当前已保存策略：<strong>{formatAuditRetention(freshPolicy.audit_retention_days)}</strong>
           </p>
           <p>
-            当前最新预览：预计清理 <strong className="nfc-danger-text">{freshPreview.delete_count}</strong> 条 审计历史记录。
+            当前最新预览：预计清理 <strong className="nfc-danger-text">{freshPreview.delete_count}</strong> 条 Audit 历史记录。
           </p>
           <p className="nfc-warning-copy">
             提示：当前预览仅为预计结果。实际执行时将根据数据库中最新保存的保留策略以及执行时最新的审计数据重新计算，最终删除数量可能与当前预览不同。
@@ -369,7 +369,7 @@ export const SettingsPage: React.FC = () => {
 
   const sessionColumns = [
     {
-      title: '登录设备 / 浏览器标识',
+      title: '登录设备 / User Agent',
       dataIndex: 'user_agent',
       key: 'user_agent',
       render: (ua: string, record: SessionInfo) => (
@@ -432,8 +432,8 @@ export const SettingsPage: React.FC = () => {
   return (
     <div className="nfc-operations-page nfc-settings-page nfc-system-controls-page nfc-page-layout-workbench">
       <PageHeader
-        title="系统设置"
-        description="按运行安全、数据生命周期、资源控制和会话管理分区查看系统设置。危险文件开关仍只能通过宿主机环境变量配置。"
+        title="系统设置与安全中心"
+        description="集中查看文件安全开关、数据保留、资源控制与管理员会话。危险文件开关仍只能通过宿主机环境变量配置。"
         actions={
           <ActionBar compact>
             <Button
@@ -453,16 +453,8 @@ export const SettingsPage: React.FC = () => {
         }
       />
 
-      <nav className="nfc-settings-section-nav" aria-label="设置分区">
-        <a href="#settings-runtime">运行安全</a>
-        <a href="#settings-lifecycle">数据生命周期</a>
-        <a href="#settings-resource">资源控制</a>
-        <a href="#settings-sessions">活动会话</a>
-      </nav>
-
       <div className="nfc-settings-grid">
         <DataPanel
-          id="settings-runtime"
           title="全局文件安全运行参数"
           description="这些开关来自服务端运行环境，Web UI 只读展示，防止误触扩大文件修改权限。"
           className="nfc-panel-flush nfc-settings-panel-runtime"
@@ -510,14 +502,13 @@ export const SettingsPage: React.FC = () => {
         </DataPanel>
 
         <DataPanel
-          id="settings-lifecycle"
           title="数据生命周期与审计保留策略"
           description="保存策略不会自动删除数据；审计清理始终需要重新获取最新预览并显式确认。"
           className="nfc-settings-panel-lifecycle"
           action={
             <ActionBar compact>
-              {lifecyclePolicy && <span className="nfc-kind-badge">审计 · {formatAuditRetention(lifecyclePolicy.audit_retention_days)}</span>}
-              {quarantinePolicy && <span className="nfc-kind-badge">隔离区 · {quarantinePolicy.quarantine_retention_days === 0 ? '永久' : quarantinePolicy.quarantine_retention_days + ' 天'}</span>}
+              {lifecyclePolicy && <span className="nfc-kind-badge">Audit · {formatAuditRetention(lifecyclePolicy.audit_retention_days)}</span>}
+              {quarantinePolicy && <span className="nfc-kind-badge">Quarantine · {quarantinePolicy.quarantine_retention_days === 0 ? '永久' : quarantinePolicy.quarantine_retention_days + ' 天'}</span>}
             </ActionBar>
           }
         >
@@ -799,7 +790,6 @@ export const SettingsPage: React.FC = () => {
         )}
 
         <DataPanel
-          id="settings-sessions"
           title="管理员活动会话"
           description="当前设备不可在此强制注销；其他会话可由管理员显式下线。"
           action={<span className="nfc-panel-count">{sessionsData?.sessions?.length ?? 0} sessions</span>}

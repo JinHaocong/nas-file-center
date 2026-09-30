@@ -19,15 +19,16 @@ describe('v0.4.3 console invariants carried into v0.4.7', () => {
     assert.match(css, /\.nfc-sidebar\.nfc-sidebar[\s\S]*box-shadow:/);
   });
 
-  test('mobile navigation uses one drawer entry point without a duplicate bottom dock', () => {
+  test('mobile navigation retains a persistent bottom dock with primary routes and More', () => {
     const layout = read('src/layouts/MainLayout.tsx');
-    const responsiveNav = read('src/components/layout/ResponsiveNav.tsx');
-    const header = read('src/components/Header.tsx');
-    assert.doesNotMatch(layout, /<MobileDock/);
-    assert.match(layout, /ResponsiveNav/);
-    assert.match(responsiveNav, /Drawer/);
-    assert.match(header, /MenuOutlined/);
-    assert.match(header, /onOpenNavigation/);
+    const dock = read('src/components/layout/MobileDock.tsx');
+    assert.match(layout, /<MobileDock/);
+    assert.match(dock, /\/dashboard/);
+    assert.match(dock, /\/scans/);
+    assert.match(dock, /\/plans/);
+    assert.match(dock, /\/tasks/);
+    assert.match(dock, /更多/);
+    assert.match(dock, /nfc-mobile-dock/);
   });
 
   test('mobile page content reserves safe space for the bottom dock', () => {

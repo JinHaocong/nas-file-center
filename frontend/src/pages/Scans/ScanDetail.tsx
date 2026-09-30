@@ -177,7 +177,7 @@ export const ScanDetailPage: React.FC = () => {
     { label: '任务 ID', value: <span className="nfc-mono">#{scan.id}</span> },
     {
       label: '扫描模式',
-      value: <span className="nfc-kind-badge">{scan.mode === 'isolate' ? '跨目录隔离' : '标准扫描'}</span>,
+      value: <span className="nfc-kind-badge">{scan.mode === 'isolate' ? 'A/B isolate' : 'standard'}</span>,
     },
     { label: '创建时间', value: formatDateTime(scan.created_at) },
     { label: '开始时间', value: scan.started_at ? formatDateTime(scan.started_at) : '—' },
@@ -197,7 +197,7 @@ export const ScanDetailPage: React.FC = () => {
           <div className="nfc-plan-header-meta">
             <span className="nfc-mono">Scan #{scan.id}</span>
             <StatusBadge status={scan.status} />
-            {scan.has_dependent_plan && <span className="nfc-kind-badge">已有依赖计划</span>}
+            {scan.has_dependent_plan && <span className="nfc-kind-badge">dependent plan</span>}
           </div>
         }
         actions={
@@ -228,14 +228,14 @@ export const ScanDetailPage: React.FC = () => {
             {scan.status === 'completed' && scan.total_groups > 0 && (
               <>
                 <Button icon={<ScheduleOutlined />} onClick={() => setPlanModalOpen(true)}>
-                  生成基础去重计划
+                  经典去重计划
                 </Button>
                 <Button
                   type="primary"
                   icon={<ThunderboltOutlined />}
                   onClick={() => navigate(`/scans/${scan.id}/dedupe`)}
                 >
-                  配置高级去重
+                  高级去重 (Advanced Dedupe)
                 </Button>
               </>
             )}
@@ -256,7 +256,7 @@ export const ScanDetailPage: React.FC = () => {
       <DataPanel
         title="扫描摘要"
         description="扫描结果是只读快照；后续文件操作必须通过 Plan 生命周期。"
-        className="nfc-panel-flush nfc-scan-summary nfc-detail-summary-panel"
+        className="nfc-panel-flush nfc-scan-summary"
       >
         <ResponsiveDescriptions items={descriptionItems} />
         <div className="nfc-root-list">
@@ -273,7 +273,7 @@ export const ScanDetailPage: React.FC = () => {
         <DataPanel
           title="重复文件组"
           description="展开组可查看每个成员；这里只展示扫描快照，不会直接修改文件。"
-          action={<span className="nfc-panel-count">{groupsData?.total || 0} 个重复组</span>}
+          action={<span className="nfc-panel-count">{groupsData?.total || 0} groups</span>}
           className="nfc-panel-flush"
           variant="dense"
         >
@@ -284,7 +284,6 @@ export const ScanDetailPage: React.FC = () => {
                 columns={groupColumns}
                 rowKey="id"
                 loading={groupsLoading}
-                scroll={{ x: 900 }}
                 expandable={{ expandedRowRender }}
                 pagination={{
                   current: page,
@@ -309,8 +308,8 @@ export const ScanDetailPage: React.FC = () => {
                       <article className="nfc-duplicate-group-mobile-card" key={group.id}>
                         <div className="nfc-mobile-record-heading">
                           <div>
-                            <span className="nfc-mobile-record-title nfc-mono">重复组 #{group.id}</span>
-                            <span className="nfc-kind-badge">{group.member_count} 个副本</span>
+                            <span className="nfc-mobile-record-title nfc-mono">Group #{group.id}</span>
+                            <span className="nfc-kind-badge">{group.member_count} copies</span>
                           </div>
                           <span className="nfc-data-emphasis">{formatBytes(group.reclaimable_bytes)}</span>
                         </div>
