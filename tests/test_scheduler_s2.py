@@ -470,6 +470,37 @@ def test_resource_policy_pause_still_blocks_scheduled_index_claim(tmp_path: Path
         assert work.status == "queued"
 
 
+def test_worker_retries_failed_scheduler_tick_within_same_minute(tmp_path: Path):
+    settings, _, _, _, _, _ = _env(tmp_path)
+    stop_event = threading.Event()
+    claim_calls = {"count": 0}
+
+    def fake_claim(*args, **kwargs):
+        claim_calls["count"] += 1
+        if claim_calls["count"] >= 2:
+            stop_event.set()
+        return None
+
+    with (
+        patch("app.worker.acquire_worker_ownership", return_value=True),
+        patch("app.worker.recover_interrupted_jobs", return_value={}),
+        patch("app.worker.claim_next_job", side_effect=fake_claim),
+        patch(
+            "app.worker.run_scheduler_tick",
+            side_effect=[RuntimeError("transient scheduler failure"), None],
+        ) as tick,
+        patch("app.worker.utcnow", return_value=_dt(12, 1, 5)),
+    ):
+        worker_loop(
+            settings,
+            poll_seconds=0,
+            heartbeat_interval=999,
+            stop_event=stop_event,
+        )
+
+    assert tick.call_count == 2
+
+
 def test_worker_attempts_scheduler_tick_at_most_once_per_minute(tmp_path: Path):
     settings, _, _, _, _, _ = _env(tmp_path)
     stop_event = threading.Event()
