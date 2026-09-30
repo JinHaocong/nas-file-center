@@ -3,6 +3,7 @@ import React from 'react';
 export type DataPanelVariant = 'default' | 'dense' | 'quiet' | 'danger' | 'floating';
 
 interface DataPanelProps {
+  id?: string;
   title: string;
   description?: React.ReactNode;
   action?: React.ReactNode;
@@ -12,6 +13,7 @@ interface DataPanelProps {
 }
 
 export const DataPanel: React.FC<DataPanelProps> = ({
+  id,
   title,
   description,
   action,
@@ -19,7 +21,7 @@ export const DataPanel: React.FC<DataPanelProps> = ({
   className = '',
   variant = 'default',
 }) => (
-  <section className={`nfc-data-panel nfc-data-panel-${variant} ${className}`.trim()}>
+  <section id={id} className={`nfc-data-panel nfc-data-panel-${variant} ${className}`.trim()}>
     <header className="nfc-data-panel-header">
       <div className="nfc-data-panel-heading">
         <h2 className="nfc-data-panel-title">{title}</h2>
