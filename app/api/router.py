@@ -5,6 +5,7 @@ import re
 from typing import Any, Literal
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
+from sqlalchemy import select
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from app.auth.dependencies import get_current_user, require_admin_user
@@ -21,7 +22,7 @@ from app.batch_utilities.errors import (
     BatchUtilityError,
     BatchUtilityInvalidConfigError,
 )
-from app.models import BatchPlan, User, WorkJob
+from app.models import BatchPlan, BatchPlanItem, User, WorkJob
 from app.organizers.advanced_rules import OrganizerAdvancedRules
 from app.media.catalog import (
     enqueue_media_analysis,
@@ -66,7 +67,14 @@ from app.workflows.schema import (
 router = APIRouter(prefix="/api", tags=["file-center"], dependencies=[Depends(get_current_user)])
 
 
-def _plan_requires_admin(plan: BatchPlan | None) -> bool:
+_ADMIN_ONLY_PLAN_OPERATIONS = frozenset({
+    "hardlink_optimize",
+    "reflink_optimize",
+    "media_corrupt_unlink_delete",
+})
+
+
+def _plan_requires_admin(plan: BatchPlan | None, session=None) -> bool:
     if plan is None:
         return False
     if plan.kind == "media-corrupt-delete":
@@ -74,19 +82,32 @@ def _plan_requires_admin(plan: BatchPlan | None) -> bool:
     try:
         metadata = json.loads(plan.metadata_json or "{}")
     except Exception:
-        return False
-    return (
+        metadata = {}
+    if (
         isinstance(metadata, dict)
         and metadata.get("source") == "dedupe"
         and metadata.get("storage_action") in {"hardlink", "reflink"}
-    )
+    ):
+        return True
+    if session is not None and plan.id is not None:
+        reserved_item = session.scalar(
+            select(BatchPlanItem.id)
+            .where(
+                BatchPlanItem.plan_id == plan.id,
+                BatchPlanItem.operation.in_(_ADMIN_ONLY_PLAN_OPERATIONS),
+            )
+            .limit(1)
+        )
+        if reserved_item is not None:
+            return True
+    return False
 
 
 def _require_restricted_plan_admin(request: Request, plan_id: int, user: User) -> None:
     """Fence destructive or inode-changing plan management to administrators."""
     with request.app.state.service.SessionLocal() as session:
         plan = session.get(BatchPlan, plan_id)
-        if _plan_requires_admin(plan) and user.role != "admin":
+        if _plan_requires_admin(plan, session) and user.role != "admin":
             raise HTTPException(403, "Only administrator can manage this plan")
 
 
@@ -415,7 +436,7 @@ class RenamePreviewRequest(BaseModel):
 
 
 class PlanItemInput(BaseModel):
-    operation: str
+    operation: Literal["quarantine", "touch", "move", "rename"]
     source: str
     target: str | None = None
     keep: str | None = None
