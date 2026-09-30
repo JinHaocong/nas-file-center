@@ -137,4 +137,3 @@ def test_pathmatch_preview_fails_closed_when_sync_candidate_budget_is_exceeded(
             [str(dir_a), str(dir_b)],
             mode="relative-path",
         )
-
