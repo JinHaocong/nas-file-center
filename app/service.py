@@ -26,7 +26,7 @@ from app.config import Settings
 from app.db import create_engine_and_session, init_db
 from app.execution.executor import execute_item
 from app.execution.verifier import verify_duplicate_pair
-from app.indexing.indexer import IndexedEntry, iter_root, scan_root
+from app.indexing.indexer import IndexedEntry, iter_root
 from app.indexing.matcher import match_entries
 from app.job_queue import enqueue_index_work, enqueue_scan_work
 from app.models import (
@@ -192,6 +192,12 @@ PLAN_HISTORY_STATES = {
     "completed",
     "failed",
 }
+
+
+# Synchronous filesystem Preview endpoints run inside the API process rather
+# than the background Worker. Keep their candidate set bounded so a very large
+# NAS tree fails explicitly instead of exhausting API memory.
+MAX_SYNC_PREVIEW_FILE_CANDIDATES = 50_000
 
 from app.organizers.advanced_rules import advanced_rules_enabled, normalize_advanced_rules
 from app.organizers.compiler import compile_organizer_preview
@@ -2211,12 +2217,30 @@ class FileCenterService:
         return self.plan_detail(plan_id)
 
     def path_match_preview(self, roots: list[str], *, mode: str, normalize_pattern: str | None = None, normalize_replacement: str = ""):
-        entries = []
         quarantine_ex = [self.settings.quarantine_root] if getattr(self.settings, "quarantine_root", None) else None
-        for index, root in enumerate(roots):
-            entries.extend(scan_root(root, self.settings.allowed_roots, root_key=f"root-{index}", excluded_roots=quarantine_ex))
+
+        def candidates():
+            seen_files = 0
+            for index, root in enumerate(roots):
+                for entry in iter_root(
+                    root,
+                    self.settings.allowed_roots,
+                    root_key=f"root-{index}",
+                    excluded_roots=quarantine_ex,
+                ):
+                    if entry.is_dir:
+                        continue
+                    seen_files += 1
+                    if seen_files > MAX_SYNC_PREVIEW_FILE_CANDIDATES:
+                        raise ValueError(
+                            "Preview candidate limit exceeded "
+                            f"({MAX_SYNC_PREVIEW_FILE_CANDIDATES}); "
+                            "narrow the selected roots or filters"
+                        )
+                    yield entry
+
         groups = match_entries(
-            entries,
+            candidates(),
             mode=mode,
             normalize_pattern=normalize_pattern,
             normalize_replacement=normalize_replacement,
@@ -2244,6 +2268,18 @@ class FileCenterService:
         sources: list[Path] = []
         seen_sources: set[Path] = set()
 
+        def add_candidate(candidate: Path) -> None:
+            if candidate in seen_sources or not _matches_source_extension(candidate, rule):
+                return
+            if len(sources) >= MAX_SYNC_PREVIEW_FILE_CANDIDATES:
+                raise ValueError(
+                    "Preview candidate limit exceeded "
+                    f"({MAX_SYNC_PREVIEW_FILE_CANDIDATES}); "
+                    "narrow the selected roots or filters"
+                )
+            seen_sources.add(candidate)
+            sources.append(candidate)
+
         for requested_source in requested_sources:
             if requested_source.is_dir() and not requested_source.is_symlink():
                 for current, dirnames, filenames in os.walk(requested_source, followlinks=False):
@@ -2257,16 +2293,10 @@ class FileCenterService:
                         if candidate.is_symlink() or not candidate.is_file():
                             continue
                         safe_candidate = require_allowed_path(candidate, self.settings.allowed_roots)
-                        if safe_candidate not in seen_sources:
-                            seen_sources.add(safe_candidate)
-                            sources.append(safe_candidate)
+                        add_candidate(safe_candidate)
                 continue
 
-            if requested_source not in seen_sources:
-                seen_sources.add(requested_source)
-                sources.append(requested_source)
-
-        sources = [source for source in sources if _matches_source_extension(source, rule)]
+            add_candidate(requested_source)
         sources.sort(key=str)
         source_set = set(sources)
         results = []
