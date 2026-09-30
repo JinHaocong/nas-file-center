@@ -718,6 +718,23 @@ def execute_storage_optimization(
         completed = journals.get("completed")
         published = journals.get("published")
 
+        existing_new = _stat_optional(source_parent_fd, new_name)
+        existing_old = _stat_optional(source_parent_fd, old_name)
+        if (
+            existing_new is not None
+            and "prepare_new_intent" not in journals
+            and "prepared_new" not in journals
+        ):
+            raise StateConflictError("STORAGE_OPTIMIZATION_NEW_OWNERSHIP_AMBIGUOUS")
+        if (
+            existing_old is not None
+            and "capture_old_intent" not in journals
+            and "captured_old" not in journals
+        ):
+            raise StateConflictError("STORAGE_OPTIMIZATION_OLD_OWNERSHIP_AMBIGUOUS")
+        if published is not None and "publish_intent" not in journals:
+            raise StateConflictError("STORAGE_OPTIMIZATION_PUBLICATION_INTENT_MISSING")
+
         if completed is not None:
             published_row = journals.get("published")
             if published_row is None:
@@ -845,6 +862,22 @@ def execute_storage_optimization(
                 "STORAGE_OPTIMIZATION_SOURCE_HAS_ADDITIONAL_HARDLINKS",
             )
             _ensure_initial_capability(manifest, allowed_roots=allowed_roots)
+            _phase_journal(
+                session_factory,
+                worker_id=worker_id,
+                manifest=manifest,
+                phase="prepare_new_intent",
+                task_id=task_id,
+                user_id=user_id,
+                after={},
+            )
+            journals = _journals(session_factory, manifest)
+
+        if (
+            "prepare_new_intent" not in journals
+            and "prepared_new" not in journals
+        ):
+            raise StateConflictError("STORAGE_OPTIMIZATION_PREPARE_NEW_INTENT_MISSING")
 
         new_stat = _create_new(
             keep_parent_fd=keep_parent_fd,
@@ -875,6 +908,16 @@ def execute_storage_optimization(
                 raise StateConflictError(
                     "STORAGE_OPTIMIZATION_SOURCE_AND_OLD_MISSING_BEFORE_CAPTURE"
                 )
+            _phase_journal(
+                session_factory,
+                worker_id=worker_id,
+                manifest=manifest,
+                phase="capture_old_intent",
+                task_id=task_id,
+                user_id=user_id,
+                after={},
+            )
+            journals = _journals(session_factory, manifest)
             source_before_anchor = _qualify_original(
                 source_parent_fd,
                 source_name,
@@ -911,6 +954,11 @@ def execute_storage_optimization(
                 "STORAGE_OPTIMIZATION_CAPTURE_LINK_COUNT_CHANGED",
             )
         else:
+            if (
+                "capture_old_intent" not in journals
+                and "captured_old" not in journals
+            ):
+                raise StateConflictError("STORAGE_OPTIMIZATION_OLD_OWNERSHIP_AMBIGUOUS")
             old_stat = _qualify_original(
                 source_parent_fd,
                 old_name,
@@ -1024,6 +1072,16 @@ def execute_storage_optimization(
         if published is None:
             source_stat = _stat_optional(source_parent_fd, source_name)
             if source_stat is None:
+                _phase_journal(
+                    session_factory,
+                    worker_id=worker_id,
+                    manifest=manifest,
+                    phase="publish_intent",
+                    task_id=task_id,
+                    user_id=user_id,
+                    after={},
+                )
+                journals = _journals(session_factory, manifest)
                 new_stat = _qualify_new(
                     source_parent_fd,
                     new_name,
@@ -1055,8 +1113,13 @@ def execute_storage_optimization(
                     )
                 published_identity = _identity(source_after)
             else:
-                # Crash after link publication but before journal: ownership is
-                # provable only while .new still exists as the same inode.
+                # Crash after link publication but before the qualified
+                # publication journal is recoverable only when the durable
+                # publish intent already grants this exact namespace authority.
+                if "publish_intent" not in journals:
+                    raise StateConflictError(
+                        "STORAGE_OPTIMIZATION_PUBLICATION_OWNERSHIP_AMBIGUOUS"
+                    )
                 new_stat = _stat_optional(source_parent_fd, new_name)
                 if new_stat is None or (
                     int(source_stat.st_dev),
