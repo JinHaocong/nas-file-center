@@ -13,7 +13,7 @@ import './styles/pages/settings.css';
 import './styles/redesign/foundation.css';
 import './styles/redesign/shell.css';
 import './styles/redesign/components.css';
-import './styles/pages/dashboard.css';
+import './styles/redesign/pages/dashboard.css';
 import './styles/pages/ledger.css';
 import './styles/pages/workbench.css';
 

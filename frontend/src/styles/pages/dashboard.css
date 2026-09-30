@@ -1,327 +1,171 @@
-/* Dashboard: operational overview, not a reporting dashboard. */
-.nfc-dashboard-page .nfc-dashboard-priority {
-  min-height: 82px;
-  margin-bottom: 12px;
-  padding: 16px 18px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  border: 1px solid var(--nfc-border);
-  border-radius: var(--nfc-radius-panel);
-  background: var(--nfc-bg-surface);
+.nfc-dashboard-page {
+  gap: 18px;
 }
 
-.nfc-dashboard-priority-main {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 3px 12px;
-  align-items: center;
+.nfc-dashboard-page .nfc-snapshot-note {
+  margin-bottom: 16px;
+  padding: 9px 12px;
+  border: 1px solid var(--nfc-v49-line, var(--nfc-border-soft));
+  border-radius: var(--nfc-v49-radius-md, var(--nfc-radius-control));
+  background: color-mix(in srgb, var(--nfc-v49-surface-soft, var(--nfc-surface-2)) 82%, transparent);
+  box-shadow: none;
 }
 
-.nfc-dashboard-priority-label {
-  grid-row: 1 / span 2;
-  width: 38px;
-  height: 38px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 9px;
-  background: var(--nfc-accent-soft);
-  color: var(--nfc-accent);
+.nfc-dashboard-page .nfc-snapshot-note strong {
+  color: var(--nfc-v49-text, var(--nfc-text));
+  font-weight: 640;
 }
 
-.nfc-dashboard-priority-label span {
-  display: none;
-}
-
-.nfc-dashboard-priority-main strong {
-  color: var(--nfc-text);
-  font-size: 15px;
-  font-weight: 680;
-}
-
-.nfc-dashboard-priority-main > span {
-  color: var(--nfc-text-muted);
-  font-size: 12px;
-}
-
-.nfc-dashboard-snapshot {
-  min-height: 48px;
-  margin-bottom: 22px;
-  padding: 10px 12px;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  border-bottom: 1px solid var(--nfc-border);
-  color: var(--nfc-text-muted);
-}
-
-.nfc-dashboard-snapshot > .anticon {
-  color: var(--nfc-text-subtle);
-}
-
-.nfc-dashboard-snapshot > div {
-  min-width: 0;
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-
-.nfc-dashboard-snapshot strong {
-  color: var(--nfc-text);
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-.nfc-dashboard-snapshot span {
-  overflow: hidden;
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.nfc-dashboard-page .nfc-dashboard-metric-grid {
-  margin-bottom: 30px;
+.nfc-dashboard-page .nfc-snapshot-note span {
+  color: var(--nfc-v49-subtle, var(--nfc-text-subtle));
 }
 
 .nfc-dashboard-page .nfc-dashboard-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(250px, 290px);
-  gap: 30px;
+  grid-template-columns: minmax(0, 1.82fr) minmax(284px, 0.58fr);
+  gap: 22px;
   align-items: start;
 }
 
-.nfc-dashboard-main-column {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 26px;
+.nfc-dashboard-page .nfc-dashboard-main-column {
+  gap: 18px;
 }
 
-.nfc-dashboard-rail {
-  min-width: 0;
+.nfc-dashboard-page .nfc-dashboard-rail {
   position: sticky;
-  top: 76px;
+  top: 78px;
+  gap: 12px;
+  padding-left: 0;
+  border-left: 0;
 }
 
-.nfc-dashboard-section-heading {
-  margin-bottom: 10px;
-}
-
-.nfc-dashboard-section-heading h2 {
-  margin: 0;
-  color: var(--nfc-text);
-  font-size: 15px;
-  font-weight: 680;
-}
-
-.nfc-dashboard-section-heading span {
-  display: block;
-  margin-top: 3px;
-  color: var(--nfc-text-subtle);
-  font-size: 12px;
-}
-
-.nfc-dashboard-page .nfc-quick-actions {
+.nfc-dashboard-page .nfc-dashboard-rail > .nfc-data-panel {
   overflow: hidden;
-  border: 1px solid var(--nfc-border);
-  border-radius: var(--nfc-radius-panel);
-  background: var(--nfc-bg-surface);
+  border: 1px solid var(--nfc-v49-line, var(--nfc-border-soft)) !important;
+  border-radius: var(--nfc-v49-radius-lg, var(--nfc-radius-workspace)) !important;
+  background: color-mix(in srgb, var(--nfc-v49-surface, var(--nfc-surface-1)) 76%, transparent) !important;
+  box-shadow: none !important;
+}
+
+.nfc-dashboard-page .nfc-dashboard-rail > .nfc-data-panel + .nfc-data-panel {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 1px solid var(--nfc-v49-line, var(--nfc-border-soft)) !important;
+}
+
+.nfc-dashboard-page .nfc-dashboard-rail .nfc-data-panel-header {
+  min-height: 58px;
+  padding: 12px 14px 11px;
+  border-bottom: 1px solid color-mix(in srgb, var(--nfc-v49-line, var(--nfc-border-soft)) 72%, transparent);
+  background: color-mix(in srgb, var(--nfc-v49-surface-soft, var(--nfc-surface-2)) 52%, transparent);
+}
+
+.nfc-dashboard-page .nfc-dashboard-rail .nfc-data-panel-title {
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.nfc-dashboard-page .nfc-dashboard-rail .nfc-data-panel-description {
+  max-width: 34ch;
+  margin-top: 3px;
+  font-size: 9.75px;
+  line-height: 1.45;
+}
+
+.nfc-dashboard-page .nfc-dashboard-rail .nfc-data-panel-body {
+  background: transparent;
 }
 
 .nfc-dashboard-page .nfc-quick-action {
-  width: 100%;
-  min-height: 76px;
-  padding: 12px;
-  display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) 14px;
-  align-items: center;
-  gap: 10px;
-  border: 0;
-  border-bottom: 1px solid var(--nfc-border);
+  min-height: 58px;
+  padding: 9px 13px;
+  border-radius: 0;
+  border-bottom-color: color-mix(in srgb, var(--nfc-v49-line, var(--nfc-border-soft)) 76%, transparent);
   background: transparent;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.nfc-dashboard-page .nfc-quick-action:last-child {
-  border-bottom: 0;
+  transform: none;
 }
 
 .nfc-dashboard-page .nfc-quick-action:hover {
-  background: var(--nfc-bg-hover);
+  background: color-mix(in srgb, var(--nfc-accent) 3.2%, transparent);
+  transform: none;
 }
 
 .nfc-dashboard-page .nfc-quick-action-icon {
-  width: 34px;
-  height: 34px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 9px;
-  background: var(--nfc-bg-subtle);
-  color: var(--nfc-text-muted);
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--nfc-v49-muted, var(--nfc-text-muted));
+  background: color-mix(in srgb, var(--nfc-v49-surface-muted, var(--nfc-surface-2)) 74%, transparent);
 }
 
 .nfc-dashboard-page .nfc-quick-action-copy {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
   gap: 2px;
 }
 
 .nfc-dashboard-page .nfc-quick-action-copy strong {
-  color: var(--nfc-text);
-  font-size: 13px;
-  font-weight: 650;
+  font-size: 11px;
+  font-weight: 630;
 }
 
 .nfc-dashboard-page .nfc-quick-action-copy span {
-  color: var(--nfc-text-subtle);
-  font-size: 11.5px;
-  line-height: 1.45;
+  color: var(--nfc-v49-subtle, var(--nfc-text-subtle));
+  font-size: 9.5px;
+  line-height: 1.4;
 }
 
 .nfc-dashboard-page .nfc-quick-action-arrow {
-  color: var(--nfc-text-subtle);
+  color: var(--nfc-v49-subtle, var(--nfc-text-subtle));
+  opacity: 0.78;
 }
 
-.nfc-dashboard-task-identity {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
+.nfc-dashboard-page .nfc-summary-row {
+  min-height: 43px;
+  padding-inline: 13px;
+  border-bottom-color: color-mix(in srgb, var(--nfc-v49-line, var(--nfc-border-soft)) 76%, transparent);
+  background: transparent;
+  font-size: 10.5px;
 }
 
-.nfc-dashboard-task-identity strong {
-  color: var(--nfc-text);
-  font-weight: 620;
+.nfc-dashboard-page .nfc-summary-row strong {
+  font-size: 11.5px;
+  font-weight: 650;
 }
 
-.nfc-dashboard-task-identity .nfc-mono {
-  color: var(--nfc-text-subtle);
-  font-size: 11px;
+.nfc-dashboard-page .nfc-data-panel-header {
+  padding-inline: 16px;
 }
 
-.nfc-dashboard-page .nfc-mobile-activity-list {
-  display: flex;
-  flex-direction: column;
-}
-
-.nfc-dashboard-page .nfc-mobile-activity-card {
-  width: 100%;
-  padding: 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  border: 0;
-  border-bottom: 1px solid var(--nfc-border);
-  background: var(--nfc-bg-surface);
-  color: inherit;
-  text-align: left;
-}
-
-.nfc-dashboard-page button.nfc-mobile-activity-card {
-  cursor: pointer;
-}
-
-.nfc-dashboard-page .nfc-mobile-activity-card:last-child {
-  border-bottom: 0;
-}
-
-.nfc-dashboard-page .nfc-mobile-activity-topline {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.nfc-dashboard-page .nfc-mobile-activity-topline strong {
-  color: var(--nfc-text);
-  font-size: 13px;
-}
-
-.nfc-dashboard-page .nfc-mobile-activity-grid {
-  display: flex;
-  gap: 14px;
-  color: var(--nfc-text-muted);
-  font-size: 12px;
-}
-
-.nfc-dashboard-page .nfc-mobile-activity-meta {
-  color: var(--nfc-text-subtle);
-  font-size: 11px;
-}
-
-@media (max-width: 1100px) {
+@media (max-width: 1199px) {
   .nfc-dashboard-page .nfc-dashboard-layout {
     grid-template-columns: 1fr;
   }
 
-  .nfc-dashboard-rail {
+  .nfc-dashboard-page .nfc-dashboard-rail {
     position: static;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
   }
 
-  .nfc-dashboard-page .nfc-quick-actions {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .nfc-dashboard-page .nfc-quick-action {
-    border-right: 1px solid var(--nfc-border);
-    border-bottom: 0;
-  }
-
-  .nfc-dashboard-page .nfc-quick-action:last-child {
-    border-right: 0;
+  .nfc-dashboard-page .nfc-dashboard-rail > .nfc-data-panel + .nfc-data-panel {
+    padding-left: 0;
   }
 }
 
 @media (max-width: 767px) {
-  .nfc-dashboard-page .nfc-dashboard-priority {
-    align-items: stretch;
-    flex-direction: column;
+  .nfc-dashboard-page .nfc-dashboard-layout,
+  .nfc-dashboard-page .nfc-dashboard-main-column,
+  .nfc-dashboard-page .nfc-dashboard-rail {
     gap: 12px;
   }
 
-  .nfc-dashboard-page .nfc-dashboard-priority > .ant-btn {
-    width: 100%;
-    min-height: 44px;
-  }
-
-  .nfc-dashboard-snapshot {
-    grid-template-columns: auto minmax(0, 1fr);
-  }
-
-  .nfc-dashboard-snapshot > div {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  .nfc-dashboard-snapshot span {
-    white-space: normal;
-  }
-
-  .nfc-dashboard-snapshot > .ant-btn {
-    grid-column: 2;
-    justify-self: start;
-    padding-inline: 0;
-  }
-
-  .nfc-dashboard-page .nfc-quick-actions {
+  .nfc-dashboard-page .nfc-dashboard-rail {
     grid-template-columns: 1fr;
   }
 
-  .nfc-dashboard-page .nfc-quick-action {
-    min-height: 72px;
-    border-right: 0;
-    border-bottom: 1px solid var(--nfc-border);
-  }
-
-  .nfc-dashboard-page .nfc-quick-action:last-child {
-    border-bottom: 0;
+  .nfc-dashboard-page .nfc-dashboard-rail .nfc-data-panel-header {
+    min-height: 54px;
+    padding: 10px 12px;
   }
 }
