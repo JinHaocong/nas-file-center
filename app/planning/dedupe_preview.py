@@ -1204,6 +1204,20 @@ def build_preview_response(
             for info in storage_action_snapshot.values()
             if info.get("actionable") is True
         )
+        released_bytes_by_scan_root_formatted = {
+            str(i): 0 for i in range(len(compilation.scan_roots))
+        }
+        for info in storage_action_snapshot.values():
+            if info.get("actionable") is not True:
+                continue
+            raw_index = info.get("scan_root_index")
+            if not isinstance(raw_index, int) or isinstance(raw_index, bool):
+                continue
+            key = str(raw_index)
+            if key in released_bytes_by_scan_root_formatted:
+                released_bytes_by_scan_root_formatted[key] += int(
+                    info.get("expected_size") or 0
+                )
     summary_data = {
         "selection_mode": compilation.summary.get("selection_mode", compilation.scorer_config.selection_mode),
         "group_count": len(compilation.groups),

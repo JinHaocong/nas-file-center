@@ -30,12 +30,20 @@ def build_storage_action_snapshot(
         if group.status != "actionable" or group.recommended_keep is None:
             continue
         keep_path = group.recommended_keep.absolute_path
+        members_by_path = {member.absolute_path: member for member in group.members}
         for source_path in group.quarantine_candidates:
+            member = members_by_path.get(source_path)
             info: dict[str, Any] = {
                 "storage_action": action,
                 "keep_path": keep_path,
                 "source_path": source_path,
                 "expected_size": int(group.file_size),
+                "scan_root_index": (
+                    int(member.scan_root_index)
+                    if member is not None
+                    and member.scan_root_index is not None
+                    else None
+                ),
                 "actionable": True,
                 "reason": "QUARANTINE_ACTIONABLE",
                 "capability": "NOT_CHECKED",
@@ -43,10 +51,13 @@ def build_storage_action_snapshot(
 
             if action == "hardlink":
                 try:
-                    compatible, reason, _, _ = hardlink_metadata_compatibility(
+                    compatible, reason, _, source_metadata = hardlink_metadata_compatibility(
                         keep_path,
                         source_path,
                     )
+                    if compatible and source_metadata.link_count != 1:
+                        compatible = False
+                        reason = "SOURCE_HAS_MULTIPLE_HARDLINKS"
                 except StorageMetadataError as exc:
                     compatible = False
                     reason = f"HARDLINK_METADATA_UNAVAILABLE:{exc}"
@@ -59,7 +70,10 @@ def build_storage_action_snapshot(
                     info["actionable"] = False
                     info["reason"] = f"REFLINK_METADATA_UNAVAILABLE:{exc}"
                 else:
-                    if ownership_can_be_preserved(source_metadata):
+                    if source_metadata.link_count != 1:
+                        info["actionable"] = False
+                        info["reason"] = "SOURCE_HAS_MULTIPLE_HARDLINKS"
+                    elif ownership_can_be_preserved(source_metadata):
                         info["reason"] = "REFLINK_METADATA_PRESERVABLE"
                     else:
                         info["actionable"] = False
@@ -106,3 +120,21 @@ def storage_action_reclaim_bytes(
         for info in snapshot.values()
         if info.get("actionable") is True
     )
+
+
+def storage_action_released_bytes_by_scan_root(
+    snapshot: dict[str, dict[str, Any]],
+    scan_root_count: int,
+) -> dict[str, int]:
+    totals = {str(index): 0 for index in range(max(0, int(scan_root_count)))}
+    for info in snapshot.values():
+        if info.get("actionable") is not True:
+            continue
+        raw_index = info.get("scan_root_index")
+        if not isinstance(raw_index, int) or isinstance(raw_index, bool):
+            continue
+        key = str(raw_index)
+        if key not in totals:
+            continue
+        totals[key] += int(info.get("expected_size") or 0)
+    return totals
