@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 import signal
@@ -35,6 +36,9 @@ from app.tasks.state_machine import (
     validate_transition,
 )
 from app.tasks.sync import sync_batch_plan_status, sync_scan_job_status
+
+
+logger = logging.getLogger(__name__)
 
 
 def _build_incomplete_plan_error_text(
@@ -497,9 +501,9 @@ def worker_loop(
             scheduler_minute = scheduler_now.replace(second=0, microsecond=0)
             if scheduler_minute != last_scheduler_tick_minute:
                 # The Worker owns ticking; API processes never start a scheduler
-                # background timer. Mark the minute before execution so this
-                # worker attempts at most one scheduler tick per UTC minute.
-                last_scheduler_tick_minute = scheduler_minute
+                # background timer. A failed tick must remain retryable during
+                # the same UTC minute: ScheduleRun's unique slot identity is the
+                # durable duplicate-dispatch fence.
                 try:
                     run_scheduler_tick(
                         SessionLocal,
@@ -509,8 +513,14 @@ def worker_loop(
                     )
                 except Exception:
                     # Scheduler failure is fail-closed for dispatch and must not
-                    # terminate the existing WorkJob worker loop.
-                    pass
+                    # terminate the existing WorkJob worker loop. Do not mark
+                    # this minute complete so the next loop can retry it.
+                    logger.exception(
+                        "Scheduler tick failed for %s; retrying within the current minute",
+                        scheduler_minute.isoformat(),
+                    )
+                else:
+                    last_scheduler_tick_minute = scheduler_minute
 
             try:
                 claimed_id = claim_next_job(engine, SessionLocal, worker_id=worker_id)
