@@ -83,6 +83,7 @@ from app.planning.dedupe_preview import (
     compile_advanced_dedupe_preview,
     compute_current_dedupe_db_lineage_digest,
     compute_preview_digest,
+    normalize_storage_action,
 )
 from app.workflows.schema import WorkflowDefinition
 from app.workflows.validation import validate_raw_steps_types
@@ -6142,6 +6143,7 @@ class FileCenterService:
         self,
         scan_job_id: int,
         scorer_config: dict[str, Any] | None = None,
+        storage_action: str = "quarantine",
         page: int = 1,
         page_size: int = 50,
     ) -> dict[str, Any]:
@@ -6178,6 +6180,7 @@ class FileCenterService:
                 protect_last_file=effective_protect_last_file,
                 allowed_roots=effective_allowed_roots,
                 quarantine_root=effective_quarantine_root,
+                storage_action=normalize_storage_action(storage_action),
                 page=page,
                 page_size=page_size,
             )
@@ -6215,7 +6218,9 @@ class FileCenterService:
         *,
         scorer_config: dict[str, Any],
         expected_preview_digest: str,
+        storage_action: str = "quarantine",
     ) -> dict[str, Any]:
+        storage_action = normalize_storage_action(storage_action)
         protect_last_file, allowed_roots, quarantine_root, effective_safety_policy = (
             self._capture_effective_dedupe_safety_snapshot()
         )
@@ -6236,6 +6241,7 @@ class FileCenterService:
             source_snapshot_digest=compilation.source_snapshot_digest,
             decision_digest=compilation.decision_digest,
             effective_safety_policy=effective_safety_policy,
+            storage_action=storage_action,
         )
         if actual_preview_digest.lower() != expected_preview_digest.lower():
             raise DedupePreviewChangedError(details={
@@ -6252,6 +6258,7 @@ class FileCenterService:
         intents = build_advanced_dedupe_draft_intents(
             compilation,
             protect_last_file=protect_last_file,
+            storage_action=storage_action,
         )
         if len(intents) != compilation.planned_quarantine_count:
             raise DedupeInvalidConfigError(
@@ -6267,6 +6274,7 @@ class FileCenterService:
             compilation=compilation,
             preview_digest=actual_preview_digest,
             effective_safety_policy=effective_safety_policy,
+            storage_action=storage_action,
             intents=intents,
         )
 
@@ -6287,6 +6295,7 @@ class FileCenterService:
         compilation,
         preview_digest: str,
         effective_safety_policy: dict[str, Any],
+        storage_action: str,
         intents: tuple[DedupeDraftIntent, ...],
     ) -> BatchPlan:
         metadata = {
@@ -6300,6 +6309,7 @@ class FileCenterService:
             "preview_digest": preview_digest,
             "db_lineage_digest": compilation.db_lineage_digest,
             "selection_mode": compilation.summary.get("selection_mode"),
+            "storage_action": storage_action,
             "effective_safety_policy": effective_safety_policy,
             "summary": {
                 "actionable_group_count": compilation.actionable_group_count,
