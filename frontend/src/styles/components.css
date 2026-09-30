@@ -1141,3 +1141,53 @@
 .ant-table-wrapper .ant-table-pagination.ant-pagination {
   margin: 0;
 }
+
+
+/* H4 Hardlink / Reflink storage-action controls. */
+.nfc-storage-action-panel,
+.nfc-storage-capability-diagnostics {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.nfc-storage-action-header,
+.nfc-storage-capability-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.nfc-storage-action-options {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.nfc-storage-capability-diagnostics {
+  padding: 12px;
+  border: 1px solid var(--nfc-border-soft);
+  border-radius: var(--nfc-radius-control);
+  background: color-mix(in srgb, var(--nfc-surface-2) 42%, transparent);
+}
+
+.nfc-plan-storage-action-alert {
+  margin-bottom: 12px;
+}
+
+@media (max-width: 767px) {
+  .nfc-storage-action-header,
+  .nfc-storage-capability-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .nfc-storage-action-options .ant-radio-button-wrapper {
+    flex: 1 1 100%;
+    text-align: center;
+  }
+
+  .nfc-storage-capability-heading .ant-btn {
+    width: 100%;
+  }
+}

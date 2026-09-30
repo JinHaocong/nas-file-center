@@ -3,6 +3,8 @@ import { Alert, Tag, Typography } from 'antd';
 import {
   DeleteOutlined,
   FileTextOutlined,
+  LinkOutlined,
+  CopyOutlined,
   FolderOutlined,
   SaveOutlined,
   CheckCircleOutlined,
@@ -37,6 +39,37 @@ export const DedupePreviewSummaryPanel: React.FC<Props> = ({
     scanRoots.length > 0 ? scanRoots : summary.scan_roots
   );
   const mode = selectionMode || summary.selection_mode;
+  const storageAction = summary.storage_action || 'quarantine';
+  const actionMetric =
+    storageAction === 'hardlink'
+      ? {
+          key: 'storage-action',
+          label: '计划 Hardlink 优化',
+          value: `${summary.planned_action_count ?? 0}`,
+          suffix: '个',
+          meta: `metadata 阻断 ${summary.storage_blocked_count ?? 0}`,
+          icon: <LinkOutlined />,
+          tone: 'warning',
+        }
+      : storageAction === 'reflink'
+        ? {
+            key: 'storage-action',
+            label: '计划 Reflink 优化',
+            value: `${summary.planned_action_count ?? 0}`,
+            suffix: '个',
+            meta: `metadata 阻断 ${summary.storage_blocked_count ?? 0}`,
+            icon: <CopyOutlined />,
+            tone: 'accent',
+          }
+        : {
+            key: 'quarantine',
+            label: '计划隔离副本',
+            value: `${summary.planned_quarantine_count ?? 0}`,
+            suffix: '个',
+            meta: '执行后进入隔离区',
+            icon: <DeleteOutlined />,
+            tone: 'warning',
+          };
 
   const metrics = [
     {
@@ -57,15 +90,7 @@ export const DedupePreviewSummaryPanel: React.FC<Props> = ({
       icon: <FileTextOutlined />,
       tone: 'accent',
     },
-    {
-      key: 'quarantine',
-      label: '计划隔离副本',
-      value: `${summary.planned_quarantine_count ?? 0}`,
-      suffix: '个',
-      meta: '执行后进入隔离区',
-      icon: <DeleteOutlined />,
-      tone: 'warning',
-    },
+    actionMetric,
     {
       key: 'reclaim',
       label: '预计释放容量',
@@ -94,6 +119,25 @@ export const DedupePreviewSummaryPanel: React.FC<Props> = ({
           </article>
         ))}
       </div>
+
+      {storageAction === 'hardlink' && (
+        <Alert
+          className="nfc-overlay-alert"
+          type="warning"
+          showIcon
+          message="Hardlink 语义已选择"
+          description="两个路径最终共享同一个 inode；未来经任一路径写入都会修改同一份文件内容。"
+        />
+      )}
+      {storageAction === 'reflink' && (
+        <Alert
+          className="nfc-overlay-alert"
+          type="info"
+          showIcon
+          message="Reflink 语义已选择"
+          description="独立 inode + Copy-on-Write（写时复制）；不是普通完整复制。"
+        />
+      )}
 
       {mode === 'balanced_by_bytes' && (
         <Alert
