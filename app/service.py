@@ -47,6 +47,7 @@ from app.models import (
     QuarantineEntry,
     RecentPath,
     ScanJob,
+    TaskEvent,
     WorkJob,
     Workflow,
     WorkflowRevision,
