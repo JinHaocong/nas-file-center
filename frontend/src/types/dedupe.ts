@@ -3,6 +3,8 @@ export type DedupeSelectionMode =
   | 'balanced_by_bytes'
   | 'recursive_directory_balanced_by_bytes';
 
+export type DedupeStorageAction = 'quarantine' | 'hardlink' | 'reflink';
+
 export type DedupeMtimeMode = 'none' | 'newest' | 'oldest';
 
 export type PathPriorityScope = 'absolute' | 'relative';
@@ -44,6 +46,7 @@ export interface DedupeScorerConfig {
 export interface DirectAdvancedDedupeGenerateRequest {
   scorer_config: DedupeScorerConfig;
   expected_preview_digest: string;
+  storage_action?: DedupeStorageAction;
 }
 
 export interface DirectAdvancedDedupeGenerateResponse {
@@ -60,6 +63,7 @@ export interface DirectDedupePreviewRequest {
   page?: number;
   page_size?: number;
   scorer_config?: DedupeScorerConfig;
+  storage_action?: DedupeStorageAction;
 }
 
 export interface FactorContribution {
@@ -84,7 +88,14 @@ export interface BalanceInfo {
   [key: string]: any;
 }
 
-export type MemberDecision = 'KEEP' | 'QUARANTINE' | 'SAFETY_EXCLUDED' | 'SKIPPED' | 'UNAVAILABLE';
+export type MemberDecision =
+  | 'KEEP'
+  | 'QUARANTINE'
+  | 'HARDLINK'
+  | 'REFLINK'
+  | 'SAFETY_EXCLUDED'
+  | 'SKIPPED'
+  | 'UNAVAILABLE';
 
 export interface DedupePreviewMemberRow {
   group_provenance_id?: number;
@@ -110,6 +121,10 @@ export interface DedupePreviewMemberRow {
   balance_info?: BalanceInfo | null;
   candidate_balance_bucket?: string | null;
   recursive_last_file_protection_reason?: string | null;
+  storage_action?: DedupeStorageAction;
+  storage_capability?: string | null;
+  storage_metadata_compatible?: boolean | null;
+  storage_blocking_reason?: string | null;
   incomplete?: boolean;
 }
 
@@ -122,6 +137,9 @@ export interface DedupeSummary {
   candidate_member_count: number;
   actionable_group_count: number;
   skipped_group_count: number;
+  storage_action?: DedupeStorageAction;
+  planned_action_count?: number;
+  storage_blocked_count?: number;
   planned_quarantine_count: number;
   expected_reclaim_bytes: number;
   released_bytes_by_scan_root?: Record<string, number>;
@@ -151,6 +169,7 @@ export interface DirectDedupePreviewResponse {
   scorer_config_digest: string;
   source_snapshot_digest: string;
   decision_digest: string;
+  storage_action_snapshot_digest?: string | null;
   dedupe_engine_version: number;
   preview_source: string;
   live_filesystem_verified: boolean;
@@ -158,6 +177,9 @@ export interface DirectDedupePreviewResponse {
   candidate_member_count: number;
   actionable_group_count: number;
   skipped_group_count: number;
+  storage_action: DedupeStorageAction;
+  planned_action_count: number;
+  storage_blocked_count: number;
   planned_quarantine_count: number;
   expected_reclaim_bytes: number;
   released_bytes_by_scan_root: Record<string, number>;
@@ -238,4 +260,29 @@ export interface DedupeDiagnosticResponse {
   exact_duplicate_copies: boolean;
   paths: [DedupeDiagnosticPath, DedupeDiagnosticPath];
   scan: DedupeDiagnosticScanContext | null;
+}
+
+
+export type StorageOptimizationCapabilityState = 'supported' | 'unsupported' | 'unknown';
+
+export interface StorageOptimizationCapabilityResult {
+  capability: StorageOptimizationCapabilityState;
+  operation: 'hardlink' | 'reflink';
+  reason: string;
+  supported: boolean;
+  parent_device: number | null;
+  parent_inode: number | null;
+  source_parent_device: number | null;
+  source_parent_inode: number | null;
+}
+
+export interface StorageOptimizationCapabilitiesResponse {
+  hardlink: StorageOptimizationCapabilityResult;
+  reflink: StorageOptimizationCapabilityResult;
+}
+
+export interface StorageOptimizationCapabilityRequest {
+  directory?: string;
+  source_directory?: string;
+  destination_directory?: string;
 }

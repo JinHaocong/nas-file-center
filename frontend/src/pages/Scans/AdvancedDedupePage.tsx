@@ -15,12 +15,13 @@ import {
   ScheduleOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons';
-import { scansApi } from '../../api/domain';
+import { scansApi, storageOptimizationApi } from '../../api/domain';
 import { formatDedupeErrorMessage, getStructuredApiError } from '../../api/errors';
 import {
   DedupeScorerConfig,
   DirectDedupePreviewResponse,
   DedupePreviewMemberRow,
+  DedupeStorageAction,
 } from '../../types/dedupe';
 import {
   createDefaultDedupeScorerConfig,
@@ -38,6 +39,7 @@ import {
   DedupePreviewSummaryPanel,
   DedupeExplainDrawer,
   DedupeIdentitySafetyPanel,
+  DedupeStorageActionPanel,
 } from '../../components/dedupe';
 import { formatBytes } from '../../utils/format';
 import { shouldAcceptDirectResponse } from '../../utils/hotfix2Helpers';
@@ -47,17 +49,29 @@ import { ActionBar } from '../../components/ui/ActionBar';
 import { ResponsiveDescriptions } from '../../components/ui/ResponsiveDescriptions';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { CodePath } from '../../components/ui/CodePath';
+import { useAuth } from '../../contexts/AuthContext';
+
+const parentDirectory = (path: string): string => {
+  const normalized = path.replace(/\/+$/, '');
+  const index = normalized.lastIndexOf('/');
+  if (index <= 0) return '/';
+  return normalized.slice(0, index);
+};
 
 export const AdvancedDedupePage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const scanId = parseInt(id || '0', 10);
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
 
   const [dedupeState, dispatch] = useReducer(dedupeStateReducer, initialDedupeState);
   const [scorerConfig, setScorerConfig] = useState<DedupeScorerConfig>(
     createDefaultDedupeScorerConfig()
   );
   const [previewedConfig, setPreviewedConfig] = useState<DedupeScorerConfig | null>(null);
+  const [storageAction, setStorageAction] = useState<DedupeStorageAction>('quarantine');
+  const [previewedStorageAction, setPreviewedStorageAction] = useState<DedupeStorageAction | null>(null);
   const [previewData, setPreviewData] = useState<DirectDedupePreviewResponse | null>(null);
   const [page, setPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(50);
@@ -74,8 +88,48 @@ export const AdvancedDedupePage: React.FC = () => {
     enabled: !!scanId,
   });
 
+  const diagnosticRow =
+    previewData?.storage_action === storageAction
+      ? previewData.rows.find(
+    (row) =>
+      row.group_status === 'actionable' &&
+      Boolean(row.group_recommended_keep_path) &&
+      row.absolute_path !== row.group_recommended_keep_path
+        )
+      : undefined;
+  const diagnosticPair =
+    diagnosticRow && diagnosticRow.group_recommended_keep_path
+      ? {
+          keepPath: diagnosticRow.group_recommended_keep_path,
+          sourcePath: diagnosticRow.absolute_path,
+          keepParent: parentDirectory(diagnosticRow.group_recommended_keep_path),
+          sourceParent: parentDirectory(diagnosticRow.absolute_path),
+        }
+      : null;
+
+  const capabilityMutation = useMutation({
+    mutationFn: () => {
+      if (!diagnosticPair) {
+        throw new Error('当前预览页没有可用于能力探测的 KEEP / SOURCE 路径对');
+      }
+      return storageOptimizationApi.probeCapabilities({
+        source_directory: diagnosticPair.keepParent,
+        destination_directory: diagnosticPair.sourceParent,
+      });
+    },
+    onSuccess: () => message.success('运行时能力探测完成；Validate / Execute 仍会重新验证'),
+    onError: (err: any) => message.error(err?.message || '运行时能力探测失败'),
+  });
+
   const handleConfigChange = (newConfig: DedupeScorerConfig) => {
     setScorerConfig(newConfig);
+    capabilityMutation.reset();
+    dispatch({ type: 'CONFIG_EDITED' });
+  };
+
+  const handleStorageActionChange = (nextAction: DedupeStorageAction) => {
+    setStorageAction(nextAction);
+    capabilityMutation.reset();
     dispatch({ type: 'CONFIG_EDITED' });
   };
 
@@ -84,12 +138,14 @@ export const AdvancedDedupePage: React.FC = () => {
     generation: number;
     page: number;
     pageSize: number;
+    storageAction: DedupeStorageAction;
   }
 
   const previewMutation = useMutation({
     mutationFn: (variables: PreviewMutationVariables) =>
       scansApi.dedupePreview(scanId, {
         scorer_config: variables.cfg,
+        storage_action: variables.storageAction,
         page: variables.page,
         page_size: variables.pageSize,
       }),
@@ -106,6 +162,8 @@ export const AdvancedDedupePage: React.FC = () => {
       setPageSize(variables.pageSize);
       setPreviewData(data);
       setPreviewedConfig(JSON.parse(JSON.stringify(variables.cfg)));
+      setPreviewedStorageAction(variables.storageAction);
+      capabilityMutation.reset();
       dispatch({
         type: 'PREVIEW_SUCCESS',
         digest: data.preview_digest,
@@ -122,12 +180,13 @@ export const AdvancedDedupePage: React.FC = () => {
 
   const generateMutation = useMutation({
     mutationFn: () => {
-      if (!previewData || !previewedConfig || !dedupeState.acceptedPreviewDigest) {
+      if (!previewData || !previewedConfig || !previewedStorageAction || !dedupeState.acceptedPreviewDigest) {
         throw new Error('无有效的权威预览数据，请先运行预览');
       }
       return scansApi.createAdvancedDedupePlan(scanId, {
         scorer_config: previewedConfig,
         expected_preview_digest: dedupeState.acceptedPreviewDigest,
+        storage_action: previewedStorageAction,
       });
     },
     onSuccess: (res) => {
@@ -209,6 +268,7 @@ export const AdvancedDedupePage: React.FC = () => {
   const isDirty =
     dedupeState.status === 'PREVIEW_STALE' ||
     dedupeState.acceptedPreviewDigest === null ||
+    previewedStorageAction !== storageAction ||
     (previewedConfig ? isScorerConfigDirty(scorerConfig, previewedConfig) : true);
 
   const validation = validateScorerConfigForm(scorerConfig);
@@ -225,16 +285,32 @@ export const AdvancedDedupePage: React.FC = () => {
       generation: currentGen,
       page: 1,
       pageSize,
+      storageAction,
     });
   };
 
   const handleConfirmGeneratePlan = () => {
+    const actionLabel = storageAction === 'quarantine' ? 'Quarantine' : storageAction === 'hardlink' ? 'Hardlink' : 'Reflink';
     Modal.confirm({
-      title: '确认生成精确去重计划草案？',
+      title: `确认生成 ${actionLabel} 去重计划草案？`,
       icon: <ExclamationCircleOutlined />,
       content: (
         <div>
-          <p>将提交当前权威预览摘要以原子方式创建执行计划草案。</p>
+          <p>将提交当前权威预览摘要与 Storage Action（{actionLabel}）以原子方式创建执行计划草案。</p>
+          {storageAction === 'hardlink' && (
+            <Alert
+              type="warning"
+              showIcon
+              message="Hardlink 后两个路径共享同一个 inode，未来通过任一路径写入都会修改同一份文件内容。"
+            />
+          )}
+          {storageAction === 'reflink' && (
+            <Alert
+              type="info"
+              showIcon
+              message="Reflink 使用独立 inode / Copy-on-Write，不是普通完整复制。"
+            />
+          )}
           <p className="nfc-modal-support-copy">
             生成后仅创建 Draft 状态计划，底层物理文件不会发生任何改变。后续仍需完成
             <strong> Freeze -&gt; Validate -&gt; Execute </strong>
@@ -259,6 +335,7 @@ export const AdvancedDedupePage: React.FC = () => {
       generation: currentGen,
       page: newPage,
       pageSize: newPageSize,
+      storageAction,
     });
   };
 
@@ -367,7 +444,24 @@ export const AdvancedDedupePage: React.FC = () => {
 
         <div className="nfc-dedupe-strategy-stage">
           <DataPanel
-        title="1. 评分策略与偏好配置"
+            title="1. 存储动作"
+            description="Quarantine 保持默认；Hardlink / Reflink 需要显式选择，且任何动作变化都会使已有 Preview 失效。"
+          >
+            <DedupeStorageActionPanel
+              value={storageAction}
+              onChange={handleStorageActionChange}
+              disabled={previewMutation.isPending || generateMutation.isPending}
+              isAdmin={isAdmin}
+              diagnosticPair={diagnosticPair}
+              capabilityData={capabilityMutation.data}
+              capabilityLoading={capabilityMutation.isPending}
+              capabilityError={(capabilityMutation.error as any)?.message || null}
+              onProbeCapabilities={() => capabilityMutation.mutate()}
+            />
+          </DataPanel>
+
+          <DataPanel
+        title="2. 评分策略与偏好配置"
         description="所有配置变化都会使已接受的 preview digest 失效，必须重新 Preview。"
       >
         <div className="nfc-dedupe-editor-wrap">
@@ -438,7 +532,7 @@ export const AdvancedDedupePage: React.FC = () => {
           >
             <ActionBar>
               <div className="nfc-dedupe-plan-copy">
-                <strong>2. 确认并生成执行计划草案</strong>
+                <strong>3. 确认并生成执行计划草案</strong>
                 <span>
                   {isDirty
                     ? '当前 preview_digest 对应旧配置；必须重新 Preview 后才能生成计划。'
@@ -463,7 +557,7 @@ export const AdvancedDedupePage: React.FC = () => {
                   disabled={
                     !canGeneratePlan(dedupeState) ||
                     previewMutation.isPending ||
-                    previewData.planned_quarantine_count === 0
+                    previewData.planned_action_count === 0
                   }
                 >
                   生成执行计划草案
@@ -473,8 +567,8 @@ export const AdvancedDedupePage: React.FC = () => {
           </section>
 
           <DataPanel
-            title="去重候选与隔离决策"
-            description="每个成员的选择、评分、保留资格与安全排除都可追溯解释。"
+            title="去重候选与 Storage Action 决策"
+            description="每个成员的 KEEP / QUARANTINE / HARDLINK / REFLINK、metadata eligibility 与阻断原因都可追溯解释。"
             action={<span className="nfc-panel-count">{previewData.total_rows} candidates</span>}
             className="nfc-panel-flush"
             variant="dense"

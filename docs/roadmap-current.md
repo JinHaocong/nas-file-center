@@ -89,7 +89,7 @@ The following items are deliberately **not implicit next gates**:
   track.
 - Notifications / webhook delivery — **OUT OF SCOPE** for the closed 036 track.
 - Advanced Auth (API token / TOTP / recovery codes) — **DEFERRED**.
-- Hardlink / Reflink capability expansion — **DEFERRED**.
+- Hardlink / Reflink storage optimization — **ACTIVE CURRENT TRACK**; see section 7.
 - Scheduler / Cron — **DEFERRED**.
 
 Any of these may return later only through a new Scope + Architecture Freeze.
@@ -233,7 +233,7 @@ record until supplied and committed.
 
 ## 7. CURRENT NEW TRACK — Hardlink / Reflink Storage Optimization
 
-**Status: H0 CLOSED — H1 NEXT**
+**Status: H0 CLOSED / H1 CLOSED / H2 CLOSED / H3 CLOSED / H4 CURRENT**
 
 Product decision on 2026-09-30 explicitly activates Hardlink / Reflink as the
 next implementation track.
@@ -256,12 +256,21 @@ Frozen V1 direction:
 
 Implementation sequence:
 
-- **H0 CLOSED** — scope, authority, capability probes, metadata policy,
-  transaction/recovery semantics and TDD matrix frozen.
-- **H1 NEXT** — runtime Hardlink/Reflink capability primitives.
-- **H2** — Advanced Dedupe Preview/Generate/Freeze/Validate integration.
-- **H3** — transactional Worker execution and restart recovery.
-- **H4** — frontend, Docker and isolated filesystem closure.
+- **H0 CLOSED** — PR #107, architecture freeze.
+- **H1 CLOSED / MERGED** — PR #108, positive runtime Hardlink/Reflink probes,
+  actual KEEP-parent → SOURCE-parent capability checks and zero-residue rules.
+- **H2 CLOSED / MERGED** — PR #109, explicit storage_action binding through
+  Advanced Dedupe Preview → Draft → Freeze → Validate while preserving
+  Quarantine as the default.
+- **H3 CLOSED / MERGED** — PR #110, Worker-only transactional execution,
+  durable phase journal, restart replay and topology/ABA/lease fences.
+- **H4 CURRENT** — PR #114, frontend selector/warnings/capability diagnostics,
+  Docker/full regression closure and documented filesystem-acceptance boundary.
+
+H4 source closure does not by itself claim that any specific real NAS filesystem
+supports Hardlink or Reflink. Runtime support remains positively probed on the
+actual path pair, and Organizer C5 / Scheduler S5 real-NAS acceptance remains
+separate.
 
 Organizer C5 and Scheduler S5 real-NAS acceptance remain separate pending
 closure items. Their pending acceptance does not block source implementation of

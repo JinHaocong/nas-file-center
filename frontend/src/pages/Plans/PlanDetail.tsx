@@ -234,6 +234,10 @@ export const PlanDetailPage: React.FC = () => {
   const isDedupeWorkflowPlan = Boolean(
     workflowMeta && workflowMeta.workflow_mode === 'dedupe'
   );
+  const planStorageAction =
+    plan.kind === 'dedupe' && typeof plan.metadata?.storage_action === 'string'
+      ? plan.metadata.storage_action
+      : 'quarantine';
   const isStaleWorkflowPlan = Boolean(
     plan.status === 'stale' && isWorkflowPlan && !isDedupeWorkflowPlan
   );
@@ -410,6 +414,25 @@ export const PlanDetailPage: React.FC = () => {
           </ActionBar>
         }
       />
+
+      {planStorageAction === 'hardlink' && (
+        <Alert
+          className="nfc-plan-storage-action-alert"
+          type="warning"
+          showIcon
+          message="Hardlink 计划：两个路径会共享同一个 inode"
+          description="Hardlink 后两个路径共享同一个 inode，未来通过任一路径写入都会修改同一份文件内容。Freeze / Validate / Worker Execute 仍会重新验证 SHA-256、身份与运行时能力。"
+        />
+      )}
+      {planStorageAction === 'reflink' && (
+        <Alert
+          className="nfc-plan-storage-action-alert"
+          type="info"
+          showIcon
+          message="Reflink 计划：独立 inode / Copy-on-Write"
+          description="Reflink 会创建独立 inode，并使用 Copy-on-Write（写时复制）；它不是普通完整复制。Freeze / Validate / Worker Execute 仍会重新验证 SHA-256、身份与运行时能力。"
+        />
+      )}
 
       <div className="nfc-lifecycle-strip" aria-label="计划生命周期">
         {lifecycleSteps.map((step, index) => {

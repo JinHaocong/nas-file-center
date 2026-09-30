@@ -188,6 +188,40 @@ export const DedupeExplainDrawer: React.FC<Props> = ({
           </Descriptions>
         </Card>
 
+        {member.storage_action && member.storage_action !== 'quarantine' && (
+          <Card size="small" title="Storage Action 资格" bordered={false} className="nfc-dedupe-surface-card">
+            <Descriptions className="nfc-detail-descriptions" column={1} size="small">
+              <Descriptions.Item label="Storage Action">
+                <Tag color={member.storage_action === 'hardlink' ? 'orange' : 'green'}>
+                  {member.storage_action.toUpperCase()}
+                </Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="Metadata eligibility">
+                {member.storage_metadata_compatible === true ? (
+                  <Tag color="success">ELIGIBLE</Tag>
+                ) : member.storage_metadata_compatible === false ? (
+                  <Tag color="error">BLOCKED</Tag>
+                ) : (
+                  <Tag>NOT APPLICABLE</Tag>
+                )}
+              </Descriptions.Item>
+              {member.storage_blocking_reason && (
+                <Descriptions.Item label="阻断原因">
+                  <Text type="warning" code>{member.storage_blocking_reason}</Text>
+                </Descriptions.Item>
+              )}
+              <Descriptions.Item label="Preview capability">
+                <Text code>{member.storage_capability || 'NOT_CHECKED'}</Text>
+              </Descriptions.Item>
+            </Descriptions>
+            <Alert
+              type="info"
+              showIcon
+              message="Preview 只做 metadata eligibility，不执行 filesystem capability probe。"
+            />
+          </Card>
+        )}
+
         {!member.incomplete && (
           <Card
             size="small"
