@@ -1460,31 +1460,6 @@
   letter-spacing: 0.04em;
 }
 
-/* Settings integration ----------------------------------------------------- */
-.nfc-app-main .nfc-system-controls-page .nfc-settings-grid {
-  gap: 24px;
-}
-
-.nfc-app-main .nfc-system-controls-page .nfc-settings-grid > .nfc-data-panel {
-  border-color: var(--nfc-v54-line);
-  background: var(--nfc-v54-surface);
-  box-shadow: var(--nfc-v54-shadow-card);
-}
-
-.nfc-app-main .nfc-system-controls-page .nfc-settings-subpanel {
-  border-color: var(--nfc-v54-line) !important;
-  background: var(--nfc-v54-surface-soft) !important;
-}
-
-.nfc-app-main .nfc-system-controls-page .nfc-settings-subpanel-header,
-.nfc-app-main .nfc-system-controls-page .nfc-settings-window-header {
-  border-bottom-color: var(--nfc-v54-line);
-}
-
-.nfc-app-main .nfc-system-controls-page .nfc-settings-control-grid {
-  gap: 16px 18px;
-}
-
 /* ========================================================================== */
 /* Phase 5 — drawers, modals, code/evidence, mobile and finishing             */
 /* ========================================================================== */

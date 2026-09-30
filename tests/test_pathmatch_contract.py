@@ -105,3 +105,35 @@ def test_pathmatch_api_contract_and_plan_generation(tmp_path: Path):
 
     assert (dir_a / "movie.mkv").exists()
     assert not (dir_b / "movie.mkv").exists()
+
+def test_pathmatch_preview_fails_closed_when_sync_candidate_budget_is_exceeded(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    import app.service as service_module
+    from app.service import FileCenterService
+
+    data = tmp_path / "data"
+    config = tmp_path / "config"
+    dir_a = data / "DiskA"
+    dir_b = data / "DiskB"
+    dir_a.mkdir(parents=True)
+    dir_b.mkdir(parents=True)
+    config.mkdir()
+    (dir_a / "one.bin").write_bytes(b"one")
+    (dir_b / "two.bin").write_bytes(b"two")
+
+    service = FileCenterService(
+        Settings(
+            config_dir=config,
+            data_mount=data,
+            allowed_roots_raw=str(data),
+        )
+    )
+    monkeypatch.setattr(service_module, "MAX_SYNC_PREVIEW_FILE_CANDIDATES", 1)
+
+    with pytest.raises(ValueError, match=r"Preview candidate limit exceeded \(1\)"):
+        service.path_match_preview(
+            [str(dir_a), str(dir_b)],
+            mode="relative-path",
+        )

@@ -112,7 +112,7 @@ def _require_restricted_plan_admin(request: Request, plan_id: int, user: User) -
 
 
 def _require_restricted_task_admin(request: Request, task_id: int, user: User) -> None:
-    """Fence resume/retry of restricted BatchPlan execution tasks."""
+    """Fence management of restricted BatchPlan execution tasks."""
     with request.app.state.service.SessionLocal() as session:
         task = session.get(WorkJob, task_id)
         if task is None or task.kind != "batch-plan-execute":
@@ -125,8 +125,8 @@ def _require_restricted_task_admin(request: Request, task_id: int, user: User) -
         if not isinstance(raw_plan_id, int) or isinstance(raw_plan_id, bool):
             return
         plan = session.get(BatchPlan, raw_plan_id)
-        if _plan_requires_admin(plan) and user.role != "admin":
-            raise HTTPException(403, "Only administrator can resume or retry this task")
+        if _plan_requires_admin(plan, session) and user.role != "admin":
+            raise HTTPException(403, "Only administrator can manage this task")
 
 
 class QuarantineRestoreRequest(BaseModel):

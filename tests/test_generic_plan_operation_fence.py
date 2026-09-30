@@ -144,3 +144,81 @@ def test_member_cannot_manage_restricted_optimization_task(
 
     assert response.status_code == 403
 
+
+
+@pytest.mark.parametrize(
+    ("method", "path_suffix"),
+    [
+        ("post", "pause"),
+        ("post", "resume"),
+        ("post", "cancel"),
+        ("post", "retry"),
+        ("delete", ""),
+    ],
+)
+def test_member_cannot_manage_task_with_reserved_internal_operation(
+    tmp_path: Path,
+    method: str,
+    path_suffix: str,
+) -> None:
+    data = tmp_path / "data"
+    config = tmp_path / "config"
+    data.mkdir()
+    config.mkdir()
+    settings = Settings(
+        config_dir=config,
+        data_mount=data,
+        allowed_roots_raw=str(data),
+    )
+    app = create_app(settings)
+    service = app.state.service
+
+    with service.SessionLocal() as session:
+        plan = BatchPlan(
+            name="legacy-injected-plan",
+            kind="custom",
+            status="ready",
+            expected_changes=1,
+            metadata_json="{}",
+        )
+        session.add(plan)
+        session.flush()
+        session.add(
+            BatchPlanItem(
+                plan_id=plan.id,
+                sequence=1,
+                operation="hardlink_optimize",
+                source_path=str(data / "source.bin"),
+                target_path=None,
+                keep_path=str(data / "keep.bin"),
+                expected_size=0,
+                expected_mtime_ns=0,
+                expected_device=0,
+                expected_inode=0,
+                expected_hash=None,
+                state="planned",
+                metadata_json="{}",
+            )
+        )
+        job = WorkJob(
+            kind="batch-plan-execute",
+            status="queued",
+            state_json=f'{{"plan_id":{plan.id}}}',
+        )
+        session.add(job)
+        session.commit()
+        task_id = int(job.id)
+
+    member = User(
+        id=1000,
+        username="member-reserved-item",
+        password_hash="unused",
+        role="user",
+        is_active=True,
+    )
+    app.dependency_overrides[get_current_user] = lambda: member
+    client = TestClient(app)
+    url = f"/api/tasks/{task_id}" + (f"/{path_suffix}" if path_suffix else "")
+    response = getattr(client, method)(url, headers={"Origin": "http://testserver"})
+
+    assert response.status_code == 403
