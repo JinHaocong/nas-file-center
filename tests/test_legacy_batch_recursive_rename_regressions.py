@@ -172,4 +172,3 @@ def test_recursive_rename_preview_budget_counts_only_matching_extension_candidat
     assert len(preview) == 1
     assert preview[0]["source"] == str(wanted)
     assert preview[0]["target"] == str(scope / "cover.jpg")
-
