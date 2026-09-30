@@ -32,7 +32,10 @@ from app.media.catalog import (
 from app.media.corrupt_delete import build_corrupt_delete_preview, create_corrupt_delete_plan
 from app.path_safety import UnsafePathError
 from app.scanners.diagnostics import diagnose_duplicate_pair
-from app.storage_optimization.capability import probe_storage_optimization_capabilities
+from app.storage_optimization.capability import (
+    probe_storage_optimization_between,
+    probe_storage_optimization_capabilities,
+)
 from app.service import StateConflictError
 from app.planning.dedupe_preview import (
     DedupeEmptyPlanError,
@@ -180,14 +183,35 @@ class DedupeDiagnosticRequest(BaseModel):
 class StorageOptimizationCapabilityRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    directory: str = Field(min_length=1, max_length=4096)
+    directory: str | None = Field(default=None, min_length=1, max_length=4096)
+    source_directory: str | None = Field(default=None, min_length=1, max_length=4096)
+    destination_directory: str | None = Field(default=None, min_length=1, max_length=4096)
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_probe_shape(cls, raw: Any) -> Any:
+        if not isinstance(raw, dict):
+            return raw
+        directory = raw.get("directory")
+        source = raw.get("source_directory")
+        destination = raw.get("destination_directory")
+        if directory is not None:
+            if source is not None or destination is not None:
+                raise ValueError(
+                    "directory cannot be mixed with source_directory/destination_directory"
+                )
+            return raw
+        if source is None or destination is None:
+            raise ValueError(
+                "provide directory or both source_directory and destination_directory"
+            )
+        return raw
 
 
 class DedupePreviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     scorer_config: dict[str, Any] | None = None
-    storage_action: Literal["quarantine", "hardlink", "reflink"] = "quarantine"
     page: int = 1
     page_size: int = 50
 
@@ -225,7 +249,6 @@ class DedupePlanRequest(BaseModel):
     relative_path_priority_patterns: list[str] | None = None
     scorer_config: dict[str, Any] | None = None
     expected_preview_digest: str | None = None
-    storage_action: Literal["quarantine", "hardlink", "reflink"] = "quarantine"
 
     @model_validator(mode="before")
     @classmethod
@@ -244,7 +267,7 @@ class DedupePlanRequest(BaseModel):
                     details={"field": "scorer_config"},
                 )
 
-            allowed_advanced_keys = {"scorer_config", "expected_preview_digest", "storage_action"}
+            allowed_advanced_keys = {"scorer_config", "expected_preview_digest"}
             extra_or_mixed = [k for k in raw.keys() if k not in allowed_advanced_keys]
             if extra_or_mixed:
                 legacy_fields = {
@@ -743,9 +766,23 @@ def storage_optimization_capabilities(
     request: Request,
     payload: StorageOptimizationCapabilityRequest,
 ):
-    return probe_storage_optimization_capabilities(
-        payload.directory,
-        request.app.state.settings.allowed_roots,
+    settings = request.app.state.settings
+    if not settings.allow_mutation:
+        raise HTTPException(
+            status_code=409,
+            detail="Storage capability probe requires ALLOW_MUTATION=true",
+        )
+    if payload.directory is not None:
+        return probe_storage_optimization_capabilities(
+            payload.directory,
+            settings.allowed_roots,
+        )
+    assert payload.source_directory is not None
+    assert payload.destination_directory is not None
+    return probe_storage_optimization_between(
+        payload.source_directory,
+        payload.destination_directory,
+        settings.allowed_roots,
     )
 
 
@@ -781,7 +818,6 @@ def dedupe_preview(
         return service.get_dedupe_preview(
             scan_job_id=scan_job_id,
             scorer_config=payload.scorer_config,
-            storage_action=payload.storage_action,
             page=payload.page,
             page_size=payload.page_size,
         )
@@ -810,7 +846,6 @@ def create_dedupe_plan(request: Request, scan_job_id: int, payload: DedupePlanRe
                     scan_job_id,
                     scorer_config=payload.scorer_config,
                     expected_preview_digest=payload.expected_preview_digest,
-                    storage_action=payload.storage_action,
                 )
             except ValueError as exc:
                 msg = str(exc)

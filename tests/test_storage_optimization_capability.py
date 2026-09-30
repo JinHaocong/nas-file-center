@@ -7,7 +7,9 @@ from pathlib import Path
 from app.storage_optimization.capability import (
     FICLONE,
     StorageOptimizationCapability,
+    probe_hardlink_between,
     probe_hardlink_capability,
+    probe_reflink_between,
     probe_reflink_capability,
 )
 
@@ -108,3 +110,115 @@ def test_reflink_probe_ioctl_success_without_clone_is_unknown(monkeypatch, tmp_p
     assert result.capability is StorageOptimizationCapability.UNKNOWN
     assert result.reason == "reflink_probe_identity_or_content_mismatch"
     assert _probe_residue(tmp_path) == []
+
+
+def test_hardlink_probe_between_distinct_parents_proves_actual_route(tmp_path: Path):
+    source_parent = tmp_path / "keep-parent"
+    destination_parent = tmp_path / "source-parent"
+    source_parent.mkdir()
+    destination_parent.mkdir()
+
+    result = probe_hardlink_between(
+        source_parent,
+        destination_parent,
+        [tmp_path],
+    )
+
+    assert result.capability is StorageOptimizationCapability.SUPPORTED
+    assert result.source_parent_inode == source_parent.stat().st_ino
+    assert result.parent_inode == destination_parent.stat().st_ino
+    assert _probe_residue(source_parent) == []
+    assert _probe_residue(destination_parent) == []
+
+
+def test_hardlink_probe_between_does_not_trust_equal_st_dev(monkeypatch, tmp_path: Path):
+    source_parent = tmp_path / "keep-parent"
+    destination_parent = tmp_path / "source-parent"
+    source_parent.mkdir()
+    destination_parent.mkdir()
+    assert source_parent.stat().st_dev == destination_parent.stat().st_dev
+
+    real_link = os.link
+
+    def reject_cross_parent(src, dst, *, src_dir_fd=None, dst_dir_fd=None, **kwargs):
+        if src_dir_fd != dst_dir_fd:
+            raise OSError(errno.EXDEV, "synthetic NAS cross-area rejection")
+        return real_link(
+            src,
+            dst,
+            src_dir_fd=src_dir_fd,
+            dst_dir_fd=dst_dir_fd,
+            **kwargs,
+        )
+
+    monkeypatch.setattr("app.storage_optimization.capability.os.link", reject_cross_parent)
+
+    result = probe_hardlink_between(
+        source_parent,
+        destination_parent,
+        [tmp_path],
+    )
+
+    assert result.capability is StorageOptimizationCapability.UNSUPPORTED
+    assert "hardlink_probe_failed" in result.reason
+    assert _probe_residue(source_parent) == []
+    assert _probe_residue(destination_parent) == []
+
+
+def test_reflink_probe_between_uses_keep_parent_as_clone_source(monkeypatch, tmp_path: Path):
+    source_parent = tmp_path / "keep-parent"
+    destination_parent = tmp_path / "source-parent"
+    source_parent.mkdir()
+    destination_parent.mkdir()
+
+    def emulate_ficlone(dst_fd: int, request: int, src_fd: int):
+        assert request == FICLONE
+        src_pos = os.lseek(src_fd, 0, os.SEEK_CUR)
+        dst_pos = os.lseek(dst_fd, 0, os.SEEK_CUR)
+        try:
+            os.lseek(src_fd, 0, os.SEEK_SET)
+            payload = os.read(src_fd, 1024 * 1024)
+            os.ftruncate(dst_fd, 0)
+            os.lseek(dst_fd, 0, os.SEEK_SET)
+            os.write(dst_fd, payload)
+        finally:
+            os.lseek(src_fd, src_pos, os.SEEK_SET)
+            os.lseek(dst_fd, dst_pos, os.SEEK_SET)
+        return 0
+
+    monkeypatch.setattr("app.storage_optimization.capability.fcntl.ioctl", emulate_ficlone)
+
+    result = probe_reflink_between(
+        source_parent,
+        destination_parent,
+        [tmp_path],
+    )
+
+    assert result.capability is StorageOptimizationCapability.SUPPORTED
+    assert result.source_parent_inode == source_parent.stat().st_ino
+    assert result.parent_inode == destination_parent.stat().st_ino
+    assert _probe_residue(source_parent) == []
+    assert _probe_residue(destination_parent) == []
+
+
+def test_reflink_probe_between_cross_area_rejection_is_unsupported(monkeypatch, tmp_path: Path):
+    source_parent = tmp_path / "keep-parent"
+    destination_parent = tmp_path / "source-parent"
+    source_parent.mkdir()
+    destination_parent.mkdir()
+
+    def reject(*_args, **_kwargs):
+        raise OSError(errno.EXDEV, "synthetic cross-area reflink rejection")
+
+    monkeypatch.setattr("app.storage_optimization.capability.fcntl.ioctl", reject)
+
+    result = probe_reflink_between(
+        source_parent,
+        destination_parent,
+        [tmp_path],
+    )
+
+    assert result.capability is StorageOptimizationCapability.UNSUPPORTED
+    assert "reflink_probe_failed" in result.reason
+    assert _probe_residue(source_parent) == []
+    assert _probe_residue(destination_parent) == []
