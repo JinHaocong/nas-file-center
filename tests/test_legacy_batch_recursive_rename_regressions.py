@@ -127,3 +127,49 @@ def test_recursive_rename_extension_filter_only_proposes_matching_files(tmp_path
         str(second): str(nested / "poster.jpg"),
     }
     assert str(untouched) not in {row["source"] for row in preview}
+
+def test_recursive_rename_preview_fails_closed_when_candidate_budget_is_exceeded(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    import app.service as service_module
+    import pytest
+    from app.batch.rename import RenameRule
+
+    service, data_dir = _make_service(tmp_path)
+    scope = data_dir / "Large"
+    scope.mkdir()
+    (scope / "one.txt").write_text("one", encoding="utf-8")
+    (scope / "two.txt").write_text("two", encoding="utf-8")
+
+    monkeypatch.setattr(service_module, "MAX_SYNC_PREVIEW_FILE_CANDIDATES", 1)
+
+    with pytest.raises(ValueError, match=r"Preview candidate limit exceeded \(1\)"):
+        service.rename_preview([str(scope)], RenameRule(prefix="REN-"))
+
+
+def test_recursive_rename_preview_budget_counts_only_matching_extension_candidates(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    import app.service as service_module
+    from app.batch.rename import RenameRule
+
+    service, data_dir = _make_service(tmp_path)
+    scope = data_dir / "Filtered"
+    scope.mkdir()
+    (scope / "ignore-a.png").write_bytes(b"a")
+    (scope / "ignore-b.png").write_bytes(b"b")
+    wanted = scope / "cover.webp"
+    wanted.write_bytes(b"wanted")
+
+    monkeypatch.setattr(service_module, "MAX_SYNC_PREVIEW_FILE_CANDIDATES", 1)
+    preview = service.rename_preview(
+        [str(scope)],
+        RenameRule(source_extension=".webp", target_extension=".jpg"),
+    )
+
+    assert len(preview) == 1
+    assert preview[0]["source"] == str(wanted)
+    assert preview[0]["target"] == str(scope / "cover.jpg")
+
