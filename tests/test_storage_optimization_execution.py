@@ -265,10 +265,13 @@ def test_hardlink_optimization_success_is_journaled_and_preserves_path(tmp_path:
 
     phases = _journal_phases(env)
     assert phases == [
+        "prepare_new_intent",
         "prepared_new",
+        "capture_old_intent",
         "captured_old",
         "source_retire_intent",
         "source_retired",
+        "publish_intent",
         "published",
         "old_retire_intent",
         "completed",
@@ -325,6 +328,73 @@ def test_reflink_optimization_preserves_independent_inode_semantics(
 
     assert env["source"].read_bytes() != env["keep"].read_bytes()
     assert env["keep"].read_bytes() == env["payload"]
+    assert env["source"].stat().st_nlink == 1
+
+
+def test_reflink_publication_crash_recovers_only_owned_aliases(
+    tmp_path: Path,
+    monkeypatch,
+):
+    env = _seed(tmp_path, operation="reflink_optimize")
+    import app.storage_optimization.executor as executor_module
+
+    monkeypatch.setattr(
+        "app.storage_optimization.executor.probe_reflink_between",
+        lambda *_args, **_kwargs: CapabilityProbeResult(
+            StorageOptimizationCapability.SUPPORTED,
+            "reflink",
+            "test-supported",
+        ),
+    )
+    monkeypatch.setattr(
+        "app.storage_optimization.executor.fcntl.ioctl",
+        _emulate_ficlone,
+    )
+
+    original_phase_journal = executor_module._phase_journal
+    fired = {"value": False}
+
+    def crash_before_published_journal(*args, **kwargs):
+        if kwargs.get("phase") == "published" and not fired["value"]:
+            fired["value"] = True
+            raise RuntimeError("synthetic-crash:published")
+        return original_phase_journal(*args, **kwargs)
+
+    monkeypatch.setattr(
+        executor_module,
+        "_phase_journal",
+        crash_before_published_journal,
+    )
+
+    with pytest.raises(RuntimeError, match="synthetic-crash:published"):
+        execute_storage_optimization(
+            env["item"],
+            plan_id=str(env["plan_id"]),
+            allowed_roots=env["settings"].allowed_roots,
+            session_factory=env["service"].SessionLocal,
+            worker_id=WORKER_ID,
+        )
+
+    private_new = env["source"].parent / f".__nfc_opt_{env['tx_id']}.new"
+    assert private_new.exists()
+    assert env["source"].exists()
+    assert private_new.stat().st_ino == env["source"].stat().st_ino
+    assert env["source"].stat().st_nlink == 2
+
+    monkeypatch.setattr(executor_module, "_phase_journal", original_phase_journal)
+    reason = execute_storage_optimization(
+        env["item"],
+        plan_id=str(env["plan_id"]),
+        allowed_roots=env["settings"].allowed_roots,
+        session_factory=env["service"].SessionLocal,
+        worker_id=WORKER_ID,
+    )
+
+    assert "completed" in reason or "recovered" in reason
+    assert env["source"].read_bytes() == env["payload"]
+    assert env["source"].stat().st_ino != env["keep"].stat().st_ino
+    assert env["source"].stat().st_nlink == 1
+    assert not private_new.exists()
 
 
 @pytest.mark.parametrize(
