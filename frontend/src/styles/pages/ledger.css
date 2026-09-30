@@ -1,0 +1,188 @@
+/* Shared ledger/list treatment for index, scan, task, plan and audit pages. */
+.nfc-ledger-panel > .nfc-data-panel-body {
+  overflow: hidden;
+}
+
+.nfc-ledger-toolbar {
+  min-height: 54px;
+  padding: 10px 13px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--nfc-border);
+  background: var(--nfc-bg-surface);
+}
+
+.nfc-ledger-result {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--nfc-text-muted);
+  font-size: 12px;
+}
+
+.nfc-ledger-result strong {
+  color: var(--nfc-text);
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.nfc-ledger-safety-note {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  color: var(--nfc-text-subtle);
+  font-size: 11.5px;
+}
+
+.nfc-ledger-safety-note .anticon {
+  color: var(--nfc-success);
+}
+
+.nfc-indexes-page .nfc-path-cell {
+  min-width: 260px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.nfc-indexes-page .nfc-path-cell > .anticon {
+  flex: 0 0 auto;
+  color: var(--nfc-text-subtle);
+}
+
+.nfc-indexes-page .nfc-code-path {
+  min-width: 0;
+  max-width: min(680px, 52vw);
+}
+
+.nfc-indexes-page .ant-table-pagination.ant-pagination {
+  margin: 0 !important;
+  padding: 12px 13px;
+  border-top: 1px solid var(--nfc-border);
+  background: var(--nfc-bg-surface);
+}
+
+.nfc-mobile-record-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.nfc-index-mobile-card {
+  padding: 14px;
+  border: 0 !important;
+  border-bottom: 1px solid var(--nfc-border) !important;
+  border-radius: 0 !important;
+  background: var(--nfc-bg-surface) !important;
+  box-shadow: none !important;
+}
+
+.nfc-index-mobile-card:last-child {
+  border-bottom: 0 !important;
+}
+
+.nfc-mobile-record-heading {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.nfc-index-mobile-path {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nfc-index-mobile-path > .anticon {
+  flex: 0 0 auto;
+  color: var(--nfc-text-subtle);
+}
+
+.nfc-index-mobile-path .nfc-code-path {
+  min-width: 0;
+  max-width: calc(100vw - 150px);
+}
+
+.nfc-mobile-record-facts {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px 12px;
+}
+
+.nfc-mobile-record-facts span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--nfc-text-subtle);
+  font-size: 11px;
+}
+
+.nfc-mobile-record-facts b {
+  overflow-wrap: anywhere;
+  color: var(--nfc-text);
+  font-size: 12px;
+  font-weight: 620;
+}
+
+.nfc-mobile-record-note {
+  margin-top: 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--nfc-bg-subtle);
+  color: var(--nfc-text-muted);
+  font-size: 11.5px;
+}
+
+.nfc-mobile-record-actions {
+  margin-top: 10px;
+  padding-top: 8px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  border-top: 1px solid var(--nfc-border);
+}
+
+.nfc-mobile-pagination {
+  padding: 12px;
+  border-top: 1px solid var(--nfc-border);
+  background: var(--nfc-bg-surface);
+}
+
+.nfc-index-create-modal .nfc-form-note {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--nfc-bg-subtle);
+  color: var(--nfc-text-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+@media (max-width: 767px) {
+  .nfc-ledger-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .nfc-ledger-safety-note {
+    justify-content: flex-start;
+  }
+
+  .nfc-mobile-record-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .nfc-index-mobile-path .nfc-code-path {
+    max-width: calc(100vw - 168px);
+  }
+}
