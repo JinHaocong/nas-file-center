@@ -38,6 +38,18 @@ from app.planning.dedupe_engine import (
 MAX_DEDUPE_CANDIDATES = 50_000
 MAX_PLANNED_QUARANTINE = 100_000
 
+STORAGE_ACTIONS = frozenset({"quarantine", "hardlink", "reflink"})
+
+
+def normalize_storage_action(value: str | None) -> str:
+    action = "quarantine" if value is None else str(value).strip().lower()
+    if action not in STORAGE_ACTIONS:
+        raise DedupeInvalidConfigError(
+            "storage_action must be one of quarantine, hardlink, reflink",
+            details={"field": "storage_action", "value": value},
+        )
+    return action
+
 
 class DedupeError(Exception):
     def __init__(self, message: str, code: str, details: Any = None, status_code: int = 400):
@@ -997,14 +1009,17 @@ def compute_preview_digest(
     source_snapshot_digest: str,
     decision_digest: str,
     effective_safety_policy: Mapping[str, Any],
+    storage_action: str = "quarantine",
     dedupe_engine_version: int = 1,
 ) -> str:
+    storage_action = normalize_storage_action(storage_action)
     payload = {
         "dedupe_engine_version": dedupe_engine_version,
         "scan_job_id": scan_job_id,
         "scorer_config_digest": scorer_config_digest,
         "source_snapshot_digest": source_snapshot_digest,
         "decision_digest": decision_digest,
+        "storage_action": storage_action,
         "effective_safety_policy": dict(sorted(effective_safety_policy.items())),
     }
     return hashlib.sha256(canonical_json_dumps(payload).encode("utf-8")).hexdigest()
@@ -1016,9 +1031,11 @@ def build_preview_response(
     protect_last_file: bool = True,
     allowed_roots: Sequence[str | Path] | None = None,
     quarantine_root: str | Path | None = None,
+    storage_action: str = "quarantine",
     page: int = 1,
     page_size: int = 50,
 ) -> dict[str, Any]:
+    storage_action = normalize_storage_action(storage_action)
     canonical_safety_policy = canonicalize_effective_safety_policy(
         protect_last_file=protect_last_file,
         allowed_roots=allowed_roots,
@@ -1030,6 +1047,7 @@ def build_preview_response(
         source_snapshot_digest=compilation.source_snapshot_digest,
         decision_digest=compilation.decision_digest,
         effective_safety_policy=canonical_safety_policy,
+        storage_action=storage_action,
     )
 
     recursive_mode = compilation.scorer_config.selection_mode == "recursive_directory_balanced_by_bytes"
@@ -1058,7 +1076,11 @@ def build_preview_response(
             elif m.recommended_keep:
                 member_decision = "KEEP"
             elif m.absolute_path in g_quarantine_set:
-                member_decision = "QUARANTINE"
+                member_decision = {
+                    "quarantine": "QUARANTINE",
+                    "hardlink": "HARDLINK",
+                    "reflink": "REFLINK",
+                }[storage_action]
             else:
                 member_decision = "SKIPPED"
             contrib_list = [
@@ -1131,7 +1153,9 @@ def build_preview_response(
         "candidate_member_count": compilation.candidate_member_count,
         "actionable_group_count": compilation.actionable_group_count,
         "skipped_group_count": compilation.skipped_group_count,
-        "planned_quarantine_count": compilation.planned_quarantine_count,
+        "storage_action": storage_action,
+        "planned_action_count": compilation.planned_quarantine_count,
+        "planned_quarantine_count": compilation.planned_quarantine_count if storage_action == "quarantine" else 0,
         "expected_reclaim_bytes": compilation.expected_reclaim_bytes,
         "released_bytes_by_scan_root": released_bytes_by_scan_root_formatted,
     }
@@ -1143,7 +1167,9 @@ def build_preview_response(
         "candidate_member_count": compilation.candidate_member_count,
         "actionable_group_count": compilation.actionable_group_count,
         "skipped_group_count": compilation.skipped_group_count,
-        "planned_quarantine_count": compilation.planned_quarantine_count,
+        "storage_action": storage_action,
+        "planned_action_count": compilation.planned_quarantine_count,
+        "planned_quarantine_count": compilation.planned_quarantine_count if storage_action == "quarantine" else 0,
         "expected_reclaim_bytes": compilation.expected_reclaim_bytes,
         "released_bytes_by_scan_root": released_bytes_by_scan_root_formatted,
         "scorer_config_digest": compilation.scorer_config_digest,
