@@ -70,6 +70,7 @@ from app.planning.dedupe_config import canonical_config_dict
 from app.storage_optimization.capability import (
     StorageOptimizationCapability,
     probe_hardlink_between,
+    probe_hardlink_capability,
     probe_reflink_between,
 )
 from app.storage_optimization.metadata import (
@@ -2143,6 +2144,26 @@ class FileCenterService:
                         item_validations[row.id] = (
                             "skipped",
                             f"STORAGE_OPTIMIZATION_CAPABILITY_{capability.capability.value.upper()}:{capability.reason}",
+                            None,
+                        )
+                        continue
+
+                    # H3 publication/capture uses atomic local hard-link
+                    # no-clobber anchors in the SOURCE parent even for Reflink.
+                    local_publish_capability = probe_hardlink_capability(
+                        Path(row.source_path).parent,
+                        self.settings.allowed_roots,
+                    )
+                    if (
+                        local_publish_capability.capability
+                        is not StorageOptimizationCapability.SUPPORTED
+                    ):
+                        has_error = True
+                        item_validations[row.id] = (
+                            "skipped",
+                            "STORAGE_OPTIMIZATION_LOCAL_PUBLISH_"
+                            f"{local_publish_capability.capability.value.upper()}:"
+                            f"{local_publish_capability.reason}",
                             None,
                         )
                         continue
