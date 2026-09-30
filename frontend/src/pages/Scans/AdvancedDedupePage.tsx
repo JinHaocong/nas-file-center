@@ -88,12 +88,15 @@ export const AdvancedDedupePage: React.FC = () => {
     enabled: !!scanId,
   });
 
-  const diagnosticRow = previewData?.rows.find(
+  const diagnosticRow =
+    previewData?.storage_action === storageAction
+      ? previewData.rows.find(
     (row) =>
       row.group_status === 'actionable' &&
       Boolean(row.group_recommended_keep_path) &&
       row.absolute_path !== row.group_recommended_keep_path
-  );
+        )
+      : undefined;
   const diagnosticPair =
     diagnosticRow && diagnosticRow.group_recommended_keep_path
       ? {
