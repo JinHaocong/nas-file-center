@@ -3112,6 +3112,15 @@ class FileCenterService:
                 and direct_plan_meta.get("storage_action") in {"hardlink", "reflink"}
             ):
                 raise StateConflictError(
+                    "Hardlink/Reflink optimization requires the Worker journaled transaction authority; "
+                    "synchronous execute_plan is not an authorized mutation path"
+                )
+            if (
+                isinstance(direct_plan_meta, dict)
+                and direct_plan_meta.get("source") == "dedupe"
+                and direct_plan_meta.get("storage_action") in {"hardlink", "reflink"}
+            ):
+                raise StateConflictError(
                     "Hardlink/Reflink storage optimization requires the Worker journaled "
                     "transaction authority; synchronous execute_plan is not authorized"
                 )
