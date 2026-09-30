@@ -483,6 +483,30 @@ def execute_item(
         and not utility_empty_cleanup_authorized
     ):
         return _skip("permanent deletion is disabled")
+    if item.operation in {"hardlink_optimize", "reflink_optimize"}:
+        if not session_factory or not worker_id:
+            return ItemResult(
+                "failed",
+                "STORAGE_OPTIMIZATION_AUTHORITY_MISSING: Worker authority and session_factory are required",
+            )
+        try:
+            from app.storage_optimization.executor import execute_storage_optimization
+
+            reason = execute_storage_optimization(
+                item,
+                plan_id=plan_id,
+                allowed_roots=allowed_roots,
+                session_factory=session_factory,
+                worker_id=worker_id,
+            )
+        except Exception as exc:
+            from app.tasks.state_machine import JobLeaseLost
+
+            if isinstance(exc, JobLeaseLost):
+                raise
+            return ItemResult("failed", str(exc))
+        return ItemResult("completed", reason, Path(item.source))
+
     if item.operation == "media_corrupt_unlink_delete":
         if not session_factory or not worker_id:
             return ItemResult(
