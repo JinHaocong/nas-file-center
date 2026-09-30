@@ -187,6 +187,7 @@ class DedupePreviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     scorer_config: dict[str, Any] | None = None
+    storage_action: Literal["quarantine", "hardlink", "reflink"] = "quarantine"
     page: int = 1
     page_size: int = 50
 
@@ -224,6 +225,7 @@ class DedupePlanRequest(BaseModel):
     relative_path_priority_patterns: list[str] | None = None
     scorer_config: dict[str, Any] | None = None
     expected_preview_digest: str | None = None
+    storage_action: Literal["quarantine", "hardlink", "reflink"] = "quarantine"
 
     @model_validator(mode="before")
     @classmethod
@@ -242,7 +244,7 @@ class DedupePlanRequest(BaseModel):
                     details={"field": "scorer_config"},
                 )
 
-            allowed_advanced_keys = {"scorer_config", "expected_preview_digest"}
+            allowed_advanced_keys = {"scorer_config", "expected_preview_digest", "storage_action"}
             extra_or_mixed = [k for k in raw.keys() if k not in allowed_advanced_keys]
             if extra_or_mixed:
                 legacy_fields = {
@@ -779,6 +781,7 @@ def dedupe_preview(
         return service.get_dedupe_preview(
             scan_job_id=scan_job_id,
             scorer_config=payload.scorer_config,
+            storage_action=payload.storage_action,
             page=payload.page,
             page_size=payload.page_size,
         )
@@ -807,6 +810,7 @@ def create_dedupe_plan(request: Request, scan_job_id: int, payload: DedupePlanRe
                     scan_job_id,
                     scorer_config=payload.scorer_config,
                     expected_preview_digest=payload.expected_preview_digest,
+                    storage_action=payload.storage_action,
                 )
             except ValueError as exc:
                 msg = str(exc)
