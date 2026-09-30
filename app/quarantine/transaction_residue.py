@@ -247,9 +247,10 @@ def _cleanup_utility_move_tx(
 
 def cleanup_terminal_transaction_residue(
     *,
-    quarantine_root: Path | str,
     session_factory: sessionmaker,
     worker_id: str,
+    quarantine_root: Path | str | None = None,
+    settings: object | None = None,
 ) -> dict[str, int]:
     """Retire terminal NFC transaction metadata without touching user payloads.
 
@@ -259,7 +260,27 @@ def cleanup_terminal_transaction_residue(
       active plans are never touched, and live plans require a completed MOVE.
     - unknown files, symlinks, malformed metadata and active transactions remain.
     """
-    root = Path(quarantine_root)
+    if settings is not None:
+        if (
+            not bool(getattr(settings, "allow_mutation", False))
+            or not bool(getattr(settings, "allow_delete", False))
+        ):
+            return {
+                "quarantine_tx_dirs_removed": 0,
+                "utility_move_states_removed": 0,
+            }
+        configured_root = getattr(settings, "quarantine_root", None)
+        if configured_root is None:
+            return {
+                "quarantine_tx_dirs_removed": 0,
+                "utility_move_states_removed": 0,
+            }
+        root = Path(configured_root)
+    elif quarantine_root is not None:
+        root = Path(quarantine_root)
+    else:
+        raise ValueError("quarantine_root or settings is required")
+
     with session_factory() as session:
         assert_active_worker_lease(session, worker_id)
 
