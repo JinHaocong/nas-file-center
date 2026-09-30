@@ -34,19 +34,20 @@ describe('v0.4.2 taste principles carried into the current control plane', () =>
     assert.ok(css.includes('.nfc-dashboard-rail'));
   });
 
-  test('sidebar remains the navigation anchor while header is reduced to utility chrome', () => {
+  test('sidebar remains the navigation anchor while header stays compact and opaque', () => {
     const sidebar = read('src/components/Sidebar.tsx');
     const header = read('src/components/Header.tsx');
-    const shell = read('src/styles/shell.css');
-    const workspaceV2 = read('src/styles/v056-right-workspace-v2.css');
+    const shell = read('src/styles/redesign/shell.css');
     assert.ok(sidebar.includes('nfc-sidebar-meta'));
-    assert.ok(sidebar.includes('CONTROL PLANE'));
-    assert.ok(shell.includes('.nfc-sidebar.nfc-sidebar'));
+    assert.ok(sidebar.includes('文件工作台'));
+    assert.match(shell, /\.nfc-sidebar\.ant-layout-sider/);
     assert.ok(header.includes('nfc-header-command-cluster'));
     assert.ok(header.includes('SafeModeBadge'));
     assert.ok(header.includes('WorkerStatusBadge'));
+    assert.ok(header.includes('nfc-header-location'));
     assert.doesNotMatch(header, /nfc-header-workspace|resolveWorkspaceContext/);
-    assert.match(workspaceV2, /\.nfc-header\.nfc-header[\s\S]*backdrop-filter:\s*blur\(22px\)/);
+    assert.match(shell, /\.nfc-header\.ant-layout-header[\s\S]*background:\s*var\(--nfc-bg-surface\)/);
+    assert.match(shell, /\.nfc-header\.ant-layout-header[\s\S]*backdrop-filter:\s*none/);
   });
 
   test('dashboard page identity stays singular in the current workspace', () => {
