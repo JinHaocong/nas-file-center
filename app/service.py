@@ -84,6 +84,7 @@ from app.storage_optimization.planning import (
     actionable_storage_paths,
     build_storage_action_snapshot,
     storage_action_reclaim_bytes,
+    storage_action_released_bytes_by_scan_root,
     storage_action_snapshot_digest,
 )
 from app.planning.dedupe_generate import DedupeDraftIntent, build_advanced_dedupe_draft_intents
@@ -2071,6 +2072,7 @@ class FileCenterService:
                             metadata.uid,
                             metadata.gid,
                             metadata.size,
+                            metadata.link_count,
                             metadata.mtime_ns,
                             metadata.xattrs,
                         )
@@ -2866,6 +2868,11 @@ class FileCenterService:
                         raise StateConflictError(
                             f"STORAGE_OPTIMIZATION_METADATA_UNAVAILABLE: {exc}"
                         ) from exc
+
+                    if source_metadata.link_count != 1:
+                        raise StateConflictError(
+                            "SOURCE_HAS_MULTIPLE_HARDLINKS: optimization requires a singly-linked SOURCE inode"
+                        )
 
                     if it["operation"] == "hardlink_optimize":
                         compatible, metadata_reason, keep_metadata, source_metadata = (
@@ -6514,6 +6521,19 @@ class FileCenterService:
             storage_action=storage_action,
             storage_action_snapshot_digest=action_snapshot_digest,
             storage_action_reclaim_bytes_value=storage_action_reclaim_bytes(action_snapshot),
+            storage_action_released_bytes_by_root_value=(
+                {
+                    str(key): value
+                    for key, value in sorted(
+                        compilation.released_bytes_by_scan_root.items()
+                    )
+                }
+                if storage_action == "quarantine"
+                else storage_action_released_bytes_by_scan_root(
+                    action_snapshot,
+                    len(compilation.scan_roots),
+                )
+            ),
             intents=intents,
         )
 
@@ -6537,6 +6557,7 @@ class FileCenterService:
         storage_action: str,
         storage_action_snapshot_digest: str | None,
         storage_action_reclaim_bytes_value: int,
+        storage_action_released_bytes_by_root_value: dict[str, int],
         intents: tuple[DedupeDraftIntent, ...],
     ) -> BatchPlan:
         metadata = {
@@ -6569,10 +6590,7 @@ class FileCenterService:
                     if storage_action == "quarantine"
                     else storage_action_reclaim_bytes_value
                 ),
-                "released_bytes_by_scan_root": {
-                    str(key): value
-                    for key, value in sorted(compilation.released_bytes_by_scan_root.items())
-                },
+                "released_bytes_by_scan_root": storage_action_released_bytes_by_root_value,
             },
         }
 
