@@ -32,6 +32,7 @@ from app.media.catalog import (
 from app.media.corrupt_delete import build_corrupt_delete_preview, create_corrupt_delete_plan
 from app.path_safety import UnsafePathError
 from app.scanners.diagnostics import diagnose_duplicate_pair
+from app.storage_optimization.capability import probe_storage_optimization_capabilities
 from app.service import StateConflictError
 from app.planning.dedupe_preview import (
     DedupeEmptyPlanError,
@@ -174,6 +175,12 @@ class DedupeDiagnosticRequest(BaseModel):
     path_a: str = Field(min_length=1, max_length=4096)
     path_b: str = Field(min_length=1, max_length=4096)
     scan_job_id: int | None = Field(default=None, ge=1)
+
+
+class StorageOptimizationCapabilityRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    directory: str = Field(min_length=1, max_length=4096)
 
 
 class DedupePreviewRequest(BaseModel):
@@ -724,6 +731,20 @@ def diagnose_scan_pair(request: Request, payload: DedupeDiagnosticRequest):
         raise HTTPException(404, "scan not found") from exc
     except (ValueError, OSError) as exc:
         raise HTTPException(400, str(exc)) from exc
+
+
+@router.post(
+    "/storage-optimization/capabilities",
+    dependencies=[Depends(require_admin_user)],
+)
+def storage_optimization_capabilities(
+    request: Request,
+    payload: StorageOptimizationCapabilityRequest,
+):
+    return probe_storage_optimization_capabilities(
+        payload.directory,
+        request.app.state.settings.allowed_roots,
+    )
 
 
 @router.get("/scans/{scan_job_id}")
