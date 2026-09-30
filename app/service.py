@@ -5486,37 +5486,40 @@ class FileCenterService:
                 ) from exc
 
     def _cleanup_empty_terminal_tx_artifacts(self, entry: QuarantineEntry) -> None:
-        """Remove directory-only transaction residue for explicit record cleanup.
+        """Remove provably-empty transaction residue for terminal records.
 
-        An EXDEV failure can happen before the candidate anchor is created. In
-        that case allocation has already created .tx/entry-N/attempt-M, but the
-        tree contains no owned payload at all. Terminal record deletion may
-        remove only that provably-empty directory tree. Any file, symlink, or
-        non-directory object keeps the existing fail-closed behavior.
+        Abandoned/conflict cleanup remains fail-closed because any surviving
+        transaction artifact may still be the only evidence or copy. Purged
+        entries are different: the payload has already reached a permanent
+        terminal state, so directory-only residue may be retired opportunistically.
+        Unknown files, symlinks, or non-directory objects are never removed.
         """
-        if entry.state not in {"abandoned", "conflict"}:
+        if entry.state not in {"abandoned", "conflict", "purged"}:
             return
 
-        self._cleanup_abandoned_cross_storage_staging(entry)
+        strict = entry.state in {"abandoned", "conflict"}
+        if strict:
+            self._cleanup_abandoned_cross_storage_staging(entry)
 
-        tx_entry_root = (
-            Path(self.settings.quarantine_root)
-            / ".tx"
-            / f"entry-{entry.id}"
-        )
+        tx_root = Path(self.settings.quarantine_root) / ".tx"
+        tx_entry_root = tx_root / f"entry-{entry.id}"
         try:
             root_stat = os.lstat(tx_entry_root)
         except FileNotFoundError:
             return
         except OSError as exc:
-            raise StateConflictError(
-                f"Cannot inspect transaction artifacts for quarantine entry #{entry.id}: {exc}"
-            ) from exc
+            if strict:
+                raise StateConflictError(
+                    f"Cannot inspect transaction artifacts for quarantine entry #{entry.id}: {exc}"
+                ) from exc
+            return
 
         if not stat.S_ISDIR(root_stat.st_mode) or stat.S_ISLNK(root_stat.st_mode):
-            raise StateConflictError(
-                f"Transaction artifact root for quarantine entry #{entry.id} is not a plain directory"
-            )
+            if strict:
+                raise StateConflictError(
+                    f"Transaction artifact root for quarantine entry #{entry.id} is not a plain directory"
+                )
+            return
 
         directories: list[Path] = []
         for current, dirnames, filenames in os.walk(tx_entry_root, topdown=True, followlinks=False):
@@ -5524,29 +5527,39 @@ class FileCenterService:
             try:
                 current_stat = os.lstat(current_path)
             except OSError as exc:
-                raise StateConflictError(
-                    f"Cannot inspect transaction artifacts for quarantine entry #{entry.id}: {exc}"
-                ) from exc
+                if strict:
+                    raise StateConflictError(
+                        f"Cannot inspect transaction artifacts for quarantine entry #{entry.id}: {exc}"
+                    ) from exc
+                return
             if not stat.S_ISDIR(current_stat.st_mode) or stat.S_ISLNK(current_stat.st_mode):
-                raise StateConflictError(
-                    f"Transaction artifacts for quarantine entry #{entry.id} contain a non-directory object"
-                )
+                if strict:
+                    raise StateConflictError(
+                        f"Transaction artifacts for quarantine entry #{entry.id} contain a non-directory object"
+                    )
+                return
             if filenames:
-                raise StateConflictError(
-                    f"Transaction artifacts for quarantine entry #{entry.id} still contain owned payload/evidence"
-                )
+                if strict:
+                    raise StateConflictError(
+                        f"Transaction artifacts for quarantine entry #{entry.id} still contain owned payload/evidence"
+                    )
+                return
             for dirname in dirnames:
                 child = current_path / dirname
                 try:
                     child_stat = os.lstat(child)
                 except OSError as exc:
-                    raise StateConflictError(
-                        f"Cannot inspect transaction artifacts for quarantine entry #{entry.id}: {exc}"
-                    ) from exc
+                    if strict:
+                        raise StateConflictError(
+                            f"Cannot inspect transaction artifacts for quarantine entry #{entry.id}: {exc}"
+                        ) from exc
+                    return
                 if not stat.S_ISDIR(child_stat.st_mode) or stat.S_ISLNK(child_stat.st_mode):
-                    raise StateConflictError(
-                        f"Transaction artifacts for quarantine entry #{entry.id} contain a symlink or non-directory object"
-                    )
+                    if strict:
+                        raise StateConflictError(
+                            f"Transaction artifacts for quarantine entry #{entry.id} contain a symlink or non-directory object"
+                        )
+                    return
             directories.append(current_path)
 
         for directory in reversed(directories):
@@ -5555,9 +5568,16 @@ class FileCenterService:
             except FileNotFoundError:
                 continue
             except OSError as exc:
-                raise StateConflictError(
-                    f"Transaction artifacts for quarantine entry #{entry.id} are not safely empty: {exc}"
-                ) from exc
+                if strict:
+                    raise StateConflictError(
+                        f"Transaction artifacts for quarantine entry #{entry.id} are not safely empty: {exc}"
+                    ) from exc
+                return
+
+        try:
+            tx_root.rmdir()
+        except (FileNotFoundError, OSError):
+            pass
 
     def _assert_quarantine_record_deletable(self, entry: QuarantineEntry) -> None:
         deletable_states = {"restored", "purged", "abandoned", "conflict"}

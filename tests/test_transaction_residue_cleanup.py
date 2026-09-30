@@ -1,142 +1,143 @@
 from __future__ import annotations
 
-import json
-import os
 from pathlib import Path
 
 from sqlalchemy import text
 
 from app.db import create_engine_and_session, init_db
+from app.execution.directory_transplant import move_directory_tree_noreplace
 from app.models import QuarantineEntry, TaskLock, utcnow
-from app.tasks.recovery import acquire_worker_ownership
-from app.transaction_residue import (
-    cleanup_completed_utility_move_residue,
-    cleanup_empty_quarantine_tx_residue,
-)
+from app.quarantine.transaction_residue import cleanup_terminal_transaction_residue
 
 
-def _db(tmp_path: Path):
-    db_path = tmp_path / "residue.db"
+def _env(tmp_path: Path):
+    db_path = tmp_path / "cleanup.db"
     engine, SessionLocal = create_engine_and_session(db_path)
     init_db(engine, db_path=db_path)
-    assert acquire_worker_ownership(engine, SessionLocal, worker_id="cleanup-worker")
-    return SessionLocal
-
-
-def test_orphaned_empty_quarantine_tx_tree_is_removed(tmp_path: Path) -> None:
-    SessionLocal = _db(tmp_path)
-    root = tmp_path / "trash"
-    attempt = root / ".tx" / "entry-41" / "attempt-3" / "purge"
-    attempt.mkdir(parents=True)
-
-    stats = cleanup_empty_quarantine_tx_residue(
-        SessionLocal,
-        root,
-        worker_id="cleanup-worker",
-    )
-
-    assert stats["removed_entry_namespaces"] == 1
-    assert not (root / ".tx").exists()
-
-
-def test_active_quarantine_entry_keeps_empty_tx_tree(tmp_path: Path) -> None:
-    SessionLocal = _db(tmp_path)
-    root = tmp_path / "trash"
-    entry_root = root / ".tx" / "entry-7"
-    (entry_root / "attempt-1").mkdir(parents=True)
-
+    quarantine_root = tmp_path / "trash"
+    quarantine_root.mkdir()
+    worker_id = "residue-cleanup-worker"
     with SessionLocal() as session:
-        session.add(
-            QuarantineEntry(
-                id=7,
-                original_path=str(tmp_path / "source.bin"),
-                quarantine_path=str(root / "payload.q-7.bin"),
-                state="active",
-                tx_phase="active",
-            )
-        )
+        session.execute(text("BEGIN IMMEDIATE"))
+        session.add(TaskLock(id=1, locked=True, owner=worker_id, acquired_at=utcnow()))
         session.commit()
+    return SessionLocal, quarantine_root, worker_id
 
-    stats = cleanup_empty_quarantine_tx_residue(
-        SessionLocal,
-        root,
-        worker_id="cleanup-worker",
+
+def test_startup_cleanup_removes_orphaned_empty_quarantine_tx_tree(tmp_path: Path):
+    SessionLocal, quarantine_root, worker_id = _env(tmp_path)
+    orphan = quarantine_root / ".tx" / "entry-77"
+    (orphan / "attempt-1").mkdir(parents=True)
+    (orphan / "attempt-2" / "nested").mkdir(parents=True)
+
+    stats = cleanup_terminal_transaction_residue(
+        quarantine_root=quarantine_root,
+        session_factory=SessionLocal,
+        worker_id=worker_id,
     )
 
-    assert stats["removed_entry_namespaces"] == 0
-    assert entry_root.is_dir()
+    assert stats["quarantine_tx_dirs_removed"] == 1
+    assert not orphan.exists()
+    assert not (quarantine_root / ".tx").exists()
 
 
-def test_orphaned_quarantine_tx_tree_with_file_is_preserved(tmp_path: Path) -> None:
-    SessionLocal = _db(tmp_path)
-    root = tmp_path / "trash"
-    entry_root = root / ".tx" / "entry-99"
-    entry_root.mkdir(parents=True)
-    (entry_root / "unknown.bin").write_bytes(b"do-not-delete")
+def test_startup_cleanup_preserves_unknown_quarantine_tx_file(tmp_path: Path):
+    SessionLocal, quarantine_root, worker_id = _env(tmp_path)
+    orphan = quarantine_root / ".tx" / "entry-77" / "attempt-1"
+    orphan.mkdir(parents=True)
+    evidence = orphan / "unknown.bin"
+    evidence.write_bytes(b"do-not-delete")
 
-    stats = cleanup_empty_quarantine_tx_residue(
-        SessionLocal,
-        root,
-        worker_id="cleanup-worker",
+    stats = cleanup_terminal_transaction_residue(
+        quarantine_root=quarantine_root,
+        session_factory=SessionLocal,
+        worker_id=worker_id,
     )
 
-    assert stats["removed_entry_namespaces"] == 0
-    assert stats["skipped_namespaces"] >= 1
-    assert (entry_root / "unknown.bin").read_bytes() == b"do-not-delete"
+    assert stats["quarantine_tx_dirs_removed"] == 0
+    assert evidence.read_bytes() == b"do-not-delete"
 
 
-def _write_transplant_state(item_dir: Path, source: Path, target: Path, *, phase: str) -> None:
-    item_dir.mkdir(parents=True)
-    target.mkdir(parents=True)
-    st = os.lstat(target)
-    (item_dir / "state.json").write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "phase": phase,
-                "source": str(source),
-                "target": str(target),
-                "created_dirs": {"": [int(st.st_dev), int(st.st_ino)]},
-            }
-        ),
-        encoding="utf-8",
+def test_startup_cleanup_removes_empty_terminal_quarantine_tx_tree(tmp_path: Path):
+    SessionLocal, quarantine_root, worker_id = _env(tmp_path)
+    with SessionLocal() as session:
+        entry = QuarantineEntry(
+            original_path=str(tmp_path / "source.bin"),
+            quarantine_path=str(quarantine_root / "source.q"),
+            state="purged",
+            tx_phase="purged",
+        )
+        session.add(entry)
+        session.commit()
+        entry_id = int(entry.id)
+
+    tree = quarantine_root / ".tx" / f"entry-{entry_id}" / "attempt-1"
+    tree.mkdir(parents=True)
+
+    stats = cleanup_terminal_transaction_residue(
+        quarantine_root=quarantine_root,
+        session_factory=SessionLocal,
+        worker_id=worker_id,
     )
 
-
-def test_completed_utility_move_state_is_removed(tmp_path: Path) -> None:
-    SessionLocal = _db(tmp_path)
-    root = tmp_path / "trash"
-    source = tmp_path / "source-gone"
-    target = tmp_path / "target"
-    item_dir = root / ".utility-move-tx" / "plan-1" / "item-1"
-    _write_transplant_state(item_dir, source, target, phase="transplanted")
-
-    stats = cleanup_completed_utility_move_residue(
-        SessionLocal,
-        root,
-        worker_id="cleanup-worker",
-    )
-
-    assert stats["removed_transactions"] == 1
-    assert not (root / ".utility-move-tx").exists()
-    assert target.is_dir()
+    assert stats["quarantine_tx_dirs_removed"] == 1
+    assert not tree.parent.exists()
 
 
-def test_incomplete_utility_move_state_is_preserved(tmp_path: Path) -> None:
-    SessionLocal = _db(tmp_path)
-    root = tmp_path / "trash"
+def test_startup_cleanup_removes_orphaned_utility_move_state(tmp_path: Path):
+    SessionLocal, quarantine_root, worker_id = _env(tmp_path)
     source = tmp_path / "source"
-    source.mkdir()
     target = tmp_path / "target"
-    item_dir = root / ".utility-move-tx" / "plan-2" / "item-1"
-    _write_transplant_state(item_dir, source, target, phase="migrating")
+    source.mkdir()
+    (source / "payload.txt").write_text("payload", encoding="utf-8")
 
-    stats = cleanup_completed_utility_move_residue(
-        SessionLocal,
-        root,
-        worker_id="cleanup-worker",
+    move_directory_tree_noreplace(
+        source,
+        target,
+        quarantine_root=quarantine_root,
+        plan_id="17",
+        sequence=2,
+        transaction_id="historical-complete",
+    )
+    state_root = quarantine_root / ".utility-move-tx"
+    assert state_root.exists()
+
+    stats = cleanup_terminal_transaction_residue(
+        quarantine_root=quarantine_root,
+        session_factory=SessionLocal,
+        worker_id=worker_id,
     )
 
-    assert stats["removed_transactions"] == 0
-    assert stats["skipped_transactions"] >= 1
-    assert (item_dir / "state.json").is_file()
+    assert stats["utility_move_states_removed"] == 1
+    assert not state_root.exists()
+    assert (target / "payload.txt").read_text(encoding="utf-8") == "payload"
+
+
+def test_startup_cleanup_preserves_utility_move_state_with_unknown_sibling(tmp_path: Path):
+    SessionLocal, quarantine_root, worker_id = _env(tmp_path)
+    source = tmp_path / "source"
+    target = tmp_path / "target"
+    source.mkdir()
+    (source / "payload.txt").write_text("payload", encoding="utf-8")
+
+    move_directory_tree_noreplace(
+        source,
+        target,
+        quarantine_root=quarantine_root,
+        plan_id="18",
+        sequence=1,
+        transaction_id="historical-with-foreign",
+    )
+    item_dir = next((quarantine_root / ".utility-move-tx" / "18").iterdir())
+    foreign = item_dir / "unexpected.bin"
+    foreign.write_bytes(b"preserve")
+
+    stats = cleanup_terminal_transaction_residue(
+        quarantine_root=quarantine_root,
+        session_factory=SessionLocal,
+        worker_id=worker_id,
+    )
+
+    assert stats["utility_move_states_removed"] == 0
+    assert foreign.read_bytes() == b"preserve"
+    assert (item_dir / "state.json").exists()
