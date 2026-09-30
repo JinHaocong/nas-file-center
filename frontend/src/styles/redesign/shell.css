@@ -138,9 +138,9 @@
   justify-content: space-between;
   border-bottom: 1px solid var(--nfc-border);
   border-radius: 0;
-  background: color-mix(in srgb, var(--nfc-bg-surface) 96%, transparent) !important;
+  background: var(--nfc-bg-surface) !important;
   box-shadow: none !important;
-  backdrop-filter: blur(12px);
+  backdrop-filter: none;
 }
 
 .nfc-header-left,
@@ -214,7 +214,7 @@
   border: 1px solid var(--nfc-border) !important;
   border-radius: 7px;
   background: var(--nfc-bg-subtle) !important;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 20px;
 }
 

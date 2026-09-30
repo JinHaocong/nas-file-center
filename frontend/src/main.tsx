@@ -16,6 +16,8 @@ import './styles/redesign/components.css';
 import './styles/redesign/pages/dashboard.css';
 import './styles/pages/ledger.css';
 import './styles/pages/workbench.css';
+import './styles/redesign/pages/detail.css';
+import './styles/redesign/pages/automation.css';
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
