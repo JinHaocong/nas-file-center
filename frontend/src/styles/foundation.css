@@ -1,79 +1,110 @@
-html {
-  background: var(--nfc-canvas);
+/* NAS File Center design foundation.
+ * This file owns semantic tokens, typography and motion. It intentionally
+ * contains no page-specific selectors.
+ */
+:root {
+  --nfc-bg-app: #f5f6f8;
+  --nfc-bg-surface: #ffffff;
+  --nfc-bg-subtle: #f0f2f5;
+  --nfc-bg-hover: #f7f8fa;
+  --nfc-text: #20242c;
+  --nfc-text-muted: #626b78;
+  --nfc-text-subtle: #8a93a0;
+  --nfc-border: #e4e7ec;
+  --nfc-border-strong: #d2d7df;
+  --nfc-accent: #4361ee;
+  --nfc-accent-soft: #eef2ff;
+  --nfc-success: #20815a;
+  --nfc-success-soft: #edf8f2;
+  --nfc-warning: #a66a12;
+  --nfc-warning-soft: #fff7e8;
+  --nfc-danger: #c43d4d;
+  --nfc-danger-soft: #fff0f1;
+  --nfc-info: #4361ee;
+  --nfc-radius-control: 8px;
+  --nfc-radius-panel: 12px;
+  --nfc-space-1: 4px;
+  --nfc-space-2: 8px;
+  --nfc-space-3: 12px;
+  --nfc-space-4: 16px;
+  --nfc-space-6: 24px;
+  --nfc-space-8: 32px;
+  --nfc-control-height: 38px;
+  --nfc-focus-ring: 0 0 0 3px rgba(67, 97, 238, 0.16);
+}
+
+[data-theme='dark'] {
+  --nfc-bg-app: #0e1116;
+  --nfc-bg-surface: #14181e;
+  --nfc-bg-subtle: #1a1f27;
+  --nfc-bg-hover: #1d232c;
+  --nfc-text: #f2f4f7;
+  --nfc-text-muted: #aeb6c2;
+  --nfc-text-subtle: #7f8997;
+  --nfc-border: #2a313b;
+  --nfc-border-strong: #3a4450;
+  --nfc-accent: #8ea2ff;
+  --nfc-accent-soft: #202a52;
+  --nfc-success: #69c89b;
+  --nfc-success-soft: #153329;
+  --nfc-warning: #e6b45d;
+  --nfc-warning-soft: #382b16;
+  --nfc-danger: #ff8f9b;
+  --nfc-danger-soft: #3d2026;
+  --nfc-info: #8ea2ff;
+  --nfc-focus-ring: 0 0 0 3px rgba(142, 162, 255, 0.2);
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
 }
 
 body {
-  background:
-    radial-gradient(58rem 34rem at 100% 0%, var(--nfc-canvas-tint-a), transparent 72%),
-    radial-gradient(46rem 28rem at 16% 100%, var(--nfc-canvas-tint-b), transparent 76%),
-    var(--nfc-canvas);
+  margin: 0;
+  background: var(--nfc-bg-app);
   color: var(--nfc-text);
-}
-
-::selection {
-  background: color-mix(in srgb, var(--nfc-accent) 20%, transparent);
-  color: var(--nfc-text);
-}
-
-:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--nfc-accent) 68%, white 10%);
-  outline-offset: 2px;
-}
-
-.nfc-app-shell,
-.nfc-app-main {
-  background: transparent !important;
-}
-
-.nfc-app-main {
-  min-width: 0;
-}
-
-.nfc-page-content {
-  position: relative;
-  z-index: 1;
-  padding: 22px var(--nfc-page-gutter) 46px;
-}
-
-.nfc-page-content::before {
-  content: '';
-  position: fixed;
-  z-index: -1;
-  inset: 0;
-  pointer-events: none;
-  background: linear-gradient(120deg, transparent 12%, color-mix(in srgb, var(--nfc-accent) 1.2%, transparent) 56%, transparent 84%);
-}
-
-.nfc-operations-page,
-.nfc-dashboard {
-  width: min(100%, var(--nfc-content-max));
-  margin-inline: auto;
-}
-
-.nfc-operations-page {
-  gap: 20px;
-}
-
-.nfc-mono,
-.nfc-kind-badge,
-.nfc-operation-badge,
-code,
-pre {
-  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
 }
 
 * {
-  scrollbar-color: color-mix(in srgb, var(--nfc-text-subtle) 24%, transparent) transparent;
+  box-sizing: border-box;
 }
 
-*::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+button,
+input,
+textarea,
+select {
+  font: inherit;
 }
 
-*::-webkit-scrollbar-thumb {
-  border: 2px solid transparent;
-  border-radius: var(--nfc-radius-pill);
-  background: color-mix(in srgb, var(--nfc-text-subtle) 28%, transparent);
-  background-clip: padding-box;
+:where(button, a, input, textarea, select, [tabindex]):focus-visible {
+  outline: none;
+  box-shadow: var(--nfc-focus-ring);
+}
+
+.nfc-mono,
+.nfc-code-path,
+.nfc-metric-value,
+.nfc-data-emphasis {
+  font-variant-numeric: tabular-nums;
+}
+
+.nfc-code-path,
+.nfc-mono {
+  font-family: "SFMono-Regular", "Cascadia Code", "Roboto Mono", ui-monospace, Menlo, Monaco, Consolas, monospace;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }

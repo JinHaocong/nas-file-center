@@ -9,10 +9,10 @@ import './styles/v049-workspace.css';
 import './styles/v050-layout.css';
 import './styles/v051-product-polish.css';
 import './styles/v052-final-audit.css';
-import './styles/v054-premium-system.css';
-import './styles/v055-workspace-breathing.css';
-import './styles/v056-right-workspace-v2.css';
 import './styles/pages/settings.css';
+import './styles/foundation.css';
+import './styles/shell.css';
+import './styles/components.css';
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
