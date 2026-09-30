@@ -18,6 +18,7 @@ class FrozenFileMetadata:
     uid: int
     gid: int
     size: int
+    link_count: int
     atime_ns: int
     mtime_ns: int
     xattrs: tuple[tuple[str, bytes], ...]
@@ -28,6 +29,7 @@ class FrozenFileMetadata:
             "uid": self.uid,
             "gid": self.gid,
             "size": self.size,
+            "link_count": self.link_count,
             "atime_ns": self.atime_ns,
             "mtime_ns": self.mtime_ns,
             "xattrs": [
@@ -59,6 +61,7 @@ class FrozenFileMetadata:
                 uid=int(raw["uid"]),
                 gid=int(raw["gid"]),
                 size=int(raw["size"]),
+                link_count=int(raw["link_count"]),
                 atime_ns=int(raw["atime_ns"]),
                 mtime_ns=int(raw["mtime_ns"]),
                 xattrs=tuple(sorted(xattrs)),
@@ -100,6 +103,7 @@ def capture_file_metadata(path: Path | str) -> FrozenFileMetadata:
         uid=int(st.st_uid),
         gid=int(st.st_gid),
         size=int(st.st_size),
+        link_count=int(st.st_nlink),
         atime_ns=int(getattr(st, "st_atime_ns", int(st.st_atime * 1e9))),
         mtime_ns=int(getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))),
         xattrs=_read_xattrs(source),
@@ -148,11 +152,7 @@ def ownership_can_be_preserved(metadata: FrozenFileMetadata) -> bool:
 
 
 def apply_frozen_metadata_fd(fd: int, metadata: FrozenFileMetadata) -> None:
-    """Apply SOURCE-facing metadata to a newly-created reflink inode.
-
-    The caller owns the new inode exclusively. Any failure occurs before the
-    original SOURCE binding is retired, so callers must fail closed.
-    """
+    """Apply SOURCE-facing metadata to a newly-created reflink inode."""
     try:
         current = os.fstat(fd)
         if int(current.st_uid) != metadata.uid or int(current.st_gid) != metadata.gid:
@@ -195,6 +195,7 @@ def capture_file_metadata_fd(fd: int) -> FrozenFileMetadata:
         uid=int(st.st_uid),
         gid=int(st.st_gid),
         size=int(st.st_size),
+        link_count=int(st.st_nlink),
         atime_ns=int(getattr(st, "st_atime_ns", int(st.st_atime * 1e9))),
         mtime_ns=int(getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))),
         xattrs=xattrs,
@@ -215,6 +216,7 @@ def replacement_metadata_matches(
         and actual.uid == expected.uid
         and actual.gid == expected.gid
         and actual.size == expected.size
+        and actual.link_count == expected.link_count
         and actual.mtime_ns == expected.mtime_ns
         and actual.xattrs == expected.xattrs
     )
