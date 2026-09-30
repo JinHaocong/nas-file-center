@@ -446,20 +446,19 @@ def test_completed_same_generation_historical_epoch_does_not_poison_reused_entry
     assert not old_public_view.exists()
     assert external_survivor.read_bytes() == old_payload
 
-    # Terminal record cleanup may delete QuarantineEntry metadata while durable
-    # OperationJournal history intentionally remains. If the empty historical
-    # namespace is also cleaned later, SQLite can reuse id=1 and the new
-    # transactional quarantine can legitimately begin at attempt generation 1.
+    # The purge now compacts its empty NFC-owned namespace while durable
+    # OperationJournal history intentionally remains. Terminal record cleanup
+    # may later delete QuarantineEntry metadata; SQLite can then reuse id=1 and
+    # a new transactional quarantine can legitimately begin at generation 1.
+    old_attempt = trash / ".tx" / "entry-1" / "attempt-1"
+    assert not old_attempt.exists()
+    assert not old_attempt.parent.exists()
+
     with SessionLocal() as session:
         old_entry = session.get(QuarantineEntry, 1)
         assert old_entry is not None
         session.delete(old_entry)
         session.commit()
-
-    old_attempt = trash / ".tx" / "entry-1" / "attempt-1"
-    assert old_attempt.is_dir()
-    old_attempt.rmdir()
-    old_attempt.parent.rmdir()
 
     new_payload = b"gate6a2-same-generation-reused-entry-id"
     new_attempt = trash / ".tx" / "entry-1" / "attempt-1"
@@ -510,6 +509,8 @@ def test_completed_same_generation_historical_epoch_does_not_poison_reused_entry
     assert not new_anchor.exists()
     assert not new_captured.exists()
     assert not new_public.exists()
+    assert not new_attempt.exists()
+    assert not new_attempt.parent.exists()
     assert external_survivor.read_bytes() == old_payload
 
     with SessionLocal() as session:

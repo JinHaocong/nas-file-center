@@ -116,6 +116,7 @@ def _seed_transactional_entry(
     *,
     label: str,
     add_unknown_private_path: bool = False,
+    public_parent: Path | None = None,
 ) -> int:
     payload = f"gate6a2-{label}".encode()
     with service.SessionLocal() as session:
@@ -138,7 +139,9 @@ def _seed_transactional_entry(
         attempt.mkdir(parents=True)
         anchor = attempt / "anchor"
         captured = attempt / "captured_source"
-        public_view = trash / f"{label}.q-{entry_id}.bin"
+        public_dir = public_parent or trash
+        public_dir.mkdir(parents=True, exist_ok=True)
+        public_view = public_dir / f"{label}.q-{entry_id}.bin"
         anchor.write_bytes(payload)
         os.link(anchor, captured)
         os.link(anchor, public_view)
@@ -154,6 +157,38 @@ def _seed_transactional_entry(
         entry.mtime_ns = st.st_mtime_ns
         session.commit()
     return entry_id
+
+
+def test_single_clear_prunes_only_empty_quarantine_parent_chain(tmp_path: Path) -> None:
+    service, client, data, trash = _setup_api(tmp_path)
+    nested_parent = trash / "task-77" / "root-0" / "media" / "season-01"
+    unrelated_empty = trash / "unrelated-empty"
+    unrelated_empty.mkdir(parents=True)
+
+    entry_id = _seed_transactional_entry(
+        service,
+        data,
+        trash,
+        label="nested-clear",
+        public_parent=nested_parent,
+    )
+
+    response = client.post(
+        f"/api/quarantine/{entry_id}/purge",
+        json={"confirmation": "DELETE"},
+        headers={"Origin": "http://testserver"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["state"] == "purged"
+    assert not nested_parent.exists()
+    assert not (trash / "task-77").exists()
+    assert not (trash / ".tx" / f"entry-{entry_id}").exists()
+
+    # The cleanup is not a recursive sweep. Unrelated empty quarantine
+    # directories remain untouched, and QUARANTINE_ROOT itself is preserved.
+    assert unrelated_empty.is_dir()
+    assert trash.is_dir()
 
 
 def test_single_clear_uses_unlink_v1_and_reports_indexed_hardlink_survivor(tmp_path: Path) -> None:

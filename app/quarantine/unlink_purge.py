@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import json
 import os
 import stat
@@ -38,6 +39,58 @@ def _is_within(path: Path, root: Path) -> bool:
     except ValueError:
         return False
     return True
+
+
+def _prune_empty_quarantine_parents(
+    removed_path: Path | str,
+    quarantine_root: Path | str,
+    *,
+    session_factory: Any,
+    worker_id: str | None,
+) -> None:
+    """Remove only empty quarantine ancestors of one frozen owned path.
+
+    The quarantine root itself is never removed. Traversal is descriptor-bound
+    through the configured quarantine root and rejects symlink/non-directory
+    ancestors. rmdir is intentionally non-recursive: any foreign or still-live
+    child stops pruning without widening deletion authority.
+    """
+    root = _absolute_lexical(quarantine_root)
+    current = _absolute_lexical(removed_path).parent
+    if not _is_within(current, root):
+        raise StateConflictError("UNLINK_EMPTY_DIR_PATH_OUTSIDE_QUARANTINE")
+
+    while current != root:
+        try:
+            with safe_open_parent_fd(current, [root]) as (parent_fd, leaf):
+                try:
+                    st = os.stat(leaf, dir_fd=parent_fd, follow_symlinks=False)
+                except FileNotFoundError:
+                    current = current.parent
+                    continue
+
+                if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
+                    raise StateConflictError(
+                        f"UNLINK_EMPTY_DIR_UNSAFE_ANCESTOR:{current}"
+                    )
+
+                if worker_id is not None:
+                    renew_and_assert_worker_lease(session_factory, worker_id)
+
+                try:
+                    os.rmdir(leaf, dir_fd=parent_fd)
+                except FileNotFoundError:
+                    pass
+                except OSError as exc:
+                    if exc.errno in (errno.ENOTEMPTY, errno.EEXIST):
+                        break
+                    raise StateConflictError(
+                        f"UNLINK_EMPTY_DIR_PRUNE_FAILED:{current}:{exc.errno}"
+                    ) from exc
+        except FileNotFoundError:
+            pass
+
+        current = current.parent
 
 
 def _is_cross_storage_entry(entry: Any) -> bool:
@@ -1334,6 +1387,17 @@ def execute_journaled_unlink_purge(
             entry_id,
             frozen,
             attempt_generation=generation,
+        )
+
+    # All frozen payload names are now proven absent. Compact only their empty
+    # NFC quarantine ancestor directories before publishing terminal success.
+    # This never recursively deletes and stops at the first non-empty directory.
+    for frozen in frozen_items:
+        _prune_empty_quarantine_parents(
+            frozen["path"],
+            root,
+            session_factory=session_factory,
+            worker_id=worker_id,
         )
 
     _commit_terminal_purged(
