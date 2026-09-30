@@ -138,12 +138,18 @@ Filesystem names, mount labels and `st_dev` equality are not sufficient proof.
 Capability states:
 
 ```text
+NOT_CHECKED
 SUPPORTED
 UNSUPPORTED
 UNKNOWN
 ```
 
-`UNKNOWN` is fail-closed.
+`UNKNOWN` is fail-closed. `NOT_CHECKED` is not execution authority.
+
+Normal Dedupe Preview and Generate MUST NOT run a filesystem-mutating capability
+probe. Capability probing is a separate, explicit administrator diagnostic
+action using only NFC-owned disposable names. Validate and Execute must perform
+their own current positive probe regardless of any earlier UI diagnostic result.
 
 ### Hardlink probe
 
@@ -195,13 +201,17 @@ Preview must show per item:
 - KEEP path;
 - SOURCE path;
 - selected storage action;
-- capability state;
+- capability state when a separate explicit probe result is available, otherwise
+  `NOT_CHECKED`;
 - bytes potentially reclaimed;
-- whether metadata is hardlink-compatible;
+- whether metadata is hardlink-compatible from read-only metadata inspection;
 - warning when Hardlink will create shared-inode semantics;
-- blocking reason when unsupported.
+- blocking reason when a known probe result is unsupported.
 
-Generate accepts only items from the exact Preview digest.
+Generate accepts only items from the exact Preview digest. A Draft may exist with
+`NOT_CHECKED` capability because Draft creation is not execution authority.
+Validate must positively probe the current SOURCE parent before the Plan can
+become executable.
 
 The Preview digest must bind at least:
 
@@ -209,11 +219,12 @@ The Preview digest must bind at least:
 - KEEP/SOURCE selection;
 - content hash / size facts used by the preview;
 - storage action;
-- capability result and probed parent identity;
 - hardlink metadata-compatibility result;
 - safety policy snapshot.
 
-Any decision-affecting change requires a fresh Preview.
+Transient capability observations are diagnostic and are not digest authority;
+Validate/Execute re-probe the live filesystem. Any Preview decision-affecting
+source/config change still requires a fresh Preview.
 
 ## 7. Metadata policy
 
@@ -326,8 +337,10 @@ The operation must never unlink KEEP.
 - only admin may generate or execute Hardlink/Reflink optimization Plans;
 - existing CSRF/origin protection applies;
 - no arbitrary path mutation endpoint is introduced;
-- capability probing accepts only paths already represented by an authorized
-  scan/dedupe context or an allowed-root admin capability check;
+- capability probing is an explicit admin action and accepts only paths already
+  represented by an authorized scan/dedupe context or an allowed-root admin
+  capability check;
+- Preview/Generate never trigger capability probes as a hidden side effect;
 - mobile and desktop must both expose the selected storage action and warning.
 
 Hardlink UI requires an explicit warning acknowledgement at Generate time:
