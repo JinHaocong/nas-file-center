@@ -188,6 +188,51 @@ export const DedupeExplainDrawer: React.FC<Props> = ({
           </Descriptions>
         </Card>
 
+        {(member.storage_action || member.storage_blocking_reason) && (
+          <Card
+            size="small"
+            title="存储优化判定"
+            bordered={false}
+            className="nfc-dedupe-surface-card"
+          >
+            <Descriptions className="nfc-detail-descriptions" column={1} size="small">
+              <Descriptions.Item label="存储动作">
+                <Tag color={
+                  member.storage_action === 'hardlink'
+                    ? 'orange'
+                    : member.storage_action === 'reflink'
+                      ? 'blue'
+                      : 'default'
+                }>
+                  {member.storage_action === 'hardlink'
+                    ? 'Hardlink'
+                    : member.storage_action === 'reflink'
+                      ? 'Reflink'
+                      : '隔离'}
+                </Tag>
+              </Descriptions.Item>
+              {member.storage_capability && (
+                <Descriptions.Item label="Capability">
+                  <Text code>{member.storage_capability}</Text>
+                </Descriptions.Item>
+              )}
+              {member.storage_metadata_compatible !== undefined &&
+                member.storage_metadata_compatible !== null && (
+                  <Descriptions.Item label="Metadata 兼容">
+                    <Tag color={member.storage_metadata_compatible ? 'success' : 'warning'}>
+                      {member.storage_metadata_compatible ? '通过' : '阻断'}
+                    </Tag>
+                  </Descriptions.Item>
+                )}
+              {member.storage_blocking_reason && (
+                <Descriptions.Item label="阻断原因">
+                  <Text type="warning" code>{member.storage_blocking_reason}</Text>
+                </Descriptions.Item>
+              )}
+            </Descriptions>
+          </Card>
+        )}
+
         {!member.incomplete && (
           <Card
             size="small"
