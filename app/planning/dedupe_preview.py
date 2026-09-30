@@ -1077,6 +1077,7 @@ def build_preview_response(
             g_balance_info = None
 
         for m in g.members:
+            storage_info: Mapping[str, Any] = {}
             if g_status == "skipped":
                 member_decision = "SKIPPED"
             elif m.recommended_keep:
