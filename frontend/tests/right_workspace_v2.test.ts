@@ -51,7 +51,7 @@ describe('Right Workspace v2 design system', () => {
     assert.match(css, /\.nfc-dashboard-page/);
     assert.match(css, /\.nfc-quarantine-page/);
     assert.match(css, /\.nfc-workflow-builder-page/);
-    assert.match(css, /\.nfc-settings-page/);
+    assert.doesNotMatch(css, /\.nfc-settings-page/);
     assert.match(css, /\.nfc-advanced-dedupe-page/);
   });
 
