@@ -1,0 +1,177 @@
+/* Detail pages: identity/status first, then primary actions, summary and results. */
+.nfc-page-layout-detail .nfc-page-header {
+  margin-bottom: 18px !important;
+}
+
+.nfc-detail-primary-actions {
+  margin-bottom: 22px;
+  padding: 12px;
+  border: 1px solid var(--nfc-border);
+  border-radius: var(--nfc-radius-panel);
+  background: var(--nfc-bg-surface);
+}
+
+.nfc-detail-primary-actions .nfc-action-bar {
+  gap: 8px;
+}
+
+.nfc-detail-summary-panel {
+  margin-bottom: 28px;
+}
+
+.nfc-detail-summary-panel > .nfc-data-panel-body {
+  padding: 16px !important;
+}
+
+.nfc-root-list {
+  margin-top: 14px;
+  padding-top: 14px;
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 12px;
+  border-top: 1px solid var(--nfc-border);
+}
+
+.nfc-root-list-label {
+  color: var(--nfc-text-muted);
+  font-size: 12px;
+  font-weight: 620;
+}
+
+.nfc-root-list-values {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.nfc-lifecycle-strip {
+  margin-bottom: 12px;
+  padding: 10px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  border: 1px solid var(--nfc-border);
+  border-radius: var(--nfc-radius-panel);
+  background: var(--nfc-bg-surface);
+}
+
+.nfc-lifecycle-step {
+  min-width: 0;
+  padding: 10px;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  border-radius: 8px;
+  color: var(--nfc-text-subtle);
+}
+
+.nfc-lifecycle-step-active {
+  background: var(--nfc-accent-soft);
+  color: var(--nfc-accent);
+}
+
+.nfc-lifecycle-step-complete {
+  color: var(--nfc-success);
+}
+
+.nfc-lifecycle-step-index {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.nfc-lifecycle-step-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.nfc-lifecycle-step-copy strong {
+  font-size: 12px;
+  font-weight: 680;
+}
+
+.nfc-lifecycle-step-copy span {
+  margin-top: 1px;
+  font-size: 11.5px;
+}
+
+.nfc-plan-action-surface {
+  margin-bottom: 26px;
+}
+
+.nfc-duplicate-member-table {
+  padding: 10px 12px 12px 44px;
+  background: var(--nfc-bg-subtle);
+}
+
+.nfc-duplicate-member-list {
+  border-top: 1px solid var(--nfc-border);
+  padding-top: 10px;
+}
+
+.nfc-duplicate-member-list summary {
+  color: var(--nfc-accent);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.nfc-duplicate-member {
+  min-width: 0;
+  padding: 8px 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--nfc-border);
+}
+
+.nfc-detail-workbench .nfc-dedupe-context-rail,
+.nfc-detail-workbench .nfc-dedupe-strategy-stage {
+  min-width: 0;
+}
+
+.nfc-detail-workbench .nfc-dedupe-strategy-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+@media (max-width: 900px) {
+  .nfc-lifecycle-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .nfc-root-list {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+}
+
+@media (max-width: 520px) {
+  .nfc-lifecycle-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .nfc-detail-primary-actions .nfc-action-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .nfc-detail-primary-actions .ant-btn {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .nfc-duplicate-member {
+    grid-template-columns: 1fr;
+  }
+}
