@@ -119,6 +119,36 @@ export const DedupePreviewTable: React.FC<Props> = ({
       render: (score?: number) => <span className="nfc-mono">{score !== undefined ? score.toLocaleString() : '—'}</span>,
     },
     {
+      title: '存储动作',
+      key: 'storage_action',
+      width: 160,
+      render: (_, record) => {
+        const action = record.storage_action || 'quarantine';
+        if (record.storage_blocking_reason) {
+          return (
+            <Tooltip title={record.storage_blocking_reason}>
+              <Tag color="warning">已阻断</Tag>
+            </Tooltip>
+          );
+        }
+        if (action === 'hardlink') {
+          return (
+            <Tooltip title={record.storage_capability || 'NOT_CHECKED'}>
+              <Tag color="orange">Hardlink</Tag>
+            </Tooltip>
+          );
+        }
+        if (action === 'reflink') {
+          return (
+            <Tooltip title={record.storage_capability || 'NOT_CHECKED'}>
+              <Tag color="blue">Reflink</Tag>
+            </Tooltip>
+          );
+        }
+        return <Tag>隔离</Tag>;
+      },
+    },
+    {
       title: '保留资格',
       dataIndex: 'eligible_as_keep',
       key: 'eligible_as_keep',
@@ -184,6 +214,8 @@ export const DedupePreviewTable: React.FC<Props> = ({
           { label: '全部决策', value: 'ALL' },
           { label: '保留 (KEEP)', value: 'KEEP' },
           { label: '隔离 (QUARANTINE)', value: 'QUARANTINE' },
+          { label: 'Hardlink', value: 'HARDLINK' },
+          { label: 'Reflink', value: 'REFLINK' },
           { label: '安全排除', value: 'SAFETY_EXCLUDED' },
           { label: '已跳过 (SKIPPED)', value: 'SKIPPED' },
         ]}
@@ -265,6 +297,17 @@ export const DedupePreviewTable: React.FC<Props> = ({
                       <span>组 <b>{formatOptionalGroupId(row.group_provenance_id)}</b></span>
                       <span>单文件 <b>{formatOptionalFileSize(row.group_file_size)}</b></span>
                       <span>保留资格 <b>{eligibility.text}</b></span>
+                      <span>
+                        存储动作 <b>{
+                          row.storage_blocking_reason
+                            ? '已阻断'
+                            : row.storage_action === 'hardlink'
+                              ? 'Hardlink'
+                              : row.storage_action === 'reflink'
+                                ? 'Reflink'
+                                : '隔离'
+                        }</b>
+                      </span>
                       <span>扫描根 <b>{formatScanRootLabel(row.scan_root_index, row.scan_root_path)}</b></span>
                     </div>
 
