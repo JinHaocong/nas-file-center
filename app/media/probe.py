@@ -206,6 +206,11 @@ def probe_image(path: Path | str) -> MediaProbeResult:
         if exc.errno is None and any(marker in lowered for marker in deterministic_decode_markers):
             return _corrupt("image", "IMAGE_DECODE_FAILED", str(exc))
         return _unknown("image", "IMAGE_DECODE_AMBIGUOUS", str(exc))
+    except RuntimeError as exc:
+        # Pillow plugins may raise RuntimeError for runtime/decoder state
+        # failures. Never let one image abort the whole media-analysis job;
+        # ambiguous runtime failures remain unknown and grant no delete authority.
+        return _unknown("image", "IMAGE_DECODE_AMBIGUOUS", str(exc))
     except (SyntaxError, ValueError) as exc:
         return _corrupt("image", "IMAGE_DECODE_FAILED", str(exc))
 
