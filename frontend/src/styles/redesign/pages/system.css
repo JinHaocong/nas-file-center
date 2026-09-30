@@ -70,6 +70,34 @@
   max-width: min(620px, 48vw);
 }
 
+.nfc-settings-section-nav {
+  margin: -6px 0 22px;
+  padding: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  border: 1px solid var(--nfc-border);
+  border-radius: 10px;
+  background: var(--nfc-bg-surface);
+}
+
+.nfc-settings-section-nav a {
+  min-height: 34px;
+  padding: 7px 10px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 7px;
+  color: var(--nfc-text-muted);
+  font-size: 12px;
+  font-weight: 620;
+  text-decoration: none;
+}
+
+.nfc-settings-section-nav a:hover {
+  background: var(--nfc-bg-hover);
+  color: var(--nfc-text);
+}
+
 .nfc-system-controls-page .nfc-settings-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -234,8 +262,14 @@
     padding: 22px 18px;
   }
 
-  .nfc-login-theme-label {
-    display: none;
+  .nfc-settings-section-nav {
+    margin-bottom: 16px;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+  }
+
+  .nfc-settings-section-nav a {
+    flex: 0 0 auto;
   }
 
   .nfc-login-footer {
