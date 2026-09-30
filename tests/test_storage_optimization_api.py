@@ -11,7 +11,7 @@ from app.models import User
 from app.service import FileCenterService
 
 
-def _client(tmp_path: Path):
+def _client(tmp_path: Path, *, allow_mutation: bool = True):
     data = tmp_path / "data"
     data.mkdir()
     config = tmp_path / "config"
@@ -22,6 +22,7 @@ def _client(tmp_path: Path):
         allowed_roots_raw=str(data),
         initial_admin_username="admin",
         initial_admin_password="AdminPassword123!",
+        allow_mutation=allow_mutation,
     )
     service = FileCenterService(settings)
     with service.SessionLocal() as session:
@@ -86,3 +87,56 @@ def test_admin_storage_capability_probe_returns_closed_states_and_zero_residue(t
         if path.name.startswith(".__nfc_hardlink_probe_")
         or path.name.startswith(".__nfc_reflink_probe_")
     ] == []
+
+
+def test_storage_capability_probe_respects_read_only_mode(tmp_path: Path):
+    client, data = _client(tmp_path, allow_mutation=False)
+    _login(client, "admin", "AdminPassword123!")
+
+    response = client.post(
+        "/api/storage-optimization/capabilities",
+        json={"directory": str(data)},
+        headers={"Origin": "http://testserver"},
+    )
+
+    assert response.status_code == 409
+    assert list(data.iterdir()) == []
+
+
+def test_storage_capability_probe_accepts_actual_source_destination_parents(tmp_path: Path):
+    client, data = _client(tmp_path)
+    source_parent = data / "keep-parent"
+    destination_parent = data / "source-parent"
+    source_parent.mkdir()
+    destination_parent.mkdir()
+    _login(client, "admin", "AdminPassword123!")
+
+    response = client.post(
+        "/api/storage-optimization/capabilities",
+        json={
+            "source_directory": str(source_parent),
+            "destination_directory": str(destination_parent),
+        },
+        headers={"Origin": "http://testserver"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert set(payload) == {"hardlink", "reflink"}
+    assert payload["hardlink"]["parent_inode"] == destination_parent.stat().st_ino
+    assert payload["hardlink"]["source_parent_inode"] == source_parent.stat().st_ino
+    assert not any(path.name.startswith(".__nfc_") for path in source_parent.iterdir())
+    assert not any(path.name.startswith(".__nfc_") for path in destination_parent.iterdir())
+
+
+def test_storage_capability_probe_rejects_partial_pair_shape(tmp_path: Path):
+    client, data = _client(tmp_path)
+    _login(client, "admin", "AdminPassword123!")
+
+    response = client.post(
+        "/api/storage-optimization/capabilities",
+        json={"source_directory": str(data)},
+        headers={"Origin": "http://testserver"},
+    )
+
+    assert response.status_code == 422
