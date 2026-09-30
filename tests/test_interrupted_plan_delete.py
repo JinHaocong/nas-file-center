@@ -144,3 +144,38 @@ def test_fresh_queued_execution_still_blocks_plan_delete(tmp_path: Path) -> None
         job = session.get(WorkJob, job_id)
         assert job is not None
         assert job.status == "queued"
+
+
+def test_delete_orphaned_executing_plan_without_active_job(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    with service.SessionLocal() as session:
+        plan = BatchPlan(
+            name="Legacy orphan execution",
+            kind="quarantine-bulk-purge",
+            status="executing",
+            expected_changes=1,
+        )
+        session.add(plan)
+        session.flush()
+        session.add(
+            BatchPlanItem(
+                plan_id=plan.id,
+                sequence=1,
+                operation="quarantine_purge",
+                source_path="/data/legacy-orphan",
+                state="executing",
+            )
+        )
+        session.commit()
+        plan_id = int(plan.id)
+
+    listing = service.list_plans()
+    row = next(item for item in listing["items"] if item["id"] == plan_id)
+    assert row["status"] == "executing"
+    assert row["active_work_job_id"] is None
+
+    result = service.delete_plan(plan_id)
+
+    assert result == {"deleted": True, "id": plan_id}
+    with service.SessionLocal() as session:
+        assert session.get(BatchPlan, plan_id) is None
