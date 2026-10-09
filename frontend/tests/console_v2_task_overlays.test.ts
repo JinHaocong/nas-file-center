@@ -23,6 +23,8 @@ describe('Console v2 Task Center Radix overlays', () => {
     assert.match(sheet, /<Dialog.Close asChild>/);
     assert.match(sheet, /aria-label="关闭详情抽屉"/);
     assert.match(drawer, /<TaskLogTable key=\{task.id\} taskId=\{task.id\}/);
+    assert.match(drawer, /<TaskDeleteButton key=\{task.id\}/);
+    assert.match(drawer, /<TaskActionBar key=\{task.id\}/);
     assert.doesNotMatch(drawer, /from ['"]antd['"]|<Drawer\b|<Descriptions\b/);
   });
 
