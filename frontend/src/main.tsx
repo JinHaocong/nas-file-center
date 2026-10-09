@@ -13,6 +13,7 @@ import './styles/v054-premium-system.css';
 import './styles/v055-workspace-breathing.css';
 import './styles/v056-right-workspace-v2.css';
 import './styles/pages/settings.css';
+import './styles/console-v2.css';
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
