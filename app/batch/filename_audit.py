@@ -14,6 +14,7 @@ import unicodedata
 
 from app.batch.file_rename import _open_directory_nofollow
 from app.path_safety import (
+    is_reserved_quarantine_path,
     require_allowed_path,
     require_unreserved_path,
     validate_mutation_destination,
@@ -85,10 +86,9 @@ def _safe_trim_suggestion(
         folded = cleaned.casefold()
         if folded in existing or folded in proposed:
             raise ValueError("Proposed name conflicts with an existing or suggested name")
-        # If trimming leaves other control/invisible characters, do not
-        # claim this is a complete or safe correction.
-        if any(unicodedata.category(ch) in {"Cc", "Cf", "Cs"} for ch in cleaned):
-            raise ValueError("File contains control/invisible characters; manual review needed")
+        # Only suggest an unambiguous fix; unresolved issues require review.
+        if _inspect_name(cleaned):
+            raise ValueError("Other filename issues remain after trimming; manual review needed")
         proposed.add(folded)
         return str(target), None
     except (OSError, ValueError) as exc:
@@ -127,6 +127,9 @@ def audit_immediate_filenames(
                         "choose a smaller directory"
                     )
                 occupied.add(entry.name.casefold())
+                if is_reserved_quarantine_path(safe / entry.name, quarantine_root):
+                    ignored += 1
+                    continue
                 info = entry.stat(follow_symlinks=False)
                 if not stat.S_ISREG(info.st_mode):
                     ignored += 1
