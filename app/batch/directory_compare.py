@@ -67,6 +67,7 @@ def _scan(root: Path, quarantine: Path | None) -> tuple[dict[str, dict[str, Any]
     """Descriptor-based DFS, bounded by total eligible entries per tree."""
     rows: dict[str, dict[str, Any]] = {}
     skipped_links = 0
+    visited = 0
     root_fd = _open_directory_absolute(root)
     try:
         stack: list[tuple[str, ...]] = [()]
@@ -76,6 +77,12 @@ def _scan(root: Path, quarantine: Path | None) -> tuple[dict[str, dict[str, Any]
             try:
                 with os.scandir(fd) as entries:
                     for entry in entries:
+                        visited += 1
+                        if visited > MAX_ENTRIES_PER_ROOT:
+                            raise ValueError(
+                                f"Directory contains more than {MAX_ENTRIES_PER_ROOT} entries; "
+                                "narrow the comparison roots"
+                            )
                         rel_parts = components + (entry.name,)
                         rel = "/".join(rel_parts)
                         if _is_reserved(root.joinpath(*rel_parts), quarantine):
@@ -86,11 +93,6 @@ def _scan(root: Path, quarantine: Path | None) -> tuple[dict[str, dict[str, Any]
                             continue
                         if not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)):
                             continue
-                        if len(rows) >= MAX_ENTRIES_PER_ROOT:
-                            raise ValueError(
-                                f"Directory contains more than {MAX_ENTRIES_PER_ROOT} entries; "
-                                "narrow the comparison roots"
-                            )
                         kind = "directory" if stat.S_ISDIR(info.st_mode) else "file"
                         rows[rel] = {
                             "kind": kind,
