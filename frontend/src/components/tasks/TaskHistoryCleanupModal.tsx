@@ -1,15 +1,13 @@
 import React, { useState } from 'react';
-import { Button, Modal, Checkbox, Alert, Space, Typography, message } from 'antd';
-import { DeleteOutlined } from '@ant-design/icons';
+import * as Dialog from '@radix-ui/react-dialog';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { tasksApi } from '../../api/tasks';
-import { TerminalTaskStatus } from '../../types/task';
+import type { TerminalTaskStatus } from '../../types/task';
+import { ConsoleButton } from '../ui/ConsoleButton';
+import { ConsoleIcon } from '../ui/ConsoleIcon';
+import { useConsoleToast } from '../ui/ConsoleToast';
 
-const { Text } = Typography;
-
-interface Props {
-  onCleaned?: () => void;
-}
+interface Props { onCleaned?: () => void; }
 
 const TERMINAL_OPTIONS: { label: string; value: TerminalTaskStatus }[] = [
   { label: '已完成 (completed)', value: 'completed' },
@@ -20,25 +18,20 @@ const TERMINAL_OPTIONS: { label: string; value: TerminalTaskStatus }[] = [
 export const TaskHistoryCleanupModal: React.FC<Props> = ({ onCleaned }) => {
   const [open, setOpen] = useState(false);
   const [selectedStatuses, setSelectedStatuses] = useState<TerminalTaskStatus[]>([
-    'completed',
-    'failed',
-    'cancelled',
+    'completed', 'failed', 'cancelled',
   ]);
   const queryClient = useQueryClient();
+  const toast = useConsoleToast();
 
   const handleOpen = () => {
     setSelectedStatuses(['completed', 'failed', 'cancelled']);
     setOpen(true);
   };
 
-  const handleClose = () => {
-    setOpen(false);
-  };
-
   const cleanupMutation = useMutation({
     mutationFn: (statuses: TerminalTaskStatus[]) => tasksApi.clearTaskHistory(statuses),
-    onSuccess: async (res) => {
-      message.success(`已清理 ${res.deleted_count} 个历史任务`);
+    onSuccess: async res => {
+      toast.success('已清理 ' + res.deleted_count + ' 个历史任务');
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['tasksList'] }),
         queryClient.invalidateQueries({ queryKey: ['taskDetail'] }),
@@ -48,81 +41,94 @@ export const TaskHistoryCleanupModal: React.FC<Props> = ({ onCleaned }) => {
       onCleaned?.();
     },
     onError: (err: Error) => {
-      message.error(err.message || '清理历史任务失败');
+      toast.error(err.message || '清理历史任务失败');
     },
   });
 
+  const toggle = (status: TerminalTaskStatus, checked: boolean) => {
+    setSelectedStatuses(previous => checked
+      ? [...previous.filter(item => item !== status), status]
+      : previous.filter(item => item !== status));
+  };
+
   const handleConfirm = () => {
-    if (selectedStatuses.length === 0) {
-      return;
-    }
+    if (selectedStatuses.length === 0 || cleanupMutation.isPending) return;
     cleanupMutation.mutate(selectedStatuses);
   };
 
   return (
     <>
-      <Button danger icon={<DeleteOutlined />} onClick={handleOpen}>
+      <ConsoleButton variant="danger"
+        leadingIcon={<ConsoleIcon name="archive" size={16} />} onClick={handleOpen}>
         清理历史
-      </Button>
-
-      <Modal
-      className="nfc-overlay-modal nfc-history-cleanup-modal nfc-task-history-cleanup-modal"
-        title="清理任务历史"
-        open={open}
-        onCancel={handleClose}
-        footer={[
-          <Button key="cancel" onClick={handleClose}>
-            取消
-          </Button>,
-          <Button
-            key="confirm"
-            danger
-            type="primary"
-            disabled={selectedStatuses.length === 0}
-            loading={cleanupMutation.isPending}
-            onClick={handleConfirm}
+      </ConsoleButton>
+      <Dialog.Root open={open} onOpenChange={next => {
+        if (!cleanupMutation.isPending) setOpen(next);
+      }}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="nfc-v2-dialog-overlay" />
+          <Dialog.Content
+            className="nfc-v2-dialog nfc-v2-history-dialog nfc-overlay-modal nfc-history-cleanup-modal nfc-task-history-cleanup-modal"
+            onEscapeKeyDown={event => { if (cleanupMutation.isPending) event.preventDefault(); }}
+            onPointerDownOutside={event => event.preventDefault()}
           >
-            确认清理
-          </Button>,
-        ]}
-        destroyOnClose
-      >
-        <Space className="nfc-history-cleanup-stack" direction="vertical" size={16}>
-          <Alert
-            type="warning"
-            showIcon
-            message="清理范围说明"
-            description="该操作会清理所有任务类型中符合所选终态的历史任务，不是仅清理当前分页或当前任务类型筛选结果。"
-          />
+            <header className="nfc-v2-dialog-heading">
+              <span className="nfc-v2-dialog-icon is-danger">
+                <ConsoleIcon name="shield-check" size={20} />
+              </span>
+              <div>
+                <Dialog.Title>清理任务历史</Dialog.Title>
+                <Dialog.Description>仅清理选中终态任务的元数据与事件日志。</Dialog.Description>
+              </div>
+              <button type="button" className="nfc-v2-dialog-close"
+                disabled={cleanupMutation.isPending} aria-label="关闭历史清理窗口"
+                onClick={() => setOpen(false)}><ConsoleIcon name="x" size={18} /></button>
+            </header>
 
-          <div>
-            <Text strong className="nfc-history-cleanup-label">
-              选择要清理的历史任务状态：
-            </Text>
-            <Checkbox.Group
-              options={TERMINAL_OPTIONS}
-              value={selectedStatuses}
-              onChange={(checked) => setSelectedStatuses(checked as TerminalTaskStatus[])}
-            />
-          </div>
+            <div className="nfc-v2-history-body nfc-history-cleanup-stack">
+              <div className="nfc-v2-history-warning" role="note">
+                <ConsoleIcon name="shield-check" size={18} />
+                <div><strong>清理范围说明</strong>
+                  <p>该操作会清理所有任务类型中符合所选终态的历史任务，不是仅清理当前分页或当前任务类型筛选结果。</p>
+                </div>
+              </div>
 
-          <div className="nfc-history-cleanup-note">
-            <Text strong className="nfc-history-cleanup-note-title">
-              影响与安全说明：
-            </Text>
-            <ul className="nfc-history-cleanup-list">
-              <li>选中的终态任务元数据及其关联事件日志（Task Logs）将被永久删除。</li>
-              <li>
-                <strong className="nfc-success-text">绝不会删除</strong> NAS 存储上的任何文件。
-              </li>
-              <li>
-                <strong className="nfc-success-text">绝不会删除</strong> Audit 审计记录。
-              </li>
-              <li>排队中、执行中、暂停中或取消中的任务受系统保护，不会受到任何影响。</li>
-            </ul>
-          </div>
-        </Space>
-      </Modal>
+              <fieldset className="nfc-v2-history-statuses">
+                <legend>选择要清理的历史任务状态：</legend>
+                {TERMINAL_OPTIONS.map(option => (
+                  <label key={option.value}>
+                    <input type="checkbox" value={option.value}
+                      checked={selectedStatuses.includes(option.value)}
+                      disabled={cleanupMutation.isPending}
+                      onChange={event => toggle(option.value, event.target.checked)} />
+                    <span>{option.label}</span>
+                  </label>
+                ))}
+              </fieldset>
+
+              <section className="nfc-v2-history-impacts" aria-label="影响与安全说明">
+                <strong>影响与安全说明：</strong>
+                <ul className="nfc-history-cleanup-list">
+                  <li>选中的终态任务元数据及其关联事件日志（Task Logs）将被永久删除。</li>
+                  <li><strong className="nfc-success-text">绝不会删除</strong> NAS 存储上的任何文件。</li>
+                  <li><strong className="nfc-success-text">绝不会删除</strong> Audit 审计记录。</li>
+                  <li>排队中、执行中、暂停中或取消中的任务受系统保护，不会受到任何影响。</li>
+                </ul>
+              </section>
+            </div>
+
+            <footer className="nfc-v2-confirm-actions">
+              <ConsoleButton disabled={cleanupMutation.isPending}
+                onClick={() => setOpen(false)}>取消</ConsoleButton>
+              <ConsoleButton variant="danger"
+                disabled={selectedStatuses.length === 0 || cleanupMutation.isPending}
+                loading={cleanupMutation.isPending} onClick={handleConfirm}>
+                确认清理
+              </ConsoleButton>
+            </footer>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
     </>
   );
 };

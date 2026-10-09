@@ -1,15 +1,12 @@
 import React, { useState } from 'react';
-import { Space, Button, Popconfirm, Tooltip, message, notification } from 'antd';
-import {
-  PauseCircleOutlined,
-  PlayCircleOutlined,
-  StopOutlined,
-  ReloadOutlined,
-} from '@ant-design/icons';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { tasksApi } from '../../api/tasks';
-import { TaskDetail, TaskItem } from '../../types/task';
-import { getTaskActionAvailability, TaskAction } from './task_actions';
+import type { TaskDetail, TaskItem } from '../../types/task';
+import { getTaskActionAvailability, type TaskAction } from './task_actions';
+import { ConsoleButton } from '../ui/ConsoleButton';
+import { ConsoleConfirmDialog } from '../ui/ConsoleConfirmDialog';
+import { ConsoleIcon } from '../ui/ConsoleIcon';
+import { useConsoleToast } from '../ui/ConsoleToast';
 
 interface Props {
   task: TaskItem | TaskDetail;
@@ -18,7 +15,10 @@ interface Props {
 
 export const TaskActionBar: React.FC<Props> = ({ task, onViewTask }) => {
   const queryClient = useQueryClient();
+  const toast = useConsoleToast();
   const [activeAction, setActiveAction] = useState<TaskAction | null>(null);
+  const [confirmAction, setConfirmAction] = useState<'cancel' | 'retry' | null>(null);
+  const [createdRetryId, setCreatedRetryId] = useState<number | null>(null);
 
   const invalidateTaskQueries = async () => {
     await Promise.all([
@@ -31,17 +31,13 @@ export const TaskActionBar: React.FC<Props> = ({ task, onViewTask }) => {
   const pauseMutation = useMutation({
     mutationFn: () => tasksApi.pauseTask(task.id),
     onMutate: () => setActiveAction('pause'),
-    onSuccess: async (res) => {
+    onSuccess: async res => {
       await invalidateTaskQueries();
-      if (res.status === 'paused') {
-        message.success('任务已暂停');
-      } else {
-        message.success('暂停请求已提交');
-      }
+      toast.success(res.status === 'paused' ? '任务已暂停' : '暂停请求已提交');
     },
     onError: async (error: Error) => {
       await invalidateTaskQueries();
-      message.error(error.message || '暂停操作失败');
+      toast.error(error.message || '暂停操作失败');
     },
     onSettled: () => setActiveAction(null),
   });
@@ -51,11 +47,11 @@ export const TaskActionBar: React.FC<Props> = ({ task, onViewTask }) => {
     onMutate: () => setActiveAction('resume'),
     onSuccess: async () => {
       await invalidateTaskQueries();
-      message.success('任务已恢复并重新进入队列');
+      toast.success('任务已恢复并重新进入队列');
     },
     onError: async (error: Error) => {
       await invalidateTaskQueries();
-      message.error(error.message || '恢复操作失败');
+      toast.error(error.message || '恢复操作失败');
     },
     onSettled: () => setActiveAction(null),
   });
@@ -63,17 +59,15 @@ export const TaskActionBar: React.FC<Props> = ({ task, onViewTask }) => {
   const cancelMutation = useMutation({
     mutationFn: () => tasksApi.cancelTask(task.id),
     onMutate: () => setActiveAction('cancel'),
-    onSuccess: async (res) => {
+    onSuccess: async res => {
       await invalidateTaskQueries();
-      if (res.status === 'cancel_requested') {
-        message.info('取消请求已提交，等待 Worker 安全停止');
-      } else {
-        message.success('任务已取消');
-      }
+      toast.info(res.status === 'cancel_requested'
+        ? '取消请求已提交，等待 Worker 安全停止' : '任务已取消');
+      setConfirmAction(null);
     },
     onError: async (error: Error) => {
       await invalidateTaskQueries();
-      message.error(error.message || '取消操作失败');
+      toast.error(error.message || '取消操作失败');
     },
     onSettled: () => setActiveAction(null),
   });
@@ -81,130 +75,97 @@ export const TaskActionBar: React.FC<Props> = ({ task, onViewTask }) => {
   const retryMutation = useMutation({
     mutationFn: () => tasksApi.retryTask(task.id),
     onMutate: () => setActiveAction('retry'),
-    onSuccess: async (res) => {
+    onSuccess: async res => {
       await invalidateTaskQueries();
-      const newJobId = res.job.id;
-      notification.success({
-        message: '重试任务已创建',
-        description: `已为失败任务 #${task.id} 创建新的排队任务 #${newJobId}。`,
-        btn: onViewTask ? (
-          <Button
-            type="primary"
-            size="small"
-            onClick={() => {
-              notification.destroy();
-              onViewTask(newJobId);
-            }}
-          >
-            查看任务 #{newJobId}
-          </Button>
-        ) : undefined,
-        duration: 8,
-      });
+      setCreatedRetryId(res.job.id);
+      toast.success('重试任务 #' + res.job.id + ' 已创建');
+      setConfirmAction(null);
     },
     onError: async (error: Error) => {
       await invalidateTaskQueries();
-      message.error(error.message || '重试操作失败');
+      toast.error(error.message || '重试操作失败');
     },
     onSettled: () => setActiveAction(null),
   });
 
   const isAnyPending = activeAction !== null;
-
   const pauseAvail = getTaskActionAvailability(task, 'pause');
   const resumeAvail = getTaskActionAvailability(task, 'resume');
   const cancelAvail = getTaskActionAvailability(task, 'cancel');
   const retryAvail = getTaskActionAvailability(task, 'retry');
 
-  const cancelDescription =
-    task.status === 'running'
+  const confirmDescription = confirmAction === 'cancel'
+    ? task.status === 'running'
       ? '取消请求会发送给 Worker，任务将在下一个安全 checkpoint 停止，可能不会立即变成已取消。'
-      : '确认取消该任务？';
+      : '确认取消该任务？'
+    : '原失败任务会保留，系统将创建一个新的排队任务。';
+
+  const confirm = () => {
+    if (isAnyPending) return;
+    if (confirmAction === 'cancel' && cancelAvail.enabled) cancelMutation.mutate();
+    if (confirmAction === 'retry' && retryAvail.enabled) retryMutation.mutate();
+  };
 
   return (
-    <Space className="nfc-task-action-bar" wrap size={[8, 8]}>
-      {/* 1. Pause Action */}
-      <Tooltip title={!pauseAvail.enabled ? pauseAvail.reason : undefined}>
-        <span>
-          <Button
-            icon={<PauseCircleOutlined />}
-            disabled={!pauseAvail.enabled || isAnyPending}
-            loading={activeAction === 'pause'}
-            onClick={() => pauseMutation.mutate()}
-          >
-            暂停
-          </Button>
-        </span>
-      </Tooltip>
-
-      {/* 2. Resume Action */}
-      <Tooltip title={!resumeAvail.enabled ? resumeAvail.reason : undefined}>
-        <span>
-          <Button
-            icon={<PlayCircleOutlined />}
-            disabled={!resumeAvail.enabled || isAnyPending}
-            loading={activeAction === 'resume'}
-            onClick={() => resumeMutation.mutate()}
-          >
-            恢复
-          </Button>
-        </span>
-      </Tooltip>
-
-      {/* 3. Cancel Action (Secondary Confirmation Required) */}
-      <Tooltip title={!cancelAvail.enabled ? cancelAvail.reason : undefined}>
-        <span>
-          <Popconfirm
-            title={`确认取消任务 #${task.id}？`}
-            description={
-              <div className="nfc-popconfirm-copy">
-                {cancelDescription}
-              </div>
-            }
-            okText="确认取消"
-            okButtonProps={{ danger: true }}
-            cancelText="取消"
-            disabled={!cancelAvail.enabled || isAnyPending}
-            onConfirm={() => cancelMutation.mutate()}
-          >
-            <Button
-              danger
-              icon={<StopOutlined />}
-              disabled={!cancelAvail.enabled || isAnyPending}
-              loading={activeAction === 'cancel'}
-            >
-              取消
-            </Button>
-          </Popconfirm>
-        </span>
-      </Tooltip>
-
-      {/* 4. Retry Action (Secondary Confirmation Required) */}
-      <Tooltip title={!retryAvail.enabled ? retryAvail.reason : undefined}>
-        <span>
-          <Popconfirm
-            title={`确认重试任务 #${task.id}？`}
-            description={
-              <div className="nfc-popconfirm-copy">
-                原失败任务会保留，系统将创建一个新的排队任务。
-              </div>
-            }
-            okText="确认重试"
-            cancelText="取消"
-            disabled={!retryAvail.enabled || isAnyPending}
-            onConfirm={() => retryMutation.mutate()}
-          >
-            <Button
-              type="primary"
-              icon={<ReloadOutlined />}
-              disabled={!retryAvail.enabled || isAnyPending}
-              loading={activeAction === 'retry'}
-            >
-              重试
-            </Button>
-          </Popconfirm>
-        </span>
-      </Tooltip>
-    </Space>
+    <div className="nfc-task-action-bar nfc-v2-task-actions">
+      <span title={!pauseAvail.enabled ? pauseAvail.reason || undefined : undefined}>
+        <ConsoleButton disabled={!pauseAvail.enabled || isAnyPending}
+          loading={activeAction === 'pause'} onClick={() => pauseMutation.mutate()}>
+          暂停
+        </ConsoleButton>
+      </span>
+      <span title={!resumeAvail.enabled ? resumeAvail.reason || undefined : undefined}>
+        <ConsoleButton disabled={!resumeAvail.enabled || isAnyPending}
+          loading={activeAction === 'resume'} onClick={() => resumeMutation.mutate()}>
+          恢复
+        </ConsoleButton>
+      </span>
+      <span title={!cancelAvail.enabled ? cancelAvail.reason || undefined : undefined}>
+        <ConsoleButton variant="danger"
+          leadingIcon={<ConsoleIcon name="x" size={15} />}
+          disabled={!cancelAvail.enabled || isAnyPending}
+          loading={activeAction === 'cancel'}
+          onClick={() => { if (cancelAvail.enabled) setConfirmAction('cancel'); }}>
+          取消
+        </ConsoleButton>
+      </span>
+      <span title={!retryAvail.enabled ? retryAvail.reason || undefined : undefined}>
+        <ConsoleButton variant="primary"
+          leadingIcon={<ConsoleIcon name="refresh" size={15} />}
+          disabled={!retryAvail.enabled || isAnyPending}
+          loading={activeAction === 'retry'}
+          onClick={() => { if (retryAvail.enabled) setConfirmAction('retry'); }}>
+          重试
+        </ConsoleButton>
+      </span>
+      {createdRetryId !== null && (
+        <div className="nfc-v2-retry-result" role="status">
+          已为任务 #{task.id} 创建重试任务 #{createdRetryId}
+          {onViewTask && (
+            <ConsoleButton size="sm" variant="ghost"
+              onClick={() => {
+                const id = createdRetryId;
+                setCreatedRetryId(null);
+                onViewTask(id);
+              }}>
+              查看任务 #{createdRetryId}
+            </ConsoleButton>
+          )}
+        </div>
+      )}
+      <ConsoleConfirmDialog
+        open={confirmAction !== null}
+        onOpenChange={next => { if (!next && !isAnyPending) setConfirmAction(null); }}
+        title={confirmAction === 'cancel'
+          ? '确认取消任务 #' + task.id + '？'
+          : '确认重试任务 #' + task.id + '？'}
+        description={<p>{confirmDescription}</p>}
+        confirmText={confirmAction === 'cancel' ? '确认取消' : '确认重试'}
+        onConfirm={confirm}
+        busy={isAnyPending}
+        disabled={confirmAction === 'cancel' ? !cancelAvail.enabled : !retryAvail.enabled}
+        danger={confirmAction === 'cancel'}
+      />
+    </div>
   );
 };

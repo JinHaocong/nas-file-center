@@ -16,7 +16,8 @@ approved NAS File Center mockup. User-selectable dark/system modes remain.
 - [x] Native administrator password dialog + toast provider (PR #133).
 - [x] Official Radix Dialog + Lucide React dependency integration (this PR).
 - [x] Task Center list, filtering, pagination, error views and progress UI (this PR).
-- [ ] Remaining task detail/confirmation sheets, scan and dedupe views.
+- [x] Task Inspector Sheet, task actions, delete/cleanup confirmation and event logs (this PR).
+- [ ] Scan and dedupe views, plus remaining Ant Design screens and confirmations.
 - [ ] Shared dialogs, select, checkbox, forms and destructive confirmation primitives.
 - [ ] Organizer, workflow editor, rename/file tools, settings and remaining pages.
 - [ ] Remove all `antd` and `@ant-design/icons` imports and their lockfile dependencies.

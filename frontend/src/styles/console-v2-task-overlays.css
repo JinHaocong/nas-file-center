@@ -1,0 +1,257 @@
+/* Console v2 Task Inspector — Radix Portal surfaces live outside .nfc-v2-shell.
+   Duplicate the surface tokens here so the dialog looks right in both themes. */
+.nfc-v2-sheet, .nfc-v2-confirm-dialog, .nfc-v2-history-dialog {
+  --v2-paper: #fff;
+  --v2-canvas: #f6f8fc;
+  --v2-text: #18263a;
+  --v2-muted: #63738b;
+  --v2-subtle: #8794a6;
+  --v2-line: #e5eaf1;
+  --v2-indigo: #2875e9;
+  --v2-indigo-soft: #edf4ff;
+  font-family: inherit;
+  color: var(--v2-text);
+}
+[data-theme='dark'] .nfc-v2-sheet,
+[data-theme='dark'] .nfc-v2-confirm-dialog,
+[data-theme='dark'] .nfc-v2-history-dialog {
+  --v2-paper: #1a2434;
+  --v2-canvas: #111827;
+  --v2-text: #f1f5fb;
+  --v2-muted: #afbdce;
+  --v2-subtle: #93a4b8;
+  --v2-line: #2c3a4e;
+  --v2-indigo: #83b5ff;
+  --v2-indigo-soft: #203452;
+}
+
+.nfc-v2-sheet-overlay { z-index: 1100; }
+.nfc-v2-sheet.nfc-overlay-drawer {
+  position: fixed;
+  inset: 0 0 0 auto;
+  z-index: 1101;
+  box-sizing: border-box;
+  width: min(760px, 100vw);
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--v2-paper);
+  border-left: 1px solid var(--v2-line);
+  box-shadow: -25px 0 75px rgba(5,20,40,.22);
+  padding: 0;
+  animation: nfc-v2-sheet-enter .17s ease-out;
+}
+@keyframes nfc-v2-sheet-enter {
+  from { transform: translateX(24px); opacity: .75; }
+  to { transform: translateX(0); opacity: 1; }
+}
+.nfc-v2-sheet-header {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 14px;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 23px 29px 20px;
+  background: var(--v2-paper);
+  border-bottom: 1px solid var(--v2-line);
+}
+.nfc-v2-sheet-heading { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.nfc-v2-sheet-eyebrow {
+  font-size: 10px;
+  font-weight: 740;
+  color: var(--v2-indigo);
+  text-transform: uppercase;
+  letter-spacing: .1em;
+}
+.nfc-v2-sheet-title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.nfc-v2-sheet-title-row h2 { margin: 0; color: var(--v2-text); font-size: 20px; font-weight: 750; }
+.nfc-v2-task-id { padding: 4px 8px; background: var(--v2-canvas); border: 1px solid var(--v2-line); border-radius: 7px; font-size: 11px; color: var(--v2-muted); font-weight: 650; }
+.nfc-v2-sheet-description { margin: 0; color: var(--v2-muted); font-size: 11.5px; line-height: 1.6; }
+.nfc-v2-sheet-header .nfc-v2-dialog-close { flex: 0 0 auto; }
+.nfc-v2-sheet-body { flex: 1; min-height: 0; padding: 22px 29px 38px; overflow-y: auto; overscroll-behavior: contain; color: var(--v2-text); }
+.nfc-v2-task-inspector { display: flex; flex-direction: column; gap: 19px; }
+.nfc-v2-task-inspector .nfc-overlay-section {
+  padding: 19px;
+  border: 1px solid var(--v2-line);
+  border-radius: 13px;
+  background: var(--v2-paper);
+  min-width: 0;
+}
+.nfc-v2-task-inspector .nfc-overlay-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 0 13px;
+  margin: 0 0 13px;
+  border-bottom: 1px solid var(--v2-line);
+}
+.nfc-v2-task-inspector .nfc-overlay-section-header span {
+  color: var(--v2-subtle);
+  font-size: 10px;
+  font-weight: 690;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+.nfc-v2-task-inspector .nfc-overlay-section-header h3 { color: var(--v2-text); margin: 5px 0 0; font-size: 14px; font-weight: 720; }
+.nfc-v2-task-inspector .nfc-v2-task-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0,1fr));
+  margin: 0;
+  gap: 12px 18px;
+}
+.nfc-v2-task-facts > div { min-width: 0; }
+.nfc-v2-task-facts > div.is-wide { grid-column: 1 / -1; }
+.nfc-v2-task-facts dt { font-size: 11px; color: var(--v2-subtle); margin: 0 0 7px; }
+.nfc-v2-task-facts dd { font-size: 12px; color: var(--v2-text); margin: 0; overflow-wrap: anywhere; }
+.nfc-v2-task-capabilities { display: flex; gap: 6px; flex-wrap: wrap; }
+.nfc-v2-task-capability {
+  font-size: 11px;
+  color: var(--v2-muted);
+  padding: 5px 9px;
+  border: 1px solid var(--v2-line);
+  background: var(--v2-canvas);
+  border-radius: 7px;
+}
+.nfc-v2-task-capability.is-supported { background: #eaf8f2; color: #18835f; border-color: #c8ecdb; }
+[data-theme='dark'] .nfc-v2-task-capability.is-supported { background: #194137; color: #a1e9c9; border-color: #306858; }
+.nfc-v2-task-inline-alert {
+  background: #fff0f3;
+  border: 1px solid #f0c9d2;
+  border-radius: 10px;
+  color: #aa344e;
+  padding: 14px 16px;
+}
+.nfc-v2-task-inline-alert strong { font-size: 12px; font-weight: 740; }
+.nfc-v2-task-inline-alert p { font-size: 12px; margin: 7px 0 0; line-height: 1.6; overflow-wrap: anywhere; }
+[data-theme='dark'] .nfc-v2-task-inline-alert { background: #482432; color: #ffbdc9; border-color: #734357; }
+.nfc-v2-task-context-stack { display: grid; gap: 9px; }
+.nfc-v2-task-context { background: var(--v2-canvas); border: 1px solid var(--v2-line); border-radius: 9px; overflow: hidden; }
+.nfc-v2-task-context summary { padding: 12px 14px; color: var(--v2-text); font-size: 12px; font-weight: 650; cursor: pointer; }
+.nfc-v2-task-context[open] summary { border-bottom: 1px solid var(--v2-line); }
+.nfc-v2-task-context .nfc-code-block, .nfc-v2-log-context-row .nfc-code-block { max-width: 100%; overflow: auto; margin: 0; padding: 14px; color: var(--v2-text); background: var(--v2-canvas); font-size: 11px; line-height: 1.65; }
+.nfc-v2-task-muted { display: block; padding: 13px; color: var(--v2-subtle); font-size: 12px; }
+.nfc-v2-task-actions { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; }
+.nfc-v2-retry-result { flex-basis: 100%; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 5px; padding: 11px; border-radius: 9px; background: var(--v2-indigo-soft); color: var(--v2-text); font-size: 11px; }
+
+/* Native button and pagination elements also style inside Radix's body portal. */
+.nfc-v2-sheet .nfc-console-button,
+.nfc-v2-confirm-dialog .nfc-console-button,
+.nfc-v2-history-dialog .nfc-console-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  min-height: 37px;
+  padding: 0 13px;
+  border: 1px solid var(--v2-line);
+  border-radius: 9px;
+  background: var(--v2-paper);
+  color: var(--v2-text);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 630;
+  cursor: pointer;
+}
+.nfc-v2-sheet .nfc-console-button:disabled,
+.nfc-v2-confirm-dialog .nfc-console-button:disabled,
+.nfc-v2-history-dialog .nfc-console-button:disabled { opacity: .48; cursor: not-allowed; }
+.nfc-v2-sheet .nfc-console-button-sm { min-height: 32px; padding: 0 9px; }
+.nfc-v2-sheet .nfc-console-button-ghost { border-color: transparent; color: var(--v2-indigo); background: transparent; }
+.nfc-v2-sheet .nfc-console-button-primary,
+.nfc-v2-confirm-dialog .nfc-console-button-primary,
+.nfc-v2-history-dialog .nfc-console-button-primary { background: #2878ef; border-color: #2878ef; color: #fff; }
+.nfc-v2-sheet .nfc-console-button-danger,
+.nfc-v2-confirm-dialog .nfc-console-button-danger,
+.nfc-v2-history-dialog .nfc-console-button-danger { background: #b9344f; border-color: #b9344f; color: #fff; }
+.nfc-v2-sheet .nfc-console-spinner,
+.nfc-v2-confirm-dialog .nfc-console-spinner,
+.nfc-v2-history-dialog .nfc-console-spinner {
+  display: inline-block;
+  width: 14px; height: 14px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: nfc-v2-sheet-spin .8s linear infinite;
+}
+@keyframes nfc-v2-sheet-spin { to { transform: rotate(360deg); } }
+
+/* Nested task confirm dialogs must sit above the inspector sheet and its scrim. */
+.nfc-v2-confirm-overlay { z-index: 1300 !important; }
+.nfc-v2-confirm-dialog.nfc-v2-dialog[data-state='open'] { z-index: 1301 !important; width: min(460px, calc(100vw - 24px)); }
+.nfc-v2-confirm-dialog .nfc-v2-dialog-icon.is-danger,
+.nfc-v2-history-dialog .nfc-v2-dialog-icon.is-danger { background: #fff0f2; color: #bc3553; }
+.nfc-v2-confirm-description { padding: 20px 24px; color: var(--v2-muted); line-height: 1.7; font-size: 12px; }
+.nfc-v2-confirm-description p { margin: 0; }
+.nfc-v2-confirm-actions { display: flex; gap: 10px; align-items: center; justify-content: flex-end; padding: 17px 23px 22px; border-top: 1px solid var(--v2-line); }
+.nfc-v2-history-dialog.nfc-v2-dialog[data-state='open'] { width: min(540px, calc(100vw - 24px)); }
+.nfc-v2-history-body { display: grid; gap: 20px; padding: 21px 24px; }
+.nfc-v2-history-warning { display: flex; align-items: flex-start; gap: 11px; padding: 12px; background: #fff8eb; border: 1px solid #f5e5be; border-radius: 9px; color: #865b22; font-size: 11px; line-height: 1.65; }
+.nfc-v2-history-warning svg { margin-top: 2px; flex: 0 0 auto; }
+.nfc-v2-history-warning strong { display: block; font-size: 12px; }
+.nfc-v2-history-warning p { margin: 4px 0 0; }
+[data-theme='dark'] .nfc-v2-history-warning { background: #44321e; border-color: #694d31; color: #f5d59f; }
+.nfc-v2-history-statuses { border: 0; margin: 0; padding: 0; min-width: 0; display: grid; gap: 10px; }
+.nfc-v2-history-statuses legend { color: var(--v2-text); margin-bottom: 11px; font-size: 12px; font-weight: 680; }
+.nfc-v2-history-statuses label { display: flex; align-items: center; gap: 9px; color: var(--v2-text); font-size: 12px; cursor: pointer; }
+.nfc-v2-history-statuses input { accent-color: #2878ef; width: 16px; height: 16px; cursor: pointer; }
+.nfc-v2-history-impacts { border-top: 1px solid var(--v2-line); padding-top: 16px; font-size: 11.5px; color: var(--v2-muted); line-height: 1.8; }
+.nfc-v2-history-impacts > strong { color: var(--v2-text); font-size: 12px; }
+.nfc-v2-history-impacts ul { padding-left: 19px; margin: 9px 0 0; }
+.nfc-v2-history-impacts li { margin-bottom: 5px; }
+
+/* Event logs: responsive native table, levels, paging and safe context expansion. */
+.nfc-v2-task-log-panel { min-width: 0; }
+.nfc-v2-log-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; padding-bottom: 16px; border-bottom: 1px solid var(--v2-line); }
+.nfc-v2-log-header h3 { margin: 4px 0 0; font-size: 14px; color: var(--v2-text); }
+.nfc-v2-log-header .nfc-console-filter { min-width: 148px; display: grid; gap: 7px; font-size: 11px; }
+.nfc-v2-log-header .nfc-console-select-shell { position: relative; display: flex; }
+.nfc-v2-log-header .nfc-console-select { appearance: none; width: 100%; height: 35px; border: 1px solid var(--v2-line); border-radius: 9px; color: var(--v2-text); background: var(--v2-paper); padding: 0 35px 0 12px; font-size: 12px; }
+.nfc-v2-log-header .nfc-console-select-chevron { position: absolute; right: 9px; top: 10px; color: var(--v2-muted); pointer-events: none; }
+.nfc-v2-log-header .nfc-console-filter-label { color: var(--v2-muted); }
+.nfc-v2-log-table-scroll { width: 100%; overflow-x: auto; margin-top: 12px; }
+.nfc-v2-log-table { width: 100%; min-width: 560px; border-collapse: collapse; font-size: 11.5px; text-align: left; }
+.nfc-v2-log-table th { padding: 10px 11px; white-space: nowrap; font-size: 10.5px; color: var(--v2-muted); background: var(--v2-canvas); }
+.nfc-v2-log-table td { padding: 11px; border-top: 1px solid var(--v2-line); vertical-align: top; color: var(--v2-text); }
+.nfc-v2-log-message { overflow-wrap: anywhere; min-width: 190px; }
+.nfc-v2-log-expand { border: 0; color: var(--v2-indigo); background: transparent; cursor: pointer; }
+.nfc-v2-log-level { display: inline-flex; padding: 4px 7px; border-radius: 6px; background: var(--v2-canvas); color: var(--v2-muted); font-size: 10px; font-weight: 700; }
+.nfc-v2-log-level.is-error { background: #fff0f1; color: #b9354c; }
+.nfc-v2-log-level.is-warning { background: #fff3e3; color: #a46e19; }
+.nfc-v2-log-level.is-info { background: #ecf4ff; color: #2875d9; }
+.nfc-v2-log-context-row td { padding: 0; }
+.nfc-v2-sheet .nfc-console-pagination { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; padding: 13px 0 2px; gap: 10px; color: var(--v2-muted); font-size: 11px; }
+.nfc-v2-sheet .nfc-console-page-buttons { display: flex; align-items: center; gap: 8px; color: var(--v2-text); }
+.nfc-v2-sheet .nfc-console-page-buttons button { display: grid; place-items: center; width: 30px; height: 30px; border: 1px solid var(--v2-line); border-radius: 7px; color: var(--v2-text); background: var(--v2-paper); cursor: pointer; }
+.nfc-v2-sheet .nfc-console-page-buttons button:disabled { opacity: .4; cursor: not-allowed; }
+.nfc-v2-sheet .nfc-console-page-size select { border-radius: 7px; border: 1px solid var(--v2-line); padding: 7px; background: var(--v2-paper); color: var(--v2-text); margin-left: 6px; }
+.nfc-v2-sheet .nfc-console-empty { display: grid; justify-items: center; padding: 23px; gap: 9px; color: var(--v2-muted); }
+.nfc-v2-sheet .nfc-console-empty-icon { color: var(--v2-indigo); }
+.nfc-v2-sheet .nfc-console-empty p { margin: 0; font-size: 11px; }
+.nfc-v2-sheet .nfc-task-progress-meta { display: flex; justify-content: space-between; gap: 8px; color: var(--v2-subtle); font-size: 11px; }
+.nfc-v2-sheet .nfc-v2-progress-track { display: flex; gap: 9px; align-items: center; }
+.nfc-v2-sheet .nfc-v2-native-progress { flex: 1; width: 100%; height: 8px; appearance: none; border: 0; border-radius: 9px; background: var(--v2-line); }
+.nfc-v2-sheet .nfc-v2-native-progress::-webkit-progress-bar { background: var(--v2-line); border-radius: 9px; }
+.nfc-v2-sheet .nfc-v2-native-progress::-webkit-progress-value { background: #2875e9; border-radius: 9px; }
+.nfc-v2-sheet .nfc-v2-native-progress::-moz-progress-bar { background: #2875e9; border-radius: 9px; }
+.nfc-v2-sheet .nfc-v2-progress-spinner { display: inline-block; width: 13px; height: 13px; border: 2px solid var(--v2-line); border-top-color: var(--v2-indigo); border-radius: 50%; animation: nfc-v2-sheet-spin .8s linear infinite; }
+.nfc-v2-sheet .nfc-task-progress-live { display: flex; gap: 9px; align-items: center; }
+.nfc-v2-sheet .nfc-v2-progress-percent { color: var(--v2-muted); font-size: 11px; }
+.nfc-v2-sheet .nfc-task-progress-message { display: block; margin-top: 6px; color: var(--v2-muted); font-size: 11px; overflow-wrap: anywhere; }
+@media (max-width: 767px) {
+  .nfc-v2-sheet.nfc-overlay-drawer { width: 100vw; border-left: 0; }
+  .nfc-v2-sheet-header { padding: 19px 17px 16px; }
+  .nfc-v2-sheet-body { padding: 16px 13px 44px; }
+  .nfc-v2-task-inspector .nfc-overlay-section { padding: 14px; }
+  .nfc-v2-task-facts { grid-template-columns: minmax(0,1fr); }
+  .nfc-v2-task-inspector .nfc-v2-task-facts { grid-template-columns: minmax(0,1fr); }
+  .nfc-v2-task-facts > div.is-wide { grid-column: auto; }
+  .nfc-v2-history-body { padding: 17px; }
+  .nfc-v2-confirm-actions { padding: 15px 17px 19px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nfc-v2-sheet.nfc-overlay-drawer { animation: none; }
+  .nfc-v2-sheet .nfc-v2-progress-spinner, .nfc-console-spinner { animation: none; }
+}
