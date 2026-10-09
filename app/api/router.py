@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from app.auth.dependencies import get_current_user, require_admin_user
 from app.batch.rename import RenameRule
 from app.batch.directory_rename import preview_immediate_directory_renames
+from app.batch.directory_compare import compare_directories, verify_directory_pair
 from app.exceptions import PlanStaleError
 from app.filters.schema import FilterPreviewRequest, FilterPreviewResponse
 from app.filters.validation import FilterValidationError
@@ -445,6 +446,16 @@ class ImmediateDirectoryRenamePreviewRequest(BaseModel):
     mode: Literal["replace_name", "replace_suffix", "add_prefix", "add_suffix"]
     find: str = Field(default="", max_length=255)
     value: str = Field(default="", max_length=255)
+
+
+class DirectoryDiffRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    root_a: str = Field(min_length=1, max_length=4096)
+    root_b: str = Field(min_length=1, max_length=4096)
+
+
+class DirectoryDiffVerifyRequest(DirectoryDiffRequest):
+    relative_path: str = Field(min_length=1, max_length=4096)
 
 
 class PlanItemInput(BaseModel):
@@ -1328,6 +1339,32 @@ def immediate_directory_rename_preview(
             quarantine_root=request.app.state.settings.quarantine_root,
         )
         return {"items": items, "count": len(items)}
+    except (ValueError, OSError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/directories/compare/preview")
+def directory_diff_preview(request: Request, payload: DirectoryDiffRequest):
+    """Read-only relative-path comparison; equal sizes are not proof of equal content."""
+    try:
+        return compare_directories(
+            payload.root_a, payload.root_b,
+            allowed_roots=request.app.state.settings.allowed_roots,
+            quarantine_root=request.app.state.settings.quarantine_root,
+        )
+    except (ValueError, OSError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/directories/compare/verify")
+def directory_diff_verify(request: Request, payload: DirectoryDiffVerifyRequest):
+    """Explicit bounded SHA256 verification for exactly one file pair."""
+    try:
+        return verify_directory_pair(
+            payload.root_a, payload.root_b, payload.relative_path,
+            allowed_roots=request.app.state.settings.allowed_roots,
+            quarantine_root=request.app.state.settings.quarantine_root,
+        )
     except (ValueError, OSError) as exc:
         raise HTTPException(400, str(exc)) from exc
 
