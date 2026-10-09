@@ -6,7 +6,7 @@ import { validatePasswordChange } from '../src/components/ui/passwordValidation'
 
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');
 
-describe('Console v2 native administrator security dialog', () => {
+describe('Console v2 Radix administrator security dialog', () => {
   test('password validation rejects missing, short and mismatched credentials', () => {
     assert.equal(validatePasswordChange({
       oldPassword: '', newPassword: 'abcdef', confirmPassword: 'abcdef',
@@ -25,11 +25,16 @@ describe('Console v2 native administrator security dialog', () => {
     }), null);
   });
 
-  test('native modal preserves old-password verification and server API', () => {
+  test('Radix modal preserves old-password verification and server API', () => {
     const source = read('src/components/ChangePasswordModal.tsx');
-    assert.match(source, /<dialog/);
-    assert.match(source, /showModal\(\)/);
-    assert.match(source, /onCancel=/);
+    assert.match(source, /import \* as Dialog from '@radix-ui\/react-dialog'/);
+    for (const part of ['Root', 'Portal', 'Overlay', 'Content', 'Title', 'Description']) {
+      assert.ok(source.includes('<Dialog.' + part), part);
+    }
+    assert.match(source, /onEscapeKeyDown=/);
+    assert.match(source, /onPointerDownOutside=/);
+    assert.match(source, /onOpenAutoFocus=/);
+    assert.match(source, /if \(!next && !submitting\) close\(\)/);
     assert.match(source, /authApi\.changePassword/);
     assert.match(source, /old_password: oldPassword/);
     assert.match(source, /new_password: newPassword/);
@@ -52,7 +57,8 @@ describe('Console v2 native administrator security dialog', () => {
 
   test('native security modal and toast have light-dark responsive CSS', () => {
     const css = read('src/styles/console-v2.css');
-    assert.match(css, /\.nfc-v2-dialog::backdrop/);
+    assert.match(css, /\.nfc-v2-dialog-overlay/);
+    assert.ok(css.includes(".nfc-v2-dialog[data-state='open']"));
     assert.match(css, /\.nfc-v2-dialog-form input/);
     assert.match(css, /\.nfc-v2-toast-error/);
     assert.match(css, /\[data-theme='dark'\] \.nfc-v2-toast/);
