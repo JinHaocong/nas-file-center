@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from app.auth.dependencies import get_current_user, require_admin_user
 from app.batch.rename import RenameRule
+from app.batch.directory_rename import preview_immediate_directory_renames
 from app.exceptions import PlanStaleError
 from app.filters.schema import FilterPreviewRequest, FilterPreviewResponse
 from app.filters.validation import FilterValidationError
@@ -435,6 +436,15 @@ class RenamePreviewRequest(BaseModel):
     include_parent: bool = False
     source_extension: str | None = None
     target_extension: str | None = None
+
+
+class ImmediateDirectoryRenamePreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    parent: str = Field(min_length=1, max_length=4096)
+    mode: Literal["replace_name", "replace_suffix", "add_prefix", "add_suffix"]
+    find: str = Field(default="", max_length=255)
+    value: str = Field(default="", max_length=255)
 
 
 class PlanItemInput(BaseModel):
@@ -1299,6 +1309,25 @@ def rename_preview(request: Request, payload: RenamePreviewRequest):
             target_extension=payload.target_extension,
         )
         return {"items": request.app.state.service.rename_preview(payload.paths, rule)}
+    except (ValueError, OSError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/rename/directories/preview")
+def immediate_directory_rename_preview(
+    request: Request, payload: ImmediateDirectoryRenamePreviewRequest
+):
+    """Preview direct child *directories*, never recursive and never mutating."""
+    try:
+        items = preview_immediate_directory_renames(
+            payload.parent,
+            mode=payload.mode,
+            find=payload.find,
+            value=payload.value,
+            allowed_roots=request.app.state.settings.allowed_roots,
+            quarantine_root=request.app.state.settings.quarantine_root,
+        )
+        return {"items": items, "count": len(items)}
     except (ValueError, OSError) as exc:
         raise HTTPException(400, str(exc)) from exc
 
