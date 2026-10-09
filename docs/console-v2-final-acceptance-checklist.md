@@ -1,0 +1,35 @@
+# Console v2 Migration — final-acceptance checklist
+
+The product owner requested **one unified visual acceptance at the end**.
+Intermediate PRs are gated by automated tests, build, Docker and security checks;
+they are not separate visual sign-off requests.
+
+## Visual target
+
+Dark premium navigation with a clean light workspace by default, matching the
+approved NAS File Center mockup. User-selectable dark/system modes remain.
+
+## Workstreams
+
+- [x] Dark/sidebar, responsive shell, header and real-data Dashboard (PR #131).
+- [x] Native Plan ledger, pagination, buttons and empty states (PR #132).
+- [ ] Native administrator password dialog + toast provider (PR #133, CI pending).
+- [ ] Core task, scan and dedupe views: responsive tables/cards/filters/actions.
+- [ ] Shared dialogs, select, checkbox, forms and destructive confirmation primitives.
+- [ ] Organizer, workflow editor, rename/file tools, settings and remaining pages.
+- [ ] Remove all `antd` and `@ant-design/icons` imports and their lockfile dependencies.
+- [ ] Consolidate historical UI CSS overrides into an owned, maintainable theme system.
+- [ ] Full TypeScript, frontend unit/regression, backend, Docker and dependency-audit gates.
+- [ ] One final browser review: 360/390/430/768/1024/1280/1440/1920 px.
+- [ ] Keyboard navigation, focus management, dark-mode contrast, reduced motion and
+      destructive confirmations.
+- [ ] Verify against real NAS when a safe test environment is available.
+- [ ] Get owner's single consolidated visual acceptance; deploy only by explicit
+      deployment action when approved.
+
+## Guardrails
+
+Do not turn console appearance changes into new capabilities or backend behavior:
+auth/session, Plan/Task lifecycle, Worker controls, path guards, quarantines, real
+filesystem writes, irreversible operations and audit semantics remain unchanged.
+No screenshot-only mock data in runtime.
