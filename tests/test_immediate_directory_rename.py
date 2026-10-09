@@ -95,6 +95,31 @@ def test_conflicting_new_names_detected(tmp_path):
     assert all(item["conflict"] for item in result)
 
 
+
+def test_literal_whitespace_replacement(tmp_path):
+    root = tmp_path / "library"
+    root.mkdir()
+    (root / "hello world").mkdir()
+
+    result = preview(root, "replace_name", find=" ", value="_")
+
+    assert result[0]["target"] == str(root / "hello_world")
+    assert result[0]["conflict"] is False
+
+
+def test_casefold_output_collision_detected_conservatively(tmp_path):
+    root = tmp_path / "library"
+    root.mkdir()
+    (root / "Foo-A").mkdir()
+    (root / "foo-A").mkdir()
+
+    result = preview(root, "replace_suffix", find="-A", value="")
+
+    assert len(result) == 2
+    assert sum(item["conflict"] for item in result) == 1
+
+
+
 def test_quarantine_and_file_ignored(tmp_path):
     root = tmp_path / "library"
     root.mkdir()
