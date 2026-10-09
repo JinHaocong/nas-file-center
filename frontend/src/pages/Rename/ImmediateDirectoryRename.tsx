@@ -91,7 +91,7 @@ export const ImmediateDirectoryRename: React.FC = () => {
         message.error('请输入要新增的文本');
         return;
       }
-      const mode = module === 'replace'
+      const mode: 'replace_name' | 'replace_suffix' | 'add_prefix' | 'add_suffix' = module === 'replace'
         ? (replaceTarget === 'name' ? 'replace_name' : 'replace_suffix')
         : (addPosition === 'prefix' ? 'add_prefix' : 'add_suffix');
       const payload = { parent: values.parent, mode, find, value };
