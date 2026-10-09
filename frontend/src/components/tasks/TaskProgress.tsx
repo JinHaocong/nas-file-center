@@ -1,10 +1,7 @@
 import React from 'react';
-import { Progress, Typography, Spin } from 'antd';
 import dayjs from 'dayjs';
-import { TaskProgress as TaskProgressType, TaskStatus } from '../../types/task';
+import type { TaskProgress as TaskProgressType, TaskStatus } from '../../types/task';
 import { computeProgressPercentage, calculateTaskEta } from './task_utils';
-
-const { Text } = Typography;
 
 interface Props {
   progress: TaskProgressType;
@@ -16,12 +13,7 @@ interface Props {
 }
 
 export const TaskProgress: React.FC<Props> = ({
-  progress,
-  status,
-  size = 'small',
-  showDetails = false,
-  startedAt,
-  now,
+  progress, status, size = 'small', showDetails = false, startedAt, now,
 }) => {
   const current = progress?.current || 0;
   const total = progress?.total || 0;
@@ -31,8 +23,8 @@ export const TaskProgress: React.FC<Props> = ({
 
   const meta = (primary: React.ReactNode, secondary?: React.ReactNode) => (
     <div className="nfc-task-progress-meta">
-      <Text type="secondary">{primary}</Text>
-      {secondary !== undefined && <Text type="secondary">{secondary}</Text>}
+      <span>{primary}</span>
+      {secondary !== undefined && <span>{secondary}</span>}
     </div>
   );
 
@@ -41,35 +33,29 @@ export const TaskProgress: React.FC<Props> = ({
     tone: 'success' | 'danger' | 'warning' | 'muted',
     countLabel?: string,
   ) => (
-    <div className={`nfc-task-progress nfc-task-progress-${tone}`}>
-      <Text className="nfc-task-progress-status">
-        {label}{countLabel || ''}
-      </Text>
-      {meta(`ETA: ${eta.text}`, message ? `· ${message}` : undefined)}
+    <div className={'nfc-task-progress nfc-task-progress-' + tone}>
+      <span className="nfc-task-progress-status">{label}{countLabel || ''}</span>
+      {meta('ETA: ' + eta.text, message ? '· ' + message : undefined)}
     </div>
   );
 
   if (total > 0 && percent !== null) {
-    let progressStatus: 'success' | 'exception' | 'normal' | 'active' | undefined;
-    if (status === 'failed') progressStatus = 'exception';
-    else if (status === 'completed') progressStatus = 'success';
-    else if (status === 'running') progressStatus = 'active';
-
+    const tone = status === 'failed' ? 'danger' :
+      status === 'completed' ? 'success' : status === 'running' ? 'active' : 'normal';
     return (
-      <div className={`nfc-task-progress nfc-task-progress-bar ${showDetails ? 'is-detailed' : ''}`}>
-        <Progress percent={percent} size={size} status={progressStatus} />
+      <div className={'nfc-task-progress nfc-task-progress-bar nfc-v2-progress-' + tone +
+        (showDetails ? ' is-detailed' : '') + (size === 'small' ? ' is-small' : '')}>
+        <div className="nfc-v2-progress-track">
+          <progress className="nfc-v2-native-progress" max={100} value={percent}
+            aria-label="任务完成进度">{percent}%</progress>
+          <span className="nfc-v2-progress-percent">{percent}%</span>
+        </div>
         {meta(
-          `${current} / ${total}${showDetails ? ` (${percent}%)` : ''}`,
-          `ETA: ${eta.text}`,
+          current + ' / ' + total + (showDetails ? ' (' + percent + '%)' : ''),
+          'ETA: ' + eta.text,
         )}
         {message && (
-          <Text
-            type="secondary"
-            ellipsis={{ tooltip: message }}
-            className="nfc-task-progress-message"
-          >
-            {message}
-          </Text>
+          <span className="nfc-task-progress-message" title={message}>{message}</span>
         )}
       </div>
     );
@@ -78,39 +64,35 @@ export const TaskProgress: React.FC<Props> = ({
   if (status === 'running') {
     return (
       <div className="nfc-task-progress nfc-task-progress-running">
-        <div className="nfc-task-progress-live">
-          <Spin size="small" />
-          <Text ellipsis={{ tooltip: message || '正在执行...' }}>
-            {message || '正在执行...'}
-          </Text>
+        <div className="nfc-task-progress-live" role="status">
+          <span className="nfc-v2-progress-spinner" aria-hidden="true" />
+          <span title={message || '正在执行...'}>{message || '正在执行...'}</span>
         </div>
-        {meta(`进度未知${current > 0 ? ` (${current} 项)` : ''}`, `ETA: ${eta.text}`)}
+        {meta('进度未知' + (current > 0 ? ' (' + current + ' 项)' : ''), 'ETA: ' + eta.text)}
       </div>
     );
   }
 
   if (status === 'completed') {
-    return terminal('已完成', 'success', current > 0 ? ` (${current} 项)` : '');
+    return terminal('已完成', 'success', current > 0 ? ' (' + current + ' 项)' : '');
   }
   if (status === 'failed') {
-    return terminal('已失败', 'danger', current > 0 ? ` (${current} 项)` : '');
+    return terminal('已失败', 'danger', current > 0 ? ' (' + current + ' 项)' : '');
   }
   if (status === 'cancelled') {
-    return terminal('已取消', 'muted', current > 0 ? ` (${current} 项)` : '');
+    return terminal('已取消', 'muted', current > 0 ? ' (' + current + ' 项)' : '');
   }
   if (status === 'paused') {
-    return terminal('已暂停', 'warning', current > 0 ? ` (已处理: ${current} 项)` : '');
+    return terminal('已暂停', 'warning', current > 0 ? ' (已处理: ' + current + ' 项)' : '');
   }
   if (status === 'cancel_requested') {
-    return terminal('正在取消...', 'warning', current > 0 ? ` (${current} 项)` : '');
+    return terminal('正在取消...', 'warning', current > 0 ? ' (' + current + ' 项)' : '');
   }
 
   return (
     <div className="nfc-task-progress nfc-task-progress-muted">
-      <Text className="nfc-task-progress-status">
-        {message || '等待 Worker 执行...'}
-      </Text>
-      {meta(`ETA: ${eta.text}`, current > 0 ? `· 已处理 ${current} 项` : undefined)}
+      <span className="nfc-task-progress-status">{message || '等待 Worker 执行...'}</span>
+      {meta('ETA: ' + eta.text, current > 0 ? '· 已处理 ' + current + ' 项' : undefined)}
     </div>
   );
 };

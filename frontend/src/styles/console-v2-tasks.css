@@ -1,0 +1,213 @@
+/* Console v2: Tasks ledger and filter controls — keep global Ant controls untouched. */
+.nfc-v2-shell .nfc-v2-tasks-page { max-width: min(100%, 1690px) !important; }
+.nfc-v2-tasks-page > .nfc-page-header { margin-bottom: 20px !important; }
+.nfc-v2-tasks-page .nfc-data-panel-header { padding: 13px 1px 15px; }
+.nfc-v2-tasks-page .nfc-data-panel-title { color: var(--v2-text); font-size: 15px; }
+.nfc-v2-tasks-page .nfc-data-panel-description { color: var(--v2-muted); }
+.nfc-v2-shell .nfc-v2-tasks-page .nfc-data-panel-body {
+  padding: 0 !important;
+  overflow: hidden;
+  border: 1px solid var(--v2-line) !important;
+  border-radius: 13px !important;
+  box-shadow: var(--v2-shadow);
+  background: var(--v2-paper) !important;
+}
+.nfc-v2-shell .nfc-v2-task-filter-bar {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 12px !important;
+  padding: 17px 20px;
+  border-bottom: 1px solid var(--v2-line);
+  background: var(--v2-paper);
+}
+.nfc-v2-shell .nfc-console-filter {
+  display: grid;
+  gap: 7px;
+  min-width: min(180px, 100%);
+  color: var(--v2-text);
+  font-size: 12px;
+  font-weight: 600;
+}
+.nfc-v2-shell .nfc-console-filter-label { color: var(--v2-muted); font-size: 11px; font-weight: 630; }
+.nfc-v2-shell .nfc-console-select-shell { position: relative; display: flex; align-items: center; min-width: 0; }
+.nfc-v2-shell .nfc-console-select {
+  appearance: none;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  height: 39px;
+  padding: 0 35px 0 13px;
+  border: 1px solid var(--v2-line);
+  border-radius: 10px;
+  background: var(--v2-paper);
+  color: var(--v2-text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 550;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(30,55,84,.03);
+}
+.nfc-v2-shell .nfc-console-select:hover { border-color: color-mix(in srgb, var(--v2-indigo) 36%, var(--v2-line)); }
+.nfc-v2-shell .nfc-console-select:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--v2-indigo) 24%, transparent);
+  border-color: var(--v2-indigo);
+  outline-offset: 1px;
+}
+.nfc-v2-shell .nfc-console-select-chevron {
+  position: absolute;
+  right: 12px;
+  pointer-events: none;
+  color: var(--v2-muted);
+}
+.nfc-v2-task-filter-bar > .nfc-console-button { margin-bottom: 1px; }
+.nfc-v2-task-filter-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-left: auto;
+  min-height: 39px;
+  color: var(--v2-subtle);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.nfc-v2-task-filter-hint svg { color: var(--v2-indigo); }
+
+.nfc-v2-shell .nfc-v2-task-alert {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin: 0 0 18px;
+  padding: 15px;
+  border: 1px solid #f4cad2;
+  border-radius: 11px;
+  background: #fff4f5;
+  color: #ad2f49;
+}
+.nfc-v2-task-alert > svg { flex: 0 0 auto; margin-top: 1px; }
+.nfc-v2-task-alert > div { flex: 1; min-width: 0; }
+.nfc-v2-task-alert strong { font-size: 12px; font-weight: 750; }
+.nfc-v2-task-alert p { font-size: 11px; margin: 5px 0 0; overflow-wrap: anywhere; }
+.nfc-v2-task-alert > .nfc-console-button { align-self: center; }
+[data-theme='dark'] .nfc-v2-task-alert { background: #482432; color: #ffb9c6; border-color: #724050; }
+.nfc-v2-task-loading { padding: 38px 20px; text-align: center; color: var(--v2-muted); font-size: 12px; }
+
+.nfc-v2-task-table-scroll { width: 100%; max-width: 100%; overflow-x: auto; }
+.nfc-v2-shell .nfc-v2-task-table { border-collapse: collapse; width: 100%; min-width: 1190px; font-size: 12px; text-align: left; }
+.nfc-v2-task-table th {
+  padding: 13px 15px;
+  border-bottom: 1px solid var(--v2-line);
+  background: var(--v2-canvas);
+  color: var(--v2-muted);
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.nfc-v2-task-table td {
+  padding: 14px 15px;
+  border-top: 1px solid var(--v2-line);
+  color: var(--v2-text);
+  vertical-align: middle;
+}
+.nfc-v2-task-table tbody tr:first-child td { border-top: 0; }
+.nfc-v2-task-table tbody tr:hover { background: color-mix(in srgb, var(--v2-indigo-soft) 43%, var(--v2-paper)); }
+.nfc-v2-task-table th:nth-child(4) { min-width: 225px; }
+.nfc-v2-task-table th:nth-child(7) { min-width: 170px; }
+.nfc-v2-task-table th:last-child { min-width: 140px; }
+.nfc-v2-task-table .nfc-v2-task-id { color: var(--v2-indigo); font-weight: 700; font-size: 12px; }
+.nfc-v2-task-progress-cell { min-width: 210px; }
+.nfc-v2-task-progress-cell .nfc-task-progress { min-width: 195px; }
+.nfc-v2-task-date { white-space: nowrap; color: var(--v2-muted) !important; font-size: 11px; font-variant-numeric: tabular-nums; }
+.nfc-v2-task-error {
+  display: inline-block;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  white-space: nowrap;
+  color: #c74657;
+  cursor: help;
+}
+.nfc-v2-tasks-page .nfc-row-actions { display: flex; justify-content: flex-end; align-items: center; gap: 4px; white-space: nowrap; }
+.nfc-v2-tasks-page .nfc-status-badge { white-space: nowrap; }
+.nfc-v2-tasks-page .nfc-console-pagination { margin: 0; }
+
+@media (max-width: 767px) {
+  .nfc-v2-task-filter-bar { gap: 9px !important; padding: 13px !important; }
+  .nfc-v2-shell .nfc-console-filter { flex: 1 1 calc(50% - 9px); min-width: 0; }
+  .nfc-v2-task-filter-bar > .nfc-console-button { margin-top: 6px; }
+  .nfc-v2-task-filter-hint { margin-left: 0; }
+  .nfc-v2-tasks-page .nfc-mobile-record-list { display: grid; gap: 11px; padding: 12px; }
+  .nfc-v2-tasks-page .nfc-task-mobile-card {
+    padding: 15px;
+    border: 1px solid var(--v2-line);
+    border-radius: 12px;
+    background: var(--v2-paper);
+  }
+  .nfc-v2-tasks-page .nfc-mobile-record-actions { display: flex; gap: 9px; align-items: center; flex-wrap: wrap; }
+  .nfc-v2-task-alert { flex-wrap: wrap; }
+}
+@media (max-width: 380px) {
+  .nfc-v2-shell .nfc-console-filter { flex-basis: 100%; }
+}
+
+/* TaskProgress is a shared, API-truthful native progress control. */
+.nfc-v2-shell .nfc-task-progress { min-width: 0; color: var(--v2-text); font-size: 11px; }
+.nfc-v2-shell .nfc-task-progress-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin-top: 6px;
+  color: var(--v2-subtle);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+.nfc-v2-shell .nfc-v2-progress-track { display: flex; align-items: center; gap: 10px; width: 100%; }
+.nfc-v2-shell .nfc-v2-native-progress {
+  width: 100%;
+  height: 8px;
+  flex: 1;
+  appearance: none;
+  overflow: hidden;
+  border: 0;
+  border-radius: 999px;
+  background: var(--v2-line);
+}
+.nfc-v2-native-progress::-webkit-progress-bar { background: var(--v2-line); border-radius: 999px; }
+.nfc-v2-native-progress::-webkit-progress-value { background: #397fed; border-radius: 999px; }
+.nfc-v2-native-progress::-moz-progress-bar { background: #397fed; border-radius: 999px; }
+.nfc-v2-progress-success .nfc-v2-native-progress::-webkit-progress-value { background: #26aa7b; }
+.nfc-v2-progress-success .nfc-v2-native-progress::-moz-progress-bar { background: #26aa7b; }
+.nfc-v2-progress-danger .nfc-v2-native-progress::-webkit-progress-value { background: #df5266; }
+.nfc-v2-progress-danger .nfc-v2-native-progress::-moz-progress-bar { background: #df5266; }
+.nfc-v2-shell .nfc-v2-progress-percent { color: var(--v2-muted); font-size: 10px; font-weight: 650; min-width: 32px; text-align: right; font-variant-numeric: tabular-nums; }
+.nfc-v2-shell .nfc-task-progress-message {
+  display: block;
+  margin-top: 5px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--v2-muted);
+  font-size: 10px;
+}
+.nfc-v2-shell .nfc-task-progress-status { font-size: 11px; font-weight: 650; }
+.nfc-v2-shell .nfc-task-progress-success .nfc-task-progress-status { color: #18825f; }
+.nfc-v2-shell .nfc-task-progress-danger .nfc-task-progress-status { color: #c74356; }
+.nfc-v2-shell .nfc-task-progress-warning .nfc-task-progress-status { color: #b18021; }
+.nfc-v2-shell .nfc-task-progress-muted .nfc-task-progress-status { color: var(--v2-muted); }
+.nfc-v2-shell .nfc-task-progress-live { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.nfc-v2-shell .nfc-task-progress-live > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nfc-v2-progress-spinner {
+  width: 13px; height: 13px;
+  flex: 0 0 13px;
+  border: 2px solid var(--v2-line);
+  border-top-color: var(--v2-indigo);
+  border-radius: 50%;
+  animation: nfc-v2-progress-spin .9s linear infinite;
+}
+@keyframes nfc-v2-progress-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .nfc-v2-progress-spinner { animation: none; border-top-color: var(--v2-indigo); }
+}

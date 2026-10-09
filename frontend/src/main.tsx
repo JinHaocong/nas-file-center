@@ -15,6 +15,7 @@ import './styles/v056-right-workspace-v2.css';
 import './styles/pages/settings.css';
 import './styles/console-v2.css';
 import './styles/console-v2-phase2.css';
+import './styles/console-v2-tasks.css';
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
