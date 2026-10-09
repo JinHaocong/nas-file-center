@@ -206,7 +206,7 @@ export const ImmediateDirectoryRename: React.FC = () => {
                 <Form.Item
                   name="find"
                   label="查找字面量"
-                  rules={[{ required: true, whitespace: true, message: '请输入查找文本' }]}
+                  rules={[{ required: true, message: '请输入查找文本' }]}
                 >
                   <Input maxLength={255} placeholder={replaceTarget === 'name' ? '例如：旧名称' : '例如：_old'} />
                 </Form.Item>
