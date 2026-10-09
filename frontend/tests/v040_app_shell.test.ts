@@ -24,11 +24,13 @@ describe('v0.4.0 responsive App Shell contract', () => {
     assert.match(source, /isDesktop/);
   });
 
-  test('navigation uses Drawer on mobile and Sider on desktop', () => {
+  test('navigation uses accessible native dialog on mobile and independent desktop sidebar', () => {
     const source = read('src/components/layout/ResponsiveNav.tsx');
-    assert.match(source, /Drawer/);
+    assert.match(source, /role="dialog"/);
+    assert.match(source, /aria-modal="true"/);
     assert.match(source, /Sidebar/);
     assert.match(source, /isMobile/);
+    assert.doesNotMatch(source, /from 'antd'/);
   });
 
   test('MainLayout uses responsive navigation and semantic page shell classes', () => {
