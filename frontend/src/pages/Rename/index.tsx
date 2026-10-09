@@ -7,6 +7,7 @@ import {
   Form,
   Input,
   InputNumber,
+  Segmented,
   Table,
   message,
 } from 'antd';
@@ -19,6 +20,7 @@ import { useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { batchApi, plansApi } from '../../api/domain';
 import { useTitle } from '../../hooks/useTitle';
+import { ImmediateDirectoryRename } from './ImmediateDirectoryRename';
 import { splitLines } from '../../utils/format';
 import { RenameProposal } from '../../types';
 import { DirectoryPicker } from '../../components/DirectoryPicker';
@@ -34,6 +36,7 @@ export const RenamePage: React.FC = () => {
   const navigate = useNavigate();
   const [form] = Form.useForm();
   const [proposals, setProposals] = useState<RenameProposal[] | null>(null);
+  const [scope, setScope] = useState<'directories' | 'advanced'>('directories');
 
   const previewMutation = useMutation({
     mutationFn: (payload: any) => batchApi.previewRename(payload),
@@ -151,7 +154,20 @@ export const RenamePage: React.FC = () => {
 
   return (
     <div className="nfc-operations-page nfc-rename-page nfc-page-layout-workbench">
-      <PageHeader
+      <Segmented
+        value={scope}
+        onChange={(value) => setScope(value as 'directories' | 'advanced')}
+        options={[
+          { label: '一级目录批量重命名', value: 'directories' },
+          { label: '高级文件重命名（原功能）', value: 'advanced' },
+        ]}
+        style={{ marginBottom: 20 }}
+      />
+      {scope === 'directories' ? (
+        <ImmediateDirectoryRename />
+      ) : (
+        <>
+          <PageHeader
         title="批量重命名"
         description="组合正则、扩展名替换、前后缀、父目录名与编号规则；必须先 Preview，并在无冲突时生成 Rename Plan。"
       />
@@ -331,6 +347,8 @@ export const RenamePage: React.FC = () => {
             }
           />
         </DataPanel>
+      )}
+        </>
       )}
     </div>
   );
