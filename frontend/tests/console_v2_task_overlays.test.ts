@@ -45,7 +45,7 @@ describe('Console v2 Task Center Radix overlays', () => {
     ]) assert.ok(button.includes(token), token);
     assert.match(dialog, /onEscapeKeyDown=/);
     assert.match(dialog, /onPointerDownOutside=\{event => event.preventDefault\(\)\}/);
-    assert.match(dialog, /busy=\{busy\}/);
+    assert.match(dialog, /if \(!busy\) onOpenChange\(next\)/);
     assert.match(dialog, /disabled=\{busy \|\| disabled\}/);
     assert.doesNotMatch(button, /from ['"]antd['"]|<Popconfirm/);
   });
