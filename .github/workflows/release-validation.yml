@@ -3,6 +3,7 @@ name: Release Validation
 on:
   push:
     branches:
+      - main
       - release/v0.4.7
   pull_request:
     branches:
