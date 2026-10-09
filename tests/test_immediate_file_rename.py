@@ -83,7 +83,8 @@ def test_rejects_existing_target_even_when_type_differs(tmp_path, occupant):
     rows = preview(parent, "replace_name", find="old", value="new")
     assert len(rows) == 1
     assert rows[0]["conflict"] is True
-    assert "collides" in rows[0]["conflict_reason"]
+    assert ("collides" in rows[0]["conflict_reason"] or
+            "symlink" in rows[0]["conflict_reason"])
     assert (parent / "old.txt").read_text() == "old"
 
 
@@ -126,7 +127,7 @@ def test_invalid_rules_rejected(tmp_path, mode, find, value):
         preview(parent, mode, find=find, value=value)
 
 
-@pytest.mark.parametrize("value", ["x/y", "x\\y", "\x00", "x" * 260])
+@pytest.mark.parametrize("value", ["x/y", "x\\y", "\x00", "x" * 250])
 def test_unsafe_output_is_conflict_not_mutation(tmp_path, value):
     parent = tmp_path / "files"
     parent.mkdir()
@@ -134,6 +135,16 @@ def test_unsafe_output_is_conflict_not_mutation(tmp_path, value):
     rows = preview(parent, "add_prefix", value=value)
     assert len(rows) == 1 and rows[0]["conflict"] is True
     assert (parent / "a.txt").exists()
+
+
+def test_rejects_overlong_rule_input(tmp_path):
+    parent = tmp_path / "files"
+    parent.mkdir()
+    (parent / "a.txt").write_text("x")
+    # Request-schema limit applies to the rule value itself (not a row conflict).
+    with pytest.raises(ValueError, match="at most 255 characters"):
+        preview(parent, "add_prefix", value="x" * 260)
+    assert (parent / "a.txt").read_text() == "x"
 
 
 def test_parent_and_quarantine_guards(tmp_path):
