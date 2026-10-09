@@ -10,6 +10,7 @@ import { ScanDetailPage } from '../pages/Scans/ScanDetail';
 import { AdvancedDedupePage } from '../pages/Scans/AdvancedDedupePage';
 import { PathMatchPage } from '../pages/PathMatch';
 import { DirectoryDiffPage } from '../pages/DirectoryDiff';
+import { FilenameAuditPage } from '../pages/FilenameAudit';
 import { RenamePage } from '../pages/Rename';
 import { BatchPage } from '../pages/Batch';
 import { OrganizerPage } from '../pages/Organizer';
@@ -36,6 +37,7 @@ export const AppRouter: React.FC = () => {
         <Route path="scans/:id/dedupe" element={<AdvancedDedupePage />} />
         <Route path="path-match" element={<PathMatchPage />} />
         <Route path="directory-diff" element={<DirectoryDiffPage />} />
+        <Route path="filename-audit" element={<FilenameAuditPage />} />
         <Route path="rename" element={<RenamePage />} />
         <Route path="batch" element={<BatchPage />} />
         <Route path="organizer" element={<OrganizerPage />} />
