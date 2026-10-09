@@ -21,7 +21,7 @@ describe('v0.4.0 C6B overlay consistency contract', () => {
         const styles = read('src/styles/console-v2-task-overlays.css');
         assert.match(sheet, /nfc-overlay-drawer/);
         assert.match(sheet, /<Dialog.Content/);
-        assert.match(styles, /\\.nfc-v2-sheet\\.nfc-overlay-drawer/);
+        assert.ok(styles.includes('.nfc-v2-sheet.nfc-overlay-drawer'));
       } else {
         assert.match(source, /nfc-overlay-drawer/, path);
       }
