@@ -132,10 +132,10 @@ export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose, onVie
           <section className="nfc-overlay-section">
             <header className="nfc-overlay-section-header nfc-overlay-section-header-actions">
               <div><span>Controls</span><h3>任务操作</h3></div>
-              <TaskDeleteButton task={task} size="small" type="default"
+              <TaskDeleteButton key={task.id} task={task} size="small" type="default"
                 danger onSuccess={onClose} />
             </header>
-            <TaskActionBar task={task} onViewTask={onViewTask} />
+            <TaskActionBar key={task.id} task={task} onViewTask={onViewTask} />
           </section>
 
           <section className="nfc-overlay-section">
