@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from app.auth.dependencies import get_current_user, require_admin_user
 from app.batch.rename import RenameRule
 from app.batch.directory_rename import preview_immediate_directory_renames
+from app.batch.file_rename import preview_immediate_file_renames
 from app.batch.directory_compare import compare_directories, verify_directory_pair
 from app.exceptions import PlanStaleError
 from app.filters.schema import FilterPreviewRequest, FilterPreviewResponse
@@ -446,6 +447,10 @@ class ImmediateDirectoryRenamePreviewRequest(BaseModel):
     mode: Literal["replace_name", "replace_suffix", "add_prefix", "add_suffix"]
     find: str = Field(default="", max_length=255)
     value: str = Field(default="", max_length=255)
+
+
+class ImmediateFileRenamePreviewRequest(ImmediateDirectoryRenamePreviewRequest):
+    preserve_extension: bool = True
 
 
 class DirectoryDiffRequest(BaseModel):
@@ -1335,6 +1340,24 @@ def immediate_directory_rename_preview(
             mode=payload.mode,
             find=payload.find,
             value=payload.value,
+            allowed_roots=request.app.state.settings.allowed_roots,
+            quarantine_root=request.app.state.settings.quarantine_root,
+        )
+        return {"items": items, "count": len(items)}
+    except (ValueError, OSError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/rename/files/preview")
+def immediate_file_rename_preview(
+    request: Request, payload: ImmediateFileRenamePreviewRequest
+):
+    """Preview regular files only; no recursion or filesystem mutations."""
+    try:
+        items = preview_immediate_file_renames(
+            payload.parent, mode=payload.mode,
+            find=payload.find, value=payload.value,
+            preserve_extension=payload.preserve_extension,
             allowed_roots=request.app.state.settings.allowed_roots,
             quarantine_root=request.app.state.settings.quarantine_root,
         )
