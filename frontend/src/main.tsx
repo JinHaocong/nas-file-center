@@ -16,6 +16,7 @@ import './styles/pages/settings.css';
 import './styles/console-v2.css';
 import './styles/console-v2-phase2.css';
 import './styles/console-v2-tasks.css';
+import './styles/console-v2-task-overlays.css';
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
