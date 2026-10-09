@@ -20,7 +20,7 @@ export const ConsoleSheet: React.FC<Props> = ({
 }) => (
   <Dialog.Root open={open} onOpenChange={next => { if (!next) onClose(); }}>
     <Dialog.Portal>
-      <Dialog.Overlay className="nfc-v2-dialog-overlay" />
+      <Dialog.Overlay className="nfc-v2-dialog-overlay nfc-v2-sheet-overlay" />
       <Dialog.Content className={'nfc-v2-sheet nfc-overlay-drawer ' + className}>
         <header className="nfc-v2-sheet-header">
           <div className="nfc-v2-sheet-heading">
