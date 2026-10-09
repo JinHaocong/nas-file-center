@@ -1,6 +1,6 @@
-import React from 'react';
-import { Drawer } from 'antd';
+import React, { useEffect, useRef } from 'react';
 import { Sidebar } from '../Sidebar';
+import { ConsoleIcon } from '../ui/ConsoleIcon';
 
 interface ResponsiveNavProps {
   isMobile: boolean;
@@ -11,31 +11,40 @@ interface ResponsiveNavProps {
 }
 
 export const ResponsiveNav: React.FC<ResponsiveNavProps> = ({
-  isMobile,
-  mobileOpen,
-  onMobileClose,
-  collapsed,
-  onCollapse,
+  isMobile, mobileOpen, onMobileClose, collapsed, onCollapse,
 }) => {
-  if (isMobile) {
-    return (
-      <Drawer
-        placement="left"
-        width={288}
-        open={mobileOpen}
-        onClose={onMobileClose}
-        closable={false}
-        className="nfc-mobile-nav-drawer"
-      >
-        <Sidebar
-          collapsed={false}
-          onCollapse={onCollapse}
-          embedded
-          onNavigate={onMobileClose}
-        />
-      </Drawer>
-    );
-  }
+  const closeRef = useRef<HTMLButtonElement>(null);
 
-  return <Sidebar collapsed={collapsed} onCollapse={onCollapse} />;
+  useEffect(() => {
+    if (!isMobile || !mobileOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    closeRef.current?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onMobileClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [isMobile, mobileOpen, onMobileClose]);
+
+  if (!isMobile) return <Sidebar collapsed={collapsed} onCollapse={onCollapse} />;
+  if (!mobileOpen) return null;
+
+  return (
+    <div className="nfc-v2-mobile-nav-layer">
+      <button className="nfc-v2-mobile-nav-backdrop" type="button"
+        onClick={onMobileClose} aria-label="关闭导航菜单" />
+      <div className="nfc-v2-mobile-nav-dialog" role="dialog" aria-modal="true"
+        aria-label="NAS File Center 主导航">
+        <button ref={closeRef} type="button" className="nfc-v2-mobile-nav-close"
+          aria-label="关闭导航菜单" onClick={onMobileClose}>
+          <ConsoleIcon name="x" size={20} />
+        </button>
+        <Sidebar collapsed={false} onCollapse={onCollapse} embedded onNavigate={onMobileClose} />
+      </div>
+    </div>
+  );
 };
