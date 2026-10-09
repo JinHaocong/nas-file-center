@@ -38,7 +38,7 @@ export const Sidebar: React.FC<Props> = ({
         {!compact && (
           <span className="nfc-v2-brand-copy">
             <strong>NAS File Center</strong>
-            <span>SECURE FILE OPERATIONS</span>
+            <span>SECURE FILE OPERATIONS · v0.4.7</span>
           </span>
         )}
       </button>
