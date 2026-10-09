@@ -24,7 +24,7 @@ export const ConsoleConfirmDialog: React.FC<Props> = ({
     if (!busy) onOpenChange(next);
   }}>
     <Dialog.Portal>
-      <Dialog.Overlay className="nfc-v2-dialog-overlay" />
+      <Dialog.Overlay className="nfc-v2-dialog-overlay nfc-v2-confirm-overlay" />
       <Dialog.Content
         className="nfc-v2-dialog nfc-v2-confirm-dialog nfc-overlay-modal"
         onEscapeKeyDown={event => { if (busy) event.preventDefault(); }}
