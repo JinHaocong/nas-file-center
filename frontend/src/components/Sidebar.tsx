@@ -19,6 +19,7 @@ import {
   SafetyCertificateOutlined,
   DeploymentUnitOutlined,
   FileImageOutlined,
+  FileSearchOutlined,
 } from '@ant-design/icons';
 
 const { Sider } = Layout;
@@ -46,6 +47,7 @@ const leafMenuItems: NonNullable<MenuProps['items']> = [
   { key: '/audit', icon: <AuditOutlined />, label: '审计日志' },
   { key: '/settings', icon: <SettingOutlined />, label: '系统设置' },
   { key: '/media', icon: <FileImageOutlined />, label: '媒体完整性' },
+  { key: '/filename-audit', icon: <FileSearchOutlined />, label: '文件名巡检' },
 ];
 
 const groupLabel = (label: string) => <span className="nfc-nav-group-label">{label}</span>;
@@ -64,7 +66,7 @@ const groupedMenuItems: MenuProps['items'] = [
   {
     type: 'group',
     label: groupLabel('文件工具'),
-    children: [leafMenuItems[3], leafMenuItems[4], leafMenuItems[5], leafMenuItems[6], leafMenuItems[7]],
+    children: [leafMenuItems[3], leafMenuItems[4], leafMenuItems[5], leafMenuItems[6], leafMenuItems[7], leafMenuItems[16]],
   },
   {
     type: 'group',
