@@ -7,6 +7,7 @@ import {
   FolderOpenOutlined,
   ScanOutlined,
   BranchesOutlined,
+  DiffOutlined,
   EditOutlined,
   AppstoreOutlined,
   FolderViewOutlined,
@@ -33,6 +34,7 @@ const leafMenuItems: NonNullable<MenuProps['items']> = [
   { key: '/indexes', icon: <FolderOpenOutlined />, label: '文件索引' },
   { key: '/scans', icon: <ScanOutlined />, label: '扫描去重' },
   { key: '/path-match', icon: <BranchesOutlined />, label: '路径匹配' },
+  { key: '/directory-diff', icon: <DiffOutlined />, label: '双目录差异' },
   { key: '/rename', icon: <EditOutlined />, label: '批量重命名' },
   { key: '/batch', icon: <AppstoreOutlined />, label: '批量处理' },
   { key: '/organizer', icon: <FolderViewOutlined />, label: 'Organizer 整理' },
@@ -57,27 +59,27 @@ const groupedMenuItems: MenuProps['items'] = [
   {
     type: 'group',
     label: groupLabel('数据与扫描'),
-    children: [leafMenuItems[1], leafMenuItems[2], leafMenuItems[14]],
+    children: [leafMenuItems[1], leafMenuItems[2], leafMenuItems[15]],
   },
   {
     type: 'group',
     label: groupLabel('文件工具'),
-    children: [leafMenuItems[3], leafMenuItems[4], leafMenuItems[5], leafMenuItems[6]],
+    children: [leafMenuItems[3], leafMenuItems[4], leafMenuItems[5], leafMenuItems[6], leafMenuItems[7]],
   },
   {
     type: 'group',
     label: groupLabel('自动化'),
-    children: [leafMenuItems[7], leafMenuItems[8]],
+    children: [leafMenuItems[8], leafMenuItems[9]],
   },
   {
     type: 'group',
     label: groupLabel('安全与运行'),
-    children: [leafMenuItems[9], leafMenuItems[10], leafMenuItems[11], leafMenuItems[12]],
+    children: [leafMenuItems[10], leafMenuItems[11], leafMenuItems[12], leafMenuItems[13]],
   },
   {
     type: 'group',
     label: groupLabel('系统'),
-    children: [leafMenuItems[13]],
+    children: [leafMenuItems[14]],
   },
 ];
 
