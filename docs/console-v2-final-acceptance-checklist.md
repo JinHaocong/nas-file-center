@@ -13,7 +13,8 @@ approved NAS File Center mockup. User-selectable dark/system modes remain.
 
 - [x] Dark/sidebar, responsive shell, header and real-data Dashboard (PR #131).
 - [x] Native Plan ledger, pagination, buttons and empty states (PR #132).
-- [ ] Native administrator password dialog + toast provider (PR #133, CI pending).
+- [x] Native administrator password dialog + toast provider (PR #133).
+- [x] Official Radix Dialog + Lucide React dependency integration (this PR).
 - [ ] Core task, scan and dedupe views: responsive tables/cards/filters/actions.
 - [ ] Shared dialogs, select, checkbox, forms and destructive confirmation primitives.
 - [ ] Organizer, workflow editor, rename/file tools, settings and remaining pages.
