@@ -1,89 +1,14 @@
 import React from 'react';
-import { Layout, Menu } from 'antd';
-import type { MenuProps } from 'antd';
 import { useLocation, useNavigate } from 'react-router-dom';
-import {
-  DashboardOutlined,
-  FolderOpenOutlined,
-  ScanOutlined,
-  BranchesOutlined,
-  DiffOutlined,
-  EditOutlined,
-  AppstoreOutlined,
-  FolderViewOutlined,
-  ScheduleOutlined,
-  ThunderboltOutlined,
-  AuditOutlined,
-  SettingOutlined,
-  HddOutlined,
-  SafetyCertificateOutlined,
-  DeploymentUnitOutlined,
-  FileImageOutlined,
-  FileSearchOutlined,
-} from '@ant-design/icons';
+import { ConsoleIcon } from './ui/ConsoleIcon';
+import { consoleNavGroups } from './layout/navItems';
 
-const { Sider } = Layout;
 interface Props {
   collapsed: boolean;
   onCollapse: (collapsed: boolean) => void;
   embedded?: boolean;
   onNavigate?: () => void;
 }
-
-const leafMenuItems: NonNullable<MenuProps['items']> = [
-  { key: '/dashboard', icon: <DashboardOutlined />, label: '系统概览' },
-  { key: '/indexes', icon: <FolderOpenOutlined />, label: '文件索引' },
-  { key: '/scans', icon: <ScanOutlined />, label: '扫描去重' },
-  { key: '/path-match', icon: <BranchesOutlined />, label: '路径匹配' },
-  { key: '/directory-diff', icon: <DiffOutlined />, label: '双目录差异' },
-  { key: '/rename', icon: <EditOutlined />, label: '批量重命名' },
-  { key: '/batch', icon: <AppstoreOutlined />, label: '批量处理' },
-  { key: '/organizer', icon: <FolderViewOutlined />, label: 'Organizer 整理' },
-  { key: '/workflows', icon: <DeploymentUnitOutlined />, label: '工作流中心' },
-  { key: '/schedules', icon: <ScheduleOutlined />, label: '计划任务' },
-  { key: '/plans', icon: <ScheduleOutlined />, label: '执行计划' },
-  { key: '/quarantine', icon: <SafetyCertificateOutlined />, label: '文件隔离区' },
-  { key: '/tasks', icon: <ThunderboltOutlined />, label: '任务中心' },
-  { key: '/audit', icon: <AuditOutlined />, label: '审计日志' },
-  { key: '/settings', icon: <SettingOutlined />, label: '系统设置' },
-  { key: '/media', icon: <FileImageOutlined />, label: '媒体完整性' },
-  { key: '/filename-audit', icon: <FileSearchOutlined />, label: '文件名巡检' },
-];
-
-const groupLabel = (label: string) => <span className="nfc-nav-group-label">{label}</span>;
-
-const groupedMenuItems: MenuProps['items'] = [
-  {
-    type: 'group',
-    label: groupLabel('概览'),
-    children: [leafMenuItems[0]],
-  },
-  {
-    type: 'group',
-    label: groupLabel('数据与扫描'),
-    children: [leafMenuItems[1], leafMenuItems[2], leafMenuItems[15]],
-  },
-  {
-    type: 'group',
-    label: groupLabel('文件工具'),
-    children: [leafMenuItems[3], leafMenuItems[4], leafMenuItems[5], leafMenuItems[6], leafMenuItems[7], leafMenuItems[16]],
-  },
-  {
-    type: 'group',
-    label: groupLabel('自动化'),
-    children: [leafMenuItems[8], leafMenuItems[9]],
-  },
-  {
-    type: 'group',
-    label: groupLabel('安全与运行'),
-    children: [leafMenuItems[10], leafMenuItems[11], leafMenuItems[12], leafMenuItems[13]],
-  },
-  {
-    type: 'group',
-    label: groupLabel('系统'),
-    children: [leafMenuItems[14]],
-  },
-];
 
 export const Sidebar: React.FC<Props> = ({
   collapsed,
@@ -93,10 +18,8 @@ export const Sidebar: React.FC<Props> = ({
 }) => {
   const location = useLocation();
   const navigate = useNavigate();
-
+  const compact = collapsed && !embedded;
   const selectedKey = '/' + location.pathname.split('/')[1];
-  const menuItems = collapsed && !embedded ? leafMenuItems : groupedMenuItems;
-
   const go = (path: string) => {
     navigate(path);
     onNavigate?.();
@@ -106,50 +29,67 @@ export const Sidebar: React.FC<Props> = ({
     <>
       <button
         type="button"
-        className={collapsed && !embedded ? 'nfc-brand nfc-brand-collapsed' : 'nfc-brand'}
+        className="nfc-v2-brand"
         onClick={() => go('/dashboard')}
-        aria-label="返回系统概览"
+        title={compact ? 'NAS File Center — 返回仪表盘' : undefined}
+        aria-label="NAS File Center — 返回仪表盘"
       >
-        <span className="nfc-brand-mark" aria-hidden="true">
-          <HddOutlined />
-        </span>
-        {(!collapsed || embedded) && (
-          <span className="nfc-brand-copy">
-            <span className="nfc-brand-title">NAS File Center</span>
-            <span className="nfc-sidebar-meta">
-              <span>CONTROL PLANE</span>
-              <span className="nfc-sidebar-meta-separator" aria-hidden="true">/</span>
-              <span>v0.4.7</span>
-            </span>
+        <span className="nfc-v2-brand-icon"><ConsoleIcon name="hard-drive" size={22} /></span>
+        {!compact && (
+          <span className="nfc-v2-brand-copy">
+            <strong>NAS File Center</strong>
+            <span>SECURE FILE OPERATIONS</span>
           </span>
         )}
       </button>
 
-      <Menu
-        mode="inline"
-        selectedKeys={[selectedKey || '/dashboard']}
-        items={menuItems}
-        onClick={({ key }) => go(key)}
-        className="nfc-sidebar-menu"
-      />
+      <nav className="nfc-v2-nav" aria-label="主导航">
+        {consoleNavGroups.map(group => (
+          <section className="nfc-v2-nav-group" key={group.label} aria-label={group.label}>
+            {!compact && <h2 className="nfc-v2-nav-group-title">{group.label}</h2>}
+            {group.items.map(item => (
+              <button
+                type="button"
+                key={item.path}
+                title={compact ? item.label : undefined}
+                aria-label={item.label}
+                aria-current={selectedKey === item.path ? 'page' : undefined}
+                className={'nfc-v2-nav-item' + (selectedKey === item.path ? ' is-active' : '')}
+                onClick={() => go(item.path)}
+              >
+                <ConsoleIcon name={item.icon} size={19} />
+                {!compact && <span>{item.label}</span>}
+                {!compact && selectedKey === item.path &&
+                  <ConsoleIcon className="nfc-v2-nav-current" name="chevron-right" size={15} />}
+              </button>
+            ))}
+          </section>
+        ))}
+      </nav>
+      <div className="nfc-v2-sidebar-footer">
+        <span className="nfc-v2-sidebar-footer-icon"><ConsoleIcon name="shield-check" size={17} /></span>
+        {!compact && (
+          <span><strong>安全操作优先</strong><small>Preview → Plan → Execute</small></span>
+        )}
+      </div>
+      {!embedded && (
+        <button
+          className="nfc-v2-sidebar-collapse"
+          type="button"
+          aria-label={compact ? '展开侧边栏' : '收起侧边栏'}
+          title={compact ? '展开侧边栏' : '收起侧边栏'}
+          onClick={() => onCollapse(!collapsed)}
+        >
+          <ConsoleIcon name={compact ? 'chevron-right' : 'chevron-down'} size={16} />
+        </button>
+      )}
     </>
   );
 
-  if (embedded) {
-    return <nav className="nfc-mobile-sidebar" aria-label="主导航">{navigation}</nav>;
-  }
-
+  if (embedded) return <div className="nfc-v2-sidebar nfc-v2-sidebar-mobile">{navigation}</div>;
   return (
-    <Sider
-      collapsible
-      trigger={null}
-      collapsed={collapsed}
-      onCollapse={onCollapse}
-      width={232}
-      theme="light"
-      className="nfc-sidebar"
-    >
+    <aside className={'nfc-v2-sidebar' + (compact ? ' is-collapsed' : '')}>
       {navigation}
-    </Sider>
+    </aside>
   );
 };
