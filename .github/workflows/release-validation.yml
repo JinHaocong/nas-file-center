@@ -31,12 +31,16 @@ jobs:
       - name: Checkout exact candidate
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
       - name: Record candidate identity
         shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${EXPECTED_SHA}"
           git rev-parse HEAD
           git status --short
           git diff --check
@@ -90,6 +94,8 @@ jobs:
     steps:
       - name: Checkout exact candidate
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -98,8 +104,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          TAG="kerwinjhc/nas-file-center:0.4.7-rc-${GITHUB_SHA::7}"
-          echo "candidate_tag=${TAG}" | tee docker-evidence.txt
+          CANDIDATE_SHA="$(git rev-parse HEAD)"
+          TAG="kerwinjhc/nas-file-center:0.4.7-rc-${CANDIDATE_SHA::7}"
+          echo "candidate_sha=${CANDIDATE_SHA}" | tee docker-evidence.txt
+          echo "candidate_tag=${TAG}" | tee -a docker-evidence.txt
           docker buildx build \
             --platform linux/amd64 \
             --load \
@@ -115,7 +123,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: release-v047-docker-${{ github.sha }}
+          name: release-v047-docker-${{ github.event.pull_request.head.sha || github.sha }}
           retention-days: 14
           path: |
             docker-build.log
