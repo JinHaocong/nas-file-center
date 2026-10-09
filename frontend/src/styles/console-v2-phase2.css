@@ -1,0 +1,146 @@
+/* Console v2 migration / Phase 2 — native operation primitives + Plans ledger.
+   Every rule scoped to the console shell; old Ant widgets remain safe for now. */
+.nfc-v2-shell .nfc-console-button {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  white-space: nowrap;
+  flex: 0 0 auto;
+  height: 39px;
+  padding: 0 14px;
+  border-radius: 10px;
+  border: 1px solid var(--v2-line);
+  color: var(--v2-text);
+  background: var(--v2-paper);
+  box-shadow: 0 1px 2px rgba(30, 55, 84, .025);
+  font-size: 12px;
+  font-weight: 640;
+  cursor: pointer;
+  transition: background .15s ease, border-color .15s ease, color .15s ease;
+}
+.nfc-v2-shell .nfc-console-button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--v2-indigo) 34%, var(--v2-line));
+  background: var(--v2-indigo-soft);
+}
+.nfc-v2-shell .nfc-console-button:disabled { opacity: .48; cursor: not-allowed; }
+.nfc-v2-shell .nfc-console-button-sm { height: 32px; padding: 0 10px; border-radius: 8px; font-size: 11.5px; }
+.nfc-v2-shell .nfc-console-button-ghost { background: transparent; border-color: transparent; box-shadow: none; color: var(--v2-indigo); }
+.nfc-v2-shell .nfc-console-button-primary { color: white; background: #2878ef; border-color: #2878ef; }
+.nfc-v2-shell .nfc-console-button-primary:hover:not(:disabled) { color: white; background: #236bda; }
+.nfc-v2-shell .nfc-console-button-danger { color: #b72d49; background: #fff5f5; border-color: #f5ccd3; }
+.nfc-v2-shell .nfc-console-button-danger:hover:not(:disabled) { color: #9f253e; background: #ffe9ed; }
+.nfc-console-spinner { width: 15px; height: 15px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: nfc-console-spin .7s linear infinite; }
+@keyframes nfc-console-spin { to { transform: rotate(360deg); } }
+
+.nfc-v2-shell .nfc-console-empty {
+  min-height: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 18px;
+  text-align: center;
+  color: var(--v2-muted);
+}
+.nfc-v2-shell .nfc-console-empty-icon {
+  width: 48px; height: 48px;
+  display: grid; place-items: center;
+  border-radius: 14px;
+  border: 1px solid var(--v2-line);
+  background: var(--v2-indigo-soft);
+  color: var(--v2-indigo);
+}
+.nfc-v2-shell .nfc-console-empty strong { font-size: 13px; color: var(--v2-text); }
+.nfc-v2-shell .nfc-console-empty p { margin: 0; font-size: 12px; max-width: 42ch; line-height: 1.6; }
+
+.nfc-v2-shell .nfc-console-pagination {
+  min-height: 68px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 13px 18px;
+  border-top: 1px solid var(--v2-line);
+  background: var(--v2-paper);
+  color: var(--v2-muted);
+  font-size: 11.5px;
+}
+.nfc-v2-shell .nfc-console-page-summary { font-variant-numeric: tabular-nums; }
+.nfc-v2-shell .nfc-console-page-buttons { display: inline-flex; align-items: center; gap: 10px; color: var(--v2-text); font-variant-numeric: tabular-nums; }
+.nfc-v2-shell .nfc-console-page-buttons button {
+  width: 32px; height: 32px;
+  display: grid; place-items: center;
+  background: var(--v2-paper);
+  border: 1px solid var(--v2-line);
+  border-radius: 8px;
+  color: var(--v2-muted);
+  cursor: pointer;
+}
+.nfc-v2-shell .nfc-console-page-buttons button:disabled { opacity: .35; cursor: not-allowed; }
+.nfc-v2-shell .nfc-console-page-buttons button:hover:not(:disabled) { border-color: var(--v2-indigo); color: var(--v2-indigo); }
+.nfc-console-page-prev { transform: rotate(180deg); }
+.nfc-v2-shell .nfc-console-page-size { display: inline-flex; align-items: center; gap: 9px; white-space: nowrap; }
+.nfc-v2-shell .nfc-console-page-size select {
+  min-width: 89px; height: 33px;
+  padding: 0 7px;
+  border-radius: 8px;
+  border: 1px solid var(--v2-line);
+  background: var(--v2-paper);
+  color: var(--v2-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.nfc-v2-shell .nfc-v2-plans-page { max-width: min(100%, 1690px) !important; }
+.nfc-v2-plans-page > .nfc-page-header { margin-bottom: 22px !important; }
+.nfc-v2-shell .nfc-v2-plans-page .nfc-data-panel-body {
+  padding: 0 !important;
+  background: var(--v2-paper);
+  border: 1px solid var(--v2-line);
+  border-radius: 13px;
+  box-shadow: var(--v2-shadow);
+  overflow: hidden;
+}
+.nfc-v2-shell .nfc-v2-plans-page .nfc-data-panel-header { padding: 12px 1px 15px; }
+.nfc-v2-shell .nfc-v2-plans-page .nfc-data-panel-title { color: var(--v2-text); font-size: 15px; }
+.nfc-v2-shell .nfc-v2-plans-page .nfc-data-panel-description { color: var(--v2-muted); }
+.nfc-v2-plan-list-state { padding: 20px; color: var(--v2-muted); text-align: center; }
+
+.nfc-v2-plan-table-scroll { width: 100%; max-width: 100%; overflow-x: auto; }
+.nfc-v2-shell .nfc-v2-plan-table {
+  width: 100%;
+  min-width: 860px;
+  border-collapse: collapse;
+  font-size: 12px;
+  text-align: left;
+}
+.nfc-v2-plan-table th { padding: 13px 17px; background: var(--v2-canvas); color: var(--v2-muted); border-bottom: 1px solid var(--v2-line); font-weight: 620; font-size: 11px; white-space: nowrap; }
+.nfc-v2-plan-table td { padding: 15px 17px; border-top: 1px solid var(--v2-line); color: var(--v2-text); }
+.nfc-v2-plan-table tbody tr:first-child td { border-top: 0; }
+.nfc-v2-plan-table tbody tr:hover { background: color-mix(in srgb, var(--v2-indigo-soft) 50%, var(--v2-paper)); }
+.nfc-v2-shell .nfc-v2-plan-name { border: 0; padding: 0; display: inline-flex; align-items: center; gap: 9px; max-width: 300px; text-align: left; color: var(--v2-text); background: transparent; font-weight: 660; font-size: 12px; cursor: pointer; }
+.nfc-v2-shell .nfc-v2-plan-name svg { flex: 0 0 auto; color: var(--v2-indigo); }
+.nfc-v2-shell .nfc-v2-plan-name:hover { color: var(--v2-indigo); }
+.nfc-v2-plan-id { display: block; margin: 5px 0 0 27px; color: var(--v2-subtle); font-size: 10px; }
+.nfc-v2-plan-number { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.nfc-v2-plan-date { color: var(--v2-muted) !important; white-space: nowrap; font-size: 11px; }
+.nfc-v2-plans-page .nfc-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; white-space: nowrap; }
+.nfc-v2-plans-page .nfc-status-badge { white-space: nowrap; }
+
+@media (max-width: 767px) {
+  .nfc-v2-shell .nfc-console-pagination { padding: 12px; justify-content: center; }
+  .nfc-v2-shell .nfc-console-page-summary { width: 100%; text-align: center; }
+  .nfc-v2-plans-page .nfc-mobile-record-list { display: grid; gap: 11px; padding: 12px; }
+  .nfc-v2-plans-page .nfc-plan-mobile-card { padding: 15px; border: 1px solid var(--v2-line); border-radius: 11px; background: var(--v2-paper); }
+  .nfc-v2-plans-page .nfc-mobile-record-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
+  .nfc-v2-plans-page .nfc-page-actions { width: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nfc-console-spinner { animation: none; border-right-color: currentColor; }
+  .nfc-console-button { transition: none !important; }
+}
