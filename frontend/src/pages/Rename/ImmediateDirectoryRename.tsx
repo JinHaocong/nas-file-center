@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { Alert, Button, Empty, Form, Input, Radio, Table, message } from 'antd';
 import { ArrowRightOutlined, EyeOutlined, ScheduleOutlined } from '@ant-design/icons';
 import { useMutation } from '@tanstack/react-query';
@@ -30,10 +30,17 @@ export const ImmediateDirectoryRename: React.FC = () => {
   const [replaceTarget, setReplaceTarget] = useState<ReplaceTarget>('name');
   const [addPosition, setAddPosition] = useState<AddPosition>('prefix');
   const [proposals, setProposals] = useState<RenameProposal[] | null>(null);
+  // Reject late Preview responses after a rule/path change.
+  const activePreviewKey = useRef<string | null>(null);
+  const clearPreview = () => {
+    activePreviewKey.current = null;
+    setProposals(null);
+  };
 
   const previewMutation = useMutation({
     mutationFn: batchApi.previewImmediateDirectoryRename,
-    onSuccess: (response) => {
+    onSuccess: (response, variables) => {
+      if (JSON.stringify(variables) !== activePreviewKey.current) return;
       setProposals(response.items);
       const conflicts = response.items.filter((item) => item.conflict).length;
       if (conflicts) {
@@ -42,8 +49,9 @@ export const ImmediateDirectoryRename: React.FC = () => {
         message.success(`预览完成，${response.count} 个目录需要改名`);
       }
     },
-    onError: (error: any) => {
-      setProposals(null);
+    onError: (error: any, variables) => {
+      if (JSON.stringify(variables) !== activePreviewKey.current) return;
+      clearPreview();
       message.error(error.message || '目录重命名预览失败');
     },
   });
@@ -59,15 +67,15 @@ export const ImmediateDirectoryRename: React.FC = () => {
 
   const changeModule = (next: Module) => {
     setModule(next);
-    setProposals(null);
+    clearPreview();
   };
   const changeReplaceTarget = (next: ReplaceTarget) => {
     setReplaceTarget(next);
-    setProposals(null);
+    clearPreview();
   };
   const changeAddPosition = (next: AddPosition) => {
     setAddPosition(next);
-    setProposals(null);
+    clearPreview();
   };
 
   const handlePreview = async () => {
@@ -86,8 +94,10 @@ export const ImmediateDirectoryRename: React.FC = () => {
       const mode = module === 'replace'
         ? (replaceTarget === 'name' ? 'replace_name' : 'replace_suffix')
         : (addPosition === 'prefix' ? 'add_prefix' : 'add_suffix');
-      setProposals(null);
-      previewMutation.mutate({ parent: values.parent, mode, find, value });
+      const payload = { parent: values.parent, mode, find, value };
+      clearPreview();
+      activePreviewKey.current = JSON.stringify(payload);
+      previewMutation.mutate(payload);
     } catch {
       // Form handles invalid input.
     }
@@ -150,7 +160,7 @@ export const ImmediateDirectoryRename: React.FC = () => {
         <Form<DirectoryRenameForm>
           form={form}
           layout="vertical"
-          onValuesChange={() => setProposals(null)}
+          onValuesChange={clearPreview}
         >
           <Form.Item
             name="parent"
