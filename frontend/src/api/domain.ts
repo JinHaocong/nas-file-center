@@ -193,6 +193,44 @@ export const plansApi = {
     api.get<OperationJournalListResponse>(`/api/plans/${id}/operation-journal?page=${page}&page_size=${pageSize}`),
 };
 
+export type DirectoryDiffStatus =
+  | 'only_a' | 'only_b' | 'type_mismatch' | 'size_different'
+  | 'same_size_unverified' | 'both_directories';
+
+export interface DirectoryDiffRow {
+  relative_path: string;
+  kind_a: 'file' | 'directory' | null;
+  kind_b: 'file' | 'directory' | null;
+  size_a: number | null;
+  size_b: number | null;
+  status: DirectoryDiffStatus;
+  verification?: 'content_same' | 'content_different';
+}
+
+export interface DirectoryDiffResponse {
+  root_a: string;
+  root_b: string;
+  entries_a: number;
+  entries_b: number;
+  skipped_symlinks_a: number;
+  skipped_symlinks_b: number;
+  counts: Partial<Record<DirectoryDiffStatus, number>>;
+  total: number;
+  items: DirectoryDiffRow[];
+}
+
+export const directoryDiffApi = {
+  preview: (payload: { root_a: string; root_b: string }) =>
+    api.post<DirectoryDiffResponse>('/api/directories/compare/preview', payload),
+  verify: (payload: { root_a: string; root_b: string; relative_path: string }) =>
+    api.post<{
+      relative_path: string;
+      sha256_a: string;
+      sha256_b: string;
+      same_content: boolean;
+    }>('/api/directories/compare/verify', payload),
+};
+
 export const batchApi = {
   previewImmediateDirectoryRename: (payload: {
     parent: string;
