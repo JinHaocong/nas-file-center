@@ -95,6 +95,8 @@ export const DirectoryDiffPage: React.FC = () => {
     onSuccess: (data, input) => {
       if (JSON.stringify(input) !== activePreviewKey.current) return;
       setResult(data);
+      // Later SHA256 calls use the canonical roots returned by the server.
+      activePreviewKey.current = JSON.stringify({ root_a: data.root_a, root_b: data.root_b });
       message.success(`只读对比完成，列出 ${data.total} 个路径`);
     },
     onError: (error: any, input) => {
