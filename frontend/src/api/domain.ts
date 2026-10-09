@@ -194,6 +194,15 @@ export const plansApi = {
 };
 
 export const batchApi = {
+  previewImmediateDirectoryRename: (payload: {
+    parent: string;
+    mode: 'replace_name' | 'replace_suffix' | 'add_prefix' | 'add_suffix';
+    find?: string;
+    value?: string;
+  }) => api.post<{ items: RenameProposal[]; count: number }>(
+    '/api/rename/directories/preview',
+    payload,
+  ),
   previewRename: (payload: {
     paths: string[];
     regex_pattern?: string | null;
