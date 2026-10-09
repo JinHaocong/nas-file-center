@@ -13,7 +13,8 @@ describe('v0.4.4 cohesion invariants carried into the v0.4.7 control plane', () 
     assert.match(header, /nfc-header-command-cluster/);
     assert.match(header, /SafeModeBadge/);
     assert.match(header, /WorkerStatusBadge/);
-    assert.doesNotMatch(header, /nfc-header-workspace|resolveWorkspaceContext|useLocation/);
+    assert.doesNotMatch(header, /nfc-header-workspace|resolveWorkspaceContext/);
+    assert.match(header, /navLabel\(location.pathname\)/);
     assert.match(pageHeader, /nfc-page-title/);
     assert.match(workspaceV2, /\.nfc-page-eyebrow\s*\{[\s\S]*display:\s*none/);
     assert.doesNotMatch(header, /nfc-header-brand-dot/);

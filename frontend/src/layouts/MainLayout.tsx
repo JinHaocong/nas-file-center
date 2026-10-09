@@ -1,13 +1,11 @@
 import React, { useState } from 'react';
-import { Layout, Spin } from 'antd';
 import { Outlet, Navigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Header } from '../components/Header';
 import { ResponsiveNav } from '../components/layout/ResponsiveNav';
 import { MobileDock } from '../components/layout/MobileDock';
+import { ConsoleIcon } from '../components/ui/ConsoleIcon';
 import { useResponsive } from '../hooks/useResponsive';
-
-const { Content } = Layout;
 
 export const MainLayout: React.FC = () => {
   const { isAuthenticated, loading } = useAuth();
@@ -18,18 +16,15 @@ export const MainLayout: React.FC = () => {
   if (loading) {
     return (
       <div className="nfc-session-loading">
-        <Spin size="large" />
+        <ConsoleIcon name="shield-check" size={28} />
         <span>正在验证 NAS 管理员会话...</span>
       </div>
     );
   }
-
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
-  }
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
 
   return (
-    <Layout className="nfc-app-shell">
+    <div className="nfc-app-shell nfc-v2-shell">
       <ResponsiveNav
         isMobile={isMobile}
         mobileOpen={mobileNavOpen}
@@ -37,18 +32,18 @@ export const MainLayout: React.FC = () => {
         collapsed={collapsed}
         onCollapse={setCollapsed}
       />
-      <Layout className="nfc-app-main">
+      <div className="nfc-app-main nfc-v2-main">
         <Header
           collapsed={collapsed}
           onToggle={() => setCollapsed(!collapsed)}
           isMobile={isMobile}
           onOpenNavigation={() => setMobileNavOpen(true)}
         />
-        <Content className="nfc-page-content">
+        <main className="nfc-page-content nfc-v2-page-content" id="main-content">
           <Outlet />
-        </Content>
+        </main>
         {isMobile && <MobileDock onMore={() => setMobileNavOpen(true)} />}
-      </Layout>
-    </Layout>
+      </div>
+    </div>
   );
 };

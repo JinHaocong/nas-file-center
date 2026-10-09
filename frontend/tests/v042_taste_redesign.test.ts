@@ -39,8 +39,9 @@ describe('v0.4.2 taste principles carried into the current control plane', () =>
     const header = read('src/components/Header.tsx');
     const shell = read('src/styles/shell.css');
     const workspaceV2 = read('src/styles/v056-right-workspace-v2.css');
-    assert.ok(sidebar.includes('nfc-sidebar-meta'));
-    assert.ok(sidebar.includes('CONTROL PLANE'));
+    assert.ok(sidebar.includes('nfc-v2-brand'));
+    assert.ok(sidebar.includes('consoleNavGroups'));
+    assert.doesNotMatch(sidebar, /from 'antd'/);
     assert.ok(shell.includes('.nfc-sidebar.nfc-sidebar'));
     assert.ok(header.includes('nfc-header-command-cluster'));
     assert.ok(header.includes('SafeModeBadge'));
