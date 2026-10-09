@@ -1,5 +1,6 @@
 import React from 'react';
 import { ConsoleIcon } from './ConsoleIcon';
+import { getPaginationState } from './paginationModel';
 
 interface Props {
   page: number;
@@ -12,10 +13,7 @@ interface Props {
 export const ConsolePagination: React.FC<Props> = ({
   page, pageSize, total, onChange, pageSizes = [10, 20, 50, 100],
 }) => {
-  const pages = Math.max(1, Math.ceil(Math.max(0, total) / pageSize));
-  const current = Math.max(1, Math.min(page, pages));
-  const start = total > 0 ? (current - 1) * pageSize + 1 : 0;
-  const end = Math.min(total, current * pageSize);
+  const { pages, current, start, end } = getPaginationState(page, pageSize, total);
   return (
     <nav className="nfc-console-pagination" aria-label="列表分页">
       <span className="nfc-console-page-summary">显示 {start}–{end} / 共 {total} 条</span>
