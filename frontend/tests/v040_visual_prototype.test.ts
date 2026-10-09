@@ -8,9 +8,10 @@ const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8'
 describe('v0.4.0 C2A visual prototype contract', () => {
   test('sidebar groups navigation by product domain instead of one flat menu', () => {
     const source = read('src/components/Sidebar.tsx');
-    assert.match(source, /type:\s*['"]group['"]/);
+    const nav = read('src/components/layout/navItems.ts');
+    assert.match(source, /consoleNavGroups/);
     for (const label of ['数据与扫描', '文件工具', '自动化', '安全与运行', '系统']) {
-      assert.match(source, new RegExp(label));
+      assert.match(nav, new RegExp(label));
     }
   });
 
@@ -32,8 +33,8 @@ describe('v0.4.0 C2A visual prototype contract', () => {
     assert.match(source, /最近一次扫描预计可释放/);
     assert.match(source, /navigate\(['"]\/scans['"]\)/);
     assert.match(source, /navigate\(['"]\/tasks['"]\)/);
-    assert.match(source, /navigate\(['"]\/indexes['"]\)/);
-    assert.match(source, /navigate\(['"]\/organizer['"]\)/);
+    assert.match(source, /directory-diff/);
+    assert.match(source, /filename-audit/);
   });
 
   test('mobile dashboard renders activity as cards instead of squeezing desktop tables', () => {
