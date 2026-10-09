@@ -1,21 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import {
-  Alert,
-  Button,
-  Empty,
-  Pagination,
-  Select,
-  Table,
-  Tooltip,
-} from 'antd';
-import { EyeOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import dayjs from 'dayjs';
 import { tasksApi } from '../../api/tasks';
 import { useTitle } from '../../hooks/useTitle';
 import { formatDateTime, formatElapsed } from '../../utils/format';
-import { TaskItem, TaskStatus } from '../../types/task';
+import type { TaskItem } from '../../types/task';
 import { WorkerStatusCard } from '../../components/tasks/WorkerStatusCard';
 import { TaskProgress } from '../../components/tasks/TaskProgress';
 import { TaskDetailDrawer } from '../../components/tasks/TaskDetailDrawer';
@@ -26,6 +16,11 @@ import { DataPanel } from '../../components/ui/DataPanel';
 import { ActionBar } from '../../components/ui/ActionBar';
 import { ResponsiveDataView } from '../../components/ui/ResponsiveDataView';
 import { StatusBadge } from '../../components/ui/StatusBadge';
+import { ConsoleButton } from '../../components/ui/ConsoleButton';
+import { ConsolePagination } from '../../components/ui/ConsolePagination';
+import { ConsoleEmpty } from '../../components/ui/ConsoleEmpty';
+import { ConsoleSelect } from '../../components/ui/ConsoleSelect';
+import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
 
 const STATUS_OPTIONS = [
   { label: '全部状态', value: 'all' },
@@ -52,8 +47,8 @@ export const TasksPage: React.FC = () => {
 
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
-  const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [jobTypeFilter, setJobTypeFilter] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [jobTypeFilter, setJobTypeFilter] = useState('all');
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
   const [currentTime, setCurrentTime] = useState<dayjs.Dayjs>(() => dayjs());
@@ -113,180 +108,43 @@ export const TasksPage: React.FC = () => {
     setPage(1);
   };
 
+  const changePage = (nextPage: number, nextSize: number) => {
+    if (nextSize !== pageSize) {
+      setPageSize(nextSize);
+      setPage(1);
+    } else {
+      setPage(nextPage);
+    }
+  };
+
   const handleDeleted = (taskId: number) => {
     if (page > 1 && data?.items?.length === 1) {
       setPage((prev) => Math.max(1, prev - 1));
     }
     if (selectedTaskId === taskId) {
-      setSelectedTaskId(null);
+      closeTaskDetail();
     }
   };
 
   const isFiltered = statusFilter !== 'all' || jobTypeFilter !== 'all';
-  const items = data?.items || [];
+  const items: TaskItem[] = isError ? [] : data?.items || [];
+  const noItemsTitle = isFiltered ? '没有匹配的任务' : '暂无任务记录';
+  const noItemsDescription = isFiltered
+    ? '当前筛选条件没有找到记录，请尝试切换状态或类型。'
+    : '扫描、索引或执行计划生成的任务会显示在这里。';
 
-  const columns = [
-    {
-      title: '任务 ID',
-      dataIndex: 'id',
-      key: 'id',
-      width: 88,
-      render: (id: number) => (
-        <button type="button" className="nfc-table-link nfc-mono" onClick={() => setSelectedTaskId(id)}>
-          #{id}
-        </button>
-      ),
-    },
-    {
-      title: '任务类型',
-      dataIndex: 'job_type',
-      key: 'job_type',
-      width: 138,
-      render: (type: string) => <span className="nfc-kind-badge">{type}</span>,
-    },
-    {
-      title: '状态',
-      dataIndex: 'status',
-      key: 'status',
-      width: 118,
-      render: (status: TaskStatus) => <StatusBadge status={status} />,
-    },
-    {
-      title: '进度',
-      key: 'progress',
-      width: 230,
-      render: (_: unknown, record: TaskItem) => (
-        <TaskProgress
-          progress={record.progress}
-          status={record.status}
-          startedAt={record.started_at}
-          now={currentTime}
-        />
-      ),
-    },
-    {
-      title: '创建时间',
-      dataIndex: 'created_at',
-      key: 'created_at',
-      width: 158,
-      render: (val: string | null) => <span className="nfc-table-meta">{formatDateTime(val)}</span>,
-    },
-    {
-      title: '执行耗时',
-      key: 'elapsed',
-      width: 108,
-      render: (_: unknown, record: TaskItem) => (
-        <span className="nfc-table-meta">{formatElapsed(record.started_at, record.finished_at, currentTime)}</span>
-      ),
-    },
-    {
-      title: '错误',
-      key: 'error',
-      width: 190,
-      render: (_: unknown, record: TaskItem) => {
-        if (!record.error && !record.error_code) return <span className="nfc-table-muted">—</span>;
-        const fullErr = record.error || record.error_code || '';
-        const displayErr = fullErr.length > 28 ? `${fullErr.slice(0, 28)}…` : fullErr;
-        return (
-          <Tooltip title={fullErr}>
-            <span className="nfc-table-error">
-              {record.error_code ? `[${record.error_code}] ` : ''}
-              {displayErr}
-            </span>
-          </Tooltip>
-        );
-      },
-    },
-    {
-      title: '操作',
-      key: 'action',
-      width: 142,
-      fixed: 'right' as const,
-      render: (_: unknown, record: TaskItem) => (
-        <div className="nfc-row-actions">
-          <Button
-            size="small"
-            type="text"
-            icon={<EyeOutlined />}
-            onClick={() => setSelectedTaskId(record.id)}
-          >
-            详情
-          </Button>
-          <TaskDeleteButton
-            task={record}
-            size="small"
-            type="text"
-            onSuccess={() => handleDeleted(record.id)}
-          />
-        </div>
-      ),
-    },
-  ];
-
-  const mobileCards = (
-    <div className="nfc-mobile-record-list">
-      {items.length === 0 ? (
-        <Empty
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description={isFiltered ? '无匹配任务 (No matching tasks)' : '暂无任务 (No tasks yet)'}
-        />
-      ) : (
-        items.map((task) => (
-          <article className="nfc-task-mobile-card" key={task.id}>
-            <div className="nfc-mobile-record-heading">
-              <div>
-                <button
-                  type="button"
-                  className="nfc-mobile-record-title nfc-mono"
-                  onClick={() => setSelectedTaskId(task.id)}
-                >
-                  #{task.id}
-                </button>
-                <span className="nfc-kind-badge">{task.job_type}</span>
-              </div>
-              <StatusBadge status={task.status} />
-            </div>
-
-            <div className="nfc-mobile-record-progress">
-              <TaskProgress
-                progress={task.progress}
-                status={task.status}
-                startedAt={task.started_at}
-                now={currentTime}
-                showDetails
-              />
-            </div>
-
-            <div className="nfc-mobile-record-facts">
-              <span>创建 <b>{formatDateTime(task.created_at)}</b></span>
-              <span>耗时 <b>{formatElapsed(task.started_at, task.finished_at, currentTime)}</b></span>
-            </div>
-
-            {(task.error || task.error_code) && (
-              <div className="nfc-mobile-record-error">
-                {task.error_code ? `[${task.error_code}] ` : ''}
-                {task.error || task.error_code}
-              </div>
-            )}
-
-            <div className="nfc-mobile-record-actions">
-              <Button type="text" icon={<EyeOutlined />} onClick={() => setSelectedTaskId(task.id)}>
-                查看详情
-              </Button>
-              <TaskDeleteButton
-                task={task}
-                type="text"
-                onSuccess={() => handleDeleted(task.id)}
-              />
-            </div>
-          </article>
-        ))
-      )}
-    </div>
+  const pagination = !isError && !isLoading && (data?.total || 0) > 0 && (
+    <ConsolePagination
+      page={page}
+      pageSize={pageSize}
+      total={data?.total || 0}
+      pageSizes={[20, 50, 100, 200]}
+      onChange={changePage}
+    />
   );
 
   return (
-    <div className="nfc-operations-page nfc-tasks-page nfc-page-layout-ledger">
+    <div className="nfc-operations-page nfc-tasks-page nfc-page-layout-ledger nfc-v2-tasks-page">
       <PageHeader
         eyebrow="Operations"
         title="任务中心"
@@ -299,9 +157,11 @@ export const TasksPage: React.FC = () => {
                 setSelectedTaskId(null);
               }}
             />
-            <Button icon={<ReloadOutlined />} onClick={() => refetch()} loading={isFetching}>
-              刷新
-            </Button>
+            <ConsoleButton
+              loading={isFetching}
+              leadingIcon={<ConsoleIcon name="refresh" size={16} />}
+              onClick={() => refetch()}
+            >刷新</ConsoleButton>
           </ActionBar>
         }
       />
@@ -309,96 +169,142 @@ export const TasksPage: React.FC = () => {
       <WorkerStatusCard />
 
       {isError && (
-        <Alert
-          type="error"
-          showIcon
-          className="nfc-page-alert"
-          message="任务列表加载失败"
-          description={
-            typeof error === 'object' && error && 'message' in error
-              ? String(error.message)
-              : '无法连接到任务服务，请检查 NAS 服务端状态'
-          }
-        />
+        <div className="nfc-v2-task-alert nfc-page-alert" role="alert">
+          <ConsoleIcon name="x" size={19} />
+          <div>
+            <strong>任务列表加载失败</strong>
+            <p>{error instanceof Error ? error.message : '无法连接到任务服务，请检查 NAS 服务端状态'}</p>
+          </div>
+          <ConsoleButton size="sm" onClick={() => refetch()}>重试</ConsoleButton>
+        </div>
       )}
 
       <DataPanel
         title="任务队列"
-        description="按状态和任务类型筛选；正在运行的任务会保留实时进度与 ETA。"
-        action={<span className="nfc-panel-count">{data?.total ?? 0} tasks</span>}
+        description="按状态和类型筛选；运行中的任务会更新进度与 ETA，进度未知时不会显示虚构百分比。"
+        action={<span className="nfc-panel-count">{isError ? '—' : data?.total ?? 0} tasks</span>}
         className="nfc-panel-flush"
         variant="dense"
       >
-        <ActionBar className="nfc-filter-bar">
-          <label className="nfc-filter-control">
-            <span>状态</span>
-            <Select
-              value={statusFilter}
-              onChange={handleStatusFilterChange}
-              options={STATUS_OPTIONS}
-              popupMatchSelectWidth={false}
-            />
-          </label>
-          <label className="nfc-filter-control">
-            <span>任务类型</span>
-            <Select
-              value={jobTypeFilter}
-              onChange={handleJobTypeFilterChange}
-              options={JOB_TYPE_OPTIONS}
-              popupMatchSelectWidth={false}
-            />
-          </label>
+        <ActionBar className="nfc-filter-bar nfc-v2-task-filter-bar">
+          <ConsoleSelect id="nfc-task-status-filter" label="状态" value={statusFilter}
+            onChange={handleStatusFilterChange} options={STATUS_OPTIONS} />
+          <ConsoleSelect id="nfc-task-type-filter" label="任务类型" value={jobTypeFilter}
+            onChange={handleJobTypeFilterChange} options={JOB_TYPE_OPTIONS} />
+          {isFiltered && (
+            <ConsoleButton variant="ghost" size="sm" onClick={() => {
+              setStatusFilter('all');
+              setJobTypeFilter('all');
+              setPage(1);
+            }} leadingIcon={<ConsoleIcon name="x" size={15} />}>清除筛选</ConsoleButton>
+          )}
+          <span className="nfc-v2-task-filter-hint">
+            <ConsoleIcon name="activity" size={15} /> 活动任务自动更新
+          </span>
         </ActionBar>
 
-        <ResponsiveDataView
-          desktop={
-            <Table
-              dataSource={items}
-              columns={columns}
-              rowKey="id"
-              loading={isLoading}
-              scroll={{ x: 1160 }}
-              locale={{
-                emptyText: (
-                  <Empty
-                    image={Empty.PRESENTED_IMAGE_SIMPLE}
-                    description={isFiltered ? '无匹配任务 (No matching tasks)' : '暂无任务 (No tasks yet)'}
-                  />
-                ),
-              }}
-              pagination={{
-                current: page,
-                pageSize,
-                total: data?.total || 0,
-                showSizeChanger: true,
-                pageSizeOptions: ['20', '50', '100', '200'],
-                showTotal: (total) => `共 ${total} 条记录`,
-                onChange: (p, ps) => {
-                  setPage(p);
-                  setPageSize(ps);
-                },
-              }}
-            />
-          }
-          mobile={
-            <>
-              {mobileCards}
-              <div className="nfc-mobile-pagination">
-                <Pagination
-                  current={page}
-                  pageSize={pageSize}
-                  total={data?.total || 0}
-                  showSizeChanger
-                  pageSizeOptions={['20', '50', '100', '200']}
-                  onChange={(p, ps) => {
-                    setPage(p);
-                    setPageSize(ps);
-                  }}
-                />
+        {isError ? (
+          <ConsoleEmpty title="暂时无法显示任务" description="请先恢复任务服务连接，已有任务不会受到影响。" />
+        ) : isLoading ? (
+          <div className="nfc-v2-task-loading" role="status">正在加载任务列表…</div>
+        ) : items.length === 0 ? (
+          <ConsoleEmpty title={noItemsTitle} description={noItemsDescription} />
+        ) : (
+          <ResponsiveDataView
+            desktop={
+              <div className="nfc-v2-task-table-scroll">
+                <table className="nfc-v2-task-table">
+                  <thead><tr>
+                    <th scope="col">任务 ID</th>
+                    <th scope="col">任务类型</th>
+                    <th scope="col">状态</th>
+                    <th scope="col">执行进度</th>
+                    <th scope="col">创建时间</th>
+                    <th scope="col">执行耗时</th>
+                    <th scope="col">错误</th>
+                    <th scope="col">操作</th>
+                  </tr></thead>
+                  <tbody>{items.map(task => {
+                    const errorText = task.error || task.error_code || '';
+                    const clippedError = errorText.length > 28 ? errorText.slice(0, 28) + '…' : errorText;
+                    return (
+                      <tr key={task.id}>
+                        <td>
+                          <button type="button" className="nfc-table-link nfc-mono nfc-v2-task-id"
+                            onClick={() => setSelectedTaskId(task.id)}>
+                            #{task.id}
+                          </button>
+                        </td>
+                        <td><span className="nfc-kind-badge">{task.job_type}</span></td>
+                        <td><StatusBadge status={task.status} /></td>
+                        <td className="nfc-v2-task-progress-cell">
+                          <TaskProgress progress={task.progress} status={task.status}
+                            startedAt={task.started_at} now={currentTime} />
+                        </td>
+                        <td className="nfc-v2-task-date">{formatDateTime(task.created_at)}</td>
+                        <td className="nfc-v2-task-date">
+                          {formatElapsed(task.started_at, task.finished_at, currentTime)}
+                        </td>
+                        <td>
+                          {errorText ? (
+                            <span className="nfc-table-error nfc-v2-task-error" title={errorText}>
+                              {task.error_code ? '[' + task.error_code + '] ' : ''}{clippedError}
+                            </span>
+                          ) : <span className="nfc-table-muted">—</span>}
+                        </td>
+                        <td><div className="nfc-row-actions">
+                          <ConsoleButton size="sm" variant="ghost"
+                            leadingIcon={<ConsoleIcon name="search" size={15} />}
+                            onClick={() => setSelectedTaskId(task.id)}>详情</ConsoleButton>
+                          <TaskDeleteButton task={task} size="small" type="text"
+                            onSuccess={() => handleDeleted(task.id)} />
+                        </div></td>
+                      </tr>
+                    );
+                  })}</tbody>
+                </table>
               </div>
-            </>
-          }
-        />
+            }
+            mobile={
+              <div className="nfc-mobile-record-list">
+                {items.map(task => (
+                  <article className="nfc-task-mobile-card" key={task.id}>
+                    <div className="nfc-mobile-record-heading">
+                      <div>
+                        <button type="button" className="nfc-mobile-record-title nfc-mono"
+                          onClick={() => setSelectedTaskId(task.id)}>#{task.id}</button>
+                        <span className="nfc-kind-badge">{task.job_type}</span>
+                      </div>
+                      <StatusBadge status={task.status} />
+                    </div>
+                    <div className="nfc-mobile-record-progress">
+                      <TaskProgress progress={task.progress} status={task.status}
+                        startedAt={task.started_at} now={currentTime} showDetails />
+                    </div>
+                    <div className="nfc-mobile-record-facts">
+                      <span>创建 <b>{formatDateTime(task.created_at)}</b></span>
+                      <span>耗时 <b>{formatElapsed(task.started_at, task.finished_at, currentTime)}</b></span>
+                    </div>
+                    {(task.error || task.error_code) && (
+                      <div className="nfc-mobile-record-error">
+                        {task.error_code ? '[' + task.error_code + '] ' : ''}
+                        {task.error || task.error_code}
+                      </div>
+                    )}
+                    <div className="nfc-mobile-record-actions">
+                      <ConsoleButton size="sm" variant="ghost"
+                        leadingIcon={<ConsoleIcon name="search" size={15} />}
+                        onClick={() => setSelectedTaskId(task.id)}>查看详情</ConsoleButton>
+                      <TaskDeleteButton task={task} type="text"
+                        onSuccess={() => handleDeleted(task.id)} />
+                    </div>
+                  </article>
+                ))}
+              </div>
+            }
+          />
+        )}
+        {pagination}
       </DataPanel>
 
       <TaskDetailDrawer
