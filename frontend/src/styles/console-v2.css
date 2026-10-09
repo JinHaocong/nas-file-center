@@ -621,6 +621,25 @@
 }
 
 
+/* Radix Portal is rendered at the document root; use fallback tokens as needed. */
+.nfc-v2-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  background: rgba(11, 23, 41, .64);
+  backdrop-filter: blur(4px);
+}
+.nfc-v2-dialog[data-state='open'] {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  margin: 0;
+  transform: translate(-50%, -50%);
+  z-index: 1101;
+}
+.nfc-v2-dialog[data-state='closed'] { pointer-events: none; }
+.nfc-v2-dialog:focus-visible { outline: 3px solid #82b6ff; outline-offset: 2px; }
+
 /* Phase 2B — accessible native administrator dialog & feedback. */
 .nfc-v2-dialog {
   width: min(440px, calc(100vw - 28px));
