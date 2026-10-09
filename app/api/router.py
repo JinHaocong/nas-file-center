@@ -12,6 +12,7 @@ from app.auth.dependencies import get_current_user, require_admin_user
 from app.batch.rename import RenameRule
 from app.batch.directory_rename import preview_immediate_directory_renames
 from app.batch.file_rename import preview_immediate_file_renames
+from app.batch.filename_audit import audit_immediate_filenames
 from app.batch.directory_compare import compare_directories, verify_directory_pair
 from app.exceptions import PlanStaleError
 from app.filters.schema import FilterPreviewRequest, FilterPreviewResponse
@@ -447,6 +448,11 @@ class ImmediateDirectoryRenamePreviewRequest(BaseModel):
     mode: Literal["replace_name", "replace_suffix", "add_prefix", "add_suffix"]
     find: str = Field(default="", max_length=255)
     value: str = Field(default="", max_length=255)
+
+
+class FilenameAuditPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    parent: str = Field(min_length=1, max_length=4096)
 
 
 class ImmediateFileRenamePreviewRequest(ImmediateDirectoryRenamePreviewRequest):
@@ -1362,6 +1368,19 @@ def immediate_file_rename_preview(
             quarantine_root=request.app.state.settings.quarantine_root,
         )
         return {"items": items, "count": len(items)}
+    except (ValueError, OSError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/filenames/audit/preview")
+def filename_quality_audit_preview(request: Request, payload: FilenameAuditPreviewRequest):
+    """Inspect only immediate regular file names. Never changes filesystem data."""
+    try:
+        return audit_immediate_filenames(
+            payload.parent,
+            allowed_roots=request.app.state.settings.allowed_roots,
+            quarantine_root=request.app.state.settings.quarantine_root,
+        )
     except (ValueError, OSError) as exc:
         raise HTTPException(400, str(exc)) from exc
 
