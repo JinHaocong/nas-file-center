@@ -232,6 +232,16 @@ export const directoryDiffApi = {
 };
 
 export const batchApi = {
+  previewImmediateFileRename: (payload: {
+    parent: string;
+    mode: 'replace_name' | 'replace_suffix' | 'add_prefix' | 'add_suffix';
+    find?: string;
+    value?: string;
+    preserve_extension: boolean;
+  }) => api.post<{ items: RenameProposal[]; count: number }>(
+    '/api/rename/files/preview',
+    payload,
+  ),
   previewImmediateDirectoryRename: (payload: {
     parent: string;
     mode: 'replace_name' | 'replace_suffix' | 'add_prefix' | 'add_suffix';

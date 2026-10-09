@@ -8,6 +8,7 @@ import {
   Input,
   InputNumber,
   Segmented,
+  Select,
   Table,
   message,
 } from 'antd';
@@ -20,7 +21,9 @@ import { useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { batchApi, plansApi } from '../../api/domain';
 import { useTitle } from '../../hooks/useTitle';
+import { useResponsive } from '../../hooks/useResponsive';
 import { ImmediateDirectoryRename } from './ImmediateDirectoryRename';
+import { ImmediateFileRename } from './ImmediateFileRename';
 import { splitLines } from '../../utils/format';
 import { RenameProposal } from '../../types';
 import { DirectoryPicker } from '../../components/DirectoryPicker';
@@ -33,10 +36,11 @@ import { StatusBadge } from '../../components/ui/StatusBadge';
 
 export const RenamePage: React.FC = () => {
   useTitle('批量重命名');
+  const { isMobile } = useResponsive();
   const navigate = useNavigate();
   const [form] = Form.useForm();
   const [proposals, setProposals] = useState<RenameProposal[] | null>(null);
-  const [scope, setScope] = useState<'directories' | 'advanced'>('directories');
+  const [scope, setScope] = useState<'directories' | 'files' | 'advanced'>('directories');
 
   const previewMutation = useMutation({
     mutationFn: (payload: any) => batchApi.previewRename(payload),
@@ -154,17 +158,34 @@ export const RenamePage: React.FC = () => {
 
   return (
     <div className="nfc-operations-page nfc-rename-page nfc-page-layout-workbench">
-      <Segmented
-        value={scope}
-        onChange={(value) => setScope(value as 'directories' | 'advanced')}
-        options={[
-          { label: '一级目录批量重命名', value: 'directories' },
-          { label: '高级文件重命名（原功能）', value: 'advanced' },
-        ]}
-        style={{ marginBottom: 20 }}
-      />
+      {isMobile ? (
+        <Select
+          aria-label="重命名模式"
+          value={scope}
+          onChange={(value) => setScope(value as 'directories' | 'files' | 'advanced')}
+          options={[
+            { label: '一级目录批量重命名', value: 'directories' },
+            { label: '一级文件批量重命名', value: 'files' },
+            { label: '高级文件重命名（原功能）', value: 'advanced' },
+          ]}
+          style={{ width: '100%', marginBottom: 20 }}
+        />
+      ) : (
+        <Segmented
+          value={scope}
+          onChange={(value) => setScope(value as 'directories' | 'files' | 'advanced')}
+          options={[
+            { label: '一级目录批量重命名', value: 'directories' },
+            { label: '一级文件批量重命名', value: 'files' },
+            { label: '高级文件重命名（原功能）', value: 'advanced' },
+          ]}
+          style={{ marginBottom: 20 }}
+        />
+      )}
       {scope === 'directories' ? (
         <ImmediateDirectoryRename />
+      ) : scope === 'files' ? (
+        <ImmediateFileRename />
       ) : (
         <>
           <PageHeader
