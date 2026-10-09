@@ -193,6 +193,36 @@ export const plansApi = {
     api.get<OperationJournalListResponse>(`/api/plans/${id}/operation-journal?page=${page}&page_size=${pageSize}`),
 };
 
+export type FilenameIssue =
+  | 'edge_whitespace' | 'windows_trailing_dot_space'
+  | 'windows_invalid_character' | 'windows_reserved_device'
+  | 'invisible_or_control' | 'unicode_non_nfc'
+  | 'long_name' | 'repeated_extension' | 'suspicious_double_extension';
+
+export interface FilenameAuditRow {
+  name: string;
+  path: string;
+  issues: FilenameIssue[];
+  suggested_target: string | null;
+  suggestion_block_reason: string | null;
+}
+
+export interface FilenameAuditPreview {
+  parent: string;
+  scanned: number;
+  checked_regular_files: number;
+  ignored_entries: number;
+  issues_total: number;
+  counts: Partial<Record<FilenameIssue, number>>;
+  items: FilenameAuditRow[];
+  total: number;
+}
+
+export const filenameAuditApi = {
+  preview: (payload: { parent: string }) =>
+    api.post<FilenameAuditPreview>('/api/filenames/audit/preview', payload),
+};
+
 export type DirectoryDiffStatus =
   | 'only_a' | 'only_b' | 'type_mismatch' | 'size_different'
   | 'same_size_unverified' | 'both_directories';
