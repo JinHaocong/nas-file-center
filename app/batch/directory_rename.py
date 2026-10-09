@@ -94,6 +94,7 @@ def preview_immediate_directory_renames(
     candidates.sort(key=lambda p: p.name)
     results: list[dict] = []
     targets: set[Path] = set()
+    folded_target_names: set[str] = set()
     for source in candidates:
         updated_name = _rename_basename(source.name, mode=mode, find=find, value=value)
         if updated_name == source.name:
@@ -109,13 +110,14 @@ def preview_immediate_directory_renames(
             )
             if target.parent != safe_parent:
                 raise ValueError("Rename must stay in the selected directory")
-            if target in targets:
+            if target in targets or target.name.casefold() in folded_target_names:
                 raise ValueError("Multiple directories would receive the same name")
             if target.exists() or target.is_symlink():
                 raise ValueError("Target already exists")
             if not source.is_dir() or source.is_symlink():
                 raise ValueError("Source directory has changed")
             targets.add(target)
+            folded_target_names.add(target.name.casefold())
             results.append({
                 "source": str(source), "target": str(target),
                 "conflict": False, "conflict_reason": None,
