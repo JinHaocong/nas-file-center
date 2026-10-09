@@ -199,7 +199,7 @@ export const FilenameAuditPage: React.FC = () => {
               options={[
                 { value: 'all', label: '全部问题' },
                 { value: 'fixable', label: '可建议修复' },
-                ...Object.entries(labels).map(([value, label]) => ({ value, label })),
+                ...(Object.keys(labels) as FilenameIssue[]).map(value => ({ value, label: labels[value] })),
               ]} />
             <Button disabled={!visible.length} icon={<DownloadOutlined />}
               onClick={() => exportReport(visible)}>
