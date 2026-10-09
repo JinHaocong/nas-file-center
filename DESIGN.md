@@ -1,5 +1,7 @@
 # NAS File Center Design System
 
+> **Current visual authority (2026-10-09):** The user approved a dark-sidebar + light-workspace NAS File Center redesign and expressly authorized replacing Ant Design. New migration authority: [Console v2 Phase 1](docs/console-v2-phase1.md). Earlier clauses saying “Ant Design must remain” describe prior historical phases and are superseded for this approved UI track. Existing business safety/lifecycle contracts remain binding.
+
 > Product release authority: **v0.4.7**
 > Historical design baseline: v0.4.0 C0 FROZEN
 > Baseline: `main@08ce4046a556e7f3dec1d2de1a7d4ea37c610f7f`
