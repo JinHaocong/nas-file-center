@@ -127,7 +127,7 @@ def test_invalid_rules_rejected(tmp_path, mode, find, value):
         preview(parent, mode, find=find, value=value)
 
 
-@pytest.mark.parametrize("value", ["x/y", "x\\y", "\x00", "x" * 250])
+@pytest.mark.parametrize("value", ["x/y", "x\\y", "\x00", "x" * 251])
 def test_unsafe_output_is_conflict_not_mutation(tmp_path, value):
     parent = tmp_path / "files"
     parent.mkdir()
@@ -135,6 +135,20 @@ def test_unsafe_output_is_conflict_not_mutation(tmp_path, value):
     rows = preview(parent, "add_prefix", value=value)
     assert len(rows) == 1 and rows[0]["conflict"] is True
     assert (parent / "a.txt").exists()
+
+
+def test_maximum_length_filename_is_allowed_but_not_mutated(tmp_path):
+    parent = tmp_path / "files"
+    parent.mkdir()
+    original = parent / "a.txt"
+    original.write_text("x")
+    # 250-byte prefix plus 5-byte basename fits Linux NAME_MAX=255.
+    rows = preview(parent, "add_prefix", value="x" * 250)
+    assert len(rows) == 1
+    assert rows[0]["conflict"] is False
+    assert len(rows[0]["target"].encode("utf-8").split(b"/")[-1]) == 255
+    assert original.read_text() == "x"
+    assert not Path(rows[0]["target"]).exists()
 
 
 def test_rejects_overlong_rule_input(tmp_path):
