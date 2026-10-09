@@ -200,7 +200,7 @@ export const ImmediateFileRename: React.FC = () => {
                 type="info"
                 showIcon
                 message={replaceTarget === 'name'
-                  ? '名称替换会替换文件名中出现的全部完全匹配文本（区分大小写）'
+                  ? '名称替换只针对当前处理范围（默认不含最后一个扩展名）中完全匹配的文本，区分大小写'
                   : '末尾替换作用于当前处理范围的结尾：保留扩展名时为主名末尾，关闭时为整个文件名末尾'}
                 className="nfc-page-alert"
               />
@@ -224,8 +224,8 @@ export const ImmediateFileRename: React.FC = () => {
                   value={addPosition}
                   onChange={(event) => changeAddPosition(event.target.value as AddPosition)}
                 >
-                  <Radio value="prefix">文件名前新增（前缀）</Radio>
-                  <Radio value="suffix">文件名后新增（后缀）</Radio>
+                  <Radio value="prefix">文件主名前新增（前缀）</Radio>
+                  <Radio value="suffix">文件主名后新增（后缀）</Radio>
                 </Radio.Group>
               </Form.Item>
               <Form.Item
@@ -262,15 +262,15 @@ export const ImmediateFileRename: React.FC = () => {
           type="error"
           showIcon
           message="存在目标文件重名或不安全路径"
-          description="请修改规则并重新预览。已有目录不会被覆盖；全部安全后才允许生成计划。"
+          description="请修改规则并重新预览。已有文件或目录不会被覆盖；全部安全后才允许生成计划。"
           className="nfc-page-alert"
         />
       )}
 
       {proposals !== null && (
         <DataPanel
-          title="一级子文件改名预览"
-          description="仅显示名称会变化的一级子文件；无匹配项表示无需重命名。"
+          title="一级文件改名预览"
+          description="仅显示名称会变化的一级普通文件；无匹配项表示无需重命名。"
           action={<span className="nfc-panel-count">{proposals.length} 个文件</span>}
           className="nfc-panel-flush nfc-file-tool-result-panel"
           variant="dense"
