@@ -249,6 +249,33 @@
 .nfc-v2-breadcrumb strong { color: var(--v2-text); font-weight: 650; }
 .nfc-v2-header-divider { width: 1px; height: 22px; background: var(--v2-line); }
 .nfc-v2-header .nfc-header-status { display: flex; align-items: center; gap: 7px; }
+.nfc-v2-header .nfc-header-status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 29px;
+  padding: 3px 10px;
+  border: 1px solid var(--v2-line);
+  border-radius: 8px;
+  background: var(--v2-canvas);
+  color: var(--v2-muted);
+  white-space: nowrap;
+  font-size: 11.5px;
+  font-weight: 650;
+  line-height: 1.45;
+}
+.nfc-v2-header .nfc-header-status-badge.is-safe { background: #e9f8f1; color: #15805f; border-color: #d7f1e4; }
+.nfc-v2-header .nfc-header-status-badge.is-warning { background: #fff4e3; color: #a96b1b; border-color: #ffe5be; }
+.nfc-v2-header .nfc-header-status-badge.is-danger { background: #fff0f1; color: #bd304b; border-color: #ffdce1; }
+.nfc-v2-header .nfc-header-status-badge.is-processing { background: #eaf3ff; color: #2471de; border-color: #d5e5fd; }
+.nfc-v2-header .nfc-header-status-badge.is-idle { background: var(--v2-canvas); color: var(--v2-muted); border-color: var(--v2-line); }
+.nfc-v2-header .nfc-header-status-badge.is-loading { background: var(--v2-canvas); color: var(--v2-subtle); border-color: var(--v2-line); }
+[data-theme='dark'] .nfc-v2-header .nfc-header-status-badge.is-safe { background: #153c30; color: #86e5bd; border-color: #205842; }
+[data-theme='dark'] .nfc-v2-header .nfc-header-status-badge.is-warning { background: #40311e; color: #f3cd82; border-color: #634a2d; }
+[data-theme='dark'] .nfc-v2-header .nfc-header-status-badge.is-danger { background: #452530; color: #ffadb9; border-color: #673843; }
+[data-theme='dark'] .nfc-v2-header .nfc-header-status-badge.is-processing { background: #203c62; color: #a8ccff; border-color: #375b86; }
+
 .nfc-v2-header .nfc-header-status-badge.ant-tag { min-height: 29px; height: auto; line-height: 26px; padding: 1px 9px; border-radius: 8px !important; background: var(--v2-canvas) !important; border: 1px solid var(--v2-line) !important; color: var(--v2-muted); font-size: 11.5px; font-weight: 650; }
 .nfc-v2-header .nfc-header-status-badge.is-safe { color: #15805f !important; background: #e9f8f1 !important; border-color: #d7f1e4 !important; }
 .nfc-v2-header .nfc-header-status-badge.is-danger { color: #bd304b !important; background: #fff0f1 !important; border-color: #ffdce1 !important; }
