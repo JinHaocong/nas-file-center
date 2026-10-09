@@ -15,7 +15,16 @@ describe('v0.4.0 C6B overlay consistency contract', () => {
       'src/pages/Plans/OperationJournalDrawer.tsx',
     ]) {
       const source = read(path);
-      assert.match(source, /nfc-overlay-drawer/, path);
+      if (path.endsWith('/TaskDetailDrawer.tsx')) {
+        assert.match(source, /<ConsoleSheet/, path);
+        const sheet = read('src/components/ui/ConsoleSheet.tsx');
+        const styles = read('src/styles/console-v2-task-overlays.css');
+        assert.match(sheet, /nfc-overlay-drawer/);
+        assert.match(sheet, /<Dialog.Content/);
+        assert.match(styles, /\\.nfc-v2-sheet\\.nfc-overlay-drawer/);
+      } else {
+        assert.match(source, /nfc-overlay-drawer/, path);
+      }
     }
   });
 
