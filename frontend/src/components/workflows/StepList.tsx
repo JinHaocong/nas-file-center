@@ -111,7 +111,7 @@ export const StepList: React.FC<StepListProps> = ({ steps, mode, readOnly = fals
     const current = enabled.indexOf(document.activeElement as HTMLButtonElement);
     const target = key === 'Home' ? 0 : key === 'End' ? enabled.length - 1
       : key === 'ArrowDown' ? (current + 1) % enabled.length
-      : (current + enabled.length - 1) % enabled.length;
+      : current === -1 ? enabled.length - 1 : (current + enabled.length - 1) % enabled.length;
     enabled[target]?.focus();
   };
 
@@ -123,8 +123,6 @@ export const StepList: React.FC<StepListProps> = ({ steps, mode, readOnly = fals
     } else if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
       event.preventDefault();
       focusMenuItem(event.key);
-    } else if (event.key === 'Tab') {
-      setMenuOpen(false);
     }
   };
 
@@ -164,7 +162,11 @@ export const StepList: React.FC<StepListProps> = ({ steps, mode, readOnly = fals
             </ConsoleButton>
             {menuOpen && canOpenMenu && (
               <div id={menuId} ref={menuRef} className="nfc-v2-step-menu" role="menu"
-                aria-label="选择工作流步骤类型" onKeyDown={handleMenuKeyDown}>
+                aria-label="选择工作流步骤类型" onKeyDown={handleMenuKeyDown}
+                onBlur={(event) => {
+                  // Let native Tab/Shift+Tab move focus before closing the menu.
+                  if (!event.currentTarget.contains(event.relatedTarget)) setMenuOpen(false);
+                }}>
                 {menuItems.map(item => (
                   <button key={item.key} type="button" role="menuitem"
                     className="nfc-v2-step-menu-item"

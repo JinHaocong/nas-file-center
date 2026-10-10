@@ -61,11 +61,11 @@ describe('Console v2 StepList native add menu and topology safety', () => {
       'aria-controls=', 'role="menu"', 'role="menuitem"',
       'disabled={!allowedInsertions.includes(item.key)}',
       'disabled={!canOpenMenu}', 'menuRef.current?.querySelectorAll',
-      "event.key === 'Escape'", "event.key === 'Tab'",
+      "event.key === 'Escape'", 'onBlur={(event) => {', 'event.relatedTarget',
       "'ArrowDown', 'ArrowUp', 'Home', 'End'",
       "document.addEventListener('pointerdown', handleOutside)",
       "document.removeEventListener('pointerdown', handleOutside)",
-      'triggerRef.current?.focus()', 'setMenuOpen(false)',
+      'triggerRef.current?.focus()', 'setMenuOpen(false)', 'current === -1',
       'role="status"', '暂无工作流步骤，请从下方添加执行步骤',
     ]) assert.ok(s.includes(token), token);
     assert.doesNotMatch(s, /from ['"]antd['"]|@ant-design\/icons|<Dropdown\b|<Empty\b|<Button\b/);
