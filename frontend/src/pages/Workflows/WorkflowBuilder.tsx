@@ -152,8 +152,8 @@ export const WorkflowBuilderPage: React.FC = () => {
     if (isHistoricalView && historicalRevisionData) {
       if (workflow) {
         setName(workflow.name ?? '');
-        setDescription(workflow.description ?? '');
-        setNameError('');
+      setDescription(workflow.description ?? '');
+      setNameError('');
       }
       if (historicalRevisionData.definition) {
         setMode(historicalRevisionData.definition.mode || 'file');
