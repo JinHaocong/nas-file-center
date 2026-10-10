@@ -29,6 +29,7 @@ import './styles/console-v2-dedupe-safety.css';
 import './styles/console-v2-dedupe-explain.css';
 import './styles/console-v2-code-path.css';
 import './styles/console-v2-workflow-builder.css';
+import './styles/console-v2-workflow-revisions.css';
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>

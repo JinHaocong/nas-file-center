@@ -1,0 +1,51 @@
+/* Console v2 immutable workflow revisions, rendered through the shared Radix sheet portal. */
+.nfc-v2-revision-sheet { --nfc-rev-text: var(--v2-text); --nfc-rev-muted: var(--v2-muted); --nfc-rev-line: var(--v2-line); --nfc-rev-surface: var(--v2-paper); }
+.nfc-v2-revision-sheet .nfc-v2-sheet-body { padding: 18px 20px 35px; }
+.nfc-v2-revision-error { display: grid; gap: 8px; border: 1px solid #cb7184; border-radius: 11px; padding: 15px; background: var(--v2-canvas); color: var(--v2-text); }
+.nfc-v2-revision-error p { margin: 0; color: var(--v2-muted); }
+.nfc-v2-revision-loading { display: flex; align-items: center; gap: 10px; padding: 22px; color: var(--v2-muted); font-size: 12px; }
+.nfc-v2-revision-table-wrap { overflow-x: auto; border: 1px solid var(--v2-line); border-radius: 12px; }
+.nfc-v2-revision-table { width: 100%; border-collapse: collapse; font-size: 12px; line-height: 1.6; }
+.nfc-v2-revision-table th { text-align: left; background: var(--v2-canvas); color: var(--v2-muted); font-size: 11px; font-weight: 720; }
+.nfc-v2-revision-table th, .nfc-v2-revision-table td { padding: 12px 10px; vertical-align: middle; border-bottom: 1px solid var(--v2-line); }
+.nfc-v2-revision-table tr:last-child td { border-bottom: 0; }
+.nfc-v2-revision-table td { color: var(--v2-text); }
+.nfc-v2-revision-table th:nth-child(1) { min-width: 78px; }
+.nfc-v2-revision-table th:nth-child(2) { min-width: 150px; }
+.nfc-v2-revision-table th:nth-child(3) { min-width: 112px; }
+.nfc-v2-revision-table th:nth-child(4) { min-width: 190px; }
+.nfc-v2-revision-current { display: inline-block; margin-left: 7px; padding: 2px 6px; border-radius: 6px; background: var(--v2-indigo-soft); color: var(--v2-indigo); font-size: 10px; font-weight: 700; }
+.nfc-v2-revision-digest { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; min-width: 0; max-width: 100%; }
+.nfc-v2-revision-digest code { display: inline-block; max-width: 145px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; user-select: text; color: var(--v2-text); font-size: 11px; }
+.nfc-v2-revision-copy { display: grid; place-items: center; width: 29px; height: 29px; flex: 0 0 auto; cursor: pointer; color: var(--v2-indigo); border: 1px solid var(--v2-line); border-radius: 7px; background: var(--v2-paper); }
+.nfc-v2-revision-copy-state { color: var(--v2-muted); font-size: 10px; }
+.nfc-v2-revision-field-label { display: block; color: var(--v2-muted); font-size: 10px; margin: 0 0 5px; }
+.nfc-v2-revision-actions { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+.nfc-v2-revision-sheet .nfc-v2-revision-actions .nfc-console-button { padding: 0 7px; }
+.nfc-v2-revision-mobile-list { display: grid; gap: 12px; }
+.nfc-v2-revision-mobile-card { display: grid; gap: 9px; padding: 15px; border: 1px solid var(--v2-line); border-radius: 11px; background: var(--v2-paper); color: var(--v2-text); }
+.nfc-v2-revision-mobile-card .nfc-revision-mobile-topline { display: flex; justify-content: space-between; align-items: start; flex-wrap: wrap; gap: 10px; }
+.nfc-v2-revision-mobile-card time { color: var(--v2-muted); font-size: 11px; }
+.nfc-v2-revision-inspect-overlay { z-index: 1400 !important; }
+.nfc-v2-revision-inspect.nfc-v2-dialog[data-state='open'] { z-index: 1401 !important; width: min(720px, calc(100vw - 24px)); max-height: min(85dvh, 840px); display: flex; flex-direction: column; color: var(--v2-text); background: var(--v2-paper); }
+.nfc-v2-revision-inspect { --v2-paper: #fff; --v2-text: #18263a; --v2-muted: #63738b; --v2-line: #e5eaf1; --v2-indigo: #2875e9; --v2-canvas: #f6f8fc; }
+[data-theme='dark'] .nfc-v2-revision-inspect { --v2-paper: #1a2434; --v2-text: #f1f5fb; --v2-muted: #afbdce; --v2-line: #2c3a4e; --v2-indigo: #83b5ff; --v2-canvas: #111827; }
+.nfc-v2-revision-inspect .nfc-v2-dialog-heading { flex: 0 0 auto; }
+.nfc-v2-revision-inspect .nfc-v2-dialog-heading h2 { color: var(--v2-text); }
+.nfc-v2-revision-inspect .nfc-v2-dialog-heading p { color: var(--v2-muted); }
+.nfc-v2-revision-definition { display: grid; gap: 8px; padding: 16px 22px; min-width: 0; min-height: 0; overflow: auto; }
+.nfc-v2-revision-definition .nfc-v2-revision-digest code { max-width: min(500px, 63vw); }
+.nfc-v2-revision-json { max-width: 100%; min-width: 0; overflow: auto; white-space: pre; background: var(--v2-canvas); color: var(--v2-text); border: 1px solid var(--v2-line); border-radius: 9px; padding: 13px; font-size: 11px; line-height: 1.65; }
+.nfc-v2-revision-inspect .nfc-v2-confirm-actions { flex: 0 0 auto; }
+.nfc-v2-revision-copy:focus-visible,
+.nfc-v2-revision-sheet button:focus-visible,
+.nfc-v2-revision-inspect button:focus-visible { outline: 2px solid var(--v2-indigo); outline-offset: 2px; }
+.nfc-v2-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; padding: 0; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+@media (max-width: 767px) {
+ .nfc-v2-revision-sheet .nfc-v2-sheet-body { padding: 14px 13px 36px; }
+ .nfc-v2-revision-copy, .nfc-v2-revision-sheet .nfc-console-button-sm { min-height: 44px; }
+ .nfc-v2-revision-inspect.nfc-v2-dialog[data-state='open'] { max-height: 92dvh; }
+}
+@media (prefers-reduced-motion: reduce) {
+ .nfc-v2-revision-inspect, .nfc-v2-revision-sheet, .nfc-v2-revision-copy { animation: none; transition: none; }
+}
