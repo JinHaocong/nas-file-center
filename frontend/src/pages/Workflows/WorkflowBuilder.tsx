@@ -521,6 +521,27 @@ export const WorkflowBuilderPage: React.FC = () => {
           />
         )}
 
+      <ConsoleConfirmDialog
+        open={confirmation !== null}
+        onOpenChange={open => { if (!open && !rollbackMutation.isPending) setConfirmation(null); }}
+        title={confirmation?.kind === 'mode' ? '切换工作流模式'
+          : confirmation?.kind === 'back' ? '未保存的更改' : '确认回滚历史版本'}
+        description={confirmation?.kind === 'mode'
+          ? '切换到 ' + modeLabel(confirmation.targetMode) +
+            ' 将重置流水线步骤为该模式的标准默认拓扑。确定切换吗？'
+          : confirmation?.kind === 'back'
+            ? '当前工作流存在未保存的修改，退出将丢失这些修改，确认返回吗？'
+            : '系统将基于历史版本 r' +
+              (confirmation?.kind === 'rollback' ? confirmation.revision : '') +
+              ' 的定义生成新修订版本并恢复至当前。'}
+        confirmText={confirmation?.kind === 'mode' ? '确认重置并切换'
+          : confirmation?.kind === 'back' ? '确认退出' : '确认回滚'}
+        danger={confirmation?.kind !== 'mode'}
+        busy={rollbackMutation.isPending && confirmation?.kind === 'rollback'}
+        disabled={confirmation?.kind === 'mode' && !canSwitchMode}
+        onConfirm={confirmWorkflowAction}
+      />
+
       {!isNew && workflow && (
         <RevisionDrawer
           open={revisionDrawerOpen}
