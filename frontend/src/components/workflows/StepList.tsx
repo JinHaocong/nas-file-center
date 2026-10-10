@@ -28,7 +28,7 @@ const organizerChoices: StepChoice[] = [
   { key: 'organize', icon: 'folders', label: '目录整理方案 (Organize)' },
 ];
 
-/** StepCard/editors remain unchanged; this batch only owns the list and add menu. */
+/** List owns topology and add-menu semantics; StepCard delegates native and remaining legacy editors. */
 export const StepList: React.FC<StepListProps> = ({ steps, mode, readOnly = false, onChange }) => {
   const menuId = React.useId();
   const triggerRef = useRef<HTMLButtonElement>(null);
