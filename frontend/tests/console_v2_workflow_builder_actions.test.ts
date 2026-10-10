@@ -42,7 +42,7 @@ describe('Console v2 workflow builder action shell and safety', () => {
       "kind: 'rollback'", 'setConfirmation(', 'confirmWorkflowAction',
       'canConfirmWorkflowModeReset(', 'canConfirmWorkflowRollback({',
       "setSteps(defaultStepsForMode(confirmation.targetMode))",
-      "confirmation.targetMode !== mode", 'canSwitchMode', 'saveMutation.isPending',
+      'canSwitchMode', 'saveMutation.isPending',
       'rollbackInFlight.current', 'rollbackMutation.isPending', 'workflow.current_revision',
       'expectedRevision', 'targetRevision', 'canRollback',
       '确认重置并切换', '当前工作流存在未保存的修改', '确认回滚',

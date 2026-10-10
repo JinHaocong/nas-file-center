@@ -24,8 +24,8 @@ export interface WorkflowRollbackConfirmation {
 export function canConfirmWorkflowRollback(state: WorkflowRollbackConfirmation): boolean {
   return state.canRollback && state.isHistoricalView && !state.busy &&
     state.currentRevision !== undefined &&
-    Number.isInteger(state.selectedRevision) &&
     state.selectedRevision !== null &&
+    Number.isInteger(state.selectedRevision) &&
     state.selectedRevision >= 1 &&
     state.selectedRevision === state.requestedRevision &&
     state.currentRevision === state.expectedRevision &&
