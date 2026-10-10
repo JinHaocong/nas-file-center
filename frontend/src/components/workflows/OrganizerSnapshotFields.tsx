@@ -9,11 +9,13 @@ import {
 import { renderTemplate } from '../../utils/templateRenderer';
 import { formatBytes } from '../../utils/format';
 import { ConsoleIcon } from '../ui/ConsoleIcon';
+import { DirectoryPicker } from '../DirectoryPicker';
 
 interface Props {
   value: OrganizerProfileSnapshot;
   onChange: (value: OrganizerProfileSnapshot) => void;
   readOnly?: boolean;
+  includeRoot?: boolean;
 }
 type Tab = 'basic' | 'template' | 'rules' | 'mtime' | 'advanced';
 const tabs: { key: Tab; title: string }[] = [
@@ -73,7 +75,7 @@ const Tags: React.FC<{
 
 /** Workflow-only editor. The standalone Organizer profile form keeps its own API + Form authority. */
 export const OrganizerSnapshotFields: React.FC<Props> = ({
-  value, onChange, readOnly = false,
+  value, onChange, readOnly = false, includeRoot = false,
 }) => {
   const uid = useId();
   const [tab, setTab] = useState<Tab>('basic');
@@ -186,6 +188,17 @@ export const OrganizerSnapshotFields: React.FC<Props> = ({
                   placeholder="简要描述该整理规则的适用场景及规范..."
                   onChange={event => patch('description', event.target.value)} />
               </label>
+              {includeRoot && (
+                <div className="nfc-v2-organizer-field nfc-v2-organizer-root-field">
+                  <span>默认整理根目录</span>
+                  <span className="nfc-v2-organizer-help">
+                    可选。手动输入或使用白名单目录浏览器选择，最终由后端 ALLOWED_ROOTS 校验。
+                  </span>
+                  <DirectoryPicker multiple={false} value={snapshot.root || ''}
+                    disabled={readOnly} placeholder="点击浏览或手动输入默认根目录..."
+                    onChange={path => { if (!readOnly && typeof path === 'string') patch('root', path); }} />
+                </div>
+              )}
               {boolField('递归处理子目录', Boolean(snapshot.recursive), checked => patch('recursive', checked))}
               <p className="nfc-v2-organizer-help">工作流的根目录由 Scan 步骤选择。导入方案的 root 只作为快照原始字段保存，不在此处改写。</p>
             </div>
