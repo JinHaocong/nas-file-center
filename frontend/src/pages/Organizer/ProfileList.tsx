@@ -47,7 +47,7 @@ export const ProfileList: React.FC<ProfileListProps> = ({
   const [deleteIntent, setDeleteIntent] = useState<{ id: number; name: string } | null>(null);
   const [exportingId, setExportingId] = useState<number | null>(null);
 
-  const { data, isLoading, isFetching, isError, error, refetch } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['organizer-profiles', page, pageSize, search],
     queryFn: () => organizerProfilesApi.listProfiles(page, pageSize, search),
   });
