@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
-  canConfirmWorkflowModeReset, canConfirmWorkflowRollback, validateWorkflowBasicFields,
+  canConfirmWorkflowModeReset, canConfirmWorkflowRollback,
 } from '../src/utils/workflowBuilderActions';
 const read = (p: string) => readFileSync(resolve(process.cwd(), p), 'utf8');
 
