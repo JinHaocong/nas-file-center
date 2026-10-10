@@ -38,6 +38,7 @@ import './styles/console-v2-workflow-organizer.css';
 import './styles/console-v2-organizer-profile-form.css';
 import './styles/console-v2-organizer-profile-list.css';
 import './styles/console-v2-organizer-preview.css';
+import './styles/console-v2-immediate-rename.css';
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
