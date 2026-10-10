@@ -1,0 +1,71 @@
+/* Console v2 shared copyable CodePath. Local to display-only paths; no filesystem operation. */
+.nfc-v2-code-path {
+  --nfc-path-paper: #f5f8fc;
+  --nfc-path-border: #dce5ee;
+  --nfc-path-text: #264059;
+  --nfc-path-muted: #657991;
+  --nfc-path-accent: #2878ef;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-width: 0;
+  gap: 4px;
+  vertical-align: middle;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--nfc-path-text) !important;
+}
+[data-theme='dark'] .nfc-v2-code-path {
+  --nfc-path-paper: #263448;
+  --nfc-path-border: #36465c;
+  --nfc-path-text: #dbeaff;
+  --nfc-path-muted: #a9bbd1;
+  --nfc-path-accent: #83b5ff;
+}
+.nfc-v2-code-path .nfc-v2-code-path-value {
+  display: inline-block;
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  color: inherit;
+  background: var(--nfc-path-paper);
+  border: 1px solid var(--nfc-path-border);
+  border-radius: 6px;
+  padding: 4px 6px;
+  user-select: text;
+  cursor: text;
+}
+.nfc-v2-code-path.nfc-code-path-muted { color: var(--nfc-path-muted) !important; }
+.nfc-v2-code-path .nfc-v2-code-path-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 30px;
+  min-height: 30px;
+  border: 1px solid var(--nfc-path-border);
+  border-radius: 7px;
+  background: var(--nfc-path-paper);
+  color: var(--nfc-path-text);
+  cursor: pointer;
+  padding: 0;
+}
+.nfc-v2-code-path .nfc-v2-code-path-copy:hover { border-color: var(--nfc-path-accent); color: var(--nfc-path-accent); }
+.nfc-v2-code-path .nfc-v2-code-path-copy:focus-visible {
+  outline: 2px solid var(--nfc-path-accent); outline-offset: 2px;
+}
+.nfc-v2-code-path .nfc-v2-code-path-feedback {
+  position: absolute; width: 1px; height: 1px; padding: 0;
+  overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap;
+}
+@media (max-width: 767px) {
+  .nfc-v2-code-path .nfc-v2-code-path-copy { min-width: 44px; min-height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nfc-v2-code-path * { animation-duration: 0.01ms; transition-duration: 0.01ms; }
+}

@@ -1,7 +1,7 @@
 import React from 'react';
 import {
   Activity, Archive, ArrowDown, ArrowRight, ArrowUp, Bell, CalendarDays, Check,
-  CircleCheck, ChevronDown, ChevronRight, Clock3, Database,
+  CircleCheck, Copy, ChevronDown, ChevronRight, Clock3, Database,
   FileCheck2, FileSearch, FileText, Folder, FolderOpen, Folders,
   GitCompareArrows, HardDrive, History, Info, Layers3, LayoutDashboard, ListChecks,
   LockKeyhole, LogOut, Menu, Moon, Pencil, Play, Plus, RefreshCw,
@@ -21,6 +21,7 @@ const icons = {
   calendar: CalendarDays,
   check: Check,
   'check-circle': CircleCheck,
+  copy: Copy,
   'chevron-down': ChevronDown,
   'chevron-right': ChevronRight,
   clock: Clock3,
