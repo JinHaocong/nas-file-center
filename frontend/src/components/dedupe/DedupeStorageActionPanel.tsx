@@ -3,6 +3,7 @@ import type {
   DedupeStorageAction, StorageOptimizationCapabilitiesResponse,
 } from '../../types/dedupe';
 import { CodePath } from '../ui/CodePath';
+import { canSelectStorageAction, canRunCapabilityProbe } from './storageActionModel';
 import { ConsoleButton } from '../ui/ConsoleButton';
 import { ConsoleIcon } from '../ui/ConsoleIcon';
 
@@ -49,7 +50,7 @@ export const DedupeStorageActionPanel: React.FC<Props> = ({
   const selectedCapability =
     value === 'hardlink' || value === 'reflink' ? capabilityData?.[value] : undefined;
   const chooseAction = (next: DedupeStorageAction) => {
-    if (disabled || (next !== 'quarantine' && !isAdmin)) return;
+    if (!canSelectStorageAction(next, isAdmin, disabled)) return;
     onChange(next);
   };
 
@@ -117,9 +118,9 @@ export const DedupeStorageActionPanel: React.FC<Props> = ({
             </div>
             <ConsoleButton size="sm" leadingIcon={<ConsoleIcon name="search" size={16} />}
               onClick={() => {
-                if (!disabled && !capabilityLoading && diagnosticPair) onProbeCapabilities();
+                if (canRunCapabilityProbe(value, isAdmin, disabled, capabilityLoading, Boolean(diagnosticPair))) onProbeCapabilities();
               }}
-              loading={capabilityLoading} disabled={disabled || !diagnosticPair || capabilityLoading}>
+              loading={capabilityLoading} disabled={!canRunCapabilityProbe(value, isAdmin, disabled, capabilityLoading, Boolean(diagnosticPair))}>
               显式探测当前路径对
             </ConsoleButton>
           </header>
