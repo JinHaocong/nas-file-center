@@ -1,21 +1,9 @@
 import React from 'react';
-import { Alert, Tag, Typography } from 'antd';
-import {
-  DeleteOutlined,
-  FileTextOutlined,
-  LinkOutlined,
-  CopyOutlined,
-  FolderOutlined,
-  SaveOutlined,
-  CheckCircleOutlined,
-  InfoCircleOutlined,
-} from '@ant-design/icons';
-import { DedupeSummary, DedupeSelectionMode } from '../../types/dedupe';
+import type { DedupeSummary, DedupeSelectionMode } from '../../types/dedupe';
 import { getProtectLastFileDescription } from '../../utils/dedupePresentation';
 import { formatBytes } from '../../utils/format';
 import { formatScanRootLabel, mapReleasedBytesByScanRoot } from '../../utils/dedupePreview';
-
-const { Text } = Typography;
+import { ConsoleIcon, type ConsoleIconName } from '../ui/ConsoleIcon';
 
 interface Props {
   summary: DedupeSummary;
@@ -27,11 +15,20 @@ interface Props {
   selectionMode?: DedupeSelectionMode;
 }
 
+const SummaryNotice: React.FC<{
+  title: string;
+  children: React.ReactNode;
+  warning?: boolean;
+}> = ({ title, children, warning = false }) => (
+  <div className={'nfc-v2-dedupe-summary-notice' + (warning ? ' is-warning' : '')} role="note">
+    <ConsoleIcon name="shield-check" size={18} />
+    <div><strong>{title}</strong><p>{children}</p></div>
+  </div>
+);
+
+/** A read-only projection of server-calculated dedupe summary; never calculate scores locally. */
 export const DedupePreviewSummaryPanel: React.FC<Props> = ({
-  summary,
-  effectiveSafetyPolicy,
-  scanRoots = [],
-  selectionMode,
+  summary, effectiveSafetyPolicy, scanRoots = [], selectionMode,
 }) => {
   const policy = effectiveSafetyPolicy || summary.effective_safety_policy;
   const rootEntries = mapReleasedBytesByScanRoot(
@@ -43,73 +40,58 @@ export const DedupePreviewSummaryPanel: React.FC<Props> = ({
   const actionMetric =
     storageAction === 'hardlink'
       ? {
-          key: 'storage-action',
-          label: '计划 Hardlink 优化',
-          value: `${summary.planned_action_count ?? 0}`,
-          suffix: '个',
-          meta: `metadata 阻断 ${summary.storage_blocked_count ?? 0}`,
-          icon: <LinkOutlined />,
-          tone: 'warning',
+          key: 'storage-action', label: '计划 Hardlink 优化',
+          value: String(summary.planned_action_count ?? 0), suffix: '个',
+          meta: 'metadata 阻断 ' + (summary.storage_blocked_count ?? 0),
+          icon: 'git-compare' as ConsoleIconName, tone: 'warning',
         }
       : storageAction === 'reflink'
         ? {
-            key: 'storage-action',
-            label: '计划 Reflink 优化',
-            value: `${summary.planned_action_count ?? 0}`,
-            suffix: '个',
-            meta: `metadata 阻断 ${summary.storage_blocked_count ?? 0}`,
-            icon: <CopyOutlined />,
-            tone: 'accent',
+            key: 'storage-action', label: '计划 Reflink 优化',
+            value: String(summary.planned_action_count ?? 0), suffix: '个',
+            meta: 'metadata 阻断 ' + (summary.storage_blocked_count ?? 0),
+            icon: 'file-check' as ConsoleIconName, tone: 'accent',
           }
         : {
-            key: 'quarantine',
-            label: '计划隔离副本',
-            value: `${summary.planned_quarantine_count ?? 0}`,
-            suffix: '个',
+            key: 'quarantine', label: '计划隔离副本',
+            value: String(summary.planned_quarantine_count ?? 0), suffix: '个',
             meta: '执行后进入隔离区',
-            icon: <DeleteOutlined />,
-            tone: 'warning',
+            icon: 'trash' as ConsoleIconName, tone: 'warning',
           };
-
   const metrics = [
     {
-      key: 'groups',
-      label: '重复组数',
-      value: `${summary.group_count ?? summary.actionable_group_count ?? 0}`,
+      key: 'groups', label: '重复组数',
+      value: String(summary.group_count ?? summary.actionable_group_count ?? 0),
       suffix: '组',
-      meta: `可处理 ${summary.actionable_group_count ?? 0} · 跳过 ${summary.skipped_group_count ?? 0}`,
-      icon: <FolderOutlined />,
-      tone: 'success',
+      meta: '可处理 ' + (summary.actionable_group_count ?? 0) +
+        ' · 跳过 ' + (summary.skipped_group_count ?? 0),
+      icon: 'folder' as ConsoleIconName, tone: 'success',
     },
     {
-      key: 'members',
-      label: '重复副本总数',
-      value: `${summary.candidate_member_count ?? 0}`,
-      suffix: '个',
+      key: 'members', label: '重复副本总数',
+      value: String(summary.candidate_member_count ?? 0), suffix: '个',
       meta: '候选文件总数',
-      icon: <FileTextOutlined />,
-      tone: 'accent',
+      icon: 'file-text' as ConsoleIconName, tone: 'accent',
     },
     actionMetric,
     {
-      key: 'reclaim',
-      label: '预计释放容量',
-      value: formatBytes(summary.expected_reclaim_bytes ?? 0),
-      suffix: '',
+      key: 'reclaim', label: '预计释放容量',
+      value: formatBytes(summary.expected_reclaim_bytes ?? 0), suffix: '',
       meta: '去重后净收益容量',
-      icon: <SaveOutlined />,
-      tone: 'neutral',
+      icon: 'database' as ConsoleIconName, tone: 'neutral',
     },
   ];
 
   return (
-    <div className="nfc-dedupe-summary-panel">
+    <section className="nfc-dedupe-summary-panel nfc-v2-dedupe-summary" aria-label="高级去重预览汇总">
       <div className="nfc-dedupe-summary-grid">
-        {metrics.map((metric) => (
-          <article className={`nfc-dedupe-summary-metric tone-${metric.tone}`} key={metric.key}>
+        {metrics.map(metric => (
+          <article className={'nfc-dedupe-summary-metric tone-' + metric.tone} key={metric.key}>
             <div className="nfc-dedupe-summary-metric-topline">
               <span>{metric.label}</span>
-              <span className="nfc-dedupe-summary-metric-icon">{metric.icon}</span>
+              <span className="nfc-dedupe-summary-metric-icon">
+                <ConsoleIcon name={metric.icon} size={17} />
+              </span>
             </div>
             <div className="nfc-dedupe-summary-value">
               {metric.value}
@@ -121,33 +103,21 @@ export const DedupePreviewSummaryPanel: React.FC<Props> = ({
       </div>
 
       {storageAction === 'hardlink' && (
-        <Alert
-          className="nfc-overlay-alert"
-          type="warning"
-          showIcon
-          message="Hardlink 语义已选择"
-          description="两个路径最终共享同一个 inode；未来经任一路径写入都会修改同一份文件内容。"
-        />
+        <SummaryNotice title="Hardlink 语义已选择" warning>
+          两个路径最终共享同一个 inode；未来经任一路径写入都会修改同一份文件内容。
+        </SummaryNotice>
       )}
       {storageAction === 'reflink' && (
-        <Alert
-          className="nfc-overlay-alert"
-          type="info"
-          showIcon
-          message="Reflink 语义已选择"
-          description="独立 inode + Copy-on-Write（写时复制）；不是普通完整复制。"
-        />
+        <SummaryNotice title="Reflink 语义已选择">
+          独立 inode + Copy-on-Write（写时复制）；不是普通完整复制。
+        </SummaryNotice>
       )}
-
       {mode === 'balanced_by_bytes' && (
-        <Alert
-          className="nfc-overlay-alert"
-          type="info"
-          showIcon
-          icon={<InfoCircleOutlined />}
-          message="根目录字节平衡模式已生效"
-          description="Balanced by Bytes 使用 backend released_bytes 作为跨组选择层，在候选允许的情况下尽量均衡各 Scan Root 的累计计划释放字节。该机制独立于因子权重计分之外。"
-        />
+        <SummaryNotice title="根目录字节平衡模式已生效">
+          Balanced by Bytes 使用 backend released_bytes 作为跨组选择层，
+          在候选允许的情况下尽量均衡各 Scan Root 的累计计划释放字节。
+          该机制独立于因子权重计分之外。
+        </SummaryNotice>
       )}
 
       {rootEntries.length > 0 && (
@@ -157,29 +127,28 @@ export const DedupePreviewSummaryPanel: React.FC<Props> = ({
               <div className="nfc-embedded-section-kicker">Capacity distribution</div>
               <h3>各扫描根目录预计释放容量</h3>
             </div>
-            <Tag color="blue">容量分布</Tag>
+            <span className="nfc-v2-dedupe-summary-tag">容量分布</span>
           </header>
           <div className="nfc-dedupe-root-release-list">
-            {rootEntries.map((entry) => (
+            {rootEntries.map(entry => (
               <div className="nfc-dedupe-root-release-row" key={entry.rootIndex}>
-                <Text strong>{formatScanRootLabel(entry.rootIndex, entry.rootPath)}</Text>
-                <Text strong className={entry.releasedBytes > 0 ? 'nfc-warning-text' : 'nfc-table-muted'}>
+                <strong>{formatScanRootLabel(entry.rootIndex, entry.rootPath)}</strong>
+                <strong className={entry.releasedBytes > 0 ? 'nfc-warning-text' : 'nfc-table-muted'}>
                   {formatBytes(entry.releasedBytes)}
-                </Text>
+                </strong>
               </div>
             ))}
           </div>
         </section>
       )}
-
-      <div className="nfc-dedupe-safety-footnote">
-        <CheckCircleOutlined className={policy?.protect_last_file ? 'is-safe' : 'is-warning'} />
-        <Text type="secondary">
+      <div className="nfc-dedupe-safety-footnote nfc-v2-dedupe-summary-footnote">
+        <ConsoleIcon name="shield-check" size={18} className={policy?.protect_last_file ? 'is-safe' : 'is-warning'} />
+        <span>
           {policy && policy.protect_last_file !== undefined
             ? getProtectLastFileDescription(policy.protect_last_file)
             : '去重安全保护策略 (protect_last_file): 未配置。'}
-        </Text>
+        </span>
       </div>
-    </div>
+    </section>
   );
 };
