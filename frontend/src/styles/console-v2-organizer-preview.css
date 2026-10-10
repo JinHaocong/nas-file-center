@@ -1,0 +1,64 @@
+/* Console v2 Organizer read-only Preview, digest-bound stage gates and proposals. */
+.nfc-v2-organizer-preview {
+  --nfc-opv-paper:#fff;--nfc-opv-muted:#64748b;--nfc-opv-text:#1c293d;
+  --nfc-opv-soft:#f6f8fc;--nfc-opv-line:#dce5ee;--nfc-opv-accent:#2878ef;
+}
+[data-theme='dark'] .nfc-v2-organizer-preview {
+  --nfc-opv-paper:#1a2434;--nfc-opv-muted:#afbed4;--nfc-opv-text:#f0f4fa;
+  --nfc-opv-soft:#222e41;--nfc-opv-line:#36435a;--nfc-opv-accent:#83b5ff;
+}
+.nfc-v2-organizer-preview-controls { display:grid;gap:13px;padding:2px 0; }
+.nfc-v2-organizer-root-control { display:grid;gap:8px;min-width:0; }
+.nfc-v2-organizer-root-caption { color:var(--nfc-opv-text);font-size:12px;font-weight:700; }
+.nfc-v2-organizer-root-control .nfc-v2-directory-picker { max-width:100%; }
+.nfc-v2-organizer-root-control .nfc-directory-picker-single { display:flex;align-items:center;gap:8px;flex-wrap:wrap; }
+.nfc-v2-organizer-root-control .nfc-v2-directory-input-wrap { flex:1 1 250px;min-width:0; }
+.nfc-v2-organizer-root-control .nfc-v2-organizer-help { color:var(--nfc-opv-muted);font-size:11px;line-height:1.6; }
+.nfc-v2-organizer-root-error { color:#b8324d;font-size:12px; }
+.nfc-v2-organizer-preview-loading { display:flex;align-items:center;gap:9px;color:var(--nfc-opv-muted);font-size:12px; }
+.nfc-v2-organizer-stage-notice { display:flex;align-items:flex-start;gap:10px;padding:13px 15px;border-radius:10px;
+  border:1px solid var(--nfc-opv-line);background:var(--nfc-opv-soft);color:var(--nfc-opv-text);font-size:12px;line-height:1.65; }
+.nfc-v2-organizer-stage-notice svg { flex:0 0 auto;margin-top:2px; }
+.nfc-v2-organizer-stage-notice.is-warning { border-color:#dcaa62;background:color-mix(in srgb,#dbad5d 10%,var(--nfc-opv-paper)); }
+.nfc-v2-organizer-stage-notice.is-success { border-color:#5aa58b;background:color-mix(in srgb,#5fae8c 10%,var(--nfc-opv-paper)); }
+.nfc-v2-organizer-stage-notice.is-danger { border-color:#cc6379;background:color-mix(in srgb,#d45a74 8%,var(--nfc-opv-paper)); }
+.nfc-v2-organizer-stage-notice strong { font-size:12px; }
+.nfc-v2-organizer-stage-notice p { margin:5px 0 0; }
+.nfc-v2-organizer-proposals .nfc-organizer-preview-filter { padding:10px 13px; }
+.nfc-v2-organizer-filter { display:flex;align-items:center;flex-wrap:wrap;gap:5px; }
+.nfc-v2-organizer-filter label { display:inline-flex;align-items:center;gap:7px;min-height:38px;padding:8px 12px;
+  cursor:pointer;background:var(--nfc-opv-paper);color:var(--nfc-opv-text);
+  border:1px solid var(--nfc-opv-line);border-radius:8px;font-size:12px;font-weight:600; }
+.nfc-v2-organizer-filter label.is-selected { border-color:var(--nfc-opv-accent);color:var(--nfc-opv-accent);background:var(--nfc-opv-soft); }
+.nfc-v2-organizer-filter input { accent-color:var(--nfc-opv-accent);width:16px;height:16px; }
+.nfc-v2-organizer-filter label:has(input:disabled) { cursor:progress;opacity:.75; }
+.nfc-v2-organizer-proposal-table-scroll { width:100%;overflow-x:auto; }
+.nfc-v2-organizer-proposal-table { width:100%;min-width:930px;border-collapse:collapse;text-align:left;font-size:12px; }
+.nfc-v2-organizer-proposal-table th { padding:12px 13px;border-bottom:1px solid var(--nfc-opv-line);
+  background:var(--nfc-opv-soft);color:var(--nfc-opv-muted);font-size:11px;font-weight:680;white-space:nowrap; }
+.nfc-v2-organizer-proposal-table td { vertical-align:middle;padding:12px 13px;border-bottom:1px solid var(--nfc-opv-line);color:var(--nfc-opv-text); }
+.nfc-v2-organizer-proposal-table tr:last-child td { border-bottom:0; }
+.nfc-v2-organizer-proposal-table tbody tr:hover { background:var(--nfc-opv-soft); }
+.nfc-v2-organizer-proposal-table .nfc-inline-badges { min-width:0;display:flex;flex-wrap:wrap;gap:5px; }
+.nfc-v2-organizer-target-path { display:flex;align-items:center;gap:6px;min-width:0; }
+.nfc-v2-organizer-target-path svg { flex:0 0 auto; }
+.nfc-v2-organizer-proposals .nfc-console-pagination { border-top:1px solid var(--nfc-opv-line); }
+.nfc-v2-organizer-proposal-mobile-list { display:grid;gap:11px;padding:12px; }
+.nfc-v2-organizer-proposal-mobile-list .nfc-organizer-proposal-mobile-card {
+  background:var(--nfc-opv-paper);border:1px solid var(--nfc-opv-line);
+  border-radius:11px;padding:13px;color:var(--nfc-opv-text); }
+.nfc-v2-organizer-proposal-mobile-list .nfc-plan-mobile-heading-copy { display:grid;gap:6px;min-width:0; }
+.nfc-v2-organizer-preview :is(button,input,select):focus-visible { outline:2px solid var(--nfc-opv-accent);outline-offset:2px; }
+@media (max-width:767px) {
+  .nfc-v2-organizer-preview-controls .nfc-console-button,
+  .nfc-v2-organizer-filter label { min-height:44px; }
+  .nfc-v2-organizer-root-control .nfc-directory-picker-single button,
+  .nfc-v2-organizer-root-control .nfc-directory-picker-single input { min-height:44px; }
+  .nfc-v2-organizer-filter { width:100%; }
+  .nfc-v2-organizer-stage-notice { margin-inline:0; }
+  .nfc-v2-organizer-preview-digest { overflow-wrap:anywhere; }
+}
+@media (prefers-reduced-motion:reduce) {
+  .nfc-v2-organizer-preview *, .nfc-v2-organizer-preview *::before,
+  .nfc-v2-organizer-preview *::after { animation:none;transition:none;scroll-behavior:auto; }
+}
