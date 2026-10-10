@@ -227,6 +227,8 @@ export const AdvancedDedupePage: React.FC = () => {
   const validation = validateScorerConfigForm(scorerConfig);
 
   const handleRunPreview = () => {
+    if (generateInFlight.current || generateMutation.isPending ||
+        previewMutation.isPending) return;
     if (!validation.valid) {
       toast.error('请先修正配置校验错误');
       return;
@@ -277,6 +279,8 @@ export const AdvancedDedupePage: React.FC = () => {
   };
 
   const handlePageChange = (newPage: number, newPageSize: number) => {
+    if (generateInFlight.current || generateMutation.isPending ||
+        previewMutation.isPending) return;
     const currentGen = dedupeState.configGeneration;
     dispatch({ type: 'PREVIEW_STARTED' });
     previewMutation.mutate({
