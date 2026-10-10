@@ -38,7 +38,7 @@ export const DedupePreviewTable: React.FC<Props> = ({
     [rows, searchText, decisionFilter, rootFilter],
   );
   const isServerPaged = Boolean(pagination);
-  const visibleRows = isServerPaged
+  const visibleRows = isServerPaged || pagination === false
     ? filteredRows
     : filteredRows.slice((localPage - 1) * localPageSize, localPage * localPageSize);
   const paginationView = pagination ? (
