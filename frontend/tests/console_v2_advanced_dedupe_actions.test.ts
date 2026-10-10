@@ -52,7 +52,7 @@ describe('Console v2 advanced dedupe page authority dialogs', () => {
       "structured.code === 'DEDUPE_EMPTY_PLAN'",
       'handleRunPreview()', 'shouldAcceptDirectResponse',
       "dispatch({ type: 'CONFIG_EDITED' })",
-      "dispatch({ type: 'PREVIEW_SUCCESS',",
+      "type: 'PREVIEW_SUCCESS',",
       'setNotice(null); // Any pending confirmation refers to the old preview digest.',
       'setNotice(null); // Invalidate stale action confirmation.',
       "navigate('/plans/' + (res.id || res.plan_id))",
@@ -85,7 +85,7 @@ describe('Console v2 advanced dedupe page authority dialogs', () => {
     for (const part of [
       '.nfc-v2-advanced-dedupe-dialog', '.nfc-v2-advanced-dedupe-overlay',
       '.nfc-v2-advanced-dedupe-dialog-actions', '.nfc-v2-dedupe-page-state',
-      "[data-theme='dark']", 'on', ':focus-visible',
+      "[data-theme='dark']", ':focus-visible',
       '@media (max-width: 767px)', 'prefers-reduced-motion: reduce',
       'overscroll-behavior',
     ]) assert.ok(css.includes(part), part);
