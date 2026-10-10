@@ -104,3 +104,52 @@
 @media (prefers-reduced-motion: reduce) {
   .nfc-workflow-builder-page .nfc-v2-workflow-mode-choice { transition: none; }
 }
+
+/* StepList action menu: use the same Console v2 surface for native button and menu. */
+.nfc-v2-step-empty {
+  display: flex; flex-direction: column; justify-content: center; align-items: center;
+  gap: 9px; min-height: 110px; color: var(--nfc-text-muted);
+  text-align: center; font-size: 12px;
+}
+.nfc-v2-step-empty svg { color: var(--nfc-text-subtle); }
+.nfc-v2-step-empty p { margin: 0; }
+.nfc-v2-step-menu-anchor { position: relative; width: fit-content; max-width: 100%; }
+.nfc-v2-step-menu-anchor .nfc-step-add-button { min-width: 180px; min-height: 42px; }
+.nfc-v2-step-menu {
+  position: absolute; z-index: 40; top: calc(100% + 6px); left: 0;
+  min-width: min(290px, calc(100vw - 56px));
+  display: flex; flex-direction: column; gap: 2px; padding: 6px;
+  border: 1px solid var(--nfc-hairline); border-radius: 12px;
+  background: var(--nfc-surface-1); color: var(--nfc-text);
+  box-shadow: 0 12px 32px rgba(11, 22, 39, .17);
+}
+.nfc-v2-step-menu-item {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  min-height: 40px; text-align: left; padding: 9px 10px;
+  border: 1px solid transparent; border-radius: 8px;
+  background: transparent; color: var(--nfc-text); cursor: pointer;
+  font: inherit; font-size: 12px;
+}
+.nfc-v2-step-menu-item svg { flex: 0 0 auto; color: var(--nfc-text-subtle); }
+.nfc-v2-step-menu-item:hover:not(:disabled),
+.nfc-v2-step-menu-item:focus-visible {
+  background: var(--nfc-info-soft); border-color: var(--nfc-accent);
+}
+.nfc-v2-step-menu-item:focus-visible,
+.nfc-v2-step-menu-anchor .nfc-step-add-button:focus-visible {
+  outline: 2px solid var(--nfc-accent); outline-offset: 2px;
+}
+.nfc-v2-step-menu-item:disabled { opacity: .45; cursor: not-allowed; }
+[data-theme='dark'] .nfc-v2-step-menu {
+  background: var(--nfc-surface-1); border-color: var(--nfc-hairline);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .35);
+}
+@media (max-width: 767px) {
+  .nfc-v2-step-menu-anchor { width: 100%; }
+  .nfc-v2-step-menu-anchor .nfc-step-add-button { width: 100%; min-height: 44px; }
+  .nfc-v2-step-menu { width: 100%; min-width: 0; box-sizing: border-box; }
+  .nfc-v2-step-menu-item { min-height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nfc-v2-step-menu, .nfc-v2-step-menu-item { animation: none; transition: none; }
+}

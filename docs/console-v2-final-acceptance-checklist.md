@@ -33,7 +33,8 @@ approved NAS File Center mockup. User-selectable dark/system modes remain.
 - [ ] Shared dialogs, select, checkbox, forms and destructive confirmation primitives.
 - [x] Workflow builder native action bar, read-only status, Radix mode reset / unsaved-exit / rollback confirmations (PR #149).
 - [x] Workflow builder native name/description fields, accessible mode radios, trim validation and dirty guards (PR #150).
-- [ ] Workflow StepList, RevisionDrawer, WorkflowList, organizer, rename/file tools, settings and remaining pages.
+- [x] Workflow StepList native add-step action menu, empty state, topology/RBAC safeguards and keyboard support (PR #151).
+- [ ] Workflow StepCard and step editors, RevisionDrawer, WorkflowList, organizer, rename/file tools, settings and remaining pages.
 - [ ] Remove all `antd` and `@ant-design/icons` imports and their lockfile dependencies.
 - [ ] Consolidate historical UI CSS overrides into an owned, maintainable theme system.
 - [ ] Full TypeScript, frontend unit/regression, backend, Docker and dependency-audit gates.
