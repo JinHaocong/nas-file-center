@@ -28,6 +28,7 @@ approved NAS File Center mockup. User-selectable dark/system modes remain.
 - [x] Shared Advanced Dedupe scorer editor: native accessible mode radios, factor weights, ordered rules and reset (PR #145).
 - [x] Advanced Dedupe read-only authority/safety lineage and role-guarded storage action panels (PR #146).
 - [x] Advanced Dedupe Radix decision explanation sheet + native read-only preview summary (PR #147).
+- [x] Shared copyable CodePath: native full-text path, explicit copy, non-HTTPS fallback and responsive focus (PR #148).
 - [ ] Remaining Ant screens and shared controls.
 - [ ] Shared dialogs, select, checkbox, forms and destructive confirmation primitives.
 - [ ] Organizer, workflow editor, rename/file tools, settings and remaining pages.
