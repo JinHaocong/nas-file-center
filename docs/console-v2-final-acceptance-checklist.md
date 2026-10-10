@@ -18,7 +18,8 @@ approved NAS File Center mockup. User-selectable dark/system modes remain.
 - [x] Task Center list, filtering, pagination, error views and progress UI (this PR).
 - [x] Task Inspector Sheet, task actions, delete/cleanup confirmation and event logs (this PR).
 - [x] Scan History list/pagination and scan deletion confirmation (this PR).
-- [ ] Scan creation form, Scan Detail duplicate groups, classic/advanced dedupe views and other Ant screens.
+- [x] Scan Detail read-only duplicate groups, member expansion and pagination (this PR).
+- [ ] Scan creation form, classic/advanced dedupe views and other Ant screens.
 - [ ] Shared dialogs, select, checkbox, forms and destructive confirmation primitives.
 - [ ] Organizer, workflow editor, rename/file tools, settings and remaining pages.
 - [ ] Remove all `antd` and `@ant-design/icons` imports and their lockfile dependencies.
