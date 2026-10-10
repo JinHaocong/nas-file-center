@@ -1,0 +1,54 @@
+/* Console v2 workflow collection: one controlled page across desktop/mobile. */
+.nfc-v2-workflow-list-page {
+  --nfc-wfl-bg: #fff; --nfc-wfl-soft: #f6f8fc; --nfc-wfl-text: #1c293d;
+  --nfc-wfl-muted: #64748b; --nfc-wfl-line: #dce5ee; --nfc-wfl-accent: #2878ef;
+}
+[data-theme='dark'] .nfc-v2-workflow-list-page {
+  --nfc-wfl-bg: #1a2434; --nfc-wfl-soft: #222e41; --nfc-wfl-text: #f0f4fa;
+  --nfc-wfl-muted: #adbed4; --nfc-wfl-line: #36435a; --nfc-wfl-accent: #83b5ff;
+}
+.nfc-v2-workflow-archive-filter {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 12px; font-weight: 550; color: var(--nfc-wfl-text); cursor: pointer;
+  min-height: 42px; padding: 0 5px;
+}
+.nfc-v2-workflow-archive-filter input { width: 17px; height: 17px; accent-color: var(--nfc-wfl-accent); }
+.nfc-v2-workflow-table-scroll { overflow-x: auto; max-width: 100%; width: 100%; }
+.nfc-v2-workflow-table { border-collapse: collapse; min-width: 1080px; width: 100%; font-size: 12px; text-align: left; }
+.nfc-v2-workflow-table th {
+  padding: 12px 13px; border-bottom: 1px solid var(--nfc-wfl-line);
+  background: var(--nfc-wfl-soft); color: var(--nfc-wfl-muted); font-weight: 690;
+  font-size: 11px; white-space: nowrap;
+}
+.nfc-v2-workflow-table td { padding: 12px 13px; border-bottom: 1px solid var(--nfc-wfl-line); color: var(--nfc-wfl-text); vertical-align: middle; }
+.nfc-v2-workflow-table tbody tr:last-child td { border-bottom: 0; }
+.nfc-v2-workflow-table tbody tr:hover { background: var(--nfc-wfl-soft); }
+.nfc-v2-workflow-table .nfc-workflow-name { color: var(--nfc-wfl-text); text-align: left; }
+.nfc-v2-workflow-table .nfc-workflow-name:hover { color: var(--nfc-wfl-accent); }
+.nfc-v2-workflow-table .nfc-table-meta { font-size: 11px; white-space: nowrap; color: var(--nfc-wfl-muted); }
+.nfc-v2-workflow-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.nfc-v2-workflow-actions .nfc-console-button { min-height: 34px; padding: 0 8px; }
+.nfc-v2-workflow-actions .nfc-console-button-danger { border-color: transparent; background: transparent; color: #b8324d; }
+.nfc-v2-workflow-actions .nfc-console-button-danger:hover:not(:disabled) { background: #fff0f2; border-color: #efbdc8; }
+[data-theme='dark'] .nfc-v2-workflow-actions .nfc-console-button-danger { color: #ff99ab; }
+[data-theme='dark'] .nfc-v2-workflow-actions .nfc-console-button-danger:hover:not(:disabled) { background: #482432; border-color: #734357; }
+.nfc-v2-workflow-list-error, .nfc-v2-workflow-list-loading { padding: 22px; color: var(--nfc-wfl-muted); font-size: 12px; }
+.nfc-v2-workflow-list-error { display: grid; gap: 10px; border: 1px solid #cb7184; border-radius: 10px; margin: 12px; }
+.nfc-v2-workflow-list-error p { margin: 0; }
+.nfc-v2-workflow-list-error strong { color: var(--nfc-wfl-text); }
+.nfc-v2-workflow-list-loading { display: flex; align-items: center; gap: 9px; }
+.nfc-v2-workflow-list-loading .nfc-console-spinner { width: 17px; height: 17px; border-radius: 50%; border: 2px solid var(--nfc-wfl-accent); border-right-color: transparent; animation: nfc-console-spin .75s linear infinite; }
+.nfc-v2-workflow-list-page .nfc-console-pagination { border-color: var(--nfc-wfl-line); }
+.nfc-v2-workflow-list-page :is(button, input, select):focus-visible { outline: 2px solid var(--nfc-wfl-accent); outline-offset: 2px; }
+.nfc-v2-workflow-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; padding: 0; clip: rect(0,0,0,0); white-space: nowrap; }
+@media (max-width: 767px) {
+  .nfc-v2-workflow-list-page .nfc-page-actions { width: 100%; }
+  .nfc-v2-workflow-archive-filter, .nfc-v2-workflow-list-page .nfc-page-actions .nfc-console-button { min-height: 44px; }
+  .nfc-v2-workflow-mobile-list { display: grid; gap: 11px; padding: 12px; }
+  .nfc-v2-workflow-mobile-list .nfc-workflow-mobile-card { background: var(--nfc-wfl-bg); border: 1px solid var(--nfc-wfl-line); border-radius: 11px; padding: 14px; }
+  .nfc-v2-workflow-mobile-list .nfc-v2-workflow-actions .nfc-console-button { min-height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nfc-v2-workflow-list-loading .nfc-console-spinner { animation: none; }
+  .nfc-v2-workflow-list-page * { transition: none; }
+}
