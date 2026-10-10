@@ -24,6 +24,7 @@ export const DedupeScorerConfigEditor: React.FC<Props> = ({
   showReset = true,
 }) => {
   const config = value || createDefaultDedupeScorerConfig();
+  const instanceId = React.useId();
   const validation = validateScorerConfigForm(config);
 
   const updateConfig = (updater: (prev: DedupeScorerConfig) => DedupeScorerConfig) => {
@@ -173,7 +174,7 @@ export const DedupeScorerConfigEditor: React.FC<Props> = ({
         <p className="nfc-dedupe-config-intro">决定如何在重复项中权衡保留目标。</p>
         <div className="nfc-v2-scorer-options">
           <label className="nfc-v2-scorer-option">
-            <input type="radio" name="nfc-scorer-selection-mode"
+            <input type="radio" name={instanceId + "-selection-mode"}
               value="weighted" checked={config.selection_mode === 'weighted'}
               onChange={() => handleSelectionModeChange('weighted')} />
             <span><strong>加权评分模式 (Weighted)</strong>
@@ -183,7 +184,7 @@ export const DedupeScorerConfigEditor: React.FC<Props> = ({
             </span>
           </label>
           <label className="nfc-v2-scorer-option">
-            <input type="radio" name="nfc-scorer-selection-mode"
+            <input type="radio" name={instanceId + "-selection-mode"}
               value="balanced_by_bytes" checked={config.selection_mode === 'balanced_by_bytes'}
               onChange={() => handleSelectionModeChange('balanced_by_bytes')} />
             <span><strong>扫描根字节平衡 (Balanced by Scan Root)</strong>
@@ -193,7 +194,7 @@ export const DedupeScorerConfigEditor: React.FC<Props> = ({
             </span>
           </label>
           <label className="nfc-v2-scorer-option">
-            <input type="radio" name="nfc-scorer-selection-mode"
+            <input type="radio" name={instanceId + "-selection-mode"}
               value="recursive_directory_balanced_by_bytes"
               checked={config.selection_mode === 'recursive_directory_balanced_by_bytes'}
               onChange={() => handleSelectionModeChange('recursive_directory_balanced_by_bytes')} />
@@ -214,9 +215,9 @@ export const DedupeScorerConfigEditor: React.FC<Props> = ({
         )}
       </fieldset>
 
-      <section className="nfc-dedupe-config-card nfc-v2-scorer-card" aria-labelledby="nfc-path-priority-heading">
+      <section className="nfc-dedupe-config-card nfc-v2-scorer-card" aria-labelledby={instanceId + "-path-priority-heading"}>
         <div className="nfc-dedupe-config-heading nfc-v2-scorer-heading">
-          <h3 id="nfc-path-priority-heading">路径优先级规则 (Path Priority)</h3>
+          <h3 id={instanceId + "-path-priority-heading"}>路径优先级规则 (Path Priority)</h3>
           <span className={'nfc-v2-scorer-state' + (path_priority.enabled ? ' is-on' : '')}>
             {path_priority.enabled ? '已启用' : '已停用'}
           </span>
@@ -227,8 +228,8 @@ export const DedupeScorerConfigEditor: React.FC<Props> = ({
           </label>
         </div>
         <div className="nfc-dedupe-weight-row nfc-v2-scorer-weight">
-          <label htmlFor="nfc-path-priority-weight">因子权重 (0 - {MAX_WEIGHT})</label>
-          <input id="nfc-path-priority-weight" type="number" step={1} min={0} max={MAX_WEIGHT}
+          <label htmlFor={instanceId + "-path-priority-weight"}>因子权重 (0 - {MAX_WEIGHT})</label>
+          <input id={instanceId + "-path-priority-weight"} type="number" step={1} min={0} max={MAX_WEIGHT}
             value={path_priority.weight} className="nfc-dedupe-weight-input"
             onChange={event => handlePathPriorityWeightChange(event.target.value === '' ? null : event.target.valueAsNumber)}
             disabled={disabled || !path_priority.enabled} />
@@ -262,7 +263,6 @@ export const DedupeScorerConfigEditor: React.FC<Props> = ({
                       <span className="nfc-v2-sr-only">路径规则 #{idx + 1} 的匹配表达式</span>
                       <input type="text" value={rule.pattern} disabled={disabled}
                         aria-label={'路径规则 #' + (idx + 1) + ' 的匹配表达式'}
-                        maxLength={513}
                         placeholder={rule.scope === 'absolute' ? '/volume1/archive/*' : 'archive/*'}
                         onChange={event => handleUpdatePathRule(idx, 'pattern', event.target.value)} />
                     </label>
@@ -290,9 +290,9 @@ export const DedupeScorerConfigEditor: React.FC<Props> = ({
         )}
       </section>
 
-      <section className="nfc-dedupe-config-card nfc-v2-scorer-card" aria-labelledby="nfc-preferred-extension-heading">
+      <section className="nfc-dedupe-config-card nfc-v2-scorer-card" aria-labelledby={instanceId + "-preferred-extension-heading"}>
         <div className="nfc-dedupe-config-heading nfc-v2-scorer-heading">
-          <h3 id="nfc-preferred-extension-heading">优先扩展名 (Preferred Extension)</h3>
+          <h3 id={instanceId + "-preferred-extension-heading"}>优先扩展名 (Preferred Extension)</h3>
           <span className={'nfc-v2-scorer-state' + (preferred_extension.enabled ? ' is-on' : '')}>
             {preferred_extension.enabled ? '已启用' : '已停用'}
           </span>
@@ -303,8 +303,8 @@ export const DedupeScorerConfigEditor: React.FC<Props> = ({
           </label>
         </div>
         <div className="nfc-dedupe-weight-row nfc-v2-scorer-weight">
-          <label htmlFor="nfc-extension-weight">因子权重 (0 - {MAX_WEIGHT})</label>
-          <input id="nfc-extension-weight" type="number" step={1} min={0} max={MAX_WEIGHT}
+          <label htmlFor={instanceId + "-extension-weight"}>因子权重 (0 - {MAX_WEIGHT})</label>
+          <input id={instanceId + "-extension-weight"} type="number" step={1} min={0} max={MAX_WEIGHT}
             value={preferred_extension.weight} className="nfc-dedupe-weight-input"
             disabled={disabled || !preferred_extension.enabled}
             onChange={event => handleExtWeightChange(event.target.value === '' ? null : event.target.valueAsNumber)} />
@@ -327,7 +327,7 @@ export const DedupeScorerConfigEditor: React.FC<Props> = ({
                     <span className="nfc-dedupe-rule-index" aria-hidden="true">#{idx + 1}</span>
                     <label className="nfc-v2-scorer-rule-pattern">
                       <span className="nfc-v2-sr-only">扩展名规则 #{idx + 1}</span>
-                      <input type="text" value={ext} disabled={disabled} maxLength={65}
+                      <input type="text" value={ext} disabled={disabled}
                         aria-label={'扩展名规则 #' + (idx + 1)}
                         placeholder="例如 .flac 或 mp4"
                         onChange={event => handleUpdateExtension(idx, event.target.value)} />
@@ -362,20 +362,20 @@ export const DedupeScorerConfigEditor: React.FC<Props> = ({
           <div className="nfc-v2-scorer-mtime-options">
             <span className="nfc-v2-scorer-label">时间偏好策略</span>
             <div className="nfc-v2-scorer-options is-inline">
-              <label className="nfc-v2-scorer-option"><input type="radio" name="nfc-scorer-mtime-mode"
+              <label className="nfc-v2-scorer-option"><input type="radio" name={instanceId + "-mtime-mode"}
                 checked={mtime.mode === 'none'} onChange={() => handleMtimeModeChange('none')} />
                 不参与排序 (None)</label>
-              <label className="nfc-v2-scorer-option"><input type="radio" name="nfc-scorer-mtime-mode"
+              <label className="nfc-v2-scorer-option"><input type="radio" name={instanceId + "-mtime-mode"}
                 checked={mtime.mode === 'newest'} onChange={() => handleMtimeModeChange('newest')} />
                 偏好最新文件 (Newest)</label>
-              <label className="nfc-v2-scorer-option"><input type="radio" name="nfc-scorer-mtime-mode"
+              <label className="nfc-v2-scorer-option"><input type="radio" name={instanceId + "-mtime-mode"}
                 checked={mtime.mode === 'oldest'} onChange={() => handleMtimeModeChange('oldest')} />
                 偏好最旧文件 (Oldest)</label>
             </div>
           </div>
           <div className="nfc-dedupe-weight-row nfc-v2-scorer-weight">
-            <label htmlFor="nfc-mtime-weight">因子权重 (0 - {MAX_WEIGHT})</label>
-            <input id="nfc-mtime-weight" type="number" step={1} min={0} max={MAX_WEIGHT}
+            <label htmlFor={instanceId + "-mtime-weight"}>因子权重 (0 - {MAX_WEIGHT})</label>
+            <input id={instanceId + "-mtime-weight"} type="number" step={1} min={0} max={MAX_WEIGHT}
               value={mtime.weight} className="nfc-dedupe-weight-input"
               disabled={disabled || mtime.mode === 'none'}
               onChange={event => handleMtimeWeightChange(event.target.value === '' ? null : event.target.valueAsNumber)} />
