@@ -1,0 +1,116 @@
+/* Console v2 identity lineage and storage decisions: server values are display-only. */
+.nfc-v2-identity-panel, .nfc-v2-storage-action {
+  --nfc-safe-paper: #fff; --nfc-safe-surface: #f6f9fc; --nfc-safe-text: #1c293d;
+  --nfc-safe-muted: #607187; --nfc-safe-border: #dce5ee; --nfc-safe-accent: #2878ef;
+  color: var(--nfc-safe-text); font-size: 12px; min-width: 0;
+}
+[data-theme='dark'] .nfc-v2-identity-panel,
+[data-theme='dark'] .nfc-v2-storage-action {
+  --nfc-safe-paper: #1a2434; --nfc-safe-surface: #222e41; --nfc-safe-text: #f0f4fa;
+  --nfc-safe-muted: #b3c3d6; --nfc-safe-border: #36435a; --nfc-safe-accent: #83b5ff;
+}
+.nfc-v2-safety-advisory, .nfc-v2-storage-action-note {
+  display: flex; align-items: flex-start; gap: 10px; min-width: 0; line-height: 1.65;
+  padding: 13px 15px; border: 1px solid var(--nfc-safe-border);
+  background: var(--nfc-safe-surface); border-radius: 10px;
+  color: var(--nfc-safe-text);
+}
+.nfc-v2-safety-advisory svg, .nfc-v2-storage-action-note svg { flex: 0 0 auto; color: var(--nfc-safe-accent); margin-top: 1px; }
+.nfc-v2-safety-advisory.is-verified { border-color: #389d80; }
+.nfc-v2-safety-advisory.is-verified svg { color: #389d80; }
+.nfc-v2-safety-advisory p, .nfc-v2-storage-action-note p { margin: 4px 0 0; color: var(--nfc-safe-muted); }
+.nfc-v2-safety-card {
+  border: 1px solid var(--nfc-safe-border); border-radius: 13px;
+  background: var(--nfc-safe-paper); padding: 17px; margin-top: 13px;
+}
+.nfc-v2-safety-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+.nfc-v2-safety-heading h3 { margin: 0; display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  font-size: 13px; color: var(--nfc-safe-text); }
+.nfc-v2-safety-tag, .nfc-v2-storage-action-tag {
+  padding: 4px 8px; display: inline-flex; border-radius: 7px; border: 1px solid var(--nfc-safe-border);
+  color: var(--nfc-safe-muted); background: var(--nfc-safe-surface); font-size: 11px; font-weight: 650;
+}
+.nfc-v2-safety-tag.is-good { color: #197a5c; border-color: #8dbba9; }
+[data-theme='dark'] .nfc-v2-safety-tag.is-good { color: #75dbba; }
+.nfc-v2-safety-facts {
+  display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 13px 18px;
+  margin: 0; padding: 0;
+}
+.nfc-v2-safety-fact { min-width: 0; border-bottom: 1px solid var(--nfc-safe-border); padding-bottom: 12px; }
+.nfc-v2-safety-fact.is-full { grid-column: 1 / -1; }
+.nfc-v2-safety-fact dt, .nfc-v2-storage-capability-facts dt {
+  display: flex; align-items: center; gap: 5px; margin-bottom: 6px;
+  color: var(--nfc-safe-muted); line-height: 1.6; font-weight: 620;
+}
+.nfc-v2-safety-fact dd, .nfc-v2-storage-capability-facts dd {
+  margin: 0; min-width: 0; overflow-wrap: anywhere; color: var(--nfc-safe-text);
+}
+.nfc-v2-safety-digest { display: inline-flex; align-items: flex-start; flex-wrap: wrap; gap: 6px; max-width: 100%; }
+.nfc-v2-safety-digest code {
+  overflow-wrap: anywhere; user-select: text; font-family: ui-monospace,SFMono-Regular,Consolas,monospace;
+  font-size: 11px; line-height: 1.7; color: var(--nfc-safe-text);
+}
+.nfc-v2-safety-digest.is-primary code { font-weight: 700; }
+.nfc-v2-safety-digest .nfc-console-button { font-size: 11px; min-height: 28px; padding: 3px 7px; }
+.nfc-v2-safety-root-list { display: grid; gap: 6px; }
+.nfc-v2-identity-panel :is(button, input, select):focus-visible,
+.nfc-v2-storage-action :is(button, input, select):focus-visible {
+  outline: 2px solid var(--nfc-safe-accent); outline-offset: 2px;
+}
+.nfc-v2-storage-action .nfc-storage-action-header {
+  display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 12px; margin-bottom: 13px;
+}
+.nfc-v2-storage-action-tag.is-quarantine { color: var(--nfc-safe-accent); }
+.nfc-v2-storage-action-tag.is-hardlink { color: #ae7828; border-color: #cc9b53; }
+.nfc-v2-storage-action-tag.is-reflink { color: #197a5c; border-color: #8dbba9; }
+[data-theme='dark'] .nfc-v2-storage-action-tag.is-hardlink { color: #e8bb79; }
+[data-theme='dark'] .nfc-v2-storage-action-tag.is-reflink { color: #75dbba; }
+.nfc-v2-storage-action-options {
+  display: flex; flex-wrap: wrap; padding: 0; border: none; margin: 0 0 15px;
+  gap: 8px; min-width: 0;
+}
+.nfc-v2-storage-action-option {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 42px;
+  padding: 0 12px; border: 1px solid var(--nfc-safe-border); border-radius: 10px;
+  color: var(--nfc-safe-text); background: var(--nfc-safe-paper); font-weight: 670; cursor: pointer;
+}
+.nfc-v2-storage-action-option input { accent-color: var(--nfc-safe-accent); }
+.nfc-v2-storage-action-option.is-selected {
+  border-color: var(--nfc-safe-accent); background: var(--nfc-safe-surface);
+}
+.nfc-v2-storage-action-option:has(input:disabled) { cursor: not-allowed; opacity: .57; }
+.nfc-v2-storage-action-note { margin: 11px 0; }
+.nfc-v2-storage-action-note.is-warning { border-color: #cf9b50; }
+.nfc-v2-storage-action-note.is-error { border-color: #cc3c4e; }
+.nfc-v2-storage-action-note.is-error svg { color: #cc3c4e; }
+.nfc-v2-storage-capability {
+  background: var(--nfc-safe-surface); border: 1px solid var(--nfc-safe-border);
+  padding: 14px; border-radius: 12px; margin-top: 15px; min-width: 0;
+}
+.nfc-v2-storage-capability .nfc-storage-capability-heading {
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between;
+}
+.nfc-v2-storage-capability-title { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.nfc-v2-capability-badge { font-size: 10px; letter-spacing: .025em; font-weight: 740;
+  border-radius: 7px; padding: 4px 7px; border: 1px solid var(--nfc-safe-border); }
+.nfc-v2-capability-badge.is-supported { color: #197a5c; border-color: #68ad95; }
+.nfc-v2-capability-badge.is-unsupported { color: #b73e55; border-color: #d2868e; }
+.nfc-v2-capability-badge.is-unknown { color: #ae7828; border-color: #cf9b50; }
+[data-theme='dark'] .nfc-v2-capability-badge.is-supported { color: #75dbba; }
+[data-theme='dark'] .nfc-v2-capability-badge.is-unsupported { color: #ffaab2; }
+[data-theme='dark'] .nfc-v2-capability-badge.is-unknown { color: #e8bb79; }
+.nfc-v2-storage-capability-warning { color: var(--nfc-safe-muted); line-height: 1.7; margin: 13px 0; }
+.nfc-v2-storage-capability-facts { display: grid; gap: 10px; padding: 0; margin: 0; }
+.nfc-v2-storage-capability-facts > div { display: grid; grid-template-columns: minmax(120px,30%) minmax(0,1fr);
+  padding: 7px 0; border-bottom: 1px solid var(--nfc-safe-border); gap: 12px; }
+.nfc-v2-storage-capability-facts code { color: var(--nfc-safe-text); overflow-wrap: anywhere; }
+@media (max-width: 767px) {
+  .nfc-v2-safety-card { padding: 12px; }
+  .nfc-v2-safety-facts { grid-template-columns: minmax(0,1fr); }
+  .nfc-v2-storage-action-option { flex: 1 1 125px; min-height: 44px; }
+  .nfc-v2-storage-capability .nfc-console-button { min-height: 44px; }
+  .nfc-v2-storage-capability-facts > div { grid-template-columns: minmax(0,1fr); gap: 4px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nfc-v2-identity-panel *, .nfc-v2-storage-action * { animation-duration: 0.01ms; transition-duration: 0.01ms; }
+}
