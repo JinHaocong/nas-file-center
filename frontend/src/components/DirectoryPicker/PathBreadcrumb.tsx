@@ -1,6 +1,6 @@
 import React from 'react';
-import { Breadcrumb, Button, Dropdown, MenuProps } from 'antd';
-import { HomeOutlined, FolderOutlined, DownOutlined } from '@ant-design/icons';
+import { ConsoleIcon } from '../ui/ConsoleIcon';
+import { buildDirectoryBreadcrumb } from './path_model';
 
 interface PathBreadcrumbProps {
   currentPath: string;
@@ -8,99 +8,48 @@ interface PathBreadcrumbProps {
   onNavigate: (path: string) => void;
 }
 
+/** Breadcrumb navigation derives only from the server-reported allowed roots. */
 export const PathBreadcrumb: React.FC<PathBreadcrumbProps> = ({
-  currentPath,
-  allowedRoots = [],
-  onNavigate,
+  currentPath, allowedRoots = [], onNavigate,
 }) => {
-  if (!currentPath) {
-    return null;
-  }
+  const location = buildDirectoryBreadcrumb(currentPath, allowedRoots);
+  if (!location) return null;
 
-  const cleanCurrent = currentPath.replace(/\/+$/, '');
-
-  // Find the most specific matching allowedRoot for currentPath
-  const matchingRoots = allowedRoots
-    .filter((r) => cleanCurrent === r.replace(/\/+$/, '') || cleanCurrent.startsWith(r.replace(/\/+$/, '') + '/'))
-    .sort((a, b) => b.length - a.length);
-
-  const baseRoot = matchingRoots[0] || (allowedRoots.length > 0 ? allowedRoots[0].replace(/\/+$/, '') : cleanCurrent);
-
-  // Build root switcher or root button
-  const rootMenuItems: MenuProps['items'] = allowedRoots.map((root) => ({
-    key: root,
-    label: root,
-    icon: <FolderOutlined />,
-    onClick: () => onNavigate(root),
-  }));
-
-  const rootButton = allowedRoots.length > 1 ? (
-    <Dropdown menu={{ items: rootMenuItems }} trigger={['click']}>
-      <Button
-        type="link"
-        size="small"
-        icon={<HomeOutlined />}
-        className="nfc-path-breadcrumb-root"
-      >
-        {baseRoot} <DownOutlined className="nfc-path-breadcrumb-chevron" />
-      </Button>
-    </Dropdown>
-  ) : (
-    <Button
-      type="link"
-      size="small"
-      icon={<HomeOutlined />}
-      className="nfc-path-breadcrumb-root"
-      onClick={() => onNavigate(baseRoot)}
-    >
-      {baseRoot}
-    </Button>
-  );
-
-  const items = [
-    {
-      title: rootButton,
-    },
-  ];
-
-  // Derive sub-segments relative to baseRoot
-  const cleanBaseRoot = baseRoot.replace(/\/+$/, '');
-  let relPath = '';
-  if (cleanCurrent === cleanBaseRoot) {
-    relPath = '';
-  } else if (cleanCurrent.startsWith(cleanBaseRoot + '/')) {
-    relPath = cleanCurrent.slice(cleanBaseRoot.length).replace(/^\/+/, '');
-  }
-
-  if (relPath) {
-    const segments = relPath.split('/').filter(Boolean);
-    segments.forEach((seg, idx) => {
-      const isLast = idx === segments.length - 1;
-      const target = `${cleanBaseRoot}/${segments.slice(0, idx + 1).join('/')}`;
-
-      items.push({
-        title: isLast ? (
-          <span className="nfc-path-breadcrumb-current">
-            <FolderOutlined className="nfc-path-breadcrumb-folder" />
-            {seg}
-          </span>
-        ) : (
-          <Button
-            type="link"
-            size="small"
-            className="nfc-path-breadcrumb-link"
-            onClick={() => onNavigate(target)}
-          >
-            {seg}
-          </Button>
-        ),
-      });
-    });
-  }
+  const roots = [...new Set(allowedRoots.map(root => root.replace(/\/+$/, '') || '/'))];
 
   return (
-    <div className="nfc-path-breadcrumb">
-      <Breadcrumb items={items} />
-    </div>
+    <nav className="nfc-path-breadcrumb nfc-v2-path-breadcrumb" aria-label="目录位置">
+      {roots.length > 1 ? (
+        <label className="nfc-v2-breadcrumb-root-select">
+          <ConsoleIcon name="folder" size={15} />
+          <select aria-label="切换允许的根目录" value={location.baseRoot}
+            onChange={event => onNavigate(event.target.value)}>
+            {roots.map(root => <option key={root} value={root}>{root}</option>)}
+          </select>
+          <ConsoleIcon name="chevron-down" size={13} />
+        </label>
+      ) : (
+        <button type="button" className="nfc-v2-breadcrumb-link nfc-path-breadcrumb-root"
+          onClick={() => onNavigate(location.baseRoot)}>
+          <ConsoleIcon name="folder" size={15} />
+          <span>{location.baseRoot}</span>
+        </button>
+      )}
+      {location.segments.map((segment, index) => (
+        <React.Fragment key={segment.path}>
+          <ConsoleIcon name="chevron-right" size={13} className="nfc-v2-breadcrumb-separator" />
+          {index === location.segments.length - 1 ? (
+            <span className="nfc-path-breadcrumb-current" aria-current="location">
+              {segment.name}
+            </span>
+          ) : (
+            <button type="button" className="nfc-v2-breadcrumb-link nfc-path-breadcrumb-link"
+              onClick={() => onNavigate(segment.path)}>
+              {segment.name}
+            </button>
+          )}
+        </React.Fragment>
+      ))}
+    </nav>
   );
 };

@@ -20,6 +20,7 @@ import './styles/console-v2-task-overlays.css';
 import './styles/console-v2-scans.css';
 import './styles/console-v2-scan-detail.css';
 import './styles/console-v2-scan-create.css';
+import './styles/console-v2-directory-picker.css';
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>

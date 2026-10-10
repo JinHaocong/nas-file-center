@@ -296,10 +296,16 @@ def test_path_breadcrumb_allowed_roots_relative_navigation_contract():
         / "PathBreadcrumb.tsx"
     )
     content = breadcrumb_file.read_text(encoding="utf-8")
-    # Verify relative derivation logic based on matched allowedRoot
-    assert "matchingRoots" in content
-    assert "cleanBaseRoot" in content
-    assert "cleanCurrent.slice(cleanBaseRoot.length)" in content
+    # The React breadcrumb now delegates navigation derivation to a testable
+    # pure module. Retain the boundary contract instead of its old variable names.
+    model_file = breadcrumb_file.with_name("path_model.ts")
+    model = model_file.read_text(encoding="utf-8")
+    assert "buildDirectoryBreadcrumb(currentPath, allowedRoots)" in content
+    assert "buildDirectoryBreadcrumb(" in model
+    assert "matches = roots.filter" in model
+    assert "current.startsWith(root + '/')" in model
+    assert ".sort((a, b) => b.length - a.length)" in model
+    assert "parts.some(part => part === '.' || part === '..')" in model
 
 
 def test_filesystem_natural_sort_ordering(tmp_path: Path):
