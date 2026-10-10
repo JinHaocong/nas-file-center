@@ -1,0 +1,108 @@
+/* Console v2: classic Plan and read-only SHA256 diagnosis overlays. */
+.nfc-v2-dedupe-dialog {
+  --nfc-dedupe-paper: #fff;
+  --nfc-dedupe-canvas: #f6f9fc;
+  --nfc-dedupe-text: #18263a;
+  --nfc-dedupe-muted: #64748b;
+  --nfc-dedupe-line: #e1e8f1;
+  --nfc-dedupe-accent: #2878ef;
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: min(620px, calc(100vw - 24px)); max-height: min(92dvh, 1000px);
+  z-index: 1221; overflow-y: auto; overscroll-behavior: contain;
+  border: 1px solid var(--nfc-dedupe-line); border-radius: 16px;
+  background: var(--nfc-dedupe-paper); color: var(--nfc-dedupe-text);
+  padding: 22px 24px; box-shadow: 0 24px 65px rgba(5, 22, 45, .23);
+  font-family: inherit; font-size: 12px;
+}
+[data-theme='dark'] .nfc-v2-dedupe-dialog {
+  --nfc-dedupe-paper: #1a2434;
+  --nfc-dedupe-canvas: #222e41;
+  --nfc-dedupe-text: #f0f4fa;
+  --nfc-dedupe-muted: #a9bbd1;
+  --nfc-dedupe-line: #36435a;
+  --nfc-dedupe-accent: #83b5ff;
+}
+.nfc-v2-dedupe-overlay { z-index: 1220; }
+.nfc-v2-diagnostic-dialog { width: min(860px, calc(100vw - 24px)); }
+.nfc-v2-dedupe-dialog-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
+.nfc-v2-dedupe-dialog-header h2 { margin: 0; color: var(--nfc-dedupe-text); font-size: 18px; font-weight: 750; }
+.nfc-v2-dedupe-dialog-header p { margin: 8px 0 0; color: var(--nfc-dedupe-muted); font-size: 11px; }
+.nfc-v2-dedupe-close { display: inline-flex; padding: 6px; border: 0; border-radius: 7px; background: transparent; color: var(--nfc-dedupe-text); cursor: pointer; }
+.nfc-v2-dedupe-close:disabled { opacity: .5; cursor: not-allowed; }
+.nfc-v2-dedupe-note { display: flex; gap: 10px; align-items: flex-start; background: var(--nfc-dedupe-canvas);
+  border: 1px solid var(--nfc-dedupe-line); border-radius: 10px; color: var(--nfc-dedupe-muted);
+  padding: 12px 13px; line-height: 1.65; margin-bottom: 17px; }
+.nfc-v2-dedupe-note svg { flex: 0 0 auto; color: #258868; }
+.nfc-v2-dedupe-form { display: grid; gap: 15px; }
+.nfc-v2-dedupe-field { min-width: 0; display: grid; gap: 8px; }
+.nfc-v2-dedupe-field label { color: var(--nfc-dedupe-text); font-weight: 680; }
+.nfc-v2-dedupe-field input, .nfc-v2-dedupe-field select, .nfc-v2-dedupe-field textarea {
+  min-width: 0; width: 100%; border: 1px solid var(--nfc-dedupe-line); border-radius: 9px;
+  padding: 10px 12px; color: var(--nfc-dedupe-text); background: var(--nfc-dedupe-paper);
+  font: inherit; font-size: 12px; line-height: 1.6;
+}
+.nfc-v2-dedupe-field textarea { resize: vertical; }
+.nfc-v2-dedupe-field input:disabled, .nfc-v2-dedupe-field select:disabled, .nfc-v2-dedupe-field textarea:disabled { opacity: .6; }
+.nfc-v2-dedupe-field :is(input,select,textarea):focus-visible,
+.nfc-v2-dedupe-dialog button:focus-visible { outline: 2px solid var(--nfc-dedupe-accent); outline-offset: 2px; }
+.nfc-v2-dedupe-safety { display: flex; gap: 9px; align-items: flex-start; margin: 0; font-size: 11px; color: var(--nfc-dedupe-muted); line-height: 1.65; }
+.nfc-v2-dedupe-safety svg { flex: 0 0 auto; color: #258868; }
+.nfc-v2-dedupe-error { background: #fff0f3; color: #af2f4b; border: 1px solid #f0c4d0; padding: 10px 12px; border-radius: 8px; }
+[data-theme='dark'] .nfc-v2-dedupe-error { color: #ffc4d3; background: #462334; border-color: #774355; }
+.nfc-v2-dedupe-actions { display: flex; gap: 9px; justify-content: flex-end; flex-wrap: wrap;
+  border-top: 1px solid var(--nfc-dedupe-line); padding-top: 15px; }
+.nfc-v2-dedupe-actions.is-leading { border: 0; justify-content: flex-start; padding: 0; }
+.nfc-v2-dedupe-dialog .nfc-console-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  border: 1px solid var(--nfc-dedupe-line); background: var(--nfc-dedupe-paper); color: var(--nfc-dedupe-text);
+  border-radius: 8px; padding: 0 13px; min-height: 38px; cursor: pointer; font-size: 12px; font-weight: 660; }
+.nfc-v2-dedupe-dialog .nfc-console-button-primary { background: #2878ef; border-color: #2878ef; color: #fff; }
+.nfc-v2-dedupe-dialog .nfc-console-button:disabled { opacity: .55; cursor: not-allowed; }
+.nfc-v2-dedupe-dialog .nfc-console-spinner { display: inline-block; width: 14px; height: 14px;
+  border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: nfc-v2-dedupe-spin .8s linear infinite; }
+@keyframes nfc-v2-dedupe-spin { to { transform: rotate(360deg); } }
+.nfc-v2-diagnostic-stack { display: grid; gap: 17px; }
+.nfc-v2-diagnostic-stack .nfc-v2-dedupe-note { margin: 0; }
+.nfc-v2-diagnostic-summary { display: grid; gap: 6px; margin-bottom: 14px; padding: 13px 14px;
+  background: var(--nfc-dedupe-canvas); border: 1px solid var(--nfc-dedupe-line); border-radius: 10px; }
+.nfc-v2-diagnostic-summary strong { font-size: 13px; }
+.nfc-v2-diagnostic-summary.is-error { border-color: #da8899; }
+.nfc-v2-diagnostic-summary.is-success { border-color: #51ab91; }
+.nfc-v2-diagnostic-summary.is-warning { border-color: #e4b76a; }
+.nfc-v2-diagnostic-summary span { color: var(--nfc-dedupe-muted); line-height: 1.7; }
+.nfc-v2-diagnostic-dialog .nfc-dedupe-diagnostic-path-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
+.nfc-v2-diagnostic-path { border: 1px solid var(--nfc-dedupe-line); border-radius: 10px; padding: 13px; min-width: 0; }
+.nfc-v2-diagnostic-path .nfc-dedupe-diagnostic-path-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.nfc-v2-diagnostic-tag { border: 1px solid var(--nfc-dedupe-line); border-radius: 6px; padding: 3px 7px;
+  background: var(--nfc-dedupe-canvas); color: var(--nfc-dedupe-muted); font-size: 11px; }
+.nfc-v2-diagnostic-tag.is-warning { color: #ad7330; }
+.nfc-v2-diagnostic-facts, .nfc-v2-diagnostic-comparison { display: grid;
+  grid-template-columns: repeat(2,minmax(0,1fr)); gap: 11px 15px; margin: 15px 0 0; }
+.nfc-v2-diagnostic-facts > div, .nfc-v2-diagnostic-comparison > div { min-width: 0; }
+.nfc-v2-diagnostic-facts .is-wide { grid-column: 1/-1; }
+.nfc-v2-diagnostic-facts dt, .nfc-v2-diagnostic-comparison dt { color: var(--nfc-dedupe-muted); font-size: 11px; margin-bottom: 5px; }
+.nfc-v2-diagnostic-facts dd, .nfc-v2-diagnostic-comparison dd { margin: 0; overflow-wrap: anywhere; }
+.nfc-v2-diagnostic-hash { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.nfc-v2-diagnostic-hash button { border: 1px solid var(--nfc-dedupe-line); background: var(--nfc-dedupe-canvas);
+  color: var(--nfc-dedupe-text); border-radius: 6px; padding: 5px 7px; cursor: pointer; }
+.nfc-v2-diagnostic-comparison { grid-template-columns: repeat(3,minmax(0,1fr)); padding: 13px; background: var(--nfc-dedupe-canvas);
+  border-radius: 10px; border: 1px solid var(--nfc-dedupe-line); margin: 14px 0; }
+.nfc-v2-diagnostic-dialog .nfc-dedupe-diagnostic-scan { margin-top: 16px; }
+.nfc-v2-diagnostic-dialog .nfc-dedupe-diagnostic-section-heading { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.nfc-v2-diagnostic-dialog .nfc-dedupe-diagnostic-section-heading > div { display: grid; gap: 5px; }
+.nfc-v2-diagnostic-dialog .nfc-dedupe-diagnostic-section-heading span { color: var(--nfc-dedupe-muted); }
+.nfc-v2-diagnostic-dialog .nfc-dedupe-diagnostic-scan-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.nfc-v2-diagnostic-dialog .nfc-dedupe-diagnostic-scan-path { display: grid; gap: 7px; min-width: 0;
+  border: 1px solid var(--nfc-dedupe-line); border-radius: 9px; padding: 12px; }
+.nfc-v2-diagnostic-dialog .nfc-dedupe-diagnostic-filter-note { display: flex; flex-wrap: wrap; gap: 7px;
+  margin-top: 14px; padding: 12px; border: 1px solid var(--nfc-dedupe-line); border-radius: 8px; }
+.nfc-v2-diagnostic-dialog .nfc-dedupe-diagnostic-filter-note span { background: var(--nfc-dedupe-canvas);
+  color: var(--nfc-dedupe-muted); border-radius: 6px; padding: 4px 6px; }
+@media (max-width: 767px) {
+  .nfc-v2-dedupe-dialog { padding: 17px; width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
+  .nfc-v2-diagnostic-dialog .nfc-dedupe-diagnostic-path-grid,
+  .nfc-v2-diagnostic-dialog .nfc-dedupe-diagnostic-scan-grid { grid-template-columns: 1fr; }
+  .nfc-v2-diagnostic-comparison { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nfc-v2-dedupe-dialog .nfc-console-spinner { animation: none; border-right-color: currentColor; }
+}
