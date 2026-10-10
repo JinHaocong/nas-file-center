@@ -17,7 +17,7 @@ export const FilterStepEditor: React.FC<FilterStepEditorProps> = ({ step, onChan
       <FilterBuilder
         value={step.filter}
         readOnly={readOnly}
-        onChange={(newCond: FilterNode) => onChange({ ...step, filter: newCond })}
+        onChange={(newCond: FilterNode) => { if (!readOnly) onChange({ ...step, filter: newCond }); }}
       />
     </div>
   );
