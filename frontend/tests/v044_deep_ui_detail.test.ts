@@ -46,7 +46,7 @@ describe('v0.4.4 deep UI detail and mobile system', () => {
     assert.match(revisions, /<ConsoleSheet/);
     assert.match(sharedSheet, /nfc-overlay-drawer/);
     assert.match(revisions, /nfc-v2-revision-mobile-list/);
-    assert.match(revisionCss, /@media \\(max-width: 767px\\)/);
+    assert.ok(revisionCss.includes('@media (max-width: 767px)'));
     assert.match(revisions, /nfc-code-block/);
   });
 
