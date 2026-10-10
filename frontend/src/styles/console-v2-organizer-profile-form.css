@@ -8,6 +8,10 @@
   --nfc-surface-2: #f5f8fc;
   --nfc-info-soft: #edf4ff;
   --nfc-accent: #2875e9;
+  --v2-org-line: var(--nfc-hairline);
+  --v2-org-text: var(--nfc-text);
+  --v2-org-muted: var(--nfc-text-muted);
+  --v2-org-surface: var(--nfc-surface-1);
   box-sizing: border-box;
   position: fixed; top: 50%; left: 50%; z-index: 1141;
   width: min(760px, calc(100vw - 24px)); max-height: min(92dvh, 920px);

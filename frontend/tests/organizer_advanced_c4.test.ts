@@ -104,7 +104,10 @@ describe('Organizer Advanced Rules C4 frontend contract', () => {
 
     assert.ok(defaults.includes('cloneOrganizerAdvancedRules'));
     assert.ok(defaults.includes('advanced_rules: cloneOrganizerAdvancedRules'));
-    assert.ok(modal.includes('advanced_rules: editingProfile.advanced_rules'));
+    const profileAdapter = read('src/utils/organizerProfileForm.ts');
+    assert.ok(modal.includes('organizerProfileFormPayload(draft)'));
+    assert.ok(profileAdapter.includes('advanced_rules: profile.advanced_rules'));
+    assert.ok(profileAdapter.includes('advanced_rules: normalized.advanced_rules'));
     const nativeFields = read('src/components/workflows/OrganizerSnapshotFields.tsx');
     const snapshotAdapter = read('src/utils/workflowOrganizerSnapshot.ts');
     assert.ok(workflowEditor.includes('importProfileToSnapshot(fresh)'));
