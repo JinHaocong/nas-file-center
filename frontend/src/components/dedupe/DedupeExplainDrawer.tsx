@@ -1,35 +1,17 @@
 import React from 'react';
+import type { DedupePreviewMemberRow } from '../../types/dedupe';
 import {
-  Drawer,
-  Descriptions,
-  Tag,
-  Typography,
-  Table,
-  Card,
-  Alert,
-  Space,
-  Divider,
-} from 'antd';
-import {
-  CheckCircleOutlined,
-  CloseCircleOutlined,
-  InfoCircleOutlined,
-  CompassOutlined,
-} from '@ant-design/icons';
-import { DedupePreviewMemberRow, FactorContribution } from '../../types/dedupe';
-import {
-  formatScanRootLabel,
-  classifyMemberDecision,
+  formatScanRootLabel, classifyMemberDecision,
   isBalancerContributionExcludedFromFactors,
 } from '../../utils/dedupePreview';
 import {
-  formatOptionalGroupId,
-  formatOptionalFileSize,
-  findDuplicateGroupSiblings,
+  formatOptionalGroupId, formatOptionalFileSize, findDuplicateGroupSiblings,
 } from '../../utils/dedupePresentation';
 import { formatBytes } from '../../utils/format';
-
-const { Text } = Typography;
+import { ConsoleSheet } from '../ui/ConsoleSheet';
+import { ConsoleButton } from '../ui/ConsoleButton';
+import { ConsoleIcon } from '../ui/ConsoleIcon';
+import { useConsoleToast } from '../ui/ConsoleToast';
 
 interface Props {
   open: boolean;
@@ -38,309 +20,318 @@ interface Props {
   groupMembers?: DedupePreviewMemberRow[];
 }
 
+const DecisionTag: React.FC<{ decision?: string; eligible?: boolean; children?: React.ReactNode }> =
+  ({ decision, eligible, children }) => {
+    const cls = classifyMemberDecision(decision, eligible);
+    return (
+      <span className={'nfc-v2-dedupe-decision-tag is-' + cls.color}>
+        {children || cls.label}
+      </span>
+    );
+  };
+
+const Section: React.FC<{ title: string; children: React.ReactNode; aside?: React.ReactNode }> =
+  ({ title, children, aside }) => (
+    <section className="nfc-dedupe-surface-card nfc-v2-dedupe-explain-section">
+      <header className="nfc-v2-dedupe-explain-section-header">
+        <h3>{title}</h3>{aside}
+      </header>
+      {children}
+    </section>
+  );
+
+const Fact: React.FC<{ label: string; children: React.ReactNode }> =
+  ({ label, children }) => (
+    <div className="nfc-v2-dedupe-explain-fact">
+      <dt>{label}</dt>
+      <dd>{children}</dd>
+    </div>
+  );
+
+const Notice: React.FC<{ children: React.ReactNode; warning?: boolean }> =
+  ({ children, warning = false }) => (
+    <div className={'nfc-v2-dedupe-explain-notice' + (warning ? ' is-warning' : '')} role="note">
+      <ConsoleIcon name="shield-check" size={18} /> <span>{children}</span>
+    </div>
+  );
+
 const renderBucketBytes = (value?: Record<string, number>) => {
-  if (!value || Object.keys(value).length === 0) return <Text type="secondary">-</Text>;
+  if (!value || Object.keys(value).length === 0) return <span className="nfc-table-muted">-</span>;
   return (
-    <Space direction="vertical" size={2}>
+    <div className="nfc-v2-dedupe-explain-buckets">
       {Object.entries(value)
         .sort(([left], [right]) => left.localeCompare(right))
         .map(([bucket, bytes]) => (
-          <Text key={bucket} code>
-            {bucket}: {formatBytes(bytes)}
-          </Text>
+          <code key={bucket}>{bucket}: {formatBytes(bytes)}</code>
         ))}
-    </Space>
+    </div>
   );
 };
 
+/** Read-only explanation. Scores, reasons, eligibility and balance facts all come from the backend. */
 export const DedupeExplainDrawer: React.FC<Props> = ({
-  open,
-  onClose,
-  member,
-  groupMembers = [],
+  open, onClose, member, groupMembers = [],
 }) => {
-  if (!member) {
-    return null;
-  }
+  const toast = useConsoleToast();
+  if (!member) return null;
+
+  const copyValue = (value: string) => {
+    if (!navigator.clipboard?.writeText) {
+      toast.error('当前浏览器不支持复制');
+      return;
+    }
+    void navigator.clipboard.writeText(value)
+      .then(() => toast.success('已复制'))
+      .catch(() => toast.error('复制失败，请手动选择文本'));
+  };
+  const Copyable: React.FC<{ value: string }> = ({ value }) => (
+    <span className="nfc-v2-dedupe-explain-copy">
+      <code title={value}>{value}</code>
+      <ConsoleButton variant="ghost" size="sm" aria-label="复制内容"
+        onClick={() => copyValue(value)}>复制</ConsoleButton>
+    </span>
+  );
 
   const decisionCls = classifyMemberDecision(member.member_decision, member.eligible_as_keep);
   const factorContributions = (member.contributions || []).filter(
-    (c) => !isBalancerContributionExcludedFromFactors(c)
+    c => !isBalancerContributionExcludedFromFactors(c)
   );
   const balanceInfo = member.balance_info || member.group_balance_info;
   const siblings = findDuplicateGroupSiblings(member, groupMembers);
 
   return (
-    <Drawer
-        rootClassName="nfc-overlay-drawer nfc-dedupe-explain-drawer"
-      title={
-        <div className="nfc-drawer-title"><span className="nfc-drawer-title-kicker">Decision explain</span><div className="nfc-drawer-title-row"><span>去重决策分析</span>
-          <Tag color={decisionCls.color} className="nfc-decision-tag">
-            {decisionCls.label}
-          </Tag></div></div>
-      }
-      placement="right"
-      width={680}
-      open={open}
-      onClose={onClose}
-      destroyOnClose
-    >
-      <div className="nfc-overlay-stack nfc-dedupe-explain-stack">
+    <ConsoleSheet open={open} onClose={onClose} title="去重决策分析"
+      description="只读展示后端评分、资格、安全排除和容量平衡依据"
+      eyebrow="Decision explain" className="nfc-v2-dedupe-explain-sheet nfc-dedupe-explain-drawer"
+      titleAside={<DecisionTag decision={decisionCls.kind} eligible={member.eligible_as_keep} />}>
+      <div className="nfc-overlay-stack nfc-dedupe-explain-stack nfc-v2-dedupe-explain">
         {member.incomplete && (
-          <Alert
-            type="warning"
-            showIcon
-            message="缺少详细指标分析数据"
-            description="当前去重项缺少完整的后端 canonical 分析数据，无法展示详细的因子评分与决策依据。"
-          />
+          <Notice warning>
+            <strong>缺少详细指标分析数据。</strong>
+            当前去重项缺少完整的后端 canonical 分析数据，无法展示详细的因子评分与决策依据。
+          </Notice>
         )}
 
-        <Card size="small" title="文件基本信息" bordered={false} className="nfc-dedupe-surface-card">
-          <Descriptions className="nfc-detail-descriptions" column={1} size="small">
-            <Descriptions.Item label="绝对路径">
-              <Text copyable strong className="nfc-breakall">
-                {member.absolute_path}
-              </Text>
-            </Descriptions.Item>
+        <Section title="文件基本信息">
+          <dl className="nfc-v2-dedupe-explain-facts">
+            <Fact label="绝对路径"><Copyable value={member.absolute_path} /></Fact>
             {member.relative_path && (
-              <Descriptions.Item label="相对路径">
-                <Text className="nfc-breakall">{member.relative_path}</Text>
-              </Descriptions.Item>
+              <Fact label="相对路径"><code>{member.relative_path}</code></Fact>
             )}
-            <Descriptions.Item label="所属扫描根">
-              <Tag color="cyan">{formatScanRootLabel(member.scan_root_index, member.scan_root_path)}</Tag>
-            </Descriptions.Item>
-            <Descriptions.Item label="单文件大小">
-              <Text strong>{formatOptionalFileSize(member.group_file_size)}</Text>
-            </Descriptions.Item>
-            <Descriptions.Item label="重复组 ID">
-              <Tag color="purple">{formatOptionalGroupId(member.group_provenance_id)}</Tag>
-            </Descriptions.Item>
-          </Descriptions>
-        </Card>
+            <Fact label="所属扫描根">
+              <span className="nfc-v2-dedupe-explain-tag">{formatScanRootLabel(member.scan_root_index, member.scan_root_path)}</span>
+            </Fact>
+            <Fact label="单文件大小"><strong>{formatOptionalFileSize(member.group_file_size)}</strong></Fact>
+            <Fact label="重复组 ID"><span className="nfc-v2-dedupe-explain-tag">{formatOptionalGroupId(member.group_provenance_id)}</span></Fact>
+          </dl>
+        </Section>
 
-        <Card size="small" title="重复组级别摘要 (Group Summary)" bordered={false} className="nfc-dedupe-surface-card">
-          <Descriptions className="nfc-detail-descriptions" column={1} size="small">
+        <Section title="重复组级别摘要 (Group Summary)">
+          <dl className="nfc-v2-dedupe-explain-facts">
             {member.group_status && (
-              <Descriptions.Item label="组状态 (group_status)">
-                <Tag color={member.group_status === 'actionable' ? 'green' : 'orange'}>{member.group_status}</Tag>
-              </Descriptions.Item>
+              <Fact label="组状态 (group_status)">
+                <span className="nfc-v2-dedupe-explain-tag">{member.group_status}</span>
+              </Fact>
             )}
             {member.group_skip_reason && (
-              <Descriptions.Item label="组跳过原因 (group_skip_reason)">
-                <Text type="warning">{member.group_skip_reason}</Text>
-              </Descriptions.Item>
+              <Fact label="组跳过原因 (group_skip_reason)">
+                <span className="nfc-v2-dedupe-explain-warning">{member.group_skip_reason}</span>
+              </Fact>
             )}
             {member.group_recommended_keep_path && (
-              <Descriptions.Item label="组推荐保留路径 (group_recommended_keep_path)">
-                <Text copyable strong className="nfc-breakall">{member.group_recommended_keep_path}</Text>
-              </Descriptions.Item>
+              <Fact label="组推荐保留路径 (group_recommended_keep_path)">
+                <Copyable value={member.group_recommended_keep_path} />
+              </Fact>
             )}
-            <Descriptions.Item label="组可释放容量 (group_reclaimable_bytes)">
-              <Text strong className="nfc-success-text">{formatOptionalFileSize(member.group_reclaimable_bytes)}</Text>
-            </Descriptions.Item>
+            <Fact label="组可释放容量 (group_reclaimable_bytes)">
+              <strong>{formatOptionalFileSize(member.group_reclaimable_bytes)}</strong>
+            </Fact>
             {member.group_selection_reason && (
-              <Descriptions.Item label="组选择原因 (group_selection_reason)">
-                <Text>{member.group_selection_reason}</Text>
-              </Descriptions.Item>
+              <Fact label="组选择原因 (group_selection_reason)">{member.group_selection_reason}</Fact>
             )}
-          </Descriptions>
-        </Card>
+          </dl>
+        </Section>
 
-        <Card size="small" title="决策与资格判定" bordered={false} className="nfc-dedupe-surface-card">
-          <Descriptions className="nfc-detail-descriptions" column={1} size="small">
-            <Descriptions.Item label="最终决策 (Decision)">
-              <Space>
-                <Tag color={decisionCls.color} className="nfc-decision-tag">{decisionCls.label}</Tag>
-                {member.recommended_keep && <Tag color="green">推荐保留项</Tag>}
-                {member.is_top_candidate && <Tag color="blue">最高候选者</Tag>}
-              </Space>
-            </Descriptions.Item>
-            <Descriptions.Item label="可保留资格 (Eligible)">
+        <Section title="决策与资格判定">
+          <dl className="nfc-v2-dedupe-explain-facts">
+            <Fact label="最终决策 (Decision)">
+              <div className="nfc-v2-dedupe-explain-tags">
+                <DecisionTag decision={member.member_decision} eligible={member.eligible_as_keep} />
+                {member.recommended_keep && <span className="nfc-v2-dedupe-decision-tag is-success">推荐保留项</span>}
+                {member.is_top_candidate && <span className="nfc-v2-dedupe-decision-tag is-default">最高候选者</span>}
+              </div>
+            </Fact>
+            <Fact label="可保留资格 (Eligible)">
               {member.eligible_as_keep === true ? (
-                <Tag icon={<CheckCircleOutlined />} color="success">满足保留资格</Tag>
+                <span className="nfc-v2-dedupe-decision-tag is-success">
+                  <ConsoleIcon name="check-circle" size={15} /> 满足保留资格
+                </span>
               ) : member.eligible_as_keep === false ? (
-                <Tag icon={<CloseCircleOutlined />} color="warning">
+                <span className="nfc-v2-dedupe-decision-tag is-warning">
+                  <ConsoleIcon name="shield-check" size={15} />
                   受限不可保留 ({member.safety_reasons?.join(', ') || '安全策略排除'})
-                </Tag>
+                </span>
               ) : (
-                <Tag color="default">不可用 / -</Tag>
+                <span className="nfc-v2-dedupe-decision-tag is-default">不可用 / -</span>
               )}
-            </Descriptions.Item>
-            <Descriptions.Item label="决策原因 / 说明">
-              <Text>{member.selection_reason || member.group_selection_reason || '-'}</Text>
-            </Descriptions.Item>
-            <Descriptions.Item label="总评分 (Total Score)">
-              <Text strong className="nfc-dedupe-score-value">
+            </Fact>
+            <Fact label="决策原因 / 说明">
+              {member.selection_reason || member.group_selection_reason || '-'}
+            </Fact>
+            <Fact label="总评分 (Total Score)">
+              <strong className="nfc-dedupe-score-value">
                 {member.total_score !== undefined ? member.total_score.toLocaleString() : '-'}
-              </Text>
-            </Descriptions.Item>
+              </strong>
+            </Fact>
             {member.candidate_balance_bucket && (
-              <Descriptions.Item label="递归候选桶 (candidate_balance_bucket)">
-                <Text code copyable>{member.candidate_balance_bucket}</Text>
-              </Descriptions.Item>
+              <Fact label="递归候选桶 (candidate_balance_bucket)">
+                <Copyable value={member.candidate_balance_bucket} />
+              </Fact>
             )}
             {member.recursive_last_file_protection_reason && (
-              <Descriptions.Item label="最后文件保护原因 (recursive_last_file_protection_reason)">
-                <Text type="warning">{member.recursive_last_file_protection_reason}</Text>
-              </Descriptions.Item>
+              <Fact label="最后文件保护原因 (recursive_last_file_protection_reason)">
+                <span className="nfc-v2-dedupe-explain-warning">{member.recursive_last_file_protection_reason}</span>
+              </Fact>
             )}
-          </Descriptions>
-        </Card>
+          </dl>
+        </Section>
 
         {member.storage_action && member.storage_action !== 'quarantine' && (
-          <Card size="small" title="Storage Action 资格" bordered={false} className="nfc-dedupe-surface-card">
-            <Descriptions className="nfc-detail-descriptions" column={1} size="small">
-              <Descriptions.Item label="Storage Action">
-                <Tag color={member.storage_action === 'hardlink' ? 'orange' : 'green'}>
-                  {member.storage_action.toUpperCase()}
-                </Tag>
-              </Descriptions.Item>
-              <Descriptions.Item label="Metadata eligibility">
-                {member.storage_metadata_compatible === true ? (
-                  <Tag color="success">ELIGIBLE</Tag>
-                ) : member.storage_metadata_compatible === false ? (
-                  <Tag color="error">BLOCKED</Tag>
-                ) : (
-                  <Tag>NOT APPLICABLE</Tag>
-                )}
-              </Descriptions.Item>
+          <Section title="Storage Action 资格">
+            <dl className="nfc-v2-dedupe-explain-facts">
+              <Fact label="Storage Action">
+                <span className="nfc-v2-dedupe-explain-tag">{member.storage_action.toUpperCase()}</span>
+              </Fact>
+              <Fact label="Metadata eligibility">
+                <span className={'nfc-v2-dedupe-decision-tag ' +
+                  (member.storage_metadata_compatible === true ? 'is-success' :
+                    member.storage_metadata_compatible === false ? 'is-error' : 'is-default')}>
+                  {member.storage_metadata_compatible === true ? 'ELIGIBLE' :
+                    member.storage_metadata_compatible === false ? 'BLOCKED' : 'NOT APPLICABLE'}
+                </span>
+              </Fact>
               {member.storage_blocking_reason && (
-                <Descriptions.Item label="阻断原因">
-                  <Text type="warning" code>{member.storage_blocking_reason}</Text>
-                </Descriptions.Item>
+                <Fact label="阻断原因">
+                  <code className="nfc-v2-dedupe-explain-warning">{member.storage_blocking_reason}</code>
+                </Fact>
               )}
-              <Descriptions.Item label="Preview capability">
-                <Text code>{member.storage_capability || 'NOT_CHECKED'}</Text>
-              </Descriptions.Item>
-            </Descriptions>
-            <Alert
-              type="info"
-              showIcon
-              message="Preview 只做 metadata eligibility，不执行 filesystem capability probe。"
-            />
-          </Card>
+              <Fact label="Preview capability">
+                <code>{member.storage_capability || 'NOT_CHECKED'}</code>
+              </Fact>
+            </dl>
+            <Notice>Preview 只做 metadata eligibility，不执行 filesystem capability probe。</Notice>
+          </Section>
         )}
 
         {!member.incomplete && (
-          <Card
-            size="small"
-            title={
-              <div className="nfc-dedupe-config-heading">
-                <span>各因子打分明细 (Factor Contributions)</span>
-                <Text type="secondary" className="nfc-table-meta">加权评分层</Text>
-              </div>
-            }
-            bordered={false}
-            className="nfc-dedupe-surface-card"
-          >
+          <Section title="各因子打分明细 (Factor Contributions)"
+            aside={<span className="nfc-table-meta">加权评分层</span>}>
             {factorContributions.length === 0 ? (
-              <Alert type="info" message="当前无单独计分因子贡献项。" />
+              <Notice>当前无单独计分因子贡献项。</Notice>
             ) : (
-              <Table<FactorContribution>
-                dataSource={factorContributions}
-                rowKey="factor"
-                size="small"
-                pagination={false}
-                columns={[
-                  { title: '因子名称', dataIndex: 'factor', key: 'factor', render: (f: string) => <Tag color="geekblue">{f}</Tag> },
-                  { title: '配置权重', dataIndex: 'configured_weight', key: 'configured_weight', align: 'right', render: (w: number) => <Text>{w}</Text> },
-                  { title: '实际贡献分', dataIndex: 'actual_contribution', key: 'actual_contribution', align: 'right', render: (c: number) => <Text strong className={c > 0 ? 'nfc-success-text' : 'nfc-table-muted'}>+{c.toLocaleString()}</Text> },
-                  { title: '说明 / 命中规则', dataIndex: 'reason', key: 'reason', render: (r?: string) => <Text type="secondary">{r || '-'}</Text> },
-                ]}
-              />
+              <div className="nfc-v2-dedupe-explain-table-wrap">
+                <table className="nfc-v2-dedupe-explain-table">
+                  <thead><tr>
+                    <th scope="col">因子名称</th>
+                    <th scope="col">配置权重</th>
+                    <th scope="col">实际贡献分</th>
+                    <th scope="col">说明 / 命中规则</th>
+                  </tr></thead>
+                  <tbody>
+                    {factorContributions.map((factor, idx) => (
+                      <tr key={factor.factor + ':' + idx}>
+                        <td><span className="nfc-v2-dedupe-explain-tag">{factor.factor}</span></td>
+                        <td className="is-numeric">{factor.configured_weight}</td>
+                        <td className="is-numeric"><strong>{factor.actual_contribution > 0 ? '+' : ''}{factor.actual_contribution.toLocaleString()}</strong></td>
+                        <td>{factor.reason || '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
-          </Card>
+          </Section>
         )}
 
         {!member.incomplete && balanceInfo && (
-          <Card
-            size="small"
-            title={
-              <Space>
-                <CompassOutlined className="nfc-warning-text" />
-                <span>容量平衡器分析 (Capacity Balancer)</span>
-              </Space>
-            }
-            bordered={false}
-            className="nfc-dedupe-surface-card nfc-dedupe-balancer-card"
-          >
-            <div className="nfc-dedupe-balancer-stack">
-              <Alert
-                type="warning"
-                showIcon
-                message={balanceInfo.lca ? '递归目录平衡器属于选择仲裁层，Recursive Last-File Protection 强制连续启用。' : '容量平衡器属于选择仲裁层，独立于因子权重计分之外。'}
-                className="nfc-overlay-alert"
-              />
-              <Descriptions className="nfc-detail-descriptions" column={1} size="small">
-                {balanceInfo.balance_source && (
-                  <Descriptions.Item label="平衡来源 (balance_source)"><Tag>{balanceInfo.balance_source}</Tag></Descriptions.Item>
-                )}
-                {balanceInfo.lca && (
-                  <Descriptions.Item label="重复组 LCA (lca)"><Text code copyable>{balanceInfo.lca}</Text></Descriptions.Item>
-                )}
-                {balanceInfo.lca_depth !== undefined && (
-                  <Descriptions.Item label="LCA 深度 (lca_depth)"><Text>{balanceInfo.lca_depth}</Text></Descriptions.Item>
-                )}
-                {balanceInfo.anchor_root && (
-                  <Descriptions.Item label="锚定根 (anchor_root)"><Text code>{balanceInfo.anchor_root}</Text></Descriptions.Item>
-                )}
-                {balanceInfo.parent_bucket !== undefined && (
-                  <Descriptions.Item label="父目录桶 (parent_bucket)"><Text code>{balanceInfo.parent_bucket || '-'}</Text></Descriptions.Item>
-                )}
-                {balanceInfo.recursive_last_file_protection && (
-                  <Descriptions.Item label="Recursive Last-File Protection"><Tag color="warning">{balanceInfo.recursive_last_file_protection}</Tag></Descriptions.Item>
-                )}
-                {balanceInfo.bucket_released_bytes_before && (
-                  <Descriptions.Item label="目录桶释放字节 (bucket_released_bytes_before)">{renderBucketBytes(balanceInfo.bucket_released_bytes_before)}</Descriptions.Item>
-                )}
-                {balanceInfo.bucket_released_bytes_after && (
-                  <Descriptions.Item label="目录桶释放字节 (bucket_released_bytes_after)">{renderBucketBytes(balanceInfo.bucket_released_bytes_after)}</Descriptions.Item>
-                )}
-                {balanceInfo.spread_before !== undefined && (
-                  <Descriptions.Item label="平衡前极差 (spread_before)"><Text strong>{formatBytes(balanceInfo.spread_before)}</Text></Descriptions.Item>
-                )}
-                {balanceInfo.spread_after !== undefined && (
-                  <Descriptions.Item label="平衡后极差 (spread_after)"><Text strong>{formatBytes(balanceInfo.spread_after)}</Text></Descriptions.Item>
-                )}
-              </Descriptions>
-            </div>
-          </Card>
+          <Section title="容量平衡器分析 (Capacity Balancer)">
+            <Notice warning>
+              {balanceInfo.lca
+                ? '递归目录平衡器属于选择仲裁层，Recursive Last-File Protection 强制连续启用。'
+                : '容量平衡器属于选择仲裁层，独立于因子权重计分之外。'}
+            </Notice>
+            <dl className="nfc-v2-dedupe-explain-facts">
+              {balanceInfo.balance_source && (
+                <Fact label="平衡来源 (balance_source)">{balanceInfo.balance_source}</Fact>
+              )}
+              {balanceInfo.lca && (
+                <Fact label="重复组 LCA (lca)"><Copyable value={balanceInfo.lca} /></Fact>
+              )}
+              {balanceInfo.lca_depth !== undefined && (
+                <Fact label="LCA 深度 (lca_depth)">{balanceInfo.lca_depth}</Fact>
+              )}
+              {balanceInfo.anchor_root && (
+                <Fact label="锚定根 (anchor_root)"><code>{balanceInfo.anchor_root}</code></Fact>
+              )}
+              {balanceInfo.parent_bucket !== undefined && (
+                <Fact label="父目录桶 (parent_bucket)"><code>{balanceInfo.parent_bucket || '-'}</code></Fact>
+              )}
+              {balanceInfo.recursive_last_file_protection && (
+                <Fact label="Recursive Last-File Protection">
+                  <span className="nfc-v2-dedupe-decision-tag is-warning">{balanceInfo.recursive_last_file_protection}</span>
+                </Fact>
+              )}
+              {balanceInfo.bucket_released_bytes_before && (
+                <Fact label="目录桶释放字节 (bucket_released_bytes_before)">
+                  {renderBucketBytes(balanceInfo.bucket_released_bytes_before)}
+                </Fact>
+              )}
+              {balanceInfo.bucket_released_bytes_after && (
+                <Fact label="目录桶释放字节 (bucket_released_bytes_after)">
+                  {renderBucketBytes(balanceInfo.bucket_released_bytes_after)}
+                </Fact>
+              )}
+              {balanceInfo.spread_before !== undefined && (
+                <Fact label="平衡前极差 (spread_before)">
+                  <strong>{formatBytes(balanceInfo.spread_before)}</strong>
+                </Fact>
+              )}
+              {balanceInfo.spread_after !== undefined && (
+                <Fact label="平衡后极差 (spread_after)">
+                  <strong>{formatBytes(balanceInfo.spread_after)}</strong>
+                </Fact>
+              )}
+            </dl>
+          </Section>
         )}
 
         {siblings.length > 0 && (
-          <Card size="small" title={`同组其他副本成员 (${siblings.length} 个)`} bordered={false} className="nfc-dedupe-surface-card">
-            <div className="nfc-dedupe-sibling-list">
-              {siblings.map((sib, idx) => {
-                const sCls = classifyMemberDecision(sib.member_decision, sib.eligible_as_keep);
-                return (
-                  <div key={idx} className="nfc-dedupe-sibling-card">
-                    <div className="nfc-dedupe-sibling-heading">
-                      <Tag color={sCls.color}>{sCls.label}</Tag>
-                      <Text strong className={sib.total_score !== undefined && sib.total_score > 0 ? 'nfc-accent-text' : 'nfc-table-muted'}>
-                        评分: {sib.total_score !== undefined ? sib.total_score : '-'}
-                      </Text>
-                    </div>
-                    <Text ellipsis className="nfc-dedupe-sibling-path">{sib.absolute_path}</Text>
-                    <div className="nfc-dedupe-sibling-meta">
-                      <span>{formatScanRootLabel(sib.scan_root_index, sib.scan_root_path)}</span>
-                      {sib.selection_reason && <><span className="nfc-inline-separator">|</span><span>{sib.selection_reason}</span></>}
-                    </div>
+          <Section title={'同组其他副本成员 (' + siblings.length + ' 个，当前预览页)'}>
+            <div className="nfc-dedupe-sibling-list nfc-v2-dedupe-explain-siblings">
+              {siblings.map((sib, idx) => (
+                <div key={sib.absolute_path + ':' + idx} className="nfc-dedupe-sibling-card">
+                  <div className="nfc-dedupe-sibling-heading">
+                    <DecisionTag decision={sib.member_decision} eligible={sib.eligible_as_keep} />
+                    <strong className={sib.total_score !== undefined && sib.total_score > 0 ? 'nfc-accent-text' : 'nfc-table-muted'}>
+                      评分: {sib.total_score !== undefined ? sib.total_score : '-'}
+                    </strong>
                   </div>
-                );
-              })}
+                  <code className="nfc-dedupe-sibling-path" title={sib.absolute_path}>{sib.absolute_path}</code>
+                  <div className="nfc-dedupe-sibling-meta">
+                    <span>{formatScanRootLabel(sib.scan_root_index, sib.scan_root_path)}</span>
+                    {sib.selection_reason && <><span className="nfc-inline-separator">|</span><span>{sib.selection_reason}</span></>}
+                  </div>
+                </div>
+              ))}
             </div>
-          </Card>
+          </Section>
         )}
 
-        <Divider className="nfc-compact-divider" />
-        <div className="nfc-dedupe-explain-footnote">
-          <InfoCircleOutlined className="nfc-table-muted" />
-          <Text type="secondary" className="nfc-table-meta">
-            所有打分与决策数据均由后端去重引擎确定性产出，前端不进行任何打分计算。
-          </Text>
+        <div className="nfc-dedupe-explain-footnote nfc-v2-dedupe-explain-footnote">
+          <ConsoleIcon name="shield-check" size={16} />
+          所有打分与决策数据均由后端去重引擎确定性产出，前端不进行任何打分计算。
         </div>
       </div>
-    </Drawer>
+    </ConsoleSheet>
   );
 };
