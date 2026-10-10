@@ -134,7 +134,8 @@ export const ProfileList: React.FC<ProfileListProps> = ({
         anchor.click();
         anchor.remove();
       } finally {
-        URL.revokeObjectURL(url);
+        // Keep the object URL alive through the browser's download navigation.
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
       }
       toast.success('已导出方案: ' + profile.name);
     } catch (err: unknown) {

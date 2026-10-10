@@ -26,7 +26,11 @@ describe('v0.4.4 UI audit polish', () => {
 
   test('legacy cleanup and organizer import use the current overlay/panel system', () => {
     assert.match(read('src/components/plans/LegacyPlanCleanup.tsx'), /nfc-legacy-plan-cleanup/);
-    assert.match(read('src/pages/Organizer/ProfileList.tsx'), /nfc-overlay-modal nfc-organizer-import-modal/);
+    const organizer = read('src/pages/Organizer/ProfileList.tsx');
+    const nativeCss = read('src/styles/console-v2-organizer-profile-list.css');
+    assert.match(organizer, /<Dialog\\.Content className="nfc-v2-organizer-import-dialog nfc-overlay-modal"/);
+    assert.match(organizer, /<Dialog\\.Overlay className="nfc-v2-dialog-overlay nfc-v2-organizer-import-overlay"/);
+    assert.match(nativeCss, /\\.nfc-v2-organizer-import-dialog/);
   });
 
   test('header status badges no longer depend on inline visual chrome', () => {
