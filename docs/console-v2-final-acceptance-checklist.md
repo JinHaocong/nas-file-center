@@ -27,7 +27,8 @@ approved NAS File Center mockup. User-selectable dark/system modes remain.
 - [x] Advanced Dedupe page native actions, Radix Draft confirmation and stale-preview recovery (PR #144).
 - [x] Shared Advanced Dedupe scorer editor: native accessible mode radios, factor weights, ordered rules and reset (PR #145).
 - [x] Advanced Dedupe read-only authority/safety lineage and role-guarded storage action panels (PR #146).
-- [ ] Advanced Dedupe explain drawer, summary panel and remaining Ant screens.
+- [x] Advanced Dedupe Radix decision explanation sheet + native read-only preview summary (PR #147).
+- [ ] Remaining Ant screens and shared controls.
 - [ ] Shared dialogs, select, checkbox, forms and destructive confirmation primitives.
 - [ ] Organizer, workflow editor, rename/file tools, settings and remaining pages.
 - [ ] Remove all `antd` and `@ant-design/icons` imports and their lockfile dependencies.
