@@ -1,0 +1,122 @@
+/* Console v2: controlled native dedupe scorer. Reused in scans and workflow editors. */
+.nfc-v2-scorer-editor {
+  --nfc-scorer-paper: #fff;
+  --nfc-scorer-surface: #f7f9fc;
+  --nfc-scorer-line: #dce5ee;
+  --nfc-scorer-text: #1c293d;
+  --nfc-scorer-muted: #64748b;
+  --nfc-scorer-accent: #2878ef;
+  display: grid; gap: 15px; min-width: 0; color: var(--nfc-scorer-text);
+}
+[data-theme='dark'] .nfc-v2-scorer-editor {
+  --nfc-scorer-paper: #1a2434;
+  --nfc-scorer-surface: #222e41;
+  --nfc-scorer-line: #36435a;
+  --nfc-scorer-text: #f0f4fa;
+  --nfc-scorer-muted: #a9bbd1;
+  --nfc-scorer-accent: #83b5ff;
+}
+.nfc-v2-scorer-editor .nfc-v2-sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden;
+  clip: rect(0,0,0,0); white-space: nowrap;
+}
+.nfc-v2-scorer-card {
+  box-sizing: border-box; border: 1px solid var(--nfc-scorer-line); border-radius: 13px;
+  background: var(--nfc-scorer-paper); padding: 17px; margin: 0;
+  min-width: 0; color: var(--nfc-scorer-text);
+}
+.nfc-v2-scorer-card legend {
+  font-weight: 740; color: var(--nfc-scorer-text); font-size: 13px;
+  padding: 0 6px; line-height: 1.6;
+}
+.nfc-v2-scorer-card h3 { margin: 0; font-size: 13px; color: var(--nfc-scorer-text); }
+.nfc-v2-scorer-card .nfc-dedupe-config-intro { margin: 2px 0 14px; color: var(--nfc-scorer-muted); }
+.nfc-v2-scorer-options { display: grid; gap: 9px; }
+.nfc-v2-scorer-options.is-inline { display: flex; flex-wrap: wrap; gap: 11px 22px; }
+.nfc-v2-scorer-option {
+  display: flex; gap: 9px; align-items: flex-start; color: var(--nfc-scorer-text);
+  line-height: 1.5; cursor: pointer; font-size: 12px;
+}
+.nfc-v2-scorer-option input[type='radio'] {
+  margin: 3px 0 0; accent-color: var(--nfc-scorer-accent); flex: 0 0 auto;
+}
+.nfc-v2-scorer-option .nfc-dedupe-radio-help {
+  display: block; color: var(--nfc-scorer-muted); line-height: 1.6; margin-top: 3px;
+}
+.nfc-v2-scorer-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.nfc-v2-scorer-heading h3 { flex: 1 1 180px; }
+.nfc-v2-scorer-toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.nfc-v2-scorer-toggle input { accent-color: var(--nfc-scorer-accent); }
+.nfc-v2-scorer-state {
+  padding: 3px 7px; border: 1px solid var(--nfc-scorer-line); border-radius: 7px;
+  font-size: 11px; color: var(--nfc-scorer-muted);
+}
+.nfc-v2-scorer-state.is-on { color: var(--nfc-scorer-accent); border-color: var(--nfc-scorer-accent); }
+.nfc-v2-scorer-weight {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 9px;
+  margin-bottom: 13px; color: var(--nfc-scorer-text);
+}
+.nfc-v2-scorer-weight > label { font-weight: 670; }
+.nfc-v2-scorer-weight .nfc-dedupe-weight-input {
+  box-sizing: border-box; width: 125px; max-width: 100%;
+  height: 41px; padding: 8px 10px; border: 1px solid var(--nfc-scorer-line);
+  border-radius: 9px; color: var(--nfc-scorer-text); background: var(--nfc-scorer-paper);
+  font: inherit; font-variant-numeric: tabular-nums;
+}
+.nfc-v2-scorer-help { color: var(--nfc-scorer-muted); line-height: 1.6; font-size: 11px; }
+.nfc-v2-scorer-rule-row {
+  box-sizing: border-box; display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  width: 100%; min-width: 0; padding: 10px;
+  background: var(--nfc-scorer-surface); border: 1px solid var(--nfc-scorer-line);
+  border-radius: 10px;
+}
+.nfc-v2-scorer-rule-row + .nfc-v2-scorer-rule-row { margin-top: 8px; }
+.nfc-v2-scorer-rule-scope { flex: 0 1 130px; min-width: 100px; }
+.nfc-v2-scorer-rule-pattern { flex: 1 1 200px; min-width: 160px; }
+.nfc-v2-scorer-rule-row :is(input,select) {
+  box-sizing: border-box; width: 100%; min-height: 40px; padding: 8px 10px;
+  border: 1px solid var(--nfc-scorer-line); border-radius: 8px;
+  background: var(--nfc-scorer-paper); color: var(--nfc-scorer-text);
+  font: inherit; font-size: 12px;
+}
+.nfc-v2-scorer-rule-actions { display: inline-flex; flex-wrap: nowrap; align-items: center; gap: 4px; }
+.nfc-v2-scorer-rule-actions .nfc-console-button {
+  padding: 6px; min-height: 36px; min-width: 36px;
+}
+.nfc-v2-scorer-rule-actions .nfc-console-button > span { display: inline-flex; }
+.nfc-v2-scorer-card :is(input, select, button):focus-visible {
+  outline: 2px solid var(--nfc-scorer-accent); outline-offset: 2px;
+}
+.nfc-v2-scorer-card :is(input, select, button):disabled { cursor: not-allowed; opacity: .58; }
+.nfc-v2-scorer-empty {
+  margin: 10px 0; padding: 12px; color: var(--nfc-scorer-muted);
+  background: var(--nfc-scorer-surface); border: 1px dashed var(--nfc-scorer-line);
+  border-radius: 9px;
+}
+.nfc-v2-scorer-notice {
+  display: flex; align-items: flex-start; gap: 10px; padding: 12px;
+  margin-top: 13px; border: 1px solid #d5a14c; border-radius: 9px;
+  background: var(--nfc-scorer-surface); color: var(--nfc-scorer-text);
+}
+.nfc-v2-scorer-notice svg { flex: 0 0 auto; }
+.nfc-v2-scorer-notice p { margin: 4px 0 0; color: var(--nfc-scorer-muted); }
+.nfc-v2-scorer-validation {
+  color: #a8283a; padding: 13px; border: 1px solid #d77079;
+  border-radius: 10px; background: rgba(220,58,77,.075);
+}
+[data-theme='dark'] .nfc-v2-scorer-validation { color: #ffaab2; }
+.nfc-v2-scorer-validation ul { margin: 8px 0 0; padding-left: 20px; }
+.nfc-v2-scorer-mtime-options { display: grid; gap: 8px; }
+.nfc-v2-scorer-mtime-options .nfc-v2-scorer-label { font-weight: 660; }
+.nfc-v2-scorer-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.nfc-v2-scorer-footer .nfc-form-safety-note { display: inline-flex; align-items: center; gap: 7px; color: var(--nfc-scorer-muted); line-height: 1.7; flex: 1; }
+@media (max-width: 767px) {
+  .nfc-v2-scorer-card { padding: 12px; }
+  .nfc-v2-scorer-rule-scope, .nfc-v2-scorer-rule-pattern { flex: 1 1 100%; }
+  .nfc-v2-scorer-rule-actions { margin-left: auto; }
+  .nfc-v2-scorer-rule-actions .nfc-console-button { min-height: 44px; min-width: 44px; }
+  .nfc-v2-scorer-weight .nfc-dedupe-weight-input { min-height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nfc-v2-scorer-editor * { animation-duration: 0.01ms; transition-duration: 0.01ms; }
+}
