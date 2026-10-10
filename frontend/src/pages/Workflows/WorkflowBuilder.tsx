@@ -1,25 +1,9 @@
-import React, { useEffect, useState } from 'react';
-import {
-  Alert,
-  Button,
-  Form,
-  Input,
-  Modal,
-  Popconfirm,
-  Radio,
-  Spin,
-  message,
-} from 'antd';
-import {
-  AppstoreOutlined,
-  ArrowLeftOutlined,
-  ExclamationCircleOutlined,
-  FileTextOutlined,
-  HistoryOutlined,
-  SaveOutlined,
-  ThunderboltOutlined,
-  ToolOutlined,
-} from '@ant-design/icons';
+import React, { useEffect, useRef, useState } from 'react';
+import { Form, Input, Radio } from 'antd';
+import { ConsoleButton } from '../../components/ui/ConsoleButton';
+import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
+import { ConsoleConfirmDialog } from '../../components/ui/ConsoleConfirmDialog';
+import { useConsoleToast } from '../../components/ui/ConsoleToast';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { workflowApi } from '../../api/workflows';
@@ -87,11 +71,16 @@ const modeLabel = (mode: WorkflowMode) => {
 };
 
 const modeIcon = (mode: WorkflowMode) => {
-  if (mode === 'file') return <FileTextOutlined />;
-  if (mode === 'organizer') return <AppstoreOutlined />;
-  if (mode === 'dedupe') return <ThunderboltOutlined />;
-  return <ToolOutlined />;
+  if (mode === 'file') return <ConsoleIcon name="file-text" size={17} />;
+  if (mode === 'organizer') return <ConsoleIcon name="folders" size={17} />;
+  if (mode === 'dedupe') return <ConsoleIcon name="zap" size={17} />;
+  return <ConsoleIcon name="settings" size={17} />;
 };
+
+type PendingWorkflowConfirmation =
+  | { kind: 'mode'; targetMode: WorkflowMode }
+  | { kind: 'back' }
+  | { kind: 'rollback'; revision: number; expectedRevision: number };
 
 export const WorkflowBuilderPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -104,6 +93,9 @@ export const WorkflowBuilderPage: React.FC = () => {
   useTitle(isNew ? '新建工作流' : `编辑工作流 #${workflowId}`);
   const { user } = useAuth();
   const [form] = Form.useForm();
+  const toast = useConsoleToast();
+  const rollbackInFlight = useRef(false);
+  const [confirmation, setConfirmation] = useState<PendingWorkflowConfirmation | null>(null);
   const [mode, setMode] = useState<WorkflowMode>('file');
   const [steps, setSteps] = useState<WorkflowStep[]>([]);
   const [isDirty, setIsDirty] = useState(false);
@@ -214,16 +206,14 @@ export const WorkflowBuilderPage: React.FC = () => {
       });
     },
     onSuccess: (res: WorkflowResponse) => {
-      message.success(
-        isNew ? '工作流创建成功' : `工作流已保存至新版本 r${res.current_revision}`
-      );
+      toast.success(isNew ? '工作流创建成功' : `工作流已保存至新版本 r${res.current_revision}`);
       setIsDirty(false);
       queryClient.invalidateQueries({ queryKey: ['workflowsList'] });
       if (isNew) navigate(`/workflows/${res.id}`);
       else refetch();
     },
     onError: (err) =>
-      message.error(getStructuredApiError(err).message || '保存工作流失败'),
+      toast.error(getStructuredApiError(err).message || '保存工作流失败'),
   });
 
   const rollbackMutation = useMutation({
@@ -235,14 +225,18 @@ export const WorkflowBuilderPage: React.FC = () => {
       });
     },
     onSuccess: (data) => {
-      message.success(`已成功回滚至版本 r${data.current_revision}`);
+      setConfirmation(null);
+      toast.success(`已成功回滚至版本 r${data.current_revision}`);
       queryClient.invalidateQueries({ queryKey: ['workflowDetail', workflowId] });
       queryClient.invalidateQueries({ queryKey: ['workflowsList'] });
       navigate(`/workflows/${workflowId}`);
       refetch();
     },
-    onError: (err) =>
-      message.error(getStructuredApiError(err).message || '回滚失败'),
+    onError: (err) => {
+      setConfirmation(null);
+      toast.error(getStructuredApiError(err).message || '回滚失败');
+    },
+    onSettled: () => { rollbackInFlight.current = false; },
   });
 
   const handleModeChange = (newMode: WorkflowMode) => {
