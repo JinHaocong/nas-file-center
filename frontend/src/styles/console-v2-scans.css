@@ -1,0 +1,58 @@
+/* Console v2 Scan history: isolated page styles; no global Ant override. */
+.nfc-v2-shell .nfc-v2-scans-page { max-width: min(100%, 1690px) !important; }
+.nfc-v2-scans-page > .nfc-page-header { margin-bottom: 21px !important; }
+.nfc-v2-scans-page .nfc-data-panel-header { padding: 13px 1px 15px; }
+.nfc-v2-scans-page .nfc-data-panel-title { color: var(--v2-text); font-size: 15px; }
+.nfc-v2-scans-page .nfc-data-panel-description { color: var(--v2-muted); }
+.nfc-v2-shell .nfc-v2-scans-page .nfc-data-panel-body {
+  padding: 0 !important;
+  overflow: hidden;
+  border-radius: 13px;
+  border: 1px solid var(--v2-line);
+  background: var(--v2-paper);
+  box-shadow: var(--v2-shadow);
+}
+.nfc-v2-scan-list-state { padding: 20px; text-align: center; color: var(--v2-muted); font-size: 12px; }
+.nfc-v2-scan-table-scroll { width: 100%; max-width: 100%; overflow-x: auto; }
+.nfc-v2-shell .nfc-v2-scan-table { width: 100%; min-width: 1020px; border-collapse: collapse; font-size: 12px; text-align: left; }
+.nfc-v2-scan-table thead th {
+  padding: 13px 16px;
+  background: var(--v2-canvas);
+  color: var(--v2-muted);
+  border-bottom: 1px solid var(--v2-line);
+  font-weight: 650;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.nfc-v2-scan-table td { padding: 14px 16px; border-top: 1px solid var(--v2-line); color: var(--v2-text); vertical-align: middle; }
+.nfc-v2-scan-table tbody tr:first-child td { border-top: 0; }
+.nfc-v2-scan-table tbody tr:hover { background: color-mix(in srgb, var(--v2-indigo-soft) 45%, var(--v2-paper)); }
+.nfc-v2-scans-page .nfc-v2-scan-name {
+  display: inline-flex; gap: 9px; align-items: center; max-width: 320px;
+  border: 0; padding: 0; color: var(--v2-text);
+  background: transparent; text-align: left; font: inherit; font-weight: 700;
+  cursor: pointer;
+}
+.nfc-v2-scans-page .nfc-v2-scan-name svg { flex: 0 0 auto; color: var(--v2-indigo); }
+.nfc-v2-scans-page .nfc-v2-scan-name:hover { color: var(--v2-indigo); }
+.nfc-v2-scans-page .nfc-v2-scan-name span { min-width: 0; overflow-wrap: anywhere; }
+.nfc-v2-scan-id { display: block; margin: 5px 0 0 27px; color: var(--v2-subtle); font-size: 10px; }
+.nfc-v2-scan-number { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.nfc-v2-scan-date { white-space: nowrap; color: var(--v2-muted) !important; font-size: 11px; }
+.nfc-v2-scans-page .nfc-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 5px; white-space: nowrap; }
+.nfc-v2-scans-page .nfc-status-badge { white-space: nowrap; }
+
+@media (max-width: 767px) {
+  .nfc-v2-scans-page .nfc-mobile-record-list { display: grid; gap: 11px; padding: 12px; }
+  .nfc-v2-scans-page .nfc-scan-mobile-card {
+    background: var(--v2-paper);
+    border: 1px solid var(--v2-line);
+    border-radius: 12px;
+    padding: 15px;
+  }
+  .nfc-v2-scans-page .nfc-mobile-record-actions { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+  .nfc-v2-scans-page .nfc-page-actions { width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nfc-v2-scans-page .nfc-v2-scan-table tbody tr { transition: none; }
+}
