@@ -77,7 +77,7 @@ export const ScanCreateModal: React.FC<Props> = ({ open, onClose }) => {
     createMutation.mutate(toScanCreatePayload(values));
   };
 
-  const update = <K extends keyof ScanCreateValues>(key: K, value: ScanCreateValues[K]) => {
+  const update = <K extends keyof ScanCreateValues,>(key: K, value: ScanCreateValues[K]) => {
     setValues(current => ({ ...current, [key]: value }));
     setValidationError(null);
   };
