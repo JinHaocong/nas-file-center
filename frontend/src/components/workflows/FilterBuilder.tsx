@@ -1,4 +1,4 @@
-import React, { useId, useState } from 'react';
+import React, { useState } from 'react';
 import {
   type FilterNode, type FilterLeafNode, type FilterAndOrNode, type FilterNotNode,
   type FilterLeafField, type FilterLeafOperator,
@@ -9,7 +9,7 @@ import {
   normalizeExtension,
 } from '../../utils/filterMatrix';
 import {
-  countFilterLeaves, createFilterNode, changeFilterField, changeFilterOperator,
+  createFilterNode, changeFilterField, changeFilterOperator,
   canAppendFilterChild, addFilterTag, formatFilterMtimeLocal, parseFilterMtimeLocal,
   type FilterNodeKind, DEFAULT_CHILD,
 } from '../../utils/workflowFilterActions';
@@ -93,7 +93,7 @@ const FilterTags: React.FC<{
             onKeyDown={event => {
               if (event.key === 'Enter') { event.preventDefault(); add(); }
             }}
-            onBlur={add} />
+            />
           <button type="button" title="添加列表项" aria-label="添加列表项" disabled={!draft.trim()}
             onClick={add}><ConsoleIcon name="plus" size={16} /></button>
         </div>
@@ -114,11 +114,9 @@ export interface FilterBuilderProps {
 export const FilterBuilder: React.FC<FilterBuilderProps> = ({
   value, onChange, onDelete, depth = 0, readOnly = false,
 }) => {
-  const id = useId();
   const nodeType: FilterNodeKind = isFilterLeafNode(value) ? 'leaf'
     : isFilterAndOrNode(value) ? value.op : isFilterNotNode(value) ? 'not' : 'leaf';
   const canNest = depth < MAX_FILTER_DEPTH;
-  const currentLeaves = countFilterLeaves(value);
 
   const handleTypeChange = (nextType: FilterNodeKind) => {
     if (readOnly || nextType === nodeType) return;
