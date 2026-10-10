@@ -200,7 +200,7 @@ export const OrganizerSnapshotFields: React.FC<Props> = ({
                 </div>
               )}
               {boolField('递归处理子目录', Boolean(snapshot.recursive), checked => patch('recursive', checked))}
-              <p className="nfc-v2-organizer-help">工作流的根目录由 Scan 步骤选择。导入方案的 root 只作为快照原始字段保存，不在此处改写。</p>
+              {!includeRoot && <p className="nfc-v2-organizer-help">工作流的根目录由 Scan 步骤选择。导入方案的 root 只作为快照原始字段保存，不在此处改写。</p>}
             </div>
           )}
           {tab === 'template' && (
