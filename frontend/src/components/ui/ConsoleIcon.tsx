@@ -1,11 +1,11 @@
 import React from 'react';
 import {
-  Activity, Archive, ArrowRight, Bell, CalendarDays, Check,
+  Activity, Archive, ArrowRight, ArrowUp, Bell, CalendarDays, Check,
   CircleCheck, ChevronDown, ChevronRight, Clock3, Database,
   FileCheck2, FileSearch, FileText, Folder, FolderOpen, Folders,
-  GitCompareArrows, HardDrive, Layers3, LayoutDashboard, ListChecks,
-  LockKeyhole, LogOut, Menu, Moon, Pencil, Play, RefreshCw,
-  Search, Settings, ShieldCheck, SlidersHorizontal, Sun,
+  GitCompareArrows, HardDrive, History, Layers3, LayoutDashboard, ListChecks,
+  LockKeyhole, LogOut, Menu, Moon, Pencil, Play, Plus, RefreshCw,
+  Search, Settings, ShieldCheck, SlidersHorizontal, Star, Sun, Trash2,
   Terminal, UserRound, Workflow, X, Zap,
 } from 'lucide-react';
 import type { LucideIcon, LucideProps } from 'lucide-react';
@@ -14,6 +14,7 @@ import type { LucideIcon, LucideProps } from 'lucide-react';
 const icons = {
   activity: Activity,
   archive: Archive,
+  'arrow-up': ArrowUp,
   'arrow-right': ArrowRight,
   bell: Bell,
   calendar: CalendarDays,
@@ -31,6 +32,7 @@ const icons = {
   folders: Folders,
   'git-compare': GitCompareArrows,
   'hard-drive': HardDrive,
+  history: History,
   layers: Layers3,
   'layout-dashboard': LayoutDashboard,
   'list-checks': ListChecks,
@@ -40,12 +42,15 @@ const icons = {
   moon: Moon,
   pencil: Pencil,
   play: Play,
+  plus: Plus,
   refresh: RefreshCw,
   search: Search,
   settings: Settings,
   'shield-check': ShieldCheck,
   sliders: SlidersHorizontal,
+  star: Star,
   sun: Sun,
+  trash: Trash2,
   terminal: Terminal,
   user: UserRound,
   workflow: Workflow,
