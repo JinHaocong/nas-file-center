@@ -1,22 +1,14 @@
-import React from 'react';
-import {
-  Alert,
-  Button,
-  Descriptions,
-  Form,
-  Input,
-  Modal,
-  Space,
-  Tag,
-  Typography,
-  message,
-} from 'antd';
-import { SearchOutlined } from '@ant-design/icons';
+import React, { useEffect, useRef, useState } from 'react';
+import * as Dialog from '@radix-ui/react-dialog';
 import { useMutation } from '@tanstack/react-query';
 import { scansApi } from '../../api/domain';
-import { DedupeDiagnosticResponse } from '../../types/dedupe';
+import type { DedupeDiagnosticResponse } from '../../types/dedupe';
 import { formatBytes } from '../../utils/format';
 import { CodePath } from '../ui/CodePath';
+import { ConsoleButton } from '../ui/ConsoleButton';
+import { ConsoleIcon } from '../ui/ConsoleIcon';
+import { useConsoleToast } from '../ui/ConsoleToast';
+import { type DedupePairValues, validateDedupePair, toDedupePairPayload } from './diagnostic_form';
 
 interface DedupeDiagnosticModalProps {
   open: boolean;
@@ -84,226 +76,210 @@ const reasonCopy: Record<string, string> = {
   NOT_IN_SNAPSHOT_AT_SCAN_TIME: '当前路径没有出现在该扫描的重复快照中',
 };
 
-const PathFacts: React.FC<{
+
+const DiagnosticPath: React.FC<{
   label: string;
   item: DedupeDiagnosticResponse['paths'][number];
-}> = ({ label, item }) => (
-  <section className="nfc-dedupe-diagnostic-path">
-    <div className="nfc-dedupe-diagnostic-path-heading">
-      <strong>{label}</strong>
-      {item.in_quarantine && <Tag>隔离区</Tag>}
-      {item.is_symlink && <Tag color="orange">symlink</Tag>}
-    </div>
-    <CodePath value={item.requested_path} />
-    <Descriptions
-      size="small"
-      column={2}
-      items={[
-        { key: 'exists', label: '存在', children: item.exists ? '是' : '否' },
-        { key: 'regular', label: '普通文件', children: item.is_regular_file ? '是' : '否' },
-        {
-          key: 'size',
-          label: '大小',
-          children: item.size == null ? '—' : formatBytes(item.size),
-        },
-        {
-          key: 'inode',
-          label: 'Device / Inode',
-          children:
-            item.device == null || item.inode == null
-              ? '—'
-              : <span className="nfc-mono">{item.device} / {item.inode}</span>,
-        },
-        {
-          key: 'mtime',
-          label: 'mtime_ns',
-          children: item.mtime_ns == null ? '—' : <span className="nfc-mono">{item.mtime_ns}</span>,
-        },
-        {
-          key: 'hash',
-          label: 'SHA-256',
-          span: 2,
-          children: item.sha256
-            ? <Typography.Text className="nfc-mono" copyable={{ text: item.sha256 }}>{item.sha256}</Typography.Text>
-            : <span className="nfc-table-meta">{item.hash_error || '—'}</span>,
-        },
-      ]}
-    />
-  </section>
-);
+}> = ({ label, item }) => {
+  const toast = useConsoleToast();
+  const copyHash = async () => {
+    if (!item.sha256) return;
+    try {
+      await navigator.clipboard.writeText(item.sha256);
+      toast.success('SHA-256 已复制');
+    } catch {
+      toast.error('无法复制 SHA-256，请手动选中复制');
+    }
+  };
+  return (
+    <section className="nfc-dedupe-diagnostic-path nfc-v2-diagnostic-path">
+      <div className="nfc-dedupe-diagnostic-path-heading">
+        <strong>{label}</strong>
+        {item.in_quarantine && <span className="nfc-v2-diagnostic-tag">隔离区</span>}
+        {item.is_symlink && <span className="nfc-v2-diagnostic-tag is-warning">symlink</span>}
+      </div>
+      <CodePath value={item.requested_path} />
+      <dl className="nfc-v2-diagnostic-facts">
+        <div><dt>存在</dt><dd>{item.exists ? '是' : '否'}</dd></div>
+        <div><dt>普通文件</dt><dd>{item.is_regular_file ? '是' : '否'}</dd></div>
+        <div><dt>大小</dt><dd>{item.size == null ? '—' : formatBytes(item.size)}</dd></div>
+        <div><dt>Device / Inode</dt><dd className="nfc-mono">
+          {item.device == null || item.inode == null ? '—' : item.device + ' / ' + item.inode}
+        </dd></div>
+        <div><dt>mtime_ns</dt><dd className="nfc-mono">{item.mtime_ns ?? '—'}</dd></div>
+        <div className="is-wide"><dt>SHA-256</dt><dd className="nfc-v2-diagnostic-hash">
+          <span className="nfc-mono">{item.sha256 || item.hash_error || '—'}</span>
+          {item.sha256 && (
+            <button type="button" aria-label={'复制' + label + ' SHA-256'} onClick={() => { void copyHash(); }}>
+              <ConsoleIcon name="file-check" size={15} /> 复制
+            </button>
+          )}
+        </dd></div>
+      </dl>
+    </section>
+  );
+};
 
 export const DedupeDiagnosticModal: React.FC<DedupeDiagnosticModalProps> = ({
-  open,
-  onClose,
-  scanJobId = null,
+  open, onClose, scanJobId = null,
 }) => {
-  const [form] = Form.useForm();
+  const [values, setValues] = useState<DedupePairValues>({ pathA: '', pathB: '' });
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const inFlight = useRef(false);
+  const toast = useConsoleToast();
 
   const mutation = useMutation({
-    mutationFn: (values: { path_a: string; path_b: string }) =>
-      scansApi.diagnosePair({
-        path_a: values.path_a.trim(),
-        path_b: values.path_b.trim(),
-        scan_job_id: scanJobId ?? null,
-      }),
-    onError: (err: any) => {
-      message.error(err.message || '重复诊断失败');
-    },
+    mutationFn: (request: ReturnType<typeof toDedupePairPayload>) =>
+      scansApi.diagnosePair(request),
+    onError: (err: Error) => toast.error(err.message || '重复诊断失败'),
+    onSettled: () => { inFlight.current = false; },
   });
+
+  useEffect(() => {
+    if (!open) return;
+    setValues({ pathA: '', pathB: '' });
+    setValidationError(null);
+    inFlight.current = false;
+    mutation.reset();
+    // Only reset on open or scan context change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, scanJobId]);
+
+  const busy = mutation.isPending;
+  const close = () => {
+    if (busy || inFlight.current) return;
+    onClose();
+  };
+  const update = (key: keyof DedupePairValues, value: string) => {
+    setValues(previous => ({ ...previous, [key]: value }));
+    setValidationError(null);
+    if (!busy) mutation.reset(); // Results never describe edited paths.
+  };
+  const submit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (busy || inFlight.current) return;
+    const failure = validateDedupePair(values);
+    if (failure) {
+      setValidationError(failure);
+      return;
+    }
+    inFlight.current = true;
+    setValidationError(null);
+    mutation.mutate(toDedupePairPayload(values, scanJobId));
+  };
 
   const result = mutation.data;
   const diagnosis = result ? diagnosisCopy[result.diagnosis] : null;
 
   return (
-    <Modal
-      title="重复文件诊断"
-      open={open}
-      onCancel={onClose}
-      footer={null}
-      width={860}
-      className="nfc-overlay-modal nfc-dedupe-diagnostic-modal"
-      destroyOnClose
-    >
-      <div className="nfc-dedupe-diagnostic-stack">
-        <Alert
-          type="info"
-          showIcon
-          message="只读诊断"
-          description={
-            scanJobId
-              ? `会比较当前文件内容，并解释它们在 Scan #${scanJobId} 快照中的状态；不会移动、隔离或删除文件。`
-              : '会比较当前文件内容和文件系统身份；不会移动、隔离或删除文件。'
-          }
-        />
-
-        <Form
-          form={form}
-          layout="vertical"
-          onFinish={(values) => mutation.mutate(values)}
-        >
-          <Form.Item
-            name="path_a"
-            label="文件 A"
-            rules={[{ required: true, message: '请输入第一个完整文件路径' }]}
-          >
-            <Input placeholder="/data/..." />
-          </Form.Item>
-          <Form.Item
-            name="path_b"
-            label="文件 B"
-            rules={[{ required: true, message: '请输入第二个完整文件路径' }]}
-          >
-            <Input placeholder="/data/..." />
-          </Form.Item>
-          <Space>
-            <Button
-              type="primary"
-              htmlType="submit"
-              icon={<SearchOutlined />}
-              loading={mutation.isPending}
-            >
-              开始诊断
-            </Button>
-            {result && (
-              <Button onClick={() => mutation.reset()}>
-                清除结果
-              </Button>
-            )}
-          </Space>
-        </Form>
-
-        {result && diagnosis && (
-          <div className="nfc-dedupe-diagnostic-result">
-            <Alert
-              type={diagnosis.type}
-              showIcon
-              message={diagnosis.title}
-              description={diagnosis.detail}
-            />
-
-            <div className="nfc-dedupe-diagnostic-path-grid">
-              <PathFacts label="文件 A" item={result.paths[0]} />
-              <PathFacts label="文件 B" item={result.paths[1]} />
+    <Dialog.Root open={open} onOpenChange={next => { if (!next) close(); }}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="nfc-v2-dialog-overlay nfc-v2-dedupe-overlay" />
+        <Dialog.Content className="nfc-overlay-modal nfc-dedupe-diagnostic-modal nfc-v2-dedupe-dialog nfc-v2-diagnostic-dialog"
+          onEscapeKeyDown={event => { if (busy) event.preventDefault(); }}
+          onPointerDownOutside={event => event.preventDefault()}>
+          <header className="nfc-v2-dedupe-dialog-header">
+            <div>
+              <Dialog.Title>重复文件诊断</Dialog.Title>
+              <Dialog.Description>
+                {scanJobId
+                  ? '比较当前内容并解释 Scan #' + scanJobId + ' 快照中的状态。'
+                  : '比较当前内容和文件系统身份。'}
+              </Dialog.Description>
             </div>
-
-            <Descriptions
-              bordered
-              size="small"
-              column={3}
-              items={[
-                {
-                  key: 'same-entry',
-                  label: '同一 inode',
-                  children: result.same_filesystem_entry ? '是' : '否',
-                },
-                {
-                  key: 'size-match',
-                  label: '大小一致',
-                  children: result.size_match == null ? '未知' : result.size_match ? '是' : '否',
-                },
-                {
-                  key: 'hash-match',
-                  label: 'SHA-256 一致',
-                  children: result.sha256_match == null ? '未知' : result.sha256_match ? '是' : '否',
-                },
-              ]}
-            />
-
-            {result.scan && (
-              <section className="nfc-dedupe-diagnostic-scan">
-                <div className="nfc-dedupe-diagnostic-section-heading">
-                  <div>
-                    <strong>Scan #{result.scan.scan_job_id} 快照解释</strong>
-                    <span>{result.scan.name}</span>
-                  </div>
-                  <Tag color={result.scan.same_duplicate_group ? 'green' : 'default'}>
-                    {result.scan.same_duplicate_group ? '当时属于同一重复组' : '当时未记录为同一重复组'}
-                  </Tag>
+            <button type="button" className="nfc-v2-dedupe-close"
+              aria-label="关闭重复诊断" disabled={busy} onClick={close}>
+              <ConsoleIcon name="x" size={18} />
+            </button>
+          </header>
+          <div className="nfc-dedupe-diagnostic-stack nfc-v2-diagnostic-stack">
+            <div className="nfc-v2-dedupe-note" role="note">
+              <ConsoleIcon name="shield-check" size={18} />
+              只读诊断，不会移动、隔离或删除文件；所有文件路径受服务端 ALLOWED_ROOTS / PathGuard 限制。
+            </div>
+            <form className="nfc-v2-dedupe-form" onSubmit={submit}>
+              <div className="nfc-v2-dedupe-field">
+                <label htmlFor="nfc-diagnostic-path-a">文件 A</label>
+                <input id="nfc-diagnostic-path-a" required type="text" placeholder="/data/..."
+                  value={values.pathA} disabled={busy}
+                  onChange={event => update('pathA', event.target.value)} />
+              </div>
+              <div className="nfc-v2-dedupe-field">
+                <label htmlFor="nfc-diagnostic-path-b">文件 B</label>
+                <input id="nfc-diagnostic-path-b" required type="text" placeholder="/data/..."
+                  value={values.pathB} disabled={busy}
+                  onChange={event => update('pathB', event.target.value)} />
+              </div>
+              {validationError && <div className="nfc-v2-dedupe-error" role="alert">{validationError}</div>}
+              <div className="nfc-v2-dedupe-actions is-leading">
+                <ConsoleButton type="submit" variant="primary" loading={busy}
+                  leadingIcon={<ConsoleIcon name="search" size={16} />}>开始诊断</ConsoleButton>
+                {result && (
+                  <ConsoleButton disabled={busy} onClick={() => mutation.reset()}>清除结果</ConsoleButton>
+                )}
+              </div>
+            </form>
+            {result && diagnosis && (
+              <section className="nfc-dedupe-diagnostic-result" aria-label="诊断结果">
+                <div className={'nfc-v2-diagnostic-summary is-' + diagnosis.type} role="status">
+                  <strong>{diagnosis.title}</strong>
+                  <span>{diagnosis.detail}</span>
                 </div>
-
-                <div className="nfc-dedupe-diagnostic-scan-grid">
-                  {result.scan.paths.map((pathInfo, index) => (
-                    <div key={index} className="nfc-dedupe-diagnostic-scan-path">
-                      <strong>文件 {index === 0 ? 'A' : 'B'}</strong>
-                      <span>
-                        快照成员：
-                        {pathInfo.included_in_duplicate_snapshot ? '是' : '否'}
+                <div className="nfc-dedupe-diagnostic-path-grid">
+                  <DiagnosticPath label="文件 A" item={result.paths[0]} />
+                  <DiagnosticPath label="文件 B" item={result.paths[1]} />
+                </div>
+                <dl className="nfc-v2-diagnostic-comparison">
+                  <div><dt>同一 inode</dt><dd>{result.same_filesystem_entry ? '是' : '否'}</dd></div>
+                  <div><dt>大小一致</dt><dd>
+                    {result.size_match == null ? '未知' : result.size_match ? '是' : '否'}
+                  </dd></div>
+                  <div><dt>SHA-256 一致</dt><dd>
+                    {result.sha256_match == null ? '未知' : result.sha256_match ? '是' : '否'}
+                  </dd></div>
+                </dl>
+                {result.scan && (
+                  <section className="nfc-dedupe-diagnostic-scan">
+                    <div className="nfc-dedupe-diagnostic-section-heading">
+                      <div>
+                        <strong>Scan #{result.scan.scan_job_id} 快照解释</strong>
+                        <span>{result.scan.name}</span>
+                      </div>
+                      <span className="nfc-v2-diagnostic-tag">
+                        {result.scan.same_duplicate_group ? '当时属于同一重复组' : '当时未记录为同一重复组'}
                       </span>
-                      <span>
-                        Scan Root：
-                        {pathInfo.scan_root_index == null ? '—' : `#${pathInfo.scan_root_index}`}
-                      </span>
-                      {pathInfo.memberships.length > 0 && (
-                        <span>
-                          Group：
-                          {pathInfo.memberships.map((entry) => `#${entry.group_id}`).join(', ')}
-                        </span>
-                      )}
-                      {pathInfo.reasons.map((reason) => (
-                        <span className="nfc-warning-text" key={reason}>
-                          {reasonCopy[reason] || reason}
-                        </span>
+                    </div>
+                    <div className="nfc-dedupe-diagnostic-scan-grid">
+                      {result.scan.paths.map((pathInfo, index) => (
+                        <div key={index} className="nfc-dedupe-diagnostic-scan-path">
+                          <strong>文件 {index === 0 ? 'A' : 'B'}</strong>
+                          <span>快照成员：{pathInfo.included_in_duplicate_snapshot ? '是' : '否'}</span>
+                          <span>Scan Root：{pathInfo.scan_root_index == null ? '—' : '#' + pathInfo.scan_root_index}</span>
+                          {pathInfo.memberships.length > 0 && (
+                            <span>Group：{pathInfo.memberships.map(entry => '#' + entry.group_id).join(', ')}</span>
+                          )}
+                          {pathInfo.reasons.map(reason => (
+                            <span className="nfc-warning-text" key={reason}>
+                              {reasonCopy[reason] || reason}
+                            </span>
+                          ))}
+                        </div>
                       ))}
                     </div>
-                  ))}
-                </div>
-
-                <div className="nfc-dedupe-diagnostic-filter-note">
-                  <span>当时参数</span>
-                  <span>min-size: {result.scan.fclones_args.min_size || '无'}</span>
-                  <span>match-links: {result.scan.fclones_args.match_links ? '开启' : '关闭'}</span>
-                  <span>
-                    include patterns: {result.scan.fclones_args.name_patterns?.join(', ') || '无'}
-                  </span>
-                  <span>
-                    exclude patterns: {result.scan.fclones_args.exclude_patterns?.join(', ') || '无'}
-                  </span>
-                </div>
+                    <div className="nfc-dedupe-diagnostic-filter-note">
+                      <span>当时参数</span>
+                      <span>min-size: {result.scan.fclones_args.min_size || '无'}</span>
+                      <span>match-links: {result.scan.fclones_args.match_links ? '开启' : '关闭'}</span>
+                      <span>include patterns: {result.scan.fclones_args.name_patterns?.join(', ') || '无'}</span>
+                      <span>exclude patterns: {result.scan.fclones_args.exclude_patterns?.join(', ') || '无'}</span>
+                    </div>
+                  </section>
+                )}
               </section>
             )}
           </div>
-        )}
-      </div>
-    </Modal>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 };

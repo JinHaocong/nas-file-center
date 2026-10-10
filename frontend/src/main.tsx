@@ -22,6 +22,7 @@ import './styles/console-v2-scan-detail.css';
 import './styles/console-v2-scan-create.css';
 import './styles/console-v2-directory-picker.css';
 import './styles/console-v2-directory-modal.css';
+import './styles/console-v2-dedupe-overlays.css';
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
