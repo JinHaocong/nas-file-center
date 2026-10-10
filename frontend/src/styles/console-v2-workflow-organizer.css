@@ -1,0 +1,48 @@
+/* Workflow-only Organizer snapshot editor; profile CRUD still uses its own legacy Form. */
+.nfc-v2-workflow-organizer { --v2-org-line:var(--nfc-hairline);--v2-org-text:var(--nfc-text);--v2-org-muted:var(--nfc-text-muted);--v2-org-surface:var(--nfc-surface-1);display:grid;gap:13px;min-width:0; }
+.nfc-v2-workflow-organizer-import { background:var(--nfc-surface-2);border-color:var(--v2-org-line); }
+.nfc-v2-workflow-organizer-import .nfc-organizer-step-import-stack { display:grid;gap:8px;min-width:0; }
+.nfc-v2-workflow-organizer-import-row { display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap; }
+.nfc-v2-workflow-organizer-import-label { display:inline-flex;gap:8px;align-items:center;font-size:12px;font-weight:690;color:var(--v2-org-text); }
+.nfc-v2-workflow-organizer-import-select { flex:1 1 240px;max-width:450px;min-width:0;min-height:42px;padding:8px 10px;background:var(--v2-org-surface);border:1px solid var(--v2-org-line);border-radius:9px;color:var(--v2-org-text);font:inherit;font-size:12px; }
+.nfc-v2-workflow-organizer .nfc-form-safety-note { color:var(--v2-org-muted);font-size:11px;line-height:1.6;margin:0; }
+.nfc-v2-organizer-snapshot-form { display:grid;gap:12px;min-width:0; }
+.nfc-v2-organizer-tabs { display:flex;gap:4px;padding:4px;overflow-x:auto;background:var(--nfc-surface-2);border:1px solid var(--v2-org-line);border-radius:10px; }
+.nfc-v2-organizer-tabs button { padding:10px 12px;white-space:nowrap;cursor:pointer;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--v2-org-muted);font-weight:630;font-size:12px;min-height:40px; }
+.nfc-v2-organizer-tabs button[aria-selected='true'] { background:var(--v2-org-surface);color:var(--nfc-accent);border-color:var(--v2-org-line); }
+.nfc-v2-organizer-content { min-width:0;border:0;margin:0;padding:0; }
+.nfc-v2-organizer-grid { display:grid;gap:13px;min-width:0; }
+.nfc-v2-organizer-field { display:grid;gap:6px;min-width:0;color:var(--v2-org-text);font-size:12px;font-weight:650; }
+.nfc-v2-organizer-field > span > b { color:#b93250; }
+.nfc-v2-organizer-help { color:var(--v2-org-muted);font-size:11px;font-weight:430;line-height:1.6;overflow-wrap:anywhere; }
+.nfc-v2-organizer-field > :is(input,textarea,select),.nfc-v2-organizer-tags-entry input { box-sizing:border-box;min-height:42px;width:100%;padding:9px 11px;border:1px solid var(--v2-org-line);border-radius:9px;background:var(--v2-org-surface);color:var(--v2-org-text);font:inherit;font-size:12px; }
+.nfc-v2-organizer-field textarea { resize:vertical; }
+.nfc-v2-organizer-content:disabled :is(input,textarea,select) { opacity:.7;cursor:not-allowed; }
+.nfc-v2-organizer-toggle { display:flex;align-items:center;gap:9px;min-height:42px;color:var(--v2-org-text);font-size:12px;cursor:pointer; }
+.nfc-v2-organizer-toggle input { width:18px;height:18px;accent-color:var(--nfc-accent); }
+.nfc-v2-organizer-notice { display:flex;align-items:start;gap:10px;border:1px solid var(--v2-org-line);background:var(--nfc-info-soft);padding:12px;border-radius:10px;color:var(--v2-org-text);font-size:12px;line-height:1.65;overflow-wrap:anywhere; }
+.nfc-v2-organizer-notice svg { flex:0 0 auto;color:var(--nfc-accent);margin-top:2px; }
+.nfc-v2-organizer-notice code { font-size:11px; }
+.nfc-v2-organizer-notice.is-warning { border-color:#ca9553; }
+.nfc-v2-organizer-live-preview { display:grid;gap:8px;border:1px solid var(--v2-org-line);padding:12px;background:var(--nfc-surface-2);border-radius:9px;font-size:12px;color:var(--v2-org-text); }
+.nfc-v2-organizer-live-preview code { overflow-wrap:anywhere;font-size:12px; }
+.nfc-v2-organizer-tags { display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:7px;border:1px solid var(--v2-org-line);background:var(--v2-org-surface);border-radius:9px; }
+.nfc-v2-organizer-tag { display:inline-flex;align-items:center;gap:5px;max-width:100%;padding:4px 6px;border-radius:7px;background:var(--nfc-info-soft);font-size:11px;overflow-wrap:anywhere; }
+.nfc-v2-organizer-tag button,.nfc-v2-organizer-tags-entry button { display:grid;place-items:center;border:0;background:transparent;color:var(--nfc-accent);border-radius:6px;min-width:27px;min-height:27px;cursor:pointer; }
+.nfc-v2-organizer-tags-entry { display:flex;min-width:min(180px,100%);flex:1 1 180px;gap:6px; }
+.nfc-v2-organizer-tags-entry input { min-width:0; }
+.nfc-v2-organizer-advanced { display:grid;gap:10px; }
+.nfc-v2-organizer-danger { color:#b83a54;border:1px solid #ce7d91;border-radius:9px;padding:11px;font-size:12px; }
+[data-theme='dark'] .nfc-v2-organizer-danger { color:#ff9daf; }
+.nfc-v2-organizer-advanced-collapse { display:grid;gap:8px;border:0;background:transparent; }
+.nfc-v2-organizer-rule { overflow:hidden;border:1px solid var(--v2-org-line);border-radius:9px;background:var(--v2-org-surface); }
+.nfc-v2-organizer-rule-toggle { width:100%;display:flex;align-items:center;gap:9px;min-height:44px;padding:11px 12px;border:0;background:var(--nfc-surface-2);color:var(--v2-org-text);text-align:left;cursor:pointer;font-weight:670;font-size:12px; }
+.nfc-v2-organizer-rule-body { display:grid;gap:12px;padding:14px; }
+.nfc-v2-organizer-rule-body[hidden] { display:none; }
+.nfc-v2-organizer-errors { display:grid;gap:5px;border:1px solid #ce7d91;border-radius:9px;padding:11px;font-size:11px;color:#ba3953; }
+.nfc-v2-organizer-errors p { margin:0; }
+.nfc-v2-workflow-organizer :is(button,input,select,textarea):focus-visible { outline:2px solid var(--nfc-accent);outline-offset:2px; }
+[data-theme='dark'] .nfc-v2-workflow-organizer { --v2-org-line:var(--nfc-hairline);--v2-org-text:var(--nfc-text);--v2-org-muted:var(--nfc-text-muted);--v2-org-surface:var(--nfc-surface-1); }
+[data-theme='dark'] .nfc-v2-organizer-field > :is(input,textarea,select),[data-theme='dark'] .nfc-v2-organizer-tags-entry input,[data-theme='dark'] .nfc-v2-workflow-organizer-import-select { color-scheme:dark; }
+@media (max-width:767px) { .nfc-v2-workflow-organizer-import-row { align-items:stretch;flex-direction:column; }.nfc-v2-workflow-organizer-import-select { max-width:none;min-height:44px;width:100%;flex-basis:auto; }.nfc-v2-organizer-tabs button { min-height:44px; }.nfc-v2-organizer-field > :is(input,textarea,select),.nfc-v2-organizer-tags-entry input { min-height:44px; }.nfc-v2-organizer-tags-entry button,.nfc-v2-organizer-tag button { min-width:44px;min-height:44px; } }
+@media (prefers-reduced-motion:reduce) { .nfc-v2-workflow-organizer * { transition:none;animation:none;scroll-behavior:auto; } }

@@ -105,8 +105,14 @@ describe('Organizer Advanced Rules C4 frontend contract', () => {
     assert.ok(defaults.includes('cloneOrganizerAdvancedRules'));
     assert.ok(defaults.includes('advanced_rules: cloneOrganizerAdvancedRules'));
     assert.ok(modal.includes('advanced_rules: editingProfile.advanced_rules'));
-    assert.ok(workflowEditor.includes('advanced_rules: step.profile_snapshot.advanced_rules'));
-    assert.ok(workflowEditor.includes('advanced_rules: allValues.advanced_rules'));
+    const nativeFields = read('src/components/workflows/OrganizerSnapshotFields.tsx');
+    const snapshotAdapter = read('src/utils/workflowOrganizerSnapshot.ts');
+    assert.ok(workflowEditor.includes('importProfileToSnapshot(fresh)'));
+    assert.ok(workflowEditor.includes('profile_snapshot: immutableSnapshot'));
+    assert.ok(nativeFields.includes('patchWorkflowOrganizerAdvancedRule'));
+    assert.ok(snapshotAdapter.includes('advanced_rules: cloneOrganizerAdvancedRules'));
+    assert.ok(snapshotAdapter.includes('...advancedRules[key]'));
+    assert.ok(snapshotAdapter.includes('...fields'));
   });
 
   test('C4 styles cover mobile and dark staged surfaces', () => {

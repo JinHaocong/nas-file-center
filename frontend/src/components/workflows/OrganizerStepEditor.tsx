@@ -1,133 +1,96 @@
-import React, { useEffect } from 'react';
-import { Form, Select, Space, Typography, message } from 'antd';
-import { ImportOutlined } from '@ant-design/icons';
+import React, { useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { OrganizeStep, OrganizerProfileSnapshot } from '../../types/workflow';
-import { OrganizerProfileFields } from './OrganizerProfileFields';
+import type { OrganizeStep, OrganizerProfileSnapshot } from '../../types/workflow';
+import { OrganizerSnapshotFields } from './OrganizerSnapshotFields';
 import { organizerProfilesApi } from '../../api/organizerProfiles';
 import { getStructuredApiError } from '../../api/errors';
-import { createDefaultOrganizerSnapshot, importProfileToSnapshot } from '../../utils/organizerDefaults';
+import { importProfileToSnapshot } from '../../utils/organizerDefaults';
+import { ConsoleIcon } from '../ui/ConsoleIcon';
+import { useConsoleToast } from '../ui/ConsoleToast';
 
-const { Text } = Typography;
-
-interface OrganizerStepEditorProps {
+interface Props {
   step: OrganizeStep;
   onChange: (updated: OrganizeStep) => void;
   readOnly?: boolean;
 }
 
-export const OrganizerStepEditor: React.FC<OrganizerStepEditorProps> = ({ step, onChange, readOnly = false }) => {
-  const [form] = Form.useForm();
-  const [isImporting, setIsImporting] = React.useState(false);
+/** Imports a *fetched* immutable copy, not a live profile reference. */
+export const OrganizerStepEditor: React.FC<Props> = ({
+  step, onChange, readOnly = false,
+}) => {
+  const toast = useConsoleToast();
+  const [isImporting, setIsImporting] = useState(false);
+  const importInFlight = useRef(false);
+  const readOnlyRef = useRef(readOnly);
+  const stepRef = useRef(step);
+  readOnlyRef.current = readOnly;
+  stepRef.current = step;
 
-  const { data: profilesData, isLoading: isLoadingProfiles } = useQuery({
+  const { data: profilesData, isLoading: isLoadingProfiles, isError: profilesError } = useQuery({
     queryKey: ['organizerProfilesListForImport'],
     queryFn: () => organizerProfilesApi.listProfiles(1, 100),
+    enabled: !readOnly,
   });
-
-  useEffect(() => {
-    const defaults = createDefaultOrganizerSnapshot();
-    form.setFieldsValue({
-      name: step.profile_snapshot.name || '',
-      description: step.profile_snapshot.description || '',
-      root: step.profile_snapshot.root || '',
-      recursive: step.profile_snapshot.recursive ?? defaults.recursive,
-      image_extensions: step.profile_snapshot.image_extensions ?? defaults.image_extensions,
-      video_extensions: step.profile_snapshot.video_extensions ?? defaults.video_extensions,
-      rename_template: step.profile_snapshot.rename_template ?? defaults.rename_template,
-      statistics_template: step.profile_snapshot.statistics_template ?? defaults.statistics_template,
-      preserve_tags: step.profile_snapshot.preserve_tags ?? defaults.preserve_tags,
-      cleanup_patterns: step.profile_snapshot.cleanup_patterns ?? defaults.cleanup_patterns,
-      numbering_mode: step.profile_snapshot.numbering_mode ?? defaults.numbering_mode,
-      numbering_start: step.profile_snapshot.numbering_start ?? defaults.numbering_start,
-      numbering_padding: step.profile_snapshot.numbering_padding ?? defaults.numbering_padding,
-      mtime_mode: step.profile_snapshot.mtime_mode ?? defaults.mtime_mode,
-      mtime_delay_seconds: step.profile_snapshot.mtime_delay_seconds ?? defaults.mtime_delay_seconds,
-      advanced_rules: step.profile_snapshot.advanced_rules ?? defaults.advanced_rules,
-    });
-  }, [step.profile_snapshot, form]);
-
-  const handleImportProfile = async (profileId: number) => {
+  const handleImportProfile = async (rawId: string) => {
+    const profileId = Number(rawId);
+    const knownIds = (profilesData?.items || []).map(p => p.id);
+    if (readOnlyRef.current || importInFlight.current ||
+      !Number.isSafeInteger(profileId) || !knownIds.includes(profileId)) return;
+    importInFlight.current = true;
     setIsImporting(true);
     try {
       const fresh = await organizerProfilesApi.getProfile(profileId);
+      if (readOnlyRef.current) return;
       const immutableSnapshot = importProfileToSnapshot(fresh);
-      onChange({
-        ...step,
-        profile_snapshot: immutableSnapshot,
-      });
-      message.success(`已从「${fresh.name}」获取最新配置并导入为独立快照副本`);
+      onChange({ ...stepRef.current, profile_snapshot: immutableSnapshot });
+      toast.success(`已从「${fresh.name}」获取最新配置并导入为独立快照副本`);
     } catch (err: unknown) {
-      const structured = getStructuredApiError(err);
-      message.error(`导入配置失败: ${structured.message}`);
+      toast.error(`导入配置失败: ${getStructuredApiError(err).message}`);
     } finally {
+      importInFlight.current = false;
       setIsImporting(false);
     }
   };
-
-  const handleValuesChange = (_: any, allValues: any) => {
-    const updatedSnapshot: OrganizerProfileSnapshot = {
-      name: allValues.name,
-      description: allValues.description || null,
-      root: allValues.root || null,
-      recursive: Boolean(allValues.recursive),
-      image_extensions: allValues.image_extensions || [],
-      video_extensions: allValues.video_extensions || [],
-      rename_template: allValues.rename_template || '{name}',
-      statistics_template: allValues.statistics_template || '[{images}P {videos}V {size}]',
-      preserve_tags: allValues.preserve_tags || [],
-      cleanup_patterns: allValues.cleanup_patterns || [],
-      numbering_mode: allValues.numbering_mode || 'none',
-      numbering_start: Number(allValues.numbering_start ?? 1),
-      numbering_padding: Number(allValues.numbering_padding ?? 3),
-      mtime_mode: allValues.mtime_mode || 'none',
-      mtime_delay_seconds: Number(allValues.mtime_delay_seconds ?? 2.0),
-      advanced_rules: allValues.advanced_rules || createDefaultOrganizerSnapshot().advanced_rules,
-    };
-    onChange({
-      ...step,
-      profile_snapshot: updatedSnapshot,
-    });
+  const handleValuesChange = (nextSnapshot: OrganizerProfileSnapshot) => {
+    if (readOnlyRef.current || importInFlight.current) return;
+    onChange({ ...stepRef.current, profile_snapshot: nextSnapshot });
   };
-
   return (
-    <div className="nfc-organizer-step-editor">
+    <div className="nfc-organizer-step-editor nfc-v2-workflow-organizer">
       {!readOnly && (
-        <div className="nfc-organizer-step-import">
-          <Space className="nfc-organizer-step-import-stack" direction="vertical">
-            <Space className="nfc-organizer-step-import-row" align="center">
-              <Space>
-                <ImportOutlined className="nfc-success-text" />
-                <Text strong>从现有整理方案导入配置 (Import from Profile)</Text>
-              </Space>
-              <Select
-                placeholder="选择已有方案导入快照..."
-                loading={isLoadingProfiles || isImporting}
-                disabled={isImporting}
-                value={undefined}
-                onChange={handleImportProfile}
-                options={(profilesData?.items || []).map((p) => ({
-                  label: `${p.name} (ID: #${p.id})`,
-                  value: p.id,
-                }))}
-              />
-            </Space>
-            <Text type="secondary" className="nfc-form-safety-note">
-              说明：导入操作将把目标方案的配置复制为独立的不可变快照，后续原方案的修改不会影响本工作流。
-            </Text>
-          </Space>
+        <div className="nfc-organizer-step-import nfc-v2-workflow-organizer-import">
+          <div className="nfc-organizer-step-import-stack">
+            <label className="nfc-organizer-step-import-row nfc-v2-workflow-organizer-import-row">
+              <span className="nfc-v2-workflow-organizer-import-label">
+                <ConsoleIcon name="copy" size={17} />
+                从现有整理方案导入配置 (Import from Profile)
+              </span>
+              <select className="nfc-v2-workflow-organizer-import-select"
+                disabled={isLoadingProfiles || isImporting}
+                value="" aria-label="选择已有整理方案导入快照"
+                onChange={event => { void handleImportProfile(event.target.value); }}>
+                <option value="" disabled>选择已有方案导入快照...</option>
+                {(profilesData?.items || []).map(profile => (
+                  <option key={profile.id} value={profile.id}>
+                    {profile.name} (ID: #{profile.id})
+                  </option>
+                ))}
+              </select>
+            </label>
+            {profilesError && <span role="alert" className="nfc-v2-step-warning">
+              无法读取方案列表；现有快照不会被清空。
+            </span>}
+            {isImporting && <span role="status" className="nfc-v2-organizer-help">
+              正在获取最新方案并复制快照…
+            </span>}
+            <p className="nfc-form-safety-note">
+              导入操作将把目标方案的配置复制为独立的不可变快照；后续原方案的修改不会影响本工作流。
+            </p>
+          </div>
         </div>
       )}
-
-      <Form
-        className="nfc-workflow-step-form nfc-organizer-step-form"
-        form={form}
-        layout="vertical"
-        disabled={readOnly}
-        onValuesChange={handleValuesChange}
-      >
-        <OrganizerProfileFields includeRoot={false} />
-      </Form>
+      <OrganizerSnapshotFields value={step.profile_snapshot}
+        onChange={handleValuesChange} readOnly={readOnly || isImporting} />
     </div>
   );
 };
