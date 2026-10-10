@@ -1,6 +1,6 @@
 import React from 'react';
 import {
-  Activity, Archive, ArrowDown, ArrowRight, ArrowUp, Bell, CalendarDays, Check,
+  Activity, Archive, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Bell, CalendarDays, Check,
   CircleCheck, Copy, ChevronDown, ChevronRight, Clock3, Database,
   FileCheck2, FileSearch, FileText, Folder, FolderOpen, Folders,
   GitCompareArrows, HardDrive, History, Info, Layers3, LayoutDashboard, ListChecks,
@@ -16,6 +16,7 @@ const icons = {
   archive: Archive,
   'arrow-up': ArrowUp,
   'arrow-down': ArrowDown,
+  'arrow-left': ArrowLeft,
   'arrow-right': ArrowRight,
   bell: Bell,
   calendar: CalendarDays,

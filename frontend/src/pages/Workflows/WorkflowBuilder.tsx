@@ -1,25 +1,9 @@
-import React, { useEffect, useState } from 'react';
-import {
-  Alert,
-  Button,
-  Form,
-  Input,
-  Modal,
-  Popconfirm,
-  Radio,
-  Spin,
-  message,
-} from 'antd';
-import {
-  AppstoreOutlined,
-  ArrowLeftOutlined,
-  ExclamationCircleOutlined,
-  FileTextOutlined,
-  HistoryOutlined,
-  SaveOutlined,
-  ThunderboltOutlined,
-  ToolOutlined,
-} from '@ant-design/icons';
+import React, { useEffect, useRef, useState } from 'react';
+import { Form, Input, Radio } from 'antd';
+import { ConsoleButton } from '../../components/ui/ConsoleButton';
+import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
+import { ConsoleConfirmDialog } from '../../components/ui/ConsoleConfirmDialog';
+import { useConsoleToast } from '../../components/ui/ConsoleToast';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { workflowApi } from '../../api/workflows';
@@ -41,6 +25,7 @@ import {
   canSaveRevision,
   canSwitchWorkflowMode,
 } from '../../utils/workflowRbac';
+import { canConfirmWorkflowModeReset, canConfirmWorkflowRollback } from '../../utils/workflowBuilderActions';
 import { createDefaultOrganizerSnapshot } from '../../utils/organizerDefaults';
 import { createDefaultDedupeScorerConfig } from '../../utils/dedupeConfig';
 import { createInitialScanStep, parseWorkflowRevisionQuery } from '../../utils/workflowRevisionParser';
@@ -87,11 +72,16 @@ const modeLabel = (mode: WorkflowMode) => {
 };
 
 const modeIcon = (mode: WorkflowMode) => {
-  if (mode === 'file') return <FileTextOutlined />;
-  if (mode === 'organizer') return <AppstoreOutlined />;
-  if (mode === 'dedupe') return <ThunderboltOutlined />;
-  return <ToolOutlined />;
+  if (mode === 'file') return <ConsoleIcon name="file-text" size={17} />;
+  if (mode === 'organizer') return <ConsoleIcon name="folders" size={17} />;
+  if (mode === 'dedupe') return <ConsoleIcon name="zap" size={17} />;
+  return <ConsoleIcon name="settings" size={17} />;
 };
+
+type PendingWorkflowConfirmation =
+  | { kind: 'mode'; targetMode: WorkflowMode }
+  | { kind: 'back' }
+  | { kind: 'rollback'; revision: number; expectedRevision: number };
 
 export const WorkflowBuilderPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -104,6 +94,9 @@ export const WorkflowBuilderPage: React.FC = () => {
   useTitle(isNew ? '新建工作流' : `编辑工作流 #${workflowId}`);
   const { user } = useAuth();
   const [form] = Form.useForm();
+  const toast = useConsoleToast();
+  const rollbackInFlight = useRef(false);
+  const [confirmation, setConfirmation] = useState<PendingWorkflowConfirmation | null>(null);
   const [mode, setMode] = useState<WorkflowMode>('file');
   const [steps, setSteps] = useState<WorkflowStep[]>([]);
   const [isDirty, setIsDirty] = useState(false);
@@ -214,16 +207,14 @@ export const WorkflowBuilderPage: React.FC = () => {
       });
     },
     onSuccess: (res: WorkflowResponse) => {
-      message.success(
-        isNew ? '工作流创建成功' : `工作流已保存至新版本 r${res.current_revision}`
-      );
+      toast.success(isNew ? '工作流创建成功' : `工作流已保存至新版本 r${res.current_revision}`);
       setIsDirty(false);
       queryClient.invalidateQueries({ queryKey: ['workflowsList'] });
       if (isNew) navigate(`/workflows/${res.id}`);
       else refetch();
     },
     onError: (err) =>
-      message.error(getStructuredApiError(err).message || '保存工作流失败'),
+      toast.error(getStructuredApiError(err).message || '保存工作流失败'),
   });
 
   const rollbackMutation = useMutation({
@@ -235,34 +226,28 @@ export const WorkflowBuilderPage: React.FC = () => {
       });
     },
     onSuccess: (data) => {
-      message.success(`已成功回滚至版本 r${data.current_revision}`);
+      setConfirmation(null);
+      toast.success(`已成功回滚至版本 r${data.current_revision}`);
       queryClient.invalidateQueries({ queryKey: ['workflowDetail', workflowId] });
       queryClient.invalidateQueries({ queryKey: ['workflowsList'] });
       navigate(`/workflows/${workflowId}`);
       refetch();
     },
-    onError: (err) =>
-      message.error(getStructuredApiError(err).message || '回滚失败'),
+    onError: (err) => {
+      setConfirmation(null);
+      toast.error(getStructuredApiError(err).message || '回滚失败');
+    },
+    onSettled: () => { rollbackInFlight.current = false; },
   });
 
   const handleModeChange = (newMode: WorkflowMode) => {
-    if (newMode === mode) return;
-    const apply = () => {
+    if (!canSwitchMode || newMode === mode) return;
+    if (steps.length > 0) {
+      setConfirmation({ kind: 'mode', targetMode: newMode });
+    } else {
       setMode(newMode);
       setSteps(defaultStepsForMode(newMode));
       setIsDirty(true);
-    };
-    if (steps.length > 0) {
-      Modal.confirm({
-        title: '切换工作流模式',
-        icon: <ExclamationCircleOutlined />,
-        content: `切换到 ${modeLabel(newMode)} 将重置流水线步骤为该模式的标准默认拓扑。确定切换吗？`,
-        okText: '确认重置并切换',
-        cancelText: '取消',
-        onOk: apply,
-      });
-    } else {
-      apply();
     }
   };
 
@@ -272,106 +257,94 @@ export const WorkflowBuilderPage: React.FC = () => {
   };
 
   const handleBack = () => {
-    if (isDirty) {
-      Modal.confirm({
-        title: '未保存的更改',
-        icon: <ExclamationCircleOutlined />,
-        content: '当前工作流存在未保存的修改，退出将丢失这些修改，确认返回吗？',
-        okText: '确认退出',
-        cancelText: '留在此页',
-        onOk: () => navigate('/workflows'),
-      });
-    } else {
-      navigate('/workflows');
+    if (isDirty) setConfirmation({ kind: 'back' });
+    else navigate('/workflows');
+  };
+
+  const confirmWorkflowAction = () => {
+    if (!confirmation) return;
+    if (confirmation.kind === 'mode') {
+      if (canConfirmWorkflowModeReset(canSwitchMode, saveMutation.isPending, mode, confirmation.targetMode)) {
+        setMode(confirmation.targetMode);
+        setSteps(defaultStepsForMode(confirmation.targetMode));
+        setIsDirty(true);
+      }
+      setConfirmation(null);
+      return;
     }
+    if (confirmation.kind === 'back') {
+      setConfirmation(null);
+      navigate('/workflows');
+      return;
+    }
+    if (rollbackInFlight.current || rollbackMutation.isPending) return;
+    if (!canConfirmWorkflowRollback({
+      canRollback, isHistoricalView, currentRevision: workflow?.current_revision,
+      selectedRevision: targetRevision, requestedRevision: confirmation.revision,
+      expectedRevision: confirmation.expectedRevision,
+      busy: rollbackMutation.isPending || rollbackInFlight.current,
+    })) {
+      setConfirmation(null);
+      return;
+    }
+    rollbackInFlight.current = true;
+    rollbackMutation.mutate(confirmation.revision);
   };
 
   if (!isNew && (isLoading || (isHistoricalView && isHistLoading))) {
     return (
-      <div className="nfc-centered-state">
-        <Spin size="large" tip="正在载入工作流配置..." />
+      <div className="nfc-centered-state nfc-v2-workflow-state" role="status">
+        <span className="nfc-console-spinner" aria-hidden="true" />
+        正在载入工作流配置...
       </div>
     );
   }
 
   if (!isNew && isError) {
     return (
-      <Alert
-        type="error"
-        showIcon
-        message="加载工作流失败"
-        description={getStructuredApiError(error).message}
-        action={<Button onClick={() => navigate('/workflows')}>返回列表</Button>}
-      />
+      <div className="nfc-workflow-error-state nfc-v2-workflow-state is-error" role="alert">
+        <h2>加载工作流失败</h2>
+        <p>{getStructuredApiError(error).message}</p>
+        <ConsoleButton onClick={() => navigate('/workflows')}>返回列表</ConsoleButton>
+      </div>
     );
   }
 
   if (!isNew && !parsedRevision.isValid) {
     return (
-      <div className="nfc-workflow-error-state">
-        <Button
-          icon={<ArrowLeftOutlined />}
-          onClick={() => navigate(`/workflows/${workflowId}`)}
-        >
-          返回当前版本
-        </Button>
-        <Alert
-          type="error"
-          showIcon
-          message="无效的历史版本号"
-          description={parsedRevision.errorMessage || '版本号参数不合法，已拒绝访问。'}
-          action={
-            <Button
-              type="primary"
-              onClick={() => navigate(`/workflows/${workflowId}`)}
-            >
-              查看当前最新版本 (r{workflow?.current_revision ?? ''})
-            </Button>
-          }
-        />
+      <div className="nfc-workflow-error-state nfc-v2-workflow-state is-error" role="alert">
+        <h2>无效的历史版本号</h2>
+        <p>{parsedRevision.errorMessage || '版本号参数不合法，已拒绝访问。'}</p>
+        <ConsoleButton leadingIcon={<ConsoleIcon name="arrow-left" size={16} />}
+          onClick={() => navigate('/workflows/' + workflowId)}>返回当前版本</ConsoleButton>
+        <ConsoleButton variant="primary" onClick={() => navigate('/workflows/' + workflowId)}>
+          查看当前最新版本 (r{workflow?.current_revision ?? ''})
+        </ConsoleButton>
       </div>
     );
   }
 
   if (!isNew && isHistoricalView && isHistError) {
     return (
-      <div className="nfc-workflow-error-state">
-        <Button
-          icon={<ArrowLeftOutlined />}
-          onClick={() => navigate(`/workflows/${workflowId}`)}
-        >
-          返回当前版本
-        </Button>
-        <Alert
-          type="error"
-          showIcon
-          message="历史版本加载失败"
-          description={
-            getStructuredApiError(histError).message ||
-            '指定的历史版本不存在或加载失败。'
-          }
-          action={
-            <Button
-              type="primary"
-              onClick={() => navigate(`/workflows/${workflowId}`)}
-            >
-              查看当前最新版本 (r{workflow?.current_revision ?? ''})
-            </Button>
-          }
-        />
+      <div className="nfc-workflow-error-state nfc-v2-workflow-state is-error" role="alert">
+        <h2>历史版本加载失败</h2>
+        <p>{getStructuredApiError(histError).message || '指定的历史版本不存在或加载失败。'}</p>
+        <ConsoleButton leadingIcon={<ConsoleIcon name="arrow-left" size={16} />}
+          onClick={() => navigate('/workflows/' + workflowId)}>返回当前版本</ConsoleButton>
+        <ConsoleButton variant="primary" onClick={() => navigate('/workflows/' + workflowId)}>
+          查看当前最新版本 (r{workflow?.current_revision ?? ''})
+        </ConsoleButton>
       </div>
     );
   }
 
   if (isNew && !canCreateWorkflow(user?.role)) {
     return (
-      <Alert
-        type="error"
-        showIcon
-        message="权限不足"
-        description="普通成员不可创建新工作流，请联系管理员。"
-        action={<Button onClick={() => navigate('/workflows')}>返回列表</Button>}
-      />
+      <div className="nfc-workflow-error-state nfc-v2-workflow-state is-error" role="alert">
+        <h2>权限不足</h2>
+        <p>普通成员不可创建新工作流，请联系管理员。</p>
+        <ConsoleButton onClick={() => navigate('/workflows')}>返回列表</ConsoleButton>
+      </div>
     );
   }
 
@@ -396,72 +369,61 @@ export const WorkflowBuilderPage: React.FC = () => {
         }
         actions={
           <ActionBar compact>
-            <Button icon={<ArrowLeftOutlined />} onClick={handleBack}>返回</Button>
+            <ConsoleButton leadingIcon={<ConsoleIcon name="arrow-left" size={16} />}
+              onClick={handleBack}>返回</ConsoleButton>
             {isHistoricalView && (
-              <Button onClick={() => navigate(`/workflows/${workflowId}`)}>
+              <ConsoleButton onClick={() => navigate('/workflows/' + workflowId)}>
                 返回当前最新版
-              </Button>
+              </ConsoleButton>
             )}
             {isHistoricalView && canRollback && (
-              <Popconfirm
-                title={`确认回滚至历史版本 r${targetRevision}？`}
-                description="系统将基于此定义生成新修订版本并恢复至当前。"
-                onConfirm={() => rollbackMutation.mutate(targetRevision!)}
-                okText="确认回滚"
-                cancelText="取消"
-              >
-                <Button danger icon={<HistoryOutlined />} loading={rollbackMutation.isPending}>
-                  回滚至此版本
-                </Button>
-              </Popconfirm>
+              <ConsoleButton variant="danger" leadingIcon={<ConsoleIcon name="history" size={16} />}
+                loading={rollbackMutation.isPending}
+                onClick={() => {
+                  if (workflow && targetRevision !== null && !rollbackMutation.isPending) {
+                    setConfirmation({ kind: 'rollback', revision: targetRevision,
+                      expectedRevision: workflow.current_revision });
+                  }
+                }}>
+                回滚至此版本
+              </ConsoleButton>
             )}
             {!isNew && workflow && (
-              <Button
-                icon={<HistoryOutlined />}
-                onClick={() => setRevisionDrawerOpen(true)}
-              >
-                版本历史
-              </Button>
+              <ConsoleButton leadingIcon={<ConsoleIcon name="history" size={16} />}
+                onClick={() => setRevisionDrawerOpen(true)}>版本历史</ConsoleButton>
             )}
             {canEdit && (
-              <Button
-                type="primary"
-                icon={<SaveOutlined />}
-                loading={saveMutation.isPending}
-                disabled={!isDirty && !isNew}
-                onClick={() => saveMutation.mutate()}
-              >
+              <ConsoleButton variant="primary" leadingIcon={<ConsoleIcon name="check" size={16} />}
+                loading={saveMutation.isPending} disabled={!isDirty && !isNew}
+                onClick={() => saveMutation.mutate()}>
                 {isNew ? '创建工作流' : '保存新版本'}
-              </Button>
+              </ConsoleButton>
             )}
           </ActionBar>
         }
       />
 
-      <div className="nfc-plan-alert-stack">
+      <div className="nfc-plan-alert-stack nfc-v2-workflow-notices">
         {isArchived && (
-          <Alert
-            type="error"
-            showIcon
-            message="工作流已被归档封存"
-            description="归档态完全只读：禁止编辑、保存新版本、回滚、Preview 与 Generate。"
-          />
+          <div className="nfc-v2-workflow-notice is-error" role="note">
+            <ConsoleIcon name="lock" size={18} />
+            <div><strong>工作流已被归档封存</strong>
+              <p>归档态完全只读：禁止编辑、保存新版本、回滚、Preview 与 Generate。</p></div>
+          </div>
         )}
         {isHistoricalView && (
-          <Alert
-            type="info"
-            showIcon
-            message={`正在查看历史版本 r${targetRevision}`}
-            description="历史版本只读；可在允许条件下基于此版本 Preview / Generate Draft，或由管理员回滚。"
-          />
+          <div className="nfc-v2-workflow-notice" role="note">
+            <ConsoleIcon name="history" size={18} />
+            <div><strong>正在查看历史版本 r{targetRevision}</strong>
+              <p>历史版本只读；可在允许条件下基于此版本 Preview / Generate Draft，或由管理员回滚。</p></div>
+          </div>
         )}
         {!isNew && !canEdit && !isArchived && !isHistoricalView && (
-          <Alert
-            type="warning"
-            showIcon
-            message="普通成员权限提示"
-            description="可查看、Preview 与 Generate Draft，但不能修改步骤、保存修订或归档。"
-          />
+          <div className="nfc-v2-workflow-notice is-warning" role="note">
+            <ConsoleIcon name="shield-check" size={18} />
+            <div><strong>普通成员权限提示</strong>
+              <p>可查看、Preview 与 Generate Draft，但不能修改步骤、保存修订或归档。</p></div>
+          </div>
         )}
       </div>
 
@@ -562,6 +524,27 @@ export const WorkflowBuilderPage: React.FC = () => {
             onGeneratePlanSuccess={(planId) => navigate(`/plans/${planId}`)}
           />
         )}
+
+      <ConsoleConfirmDialog
+        open={confirmation !== null}
+        onOpenChange={open => { if (!open && !rollbackMutation.isPending) setConfirmation(null); }}
+        title={confirmation?.kind === 'mode' ? '切换工作流模式'
+          : confirmation?.kind === 'back' ? '未保存的更改' : '确认回滚历史版本'}
+        description={confirmation?.kind === 'mode'
+          ? '切换到 ' + modeLabel(confirmation.targetMode) +
+            ' 将重置流水线步骤为该模式的标准默认拓扑。确定切换吗？'
+          : confirmation?.kind === 'back'
+            ? '当前工作流存在未保存的修改，退出将丢失这些修改，确认返回吗？'
+            : '系统将基于历史版本 r' +
+              (confirmation?.kind === 'rollback' ? confirmation.revision : '') +
+              ' 的定义生成新修订版本并恢复至当前。'}
+        confirmText={confirmation?.kind === 'mode' ? '确认重置并切换'
+          : confirmation?.kind === 'back' ? '确认退出' : '确认回滚'}
+        danger={confirmation?.kind !== 'mode'}
+        busy={rollbackMutation.isPending && confirmation?.kind === 'rollback'}
+        disabled={confirmation?.kind === 'mode' && !canSwitchMode}
+        onConfirm={confirmWorkflowAction}
+      />
 
       {!isNew && workflow && (
         <RevisionDrawer
