@@ -25,6 +25,7 @@ import {
   canSaveRevision,
   canSwitchWorkflowMode,
 } from '../../utils/workflowRbac';
+import { canConfirmWorkflowModeReset, canConfirmWorkflowRollback } from '../../utils/workflowBuilderActions';
 import { createDefaultOrganizerSnapshot } from '../../utils/organizerDefaults';
 import { createDefaultDedupeScorerConfig } from '../../utils/dedupeConfig';
 import { createInitialScanStep, parseWorkflowRevisionQuery } from '../../utils/workflowRevisionParser';
@@ -263,7 +264,7 @@ export const WorkflowBuilderPage: React.FC = () => {
   const confirmWorkflowAction = () => {
     if (!confirmation) return;
     if (confirmation.kind === 'mode') {
-      if (canSwitchMode && !saveMutation.isPending && confirmation.targetMode !== mode) {
+      if (canConfirmWorkflowModeReset(canSwitchMode, saveMutation.isPending, mode, confirmation.targetMode)) {
         setMode(confirmation.targetMode);
         setSteps(defaultStepsForMode(confirmation.targetMode));
         setIsDirty(true);
@@ -277,9 +278,12 @@ export const WorkflowBuilderPage: React.FC = () => {
       return;
     }
     if (rollbackInFlight.current || rollbackMutation.isPending) return;
-    if (!workflow || !canRollback || !isHistoricalView ||
-        targetRevision === null || targetRevision !== confirmation.revision ||
-        workflow.current_revision !== confirmation.expectedRevision) {
+    if (!canConfirmWorkflowRollback({
+      canRollback, isHistoricalView, currentRevision: workflow?.current_revision,
+      selectedRevision: targetRevision, requestedRevision: confirmation.revision,
+      expectedRevision: confirmation.expectedRevision,
+      busy: rollbackMutation.isPending || rollbackInFlight.current,
+    })) {
       setConfirmation(null);
       return;
     }
