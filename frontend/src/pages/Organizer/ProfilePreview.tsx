@@ -259,9 +259,9 @@ export const ProfilePreview: React.FC<ProfilePreviewProps> = ({ profile, onBack 
         className="nfc-complex-form-panel nfc-v2-organizer-target">
         <div className="nfc-v2-organizer-preview-controls">
           <div className="nfc-v2-organizer-root-control">
-            <label htmlFor="nfc-v2-organizer-root-caption" className="nfc-v2-organizer-root-caption" id="nfc-v2-organizer-root-caption">
+            <span className="nfc-v2-organizer-root-caption" id="nfc-v2-organizer-root-caption">
               整理目标根目录
-            </label>
+            </span>
             <DirectoryPicker multiple={false} value={currentRoot}
               disabled={planLoading} placeholder="点击选择整理根目录..."
               onChange={path => { if (typeof path === 'string') handleRootChange(path); }} />
