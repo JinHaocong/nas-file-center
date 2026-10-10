@@ -360,7 +360,7 @@ def test_filesystem_bounded_heap_and_no_full_list_in_source():
     assert "natural_sort_key" in content
 
 
-def test_directory_picker_checkbox_stop_propagation_source_contract():
+def test_directory_picker_row_actions_are_isolated_source_contract():
     modal_file = (
         Path(__file__).resolve().parent.parent
         / "frontend"
@@ -370,7 +370,17 @@ def test_directory_picker_checkbox_stop_propagation_source_contract():
         / "DirectoryPickerModal.tsx"
     )
     content = modal_file.read_text(encoding="utf-8")
-    # Checkbox wrappers must have stopPropagation
-    assert "onClick={(e) => e.stopPropagation()}" in content
-    # Popconfirm delete wrapper must have stopPropagation
-    assert "onConfirm={() => delFavMutation.mutate(fav.id)}" in content
+    # Old Ant List.Item had click handlers on the entire row, so checkbox
+    # and delete actions required stopPropagation. Native rows now navigate
+    # only via an explicit button; selection controls are separate siblings.
+    assert 'className="nfc-v2-directory-open"' in content
+    assert "onClick={() => handleNavigate(item.path)}" in content
+    assert "onChange={() => handleToggleSelect(item.path)}" in content
+    assert "onClick={() => handleToggleSelect(item.path)}" in content
+    assert '<li onClick=' not in content
+    # Deleting a favorite requires a separate Radix confirmation and does
+    # not navigate into or remove the directory from NAS storage.
+    assert "setConfirmFavoriteId(fav.id)" in content
+    assert "<ConsoleConfirmDialog" in content
+    assert "delFavMutation.mutate(confirmFavoriteId)" in content
+    assert "仅删除收藏记录，不会删除 NAS 上的目录或文件" in content
