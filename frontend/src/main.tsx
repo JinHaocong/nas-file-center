@@ -31,6 +31,7 @@ import './styles/console-v2-code-path.css';
 import './styles/console-v2-workflow-builder.css';
 import './styles/console-v2-workflow-revisions.css';
 import './styles/console-v2-workflow-list.css';
+import './styles/console-v2-workflow-step-card.css';
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
