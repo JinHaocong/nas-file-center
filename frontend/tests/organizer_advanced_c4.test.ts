@@ -63,20 +63,27 @@ describe('Organizer Advanced Rules C4 frontend contract', () => {
     const source = read('src/pages/Organizer/ProfilePreview.tsx');
 
     assert.ok(api.includes('expected_preview_digest?: string'));
+    const safety = read('src/utils/organizerPreviewSafety.ts');
     includesAll(source, [
       'result.preview_digest',
       'result.structural_required',
-      'summary.advanced_changes',
-      'summary.wrapper_candidates',
       'expected_preview_digest: params.expectedPreviewDigest',
       'Stage A Structural Preview',
       'Stage B Rename Preview',
       'Stage B 已锁定',
       '必须重新 Preview',
       'proposal_type',
-      "if (!advancedEnabled) return 'Standard'",
       'Stage B 锁定',
-      'summary!.conflicts === 0',
+      'canGenerateOrganizerPlan',
+      'previewRoot, selectedRoot: currentRoot, busy',
+    ]);
+    includesAll(safety, [
+      'summary.advanced_changes',
+      'summary.wrapper_candidates',
+      'summary.conflicts !== 0',
+      'previewRoot !== selectedRoot.trim()',
+      'advancedEnabled && !previewDigest',
+      "if (!advancedEnabled) return 'Standard'",
     ]);
   });
 

@@ -88,7 +88,7 @@ describe('v0.4.0 C5A workflows and organizer surfaces contract', () => {
     for (const symbol of ['PageHeader', 'DataPanel', 'ActionBar', 'MetricCard', 'ResponsiveDataView', 'CodePath', 'StatusBadge']) {
       assert.match(source, new RegExp(symbol));
     }
-    for (const semantic of ['snapshot_id', 'summary!.conflicts === 0', 'createPlan', 'include_touch', 'canGeneratePlan']) {
+    for (const semantic of ['snapshot_id', 'canGenerateOrganizerPlan', 'createPlan', 'include_touch', 'canGeneratePlan']) {
       assert.match(source, new RegExp(semantic.replace(/[.*+?^$()|[\]\\]/g, '\\$&')));
     }
     assert.match(source, /nfc-organizer-proposal-mobile-card/);
