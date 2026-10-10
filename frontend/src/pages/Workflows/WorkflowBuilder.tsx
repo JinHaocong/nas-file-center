@@ -240,23 +240,13 @@ export const WorkflowBuilderPage: React.FC = () => {
   });
 
   const handleModeChange = (newMode: WorkflowMode) => {
-    if (newMode === mode) return;
-    const apply = () => {
+    if (!canSwitchMode || newMode === mode) return;
+    if (steps.length > 0) {
+      setConfirmation({ kind: 'mode', targetMode: newMode });
+    } else {
       setMode(newMode);
       setSteps(defaultStepsForMode(newMode));
       setIsDirty(true);
-    };
-    if (steps.length > 0) {
-      Modal.confirm({
-        title: '切换工作流模式',
-        icon: <ExclamationCircleOutlined />,
-        content: `切换到 ${modeLabel(newMode)} 将重置流水线步骤为该模式的标准默认拓扑。确定切换吗？`,
-        okText: '确认重置并切换',
-        cancelText: '取消',
-        onOk: apply,
-      });
-    } else {
-      apply();
     }
   };
 
@@ -266,18 +256,35 @@ export const WorkflowBuilderPage: React.FC = () => {
   };
 
   const handleBack = () => {
-    if (isDirty) {
-      Modal.confirm({
-        title: '未保存的更改',
-        icon: <ExclamationCircleOutlined />,
-        content: '当前工作流存在未保存的修改，退出将丢失这些修改，确认返回吗？',
-        okText: '确认退出',
-        cancelText: '留在此页',
-        onOk: () => navigate('/workflows'),
-      });
-    } else {
-      navigate('/workflows');
+    if (isDirty) setConfirmation({ kind: 'back' });
+    else navigate('/workflows');
+  };
+
+  const confirmWorkflowAction = () => {
+    if (!confirmation) return;
+    if (confirmation.kind === 'mode') {
+      if (canSwitchMode && !saveMutation.isPending && confirmation.targetMode !== mode) {
+        setMode(confirmation.targetMode);
+        setSteps(defaultStepsForMode(confirmation.targetMode));
+        setIsDirty(true);
+      }
+      setConfirmation(null);
+      return;
     }
+    if (confirmation.kind === 'back') {
+      setConfirmation(null);
+      navigate('/workflows');
+      return;
+    }
+    if (rollbackInFlight.current || rollbackMutation.isPending) return;
+    if (!workflow || !canRollback || !isHistoricalView ||
+        targetRevision === null || targetRevision !== confirmation.revision ||
+        workflow.current_revision !== confirmation.expectedRevision) {
+      setConfirmation(null);
+      return;
+    }
+    rollbackInFlight.current = true;
+    rollbackMutation.mutate(confirmation.revision);
   };
 
   if (!isNew && (isLoading || (isHistoricalView && isHistLoading))) {
