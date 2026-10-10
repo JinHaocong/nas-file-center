@@ -122,7 +122,10 @@ def test_frontend_organizer_profile_source_contracts():
     modal_code = (fe_dir / "ProfileFormModal.tsx").read_text(encoding="utf-8")
     preview_code = (fe_dir / "ProfilePreview.tsx").read_text(encoding="utf-8")
 
-    assert "DirectoryPicker" in modal_code
+    shared_fields = (fe_dir.parent.parent / "components" / "workflows" / "OrganizerSnapshotFields.tsx").read_text(encoding="utf-8")
+    assert "OrganizerSnapshotFields includeRoot" in modal_code
+    assert "<DirectoryPicker multiple={false}" in shared_fields
+    assert "ALLOWED_ROOTS" in shared_fields
     assert "DirectoryPicker" in preview_code
     assert "formatDateTime" in list_code
     assert "organizerProfilesApi" in list_code
