@@ -1,4 +1,4 @@
-/* Console v2 workflow builder shell. Ant Form remains until its own guarded migration. */
+/* Console v2 workflow builder shell and native accessible editor. */
 .nfc-v2-workflow-state {
   --nfc-wf-paper: #fff; --nfc-wf-text: #1c293d; --nfc-wf-muted: #64748b;
   --nfc-wf-line: #dce5ee; --nfc-wf-accent: #2878ef;
@@ -51,4 +51,56 @@
 @media (prefers-reduced-motion: reduce) {
   .nfc-v2-workflow-state .nfc-console-spinner { animation: none; border-right-color: currentColor; }
   .nfc-v2-workflow-notices * { animation-duration: 0.01ms; transition-duration: 0.01ms; }
+}
+
+/* Native form and mode radio selection. */
+.nfc-v2-workflow-form { display: grid; gap: 18px; }
+.nfc-v2-workflow-field { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.nfc-v2-workflow-field > label,
+.nfc-v2-workflow-mode-fieldset > legend {
+  color: var(--nfc-text); font-size: 12px; font-weight: 650;
+}
+.nfc-v2-workflow-field > label span,
+.nfc-v2-workflow-mode-fieldset > legend span { color: #c24c62; }
+.nfc-v2-workflow-field > :is(input, textarea) {
+  width: 100%; box-sizing: border-box; min-height: 42px;
+  border: 1px solid var(--nfc-hairline); border-radius: 9px;
+  padding: 10px 12px; background: var(--nfc-surface-1); color: var(--nfc-text);
+  font: inherit; font-size: 13px; line-height: 1.5;
+}
+.nfc-v2-workflow-field > textarea { resize: vertical; }
+.nfc-v2-workflow-field > :is(input, textarea)::placeholder { color: var(--nfc-text-subtle); }
+.nfc-v2-workflow-field > :is(input, textarea):disabled { opacity: .65; cursor: not-allowed; }
+.nfc-v2-workflow-field > :is(input, textarea):focus-visible {
+  outline: 2px solid var(--nfc-accent); outline-offset: 2px;
+}
+.nfc-v2-workflow-field > input[aria-invalid='true'] { border-color: #c24c62; }
+.nfc-v2-workflow-field-error { color: #b8324d; font-size: 12px; }
+[data-theme='dark'] .nfc-v2-workflow-field-error { color: #ff91a5; }
+.nfc-v2-workflow-mode-fieldset { border: 0; min-width: 0; padding: 0; margin: 0; }
+.nfc-v2-workflow-field-help { margin: 5px 0 12px; color: var(--nfc-text-muted); font-size: 12px; }
+.nfc-workflow-builder-page .nfc-v2-workflow-mode-choice {
+  position: relative; cursor: pointer; min-height: 58px;
+  transition: border-color .15s ease, background-color .15s ease;
+}
+.nfc-v2-workflow-mode-choice > input {
+  position: absolute; width: 1px; height: 1px; opacity: 0; margin: 0;
+}
+.nfc-v2-workflow-mode-choice > svg { grid-row: 1 / span 2; color: var(--nfc-text-subtle); }
+.nfc-workflow-builder-page .nfc-v2-workflow-mode-choice.is-selected {
+  border-color: var(--nfc-accent); background: var(--nfc-info-soft);
+}
+.nfc-workflow-builder-page .nfc-v2-workflow-mode-choice:focus-within {
+  outline: 2px solid var(--nfc-accent); outline-offset: 2px;
+}
+.nfc-v2-workflow-mode-fieldset:disabled .nfc-v2-workflow-mode-choice { cursor: not-allowed; opacity: .65; }
+[data-theme='dark'] .nfc-v2-workflow-field > :is(input, textarea) {
+  background: var(--nfc-surface-1); border-color: var(--nfc-hairline); color: var(--nfc-text);
+}
+@media (max-width: 767px) {
+  .nfc-v2-workflow-field > :is(input, textarea) { min-height: 44px; }
+  .nfc-workflow-builder-page .nfc-v2-workflow-mode-choice { min-height: 56px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nfc-workflow-builder-page .nfc-v2-workflow-mode-choice { transition: none; }
 }

@@ -1,5 +1,4 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Form, Input, Radio } from 'antd';
 import { ConsoleButton } from '../../components/ui/ConsoleButton';
 import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
 import { ConsoleConfirmDialog } from '../../components/ui/ConsoleConfirmDialog';
@@ -25,7 +24,7 @@ import {
   canSaveRevision,
   canSwitchWorkflowMode,
 } from '../../utils/workflowRbac';
-import { canConfirmWorkflowModeReset, canConfirmWorkflowRollback } from '../../utils/workflowBuilderActions';
+import { canConfirmWorkflowModeReset, canConfirmWorkflowRollback, validateWorkflowBasicFields } from '../../utils/workflowBuilderActions';
 import { createDefaultOrganizerSnapshot } from '../../utils/organizerDefaults';
 import { createDefaultDedupeScorerConfig } from '../../utils/dedupeConfig';
 import { createInitialScanStep, parseWorkflowRevisionQuery } from '../../utils/workflowRevisionParser';
@@ -71,6 +70,8 @@ const modeLabel = (mode: WorkflowMode) => {
   return '目录工具流';
 };
 
+const workflowModes: WorkflowMode[] = ['file', 'organizer', 'dedupe', 'utility'];
+
 const modeIcon = (mode: WorkflowMode) => {
   if (mode === 'file') return <ConsoleIcon name="file-text" size={17} />;
   if (mode === 'organizer') return <ConsoleIcon name="folders" size={17} />;
@@ -93,7 +94,11 @@ export const WorkflowBuilderPage: React.FC = () => {
   const revisionQuery = searchParams.get('revision');
   useTitle(isNew ? '新建工作流' : `编辑工作流 #${workflowId}`);
   const { user } = useAuth();
-  const [form] = Form.useForm();
+  const formId = React.useId();
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [nameError, setNameError] = useState('');
   const toast = useConsoleToast();
   const rollbackInFlight = useRef(false);
   const [confirmation, setConfirmation] = useState<PendingWorkflowConfirmation | null>(null);
@@ -146,10 +151,9 @@ export const WorkflowBuilderPage: React.FC = () => {
     if (!parsedRevision.isValid) return;
     if (isHistoricalView && historicalRevisionData) {
       if (workflow) {
-        form.setFieldsValue({
-          name: workflow.name,
-          description: workflow.description,
-        });
+        setName(workflow.name ?? '');
+        setDescription(workflow.description ?? '');
+        setNameError('');
       }
       if (historicalRevisionData.definition) {
         setMode(historicalRevisionData.definition.mode || 'file');
@@ -157,18 +161,18 @@ export const WorkflowBuilderPage: React.FC = () => {
       }
       setIsDirty(false);
     } else if (workflow && !isHistoricalView) {
-      form.setFieldsValue({
-        name: workflow.name,
-        description: workflow.description,
-      });
+      setName(workflow.name ?? '');
+        setDescription(workflow.description ?? '');
+        setNameError('');
       if (workflow.definition) {
         setMode(workflow.definition.mode || 'file');
         setSteps(workflow.definition.steps || []);
       }
       setIsDirty(false);
     } else if (isNew) {
-      form.resetFields();
-      form.setFieldsValue({ name: '', description: '' });
+      setName('');
+      setDescription('');
+      setNameError('');
       setMode('file');
       setSteps(defaultStepsForMode('file'));
       setIsDirty(false);
@@ -180,12 +184,12 @@ export const WorkflowBuilderPage: React.FC = () => {
     targetRevision,
     historicalRevisionData,
     isNew,
-    form,
   ]);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      const values = await form.validateFields();
+      const values = validateWorkflowBasicFields(name, description);
+      if (values.nameError) throw new Error(values.nameError);
       const definition: WorkflowDefinition = {
         schema_version: 1,
         mode,
@@ -193,16 +197,16 @@ export const WorkflowBuilderPage: React.FC = () => {
       };
       if (isNew) {
         return workflowApi.createWorkflow({
-          name: values.name.trim(),
-          description: values.description?.trim() || '',
+          name: values.name,
+          description: values.description,
           definition,
         });
       }
       if (!workflow) throw new Error('工作流数据缺失');
       return workflowApi.updateWorkflow(workflowId, {
         expected_current_revision: workflow.current_revision,
-        name: values.name.trim(),
-        description: values.description?.trim() || '',
+        name: values.name,
+        description: values.description,
         definition,
       });
     },
@@ -216,6 +220,17 @@ export const WorkflowBuilderPage: React.FC = () => {
     onError: (err) =>
       toast.error(getStructuredApiError(err).message || '保存工作流失败'),
   });
+
+  const handleSave = () => {
+    if (!canEdit || saveMutation.isPending) return;
+    const values = validateWorkflowBasicFields(name, description);
+    if (values.nameError) {
+      setNameError(values.nameError);
+      nameInputRef.current?.focus();
+      return;
+    }
+    saveMutation.mutate();
+  };
 
   const rollbackMutation = useMutation({
     mutationFn: (revision: number) => {
@@ -395,7 +410,7 @@ export const WorkflowBuilderPage: React.FC = () => {
             {canEdit && (
               <ConsoleButton variant="primary" leadingIcon={<ConsoleIcon name="check" size={16} />}
                 loading={saveMutation.isPending} disabled={!isDirty && !isNew}
-                onClick={() => saveMutation.mutate()}>
+                onClick={handleSave}>
                 {isNew ? '创建工作流' : '保存新版本'}
               </ConsoleButton>
             )}
@@ -434,66 +449,57 @@ export const WorkflowBuilderPage: React.FC = () => {
         description="模式切换会重置为对应模式的标准拓扑，并需要保存为新的 revision。"
         className="nfc-complex-form-panel"
       >
-        <Form
-          form={form}
-          layout="vertical"
-          onValuesChange={() => setIsDirty(true)}
-          disabled={!canEdit}
-        >
+        <form className="nfc-v2-workflow-form" noValidate
+          onSubmit={(event) => { event.preventDefault(); handleSave(); }}>
           <div className="nfc-form-grid">
-            <Form.Item
-              name="name"
-              label="工作流名称"
-              rules={[{ required: true, message: '请输入工作流名称' }]}
-            >
-              <Input placeholder="例如：下载目录自动整理归档流 / 相册清理流" />
-            </Form.Item>
-            <Form.Item name="description" label="工作流描述">
-              <Input.TextArea
-                rows={2}
-                placeholder="描述处理逻辑、边界和目标场景..."
-              />
-            </Form.Item>
+            <div className="nfc-v2-workflow-field">
+              <label htmlFor={formId + '-name'}>工作流名称 <span aria-hidden="true">*</span></label>
+              <input ref={nameInputRef} id={formId + '-name'} type="text" value={name}
+                disabled={!canEdit} required
+                placeholder="例如：下载目录自动整理归档流 / 相册清理流"
+                aria-invalid={Boolean(nameError)}
+                aria-describedby={nameError ? formId + '-name-error' : undefined}
+                onChange={(event) => {
+                  setName(event.target.value);
+                  setNameError('');
+                  setIsDirty(true);
+                }} />
+              {nameError && <span id={formId + '-name-error'}
+                className="nfc-v2-workflow-field-error" role="alert">{nameError}</span>}
+            </div>
+            <div className="nfc-v2-workflow-field">
+              <label htmlFor={formId + '-description'}>工作流描述</label>
+              <textarea id={formId + '-description'} rows={2} value={description}
+                disabled={!canEdit} placeholder="描述处理逻辑、边界和目标场景..."
+                onChange={(event) => {
+                  setDescription(event.target.value);
+                  setIsDirty(true);
+                }} />
+            </div>
           </div>
-
-          <Form.Item
-            label="工作流模式"
-            required
-            extra={
-              !canSwitchMode
-                ? '当前状态或权限下工作流模式不可修改'
-                : '切换模式将重置步骤为该模式标准拓扑'
-            }
-          >
-            <Radio.Group
-              value={mode}
-              onChange={(event) => handleModeChange(event.target.value)}
-              disabled={!canSwitchMode}
-              className="nfc-workflow-mode-grid"
-            >
-              <Radio.Button value="file">
-                <span className="nfc-workflow-mode-option">
-                  {modeIcon('file')}<span>{modeLabel('file')}</span><small>file</small>
-                </span>
-              </Radio.Button>
-              <Radio.Button value="organizer">
-                <span className="nfc-workflow-mode-option">
-                  {modeIcon('organizer')}<span>{modeLabel('organizer')}</span><small>organizer</small>
-                </span>
-              </Radio.Button>
-              <Radio.Button value="dedupe">
-                <span className="nfc-workflow-mode-option">
-                  {modeIcon('dedupe')}<span>{modeLabel('dedupe')}</span><small>dedupe</small>
-                </span>
-              </Radio.Button>
-              <Radio.Button value="utility">
-                <span className="nfc-workflow-mode-option">
-                  {modeIcon('utility')}<span>{modeLabel('utility')}</span><small>utility</small>
-                </span>
-              </Radio.Button>
-            </Radio.Group>
-          </Form.Item>
-        </Form>
+          <fieldset className="nfc-v2-workflow-mode-fieldset" disabled={!canSwitchMode}
+            aria-describedby={formId + '-mode-help'}>
+            <legend>工作流模式 <span aria-hidden="true">*</span></legend>
+            <p id={formId + '-mode-help'} className="nfc-v2-workflow-field-help">
+              {!canSwitchMode ? '当前状态或权限下工作流模式不可修改'
+                : '切换模式将重置步骤为该模式标准拓扑'}
+            </p>
+            <div className="nfc-workflow-mode-grid">
+              {workflowModes.map(option => (
+                <label key={option}
+                  className={'nfc-workflow-mode-option nfc-v2-workflow-mode-choice' +
+                    (mode === option ? ' is-selected' : '')}>
+                  <input type="radio" name={formId + '-mode'} value={option}
+                    checked={mode === option} disabled={!canSwitchMode}
+                    onChange={() => handleModeChange(option)} />
+                  {modeIcon(option)}
+                  <span>{modeLabel(option)}</span>
+                  <small>{option}</small>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        </form>
           </DataPanel>
         </aside>
 
