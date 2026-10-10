@@ -41,7 +41,12 @@ describe('v0.4.4 deep UI detail and mobile system', () => {
     const revisions = read('src/components/workflows/RevisionDrawer.tsx');
     assert.match(journal, /nfc-operation-journal-drawer/);
     assert.match(stale, /nfc-stale-rebuild-drawer/);
-    assert.match(revisions, /nfc-revision-drawer/);
+    const sharedSheet = read('src/components/ui/ConsoleSheet.tsx');
+    const revisionCss = read('src/styles/console-v2-workflow-revisions.css');
+    assert.match(revisions, /<ConsoleSheet/);
+    assert.match(sharedSheet, /nfc-overlay-drawer/);
+    assert.match(revisions, /nfc-v2-revision-mobile-list/);
+    assert.ok(revisionCss.includes('@media (max-width: 767px)'));
     assert.match(revisions, /nfc-code-block/);
   });
 

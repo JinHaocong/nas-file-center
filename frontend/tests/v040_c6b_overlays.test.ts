@@ -15,7 +15,7 @@ describe('v0.4.0 C6B overlay consistency contract', () => {
       'src/pages/Plans/OperationJournalDrawer.tsx',
     ]) {
       const source = read(path);
-      if (path.endsWith('/TaskDetailDrawer.tsx') || path.endsWith('/DedupeExplainDrawer.tsx')) {
+      if (path.endsWith('/TaskDetailDrawer.tsx') || path.endsWith('/DedupeExplainDrawer.tsx') || path.endsWith('/RevisionDrawer.tsx')) {
         assert.match(source, /<ConsoleSheet/, path);
         const sheet = read('src/components/ui/ConsoleSheet.tsx');
         const styles = read('src/styles/console-v2-task-overlays.css');
@@ -48,10 +48,15 @@ describe('v0.4.0 C6B overlay consistency contract', () => {
 
   test('RevisionDrawer styles both drawer and definition-inspection modal', () => {
     const source = read('src/components/workflows/RevisionDrawer.tsx');
-    assert.match(source, /nfc-overlay-drawer/);
+    const sheet = read('src/components/ui/ConsoleSheet.tsx');
+    const guard = read('src/utils/workflowRevisionActions.ts');
+    assert.match(source, /<ConsoleSheet/);
+    assert.match(sheet, /nfc-overlay-drawer/);
     assert.match(source, /nfc-overlay-modal/);
     assert.match(source, /expected_current_revision/);
-    assert.match(source, /canRollbackWorkflow/);
+    assert.match(source, /canConfirmRevisionDrawerRollback/);
+    assert.match(guard, /canRollbackWorkflow/);
+    assert.match(guard, /expectedRevision === state.currentRevision/);
   });
 
   test('critical quarantine overlays preserve irreversible safety authority', () => {
