@@ -1,0 +1,62 @@
+/* Native first-level file/directory rename forms and shared readonly proposal results. */
+.nfc-v2-immediate-rename { --nfc-im-paper:var(--nfc-surface-1);--nfc-im-soft:var(--nfc-surface-2);
+  --nfc-im-text:var(--nfc-text);--nfc-im-muted:var(--nfc-text-muted);
+  --nfc-im-line:var(--nfc-hairline);--nfc-im-accent:var(--nfc-accent);min-width:0;display:grid;gap:16px; }
+.nfc-v2-immediate-editor-form { display:grid;gap:17px; }
+.nfc-v2-immediate-field { display:grid;gap:8px;min-width:0;color:var(--nfc-im-text);font-size:12px;font-weight:650; }
+.nfc-v2-immediate-field small { font-size:11px;font-weight:400;color:var(--nfc-im-muted);line-height:1.6; }
+.nfc-v2-immediate-field > input { box-sizing:border-box;width:100%;min-height:42px;padding:9px 11px;
+  border:1px solid var(--nfc-im-line);border-radius:8px;background:var(--nfc-im-paper);
+  color:var(--nfc-im-text);font:inherit;font-size:12px; }
+.nfc-v2-immediate-field .nfc-directory-picker-single { display:flex;gap:8px;align-items:center;flex-wrap:wrap; }
+.nfc-v2-immediate-field .nfc-v2-directory-input-wrap { flex:1 1 210px;min-width:0; }
+.nfc-v2-immediate-radio { display:flex;align-items:center;flex-wrap:wrap;gap:9px; }
+.nfc-v2-immediate-radio label { display:inline-flex;align-items:center;gap:7px;padding:9px 12px;
+  min-height:38px;box-sizing:border-box;border:1px solid var(--nfc-im-line);
+  border-radius:8px;cursor:pointer;background:var(--nfc-im-paper);font-weight:560; }
+.nfc-v2-immediate-radio label.is-selected { border-color:var(--nfc-im-accent);color:var(--nfc-im-accent);
+  background:var(--nfc-im-soft); }
+.nfc-v2-immediate-radio input,.nfc-v2-immediate-preserve input { width:17px;height:17px;accent-color:var(--nfc-im-accent); }
+.nfc-v2-immediate-radio label:has(input:disabled) { opacity:.7;cursor:not-allowed; }
+.nfc-v2-immediate-notice { display:flex;gap:8px;align-items:flex-start;padding:12px;
+  border:1px solid var(--nfc-im-line);border-radius:9px;
+  background:var(--nfc-im-soft);color:var(--nfc-im-text);font-size:12px;line-height:1.65; }
+.nfc-v2-immediate-notice svg { flex:0 0 auto;margin-top:2px;color:var(--nfc-im-accent); }
+.nfc-v2-immediate-preserve { display:flex;align-items:center;flex-wrap:wrap;gap:8px;
+  min-height:42px;font-size:12px;font-weight:650;color:var(--nfc-im-text); }
+.nfc-v2-immediate-preserve small { width:100%;font-size:11px;line-height:1.6;
+  color:var(--nfc-im-muted);font-weight:400; }
+.nfc-v2-immediate-error { display:flex;align-items:flex-start;gap:10px;padding:13px;
+  border:1px solid #c7647c;background:color-mix(in srgb,#d85f75 8%,var(--nfc-im-paper));
+  border-radius:9px;color:var(--nfc-im-text);font-size:12px; }
+.nfc-v2-immediate-error svg { flex:0 0 auto;color:#c43f58; }
+.nfc-v2-immediate-error strong { font-weight:730; }
+.nfc-v2-immediate-error p { margin:6px 0 0;line-height:1.6; }
+.nfc-v2-immediate-table-scroll { max-width:100%;overflow-x:auto; }
+.nfc-v2-immediate-table { width:100%;min-width:760px;border-collapse:collapse;text-align:left;font-size:12px; }
+.nfc-v2-immediate-table th { padding:12px 13px;background:var(--nfc-im-soft);
+  border-bottom:1px solid var(--nfc-im-line);color:var(--nfc-im-muted);font-size:11px;font-weight:720; }
+.nfc-v2-immediate-table td { padding:12px 13px;border-bottom:1px solid var(--nfc-im-line);
+  vertical-align:middle;color:var(--nfc-im-text); }
+.nfc-v2-immediate-table tr:last-child td { border-bottom:0; }
+.nfc-v2-immediate-table tbody tr:hover { background:var(--nfc-im-soft); }
+.nfc-v2-immediate-target { display:flex;align-items:center;gap:7px;min-width:0; }
+.nfc-v2-immediate-target svg { flex:0 0 auto;color:var(--nfc-im-muted); }
+.nfc-v2-immediate-sr-only { position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap; }
+.nfc-v2-immediate-mobile-list { display:grid;gap:10px;padding:12px; }
+.nfc-v2-immediate-mobile-list .nfc-rename-proposal-mobile-card { padding:13px;border-radius:9px;
+  border:1px solid var(--nfc-im-line);background:var(--nfc-im-paper); }
+.nfc-v2-immediate-rename :is(input,button,select):focus-visible { outline:2px solid var(--nfc-im-accent);outline-offset:2px; }
+[data-theme='dark'] .nfc-v2-immediate-rename { --nfc-im-paper:var(--nfc-surface-1);
+  --nfc-im-soft:var(--nfc-surface-2);--nfc-im-text:var(--nfc-text);
+  --nfc-im-muted:var(--nfc-text-muted);--nfc-im-line:var(--nfc-hairline);
+  --nfc-im-accent:var(--nfc-accent); }
+@media (max-width:767px) {
+  .nfc-v2-immediate-radio label,.nfc-v2-immediate-field > input,
+  .nfc-v2-immediate-rename .nfc-console-button { min-height:44px; }
+  .nfc-v2-immediate-field .nfc-directory-picker-single :is(button,input) { min-height:44px; }
+  .nfc-v2-immediate-rename .nfc-form-grid { grid-template-columns:1fr; }
+}
+@media (prefers-reduced-motion:reduce) {
+  .nfc-v2-immediate-rename * { animation:none;transition:none;scroll-behavior:auto; }
+}
