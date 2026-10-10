@@ -1,41 +1,14 @@
 import React from 'react';
 import {
-  Card,
-  Radio,
-  InputNumber,
-  Button,
-  Space,
-  Typography,
-  Input,
-  Select,
-  Alert,
-  Switch,
-  Tag,
-} from 'antd';
-import {
-  PlusOutlined,
-  DeleteOutlined,
-  ArrowUpOutlined,
-  ArrowDownOutlined,
-  ReloadOutlined,
-  InfoCircleOutlined,
-} from '@ant-design/icons';
-import {
-  DedupeScorerConfig,
-  PathPriorityRule,
-  PathPriorityScope,
-  DedupeSelectionMode,
-  DedupeMtimeMode,
+  DedupeScorerConfig, PathPriorityRule, PathPriorityScope,
+  DedupeSelectionMode, DedupeMtimeMode,
 } from '../../types/dedupe';
 import {
-  MAX_RULES_COUNT,
-  MAX_EXTENSIONS_COUNT,
-  MAX_WEIGHT,
-  createDefaultDedupeScorerConfig,
-  validateScorerConfigForm,
+  MAX_RULES_COUNT, MAX_EXTENSIONS_COUNT, MAX_WEIGHT,
+  createDefaultDedupeScorerConfig, validateScorerConfigForm,
 } from '../../utils/dedupeConfig';
-
-const { Text, Paragraph } = Typography;
+import { ConsoleButton } from '../ui/ConsoleButton';
+import { ConsoleIcon } from '../ui/ConsoleIcon';
 
 interface Props {
   value: DedupeScorerConfig;
@@ -51,6 +24,7 @@ export const DedupeScorerConfigEditor: React.FC<Props> = ({
   showReset = true,
 }) => {
   const config = value || createDefaultDedupeScorerConfig();
+  const instanceId = React.useId();
   const validation = validateScorerConfigForm(config);
 
   const updateConfig = (updater: (prev: DedupeScorerConfig) => DedupeScorerConfig) => {
@@ -185,182 +159,240 @@ export const DedupeScorerConfigEditor: React.FC<Props> = ({
   const isRecursiveDirectoryBalance = config.selection_mode === 'recursive_directory_balanced_by_bytes';
 
   return (
-    <div className="nfc-dedupe-scorer-editor">
+    <div className="nfc-dedupe-scorer-editor nfc-v2-scorer-editor">
       {!validation.valid && (
-        <Alert
-          type="error"
-          showIcon
-          message="配置校验错误"
-          description={
-            <ul className="nfc-validation-list">
-              {validation.errors.map((err, idx) => (
-                <li key={idx}>{err}</li>
-              ))}
-            </ul>
-          }
-        />
+        <section className="nfc-v2-scorer-validation" role="alert" aria-live="assertive">
+          <strong>配置校验错误</strong>
+          <ul className="nfc-validation-list">
+            {validation.errors.map((error, idx) => <li key={idx}>{error}</li>)}
+          </ul>
+        </section>
       )}
 
-      <Card size="small" title="选择与平衡模式 (Selection Mode)" bordered={false} className="nfc-dedupe-config-card">
-        <Paragraph type="secondary" className="nfc-dedupe-config-intro">
-          决定如何在重复项中权衡保留目标。
-        </Paragraph>
-        <Radio.Group
-          value={config.selection_mode}
-          onChange={(e) => handleSelectionModeChange(e.target.value)}
-          disabled={disabled}
-        >
-          <Space direction="vertical">
-            <Radio value="weighted">
-              <Text strong>加权评分模式 (Weighted)</Text>
-              <span className="nfc-dedupe-radio-help">
+      <fieldset className="nfc-dedupe-config-card nfc-v2-scorer-card" disabled={disabled}>
+        <legend>选择与平衡模式 (Selection Mode)</legend>
+        <p className="nfc-dedupe-config-intro">决定如何在重复项中权衡保留目标。</p>
+        <div className="nfc-v2-scorer-options">
+          <label className="nfc-v2-scorer-option">
+            <input type="radio" name={instanceId + "-selection-mode"}
+              value="weighted" checked={config.selection_mode === 'weighted'}
+              onChange={() => handleSelectionModeChange('weighted')} />
+            <span><strong>加权评分模式 (Weighted)</strong>
+              <small className="nfc-dedupe-radio-help">
                 根据路径、扩展名及修改时间等多因子加权计算最高分胜出者作为保留项。
-              </span>
-            </Radio>
-            <Radio value="balanced_by_bytes">
-              <Text strong>扫描根字节平衡 (Balanced by Scan Root)</Text>
-              <span className="nfc-dedupe-radio-help">
+              </small>
+            </span>
+          </label>
+          <label className="nfc-v2-scorer-option">
+            <input type="radio" name={instanceId + "-selection-mode"}
+              value="balanced_by_bytes" checked={config.selection_mode === 'balanced_by_bytes'}
+              onChange={() => handleSelectionModeChange('balanced_by_bytes')} />
+            <span><strong>扫描根字节平衡 (Balanced by Scan Root)</strong>
+              <small className="nfc-dedupe-radio-help">
                 平衡各个扫描根目录的释放空间，权衡容量分布；因子权重用于根内部择优。
-              </span>
-            </Radio>
-            <Radio value="recursive_directory_balanced_by_bytes">
-              <Text strong>递归目录字节平衡 (Recursive Directory Balanced by Bytes)</Text>
-              <span className="nfc-dedupe-radio-help">
+              </small>
+            </span>
+          </label>
+          <label className="nfc-v2-scorer-option">
+            <input type="radio" name={instanceId + "-selection-mode"}
+              value="recursive_directory_balanced_by_bytes"
+              checked={config.selection_mode === 'recursive_directory_balanced_by_bytes'}
+              onChange={() => handleSelectionModeChange('recursive_directory_balanced_by_bytes')} />
+            <span><strong>递归目录字节平衡 (Recursive Directory Balanced by Bytes)</strong>
+              <small className="nfc-dedupe-radio-help">
                 以重复组 LCA 下的目录桶为单位递归平衡释放字节；评分层仍先确定候选资格与优先关系。
-              </span>
-            </Radio>
-          </Space>
-        </Radio.Group>
+              </small>
+            </span>
+          </label>
+        </div>
         {isRecursiveDirectoryBalance && (
-          <Alert
-            type="warning"
-            showIcon
-            message="Recursive Last-File Protection — 强制启用"
-            description="递归目录模式持续保护每个受约束目录桶的最后文件。该保护不可关闭，前端不提供禁用开关。"
-            className="nfc-overlay-alert nfc-dedupe-recursive-alert"
-          />
-        )}
-      </Card>
-
-      <Card
-        size="small"
-        title={
-          <div className="nfc-dedupe-config-heading">
-            <Space>
-              <span>路径优先级规则 (Path Priority)</span>
-              <Tag color={path_priority.enabled ? 'blue' : 'default'}>
-                {path_priority.enabled ? '已启用' : '已停用'}
-              </Tag>
-            </Space>
-            <Switch checked={path_priority.enabled} onChange={handlePathPriorityEnabledChange} disabled={disabled} />
+          <div className="nfc-v2-scorer-notice is-warning nfc-dedupe-recursive-alert" role="note">
+            <ConsoleIcon name="shield-check" size={17} />
+            <div><strong>Recursive Last-File Protection — 强制启用</strong>
+              <p>递归目录模式持续保护每个受约束目录桶的最后文件。该保护不可关闭，前端不提供禁用开关。</p>
+            </div>
           </div>
-        }
-        bordered={false}
-        className="nfc-dedupe-config-card"
-      >
-        <div className="nfc-dedupe-weight-row">
-          <Text>因子权重 (0 - {MAX_WEIGHT}):</Text>
-          <InputNumber min={0} max={MAX_WEIGHT} value={path_priority.weight} onChange={handlePathPriorityWeightChange} disabled={disabled || !path_priority.enabled} className="nfc-dedupe-weight-input" />
-          <Text type="secondary">高优先级路径匹配成功将赋予该权重分值</Text>
+        )}
+      </fieldset>
+
+      <section className="nfc-dedupe-config-card nfc-v2-scorer-card" aria-labelledby={instanceId + "-path-priority-heading"}>
+        <div className="nfc-dedupe-config-heading nfc-v2-scorer-heading">
+          <h3 id={instanceId + "-path-priority-heading"}>路径优先级规则 (Path Priority)</h3>
+          <span className={'nfc-v2-scorer-state' + (path_priority.enabled ? ' is-on' : '')}>
+            {path_priority.enabled ? '已启用' : '已停用'}
+          </span>
+          <label className="nfc-v2-scorer-toggle">
+            <input type="checkbox" checked={path_priority.enabled} disabled={disabled}
+              onChange={event => handlePathPriorityEnabledChange(event.target.checked)} />
+            <span>启用路径因子</span>
+          </label>
+        </div>
+        <div className="nfc-dedupe-weight-row nfc-v2-scorer-weight">
+          <label htmlFor={instanceId + "-path-priority-weight"}>因子权重 (0 - {MAX_WEIGHT})</label>
+          <input id={instanceId + "-path-priority-weight"} type="number" step={1} min={0} max={MAX_WEIGHT}
+            value={path_priority.weight} className="nfc-dedupe-weight-input"
+            onChange={event => handlePathPriorityWeightChange(event.target.value === '' ? null : event.target.valueAsNumber)}
+            disabled={disabled || !path_priority.enabled} />
+          <span className="nfc-v2-scorer-help">高优先级路径匹配成功将赋予该权重分值</span>
         </div>
         {path_priority.enabled && (
           <div>
             <div className="nfc-dedupe-rule-toolbar">
-              <Text strong>匹配规则列表 ({path_priority.rules.length} / {MAX_RULES_COUNT})</Text>
-              <Button type="dashed" size="small" icon={<PlusOutlined />} onClick={handleAddPathRule} disabled={disabled || path_priority.rules.length >= MAX_RULES_COUNT}>添加路径规则</Button>
+              <strong>匹配规则列表 ({path_priority.rules.length} / {MAX_RULES_COUNT})</strong>
+              <ConsoleButton size="sm" leadingIcon={<ConsoleIcon name="plus" size={15} />}
+                disabled={disabled || path_priority.rules.length >= MAX_RULES_COUNT}
+                onClick={handleAddPathRule}>添加路径规则</ConsoleButton>
             </div>
             {path_priority.rules.length === 0 ? (
-              <Alert type="info" message="尚未添加路径规则。点击上方按钮添加按路径前缀匹配的规则。" />
+              <p className="nfc-v2-scorer-empty">尚未添加路径规则。点击上方按钮添加按路径前缀匹配的规则。</p>
             ) : (
               <div className="nfc-dedupe-rule-list">
                 {path_priority.rules.map((rule, idx) => (
-                  <div key={idx} className="nfc-dedupe-rule-row">
-                    <Text type="secondary" className="nfc-dedupe-rule-index">#{idx + 1}</Text>
-                    <Select<PathPriorityScope> value={rule.scope} onChange={(val) => handleUpdatePathRule(idx, 'scope', val)} disabled={disabled} className="nfc-dedupe-scope-select" options={[{ label: '绝对路径', value: 'absolute' }, { label: '相对路径', value: 'relative' }]} />
-                    <Input value={rule.pattern} onChange={(e) => handleUpdatePathRule(idx, 'pattern', e.target.value)} placeholder={rule.scope === 'absolute' ? '/volume1/archive/*' : 'archive/*'} disabled={disabled} className="nfc-dedupe-rule-input" />
-                    <Space size={4}>
-                      <Button type="text" size="small" icon={<ArrowUpOutlined />} disabled={disabled || idx === 0} onClick={() => handleMovePathRule(idx, 'up')} />
-                      <Button type="text" size="small" icon={<ArrowDownOutlined />} disabled={disabled || idx === path_priority.rules.length - 1} onClick={() => handleMovePathRule(idx, 'down')} />
-                      <Button type="text" danger size="small" icon={<DeleteOutlined />} disabled={disabled} onClick={() => handleDeletePathRule(idx)} />
-                    </Space>
+                  <div key={idx} className="nfc-dedupe-rule-row nfc-v2-scorer-rule-row">
+                    <span className="nfc-dedupe-rule-index" aria-hidden="true">#{idx + 1}</span>
+                    <label className="nfc-v2-scorer-rule-scope">
+                      <span className="nfc-v2-sr-only">路径规则 #{idx + 1} 的范围</span>
+                      <select value={rule.scope} disabled={disabled}
+                        aria-label={'路径规则 #' + (idx + 1) + ' 的范围'}
+                        onChange={event => handleUpdatePathRule(idx, 'scope', event.target.value as PathPriorityScope)}>
+                        <option value="absolute">绝对路径</option>
+                        <option value="relative">相对路径</option>
+                      </select>
+                    </label>
+                    <label className="nfc-v2-scorer-rule-pattern">
+                      <span className="nfc-v2-sr-only">路径规则 #{idx + 1} 的匹配表达式</span>
+                      <input type="text" value={rule.pattern} disabled={disabled}
+                        aria-label={'路径规则 #' + (idx + 1) + ' 的匹配表达式'}
+                        placeholder={rule.scope === 'absolute' ? '/volume1/archive/*' : 'archive/*'}
+                        onChange={event => handleUpdatePathRule(idx, 'pattern', event.target.value)} />
+                    </label>
+                    <div className="nfc-v2-scorer-rule-actions">
+                      <ConsoleButton variant="ghost" size="sm" aria-label={'上移路径规则 #' + (idx + 1)}
+                        disabled={disabled || idx === 0}
+                        onClick={() => handleMovePathRule(idx, 'up')}>
+                        <ConsoleIcon name="arrow-up" size={16} />
+                      </ConsoleButton>
+                      <ConsoleButton variant="ghost" size="sm" aria-label={'下移路径规则 #' + (idx + 1)}
+                        disabled={disabled || idx === path_priority.rules.length - 1}
+                        onClick={() => handleMovePathRule(idx, 'down')}>
+                        <ConsoleIcon name="arrow-down" size={16} />
+                      </ConsoleButton>
+                      <ConsoleButton variant="danger" size="sm" aria-label={'删除路径规则 #' + (idx + 1)}
+                        disabled={disabled} onClick={() => handleDeletePathRule(idx)}>
+                        <ConsoleIcon name="trash" size={16} />
+                      </ConsoleButton>
+                    </div>
                   </div>
                 ))}
               </div>
             )}
           </div>
         )}
-      </Card>
+      </section>
 
-      <Card
-        size="small"
-        title={
-          <div className="nfc-dedupe-config-heading">
-            <Space>
-              <span>优先扩展名 (Preferred Extension)</span>
-              <Tag color={preferred_extension.enabled ? 'blue' : 'default'}>{preferred_extension.enabled ? '已启用' : '已停用'}</Tag>
-            </Space>
-            <Switch checked={preferred_extension.enabled} onChange={handleExtEnabledChange} disabled={disabled} />
-          </div>
-        }
-        bordered={false}
-        className="nfc-dedupe-config-card"
-      >
-        <div className="nfc-dedupe-weight-row">
-          <Text>因子权重 (0 - {MAX_WEIGHT}):</Text>
-          <InputNumber min={0} max={MAX_WEIGHT} value={preferred_extension.weight} onChange={handleExtWeightChange} disabled={disabled || !preferred_extension.enabled} className="nfc-dedupe-weight-input" />
-          <Text type="secondary">匹配列表中扩展名的文件将获得优先得分（排序越前优先级越高）</Text>
+      <section className="nfc-dedupe-config-card nfc-v2-scorer-card" aria-labelledby={instanceId + "-preferred-extension-heading"}>
+        <div className="nfc-dedupe-config-heading nfc-v2-scorer-heading">
+          <h3 id={instanceId + "-preferred-extension-heading"}>优先扩展名 (Preferred Extension)</h3>
+          <span className={'nfc-v2-scorer-state' + (preferred_extension.enabled ? ' is-on' : '')}>
+            {preferred_extension.enabled ? '已启用' : '已停用'}
+          </span>
+          <label className="nfc-v2-scorer-toggle">
+            <input type="checkbox" checked={preferred_extension.enabled} disabled={disabled}
+              onChange={event => handleExtEnabledChange(event.target.checked)} />
+            <span>启用扩展名因子</span>
+          </label>
+        </div>
+        <div className="nfc-dedupe-weight-row nfc-v2-scorer-weight">
+          <label htmlFor={instanceId + "-extension-weight"}>因子权重 (0 - {MAX_WEIGHT})</label>
+          <input id={instanceId + "-extension-weight"} type="number" step={1} min={0} max={MAX_WEIGHT}
+            value={preferred_extension.weight} className="nfc-dedupe-weight-input"
+            disabled={disabled || !preferred_extension.enabled}
+            onChange={event => handleExtWeightChange(event.target.value === '' ? null : event.target.valueAsNumber)} />
+          <span className="nfc-v2-scorer-help">匹配列表中扩展名的文件将获得优先得分（排序越前优先级越高）</span>
         </div>
         {preferred_extension.enabled && (
           <div>
             <div className="nfc-dedupe-rule-toolbar">
-              <Text strong>扩展名优先级列表 ({preferred_extension.extensions.length} / {MAX_EXTENSIONS_COUNT})</Text>
-              <Button type="dashed" size="small" icon={<PlusOutlined />} onClick={handleAddExtension} disabled={disabled || preferred_extension.extensions.length >= MAX_EXTENSIONS_COUNT}>添加扩展名</Button>
+              <strong>扩展名优先级列表 ({preferred_extension.extensions.length} / {MAX_EXTENSIONS_COUNT})</strong>
+              <ConsoleButton size="sm" leadingIcon={<ConsoleIcon name="plus" size={15} />}
+                disabled={disabled || preferred_extension.extensions.length >= MAX_EXTENSIONS_COUNT}
+                onClick={handleAddExtension}>添加扩展名</ConsoleButton>
             </div>
             {preferred_extension.extensions.length === 0 ? (
-              <Alert type="info" message="尚未添加优先扩展名。如 .flac、.mkv、.raw 等。" />
+              <p className="nfc-v2-scorer-empty">尚未添加优先扩展名。如 .flac、.mkv、.raw 等。</p>
             ) : (
               <div className="nfc-dedupe-rule-list">
                 {preferred_extension.extensions.map((ext, idx) => (
-                  <div key={idx} className="nfc-dedupe-rule-row">
-                    <Text type="secondary" className="nfc-dedupe-rule-index">#{idx + 1}</Text>
-                    <Input value={ext} onChange={(e) => handleUpdateExtension(idx, e.target.value)} placeholder="例如 .flac 或 mp4" disabled={disabled} className="nfc-dedupe-rule-input" />
-                    <Space size={4}>
-                      <Button type="text" size="small" icon={<ArrowUpOutlined />} disabled={disabled || idx === 0} onClick={() => handleMoveExtension(idx, 'up')} />
-                      <Button type="text" size="small" icon={<ArrowDownOutlined />} disabled={disabled || idx === preferred_extension.extensions.length - 1} onClick={() => handleMoveExtension(idx, 'down')} />
-                      <Button type="text" danger size="small" icon={<DeleteOutlined />} disabled={disabled} onClick={() => handleDeleteExtension(idx)} />
-                    </Space>
+                  <div key={idx} className="nfc-dedupe-rule-row nfc-v2-scorer-rule-row">
+                    <span className="nfc-dedupe-rule-index" aria-hidden="true">#{idx + 1}</span>
+                    <label className="nfc-v2-scorer-rule-pattern">
+                      <span className="nfc-v2-sr-only">扩展名规则 #{idx + 1}</span>
+                      <input type="text" value={ext} disabled={disabled}
+                        aria-label={'扩展名规则 #' + (idx + 1)}
+                        placeholder="例如 .flac 或 mp4"
+                        onChange={event => handleUpdateExtension(idx, event.target.value)} />
+                    </label>
+                    <div className="nfc-v2-scorer-rule-actions">
+                      <ConsoleButton variant="ghost" size="sm" aria-label={'上移扩展名规则 #' + (idx + 1)}
+                        disabled={disabled || idx === 0}
+                        onClick={() => handleMoveExtension(idx, 'up')}>
+                        <ConsoleIcon name="arrow-up" size={16} />
+                      </ConsoleButton>
+                      <ConsoleButton variant="ghost" size="sm" aria-label={'下移扩展名规则 #' + (idx + 1)}
+                        disabled={disabled || idx === preferred_extension.extensions.length - 1}
+                        onClick={() => handleMoveExtension(idx, 'down')}>
+                        <ConsoleIcon name="arrow-down" size={16} />
+                      </ConsoleButton>
+                      <ConsoleButton variant="danger" size="sm" aria-label={'删除扩展名规则 #' + (idx + 1)}
+                        disabled={disabled} onClick={() => handleDeleteExtension(idx)}>
+                        <ConsoleIcon name="trash" size={16} />
+                      </ConsoleButton>
+                    </div>
                   </div>
                 ))}
               </div>
             )}
           </div>
         )}
-      </Card>
+      </section>
 
-      <Card size="small" title="修改时间偏好 (Modification Time)" bordered={false} className="nfc-dedupe-config-card">
+      <fieldset className="nfc-dedupe-config-card nfc-v2-scorer-card" disabled={disabled}>
+        <legend>修改时间偏好 (Modification Time)</legend>
         <div className="nfc-dedupe-mtime-stack">
-          <div className="nfc-dedupe-weight-row">
-            <Text>时间偏好策略:</Text>
-            <Radio.Group value={mtime.mode} onChange={(e) => handleMtimeModeChange(e.target.value)} disabled={disabled}>
-              <Radio value="none">不参与排序 (None)</Radio>
-              <Radio value="newest">偏好最新文件 (Newest)</Radio>
-              <Radio value="oldest">偏好最旧文件 (Oldest)</Radio>
-            </Radio.Group>
+          <div className="nfc-v2-scorer-mtime-options">
+            <span className="nfc-v2-scorer-label">时间偏好策略</span>
+            <div className="nfc-v2-scorer-options is-inline">
+              <label className="nfc-v2-scorer-option"><input type="radio" name={instanceId + "-mtime-mode"}
+                checked={mtime.mode === 'none'} onChange={() => handleMtimeModeChange('none')} />
+                不参与排序 (None)</label>
+              <label className="nfc-v2-scorer-option"><input type="radio" name={instanceId + "-mtime-mode"}
+                checked={mtime.mode === 'newest'} onChange={() => handleMtimeModeChange('newest')} />
+                偏好最新文件 (Newest)</label>
+              <label className="nfc-v2-scorer-option"><input type="radio" name={instanceId + "-mtime-mode"}
+                checked={mtime.mode === 'oldest'} onChange={() => handleMtimeModeChange('oldest')} />
+                偏好最旧文件 (Oldest)</label>
+            </div>
           </div>
-          <div className="nfc-dedupe-weight-row">
-            <Text>因子权重 (0 - {MAX_WEIGHT}):</Text>
-            <InputNumber min={0} max={MAX_WEIGHT} value={mtime.weight} onChange={handleMtimeWeightChange} disabled={disabled || mtime.mode === 'none'} className="nfc-dedupe-weight-input" />
-            <Text type="secondary">偏好方向上的时间差加权计分</Text>
+          <div className="nfc-dedupe-weight-row nfc-v2-scorer-weight">
+            <label htmlFor={instanceId + "-mtime-weight"}>因子权重 (0 - {MAX_WEIGHT})</label>
+            <input id={instanceId + "-mtime-weight"} type="number" step={1} min={0} max={MAX_WEIGHT}
+              value={mtime.weight} className="nfc-dedupe-weight-input"
+              disabled={disabled || mtime.mode === 'none'}
+              onChange={event => handleMtimeWeightChange(event.target.value === '' ? null : event.target.valueAsNumber)} />
+            <span className="nfc-v2-scorer-help">偏好方向上的时间差加权计分</span>
           </div>
         </div>
-      </Card>
+      </fieldset>
 
-      <div className="nfc-dedupe-config-footer">
-        <Text type="secondary" className="nfc-form-safety-note">
-          <InfoCircleOutlined className="nfc-inline-icon" />
+      <div className="nfc-dedupe-config-footer nfc-v2-scorer-footer">
+        <span className="nfc-form-safety-note">
+          <ConsoleIcon name="shield-check" size={16} />
           NAS 去重 V1 标准规范：仅包含通用文件系统打分因子（路径、扩展名、修改时间），排除媒体特定字段。
-        </Text>
-        {showReset && !disabled && <Button icon={<ReloadOutlined />} onClick={handleReset} size="small">重置为默认值</Button>}
+        </span>
+        {showReset && !disabled && (
+          <ConsoleButton size="sm" leadingIcon={<ConsoleIcon name="refresh" size={15} />}
+            onClick={handleReset}>重置为默认值</ConsoleButton>
+        )}
       </div>
     </div>
   );

@@ -24,6 +24,7 @@ import './styles/console-v2-directory-picker.css';
 import './styles/console-v2-directory-modal.css';
 import './styles/console-v2-dedupe-overlays.css';
 import './styles/console-v2-advanced-dedupe.css';
+import './styles/console-v2-dedupe-scorer.css';
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
