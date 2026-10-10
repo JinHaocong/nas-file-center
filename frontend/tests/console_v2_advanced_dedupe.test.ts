@@ -14,13 +14,15 @@ const rows: DedupePreviewMemberRow[] = [
   { absolute_path: '/srv/B/test.mp4', relative_path: 'B/test.mp4', scan_root_index: 1,
     member_decision: 'HARDLINK', eligible_as_keep: true },
   { absolute_path: '/srv/A/unknown', scan_root_index: 0, member_decision: 'UNAVAILABLE' },
+  { absolute_path: '/srv/A/protected', scan_root_index: 0, member_decision: 'SAFETY_EXCLUDED', eligible_as_keep: false },
 ];
 describe('Console v2 advanced dedupe preview table', () => {
   test('client-side filters are scoped to supplied server page and preserve safety classifications', () => {
-    assert.equal(filterDedupePreviewRows(rows, {searchText:'',decisionFilter:'ALL',rootFilter:'ALL'}).length,4);
+    assert.equal(filterDedupePreviewRows(rows, {searchText:'',decisionFilter:'ALL',rootFilter:'ALL'}).length,5);
     assert.deepEqual(filterDedupePreviewRows(rows,{searchText:'master.JPG',decisionFilter:'ALL',rootFilter:'ALL'}),rows.slice(0,2));
     assert.deepEqual(filterDedupePreviewRows(rows,{searchText:'B/TEST',decisionFilter:'ALL',rootFilter:1}),[rows[2]]);
-    assert.deepEqual(filterDedupePreviewRows(rows,{searchText:'',decisionFilter:'SAFETY_EXCLUDED',rootFilter:'ALL'}),[rows[1]]);
+    assert.deepEqual(filterDedupePreviewRows(rows,{searchText:'',decisionFilter:'QUARANTINE',rootFilter:'ALL'}),[rows[1]]);
+    assert.deepEqual(filterDedupePreviewRows(rows,{searchText:'',decisionFilter:'SAFETY_EXCLUDED',rootFilter:'ALL'}),[rows[4]]);
     assert.deepEqual(filterDedupePreviewRows(rows,{searchText:'',decisionFilter:'UNAVAILABLE',rootFilter:0}),[rows[3]]);
     assert.deepEqual(filterDedupePreviewRows(rows,{searchText:'',decisionFilter:'KEEP',rootFilter:1}),[]);
     assert.ok(decisionFilterOptions.some(o=>o.value==='HARDLINK'));
