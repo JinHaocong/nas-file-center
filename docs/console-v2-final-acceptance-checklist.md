@@ -38,7 +38,8 @@ approved NAS File Center mockup. User-selectable dark/system modes remain.
 - [x] WorkflowList native unified pagination, responsive list, RBAC-gated archive/permanent-delete confirmations (PR #153).
 - [x] Workflow StepCard semantic native card, move/delete/read-only guards; native rename, quarantine and dedupe specification editors (PR #154).
 - [x] Native Scan/Move/Touch editors with registered Index Roots, 16-root cap, exact relative subpath and local mtime_ns conversion (PR #155).
-- [ ] Remaining workflow editors (filter/organizer/utility), organizer, rename/file tools, settings and remaining pages.
+- [x] Native Utility managed-root editor and recursive Filter AST: matrix, list values, depth/leaf caps and readonly protection (PR #156).
+- [ ] Remaining workflow Organizer editor and other Ant screens: organizer, rename/file tools, settings and remaining pages.
 - [ ] Remove all `antd` and `@ant-design/icons` imports and their lockfile dependencies.
 - [ ] Consolidate historical UI CSS overrides into an owned, maintainable theme system.
 - [ ] Full TypeScript, frontend unit/regression, backend, Docker and dependency-audit gates.
