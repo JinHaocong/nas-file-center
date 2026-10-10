@@ -44,7 +44,8 @@ describe('Gate6-B Utility frontend contract', () => {
     assert.match(workflowTypesSource, /capability_reason\?:\s*string\s*\|\s*null/);
   });
   test('builder exposes Utility mode backed by managed root plus optional subpath', () => {
-    assert.match(builderSource, /value=["']utility["']/);
+    assert.match(builderSource, /workflowModes:\s*WorkflowMode\[\]\s*=\s*\[[^\]]*'utility'/);
+    assert.match(builderSource, /<input type="radio"[^>]*value=\{option\}/);
     assert.match(builderSource, /single_child_wrapper_collapse/);
     assert.match(builderSource, /目录工具流|Utility/);
   });

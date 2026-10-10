@@ -31,3 +31,17 @@ export function canConfirmWorkflowRollback(state: WorkflowRollbackConfirmation):
     state.currentRevision === state.expectedRevision &&
     state.requestedRevision < state.currentRevision;
 }
+
+/** Normalizes both editable fields before submission, rejecting blank trimmed names. */
+export function validateWorkflowBasicFields(name: string, description: string): {
+  name: string;
+  description: string;
+  nameError: string;
+} {
+  const normalizedName = name.trim();
+  return {
+    name: normalizedName,
+    description: description.trim(),
+    nameError: normalizedName ? '' : '请输入工作流名称',
+  };
+}

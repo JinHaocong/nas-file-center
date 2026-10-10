@@ -59,13 +59,13 @@ describe('Console v2 workflow builder action shell and safety', () => {
       'canCreateWorkflow(user?.role)', 'canSaveRevision(user?.role, isArchived)',
       'canSwitchWorkflowMode(user?.role', 'canRollbackWorkflow(user?.role, isArchived)',
       'isHistoricalView', 'isArchived', 'isBuiltin',
-      'form.validateFields()', 'Form.useForm()', 'name: values.name.trim()',
-      'description: values.description?.trim()', 'schema_version: 1',
+      'validateWorkflowBasicFields(name, description)', 'name: values.name',
+      'description: values.description', 'schema_version: 1',
       'StepList', 'WorkflowPreviewPanel', 'RevisionDrawer',
       'createDefaultDedupeScorerConfig', 'createDefaultOrganizerSnapshot',
       'isDirty={isDirty}', 'isArchived={isArchived}', 'onGeneratePlanSuccess',
     ])assert.ok(s.includes(term),term);
-    assert.ok(s.includes("import { Form, Input, Radio } from 'antd'"));
+    assert.doesNotMatch(s, /from ['"]antd['"]|Form\.useForm\(|form\.validateFields\(/);
   });
 
   test('native status, history, back, save and toast controls remain accessible', () => {
