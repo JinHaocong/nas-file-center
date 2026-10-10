@@ -84,11 +84,12 @@ describe('Console v2 native dedupe scoring editor', () => {
   test('shared native editor supports workflow and scan; light/dark/mobile and focus treatment', () => {
     const s = read('src/components/dedupe/DedupeScorerConfigEditor.tsx');
     const scan = read('src/pages/Scans/AdvancedDedupePage.tsx');
-    const workflow = read('src/pages/Workflows/WorkflowBuilder.tsx');
+    const exported = read('src/components/dedupe/index.ts');
     const css = read('src/styles/console-v2-dedupe-scorer.css');
     const main = read('src/main.tsx');
     assert.ok(scan.includes('DedupeScorerConfigEditor'));
-    assert.ok(workflow.includes('DedupeScorerConfigEditor'));
+    assert.ok(exported.includes('DedupeScorerConfigEditor'));
+    assert.ok(s.includes('export const DedupeScorerConfigEditor'));
     for (const token of ['.nfc-v2-scorer-editor','.nfc-v2-scorer-rule-row',
       '.nfc-v2-scorer-validation',"[data-theme='dark']",':focus-visible',
       '@media (max-width: 767px)','prefers-reduced-motion: reduce',
