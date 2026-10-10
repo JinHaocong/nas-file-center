@@ -19,6 +19,7 @@ export const OrganizerPage: React.FC = () => {
 
   const saveMutation = useMutation({
     mutationFn: async (values: Partial<OrganizerProfile>) => {
+      if (editingProfile?.is_builtin) throw new Error('内置方案不可直接修改');
       if (editingProfile) {
         return organizerProfilesApi.updateProfile(editingProfile.id, values);
       }
@@ -41,6 +42,7 @@ export const OrganizerPage: React.FC = () => {
   };
 
   const handleEdit = (profile: OrganizerProfile) => {
+    if (profile.is_builtin) return;
     setEditingProfile(profile);
     setModalOpen(true);
   };
