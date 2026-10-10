@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Form, Input, Modal, Switch, message } from 'antd';
+import { Button, Form, Input, Modal, Switch, message } from 'antd';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { scansApi } from '../../api/domain';
