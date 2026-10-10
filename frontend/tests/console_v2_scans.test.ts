@@ -68,7 +68,7 @@ describe('Console v2 scan history migration', () => {
     const modal = read('src/components/scans/ScanCreateModal.tsx');
     const model = read('src/components/scans/scan_create.ts');
     assert.match(page, /<ScanCreateModal open=\{isModalOpen\}/);
-    assert.doesNotMatch(page, /from ['"]antd['"]|<Form\\b|<Input\\b|<Switch\\b/);
+    assert.doesNotMatch(page, /from ['"]antd['"]|<Form\b|<Input\b|<Switch\b/);
     for (const token of [
       '<DirectoryPicker multiple', 'ALLOWED_ROOTS',
       'scansApi.createScan(request)', 'namePatternsText', 'excludePatternsText',
