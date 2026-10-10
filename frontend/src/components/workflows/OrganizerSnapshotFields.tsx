@@ -59,7 +59,7 @@ const Tags: React.FC<{
                 if (event.key === 'Enter') { event.preventDefault(); add(); }
                 else if (!cleanup && (event.key === ',' || event.key === ' ')) { event.preventDefault(); add(); }
               }}
-              onBlur={add} />
+              />
             <button type="button" disabled={!draft.trim()} aria-label={'添加' + label} onClick={add}>
               <ConsoleIcon name="plus" size={16} />
             </button>
