@@ -47,9 +47,9 @@ describe('Console v2 Scan Creation form', () => {
       '<DirectoryPicker multiple disabled={createMutation.isPending}',
       "validateScanCreateValues(values)", 'toScanCreatePayload(values)',
       'createMutation.isPending', 'createMutation.mutate(',
-      'keyboard={!createMutation.isPending}',
-      'maskClosable={!createMutation.isPending}',
-      'closable={!createMutation.isPending}',
+      'onEscapeKeyDown={event => { if (createMutation.isPending) event.preventDefault(); }}',
+      'onPointerDownOutside={event => event.preventDefault()}',
+      'disabled={createMutation.isPending} onClick={close}',
       'ALLOWED_ROOTS',
       "queryClient.invalidateQueries({ queryKey: ['scansList'] })",
       "queryClient.invalidateQueries({ queryKey: ['workJobsList'] })",
@@ -58,12 +58,14 @@ describe('Console v2 Scan Creation form', () => {
     assert.doesNotMatch(code, /<Form\b|<Form.Item\b|<Input\b|<Switch\b/);
   });
 
-  test('scan list no longer imports Ant controls; modal only remains until DirectoryPicker overlay migration', () => {
+  test('scan list and nested Scan creation modal use native/Radix controls', () => {
     const page = read('src/pages/Scans/index.tsx');
     const form = read('src/components/scans/ScanCreateModal.tsx');
     assert.doesNotMatch(page, /from ['"]antd['"]|@ant-design\/icons|Form\.useForm/);
     assert.match(page, /<ScanCreateModal open=\{isModalOpen\}/);
-    assert.match(form, /import \{ Modal \} from 'antd'/);
+    assert.match(form, /import \* as Dialog from '@radix-ui\/react-dialog'/);
+    assert.match(form, /<Dialog.Content/);
+    assert.doesNotMatch(form, /from ['"]antd['"]/);
     assert.match(form, /from '..\/DirectoryPicker'/);
     assert.match(form, /onError: \(err: Error\) =>/);
     assert.match(form, /toast\.error\(message\)/);

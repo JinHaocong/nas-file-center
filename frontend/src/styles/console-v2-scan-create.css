@@ -1,4 +1,4 @@
-/* Scan Creation UI: only the form is native; Ant Modal/DirectoryPicker modal remain temporarily. */
+/* Scan Creation UI: Radix parent and nested DirectoryPicker modal share focus management. */
 .nfc-v2-scan-create-modal {
   --nfc-form-paper: #fff;
   --nfc-form-text: #18263a;
@@ -15,7 +15,7 @@
   --nfc-form-surface: #222e41;
   --nfc-form-accent: #83b5ff;
 }
-.nfc-v2-scan-create-modal .ant-modal-content {
+.nfc-v2-scan-create-modal {
   padding: 24px;
   border: 1px solid var(--nfc-form-line);
   background: var(--nfc-form-paper);
@@ -23,8 +23,18 @@
   color: var(--nfc-form-text);
   box-shadow: 0 24px 70px rgba(4,24,50,.2);
 }
-.nfc-v2-scan-create-modal .ant-modal-title { font-size: 17px; font-weight: 740; color: var(--nfc-form-text); }
-.nfc-v2-scan-create-modal .ant-modal-header { background: transparent; margin-bottom: 24px; }
+.nfc-v2-scan-create-overlay { z-index: 1190; }
+.nfc-v2-scan-create-modal {
+  position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  z-index: 1191; width: min(640px, calc(100vw - 24px)); max-height: min(90dvh, 900px);
+  overflow-y: auto; overscroll-behavior: contain;
+}
+.nfc-v2-scan-create-header { display: grid; grid-template-columns: 1fr auto; gap: 5px 12px; margin-bottom: 24px; }
+.nfc-v2-scan-create-header h2 { margin: 0; font-size: 17px; font-weight: 740; color: var(--nfc-form-text); }
+.nfc-v2-scan-create-header p { grid-column: 1; color: var(--nfc-form-muted); font-size: 11px; margin: 0; }
+.nfc-v2-scan-create-close { grid-column: 2; grid-row: 1 / span 2; border: 0; background: transparent; color: var(--nfc-form-text); cursor: pointer; align-self: start; padding: 5px; }
+.nfc-v2-scan-create-close:disabled { opacity: .45; cursor: not-allowed; }
+.nfc-v2-scan-create-close:focus-visible { outline: 2px solid var(--nfc-form-accent); outline-offset: 2px; }
 .nfc-v2-scan-create-form { display: grid; gap: 17px; color: var(--nfc-form-text); }
 .nfc-v2-scan-create-field { display: grid; gap: 9px; min-width: 0; }
 .nfc-v2-scan-create-field > label, .nfc-v2-scan-create-label {
@@ -96,7 +106,7 @@
 }
 @media (max-width: 767px) {
   .nfc-v2-scan-create-patterns { grid-template-columns: 1fr; }
-  .nfc-v2-scan-create-modal .ant-modal-content { padding: 17px; }
+  .nfc-v2-scan-create-modal { padding: 17px; }
   .nfc-v2-scan-create-form { gap: 15px; }
   .nfc-v2-scan-create-actions { flex-wrap: wrap; }
 }

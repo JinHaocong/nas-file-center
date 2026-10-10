@@ -7,8 +7,7 @@ import { DirectoryPickerModal } from './DirectoryPickerModal';
 import { splitDirectoryPathLines } from './path_model';
 
 /**
- * Native Console v2 input/selection surface. DirectoryPickerModal remains the
- * same server-backed Ant overlay until its browser/focus migration is complete.
+ * Native Console v2 selection controls and Radix directory browser.
  */
 export const DirectoryPicker: React.FC<DirectoryPickerProps> = ({
   value, onChange, multiple = false, disabled = false,

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Modal } from 'antd';
+import * as Dialog from '@radix-ui/react-dialog';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { scansApi } from '../../api/domain';
@@ -23,8 +23,7 @@ const emptyValues = (): ScanCreateValues => ({
 });
 
 /**
- * Native form controls, retaining the proven directory picker and its Ant
- * overlay until DirectoryPickerModal is independently migrated.
+ * Native form and Radix overlay: nested DirectoryPicker now shares Radix focus management.
  */
 export const ScanCreateModal: React.FC<Props> = ({ open, onClose }) => {
   const queryClient = useQueryClient();
@@ -83,18 +82,21 @@ export const ScanCreateModal: React.FC<Props> = ({ open, onClose }) => {
   };
 
   return (
-    <Modal
-      title="新建 fclones 精确扫描任务"
-      open={open}
-      onCancel={close}
-      footer={null}
-      width={640}
-      closable={!createMutation.isPending}
-      keyboard={!createMutation.isPending}
-      maskClosable={!createMutation.isPending}
-      destroyOnClose
-      className="nfc-form-modal nfc-overlay-modal nfc-scan-create-modal nfc-v2-scan-create-modal"
-    >
+    <Dialog.Root open={open} onOpenChange={next => { if (!next) close(); }}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="nfc-v2-dialog-overlay nfc-v2-scan-create-overlay" />
+        <Dialog.Content className="nfc-form-modal nfc-overlay-modal nfc-scan-create-modal nfc-v2-scan-create-modal"
+          onEscapeKeyDown={event => { if (createMutation.isPending) event.preventDefault(); }}
+          onPointerDownOutside={event => event.preventDefault()}>
+          <header className="nfc-v2-scan-create-header">
+            <Dialog.Title>新建 fclones 精确扫描任务</Dialog.Title>
+            <Dialog.Description>创建扫描任务并在后台执行，选择路径仍受 ALLOWED_ROOTS 约束。</Dialog.Description>
+            <button type="button" aria-label="关闭新建扫描"
+              className="nfc-v2-scan-create-close"
+              disabled={createMutation.isPending} onClick={close}>
+              <ConsoleIcon name="x" size={18} />
+            </button>
+          </header>
       <form className="nfc-v2-scan-create-form" onSubmit={submit}>
         <div className="nfc-v2-scan-create-field">
           <label htmlFor="nfc-scan-name">任务名称</label>
@@ -162,6 +164,8 @@ export const ScanCreateModal: React.FC<Props> = ({ open, onClose }) => {
             leadingIcon={<ConsoleIcon name="file-search" size={16} />}>开始扫描</ConsoleButton>
         </div>
       </form>
-    </Modal>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 };
