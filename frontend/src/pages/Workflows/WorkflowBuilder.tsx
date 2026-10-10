@@ -365,72 +365,61 @@ export const WorkflowBuilderPage: React.FC = () => {
         }
         actions={
           <ActionBar compact>
-            <Button icon={<ArrowLeftOutlined />} onClick={handleBack}>返回</Button>
+            <ConsoleButton leadingIcon={<ConsoleIcon name="arrow-left" size={16} />}
+              onClick={handleBack}>返回</ConsoleButton>
             {isHistoricalView && (
-              <Button onClick={() => navigate(`/workflows/${workflowId}`)}>
+              <ConsoleButton onClick={() => navigate('/workflows/' + workflowId)}>
                 返回当前最新版
-              </Button>
+              </ConsoleButton>
             )}
             {isHistoricalView && canRollback && (
-              <Popconfirm
-                title={`确认回滚至历史版本 r${targetRevision}？`}
-                description="系统将基于此定义生成新修订版本并恢复至当前。"
-                onConfirm={() => rollbackMutation.mutate(targetRevision!)}
-                okText="确认回滚"
-                cancelText="取消"
-              >
-                <Button danger icon={<HistoryOutlined />} loading={rollbackMutation.isPending}>
-                  回滚至此版本
-                </Button>
-              </Popconfirm>
+              <ConsoleButton variant="danger" leadingIcon={<ConsoleIcon name="history" size={16} />}
+                loading={rollbackMutation.isPending}
+                onClick={() => {
+                  if (workflow && targetRevision !== null && !rollbackMutation.isPending) {
+                    setConfirmation({ kind: 'rollback', revision: targetRevision,
+                      expectedRevision: workflow.current_revision });
+                  }
+                }}>
+                回滚至此版本
+              </ConsoleButton>
             )}
             {!isNew && workflow && (
-              <Button
-                icon={<HistoryOutlined />}
-                onClick={() => setRevisionDrawerOpen(true)}
-              >
-                版本历史
-              </Button>
+              <ConsoleButton leadingIcon={<ConsoleIcon name="history" size={16} />}
+                onClick={() => setRevisionDrawerOpen(true)}>版本历史</ConsoleButton>
             )}
             {canEdit && (
-              <Button
-                type="primary"
-                icon={<SaveOutlined />}
-                loading={saveMutation.isPending}
-                disabled={!isDirty && !isNew}
-                onClick={() => saveMutation.mutate()}
-              >
+              <ConsoleButton variant="primary" leadingIcon={<ConsoleIcon name="check" size={16} />}
+                loading={saveMutation.isPending} disabled={!isDirty && !isNew}
+                onClick={() => saveMutation.mutate()}>
                 {isNew ? '创建工作流' : '保存新版本'}
-              </Button>
+              </ConsoleButton>
             )}
           </ActionBar>
         }
       />
 
-      <div className="nfc-plan-alert-stack">
+      <div className="nfc-plan-alert-stack nfc-v2-workflow-notices">
         {isArchived && (
-          <Alert
-            type="error"
-            showIcon
-            message="工作流已被归档封存"
-            description="归档态完全只读：禁止编辑、保存新版本、回滚、Preview 与 Generate。"
-          />
+          <div className="nfc-v2-workflow-notice is-error" role="note">
+            <ConsoleIcon name="lock" size={18} />
+            <div><strong>工作流已被归档封存</strong>
+              <p>归档态完全只读：禁止编辑、保存新版本、回滚、Preview 与 Generate。</p></div>
+          </div>
         )}
         {isHistoricalView && (
-          <Alert
-            type="info"
-            showIcon
-            message={`正在查看历史版本 r${targetRevision}`}
-            description="历史版本只读；可在允许条件下基于此版本 Preview / Generate Draft，或由管理员回滚。"
-          />
+          <div className="nfc-v2-workflow-notice" role="note">
+            <ConsoleIcon name="history" size={18} />
+            <div><strong>正在查看历史版本 r{targetRevision}</strong>
+              <p>历史版本只读；可在允许条件下基于此版本 Preview / Generate Draft，或由管理员回滚。</p></div>
+          </div>
         )}
         {!isNew && !canEdit && !isArchived && !isHistoricalView && (
-          <Alert
-            type="warning"
-            showIcon
-            message="普通成员权限提示"
-            description="可查看、Preview 与 Generate Draft，但不能修改步骤、保存修订或归档。"
-          />
+          <div className="nfc-v2-workflow-notice is-warning" role="note">
+            <ConsoleIcon name="shield-check" size={18} />
+            <div><strong>普通成员权限提示</strong>
+              <p>可查看、Preview 与 Generate Draft，但不能修改步骤、保存修订或归档。</p></div>
+          </div>
         )}
       </div>
 
