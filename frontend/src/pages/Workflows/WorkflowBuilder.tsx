@@ -289,90 +289,58 @@ export const WorkflowBuilderPage: React.FC = () => {
 
   if (!isNew && (isLoading || (isHistoricalView && isHistLoading))) {
     return (
-      <div className="nfc-centered-state">
-        <Spin size="large" tip="正在载入工作流配置..." />
+      <div className="nfc-centered-state nfc-v2-workflow-state" role="status">
+        <span className="nfc-console-spinner" aria-hidden="true" />
+        正在载入工作流配置...
       </div>
     );
   }
 
   if (!isNew && isError) {
     return (
-      <Alert
-        type="error"
-        showIcon
-        message="加载工作流失败"
-        description={getStructuredApiError(error).message}
-        action={<Button onClick={() => navigate('/workflows')}>返回列表</Button>}
-      />
+      <div className="nfc-workflow-error-state nfc-v2-workflow-state is-error" role="alert">
+        <h2>加载工作流失败</h2>
+        <p>{getStructuredApiError(error).message}</p>
+        <ConsoleButton onClick={() => navigate('/workflows')}>返回列表</ConsoleButton>
+      </div>
     );
   }
 
   if (!isNew && !parsedRevision.isValid) {
     return (
-      <div className="nfc-workflow-error-state">
-        <Button
-          icon={<ArrowLeftOutlined />}
-          onClick={() => navigate(`/workflows/${workflowId}`)}
-        >
-          返回当前版本
-        </Button>
-        <Alert
-          type="error"
-          showIcon
-          message="无效的历史版本号"
-          description={parsedRevision.errorMessage || '版本号参数不合法，已拒绝访问。'}
-          action={
-            <Button
-              type="primary"
-              onClick={() => navigate(`/workflows/${workflowId}`)}
-            >
-              查看当前最新版本 (r{workflow?.current_revision ?? ''})
-            </Button>
-          }
-        />
+      <div className="nfc-workflow-error-state nfc-v2-workflow-state is-error" role="alert">
+        <h2>无效的历史版本号</h2>
+        <p>{parsedRevision.errorMessage || '版本号参数不合法，已拒绝访问。'}</p>
+        <ConsoleButton leadingIcon={<ConsoleIcon name="arrow-left" size={16} />}
+          onClick={() => navigate('/workflows/' + workflowId)}>返回当前版本</ConsoleButton>
+        <ConsoleButton variant="primary" onClick={() => navigate('/workflows/' + workflowId)}>
+          查看当前最新版本 (r{workflow?.current_revision ?? ''})
+        </ConsoleButton>
       </div>
     );
   }
 
   if (!isNew && isHistoricalView && isHistError) {
     return (
-      <div className="nfc-workflow-error-state">
-        <Button
-          icon={<ArrowLeftOutlined />}
-          onClick={() => navigate(`/workflows/${workflowId}`)}
-        >
-          返回当前版本
-        </Button>
-        <Alert
-          type="error"
-          showIcon
-          message="历史版本加载失败"
-          description={
-            getStructuredApiError(histError).message ||
-            '指定的历史版本不存在或加载失败。'
-          }
-          action={
-            <Button
-              type="primary"
-              onClick={() => navigate(`/workflows/${workflowId}`)}
-            >
-              查看当前最新版本 (r{workflow?.current_revision ?? ''})
-            </Button>
-          }
-        />
+      <div className="nfc-workflow-error-state nfc-v2-workflow-state is-error" role="alert">
+        <h2>历史版本加载失败</h2>
+        <p>{getStructuredApiError(histError).message || '指定的历史版本不存在或加载失败。'}</p>
+        <ConsoleButton leadingIcon={<ConsoleIcon name="arrow-left" size={16} />}
+          onClick={() => navigate('/workflows/' + workflowId)}>返回当前版本</ConsoleButton>
+        <ConsoleButton variant="primary" onClick={() => navigate('/workflows/' + workflowId)}>
+          查看当前最新版本 (r{workflow?.current_revision ?? ''})
+        </ConsoleButton>
       </div>
     );
   }
 
   if (isNew && !canCreateWorkflow(user?.role)) {
     return (
-      <Alert
-        type="error"
-        showIcon
-        message="权限不足"
-        description="普通成员不可创建新工作流，请联系管理员。"
-        action={<Button onClick={() => navigate('/workflows')}>返回列表</Button>}
-      />
+      <div className="nfc-workflow-error-state nfc-v2-workflow-state is-error" role="alert">
+        <h2>权限不足</h2>
+        <p>普通成员不可创建新工作流，请联系管理员。</p>
+        <ConsoleButton onClick={() => navigate('/workflows')}>返回列表</ConsoleButton>
+      </div>
     );
   }
 
