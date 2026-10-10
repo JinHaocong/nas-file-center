@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
-import { Button, Form, Input, Modal, Switch, message } from 'antd';
+
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { scansApi } from '../../api/domain';
 import type { ScanJob } from '../../types';
 import { useTitle } from '../../hooks/useTitle';
 import { formatBytes, formatDateTime } from '../../utils/format';
-import { DirectoryPicker } from '../../components/DirectoryPicker';
+import { ScanCreateModal } from '../../components/scans/ScanCreateModal';
+import { useConsoleToast } from '../../components/ui/ConsoleToast';
 import { ScanDeleteButton } from '../../components/scans/ScanDeleteButton';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { DataPanel } from '../../components/ui/DataPanel';
@@ -19,15 +20,13 @@ import { ConsoleEmpty } from '../../components/ui/ConsoleEmpty';
 import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
 import { DedupeDiagnosticModal } from '../../components/dedupe/DedupeDiagnosticModal';
 
-const { TextArea } = Input;
-
 export const ScansPage: React.FC = () => {
   useTitle('扫描去重');
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const toast = useConsoleToast();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [diagnosticOpen, setDiagnosticOpen] = useState(false);
-  const [form] = Form.useForm();
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [deletingId, setDeletingId] = useState<number | null>(null);
@@ -46,7 +45,7 @@ export const ScansPage: React.FC = () => {
     mutationFn: (id: number) => scansApi.deleteScan(id),
     onMutate: id => setDeletingId(id),
     onSuccess: (_, id) => {
-      message.success('扫描 #' + id + ' 已安全删除');
+      toast.success('扫描 #' + id + ' 已安全删除');
       queryClient.invalidateQueries({ queryKey: ['scansList'] });
       queryClient.invalidateQueries({ queryKey: ['dashboardSummary'] });
       if (data?.items?.length === 1 && page > 1) {
@@ -54,43 +53,9 @@ export const ScansPage: React.FC = () => {
       }
     },
     onError: (err: Error) => {
-      message.error(err.message || '删除扫描失败');
+      toast.error(err.message || '删除扫描失败');
     },
     onSettled: () => setDeletingId(null),
-  });
-
-  const createScanMutation = useMutation({
-    mutationFn: (values: any) => {
-      let roots: string[] = [];
-      if (Array.isArray(values.roots)) {
-        roots = values.roots.filter(Boolean);
-      } else if (typeof values.roots === 'string') {
-        roots = values.roots.split('\n').map((s: string) => s.trim()).filter(Boolean);
-      }
-      return scansApi.createScan({
-        name: values.name,
-        roots,
-        isolate: values.isolate || false,
-        min_size: values.min_size || null,
-        name_patterns: values.name_patterns_text
-          ? values.name_patterns_text.split('\n').map((s: string) => s.trim()).filter(Boolean)
-          : null,
-        exclude_patterns: values.exclude_patterns_text
-          ? values.exclude_patterns_text.split('\n').map((s: string) => s.trim()).filter(Boolean)
-          : null,
-      });
-    },
-    onSuccess: (res) => {
-      message.success('扫描任务已加入后台队列');
-      setIsModalOpen(false);
-      form.resetFields();
-      queryClient.invalidateQueries({ queryKey: ['scansList'] });
-      queryClient.invalidateQueries({ queryKey: ['workJobsList'] });
-      navigate(`/scans/${res.scan_job_id}`);
-    },
-    onError: (err: any) => {
-      message.error(err.message || '创建扫描失败');
-    },
   });
 
   const items: ScanJob[] = isError ? [] : data?.items || [];
@@ -232,62 +197,7 @@ export const ScansPage: React.FC = () => {
         )}
       </DataPanel>
 
-      <Modal
-        title="新建 fclones 精确扫描任务"
-        open={isModalOpen}
-        onCancel={() => setIsModalOpen(false)}
-        footer={null}
-        width={640}
-        className="nfc-form-modal nfc-overlay-modal nfc-scan-create-modal"
-      >
-        <Form form={form} layout="vertical" onFinish={(vals) => createScanMutation.mutate(vals)}>
-          <Form.Item
-            name="name"
-            label="任务名称"
-            rules={[{ required: true, message: '请输入任务名称' }]}
-            initialValue={`Scan-${new Date().toISOString().slice(0, 10)}`}
-          >
-            <Input placeholder="例如：电影库与备份盘跨盘查重" />
-          </Form.Item>
-
-          <Form.Item
-            name="roots"
-            label="待扫描根目录"
-            rules={[{ required: true, message: '请至少选择或输入一个待扫描路径' }]}
-            extra="路径必须位于 ALLOWED_ROOTS 白名单内。"
-          >
-            <DirectoryPicker multiple placeholder="点击选择或添加待扫描目录..." />
-          </Form.Item>
-
-          <Form.Item
-            name="isolate"
-            label="跨目录隔离模式 (Isolate / A-B)"
-            valuePropName="checked"
-            extra="仅报告同时跨越不同输入根目录的重复组，不报告单根目录内部重复。"
-          >
-            <Switch />
-          </Form.Item>
-
-          <Form.Item name="min_size" label="最小文件大小过滤" extra="例如 100M、1G；留空不限制。">
-            <Input placeholder="例如: 10M" />
-          </Form.Item>
-
-          <Form.Item name="name_patterns_text" label="包含文件名 Pattern（每行一个，可选）">
-            <TextArea rows={2} placeholder={'*.mp4\n*.mkv'} />
-          </Form.Item>
-
-          <Form.Item name="exclude_patterns_text" label="排除文件名 Pattern（每行一个，可选）">
-            <TextArea rows={2} placeholder={'*.part\n*.tmp'} />
-          </Form.Item>
-
-          <ActionBar className="nfc-modal-actions">
-            <Button onClick={() => setIsModalOpen(false)}>取消</Button>
-            <Button type="primary" htmlType="submit" loading={createScanMutation.isPending}>
-              开始扫描
-            </Button>
-          </ActionBar>
-        </Form>
-      </Modal>
+      <ScanCreateModal open={isModalOpen} onClose={() => setIsModalOpen(false)} />
 
       <DedupeDiagnosticModal
         open={diagnosticOpen}

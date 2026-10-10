@@ -63,20 +63,22 @@ describe('Console v2 scan history migration', () => {
     assert.match(page, /setPage\(previous => previous - 1\)/);
   });
 
-  test('create scan form remains intact pending safe DirectoryPicker migration', () => {
+  test('native Scan creation form preserves DirectoryPicker and API contract', () => {
     const page = read('src/pages/Scans/index.tsx');
+    const modal = read('src/components/scans/ScanCreateModal.tsx');
+    const model = read('src/components/scans/scan_create.ts');
+    assert.match(page, /<ScanCreateModal open=\{isModalOpen\}/);
+    assert.doesNotMatch(page, /from ['"]antd['"]|<Form\b|<Input\b|<Switch\b/);
     for (const token of [
-      'Form.useForm()', 'DirectoryPicker', 'multiple placeholder=',
-      "roots = values.roots.filter(Boolean)",
-      "roots = values.roots.split('\\n')",
-      "isolate: values.isolate || false",
-      'min_size: values.min_size || null',
-      'name_patterns_text', 'exclude_patterns_text',
-      'scansApi.createScan(', 'createScanMutation.isPending',
-      'ALLOWED_ROOTS', 'DedupeDiagnosticModal',
-      "navigate(`/scans/${res.scan_job_id}`)",
-    ]) assert.ok(page.includes(token), token);
-    assert.match(page, /<Modal[\s\S]*<Form form=\{form\}/);
+      '<DirectoryPicker multiple', 'ALLOWED_ROOTS',
+      'scansApi.createScan(request)', 'namePatternsText', 'excludePatternsText',
+      "queryClient.invalidateQueries({ queryKey: ['scansList'] })",
+      "queryClient.invalidateQueries({ queryKey: ['workJobsList'] })",
+      "navigate('/scans/' + res.scan_job_id)",
+      'createMutation.isPending', '<form', 'type="checkbox"',
+    ]) assert.ok(modal.includes(token), token);
+    for (const token of ['min_size:', 'name_patterns:', 'exclude_patterns:',
+      'roots: values.roots', 'isolate: values.isolate']) assert.ok(model.includes(token), token);
   });
 
   test('list distinguishes loading, empty and error; no stale results shown on API error', () => {
