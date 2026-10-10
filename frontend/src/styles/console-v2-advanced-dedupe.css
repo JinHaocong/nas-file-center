@@ -37,3 +37,86 @@
 @media (prefers-reduced-motion: reduce) {
   .nfc-v2-dedupe-preview * { scroll-behavior: auto; animation-duration: 0.01ms; }
 }
+
+
+/* Page states and Radix confirmation are portal-owned; no Ant modal overrides. */
+.nfc-v2-dedupe-page-state {
+  display: grid; gap: 13px; max-width: 620px; margin: 32px auto; padding: 26px;
+  border-radius: 14px; border: 1px solid #dce5ee; background: #fff; color: #1b2b40;
+  font-size: 13px; line-height: 1.65;
+}
+.nfc-v2-dedupe-page-state h2, .nfc-v2-dedupe-page-state p { margin: 0; }
+.nfc-v2-dedupe-page-state .nfc-console-spinner { width: 20px; height: 20px; }
+[data-theme='dark'] .nfc-v2-dedupe-page-state { border-color: #36435a; background: #1a2434; color: #f0f4fa; }
+.nfc-v2-advanced-dedupe-overlay { z-index: 1280; }
+.nfc-v2-advanced-dedupe-dialog {
+  --nfc-adv-dialog-paper: #fff; --nfc-adv-dialog-text: #1c2a3d;
+  --nfc-adv-dialog-muted: #64748b; --nfc-adv-dialog-line: #dce5ee;
+  position: fixed; z-index: 1281; top: 50%; left: 50%;
+  transform: translate(-50%, -50%); width: min(560px, calc(100vw - 24px));
+  max-height: min(90dvh, 900px); overflow-y: auto; overscroll-behavior: contain;
+  border: 1px solid var(--nfc-adv-dialog-line); border-radius: 15px;
+  background: var(--nfc-adv-dialog-paper); color: var(--nfc-adv-dialog-text);
+  padding: 21px 23px; box-shadow: 0 24px 72px rgba(3, 21, 45, .24); font-size: 12px;
+}
+[data-theme='dark'] .nfc-v2-advanced-dedupe-dialog {
+  --nfc-adv-dialog-paper: #1a2434; --nfc-adv-dialog-text: #f0f4fa;
+  --nfc-adv-dialog-muted: #b4c3d4; --nfc-adv-dialog-line: #36435a;
+}
+.nfc-v2-advanced-dedupe-dialog-header {
+  display: flex; align-items: flex-start; gap: 10px;
+}
+.nfc-v2-advanced-dedupe-dialog-header h2 {
+  flex: 1; margin: 0; font-size: 17px; font-weight: 720;
+  color: var(--nfc-adv-dialog-text); line-height: 1.45;
+}
+.nfc-v2-advanced-dedupe-dialog-icon { color: #2878ef; flex: 0 0 auto; margin-top: 2px; }
+.nfc-v2-advanced-dedupe-dialog-header button {
+  border: 0; background: transparent; color: inherit; cursor: pointer; padding: 4px;
+}
+.nfc-v2-advanced-dedupe-dialog-header button:disabled { opacity: .5; cursor: not-allowed; }
+.nfc-v2-advanced-dedupe-dialog-copy {
+  color: var(--nfc-adv-dialog-text); line-height: 1.75; margin: 15px 0 20px;
+}
+.nfc-v2-advanced-dedupe-dialog-copy p { margin: 9px 0; }
+.nfc-v2-advanced-dedupe-dialog-copy .is-warning,
+.nfc-v2-advanced-dedupe-dialog-copy .is-info {
+  border: 1px solid var(--nfc-adv-dialog-line); padding: 11px 12px; border-radius: 8px;
+}
+.nfc-v2-advanced-dedupe-dialog-copy .is-warning { border-color: #cf9b50; }
+.nfc-v2-advanced-dedupe-dialog-copy .is-info { border-color: #619bcf; }
+.nfc-v2-advanced-dedupe-error {
+  padding: 10px 12px; border-radius: 8px; background: rgba(204, 60, 78, .08);
+  border: 1px solid rgba(204, 60, 78, .24); overflow-wrap: anywhere;
+}
+.nfc-v2-advanced-dedupe-dialog-actions {
+  display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap;
+}
+.nfc-v2-advanced-dedupe-dialog :is(button):focus-visible {
+  outline: 2px solid #2878ef; outline-offset: 2px;
+}
+.nfc-v2-advanced-dedupe-dialog .nfc-console-button {
+  display: inline-flex; align-items: center; justify-content: center; min-height: 40px;
+  padding: 0 14px; border: 1px solid var(--nfc-adv-dialog-line); border-radius: 9px;
+  background: var(--nfc-adv-dialog-paper); color: var(--nfc-adv-dialog-text);
+  font: inherit; font-weight: 660; cursor: pointer;
+}
+.nfc-v2-advanced-dedupe-dialog .nfc-console-button-primary {
+  background: #2878ef; border-color: #2878ef; color: #fff;
+}
+.nfc-v2-advanced-dedupe-dialog .nfc-console-button:disabled { opacity: .55; cursor: not-allowed; }
+.nfc-v2-advanced-dedupe-dialog .nfc-console-spinner {
+  width: 14px; height: 14px; display: inline-block; border-radius: 50%;
+  border: 2px solid currentColor; border-right-color: transparent;
+  animation: nfc-v2-advanced-spin .8s linear infinite;
+}
+@keyframes nfc-v2-advanced-spin { to { transform: rotate(360deg); } }
+@media (max-width: 767px) {
+  .nfc-v2-dedupe-page-state { margin: 10px; padding: 18px; }
+  .nfc-v2-advanced-dedupe-dialog { padding: 17px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nfc-v2-advanced-dedupe-dialog .nfc-console-spinner {
+    animation: none; border-right-color: currentColor;
+  }
+}

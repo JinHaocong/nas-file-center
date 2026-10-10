@@ -24,7 +24,8 @@ approved NAS File Center mockup. User-selectable dark/system modes remain.
 - [x] DirectoryPicker browser/favorites/recent Radix modal and Scan creation outer Radix dialog (PR #141).
 - [x] Classic Dedupe Plan creation + read-only pair diagnostic dialogs (PR #142).
 - [x] Advanced Dedupe native candidate table, page-local filters and server pagination (PR #143).
-- [ ] Advanced Dedupe page actions, confirmation dialogs, scoring editor and other Ant screens.
+- [x] Advanced Dedupe page native actions, Radix Draft confirmation and stale-preview recovery (PR #144).
+- [ ] Advanced Dedupe scoring editor, safety panels, explain drawer and other Ant screens.
 - [ ] Shared dialogs, select, checkbox, forms and destructive confirmation primitives.
 - [ ] Organizer, workflow editor, rename/file tools, settings and remaining pages.
 - [ ] Remove all `antd` and `@ant-design/icons` imports and their lockfile dependencies.

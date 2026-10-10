@@ -1,20 +1,10 @@
-import React, { useReducer, useState } from 'react';
+import React, { useReducer, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import {
-  Alert,
-  Button,
-  message,
-  Modal,
-  Spin,
-} from 'antd';
-import {
-  ArrowLeftOutlined,
-  ExclamationCircleOutlined,
-  ReloadOutlined,
-  ScheduleOutlined,
-  ThunderboltOutlined,
-} from '@ant-design/icons';
+import { ConsoleButton } from '../../components/ui/ConsoleButton';
+import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
+import { useConsoleToast } from '../../components/ui/ConsoleToast';
+import { DedupeActionDialog, type DedupeNoticeKind } from '../../components/dedupe/DedupeActionDialog';
 import { scansApi, storageOptimizationApi } from '../../api/domain';
 import { formatDedupeErrorMessage, getStructuredApiError } from '../../api/errors';
 import {
@@ -64,6 +54,10 @@ export const AdvancedDedupePage: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
+  const toast = useConsoleToast();
+  const generateInFlight = useRef(false);
+  const [notice, setNotice] = useState<DedupeNoticeKind | null>(null);
+  const [noticeError, setNoticeError] = useState<string | null>(null);
 
   const [dedupeState, dispatch] = useReducer(dedupeStateReducer, initialDedupeState);
   const [scorerConfig, setScorerConfig] = useState<DedupeScorerConfig>(
@@ -117,17 +111,19 @@ export const AdvancedDedupePage: React.FC = () => {
         destination_directory: diagnosticPair.sourceParent,
       });
     },
-    onSuccess: () => message.success('运行时能力探测完成；Validate / Execute 仍会重新验证'),
-    onError: (err: any) => message.error(err?.message || '运行时能力探测失败'),
+    onSuccess: () => toast.success('运行时能力探测完成；Validate / Execute 仍会重新验证'),
+    onError: (err: any) => toast.error(err?.message || '运行时能力探测失败'),
   });
 
   const handleConfigChange = (newConfig: DedupeScorerConfig) => {
+    setNotice(null); // Any pending confirmation refers to the old preview digest.
     setScorerConfig(newConfig);
     capabilityMutation.reset();
     dispatch({ type: 'CONFIG_EDITED' });
   };
 
   const handleStorageActionChange = (nextAction: DedupeStorageAction) => {
+    setNotice(null); // Invalidate stale action confirmation.
     setStorageAction(nextAction);
     capabilityMutation.reset();
     dispatch({ type: 'CONFIG_EDITED' });
@@ -169,18 +165,19 @@ export const AdvancedDedupePage: React.FC = () => {
         digest: data.preview_digest,
         requestGeneration: variables.generation,
       });
-      message.success('高级预览计算完成');
+      toast.success('高级预览计算完成');
     },
     onError: (err: any) => {
       const formatted = formatDedupeErrorMessage(err);
       dispatch({ type: 'PREVIEW_FAILED', error: formatted });
-      message.error(formatted);
+      toast.error(formatted);
     },
   });
 
   const generateMutation = useMutation({
     mutationFn: () => {
-      if (!previewData || !previewedConfig || !previewedStorageAction || !dedupeState.acceptedPreviewDigest) {
+      if (!previewData || !previewedConfig || !previewedStorageAction ||
+          !dedupeState.acceptedPreviewDigest) {
         throw new Error('无有效的权威预览数据，请先运行预览');
       }
       return scansApi.createAdvancedDedupePlan(scanId, {
@@ -190,77 +187,33 @@ export const AdvancedDedupePage: React.FC = () => {
       });
     },
     onSuccess: (res) => {
+      generateInFlight.current = false;
+      setNotice(null);
       dispatch({ type: 'GENERATE_SUCCESS' });
-      message.success(`成功生成精确去重计划 #${res.id || res.plan_id}`);
-      navigate(`/plans/${res.id || res.plan_id}`);
+      toast.success('成功生成精确去重计划 #' + (res.id || res.plan_id));
+      navigate('/plans/' + (res.id || res.plan_id));
     },
     onError: (err: any) => {
+      generateInFlight.current = false;
       const structured = getStructuredApiError(err);
       const formatted = formatDedupeErrorMessage(err);
-
-      if (
-        structured.code === 'PREVIEW_CHANGED' ||
-        structured.code === 'DEDUPE_PREVIEW_CHANGED'
-      ) {
+      setNoticeError(formatted);
+      if (structured.code === 'PREVIEW_CHANGED' ||
+          structured.code === 'DEDUPE_PREVIEW_CHANGED') {
         dispatch({ type: 'PREVIEW_CHANGED_ERROR', error: formatted });
-        Modal.confirm({
-          title: '预览校验失败 (PREVIEW_CHANGED)',
-          icon: <ExclamationCircleOutlined />,
-          content: '检测到底层文件或打分状态已变化，权威摘要已失效。是否重新运行预览？',
-          okText: '重新运行预览',
-          cancelText: '取消',
-          onOk: () => {
-            handleRunPreview();
-          },
-        });
+        setNotice('preview_changed');
         return;
       }
-
       dispatch({ type: 'GENERATE_FAILED', error: formatted });
-
       if (structured.code === 'DEDUPE_SCAN_NOT_FOUND') {
-        Modal.error({
-          title: '扫描任务不存在 (DEDUPE_SCAN_NOT_FOUND)',
-          content: (
-            <div>
-              <p>{formatted}</p>
-              <p className="nfc-modal-support-copy">
-                关联的底层扫描任务已不可用，当前去重计划草案无法生成。
-              </p>
-            </div>
-          ),
-          okText: '返回扫描列表',
-          onOk: () => navigate('/scans'),
-        });
+        setNotice('scan_not_found');
       } else if (structured.code === 'DEDUPE_SCAN_NOT_COMPLETED') {
-        Modal.warning({
-          title: '扫描任务尚未完成 (DEDUPE_SCAN_NOT_COMPLETED)',
-          content: (
-            <div>
-              <p>{formatted}</p>
-              <p className="nfc-modal-support-copy">
-                扫描任务当前未处于完成状态，请等待扫描完成后再生成去重计划。
-              </p>
-            </div>
-          ),
-          okText: '返回扫描详情',
-          onOk: () => navigate(`/scans/${scanId}`),
-        });
+        setNotice('scan_not_completed');
       } else if (structured.code === 'DEDUPE_EMPTY_PLAN') {
-        Modal.info({
-          title: '无可用去重操作 (DEDUPE_EMPTY_PLAN)',
-          content: (
-            <div>
-              <p>{formatted}</p>
-              <p className="nfc-modal-support-copy">
-                当前配置下未产生任何可执行的去重操作。
-              </p>
-            </div>
-          ),
-          okText: '确定',
-        });
+        setNotice('empty_plan');
       } else {
-        message.error(formatted);
+        setNotice(null);
+        toast.error(formatted);
       }
     },
   });
@@ -274,8 +227,10 @@ export const AdvancedDedupePage: React.FC = () => {
   const validation = validateScorerConfigForm(scorerConfig);
 
   const handleRunPreview = () => {
+    if (generateInFlight.current || generateMutation.isPending ||
+        previewMutation.isPending) return;
     if (!validation.valid) {
-      message.error('请先修正配置校验错误');
+      toast.error('请先修正配置校验错误');
       return;
     }
     const currentGen = dedupeState.configGeneration;
@@ -290,44 +245,42 @@ export const AdvancedDedupePage: React.FC = () => {
   };
 
   const handleConfirmGeneratePlan = () => {
-    const actionLabel = storageAction === 'quarantine' ? 'Quarantine' : storageAction === 'hardlink' ? 'Hardlink' : 'Reflink';
-    Modal.confirm({
-      title: `确认生成 ${actionLabel} 去重计划草案？`,
-      icon: <ExclamationCircleOutlined />,
-      content: (
-        <div>
-          <p>将提交当前权威预览摘要与 Storage Action（{actionLabel}）以原子方式创建执行计划草案。</p>
-          {storageAction === 'hardlink' && (
-            <Alert
-              type="warning"
-              showIcon
-              message="Hardlink 后两个路径共享同一个 inode，未来通过任一路径写入都会修改同一份文件内容。"
-            />
-          )}
-          {storageAction === 'reflink' && (
-            <Alert
-              type="info"
-              showIcon
-              message="Reflink 使用独立 inode / Copy-on-Write，不是普通完整复制。"
-            />
-          )}
-          <p className="nfc-modal-support-copy">
-            生成后仅创建 Draft 状态计划，底层物理文件不会发生任何改变。后续仍需完成
-            <strong> Freeze -&gt; Validate -&gt; Execute </strong>
-            流程。
-          </p>
-        </div>
-      ),
-      okText: '确认生成草案',
-      cancelText: '取消',
-      onOk: () => {
-        dispatch({ type: 'GENERATE_STARTED' });
-        generateMutation.mutate();
-      },
-    });
+    if (generateInFlight.current || generateMutation.isPending ||
+        previewMutation.isPending || !canGeneratePlan(dedupeState) ||
+        isDirty || !previewData || previewData.planned_action_count === 0) return;
+    setNoticeError(null);
+    setNotice('generate');
+  };
+
+  const handleNoticeConfirm = () => {
+    if (notice === 'generate') {
+      // Confirm with the *latest* state, never the snapshot captured when dialog opened.
+      if (generateInFlight.current || generateMutation.isPending ||
+          previewMutation.isPending || !canGeneratePlan(dedupeState) ||
+          isDirty || !previewData || previewData.planned_action_count === 0) {
+        setNotice(null);
+        return;
+      }
+      generateInFlight.current = true;
+      dispatch({ type: 'GENERATE_STARTED' });
+      generateMutation.mutate();
+    } else if (notice === 'preview_changed') {
+      setNotice(null);
+      handleRunPreview();
+    } else if (notice === 'scan_not_found') {
+      setNotice(null);
+      navigate('/scans');
+    } else if (notice === 'scan_not_completed') {
+      setNotice(null);
+      navigate('/scans/' + scanId);
+    } else {
+      setNotice(null);
+    }
   };
 
   const handlePageChange = (newPage: number, newPageSize: number) => {
+    if (generateInFlight.current || generateMutation.isPending ||
+        previewMutation.isPending) return;
     const currentGen = dedupeState.configGeneration;
     dispatch({ type: 'PREVIEW_STARTED' });
     previewMutation.mutate({
@@ -346,45 +299,40 @@ export const AdvancedDedupePage: React.FC = () => {
 
   if (scanLoading) {
     return (
-      <div className="nfc-centered-state">
-        <Spin size="large" />
+      <div className="nfc-v2-dedupe-page-state" role="status" aria-live="polite">
+        <span className="nfc-console-spinner" aria-hidden="true" />
+        正在加载扫描任务…
       </div>
     );
   }
 
   if (scanError || !scan) {
     return (
-      <Alert
-        message="扫描任务不存在"
-        description={`未找到 ID 为 #${scanId} 的扫描任务`}
-        type="error"
-        showIcon
-        action={<Button onClick={() => navigate('/scans')}>返回扫描列表</Button>}
-      />
+      <section className="nfc-v2-dedupe-page-state" role="alert">
+        <h2>扫描任务不存在</h2>
+        <p>未找到 ID 为 #{scanId} 的扫描任务</p>
+        <ConsoleButton onClick={() => navigate('/scans')}>返回扫描列表</ConsoleButton>
+      </section>
     );
   }
 
   if (scan.status !== 'completed') {
     return (
-      <Alert
-        message="扫描任务尚未完成"
-        description={`扫描任务当前状态为 ${scan.status}，只有已完成的扫描才能进行高级去重分析。`}
-        type="warning"
-        showIcon
-        action={<Button onClick={() => navigate(`/scans/${scanId}`)}>返回扫描详情</Button>}
-      />
+      <section className="nfc-v2-dedupe-page-state" role="alert">
+        <h2>扫描任务尚未完成</h2>
+        <p>扫描任务当前状态为 {scan.status}，只有已完成的扫描才能进行高级去重分析。</p>
+        <ConsoleButton onClick={() => navigate('/scans/' + scanId)}>返回扫描详情</ConsoleButton>
+      </section>
     );
   }
 
   if (scan.total_groups === 0) {
     return (
-      <Alert
-        message="未发现重复文件"
-        description="本次扫描未发现任何重复文件组，无需执行去重。"
-        type="info"
-        showIcon
-        action={<Button onClick={() => navigate(`/scans/${scanId}`)}>返回扫描详情</Button>}
-      />
+      <section className="nfc-v2-dedupe-page-state" role="status">
+        <h2>未发现重复文件</h2>
+        <p>本次扫描未发现任何重复文件组，无需执行去重。</p>
+        <ConsoleButton onClick={() => navigate('/scans/' + scanId)}>返回扫描详情</ConsoleButton>
+      </section>
     );
   }
 
@@ -416,9 +364,9 @@ export const AdvancedDedupePage: React.FC = () => {
         }
         actions={
           <ActionBar compact>
-            <Button icon={<ArrowLeftOutlined />} onClick={() => navigate(`/scans/${scanId}`)}>
+            <ConsoleButton onClick={() => navigate('/scans/' + scanId)}>
               返回扫描详情
-            </Button>
+            </ConsoleButton>
           </ActionBar>
         }
       />
@@ -474,15 +422,12 @@ export const AdvancedDedupePage: React.FC = () => {
 
         <ActionBar className="nfc-dedupe-config-actions">
           <ActionBar compact>
-            <Button
-              type="primary"
-              icon={<ThunderboltOutlined />}
-              onClick={handleRunPreview}
-              loading={previewMutation.isPending}
-              disabled={!validation.valid}
-            >
+            <ConsoleButton variant="primary"
+              leadingIcon={<ConsoleIcon name="zap" size={16} />}
+              onClick={handleRunPreview} loading={previewMutation.isPending}
+              disabled={!validation.valid || generateMutation.isPending}>
               运行高级预览 (Preview)
-            </Button>
+            </ConsoleButton>
             {isDirty && (
               <span className="nfc-status-badge nfc-status-warning">
                 <span className="nfc-status-dot" />
@@ -541,27 +486,23 @@ export const AdvancedDedupePage: React.FC = () => {
               </div>
               <ActionBar compact>
                 {isDirty && (
-                  <Button
-                    icon={<ReloadOutlined />}
-                    onClick={handleRunPreview}
-                    loading={previewMutation.isPending}
-                  >
+                  <ConsoleButton leadingIcon={<ConsoleIcon name="refresh" size={16} />}
+                    onClick={handleRunPreview} loading={previewMutation.isPending}
+                    disabled={generateMutation.isPending}>
                     重新运行预览
-                  </Button>
+                  </ConsoleButton>
                 )}
-                <Button
-                  type="primary"
-                  icon={<ScheduleOutlined />}
+                <ConsoleButton variant="primary"
+                  leadingIcon={<ConsoleIcon name="calendar" size={16} />}
                   onClick={handleConfirmGeneratePlan}
                   loading={generateMutation.isPending}
                   disabled={
-                    !canGeneratePlan(dedupeState) ||
+                    !canGeneratePlan(dedupeState) || isDirty ||
                     previewMutation.isPending ||
                     previewData.planned_action_count === 0
-                  }
-                >
+                  }>
                   生成执行计划草案
-                </Button>
+                </ConsoleButton>
               </ActionBar>
             </ActionBar>
           </section>
@@ -594,6 +535,16 @@ export const AdvancedDedupePage: React.FC = () => {
         onClose={() => setExplainOpen(false)}
         member={selectedMember}
         groupMembers={previewData?.rows || []}
+      />
+      <DedupeActionDialog
+        kind={notice}
+        storageAction={storageAction}
+        errorMessage={noticeError}
+        busy={generateMutation.isPending || generateInFlight.current}
+        onCancel={() => {
+          if (!generateMutation.isPending && !generateInFlight.current) setNotice(null);
+        }}
+        onConfirm={handleNoticeConfirm}
       />
     </div>
   );
