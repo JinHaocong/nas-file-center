@@ -1,0 +1,79 @@
+/* Console v2 directory picker surfaces (modal browser stays on Ant for this batch). */
+.nfc-v2-directory-picker {
+  --nfc-picker-surface: var(--nfc-surface-1);
+  --nfc-picker-border: var(--nfc-hairline);
+  --nfc-picker-text: var(--nfc-text);
+  --nfc-picker-muted: var(--nfc-text-muted);
+  color: var(--nfc-picker-text);
+  min-width: 0;
+}
+.nfc-v2-directory-picker .nfc-directory-picker-heading,
+.nfc-v2-directory-picker .nfc-directory-picker-single {
+  display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
+}
+.nfc-v2-directory-picker .nfc-directory-picker-heading { justify-content: space-between; }
+.nfc-v2-directory-picker .nfc-directory-picker-heading > span { font-size: 12px; font-weight: 650; }
+.nfc-v2-directory-picker .nfc-directory-picker-paths { display: grid; gap: 6px; margin-top: 9px; }
+.nfc-v2-directory-picker .nfc-directory-picker-path-row {
+  display: flex; gap: 9px; align-items: center; min-width: 0;
+  padding: 7px 9px; border: 1px solid var(--nfc-picker-border);
+  border-radius: 8px; background: var(--nfc-picker-surface);
+}
+.nfc-v2-directory-picker .nfc-directory-picker-path-row > svg { flex: 0 0 auto; color: var(--nfc-picker-muted); }
+.nfc-v2-directory-picker .nfc-directory-picker-path-row .nfc-code-path { min-width: 0; flex: 1; }
+.nfc-v2-directory-picker .nfc-directory-picker-empty {
+  display: flex; align-items: center; justify-content: center; gap: 9px;
+  width: 100%; min-height: 66px; padding: 12px; text-align: center;
+  border: 1px dashed var(--nfc-picker-border); border-radius: 10px;
+  color: var(--nfc-picker-muted); background: var(--nfc-picker-surface);
+}
+.nfc-v2-directory-picker .nfc-v2-directory-input-wrap { position: relative; flex: 1; min-width: 180px; }
+.nfc-v2-directory-picker .nfc-v2-directory-input-wrap input,
+.nfc-v2-directory-picker .nfc-directory-picker-manual textarea {
+  width: 100%; min-width: 0; padding: 9px 35px 9px 12px; min-height: 39px;
+  border: 1px solid var(--nfc-picker-border); border-radius: 9px;
+  background: var(--nfc-picker-surface); color: var(--nfc-picker-text);
+  font-size: 12px; line-height: 1.55;
+}
+.nfc-v2-directory-picker .nfc-directory-picker-manual { margin-top: 9px; }
+.nfc-v2-directory-picker .nfc-directory-picker-manual textarea {
+  display: block; margin-top: 7px; min-height: 88px; resize: vertical; padding: 10px 12px;
+}
+.nfc-v2-directory-picker .nfc-v2-directory-clear,
+.nfc-v2-directory-picker .nfc-v2-directory-remove {
+  display: inline-flex; justify-content: center; align-items: center;
+  border: 0; background: transparent; color: var(--nfc-picker-muted);
+  border-radius: 6px; cursor: pointer; width: 30px; height: 30px; flex: 0 0 auto;
+}
+.nfc-v2-directory-picker .nfc-v2-directory-clear { position: absolute; top: 50%; right: 4px; transform: translateY(-50%); }
+.nfc-v2-directory-picker button:focus-visible,
+.nfc-v2-directory-picker input:focus-visible,
+.nfc-v2-directory-picker textarea:focus-visible,
+.nfc-v2-path-breadcrumb button:focus-visible,
+.nfc-v2-path-breadcrumb select:focus-visible { outline: 2px solid var(--nfc-accent); outline-offset: 2px; }
+.nfc-v2-directory-picker button:disabled,
+.nfc-v2-directory-picker input:disabled,
+.nfc-v2-directory-picker textarea:disabled { opacity: .58; cursor: not-allowed; }
+.nfc-v2-path-breadcrumb {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 5px;
+  min-width: 0; color: var(--nfc-text-muted); font-size: 12px;
+}
+.nfc-v2-path-breadcrumb .nfc-v2-breadcrumb-link,
+.nfc-v2-path-breadcrumb .nfc-v2-breadcrumb-root-select {
+  display: inline-flex; align-items: center; gap: 5px;
+  border: 0; padding: 5px 6px; border-radius: 7px;
+  color: var(--nfc-text); background: transparent; max-width: 100%;
+}
+.nfc-v2-path-breadcrumb button { cursor: pointer; }
+.nfc-v2-path-breadcrumb .nfc-v2-breadcrumb-root-select { border: 1px solid var(--nfc-hairline); }
+.nfc-v2-path-breadcrumb select { min-width: 0; max-width: 250px; background: transparent; border: 0; color: inherit; cursor: pointer; }
+.nfc-v2-path-breadcrumb .nfc-v2-breadcrumb-separator { color: var(--nfc-text-subtle); flex: 0 0 auto; }
+.nfc-v2-path-breadcrumb .nfc-path-breadcrumb-current { color: var(--nfc-text); font-weight: 680; overflow-wrap: anywhere; }
+@media (max-width: 767px) {
+  .nfc-v2-directory-picker .nfc-directory-picker-single { align-items: stretch; }
+  .nfc-v2-directory-picker .nfc-v2-directory-input-wrap { flex-basis: 100%; }
+  .nfc-v2-path-breadcrumb select { max-width: 180px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nfc-v2-directory-picker *, .nfc-v2-path-breadcrumb * { scroll-behavior: auto; }
+}

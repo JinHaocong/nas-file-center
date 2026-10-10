@@ -1,25 +1,22 @@
 import React, { useState } from 'react';
-import { Button, Input } from 'antd';
-import {
-  CloseCircleOutlined,
-  EditOutlined,
-  FolderOpenOutlined,
-  PlusOutlined,
-} from '@ant-design/icons';
 import { CodePath } from '../ui/CodePath';
+import { ConsoleButton } from '../ui/ConsoleButton';
+import { ConsoleIcon } from '../ui/ConsoleIcon';
 import { DirectoryPickerProps } from './types';
 import { DirectoryPickerModal } from './DirectoryPickerModal';
+import { splitDirectoryPathLines } from './path_model';
 
+/**
+ * Native Console v2 input/selection surface. DirectoryPickerModal remains the
+ * same server-backed Ant overlay until its browser/focus migration is complete.
+ */
 export const DirectoryPicker: React.FC<DirectoryPickerProps> = ({
-  value,
-  onChange,
-  multiple = false,
-  disabled = false,
-  placeholder = '请选择或输入目录路径',
-  allowManualInput = true,
+  value, onChange, multiple = false, disabled = false,
+  placeholder = '请选择或输入目录路径', allowManualInput = true,
 }) => {
   const [modalOpen, setModalOpen] = useState(false);
   const [showManual, setShowManual] = useState(false);
+  const [manualDraft, setManualDraft] = useState('');
 
   const currentValues: string[] = React.useMemo(() => {
     if (!value) return [];
@@ -27,81 +24,71 @@ export const DirectoryPicker: React.FC<DirectoryPickerProps> = ({
     return [String(value).trim()].filter(Boolean);
   }, [value]);
 
-  const singleValue = currentValues.length > 0 ? currentValues[0] : '';
+  const singleValue = currentValues[0] || '';
 
   const handleModalConfirm = (selected: string | string[]) => {
     if (multiple) {
-      const arr = Array.isArray(selected) ? selected : [selected];
-      onChange?.(arr);
+      const next = Array.isArray(selected) ? selected : [selected];
+      if (showManual) setManualDraft(next.join('\n'));
+      onChange?.(next);
     } else {
-      const val = Array.isArray(selected) ? selected[0] || '' : selected;
-      onChange?.(val);
+      onChange?.(Array.isArray(selected) ? selected[0] || '' : selected);
     }
   };
 
   const handleRemovePath = (pathToRemove: string) => {
+    if (disabled) return;
     if (multiple) {
-      onChange?.(currentValues.filter((p) => p !== pathToRemove));
+      const next = currentValues.filter(path => path !== pathToRemove);
+      if (showManual) setManualDraft(next.join('\n'));
+      onChange?.(next);
     } else {
       onChange?.('');
     }
   };
 
-  const handleManualChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    const text = e.target.value;
-    if (multiple) {
-      onChange?.(
-        text
-          .split('\n')
-          .map((line) => line.trim())
-          .filter(Boolean)
-      );
-    } else {
-      onChange?.(text.trim());
-    }
+  const toggleManual = () => {
+    if (disabled) return;
+    if (!showManual) setManualDraft(currentValues.join('\n'));
+    setShowManual(previous => !previous);
+  };
+
+  const handleManualChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+    if (disabled) return;
+    const text = event.target.value;
+    // Keep unfinished lines in the textarea while emitting normalized values.
+    setManualDraft(text);
+    onChange?.(splitDirectoryPathLines(text));
   };
 
   return (
-    <div className="nfc-directory-picker">
+    <div className="nfc-directory-picker nfc-v2-directory-picker">
       {multiple ? (
         <div className="nfc-directory-picker-selection">
           <div className="nfc-directory-picker-heading">
             <span>已选择目录 <strong>{currentValues.length}</strong></span>
-            <Button
-              size="small"
-              icon={<FolderOpenOutlined />}
-              disabled={disabled}
-              onClick={() => setModalOpen(true)}
-            >
-              选择目录
-            </Button>
+            <ConsoleButton size="sm" disabled={disabled}
+              leadingIcon={<ConsoleIcon name="folder-open" size={16} />}
+              onClick={() => setModalOpen(true)}>选择目录</ConsoleButton>
           </div>
-
           {currentValues.length === 0 ? (
-            <button
-              type="button"
-              className="nfc-directory-picker-empty"
-              disabled={disabled}
-              onClick={() => setModalOpen(true)}
-            >
-              <PlusOutlined />
+            <button type="button" className="nfc-directory-picker-empty"
+              disabled={disabled} onClick={() => setModalOpen(true)}>
+              <ConsoleIcon name="folder-open" size={18} />
               <span>{placeholder}</span>
             </button>
           ) : (
             <div className="nfc-directory-picker-paths">
-              {currentValues.map((path) => (
+              {currentValues.map(path => (
                 <div className="nfc-directory-picker-path-row" key={path}>
-                  <FolderOpenOutlined aria-hidden="true" />
+                  <ConsoleIcon name="folder" size={16} />
                   <CodePath value={path} />
                   {!disabled && (
-                    <Button
-                      type="text"
-                      size="small"
-                      danger
-                      aria-label={"移除目录 " + path}
-                      icon={<CloseCircleOutlined />}
-                      onClick={() => handleRemovePath(path)}
-                    />
+                    <button type="button" className="nfc-v2-directory-remove"
+                      aria-label={'移除目录 ' + path}
+                      onClick={() => handleRemovePath(path)}>
+                      <ConsoleIcon name="x" size={15} />
+                    </button>
                   )}
                 </div>
               ))}
@@ -110,48 +97,35 @@ export const DirectoryPicker: React.FC<DirectoryPickerProps> = ({
         </div>
       ) : (
         <div className="nfc-directory-picker-single">
-          <Input
-            value={singleValue}
-            placeholder={placeholder}
-            disabled={disabled}
-            onChange={(e) => onChange?.(e.target.value)}
-            suffix={
-              singleValue && !disabled ? (
-                <CloseCircleOutlined
-                  className="nfc-directory-picker-clear"
-                  onClick={() => onChange?.('')}
-                />
-              ) : null
-            }
-          />
-          <Button
-            icon={<FolderOpenOutlined />}
-            disabled={disabled}
-            onClick={() => setModalOpen(true)}
-          >
-            选择目录
-          </Button>
+          <div className="nfc-v2-directory-input-wrap">
+            <input type="text" aria-label="目录路径" value={singleValue}
+              placeholder={placeholder} disabled={disabled}
+              onChange={event => onChange?.(event.target.value)} />
+            {singleValue && !disabled && (
+              <button type="button" className="nfc-v2-directory-clear"
+                aria-label="清空目录路径" onClick={() => onChange?.('')}>
+                <ConsoleIcon name="x" size={16} />
+              </button>
+            )}
+          </div>
+          <ConsoleButton disabled={disabled} leadingIcon={<ConsoleIcon name="folder-open" size={16} />}
+            onClick={() => setModalOpen(true)}>选择目录</ConsoleButton>
         </div>
       )}
 
       {allowManualInput && multiple && (
         <div className="nfc-directory-picker-manual">
-          <Button
-            type="link"
-            size="small"
-            icon={<EditOutlined />}
-            onClick={() => setShowManual(!showManual)}
-          >
+          <ConsoleButton variant="ghost" size="sm" disabled={disabled}
+            aria-expanded={showManual}
+            leadingIcon={<ConsoleIcon name="pencil" size={14} />}
+            onClick={toggleManual}>
             {showManual ? '收起手动输入' : '高级：手动多行输入路径'}
-          </Button>
+          </ConsoleButton>
           {showManual && (
-            <Input.TextArea
-              rows={3}
+            <textarea rows={3} aria-label="手动多行目录路径"
               placeholder="每行输入一个绝对路径，例如：/data/Download"
-              value={currentValues.join('\n')}
-              onChange={handleManualChange}
-              disabled={disabled}
-            />
+              value={manualDraft} onChange={handleManualChange}
+              disabled={disabled} />
           )}
         </div>
       )}
