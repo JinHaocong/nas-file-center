@@ -1,0 +1,54 @@
+/* Console v2 workflow builder shell. Ant Form remains until its own guarded migration. */
+.nfc-v2-workflow-state {
+  --nfc-wf-paper: #fff; --nfc-wf-text: #1c293d; --nfc-wf-muted: #64748b;
+  --nfc-wf-line: #dce5ee; --nfc-wf-accent: #2878ef;
+  box-sizing: border-box; border: 1px solid var(--nfc-wf-line);
+  border-radius: 13px; padding: 22px;
+  background: var(--nfc-wf-paper); color: var(--nfc-wf-text);
+  display: flex; flex-direction: column; align-items: flex-start; gap: 12px;
+  margin: 20px auto; max-width: 620px; font-size: 12px; line-height: 1.7;
+}
+[data-theme='dark'] .nfc-v2-workflow-state {
+  --nfc-wf-paper: #1a2434; --nfc-wf-text: #f0f4fa; --nfc-wf-muted: #acbed2;
+  --nfc-wf-line: #36435a; --nfc-wf-accent: #83b5ff;
+}
+.nfc-v2-workflow-state h2 { font-size: 16px; margin: 0; color: var(--nfc-wf-text); }
+.nfc-v2-workflow-state p { margin: 0; color: var(--nfc-wf-muted); overflow-wrap: anywhere; }
+.nfc-v2-workflow-state.is-error { border-color: #c96d81; }
+.nfc-v2-workflow-state .nfc-console-spinner {
+  display: block; width: 19px; height: 19px; border-radius: 50%;
+  border: 2px solid var(--nfc-wf-accent); border-right-color: transparent;
+  animation: nfc-console-spin .7s linear infinite;
+}
+.nfc-v2-workflow-notices {
+  --nfc-wf-paper: #fff; --nfc-wf-text: #1c293d; --nfc-wf-muted: #64748b;
+  --nfc-wf-line: #dce5ee; --nfc-wf-accent: #2878ef;
+  display: grid; gap: 10px; margin-bottom: 16px;
+}
+[data-theme='dark'] .nfc-v2-workflow-notices {
+  --nfc-wf-paper: #1a2434; --nfc-wf-text: #f0f4fa; --nfc-wf-muted: #b1c3d6;
+  --nfc-wf-line: #36435a; --nfc-wf-accent: #83b5ff;
+}
+.nfc-v2-workflow-notice {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 13px 15px; border: 1px solid var(--nfc-wf-line);
+  border-radius: 10px; background: var(--nfc-wf-paper);
+  color: var(--nfc-wf-text); font-size: 12px; line-height: 1.65;
+}
+.nfc-v2-workflow-notice.is-warning { border-color: #d4a85e; }
+.nfc-v2-workflow-notice.is-error { border-color: #ce7184; }
+.nfc-v2-workflow-notice svg { flex: 0 0 auto; margin-top: 2px; color: var(--nfc-wf-accent); }
+.nfc-v2-workflow-notice.is-error svg { color: #c74e65; }
+.nfc-v2-workflow-notice p { margin: 4px 0 0; color: var(--nfc-wf-muted); }
+.nfc-workflow-builder-page .nfc-page-actions .nfc-console-button { min-height: 38px; }
+.nfc-workflow-builder-page .nfc-page-actions .nfc-console-button:focus-visible,
+.nfc-v2-workflow-state button:focus-visible { outline: 2px solid var(--nfc-wf-accent, #2878ef); outline-offset: 2px; }
+@media (max-width: 767px) {
+  .nfc-v2-workflow-state { margin: 10px; padding: 15px; }
+  .nfc-v2-workflow-notice { padding: 12px; }
+  .nfc-workflow-builder-page .nfc-page-actions .nfc-console-button { min-height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nfc-v2-workflow-state .nfc-console-spinner { animation: none; border-right-color: currentColor; }
+  .nfc-v2-workflow-notices * { animation-duration: 0.01ms; transition-duration: 0.01ms; }
+}
