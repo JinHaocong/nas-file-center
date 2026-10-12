@@ -1,27 +1,5 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import {
-  Alert,
-  Button,
-  Empty,
-  message,
-  Pagination,
-  Popconfirm,
-  Spin,
-  Table,
-  Tooltip,
-} from 'antd';
-import {
-  ArrowLeftOutlined,
-  ArrowRightOutlined,
-  BuildOutlined,
-  CheckCircleOutlined,
-  HistoryOutlined,
-  LockOutlined,
-  PlayCircleOutlined,
-  ReloadOutlined,
-  RollbackOutlined,
-} from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { OperationJournalDrawer } from './OperationJournalDrawer';
 import { StaleRebuildDrawer } from '../../components/plans/StaleRebuildDrawer';
@@ -29,13 +7,10 @@ import { isWorkflowPlanMetadata, WorkflowPlanMetadata } from '../../types/workfl
 import { plansApi, settingsApi } from '../../api/domain';
 import { useTitle } from '../../hooks/useTitle';
 import { formatBytes, formatDateTime } from '../../utils/format';
-import { PlanItem } from '../../types';
+import type { PlanItem } from '../../types';
 import { PlanDeleteButton } from '../../components/plans/PlanDeleteButton';
-import {
-  invalidatePlanDeleteFailure,
-  getPlanDetailRenderState,
-  getPlanDetailView,
-} from '../../components/plans/plan_cleanup';
+import { invalidatePlanDeleteFailure, getPlanDetailRenderState, getPlanDetailView } from '../../components/plans/plan_cleanup';
+import { canPlanLifecycleAction, planConfirmationSnapshot, samePlanConfirmation, type PlanConfirmationSnapshot } from '../../utils/planDetailActions';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { DataPanel } from '../../components/ui/DataPanel';
 import { ActionBar } from '../../components/ui/ActionBar';
@@ -43,6 +18,12 @@ import { ResponsiveDataView } from '../../components/ui/ResponsiveDataView';
 import { ResponsiveDescriptions } from '../../components/ui/ResponsiveDescriptions';
 import { CodePath } from '../../components/ui/CodePath';
 import { StatusBadge } from '../../components/ui/StatusBadge';
+import { ConsoleButton } from '../../components/ui/ConsoleButton';
+import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
+import { ConsolePagination } from '../../components/ui/ConsolePagination';
+import { ConsoleConfirmDialog } from '../../components/ui/ConsoleConfirmDialog';
+import { ConsoleEmpty } from '../../components/ui/ConsoleEmpty';
+import { useConsoleToast } from '../../components/ui/ConsoleToast';
 
 const lifecycleSteps = [
   { key: 'draft', label: 'Draft', caption: '预览草稿' },
@@ -64,6 +45,9 @@ export const PlanDetailPage: React.FC = () => {
   const planId = Number(id);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const toast = useConsoleToast();
+  const actionInFlight = useRef(false);
+  const [confirmation, setConfirmation] = useState<PlanConfirmationSnapshot | null>(null);
   useTitle(`计划详情 #${planId}`);
 
   const [page, setPage] = useState(1);
@@ -86,6 +70,7 @@ export const PlanDetailPage: React.FC = () => {
   } = useQuery({
     queryKey: ['planDetail', planId, page, pageSize],
     queryFn: () => plansApi.getPlanDetail(planId, page, pageSize),
+    enabled: Number.isSafeInteger(planId) && planId > 0,
   });
 
   const {
@@ -96,50 +81,50 @@ export const PlanDetailPage: React.FC = () => {
   } = useQuery({
     queryKey: ['planOperationJournalSummary', planId],
     queryFn: () => plansApi.getOperationJournal(planId, 1, 1),
-    enabled: !!planId,
+    enabled: Number.isSafeInteger(planId) && planId > 0,
   });
 
   const undoPlanMutation = useMutation({
     mutationFn: () => plansApi.createUndoPlan(planId),
     onSuccess: (res) => {
-      message.success(`已成功创建撤销计划 #${res.id}（共 ${res.total_items} 项逆向操作）`);
+      toast.success(`已成功创建撤销计划 #${res.id}（共 ${res.total_items} 项逆向操作）`);
       queryClient.invalidateQueries({ queryKey: ['plansList'] });
       queryClient.invalidateQueries({ queryKey: ['dashboardSummary'] });
       navigate(`/plans/${res.id}`);
     },
     onError: (err: any) => {
-      message.error(err.message || '生成撤销计划失败');
+      toast.error(err.message || '生成撤销计划失败');
     },
   });
 
   const freezeMutation = useMutation({
     mutationFn: () => plansApi.freezePlan(planId),
     onSuccess: () => {
-      message.success('计划已成功冻结，参数已不可篡改');
+      toast.success('计划已成功冻结，参数已不可篡改');
       refetch();
       queryClient.invalidateQueries({ queryKey: ['plansList'] });
     },
     onError: (err: any) => {
-      message.error(err.message || '冻结失败');
+      toast.error(err.message || '冻结失败');
     },
   });
 
   const validateMutation = useMutation({
     mutationFn: () => plansApi.validatePlan(planId),
     onSuccess: () => {
-      message.success('计划校验完成，状态已就绪 (Ready)');
+      toast.success('计划校验完成，状态已就绪 (Ready)');
       refetch();
       queryClient.invalidateQueries({ queryKey: ['plansList'] });
     },
     onError: (err: any) => {
-      message.error(err.message || '校验失败');
+      toast.error(err.message || '校验失败');
     },
   });
 
   const executeMutation = useMutation({
     mutationFn: () => plansApi.executePlan(planId),
     onSuccess: (data) => {
-      message.success(`计划已加入任务队列，任务 #${data.work_job_id}`);
+      toast.success(`计划已加入任务队列，任务 #${data.work_job_id}`);
       refetch();
       queryClient.invalidateQueries({ queryKey: ['plansList'] });
       queryClient.invalidateQueries({ queryKey: ['dashboardSummary'] });
@@ -147,21 +132,21 @@ export const PlanDetailPage: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['workJobs'] });
     },
     onError: (err: any) => {
-      message.error(err.message || '执行失败');
+      toast.error(err.message || '执行失败');
     },
   });
 
   const deleteMutation = useMutation({
     mutationFn: () => plansApi.deletePlan(planId),
     onSuccess: () => {
-      message.success(`计划 #${planId} 已安全删除`);
+      toast.success(`计划 #${planId} 已安全删除`);
       queryClient.invalidateQueries({ queryKey: ['plansList'] });
       queryClient.invalidateQueries({ queryKey: ['dashboardSummary'] });
       queryClient.invalidateQueries({ queryKey: ['scansList'] });
       navigate('/plans');
     },
     onError: (err: any) => {
-      message.error(err.message || '删除计划失败');
+      toast.error(err.message || '删除计划失败');
       invalidatePlanDeleteFailure(queryClient, planId);
     },
   });
@@ -175,60 +160,28 @@ export const PlanDetailPage: React.FC = () => {
   const view = getPlanDetailView(renderState, !!plan);
 
   if (view === 'loading') {
-    return (
-      <div className="nfc-centered-state">
-        <Spin size="large" />
+    return <div className="nfc-centered-state nfc-v2-plan-load" role="status">
+      <span className="nfc-console-spinner" aria-hidden="true" />正在载入计划…
+    </div>;
+  }
+  if (view === 'not-found' || view === 'error' || !plan) {
+    const missing = view === 'not-found' || !plan && view !== 'error';
+    return <div className="nfc-v2-plan-message is-error" role="alert">
+      <ConsoleIcon name="info" size={20} />
+      <div><strong>{missing ? '计划不存在' : '加载计划失败'}</strong>
+        <p>{missing ? '未找到 ID 为 #' + planId + ' 的批处理计划' :
+          error instanceof Error ? error.message : '获取计划详情失败，请检查网络或稍后重试'}</p>
       </div>
-    );
-  }
-
-  if (view === 'not-found') {
-    return (
-      <Alert
-        message="计划不存在"
-        description={`未找到 ID 为 #${planId} 的批处理计划`}
-        type="error"
-        showIcon
-        action={<Button onClick={() => navigate('/plans')}>返回计划列表</Button>}
-      />
-    );
-  }
-
-  if (view === 'error') {
-    return (
-      <Alert
-        message="加载计划失败"
-        description={(error as any)?.message || '获取计划详情失败，请检查网络或稍后重试'}
-        type="error"
-        showIcon
-        action={<Button onClick={() => refetch()}>重试</Button>}
-      />
-    );
-  }
-
-  if (!plan) {
-    return (
-      <Alert
-        message="计划不存在"
-        description={`未找到 ID 为 #${planId} 的批处理计划`}
-        type="error"
-        showIcon
-        action={<Button onClick={() => navigate('/plans')}>返回计划列表</Button>}
-      />
-    );
+      <ConsoleButton onClick={() => {
+        if (missing) navigate('/plans'); else void refetch();
+      }}>{missing ? '返回计划列表' : '重试'}</ConsoleButton>
+    </div>;
   }
 
   const isSafeMode = !settings?.allow_mutation;
   const hasActiveJob = Boolean(plan.active_work_job_id);
-  const executeDisabled = isSafeMode || hasActiveJob;
 
   const journalTotal = !isJournalLoading && !isJournalError ? (journalData?.total ?? 0) : 0;
-  const canCreateUndo =
-    (plan.status === 'completed' || plan.status === 'partial') &&
-    journalTotal > 0 &&
-    !isJournalLoading &&
-    !isJournalError;
-
   const isWorkflowPlan = Boolean(isWorkflowPlanMetadata(plan.metadata));
   const workflowMeta = isWorkflowPlan ? (plan.metadata as WorkflowPlanMetadata) : null;
   const isDedupeWorkflowPlan = Boolean(
@@ -247,74 +200,69 @@ export const PlanDetailPage: React.FC = () => {
 
   const lifecycleIndex = getLifecycleIndex(plan.status);
 
-  const columns = [
-    {
-      title: '序号',
-      dataIndex: 'sequence',
-      key: 'sequence',
-      width: 72,
-      render: (seq: number) => <span className="nfc-mono">#{seq}</span>,
-    },
-    {
-      title: '操作',
-      dataIndex: 'operation',
-      key: 'operation',
-      width: 112,
-      render: (op: string) => (
-        <span className={`nfc-operation-badge nfc-operation-${op}`}>{op}</span>
-      ),
-    },
-    {
-      title: '源文件 / 待操作路径',
-      dataIndex: 'source',
-      key: 'source',
-      render: (value: string) => <CodePath value={value} />,
-    },
-    {
-      title: '目标路径 / 保留副本',
-      key: 'target_or_keep',
-      render: (_: unknown, record: PlanItem) => {
-        if (record.target) {
-          return (
-            <div className="nfc-target-path">
-              <ArrowRightOutlined />
-              <CodePath value={record.target} />
-            </div>
-          );
-        }
-        if (record.keep) {
-          return (
-            <div className="nfc-target-path">
-              <span className="nfc-kind-badge">keep</span>
-              <CodePath value={record.keep} />
-            </div>
-          );
-        }
-        return <span className="nfc-table-muted">—</span>;
-      },
-    },
-    {
-      title: '预估容量',
-      dataIndex: 'expected_size',
-      key: 'expected_size',
-      width: 110,
-      render: (bytes: number) => (bytes > 0 ? formatBytes(bytes) : '—'),
-    },
-    {
-      title: '校验状态',
-      dataIndex: 'state',
-      key: 'state',
-      width: 122,
-      render: (state: string) => <StatusBadge status={state} />,
-    },
-    {
-      title: '执行备注',
-      dataIndex: 'reason',
-      key: 'reason',
-      width: 180,
-      render: (reason: string) => reason || <span className="nfc-table-muted">—</span>,
-    },
-  ];
+  const pendingAction = freezeMutation.isPending || validateMutation.isPending ||
+    executeMutation.isPending || undoPlanMutation.isPending || deleteMutation.isPending;
+  const actionContext = {
+    plan, allowMutation: !isSafeMode, journalTotal,
+    journalReady: !isJournalLoading && !isJournalError,
+    pending: pendingAction || actionInFlight.current,
+  };
+  const canFreeze = canPlanLifecycleAction('freeze', actionContext);
+  const canValidate = canPlanLifecycleAction('validate', actionContext);
+  const canExecute = canPlanLifecycleAction('execute', actionContext);
+  const canUndo = canPlanLifecycleAction('undo', actionContext);
+  const currentConfirmation = confirmation
+    ? planConfirmationSnapshot(confirmation.action, actionContext) : null;
+  const confirmationValid = samePlanConfirmation(confirmation, currentConfirmation);
+  const beginAction = (action: 'freeze' | 'validate') => {
+    if (actionInFlight.current || !canPlanLifecycleAction(action, actionContext)) return;
+    actionInFlight.current = true;
+    const mutation = action === 'freeze' ? freezeMutation : validateMutation;
+    mutation.mutate(undefined, { onSettled: () => { actionInFlight.current = false; } });
+  };
+  const openConfirmation = (action: 'execute' | 'undo') => {
+    if (!actionInFlight.current) setConfirmation(planConfirmationSnapshot(action, actionContext));
+  };
+  const submitConfirmation = async () => {
+    if (!confirmation || actionInFlight.current || !confirmationValid ||
+        !canPlanLifecycleAction(confirmation.action, actionContext)) {
+      setConfirmation(null);
+      return;
+    }
+    const action = confirmation.action;
+    actionInFlight.current = true;
+    try {
+      if (action === 'execute') {
+        await executeMutation.mutateAsync();
+      } else {
+        await undoPlanMutation.mutateAsync();
+      }
+    } catch {
+      // Existing mutation onError reports the server's error.
+    } finally {
+      actionInFlight.current = false;
+      setConfirmation(null);
+    }
+  };
+  const renderTarget = (item: PlanItem) => {
+    if (item.target) return <div className="nfc-target-path">
+      <ConsoleIcon name="arrow-right" size={16} /><CodePath value={item.target} />
+    </div>;
+    if (item.keep) return <div className="nfc-target-path">
+      <span className="nfc-kind-badge">keep</span><CodePath value={item.keep} />
+    </div>;
+    return <span className="nfc-table-muted">—</span>;
+  };
+  const notice = (
+    title: string, description: React.ReactNode,
+    tone: 'info' | 'warning' | 'error' = 'info', action?: React.ReactNode,
+  ) => <div className={'nfc-v2-plan-notice is-' + tone}
+    role={tone === 'error' || tone === 'warning' ? 'alert' : 'note'}>
+    <ConsoleIcon name={tone === 'warning' ? 'shield-check' : 'info'} size={20} />
+    <div className="nfc-v2-plan-notice-body"><strong>{title}</strong>
+      <div className="nfc-v2-plan-notice-description">{description}</div></div>
+    {action && <div className="nfc-v2-plan-notice-actions">{action}</div>}
+  </div>;
 
   const summaryItems = [
     { label: '计划 ID', value: <span className="nfc-mono">#{plan.id}</span> },
@@ -349,7 +297,7 @@ export const PlanDetailPage: React.FC = () => {
   const mobileItems = (
     <div className="nfc-mobile-record-list">
       {(plan.items || []).length === 0 ? (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无计划项" />
+        <ConsoleEmpty title="暂无计划项" description="当前计划没有可展示的操作项。" />
       ) : (
         (plan.items || []).map((item: PlanItem) => (
           <article className="nfc-plan-item-mobile-card" key={item.id || `${item.source}_${item.sequence}`}>
@@ -394,45 +342,26 @@ export const PlanDetailPage: React.FC = () => {
 
   return (
     <div className="nfc-operations-page nfc-plan-detail-page nfc-page-layout-detail">
-      <PageHeader
-        title={plan.name}
-        description={
-          <div className="nfc-plan-header-meta">
-            <span className="nfc-mono">Plan #{plan.id}</span>
-            <span className="nfc-kind-badge">{plan.kind}</span>
-            <StatusBadge status={plan.status} />
-          </div>
-        }
-        actions={
-          <ActionBar compact>
-            <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/plans')}>
-              返回列表
-            </Button>
-            <Button icon={<ReloadOutlined />} onClick={() => refetch()} loading={isFetching}>
-              刷新
-            </Button>
-          </ActionBar>
-        }
+      <PageHeader title={plan.name}
+        description={<div className="nfc-plan-header-meta">
+          <span className="nfc-mono">Plan #{plan.id}</span>
+          <span className="nfc-kind-badge">{plan.kind}</span>
+          <StatusBadge status={plan.status} />
+        </div>}
+        actions={<ActionBar compact>
+          <ConsoleButton leadingIcon={<ConsoleIcon name="arrow-left" size={16} />}
+            onClick={() => navigate('/plans')}>返回列表</ConsoleButton>
+          <ConsoleButton leadingIcon={<ConsoleIcon name="refresh" size={16} />}
+            onClick={() => { void refetch(); }} loading={isFetching}>刷新</ConsoleButton>
+        </ActionBar>}
       />
-
-      {planStorageAction === 'hardlink' && (
-        <Alert
-          className="nfc-plan-storage-action-alert"
-          type="warning"
-          showIcon
-          message="Hardlink 计划：两个路径会共享同一个 inode"
-          description="Hardlink 后两个路径共享同一个 inode，未来通过任一路径写入都会修改同一份文件内容。Freeze / Validate / Worker Execute 仍会重新验证 SHA-256、身份与运行时能力。"
-        />
-      )}
-      {planStorageAction === 'reflink' && (
-        <Alert
-          className="nfc-plan-storage-action-alert"
-          type="info"
-          showIcon
-          message="Reflink 计划：独立 inode / Copy-on-Write"
-          description="Reflink 会创建独立 inode，并使用 Copy-on-Write（写时复制）；它不是普通完整复制。Freeze / Validate / Worker Execute 仍会重新验证 SHA-256、身份与运行时能力。"
-        />
-      )}
+      {planStorageAction === 'hardlink' &&
+        notice('Hardlink 计划：两个路径会共享同一个 inode',
+          'Hardlink 后两个路径共享同一个 inode，未来通过任一路径写入都会修改同一份文件内容。Freeze / Validate / Worker Execute 仍会重新验证 SHA-256、身份与运行时能力。',
+          'warning')}
+      {planStorageAction === 'reflink' &&
+        notice('Reflink 计划：独立 inode / Copy-on-Write',
+          'Reflink 会创建独立 inode，并使用 Copy-on-Write（写时复制）；它不是普通完整复制。Freeze / Validate / Worker Execute 仍会重新验证 SHA-256、身份与运行时能力。')}
 
       <div className="nfc-lifecycle-strip" aria-label="计划生命周期">
         {lifecycleSteps.map((step, index) => {
@@ -454,236 +383,120 @@ export const PlanDetailPage: React.FC = () => {
         })}
       </div>
 
-      <section className="nfc-plan-action-surface" aria-label="计划安全操作">
+      <section className="nfc-plan-action-surface nfc-v2-plan-actions" aria-label="计划安全操作">
         <ActionBar>
           {plan.status === 'draft' && (
-            <Button
-              icon={<LockOutlined />}
-              onClick={() => freezeMutation.mutate()}
-              loading={freezeMutation.isPending}
-            >
+            <ConsoleButton leadingIcon={<ConsoleIcon name="lock" size={16} />}
+              onClick={() => beginAction('freeze')} disabled={!canFreeze}
+              loading={freezeMutation.isPending}>
               冻结计划 (Freeze)
-            </Button>
+            </ConsoleButton>
           )}
-
-          {(plan.status === 'frozen' ||
-            plan.status === 'ready' ||
-            plan.status === 'partial' ||
-            plan.status === 'stale') && (
-            <Tooltip
-              title={
-                hasActiveJob
-                  ? `该计划当前已有执行任务进行中 (任务 #${plan.active_work_job_id})`
-                  : undefined
-              }
-            >
-              <span>
-                <Button
-                  icon={<CheckCircleOutlined />}
-                  onClick={() => validateMutation.mutate()}
-                  loading={validateMutation.isPending}
-                  disabled={hasActiveJob}
-                >
-                  SHA256 实时校验 (Validate)
-                </Button>
-              </span>
-            </Tooltip>
+          {['frozen', 'ready', 'partial', 'stale'].includes(plan.status) && (
+            <span title={hasActiveJob ?
+              '该计划当前已有执行任务进行中 (任务 #' + plan.active_work_job_id + ')' : undefined}>
+              <ConsoleButton leadingIcon={<ConsoleIcon name="check-circle" size={16} />}
+                disabled={!canValidate} loading={validateMutation.isPending}
+                onClick={() => beginAction('validate')}>
+                SHA256 实时校验 (Validate)
+              </ConsoleButton>
+            </span>
           )}
-
-          {(plan.status === 'ready' || plan.status === 'partial') && (
-            <Tooltip
-              title={
-                isSafeMode
-                  ? '当前处于只读安全模式 (ALLOW_MUTATION=false)，执行按钮已被锁定。若确认执行，请修改 compose 环境变量开启允许写入。'
-                  : hasActiveJob
-                    ? `该计划当前已有执行任务进行中 (任务 #${plan.active_work_job_id})`
-                    : '执行计划：将按计划安全变更/隔离文件'
-              }
-            >
-              <span>
-                <Popconfirm
-                  title="确认执行计划？"
-                  description="请确认您已仔细核对所有计划项并完成了校验。"
-                  onConfirm={() => executeMutation.mutate()}
-                  disabled={executeDisabled}
-                  okText="确认执行"
-                  cancelText="取消"
-                  okButtonProps={{ danger: true }}
-                >
-                  <Button
-                    type="primary"
-                    danger
-                    icon={<PlayCircleOutlined />}
-                    disabled={executeDisabled}
-                    loading={executeMutation.isPending}
-                  >
-                    执行计划 (Execute)
-                  </Button>
-                </Popconfirm>
-              </span>
-            </Tooltip>
+          {['ready', 'partial'].includes(plan.status) && (
+            <span title={isSafeMode ?
+              '当前处于只读安全模式 (ALLOW_MUTATION=false)，执行按钮已锁定。' :
+              hasActiveJob ? '当前存在执行任务 #' + plan.active_work_job_id : undefined}>
+              <ConsoleButton variant="danger" leadingIcon={<ConsoleIcon name="play" size={16} />}
+                disabled={!canExecute} loading={executeMutation.isPending}
+                onClick={() => openConfirmation('execute')}>
+                执行计划 (Execute)
+              </ConsoleButton>
+            </span>
           )}
-
-          <Button
-            icon={<HistoryOutlined />}
-            onClick={() => {
-              refetchJournal();
-              setJournalDrawerOpen(true);
-            }}
-          >
-            操作日志 {journalTotal > 0 ? `(${journalTotal})` : ''}
-          </Button>
-
-          {canCreateUndo && (
-            <Tooltip
-              title={
-                hasActiveJob
-                  ? `该计划当前已有执行任务进行中 (任务 #${plan.active_work_job_id})`
-                  : '基于底层操作日志倒序生成一份逆向还原计划'
-              }
-            >
-              <span>
-                <Popconfirm
-                  title="确认生成撤销计划？"
-                  description="系统将基于该计划已完成的操作日志（Operation Journal）倒序生成一份新的 Undo 计划。新计划为独立草稿态，仍需按常规流程完成参数冻结与实时校验后方可执行。"
-                  onConfirm={() => undoPlanMutation.mutate()}
-                  disabled={hasActiveJob || undoPlanMutation.isPending}
-                  okText="生成撤销计划"
-                  cancelText="取消"
-                >
-                  <Button
-                    icon={<RollbackOutlined />}
-                    loading={undoPlanMutation.isPending}
-                    disabled={hasActiveJob}
-                  >
-                    生成撤销计划 (Undo)
-                  </Button>
-                </Popconfirm>
-              </span>
-            </Tooltip>
+          <ConsoleButton leadingIcon={<ConsoleIcon name="history" size={16} />}
+            onClick={() => { void refetchJournal(); setJournalDrawerOpen(true); }}>
+            操作日志 {journalTotal > 0 ? '(' + journalTotal + ')' : ''}
+          </ConsoleButton>
+          {['completed', 'partial'].includes(plan.status) && journalTotal > 0 && (
+            <span title={hasActiveJob ?
+              '该计划当前已有执行任务进行中 (任务 #' + plan.active_work_job_id + ')' : undefined}>
+              <ConsoleButton leadingIcon={<ConsoleIcon name="refresh" size={16} />}
+                loading={undoPlanMutation.isPending} disabled={!canUndo}
+                onClick={() => openConfirmation('undo')}>
+                生成撤销计划 (Undo)
+              </ConsoleButton>
+            </span>
           )}
-
           {isStaleWorkflowPlan && (
-            <Button
-              icon={<BuildOutlined />}
-              onClick={() => setRebuildDrawerOpen(true)}
-            >
+            <ConsoleButton leadingIcon={<ConsoleIcon name="layers" size={16} />}
+              onClick={() => setRebuildDrawerOpen(true)}>
               重建工作流计划 (Rebuild Plan)
-            </Button>
+            </ConsoleButton>
           )}
-
           {isStaleDedupePlan && workflowMeta && (
-            <Button
-              icon={<ArrowLeftOutlined />}
-              onClick={() => navigate(`/workflows/${workflowMeta.workflow_id}`)}
-            >
+            <ConsoleButton leadingIcon={<ConsoleIcon name="arrow-left" size={16} />}
+              onClick={() => navigate('/workflows/' + workflowMeta.workflow_id)}>
               返回关联工作流
-            </Button>
+            </ConsoleButton>
           )}
-
-          <PlanDeleteButton
-            plan={plan}
+          <PlanDeleteButton plan={plan}
             onDelete={() => deleteMutation.mutateAsync()}
             loading={deleteMutation.isPending}
-            type="default"
-            size="middle"
-          />
+            type="default" size="middle" />
         </ActionBar>
       </section>
 
-      <div className="nfc-plan-alert-stack">
-        {(plan.kind === 'undo' || plan.metadata?.is_undo) && (
-          <Alert
-            message={`撤销还原计划 (Undo Plan for #${plan.metadata?.undo_of_plan_id || plan.metadata?.undo_for_plan_id || 'Unknown'})`}
-            description={
-              <div>
-                本计划为计划 #{plan.metadata?.undo_of_plan_id || plan.metadata?.undo_for_plan_id} 的撤销还原计划。所有操作项已根据底层操作日志严格倒序排布。
-                <div className="nfc-alert-emphasis">
-                  安全声明：Undo 计划绝不支持直接原地执行，必须严格按照常规生命周期完成 Freeze 冻结与实时 SHA256 校验后方可通过任务中心安全执行。
-                </div>
+      <div className="nfc-plan-alert-stack nfc-v2-plan-alerts">
+        {(plan.kind === 'undo' || plan.metadata?.is_undo) &&
+          notice(
+            '撤销还原计划 (Undo Plan for #' +
+              (plan.metadata?.undo_of_plan_id || plan.metadata?.undo_for_plan_id || 'Unknown') + ')',
+            <div>
+              本计划为原计划的撤销还原计划。所有操作项已根据底层 Operation Journal 严格倒序排布。
+              <div className="nfc-alert-emphasis">
+                安全声明：Undo 计划绝不支持直接原地执行，必须严格按照常规生命周期完成 Freeze 冻结与实时 SHA256 校验后方可通过任务中心安全执行。
               </div>
-            }
-            type="info"
-            showIcon
-            icon={<RollbackOutlined />}
-            action={
-              plan.metadata?.undo_of_plan_id || plan.metadata?.undo_for_plan_id ? (
-                <Button
-                  size="small"
-                  onClick={() =>
-                    navigate(
-                      `/plans/${plan.metadata?.undo_of_plan_id || plan.metadata?.undo_for_plan_id}`
-                    )
-                  }
-                >
-                  查看原计划
-                </Button>
-              ) : undefined
-            }
-          />
+            </div>, 'info',
+            (plan.metadata?.undo_of_plan_id || plan.metadata?.undo_for_plan_id) &&
+              <ConsoleButton size="sm"
+                onClick={() => navigate('/plans/' +
+                  (plan.metadata?.undo_of_plan_id || plan.metadata?.undo_for_plan_id))}>
+                查看原计划
+              </ConsoleButton>,
+          )}
+        {plan.status === 'stale' && notice(
+          isStaleDedupePlan
+            ? '去重执行计划已过期锁定 (PLAN_STALE)'
+            : isStaleWorkflowPlan
+              ? '工作流计划已过期 (PLAN_STALE)'
+              : '计划已过期 (PLAN_STALE)',
+          isStaleDedupePlan ? <div>
+            去重候选文件已被外部修改、移动、删除或哈希变动。去重计划涉及数据安全，严禁原地增量重建。
+            <div className="nfc-alert-followup">
+              处置建议：请重新执行全量扫描，获取最新重复组快照后
+              {workflowMeta
+                ? '返回关联工作流（#' + workflowMeta.workflow_id + '）重新生成去重计划。'
+                : '前往高级去重页面重新生成计划草案。'}
+            </div>
+          </div> : isStaleWorkflowPlan
+            ? '计划中的源文件已被外部修改、移动、删除或替换。计划已锁定。可基于原工作流历史版本与快照参数重新构建全新草稿。'
+            : '计划中的源文件已被外部修改、移动、删除或替换。计划已锁定，严禁执行。如需继续操作，请删除此计划并重新生成。',
+          'error',
+          isStaleDedupePlan
+            ? <ActionBar compact>
+                {workflowMeta && <ConsoleButton variant="primary" size="sm"
+                  onClick={() => navigate('/workflows/' + workflowMeta.workflow_id)}>
+                  返回关联工作流
+                </ConsoleButton>}
+                <ConsoleButton size="sm" onClick={() => navigate('/scans')}>前往扫描任务</ConsoleButton>
+              </ActionBar>
+            : isStaleWorkflowPlan
+              ? <ConsoleButton size="sm" variant="primary"
+                  onClick={() => setRebuildDrawerOpen(true)}>重建计划预览</ConsoleButton>
+              : undefined,
         )}
-
-        {plan.status === 'stale' && (
-          <Alert
-            message={
-              isStaleDedupePlan
-                ? '去重执行计划已过期锁定 (PLAN_STALE)'
-                : isStaleWorkflowPlan
-                  ? '工作流计划已过期 (PLAN_STALE)'
-                  : '计划已过期 (PLAN_STALE)'
-            }
-            description={
-              isStaleDedupePlan ? (
-                <div>
-                  去重候选文件已被外部修改、移动、删除或哈希变动。去重计划涉及数据安全，严禁原地增量重建。
-                  <div className="nfc-alert-followup">
-                    处置建议：请先重新执行全量扫描任务以获取最新重复组快照，然后
-                    {workflowMeta ? (
-                      <span>返回关联工作流（#{workflowMeta.workflow_id}）重新生成去重计划。</span>
-                    ) : (
-                      <span>前往高级去重页面重新生成计划草案。</span>
-                    )}
-                  </div>
-                </div>
-              ) : isStaleWorkflowPlan ? (
-                '计划中的源文件已被外部修改、移动、删除或替换。为保障 NAS 数据安全，该计划已被锁定。由于此计划源自工作流，您可以基于原始工作流历史版本与快照参数重新构建全新草稿。'
-              ) : (
-                '计划中的源文件已被外部修改、移动、删除或替换。为保障 NAS 数据安全，该计划已被锁定，严禁执行。如需继续操作，请删除此计划并重新生成。'
-              )
-            }
-            type="error"
-            showIcon
-            action={
-              isStaleDedupePlan ? (
-                <ActionBar compact>
-                  {workflowMeta && (
-                    <Button
-                      type="primary"
-                      onClick={() => navigate(`/workflows/${workflowMeta.workflow_id}`)}
-                    >
-                      返回关联工作流
-                    </Button>
-                  )}
-                  <Button onClick={() => navigate('/scans')}>前往扫描任务</Button>
-                </ActionBar>
-              ) : isStaleWorkflowPlan ? (
-                <Button type="primary" onClick={() => setRebuildDrawerOpen(true)}>
-                  重建计划预览
-                </Button>
-              ) : undefined
-            }
-          />
-        )}
-
-        {isSafeMode && (
-          <Alert
-            message="只读安全保护模式生效中"
-            description="系统当前以 ALLOW_MUTATION=false 运行。您可以安全进行 Dry Run 计划生成与 SHA256 校验，但无法直接触发 Execute 执行。"
-            type="info"
-            showIcon
-            icon={<LockOutlined />}
-          />
-        )}
+        {isSafeMode && notice('只读安全保护模式生效中',
+          '系统当前以 ALLOW_MUTATION=false 运行。可安全生成 Dry Run 与 SHA256 校验，但不能直接触发 Execute。')}
       </div>
 
       <DataPanel
@@ -706,45 +519,59 @@ export const PlanDetailPage: React.FC = () => {
         variant="dense"
       >
         <ResponsiveDataView
-          desktop={
-            <Table
-              dataSource={plan.items || []}
-              columns={columns}
-              rowKey={(record) => record.id || `${record.source}_${record.sequence}`}
-              scroll={{ x: 1180 }}
-              pagination={{
-                current: page,
-                pageSize,
-                total: plan.total_items ?? plan.expected_changes,
-                showSizeChanger: true,
-                pageSizeOptions: ['20', '50', '100', '200'],
-                onChange: (p, ps) => {
-                  setPage(p);
-                  setPageSize(ps);
-                },
-              }}
-            />
-          }
-          mobile={
-            <>
-              {mobileItems}
-              <div className="nfc-mobile-pagination">
-                <Pagination
-                  current={page}
-                  pageSize={pageSize}
-                  total={plan.total_items ?? plan.expected_changes}
-                  showSizeChanger
-                  pageSizeOptions={['20', '50', '100', '200']}
-                  onChange={(p, ps) => {
-                    setPage(p);
-                    setPageSize(ps);
-                  }}
-                />
-              </div>
-            </>
-          }
+          desktop={(plan.items || []).length === 0
+            ? <ConsoleEmpty title="暂无计划项" description="当前计划没有可展示的操作项。" />
+            : <div className="nfc-v2-plan-table-scroll">
+                <table className="nfc-v2-plan-table">
+                  <thead><tr>
+                    <th scope="col">序号</th><th scope="col">操作</th>
+                    <th scope="col">源文件 / 待操作路径</th>
+                    <th scope="col">目标路径 / 保留副本</th>
+                    <th scope="col">预估容量</th><th scope="col">校验状态</th>
+                    <th scope="col">执行备注</th>
+                  </tr></thead>
+                  <tbody>{(plan.items || []).map(item => (
+                    <tr key={item.id || item.source + '_' + item.sequence}>
+                      <td className="nfc-mono">#{item.sequence}</td>
+                      <td><span className={'nfc-operation-badge nfc-operation-' + item.operation}>
+                        {item.operation}</span></td>
+                      <td><CodePath value={item.source} /></td>
+                      <td>{renderTarget(item)}</td>
+                      <td>{item.expected_size > 0 ? formatBytes(item.expected_size) : '—'}</td>
+                      <td><StatusBadge status={item.state} /></td>
+                      <td>{item.reason || <span className="nfc-table-muted">—</span>}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>}
+          mobile={mobileItems}
         />
+        <ConsolePagination page={page} pageSize={pageSize}
+          total={plan.total_items ?? plan.expected_changes}
+          pageSizes={[20, 50, 100, 200]}
+          onChange={(p, ps) => { setPage(p); setPageSize(ps); }} />
       </DataPanel>
+
+      <ConsoleConfirmDialog
+        open={confirmation !== null}
+        onOpenChange={next => { if (!next && !pendingAction && !actionInFlight.current) setConfirmation(null); }}
+        title={confirmation?.action === 'execute' ? '确认执行计划？' : '确认生成撤销计划？'}
+        description={confirmation?.action === 'execute'
+          ? <div className="nfc-v2-plan-confirm">
+              <p>请核对计划 #{confirmation.id}、当前校验状态、目标路径及全部计划项。</p>
+              <p>Execute 将通过既有 Worker 任务队列对真实 NAS 文件进行变更或隔离。</p>
+              <p>执行前必须保持 ALLOW_MUTATION=true、Ready/Partial 状态并且没有活动任务。</p>
+            </div>
+          : <div className="nfc-v2-plan-confirm">
+              <p>系统将基于 Operation Journal 已完成的操作倒序创建一份新的 Undo Draft。</p>
+              <p>该 Draft 仍需完成 Freeze → Validate → Execute；不会直接原地撤销文件。</p>
+            </div>}
+        confirmText={confirmation?.action === 'execute' ? '确认执行' : '生成撤销计划'}
+        danger={confirmation?.action === 'execute'}
+        busy={pendingAction}
+        disabled={!confirmationValid}
+        onConfirm={() => { void submitConfirmation(); }}
+      />
 
       <OperationJournalDrawer
         planId={planId}

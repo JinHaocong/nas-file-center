@@ -68,12 +68,16 @@ describe('v0.4.0 C2B operations surfaces contract', () => {
       'PlanDeleteButton',
       'OperationJournalDrawer',
       'StaleRebuildDrawer',
-      'Popconfirm',
+      'ConsoleConfirmDialog',
+      'planConfirmationSnapshot',
+      'samePlanConfirmation',
+      'canPlanLifecycleAction',
       'ALLOW_MUTATION=false',
     ]) {
       assert.match(source, new RegExp(semantic));
     }
     assert.match(source, /nfc-plan-item-mobile-card/);
+    assert.doesNotMatch(source, /<Popconfirm\b|from ['"]antd['"]|@ant-design\/icons/);
     assert.doesNotMatch(source, /<Card\b/);
   });
 

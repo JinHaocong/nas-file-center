@@ -13,7 +13,6 @@ const root = resolve(frontend, 'src');
 const allowed = new Set([
   'src/components/workflows/OrganizerProfileFields.tsx',
   'src/contexts/ThemeContext.tsx',
-  'src/pages/Plans/PlanDetail.tsx',
 ]);
 
 const sourceExt = /\.(?:[cm]?js|[cm]?ts|jsx|tsx|css)$/i;
