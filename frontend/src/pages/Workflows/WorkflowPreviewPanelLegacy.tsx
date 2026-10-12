@@ -1,65 +1,32 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
-import {
-  Alert,
-  Button,
-  Empty,
-  Input,
-  message,
-  Pagination,
-  Popconfirm,
-  Select,
-  Switch,
-  Table,
-  Tag,
-  Typography,
-} from "antd";
-import {
-  ReloadOutlined,
-  ThunderboltOutlined,
-  WarningOutlined,
-} from "@ant-design/icons";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { workflowApi } from "../../api/workflows";
-import { indexesApi } from "../../api/domain";
-import { IndexRoot } from "../../types";
-import { getStructuredApiError, formatDedupeErrorMessage } from "../../api/errors";
-import {
-  WorkflowPreviewItem,
-  WorkflowPreviewResponse,
-  WorkflowMode,
-} from "../../types/workflow";
-import {
-  DedupeSummary,
-  DedupePreviewMemberRow,
-} from "../../types/dedupe";
-import {
-  WorkflowPreviewState,
-  transitionPreviewState,
-} from "../../utils/workflowPreviewMachine";
-import { canPreviewWorkflow, canGenerateDraft } from "../../utils/workflowRbac";
-import { normalizeSelectedRoots } from "../../utils/rootCardinality";
-import { computePreviewRowIndex } from "../../utils/workflowRevisionParser";
-import { CompletedScanPicker } from "../../components/workflows/CompletedScanPicker";
-import { mapWorkflowPreviewItemsToDedupeRows } from "../../utils/dedupePreview";
-import {
-  computeWorkflowDedupeTableTotal,
-  shouldAcceptWorkflowResponse,
-  computeCanDraft,
-} from "../../utils/hotfix2Helpers";
-import {
-  DedupeIdentitySafetyPanel,
-  DedupePreviewSummaryPanel,
-  DedupePreviewTable,
-  DedupeExplainDrawer,
-} from "../../components/dedupe";
-import { DataPanel } from "../../components/ui/DataPanel";
-import { ActionBar } from "../../components/ui/ActionBar";
-import { ResponsiveDescriptions } from "../../components/ui/ResponsiveDescriptions";
-import { ResponsiveDataView } from "../../components/ui/ResponsiveDataView";
-import { CodePath } from "../../components/ui/CodePath";
-import { StatusBadge } from "../../components/ui/StatusBadge";
-
-const { Text } = Typography;
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { workflowApi } from '../../api/workflows';
+import { indexesApi } from '../../api/domain';
+import type { IndexRoot } from '../../types';
+import { getStructuredApiError, formatDedupeErrorMessage } from '../../api/errors';
+import type { WorkflowPreviewItem, WorkflowPreviewResponse, WorkflowMode, WorkflowGeneratePlanRequest } from '../../types/workflow';
+import type { DedupeSummary, DedupePreviewMemberRow } from '../../types/dedupe';
+import { WorkflowPreviewState, transitionPreviewState } from '../../utils/workflowPreviewMachine';
+import { canPreviewWorkflow, canGenerateDraft } from '../../utils/workflowRbac';
+import { normalizeSelectedRoots } from '../../utils/rootCardinality';
+import { computePreviewRowIndex } from '../../utils/workflowRevisionParser';
+import { CompletedScanPicker } from '../../components/workflows/CompletedScanPicker';
+import { mapWorkflowPreviewItemsToDedupeRows } from '../../utils/dedupePreview';
+import { computeWorkflowDedupeTableTotal, shouldAcceptWorkflowResponse, computeCanDraft } from '../../utils/hotfix2Helpers';
+import { buildLegacyDraftRequest, sameLegacyDraftRequest } from '../../utils/workflowLegacyDraft';
+import { DedupeIdentitySafetyPanel, DedupePreviewSummaryPanel, DedupePreviewTable, DedupeExplainDrawer } from '../../components/dedupe';
+import { DataPanel } from '../../components/ui/DataPanel';
+import { ActionBar } from '../../components/ui/ActionBar';
+import { ResponsiveDescriptions } from '../../components/ui/ResponsiveDescriptions';
+import { ResponsiveDataView } from '../../components/ui/ResponsiveDataView';
+import { CodePath } from '../../components/ui/CodePath';
+import { StatusBadge } from '../../components/ui/StatusBadge';
+import { ConsoleButton } from '../../components/ui/ConsoleButton';
+import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
+import { ConsoleConfirmDialog } from '../../components/ui/ConsoleConfirmDialog';
+import { ConsolePagination } from '../../components/ui/ConsolePagination';
+import { ConsoleEmpty } from '../../components/ui/ConsoleEmpty';
+import { useConsoleToast } from '../../components/ui/ConsoleToast';
 
 export interface PreviewRequestSnapshot {
   workflowId: number;
@@ -91,6 +58,12 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
   onGeneratePlanSuccess,
 }) => {
   const queryClient = useQueryClient();
+  const toast = useConsoleToast();
+  const liveContext = useRef({ workflowId, revision, mode, isDirty, isArchived });
+  liveContext.current = { workflowId, revision, mode, isDirty, isArchived };
+  const generating = useRef(false);
+  const [draftBusy, setDraftBusy] = useState(false);
+  const [confirmation, setConfirmation] = useState<WorkflowGeneratePlanRequest | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [selectedRoots, setSelectedRoots] = useState<number[] | undefined>(undefined);
@@ -112,6 +85,8 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
   );
   const [previewData, setPreviewData] = useState<WorkflowPreviewResponse | null>(null);
   const latestRequestIdRef = useRef<number>(0);
+  const [previewContext, setPreviewContext] = useState<string | null>(null);
+  const contextKey = [workflowId, revision, mode, Number(isDirty), Number(isArchived)].join(':');
 
   const { data: indexesData } = useQuery({
     queryKey: ["indexesRootsList"],
@@ -126,7 +101,10 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
   useEffect(() => {
     setPreviewState((prev) => transitionPreviewState(prev, { type: "DIRTY_CHANGE", isDirty }));
     if (isDirty) {
+      latestRequestIdRef.current += 1;
       setPreviewData(null);
+      setPreviewContext(null);
+      setConfirmation(null);
     }
   }, [isDirty]);
 
@@ -135,8 +113,10 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
     setSelectedRoots(undefined);
     setSelectedScanJobId(undefined);
     setPreviewData(null);
+    setPreviewContext(null);
+    setConfirmation(null);
     setPreviewState(isDirty ? "EDITING_DIRTY" : "SAVED_PREVIEW_REQUIRED");
-  }, [mode, workflowId, revision]);
+  }, [mode, workflowId, revision, isArchived]);
 
   const previewMutation = useMutation({
     mutationFn: async (snapshot: PreviewRequestSnapshot) => {
@@ -177,13 +157,22 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
     onSuccess: (data, variables) => {
       if (!shouldAcceptWorkflowResponse({
         snapshot: variables,
-        currentWorkflowId: workflowId,
-        currentRevision: revision,
-        currentMode: mode,
+        currentWorkflowId: liveContext.current.workflowId,
+        currentRevision: liveContext.current.revision,
+        currentMode: liveContext.current.mode,
         currentRequestId: latestRequestIdRef.current,
       })) {
         return;
       }
+      if (liveContext.current.isDirty || liveContext.current.isArchived ||
+          data.workflow_id !== variables.workflowId ||
+          (data.workflow_revision ?? data.revision) !== variables.revision) {
+        setPreviewData(null); setPreviewContext(null);
+        setPreviewError('预览版本与工作流不一致，请重新 Preview');
+        setPreviewState('PREVIEW_STALE');
+        return;
+      }
+      setPreviewContext([variables.workflowId, variables.revision, variables.mode, 0, 0].join(':'));
       setPage(variables.page);
       setPageSize(variables.pageSize);
       setPreviewData(data);
@@ -197,9 +186,9 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
     onError: (err, variables) => {
       if (!shouldAcceptWorkflowResponse({
         snapshot: variables,
-        currentWorkflowId: workflowId,
-        currentRevision: revision,
-        currentMode: mode,
+        currentWorkflowId: liveContext.current.workflowId,
+        currentRevision: liveContext.current.revision,
+        currentMode: liveContext.current.mode,
         currentRequestId: latestRequestIdRef.current,
       })) {
         return;
@@ -207,6 +196,7 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
       const formatted = formatDedupeErrorMessage(err);
       setPreviewError(formatted);
       setPreviewData(null);
+      setPreviewContext(null);
       setPreviewState((prev) =>
         transitionPreviewState(prev, {
           type: "PREVIEW_ERROR",
@@ -229,6 +219,9 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
     const sid = params?.scanJobId !== undefined ? params.scanJobId : selectedScanJobId;
     const rts = params?.roots !== undefined ? params.roots : selectedRoots;
 
+    if (!canPreviewWorkflow(isArchived) || isDirty || generating.current ||
+        previewMutation.isPending || generatePlanMutation.isPending || draftBusy) return;
+    setPreviewData(null); setPreviewContext(null); setConfirmation(null);
     const reqId = ++latestRequestIdRef.current;
     previewMutation.mutate({
       workflowId,
@@ -249,7 +242,7 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
     setSelectedRoots(normalized);
     setPage(1);
     setPreviewState((prev) => transitionPreviewState(prev, { type: "ROOTS_CHANGE" }));
-    setPreviewData(null);
+    setPreviewData(null); setPreviewContext(null); setConfirmation(null);
   };
 
   const handleScanJobChange = (scanJobId?: number) => {
@@ -257,98 +250,29 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
     setSelectedScanJobId(scanJobId);
     setPage(1);
     setPreviewState("SAVED_PREVIEW_REQUIRED");
-    setPreviewData(null);
+    setPreviewData(null); setPreviewContext(null); setConfirmation(null);
   };
 
   const generatePlanMutation = useMutation({
-    mutationFn: () => {
-      if (!previewData?.compile_digest) {
-        throw new Error("未获取到编译摘要，无法生成计划");
-      }
-      if (isDedupe) {
-        if (!selectedScanJobId) {
-          throw new Error("请先选择已完成的扫描任务");
-        }
-        return workflowApi.generatePlan(workflowId, {
-          expected_compile_digest: previewData.compile_digest,
-          revision,
-          runtime_inputs: {
-            scan_job_id: selectedScanJobId,
-          },
-          plan_name: customPlanName.trim() || undefined,
-        });
-      }
-
-      const organizerSummary = isOrganizer ? previewData.organizer_summary : null;
-      if (organizerSummary?.advanced_enabled && !organizerSummary.preview_digest) {
-        throw new Error("Organizer Advanced Preview 缺少 preview digest，请重新 Preview");
-      }
-      return workflowApi.generatePlan(workflowId, {
-        expected_compile_digest: previewData.compile_digest,
-        expected_preview_digest:
-          organizerSummary?.advanced_enabled && organizerSummary.preview_digest
-            ? organizerSummary.preview_digest
-            : undefined,
-        revision,
-        runtime_inputs:
-          selectedRoots && selectedRoots.length > 0
-            ? { root_ids: selectedRoots }
-            : undefined,
-        plan_name: customPlanName.trim() || undefined,
-      });
-    },
-    onSuccess: (data) => {
-      const stageMessage = isOrganizer && previewData?.organizer_summary?.advanced_enabled
-        ? previewData.organizer_summary.structural_required
-          ? `Organizer Stage A 结构计划草稿 #${data.plan_id} 已生成；执行后必须重新 Preview`
-          : `Organizer Stage B 重命名计划草稿 #${data.plan_id} 已生成`
-        : `批处理计划草稿 #${data.plan_id} 生成成功`;
-      message.success(stageMessage);
-      queryClient.invalidateQueries({ queryKey: ["plansList"] });
-      onGeneratePlanSuccess(data.plan_id);
-    },
-    onError: (err) => {
-      const structured = getStructuredApiError(err);
-      const formatted = formatDedupeErrorMessage(err);
-      if (
-        structured.code === "PREVIEW_CHANGED" ||
-        structured.code === "DEDUPE_PREVIEW_CHANGED"
-      ) {
-        setErrorMessage(formatted);
-        setPreviewData((prev) => (prev ? { ...prev, compile_digest: "" } : null));
-        setPreviewState((prev) =>
-          transitionPreviewState(prev, { type: "PREVIEW_CHANGED_ERROR" })
-        );
-      } else if (
-        structured.code === "DEDUPE_SCAN_NOT_FOUND" ||
-        structured.code === "DEDUPE_SCAN_NOT_COMPLETED"
-      ) {
-        setErrorMessage(formatted);
-        setPreviewData(null);
-        setSelectedScanJobId(undefined);
-        setPreviewState("SAVED_PREVIEW_REQUIRED");
-      } else if (structured.code === "WORKFLOW_ARCHIVED") {
-        setErrorMessage(formatted);
-        setPreviewData(null);
-        setPreviewState("PREVIEW_STALE");
-      } else {
-        setErrorMessage(formatted);
-      }
-    },
+    mutationFn: ({ targetId, snapshot }: { targetId: number; snapshot: WorkflowGeneratePlanRequest }) =>
+      workflowApi.generatePlan(targetId, snapshot),
   });
+
+  const acceptedPreview = previewContext === contextKey && !isDirty && !isArchived
+    ? previewData : null;
 
   // Mapped dedupe rows if mode is dedupe
   const dedupeRows = useMemo(() => {
-    if (!isDedupe || !previewData?.items) return [];
+    if (!isDedupe || !acceptedPreview?.items) return [];
     return mapWorkflowPreviewItemsToDedupeRows(previewData.items);
-  }, [isDedupe, previewData?.items]);
+  }, [isDedupe, acceptedPreview?.items]);
 
   // Directly consume dedupe_summary from previewData (Blocker 1)
   const dedupeSummary: DedupeSummary | null = isDedupe
-    ? (previewData?.dedupe_summary ?? null)
+    ? (acceptedPreview?.dedupe_summary ?? null)
     : null;
 
-  const organizerSummary = isOrganizer ? (previewData?.organizer_summary ?? null) : null;
+  const organizerSummary = isOrganizer ? (acceptedPreview?.organizer_summary ?? null) : null;
   const organizerAdvanced = Boolean(organizerSummary?.advanced_enabled);
   const organizerStructuralRequired = Boolean(organizerSummary?.structural_required);
   const organizerPreviewDigest = organizerSummary?.preview_digest || undefined;
