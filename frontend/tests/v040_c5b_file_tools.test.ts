@@ -49,8 +49,8 @@ describe('v0.4.0 C5B file tools surfaces contract', () => {
       assert.ok((source + adapter).includes(semantic), semantic);
     }
     assert.match(source, /不会转换|不做.*转码|仅.*重命名/);
-    assert.match(source, /disabled=\\{!canPlan\\}/);
-    assert.doesNotMatch(source, /<Card\\b/);
+    assert.ok(source.includes('disabled={!canPlan}'));
+    assert.doesNotMatch(source, /<Card\b/);
   });
 
   test('C5B CSS defines complex file-tool form and mobile result surfaces', () => {
