@@ -53,10 +53,10 @@ describe('Console v2 Plan Detail lifecycle safety and native UX', () => {
       planConfirmationSnapshot('execute',context('partial'))),false);
     assert.equal(samePlanConfirmation(confirmed,
       planConfirmationSnapshot('execute',context('ready',{
-        plan:{id:24,status:'ready',active_work_job_id:null}})),false);
+        plan:{id:24,status:'ready',active_work_job_id:null}}))),false);
     assert.equal(samePlanConfirmation(confirmed,
       planConfirmationSnapshot('execute',context('ready',{
-        plan:{id:23,status:'ready',active_work_job_id:2}})),false);
+        plan:{id:23,status:'ready',active_work_job_id:2}}))),false);
     const undo=planConfirmationSnapshot('undo',context('completed'));
     assert.equal(samePlanConfirmation(undo,
       planConfirmationSnapshot('undo',context('completed',{journalTotal:13}))),false);
