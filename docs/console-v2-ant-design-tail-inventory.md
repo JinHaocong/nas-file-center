@@ -5,7 +5,7 @@
 
 ## Policy
 
-Only the exact four runtime modules below may import `antd` or
+Only the exact three runtime modules below may import `antd` or
 `@ant-design/icons` until their corresponding native migrations land.
 The test script denies new unapproved import sites **and** fails if an
 allowlisted file no longer imports AntD but was not removed from this list.
@@ -16,14 +16,18 @@ Do **not** uninstall `antd`/`@ant-design/icons` while this inventory is
 nonempty, and do **not** edit the npm lockfile independently of package
 manifest changes.
 
-## Remaining direct AntD runtime imports (4 files)
+## Remaining direct AntD runtime imports (3 files)
 
 | Path | Current dependency / migration consideration |
 |---|---|
 | `src/components/workflows/OrganizerProfileFields.tsx` | AntD Form instance/useWatch and extensive nested rule editor; migrate together with host profile forms |
 | `src/contexts/ThemeContext.tsx` | AntD ConfigProvider, locale and theme tokens; remove only once all consumer components migrate |
 | `src/pages/Plans/PlanDetail.tsx` | AntD destructive Plan lifecycle controls and detail ledger; preserve each transition guard |
-| `src/pages/Workflows/WorkflowPreviewPanelLegacy.tsx` | AntD legacy preview and dedupe pipeline; retain dirty-state, latest preview request and digest-bound Draft |
+
+## PR #179 — native legacy Workflow Preview / Draft
+
+- `src/pages/Workflows/WorkflowPreviewPanelLegacy.tsx` — native File/Dedupe/Organizer preview, managed roots, readonly Dedupe evidence and explicit immutable compile/preview-digest-bound Draft confirmation.
+- `src/utils/workflowLegacyDraft.ts` — standalone safe Draft request normalization and confirmation snapshot guard.
 
 ## PR #178 — native Utility Workflow Preview and Draft
 
@@ -51,7 +55,7 @@ manifest changes.
 
 ## Follow-ups
 
-1. Finish PlanDetail and legacy Workflow Preview safety surfaces.
+1. Finish PlanDetail lifecycle controls.
 2. Migrate legacy organizer form fields; Login and completed-scan picker are native.
 3. Remove the global AntD ConfigProvider once its final consumers have migrated.
 4. Run this import gate plus full frontend, backend, Docker and dependency-audit checks.
