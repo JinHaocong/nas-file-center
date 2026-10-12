@@ -24,6 +24,7 @@ describe('Console v2 residual Ant Design cleanup — audited native safety', () 
       'src/pages/Workflows/UtilityWorkflowPreviewPanel.tsx',
       'src/pages/Workflows/WorkflowPreviewPanelLegacy.tsx',
       'src/pages/Plans/PlanDetail.tsx',
+      'src/contexts/ThemeContext.tsx',
     ]) {
       const source = read(path);
       assert.doesNotMatch(source, /from ['"]antd['"]|from ['"]@ant-design\/icons['"]/);
@@ -35,7 +36,6 @@ describe('Console v2 residual Ant Design cleanup — audited native safety', () 
     const source = read('scripts/check-ant-design-tail.mjs');
     for (const token of [
       "resolve(frontend, 'src')", 'const allowed = new Set([',
-      "'src/contexts/ThemeContext.tsx'",
       'modulePattern', 'readdirSync(dir)', 'statSync(full).isDirectory()',
       'matches.sort(', 'const unexpected = matches.filter(item => !item.approved)',
       'if (missing.length || unexpected.length) process.exitCode = 1',

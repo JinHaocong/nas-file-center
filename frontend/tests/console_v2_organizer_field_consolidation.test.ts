@@ -112,10 +112,12 @@ describe('Console v2 native Organizer field authority', () => {
       .some(text => text.includes('2 到 64')));
   });
 
-  test('only ThemeContext remains allowlisted for direct AntD imports', () => {
+  test('zero runtime AntD import exceptions remain after native theme migration', () => {
     const guard = read('scripts/check-ant-design-tail.mjs');
-    assert.ok(guard.includes("'src/contexts/ThemeContext.tsx'"));
+    assert.ok(guard.includes('const allowed = new Set(['));
+    assert.ok(!guard.includes("'src/contexts/ThemeContext.tsx'"));
     assert.ok(!guard.includes("'src/components/workflows/OrganizerProfileFields.tsx'"));
     assert.ok(guard.includes('const unexpected = matches.filter(item => !item.approved)'));
+    assert.ok(guard.includes('if (missing.length || unexpected.length) process.exitCode = 1'));
   });
 });

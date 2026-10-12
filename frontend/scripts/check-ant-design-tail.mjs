@@ -1,7 +1,7 @@
 /**
  * Console v2 Ant Design tail gate.
  * Enumerates every runtime source module, never relying on GitHub code search.
- * Only the explicitly reviewed, not-yet-migrated legacy modules may import AntD.
+ * Zero runtime source imports from AntD or @ant-design/icons are permitted.
  *
  * Run directly: node scripts/check-ant-design-tail.mjs
  */
@@ -11,7 +11,6 @@ import { relative, resolve, sep } from 'node:path';
 const frontend = resolve(process.cwd());
 const root = resolve(frontend, 'src');
 const allowed = new Set([
-  'src/contexts/ThemeContext.tsx',
 ]);
 
 const sourceExt = /\.(?:[cm]?js|[cm]?ts|jsx|tsx|css)$/i;
