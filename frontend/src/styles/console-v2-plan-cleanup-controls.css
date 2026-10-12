@@ -1,0 +1,55 @@
+/* Console v2 Plan metadata cleanup — Radix confirmations, native readonly guardrails. */
+.nfc-v2-legacy-plan-cleanup {
+  display:flex;gap:12px;align-items:flex-start;min-width:0;
+  border:1px solid color-mix(in srgb,#c48a35 45%,var(--nfc-hairline));
+  border-radius:12px;padding:14px;background:var(--nfc-surface-2);
+  color:var(--nfc-text);font-size:12px;line-height:1.6;
+}
+.nfc-v2-legacy-plan-cleanup > svg { color:#b38332;flex:0 0 auto;margin-top:2px; }
+.nfc-v2-legacy-plan-main { display:grid;gap:9px;min-width:0;flex:1; }
+.nfc-v2-legacy-plan-cleanup .nfc-legacy-plan-cleanup-heading {
+  display:flex;flex-wrap:wrap;align-items:center;gap:12px;justify-content:space-between;
+}
+.nfc-v2-legacy-plan-cleanup .nfc-legacy-plan-cleanup-description {
+  margin:0;color:var(--nfc-text-muted);font-size:11px;overflow-wrap:anywhere;
+}
+.nfc-v2-plan-delete-subtle { background:transparent;border-color:transparent;box-shadow:none; }
+.nfc-v2-plan-history-dialog { max-width:min(94vw,610px);max-height:88vh;overflow-y:auto; }
+.nfc-v2-plan-history-body { display:grid;gap:15px;margin:0;padding:0 3px;min-width:0; }
+.nfc-v2-plan-cleanup-warning {
+  display:flex;align-items:flex-start;gap:10px;border:1px solid var(--nfc-hairline);
+  border-radius:9px;padding:12px;background:var(--nfc-surface-2);
+  color:var(--nfc-text);font-size:12px;line-height:1.6;
+}
+.nfc-v2-plan-cleanup-warning > svg { flex:0 0 auto;color:#c08b32; }
+.nfc-v2-plan-cleanup-warning p { color:var(--nfc-text-muted);margin:4px 0 0; }
+.nfc-v2-plan-history-options { min-width:0;margin:0;padding:0;border:0;display:grid;gap:9px; }
+.nfc-v2-plan-history-options legend { margin-bottom:9px;font-size:12px;font-weight:700;color:var(--nfc-text); }
+.nfc-v2-plan-history-options label { display:flex;align-items:center;gap:10px;
+  padding:10px 12px;border:1px solid var(--nfc-hairline);border-radius:8px;
+  background:var(--nfc-surface-1);font-size:12px;cursor:pointer;min-height:43px;box-sizing:border-box; }
+.nfc-v2-plan-history-options input { width:17px;height:17px;accent-color:var(--nfc-accent); }
+.nfc-v2-plan-history-options :is(input,button):focus-visible,
+.nfc-v2-legacy-plan-cleanup button:focus-visible {
+  outline:2px solid var(--nfc-accent);outline-offset:2px;
+}
+.nfc-v2-plan-history-dialog .nfc-history-cleanup-note { color:var(--nfc-text-muted); }
+.nfc-v2-plan-history-dialog .nfc-history-cleanup-list { padding-left:19px;line-height:1.75; }
+[data-theme='dark'] .nfc-v2-legacy-plan-cleanup,
+[data-theme='dark'] .nfc-v2-plan-history-dialog {
+  color:var(--nfc-text);border-color:var(--nfc-hairline);
+  background:var(--nfc-surface-2);
+}
+@media(max-width:767px) {
+  .nfc-v2-legacy-plan-cleanup { padding:12px; }
+  .nfc-v2-legacy-plan-cleanup .nfc-legacy-plan-cleanup-heading {
+    align-items:stretch;flex-direction:column; }
+  .nfc-v2-legacy-plan-cleanup .nfc-console-button,
+  .nfc-v2-plan-history-dialog .nfc-console-button { min-height:44px; }
+  .nfc-v2-plan-history-dialog { width:min(94vw,610px); }
+}
+@media(prefers-reduced-motion:reduce) {
+  .nfc-v2-legacy-plan-cleanup *, .nfc-v2-plan-history-dialog * {
+    animation:none;transition:none;scroll-behavior:auto;
+  }
+}
