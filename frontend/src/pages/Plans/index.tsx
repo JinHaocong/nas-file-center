@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { message } from 'antd';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { plansApi } from '../../api/domain';
@@ -19,9 +18,11 @@ import { ConsoleButton } from '../../components/ui/ConsoleButton';
 import { ConsoleEmpty } from '../../components/ui/ConsoleEmpty';
 import { ConsolePagination } from '../../components/ui/ConsolePagination';
 import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
+import { useConsoleToast } from '../../components/ui/ConsoleToast';
 
 export const PlansPage: React.FC = () => {
   useTitle('执行计划');
+  const toast = useConsoleToast();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
@@ -44,7 +45,7 @@ export const PlansPage: React.FC = () => {
     mutationFn: (id: number) => plansApi.deletePlan(id),
     onMutate: (id) => setDeletingId(id),
     onSuccess: (_, id) => {
-      message.success('计划 #' + id + ' 已安全删除');
+      toast.success('计划 #' + id + ' 已安全删除');
       queryClient.invalidateQueries({ queryKey: ['plansList'] });
       queryClient.invalidateQueries({ queryKey: ['dashboardSummary'] });
       queryClient.invalidateQueries({ queryKey: ['scansList'] });
@@ -53,7 +54,7 @@ export const PlansPage: React.FC = () => {
       }
     },
     onError: (err: any, id: number) => {
-      message.error(err.message || '删除计划失败');
+      toast.error(err.message || '删除计划失败');
       invalidatePlanDeleteFailure(queryClient, id);
     },
     onSettled: () => setDeletingId(null),
@@ -135,7 +136,7 @@ export const PlansPage: React.FC = () => {
                           查看与执行
                         </ConsoleButton>
                         <PlanDeleteButton plan={plan}
-                          onDelete={() => deletePlanMutation.mutate(plan.id)}
+                          onDelete={() => deletePlanMutation.mutateAsync(plan.id)}
                           loading={deletingId === plan.id} type="text" />
                       </div></td>
                     </tr>
@@ -166,7 +167,7 @@ export const PlansPage: React.FC = () => {
                       <ConsoleButton variant="ghost" size="sm"
                         onClick={() => openPlan(plan.id)}>查看与执行</ConsoleButton>
                       <PlanDeleteButton plan={plan}
-                        onDelete={() => deletePlanMutation.mutate(plan.id)}
+                        onDelete={() => deletePlanMutation.mutateAsync(plan.id)}
                         loading={deletingId === plan.id} type="text" size="middle" />
                     </div>
                   </article>

@@ -1,10 +1,10 @@
-import React from 'react';
-import { Button, Popconfirm, Tooltip } from 'antd';
-import { DeleteOutlined } from '@ant-design/icons';
+import React, { useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { ConsoleButton } from '../ui/ConsoleButton';
+import { ConsoleIcon } from '../ui/ConsoleIcon';
+import { ConsoleConfirmDialog } from '../ui/ConsoleConfirmDialog';
 import {
-  getPlanDeleteAvailability,
-  getPlanDeleteConfirmationContent,
+  getPlanDeleteAvailability, getPlanDeleteConfirmationContent,
   invalidatePlanDeleteFailure,
 } from './plan_cleanup';
 
@@ -17,7 +17,7 @@ export interface PlanDeleteButtonProps {
     active_work_job_status?: string | null;
     active_work_job_recovered_after_restart?: boolean;
   };
-  onDelete: () => void | Promise<void>;
+  onDelete: () => void | Promise<unknown>;
   loading?: boolean;
   size?: 'small' | 'middle' | 'large';
   type?: 'link' | 'text' | 'default' | 'primary';
@@ -25,59 +25,51 @@ export interface PlanDeleteButtonProps {
   buttonText?: string;
 }
 
+/** A readonly availability fence followed by a true explicit Radix confirmation. */
 export const PlanDeleteButton: React.FC<PlanDeleteButtonProps> = ({
-  plan,
-  onDelete,
-  loading = false,
-  size = 'small',
-  type = 'link',
-  danger = true,
-  buttonText = '删除',
+  plan, onDelete, loading = false, size = 'small',
+  type = 'link', danger = true, buttonText = '删除',
 }) => {
   const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const singleFlight = useRef(false);
   const { canDelete, reason } = getPlanDeleteAvailability(plan);
-  const { title: popconfirmTitle, description: popconfirmDescription } =
-    getPlanDeleteConfirmationContent(plan);
-
-  const btn = (
-    <Button
-      size={size}
-      type={type}
-      danger={danger && canDelete}
-      disabled={!canDelete || loading}
-      loading={loading}
-      icon={<DeleteOutlined />}
-    >
-      {buttonText}
-    </Button>
-  );
-
-  if (!canDelete && reason) {
-    return (
-      <Tooltip title={reason}>
-        <span>{btn}</span>
-      </Tooltip>
-    );
-  }
-
+  const { title, description } = getPlanDeleteConfirmationContent(plan);
+  const busy = loading || submitting;
   const handleConfirm = async () => {
+    if (!canDelete || busy || singleFlight.current) return;
+    singleFlight.current = true;
+    setSubmitting(true);
     try {
       await onDelete();
-    } catch (err: any) {
+      setOpen(false);
+    } catch {
       invalidatePlanDeleteFailure(queryClient, plan.id);
+    } finally {
+      singleFlight.current = false;
+      setSubmitting(false);
     }
   };
-
   return (
-    <Popconfirm
-      title={popconfirmTitle}
-      description={popconfirmDescription}
-      okText="确认删除"
-      cancelText="取消"
-      okButtonProps={{ danger: true }}
-      onConfirm={handleConfirm}
-    >
-      {btn}
-    </Popconfirm>
+    <>
+      <span title={!canDelete ? reason : undefined}>
+        <ConsoleButton
+          size={size === 'small' ? 'sm' : 'md'}
+          variant={!canDelete || !danger ? 'secondary' : 'danger'}
+          className={type === 'link' || type === 'text' ? 'nfc-v2-plan-delete-subtle' : ''}
+          leadingIcon={<ConsoleIcon name="trash" size={15} />}
+          disabled={!canDelete || busy}
+          loading={busy}
+          onClick={() => { if (canDelete && !busy) setOpen(true); }}>
+          {buttonText}
+        </ConsoleButton>
+      </span>
+      <ConsoleConfirmDialog open={open}
+        onOpenChange={next => { if (!busy) setOpen(next); }}
+        title={title} description={description} danger
+        confirmText="确认删除" disabled={!canDelete || busy}
+        busy={busy} onConfirm={() => { void handleConfirm(); }} />
+    </>
   );
 };

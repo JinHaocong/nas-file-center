@@ -49,6 +49,7 @@ approved NAS File Center mockup. User-selectable dark/system modes remain.
 - [x] Native Path Match: typed multi-root read-only Preview, native responsive groups, keep-first Quarantine Draft with fail-closed server re-preview, stale-request guards and final Plan lifecycle reminders (PR #165).
 - [x] Native Batch: semantic native operation radios, managed path and mapping inputs, checked Draft-only Quarantine/Touch/Move/Rename payloads, duplicate guards and responsive styles (PR #166).
 - [x] Native Settings: read-only host security flags, guarded audit/quarantine/resource policy saves, refreshed Audit cleanup confirmations, self-audited clear, RBAC-gated session revocation and accessible responsive native controls (PR #167).
+- [x] Native Plan cleanup controls: safe per-plan deletion, legacy metadata cleanup, terminal-only Plan history checklist with Radix confirmations and no AntD; Plans ledger native Toast (PR #168).
 - [ ] Remove all `antd` and `@ant-design/icons` imports and their lockfile dependencies.
 - [ ] Consolidate historical UI CSS overrides into an owned, maintainable theme system.
 - [ ] Full TypeScript, frontend unit/regression, backend, Docker and dependency-audit gates.
