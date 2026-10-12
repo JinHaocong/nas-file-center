@@ -114,7 +114,7 @@ describe('Console v2 Filename Audit — native guarded migration', () => {
       '<ConsoleButton', '<ConsolePagination', '<ConsoleEmpty',
       '<ResponsiveDataView', '<CodePath', 'getPaginationState',
       'visiblePage.map(', 'togglePage(', 'type="checkbox"', 'type="select"',
-      '导出 CSV', 'buildFilenameAuditCsv(rows)', '仅首尾普通空格',
+      '导出 CSV', 'buildFilenameAuditCsv(rows)', '只对首尾普通空格',
     ]) {
       assert.ok(source.includes(token) || (token === 'type="select"' && source.includes('<select value={filter}')),
         token);
