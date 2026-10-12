@@ -96,7 +96,7 @@ describe('Console v2 Settings native RBAC and destructive action security', () =
   test('sessions are read-only until confirming a different non-current device', () => {
     const s = page();
     for (const token of [
-      'session.is_current', "confirmation.kind === 'revoke'",
+      'session.is_current', "setConfirmation({ kind: 'revoke'",
       'active.is_current', 'authApi.revokeSession(sessionId)',
       "runOnce('session-revoke'", 'sessionActions(session)',
       '<ResponsiveDataView', 'nfc-session-mobile-card', 'nfc-v2-settings-table',
