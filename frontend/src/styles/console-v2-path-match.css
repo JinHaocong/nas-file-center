@@ -7,7 +7,7 @@
   --nfc-pm-line:var(--nfc-hairline);
   --nfc-pm-accent:var(--nfc-accent);
 }
-.nfc-v2-path-match-form { display:grid;gap:16px;min-width:0; }
+.nfc-v2-path-match .nfc-path-match-form { display:grid;gap:16px;min-width:0; }
 .nfc-v2-path-match-field { display:grid;gap:7px;min-width:0;
   color:var(--nfc-pm-ink);font-size:12px;font-weight:650; }
 .nfc-v2-path-match-field > div { min-width:0; }

@@ -188,7 +188,7 @@ export const PathMatchPage: React.FC = () => {
       <DataPanel title="匹配规则"
         description="至少选择两个根目录；路径必须位于 ALLOWED_ROOTS。"
         className="nfc-complex-form-panel nfc-file-tool-form nfc-tool-workbench">
-        <div className="nfc-path-match-form nfc-v2-path-match-form">
+        <div className="nfc-path-match-form">
           <div className="nfc-v2-path-match-field">
             <label id="nfc-path-match-roots-label">比对根目录（至少 2 个）</label>
             <div aria-labelledby="nfc-path-match-roots-label">
