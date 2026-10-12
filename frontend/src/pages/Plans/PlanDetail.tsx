@@ -384,140 +384,66 @@ export const PlanDetailPage: React.FC = () => {
         })}
       </div>
 
-      <section className="nfc-plan-action-surface" aria-label="计划安全操作">
+      <section className="nfc-plan-action-surface nfc-v2-plan-actions" aria-label="计划安全操作">
         <ActionBar>
           {plan.status === 'draft' && (
-            <Button
-              icon={<LockOutlined />}
-              onClick={() => freezeMutation.mutate()}
-              loading={freezeMutation.isPending}
-            >
+            <ConsoleButton leadingIcon={<ConsoleIcon name="lock" size={16} />}
+              onClick={() => beginAction('freeze')} disabled={!canFreeze}
+              loading={freezeMutation.isPending}>
               冻结计划 (Freeze)
-            </Button>
+            </ConsoleButton>
           )}
-
-          {(plan.status === 'frozen' ||
-            plan.status === 'ready' ||
-            plan.status === 'partial' ||
-            plan.status === 'stale') && (
-            <Tooltip
-              title={
-                hasActiveJob
-                  ? `该计划当前已有执行任务进行中 (任务 #${plan.active_work_job_id})`
-                  : undefined
-              }
-            >
-              <span>
-                <Button
-                  icon={<CheckCircleOutlined />}
-                  onClick={() => validateMutation.mutate()}
-                  loading={validateMutation.isPending}
-                  disabled={hasActiveJob}
-                >
-                  SHA256 实时校验 (Validate)
-                </Button>
-              </span>
-            </Tooltip>
+          {['frozen', 'ready', 'partial', 'stale'].includes(plan.status) && (
+            <span title={hasActiveJob ?
+              '该计划当前已有执行任务进行中 (任务 #' + plan.active_work_job_id + ')' : undefined}>
+              <ConsoleButton leadingIcon={<ConsoleIcon name="check-circle" size={16} />}
+                disabled={!canValidate} loading={validateMutation.isPending}
+                onClick={() => beginAction('validate')}>
+                SHA256 实时校验 (Validate)
+              </ConsoleButton>
+            </span>
           )}
-
-          {(plan.status === 'ready' || plan.status === 'partial') && (
-            <Tooltip
-              title={
-                isSafeMode
-                  ? '当前处于只读安全模式 (ALLOW_MUTATION=false)，执行按钮已被锁定。若确认执行，请修改 compose 环境变量开启允许写入。'
-                  : hasActiveJob
-                    ? `该计划当前已有执行任务进行中 (任务 #${plan.active_work_job_id})`
-                    : '执行计划：将按计划安全变更/隔离文件'
-              }
-            >
-              <span>
-                <Popconfirm
-                  title="确认执行计划？"
-                  description="请确认您已仔细核对所有计划项并完成了校验。"
-                  onConfirm={() => executeMutation.mutate()}
-                  disabled={executeDisabled}
-                  okText="确认执行"
-                  cancelText="取消"
-                  okButtonProps={{ danger: true }}
-                >
-                  <Button
-                    type="primary"
-                    danger
-                    icon={<PlayCircleOutlined />}
-                    disabled={executeDisabled}
-                    loading={executeMutation.isPending}
-                  >
-                    执行计划 (Execute)
-                  </Button>
-                </Popconfirm>
-              </span>
-            </Tooltip>
+          {['ready', 'partial'].includes(plan.status) && (
+            <span title={isSafeMode ?
+              '当前处于只读安全模式 (ALLOW_MUTATION=false)，执行按钮已锁定。' :
+              hasActiveJob ? '当前存在执行任务 #' + plan.active_work_job_id : undefined}>
+              <ConsoleButton variant="danger" leadingIcon={<ConsoleIcon name="play" size={16} />}
+                disabled={!canExecute} loading={executeMutation.isPending}
+                onClick={() => openConfirmation('execute')}>
+                执行计划 (Execute)
+              </ConsoleButton>
+            </span>
           )}
-
-          <Button
-            icon={<HistoryOutlined />}
-            onClick={() => {
-              refetchJournal();
-              setJournalDrawerOpen(true);
-            }}
-          >
-            操作日志 {journalTotal > 0 ? `(${journalTotal})` : ''}
-          </Button>
-
-          {canCreateUndo && (
-            <Tooltip
-              title={
-                hasActiveJob
-                  ? `该计划当前已有执行任务进行中 (任务 #${plan.active_work_job_id})`
-                  : '基于底层操作日志倒序生成一份逆向还原计划'
-              }
-            >
-              <span>
-                <Popconfirm
-                  title="确认生成撤销计划？"
-                  description="系统将基于该计划已完成的操作日志（Operation Journal）倒序生成一份新的 Undo 计划。新计划为独立草稿态，仍需按常规流程完成参数冻结与实时校验后方可执行。"
-                  onConfirm={() => undoPlanMutation.mutate()}
-                  disabled={hasActiveJob || undoPlanMutation.isPending}
-                  okText="生成撤销计划"
-                  cancelText="取消"
-                >
-                  <Button
-                    icon={<RollbackOutlined />}
-                    loading={undoPlanMutation.isPending}
-                    disabled={hasActiveJob}
-                  >
-                    生成撤销计划 (Undo)
-                  </Button>
-                </Popconfirm>
-              </span>
-            </Tooltip>
+          <ConsoleButton leadingIcon={<ConsoleIcon name="history" size={16} />}
+            onClick={() => { void refetchJournal(); setJournalDrawerOpen(true); }}>
+            操作日志 {journalTotal > 0 ? '(' + journalTotal + ')' : ''}
+          </ConsoleButton>
+          {['completed', 'partial'].includes(plan.status) && journalTotal > 0 && (
+            <span title={hasActiveJob ?
+              '该计划当前已有执行任务进行中 (任务 #' + plan.active_work_job_id + ')' : undefined}>
+              <ConsoleButton leadingIcon={<ConsoleIcon name="refresh" size={16} />}
+                loading={undoPlanMutation.isPending} disabled={!canUndo}
+                onClick={() => openConfirmation('undo')}>
+                生成撤销计划 (Undo)
+              </ConsoleButton>
+            </span>
           )}
-
           {isStaleWorkflowPlan && (
-            <Button
-              icon={<BuildOutlined />}
-              onClick={() => setRebuildDrawerOpen(true)}
-            >
+            <ConsoleButton leadingIcon={<ConsoleIcon name="layers" size={16} />}
+              onClick={() => setRebuildDrawerOpen(true)}>
               重建工作流计划 (Rebuild Plan)
-            </Button>
+            </ConsoleButton>
           )}
-
           {isStaleDedupePlan && workflowMeta && (
-            <Button
-              icon={<ArrowLeftOutlined />}
-              onClick={() => navigate(`/workflows/${workflowMeta.workflow_id}`)}
-            >
+            <ConsoleButton leadingIcon={<ConsoleIcon name="arrow-left" size={16} />}
+              onClick={() => navigate('/workflows/' + workflowMeta.workflow_id)}>
               返回关联工作流
-            </Button>
+            </ConsoleButton>
           )}
-
-          <PlanDeleteButton
-            plan={plan}
+          <PlanDeleteButton plan={plan}
             onDelete={() => deleteMutation.mutateAsync()}
             loading={deleteMutation.isPending}
-            type="default"
-            size="middle"
-          />
+            type="default" size="middle" />
         </ActionBar>
       </section>
 
