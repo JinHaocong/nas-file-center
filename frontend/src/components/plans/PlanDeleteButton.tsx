@@ -17,7 +17,7 @@ export interface PlanDeleteButtonProps {
     active_work_job_status?: string | null;
     active_work_job_recovered_after_restart?: boolean;
   };
-  onDelete: () => void | Promise<void>;
+  onDelete: () => void | Promise<unknown>;
   loading?: boolean;
   size?: 'small' | 'middle' | 'large';
   type?: 'link' | 'text' | 'default' | 'primary';

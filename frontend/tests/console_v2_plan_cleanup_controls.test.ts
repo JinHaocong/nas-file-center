@@ -41,7 +41,7 @@ describe('Console v2 native Plan cleanup controls', () => {
     const s = deleteButton();
     for (const token of [
       "size?: 'small' | 'middle' | 'large'", "type?: 'link' | 'text' | 'default' | 'primary'",
-      'onDelete: () => void | Promise<void>', 'buttonText?: string',
+      'onDelete: () => void | Promise<unknown>', 'buttonText?: string',
     ]) assert.ok(s.includes(token), token);
   });
   test('legacy cleanup preserves exact old-only API and scan relationship semantics', () => {
