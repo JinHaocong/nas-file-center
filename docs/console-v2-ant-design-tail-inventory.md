@@ -5,22 +5,27 @@
 
 ## Policy
 
-Only the exact one runtime module below may import `antd` or
-`@ant-design/icons` until their corresponding native migrations land.
-The test script denies new unapproved import sites **and** fails if an
-allowlisted file no longer imports AntD but was not removed from this list.
+Zero runtime source modules may import `antd` or `@ant-design/icons`.
+Any new or resurrected direct import is a CI failure.
+The test script enumerates all runtime source modules and fails on any
+unapproved AntD import or stale allowlist entry.
 This gate scans all TS, TSX, JS, JSX and CSS source files and is executed
 by `npm test` before TypeScript test compilation.
 
-Do **not** uninstall `antd`/`@ant-design/icons` while this inventory is
-nonempty, and do **not** edit the npm lockfile independently of package
-manifest changes.
+The import inventory is now empty; remove the unused `antd` and
+`@ant-design/icons` npm packages in a follow-up change with manifest and
+lockfile generated together, not independently.
 
-## Remaining direct AntD runtime imports (1 file)
+## Remaining direct AntD runtime imports (0 files)
 
-| Path | Current dependency / migration consideration |
-|---|---|
-| `src/contexts/ThemeContext.tsx` | AntD ConfigProvider, locale and theme tokens; remove only once all consumer components migrate |
+No runtime source modules import Ant Design. The dependency packages remain in
+`frontend/package.json` until the coordinated npm lockfile cleanup.
+
+## PR #182 — native ThemeContext, zero AntD source imports
+
+- `src/contexts/ThemeContext.tsx` — remove obsolete AntD ConfigProvider and zh-CN locale dependency; preserve public `useTheme` / ThemeMode API, localStorage key `nfc_theme_mode`, system dark-mode listener and cleanup, and root `data-theme`/`colorScheme` ownership of existing native CSS tokens.
+- `src/utils/themeMode.ts` — pure, tested stored tri-state normalization (default light) and effective system dark-mode decision.
+- The AntD import gate now rejects all direct runtime imports; legacy premium-visual assertion tests the native CSS contract rather than deleted AntD token config.
 
 ## PR #181 — consolidate native Organizer fields; remove orphan AntD form
 
@@ -64,9 +69,8 @@ manifest changes.
 
 ## Follow-ups
 
-1. Remove the global AntD ConfigProvider from ThemeContext without changing theme persistence or system mode behavior.
-4. Run this import gate plus full frontend, backend, Docker and dependency-audit checks.
-5. Only at **zero imports**, remove `antd` / `@ant-design/icons` from package and regenerate the lockfile.
-6. Consolidate historical styling overrides and conduct one consolidated browser visual acceptance.
+1. Remove `antd` / `@ant-design/icons` from package.json and regenerate package-lock.json together now that runtime imports are zero.
+2. Run import audit, frontend tests/typecheck/build, full backend regression, Docker and dependency-audit checks.
+3. Consolidate historical styling overrides and conduct one consolidated browser visual acceptance.
 
 No physical NAS operations, deployment or broad authority changes are part of this inventory.
