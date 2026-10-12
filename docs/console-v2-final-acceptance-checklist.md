@@ -29,7 +29,7 @@ approved NAS File Center mockup. User-selectable dark/system modes remain.
 - [x] Advanced Dedupe read-only authority/safety lineage and role-guarded storage action panels (PR #146).
 - [x] Advanced Dedupe Radix decision explanation sheet + native read-only preview summary (PR #147).
 - [x] Shared copyable CodePath: native full-text path, explicit copy, non-HTTPS fallback and responsive focus (PR #148).
-- [ ] Remaining Ant screens and shared controls.
+- [ ] Remaining Directory Diff, Path Match/Batch, Settings, other Ant screens and shared controls.
 - [ ] Shared dialogs, select, checkbox, forms and destructive confirmation primitives.
 - [x] Workflow builder native action bar, read-only status, Radix mode reset / unsaved-exit / rollback confirmations (PR #149).
 - [x] Workflow builder native name/description fields, accessible mode radios, trim validation and dirty guards (PR #150).
@@ -45,7 +45,7 @@ approved NAS File Center mockup. User-selectable dark/system modes remain.
 - [x] Organizer ProfilePreview native read-only proposals, root/digest invalidation, Stage A/B conflict gating and shared pagination (PR #160).
 - [x] Native first-level directory/file Rename editors using one controlled schema, literal-mode preview, conflict-safe Plan and responsive results (PR #161).
 - [x] Native Advanced Regex Rename: typed wire schema, root/rule-bound readonly Preview, collision-safe Plan, semantic responsive results and native mode switch (PR #162).
-- [ ] Remaining Filename Audit, Directory Diff, Path Match/Batch file tools, settings and other Ant screens.
+- [x] Native Filename Audit: read-only scoped Preview, advisory issues, selected-only rechecked Rename Draft, stale-response guards, CSV protection and responsive results (PR #163).
 - [ ] Remove all `antd` and `@ant-design/icons` imports and their lockfile dependencies.
 - [ ] Consolidate historical UI CSS overrides into an owned, maintainable theme system.
 - [ ] Full TypeScript, frontend unit/regression, backend, Docker and dependency-audit gates.
