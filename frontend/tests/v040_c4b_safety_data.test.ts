@@ -46,7 +46,10 @@ describe('v0.4.0 C4B safety and data surfaces contract', () => {
       assert.match(source, new RegExp(symbol));
     }
     assert.match(source, /nfc-index-mobile-card/);
-    assert.match(source, /record\.can_remove/);
+    assert.match(source, /getIndexRemoveAvailability\(record\)/);
+    const lifecycle = read('src/components/indexes/index_lifecycle.ts');
+    assert.match(lifecycle, /root\.can_remove === false/);
+    assert.match(lifecycle, /root\.has_active_job/);
     assert.match(source, /record\.path_state === ['"]available['"]/);
     assert.match(source, /DirectoryPicker/);
     assert.match(source, /不会删除 NAS 上的任何真实文件或目录/);

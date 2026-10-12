@@ -49,6 +49,7 @@ import './styles/console-v2-plan-cleanup-controls.css';
 import './styles/console-v2-quarantine-single-actions.css';
 import './styles/console-v2-quarantine-bulk-dialogs.css';
 import './styles/console-v2-quarantine-ledger.css';
+import './styles/console-v2-indexes.css';
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>

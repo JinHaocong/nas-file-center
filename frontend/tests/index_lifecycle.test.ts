@@ -135,42 +135,22 @@ describe('Index Root Lifecycle: Policy Matrix & API Contract Tests', () => {
   });
 
   describe('DirectoryPicker Integration Gate', () => {
-    test('Indexes/index.tsx integrates DirectoryPicker into Form.Item name="root"', () => {
+    test('native Indexes create dialog binds DirectoryPicker without legacy AntD Form.Item', () => {
       const indexPath = resolve(__dirname, '../../src/pages/Indexes/index.tsx');
       const content = readFileSync(indexPath, 'utf-8');
 
-      // 1. Must import DirectoryPicker from components
-      assert.ok(
-        content.includes("import { DirectoryPicker } from '../../components/DirectoryPicker'"),
-        'Indexes/index.tsx must import DirectoryPicker from components/DirectoryPicker'
-      );
-
-      // 2. Form.Item name="root" must contain DirectoryPicker
-      assert.ok(
-        content.includes('<Form.Item\n            name="root"') ||
-        content.includes('<Form.Item name="root"'),
-        'Must contain Form.Item for root field'
-      );
-      assert.ok(
-        content.includes('<DirectoryPicker'),
-        'Must render DirectoryPicker component'
-      );
-      assert.ok(
-        content.includes('multiple={false}'),
-        'DirectoryPicker must be configured with multiple={false}'
-      );
-      assert.ok(
-        content.includes('allowManualInput={true}'),
-        'DirectoryPicker must be configured with allowManualInput={true}'
-      );
-
-      // 3. Must not have regular Input inside root Form.Item
-      const rootItemMatch = content.match(/<Form\.Item[^>]*name="root"[^>]*>([\s\S]*?)<\/Form\.Item>/);
-      assert.ok(rootItemMatch, 'root Form.Item must exist');
-      assert.ok(
-        !rootItemMatch[1].includes('<Input '),
-        'root Form.Item must not use simple <Input>'
-      );
+      assert.ok(content.includes("import { DirectoryPicker } from '../../components/DirectoryPicker'"));
+      assert.ok(content.includes('<DirectoryPicker multiple={false} allowManualInput={true}'));
+      assert.ok(content.includes('value={rootDraft}'));
+      assert.ok(content.includes('disabled={createMutation.isPending}'));
+      assert.ok(content.includes('onChange={value =>'));
+      assert.ok(content.includes('const root = rootDraft.trim()'));
+      assert.ok(content.includes("if (!root.startsWith('/'))"));
+      assert.ok(content.includes('await createMutation.mutateAsync(root)'));
+      assert.ok(content.includes('ALLOWED_ROOTS'));
+      assert.ok(content.includes('<Dialog.Content'));
+      assert.ok(content.includes('onPointerDownOutside={event => event.preventDefault()}'));
+      assert.doesNotMatch(content, /from ['"]antd['"]|@ant-design\/icons|<Form\.Item\b|<Input\b/);
     });
   });
 });
