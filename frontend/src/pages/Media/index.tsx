@@ -35,10 +35,12 @@ const formatDuration = (seconds: number | null) => {
 
 const integrityBadge = (record: MediaAsset) => {
   const status = record.integrity_status;
+  const label = record.integrity_status === 'healthy' ? '正常' :
+    record.integrity_status === 'corrupt' ? '损坏' : '未知';
   return <span className={'nfc-v2-media-status is-' + status}
     title={record.integrity_detail || record.integrity_reason_code || undefined}>
     <ConsoleIcon name={status === 'healthy' ? 'check-circle' : status === 'corrupt' ? 'shield-check' : 'info'} size={14} />
-    {status === 'healthy' ? '正常' : status === 'corrupt' ? '损坏' : '未知'}
+    {label}
   </span>;
 };
 const verificationBadge = (record: MediaAsset) => {
@@ -404,7 +406,7 @@ export const MediaPage: React.FC = () => {
             </label>
             <ConsoleButton type="submit" size="sm">搜索</ConsoleButton>
           </form>
-          <ConsoleButton variant="danger" size="sm"
+          <ConsoleButton variant="danger" size="sm" className="nfc-media-destructive-action"
             leadingIcon={<ConsoleIcon name="trash" size={15} />}
             disabled={!isAdmin || selectedIds.length === 0 || deleteBusy || deletePreviewBusy}
             loading={deletePreviewBusy}
