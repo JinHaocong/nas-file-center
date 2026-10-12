@@ -424,7 +424,7 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
           '草稿未保存时禁止 Preview 与 Generate。请先保存新版本。', 'warning')
         : <>
           {errorMessage && <div className="nfc-v2-legacy-notice is-error" role="alert">
-            <ConsoleIcon name="alert-circle" size={18} />
+            <ConsoleIcon name="info" size={18} />
             <div><strong>操作失败</strong><p>{errorMessage}</p></div>
             <button type="button" aria-label="关闭操作错误" onClick={() => setErrorMessage(null)}>
               <ConsoleIcon name="x" size={16} />
