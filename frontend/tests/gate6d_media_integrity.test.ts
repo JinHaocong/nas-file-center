@@ -27,7 +27,9 @@ describe('Gate6-D media metadata + integrity UI', () => {
     assert.match(page, /DELETE_CORRUPT_FILES|createCorruptDeletePlan/);
     assert.match(page, /validated\.status !== 'ready'/);
     assert.match(page, /plansApi\.executePlan/);
-    assert.match(page, /disabled: !record\.can_direct_delete \|\| !isAdmin/);
+    assert.match(page, /record\.integrity_status === 'corrupt' && record\.can_direct_delete/);
+    assert.match(page, /disabled=\{!canSelect\(record\)/);
+    assert.match(page, /!isAdmin \|\| deleteInFlight\.current/);
   });
 
   test('media API binds deletion to the dedicated corrupt evidence endpoints', () => {
