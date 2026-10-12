@@ -26,7 +26,7 @@ describe('Console v2 native Media integrity and direct-unlink safety', () => {
       "status === 'corrupt' ? '损坏' : '未知'",
       "unverified: '未建立基线'", "baseline: '基线已建立'",
       "verified: 'SHA256 通过'", "changed: '内容变化'",
-      "unknown: '无法校验'", "'SHA256 变化'",
+      "unknown: '无法校验'", 'label="SHA256 变化"',
     ]) assert.ok(s.includes(token), token);
   });
   test('native desktop and mobile share corrupt-only selection with admin permission', () => {
