@@ -45,6 +45,7 @@ import './styles/console-v2-directory-diff.css';
 import './styles/console-v2-path-match.css';
 import './styles/console-v2-batch.css';
 import './styles/console-v2-settings.css';
+import './styles/console-v2-plan-cleanup-controls.css';
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
