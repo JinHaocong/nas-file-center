@@ -1,0 +1,113 @@
+/* Console v2 residual migration: completed-only scans and credentials form. */
+.nfc-v2-completed-scan-picker {
+  --nfc-v2-choice-bg:var(--nfc-surface-1,#fff);
+  --nfc-v2-choice-line:var(--nfc-hairline,#dbe3ee);
+  --nfc-v2-choice-text:var(--nfc-text,#172338);
+  --nfc-v2-choice-muted:var(--nfc-text-muted,#65738a);
+  --nfc-v2-choice-accent:var(--nfc-accent,#286ff1);
+}
+.nfc-v2-completed-scan-picker .nfc-completed-scan-picker-controls {
+  display:flex;align-items:flex-end;gap:9px;flex-wrap:wrap;min-width:0;
+}
+.nfc-v2-scan-choice { display:grid;gap:7px;flex:1 1 300px;min-width:0; }
+.nfc-v2-scan-choice label,.nfc-v2-completed-scan-picker .nfc-completed-scan-manual label {
+  color:var(--nfc-v2-choice-muted);font-size:11px;font-weight:650; }
+.nfc-v2-completed-scan-picker :is(input,select) {
+  box-sizing:border-box;min-width:0;width:100%;min-height:40px;
+  padding:9px 11px;border:1px solid var(--nfc-v2-choice-line);
+  border-radius:8px;background:var(--nfc-v2-choice-bg);color:var(--nfc-v2-choice-text);
+  font:inherit;font-size:12px;color-scheme:light; }
+.nfc-v2-completed-scan-picker .nfc-completed-scan-manual {
+  flex:1 1 270px;display:flex;align-items:flex-end;flex-wrap:wrap;gap:9px;min-width:0;
+}
+.nfc-v2-completed-scan-picker .nfc-completed-scan-manual label {
+  flex:1 0 100%; }
+.nfc-v2-completed-scan-picker .nfc-completed-scan-id-input {
+  flex:1 1 155px;width:auto; }
+.nfc-v2-completed-scan-picker .nfc-console-button { min-height:40px; }
+.nfc-v2-completed-scan-picker :is(button,input,select):disabled {
+  opacity:.58;cursor:not-allowed; }
+.nfc-v2-completed-scan-picker small[role='alert'] { color:#b43d54; }
+.nfc-v2-completed-scan-picker small[role='status'] { color:var(--nfc-v2-choice-muted); }
+.nfc-v2-completed-scan-picker .nfc-completed-scan-summary {
+  margin-top:12px;display:flex;align-items:center;flex-wrap:wrap;
+  gap:7px 12px;border:1px solid var(--nfc-v2-choice-line);border-radius:9px;
+  padding:11px;color:var(--nfc-v2-choice-text);font-size:12px; }
+.nfc-v2-completed-scan-picker .nfc-v2-scan-root {
+  max-width:100%;overflow-wrap:anywhere;
+  border:1px solid var(--nfc-v2-choice-line);border-radius:7px;
+  padding:3px 6px;background:var(--nfc-surface-2,#f6f8fc);
+}
+.nfc-v2-login-shell .nfc-login-theme {
+  display:flex;align-items:center;gap:8px;z-index:1;
+}
+.nfc-v2-login-shell .nfc-v2-login-theme-label {
+  display:flex;align-items:center;gap:7px;
+  color:var(--nfc-text-muted);font-size:12px;
+}
+.nfc-v2-login-shell .nfc-login-theme select {
+  box-sizing:border-box;min-height:40px;max-width:175px;padding:8px 11px;
+  border:1px solid var(--nfc-hairline);border-radius:8px;
+  background:var(--nfc-surface-1);color:var(--nfc-text);font:inherit;
+  font-size:12px;color-scheme:light;
+}
+.nfc-v2-login-form { display:grid;gap:17px; }
+.nfc-v2-login-field { display:grid;gap:7px; }
+.nfc-v2-login-field > label {
+  color:var(--nfc-text-muted);font-size:12px;font-weight:650;
+}
+.nfc-v2-login-input-wrap {
+  display:flex;align-items:center;gap:9px;padding:0 12px;
+  border:1px solid var(--nfc-hairline);border-radius:9px;
+  background:var(--nfc-surface-1);color:var(--nfc-text-muted);
+}
+.nfc-v2-login-input-wrap > svg { flex:0 0 auto; }
+.nfc-v2-login-input-wrap:focus-within {
+  outline:2px solid var(--nfc-accent);outline-offset:2px;
+}
+.nfc-v2-login-input-wrap input {
+  box-sizing:border-box;border:0;outline:0;background:transparent;
+  color:var(--nfc-text);width:100%;min-width:0;min-height:42px;
+  font:inherit;font-size:13px;
+}
+.nfc-v2-login-shell .nfc-login-submit { width:100%;min-height:44px;justify-content:center; }
+.nfc-v2-login-alert {
+  display:flex;align-items:center;gap:9px;min-width:0;
+  padding:10px;margin-bottom:16px;border:1px solid #c97585;
+  border-radius:9px;background:var(--nfc-surface-2);color:#b33d55;
+  font-size:12px;line-height:1.5; }
+.nfc-v2-login-alert > svg { flex:0 0 auto; }
+.nfc-v2-login-alert > span { flex:1;min-width:0;overflow-wrap:anywhere; }
+.nfc-v2-login-alert button { background:transparent;border:0;color:inherit;
+  min-width:32px;min-height:32px;cursor:pointer; }
+.nfc-v2-completed-scan-picker :is(button,input,select):focus-visible,
+.nfc-v2-login-shell :is(button,select):focus-visible {
+  outline:2px solid var(--nfc-accent);outline-offset:2px;
+}
+[data-theme='dark'] .nfc-v2-completed-scan-picker {
+  --nfc-v2-choice-bg:var(--nfc-surface-1,#1a2434);
+  --nfc-v2-choice-line:var(--nfc-hairline,#36435a);
+  --nfc-v2-choice-text:var(--nfc-text,#f1f5fb);
+  --nfc-v2-choice-muted:var(--nfc-text-muted,#afbdce);
+  --nfc-v2-choice-accent:var(--nfc-accent,#83b5ff);
+}
+[data-theme='dark'] .nfc-v2-completed-scan-picker :is(input,select),
+[data-theme='dark'] .nfc-v2-login-shell .nfc-login-theme select {
+  color-scheme:dark; }
+[data-theme='dark'] .nfc-v2-login-alert { color:#ff96ae;border-color:#b45c72; }
+@media(max-width:767px) {
+  .nfc-v2-completed-scan-picker .nfc-completed-scan-picker-controls {
+    align-items:stretch;flex-direction:column; }
+  .nfc-v2-completed-scan-picker :is(input,select,.nfc-console-button) {
+    min-height:44px; }
+  .nfc-v2-completed-scan-picker .nfc-v2-scan-choice,
+  .nfc-v2-completed-scan-picker .nfc-completed-scan-manual {
+    width:100%;flex:0 1 auto; }
+  .nfc-v2-login-shell .nfc-v2-login-theme-label span { display:none; }
+  .nfc-v2-login-shell .nfc-login-theme select,
+  .nfc-v2-login-shell .nfc-login-submit { min-height:44px; }
+}
+@media(prefers-reduced-motion:reduce) {
+  .nfc-v2-login-shell *, .nfc-v2-completed-scan-picker * {
+    animation:none;transition:none;scroll-behavior:auto; }
+}
