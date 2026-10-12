@@ -7,12 +7,12 @@ const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8'
 
 describe('v0.4.0 C5B file tools surfaces contract', () => {
   test('Batch uses product form surfaces while preserving operation payload semantics', () => {
-    const source = read('src/pages/Batch/index.tsx');
+    const source = read('src/pages/Batch/index.tsx') + '\n' + read('src/utils/batchDraftSafety.ts');
     for (const symbol of ['PageHeader', 'DataPanel', 'ActionBar']) {
       assert.match(source, new RegExp(symbol));
     }
     assert.match(source, /nfc-batch-operation-grid/);
-    assert.match(source, /kind:\s*`batch-\$\{op\}`/);
+    assert.match(source, /kind:\s*['"]batch-['"]\s*\+\s*op/);
     assert.match(source, /operation:\s*op/);
     assert.match(source, /value=["']hardlink["'][^\n]*disabled/);
     assert.match(source, /value=["']reflink["'][^\n]*disabled/);

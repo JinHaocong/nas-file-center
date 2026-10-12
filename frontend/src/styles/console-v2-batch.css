@@ -1,0 +1,65 @@
+/* Console v2 Batch — native Draft-only form, no direct filesystem execution. */
+.nfc-v2-batch {
+  --nfc-batch-paper:var(--nfc-surface-1);
+  --nfc-batch-soft:var(--nfc-surface-2);
+  --nfc-batch-text:var(--nfc-text);
+  --nfc-batch-muted:var(--nfc-text-muted);
+  --nfc-batch-line:var(--nfc-hairline);
+  --nfc-batch-accent:var(--nfc-accent);
+}
+.nfc-v2-batch-form { display:grid;gap:18px;min-width:0; }
+.nfc-v2-batch-field { display:grid;gap:8px;min-width:0;color:var(--nfc-batch-text);
+  font-size:12px;font-weight:650; }
+.nfc-v2-batch-field > input,.nfc-v2-batch-field > textarea {
+  width:100%;box-sizing:border-box;border:1px solid var(--nfc-batch-line);
+  border-radius:9px;min-height:42px;padding:10px 12px;
+  color:var(--nfc-batch-text);background:var(--nfc-batch-paper);font:inherit;font-size:12px; }
+.nfc-v2-batch-field > textarea { min-height:160px;resize:vertical;line-height:1.7; }
+.nfc-v2-batch-field > small { color:var(--nfc-batch-muted);font-weight:400;
+  font-size:11px;line-height:1.6; }
+.nfc-v2-batch-operations { min-width:0;border:0;padding:0;margin:0; }
+.nfc-v2-batch-operations legend { color:var(--nfc-batch-text);font-size:12px;
+  font-weight:650;margin-bottom:9px; }
+.nfc-v2-batch .nfc-batch-operation-grid { display:grid;gap:10px; }
+.nfc-v2-batch-radio { display:flex;align-items:center;gap:9px;cursor:pointer;
+  border:1px solid var(--nfc-batch-line);border-radius:9px;
+  padding:11px;min-height:52px;box-sizing:border-box;
+  color:var(--nfc-batch-text);background:var(--nfc-batch-paper); }
+.nfc-v2-batch-radio.is-selected { border-color:var(--nfc-batch-accent);
+  background:var(--nfc-batch-soft); }
+.nfc-v2-batch-radio input { width:17px;height:17px;flex:0 0 auto;
+  accent-color:var(--nfc-batch-accent); }
+.nfc-v2-batch-radio span { display:grid;gap:4px;font-size:12px;font-weight:650; }
+.nfc-v2-batch-radio small { color:var(--nfc-batch-muted);font-weight:400;font-size:11px; }
+.nfc-v2-batch-radio.is-disabled { opacity:.56;cursor:not-allowed; }
+.nfc-v2-batch-notice { display:flex;align-items:flex-start;gap:10px;padding:13px;
+  border-radius:10px;border:1px solid var(--nfc-batch-line);
+  background:var(--nfc-batch-soft);font-size:12px;line-height:1.65;
+  color:var(--nfc-batch-text); }
+.nfc-v2-batch-notice > svg { flex:0 0 auto;margin-top:2px;color:var(--nfc-batch-accent); }
+.nfc-v2-batch-notice p { margin:3px 0 0;color:var(--nfc-batch-muted); }
+.nfc-v2-batch-error { border:1px solid #cc7085;border-radius:9px;
+  padding:9px 11px;background:color-mix(in srgb,#d34a65 9%,var(--nfc-batch-paper));
+  color:var(--nfc-batch-text);font-size:12px; }
+.nfc-v2-batch :is(button,input,textarea):focus-visible {
+  outline:2px solid var(--nfc-batch-accent);outline-offset:2px; }
+[data-theme='dark'] .nfc-v2-batch {
+  --nfc-batch-paper:var(--nfc-surface-1);
+  --nfc-batch-soft:var(--nfc-surface-2);
+  --nfc-batch-text:var(--nfc-text);
+  --nfc-batch-muted:var(--nfc-text-muted);
+  --nfc-batch-line:var(--nfc-hairline);
+  --nfc-batch-accent:var(--nfc-accent);
+}
+@media (max-width:767px) {
+  .nfc-v2-batch .nfc-batch-operation-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .nfc-v2-batch-radio { min-height:66px; }
+  .nfc-v2-batch-field > input,.nfc-v2-batch-field > textarea,
+  .nfc-v2-batch .nfc-console-button { min-height:44px; }
+}
+@media (max-width:390px) {
+  .nfc-v2-batch .nfc-batch-operation-grid { grid-template-columns:1fr; }
+}
+@media (prefers-reduced-motion:reduce) {
+  .nfc-v2-batch * { animation:none;transition:none;scroll-behavior:auto; }
+}
