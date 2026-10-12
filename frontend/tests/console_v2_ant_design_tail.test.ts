@@ -9,7 +9,7 @@ const audit = () => read('src/pages/Audit/index.tsx');
 const rebuild = () => read('src/components/plans/StaleRebuildDrawer.tsx');
 
 describe('Console v2 residual Ant Design cleanup — audited native safety', () => {
-  test('four migrated runtime components no longer use AntD dependencies', () => {
+  test('migrated runtime components no longer use AntD dependencies', () => {
     for (const path of [
       'src/pages/Audit/index.tsx',
       'src/components/tasks/TaskStatusTag.tsx',
@@ -18,6 +18,7 @@ describe('Console v2 residual Ant Design cleanup — audited native safety', () 
       'src/contexts/AuthContext.tsx',
       'src/pages/Organizer/index.tsx',
       'src/hooks/useResponsive.ts',
+      'src/pages/Plans/OperationJournalDrawer.tsx',
     ]) {
       const source = read(path);
       assert.doesNotMatch(source, /from ['"]antd['"]|from ['"]@ant-design\/icons['"]/);
@@ -33,7 +34,6 @@ describe('Console v2 residual Ant Design cleanup — audited native safety', () 
       "'src/components/workflows/OrganizerProfileFields.tsx'",
       "'src/contexts/ThemeContext.tsx'",
       "'src/pages/Login/index.tsx'",
-      "'src/pages/Plans/OperationJournalDrawer.tsx'",
       "'src/pages/Plans/PlanDetail.tsx'",
       "'src/pages/Workflows/UtilityWorkflowPreviewPanel.tsx'",
       "'src/pages/Workflows/WorkflowPreviewPanelLegacy.tsx'",
@@ -219,4 +219,40 @@ describe('Console v2 residual Ant Design cleanup — audited native safety', () 
     assert.ok(main.includes("import './styles/console-v2-audit-and-worker.css'"));
     assert.ok(main.includes("import './styles/console-v2-stale-rebuild.css'"));
   });
+
+  test('native journal sheet keeps server-side paginated read-only Worker evidence', () => {
+    const s = read('src/pages/Plans/OperationJournalDrawer.tsx');
+    for (const token of [
+      "queryKey: ['planOperationJournal', planId, page, pageSize]",
+      'plansApi.getOperationJournal(planId, page, pageSize)',
+      'enabled: open && !!planId',
+      '<ConsoleSheet', '<ResponsiveDataView',
+      '<ConsolePagination', 'pageSizes={[10, 20, 50]}',
+      '<CodePath value={beforePath(record)}',
+      '<CodePath value={afterPath(record)}',
+      'formatBytes(record.before.size)', 'formatBytes(record.after.size)',
+      'record.metadata_before?.inode', 'record.metadata_after?.inode',
+      'formatDateTime(record.created_at)',
+      'record.before', 'record.after', 'record.metadata_before', 'record.metadata_after',
+      'JSON.stringify(value ?? null, null, 2)',
+      '<details', '<summary>查看原始审计数据</summary>',
+      'isError &&', 'isLoading &&', 'role="alert"', 'role="status"',
+      'void refetch()', 'setPageSize(nextSize)', 'setPage(1)',
+    ]) assert.ok(s.includes(token), token);
+    assert.doesNotMatch(s, /from ['"]antd['"]|from ['"]@ant-design\/icons['"]|<Drawer\b|<Table\b/);
+    assert.doesNotMatch(s, /useMutation|deleteOperationJournal|unlink|purge/);
+  });
+
+  test('native journal styles keep dark/mobile/focus/reduced-motion contract', () => {
+    const css = read('src/styles/console-v2-operation-journal.css');
+    for (const token of [
+      '.nfc-v2-operation-journal', '.nfc-v2-journal-table',
+      '.nfc-journal-json-grid', "data-theme='dark'",
+      'max-width:767px', 'focus-visible', 'prefers-reduced-motion:reduce',
+      'min-height:44px',
+    ]) assert.ok(css.includes(token), token);
+    assert.ok(read('src/main.tsx').includes(
+      "import './styles/console-v2-operation-journal.css'"));
+  });
+
 });

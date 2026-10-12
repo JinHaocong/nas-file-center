@@ -39,7 +39,12 @@ describe('v0.4.4 deep UI detail and mobile system', () => {
     const journal = read('src/pages/Plans/OperationJournalDrawer.tsx');
     const stale = read('src/components/plans/StaleRebuildDrawer.tsx');
     const revisions = read('src/components/workflows/RevisionDrawer.tsx');
-    assert.match(journal, /nfc-operation-journal-drawer/);
+    assert.match(journal, /<ConsoleSheet/);
+    assert.match(journal, /nfc-v2-operation-journal/);
+    assert.match(journal, /<ResponsiveDataView/);
+    const journalCss = read('src/styles/console-v2-operation-journal.css');
+    assert.match(journalCss, /@media\(max-width:767px\)/);
+    assert.match(journalCss, /width:100vw/);
     assert.match(stale, /nfc-stale-rebuild-drawer/);
     const sharedSheet = read('src/components/ui/ConsoleSheet.tsx');
     const revisionCss = read('src/styles/console-v2-workflow-revisions.css');
