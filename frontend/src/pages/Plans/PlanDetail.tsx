@@ -180,7 +180,6 @@ export const PlanDetailPage: React.FC = () => {
 
   const isSafeMode = !settings?.allow_mutation;
   const hasActiveJob = Boolean(plan.active_work_job_id);
-  const executeDisabled = isSafeMode || hasActiveJob;
 
   const journalTotal = !isJournalLoading && !isJournalError ? (journalData?.total ?? 0) : 0;
   const isWorkflowPlan = Boolean(isWorkflowPlanMetadata(plan.metadata));
@@ -447,99 +446,57 @@ export const PlanDetailPage: React.FC = () => {
         </ActionBar>
       </section>
 
-      <div className="nfc-plan-alert-stack">
-        {(plan.kind === 'undo' || plan.metadata?.is_undo) && (
-          <Alert
-            message={`撤销还原计划 (Undo Plan for #${plan.metadata?.undo_of_plan_id || plan.metadata?.undo_for_plan_id || 'Unknown'})`}
-            description={
-              <div>
-                本计划为计划 #{plan.metadata?.undo_of_plan_id || plan.metadata?.undo_for_plan_id} 的撤销还原计划。所有操作项已根据底层操作日志严格倒序排布。
-                <div className="nfc-alert-emphasis">
-                  安全声明：Undo 计划绝不支持直接原地执行，必须严格按照常规生命周期完成 Freeze 冻结与实时 SHA256 校验后方可通过任务中心安全执行。
-                </div>
+      <div className="nfc-plan-alert-stack nfc-v2-plan-alerts">
+        {(plan.kind === 'undo' || plan.metadata?.is_undo) &&
+          notice(
+            '撤销还原计划 (Undo Plan for #' +
+              (plan.metadata?.undo_of_plan_id || plan.metadata?.undo_for_plan_id || 'Unknown') + ')',
+            <div>
+              本计划为原计划的撤销还原计划。所有操作项已根据底层 Operation Journal 严格倒序排布。
+              <div className="nfc-alert-emphasis">
+                安全声明：Undo 计划绝不支持直接原地执行，必须严格按照常规生命周期完成 Freeze 冻结与实时 SHA256 校验后方可通过任务中心安全执行。
               </div>
-            }
-            type="info"
-            showIcon
-            icon={<RollbackOutlined />}
-            action={
-              plan.metadata?.undo_of_plan_id || plan.metadata?.undo_for_plan_id ? (
-                <Button
-                  size="small"
-                  onClick={() =>
-                    navigate(
-                      `/plans/${plan.metadata?.undo_of_plan_id || plan.metadata?.undo_for_plan_id}`
-                    )
-                  }
-                >
-                  查看原计划
-                </Button>
-              ) : undefined
-            }
-          />
+            </div>, 'info',
+            (plan.metadata?.undo_of_plan_id || plan.metadata?.undo_for_plan_id) &&
+              <ConsoleButton size="sm"
+                onClick={() => navigate('/plans/' +
+                  (plan.metadata?.undo_of_plan_id || plan.metadata?.undo_for_plan_id))}>
+                查看原计划
+              </ConsoleButton>,
+          )}
+        {plan.status === 'stale' && notice(
+          isStaleDedupePlan
+            ? '去重执行计划已过期锁定 (PLAN_STALE)'
+            : isStaleWorkflowPlan
+              ? '工作流计划已过期 (PLAN_STALE)'
+              : '计划已过期 (PLAN_STALE)',
+          isStaleDedupePlan ? <div>
+            去重候选文件已被外部修改、移动、删除或哈希变动。去重计划涉及数据安全，严禁原地增量重建。
+            <div className="nfc-alert-followup">
+              处置建议：请重新执行全量扫描，获取最新重复组快照后
+              {workflowMeta
+                ? '返回关联工作流（#' + workflowMeta.workflow_id + '）重新生成去重计划。'
+                : '前往高级去重页面重新生成计划草案。'}
+            </div>
+          </div> : isStaleWorkflowPlan
+            ? '计划中的源文件已被外部修改、移动、删除或替换。计划已锁定。可基于原工作流历史版本与快照参数重新构建全新草稿。'
+            : '计划中的源文件已被外部修改、移动、删除或替换。计划已锁定，严禁执行。如需继续操作，请删除此计划并重新生成。',
+          'error',
+          isStaleDedupePlan
+            ? <ActionBar compact>
+                {workflowMeta && <ConsoleButton variant="primary" size="sm"
+                  onClick={() => navigate('/workflows/' + workflowMeta.workflow_id)}>
+                  返回关联工作流
+                </ConsoleButton>}
+                <ConsoleButton size="sm" onClick={() => navigate('/scans')}>前往扫描任务</ConsoleButton>
+              </ActionBar>
+            : isStaleWorkflowPlan
+              ? <ConsoleButton size="sm" variant="primary"
+                  onClick={() => setRebuildDrawerOpen(true)}>重建计划预览</ConsoleButton>
+              : undefined,
         )}
-
-        {plan.status === 'stale' && (
-          <Alert
-            message={
-              isStaleDedupePlan
-                ? '去重执行计划已过期锁定 (PLAN_STALE)'
-                : isStaleWorkflowPlan
-                  ? '工作流计划已过期 (PLAN_STALE)'
-                  : '计划已过期 (PLAN_STALE)'
-            }
-            description={
-              isStaleDedupePlan ? (
-                <div>
-                  去重候选文件已被外部修改、移动、删除或哈希变动。去重计划涉及数据安全，严禁原地增量重建。
-                  <div className="nfc-alert-followup">
-                    处置建议：请先重新执行全量扫描任务以获取最新重复组快照，然后
-                    {workflowMeta ? (
-                      <span>返回关联工作流（#{workflowMeta.workflow_id}）重新生成去重计划。</span>
-                    ) : (
-                      <span>前往高级去重页面重新生成计划草案。</span>
-                    )}
-                  </div>
-                </div>
-              ) : isStaleWorkflowPlan ? (
-                '计划中的源文件已被外部修改、移动、删除或替换。为保障 NAS 数据安全，该计划已被锁定。由于此计划源自工作流，您可以基于原始工作流历史版本与快照参数重新构建全新草稿。'
-              ) : (
-                '计划中的源文件已被外部修改、移动、删除或替换。为保障 NAS 数据安全，该计划已被锁定，严禁执行。如需继续操作，请删除此计划并重新生成。'
-              )
-            }
-            type="error"
-            showIcon
-            action={
-              isStaleDedupePlan ? (
-                <ActionBar compact>
-                  {workflowMeta && (
-                    <Button
-                      type="primary"
-                      onClick={() => navigate(`/workflows/${workflowMeta.workflow_id}`)}
-                    >
-                      返回关联工作流
-                    </Button>
-                  )}
-                  <Button onClick={() => navigate('/scans')}>前往扫描任务</Button>
-                </ActionBar>
-              ) : isStaleWorkflowPlan ? (
-                <Button type="primary" onClick={() => setRebuildDrawerOpen(true)}>
-                  重建计划预览
-                </Button>
-              ) : undefined
-            }
-          />
-        )}
-
-        {isSafeMode && (
-          <Alert
-            message="只读安全保护模式生效中"
-            description="系统当前以 ALLOW_MUTATION=false 运行。您可以安全进行 Dry Run 计划生成与 SHA256 校验，但无法直接触发 Execute 执行。"
-            type="info"
-            showIcon
-            icon={<LockOutlined />}
-          />
-        )}
+        {isSafeMode && notice('只读安全保护模式生效中',
+          '系统当前以 ALLOW_MUTATION=false 运行。可安全生成 Dry Run 与 SHA256 校验，但不能直接触发 Execute。')}
       </div>
 
       <DataPanel
