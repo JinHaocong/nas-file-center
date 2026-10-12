@@ -29,7 +29,6 @@ approved NAS File Center mockup. User-selectable dark/system modes remain.
 - [x] Advanced Dedupe read-only authority/safety lineage and role-guarded storage action panels (PR #146).
 - [x] Advanced Dedupe Radix decision explanation sheet + native read-only preview summary (PR #147).
 - [x] Shared copyable CodePath: native full-text path, explicit copy, non-HTTPS fallback and responsive focus (PR #148).
-- [ ] Remaining Directory Diff, Path Match/Batch, Settings, other Ant screens and shared controls.
 - [ ] Shared dialogs, select, checkbox, forms and destructive confirmation primitives.
 - [x] Workflow builder native action bar, read-only status, Radix mode reset / unsaved-exit / rollback confirmations (PR #149).
 - [x] Workflow builder native name/description fields, accessible mode radios, trim validation and dirty guards (PR #150).
@@ -46,6 +45,7 @@ approved NAS File Center mockup. User-selectable dark/system modes remain.
 - [x] Native first-level directory/file Rename editors using one controlled schema, literal-mode preview, conflict-safe Plan and responsive results (PR #161).
 - [x] Native Advanced Regex Rename: typed wire schema, root/rule-bound readonly Preview, collision-safe Plan, semantic responsive results and native mode switch (PR #162).
 - [x] Native Filename Audit: read-only scoped Preview, advisory issues, selected-only rechecked Rename Draft, stale-response guards, CSV protection and responsive results (PR #163).
+- [x] Native Directory Diff: two-root guarded read-only Preview, canonical single-file SHA256, stale-response isolation, semantic desktop/mobile results and CSV formula protection (PR #164).
 - [ ] Remove all `antd` and `@ant-design/icons` imports and their lockfile dependencies.
 - [ ] Consolidate historical UI CSS overrides into an owned, maintainable theme system.
 - [ ] Full TypeScript, frontend unit/regression, backend, Docker and dependency-audit gates.
