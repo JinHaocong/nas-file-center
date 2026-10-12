@@ -19,8 +19,8 @@ describe('Batch rename extension replacement UI contract', () => {
     assert.ok(payloadSource.includes('source_extension: draft.source_extension'));
     assert.ok(payloadSource.includes('target_extension: draft.target_extension'));
     assert.ok(renamePageSource.includes('batchApi.previewRename(payload)'));
-    assert.match(domainSource, /source_extension\\?:\\s*string/);
-    assert.match(domainSource, /target_extension\\?:\\s*string/);
+    assert.ok(domainSource.includes('source_extension?: string'));
+    assert.ok(domainSource.includes('target_extension?: string'));
   });
   test('UI explicitly warns extension replacement renames, not converts', () => {
     assert.match(renamePageSource, /不会转换|不做.*转码|仅.*重命名/);
