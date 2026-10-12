@@ -140,7 +140,7 @@ export const QuarantinePage: React.FC = () => {
     },
   });
 
-  const clearBulkSelection = () => { setSelectedEntryIds([]); setSelectionNotice(''); };
+  const clearBulkSelection = () => { filterRequestEpoch.current += 1; setSelectedEntryIds([]); setSelectionNotice(''); };
   const invalidateFilteredRequests = () => {
     filterRequestEpoch.current += 1;
     terminalRequestEpoch.current += 1;
@@ -183,10 +183,12 @@ export const QuarantinePage: React.FC = () => {
       toast.info('当前页没有可批量操作的 active 条目');
       return;
     }
+    filterRequestEpoch.current += 1;
     setSelectedEntryIds(current => Array.from(new Set([...current, ...currentPageSelectableIds])));
     setSelectionNotice('已选择当前页 ' + currentPageSelectableIds.length + ' 个 active 条目；翻页后选择仍保留');
   };
   const toggleCurrentPage = (checked: boolean) => {
+    filterRequestEpoch.current += 1;
     setSelectedEntryIds(current => checked
       ? Array.from(new Set([...current, ...currentPageSelectableIds]))
       : current.filter(id => !currentPageSelectableIds.includes(id)));
@@ -194,6 +196,7 @@ export const QuarantinePage: React.FC = () => {
   };
   const toggleSelected = (record: QuarantineEntry, checked: boolean) => {
     if (record.state !== 'active') return;
+    filterRequestEpoch.current += 1;
     setSelectedEntryIds(current => checked
       ? Array.from(new Set([...current, record.id]))
       : current.filter(id => id !== record.id));
@@ -498,14 +501,14 @@ export const QuarantinePage: React.FC = () => {
         isSafeMode={isSafeMode} onClose={() => { setBulkRestoreOpen(false); setBulkRestoreEntryIds([]); }}
         onPlanCreated={plan => {
           setBulkRestoreOpen(false); setBulkRestoreEntryIds([]); clearBulkSelection();
-          navigate('/plans/' + plan.id);
+          navigate(`/plans/${plan.id}`);
         }} />
       <BulkPurgeModal open={bulkPurgeOpen} entryIds={bulkPurgeEntryIds}
         isAdmin={Boolean(isAdmin)} allowMutation={!isSafeMode} allowDelete={allowDelete}
         onClose={() => { setBulkPurgeOpen(false); setBulkPurgeEntryIds([]); }}
         onPlanCreated={plan => {
           setBulkPurgeOpen(false); setBulkPurgeEntryIds([]); clearBulkSelection();
-          navigate('/plans/' + plan.id);
+          navigate(`/plans/${plan.id}`);
         }} />
     </div>
   );
