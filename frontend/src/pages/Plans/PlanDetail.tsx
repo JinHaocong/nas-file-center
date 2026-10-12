@@ -183,12 +183,6 @@ export const PlanDetailPage: React.FC = () => {
   const executeDisabled = isSafeMode || hasActiveJob;
 
   const journalTotal = !isJournalLoading && !isJournalError ? (journalData?.total ?? 0) : 0;
-  const canCreateUndo =
-    (plan.status === 'completed' || plan.status === 'partial') &&
-    journalTotal > 0 &&
-    !isJournalLoading &&
-    !isJournalError;
-
   const isWorkflowPlan = Boolean(isWorkflowPlanMetadata(plan.metadata));
   const workflowMeta = isWorkflowPlan ? (plan.metadata as WorkflowPlanMetadata) : null;
   const isDedupeWorkflowPlan = Boolean(
@@ -207,74 +201,69 @@ export const PlanDetailPage: React.FC = () => {
 
   const lifecycleIndex = getLifecycleIndex(plan.status);
 
-  const columns = [
-    {
-      title: '序号',
-      dataIndex: 'sequence',
-      key: 'sequence',
-      width: 72,
-      render: (seq: number) => <span className="nfc-mono">#{seq}</span>,
-    },
-    {
-      title: '操作',
-      dataIndex: 'operation',
-      key: 'operation',
-      width: 112,
-      render: (op: string) => (
-        <span className={`nfc-operation-badge nfc-operation-${op}`}>{op}</span>
-      ),
-    },
-    {
-      title: '源文件 / 待操作路径',
-      dataIndex: 'source',
-      key: 'source',
-      render: (value: string) => <CodePath value={value} />,
-    },
-    {
-      title: '目标路径 / 保留副本',
-      key: 'target_or_keep',
-      render: (_: unknown, record: PlanItem) => {
-        if (record.target) {
-          return (
-            <div className="nfc-target-path">
-              <ArrowRightOutlined />
-              <CodePath value={record.target} />
-            </div>
-          );
-        }
-        if (record.keep) {
-          return (
-            <div className="nfc-target-path">
-              <span className="nfc-kind-badge">keep</span>
-              <CodePath value={record.keep} />
-            </div>
-          );
-        }
-        return <span className="nfc-table-muted">—</span>;
-      },
-    },
-    {
-      title: '预估容量',
-      dataIndex: 'expected_size',
-      key: 'expected_size',
-      width: 110,
-      render: (bytes: number) => (bytes > 0 ? formatBytes(bytes) : '—'),
-    },
-    {
-      title: '校验状态',
-      dataIndex: 'state',
-      key: 'state',
-      width: 122,
-      render: (state: string) => <StatusBadge status={state} />,
-    },
-    {
-      title: '执行备注',
-      dataIndex: 'reason',
-      key: 'reason',
-      width: 180,
-      render: (reason: string) => reason || <span className="nfc-table-muted">—</span>,
-    },
-  ];
+  const pendingAction = freezeMutation.isPending || validateMutation.isPending ||
+    executeMutation.isPending || undoPlanMutation.isPending || deleteMutation.isPending;
+  const actionContext = {
+    plan, allowMutation: !isSafeMode, journalTotal,
+    journalReady: !isJournalLoading && !isJournalError,
+    pending: pendingAction || actionInFlight.current,
+  };
+  const canFreeze = canPlanLifecycleAction('freeze', actionContext);
+  const canValidate = canPlanLifecycleAction('validate', actionContext);
+  const canExecute = canPlanLifecycleAction('execute', actionContext);
+  const canUndo = canPlanLifecycleAction('undo', actionContext);
+  const currentConfirmation = confirmation
+    ? planConfirmationSnapshot(confirmation.action, actionContext) : null;
+  const confirmationValid = samePlanConfirmation(confirmation, currentConfirmation);
+  const beginAction = (action: 'freeze' | 'validate') => {
+    if (actionInFlight.current || !canPlanLifecycleAction(action, actionContext)) return;
+    actionInFlight.current = true;
+    const mutation = action === 'freeze' ? freezeMutation : validateMutation;
+    mutation.mutate(undefined, { onSettled: () => { actionInFlight.current = false; } });
+  };
+  const openConfirmation = (action: 'execute' | 'undo') => {
+    if (!actionInFlight.current) setConfirmation(planConfirmationSnapshot(action, actionContext));
+  };
+  const submitConfirmation = async () => {
+    if (!confirmation || actionInFlight.current || !confirmationValid ||
+        !canPlanLifecycleAction(confirmation.action, actionContext)) {
+      setConfirmation(null);
+      return;
+    }
+    const action = confirmation.action;
+    actionInFlight.current = true;
+    try {
+      if (action === 'execute') {
+        await executeMutation.mutateAsync();
+      } else {
+        await undoPlanMutation.mutateAsync();
+      }
+    } catch {
+      // Existing mutation onError reports the server's error.
+    } finally {
+      actionInFlight.current = false;
+      setConfirmation(null);
+    }
+  };
+  const renderTarget = (item: PlanItem) => {
+    if (item.target) return <div className="nfc-target-path">
+      <ConsoleIcon name="arrow-right" size={16} /><CodePath value={item.target} />
+    </div>;
+    if (item.keep) return <div className="nfc-target-path">
+      <span className="nfc-kind-badge">keep</span><CodePath value={item.keep} />
+    </div>;
+    return <span className="nfc-table-muted">—</span>;
+  };
+  const notice = (
+    title: string, description: React.ReactNode,
+    tone: 'info' | 'warning' | 'error' = 'info', action?: React.ReactNode,
+  ) => <div className={'nfc-v2-plan-notice is-' + tone}
+    role={tone === 'error' || tone === 'warning' ? 'alert' : 'note'}>
+    <ConsoleIcon name={tone === 'warning' ? 'shield-check' : 'info'} size={20} />
+    <div className="nfc-v2-plan-notice-body"><strong>{title}</strong>
+      <div className="nfc-v2-plan-notice-description">{description}</div></div>
+    {action && <div className="nfc-v2-plan-notice-actions">{action}</div>}
+  </div>;
 
   const summaryItems = [
     { label: '计划 ID', value: <span className="nfc-mono">#{plan.id}</span> },
@@ -309,7 +298,7 @@ export const PlanDetailPage: React.FC = () => {
   const mobileItems = (
     <div className="nfc-mobile-record-list">
       {(plan.items || []).length === 0 ? (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无计划项" />
+        <ConsoleEmpty title="暂无计划项" description="当前计划没有可展示的操作项。" />
       ) : (
         (plan.items || []).map((item: PlanItem) => (
           <article className="nfc-plan-item-mobile-card" key={item.id || `${item.source}_${item.sequence}`}>
