@@ -1,0 +1,96 @@
+/* Console v2 Settings — native controls and semantic sessions (scoped after pages/settings.css). */
+.nfc-v2-settings {
+  --nfc-v2-set-paper:var(--nfc-surface-1);
+  --nfc-v2-set-soft:var(--nfc-surface-2);
+  --nfc-v2-set-line:var(--nfc-hairline);
+  --nfc-v2-set-ink:var(--nfc-text);
+  --nfc-v2-set-muted:var(--nfc-text-muted);
+  --nfc-v2-set-accent:var(--nfc-accent);
+}
+.nfc-v2-settings-notice { display:flex;align-items:flex-start;gap:10px;min-width:0;
+  margin:0;border:1px solid var(--nfc-v2-set-line);border-radius:9px;
+  padding:12px 13px;background:var(--nfc-v2-set-soft);color:var(--nfc-v2-set-ink);
+  font-size:12px;line-height:1.6; }
+.nfc-v2-settings-notice > svg { flex:0 0 auto;margin-top:2px;color:var(--nfc-v2-set-accent); }
+.nfc-v2-settings-notice p { margin:4px 0 0;color:var(--nfc-v2-set-muted); }
+.nfc-v2-settings .nfc-settings-inline-control > input,
+.nfc-v2-settings .nfc-settings-inline-control > select,
+.nfc-v2-settings .nfc-settings-control > input,
+.nfc-v2-settings .nfc-settings-control > select {
+  box-sizing:border-box;width:100%;min-width:0;min-height:40px;
+  border:1px solid var(--nfc-v2-set-line);border-radius:8px;
+  background:var(--nfc-v2-set-paper);padding:9px 10px;
+  color:var(--nfc-v2-set-ink);font:inherit;font-size:12px; }
+.nfc-v2-settings :is(button,input,select):focus-visible {
+  outline:2px solid var(--nfc-v2-set-accent);outline-offset:2px; }
+.nfc-v2-settings .nfc-settings-inline-control > input:disabled,
+.nfc-v2-settings .nfc-settings-control > input:disabled,
+.nfc-v2-settings select:disabled { opacity:.57;cursor:not-allowed; }
+.nfc-v2-settings .nfc-settings-panel-body > .nfc-v2-settings-notice,
+.nfc-v2-settings .nfc-settings-stack > .nfc-v2-settings-notice { margin:0; }
+.nfc-v2-settings-status { display:inline-flex;max-width:100%;align-items:center;
+  border:1px solid var(--nfc-v2-set-line);border-radius:7px;padding:4px 8px;
+  background:var(--nfc-v2-set-soft);font-size:11px;line-height:1.45;
+  color:var(--nfc-v2-set-ink);font-weight:650; }
+.nfc-v2-settings-status.tone-success { border-color:color-mix(in srgb,#258c66 45%,var(--nfc-v2-set-line));
+  background:color-mix(in srgb,#258c66 10%,var(--nfc-v2-set-paper)); }
+.nfc-v2-settings-status.tone-warning { border-color:color-mix(in srgb,#d19b43 50%,var(--nfc-v2-set-line));
+  background:color-mix(in srgb,#d19b43 10%,var(--nfc-v2-set-paper)); }
+.nfc-v2-settings-status.tone-danger { border-color:color-mix(in srgb,#ce4664 55%,var(--nfc-v2-set-line));
+  background:color-mix(in srgb,#ce4664 10%,var(--nfc-v2-set-paper)); }
+.nfc-v2-settings .nfc-settings-subpanel > .nfc-action-bar { align-items:end; }
+.nfc-v2-settings .nfc-settings-retention-actions { display:flex;flex-wrap:wrap;gap:8px; }
+.nfc-v2-settings-switch { display:inline-flex;align-items:center;gap:8px;min-height:40px;
+  cursor:pointer;color:var(--nfc-v2-set-ink);font-size:12px;font-weight:650; }
+.nfc-v2-settings-switch input { width:19px;height:19px;accent-color:var(--nfc-v2-set-accent); }
+.nfc-v2-settings-error { color:var(--nfc-v2-set-ink);
+  border:1px solid #ce4664;border-radius:8px;padding:10px;background:var(--nfc-v2-set-soft); }
+.nfc-v2-settings-loading { padding:20px 18px;color:var(--nfc-v2-set-muted);font-size:12px; }
+.nfc-v2-settings-muted { color:var(--nfc-v2-set-muted);font-size:11px; }
+.nfc-v2-settings-table-scroll { max-width:100%;overflow-x:auto; }
+.nfc-v2-settings-table { width:100%;min-width:880px;border-collapse:collapse;
+  text-align:left;font-size:12px;color:var(--nfc-v2-set-ink); }
+.nfc-v2-settings-table caption { position:absolute;width:1px;height:1px;
+  margin:-1px;padding:0;border:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap; }
+.nfc-v2-settings-table th { padding:12px 14px;background:var(--nfc-v2-set-soft);
+  border-bottom:1px solid var(--nfc-v2-set-line);font-weight:700;
+  color:var(--nfc-v2-set-muted);font-size:11px; }
+.nfc-v2-settings-table td { vertical-align:middle;padding:12px 14px;
+  border-bottom:1px solid var(--nfc-v2-set-line);overflow-wrap:anywhere; }
+.nfc-v2-settings-table tbody tr:hover { background:var(--nfc-v2-set-soft); }
+.nfc-v2-settings-table tr:last-child td { border-bottom:0; }
+.nfc-v2-settings-device { display:flex;align-items:center;flex-wrap:wrap;min-width:0;gap:8px; }
+.nfc-v2-settings-device > svg { flex:0 0 auto;color:var(--nfc-v2-set-muted); }
+.nfc-v2-settings-device .nfc-session-user-agent { overflow-wrap:anywhere;min-width:0; }
+.nfc-v2-settings-mobile { display:grid;gap:11px;padding:12px; }
+.nfc-v2-settings-mobile .nfc-session-mobile-card { display:grid;gap:12px;
+  min-width:0;padding:13px;background:var(--nfc-v2-set-paper);
+  border:1px solid var(--nfc-v2-set-line);border-radius:10px; }
+.nfc-v2-settings-mobile .nfc-mobile-record-heading { display:flex;align-items:center;flex-wrap:wrap;gap:9px; }
+.nfc-v2-settings-mobile .nfc-mobile-record-facts { display:grid;gap:7px;
+  color:var(--nfc-v2-set-muted);font-size:11px; }
+.nfc-v2-settings-mobile .nfc-mobile-record-actions { display:flex;justify-content:flex-end; }
+.nfc-v2-settings-confirm-copy { display:grid;gap:9px;color:var(--nfc-v2-set-ink);
+  font-size:12px;line-height:1.65; }
+.nfc-v2-settings-confirm-copy p { margin:0; }
+[data-theme='dark'] .nfc-v2-settings {
+  --nfc-v2-set-paper:var(--nfc-surface-1);
+  --nfc-v2-set-soft:var(--nfc-surface-2);
+  --nfc-v2-set-line:var(--nfc-hairline);
+  --nfc-v2-set-ink:var(--nfc-text);
+  --nfc-v2-set-muted:var(--nfc-text-muted);
+  --nfc-v2-set-accent:var(--nfc-accent);
+}
+@media(max-width:767px) {
+  .nfc-v2-settings .nfc-settings-inline-control { width:100%;grid-template-columns:1fr; }
+  .nfc-v2-settings .nfc-settings-retention-actions { width:100%;justify-content:flex-start; }
+  .nfc-v2-settings .nfc-console-button,
+  .nfc-v2-settings .nfc-settings-control > input,
+  .nfc-v2-settings .nfc-settings-control > select,
+  .nfc-v2-settings .nfc-settings-inline-control > input,
+  .nfc-v2-settings .nfc-settings-inline-control > select { min-height:44px; }
+  .nfc-v2-settings-notice { padding:12px; }
+}
+@media(prefers-reduced-motion:reduce) {
+  .nfc-v2-settings * { transition:none;animation:none;scroll-behavior:auto; }
+}
