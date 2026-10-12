@@ -28,6 +28,9 @@ describe('Scheduler S4 API and responsive UI contract', () => {
 
   test('desktop and mobile surfaces include editor, run history, task linkage and admin-only actions', () => {
     const page = read('src/pages/Scheduler/index.tsx');
+    const editor = read('src/pages/Scheduler/ScheduleEditorModal.tsx');
+    const history = read('src/pages/Scheduler/ScheduleHistoryDrawer.tsx');
+    const model = read('src/pages/Scheduler/schedulerModel.ts');
 
     assert.match(page, /ResponsiveDataView/);
     assert.match(page, /nfc-scheduler-mobile-card/);
@@ -35,10 +38,13 @@ describe('Scheduler S4 API and responsive UI contract', () => {
     assert.match(page, /ScheduleHistoryDrawer/);
     assert.match(page, /user\?\.role === 'admin'/);
     assert.match(page, /Run now/);
-    assert.match(page, /\/tasks\?task=\$\{run\.work_job_id\}/);
-    assert.match(page, /workflow_revision/);
-    assert.match(page, /definition_sha256/);
-    assert.match(page, /不会自动 Freeze、Validate 或 Execute/);
+    assert.match(history, /\/tasks\?task=/);
+    assert.match(editor, /workflowRevision/);
+    assert.match(editor, /workflowSha/);
+    assert.match(model, /workflow_revision/);
+    assert.match(model, /definition_sha256/);
+    assert.match(editor, /不会自动 Freeze、Validate 或 Execute/);
+    assert.doesNotMatch(page + editor + history, /from ['"]antd['"]|@ant-design\/icons/);
   });
 
   test('mobile Scheduler layout stacks the editor and uses full-width run history', () => {
@@ -50,7 +56,7 @@ describe('Scheduler S4 API and responsive UI contract', () => {
     );
     assert.match(
       css,
-      /\.nfc-scheduler-history-drawer \.ant-drawer-content-wrapper\s*\{[\s\S]*width:\s*100vw !important/
+      /\.nfc-v2-scheduler-history\.nfc-v2-sheet\s*\{[\s\S]*width:\s*100vw/
     );
   });
 
