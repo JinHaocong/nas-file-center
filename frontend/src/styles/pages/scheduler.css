@@ -1,216 +1,164 @@
+/* Console v2 Scheduler — native ledger, Radix editor and history sheet. */
 .nfc-scheduler-page {
-  --nfc-scheduler-gap: 14px;
+  --nfc-scheduler-gap:14px;
+  --nfc-sched-paper:var(--v2-paper,#fff);
+  --nfc-sched-soft:var(--v2-canvas,#f5f7fb);
+  --nfc-sched-text:var(--v2-text,#172338);
+  --nfc-sched-muted:var(--v2-muted,#65738a);
+  --nfc-sched-line:var(--v2-line,#e7ebf1);
+  --nfc-sched-accent:var(--v2-indigo,#286ff1);
 }
-
-.nfc-scheduler-name-cell,
-.nfc-scheduler-target-cell,
-.nfc-scheduler-time-cell {
-  display: grid;
-  gap: 4px;
+.nfc-v2-scheduler-page .nfc-data-panel-body {
+  padding:0;overflow:hidden;background:var(--nfc-sched-paper);
+  border:1px solid var(--nfc-sched-line);border-radius:12px;
 }
-
-.nfc-scheduler-name-cell > span,
-.nfc-scheduler-target-cell > code,
-.nfc-scheduler-time-cell > span {
-  color: var(--nfc-text-tertiary);
-  font-size: 12px;
+.nfc-scheduler-name-cell,.nfc-scheduler-target-cell,.nfc-scheduler-time-cell { display:grid;gap:4px; }
+.nfc-scheduler-name-cell > span,.nfc-scheduler-target-cell > code,.nfc-scheduler-time-cell > span {
+  color:var(--nfc-sched-muted);font-size:12px;
 }
-
-.nfc-scheduler-target-cell > code,
-.nfc-scheduler-time-cell > code {
-  font-size: 12px;
-  white-space: normal;
-  overflow-wrap: anywhere;
+.nfc-scheduler-target-cell > code,.nfc-scheduler-time-cell > code {
+  font-size:12px;white-space:normal;overflow-wrap:anywhere;
 }
-
-.nfc-scheduler-form-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(180px, 0.44fr);
-  gap: 14px;
-  align-items: start;
+.nfc-v2-scheduler-table-scroll { width:100%;max-width:100%;overflow-x:auto;scrollbar-width:thin; }
+.nfc-v2-scheduler-table { min-width:1190px;width:100%;border-collapse:collapse;
+  color:var(--nfc-sched-text);font-size:12px;line-height:1.65;table-layout:fixed; }
+.nfc-v2-scheduler-table th { padding:12px 11px;text-align:left;font-size:11px;
+  font-weight:700;color:var(--nfc-sched-muted);background:var(--nfc-sched-soft);
+  border-bottom:1px solid var(--nfc-sched-line); }
+.nfc-v2-scheduler-table td { padding:13px 11px;border-bottom:1px solid var(--nfc-sched-line);
+  vertical-align:middle;overflow-wrap:anywhere; }
+.nfc-v2-scheduler-table tbody tr:last-child td { border-bottom:0; }
+.nfc-v2-scheduler-table tbody tr:hover { background:color-mix(in srgb,var(--nfc-sched-soft) 70%,transparent); }
+.nfc-v2-scheduler-table th:nth-child(1) { width:19%; }
+.nfc-v2-scheduler-table th:nth-child(2) { width:91px; }
+.nfc-v2-scheduler-table th:nth-child(3) { width:17%; }
+.nfc-v2-scheduler-table th:nth-child(4) { width:17%; }
+.nfc-v2-scheduler-table th:nth-child(5),.nfc-v2-scheduler-table th:nth-child(6) { width:156px; }
+.nfc-v2-scheduler-table th:nth-child(7) { width:210px; }
+.nfc-v2-scheduler-actions { display:flex;flex-wrap:wrap;gap:6px;align-items:center; }
+.nfc-v2-scheduler-switch { display:inline-flex;align-items:center;gap:7px;
+  color:var(--nfc-sched-text);font-size:12px;cursor:pointer; }
+.nfc-v2-scheduler-switch input { width:17px;height:17px;accent-color:var(--nfc-sched-accent); }
+.nfc-v2-scheduler-switch input:disabled { opacity:.55;cursor:not-allowed; }
+.nfc-v2-scheduler-state,.nfc-v2-scheduler-run-state {
+  display:inline-flex;align-items:center;border:1px solid var(--nfc-sched-line);
+  padding:3px 8px;border-radius:8px;background:var(--nfc-sched-soft);
+  color:var(--nfc-sched-muted);font-size:11px;font-weight:650;
 }
+.nfc-v2-scheduler-state.is-enabled,.nfc-v2-scheduler-run-state.is-dispatched { color:#16805f; }
+.nfc-v2-scheduler-run-state.is-skipped { color:#a87a27; }
+.nfc-v2-scheduler-run-state.is-failed { color:#bf4055; }
+.nfc-v2-scheduler-list-state { padding:26px;text-align:center;color:var(--nfc-sched-muted); }
+.nfc-v2-scheduler-note { display:flex;align-items:flex-start;gap:10px;
+  border:1px solid var(--nfc-sched-line);border-radius:9px;padding:12px;
+  margin:0 0 13px;background:var(--nfc-sched-soft);
+  color:var(--nfc-sched-text);font-size:12px;line-height:1.7; }
+.nfc-v2-scheduler-note > svg { flex:0 0 auto;color:var(--nfc-sched-accent);margin-top:2px; }
+.nfc-v2-scheduler-note p { margin:4px 0 0;color:var(--nfc-sched-muted); }
+.nfc-v2-scheduler-note.is-warning { border-color:color-mix(in srgb,#c98b40 55%,var(--nfc-sched-line)); }
+.nfc-scheduler-mobile-list { display:grid;gap:0;padding:0 14px; }
+.nfc-scheduler-mobile-card { display:grid;gap:10px;padding:14px 0;border-bottom:1px solid var(--nfc-sched-line); }
+.nfc-scheduler-mobile-id { display:block;margin-top:2px;color:var(--nfc-sched-muted);font-size:11px; }
+.nfc-scheduler-mobile-primary { display:grid;gap:3px; }
+.nfc-scheduler-mobile-primary > span { color:var(--nfc-sched-muted);font-size:11px; }
+.nfc-scheduler-mobile-primary > b { font-size:13px;overflow-wrap:anywhere; }
+.nfc-scheduler-mobile-cron { display:flex;align-items:center;flex-wrap:wrap;gap:8px;min-width:0; }
+.nfc-scheduler-mobile-cron code { padding:3px 7px;border-radius:7px;
+  background:var(--nfc-sched-soft);font-size:12px; }
+.nfc-scheduler-mobile-cron span { color:var(--nfc-sched-muted);font-size:12px; }
 
-.nfc-scheduler-pin-panel {
-  display: grid;
-  grid-template-columns: 120px minmax(0, 1fr);
-  gap: 10px;
-  margin: -2px 0 16px;
-  padding: 12px 14px;
-  border: 1px solid var(--nfc-border-soft);
-  border-radius: 12px;
-  background: var(--nfc-surface-2);
+.nfc-v2-scheduler-editor {
+  --nfc-sched-editor-ink:var(--nfc-text,#172338);
+  --nfc-sched-editor-paper:var(--nfc-surface-1,#fff);
+  --nfc-sched-editor-soft:var(--nfc-surface-2,#f5f7fb);
+  --nfc-sched-editor-line:var(--nfc-hairline,#dce5ee);
+  --nfc-sched-editor-accent:var(--nfc-accent,#286ff1);
+  width:min(94vw,760px);max-width:760px;max-height:89dvh;overflow-y:auto;color:var(--nfc-sched-editor-ink);
 }
-
-.nfc-scheduler-pin-panel > div {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
+.nfc-v2-scheduler-editor .nfc-v2-dialog-heading { align-items:flex-start; }
+.nfc-v2-scheduler-editor .nfc-v2-dialog-heading > div { flex:1;min-width:0; }
+.nfc-v2-scheduler-editor .nfc-v2-dialog-heading p { margin:6px 0 0;font-size:11px;line-height:1.6; }
+.nfc-v2-scheduler-form { display:grid;gap:15px;margin-top:14px;min-width:0; }
+.nfc-scheduler-form-grid { display:grid;grid-template-columns:minmax(0,1fr) minmax(180px,.44fr);
+  gap:14px;align-items:start; }
+.nfc-v2-scheduler-field { display:grid;gap:7px;min-width:0;
+  color:var(--nfc-sched-editor-ink);font-size:12px;font-weight:700; }
+.nfc-v2-scheduler-field :is(input,select,textarea) {
+  box-sizing:border-box;width:100%;min-width:0;min-height:40px;padding:9px 11px;
+  border:1px solid var(--nfc-sched-editor-line);border-radius:8px;
+  background:var(--nfc-sched-editor-paper);color:var(--nfc-sched-editor-ink);
+  font:inherit;font-size:12px;font-weight:400; }
+.nfc-v2-scheduler-field textarea { resize:vertical; }
+.nfc-v2-scheduler-field small { font-size:11px;font-weight:400;line-height:1.6;
+  color:var(--nfc-text-muted); }
+.nfc-v2-scheduler-toggle { display:flex;align-items:center;gap:9px;
+  padding:10px 0;font-size:12px;font-weight:700; }
+.nfc-v2-scheduler-toggle input { width:17px;height:17px;accent-color:var(--nfc-sched-editor-accent); }
+.nfc-v2-scheduler-section-label { border-bottom:1px solid var(--nfc-sched-editor-line);
+  padding:6px 0 9px;font-size:12px;font-weight:700; }
+.nfc-v2-scheduler-multi { display:grid;gap:9px;min-width:0;
+  border:1px solid var(--nfc-sched-editor-line);border-radius:9px;padding:10px; }
+.nfc-v2-scheduler-multi legend { font-size:12px;font-weight:700;padding:0 5px; }
+.nfc-v2-scheduler-multi label { display:flex;align-items:center;gap:9px;
+  background:var(--nfc-sched-editor-soft);border-radius:7px;padding:9px;
+  font-size:12px;line-height:1.5;overflow-wrap:anywhere;cursor:pointer; }
+.nfc-v2-scheduler-multi input { width:17px;height:17px;flex:0 0 auto;
+  accent-color:var(--nfc-sched-editor-accent); }
+.nfc-v2-scheduler-multi p { margin:0;font-size:12px;color:var(--nfc-text-muted); }
+.nfc-scheduler-pin-panel { display:grid;grid-template-columns:120px minmax(0,1fr);
+  gap:10px;padding:12px 14px;border:1px solid var(--nfc-sched-editor-line);
+  border-radius:12px;background:var(--nfc-sched-editor-soft); }
+.nfc-scheduler-pin-panel > div { display:grid;gap:3px;min-width:0; }
+.nfc-scheduler-pin-panel span { color:var(--nfc-text-muted);font-size:11px; }
+.nfc-scheduler-pin-panel code { overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;font-size:11px; }
+.nfc-scheduler-boundary-alert { margin-bottom:4px; }
+.nfc-scheduler-time-preview { display:grid;gap:10px;margin-top:2px; }
+.nfc-scheduler-preview-error { color:#c34258;font-size:12px; }
+.nfc-scheduler-occurrences { display:grid;gap:5px;padding:10px 12px;
+  border:1px solid var(--nfc-sched-editor-line);border-radius:10px;
+  background:var(--nfc-sched-editor-soft); }
+.nfc-scheduler-occurrences code { font-size:12px; }
+.nfc-v2-scheduler-editor :is(button,input,select,textarea):focus-visible {
+  outline:2px solid var(--nfc-sched-editor-accent);outline-offset:2px;
 }
-
-.nfc-scheduler-pin-panel span {
-  color: var(--nfc-text-tertiary);
-  font-size: 11px;
+.nfc-scheduler-run-list { display:grid;gap:10px; }
+.nfc-scheduler-run-card { display:grid;gap:10px;padding:12px 14px;
+  border:1px solid var(--nfc-border-soft);border-radius:12px;background:var(--nfc-surface-1); }
+.nfc-scheduler-run-heading { display:flex;align-items:center;
+  justify-content:space-between;gap:12px; }
+.nfc-scheduler-run-facts { display:flex;flex-wrap:wrap;gap:6px 16px;
+  align-items:center;color:var(--nfc-text-secondary);font-size:12px; }
+.nfc-scheduler-history-loading { padding:24px 0;text-align:center;color:var(--nfc-text-tertiary); }
+.nfc-v2-scheduler-history.nfc-v2-sheet { width:min(620px,100vw); }
+[data-theme='dark'] .nfc-v2-scheduler-editor {
+  --nfc-sched-editor-paper:var(--nfc-surface-1,#1a2434);
+  --nfc-sched-editor-soft:var(--nfc-surface-2,#222e41);
+  --nfc-sched-editor-ink:var(--nfc-text,#f1f5fb);
+  --nfc-sched-editor-line:var(--nfc-hairline,#36435a);
+  --nfc-sched-editor-accent:var(--nfc-accent,#83b5ff);
 }
-
-.nfc-scheduler-pin-panel code {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11px;
+[data-theme='dark'] .nfc-scheduler-page {
+  --nfc-sched-paper:var(--v2-paper,#1a2434);
+  --nfc-sched-soft:var(--v2-canvas,#111827);
+  --nfc-sched-text:var(--v2-text,#f1f5fb);
+  --nfc-sched-muted:var(--v2-muted,#afbdce);
+  --nfc-sched-line:var(--v2-line,#2c3a4e);
+  --nfc-sched-accent:var(--v2-indigo,#83b5ff);
 }
-
-.nfc-scheduler-boundary-alert {
-  margin-bottom: 16px;
+@media (max-width:767px) {
+  .nfc-scheduler-page { gap:12px; }
+  .nfc-scheduler-form-grid { grid-template-columns:1fr;gap:10px; }
+  .nfc-scheduler-pin-panel { grid-template-columns:1fr; }
+  .nfc-v2-scheduler-editor { width:min(96vw,760px);max-height:93dvh; }
+  .nfc-v2-scheduler-history.nfc-v2-sheet { width:100vw; }
+  .nfc-scheduler-run-facts { display:grid;gap:6px; }
+  .nfc-scheduler-mobile-card .nfc-mobile-record-actions { flex-wrap:wrap;justify-content:flex-start; }
+  .nfc-v2-scheduler-page .nfc-console-button,
+  .nfc-v2-scheduler-editor :is(.nfc-console-button,input,select) { min-height:44px; }
 }
-
-.nfc-scheduler-time-preview {
-  display: grid;
-  gap: 10px;
-  margin-top: 2px;
-}
-
-.nfc-scheduler-preview-error {
-  color: var(--ant-color-error, #ff4d4f);
-  font-size: 12px;
-}
-
-.nfc-scheduler-occurrences {
-  display: grid;
-  gap: 5px;
-  padding: 10px 12px;
-  border: 1px solid var(--nfc-border-soft);
-  border-radius: 10px;
-  background: var(--nfc-surface-2);
-}
-
-.nfc-scheduler-occurrences code {
-  font-size: 12px;
-}
-
-.nfc-scheduler-run-list {
-  display: grid;
-  gap: 10px;
-}
-
-.nfc-scheduler-run-card {
-  display: grid;
-  gap: 10px;
-  padding: 12px 14px;
-  border: 1px solid var(--nfc-border-soft);
-  border-radius: 12px;
-  background: var(--nfc-surface-1);
-}
-
-.nfc-scheduler-run-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.nfc-scheduler-run-facts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 16px;
-  align-items: center;
-  color: var(--nfc-text-secondary);
-  font-size: 12px;
-}
-
-.nfc-scheduler-history-loading {
-  padding: 24px 0;
-  text-align: center;
-  color: var(--nfc-text-tertiary);
-}
-
-.nfc-scheduler-mobile-list {
-  padding: 0 14px;
-}
-
-.nfc-scheduler-mobile-card {
-  display: grid;
-  gap: 10px;
-  padding: 14px 0;
-  border-bottom: 1px solid var(--nfc-border-soft);
-}
-
-.nfc-scheduler-mobile-id {
-  display: block;
-  margin-top: 2px;
-  color: var(--nfc-text-tertiary);
-  font-size: 11px;
-}
-
-.nfc-scheduler-mobile-primary {
-  display: grid;
-  gap: 3px;
-}
-
-.nfc-scheduler-mobile-primary > span {
-  color: var(--nfc-text-tertiary);
-  font-size: 11px;
-}
-
-.nfc-scheduler-mobile-primary > b {
-  font-size: 13px;
-  overflow-wrap: anywhere;
-}
-
-.nfc-scheduler-mobile-cron {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  min-width: 0;
-}
-
-.nfc-scheduler-mobile-cron code {
-  padding: 3px 7px;
-  border-radius: 7px;
-  background: var(--nfc-surface-2);
-  font-size: 12px;
-}
-
-.nfc-scheduler-mobile-cron span {
-  color: var(--nfc-text-secondary);
-  font-size: 12px;
-}
-
-@media (max-width: 767px) {
-  .nfc-scheduler-page {
-    gap: 12px;
-  }
-
-  .nfc-scheduler-form-grid {
-    grid-template-columns: 1fr;
-    gap: 0;
-  }
-
-  .nfc-scheduler-pin-panel {
-    grid-template-columns: 1fr;
-  }
-
-  .nfc-scheduler-editor .ant-modal {
-    max-width: calc(100vw - 20px);
-    margin: 10px auto;
-    top: 0;
-  }
-
-  .nfc-scheduler-editor .ant-modal-content {
-    padding: 14px;
-  }
-
-  .nfc-scheduler-history-drawer .ant-drawer-content-wrapper {
-    width: 100vw !important;
-  }
-
-  .nfc-scheduler-run-facts {
-    display: grid;
-    gap: 6px;
-  }
-
-  .nfc-scheduler-mobile-card .nfc-mobile-record-actions {
-    overflow-x: auto;
-    justify-content: flex-start;
+@media (prefers-reduced-motion:reduce) {
+  .nfc-v2-scheduler-page *, .nfc-v2-scheduler-editor *, .nfc-v2-scheduler-history * {
+    animation:none;transition:none;scroll-behavior:auto;
   }
 }
