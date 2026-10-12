@@ -50,6 +50,7 @@ import './styles/console-v2-quarantine-single-actions.css';
 import './styles/console-v2-quarantine-bulk-dialogs.css';
 import './styles/console-v2-quarantine-ledger.css';
 import './styles/console-v2-indexes.css';
+import './styles/console-v2-media.css';
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
