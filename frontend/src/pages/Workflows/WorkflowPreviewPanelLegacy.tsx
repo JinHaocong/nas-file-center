@@ -268,15 +268,9 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
   }, [isDedupe, acceptedPreview?.items]);
 
   // Directly consume dedupe_summary from previewData (Blocker 1)
-  const dedupeSummary: DedupeSummary | null = isDedupe
-    ? (acceptedPreview?.dedupe_summary ?? null)
-    : null;
 
-  const organizerSummary = isOrganizer ? (acceptedPreview?.organizer_summary ?? null) : null;
-  const organizerAdvanced = Boolean(organizerSummary?.advanced_enabled);
-  const organizerStructuralRequired = Boolean(organizerSummary?.structural_required);
-  const organizerPreviewDigest = organizerSummary?.preview_digest || undefined;
-  const organizerConflicts = Number(organizerSummary?.summary?.conflicts ?? 0);
+
+
 
   const organizerItemStage = (item: WorkflowPreviewItem) => {
     if (!organizerAdvanced) return "Standard";
@@ -299,6 +293,7 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
 
   const canPreview = canPreviewWorkflow(isArchived) && !isDirty &&
     (!isDedupe || Boolean(selectedScanJobId));
+  const dedupeSummary: DedupeSummary | null = isDedupe ? (acceptedPreview?.dedupe_summary ?? null) : null;
   const organizerSummary = isOrganizer ? acceptedPreview?.organizer_summary : null;
   const organizerAdvanced = Boolean(organizerSummary?.advanced_enabled);
   const organizerStructuralRequired = Boolean(organizerSummary?.structural_required);
