@@ -31,7 +31,7 @@ describe('Console v2 native Plan cleanup controls', () => {
     const s = deleteButton();
     for (const token of [
       'getPlanDeleteAvailability(plan)', 'getPlanDeleteConfirmationContent(plan)',
-      '!canDelete || loading', 'if (!canDelete || busy || singleFlight.current) return;',
+      '!canDelete || busy', 'const busy = loading || submitting;', 'if (!canDelete || busy || singleFlight.current) return;',
       'await onDelete()', 'invalidatePlanDeleteFailure(queryClient, plan.id)',
       '<ConsoleConfirmDialog', 'confirmText="确认删除"', 'onClick={() => { if (canDelete && !busy) setOpen(true); }}',
     ]) assert.ok(s.includes(token), token);
