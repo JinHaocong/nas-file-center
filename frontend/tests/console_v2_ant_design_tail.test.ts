@@ -15,6 +15,9 @@ describe('Console v2 residual Ant Design cleanup — audited native safety', () 
       'src/components/tasks/TaskStatusTag.tsx',
       'src/components/tasks/WorkerStatusCard.tsx',
       'src/components/plans/StaleRebuildDrawer.tsx',
+      'src/contexts/AuthContext.tsx',
+      'src/pages/Organizer/index.tsx',
+      'src/hooks/useResponsive.ts',
     ]) {
       const source = read(path);
       assert.doesNotMatch(source, /from ['"]antd['"]|from ['"]@ant-design\/icons['"]/);
@@ -26,7 +29,13 @@ describe('Console v2 residual Ant Design cleanup — audited native safety', () 
     const source = read('scripts/check-ant-design-tail.mjs');
     for (const token of [
       "resolve(frontend, 'src')", 'const allowed = new Set([',
+      "'src/components/workflows/CompletedScanPicker.tsx'",
+      "'src/components/workflows/OrganizerProfileFields.tsx'",
+      "'src/contexts/ThemeContext.tsx'",
+      "'src/pages/Login/index.tsx'",
+      "'src/pages/Plans/OperationJournalDrawer.tsx'",
       "'src/pages/Plans/PlanDetail.tsx'",
+      "'src/pages/Workflows/UtilityWorkflowPreviewPanel.tsx'",
       "'src/pages/Workflows/WorkflowPreviewPanelLegacy.tsx'",
       'modulePattern', 'readdirSync(dir)', 'statSync(full).isDirectory()',
       'matches.sort(', 'const unexpected = matches.filter(item => !item.approved)',
@@ -164,6 +173,36 @@ describe('Console v2 residual Ant Design cleanup — audited native safety', () 
       '重建操作受阻',
       '关联工作流已归档，无法重新生成计划',
     ]) assert.ok(s.includes(token), token);
+  });
+
+
+  test('auth/organizer preserve server mutations while routing notifications through native toast provider', () => {
+    const app = read('src/App.tsx');
+    assert.match(app, /<ConsoleToastProvider>[\s\S]*<AuthProvider>/);
+    const auth = read('src/contexts/AuthContext.tsx');
+    for (const token of [
+      'useConsoleToast()', 'await authApi.login(payload)',
+      'await authApi.logout()', "setUser(null)", "navigate('/login', { replace: true })",
+      'toast.success(', 'toast.info(',
+    ]) assert.ok(auth.includes(token), token);
+    const organizer = read('src/pages/Organizer/index.tsx');
+    for (const token of [
+      'useConsoleToast()', 'organizerProfilesApi.updateProfile',
+      'organizerProfilesApi.createProfile', 'toast.success(', 'toast.error(',
+      "editingProfile?.is_builtin", "queryKey: ['organizer-profiles']",
+    ]) assert.ok(organizer.includes(token), token);
+  });
+
+  test('native responsive hook preserves 768px md / 1200px xl thresholds and resize cleanup', () => {
+    const s=read('src/hooks/useResponsive.ts');
+    for(const token of [
+      'useSyncExternalStore(subscribe, readWidth, () => 0)',
+      'window.addEventListener(', 'window.removeEventListener(',
+      'width < 768', 'width >= 1200',
+      'const isTablet = !isMobile && !isDesktop',
+      "typeof window !== 'undefined'",
+    ]) assert.ok(s.includes(token), token);
+    assert.doesNotMatch(s, /from ['"]antd['"]|Grid\.useBreakpoint|useBreakpoint\(/);
   });
 
   test('native owned audit and rebuild styles expose dark/mobile/focus/reduced motion', () => {
