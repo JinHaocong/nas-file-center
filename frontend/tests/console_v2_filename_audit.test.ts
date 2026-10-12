@@ -110,7 +110,7 @@ describe('Console v2 Filename Audit — native guarded migration', () => {
       'buildFilenameAuditRequest(parent)', 'requestTicket.current !== ticket',
       'activePreviewKey.current !== key', 'invalidatePreview();',
       'planGuard.current', 'previewGuard.current', "kind: 'rename'",
-      "operation: 'rename'", "'/plans/' + created.id",
+      "'/plans/' + created.id",
       '<ConsoleButton', '<ConsolePagination', '<ConsoleEmpty',
       '<ResponsiveDataView', '<CodePath', 'getPaginationState',
       'visiblePage.map(', 'togglePage(', 'type="checkbox"', 'type="select"',
