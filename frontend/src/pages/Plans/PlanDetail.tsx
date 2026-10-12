@@ -1,27 +1,5 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import {
-  Alert,
-  Button,
-  Empty,
-  message,
-  Pagination,
-  Popconfirm,
-  Spin,
-  Table,
-  Tooltip,
-} from 'antd';
-import {
-  ArrowLeftOutlined,
-  ArrowRightOutlined,
-  BuildOutlined,
-  CheckCircleOutlined,
-  HistoryOutlined,
-  LockOutlined,
-  PlayCircleOutlined,
-  ReloadOutlined,
-  RollbackOutlined,
-} from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { OperationJournalDrawer } from './OperationJournalDrawer';
 import { StaleRebuildDrawer } from '../../components/plans/StaleRebuildDrawer';
@@ -29,13 +7,10 @@ import { isWorkflowPlanMetadata, WorkflowPlanMetadata } from '../../types/workfl
 import { plansApi, settingsApi } from '../../api/domain';
 import { useTitle } from '../../hooks/useTitle';
 import { formatBytes, formatDateTime } from '../../utils/format';
-import { PlanItem } from '../../types';
+import type { PlanItem } from '../../types';
 import { PlanDeleteButton } from '../../components/plans/PlanDeleteButton';
-import {
-  invalidatePlanDeleteFailure,
-  getPlanDetailRenderState,
-  getPlanDetailView,
-} from '../../components/plans/plan_cleanup';
+import { invalidatePlanDeleteFailure, getPlanDetailRenderState, getPlanDetailView } from '../../components/plans/plan_cleanup';
+import { canPlanLifecycleAction, planConfirmationSnapshot, samePlanConfirmation, type PlanConfirmationSnapshot } from '../../utils/planDetailActions';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { DataPanel } from '../../components/ui/DataPanel';
 import { ActionBar } from '../../components/ui/ActionBar';
@@ -43,6 +18,12 @@ import { ResponsiveDataView } from '../../components/ui/ResponsiveDataView';
 import { ResponsiveDescriptions } from '../../components/ui/ResponsiveDescriptions';
 import { CodePath } from '../../components/ui/CodePath';
 import { StatusBadge } from '../../components/ui/StatusBadge';
+import { ConsoleButton } from '../../components/ui/ConsoleButton';
+import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
+import { ConsolePagination } from '../../components/ui/ConsolePagination';
+import { ConsoleConfirmDialog } from '../../components/ui/ConsoleConfirmDialog';
+import { ConsoleEmpty } from '../../components/ui/ConsoleEmpty';
+import { useConsoleToast } from '../../components/ui/ConsoleToast';
 
 const lifecycleSteps = [
   { key: 'draft', label: 'Draft', caption: '预览草稿' },
@@ -64,6 +45,9 @@ export const PlanDetailPage: React.FC = () => {
   const planId = Number(id);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const toast = useConsoleToast();
+  const actionInFlight = useRef(false);
+  const [confirmation, setConfirmation] = useState<PlanConfirmationSnapshot | null>(null);
   useTitle(`计划详情 #${planId}`);
 
   const [page, setPage] = useState(1);
@@ -86,6 +70,7 @@ export const PlanDetailPage: React.FC = () => {
   } = useQuery({
     queryKey: ['planDetail', planId, page, pageSize],
     queryFn: () => plansApi.getPlanDetail(planId, page, pageSize),
+    enabled: Number.isSafeInteger(planId) && planId > 0,
   });
 
   const {
@@ -96,50 +81,50 @@ export const PlanDetailPage: React.FC = () => {
   } = useQuery({
     queryKey: ['planOperationJournalSummary', planId],
     queryFn: () => plansApi.getOperationJournal(planId, 1, 1),
-    enabled: !!planId,
+    enabled: Number.isSafeInteger(planId) && planId > 0,
   });
 
   const undoPlanMutation = useMutation({
     mutationFn: () => plansApi.createUndoPlan(planId),
     onSuccess: (res) => {
-      message.success(`已成功创建撤销计划 #${res.id}（共 ${res.total_items} 项逆向操作）`);
+      toast.success(`已成功创建撤销计划 #${res.id}（共 ${res.total_items} 项逆向操作）`);
       queryClient.invalidateQueries({ queryKey: ['plansList'] });
       queryClient.invalidateQueries({ queryKey: ['dashboardSummary'] });
       navigate(`/plans/${res.id}`);
     },
     onError: (err: any) => {
-      message.error(err.message || '生成撤销计划失败');
+      toast.error(err.message || '生成撤销计划失败');
     },
   });
 
   const freezeMutation = useMutation({
     mutationFn: () => plansApi.freezePlan(planId),
     onSuccess: () => {
-      message.success('计划已成功冻结，参数已不可篡改');
+      toast.success('计划已成功冻结，参数已不可篡改');
       refetch();
       queryClient.invalidateQueries({ queryKey: ['plansList'] });
     },
     onError: (err: any) => {
-      message.error(err.message || '冻结失败');
+      toast.error(err.message || '冻结失败');
     },
   });
 
   const validateMutation = useMutation({
     mutationFn: () => plansApi.validatePlan(planId),
     onSuccess: () => {
-      message.success('计划校验完成，状态已就绪 (Ready)');
+      toast.success('计划校验完成，状态已就绪 (Ready)');
       refetch();
       queryClient.invalidateQueries({ queryKey: ['plansList'] });
     },
     onError: (err: any) => {
-      message.error(err.message || '校验失败');
+      toast.error(err.message || '校验失败');
     },
   });
 
   const executeMutation = useMutation({
     mutationFn: () => plansApi.executePlan(planId),
     onSuccess: (data) => {
-      message.success(`计划已加入任务队列，任务 #${data.work_job_id}`);
+      toast.success(`计划已加入任务队列，任务 #${data.work_job_id}`);
       refetch();
       queryClient.invalidateQueries({ queryKey: ['plansList'] });
       queryClient.invalidateQueries({ queryKey: ['dashboardSummary'] });
@@ -147,21 +132,21 @@ export const PlanDetailPage: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['workJobs'] });
     },
     onError: (err: any) => {
-      message.error(err.message || '执行失败');
+      toast.error(err.message || '执行失败');
     },
   });
 
   const deleteMutation = useMutation({
     mutationFn: () => plansApi.deletePlan(planId),
     onSuccess: () => {
-      message.success(`计划 #${planId} 已安全删除`);
+      toast.success(`计划 #${planId} 已安全删除`);
       queryClient.invalidateQueries({ queryKey: ['plansList'] });
       queryClient.invalidateQueries({ queryKey: ['dashboardSummary'] });
       queryClient.invalidateQueries({ queryKey: ['scansList'] });
       navigate('/plans');
     },
     onError: (err: any) => {
-      message.error(err.message || '删除计划失败');
+      toast.error(err.message || '删除计划失败');
       invalidatePlanDeleteFailure(queryClient, planId);
     },
   });
@@ -175,47 +160,22 @@ export const PlanDetailPage: React.FC = () => {
   const view = getPlanDetailView(renderState, !!plan);
 
   if (view === 'loading') {
-    return (
-      <div className="nfc-centered-state">
-        <Spin size="large" />
+    return <div className="nfc-centered-state nfc-v2-plan-load" role="status">
+      <span className="nfc-console-spinner" aria-hidden="true" />正在载入计划…
+    </div>;
+  }
+  if (view === 'not-found' || view === 'error' || !plan) {
+    const missing = view === 'not-found' || !plan && view !== 'error';
+    return <div className="nfc-v2-plan-message is-error" role="alert">
+      <ConsoleIcon name="info" size={20} />
+      <div><strong>{missing ? '计划不存在' : '加载计划失败'}</strong>
+        <p>{missing ? '未找到 ID 为 #' + planId + ' 的批处理计划' :
+          error instanceof Error ? error.message : '获取计划详情失败，请检查网络或稍后重试'}</p>
       </div>
-    );
-  }
-
-  if (view === 'not-found') {
-    return (
-      <Alert
-        message="计划不存在"
-        description={`未找到 ID 为 #${planId} 的批处理计划`}
-        type="error"
-        showIcon
-        action={<Button onClick={() => navigate('/plans')}>返回计划列表</Button>}
-      />
-    );
-  }
-
-  if (view === 'error') {
-    return (
-      <Alert
-        message="加载计划失败"
-        description={(error as any)?.message || '获取计划详情失败，请检查网络或稍后重试'}
-        type="error"
-        showIcon
-        action={<Button onClick={() => refetch()}>重试</Button>}
-      />
-    );
-  }
-
-  if (!plan) {
-    return (
-      <Alert
-        message="计划不存在"
-        description={`未找到 ID 为 #${planId} 的批处理计划`}
-        type="error"
-        showIcon
-        action={<Button onClick={() => navigate('/plans')}>返回计划列表</Button>}
-      />
-    );
+      <ConsoleButton onClick={() => {
+        if (missing) navigate('/plans'); else void refetch();
+      }}>{missing ? '返回计划列表' : '重试'}</ConsoleButton>
+    </div>;
   }
 
   const isSafeMode = !settings?.allow_mutation;
