@@ -56,7 +56,7 @@ approved NAS File Center mockup. User-selectable dark/system modes remain.
 - [x] Native Indexes root ledger: desktop/mobile semantic records, truthful missing/blocked path state, server pagination, native Radix root selection and safe metadata-only remove confirmations with active-WorkJob guard (PR #172).
 - [x] Native Scheduler ledger, typed five-target editor, fixed workflow revision/SHA, Utility Preview-only authority, accessible history sheet and guarded admin Run-now/enable actions (PR #173).
 - [x] Native Media integrity ledger: desktop/mobile accessible results, corrupt-only admin selections, read-only analyze/SHA256 queues, exact preview ID/digest fail-closed guards and explicit Plan→Freeze→Validate→Worker deletion confirmation (PR #174).
-- [x] Ant Design tail tranche: native Audit ledger/details, task status/Worker health, guarded Stale Rebuild Draft drawer, and CI-enforced exact remaining import inventory (PR #175).
+- [x] Ant Design tail tranche: native Audit ledger/details, Task status/Worker health, guarded Stale Rebuild Draft drawer, Auth/Organizer toasts and responsive Hook; CI-enforced 8-file residual import inventory (PR #175).
 - [ ] Remove all `antd` and `@ant-design/icons` imports and their lockfile dependencies.
 - [ ] Consolidate historical UI CSS overrides into an owned, maintainable theme system.
 - [ ] Full TypeScript, frontend unit/regression, backend, Docker and dependency-audit gates.
