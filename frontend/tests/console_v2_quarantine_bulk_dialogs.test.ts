@@ -204,7 +204,7 @@ describe('Console v2 native Quarantine bulk Preview → Draft gates', () => {
       'entryIds={bulkRestoreEntryIds}', 'entryIds={bulkPurgeEntryIds}',
       'isSafeMode={isSafeMode}', 'isAdmin={Boolean(isAdmin)}',
       'allowMutation={!isSafeMode}', 'allowDelete={allowDelete}',
-      'onPlanCreated={(plan)=>', 'navigate(', 'clearBulkSelection()',
+      'onPlanCreated={plan =>', 'navigate(', 'clearBulkSelection()',
     ]) assert.ok(page.includes(token), token);
   });
 });

@@ -355,7 +355,7 @@ export const QuarantinePage: React.FC = () => {
         <span><strong>只读安全保护模式生效中。</strong> 系统当前以 ALLOW_MUTATION=false 运行。所有文件移动与写入已被锁定，恢复与清除操作当前不可用。</span>
       </div>}
 
-      <DataPanel title="隔离文件" description="筛选、显式选择并生成恢复或永久删除计划。"
+      <DataPanel title="隔离文件" description="筛选、显式选择并生成恢复或永久删除 Draft；实际文件操作仍必须经过 Plan 的 Freeze → Validate → Execute。"
         action={<span className="nfc-panel-count">{quarantineData?.total ?? 0} entries</span>}
         className="nfc-panel-flush" variant="dense">
         <div className="nfc-quarantine-command-center nfc-v2-quarantine-command-center">
