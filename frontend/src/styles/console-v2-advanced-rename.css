@@ -1,0 +1,73 @@
+/* Console v2 Rename mode and advanced Regex Rename scope. */
+.nfc-v2-rename-page {
+  --nfc-adv-surface: var(--nfc-surface-1);
+  --nfc-adv-soft: var(--nfc-surface-2);
+  --nfc-adv-text: var(--nfc-text);
+  --nfc-adv-muted: var(--nfc-text-muted);
+  --nfc-adv-line: var(--nfc-hairline);
+  --nfc-adv-accent: var(--nfc-accent);
+}
+.nfc-v2-rename-mode { display:flex;flex-wrap:wrap;gap:7px;margin:0 0 19px; }
+.nfc-v2-rename-mode label { display:inline-flex;align-items:center;gap:8px;min-height:42px;
+  box-sizing:border-box;padding:10px 14px;border:1px solid var(--nfc-adv-line);
+  border-radius:9px;color:var(--nfc-adv-muted);background:var(--nfc-adv-surface);
+  font-size:12px;font-weight:650;cursor:pointer; }
+.nfc-v2-rename-mode label.is-selected { color:var(--nfc-adv-accent);
+  border-color:var(--nfc-adv-accent);background:var(--nfc-adv-soft); }
+.nfc-v2-rename-mode input { accent-color:var(--nfc-adv-accent);width:16px;height:16px; }
+.nfc-v2-advanced-rename { display:grid;gap:16px;min-width:0; }
+.nfc-v2-advanced-rename-form { display:grid;gap:16px; }
+.nfc-v2-advanced-rename-field { display:grid;gap:7px;min-width:0;
+  color:var(--nfc-adv-text);font-size:12px;font-weight:650; }
+.nfc-v2-advanced-rename-field small { color:var(--nfc-adv-muted);font-size:11px;line-height:1.6;font-weight:400; }
+.nfc-v2-advanced-rename-field > input { box-sizing:border-box;width:100%;min-height:42px;
+  border:1px solid var(--nfc-adv-line);border-radius:8px;padding:9px 11px;
+  background:var(--nfc-adv-surface);color:var(--nfc-adv-text);
+  font:inherit;font-size:12px; }
+.nfc-v2-advanced-rename-field .nfc-directory-picker-selection { min-width:0; }
+.nfc-v2-advanced-rename-notice { display:flex;align-items:flex-start;gap:10px;
+  border:1px solid var(--nfc-adv-line);border-radius:9px;padding:12px;
+  background:var(--nfc-adv-soft);color:var(--nfc-adv-text);font-size:12px;line-height:1.6; }
+.nfc-v2-advanced-rename-notice > svg { flex:0 0 auto;color:var(--nfc-adv-accent);margin-top:2px; }
+.nfc-v2-advanced-rename-notice p { margin:4px 0 0; }
+.nfc-v2-advanced-rename-check { display:inline-flex;align-items:center;gap:9px;min-height:42px;
+  color:var(--nfc-adv-text);font-size:12px;cursor:pointer; }
+.nfc-v2-advanced-rename-check input { accent-color:var(--nfc-adv-accent);width:18px;height:18px; }
+.nfc-v2-advanced-rename-warning { display:flex;align-items:flex-start;gap:9px;
+  border:1px solid #cc7186;border-radius:9px;background:color-mix(in srgb,#d35473 9%,var(--nfc-adv-surface));
+  padding:12px;color:var(--nfc-adv-text);font-size:12px;line-height:1.6; }
+.nfc-v2-advanced-rename-warning > svg { flex:0 0 auto;color:#ca4965; }
+.nfc-v2-advanced-rename-warning p { margin:5px 0 0; }
+.nfc-v2-advanced-rename-table-scroll { max-width:100%;overflow-x:auto; }
+.nfc-v2-advanced-rename-table { border-collapse:collapse;width:100%;min-width:760px;
+  text-align:left;font-size:12px;color:var(--nfc-adv-text); }
+.nfc-v2-advanced-rename-table th { padding:12px 13px;border-bottom:1px solid var(--nfc-adv-line);
+  background:var(--nfc-adv-soft);color:var(--nfc-adv-muted);font-size:11px;font-weight:700; }
+.nfc-v2-advanced-rename-table td { border-bottom:1px solid var(--nfc-adv-line);
+  padding:12px 13px;vertical-align:middle; }
+.nfc-v2-advanced-rename-table tr:last-child td { border-bottom:0; }
+.nfc-v2-advanced-rename-table tbody tr:hover { background:var(--nfc-adv-soft); }
+.nfc-v2-advanced-rename-target { display:flex;align-items:center;gap:8px;min-width:0; }
+.nfc-v2-advanced-rename-target svg { flex:0 0 auto;color:var(--nfc-adv-muted); }
+.nfc-v2-advanced-rename-sr-only { position:absolute;width:1px;height:1px;overflow:hidden;
+  padding:0;clip:rect(0,0,0,0);white-space:nowrap; }
+.nfc-v2-advanced-rename-mobile { display:grid;gap:11px;padding:12px; }
+.nfc-v2-advanced-rename-mobile .nfc-rename-proposal-mobile-card { background:var(--nfc-adv-surface);
+  border:1px solid var(--nfc-adv-line);border-radius:10px;padding:13px; }
+.nfc-v2-rename-page :is(button,input,textarea,select):focus-visible {
+  outline:2px solid var(--nfc-adv-accent);outline-offset:2px; }
+[data-theme='dark'] .nfc-v2-rename-page {
+  --nfc-adv-surface:var(--nfc-surface-1);--nfc-adv-soft:var(--nfc-surface-2);
+  --nfc-adv-text:var(--nfc-text);--nfc-adv-muted:var(--nfc-text-muted);
+  --nfc-adv-line:var(--nfc-hairline);--nfc-adv-accent:var(--nfc-accent);
+}
+@media (max-width:767px) {
+  .nfc-v2-rename-mode { display:grid;grid-template-columns:1fr; }
+  .nfc-v2-rename-mode label { min-height:44px; }
+  .nfc-v2-advanced-rename .nfc-form-grid { grid-template-columns:1fr; }
+  .nfc-v2-advanced-rename-field > input,
+  .nfc-v2-advanced-rename .nfc-console-button { min-height:44px; }
+}
+@media (prefers-reduced-motion:reduce) {
+  .nfc-v2-rename-page * { transition:none;animation:none;scroll-behavior:auto; }
+}
