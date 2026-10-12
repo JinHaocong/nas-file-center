@@ -1,30 +1,17 @@
-import React, { useEffect, useState } from 'react';
-import {
-  Alert,
-  Button,
-  Descriptions,
-  Drawer,
-  Input,
-  Pagination,
-  Spin,
-  Table,
-  Tag,
-  Typography,
-  message,
-} from 'antd';
-import {
-  BuildOutlined,
-  ReloadOutlined,
-  ThunderboltOutlined,
-} from '@ant-design/icons';
+import React, { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { workflowApi } from '../../api/workflows';
 import { formatDedupeErrorMessage, getStructuredApiError } from '../../api/errors';
-import { WorkflowPreviewItem } from '../../types/workflow';
+import type { WorkflowPreviewItem } from '../../types/workflow';
 import { computeRebuildReadiness } from '../../utils/rebuildReadiness';
 import { useResponsive } from '../../hooks/useResponsive';
-
-const { Text } = Typography;
+import { ConsoleSheet } from '../ui/ConsoleSheet';
+import { ConsoleButton } from '../ui/ConsoleButton';
+import { ConsoleIcon } from '../ui/ConsoleIcon';
+import { ConsolePagination } from '../ui/ConsolePagination';
+import { ConsoleEmpty } from '../ui/ConsoleEmpty';
+import { CodePath } from '../ui/CodePath';
+import { useConsoleToast } from '../ui/ConsoleToast';
 
 interface StaleRebuildDrawerProps {
   open: boolean;
@@ -34,50 +21,58 @@ interface StaleRebuildDrawerProps {
 }
 
 const operationTone: Record<string, string> = {
-  rename: 'cyan',
-  move: 'purple',
-  touch: 'blue',
-  quarantine: 'orange',
+  rename: 'info', move: 'info', touch: 'neutral', quarantine: 'warning',
 };
+const operationBadge = (op: string) => (
+  <span className={'nfc-v2-rebuild-badge is-' + (operationTone[op] || 'neutral')}>{op}</span>
+);
+const changeBadge = (changed: boolean) => (
+  <span className={'nfc-v2-rebuild-badge ' + (changed ? 'is-info' : 'is-neutral')}>
+    {changed ? '有变更' : '保持/更新'}
+  </span>
+);
+const targetLabel = (item: WorkflowPreviewItem) =>
+  item.operation === 'touch'
+    ? 'mtime → ' + (item.mtime_ns ? new Date(item.mtime_ns / 1e6).toLocaleString() : '当前时间')
+    : null;
 
 export const StaleRebuildDrawer: React.FC<StaleRebuildDrawerProps> = ({
-  open,
-  planId,
-  onClose,
-  onRebuildSuccess,
+  open, planId, onClose, onRebuildSuccess,
 }) => {
   const { isMobile } = useResponsive();
+  const toast = useConsoleToast();
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [customPlanName, setCustomPlanName] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [previewInvalidated, setPreviewInvalidated] = useState(false);
   const [acceptedDigest, setAcceptedDigest] = useState<string | null>(null);
+  const submitInFlight = useRef(false);
+  const [submitBusy, setSubmitBusy] = useState(false);
 
-  const {
-    data: preview,
-    isLoading,
-    isFetching,
-    isError,
-    error,
-    refetch,
-  } = useQuery({
+  const { data: preview, isLoading, isFetching, isError, error, refetch } = useQuery({
     queryKey: ['rebuildPlanPreview', planId, page, pageSize],
-    queryFn: () =>
-      workflowApi.rebuildPlanPreview(planId, {
-        page,
-        page_size: pageSize,
-      }),
+    queryFn: () => workflowApi.rebuildPlanPreview(planId, { page, page_size: pageSize }),
     enabled: open && !!planId,
   });
 
   useEffect(() => {
-    if (preview?.compile_digest && !previewInvalidated) {
+    setPage(1);
+    setPageSize(50);
+    setCustomPlanName('');
+    setErrorMessage(null);
+    setAcceptedDigest(null);
+    setPreviewInvalidated(false);
+  }, [planId]);
+
+  useEffect(() => {
+    if (open && preview?.compile_digest && !previewInvalidated) {
       setAcceptedDigest(preview.compile_digest);
     }
-  }, [preview, previewInvalidated]);
+  }, [open, preview, previewInvalidated]);
 
   const handleManualRefresh = async () => {
+    if (submitInFlight.current || submitBusy) return;
     setErrorMessage(null);
     setPreviewInvalidated(true);
     setAcceptedDigest(null);
@@ -98,24 +93,16 @@ export const StaleRebuildDrawer: React.FC<StaleRebuildDrawerProps> = ({
 
   const readiness = computeRebuildReadiness({
     hasPreview: Boolean(preview),
-    previewInvalidated,
-    acceptedDigest,
-    isLoading,
-    isFetching,
+    previewInvalidated, acceptedDigest, isLoading, isFetching,
   });
 
   const rebuildMutation = useMutation({
-    mutationFn: async () => {
-      if (!readiness.canSubmit || !readiness.submitDigest) {
-        throw new Error('当前预览已失效或正在获取，请先刷新预览');
-      }
-      return workflowApi.rebuildPlan(planId, {
-        expected_compile_digest: readiness.submitDigest,
-        plan_name: customPlanName.trim() || undefined,
-      });
-    },
-    onSuccess: (data) => {
-      message.success(`全新重建草稿计划 #${data.id || data.plan_id} 创建成功`);
+    mutationFn: async (digest: string) => workflowApi.rebuildPlan(planId, {
+      expected_compile_digest: digest,
+      plan_name: customPlanName.trim() || undefined,
+    }),
+    onSuccess: data => {
+      toast.success('全新重建草稿计划 #' + (data.id || data.plan_id) + ' 创建成功');
       onClose();
       onRebuildSuccess(data.id || data.plan_id);
     },
@@ -134,214 +121,142 @@ export const StaleRebuildDrawer: React.FC<StaleRebuildDrawerProps> = ({
       }
     },
   });
-
-  const columns = [
-    {
-      title: '序号',
-      key: 'index',
-      width: 60,
-      render: (_: unknown, __: unknown, idx: number) => (page - 1) * pageSize + idx + 1,
-    },
-    {
-      title: '操作',
-      dataIndex: 'operation',
-      key: 'operation',
-      width: 100,
-      render: (op: string) => <Tag color={operationTone[op] || 'default'}>{op}</Tag>,
-    },
-    {
-      title: '变更',
-      dataIndex: 'changed',
-      key: 'changed',
-      width: 100,
-      render: (changed: boolean) =>
-        changed ? <Tag color="processing">有变更</Tag> : <Tag>保持/更新</Tag>,
-    },
-    {
-      title: '源路径',
-      dataIndex: 'source_path',
-      key: 'source_path',
-      ellipsis: true,
-      render: (path: string) => <Text code>{path}</Text>,
-    },
-    {
-      title: '目标路径',
-      dataIndex: 'target_path',
-      key: 'target_path',
-      ellipsis: true,
-      render: (target: string | null, record: WorkflowPreviewItem) => {
-        if (record.operation === 'touch') {
-          return (
-            <Text type="secondary">
-              mtime → {record.mtime_ns ? new Date(record.mtime_ns / 1e6).toLocaleString() : '当前时间'}
-            </Text>
-          );
-        }
-        return target ? <Text code>{target}</Text> : <Text type="secondary">—</Text>;
-      },
-    },
-  ];
+  const closeSafely = () => {
+    if (!submitInFlight.current && !submitBusy && !rebuildMutation.isPending) onClose();
+  };
+  const submitRebuild = async () => {
+    if (!open || submitInFlight.current || submitBusy || rebuildMutation.isPending) return;
+    if (!readiness.canSubmit || !readiness.submitDigest) {
+      setErrorMessage('当前预览已失效或正在获取，请先刷新预览');
+      return;
+    }
+    submitInFlight.current = true;
+    setSubmitBusy(true);
+    try {
+      await rebuildMutation.mutateAsync(readiness.submitDigest);
+    } catch {
+      // Failure is reported by mutation.onError; digest mismatch requires fresh Preview.
+    } finally {
+      submitInFlight.current = false;
+      setSubmitBusy(false);
+    }
+  };
 
   const items = preview?.items || [];
+  const renderTarget = (item: WorkflowPreviewItem) => {
+    const time = targetLabel(item);
+    return time ? <span className="nfc-table-meta">{time}</span>
+      : item.target_path ? <CodePath value={item.target_path} /> : '—';
+  };
 
   return (
-    <Drawer
-      rootClassName="nfc-overlay-drawer nfc-stale-rebuild-drawer"
-      title={
-        <div className="nfc-drawer-title">
-          <span className="nfc-drawer-title-kicker">Rebuild preview</span>
-          <div className="nfc-drawer-title-row">
-            <BuildOutlined />
-            <span>过期计划 #{planId}</span>
+    <ConsoleSheet open={open} onClose={closeSafely}
+      title={'过期计划 #' + planId}
+      eyebrow="REBUILD PREVIEW"
+      description="基于权威 Workflow Lineage 和快照重新生成草稿；不自动执行或修改源文件。"
+      className="nfc-stale-rebuild-drawer nfc-v2-stale-rebuild"
+      titleAside={<div className="nfc-v2-rebuild-actions">
+        <ConsoleButton size="sm" leadingIcon={<ConsoleIcon name="refresh" size={15} />}
+          onClick={() => { void handleManualRefresh(); }}
+          disabled={submitBusy || rebuildMutation.isPending}
+          loading={isLoading || isFetching}>刷新预览</ConsoleButton>
+        <ConsoleButton size="sm" variant="primary" leadingIcon={<ConsoleIcon name="zap" size={15} />}
+          loading={submitBusy} disabled={!readiness.canSubmit || submitBusy || rebuildMutation.isPending}
+          onClick={() => { void submitRebuild(); }}>生成草稿</ConsoleButton>
+      </div>}>
+      <div className="nfc-overlay-stack nfc-v2-rebuild-body">
+        {previewInvalidated && <div className="nfc-v2-rebuild-alert is-warning" role="alert">
+          <ConsoleIcon name="info" size={17} /><div>
+            <strong>预览摘要已失效</strong>
+            <p>底层状态已变化，旧编译摘要不能提交。请刷新预览获取新的 digest。</p>
           </div>
-        </div>
-      }
-      open={open}
-      onClose={onClose}
-      width={940}
-      extra={
-        <div className="nfc-drawer-actions">
-          <Button icon={<ReloadOutlined />} onClick={handleManualRefresh} loading={isLoading || isFetching}>
-            刷新预览
-          </Button>
-          <Button
-            type="primary"
-            icon={<ThunderboltOutlined />}
-            loading={rebuildMutation.isPending}
-            disabled={!readiness.canSubmit}
-            onClick={() => rebuildMutation.mutate()}
-          >
-            生成草稿
-          </Button>
-        </div>
-      }
-    >
-      <div className="nfc-overlay-stack">
-        {previewInvalidated && (
-          <Alert
-            className="nfc-overlay-alert"
-            type="warning"
-            showIcon
-            message="预览摘要已失效"
-            description="底层状态已变化，旧编译摘要不能提交。请刷新预览获取新的 digest。"
-          />
-        )}
-
-        {errorMessage && (
-          <Alert
-            className="nfc-overlay-alert"
-            type="error"
-            showIcon
-            message="重建操作受阻"
-            description={errorMessage}
-            closable
-            onClose={() => setErrorMessage(null)}
-          />
-        )}
-
-        {isError && (
-          <Alert
-            className="nfc-overlay-alert"
-            type="error"
-            showIcon
-            message="无法生成重建预览"
-            description={formatDedupeErrorMessage(error)}
-          />
-        )}
-
-        {isLoading && (
-          <div className="nfc-overlay-loading">
-            <Spin tip="正在基于权威 Lineage 与快照计算预览..." />
+        </div>}
+        {errorMessage && <div className="nfc-v2-rebuild-alert is-error" role="alert">
+          <ConsoleIcon name="info" size={17} /><div>
+            <strong>重建操作受阻</strong><p>{errorMessage}</p>
+            <ConsoleButton size="sm" variant="ghost" onClick={() => setErrorMessage(null)}>关闭提示</ConsoleButton>
           </div>
-        )}
-
+        </div>}
+        {isError && <div className="nfc-v2-rebuild-alert is-error" role="alert">
+          <ConsoleIcon name="info" size={17} /><div>
+            <strong>无法生成重建预览</strong><p>{formatDedupeErrorMessage(error)}</p>
+          </div>
+        </div>}
+        {isLoading && <div className="nfc-overlay-loading" role="status">
+          正在基于权威 Lineage 与快照计算预览…
+        </div>}
         {preview && (
           <>
             <section className="nfc-overlay-section">
-              <header className="nfc-overlay-section-header">
-                <div>
-                  <span>Authority</span>
-                  <h3>重建基线</h3>
-                </div>
-              </header>
-              <Descriptions
-                className="nfc-detail-descriptions"
-                size="small"
-                column={{ xxl: 2, xl: 2, lg: 2, md: 1, sm: 1, xs: 1 }}
-              >
-                <Descriptions.Item label="工作流">#{preview.workflow_id}</Descriptions.Item>
-                <Descriptions.Item label="Lineage Revision">r{preview.workflow_revision}</Descriptions.Item>
-                <Descriptions.Item label="计划项">
-                  <Text strong>{preview.planned_operations_count}</Text>
-                </Descriptions.Item>
-                <Descriptions.Item label="匹配对象">{preview.matched_count}</Descriptions.Item>
-                <Descriptions.Item label="Compile Digest" span={2}>
-                  <Text code copyable>{preview.compile_digest}</Text>
-                </Descriptions.Item>
-                <Descriptions.Item label="Definition SHA256" span={2}>
-                  <Text code copyable>{preview.definition_sha256}</Text>
-                </Descriptions.Item>
-              </Descriptions>
+              <header className="nfc-overlay-section-header"><div>
+                <span>Authority</span><h3>重建基线</h3>
+              </div></header>
+              <dl className="nfc-v2-rebuild-facts">
+                <div><dt>工作流</dt><dd>#{preview.workflow_id}</dd></div>
+                <div><dt>Lineage Revision</dt><dd>r{preview.workflow_revision}</dd></div>
+                <div><dt>计划项</dt><dd>{preview.planned_operations_count}</dd></div>
+                <div><dt>匹配对象</dt><dd>{preview.matched_count}</dd></div>
+                <div className="is-wide"><dt>Compile Digest</dt>
+                  <dd><code>{preview.compile_digest}</code></dd></div>
+                <div className="is-wide"><dt>Definition SHA256</dt>
+                  <dd><code>{preview.definition_sha256}</code></dd></div>
+              </dl>
             </section>
-
             <section className="nfc-overlay-section nfc-overlay-section-flush">
-              <header className="nfc-overlay-section-header nfc-overlay-section-header-actions">
-                <div>
-                  <span>Operations</span>
-                  <h3>计划操作预览</h3>
-                </div>
-                <Input
-                  className="nfc-rebuild-name-input"
-                  placeholder="自定义新草稿名称（可选）"
-                  value={customPlanName}
-                  onChange={(e) => setCustomPlanName(e.target.value)}
-                />
-              </header>
-
-              {isMobile ? (
+              <header className="nfc-overlay-section-header nfc-overlay-section-header-actions"><div>
+                <span>Operations</span><h3>计划操作预览</h3>
+              </div></header>
+              <label className="nfc-v2-rebuild-name">草稿计划名称（可选）
+                <input value={customPlanName} disabled={submitBusy}
+                  onChange={event => setCustomPlanName(event.target.value)}
+                  placeholder="自定义新草稿名称（可选）" />
+              </label>
+              {items.length === 0 && <ConsoleEmpty title="无预览操作" description="当前预览没有可显示的操作。" />}
+              {items.length > 0 && (isMobile ? (
                 <div className="nfc-rebuild-mobile-list">
-                  {items.map((item, idx) => (
-                    <article className="nfc-rebuild-mobile-card" key={`${item.source_path}-${item.operation}-${idx}`}>
+                  {items.map((item, index) => (
+                    <article className="nfc-rebuild-mobile-card" key={item.source_path + item.operation + index}>
                       <div className="nfc-rebuild-mobile-topline">
-                        <Tag color={operationTone[item.operation] || 'default'}>{item.operation}</Tag>
-                        {item.changed ? <Tag color="processing">有变更</Tag> : <Tag>保持/更新</Tag>}
+                        {operationBadge(item.operation)}{changeBadge(item.changed)}
                       </div>
                       <div className="nfc-rebuild-mobile-paths">
-                        <Text code>{item.source_path}</Text>
-                        <span>→</span>
-                        <Text code>{item.target_path || '—'}</Text>
+                        <CodePath value={item.source_path} /><span>→</span>{renderTarget(item)}
                       </div>
                     </article>
                   ))}
                 </div>
               ) : (
-                <Table
-                  className="nfc-embedded-table"
-                  dataSource={items}
-                  columns={columns}
-                  rowKey={(rec, idx) => `${rec.source_path}-${rec.operation}-${idx}`}
-                  size="small"
-                  pagination={false}
-                />
-              )}
-
-              <Pagination
-                className="nfc-embedded-pagination"
-                current={page}
-                pageSize={pageSize}
-                total={preview.planned_operations_count}
-                showSizeChanger={!isMobile}
-                pageSizeOptions={['20', '50', '100']}
-                simple={isMobile}
-                onChange={(p, ps) => {
-                  setPage(p);
-                  setPageSize(ps);
-                }}
-              />
+                <div className="nfc-v2-rebuild-table-scroll"><table className="nfc-v2-rebuild-table">
+                  <thead><tr><th scope="col">序号</th><th scope="col">操作</th>
+                    <th scope="col">变更</th><th scope="col">源路径</th>
+                    <th scope="col">目标路径 / mtime</th></tr></thead>
+                  <tbody>{items.map((item, index) => (
+                    <tr key={item.source_path + item.operation + index}>
+                      <td>{(page - 1) * pageSize + index + 1}</td>
+                      <td>{operationBadge(item.operation)}</td><td>{changeBadge(item.changed)}</td>
+                      <td><CodePath value={item.source_path} /></td>
+                      <td>{renderTarget(item)}</td>
+                    </tr>
+                  ))}</tbody>
+                </table></div>
+              ))}
+              <ConsolePagination page={page} pageSize={pageSize}
+                total={preview.planned_operations_count} pageSizes={[20, 50, 100]}
+                onChange={(next, size) => {
+                  if (submitBusy) return;
+                  setPage(size !== pageSize ? 1 : next);
+                  setPageSize(size);
+                  setAcceptedDigest(null);
+                  setPreviewInvalidated(true);
+                }} />
+              <div className="nfc-v2-rebuild-boundary" role="note">
+                <ConsoleIcon name="shield-check" size={16} />
+                <span>只生成新的 Draft Plan；执行仍须另行 Freeze → Validate → Execute。</span>
+              </div>
             </section>
           </>
         )}
       </div>
-    </Drawer>
+    </ConsoleSheet>
   );
 };

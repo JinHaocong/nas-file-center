@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { message } from 'antd';
+import { useConsoleToast } from '../components/ui/ConsoleToast';
 import { authApi } from '../api/auth';
 import { api } from '../api/client';
 import { User } from '../types';
@@ -27,6 +27,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+  const toast = useConsoleToast();
 
   const refreshUser = async () => {
     try {
@@ -50,7 +51,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const login = async (payload: { username: string; password: string }) => {
     const loggedUser = await authApi.login(payload);
     setUser(loggedUser);
-    message.success(`欢迎回来，${loggedUser.username}`);
+    toast.success(`欢迎回来，${loggedUser.username}`);
   };
 
   const logout = async () => {
@@ -60,7 +61,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Ignore network error during logout
     } finally {
       setUser(null);
-      message.info('已安全退出登录');
+      toast.info('已安全退出登录');
       navigate('/login', { replace: true });
     }
   };
