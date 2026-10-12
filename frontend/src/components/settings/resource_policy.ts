@@ -23,10 +23,10 @@ export interface ValidationResult {
 }
 
 export function validateResourcePolicyUpdate(payload: ResourcePolicyUpdate): ValidationResult {
-  if (typeof payload.scan_threads !== 'number' || payload.scan_threads < 1 || payload.scan_threads > 32) {
+  if (!Number.isInteger(payload.scan_threads) || payload.scan_threads < 1 || payload.scan_threads > 32) {
     return { valid: false, error: '扫描线程上限必须为 1 到 32 之间的整数' };
   }
-  if (typeof payload.hash_threads !== 'number' || payload.hash_threads < 1 || payload.hash_threads > 32) {
+  if (!Number.isInteger(payload.hash_threads) || payload.hash_threads < 1 || payload.hash_threads > 32) {
     return { valid: false, error: '哈希线程上限必须为 1 到 32 之间的整数' };
   }
   if (!['low', 'normal', 'unlimited'].includes(payload.io_limit)) {
