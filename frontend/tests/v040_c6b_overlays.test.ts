@@ -15,7 +15,7 @@ describe('v0.4.0 C6B overlay consistency contract', () => {
       'src/pages/Plans/OperationJournalDrawer.tsx',
     ]) {
       const source = read(path);
-      if (path.endsWith('/TaskDetailDrawer.tsx') || path.endsWith('/DedupeExplainDrawer.tsx') || path.endsWith('/RevisionDrawer.tsx') || path.endsWith('/StaleRebuildDrawer.tsx')) {
+      if (path.endsWith('/TaskDetailDrawer.tsx') || path.endsWith('/DedupeExplainDrawer.tsx') || path.endsWith('/RevisionDrawer.tsx') || path.endsWith('/StaleRebuildDrawer.tsx') || path.endsWith('/OperationJournalDrawer.tsx')) {
         assert.match(source, /<ConsoleSheet/, path);
         const sheet = read('src/components/ui/ConsoleSheet.tsx');
         const styles = read('src/styles/console-v2-task-overlays.css');
