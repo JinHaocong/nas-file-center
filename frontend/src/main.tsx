@@ -40,6 +40,7 @@ import './styles/console-v2-organizer-profile-list.css';
 import './styles/console-v2-organizer-preview.css';
 import './styles/console-v2-immediate-rename.css';
 import './styles/console-v2-advanced-rename.css';
+import './styles/console-v2-filename-audit.css';
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
