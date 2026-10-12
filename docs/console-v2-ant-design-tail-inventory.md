@@ -5,7 +5,7 @@
 
 ## Policy
 
-Only the exact eight runtime modules below may import `antd` or
+Only the exact seven runtime modules below may import `antd` or
 `@ant-design/icons` until their corresponding native migrations land.
 The test script denies new unapproved import sites **and** fails if an
 allowlisted file no longer imports AntD but was not removed from this list.
@@ -16,7 +16,7 @@ Do **not** uninstall `antd`/`@ant-design/icons` while this inventory is
 nonempty, and do **not** edit the npm lockfile independently of package
 manifest changes.
 
-## Remaining direct AntD runtime imports (8 files)
+## Remaining direct AntD runtime imports (7 files)
 
 | Path | Current dependency / migration consideration |
 |---|---|
@@ -24,10 +24,13 @@ manifest changes.
 | `src/components/workflows/OrganizerProfileFields.tsx` | AntD Form instance/useWatch and extensive nested rule editor; migrate together with host profile forms |
 | `src/contexts/ThemeContext.tsx` | AntD ConfigProvider, locale and theme tokens; remove only once all consumer components migrate |
 | `src/pages/Login/index.tsx` | AntD credential form and theme dropdown; preserve auth redirect and theme/keyboard semantics |
-| `src/pages/Plans/OperationJournalDrawer.tsx` | AntD audit journal drawer; preserve physical before/after details |
 | `src/pages/Plans/PlanDetail.tsx` | AntD destructive Plan lifecycle controls and detail ledger; preserve each transition guard |
 | `src/pages/Workflows/UtilityWorkflowPreviewPanel.tsx` | AntD Preview/Draft controls and utility candidate selection; retain RBAC + revision snapshot |
 | `src/pages/Workflows/WorkflowPreviewPanelLegacy.tsx` | AntD legacy preview and dedupe pipeline; retain dirty-state, latest preview request and digest-bound Draft |
+
+## PR #176 — native Operation Journal
+
+- `src/pages/Plans/OperationJournalDrawer.tsx` — native read-only ConsoleSheet; all four raw evidence JSON fields, before/after paths, size/inode, server pagination and error/retry preserved.
 
 ## PR #175 — migrated modules (seven runtime files)
 
@@ -41,7 +44,7 @@ manifest changes.
 
 ## Follow-ups
 
-1. Finish PlanDetail / OperationJournal and Workflow Preview safety surfaces.
+1. Finish PlanDetail and Workflow Preview safety surfaces.
 2. Migrate legacy organizer form fields, completed-scan picker and login.
 3. Remove the global AntD ConfigProvider once its final consumers have migrated.
 4. Run this import gate plus full frontend, backend, Docker and dependency-audit checks.
