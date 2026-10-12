@@ -90,7 +90,7 @@ describe('Console v2 Advanced Regex Rename native UI', () => {
     for (const symbol of ['不会转换图片格式', 'WebP → JPEG 转码',
       '<ConsolePagination', '<ResponsiveDataView', '<StatusBadge',
       'nfc-rename-proposal-mobile-card', '<ConsoleEmpty', '<CodePath',
-      'getPaginationState', 'visible.map(', 'type="checkbox"', 'type="number"']) {
+      'getPaginationState', 'visible.map(', 'type="checkbox"', "'number'"]) {
       assert.ok(s.includes(symbol), symbol);
     }
   });
