@@ -35,22 +35,21 @@ describe('v0.4.0 C5B file tools surfaces contract', () => {
   });
 
   test('Rename uses responsive preview cards and preserves extension/conflict contracts', () => {
-    const source = read('src/pages/Rename/index.tsx');
+    const mode = read('src/pages/Rename/index.tsx');
+    const source = read('src/pages/Rename/AdvancedRenameEditor.tsx');
+    const adapter = read('src/utils/advancedRenameSafety.ts');
+    assert.ok(mode.includes('<AdvancedRenameEditor'));
     for (const symbol of ['PageHeader', 'DataPanel', 'ActionBar', 'ResponsiveDataView', 'CodePath', 'StatusBadge']) {
       assert.match(source, new RegExp(symbol));
     }
     assert.match(source, /nfc-rename-proposal-mobile-card/);
-    for (const semantic of [
-      'source_extension: values.source_extension',
-      'target_extension: values.target_extension',
-      'hasConflicts',
-      'previewRename',
-      "kind: 'rename'",
-    ]) {
-      assert.match(source, new RegExp(semantic.replace(/[.*+?^$()|[\]\\]/g, '\\$&')));
+    for (const semantic of ['source_extension: draft.source_extension',
+      'target_extension: draft.target_extension', 'previewRename', "kind: 'rename'",
+      'canGenerateAdvancedRenamePlan']) {
+      assert.ok((source + adapter).includes(semantic), semantic);
     }
     assert.match(source, /不会转换|不做.*转码|仅.*重命名/);
-    assert.match(source, /disabled=\{hasConflicts\}/);
+    assert.ok(source.includes('disabled={!canPlan}'));
     assert.doesNotMatch(source, /<Card\b/);
   });
 
