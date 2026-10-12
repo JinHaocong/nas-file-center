@@ -8,6 +8,7 @@ import { ConsoleButton } from '../ui/ConsoleButton';
 import { ConsoleIcon } from '../ui/ConsoleIcon';
 import { StatusBadge } from '../ui/StatusBadge';
 import { useConsoleToast } from '../ui/ConsoleToast';
+import { parseCompletedScanJobId, verifiedCompletedScanId, completedScanJobs } from '../../utils/completedScanSelection';
 
 interface Props {
   value?: number;
@@ -16,11 +17,8 @@ interface Props {
 }
 
 /** An ID is eligible for dedupe only after a completed ScanJob is identified. */
-export const isValidCompletedScanId = (value: string): boolean => {
-  if (!/^[1-9]\d*$/.test(value)) return false;
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed > 0;
-};
+export const isValidCompletedScanId = (value: string): boolean =>
+  parseCompletedScanJobId(value) !== null;
 
 export const CompletedScanPicker: React.FC<Props> = ({
   value, onChange, disabled = false,
@@ -48,9 +46,7 @@ export const CompletedScanPicker: React.FC<Props> = ({
     },
   });
 
-  const completedScans = (scansData || []).filter(
-    (scan: ScanJob) => scan.status === 'completed'
-  );
+  const completedScans = completedScanJobs(scansData || []);
   const selectedScanFromList = completedScans.find((scan: ScanJob) => scan.id === value);
   const { data: valueScanDetail } = useQuery({
     queryKey: ['scanDetailPicker', value],
@@ -68,20 +64,21 @@ export const CompletedScanPicker: React.FC<Props> = ({
   const handleVerifyAndApply = async () => {
     if (disabled || verificationInFlight.current) return;
     const requested = manualInputId.trim();
-    if (!isValidCompletedScanId(requested)) {
+    const parsedId = parseCompletedScanJobId(requested);
+    if (parsedId === null) {
       onChange(undefined);
       setManualScanDetail(null);
       toast.info('请输入有效的 Scan Job ID');
       return;
     }
-    const id = Number(requested);
+    const id = parsedId;
     const generation = ++verificationGeneration.current;
     verificationInFlight.current = true;
     setVerifying(true);
     try {
       const detail = await scansApi.getScanDetail(id);
       if (generation !== verificationGeneration.current) return;
-      if (detail?.id === id && detail.status === 'completed') {
+      if (verifiedCompletedScanId(id, detail) !== null) {
         setManualScanDetail(detail);
         onChange(detail.id);
         toast.success('已确认扫描任务 #' + detail.id + ' 处于已完成状态');
