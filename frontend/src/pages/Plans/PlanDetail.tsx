@@ -343,45 +343,26 @@ export const PlanDetailPage: React.FC = () => {
 
   return (
     <div className="nfc-operations-page nfc-plan-detail-page nfc-page-layout-detail">
-      <PageHeader
-        title={plan.name}
-        description={
-          <div className="nfc-plan-header-meta">
-            <span className="nfc-mono">Plan #{plan.id}</span>
-            <span className="nfc-kind-badge">{plan.kind}</span>
-            <StatusBadge status={plan.status} />
-          </div>
-        }
-        actions={
-          <ActionBar compact>
-            <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/plans')}>
-              返回列表
-            </Button>
-            <Button icon={<ReloadOutlined />} onClick={() => refetch()} loading={isFetching}>
-              刷新
-            </Button>
-          </ActionBar>
-        }
+      <PageHeader title={plan.name}
+        description={<div className="nfc-plan-header-meta">
+          <span className="nfc-mono">Plan #{plan.id}</span>
+          <span className="nfc-kind-badge">{plan.kind}</span>
+          <StatusBadge status={plan.status} />
+        </div>}
+        actions={<ActionBar compact>
+          <ConsoleButton leadingIcon={<ConsoleIcon name="arrow-left" size={16} />}
+            onClick={() => navigate('/plans')}>返回列表</ConsoleButton>
+          <ConsoleButton leadingIcon={<ConsoleIcon name="refresh" size={16} />}
+            onClick={() => { void refetch(); }} loading={isFetching}>刷新</ConsoleButton>
+        </ActionBar>}
       />
-
-      {planStorageAction === 'hardlink' && (
-        <Alert
-          className="nfc-plan-storage-action-alert"
-          type="warning"
-          showIcon
-          message="Hardlink 计划：两个路径会共享同一个 inode"
-          description="Hardlink 后两个路径共享同一个 inode，未来通过任一路径写入都会修改同一份文件内容。Freeze / Validate / Worker Execute 仍会重新验证 SHA-256、身份与运行时能力。"
-        />
-      )}
-      {planStorageAction === 'reflink' && (
-        <Alert
-          className="nfc-plan-storage-action-alert"
-          type="info"
-          showIcon
-          message="Reflink 计划：独立 inode / Copy-on-Write"
-          description="Reflink 会创建独立 inode，并使用 Copy-on-Write（写时复制）；它不是普通完整复制。Freeze / Validate / Worker Execute 仍会重新验证 SHA-256、身份与运行时能力。"
-        />
-      )}
+      {planStorageAction === 'hardlink' &&
+        notice('Hardlink 计划：两个路径会共享同一个 inode',
+          'Hardlink 后两个路径共享同一个 inode，未来通过任一路径写入都会修改同一份文件内容。Freeze / Validate / Worker Execute 仍会重新验证 SHA-256、身份与运行时能力。',
+          'warning')}
+      {planStorageAction === 'reflink' &&
+        notice('Reflink 计划：独立 inode / Copy-on-Write',
+          'Reflink 会创建独立 inode，并使用 Copy-on-Write（写时复制）；它不是普通完整复制。Freeze / Validate / Worker Execute 仍会重新验证 SHA-256、身份与运行时能力。')}
 
       <div className="nfc-lifecycle-strip" aria-label="计划生命周期">
         {lifecycleSteps.map((step, index) => {
