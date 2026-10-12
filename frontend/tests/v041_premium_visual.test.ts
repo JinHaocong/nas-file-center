@@ -70,11 +70,22 @@ describe('v0.4.1 premium visual pass contract', () => {
     assert.ok(css.includes('.nfc-status-live'));
   });
 
-  test('theme provider overrides Ant component chrome instead of relying on defaults', () => {
+  test('native theme provider delegates UI chrome to light/dark CSS tokens', () => {
     const source = read('src/contexts/ThemeContext.tsx');
-    for (const component of ['Button:', 'Input:', 'Select:', 'Table:', 'Modal:', 'Drawer:']) {
-      assert.ok(source.includes(component), component);
-    }
+    const css = read('src/index.css');
+    const native = read('src/styles/console-v2.css');
+    for (const token of [
+      'ThemeContext.Provider', "localStorage.getItem('nfc_theme_mode')",
+      "localStorage.setItem('nfc_theme_mode', newMode)",
+      "'(prefers-color-scheme: dark)'", "addEventListener('change'",
+      "removeEventListener('change'", "setAttribute('data-theme'",
+      'document.documentElement.style.colorScheme',
+    ]) assert.ok(source.includes(token), token);
+    for (const token of [':root {', "[data-theme='dark']", '--nfc-accent:',
+      '--nfc-surface-1:', '--nfc-text:']) assert.ok(css.includes(token), token);
+    assert.ok(native.includes('.nfc-console-button'));
+    assert.ok(native.includes('focus-visible'));
+    assert.doesNotMatch(source, /from ['"]antd['"]|ConfigProvider|antdTheme|locale={zhCN}/);
   });
 
   test('representative surfaces add stagger, section accents and refined interaction chrome', () => {
