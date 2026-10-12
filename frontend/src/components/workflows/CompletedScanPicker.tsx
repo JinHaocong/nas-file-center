@@ -54,8 +54,10 @@ export const CompletedScanPicker: React.FC<Props> = ({
     enabled: Number.isSafeInteger(value) && Number(value) > 0 && !selectedScanFromList,
   });
   const activeScan = selectedScanFromList ||
-    (manualScanDetail?.id === value && manualScanDetail.status === 'completed' ? manualScanDetail : null) ||
-    (valueScanDetail?.id === value && valueScanDetail.status === 'completed' ? valueScanDetail : null);
+    (manualScanDetail && manualScanDetail.id === value && manualScanDetail.status === 'completed'
+      ? manualScanDetail : null) ||
+    (valueScanDetail && valueScanDetail.id === value && valueScanDetail.status === 'completed'
+      ? valueScanDetail : null);
 
   const filteredScans = completedScans.filter(scan =>
     ('#' + scan.id + ' ' + scan.name).toLowerCase().includes(scanSearch.trim().toLowerCase())
