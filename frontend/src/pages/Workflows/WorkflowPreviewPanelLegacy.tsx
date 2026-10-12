@@ -264,32 +264,13 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
   // Mapped dedupe rows if mode is dedupe
   const dedupeRows = useMemo(() => {
     if (!isDedupe || !acceptedPreview?.items) return [];
-    return mapWorkflowPreviewItemsToDedupeRows(previewData.items);
+    return mapWorkflowPreviewItemsToDedupeRows(acceptedPreview.items);
   }, [isDedupe, acceptedPreview?.items]);
 
   // Directly consume dedupe_summary from previewData (Blocker 1)
 
 
 
-
-  const organizerItemStage = (item: WorkflowPreviewItem) => {
-    if (!organizerAdvanced) return "Standard";
-    if (item.metadata?.conflict) return "Blocking conflict";
-    if (item.metadata?.proposal_type === "wrapper_collapse") return "Stage A";
-    return organizerStructuralRequired ? "Stage B · locked" : "Stage B";
-  };
-
-  const organizerRuleLabel = (item: WorkflowPreviewItem) => {
-    const proposalType = String(item.metadata?.proposal_type || "");
-    const labels: Record<string, string> = {
-      wrapper_collapse: "Wrapper collapse",
-      directory_rename: "Directory rename",
-      file_rename: "File numbering",
-      latest_child_prefix: "Latest prefix",
-      touch: "mtime",
-    };
-    return labels[proposalType] || proposalType || item.operation;
-  };
 
   const canPreview = canPreviewWorkflow(isArchived) && !isDirty &&
     (!isDedupe || Boolean(selectedScanJobId));
@@ -344,7 +325,7 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
     if (canDraft && currentDraft && !draftBusy) setConfirmation(currentDraft);
   };
   const submitDraft = async () => {
-    if (generationInFlight.current || !canDraft ||
+    if (generating.current || !canDraft ||
         !sameLegacyDraftRequest(confirmation, currentDraft) || !confirmation) {
       setConfirmation(null);
       return;
@@ -360,7 +341,7 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
           }
         : undefined,
     };
-    generationInFlight.current = true;
+    generating.current = true;
     setDraftBusy(true);
     setErrorMessage(null);
     try {
@@ -397,19 +378,14 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
         setPreviewState('PREVIEW_STALE');
       }
     } finally {
-      generationInFlight.current = false;
+      generating.current = false;
       setDraftBusy(false);
       setConfirmation(null);
     }
   };
-  const target = (item: WorkflowPreviewItem) =>
-    item.operation === 'touch'
-      ? <span className="nfc-table-meta">mtime: {item.mtime_ns
-          ? new Date(item.mtime_ns / 1e6).toLocaleString() : '当前时间'}</span>
-      : <CodePath value={item.target_path} muted={!item.target_path} />;
   const notice = (title: string, detail: string, tone: 'info' | 'warning' | 'error' | 'success' = 'info') =>
     <div className={'nfc-v2-legacy-notice is-' + tone} role={tone === 'warning' || tone === 'error' ? 'alert' : 'note'}>
-      <ConsoleIcon name={tone === 'error' ? 'alert-circle' : 'info'} size={18} />
+      <ConsoleIcon name={tone === 'error' ? 'info' : 'info'} size={18} />
       <div><strong>{title}</strong><p>{detail}</p></div>
     </div>;
   const previewStates: Record<string, string> = {
@@ -642,7 +618,7 @@ export const WorkflowPreviewPanel: React.FC<WorkflowPreviewPanelProps> = ({
         </>}
       </div>
       <ConsoleConfirmDialog open={confirmation !== null}
-        onOpenChange={next => { if (!next && !draftBusy && !generationInFlight.current) setConfirmation(null); }}
+        onOpenChange={next => { if (!next && !draftBusy && !generating.current) setConfirmation(null); }}
         title={organizerStructuralRequired ? '确认生成 Organizer Stage A 结构计划草稿？' :
           organizerAdvanced ? '确认生成 Organizer Stage B 重命名计划草稿？' :
           '确认基于此预览生成批处理计划草稿？'}
