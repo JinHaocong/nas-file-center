@@ -73,7 +73,7 @@ const Tags: React.FC<{
   );
 };
 
-/** Workflow-only editor. The standalone Organizer profile form keeps its own API + Form authority. */
+/** Shared native field editor for workflow snapshots and standalone profile CRUD; each parent owns persistence authority. */
 export const OrganizerSnapshotFields: React.FC<Props> = ({
   value, onChange, readOnly = false, includeRoot = false,
 }) => {

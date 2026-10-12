@@ -35,7 +35,6 @@ describe('Console v2 residual Ant Design cleanup — audited native safety', () 
     const source = read('scripts/check-ant-design-tail.mjs');
     for (const token of [
       "resolve(frontend, 'src')", 'const allowed = new Set([',
-      "'src/components/workflows/OrganizerProfileFields.tsx'",
       "'src/contexts/ThemeContext.tsx'",
       'modulePattern', 'readdirSync(dir)', 'statSync(full).isDirectory()',
       'matches.sort(', 'const unexpected = matches.filter(item => !item.approved)',

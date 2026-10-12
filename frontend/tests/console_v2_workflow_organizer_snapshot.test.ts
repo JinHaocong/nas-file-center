@@ -1,6 +1,6 @@
 import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createDefaultOrganizerSnapshot, importProfileToSnapshot } from '../src/utils/organizerDefaults';
 import {
@@ -100,8 +100,13 @@ describe('Console v2 native Workflow Organizer immutable snapshot', () => {
       'aria-label="选择已有整理方案导入快照"', 'role="alert"',
     ]) assert.ok(s.includes(t), t);
     assert.doesNotMatch(s, /from ['"]antd['"]|@ant-design\/icons|<Form\b|<Select\b|message\./);
-    const shared = read('src/components/workflows/OrganizerProfileFields.tsx');
-    assert.ok(shared.includes('Form.useFormInstance()')); // Standalone form stays untouched.
+    // Both active consumers use the same controlled native editor; the old
+    // AntD Form.useFormInstance-based field set has no active caller.
+    const standalone = read('src/pages/Organizer/ProfileFormModal.tsx');
+    assert.ok(standalone.includes('<OrganizerSnapshotFields includeRoot'));
+    assert.ok(s.includes('<OrganizerSnapshotFields value={step.profile_snapshot}'));
+    assert.equal(existsSync(resolve(process.cwd(),
+      'src/components/workflows/OrganizerProfileFields.tsx')), false);
   });
   test('native tabs, advanced Stage A/B alerts and live template preview retain safe semantics', () => {
     const s = read('src/components/workflows/OrganizerSnapshotFields.tsx');
