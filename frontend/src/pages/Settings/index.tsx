@@ -193,7 +193,7 @@ export const SettingsPage: React.FC = () => {
     };
     const checked = validateResourcePolicyUpdate(payload);
     if (!checked.valid) { toast.error(checked.error || '资源策略校验失败'); return; }
-    void runOnce('resource-save', () => saveResourcePolicyMutation.mutateAsync(payload));
+    void runOnce('resource-save', () => saveResourcePolicyMutation.mutateAsync(payload)).catch(() => {});
   };
   const handleSavePolicy = () => {
     if (rejectNonAdmin('修改审计保留策略')) return;
@@ -204,7 +204,7 @@ export const SettingsPage: React.FC = () => {
     }
     prepareTicket.current += 1;
     setConfirmation(current => current?.kind === 'retention' ? null : current);
-    void runOnce('audit-save', () => savePolicyMutation.mutateAsync(retentionDaysInput));
+    void runOnce('audit-save', () => savePolicyMutation.mutateAsync(retentionDaysInput)).catch(() => {});
   };
   const handleSaveQuarantinePolicy = () => {
     if (rejectNonAdmin('修改隔离区保留策略')) return;
@@ -213,7 +213,7 @@ export const SettingsPage: React.FC = () => {
       return;
     }
     void runOnce('quarantine-save', () =>
-      saveQuarantinePolicyMutation.mutateAsync(quarantineDaysInput));
+      saveQuarantinePolicyMutation.mutateAsync(quarantineDaysInput)).catch(() => {});
   };
 
   const auditSaveAvail = getAuditRetentionSaveAvailability(isAdmin, savePolicyMutation.isPending);
