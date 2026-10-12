@@ -1,0 +1,146 @@
+/* Console v2 Media integrity. Owned semantic responsive controls and Radix portal UI. */
+.nfc-v2-media-page {
+  --nfc-media-bg:var(--v2-paper,#fff);
+  --nfc-media-soft:var(--v2-canvas,#f6f8fb);
+  --nfc-media-text:var(--v2-text,#182438);
+  --nfc-media-muted:var(--v2-muted,#66768b);
+  --nfc-media-line:var(--v2-line,#e2e8f0);
+  --nfc-media-accent:var(--v2-indigo,#286ff1);
+}
+.nfc-v2-media-page .nfc-data-panel-body {
+  padding:0;overflow:hidden;background:var(--nfc-media-bg);
+  border:1px solid var(--nfc-media-line);border-radius:11px;
+}
+.nfc-v2-media-filters {
+  display:flex;align-items:flex-end;flex-wrap:wrap;gap:10px;padding:15px;
+  border-bottom:1px solid var(--nfc-media-line);
+}
+.nfc-v2-media-filters > label,.nfc-v2-media-search > label {
+  display:grid;gap:5px;min-width:135px;
+  font-size:11px;font-weight:700;color:var(--nfc-media-muted);
+}
+.nfc-v2-media-filters > label:first-child { min-width:210px;flex:1 1 210px; }
+.nfc-v2-media-filters select,.nfc-v2-media-filters input {
+  box-sizing:border-box;min-width:0;width:100%;min-height:40px;
+  border:1px solid var(--nfc-media-line);border-radius:8px;
+  background:var(--nfc-media-bg);color:var(--nfc-media-text);
+  padding:9px 11px;font-size:12px;font-weight:400;
+}
+.nfc-v2-media-search { flex:1 1 250px;display:flex;gap:8px;align-items:flex-end;min-width:0; }
+.nfc-v2-media-search > label { flex:1;min-width:0; }
+.nfc-v2-media-warning { display:flex;align-items:flex-start;gap:10px;padding:12px 15px;
+  font-size:12px;line-height:1.7;border-bottom:1px solid var(--nfc-media-line);
+  background:color-mix(in srgb,#f8edcf 32%,var(--nfc-media-bg));
+  color:var(--nfc-media-text); }
+.nfc-v2-media-warning > svg { flex:0 0 auto;color:#bd812a;margin-top:2px; }
+.nfc-v2-media-table-scroll { max-width:100%;overflow-x:auto;scrollbar-width:thin; }
+.nfc-v2-media-table { border-collapse:collapse;table-layout:fixed;
+  width:100%;min-width:1210px;font-size:12px;line-height:1.6;color:var(--nfc-media-text); }
+.nfc-v2-media-table th { text-align:left;font-size:11px;font-weight:700;
+  padding:11px 9px;color:var(--nfc-media-muted);
+  background:var(--nfc-media-soft);border-bottom:1px solid var(--nfc-media-line); }
+.nfc-v2-media-table td { vertical-align:middle;min-width:0;padding:11px 9px;
+  border-bottom:1px solid var(--nfc-media-line);overflow-wrap:anywhere; }
+.nfc-v2-media-table tbody tr:last-child td { border-bottom:0; }
+.nfc-v2-media-table tbody tr:hover { background:color-mix(in srgb,var(--nfc-media-soft) 74%,transparent); }
+.nfc-v2-media-table th:nth-child(1) { width:42px; }
+.nfc-v2-media-table th:nth-child(2) { width:235px; }
+.nfc-v2-media-table th:nth-child(3) { width:119px; }
+.nfc-v2-media-table th:nth-child(4) { width:144px; }
+.nfc-v2-media-table th:nth-child(5) { width:143px; }
+.nfc-v2-media-table th:nth-child(6) { width:156px; }
+.nfc-v2-media-table th:nth-child(7) { width:177px; }
+.nfc-v2-media-table th:nth-child(8) { width:144px; }
+.nfc-v2-media-table td small { display:block;color:var(--nfc-media-muted);margin-top:4px; }
+.nfc-v2-media-checkbox { width:17px;height:17px;vertical-align:middle;margin:0;
+  accent-color:var(--nfc-media-accent);cursor:pointer; }
+.nfc-v2-media-checkbox:disabled { opacity:.37;cursor:not-allowed; }
+.nfc-v2-media-file { display:flex;gap:9px;align-items:flex-start;min-width:0; }
+.nfc-v2-media-file > svg { flex:0 0 auto;margin-top:2px;color:var(--nfc-media-accent); }
+.nfc-v2-media-file > div { display:grid;gap:4px;min-width:0;overflow-wrap:anywhere; }
+.nfc-v2-media-file > div > span { font-size:11px;color:var(--nfc-media-muted); }
+.nfc-v2-media-file .nfc-code-path { max-width:100%; }
+.nfc-v2-media-status { display:inline-flex;align-items:center;gap:5px;white-space:normal;
+  max-width:100%;padding:4px 8px;border-radius:7px;border:1px solid var(--nfc-media-line);
+  background:var(--nfc-media-soft);color:var(--nfc-media-muted);
+  font-size:11px;font-weight:650;line-height:1.4; }
+.nfc-v2-media-status > svg { flex:0 0 auto; }
+.nfc-v2-media-status.is-healthy,.nfc-v2-media-status.is-verified { color:#17845f; }
+.nfc-v2-media-status.is-corrupt,.nfc-v2-media-status.is-changed { color:#c14158; }
+.nfc-v2-media-status.is-baseline { color:var(--nfc-media-accent); }
+.nfc-v2-media-mobile { padding:11px;display:grid;gap:11px; }
+.nfc-v2-media-mobile .nfc-index-mobile-card { border:1px solid var(--nfc-media-line);
+  border-radius:11px;background:var(--nfc-media-bg);padding:12px;min-width:0; }
+.nfc-v2-media-mobile .nfc-mobile-record-heading { align-items:flex-start; }
+.nfc-v2-media-mobile .nfc-v2-media-badges { display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end; }
+.nfc-v2-media-mobile .nfc-mobile-record-actions { gap:12px; }
+.nfc-v2-media-loading { display:flex;justify-content:center;align-items:center;
+  gap:10px;flex-wrap:wrap;min-height:110px;padding:20px;
+  color:var(--nfc-media-muted);font-size:12px; }
+.nfc-v2-media-page .nfc-console-pagination {
+  padding:12px 16px;border-top:1px solid var(--nfc-media-line);
+}
+.nfc-v2-media-page :is(input,select,button):focus-visible {
+  outline:2px solid var(--nfc-media-accent);outline-offset:2px;
+}
+[data-theme='dark'] .nfc-v2-media-page {
+  --nfc-media-bg:var(--v2-paper,#1a2434);
+  --nfc-media-soft:var(--v2-canvas,#111827);
+  --nfc-media-text:var(--v2-text,#f1f5fb);
+  --nfc-media-muted:var(--v2-muted,#afbdce);
+  --nfc-media-line:var(--v2-line,#2c3a4e);
+  --nfc-media-accent:var(--v2-indigo,#83b5ff);
+}
+.nfc-v2-media-queue-dialog {
+  --nfc-media-queue-bg:var(--nfc-surface-1,#fff);
+  --nfc-media-queue-soft:var(--nfc-surface-2,#f6f8fb);
+  --nfc-media-queue-text:var(--nfc-text,#182438);
+  --nfc-media-queue-line:var(--nfc-hairline,#dce5ee);
+  --nfc-media-queue-accent:var(--nfc-accent,#286ff1);
+  width:min(94vw,650px);max-width:650px;max-height:min(88dvh,800px);
+  overflow-y:auto;color:var(--nfc-media-queue-text);
+}
+[data-theme='dark'] .nfc-v2-media-queue-dialog {
+  --nfc-media-queue-bg:var(--nfc-surface-1,#1a2434);
+  --nfc-media-queue-soft:var(--nfc-surface-2,#222e41);
+  --nfc-media-queue-text:var(--nfc-text,#f1f5fb);
+  --nfc-media-queue-line:var(--nfc-hairline,#36435a);
+  --nfc-media-queue-accent:var(--nfc-accent,#83b5ff);
+}
+.nfc-v2-media-queue-dialog .nfc-v2-dialog-heading { align-items:flex-start; }
+.nfc-v2-media-queue-dialog .nfc-v2-dialog-heading > div { flex:1;min-width:0; }
+.nfc-v2-media-queue-description { margin-top:7px;font-size:11px;line-height:1.7; }
+.nfc-v2-media-queue-body { display:grid;gap:14px;margin:12px 0; }
+.nfc-v2-media-queue-body > p { margin:0;font-size:12px;line-height:1.7; }
+.nfc-v2-media-root-options { display:grid;gap:8px;border:1px solid var(--nfc-media-queue-line);
+  border-radius:9px;padding:12px;min-width:0; }
+.nfc-v2-media-root-options legend { padding:0 6px;font-size:12px;font-weight:700; }
+.nfc-v2-media-root-options label { display:flex;align-items:flex-start;gap:10px;
+  padding:9px 10px;border-radius:8px;background:var(--nfc-media-queue-soft);
+  font-size:12px;line-height:1.6;cursor:pointer;overflow-wrap:anywhere; }
+.nfc-v2-media-root-options input { margin-top:2px;width:17px;height:17px;flex:0 0 auto;
+  accent-color:var(--nfc-media-queue-accent); }
+.nfc-v2-media-root-options input:disabled { opacity:.5;cursor:not-allowed; }
+.nfc-v2-media-root-options label:has(input:disabled) { opacity:.66;cursor:not-allowed; }
+.nfc-v2-media-root-options p { margin:0;font-size:12px; }
+.nfc-v2-media-queue-dialog :is(input,button):focus-visible {
+  outline:2px solid var(--nfc-media-queue-accent);outline-offset:2px;
+}
+@media(max-width:767px) {
+  .nfc-v2-media-filters { padding:11px;gap:9px; }
+  .nfc-v2-media-filters > label { min-width:0;flex:1 1 135px; }
+  .nfc-v2-media-filters > label:first-child { flex:1 1 100%; }
+  .nfc-v2-media-search { flex:1 1 100%; }
+  .nfc-v2-media-mobile .nfc-mobile-record-heading { flex-direction:column;gap:9px; }
+  .nfc-v2-media-mobile .nfc-v2-media-badges { justify-content:flex-start; }
+  .nfc-v2-media-page .nfc-console-button,
+  .nfc-v2-media-filters :is(input,select),
+  .nfc-v2-media-queue-dialog .nfc-console-button { min-height:44px; }
+  .nfc-v2-media-queue-dialog { width:min(96vw,650px);max-height:93dvh; }
+  .nfc-v2-media-root-options label { min-height:44px; }
+}
+@media(prefers-reduced-motion:reduce) {
+  .nfc-v2-media-page *, .nfc-v2-media-queue-dialog * {
+    animation:none;transition:none;scroll-behavior:auto;
+  }
+}
