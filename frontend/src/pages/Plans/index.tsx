@@ -136,7 +136,7 @@ export const PlansPage: React.FC = () => {
                           查看与执行
                         </ConsoleButton>
                         <PlanDeleteButton plan={plan}
-                          onDelete={() => deletePlanMutation.mutate(plan.id)}
+                          onDelete={() => deletePlanMutation.mutateAsync(plan.id)}
                           loading={deletingId === plan.id} type="text" />
                       </div></td>
                     </tr>
@@ -167,7 +167,7 @@ export const PlansPage: React.FC = () => {
                       <ConsoleButton variant="ghost" size="sm"
                         onClick={() => openPlan(plan.id)}>查看与执行</ConsoleButton>
                       <PlanDeleteButton plan={plan}
-                        onDelete={() => deletePlanMutation.mutate(plan.id)}
+                        onDelete={() => deletePlanMutation.mutateAsync(plan.id)}
                         loading={deletingId === plan.id} type="text" size="middle" />
                     </div>
                   </article>

@@ -583,7 +583,7 @@ export const PlanDetailPage: React.FC = () => {
 
           <PlanDeleteButton
             plan={plan}
-            onDelete={() => deleteMutation.mutate()}
+            onDelete={() => deleteMutation.mutateAsync()}
             loading={deleteMutation.isPending}
             type="default"
             size="middle"

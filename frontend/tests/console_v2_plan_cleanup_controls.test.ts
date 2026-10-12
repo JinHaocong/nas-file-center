@@ -99,6 +99,13 @@ describe('Console v2 native Plan cleanup controls', () => {
     ]) assert.ok(s.includes(token), token);
     assert.doesNotMatch(s, /from ['"]antd['"]|@ant-design\/icons|<Modal\b|<Checkbox\.Group/);
   });
+  test('both Plan entry points await the deletion Promise before dismissing confirmation', () => {
+    const ledger = read('src/pages/Plans/index.tsx');
+    const detail = read('src/pages/Plans/PlanDetail.tsx');
+    assert.equal(ledger.split('onDelete={() => deletePlanMutation.mutateAsync(plan.id)}').length - 1, 2);
+    assert.ok(detail.includes('onDelete={() => deleteMutation.mutateAsync()}'));
+    assert.ok(deleteButton().includes('await onDelete()'));
+  });
   test('Plans ledger uses native toast without AntD message import', () => {
     const s = read('src/pages/Plans/index.tsx');
     for (const token of [
