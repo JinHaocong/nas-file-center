@@ -72,6 +72,7 @@ describe('Console v2 native Scheduler S4 semantics', () => {
     const d = createDefaultScheduleDraft();
     for (const type of ['media_analysis', 'media_integrity_verification'] as const) {
       d.targetType = type;
+      d.mediaRootKeys = [];
       assert.throws(() => buildScheduleTarget(d, null), /媒体根目录/);
       d.mediaRootKeys = ['/data/one'];
       assert.deepEqual(buildScheduleTarget(d, null), { type, root_keys: ['/data/one'] });
