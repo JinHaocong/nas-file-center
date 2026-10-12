@@ -519,45 +519,59 @@ export const PlanDetailPage: React.FC = () => {
         variant="dense"
       >
         <ResponsiveDataView
-          desktop={
-            <Table
-              dataSource={plan.items || []}
-              columns={columns}
-              rowKey={(record) => record.id || `${record.source}_${record.sequence}`}
-              scroll={{ x: 1180 }}
-              pagination={{
-                current: page,
-                pageSize,
-                total: plan.total_items ?? plan.expected_changes,
-                showSizeChanger: true,
-                pageSizeOptions: ['20', '50', '100', '200'],
-                onChange: (p, ps) => {
-                  setPage(p);
-                  setPageSize(ps);
-                },
-              }}
-            />
-          }
-          mobile={
-            <>
-              {mobileItems}
-              <div className="nfc-mobile-pagination">
-                <Pagination
-                  current={page}
-                  pageSize={pageSize}
-                  total={plan.total_items ?? plan.expected_changes}
-                  showSizeChanger
-                  pageSizeOptions={['20', '50', '100', '200']}
-                  onChange={(p, ps) => {
-                    setPage(p);
-                    setPageSize(ps);
-                  }}
-                />
-              </div>
-            </>
-          }
+          desktop={(plan.items || []).length === 0
+            ? <ConsoleEmpty title="暂无计划项" description="当前计划没有可展示的操作项。" />
+            : <div className="nfc-v2-plan-table-scroll">
+                <table className="nfc-v2-plan-table">
+                  <thead><tr>
+                    <th scope="col">序号</th><th scope="col">操作</th>
+                    <th scope="col">源文件 / 待操作路径</th>
+                    <th scope="col">目标路径 / 保留副本</th>
+                    <th scope="col">预估容量</th><th scope="col">校验状态</th>
+                    <th scope="col">执行备注</th>
+                  </tr></thead>
+                  <tbody>{(plan.items || []).map(item => (
+                    <tr key={item.id || item.source + '_' + item.sequence}>
+                      <td className="nfc-mono">#{item.sequence}</td>
+                      <td><span className={'nfc-operation-badge nfc-operation-' + item.operation}>
+                        {item.operation}</span></td>
+                      <td><CodePath value={item.source} /></td>
+                      <td>{renderTarget(item)}</td>
+                      <td>{item.expected_size > 0 ? formatBytes(item.expected_size) : '—'}</td>
+                      <td><StatusBadge status={item.state} /></td>
+                      <td>{item.reason || <span className="nfc-table-muted">—</span>}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>}
+          mobile={mobileItems}
         />
+        <ConsolePagination page={page} pageSize={pageSize}
+          total={plan.total_items ?? plan.expected_changes}
+          pageSizes={[20, 50, 100, 200]}
+          onChange={(p, ps) => { setPage(p); setPageSize(ps); }} />
       </DataPanel>
+
+      <ConsoleConfirmDialog
+        open={confirmation !== null}
+        onOpenChange={next => { if (!next && !pendingAction && !actionInFlight.current) setConfirmation(null); }}
+        title={confirmation?.action === 'execute' ? '确认执行计划？' : '确认生成撤销计划？'}
+        description={confirmation?.action === 'execute'
+          ? <div className="nfc-v2-plan-confirm">
+              <p>请核对计划 #{confirmation.id}、当前校验状态、目标路径及全部计划项。</p>
+              <p>Execute 将通过既有 Worker 任务队列对真实 NAS 文件进行变更或隔离。</p>
+              <p>执行前必须保持 ALLOW_MUTATION=true、Ready/Partial 状态并且没有活动任务。</p>
+            </div>
+          : <div className="nfc-v2-plan-confirm">
+              <p>系统将基于 Operation Journal 已完成的操作倒序创建一份新的 Undo Draft。</p>
+              <p>该 Draft 仍需完成 Freeze → Validate → Execute；不会直接原地撤销文件。</p>
+            </div>}
+        confirmText={confirmation?.action === 'execute' ? '确认执行' : '生成撤销计划'}
+        danger={confirmation?.action === 'execute'}
+        busy={pendingAction}
+        disabled={!confirmationValid}
+        onConfirm={() => { void submitConfirmation(); }}
+      />
 
       <OperationJournalDrawer
         planId={planId}
