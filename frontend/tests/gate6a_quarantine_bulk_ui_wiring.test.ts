@@ -9,10 +9,15 @@ const quarantinePageSource = readFileSync(
 );
 
 describe('Gate6-A quarantine page wiring contract', () => {
-  test('quarantine table exposes explicit active-row bulk selection', () => {
-    assert.match(quarantinePageSource, /rowSelection=/);
-    assert.match(quarantinePageSource, /preserveSelectedRowKeys:\s*true/);
+  test('native quarantine table preserves explicit active-only selection across pages', () => {
     assert.match(quarantinePageSource, /getBulkSelectableEntryIds/);
+    assert.match(quarantinePageSource, /record\.state !== 'active'/);
+    assert.match(quarantinePageSource, /disabled=\{record\.state !== 'active'\}/);
+    assert.match(quarantinePageSource, /selectedEntryIds\.includes\(record\.id\)/);
+    assert.match(quarantinePageSource, /Array\.from\(new Set\(\[\.\.\.current, \.\.\.currentPageSelectableIds\]\)\)/);
+    assert.match(quarantinePageSource, /aria-label="选择当前页所有 active 隔离条目"/);
+    assert.match(quarantinePageSource, /<table className="nfc-v2-quarantine-table"/);
+    assert.doesNotMatch(quarantinePageSource, /from ['"]antd['"]|rowSelection=|<Table\b/);
   });
 
   test('bulk restore and Gate6-A2 bulk permanent purge are both wired to safety modals', () => {
