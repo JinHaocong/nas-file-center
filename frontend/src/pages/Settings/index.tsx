@@ -402,7 +402,8 @@ export const SettingsPage: React.FC = () => {
                     onClick={() => setRetentionDaysInput(days)}>{days === 0 ? '永久保留' : days + ' 天'}</ConsoleButton>
                 ))}
                 <ConsoleButton variant="primary" size="sm" loading={savePolicyMutation.isPending}
-                  disabled={!auditSaveAvail.canSave} title={auditSaveAvail.disabledReason}
+                  disabled={!auditSaveAvail.canSave}
+                  title={!isAdmin ? '仅系统管理员允许修改审计保留策略' : auditSaveAvail.disabledReason}
                   leadingIcon={<ConsoleIcon name="check" size={16} />}
                   onClick={handleSavePolicy}>保存策略</ConsoleButton>
               </ActionBar>
@@ -430,7 +431,8 @@ export const SettingsPage: React.FC = () => {
                   </select>
                 </label>
                 <ConsoleButton variant="primary" size="sm" loading={saveQuarantinePolicyMutation.isPending}
-                  disabled={!quarantineSaveAvail.canSave} title={quarantineSaveAvail.disabledReason}
+                  disabled={!quarantineSaveAvail.canSave}
+                  title={!isAdmin ? '仅系统管理员允许修改隔离区保留策略' : quarantineSaveAvail.disabledReason}
                   leadingIcon={<ConsoleIcon name="check" size={16} />}
                   onClick={handleSaveQuarantinePolicy}>保存隔离区策略</ConsoleButton>
               </ActionBar>
@@ -459,7 +461,7 @@ export const SettingsPage: React.FC = () => {
                   <ConsoleButton variant="danger" size="sm"
                     loading={applyRetentionMutation.isPending || prepareApplyPending}
                     disabled={!availability.canApply || !!confirmation}
-                    title={availability.disabledReason}
+                    title={!isAdmin ? '仅系统管理员允许执行审计日志清理' : availability.disabledReason}
                     leadingIcon={<ConsoleIcon name="trash" size={16} />}
                     onClick={() => { void handlePrepareApply(); }}>执行审计清理</ConsoleButton>
                 </ActionBar>
@@ -652,8 +654,8 @@ export const SettingsPage: React.FC = () => {
           <div className="nfc-v2-settings-confirm-copy">
             <p>当前已保存策略：<strong>{formatAuditRetention(confirmation.days)}</strong></p>
             <p>当前最新预览：预计清理 <strong className="nfc-danger-text">{confirmation.deleteCount}</strong> 条 Audit 历史记录。</p>
-            <p>当前预览仅为预计结果。实际执行将按数据库中最新策略和审计数据重新计算，删除数量可能不同。</p>
-            <p>仅清理 Audit 历史，不删除 NAS 文件或 Task、Scan、Plan、Index 数据。</p>
+            <p>提示：当前预览仅为预计结果。实际执行时将根据数据库中最新保存的保留策略以及执行时最新的审计数据重新计算，最终删除数量可能与当前预览不同。</p>
+            <p>安全边界：本操作仅清理符合保留期条件的 Audit 历史记录。不会删除 NAS 上的真实文件或目录，也不会删除 Task、Scan、Plan 或 Index 数据。</p>
             <p className="nfc-danger-copy">审计历史清理不可撤销。</p>
           </div>
         ) : confirmation?.kind === 'clear' ? (
