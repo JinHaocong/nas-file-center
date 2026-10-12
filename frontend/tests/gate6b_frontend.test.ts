@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { validateWorkflowStepOrder, getAllowedInsertions } from '../src/utils/workflowTopology.js';
 import { createDefaultDedupeScorerConfig, validateScorerConfigForm } from '../src/utils/dedupeConfig.js';
+import { selectableUtilityCandidateIds, utilityDraftRequest } from '../src/utils/workflowUtilityDraft';
 
 const workflowTypesSource = readFileSync(resolve(process.cwd(), 'src/types/workflow.ts'), 'utf8');
 const builderSource = readFileSync(resolve(process.cwd(), 'src/pages/Workflows/WorkflowBuilder.tsx'), 'utf8');
@@ -64,10 +65,21 @@ describe('Gate6-B Utility frontend contract', () => {
     assert.match(previewPanelSource, /UNSUPPORTED_FILESYSTEM/);
     assert.match(previewPanelSource, /UTILITY_MOVE_UNSUPPORTED_FILESYSTEM/);
     assert.match(previewPanelSource, /unsupportedCandidates/);
-    assert.match(previewPanelSource, /selectedCandidateIds\.length\s*>\s*0/);
+    assert.deepEqual(selectableUtilityCandidateIds([unsupportedCandidate]), []);
+    assert.equal(utilityDraftRequest({
+      preview: {
+        workflow_id: 7, workflow_revision: 1, compile_digest: 'a'.repeat(64),
+        utility_summary: { candidates: [unsupportedCandidate] },
+      } as any,
+      workflowId: 7, revision: 1, contextValid: true,
+      isDirty: false, isArchived: false,
+      previewPending: false, generatePending: false,
+      selectedCandidateIds: [],
+    }, ''), null);
+    assert.match(previewPanelSource, /utilityDraftRequest/);
     assert.match(previewPanelSource, /只读发现/);
     assert.match(previewPanelSource, /安全无覆盖 MOVE/);
-    assert.match(previewPanelSource, /严格 no-clobber 运行时探测/);
+    assert.match(previewPanelSource, /严格 no-clobber/);
   });
 });
 
