@@ -1,0 +1,75 @@
+/* Console v2 — native Plan Detail lifecycle, safety and PlanItem ledger. */
+.nfc-plan-detail-page {
+  --nfc-plan-bg:var(--nfc-surface-1,#fff);
+  --nfc-plan-muted:var(--nfc-text-muted,#65738a);
+  --nfc-plan-ink:var(--nfc-text,#172338);
+  --nfc-plan-line:var(--nfc-hairline,#dce4ef);
+  --nfc-plan-soft:var(--nfc-surface-2,#f6f8fc);
+  --nfc-plan-accent:var(--nfc-accent,#286ff1);
+}
+.nfc-v2-plan-load { display:flex;align-items:center;justify-content:center;
+  gap:12px;min-height:170px;color:var(--nfc-text-muted); }
+.nfc-v2-plan-load .nfc-console-spinner { width:20px;height:20px; }
+.nfc-v2-plan-message { display:flex;align-items:flex-start;flex-wrap:wrap;
+  gap:10px;border:1px solid var(--nfc-hairline);border-radius:12px;
+  background:var(--nfc-surface-1);padding:17px;color:var(--nfc-text); }
+.nfc-v2-plan-message.is-error { border-color:#be6577; }
+.nfc-v2-plan-message > svg { flex:0 0 auto; }
+.nfc-v2-plan-message > div { flex:1 1 240px;min-width:0; }
+.nfc-v2-plan-message p { margin:6px 0 0;color:var(--nfc-text-muted);overflow-wrap:anywhere; }
+.nfc-v2-plan-actions .nfc-action-bar { display:flex;gap:9px;flex-wrap:wrap; }
+.nfc-v2-plan-actions .nfc-console-button { min-height:39px; }
+.nfc-v2-plan-actions > .nfc-action-bar > span { display:inline-flex; }
+.nfc-v2-plan-notice { display:flex;align-items:flex-start;gap:10px;
+  padding:13px 14px;border:1px solid var(--nfc-plan-line);
+  border-radius:10px;background:var(--nfc-plan-soft);color:var(--nfc-plan-ink);
+  font-size:12px;line-height:1.65; }
+.nfc-v2-plan-notice.is-warning { border-color:#d3aa69; }
+.nfc-v2-plan-notice.is-error { border-color:#cd6f85; }
+.nfc-v2-plan-notice > svg { flex:0 0 auto;margin-top:3px; }
+.nfc-v2-plan-notice-body { min-width:0;flex:1 1 240px; }
+.nfc-v2-plan-notice-body strong { font-weight:700; }
+.nfc-v2-plan-notice-description { color:var(--nfc-plan-muted);margin-top:4px;overflow-wrap:anywhere; }
+.nfc-v2-plan-notice-actions { flex:0 1 auto;display:flex;align-items:center;flex-wrap:wrap;gap:8px; }
+.nfc-v2-plan-alerts { display:grid;gap:10px; }
+.nfc-v2-plan-table-scroll { max-width:100%;overflow-x:auto;scrollbar-width:thin; }
+.nfc-v2-plan-table { width:100%;min-width:1100px;border-collapse:collapse;
+  table-layout:fixed;color:var(--nfc-plan-ink);font-size:12px; }
+.nfc-v2-plan-table th { padding:11px 10px;text-align:left;
+  font-size:11px;color:var(--nfc-plan-muted);background:var(--nfc-plan-soft);
+  border-bottom:1px solid var(--nfc-plan-line); }
+.nfc-v2-plan-table td { padding:12px 10px;border-bottom:1px solid var(--nfc-plan-line);
+  vertical-align:top;overflow-wrap:anywhere; }
+.nfc-v2-plan-table th:nth-child(1) { width:70px; }
+.nfc-v2-plan-table th:nth-child(2) { width:105px; }
+.nfc-v2-plan-table th:nth-child(5) { width:116px; }
+.nfc-v2-plan-table th:nth-child(6) { width:124px; }
+.nfc-v2-plan-table th:nth-child(7) { width:185px; }
+.nfc-v2-plan-table .nfc-target-path { display:flex;align-items:flex-start;gap:7px;min-width:0; }
+.nfc-v2-plan-table .nfc-target-path > svg { flex:0 0 auto; }
+.nfc-v2-plan-table .nfc-target-path .nfc-code-path { min-width:0;overflow-wrap:anywhere; }
+.nfc-plan-detail-page .nfc-console-pagination { margin-top:12px; }
+.nfc-v2-plan-confirm { display:grid;gap:8px;line-height:1.65; }
+.nfc-v2-plan-confirm p { margin:0;overflow-wrap:anywhere; }
+.nfc-plan-detail-page :is(button,select):focus-visible {
+  outline:2px solid var(--nfc-plan-accent);outline-offset:2px; }
+[data-theme='dark'] .nfc-plan-detail-page {
+  --nfc-plan-bg:var(--nfc-surface-1,#1a2434);
+  --nfc-plan-muted:var(--nfc-text-muted,#afbdce);
+  --nfc-plan-ink:var(--nfc-text,#f1f5fb);
+  --nfc-plan-line:var(--nfc-hairline,#36435a);
+  --nfc-plan-soft:var(--nfc-surface-2,#111827);
+  --nfc-plan-accent:var(--nfc-accent,#83b5ff);
+}
+@media(max-width:767px) {
+  .nfc-v2-plan-actions .nfc-action-bar { align-items:stretch; }
+  .nfc-v2-plan-actions .nfc-console-button { min-height:44px; }
+  .nfc-v2-plan-notice { flex-wrap:wrap;padding:12px; }
+  .nfc-v2-plan-notice-actions { width:100%; }
+  .nfc-v2-plan-notice-actions .nfc-console-button { min-height:44px; }
+  .nfc-plan-detail-page .nfc-console-pagination :is(button,select) { min-height:44px; }
+}
+@media(prefers-reduced-motion:reduce) {
+  .nfc-plan-detail-page *, .nfc-v2-plan-confirm * {
+    animation:none;transition:none;scroll-behavior:auto; }
+}
