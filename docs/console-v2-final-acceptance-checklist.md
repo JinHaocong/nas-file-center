@@ -29,7 +29,6 @@ approved NAS File Center mockup. User-selectable dark/system modes remain.
 - [x] Advanced Dedupe read-only authority/safety lineage and role-guarded storage action panels (PR #146).
 - [x] Advanced Dedupe Radix decision explanation sheet + native read-only preview summary (PR #147).
 - [x] Shared copyable CodePath: native full-text path, explicit copy, non-HTTPS fallback and responsive focus (PR #148).
-- [ ] Remaining Path Match/Batch, Settings, other Ant screens and shared controls.
 - [ ] Shared dialogs, select, checkbox, forms and destructive confirmation primitives.
 - [x] Workflow builder native action bar, read-only status, Radix mode reset / unsaved-exit / rollback confirmations (PR #149).
 - [x] Workflow builder native name/description fields, accessible mode radios, trim validation and dirty guards (PR #150).
