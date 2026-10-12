@@ -261,6 +261,26 @@ export const directoryDiffApi = {
     }>('/api/directories/compare/verify', payload),
 };
 
+export type PathMatchMode = 'relative-path' | 'basename' | 'stem' | 'normalized';
+
+export interface PathMatchMember {
+  root: string;
+  path: string;
+  relative_path: string;
+  size: number;
+  mtime_ns: number;
+}
+
+export interface PathMatchGroup {
+  key: string;
+  members: PathMatchMember[];
+}
+
+export interface PathMatchPreviewResponse {
+  groups: PathMatchGroup[];
+  count: number;
+}
+
 export const batchApi = {
   previewImmediateFileRename: (payload: {
     parent: string;
@@ -295,10 +315,10 @@ export const batchApi = {
   }) => api.post<{ items: RenameProposal[] }>('/api/rename/preview', payload),
   previewPathMatch: (payload: {
     roots: string[];
-    mode?: string;
+    mode?: PathMatchMode;
     normalize_pattern?: string | null;
     normalize_replacement?: string;
-  }) => api.post<{ groups: any[]; count: number }>('/api/path-match/preview', payload),
+  }) => api.post<PathMatchPreviewResponse>('/api/path-match/preview', payload),
 };
 
 export const tasksApi = {

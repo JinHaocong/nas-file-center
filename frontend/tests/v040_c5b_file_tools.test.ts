@@ -21,7 +21,7 @@ describe('v0.4.0 C5B file tools surfaces contract', () => {
   });
 
   test('Path Match has responsive preview cards and preserves keep-first quarantine-plan semantics', () => {
-    const source = read('src/pages/PathMatch/index.tsx');
+    const source = read('src/pages/PathMatch/index.tsx') + '\n' + read('src/utils/pathMatchSafety.ts');
     for (const symbol of ['PageHeader', 'DataPanel', 'ActionBar', 'ResponsiveDataView', 'CodePath', 'StatusBadge']) {
       assert.match(source, new RegExp(symbol));
     }

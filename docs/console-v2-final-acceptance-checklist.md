@@ -46,6 +46,7 @@ approved NAS File Center mockup. User-selectable dark/system modes remain.
 - [x] Native Advanced Regex Rename: typed wire schema, root/rule-bound readonly Preview, collision-safe Plan, semantic responsive results and native mode switch (PR #162).
 - [x] Native Filename Audit: read-only scoped Preview, advisory issues, selected-only rechecked Rename Draft, stale-response guards, CSV protection and responsive results (PR #163).
 - [x] Native Directory Diff: two-root guarded read-only Preview, canonical single-file SHA256, stale-response isolation, semantic desktop/mobile results and CSV formula protection (PR #164).
+- [x] Native Path Match: typed multi-root read-only Preview, native responsive groups, keep-first Quarantine Draft with fail-closed server re-preview, stale-request guards and final Plan lifecycle reminders (PR #165).
 - [ ] Remove all `antd` and `@ant-design/icons` imports and their lockfile dependencies.
 - [ ] Consolidate historical UI CSS overrides into an owned, maintainable theme system.
 - [ ] Full TypeScript, frontend unit/regression, backend, Docker and dependency-audit gates.
