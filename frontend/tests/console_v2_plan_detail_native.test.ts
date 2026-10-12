@@ -77,7 +77,7 @@ describe('Console v2 Plan Detail lifecycle safety and native UX', () => {
       '!settings?.allow_mutation', 'active_work_job_id',
       "plan.status === 'stale'", 'isStaleDedupePlan', 'isStaleWorkflowPlan',
       'Hardlink 计划', 'Reflink 计划',
-      'UNDO', 'ALLOW_MUTATION=false', 'PLAN_STALE',
+      'Undo Plan', 'ALLOW_MUTATION=false', 'PLAN_STALE',
       'onDelete={() => deleteMutation.mutateAsync()}',
       '<PlanDeleteButton', '<OperationJournalDrawer', '<StaleRebuildDrawer',
       'onRebuildSuccess', '<ConsoleConfirmDialog', '<ConsoleButton',
