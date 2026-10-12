@@ -11,7 +11,6 @@ import { relative, resolve, sep } from 'node:path';
 const frontend = resolve(process.cwd());
 const root = resolve(frontend, 'src');
 const allowed = new Set([
-  'src/components/workflows/OrganizerProfileFields.tsx',
   'src/contexts/ThemeContext.tsx',
 ]);
 
