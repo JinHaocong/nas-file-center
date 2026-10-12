@@ -11,10 +11,8 @@ import { relative, resolve, sep } from 'node:path';
 const frontend = resolve(process.cwd());
 const root = resolve(frontend, 'src');
 const allowed = new Set([
-  'src/components/workflows/CompletedScanPicker.tsx',
   'src/components/workflows/OrganizerProfileFields.tsx',
   'src/contexts/ThemeContext.tsx',
-  'src/pages/Login/index.tsx',
   'src/pages/Plans/PlanDetail.tsx',
   'src/pages/Workflows/UtilityWorkflowPreviewPanel.tsx',
   'src/pages/Workflows/WorkflowPreviewPanelLegacy.tsx',
