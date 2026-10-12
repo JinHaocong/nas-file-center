@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { message } from 'antd';
+import { useConsoleToast } from '../../components/ui/ConsoleToast';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTitle } from '../../hooks/useTitle';
 import { OrganizerProfile } from '../../types';
@@ -12,6 +12,7 @@ import { PageHeader } from '../../components/ui/PageHeader';
 export const OrganizerPage: React.FC = () => {
   useTitle('目录整理方案');
   const queryClient = useQueryClient();
+  const toast = useConsoleToast();
 
   const [activeProfile, setActiveProfile] = useState<OrganizerProfile | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -26,13 +27,13 @@ export const OrganizerPage: React.FC = () => {
       return organizerProfilesApi.createProfile(values);
     },
     onSuccess: (saved) => {
-      message.success(`方案 "${saved.name}" 已成功保存！`);
+      toast.success(`方案 "${saved.name}" 已成功保存！`);
       setModalOpen(false);
       setEditingProfile(null);
       queryClient.invalidateQueries({ queryKey: ['organizer-profiles'] });
     },
     onError: (err: any) => {
-      message.error(err.message || '保存方案失败');
+      toast.error(err.message || '保存方案失败');
     },
   });
 
