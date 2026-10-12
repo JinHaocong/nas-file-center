@@ -14,7 +14,6 @@ const allowed = new Set([
   'src/components/workflows/OrganizerProfileFields.tsx',
   'src/contexts/ThemeContext.tsx',
   'src/pages/Plans/PlanDetail.tsx',
-  'src/pages/Workflows/WorkflowPreviewPanelLegacy.tsx',
 ]);
 
 const sourceExt = /\.(?:[cm]?js|[cm]?ts|jsx|tsx|css)$/i;
