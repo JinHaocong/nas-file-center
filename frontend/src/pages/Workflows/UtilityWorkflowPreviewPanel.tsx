@@ -54,6 +54,7 @@ export const UtilityWorkflowPreviewPanel: React.FC<Props> = ({
 
   useEffect(() => {
     previewSequence.current += 1;
+    previewInFlight.current = false;
     setPreviewData(null);
     setPreviewContext(null);
     setSelectedCandidateIds([]);
