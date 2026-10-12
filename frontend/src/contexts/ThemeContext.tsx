@@ -18,7 +18,7 @@ const ThemeContext = createContext<ThemeContextType>({
 
 /**
  * Native theme context. Design tokens belong to existing :root and
- * [data-theme='dark'] CSS declarations, not an AntD ConfigProvider.
+ * [data-theme='dark'] CSS declarations, not a component-library-specific JavaScript provider.
  */
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [mode, setModeState] = useState<ThemeMode>(() =>
