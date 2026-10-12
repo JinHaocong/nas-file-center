@@ -5,7 +5,7 @@
 
 ## Policy
 
-Only the exact two runtime modules below may import `antd` or
+Only the exact one runtime module below may import `antd` or
 `@ant-design/icons` until their corresponding native migrations land.
 The test script denies new unapproved import sites **and** fails if an
 allowlisted file no longer imports AntD but was not removed from this list.
@@ -16,12 +16,17 @@ Do **not** uninstall `antd`/`@ant-design/icons` while this inventory is
 nonempty, and do **not** edit the npm lockfile independently of package
 manifest changes.
 
-## Remaining direct AntD runtime imports (2 files)
+## Remaining direct AntD runtime imports (1 file)
 
 | Path | Current dependency / migration consideration |
 |---|---|
-| `src/components/workflows/OrganizerProfileFields.tsx` | AntD Form instance/useWatch and extensive nested rule editor; migrate together with host profile forms |
 | `src/contexts/ThemeContext.tsx` | AntD ConfigProvider, locale and theme tokens; remove only once all consumer components migrate |
+
+## PR #181 — consolidate native Organizer fields; remove orphan AntD form
+
+- Removed unreferenced `src/components/workflows/OrganizerProfileFields.tsx`, an obsolete Form.useFormInstance/useWatch implementation. Both active consumers already use the same controlled native `OrganizerSnapshotFields` editor: Organizer `ProfileFormModal` and workflow `OrganizerStepEditor`.
+- Existing `hydrateWorkflowOrganizerSnapshot`, `patchWorkflowOrganizerAdvancedRule`, `validateWorkflowOrganizerSnapshot`, and `organizerProfileFormPayload` preserve typed fields, immutable imported snapshots, advanced rules, Stage A/B limits, and allowlisted submission. Added dedicated regression coverage.
+- No runtime form/API behavior change, no new root authority, no filesystem operation.
 
 ## PR #180 — native Plan Detail lifecycle and ledger
 
@@ -59,9 +64,7 @@ manifest changes.
 
 ## Follow-ups
 
-1. Finish OrganizerProfileFields and their host form controls.
-2. Migrate legacy organizer form fields; Login and completed-scan picker are native.
-3. Remove the global AntD ConfigProvider once its final consumers have migrated.
+1. Remove the global AntD ConfigProvider from ThemeContext without changing theme persistence or system mode behavior.
 4. Run this import gate plus full frontend, backend, Docker and dependency-audit checks.
 5. Only at **zero imports**, remove `antd` / `@ant-design/icons` from package and regenerate the lockfile.
 6. Consolidate historical styling overrides and conduct one consolidated browser visual acceptance.
