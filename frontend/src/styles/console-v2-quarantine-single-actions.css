@@ -1,0 +1,82 @@
+/* Console v2 / Gate 6A-2 single-item quarantine confirmations.
+   The Radix portal is outside .nfc-v2-shell: each selector is dialog-owned. */
+.nfc-v2-quarantine-dialog {
+  --nfc-q-paper:var(--nfc-surface-1,#fff);
+  --nfc-q-soft:var(--nfc-surface-2,#f5f7fb);
+  --nfc-q-text:var(--nfc-text,#182338);
+  --nfc-q-muted:var(--nfc-text-muted,#68778b);
+  --nfc-q-line:var(--nfc-hairline,#dce5ee);
+  --nfc-q-accent:var(--nfc-accent,#286ff1);
+  width:min(94vw,690px);max-width:690px;max-height:min(89dvh,930px);
+  overflow-y:auto;color:var(--nfc-q-text);
+}
+[data-theme='dark'] .nfc-v2-quarantine-dialog {
+  --nfc-q-paper:var(--nfc-surface-1,#1a2434);
+  --nfc-q-soft:var(--nfc-surface-2,#222e41);
+  --nfc-q-text:var(--nfc-text,#f0f4fa);
+  --nfc-q-muted:var(--nfc-text-muted,#b3c3d6);
+  --nfc-q-line:var(--nfc-hairline,#36435a);
+  --nfc-q-accent:var(--nfc-accent,#83b5ff);
+}
+.nfc-v2-quarantine-dialog .nfc-v2-dialog-heading { align-items:flex-start;gap:11px; }
+.nfc-v2-quarantine-dialog .nfc-v2-dialog-heading > div { min-width:0;flex:1; }
+.nfc-v2-quarantine-subtitle { margin:7px 0 0;color:var(--nfc-q-muted);font-size:11px;line-height:1.7; }
+.nfc-v2-quarantine-body { display:grid;gap:14px;min-width:0;padding:6px 0; }
+.nfc-v2-quarantine-alert { display:flex;align-items:flex-start;gap:10px;min-width:0;padding:12px;
+  border:1px solid var(--nfc-q-line);border-radius:9px;
+  background:var(--nfc-q-soft);font-size:12px;line-height:1.7; }
+.nfc-v2-quarantine-alert.is-danger { border-color:color-mix(in srgb,#ce4962 62%,var(--nfc-q-line)); }
+.nfc-v2-quarantine-alert.is-warning { border-color:color-mix(in srgb,#c98e3f 62%,var(--nfc-q-line)); }
+.nfc-v2-quarantine-alert.is-success { border-color:color-mix(in srgb,#318868 56%,var(--nfc-q-line)); }
+.nfc-v2-quarantine-alert > svg { flex:0 0 auto;margin-top:2px;color:var(--nfc-q-accent); }
+.nfc-v2-quarantine-alert.is-danger > svg { color:#d45068; }
+.nfc-v2-quarantine-alert p { margin:3px 0 0; }
+.nfc-v2-quarantine-alert-copy { color:var(--nfc-q-muted);margin-top:4px;overflow-wrap:anywhere; }
+.nfc-v2-quarantine-facts { display:grid;gap:0;min-width:0;margin:0;
+  border:1px solid var(--nfc-q-line);border-radius:9px;overflow:hidden; }
+.nfc-v2-quarantine-facts > div { display:grid;grid-template-columns:minmax(115px,28%) minmax(0,1fr);
+  gap:13px;align-items:start;padding:11px 13px;min-width:0; }
+.nfc-v2-quarantine-facts > div+div { border-top:1px solid var(--nfc-q-line); }
+.nfc-v2-quarantine-facts dt { color:var(--nfc-q-muted);font-size:11px;font-weight:700; }
+.nfc-v2-quarantine-facts dd { margin:0;min-width:0;font-size:12px;overflow-wrap:anywhere; }
+.nfc-v2-quarantine-facts code,.nfc-v2-quarantine-results code,
+.nfc-v2-quarantine-options code,.nfc-v2-quarantine-token code {
+  font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+  white-space:normal;overflow-wrap:anywhere;font-size:11px; }
+.nfc-v2-quarantine-options { display:grid;gap:9px;min-width:0;border:0;padding:0;margin:0; }
+.nfc-v2-quarantine-options legend { margin:0 0 10px;font-size:12px;font-weight:700; }
+.nfc-v2-quarantine-options label { display:flex;gap:10px;align-items:flex-start;
+  border:1px solid var(--nfc-q-line);border-radius:9px;padding:11px 12px;
+  background:var(--nfc-q-paper);color:var(--nfc-q-text);font-size:12px;
+  line-height:1.6;cursor:pointer; }
+.nfc-v2-quarantine-options label.is-selected { border-color:var(--nfc-q-accent);
+  background:var(--nfc-q-soft); }
+.nfc-v2-quarantine-options input { width:17px;height:17px;margin-top:2px;flex:0 0 auto;
+  accent-color:var(--nfc-q-accent); }
+.nfc-v2-quarantine-options:disabled label { cursor:not-allowed;opacity:.65; }
+.nfc-v2-quarantine-manual,.nfc-v2-quarantine-token { display:grid;gap:8px;min-width:0;
+  font-size:12px;font-weight:650;line-height:1.65; }
+.nfc-v2-quarantine-manual input,.nfc-v2-quarantine-token input {
+  box-sizing:border-box;width:100%;min-height:43px;border:1px solid var(--nfc-q-line);
+  background:var(--nfc-q-paper);color:var(--nfc-q-text);
+  font:inherit;font-size:12px;border-radius:9px;padding:10px 11px; }
+.nfc-v2-quarantine-manual input[aria-invalid='true'],
+.nfc-v2-quarantine-token input[aria-invalid='true'] { border-color:#ce4962; }
+.nfc-v2-quarantine-error { color:#bd3e5b;font-size:11px;font-weight:600; }
+[data-theme='dark'] .nfc-v2-quarantine-error { color:#ffafbf; }
+.nfc-v2-quarantine-results { display:grid;gap:10px; }
+.nfc-v2-quarantine-results ul { list-style:disc;margin:7px 0 0;padding-left:21px; }
+.nfc-v2-quarantine-results li { margin:3px 0; }
+.nfc-v2-quarantine-dialog :is(input,button):focus-visible {
+  outline:2px solid var(--nfc-q-accent);outline-offset:2px; }
+.nfc-v2-quarantine-dialog input:disabled { cursor:not-allowed;opacity:.56; }
+@media(max-width:767px) {
+  .nfc-v2-quarantine-dialog { width:min(96vw,690px);max-height:93dvh; }
+  .nfc-v2-quarantine-facts > div { grid-template-columns:1fr;gap:5px; }
+  .nfc-v2-quarantine-dialog .nfc-console-button,
+  .nfc-v2-quarantine-manual input,.nfc-v2-quarantine-token input { min-height:44px; }
+  .nfc-v2-quarantine-options label { min-height:48px; }
+}
+@media(prefers-reduced-motion:reduce) {
+  .nfc-v2-quarantine-dialog * { animation:none;transition:none;scroll-behavior:auto; }
+}
