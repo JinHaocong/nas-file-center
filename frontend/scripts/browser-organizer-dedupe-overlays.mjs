@@ -299,7 +299,7 @@ try {
           true, 'No completed Scan selected => Preview disabled');
         assert.equal(await draft.isDisabled(), true);
         const picker = page.getByLabel('选择已完成的扫描任务');
-        await picker.locator('option[value="501"]').waitFor();
+        await picker.locator('option[value="501"]').waitFor({ state: 'attached' });
         assert.equal(await picker.locator('option[value="503"]').count(), 0,
           'Running Scan must be absent from completed picker');
         await picker.selectOption('501');
