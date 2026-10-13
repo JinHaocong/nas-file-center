@@ -352,12 +352,13 @@ describe('Right Workspace v2 design system', () => {
   });
 
 
-  test('glass treatment is constrained to utility and overlay surfaces', () => {
+  test('legacy utility glass does not blur the Pure White modal scrim', () => {
     const css = read('src/styles/v056-right-workspace-v2.css');
 
     assert.match(css, /\.nfc-header\.nfc-header[\s\S]*backdrop-filter:\s*blur\(22px\)/);
     const nativeDialog = read('src/styles/console-v2.css');
-    assert.match(nativeDialog, /\.nfc-v2-dialog-overlay\s*\{[^}]*backdrop-filter:\s*blur\(4px\);/);
+    assert.match(nativeDialog, /\.nfc-v2-dialog-overlay\s*\{[^}]*backdrop-filter:\s*none;/);
+    assert.doesNotMatch(nativeDialog, /\.nfc-v2-dialog-overlay\s*\{[^}]*backdrop-filter:\s*blur\(/);
     assert.match(nativeDialog, /\.nfc-v2-dialog:focus-visible\s*\{[^}]*outline:\s*3px solid/);
     assert.match(css, /\.nfc-quarantine-page \.nfc-bulk-action-bar[\s\S]*backdrop-filter:\s*blur\(18px\)/);
     assert.doesNotMatch(css, /\.nfc-data-panel-body[^{]*\{[^}]*backdrop-filter/);

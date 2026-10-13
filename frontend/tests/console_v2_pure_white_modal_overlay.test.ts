@@ -8,7 +8,7 @@ const shell = read('src/styles/console-v2.css');
 
 const findRules = (source: string, selector: string): string[] => {
   const escaped = selector.replace(/[.*+?^$\x7b\x7d()|[\]\\]/g, '\\$&');
-  return [...source.matchAll(new RegExp(escaped + '\\s*\\{([^}]*)\\}', 'g'))].map(match => match[1]);
+  return [...source.matchAll(new RegExp('(?:^|\\n)\\s*' + escaped + '\\s*\\{([^}]*)\\}', 'g'))].map(match => match[1]);
 };
 
 const expectZ = (source: string, selector: string, level: number) => {
