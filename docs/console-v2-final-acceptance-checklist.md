@@ -65,7 +65,8 @@ approved NAS File Center mockup. User-selectable dark/system modes remain.
 - [x] Native Organizer field consolidation: both CRUD ProfileFormModal and workflow OrganizerStepEditor already use controlled OrganizerSnapshotFields; remove orphan AntD Form/useWatch module, preserve defaults/payload and advanced Stage A/B safety (PR #181).
 - [x] Native ThemeContext: remove final AntD ConfigProvider/locale; preserve light/dark/system preference, `nfc_theme_mode`, media listener and CSS tokens; runtime direct AntD import gate now zero (PR #182).
 - [x] Remove `antd` and `@ant-design/icons` from npm manifest and lockfile together, prune unreachable transitive packages, assert lock closure and `npm ci` identity (PR #183).
-- [ ] Consolidate historical UI CSS overrides into an owned, maintainable theme system.
+- [x] CSS ownership cleanup tranche 1: remove dead AntD selectors from Console v2 shell and native Settings composition, enforce zero legacy selectors across owned Console v2 CSS, document cascade boundaries (PR #184).
+- [ ] Consolidate remaining historical UI CSS overrides into an owned, maintainable theme system.
 - [ ] Full TypeScript, frontend unit/regression, backend, Docker and dependency-audit gates.
 - [ ] One final browser review: 360/390/430/768/1024/1280/1440/1920 px.
 - [ ] Keyboard navigation, focus management, dark-mode contrast, reduced motion and

@@ -1,5 +1,5 @@
 /* Console v2 migration / Phase 2 — native operation primitives + Plans ledger.
-   Every rule scoped to the console shell; old Ant widgets remain safe for now. */
+   Every rule scoped to the console shell; no legacy AntD widget overrides. */
 .nfc-v2-shell .nfc-console-button {
   appearance: none;
   display: inline-flex;
