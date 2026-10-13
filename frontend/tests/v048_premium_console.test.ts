@@ -41,19 +41,20 @@ describe('v0.4.8 premium console visual system', () => {
     assert.match(css, /\.nfc-metric-card[\s\S]*border-radius: 0[\s\S]*box-shadow: none/);
   });
 
-  test('dense tables and forms share one restrained control language', () => {
+  test('native panels and form guidance retain the premium presentation tokens', () => {
     const css = read('src/styles/v048.css');
-    assert.match(css, /\.nfc-data-panel \.ant-table-thead/);
-    assert.match(css, /\.nfc-data-panel \.ant-table-tbody/);
-    assert.match(css, /\.nfc-app-shell \.ant-input/);
-    assert.match(css, /\.nfc-app-shell \.ant-select-selector/);
+    assert.match(css, /\.nfc-data-panel\s*\{/);
+    assert.match(css, /\.nfc-data-panel-header\s*\{/);
+    assert.match(css, /\.nfc-form-note,/);
+    assert.match(css, /\.nfc-dedupe-config-note\s*\{/);
     assert.match(css, /--nfc-premium-control: 38px/);
+    assert.doesNotMatch(css, /\.(?:ant-[a-z]|anticon\b)/);
   });
 
   test('settings, overlays and mobile records are covered by the same system', () => {
     const css = read('src/styles/v048.css');
     assert.match(css, /\.nfc-settings-subpanel-header/);
-    assert.match(css, /\.ant-modal-content/);
+    assert.match(css, /\.nfc-snapshot-note\s*\{/);
     assert.match(css, /\.nfc-task-mobile-card/);
     assert.match(css, /@media \(max-width: 767px\)/);
   });
