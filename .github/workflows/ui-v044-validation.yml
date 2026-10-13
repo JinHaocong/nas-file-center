@@ -143,6 +143,10 @@ jobs:
         working-directory: frontend
         run: node scripts/browser-workflow-preview-overlays.mjs
 
+      - name: Run read-only Chromium Organizer Advanced and Dedupe matrix
+        working-directory: frontend
+        run: node scripts/browser-organizer-dedupe-overlays.mjs
+
       - name: Upload visual evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -157,3 +161,4 @@ jobs:
             frontend/artifacts/browser-quarantine-bulk/*.png
             frontend/artifacts/browser-plan-lifecycle/*.png
             frontend/artifacts/browser-workflow-preview/*.png
+            frontend/artifacts/browser-organizer-dedupe/*.png
