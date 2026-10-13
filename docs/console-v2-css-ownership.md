@@ -8,7 +8,7 @@ browser pass would risk unintentionally altering the CSS cascade.
 ## Import and ownership order (actual `frontend/src/main.tsx`)
 
 1. `src/index.css` — historical app defaults, older UI rules and accumulated
-   v0.4.x amendments. It still contains dead `.ant-*` selectors.
+   v0.4.x amendments. AntD selectors retired under PR #192; live native declarations remain.
 2. `src/styles/v047.css` through `v056-right-workspace-v2.css` — older UI
    versions and workspace refinements. Keep them in existing order while their
    live native selectors and interactions are identified.
@@ -84,11 +84,19 @@ could change actual computed styles even when unit tests still pass.
 - Expanded CSS ownership audit from 54 to **55 reviewed files**, registered six dedicated native regression tests.
 - `src/index.css` remains for separate historical CSS cleanup; final browser visual acceptance and NAS production deployment are **not** completed.
 
+## PR #192 — reviewed historical `src/index.css`
+
+- Retired 287 obsolete AntD-only CSS groups and removed AntD from 10 mixed groups without replacing any of the **901 preserved native selector/declaration groups**.
+- Kept all **39** original media wrappers, themes, mobile hit targets, reduced motion and imported CSS cascade ordering; no wholesale removal of historical CSS.
+- Updated historical v0.4.x tests that still asserted AntD navigation, controls and modal/drawer DOM; replaced them with native nav/focus, Radix overlay and touch-target checks.
+- Extended CSS audit to **56 files**, including root `src/index.css` with an explicit index path resolver, and added six native legacy index regression tests.
+- Browser computed-style and visual acceptance still pending; this is not production NAS deployment.
+
 ## Deliberately pending work
 
-- Audit remaining dead AntD CSS selectors in `src/index.css`. Historical tests
-  referencing that layer must be audited and updated to native semantics before
-  removing dead selectors.
+- The audited 56 legacy/owned CSS layers are zero-AntD-selectors; continue
+  identifying overwritten versus still-live native declarations, with browser
+  computed-style evidence rather than mass deletion.
 - Identify overwritten versus still-live native declarations across legacy
   versioned styles. Remove or relocate them in small, reviewed tranches, with
   computed-style evidence when selectors share a cascade.
