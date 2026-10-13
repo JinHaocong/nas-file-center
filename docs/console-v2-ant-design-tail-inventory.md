@@ -12,14 +12,20 @@ unapproved AntD import or stale allowlist entry.
 This gate scans all TS, TSX, JS, JSX and CSS source files and is executed
 by `npm test` before TypeScript test compilation.
 
-The import inventory is now empty; remove the unused `antd` and
-`@ant-design/icons` npm packages in a follow-up change with manifest and
-lockfile generated together, not independently.
+The import inventory is empty. The unused `antd` and `@ant-design/icons`
+npm packages, and all now-unreachable transitive lockfile nodes, were removed
+together from `frontend/package.json` and `frontend/package-lock.json` in PR #183.
 
 ## Remaining direct AntD runtime imports (0 files)
 
-No runtime source modules import Ant Design. The dependency packages remain in
-`frontend/package.json` until the coordinated npm lockfile cleanup.
+No runtime source modules import Ant Design, and the frontend npm manifest
+and lockfile no longer contain Ant Design packages.
+
+## PR #183 — remove Ant Design dependency packages and lock tree
+
+- Drop `antd` and `@ant-design/icons` from `frontend/package.json`, and update npm v3 `frontend/package-lock.json` in the same PR; prune 65 now-unreachable transitive packages while preserving all 156 reachable dependency nodes.
+- Add an explicit dependency-tree regression requiring exact manifest/lock root agreement, zero AntD/rc-component artifacts, resolution of every mandatory package and peer dependency, and no orphan lock nodes.
+- Docker and CI continue to use `npm ci` from the exact pinned lockfile; no changes to Worker/Plan/file APIs or runtime CSS.
 
 ## PR #182 — native ThemeContext, zero AntD source imports
 
@@ -69,8 +75,8 @@ No runtime source modules import Ant Design. The dependency packages remain in
 
 ## Follow-ups
 
-1. Remove `antd` / `@ant-design/icons` from package.json and regenerate package-lock.json together now that runtime imports are zero.
+1. Consolidate historical styling overrides into owned native theme CSS without changing interaction semantics.
 2. Run import audit, frontend tests/typecheck/build, full backend regression, Docker and dependency-audit checks.
-3. Consolidate historical styling overrides and conduct one consolidated browser visual acceptance.
+3. Conduct the requested one consolidated browser visual acceptance after style cleanup.
 
 No physical NAS operations, deployment or broad authority changes are part of this inventory.
