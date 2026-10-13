@@ -96,7 +96,7 @@ describe('Pure White Stage 4A login, settings and utility preview', () => {
       'sameUtilityDraftRequest(confirmation, requestNow)',
       'draftInFlight.current',
       'workflowApi.generatePlan(targetId, snapshot)',
-      'expected_compile_digest',
+      'utilityDraftRequest(',
       'selected_candidate_ids',
       'Freeze → Validate → Execute',
       '只生成新的 Draft Plan',
