@@ -947,11 +947,6 @@ body,
   background: var(--nfc-w2-surface);
 }
 
-.nfc-app-main .nfc-dashboard-page .nfc-dashboard-command-deck {
-  margin-bottom: 26px;
-  gap: 16px;
-}
-
 /* Compact dashboard rail is intentionally one level quieter than primary
  * section headers, but follows the same typography family. */
 .nfc-app-main .nfc-dashboard-page .nfc-dashboard-rail .nfc-data-panel-header {
@@ -972,7 +967,6 @@ body,
 }
 
 .nfc-app-main .nfc-dashboard-page .nfc-dashboard-command-deck .nfc-metric-grid {
-  gap: 12px;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -980,23 +974,12 @@ body,
 }
 
 .nfc-app-main .nfc-dashboard-page .nfc-dashboard-command-deck .nfc-metric-card {
-  min-height: 104px;
-  padding: 16px 17px;
   border: 1px solid var(--nfc-w2-hairline);
   border-radius: var(--nfc-w2-radius-md);
 }
 
 .nfc-app-main .nfc-dashboard-page .nfc-dashboard-command-deck .nfc-snapshot-note {
-  padding: 11px 14px;
   border-radius: var(--nfc-w2-radius-sm);
-}
-
-.nfc-app-main .nfc-dashboard-page .nfc-dashboard-layout {
-  gap: 30px;
-}
-
-.nfc-app-main .nfc-dashboard-page .nfc-dashboard-main-column {
-  gap: 26px;
 }
 
 .nfc-app-main .nfc-dashboard-page .nfc-dashboard-rail {
@@ -1009,7 +992,6 @@ body,
 
 .nfc-app-main .nfc-quarantine-command-center {
   padding: 0;
-  gap: 12px;
   background: transparent;
   border: 0;
 }
@@ -1157,19 +1139,11 @@ body,
 }
 
 /* Quarantine */
-.nfc-app-main .nfc-quarantine-page .nfc-page-alert {
-  margin-bottom: 0;
-}
-
 .nfc-app-main .nfc-quarantine-page .nfc-quarantine-command-center {
   gap: 8px;
 }
 
 /* Tasks */
-.nfc-app-main .nfc-tasks-page .nfc-worker-status-strip {
-  margin-bottom: 0;
-}
-
 /* Audit */
 .nfc-app-main .nfc-audit-page .nfc-search-input {
   max-width: 520px;
@@ -1215,40 +1189,15 @@ body,
   margin-bottom: 2px;
 }
 
-.nfc-app-main .nfc-plan-detail-page .nfc-plan-action-surface {
-  margin-bottom: 0;
-}
-
 /* Advanced Dedupe */
-.nfc-app-main .nfc-advanced-dedupe-page .nfc-dedupe-cockpit {
-  gap: 24px;
-}
-
 /* Workflow Builder */
 .nfc-app-main .nfc-workflow-builder-page .nfc-workflow-editor-layout {
   gap: 24px;
 }
 
 /* Dashboard */
-.nfc-app-main .nfc-dashboard-page .nfc-dashboard-command-deck {
-  margin-bottom: 20px;
-}
-
-.nfc-app-main .nfc-dashboard-page .nfc-dashboard-layout {
-  margin-top: 20px;
-  gap: 24px;
-}
-
-.nfc-app-main .nfc-dashboard-page .nfc-dashboard-main-column {
-  gap: 22px;
-}
-
 .nfc-app-main .nfc-dashboard-page .nfc-dashboard-rail {
   gap: 16px;
-}
-
-.nfc-app-main .nfc-dashboard-page .nfc-dashboard-main-column > .nfc-data-panel {
-  min-height: 240px;
 }
 
 /* Login */
@@ -1273,10 +1222,6 @@ body,
 }
 
 @media (max-width: 767px) {
-  .nfc-app-main .nfc-operations-page {
-    gap: 15px;
-  }
-
   .nfc-app-main .nfc-organizer-page .nfc-organizer-profile-toolbar .nfc-search-input {
     flex-basis: 100%;
     max-width: none;
@@ -1294,10 +1239,6 @@ body,
  * before horizontal pressure turns into a visually off-center command rail. */
 .nfc-app-main .nfc-page-layout-ledger {
   min-width: 0;
-}
-
-.nfc-app-main .nfc-page-layout-ledger > .nfc-page-header {
-  margin-bottom: 26px;
 }
 
 .nfc-app-main .nfc-page-layout-ledger > .nfc-data-panel,
