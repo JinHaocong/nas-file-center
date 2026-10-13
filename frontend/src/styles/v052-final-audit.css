@@ -62,18 +62,6 @@
 }
 
 /* Dense table / path resilience ------------------------------------------- */
-.nfc-data-panel .ant-table-wrapper,
-.nfc-data-panel .ant-table-container,
-.nfc-data-panel .ant-table-content,
-.nfc-embedded-table .ant-table-container,
-.nfc-embedded-table .ant-table-content {
-  min-width: 0;
-}
-
-.nfc-data-panel .ant-table-content,
-.nfc-embedded-table .ant-table-content {
-  scrollbar-gutter: stable;
-}
 
 .nfc-code-path,
 .nfc-path-cell,
@@ -113,13 +101,6 @@
 }
 
 /* Operational list finishing ---------------------------------------------- */
-.nfc-indexes-page .ant-table-thead > tr > th,
-.nfc-scans-page .ant-table-thead > tr > th,
-.nfc-tasks-page .ant-table-thead > tr > th,
-.nfc-audit-page .ant-table-thead > tr > th,
-.nfc-workflows-page .ant-table-thead > tr > th {
-  white-space: nowrap;
-}
 
 .nfc-tasks-page .nfc-filter-bar {
   display: grid;
@@ -132,11 +113,6 @@
 .nfc-tasks-page .nfc-filter-control {
   min-width: 0;
   grid-template-columns: 64px minmax(0, 1fr);
-}
-
-.nfc-tasks-page .nfc-filter-control .ant-select {
-  width: 100%;
-  min-width: 0;
 }
 
 .nfc-task-mobile-card {
@@ -169,7 +145,6 @@
   gap: 10px 12px;
 }
 
-.nfc-system-controls-page .nfc-settings-control-grid .ant-form-item,
 .nfc-system-controls-page .nfc-settings-control-grid > label {
   min-width: 0;
 }
@@ -183,16 +158,6 @@
 /* Directory picker --------------------------------------------------------- */
 .nfc-directory-picker-modal {
   max-width: calc(100vw - 32px);
-}
-
-.nfc-directory-picker-modal .ant-modal-content {
-  overflow: hidden;
-}
-
-.nfc-directory-picker-modal .ant-modal-body {
-  max-height: calc(100dvh - 220px);
-  overflow: auto;
-  overscroll-behavior: contain;
 }
 
 .nfc-directory-picker-body {
@@ -219,7 +184,6 @@
   overscroll-behavior: contain;
 }
 
-.nfc-directory-item.ant-list-item,
 .nfc-directory-secondary-item {
   transition: background 140ms ease, border-color 140ms ease;
 }
@@ -255,21 +219,6 @@
 }
 
 /* Overlay containment ------------------------------------------------------ */
-.nfc-overlay-modal .ant-modal-content {
-  max-height: min(92dvh, 920px);
-  overflow: hidden;
-}
-
-.nfc-overlay-modal:not(.nfc-directory-picker-modal) .ant-modal-body {
-  max-height: calc(92dvh - 150px);
-  overflow: auto;
-  overscroll-behavior: contain;
-}
-
-.nfc-overlay-drawer .ant-drawer-body {
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
-}
 
 .nfc-overlay-section,
 .nfc-detail-collapse,
@@ -293,10 +242,6 @@
 
 .nfc-login-brand {
   align-items: center;
-}
-
-.nfc-login-panel .ant-form-item {
-  margin-bottom: 16px;
 }
 
 .nfc-login-submit {
@@ -362,10 +307,6 @@
     justify-content: flex-start;
   }
 
-  .nfc-page-actions .nfc-action-bar > .ant-btn {
-    min-height: 38px !important;
-  }
-
   .nfc-data-panel-header {
     align-items: flex-start;
     flex-wrap: wrap;
@@ -400,11 +341,6 @@
     max-width: calc(100vw - 16px);
   }
 
-  .nfc-directory-picker-modal .ant-modal-body {
-    max-height: calc(100dvh - 206px);
-    padding-inline: 12px;
-  }
-
   .nfc-directory-browser-toolbar {
     border-radius: 10px;
   }
@@ -420,10 +356,6 @@
   .nfc-directory-picker-footer-actions {
     display: grid !important;
     grid-template-columns: 1fr 1fr;
-  }
-
-  .nfc-overlay-modal:not(.nfc-directory-picker-modal) .ant-modal-body {
-    max-height: calc(100dvh - 168px);
   }
 
   .nfc-login-shell {
@@ -463,10 +395,6 @@
     grid-template-columns: 1fr;
   }
 
-  .nfc-directory-picker-footer-actions .ant-btn {
-    width: 100%;
-  }
-
   .nfc-login-panel {
     padding: 20px 16px;
   }
@@ -481,8 +409,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .nfc-task-mobile-card,
-  .nfc-directory-item.ant-list-item,
-  .nfc-directory-secondary-item {
+.nfc-directory-secondary-item {
     transition: none !important;
   }
 }
