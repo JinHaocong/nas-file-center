@@ -39,22 +39,6 @@
   gap: 10px;
 }
 
-.nfc-batch-page .nfc-batch-operation-grid .ant-radio-button-wrapper {
-  min-height: 56px;
-  border-color: var(--nfc-v49-line, var(--nfc-border-soft));
-  border-radius: var(--nfc-v49-radius-md, var(--nfc-radius-control)) !important;
-  background: var(--nfc-v49-surface, var(--nfc-surface-1));
-}
-
-.nfc-batch-page .nfc-batch-operation-grid .ant-radio-button-wrapper:hover {
-  background: var(--nfc-v49-surface-soft, var(--nfc-surface-2));
-}
-
-.nfc-batch-page .nfc-batch-operation-grid .ant-radio-button-wrapper-checked {
-  border-color: color-mix(in srgb, var(--nfc-accent) 42%, var(--nfc-v49-line, var(--nfc-border-soft))) !important;
-  background: color-mix(in srgb, var(--nfc-accent) 5%, var(--nfc-v49-surface, var(--nfc-surface-1)));
-}
-
 .nfc-organizer-page .nfc-organizer-profile-mobile-card,
 .nfc-organizer-preview-page .nfc-organizer-proposal-mobile-card {
   border-color: var(--nfc-v49-line, var(--nfc-border-soft));
