@@ -1,7 +1,7 @@
 /**
  * Console v2 owned CSS boundary.
  * Historical index.css and reviewed v04x-v05x layers are audited after native migration.
- * Native console styles, Settings, index.css, core v047 styles and reviewed v048-v056 CSS must have
+ * Native console styles, Settings, index.css, v046/v047 foundations and reviewed v048-v056 CSS must have
  * zero legacy Ant Design class selectors.
  *
  * Usage (from frontend): node scripts/check-console-css-ownership.mjs
@@ -28,6 +28,15 @@ owned.push('legacy-reviewed:shell.css');
 owned.push('legacy-reviewed:primitives.css');
 owned.push('legacy-reviewed:overlays.css');
 owned.push('legacy-reviewed:responsive.css');
+owned.push('legacy-reviewed:components.css');
+owned.push('legacy-reviewed:foundation.css');
+owned.push('legacy-reviewed:pages/dashboard.css');
+owned.push('legacy-reviewed:pages/details.css');
+owned.push('legacy-reviewed:pages/operations.css');
+owned.push('legacy-reviewed:pages/scheduler.css');
+owned.push('legacy-reviewed:tokens.css');
+owned.push('legacy-reviewed:v046.css');
+owned.push('legacy-reviewed:v047.css');
 const errors = [];
 for (const name of owned) {
   const path = name.substring(name.indexOf(':') + 1);
