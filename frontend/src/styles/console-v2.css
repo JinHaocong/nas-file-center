@@ -1,7 +1,7 @@
 /*
  * NAS File Center — Console v2 / phase 1
- * Non-Ant application shell, navigation and Dashboard.
- * Legacy business screens keep their current controls until explicitly migrated.
+ * Native application shell, navigation, Dashboard and shared overlays.
+ * All runtime views are native; historical AntD CSS remains in separate legacy layers.
  */
 .nfc-v2-shell {
   --v2-canvas: #f5f7fb;
