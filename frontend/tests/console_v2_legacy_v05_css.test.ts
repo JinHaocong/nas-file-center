@@ -33,7 +33,7 @@ describe('Console v2 reviewed v050/v051/v055 legacy CSS retirement', () => {
 
   test('v051 keeps keyboard row-actions, mobile cards and native overlay structure', () => {
     const css = read(sheets[1]);
-    assert.match(css, /\.nfc-row-actions\s*\{[^}]*opacity:\s*0\.72/);
+    assert.match(css, /\.nfc-row-actions\s*\{[^}]*opacity:\s*0\.76/);
     assert.match(css, /\.nfc-row-actions:focus-within\s*\{[^}]*opacity:\s*1/);
     for (const marker of [
       '.nfc-centered-state', '.nfc-file-tool-form .nfc-form-grid {',
