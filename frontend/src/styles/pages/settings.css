@@ -51,13 +51,6 @@
   padding: 16px 18px 0;
 }
 
-.nfc-app-main .nfc-system-controls-page .nfc-settings-panel-body > .ant-alert,
-.nfc-app-main .nfc-system-controls-page .nfc-settings-stack > .ant-alert {
-  margin: 0;
-  border-color: color-mix(in srgb, var(--nfc-w2-accent) 16%, var(--nfc-w2-hairline));
-  background: color-mix(in srgb, var(--nfc-w2-accent) 4%, var(--nfc-w2-surface-soft));
-}
-
 /* Runtime facts ----------------------------------------------------------- */
 
 .nfc-app-main .nfc-system-controls-page .nfc-settings-panel-runtime .nfc-responsive-descriptions {
@@ -173,15 +166,6 @@
   line-height: 1.45;
 }
 
-.nfc-app-main .nfc-system-controls-page .nfc-settings-inline-control .ant-input-number,
-.nfc-app-main .nfc-system-controls-page .nfc-settings-inline-control .ant-select,
-.nfc-app-main .nfc-system-controls-page .nfc-settings-control .ant-input,
-.nfc-app-main .nfc-system-controls-page .nfc-settings-control .ant-input-number,
-.nfc-app-main .nfc-system-controls-page .nfc-settings-control .ant-select {
-  width: 100%;
-  min-width: 0;
-}
-
 .nfc-app-main .nfc-system-controls-page .nfc-settings-help {
   margin: 0;
   padding: 0 14px 13px;
@@ -195,10 +179,6 @@
 .nfc-app-main .nfc-system-controls-page .nfc-settings-panel-lifecycle > .nfc-data-panel-body > .nfc-settings-stack {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: start;
-}
-
-.nfc-app-main .nfc-system-controls-page .nfc-settings-panel-lifecycle > .nfc-data-panel-body > .nfc-settings-stack > .ant-alert {
-  grid-column: 1 / -1;
 }
 
 .nfc-app-main .nfc-system-controls-page .nfc-settings-policy-card {
@@ -247,18 +227,6 @@
   color: inherit;
   font-size: inherit;
   line-height: normal;
-}
-
-.nfc-app-main .nfc-system-controls-page .nfc-settings-retention-actions .ant-btn {
-  min-height: 34px;
-  height: 34px;
-  padding-inline: 12px;
-}
-
-.nfc-app-main .nfc-system-controls-page .nfc-settings-retention-actions .ant-btn > span {
-  color: inherit;
-  font-size: 12px;
-  line-height: 1;
 }
 
 .nfc-app-main .nfc-system-controls-page .nfc-settings-subpanel-danger .nfc-responsive-descriptions,
@@ -313,19 +281,9 @@
 
 /* Sessions ---------------------------------------------------------------- */
 
-.nfc-app-main .nfc-system-controls-page .nfc-settings-panel-sessions .nfc-data-panel-body,
-.nfc-app-main .nfc-system-controls-page .nfc-settings-panel-sessions .ant-table-wrapper {
+.nfc-app-main .nfc-system-controls-page .nfc-settings-panel-sessions .nfc-data-panel-body {
   width: 100%;
   min-width: 0;
-}
-
-.nfc-app-main .nfc-system-controls-page .nfc-settings-panel-sessions .ant-table-wrapper {
-  overflow-x: auto;
-}
-
-.nfc-app-main .nfc-system-controls-page .nfc-settings-panel-sessions .ant-table-thead > tr > th,
-.nfc-app-main .nfc-system-controls-page .nfc-settings-panel-sessions .ant-table-tbody > tr > td {
-  vertical-align: middle;
 }
 
 .nfc-app-main .nfc-system-controls-page .nfc-session-user-agent,
@@ -447,8 +405,7 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .nfc-app-main .nfc-system-controls-page .nfc-settings-retention-actions > span,
-  .nfc-app-main .nfc-system-controls-page .nfc-settings-retention-actions .ant-btn {
+  .nfc-app-main .nfc-system-controls-page .nfc-settings-retention-actions > span {
     width: 100%;
   }
 }
@@ -460,10 +417,7 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .nfc-app-main .nfc-system-controls-page .nfc-settings-grid > .nfc-data-panel > .nfc-data-panel-header .nfc-action-bar .ant-btn,
-  .nfc-app-main .nfc-system-controls-page .nfc-settings-subpanel > .nfc-action-bar .ant-btn,
-  .nfc-app-main .nfc-system-controls-page .nfc-settings-subpanel > .nfc-action-bar > span,
-  .nfc-app-main .nfc-system-controls-page .nfc-settings-subpanel > .nfc-action-bar > span .ant-btn {
+  .nfc-app-main .nfc-system-controls-page .nfc-settings-subpanel > .nfc-action-bar > span {
     width: 100%;
   }
 }
