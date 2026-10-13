@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.router import router as api_router
+from app.archive_recovery.router import router as archive_recovery_router
 from app.api.quarantine_bulk import router as quarantine_bulk_router
 from app.auth.dependencies import get_current_user
 from app.auth.rate_limiter import LoginRateLimiter
@@ -133,6 +134,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(auth_router)
     app.include_router(quarantine_bulk_router)
     app.include_router(scheduler_router)
+    app.include_router(archive_recovery_router)
     app.include_router(api_router)
 
     # React Frontend SPA Hosting (TASK-031-03)

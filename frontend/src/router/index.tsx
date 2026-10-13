@@ -5,6 +5,7 @@ import { LoginPage } from '../pages/Login';
 import { DashboardPage } from '../pages/Dashboard';
 import { IndexesPage } from '../pages/Indexes';
 import { MediaPage } from '../pages/Media';
+import { ArchiveRecoveryPage } from '../pages/ArchiveRecovery';
 import { ScansPage } from '../pages/Scans';
 import { ScanDetailPage } from '../pages/Scans/ScanDetail';
 import { AdvancedDedupePage } from '../pages/Scans/AdvancedDedupePage';
@@ -32,6 +33,7 @@ export const AppRouter: React.FC = () => {
         <Route path="dashboard" element={<DashboardPage />} />
         <Route path="indexes" element={<IndexesPage />} />
         <Route path="media" element={<MediaPage />} />
+        <Route path="archive-recovery" element={<ArchiveRecoveryPage />} />
         <Route path="scans" element={<ScansPage />} />
         <Route path="scans/:id" element={<ScanDetailPage />} />
         <Route path="scans/:id/dedupe" element={<AdvancedDedupePage />} />

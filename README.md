@@ -224,3 +224,10 @@ docker buildx build \
   --load \
   .
 ```
+
+
+## Archive file recovery (experimental, administrator-only)
+
+The **压缩包恢复** tool supports best-effort ZIP / TAR / 7z / RAR file salvage with a same-directory unique result folder; original archives are left untouched. ZIP CRC and full image decode are distinguished from unverified extraction. The existing Worker/Task Center handles recovery jobs and cancellation. Defaults remain read-only: the archive parent must be explicitly writable and `ALLOW_MUTATION=true`.
+
+Read [archive recovery deployment, supported formats, limits and known security boundaries](docs/archive-recovery.md) before enabling this feature. Password-protected archives additionally require a shared tmpfs mount, with optional [Compose](compose.archive-recovery-secrets.yaml) or [Komodo](compose.komodo.archive-recovery-secrets.yaml) overlay. No generic damaged encrypted solid-stream recovery is claimed.

@@ -171,6 +171,9 @@ class TaskService:
                 data["payload"] = json.loads(job.state_json or "{}")
             except Exception:
                 data["payload"] = {}
+            if job.kind == "archive-recovery":
+                # A one-time tmpfs reference is a secret capability, not task UI data.
+                data["payload"].pop("secret_token", None)
             return data
 
     def pause_task(self, task_id: int) -> dict:

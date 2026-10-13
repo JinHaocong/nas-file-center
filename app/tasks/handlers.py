@@ -137,3 +137,6 @@ class _HandlerCompatibilityModule(types.ModuleType):
 
 
 sys.modules[__name__].__class__ = _HandlerCompatibilityModule
+
+# Archive recovery uses the canonical Worker handler registry.
+from app.archive_recovery.integration import ArchiveRecoveryHandler as ArchiveRecoveryHandler

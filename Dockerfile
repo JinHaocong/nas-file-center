@@ -20,7 +20,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     DATA_MOUNT=/data
 WORKDIR /app
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg \
+    && apt-get install -y --no-install-recommends ffmpeg libarchive13 \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=fclones-builder /usr/local/cargo/bin/fclones /usr/local/bin/fclones
 COPY --from=frontend-builder /build/dist /app/frontend/dist
