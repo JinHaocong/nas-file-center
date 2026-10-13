@@ -75,6 +75,14 @@
 - **Utility Workflow Preview**：把 Paper/Surface/Text/Focus 的蓝色兜底 Token 改为灰白黑及独立深灰模式；只读候选表增加 tabular-nums 与 focus-within，长路径、手机候选卡片与触控操作更清晰。保留 compile_digest、revision、READY 可选状态、Immutable Draft Request 与 Freeze → Validate → Execute 的后续安全链。
 - **证据边界**：本批只修改原有 Login、Completed Scan、Settings、Utility Preview 样式所有者与测试文档，未新增 CSS 覆盖层或业务逻辑。CI 与源码测试不能替代 360–1920px 的浏览器主题/键盘/弹窗验收，也不是生产 NAS 部署。
 
+## 第四阶段第二批：Quarantine 隔离区视觉与安全语义
+
+- **隔离区 Ledger**：由旧 `--v2-indigo` 蓝灰兜底转为 `--nfc-` Pure White 灰度 Token，并分别设计暗色表面。桌面表格保留后端真实状态、服务器分页、终态清理白名单和 active-only 选择；数字等宽、长路径换行、鼠标悬停与键盘 focus-within 同等可辨。移动卡片、按钮和复选框更易触控，列表横向滚动不串联父页面。
+- **单文件 Restore / Purge**：Portal 统一白灰黑与独立深灰，选中、禁用及键盘焦点易辨，移动端关闭按钮至少 44px，长文件路径显示完整。恢复严格只有 skip / rename / manual，不允许覆盖；永久清除必须管理员、双安全开关、输入大写 DELETE。红色危险、琥珀警告、绿色成功不能被中性色覆盖，hard link survivor 与独立内容副本必须保持 advisory 语义。
+- **Bulk Restore / Purge**：仅 Preview 与生成 Draft，保持 Preview Digest 绑定、选中身份验证、只要存在 blocked 即 fail-closed，永久清除生成前仍要求 DELETE；表格/指标数字对齐、被阻止/允许状态明晰。弹窗层级沿用 Radix `nfc-v2-confirm-overlay` / `nfc-v2-dialog`，不新建 z-index 覆盖层；背景遮罩继续采用 PR #198 的无模糊中性设计，弹窗正文保持清晰。
+- **交互保证**：原有请求防重入、繁忙时禁止关闭、Esc / 外部点击限制、不可逆操作明确确认与审计记录不变；不改动 API、RBAC、Worker、实际 NAS 文件或 Archive Recovery。
+- **回归与边界**：新增 6 条纯源码专项回归，保留已有隔离区安全测试及 CSS 所有权审计。合并后的代码仍未完成真实浏览器的 `light/dark/system`、360/390/430/768/1024/1280/1440/1920px、长路径、键盘导航与叠层验收。上线部署前必须在实际浏览器复现并验证用户反馈的遮罩问题。
+
 ## 像素级最终验收矩阵
 
 - **视口**：360、390、430、768、1024、1280、1440、1920px；横向溢出必须由明确的表格滚动容器接管，不允许主页面出现意外滚动条。
