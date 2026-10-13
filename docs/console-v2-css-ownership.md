@@ -99,10 +99,18 @@ could change actual computed styles even when unit tests still pass.
 - Updated stale AntD table/menu/overlay visual assertions to native semantic component contracts. Added six targeted regressions and expanded zero-AntD CSS audit to **60 files**.
 - Other unreviewed v047 page/component styles may still contain obsolete AntD selectors; do **not** claim repository-wide zero until all are audited. Final browser visual sign-off remains pending.
 
+## PR #194 — reviewed component layer and already-native v046/v047 files
+
+- Removed **36 AntD-only CSS rule groups** and AntD members of **1 mixed group** in `src/styles/components.css`; all **162 native groups**, six original media wrappers and import order remain intact.
+- The mixed group retains `.nfc-overlay-section-flush > .nfc-embedded-table` and its original margin.
+- Added `components.css` plus eight already AntD-free stylesheets (`foundation.css`, `tokens.css`, `v046.css`, `v047.css`, `pages/dashboard.css`, `pages/details.css`, `pages/operations.css`, `pages/scheduler.css`) to the zero-selector audit: **69 of 74 CSS files**.
+- Added six native component regression tests. The five remaining unreviewed stylesheets are `pages/login.css`, `pages/organizer.css`, `pages/tools.css`, `pages/workflows.css`, and `v048-pages.css`.
+- This is source-level CSS cleanup, not a browser visual sign-off or NAS deployment.
+
 ## Deliberately pending work
 
-- The audited 60 legacy/owned CSS layers are zero-AntD-selectors; inspect
-  remaining unreviewed component/page layers before claiming complete retirement.
+- The audited 69 legacy/owned CSS layers are zero-AntD-selectors; finish the
+  five unreviewed page layers before claiming repository-wide selector retirement.
 - Identify overwritten versus still-live native declarations across legacy
   versioned styles. Remove or relocate them in small, reviewed tranches, with
   computed-style evidence when selectors share a cascade.
