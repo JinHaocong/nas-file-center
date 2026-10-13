@@ -1,7 +1,7 @@
 /**
  * Console v2 owned CSS boundary.
  * Historical index.css and other v04x-v05x layers remain pending review.
- * Native console styles, Settings and reviewed v048-detail.css must have
+ * Native console styles, Settings and both reviewed v048 CSS layers must have
  * zero legacy Ant Design class selectors.
  *
  * Usage (from frontend): node scripts/check-console-css-ownership.mjs
@@ -15,6 +15,7 @@ const owned = readdirSync(root)
   .map(name => 'console-v2:' + name);
 owned.push('settings:pages/settings.css');
 owned.push('legacy-reviewed:v048-detail.css');
+owned.push('legacy-reviewed:v048.css');
 const errors = [];
 for (const name of owned) {
   const path = name.substring(name.indexOf(':') + 1);
