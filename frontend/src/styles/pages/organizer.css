@@ -24,18 +24,6 @@
   background: transparent !important;
 }
 
-.nfc-organizer-profile-modal .ant-modal-body,
-.nfc-organizer-import-modal .ant-modal-body {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.nfc-organizer-profile-modal .ant-form-item,
-.nfc-organizer-import-modal .ant-form-item {
-  margin-bottom: 14px;
-}
-
 .nfc-organizer-import-modal textarea {
   min-height: min(42dvh, 360px) !important;
   border-color: var(--nfc-v49-line, var(--nfc-border-soft)) !important;
@@ -90,21 +78,6 @@
   background: var(--nfc-v49-surface, var(--nfc-surface-1));
 }
 
-.nfc-organizer-advanced-collapse .ant-collapse-item {
-  border-bottom-color: var(--nfc-v49-line, var(--nfc-border-soft));
-}
-
-.nfc-organizer-advanced-collapse .ant-collapse-header,
-.nfc-organizer-advanced-collapse .ant-collapse-content,
-.nfc-organizer-advanced-collapse .ant-collapse-content-box {
-  color: var(--nfc-v49-text, var(--nfc-text));
-  background: var(--nfc-v49-surface, var(--nfc-surface-1));
-}
-
-.nfc-organizer-advanced-collapse .ant-collapse-content {
-  border-top-color: var(--nfc-v49-line, var(--nfc-border-soft));
-}
-
 .nfc-organizer-preview-digest {
   display: flex;
   align-items: center;
@@ -130,9 +103,6 @@
 }
 
 [data-theme='dark'] .nfc-organizer-advanced-collapse,
-[data-theme='dark'] .nfc-organizer-advanced-collapse .ant-collapse-header,
-[data-theme='dark'] .nfc-organizer-advanced-collapse .ant-collapse-content,
-[data-theme='dark'] .nfc-organizer-advanced-collapse .ant-collapse-content-box,
 [data-theme='dark'] .nfc-organizer-preview-digest {
   background: var(--nfc-v49-surface, var(--nfc-surface-1));
   border-color: var(--nfc-v49-line, var(--nfc-border-soft));
@@ -144,22 +114,9 @@
     overflow-x: auto;
   }
 
-  .nfc-organizer-profile-modal .ant-form-item,
-  .nfc-organizer-import-modal .ant-form-item {
-    margin-bottom: 12px;
-  }
-
   .nfc-organizer-step-import-row {
     align-items: stretch !important;
     flex-direction: column;
-  }
-
-  .nfc-organizer-advanced-collapse .ant-collapse-header {
-    padding-inline: 12px !important;
-  }
-
-  .nfc-organizer-advanced-collapse .ant-collapse-content-box {
-    padding: 12px !important;
   }
 
   .nfc-organizer-preview-digest {
