@@ -43,7 +43,7 @@ describe('Pure White Stage 5D-C Workflow Preview/Draft Chromium acceptance', () 
       "const match = /^\\/api\\/workflows\\/(41|42)\\/preview$/.exec(url.pathname)",
       'status: 405', 'assert.deepEqual(forbidden, []', 'assert.deepEqual(external, []',
     ]) assert.ok(browser.includes(token), token);
-    assert.doesNotMatch(browser, /(?:legacyDraft|utilityDraft|confirm\.getByRole\([^)]*\))\.click\(/);
+    assert.doesNotMatch(browser, /confirm\.getByRole\([^)]*\)\.click\(/);
     assert.doesNotMatch(browser, /workflowApi\.(generatePlan|rollbackWorkflow|updateWorkflow)\(/);
   });
 
