@@ -58,6 +58,7 @@ import './styles/console-v2-scan-login.css';
 import './styles/console-v2-utility-preview.css';
 import './styles/console-v2-workflow-legacy-preview.css';
 import './styles/console-v2-plan-detail.css';
+import './styles/console-v2-archive-recovery.css';
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
