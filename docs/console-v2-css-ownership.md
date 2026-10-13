@@ -40,12 +40,18 @@ could change actual computed styles even when unit tests still pass.
 - Removed 44 obsolete AntD-only CSS rule blocks from `frontend/src/styles/v048-detail.css` and removed old selectors from 3 mixed declarations, retaining all original native rule bodies and relative cascade positions. Native `.nfc-row-actions:focus-within`, `.nfc-mobile-pagination` and reduced-motion styles remain.
 - Removed now-empty historical AntD section headers. The reviewed detail layer contains zero `.ant-*` / `.anticon` selectors.
 - Extended the ownership preflight to check the reviewed v048 detail stylesheet alongside the 45 Console v2 and Settings-owned styles (47 total checked files), including `anticon` selectors. Added focused regression coverage and replaced the stale v0.4.8 test that demanded AntD alert and empty-state DOM classes with native details and pagination guarantees.
-- The broader `src/index.css`, `v048.css`, `v049-workspace.css`, `v054-premium-system.css`, and `v056-right-workspace-v2.css` retain historical rules pending separate review, with no false zero-residual claim.
+- The broader `src/index.css`, `v049-workspace.css`, `v054-premium-system.css`, and `v056-right-workspace-v2.css` retain historical rules pending separate review, with no false zero-residual claim.
+
+## PR #186 — reviewed v0.4.8 base CSS and branch maintenance
+
+- Removed 39 pure AntD CSS rule blocks from `src/styles/v048.css` and obsolete selectors from two mixed groups. Preserved native data panels, metrics, snapshot notices, form hints, themed tokens, responsiveness and reduced-motion declarations.
+- Added `v048.css` to the CI CSS ownership guard (48 reviewed files), updated the old v048 tests and added a dedicated regression test.
+- Added `scripts/cleanup_merged_branches.py` with `docs/merged-branch-cleanup.md` and offline fixture tests. Defaults to dry-run, requires exact merged PR head, prevents deletion of protected, open or unmerged branches, and requires explicit `--execute`. No branches were deleted as part of PR #186.
 
 ## Deliberately pending work
 
 - Audit remaining dead AntD CSS selectors in `src/index.css`,
-  `styles/v048.css`, `styles/v049-workspace.css`, `v054-premium-system.css` and
+  `styles/v049-workspace.css`, `v054-premium-system.css` and
   `v056-right-workspace-v2.css`. Several historical tests still demand these
   selectors and must be updated to native semantic assertions before removal.
 - Identify overwritten versus still-live native declarations across legacy
