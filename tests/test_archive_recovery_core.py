@@ -36,7 +36,7 @@ def test_broken_zip_central_directory_salvages_local_headers(tmp_path):
     source.write_bytes(source.read_bytes()[:-19])
     report, dst = result(tmp_path, source)
     assert report['known_total'] is None
-    assert report['items'][0]['provenance'] == 'zip_local_header'
+    assert report['items'][0]['provenance'].startswith('zip_local_header@')
     assert report['stats']['integrity_passed'] == 1
     assert (dst / 'survivor.txt').read_text() == 'clean'
 
@@ -156,3 +156,59 @@ def test_password_not_logged_in_error_or_report(tmp_path):
     report, dst = result(tmp_path, source, password='secret-sentinel')
     assert 'secret-sentinel' not in str(report)
     assert (dst / 'plain.txt').exists()
+
+
+def test_inner_tar_is_extracted_and_intermediate_removed(tmp_path):
+    memory = io.BytesIO()
+    with tarfile.open(fileobj=memory, mode='w') as tar:
+        data = b'inner-content'
+        ti = tarfile.TarInfo('sub/inner.txt')
+        ti.size = len(data)
+        tar.addfile(ti, io.BytesIO(data))
+    source = tmp_path / 'outer.zip'
+    with zipfile.ZipFile(source, 'w') as zip_archive:
+        zip_archive.writestr('inner.tar', memory.getvalue())
+    report, dest = result(tmp_path, source)
+    assert (dest / 'sub' / 'inner.txt').read_bytes() == b'inner-content'
+    assert not (dest / 'inner.tar').exists()
+    assert report['known_total'] == 1
+    assert report['stats']['unverified'] == 1
+
+
+def test_zip_midstream_gap_resynchronizes_only_crc_validated_headers(tmp_path):
+    import struct
+    import zlib
+    def local_file(name: str, data: bytes, crc_delta=0):
+        raw = name.encode()
+        crc = (zlib.crc32(data) + crc_delta) & 0xffffffff
+        return (b'PK\x03\x04' + struct.pack('<HHHHHIIIHH',
+                20, 0, 0, 0, 0, crc, len(data), len(data), len(raw), 0) + raw + data)
+    source = tmp_path / 'gap.zip'
+    source.write_bytes(local_file('first.txt', b'one') +
+                       b'corruption in stream PK\x03\x04junk' +
+                       local_file('bad.txt', b'mismatch', crc_delta=1) +
+                       b'junk' + local_file('last.txt', b'two'))
+    report, dest = result(tmp_path, source)
+    assert (dest / 'first.txt').read_bytes() == b'one'
+    assert (dest / 'last.txt').read_bytes() == b'two'
+    assert not (dest / 'bad.txt').exists()
+    assert report['stats']['integrity_passed'] == 2
+
+
+def test_interrupted_cleanup_only_removes_owned_parts(tmp_path):
+    from app.archive_recovery.core import clean_interrupted_parts
+    output = tmp_path / 'result'
+    output.mkdir()
+    (output / 'nested').mkdir()
+    good = output / 'nested' / 'good.txt'
+    good.write_text('keep')
+    tmp = output / 'nested' / ('.nfc-part-' + 'a' * 24)
+    tmp.write_text('temporary')
+    unknown = output / 'nested' / '.nfc-part-not-a-job'
+    unknown.write_text('other')
+    identity = [str(output.stat().st_dev), str(output.stat().st_ino)]
+    assert clean_interrupted_parts(output, ['0', '0']) == 0
+    assert tmp.exists()
+    assert clean_interrupted_parts(output, identity) == 1
+    assert not tmp.exists()
+    assert unknown.exists() and good.read_text() == 'keep'

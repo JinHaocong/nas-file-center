@@ -9,7 +9,7 @@ import time
 
 from sqlalchemy import text
 
-from app.archive_recovery.core import RecoveryError, recover_archive
+from app.archive_recovery.core import RecoveryError, recover_archive, clean_interrupted_parts
 from app.config import Settings
 from app.models import WorkJob
 from app.tasks.context import JobContext
@@ -122,6 +122,8 @@ class ArchiveRecoveryHandler(TaskHandler):
             password = read_one_time_password(token)
             report = recover_archive(source, output, password=password, check=checkpoint,
                                      deep=state.get('deep', True), items=items)
+            if items and all(r['status'] == 'unrecovered' for r in items):
+                raise RecoveryError('NO_FILES_RECOVERED')
             after = source.stat()
             if (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns) != (
                     after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns):
@@ -144,17 +146,11 @@ class ArchiveRecoveryHandler(TaskHandler):
             # worker-owned temporary names; final published files survive.
             if token and tmpfs_available():
                 (SECRET_DIR / token).unlink(missing_ok=True)
-            if output.is_dir() and not output.is_symlink() and (
-                [str(output.stat().st_dev), str(output.stat().st_ino)] == state.get('output_identity')
-            ):
-                for parent, dirs, files in os.walk(output, topdown=False, followlinks=False):
-                    for name in files:
-                        if name.startswith('.nfc-part-'):
-                            (Path(parent) / name).unlink(missing_ok=True)
-                try:
-                    (output / '_incomplete').rmdir()
-                except OSError:
-                    pass
+            clean_interrupted_parts(output, state.get('output_identity', []))
+            try:
+                (output / '_incomplete').rmdir()
+            except OSError:
+                pass
             if status != 'completed' and status != 'partial':
                 write_report(settings, job.id, {
                     'source': str(source), 'output': str(output),
@@ -172,3 +168,54 @@ class ArchiveRecoveryHandler(TaskHandler):
                         output.rmdir()
                 except OSError:
                     pass
+
+
+def cleanup_recovery_after_worker_restart(settings: Settings, session_factory, worker_id: str) -> None:
+    """Retire only job-owned temp names after the existing Worker lease takeover."""
+    from sqlalchemy import select
+    from app.tasks.recovery import assert_active_worker_lease
+
+    with session_factory() as session:
+        assert_active_worker_lease(session, worker_id)
+        jobs = list(session.scalars(
+            select(WorkJob).where(WorkJob.kind == 'archive-recovery',
+                                  WorkJob.status == 'failed',
+                                  WorkJob.error_code == 'WORKER_INTERRUPTED')
+        ))
+    for job in jobs:
+        try:
+            state = json.loads(job.state_json or '{}')
+            output = Path(state['output'])
+            source = Path(state['source'])
+            from app.path_safety import require_allowed_path
+            if output.parent != source.parent or (
+                require_allowed_path(source, settings.allowed_roots) != source
+            ):
+                continue
+            clean_interrupted_parts(output, state.get('output_identity', []))
+            token = state.get('secret_token')
+            if token and len(token) == 32 and tmpfs_available():
+                (SECRET_DIR / token).unlink(missing_ok=True)
+        except (KeyError, OSError, ValueError):
+            # No cleanup authority can be derived from malformed/stale job state.
+            continue
+
+
+def cleanup_cancelled_queued_recovery(state_json: str) -> None:
+    """Remove one-time RAM secret and only a task-owned EMPTY output dir."""
+    try:
+        state = json.loads(state_json or '{}')
+        token = state.get('secret_token')
+        if token and len(token) == 32 and all(c in '0123456789abcdef' for c in token) and tmpfs_available():
+            (SECRET_DIR / token).unlink(missing_ok=True)
+        output = Path(state['output'])
+        source = Path(state['source'])
+        if output.parent != source.parent or output.is_symlink() or not output.is_dir():
+            return
+        st = output.stat()
+        if [str(st.st_dev), str(st.st_ino)] != state.get('output_identity'):
+            return
+        output.rmdir()
+    except (KeyError, ValueError, OSError):
+        # Existing user files, foreign directories and ambiguous identities survive.
+        pass

@@ -24,7 +24,7 @@ router = APIRouter(prefix='/api/archive-recovery', tags=['archive-recovery'],
 
 class RecoveryRequest(BaseModel):
     source: str = Field(min_length=1, max_length=4096)
-    password: str | None = Field(default=None, max_length=4096)
+    password: str | None = None
     deep: bool = True
 
 
@@ -76,6 +76,8 @@ def start_archive(request: Request, payload: RecoveryRequest):
         detect_format(source)
     except RecoveryError as exc:
         raise HTTPException(422, str(exc)) from exc
+    if payload.password and len(payload.password.encode('utf-8')) > 4096:
+        raise HTTPException(422, 'PASSWORD_TOO_LONG')
     if payload.password and not tmpfs_available():
         raise HTTPException(503, 'PASSWORD_CHANNEL_UNAVAILABLE: configure shared tmpfs')
     # Explicit source identity and unique output directory; no overwrite.

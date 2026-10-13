@@ -455,6 +455,15 @@ def _cleanup_transaction_residue_after_recovery(
         logger.exception("Terminal transaction residue cleanup failed closed")
 
 
+def _cleanup_archive_after_recovery(settings: Settings, session_factory: sessionmaker, worker_id: str) -> None:
+    """Finish only registered archive staging cleanup after Worker lease recovery."""
+    try:
+        from app.archive_recovery.integration import cleanup_recovery_after_worker_restart
+        cleanup_recovery_after_worker_restart(settings, session_factory, worker_id)
+    except Exception:
+        logger.exception("Archive recovery temporary cleanup failed closed")
+
+
 def worker_loop(
     settings: Settings | None = None,
     *,
@@ -501,6 +510,7 @@ def worker_loop(
     if acquired:
         recover_interrupted_jobs(engine, SessionLocal, worker_id=worker_id)
         _cleanup_transaction_residue_after_recovery(settings, SessionLocal, worker_id)
+        _cleanup_archive_after_recovery(settings, SessionLocal, worker_id)
 
     last_scheduler_tick_minute = None
 
@@ -520,6 +530,7 @@ def worker_loop(
                     continue
                 recover_interrupted_jobs(engine, SessionLocal, worker_id=worker_id)
                 _cleanup_transaction_residue_after_recovery(settings, SessionLocal, worker_id)
+                _cleanup_archive_after_recovery(settings, SessionLocal, worker_id)
 
             scheduler_now = utcnow()
             scheduler_minute = scheduler_now.replace(second=0, microsecond=0)

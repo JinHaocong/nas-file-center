@@ -226,28 +226,36 @@ def _zip(source: Path, root: Path, fd: int, budget: Budget, results: list[dict],
 def _zip_headers(source: Path, root: Path, fd: int, budget: Budget, results: list[dict]) -> None:
     """Conservative salvage: only complete non-encrypted local headers without descriptors."""
     with source.open('rb') as inp:
-        while True:
+        length = source.stat().st_size
+        offset = 0
+        while offset + 30 <= length:
             budget.step()
+            inp.seek(offset)
             sig = inp.read(4)
-            if not sig:
-                return None
             if sig != b'PK\x03\x04':
-                # Bounded streaming scan; never trust arbitrary bytes as resync.
-                return None
+                # A candidate must still pass strict header, stream and CRC
+                # checks; arbitrary signatures are never considered valid.
+                inp.seek(offset)
+                window = inp.read(CHUNK)
+                next_header = window.find(b'PK\x03\x04', 1)
+                offset += next_header if next_header >= 0 else max(1, len(window) - 3)
+                continue
             hdr = inp.read(26)
             if len(hdr) != 26:
-                return None
+                break
             _, flags, method, _, _, crc, compressed, raw_size, name_len, extra_len = struct.unpack('<HHHHHIIIHH', hdr)
             if name_len > 4096 or extra_len > 65535 or compressed > MAX_BYTES:
-                return None
+                offset += 4
+                continue
             raw = inp.read(name_len)
             extra = inp.read(extra_len)
             if len(raw) != name_len or len(extra) != extra_len:
-                return None
+                offset += 4
+                continue
             name = raw.decode('utf-8' if flags & 0x800 else 'cp437', errors='replace')
             if flags & (1 | 8) or method not in (0, 8) or raw_size > MAX_BYTES:
                 results.append({'name': name, 'status': 'unrecovered', 'reason': 'LOCAL_HEADER_UNSUPPORTED'})
-                inp.seek(compressed, 1)
+                offset = inp.tell() + compressed
                 continue
             # The compressed region is bounded; decompression is streaming and
             # budget accounting occurs before data is written. Malformed streams
@@ -281,7 +289,9 @@ def _zip_headers(source: Path, root: Path, fd: int, budget: Budget, results: lis
                 if plain_size != raw_size or (digest & 0xffffffff) != crc:
                     raise ValueError('CRC_MISMATCH')
             _record(root, fd, name, unpack_chunks(), budget, results, crc=True,
-                    expected=raw_size, provenance='zip_local_header')
+                    expected=raw_size, provenance=f'zip_local_header@{offset}')
+            offset = inp.tell()
+        return None
 
 
 def _tar_header(block: bytes) -> tuple[str, int, bytes] | None:
@@ -456,9 +466,9 @@ def recover_archive(source: Path, result_dir: Path, *, password: str | None = No
         # One additional TAR layer, only from a normally published regular file.
         if deep:
             for record in list(results):
-                if record.get('status') not in {'unverified', 'format_validated'}:
+                if record.get('status') not in {'integrity_passed', 'unverified', 'format_validated', 'incomplete'}:
                     continue
-                if not record['path'].lower().endswith('.tar'):
+                if not record['name'].lower().endswith('.tar'):
                     continue
                 inner = result_dir / record['path']
                 before = len(results)
@@ -479,3 +489,29 @@ def recover_archive(source: Path, result_dir: Path, *, password: str | None = No
             (result_dir / '_incomplete').rmdir()
         except OSError:
             pass
+
+
+def clean_interrupted_parts(output: Path, identity: list[str]) -> int:
+    """Delete ONLY our exact temporary names under a verified private output root.
+
+    Final files, even in nested user directories, are never removed. The same
+    temp-name namespace is forbidden to archive entries by safe_parts().
+    """
+    if output.is_symlink() or not output.is_dir():
+        return 0
+    observed = output.stat()
+    if [str(observed.st_dev), str(observed.st_ino)] != identity:
+        return 0
+    count = 0
+    for parent, dirs, files in os.walk(output, topdown=True, followlinks=False):
+        if Path(parent).is_symlink():
+            continue
+        dirs[:] = [name for name in dirs if not (Path(parent) / name).is_symlink()]
+        for name in files:
+            if re.fullmatch(r"\.nfc-part-[0-9a-f]{24}", name):
+                path = Path(parent) / name
+                if path.is_symlink():
+                    continue
+                path.unlink(missing_ok=True)
+                count += 1
+    return count

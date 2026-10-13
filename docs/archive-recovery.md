@@ -28,3 +28,4 @@ Per-job defaults: 10,000 files, 4 GiB total decoded bytes, 30 minutes, 32 name c
 ## Required release acceptance
 
 Local generated fixtures cover ZIP/TAR corruption and path safety. **Real encrypted 7z, RAR3/RAR5, host zfuse write permissions, process kill/worker restart cleanup, image Docker build and end-to-end authentication must be checked on the exact candidate before production deployment.** Don't infer these from local Python unit tests.
+Worker restart cleanup validates the exact task-owned output directory identity and removes only `.nfc-part-<24hex>` names. Directly cancelled queued tasks also retire any pending one-time tmpfs credential and remove their empty result directory. In a filesystem race or a blocked permission situation, cleanup fails closed rather than deleting foreign files.

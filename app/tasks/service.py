@@ -298,7 +298,14 @@ class TaskService:
 
             raise ValueError(f"Cannot cancel job in state '{job.status}'")
 
-        return atomic_task_transition(self.SessionLocal, task_id, _transition)
+        response = atomic_task_transition(self.SessionLocal, task_id, _transition)
+        if response["job_type"] == "archive-recovery" and response["status"] == "cancelled":
+            with self.SessionLocal() as session:
+                current = session.get(WorkJob, task_id)
+                if current is not None:
+                    from app.archive_recovery.integration import cleanup_cancelled_queued_recovery
+                    cleanup_cancelled_queued_recovery(current.state_json)
+        return response
 
     def retry_task(self, task_id: int, user_id: int | None = None) -> dict:
         def _transition(session: Session, job: WorkJob, now: datetime):
