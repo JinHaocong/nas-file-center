@@ -52,7 +52,7 @@ describe('Pure White v2.1 visual foundation and details', () => {
     assert.match(shell, /\.nfc-v2-dashboard-hero\s*\{[^}]*min-height:\s*0;[^}]*border:\s*0;[^}]*background:\s*transparent;/);
     assert.match(shell, /\.nfc-v2-hero-illustration\s*\{\s*display:\s*none;/);
     assert.match(shell, /\.nfc-v2-dashboard \.nfc-metric-card\s*\{[^}]*border-radius:\s*12px !important;[^}]*box-shadow:\s*var\(--v2-shadow\) !important;/);
-    assert.match(shell, /\.nfc-v2-data-table tbody tr:hover\s*\{\s*background:\s*var\(--v2-indigo-soft\);/);
+    assert.match(shell, /\.nfc-v2-data-table tbody tr:hover,\s*\.nfc-v2-data-table tbody tr:focus-within\s*\{\s*background:\s*var\(--v2-indigo-soft\);/);
     const dashboard = read('src/pages/Dashboard/index.tsx');
     assert.ok(dashboard.includes('dashboardApi'));
     assert.ok(dashboard.includes('scansApi'));
