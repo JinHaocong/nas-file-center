@@ -163,28 +163,20 @@ body,
 }
 
 .nfc-page-eyebrow {
-  margin-bottom: 7px;
   color: var(--nfc-v49-subtle);
-  font-size: 8.5px;
   font-weight: 740;
-  letter-spacing: 0.15em;
   text-transform: uppercase;
 }
 
 .nfc-page-title {
   color: var(--nfc-v49-text);
-  font-size: clamp(27px, 2vw, 34px);
-  font-weight: 655;
   line-height: 1.08;
   letter-spacing: -0.04em;
 }
 
 .nfc-page-description {
   max-width: 76ch;
-  margin-top: 8px;
   color: var(--nfc-v49-muted);
-  font-size: 12px;
-  line-height: 1.65;
 }
 
 .nfc-page-actions {
@@ -235,16 +227,11 @@ body,
 
 .nfc-data-panel-title {
   color: var(--nfc-v49-text);
-  font-size: 12.5px;
-  font-weight: 660;
   letter-spacing: -0.012em;
 }
 
 .nfc-data-panel-description {
-  margin-top: 3px;
   color: var(--nfc-v49-subtle);
-  font-size: 10px;
-  line-height: 1.48;
 }
 
 .nfc-panel-count {
