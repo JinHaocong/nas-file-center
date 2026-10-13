@@ -126,7 +126,7 @@ try {
         assert.deepEqual(errors, [], 'Restore ' + label + ': ' + errors.join('; '));
         const choices = restore.locator('input[name="restore-conflict-policy"]');
         assert.equal(await choices.count(), 3, 'Only skip/rename/manual recovery strategies');
-        await choices.filter({ hasNot: page.locator('none') }).first().check();
+        await choices.first().check();
         await page.screenshot({ path: resolve(OUT, 'restore-' + label + '.png') });
         await page.keyboard.press('Escape');
         await restore.waitFor({ state: 'hidden' });
