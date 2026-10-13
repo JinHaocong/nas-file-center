@@ -9,7 +9,7 @@
 .nfc-v2-dedupe-filter-select select { width: 100%; height: 42px; padding: 0 9px; border: 1px solid #eaeae7;
   border-radius: 9px; background: #fff; color: #20201f; font: inherit; }
 .nfc-v2-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
-.nfc-v2-dedupe-preview :is(input,select,button):focus-visible { outline: 2px solid #252525; outline-offset: 2px; }
+.nfc-v2-dedupe-preview :is(input,select,button):focus-visible { outline: 2px solid var(--nfc-accent); outline-offset: 2px; }
 .nfc-v2-dedupe-loading,.nfc-v2-dedupe-empty { margin: 14px; padding: 14px; color: #696965; }
 .nfc-v2-dedupe-table-scroll { width: 100%; overflow-x: auto; overscroll-behavior-x: contain; }
 .nfc-v2-dedupe-table { border-collapse: collapse; width: 100%; min-width: 1000px; text-align: left; font-size: 12px; }
@@ -75,7 +75,7 @@
   flex: 1; margin: 0; font-size: 17px; font-weight: 720;
   color: var(--nfc-adv-dialog-text); line-height: 1.45;
 }
-.nfc-v2-advanced-dedupe-dialog-icon { color: #252525; flex: 0 0 auto; margin-top: 2px; }
+.nfc-v2-advanced-dedupe-dialog-icon { color: var(--nfc-adv-dialog-accent); flex: 0 0 auto; margin-top: 2px; }
 .nfc-v2-advanced-dedupe-dialog-header button {
   border: 0; background: transparent; color: inherit; cursor: pointer; padding: 4px;
 }
