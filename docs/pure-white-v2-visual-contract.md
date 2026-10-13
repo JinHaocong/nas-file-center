@@ -59,6 +59,14 @@
 - **Scorer 与存储安全面板**：统一中性色板，提升键盘焦点与触控尺寸；保留 supported / unsupported / unknown、warning/error/verified 的绿色/琥珀/红色语义，后端仍是能力与授权权威。
 - **验收边界**：仅修改已有的样式所有者与源码测试，没有新增版本覆盖层、API 或后端更改；回归测试与 CI 不能代替 light/dark/system 和 8 档宽度的浏览器视觉验收，也不能代替 NAS 上的部署验证。
 
+## 第三阶段第三批：Preview / Results / Plan 历史清理
+
+- **Organizer Preview**：基于服务器的 Stage A/B snapshot、分页、过滤和 digest-bound 生成机制保持不变。只整理 Preview 根路径控件、状态提示、proposal 表格、长路径与移动卡片的灰度层次、tabular-nums 和 hover/focus-within。Stage 冲突仍用原有警告/成功/危险语义色。
+- **Advanced Dedupe**：结果筛选、决策/资格标签、行高、路径断行和焦点转为灰白中性色；真实后端结果、Preview Digest、Hardlink/Reflink 风险说明及仅生成 Draft 的行为不变。确认浮层保持 1280/1281 层级，浅色深灰主按钮和深色高对比主按钮分别定义文字色。
+- **Dedupe Explain**：只读 Summary 与独立 Radix Sheet 统一中性色，层级 1225/1226；保留后端 canonical 解释、权重贡献、文件 provenance、分组与所有实际安全状态颜色。表格和长路径允许滚动/换行、聚焦可见。
+- **Plan 历史清理**：终态白名单（completed / failed）和 Delete ≠ Undo 告知保持原状；只增强选中、键盘焦点、禁用和视口滚动的可见反馈。忙碌防重复提交与防关闭、删除确认及文件系统不受影响。
+- **证据与限制**：新增 6 项源码级回归。完全不修改 API、Worker、数据库、文件操作、生产 NAS 或发布版本；CI 通过后也仍需 light/dark/system 与 360/390/430/768/1024/1280/1440/1920px 的真实浏览器验收。
+
 ## 像素级最终验收矩阵
 
 - **视口**：360、390、430、768、1024、1280、1440、1920px；横向溢出必须由明确的表格滚动容器接管，不允许主页面出现意外滚动条。
