@@ -22,6 +22,9 @@ const PAGES = [
   { path: '/dashboard', id: 'dashboard', heading: 'NAS File Center', selector: '.nfc-dashboard-page' },
   { path: '/plans', id: 'plans', heading: '执行计划', selector: '.nfc-plans-page' },
   { path: '/tasks', id: 'tasks', heading: '任务中心', selector: '.nfc-tasks-page' },
+  { path: '/indexes', id: 'indexes', heading: '文件索引', selector: '.nfc-indexes-page' },
+  { path: '/media', id: 'media', heading: '媒体完整性', selector: '.nfc-media-page' },
+  { path: '/quarantine', id: 'quarantine', heading: '文件隔离区', selector: '.nfc-quarantine-page' },
 ];
 const server = spawn(process.execPath, [
   'node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1',
@@ -91,6 +94,12 @@ async function inspect(page, theme, width, item) {
       check(inside(content), 'Dashboard columns overflow');
       check(getComputedStyle(metrics).display === 'grid', 'Metric layout lost grid');
     } else {
+      if (item.id === 'media') {
+        const mediaMetrics = get('.nfc-media-page > .nfc-metric-grid');
+        check(inside(mediaMetrics), 'Media metrics overflow viewport');
+        check(getComputedStyle(mediaMetrics).display === 'grid',
+          'Media metrics lost their responsive grid');
+      }
       const head = get(item.selector + ' > .nfc-page-header');
       const panel = get(item.selector + ' > .nfc-data-panel');
       const mb = getComputedStyle(head).marginBottom;
@@ -166,8 +175,8 @@ try {
     }
   }
   assert.equal(passed, WIDTHS.length * THEMES.length);
-  console.log('[WORKSPACE CASCADE] 32/32 cases, 96 screenshots; ' +
-    'real Dashboard/Plans/Tasks CSS, synthetic GET only; no NAS or file access.');
+  console.log('[WORKSPACE CASCADE] 32/32 cases, 192 screenshots; ' +
+    'real Dashboard/Plans/Tasks/Indexes/Media/Quarantine CSS, synthetic GET only; no NAS or file access.');
 } finally {
   await browser?.close();
   server.kill('SIGTERM');

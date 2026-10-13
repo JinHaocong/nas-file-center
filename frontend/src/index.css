@@ -259,28 +259,18 @@ textarea {
 }
 
 .nfc-page-eyebrow {
-  margin-bottom: 6px;
   color: var(--nfc-text-subtle);
-  font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.12em;
 }
 
 .nfc-page-title {
   margin: 0;
   color: var(--nfc-text);
-  font-size: 24px;
-  font-weight: 620;
-  line-height: 1.22;
-  letter-spacing: -0.025em;
 }
 
 .nfc-page-description {
-  max-width: 720px;
   margin-top: 7px;
   color: var(--nfc-text-muted);
-  font-size: 13px;
-  line-height: 1.55;
 }
 
 .nfc-page-actions {
@@ -355,12 +345,7 @@ textarea {
 }
 
 .nfc-metric-value {
-  margin-top: 16px;
   color: var(--nfc-text);
-  font-size: clamp(22px, 2vw, 30px);
-  font-weight: 620;
-  line-height: 1;
-  letter-spacing: -0.035em;
   font-variant-numeric: tabular-nums;
 }
 
@@ -389,10 +374,7 @@ textarea {
 }
 
 .nfc-dashboard-layout {
-  margin-top: 18px;
   display: grid;
-  grid-template-columns: minmax(0, 1.75fr) minmax(280px, 0.65fr);
-  gap: 18px;
   align-items: start;
 }
 
