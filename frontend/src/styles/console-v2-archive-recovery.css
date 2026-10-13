@@ -1,0 +1,272 @@
+/* Pure White v2.1 — Archive Recovery. Scoped to the live file-recovery screen.
+   Keep source inspection, read-only guarantees and worker evidence visible. */
+.nfc-v2-shell .nfc-archive-recovery-page {
+  width: min(100%, 1440px) !important;
+  max-width: 1440px !important;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  color: var(--v2-text);
+}
+.nfc-v2-shell .nfc-archive-recovery-intro {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: -6px;
+}
+.nfc-v2-shell .nfc-archive-recovery-intro span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 29px;
+  padding: 5px 11px;
+  border: 1px solid var(--v2-line);
+  border-radius: 7px;
+  background: var(--v2-paper);
+  color: var(--v2-muted);
+  font-size: 11px;
+  font-weight: 570;
+  line-height: 1.5;
+}
+.nfc-v2-shell .nfc-archive-recovery-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.07fr) minmax(0, .93fr);
+  align-items: start;
+  gap: 18px;
+  min-width: 0;
+}
+.nfc-v2-shell .nfc-archive-recovery-page .nfc-data-panel {
+  min-width: 0;
+  margin: 0 !important;
+  overflow: hidden;
+  border: 1px solid var(--v2-line) !important;
+  border-radius: 12px !important;
+  background: var(--v2-paper) !important;
+  box-shadow: var(--v2-shadow) !important;
+}
+.nfc-v2-shell .nfc-archive-recovery-page .nfc-data-panel-header {
+  min-height: 0;
+  padding: 20px 22px 17px !important;
+  border-bottom: 1px solid var(--v2-line) !important;
+  background: var(--v2-paper) !important;
+}
+.nfc-v2-shell .nfc-archive-recovery-page .nfc-data-panel-title {
+  font-size: 15px !important;
+  font-weight: 700 !important;
+  color: var(--v2-text) !important;
+}
+.nfc-v2-shell .nfc-archive-recovery-page .nfc-data-panel-description {
+  margin-top: 6px;
+  font-size: 12px !important;
+  line-height: 1.65;
+  color: var(--v2-muted) !important;
+}
+.nfc-v2-shell .nfc-archive-recovery-page .nfc-data-panel-body {
+  display: grid;
+  align-content: start;
+  gap: 13px;
+  padding: 20px 22px 22px !important;
+  background: var(--v2-paper) !important;
+  min-width: 0;
+}
+.nfc-v2-shell .nfc-archive-recovery-field-label {
+  display: block;
+  color: var(--v2-text);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.5;
+}
+.nfc-v2-shell .nfc-archive-recovery-page input:not([type='checkbox']),
+.nfc-v2-shell .nfc-archive-recovery-page select {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  padding: 8px 11px;
+  border: 1px solid var(--v2-line);
+  border-radius: 8px;
+  background: var(--v2-paper);
+  color: var(--v2-text);
+  font: inherit;
+  font-size: 12px;
+}
+.nfc-v2-shell .nfc-archive-recovery-page input:focus-visible,
+.nfc-v2-shell .nfc-archive-recovery-page select:focus-visible,
+.nfc-v2-shell .nfc-archive-recovery-file:focus-visible {
+  outline: 2px solid var(--v2-muted);
+  outline-offset: 2px;
+}
+.nfc-v2-shell .nfc-archive-recovery-filter-row .nfc-action-bar,
+.nfc-v2-shell .nfc-archive-recovery-page .nfc-action-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+.nfc-v2-shell .nfc-archive-recovery-filter-row input { flex: 1 1 220px; }
+.nfc-v2-shell .nfc-archive-recovery-page .nfc-console-button-primary {
+  color: #fff;
+  background: #262625;
+  border-color: #262625;
+}
+[data-theme='dark'] .nfc-v2-shell .nfc-archive-recovery-page .nfc-console-button-primary {
+  color: #20201f;
+  background: #e9e9e6;
+  border-color: #e9e9e6;
+}
+.nfc-v2-shell .nfc-archive-recovery-file-list {
+  display: grid !important;
+  gap: 7px;
+  min-width: 0;
+  max-height: 336px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.nfc-v2-shell .nfc-archive-recovery-file {
+  display: flex !important;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--v2-line) !important;
+  border-radius: 8px !important;
+  background: var(--v2-paper) !important;
+  color: var(--v2-text) !important;
+  font-size: 12px;
+  text-align: left;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.nfc-v2-shell .nfc-archive-recovery-file:hover {
+  background: var(--v2-indigo-soft) !important;
+  border-color: var(--v2-muted) !important;
+}
+.nfc-v2-shell .nfc-archive-recovery-file.is-selected {
+  background: var(--v2-indigo-soft) !important;
+  border-color: var(--v2-muted) !important;
+}
+.nfc-v2-shell .nfc-archive-recovery-file.is-selected strong {
+  margin-left: auto;
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 660;
+  color: var(--v2-text);
+}
+.nfc-v2-shell .nfc-archive-recovery-empty {
+  margin: 0;
+  padding: 20px 12px;
+  border: 1px dashed var(--v2-line);
+  border-radius: 8px;
+  color: var(--v2-muted);
+  font-size: 12px;
+  line-height: 1.7;
+  text-align: center;
+}
+.nfc-v2-shell .nfc-archive-recovery-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  color: var(--v2-text);
+  font-size: 12px;
+  line-height: 1.7;
+  cursor: pointer;
+}
+.nfc-v2-shell .nfc-archive-recovery-toggle input {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  margin-top: 3px;
+  accent-color: var(--v2-indigo);
+}
+.nfc-v2-shell .nfc-archive-recovery-help {
+  margin: 0;
+  padding: 13px 15px;
+  border: 1px solid var(--v2-line);
+  border-radius: 9px;
+  background: var(--v2-indigo-soft);
+  color: var(--v2-muted);
+  font-size: 11.5px;
+  line-height: 1.85;
+  overflow-wrap: anywhere;
+}
+.nfc-v2-shell .nfc-archive-recovery-check-result,
+.nfc-v2-shell .nfc-archive-recovery-task-status {
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--v2-line);
+  border-radius: 9px;
+  background: var(--v2-indigo-soft);
+  color: var(--v2-text);
+  font-size: 12px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+.nfc-v2-shell .nfc-archive-recovery-check-result p { margin: 0 0 6px; }
+.nfc-v2-shell .nfc-archive-recovery-check-result p:last-child { margin-bottom: 0; }
+.nfc-v2-shell .nfc-archive-recovery-task-panel .nfc-data-panel-body { gap: 16px; }
+.nfc-v2-shell .nfc-archive-recovery-task-panel p { max-width: 100%; overflow-wrap: anywhere; }
+.nfc-v2-shell .nfc-archive-recovery-output code {
+  padding: 3px 6px;
+  border-radius: 5px;
+  background: var(--v2-indigo-soft);
+  color: var(--v2-text);
+  font-size: 12px;
+  word-break: break-all;
+}
+.nfc-v2-shell .nfc-archive-recovery-stats {
+  padding: 12px 14px;
+  border: 1px solid var(--v2-line);
+  border-radius: 8px;
+  color: var(--v2-muted);
+  font-size: 12px;
+  line-height: 1.8;
+  font-variant-numeric: tabular-nums;
+}
+.nfc-v2-shell .nfc-archive-recovery-warning {
+  padding: 11px 13px;
+  border: 1px solid #e5c998;
+  border-radius: 8px;
+  background: #fff8eb;
+  color: #885b20;
+  font-size: 12px;
+  line-height: 1.75;
+}
+[data-theme='dark'] .nfc-v2-shell .nfc-archive-recovery-warning {
+  border-color: #6b532f;
+  background: #392d1c;
+  color: #f2d19a;
+}
+.nfc-v2-shell .nfc-archive-recovery-results {
+  display: grid !important;
+  gap: 6px;
+  min-width: 0;
+}
+.nfc-v2-shell .nfc-archive-recovery-result {
+  display: block;
+  padding: 10px 13px;
+  border: 1px solid var(--v2-line);
+  border-radius: 8px;
+  background: var(--v2-paper);
+  color: var(--v2-muted);
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.nfc-v2-shell .nfc-archive-recovery-result strong { color: var(--v2-text); }
+@media (max-width: 1023px) {
+  .nfc-v2-shell .nfc-archive-recovery-layout { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 767px) {
+  .nfc-v2-shell .nfc-archive-recovery-page { gap: 14px; }
+  .nfc-v2-shell .nfc-archive-recovery-layout { gap: 13px; }
+  .nfc-v2-shell .nfc-archive-recovery-page .nfc-data-panel-header { padding: 16px 15px 14px !important; }
+  .nfc-v2-shell .nfc-archive-recovery-page .nfc-data-panel-body { padding: 16px 15px 18px !important; }
+  .nfc-v2-shell .nfc-archive-recovery-intro { gap: 6px; }
+  .nfc-v2-shell .nfc-archive-recovery-intro span { padding: 4px 8px; }
+  .nfc-v2-shell .nfc-archive-recovery-file-list { max-height: 280px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nfc-v2-shell .nfc-archive-recovery-file { transition: none !important; }
+}
