@@ -64,11 +64,15 @@ describe('v0.4.4 cohesion invariants carried into the v0.4.7 control plane', () 
     assert.match(tokens, /--nfc-radius-inner:/);
   });
 
-  test('dropdowns and modal surfaces retain the dedicated overlay depth system', () => {
-    const css = read('src/styles/overlays.css');
-    assert.match(css, /\.ant-dropdown \.ant-dropdown-menu,[\s\S]*var\(--nfc-overlay-surface-bg\)/s);
-    assert.match(css, /\.ant-select-dropdown,[\s\S]*var\(--nfc-shadow-overlay\)/s);
-    assert.match(css, /\.ant-modal \.ant-modal-content,[\s\S]*var\(--nfc-overlay-surface-bg\)/s);
+  test('native Radix sheets and dialogs retain dedicated themed overlay depth', () => {
+    const sheets = read('src/styles/console-v2-task-overlays.css');
+    const shell = read('src/styles/console-v2.css');
+    const tokens = read('src/styles/tokens.css');
+    assert.match(sheets, /\.nfc-v2-sheet\.nfc-overlay-drawer\s*\{[^}]*background:\s*var\(--v2-paper\);[^}]*box-shadow:/);
+    assert.match(shell, /\.nfc-v2-dialog\s*\{[^}]*background:\s*var\(--v2-paper, #fff\);[^}]*box-shadow:/);
+    assert.match(sheets, /\[data-theme='dark'\] \.nfc-v2-sheet/);
+    assert.ok(tokens.includes('--nfc-shadow-overlay:'));
+    assert.doesNotMatch(read('src/styles/overlays.css'), /\.(?:ant-[a-z][\w-]*|anticon\b)/);
   });
 
   test('settings keeps one stable page column with task-specific internal grids', () => {

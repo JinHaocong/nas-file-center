@@ -55,7 +55,7 @@ describe('v0.4.4 UI audit polish', () => {
     const move = read('src/components/workflows/MoveStepEditor.tsx');
     const utility = read('src/components/workflows/SingleChildWrapperCollapseStepEditor.tsx');
     const nav = read('src/components/layout/ResponsiveNav.tsx');
-    const css = read('src/styles/pages/workflows.css') + read('src/styles/overlays.css');
+    const css = read('src/styles/overlays.css');
 
     assert.match(scan, /nfc-workflow-full-control/);
     assert.match(move, /nfc-workflow-full-control/);
@@ -64,7 +64,9 @@ describe('v0.4.4 UI audit polish', () => {
     assert.doesNotMatch(move, /style=\{\{/);
     assert.doesNotMatch(utility, /style=\{\{/);
     assert.doesNotMatch(nav, /styles=\{\{/);
-    assert.match(css, /\.nfc-mobile-nav-drawer \.ant-drawer-body\s*\{[^}]*padding:\s*0/s);
+    const native = read('src/styles/console-v2-task-overlays.css');
+    assert.match(native, /@media \(max-width: 767px\)[\s\S]*\.nfc-v2-sheet\.nfc-overlay-drawer\s*\{\s*width:\s*100vw;/);
+    assert.doesNotMatch(css, /\.(?:ant-[a-z][\w-]*|anticon\b)/);
   });
 
 });

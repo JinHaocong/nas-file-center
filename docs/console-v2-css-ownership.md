@@ -92,11 +92,17 @@ could change actual computed styles even when unit tests still pass.
 - Extended CSS audit to **56 files**, including root `src/index.css` with an explicit index path resolver, and added six native legacy index regression tests.
 - Browser computed-style and visual acceptance still pending; this is not production NAS deployment.
 
+## PR #193 — retired v047 foundational AntD overrides
+
+- Removed **38 AntD-only CSS blocks** and AntD selectors from **2 mixed groups** across `shell.css`, `primitives.css`, `overlays.css` and `responsive.css`.
+- Preserved the original **86 native rule groups** and all seven responsive media groups, including the header status badge and mobile page action bar. The now-empty historical overlay sheet remains in its original import position as an explanatory comment; active Radix dialog and sheet chrome is owned by Console v2.
+- Updated stale AntD table/menu/overlay visual assertions to native semantic component contracts. Added six targeted regressions and expanded zero-AntD CSS audit to **60 files**.
+- Other unreviewed v047 page/component styles may still contain obsolete AntD selectors; do **not** claim repository-wide zero until all are audited. Final browser visual sign-off remains pending.
+
 ## Deliberately pending work
 
-- The audited 56 legacy/owned CSS layers are zero-AntD-selectors; continue
-  identifying overwritten versus still-live native declarations, with browser
-  computed-style evidence rather than mass deletion.
+- The audited 60 legacy/owned CSS layers are zero-AntD-selectors; inspect
+  remaining unreviewed component/page layers before claiming complete retirement.
 - Identify overwritten versus still-live native declarations across legacy
   versioned styles. Remove or relocate them in small, reviewed tranches, with
   computed-style evidence when selectors share a cascade.

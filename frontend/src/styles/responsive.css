@@ -63,8 +63,7 @@
     width: 100%;
   }
 
-  .nfc-page-actions .nfc-action-bar,
-  .nfc-page-actions > .ant-space {
+  .nfc-page-actions .nfc-action-bar {
     width: 100%;
   }
 
@@ -119,11 +118,6 @@
   .nfc-mobile-dock-surface {
     border-radius: 16px;
     box-shadow: 0 12px 36px color-mix(in srgb, var(--nfc-text) 12%, transparent);
-  }
-
-  .ant-modal .ant-modal-content,
-  .ant-drawer .ant-drawer-content {
-    box-shadow: 0 18px 52px color-mix(in srgb, #000 28%, transparent) !important;
   }
 }
 

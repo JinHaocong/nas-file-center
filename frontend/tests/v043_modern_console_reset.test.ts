@@ -52,7 +52,7 @@ describe('v0.4.3 console invariants carried into v0.4.7', () => {
 
   test('data surfaces use restrained table chrome and compact density', () => {
     const css = read('src/styles/primitives.css');
-    assert.match(css, /\.nfc-data-panel \.ant-table-thead > tr > th[\s\S]*text-transform:\s*none/);
+    assert.match(css, /\.nfc-data-panel-dense\s*\{[^}]*background:\s*var\(--nfc-surface-1\);[^}]*box-shadow:\s*none;/);
     assert.match(css, /\.nfc-data-panel-dense[\s\S]*box-shadow:\s*none/);
   });
 
