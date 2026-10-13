@@ -114,11 +114,6 @@
   gap: 9px;
 }
 
-.nfc-app-main .nfc-page-actions .ant-btn {
-  min-height: 40px;
-  padding-inline: 15px;
-}
-
 /* -------------------------------------------------------------------------- */
 /* Dashboard breathing rhythm                                                 */
 /* -------------------------------------------------------------------------- */
@@ -401,7 +396,6 @@
   .nfc-app-main .nfc-dashboard-page .nfc-dashboard-rail {
     gap: 14px;
   }
-
 
   .nfc-app-main .nfc-quarantine-command-center {
     padding: 11px;
