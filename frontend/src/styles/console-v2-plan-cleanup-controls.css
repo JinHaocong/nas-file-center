@@ -14,7 +14,7 @@
   margin:0;color:var(--nfc-text-muted);font-size:11px;overflow-wrap:anywhere;
 }
 .nfc-v2-plan-delete-subtle { background:transparent;border-color:transparent;box-shadow:none; }
-.nfc-v2-plan-history-dialog { max-width:min(94vw,610px);max-height:88vh;overflow-y:auto; }
+.nfc-v2-plan-history-dialog { max-width:min(94vw,610px);max-height:min(88dvh,850px);overflow-y:auto;overscroll-behavior:contain; }
 .nfc-v2-plan-history-body { display:grid;gap:15px;margin:0;padding:0 3px;min-width:0; }
 .nfc-v2-plan-cleanup-warning {
   display:flex;align-items:flex-start;gap:10px;border:1px solid var(--nfc-hairline);
@@ -29,6 +29,9 @@
   padding:10px 12px;border:1px solid var(--nfc-hairline);border-radius:8px;
   background:var(--nfc-surface-1);font-size:12px;cursor:pointer;min-height:43px;box-sizing:border-box; }
 .nfc-v2-plan-history-options input { width:17px;height:17px;accent-color:var(--nfc-accent); }
+.nfc-v2-plan-history-options label:has(input:checked) { border-color:var(--nfc-hairline-strong);background:var(--nfc-accent-soft); }
+.nfc-v2-plan-history-options label:focus-within { outline:2px solid var(--nfc-accent);outline-offset:2px; }
+.nfc-v2-plan-history-options label:has(input:disabled) { cursor:not-allowed;opacity:.6; }
 .nfc-v2-plan-history-options :is(input,button):focus-visible,
 .nfc-v2-legacy-plan-cleanup button:focus-visible {
   outline:2px solid var(--nfc-accent);outline-offset:2px;
@@ -46,7 +49,8 @@
     align-items:stretch;flex-direction:column; }
   .nfc-v2-legacy-plan-cleanup .nfc-console-button,
   .nfc-v2-plan-history-dialog .nfc-console-button { min-height:44px; }
-  .nfc-v2-plan-history-dialog { width:min(94vw,610px); }
+  .nfc-v2-plan-history-dialog { width:min(94vw,610px);max-height:calc(100dvh - 16px); }
+  .nfc-v2-plan-history-options label { min-height:44px; }
 }
 @media(prefers-reduced-motion:reduce) {
   .nfc-v2-legacy-plan-cleanup *, .nfc-v2-plan-history-dialog * {
