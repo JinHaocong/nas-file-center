@@ -46,17 +46,21 @@ describe('v0.4.7 control plane foundation', () => {
     assert.match(css, /\.nfc-metric-card[\s\S]*border-radius: 0[\s\S]*background: transparent[\s\S]*box-shadow: none/);
   });
 
-  test('dense tables use restrained headers and flat rows', () => {
+  test('dense native panel and log tables preserve restrained data presentation', () => {
     const css = read('src/styles/primitives.css');
-    assert.match(css, /\.nfc-data-panel \.ant-table-thead[\s\S]*text-transform: none/);
-    assert.match(css, /\.nfc-data-panel \.ant-table-tbody[\s\S]*border-bottom-color/);
+    const logs = read('src/styles/console-v2-task-overlays.css');
+    assert.match(css, /\.nfc-data-panel-dense\s*\{[^}]*background:\s*var\(--nfc-surface-1\);[^}]*box-shadow:\s*none;/);
+    assert.match(logs, /\.nfc-v2-log-table\s*\{[^}]*border-collapse:\s*collapse;/);
   });
 
-  test('floating Ant surfaces retain deliberate overlay depth', () => {
-    const css = read('src/styles/overlays.css');
-    assert.match(css, /\.ant-modal \.ant-modal-content,[\s\S]*\.ant-select-dropdown,[\s\S]*var\(--nfc-overlay-surface-bg\)/);
-    assert.match(css, /var\(--nfc-shadow-overlay\)/);
-    assert.match(css, /var\(--nfc-blur-overlay\)/);
+  test('native Radix floating surfaces retain deliberate themed overlay depth', () => {
+    const shell = read('src/styles/console-v2.css');
+    const sheets = read('src/styles/console-v2-task-overlays.css');
+    const tokens = read('src/styles/tokens.css');
+    assert.match(shell, /\.nfc-v2-dialog\s*\{[^}]*background:\s*var\(--v2-paper, #fff\);[^}]*box-shadow:/);
+    assert.match(sheets, /\.nfc-v2-sheet\.nfc-overlay-drawer\s*\{[^}]*background:\s*var\(--v2-paper\);[^}]*box-shadow:/);
+    assert.ok(tokens.includes('--nfc-shadow-overlay:'));
+    assert.ok(tokens.includes('--nfc-blur-overlay:'));
   });
 
   test('mobile keeps the unboxed hierarchy and a real two-column metric instrument', () => {
