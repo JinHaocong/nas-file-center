@@ -95,3 +95,11 @@ Do not turn console appearance changes into new capabilities or backend behavior
 auth/session, Plan/Task lifecycle, Worker controls, path guards, quarantines, real
 filesystem writes, irreversible operations and audit semantics remain unchanged.
 No screenshot-only mock data in runtime.
+
+
+## Pure White browser Overlay smoke (Stage 5A)
+
+- The UI Validation GitHub Actions workflow now checks actual Chromium computed CSS for the real React ScanCreate / nested DirectoryPicker Radix dialogs at eight widths and four theme/system combinations (32 read-only mocked-API cases).
+- Evidence: artifact named `pure-white-overlays-<exact PR HEAD SHA>` containing real Chromium screenshots. Run uses local Vite preview and intercepts `/api/**` exclusively; mutating calls are rejected with 405. The browser never connects to production NAS.
+- Check no backdrop blur, confirm modal/scrim z order, background and primary text light/dark contrast, dialog viewport containment, hit testing and inner Escape handling. This covers two modal flows only, not all pages or the user's existing deployment screenshot.
+- Before final sign-off, compare actual deployed site and original blurry screenshot, across 360/390/430/768/1024/1280/1440/1920 in light/dark/system; inspect nested modal keyboard focus, busy states, directory allowlist errors and unsafe actions without executing them.

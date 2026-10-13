@@ -90,6 +90,14 @@
 - **不支持的结论**：通过源码级回归或 GitHub CI 不能证明运行时所有宽度、主题、悬停态的 computed style 不变。其它历史重复规则暂不处理，留待真实浏览器视觉验收后的第二批合并。
 - **安全限制**：本批绝不更改 NAS 实际文件、后端、Worker、权限确认、Preview/Plan/Freeze/Validate/Execute 或部署。保留 Quarantine、Organizer 和 Plan 危险操作安全链。
 
+## 第五阶段第一批：真实浏览器嵌套弹窗验收
+
+- **发现**：`ScanCreate` 与嵌套 `DirectoryPicker` 属于独立 Radix Portal，仍持有旧蓝灰主题兜底和蓝色 primary。源头分别在原有的 `console-v2-scan-create.css` 与 `console-v2-directory-modal.css`。本批就地转换为 Pure White 独立 light/dark Token，不新增 CSS 覆盖层。
+- **真实 Chromium 自动化**：`frontend/scripts/browser-overlay-smoke.mjs` 在 GitHub Actions 的 `UI Validation / browser-overlay-smoke` Job 中构建并启动真实 Vite/React 路由 `/scans`，真实点击 `新建扫描 → 选择目录`，以浏览器 `getComputedStyle` 核对无遮罩模糊、1190/1191 与 1200/1201 层级、深色按钮反差、窗口边界、点击命中、内层 Escape 关闭后外层保留，并为每种组合存放截图证据。
+- **矩阵**：360/390/430/768/1024/1280/1440/1920px × light / dark / system-light / system-dark，32 个真实 Chromium case；使用 `prefers-reduced-motion: reduce`。只用**拦截的只读模拟 API**，任何 POST/PUT/DELETE 都会返回 405 并使断言失败，绝不访问真实 NAS。
+- **可证实与不可证实**：这组检查能发现上述两层**真实 DOM + 真实 CSS 的浏览器计算样式与堆叠问题**，但不包含全部业务页面、生产服务器配置、具体用户截图的原环境，也不能由此宣称 NAS 端已修复或者 8 宽度 × 3 主题的完整人工视觉验收结束。截图由 Actions 上传，用户仍需在实际部署后比对。
+- **安全不变量**：扫描真实请求/API 语义、目录白名单、安全模式、Plan → Freeze → Validate → Worker、忙碌禁止关闭、失败提示、只读证据、Archive Recovery 不变；仅修改既有 Scan/Directory Portal 样式、增加隔离浏览器验证和专项测试。
+
 ## 像素级最终验收矩阵
 
 - **视口**：360、390、430、768、1024、1280、1440、1920px；横向溢出必须由明确的表格滚动容器接管，不允许主页面出现意外滚动条。

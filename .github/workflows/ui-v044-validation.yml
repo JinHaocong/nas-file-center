@@ -80,3 +80,54 @@ jobs:
       - name: Build frontend
         working-directory: frontend
         run: npm run build
+
+  # Run the real React/Radix app in Chromium against read-only synthetic API fixtures.
+  # This tests computed CSS/stacking at 8 viewports and light/dark/system modes.
+  browser-overlay-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact candidate HEAD
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify candidate identity
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "${EXPECTED_SHA}"
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install application dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install isolated browser runner (without changing lockfile)
+        working-directory: frontend
+        run: |
+          npm install --no-save --package-lock=false playwright@1.56.1
+          npx playwright install chromium
+
+      - name: Build actual frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Run read-only Chromium overlay matrix
+        working-directory: frontend
+        run: node scripts/browser-overlay-smoke.mjs
+
+      - name: Upload visual evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pure-white-overlays-${{ github.event.pull_request.head.sha || github.sha }}
+          retention-days: 14
+          if-no-files-found: ignore
+          path: frontend/artifacts/browser-overlay/*.png
