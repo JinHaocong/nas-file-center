@@ -58,7 +58,8 @@ export const DashboardPage: React.FC = () => {
 
   const scanItems = scansData?.items || [];
   const taskItems = tasksData?.items || [];
-  const activeTaskCount = summary?.queued_or_running_jobs || 0;
+  const summaryReady = !summaryLoading && !summaryError && Boolean(summary);
+  const activeTaskCount = summaryReady ? (summary?.queued_or_running_jobs ?? 0) : null;
   const completedInRecent = taskItems.filter(task => task.status === 'completed').length;
   const runningInRecent = taskItems.filter(task => ['running', 'queued'].includes(task.status)).length;
   const failedInRecent = taskItems.filter(task => task.status === 'failed').length;
@@ -104,21 +105,21 @@ export const DashboardPage: React.FC = () => {
       <section className="nfc-v2-dashboard-metrics" aria-label="核心运行指标">
         <div className="nfc-metric-grid">
           <MetricCard label="已索引文件"
-            value={(summary?.indexed_files || 0).toLocaleString()}
-            meta={summaryLoading ? '读取中…' : (summary?.indexed_folders || 0).toLocaleString() + ' 个目录'}
+            value={summaryReady ? (summary?.indexed_files ?? 0).toLocaleString() : '—'}
+            meta={summaryLoading ? '读取中…' : summaryError ? '暂不可用' : (summary?.indexed_folders ?? 0).toLocaleString() + ' 个目录'}
             icon={<ConsoleIcon name="database" size={20} />} />
           <MetricCard label="最近一次扫描发现"
-            value={summary?.latest_scan_id ? (summary.duplicate_group_count || 0).toLocaleString() : '—'}
-            meta={summary?.latest_scan_name || '暂无已完成扫描'}
+            value={summaryReady && summary?.latest_scan_id ? (summary.duplicate_group_count ?? 0).toLocaleString() : '—'}
+            meta={summaryError ? '暂不可用' : summaryLoading ? '读取中…' : summary?.latest_scan_name || '暂无已完成扫描'}
             icon={<ConsoleIcon name="layers" size={20} />} tone="attention" />
           <MetricCard label="最近一次扫描预计可释放"
-            value={summary?.latest_scan_id ? formatBytes(summary.latest_reclaimable_bytes || 0) : '—'}
-            meta={summary?.latest_scan_finished_at
+            value={summaryReady && summary?.latest_scan_id ? formatBytes(summary.latest_reclaimable_bytes ?? 0) : '—'}
+            meta={summaryError ? '暂不可用' : summaryLoading ? '读取中…' : summary?.latest_scan_finished_at
               ? formatDateTime(summary.latest_scan_finished_at) : '等待扫描快照'}
             icon={<ConsoleIcon name="archive" size={20} />} tone="success" />
           <MetricCard label="执行计划"
-            value={(summary?.plan_count || 0).toLocaleString()}
-            meta="现有计划总数"
+            value={summaryReady ? (summary?.plan_count ?? 0).toLocaleString() : '—'}
+            meta={summaryError ? '暂不可用' : summaryLoading ? '读取中…' : '现有计划总数'}
             icon={<ConsoleIcon name="list-checks" size={20} />} />
         </div>
       </section>
@@ -238,7 +239,7 @@ export const DashboardPage: React.FC = () => {
               <div className="nfc-v2-runtime-header">
                 <span className="nfc-v2-runtime-mark"><ConsoleIcon name="activity" size={18} /></span>
                 <span>当前活跃队列</span>
-                <strong>{activeTaskCount}</strong>
+                <strong>{activeTaskCount ?? '—'}</strong>
               </div>
               <div className="nfc-v2-runtime-meters">
                 <div><span>最近 {taskItems.length} 项任务 · 已完成</span><strong>{completedInRecent}</strong></div>
