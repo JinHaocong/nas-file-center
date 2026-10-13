@@ -103,3 +103,10 @@ No screenshot-only mock data in runtime.
 - Evidence: artifact named `pure-white-overlays-<exact PR HEAD SHA>` containing real Chromium screenshots. Run uses local Vite preview and intercepts `/api/**` exclusively; mutating calls are rejected with 405. The browser never connects to production NAS.
 - Check no backdrop blur, confirm modal/scrim z order, background and primary text light/dark contrast, dialog viewport containment, hit testing and inner Escape handling. This covers two modal flows only, not all pages or the user's existing deployment screenshot.
 - Before final sign-off, compare actual deployed site and original blurry screenshot, across 360/390/430/768/1024/1280/1440/1920 in light/dark/system; inspect nested modal keyboard focus, busy states, directory allowlist errors and unsafe actions without executing them.
+
+
+## Pure White browser Tasks / History smoke (Stage 5B)
+
+- UI Validation adds a second read-only Chromium test script covering actual `/tasks` page and Task Sheet → delete confirmation + independent history cleanup modal; 32 theme/viewport cases, 64 screenshots.
+- Assert 1100/1101 Sheet, 1300/1301 nested confirm stacking, no backdrop blur, keyboard Escape leaving the parent sheet visible, dark/light content surface, no viewport escape, hit-testing, and no-selected-state destructive action disabled.
+- API responses are fixture GET only. POST/PUT/DELETE rejected 405. **No destructive confirm click and no NAS connection**. The screenshots and CI do not replace deployed-site visual acceptance.

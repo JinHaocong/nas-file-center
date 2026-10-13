@@ -123,6 +123,10 @@ jobs:
         working-directory: frontend
         run: node scripts/browser-overlay-smoke.mjs
 
+      - name: Run read-only Chromium Tasks modal and nested Sheet matrix
+        working-directory: frontend
+        run: node scripts/browser-task-overlays.mjs
+
       - name: Upload visual evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -130,4 +134,6 @@ jobs:
           name: pure-white-overlays-${{ github.event.pull_request.head.sha || github.sha }}
           retention-days: 14
           if-no-files-found: ignore
-          path: frontend/artifacts/browser-overlay/*.png
+          path: |
+            frontend/artifacts/browser-overlay/*.png
+            frontend/artifacts/browser-task-overlay/*.png
