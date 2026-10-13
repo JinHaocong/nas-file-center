@@ -47,7 +47,7 @@ describe('Right Workspace v2 design system', () => {
     assert.match(css, /\.nfc-data-panel-body[\s\S]*border-radius:\s*var\(--nfc-w2-radius-md\)/);
     assert.match(css, /\.nfc-metric-grid[\s\S]*grid-template-columns:\s*repeat\(4/);
     assert.match(css, /\.nfc-metric-grid > \.nfc-metric-card[\s\S]*grid-column:\s*auto !important/);
-    assert.match(css, /\.nfc-data-panel \.ant-table-tbody > tr > td[\s\S]*font-size:\s*12\.75px/);
+    assert.match(css, /\.nfc-table-link,\s*\.nfc-plan-name,\s*\.nfc-mobile-record-title\s*\{[^}]*font-size:\s*13px;/);
     assert.match(css, /\.nfc-dashboard-page/);
     assert.match(css, /\.nfc-quarantine-page/);
     assert.match(css, /\.nfc-workflow-builder-page/);
@@ -149,7 +149,7 @@ describe('Right Workspace v2 design system', () => {
 
     assert.match(css, /--nfc-w2-dashboard-max:\s*1800px/);
     assert.match(css, /minmax\(300px, 340px\)/);
-    assert.match(css, /\.ant-modal-footer[\s\S]*border-top:/);
+    assert.match(read('src/styles/console-v2.css'), /\.nfc-v2-dialog-footer\s*\{[^}]*border-top:\s*1px solid var\(--v2-line/);
     assert.match(settingsCss, /grid-template-columns:\s*minmax\(0, 1fr\)/);
     assert.match(settingsCss, /\.nfc-settings-policy-card/);
     assert.match(settingsCss, /\.nfc-settings-resource-controls/);
@@ -271,7 +271,7 @@ describe('Right Workspace v2 design system', () => {
     }
 
     assert.match(css, /\.nfc-operations-page > \.nfc-page-header[\s\S]*margin-bottom:\s*0 !important/);
-    assert.match(css, /\.nfc-page-layout-ledger \.ant-table-tbody > tr\.ant-table-placeholder > td[\s\S]*height:\s*220px/);
+    assert.match(css, /\.nfc-app-main \.nfc-page-layout-ledger > \.nfc-data-panel > \.nfc-data-panel-header\s*\{[^}]*padding:\s*var\(--nfc-w2-panel-header-top\)/);
     assert.match(organizer, /title="目录整理方案"/);
     assert.match(profileList, /title="整理方案"/);
     assert.doesNotMatch(organizer, /Organizer 整理方案/);
@@ -339,7 +339,7 @@ describe('Right Workspace v2 design system', () => {
     assert.match(css, /--nfc-shell-card-radius:\s*var\(--nfc-radius-shell\)/);
     assert.match(
       css,
-      /\.nfc-app-main \.nfc-data-panel,[\s\S]*\.nfc-app-main \.ant-card\s*\{[^}]*border:\s*1px solid var\(--nfc-shell-card-border\) !important;[^}]*border-radius:\s*var\(--nfc-shell-card-radius\) !important;[^}]*background:\s*var\(--nfc-shell-card-bg\) !important;[^}]*box-shadow:\s*var\(--nfc-shell-card-shadow\) !important;/s
+      /\.nfc-app-main \.nfc-data-panel,[\s\S]*\.nfc-app-main \.nfc-responsive-descriptions\s*\{[^}]*border:\s*1px solid var\(--nfc-shell-card-border\) !important;[^}]*border-radius:\s*var\(--nfc-shell-card-radius\) !important;[^}]*background:\s*var\(--nfc-shell-card-bg\) !important;[^}]*box-shadow:\s*var\(--nfc-shell-card-shadow\) !important;/s
     );
     assert.match(
       css,
@@ -356,7 +356,9 @@ describe('Right Workspace v2 design system', () => {
     const css = read('src/styles/v056-right-workspace-v2.css');
 
     assert.match(css, /\.nfc-header\.nfc-header[\s\S]*backdrop-filter:\s*blur\(22px\)/);
-    assert.match(css, /\.ant-modal-content,[\s\S]*\.ant-drawer-content[\s\S]*backdrop-filter:\s*blur\(24px\)/);
+    const nativeDialog = read('src/styles/console-v2.css');
+    assert.match(nativeDialog, /\.nfc-v2-dialog-overlay\s*\{[^}]*backdrop-filter:\s*blur\(4px\);/);
+    assert.match(nativeDialog, /\.nfc-v2-dialog:focus-visible\s*\{[^}]*outline:\s*3px solid/);
     assert.match(css, /\.nfc-quarantine-page \.nfc-bulk-action-bar[\s\S]*backdrop-filter:\s*blur\(18px\)/);
     assert.doesNotMatch(css, /\.nfc-data-panel-body[^{]*\{[^}]*backdrop-filter/);
   });
