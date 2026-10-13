@@ -83,12 +83,6 @@
   box-shadow: var(--nfc-ui-panel-shadow);
 }
 
-.nfc-dashboard-command-deck .nfc-snapshot-note > .anticon {
-  margin-top: 2px;
-  color: var(--nfc-accent);
-  font-size: 17px;
-}
-
 .nfc-dashboard-command-deck .nfc-snapshot-note > div {
   min-width: 0;
   display: flex;
@@ -272,10 +266,6 @@
 
 .nfc-tasks-page .nfc-filter-control > span {
   white-space: nowrap;
-}
-
-.nfc-tasks-page .nfc-filter-control .ant-select {
-  min-width: 130px;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -474,10 +464,6 @@
   gap: 7px;
 }
 
-.nfc-workflow-definition-rail .nfc-workflow-mode-grid .ant-radio-button-wrapper {
-  min-height: 76px;
-}
-
 .nfc-workflow-pipeline-canvas {
   min-width: 0;
 }
@@ -516,10 +502,6 @@
 @media (max-width: 1499px) {
   .nfc-media-page .nfc-filter-bar {
     grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .nfc-media-page .nfc-filter-bar .ant-input-affix-wrapper {
-    grid-column: span 2;
   }
 
   .nfc-media-page .nfc-filter-bar .nfc-media-destructive-action {
@@ -633,21 +615,12 @@
     grid-template-columns: 72px minmax(0, 1fr);
   }
 
-  .nfc-tasks-page .nfc-filter-control .ant-select {
-    width: 100%;
-  }
-
   .nfc-quarantine-command-center {
     padding: 10px;
   }
 
   .nfc-quarantine-command-center .nfc-quarantine-filter-bar {
     grid-template-columns: minmax(0, 1fr) auto;
-  }
-
-  .nfc-quarantine-command-center .nfc-quarantine-filter-bar .ant-select {
-    grid-column: 1 / -1;
-    width: 100%;
   }
 
   .nfc-quarantine-command-center .nfc-bulk-action-bar {
@@ -657,11 +630,6 @@
 
   .nfc-quarantine-command-center .nfc-bulk-action-bar > * {
     min-width: 0;
-  }
-
-  .nfc-quarantine-command-center .nfc-bulk-action-bar .ant-btn,
-  .nfc-quarantine-command-center .nfc-bulk-action-bar .ant-tooltip-open {
-    width: 100%;
   }
 
   .nfc-quarantine-command-center .nfc-selection-count {
@@ -734,7 +702,6 @@
     grid-column: 1;
   }
 }
-
 
 /* -------------------------------------------------------------------------- */
 /* Detail pages: lifecycle and evidence hierarchy                             */
@@ -849,16 +816,6 @@
   background: var(--nfc-ui-panel-bg-soft) !important;
 }
 
-.nfc-media-page .nfc-filter-bar .ant-select,
-.nfc-media-page .nfc-filter-bar .ant-input-affix-wrapper {
-  width: 100% !important;
-  min-width: 0 !important;
-}
-
-.nfc-media-page .nfc-filter-bar .ant-btn-dangerous {
-  min-width: max-content;
-}
-
 .nfc-media-page .nfc-filter-bar .nfc-media-destructive-action {
   justify-self: end;
 }
@@ -907,11 +864,6 @@
     grid-template-columns: 1fr;
   }
 
-  .nfc-plan-detail-page .nfc-plan-action-surface .ant-btn,
-  .nfc-plan-detail-page .nfc-plan-action-surface .ant-tooltip-open {
-    width: 100%;
-  }
-
   .nfc-plan-detail-page .nfc-plan-summary .nfc-responsive-descriptions,
   .nfc-scan-detail-page .nfc-scan-summary .nfc-responsive-descriptions {
     grid-template-columns: 1fr 1fr;
@@ -930,14 +882,6 @@
     min-width: 0;
   }
 
-  .nfc-media-page .nfc-filter-bar .ant-input-affix-wrapper {
-    grid-column: 1 / -1;
-  }
-
-  .nfc-media-page .nfc-filter-bar .ant-btn-dangerous {
-    grid-column: 1 / -1;
-    width: 100%;
-  }
 }
 
 @media (max-width: 420px) {
