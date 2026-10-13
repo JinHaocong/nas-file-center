@@ -76,7 +76,7 @@ describe('Pure White Stage 5E-B historical index.css cascade convergence', () =>
       'Ledger duplicate heading margin',
       'Desktop page must own single scrolling region',
       'assert.equal(passed, WIDTHS.length * THEMES.length)',
-      '32/32 cases, 192 screenshots',
+      '32/32 cases, 288 screenshots',
     ]) assert.ok(matrix.includes(token), token);
   });
 
