@@ -55,6 +55,13 @@ could change actual computed styles even when unit tests still pass.
 - Extended CI's zero `.ant-*`/`.anticon` CSS audit from 48 to **51 reviewed files**, and added native focus/responsive/import-order regression tests.
 - Leave `index.css`, `v049-workspace.css`, `v052-final-audit.css`, `v054-premium-system.css` and `v056-right-workspace-v2.css` pending independent review; no claim of completed browser visual acceptance.
 
+## PR #188 — reviewed v0.5.2 final audit layer
+
+- Removed 14 unreachable AntD-only CSS blocks from `v052-final-audit.css`; removed AntD selectors from 3 mixed groups while preserving native Settings labels, directory secondary-item transitions and reduced-motion rules.
+- Preserved native page composition, keyboard focus, directory picker and mobile breakpoints in their original cascade order; no import reordering or business behavior changes.
+- Expanded CSS ownership audit from 51 to **52 reviewed files** and added dedicated regressions for native focus/responsive/mixed-selector survival.
+- Browser visual acceptance is still pending; this cleanup does not constitute a browser pass or production deployment.
+
 ## Deliberately pending work
 
 - Audit remaining dead AntD CSS selectors in `src/index.css`,
