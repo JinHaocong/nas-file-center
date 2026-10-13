@@ -52,6 +52,38 @@
   background: var(--v2-paper);
   box-shadow: var(--v2-shadow);
 }
+.nfc-v2-scans-page .nfc-v2-scan-panel-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.nfc-v2-scans-page .nfc-v2-scan-live-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 28px;
+  padding: 4px 10px;
+  color: #247750;
+  background: #edf6ef;
+  border: 1px solid #d6ebdd;
+  border-radius: 7px;
+  font-size: 11px;
+  font-weight: 625;
+}
+.nfc-v2-scans-page .nfc-v2-scan-live-label::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+[data-theme='dark'] .nfc-v2-scans-page .nfc-v2-scan-live-label {
+  color: #b5e8c6;
+  background: #20392c;
+  border-color: #335944;
+}
 .nfc-v2-scan-list-state {
   min-height: 160px;
   display: grid;
