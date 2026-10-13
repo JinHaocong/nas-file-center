@@ -214,123 +214,12 @@
   box-shadow: none !important;
 }
 
-.nfc-data-panel .ant-table,
-.nfc-data-panel .ant-table-container,
-.nfc-data-panel .ant-table-content {
-  background: transparent;
-}
-
-.nfc-data-panel .ant-table-thead > tr > th {
-  height: 38px;
-  background: color-mix(in srgb, var(--nfc-surface-2) 68%, transparent) !important;
-  border-bottom-color: var(--nfc-border-soft) !important;
-  color: var(--nfc-text-muted);
-  font-size: 10.5px;
-  font-weight: 680;
-  letter-spacing: 0.015em;
-  text-transform: none;
-}
-
-.nfc-data-panel .ant-table-tbody > tr > td {
-  min-height: 42px;
-  border-bottom-color: var(--nfc-border-soft) !important;
-}
-
-.nfc-data-panel .ant-table-tbody > tr:hover > td {
-  background: color-mix(in srgb, var(--nfc-accent) 3.6%, var(--nfc-surface-1)) !important;
-}
-
-.nfc-app-shell .ant-btn,
-.nfc-app-shell .ant-input,
-.nfc-app-shell .ant-input-affix-wrapper,
-.nfc-app-shell .ant-input-number,
-.nfc-app-shell .ant-select-selector,
-.nfc-app-shell .ant-picker {
-  border-radius: var(--nfc-radius-control) !important;
-}
-
-.nfc-app-shell .ant-input,
-.nfc-app-shell .ant-input-affix-wrapper,
-.nfc-app-shell .ant-input-number,
-.nfc-app-shell .ant-select-selector,
-.nfc-app-shell .ant-picker {
-  border-color: var(--nfc-border-soft) !important;
-  background: var(--nfc-surface-1) !important;
-  box-shadow: none;
-}
-
-.nfc-app-shell .ant-input:hover,
-.nfc-app-shell .ant-input-affix-wrapper:hover,
-.nfc-app-shell .ant-input-number:hover,
-.nfc-app-shell .ant-select:hover .ant-select-selector,
-.nfc-app-shell .ant-picker:hover {
-  border-color: var(--nfc-border-strong) !important;
-}
-
-.nfc-app-shell .ant-card,
-.nfc-app-shell .ant-alert {
-  border-color: var(--nfc-border-soft);
-  border-radius: var(--nfc-radius-inner);
-  box-shadow: none;
-}
-
 .nfc-status-badge,
 .nfc-kind-badge,
 .nfc-operation-badge,
 .nfc-retention-badge {
   border-color: var(--nfc-border-soft);
   box-shadow: none;
-}
-
-.nfc-app-shell .ant-tabs-nav::before {
-  border-bottom-color: var(--nfc-border-soft);
-}
-
-.nfc-app-shell .ant-tabs-tab {
-  border-radius: 6px;
-  transition:
-    color var(--nfc-motion-fast, 160ms) ease,
-    background var(--nfc-motion-fast, 160ms) ease;
-}
-
-.nfc-app-shell .ant-tabs-tab:hover {
-  background: color-mix(in srgb, var(--nfc-accent-soft) 36%, transparent);
-}
-
-.nfc-app-shell .ant-tabs-tab-active {
-  background: color-mix(in srgb, var(--nfc-accent-soft) 50%, transparent);
-}
-
-.nfc-app-shell .ant-pagination {
-  gap: 2px;
-}
-
-.nfc-app-shell .ant-pagination-item,
-.nfc-app-shell .ant-pagination-prev .ant-pagination-item-link,
-.nfc-app-shell .ant-pagination-next .ant-pagination-item-link {
-  border-color: transparent;
-  border-radius: 7px;
-  background: transparent;
-}
-
-.nfc-app-shell .ant-pagination-item:hover,
-.nfc-app-shell .ant-pagination-prev .ant-pagination-item-link:hover,
-.nfc-app-shell .ant-pagination-next .ant-pagination-item-link:hover {
-  background: var(--nfc-surface-2);
-}
-
-.nfc-app-shell .ant-pagination-item-active {
-  border-color: var(--nfc-border-soft);
-  background: var(--nfc-surface-1);
-}
-
-.nfc-app-shell .ant-empty-description {
-  color: var(--nfc-text-subtle);
-}
-
-.nfc-app-shell .ant-skeleton .ant-skeleton-content .ant-skeleton-title,
-.nfc-app-shell .ant-skeleton .ant-skeleton-content .ant-skeleton-paragraph > li {
-  background: color-mix(in srgb, var(--nfc-surface-2) 86%, transparent);
 }
 
 
