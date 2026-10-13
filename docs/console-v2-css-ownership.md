@@ -114,6 +114,14 @@ could change actual computed styles even when unit tests still pass.
 - CSS zero-selector audit now covers **all 74 of 74 CSS files**, including future inventory-completeness checks for new unreviewed CSS files, duplicate registration and missing ownership paths.
 - Added six native page layout regressions. This completes **AntD selector retirement**, not browser visual acceptance, CSS computed-style consolidation, owner sign-off or production deployment.
 
+## Stage 4C — first conservative native cascade consolidation
+
+- Reviewed `v049-workspace.css`: removed **13 early declarations** for typography and spacing in five selectors whose later **identical-selector, identical-at-rule-context** rules already set the final value. The earlier rules remain in place with all independently defined properties (text colors, letter spacing where not overwritten, max-width, etc.).
+- The later authoritative values are unchanged: page eyebrow margin/font-size/tracking, page title font-size/weight, page description margin/font-size/line-height, panel title font-size/weight and panel description margin/font-size/line-height.
+- Kept all import ordering, eight `@media` conditions, original rule order, selector specificity, `!important` handling and responsive focus styles. The 75-file CSS ownership inventory remains unchanged.
+- Added five source-level regressions that verify both early declaration removal and late winners. **This is a low-risk targeted source consolidation, not a claim that all historical cascade overlaps have been retired or browser computed-style snapshots have been approved.**
+- Further broad pruning of `v049`, `v054`, `v056` and other historical native rules requires computed-style comparison in a real browser; do not infer safety from file name alone.
+
 ## Deliberately pending work
 
 - All 74 current frontend CSS files are audited for zero AntD selectors.
