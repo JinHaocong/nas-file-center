@@ -51,6 +51,14 @@
 - **行为安全**：完全保留已保存 Workflow Revision、Preview/Generate Draft、服务器分页、Plan Draft → Freeze → Validate → Worker、操作日志、Undo 和危险动作确认。此批不引入新 API，也不改变任何文件操作。
 - **证据边界**：源码级回归 + 当前 HEAD 全套 CI 不是最终浏览器验收，后续需覆盖 8 档宽度、light/dark/system、键盘与弹窗叠加。
 
+## 第三阶段第二批：Workflow Steps / Organizer / Dedupe 复杂表单
+
+- **Workflow StepCard 与输入**：去除分类标签中不必要的紫色/琥珀装饰，采用中性灰；长路径与步骤摘要可安全换行；Root 选择列表保留 checked、hover、focus-within 与键盘可达性。
+- **Organizer 配置 Portal**：独立浮层的旧蓝色 Token 转为 Pure White 白灰黑，深色单独设计；保留 Organizer Portal 1140/1141 与 DirectoryPicker 1200/1201 的层级、目录白名单、表单校验与繁忙提交限制。
+- **Dedupe 创建计划与诊断**：灰黑主按钮及暗色高对比文字，诊断 SHA/文件路径按需换行，移动端操作控件至少 44px；保留 1220/1221 层级、只读证据和 Plan → Freeze → Validate → Execute 安全流程。
+- **Scorer 与存储安全面板**：统一中性色板，提升键盘焦点与触控尺寸；保留 supported / unsupported / unknown、warning/error/verified 的绿色/琥珀/红色语义，后端仍是能力与授权权威。
+- **验收边界**：仅修改已有的样式所有者与源码测试，没有新增版本覆盖层、API 或后端更改；回归测试与 CI 不能代替 light/dark/system 和 8 档宽度的浏览器视觉验收，也不能代替 NAS 上的部署验证。
+
 ## 像素级最终验收矩阵
 
 - **视口**：360、390、430、768、1024、1280、1440、1920px；横向溢出必须由明确的表格滚动容器接管，不允许主页面出现意外滚动条。

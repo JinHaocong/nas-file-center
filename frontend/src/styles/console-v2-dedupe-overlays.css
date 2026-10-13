@@ -1,26 +1,28 @@
 /* Console v2: classic Plan and read-only SHA256 diagnosis overlays. */
 .nfc-v2-dedupe-dialog {
   --nfc-dedupe-paper: #fff;
-  --nfc-dedupe-canvas: #f6f9fc;
-  --nfc-dedupe-text: #18263a;
-  --nfc-dedupe-muted: #64748b;
-  --nfc-dedupe-line: #e1e8f1;
-  --nfc-dedupe-accent: #2878ef;
+  --nfc-dedupe-canvas: #f5f5f3;
+  --nfc-dedupe-text: #20201f;
+  --nfc-dedupe-muted: #696965;
+  --nfc-dedupe-line: #eaeae7;
+  --nfc-dedupe-accent: #252525;
+  --nfc-dedupe-primary-text: #ffffff;
   position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
   width: min(620px, calc(100vw - 24px)); max-height: min(92dvh, 1000px);
   z-index: 1221; overflow-y: auto; overscroll-behavior: contain;
   border: 1px solid var(--nfc-dedupe-line); border-radius: 16px;
   background: var(--nfc-dedupe-paper); color: var(--nfc-dedupe-text);
-  padding: 22px 24px; box-shadow: 0 24px 65px rgba(5, 22, 45, .23);
+  padding: 22px 24px; box-shadow: 0 24px 65px rgba(20, 20, 18, .17);
   font-family: inherit; font-size: 12px;
 }
 [data-theme='dark'] .nfc-v2-dedupe-dialog {
-  --nfc-dedupe-paper: #1a2434;
-  --nfc-dedupe-canvas: #222e41;
-  --nfc-dedupe-text: #f0f4fa;
-  --nfc-dedupe-muted: #a9bbd1;
-  --nfc-dedupe-line: #36435a;
-  --nfc-dedupe-accent: #83b5ff;
+  --nfc-dedupe-paper: #242422;
+  --nfc-dedupe-canvas: #2d2d2a;
+  --nfc-dedupe-text: #f5f5f2;
+  --nfc-dedupe-muted: #b6b6b0;
+  --nfc-dedupe-line: #383834;
+  --nfc-dedupe-accent: #e9e9e6;
+  --nfc-dedupe-primary-text: #20201f;
 }
 .nfc-v2-dedupe-overlay { z-index: 1220; }
 .nfc-v2-diagnostic-dialog { width: min(860px, calc(100vw - 24px)); }
@@ -55,7 +57,7 @@
 .nfc-v2-dedupe-dialog .nfc-console-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   border: 1px solid var(--nfc-dedupe-line); background: var(--nfc-dedupe-paper); color: var(--nfc-dedupe-text);
   border-radius: 8px; padding: 0 13px; min-height: 38px; cursor: pointer; font-size: 12px; font-weight: 660; }
-.nfc-v2-dedupe-dialog .nfc-console-button-primary { background: #2878ef; border-color: #2878ef; color: #fff; }
+.nfc-v2-dedupe-dialog .nfc-console-button-primary { background: var(--nfc-dedupe-accent); border-color: var(--nfc-dedupe-accent); color: var(--nfc-dedupe-primary-text); }
 .nfc-v2-dedupe-dialog .nfc-console-button:disabled { opacity: .55; cursor: not-allowed; }
 .nfc-v2-dedupe-dialog .nfc-console-spinner { display: inline-block; width: 14px; height: 14px;
   border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: nfc-v2-dedupe-spin .8s linear infinite; }
@@ -81,7 +83,7 @@
 .nfc-v2-diagnostic-facts .is-wide { grid-column: 1/-1; }
 .nfc-v2-diagnostic-facts dt, .nfc-v2-diagnostic-comparison dt { color: var(--nfc-dedupe-muted); font-size: 11px; margin-bottom: 5px; }
 .nfc-v2-diagnostic-facts dd, .nfc-v2-diagnostic-comparison dd { margin: 0; overflow-wrap: anywhere; }
-.nfc-v2-diagnostic-hash { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.nfc-v2-diagnostic-hash { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-width: 0; overflow-wrap: anywhere; }
 .nfc-v2-diagnostic-hash button { border: 1px solid var(--nfc-dedupe-line); background: var(--nfc-dedupe-canvas);
   color: var(--nfc-dedupe-text); border-radius: 6px; padding: 5px 7px; cursor: pointer; }
 .nfc-v2-diagnostic-comparison { grid-template-columns: repeat(3,minmax(0,1fr)); padding: 13px; background: var(--nfc-dedupe-canvas);
@@ -99,6 +101,9 @@
   color: var(--nfc-dedupe-muted); border-radius: 6px; padding: 4px 6px; }
 @media (max-width: 767px) {
   .nfc-v2-dedupe-dialog { padding: 17px; width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
+  .nfc-v2-dedupe-dialog .nfc-console-button, .nfc-v2-dedupe-close { min-height: 44px; }
+  .nfc-v2-dedupe-field :is(input,select,textarea) { min-height: 44px; }
+  .nfc-v2-diagnostic-hash button { min-height: 44px; }
   .nfc-v2-diagnostic-dialog .nfc-dedupe-diagnostic-path-grid,
   .nfc-v2-diagnostic-dialog .nfc-dedupe-diagnostic-scan-grid { grid-template-columns: 1fr; }
   .nfc-v2-diagnostic-comparison { grid-template-columns: 1fr; }

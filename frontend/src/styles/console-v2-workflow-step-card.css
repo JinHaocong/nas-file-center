@@ -1,8 +1,10 @@
 /* Native Workflow StepCard & simple editor fields; inherits Console v2 tokens. */
 .nfc-workflow-step-card.nfc-v2-step-card {
+  --nfc-info-soft: var(--nfc-accent-soft);
   box-sizing: border-box; display: block; min-width: 0;
   color: var(--nfc-text); background: var(--nfc-surface-1);
 }
+.nfc-workflow-step-card.nfc-v2-step-card:focus-within { border-color: var(--nfc-hairline-strong); }
 .nfc-v2-step-card > .nfc-v2-step-heading {
   display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap;
   background: transparent;
@@ -18,19 +20,19 @@
 }
 .nfc-v2-step-heading > .nfc-step-heading-copy { flex: 1 1 180px; min-width: 0; }
 .nfc-v2-step-heading .nfc-step-title-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12px; }
-.nfc-v2-step-heading .nfc-step-summary { display: block; overflow-wrap: anywhere; color: var(--nfc-text-muted); font-size: 11px; margin-top: 4px; }
+.nfc-v2-step-heading .nfc-step-summary { display: block; min-width: 0; overflow-wrap: anywhere; color: var(--nfc-text-muted); font-size: 11px; line-height: 1.6; margin-top: 4px; }
 .nfc-v2-step-type {
   display: inline-flex; align-items: center; gap: 5px;
   border-radius: 6px; padding: 3px 7px; border: 1px solid var(--nfc-hairline);
-  background: var(--nfc-info-soft); color: var(--nfc-accent);
+  background: var(--nfc-surface-2); color: var(--nfc-text-muted);
   font-size: 10px; letter-spacing: .025em; font-weight: 750;
 }
 .nfc-v2-step-type.is-quarantine, .nfc-v2-step-type.is-utility {
-  background: color-mix(in srgb, #e2ae52 15%, var(--nfc-surface-1));
+  background: var(--nfc-surface-2);
   color: var(--nfc-text);
 }
 .nfc-v2-step-type.is-dedupe, .nfc-v2-step-type.is-organize {
-  background: color-mix(in srgb, #8668d4 12%, var(--nfc-surface-1));
+  background: var(--nfc-surface-2);
   color: var(--nfc-text);
 }
 .nfc-v2-step-readonly {
