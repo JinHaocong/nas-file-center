@@ -43,12 +43,14 @@ describe('Console v2 legacy v0.4.8 CSS retirement — tranche 2', () => {
     assert.ok(entry.includes("import './styles/console-v2-phase2.css';"));
   });
 
-  test('CSS import guard includes reviewed v048 base/detail, not pending v054', () => {
+  test('CSS import guard includes reviewed v048/v049/v054 while v056 stays pending', () => {
     const guard = read('scripts/check-console-css-ownership.mjs');
     assert.ok(guard.includes("'legacy-reviewed:v048-detail.css'"));
     assert.ok(guard.includes("'settings:pages/settings.css'"));
     assert.ok(guard.includes("'legacy-reviewed:v048.css'"));
-    assert.ok(!guard.includes("'legacy-reviewed:v054-premium-system.css'"));
+    assert.ok(guard.includes("'legacy-reviewed:v049-workspace.css'"));
+    assert.ok(guard.includes("'legacy-reviewed:v054-premium-system.css'"));
+    assert.ok(!guard.includes("'legacy-reviewed:v056-right-workspace-v2.css'"));
     assert.ok(guard.includes("if (errors.length) process.exitCode = 1"));
     const docs = read('../docs/console-v2-css-ownership.md');
     assert.ok(docs.includes('PR #185'));
