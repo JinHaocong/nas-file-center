@@ -206,7 +206,7 @@ try {
         assert.equal(await policies.count(), 2, 'Only skip and rename allowed');
         assert.equal(await policies.nth(0).isChecked(), true, 'Skip must be default');
         await restore.getByRole('button', { name: '重新 Preview' }).click();
-        await restore.getByRole('region', { name: '批量恢复预览结果' }).waitFor();
+        await restore.getByText('Blocked 1').waitFor();
         assert.equal(await generateRestore.isDisabled(), true,
           'Any blocked restore member must prevent whole Draft');
         assert.ok((await restore.innerText()).includes('VISUAL_FIXTURE_BLOCKED'));
@@ -214,7 +214,7 @@ try {
         await policies.nth(1).check();
         assert.equal(await generateRestore.isDisabled(), true, 'Policy change invalidates Preview');
         await restore.getByRole('button', { name: '重新 Preview' }).click();
-        await restore.getByRole('region', { name: '批量恢复预览结果' }).waitFor();
+        await restore.getByText('Eligible 2').waitFor();
         assert.equal(await generateRestore.isEnabled(), true, 'Eligible rename Preview allows Draft UI');
         await assertDialog(page, theme.effective, width, restoreSelector, 'Restore ready ' + label);
         await page.screenshot({ path: resolve(OUT, 'restore-ready-' + label + '.png') });
@@ -229,7 +229,7 @@ try {
         const generatePurge = purge.getByRole('button', { name: '生成永久删除 Draft' });
         assert.equal(await generatePurge.isDisabled(), true, 'Purge requires Preview and DELETE');
         await purge.getByRole('button', { name: '重新 Preview' }).click();
-        await purge.getByRole('region', { name: '批量清除预览结果' }).waitFor();
+        await purge.getByText('Eligible 2').waitFor();
         assert.ok((await purge.innerText()).includes('hard link'),
           'Hardlink survivor advisory must remain visible');
         assert.ok((await purge.innerText()).includes('独立副本'),
@@ -245,7 +245,7 @@ try {
         await assertDialog(page, theme.effective, width, purgeSelector, 'Purge ready ' + label);
         await page.screenshot({ path: resolve(OUT, 'purge-ready-' + label + '.png') });
         await purge.getByRole('button', { name: '重新 Preview' }).click();
-        await purge.getByRole('region', { name: '批量清除预览结果' }).waitFor();
+        await purge.getByText('Blocked 1').waitFor();
         assert.equal(await generatePurge.isDisabled(), true,
           'Blocked second Preview must revoke both digest and DELETE');
         assert.ok((await purge.innerText()).includes('VISUAL_FIXTURE_BLOCKED'));
