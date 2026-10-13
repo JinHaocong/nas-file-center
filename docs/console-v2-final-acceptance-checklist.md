@@ -6,8 +6,9 @@ they are not separate visual sign-off requests.
 
 ## Visual target
 
-Dark premium navigation with a clean light workspace by default, matching the
-approved NAS File Center mockup. User-selectable dark/system modes remain.
+Current approved target is **Pure White v2.1**: neutral white/soft-gray navigation,
+charcoal emphasis and clean light workspace. Dedicated dark/system modes remain.
+The earlier dark premium shell is historical and is no longer the visual target.
 
 ## Workstreams
 
@@ -78,6 +79,7 @@ approved NAS File Center mockup. User-selectable dark/system modes remain.
 - [x] CSS cleanup tranche 11: retire 36 AntD-only and 1 mixed selector from components.css, preserve 162 native rules and audit eight already-clean v046/v047 files; raise CSS audit coverage to 69 of 74 (PR #194).
 - [x] CSS cleanup tranche 12: retire final 22 AntD-only and 2 mixed selectors in five remaining page layers, preserve native dark theme/responsive composition and add complete 74/74 CSS audit with future-file detection (PR #195).
 - [x] Pure White v2.1 foundation (separate visual redesign): neutral light/dark tokens, white sidebar/header, keyboard-visible charcoal selection, monochrome primary actions, mobile shell, Radix Portal palette, ten detailed CSS regressions. This is **source-level change only**, not final visual sign-off; see `docs/pure-white-v2-visual-contract.md`.
+- [x] Pure White v2.1 detail tranche: true Dashboard loading/error placeholders, aligned compact tables, flat quick-action list, native scan status/count typography, mobile records, dark/keyboard interaction; dedicated regressions (PR #197). Source-level only, browser sign-off still open.
 - [ ] Consolidate remaining historical UI CSS overrides into an owned, maintainable theme system.
 - [ ] Full TypeScript, frontend unit/regression, backend, Docker and dependency-audit gates.
 - [ ] One final browser review: 360/390/430/768/1024/1280/1440/1920 px.
