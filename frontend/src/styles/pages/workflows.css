@@ -103,26 +103,10 @@
   background: transparent;
 }
 
-.nfc-step-add-button.ant-btn {
-  width: 100%;
-  min-height: 40px;
-  border-color: var(--nfc-v49-line-strong, var(--nfc-border-soft));
-  border-style: dashed;
-  background: transparent;
-}
-
-.nfc-step-add-button.ant-btn:hover {
-  background: var(--nfc-v49-surface-soft, var(--nfc-surface-2));
-}
-
 .nfc-workflow-step-form {
   display: flex;
   flex-direction: column;
   gap: 10px;
-}
-
-.nfc-workflow-step-form .ant-form-item {
-  margin-bottom: 12px;
 }
 
 .nfc-workflow-full-control {
@@ -167,13 +151,6 @@
   font-weight: 650;
 }
 
-.nfc-filter-builder.ant-card {
-  border: 1px solid var(--nfc-v49-line, var(--nfc-border-soft)) !important;
-  border-radius: var(--nfc-v49-radius-md, var(--nfc-radius-control)) !important;
-  background: var(--nfc-v49-surface, var(--nfc-surface-1)) !important;
-  box-shadow: none !important;
-}
-
 .nfc-filter-group-card,
 .nfc-filter-not-card {
   background:
@@ -199,13 +176,6 @@
   border-left: 1px solid color-mix(in srgb, var(--nfc-accent) 24%, var(--nfc-v49-line, var(--nfc-border-soft)));
 }
 
-.nfc-filter-leaf-card .ant-card-body {
-  display: grid;
-  grid-template-columns: minmax(96px, 0.2fr) minmax(120px, 0.22fr) minmax(110px, 0.2fr) minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-}
-
 .nfc-filter-value-control,
 .nfc-filter-value-wide {
   min-width: 0;
@@ -229,9 +199,6 @@
 }
 
 @media (max-width: 900px) {
-  .nfc-filter-leaf-card .ant-card-body {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 
   .nfc-filter-value-wide {
     grid-column: 1 / -1;
@@ -257,10 +224,6 @@
   .nfc-completed-scan-manual,
   .nfc-completed-scan-id-input {
     width: 100%;
-  }
-
-  .nfc-filter-leaf-card .ant-card-body {
-    grid-template-columns: 1fr;
   }
 
   .nfc-filter-value-wide {
