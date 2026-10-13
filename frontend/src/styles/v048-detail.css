@@ -53,8 +53,6 @@
   background: color-mix(in srgb, var(--nfc-premium-surface-strong) 52%, transparent);
 }
 
-
-
 .nfc-header-status-badge.is-safe {
   color: var(--nfc-success) !important;
   background: color-mix(in srgb, var(--nfc-success-soft) 54%, transparent) !important;
@@ -79,7 +77,6 @@
 .nfc-header-status-badge.is-loading {
   color: var(--nfc-premium-muted) !important;
 }
-
 
 .nfc-header-command-cluster {
   gap: 2px;
@@ -109,7 +106,6 @@
 .nfc-page-actions .nfc-action-bar {
   justify-content: flex-end;
 }
-
 
 /* -------------------------------------------------------------------------- */
 /* Definition/spec surfaces                                                   */
@@ -166,10 +162,6 @@
 /* Dense tables / row actions                                                 */
 /* -------------------------------------------------------------------------- */
 
-
-
-
-
 .nfc-row-actions {
   gap: 1px;
   opacity: 0.78;
@@ -178,10 +170,6 @@
 .nfc-row-actions:focus-within {
   opacity: 1;
 }
-
-
-
-
 
 /* -------------------------------------------------------------------------- */
 /* Status, path and metadata                                                  */
@@ -245,19 +233,9 @@
 /* Alerts and notices                                                         */
 /* -------------------------------------------------------------------------- */
 
-
-
-
-
-
-
-
 /* -------------------------------------------------------------------------- */
 /* Empty, loading and pagination                                              */
 /* -------------------------------------------------------------------------- */
-
-
-
 
 .nfc-centered-state {
   min-height: 260px;
@@ -271,29 +249,9 @@
   background: transparent;
 }
 
-
-
 /* -------------------------------------------------------------------------- */
 /* Inputs and selectors                                                       */
 /* -------------------------------------------------------------------------- */
-
-
-
-
-
-
-/* -------------------------------------------------------------------------- */
-/* Modal / drawer polish                                                      */
-/* -------------------------------------------------------------------------- */
-
-
-
-
-
-
-
-
-
 
 /* -------------------------------------------------------------------------- */
 /* Page-specific finishing                                                    */
@@ -385,7 +343,6 @@
     display: none;
   }
 
-
   .nfc-page-header-copy {
     max-width: 100%;
   }
@@ -427,9 +384,6 @@
   .nfc-row-actions {
     opacity: 1;
   }
-
-
-
 
 }
 
