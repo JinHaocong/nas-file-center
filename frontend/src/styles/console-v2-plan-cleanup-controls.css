@@ -1,4 +1,7 @@
 /* Console v2 Plan metadata cleanup — Radix confirmations, native readonly guardrails. */
+/* Plan history cleanup uses the shared confirm scrim (1300). Its content
+   must sit above the overlay, not at the generic 1101 dialog layer. */
+.nfc-v2-plan-history-dialog.nfc-v2-dialog[data-state='open'] { z-index:1301; }
 .nfc-v2-legacy-plan-cleanup {
   display:flex;gap:12px;align-items:flex-start;min-width:0;
   border:1px solid color-mix(in srgb,#c48a35 45%,var(--nfc-hairline));

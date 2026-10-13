@@ -127,6 +127,10 @@ jobs:
         working-directory: frontend
         run: node scripts/browser-task-overlays.mjs
 
+      - name: Run read-only Chromium Quarantine/Plan dialog matrix
+        working-directory: frontend
+        run: node scripts/browser-quarantine-plan-overlays.mjs
+
       - name: Upload visual evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -137,3 +141,4 @@ jobs:
           path: |
             frontend/artifacts/browser-overlay/*.png
             frontend/artifacts/browser-task-overlay/*.png
+            frontend/artifacts/browser-quarantine-plan/*.png

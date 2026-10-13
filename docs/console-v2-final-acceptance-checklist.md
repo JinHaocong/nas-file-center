@@ -110,3 +110,11 @@ No screenshot-only mock data in runtime.
 - UI Validation adds a second read-only Chromium test script covering actual `/tasks` page and Task Sheet → delete confirmation + independent history cleanup modal; 32 theme/viewport cases, 64 screenshots.
 - Assert 1100/1101 Sheet, 1300/1301 nested confirm stacking, no backdrop blur, keyboard Escape leaving the parent sheet visible, dark/light content surface, no viewport escape, hit-testing, and no-selected-state destructive action disabled.
 - API responses are fixture GET only. POST/PUT/DELETE rejected 405. **No destructive confirm click and no NAS connection**. The screenshots and CI do not replace deployed-site visual acceptance.
+
+
+## Pure White Stage 5C Quarantine / Plan dialog browser evidence
+
+- Feature-owned z-index fix pairs the existing shared Radix confirm scrim at 1300 with single Quarantine, bulk Quarantine and Plan History **open** dialog content at 1301. No broad/global z-index override or business logic edits.
+- CI browser script `frontend/scripts/browser-quarantine-plan-overlays.mjs` checks 32 actual Chromium viewport/theme combinations using read-only synthetic GET APIs, opening Quarantine Restore/Purge and Plan History dialogs without executing restore, unlink, deletion or history clear.
+- Evidence: 96 screenshots in `frontend/artifacts/browser-quarantine-plan`, uploaded along with the preceding 96 screenshot files under a PR HEAD-derived artifact. Validate z-index, no blur, pointer hit-test, modal bounds, DELETE exact uppercase, three restore policy choices, and plan no-selection disablement.
+- This is not a claim that the original production NAS deployment already contains the fix or that all production UI/permissions have passed end-to-end acceptance.
