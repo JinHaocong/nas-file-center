@@ -9,6 +9,9 @@
 .nfc-v2-revision-table th { text-align: left; background: var(--v2-canvas); color: var(--v2-muted); font-size: 11px; font-weight: 720; }
 .nfc-v2-revision-table th, .nfc-v2-revision-table td { padding: 12px 10px; vertical-align: middle; border-bottom: 1px solid var(--v2-line); }
 .nfc-v2-revision-table tr:last-child td { border-bottom: 0; }
+.nfc-v2-revision-table { font-variant-numeric: tabular-nums; }
+.nfc-v2-revision-table tbody tr:hover,
+.nfc-v2-revision-table tbody tr:focus-within { background: var(--v2-indigo-soft); }
 .nfc-v2-revision-table td { color: var(--v2-text); }
 .nfc-v2-revision-table th:nth-child(1) { min-width: 78px; }
 .nfc-v2-revision-table th:nth-child(2) { min-width: 150px; }
@@ -28,8 +31,8 @@
 .nfc-v2-revision-mobile-card time { color: var(--v2-muted); font-size: 11px; }
 .nfc-v2-revision-inspect-overlay { z-index: 1400 !important; }
 .nfc-v2-revision-inspect.nfc-v2-dialog[data-state='open'] { z-index: 1401 !important; width: min(720px, calc(100vw - 24px)); max-height: min(85dvh, 840px); display: flex; flex-direction: column; color: var(--v2-text); background: var(--v2-paper); }
-.nfc-v2-revision-inspect { --v2-paper: #fff; --v2-text: #18263a; --v2-muted: #63738b; --v2-line: #e5eaf1; --v2-indigo: #2875e9; --v2-canvas: #f6f8fc; }
-[data-theme='dark'] .nfc-v2-revision-inspect { --v2-paper: #1a2434; --v2-text: #f1f5fb; --v2-muted: #afbdce; --v2-line: #2c3a4e; --v2-indigo: #83b5ff; --v2-canvas: #111827; }
+.nfc-v2-revision-inspect { --v2-paper: #ffffff; --v2-text: #20201f; --v2-muted: #696965; --v2-line: #eaeae7; --v2-indigo: #252525; --v2-indigo-soft: #f1f1ef; --v2-canvas: #ffffff; }
+[data-theme='dark'] .nfc-v2-revision-inspect { --v2-paper: #242422; --v2-text: #f5f5f2; --v2-muted: #b6b6b0; --v2-line: #383834; --v2-indigo: #e9e9e6; --v2-indigo-soft: #323230; --v2-canvas: #171716; }
 .nfc-v2-revision-inspect .nfc-v2-dialog-heading { flex: 0 0 auto; }
 .nfc-v2-revision-inspect .nfc-v2-dialog-heading h2 { color: var(--v2-text); }
 .nfc-v2-revision-inspect .nfc-v2-dialog-heading p { color: var(--v2-muted); }

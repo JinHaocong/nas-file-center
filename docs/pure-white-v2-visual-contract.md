@@ -43,6 +43,14 @@
 - **层级契约**：保留各已有层级对（普通弹窗 1100/1101、扫描 1190/1191、DirectoryPicker 1200/1201、嵌套任务确认 1300/1301、Workflow Revision 1400/1401），遮罩始终低于所属 Content；保留 ESC、外部点击限制、繁忙禁用与焦点管理。
 - **验收边界**：新增源码级层级/背景回归，并继续运行全部 frontend、CSS audit、backend 与 Docker CI；`light/dark/system` 实际浏览器中验证嵌套 DirectoryPicker、任务确认和 Workflow Revision，以及用户截图对应弹窗后，才能标记视觉缺陷最终修复。
 
+## 第三阶段第一批：Workflow / Plan 细节收敛
+
+- **Workflow Builder**：加载/失败/说明状态与模式选择改为 Pure White 中性色 Token，不保留旧品牌蓝；危险/错误/警告仍使用语义色。表单焦点和禁用反馈、步骤菜单触控范围及 reduced-motion 原样保留。
+- **Revision Portal**：嵌套只读版本详情使用与主应用相同的白灰黑 / 独立深灰主题；版本记录数字等宽对齐，表格同时支持悬停和键盘 focus-within；SHA256、历史只读与回滚二次确认不变。
+- **Plan 详情**：统一浅/深色兜底 Token 为中性系统，PlanItem 表格用 tabular-nums、行 hover/focus-within 区分。保留可滚动长路径、警告/危险语义、移动端 44px 操作和 reduced-motion。
+- **行为安全**：完全保留已保存 Workflow Revision、Preview/Generate Draft、服务器分页、Plan Draft → Freeze → Validate → Worker、操作日志、Undo 和危险动作确认。此批不引入新 API，也不改变任何文件操作。
+- **证据边界**：源码级回归 + 当前 HEAD 全套 CI 不是最终浏览器验收，后续需覆盖 8 档宽度、light/dark/system、键盘与弹窗叠加。
+
 ## 像素级最终验收矩阵
 
 - **视口**：360、390、430、768、1024、1280、1440、1920px；横向溢出必须由明确的表格滚动容器接管，不允许主页面出现意外滚动条。
