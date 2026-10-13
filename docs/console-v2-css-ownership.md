@@ -48,6 +48,13 @@ could change actual computed styles even when unit tests still pass.
 - Added `v048.css` to the CI CSS ownership guard (48 reviewed files), updated the old v048 tests and added a dedicated regression test.
 - Added `scripts/cleanup_merged_branches.py` with `docs/merged-branch-cleanup.md` and offline fixture tests. Defaults to dry-run, requires exact merged PR head, prevents deletion of protected, open or unmerged branches, and requires explicit `--execute`. No branches were deleted as part of PR #186.
 
+## PR #187 — reviewed v0.5.0/v0.5.1/v0.5.5 native CSS
+
+- Retired 46 unreachable AntD-only declaration blocks (12 in v050-layout, 33 in v051-product-polish, 1 in v055-workspace-breathing); removed AntD from 1 mixed v051 row-actions selector while retaining native `.nfc-row-actions:focus-within` declarations at the original cascade position.
+- Preserved real v050 operational/dashboard layouts, v051 mobile records/overlays and v055 responsive workspace rhythm. No stylesheet reorder or application behavior changes.
+- Extended CI's zero `.ant-*`/`.anticon` CSS audit from 48 to **51 reviewed files**, and added native focus/responsive/import-order regression tests.
+- Leave `index.css`, `v049-workspace.css`, `v052-final-audit.css`, `v054-premium-system.css` and `v056-right-workspace-v2.css` pending independent review; no claim of completed browser visual acceptance.
+
 ## Deliberately pending work
 
 - Audit remaining dead AntD CSS selectors in `src/index.css`,
