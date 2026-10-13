@@ -76,11 +76,19 @@ could change actual computed styles even when unit tests still pass.
 - Expanded zero legacy selector audit to **54 reviewed/owned files** and added 5 native regression tests in the full frontend suite.
 - Browser visual acceptance remains pending; no NAS deployment or filesystem mutation.
 
+## PR #191 — reviewed v0.5.6 right workspace layer
+
+- Retired 50 unreachable AntD-only rules and stripped obsolete AntD selectors from 4 mixed rule groups in `src/styles/v056-right-workspace-v2.css`.
+- Retained all **339 native selector/declaration groups**, original responsive media queries, cascade order, native keyboard row-action focus, ledger width, shell-card contracts, and mobile card radius.
+- Replaced five stale v056 AntD visual test assertions with active native table labels, accessible dialog/footer, ledger headers, card surfaces and focus protection; updated historic ownership expectation.
+- Expanded CSS ownership audit from 54 to **55 reviewed files**, registered six dedicated native regression tests.
+- `src/index.css` remains for separate historical CSS cleanup; final browser visual acceptance and NAS production deployment are **not** completed.
+
 ## Deliberately pending work
 
-- Audit remaining dead AntD CSS selectors in `src/index.css` and
-  `v056-right-workspace-v2.css`. Historical tests referencing those layers
-  must be audited and updated to native semantics before removing dead selectors.
+- Audit remaining dead AntD CSS selectors in `src/index.css`. Historical tests
+  referencing that layer must be audited and updated to native semantics before
+  removing dead selectors.
 - Identify overwritten versus still-live native declarations across legacy
   versioned styles. Remove or relocate them in small, reviewed tranches, with
   computed-style evidence when selectors share a cascade.
