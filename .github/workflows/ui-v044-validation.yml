@@ -139,6 +139,10 @@ jobs:
         working-directory: frontend
         run: node scripts/browser-plan-lifecycle-overlays.mjs
 
+      - name: Run read-only Chromium Workflow Preview and Draft confirmation matrix
+        working-directory: frontend
+        run: node scripts/browser-workflow-preview-overlays.mjs
+
       - name: Upload visual evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -152,3 +156,4 @@ jobs:
             frontend/artifacts/browser-quarantine-plan/*.png
             frontend/artifacts/browser-quarantine-bulk/*.png
             frontend/artifacts/browser-plan-lifecycle/*.png
+            frontend/artifacts/browser-workflow-preview/*.png
