@@ -17,7 +17,7 @@ import { chromium } from 'playwright';
 
 const ROOT = process.cwd();
 const PORT = 4179;
-const URL = 'http://127.0.0.1:' + PORT;
+const BASE_URL = 'http://127.0.0.1:' + PORT;
 const OUTPUT = resolve(ROOT, 'artifacts/browser-overlay');
 const WIDTHS = [360, 390, 430, 768, 1024, 1280, 1440, 1920];
 const MODES = [
@@ -38,7 +38,7 @@ async function ready() {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     if (server.exitCode !== null) throw new Error('Vite preview exited early');
     try {
-      const response = await fetch(URL + '/login');
+      const response = await fetch(BASE_URL + '/login');
       if (response.ok) return;
     } catch { /* startup */ }
     await sleep(200);
@@ -146,7 +146,7 @@ try {
       });
       const label = visual.mode + '-' + visual.system + '-' + width;
       try {
-        await page.goto(URL + '/scans', { waitUntil: 'domcontentloaded' });
+        await page.goto(BASE_URL + '/scans', { waitUntil: 'domcontentloaded' });
         await page.getByRole('button', { name: '新建扫描' }).first().click({ timeout: 15000 });
         await page.locator('.nfc-v2-scan-create-modal').waitFor({ state: 'visible' });
         await page.locator('.nfc-v2-scan-create-modal')
