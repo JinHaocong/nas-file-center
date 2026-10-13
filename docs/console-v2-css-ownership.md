@@ -53,7 +53,7 @@ could change actual computed styles even when unit tests still pass.
 - Retired 46 unreachable AntD-only declaration blocks (12 in v050-layout, 33 in v051-product-polish, 1 in v055-workspace-breathing); removed AntD from 1 mixed v051 row-actions selector while retaining native `.nfc-row-actions:focus-within` declarations at the original cascade position.
 - Preserved real v050 operational/dashboard layouts, v051 mobile records/overlays and v055 responsive workspace rhythm. No stylesheet reorder or application behavior changes.
 - Extended CI's zero `.ant-*`/`.anticon` CSS audit from 48 to **51 reviewed files**, and added native focus/responsive/import-order regression tests.
-- Leave `index.css`, `v054-premium-system.css` and `v056-right-workspace-v2.css` pending independent review; no claim of completed browser visual acceptance.
+- Leave `index.css` and `v056-right-workspace-v2.css` pending independent review; no claim of completed browser visual acceptance.
 
 ## PR #188 — reviewed v0.5.2 final audit layer
 
@@ -69,11 +69,18 @@ could change actual computed styles even when unit tests still pass.
 - Expanded the CSS ownership audit from 52 to **53 files**, with 5 focused native regressions registered in the full frontend test runner.
 - This is a source/CSS cleanup only; browser visual acceptance and production NAS deployment remain outstanding.
 
+## PR #190 — reviewed v0.5.4 premium workspace layer
+
+- Retired 81 dead AntD-only CSS rule groups and removed AntD selectors from 6 mixed groups in `src/styles/v054-premium-system.css`.
+- Preserved all 177 native selector/declaration groups and all original media breakpoints and import order, including status badge, row-actions keyboard focus, reduced-motion surface transitions, form hints, overlay geometry and reduced transparency.
+- Expanded zero legacy selector audit to **54 reviewed/owned files** and added 5 native regression tests in the full frontend suite.
+- Browser visual acceptance remains pending; no NAS deployment or filesystem mutation.
+
 ## Deliberately pending work
 
-- Audit remaining dead AntD CSS selectors in `src/index.css`,
-  `v054-premium-system.css` and `v056-right-workspace-v2.css`. Several historical tests still demand these
-  selectors and must be updated to native semantic assertions before removal.
+- Audit remaining dead AntD CSS selectors in `src/index.css` and
+  `v056-right-workspace-v2.css`. Historical tests referencing those layers
+  must be audited and updated to native semantics before removing dead selectors.
 - Identify overwritten versus still-live native declarations across legacy
   versioned styles. Remove or relocate them in small, reviewed tranches, with
   computed-style evidence when selectors share a cascade.
