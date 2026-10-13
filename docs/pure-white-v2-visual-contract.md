@@ -67,6 +67,14 @@
 - **Plan 历史清理**：终态白名单（completed / failed）和 Delete ≠ Undo 告知保持原状；只增强选中、键盘焦点、禁用和视口滚动的可见反馈。忙碌防重复提交与防关闭、删除确认及文件系统不受影响。
 - **证据与限制**：新增 6 项源码级回归。完全不修改 API、Worker、数据库、文件操作、生产 NAS 或发布版本；CI 通过后也仍需 light/dark/system 与 360/390/430/768/1024/1280/1440/1920px 的真实浏览器验收。
 
+## 第四阶段第一批：登录、设置与文件工具预览
+
+- **Login**：移除登录页径向光晕、伪元素玻璃装饰与大幅暗蓝投影；保持纯白画布、灰度边框、克制阴影与独立深色对比度。原生 username/password 认证、三态主题、单次提交和错误提示均不变。
+- **Completed Scan Picker**：原生输入控件和路径标签的旧蓝色兜底 Token 改为中性色，选中值始终依靠真实已完成任务和详细信息验证；长根路径换行，移动端弹出警告的关闭控件尺寸更可用。
+- **Settings**：保持运行配置只读与管理员权限、审计预览/保存/清空双确认和会话撤销授权。仅改善终端会话表格的数字对齐、focus-within、滚动边界、移动设备卡片焦点与 44px 开关/操作尺寸；危险/警告/成功语义颜色保持。
+- **Utility Workflow Preview**：把 Paper/Surface/Text/Focus 的蓝色兜底 Token 改为灰白黑及独立深灰模式；只读候选表增加 tabular-nums 与 focus-within，长路径、手机候选卡片与触控操作更清晰。保留 compile_digest、revision、READY 可选状态、Immutable Draft Request 与 Freeze → Validate → Execute 的后续安全链。
+- **证据边界**：本批只修改原有 Login、Completed Scan、Settings、Utility Preview 样式所有者与测试文档，未新增 CSS 覆盖层或业务逻辑。CI 与源码测试不能替代 360–1920px 的浏览器主题/键盘/弹窗验收，也不是生产 NAS 部署。
+
 ## 像素级最终验收矩阵
 
 - **视口**：360、390、430、768、1024、1280、1440、1920px；横向溢出必须由明确的表格滚动容器接管，不允许主页面出现意外滚动条。

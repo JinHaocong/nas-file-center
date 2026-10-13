@@ -1,8 +1,6 @@
 .nfc-login-shell {
   padding: 28px;
-  background:
-    radial-gradient(circle at 75% 10%, color-mix(in srgb, var(--nfc-accent) 5%, transparent), transparent 32rem),
-    var(--nfc-v49-canvas, var(--nfc-canvas));
+  background: var(--nfc-canvas);
 }
 
 .nfc-login-panel {
@@ -11,23 +9,13 @@
   width: min(432px, 100%);
   padding: 30px;
   border: 1px solid var(--nfc-v49-line, var(--nfc-border-soft));
-  border-radius: var(--nfc-v49-radius-xl, 16px);
+  border-radius: 12px;
   background: var(--nfc-v49-surface, var(--nfc-surface-1));
-  box-shadow: 0 24px 78px rgba(10, 15, 22, 0.1);
+  box-shadow: 0 8px 28px rgba(20, 20, 18, 0.045);
 }
 
 [data-theme='dark'] .nfc-login-panel {
-  box-shadow: 0 28px 86px rgba(0, 0, 0, 0.38);
-}
-
-.nfc-login-panel::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  border-radius: inherit;
-  box-shadow: inset 0 1px 0 color-mix(in srgb, white 38%, transparent);
-  opacity: 0.38;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.15);
 }
 
 .nfc-login-panel > * {
@@ -72,7 +60,7 @@
   margin-top: 18px;
   padding: 12px 14px;
   border: 1px solid var(--nfc-v49-line, var(--nfc-border-soft));
-  border-radius: var(--nfc-v49-radius-md, var(--nfc-radius-inner));
+  border-radius: 9px;
   background: var(--nfc-v49-surface-soft, var(--nfc-surface-2));
 }
 
