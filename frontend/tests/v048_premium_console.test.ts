@@ -139,11 +139,15 @@ describe('v0.4.8 detail polish pass', () => {
     assert.match(css, /\.nfc-header-status-badge\.is-processing[\s\S]*var\(--nfc-premium-accent\)/);
   });
 
-  test('descriptions, alerts and empty states use the refined editorial treatment', () => {
+  test('native descriptions, empty state and pagination preserve detail treatment', () => {
     const css = read('src/styles/v048-detail.css');
     assert.match(css, /\.nfc-responsive-descriptions[\s\S]*border-radius: 0 !important/);
-    assert.match(css, /\.nfc-page-alert\.ant-alert,[\s\S]*border-left: 2px solid/);
-    assert.match(css, /\.nfc-data-panel \.ant-empty[\s\S]*padding: 36px 16px/);
+    assert.match(css, /\.nfc-centered-state\s*\{[^}]*min-height: 260px/);
+    assert.match(css, /\.nfc-mobile-pagination\s*\{[^}]*min-height: 52px/);
+    assert.doesNotMatch(css, /\.ant-[a-z]|\.anticon\b/);
+    const native = read('src/styles/console-v2-phase2.css');
+    assert.match(native, /\.nfc-console-empty\s*\{/);
+    assert.match(native, /\.nfc-console-pagination\s*\{/);
   });
 
   test('row actions remain accessible while becoming quieter at rest', () => {
