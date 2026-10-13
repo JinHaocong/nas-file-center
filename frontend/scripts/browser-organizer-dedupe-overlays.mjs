@@ -265,7 +265,8 @@ try {
         // Stage A structural operations are isolated; Stage B must not bypass them.
         await organizer.getByRole('button', { name: '刷新预览' }).click();
         await waitEnabled(page, '生成 Stage A 结构草稿');
-        assert.ok((await organizer.innerText()).includes('Stage B · locked'));
+        assert.ok((await organizer.innerText()).includes('Stage B rename/file/prefix 已锁定'),
+          'Structural Stage A must visibly lock Stage B work');
         await organizer.getByRole('button', { name: '生成 Stage A 结构草稿' }).click();
         await confirm.waitFor({ state: 'visible' });
         assert.ok((await confirm.innerText()).includes('Stage A 执行完成后必须重新 Preview'));
