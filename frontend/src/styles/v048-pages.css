@@ -189,10 +189,6 @@
   max-width: 980px;
 }
 
-.nfc-file-tool-form .ant-form-item {
-  margin-bottom: 18px;
-}
-
 .nfc-file-tool-primary-actions {
   margin-top: 22px;
   padding-top: 16px;
@@ -269,19 +265,6 @@
   border-top: 0;
 }
 
-.nfc-workflow-builder-page .nfc-step-add-button.ant-btn {
-  min-height: 44px;
-  border: 1px dashed var(--nfc-premium-line) !important;
-  border-radius: var(--nfc-premium-radius-md) !important;
-  color: var(--nfc-premium-muted);
-}
-
-.nfc-workflow-builder-page .nfc-step-add-button.ant-btn:hover {
-  border-color: var(--nfc-premium-line-strong) !important;
-  background: var(--nfc-premium-surface-subtle) !important;
-}
-
-.nfc-workflow-builder-page .nfc-filter-builder.ant-card,
 .nfc-workflow-builder-page .nfc-dedupe-surface-card,
 .nfc-workflow-builder-page .nfc-dedupe-config-card,
 .nfc-workflow-builder-page .nfc-dedupe-summary-metric,
