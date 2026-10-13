@@ -1,4 +1,7 @@
 /* Console v2 Quarantine bulk Draft dialogs, scoped to Radix portal roots. */
+/* Bulk Restore/Purge portals share the 1300 confirm scrim; never leave
+   the dialog behind it or mask the keyboard/pointer targets. */
+.nfc-v2-quarantine-bulk-dialog.nfc-v2-dialog[data-state='open'] { z-index:1301; }
 .nfc-v2-quarantine-bulk-dialog {
   --nfc-bulk-bg:var(--nfc-surface-1,#fff);
   --nfc-bulk-soft:var(--nfc-surface-2,#f5f5f3);
