@@ -60,7 +60,7 @@ describe('Pure White Stage 5A — actual browser portal acceptance contracts', (
   test('Chromium smoke tests actual Vite/React output, not a static HTML imitation', () => {
     for (const marker of [
       "import { chromium } from 'playwright'",
-      "await page.goto(URL + '/scans'",
+      "await page.goto(BASE_URL + '/scans'",
       "await page.route('**/api/**'",
       "request.method() !== 'GET'",
       "await page.locator('.nfc-v2-directory-dialog').waitFor",
