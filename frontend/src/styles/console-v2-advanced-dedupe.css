@@ -30,7 +30,7 @@
 [data-theme='dark'] .nfc-v2-dedupe-filter-search,
 [data-theme='dark'] .nfc-v2-dedupe-filter-select select { border-color: #383834; background: #242422; color: #f5f5f2; }
 [data-theme='dark'] .nfc-v2-dedupe-table th, [data-theme='dark'] .nfc-v2-dedupe-table td { border-color: #383834; }
-[data-theme='dark'] .nfc-v2-dedupe-table thead { color: #a9bbd1; }
+[data-theme='dark'] .nfc-v2-dedupe-table thead { color: #b6b6b0; }
 [data-theme='dark'] .nfc-v2-dedupe-eligibility.is-eligible { color: #75dbba; }
 [data-theme='dark'] .nfc-v2-dedupe-eligibility.is-safety_excluded { color: #f3c484; }
 @media (max-width: 767px) {
