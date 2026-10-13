@@ -36,7 +36,7 @@ describe('Console v2 reviewed historical index.css retirement', () => {
       ':root {', "[data-theme='dark']", '--nfc-accent:',
       '--nfc-shadow-sm', '--nfc-motion-enter',
       '@keyframes nfc-enter', '@keyframes nfc-status-pulse',
-      '@media (max-width: 767px)', '@media (max-width: 420px)',
+      '@media (max-width: 767px)', '@media (max-width: 1023px)',
       '@media (prefers-reduced-motion: reduce)',
       '.nfc-login-submit {', '.nfc-directory-picker-path-row {',
     ]) assert.ok(css.includes(marker), marker);
