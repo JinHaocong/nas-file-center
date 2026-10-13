@@ -38,7 +38,7 @@ describe('Pure White Stage 3C: preview, explanation and destructive-history affo
       '@media (max-width: 767px)',
     ]) assert.ok(advanced.includes(token), token);
     assert.match(advanced, /\.nfc-v2-dedupe-preview :is\(input,select,button\):focus-visible \{ outline: 2px solid var\(--nfc-accent\)/);
-    assert.doesNotMatch(advanced, /#2878ef|#83b5ff|#1a2434|rgba\(70,123,190/);
+    assert.doesNotMatch(advanced, /#2878ef|#83b5ff|#1a2434|#a9bbd1|rgba\(70,123,190/);
   });
 
   test('Dedupe generation authority dialog has legible charcoal/light and dark-button contrast', () => {
