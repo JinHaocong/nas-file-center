@@ -107,10 +107,18 @@ could change actual computed styles even when unit tests still pass.
 - Added six native component regression tests. The five remaining unreviewed stylesheets are `pages/login.css`, `pages/organizer.css`, `pages/tools.css`, `pages/workflows.css`, and `v048-pages.css`.
 - This is source-level CSS cleanup, not a browser visual sign-off or NAS deployment.
 
+## PR #195 — all historical AntD CSS selectors retired
+
+- Removed **22 AntD-only groups** and AntD members of **2 mixed groups** from `pages/login.css`, `pages/organizer.css`, `pages/tools.css`, `pages/workflows.css`, and `v048-pages.css`.
+- Preserved all **139 native selector/declaration groups** and existing media queries in the five files, including native organizer dark-theme selectors and premium Dedupe surfaces.
+- CSS zero-selector audit now covers **all 74 of 74 CSS files**, including future inventory-completeness checks for new unreviewed CSS files, duplicate registration and missing ownership paths.
+- Added six native page layout regressions. This completes **AntD selector retirement**, not browser visual acceptance, CSS computed-style consolidation, owner sign-off or production deployment.
+
 ## Deliberately pending work
 
-- The audited 69 legacy/owned CSS layers are zero-AntD-selectors; finish the
-  five unreviewed page layers before claiming repository-wide selector retirement.
+- All 74 current frontend CSS files are audited for zero AntD selectors.
+  Preserve coverage whenever new files are added; do not equate source-level
+  selector retirement with computed-style or browser acceptance.
 - Identify overwritten versus still-live native declarations across legacy
   versioned styles. Remove or relocate them in small, reviewed tranches, with
   computed-style evidence when selectors share a cascade.
