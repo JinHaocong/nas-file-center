@@ -13,12 +13,13 @@ describe('v0.4.4 deep UI detail and mobile system', () => {
     assert.match(css, /\.nfc-sidebar-menu\s*\{[^}]*overflow-y:\s*auto/s);
   });
 
-  test('shared overlays have a mobile full-screen treatment', () => {
-    const css = read('src/index.css');
-    assert.ok(css.includes('.nfc-overlay-drawer .ant-drawer-content-wrapper'));
-    assert.ok(css.includes('.nfc-overlay-modal .ant-modal-content'));
-    assert.match(css, /@media \(max-width: 767px\)[\s\S]*\.nfc-overlay-drawer \.ant-drawer-content-wrapper[\s\S]*width:\s*100vw/s);
-    assert.match(css, /@media \(max-width: 767px\)[\s\S]*\.nfc-overlay-modal[\s\S]*calc\(100vw - 12px\)/s);
+  test('native overlays retain a mobile full-screen sheet and bounded dialog', () => {
+    const sheets = read('src/styles/console-v2-task-overlays.css');
+    const dialogs = read('src/styles/console-v2.css');
+    assert.match(sheets, /\.nfc-v2-sheet\.nfc-overlay-drawer\s*\{/);
+    assert.match(sheets, /@media \(max-width: 767px\)[\s\S]*\.nfc-v2-sheet\.nfc-overlay-drawer\s*\{\s*width:\s*100vw;/);
+    assert.match(dialogs, /\.nfc-v2-dialog\s*\{[^}]*width:\s*min\(440px, calc\(100vw - 28px\)\)/);
+    assert.match(dialogs, /\.nfc-v2-dialog:focus-visible\s*\{[^}]*outline:/);
   });
 
   test('task logs use a dedicated mobile card view instead of the desktop table', () => {
@@ -81,9 +82,12 @@ describe('v0.4.4 deep UI detail and mobile system', () => {
     }
   });
 
-  test('mobile controls and forms use touch-safe sizing', () => {
+  test('native touch controls and directory rows preserve mobile hit targets', () => {
     const css = read('src/index.css');
-    assert.match(css, /@media \(max-width: 767px\)[\s\S]*\.nfc-operations-page \.ant-btn[\s\S]*min-height:\s*44px/s);
-    assert.match(css, /@media \(max-width: 767px\)[\s\S]*\.nfc-operations-page \.ant-input[\s\S]*min-height:\s*44px/s);
+    assert.match(css, /@media \(max-width: 767px\)[\s\S]*\.nfc-touch-button\s*\{[^}]*min-height:\s*44px;/);
+    assert.match(css, /\.nfc-directory-picker-path-row\s*\{[^}]*min-height:\s*44px;/);
+    assert.match(css, /\.nfc-login-submit\s*\{[^}]*min-height:\s*44px;/);
   });
+
+
 });

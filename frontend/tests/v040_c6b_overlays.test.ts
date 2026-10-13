@@ -82,16 +82,15 @@ describe('v0.4.0 C6B overlay consistency contract', () => {
     assert.match(journal, /operation/i);
   });
 
-  test('shared overlay CSS defines restrained chrome and mobile behavior', () => {
-    const css = read('src/index.css');
-    for (const selector of [
-      '.nfc-overlay-modal',
-      '.nfc-overlay-drawer',
-      '.nfc-overlay-modal .ant-modal-content',
-      '.nfc-overlay-drawer .ant-drawer-content',
-      '.nfc-overlay-drawer .ant-drawer-content-wrapper',
-    ]) {
-      assert.match(css, new RegExp(selector.replaceAll('.', '\\.')));
-    }
+  test('native Radix overlay CSS defines restrained chrome and mobile behavior', () => {
+    const sheets = read('src/styles/console-v2-task-overlays.css');
+    const dialogs = read('src/styles/console-v2.css');
+    const legacy = read('src/index.css');
+    assert.match(sheets, /\.nfc-v2-sheet\.nfc-overlay-drawer\s*\{/);
+    assert.match(sheets, /@media \(max-width: 767px\)[\s\S]*\.nfc-v2-sheet\.nfc-overlay-drawer\s*\{\s*width:\s*100vw;/);
+    assert.match(dialogs, /\.nfc-v2-dialog-overlay\s*\{/);
+    assert.match(dialogs, /\.nfc-v2-dialog\s*\{[^}]*width:\s*min\(440px/);
+    assert.ok(legacy.includes('.nfc-overlay-modal'));
+    assert.doesNotMatch(legacy, /\.(?:ant-[a-z][\w-]*|anticon\b)/);
   });
 });
