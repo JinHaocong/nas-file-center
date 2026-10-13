@@ -51,7 +51,7 @@ describe('Console v2 owned CSS cleanup — migration tranche 1', () => {
       ':focus-visible', '@media (max-width: 767px)',
       '@media (prefers-reduced-motion: reduce)',
     ]) assert.ok(css.includes(token), token);
-    const inventory = read('docs/console-v2-css-ownership.md');
+    const inventory = read('../docs/console-v2-css-ownership.md');
     assert.ok(inventory.includes('CSS cascade'));
     assert.ok(inventory.includes('index.css'));
     assert.ok(inventory.includes('visual acceptance'));
