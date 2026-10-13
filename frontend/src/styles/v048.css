@@ -90,24 +90,6 @@ body {
   gap: 10px;
 }
 
-.nfc-header-nav-toggle.ant-btn,
-.nfc-command-button.ant-btn {
-  min-width: var(--nfc-premium-control);
-  height: var(--nfc-premium-control);
-  border: 1px solid transparent !important;
-  border-radius: var(--nfc-premium-radius-md) !important;
-  color: var(--nfc-premium-muted);
-  background: transparent !important;
-  box-shadow: none !important;
-}
-
-.nfc-header-nav-toggle.ant-btn:hover,
-.nfc-command-button.ant-btn:hover {
-  color: var(--nfc-premium-text) !important;
-  border-color: var(--nfc-premium-line) !important;
-  background: color-mix(in srgb, var(--nfc-premium-surface-strong) 72%, transparent) !important;
-}
-
 .nfc-header-workspace {
   min-width: 0;
   padding: 2px 17px 2px 2px;
@@ -134,21 +116,6 @@ body {
 
 .nfc-header-status {
   gap: 6px;
-}
-
-.nfc-header-status-badge.ant-tag,
-.nfc-header-status .ant-tag {
-  min-height: 24px;
-  margin-inline-end: 0;
-  padding: 1px 8px;
-  border: 1px solid var(--nfc-premium-line) !important;
-  border-radius: 999px;
-  color: var(--nfc-premium-muted);
-  background: transparent !important;
-  box-shadow: none !important;
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 20px;
 }
 
 .nfc-header-command-cluster {
@@ -232,10 +199,6 @@ body {
   align-self: flex-end;
   gap: 8px;
   padding-bottom: 1px;
-}
-
-.nfc-page-actions .ant-btn {
-  min-height: var(--nfc-premium-control);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -416,48 +379,6 @@ body {
 /* Tables                                                                     */
 /* -------------------------------------------------------------------------- */
 
-.nfc-data-panel .ant-table,
-.nfc-data-panel .ant-table-container,
-.nfc-data-panel .ant-table-content,
-.nfc-data-panel .ant-table-thead > tr > th,
-.nfc-data-panel .ant-table-tbody > tr > td {
-  background: transparent;
-}
-
-.nfc-data-panel .ant-table-thead > tr {
-  height: 40px;
-}
-
-.nfc-data-panel .ant-table-thead > tr > th {
-  padding: 9px 14px !important;
-  border-bottom: 1px solid var(--nfc-premium-line) !important;
-  color: var(--nfc-premium-subtle);
-  background: color-mix(in srgb, var(--nfc-premium-surface-subtle) 56%, transparent) !important;
-  font-size: 9.5px;
-  font-weight: 680;
-  letter-spacing: 0.035em;
-  text-transform: none;
-}
-
-.nfc-data-panel .ant-table-tbody > tr {
-  height: 48px;
-}
-
-.nfc-data-panel .ant-table-tbody > tr > td {
-  padding: 10px 14px !important;
-  border-bottom: 1px solid var(--nfc-premium-line) !important;
-  color: var(--nfc-premium-muted);
-  font-size: 11.5px;
-}
-
-.nfc-data-panel .ant-table-tbody > tr:last-child > td {
-  border-bottom: 0 !important;
-}
-
-.nfc-data-panel .ant-table-tbody > tr:hover > td {
-  background: color-mix(in srgb, var(--nfc-premium-accent) 3.2%, transparent) !important;
-}
-
 .nfc-table-link,
 .nfc-plan-name,
 .nfc-mobile-record-title {
@@ -495,142 +416,9 @@ body {
   font-weight: 600;
 }
 
-.nfc-app-shell .ant-btn,
-.nfc-app-shell .ant-input,
-.nfc-app-shell .ant-input-affix-wrapper,
-.nfc-app-shell .ant-input-number,
-.nfc-app-shell .ant-select-selector,
-.nfc-app-shell .ant-picker {
-  border-radius: var(--nfc-premium-radius-md) !important;
-}
-
-.nfc-app-shell .ant-btn:not(.ant-btn-link):not(.ant-btn-text) {
-  min-height: var(--nfc-premium-control);
-  border-color: var(--nfc-premium-line-strong);
-  box-shadow: none;
-  font-size: 11.5px;
-  font-weight: 580;
-}
-
-.nfc-app-shell .ant-btn-default {
-  color: var(--nfc-premium-text);
-  background: var(--nfc-premium-surface-strong);
-}
-
-.nfc-app-shell .ant-btn-default:not(:disabled):hover {
-  color: var(--nfc-premium-text) !important;
-  border-color: color-mix(in srgb, var(--nfc-premium-accent) 30%, var(--nfc-premium-line-strong)) !important;
-  background: color-mix(in srgb, var(--nfc-premium-accent) 3%, var(--nfc-premium-surface-strong)) !important;
-}
-
-.nfc-app-shell .ant-btn-primary {
-  border-color: transparent !important;
-  background: var(--nfc-premium-text) !important;
-  color: var(--nfc-premium-surface-strong) !important;
-}
-
-[data-theme='dark'] .nfc-app-shell .ant-btn-primary {
-  background: #eef2f5 !important;
-  color: #11161a !important;
-}
-
-.nfc-app-shell .ant-btn-primary:not(:disabled):hover {
-  opacity: 0.9;
-}
-
-.nfc-app-shell .ant-input,
-.nfc-app-shell .ant-input-affix-wrapper,
-.nfc-app-shell .ant-input-number,
-.nfc-app-shell .ant-select-selector,
-.nfc-app-shell .ant-picker {
-  min-height: var(--nfc-premium-control);
-  border-color: var(--nfc-premium-line) !important;
-  background: color-mix(in srgb, var(--nfc-premium-surface-strong) 92%, transparent) !important;
-  color: var(--nfc-premium-text);
-  box-shadow: none !important;
-}
-
-.nfc-app-shell .ant-input:hover,
-.nfc-app-shell .ant-input-affix-wrapper:hover,
-.nfc-app-shell .ant-input-number:hover,
-.nfc-app-shell .ant-select:hover .ant-select-selector,
-.nfc-app-shell .ant-picker:hover {
-  border-color: var(--nfc-premium-line-strong) !important;
-}
-
-.nfc-app-shell .ant-input:focus,
-.nfc-app-shell .ant-input-affix-wrapper-focused,
-.nfc-app-shell .ant-input-number-focused,
-.nfc-app-shell .ant-select-focused .ant-select-selector,
-.nfc-app-shell .ant-picker-focused {
-  border-color: color-mix(in srgb, var(--nfc-premium-accent) 48%, var(--nfc-premium-line-strong)) !important;
-  box-shadow: 0 0 0 3px var(--nfc-premium-accent-soft) !important;
-}
-
-.nfc-app-shell .ant-form-item-label > label {
-  color: var(--nfc-premium-muted);
-  font-size: 10.5px;
-  font-weight: 590;
-}
-
-.nfc-app-shell .ant-form-item-extra,
-.nfc-app-shell .ant-form-item-explain {
-  color: var(--nfc-premium-subtle);
-  font-size: 10px;
-}
-
 /* -------------------------------------------------------------------------- */
 /* Tabs + segmented choices                                                   */
 /* -------------------------------------------------------------------------- */
-
-.nfc-app-shell .ant-tabs-nav {
-  margin-bottom: 18px;
-}
-
-.nfc-app-shell .ant-tabs-nav::before {
-  border-bottom: 1px solid var(--nfc-premium-line);
-}
-
-.nfc-app-shell .ant-tabs-tab {
-  margin: 0 4px 0 0 !important;
-  padding: 9px 10px !important;
-  border-radius: 8px 8px 0 0;
-  color: var(--nfc-premium-muted);
-  font-size: 11px;
-  font-weight: 570;
-  background: transparent !important;
-  transform: none !important;
-}
-
-.nfc-app-shell .ant-tabs-tab:hover {
-  color: var(--nfc-premium-text);
-  background: transparent !important;
-}
-
-.nfc-app-shell .ant-tabs-tab-active .ant-tabs-tab-btn {
-  color: var(--nfc-premium-text) !important;
-  text-shadow: none;
-}
-
-.nfc-app-shell .ant-tabs-ink-bar {
-  height: 2px !important;
-  background: var(--nfc-premium-text) !important;
-  box-shadow: none !important;
-}
-
-.nfc-workflow-mode-grid .ant-radio-button-wrapper,
-.nfc-batch-operation-grid .ant-radio-button-wrapper {
-  border-color: var(--nfc-premium-line) !important;
-  border-radius: var(--nfc-premium-radius-md) !important;
-  background: var(--nfc-premium-surface-subtle);
-  box-shadow: none !important;
-}
-
-.nfc-workflow-mode-grid .ant-radio-button-wrapper-checked,
-.nfc-batch-operation-grid .ant-radio-button-wrapper-checked {
-  border-color: color-mix(in srgb, var(--nfc-premium-accent) 35%, var(--nfc-premium-line)) !important;
-  background: var(--nfc-premium-accent-soft) !important;
-}
 
 /* -------------------------------------------------------------------------- */
 /* Status + metadata                                                          */
@@ -665,9 +453,7 @@ body {
   color: var(--nfc-premium-muted) !important;
   font-size: 10.5px;
 }
-
-.nfc-snapshot-note,
-.nfc-page-alert.ant-alert {
+.nfc-snapshot-note {
   border: 1px solid var(--nfc-premium-line);
   border-radius: var(--nfc-premium-radius-md);
   background: var(--nfc-premium-surface-subtle);
@@ -761,35 +547,6 @@ body {
 /* Modals, drawers, dropdowns                                                 */
 /* -------------------------------------------------------------------------- */
 
-.nfc-app-shell .ant-modal-content,
-.ant-modal-content,
-.ant-drawer-content,
-.ant-dropdown-menu,
-.ant-popover-inner {
-  border: 1px solid var(--nfc-premium-line) !important;
-  border-radius: var(--nfc-premium-radius-lg) !important;
-  background: color-mix(in srgb, var(--nfc-premium-surface-strong) 96%, transparent) !important;
-  box-shadow: var(--nfc-premium-shadow-float) !important;
-}
-
-.ant-modal-header,
-.ant-modal-footer {
-  border-color: var(--nfc-premium-line) !important;
-  background: transparent !important;
-}
-
-.ant-dropdown-menu-item,
-.ant-dropdown-menu-submenu-title {
-  min-height: 36px;
-  border-radius: 8px;
-  font-size: 11px;
-}
-
-.ant-dropdown-menu-item:hover,
-.ant-dropdown-menu-submenu-title:hover {
-  background: var(--nfc-premium-surface-subtle) !important;
-}
-
 /* -------------------------------------------------------------------------- */
 /* Mobile records                                                             */
 /* -------------------------------------------------------------------------- */
@@ -826,32 +583,6 @@ body {
 /* Pagination + misc                                                          */
 /* -------------------------------------------------------------------------- */
 
-.nfc-app-shell .ant-pagination {
-  gap: 2px;
-}
-
-.nfc-app-shell .ant-pagination-item,
-.nfc-app-shell .ant-pagination-prev .ant-pagination-item-link,
-.nfc-app-shell .ant-pagination-next .ant-pagination-item-link {
-  border: 0 !important;
-  border-radius: 8px;
-  color: var(--nfc-premium-muted);
-  background: transparent !important;
-}
-
-.nfc-app-shell .ant-pagination-item:hover,
-.nfc-app-shell .ant-pagination-prev .ant-pagination-item-link:hover,
-.nfc-app-shell .ant-pagination-next .ant-pagination-item-link:hover {
-  background: var(--nfc-premium-surface-subtle) !important;
-}
-
-.nfc-app-shell .ant-pagination-item-active {
-  color: var(--nfc-premium-text);
-  background: var(--nfc-premium-surface-strong) !important;
-  box-shadow: inset 0 0 0 1px var(--nfc-premium-line);
-}
-
-.nfc-app-shell .ant-empty-description,
 .nfc-form-note,
 .nfc-dedupe-config-note {
   color: var(--nfc-premium-subtle);
