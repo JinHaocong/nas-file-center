@@ -1,9 +1,6 @@
 /* v0.4.7 deep component system */
 
 /* Directory picker */
-.nfc-directory-picker-modal .ant-modal-body {
-  padding-top: 4px;
-}
 
 .nfc-directory-picker-title {
   display: flex;
@@ -44,21 +41,6 @@
   overflow: hidden;
 }
 
-.nfc-path-breadcrumb .ant-breadcrumb {
-  min-width: 0;
-  white-space: nowrap;
-}
-
-.nfc-path-breadcrumb-root.ant-btn,
-.nfc-path-breadcrumb-link.ant-btn {
-  max-width: min(320px, 34vw);
-  height: 30px;
-  padding-inline: 6px;
-  overflow: hidden;
-  color: var(--nfc-text-muted);
-  text-overflow: ellipsis;
-}
-
 .nfc-path-breadcrumb-current {
   max-width: 280px;
   display: inline-flex;
@@ -94,24 +76,6 @@
   border: 1px solid var(--nfc-border-soft);
   border-radius: var(--nfc-radius-control);
   background: var(--nfc-surface-1);
-}
-
-.nfc-directory-item.ant-list-item {
-  min-height: 52px;
-  padding: 8px 10px;
-  border-block-end-color: var(--nfc-border-soft) !important;
-  cursor: pointer;
-  transition:
-    background var(--nfc-motion-fast, 160ms) ease,
-    border-color var(--nfc-motion-fast, 160ms) ease;
-}
-
-.nfc-directory-item.ant-list-item:hover {
-  background: color-mix(in srgb, var(--nfc-accent) 4.5%, var(--nfc-surface-2));
-}
-
-.nfc-directory-item.ant-list-item.is-selected {
-  background: color-mix(in srgb, var(--nfc-accent-soft) 62%, var(--nfc-dense-surface-bg));
 }
 
 .nfc-directory-item-icon {
@@ -246,14 +210,6 @@
   min-width: 0;
 }
 
-.nfc-task-progress-bar .ant-progress {
-  margin-bottom: 3px;
-}
-
-.nfc-task-progress-bar .ant-progress-inner {
-  background: color-mix(in srgb, var(--nfc-surface-2) 82%, transparent);
-}
-
 .nfc-task-progress-meta {
   display: flex;
   align-items: center;
@@ -288,19 +244,7 @@
   gap: 7px !important;
 }
 
-.nfc-task-action-bar .ant-btn {
-  min-width: 78px;
-}
-
 /* Drawer / inspector internals */
-.nfc-overlay-drawer .ant-drawer-header {
-  min-height: 66px;
-  padding: 12px 16px;
-}
-
-.nfc-overlay-drawer .ant-drawer-body {
-  padding: 16px;
-}
 
 .nfc-drawer-title {
   min-width: 0;
@@ -370,13 +314,8 @@
   font-weight: 660;
 }
 
-.nfc-overlay-section-flush > .ant-table-wrapper,
 .nfc-overlay-section-flush > .nfc-embedded-table {
   margin: 0;
-}
-
-.nfc-embedded-table .ant-table-thead > tr > th {
-  background: var(--nfc-surface-2) !important;
 }
 
 .nfc-embedded-pagination {
@@ -399,10 +338,6 @@
 }
 
 /* Destructive / recovery overlays */
-.nfc-quarantine-purge-modal .ant-modal-content,
-.nfc-quarantine-bulk-purge-modal .ant-modal-content {
-  border-color: color-mix(in srgb, var(--nfc-danger) 24%, var(--nfc-border-strong)) !important;
-}
 
 .nfc-danger-heading {
   color: var(--nfc-text);
@@ -424,11 +359,6 @@
   color: var(--nfc-text-muted);
 }
 
-.nfc-destructive-confirm .ant-input-affix-wrapper {
-  border-color: color-mix(in srgb, var(--nfc-danger) 25%, var(--nfc-border-soft)) !important;
-  background: var(--nfc-dense-surface-bg) !important;
-}
-
 .nfc-quarantine-preview-stack {
   width: 100%;
 }
@@ -446,31 +376,12 @@
   border-radius: var(--nfc-radius-inner);
 }
 
-.nfc-quarantine-descriptions .ant-descriptions-view,
-.nfc-detail-descriptions .ant-descriptions-view {
-  border-color: var(--nfc-border-soft) !important;
-}
-
 .nfc-quarantine-restore-form {
   margin-top: 14px;
 }
 
 .nfc-radio-stack {
   width: 100%;
-}
-
-.nfc-radio-stack .ant-radio-wrapper {
-  width: 100%;
-  margin-inline-end: 0;
-  padding: 9px 10px;
-  border: 1px solid var(--nfc-border-soft);
-  border-radius: var(--nfc-radius-control);
-  background: color-mix(in srgb, var(--nfc-surface-2) 42%, transparent);
-}
-
-.nfc-radio-stack .ant-radio-wrapper-checked {
-  border-color: var(--nfc-border-accent);
-  background: color-mix(in srgb, var(--nfc-accent-soft) 46%, transparent);
 }
 
 .nfc-popconfirm-copy {
@@ -504,18 +415,10 @@
 }
 
 @media (max-width: 767px) {
-  .nfc-directory-picker-modal .ant-modal-content {
-    border-radius: 16px !important;
-  }
 
   .nfc-directory-browser-row {
     align-items: stretch;
     flex-direction: column;
-  }
-
-  .nfc-path-breadcrumb-root.ant-btn,
-  .nfc-path-breadcrumb-link.ant-btn {
-    max-width: 68vw;
   }
 
   .nfc-directory-favorite-editor {
@@ -539,11 +442,6 @@
     width: 100%;
   }
 
-  .nfc-directory-picker-footer-actions .ant-btn {
-    min-height: 42px;
-    flex: 1 1 0;
-  }
-
   .nfc-worker-stats {
     grid-template-columns: 1fr 1fr;
   }
@@ -554,19 +452,6 @@
 
   .nfc-task-action-bar {
     width: 100%;
-  }
-
-  .nfc-task-action-bar > .ant-space-item {
-    flex: 1 1 calc(50% - 4px);
-  }
-
-  .nfc-task-action-bar .ant-btn {
-    width: 100%;
-    min-height: 42px;
-  }
-
-  .nfc-overlay-drawer .ant-drawer-body {
-    padding: 12px;
   }
 
   .nfc-drawer-actions {
@@ -586,24 +471,11 @@
   .nfc-destructive-confirm {
     padding: 11px;
   }
-
-  .nfc-radio-stack .ant-radio-wrapper {
-    align-items: flex-start;
-    padding: 9px;
-  }
 }
 
 /* Final component audit */
 
 /* Account/security and historical cleanup */
-.nfc-change-password-modal .ant-modal-body,
-.nfc-history-cleanup-modal .ant-modal-body {
-  padding-top: 8px;
-}
-
-.nfc-security-form .ant-form-item {
-  margin-bottom: 14px;
-}
 
 .nfc-history-cleanup-stack {
   width: 100%;
@@ -800,21 +672,6 @@
   border-top: 1px solid var(--nfc-border-soft);
 }
 
-.nfc-dedupe-config-card.ant-card,
-.nfc-dedupe-surface-card.ant-card {
-  border: 0 !important;
-  border-top: 1px solid var(--nfc-border-soft) !important;
-  border-bottom: 1px solid var(--nfc-border-soft) !important;
-  border-radius: 0 !important;
-  background: transparent !important;
-}
-
-.nfc-dedupe-config-card .ant-card-head,
-.nfc-dedupe-surface-card .ant-card-head {
-  min-height: 48px;
-  border-bottom-color: var(--nfc-border-soft);
-}
-
 .nfc-dedupe-rule-toolbar,
 .nfc-dedupe-weight-row,
 .nfc-dedupe-config-heading {
@@ -961,11 +818,6 @@
     flex-direction: column;
   }
 
-  .nfc-legacy-plan-cleanup-heading .ant-btn {
-    width: 100%;
-    min-height: 42px;
-  }
-
   .nfc-embedded-section-header {
     align-items: flex-start;
     flex-direction: column;
@@ -1001,11 +853,6 @@
 
   .nfc-dedupe-rule-row {
     grid-template-columns: auto minmax(0, 1fr);
-  }
-
-  .nfc-dedupe-rule-row > .ant-btn {
-    grid-column: 1 / -1;
-    width: 100%;
   }
 
   .nfc-dedupe-weight-row,
@@ -1092,10 +939,6 @@
   font-size: 16px;
 }
 
-.nfc-dedupe-balancer-card.ant-card {
-  border-color: color-mix(in srgb, var(--nfc-warning) 22%, var(--nfc-hairline)) !important;
-}
-
 .nfc-task-progress-message {
   max-width: 100%;
   color: var(--nfc-text-subtle);
@@ -1116,16 +959,6 @@
 }
 
 @media (max-width: 767px) {
-  .nfc-dedupe-scorer-editor .ant-radio-wrapper {
-    width: 100%;
-    align-items: flex-start;
-    margin-inline-end: 0;
-  }
-
-  .nfc-dedupe-scorer-editor .ant-radio-wrapper > span:last-child {
-    min-width: 0;
-    flex: 1 1 auto;
-  }
 
   .nfc-dedupe-radio-help {
     display: block;
@@ -1138,9 +971,6 @@
 }
 
 /* Global Ant Design table pagination spacing. */
-.ant-table-wrapper .ant-table-pagination.ant-pagination {
-  margin: 0;
-}
 
 
 /* H4 Hardlink / Reflink storage-action controls. */
@@ -1180,14 +1010,5 @@
   .nfc-storage-capability-heading {
     align-items: stretch;
     flex-direction: column;
-  }
-
-  .nfc-storage-action-options .ant-radio-button-wrapper {
-    flex: 1 1 100%;
-    text-align: center;
-  }
-
-  .nfc-storage-capability-heading .ant-btn {
-    width: 100%;
   }
 }
