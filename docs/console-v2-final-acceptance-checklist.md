@@ -76,6 +76,7 @@ approved NAS File Center mockup. User-selectable dark/system modes remain.
 - [x] CSS cleanup tranche 9: retire 287 AntD-only blocks and 10 mixed selectors from root index.css; preserve 901 native rule groups and 39 media wrappers, update legacy native visual contracts and audit 56 files (PR #192).
 - [x] CSS cleanup tranche 10: retire 38 AntD-only blocks and 2 mixed selectors from v047 shell/primitives/overlays/responsive; preserve 86 native rule groups, expand audit to 60 sheets and protect native Radix overlays (PR #193).
 - [x] CSS cleanup tranche 11: retire 36 AntD-only and 1 mixed selector from components.css, preserve 162 native rules and audit eight already-clean v046/v047 files; raise CSS audit coverage to 69 of 74 (PR #194).
+- [x] CSS cleanup tranche 12: retire final 22 AntD-only and 2 mixed selectors in five remaining page layers, preserve native dark theme/responsive composition and add complete 74/74 CSS audit with future-file detection (PR #195).
 - [ ] Consolidate remaining historical UI CSS overrides into an owned, maintainable theme system.
 - [ ] Full TypeScript, frontend unit/regression, backend, Docker and dependency-audit gates.
 - [ ] One final browser review: 360/390/430/768/1024/1280/1440/1920 px.
