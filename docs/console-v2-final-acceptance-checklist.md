@@ -118,3 +118,12 @@ No screenshot-only mock data in runtime.
 - CI browser script `frontend/scripts/browser-quarantine-plan-overlays.mjs` checks 32 actual Chromium viewport/theme combinations using read-only synthetic GET APIs, opening Quarantine Restore/Purge and Plan History dialogs without executing restore, unlink, deletion or history clear.
 - Evidence: 96 screenshots in `frontend/artifacts/browser-quarantine-plan`, uploaded along with the preceding 96 screenshot files under a PR HEAD-derived artifact. Validate z-index, no blur, pointer hit-test, modal bounds, DELETE exact uppercase, three restore policy choices, and plan no-selection disablement.
 - This is not a claim that the original production NAS deployment already contains the fix or that all production UI/permissions have passed end-to-end acceptance.
+
+
+## Pure White Stage 5D-A — Quarantine Bulk Restore/Purge browser acceptance
+
+- Added fourth real Chromium script: `frontend/scripts/browser-quarantine-bulk-overlays.mjs`; **8 viewports × 4 theme/system combinations = 32 cases** on actual built React/Radix `/quarantine`. Four screenshots per case (blocked/ready Restore and ready/blocked Purge) = **128 screenshots**. Prior stages plus this one target **128 viewport/theme cases and 320 screenshots**, pending exact-HEAD CI.
+- Validates 1300/1301 scrim/dialog stack, computed no-blur scrim, dark/light backgrounds, viewport bounds, pointer hit-test, Escape close and retained selection after Restore cancel.
+- Exercises active-only selection; disabled controls before selection; Restore skip/rename; policy-change Preview invalidation; blocked-any-member Draft denial; strict uppercase DELETE for Purge; hardlink-survivor and independent-copy advisory distinction.
+- **Read-only route safety:** Browser network is limited to localhost Vite. GET API receives synthetic data. The only allowed POST is `/api/quarantine/bulk-preview`, mocked entirely within Playwright and never reaching the backend. Every other non-GET route, especially `/api/quarantine/bulk-plan` and execute/delete routes, is rejected HTTP 405 and asserted absent. Tests never click Generate Draft or any execute/delete confirmation.
+- This is not production NAS acceptance. Workflow/Plan lifecycle and remaining visual/CSS review are separate follow-up stages; original deployed blur screenshot must be retested in the real NAS environment.
