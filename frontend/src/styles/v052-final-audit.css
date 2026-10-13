@@ -409,7 +409,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .nfc-task-mobile-card,
-.nfc-directory-secondary-item {
+  .nfc-directory-secondary-item {
     transition: none !important;
   }
 }
