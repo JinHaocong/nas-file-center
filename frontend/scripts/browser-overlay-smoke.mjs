@@ -91,7 +91,10 @@ async function inspect(page, theme, width) {
     check(document.documentElement.dataset.theme === theme,
       'document theme disagrees with system/theme choice');
     for (const [name, overlay] of [['scan', scanOverlay], ['directory', dirOverlay]]) {
-      check(overlay.filter === 'none' && overlay.webkitFilter === 'none',
+      // Chromium exposes the standard property but may omit the nonstandard
+      // webkit alias. An absent alias is not an active blur filter.
+      check(overlay.filter === 'none' &&
+        (overlay.webkitFilter === undefined || overlay.webkitFilter === 'none'),
         name + ' scrim has blur/filter: ' + overlay.filter + ' / ' + overlay.webkitFilter);
     }
     check(scan.background === expected, 'Scan modal background: ' + scan.background);
