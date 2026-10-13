@@ -34,10 +34,9 @@ describe('Pure White Stage 5E-A computed CSS cascade cleanup', () => {
     assert.match(layout[0], /margin-top:\s*0;/);
     assert.match(layout[0], /\bgap:\s*18px;/);
     assert.match(column[0], /\bgap:\s*18px;/);
-    for (const blocked of ['gap: 30px', 'gap: 26px', 'gap: 22px', 'min-height: 240px']) {
-      const section = css.slice(css.indexOf('/* Specificity bridge'), css.indexOf('/* Desktop shell scroll ownership'));
-      assert.equal(section.includes(blocked), false, 'Obsolete winner conflict: ' + blocked);
-    }
+    assert.doesNotMatch(layout.join('\n'), /gap:\s*(30|24)px/);
+    assert.doesNotMatch(column.join('\n'), /gap:\s*(26|22)px/);
+    assert.doesNotMatch(css, /\.nfc-app-main \.nfc-dashboard-page \.nfc-dashboard-main-column > \.nfc-data-panel\s*\{\s*min-height:\s*240px;/);
   });
 
   test('Ledger heading and operational spacing retain their final cascade identity', () => {
