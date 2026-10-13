@@ -63,12 +63,6 @@
   background: var(--nfc-v49-line, var(--nfc-border-soft));
 }
 
-.nfc-login-panel .ant-input,
-.nfc-login-panel .ant-input-affix-wrapper {
-  min-height: 42px;
-  border-radius: var(--nfc-radius-control);
-}
-
 .nfc-login-submit {
   min-height: 44px;
   border-radius: var(--nfc-radius-control);
