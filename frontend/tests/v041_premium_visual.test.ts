@@ -28,7 +28,7 @@ describe('v0.4.1 premium visual pass contract', () => {
       '.nfc-data-panel',
       '.nfc-metric-card',
       '.nfc-quick-action',
-      '.nfc-sidebar-menu .ant-menu-item',
+      '.nfc-sidebar-menu',
     ]) {
       assert.ok(css.includes(selector), selector);
     }
@@ -36,26 +36,24 @@ describe('v0.4.1 premium visual pass contract', () => {
     assert.ok(css.includes('@keyframes nfc-status-pulse'));
   });
 
-  test('Ant Design controls are visually normalized by shared NFC chrome', () => {
+  test('native controls and surfaces share NFC chrome without historical AntD selectors', () => {
     const css = read('src/index.css');
+    const native = read('src/styles/console-v2.css');
     for (const selector of [
-      '.ant-btn',
-      '.ant-input',
-      '.ant-select-selector',
-      '.ant-table-wrapper',
-      '.ant-modal-content',
-      '.ant-drawer-content',
-      '.ant-dropdown-menu',
-    ]) {
-      assert.ok(css.includes(selector), selector);
-    }
+      '.nfc-brand', '.nfc-page-header', '.nfc-data-panel',
+      '.nfc-metric-card', '.nfc-task-mobile-card', '.nfc-form-note',
+    ]) assert.ok(css.includes(selector), selector);
     assert.ok(css.includes('box-shadow: var(--nfc-shadow-sm)'));
+    assert.ok(native.includes('.nfc-v2-dialog .nfc-console-button'));
+    assert.doesNotMatch(css, /\.(?:ant-[a-z][\w-]*|anticon\b)/);
   });
 
-  test('navigation gains selected-state depth and motion', () => {
+  test('native sidebar active state keeps visible navigation emphasis', () => {
+    const nav = read('src/styles/console-v2.css');
+    const sidebar = read('src/components/Sidebar.tsx');
     const css = read('src/index.css');
-    assert.ok(css.includes('.nfc-sidebar-menu .ant-menu-item-selected::before'));
-    assert.ok(css.includes('translateX('));
+    assert.match(nav, /\.nfc-v2-nav-item\.is-active\s*\{/);
+    assert.match(sidebar, /nfc-v2-nav-item.*is-active/);
     assert.ok(css.includes('var(--nfc-ease-standard)'));
   });
 
@@ -95,10 +93,10 @@ describe('v0.4.1 premium visual pass contract', () => {
       '.nfc-metric-grid .nfc-metric-card:nth-child(2)',
       '.nfc-dashboard-layout > :nth-child(2)',
       '.nfc-mobile-record-list > *',
-      '.nfc-header-actions .ant-btn',
-      '.ant-switch',
-      '.ant-checkbox-wrapper',
-      '.ant-tabs-tab',
+      '.nfc-header-actions',
+      '.nfc-brand-mark',
+      '.nfc-form-note',
+      '.nfc-step-editor-note',
       '::-webkit-scrollbar',
     ]) {
       assert.ok(css.includes(selector), selector);
