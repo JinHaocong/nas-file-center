@@ -11,6 +11,7 @@ NAS File Center bundles the following libraries locally in the frontend package 
 - **Day.js** — MIT License — https://day.js.org/
 - **Argon2 / argon2-cffi** — MIT / Apache 2.0 — https://github.com/hynek/argon2-cffi
 - **fclones** — MIT License — https://github.com/pkolaczk/fclones
+- **cryptography (Python)** — Apache-2.0 / BSD licenses — https://cryptography.io/ (AES-256 CBC decryptor used only after explicit recovery authorization)
 - **libarchive** — BSD-style License — https://www.libarchive.org/ (Debian runtime package `libarchive13`; used to read 7z/RAR without unsafe extraction paths)
 
 All bundled assets retain their respective licenses and are built into the final self-contained Docker container.

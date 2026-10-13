@@ -122,7 +122,8 @@ class ArchiveRecoveryHandler(TaskHandler):
             password = read_one_time_password(token)
             report = recover_archive(source, output, password=password, check=checkpoint,
                                      deep=state.get('deep', True), items=items)
-            if items and all(r['status'] == 'unrecovered' for r in items):
+            if not any(r['status'] in {'integrity_passed', 'format_validated', 'unverified', 'incomplete'}
+                       for r in items):
                 raise RecoveryError('NO_FILES_RECOVERED')
             after = source.stat()
             if (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns) != (

@@ -118,8 +118,8 @@ export const ArchiveRecoveryPage: React.FC = () => {
         <input id="recovery-password" type="password" autoComplete="off" value={password}
           onChange={event => setPassword(event.target.value)} />
         <label><input type="checkbox" checked={deep} onChange={event => setDeep(event.target.checked)} />
-          启用已实现的增强策略（TAR 扫描、ZIP 本地头恢复、内层 TAR）</label>
-        <p>不支持通用 AES/LZMA2、RAR Solid 损坏点之后的解码重同步。临时解压数据可能较大；执行限制为 10,000 个文件、4 GiB 输出和 30 分钟。</p>
+          启用增强恢复（ZIP/TAR 扫描、内层 TAR、符合条件的 7z AES + LZMA2 重同步）</label>
+        <p>7z AES/LZMA2 深度扫描需要正确密码、CRC 完好的 7z 文件头、可独立解码的 LZMA2 重置块及文件 CRC；不支持任意加密流重建和 RAR Solid 深度重同步。单个重置段最多处理 32 MiB；破损块头后的重新扫描窗口最多 8 MiB。整体文件产出限制为 10,000 个、4 GiB、30 分钟。</p>
         <ActionBar>
           <ConsoleButton disabled={!selected || check.isPending || Boolean(taskId)}
             loading={check.isPending} onClick={() => { void check.mutateAsync(selected).catch(() => {}); }}>检测</ConsoleButton>
@@ -144,6 +144,12 @@ export const ArchiveRecoveryPage: React.FC = () => {
         {report.data && <>
           <p>最终状态：{report.data.recovery_status} · 原包条目总数：{report.data.known_total ?? '未知'}</p>
           <p>结果目录：<code>{report.data.output}</code></p>
+          {report.data.aes_lzma2_deep && <p>
+            AES/LZMA2 深度恢复：{report.data.aes_lzma2_deep.status} ·
+            CRC 确认文件 {report.data.aes_lzma2_deep.recovered} 个 ·
+            已验证重置点 {report.data.aes_lzma2_deep.reset_points ?? 0} 个。
+            {report.data.aes_lzma2_deep.reason && <> 限制或失败原因：{report.data.aes_lzma2_deep.reason}</>}
+          </p>}
           <p>完整性通过 {report.data.stats.integrity_passed || 0} · 格式通过 {report.data.stats.format_validated || 0} · 未验证 {report.data.stats.unverified || 0} · 不完整 {report.data.stats.incomplete || 0} · 未恢复 {report.data.stats.unrecovered || 0}</p>
           <ActionBar>
             <ConsoleButton onClick={downloadReport}>下载 JSON 报告</ConsoleButton>

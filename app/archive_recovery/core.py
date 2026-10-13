@@ -462,7 +462,72 @@ def recover_archive(source: Path, result_dir: Path, *, password: str | None = No
                 _stream_tar(source, result_dir, fd, budget, results)
         else:
             total = None
-            _libarchive(source, result_dir, fd, budget, results, password)
+            try:
+                _libarchive(source, result_dir, fd, budget, results, password)
+            except RecoveryError:
+                # A failed standard reader may still leave independently
+                # CRC-verifiable AES/LZMA2 reset segments; only for 7z with
+                # an explicitly supplied password and enabled deep mode.
+                if fmt != '7z' or not deep or not password:
+                    raise
+                results.append({'name': '<archive>', 'status': 'unrecovered',
+                                'reason': 'STANDARD_READER_UNAVAILABLE'})
+        deep_result = None
+        if fmt == '7z' and deep and password:
+            from app.archive_recovery.aes_lzma2 import (
+                DeepRecoveryUnavailable, recover_aes_lzma2,
+            )
+
+            def publish_crc_proven(name: str, chunks: Iterator[bytes], size: int,
+                                   provenance: str) -> bool:
+                # The deep engine already compared this exact file to its 7z
+                # CRC and length. Recheck through the existing safe publisher.
+                try:
+                    parts = safe_parts(name)
+                except RecoveryError:
+                    results.append({'name': name[:256], 'status': 'unrecovered',
+                                    'reason': 'UNSAFE_PATH'})
+                    return False
+                for old in results:
+                    if old.get('name') != name or old.get('path') != name:
+                        continue
+                    if old.get('status') == 'integrity_passed':
+                        return False
+                    # Standard extraction already wrote this entry. Upgrade
+                    # only when its actual bytes equal CRC-proven deep output.
+                    if old.get('status') not in {'unverified', 'format_validated'}:
+                        return False
+                    expected_bytes = b''.join(chunks)
+                    if len(expected_bytes) != size:
+                        return False
+                    try:
+                        parent = _open_parent(fd, parts)
+                        try:
+                            handle = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW,
+                                             dir_fd=parent)
+                            with os.fdopen(handle, 'rb') as reader:
+                                if os.fstat(reader.fileno()).st_size != size:
+                                    return False
+                                if reader.read(size + 1) != expected_bytes:
+                                    return False
+                        finally:
+                            os.close(parent)
+                    except (OSError, ValueError):
+                        return False
+                    old['status'] = 'integrity_passed'
+                    old['provenance'] = provenance
+                    return True
+                before = len(results)
+                _record(result_dir, fd, name, chunks, budget, results,
+                        crc=True, expected=size, provenance=provenance)
+                return len(results) > before and results[-1]['status'] == 'integrity_passed'
+
+            try:
+                deep_result = recover_aes_lzma2(source, password,
+                            check=lambda: budget.step(), publish=publish_crc_proven)
+            except DeepRecoveryUnavailable as exc:
+                deep_result = {'status': 'unsupported', 'reason': str(exc),
+                               'recovered': 0}
         # One additional TAR layer, only from a normally published regular file.
         if deep:
             for record in list(results):
@@ -480,9 +545,14 @@ def recover_archive(source: Path, result_dir: Path, *, password: str | None = No
                 'known_total': total, 'items': results,
                 'stats': {s: sum(r['status'] == s for r in results)
                           for s in ('integrity_passed','format_validated','unverified','incomplete','unrecovered')},
-                'deep_capability': 'tar_inner_only' if fmt in ('7z', 'rar') else 'tar_or_zip_salvage',
+                'deep_capability': ('aes_lzma2_crc_reset' if deep_result is not None
+                                     else 'tar_inner_only' if fmt in ('7z', 'rar')
+                                     else 'tar_or_zip_salvage'),
+                'aes_lzma2_deep': deep_result,
                 'warnings': ['Format validation is not byte-for-byte integrity verification.',
-                             'Encrypted solid LZMA2 / RAR stream resynchronization is not supported.']}
+                             'AES/LZMA2 deep recovery requires an intact verified 7z header, independently decodable reset chunks, and matching per-file CRC. Arbitrary encrypted-solid reconstruction is not possible.'
+                             if fmt == '7z' else 'RAR solid stream resynchronization is not supported.'
+                             if fmt == 'rar' else 'Only verifiable ZIP and TAR recovery is attempted.']}
     finally:
         os.close(fd)
         try:

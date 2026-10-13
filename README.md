@@ -231,3 +231,6 @@ docker buildx build \
 The **压缩包恢复** tool supports best-effort ZIP / TAR / 7z / RAR file salvage with a same-directory unique result folder; original archives are left untouched. ZIP CRC and full image decode are distinguished from unverified extraction. The existing Worker/Task Center handles recovery jobs and cancellation. Defaults remain read-only: the archive parent must be explicitly writable and `ALLOW_MUTATION=true`.
 
 Read [archive recovery deployment, supported formats, limits and known security boundaries](docs/archive-recovery.md) before enabling this feature. Password-protected archives additionally require a shared tmpfs mount, with optional [Compose](compose.archive-recovery-secrets.yaml) or [Komodo](compose.komodo.archive-recovery-secrets.yaml) overlay. No generic damaged encrypted solid-stream recovery is claimed.
+
+
+Experimental AES-256-CBC + LZMA2 7z deep recovery is available for **intact, CRC-checked metadata** with independently decodable reset points and CRC-verifiable complete files; see [supported boundaries and limits](docs/archive-recovery.md#experimental-aes-256-cbc--lzma2-7z-deep-recovery). It does not reconstruct arbitrary encrypted solid streams.

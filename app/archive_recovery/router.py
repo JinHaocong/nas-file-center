@@ -59,7 +59,9 @@ def check_archive(request: Request, payload: RecoveryRequest):
             'can_write': request.app.state.settings.allow_mutation and os.access(source.parent, os.W_OK),
             'dependency_available': fmt in ('tar', 'zip') or bool(ctypes.util.find_library('archive')),
             'deep_strategy': 'tar_rescan' if fmt == 'tar' else
-                             'zip_local_headers' if fmt == 'zip' else 'nested_tar_only',
+                             'zip_local_headers' if fmt == 'zip' else
+                             'aes_lzma2_crc_reset_when_supported' if fmt == '7z' else
+                             'nested_tar_only',
             'warning': 'Unknown required space; extraction stops at configured resource caps.'}
 
 

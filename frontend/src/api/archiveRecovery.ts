@@ -19,6 +19,15 @@ export interface RecoveryReport {
   stats: Record<string, number>;
   error_code?: string | null;
   deep_capability?: string;
+  aes_lzma2_deep?: {
+    status: string;
+    recovered: number;
+    reason?: string;
+    reset_points?: number;
+    decoded_segments?: number;
+    rejected_segments?: number;
+    resync_scan?: { scan_bytes: number; probed: number; proven_files: number };
+  } | null;
   warnings?: string[];
 }
 
