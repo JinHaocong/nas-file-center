@@ -6,10 +6,33 @@ import { resolve } from 'node:path';
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');
 const css = read('src/styles/v049-workspace.css');
 
+// Only top-level rules share this cascade context. A plain regex would also
+// count same-named rules inside responsive @media blocks.
 const selectorRules = (selector: string): string[] => {
-  const escaped = selector.replace(/\./g, '\\.');
-  return [...css.matchAll(new RegExp('(?:^|\\n)\\s*' + escaped + '\\s*\\{([^{}]*)\\}', 'g'))]
-    .map(match => match[1]);
+  const plain = css.replace(/\/\*[\s\S]*?\*\//g, comment => comment.replace(/[^\n]/g, ' '));
+  const bodies: string[] = [];
+  let depth = 0;
+  let segmentStart = 0;
+  let selectedOpen = -1;
+  for (let i = 0; i < plain.length; i += 1) {
+    if (plain[i] === '{') {
+      if (depth === 0 && plain.slice(segmentStart, i).trim() === selector) {
+        selectedOpen = i;
+      }
+      depth += 1;
+      segmentStart = i + 1;
+    } else if (plain[i] === '}') {
+      depth -= 1;
+      assert.ok(depth >= 0, 'CSS braces remain balanced');
+      if (depth === 0 && selectedOpen >= 0) {
+        bodies.push(plain.slice(selectedOpen + 1, i));
+        selectedOpen = -1;
+      }
+      segmentStart = i + 1;
+    }
+  }
+  assert.equal(depth, 0, 'CSS braces remain balanced');
+  return bodies;
 };
 
 const properties = (body: string): Map<string, string> => {
