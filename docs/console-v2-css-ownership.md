@@ -53,7 +53,7 @@ could change actual computed styles even when unit tests still pass.
 - Retired 46 unreachable AntD-only declaration blocks (12 in v050-layout, 33 in v051-product-polish, 1 in v055-workspace-breathing); removed AntD from 1 mixed v051 row-actions selector while retaining native `.nfc-row-actions:focus-within` declarations at the original cascade position.
 - Preserved real v050 operational/dashboard layouts, v051 mobile records/overlays and v055 responsive workspace rhythm. No stylesheet reorder or application behavior changes.
 - Extended CI's zero `.ant-*`/`.anticon` CSS audit from 48 to **51 reviewed files**, and added native focus/responsive/import-order regression tests.
-- Leave `index.css`, `v049-workspace.css`, `v052-final-audit.css`, `v054-premium-system.css` and `v056-right-workspace-v2.css` pending independent review; no claim of completed browser visual acceptance.
+- Leave `index.css`, `v054-premium-system.css` and `v056-right-workspace-v2.css` pending independent review; no claim of completed browser visual acceptance.
 
 ## PR #188 — reviewed v0.5.2 final audit layer
 
@@ -62,11 +62,17 @@ could change actual computed styles even when unit tests still pass.
 - Expanded CSS ownership audit from 51 to **52 reviewed files** and added dedicated regressions for native focus/responsive/mixed-selector survival.
 - Browser visual acceptance is still pending; this cleanup does not constitute a browser pass or production deployment.
 
+## PR #189 — reviewed v0.4.9 workspace layer
+
+- Retired 94 dead AntD-only CSS rule groups from `src/styles/v049-workspace.css` and removed 4 AntD members from mixed groups. Preserved the exact native declarations and source order, including keyboard `.nfc-row-actions:focus-within`, both native mobile pagination groups, and the native reduced-transparency header/page surface.
+- Removed one now-empty AntD-only mobile media block. All other media queries, existing native CSS rule bodies and cascade imports remain intact.
+- Expanded the CSS ownership audit from 52 to **53 files**, with 5 focused native regressions registered in the full frontend test runner.
+- This is a source/CSS cleanup only; browser visual acceptance and production NAS deployment remain outstanding.
+
 ## Deliberately pending work
 
 - Audit remaining dead AntD CSS selectors in `src/index.css`,
-  `styles/v049-workspace.css`, `v054-premium-system.css` and
-  `v056-right-workspace-v2.css`. Several historical tests still demand these
+  `v054-premium-system.css` and `v056-right-workspace-v2.css`. Several historical tests still demand these
   selectors and must be updated to native semantic assertions before removal.
 - Identify overwritten versus still-live native declarations across legacy
   versioned styles. Remove or relocate them in small, reviewed tranches, with
