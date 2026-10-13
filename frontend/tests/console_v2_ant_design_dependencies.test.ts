@@ -82,6 +82,12 @@ describe('Console v2 Ant Design npm dependency retirement', () => {
     assert.ok(guard.includes('const allowed = new Set(['));
     assert.ok(!guard.includes("'src/contexts/ThemeContext.tsx'"));
     assert.ok(guard.includes('const unexpected = matches.filter(item => !item.approved)'));
+    const vite = read('vite.config.ts');
+    for(const chunk of ["'vendor-react'", "'vendor-query'"]) {
+      assert.ok(vite.includes(chunk), 'Missing retained manual vendor chunk: '+chunk);
+    }
+    assert.doesNotMatch(vite, /vendor-antd|\['antd',\s*'@ant-design\/icons'\]/,
+      'removed AntD packages must not be Vite manual entry modules');
     const docker=read('../Dockerfile');
     assert.ok(docker.includes('COPY frontend/package.json frontend/package-lock.json ./'));
     assert.ok(docker.includes('RUN npm ci'));
