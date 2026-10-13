@@ -37,6 +37,22 @@ owned.push('legacy-reviewed:pages/scheduler.css');
 owned.push('legacy-reviewed:tokens.css');
 owned.push('legacy-reviewed:v046.css');
 owned.push('legacy-reviewed:v047.css');
+owned.push('legacy-reviewed:pages/login.css');
+owned.push('legacy-reviewed:pages/organizer.css');
+owned.push('legacy-reviewed:pages/tools.css');
+owned.push('legacy-reviewed:pages/workflows.css');
+owned.push('legacy-reviewed:v048-pages.css');
+// The reviewed list must be exhaustive, not just clean for today's files.
+function cssFiles(dir, prefix = '') {
+  const files = [];
+  for (const entry of readdirSync(resolve(dir, prefix), { withFileTypes: true })) {
+    const path = prefix + entry.name;
+    if (entry.isDirectory()) files.push(...cssFiles(dir, path + '/'));
+    else if (entry.isFile() && entry.name.endsWith('.css')) files.push(path);
+  }
+  return files;
+}
+
 const errors = [];
 for (const name of owned) {
   const path = name.substring(name.indexOf(':') + 1);
@@ -47,7 +63,15 @@ for (const name of owned) {
     errors.push(path + ': ' + hits.map(hit => hit[0]).join(', '));
   }
 }
-if (owned.length < 40) errors.push('Native CSS inventory unexpectedly shrank');
+const allCss = [...cssFiles(root), '../index.css'];
+const reviewed = owned.map(name => name.startsWith('legacy-index:') ?
+  '../index.css' : name.substring(name.indexOf(':') + 1));
+const reviewedSet = new Set(reviewed);
+for (const path of allCss) {
+  if (!reviewedSet.has(path)) errors.push('Unreviewed CSS file: ' + path);
+}
+if (reviewedSet.size !== reviewed.length) errors.push('Duplicate CSS ownership entry');
+if (reviewedSet.size !== allCss.length) errors.push('Incomplete CSS inventory coverage');
 for (const issue of errors) console.error('[CSS OWNER VIOLATION] ' + issue);
 console.log('[CSS AUDIT] ' + owned.length + ' owned/reviewed CSS files checked; ' +
   errors.length + ' violation(s).');
