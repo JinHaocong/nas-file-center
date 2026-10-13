@@ -212,6 +212,7 @@
 .nfc-v2-sidebar-footer > span:last-child { display: flex; flex-direction: column; gap: 3px; }
 .nfc-v2-sidebar-footer strong { color: var(--v2-text); font-size: 11.5px; font-weight: 650; }
 .nfc-v2-sidebar-footer small { color: var(--v2-subtle); font-size: 10px; }
+.nfc-v2-sidebar-footer .nfc-v2-release-version { margin-top: 5px; font-size: 10px; color: var(--v2-subtle); letter-spacing: .025em; font-variant-numeric: tabular-nums; }
 .nfc-v2-sidebar-collapse {
   border: 0;
   border-top: 1px solid var(--v2-sidebar-line);
