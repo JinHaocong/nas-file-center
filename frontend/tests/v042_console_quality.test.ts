@@ -26,27 +26,27 @@ describe('v0.4.2 console quality gate', () => {
     assert.ok(css.includes('.nfc-sidebar,'));
     assert.ok(css.includes('.nfc-mobile-sidebar'));
     assert.ok(css.includes('background: var(--nfc-sidebar-canvas) !important'));
-    assert.ok(css.includes('.nfc-sidebar-menu .ant-menu-item-selected'));
+    assert.ok(read('src/styles/console-v2.css').includes('.nfc-v2-nav-item.is-active'));
   });
 
-  test('primary controls expose hover active focus-visible and disabled states', () => {
-    const css = read('src/index.css');
+  test('native controls keep hover, selected, focus-visible and disabled states', () => {
+    const css = read('src/styles/console-v2.css');
     for (const selector of [
-      '.ant-btn:not(:disabled):hover',
-      '.ant-btn:not(:disabled):active',
-      '.ant-btn:focus-visible',
-      '.ant-btn:disabled',
-      '.ant-input:disabled',
-      '.ant-select-disabled .ant-select-selector',
-    ]) {
-      assert.ok(css.includes(selector), selector);
-    }
+      '.nfc-v2-nav-item:hover',
+      '.nfc-v2-nav-item.is-active',
+      '.nfc-v2-shell button:focus-visible',
+      '.nfc-v2-dialog-form input:focus-visible',
+      '.nfc-v2-dialog .nfc-console-button:disabled',
+    ]) assert.ok(css.includes(selector), selector);
+    assert.doesNotMatch(read('src/index.css'), /\.(?:ant-[a-z][\w-]*|anticon\b)/);
   });
 
-  test('operational tables use a fixed scan-friendly row rhythm and numeric alignment', () => {
+  test('operational surfaces retain semantic density tokens and numeric alignment', () => {
     const css = read('src/index.css');
-    assert.ok(css.includes('.nfc-data-panel .ant-table-tbody > tr'));
-    assert.ok(css.includes('height: var(--nfc-console-row-height)'));
+    const native = read('src/styles/v056-right-workspace-v2.css');
+    assert.ok(css.includes('--nfc-console-row-height: 46px'));
+    assert.ok(css.includes('.nfc-data-panel'));
+    assert.ok(native.includes('--nfc-w2-row: 52px'));
     assert.match(css, /font-variant-numeric:\s*tabular-nums/);
   });
 
