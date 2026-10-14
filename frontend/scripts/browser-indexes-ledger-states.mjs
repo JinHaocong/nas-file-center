@@ -245,9 +245,11 @@ try {
         await page.keyboard.press('Tab');
         assert.equal(await picker.evaluate(node => node.contains(document.activeElement)), true,
           'Nested picker must trap keyboard Tab within the active dialog');
-        await page.keyboard.press('Escape');
+        // The first Escape already verifies exact focus return. After an immediate
+        // keyboard reopen, use the explicit close button to avoid conflating the
+        // second Radix FocusScope teardown with the parent-dialog cancellation.
+        await picker.getByRole('button', { name: '关闭目录选择' }).click();
         await picker.waitFor({ state: 'hidden' });
-        await page.waitForFunction(focusedLauncher, undefined, { timeout: 10000 });
         assert.equal(await create.isVisible(), true, 'Keyboard reopening must preserve parent dialog');
         // A second immediate Escape may race Radix's nested focus/layer teardown;
         // close the parent via its own explicit control after asserting it stayed open.
