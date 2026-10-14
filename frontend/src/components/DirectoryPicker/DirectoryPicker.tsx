@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { CodePath } from '../ui/CodePath';
 import { ConsoleButton } from '../ui/ConsoleButton';
 import { ConsoleIcon } from '../ui/ConsoleIcon';
@@ -16,6 +16,14 @@ export const DirectoryPicker: React.FC<DirectoryPickerProps> = ({
   const [modalOpen, setModalOpen] = useState(false);
   const [showManual, setShowManual] = useState(false);
   const [manualDraft, setManualDraft] = useState('');
+  // A controlled Radix Dialog without <Dialog.Trigger> has no implicit return
+  // target. Keep the exact launching button for keyboard users.
+  const returnFocusTarget = useRef<HTMLButtonElement | null>(null);
+  const openDirectoryBrowser = (button: HTMLButtonElement) => {
+    if (disabled) return;
+    returnFocusTarget.current = button;
+    setModalOpen(true);
+  };
 
   const currentValues: string[] = React.useMemo(() => {
     if (!value) return [];
@@ -68,11 +76,11 @@ export const DirectoryPicker: React.FC<DirectoryPickerProps> = ({
             <span>已选择目录 <strong>{currentValues.length}</strong></span>
             <ConsoleButton size="sm" disabled={disabled}
               leadingIcon={<ConsoleIcon name="folder-open" size={16} />}
-              onClick={() => setModalOpen(true)}>选择目录</ConsoleButton>
+              onClick={event => openDirectoryBrowser(event.currentTarget)}>选择目录</ConsoleButton>
           </div>
           {currentValues.length === 0 ? (
             <button type="button" className="nfc-directory-picker-empty"
-              disabled={disabled} onClick={() => setModalOpen(true)}>
+              disabled={disabled} onClick={event => openDirectoryBrowser(event.currentTarget)}>
               <ConsoleIcon name="folder-open" size={18} />
               <span>{placeholder}</span>
             </button>
@@ -108,7 +116,7 @@ export const DirectoryPicker: React.FC<DirectoryPickerProps> = ({
             )}
           </div>
           <ConsoleButton disabled={disabled} leadingIcon={<ConsoleIcon name="folder-open" size={16} />}
-            onClick={() => setModalOpen(true)}>选择目录</ConsoleButton>
+            onClick={event => openDirectoryBrowser(event.currentTarget)}>选择目录</ConsoleButton>
         </div>
       )}
 
@@ -136,6 +144,7 @@ export const DirectoryPicker: React.FC<DirectoryPickerProps> = ({
         multiple={multiple}
         initialPath={singleValue || undefined}
         selectedValues={currentValues}
+        returnFocusTo={returnFocusTarget.current}
       />
     </div>
   );
