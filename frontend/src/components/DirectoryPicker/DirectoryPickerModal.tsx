@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { filesystemApi } from '../../api/filesystem';
 import { DirectoryPickerModalProps } from './types';
 import { PathBreadcrumb } from './PathBreadcrumb';
+import { nextDirectoryTab, type DirectoryTab } from './tab_navigation';
 import { formatDateTime } from '../../utils/format';
 import { useResponsive } from '../../hooks/useResponsive';
 import { ConsoleButton } from '../ui/ConsoleButton';
@@ -17,7 +18,7 @@ import {
   resolveDirectorySelection, toggleDirectorySelection,
 } from './selection_model';
 
-type Tab = 'browser' | 'favorites' | 'recent';
+type Tab = DirectoryTab;
 const PAGE_SIZE = 100;
 
 export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
@@ -34,6 +35,9 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
   const [favoriteLabel, setFavoriteLabel] = useState('');
   const [isAddingFavorite, setIsAddingFavorite] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>('browser');
+  const tabRefs = useRef<Record<Tab, HTMLButtonElement | null>>({
+    browser: null, favorites: null, recent: null,
+  });
   const [confirmFavoriteId, setConfirmFavoriteId] = useState<number | null>(null);
   const [isConfirming, setIsConfirming] = useState(false);
   const confirmingRef = useRef(false);
@@ -258,16 +262,26 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
                 ['recent', '最近使用 (' + (recentData?.items?.length || 0) + ')', 'history'],
               ] as const).map(([tab, label, icon]) => (
                 <button type="button" role="tab" key={tab} id={'nfc-directory-tab-' + tab}
-                  aria-selected={activeTab === tab} aria-controls={'nfc-directory-panel-' + tab}
+                  ref={node => { tabRefs.current[tab] = node; }}
+                  aria-selected={activeTab === tab} aria-controls="nfc-directory-active-panel"
+                  tabIndex={activeTab === tab ? 0 : -1}
                   disabled={busy} className={activeTab === tab ? 'is-active' : ''}
-                  onClick={() => setActiveTab(tab)}>
+                  onClick={() => setActiveTab(tab)}
+                  onKeyDown={event => {
+                    if (busy) return;
+                    const next = nextDirectoryTab(activeTab, event.key);
+                    if (next === null) return;
+                    event.preventDefault();
+                    setActiveTab(next);
+                    tabRefs.current[next]?.focus();
+                  }}>
                   <ConsoleIcon name={icon} size={15} />{label}
                 </button>
               ))}
             </div>
-            <div role="tabpanel" id={'nfc-directory-panel-' + activeTab}
+            <div role="tabpanel" id="nfc-directory-active-panel"
               aria-labelledby={'nfc-directory-tab-' + activeTab}
-              className="nfc-v2-directory-panel">
+              tabIndex={0} className="nfc-v2-directory-panel">
               {activeTab === 'browser' && (
                 <>
                   <div className="nfc-directory-search-row">
