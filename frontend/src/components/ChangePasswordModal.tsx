@@ -17,6 +17,7 @@ interface Props {
  */
 export const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
   const firstInputRef = useRef<HTMLInputElement>(null);
+  const submitLock = useRef(false);
   const toast = useConsoleToast();
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -32,20 +33,21 @@ export const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
   };
 
   const close = () => {
-    if (submitting) return;
+    if (submitting || submitLock.current) return;
     reset();
     onClose();
   };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (submitting) return;
+    if (submitting || submitLock.current) return;
     const validationError = validatePasswordChange({ oldPassword, newPassword, confirmPassword });
     if (validationError) {
       setError(validationError);
       return;
     }
     setError(null);
+    submitLock.current = true;
     setSubmitting(true);
     try {
       await authApi.changePassword({
@@ -58,19 +60,20 @@ export const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : '修改管理员密码失败');
     } finally {
+      submitLock.current = false;
       setSubmitting(false);
     }
   };
 
   return (
     <Dialog.Root open={open} onOpenChange={next => {
-      if (!next && !submitting) close();
+      if (!next && !submitting && !submitLock.current) close();
     }}>
       <Dialog.Portal>
         <Dialog.Overlay className="nfc-v2-dialog-overlay" />
         <Dialog.Content
           className="nfc-v2-dialog nfc-change-password-modal nfc-overlay-modal"
-          onEscapeKeyDown={event => { if (submitting) event.preventDefault(); }}
+          onEscapeKeyDown={event => { if (submitting || submitLock.current) event.preventDefault(); }}
           onPointerDownOutside={event => event.preventDefault()}
           onOpenAutoFocus={event => {
             event.preventDefault();
@@ -97,17 +100,17 @@ export const ChangePasswordModal: React.FC<Props> = ({ open, onClose }) => {
             <input ref={firstInputRef} id="nfc-old-password" type="password" required
               autoComplete="current-password" placeholder="请输入当前密码"
               disabled={submitting} value={oldPassword}
-              onChange={event => setOldPassword(event.target.value)} />
+              onChange={event => { if (!submitLock.current) setOldPassword(event.target.value); }} />
             <label htmlFor="nfc-new-password">新密码</label>
             <input id="nfc-new-password" type="password" required minLength={6}
               autoComplete="new-password" placeholder="请输入新密码（至少6位）"
               disabled={submitting} value={newPassword}
-              onChange={event => setNewPassword(event.target.value)} />
+              onChange={event => { if (!submitLock.current) setNewPassword(event.target.value); }} />
             <label htmlFor="nfc-confirm-password">确认新密码</label>
             <input id="nfc-confirm-password" type="password" required minLength={6}
               autoComplete="new-password" placeholder="请再次输入新密码"
               disabled={submitting} value={confirmPassword}
-              onChange={event => setConfirmPassword(event.target.value)} />
+              onChange={event => { if (!submitLock.current) setConfirmPassword(event.target.value); }} />
             {error && <div className="nfc-v2-dialog-error" role="alert">{error}</div>}
             <div className="nfc-v2-dialog-footer">
               <ConsoleButton onClick={close} disabled={submitting}>取消</ConsoleButton>

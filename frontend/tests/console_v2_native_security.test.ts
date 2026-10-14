@@ -34,7 +34,7 @@ describe('Console v2 Radix administrator security dialog', () => {
     assert.match(source, /onEscapeKeyDown=/);
     assert.match(source, /onPointerDownOutside=/);
     assert.match(source, /onOpenAutoFocus=/);
-    assert.match(source, /if \(!next && !submitting\) close\(\)/);
+    assert.match(source, /if \(!next && !submitting && !submitLock\.current\) close\(\)/);
     assert.match(source, /authApi\.changePassword/);
     assert.match(source, /old_password: oldPassword/);
     assert.match(source, /new_password: newPassword/);

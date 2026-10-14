@@ -43,9 +43,9 @@ describe('Console v2 scan history migration', () => {
     const button = read('src/components/scans/ScanDeleteButton.tsx');
     for (const token of [
       'getScanDeleteAvailability(scan)', 'disabled={unavailable}',
-      'if (!getScanDeleteAvailability(scan).canDelete || loading) return',
-      '<ConsoleConfirmDialog', 'busy={loading}', 'disabled={!canDelete}',
-      'onConfirm={confirmDelete}', 'onDelete()',
+      'if (!getScanDeleteAvailability(scan).canDelete || busy || deleteInFlight.current) return',
+      '<ConsoleConfirmDialog', 'busy={busy}', 'disabled={!canDelete || busy}',
+      'onConfirm={() => { void confirmDelete(); }}', 'onDelete()',
       '扫描元数据', '关联执行计划',
     ]) assert.ok(button.includes(token), token);
     assert.doesNotMatch(button, /from ['"]antd['"]|<Popconfirm\b|<Tooltip\b/);

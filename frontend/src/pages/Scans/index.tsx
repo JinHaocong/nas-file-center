@@ -153,7 +153,7 @@ export const ScansPage: React.FC = () => {
                         <ConsoleButton size="sm" variant="ghost"
                           onClick={() => openScan(scan.id)}>查看详情</ConsoleButton>
                         <ScanDeleteButton key={scan.id} scan={scan}
-                          onDelete={() => deleteScanMutation.mutate(scan.id)}
+                          onDelete={() => deleteScanMutation.mutateAsync(scan.id)}
                           loading={deletingId === scan.id} type="text" />
                       </div></td>
                     </tr>
@@ -185,7 +185,7 @@ export const ScansPage: React.FC = () => {
                       <ConsoleButton size="sm" variant="ghost"
                         onClick={() => openScan(scan.id)}>查看详情</ConsoleButton>
                       <ScanDeleteButton key={scan.id} scan={scan}
-                        onDelete={() => deleteScanMutation.mutate(scan.id)}
+                        onDelete={() => deleteScanMutation.mutateAsync(scan.id)}
                         loading={deletingId === scan.id} type="text" size="middle" />
                     </div>
                   </article>

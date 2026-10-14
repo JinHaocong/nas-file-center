@@ -64,7 +64,7 @@ describe('Pure White Stage 5B: real Tasks portal visual acceptance contract', ()
     assert.ok(detail.includes('<ConsoleSheet'));
     assert.ok(del.includes('getTaskDeleteAvailability(task)'));
     assert.ok(del.includes('<ConsoleConfirmDialog'));
-    assert.ok(del.includes('onConfirm={confirmDelete}'));
+    assert.ok(del.includes('onConfirm={() => { void confirmDelete(); }}'));
     assert.ok(cleanup.includes("['completed', 'failed', 'cancelled']"));
     assert.ok(cleanup.includes('disabled={selectedStatuses.length === 0 || cleanupMutation.isPending}'));
     assert.ok(confirm.includes('onPointerDownOutside={event => event.preventDefault()}'));
