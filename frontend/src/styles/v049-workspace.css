@@ -90,12 +90,8 @@ body,
 
 .nfc-header.nfc-header {
   position: sticky;
-
   z-index: 30;
-
-
   border-bottom: 1px solid var(--nfc-v49-line);
-
   background: color-mix(in srgb, var(--nfc-v49-canvas) 88%, transparent);
 }
 
@@ -201,7 +197,6 @@ body,
 }
 
 .nfc-data-panel-header {
-
   gap: 14px;
 
 }
@@ -336,7 +331,6 @@ body,
 }
 
 .nfc-metric-card {
-
   border-right: 1px solid var(--nfc-v49-line);
 
 
@@ -353,7 +347,6 @@ body,
 }
 
 .nfc-metric-value {
-
   color: var(--nfc-v49-text);
   font-size: clamp(23px, 1.9vw, 30px);
   font-weight: 650;
@@ -675,8 +668,6 @@ body,
 }
 
 .nfc-system-controls-page .nfc-settings-grid > .nfc-data-panel > .nfc-data-panel-header {
-
-
   border-bottom: 1px solid var(--nfc-v49-line);
 }
 
@@ -689,7 +680,6 @@ body,
 .nfc-system-controls-page .nfc-settings-subpanel {
   border: 0 !important;
   border-bottom: 1px solid var(--nfc-v49-line) !important;
-
   background: transparent !important;
   box-shadow: none !important;
 }
