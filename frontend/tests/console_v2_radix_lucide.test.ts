@@ -35,7 +35,7 @@ describe('Console v2 official Radix and Lucide foundation', () => {
     }
     assert.match(dialog, /onEscapeKeyDown=/);
     assert.match(dialog, /onPointerDownOutside=/);
-    assert.match(dialog, /if \(!next && !submitting\) close\(\)/);
+    assert.match(dialog, /if \(!next && !submitting && !submitLock\.current\) close\(\)/);
     assert.match(dialog, /authApi\.changePassword/);
     assert.match(dialog, /validatePasswordChange/);
     assert.doesNotMatch(dialog, /from ['"]antd['"]/);

@@ -38,8 +38,8 @@ describe('Console v2 Task Center Radix overlays', () => {
       assert.equal(getTaskDeleteAvailability({ status }).enabled, true, status);
     }
     for (const token of [
-      'getTaskDeleteAvailability(task)', 'disabled={!availability.enabled}',
-      'if (!availability.enabled || deleteMutation.isPending) return',
+      'getTaskDeleteAvailability(task)', 'disabled={!availability.enabled || deleteMutation.isPending}',
+      'if (!getTaskDeleteAvailability(task).enabled || deleteMutation.isPending || deleteInFlight.current) return',
       'tasksApi.deleteTask(task.id)', 'invalidateQueries',
       "queryClient.removeQueries({ queryKey: ['taskDetail', task.id] })",
       "queryClient.removeQueries({ queryKey: ['taskLogs', task.id] })",

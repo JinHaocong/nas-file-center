@@ -67,7 +67,7 @@ describe('Pure White Stage 5E-K native shared control fail-closed safety', () =>
     assert.equal((confirm.match(/onClick=\{\(\) => \{ if \(!busy\) onOpenChange\(false\); \}\}/g) || []).length,
       2, 'both close button and Cancel action must be busy-guarded');
     assert.doesNotMatch(confirm, /onClick=\{onConfirm\}|onClick=\{\(\) => onOpenChange\(false\)\}/);
-    assert.ok(taskDelete.includes('disabled={!availability.enabled}'));
+    assert.ok(taskDelete.includes('disabled={!availability.enabled || deleteMutation.isPending}'));
     assert.ok(taskDelete.includes('busy={deleteMutation.isPending}'));
     assert.ok(taskActions.includes('disabled={confirmAction ==='));
     assert.ok(taskActions.includes('busy={isAnyPending}'));

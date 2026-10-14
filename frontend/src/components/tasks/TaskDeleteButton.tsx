@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { tasksApi } from '../../api/tasks';
 import type { TaskDetail, TaskItem } from '../../types/task';
@@ -22,6 +22,7 @@ export const TaskDeleteButton: React.FC<Props> = ({
   const queryClient = useQueryClient();
   const toast = useConsoleToast();
   const [open, setOpen] = useState(false);
+  const deleteInFlight = useRef(false);
   const availability = getTaskDeleteAvailability(task);
 
   const deleteMutation = useMutation({
@@ -40,9 +41,17 @@ export const TaskDeleteButton: React.FC<Props> = ({
     },
   });
 
-  const confirmDelete = () => {
-    if (!availability.enabled || deleteMutation.isPending) return;
-    deleteMutation.mutate();
+  const confirmDelete = async () => {
+    // Acquire the lock synchronously, before React Query's pending state rerenders.
+    if (!getTaskDeleteAvailability(task).enabled || deleteMutation.isPending || deleteInFlight.current) return;
+    deleteInFlight.current = true;
+    try {
+      await deleteMutation.mutateAsync();
+    } catch {
+      // onError already owns the toast and task-list invalidation.
+    } finally {
+      deleteInFlight.current = false;
+    }
   };
 
   return (
@@ -52,23 +61,23 @@ export const TaskDeleteButton: React.FC<Props> = ({
           size={size === 'small' ? 'sm' : 'md'}
           variant={type === 'link' || type === 'text' ? 'ghost' : danger ? 'danger' : 'secondary'}
           leadingIcon={<ConsoleIcon name="archive" size={15} />}
-          disabled={!availability.enabled}
+          disabled={!availability.enabled || deleteMutation.isPending}
           loading={deleteMutation.isPending}
           aria-label={'删除任务 #' + task.id}
-          onClick={() => { if (availability.enabled) setOpen(true); }}
+          onClick={() => { if (availability.enabled && !deleteMutation.isPending && !deleteInFlight.current) setOpen(true); }}
         >删除</ConsoleButton>
       </span>
       <ConsoleConfirmDialog
         open={open}
-        onOpenChange={setOpen}
+        onOpenChange={next => { if (!deleteMutation.isPending && !deleteInFlight.current) setOpen(next); }}
         title={'确认删除任务 #' + task.id + '？'}
         description={
           <p>删除后将同时清除该任务的事件日志。该操作不会删除 NAS 上的任何文件，也不会删除 Audit 审计记录。</p>
         }
         confirmText="确认删除"
-        onConfirm={confirmDelete}
+        onConfirm={() => { void confirmDelete(); }}
         busy={deleteMutation.isPending}
-        disabled={!availability.enabled}
+        disabled={!availability.enabled || deleteMutation.isPending}
         danger
       />
     </>
