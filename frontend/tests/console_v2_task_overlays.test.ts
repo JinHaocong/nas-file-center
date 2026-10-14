@@ -66,7 +66,8 @@ describe('Console v2 Task Center Radix overlays', () => {
       'onPointerDownOutside={event => event.preventDefault()}',
     ]) assert.ok(modal.includes(safety), safety);
     assert.doesNotMatch(modal, /from ['"]antd['"]|<Modal\b|<Checkbox.Group/);
-    assert.match(modal, /<input type="checkbox"/);
+    assert.match(modal, /<ConsoleCheckbox value=\{option.value\}/);
+    assert.match(modal, /onCheckedChange=\{checked => toggle\(option.value, checked\)\}/);
   });
 
   test('cancel and retry require secondary confirmation, while pause/resume stay gated', () => {

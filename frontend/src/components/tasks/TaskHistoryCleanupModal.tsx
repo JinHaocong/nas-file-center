@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { tasksApi } from '../../api/tasks';
 import type { TerminalTaskStatus } from '../../types/task';
 import { ConsoleButton } from '../ui/ConsoleButton';
+import { ConsoleCheckbox } from '../ui/ConsoleCheckbox';
 import { ConsoleIcon } from '../ui/ConsoleIcon';
 import { useConsoleToast } from '../ui/ConsoleToast';
 
@@ -20,10 +21,13 @@ export const TaskHistoryCleanupModal: React.FC<Props> = ({ onCleaned }) => {
   const [selectedStatuses, setSelectedStatuses] = useState<TerminalTaskStatus[]>([
     'completed', 'failed', 'cancelled',
   ]);
+  // Synchronous guard closes the gap before React Query commits isPending.
+  const submitting = useRef(false);
   const queryClient = useQueryClient();
   const toast = useConsoleToast();
 
   const handleOpen = () => {
+    if (submitting.current) return;
     setSelectedStatuses(['completed', 'failed', 'cancelled']);
     setOpen(true);
   };
@@ -46,14 +50,29 @@ export const TaskHistoryCleanupModal: React.FC<Props> = ({ onCleaned }) => {
   });
 
   const toggle = (status: TerminalTaskStatus, checked: boolean) => {
+    if (submitting.current || cleanupMutation.isPending) return;
     setSelectedStatuses(previous => checked
       ? [...previous.filter(item => item !== status), status]
       : previous.filter(item => item !== status));
   };
 
-  const handleConfirm = () => {
-    if (selectedStatuses.length === 0 || cleanupMutation.isPending) return;
-    cleanupMutation.mutate(selectedStatuses);
+  const closeSafely = () => {
+    if (!submitting.current && !cleanupMutation.isPending) setOpen(false);
+  };
+  const handleConfirm = async () => {
+    if (submitting.current || cleanupMutation.isPending || selectedStatuses.length === 0) return;
+    // A stable snapshot, restricted to terminal statuses, prevents async selection drift.
+    const selected = TERMINAL_OPTIONS.map(option => option.value)
+      .filter(status => selectedStatuses.includes(status));
+    if (selected.length === 0) return;
+    submitting.current = true;
+    try {
+      await cleanupMutation.mutateAsync(selected);
+    } catch {
+      // onError already reports errors; keep the dialog open to allow explicit retry.
+    } finally {
+      submitting.current = false;
+    }
   };
 
   return (
@@ -63,13 +82,13 @@ export const TaskHistoryCleanupModal: React.FC<Props> = ({ onCleaned }) => {
         清理历史
       </ConsoleButton>
       <Dialog.Root open={open} onOpenChange={next => {
-        if (!cleanupMutation.isPending) setOpen(next);
+        if (!cleanupMutation.isPending && !submitting.current) setOpen(next);
       }}>
         <Dialog.Portal>
           <Dialog.Overlay className="nfc-v2-dialog-overlay" />
           <Dialog.Content
             className="nfc-v2-dialog nfc-v2-history-dialog nfc-overlay-modal nfc-history-cleanup-modal nfc-task-history-cleanup-modal"
-            onEscapeKeyDown={event => { if (cleanupMutation.isPending) event.preventDefault(); }}
+            onEscapeKeyDown={event => { if (cleanupMutation.isPending || submitting.current) event.preventDefault(); }}
             onPointerDownOutside={event => event.preventDefault()}
           >
             <header className="nfc-v2-dialog-heading">
@@ -82,7 +101,7 @@ export const TaskHistoryCleanupModal: React.FC<Props> = ({ onCleaned }) => {
               </div>
               <button type="button" className="nfc-v2-dialog-close"
                 disabled={cleanupMutation.isPending} aria-label="关闭历史清理窗口"
-                onClick={() => setOpen(false)}><ConsoleIcon name="x" size={18} /></button>
+                onClick={closeSafely}><ConsoleIcon name="x" size={18} /></button>
             </header>
 
             <div className="nfc-v2-history-body nfc-history-cleanup-stack">
@@ -97,10 +116,10 @@ export const TaskHistoryCleanupModal: React.FC<Props> = ({ onCleaned }) => {
                 <legend>选择要清理的历史任务状态：</legend>
                 {TERMINAL_OPTIONS.map(option => (
                   <label key={option.value}>
-                    <input type="checkbox" value={option.value}
+                    <ConsoleCheckbox value={option.value}
                       checked={selectedStatuses.includes(option.value)}
                       disabled={cleanupMutation.isPending}
-                      onChange={event => toggle(option.value, event.target.checked)} />
+                      onCheckedChange={checked => toggle(option.value, checked)} />
                     <span>{option.label}</span>
                   </label>
                 ))}
@@ -119,10 +138,10 @@ export const TaskHistoryCleanupModal: React.FC<Props> = ({ onCleaned }) => {
 
             <footer className="nfc-v2-confirm-actions">
               <ConsoleButton disabled={cleanupMutation.isPending}
-                onClick={() => setOpen(false)}>取消</ConsoleButton>
+                onClick={closeSafely}>取消</ConsoleButton>
               <ConsoleButton variant="danger"
                 disabled={selectedStatuses.length === 0 || cleanupMutation.isPending}
-                loading={cleanupMutation.isPending} onClick={handleConfirm}>
+                loading={cleanupMutation.isPending} onClick={() => { void handleConfirm(); }}>
                 确认清理
               </ConsoleButton>
             </footer>
