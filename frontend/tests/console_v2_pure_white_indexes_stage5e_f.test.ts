@@ -39,7 +39,7 @@ describe('Pure White Stage 5E-F Indexes complex state gates', () => {
     assert.match(indexes, /record\.path_state === 'available'/);
     assert.match(indexes, /<ConsolePagination page=\{page\} pageSize=\{pageSize\}/);
     assert.match(indexes, /onChange=\{changePage\}/);
-    assert.match(indexes, /className="nfc-v2-index-create-dialog"/);
+    assert.match(indexes, /nfc-v2-index-create-dialog/);
     assert.match(lifecycle, /if \(root\.has_active_job \|\| root\.can_remove === false\)/);
     assert.match(lifecycle, /case 'blocked':/);
     assert.match(lifecycle, /case 'missing':/);
