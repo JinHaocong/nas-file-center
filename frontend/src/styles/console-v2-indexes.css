@@ -57,8 +57,9 @@
   --nfc-idx-line:var(--v2-line,#2c3a4e);
   --nfc-idx-accent:var(--v2-indigo,#83b5ff);
 }
-/* Radix content must sit above the shared 1300 create-dialog scrim. */
-.nfc-v2-index-create-dialog[data-state='open'] { z-index: 1301; }
+/* Create is a base-layer dialog (1100/1101), not a 1300 destructive confirm.
+   Its nested DirectoryPicker (1200/1201) and favorite confirm (1300/1301)
+   must stay above it, including while scrolling or using keyboard focus. */
 .nfc-v2-index-create-dialog {
   --nfc-idx-form-bg:var(--nfc-surface-1,#fff);
   --nfc-idx-form-ink:var(--nfc-text,#172338);

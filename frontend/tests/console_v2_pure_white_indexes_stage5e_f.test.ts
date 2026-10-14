@@ -47,7 +47,8 @@ describe('Pure White Stage 5E-F Indexes complex state gates', () => {
     assert.match(lifecycle, /case 'blocked':/);
     assert.match(lifecycle, /case 'missing':/);
     assert.match(genericDialogs, /\.nfc-v2-dialog\[data-state='open'\][\s\S]*?z-index:\s*1101/);
-    assert.match(styles, /\.nfc-v2-index-create-dialog\[data-state='open'\]\s*\{\s*z-index:\s*1301\s*;/);
+    assert.doesNotMatch(styles, /\.nfc-v2-index-create-dialog\[data-state='open'\]\s*\{\s*z-index:\s*1301/);
+    assert.match(indexes, /<Dialog\.Overlay className="nfc-v2-dialog-overlay" \/>/);
     assert.match(entry, /import '\.\/styles\/console-v2-indexes\.css'/);
   });
 
