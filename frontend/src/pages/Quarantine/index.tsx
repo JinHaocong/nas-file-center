@@ -22,6 +22,7 @@ import { StatusBadge } from '../../components/ui/StatusBadge';
 import { ConsoleButton } from '../../components/ui/ConsoleButton';
 import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
 import { ConsoleSelect } from '../../components/ui/ConsoleSelect';
+import { ConsoleCheckbox } from '../../components/ui/ConsoleCheckbox';
 import { ConsolePagination } from '../../components/ui/ConsolePagination';
 import { ConsoleEmpty } from '../../components/ui/ConsoleEmpty';
 import { ConsoleConfirmDialog } from '../../components/ui/ConsoleConfirmDialog';
@@ -324,11 +325,11 @@ export const QuarantinePage: React.FC = () => {
   };
 
   const checkedEntry = (record: QuarantineEntry) => (
-    <input type="checkbox" className="nfc-v2-quarantine-checkbox"
+    <ConsoleCheckbox className="nfc-v2-quarantine-checkbox"
       aria-label={'选择隔离条目 #' + record.id}
       checked={record.state === 'active' && selectedEntryIds.includes(record.id)}
       disabled={record.state !== 'active'}
-      onChange={event => toggleSelected(record, event.target.checked)} />
+      onCheckedChange={checked => toggleSelected(record, checked)} />
   );
   const renderStatus = (state: QuarantineState) => (
     <StatusBadge status={STATE_CONFIG[state]?.status || 'queued'} label={STATE_CONFIG[state]?.label || state} />
@@ -428,11 +429,11 @@ export const QuarantinePage: React.FC = () => {
                 <table className="nfc-v2-quarantine-table">
                   <thead><tr>
                     <th scope="col" className="nfc-v2-quarantine-check-cell">
-                      <input type="checkbox" className="nfc-v2-quarantine-checkbox"
+                      <ConsoleCheckbox className="nfc-v2-quarantine-checkbox"
                         aria-label="选择当前页所有 active 隔离条目"
                         checked={currentPageAllSelected}
                         disabled={currentPageSelectableIds.length === 0}
-                        onChange={event => toggleCurrentPage(event.target.checked)} />
+                        onCheckedChange={toggleCurrentPage} />
                     </th>
                     <th scope="col">编号</th><th scope="col">原始路径</th>
                     <th scope="col">隔离区路径</th><th scope="col">大小</th>
