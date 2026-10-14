@@ -20,6 +20,9 @@ interface Props {
 export const DedupeActionDialog: React.FC<Props> = ({
   kind, storageAction, errorMessage, busy, onCancel, onConfirm,
 }) => {
+  // Defensive callback gate; the owning page retains Preview/Draft and RBAC authority.
+  const cancelSafely = () => { if (!busy) onCancel(); };
+  const confirmSafely = () => { if (!busy && kind !== null) onConfirm(); };
   const actionLabel = storageAction === 'quarantine'
     ? 'Quarantine' : storageAction === 'hardlink' ? 'Hardlink' : 'Reflink';
   const titles: Record<DedupeNoticeKind, string> = {
@@ -37,7 +40,7 @@ export const DedupeActionDialog: React.FC<Props> = ({
     empty_plan: '确定',
   };
   return (
-    <Dialog.Root open={kind !== null} onOpenChange={next => { if (!next && !busy) onCancel(); }}>
+    <Dialog.Root open={kind !== null} onOpenChange={next => { if (!next) cancelSafely(); }}>
       <Dialog.Portal>
         <Dialog.Overlay className="nfc-v2-dialog-overlay nfc-v2-advanced-dedupe-overlay" />
         <Dialog.Content className="nfc-overlay-modal nfc-v2-advanced-dedupe-dialog"
@@ -49,7 +52,7 @@ export const DedupeActionDialog: React.FC<Props> = ({
             </span>
             <Dialog.Title>{kind ? titles[kind] : '高级去重确认'}</Dialog.Title>
             <button type="button" aria-label="关闭高级去重确认窗口"
-              disabled={busy} onClick={onCancel}>
+              disabled={busy} onClick={cancelSafely}>
               <ConsoleIcon name="x" size={18} />
             </button>
           </header>
@@ -90,9 +93,9 @@ export const DedupeActionDialog: React.FC<Props> = ({
           </Dialog.Description>
           <div className="nfc-v2-advanced-dedupe-dialog-actions">
             {kind !== 'empty_plan' && (
-              <ConsoleButton disabled={busy} onClick={onCancel}>取消</ConsoleButton>
+              <ConsoleButton disabled={busy} onClick={cancelSafely}>取消</ConsoleButton>
             )}
-            <ConsoleButton variant="primary" disabled={!kind} loading={busy} onClick={onConfirm}>
+            <ConsoleButton variant="primary" disabled={!kind || busy} loading={busy} onClick={confirmSafely}>
               {kind ? confirmTexts[kind] : '确定'}
             </ConsoleButton>
           </div>
