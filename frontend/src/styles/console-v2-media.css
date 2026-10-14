@@ -91,6 +91,8 @@
   --nfc-media-line:var(--v2-line,#2c3a4e);
   --nfc-media-accent:var(--v2-indigo,#83b5ff);
 }
+/* Radix queue content must paint above the shared 1300 dim-only overlay. */
+.nfc-v2-media-queue-dialog[data-state='open'] { z-index:1301; }
 .nfc-v2-media-queue-dialog {
   --nfc-media-queue-bg:var(--nfc-surface-1,#fff);
   --nfc-media-queue-soft:var(--nfc-surface-2,#f6f8fb);
