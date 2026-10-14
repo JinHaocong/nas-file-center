@@ -119,20 +119,21 @@
 .nfc-v2-shell .nfc-v2-plans-page .nfc-data-panel-description { color: var(--v2-muted); }
 .nfc-v2-plan-list-state { padding: 20px; color: var(--v2-muted); text-align: center; }
 
-.nfc-v2-plan-table-scroll { width: 100%; max-width: 100%; overflow-x: auto; }
-.nfc-v2-shell .nfc-v2-plan-table {
+.nfc-v2-plans-page .nfc-v2-plan-table-scroll { width: 100%; max-width: 100%; overflow-x: auto; }
+.nfc-v2-plans-page .nfc-v2-plan-table {
   width: 100%;
   min-width: 860px;
   border-collapse: collapse;
   font-size: 12px;
   text-align: left;
 }
-.nfc-v2-plan-table th { padding: 13px 17px; background: var(--v2-canvas); color: var(--v2-muted); border-bottom: 1px solid var(--v2-line); font-weight: 620; font-size: 11px; white-space: nowrap; }
-.nfc-v2-plan-table td { padding: 15px 17px; border-top: 1px solid var(--v2-line); color: var(--v2-text); }
-.nfc-v2-plan-table tbody tr:first-child td { border-top: 0; }
-.nfc-v2-plan-table tbody tr:hover { background: color-mix(in srgb, var(--v2-indigo-soft) 50%, var(--v2-paper)); }
-/* Plan LIST column sizing belongs here. The PlanDetail item ledger uses its
-   own scoped table columns; never let its 70px item-ID width shrink names. */
+.nfc-v2-plans-page .nfc-v2-plan-table th { padding: 13px 17px; background: var(--v2-canvas); color: var(--v2-muted); border-bottom: 1px solid var(--v2-line); font-weight: 620; font-size: 11px; white-space: nowrap; }
+.nfc-v2-plans-page .nfc-v2-plan-table td { padding: 15px 17px; border-top: 1px solid var(--v2-line); color: var(--v2-text); }
+.nfc-v2-plans-page .nfc-v2-plan-table tbody tr:first-child td { border-top: 0; }
+.nfc-v2-plans-page .nfc-v2-plan-table tbody tr:hover { background: color-mix(in srgb, var(--v2-indigo-soft) 50%, var(--v2-paper)); }
+/* Plan LIST owns all structural table chrome and column sizing. The shared
+   class also appears in PlanDetail: never let list padding, hover surfaces or
+   horizontal scroll sizing leak into its separate PlanItem ledger. */
 .nfc-v2-plans-page .nfc-v2-plan-table { min-width: 1160px; table-layout: fixed; }
 .nfc-v2-plans-page .nfc-v2-plan-table th:nth-child(1) { width: 29%; }
 .nfc-v2-plans-page .nfc-v2-plan-table th:nth-child(2) { width: 115px; }
