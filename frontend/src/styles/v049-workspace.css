@@ -90,12 +90,12 @@ body,
 
 .nfc-header.nfc-header {
   position: sticky;
-  top: 0;
+
   z-index: 30;
-  min-height: 58px;
-  padding: 8px 0 7px;
+
+
   border-bottom: 1px solid var(--nfc-v49-line);
-  border-radius: 0;
+
   background: color-mix(in srgb, var(--nfc-v49-canvas) 88%, transparent);
 }
 
@@ -130,7 +130,7 @@ body,
   padding: 2px;
   border: 1px solid var(--nfc-v49-line);
   border-radius: 999px;
-  background: color-mix(in srgb, var(--nfc-v49-surface) 72%, transparent);
+
 }
 
 .nfc-header-action-label {
@@ -142,7 +142,7 @@ body,
 
 .nfc-page-header {
   border-bottom: 1px solid var(--nfc-v49-line);
-  background: transparent;
+
 }
 
 .nfc-page-header-copy {
@@ -201,9 +201,9 @@ body,
 }
 
 .nfc-data-panel-header {
-  padding: 13px 16px 12px;
+
   gap: 14px;
-  border-bottom-color: var(--nfc-v49-line);
+
 }
 
 .nfc-data-panel-title {
@@ -336,21 +336,14 @@ body,
 }
 
 .nfc-metric-card {
-  border: 0;
+
   border-right: 1px solid var(--nfc-v49-line);
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
+
+
+
 }
 
-.nfc-metric-card:last-child {
-  border-right: 0;
-}
 
-.nfc-metric-card:hover {
-  transform: none;
-  background: color-mix(in srgb, var(--nfc-v49-accent) 2.6%, transparent);
-}
 
 .nfc-metric-label {
   color: var(--nfc-v49-subtle);
@@ -360,7 +353,7 @@ body,
 }
 
 .nfc-metric-value {
-  margin-top: 12px;
+
   color: var(--nfc-v49-text);
   font-size: clamp(23px, 1.9vw, 30px);
   font-weight: 650;
@@ -673,9 +666,6 @@ body,
 
 /* Settings ----------------------------------------------------------------- */
 
-.nfc-system-controls-page .nfc-settings-grid {
-  gap: 22px 26px;
-}
 
 .nfc-system-controls-page .nfc-settings-grid > .nfc-data-panel {
   border: 1px solid var(--nfc-v49-line) !important;
@@ -685,14 +675,11 @@ body,
 }
 
 .nfc-system-controls-page .nfc-settings-grid > .nfc-data-panel > .nfc-data-panel-header {
-  min-height: 58px;
-  padding: 13px 16px 12px;
+
+
   border-bottom: 1px solid var(--nfc-v49-line);
 }
 
-.nfc-system-controls-page .nfc-settings-grid > .nfc-data-panel > .nfc-data-panel-body {
-  padding: 14px 16px 16px;
-}
 
 .nfc-system-controls-page .nfc-settings-panel-body,
 .nfc-system-controls-page .nfc-settings-stack {
@@ -702,7 +689,7 @@ body,
 .nfc-system-controls-page .nfc-settings-subpanel {
   border: 0 !important;
   border-bottom: 1px solid var(--nfc-v49-line) !important;
-  border-radius: 0 !important;
+
   background: transparent !important;
   box-shadow: none !important;
 }
@@ -842,10 +829,6 @@ body,
   border-bottom-color: var(--nfc-v49-line);
 }
 
-.nfc-directory-browser-row {
-  min-height: 44px;
-  padding: 6px 7px;
-}
 
 .nfc-directory-list-viewport {
   max-height: min(50vh, 460px);
