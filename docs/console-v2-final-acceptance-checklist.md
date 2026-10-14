@@ -182,3 +182,12 @@ No screenshot-only mock data in runtime.
 - Safety remains unchanged: only localhost Vite, synthetic GET responses, all non-GET API calls rejected with 405 and asserted absent, all external requests denied. No workflow submission, Plan execution, NAS mount, file mutations or deployment.
 - Source contracts pin removed shadow declarations, later winners and responsive browser behavior; all previous Chromium suites still execute. Cumulative target after 5E-C PASS: **256 matrix cases, 992 images**.
 - Further cascade cleanup, wider populated pages, precise production screenshots, original mask blur reproduction and real NAS sign-off are still open; synthetic fixtures are NOT proof of production NAS visual state.
+
+
+## Pure White Stage 5E-D — Media / Quarantine dense state, CSS cleanup
+
+- Audited v049 later same-selector cascade and retired **12** fully shadowed earlier properties from `frontend/src/styles/v049-workspace.css`: dense panel border radius; quiet panel border/background; overlay section border/background/radius; overlay section header height/padding/border/background; directory picker gap; mobile pagination background. Verified importance parity for the late winning declarations; no replacement properties, production component changes or backend modifications.
+- Expanded the existing 8-width × 4-theme Chromium workspace matrix with **two additional populated routes**: Media (healthy+verified, corrupt+changed with explicit delete eligibility, unknown+unverified), Quarantine (active, conflict, restored). Read-only fixture records use long paths; each route verifies **three real rows on desktop or three cards on mobile**, visible status badges, bounded mobile cards, desktop table-owned horizontal overflow, and exact enabled/disabled selection fences. Previous six empty-state routes and Plans/Tasks/Indexes dense routes remain covered.
+- Browser evidence now targets **32 viewport/theme cases × 11 screenshots = 352 images** in this runner (64 new images); cumulative target **256 cases / 1056 screenshots** after exact-HEAD CI. Existing earlier browser suites are unchanged.
+- **No NAS operations:** all test API reads locally synthesized, all non-GET API requests denied with HTTP 405 and asserted absent, external origins blocked. The tests do not click destructive actions, create Draft, freeze/validate/execute Plans, mutate files, or deploy.
+- This expands automated fixture-based UI evidence only. Production NAS original blur evidence, broader CSS audit and live deployment visual acceptance remain open.

@@ -17,7 +17,6 @@ describe('Console v2 reviewed v049 legacy workspace CSS retirement', () => {
     assert.match(css, /\.nfc-row-actions\s*\{[^}]*opacity:\s*0\.72;/);
     assert.match(css, /\.nfc-row-actions:focus-within\s*\{[^}]*opacity:\s*1;/);
     assert.match(css, /\.nfc-mobile-pagination\s*\{[^}]*min-height:\s*50px;/);
-    assert.match(css, /\.nfc-mobile-pagination\s*\{[^}]*var\(--nfc-v49-surface-soft\)/);
     assert.match(css, /\.nfc-mobile-pagination\s*\{[^}]*color-mix\(in srgb, var\(--nfc-nav-surface\) 68%, transparent\)/);
   });
 

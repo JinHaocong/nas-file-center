@@ -50,6 +50,12 @@ const DENSE_PAGES = [
     card: '.nfc-task-mobile-card', scroll: '.nfc-v2-task-table-scroll' },
   { path: '/indexes', id: 'indexes', row: '.nfc-v2-indexes-table tbody tr',
     card: '.nfc-index-mobile-card', scroll: '.nfc-v2-indexes-table-scroll' },
+  { path: '/media', id: 'media', row: '.nfc-v2-media-table tbody tr',
+    card: '.nfc-v2-media-mobile .nfc-index-mobile-card',
+    scroll: '.nfc-v2-media-table-scroll', count: 3 },
+  { path: '/quarantine', id: 'quarantine', row: '.nfc-v2-quarantine-table tbody tr',
+    card: '.nfc-quarantine-mobile-card',
+    scroll: '.nfc-v2-quarantine-table-scroll', count: 3 },
 ];
 function denseFixture(path) {
   const timestamp = '2026-10-12T08:30:00Z';
@@ -93,11 +99,67 @@ function denseFixture(path) {
         active_job_status: null, created_at: timestamp, last_indexed_at: null },
     ], total: 2, page: 1, page_size: 20,
   };
+  if (path === '/api/media') {
+    const asset = (id, mediaKind, integrity, verification, canDelete) => ({
+      id, indexed_path_id: id + 1000, root_key: DENSE_ROOT,
+      path: DENSE_ROOT + '/2026-Photo-Video-Metadata-and-Integrity/' +
+        id + '-Original-Camera-Capture-Super-Long-Filename.' +
+        (mediaKind === 'video' ? 'mp4' : 'raw'),
+      relative_path: '2026-Photo-Video-Metadata-and-Integrity/' + id,
+      basename: id + '-Original-Camera-Capture-Super-Long-Filename',
+      size: 7785234567, mtime_ns: 1700000000000000000, media_kind: mediaKind,
+      width: mediaKind === 'video' ? 3840 : 8192,
+      height: mediaKind === 'video' ? 2160 : 5464,
+      format: mediaKind === 'video' ? 'MP4' : 'RAW',
+      date_taken: '2026-10-12', camera: 'Visual Fixture Camera / Not a Real Device',
+      orientation: 1, duration_seconds: mediaKind === 'video' ? 420.5 : null,
+      codec: mediaKind === 'video' ? 'HEVC' : null,
+      bitrate: mediaKind === 'video' ? 24000000 : null,
+      fps: mediaKind === 'video' ? 59.94 : null, audio_codec: 'AAC',
+      integrity_status: integrity, integrity_reason_code:
+        integrity === 'corrupt' ? 'HASH_MISMATCH_FROZEN_EVIDENCE' : null,
+      integrity_detail: null, verification_status: verification,
+      verification_reason_code: null, verification_detail: null,
+      verification_checked_at: timestamp, can_direct_delete: canDelete,
+      probed_at: timestamp,
+    });
+    return {
+      items: [asset(801, 'image', 'healthy', 'verified', false),
+        asset(802, 'video', 'corrupt', 'changed', true),
+        asset(803, 'image', 'unknown', 'unverified', false)],
+      total: 3, page: 1, page_size: 50,
+    };
+  }
+  if (path === '/api/quarantine') {
+    const entry = (id, state) => ({
+      id, original_path: DENSE_ROOT + '/Originals/Deep-Archive-' + id +
+        '-Protected-Filename-With-Metadata.raw',
+      quarantine_path: DENSE_ROOT + '/.nas-file-center-trash/' + id +
+        '/Visual-Fixture-Private-Quarantine-Long-Path',
+      task_id: 501, plan_item_id: 100, state, size: 987654321,
+      hash: 'c'.repeat(64), mtime_ns: 1700000000000000000,
+      device: 1, inode: id + 5000, quarantined_at: timestamp,
+      expires_at: null, restored_at: state === 'restored' ? timestamp : null,
+      purged_at: null, last_error: state === 'conflict' ? 'SAFE_PATH_CONFLICT' : null,
+      created_at: timestamp, updated_at: timestamp,
+    });
+    return {
+      items: [entry(901, 'active'), entry(902, 'conflict'),
+        entry(903, 'restored')], total: 3, page: 1, page_size: 20,
+    };
+  }
   return null;
 }
 function fixture(path, dense = false) {
   if (path === '/api/auth/me') return {
     id: 1, username: 'css-visual-fixture', role: 'admin', is_admin: true,
+  };
+  if (path === '/api/media/summary') return {
+    total: dense ? 3 : 0, image: dense ? 2 : 0, video: dense ? 1 : 0,
+    healthy: dense ? 1 : 0, corrupt: dense ? 1 : 0, unknown: dense ? 1 : 0,
+    verification_unverified: dense ? 1 : 0, verification_baseline: 0,
+    verification_verified: dense ? 1 : 0, verification_changed: dense ? 1 : 0,
+    verification_unknown: 0,
   };
   if (path === '/api/dashboard/summary') return {
     indexed_files: 100000, indexed_folders: 2000, queued_or_running_jobs: 0,
@@ -180,7 +242,9 @@ async function inspectDense(page, item, width) {
     const isMobile = width < 768;
     const selectors = isMobile ? item.card : item.row;
     const rows = [...document.querySelectorAll(selectors)];
-    if (rows.length !== 2) errors.push('Expected two dense records, got ' + rows.length);
+    const expectedCount = item.count ?? 2;
+    if (rows.length !== expectedCount)
+      errors.push('Expected ' + expectedCount + ' dense records, got ' + rows.length);
     const container = document.querySelector('.nfc-page-content');
     const outer = container?.getBoundingClientRect();
     for (const row of rows) {
@@ -198,6 +262,30 @@ async function inspectDense(page, item, width) {
           errors.push('Wide-table scrollport exceeds viewport');
         if (!['auto', 'scroll'].includes(getComputedStyle(scroll).overflowX))
           errors.push('Wide table must own horizontal overflow');
+      }
+    }
+    if (item.id === 'media') {
+      const selector = '.nfc-v2-media-checkbox[aria-label^="选择可永久删除损坏媒体"]';
+      const controls = [...document.querySelectorAll(selector)];
+      const unique = new Map(controls.map(x => [x.getAttribute('aria-label'), x]));
+      const enabled = id => unique.get('选择可永久删除损坏媒体 #' + id)?.disabled === false;
+      if (unique.size !== 3 || enabled(801) || !enabled(802) || enabled(803))
+        errors.push('Only corrupt frozen-evidence media #802 may be selected for delete Preview');
+      const statusText = rows.map(x => x.innerText).join(' ');
+      for (const label of ['SHA256 通过', '内容变化', '未建立基线', '损坏']) {
+        if (!statusText.includes(label)) errors.push('Media badge missing ' + label);
+      }
+    }
+    if (item.id === 'quarantine') {
+      const selector = '.nfc-v2-quarantine-checkbox[aria-label^="选择隔离条目"]';
+      const controls = [...document.querySelectorAll(selector)];
+      const unique = new Map(controls.map(x => [x.getAttribute('aria-label'), x]));
+      const enabled = id => unique.get('选择隔离条目 #' + id)?.disabled === false;
+      if (unique.size !== 3 || !enabled(901) || enabled(902) || enabled(903))
+        errors.push('Only active quarantine entry #901 may be selected');
+      const statusText = rows.map(x => x.innerText).join(' ');
+      for (const label of ['已隔离', '冲突', '已恢复']) {
+        if (!statusText.includes(label)) errors.push('Quarantine state missing ' + label);
       }
     }
     if (!outer || outer.left < -2 || outer.right > width + 2)
@@ -255,7 +343,7 @@ try {
           });
         }
         // A second pass mounts populated realistic ledgers without any backend writes.
-        // Preserve the existing six empty-state screenshots and add three dense views.
+        // Preserve six empty-state routes, add five dense real pages, including status gates.
         denseMode = true;
         for (const item of DENSE_PAGES) {
           await page.goto(BASE + item.path, { waitUntil: 'domcontentloaded' });
@@ -281,8 +369,8 @@ try {
     }
   }
   assert.equal(passed, WIDTHS.length * THEMES.length);
-  console.log('[WORKSPACE CASCADE] 32/32 cases, 288 screenshots; ' +
-    'real six-page empty + three-page dense CSS, synthetic GET only; no NAS or file access.');
+  console.log('[WORKSPACE CASCADE] 32/32 cases, 352 screenshots; ' +
+    'real six-page empty + five-page dense CSS/status gates; synthetic GET only; no NAS access.');
 } finally {
   await browser?.close();
   server.kill('SIGTERM');

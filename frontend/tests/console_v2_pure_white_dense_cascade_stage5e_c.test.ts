@@ -55,7 +55,7 @@ describe('Pure White Stage 5E-C v049 historical shadows and dense ledger accepta
       '.nfc-v2-plan-table tbody tr', '.nfc-v2-task-table tbody tr',
       '.nfc-v2-indexes-table tbody tr',
       'VALIDATION_PATH_IDENTITY_CHANGED', 'Unavailable-Recovery-Snapshot',
-      'Expected two dense records', 'Mobile dense card exceeds viewport bounds',
+      'const expectedCount = item.count ?? 2', 'Mobile dense card exceeds viewport bounds',
       'Wide-table scrollport exceeds viewport', 'Wide table must own horizontal overflow',
       'getComputedStyle(scroll).overflowX',
       'const isMobile = width < 768',
@@ -72,7 +72,7 @@ describe('Pure White Stage 5E-C v049 historical shadows and dense ledger accepta
       'denseMode = true', 'denseMode = false',
       'JSON.stringify(fixture(url.pathname, denseMode))',
       'assert.equal(passed, WIDTHS.length * THEMES.length)',
-      '32/32 cases, 288 screenshots',
+      '32/32 cases, 352 screenshots',
       "'/dashboard'", "'/media'", "'/quarantine'",
     ]) assert.ok(browser.includes(needle), needle);
     assert.doesNotMatch(browser, /(?:plansApi|tasksApi|indexesApi)\.(?:execute|delete|purge|freeze|validate)\(/);
