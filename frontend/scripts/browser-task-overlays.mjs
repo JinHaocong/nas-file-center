@@ -136,7 +136,10 @@ try {
       const label = theme.mode + '-' + theme.system + '-' + width;
       try {
         await page.goto(BASE_URL + '/tasks', { waitUntil: 'domcontentloaded' });
-        await page.getByRole('button', { name: '详情' }).first().click({ timeout: 15000 });
+        const detailLauncher = page.getByRole('button', { name: '详情' }).first();
+        const detailOpener = await detailLauncher.elementHandle();
+        assert.ok(detailOpener, 'Tasks detail needs a mounted keyboard launcher');
+        await detailLauncher.click({ timeout: 15000 });
         const sheet = page.locator('.nfc-v2-sheet.nfc-overlay-drawer');
         await sheet.waitFor({ state: 'visible' });
         const deleteLauncher = sheet.getByRole('button', { name: '删除任务 #42' });
@@ -160,6 +163,13 @@ try {
         await page.waitForFunction(launcherFocused);
         await page.getByRole('button', { name: '关闭详情抽屉' }).click();
         await sheet.waitFor({ state: 'hidden' });
+        await page.waitForFunction(opener => document.activeElement === opener, detailOpener);
+        // Reopen this exact Task Sheet by keyboard and test independent Escape.
+        await page.keyboard.press('Enter');
+        await sheet.waitFor({ state: 'visible' });
+        await page.keyboard.press('Escape');
+        await sheet.waitFor({ state: 'hidden' });
+        await page.waitForFunction(opener => document.activeElement === opener, detailOpener);
         console.log('[TASK BROWSER NESTED PASS] ' + label);
 
         await page.getByRole('button', { name: '清理历史' }).click();
