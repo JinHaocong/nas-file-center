@@ -982,14 +982,6 @@ body,
   border-radius: var(--nfc-w2-radius-sm);
 }
 
-.nfc-app-main .nfc-dashboard-page .nfc-dashboard-rail {
-  gap: 22px;
-}
-
-.nfc-app-main .nfc-media-page .nfc-page-alert {
-  margin: 14px 0 18px;
-}
-
 .nfc-app-main .nfc-quarantine-command-center {
   padding: 0;
   background: transparent;
