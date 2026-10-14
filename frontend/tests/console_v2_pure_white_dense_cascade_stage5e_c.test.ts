@@ -72,7 +72,7 @@ describe('Pure White Stage 5E-C v049 historical shadows and dense ledger accepta
       'denseMode = true', 'denseMode = false',
       'JSON.stringify(fixture(url.pathname, denseMode))',
       'assert.equal(passed, WIDTHS.length * THEMES.length)',
-      '32/32 cases, 288 screenshots',
+      '32/32 cases, 352 screenshots',
       "'/dashboard'", "'/media'", "'/quarantine'",
     ]) assert.ok(browser.includes(needle), needle);
     assert.doesNotMatch(browser, /(?:plansApi|tasksApi|indexesApi)\.(?:execute|delete|purge|freeze|validate)\(/);
