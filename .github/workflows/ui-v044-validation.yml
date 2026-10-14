@@ -155,6 +155,10 @@ jobs:
         working-directory: frontend
         run: node scripts/browser-task-ledger-states.mjs
 
+      - name: Run read-only Chromium Indexes state/pagination/dialog matrix
+        working-directory: frontend
+        run: node scripts/browser-indexes-ledger-states.mjs
+
       - name: Upload visual evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -172,3 +176,4 @@ jobs:
             frontend/artifacts/browser-organizer-dedupe/*.png
             frontend/artifacts/browser-workspace-cascade/*.png
             frontend/artifacts/browser-task-ledger-states/*.png
+            frontend/artifacts/browser-indexes-ledger-states/*.png
