@@ -46,7 +46,7 @@ describe('Pure White Stage 5E-R: Plans list vs PlanItem detail CSS ownership', (
       main.indexOf("import './styles/console-v2-plan-detail.css';"));
     assert.match(list, /<table className="nfc-v2-plan-table">/);
     assert.match(detail, /nfc-plan-detail-page/);
-    for (const run of ['browser-plan-lifecycle.mjs', 'browser-workspace-cascade.mjs']) {
+    for (const run of ['browser-plan-lifecycle-overlays.mjs', 'browser-workspace-cascade.mjs']) {
       assert.ok(scripts.includes('node scripts/' + run), run);
     }
     assert.match(read('scripts/browser-workspace-cascade.mjs'),
