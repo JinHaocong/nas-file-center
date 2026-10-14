@@ -139,7 +139,8 @@ try {
         await page.getByRole('button', { name: '详情' }).first().click({ timeout: 15000 });
         const sheet = page.locator('.nfc-v2-sheet.nfc-overlay-drawer');
         await sheet.waitFor({ state: 'visible' });
-        await sheet.getByRole('button', { name: '删除任务 #42' }).click();
+        const deleteLauncher = sheet.getByRole('button', { name: '删除任务 #42' });
+        await deleteLauncher.click();
         const confirm = page.locator('.nfc-v2-confirm-dialog');
         await confirm.waitFor({ state: 'visible' });
         const nestedErrors = await inspect(page, theme.effective, width, 'nested');
@@ -148,6 +149,15 @@ try {
         await page.keyboard.press('Escape');
         await confirm.waitFor({ state: 'hidden' });
         await sheet.waitFor({ state: 'visible' });
+        const launcherFocused = () => document.activeElement?.getAttribute('aria-label') ===
+          '删除任务 #42' && Boolean(document.activeElement.closest('.nfc-v2-sheet'));
+        await page.waitForFunction(launcherFocused);
+        // A restored keyboard target must reopen the same nested confirmation.
+        await page.keyboard.press('Enter');
+        await confirm.waitFor({ state: 'visible' });
+        await confirm.getByRole('button', { name: '取消' }).click();
+        await confirm.waitFor({ state: 'hidden' });
+        await page.waitForFunction(launcherFocused);
         await page.getByRole('button', { name: '关闭详情抽屉' }).click();
         await sheet.waitFor({ state: 'hidden' });
         console.log('[TASK BROWSER NESTED PASS] ' + label);
