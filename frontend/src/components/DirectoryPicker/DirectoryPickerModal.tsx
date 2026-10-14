@@ -22,7 +22,7 @@ const PAGE_SIZE = 100;
 
 export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
   open, onCancel, onConfirm, multiple = false, initialPath, selectedValues,
-  returnFocusTo,
+  returnFocusTo, disabled = false,
 }) => {
   const queryClient = useQueryClient();
   const toast = useConsoleToast();
@@ -37,8 +37,16 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
   const [confirmFavoriteId, setConfirmFavoriteId] = useState<number | null>(null);
   const [isConfirming, setIsConfirming] = useState(false);
   const confirmingRef = useRef(false);
+  const disabledRef = useRef(disabled);
+  disabledRef.current = disabled;
+  const openRef = useRef(open);
+  openRef.current = open;
+  // A result from a previous (possibly closed/reopened) browser session may
+  // not publish a selection into a new form instance.
+  const selectionSessionRef = useRef(0);
 
   useEffect(() => {
+    selectionSessionRef.current += 1;
     if (!open) return;
     const initial = initialDirectorySelection(selectedValues, multiple);
     setSelectedPaths(initial);
@@ -51,7 +59,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
     setConfirmFavoriteId(null);
     setIsConfirming(false);
     confirmingRef.current = false;
-  }, [open, initialPath, selectedValues, multiple]);
+  }, [open, disabled, initialPath, selectedValues, multiple]);
 
   const { data: dirData, isLoading: isDirLoading, isFetching: isDirFetching,
     isError: isDirError, error: dirError, refetch: refetchDir,
@@ -114,18 +122,18 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
   [favData?.items, effectiveCurrentPath]);
 
   const handleNavigate = (path: string) => {
-    if (confirmingRef.current) return;
+    if (disabledRef.current || confirmingRef.current) return;
     setCurrentPath(path);
     setSearchQuery('');
     setPage(1);
     setActiveTab('browser');
   };
   const handleToggleSelect = (path: string) => {
-    if (confirmingRef.current || !isWithinDirectoryRoots(path, allowedRoots)) return;
+    if (disabledRef.current || confirmingRef.current || !isWithinDirectoryRoots(path, allowedRoots)) return;
     setSelectedPaths(previous => toggleDirectorySelection(previous, path, multiple));
   };
   const handleSelectCurrent = () => {
-    if (!isCurrentAllowed || confirmingRef.current) return;
+    if (disabledRef.current || !isCurrentAllowed || confirmingRef.current) return;
     setSelectedPaths(previous => multiple
       ? (previous.includes(effectiveCurrentPath) ? previous : [...previous, effectiveCurrentPath])
       : [effectiveCurrentPath]);
@@ -135,7 +143,8 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
     onCancel();
   };
   const handleConfirm = async () => {
-    if (confirmingRef.current || isDirFetching || isDirError || !dirData) return;
+    if (disabledRef.current || !openRef.current || confirmingRef.current ||
+        isDirFetching || isDirError || !dirData) return;
     const selection = resolveDirectorySelection(selectedPaths, effectiveCurrentPath, multiple);
     if (!selection) return;
     const paths = Array.isArray(selection) ? selection : [selection];
@@ -143,12 +152,17 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
       toast.error('选择包含白名单范围外的路径；请重新选择允许的目录');
       return;
     }
+    const selectionSession = selectionSessionRef.current;
     confirmingRef.current = true;
     setIsConfirming(true);
     try {
       // Recents recording is best-effort and must never make selected paths
       // mutate or turn a valid selection into an unsafe fallback.
       await filesystemApi.recordRecent(paths).catch(() => {});
+      // The containing form can become disabled, close, or reopen while we
+      // await recents. In all three cases, drop this now-stale selection.
+      if (disabledRef.current || !openRef.current ||
+          selectionSession !== selectionSessionRef.current) return;
       onConfirm(selection);
       onCancel();
     } finally {
@@ -160,7 +174,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
   const hasSelection = selectedPaths.length > 0 || isCurrentAllowed;
 
   return (
-    <Dialog.Root open={open} onOpenChange={next => { if (!next) cancel(); }}>
+    <Dialog.Root open={open && !disabled} onOpenChange={next => { if (!next) cancel(); }}>
       <Dialog.Portal>
         <Dialog.Overlay className="nfc-v2-dialog-overlay nfc-v2-directory-overlay" />
         <Dialog.Content
