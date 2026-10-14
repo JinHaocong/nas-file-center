@@ -5,6 +5,7 @@ import { plansApi } from '../../api/domain';
 import { getStructuredApiError } from '../../api/errors';
 import type { PlanHistoryStatus } from '../../types';
 import { ConsoleButton } from '../ui/ConsoleButton';
+import { ConsoleCheckbox } from '../ui/ConsoleCheckbox';
 import { ConsoleIcon } from '../ui/ConsoleIcon';
 import { useConsoleToast } from '../ui/ConsoleToast';
 
@@ -40,8 +41,11 @@ export const PlanHistoryCleanupModal: React.FC<Props> = ({ onCleaned }) => {
     },
   });
 
+  const closeSafely = () => {
+    if (!cleanupMutation.isPending && !submitting.current) setOpen(false);
+  };
   const handleOpen = () => {
-    if (submitting.current) return;
+    if (submitting.current || cleanupMutation.isPending) return;
     setSelectedStatuses(['completed', 'failed']);
     setOpen(true);
   };
@@ -78,7 +82,7 @@ export const PlanHistoryCleanupModal: React.FC<Props> = ({ onCleaned }) => {
               <div><Dialog.Title>清理计划历史</Dialog.Title></div>
               <button type="button" className="nfc-v2-dialog-close" aria-label="关闭清理窗口"
                 disabled={cleanupMutation.isPending}
-                onClick={() => setOpen(false)}><ConsoleIcon name="x" size={18} /></button>
+                onClick={closeSafely}><ConsoleIcon name="x" size={18} /></button>
             </header>
             <Dialog.Description asChild>
               <div className="nfc-history-cleanup-stack nfc-v2-plan-history-body">
@@ -92,13 +96,13 @@ export const PlanHistoryCleanupModal: React.FC<Props> = ({ onCleaned }) => {
                   <legend className="nfc-history-cleanup-label">选择要清理的历史计划状态：</legend>
                   {PLAN_HISTORY_OPTIONS.map(item => (
                     <label key={item.value}>
-                      <input type="checkbox" checked={selectedStatuses.includes(item.value)}
+                      <ConsoleCheckbox checked={selectedStatuses.includes(item.value)}
                         disabled={cleanupMutation.isPending}
-                        onChange={event => {
-                          const next = event.target.checked
-                            ? [...selectedStatuses, item.value]
-                            : selectedStatuses.filter(value => value !== item.value);
-                          setSelectedStatuses(next);
+                        onCheckedChange={checked => {
+                          if (submitting.current || cleanupMutation.isPending) return;
+                          setSelectedStatuses(current => checked
+                            ? [...current.filter(value => value !== item.value), item.value]
+                            : current.filter(value => value !== item.value));
                         }} />
                       <span>{item.label}</span>
                     </label>
@@ -117,9 +121,9 @@ export const PlanHistoryCleanupModal: React.FC<Props> = ({ onCleaned }) => {
             </Dialog.Description>
             <div className="nfc-v2-confirm-actions">
               <ConsoleButton disabled={cleanupMutation.isPending}
-                onClick={() => setOpen(false)}>取消</ConsoleButton>
+                onClick={closeSafely}>取消</ConsoleButton>
               <ConsoleButton variant="danger" loading={cleanupMutation.isPending}
-                disabled={selectedStatuses.length === 0}
+                disabled={selectedStatuses.length === 0 || cleanupMutation.isPending}
                 onClick={() => { void handleConfirm(); }}>确认清理</ConsoleButton>
             </div>
           </Dialog.Content>
