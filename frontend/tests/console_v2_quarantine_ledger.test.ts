@@ -43,7 +43,7 @@ describe('Console v2 native Quarantine ledger / terminal cleanup', () => {
       "disabled={record.state !== 'active'}",
       'selectedEntryIds.includes(record.id)',
       'currentPageSelectableIds.every(id => selectedEntryIds.includes(id))',
-      'toggleCurrentPage(event.target.checked)',
+      'onCheckedChange={toggleCurrentPage}',
       'setSelectedEntryIds(current => checked',
       'Array.from(new Set([...current, ...currentPageSelectableIds]))',
       'aria-label="选择当前页所有 active 隔离条目"',
