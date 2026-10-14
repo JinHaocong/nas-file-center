@@ -7,6 +7,9 @@ const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8'
 const browser = read('scripts/browser-indexes-ledger-states.mjs');
 const indexes = read('src/pages/Indexes/index.tsx');
 const lifecycle = read('src/components/indexes/index_lifecycle.ts');
+const styles = read('src/styles/console-v2-indexes.css');
+const genericDialogs = read('src/styles/console-v2.css');
+const entry = read('src/main.tsx');
 const workflow = read('../.github/workflows/ui-v044-validation.yml');
 
 describe('Pure White Stage 5E-F Indexes complex state gates', () => {
@@ -43,6 +46,9 @@ describe('Pure White Stage 5E-F Indexes complex state gates', () => {
     assert.match(lifecycle, /if \(root\.has_active_job \|\| root\.can_remove === false\)/);
     assert.match(lifecycle, /case 'blocked':/);
     assert.match(lifecycle, /case 'missing':/);
+    assert.match(genericDialogs, /\.nfc-v2-dialog\[data-state='open'\][\s\S]*?z-index:\s*1101/);
+    assert.match(styles, /\.nfc-v2-index-create-dialog\[data-state='open'\]\s*\{\s*z-index:\s*1301\s*;/);
+    assert.match(entry, /import '\.\/styles\/console-v2-indexes\.css'/);
   });
 
   test('browser uses localhost-only synthetic GET, denies mutations and preserves prior suites', () => {
