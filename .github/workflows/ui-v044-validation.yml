@@ -159,6 +159,10 @@ jobs:
         working-directory: frontend
         run: node scripts/browser-indexes-ledger-states.mjs
 
+      - name: Run read-only Chromium Media complex filter and queue dialog matrix
+        working-directory: frontend
+        run: node scripts/browser-media-ledger-states.mjs
+
       - name: Upload visual evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -177,3 +181,4 @@ jobs:
             frontend/artifacts/browser-workspace-cascade/*.png
             frontend/artifacts/browser-task-ledger-states/*.png
             frontend/artifacts/browser-indexes-ledger-states/*.png
+            frontend/artifacts/browser-media-ledger-states/*.png
