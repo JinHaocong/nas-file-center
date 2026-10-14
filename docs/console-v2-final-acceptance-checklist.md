@@ -305,3 +305,11 @@ No screenshot-only mock data in runtime.
 - CSS historical consolidation overall, owner/production visual and keyboard review, real NAS test and final sign-off remain OPEN; no backend/DB/dependencies/permissions/filesystem changes or production writes.
 
 - Stage 5E-R CI correction: a three-class base table selector unexpectedly took precedence over the later 1160px list minimum at 768px and failed the Plan title-width browser assertion. Keep scoped base/list overrides at the same two-class specificity so the later 1160px and 29% sizing wins; require full exact-new-HEAD Chromium confirmation before merge.
+
+
+## Pure White Stage 5E-S — DirectoryPicker source tablist keyboard and ARIA association
+
+- Shared Radix DirectoryPicker's directory-browser/favorites/recent buttons declared `role="tab"` but did not implement horizontal ArrowLeft/ArrowRight, Home/End, or roving `tabIndex`. All three were normal Tab stops, and two `aria-controls` values pointed to absent panels because only the active tab panel was mounted. This is a genuine keyboard and screen-reader semantics gap, not a NAS filesystem defect.
+- Added a pure keyboard navigation model with left/right wrap and Home/End; the active tab alone gets `tabIndex=0`, inactive tabs get `-1`, and keyboard navigation updates selection and actual button focus. All three tabs now reference the single mounted, stable-id active panel; the panel's `aria-labelledby` follows the selected tab and it remains keyboard-reachable. Pointer switching, focus-return, nested Escape, dark/light tokens, and busy guards remain intact.
+- The existing 8-width × 4-theme Indexes read-only Chromium matrix now asserts selected/other tab keyboard focus, arrow and Home/End navigation, ARIA relationships, and Tab reaching the panel, without changing the screenshot count (still 1568 synthetic PNGs). Unit tests cover arrow wrapping and non-navigation-key behavior. Browser fixture denies non-GET requests and outbound traffic. **No real NAS, production visual review or final accessibility sign-off is implied.**
+- Broader shared controls, CSS consolidation, cross-browser/manual screen-reader and keyboard review, reduced-motion/contrast review, Organizer C5/Scheduler S5 actual NAS acceptance and owner sign-off remain OPEN. No backend, API, permissions, DB, filesystem, dependencies, or production changes.

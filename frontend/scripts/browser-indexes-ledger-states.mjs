@@ -231,6 +231,41 @@ try {
         assert.equal(nested.hit, true, 'Nested picker must receive pointer hits');
         assert.equal(nested.withinWidth && nested.withinHeight, true,
           'Nested picker must fit the viewport');
+        // Stage 5E-S: horizontal ARIA tabs are one Tab stop and respond to
+        // arrows, Home/End, wrapping and focus-visible keyboard navigation.
+        const tab = name => picker.locator('#nfc-directory-tab-' + name);
+        const checkTab = async name => {
+          await page.waitForFunction(tabId => {
+            const root = document.querySelector('.nfc-v2-directory-dialog');
+            const selected = root?.querySelector('#nfc-directory-tab-' + tabId);
+            const panel = root?.querySelector('#nfc-directory-active-panel');
+            const tabs = [...(root?.querySelectorAll('[role="tab"]') || [])];
+            return Boolean(selected && panel &&
+              document.activeElement === selected &&
+              selected.getAttribute('aria-selected') === 'true' &&
+              selected.getAttribute('tabindex') === '0' &&
+              tabs.length === 3 &&
+              tabs.every(other => other.getAttribute('aria-controls') === panel.id &&
+                other.getAttribute('tabindex') === (other === selected ? '0' : '-1')) &&
+              panel.getAttribute('aria-labelledby') === selected.id);
+          }, name);
+        };
+        await tab('browser').focus();
+        await checkTab('browser');
+        await page.keyboard.press('ArrowRight');
+        await checkTab('favorites');
+        await page.keyboard.press('End');
+        await checkTab('recent');
+        await page.keyboard.press('ArrowRight');
+        await checkTab('browser');
+        await page.keyboard.press('ArrowLeft');
+        await checkTab('recent');
+        await page.keyboard.press('Home');
+        await checkTab('browser');
+        await page.keyboard.press('Tab');
+        assert.equal(await picker.evaluate(node =>
+          document.activeElement === node.querySelector('[role="tabpanel"]')), true,
+          'Tab from selected tab must reach the active panel, not an inactive tab');
         await page.keyboard.press('Escape');
         await picker.waitFor({ state: 'hidden' });
         assert.equal(await create.isVisible(), true, 'Escape must close picker, not its parent');
