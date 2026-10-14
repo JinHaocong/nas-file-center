@@ -22,6 +22,7 @@ const PAGE_SIZE = 100;
 
 export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
   open, onCancel, onConfirm, multiple = false, initialPath, selectedValues,
+  returnFocusTo,
 }) => {
   const queryClient = useQueryClient();
   const toast = useConsoleToast();
@@ -167,6 +168,14 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
           data-mobile={isMobile || undefined}
           onEscapeKeyDown={event => { if (busy || confirmFavoriteId !== null) event.preventDefault(); }}
           onPointerDownOutside={event => event.preventDefault()}
+          onCloseAutoFocus={event => {
+            // This Dialog is opened by caller-owned buttons, not Dialog.Trigger.
+            // Restore keyboard focus only to a still-mounted, enabled launcher.
+            if (returnFocusTo?.isConnected && !returnFocusTo.matches(':disabled')) {
+              event.preventDefault();
+              returnFocusTo.focus();
+            }
+          }}
           aria-describedby="nfc-v2-directory-description"
         >
           <header className="nfc-v2-directory-dialog-header">

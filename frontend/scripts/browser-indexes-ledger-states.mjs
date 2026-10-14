@@ -234,6 +234,21 @@ try {
         await page.keyboard.press('Escape');
         await picker.waitFor({ state: 'hidden' });
         assert.equal(await create.isVisible(), true, 'Escape must close picker, not its parent');
+        const focusedLauncher = () => document.activeElement === document.querySelector(
+          '.nfc-v2-index-create-dialog .nfc-directory-picker-single .nfc-console-button');
+        await page.waitForFunction(focusedLauncher, undefined, { timeout: 10000 });
+        // Keyboard Enter on the restored launcher must reopen this nested dialog.
+        await page.keyboard.press('Enter');
+        await picker.waitFor({ state: 'visible' });
+        await page.waitForFunction(() =>
+          Boolean(document.activeElement?.closest('.nfc-v2-directory-dialog')));
+        await page.keyboard.press('Tab');
+        assert.equal(await picker.evaluate(node => node.contains(document.activeElement)), true,
+          'Nested picker must trap keyboard Tab within the active dialog');
+        await page.keyboard.press('Escape');
+        await picker.waitFor({ state: 'hidden' });
+        await page.waitForFunction(focusedLauncher, undefined, { timeout: 10000 });
+        assert.equal(await create.isVisible(), true, 'Keyboard reopening must preserve parent dialog');
         // A second immediate Escape may race Radix's nested focus/layer teardown;
         // close the parent via its own explicit control after asserting it stayed open.
         await create.getByRole('button', { name: '取消', exact: true }).click();
