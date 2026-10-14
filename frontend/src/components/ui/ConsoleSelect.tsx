@@ -1,7 +1,8 @@
 import React from 'react';
 import { ConsoleIcon } from './ConsoleIcon';
+import { isSelectableConsoleOption } from './selectModel';
 
-export interface ConsoleSelectOption { value: string; label: string; }
+export interface ConsoleSelectOption { value: string; label: string; disabled?: boolean; }
 export interface ConsoleSelectProps {
   id: string;
   label: string;
@@ -25,10 +26,15 @@ export const ConsoleSelect: React.FC<ConsoleSelectProps> = ({
         aria-label={label}
         value={value}
         disabled={disabled}
-        onChange={event => onChange(event.target.value)}
+        onChange={event => {
+          const next = event.currentTarget.value;
+          if (!disabled && isSelectableConsoleOption(next, options)) onChange(next);
+        }}
       >
         {options.map(option => (
-          <option key={option.value} value={option.value}>{option.label}</option>
+          <option key={option.value} value={option.value} disabled={option.disabled}>
+            {option.label}
+          </option>
         ))}
       </select>
       <ConsoleIcon name="chevron-down" size={15} className="nfc-console-select-chevron" />
