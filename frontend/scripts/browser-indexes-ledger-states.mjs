@@ -80,16 +80,18 @@ async function inspect(page, theme, width, state) {
     if (state === 'create' || state === 'confirm') {
       const dialog = document.querySelector(state === 'create'
         ? '.nfc-v2-index-create-dialog' : '.nfc-v2-confirm-dialog');
-      const overlay = document.querySelector('.nfc-v2-confirm-overlay');
+      const overlay = document.querySelector(state === 'create'
+        ? '.nfc-v2-dialog-overlay:not(.nfc-v2-confirm-overlay)'
+        : '.nfc-v2-confirm-overlay');
       check(inside(dialog), state + ' dialog exceeds viewport');
       const b = dialog?.getBoundingClientRect();
       check(Boolean(b && b.top >= -2 && b.bottom <= innerHeight + 2),
         state + ' dialog vertical bounds');
       check(getComputedStyle(overlay).backdropFilter === 'none',
         state + ' overlay must remain dim-only');
-      check(Number(getComputedStyle(overlay).zIndex) === 1300,
+      check(Number(getComputedStyle(overlay).zIndex) === (state === 'create' ? 1100 : 1300),
         state + ' overlay z-index');
-      check(Number(getComputedStyle(dialog).zIndex) === 1301,
+      check(Number(getComputedStyle(dialog).zIndex) === (state === 'create' ? 1101 : 1301),
         state + ' dialog z-index');
       const hit = document.elementFromPoint(width / 2, innerHeight / 2);
       check(Boolean(hit?.closest('.nfc-v2-dialog')), state + ' dialog pointer hit');
@@ -198,6 +200,35 @@ try {
           true, 'Empty index path must not allow queue submission');
         await inspect(page, theme.effective, width, 'create');
         await page.screenshot({ path: resolve(OUT, 'create-dialog-' + label + '.png') });
+        // Test the actual nested Radix portal at every width/theme. The previous
+        // create scrim at 1300 covered the directory browser at 1200/1201.
+        await create.getByRole('button', { name: '选择目录', exact: true }).click();
+        const picker = page.locator('.nfc-v2-directory-dialog');
+        await picker.waitFor({ state: 'visible' });
+        const nested = await page.evaluate(() => {
+          const create = document.querySelector('.nfc-v2-index-create-dialog');
+          const createOverlay = document.querySelector(
+            '.nfc-v2-dialog-overlay:not(.nfc-v2-directory-overlay)');
+          const picker = document.querySelector('.nfc-v2-directory-dialog');
+          const pickerOverlay = document.querySelector('.nfc-v2-directory-overlay');
+          const bounds = picker?.getBoundingClientRect();
+          const target = bounds && document.elementFromPoint(
+            bounds.left + bounds.width / 2, bounds.top + Math.min(70, bounds.height / 3));
+          return {
+            z: [createOverlay, create, pickerOverlay, picker].map(node =>
+              Number(getComputedStyle(node).zIndex)),
+            hit: Boolean(target?.closest('.nfc-v2-directory-dialog')),
+            withinWidth: Boolean(bounds && bounds.left >= -2 && bounds.right <= innerWidth + 2),
+            withinHeight: Boolean(bounds && bounds.top >= -2 && bounds.bottom <= innerHeight + 2),
+          };
+        });
+        assert.deepEqual(nested.z, [1100, 1101, 1200, 1201], 'Nested picker must layer above create');
+        assert.equal(nested.hit, true, 'Nested picker must receive pointer hits');
+        assert.equal(nested.withinWidth && nested.withinHeight, true,
+          'Nested picker must fit the viewport');
+        await page.keyboard.press('Escape');
+        await picker.waitFor({ state: 'hidden' });
+        assert.equal(await create.isVisible(), true, 'Escape must close picker, not its parent');
         await page.keyboard.press('Escape');
         await create.waitFor({ state: 'hidden' });
 

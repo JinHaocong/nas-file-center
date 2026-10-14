@@ -264,6 +264,14 @@ async function inspectDense(page, item, width) {
           errors.push('Wide table must own horizontal overflow');
       }
     }
+    if (item.id === 'plans' && !isMobile) {
+      const firstColumn = document.querySelector('.nfc-v2-plans-page .nfc-v2-plan-table th:first-child');
+      const title = document.querySelector('.nfc-v2-plans-page .nfc-v2-plan-name span');
+      const colWidth = firstColumn?.getBoundingClientRect().width ?? 0;
+      const titleWidth = title?.getBoundingClientRect().width ?? 0;
+      if (colWidth < 240 || titleWidth < 140)
+        errors.push('Plan list name column collapsed (' + colWidth + '/' + titleWidth + 'px)');
+    }
     if (item.id === 'media') {
       const selector = '.nfc-v2-media-checkbox[aria-label^="选择可永久删除损坏媒体"]';
       const controls = [...document.querySelectorAll(selector)];

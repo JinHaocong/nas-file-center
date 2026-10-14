@@ -297,7 +297,7 @@ export const IndexesPage: React.FC = () => {
 
       <Dialog.Root open={modalOpen} onOpenChange={next => { if (!next) closeCreate(); }}>
         <Dialog.Portal>
-          <Dialog.Overlay className="nfc-v2-dialog-overlay nfc-v2-confirm-overlay" />
+          <Dialog.Overlay className="nfc-v2-dialog-overlay" />
           <Dialog.Content
             className="nfc-v2-dialog nfc-overlay-modal nfc-index-create-modal nfc-v2-index-create-dialog"
             onEscapeKeyDown={event => { if (createMutation.isPending || createInFlight.current) event.preventDefault(); }}

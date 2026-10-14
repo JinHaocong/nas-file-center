@@ -131,6 +131,18 @@
 .nfc-v2-plan-table td { padding: 15px 17px; border-top: 1px solid var(--v2-line); color: var(--v2-text); }
 .nfc-v2-plan-table tbody tr:first-child td { border-top: 0; }
 .nfc-v2-plan-table tbody tr:hover { background: color-mix(in srgb, var(--v2-indigo-soft) 50%, var(--v2-paper)); }
+/* Plan LIST column sizing belongs here. The PlanDetail item ledger uses its
+   own scoped table columns; never let its 70px item-ID width shrink names. */
+.nfc-v2-plans-page .nfc-v2-plan-table { min-width: 1160px; table-layout: fixed; }
+.nfc-v2-plans-page .nfc-v2-plan-table th:nth-child(1) { width: 29%; }
+.nfc-v2-plans-page .nfc-v2-plan-table th:nth-child(2) { width: 115px; }
+.nfc-v2-plans-page .nfc-v2-plan-table th:nth-child(3) { width: 110px; }
+.nfc-v2-plans-page .nfc-v2-plan-table th:nth-child(4) { width: 110px; }
+.nfc-v2-plans-page .nfc-v2-plan-table th:nth-child(5) { width: 150px; }
+.nfc-v2-plans-page .nfc-v2-plan-table th:nth-child(6) { width: 175px; }
+.nfc-v2-plans-page .nfc-v2-plan-table th:nth-child(7) { width: 190px; }
+.nfc-v2-plans-page .nfc-v2-plan-name { max-width: 100%; min-width: 0; }
+.nfc-v2-plans-page .nfc-v2-plan-name span { min-width: 0; overflow-wrap: anywhere; line-height: 1.55; }
 .nfc-v2-shell .nfc-v2-plan-name { border: 0; padding: 0; display: inline-flex; align-items: center; gap: 9px; max-width: 300px; text-align: left; color: var(--v2-text); background: transparent; font-weight: 660; font-size: 12px; cursor: pointer; }
 .nfc-v2-shell .nfc-v2-plan-name svg { flex: 0 0 auto; color: var(--v2-indigo); }
 .nfc-v2-shell .nfc-v2-plan-name:hover { color: var(--v2-indigo); }
