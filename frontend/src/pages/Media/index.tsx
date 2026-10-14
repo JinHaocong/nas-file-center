@@ -18,6 +18,7 @@ import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
 import { ConsoleEmpty } from '../../components/ui/ConsoleEmpty';
 import { ConsolePagination } from '../../components/ui/ConsolePagination';
 import { ConsoleConfirmDialog } from '../../components/ui/ConsoleConfirmDialog';
+import { ConsoleCheckbox } from '../../components/ui/ConsoleCheckbox';
 import { useConsoleToast } from '../../components/ui/ConsoleToast';
 
 const formatBytes = (bytes: number) => {
@@ -100,9 +101,9 @@ const QueueDialog: React.FC<QueueDialogProps> = ({
               <legend>选择已索引根目录（至少一个）</legend>
               {options.length ? options.map(option => (
                 <label key={option.value} title={option.disabled ? '该根目录不可用，不能加入队列' : undefined}>
-                  <input type="checkbox" checked={roots.includes(option.value)}
+                  <ConsoleCheckbox checked={roots.includes(option.value)}
                     disabled={option.disabled}
-                    onChange={event => onChange(event.target.checked
+                    onCheckedChange={checked => onChange(checked
                       ? [...roots, option.value]
                       : roots.filter(value => value !== option.value))} />
                   <span>{option.label}</span>
@@ -325,12 +326,12 @@ export const MediaPage: React.FC = () => {
     </div>
   );
   const rowCheckbox = (record: MediaAsset) => (
-    <input type="checkbox" className="nfc-v2-media-checkbox"
+    <ConsoleCheckbox className="nfc-v2-media-checkbox"
       aria-label={'选择可永久删除损坏媒体 #' + record.id}
       checked={canSelect(record) && selectedIds.includes(record.id)}
       disabled={!canSelect(record) || deletePreviewBusy || deleteBusy}
       title={canSelect(record) ? '允许预览此 corrupt 条目的直接删除' : '只有证据有效的 corrupt 文件可永久删除'}
-      onChange={event => toggleRow(record, event.target.checked)} />
+      onCheckedChange={checked => toggleRow(record, checked)} />
   );
   const summary = summaryQuery.data;
 
@@ -434,10 +435,10 @@ export const MediaPage: React.FC = () => {
               desktop={<div className="nfc-v2-media-table-scroll">
                 <table className="nfc-v2-media-table">
                   <thead><tr>
-                    <th scope="col"><input type="checkbox" className="nfc-v2-media-checkbox"
+                    <th scope="col"><ConsoleCheckbox className="nfc-v2-media-checkbox"
                       checked={pageAllSelected} disabled={!isAdmin || pageEligibleIds.length === 0 || deleteBusy || deletePreviewBusy}
                       aria-label="选择本页可永久删除的损坏媒体"
-                      onChange={event => togglePage(event.target.checked)} /></th>
+                      onCheckedChange={togglePage} /></th>
                     <th scope="col">媒体文件</th><th scope="col">完整性</th>
                     <th scope="col">SHA256 校验</th><th scope="col">尺寸 / 时长</th>
                     <th scope="col">格式 / 编码</th><th scope="col">拍摄 / 探测</th>

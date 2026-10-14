@@ -36,9 +36,9 @@ describe('Console v2 native Media integrity and direct-unlink safety', () => {
       'rows.filter(canSelect).map(record => record.id)',
       'checked={canSelect(record) && selectedIds.includes(record.id)}',
       'disabled={!canSelect(record) || deletePreviewBusy || deleteBusy}',
-      'onChange={event => toggleRow(record, event.target.checked)}',
+      'onCheckedChange={checked => toggleRow(record, checked)}',
       'pageEligibleIds.every(id => selectedIds.includes(id))',
-      'togglePage(event.target.checked)', 'rowCheckbox(record)',
+      'onCheckedChange={togglePage}', 'rowCheckbox(record)',
       'onClick={() => { void beginDeletePreview([record.id]); }}',
       'disabled={!isAdmin || selectedIds.length === 0 || deleteBusy || deletePreviewBusy}',
     ]) assert.ok(s.includes(token), token);
