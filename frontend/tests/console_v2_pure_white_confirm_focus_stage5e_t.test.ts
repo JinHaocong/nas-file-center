@@ -9,12 +9,12 @@ const browser = read('scripts/browser-task-overlays.mjs');
 
 describe('Pure White Stage 5E-T controlled confirm focus return', () => {
   test('capture the real opener before Radix autofocus for dialogs without Dialog.Trigger', () => {
-    assert.match(confirm, /returnFocusTarget = React\\.useRef<HTMLElement \\| null>\\(null\\)/);
-    assert.match(confirm, /onOpenAutoFocus=\\{\\(\\) => \\{/);
-    assert.match(confirm, /const active = document\\.activeElement;/);
-    assert.match(confirm, /active instanceof HTMLElement && active !== document\\.body/);
-    assert.match(confirm, /returnFocusTarget\\.current = active/);
-    assert.doesNotMatch(confirm, /<Dialog\\.Trigger/);
+    assert.match(confirm, /returnFocusTarget = React\.useRef<HTMLElement \| null>\(null\)/);
+    assert.match(confirm, /onOpenAutoFocus=\{\(\) => \{/);
+    assert.match(confirm, /const active = document\.activeElement;/);
+    assert.match(confirm, /active instanceof HTMLElement && active !== document\.body/);
+    assert.match(confirm, /returnFocusTarget\.current = active/);
+    assert.doesNotMatch(confirm, /<Dialog\.Trigger/);
   });
 
   test('restore only a mounted enabled launcher without overriding unsafe fallbacks', () => {
