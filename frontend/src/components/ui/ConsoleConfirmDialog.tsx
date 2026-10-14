@@ -39,7 +39,7 @@ export const ConsoleConfirmDialog: React.FC<Props> = ({
           </div>
           <button type="button" className="nfc-v2-dialog-close"
             aria-label="关闭确认窗口" disabled={busy}
-            onClick={() => onOpenChange(false)}>
+            onClick={() => { if (!busy) onOpenChange(false); }}>
             <ConsoleIcon name="x" size={18} />
           </button>
         </header>
@@ -47,9 +47,10 @@ export const ConsoleConfirmDialog: React.FC<Props> = ({
           <div className="nfc-v2-confirm-description">{description}</div>
         </Dialog.Description>
         <div className="nfc-v2-confirm-actions">
-          <ConsoleButton disabled={busy} onClick={() => onOpenChange(false)}>取消</ConsoleButton>
+          <ConsoleButton disabled={busy} onClick={() => { if (!busy) onOpenChange(false); }}>取消</ConsoleButton>
           <ConsoleButton variant={danger ? 'danger' : 'primary'}
-            disabled={busy || disabled} loading={busy} onClick={onConfirm}>
+            disabled={busy || disabled} loading={busy}
+            onClick={() => { if (!busy && !disabled) onConfirm(); }}>
             {confirmText}
           </ConsoleButton>
         </div>
