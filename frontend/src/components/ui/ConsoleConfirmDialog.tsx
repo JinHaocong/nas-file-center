@@ -19,7 +19,11 @@ interface Props {
 export const ConsoleConfirmDialog: React.FC<Props> = ({
   open, onOpenChange, title, description, confirmText, onConfirm,
   busy = false, disabled = false, danger = true,
-}) => (
+}) => {
+  // Controlled dialogs have no Dialog.Trigger: remember the actual keyboard
+  // opener before Radix moves focus into the confirmation portal.
+  const returnFocusTarget = React.useRef<HTMLElement | null>(null);
+  return (
   <Dialog.Root open={open} onOpenChange={next => {
     if (!busy) onOpenChange(next);
   }}>
@@ -27,6 +31,21 @@ export const ConsoleConfirmDialog: React.FC<Props> = ({
       <Dialog.Overlay className="nfc-v2-dialog-overlay nfc-v2-confirm-overlay" />
       <Dialog.Content
         className="nfc-v2-dialog nfc-v2-confirm-dialog nfc-overlay-modal"
+        onOpenAutoFocus={() => {
+          const active = document.activeElement;
+          returnFocusTarget.current = active instanceof HTMLElement && active !== document.body
+            ? active : null;
+        }}
+        onCloseAutoFocus={event => {
+          const target = returnFocusTarget.current;
+          returnFocusTarget.current = null;
+          // A busy/removed launcher must never be focused after close.
+          // If absent, do not override Radix's normal close behavior.
+          if (target?.isConnected && !target.matches(':disabled')) {
+            event.preventDefault();
+            target.focus();
+          }
+        }}
         onEscapeKeyDown={event => { if (busy) event.preventDefault(); }}
         onPointerDownOutside={event => event.preventDefault()}
       >
@@ -57,4 +76,5 @@ export const ConsoleConfirmDialog: React.FC<Props> = ({
       </Dialog.Content>
     </Dialog.Portal>
   </Dialog.Root>
-);
+  );
+};
