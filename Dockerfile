@@ -26,7 +26,10 @@ COPY --from=fclones-builder /usr/local/cargo/bin/fclones /usr/local/bin/fclones
 COPY --from=frontend-builder /build/dist /app/frontend/dist
 COPY pyproject.toml /app/pyproject.toml
 COPY app /app/app
-RUN python -m pip install --upgrade pip && python -m pip install .
+# Avoid an unnecessary pip upgrade download and tolerate slow package downloads.
+RUN PIP_DEFAULT_TIMEOUT=120 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    python -m pip install .
 RUN mkdir -p /config /data
 EXPOSE 8080
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
