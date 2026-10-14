@@ -200,6 +200,11 @@ try {
           true, 'Empty index path must not allow queue submission');
         await inspect(page, theme.effective, width, 'create');
         await page.screenshot({ path: resolve(OUT, 'create-dialog-' + label + '.png') });
+        // Preserve the original independent parent Escape test before nesting.
+        await page.keyboard.press('Escape');
+        await create.waitFor({ state: 'hidden' });
+        await page.getByRole('button', { name: '加入索引队列', exact: true }).click();
+        await create.waitFor({ state: 'visible' });
         // Test the actual nested Radix portal at every width/theme. The previous
         // create scrim at 1300 covered the directory browser at 1200/1201.
         await create.getByRole('button', { name: '选择目录', exact: true }).click();
@@ -229,7 +234,9 @@ try {
         await page.keyboard.press('Escape');
         await picker.waitFor({ state: 'hidden' });
         assert.equal(await create.isVisible(), true, 'Escape must close picker, not its parent');
-        await page.keyboard.press('Escape');
+        // A second immediate Escape may race Radix's nested focus/layer teardown;
+        // close the parent via its own explicit control after asserting it stayed open.
+        await create.getByRole('button', { name: '取消', exact: true }).click();
         await create.waitFor({ state: 'hidden' });
 
         await item(1).getByRole('button', { name: '移除索引' }).click();
