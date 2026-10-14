@@ -10,7 +10,7 @@ describe('Pure White Stage 5E-P keyboard focus after DirectoryPicker nested dial
     const picker = read('src/components/DirectoryPicker/DirectoryPicker.tsx');
     const types = read('src/components/DirectoryPicker/types.ts');
     assert.match(picker, /returnFocusTarget = useRef<HTMLButtonElement \| null>\(null\)/);
-    assert.match(picker, /if \(disabled\) return;[\s\S]*?returnFocusTarget.current = button;/);
+    assert.match(picker, /if \(disabledRef\.current\) return;[\s\S]*?returnFocusTarget.current = button;/);
     assert.equal(picker.match(/onClick=\{event => openDirectoryBrowser\(event.currentTarget\)\}/g)?.length, 3);
     assert.match(picker, /returnFocusTo=\{returnFocusTarget.current\}/);
     assert.match(types, /returnFocusTo\?: HTMLElement \| null/);
