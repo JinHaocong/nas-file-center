@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { scansApi } from '../../api/domain';
 import { DirectoryPicker } from '../DirectoryPicker';
 import { ConsoleButton } from '../ui/ConsoleButton';
+import { ConsoleCheckbox } from '../ui/ConsoleCheckbox';
 import { ConsoleIcon } from '../ui/ConsoleIcon';
 import { useConsoleToast } from '../ui/ConsoleToast';
 import {
@@ -31,6 +32,8 @@ export const ScanCreateModal: React.FC<Props> = ({ open, onClose }) => {
   const toast = useConsoleToast();
   const [values, setValues] = useState<ScanCreateValues>(emptyValues);
   const [validationError, setValidationError] = useState<string | null>(null);
+  // Synchronous single-flight guard: closes the gap before React Query renders isPending.
+  const submitting = useRef(false);
 
   useEffect(() => {
     if (open) {
@@ -59,24 +62,34 @@ export const ScanCreateModal: React.FC<Props> = ({ open, onClose }) => {
   });
 
   const close = () => {
-    if (createMutation.isPending) return;
+    if (createMutation.isPending || submitting.current) return;
     setValidationError(null);
     onClose();
   };
 
-  const submit = (event: React.FormEvent<HTMLFormElement>) => {
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (createMutation.isPending) return;
+    if (createMutation.isPending || submitting.current) return;
     const failure = validateScanCreateValues(values);
     if (failure) {
       setValidationError(failure);
       return;
     }
+    // Freeze the validated input before awaiting any asynchronous work.
+    const payload = toScanCreatePayload(values);
+    submitting.current = true;
     setValidationError(null);
-    createMutation.mutate(toScanCreatePayload(values));
+    try {
+      await createMutation.mutateAsync(payload);
+    } catch {
+      // Existing mutation.onError renders the error and toast; allow explicit retry.
+    } finally {
+      submitting.current = false;
+    }
   };
 
   const update = <K extends keyof ScanCreateValues,>(key: K, value: ScanCreateValues[K]) => {
+    if (createMutation.isPending || submitting.current) return;
     setValues(current => ({ ...current, [key]: value }));
     setValidationError(null);
   };
@@ -86,7 +99,7 @@ export const ScanCreateModal: React.FC<Props> = ({ open, onClose }) => {
       <Dialog.Portal>
         <Dialog.Overlay className="nfc-v2-dialog-overlay nfc-v2-scan-create-overlay" />
         <Dialog.Content className="nfc-form-modal nfc-overlay-modal nfc-scan-create-modal nfc-v2-scan-create-modal"
-          onEscapeKeyDown={event => { if (createMutation.isPending) event.preventDefault(); }}
+          onEscapeKeyDown={event => { if (createMutation.isPending || submitting.current) event.preventDefault(); }}
           onPointerDownOutside={event => event.preventDefault()}>
           <header className="nfc-v2-scan-create-header">
             <Dialog.Title>新建 fclones 精确扫描任务</Dialog.Title>
@@ -119,9 +132,9 @@ export const ScanCreateModal: React.FC<Props> = ({ open, onClose }) => {
         </div>
 
         <label className="nfc-v2-scan-create-switch">
-          <input type="checkbox" checked={values.isolate}
+          <ConsoleCheckbox checked={values.isolate}
             disabled={createMutation.isPending}
-            onChange={event => update('isolate', event.target.checked)} />
+            onCheckedChange={checked => update('isolate', checked)} />
           <span>
             <strong>跨目录隔离模式 (Isolate / A-B)</strong>
             <small>仅报告跨越不同输入根目录的重复组，不报告单根目录内部重复。</small>
