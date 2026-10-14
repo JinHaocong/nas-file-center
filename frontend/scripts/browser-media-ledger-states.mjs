@@ -233,8 +233,10 @@ try {
           document.querySelectorAll(selector).length === 1, record);
         await filter(2).selectOption('corrupt');
         await filter(3).selectOption('changed');
-        await page.waitForFunction(selector =>
-          document.querySelectorAll(selector).length === 1, record);
+        await page.waitForFunction(selector => {
+          const rows = document.querySelectorAll(selector);
+          return rows.length === 1 && rows[0].textContent?.includes('902');
+        }, record);
         assert.equal(await page.locator(record).count(), 1);
         assert.ok((await page.locator(record).first().innerText()).includes('902'),
           'Compound filters should show only frozen-evidence corrupt video');
