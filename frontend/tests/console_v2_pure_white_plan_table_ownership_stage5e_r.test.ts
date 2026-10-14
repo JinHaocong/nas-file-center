@@ -16,7 +16,9 @@ describe('Pure White Stage 5E-R: Plans list vs PlanItem detail CSS ownership', (
         'Unscoped plan-table rule could change PlanDetail ledger: ' + selector);
     }
     assert.match(css, /\.nfc-v2-plans-page \.nfc-v2-plan-table-scroll \{ width: 100%; max-width: 100%; overflow-x: auto; \}/);
-    assert.match(css, /\.nfc-v2-shell \.nfc-v2-plans-page \.nfc-v2-plan-table \{[\s\S]*?min-width: 860px;/);
+    assert.match(css, /\.nfc-v2-plans-page \.nfc-v2-plan-table \{[\s\S]*?min-width: 860px;/);
+    assert.doesNotMatch(css, /\.nfc-v2-shell \.nfc-v2-plans-page \.nfc-v2-plan-table/,
+      'Extra .nfc-v2-shell specificity would override later 1160px list minimum');
     assert.match(css, /\.nfc-v2-plans-page \.nfc-v2-plan-table th \{ padding: 13px 17px;/);
     assert.match(css, /\.nfc-v2-plans-page \.nfc-v2-plan-table td \{ padding: 15px 17px;/);
     assert.match(css, /\.nfc-v2-plans-page \.nfc-v2-plan-table tbody tr:hover \{/);

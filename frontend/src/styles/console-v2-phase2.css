@@ -120,7 +120,7 @@
 .nfc-v2-plan-list-state { padding: 20px; color: var(--v2-muted); text-align: center; }
 
 .nfc-v2-plans-page .nfc-v2-plan-table-scroll { width: 100%; max-width: 100%; overflow-x: auto; }
-.nfc-v2-shell .nfc-v2-plans-page .nfc-v2-plan-table {
+.nfc-v2-plans-page .nfc-v2-plan-table {
   width: 100%;
   min-width: 860px;
   border-collapse: collapse;
