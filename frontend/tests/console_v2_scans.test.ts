@@ -75,8 +75,11 @@ describe('Console v2 scan history migration', () => {
       "queryClient.invalidateQueries({ queryKey: ['scansList'] })",
       "queryClient.invalidateQueries({ queryKey: ['workJobsList'] })",
       "navigate('/scans/' + res.scan_job_id)",
-      'createMutation.isPending', '<form', 'type="checkbox"',
+      'createMutation.isPending', '<form', '<ConsoleCheckbox checked={values.isolate}',
     ]) assert.ok(modal.includes(token), token);
+    const nativeCheckbox = read('src/components/ui/ConsoleCheckbox.tsx');
+    assert.ok(nativeCheckbox.includes('type="checkbox"'));
+    assert.ok(modal.includes("onCheckedChange={checked => update('isolate', checked)}"));
     for (const token of ['min_size:', 'name_patterns:', 'exclude_patterns:',
       'roots: values.roots', 'isolate: values.isolate']) assert.ok(model.includes(token), token);
   });

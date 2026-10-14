@@ -43,11 +43,11 @@ describe('Console v2 Scan Creation form', () => {
     const code = read('src/components/scans/ScanCreateModal.tsx');
     for (const token of [
       '<form className="nfc-v2-scan-create-form" onSubmit={submit}>',
-      'type="text" required', 'type="checkbox"', '<textarea',
+      'type="text" required', '<ConsoleCheckbox checked={values.isolate}', '<textarea',
       '<DirectoryPicker multiple disabled={createMutation.isPending}',
       "validateScanCreateValues(values)", 'toScanCreatePayload(values)',
-      'createMutation.isPending', 'createMutation.mutate(',
-      'onEscapeKeyDown={event => { if (createMutation.isPending) event.preventDefault(); }}',
+      'createMutation.isPending', 'await createMutation.mutateAsync(payload)',
+      'onEscapeKeyDown={event => { if (createMutation.isPending || submitting.current) event.preventDefault(); }}',
       'onPointerDownOutside={event => event.preventDefault()}',
       'disabled={createMutation.isPending} onClick={close}',
       'ALLOWED_ROOTS',
