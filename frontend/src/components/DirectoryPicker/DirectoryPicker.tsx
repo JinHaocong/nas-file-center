@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { CodePath } from '../ui/CodePath';
 import { ConsoleButton } from '../ui/ConsoleButton';
 import { ConsoleIcon } from '../ui/ConsoleIcon';
@@ -19,8 +19,15 @@ export const DirectoryPicker: React.FC<DirectoryPickerProps> = ({
   // A controlled Radix Dialog without <Dialog.Trigger> has no implicit return
   // target. Keep the exact launching button for keyboard users.
   const returnFocusTarget = useRef<HTMLButtonElement | null>(null);
+  // The caller may become busy while a nested browser is open or waiting on
+  // its best-effort recent-directory request. Refuse stale selection callbacks.
+  const disabledRef = useRef(disabled);
+  disabledRef.current = disabled;
+  useEffect(() => {
+    if (disabled) setModalOpen(false);
+  }, [disabled]);
   const openDirectoryBrowser = (button: HTMLButtonElement) => {
-    if (disabled) return;
+    if (disabledRef.current) return;
     returnFocusTarget.current = button;
     setModalOpen(true);
   };
@@ -34,6 +41,7 @@ export const DirectoryPicker: React.FC<DirectoryPickerProps> = ({
   const singleValue = currentValues[0] || '';
 
   const handleModalConfirm = (selected: string | string[]) => {
+    if (disabledRef.current) return;
     if (multiple) {
       const next = Array.isArray(selected) ? selected : [selected];
       if (showManual) setManualDraft(next.join('\n'));
@@ -138,7 +146,8 @@ export const DirectoryPicker: React.FC<DirectoryPickerProps> = ({
       )}
 
       <DirectoryPickerModal
-        open={modalOpen}
+        open={modalOpen && !disabled}
+        disabled={disabled}
         onCancel={() => setModalOpen(false)}
         onConfirm={handleModalConfirm}
         multiple={multiple}

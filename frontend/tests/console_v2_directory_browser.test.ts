@@ -34,7 +34,7 @@ describe('Console v2 Radix directory browser migration', () => {
     const content = read('src/components/DirectoryPicker/DirectoryPickerModal.tsx');
     for (const marker of [
       "import * as Dialog from '@radix-ui/react-dialog'",
-      '<Dialog.Root open={open}', '<Dialog.Content',
+      '<Dialog.Root open={open && !disabled}', '<Dialog.Content',
       '<ConsoleConfirmDialog', 'nfc-overlay-modal',
       'filesystemApi.listDirectory(', 'filesystemApi.listFavorites()',
       'filesystemApi.listRecent(20)', 'filesystemApi.addFavorite(',

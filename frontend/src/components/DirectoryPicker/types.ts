@@ -9,6 +9,7 @@ export interface DirectoryPickerProps {
 
 export interface DirectoryPickerModalProps {
   open: boolean;
+  disabled?: boolean;
   onCancel: () => void;
   onConfirm: (selected: string | string[]) => void;
   multiple?: boolean;
