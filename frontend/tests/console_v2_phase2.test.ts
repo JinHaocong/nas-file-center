@@ -56,7 +56,7 @@ describe('console v2 phase 2: native Plan ledger', () => {
     assert.ok(p2 > p1 && p1 > 0);
     const css = read('src/styles/console-v2-phase2.css');
     assert.match(css, /\.nfc-v2-shell \.nfc-console-button/);
-    assert.match(css, /\.nfc-v2-shell \.nfc-v2-plan-table/);
+    assert.match(css, /\.nfc-v2-shell \.nfc-v2-plans-page \.nfc-v2-plan-table/);
     assert.match(css, /@media \(max-width: 767px\)/);
     assert.match(css, /prefers-reduced-motion: reduce/);
   });

@@ -135,3 +135,10 @@ could change actual computed styles even when unit tests still pass.
   keyboard focus, reduced motion, overflow, dialogs and destructive confirmation.
 - Do not deploy, alter a NAS directory or change Preview/Plan/Worker security
   authority as part of CSS cleanup.
+
+
+## Stage 5E-R — Plans list versus PlanItem detail table ownership
+
+- After the Stage 5E-O first-column fix, `console-v2-phase2.css` still applied the base `.nfc-v2-plan-table` structural rules (table width/min-width, cell padding, header surface and hover color) to **both** the Plans list and the PlanItem detail ledger. The PlanDetail stylesheet loaded later and overrode much of this, but that cascade coupling was unnecessary and could regress if import order or individual declarations changed.
+- Restricted the Phase2 plan-table scroll, structural and row rules to `.nfc-v2-plans-page`. The list retains the same declarations, stable 1160px minimum width and 29% title column. PlanDetail continues to own its separate `.nfc-plan-detail-page` cell spacing, focus treatment and fixed 70px item ID column; no JSX markup or lifecycle operation changed.
+- Added exact selector ownership regression and reconciled the old Phase2 source assertion. Continue using the existing 32-case Plans Workspace and Plan lifecycle read-only Chromium matrices (8 widths × 4 theme combinations) and their existing screenshot quota. No claim of a complete historical CSS consolidation; final browser visual sign-off, real NAS acceptance and owner approval remain separate OPEN gates.
