@@ -193,13 +193,10 @@ body,
 }
 
 .nfc-data-panel-dense {
-  border-radius: var(--nfc-v49-radius-md) !important;
   box-shadow: none !important;
 }
 
 .nfc-data-panel-quiet {
-  border-color: transparent !important;
-  background: var(--nfc-v49-surface-soft) !important;
   box-shadow: none !important;
 }
 
@@ -762,7 +759,6 @@ body,
   min-height: 50px;
   padding: 9px 12px;
   border-top-color: var(--nfc-v49-line);
-  background: var(--nfc-v49-surface-soft);
 }
 
 /* Badges ------------------------------------------------------------------ */
@@ -823,16 +819,9 @@ body,
 }
 
 .nfc-overlay-section {
-  border-color: var(--nfc-v49-line) !important;
-  border-radius: var(--nfc-v49-radius-md) !important;
-  background: var(--nfc-v49-surface) !important;
 }
 
 .nfc-overlay-section-header {
-  min-height: 52px;
-  padding: 10px 12px;
-  border-bottom-color: var(--nfc-v49-line);
-  background: var(--nfc-v49-surface-soft);
 }
 
 .nfc-code-block {
@@ -847,7 +836,6 @@ body,
 /* Directory picker --------------------------------------------------------- */
 
 .nfc-directory-picker-body {
-  gap: 9px;
 }
 
 .nfc-directory-browser-toolbar {
