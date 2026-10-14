@@ -204,7 +204,7 @@ try {
         await sheet.waitFor({ state: 'hidden' });
 
         await page.getByRole('button', { name: '下一页' }).click();
-        await page.getByRole('button', { name: '#651' }).waitFor({ state: 'visible' });
+        await page.getByRole('button', { name: '#651', exact: true }).waitFor({ state: 'visible' });
         assert.equal(await page.locator(row).count(), 1);
         assert.equal(await page.getByRole('button', { name: '上一页' }).isEnabled(), true);
         await assertBounds(page, theme.effective, width, 'pagination');
