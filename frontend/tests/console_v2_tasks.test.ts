@@ -32,7 +32,9 @@ describe('Console v2 Task Center native UI migration', () => {
     const select = read('src/components/ui/ConsoleSelect.tsx');
     assert.match(select, /<select/);
     assert.match(select, /aria-label=\{label\}/);
-    assert.match(select, /onChange=\{event => onChange\(event.target.value\)\}/);
+    assert.match(select, /isSelectableConsoleOption\(next, options\)/);
+    assert.match(select, /if \(!disabled && isSelectableConsoleOption/);
+    assert.match(select, /disabled=\{option.disabled\}/);
     assert.doesNotMatch(select, /from ['"]antd['"]/);
   });
 
