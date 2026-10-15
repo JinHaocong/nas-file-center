@@ -129,6 +129,11 @@ jobs:
           fc-cache -f
           fc-match -f '%{family}\n' ':lang=zh-cn' | grep -E 'Noto (Sans|Serif) CJK'
 
+      # New task-tracking regression runs first, so async fixture failures fail fast.
+      - name: Run read-only Chromium Archive Recovery WorkJob continuity matrix
+        working-directory: frontend
+        run: node scripts/browser-archive-recovery-task-continuity.mjs
+
       - name: Run read-only Chromium overlay matrix
         working-directory: frontend
         run: node scripts/browser-overlay-smoke.mjs
@@ -197,3 +202,4 @@ jobs:
             frontend/artifacts/browser-indexes-ledger-states/*.png
             frontend/artifacts/browser-media-ledger-states/*.png
             frontend/artifacts/browser-archive-recovery-selection/*.png
+            frontend/artifacts/browser-archive-recovery-task-continuity/*.png
