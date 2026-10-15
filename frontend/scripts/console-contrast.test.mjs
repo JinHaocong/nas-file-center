@@ -12,9 +12,10 @@ const overlays = readFileSync('src/styles/console-v2-task-overlays.css', 'utf8')
 function rule(css, selector) {
   const index = css.indexOf(selector);
   assert.ok(index !== -1, 'Missing CSS selector: ' + selector);
-  const opening = css.indexOf('{', index + selector.length);
-  assert.equal(css.slice(index + selector.length, opening).trim(), '',
-    'Selector should own its CSS declarations: ' + selector);
+  // Selectors supplied here end with '{'. The opening brace belongs to
+  // this rule; searching *after* it would accidentally inspect the next rule.
+  const opening = index + selector.length - 1;
+  assert.equal(css[opening], '{', 'Selector must include its opening brace');
   const closing = css.indexOf('}', opening);
   assert.ok(closing > opening, 'Missing CSS rule body for ' + selector);
   return css.slice(opening + 1, closing);
