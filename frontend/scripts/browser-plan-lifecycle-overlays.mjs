@@ -298,8 +298,33 @@ try {
         await page.screenshot({ path: resolve(OUT, 'completed-undo-' + label + '.png') });
         await page.keyboard.press('Escape');
         await confirm.waitFor({ state: 'hidden' });
+        // Stage 5E-Z: the Plans ledger owns a controlled cleanup dialog with
+        // no Dialog.Trigger. Verify exact launcher focus return on three
+        // cancellation paths, without ever issuing a metadata cleanup POST.
+        await page.goto(BASE_URL + '/plans', { waitUntil: 'domcontentloaded' });
+        await page.getByRole('heading', { name: '执行计划' }).first().waitFor();
+        const historyLauncher = page.getByRole('button', { name: '清理计划历史' }).first();
+        const historyOpener = await historyLauncher.elementHandle();
+        assert.ok(historyOpener, 'Plan History launcher must exist');
+        const historyDialog = page.locator('.nfc-v2-plan-history-dialog');
+        await historyLauncher.click();
+        await historyDialog.waitFor({ state: 'visible' });
+        assert.ok((await historyDialog.innerText()).includes('Delete ≠ Undo'));
+        await historyDialog.getByRole('button', { name: '取消' }).click();
+        await historyDialog.waitFor({ state: 'hidden' });
+        await page.waitForFunction(opener => document.activeElement === opener, historyOpener);
+        await page.keyboard.press('Enter');
+        await historyDialog.waitFor({ state: 'visible' });
+        await page.keyboard.press('Escape');
+        await historyDialog.waitFor({ state: 'hidden' });
+        await page.waitForFunction(opener => document.activeElement === opener, historyOpener);
+        await page.keyboard.press('Enter');
+        await historyDialog.waitFor({ state: 'visible' });
+        await historyDialog.getByRole('button', { name: '关闭清理窗口' }).click();
+        await historyDialog.waitFor({ state: 'hidden' });
+        await page.waitForFunction(opener => document.activeElement === opener, historyOpener);
         assert.equal(rebuildPreviews, 1, 'Only one mock rebuild Preview, zero Draft requests');
-        assert.deepEqual(forbidden, [], 'No Plan mutation requests allowed');
+        assert.deepEqual(forbidden, [], 'No Plan or History cleanup mutations allowed');
         assert.deepEqual(external, [], 'No outbound NAS/network requests allowed');
         completed += 1;
         console.log('[PLAN LIFECYCLE BROWSER PASS] ' + label);
