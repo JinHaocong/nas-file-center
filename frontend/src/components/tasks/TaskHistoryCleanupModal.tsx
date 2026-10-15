@@ -23,6 +23,8 @@ export const TaskHistoryCleanupModal: React.FC<Props> = ({ onCleaned }) => {
   ]);
   // Synchronous guard closes the gap before React Query commits isPending.
   const submitting = useRef(false);
+  // Controlled Radix Dialog has no Dialog.Trigger; save the actual launcher before autofocus.
+  const returnFocusTarget = useRef<HTMLElement | null>(null);
   const queryClient = useQueryClient();
   const toast = useConsoleToast();
 
@@ -88,6 +90,21 @@ export const TaskHistoryCleanupModal: React.FC<Props> = ({ onCleaned }) => {
           <Dialog.Overlay className="nfc-v2-dialog-overlay" />
           <Dialog.Content
             className="nfc-v2-dialog nfc-v2-history-dialog nfc-overlay-modal nfc-history-cleanup-modal nfc-task-history-cleanup-modal"
+            onOpenAutoFocus={() => {
+              const active = document.activeElement;
+              returnFocusTarget.current = active instanceof HTMLElement && active !== document.body
+                ? active : null;
+            }}
+            onCloseAutoFocus={event => {
+              const target = returnFocusTarget.current;
+              returnFocusTarget.current = null;
+              // The task ledger can refresh/remove or disable the launcher.
+              // Only restore a still-connected, enabled target; otherwise keep Radix fallback.
+              if (target?.isConnected && !target.matches(':disabled')) {
+                event.preventDefault();
+                target.focus();
+              }
+            }}
             onEscapeKeyDown={event => { if (cleanupMutation.isPending || submitting.current) event.preventDefault(); }}
             onPointerDownOutside={event => event.preventDefault()}
           >

@@ -172,7 +172,12 @@ try {
         await page.waitForFunction(opener => document.activeElement === opener, detailOpener);
         console.log('[TASK BROWSER NESTED PASS] ' + label);
 
-        await page.getByRole('button', { name: '清理历史' }).click();
+        // Stage 5E-AA: history cleanup is a controlled Dialog with no Trigger.
+        // Keep the exact launcher so three safe dismissal paths restore keyboard focus.
+        const historyLauncher = page.getByRole('button', { name: '清理历史' });
+        const historyOpener = await historyLauncher.elementHandle();
+        assert.ok(historyOpener, 'Task History launcher must remain mounted');
+        await historyLauncher.click();
         const history = page.locator('.nfc-v2-history-dialog');
         await history.waitFor({ state: 'visible' });
         const historyErrors = await inspect(page, theme.effective, width, 'history');
@@ -185,8 +190,20 @@ try {
         await choices.first().check();
         assert.equal(await destructive.isEnabled(), true);
         await page.screenshot({ path: resolve(OUT, 'history-' + label + '.png') });
+        await history.getByRole('button', { name: '取消' }).click();
+        await history.waitFor({ state: 'hidden' });
+        await page.waitForFunction(opener => document.activeElement === opener, historyOpener);
+        // The launcher is keyboard-reachable after cancel, then Escape, then X.
+        await page.keyboard.press('Enter');
+        await history.waitFor({ state: 'visible' });
         await page.keyboard.press('Escape');
         await history.waitFor({ state: 'hidden' });
+        await page.waitForFunction(opener => document.activeElement === opener, historyOpener);
+        await page.keyboard.press('Enter');
+        await history.waitFor({ state: 'visible' });
+        await history.getByRole('button', { name: '关闭历史清理窗口' }).click();
+        await history.waitFor({ state: 'hidden' });
+        await page.waitForFunction(opener => document.activeElement === opener, historyOpener);
         assert.deepEqual(writes, [], 'Browser must not submit any mutating API request');
         completed += 1;
         console.log('[TASK BROWSER HISTORY PASS] ' + label);
