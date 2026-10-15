@@ -66,7 +66,7 @@ describe('Pure White Stage 5E-AB Index create modal visual gutter and focus', ()
       token.startsWith("request.") || token.startsWith('status:') || token.startsWith('assert.deepEqual'))
       ? browser.includes(token) : modal.includes(token), token);
     assert.equal(browser.split('await page.waitForFunction(opener => document.activeElement === opener, createOpener);').length - 1, 2);
-    assert.doesNotMatch(modal, /<Dialog\\.Trigger/);
+    assert.doesNotMatch(modal, /<Dialog\.Trigger/);
     const workflow = read('../.github/workflows/ui-v044-validation.yml');
     assert.ok(workflow.includes('node scripts/browser-indexes-ledger-states.mjs'));
     assert.ok(workflow.includes('Checkout exact candidate HEAD'));
