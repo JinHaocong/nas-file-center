@@ -61,7 +61,7 @@ describe('Archive Recovery follows Pure White visual and safety contracts', () =
     const browser = read('scripts/browser-archive-recovery-selection.mjs');
     assert.ok(browser.includes("getByRole('textbox', { name: '目录路径' })"));
     assert.ok(browser.includes("request.method() !== 'GET'"));
-    assert.ok(browser.includes("assert.deepEqual(blockedWrites, [])"));
+    assert.ok(browser.includes("assert.deepEqual(blockedWrites, []"));
     assert.ok(browser.includes("page.screenshot"));
     const workflow = read('../.github/workflows/ui-v044-validation.yml');
     assert.ok(workflow.includes('node scripts/browser-archive-recovery-selection.mjs'));
