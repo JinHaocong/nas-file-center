@@ -9,6 +9,7 @@ import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { chromium } from 'playwright';
+import { visualAdminFixture, visualSafeSettingsFixture } from './visual-fixtures.mjs';
 
 const BASE = 'http://127.0.0.1:4189';
 const OUT = resolve(process.cwd(), 'artifacts/browser-media-ledger-states');
@@ -66,12 +67,8 @@ async function ready() {
   throw Error('Local Vite preview unavailable');
 }
 function fixture(url) {
-  if (url.pathname === '/api/auth/me') return {
-    id: 1, username: 'media-readonly-visual-fixture', role: 'admin', is_admin: true,
-  };
-  if (url.pathname === '/api/settings') return {
-    allow_mutation: false, allow_delete: false, safe_mode: true,
-  };
+  if (url.pathname === '/api/auth/me') return visualAdminFixture('media-readonly-visual-fixture');
+  if (url.pathname === '/api/settings') return visualSafeSettingsFixture();
   if (url.pathname === '/api/indexes') return {
     items: [
       { id: 701, root: ROOT, path_state: 'available', files: 5000, folders: 20,
@@ -114,7 +111,7 @@ async function inspect(page, theme, width, state) {
     check(inside(document.querySelector('.nfc-v2-media-page')), 'Media page overflow');
     check(inside(document.querySelector('.nfc-v2-media-filters')), 'Media filter bar overflow');
     check(inside(document.querySelector('.nfc-v2-media-search')), 'Media search overflow');
-    if (state === 'analyze' || state === 'verify') {
+    if (state === 'analyze' || state === 'verify' || state === 'analyze-expanded') {
       const dialog = document.querySelector('.nfc-v2-media-queue-dialog');
       const overlay = document.querySelector('.nfc-v2-confirm-overlay');
       check(inside(dialog), state + ' media queue dialog overflow');
@@ -130,8 +127,43 @@ async function inspect(page, theme, width, state) {
       const centerHit = document.elementFromPoint(width / 2, innerHeight / 2);
       check(Boolean(centerHit?.closest('.nfc-v2-media-queue-dialog')),
         state + ' dialog pointer hit');
+      const body = dialog?.querySelector('.nfc-v2-media-queue-body');
+      const note = body?.querySelector('.nfc-form-note');
+      const fieldset = body?.querySelector('.nfc-v2-media-root-options');
+      const gutter = width < 768 ? 16 : 22;
+      for (const [name, node] of [['help copy', note], ['root fieldset', fieldset]]) {
+        const box = node?.getBoundingClientRect();
+        check(Boolean(box && rect && box.left >= rect.left + gutter &&
+          box.right <= rect.right - gutter), state + ' ' + name + ' content gutter');
+      }
       for (const row of document.querySelectorAll('.nfc-v2-media-root-options label'))
         check(inside(row), state + ' long root option overflow');
+      const optionRows = [...(dialog?.querySelectorAll('.nfc-v2-media-root-option') || [])];
+      check(optionRows.length === 2, state + ' expected two read-only roots');
+      for (const row of optionRows) {
+        const preview = row.querySelector('.nfc-v2-media-root-path');
+        const disclosure = row.querySelector('.nfc-v2-media-root-reveal');
+        const bounds = row.getBoundingClientRect();
+        check(inside(row), state + ' root container overflows viewport');
+        check(Boolean(preview && disclosure), state + ' full-path disclosure missing');
+        const css = preview && getComputedStyle(preview);
+        check(Boolean(css && css.webkitLineClamp === '2'), state + ' long path lacks two-line limit');
+        if (state !== 'analyze-expanded') {
+          check(Boolean(disclosure && !disclosure.open && bounds.height <= 110),
+            state + ' collapsed root consumes excessive vertical space');
+        }
+      }
+      if (state === 'analyze-expanded') {
+        const first = optionRows[0];
+        const full = first?.querySelector('.nfc-v2-media-root-reveal[open] p');
+        const preview = first?.querySelector('.nfc-v2-media-root-path');
+        check(Boolean(full && full.textContent === preview?.textContent),
+          'Expanded Media root path must preserve exact original text');
+        check(Boolean(first?.querySelector('input')?.checked),
+          'Disclosure keyboard interaction unexpectedly changed root selection');
+        check(Boolean(optionRows[1]?.querySelector('input')?.disabled),
+          'Blocked root must remain disabled in expanded state');
+      }
     } else if (state === 'failure') {
       check(inside(document.querySelector('.nfc-v2-media-loading[role="alert"]')),
         'Media GET 503 error alert overflow');
@@ -273,6 +305,22 @@ try {
         assert.equal(await queue.isEnabled(), true, 'Available root selection should enable queue');
         await inspect(page, theme.effective, width, 'analyze');
         await page.screenshot({ path: resolve(OUT, 'media-analyze-dialog-' + label + '.png') });
+        // Native disclosure is not nested inside the checkbox label: Enter
+        // expands the full path but may never change authorized root selection.
+        const fullPath = dialog.locator('.nfc-v2-media-root-reveal').first();
+        await fullPath.locator('summary').focus();
+        await page.keyboard.press('Enter');
+        await page.waitForFunction(() => Boolean(document.querySelector(
+          '.nfc-v2-media-queue-dialog .nfc-v2-media-root-reveal[open]')));
+        assert.equal(await fullPath.locator('p').innerText(), ROOT);
+        assert.equal(await options.nth(0).isChecked(), true);
+        assert.equal(await options.nth(1).isDisabled(), true);
+        await inspect(page, theme.effective, width, 'analyze-expanded');
+        await page.screenshot({ path: resolve(OUT, 'media-expanded-root-' + label + '.png') });
+        await page.keyboard.press('Enter');
+        await page.waitForFunction(() => !document.querySelector(
+          '.nfc-v2-media-queue-dialog .nfc-v2-media-root-reveal[open]'));
+        await inspect(page, theme.effective, width, 'analyze');
         await page.keyboard.press('Escape');
         await dialog.waitFor({ state: 'hidden' });
 
@@ -317,7 +365,7 @@ try {
     }
   }
   assert.equal(passed, WIDTHS.length * THEMES.length);
-  console.log('[MEDIA LEDGER STATES] 32/32 cases, 224 screenshots; ' +
+  console.log('[MEDIA LEDGER STATES] 32/32 cases, 256 screenshots; ' +
     'long media paths, page 2, compound filters, queue dialogs and GET 503 recovery; zero NAS traffic');
 } finally {
   await browser?.close();

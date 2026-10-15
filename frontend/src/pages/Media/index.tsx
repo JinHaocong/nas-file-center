@@ -100,15 +100,23 @@ const QueueDialog: React.FC<QueueDialogProps> = ({
             <fieldset className="nfc-v2-media-root-options" disabled={busy}>
               <legend>选择已索引根目录（至少一个）</legend>
               {options.length ? options.map(option => (
-                <label key={option.value} title={option.disabled ? '该根目录不可用，不能加入队列' : undefined}>
-                  <ConsoleCheckbox checked={roots.includes(option.value)}
-                    disabled={option.disabled}
-                    onCheckedChange={checked => onChange(checked
-                      ? [...roots, option.value]
-                      : roots.filter(value => value !== option.value))} />
-                  <span>{option.label}</span>
-                </label>
-              )) : <p>没有可用的索引根目录；请先完成文件索引。</p>}
+                <div className="nfc-v2-media-root-option" key={option.value}>
+                  <label title={option.disabled ? '该根目录不可用，不能加入队列' : undefined}>
+                    <ConsoleCheckbox checked={roots.includes(option.value)}
+                      disabled={option.disabled}
+                      onCheckedChange={checked => onChange(checked
+                        ? [...roots, option.value]
+                        : roots.filter(value => value !== option.value))} />
+                    <span className="nfc-v2-media-root-path">{option.label}</span>
+                  </label>
+                  {option.label.length > 96 && (
+                    <details className="nfc-v2-media-root-reveal">
+                      <summary>查看完整路径</summary>
+                      <p>{option.label}</p>
+                    </details>
+                  )}
+                </div>
+              )) : <p>没有可用的索引根目录；请先完成文件索引。</p>
             </fieldset>
           </div>
           <div className="nfc-v2-confirm-actions">

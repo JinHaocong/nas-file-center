@@ -391,3 +391,11 @@ No screenshot-only mock data in runtime.
 - Existing 32-case (8 widths × 4 themes) read-only Chromium Task ledger matrix tests collapsed height <=210px, execution placement, Enter-to-expand/collapse and exact expanded bytes, with additional screenshots. Task ledger target 160, overall synthetic screenshot target **1,600**, subject to exact-HEAD verification.
 - Incrementally consolidate shared synthetic auth/safe-settings/viewports/themes for **three** existing browser suites. This is not yet a fully unified mock catalogue or all-page visual review.
 - 67/74 high-level checklist stays OPEN; owner visual acceptance, Organizer C5/Scheduler S5 real-NAS tests and production sign-off are outstanding. No real NAS/production operations.
+
+
+## Pure White Stage 5E-AD — Media queue visual gutters and long-root disclosure
+
+- Targeted screenshot review identified `/media` analyze dialog at 390px with inconsistent body gutters and multi-line unbroken root labels. Source confirmed the Media queue body had margin but no owned horizontal padding; overflow-only browser assertions did not catch poor alignment or information density.
+- Fix only Media queue dialogs: body 24px desktop/18px mobile horizontal padding, two-line preview for unusually long roots, with full exact path in a native keyboard-accessible disclosure *outside* the selection label. Preserve disabled blocked roots, exact root wire values, checkboxes, queue safety, RBAC, read-only synthetic GET, and no NAS execution.
+- Reuse current 32-case Chromium Media matrix; add computed gutter/density checks, Enter expansion with exact full path, and expanded-path screenshots (Media 256 screenshots; global synthetic target 1,632). Extend shared read-only fixture defaults to Media, now four scripts, without calling migration complete.
+- High-level checklist remains **67/74**, pending full visual review, real-NAS Organizer C5/Scheduler S5 acceptance, owner acceptance and explicit deployment approval.
