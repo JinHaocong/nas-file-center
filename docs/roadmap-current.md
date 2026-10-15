@@ -286,3 +286,8 @@ Product decisions remain authoritative:
 
 Cancelled tracks must not be restarted unless the user explicitly reopens them.
 Advanced Auth requires its own fresh Scope + Architecture Freeze if activated.
+
+### Stage 5E-AF — operator-reported password recovery deployment blocker
+
+- The archive recovery UI lacked a channel check at the read-only preflight stage despite Start requiring a shared API/Worker tmpfs for supplied passwords. Expose API-side readiness and explicit next steps, preserving the existing security gate.
+- Enable the documented shared tmpfs overlay only through separate operator-authorized NAS deployment. This software PR does not change production mounts or execute recovery. Real encrypted-7z/Worker verification remains open.
