@@ -62,3 +62,16 @@ jobs:
             echo "Execution:"
             tail -n 1 branch-cleanup-execution.log
           } >> "${GITHUB_STEP_SUMMARY}"
+
+      # Exceptional one-time cleanup: the old design branch was manually ported
+      # by merged PR #196. Check fixed SHA, merged port, main ancestry, active
+      # PRs, protection and HEAD again; general cleaner rules remain unchanged.
+      - name: Audit superseded Pure White design ref (dry-run)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/retire_superseded_pure_white_branch.py
+
+      - name: Retire only the verified superseded Pure White design ref
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/retire_superseded_pure_white_branch.py --execute
