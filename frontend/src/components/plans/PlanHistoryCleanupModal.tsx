@@ -21,6 +21,9 @@ export const PlanHistoryCleanupModal: React.FC<Props> = ({ onCleaned }) => {
   const [open, setOpen] = useState(false);
   const [selectedStatuses, setSelectedStatuses] = useState<PlanHistoryStatus[]>(['completed', 'failed']);
   const submitting = useRef(false);
+  // The controlled Radix modal has no Dialog.Trigger: retain its real launcher
+  // before autofocus moves into the overlay, then restore it on safe close.
+  const returnFocusTarget = useRef<HTMLElement | null>(null);
   const queryClient = useQueryClient();
   const toast = useConsoleToast();
 
@@ -75,6 +78,21 @@ export const PlanHistoryCleanupModal: React.FC<Props> = ({ onCleaned }) => {
         <Dialog.Portal>
           <Dialog.Overlay className="nfc-v2-dialog-overlay nfc-v2-confirm-overlay" />
           <Dialog.Content className="nfc-v2-dialog nfc-overlay-modal nfc-history-cleanup-modal nfc-plan-history-cleanup-modal nfc-v2-plan-history-dialog"
+            onOpenAutoFocus={() => {
+              const active = document.activeElement;
+              returnFocusTarget.current = active instanceof HTMLElement && active !== document.body
+                ? active : null;
+            }}
+            onCloseAutoFocus={event => {
+              const target = returnFocusTarget.current;
+              returnFocusTarget.current = null;
+              // Refreshes may remove or disable a launcher after metadata cleanup.
+              // Never force focus to a stale element; otherwise keep Radix fallback.
+              if (target?.isConnected && !target.matches(':disabled')) {
+                event.preventDefault();
+                target.focus();
+              }
+            }}
             onEscapeKeyDown={event => { if (cleanupMutation.isPending || submitting.current) event.preventDefault(); }}
             onPointerDownOutside={event => event.preventDefault()}>
             <header className="nfc-v2-dialog-heading">
