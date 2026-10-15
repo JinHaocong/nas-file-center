@@ -382,3 +382,12 @@ No screenshot-only mock data in runtime.
 ### Stage 5E-AB supplementary finding — real screenshot glyph fidelity
 
 - Downloaded and inspected the preceding CI's real Indexes Chromium screenshots (390/1280, light/dark). Chinese UI text rendered as tofu squares because runner lacked a usable CJK font. The screenshot pipeline now explicitly installs and verifies Noto CJK **only in CI** before image captures; this does not change production CSS/fonts or add external runtime dependencies. The exact Stage 5E-AB artifact still requires inspection before marking the visual evidence reliable.
+
+
+## Pure White Stage 5E-AC — Task error density and shared screenshot fixture foundation
+
+- Real Stage 5E-AB screenshots show that long unbroken Task Inspector failure paths can occupy most of a 390px mobile screen ahead of Execution. Being within the viewport is insufficient for usable visual hierarchy.
+- Errors exceeding 240 characters now expose a compact three-line prefix plus native keyboard-operable disclosure of the **full unchanged** diagnostic. Short errors remain direct. Error code, backend diagnostics, action safety and existing React Query behavior remain intact.
+- Existing 32-case (8 widths × 4 themes) read-only Chromium Task ledger matrix tests collapsed height <=210px, execution placement, Enter-to-expand/collapse and exact expanded bytes, with additional screenshots. Task ledger target 160, overall synthetic screenshot target **1,600**, subject to exact-HEAD verification.
+- Incrementally consolidate shared synthetic auth/safe-settings/viewports/themes for **three** existing browser suites. This is not yet a fully unified mock catalogue or all-page visual review.
+- 67/74 high-level checklist stays OPEN; owner visual acceptance, Organizer C5/Scheduler S5 real-NAS tests and production sign-off are outstanding. No real NAS/production operations.

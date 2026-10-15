@@ -74,7 +74,7 @@ describe('Pure White Stage 5E-A computed CSS cascade cleanup', () => {
     for (const token of [
       "import { chromium } from 'playwright'",
       '360, 390, 430, 768, 1024, 1280, 1440, 1920',
-      "mode: 'light'", "mode: 'dark'", "mode: 'system'",
+      'const THEMES = visualThemes',
       "'/dashboard'", "'/plans'", "'/tasks'",
       "getComputedStyle(head).marginBottom",
       "getComputedStyle(pageContent).overflowY",
@@ -82,6 +82,11 @@ describe('Pure White Stage 5E-A computed CSS cascade cleanup', () => {
       'Ledger page gap must own vertical rhythm',
       'assert.equal(passed, WIDTHS.length * THEMES.length)',
     ]) assert.ok(browser.includes(token), token);
+    const shared = read('scripts/visual-fixtures.mjs');
+    for (const token of ["mode: 'light'", "mode: 'dark'", "mode: 'system'"]) {
+      assert.ok(shared.includes(token), 'Shared real browser matrix missing ' + token);
+    }
+    assert.ok(browser.includes("from './visual-fixtures.mjs'"));
   });
 
   test('CI captures seventh browser matrix and all requests remain local GET only', () => {

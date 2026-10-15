@@ -9,16 +9,13 @@ import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { chromium } from 'playwright';
+import { visualAdminFixture, visualSafeSettingsFixture,
+  visualViewports, visualThemes } from './visual-fixtures.mjs';
 
 const BASE = 'http://127.0.0.1:4187';
 const OUT = resolve(process.cwd(), 'artifacts/browser-task-ledger-states');
-const WIDTHS = [360, 390, 430, 768, 1024, 1280, 1440, 1920];
-const THEMES = [
-  { mode: 'light', system: 'dark', effective: 'light' },
-  { mode: 'dark', system: 'light', effective: 'dark' },
-  { mode: 'system', system: 'light', effective: 'light' },
-  { mode: 'system', system: 'dark', effective: 'dark' },
-];
+const WIDTHS = visualViewports; // 360, 390, 430, 768, 1024, 1280, 1440, 1920
+const THEMES = visualThemes; // mode: 'system', system: 'dark', effective: 'dark'
 const LONG_ERROR = 'FAIL_CLOSED_PATH_IDENTITY: ' +
   '/synthetic-nas/2026/Archived-Camera-Exports-Only/' +
   'ExtremelyLongFilenameWithoutNaturalBreaks'.repeat(18) +
@@ -56,16 +53,12 @@ async function ready() {
 }
 function fixture(url) {
   const path = url.pathname;
-  if (path === '/api/auth/me') return {
-    id: 1, username: 'task-state-visual-fixture', role: 'admin', is_admin: true,
-  };
+  if (path === '/api/auth/me') return visualAdminFixture('task-state-visual-fixture');
   if (path === '/api/tasks/worker') return {
     status: 'offline', worker_id: null, started_at: null,
     heartbeat_at: null, heartbeat_age_seconds: null,
   };
-  if (path === '/api/settings') return {
-    allow_mutation: false, allow_delete: false, safe_mode: true,
-  };
+  if (path === '/api/settings') return visualSafeSettingsFixture();
   if (path === '/api/tasks/601') return all[0];
   if (path === '/api/tasks/601/logs') return {
     items: [], total: 0, page: 1, page_size: 50,
@@ -97,7 +90,7 @@ async function assertBounds(page, theme, width, mode) {
     check(inside(document.querySelector('.nfc-page-content')), 'Workspace overflow');
     check(inside(document.querySelector('.nfc-tasks-page')), 'Tasks root overflow');
     check(inside(document.querySelector('.nfc-v2-task-filter-bar')), 'Filter bar overflow');
-    if (mode === 'drawer') {
+    if (mode === 'drawer' || mode === 'drawer-expanded') {
       const overlay = document.querySelector('.nfc-v2-sheet-overlay');
       const sheet = document.querySelector('.nfc-task-detail-drawer');
       const error = sheet?.querySelector('.nfc-prewrap-error');
@@ -105,6 +98,24 @@ async function assertBounds(page, theme, width, mode) {
         'Long error detail missing');
       check(inside(sheet), 'Task inspector exceeds viewport');
       check(inside(error), 'Long error exceeds viewport');
+      const disclosure = sheet?.querySelector('.nfc-v2-task-error-details');
+      const preview = sheet?.querySelector('.nfc-v2-task-error-preview');
+      const alert = sheet?.querySelector('.nfc-v2-task-inline-alert[role="alert"]');
+      const execution = sheet?.querySelector('.nfc-overlay-section');
+      const alertRect = alert?.getBoundingClientRect();
+      const executionRect = execution?.getBoundingClientRect();
+      check(Boolean(disclosure && preview && alertRect && executionRect),
+        'Error disclosure / execution section missing');
+      check(Boolean(preview?.textContent?.includes('FAIL_CLOSED_PATH_IDENTITY')),
+        'Diagnostic prefix missing from collapsed preview');
+      if (mode === 'drawer') {
+        check(Boolean(!disclosure?.open && alertRect && executionRect &&
+          alertRect.height <= 210 && alertRect.bottom <= executionRect.top),
+          'Compact error must leave Execution visible');
+      } else {
+        check(Boolean(disclosure?.open && disclosure.querySelector('p')?.textContent?.includes(
+          'operator-review-required')), 'Full expanded diagnostic unavailable');
+      }
       check(Number(getComputedStyle(overlay).zIndex) === 1100, 'Sheet overlay z-index');
       check(Number(getComputedStyle(sheet).zIndex) === 1101, 'Sheet content z-index');
       check(getComputedStyle(overlay).backdropFilter === 'none', 'Unexpected sheet blur');
@@ -197,9 +208,21 @@ try {
         else await page.locator(row).first().getByRole('button', { name: '详情' }).click();
         const sheet = page.locator('.nfc-task-detail-drawer');
         await sheet.waitFor({ state: 'visible' });
-        await sheet.locator('.nfc-prewrap-error').waitFor({ state: 'visible' });
+        await sheet.locator('.nfc-v2-task-error-preview').waitFor({ state: 'visible' });
         await assertBounds(page, theme.effective, width, 'drawer');
         await page.screenshot({ path: resolve(OUT, 'long-error-' + label + '.png') });
+        const disclosure = sheet.locator('.nfc-v2-task-error-details');
+        await disclosure.locator('summary').focus();
+        await page.keyboard.press('Enter');
+        await page.waitForFunction(() => Boolean(document.querySelector(
+          '.nfc-task-detail-drawer .nfc-v2-task-error-details[open]')));
+        assert.equal(await disclosure.locator('.nfc-prewrap-error').innerText(), LONG_ERROR);
+        await assertBounds(page, theme.effective, width, 'drawer-expanded');
+        await page.screenshot({ path: resolve(OUT, 'expanded-error-' + label + '.png') });
+        await page.keyboard.press('Enter');
+        await page.waitForFunction(() => !document.querySelector(
+          '.nfc-task-detail-drawer .nfc-v2-task-error-details[open]'));
+        await assertBounds(page, theme.effective, width, 'drawer');
         await page.keyboard.press('Escape');
         await sheet.waitFor({ state: 'hidden' });
 
@@ -246,7 +269,7 @@ try {
     }
   }
   assert.equal(passed, WIDTHS.length * THEMES.length);
-  console.log('[TASK LEDGER STATES] 32/32 cases, 128 screenshots; ' +
+  console.log('[TASK LEDGER STATES] 32/32 cases, 160 screenshots; ' +
     'long failure, server pagination, compound filters, error/retry; synthetic GET only.');
 } finally {
   await browser?.close();
