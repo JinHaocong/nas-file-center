@@ -48,8 +48,11 @@ function fixture(url, status) {
   }
   if (url.pathname === '/api/filesystem/favorites' ||
       url.pathname === '/api/filesystem/recent') return { items: [] };
-  if (url.pathname === '/api/tasks/777') {
-    return { id: 777, job_type: 'archive-recovery', status,
+  if (url.pathname === '/api/tasks/777' || url.pathname === '/api/tasks/778') {
+    const unrelated = url.pathname.endsWith('/778');
+    return { id: unrelated ? 778 : 777,
+      job_type: unrelated ? 'fclones-scan' : 'archive-recovery',
+      status: unrelated ? 'completed' : status,
       capabilities: { supports_cancel: false, supports_pause: false,
         supports_resume: false, supports_retry: false },
       progress: { current: 1, total: 3, percent: 33, message: 'Synthetic Worker' },
@@ -160,6 +163,24 @@ try {
         assert.equal(await page.locator('#recovery-source').inputValue(), '', label);
         assert.equal(await page.getByRole('button', { name: '开始恢复' }).isDisabled(),
           true, label);
+        // A manually supplied ID for a different WorkJob kind must not
+        // expose cancellation, recovery reports, or terminal acknowledgement.
+        await page.goto(BASE + '/archive-recovery?task=778', {
+          waitUntil: 'domcontentloaded',
+        });
+        await page.getByText('任务编号对应的不是压缩包恢复任务。', {
+          exact: false,
+        }).waitFor({ state: 'visible' });
+        assert.equal(await page.getByRole('button', {
+          name: '取消任务',
+        }).isDisabled(), true, label);
+        assert.equal(await page.getByRole('button', {
+          name: '开始下一次恢复',
+        }).count(), 0, label);
+        assert.equal(await page.locator('.nfc-archive-recovery-results').count(),
+          0, label);
+        await page.screenshot({ path: resolve(OUTPUT, label + '-unrelated.png') });
+
         assert.ok(taskReads.includes('running') && taskReads.includes('completed'),
           label + ' observed readonly task lifecycle');
         assert.deepEqual(blockedWrites, [], label + ': blocked write requests');
