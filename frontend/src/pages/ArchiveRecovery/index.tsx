@@ -62,7 +62,11 @@ export const ArchiveRecoveryPage: React.FC = () => {
     enabled: taskId !== null,
     refetchInterval: q => ['queued', 'running', 'cancel_requested'].includes(q.state.data?.status || '') ? 2000 : false,
   });
-  const terminal = ['completed', 'failed', 'cancelled'].includes(job.data?.status || '');
+  // A manually supplied task link must never offer archive cancellation or
+  // recovery-report actions against another WorkJob kind.
+  const recoveryJobMatches = job.data?.job_type === 'archive-recovery';
+  const terminal = recoveryJobMatches &&
+    ['completed', 'failed', 'cancelled'].includes(job.data?.status || '');
   const report = useQuery({
     queryKey: ['archive-recovery-report', taskId],
     queryFn: () => archiveRecoveryApi.report(taskId!),
@@ -202,11 +206,12 @@ export const ArchiveRecoveryPage: React.FC = () => {
       {taskId !== null && <DataPanel className="nfc-archive-recovery-task-panel" title="03 · 恢复任务" description="任务状态与恢复证据将在这里更新。">
         <p className="nfc-archive-recovery-task-status" role="status">任务 #{taskId} · {job.isError ? '状态暂不可用' : (job.data?.status || '排队中')} · {job.data?.progress.message || '等待 Worker'}</p>
         <p className="nfc-archive-recovery-help">切换待恢复文件或目录不会取消正在运行的任务。任务结束后，请通过“开始下一次恢复”明确结束本次跟踪；任务记录仍保留在任务中心。</p>
+        {job.data && !recoveryJobMatches && <p role="alert">任务编号对应的不是压缩包恢复任务。此页面不会提供取消、报告或下一次恢复操作；请前往任务中心查看，或返回不带任务编号的压缩包恢复页面。</p>}
         {job.isError && <p role="alert">任务状态读取失败：{getStructuredApiError(job.error).message}。可前往任务中心核对，或重试刷新。</p>}
         {cancel.isError && <p role="alert">取消请求失败：{getStructuredApiError(cancel.error).message}</p>}
         <ActionBar>
           <ConsoleButton onClick={() => navigate('/tasks?task=' + taskId)}>任务详情与日志</ConsoleButton>
-          <ConsoleButton disabled={!['running', 'queued'].includes(job.data?.status || '') || cancel.isPending}
+          <ConsoleButton disabled={!recoveryJobMatches || !['running', 'queued'].includes(job.data?.status || '') || cancel.isPending}
             onClick={() => { void cancel.mutateAsync().catch(() => {}); }}>取消任务</ConsoleButton>
           {terminal && <ConsoleButton onClick={startAnotherRecovery}>开始下一次恢复</ConsoleButton>}
         </ActionBar>
