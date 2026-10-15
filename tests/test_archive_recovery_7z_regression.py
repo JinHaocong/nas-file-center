@@ -118,3 +118,21 @@ def test_no_files_report_retains_deep_unsupported_reason(tmp_path, monkeypatch):
     assert report["deep_capability"] == "aes_lzma2_crc_reset"
     assert len(report["items"]) == 1
     assert source.exists()
+
+
+
+@pytest.mark.parametrize("reason", ["RESOURCE_LIMIT", "TIME_LIMIT", "INVALID_SOURCE_OR_DESTINATION"])
+def test_7z_deep_does_not_override_safety_failures(tmp_path, monkeypatch, reason):
+    source = tmp_path / "limited.7z"
+    _plain_7z(source, os.urandom(8000), os.urandom(9000))
+    out = tmp_path / "recover"
+    out.mkdir()
+
+    def blocked(*args):
+        raise core.RecoveryError(reason)
+
+    monkeypatch.setattr(core, "_libarchive", blocked)
+    with pytest.raises(core.RecoveryError, match=reason):
+        core.recover_archive(source, out, deep=True)
+    assert not (out / "可恢复.bin").exists()
+    assert source.exists()
