@@ -24,8 +24,8 @@ describe('Stage 5E-AH — Archive Recovery WorkJob continuity', () => {
     assert.match(view, /onClick=\{\(\) => \{\s*setSelected\(entry\.path\);\s*setPassword\(''\);\s*check\.reset\(\);\s*start\.reset\(\);/);
     assert.match(view, /onChange=\{event => \{\s*setSelected\(event\.target\.value\);\s*setPassword\(''\);\s*check\.reset\(\);\s*start\.reset\(\);/);
     assert.match(view, /if \(next === folder\) return;[\s\S]*?setFolder\(next\);[\s\S]*?setSelected\(''\);[\s\S]*?check\.reset\(\);/);
-    const beforeFinish = view.split('const startAnotherRecovery')[0];
-    assert.doesNotMatch(beforeFinish, /next\.delete\('task'\)/);
+    const beforeDismiss = view.split('const clearTaskMonitor')[0];
+    assert.doesNotMatch(beforeDismiss, /next\.delete\('task'\)/);
     assert.ok(view.includes('Boolean(taskId)}'));
     assert.ok(view.includes('disabled={!checkedSourceMatchesSelected'));
   });
@@ -83,6 +83,27 @@ describe('Stage 5E-AH — Archive Recovery WorkJob continuity', () => {
     assert.ok(workflow.includes('frontend/artifacts/browser-archive-recovery-selection/*.png'));
     assert.ok(workflow.includes('frontend/artifacts/browser-archive-recovery-task-continuity/*.png'));
     assert.ok(read('scripts/run-tests.mjs').includes('node --test scripts/visual-fixtures-archive.test.mjs'));
+  });
+
+  test('Stage 5E-AJ failed and unrelated task links have explicit safe recovery actions', () => {
+    assert.ok(view.includes('retry: false'));
+    assert.ok(view.includes('sourceInputRef.current?.focus()'));
+    assert.ok(view.includes('ref={sourceInputRef}'));
+    assert.ok(view.includes('const recoverInvalidTaskLink = () => {'));
+    assert.ok(view.includes('(!job.isError && (!job.data || recoveryJobMatches))'));
+    assert.ok(view.includes('onClick={recoverInvalidTaskLink}>返回选择压缩包'));
+    assert.ok(view.includes("void job.refetch();"));
+    assert.ok(view.includes('disabled={job.isFetching} loading={job.isFetching}'));
+    assert.ok(view.includes('任务状态读取失败'));
+    assert.ok(view.includes('taskId === null'));
+    assert.ok(view.includes('clearTaskMonitor();'));
+    const browser = read('scripts/browser-archive-recovery-task-continuity.mjs');
+    assert.ok(browser.includes("BASE + '/archive-recovery?task=779'"));
+    assert.ok(browser.includes("name: '重试读取任务状态'"));
+    assert.ok(browser.includes("name: '返回选择压缩包'"));
+    assert.ok(browser.includes("document.activeElement"));
+    assert.ok(browser.includes('taskErrorReads'));
+    assert.ok(browser.includes('assert.deepEqual(blockedWrites, []'));
   });
 
 });
