@@ -154,6 +154,7 @@ try {
         // Explicit acknowledgement only; no cancel/start/plan/execute POST.
         await page.locator('#recovery-source').fill('/data/other.zip');
         await page.getByRole('button', { name: '开始下一次恢复' }).click();
+        await monitor.waitFor({ state: 'detached' });
         assert.equal(await monitor.count(), 0, label + ' monitor dismissed');
         assert.equal(new URL(page.url()).searchParams.has('task'), false, label);
         assert.equal(await page.locator('#recovery-source').inputValue(), '', label);
