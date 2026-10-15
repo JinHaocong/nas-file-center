@@ -21,8 +21,8 @@ describe('Stage 5E-AH — Archive Recovery WorkJob continuity', () => {
   });
 
   test('selection, manual path and folder changes do not detach active task evidence', () => {
-    assert.match(view, /onClick=\{\(\) => \{\s*setSelected\(entry\.path\);\s*check\.reset\(\);\s*start\.reset\(\);/);
-    assert.match(view, /onChange=\{event => \{\s*setSelected\(event\.target\.value\);\s*check\.reset\(\);\s*start\.reset\(\);/);
+    assert.match(view, /onClick=\{\(\) => \{\s*setSelected\(entry\.path\);\s*setPassword\(''\);\s*check\.reset\(\);\s*start\.reset\(\);/);
+    assert.match(view, /onChange=\{event => \{\s*setSelected\(event\.target\.value\);\s*setPassword\(''\);\s*check\.reset\(\);\s*start\.reset\(\);/);
     assert.match(view, /if \(next === folder\) return;[\s\S]*?setFolder\(next\);[\s\S]*?setSelected\(''\);[\s\S]*?check\.reset\(\);/);
     const beforeFinish = view.split('const startAnotherRecovery')[0];
     assert.doesNotMatch(beforeFinish, /next\.delete\('task'\)/);
@@ -49,7 +49,7 @@ describe('Stage 5E-AH — Archive Recovery WorkJob continuity', () => {
     assert.ok(browser.includes("request.method() !== 'GET'"));
     assert.ok(browser.includes('blockedWrites'));
     assert.ok(browser.includes('outbound'));
-    assert.ok(browser.includes("getByRole('button', { name: '开始下一次恢复' })"));
+    assert.ok(browser.includes("name: '开始下一次恢复'"));
     assert.ok(browser.includes('page.reload('));
     assert.ok(workflow.includes('node scripts/browser-archive-recovery-task-continuity.mjs'));
   });
