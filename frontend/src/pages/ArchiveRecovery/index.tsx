@@ -64,6 +64,8 @@ export const ArchiveRecoveryPage: React.FC = () => {
     entry.type === 'file' && EXTENSIONS.test(entry.name));
   const shown = report.data?.items.filter(item => filter === 'all' || item.status === filter) || [];
   // Older APIs and missing tmpfs must fail closed for password-bearing starts.
+  // A preflight authorizes only the exact selected source, never a stale path.
+  const checkedSourceMatchesSelected = Boolean(selected) && check.data?.source === selected;
   const passwordChannelBlocked = Boolean(password) &&
     check.data?.password_channel_available !== true;
 
@@ -88,7 +90,17 @@ export const ArchiveRecoveryPage: React.FC = () => {
       <DataPanel className="nfc-archive-recovery-select-panel" title="01 · 选择压缩包" description="从 NAS 目录中选择文件；仅展示已知扩展名，服务端会检查实际文件格式。">
         <div className="nfc-archive-recovery-field-label" id="recovery-folder-label">压缩包所在目录</div>
         <div id="recovery-folder" role="group" aria-labelledby="recovery-folder-label"><DirectoryPicker value={folder}
-          onChange={value => { setFolder(typeof value === 'string' ? value : value[0] || ''); setPage(1); }} />
+          onChange={value => {
+            const next = typeof value === 'string' ? value : value[0] || '';
+            if (next === folder) return;
+            setFolder(next);
+            setPage(1);
+            // A folder switch must invalidate any prior archive and its preflight.
+            setSelected('');
+            setPassword('');
+            check.reset();
+            start.reset();
+          }} />
         </div>
         <div className="nfc-archive-recovery-filter-row"><ActionBar>
           <input aria-label="按文件名筛选" placeholder="搜索压缩包" value={search}
@@ -129,10 +141,10 @@ export const ArchiveRecoveryPage: React.FC = () => {
         <ActionBar>
           <ConsoleButton disabled={!selected || check.isPending || Boolean(taskId)}
             loading={check.isPending} onClick={() => { void check.mutateAsync(selected).catch(() => {}); }}>检测</ConsoleButton>
-          <ConsoleButton variant="primary" disabled={!selected || !check.data?.can_write || !check.data?.dependency_available || passwordChannelBlocked || start.isPending || Boolean(taskId)}
+          <ConsoleButton variant="primary" disabled={!checkedSourceMatchesSelected || !check.data?.can_write || !check.data?.dependency_available || passwordChannelBlocked || start.isPending || Boolean(taskId)}
             loading={start.isPending} onClick={() => { void start.mutateAsync().catch(() => {}); }}>开始恢复</ConsoleButton>
         </ActionBar>
-        {passwordChannelBlocked && check.data && <p className="nfc-archive-recovery-warning" role="alert">
+        {passwordChannelBlocked && checkedSourceMatchesSelected && <p className="nfc-archive-recovery-warning" role="alert">
           密码恢复暂不可启动：API 未确认共享 tmpfs 密码通道已就绪。请由部署管理员同时为 API 与 Worker
           挂载同一个 /run/nfc-recovery-secrets tmpfs（Komodo 可使用
           compose.komodo.archive-recovery-secrets.yaml），部署后重新点击“检测”。
@@ -140,7 +152,7 @@ export const ArchiveRecoveryPage: React.FC = () => {
         </p>}
         {check.isError && <p role="alert">检测失败：{getStructuredApiError(check.error).message}</p>}
         {start.isError && <p role="alert">启动失败：{getStructuredApiError(start.error).message}</p>}
-        {check.data && <div className="nfc-archive-recovery-check-result" role="status">
+        {checkedSourceMatchesSelected && check.data && <div className="nfc-archive-recovery-check-result" role="status">
           <p>实际格式：{check.data.format} · 原包大小：{check.data.source_bytes.toLocaleString()} 字节 · 当前空闲：{check.data.free_bytes.toLocaleString()} 字节</p>
           <p>写入允许：{check.data.can_write ? '是' : '否'} · 依赖：{check.data.dependency_available ? '可用' : '缺失'}</p>
           <p>密码通道（API 侧）：{check.data.password_channel_available === true ? 'tmpfs 已检测到（还需确认 Worker 共享挂载）' : '未就绪；带密码的恢复不可启动'}</p>
