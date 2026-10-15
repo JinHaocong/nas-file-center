@@ -116,7 +116,7 @@ const QueueDialog: React.FC<QueueDialogProps> = ({
                     </details>
                   )}
                 </div>
-              )) : <p>没有可用的索引根目录；请先完成文件索引。</p>
+              )) : <p>没有可用的索引根目录；请先完成文件索引。</p>}
             </fieldset>
           </div>
           <div className="nfc-v2-confirm-actions">
