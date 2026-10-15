@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { normalizeThemeMode, shouldUseDarkTheme, type ThemeMode } from '../utils/themeMode';
+import { restoreThemeMode, persistThemeMode, shouldUseDarkTheme, type ThemeMode } from '../utils/themeMode';
 
 // Preserve the public type contract for Login, Settings, and shell consumers.
 export type { ThemeMode } from '../utils/themeMode';
@@ -22,7 +22,7 @@ const ThemeContext = createContext<ThemeContextType>({
  */
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [mode, setModeState] = useState<ThemeMode>(() =>
-    normalizeThemeMode(localStorage.getItem('nfc_theme_mode')),
+    restoreThemeMode(() => localStorage.getItem('nfc_theme_mode')),
   );
   const [systemDark, setSystemDark] = useState(() =>
     Boolean(window.matchMedia?.('(prefers-color-scheme: dark)').matches),
@@ -38,7 +38,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const setMode = (newMode: ThemeMode) => {
     setModeState(newMode);
-    localStorage.setItem('nfc_theme_mode', newMode);
+    persistThemeMode(() => localStorage.setItem('nfc_theme_mode', newMode));
   };
 
   const isDark = shouldUseDarkTheme(mode, systemDark);
