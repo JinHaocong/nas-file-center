@@ -31,9 +31,25 @@ describe('Archive Recovery follows Pure White visual and safety contracts', () =
   test('cannot launch recovery without both server preflight permissions', () => {
     assert.ok(view.includes('mutationFn: archiveRecoveryApi.check'));
     assert.ok(view.includes('archiveRecoveryApi.start(selected, password, deep)'));
-    assert.match(view, /disabled=\{!selected \|\| !check\.data\?\.can_write \|\| !check\.data\?\.dependency_available \|\| start\.isPending \|\| Boolean\(taskId\)\}/);
+    assert.match(view, /disabled=\{!selected \|\| !check\.data\?\.can_write \|\| !check\.data\?\.dependency_available \|\| passwordChannelBlocked \|\| start\.isPending \|\| Boolean\(taskId\)\}/);
     assert.match(view, /setPassword\(''\);/);
     assert.match(view, /type="password" autoComplete="off"/);
+  });
+
+  test('password channel preflight fails closed for legacy/unavailable API without blocking password-free jobs', () => {
+    const api = read('src/api/archiveRecovery.ts');
+    const router = read('../app/archive_recovery/router.py');
+    for (const source of [router, api]) assert.ok(source.includes('password_channel_available'));
+    assert.ok(router.includes("'password_channel_available': tmpfs_available()"));
+    assert.ok(router.includes("if payload.password and not tmpfs_available():"));
+    assert.ok(view.includes('const passwordChannelBlocked = Boolean(password) &&'));
+    assert.ok(view.includes('check.data?.password_channel_available !== true'));
+    assert.ok(view.includes('|| passwordChannelBlocked || start.isPending'));
+    assert.ok(view.includes('密码恢复暂不可启动'));
+    assert.ok(view.includes('compose.komodo.archive-recovery-secrets.yaml'));
+    assert.ok(view.includes('重新点击“检测”'));
+    assert.ok(view.includes('密码通道（API 侧）'));
+    assert.ok(view.includes("archiveRecoveryApi.start(selected, password, deep)"));
   });
 
   test('keeps all 7z AES/LZMA2 and read-only recovery limitations visible', () => {
