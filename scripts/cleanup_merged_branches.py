@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Preview or safely delete old merged-PR remote branches (dry-run by default)."""
+"""Preview or safely delete merged-PR remote branches immediately (dry-run by default)."""
 from __future__ import annotations
 import argparse
 from datetime import datetime, timedelta, timezone
@@ -14,6 +14,7 @@ from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 API = "https://api.github.com"
+DEFAULT_MIN_AGE_DAYS = 0  # Owner-approved: merged PRs are eligible immediately.
 RESERVED = {"main", "master", "develop", "development", "staging", "production", "release"}
 RESERVED_PREFIXES = ("release/", "hotfix/", "production/", "stable/")
 
@@ -95,13 +96,18 @@ def eligible(branch, pulls, repo, default, cutoff, prefix):
     return True, "merged PR #" + str(max(p["number"] for p in match))
 
 
-def main():
+def build_parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", required=True, help="OWNER/REPO, e.g. JinHaocong/nas-file-center")
     parser.add_argument("--prefix", default="", help="Extra safety filter, e.g. feat/console-v2-")
-    parser.add_argument("--min-age-days", type=int, default=7, help="Default 7; set 0 deliberately")
+    parser.add_argument("--min-age-days", type=int, default=DEFAULT_MIN_AGE_DAYS,
+                        help="Default 0: merged PR branches are eligible immediately; set >0 to retain")
     parser.add_argument("--execute", action="store_true", help="Delete approved refs; otherwise dry-run")
-    args = parser.parse_args()
+    return parser
+
+
+def main():
+    args = build_parser().parse_args()
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", args.repo):
         parser.error("Invalid --repo")
     if args.min_age_days < 0:

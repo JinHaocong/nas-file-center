@@ -1,0 +1,64 @@
+name: Merged Branch Cleanup
+
+# Owner-approved: merged PR source branches need no seven-day retention.
+# This workflow runs only *after* a main push, never on an open PR.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Minimum permission needed to delete eligible Git refs via GitHub REST.
+permissions:
+  contents: write
+
+concurrency:
+  group: merged-branch-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    if: github.repository == 'JinHaocong/nas-file-center' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout exact main push
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Verify main candidate identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REF}" = "refs/heads/main"
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+
+      - name: Dry-run and record all branch decisions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/cleanup_merged_branches.py --repo JinHaocong/nas-file-center \
+            | tee branch-cleanup-preview.log
+
+      - name: Delete only revalidated merged PR refs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/cleanup_merged_branches.py --repo JinHaocong/nas-file-center --execute \
+            | tee branch-cleanup-execution.log
+          {
+            echo "## Merged branch cleanup"
+            echo "Source main commit: \`${GITHUB_SHA}\`"
+            echo
+            echo "Preview:"
+            tail -n 1 branch-cleanup-preview.log
+            echo
+            echo "Execution:"
+            tail -n 1 branch-cleanup-execution.log
+          } >> "${GITHUB_STEP_SUMMARY}"

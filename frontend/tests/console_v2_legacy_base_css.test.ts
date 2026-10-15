@@ -42,7 +42,8 @@ describe('Console v2 reviewed v048 base CSS and safe branch cleanup', () => {
     for (const token of [
       'parser.add_argument("--repo", required=True',
       'parser.add_argument("--execute", action="store_true"',
-      'parser.add_argument("--min-age-days", type=int, default=7',
+      'DEFAULT_MIN_AGE_DAYS = 0',
+      'parser.add_argument("--min-age-days", type=int, default=DEFAULT_MIN_AGE_DAYS',
       'branch.get("protected")',
       'if any(p.get("state") == "open"',
       'if any(not p.get("merged_at")',
