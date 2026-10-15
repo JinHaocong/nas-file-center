@@ -112,14 +112,32 @@
 .nfc-v2-media-queue-dialog .nfc-v2-dialog-heading { align-items:flex-start; }
 .nfc-v2-media-queue-dialog .nfc-v2-dialog-heading > div { flex:1;min-width:0; }
 .nfc-v2-media-queue-description { margin-top:7px;font-size:11px;line-height:1.7; }
-.nfc-v2-media-queue-body { display:grid;gap:14px;margin:12px 0; }
+/* Dialog has padding:0: own the body gutter so explanatory copy and roots align
+   with the header. This is scoped to Media; other dialogs are unchanged. */
+.nfc-v2-media-queue-body { display:grid;gap:14px;margin:0;padding:18px 24px 16px;min-width:0; }
 .nfc-v2-media-queue-body > p { margin:0;font-size:12px;line-height:1.7; }
 .nfc-v2-media-root-options { display:grid;gap:8px;border:1px solid var(--nfc-media-queue-line);
   border-radius:9px;padding:12px;min-width:0; }
 .nfc-v2-media-root-options legend { padding:0 6px;font-size:12px;font-weight:700; }
-.nfc-v2-media-root-options label { display:flex;align-items:flex-start;gap:10px;
+.nfc-v2-media-root-option {
   padding:9px 10px;border-radius:8px;background:var(--nfc-media-queue-soft);
-  font-size:12px;line-height:1.6;cursor:pointer;overflow-wrap:anywhere; }
+  min-width:0;
+}
+.nfc-v2-media-root-options label { display:flex;align-items:flex-start;gap:10px;
+  min-width:0;font-size:12px;line-height:1.6;cursor:pointer;overflow-wrap:anywhere; }
+.nfc-v2-media-root-path {
+  min-width:0;display:-webkit-box;-webkit-box-orient:vertical;
+  -webkit-line-clamp:2;line-clamp:2;overflow:hidden;overflow-wrap:anywhere;
+}
+.nfc-v2-media-root-reveal { margin:7px 0 0 27px;min-width:0;font-size:11px;line-height:1.65; }
+.nfc-v2-media-root-reveal summary {
+  width:fit-content;max-width:100%;font-weight:700;cursor:pointer;
+  text-decoration:underline;text-underline-offset:2px;
+}
+.nfc-v2-media-root-reveal summary:focus-visible {
+  outline:2px solid var(--nfc-media-queue-accent);outline-offset:3px;border-radius:3px;
+}
+.nfc-v2-media-root-reveal p { margin:7px 0 0;overflow-wrap:anywhere;white-space:pre-wrap; }
 .nfc-v2-media-root-options input { margin-top:2px;width:17px;height:17px;flex:0 0 auto;
   accent-color:var(--nfc-media-queue-accent); }
 .nfc-v2-media-root-options input:disabled { opacity:.5;cursor:not-allowed; }
@@ -139,7 +157,8 @@
   .nfc-v2-media-filters :is(input,select),
   .nfc-v2-media-queue-dialog .nfc-console-button { min-height:44px; }
   .nfc-v2-media-queue-dialog { width:min(96vw,650px);max-height:93dvh; }
-  .nfc-v2-media-root-options label { min-height:44px; }
+  .nfc-v2-media-queue-body { padding:16px 18px 14px; }
+  .nfc-v2-media-root-options label { min-height:36px; }
 }
 @media(prefers-reduced-motion:reduce) {
   .nfc-v2-media-page *, .nfc-v2-media-queue-dialog * {

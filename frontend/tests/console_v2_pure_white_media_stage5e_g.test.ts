@@ -40,7 +40,7 @@ describe('Pure White Stage 5E-G Media complex-state browser acceptance', () => {
       "'media-analyze-dialog-' + label",
       "'media-verify-dialog-' + label",
       "'media-list-503-' + label",
-      '32/32 cases, 224 screenshots',
+      '32/32 cases, 256 screenshots',
     ]) assert.ok(browser.includes(token), token);
     assert.match(page, /const canSelect = \(record: MediaAsset\)/);
     assert.match(page, /record\.integrity_status === 'corrupt' && record\.can_direct_delete/);
