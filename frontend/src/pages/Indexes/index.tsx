@@ -44,6 +44,9 @@ export const IndexesPage: React.FC = () => {
   const [removePending, setRemovePending] = useState(false);
   const removeInFlight = useRef(false);
   const createInFlight = useRef(false);
+  // The page-owned Indexes action opens a controlled Dialog without Dialog.Trigger.
+  // Capture its real keyboard launcher before the modal claims focus.
+  const createReturnFocusTarget = useRef<HTMLElement | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
 
@@ -300,6 +303,20 @@ export const IndexesPage: React.FC = () => {
           <Dialog.Overlay className="nfc-v2-dialog-overlay" />
           <Dialog.Content
             className="nfc-v2-dialog nfc-overlay-modal nfc-index-create-modal nfc-v2-index-create-dialog"
+            onOpenAutoFocus={() => {
+              const active = document.activeElement;
+              createReturnFocusTarget.current = active instanceof HTMLElement && active !== document.body
+                ? active : null;
+            }}
+            onCloseAutoFocus={event => {
+              const target = createReturnFocusTarget.current;
+              createReturnFocusTarget.current = null;
+              // Navigation or a refreshed page may detach/disable the launcher.
+              if (target?.isConnected && !target.matches(':disabled')) {
+                event.preventDefault();
+                target.focus();
+              }
+            }}
             onEscapeKeyDown={event => { if (createMutation.isPending || createInFlight.current) event.preventDefault(); }}
             onPointerDownOutside={event => event.preventDefault()}>
             <header className="nfc-v2-dialog-heading">
