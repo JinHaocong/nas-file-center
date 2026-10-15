@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 
 import { archiveRecoveryApi, type RecoveryItem } from '../../api/archiveRecovery';
 import { filesystemApi } from '../../api/filesystem';
@@ -24,6 +24,13 @@ const STATUS: Record<RecoveryItem['status'], string> = {
 export const ArchiveRecoveryPage: React.FC = () => {
   useTitle('压缩包检测与恢复');
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  // Track the WorkJob by a non-secret URL task ID so refresh/navigation cannot
+  // silently detach a still-running recovery from the visible task monitor.
+  const rawTaskId = searchParams.get('task') || '';
+  const parsedTaskId = Number(rawTaskId);
+  const taskId = /^[1-9][0-9]*$/.test(rawTaskId) && Number.isSafeInteger(parsedTaskId)
+    ? parsedTaskId : null;
   const [folder, setFolder] = useState('/data');
   const [selected, setSelected] = useState('');
   const [password, setPassword] = useState('');
@@ -31,7 +38,6 @@ export const ArchiveRecoveryPage: React.FC = () => {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
-  const [taskId, setTaskId] = useState<number | null>(null);
 
   const listing = useQuery({
     queryKey: ['archive-dir', folder, page, search],
@@ -42,7 +48,11 @@ export const ArchiveRecoveryPage: React.FC = () => {
   const start = useMutation({
     mutationFn: () => archiveRecoveryApi.start(selected, password, deep),
     onSuccess: data => {
-      setTaskId(data.work_job_id);
+      setSearchParams(current => {
+        const next = new URLSearchParams(current);
+        next.set('task', String(data.work_job_id));
+        return next;
+      }, { replace: true });
       setPassword('');
     },
   });
@@ -65,7 +75,11 @@ export const ArchiveRecoveryPage: React.FC = () => {
   // Release its monitor only through an explicit action after terminal status.
   const startAnotherRecovery = () => {
     if (!terminal || taskId === null) return;
-    setTaskId(null);
+    setSearchParams(current => {
+      const next = new URLSearchParams(current);
+      next.delete('task');
+      return next;
+    }, { replace: true });
     setSelected('');
     setPassword('');
     setFilter('all');
