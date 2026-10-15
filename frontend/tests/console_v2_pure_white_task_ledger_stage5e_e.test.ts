@@ -30,7 +30,7 @@ describe('Pure White Stage 5E-E Tasks complex states', () => {
       'List error alert overflows', 'Mobile task card overflows viewport',
       'Sheet overlay z-index', 'Sheet content z-index',
       'assert.equal(passed, WIDTHS.length * THEMES.length)',
-      '32/32 cases, 128 screenshots',
+      '32/32 cases, 160 screenshots',
     ]) assert.ok(browser.includes(token), token);
     assert.match(taskPage, /setPage\(1\)/);
     assert.match(taskPage, /isError\s*\?\s*\(/);

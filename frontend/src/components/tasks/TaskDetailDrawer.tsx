@@ -11,6 +11,9 @@ import { TaskDeleteButton } from './TaskDeleteButton';
 import { ConsoleSheet } from '../ui/ConsoleSheet';
 import { StatusBadge } from '../ui/StatusBadge';
 
+const LONG_ERROR_THRESHOLD = 240;
+const ERROR_PREVIEW_CHARS = 160;
+
 interface Props {
   taskId: number | null;
   open: boolean;
@@ -86,7 +89,20 @@ export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose, onVie
           {task.error && (
             <div className="nfc-v2-task-inline-alert nfc-overlay-alert" role="alert">
               <strong>{task.error_code ? '错误 [' + task.error_code + ']' : '任务执行失败 / 异常'}</strong>
-              <p className="nfc-prewrap-error">{task.error}</p>
+              {task.error.length > LONG_ERROR_THRESHOLD ? (
+                <>
+                  <p className="nfc-prewrap-error nfc-v2-task-error-preview">
+                    {task.error.slice(0, ERROR_PREVIEW_CHARS)}…
+                  </p>
+                  <details className="nfc-v2-task-error-details">
+                    <summary>
+                      <span className="nfc-v2-task-error-expand">展开完整错误信息</span>
+                      <span className="nfc-v2-task-error-collapse">收起完整错误信息</span>
+                    </summary>
+                    <p className="nfc-prewrap-error">{task.error}</p>
+                  </details>
+                </>
+              ) : <p className="nfc-prewrap-error">{task.error}</p>
             </div>
           )}
 

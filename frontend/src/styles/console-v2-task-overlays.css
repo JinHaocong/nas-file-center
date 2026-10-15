@@ -125,6 +125,25 @@
 }
 .nfc-v2-task-inline-alert strong { font-size: 12px; font-weight: 740; }
 .nfc-v2-task-inline-alert p { font-size: 12px; margin: 7px 0 0; line-height: 1.6; overflow-wrap: anywhere; }
+/* Native accessible disclosure keeps complete long diagnostic without burying Execution. */
+.nfc-v2-task-inline-alert .nfc-v2-task-error-preview {
+  display: -webkit-box; -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden;
+}
+.nfc-v2-task-error-details { min-width: 0; margin-top: 10px; }
+.nfc-v2-task-error-details summary {
+  width: fit-content; max-width: 100%; cursor: pointer;
+  font-size: 12px; font-weight: 700;
+  text-decoration: underline; text-underline-offset: 3px;
+}
+.nfc-v2-task-error-details summary:focus-visible {
+  outline: 2px solid currentColor; outline-offset: 3px; border-radius: 3px;
+}
+.nfc-v2-task-error-details .nfc-v2-task-error-collapse,
+.nfc-v2-task-error-details[open] .nfc-v2-task-error-expand { display: none; }
+.nfc-v2-task-error-details[open] .nfc-v2-task-error-collapse { display: inline; }
+.nfc-v2-task-error-details .nfc-prewrap-error { white-space: pre-wrap; overflow-wrap: anywhere; }
+
 [data-theme='dark'] .nfc-v2-task-inline-alert { background: #482432; color: #ffbdc9; border-color: #734357; }
 .nfc-v2-task-context-stack { display: grid; gap: 9px; }
 .nfc-v2-task-context { background: var(--v2-canvas); border: 1px solid var(--v2-line); border-radius: 9px; overflow: hidden; }

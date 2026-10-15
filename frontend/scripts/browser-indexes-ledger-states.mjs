@@ -9,16 +9,13 @@ import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { chromium } from 'playwright';
+import { visualAdminFixture, visualSafeSettingsFixture,
+  visualViewports, visualThemes } from './visual-fixtures.mjs';
 
 const BASE = 'http://127.0.0.1:4188';
 const OUT = resolve(process.cwd(), 'artifacts/browser-indexes-ledger-states');
-const WIDTHS = [360, 390, 430, 768, 1024, 1280, 1440, 1920];
-const THEMES = [
-  { mode: 'light', system: 'dark', effective: 'light' },
-  { mode: 'dark', system: 'light', effective: 'dark' },
-  { mode: 'system', system: 'light', effective: 'light' },
-  { mode: 'system', system: 'dark', effective: 'dark' },
-];
+const WIDTHS = visualViewports; // 360, 390, 430, 768, 1024, 1280, 1440, 1920
+const THEMES = visualThemes; // mode: 'system', system: 'dark', effective: 'dark'
 const LONG_ROOT = '/synthetic-nas/Camera-Archives/2026/' +
   'UnbrokenOriginalMediaArchiveFolderName'.repeat(7);
 const timestamp = '2026-10-12T08:30:00Z';
@@ -51,12 +48,8 @@ async function ready() {
   throw Error('Local Vite preview unavailable');
 }
 function fixture(url) {
-  if (url.pathname === '/api/auth/me') return {
-    id: 1, username: 'indexes-visual-fixture', role: 'admin', is_admin: true,
-  };
-  if (url.pathname === '/api/settings') return {
-    allow_mutation: false, allow_delete: false, safe_mode: true,
-  };
+  if (url.pathname === '/api/auth/me') return visualAdminFixture('indexes-visual-fixture');
+  if (url.pathname === '/api/settings') return visualSafeSettingsFixture();
   if (url.pathname === '/api/indexes') {
     const page = Number(url.searchParams.get('page') || 1);
     const size = Number(url.searchParams.get('page_size') || 20);

@@ -8,16 +8,13 @@ import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { chromium } from 'playwright';
+import { visualAdminFixture, visualSafeSettingsFixture,
+  visualViewports, visualThemes } from './visual-fixtures.mjs';
 
 const BASE = 'http://127.0.0.1:4186';
 const OUT = resolve(process.cwd(), 'artifacts/browser-workspace-cascade');
-const WIDTHS = [360, 390, 430, 768, 1024, 1280, 1440, 1920];
-const THEMES = [
-  { mode: 'light', system: 'dark', effective: 'light' },
-  { mode: 'dark', system: 'light', effective: 'dark' },
-  { mode: 'system', system: 'light', effective: 'light' },
-  { mode: 'system', system: 'dark', effective: 'dark' },
-];
+const WIDTHS = visualViewports; // 360, 390, 430, 768, 1024, 1280, 1440, 1920
+const THEMES = visualThemes; // mode: 'system', system: 'dark', effective: 'dark'
 const PAGES = [
   { path: '/dashboard', id: 'dashboard', heading: 'NAS File Center', selector: '.nfc-dashboard-page' },
   { path: '/plans', id: 'plans', heading: '执行计划', selector: '.nfc-plans-page' },
@@ -151,9 +148,7 @@ function denseFixture(path) {
   return null;
 }
 function fixture(path, dense = false) {
-  if (path === '/api/auth/me') return {
-    id: 1, username: 'css-visual-fixture', role: 'admin', is_admin: true,
-  };
+  if (path === '/api/auth/me') return visualAdminFixture('css-visual-fixture');
   if (path === '/api/media/summary') return {
     total: dense ? 3 : 0, image: dense ? 2 : 0, video: dense ? 1 : 0,
     healthy: dense ? 1 : 0, corrupt: dense ? 1 : 0, unknown: dense ? 1 : 0,
@@ -166,9 +161,7 @@ function fixture(path, dense = false) {
     plan_count: 5, latest_scan_id: null, duplicate_group_count: 0,
     latest_reclaimable_bytes: 0,
   };
-  if (path === '/api/settings') return {
-    allow_mutation: false, allow_delete: false, safe_mode: true,
-  };
+  if (path === '/api/settings') return visualSafeSettingsFixture();
   if (dense) {
     const populated = denseFixture(path);
     if (populated) return populated;
