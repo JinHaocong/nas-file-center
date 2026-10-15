@@ -60,6 +60,19 @@ export const ArchiveRecoveryPage: React.FC = () => {
     retry: false,
   });
   const cancel = useMutation({ mutationFn: () => tasksApi.cancelTask(taskId!) });
+
+  // A task belongs to its WorkJob ID, not to the editable archive selection.
+  // Release its monitor only through an explicit action after terminal status.
+  const startAnotherRecovery = () => {
+    if (!terminal || taskId === null) return;
+    setTaskId(null);
+    setSelected('');
+    setPassword('');
+    setFilter('all');
+    check.reset();
+    start.reset();
+    cancel.reset();
+  };
   const archiveRows = (listing.data?.items || []).filter(entry =>
     entry.type === 'file' && EXTENSIONS.test(entry.name));
   const shown = report.data?.items.filter(item => filter === 'all' || item.status === filter) || [];
@@ -116,7 +129,12 @@ export const ArchiveRecoveryPage: React.FC = () => {
             <button key={entry.path} type="button"
               className={'nfc-mobile-record-card nfc-archive-recovery-file' + (selected === entry.path ? ' is-selected' : '')}
               aria-pressed={selected === entry.path}
-              onClick={() => { setSelected(entry.path); check.reset(); start.reset(); setTaskId(null); setFilter('all'); }}>
+              onClick={() => {
+                setSelected(entry.path);
+                check.reset();
+                start.reset();
+                // Keep the running/completed WorkJob visible even when browsing.
+              }}>
               <ConsoleIcon name="archive" size={18} /> {entry.name}
               {selected === entry.path && <strong> ✓ 已选择</strong>}
             </button>
@@ -129,7 +147,12 @@ export const ArchiveRecoveryPage: React.FC = () => {
         </ActionBar>
         <label className="nfc-archive-recovery-field-label" htmlFor="recovery-source">或手动指定压缩包路径</label>
         <input id="recovery-source" value={selected} placeholder="/data/Download/photos.7z"
-          onChange={event => { setSelected(event.target.value); check.reset(); start.reset(); setTaskId(null); }} />
+          onChange={event => {
+            setSelected(event.target.value);
+            check.reset();
+            start.reset();
+            // Only the explicit terminal action may dismiss a WorkJob monitor.
+          }} />
       </DataPanel>
       <DataPanel className="nfc-archive-recovery-run-panel" title="02 · 检测与恢复" description="先检测文件与环境，再决定是否启动恢复任务。">
         <label className="nfc-archive-recovery-field-label" htmlFor="recovery-password">密码（可留空，不保存到任务记录）</label>
@@ -161,11 +184,15 @@ export const ArchiveRecoveryPage: React.FC = () => {
       </DataPanel>
       </div>
       {taskId !== null && <DataPanel className="nfc-archive-recovery-task-panel" title="03 · 恢复任务" description="任务状态与恢复证据将在这里更新。">
-        <p className="nfc-archive-recovery-task-status" role="status">任务 #{taskId} · {job.data?.status || '排队中'} · {job.data?.progress.message || '等待 Worker'}</p>
+        <p className="nfc-archive-recovery-task-status" role="status">任务 #{taskId} · {job.isError ? '状态暂不可用' : (job.data?.status || '排队中')} · {job.data?.progress.message || '等待 Worker'}</p>
+        <p className="nfc-archive-recovery-help">切换待恢复文件或目录不会取消正在运行的任务。任务结束后，请通过“开始下一次恢复”明确结束本次跟踪；任务记录仍保留在任务中心。</p>
+        {job.isError && <p role="alert">任务状态读取失败：{getStructuredApiError(job.error).message}。可前往任务中心核对，或重试刷新。</p>}
+        {cancel.isError && <p role="alert">取消请求失败：{getStructuredApiError(cancel.error).message}</p>}
         <ActionBar>
           <ConsoleButton onClick={() => navigate('/tasks?task=' + taskId)}>任务详情与日志</ConsoleButton>
           <ConsoleButton disabled={!['running', 'queued'].includes(job.data?.status || '') || cancel.isPending}
             onClick={() => { void cancel.mutateAsync().catch(() => {}); }}>取消任务</ConsoleButton>
+          {terminal && <ConsoleButton onClick={startAnotherRecovery}>开始下一次恢复</ConsoleButton>}
         </ActionBar>
         {report.data && <>
           <p>最终状态：{report.data.recovery_status} · 原包条目总数：{report.data.known_total ?? '未知'}</p>
