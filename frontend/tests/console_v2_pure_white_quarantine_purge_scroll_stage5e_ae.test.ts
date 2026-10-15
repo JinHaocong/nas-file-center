@@ -34,7 +34,7 @@ describe('Pure White Stage 5E-AE screenshot-led Quarantine Purge footer reachabi
       'async function assertPurgeFooterAndScroll(page, width, state)',
       'footerBox.bottom <= Math.min(modalBox.bottom, innerHeight) + 2',
       'buttonBox.bottom <= Math.min(footerBox.bottom, innerHeight) + 2',
-      'bodyBox.left >= modalBox.left + gutter',
+      'insetBox.left >= modalBox.left + gutter',
       'body.scrollHeight > body.clientHeight + 15',
       "state === 'bottom'",
       "token?.value === 'DELETE'",

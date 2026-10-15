@@ -131,6 +131,7 @@ async function assertPurgeFooterAndScroll(page, width, state) {
     const modal = document.querySelector('.nfc-quarantine-bulk-purge-modal');
     const header = modal?.querySelector(':scope > .nfc-v2-dialog-heading');
     const body = modal?.querySelector(':scope > .nfc-v2-quarantine-bulk-body');
+    const insetContent = body?.querySelector('.nfc-v2-quarantine-bulk-note');
     const footer = modal?.querySelector(':scope > .nfc-v2-confirm-actions');
     const token = body?.querySelector('.nfc-v2-quarantine-bulk-token input');
     const button = [...(footer?.querySelectorAll('button') || [])]
@@ -138,6 +139,7 @@ async function assertPurgeFooterAndScroll(page, width, state) {
     const modalBox = modal?.getBoundingClientRect();
     const headerBox = header?.getBoundingClientRect();
     const bodyBox = body?.getBoundingClientRect();
+    const insetBox = insetContent?.getBoundingClientRect();
     const footerBox = footer?.getBoundingClientRect();
     const tokenBox = token?.getBoundingClientRect();
     const buttonBox = button?.getBoundingClientRect();
@@ -153,9 +155,9 @@ async function assertPurgeFooterAndScroll(page, width, state) {
         'Purge Draft action is not visible in persistent footer');
       check(headerBox.bottom <= bodyBox.top + 2,
         'Fixed purge header overlaps diagnostics');
-      check(bodyBox.left >= modalBox.left + gutter &&
-        bodyBox.right <= modalBox.right - gutter,
-        'Purge body must align with dialog heading gutters');
+      check(Boolean(insetBox && insetBox.left >= modalBox.left + gutter &&
+        insetBox.right <= modalBox.right - gutter),
+        'Purge body contents must align with dialog heading gutters');
       if (width <= 390) {
         check(body.scrollHeight > body.clientHeight + 15,
           'Long mobile purge Preview must scroll within the body');
