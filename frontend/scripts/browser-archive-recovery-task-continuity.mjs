@@ -117,8 +117,10 @@ try {
           waitUntil: 'domcontentloaded',
         });
         const monitor = page.locator('.nfc-archive-recovery-task-panel');
-        await monitor.getByText(/任务 #777/).waitFor({ state: 'visible' });
-        assert.match(await monitor.innerText(), /Synthetic Worker/, label);
+        // The panel mounts before the asynchronous Task detail GET resolves.
+        // Wait for actual server-fixture data, not only for the shell to render.
+        await monitor.getByText(/Synthetic Worker/).waitFor({ state: 'visible' });
+        assert.match(await monitor.innerText(), /任务 #777/, label);
         assert.equal(await page.getByRole('button', {
           name: '开始下一次恢复',
         }).count(), 0, label + ' no premature task dismissal');
@@ -139,8 +141,10 @@ try {
         await page.screenshot({ path: resolve(OUTPUT, label + '-running.png') });
 
         await page.reload({ waitUntil: 'domcontentloaded' });
-        await monitor.getByText(/任务 #777/).waitFor({ state: 'visible' });
-        assert.match(await monitor.innerText(), /Synthetic Worker/, label);
+        // The panel mounts before the asynchronous Task detail GET resolves.
+        // Wait for actual server-fixture data, not only for the shell to render.
+        await monitor.getByText(/Synthetic Worker/).waitFor({ state: 'visible' });
+        assert.match(await monitor.innerText(), /任务 #777/, label);
         assert.equal(new URL(page.url()).searchParams.get('task'), '777', label);
 
         // Synthetic terminal WorkJob, retrieved only through GET.
