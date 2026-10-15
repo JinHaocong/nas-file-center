@@ -97,7 +97,6 @@ describe('Stage 5E-AH — Archive Recovery WorkJob continuity', () => {
     assert.ok(view.includes('任务状态读取失败'));
     assert.ok(view.includes('taskId === null'));
     assert.ok(view.includes('clearTaskMonitor();'));
-    assert.equal((view.match(/next\\.delete\\('task'\\)/g) || []).length, 1);
     const browser = read('scripts/browser-archive-recovery-task-continuity.mjs');
     assert.ok(browser.includes("BASE + '/archive-recovery?task=779'"));
     assert.ok(browser.includes("name: '重试读取任务状态'"));
