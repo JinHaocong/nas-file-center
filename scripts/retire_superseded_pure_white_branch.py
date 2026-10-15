@@ -28,7 +28,13 @@ def review(client):
     if repo.get("archived") or repo.get("default_branch") != "main":
         raise RuntimeError("Repository archived/default branch changed")
     main, _ = client.request(API_ROOT + "/branches/main")
-    branch, _ = client.request(API_ROOT + "/branches/" + quote(NAME, safe="/"))
+    try:
+        branch, _ = client.request(API_ROOT + "/branches/" + quote(NAME, safe="/"))
+    except RuntimeError as exc:
+        # After successful retirement, future main pushes must be idempotent.
+        if "GitHub GET failed (404)" in str(exc):
+            return None
+        raise
     if branch.get("name") != NAME or branch.get("protected"):
         raise RuntimeError("Design branch protected or renamed")
     if branch.get("commit", {}).get("sha") != HEAD:
@@ -58,6 +64,9 @@ def review(client):
 
 def run(client, *, execute=False):
     head = review(client)
+    if head is None:
+        print(f"ALREADY ABSENT {NAME}; no deletion needed")
+        return False
     print(f"Verified manually ported Pure White branch {NAME}@{head}; PR #{PORT_PR} merged")
     if not execute:
         print("DRY RUN: no branch removed")
