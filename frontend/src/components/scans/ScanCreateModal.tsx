@@ -34,6 +34,8 @@ export const ScanCreateModal: React.FC<Props> = ({ open, onClose }) => {
   const [validationError, setValidationError] = useState<string | null>(null);
   // Synchronous single-flight guard: closes the gap before React Query renders isPending.
   const submitting = useRef(false);
+  // This controlled Radix modal has no Dialog.Trigger: remember its real launcher.
+  const returnFocusTarget = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -99,6 +101,21 @@ export const ScanCreateModal: React.FC<Props> = ({ open, onClose }) => {
       <Dialog.Portal>
         <Dialog.Overlay className="nfc-v2-dialog-overlay nfc-v2-scan-create-overlay" />
         <Dialog.Content className="nfc-form-modal nfc-overlay-modal nfc-scan-create-modal nfc-v2-scan-create-modal"
+          onOpenAutoFocus={() => {
+            const active = document.activeElement;
+            returnFocusTarget.current = active instanceof HTMLElement && active !== document.body
+              ? active : null;
+          }}
+          onCloseAutoFocus={event => {
+            const target = returnFocusTarget.current;
+            returnFocusTarget.current = null;
+            // A route change or refreshed scan list may remove/disable the opener.
+            // In that case preserve Radix's normal fallback instead of forcing focus.
+            if (target?.isConnected && !target.matches(':disabled')) {
+              event.preventDefault();
+              target.focus();
+            }
+          }}
           onEscapeKeyDown={event => { if (createMutation.isPending || submitting.current) event.preventDefault(); }}
           onPointerDownOutside={event => event.preventDefault()}>
           <header className="nfc-v2-scan-create-header">

@@ -150,8 +150,12 @@ try {
       const label = visual.mode + '-' + visual.system + '-' + width;
       try {
         await page.goto(BASE_URL + '/scans', { waitUntil: 'domcontentloaded' });
-        await page.getByRole('button', { name: '新建扫描' }).first().click({ timeout: 15000 });
-        await page.locator('.nfc-v2-scan-create-modal').waitFor({ state: 'visible' });
+        const scanLauncher = page.getByRole('button', { name: '新建扫描' }).first();
+        const scanOpener = await scanLauncher.elementHandle();
+        assert.ok(scanOpener, 'New Scan opener must exist before modal opens');
+        await scanLauncher.click({ timeout: 15000 });
+        const scanModal = page.locator('.nfc-v2-scan-create-modal');
+        await scanModal.waitFor({ state: 'visible' });
         await page.locator('.nfc-v2-scan-create-modal')
           .getByRole('button', { name: '选择目录' }).first().click();
         await page.locator('.nfc-v2-directory-dialog').waitFor({ state: 'visible' });
@@ -160,7 +164,17 @@ try {
         await page.screenshot({ path: resolve(OUTPUT, label + '.png') });
         await page.keyboard.press('Escape');
         await page.locator('.nfc-v2-directory-dialog').waitFor({ state: 'hidden' });
-        await page.locator('.nfc-v2-scan-create-modal').waitFor({ state: 'visible' });
+        await scanModal.waitFor({ state: 'visible' });
+        // Closing nested DirectoryPicker must keep parent open, and closing
+        // the controlled parent must restore its exact real keyboard launcher.
+        await scanModal.getByRole('button', { name: '关闭新建扫描' }).click();
+        await scanModal.waitFor({ state: 'hidden' });
+        await page.waitForFunction(opener => document.activeElement === opener, scanOpener);
+        await page.keyboard.press('Enter');
+        await scanModal.waitFor({ state: 'visible' });
+        await page.keyboard.press('Escape');
+        await scanModal.waitFor({ state: 'hidden' });
+        await page.waitForFunction(opener => document.activeElement === opener, scanOpener);
         assert.deepEqual(deniedMethods, [], 'Browser fixture must not make mutating API requests');
         completed += 1;
         console.log('[BROWSER OVERLAY PASS] ' + label);
