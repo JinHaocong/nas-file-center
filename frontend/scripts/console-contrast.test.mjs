@@ -108,3 +108,39 @@ test('Radix portal typography keeps the same accessible theme colors as the shel
   }
   assert.match(overlays, /\.nfc-v2-task-facts dt\s*\{[^}]*color:\s*var\(--v2-subtle\)/);
 });
+
+
+/**
+ * Stage 5E-AL: status badges use normal-size text, which requires WCAG AA
+ * 4.5:1 contrast. Cover every exact selector definition, including later
+ * !important overrides; testing only the first rule can miss regressions.
+ */
+function statusRules(selector) {
+  const escaped = selector.replaceAll('.', '\\.').replaceAll('[', '\\[').replaceAll(']', '\\]');
+  const bodies = [...shell.matchAll(new RegExp('^' + escaped + '\\s*\\{([^}]*)\\}', 'gm'))]
+    .map(match => match[1]);
+  assert.ok(bodies.length > 0, 'Missing status rule: ' + selector);
+  return bodies;
+}
+
+function statusHex(body, property) {
+  const found = body.match(new RegExp(
+    '(?:^|;)\\s*' + property + '\\s*:\\s*(#[0-9a-fA-F]{6})(?:\\s*!important)?\\s*(?=;|$)',
+  ));
+  assert.ok(found, 'Missing solid ' + property + ' in status rule');
+  return found[1];
+}
+
+test('Pure White header status badges meet AA in both themes, including later overrides', () => {
+  for (const theme of ['light', 'dark']) {
+    for (const state of ['safe', 'warning', 'danger']) {
+      const selector = (theme === 'dark' ? "[data-theme='dark'] " : '')
+        + '.nfc-v2-header .nfc-header-status-badge.is-' + state;
+      for (const body of statusRules(selector)) {
+        requireAA(theme + ' ' + state + ' status', statusHex(body, 'color'), [
+          ['status background', statusHex(body, 'background')],
+        ]);
+      }
+    }
+  }
+});

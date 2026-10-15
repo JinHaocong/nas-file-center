@@ -289,8 +289,8 @@
   font-weight: 650;
   line-height: 1.45;
 }
-.nfc-v2-header .nfc-header-status-badge.is-safe { background: #e9f8f1; color: #15805f; border-color: #d7f1e4; }
-.nfc-v2-header .nfc-header-status-badge.is-warning { background: #fff4e3; color: #a96b1b; border-color: #ffe5be; }
+.nfc-v2-header .nfc-header-status-badge.is-safe { background: #e9f8f1; color: #12664e; border-color: #d7f1e4; }
+.nfc-v2-header .nfc-header-status-badge.is-warning { background: #fff4e3; color: #875516; border-color: #ffe5be; }
 .nfc-v2-header .nfc-header-status-badge.is-danger { background: #fff0f1; color: #bd304b; border-color: #ffdce1; }
 .nfc-v2-header .nfc-header-status-badge.is-processing { background: var(--v2-indigo-soft); color: var(--v2-text); border-color: var(--v2-line); }
 .nfc-v2-header .nfc-header-status-badge.is-idle { background: var(--v2-canvas); color: var(--v2-muted); border-color: var(--v2-line); }
@@ -300,7 +300,7 @@
 [data-theme='dark'] .nfc-v2-header .nfc-header-status-badge.is-danger { background: #452530; color: #ffadb9; border-color: #673843; }
 [data-theme='dark'] .nfc-v2-header .nfc-header-status-badge.is-processing { background: var(--v2-indigo-soft); color: var(--v2-text); border-color: var(--v2-line); }
 
-.nfc-v2-header .nfc-header-status-badge.is-safe { color: #15805f !important; background: #e9f8f1 !important; border-color: #d7f1e4 !important; }
+.nfc-v2-header .nfc-header-status-badge.is-safe { color: #12664e !important; background: #e9f8f1 !important; border-color: #d7f1e4 !important; }
 .nfc-v2-header .nfc-header-status-badge.is-danger { color: #bd304b !important; background: #fff0f1 !important; border-color: #ffdce1 !important; }
 [data-theme='dark'] .nfc-v2-header .nfc-header-status-badge.is-safe { background: #153c30 !important; color: #86e5bd !important; border-color: #205842 !important; }
 
