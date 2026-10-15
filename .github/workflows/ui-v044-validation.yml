@@ -119,6 +119,16 @@ jobs:
         working-directory: frontend
         run: npm run build
 
+      # Ubuntu runners may omit CJK fonts: screenshots with tofu squares are
+      # not trustworthy evidence of Chinese text wrapping, width or spacing.
+      - name: Install and verify Chinese screenshot fonts
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends fonts-noto-cjk
+          fc-cache -f
+          fc-match -f '%{family}\n' ':lang=zh-cn' | grep -E 'Noto (Sans|Serif) CJK'
+
       - name: Run read-only Chromium overlay matrix
         working-directory: frontend
         run: node scripts/browser-overlay-smoke.mjs

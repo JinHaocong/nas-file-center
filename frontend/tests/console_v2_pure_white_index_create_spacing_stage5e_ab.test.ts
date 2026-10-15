@@ -69,6 +69,11 @@ describe('Pure White Stage 5E-AB Index create modal visual gutter and focus', ()
     assert.doesNotMatch(modal, /<Dialog\.Trigger/);
     const workflow = read('../.github/workflows/ui-v044-validation.yml');
     assert.ok(workflow.includes('node scripts/browser-indexes-ledger-states.mjs'));
+    assert.ok(workflow.includes('Install and verify Chinese screenshot fonts'));
+    assert.ok(workflow.includes('fonts-noto-cjk'));
+    assert.ok(workflow.includes("fc-match -f '%{family}\\n' ':lang=zh-cn'"));
+    assert.ok(workflow.indexOf('fonts-noto-cjk') <
+      workflow.indexOf('node scripts/browser-indexes-ledger-states.mjs'));
     assert.ok(workflow.includes('Checkout exact candidate HEAD'));
   });
 });

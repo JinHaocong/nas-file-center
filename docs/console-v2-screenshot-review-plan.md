@@ -61,3 +61,8 @@ The current CI generates real screenshots in its artifact (e.g. `pure-white-over
 ## Remaining work order
 
 After the Index dialog, audit shared controlled Dialog/Sheet/DirectoryPicker surfaces first, then iterate across ledger pages and complex forms. Expand deterministic mocks and screenshot coverage in small reversible PRs. Each PR should report exact tested screens, evidence, unreviewed screens and outstanding real-NAS/owner gates; no wholesale restyling based solely on theoretical CSS matches.
+
+## CJK screenshot fidelity finding (same Stage 5E-AB)
+
+- The latest Stage 5E-AA Actions artifact was actually downloaded and its Indexes create-dialog PNGs inspected at **1280 and 390, light and dark**. The Linux Chromium screenshots display Chinese UI labels as **tofu squares**. This is a fixture environment defect, not a product copy change. Without a real CJK font, screenshot-based Chinese typography/line wrapping cannot be meaningfully reviewed.
+- Stage 5E-AB adds Noto CJK installation + `fc-match :lang=zh-cn` verification in the **browser-overlay-smoke CI job before rendering screenshots**. It does not add a CDN, web font bundle, runtime dependency or production typography override. Re-check the new exact-HEAD artifact visually before treating any Chinese screenshots as useful design evidence; OS font rendering will still differ somewhat from macOS PingFang.
