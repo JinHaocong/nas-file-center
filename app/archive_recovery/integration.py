@@ -91,6 +91,7 @@ class ArchiveRecoveryHandler(TaskHandler):
         items: list[dict] = []
         status = 'failed'
         error: str | None = None
+        report: dict | None = None
         password = None
         last_check = 0.0
 
@@ -159,7 +160,13 @@ class ArchiveRecoveryHandler(TaskHandler):
                     'items': items,
                     'stats': {s: sum(r['status'] == s for r in items)
                               for s in ('integrity_passed','format_validated','unverified','incomplete','unrecovered')},
-                    'known_total': None,
+                    'known_total': report.get('known_total') if report is not None else None,
+                    # Preserve bounded, non-secret decoder diagnostics on
+                    # NO_FILES_RECOVERED. A fatal WorkJob must not erase the
+                    # reason the fallback rejected an unsupported 7z layout.
+                    **({key: report[key] for key in (
+                        'format', 'deep_capability', 'aes_lzma2_deep', 'warnings',
+                    ) if key in report} if report is not None else {}),
                 })
                 # Never retain empty failed-job output directories.
                 try:
