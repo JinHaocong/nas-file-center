@@ -84,6 +84,17 @@ class RetirementSafety(unittest.TestCase):
                     retire.run(api, execute=True)
                 self.assertEqual(api.deletes, [])
 
+    def test_idempotent_after_ref_is_gone(self):
+        api = FakeGitHub()
+        orig = api.request
+        def no_branch(path, method="GET"):
+            if path == retire.API_ROOT + "/branches/" + retire.NAME:
+                raise RuntimeError("GitHub GET failed (404): Not Found")
+            return orig(path, method)
+        api.request = no_branch
+        self.assertFalse(retire.run(api, execute=True))
+        self.assertEqual(api.deletes, [])
+
     def test_second_review_prevents_head_race(self):
         api = FakeGitHub()
         orig = api.request
