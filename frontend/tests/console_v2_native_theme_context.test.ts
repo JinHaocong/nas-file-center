@@ -2,7 +2,7 @@ import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { normalizeThemeMode, shouldUseDarkTheme } from '../src/utils/themeMode';
+import { normalizeThemeMode, shouldUseDarkTheme, restoreThemeMode, persistThemeMode } from '../src/utils/themeMode';
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');
 
 describe('Console v2 native ThemeContext and zero direct AntD imports', () => {
@@ -12,6 +12,18 @@ describe('Console v2 native ThemeContext and zero direct AntD imports', () => {
     }
     for (const invalid of [null, undefined, '', 'auto', 'LIGHT', ' system ', 0,
       false, {}, [], NaN]) assert.equal(normalizeThemeMode(invalid), 'light');
+  });
+  test('storage errors cannot block initial theme or in-session theme changes', () => {
+    assert.equal(restoreThemeMode(() => 'system'), 'system');
+    assert.equal(restoreThemeMode(() => 'dark'), 'dark');
+    assert.equal(restoreThemeMode(() => 'unexpected'), 'light');
+    assert.equal(restoreThemeMode(() => { throw new Error('storage access denied'); }), 'light');
+    let saved: string | null = null;
+    persistThemeMode(() => { saved = 'dark'; });
+    assert.equal(saved, 'dark');
+    assert.doesNotThrow(() => persistThemeMode(() => {
+      throw new Error('storage quota or access denied');
+    }));
   });
   test('light and dark override system; system mode follows media query', () => {
     assert.equal(shouldUseDarkTheme('light', true), false);
@@ -27,8 +39,8 @@ describe('Console v2 native ThemeContext and zero direct AntD imports', () => {
     const app = read('src/App.tsx');
     for (const part of [
       'export type { ThemeMode }', 'ThemeContext.Provider',
-      "normalizeThemeMode(localStorage.getItem('nfc_theme_mode'))",
-      "localStorage.setItem('nfc_theme_mode', newMode)",
+      "restoreThemeMode(() => localStorage.getItem('nfc_theme_mode'))",
+      "persistThemeMode(() => localStorage.setItem('nfc_theme_mode', newMode))",
       'shouldUseDarkTheme(mode, systemDark)',
       "window.matchMedia?.('(prefers-color-scheme: dark)')",
       "addEventListener('change', handleChange)", "removeEventListener('change', handleChange)",
