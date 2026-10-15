@@ -167,6 +167,13 @@ async function assertPurgeFooterAndScroll(page, width, state) {
           tokenBox.bottom <= bodyBox.bottom + 2),
           'Exact DELETE input cannot be reached inside body scroller');
         check(Boolean(token?.value === 'DELETE'), 'Exact confirmation token lost on scroll');
+        if (tokenBox) {
+          const hit = document.elementFromPoint(
+            tokenBox.left + tokenBox.width / 2, tokenBox.top + tokenBox.height / 2);
+          check(hit === token, 'A floating toast masks the visible DELETE input');
+        }
+        check(Boolean(body.querySelector('.nfc-v2-quarantine-bulk-metrics[role="status"]')),
+          'Preview success must remain announced inline instead of covering DELETE');
       }
     }
     return fail;

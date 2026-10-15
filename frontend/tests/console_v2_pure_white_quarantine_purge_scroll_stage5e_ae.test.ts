@@ -23,6 +23,8 @@ describe('Pure White Stage 5E-AE screenshot-led Quarantine Purge footer reachabi
       'border-top:1px solid var(--nfc-bulk-line);',
     ]) assert.ok(css.includes(token), token);
     assert.ok(purge.includes('nfc-quarantine-bulk-purge-modal'));
+    assert.ok(purge.includes('className="nfc-v2-quarantine-bulk-metrics" role="status" aria-live="polite"'));
+    assert.ok(!purge.includes("toast.success('Preview 完成：'"));
     assert.ok(restore.includes('nfc-quarantine-bulk-restore-modal'));
     assert.ok(!css.includes('.nfc-quarantine-bulk-restore-modal > .nfc-v2-quarantine-bulk-body'));
   });
@@ -38,6 +40,8 @@ describe('Pure White Stage 5E-AE screenshot-led Quarantine Purge footer reachabi
       'body.scrollHeight > body.clientHeight + 15',
       "state === 'bottom'",
       "token?.value === 'DELETE'",
+      "hit === token, 'A floating toast masks the visible DELETE input'",
+      '.nfc-v2-quarantine-bulk-metrics[role="status"]',
       "await assertPurgeFooterAndScroll(page, width, 'ready');",
       "await assertPurgeFooterAndScroll(page, width, 'bottom');",
       "'purge-review-bottom-' + label",
