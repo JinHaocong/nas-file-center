@@ -427,3 +427,8 @@ No screenshot-only mock data in runtime.
 
 - Replace unactionable “retry” text with an explicit GET-only retry; allow the operator to dismiss a failed or unrelated WorkJob deep link without cancelling it. Programmatically refocus the surviving source input when an old task panel is dismissed, including terminal acknowledgement.
 - Add actual React/Chromium synthetic 8-width × 4-theme error/retry, wrong-kind exit and keyboard focus assertions in the existing suite; all mutating APIs are still blocked. No server, Worker, NAS or production change. The final keyboard-accessibility and owner screenshot acceptance gates remain OPEN; do not increment 67/74 solely for targeted regressions.
+
+## Stage 5E-AK — Pure White shared text contrast baseline
+
+- Fixed small secondary labels that previously missed WCAG AA 4.5:1 on the light white/gray shell/sidebar. Shared tokens now maintain 4.5:1 or better across tested light and dark canvas, paper, neutral, sidebar and Radix portal surfaces. Frontend `npm test` includes a repeatable sRGB contrast calculation plus token-parity regression.
+- This improves a portion of the outstanding keyboard/dark-contrast/motion accessibility work but does **not** close that global checkbox; other status colors, all page screenshots, manual keyboard testing, owner consolidated visual acceptance, and live NAS acceptance are still required. Keep 67/74 high-level checks unchanged.
