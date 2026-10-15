@@ -1,5 +1,5 @@
 /**
- * Stage 5E-AH/AI: real built React/Chromium full-width WorkJob continuity.
+ * Stage 5E-AH/AI/AJ: React/Chromium WorkJob continuity and keyboard-safe failure recovery.
  * All task detail/report data are synthetic GET responses on localhost.
  * Never POST a check, start, cancel, or any other mutation to a NAS.
  */
@@ -84,6 +84,7 @@ try {
       const blockedWrites = [];
       const outbound = [];
       const taskReads = [];
+      let taskErrorReads = 0;
       let status = 'running';
       await page.route('**/*', async route => {
         const request = route.request();
@@ -98,6 +99,12 @@ try {
             blockedWrites.push(request.method() + ' ' + url.pathname);
             await route.fulfill({ status: 405, contentType: 'application/json',
               body: JSON.stringify({ error: 'READ_ONLY_BROWSER_FIXTURE' }) });
+            return;
+          }
+          if (url.pathname === '/api/tasks/779') {
+            taskErrorReads += 1;
+            await route.fulfill({ status: 503, contentType: 'application/json',
+              body: JSON.stringify({ detail: 'Synthetic task unavailable' }) });
             return;
           }
           if (url.pathname === '/api/tasks/777') taskReads.push(status);
@@ -161,6 +168,9 @@ try {
         assert.equal(await monitor.count(), 0, label + ' monitor dismissed');
         assert.equal(new URL(page.url()).searchParams.has('task'), false, label);
         assert.equal(await page.locator('#recovery-source').inputValue(), '', label);
+        assert.equal(await page.locator('#recovery-source').evaluate(
+          element => element === document.activeElement), true,
+        label + ' focus returns to editable archive path after completion');
         assert.equal(await page.getByRole('button', { name: '开始恢复' }).isDisabled(),
           true, label);
         // A manually supplied ID for a different WorkJob kind must not
@@ -180,6 +190,43 @@ try {
         assert.equal(await page.locator('.nfc-archive-recovery-results').count(),
           0, label);
         await page.screenshot({ path: resolve(OUTPUT, label + '-unrelated.png') });
+        await page.getByRole('button', { name: '返回选择压缩包' }).click();
+        await monitor.waitFor({ state: 'detached' });
+        assert.equal(new URL(page.url()).searchParams.has('task'), false, label);
+        assert.equal(await page.locator('#recovery-source').evaluate(
+          element => element === document.activeElement), true,
+        label + ' focus returns after unrelated task link');
+
+        // A failed Task GET must offer a real retry and a safe exit from the
+        // deep link. Synthetic 503 is local only; no Worker operation occurs.
+        await page.goto(BASE + '/archive-recovery?task=779', {
+          waitUntil: 'domcontentloaded',
+        });
+        await page.getByRole('alert').filter({
+          hasText: '任务状态读取失败',
+        }).waitFor({ state: 'visible' });
+        assert.equal(taskErrorReads, 1, label + ' fail fast, no automatic retries');
+        assert.equal(await page.getByRole('button', {
+          name: '开始恢复',
+        }).isDisabled(), true, label);
+        const retry = page.getByRole('button', { name: '重试读取任务状态' });
+        await Promise.all([
+          page.waitForResponse(resp =>
+            new URL(resp.url()).pathname === '/api/tasks/779' &&
+            resp.status() === 503),
+          retry.click(),
+        ]);
+        assert.equal(taskErrorReads, 2, label + ' explicit retry sends one GET');
+        await page.getByRole('alert').filter({
+          hasText: '任务状态读取失败',
+        }).waitFor({ state: 'visible' });
+        await page.screenshot({ path: resolve(OUTPUT, label + '-task-error.png') });
+        await page.getByRole('button', { name: '返回选择压缩包' }).click();
+        await monitor.waitFor({ state: 'detached' });
+        assert.equal(new URL(page.url()).searchParams.has('task'), false, label);
+        assert.equal(await page.locator('#recovery-source').evaluate(
+          element => element === document.activeElement), true,
+        label + ' focus returns after failed task link');
 
         assert.ok(taskReads.includes('running') && taskReads.includes('completed'),
           label + ' observed readonly task lifecycle');
