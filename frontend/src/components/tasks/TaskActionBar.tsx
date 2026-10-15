@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { tasksApi } from '../../api/tasks';
 import type { TaskDetail, TaskItem } from '../../types/task';
 import { getTaskActionAvailability, type TaskAction } from './task_actions';
+import { dispatchTaskActionOnce } from './task_action_single_flight';
 import { ConsoleButton } from '../ui/ConsoleButton';
 import { ConsoleConfirmDialog } from '../ui/ConsoleConfirmDialog';
 import { ConsoleIcon } from '../ui/ConsoleIcon';
@@ -17,6 +18,7 @@ export const TaskActionBar: React.FC<Props> = ({ task, onViewTask }) => {
   const queryClient = useQueryClient();
   const toast = useConsoleToast();
   const [activeAction, setActiveAction] = useState<TaskAction | null>(null);
+  const actionInFlight = useRef(false);
   const [confirmAction, setConfirmAction] = useState<'cancel' | 'retry' | null>(null);
   const [createdRetryId, setCreatedRetryId] = useState<number | null>(null);
 
@@ -30,7 +32,6 @@ export const TaskActionBar: React.FC<Props> = ({ task, onViewTask }) => {
 
   const pauseMutation = useMutation({
     mutationFn: () => tasksApi.pauseTask(task.id),
-    onMutate: () => setActiveAction('pause'),
     onSuccess: async res => {
       await invalidateTaskQueries();
       toast.success(res.status === 'paused' ? '任务已暂停' : '暂停请求已提交');
@@ -39,12 +40,10 @@ export const TaskActionBar: React.FC<Props> = ({ task, onViewTask }) => {
       await invalidateTaskQueries();
       toast.error(error.message || '暂停操作失败');
     },
-    onSettled: () => setActiveAction(null),
   });
 
   const resumeMutation = useMutation({
     mutationFn: () => tasksApi.resumeTask(task.id),
-    onMutate: () => setActiveAction('resume'),
     onSuccess: async () => {
       await invalidateTaskQueries();
       toast.success('任务已恢复并重新进入队列');
@@ -53,12 +52,10 @@ export const TaskActionBar: React.FC<Props> = ({ task, onViewTask }) => {
       await invalidateTaskQueries();
       toast.error(error.message || '恢复操作失败');
     },
-    onSettled: () => setActiveAction(null),
   });
 
   const cancelMutation = useMutation({
     mutationFn: () => tasksApi.cancelTask(task.id),
-    onMutate: () => setActiveAction('cancel'),
     onSuccess: async res => {
       await invalidateTaskQueries();
       toast.info(res.status === 'cancel_requested'
@@ -69,12 +66,10 @@ export const TaskActionBar: React.FC<Props> = ({ task, onViewTask }) => {
       await invalidateTaskQueries();
       toast.error(error.message || '取消操作失败');
     },
-    onSettled: () => setActiveAction(null),
   });
 
   const retryMutation = useMutation({
     mutationFn: () => tasksApi.retryTask(task.id),
-    onMutate: () => setActiveAction('retry'),
     onSuccess: async res => {
       await invalidateTaskQueries();
       setCreatedRetryId(res.job.id);
@@ -85,10 +80,21 @@ export const TaskActionBar: React.FC<Props> = ({ task, onViewTask }) => {
       await invalidateTaskQueries();
       toast.error(error.message || '重试操作失败');
     },
-    onSettled: () => setActiveAction(null),
   });
 
-  const isAnyPending = activeAction !== null;
+  const isAnyPending = activeAction !== null || actionInFlight.current;
+  const dispatch = (action: TaskAction, mutation: () => Promise<unknown>) => {
+    // activeAction protects a committed render, and the ref closes the gap
+    // before React Query updates the UI. Both guard the shared action bar.
+    if (activeAction !== null || actionInFlight.current) return;
+    void dispatchTaskActionOnce(
+      actionInFlight, task, action, mutation,
+      () => setActiveAction(action),
+      () => setActiveAction(null),
+    ).catch(() => {
+      // Each mutation's existing onError callback owns invalidation and toast.
+    });
+  };
   const pauseAvail = getTaskActionAvailability(task, 'pause');
   const resumeAvail = getTaskActionAvailability(task, 'resume');
   const cancelAvail = getTaskActionAvailability(task, 'cancel');
@@ -101,22 +107,21 @@ export const TaskActionBar: React.FC<Props> = ({ task, onViewTask }) => {
     : '原失败任务会保留，系统将创建一个新的排队任务。';
 
   const confirm = () => {
-    if (isAnyPending) return;
-    if (confirmAction === 'cancel' && cancelAvail.enabled) cancelMutation.mutate();
-    if (confirmAction === 'retry' && retryAvail.enabled) retryMutation.mutate();
+    if (confirmAction === 'cancel') dispatch('cancel', () => cancelMutation.mutateAsync());
+    if (confirmAction === 'retry') dispatch('retry', () => retryMutation.mutateAsync());
   };
 
   return (
     <div className="nfc-task-action-bar nfc-v2-task-actions">
       <span title={!pauseAvail.enabled ? pauseAvail.reason || undefined : undefined}>
         <ConsoleButton disabled={!pauseAvail.enabled || isAnyPending}
-          loading={activeAction === 'pause'} onClick={() => pauseMutation.mutate()}>
+          loading={activeAction === 'pause'} onClick={() => dispatch('pause', () => pauseMutation.mutateAsync())}>
           暂停
         </ConsoleButton>
       </span>
       <span title={!resumeAvail.enabled ? resumeAvail.reason || undefined : undefined}>
         <ConsoleButton disabled={!resumeAvail.enabled || isAnyPending}
-          loading={activeAction === 'resume'} onClick={() => resumeMutation.mutate()}>
+          loading={activeAction === 'resume'} onClick={() => dispatch('resume', () => resumeMutation.mutateAsync())}>
           恢复
         </ConsoleButton>
       </span>
@@ -125,7 +130,7 @@ export const TaskActionBar: React.FC<Props> = ({ task, onViewTask }) => {
           leadingIcon={<ConsoleIcon name="x" size={15} />}
           disabled={!cancelAvail.enabled || isAnyPending}
           loading={activeAction === 'cancel'}
-          onClick={() => { if (cancelAvail.enabled) setConfirmAction('cancel'); }}>
+          onClick={() => { if (cancelAvail.enabled && !isAnyPending && !actionInFlight.current) setConfirmAction('cancel'); }}>
           取消
         </ConsoleButton>
       </span>
@@ -134,7 +139,7 @@ export const TaskActionBar: React.FC<Props> = ({ task, onViewTask }) => {
           leadingIcon={<ConsoleIcon name="refresh" size={15} />}
           disabled={!retryAvail.enabled || isAnyPending}
           loading={activeAction === 'retry'}
-          onClick={() => { if (retryAvail.enabled) setConfirmAction('retry'); }}>
+          onClick={() => { if (retryAvail.enabled && !isAnyPending && !actionInFlight.current) setConfirmAction('retry'); }}>
           重试
         </ConsoleButton>
       </span>
@@ -155,7 +160,7 @@ export const TaskActionBar: React.FC<Props> = ({ task, onViewTask }) => {
       )}
       <ConsoleConfirmDialog
         open={confirmAction !== null}
-        onOpenChange={next => { if (!next && !isAnyPending) setConfirmAction(null); }}
+        onOpenChange={next => { if (!next && !isAnyPending && !actionInFlight.current) setConfirmAction(null); }}
         title={confirmAction === 'cancel'
           ? '确认取消任务 #' + task.id + '？'
           : '确认重试任务 #' + task.id + '？'}
