@@ -173,6 +173,10 @@ jobs:
         working-directory: frontend
         run: node scripts/browser-media-ledger-states.mjs
 
+      - name: Run read-only Chromium Archive Recovery selection invalidation matrix
+        working-directory: frontend
+        run: node scripts/browser-archive-recovery-selection.mjs
+
       - name: Upload visual evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -192,3 +196,4 @@ jobs:
             frontend/artifacts/browser-task-ledger-states/*.png
             frontend/artifacts/browser-indexes-ledger-states/*.png
             frontend/artifacts/browser-media-ledger-states/*.png
+            frontend/artifacts/browser-archive-recovery-selection/*.png
