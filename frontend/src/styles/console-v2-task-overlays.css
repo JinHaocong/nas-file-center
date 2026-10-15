@@ -114,7 +114,7 @@
   background: var(--v2-canvas);
   border-radius: 7px;
 }
-.nfc-v2-task-capability.is-supported { background: #eaf8f2; color: #18835f; border-color: #c8ecdb; }
+.nfc-v2-task-capability.is-supported { background: #eaf8f2; color: #12664e; border-color: #c8ecdb; }
 [data-theme='dark'] .nfc-v2-task-capability.is-supported { background: #194137; color: #a1e9c9; border-color: #306858; }
 .nfc-v2-task-inline-alert {
   background: #fff0f3;
@@ -238,7 +238,7 @@
 .nfc-v2-log-expand { border: 0; color: var(--v2-indigo); background: transparent; cursor: pointer; }
 .nfc-v2-log-level { display: inline-flex; padding: 4px 7px; border-radius: 6px; background: var(--v2-canvas); color: var(--v2-muted); font-size: 10px; font-weight: 700; }
 .nfc-v2-log-level.is-error { background: #fff0f1; color: #b9354c; }
-.nfc-v2-log-level.is-warning { background: #fff3e3; color: #a46e19; }
+.nfc-v2-log-level.is-warning { background: #fff3e3; color: #875516; }
 .nfc-v2-log-level.is-info { background: var(--v2-indigo-soft); color: var(--v2-text); }
 .nfc-v2-log-context-row td { padding: 0; }
 .nfc-v2-sheet .nfc-console-pagination { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; padding: 13px 0 2px; gap: 10px; color: var(--v2-muted); font-size: 11px; }
