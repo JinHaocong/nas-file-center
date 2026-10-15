@@ -547,9 +547,13 @@ def recover_archive(source: Path, result_dir: Path, *, password: str | None = No
                 'known_total': total, 'items': results,
                 'stats': {s: sum(r['status'] == s for r in results)
                           for s in ('integrity_passed','format_validated','unverified','incomplete','unrecovered')},
-                'deep_capability': ('lzma2_crc_reset' if deep_result is not None
-                                     else 'tar_inner_only' if fmt in ('7z', 'rar')
-                                     else 'tar_or_zip_salvage'),
+                'deep_capability': (
+                    'aes_lzma2_crc_reset' if deep_result is not None
+                    and deep_result.get('stream_mode') == 'aes_lzma2'
+                    else 'lzma2_crc_reset' if deep_result is not None
+                    else 'tar_inner_only' if fmt in ('7z', 'rar')
+                    else 'tar_or_zip_salvage'
+                ),
                 'aes_lzma2_deep': deep_result,
                 'warnings': ['Format validation is not byte-for-byte integrity verification.',
                              'LZMA2 deep recovery requires an intact verified 7z header, independently decodable reset chunks, and matching per-file CRC. Encrypted LZMA2 requires a password; arbitrary solid reconstruction is not possible.'
