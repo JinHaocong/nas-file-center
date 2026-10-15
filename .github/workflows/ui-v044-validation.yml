@@ -177,6 +177,10 @@ jobs:
         working-directory: frontend
         run: node scripts/browser-archive-recovery-selection.mjs
 
+      - name: Run read-only Chromium Archive Recovery WorkJob continuity matrix
+        working-directory: frontend
+        run: node scripts/browser-archive-recovery-task-continuity.mjs
+
       - name: Upload visual evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -197,3 +201,4 @@ jobs:
             frontend/artifacts/browser-indexes-ledger-states/*.png
             frontend/artifacts/browser-media-ledger-states/*.png
             frontend/artifacts/browser-archive-recovery-selection/*.png
+            frontend/artifacts/browser-archive-recovery-task-continuity/*.png
