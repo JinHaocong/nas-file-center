@@ -12,3 +12,24 @@ export function normalizeThemeMode(value: unknown): ThemeMode {
 export function shouldUseDarkTheme(mode: ThemeMode, systemDark: boolean): boolean {
   return mode === 'dark' || (mode === 'system' && systemDark);
 }
+
+/**
+ * Browser storage can throw SecurityError in restricted/embed contexts.
+ * Prefer the established light fallback to crashing the entire shell.
+ */
+export function restoreThemeMode(read: () => unknown): ThemeMode {
+  try {
+    return normalizeThemeMode(read());
+  } catch {
+    return 'light';
+  }
+}
+
+/** Persist when possible without undoing a valid in-session theme choice. */
+export function persistThemeMode(write: () => void): void {
+  try {
+    write();
+  } catch {
+    // Storage may be blocked or full; the React state remains authoritative.
+  }
+}
