@@ -1,41 +1,64 @@
-# Safe cleanup of merged GitHub branches
+# Merged PR remote branch cleanup
 
-Use `scripts/cleanup_merged_branches.py` from any checkout with Python 3.9+ and an authenticated `gh` CLI, or set `GH_TOKEN` / `GITHUB_TOKEN` with repository metadata read and contents write permissions.
+**Policy (owner-approved, 2026-10-15):** Once a same-repository PR is **merged
+into `main`**, its source branch may be removed immediately; there is no
+mandatory seven-day delay. Do not delete an open/unmerged PR, unknown/unmatched
+branch, altered branch head, default/reserved/protected branch, or branch with
+any unmerged/active PR history.
 
-## Preview first (default: no deletion)
+This is a **remote Git ref cleanup only**. It never rewrites `main`, removes
+merged commits or PR history, deletes NAS content, or deploys the product.
+
+## Command from repository root
+
+Requires `gh auth login` or `GH_TOKEN`/`GITHUB_TOKEN` with repository
+contents/write access to delete remote branches.
+
+Preview all 0-day eligible refs **without deleting anything**:
 
 ```bash
 python3 scripts/cleanup_merged_branches.py --repo JinHaocong/nas-file-center
 ```
 
-By default this retains a branch for **at least 7 days after merge**. For Console-specific branches:
-
-```bash
-python3 scripts/cleanup_merged_branches.py --repo JinHaocong/nas-file-center --prefix feat/console-v2-
-```
-
-After reviewing `CANDIDATE` and `KEEP` lines, actually delete eligible remote refs with the opt-in flag:
+Then execute only the approved candidates:
 
 ```bash
 python3 scripts/cleanup_merged_branches.py --repo JinHaocong/nas-file-center --execute
 ```
 
-To deliberately include freshly merged branches, pass `--min-age-days 0 --execute`; this is **not** the default.
-
-## Safety invariants
-
-- Never select the GitHub default branch, main/master, develop, staging, production, release, hotfix, stable prefixes or GitHub-protected branches.
-- Only same-repository PR heads whose merge commit records target the default branch; current branch SHA must **equal** the merged PR head SHA. Squash-merges work because the PR head remains recorded.
-- If any PR on that branch is open or unmerged/closed without merge, leave it for manual review.
-- Enumerate **all** paginated PRs and branches; stop on API errors instead of guessing.
-- Before each deletion, fetch the current branch SHA/protected status and all currently open PRs again; skip if anything changed.
-- Dry-run is the default. Nothing is deleted without `--execute`.
-- No tags, local git branches, artifacts, PR records or production files are changed by this script.
-
-Unit test without GitHub access:
+Optional conservative retention, e.g. seven days:
 
 ```bash
-python3 scripts/tests/test_cleanup_merged_branches.py
+python3 scripts/cleanup_merged_branches.py --repo JinHaocong/nas-file-center --min-age-days 7 --execute
 ```
 
-This script is provided but **not executed with --execute** as part of PR #186. It is a manual maintenance tool, not a deployment action.
+The `--prefix` option limits candidates; `--execute` is always required
+for destructive remote-branch deletion in the CLI.
+
+## Automatic cleanup after merging to main
+
+`.github/workflows/merged-branch-cleanup.yml` runs on a **push to `main`**
+and supports an explicit manual `workflow_dispatch` from `main`. It uses
+an ephemeral GitHub Actions token scoped to repository `contents: write` and
+runs the same command first in dry-run mode and then in `--execute` mode;
+the job summary and logs record each result.
+
+Before deletion, the script checks all repository PR history, not just recently
+merged PRs. Eligibility requires a same-repo merged PR into the current default
+branch with an **exact match between current remote branch SHA and the PR head
+SHA**. A closed but unmerged or open PR with that branch name blocks deletion.
+It refuses archived repositories, protected/default/reserved branches and HEAD
+changes, and checks current open PRs again immediately before each delete.
+If token permissions, branch protection or a ruleset prevent deletion, the
+workflow fails visibly instead of silently reporting success.
+
+This automation is not a substitute for the PR latest-HEAD complete CI gate:
+merge only after all checks/workflows on that exact PR head succeed. It also
+does not represent real-NAS Organizer C5 / Scheduler S5 acceptance.
+
+## Recovery
+
+Deleted **branch refs** can be recreated from immutable merged PR head SHAs
+if the commit objects still exist; `main` and the historical PR remain.
+If a branch was intentionally retained without a merged PR, the cleaner reports
+`KEEP ...: no same-repo merged PR`.
