@@ -95,6 +95,28 @@ async function inspect(page, theme, width, state) {
         state + ' dialog z-index');
       const hit = document.elementFromPoint(width / 2, innerHeight / 2);
       check(Boolean(hit?.closest('.nfc-v2-dialog')), state + ' dialog pointer hit');
+      if (state === 'create' && b) {
+        // A non-overflowing dialog may still be visually broken: assert the
+        // field, directory picker and explanatory note respect the title gutter.
+        const gutter = width < 768 ? 16 : 22;
+        const headerIcon = dialog.querySelector('.nfc-v2-dialog-heading .nfc-v2-dialog-icon');
+        const label = dialog.querySelector('.nfc-v2-index-form-label');
+        const fields = [
+          ['label', label],
+          ['directory picker', dialog.querySelector('.nfc-v2-index-form .nfc-v2-directory-picker')],
+          ['explanation', dialog.querySelector('.nfc-v2-index-form .nfc-form-note')],
+        ];
+        for (const [name, node] of fields) {
+          const bounds = node?.getBoundingClientRect();
+          check(Boolean(bounds && bounds.width > 0 &&
+            bounds.left >= b.left + gutter &&
+            bounds.right <= b.right - gutter), name + ' content gutter');
+        }
+        const iconLeft = headerIcon?.getBoundingClientRect().left;
+        const labelLeft = label?.getBoundingClientRect().left;
+        check(Boolean(Number.isFinite(iconLeft) && Number.isFinite(labelLeft) &&
+          Math.abs(iconLeft - labelLeft) <= 2), 'Create form must align with header inset');
+      }
     } else if (state === 'failure') {
       check(inside(document.querySelector('.nfc-v2-indexes-error')),
         'Indexes error alert exceeds viewport');
@@ -193,17 +215,27 @@ try {
         await page.getByRole('button', { name: '上一页' }).click();
         await page.waitForFunction(selector =>
           document.querySelectorAll(selector).length === 20, record);
-        await page.getByRole('button', { name: '加入索引队列', exact: true }).click();
+        const createLauncher = page.getByRole('button', { name: '加入索引队列', exact: true });
+        const createOpener = await createLauncher.elementHandle();
+        assert.ok(createOpener, 'Index create action must have a keyboard launcher');
+        await createLauncher.click();
         const create = page.locator('.nfc-v2-index-create-dialog');
         await create.waitFor({ state: 'visible' });
         assert.equal(await create.getByRole('button', { name: '加入队列', exact: true }).isDisabled(),
           true, 'Empty index path must not allow queue submission');
         await inspect(page, theme.effective, width, 'create');
         await page.screenshot({ path: resolve(OUT, 'create-dialog-' + label + '.png') });
-        // Preserve the original independent parent Escape test before nesting.
+        // The controlled parent has no Dialog.Trigger. Check Escape and X
+        // restore the exact opener; Enter must reopen before nested navigation.
         await page.keyboard.press('Escape');
         await create.waitFor({ state: 'hidden' });
-        await page.getByRole('button', { name: '加入索引队列', exact: true }).click();
+        await page.waitForFunction(opener => document.activeElement === opener, createOpener);
+        await page.keyboard.press('Enter');
+        await create.waitFor({ state: 'visible' });
+        await create.getByRole('button', { name: '关闭索引窗口' }).click();
+        await create.waitFor({ state: 'hidden' });
+        await page.waitForFunction(opener => document.activeElement === opener, createOpener);
+        await page.keyboard.press('Enter');
         await create.waitFor({ state: 'visible' });
         // Test the actual nested Radix portal at every width/theme. The previous
         // create scrim at 1300 covered the directory browser at 1200/1201.

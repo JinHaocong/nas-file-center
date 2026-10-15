@@ -80,7 +80,13 @@
 .nfc-v2-index-create-dialog .nfc-v2-dialog-heading > div { flex:1;min-width:0; }
 .nfc-v2-index-dialog-subtitle { color:var(--nfc-idx-form-muted);
   font-size:11px;line-height:1.65;margin:6px 0 0; }
-.nfc-v2-index-form { display:grid;gap:12px;min-width:0;margin:14px 0 0; }
+/* The base dialog intentionally has padding:0. The create form must own
+   its own gutters; otherwise the label, picker, and note touch the modal rim. */
+.nfc-v2-index-form { display:grid;gap:12px;min-width:0;margin:0;padding:20px 24px 0; }
+.nfc-v2-index-form > .nfc-v2-confirm-actions {
+  margin:6px -24px 0;
+  padding:17px 24px 22px;
+}
 .nfc-v2-index-form-label { color:var(--nfc-idx-form-ink);font-size:12px;font-weight:700; }
 .nfc-v2-index-form .nfc-v2-directory-picker { min-width:0; }
 .nfc-v2-index-form .nfc-form-note { font-size:11px;line-height:1.7;
@@ -96,6 +102,11 @@
   .nfc-v2-indexes-page .nfc-console-pagination :is(button,select),
   .nfc-v2-index-create-dialog .nfc-console-button { min-height:44px; }
   .nfc-v2-index-create-dialog { width:min(96vw,640px);max-height:92dvh; }
+  .nfc-v2-index-form { padding:18px 18px 0; }
+  .nfc-v2-index-form > .nfc-v2-confirm-actions {
+    margin-inline:-18px;
+    padding:15px 18px 19px;
+  }
 }
 @media(prefers-reduced-motion:reduce) {
   .nfc-v2-indexes-page *, .nfc-v2-index-create-dialog * {
