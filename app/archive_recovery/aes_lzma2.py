@@ -1,4 +1,4 @@
-"""Conservative 7z AES-CBC + LZMA2 solid-stream resynchronization.
+"""Conservative 7z LZMA2 solid-stream resynchronization (plain or AES-CBC).
 
 This is NOT plaintext reconstruction. We map LZMA2 chunks to the CRC-checked
 7z header's uncompressed offsets. Only complete, independently decodable files
@@ -283,7 +283,7 @@ class Metadata:
     packed_size: int
     unpacked_size: int
     dictionary: int
-    aes_props: bytes
+    aes_props: bytes | None
     files: list[tuple[str, int, int, int | None]]
 
 
@@ -304,19 +304,24 @@ def inspect_7z(source: Path) -> Metadata:
         raise DeepRecoveryUnavailable('NEXT_HEADER_CRC_MISMATCH')
     stream, files = _read_header(Parse(_decode_header(raw, source, size)))
     coders, binds = stream['coders'], stream['binds']
-    if (len(coders) != 2 or [x[0] for x in coders] != [AES_ID, LZMA2_ID]
-            or binds != [(1, 0)]):
-        raise DeepRecoveryUnavailable('NOT_AES_LZMA2_LINEAR_FOLDER')
-    dictionary = _dictionary_size(coders[1][1])
+    if len(coders) == 2 and [x[0] for x in coders] == [AES_ID, LZMA2_ID] and binds == [(1, 0)]:
+        aes_props = coders[0][1]
+        lzma_props = coders[1][1]
+    elif len(coders) == 1 and coders[0][0] == LZMA2_ID and not binds:
+        aes_props = None
+        lzma_props = coders[0][1]
+    else:
+        raise DeepRecoveryUnavailable('NOT_AES_OR_PLAIN_LZMA2_LINEAR_FOLDER')
+    dictionary = _dictionary_size(lzma_props)
     packed = stream['pack_size']
     offset = 32 + stream['pack_pos']
-    if not 0 < packed <= MAX_SCAN_BYTES or packed % 16 or offset + packed > size:
-        raise DeepRecoveryUnavailable('INVALID_AES_PACKED_RANGE')
+    if not 0 < packed <= MAX_SCAN_BYTES or (aes_props is not None and packed % 16) or offset + packed > size:
+        raise DeepRecoveryUnavailable('INVALID_LZMA2_PACKED_RANGE')
     if not any(crc is not None for _, _, _, crc in files):
         raise DeepRecoveryUnavailable('NO_PER_FILE_CRCS')
     return Metadata(offset=offset, packed_size=packed,
         unpacked_size=stream['unpack_sizes'][-1], dictionary=dictionary,
-        aes_props=coders[0][1], files=files)
+        aes_props=aes_props, files=files)
 
 
 def _key_and_iv(props: bytes, password: str) -> tuple[bytes, bytes]:
@@ -353,15 +358,21 @@ def _key_and_iv(props: bytes, password: str) -> tuple[bytes, bytes]:
 
 
 class DecryptedStream:
-    """Bounded streaming CBC decryptor; malformed compressed input never written to disk."""
-    def __init__(self, source: Path, meta: Metadata, password: str, check: Callable[[], None]):
-        if Cipher is None:
-            raise DeepRecoveryUnavailable('CRYPTOGRAPHY_NOT_INSTALLED')
-        key, iv = _key_and_iv(meta.aes_props, password)
+    """Bounded read of LZMA2 bytes, with CBC decryption only when required."""
+    def __init__(self, source: Path, meta: Metadata, password: str | None, check: Callable[[], None]):
+        if meta.aes_props is not None:
+            if not password:
+                raise DeepRecoveryUnavailable('PASSWORD_REQUIRED')
+            if Cipher is None:
+                raise DeepRecoveryUnavailable('CRYPTOGRAPHY_NOT_INSTALLED')
+            key, iv = _key_and_iv(meta.aes_props, password)
+            decoder = Cipher(algorithms.AES(key), modes.CBC(iv)).decryptor()
+        else:
+            decoder = None  # The packed stream is already LZMA2; no password needed.
         self.file = source.open('rb')
         self.file.seek(meta.offset)
         self.remaining = meta.packed_size
-        self.decoder = Cipher(algorithms.AES(key), modes.CBC(iv)).decryptor()
+        self.decoder = decoder
         self.buffer = bytearray()
         self.consumed = 0
         self.check = check
@@ -382,7 +393,7 @@ class DecryptedStream:
             if len(block) != count:
                 raise DeepRecoveryUnavailable('PACKED_DATA_TRUNCATED')
             self.remaining -= count
-            self.buffer.extend(self.decoder.update(block))
+            self.buffer.extend(self.decoder.update(block) if self.decoder is not None else block)
         if len(self.buffer) < n:
             raise DeepRecoveryUnavailable('PACKED_STREAM_EXHAUSTED')
         out = bytes(self.buffer[:n])
@@ -449,7 +460,7 @@ def _decode_segment(frames: list[Frame], dictionary: int) -> bytes:
         raise DeepRecoveryUnavailable('CORRUPTED_LZMA2_CHUNK') from exc
 
 
-def recover_aes_lzma2(source: Path, password: str, *, check: Callable[[], None],
+def recover_aes_lzma2(source: Path, password: str | None, *, check: Callable[[], None],
                        publish: Callable[[str, Iterator[bytes], int, str], bool]) -> dict:
     """Publish *only* CRC-proven complete file ranges; no unknown-offset bytes.
 
@@ -457,6 +468,8 @@ def recover_aes_lzma2(source: Path, password: str, *, check: Callable[[], None],
     existing guarded descriptor-based result publisher. Returns True on success.
     """
     meta = inspect_7z(source)
+    provenance_prefix = '7z_aes_lzma2' if meta.aes_props is not None else '7z_lzma2'
+    stream_mode = 'aes_lzma2' if meta.aes_props is not None else 'plain_lzma2'
     recovered = 0
     reset_points = 0
     segments = 0
@@ -492,7 +505,7 @@ def recover_aes_lzma2(source: Path, password: str, *, check: Callable[[], None],
                 continue
             attempted.add(name)
             if publish(name, iter((blob,)), size,
-                       f'7z_aes_lzma2_reset@{current[0].input_offset}'):
+                       f'{provenance_prefix}_reset@{current[0].input_offset}'):
                 recovered += 1
 
     with DecryptedStream(source, meta, password, check) as stream:
@@ -520,13 +533,15 @@ def recover_aes_lzma2(source: Path, password: str, *, check: Callable[[], None],
             # Framing is lost; offsets are unknown. Independently probe later
             # reset streams and publish ONLY an exact CRC-proven whole file.
             # All intermediate bytes remain in memory and are discarded.
-            rescanned = _resync_by_full_file_crc(stream, meta, check, publish, attempted)
+            rescanned = _resync_by_full_file_crc(stream, meta, check, publish, attempted,
+                                                 provenance_prefix=provenance_prefix)
             recovered += rescanned['proven_files']
             return {'status': 'framing_resynchronized' if rescanned['proven_files'] else 'framing_lost',
-                    'reason': str(exc), 'recovered': recovered,
+                    'stream_mode': stream_mode, 'reason': str(exc), 'recovered': recovered,
                     'reset_points': reset_points, 'decoded_segments': segments,
                     'rejected_segments': rejected, 'resync_scan': rescanned}
-    return {'status': 'completed' if recovered else 'no_proven_files', 'recovered': recovered,
+    return {'status': 'completed' if recovered else 'no_proven_files', 'stream_mode': stream_mode,
+            'recovered': recovered,
             'reset_points': reset_points, 'decoded_segments': segments,
             'rejected_segments': rejected}
 
@@ -564,7 +579,7 @@ def _frame_from_bytes(buffer: bytes, start: int) -> tuple[Frame, int] | None:
 def _resync_by_full_file_crc(stream: DecryptedStream, meta: Metadata,
                              check: Callable[[], None],
                              publish: Callable[[str, Iterator[bytes], int, str], bool],
-                             already_attempted: set[str]) -> dict:
+                             already_attempted: set[str], *, provenance_prefix: str = '7z_aes_lzma2') -> dict:
     """Bounded search after broken framing; no absolute offsets are guessed.
 
     If the reset segment EXACTLY covers a CRC-bearing source file, that full
@@ -625,7 +640,7 @@ def _resync_by_full_file_crc(stream: DecryptedStream, meta: Metadata,
                 if name not in already_attempted and checksum == expected_crc:
                     already_attempted.add(name)
                     if publish(name, iter((decoded,)), size,
-                               f'7z_aes_lzma2_crc_resync@{pos}'):
+                               f'{provenance_prefix}_crc_resync@{pos}'):
                         proven += 1
             if size == biggest:
                 break

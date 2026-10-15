@@ -400,7 +400,9 @@ def _libarchive(source: Path, root: Path, fd: int, budget: Budget, results: list
         if password:
             passwd(handle, password.encode('utf-8'))
         if opn(handle, os.fsencode(source), CHUNK) != 0:
-            raise RecoveryError('PASSWORD_OR_DATA_ERROR')
+            # An open failure without a supplied password must not be
+            # misreported as a password mismatch.
+            raise RecoveryError('PASSWORD_OR_DATA_ERROR' if password else 'ARCHIVE_OPEN_FAILED')
         entry = ptr()
         while True:
             budget.step()
@@ -464,16 +466,19 @@ def recover_archive(source: Path, result_dir: Path, *, password: str | None = No
             total = None
             try:
                 _libarchive(source, result_dir, fd, budget, results, password)
-            except RecoveryError:
-                # A failed standard reader may still leave independently
-                # CRC-verifiable AES/LZMA2 reset segments; only for 7z with
-                # an explicitly supplied password and enabled deep mode.
-                if fmt != '7z' or not deep or not password:
+            except RecoveryError as exc:
+                # Only decoder/open failures qualify for salvage. Never turn
+                # a resource/time limit or another safety rejection into a
+                # recoverable fallback that could bypass the original gate.
+                if (fmt != '7z' or not deep or str(exc) not in {
+                    'PASSWORD_OR_DATA_ERROR', 'ARCHIVE_OPEN_FAILED',
+                    'DAMAGED_ARCHIVE', 'STANDARD_READER_FAILED',
+                }):
                     raise
                 results.append({'name': '<archive>', 'status': 'unrecovered',
                                 'reason': 'STANDARD_READER_UNAVAILABLE'})
         deep_result = None
-        if fmt == '7z' and deep and password:
+        if fmt == '7z' and deep:
             from app.archive_recovery.aes_lzma2 import (
                 DeepRecoveryUnavailable, recover_aes_lzma2,
             )
@@ -545,12 +550,16 @@ def recover_archive(source: Path, result_dir: Path, *, password: str | None = No
                 'known_total': total, 'items': results,
                 'stats': {s: sum(r['status'] == s for r in results)
                           for s in ('integrity_passed','format_validated','unverified','incomplete','unrecovered')},
-                'deep_capability': ('aes_lzma2_crc_reset' if deep_result is not None
-                                     else 'tar_inner_only' if fmt in ('7z', 'rar')
-                                     else 'tar_or_zip_salvage'),
+                'deep_capability': (
+                    'aes_lzma2_crc_reset' if deep_result is not None
+                    and deep_result.get('stream_mode') == 'aes_lzma2'
+                    else 'lzma2_crc_reset' if deep_result is not None
+                    else 'tar_inner_only' if fmt in ('7z', 'rar')
+                    else 'tar_or_zip_salvage'
+                ),
                 'aes_lzma2_deep': deep_result,
                 'warnings': ['Format validation is not byte-for-byte integrity verification.',
-                             'AES/LZMA2 deep recovery requires an intact verified 7z header, independently decodable reset chunks, and matching per-file CRC. Arbitrary encrypted-solid reconstruction is not possible.'
+                             'LZMA2 deep recovery requires an intact verified 7z header, independently decodable reset chunks, and matching per-file CRC. Encrypted LZMA2 requires a password; arbitrary solid reconstruction is not possible.'
                              if fmt == '7z' else 'RAR solid stream resynchronization is not supported.'
                              if fmt == 'rar' else 'Only verifiable ZIP and TAR recovery is attempted.']}
     finally:
