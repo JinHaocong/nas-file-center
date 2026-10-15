@@ -1,5 +1,5 @@
 /**
- * Stage 5E-AH: real built React/Chromium WorkJob monitor continuity.
+ * Stage 5E-AH/AI: real built React/Chromium full-width WorkJob continuity.
  * All task detail/report data are synthetic GET responses on localhost.
  * Never POST a check, start, cancel, or any other mutation to a NAS.
  */
@@ -9,7 +9,8 @@ import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { chromium } from 'playwright';
-import { visualAdminFixture, visualSafeSettingsFixture } from './visual-fixtures.mjs';
+import { visualAdminFixture, visualSafeSettingsFixture,
+  visualArchiveDirectoryFixture, visualViewports, visualThemes } from './visual-fixtures.mjs';
 
 const ROOT = process.cwd();
 const PORT = 4199;
@@ -38,13 +39,7 @@ function fixture(url, status) {
   if (url.pathname === '/api/auth/me') return visualAdminFixture('recovery-task-readonly');
   if (url.pathname === '/api/settings') return visualSafeSettingsFixture();
   if (url.pathname === '/api/filesystem/list') {
-    const path = url.searchParams.get('path');
-    const items = path === '/data'
-      ? [{ name: 'fixture.zip', path: '/data/fixture.zip',
-          type: 'file', is_dir: false, size: 123 }]
-      : [];
-    return { path, parent: null, allowed_roots: ['/data'], items,
-      total: items.length, page: 1, page_size: 100, has_more: false };
+    return visualArchiveDirectoryFixture(url.searchParams.get('path'));
   }
   if (url.pathname === '/api/filesystem/favorites' ||
       url.pathname === '/api/filesystem/recent') return { items: [] };
@@ -74,16 +69,17 @@ try {
   await ready();
   mkdirSync(OUTPUT, { recursive: true });
   browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
-  for (const width of [390, 1280]) {
-    for (const theme of ['light', 'dark', 'system-light', 'system-dark']) {
+  // The consolidated visual acceptance baseline is 8 widths × 4 themes.
+  for (const width of visualViewports) {
+    for (const theme of visualThemes) {
       const context = await browser.newContext({
         viewport: { width, height: 900 },
-        colorScheme: theme.endsWith('dark') ? 'dark' : 'light',
+        colorScheme: theme.system,
         reducedMotion: 'reduce',
       });
       await context.addInitScript(mode => {
-        localStorage.setItem('nfc_theme_mode', mode.split('-')[0]);
-      }, theme);
+        localStorage.setItem('nfc_theme_mode', mode);
+      }, theme.mode);
       const page = await context.newPage();
       const blockedWrites = [];
       const outbound = [];
@@ -111,7 +107,7 @@ try {
         }
         await route.continue();
       });
-      const label = theme + '-' + width;
+      const label = (theme.mode === 'system' ? 'system-' + theme.effective : theme.mode) + '-' + width;
       try {
         await page.goto(BASE + '/archive-recovery?task=777', {
           waitUntil: 'domcontentloaded',
@@ -201,8 +197,8 @@ try {
       }
     }
   }
-  assert.equal(passed, 8);
-  console.log('[ARCHIVE TASK CONTINUITY] 8/8 GET-only WorkJob cases.');
+  assert.equal(passed, 32);
+  console.log('[ARCHIVE TASK CONTINUITY] 32/32 GET-only WorkJob cases.');
 } finally {
   await browser?.close();
   server.kill('SIGTERM');
