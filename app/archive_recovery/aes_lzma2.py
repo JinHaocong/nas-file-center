@@ -469,6 +469,7 @@ def recover_aes_lzma2(source: Path, password: str | None, *, check: Callable[[],
     """
     meta = inspect_7z(source)
     provenance_prefix = '7z_aes_lzma2' if meta.aes_props is not None else '7z_lzma2'
+    stream_mode = 'aes_lzma2' if meta.aes_props is not None else 'plain_lzma2'
     recovered = 0
     reset_points = 0
     segments = 0
@@ -536,10 +537,11 @@ def recover_aes_lzma2(source: Path, password: str | None, *, check: Callable[[],
                                                  provenance_prefix=provenance_prefix)
             recovered += rescanned['proven_files']
             return {'status': 'framing_resynchronized' if rescanned['proven_files'] else 'framing_lost',
-                    'reason': str(exc), 'recovered': recovered,
+                    'stream_mode': stream_mode, 'reason': str(exc), 'recovered': recovered,
                     'reset_points': reset_points, 'decoded_segments': segments,
                     'rejected_segments': rejected, 'resync_scan': rescanned}
-    return {'status': 'completed' if recovered else 'no_proven_files', 'recovered': recovered,
+    return {'status': 'completed' if recovered else 'no_proven_files', 'stream_mode': stream_mode,
+            'recovered': recovered,
             'reset_points': reset_points, 'decoded_segments': segments,
             'rejected_segments': rejected}
 
