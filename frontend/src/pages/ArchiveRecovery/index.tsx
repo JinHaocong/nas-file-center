@@ -63,6 +63,9 @@ export const ArchiveRecoveryPage: React.FC = () => {
   const archiveRows = (listing.data?.items || []).filter(entry =>
     entry.type === 'file' && EXTENSIONS.test(entry.name));
   const shown = report.data?.items.filter(item => filter === 'all' || item.status === filter) || [];
+  // Older APIs and missing tmpfs must fail closed for password-bearing starts.
+  const passwordChannelBlocked = Boolean(password) &&
+    check.data?.password_channel_available !== true;
 
   /** Download current evidence; no extra file is written beside the source archive. */
   const downloadReport = () => {
@@ -126,14 +129,21 @@ export const ArchiveRecoveryPage: React.FC = () => {
         <ActionBar>
           <ConsoleButton disabled={!selected || check.isPending || Boolean(taskId)}
             loading={check.isPending} onClick={() => { void check.mutateAsync(selected).catch(() => {}); }}>检测</ConsoleButton>
-          <ConsoleButton variant="primary" disabled={!selected || !check.data?.can_write || !check.data?.dependency_available || start.isPending || Boolean(taskId)}
+          <ConsoleButton variant="primary" disabled={!selected || !check.data?.can_write || !check.data?.dependency_available || passwordChannelBlocked || start.isPending || Boolean(taskId)}
             loading={start.isPending} onClick={() => { void start.mutateAsync().catch(() => {}); }}>开始恢复</ConsoleButton>
         </ActionBar>
+        {passwordChannelBlocked && check.data && <p className="nfc-archive-recovery-warning" role="alert">
+          密码恢复暂不可启动：API 未确认共享 tmpfs 密码通道已就绪。请由部署管理员同时为 API 与 Worker
+          挂载同一个 /run/nfc-recovery-secrets tmpfs（Komodo 可使用
+          compose.komodo.archive-recovery-secrets.yaml），部署后重新点击“检测”。
+          请勿将密码放入普通磁盘卷、数据库或环境变量。
+        </p>}
         {check.isError && <p role="alert">检测失败：{getStructuredApiError(check.error).message}</p>}
         {start.isError && <p role="alert">启动失败：{getStructuredApiError(start.error).message}</p>}
         {check.data && <div className="nfc-archive-recovery-check-result" role="status">
           <p>实际格式：{check.data.format} · 原包大小：{check.data.source_bytes.toLocaleString()} 字节 · 当前空闲：{check.data.free_bytes.toLocaleString()} 字节</p>
           <p>写入允许：{check.data.can_write ? '是' : '否'} · 依赖：{check.data.dependency_available ? '可用' : '缺失'}</p>
+          <p>密码通道（API 侧）：{check.data.password_channel_available === true ? 'tmpfs 已检测到（还需确认 Worker 共享挂载）' : '未就绪；带密码的恢复不可启动'}</p>
           <p>增强策略：{check.data.deep_strategy}。{check.data.warning}</p>
         </div>}
       </DataPanel>

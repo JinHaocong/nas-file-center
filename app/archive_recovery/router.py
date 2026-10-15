@@ -58,6 +58,8 @@ def check_archive(request: Request, payload: RecoveryRequest):
             'source_bytes': source.stat().st_size,
             'can_write': request.app.state.settings.allow_mutation and os.access(source.parent, os.W_OK),
             'dependency_available': fmt in ('tar', 'zip') or bool(ctypes.util.find_library('archive')),
+            # Read-only API-side RAM channel check; Worker must share the mount.
+            'password_channel_available': tmpfs_available(),
             'deep_strategy': 'tar_rescan' if fmt == 'tar' else
                              'zip_local_headers' if fmt == 'zip' else
                              'aes_lzma2_crc_reset_when_supported' if fmt == '7z' else

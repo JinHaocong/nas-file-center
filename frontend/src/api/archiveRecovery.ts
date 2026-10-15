@@ -38,6 +38,8 @@ export interface RecoveryPreflight {
   free_bytes: number;
   can_write: boolean;
   dependency_available: boolean;
+  /** Checks the API-side tmpfs only; Worker must share the volume. */
+  password_channel_available: boolean;
   deep_strategy: string;
   warning: string;
 }
