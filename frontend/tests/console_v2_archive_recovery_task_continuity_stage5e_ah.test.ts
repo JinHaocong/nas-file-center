@@ -31,7 +31,11 @@ describe('Stage 5E-AH — Archive Recovery WorkJob continuity', () => {
   });
 
   test('only explicit terminal acknowledgement allows another recovery', () => {
-    assert.ok(view.includes("const terminal = ['completed', 'failed', 'cancelled'].includes"));
+    assert.ok(view.includes("const recoveryJobMatches = job.data?.job_type === 'archive-recovery'"));
+    assert.ok(view.includes("const terminal = recoveryJobMatches &&"));
+    assert.ok(view.includes("disabled={!recoveryJobMatches || !['running', 'queued'].includes"));
+    assert.ok(view.includes("job.data && !recoveryJobMatches"));
+    assert.ok(view.includes("['completed', 'failed', 'cancelled'].includes"));
     assert.match(view, /const startAnotherRecovery = \(\) => \{\s*if \(!terminal \|\| taskId === null\) return;/);
     assert.match(view, /next\.delete\('task'\);[\s\S]*?setSelected\(''\);[\s\S]*?setPassword\(''\);/);
     assert.match(view, /\{terminal && <ConsoleButton onClick=\{startAnotherRecovery\}>开始下一次恢复<\/ConsoleButton>\}/);
