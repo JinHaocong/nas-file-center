@@ -75,7 +75,7 @@ describe('Pure White Stage 5E-J shared native checkbox selection boundary', () =
       "request.method() !== 'GET'",
       'assert.deepEqual(writes, []',
       'assert.deepEqual(outbound, []',
-      '32/32 cases, 224 screenshots',
+      '32/32 cases, 256 screenshots',
     ]) assert.ok(mediaBrowser.includes(needle), needle);
     for (const needle of [
       'Only active quarantine entry #901 may be selected',
