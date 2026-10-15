@@ -208,7 +208,7 @@ try {
         else await page.locator(row).first().getByRole('button', { name: '详情' }).click();
         const sheet = page.locator('.nfc-task-detail-drawer');
         await sheet.waitFor({ state: 'visible' });
-        await sheet.locator('.nfc-prewrap-error').waitFor({ state: 'visible' });
+        await sheet.locator('.nfc-v2-task-error-preview').waitFor({ state: 'visible' });
         await assertBounds(page, theme.effective, width, 'drawer');
         await page.screenshot({ path: resolve(OUT, 'long-error-' + label + '.png') });
         const disclosure = sheet.locator('.nfc-v2-task-error-details');
