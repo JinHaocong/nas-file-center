@@ -11,6 +11,7 @@ interface ToastActions {
   success: (text: string) => void;
   error: (text: string) => void;
   info: (text: string) => void;
+  dismiss: () => void;
 }
 
 const ToastContext = createContext<ToastActions | null>(null);
@@ -25,6 +26,7 @@ export const ConsoleToastProvider: React.FC<{ children: React.ReactNode }> = ({ 
     success: text => show('success', text),
     error: text => show('error', text),
     info: text => show('info', text),
+    dismiss: () => setToast(null),
   }), [show]);
 
   useEffect(() => {

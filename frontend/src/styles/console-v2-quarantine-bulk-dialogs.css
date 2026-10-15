@@ -20,6 +20,25 @@
   --nfc-bulk-line:var(--nfc-hairline,#383834);
   --nfc-bulk-accent:var(--nfc-accent,#e9e9e6);
 }
+/* Screenshot-led: on narrow screens the long Purge Preview put the DELETE
+   field and all action buttons below the visible modal scroll viewport.
+   Keep the header + Draft-only actions in view, scroll only the diagnostic body.
+   Restore intentionally retains its pre-existing compact layout. */
+.nfc-quarantine-bulk-purge-modal.nfc-v2-quarantine-bulk-dialog {
+  display:flex;flex-direction:column;overflow:hidden;
+}
+.nfc-quarantine-bulk-purge-modal > .nfc-v2-dialog-heading,
+.nfc-quarantine-bulk-purge-modal > .nfc-v2-confirm-actions {
+  flex:0 0 auto;
+}
+.nfc-quarantine-bulk-purge-modal > .nfc-v2-quarantine-bulk-body {
+  flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;
+  scrollbar-width:thin;padding:15px 24px 19px;
+}
+.nfc-quarantine-bulk-purge-modal > .nfc-v2-confirm-actions {
+  position:relative;z-index:1;border-top:1px solid var(--nfc-bulk-line);
+  background:var(--nfc-bulk-bg);
+}
 .nfc-v2-quarantine-bulk-dialog .nfc-v2-dialog-heading { align-items:flex-start; }
 .nfc-v2-quarantine-bulk-dialog .nfc-v2-dialog-heading > div { min-width:0;flex:1; }
 .nfc-v2-quarantine-bulk-description { margin:6px 0 0;color:var(--nfc-bulk-muted);
@@ -88,6 +107,9 @@
 .nfc-v2-quarantine-bulk-dialog input:disabled { opacity:.58;cursor:not-allowed; }
 @media(max-width:767px) {
   .nfc-v2-quarantine-bulk-dialog { width:min(96vw,760px);max-height:calc(100dvh - 16px); }
+  .nfc-quarantine-bulk-purge-modal > .nfc-v2-quarantine-bulk-body {
+    padding:14px 18px 16px;
+  }
   .nfc-v2-quarantine-bulk-dialog .nfc-v2-dialog-heading button {
     min-width:44px;min-height:44px; }
   .nfc-v2-quarantine-bulk-dialog .nfc-v2-confirm-actions { flex-wrap:wrap; }

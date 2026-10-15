@@ -399,3 +399,15 @@ No screenshot-only mock data in runtime.
 - Fix only Media queue dialogs: body 24px desktop/18px mobile horizontal padding, two-line preview for unusually long roots, with full exact path in a native keyboard-accessible disclosure *outside* the selection label. Preserve disabled blocked roots, exact root wire values, checkboxes, queue safety, RBAC, read-only synthetic GET, and no NAS execution.
 - Reuse current 32-case Chromium Media matrix; add computed gutter/density checks, Enter expansion with exact full path, and expanded-path screenshots (Media 256 screenshots; global synthetic target 1,632). Extend shared read-only fixture defaults to Media, now four scripts, without calling migration complete.
 - High-level checklist remains **67/74**, pending full visual review, real-NAS Organizer C5/Scheduler S5 acceptance, owner acceptance and explicit deployment approval.
+
+
+## Pure White Stage 5E-AE — Quarantine Bulk Purge mobile scroll/action visibility
+
+- 390px real Chromium screenshot evidence: the two-entry bulk purge Preview kept the modal within the viewport but pushed confirmation and action footer off the **visible** bottom. Restore has shorter content. A viewport-only boundary test missed actual operator reachability of a sensitive action.
+- Quarantine Purge-only layout now owns safe body padding, an internal scrollable full diagnostic region and persistently visible heading / footer; no warning or checkbox/token/authority is hidden or removed. Existing Draft-only, digest, blocked-member, admin and exact DELETE gates are unchanged.
+- Expand the existing 32-case Quarantine Bulk Chromium matrix with footer/button visibility, internal scroll, bottom input accessibility, enabled-state preservation and real screenshots in both ready and bottom-reviewed states. Expected Bulk screenshots 160 (was 128), global synthetic target 1,664 (was 1,632), pending CI.
+- Keep 67/74 checklist **OPEN**. No real NAS file operations, production deployment, Organizer C5/Scheduler S5 real-NAS acceptance or owner final visual sign-off performed.
+
+- Follow-up visual review found the Preview-success toast occluded the exact DELETE input even after footer repair. Successful Purge Preview now uses the existing inline Eligible/Blocked/Digest metrics as an accessible `role=status` message; blocked/error/Draft notifications remain unchanged. Chromium checks input hit-testing after scroll so the test cannot pass when an overlay masks an actionable control. New exact-HEAD CI is mandatory.
+
+- Native 390px screenshot review of the second CI artifact revealed residual toast from the earlier **Restore eligible-Preview** (not Purge). Add a safe `dismiss` notification action: eligible Restore and Purge success is expressed by their existing aria-live inline result metrics, clearing stale transient feedback before DELETE confirmation. Blocked/error/Draft feedback unchanged. Extend Chromium cross-modal tests to check no toast, and sample three vertical hit targets within DELETE instead of center-only. Await latest SHA's entire CI again.

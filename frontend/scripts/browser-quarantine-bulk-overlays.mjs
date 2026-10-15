@@ -124,6 +124,66 @@ async function inspect(page, theme, width, selector) {
   }, { theme, width, selector });
 }
 
+async function assertPurgeFooterAndScroll(page, width, state) {
+  const failures = await page.evaluate(({ width, state }) => {
+    const fail = [];
+    const check = (condition, text) => { if (!condition) fail.push(text); };
+    const modal = document.querySelector('.nfc-quarantine-bulk-purge-modal');
+    const header = modal?.querySelector(':scope > .nfc-v2-dialog-heading');
+    const body = modal?.querySelector(':scope > .nfc-v2-quarantine-bulk-body');
+    const insetContent = body?.querySelector('.nfc-v2-quarantine-bulk-note');
+    const footer = modal?.querySelector(':scope > .nfc-v2-confirm-actions');
+    const token = body?.querySelector('.nfc-v2-quarantine-bulk-token input');
+    const button = [...(footer?.querySelectorAll('button') || [])]
+      .find(el => el.textContent?.includes('生成永久删除 Draft'));
+    const modalBox = modal?.getBoundingClientRect();
+    const headerBox = header?.getBoundingClientRect();
+    const bodyBox = body?.getBoundingClientRect();
+    const insetBox = insetContent?.getBoundingClientRect();
+    const footerBox = footer?.getBoundingClientRect();
+    const tokenBox = token?.getBoundingClientRect();
+    const buttonBox = button?.getBoundingClientRect();
+    const gutter = width < 768 ? 16 : 22;
+    check(Boolean(modalBox && headerBox && bodyBox && footerBox && buttonBox),
+      'Missing purge scroll layout/header/body/footer');
+    if (modalBox && headerBox && bodyBox && footerBox && buttonBox) {
+      check(footerBox.top >= bodyBox.bottom - 2 &&
+        footerBox.bottom <= Math.min(modalBox.bottom, innerHeight) + 2,
+        'Dangerous Draft action footer clipped below mobile viewport');
+      check(buttonBox.top >= footerBox.top - 2 &&
+        buttonBox.bottom <= Math.min(footerBox.bottom, innerHeight) + 2,
+        'Purge Draft action is not visible in persistent footer');
+      check(headerBox.bottom <= bodyBox.top + 2,
+        'Fixed purge header overlaps diagnostics');
+      check(Boolean(insetBox && insetBox.left >= modalBox.left + gutter &&
+        insetBox.right <= modalBox.right - gutter),
+        'Purge body contents must align with dialog heading gutters');
+      if (width <= 390) {
+        check(body.scrollHeight > body.clientHeight + 15,
+          'Long mobile purge Preview must scroll within the body');
+      }
+      if (state === 'bottom') {
+        check(Boolean(tokenBox && tokenBox.top >= bodyBox.top - 2 &&
+          tokenBox.bottom <= bodyBox.bottom + 2),
+          'Exact DELETE input cannot be reached inside body scroller');
+        check(Boolean(token?.value === 'DELETE'), 'Exact confirmation token lost on scroll');
+        if (tokenBox) {
+          for (const fraction of [0.2, 0.5, 0.8]) {
+            const hit = document.elementFromPoint(
+              tokenBox.left + tokenBox.width / 2,
+              tokenBox.top + tokenBox.height * fraction);
+            check(hit === token, 'A floating toast masks DELETE at vertical fraction ' + fraction);
+          }
+        }
+        check(Boolean(body.querySelector('.nfc-v2-quarantine-bulk-metrics[role="status"]')),
+          'Preview success must remain announced inline instead of covering DELETE');
+      }
+    }
+    return fail;
+  }, { width, state });
+  assert.deepEqual(failures, [], 'Purge ' + state + '-' + width + ': ' + failures.join('; '));
+}
+
 async function assertDialog(page, theme, width, selector, label) {
   const failures = await inspect(page, theme, width, selector);
   assert.deepEqual(failures, [], label + ': ' + failures.join('; '));
@@ -216,6 +276,8 @@ try {
         await restore.getByRole('button', { name: '重新 Preview' }).click();
         await restore.getByText('Eligible 2').waitFor();
         assert.equal(await generateRestore.isEnabled(), true, 'Eligible rename Preview allows Draft UI');
+        assert.equal(await page.locator('.nfc-v2-toast').count(), 0,
+          'Successful Restore Preview must clear earlier blocked toast before opening Purge');
         await assertDialog(page, theme.effective, width, restoreSelector, 'Restore ready ' + label);
         await page.screenshot({ path: resolve(OUT, 'restore-ready-' + label + '.png') });
         await page.keyboard.press('Escape');
@@ -243,7 +305,19 @@ try {
         assert.equal(await generatePurge.isEnabled(), true,
           'Only exact uppercase DELETE unlocks Draft UI, never auto-submits');
         await assertDialog(page, theme.effective, width, purgeSelector, 'Purge ready ' + label);
+        await assertPurgeFooterAndScroll(page, width, 'ready');
+        assert.equal(await page.locator('.nfc-v2-toast').count(), 0,
+          'Successful Purge Preview must not inherit floating Restore status');
         await page.screenshot({ path: resolve(OUT, 'purge-ready-' + label + '.png') });
+        // Read the exact DELETE gate inside the scrollable body without losing
+        // the real footer, digest-bound Preview or any selected entry.
+        await purge.locator('.nfc-v2-quarantine-bulk-body').evaluate(el => {
+          el.scrollTop = el.scrollHeight;
+        });
+        await assertPurgeFooterAndScroll(page, width, 'bottom');
+        await page.screenshot({ path: resolve(OUT, 'purge-review-bottom-' + label + '.png') });
+        assert.equal(await generatePurge.isEnabled(), true,
+          'Scrolling must not reset exact DELETE/Draft readiness');
         await purge.getByRole('button', { name: '重新 Preview' }).click();
         await purge.getByText('Blocked 1').waitFor();
         assert.equal(await generatePurge.isDisabled(), true,
@@ -268,7 +342,7 @@ try {
     }
   }
   assert.equal(completed, WIDTHS.length * THEMES.length);
-  console.log('[BULK BROWSER] 32/32 viewport/theme cases; 128 screenshots; ' +
+  console.log('[BULK BROWSER] 32/32 viewport/theme cases; 160 screenshots; ' +
     'only synthetic Preview POST permitted, no Plan/Execute/Delete or NAS access.');
 } finally {
   await browser?.close();
