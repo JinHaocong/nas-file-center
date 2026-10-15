@@ -20,6 +20,9 @@ interface Props {
 export const DedupeActionDialog: React.FC<Props> = ({
   kind, storageAction, errorMessage, busy, onCancel, onConfirm,
 }) => {
+  // The page owns open state without Dialog.Trigger; return focus to its
+  // original launch button after cancelling, not a detached or disabled node.
+  const returnFocusTarget = React.useRef<HTMLElement | null>(null);
   // Defensive callback gate; the owning page retains Preview/Draft and RBAC authority.
   const cancelSafely = () => { if (!busy) onCancel(); };
   const confirmSafely = () => { if (!busy && kind !== null) onConfirm(); };
@@ -44,6 +47,21 @@ export const DedupeActionDialog: React.FC<Props> = ({
       <Dialog.Portal>
         <Dialog.Overlay className="nfc-v2-dialog-overlay nfc-v2-advanced-dedupe-overlay" />
         <Dialog.Content className="nfc-overlay-modal nfc-v2-advanced-dedupe-dialog"
+          onOpenAutoFocus={() => {
+            const active = document.activeElement;
+            returnFocusTarget.current = active instanceof HTMLElement && active !== document.body
+              ? active : null;
+          }}
+          onCloseAutoFocus={event => {
+            const target = returnFocusTarget.current;
+            returnFocusTarget.current = null;
+            // Failed/stale preview and navigation may remove/disable the launcher.
+            // Preserve Radix's default fallback unless it is safe to restore.
+            if (target?.isConnected && !target.matches(':disabled')) {
+              event.preventDefault();
+              target.focus();
+            }
+          }}
           onEscapeKeyDown={event => { if (busy) event.preventDefault(); }}
           onPointerDownOutside={event => event.preventDefault()}>
           <header className="nfc-v2-advanced-dedupe-dialog-header">
