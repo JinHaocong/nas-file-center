@@ -102,7 +102,7 @@ export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose, onVie
                     <p className="nfc-prewrap-error">{task.error}</p>
                   </details>
                 </>
-              ) : <p className="nfc-prewrap-error">{task.error}</p>
+              ) : <p className="nfc-prewrap-error">{task.error}</p>}
             </div>
           )}
 
