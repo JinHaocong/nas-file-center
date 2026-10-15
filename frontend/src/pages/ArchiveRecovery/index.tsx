@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
@@ -31,6 +31,7 @@ export const ArchiveRecoveryPage: React.FC = () => {
   const parsedTaskId = Number(rawTaskId);
   const taskId = /^[1-9][0-9]*$/.test(rawTaskId) && Number.isSafeInteger(parsedTaskId)
     ? parsedTaskId : null;
+  const sourceInputRef = useRef<HTMLInputElement>(null);
   const [folder, setFolder] = useState('/data');
   const [selected, setSelected] = useState('');
   const [password, setPassword] = useState('');
@@ -60,6 +61,7 @@ export const ArchiveRecoveryPage: React.FC = () => {
     queryKey: ['archive-recovery-task', taskId],
     queryFn: () => tasksApi.getTaskDetail(taskId!),
     enabled: taskId !== null,
+    retry: false,
     refetchInterval: q => ['queued', 'running', 'cancel_requested'].includes(q.state.data?.status || '') ? 2000 : false,
   });
   // A manually supplied task link must never offer archive cancellation or
@@ -75,10 +77,9 @@ export const ArchiveRecoveryPage: React.FC = () => {
   });
   const cancel = useMutation({ mutationFn: () => tasksApi.cancelTask(taskId!) });
 
-  // A task belongs to its WorkJob ID, not to the editable archive selection.
-  // Release its monitor only through an explicit action after terminal status.
-  const startAnotherRecovery = () => {
-    if (!terminal || taskId === null) return;
+  // Retire the monitor without cancelling the Worker. Failed/unrelated deep
+  // links can be dismissed only explicitly; valid active jobs stay tracked.
+  const clearTaskMonitor = () => {
     setSearchParams(current => {
       const next = new URLSearchParams(current);
       next.delete('task');
@@ -90,6 +91,19 @@ export const ArchiveRecoveryPage: React.FC = () => {
     check.reset();
     start.reset();
     cancel.reset();
+    // The clicked action unmounts on dismissal: return keyboard focus to
+    // the surviving source input instead of losing it to document.body.
+    sourceInputRef.current?.focus();
+  };
+
+  const startAnotherRecovery = () => {
+    if (!terminal || taskId === null) return;
+    clearTaskMonitor();
+  };
+
+  const recoverInvalidTaskLink = () => {
+    if (taskId === null || (!job.isError && (!job.data || recoveryJobMatches))) return;
+    clearTaskMonitor();
   };
   const archiveRows = (listing.data?.items || []).filter(entry =>
     entry.type === 'file' && EXTENSIONS.test(entry.name));
@@ -165,7 +179,7 @@ export const ArchiveRecoveryPage: React.FC = () => {
           <ConsoleButton disabled={!listing.data?.has_more} onClick={() => setPage(value => value + 1)}>下一页</ConsoleButton>
         </ActionBar>
         <label className="nfc-archive-recovery-field-label" htmlFor="recovery-source">或手动指定压缩包路径</label>
-        <input id="recovery-source" value={selected} placeholder="/data/Download/photos.7z"
+        <input id="recovery-source" ref={sourceInputRef} value={selected} placeholder="/data/Download/photos.7z"
           onChange={event => {
             setSelected(event.target.value);
             setPassword('');
@@ -207,10 +221,14 @@ export const ArchiveRecoveryPage: React.FC = () => {
         <p className="nfc-archive-recovery-task-status" role="status">任务 #{taskId} · {job.isError ? '状态暂不可用' : (job.data?.status || '排队中')} · {job.data?.progress.message || '等待 Worker'}</p>
         <p className="nfc-archive-recovery-help">切换待恢复文件或目录不会取消正在运行的任务。任务结束后，请通过“开始下一次恢复”明确结束本次跟踪；任务记录仍保留在任务中心。</p>
         {job.data && !recoveryJobMatches && <p role="alert">任务编号对应的不是压缩包恢复任务。此页面不会提供取消、报告或下一次恢复操作；请前往任务中心查看，或返回不带任务编号的压缩包恢复页面。</p>}
-        {job.isError && <p role="alert">任务状态读取失败：{getStructuredApiError(job.error).message}。可前往任务中心核对，或重试刷新。</p>}
+        {job.isError && <p role="alert">任务状态读取失败：{getStructuredApiError(job.error).message}。可重试读取任务状态，或返回重新选择压缩包。</p>}
         {cancel.isError && <p role="alert">取消请求失败：{getStructuredApiError(cancel.error).message}</p>}
         <ActionBar>
           <ConsoleButton onClick={() => navigate('/tasks?task=' + taskId)}>任务详情与日志</ConsoleButton>
+          {job.isError && <ConsoleButton disabled={job.isFetching} loading={job.isFetching}
+            onClick={() => { void job.refetch(); }}>重试读取任务状态</ConsoleButton>}
+          {(job.isError || (job.data && !recoveryJobMatches)) &&
+            <ConsoleButton onClick={recoverInvalidTaskLink}>返回选择压缩包</ConsoleButton>}
           <ConsoleButton disabled={!recoveryJobMatches || !['running', 'queued'].includes(job.data?.status || '') || cancel.isPending}
             onClick={() => { void cancel.mutateAsync().catch(() => {}); }}>取消任务</ConsoleButton>
           {terminal && <ConsoleButton onClick={startAnotherRecovery}>开始下一次恢复</ConsoleButton>}
