@@ -18,7 +18,7 @@ describe('Pure White Stage 5E-AA Task History controlled dialog focus return', (
       '<Dialog.Root open={open}',
       'onClick={handleOpen}',
     ]) assert.ok(modal.includes(token), token);
-    assert.doesNotMatch(modal, /<Dialog\\.Trigger/);
+    assert.doesNotMatch(modal, /<Dialog\.Trigger/);
   });
 
   test('restores connected, enabled launcher only and preserves cleanup authority', () => {
@@ -40,7 +40,7 @@ describe('Pure White Stage 5E-AA Task History controlled dialog focus return', (
     ]) assert.ok(modal.includes(token), token);
     assert.ok(modal.indexOf('target.focus();') >
       modal.indexOf("if (target?.isConnected && !target.matches(':disabled')) {"));
-    assert.doesNotMatch(modal, /<Dialog\\.Trigger/);
+    assert.doesNotMatch(modal, /<Dialog\.Trigger/);
   });
 
   test('existing 32-case read-only Chromium Tasks matrix verifies Cancel, Enter, Escape and X', () => {
