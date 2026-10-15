@@ -16,3 +16,19 @@ export const visualThemes = Object.freeze([
   { mode: 'system', system: 'light', effective: 'light' },
   { mode: 'system', system: 'dark', effective: 'dark' },
 ]);
+
+/**
+ * GET-only directory payload for the Archive Recovery visual browser suites.
+ * "Other" folders are empty; no fixture ever reads the real NAS filesystem.
+ * Only a synthetic archive basename is supplied by each scenario.
+ */
+export function visualArchiveDirectoryFixture(path, archiveName = 'fixture.zip') {
+  const items = path === '/data' ? [{
+    name: archiveName, path: '/data/' + archiveName,
+    type: 'file', is_dir: false, size: 123,
+  }] : [];
+  return {
+    path, parent: null, allowed_roots: ['/data'], items,
+    total: items.length, page: 1, page_size: 100, has_more: false,
+  };
+}

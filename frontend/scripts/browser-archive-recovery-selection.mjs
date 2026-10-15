@@ -1,5 +1,5 @@
 /**
- * Stage 5E-AG: real React/Chromium archive selection regression.
+ * Stage 5E-AG/AI: real React/Chromium archive selection and 8-width regression.
  * Synthetic read-only GET fixtures only: never send a recovery check/start,
  * access a NAS, or treat these screenshots as NAS acceptance.
  * Run after npm run build with playwright@1.56.1 and Chromium installed.
@@ -10,7 +10,8 @@ import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { chromium } from 'playwright';
-import { visualAdminFixture, visualSafeSettingsFixture } from './visual-fixtures.mjs';
+import { visualAdminFixture, visualSafeSettingsFixture,
+  visualArchiveDirectoryFixture, visualViewports, visualThemes } from './visual-fixtures.mjs';
 
 const ROOT = process.cwd();
 const PORT = 4198;
@@ -42,12 +43,7 @@ function fixture(url) {
   }
   if (url.pathname === '/api/settings') return visualSafeSettingsFixture();
   if (url.pathname === '/api/filesystem/list') {
-    const path = url.searchParams.get('path');
-    const items = path === '/data'
-      ? [{ name: 'demo.zip', path: '/data/demo.zip', type: 'file', is_dir: false, size: 100 }]
-      : [];
-    return { path, parent: null, allowed_roots: ['/data'], items,
-      total: items.length, page: 1, page_size: 100, has_more: false };
+    return visualArchiveDirectoryFixture(url.searchParams.get('path'), 'demo.zip');
   }
   if (url.pathname === '/api/filesystem/favorites' ||
       url.pathname === '/api/filesystem/recent') return { items: [] };
@@ -58,16 +54,17 @@ try {
   await ready();
   mkdirSync(OUTPUT, { recursive: true });
   browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
-  for (const width of [390, 1280]) {
-    for (const theme of ['light', 'dark', 'system-light', 'system-dark']) {
+  // The consolidated visual acceptance baseline is 8 widths × 4 themes.
+  for (const width of visualViewports) {
+    for (const theme of visualThemes) {
       const context = await browser.newContext({
         viewport: { width, height: 900 },
-        colorScheme: theme.endsWith('dark') ? 'dark' : 'light',
+        colorScheme: theme.system,
         reducedMotion: 'reduce',
       });
       await context.addInitScript(mode => {
-        localStorage.setItem('nfc_theme_mode', mode.split('-')[0]);
-      }, theme);
+        localStorage.setItem('nfc_theme_mode', mode);
+      }, theme.mode);
       const page = await context.newPage();
       const blockedWrites = [];
       const outbound = [];
@@ -92,7 +89,7 @@ try {
         }
         await route.continue();
       });
-      const label = theme + '-' + width;
+      const label = (theme.mode === 'system' ? 'system-' + theme.effective : theme.mode) + '-' + width;
       try {
         await page.goto(BASE + '/archive-recovery', { waitUntil: 'domcontentloaded' });
         const file = page.locator('.nfc-archive-recovery-file').first();
@@ -120,8 +117,8 @@ try {
       }
     }
   }
-  assert.equal(passed, 8);
-  console.log('[ARCHIVE SELECTION] 8/8 real Chromium cases; synthetic GET fixtures only.');
+  assert.equal(passed, 32);
+  console.log('[ARCHIVE SELECTION] 32/32 real Chromium cases; synthetic GET fixtures only.');
 } finally {
   await browser?.close();
   server.kill('SIGTERM');

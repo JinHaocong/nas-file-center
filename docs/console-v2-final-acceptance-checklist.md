@@ -417,3 +417,8 @@ No screenshot-only mock data in runtime.
 - Owner screenshot: 7z archive format detected, enough free space and libarchive available, but password-bearing Start returns PASSWORD_CHANNEL_UNAVAILABLE. Source confirms a fail-closed shared RAM credential-channel requirement; default Komodo compose does not include the optional secrets overlay. Live NAS mounts were NOT inspected or changed.
 - Read-only check now exposes API-side channel status. UI fails closed on password-bearing Start if the field is false or absent, surfaces Chinese operator guidance, but retains original password-free rules and server Start check.
 - Synthetic backend and frontend regressions cover no premature job creation/no password leakage. Operator-only Compose/Komodo mount setup is documented. Real NAS recovery and production deployment were NOT performed. Console v2 remains 67/74 and owner, C5, S5 acceptance gates remain open.
+
+## Stage 5E-AI — Archive Recovery responsive evidence (not final acceptance)
+
+- Source-level completion and automated browser coverage extended for both Archive Recovery flows to 8 widths × 4 themes; shared read-only directory fixture and security gate assertions. Evidence expected after exact-HEAD CI: 32 source-switch screenshots + 96 WorkJob running/terminal/unrelated screenshots.
+- 67/74 high-level checkboxes remain unchanged. All-page manual screenshot review, shared control ownership, CSS consolidation, accessibility/contrast, real-NAS tests, owner approval and production deployment remain open. Synthetic screenshot generation does not close a visual sign-off checkbox.

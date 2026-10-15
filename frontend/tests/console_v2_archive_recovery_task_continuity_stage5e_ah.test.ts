@@ -57,4 +57,32 @@ describe('Stage 5E-AH — Archive Recovery WorkJob continuity', () => {
     assert.ok(browser.includes('page.reload('));
     assert.ok(workflow.includes('node scripts/browser-archive-recovery-task-continuity.mjs'));
   });
+  test('Stage 5E-AI selection and WorkJob matrices cover eight widths and shared GET-only fixtures', () => {
+    const screens = [
+      read('scripts/browser-archive-recovery-selection.mjs'),
+      read('scripts/browser-archive-recovery-task-continuity.mjs'),
+    ];
+    const fixtures = read('scripts/visual-fixtures.mjs');
+    const workflow = read('../.github/workflows/ui-v044-validation.yml');
+    assert.ok(fixtures.includes('export function visualArchiveDirectoryFixture'));
+    assert.ok(fixtures.includes('export const visualViewports'));
+    assert.ok(fixtures.includes('export const visualThemes'));
+    for (const script of screens) {
+      assert.ok(script.includes('visualArchiveDirectoryFixture('));
+      assert.ok(script.includes('for (const width of visualViewports)'));
+      assert.ok(script.includes('for (const theme of visualThemes)'));
+      assert.ok(script.includes('colorScheme: theme.system'));
+      assert.ok(script.includes("localStorage.setItem('nfc_theme_mode', mode)"));
+      assert.ok(script.includes('assert.equal(passed, 32)'));
+      assert.ok(script.includes("request.method() !== 'GET'"));
+      assert.ok(script.includes('outbound'));
+      assert.ok(script.includes('blockedWrites'));
+    }
+    assert.ok(workflow.includes('node scripts/browser-archive-recovery-selection.mjs'));
+    assert.ok(workflow.includes('node scripts/browser-archive-recovery-task-continuity.mjs'));
+    assert.ok(workflow.includes('frontend/artifacts/browser-archive-recovery-selection/*.png'));
+    assert.ok(workflow.includes('frontend/artifacts/browser-archive-recovery-task-continuity/*.png'));
+    assert.ok(read('scripts/run-tests.mjs').includes('node --test scripts/visual-fixtures-archive.test.mjs'));
+  });
+
 });
