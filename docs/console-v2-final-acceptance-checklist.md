@@ -422,3 +422,8 @@ No screenshot-only mock data in runtime.
 
 - Source-level completion and automated browser coverage extended for both Archive Recovery flows to 8 widths × 4 themes; shared read-only directory fixture and security gate assertions. Evidence expected after exact-HEAD CI: 32 source-switch screenshots + 96 WorkJob running/terminal/unrelated screenshots.
 - 67/74 high-level checkboxes remain unchanged. All-page manual screenshot review, shared control ownership, CSS consolidation, accessibility/contrast, real-NAS tests, owner approval and production deployment remain open. Synthetic screenshot generation does not close a visual sign-off checkbox.
+
+## Stage 5E-AJ — Archive Recovery task error / keyboard exit controls
+
+- Replace unactionable “retry” text with an explicit GET-only retry; allow the operator to dismiss a failed or unrelated WorkJob deep link without cancelling it. Programmatically refocus the surviving source input when an old task panel is dismissed, including terminal acknowledgement.
+- Add actual React/Chromium synthetic 8-width × 4-theme error/retry, wrong-kind exit and keyboard focus assertions in the existing suite; all mutating APIs are still blocked. No server, Worker, NAS or production change. The final keyboard-accessibility and owner screenshot acceptance gates remain OPEN; do not increment 67/74 solely for targeted regressions.
