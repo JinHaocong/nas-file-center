@@ -145,6 +145,7 @@ export const ArchiveRecoveryPage: React.FC = () => {
               aria-pressed={selected === entry.path}
               onClick={() => {
                 setSelected(entry.path);
+                setPassword('');
                 check.reset();
                 start.reset();
                 // Keep the running/completed WorkJob visible even when browsing.
@@ -163,6 +164,7 @@ export const ArchiveRecoveryPage: React.FC = () => {
         <input id="recovery-source" value={selected} placeholder="/data/Download/photos.7z"
           onChange={event => {
             setSelected(event.target.value);
+            setPassword('');
             check.reset();
             start.reset();
             // Only the explicit terminal action may dismiss a WorkJob monitor.
