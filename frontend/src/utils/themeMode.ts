@@ -33,3 +33,18 @@ export function persistThemeMode(write: () => void): void {
     // Storage may be blocked or full; the React state remains authoritative.
   }
 }
+
+/**
+ * A StorageEvent is fired in *other* tabs, not in the tab that wrote
+ * nfc_theme_mode. Treat removal and clear() as the established light default;
+ * never let unrelated keys reset the user's in-session selection.
+ * The provider checks storageArea before calling this reducer.
+ */
+export function syncThemeModeFromStorage(
+  current: ThemeMode,
+  key: string | null,
+  newValue: unknown,
+): ThemeMode {
+  if (key !== null && key !== 'nfc_theme_mode') return current;
+  return normalizeThemeMode(newValue);
+}
