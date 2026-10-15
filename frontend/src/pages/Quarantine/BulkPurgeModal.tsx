@@ -112,8 +112,9 @@ export const BulkPurgeModal: React.FC<Props> = ({
       if (result.blocked_count > 0) {
         toast.info('Preview 完成：' + result.blocked_count + ' 个条目被安全阻断，不能生成 Draft');
       }
-      // The eligible/blocked/digest summary below announces success inline.
-      // A floating success toast overlaps the exact DELETE input on mobile.
+      // The eligible/blocked/digest summary announces success inline; clear
+      // an earlier Restore/blocked-preview toast before DELETE can be typed.
+      if (result.blocked_count === 0) toast.dismiss();
     } catch (error: unknown) {
       if (isCurrent()) toast.error(getStructuredApiError(error).message || '批量永久删除 Preview 失败');
     } finally {

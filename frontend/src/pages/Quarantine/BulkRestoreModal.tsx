@@ -106,7 +106,9 @@ export const BulkRestoreModal: React.FC<Props> = ({
       if (result.blocked_count > 0) {
         toast.info('Preview 完成：' + result.blocked_count + ' 个条目被安全阻断，不能生成 Draft');
       } else {
-        toast.success('Preview 完成：' + result.eligible_count + ' 个条目可生成恢复 Draft');
+        // Inline status below is already announced; discard a prior blocked
+        // Preview toast so it cannot persist over another modal's controls.
+        toast.dismiss();
       }
     } catch (error: unknown) {
       if (isCurrent()) toast.error(getStructuredApiError(error).message || '批量恢复 Preview 失败');
@@ -204,7 +206,7 @@ export const BulkRestoreModal: React.FC<Props> = ({
             </p>}
             {preview && previewCurrent && (
               <section className="nfc-v2-quarantine-bulk-results" aria-label="批量恢复预览结果">
-                <div className="nfc-v2-quarantine-bulk-metrics">
+                <div className="nfc-v2-quarantine-bulk-metrics" role="status" aria-live="polite">
                   <span>Eligible {preview.eligible_count}</span>
                   <span className={preview.blocked_count ? 'is-blocked' : 'is-allowed'}>
                     Blocked {preview.blocked_count}

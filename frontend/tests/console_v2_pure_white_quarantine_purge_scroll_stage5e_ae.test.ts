@@ -26,6 +26,11 @@ describe('Pure White Stage 5E-AE screenshot-led Quarantine Purge footer reachabi
     assert.ok(purge.includes('className="nfc-v2-quarantine-bulk-metrics" role="status" aria-live="polite"'));
     assert.ok(!purge.includes("toast.success('Preview 完成：'"));
     assert.ok(restore.includes('nfc-quarantine-bulk-restore-modal'));
+    assert.ok(restore.includes('className="nfc-v2-quarantine-bulk-metrics" role="status" aria-live="polite"'));
+    assert.ok(restore.includes('toast.dismiss()'));
+    assert.ok(purge.includes('toast.dismiss()'));
+    assert.ok(!restore.includes("toast.success('Preview 完成：'"));
+    assert.ok(read('src/components/ui/ConsoleToast.tsx').includes('dismiss: () => setToast(null)'));
     assert.ok(!css.includes('.nfc-quarantine-bulk-restore-modal > .nfc-v2-quarantine-bulk-body'));
   });
 
@@ -40,7 +45,10 @@ describe('Pure White Stage 5E-AE screenshot-led Quarantine Purge footer reachabi
       'body.scrollHeight > body.clientHeight + 15',
       "state === 'bottom'",
       "token?.value === 'DELETE'",
-      "hit === token, 'A floating toast masks the visible DELETE input'",
+      "hit === token, 'A floating toast masks DELETE at vertical fraction ' + fraction",
+      'for (const fraction of [0.2, 0.5, 0.8])',
+      'Successful Restore Preview must clear earlier blocked toast before opening Purge',
+      'Successful Purge Preview must not inherit floating Restore status',
       '.nfc-v2-quarantine-bulk-metrics[role="status"]',
       "await assertPurgeFooterAndScroll(page, width, 'ready');",
       "await assertPurgeFooterAndScroll(page, width, 'bottom');",

@@ -168,9 +168,12 @@ async function assertPurgeFooterAndScroll(page, width, state) {
           'Exact DELETE input cannot be reached inside body scroller');
         check(Boolean(token?.value === 'DELETE'), 'Exact confirmation token lost on scroll');
         if (tokenBox) {
-          const hit = document.elementFromPoint(
-            tokenBox.left + tokenBox.width / 2, tokenBox.top + tokenBox.height / 2);
-          check(hit === token, 'A floating toast masks the visible DELETE input');
+          for (const fraction of [0.2, 0.5, 0.8]) {
+            const hit = document.elementFromPoint(
+              tokenBox.left + tokenBox.width / 2,
+              tokenBox.top + tokenBox.height * fraction);
+            check(hit === token, 'A floating toast masks DELETE at vertical fraction ' + fraction);
+          }
         }
         check(Boolean(body.querySelector('.nfc-v2-quarantine-bulk-metrics[role="status"]')),
           'Preview success must remain announced inline instead of covering DELETE');
@@ -273,6 +276,8 @@ try {
         await restore.getByRole('button', { name: '重新 Preview' }).click();
         await restore.getByText('Eligible 2').waitFor();
         assert.equal(await generateRestore.isEnabled(), true, 'Eligible rename Preview allows Draft UI');
+        assert.equal(await page.locator('.nfc-v2-toast').count(), 0,
+          'Successful Restore Preview must clear earlier blocked toast before opening Purge');
         await assertDialog(page, theme.effective, width, restoreSelector, 'Restore ready ' + label);
         await page.screenshot({ path: resolve(OUT, 'restore-ready-' + label + '.png') });
         await page.keyboard.press('Escape');
@@ -301,6 +306,8 @@ try {
           'Only exact uppercase DELETE unlocks Draft UI, never auto-submits');
         await assertDialog(page, theme.effective, width, purgeSelector, 'Purge ready ' + label);
         await assertPurgeFooterAndScroll(page, width, 'ready');
+        assert.equal(await page.locator('.nfc-v2-toast').count(), 0,
+          'Successful Purge Preview must not inherit floating Restore status');
         await page.screenshot({ path: resolve(OUT, 'purge-ready-' + label + '.png') });
         // Read the exact DELETE gate inside the scrollable body without losing
         // the real footer, digest-bound Preview or any selected entry.
