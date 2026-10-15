@@ -115,9 +115,9 @@ test('Radix portal typography keeps the same accessible theme colors as the shel
  * 4.5:1 contrast. Cover every exact selector definition, including later
  * !important overrides; testing only the first rule can miss regressions.
  */
-function statusRules(selector) {
+function statusRules(css, selector) {
   const escaped = selector.replaceAll('.', '\\.').replaceAll('[', '\\[').replaceAll(']', '\\]');
-  const bodies = [...shell.matchAll(new RegExp('^' + escaped + '\\s*\\{([^}]*)\\}', 'gm'))]
+  const bodies = [...css.matchAll(new RegExp('^' + escaped + '\\s*\\{([^}]*)\\}', 'gm'))]
     .map(match => match[1]);
   assert.ok(bodies.length > 0, 'Missing status rule: ' + selector);
   return bodies;
@@ -136,11 +136,42 @@ test('Pure White header status badges meet AA in both themes, including later ov
     for (const state of ['safe', 'warning', 'danger']) {
       const selector = (theme === 'dark' ? "[data-theme='dark'] " : '')
         + '.nfc-v2-header .nfc-header-status-badge.is-' + state;
-      for (const body of statusRules(selector)) {
+      for (const body of statusRules(shell, selector)) {
         requireAA(theme + ' ' + state + ' status', statusHex(body, 'color'), [
           ['status background', statusHex(body, 'background')],
         ]);
       }
+    }
+  }
+});
+
+/**
+ * Stage 5E-AM: task drawer's tiny capability and event-level chips are
+ * normal-size text for WCAG purposes (11px and 10px); the 4.5:1 AA
+ * threshold applies even when the status is conveyed with color.
+ */
+test('Task Inspector supported capability badge meets AA in both themes', () => {
+  for (const selector of [
+    '.nfc-v2-task-capability.is-supported',
+    "[data-theme='dark'] .nfc-v2-task-capability.is-supported",
+  ]) {
+    for (const body of statusRules(overlays, selector)) {
+      requireAA(selector, statusHex(body, 'color'), [
+        ['capability background', statusHex(body, 'background')],
+      ]);
+    }
+  }
+});
+
+test('Task event log warning and error badges meet AA on their declared backgrounds', () => {
+  // These solid badge colors are shared by both themes; fail if a future
+  // declaration reduces legibility or removes either status style.
+  for (const state of ['warning', 'error']) {
+    const selector = '.nfc-v2-log-level.is-' + state;
+    for (const body of statusRules(overlays, selector)) {
+      requireAA(selector, statusHex(body, 'color'), [
+        ['event level background', statusHex(body, 'background')],
+      ]);
     }
   }
 });
