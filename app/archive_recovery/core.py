@@ -466,11 +466,14 @@ def recover_archive(source: Path, result_dir: Path, *, password: str | None = No
             total = None
             try:
                 _libarchive(source, result_dir, fd, budget, results, password)
-            except RecoveryError:
-                # A failed standard reader may still leave independently
-                # CRC-verifiable LZMA2 reset segments, including *plain*
-                # LZMA2 (no password) and AES/LZMA2 (password required).
-                if fmt != '7z' or not deep:
+            except RecoveryError as exc:
+                # Only decoder/open failures qualify for salvage. Never turn
+                # a resource/time limit or another safety rejection into a
+                # recoverable fallback that could bypass the original gate.
+                if (fmt != '7z' or not deep or str(exc) not in {
+                    'PASSWORD_OR_DATA_ERROR', 'ARCHIVE_OPEN_FAILED',
+                    'DAMAGED_ARCHIVE', 'STANDARD_READER_FAILED',
+                }):
                     raise
                 results.append({'name': '<archive>', 'status': 'unrecovered',
                                 'reason': 'STANDARD_READER_UNAVAILABLE'})
