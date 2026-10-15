@@ -62,3 +62,31 @@ Deleted **branch refs** can be recreated from immutable merged PR head SHAs
 if the commit objects still exist; `main` and the historical PR remain.
 If a branch was intentionally retained without a merged PR, the cleaner reports
 `KEEP ...: no same-repo merged PR`.
+
+## Exceptional manually ported branch: Pure White foundation (2026-10-15)
+
+The obsolete `design/pure-white-foundation-shell` branch was recreated as the
+independent `design/pure-white-v21-foundation-on-current-main` PR #196, because
+the archive recovery code had already moved the active base forward. PR #196
+explicitly carried the original nine files (neutral palette, shell styles,
+tests, acceptance and contract) onto current `main`, added the required
+Archive Recovery layout and discreet release metadata, and was Squash Merged.
+The old branch has 14 unique Git commit IDs because the port did not retain its
+ancestry, **not** because the UI feature is still waiting to be merged.
+The PR #196 merge commit is `29ee9a65d0bbaddb7ec5e48ccbaa1fff8bbc2ec4`.
+
+Owner subsequently explicitly asked to resolve the stale branch (merge or
+delete). Review against PR #196 and live `main` found no missing features;
+re-merging would reintroduce older Dashboard/Plan styles and old release
+metadata. Only this one exact ref is approved for retirement, at HEAD
+`7abdcaddaada997e5f3cddbb6a8486786100223b`.
+
+`scripts/retire_superseded_pure_white_branch.py` is an **exceptional
+SHA-pinned, one-ref-only helper**, run in dry-run and execute modes only from
+the post-main-push cleanup Action. Before deletion it verifies the repository
+identity and default branch, non-protection, exact source SHA, merged PR #196
+head and merge SHA, that the merged port is an ancestor of the live main,
+no open PR from the original branch, and rechecks the same facts before the
+DELETE REST call. Missing ref after successful cleanup is an idempotent no-op.
+The general cleanup helper's strict PR-head equality policy remains unchanged.
+No NAS operation, production deployment or direct push to `main` is involved.
