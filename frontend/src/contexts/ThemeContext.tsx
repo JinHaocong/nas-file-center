@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { restoreThemeMode, persistThemeMode, shouldUseDarkTheme, type ThemeMode } from '../utils/themeMode';
+import { restoreThemeMode, persistThemeMode, shouldUseDarkTheme, syncThemeModeFromStorage, type ThemeMode } from '../utils/themeMode';
 
 // Preserve the public type contract for Login, Settings, and shell consumers.
 export type { ThemeMode } from '../utils/themeMode';
@@ -34,6 +34,22 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const handleChange = (event: MediaQueryListEvent) => setSystemDark(event.matches);
     mediaQuery.addEventListener('change', handleChange);
     return () => mediaQuery.removeEventListener('change', handleChange);
+  }, []);
+
+  // Theme preferences are shared between tabs. StorageEvent does not fire
+  // in the tab that made the change, and events from sessionStorage must not
+  // overwrite the current selection. Accessing localStorage may itself throw.
+  useEffect(() => {
+    const handleStorage = (event: StorageEvent) => {
+      try {
+        if (event.storageArea !== window.localStorage) return;
+      } catch {
+        return;
+      }
+      setModeState(current => syncThemeModeFromStorage(current, event.key, event.newValue));
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
   }, []);
 
   const setMode = (newMode: ThemeMode) => {

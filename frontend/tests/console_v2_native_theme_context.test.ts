@@ -2,7 +2,7 @@ import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { normalizeThemeMode, shouldUseDarkTheme, restoreThemeMode, persistThemeMode } from '../src/utils/themeMode';
+import { normalizeThemeMode, shouldUseDarkTheme, restoreThemeMode, persistThemeMode, syncThemeModeFromStorage } from '../src/utils/themeMode';
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');
 
 describe('Console v2 native ThemeContext and zero direct AntD imports', () => {
@@ -24,6 +24,29 @@ describe('Console v2 native ThemeContext and zero direct AntD imports', () => {
     assert.doesNotThrow(() => persistThemeMode(() => {
       throw new Error('storage quota or access denied');
     }));
+  });
+  test('cross-tab preference changes track valid and invalid values but ignore unrelated storage', () => {
+    for (const next of ['light', 'dark', 'system'] as const) {
+      assert.equal(syncThemeModeFromStorage('dark', 'nfc_theme_mode', next), next);
+    }
+    assert.equal(syncThemeModeFromStorage('dark', 'nfc_theme_mode', 'broken'), 'light');
+    assert.equal(syncThemeModeFromStorage('dark', 'nfc_theme_mode', null), 'light',
+      'removing the persisted key reverts to the established default');
+    assert.equal(syncThemeModeFromStorage('dark', null, null), 'light',
+      'clearing all local storage keys also removes the persisted preference');
+    assert.equal(syncThemeModeFromStorage('dark', 'unrelated_setting', 'light'), 'dark');
+    assert.equal(syncThemeModeFromStorage('system', 'auth_session', null), 'system');
+  });
+  test('provider filters storage areas and detaches cross-tab listener on unmount', () => {
+    const theme = read('src/contexts/ThemeContext.tsx');
+    for (const part of [
+      'const handleStorage = (event: StorageEvent) => {',
+      'event.storageArea !== window.localStorage',
+      'syncThemeModeFromStorage(current, event.key, event.newValue)',
+      "window.addEventListener('storage', handleStorage)",
+      "window.removeEventListener('storage', handleStorage)",
+    ]) assert.ok(theme.includes(part), part);
+    assert.match(theme, /event\.storageArea !== window\.localStorage[\s\S]*?catch\s*\{\s*return;\s*\}/);
   });
   test('light and dark override system; system mode follows media query', () => {
     assert.equal(shouldUseDarkTheme('light', true), false);
