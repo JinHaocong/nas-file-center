@@ -1,8 +1,8 @@
 /**
  * Pure White Stage 5D-D: actual Organizer Advanced and Dedupe Workflow Preview.
- * All GET endpoints are local synthetic read-only fixtures. Only two exact
- * /preview POST routes are intercepted and locally fulfilled by Playwright.
- * Every other write is denied with 405 and asserted absent. No NAS access.
+ * All GET endpoints are local synthetic read-only fixtures. Only the exact
+ * workflow and direct-dedupe read-only Preview POST routes are locally fulfilled.
+ * Every Draft/Generate/Execute/write is denied and asserted absent. No NAS access.
  */
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -86,6 +86,7 @@ function getFixture(path) {
     return { items: [scan(501, 'completed'), scan(502, 'completed'),
       scan(503, 'running')], page: 1, page_size: 500, total: 3 };
   }
+  if (path === '/api/scans/501') return scan(501, 'completed');
   const m = /^\/api\/workflows\/(51|52)$/.exec(path);
   if (m) {
     const id = Number(m[1]);
@@ -98,6 +99,31 @@ function getFixture(path) {
     };
   }
   return { items: [], total: 0, page: 1, page_size: 20 };
+}
+
+function directDedupePreviewFixture(payload) {
+  assert.equal(payload.scorer_config?.schema_version, 1);
+  assert.equal(payload.storage_action, 'quarantine');
+  assert.equal(payload.page, 1);
+  assert.equal(payload.page_size, 50);
+  const summary = {
+    scan_job_id: 501, scan_roots: [ROOT], selection_mode: 'weighted',
+    group_count: 1, candidate_member_count: 2, actionable_group_count: 1,
+    skipped_group_count: 0, planned_quarantine_count: 1, planned_action_count: 1,
+    storage_blocked_count: 0, expected_reclaim_bytes: 256,
+    released_bytes_by_scan_root: { 0: 256 }, storage_action: 'quarantine',
+    effective_safety_policy: { protect_last_file: true, allowed_roots: [ROOT] },
+  };
+  return {
+    ...summary, summary, scan_roots: [ROOT],
+    page: 1, page_size: 50, total_pages: 1, total_rows: 0, rows: [],
+    preview_digest: DEDUPE_DIGEST,
+    scorer_config_digest: 'e'.repeat(64),
+    source_snapshot_digest: 'f'.repeat(64),
+    decision_digest: '1'.repeat(64),
+    dedupe_engine_version: 2, preview_source: 'synthetic-scan-readonly',
+    live_filesystem_verified: false,
+  };
 }
 
 function previewFixture(id, req, ordinal) {
@@ -204,6 +230,7 @@ try {
       const external = [];
       const counters = { 51: 0, 52: 0 };
       const acceptedPreviews = [];
+      const directDedupePreviews = [];
       await page.route('**/*', async route => {
         const request = route.request();
         const url = new URL(request.url());
@@ -237,6 +264,20 @@ try {
             forbidden.push('Invalid Preview payload: ' + String(error));
             await route.fulfill({ status: 422, contentType: 'application/json',
               body: JSON.stringify({ detail: 'INVALID_READ_ONLY_PREVIEW_FIXTURE' }) });
+          }
+          return;
+        }
+        if (request.method() === 'POST' && url.pathname === '/api/scans/501/dedupe-preview') {
+          try {
+            const body = request.postDataJSON();
+            const response = directDedupePreviewFixture(body);
+            directDedupePreviews.push({ scanId: 501, preview: 'read-only' });
+            await route.fulfill({ status: 200, contentType: 'application/json',
+              body: JSON.stringify(response) });
+          } catch (error) {
+            forbidden.push('Invalid direct Dedupe Preview: ' + String(error));
+            await route.fulfill({ status: 422, contentType: 'application/json',
+              body: JSON.stringify({ detail: 'INVALID_READ_ONLY_DEDUPE_PREVIEW' }) });
           }
           return;
         }
@@ -336,7 +377,32 @@ try {
           { id: 52, revision: 2, scanJobId: 501 },
           { id: 52, revision: 2, scanJobId: 501 },
         ], 'All Preview responses must pin exact Workflow revision and Scan authority');
-        assert.deepEqual(forbidden, [], 'No Generate/Execute/Save/Delete API allowed');
+        // Stage 5E-Y: this is the *direct* advanced Dedupe controlled dialog,
+        // separate from the legacy Workflow Dedupe confirmation above.
+        // One isolated read-only Preview POST enables the generate launcher;
+        // no Draft/Generate POST is made, even in the browser fixture.
+        await page.goto(BASE_URL + '/scans/501/dedupe', { waitUntil: 'domcontentloaded' });
+        await page.getByRole('heading', { name: '高级精确去重' }).first().waitFor();
+        await page.getByRole('button', { name: '运行高级预览 (Preview)' }).click();
+        const generateLauncher = page.getByRole('button', { name: '生成执行计划草案' });
+        await generateLauncher.waitFor({ state: 'visible' });
+        await waitEnabled(page, '生成执行计划草案');
+        const generateOpener = await generateLauncher.elementHandle();
+        assert.ok(generateOpener, 'Actual direct Dedupe launcher must exist');
+        await generateLauncher.click();
+        const directDialog = page.locator('.nfc-v2-advanced-dedupe-dialog');
+        await directDialog.waitFor({ state: 'visible' });
+        assert.ok((await directDialog.innerText()).includes('仅创建 Draft 状态计划'));
+        await directDialog.getByRole('button', { name: '取消' }).click();
+        await directDialog.waitFor({ state: 'hidden' });
+        await page.waitForFunction(opener => document.activeElement === opener, generateOpener);
+        await page.keyboard.press('Enter');
+        await directDialog.waitFor({ state: 'visible' });
+        await page.keyboard.press('Escape');
+        await directDialog.waitFor({ state: 'hidden' });
+        await page.waitForFunction(opener => document.activeElement === opener, generateOpener);
+        assert.deepEqual(directDedupePreviews, [{ scanId: 501, preview: 'read-only' }]);
+        assert.deepEqual(forbidden, [], 'No Draft/Generate/Execute/Save/Delete API allowed');
         assert.deepEqual(external, [], 'No external network or NAS access');
         completed += 1;
         console.log('[ORG DEDUPE BROWSER PASS] ' + label);
