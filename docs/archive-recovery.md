@@ -55,3 +55,12 @@ When a 7z/ZIP/etc. format and space preflight succeeds but a password-bearing St
 2. Both services must mount exactly the **same** `nfc_recovery_secrets` named volume at `/run/nfc-recovery-secrets`, backed by `type: tmpfs`, `device: tmpfs` and `o: size=1m,mode=0700`. Separate service-local `tmpfs:` mounts are not a shared channel. Do not replace this with ordinary disk-backed bind mounts or persisted volumes.
 3. Read-only configuration checks: `docker compose -f compose.yaml -f compose.archive-recovery-secrets.yaml config` or `docker compose -f compose.komodo.yaml -f compose.komodo.archive-recovery-secrets.yaml config` (as applicable). An authorized operator may perform a controlled stack redeploy; inspect the running API **and Worker** mounts afterwards, and click the UI 检测 again.
 4. Do not put passwords in `.env`, `/config`, SQLite, container logs, process arguments or screenshots. No password is sent during the check. Keep ALLOWED_ROOTS, ALLOW_MUTATION, limited archive parent write access and all Worker lease safeguards. This does not authorize actual NAS recovery or waive independent real-NAS acceptance.
+
+
+## Folder selection, output path and password tmpfs are separate concerns (Stage 5E-AG)
+
+Changing the archive source folder in the UI now clears the selected archive, typed password and previous check result; Start also requires the check response to name the **currently** selected source path. This prevents an old positive preflight from authorizing a different archive. The API's path, permission and tmpfs checks remain authoritative.
+
+Current recovery results are created as unique sibling directories beside the **source archive** on its existing writable mount. They are not placed in a configurable central recovery root. A host directory such as `.nas-file-center-archive-recovery` under the NAS File Center config directory may be reserved as a future, separately scoped workspace, but adding a bind mount for it today does **not** redirect output or enable encrypted recovery.
+
+The actual password handoff uses only the named tmpfs-backed `nfc_recovery_secrets` volume mounted at `/run/nfc-recovery-secrets` in both API and Worker. A conventional host folder, disk bind mount, two independent container `tmpfs:` entries, or the existing quarantine directory cannot replace that shared memory channel. Operators must review the resolved Compose/Komodo configuration and running mounts; code merge alone does not modify the NAS deployment.

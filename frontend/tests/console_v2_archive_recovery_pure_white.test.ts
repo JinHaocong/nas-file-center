@@ -31,7 +31,7 @@ describe('Archive Recovery follows Pure White visual and safety contracts', () =
   test('cannot launch recovery without both server preflight permissions', () => {
     assert.ok(view.includes('mutationFn: archiveRecoveryApi.check'));
     assert.ok(view.includes('archiveRecoveryApi.start(selected, password, deep)'));
-    assert.match(view, /disabled=\{!selected \|\| !check\.data\?\.can_write \|\| !check\.data\?\.dependency_available \|\| passwordChannelBlocked \|\| start\.isPending \|\| Boolean\(taskId\)\}/);
+    assert.match(view, /disabled=\{!checkedSourceMatchesSelected \|\| !check\.data\?\.can_write \|\| !check\.data\?\.dependency_available \|\| passwordChannelBlocked \|\| start\.isPending \|\| Boolean\(taskId\)\}/);
     assert.match(view, /setPassword\(''\);/);
     assert.match(view, /type="password" autoComplete="off"/);
   });
@@ -50,6 +50,21 @@ describe('Archive Recovery follows Pure White visual and safety contracts', () =
     assert.ok(view.includes('重新点击“检测”'));
     assert.ok(view.includes('密码通道（API 侧）'));
     assert.ok(view.includes("archiveRecoveryApi.start(selected, password, deep)"));
+  });
+
+  test('Stage 5E-AG folder changes retire stale selection and source-bound preflight', () => {
+    assert.ok(view.includes("const checkedSourceMatchesSelected = Boolean(selected) && check.data?.source === selected;"));
+    assert.match(view, /if \(next === folder\) return;[\s\S]*?setSelected\(''\);[\s\S]*?setPassword\(''\);[\s\S]*?check\.reset\(\);[\s\S]*?start\.reset\(\);/);
+    assert.ok(view.includes('!checkedSourceMatchesSelected || !check.data?.can_write'));
+    assert.ok(view.includes('{checkedSourceMatchesSelected && check.data && <div'));
+    assert.ok(view.includes('{passwordChannelBlocked && checkedSourceMatchesSelected && <p'));
+    const browser = read('scripts/browser-archive-recovery-selection.mjs');
+    assert.ok(browser.includes("getByRole('textbox', { name: '目录路径' })"));
+    assert.ok(browser.includes("request.method() !== 'GET'"));
+    assert.ok(browser.includes("assert.deepEqual(blockedWrites, []"));
+    assert.ok(browser.includes("page.screenshot"));
+    const workflow = read('../.github/workflows/ui-v044-validation.yml');
+    assert.ok(workflow.includes('node scripts/browser-archive-recovery-selection.mjs'));
   });
 
   test('keeps all 7z AES/LZMA2 and read-only recovery limitations visible', () => {
