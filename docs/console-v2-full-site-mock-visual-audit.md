@@ -31,3 +31,14 @@ Do not mark the high-level eight-width final browser review, CSS consolidation, 
 1. Actual Action run 8/8 matrix jobs success for exact newest PR head; review 768 screenshot captures and JSON manifests.
 2. Compare representative samples across each page and width; log concrete errors and directly repair regressions (no CSS-theme reversion).
 3. Close the eight-width visual item only after complete final screenshot review; owner approval is separate and explicit.
+
+## Actual PNG review findings and immediate repair
+
+First trial Chromium output was downloaded and inspected, not just inferred from log assertions:
+
+- **1024px light:** a 24-page visual contact sheet showed five blank pages caused by invalid synthetic API shapes. These were mock **test-fixture** defects; data were aligned to the real typed `ScanJob`, workflow array/list, Dashboard, and Settings/resource-policy/session contracts. No business API was modified.
+- **390px light:** the new Download Verification screen rendered its remote-directory label inline with a cramped input, while a six-column history table collapsed into broken narrow columns. The real mobile PNG supplied the reproduction. Added an owned responsive form grid with vertically stacked field labels and an internal horizontal-scrolling evidence table, with no global horizontal scroll or legacy-theme fallback. Source and browser computed-geometry regressions now guard both cases.
+- **390px Plans:** legacy-count text displayed `undefined` because the mock `/api/plans/legacy/summary` did not return the typed counters. Corrected the fixture, without changing production logic.
+- **Download Verification detail:** the browser also clicks the real `查看条目` action and captures the path-by-path SHA256 result panel in every width/theme (32 additional interactive screenshots). The final evidence goal is **768 route snapshots + 32 selected detail snapshots = 800 screenshot PNGs** across eight artifacts.
+
+These fixes do not claim that every page's typography, colors or interaction states are manually signed off. All real NAS routes stay blocked in the browser.
