@@ -68,6 +68,9 @@ def test_worker_full_run_and_fail_closed_final_verdict(tmp_path, monkeypatch,
         with service.SessionLocal() as session:
             job = session.get(WorkJob, job_id)
             job.status = "running"
+            # An interrupted old attempt may have more progress than the new tree.
+            job.progress_current = 50
+            job.progress_total = 50
             session.commit()
         remote = FakeRemote(remote_bytes, remote_changes)
         monkeypatch.setattr("app.download_verification.handler.build_client", lambda settings: remote)
