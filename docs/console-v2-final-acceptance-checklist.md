@@ -81,7 +81,7 @@ The earlier dark premium shell is historical and is no longer the visual target.
 - [x] Pure White v2.1 foundation (separate visual redesign): neutral light/dark tokens, white sidebar/header, keyboard-visible charcoal selection, monochrome primary actions, mobile shell, Radix Portal palette, ten detailed CSS regressions. This is **source-level change only**, not final visual sign-off; see `docs/pure-white-v2-visual-contract.md`.
 - [x] Pure White v2.1 detail tranche: true Dashboard loading/error placeholders, aligned compact tables, flat quick-action list, native scan status/count typography, mobile records, dark/keyboard interaction; dedicated regressions (PR #197). Source-level only, browser sign-off still open.
 - [ ] Consolidate remaining historical UI CSS overrides into an owned, maintainable theme system.
-- [ ] Full TypeScript, frontend unit/regression, backend, Docker and dependency-audit gates.
+- [x] Full TypeScript, frontend unit/regression, backend, Docker and dependency-audit gates (Final Automated Integration Closure: exact-HEAD CI provenance checks; see `docs/console-v2-final-automated-integration-evidence.md`; accepted only after closure PR and merged-main CI succeed).
 - [ ] One final browser review: 360/390/430/768/1024/1280/1440/1920 px.
 - [ ] Keyboard navigation, focus management, dark-mode contrast, reduced motion and
       destructive confirmations.
@@ -432,3 +432,10 @@ No screenshot-only mock data in runtime.
 
 - Fixed small secondary labels that previously missed WCAG AA 4.5:1 on the light white/gray shell/sidebar. Shared tokens now maintain 4.5:1 or better across tested light and dark canvas, paper, neutral, sidebar and Radix portal surfaces. Frontend `npm test` includes a repeatable sRGB contrast calculation plus token-parity regression.
 - This improves a portion of the outstanding keyboard/dark-contrast/motion accessibility work but does **not** close that global checkbox; other status colors, all page screenshots, manual keyboard testing, owner consolidated visual acceptance, and live NAS acceptance are still required. Keep 67/74 high-level checks unchanged.
+
+
+## Final Automated Integration Closure — exact candidate CI (2026-10-16)
+
+- The automation-only TypeScript / frontend / backend / linux-amd64 Docker / production dependency-audit checklist item is closed subject to a **successful exact-HEAD closure PR and post-merge main CI**. See `docs/console-v2-final-automated-integration-evidence.md` for all four required PR workflow checks and the already verified Stage 5E-AS baseline.
+- UI, Release, Dependency Audit and Organizer C5 CI jobs now explicitly compare their checkout against the PR's actual head SHA. The Organizer Docker candidate identity is derived from checked-out source, not GitHub's synthetic pull-request merge SHA. The new `npm test` integration contract prevents the provenance guarantees from silently disappearing.
+- Other six high-level final-acceptance boxes are **not** closed by this automated integration evidence. Historical 67/74 references above describe their own dates and stages; this new closure makes the live high-level tally **68/74 (91.9%)** only after all closure gates finish successfully. It does not claim safe real-NAS acceptance, complete visual/accessibility sign-off, or deployment.
