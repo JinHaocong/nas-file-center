@@ -210,9 +210,10 @@ export const DownloadVerificationPage: React.FC = () => {
               {(runs.data?.items || []).map(run => <tr key={run.id}>
                 <td className="nfc-dv-id">#{run.id}</td>
                 <td><div className="nfc-dv-path">
-                  {sourceList.find(source => source.id === run.source_id)?.name
-                    || (run.source_id ? '已停用来源' : '旧版 WebDAV')} / {run.remote_root || '/'}
-                </div><small className="nfc-dv-local-path">{run.local_root}</small></td>
+                  <strong>{sourceList.find(source => source.id === run.source_id)?.name
+                    || (run.source_id ? '已停用来源' : '旧版 WebDAV')}</strong>
+                  <span className="nfc-dv-remote-path">{run.remote_root ? '/' + run.remote_root : '来源根目录 /'}</span>
+                </div><small className="nfc-dv-local-path">NAS：{run.local_root}</small></td>
                 <td>{run.mode === 'metadata' ? '快速核对' : 'SHA256'}</td>
                 <td><span className={'nfc-dv-result ' + (run.result === 'DIFFERENT' || run.job_status === 'failed' ? 'is-different'
                   : run.result === 'VERIFIED_IDENTICAL' || run.result === 'METADATA_IDENTICAL' ? 'is-matched' : '')}>
