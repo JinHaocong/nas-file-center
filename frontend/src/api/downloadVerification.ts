@@ -4,7 +4,7 @@ export interface DownloadVerificationRun {
   id: number;
   source_id: number | null;
   mode: 'metadata' | 'strict_sha256';
-  work_job_id: number;
+  work_job_id: number | null;
   remote_root: string;
   local_root: string;
   result: 'INCOMPLETE' | 'DIFFERENT' | 'STALE' | 'VERIFIED_IDENTICAL' | 'METADATA_IDENTICAL';
@@ -60,7 +60,7 @@ export const downloadVerificationApi = {
   start: (remote_root: string, local_root: string, source_id?: number, mode: 'metadata' | 'strict_sha256' = 'metadata') =>
     api.post<{ id: number; work_job_id: number; job_status: string }>('/api/download-verifications',
       { remote_root, local_root, source_id, mode }),
-  list: () => api.get<Page<DownloadVerificationRun>>('/api/download-verifications?page=1&page_size=50'),
+  list: (page = 1) => api.get<Page<DownloadVerificationRun>>('/api/download-verifications?page=' + page + '&page_size=50'),
   removeReport: (id: number) => api.delete<Record<string, never>>('/api/download-verifications/' + id),
   items: (id: number, page: number, status?: string) =>
     api.get<Page<DownloadVerificationItem>>('/api/download-verifications/' + id + '/items?page=' + page + '&page_size=50' + (status ? '&status=' + encodeURIComponent(status) : '')),
