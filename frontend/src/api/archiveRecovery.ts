@@ -16,6 +16,17 @@ export interface RecoveryReport {
   recovery_status: string;
   known_total: number | null;
   items: RecoveryItem[];
+  /** Canonical per-file verdicts when a directory can be enumerated. */
+  file_outcomes?: RecoveryItem[];
+  /** Failed or unvisited members; not a claim of physically damaged data. */
+  missing_files?: RecoveryItem[];
+  inventory?: {
+    status: 'verified' | 'listed' | 'unavailable';
+    declared_files: number | null;
+    recovered_files: number;
+    unrecovered_files: number;
+    reason?: string | null;
+  };
   stats: Record<string, number>;
   error_code?: string | null;
   deep_capability?: string;

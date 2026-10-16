@@ -174,7 +174,11 @@ describe('Console v2 native ThemeContext and zero direct AntD imports', () => {
       "Object.defineProperty(window, 'matchMedia'",
       "Object.defineProperty(window, 'localStorage'",
       "assert.deepEqual(errors, []",
-      "assert.equal(completed, 3)",
+      "assert.equal(completed, 4)",
+      '8 widths × 4 light/dark/system themes',
+      '32/32 computed CSS, 6 surfaces each',
+      'assert.deepEqual(external, []',
+      "route.fulfill({ response: await route.fetch() })",
     ]) assert.ok(browser.includes(token), token);
     assert.ok(workflow.includes('node scripts/browser-theme-resilience.mjs'));
     assert.ok(workflow.includes('Run read-only Chromium ThemeProvider resilience matrix'));
