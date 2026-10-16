@@ -42,3 +42,42 @@
     max-width: 94px;
   }
 }
+
+/* 768px uses the desktop sidebar (not MobileDock). The old two-part crumb
+ * can shrink to vertically wrapped ideographs between nav and status rails.
+ * Keep the current page visible; the parent remains in the sidebar.
+ * Compact only the redundant username text, never the user-menu trigger,
+ * Safe Mode / Worker badges, theme control or navigation affordance.
+ */
+@media (min-width: 768px) and (max-width: 899px) {
+  .nfc-v2-header .nfc-v2-breadcrumb {
+    min-width: 0;
+    max-width: min(26vw, 150px);
+    flex: 0 1 auto;
+    gap: 0;
+  }
+
+  .nfc-v2-header .nfc-v2-breadcrumb > span,
+  .nfc-v2-header .nfc-v2-breadcrumb > svg {
+    display: none;
+  }
+
+  .nfc-v2-header .nfc-v2-breadcrumb > strong {
+    display: block;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    line-height: 1.45;
+  }
+
+  .nfc-v2-header .nfc-v2-user-button > strong {
+    display: none;
+  }
+
+  .nfc-v2-header .nfc-v2-header-left,
+  .nfc-v2-header .nfc-header-command-cluster {
+    min-width: 0;
+  }
+}
