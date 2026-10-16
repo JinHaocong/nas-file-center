@@ -87,6 +87,9 @@ test('canonical shared token palette matches shell and portal contrast in both t
   assert.match(primitiveStyles, /\.nfc-page-eyebrow\s*\{[^}]*color:\s*var\(--nfc-text-subtle\)/);
   assert.match(primitiveStyles, /\.nfc-data-panel-description\s*\{[^}]*color:\s*var\(--nfc-text-subtle\)/);
   assert.match(primitiveStyles, /\.nfc-metric-label\s*\{[^}]*color:\s*var\(--nfc-text-subtle\)/);
+  assert.match(v049Styles, /\\.nfc-page-eyebrow\\s*\\{\\s*color:\\s*var\\(--nfc-text-subtle\\)/,
+    'later historical CSS must not replace canonical AA header color');
+  assert.doesNotMatch(v049Styles, /\\.nfc-page-eyebrow\\s*\\{\\s*color:\\s*var\\(--nfc-v49-subtle\\)/);
   assert.match(readFileSync('src/styles/v047.css', 'utf8'), /@import '.\/tokens.css';/,
     'actual v047 import must keep the canonical tokens in the cascade');
 });
