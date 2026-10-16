@@ -150,6 +150,9 @@ function fixture(path) {
   if (path === '/api/workflows/1') return fixtureWorkflow;
   if (path === '/api/workflows/1/revisions') return [];
   if (path === '/api/workflows') return [fixtureWorkflow];
+  if (path === '/api/download-verifications/sources/1/browse') return {
+    path: '', items: [{ name: 'PikPak', kind: 'directory', size: null }],
+  };
   if (path === '/api/download-verifications/sources') return { items: [
     { id: 1, name: 'AList', provider: 'alist', base_url: 'http://alist:5244',
       username: '', has_password: false, revision: 1, active: true },
@@ -322,6 +325,15 @@ try {
           animations: 'disabled',
         });
         if (item.id === 'download-verification') {
+          // Exercise the real Radix remote chooser against strictly read-only AList fixtures.
+          const pickerAction = tab.getByRole('button', { name: '选择目录' }).first();
+          await pickerAction.click();
+          const remotePicker = tab.getByRole('dialog', { name: '选择来源目录' });
+          await remotePicker.waitFor();
+          await remotePicker.getByRole('button', { name: /PikPak/ }).waitFor();
+          await tab.screenshot({ path: resolve(OUT, name + '-remote-picker.png'), animations: 'disabled' });
+          await remotePicker.getByRole('button', { name: '选择此目录' }).click();
+          await remotePicker.waitFor({ state: 'hidden' });
           // Capture the interactive detailed evidence table, not only the landing state.
           const action = tab.getByRole('button', { name: '查看条目' }).first();
           await action.click();
@@ -333,6 +345,13 @@ try {
           });
           if (pageErrors.length > beforeErrors) problems.push(
             'Uncaught detail-panel React errors: ' + pageErrors.slice(beforeErrors).join('; '));
+        }
+        if (item.id === 'download-sources') {
+          // Source editor is a separate route; no POST requests are issued by this fixture.
+          await tab.getByRole('button', { name: '新增来源' }).click();
+          await tab.getByRole('textbox', { name: '来源名称' }).waitFor();
+          await tab.screenshot({ path: resolve(OUT, name + '-source-editor.png'), animations: 'disabled' });
+          await tab.getByRole('button', { name: '取消' }).click();
         }
         report.push({ route: item.path, width, theme: themeLabel, ...audit, problems });
         if (problems.length) failures.push({ route: item.path, theme: themeLabel, problems });

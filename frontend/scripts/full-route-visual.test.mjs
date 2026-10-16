@@ -85,6 +85,8 @@ test('download source settings and modal browser remain covered by real route au
   assert.ok(picker.includes('nfc-v2-directory-dialog'));
   assert.ok(picker.includes('Dialog.Content'));
   assert.ok(picker.includes('!browse.isFetching'));
+  assert.ok(browser.includes("name + '-remote-picker.png'"));
+  assert.ok(browser.includes("name + '-source-editor.png'"));
 });
 
 test('real 360px visual regression keeps mobile route title on one line without hiding status badges', () => {
