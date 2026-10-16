@@ -87,7 +87,7 @@ test('real 360px visual regression keeps mobile route title on one line without 
     'Mobile repair may not hide the authoritative Safe Mode / Worker status');
   assert.ok(header.includes('navLabel(location.pathname)'));
   for (const phrase of [
-    "width <= 767 && !item.public",
+    "width <= 768 && !item.public",
     "h.identityWrap !== 'nowrap'",
     "h.leftRight > h.commandsLeft + 2",
     "h.commandsRight > width + 2",
@@ -142,4 +142,28 @@ test('computed focus contrast tests Chromium colors rather than CSS tokens', () 
     "rect.width >= 80 && rect.height >= 44",
     "focusAudit.skipTransitionSeconds, focusAudit.skipAnimationSeconds",
   ]) assert.ok(browser.includes(phrase), 'Missing computed Chromium focus assertion: ' + phrase);
+});
+
+test('tablet 768px keeps first-party header identity single-line and safety controls reachable', () => {
+  const css = readFileSync('src/styles/console-v2-mobile-header.css', 'utf8');
+  assert.match(css, /@media \(min-width: 768px\) and \(max-width: 899px\)/);
+  const tablet = css.slice(css.indexOf('@media (min-width: 768px)'));
+  for (const phrase of [
+    '.nfc-v2-header .nfc-v2-breadcrumb > span,',
+    '.nfc-v2-header .nfc-v2-breadcrumb > strong',
+    'white-space: nowrap',
+    'text-overflow: ellipsis',
+    '.nfc-v2-header .nfc-v2-user-button > strong',
+  ]) assert.ok(tablet.includes(phrase), 'Missing 768px header repair: ' + phrase);
+  assert.doesNotMatch(tablet, /\.nfc-header-status\s*\{[^}]*display:\s*none/s,
+    'Tablet must not hide Safe Mode or Worker status badges');
+  assert.doesNotMatch(tablet, /\.nfc-v2-user-button\s*\{[^}]*display:\s*none/s,
+    'Tablet must not hide the admin menu trigger');
+  for (const phrase of [
+    'width <= 768 && !item.public',
+    "h.identityWrap !== 'nowrap'",
+    'h.leftRight > h.commandsLeft + 2',
+    'h.commandsRight > width + 2',
+    "h.parentCrumbDisplay !== 'none'",
+  ]) assert.ok(browser.includes(phrase), 'Missing 768px real Chromium geometry: ' + phrase);
 });
