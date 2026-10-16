@@ -55,7 +55,7 @@ describe('Console v2 native ThemeContext and zero direct AntD imports', () => {
     assert.equal(readSystemDarkPreference(() => { throw Error('matchMedia blocked'); }), false);
     assert.equal(readSystemDarkPreference(() => ({
       get matches() { throw Error('matches blocked'); },
-    } as MediaQueryList)), false);
+    } as unknown as MediaQueryList)), false);
     assert.equal(shouldUseDarkTheme('dark', false), true);
     assert.equal(shouldUseDarkTheme('light', true), false);
   });
