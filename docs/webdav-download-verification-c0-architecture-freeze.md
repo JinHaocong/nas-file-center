@@ -1,6 +1,6 @@
 # WebDAV 下载完整性校验 — C0 Architecture Freeze（草案）
 
-状态：**DRAFT / AWAITING EXPLICIT ARCHITECTURE APPROVAL / NO PRODUCTION IMPLEMENTATION**
+状态：**IMPLEMENTATION AUTHORIZED BY USER 2026-10-16 / SOURCE PR #261 UNDER CI / REAL-NAS ACCEPTANCE PENDING**
 产品决策：2026-10-16；仅 OpenList WebDAV、严格双端 SHA256、保留原始相对目录结构。
 源码基线：`main@b64d7aed7befe6386cf0c84370c732d771380310`（独立设计分支从该 SHA 创建）。
 此文档是新增独立只读功能的设计草案；不能视为 CI、Docker 或真实 NAS 验收证据。

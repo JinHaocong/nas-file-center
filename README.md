@@ -14,6 +14,8 @@
 
 ## v0.4.7 核心更新与亮点
 
+> **新增只读功能（实现 PR #261，须待 CI / NAS 验收）：** OpenList WebDAV → NAS 下载完整性校验，原始目录结构严格匹配，双端完整 SHA256，支持后台 Worker 与分页差异报告。默认禁用；凭据必须由运维通过只读 secret 文件部署。配置与限制见 [WebDAV 下载完整性校验](docs/webdav-download-verification.md)。
+
 ### v0.4.7 UI / Responsive
 
 - 项目拥有独立的 `/DESIGN.md`，视觉方向以 Linear / Supabase 的克制 surface、hairline hierarchy 为主，并吸收 Carbon 的高密度数据与状态表达。

@@ -1,6 +1,6 @@
 # WebDAV 下载完整性校验 — Implementation Plan / TDD Matrix（待批准）
 
-状态：**DRAFT — planning only**；不得将以下命令/文件视为已实现或已测试。
+状态：**USER-APPROVED FOR IMPLEMENTATION 2026-10-16 / SOURCE PR #261 UNDER CI**；本文是设计和验证清单，不得把未完成的真实 NAS 验收宣称 PASS。
 配套 Architecture Freeze：[`webdav-download-verification-c0-architecture-freeze.md`](webdav-download-verification-c0-architecture-freeze.md)。
 冻结用户需求：**OpenList WebDAV → NAS；严格 SHA256 双端完整读取；原始相对路径完全一致；只读**。
 Source audit baseline：`main@b64d7aed7befe6386cf0c84370c732d771380310`（2026-10-16 设计起点）。已有 PR #259 是其它 CI/acceptance 工作，禁止混入其变更。
