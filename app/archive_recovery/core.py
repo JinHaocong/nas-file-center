@@ -502,9 +502,6 @@ def recover_archive(source: Path, result_dir: Path, *, password: str | None = No
                     # only when its actual bytes equal CRC-proven deep output.
                     if old.get('status') not in {'unverified', 'format_validated'}:
                         return False
-                    expected_bytes = b''.join(chunks)
-                    if len(expected_bytes) != size:
-                        return False
                     try:
                         parent = _open_parent(fd, parts)
                         try:
@@ -513,7 +510,13 @@ def recover_archive(source: Path, result_dir: Path, *, password: str | None = No
                             with os.fdopen(handle, 'rb') as reader:
                                 if os.fstat(reader.fileno()).st_size != size:
                                     return False
-                                if reader.read(size + 1) != expected_bytes:
+                                compared = 0
+                                for block in chunks:
+                                    budget.step()
+                                    compared += len(block)
+                                    if compared > size or reader.read(len(block)) != block:
+                                        return False
+                                if compared != size or reader.read(1):
                                     return False
                         finally:
                             os.close(parent)
@@ -529,7 +532,8 @@ def recover_archive(source: Path, result_dir: Path, *, password: str | None = No
 
             try:
                 deep_result = recover_aes_lzma2(source, password,
-                            check=lambda: budget.step(), publish=publish_crc_proven)
+                            check=lambda: budget.step(), publish=publish_crc_proven,
+                            scratch_dir=result_dir / '_incomplete')
             except DeepRecoveryUnavailable as exc:
                 deep_result = {'status': 'unsupported', 'reason': str(exc),
                                'recovered': 0}
