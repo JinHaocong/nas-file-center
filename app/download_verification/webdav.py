@@ -170,9 +170,10 @@ class WebDAVClient:
             raise WebDAVError("WebDAV collection did not return self entry")
         return out
 
-    def manifest(self, root: tuple[str, ...]) -> dict[str, dict]:
+    def manifest(self, root: tuple[str, ...], checkpoint=lambda: None) -> dict[str, dict]:
         result: dict[str, dict] = {}
         stack = [root]
+        visited = 0
         while stack:
             directory = stack.pop()
             for path, meta in self.list_directory(directory).items():
@@ -180,6 +181,9 @@ class WebDAVClient:
                 if rel in result or len(result) >= MAX_ENTRIES:
                     raise WebDAVError("Duplicate or over-limit remote inventory")
                 result[rel] = meta
+                visited += 1
+                if visited % 100 == 0:
+                    checkpoint()
                 if meta["kind"] == "directory":
                     stack.append(path)
         return result

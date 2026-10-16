@@ -18,7 +18,7 @@ class FakeRemote:
         self.changed = changed
         self.list_calls = 0
 
-    def manifest(self, parts):
+    def manifest(self, parts, checkpoint=lambda: None):
         self.list_calls += 1
         if self.changed and self.list_calls == 2:
             return {"changed.txt": {"kind": "file", "size": 4, "etag": None, "mtime": None}}

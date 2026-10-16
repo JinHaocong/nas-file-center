@@ -102,7 +102,9 @@ class DownloadVerificationHandler(TaskHandler):
                 run.bytes_checked = 0
                 run.error_code = None
                 session.commit()
-            remote = client.manifest(remote_parts)
+            remote = client.manifest(remote_parts, lambda: context.checkpoint(
+                progress_message="枚举 WebDAV 目录",
+                checkpoint_data={"schema_version": 1, "phase": "remote_manifest", "run_id": run_id}))
             context.checkpoint(progress_message="读取 NAS 本地目录",
                 checkpoint_data={"schema_version": 1, "phase": "local_manifest", "run_id": run_id})
             local_rows = local_manifest(local, quarantine_root=settings.quarantine_root)
@@ -151,7 +153,10 @@ class DownloadVerificationHandler(TaskHandler):
             context.checkpoint(progress_message="再次枚举 WebDAV 与 NAS，检查目录变化",
                 checkpoint_data={"schema_version": 1, "phase": "revalidate", "run_id": run_id})
             # No 'identical' if either tree changed during the scan.
-            if remote_fingerprint(remote) != remote_fingerprint(client.manifest(remote_parts)):
+            if remote_fingerprint(remote) != remote_fingerprint(client.manifest(
+                    remote_parts, lambda: context.checkpoint(
+                        progress_message="再次枚举 WebDAV 目录",
+                        checkpoint_data={"schema_version": 1, "phase": "revalidate", "run_id": run_id}))):
                 raise VerificationError("REMOTE_CHANGED")
             if local_fingerprint(local_rows) != local_fingerprint(local_manifest(
                     local, quarantine_root=settings.quarantine_root)):
