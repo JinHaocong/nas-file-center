@@ -88,6 +88,7 @@ def test_source_url_restrictions(url):
     with pytest.raises(ValueError):
         validate_source_url(url)
     assert validate_source_url("http://alist:5244") == "http://alist:5244"
+    assert validate_source_url("http://192.168.1.12:5244") == "http://192.168.1.12:5244"
     assert validate_source_url("https://cloud.example") == "https://cloud.example"
 
 
