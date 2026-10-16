@@ -208,7 +208,8 @@ test('768px recent-scans table has readable filenames and keyboard-native local 
   ]) assert.ok(dash.includes(phrase), 'Missing accessible recent scan region: ' + phrase);
   assert.match(css, /@media \(min-width: 768px\) and \(max-width: 899px\)/);
   assert.match(css, /\.nfc-v2-dashboard \.nfc-v2-recent-scans-table\s*\{\s*min-width:\s*860px/);
-  assert.match(css, /\.nfc-v2-recent-scans-scroll:focus-visible\s*\{\s*outline:\s*2px/);
+  assert.match(css, /\.nfc-v2-shell \.nfc-v2-recent-scans-scroll:focus-visible\s*\{\s*outline:\s*2px solid var\(--v2-indigo\) !important;/);
+  assert.match(css, /\.nfc-v2-recent-scans-scroll:focus-visible\s*\{[^}]*transition:\s*none !important;/);
   for (const phrase of [
     "item.id === 'dashboard' && width === 768",
     'audit.recentScansGeometry = scans', 'scans.scrollContent < scans.scrollClient + 120',
