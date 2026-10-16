@@ -214,6 +214,8 @@ test('768px recent-scans table has readable filenames and keyboard-native local 
     'audit.recentScansGeometry = scans', 'scans.scrollContent < scans.scrollClient + 120',
     'scans.filenameWidth < 145', 'scans.filenameHeight > 72',
     "tab.locator('.nfc-v2-recent-scans-scroll')", "tab.keyboard.press('ArrowRight')",
+    "tab.keyboard.press('Shift+Tab')", "element.matches(':focus-visible')",
+    'audit.recentScansFocus = focus',
     'audit.recentScansKeyboardScrollLeft', 'if (scrollLeft < 3)',
   ]) assert.ok(browser.includes(phrase), 'Missing actual Chromium 768px scan table gate: ' + phrase);
 });
