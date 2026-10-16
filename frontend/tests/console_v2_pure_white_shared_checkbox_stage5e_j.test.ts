@@ -65,6 +65,45 @@ describe('Pure White Stage 5E-J shared native checkbox selection boundary', () =
     assert.doesNotMatch(quarantine, /<input type="checkbox"/);
   });
 
+
+  test('real Chrome audits 64 native Media/Quarantine keyboard checkbox focus cases', () => {
+    const mediaCss = read('src/styles/console-v2-media.css');
+    const quarantineCss = read('src/styles/console-v2-quarantine-ledger.css');
+    const source = read('scripts/browser-workspace-cascade.mjs');
+    const manifest = 'frontend/artifacts/browser-workspace-cascade/checkbox-keyboard-audit.json';
+    assert.match(mediaCss,
+      /\.nfc-v2-shell \.nfc-v2-media-page \.nfc-v2-media-checkbox:focus-visible\s*\{\s*outline:3px solid var\(--nfc-media-accent\) !important;/);
+    assert.match(quarantineCss,
+      /\.nfc-v2-shell \.nfc-v2-quarantine-ledger \.nfc-v2-quarantine-checkbox:focus-visible\s*\{\s*outline:3px solid var\(--nfc-q-ledger-accent\) !important;/);
+    for (const css of [mediaCss, quarantineCss]) assert.match(css,
+      /outline-offset:2px;\s*transition:none !important;/);
+    for (const phrase of [
+      "import { computedContrastRatio } from './computed-contrast.mjs'",
+      'inspectNativeCheckboxKeyboard(page, item, width, theme)',
+      'const eligibleId = media ? 802 : 901',
+      'const blockedIds = media ? [801, 803] : [902, 903]',
+      "page.getByRole('checkbox'",
+      "await page.keyboard.press('Tab')",
+      "await page.keyboard.press('Shift+Tab')",
+      "input.matches(':focus-visible')",
+      "computedContrastRatio(state.outlineColor, state.surfaceBackground)",
+      "state.outlineWidth >= 3 && contrast >= 3",
+      "assert.equal(state.checked, before",
+      "assert.equal(await eligible.isChecked(), before",
+      "assert.equal(state.transitionDuration, '0s'",
+      "checkboxKeyboardAudit.length, WIDTHS.length * THEMES.length * 2",
+      "'checkbox-keyboard-audit.json'",
+    ]) assert.ok(source.includes(phrase), 'Missing real read-only checkbox focus gate: ' + phrase);
+    for (const phrase of [
+      'const WIDTHS = visualViewports', 'const THEMES = visualThemes',
+      "if (request.method() !== 'GET')",
+      'assert.deepEqual(writes, []',
+      'assert.deepEqual(outbound, []',
+      '32/32 cases, 352 screenshots',
+    ]) assert.ok(source.includes(phrase), 'Missing safe workspace visual matrix: ' + phrase);
+    assert.ok(ci.includes(manifest), 'CI must upload measured checkbox focus manifest');
+  });
+
   test('existing Chromium matrix must still test read-only selections, disabled states and no NAS writes', () => {
     for (const needle of [
       "name: '选择可永久删除损坏媒体 #'",
