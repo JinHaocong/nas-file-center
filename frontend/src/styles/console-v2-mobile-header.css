@@ -1,0 +1,44 @@
+/* Final-acceptance screenshot repair: the old two-segment breadcrumb wraps at
+ * 360px (and long route names also wrap at 390px). On mobile the navigation
+ * drawer already exposes the parent "工作台", so show only the current page.
+ * Keep both status badges and the user menu reachable, without shrinking text.
+ */
+@media (max-width: 767px) {
+  .nfc-v2-header .nfc-v2-breadcrumb {
+    min-width: 0;
+    max-width: min(34vw, 120px);
+    flex: 0 1 auto;
+    gap: 0;
+  }
+
+  .nfc-v2-header .nfc-v2-breadcrumb > span,
+  .nfc-v2-header .nfc-v2-breadcrumb > svg {
+    display: none;
+  }
+
+  .nfc-v2-header .nfc-v2-breadcrumb > strong {
+    display: block;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    line-height: 1.45;
+  }
+
+  .nfc-v2-header .nfc-v2-header-left {
+    min-width: 0;
+    flex: 0 1 auto;
+  }
+
+  .nfc-v2-header .nfc-header-command-cluster {
+    min-width: 0;
+    flex: 0 1 auto;
+  }
+}
+
+@media (max-width: 380px) {
+  .nfc-v2-header .nfc-v2-breadcrumb {
+    max-width: 94px;
+  }
+}
