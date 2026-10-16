@@ -289,3 +289,16 @@ def test_libarchive_warn_header_can_continue_to_next_entry(tmp_path, monkeypatch
     assert [r["name"] for r in items] == ["first.txt", "last.txt"]
     assert (out / "first.txt").read_bytes() == b"data"
     assert (out / "last.txt").read_bytes() == b"data"
+
+
+def test_manifest_size_disagreement_cannot_count_as_recovered():
+    from app.archive_recovery.core import _file_outcomes
+    outcomes, missing = _file_outcomes(
+        [('video.mp4', 100)],
+        [{'name': 'video.mp4', 'path': 'video.mp4', 'bytes': 50,
+          'status': 'unverified'}],
+    )
+    assert outcomes[0]['status'] == 'incomplete'
+    assert outcomes[0]['reason'] == 'DECLARED_SIZE_MISMATCH'
+    assert outcomes[0]['declared_bytes'] == 100
+    assert len(missing) == 1
