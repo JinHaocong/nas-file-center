@@ -157,6 +157,7 @@ try {
       reducedMotion: 'reduce',
     });
     const writes = [], outbound = [], pageErrors = [];
+    let loginFixture = false;
     await context.addInitScript(mode => localStorage.setItem('nfc_theme_mode', mode), theme.mode);
     await context.route('**/*', async route => {
       const request = route.request(), url = new URL(request.url());
@@ -168,6 +169,10 @@ try {
           writes.push(request.method() + ' ' + url.pathname);
           await route.fulfill({ status: 405, contentType: 'application/json',
             body: JSON.stringify({ error: 'READ_ONLY_VISUAL_AUDIT' }) });
+        } else if (url.pathname === '/api/auth/me' && loginFixture) {
+          // The login route must remain a real unauthenticated page.
+          await route.fulfill({ status: 401, contentType: 'application/json',
+            body: JSON.stringify({ detail: 'synthetic unauthenticated fixture' }) });
         } else {
           await route.fulfill({ status: 200, contentType: 'application/json',
             body: JSON.stringify(fixture(url.pathname)) });
@@ -183,6 +188,7 @@ try {
       const beforeErrors = pageErrors.length;
       const problems = [];
       try {
+        loginFixture = Boolean(item.public);
         await tab.goto(BASE + item.path, { waitUntil: 'domcontentloaded' });
         if (item.public) await tab.locator('#nfc-login-theme-select').waitFor();
         else await tab.locator('#main-content').waitFor();
