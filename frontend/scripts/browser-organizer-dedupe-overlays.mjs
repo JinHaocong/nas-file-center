@@ -179,6 +179,18 @@ function previewFixture(id, req, ordinal) {
 }
 
 async function assertConfirm(page, effectiveTheme, width, label) {
+  // Radix can report its portal visible before Chromium has updated pointer
+  // hit testing for the newly opened modal. Wait only for that paint boundary,
+  // never for a fixed sleep: a genuinely occluded dialog must still fail CI
+  // after this bounded two-second readiness check.
+  await page.waitForFunction(() => {
+    const dialog = document.querySelector('.nfc-v2-confirm-dialog[data-state="open"]');
+    if (!dialog) return false;
+    const rect = dialog.getBoundingClientRect();
+    const x = Math.max(1, Math.min(innerWidth - 1, rect.left + rect.width / 2));
+    const y = Math.max(1, Math.min(innerHeight - 1, rect.top + Math.min(rect.height / 2, 100)));
+    return Boolean(document.elementFromPoint(x, y)?.closest('.nfc-v2-confirm-dialog'));
+  }, undefined, { polling: 'raf', timeout: 2000 });
   const problems = await page.evaluate(({ effectiveTheme, width }) => {
     const dialog = document.querySelector('.nfc-v2-confirm-dialog[data-state="open"]');
     const mask = document.querySelector('.nfc-v2-confirm-overlay[data-state="open"]');
