@@ -231,7 +231,7 @@ export const DownloadVerificationPage: React.FC = () => {
                 onChange={e => setDraft(d => ({ ...d, password: e.target.value }))} />
             </label>
           </div>
-          <p className="nfc-dv-muted">密码只保存在 NAS File Center 的受保护配置文件中，不会回传到网页或写入任务记录。HTTP 仅支持 Docker 内网服务名。</p>
+          <p className="nfc-dv-muted">密码只保存在 NAS File Center 的受保护配置文件中，不会回传到网页或写入任务记录。HTTP 仅支持 Docker 服务名或私有局域网 IP，外网请使用 HTTPS。</p>
           <div className="nfc-dv-actions">
             <ConsoleButton type="submit" variant="primary" loading={saveSource.isPending}>保存来源</ConsoleButton>
             {editingId !== null && <ConsoleButton variant="danger" disabled={disableSource.isPending}
