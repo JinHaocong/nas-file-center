@@ -70,15 +70,23 @@ describe('v0.4.1 premium visual pass contract', () => {
 
   test('native theme provider delegates UI chrome to light/dark CSS tokens', () => {
     const source = read('src/contexts/ThemeContext.tsx');
+    const media = read('src/utils/themeMode.ts');
     const css = read('src/index.css');
     const native = read('src/styles/console-v2.css');
     for (const token of [
       'ThemeContext.Provider', "localStorage.getItem('nfc_theme_mode')",
       "localStorage.setItem('nfc_theme_mode', newMode)",
-      "'(prefers-color-scheme: dark)'", "addEventListener('change'",
-      "removeEventListener('change'", "setAttribute('data-theme'",
+      "'(prefers-color-scheme: dark)'",
+      'watchSystemDarkPreference(systemColorSchemeQuery, setSystemDark)',
+      "setAttribute('data-theme'",
       'document.documentElement.style.colorScheme',
     ]) assert.ok(source.includes(token), token);
+    for (const token of [
+      "media.addEventListener('change', handleChange)",
+      "media.removeEventListener('change', handleChange)",
+      'media.addListener(handleChange)',
+      'media.removeListener(handleChange)',
+    ]) assert.ok(media.includes(token), token);
     for (const token of [':root {', "[data-theme='dark']", '--nfc-accent:',
       '--nfc-surface-1:', '--nfc-text:']) assert.ok(css.includes(token), token);
     assert.ok(native.includes('.nfc-console-button'));
