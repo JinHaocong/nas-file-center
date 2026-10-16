@@ -1,6 +1,6 @@
 import React from 'react';
 import { ConsoleIcon } from './ConsoleIcon';
-import { copyExactText } from '../../utils/clipboard';
+import { copyExactText, readClipboardWriter } from '../../utils/clipboard';
 
 interface CodePathProps {
   value?: string | null;
@@ -39,7 +39,7 @@ export const CodePath: React.FC<CodePathProps> = ({ value, muted = false }) => {
 
   const copyPath = async () => {
     const copied = await copyExactText(value, {
-      writer: navigator.clipboard,
+      writer: readClipboardWriter(() => navigator.clipboard),
       fallback: copyUsingSelection,
     });
     setResult({ value, state: copied });
