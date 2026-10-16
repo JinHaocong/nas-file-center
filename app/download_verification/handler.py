@@ -44,6 +44,18 @@ class DownloadVerificationHandler(TaskHandler):
             remote_root, local_root = run.remote_root, run.local_root
         remote_parts = relative_parts(remote_root)
         local = qualified_local_root(local_root, settings)
+        # A paused/recovered task replays the entire run. JobContext progress is
+        # monotone, so clear the old progress under the current Worker lease.
+        with context.SessionLocal() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            from app.tasks.recovery import assert_active_worker_lease
+            if context.worker_id is not None:
+                assert_active_worker_lease(session, context.worker_id)
+            current = session.get(WorkJob, job.id)
+            current.progress_current = 0
+            current.progress_total = 0
+            current.progress_message = "重新开始完整校验"
+            session.commit()
 
         def commit_row(row: dict, *, remote_sha=None, local_sha=None, status=None):
             # No payload content or credentials are ever persisted.
