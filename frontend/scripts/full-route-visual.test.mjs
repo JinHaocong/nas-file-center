@@ -16,9 +16,9 @@ test('all declared React routes, including every parameterized detail page, have
   const covered = [...cases.matchAll(/path: '\/([^']+)'/g)]
     .map(x => x[1]).sort();
   const expected = covered.map(x => x.replace(/\/1(?=\/|$)/g, '/:id')).sort();
-  assert.equal(declared.length, 24);
+  assert.equal(declared.length, 25);
   assert.deepEqual(expected, declared);
-  assert.equal(new Set(covered).size, 24);
+  assert.equal(new Set(covered).size, 25);
 });
 
 test('8x4 safe Chrome visual suite has protected exact-head screenshot upload jobs', () => {
@@ -72,6 +72,23 @@ test('download verification actual 390px form/table defect has owned responsive 
   assert.ok(browser.includes("path === '/api/plans/legacy/summary'"));
 });
 
+
+test('download source settings and modal browser remain covered by real route audit', () => {
+  const settings = readFileSync('src/pages/DownloadVerification/SourcesPage.tsx', 'utf8');
+  const verify = readFileSync('src/pages/DownloadVerification/index.tsx', 'utf8');
+  const picker = readFileSync('src/pages/DownloadVerification/RemoteDirectoryPicker.tsx', 'utf8');
+  assert.ok(browser.includes("path: '/download-sources', id: 'download-sources'"));
+  assert.ok(settings.includes('ConsoleConfirmDialog'));
+  assert.ok(verify.includes('RemoteDirectoryPicker'));
+  assert.ok(verify.includes('ConsoleConfirmDialog'));
+  assert.ok(verify.includes('removeReport'));
+  assert.ok(verify.includes('aria-label="校验明细"'));
+  assert.ok(picker.includes('nfc-v2-directory-dialog'));
+  assert.ok(picker.includes('Dialog.Content'));
+  assert.ok(picker.includes('!browse.isFetching'));
+  assert.ok(browser.includes("name + '-remote-picker.png'"));
+  assert.ok(browser.includes("name + '-source-editor.png'"));
+});
 
 test('real 360px visual regression keeps mobile route title on one line without hiding status badges', () => {
   const css = readFileSync('src/styles/console-v2-mobile-header.css', 'utf8');

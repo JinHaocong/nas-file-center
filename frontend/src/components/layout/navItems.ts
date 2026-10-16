@@ -24,6 +24,7 @@ export const consoleNavGroups: ConsoleNavGroup[] = [
     { path: '/path-match', label: '路径匹配', icon: 'folder-open' },
     { path: '/directory-diff', label: '双目录差异', icon: 'git-compare' },
     { path: '/download-verification', label: '下载完整性校验', icon: 'file-check' },
+    { path: '/download-sources', label: '下载校验来源', icon: 'database' },
     { path: '/rename', label: '批量重命名', icon: 'pencil' },
     { path: '/batch', label: '批量处理', icon: 'folders' },
     { path: '/archive-recovery', label: '压缩包恢复', icon: 'archive' },
