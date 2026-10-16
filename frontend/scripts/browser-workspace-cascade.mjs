@@ -330,15 +330,29 @@ async function inspectNativeCheckboxKeyboard(page, item, width, theme) {
     // ancestor. Never pass rgba(...,0) as if it were a solid WCAG background.
     const pageRoot = input.closest(kind === 'media'
       ? '.nfc-v2-media-page' : '.nfc-v2-quarantine-ledger');
+    // CSS color-mix() can compute to color(srgb r g b / alpha),
+    // whereas older declarations compute to rgb()/rgba(). Both are sRGB;
+    // fail closed on unknown spaces or out-of-gamut/invalid channels.
+    const parsePaintedColor = color => {
+      const rgb = /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*(\d*\.?\d+))?\s*\)$/.exec(color);
+      const srgb = /^color\(srgb\s+(\d*\.?\d+)\s+(\d*\.?\d+)\s+(\d*\.?\d+)(?:\s*\/\s*(\d*\.?\d+))?\s*\)$/.exec(color);
+      if (!rgb && !srgb) throw new Error('Unresolvable computed painted surface: ' + color);
+      const match = rgb ?? srgb;
+      const channels = match.slice(1, 4).map(Number);
+      const alpha = match[4] === undefined ? 1 : Number(match[4]);
+      if (srgb) for (let i = 0; i < channels.length; i++) channels[i] *= 255;
+      if (![...channels, alpha].every(Number.isFinite) ||
+          channels.some(channel => channel < 0 || channel > 255) ||
+          alpha < 0 || alpha > 1)
+        throw new Error('Out-of-range computed painted surface: ' + color);
+      return { rgb: channels, alpha };
+    };
     const layers = [];
     for (let node = input.parentElement; node; node = node.parentElement) {
       const color = getComputedStyle(node).backgroundColor;
-      const match = /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*([01](?:\.\d+)?))?\s*\)$/.exec(color);
-      if (!match) throw new Error('Unresolvable computed painted surface: ' + color);
-      const alpha = match[4] === undefined ? 1 : Number(match[4]);
+      const { rgb, alpha } = parsePaintedColor(color);
       if (alpha > 0) layers.push({
-        rgb: match.slice(1, 4).map(Number), alpha,
-        node: node.tagName.toLowerCase(),
+        rgb, alpha, node: node.tagName.toLowerCase(),
       });
       if (alpha === 1) break;
     }
