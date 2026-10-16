@@ -130,6 +130,22 @@ def _read_state_json(state_path: Path) -> dict | None:
     return payload if isinstance(payload, dict) else None
 
 
+def _matches_committed_move(item: BatchPlanItem, state: dict) -> bool:
+    """Prove completion belongs to this transaction, not a reused plan ID."""
+    transaction_id = state.get("transaction_id")
+    if not transaction_id or state.get("phase") != "transplanted":
+        return False
+    try:
+        metadata = json.loads(item.metadata_json or "{}")
+    except (TypeError, ValueError):
+        return False
+    execution = metadata.get("execution") if isinstance(metadata, dict) else None
+    return (
+        isinstance(execution, dict)
+        and execution.get("directory_move_transaction_id") == transaction_id
+    )
+
+
 def _cleanup_utility_move_tx(
     quarantine_root: Path,
     session_factory: sessionmaker,
@@ -187,6 +203,7 @@ def _cleanup_utility_move_tx(
             if not isinstance(source, str) or not isinstance(target, str):
                 continue
 
+            committed = False
             with session_factory() as session:
                 assert_active_worker_lease(session, worker_id)
                 if _has_active_execution_job(session, plan_id):
@@ -207,13 +224,13 @@ def _cleanup_utility_move_tx(
                         or item.target_path != target
                     ):
                         continue
+                    committed = _matches_committed_move(item, state)
 
-            # A missing DB plan is not enough authority to delete recovery
-            # metadata. Always require the transaction state plus current
-            # filesystem identity to prove the MOVE reached its completed
-            # namespace state.
+            # An exact committed transaction no longer needs recovery metadata,
+            # even if its target was later moved or purged. Legacy/orphan states
+            # still need live filesystem proof; a missing plan alone is unsafe.
             try:
-                completed = directory_transplant_reconciles_completed(
+                completed = committed or directory_transplant_reconciles_completed(
                     quarantine_root,
                     plan_id,
                     sequence,
@@ -258,6 +275,7 @@ def cleanup_terminal_transaction_residue(
     - .tx: only directory-only trees whose DB owner is missing or terminal.
     - .utility-move-tx: only exact NFC state.json leaves with no unknown siblings;
       active plans are never touched, and live plans require a completed MOVE.
+      Matching committed transaction IDs permit retirement after target removal.
     - unknown files, symlinks, malformed metadata and active transactions remain.
     """
     if settings is not None:

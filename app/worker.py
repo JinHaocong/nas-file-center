@@ -577,6 +577,10 @@ def worker_loop(
                 )
                 if success is False:
                     acquired = False
+                else:
+                    # Retire completed metadata while the lease is still ours;
+                    # later purge/move jobs may already have removed its target.
+                    _cleanup_transaction_residue_after_recovery(settings, SessionLocal, worker_id)
             except JobLeaseLost:
                 acquired = False
             except Exception:
