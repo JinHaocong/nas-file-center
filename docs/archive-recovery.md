@@ -125,3 +125,16 @@ in the final report. The synthetic test is not proof that any particular
 six files in an operator's damaged archive are actually corrupt or recoverable.
 Real-NAS acceptance must compare the exported per-file report against an
 independent extraction of a **copy** of the same archive.
+
+
+If a Worker fails during extraction (for example `RESOURCE_LIMIT` after a cumulative
+4 GiB of emitted bytes), it now attempts one **read-only, bounded metadata
+reconciliation** before saving the failed-job report, provided the source's
+regular-file type, device, inode, size and modification time are unchanged.
+This does not restart recovery or override the budget; it only reports the
+filenames still missing from a verified 7z header or readable ZIP directory.
+A report for a file with mismatched decoded-vs-declared size shows
+`DECLARED_SIZE_MISMATCH` and must not count as a successfully recovered
+original. When metadata cannot be trusted, the report explicitly remains
+incomplete. Raising the 4 GiB limit requires a separately reviewed resource
+policy change; it has **not** been silently removed in this hotfix.
