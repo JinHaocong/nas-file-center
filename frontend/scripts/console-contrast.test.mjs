@@ -10,6 +10,7 @@ const shell = readFileSync('src/styles/console-v2.css', 'utf8');
 const overlays = readFileSync('src/styles/console-v2-task-overlays.css', 'utf8');
 const canonical = readFileSync('src/styles/tokens.css', 'utf8');
 const primitiveStyles = readFileSync('src/styles/primitives.css', 'utf8');
+const v049Styles = readFileSync('src/styles/v049-workspace.css', 'utf8');
 
 function rule(css, selector) {
   const index = css.indexOf(selector);
