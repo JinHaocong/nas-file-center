@@ -33,8 +33,19 @@ jobs:
       QUARANTINE_ROOT: /tmp/nfc-data/.nas-file-center-trash
 
     steps:
-      - name: Checkout
+      - name: Checkout exact candidate HEAD
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify candidate identity
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${EXPECTED_SHA}"
+          git diff --check
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -55,8 +66,19 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - name: Checkout
+      - name: Checkout exact candidate HEAD
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify candidate identity
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${EXPECTED_SHA}"
+          git diff --check
 
       - name: Set up Node.js 22
         uses: actions/setup-node@v4
