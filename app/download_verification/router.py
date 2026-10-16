@@ -61,6 +61,7 @@ def start_verification(request: Request, payload: NewVerification):
     except (ValueError, OSError) as exc:
         raise HTTPException(422, "INVALID_VERIFICATION_ROOT") from exc
     with request.app.state.service.SessionLocal() as session:
+        session.execute(text("BEGIN IMMEDIATE"))
         source = None
         if payload.source_id is not None:
             source = session.get(DownloadVerificationSource, payload.source_id)
@@ -73,7 +74,6 @@ def start_verification(request: Request, payload: NewVerification):
             raise HTTPException(503, "SOURCE_REQUIRED")
         # Legacy pre-source clients retain the exact strict SHA256 behavior.
         mode = payload.mode if source is not None else "strict_sha256"
-        session.execute(text("BEGIN IMMEDIATE"))
         job = WorkJob(kind="download-verify-webdav", status="queued", state_json="{}")
         session.add(job)
         session.flush()
