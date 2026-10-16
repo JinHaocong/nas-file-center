@@ -75,3 +75,11 @@ The existing 8-width × 4-theme mock CI now also performs the real computed brea
 Actual PR #268/#272 screenshots reveal a large 768/1024px blank strip between Dashboard description and `刷新数据`, absent at 360 and 1280/1440px. CSS cascade analysis pinpoints historical `v056-right-workspace-v2.css` assigning `flex: 1 1 620px` to the `PageHeader` copy under 1199px. The Dashboard's header uses **column flex-direction**, so 620px becomes vertical height instead of desktop text-column width.
 
 The Dashboard-owned stylesheet now restores its 768–1199px copy to content-sized `flex: 0 1 auto`, leaving other pages' layouts intact. The 8-width / 4-theme real Mock Chromium audit records computed flex-basis, flex-growth, hero height, action gap and metrics gap in the per-route manifest. At 768px and 1024px, oversized gaps, missing actions or collapsed metrics fail the CI job. Actual post-fix PNG review is required before issue closure. No NAS, backend or production action; owner sign-off and six high-level acceptance gates remain open (**68/74**).
+
+## Tablet 768px Recent Scans filename readability (Issue #274)
+
+Real Chromium light and dark Dashboard PNGs from PR #273 revealed a 768px six-column `最近扫描` table compressed until the synthetic filename wrapped one glyph per line, despite no page-level horizontal overflow. The underlying file names and navigation are intact; this is a table sizing fault.
+
+Only the Dashboard **Recent Scans** table gets `min-width: 860px` at **768–899px**, enclosed by its existing `overflow-x: auto` region. Other tables and mobile cards are unchanged. The region has an accessible label, `tabIndex={0}`, and a visible `:focus-visible` outline. The actual 768px × 4-theme Chromium audit checks table and filename geometry, locally bounded scroll width and overflow, and **actually presses ArrowRight on the focused scroller** after the baseline screenshot. This does not access the real NAS or mutate backend resources.
+
+This fix is **not** the final manual visual or WCAG/AT review. Formal final acceptance remains **68/74**, with six gates pending.
