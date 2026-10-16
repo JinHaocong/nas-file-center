@@ -129,6 +129,12 @@ jobs:
           fc-cache -f
           fc-match -f '%{family}\n' ':lang=zh-cn' | grep -E 'Noto (Sans|Serif) CJK'
 
+      # Verify theme switching, cross-tab state and blocked browser APIs in the
+      # actual unauthenticated React page. All API calls are synthetic/read-only.
+      - name: Run read-only Chromium ThemeProvider resilience matrix
+        working-directory: frontend
+        run: node scripts/browser-theme-resilience.mjs
+
       # New task-tracking regression runs first, so async fixture failures fail fast.
       - name: Run read-only Chromium Archive Recovery WorkJob continuity matrix
         working-directory: frontend
@@ -190,6 +196,7 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
           path: |
+            frontend/artifacts/browser-theme-resilience/*.png
             frontend/artifacts/browser-overlay/*.png
             frontend/artifacts/browser-task-overlay/*.png
             frontend/artifacts/browser-quarantine-plan/*.png
