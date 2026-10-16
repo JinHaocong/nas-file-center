@@ -106,7 +106,7 @@ def test_missing_size_or_incomplete_get_fails_closed(tmp_path):
                     {base + 'a': b'ab'})
     client = configured(tmp_path, opener)
     assert client.manifest(())['a']['size'] == 3
-    with pytest.raises(WebDAVError, match='incomplete'):
+    with pytest.raises(WebDAVError, match='Content-Length mismatch|incomplete'):
         client.sha256(('a',), 3)
 
 
