@@ -31,7 +31,10 @@ function job(workflow, name) {
 function requireExactCandidate(source, label) {
   assert.ok(source.includes(candidateRef), label + ' must checkout exact candidate ref');
   assert.ok(source.includes(expectedSha), label + ' must set expected candidate SHA');
-  assert.ok(source.includes(compareSha), label + ' must prove actual checkout SHA equals PR HEAD');
+  const verifiesHead = source.includes(compareSha) ||
+    (source.includes('CANDIDATE_SHA="$(git rev-parse HEAD)"') &&
+      source.includes('test "${CANDIDATE_SHA}" = "${EXPECTED_SHA}"'));
+  assert.ok(verifiesHead, label + ' must prove actual checkout SHA equals PR HEAD');
   assert.doesNotMatch(source, /continue-on-error:\s*true/, label + ' must not bypass failure');
 }
 
