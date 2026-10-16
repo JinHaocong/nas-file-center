@@ -11,7 +11,7 @@ from app.models import Base, utcnow
 class DownloadVerificationRun(Base):
     __tablename__ = "download_verification_runs"
     id: Mapped[int] = mapped_column(primary_key=True)
-    work_job_id: Mapped[int] = mapped_column(ForeignKey("work_jobs.id", ondelete="SET NULL"), index=True)
+    work_job_id: Mapped[int | None] = mapped_column(ForeignKey("work_jobs.id", ondelete="SET NULL"), index=True, nullable=True)
     remote_root: Mapped[str] = mapped_column(Text)
     local_root: Mapped[str] = mapped_column(Text)
     result: Mapped[str] = mapped_column(String(40), default="INCOMPLETE")

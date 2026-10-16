@@ -212,6 +212,8 @@ def init_db(
             "schedules",
             "schedule_runs",
             "scheduler_state",
+            "download_verification_runs",
+            "download_verification_items",
         }
 
         # Check existing columns in work_jobs

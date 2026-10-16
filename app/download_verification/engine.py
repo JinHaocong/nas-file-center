@@ -26,7 +26,7 @@ def qualified_local_root(raw: str, settings) -> Path:
     return root
 
 
-def local_manifest(root: Path, checkpoint: Callable[[], None] = lambda: None) -> dict[str, dict]:
+def local_manifest(root: Path, checkpoint: Callable[[], None] = lambda: None,\n                   quarantine_root: Path | None = None) -> dict[str, dict]:
     output: dict[str, dict] = {}
     root_fd = _open_directory_absolute(root)
     try:
@@ -38,7 +38,7 @@ def local_manifest(root: Path, checkpoint: Callable[[], None] = lambda: None) ->
                 with os.scandir(fd) as entries:
                     for entry in entries:
                         path_parts = parts + (entry.name,)
-                        name = "/".join(path_parts)
+                        name = "/".join(path_parts)\n                        if quarantine_root and (root.joinpath(*path_parts) == quarantine_root or\n                                root.joinpath(*path_parts).is_relative_to(quarantine_root)):\n                            raise VerificationError("RESERVED_LOCAL_OBJECT")
                         info = entry.stat(follow_symlinks=False)
                         if stat.S_ISREG(info.st_mode):
                             kind, size = "file", int(info.st_size)

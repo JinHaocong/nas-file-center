@@ -28,7 +28,7 @@ class NewVerification(BaseModel):
 def _summary(run: DownloadVerificationRun, job: WorkJob | None) -> dict:
     status = job.status if job else "unknown"
     # Never surface an identical verdict while the WorkJob is unfinished.
-    result = run.result if status == "completed" or run.result in ("DIFFERENT", "STALE") else "INCOMPLETE"
+    result = run.result if run.finished_at and (status == "completed" or job is None) else "INCOMPLETE"
     return {
         "id": run.id, "work_job_id": run.work_job_id, "remote_root": run.remote_root,
         "local_root": run.local_root, "result": result, "job_status": status,
