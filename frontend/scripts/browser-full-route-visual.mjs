@@ -1,6 +1,6 @@
 /**
  * Final acceptance: actual React app on EVERY declared route, not a component mock.
- * 8 CI jobs × 4 effective theme modes × 24 routes = 768 real Chromium visits.
+ * 8 CI jobs × 4 effective theme modes × 25 routes = 800 real Chromium visits.
  * GET APIs are 100% synthetic; any outbound or mutating request fails closed.
  * Captures screenshot, route, page heading, render/runtime errors and viewport overflow.
  * Screenshot collection is evidence to REVIEW; it does not automatically approve UI.
@@ -26,6 +26,7 @@ const routes = Object.freeze([
   { path: '/path-match', id: 'path-match' },
   { path: '/directory-diff', id: 'directory-diff' },
   { path: '/download-verification', id: 'download-verification' },
+  { path: '/download-sources', id: 'download-sources' },
   { path: '/filename-audit', id: 'filename-audit' },
   { path: '/rename', id: 'rename' },
   { path: '/batch', id: 'batch' },
@@ -49,7 +50,7 @@ const tested = routes.map(r => r.template || r.path.slice(1));
 assert.equal(new Set(tested).size, tested.length, 'Duplicate visual route case');
 assert.deepEqual([...tested].sort(), [...declared].sort(),
   'Visual matrix must include every router path, including dynamic details');
-assert.equal(routes.length, 24);
+assert.equal(routes.length, 25);
 
 const width = Number(process.env.NFC_VISUAL_WIDTH);
 assert.ok(visualViewports.includes(width), 'Set NFC_VISUAL_WIDTH to one of the eight required widths');
@@ -150,6 +151,13 @@ function fixture(path) {
   if (path === '/api/workflows/1') return fixtureWorkflow;
   if (path === '/api/workflows/1/revisions') return [];
   if (path === '/api/workflows') return [fixtureWorkflow];
+  if (path === '/api/download-verifications/sources/1/browse') return {
+    path: '', items: [{ name: 'PikPak', kind: 'directory', size: null }],
+  };
+  if (path === '/api/download-verifications/sources') return { items: [
+    { id: 1, name: 'AList', provider: 'alist', base_url: 'http://alist:5244',
+      username: '', has_password: false, revision: 1, active: true },
+  ] };
   if (path === '/api/download-verifications/configuration') return {
     configured: false, endpoint: '', mode: 'strict', read_only: true,
   };
@@ -386,6 +394,15 @@ try {
             'Skip-to-main activation did not move keyboard focus to main landmark');
         }
         if (item.id === 'download-verification') {
+          // Exercise the real Radix remote chooser against strictly read-only AList fixtures.
+          const pickerAction = tab.getByRole('button', { name: '选择目录' }).first();
+          await pickerAction.click();
+          const remotePicker = tab.getByRole('dialog', { name: '选择来源目录' });
+          await remotePicker.waitFor();
+          await remotePicker.getByRole('button', { name: /PikPak/ }).waitFor();
+          await tab.screenshot({ path: resolve(OUT, name + '-remote-picker.png'), animations: 'disabled' });
+          await remotePicker.getByRole('button', { name: '选择此目录' }).click();
+          await remotePicker.waitFor({ state: 'hidden' });
           // Capture the interactive detailed evidence table, not only the landing state.
           const action = tab.getByRole('button', { name: '查看条目' }).first();
           await action.click();
@@ -397,6 +414,13 @@ try {
           });
           if (pageErrors.length > beforeErrors) problems.push(
             'Uncaught detail-panel React errors: ' + pageErrors.slice(beforeErrors).join('; '));
+        }
+        if (item.id === 'download-sources') {
+          // Source editor is a separate route; no POST requests are issued by this fixture.
+          await tab.getByRole('button', { name: '新增来源' }).click();
+          await tab.getByRole('textbox', { name: '来源名称' }).waitFor();
+          await tab.screenshot({ path: resolve(OUT, name + '-source-editor.png'), animations: 'disabled' });
+          await tab.getByRole('button', { name: '取消' }).click();
         }
         report.push({ route: item.path, width, theme: themeLabel, ...audit, problems });
         if (problems.length) failures.push({ route: item.path, theme: themeLabel, problems });
@@ -421,7 +445,7 @@ try {
     ', themes=' + visualThemes.length + ', captures=' + report.length +
     ', failures=' + failures.length + '; screenshot manifest saved.');
   assert.deepEqual(failures, [], 'All-route mock visual audit detected failures; see manifest.json');
-  assert.equal(report.length, 24 * 4);
+  assert.equal(report.length, routes.length * visualThemes.length);
 } finally {
   await browser?.close();
   server.kill('SIGTERM');

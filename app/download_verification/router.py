@@ -5,10 +5,11 @@ import json
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import func, select, text
+from sqlalchemy import delete, func, select, text
 
 from app.auth.dependencies import require_admin_user
 from app.models import WorkJob
+from app.tasks.state_machine import TERMINAL_STATES
 from app.download_verification.engine import qualified_local_root
 from app.download_verification.webdav import relative_parts, WebDAVError
 from app.download_verification.models import DownloadVerificationRun, DownloadVerificationItem, DownloadVerificationSource
@@ -133,3 +134,24 @@ def list_verification_items(request: Request, run_id: int, page: int = 1,
                 "reason_code": row.reason_code,
             } for row in rows],
         }
+
+
+@router.delete("/{run_id}", status_code=204)
+def delete_verification_report(request: Request, run_id: int):
+    """Remove one completed report and its rows, not the NAS data or WorkJob audit trail.
+
+    BEGIN IMMEDIATE serializes this check against the Worker finalization lease.
+    Paused, queued and running jobs retain their reports for safe resume.
+    """
+    with request.app.state.service.SessionLocal() as session:
+        session.execute(text("BEGIN IMMEDIATE"))
+        run = session.get(DownloadVerificationRun, run_id)
+        if run is None:
+            raise HTTPException(404, "VERIFICATION_NOT_FOUND")
+        job = session.get(WorkJob, run.work_job_id) if run.work_job_id is not None else None
+        if job is not None and job.status not in TERMINAL_STATES:
+            raise HTTPException(409, "VERIFICATION_JOB_NOT_TERMINAL")
+        session.execute(delete(DownloadVerificationItem).where(
+            DownloadVerificationItem.run_id == run_id))
+        session.delete(run)
+        session.commit()
