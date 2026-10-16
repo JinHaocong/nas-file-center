@@ -398,6 +398,17 @@
   background: transparent;
   box-shadow: none;
 }
+/* At <=1199px historical v056 gives all title copies flex: 1 1 620px.
+ * Dashboard's column header turns this into 620px of vertical blank space.
+ * Scope the fix to its own content at the tablet widths shown by real PNGs.
+ */
+@media (min-width: 768px) and (max-width: 1199px) {
+  .nfc-v2-shell .nfc-v2-dashboard-hero .nfc-page-header-copy {
+    flex: 0 1 auto;
+    max-width: 100%;
+  }
+}
+
 [data-theme='dark'] .nfc-v2-dashboard-hero { background: transparent; border-color: transparent; }
 .nfc-v2-hero-copy { position: relative; z-index: 2; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; }
 .nfc-v2-hero-eyebrow { display: flex; align-items: center; gap: 8px; color: var(--v2-subtle); font-size: 10px; font-weight: 700; letter-spacing: .1em; }

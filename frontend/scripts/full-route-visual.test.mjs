@@ -184,3 +184,17 @@ test('tablet 768px keeps first-party header identity single-line and safety cont
     "h.parentCrumbDisplay !== 'none'",
   ]) assert.ok(browser.includes(phrase), 'Missing 768px real Chromium geometry: ' + phrase);
 });
+
+test('tablet Dashboard column header cancels the inherited historical 620px flex-basis', () => {
+  const css = readFileSync('src/styles/console-v2.css', 'utf8');
+  const legacy = readFileSync('src/styles/v056-right-workspace-v2.css', 'utf8');
+  assert.match(legacy, /\.nfc-app-main \.nfc-page-header-copy\s*\{\s*flex:\s*1 1 620px/);
+  assert.match(css, /@media \(min-width: 768px\) and \(max-width: 1199px\)/);
+  assert.match(css, /\.nfc-v2-shell \.nfc-v2-dashboard-hero \.nfc-page-header-copy\s*\{\s*flex:\s*0 1 auto/);
+  for (const phrase of [
+    "if (item.id === 'dashboard')", 'const style = getComputedStyle(copy)',
+    'audit.dashboardGeometry = geom', 'width >= 768 && width <= 1024',
+    "geom.copyFlexBasis !== 'auto'", "geom.copyFlexGrow !== '0'",
+    'geom.heroHeight > 300', 'geom.actionGap > 96', 'geom.metricGap > 90',
+  ]) assert.ok(browser.includes(phrase), 'Missing actual Chromium Dashboard geometry regression: ' + phrase);
+});
