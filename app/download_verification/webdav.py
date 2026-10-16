@@ -130,14 +130,12 @@ class WebDAVClient:
             if not href:
                 raise WebDAVError("Missing WebDAV href")
             child = self._href_parts(href)
-            if child == parts:
-                if seen_self:
-                    raise WebDAVError("Duplicate directory self entry")
-                seen_self = True
-                continue
-            if len(child) != len(parts) + 1 or child[:len(parts)] != parts:
+            is_self = child == parts
+            if is_self and seen_self:
+                raise WebDAVError("Duplicate directory self entry")
+            if not is_self and (len(child) != len(parts) + 1 or child[:len(parts)] != parts):
                 raise WebDAVError("WebDAV Depth:1 returned an out-of-scope entry")
-            if child in out:
+            if not is_self and child in out:
                 raise WebDAVError("Duplicate WebDAV path")
             prop = None
             for ps in entry.findall(_DAV + "propstat"):
@@ -153,9 +151,14 @@ class WebDAVClient:
             if resource is None:
                 raise WebDAVError("WebDAV resource type missing")
             is_dir = resource.find(_DAV + "collection") is not None
-            # Any other resource type must be rejected, not silently skipped.
-            if len(resource) and not is_dir:
+            # No unknown DAV type may be silently interpreted as an ordinary directory.
+            if any(child_type.tag != _DAV + "collection" for child_type in resource):
                 raise WebDAVError("Unsupported WebDAV object")
+            if is_self:
+                if not is_dir:
+                    raise WebDAVError("WebDAV collection self entry is not a directory")
+                seen_self = True
+                continue
             size = None
             if not is_dir:
                 value = prop.findtext(_DAV + "getcontentlength")

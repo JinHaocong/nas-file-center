@@ -100,6 +100,14 @@ def test_duplicate_entry_or_failed_propstat_is_not_complete(tmp_path):
         configured(tmp_path, Opener({base: xml}, {})).manifest(())
 
 
+def test_denied_self_propstat_cannot_be_skipped(tmp_path):
+    base = 'https://dav.example/dav/'
+    xml = response_xml([('/dav/', 'directory', None), ('/dav/file', 'file', 3)])
+    xml = xml.replace(b'HTTP/1.1 200 OK', b'HTTP/1.1 403 Forbidden', 1)
+    with pytest.raises(WebDAVError, match='property access failed'):
+        configured(tmp_path, Opener({base: xml}, {})).manifest(())
+
+
 def test_missing_size_or_incomplete_get_fails_closed(tmp_path):
     base = 'https://dav.example/dav/'
     opener = Opener({base: response_xml([('/dav/', 'directory', None), ('/dav/a', 'file', 3)])},
