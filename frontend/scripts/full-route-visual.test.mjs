@@ -220,3 +220,29 @@ test('768px recent-scans table has readable filenames and keyboard-native local 
     'audit.recentScansKeyboardScrollLeft', 'if (scrollLeft < 3)',
   ]) assert.ok(browser.includes(phrase), 'Missing actual Chromium 768px scan table gate: ' + phrase);
 });
+
+test('shared native filter selects have real keyboard labels and opaque computed WCAG focus rings', () => {
+  const css = readFileSync('src/styles/console-v2-tasks.css', 'utf8');
+  const select = readFileSync('src/components/ui/ConsoleSelect.tsx', 'utf8');
+  const tasks = readFileSync('src/pages/Tasks/index.tsx', 'utf8');
+  const quarantine = readFileSync('src/pages/Quarantine/index.tsx', 'utf8');
+  assert.match(css, /\.nfc-v2-shell \.nfc-console-select:focus-visible\s*\{[^}]*outline:\s*3px solid var\(--v2-indigo\)/s);
+  assert.doesNotMatch(css, /\.nfc-console-select:focus-visible\s*\{[^}]*color-mix\(/s,
+    'Focus ring must not reuse a 24%-opaque mixed color');
+  for (const phrase of ['aria-label={label}', 'htmlFor={id}', '<select', 'onChange={event => {']) {
+    assert.ok(select.includes(phrase), 'Missing native select semantics: ' + phrase);
+  }
+  for (const id of ['nfc-task-status-filter', 'nfc-task-type-filter'])
+    assert.ok(tasks.includes('id="' + id + '"'), 'Missing task native filter ' + id);
+  assert.ok(quarantine.includes('id="quarantine-state-filter"'));
+  for (const phrase of [
+    "item.id === 'tasks' || item.id === 'quarantine'",
+    "tab.locator(selector)", "await tab.keyboard.press('Tab')",
+    "await tab.keyboard.press('Shift+Tab')", "element.matches(':focus-visible')",
+    "audit.nativeSelectFocus.push", "data.outlineWidth < 2",
+    "computedContrastRatio(data.outlineColor, data.background)",
+    "computedContrastRatio(data.color, data.background)",
+    "focusContrast < 3 || textContrast < 4.5",
+    "data.accessibleName !== accessibleName", "data.hasAssociatedLabel",
+  ]) assert.ok(browser.includes(phrase), 'Missing real Chrome select focus check: ' + phrase);
+});

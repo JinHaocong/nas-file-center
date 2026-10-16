@@ -83,3 +83,11 @@ Real Chromium light and dark Dashboard PNGs from PR #273 revealed a 768px six-co
 Only the Dashboard **Recent Scans** table gets `min-width: 860px` at **768–899px**, enclosed by its existing `overflow-x: auto` region. Other tables and mobile cards are unchanged. The region has an accessible label, `tabIndex={0}`, and a visible `:focus-visible` outline. The actual 768px × 4-theme Chromium audit checks table and filename geometry, locally bounded scroll width and overflow, and **actually presses ArrowRight on the focused scroller** after the baseline screenshot. This does not access the real NAS or mutate backend resources.
 
 This fix is **not** the final manual visual or WCAG/AT review. Formal final acceptance remains **68/74**, with six gates pending.
+
+## Shared native filter select keyboard/focus contrast follow-up
+
+A targeted remaining shared-primitives review found that `ConsoleSelect`'s CSS keyboard ring used a **24%-opaque** `color-mix(..., transparent)` while its text, background and border were already tokenized. The shared native select now uses an **opaque 3px Pure White theme-accent outline**, with a 2px offset and no animated transition during focus. This applies to existing Tasks status/type and Quarantine state filters, not the entire form system.
+
+In the existing **25-route × 8-width × 4-theme** read-only real Chromium audit, the Tasks and Quarantine routes now exercise actual `Tab → Shift+Tab` keyboard focus for each of the three native selects. Per-control Manifest evidence records associated HTML `label`, accessible name, select tag, selected option preservation, geometry, resolved foreground/background and outline colors, outline thickness, focus-visible state and calculated sRGB contrast. Checks fail closed below **3:1 focus-ring contrast**, **4.5:1 normal-text contrast**, absent keyboard focus, inaccessible labels, clipped controls, or missing options. No select change events, writes or real NAS requests are issued.
+
+This is a scoped shared-control accessibility improvement, **not** complete assistive-technology/manual keyboard review or full final owner acceptance. Six high-level gates remain open; formal progress stays **68/74**.

@@ -469,6 +469,61 @@ try {
               skipped.mainTabIndex !== -1) problems.push(
             'Skip-to-main activation did not move keyboard focus to main landmark');
         }
+        if (item.id === 'tasks' || item.id === 'quarantine') {
+          // Real keyboard modality and computed foreground/ring colors for
+          // the shared native ConsoleSelect across all 8 widths x 4 themes.
+          // Do not change a selected option or issue a mutating request.
+          const targets = item.id === 'tasks'
+            ? [['#nfc-task-status-filter', '状态'], ['#nfc-task-type-filter', '任务类型']]
+            : [['#quarantine-state-filter', '隔离状态']];
+          audit.nativeSelectFocus = [];
+          for (const [selector, accessibleName] of targets) {
+            const control = tab.locator(selector);
+            await control.focus();
+            await tab.keyboard.press('Tab');
+            await tab.keyboard.press('Shift+Tab');
+            const data = await control.evaluate(element => {
+              const style = getComputedStyle(element);
+              const rect = element.getBoundingClientRect();
+              return {
+                isNativeSelect: element.tagName === 'SELECT',
+                isFocused: document.activeElement === element,
+                focusVisible: element.matches(':focus-visible'),
+                accessibleName: element.getAttribute('aria-label') ?? '',
+                hasAssociatedLabel: [...(element.labels ?? [])].some(label =>
+                  label.getAttribute('for') === element.id),
+                optionCount: element.options?.length ?? 0,
+                selectedValue: element.value,
+                disabled: element.disabled,
+                outline: style.outlineStyle,
+                outlineWidth: parseFloat(style.outlineWidth),
+                outlineColor: style.outlineColor,
+                color: style.color,
+                background: style.backgroundColor,
+                visibleInViewport: rect.width >= 70 && rect.height >= 32 &&
+                  rect.left >= -2 && rect.right <= innerWidth + 2 &&
+                  rect.top >= -2 && rect.bottom <= innerHeight + 2,
+              };
+            });
+            const focusContrast = computedContrastRatio(data.outlineColor, data.background);
+            const textContrast = computedContrastRatio(data.color, data.background);
+            audit.nativeSelectFocus.push({
+              selector, ...data,
+              focusContrast: Number(focusContrast.toFixed(2)),
+              textContrast: Number(textContrast.toFixed(2)),
+            });
+            if (!data.isNativeSelect || !data.hasAssociatedLabel ||
+                data.accessibleName !== accessibleName || data.optionCount < 2 ||
+                data.disabled || !data.visibleInViewport)
+              problems.push('Native filter select is missing/inaccessible: ' +
+                JSON.stringify({ selector, ...data }));
+            if (!data.isFocused || !data.focusVisible ||
+                data.outline === 'none' || data.outlineWidth < 2 ||
+                focusContrast < 3 || textContrast < 4.5)
+              problems.push('Native filter select computed keyboard contrast failed: ' +
+                JSON.stringify({ selector, ...data, focusContrast, textContrast }));
+          }
+        }
         if (item.id === 'dashboard' && width === 768) {
           // AFTER the normal screenshot and skip-link focus checks.
           const scroll = tab.locator('.nfc-v2-recent-scans-scroll');
