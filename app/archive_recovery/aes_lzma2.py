@@ -747,8 +747,15 @@ def recover_aes_lzma2(source: Path, password: str | None, *, check: Callable[[],
         status = 'partial' if totals['recovered'] else 'framing_lost'
     else:
         status = 'completed' if totals['recovered'] else 'no_proven_files'
-    return {'status': status, 'stream_mode': stream_mode,
-            'folders': len(blocks), 'folder_results': results, **totals}
+    summary = {'status': status, 'stream_mode': stream_mode,
+               'folders': len(blocks), 'folder_results': results, **totals}
+    # Existing single-folder callers consume this top-level diagnostic.
+    # Multi-folder reports retain each folder's independent scan details.
+    if len(results) == 1:
+        for field in ('reason', 'resync_scan'):
+            if field in results[0]:
+                summary[field] = results[0][field]
+    return summary
 
 
 
