@@ -333,7 +333,7 @@ async function inspectNativeCheckboxKeyboard(page, item, width, theme) {
     const layers = [];
     for (let node = input.parentElement; node; node = node.parentElement) {
       const color = getComputedStyle(node).backgroundColor;
-      const match = /^rgba?\\(\\s*(\\d{1,3})\\s*,\\s*(\\d{1,3})\\s*,\\s*(\\d{1,3})(?:\\s*,\\s*([01](?:\\.\\d+)?))?\\s*\\)$/.exec(color);
+      const match = /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*([01](?:\.\d+)?))?\s*\)$/.exec(color);
       if (!match) throw new Error('Unresolvable computed painted surface: ' + color);
       const alpha = match[4] === undefined ? 1 : Number(match[4]);
       if (alpha > 0) layers.push({
