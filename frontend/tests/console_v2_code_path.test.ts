@@ -2,7 +2,7 @@ import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { copyExactText } from '../src/utils/clipboard';
+import { copyExactText, readClipboardWriter } from '../src/utils/clipboard';
 const read = (p: string) => readFileSync(resolve(process.cwd(), p), 'utf8');
 
 describe('Console v2 native shared CodePath', () => {
@@ -43,6 +43,43 @@ describe('Console v2 native shared CodePath', () => {
     }), 'failed');
     assert.equal(await copyExactText('/original', { writer: rejectedWriter }), 'failed');
     assert.equal(await copyExactText('/original', { writer: null }), 'unsupported');
+  });
+
+  test('denied navigator.clipboard property access uses the legacy copy fallback', async () => {
+    const original = '/data/中文 /摄影 #01 [RAW].dng';
+    const restrictedNavigator = Object.defineProperty({}, 'clipboard', {
+      get() { throw new Error('SecurityError: clipboard getter blocked'); },
+    }) as { clipboard: { writeText: (value: string) => Promise<void> } };
+    const writer = readClipboardWriter(() => restrictedNavigator.clipboard);
+    assert.equal(writer, null, 'a throwing getter must not escape the copy click handler');
+    const copied: string[] = [];
+    assert.equal(await copyExactText(original, {
+      writer,
+      fallback: value => { copied.push(value); return true; },
+    }), 'copied');
+    assert.deepEqual(copied, [original], 'the exact server-provided path is preserved');
+    assert.equal(await copyExactText(original, { writer, fallback: () => false }), 'failed');
+  });
+
+  test('denied writeText property access falls back rather than rejecting the click', async () => {
+    const writer = Object.defineProperty({}, 'writeText', {
+      get() { throw new Error('SecurityError: writeText getter blocked'); },
+    }) as { writeText: (value: string) => Promise<void> };
+    const copied: string[] = [];
+    assert.equal(await copyExactText('/no-normalize/空 格', {
+      writer,
+      fallback: value => { copied.push(value); return true; },
+    }), 'copied');
+    assert.deepEqual(copied, ['/no-normalize/空 格']);
+    assert.equal(await copyExactText('/path', { writer }), 'failed');
+  });
+
+  test('CodePath routes browser Clipboard API reads through its guarded resolver', () => {
+    const source = read('src/components/ui/CodePath.tsx');
+    assert.ok(source.includes('writer: readClipboardWriter(() => navigator.clipboard)'));
+    assert.doesNotMatch(source, /writer:\s*navigator\.clipboard/);
+    assert.ok(source.includes('fallback: copyUsingSelection'));
+    assert.ok(source.includes("setResult({ value, state: copied })"));
   });
 
   test('empty paths remain placeholders without copy buttons; full text still available on hover', () => {
