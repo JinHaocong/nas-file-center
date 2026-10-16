@@ -55,6 +55,13 @@
 .nfc-v2-media-checkbox { width:17px;height:17px;vertical-align:middle;margin:0;
   accent-color:var(--nfc-media-accent);cursor:pointer; }
 .nfc-v2-media-checkbox:disabled { opacity:.37;cursor:not-allowed; }
+/* Shared native checkbox: make the safe frozen-evidence choice visually
+ * trackable by keyboard in both desktop ledger and mobile cards. */
+.nfc-v2-shell .nfc-v2-media-page .nfc-v2-media-checkbox:focus-visible {
+  outline:3px solid var(--nfc-media-accent) !important;
+  outline-offset:2px;
+  transition:none !important;
+}
 .nfc-v2-media-file { display:flex;gap:9px;align-items:flex-start;min-width:0; }
 .nfc-v2-media-file > svg { flex:0 0 auto;margin-top:2px;color:var(--nfc-media-accent); }
 .nfc-v2-media-file > div { display:grid;gap:4px;min-width:0;overflow-wrap:anywhere; }
