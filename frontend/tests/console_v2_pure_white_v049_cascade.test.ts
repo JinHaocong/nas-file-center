@@ -126,6 +126,39 @@ describe('Pure White historical CSS cleanup: safe v049 same-selector cascade', (
     assert.doesNotMatch(entry, /v057|pure-white\.css/);
   });
 
+  test('retire six first-mobile same-context shadows, keeping the late v049 winners', () => {
+    const firstMobile = css.indexOf('@media (max-width: 767px) {');
+    const secondMobile = css.lastIndexOf('@media (max-width: 767px) {');
+    assert.ok(firstMobile >= 0 && secondMobile > firstMobile);
+    const early = css.slice(firstMobile, secondMobile);
+    const later = css.slice(secondMobile);
+    const cases = [
+      ['.nfc-header.nfc-header', 'min-height', '54px'],
+      ['.nfc-page-header', 'align-items', 'stretch'],
+      ['.nfc-page-header', 'gap', '12px'],
+      ['.nfc-page-header-copy', 'max-width', '100%'],
+      ['.nfc-metric-grid', 'grid-template-columns', 'repeat(2, minmax(0, 1fr))'],
+      ['.nfc-metric-card', 'min-height', '94px'],
+    ] as const;
+    const body = (source: string, selector: string): string => {
+      const start = source.indexOf(selector + ' {');
+      if (start < 0) return '';
+      const open = source.indexOf('{', start);
+      return source.slice(open + 1, source.indexOf('}', open));
+    };
+    for (const [selector, prop, value] of cases) {
+      const earlyBody = body(early, selector);
+      const lateBody = body(later, selector);
+      const property = new RegExp('(?:^|;)\\s*' + prop + '\\s*:\\s*([^;]+)');
+      assert.doesNotMatch(earlyBody, property, selector + ' old ' + prop);
+      assert.equal(lateBody.match(property)?.[1]?.trim(), value, selector + ' late ' + prop);
+    }
+    assert.match(body(early, '.nfc-header.nfc-header'), /margin-inline:\s*10px/);
+    assert.match(body(early, '.nfc-page-header'), /min-height:\s*auto/);
+    assert.match(body(early, '.nfc-metric-card'), /padding:\s*12px/);
+    assert.equal([...css.matchAll(/@media\s*\([^)]*\)/g)].length, 8);
+  });
+
   test('CSS audit ownership stays complete and existing business safety routes remain unmodified', () => {
     const guard = read('scripts/check-console-css-ownership.mjs');
     assert.ok(guard.includes("'legacy-reviewed:v049-workspace.css'"));
