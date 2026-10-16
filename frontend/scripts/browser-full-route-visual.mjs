@@ -73,8 +73,9 @@ const TS = '2026-10-16T08:00:00Z';
 const fixtureScan = {
   id: 1, name: 'Mock 完整扫描 / 图片视频资料归档', status: 'completed',
   created_at: TS, started_at: TS, finished_at: TS, root_paths: ['/mock/library'],
-  roots: ['/mock/library'], total_files: 12500, total_size: 8712312000,
-  duplicate_groups: 2, duplicate_group_count: 2, duplicate_files: 5,
+  mode: 'fclones', roots: ['/mock/library'], total_files: 12500,
+  total_size: 8712312000, total_groups: 2, total_files_in_groups: 5,
+  duplicate_group_count: 2, duplicate_files: 5,
   reclaimable_bytes: 1350000000, error: null,
 };
 const fixturePlan = {
@@ -96,7 +97,34 @@ const downloadRun = {
 const page = items => ({ items, total: items.length, page: 1, page_size: 50 });
 function fixture(path) {
   if (path === '/api/auth/me') return visualAdminFixture('full-site-visual-mock');
-  if (path === '/api/settings') return visualSafeSettingsFixture();
+  if (path === '/api/settings') return {
+    ...visualSafeSettingsFixture(), protect_last_file: true, allowed_roots: ['/mock/library'],
+    quarantine_root: '/mock/quarantine', fclones_binary: 'fclones',
+    verification_hash: 'sha256',
+  };
+  if (path === '/api/auth/sessions') return { sessions: [] };
+  if (path === '/api/data-lifecycle') return {
+    audit_retention_days: 30, updated_at: TS,
+  };
+  if (path === '/api/audit/retention-preview') return {
+    retention_days: 30, total_count: 24, keep_count: 24, delete_count: 0,
+    cutoff: TS, oldest_timestamp: TS,
+  };
+  if (path === '/api/quarantine/retention-policy') return {
+    quarantine_retention_days: 30,
+  };
+  if (path === '/api/resource-policy') return {
+    revision: 1, scan_threads: 2, hash_threads: 2,
+    io_limit: 'normal', job_priority: 'normal',
+    active_window_enabled: false, active_window_start: null,
+    active_window_end: null, active_window_timezone: 'UTC',
+    outside_window_mode: 'limited',
+    effective_now: {
+      profile: 'normal', effective_thread_cap: 2,
+      resource_jobs_admitted: 0, resource_jobs_running: 0,
+      active_window_open: true,
+    },
+  };
   if (path === '/api/dashboard/summary') return {
     indexed_files: 123456, indexed_folders: 5100, queued_or_running_jobs: 0,
     plan_count: 12, latest_scan_id: 1, duplicate_group_count: 2,
@@ -114,7 +142,8 @@ function fixture(path) {
   if (path === '/api/plans/1') return fixturePlan;
   if (path === '/api/plans') return page([fixturePlan]);
   if (path === '/api/workflows/1') return fixtureWorkflow;
-  if (path === '/api/workflows') return page([fixtureWorkflow]);
+  if (path === '/api/workflows/1/revisions') return [];
+  if (path === '/api/workflows') return [fixtureWorkflow];
   if (path === '/api/download-verifications/configuration') return {
     configured: false, endpoint: '', mode: 'strict', read_only: true,
   };
