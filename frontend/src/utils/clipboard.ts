@@ -5,16 +5,30 @@ export interface ClipboardWriteOptions {
   fallback?: ((value: string) => boolean) | null;
 }
 
+/** Some restricted browsers throw even while resolving navigator.clipboard. */
+export function readClipboardWriter(
+  read: () => ClipboardWriteOptions['writer'],
+): ClipboardWriteOptions['writer'] {
+  try {
+    return read();
+  } catch {
+    return null;
+  }
+}
+
 export async function copyExactText(
   value: string,
   { writer, fallback }: ClipboardWriteOptions,
 ): Promise<ClipboardCopyResult> {
-  if (writer?.writeText) {
+  if (writer) {
     try {
-      await writer.writeText(value);
-      return 'copied';
+      // A host may expose clipboard but deny reading writeText itself.
+      if (typeof writer.writeText === 'function') {
+        await writer.writeText(value);
+        return 'copied';
+      }
     } catch {
-      // Clipboard API can be blocked on non-HTTPS NAS origins; try selection fallback.
+      // Clipboard access or the write can be denied; try selection fallback.
     }
   }
 
