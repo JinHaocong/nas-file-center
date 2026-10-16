@@ -612,6 +612,7 @@ def _recover_block(source: Path, meta: Metadata, password: str | None, *,
     recovered = reset_points = segments = rejected = prior = 0
     decoding = False
     dec = None
+    reset_origin = 0
 
     def discard() -> None:
         nonlocal candidate, candidate_written, candidate_crc
@@ -658,7 +659,7 @@ def _recover_block(source: Path, meta: Metadata, password: str | None, *,
                             if not buf:
                                 return
                             yield buf
-                    if publish(name, parts(), size, provenance_prefix + '_reset'):
+                    if publish(name, parts(), size, f'{provenance_prefix}_reset@{reset_origin}'):
                         recovered += 1
                         attempted.add(name)
                 discard()
@@ -674,6 +675,7 @@ def _recover_block(source: Path, meta: Metadata, password: str | None, *,
                     raise DeepRecoveryUnavailable('UNPACKED_SIZE_MISMATCH')
                 if frame.reset:
                     reset_points += 1
+                    reset_origin = frame.input_offset
                     segments += 1
                     discard()
                     decoding = True
@@ -731,7 +733,7 @@ def recover_aes_lzma2(source: Path, password: str | None, *, check: Callable[[],
         prefix = '7z_aes_lzma2' if block.aes_props is not None else '7z_lzma2'
         result = _recover_block(
             source, block, password, check=check, publish=publish,
-            attempted=attempted, provenance_prefix=f'{prefix}_folder{index}',
+            attempted=attempted, provenance_prefix=prefix,
             scratch_dir=scratch_dir)
         results.append(result)
         for key in totals:
