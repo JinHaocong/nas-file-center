@@ -323,9 +323,34 @@ async function inspectNativeCheckboxKeyboard(page, item, width, theme) {
   await page.keyboard.press('Tab');
   await page.keyboard.press('Shift+Tab');
   const state = await eligible.evaluate((input, kind) => {
-    const surface = document.querySelector(kind === 'media'
-      ? '.nfc-v2-media-page .nfc-data-panel-body'
-      : '.nfc-v2-quarantine-ledger .nfc-data-panel-body');
+    // A data-panel-body may have a transparent computed background because a
+    // historical !important ledger override owns the visible card. Looking at
+    // that element alone is not the painted surface. Walk the ACTUAL checkbox
+    // ancestors and alpha-composite their backgrounds over the first opaque
+    // ancestor. Never pass rgba(...,0) as if it were a solid WCAG background.
+    const pageRoot = input.closest(kind === 'media'
+      ? '.nfc-v2-media-page' : '.nfc-v2-quarantine-ledger');
+    const layers = [];
+    for (let node = input.parentElement; node; node = node.parentElement) {
+      const color = getComputedStyle(node).backgroundColor;
+      const match = /^rgba?\\(\\s*(\\d{1,3})\\s*,\\s*(\\d{1,3})\\s*,\\s*(\\d{1,3})(?:\\s*,\\s*([01](?:\\.\\d+)?))?\\s*\\)$/.exec(color);
+      if (!match) throw new Error('Unresolvable computed painted surface: ' + color);
+      const alpha = match[4] === undefined ? 1 : Number(match[4]);
+      if (alpha > 0) layers.push({
+        rgb: match.slice(1, 4).map(Number), alpha,
+        node: node.tagName.toLowerCase(),
+      });
+      if (alpha === 1) break;
+    }
+    // The document canvas may have an implicit color, but that must not
+    // silently be assumed: a missing opaque layer fails the contrast gate.
+    if (!pageRoot || !layers.length || layers[layers.length - 1].alpha !== 1)
+      throw new Error('No opaque painted ancestor for native checkbox');
+    let composited = [0, 0, 0];
+    for (const layer of [...layers].reverse())
+      composited = layer.rgb.map((channel, i) =>
+        channel * layer.alpha + composited[i] * (1 - layer.alpha));
+    const paintedBackground = 'rgb(' + composited.map(Math.round).join(', ') + ')';
     const style = getComputedStyle(input);
     const box = input.getBoundingClientRect();
     return {
@@ -342,7 +367,8 @@ async function inspectNativeCheckboxKeyboard(page, item, width, theme) {
       outlineStyle: style.outlineStyle,
       outlineWidth: parseFloat(style.outlineWidth),
       outlineColor: style.outlineColor,
-      surfaceBackground: surface ? getComputedStyle(surface).backgroundColor : '',
+      surfaceBackground: paintedBackground,
+      paintedLayerCount: layers.length,
       transitionDuration: style.transitionDuration,
     };
   }, item.id);
