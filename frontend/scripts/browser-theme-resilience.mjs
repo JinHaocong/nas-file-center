@@ -224,7 +224,7 @@ try {
         });
         assert.match(colors.subtle, /^#[0-9a-f]{6}$/,
           theme.mode + '/' + width + ' must expose a concrete theme token');
-        const rgb = colors.probeColor.match(/^rgb\\((\\d+), (\\d+), (\\d+)\\)$/);
+        const rgb = colors.probeColor.match(/^rgb\((\d+), (\d+), (\d+)\)$/);
         assert.ok(rgb, theme.mode + '/' + width + ' native label color not solid RGB');
         const computedHex = '#' + rgb.slice(1).map(v => Number(v).toString(16).padStart(2, '0')).join('');
         assert.equal(computedHex, colors.subtle,
