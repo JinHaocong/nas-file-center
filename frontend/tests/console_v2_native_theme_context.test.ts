@@ -2,7 +2,7 @@ import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { normalizeThemeMode, shouldUseDarkTheme, restoreThemeMode, persistThemeMode, syncThemeModeFromStorage } from '../src/utils/themeMode';
+import { normalizeThemeMode, shouldUseDarkTheme, restoreThemeMode, persistThemeMode, syncThemeModeFromStorage, readSystemDarkPreference, watchSystemDarkPreference } from '../src/utils/themeMode';
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');
 
 describe('Console v2 native ThemeContext and zero direct AntD imports', () => {
@@ -48,6 +48,75 @@ describe('Console v2 native ThemeContext and zero direct AntD imports', () => {
     ]) assert.ok(theme.includes(part), part);
     assert.match(theme, /event\.storageArea !== window\.localStorage[\s\S]*?catch\s*\{\s*return;\s*\}/);
   });
+  test('system media query initialization falls back safely without breaking forced modes', () => {
+    assert.equal(readSystemDarkPreference(() => ({ matches: true } as MediaQueryList)), true);
+    assert.equal(readSystemDarkPreference(() => ({ matches: false } as MediaQueryList)), false);
+    assert.equal(readSystemDarkPreference(() => undefined), false);
+    assert.equal(readSystemDarkPreference(() => { throw Error('matchMedia blocked'); }), false);
+    assert.equal(readSystemDarkPreference(() => ({
+      get matches() { throw Error('matches blocked'); },
+    } as MediaQueryList)), false);
+    assert.equal(shouldUseDarkTheme('dark', false), true);
+    assert.equal(shouldUseDarkTheme('light', true), false);
+  });
+  test('modern matchMedia changes follow the OS and unsubscribe on unmount', () => {
+    const values: boolean[] = [];
+    let handler: ((event: { matches: boolean }) => void) | undefined;
+    let removed = false;
+    const query = {
+      matches: false,
+      addEventListener(type: string, callback: typeof handler) {
+        assert.equal(type, 'change');
+        handler = callback;
+      },
+      removeEventListener(type: string, callback: typeof handler) {
+        assert.equal(type, 'change');
+        assert.equal(callback, handler);
+        removed = true;
+        handler = undefined;
+      },
+    } as unknown as MediaQueryList;
+    const cleanup = watchSystemDarkPreference(() => query, dark => values.push(dark));
+    handler?.({ matches: true });
+    handler?.({ matches: false });
+    assert.deepEqual(values, [false, true, false]);
+    cleanup();
+    assert.equal(removed, true);
+    assert.equal(handler, undefined);
+  });
+  test('legacy matchMedia listeners work, and denied APIs never crash the theme shell', () => {
+    const values: boolean[] = [];
+    let handler: ((event: { matches: boolean }) => void) | undefined;
+    let removed = false;
+    const legacy = {
+      matches: true,
+      addListener(callback: typeof handler) { handler = callback; },
+      removeListener(callback: typeof handler) {
+        assert.equal(callback, handler);
+        removed = true;
+        handler = undefined;
+      },
+    } as unknown as MediaQueryList;
+    const cleanup = watchSystemDarkPreference(() => legacy, dark => values.push(dark));
+    handler?.({ matches: false });
+    assert.deepEqual(values, [true, false]);
+    cleanup();
+    assert.equal(removed, true);
+    for (const bad of [
+      () => undefined,
+      () => { throw Error('query blocked'); },
+      () => ({ matches: false, addEventListener() { throw Error('listener blocked'); } } as unknown as MediaQueryList),
+    ]) assert.doesNotThrow(() => watchSystemDarkPreference(bad, () => {})());
+  });
+  test('ThemeProvider delegates system preference lifecycle to guarded helper', () => {
+    const theme = read('src/contexts/ThemeContext.tsx');
+    for (const token of [
+      "window.matchMedia?.('(prefers-color-scheme: dark)')",
+      'readSystemDarkPreference(systemColorSchemeQuery)',
+      'watchSystemDarkPreference(systemColorSchemeQuery, setSystemDark)',
+    ]) assert.ok(theme.includes(token), token);
+    assert.doesNotMatch(theme, /const mediaQuery = window.matchMedia/);
+  });
   test('light and dark override system; system mode follows media query', () => {
     assert.equal(shouldUseDarkTheme('light', true), false);
     assert.equal(shouldUseDarkTheme('light', false), false);
@@ -66,7 +135,7 @@ describe('Console v2 native ThemeContext and zero direct AntD imports', () => {
       "persistThemeMode(() => localStorage.setItem('nfc_theme_mode', newMode))",
       'shouldUseDarkTheme(mode, systemDark)',
       "window.matchMedia?.('(prefers-color-scheme: dark)')",
-      "addEventListener('change', handleChange)", "removeEventListener('change', handleChange)",
+      'watchSystemDarkPreference(systemColorSchemeQuery, setSystemDark)',
       "document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light')",
       "document.documentElement.style.colorScheme = isDark ? 'dark' : 'light'",
       '{children}', 'export const useTheme',
