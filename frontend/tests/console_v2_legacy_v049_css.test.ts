@@ -48,6 +48,11 @@ describe('Console v2 reviewed v049 legacy workspace CSS retirement', () => {
     assert.match(css, /@media \(prefers-reduced-transparency: reduce\)\s*\{\s*\.nfc-header\.nfc-header,\s*\.nfc-page-header\s*\{[^}]*background:\s*var\(--nfc-surface-1\) !important;[^}]*backdrop-filter:\s*none;/);
   });
 
+  test('global legacy eyebrow no longer overrides canonical Pure White contrast', () => {
+    assert.match(css, /\.nfc-page-eyebrow\s*\{\s*color:\s*var\(--nfc-text-subtle\)/);
+    assert.doesNotMatch(css, /\.nfc-page-eyebrow\s*\{\s*color:\s*var\(--nfc-v49-subtle\)/);
+  });
+
   test('v049 retains cascade import position and becomes owned CSS', () => {
     const main = read('src/main.tsx');
     const prev = main.indexOf("import './styles/v048-detail.css';");
