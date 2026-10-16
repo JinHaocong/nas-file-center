@@ -42,3 +42,11 @@ First trial Chromium output was downloaded and inspected, not just inferred from
 - **Download Verification detail:** the browser also clicks the real `查看条目` action and captures the path-by-path SHA256 result panel in every width/theme (32 additional interactive screenshots). The final evidence goal is **768 route snapshots + 32 selected detail snapshots = 800 screenshot PNGs** across eight artifacts.
 
 These fixes do not claim that every page's typography, colors or interaction states are manually signed off. All real NAS routes stay blocked in the browser.
+
+## Screenshot-based mobile header review — Stage 5E post-merge
+
+Screenshot source: PR #264 Chromium `main` evidence artifacts at 360px, 390px, 768px, 1024px and 1440px; no external NAS. The human comparison of the 24 light-mode page screenshots at these five widths (120 route images) shows a reproducible **360px header breadcrumb wrap**: both the parent `工作台` and current page title split into multiple lines. Longer route titles (e.g. `下载完整性校验`) also wrap at 390px. The two safety/status badges and user menu should remain visible.
+
+Scoped repair: `console-v2-mobile-header.css` (last CSS import) hides only the redundant parent breadcrumb and separator on mobile; it keeps the current page name as a single, ellipsized flex item, with a stricter 360px width cap. It does **not** hide Safe Mode, Worker Status, user actions or the navigation drawer. A **real Chromium** `browser-full-route-visual.mjs` assertion now checks the single-line computed current-page title, hidden duplicate parent crumb, absence of header action overlap, and viewport clipping on all 23 authenticated React route cases for **360, 390, 430px** and the 768px boundary's mobile side. The eight-width/four-theme matrix remains 800 screenshots total.
+
+The 120 light-mode review is a **targeted visual pass**, not complete frame-by-frame human approval of all 800 light/dark/system images or all content states. Full eight-width design sign-off remains open pending review of all theme cases and active UI states. The formal final-acceptance gate count remains **68/74**.
