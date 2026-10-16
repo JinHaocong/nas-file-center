@@ -444,3 +444,5 @@ No screenshot-only mock data in runtime.
 
 - Found and fixed the shared-theme contrast gap left after Stage 5E-AK: `src/styles/tokens.css` canonical `--nfc-text-subtle` previously failed the normal-text AA ratio on light accent-soft and dark soft surfaces. Match shell and portal established palettes while retaining the compatible alias, then test all six shared surfaces and 8 widths × 4 themes using real **read-only synthetic Chromium**.
 - **68/74 remains unchanged**: this is a testable defect correction and a wider token audit, **not** the complete historical CSS consolidation, all-screen visual sign-off, global accessibility acceptance, safe real-NAS acceptance or product-owner deployment approval. See `docs/console-v2-css-ownership.md` for measured ratios and residual scope.
+
+- First actual 360px light Chromium check found a later global v049 selector overriding the canonical accessible header label with `#929aa5`; the offending declaration is now corrected with source and browser regressions. The six outstanding high-level acceptance items remain open.
