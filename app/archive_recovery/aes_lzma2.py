@@ -15,6 +15,7 @@ import hashlib
 import lzma
 from pathlib import Path
 import struct
+import tempfile
 from typing import Callable, Iterator
 import zlib
 
@@ -100,81 +101,127 @@ def _folder(p: Parse) -> tuple[list[tuple[bytes, bytes]], list[tuple[int, int]]]
 
 
 def _stream_info(p: Parse) -> dict:
-    result: dict = {}
-    count = 0
+    """Read every independent packed folder and its ordered file substreams.
+
+    A linear 7z folder has one packed stream even with multiple coders.
+    PackInfo and SubStreamsInfo are arrays over *all* folders; treating the
+    archive as one folder loses the later streams and their CRC boundaries.
+    """
+    pack_pos = None
+    packed_sizes: list[int] | None = None
+    folders: list[dict] | None = None
+    sub_counts: list[int] | None = None
+    per_folder_sizes: list[list[int]] | None = None
+    per_folder_crcs: list[list[int | None]] | None = None
     while True:
         tag = p.u8()
         if tag == 0:
             break
         if tag == 6:
-            pos = p.num()
+            if packed_sizes is not None:
+                raise DeepRecoveryUnavailable('DUPLICATE_PACK_INFO')
+            pack_pos = p.num()
             count = p.num()
-            if count != 1:
-                raise DeepRecoveryUnavailable('MULTIPLE_PACKED_STREAMS')
+            if count < 1 or count > 10000:
+                raise DeepRecoveryUnavailable('INVALID_PACKED_STREAM_COUNT')
             p.tag(9)
-            sizes = [p.num() for _ in range(count)]
+            packed_sizes = [p.num() for _ in range(count)]
             next_tag = p.u8()
             if next_tag == 10:
-                _digest_list(p, count)
+                _digest_list(p, count)  # optional packed CRC; damaged packs can be salvaged
                 next_tag = p.u8()
             if next_tag != 0:
                 raise DeepRecoveryUnavailable('UNSUPPORTED_PACK_INFO')
-            result.update(pack_pos=pos, pack_size=sizes[0])
         elif tag == 7:
+            if folders is not None:
+                raise DeepRecoveryUnavailable('DUPLICATE_UNPACK_INFO')
             p.tag(11)
-            folders = p.num()
-            if folders != 1 or p.u8() != 0:
+            count = p.num()
+            if count < 1 or count > 10000 or p.u8() != 0:
                 raise DeepRecoveryUnavailable('MULTIPLE_OR_EXTERNAL_FOLDERS')
-            coders, binds = _folder(p)
+            folders = []
+            for _ in range(count):
+                coders, binds = _folder(p)
+                folders.append({'coders': coders, 'binds': binds})
             p.tag(12)
-            sizes = [p.num() for _ in coders]
-            nxt = p.u8()
-            folder_crc = None
-            if nxt == 10:
-                folder_crc = _digest_list(p, 1)[0]
-                nxt = p.u8()
-            if nxt != 0:
+            for block in folders:
+                block['unpack_sizes'] = [p.num() for _ in block['coders']]
+            next_tag = p.u8()
+            crcs = [None] * count
+            if next_tag == 10:
+                crcs = _digest_list(p, count)
+                next_tag = p.u8()
+            if next_tag != 0:
                 raise DeepRecoveryUnavailable('UNSUPPORTED_UNPACK_INFO')
-            result.update(coders=coders, binds=binds, unpack_sizes=sizes, folder_crc=folder_crc)
+            for block, crc in zip(folders, crcs):
+                block['folder_crc'] = crc
         elif tag == 8:
-            if 'coders' not in result:
+            if folders is None or sub_counts is not None:
                 raise DeepRecoveryUnavailable('MISORDERED_7Z_STREAMS')
-            nsub = 1
+            sub_counts = [1] * len(folders)
             subt = p.u8()
             if subt == 13:
-                nsub = p.num()
+                sub_counts = [p.num() for _ in folders]
                 subt = p.u8()
-            if nsub < 1 or nsub > 10000:
+            if any(n < 1 or n > 10000 for n in sub_counts) or sum(sub_counts) > 10000:
                 raise DeepRecoveryUnavailable('INVALID_SUBSTREAM_COUNT')
-            known = []
             if subt == 9:
-                known = [p.num() for _ in range(nsub - 1)]
+                lengths = [p.num() for _ in range(sum(n - 1 for n in sub_counts))]
                 subt = p.u8()
-            elif nsub > 1:
+            elif any(n > 1 for n in sub_counts):
                 raise DeepRecoveryUnavailable('MISSING_SUBSTREAM_SIZES')
-            # The final coder in a linear 2-coder pipeline is the LZMA2 output.
-            total = result['unpack_sizes'][-1]
-            sizes = known + [total - sum(known)]
-            if sizes[-1] < 0:
-                raise DeepRecoveryUnavailable('INVALID_SUBSTREAM_SIZES')
-            crcs = [None] * nsub
+            else:
+                lengths = []
+            cursor = 0
+            per_folder_sizes = []
+            for block, count in zip(folders, sub_counts):
+                leading = lengths[cursor:cursor + count - 1]
+                cursor += count - 1
+                final = block['unpack_sizes'][-1] - sum(leading)
+                if final < 0:
+                    raise DeepRecoveryUnavailable('INVALID_SUBSTREAM_SIZES')
+                per_folder_sizes.append(leading + [final])
+            # 7z omits per-substream digest when exactly one substream
+            # inherits the containing folder's unpack CRC.
+            needs_crc = sum(n for n, block in zip(sub_counts, folders)
+                            if n != 1 or block['folder_crc'] is None)
             if subt == 10:
-                if nsub == 1 and result.get('folder_crc') is not None:
-                    raise DeepRecoveryUnavailable('DUPLICATE_FOLDER_CRC')
-                crcs = _digest_list(p, nsub)
+                extra_crcs = _digest_list(p, needs_crc)
                 subt = p.u8()
-            elif nsub == 1:
-                crcs = [result.get('folder_crc')]
+            else:
+                extra_crcs = [None] * needs_crc
             if subt != 0:
                 raise DeepRecoveryUnavailable('UNSUPPORTED_SUBSTREAM_INFO')
-            result.update(sub_sizes=sizes, sub_crcs=crcs)
+            per_folder_crcs = []
+            cursor = 0
+            for count, block in zip(sub_counts, folders):
+                if count == 1 and block['folder_crc'] is not None:
+                    per_folder_crcs.append([block['folder_crc']])
+                else:
+                    per_folder_crcs.append(extra_crcs[cursor:cursor + count])
+                    cursor += count
         else:
             raise DeepRecoveryUnavailable('UNKNOWN_STREAM_INFO')
-    if not {'pack_pos','pack_size','coders','binds','unpack_sizes'} <= result.keys():
+    if pack_pos is None or packed_sizes is None or folders is None:
         raise DeepRecoveryUnavailable('INCOMPLETE_STREAM_METADATA')
-    result.setdefault('sub_sizes', [result['unpack_sizes'][-1]])
-    result.setdefault('sub_crcs', [result.get('folder_crc')])
-    return result
+    # A supported linear folder always consumes exactly one packed stream.
+    if len(packed_sizes) != len(folders):
+        raise DeepRecoveryUnavailable('PACKED_FOLDER_COUNT_MISMATCH')
+    if sub_counts is None:
+        per_folder_sizes = [[block['unpack_sizes'][-1]] for block in folders]
+        per_folder_crcs = [[block['folder_crc']] for block in folders]
+    assert per_folder_sizes is not None and per_folder_crcs is not None
+    blocks: list[dict] = []
+    position = pack_pos
+    for size, block, subs, crcs in zip(packed_sizes, folders,
+                                      per_folder_sizes, per_folder_crcs):
+        blocks.append({**block, 'pack_pos': position, 'pack_size': size,
+                       'sub_sizes': subs, 'sub_crcs': crcs, 'files': []})
+        position += size
+    # Keep old single-folder shape for verified encoded-header handling.
+    return {**blocks[0], 'blocks': blocks}
+
+
 
 
 def _file_info(p: Parse, stream: dict) -> list[tuple[str, int, int, int | None]]:
@@ -204,22 +251,35 @@ def _file_info(p: Parse, stream: dict) -> list[tuple[str, int, int, int | None]]
                 names = chars.decode('utf-16-le').split('\x00')[:-1]
             except UnicodeError as exc:
                 raise DeepRecoveryUnavailable('INVALID_FILENAMES') from exc
-        # Other metadata properties are length-delimited and ignored.
-    if names is None or len(names) != count or sum(nonempty) != len(stream['sub_sizes']):
+    blocks = stream['blocks']
+    entries = [(block, length, crc) for block in blocks
+               for length, crc in zip(block['sub_sizes'], block['sub_crcs'])]
+    if names is None or len(names) != count or sum(nonempty) != len(entries):
         raise DeepRecoveryUnavailable('FILE_MAPPING_UNAVAILABLE')
     out: list[tuple[str, int, int, int | None]] = []
-    offset = 0
+    positions = {id(block): 0 for block in blocks}
+    global_offsets = {}
+    total = 0
+    for block in blocks:
+        global_offsets[id(block)] = total
+        total += block['unpack_sizes'][-1]
     n = 0
     for name, present in zip(names, nonempty):
         if not present:
             continue
-        length = stream['sub_sizes'][n]
-        out.append((name, offset, length, stream['sub_crcs'][n]))
-        offset += length
+        block, length, crc = entries[n]
+        key = id(block)
+        offset = positions[key]
+        block['files'].append((name, offset, length, crc))
+        out.append((name, global_offsets[key] + offset, length, crc))
+        positions[key] = offset + length
         n += 1
-    if offset != stream['unpack_sizes'][-1]:
-        raise DeepRecoveryUnavailable('UNPACK_SIZES_MISMATCH')
+    for block in blocks:
+        if positions[id(block)] != block['unpack_sizes'][-1]:
+            raise DeepRecoveryUnavailable('UNPACK_SIZES_MISMATCH')
     return out
+
+
 
 
 def _read_header(p: Parse) -> tuple[dict, list[tuple[str, int, int, int | None]]]:
@@ -286,6 +346,8 @@ def _decode_header(raw: bytes, source: Path, file_size: int, password: str | Non
     p = Parse(raw)
     p.tag(23)
     stream = _stream_info(p)
+    if len(stream['blocks']) != 1:
+        raise DeepRecoveryUnavailable('UNSUPPORTED_7Z_HEADER_CODER_GRAPH')
     coders = stream['coders']
     encrypted = coders[0][0] == AES_ID
     methods = [method for method, _ in coders]
@@ -337,10 +399,11 @@ class Metadata:
     dictionary: int
     aes_props: bytes | None
     files: list[tuple[str, int, int, int | None]]
+    blocks: tuple['Metadata', ...] = ()
 
 
 def inspect_7z(source: Path, password: str | None = None) -> Metadata:
-    """Read verified file metadata, using the password for encrypted headers too."""
+    """Map CRC-bearing files to their own verified independent packed folders."""
     with source.open('rb') as file:
         intro = file.read(32)
         size = source.stat().st_size
@@ -356,25 +419,41 @@ def inspect_7z(source: Path, password: str | None = None) -> Metadata:
     if zlib.crc32(raw) != next_crc:
         raise DeepRecoveryUnavailable('NEXT_HEADER_CRC_MISMATCH')
     stream, files = _read_header(Parse(_decode_header(raw, source, size, password)))
-    coders, binds = stream['coders'], stream['binds']
-    if len(coders) == 2 and [x[0] for x in coders] == [AES_ID, LZMA2_ID] and binds == [(1, 0)]:
-        aes_props = coders[0][1]
-        lzma_props = coders[1][1]
-    elif len(coders) == 1 and coders[0][0] == LZMA2_ID and not binds:
-        aes_props = None
-        lzma_props = coders[0][1]
-    else:
+    supported: list[Metadata] = []
+    offset_limit = 32 + next_offset
+    for block in stream['blocks']:
+        coders, binds = block['coders'], block['binds']
+        if (len(coders) == 2 and [c[0] for c in coders] == [AES_ID, LZMA2_ID]
+                and binds == [(1, 0)]):
+            aes_props = coders[0][1]
+            lzma_props = coders[1][1]
+        elif len(coders) == 1 and coders[0][0] == LZMA2_ID and not binds:
+            aes_props = None
+            lzma_props = coders[0][1]
+        else:
+            # A different codec/graph in one folder does not invalidate the
+            # trusted locations of independently decodable later folders.
+            continue
+        dictionary = _dictionary_size(lzma_props)
+        packed = block['pack_size']
+        offset = 32 + block['pack_pos']
+        if (not 0 < packed <= MAX_SCAN_BYTES
+                or (aes_props is not None and packed % 16)
+                or offset < 32 or offset + packed > offset_limit
+                or block['unpack_sizes'][-1] > MAX_SCAN_BYTES):
+            raise DeepRecoveryUnavailable('INVALID_LZMA2_PACKED_RANGE')
+        supported.append(Metadata(offset, packed, block['unpack_sizes'][-1],
+                                  dictionary, aes_props, block['files']))
+    if not supported:
         raise DeepRecoveryUnavailable('NOT_AES_OR_PLAIN_LZMA2_LINEAR_FOLDER')
-    dictionary = _dictionary_size(lzma_props)
-    packed = stream['pack_size']
-    offset = 32 + stream['pack_pos']
-    if not 0 < packed <= MAX_SCAN_BYTES or (aes_props is not None and packed % 16) or offset + packed > size:
-        raise DeepRecoveryUnavailable('INVALID_LZMA2_PACKED_RANGE')
-    if not any(crc is not None for _, _, _, crc in files):
+    if not any(crc is not None for block in supported for _, _, _, crc in block.files):
         raise DeepRecoveryUnavailable('NO_PER_FILE_CRCS')
-    return Metadata(offset=offset, packed_size=packed,
-        unpacked_size=stream['unpack_sizes'][-1], dictionary=dictionary,
-        aes_props=aes_props, files=files)
+    first = supported[0]
+    return Metadata(first.offset, sum(b.packed_size for b in supported),
+                    sum(b.unpacked_size for b in supported), first.dictionary,
+                    first.aes_props, files, tuple(supported))
+
+
 
 
 def _key_and_iv(props: bytes, password: str) -> tuple[bytes, bytes]:
@@ -513,53 +592,78 @@ def _decode_segment(frames: list[Frame], dictionary: int) -> bytes:
         raise DeepRecoveryUnavailable('CORRUPTED_LZMA2_CHUNK') from exc
 
 
-def recover_aes_lzma2(source: Path, password: str | None, *, check: Callable[[], None],
-                       publish: Callable[[str, Iterator[bytes], int, str], bool]) -> dict:
-    """Publish *only* CRC-proven complete file ranges; no unknown-offset bytes.
+def _recover_block(source: Path, meta: Metadata, password: str | None, *,
+                   check: Callable[[], None],
+                   publish: Callable[[str, Iterator[bytes], int, str], bool],
+                   attempted: set[str], provenance_prefix: str,
+                   scratch_dir: Path | None) -> dict:
+    """Incrementally decode a folder; CRC-validate one entire file at a time.
 
-    `publish` receives (name, chunks, exact_size, provenance) and must use the
-    existing guarded descriptor-based result publisher. Returns True on success.
+    Memory is bounded by the LZMA2 dictionary, frame, and 2 MiB spool buffer,
+    regardless of the folder's uncompressed size. The spool is private and
+    discarded before returning; no unverified destination is ever published.
     """
-    meta = inspect_7z(source, password)
-    provenance_prefix = '7z_aes_lzma2' if meta.aes_props is not None else '7z_lzma2'
-    stream_mode = 'aes_lzma2' if meta.aes_props is not None else 'plain_lzma2'
-    recovered = 0
-    reset_points = 0
-    segments = 0
-    rejected = 0
-    current: list[Frame] = []
-    current_size = 0
-    prior = 0
-    attempted: set[str] = set()
+    targets = sorted(((offset, name, size, crc) for name, offset, size, crc in meta.files
+                      if crc is not None and size > 0), key=lambda x: x[0])
+    cursor = 0
+    candidate = None
+    candidate_crc = 0
+    candidate_written = 0
+    recovered = reset_points = segments = rejected = prior = 0
+    decoding = False
+    dec = None
+    reset_origin = 0
 
-    def flush() -> None:
-        nonlocal recovered, segments, rejected
-        if not current or not current[0].reset:
-            return
-        segments += 1
-        start = current[0].output_offset
-        length = current_size
-        if length > SEGMENT_LIMIT:
-            rejected += 1
-            return
-        try:
-            decoded = _decode_segment(current, meta.dictionary)
-        except DeepRecoveryUnavailable:
-            rejected += 1
-            return
-        for name, offset, size, crc in meta.files:
+    def discard() -> None:
+        nonlocal candidate, candidate_written, candidate_crc
+        if candidate is not None:
+            candidate.close()
+        candidate = None
+        candidate_written = candidate_crc = 0
+
+    def consume(piece: bytes, at: int) -> None:
+        nonlocal cursor, candidate, candidate_written, candidate_crc, recovered
+        pos = 0
+        while pos < len(piece) and cursor < len(targets):
             check()
-            if crc is None or name in attempted or not size:
+            start, name, size, crc = targets[cursor]
+            absolute = at + pos
+            if start + size <= absolute or name in attempted:
+                discard()
+                cursor += 1
                 continue
-            if offset < start or offset + size > start + len(decoded):
+            if absolute < start:
+                pos += min(len(piece) - pos, start - absolute)
                 continue
-            blob = decoded[offset-start:offset-start+size]
-            if zlib.crc32(blob) != crc:
-                continue
-            attempted.add(name)
-            if publish(name, iter((blob,)), size,
-                       f'{provenance_prefix}_reset@{current[0].input_offset}'):
-                recovered += 1
+            # A reset/corruption may have landed in the middle of this file.
+            # Never reconstruct an unobserved prefix or guess its CRC.
+            if candidate is None:
+                if absolute != start:
+                    cursor += 1
+                    continue
+                candidate = tempfile.SpooledTemporaryFile(
+                    max_size=2 * 1024 * 1024, mode='w+b', dir=scratch_dir)
+            take = min(len(piece) - pos, start + size - absolute)
+            block = piece[pos:pos + take]
+            candidate.write(block)
+            candidate_written += take
+            candidate_crc = zlib.crc32(block, candidate_crc)
+            pos += take
+            if candidate_written == size:
+                if candidate_crc == crc:
+                    candidate.seek(0)
+                    def parts() -> Iterator[bytes]:
+                        while True:
+                            check()
+                            buf = candidate.read(256 * 1024)
+                            if not buf:
+                                return
+                            yield buf
+                    if publish(name, parts(), size, f'{provenance_prefix}_reset@{reset_origin}'):
+                        recovered += 1
+                        attempted.add(name)
+                discard()
+                cursor += 1
 
     with DecryptedStream(source, meta, password, check) as stream:
         try:
@@ -571,32 +675,89 @@ def recover_aes_lzma2(source: Path, password: str | None, *, check: Callable[[],
                     raise DeepRecoveryUnavailable('UNPACKED_SIZE_MISMATCH')
                 if frame.reset:
                     reset_points += 1
-                    flush()
-                    current = []
-                    current_size = 0
-                current.append(frame)
-                current_size += frame.decoded_size
-                if len(current) > 32768 or current_size > SEGMENT_LIMIT:
-                    # Never retain arbitrarily long segments; continue framing
-                    # to discover later dictionary-reset boundaries.
-                    current = []
-                    current_size = 0
-            flush()
+                    reset_origin = frame.input_offset
+                    segments += 1
+                    discard()
+                    decoding = True
+                    dec = lzma.LZMADecompressor(
+                        format=lzma.FORMAT_RAW,
+                        filters=[{'id': lzma.FILTER_LZMA2, 'dict_size': meta.dictionary}])
+                    while cursor < len(targets) and targets[cursor][0] < frame.output_offset:
+                        cursor += 1
+                if not decoding:
+                    continue
+                try:
+                    assert dec is not None
+                    data = dec.decompress(frame.raw, max_length=frame.decoded_size + 1)
+                    if len(data) != frame.decoded_size:
+                        raise DeepRecoveryUnavailable('CORRUPTED_LZMA2_CHUNK')
+                except (lzma.LZMAError, EOFError, ValueError, DeepRecoveryUnavailable):
+                    rejected += 1
+                    discard()
+                    decoding = False
+                    continue
+                consume(data, frame.output_offset)
+            discard()
+            if prior != meta.unpacked_size:
+                raise DeepRecoveryUnavailable('UNPACKED_SIZE_MISMATCH')
         except DeepRecoveryUnavailable as exc:
-            # Framing is lost; offsets are unknown. Independently probe later
-            # reset streams and publish ONLY an exact CRC-proven whole file.
-            # All intermediate bytes remain in memory and are discarded.
-            rescanned = _resync_by_full_file_crc(stream, meta, check, publish, attempted,
-                                                 provenance_prefix=provenance_prefix)
-            recovered += rescanned['proven_files']
-            return {'status': 'framing_resynchronized' if rescanned['proven_files'] else 'framing_lost',
-                    'stream_mode': stream_mode, 'reason': str(exc), 'recovered': recovered,
-                    'reset_points': reset_points, 'decoded_segments': segments,
-                    'rejected_segments': rejected, 'resync_scan': rescanned}
-    return {'status': 'completed' if recovered else 'no_proven_files', 'stream_mode': stream_mode,
-            'recovered': recovered,
-            'reset_points': reset_points, 'decoded_segments': segments,
-            'rejected_segments': rejected}
+            discard()
+            # Framing loss invalidates absolute offsets. The legacy fallback
+            # only accepts an entire independent reset segment with exact CRC.
+            rescue = _resync_by_full_file_crc(stream, meta, check, publish,
+                                               attempted, provenance_prefix=provenance_prefix)
+            recovered += rescue['proven_files']
+            return {'status': 'framing_resynchronized' if rescue['proven_files'] else 'framing_lost',
+                    'reason': str(exc), 'recovered': recovered, 'reset_points': reset_points,
+                    'decoded_segments': segments, 'rejected_segments': rejected,
+                    'resync_scan': rescue}
+        finally:
+            discard()
+    return {'status': 'completed' if recovered else 'no_proven_files',
+            'recovered': recovered, 'reset_points': reset_points,
+            'decoded_segments': segments, 'rejected_segments': rejected}
+
+
+def recover_aes_lzma2(source: Path, password: str | None, *, check: Callable[[], None],
+                       publish: Callable[[str, Iterator[bytes], int, str], bool],
+                       scratch_dir: Path | None = None) -> dict:
+    """Salvage independent 7z folders, publishing only full CRC-matching files."""
+    meta = inspect_7z(source, password)
+    blocks = meta.blocks or (meta,)
+    attempted: set[str] = set()
+    totals = {'recovered': 0, 'reset_points': 0, 'decoded_segments': 0,
+              'rejected_segments': 0}
+    results = []
+    for index, block in enumerate(blocks):
+        check()
+        prefix = '7z_aes_lzma2' if block.aes_props is not None else '7z_lzma2'
+        result = _recover_block(
+            source, block, password, check=check, publish=publish,
+            attempted=attempted, provenance_prefix=prefix,
+            scratch_dir=scratch_dir)
+        results.append(result)
+        for key in totals:
+            totals[key] += result[key]
+    modes = {b.aes_props is not None for b in blocks}
+    stream_mode = ('aes_lzma2' if modes == {True}
+                   else 'plain_lzma2' if modes == {False} else 'mixed_lzma2')
+    if any(r['status'] == 'framing_resynchronized' for r in results):
+        status = 'framing_resynchronized'
+    elif any(r['status'] == 'framing_lost' for r in results):
+        status = 'partial' if totals['recovered'] else 'framing_lost'
+    else:
+        status = 'completed' if totals['recovered'] else 'no_proven_files'
+    summary = {'status': status, 'stream_mode': stream_mode,
+               'folders': len(blocks), 'folder_results': results, **totals}
+    # Existing single-folder callers consume this top-level diagnostic.
+    # Multi-folder reports retain each folder's independent scan details.
+    if len(results) == 1:
+        for field in ('reason', 'resync_scan'):
+            if field in results[0]:
+                summary[field] = results[0][field]
+    return summary
+
+
 
 
 def _frame_from_bytes(buffer: bytes, start: int) -> tuple[Frame, int] | None:

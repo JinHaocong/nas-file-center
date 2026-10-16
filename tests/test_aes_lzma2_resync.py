@@ -275,16 +275,18 @@ def test_deep_mode_never_upgrades_standard_entry_with_different_bytes(tmp_path: 
     assert (out/'recovered.bin').read_bytes()==b'Q'*len(second)
 
 
-def test_segment_memory_bound_does_not_publish(tmp_path: Path, monkeypatch):
+def test_small_legacy_segment_limit_no_longer_drops_valid_files(tmp_path: Path, monkeypatch):
     from app.archive_recovery import aes_lzma2
     source = tmp_path/'limits.7z'
     build_7z(source,(os.urandom(3000),os.urandom(5000)))
+    # This legacy limit still bounds damaged-framing CRC resynchronization,
+    # but an intact stream must recover independently verified files.
     monkeypatch.setattr(aes_lzma2,'SEGMENT_LIMIT',1024)
     outputs=[]
     result=recover_aes_lzma2(source,'good',check=lambda:None,
                             publish=lambda *args: outputs.append(args) or True)
-    assert result['recovered']==0
-    assert outputs==[]
+    assert result['recovered']==2
+    assert len(outputs)==2
 
 
 def test_realistic_aes_kdf_salt_iv_and_unicode_password(tmp_path: Path):
