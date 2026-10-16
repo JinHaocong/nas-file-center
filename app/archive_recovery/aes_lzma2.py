@@ -3,7 +3,7 @@
 This is NOT plaintext reconstruction. We map LZMA2 chunks to the CRC-checked
 7z header's uncompressed offsets. Only complete, independently decodable files
 whose original 7z per-file CRC32 matches are published. Unknown boundaries,
-unsupported folder graphs, encrypted headers, or lost chunk framing fail closed.
+unsupported folder graphs, unverifiable headers, or lost chunk framing fail closed.
 
 A CBC ciphertext error may corrupt the corresponding plaintext block and the
 next block; later LZMA2 dictionary resets can still be independently decoded.
@@ -28,6 +28,7 @@ FRAME_OUTPUT_LIMIT = 2 * 1024 * 1024
 SEGMENT_LIMIT = 32 * 1024 * 1024
 MAX_SCAN_BYTES = 8 * 1024**3
 LZMA2_ID = b'\x21'
+LZMA1_ID = b'\x03\x01\x01'
 AES_ID = b'\x06\xf1\x07\x01'
 
 
@@ -247,30 +248,81 @@ def _dictionary_size(prop: bytes) -> int:
     return size
 
 
-def _decode_header(raw: bytes, source: Path, file_size: int) -> bytes:
-    """Decode simple unencrypted LZMA2 metadata headers, or accept plain ones."""
+def _header_filter(method: bytes, props: bytes) -> dict:
+    """Validate header codec properties before allocating a bounded dictionary."""
+    if method == LZMA2_ID:
+        return {'id': lzma.FILTER_LZMA2, 'dict_size': _dictionary_size(props)}
+    if method != LZMA1_ID:
+        raise DeepRecoveryUnavailable('UNSUPPORTED_HEADER_CODER')
+    if len(props) != 5 or props[0] >= 225:
+        raise DeepRecoveryUnavailable('INVALID_LZMA1_PROPERTIES')
+    lc = props[0] % 9
+    lp = (props[0] // 9) % 5
+    pb = props[0] // 45
+    dictionary = int.from_bytes(props[1:], 'little')
+    if lc + lp > 4 or dictionary > 32 * 1024**2:
+        raise DeepRecoveryUnavailable('UNSUPPORTED_LZMA1_PROPERTIES')
+    return {'id': lzma.FILTER_LZMA1, 'dict_size': max(4096, dictionary),
+            'lc': lc, 'lp': lp, 'pb': pb}
+
+
+def _decrypt_header(contents: bytes, props: bytes, size: int, password: str | None) -> bytes:
+    """Decrypt metadata in memory, trimming only declared AES block padding."""
+    if not password:
+        raise DeepRecoveryUnavailable('PASSWORD_REQUIRED')
+    if Cipher is None:
+        raise DeepRecoveryUnavailable('CRYPTOGRAPHY_NOT_INSTALLED')
+    if len(contents) % 16 or not 0 <= len(contents) - size < 16:
+        raise DeepRecoveryUnavailable('INVALID_ENCRYPTED_HEADER_SIZE')
+    key, iv = _key_and_iv(props, password)
+    decoder = Cipher(algorithms.AES(key), modes.CBC(iv)).decryptor()
+    return (decoder.update(contents) + decoder.finalize())[:size]
+
+
+def _decode_header(raw: bytes, source: Path, file_size: int, password: str | None = None) -> bytes:
+    """Decode bounded LZMA1/LZMA2 and AES metadata; never trust unchecked plaintext."""
     if raw.startswith(b'\x01'):
         return raw
     p = Parse(raw)
     p.tag(23)
     stream = _stream_info(p)
-    if p.pos != len(raw) or len(stream['coders']) != 1 or stream['coders'][0][0] != LZMA2_ID:
-        raise DeepRecoveryUnavailable('ENCRYPTED_OR_COMPLEX_7Z_HEADER')
+    coders = stream['coders']
+    encrypted = coders[0][0] == AES_ID
+    methods = [method for method, _ in coders]
+    supported = ([AES_ID], [LZMA1_ID], [LZMA2_ID],
+                 [AES_ID, LZMA1_ID], [AES_ID, LZMA2_ID])
+    if (p.pos != len(raw) or methods not in supported
+            or stream['binds'] != ([(1, 0)] if len(coders) == 2 else [])):
+        raise DeepRecoveryUnavailable('UNSUPPORTED_7Z_HEADER_CODER_GRAPH')
     offset = 32 + stream['pack_pos']
     packed = stream['pack_size']
-    if packed > HEADER_LIMIT or offset + packed > file_size:
+    if (not 0 < packed <= HEADER_LIMIT or offset + packed > file_size
+            or any(not 0 < size <= HEADER_LIMIT for size in stream['unpack_sizes'])):
         raise DeepRecoveryUnavailable('INVALID_PACKED_HEADER')
+    if stream.get('folder_crc') is None:
+        raise DeepRecoveryUnavailable('ENCODED_HEADER_CRC_REQUIRED')
     with source.open('rb') as file:
         file.seek(offset)
         contents = file.read(packed)
-    try:
-        dec = lzma.LZMADecompressor(format=lzma.FORMAT_RAW, filters=[
-            {'id': lzma.FILTER_LZMA2, 'dict_size': _dictionary_size(stream['coders'][0][1])}
-        ])
-        out = dec.decompress(contents, max_length=HEADER_LIMIT + 1)
-    except lzma.LZMAError as exc:
-        raise DeepRecoveryUnavailable('INVALID_ENCODED_HEADER') from exc
-    if len(out) != stream['unpack_sizes'][-1] or not dec.eof or len(out) > HEADER_LIMIT:
+    if encrypted:
+        contents = _decrypt_header(contents, coders[0][1], stream['unpack_sizes'][0], password)
+    out = contents
+    method, props = coders[-1]
+    if method != AES_ID:
+        try:
+            dec = lzma.LZMADecompressor(format=lzma.FORMAT_RAW,
+                                      filters=[_header_filter(method, props)])
+            # LZMA1 without EOS is size-terminated: range-coder flush bytes
+            # can decode as extra symbols, so do not request an extra byte.
+            limit = stream['unpack_sizes'][-1] + (method == LZMA2_ID)
+            out = dec.decompress(contents, max_length=limit)
+        except (lzma.LZMAError, ValueError) as exc:
+            raise DeepRecoveryUnavailable('INVALID_ENCODED_HEADER') from exc
+        # 7-Zip's LZMA1 metadata can omit EOS. Exact size AND decoded CRC
+        # verify it; LZMA2 must still contain its mandatory end marker.
+        if (method == LZMA2_ID and not dec.eof) or (dec.eof and dec.unused_data):
+            raise DeepRecoveryUnavailable('INVALID_ENCODED_HEADER')
+    if len(out) != stream['unpack_sizes'][-1]:
         raise DeepRecoveryUnavailable('INVALID_ENCODED_HEADER')
     if stream.get('folder_crc') is not None and zlib.crc32(out) != stream['folder_crc']:
         raise DeepRecoveryUnavailable('ENCODED_HEADER_CRC_MISMATCH')
@@ -287,7 +339,8 @@ class Metadata:
     files: list[tuple[str, int, int, int | None]]
 
 
-def inspect_7z(source: Path) -> Metadata:
+def inspect_7z(source: Path, password: str | None = None) -> Metadata:
+    """Read verified file metadata, using the password for encrypted headers too."""
     with source.open('rb') as file:
         intro = file.read(32)
         size = source.stat().st_size
@@ -302,7 +355,7 @@ def inspect_7z(source: Path) -> Metadata:
         raw = file.read(next_size)
     if zlib.crc32(raw) != next_crc:
         raise DeepRecoveryUnavailable('NEXT_HEADER_CRC_MISMATCH')
-    stream, files = _read_header(Parse(_decode_header(raw, source, size)))
+    stream, files = _read_header(Parse(_decode_header(raw, source, size, password)))
     coders, binds = stream['coders'], stream['binds']
     if len(coders) == 2 and [x[0] for x in coders] == [AES_ID, LZMA2_ID] and binds == [(1, 0)]:
         aes_props = coders[0][1]
@@ -467,7 +520,7 @@ def recover_aes_lzma2(source: Path, password: str | None, *, check: Callable[[],
     `publish` receives (name, chunks, exact_size, provenance) and must use the
     existing guarded descriptor-based result publisher. Returns True on success.
     """
-    meta = inspect_7z(source)
+    meta = inspect_7z(source, password)
     provenance_prefix = '7z_aes_lzma2' if meta.aes_props is not None else '7z_lzma2'
     stream_mode = 'aes_lzma2' if meta.aes_props is not None else 'plain_lzma2'
     recovered = 0
