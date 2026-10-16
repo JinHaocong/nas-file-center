@@ -156,6 +156,31 @@ describe('Console v2 native ThemeContext and zero direct AntD imports', () => {
     assert.ok(native.includes('.nfc-console-button'));
     assert.ok(native.includes(':focus-visible'));
   });
+  test('Stage 5E-AR real Chromium exercises theme storage, OS mode, and strict read-only boundaries', () => {
+    const browser = read('scripts/browser-theme-resilience.mjs');
+    const workflow = read('../.github/workflows/ui-v044-validation.yml');
+    for (const token of [
+      "const BASE = 'http://127.0.0.1:' + PORT",
+      "page.goto(BASE + '/login'",
+      "context.route('**/api/**'",
+      "req.method() !== 'GET'",
+      "status: 405",
+      "assert.deepEqual(rejectedWrites, []",
+      "selectOption('dark')",
+      "selectOption('system')",
+      "await first.emulateMedia({ colorScheme: 'dark' })",
+      "await second.emulateMedia({ colorScheme: 'dark' })",
+      "await expectTheme(second, 'dark', 'dark')",
+      "Object.defineProperty(window, 'matchMedia'",
+      "Object.defineProperty(window, 'localStorage'",
+      "assert.deepEqual(errors, []",
+      "assert.equal(completed, 3)",
+    ]) assert.ok(browser.includes(token), token);
+    assert.ok(workflow.includes('node scripts/browser-theme-resilience.mjs'));
+    assert.ok(workflow.includes('Run read-only Chromium ThemeProvider resilience matrix'));
+    assert.doesNotMatch(browser, /route\.continue\s*\(|route\.fallback\s*\(/);
+    assert.doesNotMatch(browser, /https:\/\//);
+  });
   test('all direct AntD import exceptions are removed; audit still fail-closes', () => {
     const guard = read('scripts/check-ant-design-tail.mjs');
     assert.ok(guard.includes('const allowed = new Set(['));
