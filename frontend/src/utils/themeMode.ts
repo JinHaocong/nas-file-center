@@ -48,3 +48,55 @@ export function syncThemeModeFromStorage(
   if (key !== null && key !== 'nfc_theme_mode') return current;
   return normalizeThemeMode(newValue);
 }
+
+/**
+ * Browser media APIs may be unavailable or reject queries in restricted
+ * contexts. Fall back to the established light system preference in that case;
+ * explicit light/dark selections are unaffected.
+ */
+export function readSystemDarkPreference(
+  query: () => MediaQueryList | null | undefined,
+): boolean {
+  try {
+    return Boolean(query()?.matches);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Observe OS scheme changes without assuming modern MediaQueryList events.
+ * The effect re-reads the current value to cover changes between render and
+ * subscription. Return an idempotent cleanup even when APIs are blocked.
+ */
+export function watchSystemDarkPreference(
+  query: () => MediaQueryList | null | undefined,
+  onChange: (dark: boolean) => void,
+): () => void {
+  let media: MediaQueryList | null | undefined;
+  try {
+    media = query();
+    if (!media) return () => {};
+    onChange(Boolean(media.matches));
+  } catch {
+    return () => {};
+  }
+
+  const handleChange = (event: MediaQueryListEvent) => onChange(Boolean(event.matches));
+  try {
+    media.addEventListener('change', handleChange);
+    return () => {
+      try { media.removeEventListener('change', handleChange); } catch { /* blocked */ }
+    };
+  } catch {
+    // Legacy WebKit MediaQueryList supported addListener/removeListener only.
+    try {
+      media.addListener(handleChange);
+      return () => {
+        try { media.removeListener(handleChange); } catch { /* blocked */ }
+      };
+    } catch {
+      return () => {};
+    }
+  }
+}
