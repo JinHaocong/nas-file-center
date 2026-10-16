@@ -57,3 +57,9 @@ The 120 light-mode review is a **targeted visual pass**, not complete frame-by-f
 The same eight-width / four-theme route screenshot CI now exercises native `Tab` and `Enter` in the actual production React app, for each of the 23 authenticated routes, with a strictly synthetic, read-only backend. It verifies the new first-Tab skip link is in view and has a visible focus outline, Enter moves DOM focus to `#main-content` (not only the hash), and the header navigation's real computed transitions/animations are at most 1ms in the already-requested reduced-motion browser context. New CSS is scoped to the skip control and does not hide Safe Mode or Worker indicators.
 
 This is **736 keyboard / reduced-motion route cases**, not a comprehensive manual keyboard/contrast/assistive-technology assessment or human sign-off. The existing 768 page screenshots and 32 Download Verification detail screenshots remain unchanged.
+
+## Focus-link computed contrast and motion guard
+
+The first-Tab route audit now checks the actual focused skip-link `getComputedStyle()` foreground, opaque background and outline in Chromium, after all historical CSS layers and light/dark/system overrides. It enforces at least **4.5:1** normal-text contrast and **3:1** visible focus-outline contrast, and saves measured ratios to the per-route manifest. The visible hit area must be at least **44px** tall. Both the header toggle and skip-link computed motion must be suppressed under `prefers-reduced-motion: reduce`.
+
+These checks run across the existing **23 authenticated routes × 8 widths × 4 theme cases (736 cases)**, with no added screenshots, writable API requests or UI changes. Other forms, overlays, full visual review, assistive-technology review and owner sign-off remain open; the high-level tally stays **68/74**.
