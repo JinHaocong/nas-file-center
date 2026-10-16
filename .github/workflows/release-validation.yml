@@ -102,9 +102,12 @@ jobs:
 
       - name: Build linux amd64 release candidate
         shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
           CANDIDATE_SHA="$(git rev-parse HEAD)"
+          test "${CANDIDATE_SHA}" = "${EXPECTED_SHA}"
           TAG="kerwinjhc/nas-file-center:0.4.7-rc-${CANDIDATE_SHA::7}"
           echo "candidate_sha=${CANDIDATE_SHA}" | tee docker-evidence.txt
           echo "candidate_tag=${TAG}" | tee -a docker-evidence.txt

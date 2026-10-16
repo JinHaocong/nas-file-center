@@ -7,6 +7,7 @@ try {
   execSync('node scripts/check-ant-design-tail.mjs', { stdio: 'inherit' });
   execSync('node scripts/check-console-css-ownership.mjs', { stdio: 'inherit' });
   execSync('node --test scripts/console-contrast.test.mjs', { stdio: 'inherit' });
+  execSync('node --test scripts/final-integration-gates.test.mjs', { stdio: 'inherit' });
   execSync('node --test scripts/visual-fixtures-archive.test.mjs', { stdio: 'inherit' });
   execSync('python3 ../scripts/tests/test_cleanup_merged_branches.py', { stdio: 'inherit' });
   execSync('python3 ../scripts/tests/test_retire_superseded_pure_white_branch.py', { stdio: 'inherit' });

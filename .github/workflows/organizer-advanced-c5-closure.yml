@@ -48,8 +48,11 @@ jobs:
 
       - name: Record candidate identity
         shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${EXPECTED_SHA}"
           {
             echo "candidate_sha=$(git rev-parse HEAD)"
             echo "candidate_ref=${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"
@@ -203,10 +206,15 @@ jobs:
 
       - name: Build linux amd64 Organizer C5 candidate
         shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
-          TAG="nas-file-center:organizer-c5-${GITHUB_SHA::7}"
-          echo "candidate_tag=${TAG}" | tee organizer-c5-docker-evidence.txt
+          CANDIDATE_SHA="$(git rev-parse HEAD)"
+          test "${CANDIDATE_SHA}" = "${EXPECTED_SHA}"
+          TAG="nas-file-center:organizer-c5-${CANDIDATE_SHA::7}"
+          echo "candidate_sha=${CANDIDATE_SHA}" | tee organizer-c5-docker-evidence.txt
+          echo "candidate_tag=${TAG}" | tee -a organizer-c5-docker-evidence.txt
           docker buildx build             --platform linux/amd64             --load             --tag "${TAG}"             . 2>&1 | tee organizer-c5-docker-build.log
           docker image inspect             --format 'id={{.Id}} os={{.Os}} arch={{.Architecture}} created={{.Created}}'             "${TAG}" | tee -a organizer-c5-docker-evidence.txt
           test "$(docker image inspect --format '{{.Architecture}}' "${TAG}")" = "amd64"
