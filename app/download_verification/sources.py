@@ -40,8 +40,8 @@ def validate_source_url(value: str) -> str:
     else:
         if ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_unspecified:
             raise ValueError("FORBIDDEN_SOURCE_HOST")
-        if parsed.scheme == "http":
-            raise ValueError("HTTP_REQUIRES_DOCKER_SERVICE_NAME")
+        if parsed.scheme == "http" and not ip.is_private:
+            raise ValueError("HTTP_REQUIRES_PRIVATE_NETWORK")
     return urlunsplit((parsed.scheme, parsed.netloc.lower(), "", "", ""))
 
 
