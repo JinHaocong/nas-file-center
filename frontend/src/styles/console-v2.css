@@ -543,9 +543,14 @@
 /* Issue #274: 768px recent-scans PNG showed one-glyph-wide filenames.
  * Keep the six columns in a locally scrollable table; do not affect
  * other Dashboard tables or the document's horizontal dimensions. */
-.nfc-v2-recent-scans-scroll:focus-visible {
-  outline: 2px solid var(--v2-indigo);
+/* Issue #274 follow-up: the element matched :focus-visible during real Tab
+ * navigation, but Chromium computed outline-width=0 in multiple theme cases.
+ * Give this keyboard-scrolling region an explicit, immediate focus indicator
+ * above historical transition/reset layers, without changing other controls. */
+.nfc-v2-shell .nfc-v2-recent-scans-scroll:focus-visible {
+  outline: 2px solid var(--v2-indigo) !important;
   outline-offset: -2px;
+  transition: none !important;
 }
 @media (min-width: 768px) and (max-width: 899px) {
   .nfc-v2-dashboard .nfc-v2-recent-scans-table {

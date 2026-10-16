@@ -1027,10 +1027,6 @@ body,
     gap: 15px;
   }
 
-  .nfc-app-main .nfc-page-header-copy {
-    max-width: 100%;
-  }
-
   .nfc-app-main .nfc-page-title {
     font-size: 24px;
     line-height: 1.2;

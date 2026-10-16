@@ -31,6 +31,19 @@ describe('Pure White Stage 5E-I v056 final cascade authority', () => {
     assert.doesNotMatch(css, /\.(?:ant-[a-z][\w-]*|anticon\b)/);
   });
 
+  test('retire old v056 isolated phone-width shadow and keep the later column fix', () => {
+    assert.doesNotMatch(css, /\.nfc-app-main \.nfc-page-header-copy\s*\{\s*max-width:\s*100%;\s*\}/);
+    const later = css.slice(css.indexOf('/* Responsive spacing correction'));
+    assert.match(later, /@media \(max-width: 767px\)/);
+    assert.match(later, /\.nfc-app-main \.nfc-page-header-copy\s*\{\s*width:\s*100%;\s*max-width:\s*100%;\s*flex:\s*0 1 auto;/);
+    assert.match(css, /@media \(max-width: 1199px\)[\s\S]*?\.nfc-app-main \.nfc-page-header-copy\s*\{\s*flex:\s*1 1 620px/);
+    assert.match(read('src/styles/console-v2.css'),
+      /\.nfc-v2-shell \.nfc-v2-dashboard-hero \.nfc-page-header-copy\s*\{\s*flex:\s*0 1 auto/);
+    const entry = read('src/main.tsx');
+    assert.ok(entry.indexOf("import './styles/v056-right-workspace-v2.css';") <
+      entry.indexOf("import './styles/console-v2.css';"));
+  });
+
   test('full read-only Chromium workspace and dense ledger gates remain active', () => {
     for (const needle of [
       '360, 390, 430, 768, 1024, 1280, 1440, 1920',

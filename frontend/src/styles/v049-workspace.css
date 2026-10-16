@@ -922,7 +922,6 @@ body,
   }
 
   .nfc-header.nfc-header {
-    min-height: 54px;
     margin-inline: 10px;
     padding-block: 5px;
   }
@@ -939,12 +938,6 @@ body,
     min-height: auto;
     margin-bottom: 18px;
     padding: 0 0 16px;
-    align-items: stretch;
-    gap: 12px;
-  }
-
-  .nfc-page-header-copy {
-    max-width: 100%;
   }
 
   .nfc-page-title {
@@ -961,12 +954,7 @@ body,
     justify-content: flex-start;
   }
 
-  .nfc-metric-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .nfc-metric-card {
-    min-height: 94px;
     padding: 12px;
   }
 
