@@ -53,18 +53,18 @@ export const DownloadVerificationPage: React.FC = () => {
   });
 
   return (
-    <div className="nfc-operations-page nfc-page-layout-workbench">
+    <div className="nfc-operations-page nfc-page-layout-workbench nfc-download-verify-page">
       <PageHeader title="下载完整性校验"
         description="从 OpenList WebDAV 读取 PikPak 全部文件字节，与 NAS 原始目录逐项 SHA256 比较。只读，不创建副本或修改文件。" />
       <DataPanel title="发起严格校验" description="需要在 API 和 Worker 配置相同的只读 WebDAV 连接；远端必须提供原始字节的同源完整 GET。">
         <p>连接：{config.data?.configured ? config.data.endpoint : '尚未配置 WebDAV（请由管理员配置并重新部署）'}</p>
         <div className="nfc-form-grid">
-          <label>WebDAV 远程相对目录（以已配置 /dav/ 为根）
+          <label className="nfc-download-verify-field"><span>WebDAV 远程相对目录（以已配置 /dav/ 为根）</span>
             <input type="text" aria-label="WebDAV 远程相对目录" value={remoteRoot}
               onChange={e => setRemoteRoot(e.target.value)} placeholder="PikPak/电影/2026" />
           </label>
-          <div>
-            <label>NAS 下载后目录</label>
+          <div className="nfc-download-verify-field">
+            <span>NAS 下载后目录</span>
             <DirectoryPicker value={localRoot} onChange={value => setLocalRoot(typeof value === 'string' ? value : value[0] || '')} />
           </div>
         </div>
@@ -76,8 +76,8 @@ export const DownloadVerificationPage: React.FC = () => {
       </DataPanel>
       <DataPanel title="校验历史" description="任务 completed 仅代表执行结束；只有 VERIFIED_IDENTICAL 才表示双端字节与目录清单通过本次校验。">
         {runs.isError && <p role="alert">读取校验历史失败</p>}
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', textAlign: 'left' }}>
+        <div className="nfc-download-verify-table-scroll">
+          <table className="nfc-download-verify-table" aria-label="校验历史">
             <thead><tr><th>任务</th><th>远端 / NAS</th><th>状态</th><th>结果</th><th>进度</th><th>操作</th></tr></thead>
             <tbody>
               {(runs.data?.items || []).map(run => <tr key={run.id}>
@@ -95,8 +95,8 @@ export const DownloadVerificationPage: React.FC = () => {
       </DataPanel>
       {selected !== null && <DataPanel title={'校验明细 #' + selected} description="逐路径展示文件 / 目录差异及完整 SHA256 结果，包含空目录。">
         {details.isError && <p role="alert">读取明细失败</p>}
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', textAlign: 'left' }}>
+        <div className="nfc-download-verify-table-scroll">
+          <table className="nfc-download-verify-table" aria-label="校验明细">
             <thead><tr><th>相对路径</th><th>状态</th><th>远端大小</th><th>NAS 大小</th><th>SHA256</th></tr></thead>
             <tbody>
               {(details.data?.items || []).map(item => <tr key={item.relative_path}>
