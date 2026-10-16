@@ -1,0 +1,39 @@
+/* Accessible keyboard bypass for the 23 authenticated React routes.
+ * The link is off-screen at rest, then appears above the sticky header
+ * when keyboard-focused. Portal dialogs retain their own focus management.
+ */
+.nfc-v2-shell .nfc-v2-skip-link {
+  position: fixed;
+  inset-block-start: max(12px, env(safe-area-inset-top));
+  inset-inline-start: max(12px, env(safe-area-inset-left));
+  z-index: 2500;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 10px 16px;
+  border: 2px solid var(--nfc-text);
+  border-radius: 8px;
+  background: var(--nfc-surface-1);
+  color: var(--nfc-text);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-decoration: none;
+  box-shadow: var(--nfc-shadow-overlay);
+  transform: translateY(calc(-100% - 28px));
+}
+
+.nfc-v2-shell .nfc-v2-skip-link:focus,
+.nfc-v2-shell .nfc-v2-skip-link:focus-visible {
+  transform: none;
+  outline: 3px solid var(--nfc-text);
+  outline-offset: 3px;
+}
+
+/* The skip-link is a navigation aid, never a motion effect. */
+@media (prefers-reduced-motion: reduce) {
+  .nfc-v2-shell .nfc-v2-skip-link {
+    transition: none !important;
+    animation: none !important;
+  }
+}
