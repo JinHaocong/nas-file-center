@@ -234,6 +234,12 @@ try {
           const heading = [...document.querySelectorAll('h1,h2')].map(x =>
             x.innerText.trim()).filter(Boolean).slice(0, 4);
           const area = main?.getBoundingClientRect();
+          const header = document.querySelector('.nfc-v2-header');
+          const identity = header?.querySelector('.nfc-v2-breadcrumb > strong');
+          const parentCrumb = header?.querySelector('.nfc-v2-breadcrumb > span');
+          const commandCluster = header?.querySelector('.nfc-header-command-cluster');
+          const left = header?.querySelector('.nfc-v2-header-left');
+          const identityStyle = identity ? getComputedStyle(identity) : null;
           return {
             pathname: location.pathname,
             effectiveTheme: document.documentElement.dataset.theme,
@@ -244,6 +250,16 @@ try {
             mainRight: area?.right ?? null,
             hasShell: Boolean(shell),
             busy: Boolean(main?.querySelector('.nfc-session-loading')),
+            mobileHeader: header && identity && commandCluster && left && parentCrumb ? {
+              identityText: identity.textContent?.trim() || '',
+              identityHeight: identity.getBoundingClientRect().height,
+              identityLineHeight: parseFloat(identityStyle.lineHeight),
+              identityWrap: identityStyle.whiteSpace,
+              parentCrumbDisplay: getComputedStyle(parentCrumb).display,
+              commandsLeft: commandCluster.getBoundingClientRect().left,
+              commandsRight: commandCluster.getBoundingClientRect().right,
+              leftRight: left.getBoundingClientRect().right,
+            } : null,
           };
         });
         if (audit.pathname !== item.path) problems.push('Route redirected: ' + audit.pathname);
@@ -253,6 +269,22 @@ try {
         if (audit.busy) problems.push('Still showing session loading');
         if (audit.horizontalOverflow > 3) problems.push(
           'Document horizontal overflow: ' + audit.horizontalOverflow + 'px');
+        if (width <= 767 && !item.public) {
+          const h = audit.mobileHeader;
+          if (!h) problems.push('Mobile page header controls are missing');
+          else {
+            if (!h.identityText) problems.push('Mobile page identity is empty');
+            if (h.identityWrap !== 'nowrap' ||
+                h.identityHeight > h.identityLineHeight + 2) problems.push(
+              'Mobile breadcrumb wraps onto two lines: ' + h.identityText);
+            if (h.parentCrumbDisplay !== 'none') problems.push(
+              'Redundant mobile parent breadcrumb consumes horizontal space');
+            if (h.leftRight > h.commandsLeft + 2) problems.push(
+              'Mobile page identity overlaps header status controls');
+            if (h.commandsRight > width + 2) problems.push(
+              'Mobile header actions exceed viewport width');
+          }
+        }
         if (item.id === 'download-verification') {
           const form = await tab.evaluate(() => {
             const field = document.querySelector('.nfc-download-verify-field');

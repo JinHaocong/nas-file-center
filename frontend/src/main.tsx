@@ -60,6 +60,7 @@ import './styles/console-v2-workflow-legacy-preview.css';
 import './styles/console-v2-plan-detail.css';
 import './styles/console-v2-archive-recovery.css';
 import './styles/console-v2-download-verification.css';
+import './styles/console-v2-mobile-header.css';
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
