@@ -485,6 +485,9 @@ try {
               focusVisible: element.matches(':focus-visible'),
               outline: style.outlineStyle,
               outlineWidth: parseFloat(style.outlineWidth),
+              outlineColor: style.outlineColor,
+              transitionDuration: style.transitionDuration,
+              computedAccent: style.getPropertyValue('--v2-indigo').trim(),
             };
           });
           audit.recentScansFocus = focus;
