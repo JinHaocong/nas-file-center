@@ -199,6 +199,11 @@ class DownloadVerificationHandler(TaskHandler):
                 from app.tasks.recovery import assert_active_worker_lease
                 if context.worker_id is not None:
                     assert_active_worker_lease(session, context.worker_id)
+                if source_id:
+                    final_source = session.get(DownloadVerificationSource, source_id)
+                    if (final_source is None or not final_source.active or
+                            final_source.revision != source_revision):
+                        raise VerificationError("SOURCE_CHANGED")
                 run = session.get(DownloadVerificationRun, run_id)
                 run.result = "DIFFERENT" if differences else ("METADATA_IDENTICAL" if mode == "metadata" else "VERIFIED_IDENTICAL")
                 run.checked = completed
