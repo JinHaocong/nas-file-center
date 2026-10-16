@@ -91,7 +91,7 @@ test('Organizer full regression and Docker evidence use the same exact source id
   requireExactCandidate(job(organizer, 'linux-amd64-docker'), 'Organizer C5 / Docker');
   assert.ok(organizer.includes('CANDIDATE_SHA="$(git rev-parse HEAD)"'));
   assert.ok(organizer.includes('organizer-c5-${CANDIDATE_SHA::7}'));
-  assert.doesNotMatch(organizer, /organizer-c5-${GITHUB_SHA::7}/,
+  assert.ok(!organizer.includes('organizer-c5-${GITHUB_SHA::7}'),
     'Docker tag must not claim GitHub synthetic merge ref identity');
   assert.ok(organizer.includes("      - 'frontend/**'"));
 });
