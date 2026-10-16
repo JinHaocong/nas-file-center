@@ -25,6 +25,7 @@ const routes = Object.freeze([
   { path: '/path-match', id: 'path-match' },
   { path: '/directory-diff', id: 'directory-diff' },
   { path: '/download-verification', id: 'download-verification' },
+  { path: '/download-sources', id: 'download-sources' },
   { path: '/filename-audit', id: 'filename-audit' },
   { path: '/rename', id: 'rename' },
   { path: '/batch', id: 'batch' },
@@ -48,7 +49,7 @@ const tested = routes.map(r => r.template || r.path.slice(1));
 assert.equal(new Set(tested).size, tested.length, 'Duplicate visual route case');
 assert.deepEqual([...tested].sort(), [...declared].sort(),
   'Visual matrix must include every router path, including dynamic details');
-assert.equal(routes.length, 24);
+assert.equal(routes.length, 25);
 
 const width = Number(process.env.NFC_VISUAL_WIDTH);
 assert.ok(visualViewports.includes(width), 'Set NFC_VISUAL_WIDTH to one of the eight required widths');
@@ -149,6 +150,10 @@ function fixture(path) {
   if (path === '/api/workflows/1') return fixtureWorkflow;
   if (path === '/api/workflows/1/revisions') return [];
   if (path === '/api/workflows') return [fixtureWorkflow];
+  if (path === '/api/download-verifications/sources') return { items: [
+    { id: 1, name: 'AList', provider: 'alist', base_url: 'http://alist:5244',
+      username: '', has_password: false, revision: 1, active: true },
+  ] };
   if (path === '/api/download-verifications/configuration') return {
     configured: false, endpoint: '', mode: 'strict', read_only: true,
   };

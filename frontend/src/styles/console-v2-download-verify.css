@@ -71,3 +71,105 @@
   .nfc-dv-local,.nfc-dv-manager-grid .nfc-dv-wide {grid-column:auto;}
   .nfc-download-verify .nfc-data-panel-body {padding:13px;}
 }
+
+
+/* Clear two-directory workbench: NAS and remote controls have matching surfaces. */
+.nfc-download-verify-page .nfc-dv-workspace { display:grid;gap:21px; }
+.nfc-download-verify-page .nfc-dv-workspace > .nfc-dv-source { max-width:520px; }
+.nfc-download-verify-page .nfc-dv-pair {
+  display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:15px;align-items:stretch;
+}
+.nfc-download-verify-page .nfc-dv-pair-card {
+  border:1px solid var(--dv-line);background:var(--dv-paper);
+  border-radius:12px;padding:17px;min-width:0;display:grid;align-content:start;gap:13px;
+}
+.nfc-download-verify-page .nfc-dv-pair-heading {
+  display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px;color:var(--dv-text);
+}
+.nfc-download-verify-page .nfc-dv-pair-heading svg {color:var(--nfc-accent);}
+.nfc-download-verify-page .nfc-dv-pair-card .nfc-dv-field {width:100%;}
+.nfc-download-verify-page .nfc-dv-pair-card .nfc-v2-directory-picker {width:100%;min-width:0;}
+.nfc-download-verify-page .nfc-dv-pair-card .nfc-directory-picker-single {min-width:0;}
+.nfc-download-verify-page .nfc-dv-pair-card .nfc-dv-control-row > .nfc-console-button {
+  flex:0 0 auto;white-space:nowrap;
+}
+.nfc-download-verify-page .nfc-dv-modes {margin:0;gap:12px;}
+.nfc-download-verify-page .nfc-dv-modes > label {
+  background:var(--dv-paper);transition:border-color .15s ease;
+}
+.nfc-download-verify-page .nfc-dv-modes > label.is-selected {
+  background:color-mix(in srgb,var(--nfc-accent) 7%,var(--dv-paper));
+}
+.nfc-download-verify-page .nfc-dv-footer {
+  display:flex;align-items:center;justify-content:space-between;gap:17px;
+  border-top:1px solid var(--dv-line);padding-top:17px;
+}
+.nfc-download-verify-page .nfc-dv-footer p {margin:0;max-width:670px;color:var(--dv-muted);font-size:12px;line-height:1.7;}
+.nfc-download-verify-page .nfc-dv-footer .nfc-console-button {flex:0 0 auto;}
+.nfc-download-verify-page .nfc-dv-feedback {font-size:12px;color:#17845f;}
+.nfc-download-verify-page .nfc-dv-table-scroll {width:100%;box-sizing:border-box;}
+.nfc-download-verify-page .nfc-dv-table {min-width:990px;}
+.nfc-download-verify-page .nfc-dv-table td {line-height:1.65;}
+.nfc-download-verify-page .nfc-dv-id {white-space:nowrap;font-weight:700;}
+.nfc-download-verify-page .nfc-dv-path {overflow-wrap:anywhere;max-width:480px;font-weight:620;}
+.nfc-download-verify-page .nfc-dv-local-path {display:block;margin-top:6px;color:var(--dv-muted);font-size:11px;overflow-wrap:anywhere;}
+.nfc-download-verify-page .nfc-dv-result {font-size:12px;line-height:1.6;}
+.nfc-download-verify-page .nfc-dv-result.is-matched {color:#19805e;font-weight:650;}
+.nfc-download-verify-page .nfc-dv-result.is-different {color:#b63852;font-weight:650;}
+.nfc-download-verify-page .nfc-dv-row-actions {
+  display:flex;align-items:center;gap:7px;flex-wrap:nowrap;
+}
+.nfc-download-verify-page .nfc-dv-row-actions .nfc-console-button {
+  white-space:nowrap;flex:0 0 auto;min-height:34px;
+}
+.nfc-download-verify-page .nfc-dv-no-rows {padding:28px 16px;text-align:center;color:var(--dv-muted);}
+.nfc-download-verify-page .nfc-dv-pagination {border-top:1px solid var(--dv-line);}
+.nfc-dv-remote-dialog .nfc-dv-remote-breadcrumb {
+  display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap;
+}
+.nfc-dv-remote-dialog .nfc-dv-remote-breadcrumb > span {overflow-wrap:anywhere;font-weight:650;}
+.nfc-dv-remote-dialog .nfc-dv-remote-file {
+  display:flex;align-items:center;gap:10px;min-width:0;width:100%;
+  color:var(--nfc-dialog-muted);overflow-wrap:anywhere;
+}
+.nfc-dv-remote-dialog .nfc-dv-remote-file span {flex:1;min-width:0;}
+.nfc-dv-remote-dialog .nfc-dv-remote-file small {white-space:nowrap;}
+.nfc-dv-remote-dialog .nfc-dv-remote-current {
+  display:block;overflow-wrap:anywhere;max-width:440px;margin-top:7px;font-size:13px;
+}
+.nfc-dv-source-page .nfc-dv-source-list {display:grid;gap:10px;}
+.nfc-dv-source-page .nfc-dv-source-entry {
+  display:flex;gap:14px;align-items:center;padding:16px;
+  border:1px solid var(--dv-line);background:var(--dv-paper);border-radius:11px;min-width:0;
+}
+.nfc-dv-source-page .nfc-dv-source-symbol {
+  display:flex;align-items:center;justify-content:center;
+  flex:0 0 42px;height:42px;border-radius:11px;background:var(--dv-soft);
+  color:var(--nfc-accent);
+}
+.nfc-dv-source-page .nfc-dv-source-info {display:grid;gap:5px;flex:1;min-width:0;overflow-wrap:anywhere;}
+.nfc-dv-source-page .nfc-dv-source-info strong {font-size:13px;}
+.nfc-dv-source-page .nfc-dv-source-info span {font-size:12px;}
+.nfc-dv-source-page .nfc-dv-source-info small {font-size:11px;color:var(--dv-muted);}
+.nfc-dv-source-page .nfc-dv-source-buttons {display:flex;gap:8px;flex:0 0 auto;}
+.nfc-dv-source-page .nfc-dv-source-form {max-width:790px;display:grid;gap:14px;}
+.nfc-dv-source-page .nfc-dv-source-form label {display:grid;gap:7px;min-width:0;font-size:12px;font-weight:640;}
+.nfc-dv-source-page .nfc-dv-empty {
+  padding:30px 16px;display:grid;justify-items:center;gap:11px;
+  color:var(--dv-muted);text-align:center;
+}
+.nfc-dv-source-page .nfc-dv-empty strong {color:var(--dv-text);}
+@media(max-width:950px) {
+  .nfc-download-verify-page .nfc-dv-pair {grid-template-columns:minmax(0,1fr);}
+}
+@media(max-width:767px) {
+  .nfc-download-verify-page .nfc-dv-pair-card {padding:13px;}
+  .nfc-download-verify-page .nfc-dv-footer {align-items:stretch;flex-direction:column;}
+  .nfc-download-verify-page .nfc-dv-footer .nfc-console-button {width:100%;justify-content:center;}
+  .nfc-dv-source-page .nfc-dv-source-entry {align-items:flex-start;flex-wrap:wrap;}
+  .nfc-dv-source-page .nfc-dv-source-buttons {width:100%;padding-left:56px;}
+  .nfc-dv-source-page .nfc-dv-manager-grid {grid-template-columns:minmax(0,1fr);}
+  .nfc-dv-source-page .nfc-dv-manager-grid .nfc-dv-wide {grid-column:auto;}
+  .nfc-dv-remote-dialog .nfc-directory-picker-footer {align-items:stretch;flex-wrap:wrap;}
+  .nfc-dv-remote-dialog .nfc-directory-picker-footer-actions {width:100%;justify-content:flex-end;}
+}
