@@ -4,7 +4,7 @@ Status: **new automated visual-evidence gate; NOT visual owner approval**.
 
 ## Scope: exhaustive router coverage
 
-Audit all **24 actual React Router routes**, including `/login`, the 18 top-level authenticated navigation pages, and the four parameterized detail/editor routes (`/scans/:id`, `/scans/:id/dedupe`, `/workflows/:id`, `/plans/:id`), plus non-navigation Archive Recovery and other routes as declared in `frontend/src/router/index.tsx`. The test derives the router inventory and fails when it differs from the visual case list; new routes cannot silently bypass the audit.
+Audit all **24 actual React Router routes**, including `/login`, the 19 top-level authenticated navigation pages, and the four parameterized detail/editor routes (`/scans/:id`, `/scans/:id/dedupe`, `/workflows/:id`, `/plans/:id`), plus non-navigation Archive Recovery and other routes as declared in `frontend/src/router/index.tsx`. The test derives the router inventory and fails when it differs from the visual case list; new routes cannot silently bypass the audit.
 
 For each route, the built production React frontend is visited in **8 viewport widths** (360/390/430/768/1024/1280/1440/1920) × **4 theme cases** (light, dark, system-light, system-dark). The 8 CI matrix jobs provide **768 route/theme/width renders**, each with its own actual Chromium screenshot and diagnostic entry. At 390 and 1440 light the script captures full-page screenshots to inspect below-the-fold controls; the remaining cases capture the visible viewport.
 
