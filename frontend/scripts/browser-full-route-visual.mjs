@@ -473,16 +473,25 @@ try {
           // AFTER the normal screenshot and skip-link focus checks.
           const scroll = tab.locator('.nfc-v2-recent-scans-scroll');
           await scroll.focus();
+          // Programmatic .focus() alone does not guarantee :focus-visible.
+          // Walk the real Tab sequence into the first row and Shift+Tab
+          // back to the scroll region before checking keyboard focus chrome.
+          await tab.keyboard.press('Tab');
+          await tab.keyboard.press('Shift+Tab');
           const focus = await scroll.evaluate(element => {
             const style = getComputedStyle(element);
             return {
               isFocused: document.activeElement === element,
+              focusVisible: element.matches(':focus-visible'),
               outline: style.outlineStyle,
               outlineWidth: parseFloat(style.outlineWidth),
             };
           });
-          if (!focus.isFocused || focus.outline === 'none' || focus.outlineWidth < 2)
-            problems.push('Tablet recent scans keyboard focus indicator is missing');
+          audit.recentScansFocus = focus;
+          if (!focus.isFocused || !focus.focusVisible ||
+              focus.outline === 'none' || focus.outlineWidth < 2)
+            problems.push('Tablet recent scans keyboard focus indicator is missing: ' +
+              JSON.stringify(focus));
           await tab.keyboard.press('ArrowRight');
           await tab.waitForTimeout(120);
           const scrollLeft = await scroll.evaluate(element => element.scrollLeft);
