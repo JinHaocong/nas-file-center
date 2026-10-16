@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { visualViewports, visualThemes } from './visual-fixtures.mjs';
+import { computedContrastRatio } from './computed-contrast.mjs';
 
 const browser = readFileSync('scripts/browser-full-route-visual.mjs', 'utf8');
 const routes = readFileSync('src/router/index.tsx', 'utf8');
@@ -122,4 +123,23 @@ test('every authenticated route has a real first-Tab bypass with visible light/d
     "navTransitionSeconds",
     "locationHash",
   ]) assert.ok(browser.includes(phrase), 'Missing executable Chromium a11y regression: ' + phrase);
+});
+
+test('computed focus contrast tests Chromium colors rather than CSS tokens', () => {
+  assert.equal(computedContrastRatio('rgb(0, 0, 0)', 'rgb(255, 255, 255)'), 21);
+  assert.equal(computedContrastRatio('rgb(32, 32, 31)', 'rgb(32, 32, 31)'), 1);
+  assert.ok(computedContrastRatio('rgb(160, 160, 160)', 'rgb(255, 255, 255)') < 4.5);
+  assert.throws(() => computedContrastRatio('rgba(0, 0, 0, 0.5)', 'rgb(255, 255, 255)'),
+    /opaque computed RGB/);
+  assert.throws(() => computedContrastRatio('rgb(999, 0, 0)', 'rgb(255, 255, 255)'),
+    /exceeds 255/);
+  for (const phrase of [
+    "computedContrastRatio(\n            focusAudit.focusColor, focusAudit.focusBackground)",
+    "focusAudit.focusOutlineColor, focusAudit.focusBackground",
+    "focusTextContrast < 4.5",
+    "focusOutlineContrast < 3",
+    "audit.skipFocusContrast",
+    "rect.width >= 80 && rect.height >= 44",
+    "focusAudit.skipTransitionSeconds, focusAudit.skipAnimationSeconds",
+  ]) assert.ok(browser.includes(phrase), 'Missing computed Chromium focus assertion: ' + phrase);
 });
