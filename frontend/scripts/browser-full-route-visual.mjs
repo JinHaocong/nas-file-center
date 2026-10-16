@@ -12,6 +12,7 @@ import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { chromium } from 'playwright';
 import { visualThemes, visualViewports, visualAdminFixture, visualSafeSettingsFixture } from './visual-fixtures.mjs';
+import { computedContrastRatio } from './computed-contrast.mjs';
 
 const routes = Object.freeze([
   { path: '/login', id: 'login', public: true },
@@ -333,9 +334,14 @@ try {
               skipHref: skip?.getAttribute('href') ?? '',
               skipVisible: Boolean(rect && rect.top >= -1 && rect.left >= -1 &&
                 rect.right <= innerWidth + 1 && rect.bottom <= innerHeight + 1 &&
-                rect.width >= 80 && rect.height >= 40),
+                rect.width >= 80 && rect.height >= 44),
               focusOutline: Boolean(style && style.outlineStyle !== 'none' &&
                 parseFloat(style.outlineWidth) >= 2),
+              focusColor: style?.color ?? '',
+              focusBackground: style?.backgroundColor ?? '',
+              focusOutlineColor: style?.outlineColor ?? '',
+              skipTransitionSeconds: style?.transitionDuration ?? '',
+              skipAnimationSeconds: style?.animationDuration ?? '',
               reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
               navTransitionSeconds: navMotion?.transitionDuration ?? '',
               navAnimationSeconds: navMotion?.animationDuration ?? '',
@@ -346,8 +352,23 @@ try {
             'First Tab must focus an accessible skip-to-main link');
           if (!focusAudit.skipVisible || !focusAudit.focusOutline) problems.push(
             'Keyboard skip link is clipped, hidden or has no visible focus outline');
+          // Check focused computed colors after ALL CSS layers, not token strings.
+          // WCAG AA: >=4.5:1 text and >=3:1 non-text focus indication.
+          const focusTextContrast = computedContrastRatio(
+            focusAudit.focusColor, focusAudit.focusBackground);
+          const focusOutlineContrast = computedContrastRatio(
+            focusAudit.focusOutlineColor, focusAudit.focusBackground);
+          audit.skipFocusContrast = {
+            text: Number(focusTextContrast.toFixed(2)),
+            outline: Number(focusOutlineContrast.toFixed(2)),
+          };
+          if (focusTextContrast < 4.5) problems.push(
+            'Skip link computed text contrast below 4.5:1: ' + focusTextContrast.toFixed(2));
+          if (focusOutlineContrast < 3) problems.push(
+            'Skip link computed focus indicator contrast below 3:1: ' + focusOutlineContrast.toFixed(2));
           if (!focusAudit.reducedMotion ||
-              [focusAudit.navTransitionSeconds, focusAudit.navAnimationSeconds]
+              [focusAudit.navTransitionSeconds, focusAudit.navAnimationSeconds,
+                focusAudit.skipTransitionSeconds, focusAudit.skipAnimationSeconds]
                 .flatMap(value => value.split(','))
                 .some(value => {
                   const number = parseFloat(value);
