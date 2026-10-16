@@ -1,0 +1,98 @@
+/* Download Verification — actual 390px and 1024px Chromium visual-review repair.
+ * Keep the Pure White palette and let six-column evidence tables scroll locally.
+ */
+.nfc-download-verify-page .nfc-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 16px;
+}
+
+.nfc-download-verify-page .nfc-download-verify-field {
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+  align-content: start;
+  color: var(--nfc-text);
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.nfc-download-verify-page .nfc-download-verify-field > span {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.nfc-download-verify-page .nfc-download-verify-field input {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  min-height: var(--nfc-control-height-touch);
+  font-weight: 450;
+}
+
+.nfc-download-verify-page .nfc-download-verify-field > div {
+  min-width: 0;
+}
+
+.nfc-download-verify-table-scroll {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
+.nfc-download-verify-table {
+  width: 100%;
+  min-width: 740px;
+  table-layout: auto;
+  border-collapse: collapse;
+  color: var(--nfc-text);
+  text-align: left;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.nfc-download-verify-table th,
+.nfc-download-verify-table td {
+  padding: 11px 13px;
+  border-bottom: 1px solid var(--nfc-border-soft);
+  vertical-align: top;
+}
+
+.nfc-download-verify-table th {
+  white-space: nowrap;
+  font-weight: 680;
+  color: var(--nfc-text-muted);
+}
+
+.nfc-download-verify-table td:nth-child(2) {
+  min-width: 200px;
+  overflow-wrap: anywhere;
+}
+
+.nfc-download-verify-table td:last-child {
+  white-space: nowrap;
+}
+
+.nfc-download-verify-table tr:last-child td {
+  border-bottom: 0;
+}
+
+@media (max-width: 767px) {
+  .nfc-download-verify-page .nfc-form-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+  }
+  .nfc-download-verify-page .nfc-download-verify-field {
+    font-size: 13px;
+  }
+  .nfc-download-verify-table {
+    min-width: 720px;
+  }
+}

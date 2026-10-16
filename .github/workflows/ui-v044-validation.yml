@@ -232,3 +232,68 @@ jobs:
             frontend/artifacts/browser-media-ledger-states/*.png
             frontend/artifacts/browser-archive-recovery-selection/*.png
             frontend/artifacts/browser-archive-recovery-task-continuity/*.png
+
+  # Every router path with read-only mock APIs, 8 viewports x 4 themes.
+  # Captures actual React screenshots and JSON diagnostics, NOT owner sign-off.
+  full-route-visual-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        width: [360, 390, 430, 768, 1024, 1280, 1440, 1920]
+    steps:
+      - name: Checkout exact candidate HEAD
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify candidate identity
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "${EXPECTED_SHA}"
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install application dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install isolated Chromium test runner
+        working-directory: frontend
+        run: |
+          npm install --no-save --package-lock=false playwright@1.56.1
+          npx playwright install chromium
+
+      - name: Build actual production frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Install and verify Chinese screenshot fonts
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends fonts-noto-cjk
+          fc-cache -f
+          fc-match -f '%{family}\\n' ':lang=zh-cn' | grep -E 'Noto (Sans|Serif) CJK'
+
+      - name: Visit every React route with safe mock data and capture real screenshots
+        working-directory: frontend
+        env:
+          NFC_VISUAL_WIDTH: ${{ matrix.width }}
+        run: node scripts/browser-full-route-visual.mjs
+
+      - name: Upload all-route screenshots and per-page defect manifest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-route-visual-${{ matrix.width }}-${{ github.event.pull_request.head.sha || github.sha }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: frontend/artifacts/full-route-visual/${{ matrix.width }}/
