@@ -173,6 +173,10 @@ def test_inner_tar_is_extracted_and_intermediate_removed(tmp_path):
     assert not (dest / 'inner.tar').exists()
     assert report['known_total'] == 1
     assert report['stats']['unverified'] == 1
+    assert report['inventory']['recovered_files'] == 1
+    assert report['inventory']['unrecovered_files'] == 0
+    assert report['missing_files'] == []
+    assert report['file_outcomes'][0]['reason'] == 'NESTED_TAR_EXPANDED'
 
 
 def test_zip_midstream_gap_resynchronizes_only_crc_validated_headers(tmp_path):
@@ -212,3 +216,76 @@ def test_interrupted_cleanup_only_removes_owned_parts(tmp_path):
     assert clean_interrupted_parts(output, identity) == 1
     assert not tmp.exists()
     assert unknown.exists() and good.read_text() == 'keep'
+
+def test_duplicate_manifest_names_do_not_claim_one_published_file_twice():
+    from app.archive_recovery.core import _file_outcomes
+    outcomes, missing = _file_outcomes([
+        ('repeat.txt', 4), ('repeat.txt', 4),
+    ], [{'name': 'repeat.txt', 'path': 'repeat.txt',
+         'bytes': 4, 'status': 'integrity_passed'}])
+    assert [r['status'] for r in outcomes] == ['integrity_passed', 'unrecovered']
+    assert len(missing) == 1
+
+
+def test_libarchive_warn_header_can_continue_to_next_entry(tmp_path, monkeypatch):
+    """libarchive ARCHIVE_WARN returns a usable entry, unlike ARCHIVE_FATAL."""
+    import ctypes
+    import os
+    import stat
+    from app.archive_recovery import core
+
+    class Fn:
+        def __init__(self, callback):
+            self.callback = callback
+        def __call__(self, *args):
+            return self.callback(*args)
+
+    class Lib:
+        def __init__(self):
+            self.index = -1
+            self.sent = False
+            self.archive_read_new = Fn(lambda: 1)
+            self.archive_read_support_filter_all = Fn(lambda *args: 0)
+            self.archive_read_support_format_all = Fn(lambda *args: 0)
+            self.archive_read_add_passphrase = Fn(lambda *args: 0)
+            self.archive_read_open_filename = Fn(lambda *args: 0)
+            self.archive_read_next_header = Fn(self.next_header)
+            self.archive_entry_pathname = Fn(
+                lambda *args: [b"first.txt", b"last.txt"][self.index])
+            self.archive_entry_filetype = Fn(lambda *args: stat.S_IFREG)
+            self.archive_entry_size = Fn(lambda *args: 4)
+            self.archive_read_data = Fn(self.read_data)
+            self.archive_error_string = Fn(lambda *args: b"warning")
+            self.archive_read_free = Fn(lambda *args: 0)
+
+        def next_header(self, _handle, entry_ptr):
+            self.index += 1
+            self.sent = False
+            if self.index >= 2:
+                return 1
+            ctypes.cast(entry_ptr, ctypes.POINTER(ctypes.c_void_p))[0] = ctypes.c_void_p(2)
+            return -20 if self.index == 0 else 0
+
+        def read_data(self, _handle, dest, _length):
+            if self.sent:
+                return 0
+            ctypes.memmove(dest, b"data", 4)
+            self.sent = True
+            return 4
+
+    lib = Lib()
+    monkeypatch.setattr(core.ctypes.util, "find_library", lambda _name: "fake-archive")
+    monkeypatch.setattr(core.ctypes, "CDLL", lambda _name: lib)
+    src = tmp_path / "archive.7z"
+    src.write_bytes(b"synthetic")
+    out = tmp_path / "out"
+    out.mkdir()
+    directory = os.open(out, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    items = []
+    try:
+        core._libarchive(src, out, directory, core.Budget(), items, None)
+    finally:
+        os.close(directory)
+    assert [r["name"] for r in items] == ["first.txt", "last.txt"]
+    assert (out / "first.txt").read_bytes() == b"data"
+    assert (out / "last.txt").read_bytes() == b"data"
