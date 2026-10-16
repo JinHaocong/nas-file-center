@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { restoreThemeMode, persistThemeMode, shouldUseDarkTheme, syncThemeModeFromStorage, type ThemeMode } from '../utils/themeMode';
+import { restoreThemeMode, persistThemeMode, shouldUseDarkTheme, syncThemeModeFromStorage, readSystemDarkPreference, watchSystemDarkPreference, type ThemeMode } from '../utils/themeMode';
 
 // Preserve the public type contract for Login, Settings, and shell consumers.
 export type { ThemeMode } from '../utils/themeMode';
@@ -20,21 +20,17 @@ const ThemeContext = createContext<ThemeContextType>({
  * Native theme context. Design tokens belong to existing :root and
  * [data-theme='dark'] CSS declarations, not a component-library-specific JavaScript provider.
  */
+const systemColorSchemeQuery = () => window.matchMedia?.('(prefers-color-scheme: dark)');
+
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [mode, setModeState] = useState<ThemeMode>(() =>
     restoreThemeMode(() => localStorage.getItem('nfc_theme_mode')),
   );
   const [systemDark, setSystemDark] = useState(() =>
-    Boolean(window.matchMedia?.('(prefers-color-scheme: dark)').matches),
+    readSystemDarkPreference(systemColorSchemeQuery),
   );
 
-  useEffect(() => {
-    const mediaQuery = window.matchMedia?.('(prefers-color-scheme: dark)');
-    if (!mediaQuery) return;
-    const handleChange = (event: MediaQueryListEvent) => setSystemDark(event.matches);
-    mediaQuery.addEventListener('change', handleChange);
-    return () => mediaQuery.removeEventListener('change', handleChange);
-  }, []);
+  useEffect(() => watchSystemDarkPreference(systemColorSchemeQuery, setSystemDark), []);
 
   // Theme preferences are shared between tabs. StorageEvent does not fire
   // in the tab that made the change, and events from sessionStorage must not
