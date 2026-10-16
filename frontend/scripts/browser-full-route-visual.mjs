@@ -43,7 +43,7 @@ const routes = Object.freeze([
 // Ensure the inventory changes when a new React route is introduced.
 const router = readFileSync('src/router/index.tsx', 'utf8');
 const declared = [...router.matchAll(/<Route\s+path="([^"]+)"/g)]
-  .map(m => m[1]).filter(path => path !== '*');
+  .map(m => m[1].replace(/^\/+/, '')).filter(path => path !== '*' && path !== '');
 const tested = routes.map(r => r.template || r.path.slice(1));
 assert.equal(new Set(tested).size, tested.length, 'Duplicate visual route case');
 assert.deepEqual([...tested].sort(), [...declared].sort(),
