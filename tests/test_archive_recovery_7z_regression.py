@@ -257,3 +257,86 @@ def test_7z_deep_does_not_override_safety_failures(tmp_path, monkeypatch, reason
         core.recover_archive(source, out, deep=True)
     assert not (out / "可恢复.bin").exists()
     assert source.exists()
+
+
+def test_verified_7z_header_identifies_every_unrecovered_file(tmp_path, monkeypatch):
+    """A silent decoder stop must not hide the unvisited names in an intact 7z header."""
+    source = tmp_path / "intact-header-corrupt-body.7z"
+    _plain_7z(source, os.urandom(8000), os.urandom(9000))
+    out = tmp_path / "out"
+    out.mkdir()
+    monkeypatch.setattr(core, "_libarchive", lambda *args: None)
+    report = core.recover_archive(source, out, deep=False)
+    assert report["known_total"] == 2
+    assert report["inventory"]["status"] == "verified"
+    assert report["inventory"]["recovered_files"] == 0
+    assert report["inventory"]["unrecovered_files"] == 2
+    assert {r["name"] for r in report["missing_files"]} == {"broken.bin", "可恢复.bin"}
+    assert all(r["reason"] == "NOT_EXTRACTED_FROM_VERIFIED_HEADER" for r in report["missing_files"])
+
+
+def test_deep_success_is_reconciled_against_7z_header(tmp_path, monkeypatch):
+    """Do not double-count a failed standard attempt after CRC-backed deep recovery."""
+    source = tmp_path / "damaged.7z"
+    second = os.urandom(9000)
+    _plain_7z(source, os.urandom(8000), second)
+    out = tmp_path / "out"
+    out.mkdir()
+    def standard(*args):
+        args[4].append({"name": "可恢复.bin", "status": "unrecovered",
+                        "reason": "STANDARD_DECODER_FAILED"})
+    monkeypatch.setattr(core, "_libarchive", standard)
+    report = core.recover_archive(source, out, deep=True)
+    assert (out / "可恢复.bin").read_bytes() == second
+    assert report["inventory"]["status"] == "verified"
+    assert report["inventory"]["recovered_files"] == 1
+    assert report["inventory"]["unrecovered_files"] == 1
+    assert [r["name"] for r in report["missing_files"]] == ["broken.bin"]
+    recovered = next(r for r in report["file_outcomes"] if r["name"] == "可恢复.bin")
+    assert recovered["status"] == "integrity_passed"
+
+
+def test_limit_aborted_recovery_still_lists_unvisited_header_files(tmp_path, monkeypatch):
+    """An error after one file cannot erase the other known archive names."""
+    source = tmp_path / "large.7z"
+    _plain_7z(source, os.urandom(8000), os.urandom(9000))
+    output = tmp_path / "out"
+    output.mkdir()
+    (output / "broken.bin").write_bytes(b"some extracted bytes")
+    initial = source.stat()
+    dest_stat = output.stat()
+    settings = SimpleNamespace(
+        allow_mutation=True, allowed_roots=[str(tmp_path)],
+        quarantine_root=tmp_path / ".trash", config_dir=tmp_path / "config"
+    )
+    job = SimpleNamespace(id=9003, state_json=json.dumps({
+        "source": str(source), "output": str(output), "deep": True,
+        "identity": list(map(str, [
+            initial.st_dev, initial.st_ino, initial.st_size, initial.st_mtime_ns
+        ])),
+        "output_identity": list(map(str, [dest_stat.st_dev, dest_stat.st_ino])),
+    }))
+    context = SimpleNamespace(checkpoint=lambda **_kwargs: None)
+
+    def limited(_source, _output, **kwargs):
+        kwargs["items"].append({
+            "name": "broken.bin", "path": "broken.bin",
+            "bytes": len(b"some extracted bytes"), "status": "unverified",
+        })
+        raise core.RecoveryError("RESOURCE_LIMIT")
+
+    monkeypatch.setattr(integration, "recover_archive", limited)
+    with pytest.raises(core.RecoveryError, match="RESOURCE_LIMIT"):
+        integration.ArchiveRecoveryHandler().run(job, context, settings)
+    report = json.loads(integration.report_path(settings, job.id).read_text())
+    assert report["recovery_status"] == "failed"
+    assert report["error_code"] == "RESOURCE_LIMIT"
+    assert report["known_total"] == 2
+    assert report["inventory"]["unrecovered_files"] == 2
+    assert {r["name"] for r in report["missing_files"]} == {
+        "broken.bin", "可恢复.bin"
+    }
+    assert next(r for r in report["missing_files"] if r["name"] == "broken.bin")[
+        "reason"
+    ] == "DECLARED_SIZE_MISMATCH"
+    assert source.exists()
