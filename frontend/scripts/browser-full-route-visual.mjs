@@ -141,6 +141,9 @@ function fixture(path) {
   if (path === '/api/scans/1/groups') return page([]);
   if (path === '/api/scans') return page([fixtureScan]);
   if (path === '/api/plans/1/items' || path === '/api/plans/1/operation-journal') return page([]);
+  if (path === '/api/plans/legacy/summary') return {
+    plan_count: 2, item_count: 8, affected_scan_count: 1,
+  };
   if (path === '/api/plans/1') return fixturePlan;
   if (path === '/api/plans') return page([fixturePlan]);
   if (path === '/api/workflows/1') return fixtureWorkflow;
@@ -250,6 +253,27 @@ try {
         if (audit.busy) problems.push('Still showing session loading');
         if (audit.horizontalOverflow > 3) problems.push(
           'Document horizontal overflow: ' + audit.horizontalOverflow + 'px');
+        if (item.id === 'download-verification') {
+          const form = await tab.evaluate(() => {
+            const field = document.querySelector('.nfc-download-verify-field');
+            const name = field?.querySelector('span');
+            const input = field?.querySelector('input');
+            const scroller = document.querySelector('.nfc-download-verify-table-scroll');
+            return {
+              labelBottom: name?.getBoundingClientRect().bottom ?? 0,
+              inputTop: input?.getBoundingClientRect().top ?? 0,
+              scrollerClient: scroller?.clientWidth ?? 0,
+              scrollerContent: scroller?.scrollWidth ?? 0,
+              scrollerOverflow: scroller ? getComputedStyle(scroller).overflowX : '',
+            };
+          });
+          if (form.inputTop < form.labelBottom + 4) problems.push(
+            'Download verification form field overlaps label');
+          if (form.scrollerContent <= form.scrollerClient && width <= 430) problems.push(
+            'Mobile six-column history should scroll within its panel');
+          if (form.scrollerOverflow !== 'auto') problems.push(
+            'Download verification table lost local horizontal scrollbar');
+        }
         if (pageErrors.length > beforeErrors) problems.push(
           'Uncaught React errors: ' + pageErrors.slice(beforeErrors).join('; '));
         const name = item.id + '-' + themeLabel + '-' + width;
