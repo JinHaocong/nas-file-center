@@ -44,3 +44,27 @@ test('real browser checks do not mutate or read from NAS and fail on layout/rend
   ]) assert.ok(browser.includes(phrase), 'unsafe or missing visual gate ' + phrase);
   assert.doesNotMatch(browser, /await fetch\(['"]https?:\/\/|https:\/\/.*nas/i);
 });
+
+
+test('download verification actual 390px form/table defect has owned responsive UI guards', () => {
+  const page = readFileSync('src/pages/DownloadVerification/index.tsx', 'utf8');
+  const css = readFileSync('src/styles/console-v2-download-verification.css', 'utf8');
+  const entry = readFileSync('src/main.tsx', 'utf8');
+  for (const phrase of [
+    'nfc-download-verify-page',
+    'nfc-download-verify-field',
+    'nfc-download-verify-table-scroll',
+    'aria-label="校验历史"',
+    'aria-label="校验明细"',
+  ]) assert.ok(page.includes(phrase), 'missing actual Download Verification UI hook ' + phrase);
+  assert.match(css, /grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
+  assert.match(css, /@media \(max-width: 767px\)/);
+  assert.match(css, /grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+  assert.match(css, /min-width:\s*720px/);
+  assert.match(css, /overflow-x:\s*auto/);
+  assert.ok(entry.includes("import './styles/console-v2-download-verification.css';"));
+  assert.ok(browser.includes("item.id === 'download-verification'"));
+  assert.ok(browser.includes("'-selected-detail.png'"));
+  assert.ok(browser.includes("'Mobile six-column history should scroll within its panel'"));
+  assert.ok(browser.includes("path === '/api/plans/legacy/summary'"));
+});
