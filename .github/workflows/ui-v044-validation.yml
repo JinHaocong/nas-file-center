@@ -227,6 +227,7 @@ jobs:
             frontend/artifacts/browser-workflow-preview/*.png
             frontend/artifacts/browser-organizer-dedupe/*.png
             frontend/artifacts/browser-workspace-cascade/*.png
+            frontend/artifacts/browser-workspace-cascade/checkbox-keyboard-audit.json
             frontend/artifacts/browser-task-ledger-states/*.png
             frontend/artifacts/browser-indexes-ledger-states/*.png
             frontend/artifacts/browser-media-ledger-states/*.png

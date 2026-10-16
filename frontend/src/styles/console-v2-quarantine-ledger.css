@@ -76,8 +76,13 @@
 .nfc-v2-quarantine-checkbox { width:17px;height:17px;margin:0;
   accent-color:var(--nfc-q-ledger-accent);vertical-align:middle;cursor:pointer; }
 .nfc-v2-quarantine-checkbox:disabled { opacity:.48;cursor:not-allowed; }
-.nfc-v2-quarantine-table .nfc-v2-quarantine-checkbox:focus-visible {
-  outline:2px solid var(--nfc-q-ledger-accent);outline-offset:3px; }
+/* Shared native checkbox focus must apply to both the desktop table and
+ * mobile records; keep the active-only selection boundary untouched. */
+.nfc-v2-shell .nfc-v2-quarantine-ledger .nfc-v2-quarantine-checkbox:focus-visible {
+  outline:3px solid var(--nfc-q-ledger-accent) !important;
+  outline-offset:2px;
+  transition:none !important;
+}
 .nfc-v2-quarantine-table .nfc-v2-quarantine-check-cell { text-align:center; }
 .nfc-v2-quarantine-table .nfc-code-path { max-width:100%;min-width:0;
   overflow-wrap:anywhere; }
