@@ -28,6 +28,7 @@ RESOURCE_CONTROLLED_JOB_KINDS: tuple[str, ...] = (
     "index-root",
     "fclones-scan",
     "workflow-scheduled",
+    "download-verify-webdav",
 )
 
 

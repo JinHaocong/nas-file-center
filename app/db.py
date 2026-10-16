@@ -12,6 +12,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.auth.password import hash_password
 from app.models import Base, FilterPolicy, IndexRoot, IndexedPath, MediaAsset, OrganizerProfile, User, Workflow, WorkflowRevision, WorkJob
+from app.download_verification.models import DownloadVerificationRun, DownloadVerificationItem  # Register additive tables before create_all
 
 
 @contextmanager
