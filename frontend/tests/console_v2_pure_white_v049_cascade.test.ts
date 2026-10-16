@@ -130,8 +130,20 @@ describe('Pure White historical CSS cleanup: safe v049 same-selector cascade', (
     const firstMobile = css.indexOf('@media (max-width: 767px) {');
     const secondMobile = css.lastIndexOf('@media (max-width: 767px) {');
     assert.ok(firstMobile >= 0 && secondMobile > firstMobile);
-    const early = css.slice(firstMobile, secondMobile);
-    const later = css.slice(secondMobile);
+    const mediaBody = (at: number): string => {
+      const open = css.indexOf('{', at);
+      let depth = 0;
+      for (let index = open; index < css.length; index += 1) {
+        if (css[index] === '{') depth += 1;
+        else if (css[index] === '}') {
+          depth -= 1;
+          if (depth === 0) return css.slice(open + 1, index);
+        }
+      }
+      throw new Error('Unclosed historical mobile @media block');
+    };
+    const early = mediaBody(firstMobile);
+    const later = mediaBody(secondMobile);
     const cases = [
       ['.nfc-header.nfc-header', 'min-height', '54px'],
       ['.nfc-page-header', 'align-items', 'stretch'],
