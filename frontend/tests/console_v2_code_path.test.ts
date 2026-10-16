@@ -77,7 +77,7 @@ describe('Console v2 native shared CodePath', () => {
   test('CodePath routes browser Clipboard API reads through its guarded resolver', () => {
     const source = read('src/components/ui/CodePath.tsx');
     assert.ok(source.includes('writer: readClipboardWriter(() => navigator.clipboard)'));
-    assert.doesNotMatch(source, /writer:\\s*navigator\\.clipboard/);
+    assert.doesNotMatch(source, /writer:\s*navigator\.clipboard/);
     assert.ok(source.includes('fallback: copyUsingSelection'));
     assert.ok(source.includes("setResult({ value, state: copied })"));
   });
