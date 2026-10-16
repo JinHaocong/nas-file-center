@@ -404,12 +404,21 @@ def _libarchive(source: Path, root: Path, fd: int, budget: Budget, results: list
             # misreported as a password mismatch.
             raise RecoveryError('PASSWORD_OR_DATA_ERROR' if password else 'ARCHIVE_OPEN_FAILED')
         entry = ptr()
+        retries = 0
         while True:
             budget.step()
+            entry = ptr()  # never reuse a stale header pointer across retry
             rc = nxt(handle, ctypes.byref(entry))
             if rc == 1:  # ARCHIVE_EOF
                 break
-            if rc != 0:
+            if rc == -10:  # ARCHIVE_RETRY: bounded; never spin forever
+                retries += 1
+                if retries <= 3:
+                    continue
+            retries = 0
+            # ARCHIVE_WARN (-20) means the entry was returned with a warning.
+            # Treating it as fatal discarded all later readable files.
+            if rc not in (0, -20) or not entry.value:
                 results.append({'name': '<archive>', 'status': 'unrecovered',
                                 'reason': 'PASSWORD_OR_DATA_ERROR' if password else 'DAMAGED_ARCHIVE'})
                 break
@@ -436,6 +445,56 @@ def _libarchive(source: Path, root: Path, fd: int, budget: Budget, results: list
         free(handle)
 
 
+def _file_outcomes(manifest: list[tuple[str, int]], results: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Reconcile every declared file against what was ACTUALLY published.
+
+    A decoder may fail an entry and the independent 7z CRC reader may later
+    publish it. Such attempts are not two archive files and must not count
+    the same recovered pathname twice.
+    """
+    from collections import defaultdict
+
+    indexed: dict[str, list[dict]] = defaultdict(list)
+    for item in results:
+        if item.get('name') and item['name'] != '<archive>':
+            indexed[item['name']].append(item)
+    consumed_paths: set[str] = set()
+    outcomes: list[dict] = []
+    missing: list[dict] = []
+    success = {'integrity_passed', 'format_validated', 'unverified'}
+    rank = {'integrity_passed': 0, 'format_validated': 1, 'unverified': 2,
+            'incomplete': 3, 'unrecovered': 4}
+    for raw_name, size in manifest:
+        try:
+            name = '/'.join(safe_parts(raw_name))
+        except RecoveryError:
+            name = raw_name
+        options = indexed.get(name, [])
+        # Only one published file can satisfy one expected archive member;
+        # repeated attempts on the same pathname are not independent copies.
+        candidates = [item for item in options if item.get('status') in success
+                      and isinstance(item.get('path'), str)
+                      and item['path'] not in consumed_paths]
+        candidates.sort(key=lambda item: rank[item['status']])
+        if candidates:
+            chosen = candidates[0]
+            consumed_paths.add(chosen['path'])
+            row = {'name': name, 'status': chosen['status'],
+                   'bytes': chosen.get('bytes', size), 'path': chosen['path']}
+        else:
+            failed = next((item for item in options if item.get('status') == 'incomplete'), None)
+            if failed is None:
+                failed = next((item for item in options if item.get('status') == 'unrecovered'), None)
+            row = {'name': name, 'status': failed['status'] if failed else 'unrecovered',
+                   'bytes': size, 'reason': (failed.get('reason') if failed
+                                            else 'NOT_EXTRACTED_FROM_VERIFIED_HEADER')}
+            if failed and isinstance(failed.get('path'), str):
+                row['path'] = failed['path']
+            missing.append(row)
+        outcomes.append(row)
+    return outcomes, missing
+
+
 def recover_archive(source: Path, result_dir: Path, *, password: str | None = None,
                     check: Callable[[], None] | None = None, deep: bool = True,
                     items: list[dict] | None = None) -> dict:
@@ -451,7 +510,30 @@ def recover_archive(source: Path, result_dir: Path, *, password: str | None = No
     fd = os.open(result_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     budget = Budget(check)
     results: list[dict] = items if items is not None else []
+    manifest: list[tuple[str, int]] | None = None
+    inventory_status = 'unavailable'
+    inventory_reason: str | None = None
     try:
+        # Read-only inventory is independent of extraction success and must
+        # never be confused with byte-level payload verification.
+        if fmt == '7z':
+            from app.archive_recovery.aes_lzma2 import (
+                DeepRecoveryUnavailable, verified_7z_inventory,
+            )
+            try:
+                budget.step()
+                manifest = verified_7z_inventory(source, password)
+                inventory_status = 'verified'
+            except DeepRecoveryUnavailable as exc:
+                inventory_reason = str(exc)
+        elif fmt == 'zip':
+            try:
+                with zipfile.ZipFile(source) as index:
+                    manifest = [(m.filename, m.file_size) for m in index.infolist()
+                                if not m.is_dir()]
+                inventory_status = 'listed'
+            except zipfile.BadZipFile:
+                inventory_reason = 'DAMAGED_ZIP_DIRECTORY'
         if fmt == 'zip':
             total = _zip(source, result_dir, fd, budget, results, password, deep)
         elif fmt == 'tar':
@@ -550,8 +632,33 @@ def recover_archive(source: Path, result_dir: Path, *, password: str | None = No
                 if len(results) > before:
                     inner.unlink()
                     results.remove(record)
+        if manifest is not None:
+            outcomes, missing = _file_outcomes(manifest, results)
+            # A manifest name with no decoder attempt is explicitly included
+            # in the existing per-entry report as an UNKNOWN recovery failure,
+            # not falsely labelled a corrupt payload.
+            observed = {r.get('name') for r in results if r.get('name') != '<archive>'}
+            for row in missing:
+                if row['name'] not in observed:
+                    results.append({'name': row['name'], 'status': 'unrecovered',
+                                    'reason': 'NOT_EXTRACTED_FROM_VERIFIED_HEADER'})
+                    observed.add(row['name'])
+            total = len(manifest)
+        else:
+            outcomes = list(results)
+            missing = [r for r in results if r.get('status') in {'unrecovered', 'incomplete'}
+                       and r.get('name') != '<archive>']
+        inventory = {
+            'status': inventory_status,
+            'declared_files': len(manifest) if manifest is not None else None,
+            'recovered_files': sum(r['status'] in {'integrity_passed', 'format_validated', 'unverified'}
+                                   for r in outcomes),
+            'unrecovered_files': len(missing),
+            'reason': inventory_reason,
+        }
         return {'format': fmt, 'source': str(source), 'output': str(result_dir),
                 'known_total': total, 'items': results,
+                'inventory': inventory, 'file_outcomes': outcomes, 'missing_files': missing,
                 'stats': {s: sum(r['status'] == s for r in results)
                           for s in ('integrity_passed','format_validated','unverified','incomplete','unrecovered')},
                 'deep_capability': (
@@ -562,10 +669,16 @@ def recover_archive(source: Path, result_dir: Path, *, password: str | None = No
                     else 'tar_or_zip_salvage'
                 ),
                 'aes_lzma2_deep': deep_result,
-                'warnings': ['Format validation is not byte-for-byte integrity verification.',
+                'warnings': ([
+                    'Format validation is not byte-for-byte integrity verification.',
+                    'The archive file list is unavailable or incomplete; unseen filenames cannot be inferred.'
+                    + (' Reason: ' + inventory_reason if inventory_reason else '')
+                    if manifest is None else
+                    'The file inventory lists archive metadata; only an integrity_passed result proves a matching checksum.',
+                ] + [
                              'LZMA2 deep recovery requires an intact verified 7z header, independently decodable reset chunks, and matching per-file CRC. Encrypted LZMA2 requires a password; arbitrary solid reconstruction is not possible.'
                              if fmt == '7z' else 'RAR solid stream resynchronization is not supported.'
-                             if fmt == 'rar' else 'Only verifiable ZIP and TAR recovery is attempted.']}
+                             if fmt == 'rar' else 'Only verifiable ZIP and TAR recovery is attempted.'])}
     finally:
         os.close(fd)
         try:
