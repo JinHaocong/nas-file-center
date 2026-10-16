@@ -376,7 +376,7 @@ try {
     ', themes=' + visualThemes.length + ', captures=' + report.length +
     ', failures=' + failures.length + '; screenshot manifest saved.');
   assert.deepEqual(failures, [], 'All-route mock visual audit detected failures; see manifest.json');
-  assert.equal(report.length, 24 * 4);
+  assert.equal(report.length, routes.length * visualThemes.length);
 } finally {
   await browser?.close();
   server.kill('SIGTERM');
