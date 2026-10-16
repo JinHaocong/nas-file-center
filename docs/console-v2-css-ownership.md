@@ -164,3 +164,9 @@ A conservative source-context audit found **seven exactly shadowed declarations*
 The original 8 v049 media wrappers, other declarations (mobile header margins/padding, page title and metric card padding), selector specificity, late winners, import order and `!important` authority are preserved. Source regression checks explicitly assert absence of each early shadow and presence of the corresponding late winning property, and retain existing real Chromium 8-width × 4-theme route/overlay checks in CI. Neither component JSX nor backend/security/NAS APIs is modified.
 
 **Scope limit:** these are only seven proven same-context repetitions, not a comprehensive historical CSS consolidation or human full-site visual sign-off. Canonical final acceptance remains **68/74** with six high-level gates open.
+
+### Exact-head 768px visual gate follow-up
+
+The initial PR #276 Chromium matrix uncovered an **intermittent test-harness assertion**, not a proven layout regression: 3 of 4 Dashboard theme cases at 768px reported a missing focus outline even though every case retained the prior `214×17px` readable filename, `860px` bounded table scroll and `36–37px` keyboard ArrowRight movement. The browser script called `.focus()` programmatically and inspected `:focus-visible` **before** real keyboard modality was established; Chromium need not present a `:focus-visible` ring after programmatic focus alone.
+
+The audit now traverses the actual table keyboard order using `Tab` then `Shift+Tab` and checks `document.activeElement`, `:focus-visible` and the computed outline **on the returned scroll region**, recording all focus details in the Manifest. It still presses `ArrowRight` to prove native scrolling. This is a strengthened real-keyboard regression guard; do not waive the failed initial CI or reuse the old SHA's results. The updated exact HEAD must pass **all** route/theme browser and release checks before merge.
