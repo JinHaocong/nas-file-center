@@ -166,6 +166,7 @@ class ArchiveRecoveryHandler(TaskHandler):
                     # reason the fallback rejected an unsupported 7z layout.
                     **({key: report[key] for key in (
                         'format', 'deep_capability', 'aes_lzma2_deep', 'warnings',
+                        'inventory', 'file_outcomes', 'missing_files',
                     ) if key in report} if report is not None else {}),
                 })
                 # Never retain empty failed-job output directories.
