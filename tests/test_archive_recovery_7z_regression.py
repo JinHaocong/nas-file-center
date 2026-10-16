@@ -257,3 +257,40 @@ def test_7z_deep_does_not_override_safety_failures(tmp_path, monkeypatch, reason
         core.recover_archive(source, out, deep=True)
     assert not (out / "可恢复.bin").exists()
     assert source.exists()
+
+
+def test_verified_7z_header_identifies_every_unrecovered_file(tmp_path, monkeypatch):
+    """A silent decoder stop must not hide the unvisited names in an intact 7z header."""
+    source = tmp_path / "intact-header-corrupt-body.7z"
+    _plain_7z(source, os.urandom(8000), os.urandom(9000))
+    out = tmp_path / "out"
+    out.mkdir()
+    monkeypatch.setattr(core, "_libarchive", lambda *args: None)
+    report = core.recover_archive(source, out, deep=False)
+    assert report["known_total"] == 2
+    assert report["inventory"]["status"] == "verified"
+    assert report["inventory"]["recovered_files"] == 0
+    assert report["inventory"]["unrecovered_files"] == 2
+    assert {r["name"] for r in report["missing_files"]} == {"broken.bin", "可恢复.bin"}
+    assert all(r["reason"] == "NOT_EXTRACTED_FROM_VERIFIED_HEADER" for r in report["missing_files"])
+
+
+def test_deep_success_is_reconciled_against_7z_header(tmp_path, monkeypatch):
+    """Do not double-count a failed standard attempt after CRC-backed deep recovery."""
+    source = tmp_path / "damaged.7z"
+    second = os.urandom(9000)
+    _plain_7z(source, os.urandom(8000), second)
+    out = tmp_path / "out"
+    out.mkdir()
+    def standard(*args):
+        args[4].append({"name": "可恢复.bin", "status": "unrecovered",
+                        "reason": "STANDARD_DECODER_FAILED"})
+    monkeypatch.setattr(core, "_libarchive", standard)
+    report = core.recover_archive(source, out, deep=True)
+    assert (out / "可恢复.bin").read_bytes() == second
+    assert report["inventory"]["status"] == "verified"
+    assert report["inventory"]["recovered_files"] == 1
+    assert report["inventory"]["unrecovered_files"] == 1
+    assert [r["name"] for r in report["missing_files"]] == ["broken.bin"]
+    recovered = next(r for r in report["file_outcomes"] if r["name"] == "可恢复.bin")
+    assert recovered["status"] == "integrity_passed"
