@@ -132,7 +132,10 @@ def test_source_crud_secret_redacted_and_metadata_job_queue(app_client):
     assert stat.S_IMODE(secret_dir.stat().st_mode) == 0o700
     browse_list = client.get("/api/download-verifications/sources").json()["items"]
     assert len(browse_list) == 1
-    assert "password" not in str(browse_list)
+    assert all(set(item).isdisjoint({"password", "secret", "secret_file", "token"})
+               for item in browse_list)
+    assert all(item["has_password"] is True for item in browse_list)
+    assert "highly-secret" not in str(browse_list)
 
     response = client.post("/api/download-verifications", json={
         "source_id": source["id"], "mode": "metadata",
