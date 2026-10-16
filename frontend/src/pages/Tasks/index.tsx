@@ -40,6 +40,7 @@ const JOB_TYPE_OPTIONS = [
   { label: 'workflow-scheduled', value: 'workflow-scheduled' },
   { label: 'media-analysis', value: 'media-analysis' },
   { label: 'media-integrity-verify', value: 'media-integrity-verify' },
+  { label: 'download-verify-webdav', value: 'download-verify-webdav' },
 ];
 
 export const TasksPage: React.FC = () => {
