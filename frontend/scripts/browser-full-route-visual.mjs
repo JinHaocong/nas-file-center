@@ -86,7 +86,9 @@ const fixturePlan = {
 };
 const fixtureWorkflow = {
   id: 1, name: 'Mock 文件巡检工作流', description: '浏览器截图专用模拟数据',
-  steps: [], current_revision: 1, revision: 1, is_archived: false,
+  current_revision: 1, is_builtin: false, mode: 'file',
+  created_by_user_id: 1, archived_at: null,
+  definition: { schema_version: 1, mode: 'file', steps: [] },
   created_at: TS, updated_at: TS,
 };
 const downloadRun = {
@@ -113,7 +115,7 @@ function fixture(path) {
   if (path === '/api/quarantine/retention-policy') return {
     quarantine_retention_days: 30,
   };
-  if (path === '/api/resource-policy') return {
+  if (path === '/api/settings/resource-policy') return {
     revision: 1, scan_threads: 2, hash_threads: 2,
     io_limit: 'normal', job_priority: 'normal',
     active_window_enabled: false, active_window_start: null,
