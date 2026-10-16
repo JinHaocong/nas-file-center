@@ -445,7 +445,8 @@ def _libarchive(source: Path, root: Path, fd: int, budget: Budget, results: list
         free(handle)
 
 
-def _file_outcomes(manifest: list[tuple[str, int]], results: list[dict]) -> tuple[list[dict], list[dict]]:
+def _file_outcomes(manifest: list[tuple[str, int]], results: list[dict],
+                   expanded: dict[str, dict] | None = None) -> tuple[list[dict], list[dict]]:
     """Reconcile every declared file against what was ACTUALLY published.
 
     A decoder may fail an entry and the independent 7z CRC reader may later
@@ -469,6 +470,11 @@ def _file_outcomes(manifest: list[tuple[str, int]], results: list[dict]) -> tupl
             name = '/'.join(safe_parts(raw_name))
         except RecoveryError:
             name = raw_name
+        if expanded and name in expanded:
+            # A verified inner TAR may be intentionally replaced by its
+            # extracted children. It was recovered, not an unvisited member.
+            outcomes.append(dict(expanded[name]))
+            continue
         options = indexed.get(name, [])
         # Only one published file can satisfy one expected archive member;
         # repeated attempts on the same pathname are not independent copies.
@@ -510,6 +516,7 @@ def recover_archive(source: Path, result_dir: Path, *, password: str | None = No
     fd = os.open(result_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     budget = Budget(check)
     results: list[dict] = items if items is not None else []
+    expanded: dict[str, dict] = {}
     manifest: list[tuple[str, int]] | None = None
     inventory_status = 'unavailable'
     inventory_reason: str | None = None
@@ -629,11 +636,21 @@ def recover_archive(source: Path, result_dir: Path, *, password: str | None = No
                 inner = result_dir / record['path']
                 before = len(results)
                 _raw_tar(inner, result_dir, fd, budget, results)
-                if len(results) > before:
+                nested = results[before:]
+                if nested and all(r.get('status') in {'integrity_passed', 'unverified',
+                                                       'format_validated'} for r in nested):
+                    # Remove the intermediate only if every newly discovered
+                    # member succeeded; never discard it on partial salvage.
                     inner.unlink()
                     results.remove(record)
+                    expanded[record['name']] = {
+                        'name': record['name'], 'status': record['status'],
+                        'bytes': record.get('bytes', 0),
+                        'reason': 'NESTED_TAR_EXPANDED',
+                        'expanded_files': len(nested),
+                    }
         if manifest is not None:
-            outcomes, missing = _file_outcomes(manifest, results)
+            outcomes, missing = _file_outcomes(manifest, results, expanded)
             # A manifest name with no decoder attempt is explicitly included
             # in the existing per-entry report as an UNKNOWN recovery failure,
             # not falsely labelled a corrupt payload.
