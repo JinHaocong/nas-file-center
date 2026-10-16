@@ -332,6 +332,44 @@ try {
                 JSON.stringify(geom));
           }
         }
+        if (item.id === 'dashboard' && width === 768) {
+          // Screenshot-grounded intrinsic table geometry: contain horizontal
+          // overflow and reject the former one-glyph-per-line scan filename.
+          const scans = await tab.evaluate(() => {
+            const scroll = document.querySelector('.nfc-v2-recent-scans-scroll');
+            const table = scroll?.querySelector('.nfc-v2-recent-scans-table');
+            const name = table?.querySelector('tbody tr:first-child td:first-child .nfc-v2-row-link');
+            if (!scroll || !table || !name) return null;
+            const rect = name.getBoundingClientRect();
+            return {
+              accessibleName: scroll.getAttribute('aria-label') ?? '',
+              tabIndex: scroll.tabIndex,
+              scrollClient: scroll.clientWidth,
+              scrollContent: scroll.scrollWidth,
+              scrollOverflow: getComputedStyle(scroll).overflowX,
+              tableWidth: Math.round(table.getBoundingClientRect().width),
+              filenameWidth: Math.round(rect.width),
+              filenameHeight: Math.round(rect.height),
+              filenameText: name.textContent?.trim() ?? '',
+              rightEdge: Math.round(scroll.getBoundingClientRect().right),
+            };
+          });
+          audit.recentScansGeometry = scans;
+          if (!scans) problems.push('Tablet Dashboard recent scans table/name missing');
+          else {
+            if (scans.tabIndex !== 0 || !scans.accessibleName.includes('最近扫描'))
+              problems.push('Scrollable recent scans region is not keyboard-accessible');
+            if (scans.scrollOverflow !== 'auto' ||
+                scans.scrollContent < scans.scrollClient + 120 ||
+                scans.tableWidth < 840 || scans.rightEdge > width + 2)
+              problems.push('Tablet recent scans must scroll inside panel: ' +
+                JSON.stringify(scans));
+            if (scans.filenameWidth < 145 || scans.filenameHeight > 72 ||
+                !scans.filenameText.includes('Mock'))
+              problems.push('Tablet recent scans filename is squeezed or missing: ' +
+                JSON.stringify(scans));
+          }
+        }
         if (item.id === 'download-verification') {
           const form = await tab.evaluate(() => {
             const field = document.querySelector('.nfc-download-verify-field');
@@ -430,6 +468,27 @@ try {
           if (!skipped.mainFocused || skipped.locationHash !== '#main-content' ||
               skipped.mainTabIndex !== -1) problems.push(
             'Skip-to-main activation did not move keyboard focus to main landmark');
+        }
+        if (item.id === 'dashboard' && width === 768) {
+          // AFTER the normal screenshot and skip-link focus checks.
+          const scroll = tab.locator('.nfc-v2-recent-scans-scroll');
+          await scroll.focus();
+          const focus = await scroll.evaluate(element => {
+            const style = getComputedStyle(element);
+            return {
+              isFocused: document.activeElement === element,
+              outline: style.outlineStyle,
+              outlineWidth: parseFloat(style.outlineWidth),
+            };
+          });
+          if (!focus.isFocused || focus.outline === 'none' || focus.outlineWidth < 2)
+            problems.push('Tablet recent scans keyboard focus indicator is missing');
+          await tab.keyboard.press('ArrowRight');
+          await tab.waitForTimeout(120);
+          const scrollLeft = await scroll.evaluate(element => element.scrollLeft);
+          audit.recentScansKeyboardScrollLeft = Number(scrollLeft.toFixed(1));
+          if (scrollLeft < 3)
+            problems.push('Tablet recent scans do not respond to keyboard ArrowRight');
         }
         if (item.id === 'download-verification') {
           // Exercise the real Radix remote chooser against strictly read-only AList fixtures.
