@@ -9,7 +9,9 @@ import time
 
 from sqlalchemy import text
 
-from app.archive_recovery.core import RecoveryError, recover_archive, clean_interrupted_parts
+from app.archive_recovery.core import (
+    RecoveryError, recover_archive, clean_interrupted_parts, reconcile_failed_archive_items,
+)
 from app.config import Settings
 from app.models import WorkJob
 from app.tasks.context import JobContext
@@ -93,6 +95,7 @@ class ArchiveRecoveryHandler(TaskHandler):
         error: str | None = None
         report: dict | None = None
         password = None
+        initial_source_stat = None
         last_check = 0.0
 
         def checkpoint() -> None:
@@ -114,6 +117,7 @@ class ArchiveRecoveryHandler(TaskHandler):
             if ([str(st.st_dev), str(st.st_ino), str(st.st_size), str(st.st_mtime_ns)]
                     != state['identity']):
                 raise RecoveryError('SOURCE_CHANGED')
+            initial_source_stat = st
             if output.parent != source.parent or output.is_symlink() or not output.is_dir():
                 raise RecoveryError('OUTPUT_INVALID')
             out_stat = output.stat()
@@ -154,13 +158,34 @@ class ArchiveRecoveryHandler(TaskHandler):
             except OSError:
                 pass
             if status != 'completed' and status != 'partial':
+                # A task stopped by RESOURCE_LIMIT / TIME_LIMIT may already
+                # have recovered files. If the source is still the original
+                # regular file, enumerate its verified header read-only to
+                # make unvisited names visible in the terminal error report.
+                failure_inventory = {}
+                if status == 'failed' and initial_source_stat is not None and report is None:
+                    try:
+                        current = source.stat(follow_symlinks=False)
+                        if (stat.S_ISREG(current.st_mode) and (
+                            current.st_dev, current.st_ino, current.st_size, current.st_mtime_ns
+                        ) == (
+                            initial_source_stat.st_dev, initial_source_stat.st_ino,
+                            initial_source_stat.st_size, initial_source_stat.st_mtime_ns,
+                        )):
+                            failure_inventory = reconcile_failed_archive_items(source, items, password)
+                    except (RecoveryError, OSError, ValueError):
+                        # Inventory is evidence, not a precondition for safe
+                        # cleanup; preserve any per-entry records already made.
+                        pass
                 write_report(settings, job.id, {
                     'source': str(source), 'output': str(output),
                     'recovery_status': status, 'error_code': error,
                     'items': items,
                     'stats': {s: sum(r['status'] == s for r in items)
                               for s in ('integrity_passed','format_validated','unverified','incomplete','unrecovered')},
-                    'known_total': report.get('known_total') if report is not None else None,
+                    'known_total': report.get('known_total') if report is not None else
+                                   failure_inventory.get('known_total'),
+                    **failure_inventory,
                     # Preserve bounded, non-secret decoder diagnostics on
                     # NO_FILES_RECOVERED. A fatal WorkJob must not erase the
                     # reason the fallback rejected an unsupported 7z layout.
