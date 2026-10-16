@@ -510,6 +510,59 @@ def _file_outcomes(manifest: list[tuple[str, int]], results: list[dict],
     return outcomes, missing
 
 
+
+def reconcile_failed_archive_items(source: Path, results: list[dict],
+                                   password: str | None = None) -> dict:
+    """Read-only best-effort inventory when extraction aborted before reporting.
+
+    Called only after the Worker re-verifies original source identity. Never
+    re-enters extraction, writes output, or mistakes missing entries for corrupt.
+    A damaged or encrypted header may make a reliable list impossible.
+    """
+    manifest: list[tuple[str, int]] | None = None
+    fmt = detect_format(source)
+    reason: str | None = None
+    state = 'unavailable'
+    if fmt == '7z':
+        from app.archive_recovery.aes_lzma2 import (
+            DeepRecoveryUnavailable, verified_7z_inventory,
+        )
+        try:
+            manifest = verified_7z_inventory(source, password)
+            state = 'verified'
+        except DeepRecoveryUnavailable as exc:
+            reason = str(exc)
+    elif fmt == 'zip':
+        try:
+            with zipfile.ZipFile(source) as archive:
+                members = archive.infolist()
+                if len(members) > MAX_FILES:
+                    raise RecoveryError('RESOURCE_LIMIT')
+                manifest = [(m.filename, m.file_size) for m in members if not m.is_dir()]
+            state = 'listed'
+        except zipfile.BadZipFile:
+            reason = 'DAMAGED_ZIP_DIRECTORY'
+    if manifest is not None:
+        outcomes, missing = _file_outcomes(manifest, results)
+    else:
+        outcomes = [row for row in results if row.get('name') != '<archive>']
+        missing = [row for row in outcomes if row.get('status') in {'unrecovered', 'incomplete'}]
+    return {
+        'known_total': len(manifest) if manifest is not None else None,
+        'inventory': {
+            'status': state,
+            'declared_files': len(manifest) if manifest is not None else None,
+            'recovered_files': sum(item.get('status') in {
+                'integrity_passed', 'format_validated', 'unverified',
+            } for item in outcomes),
+            'unrecovered_files': len(missing),
+            'reason': reason,
+        },
+        'file_outcomes': outcomes,
+        'missing_files': missing,
+    }
+
+
 def recover_archive(source: Path, result_dir: Path, *, password: str | None = None,
                     check: Callable[[], None] | None = None, deep: bool = True,
                     items: list[dict] | None = None) -> dict:
