@@ -12,7 +12,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.auth.password import hash_password
 from app.models import Base, FilterPolicy, IndexRoot, IndexedPath, MediaAsset, OrganizerProfile, User, Workflow, WorkflowRevision, WorkJob
-from app.download_verification.models import DownloadVerificationRun, DownloadVerificationItem  # Register additive tables before create_all
+from app.download_verification.models import DownloadVerificationRun, DownloadVerificationItem, DownloadVerificationSource  # Register additive tables before create_all
 
 
 @contextmanager
@@ -212,6 +212,7 @@ def init_db(
             "schedules",
             "schedule_runs",
             "scheduler_state",
+            "download_verification_sources",
             "download_verification_runs",
             "download_verification_items",
         }
@@ -306,6 +307,17 @@ def init_db(
                 (col, ctype) for col, ctype in expected_media_cols if col not in current_media_cols
             ]
 
+        missing_download_verify_cols: list[tuple[str, str]] = []
+        if "download_verification_runs" in existing_tables:
+            current_verify_cols = {c["name"] for c in inspector.get_columns("download_verification_runs")}
+            missing_download_verify_cols = [
+                (name, sqltype) for name, sqltype in [
+                    ("source_id", "INTEGER REFERENCES download_verification_sources(id) ON DELETE SET NULL"),
+                    ("source_revision", "INTEGER"),
+                    ("mode", "VARCHAR(24) DEFAULT 'strict_sha256' NOT NULL"),
+                ] if name not in current_verify_cols
+            ]
+
         needs_backup = bool(
             existing_tables
             and (
@@ -315,6 +327,7 @@ def init_db(
                 or bool(missing_quarantine_cols)
                 or bool(missing_organizer_cols)
                 or bool(missing_media_cols)
+                or bool(missing_download_verify_cols)
                 or schedule_target_constraint_needs_upgrade
             )
         )
@@ -358,6 +371,14 @@ def init_db(
 
         if schedule_target_constraint_needs_upgrade:
             _upgrade_scheduler_target_constraint(engine)
+
+        # Source table is created before adding the optional foreign key on legacy run rows.
+        if missing_download_verify_cols:
+            DownloadVerificationSource.__table__.create(engine, checkfirst=True)
+            with engine.connect() as conn:
+                for col, sqltype in missing_download_verify_cols:
+                    conn.execute(text(f"ALTER TABLE download_verification_runs ADD COLUMN {col} {sqltype}"))
+                conn.commit()
 
         # Create all newly defined tables / columns / indexes
         Base.metadata.create_all(engine)

@@ -13,7 +13,8 @@ from .engine import (
     VerificationError, diff_inventory, hash_local_file, local_fingerprint,
     local_manifest, qualified_local_root, remote_fingerprint,
 )
-from .models import DownloadVerificationRun, DownloadVerificationItem
+from .models import DownloadVerificationRun, DownloadVerificationItem, DownloadVerificationSource
+from .sources import AListAPIClient, source_secret_path
 from .webdav import WebDAVClient, WebDAVError, relative_parts
 
 
@@ -24,6 +25,19 @@ def build_client(settings):
         password_file=str(settings.download_verify_webdav_password_file or ""),
         allow_http=settings.download_verify_allow_http,
     )
+
+
+def source_client(source: DownloadVerificationSource, settings, *, mode: str):
+    secret = (str(source_secret_path(settings.config_dir, source.secret_file))
+              if source.secret_file else None)
+    if mode == "metadata":
+        return AListAPIClient(base_url=source.base_url, username=source.username,
+                              password_file=secret)
+    if mode == "strict_sha256":
+        return WebDAVClient(base_url=source.base_url + "/dav/",
+                            username=source.username, password_file=secret or "",
+                            allow_http=source.base_url.startswith("http://"))
+    raise VerificationError("INVALID_VERIFY_MODE")
 
 
 @register_handler
@@ -42,6 +56,11 @@ class DownloadVerificationHandler(TaskHandler):
             if run is None or run.work_job_id != job.id:
                 raise VerificationError("VERIFY_JOB_AUTHORITY_MISMATCH")
             remote_root, local_root = run.remote_root, run.local_root
+            mode = run.mode or "strict_sha256"
+            source_id, source_revision = run.source_id, run.source_revision
+            source = session.get(DownloadVerificationSource, source_id) if source_id else None
+            if source_id and (source is None or not source.active or source.revision != source_revision):
+                raise VerificationError("SOURCE_CHANGED")
         remote_parts = relative_parts(remote_root)
         local = qualified_local_root(local_root, settings)
         # A paused/recovered task replays the entire run. JobContext progress is
@@ -84,7 +103,7 @@ class DownloadVerificationHandler(TaskHandler):
         bytes_done = 0
         total = 0
         try:
-            client = build_client(settings)
+            client = source_client(source, settings, mode=mode) if source_id else build_client(settings)
             context.checkpoint(progress_message="读取 WebDAV 云端目录",
                 checkpoint_data={"schema_version": 1, "phase": "remote_manifest", "run_id": run_id})
             # Resume is a fresh verification, never reuse old successful item rows.
@@ -134,14 +153,16 @@ class DownloadVerificationHandler(TaskHandler):
             for row in rows:
                 status = row["status"]
                 remote_sha = local_sha = None
-                if status == "PENDING_SHA256":
+                if status == "PENDING_SHA256" and mode == "metadata":
+                    status = "METADATA_MATCH"
+                elif status == "PENDING_SHA256":
                     rel = row["relative_path"]
                     # The remote endpoint must return original full 200-byte content.
                     remote_sha = client.sha256(remote_parts + tuple(rel.split("/")), row["remote_size"], tick)
                     local_sha = hash_local_file(local, rel, row["local_size"], tick)
                     status = "VERIFIED_MATCH" if remote_sha == local_sha else "HASH_MISMATCH"
                     bytes_done += row["remote_size"]
-                if status not in ("VERIFIED_MATCH", "DIRECTORY_MATCH"):
+                if status not in ("VERIFIED_MATCH", "METADATA_MATCH", "DIRECTORY_MATCH"):
                     differences = True
                 commit_row(row, remote_sha=remote_sha, local_sha=local_sha, status=status)
                 completed += 1
@@ -161,18 +182,30 @@ class DownloadVerificationHandler(TaskHandler):
             if local_fingerprint(local_rows) != local_fingerprint(local_manifest(
                     local, quarantine_root=settings.quarantine_root)):
                 raise VerificationError("LOCAL_CHANGED")
+            # Source edits during a scan require a fresh comparison.
+            if source_id:
+                with context.SessionLocal() as session:
+                    current_source = session.get(DownloadVerificationSource, source_id)
+                    if (current_source is None or not current_source.active or
+                            current_source.revision != source_revision):
+                        raise VerificationError("SOURCE_CHANGED")
             # Final cancellation/lease checkpoint BEFORE publishing the verdict.
             context.checkpoint(
                 progress_current=total, progress_total=total,
-                progress_message="内容有差异" if differences else "双端 SHA256 校验一致",
+                progress_message="内容有差异" if differences else ("路径及大小清单一致（未校验内容）" if mode == "metadata" else "双端 SHA256 校验一致"),
                 checkpoint_data={"schema_version": 1, "phase": "finalizing", "run_id": run_id})
             with context.SessionLocal() as session:
                 session.execute(text("BEGIN IMMEDIATE"))
                 from app.tasks.recovery import assert_active_worker_lease
                 if context.worker_id is not None:
                     assert_active_worker_lease(session, context.worker_id)
+                if source_id:
+                    final_source = session.get(DownloadVerificationSource, source_id)
+                    if (final_source is None or not final_source.active or
+                            final_source.revision != source_revision):
+                        raise VerificationError("SOURCE_CHANGED")
                 run = session.get(DownloadVerificationRun, run_id)
-                run.result = "DIFFERENT" if differences else "VERIFIED_IDENTICAL"
+                run.result = "DIFFERENT" if differences else ("METADATA_IDENTICAL" if mode == "metadata" else "VERIFIED_IDENTICAL")
                 run.checked = completed
                 run.bytes_checked = bytes_done
                 run.finished_at = utcnow()
@@ -193,7 +226,7 @@ class DownloadVerificationHandler(TaskHandler):
                 current = session.get(DownloadVerificationRun, run_id)
                 if current is not None:
                     current.result = "STALE" if isinstance(exc, VerificationError) and str(exc) in (
-                        "REMOTE_CHANGED", "LOCAL_CHANGED") else "INCOMPLETE"
+                        "REMOTE_CHANGED", "LOCAL_CHANGED", "SOURCE_CHANGED") else "INCOMPLETE"
                     current.error_code = str(exc) if isinstance(exc, (WebDAVError, VerificationError)) else "VERIFICATION_FAILED"
                     current.checked = completed
                     current.bytes_checked = bytes_done

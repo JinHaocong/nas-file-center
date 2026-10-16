@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.router import router as api_router
 from app.download_verification.router import router as download_verification_router
+from app.download_verification.router_sources import router as download_verification_sources_router
 from app.archive_recovery.router import router as archive_recovery_router
 from app.api.quarantine_bulk import router as quarantine_bulk_router
 from app.auth.dependencies import get_current_user
@@ -136,6 +137,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(quarantine_bulk_router)
     app.include_router(scheduler_router)
     app.include_router(archive_recovery_router)
+    app.include_router(download_verification_sources_router)
     app.include_router(download_verification_router)
     app.include_router(api_router)
 
