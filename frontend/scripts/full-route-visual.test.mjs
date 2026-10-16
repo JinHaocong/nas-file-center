@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { visualViewports, visualThemes } from './visual-fixtures.mjs';
+import { computedContrastRatio } from './computed-contrast.mjs';
 
 const browser = readFileSync('scripts/browser-full-route-visual.mjs', 'utf8');
 const routes = readFileSync('src/router/index.tsx', 'utf8');
@@ -103,10 +104,83 @@ test('real 360px visual regression keeps mobile route title on one line without 
     'Mobile repair may not hide the authoritative Safe Mode / Worker status');
   assert.ok(header.includes('navLabel(location.pathname)'));
   for (const phrase of [
-    "width <= 767 && !item.public",
+    "width <= 768 && !item.public",
     "h.identityWrap !== 'nowrap'",
     "h.leftRight > h.commandsLeft + 2",
     "h.commandsRight > width + 2",
     "h.parentCrumbDisplay !== 'none'",
   ]) assert.ok(browser.includes(phrase), 'Missing real Chromium header regression: ' + phrase);
+});
+
+
+test('every authenticated route has a real first-Tab bypass with visible light/dark focus and reduced motion', () => {
+  const layout = readFileSync('src/layouts/MainLayout.tsx', 'utf8');
+  const css = readFileSync('src/styles/console-v2-keyboard-navigation.css', 'utf8');
+  const entry = readFileSync('src/main.tsx', 'utf8');
+  const oldImport = "import './styles/console-v2-mobile-header.css';";
+  const newImport = "import './styles/console-v2-keyboard-navigation.css';";
+  assert.ok(entry.includes(newImport) && entry.indexOf(newImport) > entry.indexOf(oldImport),
+    'Keyboard skip-link styles must be imported after existing mobile and theme layers');
+  assert.match(layout, /className="nfc-v2-skip-link" href="#main-content">跳转到主要内容/);
+  assert.ok(layout.indexOf('nfc-v2-skip-link') < layout.indexOf('<ResponsiveNav'),
+    'Skip link must be before the sidebar/header in the actual Tab order');
+  assert.match(layout, /id="main-content" tabIndex=\{-1\}/);
+  assert.match(css, /\.nfc-v2-skip-link:focus-visible/);
+  assert.match(css, /outline:\s*3px solid var\(--nfc-text\)/);
+  assert.match(css, /min-height:\s*44px/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
+  for (const phrase of [
+    "await tab.keyboard.press('Tab')",
+    "await tab.keyboard.press('Enter')",
+    "document.activeElement === skip",
+    "document.activeElement?.id === 'main-content'",
+    "focusAudit.reducedMotion",
+    "focusAudit.skipVisible",
+    "focusAudit.focusOutline",
+    "navTransitionSeconds",
+    "locationHash",
+  ]) assert.ok(browser.includes(phrase), 'Missing executable Chromium a11y regression: ' + phrase);
+});
+
+test('computed focus contrast tests Chromium colors rather than CSS tokens', () => {
+  assert.equal(computedContrastRatio('rgb(0, 0, 0)', 'rgb(255, 255, 255)'), 21);
+  assert.equal(computedContrastRatio('rgb(32, 32, 31)', 'rgb(32, 32, 31)'), 1);
+  assert.ok(computedContrastRatio('rgb(160, 160, 160)', 'rgb(255, 255, 255)') < 4.5);
+  assert.throws(() => computedContrastRatio('rgba(0, 0, 0, 0.5)', 'rgb(255, 255, 255)'),
+    /opaque computed RGB/);
+  assert.throws(() => computedContrastRatio('rgb(999, 0, 0)', 'rgb(255, 255, 255)'),
+    /exceeds 255/);
+  for (const phrase of [
+    "computedContrastRatio(\n            focusAudit.focusColor, focusAudit.focusBackground)",
+    "focusAudit.focusOutlineColor, focusAudit.focusBackground",
+    "focusTextContrast < 4.5",
+    "focusOutlineContrast < 3",
+    "audit.skipFocusContrast",
+    "rect.width >= 80 && rect.height >= 44",
+    "focusAudit.skipTransitionSeconds, focusAudit.skipAnimationSeconds",
+  ]) assert.ok(browser.includes(phrase), 'Missing computed Chromium focus assertion: ' + phrase);
+});
+
+test('tablet 768px keeps first-party header identity single-line and safety controls reachable', () => {
+  const css = readFileSync('src/styles/console-v2-mobile-header.css', 'utf8');
+  assert.match(css, /@media \(min-width: 768px\) and \(max-width: 899px\)/);
+  const tablet = css.slice(css.indexOf('@media (min-width: 768px)'));
+  for (const phrase of [
+    '.nfc-v2-header .nfc-v2-breadcrumb > span,',
+    '.nfc-v2-header .nfc-v2-breadcrumb > strong',
+    'white-space: nowrap',
+    'text-overflow: ellipsis',
+    '.nfc-v2-header .nfc-v2-user-button > strong',
+  ]) assert.ok(tablet.includes(phrase), 'Missing 768px header repair: ' + phrase);
+  assert.doesNotMatch(tablet, /\.nfc-header-status\s*\{[^}]*display:\s*none/s,
+    'Tablet must not hide Safe Mode or Worker status badges');
+  assert.doesNotMatch(tablet, /\.nfc-v2-user-button\s*\{[^}]*display:\s*none/s,
+    'Tablet must not hide the admin menu trigger');
+  for (const phrase of [
+    'width <= 768 && !item.public',
+    "h.identityWrap !== 'nowrap'",
+    'h.leftRight > h.commandsLeft + 2',
+    'h.commandsRight > width + 2',
+    "h.parentCrumbDisplay !== 'none'",
+  ]) assert.ok(browser.includes(phrase), 'Missing 768px real Chromium geometry: ' + phrase);
 });

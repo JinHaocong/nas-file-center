@@ -25,6 +25,7 @@ export const MainLayout: React.FC = () => {
 
   return (
     <div className="nfc-app-shell nfc-v2-shell">
+      <a className="nfc-v2-skip-link" href="#main-content">跳转到主要内容</a>
       <ResponsiveNav
         isMobile={isMobile}
         mobileOpen={mobileNavOpen}
@@ -39,7 +40,7 @@ export const MainLayout: React.FC = () => {
           isMobile={isMobile}
           onOpenNavigation={() => setMobileNavOpen(true)}
         />
-        <main className="nfc-page-content nfc-v2-page-content" id="main-content">
+        <main className="nfc-page-content nfc-v2-page-content" id="main-content" tabIndex={-1}>
           <Outlet />
         </main>
         {isMobile && <MobileDock onMore={() => setMobileNavOpen(true)} />}

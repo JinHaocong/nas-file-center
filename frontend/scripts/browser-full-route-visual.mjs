@@ -1,6 +1,6 @@
 /**
  * Final acceptance: actual React app on EVERY declared route, not a component mock.
- * 8 CI jobs × 4 effective theme modes × 24 routes = 768 real Chromium visits.
+ * 8 CI jobs × 4 effective theme modes × 25 routes = 800 real Chromium visits.
  * GET APIs are 100% synthetic; any outbound or mutating request fails closed.
  * Captures screenshot, route, page heading, render/runtime errors and viewport overflow.
  * Screenshot collection is evidence to REVIEW; it does not automatically approve UI.
@@ -12,6 +12,7 @@ import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { chromium } from 'playwright';
 import { visualThemes, visualViewports, visualAdminFixture, visualSafeSettingsFixture } from './visual-fixtures.mjs';
+import { computedContrastRatio } from './computed-contrast.mjs';
 
 const routes = Object.freeze([
   { path: '/login', id: 'login', public: true },
@@ -277,14 +278,14 @@ try {
         if (audit.busy) problems.push('Still showing session loading');
         if (audit.horizontalOverflow > 3) problems.push(
           'Document horizontal overflow: ' + audit.horizontalOverflow + 'px');
-        if (width <= 767 && !item.public) {
+        if (width <= 768 && !item.public) {
           const h = audit.mobileHeader;
           if (!h) problems.push('Mobile page header controls are missing');
           else {
             if (!h.identityText) problems.push('Mobile page identity is empty');
             if (h.identityWrap !== 'nowrap' ||
                 h.identityHeight > h.identityLineHeight + 2) problems.push(
-              'Mobile breadcrumb wraps onto two lines: ' + h.identityText);
+              'Narrow-header breadcrumb wraps onto two lines: ' + h.identityText);
             if (h.parentCrumbDisplay !== 'none') problems.push(
               'Redundant mobile parent breadcrumb consumes horizontal space');
             if (h.leftRight > h.commandsLeft + 2) problems.push(
@@ -324,6 +325,74 @@ try {
           fullPage: (width === 390 || width === 1440) && theme.mode === 'light',
           animations: 'disabled',
         });
+        // Real keyboard bypass regression: the first Tab on every authenticated
+        // page must expose a legible skip link; Enter moves focus to the real
+        // main landmark. Keep this AFTER baseline screenshots, not in their pixels.
+        if (!item.public) {
+          await tab.keyboard.press('Tab');
+          const focusAudit = await tab.evaluate(() => {
+            const skip = document.querySelector('.nfc-v2-skip-link');
+            const navToggle = document.querySelector('.nfc-header-nav-toggle');
+            const style = skip ? getComputedStyle(skip) : null;
+            const rect = skip?.getBoundingClientRect();
+            const navMotion = navToggle ? getComputedStyle(navToggle) : null;
+            return {
+              firstTabOnSkip: Boolean(skip && document.activeElement === skip),
+              skipText: skip?.textContent?.trim() ?? '',
+              skipHref: skip?.getAttribute('href') ?? '',
+              skipVisible: Boolean(rect && rect.top >= -1 && rect.left >= -1 &&
+                rect.right <= innerWidth + 1 && rect.bottom <= innerHeight + 1 &&
+                rect.width >= 80 && rect.height >= 44),
+              focusOutline: Boolean(style && style.outlineStyle !== 'none' &&
+                parseFloat(style.outlineWidth) >= 2),
+              focusColor: style?.color ?? '',
+              focusBackground: style?.backgroundColor ?? '',
+              focusOutlineColor: style?.outlineColor ?? '',
+              skipTransitionSeconds: style?.transitionDuration ?? '',
+              skipAnimationSeconds: style?.animationDuration ?? '',
+              reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
+              navTransitionSeconds: navMotion?.transitionDuration ?? '',
+              navAnimationSeconds: navMotion?.animationDuration ?? '',
+            };
+          });
+          if (!focusAudit.firstTabOnSkip || focusAudit.skipText !== '跳转到主要内容' ||
+              focusAudit.skipHref !== '#main-content') problems.push(
+            'First Tab must focus an accessible skip-to-main link');
+          if (!focusAudit.skipVisible || !focusAudit.focusOutline) problems.push(
+            'Keyboard skip link is clipped, hidden or has no visible focus outline');
+          // Check focused computed colors after ALL CSS layers, not token strings.
+          // WCAG AA: >=4.5:1 text and >=3:1 non-text focus indication.
+          const focusTextContrast = computedContrastRatio(
+            focusAudit.focusColor, focusAudit.focusBackground);
+          const focusOutlineContrast = computedContrastRatio(
+            focusAudit.focusOutlineColor, focusAudit.focusBackground);
+          audit.skipFocusContrast = {
+            text: Number(focusTextContrast.toFixed(2)),
+            outline: Number(focusOutlineContrast.toFixed(2)),
+          };
+          if (focusTextContrast < 4.5) problems.push(
+            'Skip link computed text contrast below 4.5:1: ' + focusTextContrast.toFixed(2));
+          if (focusOutlineContrast < 3) problems.push(
+            'Skip link computed focus indicator contrast below 3:1: ' + focusOutlineContrast.toFixed(2));
+          if (!focusAudit.reducedMotion ||
+              [focusAudit.navTransitionSeconds, focusAudit.navAnimationSeconds,
+                focusAudit.skipTransitionSeconds, focusAudit.skipAnimationSeconds]
+                .flatMap(value => value.split(','))
+                .some(value => {
+                  const number = parseFloat(value);
+                  return !Number.isFinite(number) || (value.trim().endsWith('ms') ?
+                    number / 1000 : number) > 0.001;
+                })) problems.push('Reduced motion is not enforced on primary navigation');
+          await tab.keyboard.press('Enter');
+          const skipped = await tab.evaluate(() => ({
+            mainFocused: document.activeElement?.id === 'main-content',
+            locationHash: location.hash,
+            mainTabIndex: document.querySelector('#main-content')?.tabIndex,
+          }));
+          if (!skipped.mainFocused || skipped.locationHash !== '#main-content' ||
+              skipped.mainTabIndex !== -1) problems.push(
+            'Skip-to-main activation did not move keyboard focus to main landmark');
+        }
         if (item.id === 'download-verification') {
           // Exercise the real Radix remote chooser against strictly read-only AList fixtures.
           const pickerAction = tab.getByRole('button', { name: '选择目录' }).first();

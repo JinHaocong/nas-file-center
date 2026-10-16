@@ -50,3 +50,22 @@ Screenshot source: PR #264 Chromium `main` evidence artifacts at 360px, 390px, 7
 Scoped repair: `console-v2-mobile-header.css` (last CSS import) hides only the redundant parent breadcrumb and separator on mobile; it keeps the current page name as a single, ellipsized flex item, with a stricter 360px width cap. It does **not** hide Safe Mode, Worker Status, user actions or the navigation drawer. A **real Chromium** `browser-full-route-visual.mjs` assertion now checks the single-line computed current-page title, hidden duplicate parent crumb, absence of header action overlap, and viewport clipping on all 23 authenticated React route cases for **360, 390, 430px** and the 768px boundary's mobile side. The eight-width/four-theme matrix remains 800 screenshots total.
 
 The 120 light-mode review is a **targeted visual pass**, not complete frame-by-frame human approval of all 800 light/dark/system images or all content states. Full eight-width design sign-off remains open pending review of all theme cases and active UI states. The formal final-acceptance gate count remains **68/74**.
+
+
+## Keyboard-first route and reduced-motion follow-up
+
+The same eight-width / four-theme route screenshot CI now exercises native `Tab` and `Enter` in the actual production React app, for each of the 23 authenticated routes, with a strictly synthetic, read-only backend. It verifies the new first-Tab skip link is in view and has a visible focus outline, Enter moves DOM focus to `#main-content` (not only the hash), and the header navigation's real computed transitions/animations are at most 1ms in the already-requested reduced-motion browser context. New CSS is scoped to the skip control and does not hide Safe Mode or Worker indicators.
+
+This is **736 keyboard / reduced-motion route cases**, not a comprehensive manual keyboard/contrast/assistive-technology assessment or human sign-off. The existing 768 page screenshots and 32 Download Verification detail screenshots remain unchanged.
+
+## Focus-link computed contrast and motion guard
+
+The first-Tab route audit now checks the actual focused skip-link `getComputedStyle()` foreground, opaque background and outline in Chromium, after all historical CSS layers and light/dark/system overrides. It enforces at least **4.5:1** normal-text contrast and **3:1** visible focus-outline contrast, and saves measured ratios to the per-route manifest. The visible hit area must be at least **44px** tall. Both the header toggle and skip-link computed motion must be suppressed under `prefers-reduced-motion: reduce`.
+
+These checks run across the existing **23 authenticated routes × 8 widths × 4 theme cases (736 cases)**, with no added screenshots, writable API requests or UI changes. Other forms, overlays, full visual review, assistive-technology review and owner sign-off remain open; the high-level tally stays **68/74**.
+
+## Tablet 768px header screenshot regression (Issue #271)
+
+Actual PR #268 Chromium screenshot evidence shows the authenticated 768px desktop-style navigation header compressing `工作台 / 仪表盘` into vertically wrapped text despite the 360–767px fix; 1280/1440 screenshots do not exhibit this. This isolated tablet repair preserves the current page identity as a single ellipsized line and hides only its redundant parent crumb and username *text* on the 768–899px compact-desktop breakpoint. The avatar/admin trigger, Safe Mode/Worker badges and navigation remain present.
+
+The existing 8-width × 4-theme mock CI now also performs the real computed breadcrumb single-line/overlap/bounds geometry checks on every authenticated 768px route. This is a scoped header fix, not a full visual sign-off. **A distinct 768–1024px Dashboard hero empty-space issue also appears in the real screenshots and remains open under Issue #271 pending computed-layout evidence**; no speculative Dashboard CSS change is made. Overall acceptance stays **68/74**, and no real NAS or production action is taken.
