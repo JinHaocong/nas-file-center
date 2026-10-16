@@ -8,6 +8,8 @@ import { readFileSync } from 'node:fs';
 
 const shell = readFileSync('src/styles/console-v2.css', 'utf8');
 const overlays = readFileSync('src/styles/console-v2-task-overlays.css', 'utf8');
+const canonical = readFileSync('src/styles/tokens.css', 'utf8');
+const primitiveStyles = readFileSync('src/styles/primitives.css', 'utf8');
 
 function rule(css, selector) {
   const index = css.indexOf(selector);
@@ -58,6 +60,34 @@ test('WCAG contrast formula uses sRGB linearization', () => {
   assert.equal(contrast('#abcdef', '#abcdef'), 1);
   assert.ok(contrast('#858580', '#ffffff') < 4.5,
     'original Pure White subtle labels must not silently return');
+});
+
+test('canonical shared token palette matches shell and portal contrast in both themes', () => {
+  const canonicalLight = rule(canonical, ':root {');
+  const canonicalDark = rule(canonical, "[data-theme='dark'] {");
+  for (const [mode, values, shellValues, portalValues] of [
+    ['light', canonicalLight, shellLight, portalLight],
+    ['dark', canonicalDark, shellDark, portalDark],
+  ]) {
+    const subtle = token(values, '--nfc-text-subtle');
+    assert.equal(subtle, token(shellValues, '--v2-subtle'),
+      mode + ' canonical and shell must not diverge');
+    assert.equal(subtle, token(portalValues, '--v2-subtle'),
+      mode + ' canonical and Radix portals must not diverge');
+
+    const surfaceNames = ['--nfc-canvas', '--nfc-surface-1',
+      '--nfc-surface-2', '--nfc-surface-raised', '--nfc-nav-surface',
+      '--nfc-accent-soft'];
+    requireAA(mode + ' canonical shared text', subtle,
+      surfaceNames.map(name => [name, token(values, name)]));
+  }
+  assert.match(canonical, /--v2-subtle:\s*var\(--nfc-text-subtle\)/,
+    'compatibility alias must inherit the canonical accessible value');
+  assert.match(primitiveStyles, /\.nfc-page-eyebrow\s*\{[^}]*color:\s*var\(--nfc-text-subtle\)/);
+  assert.match(primitiveStyles, /\.nfc-data-panel-description\s*\{[^}]*color:\s*var\(--nfc-text-subtle\)/);
+  assert.match(primitiveStyles, /\.nfc-metric-label\s*\{[^}]*color:\s*var\(--nfc-text-subtle\)/);
+  assert.match(readFileSync('src/styles/v047.css', 'utf8'), /@import '.\/tokens.css';/,
+    'actual v047 import must keep the canonical tokens in the cascade');
 });
 
 test('light Pure White small secondary text passes AA on its actual light surfaces', () => {
