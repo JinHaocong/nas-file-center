@@ -78,3 +78,50 @@ The recovery page tracks its latest started WorkJob using a validated, non-secre
 Selecting a different archive, editing the source path or changing folders clears source-bound password and preflight authorization but **does not dismiss** the running/completed Task ID, cancellation link or report evidence. While a task is tracked the UI blocks another Check/Start. After `completed`, `failed` or `cancelled` the operator can explicitly click “开始下一次恢复” to clear the monitor and source/preflight for a new session. The previous Task record remains in Task Center, and this UI action does not cancel or delete it. No new Worker/NAS behavior was introduced.
 
 A separate 390px/1280px × light/dark/system synthetic Chromium matrix exercises GET-only running, completed and unrelated WorkJob details, source/folder switching, reload continuity and explicit terminal acknowledgement. Arbitrary URL IDs cannot enable Archive Recovery cancellation/report or terminal acknowledgement for non-recovery job kinds. All API writes and external destinations are denied, including recovery Check/Start/Cancel. This does **not** establish encrypted 7z acceptance or actual NAS deployment.
+
+
+## Per-file reconciliation and standard-reader warning recovery (2026-10-16 regression hotfix)
+
+When a structurally valid 7z header can be decoded and verified against its
+start-header and next-header CRCs, the recovery report now enumerates each regular
+file **independently from the extractor**. This also works for many payload coder
+layouts not supported by the LZMA2 deep engine, because inventory does not decode
+the payload. For ZIP, a successfully parsed central directory provides a
+**listed**, not independently CRC-authenticated, inventory. For RAR, damaged ZIP
+directory fallbacks, TAR stream failures or unsupported/unreadable 7z headers, the
+inventory can remain **unavailable**; in this case names never seen by a decoder
+cannot be guessed and total count stays unknown.
+
+The JSON report includes:
+- `inventory.status`: `verified` (7z header CRC), `listed` (ZIP directory),
+  or `unavailable` (not a proof of completeness).
+- `inventory.declared_files`, `recovered_files`, `unrecovered_files`
+  (counts are **per original regular-file member**, not decoder attempts).
+- `file_outcomes`: one final result per listed member, preferring a successful
+  deep CRC salvage over an earlier failed standard attempt.
+- `missing_files`: names/statuses/reasons of listed members without any
+  successfully published file. `NOT_EXTRACTED_FROM_VERIFIED_HEADER` means the
+  file was never extracted, **not** that its bytes were proven damaged.
+- `items` remains a diagnostic attempt log, including explicit missing entries.
+  A single file may have a failed standard attempt and a later successful deep
+  recovery, so don't treat attempts as final per-file totals.
+
+The UI shows the exact missing-file list (first 100 visible; complete JSON
+download), filterable final per-file statuses, and an explicit warning when no
+complete manifest is available. Fatal `NO_FILES_RECOVERED` jobs preserve these
+new fields if enumeration finished before failure.
+
+The libarchive decoder now accepts `ARCHIVE_WARN` (-20) headers that actually
+return an entry and bounds `ARCHIVE_RETRY` (-10) to three attempts. Other
+negative returns still stop safely. This can salvage additional readable entries
+following a recoverable warning but **cannot guarantee parity** with NAS-native
+7-Zip/unrar implementations. The original archive remains read-only. All writes
+still use the private, non-overwriting, path-safe publisher; Worker lease,
+limits, and confidential password handling remain unchanged.
+
+A generated 75-member 7z regression simulates a standard reader stopping
+after 69 published members and verifies that precisely six missing names appear
+in the final report. The synthetic test is not proof that any particular
+six files in an operator's damaged archive are actually corrupt or recoverable.
+Real-NAS acceptance must compare the exported per-file report against an
+independent extraction of a **copy** of the same archive.
