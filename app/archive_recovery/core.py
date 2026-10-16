@@ -478,9 +478,12 @@ def _file_outcomes(manifest: list[tuple[str, int]], results: list[dict],
         options = indexed.get(name, [])
         # Only one published file can satisfy one expected archive member;
         # repeated attempts on the same pathname are not independent copies.
-        candidates = [item for item in options if item.get('status') in success
-                      and isinstance(item.get('path'), str)
-                      and item['path'] not in consumed_paths]
+        published = [item for item in options if item.get('status') in success
+                     and isinstance(item.get('path'), str)
+                     and item['path'] not in consumed_paths]
+        # An extractor's unverified output size must agree with the separately
+        # inventoried header before we count that original member as recovered.
+        candidates = [item for item in published if item.get('bytes') == size]
         candidates.sort(key=lambda item: rank[item['status']])
         if candidates:
             chosen = candidates[0]
@@ -491,11 +494,17 @@ def _file_outcomes(manifest: list[tuple[str, int]], results: list[dict],
             failed = next((item for item in options if item.get('status') == 'incomplete'), None)
             if failed is None:
                 failed = next((item for item in options if item.get('status') == 'unrecovered'), None)
-            row = {'name': name, 'status': failed['status'] if failed else 'unrecovered',
-                   'bytes': size, 'reason': (failed.get('reason') if failed
-                                            else 'NOT_EXTRACTED_FROM_VERIFIED_HEADER')}
-            if failed and isinstance(failed.get('path'), str):
-                row['path'] = failed['path']
+            mismatch = published[0] if published else None
+            if mismatch is not None:
+                row = {'name': name, 'status': 'incomplete',
+                       'bytes': mismatch.get('bytes'), 'declared_bytes': size,
+                       'path': mismatch['path'], 'reason': 'DECLARED_SIZE_MISMATCH'}
+            else:
+                row = {'name': name, 'status': failed['status'] if failed else 'unrecovered',
+                       'bytes': size, 'reason': (failed.get('reason') if failed
+                                                else 'NOT_EXTRACTED_FROM_VERIFIED_HEADER')}
+                if failed and isinstance(failed.get('path'), str):
+                    row['path'] = failed['path']
             missing.append(row)
         outcomes.append(row)
     return outcomes, missing
