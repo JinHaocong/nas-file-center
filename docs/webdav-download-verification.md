@@ -19,7 +19,7 @@ NAS File Center 通过来源的 `POST /api/auth/login`（需要服务账号时�
 
 来源管理需要管理员登录。来源配置保留在 NAS File Center 的 SQLite 数据库中；密码不保存在数据库或任务状态中，而是作为 0600 权限的独立文件位于 `/config/download-verification-secrets`（目录 0700），只通过服务端使用，API 不返回密码。API/Worker 已共用 `/config` 挂载的 Compose 通常不需要新增 secret mount 或 WebDAV 环境变量。**创建来源的账号应在 AList/OpenList 中限制为只读权限。**
 
-当前地址校验支持 HTTPS origin，以及 `http://<docker-service-name>:<port>` 形式的单段 Docker DNS 名称；普通公网地址不允许明文 HTTP。登录和列举请求不继承代理，拒绝重定向、限制 JSON 响应长度、拒绝路径逃逸、重复条目和不完整分页。应将 NAS File Center 放在可信 Docker 网络内，避免将来源管理授权给非管理员。
+当前地址校验支持 HTTPS origin，以及单段 Docker DNS 名称（如 `http://alist:5244`）或 RFC1918 内网 IP（如 `http://192.168.1.12:5244`）；普通公网地址不允许明文 HTTP。登录和列举请求不继承代理，拒绝重定向、限制 JSON 响应长度、拒绝路径逃逸、重复条目和不完整分页。应将 NAS File Center 放在可信 Docker 网络内，避免将来源管理授权给非管理员。
 
 ## 可选：严格 SHA256
 
