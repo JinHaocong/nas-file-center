@@ -29,6 +29,8 @@ const REASONS: Record<string, string> = {
   UNSAFE_PATH: '文件路径不安全，已跳过',
   PASSWORD_OR_DATA_ERROR: '密码或压缩数据异常，无法单独判断',
   STANDARD_DECODER_FAILED: '标准读取器未能解码',
+  DECLARED_SIZE_MISMATCH: '实际提取长度与压缩包目录声明的长度不同，不能判定完整',
+  NESTED_TAR_EXPANDED: '内层 TAR 已成功展开，原中间 TAR 文件已移除',
 };
 const reasonText = (reason?: string): string =>
   reason ? (REASONS[reason] || reason) : '原因暂未明确';
@@ -287,7 +289,7 @@ export const ArchiveRecoveryPage: React.FC = () => {
             已验证重置点 {report.data.aes_lzma2_deep.reset_points ?? 0} 个。
             {report.data.aes_lzma2_deep.reason && <> 限制或失败原因：{report.data.aes_lzma2_deep.reason}</>}
           </p>}
-          <p className="nfc-archive-recovery-stats">完整性通过 {report.data.stats.integrity_passed || 0} · 格式通过 {report.data.stats.format_validated || 0} · 未验证 {report.data.stats.unverified || 0} · 不完整 {report.data.stats.incomplete || 0} · 未恢复 {report.data.stats.unrecovered || 0}</p>
+          <p className="nfc-archive-recovery-stats">提取尝试记录：完整性通过 {report.data.stats.integrity_passed || 0} · 格式通过 {report.data.stats.format_validated || 0} · 未验证 {report.data.stats.unverified || 0} · 不完整 {report.data.stats.incomplete || 0} · 未恢复 {report.data.stats.unrecovered || 0}（同一文件可能经历多次尝试，逐文件合计以目录清单为准）</p>
           <ActionBar>
             <ConsoleButton onClick={downloadReport}>下载 JSON 报告</ConsoleButton>
             <select aria-label="恢复验证状态" value={filter} onChange={event => setFilter(event.target.value)}>
