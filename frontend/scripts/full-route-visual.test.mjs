@@ -68,3 +68,26 @@ test('download verification actual 390px form/table defect has owned responsive 
   assert.ok(browser.includes("'Mobile six-column history should scroll within its panel'"));
   assert.ok(browser.includes("path === '/api/plans/legacy/summary'"));
 });
+
+
+test('real 360px visual regression keeps mobile route title on one line without hiding status badges', () => {
+  const css = readFileSync('src/styles/console-v2-mobile-header.css', 'utf8');
+  const entry = readFileSync('src/main.tsx', 'utf8');
+  const header = readFileSync('src/components/Header.tsx', 'utf8');
+  assert.ok(entry.includes("import './styles/console-v2-mobile-header.css';"));
+  assert.match(css, /@media \(max-width: 767px\)/);
+  assert.match(css, /\.nfc-v2-header \.nfc-v2-breadcrumb > strong/);
+  assert.match(css, /white-space:\s*nowrap/);
+  assert.match(css, /text-overflow:\s*ellipsis/);
+  assert.match(css, /@media \(max-width: 380px\)/);
+  assert.doesNotMatch(css, /nfc-header-status\s*\{[^}]*display:\s*none/s,
+    'Mobile repair may not hide the authoritative Safe Mode / Worker status');
+  assert.ok(header.includes('navLabel(location.pathname)'));
+  for (const phrase of [
+    "width <= 767 && !item.public",
+    "h.identityWrap !== 'nowrap'",
+    "h.leftRight > h.commandsLeft + 2",
+    "h.commandsRight > width + 2",
+    "h.parentCrumbDisplay !== 'none'",
+  ]) assert.ok(browser.includes(phrase), 'Missing real Chromium header regression: ' + phrase);
+});
