@@ -148,8 +148,9 @@ export const DashboardPage: React.FC = () => {
                   ))}
                 </div>
               ) : (
-                <div className="nfc-v2-table-scroll">
-                  <table className="nfc-v2-data-table">
+                <div className="nfc-v2-table-scroll nfc-v2-recent-scans-scroll"
+                  role="region" aria-label="最近扫描表格，可横向滚动" tabIndex={0}>
+                  <table className="nfc-v2-data-table nfc-v2-recent-scans-table">
                     <thead><tr><th>扫描名称</th><th>状态</th><th>重复组</th><th>可释放空间</th><th>创建时间</th><th aria-label="操作" /></tr></thead>
                     <tbody>
                       {scanItems.map(item => (

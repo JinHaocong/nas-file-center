@@ -198,3 +198,22 @@ test('tablet Dashboard column header cancels the inherited historical 620px flex
     'geom.heroHeight > 300', 'geom.actionGap > 96', 'geom.metricGap > 90',
   ]) assert.ok(browser.includes(phrase), 'Missing actual Chromium Dashboard geometry regression: ' + phrase);
 });
+
+test('768px recent-scans table has readable filenames and keyboard-native local scrolling', () => {
+  const dash = readFileSync('src/pages/Dashboard/index.tsx', 'utf8');
+  const css = readFileSync('src/styles/console-v2.css', 'utf8');
+  for (const phrase of [
+    'nfc-v2-recent-scans-scroll', 'nfc-v2-recent-scans-table',
+    'role="region" aria-label="最近扫描表格，可横向滚动" tabIndex={0}',
+  ]) assert.ok(dash.includes(phrase), 'Missing accessible recent scan region: ' + phrase);
+  assert.match(css, /@media \(min-width: 768px\) and \(max-width: 899px\)/);
+  assert.match(css, /\.nfc-v2-dashboard \.nfc-v2-recent-scans-table\s*\{\s*min-width:\s*860px/);
+  assert.match(css, /\.nfc-v2-recent-scans-scroll:focus-visible\s*\{\s*outline:\s*2px/);
+  for (const phrase of [
+    "item.id === 'dashboard' && width === 768",
+    'audit.recentScansGeometry = scans', 'scans.scrollContent < scans.scrollClient + 120',
+    'scans.filenameWidth < 145', 'scans.filenameHeight > 72',
+    "tab.locator('.nfc-v2-recent-scans-scroll')", "tab.keyboard.press('ArrowRight')",
+    'audit.recentScansKeyboardScrollLeft', 'if (scrollLeft < 3)',
+  ]) assert.ok(browser.includes(phrase), 'Missing actual Chromium 768px scan table gate: ' + phrase);
+});
