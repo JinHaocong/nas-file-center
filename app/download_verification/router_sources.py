@@ -67,6 +67,8 @@ def list_sources(request: Request):
 @router.post("", status_code=201)
 def create_source(request: Request, body: SourceCreate):
     config_dir = Path(request.app.state.settings.config_dir)
+    if not body.name.strip():
+        raise HTTPException(422, "SOURCE_NAME_REQUIRED")
     secret = None
     password = body.password.get_secret_value() if body.password is not None else ""
     if body.username and not password:
@@ -99,6 +101,9 @@ def create_source(request: Request, body: SourceCreate):
 def update_source(request: Request, source_id: int, body: SourceUpdate):
     config_dir = Path(request.app.state.settings.config_dir)
     new_secret = None
+    old_secret = None
+    if body.name is not None and not body.name.strip():
+        raise HTTPException(422, "SOURCE_NAME_REQUIRED")
     password = body.password.get_secret_value() if body.password is not None else None
     if password == "":
         raise HTTPException(422, "EMPTY_PASSWORD_NOT_ALLOWED")
@@ -106,6 +111,7 @@ def update_source(request: Request, source_id: int, body: SourceUpdate):
         with request.app.state.service.SessionLocal() as session:
             session.execute(text("BEGIN IMMEDIATE"))
             source = _source(session, source_id)
+            old_secret = source.secret_file
             name = body.name.strip() if body.name is not None else source.name
             username = body.username if body.username is not None else source.username
             if username and not (password or source.secret_file):
@@ -121,9 +127,18 @@ def update_source(request: Request, source_id: int, body: SourceUpdate):
             source.username = username
             if new_secret:
                 source.secret_file = new_secret
+            elif not username:
+                source.secret_file = None
             source.revision += 1
             session.commit()
-            return _public(source)
+            result = _public(source)
+            current_secret = source.secret_file
+        if old_secret and old_secret != current_secret:
+            try:
+                source_secret_path(config_dir, old_secret).unlink(missing_ok=True)
+            except OSError:
+                pass
+        return result
     except BaseException:
         if new_secret:
             source_secret_path(config_dir, new_secret).unlink(missing_ok=True)
@@ -136,9 +151,16 @@ def disable_source(request: Request, source_id: int):
     with request.app.state.service.SessionLocal() as session:
         session.execute(text("BEGIN IMMEDIATE"))
         source = _source(session, source_id)
+        old_secret = source.secret_file
         source.active = False
+        source.secret_file = None
         source.revision += 1
         session.commit()
+    if old_secret:
+        try:
+            source_secret_path(Path(request.app.state.settings.config_dir), old_secret).unlink(missing_ok=True)
+        except OSError:
+            pass
     return {"disabled": True}
 
 
