@@ -198,7 +198,8 @@ try {
             external.push(route.request().url());
             await route.abort();
           } else {
-            await route.continue();
+            // Serve only the local Vite fixture; no unmocked API/NAS calls.
+            await route.fulfill({ response: await route.fetch() });
           }
         });
         await fixture(context);
