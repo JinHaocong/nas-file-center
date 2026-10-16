@@ -61,6 +61,7 @@ export const downloadVerificationApi = {
     api.post<{ id: number; work_job_id: number; job_status: string }>('/api/download-verifications',
       { remote_root, local_root, source_id, mode }),
   list: () => api.get<Page<DownloadVerificationRun>>('/api/download-verifications?page=1&page_size=50'),
+  removeReport: (id: number) => api.delete<Record<string, never>>('/api/download-verifications/' + id),
   items: (id: number, page: number, status?: string) =>
     api.get<Page<DownloadVerificationItem>>('/api/download-verifications/' + id + '/items?page=' + page + '&page_size=50' + (status ? '&status=' + encodeURIComponent(status) : '')),
 };
