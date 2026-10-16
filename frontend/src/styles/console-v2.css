@@ -540,6 +540,18 @@
 .nfc-v2-error-note { background: #fff0f2; border: 1px solid #f9cfd5; color: #b32a47; border-radius: 9px; padding: 12px 15px; font-size: 12px; }
 
 .nfc-v2-table-scroll { width: 100%; overflow-x: auto; }
+/* Issue #274: 768px recent-scans PNG showed one-glyph-wide filenames.
+ * Keep the six columns in a locally scrollable table; do not affect
+ * other Dashboard tables or the document's horizontal dimensions. */
+.nfc-v2-recent-scans-scroll:focus-visible {
+  outline: 2px solid var(--v2-indigo);
+  outline-offset: -2px;
+}
+@media (min-width: 768px) and (max-width: 899px) {
+  .nfc-v2-dashboard .nfc-v2-recent-scans-table {
+    min-width: 860px;
+  }
+}
 .nfc-v2-data-table { width: 100%; border-collapse: collapse; font-size: 12px; text-align: left; }
 .nfc-v2-data-table thead { background: color-mix(in srgb, var(--v2-canvas) 80%, var(--v2-paper)); }
 .nfc-v2-data-table th { padding: 12px 17px; text-align: left; color: var(--v2-muted); font-size: 11px; font-weight: 650; white-space: nowrap; border-bottom: 1px solid var(--v2-line); }
