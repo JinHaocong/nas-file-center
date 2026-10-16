@@ -109,6 +109,31 @@ describe('Pure White Stage 5E-J shared native checkbox selection boundary', () =
     assert.ok(ci.includes(manifest), 'CI must upload measured checkbox focus manifest');
   });
 
+  test('computed paint parser accepts browser color(srgb / alpha) but rejects unknown color spaces', () => {
+    const browser = read('scripts/browser-workspace-cascade.mjs');
+    const rgbaSource = browser.match(/const rgb = \/(.+)\/\.exec\(color\);/);
+    const srgbSource = browser.match(/const srgb = \/(.+)\/\.exec\(color\);/);
+    assert.ok(rgbaSource && srgbSource, 'Both actual Chromium computed color formats must be parsed');
+    const rgb = new RegExp(rgbaSource[1]);
+    const srgb = new RegExp(srgbSource[1]);
+    const transparent = rgb.exec('rgba(0, 0, 0, 0)');
+    assert.equal(transparent?.[4], '0');
+    assert.equal(rgb.exec('rgb(255, 255, 255)')?.[4], undefined);
+    const mixed = srgb.exec('color(srgb 0.960784 0.960784 0.952941 / 0.36)');
+    assert.ok(mixed, 'real Chrome alpha-mixed surface must parse');
+    assert.deepEqual(mixed?.slice(1, 5).map(Number), [0.960784, 0.960784, 0.952941, 0.36]);
+    assert.equal(srgb.test('color(srgb 1 1 1)'), true);
+    assert.equal(srgb.test('color(display-p3 1 1 1 / 0.5)'), false);
+    for (const clause of [
+      'const parsePaintedColor = color =>',
+      'const channels = match.slice(1, 4).map(Number)',
+      'channels[i] *= 255',
+      'alpha < 0 || alpha > 1',
+      'No opaque painted ancestor for native checkbox',
+      'composited = layer.rgb.map',
+    ]) assert.ok(browser.includes(clause), clause);
+  });
+
   test('existing Chromium matrix must still test read-only selections, disabled states and no NAS writes', () => {
     for (const needle of [
       "name: '选择可永久删除损坏媒体 #'",
