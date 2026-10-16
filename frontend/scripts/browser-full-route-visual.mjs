@@ -282,6 +282,19 @@ try {
           fullPage: (width === 390 || width === 1440) && theme.mode === 'light',
           animations: 'disabled',
         });
+        if (item.id === 'download-verification') {
+          // Capture the interactive detailed evidence table, not only the landing state.
+          const action = tab.getByRole('button', { name: '查看条目' }).first();
+          await action.click();
+          await tab.getByRole('table', { name: '校验明细' }).waitFor();
+          await tab.screenshot({
+            path: resolve(OUT, name + '-selected-detail.png'),
+            fullPage: width === 390 && theme.mode === 'light',
+            animations: 'disabled',
+          });
+          if (pageErrors.length > beforeErrors) problems.push(
+            'Uncaught detail-panel React errors: ' + pageErrors.slice(beforeErrors).join('; '));
+        }
         report.push({ route: item.path, width, theme: themeLabel, ...audit, problems });
         if (problems.length) failures.push({ route: item.path, theme: themeLabel, problems });
       } catch (err) {
