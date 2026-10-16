@@ -153,3 +153,14 @@ could change actual computed styles even when unit tests still pass.
 - This closes only the **identified canonical small-text contrast defect**, not the high-level CSS ownership / 8-width full-page visual / comprehensive accessibility acceptance items. Older v048–v056 CSS and other component-specific colors still require an exhaustive global review and owner visual sign-off. No deployment or real NAS operation is included.
 
 - First exact-HEAD Chromium test also found a **real CSS cascade override**: global `.nfc-page-eyebrow` computed as `#929aa5` from v049 `--nfc-v49-subtle`, despite the compliant root token. Change only that `v049-workspace.css` eyebrow declaration to `var(--nfc-text-subtle)`, preserving every other v049 rule, import order and breakpoint. Guard with both source-level and computed Chromium regression. This demonstrates why token-only source acceptance is insufficient.
+
+## Stage 5E-AA — mobile historical CSS same-context shadow retirement (2026-10-16)
+
+A conservative source-context audit found **seven exactly shadowed declarations** in historical mobile rules:
+
+- `v049-workspace.css`: the *first* `@media (max-width: 767px)` groups redundantly set header `min-height: 54px`, page header `align-items: stretch` and `gap: 12px`, copy `max-width: 100%`, metric grid `grid-template-columns: repeat(2, minmax(0, 1fr))`, and metric card `min-height: 94px`. The **later** `@media (max-width: 767px)` groups use the **same selectors, identical media condition and same property values**. Only the six earlier declarations were retired, including now-empty copy and grid blocks.
+- `v056-right-workspace-v2.css`: the earlier phone `.nfc-app-main .nfc-page-header-copy { max-width: 100%; }` was wholly redundant with the later *same-selector and same-media* responsive-spacing correction, which still sets `width: 100%; max-width: 100%; flex: 0 1 auto;`. Only the early empty block was retired. The separate `@media (max-width: 1199px)` `flex: 1 1 620px` rule for row-layout headers **remains** and the Dashboard-owned column exception introduced by PR #273 also remains.
+
+The original 8 v049 media wrappers, other declarations (mobile header margins/padding, page title and metric card padding), selector specificity, late winners, import order and `!important` authority are preserved. Source regression checks explicitly assert absence of each early shadow and presence of the corresponding late winning property, and retain existing real Chromium 8-width × 4-theme route/overlay checks in CI. Neither component JSX nor backend/security/NAS APIs is modified.
+
+**Scope limit:** these are only seven proven same-context repetitions, not a comprehensive historical CSS consolidation or human full-site visual sign-off. Canonical final acceptance remains **68/74** with six high-level gates open.
