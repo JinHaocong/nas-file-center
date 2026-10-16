@@ -28,7 +28,7 @@ describe('Pure White Stage 4B Quarantine detail and safe overlays', () => {
       'overscroll-behavior-x:contain',
       'font-variant-numeric:tabular-nums',
       '.nfc-v2-quarantine-table tbody tr:focus-within',
-      '.nfc-v2-quarantine-table .nfc-v2-quarantine-checkbox:focus-visible',
+      '.nfc-v2-shell .nfc-v2-quarantine-ledger .nfc-v2-quarantine-checkbox:focus-visible',
       '.nfc-v2-quarantine-mobile-list .nfc-quarantine-mobile-card:focus-within',
       'overflow-wrap:anywhere', 'min-height:44px',
       'prefers-reduced-motion:reduce',
