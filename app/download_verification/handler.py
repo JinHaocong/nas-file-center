@@ -75,7 +75,22 @@ class DownloadVerificationHandler(TaskHandler):
             client = build_client(settings)
             context.checkpoint(progress_message="读取 WebDAV 云端目录",
                 checkpoint_data={"schema_version": 1, "phase": "remote_manifest", "run_id": run_id})
-            # Resume is a fresh verification, never reuse old successful item rows.\n            with context.SessionLocal() as session:\n                session.execute(text("BEGIN IMMEDIATE"))\n                from app.tasks.recovery import assert_active_worker_lease\n                if context.worker_id is not None:\n                    assert_active_worker_lease(session, context.worker_id)\n                session.query(DownloadVerificationItem).filter(\n                    DownloadVerificationItem.run_id == run_id).delete(synchronize_session=False)\n                run = session.get(DownloadVerificationRun, run_id)\n                run.result = "INCOMPLETE"\n                run.finished_at = None\n                run.checked = 0\n                run.bytes_checked = 0\n                run.error_code = None\n                session.commit()\n            remote = client.manifest(remote_parts)
+            # Resume is a fresh verification, never reuse old successful item rows.
+            with context.SessionLocal() as session:
+                session.execute(text("BEGIN IMMEDIATE"))
+                from app.tasks.recovery import assert_active_worker_lease
+                if context.worker_id is not None:
+                    assert_active_worker_lease(session, context.worker_id)
+                session.query(DownloadVerificationItem).filter(
+                    DownloadVerificationItem.run_id == run_id).delete(synchronize_session=False)
+                run = session.get(DownloadVerificationRun, run_id)
+                run.result = "INCOMPLETE"
+                run.finished_at = None
+                run.checked = 0
+                run.bytes_checked = 0
+                run.error_code = None
+                session.commit()
+            remote = client.manifest(remote_parts)
             context.checkpoint(progress_message="读取 NAS 本地目录",
                 checkpoint_data={"schema_version": 1, "phase": "local_manifest", "run_id": run_id})
             local_rows = local_manifest(local, quarantine_root=settings.quarantine_root)
@@ -126,14 +141,27 @@ class DownloadVerificationHandler(TaskHandler):
             # No 'identical' if either tree changed during the scan.
             if remote_fingerprint(remote) != remote_fingerprint(client.manifest(remote_parts)):
                 raise VerificationError("REMOTE_CHANGED")
-            if local_fingerprint(local_rows) != local_fingerprint(local_manifest(\n                    local, quarantine_root=settings.quarantine_root)):
+            if local_fingerprint(local_rows) != local_fingerprint(local_manifest(
+                    local, quarantine_root=settings.quarantine_root)):
                 raise VerificationError("LOCAL_CHANGED")
-            # Final cancellation/lease checkpoint BEFORE publishing the verdict.\n            context.checkpoint(\n                progress_current=total, progress_total=total,\n                progress_message="内容有差异" if differences else "双端 SHA256 校验一致",\n                checkpoint_data={"schema_version": 1, "phase": "finalizing", "run_id": run_id})\n            with context.SessionLocal() as session:\n                session.execute(text("BEGIN IMMEDIATE"))\n                from app.tasks.recovery import assert_active_worker_lease\n                if context.worker_id is not None:\n                    assert_active_worker_lease(session, context.worker_id)\n                run = session.get(DownloadVerificationRun, run_id)\n                run.result = "DIFFERENT" if differences else "VERIFIED_IDENTICAL"
+            # Final cancellation/lease checkpoint BEFORE publishing the verdict.
+            context.checkpoint(
+                progress_current=total, progress_total=total,
+                progress_message="内容有差异" if differences else "双端 SHA256 校验一致",
+                checkpoint_data={"schema_version": 1, "phase": "finalizing", "run_id": run_id})
+            with context.SessionLocal() as session:
+                session.execute(text("BEGIN IMMEDIATE"))
+                from app.tasks.recovery import assert_active_worker_lease
+                if context.worker_id is not None:
+                    assert_active_worker_lease(session, context.worker_id)
+                run = session.get(DownloadVerificationRun, run_id)
+                run.result = "DIFFERENT" if differences else "VERIFIED_IDENTICAL"
                 run.checked = completed
                 run.bytes_checked = bytes_done
                 run.finished_at = utcnow()
                 session.commit()
-            # WorkJob transitions to completed later, under the same Worker lease.\n            # API suppresses a successful verdict until that transition is durable.
+            # WorkJob transitions to completed later, under the same Worker lease.
+            # API suppresses a successful verdict until that transition is durable.
         except Exception as exc:
             # A failed/paused/unavailable scan must never publish VERIFIED_IDENTICAL.
             # Preserve the original worker control exception (cancel/lease loss).
