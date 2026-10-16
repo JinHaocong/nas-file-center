@@ -286,6 +286,44 @@ try {
               'Mobile header actions exceed viewport width');
           }
         }
+        if (item.id === 'dashboard') {
+          // Actual 768/1024 Chromium PNGs show a huge blank heading-to-action gap.
+          // Inspect resolved layout after all CSS layers, not source token text.
+          const geom = await tab.evaluate(() => {
+            const hero = document.querySelector('.nfc-v2-dashboard-hero');
+            const copy = hero?.querySelector('.nfc-page-header-copy');
+            const actions = hero?.querySelector('.nfc-page-actions');
+            const metrics = document.querySelector('.nfc-v2-dashboard-metrics');
+            if (!hero || !copy || !actions || !metrics) return null;
+            const h = hero.getBoundingClientRect();
+            const c = copy.getBoundingClientRect();
+            const a = actions.getBoundingClientRect();
+            const m = metrics.getBoundingClientRect();
+            const style = getComputedStyle(copy);
+            return {
+              heroHeight: Number(h.height.toFixed(1)),
+              copyFlexBasis: style.flexBasis,
+              copyFlexGrow: style.flexGrow,
+              copyHeight: Number(c.height.toFixed(1)),
+              actionGap: Number((a.top - c.bottom).toFixed(1)),
+              metricGap: Number((m.top - h.bottom).toFixed(1)),
+              actionVisible: a.width > 30 && a.height > 25,
+            };
+          });
+          audit.dashboardGeometry = geom;
+          if (!geom) problems.push('Dashboard title/action/metric geometry is missing');
+          else if (width >= 768 && width <= 1024) {
+            if (geom.copyFlexBasis !== 'auto' || geom.copyFlexGrow !== '0')
+              problems.push('Dashboard tablet flex-basis is not content-sized: ' +
+                geom.copyFlexBasis + ' grow=' + geom.copyFlexGrow);
+            if (geom.heroHeight > 300 || geom.actionGap > 96 || geom.actionGap < -2)
+              problems.push('Dashboard tablet hero has excessive vertical gap: ' +
+                JSON.stringify(geom));
+            if (!geom.actionVisible || geom.metricGap < -2 || geom.metricGap > 90)
+              problems.push('Dashboard tablet refresh/metrics are mispositioned: ' +
+                JSON.stringify(geom));
+          }
+        }
         if (item.id === 'download-verification') {
           const form = await tab.evaluate(() => {
             const field = document.querySelector('.nfc-download-verify-field');
