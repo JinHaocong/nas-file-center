@@ -144,8 +144,9 @@ body,
 .nfc-page-header-copy {
 }
 
+/* Historical global header must use canonical Pure White text, not v049 blue-gray. */
 .nfc-page-eyebrow {
-  color: var(--nfc-v49-subtle);
+  color: var(--nfc-text-subtle);
   font-weight: 740;
   text-transform: uppercase;
 }

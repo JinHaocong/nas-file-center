@@ -11,7 +11,8 @@
   --nfc-hairline-strong: #d3d3cf;
   --nfc-text: #20201f;
   --nfc-text-muted: #696965;
-  --nfc-text-subtle: #858580;
+  /* 4.5:1+ WCAG AA across paper, neutral and accent-soft backgrounds. */
+  --nfc-text-subtle: #6b6b66;
 
   --nfc-canvas-tint-a: rgba(32, 32, 31, 0.015);
   --nfc-canvas-tint-b: rgba(32, 32, 31, 0.008);
@@ -91,7 +92,8 @@
   --nfc-hairline-strong: #55554f;
   --nfc-text: #f5f5f2;
   --nfc-text-muted: #b6b6b0;
-  --nfc-text-subtle: #94948e;
+  /* Preserve AA on raised and accent-soft dark surfaces, not just canvas. */
+  --nfc-text-subtle: #9d9d97;
 
   --nfc-canvas-tint-a: rgba(245, 245, 242, 0.018);
   --nfc-canvas-tint-b: rgba(245, 245, 242, 0.008);
