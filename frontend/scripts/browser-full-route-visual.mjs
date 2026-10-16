@@ -256,10 +256,11 @@ try {
         if (item.id === 'download-verification') {
           const form = await tab.evaluate(() => {
             const field = document.querySelector('.nfc-download-verify-field');
-            const name = field?.querySelector('span');
+            const name = field?.querySelector('label');
             const input = field?.querySelector('input');
             const scroller = document.querySelector('.nfc-download-verify-table-scroll');
             return {
+              hasAccessibleField: Boolean(field && name && input),
               labelBottom: name?.getBoundingClientRect().bottom ?? 0,
               inputTop: input?.getBoundingClientRect().top ?? 0,
               scrollerClient: scroller?.clientWidth ?? 0,
@@ -267,6 +268,7 @@ try {
               scrollerOverflow: scroller ? getComputedStyle(scroller).overflowX : '',
             };
           });
+          if (!form.hasAccessibleField) problems.push('Download verification remote folder field is missing');
           if (form.inputTop < form.labelBottom + 4) problems.push(
             'Download verification form field overlaps label');
           if (form.scrollerContent <= form.scrollerClient && width <= 430) problems.push(

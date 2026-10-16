@@ -157,7 +157,7 @@ export const DownloadVerificationPage: React.FC = () => {
             </div>
             <small>{selectedSource ? selectedSource.base_url : '点击「新增来源」配置你自己的地址及只读账号'}</small>
           </div>
-          <div className="nfc-dv-field">
+          <div className="nfc-dv-field nfc-download-verify-field">
             <label>2 · 来源文件夹</label>
             <div className="nfc-dv-control-row">
               <input aria-label="云端相对目录" value={remoteRoot} onChange={e => setRemoteRoot(e.target.value)}
@@ -265,7 +265,7 @@ export const DownloadVerificationPage: React.FC = () => {
       <DataPanel title="校验历史" description="仅「快速清单一致」或「完整 SHA256 一致」是对应模式的成功结论；任务 completed 只是执行结束。">
         {runs.isError && <p role="alert">读取校验历史失败</p>}
         <div className="nfc-dv-table-scroll nfc-download-verify-table-scroll">
-          <table className="nfc-dv-table nfc-download-verify-table">
+          <table className="nfc-dv-table nfc-download-verify-table" aria-label="校验历史">
             <thead><tr><th>任务</th><th>来源 / NAS</th><th>模式</th><th>结果</th><th>进度</th><th>操作</th></tr></thead>
             <tbody>
               {(runs.data?.items || []).map(run => <tr key={run.id}>
@@ -291,7 +291,7 @@ export const DownloadVerificationPage: React.FC = () => {
         description="逐个相对路径查看差异；快速核对的文件不会显示 SHA256 一致。">
         {details.isError && <p role="alert">读取明细失败</p>}
         <div className="nfc-dv-table-scroll nfc-download-verify-table-scroll">
-          <table className="nfc-dv-table nfc-download-verify-table">
+          <table className="nfc-dv-table nfc-download-verify-table" aria-label="校验明细">
             <thead><tr><th>相对路径</th><th>结果</th><th>云端大小</th><th>NAS 大小</th><th>内容 SHA256</th></tr></thead>
             <tbody>{(details.data?.items || []).map(item => <tr key={item.relative_path}>
               <td>{item.relative_path}</td><td>{verdict[item.status] || item.status}</td>

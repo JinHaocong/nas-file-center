@@ -64,6 +64,8 @@ test('download verification actual 390px form/table defect has owned responsive 
   assert.match(css, /overflow-x:\s*auto/);
   assert.ok(entry.includes("import './styles/console-v2-download-verification.css';"));
   assert.ok(browser.includes("item.id === 'download-verification'"));
+  assert.ok(browser.includes("field?.querySelector('label')"));
+  assert.ok(browser.includes("Download verification remote folder field is missing"));
   assert.ok(browser.includes("'-selected-detail.png'"));
   assert.ok(browser.includes("'Mobile six-column history should scroll within its panel'"));
   assert.ok(browser.includes("path === '/api/plans/legacy/summary'"));
