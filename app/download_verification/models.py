@@ -8,10 +8,27 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.models import Base, utcnow
 
 
+class DownloadVerificationSource(Base):
+    """Admin-managed, read-only API source. Password lives outside SQLite."""
+    __tablename__ = "download_verification_sources"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(120))
+    provider: Mapped[str] = mapped_column(String(20))
+    base_url: Mapped[str] = mapped_column(Text)
+    username: Mapped[str] = mapped_column(String(255), default="")
+    secret_file: Mapped[str | None] = mapped_column(Text, nullable=True)
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    active: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
 class DownloadVerificationRun(Base):
     __tablename__ = "download_verification_runs"
     id: Mapped[int] = mapped_column(primary_key=True)
     work_job_id: Mapped[int | None] = mapped_column(ForeignKey("work_jobs.id", ondelete="SET NULL"), index=True, nullable=True)
+    source_id: Mapped[int | None] = mapped_column(ForeignKey("download_verification_sources.id", ondelete="SET NULL"), nullable=True)
+    source_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    mode: Mapped[str] = mapped_column(String(24), default="strict_sha256")
     remote_root: Mapped[str] = mapped_column(Text)
     local_root: Mapped[str] = mapped_column(Text)
     result: Mapped[str] = mapped_column(String(40), default="INCOMPLETE")

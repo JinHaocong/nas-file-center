@@ -1,3 +1,42 @@
+# 下载清单核对：可配置 AList / OpenList 来源
+
+## 推荐使用：快速核对（默认）
+
+进入「文件工具 → 下载完整性校验 → 新增来源」，填写你自己的来源名称、AList / OpenList 类型、内网服务地址，以及可选的**只读**服务账号。来源可以新增、修改、停用，地址**不在代码中写死**。
+
+对用户提供的 Docker Stack，两个示例配置为：
+
+| 来源 | 地址（同一 nginx_network 的容器之间） |
+| --- | --- |
+| AList | `http://alist:5244` |
+| OpenList | `http://openlist:5244` |
+
+这些只是示例，不会自动创建，也不是程序内硬编码的默认值。OpenList 对外的 5245 映射不影响容器间的 5244 通信。容器在同一网络，并不自动免除 AList / OpenList 服务的访问控制。如果挂载目录不是游客可读，使用对应服务的只读账号登录；PikPak 密码仍然只在 AList/OpenList 原有挂载设置中配置。
+
+NAS File Center 通过来源的 `POST /api/auth/login`（需要服务账号时）取得临时 token，并用 `POST /api/fs/list` 递归枚举目录。界面提供「浏览」可逐层选择来源文件夹，再用现有 NAS DirectoryPicker 选择本地下载文件夹。
+
+「快速核对」比较每个相对目录路径、文件名、对象类型、文件大小及空目录，不读取云端文件内容，**不计算 SHA256**，不写入或删除源文件。结果 `METADATA_IDENTICAL` 只表示两边的可见清单匹配，**不能证明相同大小文件的内容未损坏**；`DIFFERENT` 为已确认缺失、多余、大小或类型不一致；`INCOMPLETE` 为权限、网络、分页或枚举不完整；`STALE` 为枚举期间检测到变化。校验完成前不展示成功。
+
+来源管理需要管理员登录。来源配置保留在 NAS File Center 的 SQLite 数据库中；密码不保存在数据库或任务状态中，而是作为 0600 权限的独立文件位于 `/config/download-verification-secrets`（目录 0700），只通过服务端使用，API 不返回密码。API/Worker 已共用 `/config` 挂载的 Compose 通常不需要新增 secret mount 或 WebDAV 环境变量。**创建来源的账号应在 AList/OpenList 中限制为只读权限。**
+
+当前地址校验支持 HTTPS origin，以及单段 Docker DNS 名称（如 `http://alist:5244`）或 RFC1918 内网 IP（如 `http://192.168.1.12:5244`）；普通公网地址不允许明文 HTTP。登录和列举请求不继承代理，拒绝重定向、限制 JSON 响应长度、拒绝路径逃逸、重复条目和不完整分页。应将 NAS File Center 放在可信 Docker 网络内，避免将来源管理授权给非管理员。
+
+## 可选：严格 SHA256
+
+切换「严格 SHA256」时，针对所选来源使用其 `/dav/` WebDAV，完整读取远端和 NAS 文件内容并计算 SHA256；要求此来源具有可用于 WebDAV 的只读账号和密码。由于 AList/OpenList 的网盘驱动有时返回外部 HTTP 重定向、转码或非完整流，WebDAV 客户端仍按既有安全模型拒绝这些响应，不会将它们当成校验成功。严格结果为 `VERIFIED_IDENTICAL`，和快速的 `METADATA_IDENTICAL` 明确区分。
+
+既有旧版通过环境变量配置的单一 WebDAV 任务、历史记录及任务结果保留兼容。已有记录未变更为快速校验，也不会重新计算旧结果。
+
+## NAS 运行与验证
+
+将包含本变更的新镜像部署在 API 与 Worker 上，两者必须共用 `/config` 和同一 Docker 网络，且版本一致。在来源管理界面选择「新增来源」；先浏览一个小型、只读测试目录，再进行快速核对。校验 AList/OpenList 文件列表 API 实际权限及完整分页、只读服务账号、链接不重定向。生产文件不作为测试 fixture。
+
+本变更保留用户现有隔离区挂载、Plan/Quarantine/Worker 语义，不要求打开写权限，也不修改现有 Komodo 配置。GitHub CI 不能替代真实极空间 NAS + AList/OpenList 集成验收；未完成实机验收前不应将新功能标记为已在 NAS 验证通过。
+
+---
+
+## 历史严格模式部署说明（兼容保留）
+
 # OpenList WebDAV → NAS 严格 SHA256 下载完整性校验
 
 此功能是独立只读任务，**不下载第二份文件，不对 PikPak 或 NAS 进行写入/删除/隔离操作**，也不改变现有双目录差异页面的 10,000 项 / 单对文件 256 MiB 限制。

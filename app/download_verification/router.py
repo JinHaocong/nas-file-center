@@ -11,7 +11,7 @@ from app.auth.dependencies import require_admin_user
 from app.models import WorkJob
 from app.download_verification.engine import qualified_local_root
 from app.download_verification.webdav import relative_parts, WebDAVError
-from app.download_verification.models import DownloadVerificationRun, DownloadVerificationItem
+from app.download_verification.models import DownloadVerificationRun, DownloadVerificationItem, DownloadVerificationSource
 
 
 router = APIRouter(prefix="/api/download-verifications", tags=["download-verification"],
@@ -22,6 +22,8 @@ class NewVerification(BaseModel):
     model_config = ConfigDict(extra="forbid")
     remote_root: str = Field(default="", max_length=4096)
     local_root: str = Field(min_length=1, max_length=4096)
+    source_id: int | None = Field(default=None, gt=0)
+    mode: str = Field(default="metadata", pattern="^(metadata|strict_sha256)$")
 
 
 def _summary(run: DownloadVerificationRun, job: WorkJob | None) -> dict:
@@ -30,6 +32,7 @@ def _summary(run: DownloadVerificationRun, job: WorkJob | None) -> dict:
     result = run.result if run.finished_at and (status == "completed" or job is None) else "INCOMPLETE"
     return {
         "id": run.id, "work_job_id": run.work_job_id, "remote_root": run.remote_root,
+        "source_id": run.source_id, "mode": run.mode,
         "local_root": run.local_root, "result": result, "job_status": status,
         "checked": run.checked, "total": run.total, "bytes_checked": run.bytes_checked,
         "error_code": run.error_code, "created_at": run.created_at.isoformat(),
@@ -52,9 +55,6 @@ def configuration(request: Request):
 @router.post("", status_code=202)
 def start_verification(request: Request, payload: NewVerification):
     settings = request.app.state.settings
-    if not (settings.download_verify_webdav_base_url and settings.download_verify_webdav_user
-            and settings.download_verify_webdav_password_file):
-        raise HTTPException(503, "WEBDAV_NOT_CONFIGURED")
     try:
         remote = "/".join(relative_parts(payload.remote_root))
         local = str(qualified_local_root(payload.local_root, settings))
@@ -62,11 +62,25 @@ def start_verification(request: Request, payload: NewVerification):
         raise HTTPException(422, "INVALID_VERIFICATION_ROOT") from exc
     with request.app.state.service.SessionLocal() as session:
         session.execute(text("BEGIN IMMEDIATE"))
+        source = None
+        if payload.source_id is not None:
+            source = session.get(DownloadVerificationSource, payload.source_id)
+            if source is None or not source.active:
+                raise HTTPException(422, "SOURCE_NOT_FOUND")
+            if payload.mode == "strict_sha256" and not source.username:
+                raise HTTPException(422, "STRICT_WEBDAV_REQUIRES_CREDENTIALS")
+        elif not (settings.download_verify_webdav_base_url and settings.download_verify_webdav_user
+                  and settings.download_verify_webdav_password_file):
+            raise HTTPException(503, "SOURCE_REQUIRED")
+        # Legacy pre-source clients retain the exact strict SHA256 behavior.
+        mode = payload.mode if source is not None else "strict_sha256"
         job = WorkJob(kind="download-verify-webdav", status="queued", state_json="{}")
         session.add(job)
         session.flush()
         run = DownloadVerificationRun(work_job_id=job.id, remote_root=remote, local_root=local,
-                                      result="INCOMPLETE")
+                                      source_id=source.id if source else None,
+                                      source_revision=source.revision if source else None,
+                                      mode=mode, result="INCOMPLETE")
         session.add(run)
         session.flush()
         job.state_json = json.dumps({"run_id": run.id})
