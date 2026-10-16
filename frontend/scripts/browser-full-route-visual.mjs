@@ -270,14 +270,14 @@ try {
         if (audit.busy) problems.push('Still showing session loading');
         if (audit.horizontalOverflow > 3) problems.push(
           'Document horizontal overflow: ' + audit.horizontalOverflow + 'px');
-        if (width <= 767 && !item.public) {
+        if (width <= 768 && !item.public) {
           const h = audit.mobileHeader;
           if (!h) problems.push('Mobile page header controls are missing');
           else {
             if (!h.identityText) problems.push('Mobile page identity is empty');
             if (h.identityWrap !== 'nowrap' ||
                 h.identityHeight > h.identityLineHeight + 2) problems.push(
-              'Mobile breadcrumb wraps onto two lines: ' + h.identityText);
+              'Narrow-header breadcrumb wraps onto two lines: ' + h.identityText);
             if (h.parentCrumbDisplay !== 'none') problems.push(
               'Redundant mobile parent breadcrumb consumes horizontal space');
             if (h.leftRight > h.commandsLeft + 2) problems.push(
