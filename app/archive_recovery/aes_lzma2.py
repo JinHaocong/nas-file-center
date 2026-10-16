@@ -714,12 +714,21 @@ def _recover_block(source: Path, meta: Metadata, password: str | None, *,
                     reset_points += 1
                     reset_origin = frame.input_offset
                     segments += 1
-                    discard()
+                    # Dictionary resets do not interrupt file bytes. Preserve a
+                    # candidate only when its observed prefix ends exactly here;
+                    # decode failures already discard it before resynchronizing.
+                    contiguous = (candidate is not None and decoding
+                                  and cursor < len(targets)
+                                  and targets[cursor][0] + candidate_written
+                                  == frame.output_offset)
+                    if not contiguous:
+                        discard()
                     decoding = True
                     dec = lzma.LZMADecompressor(
                         format=lzma.FORMAT_RAW,
                         filters=[{'id': lzma.FILTER_LZMA2, 'dict_size': meta.dictionary}])
-                    while cursor < len(targets) and targets[cursor][0] < frame.output_offset:
+                    while (not contiguous and cursor < len(targets)
+                           and targets[cursor][0] < frame.output_offset):
                         cursor += 1
                 if not decoding:
                     continue
