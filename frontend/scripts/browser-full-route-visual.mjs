@@ -316,6 +316,54 @@ try {
           fullPage: (width === 390 || width === 1440) && theme.mode === 'light',
           animations: 'disabled',
         });
+        // Real keyboard bypass regression: the first Tab on every authenticated
+        // page must expose a legible skip link; Enter moves focus to the real
+        // main landmark. Keep this AFTER baseline screenshots, not in their pixels.
+        if (!item.public) {
+          await tab.keyboard.press('Tab');
+          const focusAudit = await tab.evaluate(() => {
+            const skip = document.querySelector('.nfc-v2-skip-link');
+            const navToggle = document.querySelector('.nfc-header-nav-toggle');
+            const style = skip ? getComputedStyle(skip) : null;
+            const rect = skip?.getBoundingClientRect();
+            const navMotion = navToggle ? getComputedStyle(navToggle) : null;
+            return {
+              firstTabOnSkip: Boolean(skip && document.activeElement === skip),
+              skipText: skip?.textContent?.trim() ?? '',
+              skipHref: skip?.getAttribute('href') ?? '',
+              skipVisible: Boolean(rect && rect.top >= -1 && rect.left >= -1 &&
+                rect.right <= innerWidth + 1 && rect.bottom <= innerHeight + 1 &&
+                rect.width >= 80 && rect.height >= 40),
+              focusOutline: Boolean(style && style.outlineStyle !== 'none' &&
+                parseFloat(style.outlineWidth) >= 2),
+              reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
+              navTransitionSeconds: navMotion?.transitionDuration ?? '',
+              navAnimationSeconds: navMotion?.animationDuration ?? '',
+            };
+          });
+          if (!focusAudit.firstTabOnSkip || focusAudit.skipText !== '跳转到主要内容' ||
+              focusAudit.skipHref !== '#main-content') problems.push(
+            'First Tab must focus an accessible skip-to-main link');
+          if (!focusAudit.skipVisible || !focusAudit.focusOutline) problems.push(
+            'Keyboard skip link is clipped, hidden or has no visible focus outline');
+          if (!focusAudit.reducedMotion ||
+              [focusAudit.navTransitionSeconds, focusAudit.navAnimationSeconds]
+                .flatMap(value => value.split(','))
+                .some(value => {
+                  const number = parseFloat(value);
+                  return !Number.isFinite(number) || (value.trim().endsWith('ms') ?
+                    number / 1000 : number) > 0.001;
+                })) problems.push('Reduced motion is not enforced on primary navigation');
+          await tab.keyboard.press('Enter');
+          const skipped = await tab.evaluate(() => ({
+            mainFocused: document.activeElement?.id === 'main-content',
+            locationHash: location.hash,
+            mainTabIndex: document.querySelector('#main-content')?.tabIndex,
+          }));
+          if (!skipped.mainFocused || skipped.locationHash !== '#main-content' ||
+              skipped.mainTabIndex !== -1) problems.push(
+            'Skip-to-main activation did not move keyboard focus to main landmark');
+        }
         if (item.id === 'download-verification') {
           // Capture the interactive detailed evidence table, not only the landing state.
           const action = tab.getByRole('button', { name: '查看条目' }).first();
