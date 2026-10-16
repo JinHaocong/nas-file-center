@@ -21,6 +21,21 @@ describe('Pure White Stage 5D-D read-only Organizer/Dedupe real Chromium accepta
     ]) assert.ok(source.includes(token), token);
   });
 
+  test('Stage 5E-AP waits for actual Radix pointer hit before enforcing stacking contract', () => {
+    // A visible portal can precede the browser's pointer-hit update by a
+    // frame. The wait is bounded and cannot suppress a truly blocked dialog.
+    for (const token of [
+      'await page.waitForFunction(() => {',
+      "polling: 'raf', timeout: 2000",
+      'document.elementFromPoint(x, y)',
+      "const problems = await page.evaluate",
+      "assert.deepEqual(problems, [], label + ' ' + problems.join('; '))",
+    ]) assert.ok(source.includes(token), token);
+    assert.match(source, /async function assertConfirm\([\s\S]*?await page\.waitForFunction\([\s\S]*?const problems = await page\.evaluate/);
+    assert.doesNotMatch(source, /polling:\s*'raf',\s*timeout:\s*2000\s*}\)\.catch\(/,
+      'A timed-out pointer-hit wait must fail CI instead of being ignored');
+  });
+
   test('Organizer Advanced keeps conflict, missing digest, Stage A/B barriers', () => {
     for (const token of [
       'Organizer Preview 存在 1 个 blocking conflict',
