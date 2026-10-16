@@ -158,3 +158,33 @@ def test_large_solid_stream_recovers_trailing_small_file_with_bounded_memory(tmp
     assert found["small.bin"] == small
     assert result["recovered"] == 2
     assert sorted(p.name for p in tmp_path.iterdir()) == ["large-solid.7z"]
+
+
+def test_75_member_archive_reconciles_69_published_and_lists_exact_six(tmp_path, monkeypatch):
+    """Synthetic version of the reported 75-vs-69 mismatch, without using NAS data."""
+    group = [(f"影像/clip-{i:03}.bin", f"verified-{i}".encode()) for i in range(75)]
+    source = tmp_path / "seventy-five.7z"
+    _write_archive(source, [group])
+    output = tmp_path / "output"
+    output.mkdir()
+
+    def stopped_reader(_source, root, root_fd, budget, results, _password):
+        for name, content in group[:69]:
+            core._record(root, root_fd, name, iter([content]), budget, results,
+                         expected=len(content), provenance="synthetic-standard")
+
+    monkeypatch.setattr(core, "_libarchive", stopped_reader)
+    report = core.recover_archive(source, output, deep=False)
+    assert report["known_total"] == 75
+    assert report["inventory"]["status"] == "verified"
+    assert report["inventory"]["recovered_files"] == 69
+    assert report["inventory"]["unrecovered_files"] == 6
+    assert [r["name"] for r in report["missing_files"]] == [
+        name for name, _ in group[69:]
+    ]
+    assert all(r["reason"] == "NOT_EXTRACTED_FROM_VERIFIED_HEADER"
+               for r in report["missing_files"])
+    assert len(report["file_outcomes"]) == 75
+    assert len([r for r in report["items"] if r["status"] == "unrecovered"]) == 6
+    assert all((output / name).is_file() for name, _ in group[:69])
+    assert all(not (output / name).exists() for name, _ in group[69:])

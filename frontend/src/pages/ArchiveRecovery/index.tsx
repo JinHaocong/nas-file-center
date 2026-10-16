@@ -19,6 +19,21 @@ const STATUS: Record<RecoveryItem['status'], string> = {
   integrity_passed: '完整性校验通过', format_validated: '格式验证通过',
   unverified: '未验证', incomplete: '不完整或损坏', unrecovered: '未恢复',
 };
+const REASONS: Record<string, string> = {
+  NOT_EXTRACTED_FROM_VERIFIED_HEADER: '压缩包目录有此文件，但读取器未能提取；不代表文件一定损坏',
+  ARCHIVE_DATA_ERROR: '解码时发生数据错误',
+  TRUNCATED: '数据少于目录声明的长度',
+  FORMAT_DECODE_FAILED: '图片完整解码失败',
+  CRC_MISMATCH: 'CRC 校验不匹配',
+  OUTPUT_CONFLICT: '输出路径冲突，未覆盖已有文件',
+  UNSAFE_PATH: '文件路径不安全，已跳过',
+  PASSWORD_OR_DATA_ERROR: '密码或压缩数据异常，无法单独判断',
+  STANDARD_DECODER_FAILED: '标准读取器未能解码',
+  DECLARED_SIZE_MISMATCH: '实际提取长度与压缩包目录声明的长度不同，不能判定完整',
+  NESTED_TAR_EXPANDED: '内层 TAR 已成功展开，原中间 TAR 文件已移除',
+};
+const reasonText = (reason?: string): string =>
+  reason ? (REASONS[reason] || reason) : '原因暂未明确';
 
 /** Archive selection, async worker status and per-file recovery evidence. */
 export const ArchiveRecoveryPage: React.FC = () => {
@@ -107,7 +122,10 @@ export const ArchiveRecoveryPage: React.FC = () => {
   };
   const archiveRows = (listing.data?.items || []).filter(entry =>
     entry.type === 'file' && EXTENSIONS.test(entry.name));
-  const shown = report.data?.items.filter(item => filter === 'all' || item.status === filter) || [];
+  const canonicalRows = report.data?.file_outcomes || report.data?.items || [];
+  const shown = canonicalRows.filter(item => filter === 'all' ||
+    (filter === 'missing' ? ['incomplete', 'unrecovered'].includes(item.status) : item.status === filter));
+  const missingFiles = report.data?.missing_files || [];
   // Older APIs and missing tmpfs must fail closed for password-bearing starts.
   // A preflight authorizes only the exact selected source, never a stale path.
   const checkedSourceMatchesSelected = Boolean(selected) && check.data?.source === selected;
@@ -234,7 +252,36 @@ export const ArchiveRecoveryPage: React.FC = () => {
           {terminal && <ConsoleButton onClick={startAnotherRecovery}>开始下一次恢复</ConsoleButton>}
         </ActionBar>
         {report.data && <>
-          <p>最终状态：{report.data.recovery_status} · 原包条目总数：{report.data.known_total ?? '未知'}</p>
+          <p>最终状态：{report.data.recovery_status} · 原包文件总数：{report.data.known_total ?? '无法确定'}</p>
+          {report.data.inventory && <>
+            <p className="nfc-archive-recovery-stats">
+              目录清单：{report.data.inventory.status === 'verified' ? '已通过压缩包头 CRC 验证'
+                : report.data.inventory.status === 'listed' ? '已读取（目录本身不等于文件 CRC 验证）'
+                : '无法完整读取'}
+              {report.data.inventory.declared_files !== null
+                ? <> · 列出 {report.data.inventory.declared_files} 个文件
+                  · 已恢复 {report.data.inventory.recovered_files} 个
+                  · 未成功恢复 {report.data.inventory.unrecovered_files} 个</>
+                : <> · 已观察到恢复 {report.data.inventory.recovered_files} 个；
+                  其他未扫描到的文件数量未知</>}
+            </p>
+            {report.data.inventory.status === 'unavailable' &&
+              <p className="nfc-archive-recovery-warning" role="status">
+                当前无法获得完整原包目录，报告只能列出已发现的条目；无法推断未扫描到的文件名。
+                {report.data.inventory.reason && <> 原因：{report.data.inventory.reason}</>}
+              </p>}
+          </>}
+          {missingFiles.length > 0 && <section className="nfc-archive-recovery-missing" aria-label="恢复失败或未恢复的文件">
+            <h3>未成功恢复的文件（{missingFiles.length}）</h3>
+            <p className="nfc-archive-recovery-help">以下是目录中可识别、但没有成功产出的文件；未恢复不等于文件已经损坏。请保留原压缩包。</p>
+            <div className="nfc-mobile-record-list">
+              {missingFiles.slice(0, 100).map((item, index) => <div className="nfc-mobile-record-card" key={index}>
+                <strong>{item.name}</strong> · {STATUS[item.status]}
+                <small> · {reasonText(item.reason)}</small>
+              </div>)}
+            </div>
+            {missingFiles.length > 100 && <p>仅展示前 100 个，下载 JSON 报告查看全部。</p>}
+          </section>}
           <p className="nfc-archive-recovery-output">结果目录：<code>{report.data.output}</code></p>
           {report.data.aes_lzma2_deep && <p>
             AES/LZMA2 深度恢复：{report.data.aes_lzma2_deep.status} ·
@@ -242,11 +289,12 @@ export const ArchiveRecoveryPage: React.FC = () => {
             已验证重置点 {report.data.aes_lzma2_deep.reset_points ?? 0} 个。
             {report.data.aes_lzma2_deep.reason && <> 限制或失败原因：{report.data.aes_lzma2_deep.reason}</>}
           </p>}
-          <p className="nfc-archive-recovery-stats">完整性通过 {report.data.stats.integrity_passed || 0} · 格式通过 {report.data.stats.format_validated || 0} · 未验证 {report.data.stats.unverified || 0} · 不完整 {report.data.stats.incomplete || 0} · 未恢复 {report.data.stats.unrecovered || 0}</p>
+          <p className="nfc-archive-recovery-stats">提取尝试记录：完整性通过 {report.data.stats.integrity_passed || 0} · 格式通过 {report.data.stats.format_validated || 0} · 未验证 {report.data.stats.unverified || 0} · 不完整 {report.data.stats.incomplete || 0} · 未恢复 {report.data.stats.unrecovered || 0}（同一文件可能经历多次尝试，逐文件合计以目录清单为准）</p>
           <ActionBar>
             <ConsoleButton onClick={downloadReport}>下载 JSON 报告</ConsoleButton>
             <select aria-label="恢复验证状态" value={filter} onChange={event => setFilter(event.target.value)}>
               <option value="all">全部</option>
+              <option value="missing">仅看未成功恢复</option>
               {Object.entries(STATUS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
             </select>
           </ActionBar>
@@ -254,7 +302,7 @@ export const ArchiveRecoveryPage: React.FC = () => {
           <div className="nfc-mobile-record-list nfc-archive-recovery-results" aria-label="恢复结果明细">
             {shown.slice(0, 500).map((item, index) => <div key={index} className="nfc-mobile-record-card nfc-archive-recovery-result">
               <strong>{item.name}</strong> · {STATUS[item.status]} {item.bytes !== undefined ? '· ' + item.bytes + ' bytes' : ''}
-              {item.reason && <small> · {item.reason}</small>}
+              {item.reason && <small> · {reasonText(item.reason)}</small>}
             </div>)}
           </div>
           {shown.length > 500 && <p>仅显示前 500 项；下载 JSON 报告查看全部条目。</p>}

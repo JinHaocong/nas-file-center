@@ -230,6 +230,8 @@ def _file_info(p: Parse, stream: dict) -> list[tuple[str, int, int, int | None]]
         raise DeepRecoveryUnavailable('INVALID_FILE_COUNT')
     names: list[str] | None = None
     nonempty = [True] * count
+    empty_file_bits: bytes | None = None
+    anti_file_bits: bytes | None = None
     while True:
         tag = p.u8()
         if tag == 0:
@@ -241,6 +243,10 @@ def _file_info(p: Parse, stream: dict) -> list[tuple[str, int, int, int | None]]
         if tag == 14:  # kEmptyStream bit vector
             bits = sub.raw((count + 7)//8)
             nonempty = [not bool(bits[i // 8] & (0x80 >> (i % 8))) for i in range(count)]
+        elif tag == 15:  # kEmptyFile: only the empty-stream entries
+            empty_file_bits = sub.raw(len(sub.data) - sub.pos)
+        elif tag == 16:  # kAnti: tombstones are never recoverable files
+            anti_file_bits = sub.raw(len(sub.data) - sub.pos)
         elif tag == 17:
             if sub.u8() != 0:
                 raise DeepRecoveryUnavailable('EXTERNAL_FILENAMES_UNSUPPORTED')
@@ -256,6 +262,13 @@ def _file_info(p: Parse, stream: dict) -> list[tuple[str, int, int, int | None]]
                for length, crc in zip(block['sub_sizes'], block['sub_crcs'])]
     if names is None or len(names) != count or sum(nonempty) != len(entries):
         raise DeepRecoveryUnavailable('FILE_MAPPING_UNAVAILABLE')
+    empty_count = count - sum(nonempty)
+    required_bits = (empty_count + 7) // 8
+    if ((empty_file_bits is not None and len(empty_file_bits) != required_bits)
+            or (anti_file_bits is not None and len(anti_file_bits) != required_bits)):
+        raise DeepRecoveryUnavailable('INVALID_EMPTY_FILE_PROPERTIES')
+    manifest: list[tuple[str, int]] = []
+    empty_index = 0
     out: list[tuple[str, int, int, int | None]] = []
     positions = {id(block): 0 for block in blocks}
     global_offsets = {}
@@ -266,8 +279,16 @@ def _file_info(p: Parse, stream: dict) -> list[tuple[str, int, int, int | None]]
     n = 0
     for name, present in zip(names, nonempty):
         if not present:
+            bit = 0x80 >> (empty_index % 8)
+            idx = empty_index // 8
+            is_empty_file = empty_file_bits is not None and bool(empty_file_bits[idx] & bit)
+            is_anti = anti_file_bits is not None and bool(anti_file_bits[idx] & bit)
+            if is_empty_file and not is_anti:
+                manifest.append((name, 0))
+            empty_index += 1
             continue
         block, length, crc = entries[n]
+        manifest.append((name, length))
         key = id(block)
         offset = positions[key]
         block['files'].append((name, offset, length, crc))
@@ -277,6 +298,8 @@ def _file_info(p: Parse, stream: dict) -> list[tuple[str, int, int, int | None]]
     for block in blocks:
         if positions[id(block)] != block['unpack_sizes'][-1]:
             raise DeepRecoveryUnavailable('UNPACK_SIZES_MISMATCH')
+    # Header CRC is verified by the caller before this becomes evidence.
+    stream['file_manifest'] = manifest
     return out
 
 
@@ -402,8 +425,8 @@ class Metadata:
     blocks: tuple['Metadata', ...] = ()
 
 
-def inspect_7z(source: Path, password: str | None = None) -> Metadata:
-    """Map CRC-bearing files to their own verified independent packed folders."""
+def _verified_7z_structure(source: Path, password: str | None) -> tuple[dict, list]:
+    """Read an original-CRC-verified 7z header independently from payload codecs."""
     with source.open('rb') as file:
         intro = file.read(32)
         size = source.stat().st_size
@@ -418,7 +441,21 @@ def inspect_7z(source: Path, password: str | None = None) -> Metadata:
         raw = file.read(next_size)
     if zlib.crc32(raw) != next_crc:
         raise DeepRecoveryUnavailable('NEXT_HEADER_CRC_MISMATCH')
-    stream, files = _read_header(Parse(_decode_header(raw, source, size, password)))
+    return _read_header(Parse(_decode_header(raw, source, size, password)))
+
+
+def verified_7z_inventory(source: Path, password: str | None = None) -> list[tuple[str, int]]:
+    """Named regular files from a CRC-verified header; no claim about payload integrity."""
+    stream, _ = _verified_7z_structure(source, password)
+    return list(stream['file_manifest'])
+
+
+def inspect_7z(source: Path, password: str | None = None) -> Metadata:
+    """Map CRC-bearing files to their own verified independent packed folders."""
+    stream, files = _verified_7z_structure(source, password)
+    with source.open('rb') as file:
+        intro = file.read(32)
+    next_offset = struct.unpack('<Q', intro[12:20])[0]
     supported: list[Metadata] = []
     offset_limit = 32 + next_offset
     for block in stream['blocks']:
