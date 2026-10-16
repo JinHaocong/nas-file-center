@@ -6,7 +6,7 @@
 
 1. 由运维管理员在 OpenList 创建**只读 WebDAV 账号**，授予目标 PikPak 目录的只读访问，不授予文件上传/移动/删除权限。
 2. 配置 OpenList 的 WebDAV `/dav/` 端点，**确保 GET 经 OpenList 返回 PikPak 文件原始字节**，不能是播放器转码流或指向不受控 CDN 的 HTTP 30x 跳转。程序默认拒绝跳转；不接受压缩表示、HTTP 206 部分内容。
-3. 将 WebDAV 密码放在 API 和 Worker 均可读取的只读受保护 secret 文件（例如单独只读 bind mount）。不要把密码明文写入 GitHub、环境变量值或 CI 日志。
+3. 将 WebDAV 密码放在**仅 Worker 可读取**的只读受保护 secret 文件（例如单独只读 bind mount）。不要把密码明文写入 GitHub、环境变量值或 CI 日志。
 4. API/Worker 设置以下一致的变量后重新部署（安全默认不启用本功能）：
 
 ```yaml
@@ -14,12 +14,12 @@ environment:
   - DOWNLOAD_VERIFY_WEBDAV_BASE_URL=https://your-openlist.example/dav/
   - DOWNLOAD_VERIFY_WEBDAV_USER=verification-readonly
   - DOWNLOAD_VERIFY_WEBDAV_PASSWORD_FILE=/run/secrets/nfc-webdav-password
-# 为两个容器单独添加只读 secret mount，
+# 仅为 Worker 容器添加只读 secret mount，
 # 例如 /secure/nfc-webdav-password:/run/secrets/nfc-webdav-password:ro
 ```
 
 若 OpenList 只能通过可信 Docker 内网 HTTP 访问，需额外显式设置
-`DOWNLOAD_VERIFY_ALLOW_HTTP=true`；仅在已限定的内部服务网络上允许，公网必须用有效 TLS。固定的 WebDAV origin 来自管理员部署配置，用户发起校验时**不得提供任意 URL**。运行时不继承 HTTP_PROXY/HTTPS_PROXY，也不会将 Basic 凭据随重定向泄漏给其它 host。
+`DOWNLOAD_VERIFY_ALLOW_HTTP=true`；仅在已限定的内部服务网络上允许，公网必须用有效 TLS。固定的 WebDAV origin 来自管理员部署配置，用户发起校验时**不得提供任意 URL**。API 仅验证配置字段存在，不读取密码文件；Worker 运行任务时读取并验证 secret。运行时不继承 HTTP_PROXY/HTTPS_PROXY，也不会将 Basic 凭据随重定向泄漏给其它 host。
 
 5. 登录管理员，打开“文件工具 → 下载完整性校验”，输入相对于已配置 `/dav/` 的远端目录，选择 NAS 的已下载本地根目录，点击“开始只读 SHA256 校验”。两边根目录以下的文件和目录相对路径必须完全相同。
 

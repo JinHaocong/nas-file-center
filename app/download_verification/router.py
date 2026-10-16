@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
@@ -44,7 +43,7 @@ def configuration(request: Request):
     return {
         "configured": bool(s.download_verify_webdav_base_url and s.download_verify_webdav_user
                            and s.download_verify_webdav_password_file
-                           and Path(s.download_verify_webdav_password_file).is_file()),
+                           ),
         "endpoint": s.download_verify_webdav_base_url,  # operator-provided, no secret
         "mode": "strict_sha256", "read_only": True,
     }
@@ -54,8 +53,7 @@ def configuration(request: Request):
 def start_verification(request: Request, payload: NewVerification):
     settings = request.app.state.settings
     if not (settings.download_verify_webdav_base_url and settings.download_verify_webdav_user
-            and settings.download_verify_webdav_password_file
-            and Path(settings.download_verify_webdav_password_file).is_file()):
+            and settings.download_verify_webdav_password_file):
         raise HTTPException(503, "WEBDAV_NOT_CONFIGURED")
     try:
         remote = "/".join(relative_parts(payload.remote_root))

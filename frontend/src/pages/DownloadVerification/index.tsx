@@ -42,7 +42,7 @@ export const DownloadVerificationPage: React.FC = () => {
     refetchInterval: selected === null ? false : 5000,
   });
   const start = useMutation({
-    mutationFn: () => downloadVerificationApi.start(remoteRoot.trim(), localRoot),
+    mutationFn: () => downloadVerificationApi.start(remoteRoot, localRoot),
     onSuccess: (run) => {
       setError('');
       setSelected(run.id);
