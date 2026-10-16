@@ -93,3 +93,33 @@ test('real 360px visual regression keeps mobile route title on one line without 
     "h.parentCrumbDisplay !== 'none'",
   ]) assert.ok(browser.includes(phrase), 'Missing real Chromium header regression: ' + phrase);
 });
+
+
+test('every authenticated route has a real first-Tab bypass with visible light/dark focus and reduced motion', () => {
+  const layout = readFileSync('src/layouts/MainLayout.tsx', 'utf8');
+  const css = readFileSync('src/styles/console-v2-keyboard-navigation.css', 'utf8');
+  const entry = readFileSync('src/main.tsx', 'utf8');
+  const oldImport = "import './styles/console-v2-mobile-header.css';";
+  const newImport = "import './styles/console-v2-keyboard-navigation.css';";
+  assert.ok(entry.includes(newImport) && entry.indexOf(newImport) > entry.indexOf(oldImport),
+    'Keyboard skip-link styles must be imported after existing mobile and theme layers');
+  assert.match(layout, /className="nfc-v2-skip-link" href="#main-content">跳转到主要内容/);
+  assert.ok(layout.indexOf('nfc-v2-skip-link') < layout.indexOf('<ResponsiveNav'),
+    'Skip link must be before the sidebar/header in the actual Tab order');
+  assert.match(layout, /id="main-content" tabIndex=\{-1\}/);
+  assert.match(css, /\.nfc-v2-skip-link:focus-visible/);
+  assert.match(css, /outline:\s*3px solid var\(--nfc-text\)/);
+  assert.match(css, /min-height:\s*44px/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
+  for (const phrase of [
+    "await tab.keyboard.press('Tab')",
+    "await tab.keyboard.press('Enter')",
+    "document.activeElement === skip",
+    "document.activeElement?.id === 'main-content'",
+    "focusAudit.reducedMotion",
+    "focusAudit.skipVisible",
+    "focusAudit.focusOutline",
+    "navTransitionSeconds",
+    "locationHash",
+  ]) assert.ok(browser.includes(phrase), 'Missing executable Chromium a11y regression: ' + phrase);
+});

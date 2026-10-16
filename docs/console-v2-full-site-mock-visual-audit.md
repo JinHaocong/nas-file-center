@@ -50,3 +50,10 @@ Screenshot source: PR #264 Chromium `main` evidence artifacts at 360px, 390px, 7
 Scoped repair: `console-v2-mobile-header.css` (last CSS import) hides only the redundant parent breadcrumb and separator on mobile; it keeps the current page name as a single, ellipsized flex item, with a stricter 360px width cap. It does **not** hide Safe Mode, Worker Status, user actions or the navigation drawer. A **real Chromium** `browser-full-route-visual.mjs` assertion now checks the single-line computed current-page title, hidden duplicate parent crumb, absence of header action overlap, and viewport clipping on all 23 authenticated React route cases for **360, 390, 430px** and the 768px boundary's mobile side. The eight-width/four-theme matrix remains 800 screenshots total.
 
 The 120 light-mode review is a **targeted visual pass**, not complete frame-by-frame human approval of all 800 light/dark/system images or all content states. Full eight-width design sign-off remains open pending review of all theme cases and active UI states. The formal final-acceptance gate count remains **68/74**.
+
+
+## Keyboard-first route and reduced-motion follow-up
+
+The same eight-width / four-theme route screenshot CI now exercises native `Tab` and `Enter` in the actual production React app, for each of the 23 authenticated routes, with a strictly synthetic, read-only backend. It verifies the new first-Tab skip link is in view and has a visible focus outline, Enter moves DOM focus to `#main-content` (not only the hash), and the header navigation's real computed transitions/animations are at most 1ms in the already-requested reduced-motion browser context. New CSS is scoped to the skip control and does not hide Safe Mode or Worker indicators.
+
+This is **736 keyboard / reduced-motion route cases**, not a comprehensive manual keyboard/contrast/assistive-technology assessment or human sign-off. The existing 768 page screenshots and 32 Download Verification detail screenshots remain unchanged.
