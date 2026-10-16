@@ -4,10 +4,11 @@
  */
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { chromium } from 'playwright';
+import { computedContrastRatio } from './computed-contrast.mjs';
 import { visualAdminFixture, visualSafeSettingsFixture,
   visualViewports, visualThemes } from './visual-fixtures.mjs';
 
@@ -29,6 +30,7 @@ const server = spawn(process.execPath, [
 ], { cwd: process.cwd(), stdio: 'ignore' });
 let browser;
 let passed = 0;
+const checkboxKeyboardAudit = [];
 
 async function ready() {
   for (let i = 0; i < 100; i++) {
@@ -296,6 +298,74 @@ async function inspectDense(page, item, width) {
   assert.deepEqual(failures, [], item.id + ' dense ' + width + ': ' + failures.join('; '));
 }
 
+async function inspectNativeCheckboxKeyboard(page, item, width, theme) {
+  if (item.id !== 'media' && item.id !== 'quarantine') return;
+  // The dense fixture has exactly one eligible row. Disabled controls must
+  // remain truly native-disabled, not merely visually muted, and neither
+  // the checkbox checked state nor the backend may change during focus.
+  const media = item.id === 'media';
+  const prefix = media ? '选择可永久删除损坏媒体 #' : '选择隔离条目 #';
+  const eligibleId = media ? 802 : 901;
+  const blockedIds = media ? [801, 803] : [902, 903];
+  const eligible = page.getByRole('checkbox', { name: prefix + eligibleId, exact: true });
+  const before = await eligible.isChecked();
+  assert.equal(await eligible.isEnabled(), true, item.id + ' eligible checkbox must be enabled');
+  for (const id of blockedIds) {
+    const blocked = page.getByRole('checkbox', { name: prefix + id, exact: true });
+    assert.equal(await blocked.isDisabled(), true,
+      item.id + ' protected record #' + id + ' must stay natively disabled');
+    assert.equal(await blocked.isChecked(), false,
+      item.id + ' protected record #' + id + ' must stay unchecked');
+  }
+  await eligible.focus();
+  // Genuine keyboard modality is required; programmatic .focus() alone
+  // can leave :focus-visible unset in Chromium.
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Shift+Tab');
+  const state = await eligible.evaluate((input, kind) => {
+    const surface = document.querySelector(kind === 'media'
+      ? '.nfc-v2-media-page .nfc-data-panel-body'
+      : '.nfc-v2-quarantine-ledger .nfc-data-panel-body');
+    const style = getComputedStyle(input);
+    const box = input.getBoundingClientRect();
+    return {
+      nativeType: input instanceof HTMLInputElement && input.type === 'checkbox',
+      accessibleName: input.getAttribute('aria-label'),
+      focused: document.activeElement === input,
+      focusVisible: input.matches(':focus-visible'),
+      checked: input.checked,
+      disabled: input.disabled,
+      width: Number(box.width.toFixed(1)),
+      height: Number(box.height.toFixed(1)),
+      inViewport: box.left >= -2 && box.right <= innerWidth + 2 &&
+        box.top >= -2 && box.bottom <= innerHeight + 2,
+      outlineStyle: style.outlineStyle,
+      outlineWidth: parseFloat(style.outlineWidth),
+      outlineColor: style.outlineColor,
+      surfaceBackground: surface ? getComputedStyle(surface).backgroundColor : '',
+      transitionDuration: style.transitionDuration,
+    };
+  }, item.id);
+  const contrast = computedContrastRatio(state.outlineColor, state.surfaceBackground);
+  const record = { route: item.path, width, theme: theme.mode + '-' + theme.system,
+    eligibleId, blockedIds, ...state, focusContrast: Number(contrast.toFixed(2)) };
+  checkboxKeyboardAudit.push(record);
+  assert.equal(state.nativeType, true, item.id + ' must use a native input');
+  assert.equal(state.accessibleName, prefix + eligibleId);
+  assert.equal(state.focused && state.focusVisible, true,
+    'Real Tab-return focus must remain visible: ' + JSON.stringify(record));
+  assert.equal(state.disabled, false);
+  assert.equal(state.checked, before, 'Focus-only audit must not change selection');
+  assert.equal(await eligible.isChecked(), before, 'React selection state must stay stable');
+  assert.ok(state.inViewport && state.width >= 17 && state.height >= 17,
+    'Focused checkbox must remain in viewport: ' + JSON.stringify(record));
+  assert.equal(state.outlineStyle, 'solid');
+  assert.ok(state.outlineWidth >= 3 && contrast >= 3,
+    'Computed checkbox ring must be at least 3px and 3:1: ' + JSON.stringify(record));
+  assert.equal(state.transitionDuration, '0s',
+    'Checkbox keyboard focus indicator must never animate: ' + JSON.stringify(record));
+}
+
 try {
   await ready();
   mkdirSync(OUT, { recursive: true });
@@ -353,6 +423,8 @@ try {
             path: resolve(OUT, item.id + '-dense-' + label + '.png'),
             fullPage: false,
           });
+          // Inspect after screenshots to preserve the accepted visual baseline.
+          await inspectNativeCheckboxKeyboard(page, item, width, theme);
         }
         denseMode = false;
         assert.deepEqual(writes, [], 'No write or Generate action may reach backend');
@@ -370,6 +442,12 @@ try {
     }
   }
   assert.equal(passed, WIDTHS.length * THEMES.length);
+  assert.equal(checkboxKeyboardAudit.length, WIDTHS.length * THEMES.length * 2,
+    'Every Media and Quarantine dense viewport/theme must have computed checkbox evidence');
+  writeFileSync(resolve(OUT, 'checkbox-keyboard-audit.json'),
+    JSON.stringify({ cases: checkboxKeyboardAudit, total: checkboxKeyboardAudit.length }, null, 2));
+  console.log('[WORKSPACE CHECKBOX] ' + checkboxKeyboardAudit.length +
+    '/64 native keyboard focus cases, all computed ring contrast >= 3:1');
   console.log('[WORKSPACE CASCADE] 32/32 cases, 352 screenshots; ' +
     'real six-page empty + five-page dense CSS/status gates; synthetic GET only; no NAS access.');
 } finally {
