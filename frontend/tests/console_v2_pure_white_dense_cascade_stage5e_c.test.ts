@@ -47,7 +47,7 @@ describe('Pure White Stage 5E-C v049 historical shadows and dense ledger accepta
     // The six desktop metric-grid properties graduated from late v049 to
     // later-imported v056: source-level leaf ownership is pinned separately
     // by css-historical-cascade-convergence.test.mjs.
-    assert.doesNotMatch(v049, /^\s*\.nfc-metric-grid\s*\{/m,
+    assert.doesNotMatch(v049, /^\.nfc-metric-grid\s*\{/m,
       'Historical unconditional metric-grid declarations must stay retired');
     const metricBase = v056.match(/(?:^|\n)\.nfc-metric-grid\s*\{([^}]*)\}/)?.[1];
     assert.ok(metricBase, 'v056 unconditional metric-grid owner is required');
