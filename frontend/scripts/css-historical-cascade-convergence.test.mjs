@@ -123,8 +123,14 @@ test('v049 phone: 9 earlier same-@media shadows retired; later authority unchang
 
 test('v056 dashboard rail keeps only the late 14px baseline and responsive owners', () => {
   const base = matching(v056, '.nfc-app-main .nfc-dashboard-page .nfc-dashboard-rail');
-  assert.equal(base.length, 1, 'Earlier desktop-only 16px rail is fully shadowed');
+  assert.equal(base.length, 2, 'Keep late rail spacing and separate position-only authority');
   assert.equal(base[0].declarations.get('gap'), '14px');
+  assert.equal(base[1].declarations.get('position'), 'static',
+    'The separate late positioning rule must survive');
+  assert.equal(base[1].declarations.has('gap'), false,
+    'Position-only rule must not reintroduce stale gap');
+  assert.ok(base.every(rule => rule.declarations.get('gap') !== '16px'),
+    'Old desktop rail gap was already overridden and must stay retired');
   const responsive = matching(v056, '.nfc-app-main .nfc-dashboard-page .nfc-dashboard-rail',
     '@media (max-width: 1199px)');
   assert.ok(responsive.some(rule => rule.declarations.get('gap') === '12px'),
