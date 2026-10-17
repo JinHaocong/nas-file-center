@@ -765,6 +765,11 @@
   color: var(--v2-text, #172338);
 }
 .nfc-v2-dialog-form input::placeholder { color: var(--v2-subtle, #8995a7); }
+/* Focus indicators must paint immediately when navigating between fields.
+ * The root Portal is outside the shell's reduced-motion selector. */
+.nfc-change-password-modal.nfc-v2-dialog .nfc-v2-dialog-form input {
+  transition: none !important;
+}
 /* Password form is in a root-level Radix Portal, outside the shell tokens.
  * Use opaque neutral focus colors so the full ring meets 3:1 in both themes. */
 .nfc-change-password-modal.nfc-v2-dialog .nfc-v2-dialog-form input:focus-visible {
