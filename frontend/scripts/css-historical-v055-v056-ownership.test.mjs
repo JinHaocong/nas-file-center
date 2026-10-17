@@ -179,7 +179,7 @@ test('v055 independent dense width contract and responsive tokens are not retire
       rule => rule.declarations.get(property) === value),
     'Responsive variable authority lost: ' + context + ' ' + property);
   }
-  assert.match(old55, /@media \\(max-width: 767px\\)/);
+  assert.ok(old55.includes('@media (max-width: 767px)'), 'Phone media context remains');
   const ci = read('../.github/workflows/ui-v044-validation.yml');
   for (const script of ['browser-workspace-cascade.mjs',
     'browser-indexes-ledger-states.mjs', 'browser-media-ledger-states.mjs']) {
