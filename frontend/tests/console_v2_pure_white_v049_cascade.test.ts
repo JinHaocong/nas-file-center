@@ -167,7 +167,10 @@ describe('Pure White historical CSS cleanup: safe v049 same-selector cascade', (
     }
     assert.match(body(early, '.nfc-header.nfc-header'), /margin-inline:\s*10px/);
     assert.match(body(early, '.nfc-page-header'), /min-height:\s*auto/);
-    assert.match(body(early, '.nfc-metric-card'), /padding:\s*12px/);
+    assert.doesNotMatch(body(early, '.nfc-metric-card'), /padding:\s*12px/,
+      'Earlier metric padding is shadowed by the late same-context winner');
+    assert.match(body(later, '.nfc-metric-card'), /padding:\s*12px 13px/,
+      'Later metric-card spacing remains the winning value');
     assert.equal([...css.matchAll(/@media\s*\([^)]*\)/g)].length, 8);
   });
 
