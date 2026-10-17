@@ -322,7 +322,11 @@ body,
 .nfc-metric-card {
   border-right: 1px solid var(--nfc-v49-line);
 
+
+
 }
+
+
 
 .nfc-metric-label {
   color: var(--nfc-v49-subtle);
@@ -620,6 +624,7 @@ body,
 
 /* Settings ----------------------------------------------------------------- */
 
+
 .nfc-system-controls-page .nfc-settings-grid > .nfc-data-panel {
   border: 1px solid var(--nfc-v49-line) !important;
   border-radius: var(--nfc-v49-radius-lg) !important;
@@ -630,6 +635,7 @@ body,
 .nfc-system-controls-page .nfc-settings-grid > .nfc-data-panel > .nfc-data-panel-header {
   border-bottom: 1px solid var(--nfc-v49-line);
 }
+
 
 .nfc-system-controls-page .nfc-settings-panel-body,
 .nfc-system-controls-page .nfc-settings-stack {
@@ -777,6 +783,7 @@ body,
 .nfc-directory-browser-toolbar {
   border-bottom-color: var(--nfc-v49-line);
 }
+
 
 .nfc-directory-list-viewport {
   max-height: min(50vh, 460px);
@@ -1013,6 +1020,7 @@ body,
   }
 }
 
+
 /* Content-width hierarchy -------------------------------------------------- */
 
 /* Data ledgers use the full operational width. */
@@ -1060,6 +1068,7 @@ body,
 [data-theme='dark'] .nfc-mobile-dock-surface {
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.36);
 }
+
 
 /* ========================================================================== */
 /* v0.4.10 — Sidebar-language workspace alignment                             */
