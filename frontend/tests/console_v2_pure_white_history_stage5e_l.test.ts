@@ -52,9 +52,9 @@ describe('Stage 5E-L terminal-history modal native control and single-flight saf
   test('both use the guarded native checkbox and preserve exact terminal status allowlists', () => {
     assert.match(checkbox, /<input \{\.\.\.props\} ref=\{ref\} type="checkbox" checked=\{checked\}/);
     assert.ok(checkbox.includes('onChange={event => {'), 'Guarded native onChange is registered');
-        assert.ok(checkbox.includes('onCheckedChange(event.currentTarget.checked)'), 'Original controlled callback survives');
-        assert.ok(checkbox.includes("event.currentTarget.matches(':disabled')"), 'Native disabled/fieldset guard');
-        assert.ok(checkbox.includes("closest('[aria-disabled=\"true\"], [inert], [hidden]')"), 'Inert/aria-disabled ancestor guard');
+    assert.ok(checkbox.includes('onCheckedChange(event.currentTarget.checked)'), 'Original controlled callback survives');
+    assert.ok(checkbox.includes("event.currentTarget.matches(':disabled')"), 'Native disabled/fieldset guard');
+    assert.ok(checkbox.includes("closest('[aria-disabled=\"true\"], [inert], [hidden]')"), 'Inert/aria-disabled ancestor guard');
     assert.match(tasks, /<ConsoleCheckbox value=\{option.value\}/);
     assert.match(tasks, /onCheckedChange=\{checked => toggle\(option.value, checked\)\}/);
     assert.match(plans, /<ConsoleCheckbox checked=\{selectedStatuses.includes\(item.value\)\}/);
