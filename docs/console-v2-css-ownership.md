@@ -394,7 +394,10 @@ and **767px overlay padding** rules.
 
 Extend the registered CSS cascade regression with exact property owner
 assertions, explicit independent-retention checks, breakpoint contracts,
-and canonical import-order enforcement. Existing read-only Chromium eight
+and canonical import-order enforcement. The existing v048→v049
+cross-layer test also keeps its **16 original retirement checks** while
+recognizing the six Header properties now owned by v054; it continues to
+pin all remaining independent v049 declarations. Existing read-only Chromium eight
 width / four-theme CI matrix, frontend/backend/Docker validation and
 review gate remain mandatory for this exact PR HEAD.
 
