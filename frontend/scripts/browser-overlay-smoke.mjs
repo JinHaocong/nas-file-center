@@ -14,6 +14,7 @@ import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { chromium } from 'playwright';
+import { computedContrastRatio } from './computed-contrast.mjs';
 
 const ROOT = process.cwd();
 const PORT = 4179;
@@ -175,6 +176,43 @@ try {
         await page.keyboard.press('Escape');
         await scanModal.waitFor({ state: 'hidden' });
         await page.waitForFunction(opener => document.activeElement === opener, scanOpener);
+        // The real administrator password dialog renders in a root Radix Portal,
+        // outside the shell's CSS variables. Check the keyboard ring actually
+        // painted on each native password input, including dark/system themes.
+        await page.locator('.nfc-v2-user-dropdown > summary').click();
+        await page.getByRole('button', { name: '修改密码' }).click();
+        const passwordModal = page.locator('.nfc-change-password-modal');
+        await passwordModal.waitFor({ state: 'visible' });
+        for (const id of ['nfc-old-password', 'nfc-new-password', 'nfc-confirm-password']) {
+          const input = passwordModal.locator('#' + id);
+          await input.focus();
+          const focused = await input.evaluate(node => {
+            const inputStyle = getComputedStyle(node);
+            const portalStyle = getComputedStyle(node.closest('.nfc-v2-dialog'));
+            return {
+              keyboard: node.matches(':focus-visible'),
+              outlineStyle: inputStyle.outlineStyle,
+              outlineWidth: Number.parseFloat(inputStyle.outlineWidth),
+              transitionDuration: inputStyle.transitionDuration,
+              outlineColor: inputStyle.outlineColor,
+              inputBackground: inputStyle.backgroundColor,
+              portalBackground: portalStyle.backgroundColor,
+              disabled: node.matches(':disabled'),
+            };
+          });
+          assert.equal(focused.keyboard, true, label + ': focus-visible ' + id);
+          assert.equal(focused.disabled, false, label + ': enabled password input ' + id);
+          assert.equal(focused.outlineStyle, 'solid', label + ': solid ring ' + id);
+          assert.equal(focused.transitionDuration, '0s', label + ': no password focus transition ' + id);
+          assert.ok(focused.outlineWidth >= 3, label + ': ring width ' + id + ' / ' + JSON.stringify(focused));
+          for (const surface of [focused.inputBackground, focused.portalBackground]) {
+            assert.ok(computedContrastRatio(focused.outlineColor, surface) >= 3,
+              label + ': focus contrast below 3:1 on ' + id + ' / ' + surface);
+          }
+        }
+        await page.screenshot({ path: resolve(OUTPUT, 'password-focus-' + label + '.png') });
+        await passwordModal.getByRole('button', { name: '关闭密码修改窗口' }).click();
+        await passwordModal.waitFor({ state: 'hidden' });
         assert.deepEqual(deniedMethods, [], 'Browser fixture must not make mutating API requests');
         completed += 1;
         console.log('[BROWSER OVERLAY PASS] ' + label);

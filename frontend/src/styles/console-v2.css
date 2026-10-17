@@ -765,7 +765,22 @@
   color: var(--v2-text, #172338);
 }
 .nfc-v2-dialog-form input::placeholder { color: var(--v2-subtle, #8995a7); }
-.nfc-v2-dialog-form input:focus-visible { outline: 3px solid color-mix(in srgb, var(--v2-indigo, #286ff1) 20%, transparent); border-color: var(--v2-indigo, #286ff1); }
+/* Focus indicators must paint immediately when navigating between fields.
+ * The root Portal is outside the shell's reduced-motion selector. */
+.nfc-change-password-modal.nfc-v2-dialog .nfc-v2-dialog-form input {
+  transition: none !important;
+}
+/* Password form is in a root-level Radix Portal, outside the shell tokens.
+ * Use opaque neutral focus colors so the full ring meets 3:1 in both themes. */
+.nfc-change-password-modal.nfc-v2-dialog .nfc-v2-dialog-form input:focus-visible {
+  outline: 3px solid #252525;
+  outline-offset: 2px;
+  border-color: #252525;
+}
+[data-theme='dark'] .nfc-change-password-modal.nfc-v2-dialog .nfc-v2-dialog-form input:focus-visible {
+  outline-color: #e9e9e6;
+  border-color: #e9e9e6;
+}
 .nfc-v2-dialog-form input:disabled { opacity: .65; cursor: not-allowed; }
 .nfc-v2-dialog-error {
   padding: 10px 12px;

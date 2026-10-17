@@ -61,6 +61,37 @@ describe('Pure White portal overlay clarity and stacking', () => {
     }
   });
 
+  test('root-portal password inputs use opaque 3px focus rings and 32-case computed contrast audit', () => {
+    const light = findRules(shell, '.nfc-change-password-modal.nfc-v2-dialog .nfc-v2-dialog-form input:focus-visible');
+    const dark = findRules(shell, "[data-theme='dark'] .nfc-change-password-modal.nfc-v2-dialog .nfc-v2-dialog-form input:focus-visible");
+    assert.ok(shell.includes('.nfc-change-password-modal.nfc-v2-dialog .nfc-v2-dialog-form input {'));
+    assert.ok(shell.includes('transition: none !important;'));
+    assert.equal(light.length, 1);
+    assert.equal(dark.length, 1);
+    assert.match(light[0], /outline:\s*3px solid #252525/);
+    assert.match(light[0], /outline-offset:\s*2px/);
+    assert.match(dark[0], /outline-color:\s*#e9e9e6/);
+    assert.doesNotMatch(light[0] + dark[0], /color-mix|transparent|#286ff1/);
+    const dialog = read('src/components/ChangePasswordModal.tsx');
+    assert.ok(dialog.includes('className="nfc-v2-dialog-form nfc-security-form"'));
+    for (const id of ['nfc-old-password', 'nfc-new-password', 'nfc-confirm-password']) {
+      assert.ok(dialog.includes('id="' + id + '"'));
+    }
+    const browser = read('scripts/browser-overlay-smoke.mjs');
+    for (const token of [
+      "import { computedContrastRatio } from './computed-contrast.mjs'",
+      "page.locator('.nfc-v2-user-dropdown > summary').click()",
+      "page.getByRole('button', { name: '修改密码' }).click()",
+      "node.matches(':focus-visible')",
+      "computedContrastRatio(focused.outlineColor, surface) >= 3",
+      "'password-focus-' + label + '.png'",
+      "request.method() !== 'GET'",
+      "assert.deepEqual(deniedMethods, []",
+    ]) assert.ok(browser.includes(token), token);
+    assert.ok(read('../.github/workflows/ui-v044-validation.yml')
+      .includes('node scripts/browser-overlay-smoke.mjs'));
+  });
+
   test('Radix pairing and focus/escape safety remain wired through actual components', () => {
     for (const path of [
       'src/components/scans/ScanCreateModal.tsx',
