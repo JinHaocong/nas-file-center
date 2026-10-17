@@ -266,3 +266,22 @@ Extended the registered `css-historical-v055-v056-ownership.test.mjs` to assert 
 This is **not** comprehensive historical CSS/theme consolidation or final human visual/accessibility acceptance. Formal high-level acceptance stays **69/74 (93.2%)**; no NAS mutation or production deployment.
 
 The existing TypeScript `console_v2_legacy_v05_css.test.ts` historical-retirement inventory was also made maintenance-safe: its arbitrary `v055.length > 9000` byte-count requirement is replaced with checks for **actual native v055 semantic owners and 1800/1399/767px responsive contexts**. Unchanged v050/v051 checks and comprehensive dedicated v055→v056 leaf-declaration checks continue to run. This ensures future proven deletion of dead v055 declarations does not spuriously fail a test that was intended to guard active behavior.
+
+
+## 2026-10-17 — v049 → v056 filter + description ownership (scoped batch)
+
+Following #287, audited **five unconditional exact-match selectors** in the older `v049-workspace.css` against the later-imported `v056-right-workspace-v2.css`. Retired **16 old declarations** which have identical selector specificity, unconditional at-rule ancestry and CSS importance, and are superseded by explicit v056 declarations:
+
+| Earlier v049 selector | Retired declarations | v056 remains the final owner |
+| --- | --- | --- |
+| `.nfc-filter-control` | `gap`, `color`, `font-size`, `font-weight` (4) | 7px spacing, v056 muted text, 11.5px / 600 |
+| `.nfc-description-item` | `min-height`, `padding`, `border-color` (3) | 78px, 14px 16px, v056 hairline |
+| `.nfc-description-item dt` | `margin-bottom`, `color`, `font-size`, `font-weight` (4) | 7px, v056 subtle text, 11px / 620 |
+| `.nfc-description-item dd` | `color`, `font-size` (2) | v056 muted text, 12.5px |
+| `.nfc-description-item dd.nfc-description-emphasis` | `color`, `font-size`, `font-weight` (3) | v056 text, 14px / 650 |
+
+Those five now-empty **unconditional v049 blocks** are removed, with unchanged import order. Retain the separate `.nfc-responsive-descriptions` container's existing `!important` frame contract, independent filter input rules, all v049 responsive/reduced-motion/reduced-transparency behavior and v056 winning declarations. No shorthand/longhand substitution, selector grouping change, theme change, API, Worker, Plan, NAS mutation or deployment.
+
+Added exact-context, full-property safeguards to the already registered `css-historical-cascade-convergence.test.mjs`: old selectors must remain retired, the 16 specific v056 declarations remain pinned, and existing important description frame and responsive rules persist. Existing real read-only Chromium 8-width × 4-theme checks are unchanged.
+
+**Scope limitation:** additional conservative cross-layer cleanup, not completion of all historical CSS/theme ownership. Final human visual/a11y acceptance and isolated real NAS/deployment approval remain outstanding. Formal progress remains **69/74 (93.2%)**.

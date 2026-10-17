@@ -164,3 +164,43 @@ test('import and independent CSS authority unchanged; browser evidence remains g
     assert.ok(visual.includes(token), 'No-write browser gate missing ' + token);
   }
 });
+
+test('v049 -> v056: 16 obsolete unconditional filter/description declarations stay retired', () => {
+  // The earlier files still own responsive and independent surfaces, but
+  // v056 owns these exact unconditional selectors at equal specificity.
+  const cases = [[".nfc-filter-control",[["gap","6px","7px"],["color","var(--nfc-v49-subtle)","var(--nfc-w2-text-muted)"],["font-size","9.5px","11.5px"],["font-weight","620","600"]]],[".nfc-description-item",[["min-height","72px","78px"],["padding","12px 14px","14px 16px"],["border-color","var(--nfc-v49-line)","var(--nfc-w2-hairline)"]]],[".nfc-description-item dt",[["margin-bottom","6px","7px"],["color","var(--nfc-v49-subtle)","var(--nfc-w2-text-subtle)"],["font-size","8.5px","11px"],["font-weight","680","620"]]],[".nfc-description-item dd",[["color","var(--nfc-v49-muted)","var(--nfc-w2-text-muted)"],["font-size","11px","12.5px"]]],[".nfc-description-item dd.nfc-description-emphasis",[["color","var(--nfc-v49-text)","var(--nfc-w2-text)"],["font-size","13.5px","14px"],["font-weight","650","650"]]]];
+  let total = 0;
+  for (const [selector, declarations] of cases) {
+    assert.equal(matching(v049, selector).length, 0,
+      'Obsolete v049 unconditional block returned: ' + selector);
+    const owner = matching(v056, selector);
+    assert.equal(owner.length, 1, 'One final v056 owner expected for ' + selector);
+    for (const [property, previous, current] of declarations) {
+      assert.equal(owner[0].declarations.get(property), current,
+        'Final v056 property changed: ' + selector + ' / ' + property);
+      assert.ok(!previous.includes('!important') && !current.includes('!important'),
+        'Exact CSS importance contract must not be elevated');
+      total += 1;
+    }
+  }
+  assert.equal(total, 16);
+});
+
+test('v049 responsive, themed and important description-frame owners remain intact', () => {
+  const frame = matching(v049, '.nfc-responsive-descriptions');
+  assert.equal(frame.length, 1, 'Description container still has one native owner');
+  for (const [name,expected] of Object.entries({
+    overflow: 'clip',
+    border: '1px solid var(--nfc-v49-line) !important',
+    'border-radius': 'var(--nfc-v49-radius-lg) !important',
+    background: 'var(--nfc-v49-surface) !important',
+  })) {
+    assert.equal(frame[0].declarations.get(name), expected, 'Description frame '+ name);
+  }
+  assert.match(old049, /@media \(max-width: 767px\)/);
+  assert.match(old049, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(old049, /@media \(prefers-reduced-transparency: reduce\)/);
+  assert.ok(matching(v049, '.nfc-search-input')[0]
+    .declarations.get('min-width') === '210px',
+    'Filter input native minimum remains separate');
+});
