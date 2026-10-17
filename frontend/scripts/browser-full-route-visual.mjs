@@ -235,6 +235,16 @@ try {
         await tab.goto(BASE + item.path, { waitUntil: 'domcontentloaded' });
         if (item.public) await tab.locator('#nfc-login-theme-select').waitFor();
         else await tab.locator('#main-content').waitFor();
+        // The scan detail route can mount its data panel after the shell.
+        // Wait for actual non-empty route content rather than a fixed 160ms
+        // race. Fail closed if it never renders; the same <25-char audit
+        // below remains authoritative at every width and theme.
+        if (item.id === 'scan-detail') {
+          await tab.waitForFunction(() => {
+            const main = document.querySelector('main') || document.querySelector('#root');
+            return (main?.innerText || '').trim().length >= 25;
+          }, null, { timeout: 6000 });
+        }
         await tab.waitForTimeout(160);
         const audit = await tab.evaluate(() => {
           const main = document.querySelector('main') || document.querySelector('#root');
