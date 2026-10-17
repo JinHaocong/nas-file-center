@@ -63,6 +63,8 @@ export const downloadVerificationApi = {
       { remote_root, local_root, source_id, mode }),
   list: (page = 1) => api.get<Page<DownloadVerificationRun>>('/api/download-verifications?page=' + page + '&page_size=50'),
   removeReport: (id: number) => api.delete<Record<string, never>>('/api/download-verifications/' + id),
+  bulkDeleteReports: (run_ids: number[]) =>
+    api.post<{ deleted: number }>('/api/download-verifications/bulk-delete', { run_ids }),
   items: (id: number, page: number, status?: string) =>
     api.get<Page<DownloadVerificationItem>>('/api/download-verifications/' + id + '/items?page=' + page + '&page_size=50' + (status ? '&status=' + encodeURIComponent(status) : '')),
 };
