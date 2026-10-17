@@ -1,0 +1,159 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+// Inventory leaf rules together with their exact @media/@supports ancestry.
+// Do not flatten media blocks or make assumptions from one global regex match.
+function leafRules(css) {
+  const output = [];
+  const stack = [];
+  let segmentStart = 0;
+  let quote = null;
+  let comment = false;
+  let escaped = false;
+  for (let index = 0; index < css.length; index += 1) {
+    const current = css[index];
+    const next = css[index + 1];
+    if (comment) {
+      if (current === '*' && next === '/') { comment = false; index += 1; }
+      continue;
+    }
+    if (quote) {
+      if (escaped) { escaped = false; continue; }
+      if (current === '\\') { escaped = true; continue; }
+      if (current === quote) quote = null;
+      continue;
+    }
+    if (current === '/' && next === '*') { comment = true; index += 1; continue; }
+    if (current === '"' || current === "'") { quote = current; continue; }
+    if (current === '{') {
+      const selector = css.slice(segmentStart, index).replace(/\/\*[\s\S]*?\*\//g, '').trim();
+      const context = stack.filter(entry => entry.selector.startsWith('@')).map(entry => entry.selector).join(' > ');
+      stack.push({ selector, context, bodyStart: index + 1 });
+      segmentStart = index + 1;
+    } else if (current === '}') {
+      const entry = stack.pop();
+      assert.ok(entry, 'CSS close brace must have opening selector');
+      const body = css.slice(entry.bodyStart, index);
+      if (!entry.selector.startsWith('@') && !body.includes('{')) {
+        const declarations = new Map();
+        for (const raw of body.replace(/\/\*[\s\S]*?\*\//g, '').split(';')) {
+          const colon = raw.indexOf(':');
+          if (colon < 0) continue;
+          declarations.set(raw.slice(0, colon).trim(), raw.slice(colon + 1).trim());
+        }
+        output.push({ selector: entry.selector, context: entry.context, declarations });
+      }
+      segmentStart = index + 1;
+    } else if (current === ';' && stack.length === 0) segmentStart = index + 1;
+  }
+  assert.equal(stack.length, 0, 'CSS @media and rules remain balanced');
+  return output;
+}
+
+const read = filename => readFileSync(resolve(process.cwd(), filename), 'utf8');
+const old049 = read('src/styles/v049-workspace.css');
+const old056 = read('src/styles/v056-right-workspace-v2.css');
+const v049 = leafRules(old049);
+const v056 = leafRules(old056);
+const matching = (rules, selector, context = '') => rules.filter(rule =>
+  rule.selector === selector && rule.context === context);
+
+test('v049 desktop: 5 earlier shadows retired without changing late winners', () => {
+  const header = matching(v049, '.nfc-header.nfc-header');
+  assert.equal(header.length, 2);
+  assert.equal(header[0].declarations.has('background'), false);
+  assert.equal(header[0].declarations.get('position'), 'sticky');
+  assert.equal(header[0].declarations.get('z-index'), '30');
+  assert.equal(header[1].declarations.get('background'),
+    'color-mix(in srgb, var(--nfc-nav-surface) 86%, transparent) !important');
+
+  const toolbar = matching(v049, '.nfc-filter-bar,\n.nfc-bulk-action-bar');
+  assert.equal(toolbar.length, 2);
+  for (const [property, winner] of Object.entries({
+    'min-height': '56px',
+    padding: '9px 12px',
+    'border-color': 'var(--nfc-border-soft) !important',
+    background: 'var(--nfc-ui-panel-bg-soft) !important',
+  })) {
+    assert.equal(toolbar[0].declarations.has(property), false, 'early toolbar ' + property);
+    assert.equal(toolbar[1].declarations.get(property), winner, 'final toolbar ' + property);
+  }
+  assert.equal(toolbar[0].declarations.get('box-shadow'), 'none !important');
+});
+
+test('v049 phone: 9 earlier same-@media shadows retired; later authority unchanged', () => {
+  const context = '@media (max-width: 767px)';
+  const cases = [
+    ['.nfc-page-header', [['margin-bottom', '14px'], ['padding', '16px']]],
+    ['.nfc-page-title', [['font-size', '22px']]],
+    ['.nfc-page-description', [['font-size', '11px']]],
+    ['.nfc-data-panel-header', [['min-height', '56px'], ['padding', '12px 14px']]],
+    ['.nfc-data-panel-description', [['display', 'block']]],
+    ['.nfc-metric-card', [['padding', '12px 13px']]],
+    ['.nfc-system-controls-page .nfc-settings-grid > .nfc-data-panel > .nfc-data-panel-body',
+      [['padding', '14px']]],
+  ];
+  let retired = 0;
+  for (const [selector, checks] of cases) {
+    const rules = matching(v049, selector, context);
+    assert.ok(rules.length === 1 || rules.length === 2,
+      selector + ': unexpected exact-context selector duplication');
+    for (const [property, finalValue] of checks) {
+      const winner = rules.at(-1);
+      assert.equal(winner.declarations.get(property), finalValue,
+        selector + ': late ' + property + ' has changed');
+      if (rules.length === 2) assert.equal(rules[0].declarations.has(property), false,
+        selector + ': earlier ' + property + ' must remain retired');
+      retired += 1;
+    }
+  }
+  assert.equal(retired, 9);
+  const firstHeader = matching(v049, '.nfc-page-header', context)[0];
+  assert.equal(firstHeader.declarations.get('min-height'), 'auto');
+  assert.equal(matching(v049, '.nfc-filter-bar,\n.nfc-bulk-action-bar', context)[0]
+    .declarations.get('padding'), '9px 10px',
+    'Distinct responsive toolbar authority must survive');
+  assert.equal(matching(v049, '.nfc-metric-card:nth-child(2n)', context)[0]
+    .declarations.get('border-right'), '0');
+  assert.equal([...old049.matchAll(/@media\s*\([^)]*\)/g)].length, 8,
+    'Do not remove or reorder responsive contexts');
+});
+
+test('v056 dashboard rail keeps only the late 14px baseline and responsive owners', () => {
+  const base = matching(v056, '.nfc-app-main .nfc-dashboard-page .nfc-dashboard-rail');
+  assert.equal(base.length, 1, 'Earlier desktop-only 16px rail is fully shadowed');
+  assert.equal(base[0].declarations.get('gap'), '14px');
+  const responsive = matching(v056, '.nfc-app-main .nfc-dashboard-page .nfc-dashboard-rail',
+    '@media (max-width: 1199px)');
+  assert.ok(responsive.some(rule => rule.declarations.get('gap') === '12px'),
+    'Tablet rail gap remains separately owned');
+  assert.match(old056, /@media \(max-width: 767px\)[\s\S]*?\.nfc-app-main \.nfc-dashboard-page \.nfc-dashboard-rail\s*\{[^}]*grid-template-columns:\s*1fr;/);
+});
+
+test('import and independent CSS authority unchanged; browser evidence remains gated', () => {
+  const entry = read('src/main.tsx');
+  const cssOrder = ["./styles/v048-detail.css", "./styles/v049-workspace.css",
+    "./styles/v050-layout.css", "./styles/v055-workspace-breathing.css",
+    "./styles/v056-right-workspace-v2.css", "./styles/console-v2.css"];
+  for (let i = 1; i < cssOrder.length; i += 1) {
+    assert.ok(entry.indexOf(cssOrder[i - 1]) < entry.indexOf(cssOrder[i]),
+      'Original CSS import cascade order changed at ' + cssOrder[i]);
+  }
+  assert.match(old049, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(old049, /@media \(prefers-reduced-transparency: reduce\)/);
+  const workflow = read('../.github/workflows/ui-v044-validation.yml');
+  for (const script of [
+    'browser-workspace-cascade.mjs',
+    'browser-task-ledger-states.mjs',
+    'browser-indexes-ledger-states.mjs',
+    'browser-media-ledger-states.mjs',
+    'browser-overlay-smoke.mjs',
+  ]) assert.ok(workflow.includes(script), 'Read-only viewport/theme evidence missing ' + script);
+  const visual = read('scripts/browser-workspace-cascade.mjs');
+  for (const token of ["request.method() !== 'GET'", "assert.deepEqual(writes, []",
+    "assert.deepEqual(outbound, []", '32/32 cases, 352 screenshots']) {
+    assert.ok(visual.includes(token), 'No-write browser gate missing ' + token);
+  }
+});
