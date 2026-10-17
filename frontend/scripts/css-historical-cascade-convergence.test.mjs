@@ -396,3 +396,75 @@ test('v049 metric typography and snapshot surface: 17 shadows retired, v056 rema
   assert.equal([...old049.matchAll(/@media\s*\([^)]*\)/g)].length, 8,
     'Retain all eight historical media contexts');
 });
+
+
+test('v049 workspace frame, action and metric-grid: 16 exact v056 shadows retired', () => {
+  // All retired declarations are unconditional single-selector, same-property
+  // and equal-importance losers to later-imported v056 declarations.
+  const owners = [
+    ['.nfc-page-content', {
+      position: 'relative',
+      width: '100%',
+      'min-width': '0',
+      padding: '18px clamp(24px, 2.15vw, 42px) var(--nfc-w2-page-bottom)',
+    }],
+    ['.nfc-page-content > *', {
+      width: 'min(100%, var(--nfc-w2-content-max))',
+      'margin-inline': 'auto',
+    }],
+    ['.nfc-header-action-label', {
+      color: 'var(--nfc-w2-text-muted)',
+      'font-size': '12px',
+    }],
+    ['.nfc-page-actions', {
+      'align-self': 'flex-end',
+      gap: '8px',
+    }],
+    ['.nfc-metric-grid', {
+      overflow: 'visible',
+      gap: '12px',
+      border: '0',
+      'border-radius': '0',
+      background: 'transparent',
+      'box-shadow': 'none',
+    }],
+  ];
+  let retired = 0;
+  for (const [selector, declarations] of owners) {
+    const earlier = matching(v049, selector);
+    const winners = matching(v056, selector);
+    assert.equal(winners.length, 1, selector + ': one unconditional v056 owner');
+    for (const [property, finalValue] of Object.entries(declarations)) {
+      assert.ok(earlier.every(rule => !rule.declarations.has(property)),
+        selector + ': retired v049 shadow returned: ' + property);
+      assert.equal(winners[0].declarations.get(property), finalValue,
+        selector + ': v056 winner changed: ' + property);
+      assert.ok(!finalValue.includes('!important'),
+        selector + ': no importance escalation');
+      retired += 1;
+    }
+  }
+  assert.equal(retired, 16);
+  assert.equal(matching(v049, '.nfc-page-content')[0].declarations.get('z-index'), '1',
+    'Keep independent page stacking contract');
+  assert.equal(matching(v049, '.nfc-page-actions').length, 1);
+  assert.equal(matching(v049, '.nfc-page-actions')[0].declarations.get('padding-bottom'), '0',
+    'Keep later v049 action-row property');
+  assert.equal(matching(v049, '.nfc-page-content > *').length, 0);
+  assert.equal(matching(v049, '.nfc-header-action-label').length, 0);
+  assert.equal(matching(v049, '.nfc-metric-grid').length, 0,
+    'Empty old and superseded baseline metric-grid rules stay retired');
+  assert.equal(matching(v049, '.nfc-metric-grid',
+    '@media (max-width: 1199px)')[0].declarations.get('grid-template-columns'),
+  '1fr 1fr', 'Distinct 1199px metric-column owner must survive');
+  assert.equal(matching(v049, '.nfc-metric-grid',
+    '@media (max-width: 767px)')[0].declarations.get('grid-template-columns'),
+  'repeat(2, minmax(0, 1fr))', 'Distinct phone metric columns survive');
+  assert.equal([...old049.matchAll(/@media\s*\([^)]*\)/g)].length, 8);
+  const entry = read('src/main.tsx');
+  const old = entry.indexOf("import './styles/v049-workspace.css';");
+  const late = entry.indexOf("import './styles/v056-right-workspace-v2.css';");
+  assert.ok(old >= 0 && old < late, 'v056 continues owning final frame and metric geometry');
+  assert.match(old049, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(old049, /@media \(prefers-reduced-transparency: reduce\)/);
+});
