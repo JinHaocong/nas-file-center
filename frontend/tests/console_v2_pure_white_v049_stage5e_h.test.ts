@@ -30,7 +30,7 @@ const retired: Array<[string, string[], number]> = [
   ['.nfc-metric-card', ['border', 'border-radius', 'background', 'box-shadow'], 2],
   ['.nfc-metric-card:last-child', ['border-right'], 1],
   ['.nfc-metric-card:hover', ['transform', 'background'], 1],
-  ['.nfc-metric-value', ['margin-top'], 2],
+  ['.nfc-metric-value', ['margin-top'], 1],
   ['.nfc-system-controls-page .nfc-settings-grid', ['gap'], 1],
   ['.nfc-system-controls-page .nfc-settings-grid > .nfc-data-panel > .nfc-data-panel-header',
     ['min-height', 'padding'], 2],
@@ -76,7 +76,7 @@ describe('Pure White Stage 5E-H v049 late-authority convergence', () => {
     assert.equal(property(blocks('.nfc-metric-card')[1], 'border-radius'), '16px');
     assert.equal(property(blocks('.nfc-metric-card:hover')[0], 'transform'),
       'translateY(-1px)');
-    assert.equal(property(blocks('.nfc-metric-value')[1], 'margin-top'), '12px');
+    assert.equal(property(blocks('.nfc-metric-value')[0], 'margin-top'), '12px');
     assert.equal(property(blocks('.nfc-system-controls-page .nfc-settings-subpanel')[0],
       'border-bottom'), '1px solid var(--nfc-v49-line) !important');
     assert.equal(property(blocks('.nfc-system-controls-page .nfc-settings-subpanel')[1],
