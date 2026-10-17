@@ -16,7 +16,14 @@ export interface ConsoleCheckboxProps extends Omit<
 export const ConsoleCheckbox = React.forwardRef<HTMLInputElement, ConsoleCheckboxProps>(
   ({ checked, onCheckedChange, disabled = false, ...props }, ref) => (
     <input {...props} ref={ref} type="checkbox" checked={checked} disabled={disabled}
-      onChange={event => onCheckedChange(event.currentTarget.checked)} />
+      onChange={event => {
+        // A stale or programmatically dispatched change must not bypass native
+        // disabled fieldsets or a temporarily inert/aria-disabled form region.
+        if (!disabled && !event.currentTarget.matches(':disabled') &&
+            !event.currentTarget.closest('[aria-disabled="true"], [inert], [hidden]')) {
+          onCheckedChange(event.currentTarget.checked);
+        }
+      }} />
   ),
 );
 ConsoleCheckbox.displayName = 'ConsoleCheckbox';
