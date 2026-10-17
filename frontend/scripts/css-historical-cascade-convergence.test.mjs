@@ -393,6 +393,6 @@ test('v049 metric typography and snapshot surface: 17 shadows retired, v056 rema
   assert.ok(v056.some(rule => rule.context.startsWith('@media') &&
     rule.selector === '.nfc-metric-value' && rule.declarations.get('font-size') === '23px'),
   'Responsive 23px metric value must remain');
-  assert.equal([...old049.matchAll(/@media\\s*\\([^)]*\\)/g)].length, 8,
+  assert.equal([...old049.matchAll(/@media\s*\([^)]*\)/g)].length, 8,
     'Retain all eight historical media contexts');
 });
