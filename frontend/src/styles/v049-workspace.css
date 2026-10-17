@@ -92,7 +92,6 @@ body,
   position: sticky;
   z-index: 30;
   border-bottom: 1px solid var(--nfc-v49-line);
-  background: color-mix(in srgb, var(--nfc-v49-canvas) 88%, transparent);
 }
 
 .nfc-header-left {
@@ -253,10 +252,6 @@ body,
 
 .nfc-filter-bar,
 .nfc-bulk-action-bar {
-  min-height: 54px;
-  padding: 8px 12px;
-  border-color: var(--nfc-v49-line) !important;
-  background: var(--nfc-v49-surface-soft) !important;
   box-shadow: none !important;
 }
 
@@ -936,26 +931,12 @@ body,
 
   .nfc-page-header {
     min-height: auto;
-    margin-bottom: 18px;
-    padding: 0 0 16px;
-  }
-
-  .nfc-page-title {
-    font-size: 24px;
-  }
-
-  .nfc-page-description {
-    font-size: 11.5px;
   }
 
   .nfc-page-actions,
   .nfc-page-actions .nfc-action-bar {
     width: 100%;
     justify-content: flex-start;
-  }
-
-  .nfc-metric-card {
-    padding: 12px;
   }
 
   .nfc-metric-card:nth-child(2n) {
@@ -968,15 +949,6 @@ body,
 
   .nfc-data-panel {
     border-radius: 10px !important;
-  }
-
-  .nfc-data-panel-header {
-    min-height: 54px;
-    padding: 11px 12px;
-  }
-
-  .nfc-data-panel-description {
-    display: none;
   }
 
   .nfc-filter-bar,
@@ -1028,10 +1000,6 @@ body,
 
   .nfc-system-controls-page .nfc-settings-grid {
     gap: 14px;
-  }
-
-  .nfc-system-controls-page .nfc-settings-grid > .nfc-data-panel > .nfc-data-panel-body {
-    padding: 12px;
   }
 
   .nfc-workflow-builder-page .nfc-workflow-step-heading,
