@@ -407,3 +407,13 @@ review gate remain mandatory for this exact PR HEAD.
 This is **a partial CSS consolidation only**, not complete historical/theme
 closure, manual final visual/a11y acceptance, real NAS verification or
 production approval. Formal progress remains **69/74 (93.2%)**.
+
+**PR #292 CI-specific read-only browser stabilization:** The initial exact-HEAD
+430px visual job reported one near-empty `/scans/1` route in `dark-light`
+mode, with no reported route redirect or React exception. The fixture
+previously waited only for shell insertion and 160ms after navigation.
+The dynamic scan-detail case now waits up to six seconds for real main
+content (at least 25 text characters), failing closed on timeout. The
+existing whole-route blank-page threshold, every width/theme screenshot,
+no-NAS-write assertions and error/overflow checks are unchanged. This
+does **not** waive the full restarted PR CI or claim manual visual sign-off.
