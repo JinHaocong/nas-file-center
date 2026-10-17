@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');
 const v049 = read('src/styles/v049-workspace.css');
+const v056 = read('src/styles/v056-right-workspace-v2.css');
 const browser = read('scripts/browser-workspace-cascade.mjs');
 const workflow = read('../.github/workflows/ui-v044-validation.yml');
 
@@ -20,9 +21,7 @@ describe('Pure White Stage 5E-C v049 historical shadows and dense ledger accepta
       ['.nfc-header.nfc-header', ['margin', 'border', 'box-shadow', 'backdrop-filter', '-webkit-backdrop-filter']],
       ['.nfc-page-header', ['min-height', 'margin', 'padding', 'align-items', 'gap', 'border', 'border-radius', 'box-shadow']],
       ['.nfc-page-header-copy', ['max-width']],
-      ['.nfc-page-actions', ['padding-bottom']],
       ['.nfc-data-panel-header', ['min-height']],
-      ['.nfc-metric-grid', ['gap', 'overflow', 'border', 'border-radius', 'background', 'box-shadow']],
       ['.nfc-metric-card', ['min-height', 'padding']],
     ];
     let total = 0;
@@ -38,11 +37,31 @@ describe('Pure White Stage 5E-C v049 historical shadows and dense ledger accepta
         total++;
       }
     }
+    // The old action-row padding is now its sole unconditional v049 rule.
+    const actionBlocks = rules('.nfc-page-actions');
+    assert.equal(actionBlocks.length, 1, 'Retain only the independent v049 action padding');
+    assert.match(actionBlocks[0], /padding-bottom:\s*0;/);
+    assert.doesNotMatch(actionBlocks[0], /(?:^|\n)\s*(?:align-self|gap)\s*:/);
+    total += 1;
+
+    // The six desktop metric-grid properties graduated from late v049 to
+    // later-imported v056: source-level leaf ownership is pinned separately
+    // by css-historical-cascade-convergence.test.mjs.
+    assert.doesNotMatch(v049, /^\s*\.nfc-metric-grid\s*\{/m,
+      'Historical unconditional metric-grid declarations must stay retired');
+    const metricBase = v056.match(/(?:^|\n)\.nfc-metric-grid\s*\{([^}]*)\}/)?.[1];
+    assert.ok(metricBase, 'v056 unconditional metric-grid owner is required');
+    for (const property of ['gap', 'overflow', 'border', 'border-radius', 'background', 'box-shadow']) {
+      const rule = new RegExp('(?:^|\\n)\\s*' + property + '\\s*:');
+      assert.match(metricBase, rule, 'v056 final metric property ' + property);
+      total += 1;
+    }
+
     assert.equal(total, 24);
     assert.ok(rules('.nfc-header.nfc-header')[0].includes('position: sticky'));
     assert.ok(rules('.nfc-page-header')[0].includes('border-bottom: 1px'));
-    assert.ok(rules('.nfc-metric-grid')[0].includes('grid-template-columns') === false ||
-      rules('.nfc-metric-grid')[0].includes('box-shadow') === false);
+    assert.ok(rules('.nfc-metric-grid').some(block => block.includes('grid-template-columns')),
+      'Independent responsive metric columns must survive');
     assert.ok(read('src/main.tsx').includes("import './styles/v049-workspace.css';"));
   });
 
