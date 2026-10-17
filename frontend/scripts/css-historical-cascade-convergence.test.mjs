@@ -455,8 +455,8 @@ test('v049 workspace frame, action and metric-grid: 16 exact v056 shadows retire
   assert.equal(matching(v049, '.nfc-metric-grid').length, 0,
     'Empty old and superseded baseline metric-grid rules stay retired');
   assert.equal(matching(v049, '.nfc-metric-grid',
-    '@media (max-width: 1199px)')[0].declarations.get('grid-template-columns'),
-  '1fr 1fr', 'Distinct 1199px metric-column owner must survive');
+    '@media (max-width: 420px)')[0].declarations.get('grid-template-columns'),
+  '1fr 1fr', 'Distinct 420px metric-column owner must survive');
   assert.equal(matching(v049, '.nfc-metric-grid',
     '@media (max-width: 767px)')[0].declarations.get('grid-template-columns'),
   'repeat(2, minmax(0, 1fr))', 'Distinct phone metric columns survive');
