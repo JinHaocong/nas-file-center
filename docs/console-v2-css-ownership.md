@@ -397,7 +397,10 @@ assertions, explicit independent-retention checks, breakpoint contracts,
 and canonical import-order enforcement. The existing v048→v049
 cross-layer test also keeps its **16 original retirement checks** while
 recognizing the six Header properties now owned by v054; it continues to
-pin all remaining independent v049 declarations. Existing read-only Chromium eight
+pin all remaining independent v049 declarations. The Stage 5E-D Media /
+Quarantine test similarly retains its original **12-declaration historical
+coverage** while moving three overlay properties' final authority from v049
+to v054 and keeping the independent v049 divider unchanged. Existing read-only Chromium eight
 width / four-theme CI matrix, frontend/backend/Docker validation and
 review gate remain mandatory for this exact PR HEAD.
 
