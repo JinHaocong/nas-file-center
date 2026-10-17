@@ -68,18 +68,6 @@
   margin-bottom: 28px;
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
 /* -------------------------------------------------------------------------- */
 /* Operational list pages                                                     */
 /* -------------------------------------------------------------------------- */
@@ -91,19 +79,9 @@
   margin-top: 0;
 }
 
-
-
 .nfc-app-main .nfc-plans-page .nfc-legacy-plan-cleanup {
   margin-bottom: 20px;
 }
-
-
-
-
-
-
-
-
 
 /* -------------------------------------------------------------------------- */
 /* Detail pages and workbenches                                               */
@@ -112,8 +90,6 @@
 .nfc-app-main .nfc-plan-detail-page .nfc-lifecycle-strip {
   margin-bottom: 20px;
 }
-
-
 
 .nfc-app-main .nfc-plan-detail-page .nfc-plan-alert-stack {
   margin-bottom: 20px;
@@ -135,8 +111,6 @@
 .nfc-app-main .nfc-dedupe-cockpit {
   gap: 24px;
 }
-
-
 
 .nfc-app-main .nfc-workflow-builder-page .nfc-plan-alert-stack {
   margin-bottom: 22px;
