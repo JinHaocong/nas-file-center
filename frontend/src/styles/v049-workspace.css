@@ -383,37 +383,6 @@ body,
   box-shadow: none !important;
 }
 
-.nfc-dashboard-page .nfc-quick-action {
-  min-height: 60px;
-  padding: 10px 13px;
-  grid-template-columns: 28px minmax(0, 1fr) 14px;
-  border-bottom-color: var(--nfc-v49-line);
-}
-
-.nfc-dashboard-page .nfc-quick-action-icon {
-  width: 28px;
-  height: 28px;
-  border: 0;
-  border-radius: 8px;
-  color: var(--nfc-v49-muted);
-  background: var(--nfc-v49-surface-muted);
-}
-
-.nfc-dashboard-page .nfc-quick-action-copy strong {
-  font-size: 11px;
-}
-
-.nfc-dashboard-page .nfc-quick-action-copy span {
-  font-size: 9.5px;
-}
-
-.nfc-dashboard-page .nfc-summary-row {
-  min-height: 43px;
-  padding-inline: 13px;
-  border-bottom-color: var(--nfc-v49-line);
-  font-size: 10.5px;
-}
-
 /* Worker / task ------------------------------------------------------------ */
 
 .nfc-worker-panel,

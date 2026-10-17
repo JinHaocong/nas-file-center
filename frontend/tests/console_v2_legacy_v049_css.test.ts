@@ -10,7 +10,16 @@ describe('Console v2 reviewed v049 legacy workspace CSS retirement', () => {
 
   test('v049 has no remaining AntD or anticon class selectors', () => {
     assert.doesNotMatch(css, /\.(?:ant-[a-z][\w-]*|anticon\b)/);
-    assert.ok(css.length > 35000, 'preserve substantial native workspace rules');
+    // A raw byte threshold would incorrectly block safe retirement of
+    // declarations proven shadowed by the later v056 stylesheet.
+    for (const marker of [
+      '.nfc-page-content {', '.nfc-dashboard-page .nfc-dashboard-layout {',
+      '.nfc-page-actions .nfc-action-bar {', '.nfc-metric-grid {',
+      '.nfc-data-panel-dense {', '.nfc-row-actions:focus-within {',
+      '.nfc-directory-list-viewport {', '.nfc-login-panel {',
+      '@media (max-width: 767px)', '@media (prefers-reduced-motion: reduce)',
+      '@media (prefers-reduced-transparency: reduce)',
+    ]) assert.ok(css.includes(marker), 'Native v049 owner lost: ' + marker);
   });
 
   test('native row action keyboard visibility and mobile pagination survive mixed groups', () => {

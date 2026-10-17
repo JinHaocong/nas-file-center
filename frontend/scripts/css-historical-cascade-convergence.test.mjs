@@ -204,3 +204,130 @@ test('v049 responsive, themed and important description-frame owners remain inta
     .declarations.get('min-width') === '210px',
     'Filter input native minimum remains separate');
 });
+
+test('v049 → v056: 16 old dashboard quick-action and summary row shadows stay retired', () => {
+  const cases = [
+  [
+    ".nfc-dashboard-page .nfc-quick-action",
+    [
+      [
+        "min-height",
+        "66px"
+      ],
+      [
+        "padding",
+        "11px 14px"
+      ],
+      [
+        "grid-template-columns",
+        "32px minmax(0, 1fr) 14px"
+      ],
+      [
+        "border-bottom-color",
+        "var(--nfc-w2-hairline)"
+      ]
+    ]
+  ],
+  [
+    ".nfc-dashboard-page .nfc-quick-action-icon",
+    [
+      [
+        "width",
+        "32px"
+      ],
+      [
+        "height",
+        "32px"
+      ],
+      [
+        "border",
+        "0"
+      ],
+      [
+        "border-radius",
+        "9px"
+      ],
+      [
+        "color",
+        "var(--nfc-w2-text-muted)"
+      ],
+      [
+        "background",
+        "var(--nfc-w2-surface-strong)"
+      ]
+    ]
+  ],
+  [
+    ".nfc-dashboard-page .nfc-quick-action-copy strong",
+    [
+      [
+        "font-size",
+        "12.75px"
+      ]
+    ]
+  ],
+  [
+    ".nfc-dashboard-page .nfc-quick-action-copy span",
+    [
+      [
+        "font-size",
+        "11.5px"
+      ]
+    ]
+  ],
+  [
+    ".nfc-dashboard-page .nfc-summary-row",
+    [
+      [
+        "min-height",
+        "48px"
+      ],
+      [
+        "padding-inline",
+        "14px"
+      ],
+      [
+        "border-bottom-color",
+        "var(--nfc-w2-hairline)"
+      ],
+      [
+        "font-size",
+        "12.5px"
+      ]
+    ]
+  ]
+];
+  let retired = 0;
+  for (const [selector, properties] of cases) {
+    assert.equal(matching(v049, selector).length, 0,
+      'Old unconditional v049 rule must stay retired: ' + selector);
+    const owners = matching(v056, selector);
+    assert.equal(owners.length, 1, 'One later v056 unconditional owner: ' + selector);
+    for (const [property, value] of properties) {
+      assert.equal(owners[0].declarations.get(property), value,
+        'Final v056 dashboard owner changed: ' + selector + ' / ' + property);
+      assert.ok(!value.includes('!important'), 'No importance escalation permitted');
+      retired += 1;
+    }
+  }
+  assert.equal(retired, 16);
+});
+
+test('v049 dashboard layout and important native rail remain independently owned', () => {
+  const layout = matching(v049, '.nfc-dashboard-page .nfc-dashboard-layout');
+  assert.equal(layout.length, 1);
+  assert.equal(layout[0].declarations.get('margin-top'), '18px');
+  assert.equal(layout[0].declarations.get('gap'), '22px');
+  const rail = matching(v049, '.nfc-dashboard-page .nfc-dashboard-rail > .nfc-data-panel');
+  assert.equal(rail.length, 1);
+  for (const [prop, expected] of Object.entries({
+    border: '1px solid var(--nfc-v49-line) !important',
+    'border-radius': 'var(--nfc-v49-radius-lg) !important',
+    background: 'color-mix(in srgb, var(--nfc-v49-surface) 76%, transparent) !important',
+    'box-shadow': 'none !important',
+  })) assert.equal(rail[0].declarations.get(prop), expected,
+    'Important native rail frame must remain: ' + prop);
+  assert.match(old049, /@media \(max-width: 767px\)/);
+  assert.match(old049, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(old049, /@media \(prefers-reduced-transparency: reduce\)/);
+});
