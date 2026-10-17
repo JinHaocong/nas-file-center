@@ -69,16 +69,7 @@ body,
 }
 
 .nfc-page-content {
-  position: relative;
   z-index: 1;
-  width: 100%;
-  min-width: 0;
-  padding: 28px 34px 56px;
-}
-
-.nfc-page-content > * {
-  width: min(100%, var(--nfc-v49-content-max));
-  margin-inline: auto;
 }
 
 .nfc-operations-page,
@@ -128,11 +119,6 @@ body,
 
 }
 
-.nfc-header-action-label {
-  color: var(--nfc-v49-muted);
-  font-size: 10.5px;
-}
-
 /* Page headers ------------------------------------------------------------- */
 
 .nfc-page-header {
@@ -159,11 +145,6 @@ body,
 .nfc-page-description {
   max-width: 76ch;
   color: var(--nfc-v49-muted);
-}
-
-.nfc-page-actions {
-  align-self: flex-end;
-  gap: 7px;
 }
 
 /* Core surfaces ------------------------------------------------------------ */
@@ -315,9 +296,6 @@ body,
 }
 
 /* Metrics ----------------------------------------------------------------- */
-
-.nfc-metric-grid {
-}
 
 .nfc-metric-card {
   border-right: 1px solid var(--nfc-v49-line);
@@ -1170,15 +1148,6 @@ body,
 }
 
 /* Metrics stop reading like one long spreadsheet strip. */
-.nfc-metric-grid {
-  overflow: visible;
-  gap: 12px;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-}
-
 .nfc-metric-card {
   min-height: 108px;
   padding: 16px 17px;
