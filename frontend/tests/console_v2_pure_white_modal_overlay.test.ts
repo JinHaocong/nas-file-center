@@ -62,8 +62,8 @@ describe('Pure White portal overlay clarity and stacking', () => {
   });
 
   test('root-portal password inputs use opaque 3px focus rings and 32-case computed contrast audit', () => {
-    const light = findRules(shell, '.nfc-v2-dialog-form input:focus-visible');
-    const dark = findRules(shell, "[data-theme='dark'] .nfc-v2-dialog-form input:focus-visible");
+    const light = findRules(shell, '.nfc-change-password-modal.nfc-v2-dialog .nfc-v2-dialog-form input:focus-visible');
+    const dark = findRules(shell, "[data-theme='dark'] .nfc-change-password-modal.nfc-v2-dialog .nfc-v2-dialog-form input:focus-visible");
     assert.equal(light.length, 1);
     assert.equal(dark.length, 1);
     assert.match(light[0], /outline:\s*3px solid #252525/);
