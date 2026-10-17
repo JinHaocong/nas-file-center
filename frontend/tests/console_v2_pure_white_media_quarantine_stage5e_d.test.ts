@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');
 const css = read('src/styles/v049-workspace.css');
+const premium = read('src/styles/v054-premium-system.css');
 const browser = read('scripts/browser-workspace-cascade.mjs');
 const ci = read('../.github/workflows/ui-v044-validation.yml');
 
@@ -20,7 +21,7 @@ describe('Pure White Stage 5E-D Media / Quarantine dense-status acceptance', () 
       ['.nfc-data-panel-dense', ['border-radius']],
       ['.nfc-data-panel-quiet', ['border-color', 'background']],
       ['.nfc-overlay-section', ['border-color', 'border-radius', 'background']],
-      ['.nfc-overlay-section-header', ['min-height', 'padding', 'border-bottom-color', 'background']],
+      ['.nfc-overlay-section-header', ['border-bottom-color']],
       ['.nfc-directory-picker-body', ['gap']],
       ['.nfc-mobile-pagination', ['background']],
     ];
@@ -38,9 +39,28 @@ describe('Pure White Stage 5E-D Media / Quarantine dense-status acceptance', () 
         removed++;
       }
     }
+    // The other three historical v049 winners are now superseded by
+    // later v054 declarations of identical selector, context and importance.
+    const earlierOverlay = blocks('.nfc-overlay-section-header');
+    assert.equal(earlierOverlay.length, 2);
+    const owner = premium.match(/(?:^|\n)\.nfc-overlay-section-header\s*\{([^}]*)\}/)?.[1];
+    assert.ok(owner, 'The v054 overlay owner must exist');
+    for (const [property, expected] of Object.entries({
+      'min-height': '52px',
+      padding: '11px 13px',
+      background: 'color-mix(in srgb, var(--nfc-surface-2) 48%, transparent)',
+    })) {
+      const pattern = new RegExp('(?:^|\\n)\\s*' + property + '\\s*:\\s*([^;]+)');
+      assert.doesNotMatch(earlierOverlay[1], pattern,
+        'v049 must not regain its obsolete overlay property ' + property);
+      assert.equal(owner.match(pattern)?.[1]?.trim(), expected,
+        'v054 final overlay value drifted: ' + property);
+      removed++;
+    }
     assert.equal(removed, 12);
     assert.match(blocks('.nfc-data-panel-quiet')[0], /box-shadow:\s*none\s*!important/);
-    assert.match(blocks('.nfc-overlay-section-header')[1], /min-height:\s*54px/);
+    assert.match(earlierOverlay[1], /border-bottom-color:\s*var\(--nfc-border-soft\)/,
+      'v049 independent overlay divider remains');
   });
 
   test('populate real Media and Quarantine with complete authority/status fixtures', () => {
