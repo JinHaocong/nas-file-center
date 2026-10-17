@@ -190,3 +190,21 @@ The first mobile `v049` block keeps its independent `min-height: auto` page head
 `frontend/scripts/css-historical-cascade-convergence.test.mjs` now enumerates *leaf CSS rules with their exact at-rule ancestry*, verifies all **15 early shadow retirements and corresponding unchanged late winners**, checks independent early properties and import order, and asserts that existing exact-HEAD read-only Chromium 8-width × 4-theme workspace/dense/status/overlay evidence remains in CI. The test runs automatically in `npm test`. Real browser evidence is gathered by the existing visual/overlay CI jobs against the candidate HEAD; no NAS storage/API mutation is permitted.
 
 **This is a scoped source consolidation tranche, not the final historical CSS theme-system consolidation or the 8-width human visual acceptance.** The remaining historical CSS/computed-style audit, comprehensive accessibility sign-off, real NAS test and owner deployment authorization remain open. Accordingly the high-level count stays **69/74 (93.2%)** pending those distinct closure conditions.
+
+
+## 2026-10-17 — historical cross-file header CSS authority: v048-detail → v049 (scoped tranche)
+
+After the same-file v049/v056 convergence in PR #283, the remaining high-volume overlap is **between historical version imports**. This tranche specifically removes **16 desktop, unconditional earlier declarations** from `v048-detail.css` which are superseded by **the exact same selectors and properties, with the same importance, in the later `v049-workspace.css`**:
+
+| v048-detail source rule | Retired early properties | Authoritative subsequent rule |
+| --- | --- | --- |
+| `.nfc-header-workspace` | `min-width`, `max-width` (2) | v049 132px / 210px |
+| `.nfc-header-workspace-kicker` | `color`, `font-size`, `font-weight`, `letter-spacing` (4) | v049 subtle token, 8px, 730, .14em |
+| `.nfc-header-workspace-name` | `margin-top`, `color`, `font-size`, `font-weight`, `letter-spacing` (5) | v049 3px, text token, 11px, 650, -.01em |
+| `.nfc-header-status` | `gap`, `padding`, `border`, `border-radius`, `background` (5) | v049 3px, 2px, v49 border, pill radius; subsequent v049 neutral surface background |
+
+The completely shadowed *unconditional desktop* `.nfc-header-status` rule is removed, but **its distinct responsive @media status rules remain** (mobile max-width, scrolling and scrollbar). The earlier `padding-right` on workspace is intentionally retained because v049 uses a `padding` shorthand, not the exact property: no broad shorthand/longhand rewrite is made. Kicker/name `overflow: hidden`, `text-overflow: ellipsis` and `white-space: nowrap` survive untouched; all status badge colors, responsive breakpoints, index styles, reduced-motion rules and selector specificity remain unchanged.
+
+`frontend/scripts/css-historical-cross-layer-ownership.test.mjs` now validates **the earlier file and the later file together**, enumerates actual CSS leaf declarations with their at-rule ancestry, asserts all 16 old shadows stay retired, asserts the exact live v049 final values, preserves mobile-only ancestors and independent declaration owners, checks actual ordered `main.tsx` imports, and checks that the read-only 8-width × 4-theme Chromium workspace/overlay/ledger matrix remains in the exact-HEAD CI. It runs as part of `npm test`; CI additionally runs the real read-only Chromium matrix and standard frontend/backend/Docker/security gates.
+
+**Scope:** another conservative cross-layer cleanup, **not a completed historical theme consolidation**. CSS files with grouped selectors, shorthand/longhand mixing, `!important` importance differences and distinct media conditions are not bulk-pruned. A full real-browser computed-style/theme ownership and one consolidated human visual/accessibility acceptance are still open, as is real NAS/owner sign-off. Formal completion stays **69/74 (93.2%)**; no NAS mutation, production deployment or backend/security edit.
