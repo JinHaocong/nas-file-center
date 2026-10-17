@@ -208,3 +208,21 @@ The completely shadowed *unconditional desktop* `.nfc-header-status` rule is rem
 `frontend/scripts/css-historical-cross-layer-ownership.test.mjs` now validates **the earlier file and the later file together**, enumerates actual CSS leaf declarations with their at-rule ancestry, asserts all 16 old shadows stay retired, asserts the exact live v049 final values, preserves mobile-only ancestors and independent declaration owners, checks actual ordered `main.tsx` imports, and checks that the read-only 8-width × 4-theme Chromium workspace/overlay/ledger matrix remains in the exact-HEAD CI. It runs as part of `npm test`; CI additionally runs the real read-only Chromium matrix and standard frontend/backend/Docker/security gates.
 
 **Scope:** another conservative cross-layer cleanup, **not a completed historical theme consolidation**. CSS files with grouped selectors, shorthand/longhand mixing, `!important` importance differences and distinct media conditions are not bulk-pruned. A full real-browser computed-style/theme ownership and one consolidated human visual/accessibility acceptance are still open, as is real NAS/owner sign-off. Formal completion stays **69/74 (93.2%)**; no NAS mutation, production deployment or backend/security edit.
+
+
+## 2026-10-17 — v055 → v056 desktop header ownership (scoped follow-up)
+
+Following PR #284, audited the `src/main.tsx` import order: `v055-workspace-breathing.css` loads before `v056-right-workspace-v2.css`. Four **unconditional, exact-match selectors** in v055 contained **14 earlier declarations** already superseded by v056 rules at equal specificity, importance, and at-rule context:
+
+| Selector | Earlier v055 declarations retired | Preserved v056 unconditional authority |
+| --- | --- | --- |
+| `.nfc-app-main .nfc-page-header` | `min-height`, `margin`, `padding`, `align-items`, `gap`, `border`, `border-radius`, `background`, `box-shadow` (9) | Flat workspace header: 0 minimum height, 24px bottom margin, 20px bottom padding, flex-end, 28px gap, 0 border plus independent 1px hairline bottom border, transparent background, no shadow |
+| `.nfc-app-main .nfc-page-header-copy` | `max-width` (1) | `min(980px, 74vw)` |
+| `.nfc-app-main .nfc-page-title` | `line-height` (1) | `1.18` |
+| `.nfc-app-main .nfc-page-description` | `max-width`, `margin-top`, `line-height` (3) | `82ch`, `8px`, `1.58` |
+
+The now-empty **unconditional** v055 rule blocks are removed; **all scoped responsive rules** (1800px, 1399px, 980px and narrow-screen branches), custom tokens, pseudo-elements, action layout, legacy dense-page selectors, and later v056 declarations are preserved. No shorthand/longhand equivalence was inferred: the entire earlier `border` and `padding` shorthands are replaced by the later same-name shorthands, while independent late `border-bottom` remains in place. This does not alter import order, theme tokens, `!important` rules or application/Plan/NAS operations.
+
+The dedicated `frontend/scripts/css-historical-v055-v056-ownership.test.mjs` enumerates leaf rules with exact at-rule ancestry; pins all 14 v056 winners, prevents retired v055 declarations reappearing, verifies retained responsive and independent properties, and checks existing isolated read-only Chromium matrices remain gated by the PR workflow. It is registered in `npm test`.
+
+**Still open:** exhaustive CSS theme consolidation, final human visual and a11y sign-off, real NAS isolation testing and owner-authorized production deployment. The formal **69/74 (93.2%)** high-level checklist is unchanged.

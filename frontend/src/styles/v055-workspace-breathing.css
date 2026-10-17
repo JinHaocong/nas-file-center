@@ -47,33 +47,6 @@
 /* First-screen hero / page header                                            */
 /* -------------------------------------------------------------------------- */
 
-.nfc-app-main .nfc-page-header {
-  min-height: 138px;
-  margin: 0 0 30px;
-  padding:
-    var(--nfc-v55-hero-y)
-    var(--nfc-v55-hero-x)
-    calc(var(--nfc-v55-hero-y) - 2px);
-  align-items: center;
-  gap: 30px;
-  border: 1px solid var(--nfc-v54-line);
-  border-radius: 18px;
-  background:
-    radial-gradient(
-      42rem 18rem at 6% -28%,
-      color-mix(in srgb, var(--nfc-accent) 7.5%, transparent),
-      transparent 66%
-    ),
-    linear-gradient(
-      120deg,
-      color-mix(in srgb, var(--nfc-surface-1) 98%, var(--nfc-accent) 2%),
-      var(--nfc-v54-surface)
-    );
-  box-shadow:
-    0 1px 1px color-mix(in srgb, var(--nfc-text) 2.4%, transparent),
-    0 12px 34px color-mix(in srgb, var(--nfc-text) 4.8%, transparent);
-}
-
 .nfc-app-main .nfc-page-header::after {
   left: var(--nfc-v55-hero-x);
   bottom: -1px;
@@ -86,22 +59,8 @@
   );
 }
 
-.nfc-app-main .nfc-page-header-copy {
-  max-width: min(940px, 72vw);
-}
-
 .nfc-app-main .nfc-page-eyebrow {
   margin-bottom: 10px;
-}
-
-.nfc-app-main .nfc-page-title {
-  line-height: 1.12;
-}
-
-.nfc-app-main .nfc-page-description {
-  max-width: 84ch;
-  margin-top: 11px;
-  line-height: 1.7;
 }
 
 .nfc-app-main .nfc-page-actions {
