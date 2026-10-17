@@ -255,13 +255,6 @@ body,
   box-shadow: none !important;
 }
 
-.nfc-filter-control {
-  gap: 6px;
-  color: var(--nfc-v49-subtle);
-  font-size: 9.5px;
-  font-weight: 620;
-}
-
 .nfc-search-input {
   min-width: 210px;
 }
@@ -564,30 +557,6 @@ body,
   border: 1px solid var(--nfc-v49-line) !important;
   border-radius: var(--nfc-v49-radius-lg) !important;
   background: var(--nfc-v49-surface) !important;
-}
-
-.nfc-description-item {
-  min-height: 72px;
-  padding: 12px 14px;
-  border-color: var(--nfc-v49-line);
-}
-
-.nfc-description-item dt {
-  margin-bottom: 6px;
-  color: var(--nfc-v49-subtle);
-  font-size: 8.5px;
-  font-weight: 680;
-}
-
-.nfc-description-item dd {
-  color: var(--nfc-v49-muted);
-  font-size: 11px;
-}
-
-.nfc-description-item dd.nfc-description-emphasis {
-  color: var(--nfc-v49-text);
-  font-size: 13.5px;
-  font-weight: 650;
 }
 
 /* Organizer ---------------------------------------------------------------- */
