@@ -355,7 +355,7 @@ Preserved independent `z-index: 1` in the historical page-content rule
 and the late v049 page-actions `padding-bottom: 0`. Removed an additional
 **already-empty** metric-grid rule, which is not counted as a declaration.
 All eight original historical `@media` conditions remain, notably
-1199px/767px metric grid columns, as do reduced motion/transparency,
+420px/767px metric grid columns, as do reduced motion/transparency,
 responsive gutters, the unchanged v056 full owner, CSS import order and
 Light/Dark/System theme variables.
 
