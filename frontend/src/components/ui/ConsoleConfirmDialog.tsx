@@ -41,7 +41,8 @@ export const ConsoleConfirmDialog: React.FC<Props> = ({
             returnFocusTarget.current = null;
             // A busy/removed launcher must never be focused after close.
             // If absent, do not override Radix's normal close behavior.
-            if (target?.isConnected && !target.matches(':disabled')) {
+            if (target?.isConnected && !target.matches(':disabled') &&
+                !target.closest('[aria-disabled="true"], [inert], [hidden]')) {
               event.preventDefault();
               target.focus();
             }
