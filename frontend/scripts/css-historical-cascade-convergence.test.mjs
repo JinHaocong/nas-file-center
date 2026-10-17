@@ -57,8 +57,9 @@ const old049 = read('src/styles/v049-workspace.css');
 const old056 = read('src/styles/v056-right-workspace-v2.css');
 const v049 = leafRules(old049);
 const v056 = leafRules(old056);
+const canonicalSelector = selector => selector.replace(/\s+/g, ' ').replace(/\s*,\s*/g, ',').trim();
 const matching = (rules, selector, context = '') => rules.filter(rule =>
-  rule.selector === selector && rule.context === context);
+  canonicalSelector(rule.selector) === canonicalSelector(selector) && rule.context === context);
 
 test('v049 desktop: 5 earlier shadows retired without changing late winners', () => {
   const header = matching(v049, '.nfc-header.nfc-header');
