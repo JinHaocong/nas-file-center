@@ -328,35 +328,9 @@ body,
 
 
 
-.nfc-metric-label {
-  color: var(--nfc-v49-subtle);
-  font-size: 8.5px;
-  font-weight: 710;
-  letter-spacing: 0.065em;
-}
-
-.nfc-metric-value {
-  color: var(--nfc-v49-text);
-  font-size: clamp(23px, 1.9vw, 30px);
-  font-weight: 650;
-  letter-spacing: -0.04em;
-}
-
-.nfc-metric-meta {
-  margin-top: 8px;
-  color: var(--nfc-v49-subtle);
-  font-size: 9.5px;
-}
-
 /* Dashboard ---------------------------------------------------------------- */
 
 .nfc-dashboard-page .nfc-snapshot-note {
-  margin-bottom: 16px;
-  padding: 9px 12px;
-  border: 1px solid var(--nfc-v49-line);
-  border-radius: var(--nfc-v49-radius-md);
-  color: var(--nfc-v49-muted);
-  background: var(--nfc-v49-surface-soft);
   box-shadow: none;
 }
 

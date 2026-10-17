@@ -304,3 +304,34 @@ Only those obsolete, now-empty v049 blocks are removed. Preserve other earlier d
 Extended the registered `css-historical-cascade-convergence.test.mjs` to pin all **16 final v056 property winners** and absence of earlier blocks, plus independent v049 layout and important rail styling. Replaced an old `v049.length > 35000` legacy TypeScript test sentinel with checks for concrete native workspace, keyboard and accessibility/media selectors, so legitimate dead CSS retirement is not penalized by file size. Existing full frontend/backend, Docker, security audit and read-only Chromium 8-width × 4-theme workflows remain mandatory on exact PR HEAD.
 
 This does **not** claim comprehensive historic CSS/theme ownership or final manual visual/a11y verification. Formal high-level progress remains **69/74 (93.2%)**; real NAS and production deployment still require separate approval.
+
+
+## 2026-10-17 — v049 → v056 metric typography and Dashboard snapshot ownership
+
+After #289, reviewed **four exact, unconditional single selectors** in the older
+`v049-workspace.css` against the later imported `v056-right-workspace-v2.css`.
+Retired **17 same-property, equal-specificity, equal-importance declarations**
+already owned by the later rules:
+
+| Earlier v049 selector | Safely retired properties | Unchanged v056 authority |
+| --- | --- | --- |
+| `.nfc-metric-label` | `color`, `font-size`, `font-weight`, `letter-spacing` (4) | muted foreground, 11.5px / 610, zero tracking |
+| `.nfc-metric-value` | `color`, `font-size`, `font-weight`, `letter-spacing` (4) | text foreground, responsive clamp, 660, -0.045em |
+| `.nfc-metric-meta` | `margin-top`, `color`, `font-size` (3) | 9px spacing, subtle foreground, 11.5px |
+| `.nfc-dashboard-page .nfc-snapshot-note` | `margin-bottom`, `padding`, `border`, `border-radius`, `color`, `background` (6) | 20px spacing, 11px 14px padding, zero border, v056 surface/text |
+
+Retained the **independent** historical `.nfc-metric-value { margin-top: 12px; }`
+and snapshot `box-shadow: none`, plus all eight original v049 media
+conditions, responsive v056 metric overrides, import order, theme tokens,
+and other dashboard properties. No shorthand substitutions, selector grouping,
+`!important` or dark/light/system behavior changes were made.
+
+Extended the existing `css-historical-cascade-convergence.test.mjs` regression
+with 17 exact declaration-winner checks, old-declaration absence checks,
+independent-property preservation and media/viewport invariants. Exact-HEAD
+frontend/backend/CI and isolated read-only Chromium validation are still mandatory.
+No NAS data, RBAC, Plan, Worker, API or production deployment behavior is changed.
+
+This is **not** the complete CSS/theme consolidation, manual visual or a11y
+sign-off, real NAS acceptance or production authorization. Formal high-level
+progress remains **69/74 (93.2%)**.
