@@ -9,6 +9,7 @@ export interface DownloadVerificationRun {
   local_root: string;
   result: 'INCOMPLETE' | 'DIFFERENT' | 'STALE' | 'VERIFIED_IDENTICAL' | 'METADATA_IDENTICAL';
   job_status: string;
+  can_delete: boolean;
   checked: number;
   total: number;
   bytes_checked: number;
