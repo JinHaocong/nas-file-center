@@ -193,6 +193,7 @@ try {
               keyboard: node.matches(':focus-visible'),
               outlineStyle: inputStyle.outlineStyle,
               outlineWidth: Number.parseFloat(inputStyle.outlineWidth),
+              transitionDuration: inputStyle.transitionDuration,
               outlineColor: inputStyle.outlineColor,
               inputBackground: inputStyle.backgroundColor,
               portalBackground: portalStyle.backgroundColor,
@@ -202,6 +203,7 @@ try {
           assert.equal(focused.keyboard, true, label + ': focus-visible ' + id);
           assert.equal(focused.disabled, false, label + ': enabled password input ' + id);
           assert.equal(focused.outlineStyle, 'solid', label + ': solid ring ' + id);
+          assert.equal(focused.transitionDuration, '0s', label + ': no password focus transition ' + id);
           assert.ok(focused.outlineWidth >= 3, label + ': ring width ' + id + ' / ' + JSON.stringify(focused));
           for (const surface of [focused.inputBackground, focused.portalBackground]) {
             assert.ok(computedContrastRatio(focused.outlineColor, surface) >= 3,
