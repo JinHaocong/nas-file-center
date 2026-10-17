@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 from app.config import Settings
 from app.main import create_app
 from app.download_verification.models import DownloadVerificationItem, DownloadVerificationRun
-from app.models import WorkJob
+from app.models import WorkJob, utcnow
 
 
 def test_delete_only_terminal_reports_keeps_task_history_and_files(tmp_path):
@@ -84,13 +84,14 @@ def test_orphaned_verification_reports_can_be_deleted_regardless_of_verdict(tmp_
                 session.add(DownloadVerificationRun(
                     work_job_id=None, remote_root="", local_root=str(root),
                     mode="metadata", result=verdict,
+                    finished_at=utcnow() if verdict == "DIFFERENT" else None,
                 ))
             session.commit()
             run_ids = [run.id for run in session.query(DownloadVerificationRun).order_by(
                 DownloadVerificationRun.id).all()]
         summaries = client.get("/api/download-verifications").json()["items"]
         assert len(summaries) == 2
-        assert {s["result"] for s in summaries} == {"INCOMPLETE"}
+        assert {s["result"] for s in summaries} == {"DIFFERENT", "INCOMPLETE"}
         for run_id in run_ids:
             response = client.get(f"/api/download-verifications/{run_id}")
             assert response.status_code == 200
