@@ -18,20 +18,8 @@
 }
 
 /* -------------------------------------------------------------------------- */
-/* Global workspace frame                                                     */
+/* Retained wide-ledger workspace exceptions                                  */
 /* -------------------------------------------------------------------------- */
-
-.nfc-app-main .nfc-page-content {
-  padding:
-    var(--nfc-v55-page-top)
-    var(--nfc-v55-page-gutter)
-    var(--nfc-v55-page-bottom);
-}
-
-.nfc-app-main .nfc-page-content > * {
-  width: min(100%, var(--nfc-v55-content-max));
-  margin-inline: auto;
-}
 
 /* Data-heavy pages may use a slightly wider rail while retaining safe gutters. */
 .nfc-app-main .nfc-page-content > .nfc-quarantine-page,
@@ -192,10 +180,6 @@
 
 .nfc-app-main .nfc-data-panel-header {
   padding-inline: 18px;
-}
-
-.nfc-app-main .nfc-data-panel-body:not(:empty) {
-  min-width: 0;
 }
 
 .nfc-app-main .nfc-root-list {

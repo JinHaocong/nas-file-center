@@ -226,3 +226,20 @@ The now-empty **unconditional** v055 rule blocks are removed; **all scoped respo
 The dedicated `frontend/scripts/css-historical-v055-v056-ownership.test.mjs` enumerates leaf rules with exact at-rule ancestry; pins all 14 v056 winners, prevents retired v055 declarations reappearing, verifies retained responsive and independent properties, and checks existing isolated read-only Chromium matrices remain gated by the PR workflow. It is registered in `npm test`.
 
 **Still open:** exhaustive CSS theme consolidation, final human visual and a11y sign-off, real NAS isolation testing and owner-authorized production deployment. The formal **69/74 (93.2%)** high-level checklist is unchanged.
+
+
+## 2026-10-17 — v055 → v056 workspace frame and panel-body authority (scoped follow-up)
+
+After PR #285, reviewed the same **unconditional, equal-specificity, equal-importance** cascade across `v055-workspace-breathing.css` and the subsequently imported `v056-right-workspace-v2.css`. Retired **4 earlier same-property shadows** that already have unchanged v056 winners:
+
+| Earlier v055 selector | Retired properties | Later v056 owner |
+| --- | --- | --- |
+| `.nfc-app-main .nfc-page-content` | `padding` (1) | `18px clamp(24px, 2.15vw, 42px) var(--nfc-w2-page-bottom)` |
+| `.nfc-app-main .nfc-page-content > *` | `width`, `margin-inline` (2) | `min(100%, var(--nfc-w2-content-max))`, `auto` |
+| `.nfc-app-main .nfc-data-panel-body:not(:empty)` | `min-width` (1) | `0`, alongside later independent overflow/border/radius/surface |
+
+Only those three now-empty unconditional v055 blocks are removed. Its **higher-specificity, grouped wide-ledger width exception** remains intentionally preserved, as do responsive token definitions at 1800/1399/980 and narrow widths, page composition, theme variables and the later v056 content/scroll-padding/panel contracts. No CSS import reorder, `!important` changes, React, API, RBAC, Plan lifecycle, Worker, NAS, or deployment operations.
+
+Extended `css-historical-v055-v056-ownership.test.mjs`, already registered in `npm test`, with exact-context leaf-rule checks for all four unchanged v056 winner values, retired early blocks, independent panel/scroll ownership, dense exceptions, responsive tokens and the existing isolated read-only Chromium gates.
+
+This is **not** full historical CSS/theming consolidation or final visual/accessibility acceptance. Formal high-level acceptance stays **69/74 (93.2%)**.

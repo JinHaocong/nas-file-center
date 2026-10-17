@@ -129,3 +129,60 @@ test('source order and exact-HEAD, read-only Chromium guard remain in CI', () =>
     assert.ok(browser.includes(invariant), 'Browser isolation/viewport lost: ' + invariant);
   }
 });
+
+test('v055 -> v056: page frame and nonempty body have four final owned declarations', () => {
+  const cases = [
+    ['.nfc-app-main .nfc-page-content', {
+      padding: '18px clamp(24px, 2.15vw, 42px) var(--nfc-w2-page-bottom)',
+    }],
+    ['.nfc-app-main .nfc-page-content > *', {
+      width: 'min(100%, var(--nfc-w2-content-max))', 'margin-inline': 'auto',
+    }],
+    ['.nfc-app-main .nfc-data-panel-body:not(:empty)', {
+      'min-width': '0',
+    }],
+  ];
+  let checked = 0;
+  for (const [selector, props] of cases) {
+    assert.equal(matching(early, selector).length, 0,
+      'Earlier unconditional owner must stay retired: ' + selector);
+    const owner = matching(late, selector);
+    assert.equal(owner.length, 1,
+      'Later v056 should retain one exact unconditional owner: ' + selector);
+    for (const [property, value] of Object.entries(props)) {
+      assert.equal(owner[0].declarations.get(property), value,
+        'Final v056 declaration differs: ' + selector + ' ' + property);
+      assert.ok(!value.includes('!important'), 'No importance escalation permitted');
+      checked += 1;
+    }
+  }
+  assert.equal(checked, 4);
+  assert.equal(matching(late, '.nfc-app-main .nfc-page-content')[0]
+    .declarations.get('scroll-padding-bottom'), 'var(--nfc-w2-page-bottom)',
+    'Independent scroll padding must remain');
+  const body = matching(late, '.nfc-app-main .nfc-data-panel-body:not(:empty)')[0];
+  assert.equal(body.declarations.get('overflow'), 'hidden');
+  assert.equal(body.declarations.get('border'), '1px solid var(--nfc-w2-hairline)');
+});
+
+test('v055 independent dense width contract and responsive tokens are not retired', () => {
+  assert.ok(old55.includes('.nfc-app-main .nfc-page-content > .nfc-quarantine-page,'));
+  assert.ok(old55.includes('width: min(100%, var(--nfc-v55-dense-max))'));
+  const vars = matching(early, '.nfc-app-main');
+  assert.ok(vars.some(rule => rule.declarations.get('--nfc-v55-dense-max') === '1660px'));
+  for (const [context, property, value] of [
+    ['@media (min-width: 1800px)', '--nfc-v55-dense-max', '1720px'],
+    ['@media (max-width: 1399px)', '--nfc-v55-page-gutter', 'clamp(24px, 2.4vw, 34px)'],
+    ['@media (max-width: 980px)', '--nfc-v55-page-top', '22px'],
+  ]) {
+    assert.ok(matching(early, '.nfc-app-main', context).some(
+      rule => rule.declarations.get(property) === value),
+    'Responsive variable authority lost: ' + context + ' ' + property);
+  }
+  assert.match(old55, /@media \\(max-width: 767px\\)/);
+  const ci = read('../.github/workflows/ui-v044-validation.yml');
+  for (const script of ['browser-workspace-cascade.mjs',
+    'browser-indexes-ledger-states.mjs', 'browser-media-ledger-states.mjs']) {
+    assert.ok(ci.includes(script), 'Real read-only Chromium regression missing ' + script);
+  }
+});
