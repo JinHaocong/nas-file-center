@@ -30,7 +30,7 @@ The earlier dark premium shell is historical and is no longer the visual target.
 - [x] Advanced Dedupe read-only authority/safety lineage and role-guarded storage action panels (PR #146).
 - [x] Advanced Dedupe Radix decision explanation sheet + native read-only preview summary (PR #147).
 - [x] Shared copyable CodePath: native full-text path, explicit copy, non-HTTPS fallback and responsive focus (PR #148).
-- [ ] Shared dialogs, select, checkbox, forms and destructive confirmation primitives.
+- [x] Shared dialogs, select, checkbox, forms and destructive confirmation primitives — complete live TSX ownership inventory, native/Radix guard audit, and exact-HEAD browser/CI evidence; scoped source-level closure (see `docs/console-v2-shared-primitives-acceptance.md`). Final all-site human accessibility and visual sign-off remain separate.
 - [x] Workflow builder native action bar, read-only status, Radix mode reset / unsaved-exit / rollback confirmations (PR #149).
 - [x] Workflow builder native name/description fields, accessible mode radios, trim validation and dirty guards (PR #150).
 - [x] Workflow StepList native add-step action menu, empty state, topology/RBAC safeguards and keyboard support (PR #151).
@@ -463,3 +463,10 @@ No screenshot-only mock data in runtime.
 - Add a first-in-document `跳转到主要内容` link to `#main-content`, with a programmatically focusable `main tabIndex={-1}`. The link is visually offscreen at rest and appears at the viewport top when focused, with canonical light/dark text/surface, a clear outline, safe-area insets and a 44px hit area; there is no motion effect.
 - Extend the existing 24-route real Chromium read-only Mock matrix on **all 23 authenticated routes × 8 widths × 4 theme cases** (736 interactive keyboard scenarios): press Tab and require a visible focused skip link, press Enter and require real main-landmark focus/hash; also assert computed nav motion is suppressed under `prefers-reduced-motion: reduce`. Baseline screenshots remain 800; no extra screenshot or writable NAS/API fixture action.
 - The high-level accessibility, full visual design/owner approval, historical CSS computed-style consolidation, Organizer C5/Scheduler S5 live NAS acceptance and production approval remain **OPEN**. Do not increment **68/74** solely from these targeted automated keyboard/motion checks. Latest-HEAD CI and post-merge verification are required before completion.
+
+## Final acceptance — shared native control migration closure (2026-10-17)
+
+- Complete source inventory across all **115 live TSX files**, spanning **8** shared native checkbox uses, **4** shared native select uses, **21** shared Radix confirmations, **6** shared sheets, **12** native JSX form owners and **22** direct Radix dialog owners. The new full-inventory `npm test` audit fails closed on legacy imports, unowned native form submits, missing Radix portal/content pairing, lost shared semantics or missing registered browser evidence.
+- Add a shared checkbox stale-event guard for native disabled fieldsets and `aria-disabled`/`inert`/`hidden` parents, without changing feature-owned permission/selection rules or performing any writes.
+- This closes only the previously uncompleted **shared primitives source-migration workstream**. It is not the all-site manual keyboard/screen-reader and dark-theme accessibility sign-off, final human visual review, historical CSS computed-style consolidation, Organizer C5/Scheduler S5 real-NAS validation or owner deployment permission. See `docs/console-v2-shared-primitives-acceptance.md` for exact coverage, exclusions and required gates.
+- **Count effective only after successful exact-HEAD PR CI and postmerge main CI:** **69/74 = 93.2%**, with five high-level items remaining. Earlier 68/74 entries are historical stage-specific facts, not the current tally after this closure.
