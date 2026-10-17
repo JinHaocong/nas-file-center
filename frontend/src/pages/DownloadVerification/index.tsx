@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { DirectoryPicker } from '../../components/DirectoryPicker';
@@ -53,6 +53,9 @@ export const DownloadVerificationPage: React.FC = () => {
   const [page, setPage] = useState(1);
   const [historyPage, setHistoryPage] = useState(1);
   const [deleteTarget, setDeleteTarget] = useState<DownloadVerificationRun | null>(null);
+  const [selectedReportIds, setSelectedReportIds] = useState<number[]>([]);
+  const [bulkDeleteTarget, setBulkDeleteTarget] = useState<number[] | null>(null);
+  const selectAllRef = useRef<HTMLInputElement | null>(null);
   const [error, setError] = useState('');
   const [feedback, setFeedback] = useState('');
 
@@ -92,12 +95,32 @@ export const DownloadVerificationPage: React.FC = () => {
       setError('');
       setFeedback('已删除校验报告 #' + id + '，任务中心记录及 NAS 文件不受影响');
       if (selected === id) setSelected(null);
+      setSelectedReportIds(ids => ids.filter(item => item !== id));
       void qc.invalidateQueries({ queryKey: ['download-verify-runs'] });
       if ((runs.data?.items.length || 0) === 1 && historyPage > 1) setHistoryPage(x => x - 1);
     },
     onError: err => {
       setDeleteTarget(null);
       setError(formatError(err));
+    },
+  });
+  const bulkRemove = useMutation({
+    mutationFn: (ids: number[]) => downloadVerificationApi.bulkDeleteReports(ids),
+    onSuccess: (result, ids) => {
+      setBulkDeleteTarget(null);
+      setSelectedReportIds([]);
+      setError('');
+      setFeedback('已批量删除 ' + result.deleted + ' 份校验报告，NAS 文件和任务中心记录不受影响');
+      if (selected !== null && ids.includes(selected)) setSelected(null);
+      void qc.invalidateQueries({ queryKey: ['download-verify-runs'] });
+      if (totalRuns - result.deleted <= (historyPage - 1) * 50 && historyPage > 1) {
+        setHistoryPage(p => p - 1);
+      }
+    },
+    onError: err => {
+      setBulkDeleteTarget(null);
+      setError(formatError(err));
+      void qc.invalidateQueries({ queryKey: ['download-verify-runs'] });
     },
   });
   const changeSource = (id: number) => {
@@ -108,6 +131,16 @@ export const DownloadVerificationPage: React.FC = () => {
   };
   const totalRuns = runs.data?.total ?? 0;
   const lastHistoryPage = Math.max(1, Math.ceil(totalRuns / 50));
+  const deletableRunIds = (runs.data?.items || []).filter(run => run.can_delete).map(run => run.id);
+  const selectedDeletableIds = selectedReportIds.filter(id => deletableRunIds.includes(id));
+  const allDeletableSelected = deletableRunIds.length > 0 &&
+    selectedDeletableIds.length === deletableRunIds.length;
+  useEffect(() => { setSelectedReportIds([]); }, [historyPage]);
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = selectedDeletableIds.length > 0 && !allDeletableSelected;
+    }
+  });
 
   return (
     <div className="nfc-operations-page nfc-page-layout-workbench nfc-download-verify nfc-download-verify-page">
@@ -202,11 +235,37 @@ export const DownloadVerificationPage: React.FC = () => {
 
       <DataPanel title="校验历史" description="记录各次核对结果；删除报告不会删除 NAS 文件，也不会清除任务中心日志。">
         {runs.isError && <p role="alert" className="nfc-dv-error">读取校验历史失败</p>}
+        <div className="nfc-dv-bulk-toolbar">
+          <span aria-live="polite">当前页可删除 {deletableRunIds.length} 项，已选 {selectedDeletableIds.length} 项</span>
+          <div className="nfc-dv-bulk-actions">
+            <ConsoleButton size="sm" variant="ghost"
+              disabled={selectedDeletableIds.length === 0 || bulkRemove.isPending}
+              onClick={() => setSelectedReportIds([])}>清空选择</ConsoleButton>
+            <ConsoleButton size="sm" variant="danger"
+              leadingIcon={<ConsoleIcon name="trash" size={14} />}
+              disabled={selectedDeletableIds.length === 0 || bulkRemove.isPending || remove.isPending}
+              onClick={() => setBulkDeleteTarget([...selectedDeletableIds])}>
+              批量删除（{selectedDeletableIds.length}）
+            </ConsoleButton>
+          </div>
+        </div>
         <div className="nfc-dv-table-scroll nfc-download-verify-table-scroll">
           <table className="nfc-dv-table nfc-download-verify-table" aria-label="校验历史">
-            <thead><tr><th>任务</th><th>来源 / NAS</th><th>模式</th><th>结果</th><th>进度</th><th>操作</th></tr></thead>
+            <thead><tr><th className="nfc-dv-select-cell">
+              <input ref={selectAllRef} type="checkbox" aria-label="全选当前页可删除的校验报告"
+                checked={allDeletableSelected} disabled={deletableRunIds.length === 0 || bulkRemove.isPending}
+                onChange={event => setSelectedReportIds(event.target.checked ? deletableRunIds : [])} />
+            </th><th>任务</th><th>来源 / NAS</th><th>模式</th><th>结果</th><th>进度</th><th>操作</th></tr></thead>
             <tbody>
               {(runs.data?.items || []).map(run => <tr key={run.id}>
+                <td className="nfc-dv-select-cell">
+                  <input type="checkbox" aria-label={'选择校验报告 #' + run.id}
+                    checked={selectedDeletableIds.includes(run.id)}
+                    disabled={!run.can_delete || bulkRemove.isPending}
+                    onChange={event => setSelectedReportIds(ids => event.target.checked
+                      ? [...ids.filter(id => id !== run.id), run.id]
+                      : ids.filter(id => id !== run.id))} />
+                </td>
                 <td className="nfc-dv-id">#{run.id}</td>
                 <td><div className="nfc-dv-path">
                   <strong>{sourceList.find(source => source.id === run.source_id)?.name
@@ -232,7 +291,7 @@ export const DownloadVerificationPage: React.FC = () => {
                 </div></td>
               </tr>)}
               {!runs.isLoading && runs.data?.items.length === 0 &&
-                <tr><td colSpan={6} className="nfc-dv-no-rows">暂无校验历史，完成第一次核对后将显示在这里。</td></tr>}
+                <tr><td colSpan={7} className="nfc-dv-no-rows">暂无校验历史，完成第一次核对后将显示在这里。</td></tr>}
             </tbody>
           </table>
         </div>
@@ -278,6 +337,12 @@ export const DownloadVerificationPage: React.FC = () => {
         description={<p>仅删除这条校验历史及其文件清单明细。NAS 文件、AList/OpenList 来源、任务中心执行记录均会保留。此操作不可撤销。</p>}
         confirmText="删除报告" busy={remove.isPending}
         onConfirm={() => { if (deleteTarget) remove.mutate(deleteTarget.id); }} />
+      <ConsoleConfirmDialog open={bulkDeleteTarget !== null}
+        onOpenChange={open => { if (!open && !bulkRemove.isPending) setBulkDeleteTarget(null); }}
+        title={'批量删除 ' + (bulkDeleteTarget?.length || 0) + ' 份校验报告？'}
+        description={<p>仅删除选中的校验历史及其明细；NAS 文件、AList/OpenList 来源和任务中心日志均会保留。任何报告仍在运行或已不存在时，将整批取消删除。此操作不可撤销。</p>}
+        confirmText="确认批量删除" danger busy={bulkRemove.isPending}
+        onConfirm={() => { if (bulkDeleteTarget) bulkRemove.mutate(bulkDeleteTarget); }} />
     </div>
   );
 };
