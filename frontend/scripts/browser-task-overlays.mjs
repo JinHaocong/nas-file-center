@@ -170,6 +170,33 @@ try {
         await page.keyboard.press('Escape');
         await sheet.waitFor({ state: 'hidden' });
         await page.waitForFunction(opener => document.activeElement === opener, detailOpener);
+        // Simulate controls becoming semantically unavailable while a nested
+        // confirmation is open. aria-disabled buttons can still receive focus,
+        // so a mounted native button alone is not a safe return target.
+        await page.keyboard.press('Enter');
+        await sheet.waitFor({ state: 'visible' });
+        await deleteLauncher.click();
+        await confirm.waitFor({ state: 'visible' });
+        await deleteLauncher.evaluate(node => node.setAttribute('aria-disabled', 'true'));
+        await confirm.getByRole('button', { name: '取消' }).click();
+        await confirm.waitFor({ state: 'hidden' });
+        assert.equal(await deleteLauncher.evaluate(node => document.activeElement === node),
+          false, 'Nested confirmation must not refocus an aria-disabled launcher');
+        await deleteLauncher.evaluate(node => node.removeAttribute('aria-disabled'));
+        await sheet.getByRole('button', { name: '关闭详情抽屉' }).click();
+        await sheet.waitFor({ state: 'hidden' });
+        await page.waitForFunction(opener => document.activeElement === opener, detailOpener);
+
+        // The sheet opener can independently become aria-disabled during a
+        // refresh. Closing must not re-focus that no-longer-actionable control.
+        await page.keyboard.press('Enter');
+        await sheet.waitFor({ state: 'visible' });
+        await detailLauncher.evaluate(node => node.setAttribute('aria-disabled', 'true'));
+        await sheet.getByRole('button', { name: '关闭详情抽屉' }).click();
+        await sheet.waitFor({ state: 'hidden' });
+        assert.equal(await detailLauncher.evaluate(node => document.activeElement === node),
+          false, 'Sheet must not refocus an aria-disabled launcher');
+        await detailLauncher.evaluate(node => node.removeAttribute('aria-disabled'));
         console.log('[TASK BROWSER NESTED PASS] ' + label);
 
         // Stage 5E-AA: history cleanup is a controlled Dialog with no Trigger.
