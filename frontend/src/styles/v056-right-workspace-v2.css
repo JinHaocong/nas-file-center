@@ -1183,10 +1183,7 @@ body,
   gap: 24px;
 }
 
-/* Dashboard */
-.nfc-app-main .nfc-dashboard-page .nfc-dashboard-rail {
-  gap: 16px;
-}
+/* Dashboard rail spacing is owned by the later 14px rule and responsive variants. */
 
 /* Login */
 .nfc-login-shell {
