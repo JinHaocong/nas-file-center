@@ -470,3 +470,10 @@ No screenshot-only mock data in runtime.
 - Add a shared checkbox stale-event guard for native disabled fieldsets and `aria-disabled`/`inert`/`hidden` parents, without changing feature-owned permission/selection rules or performing any writes.
 - This closes only the previously uncompleted **shared primitives source-migration workstream**. It is not the all-site manual keyboard/screen-reader and dark-theme accessibility sign-off, final human visual review, historical CSS computed-style consolidation, Organizer C5/Scheduler S5 real-NAS validation or owner deployment permission. See `docs/console-v2-shared-primitives-acceptance.md` for exact coverage, exclusions and required gates.
 - **Count effective only after successful exact-HEAD PR CI and postmerge main CI:** **69/74 = 93.2%**, with five high-level items remaining. Earlier 68/74 entries are historical stage-specific facts, not the current tally after this closure.
+
+
+## Final acceptance — 15 historical native CSS shadows retired (2026-10-17)
+
+- Scoped historical CSS convergence removes **15 proven earlier same-selector, same-media-context declarations** in `v049-workspace.css` (14) and `v056-right-workspace-v2.css` (1), keeping the late authoritative style values and independent early properties unchanged. Preserve the previous 8 `v049` media wrappers, full `main.tsx` CSS import order and reduced-motion/transparency overrides.
+- `scripts/css-historical-cascade-convergence.test.mjs` now asserts source CSS rule ownership, retained final values, responsive variants and CI registration of read-only 8-width × 4-theme Chromium visual/status/overlay matrices. See `docs/console-v2-css-ownership.md` for each exact CSS rule, scope and owner.
+- **69/74 remains unchanged.** Historical CSS consolidation is not globally complete just because this tranche is safe; no all-page human visual/accessibility or real-NAS acceptance is claimed.

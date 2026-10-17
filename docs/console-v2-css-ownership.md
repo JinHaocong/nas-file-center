@@ -172,3 +172,21 @@ PR #276's initial full-route Chromium 768px matrix found **3 of 4** Dashboard th
 A second **exact-HEAD** attempt used genuine `Tab → Shift+Tab` navigation back to the scroll region and made the root evidence conclusive: **4 of 4** themes reported `isFocused=true` and `focusVisible=true` but `outlineWidth=0`. This is an actual missing computed keyboard focus ring in the earlier PR #275 table surface, not merely a test false-positive. Source-level `:focus-visible` styling alone had not guaranteed the computed focus border. The isolated owned Console v2 rule is now reinforced as `.nfc-v2-shell .nfc-v2-recent-scans-scroll:focus-visible` with explicit 2px `!important` outline and `transition: none !important`. No other controls, table widths, routes, APIs or security paths are changed.
 
 The real Chrome audit retains **Tab → Shift+Tab → computed `:focus-visible`/outline → ArrowRight** and saves `outlineWidth`, `outlineColor`, theme accent token and computed transition duration in the Manifest. It must fail closed if the ring is still 0px, in any of the four theme cases. Both failed candidate runs must remain failures; only a new exact HEAD with fully successful 16 Checks / 4 Workflows, clean mergeability and stable main base can merge. Overall acceptance remains **68/74**.
+
+
+## 2026-10-17 — historical native CSS shadow retirement: v049 + v056 (scoped tranche)
+
+After the previous Stage 4C and Stage 5E-AA cleanups, an exact-selectors-and-`@media`-ancestry audit of the historical CSS layers found **15 more earlier declarations** with later exact-selector/identical-at-rule-context winners. The earlier declarations are now retired without changing the winning final values, selector specificity, CSS import order, browser behavior, or backend authority:
+
+| Earlier stylesheet / context | Earlier shadow(s) removed | Later owner preserved |
+| --- | --- | --- |
+| `v049-workspace.css` desktop header | 1 old background | Neutral floating header `background: color-mix(... --nfc-nav-surface ... ) !important` |
+| `v049-workspace.css` desktop filter/bulk toolbar | 4 old min-height, padding, border and background | 56px toolbar, 9×12px padding, soft border/panel background with existing `!important`; independent early `box-shadow: none !important` retained |
+| `v049-workspace.css` first `@media (max-width: 767px)` | 9 old page header margin/padding, title/description sizes, metric padding, panel header height/padding, panel description display, Settings body padding | Last `@media (max-width: 767px)` rules continue owning 14px/16px headers, 22px/11px typography, 12×13px metric spacing, 56px/12×14px panel headers, visible panel descriptions, and 14px Settings body |
+| `v056-right-workspace-v2.css` desktop Dashboard rail | 1 early `gap: 16px` block | Later exact-selector `gap: 14px` plus existing 1199px/767px rail breakpoints |
+
+The first mobile `v049` block keeps its independent `min-height: auto` page header, row/action sizing, `9px 10px` filter toolbar, metric border edges and all other live CSS. The historical `@media (max-width: 420px)`, reduced-motion and reduced-transparency contexts remain. The previous browser focus and responsive authority work is unaffected.
+
+`frontend/scripts/css-historical-cascade-convergence.test.mjs` now enumerates *leaf CSS rules with their exact at-rule ancestry*, verifies all **15 early shadow retirements and corresponding unchanged late winners**, checks independent early properties and import order, and asserts that existing exact-HEAD read-only Chromium 8-width × 4-theme workspace/dense/status/overlay evidence remains in CI. The test runs automatically in `npm test`. Real browser evidence is gathered by the existing visual/overlay CI jobs against the candidate HEAD; no NAS storage/API mutation is permitted.
+
+**This is a scoped source consolidation tranche, not the final historical CSS theme-system consolidation or the 8-width human visual acceptance.** The remaining historical CSS/computed-style audit, comprehensive accessibility sign-off, real NAS test and owner deployment authorization remain open. Accordingly the high-level count stays **69/74 (93.2%)** pending those distinct closure conditions.
