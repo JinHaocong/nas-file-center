@@ -246,3 +246,16 @@ test('shared native filter selects have real keyboard labels and opaque computed
     "data.accessibleName !== accessibleName", "data.hasAssociatedLabel",
   ]) assert.ok(browser.includes(phrase), 'Missing real Chrome select focus check: ' + phrase);
 });
+
+
+test('dynamic scan detail waits for real route content without weakening the blank-page gate', () => {
+  assert.ok(browser.includes("item.id === 'scan-detail'"));
+  assert.match(browser, /tab\.waitForFunction\(\(\) => \{/);
+  assert.match(browser, /\(main\?\.innerText \|\| ''\)\.trim\(\)\.length >= 25/);
+  assert.match(browser, /\}, null, \{ timeout: 6000 \}\)/);
+  assert.ok(browser.includes("audit.visibleChars < 25"),
+    'Never remove the existing all-route empty-content rejection');
+  assert.match(browser, /assert\.deepEqual\(failures, \[\]/);
+  assert.ok(browser.includes("if (request.method() !== 'GET')"));
+  assert.ok(browser.includes("url.origin !== BASE"));
+});
