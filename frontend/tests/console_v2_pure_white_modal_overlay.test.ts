@@ -22,6 +22,7 @@ describe('Pure White portal overlay clarity and stacking', () => {
   test('shared Radix scrim dims with neutral gray without blurring a dialog', () => {
     const light = findRules(shell, '.nfc-v2-dialog-overlay');
     const dark = findRules(shell, "[data-theme='dark'] .nfc-v2-dialog-overlay");
+    assert.match(shell, /\\.nfc-change-password-modal\\.nfc-v2-dialog \\.nfc-v2-dialog-form input\\s*\\{\\s*transition:\\s*none !important/);
     assert.equal(light.length, 1);
     assert.equal(dark.length, 1);
     assert.match(light[0], /background:\s*rgba\(32, 32, 31, \.46\)/);
