@@ -186,3 +186,166 @@ test('v055 independent dense width contract and responsive tokens are not retire
     assert.ok(ci.includes(script), 'Real read-only Chromium regression missing ' + script);
   }
 });
+
+test('v055 → v056 operational surfaces: 19 unconditional shadows stay retired', () => {
+  const cases =   [
+    [
+      ".nfc-app-main .nfc-page-actions",
+      "padding",
+      "0",
+      "0 0 1px"
+    ],
+    [
+      ".nfc-app-main .nfc-dashboard-page .nfc-dashboard-command-deck",
+      "gap",
+      "20px",
+      "10px"
+    ],
+    [
+      ".nfc-app-main .nfc-dashboard-page .nfc-dashboard-command-deck .nfc-metric-grid",
+      "border-radius",
+      "16px",
+      "0"
+    ],
+    [
+      ".nfc-app-main .nfc-dashboard-page .nfc-dashboard-command-deck .nfc-metric-card",
+      "min-height",
+      "132px",
+      "96px"
+    ],
+    [
+      ".nfc-app-main .nfc-dashboard-page .nfc-dashboard-command-deck .nfc-metric-card",
+      "padding",
+      "20px 20px 18px",
+      "14px 15px"
+    ],
+    [
+      ".nfc-app-main .nfc-dashboard-page .nfc-dashboard-command-deck .nfc-snapshot-note",
+      "padding",
+      "20px",
+      "10px 12px"
+    ],
+    [
+      ".nfc-app-main .nfc-dashboard-page .nfc-dashboard-command-deck .nfc-snapshot-note",
+      "border-radius",
+      "16px",
+      "var(--nfc-w2-radius-sm)"
+    ],
+    [
+      ".nfc-app-main .nfc-dashboard-page .nfc-dashboard-layout",
+      "gap",
+      "24px",
+      "18px"
+    ],
+    [
+      ".nfc-app-main .nfc-dashboard-page .nfc-dashboard-main-column",
+      "gap",
+      "24px",
+      "18px"
+    ],
+    [
+      ".nfc-app-main .nfc-dashboard-page .nfc-dashboard-rail",
+      "gap",
+      "18px",
+      "14px"
+    ],
+    [
+      ".nfc-app-main .nfc-tasks-page .nfc-worker-status-strip",
+      "margin-bottom",
+      "24px",
+      "28px"
+    ],
+    [
+      ".nfc-app-main .nfc-media-page > .nfc-metric-grid",
+      "margin-bottom",
+      "24px",
+      "28px"
+    ],
+    [
+      ".nfc-app-main .nfc-media-page .nfc-page-alert",
+      "margin",
+      "14px 16px 16px",
+      "12px 14px 14px"
+    ],
+    [
+      ".nfc-app-main .nfc-quarantine-command-center",
+      "padding",
+      "15px 16px",
+      "0"
+    ],
+    [
+      ".nfc-app-main .nfc-quarantine-command-center",
+      "gap",
+      "12px",
+      "0"
+    ],
+    [
+      ".nfc-app-main .nfc-quarantine-command-center .nfc-bulk-action-bar",
+      "padding-top",
+      "12px",
+      "10px"
+    ],
+    [
+      ".nfc-app-main .nfc-quarantine-command-center .nfc-bulk-action-bar",
+      "gap",
+      "9px",
+      "8px"
+    ],
+    [
+      ".nfc-app-main .nfc-plan-detail-page .nfc-plan-action-surface",
+      "margin-bottom",
+      "20px",
+      "24px"
+    ],
+    [
+      ".nfc-app-main .nfc-workflow-editor-layout",
+      "gap",
+      "24px",
+      "28px"
+    ]
+  ];
+  let removed = 0;
+  for (const [selector, property, historicalValue, finalValue] of cases) {
+    const oldBlocks = matching(early, selector);
+    assert.ok(oldBlocks.every(rule => !rule.declarations.has(property)),
+      'Retired early shadow returned: ' + selector + ' / ' + property);
+    const laterOwners = matching(late, selector);
+    const laterValues = laterOwners.flatMap(rule => rule.declarations.has(property)
+      ? [rule.declarations.get(property)] : []);
+    assert.ok(laterValues.length > 0, 'Missing later v056 authority: ' + selector);
+    assert.equal(laterValues.at(-1), finalValue,
+      'v056 final property changed: ' + selector + ' / ' + property);
+    assert.ok(!historicalValue.includes('!important') && !finalValue.includes('!important'),
+      'Exact importance parity required');
+    removed += 1;
+  }
+  assert.equal(removed, 19);
+});
+
+test('v055 operational cleanup preserves independent declarations and mobile context', () => {
+  const keep = [
+    ['.nfc-app-main .nfc-page-actions', '', 'flex', '0 0 auto'],
+    ['.nfc-app-main .nfc-dashboard-page .nfc-dashboard-command-deck',
+      '', 'margin-bottom', '28px'],
+    ['.nfc-app-main .nfc-dashboard-page .nfc-dashboard-main-column',
+      '@media (max-width: 1399px)', 'gap', '20px'],
+    ['.nfc-app-main .nfc-dashboard-page .nfc-dashboard-command-deck .nfc-metric-card',
+      '@media (max-width: 767px)', 'min-height', '106px'],
+    ['.nfc-app-main .nfc-dashboard-page .nfc-dashboard-command-deck .nfc-metric-card',
+      '@media (max-width: 767px)', 'padding', '15px 14px'],
+    ['.nfc-app-main .nfc-dashboard-page .nfc-dashboard-command-deck .nfc-snapshot-note',
+      '@media (max-width: 767px)', 'padding', '14px'],
+    ['.nfc-app-main .nfc-quarantine-command-center',
+      '@media (max-width: 767px)', 'padding', '11px'],
+  ];
+  for (const [selector, context, property, expected] of keep) {
+    assert.ok(matching(early, selector, context).some(
+      rule => rule.declarations.get(property) === expected),
+    'Independent or media-scoped styling removed: ' +
+    selector + ' / ' + context + ' / ' + property);
+  }
+  const entry = read('src/main.tsx');
+  assert.ok(entry.indexOf("import './styles/v055-workspace-breathing.css';") <
+    entry.indexOf("import './styles/v056-right-workspace-v2.css';"));
+  assert.ok(old55.includes('--nfc-v55-dense-max: 1660px;'));
+});
