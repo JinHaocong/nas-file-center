@@ -12,6 +12,7 @@ try {
   execSync('node --test scripts/shared-primitives-acceptance.test.mjs', { stdio: 'inherit' });
   execSync('node --test scripts/css-historical-cascade-convergence.test.mjs', { stdio: 'inherit' });
   execSync('node --test scripts/css-historical-cross-layer-ownership.test.mjs', { stdio: 'inherit' });
+  execSync('node --test scripts/css-historical-v055-v056-ownership.test.mjs', { stdio: 'inherit' });
   execSync('node --test scripts/visual-fixtures-archive.test.mjs', { stdio: 'inherit' });
   execSync('node --test scripts/full-route-visual.test.mjs', { stdio: 'inherit' });
   execSync('python3 ../scripts/tests/test_cleanup_merged_branches.py', { stdio: 'inherit' });
