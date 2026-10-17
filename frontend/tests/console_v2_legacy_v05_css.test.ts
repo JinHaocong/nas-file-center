@@ -17,7 +17,20 @@ describe('Console v2 reviewed v050/v051/v055 legacy CSS retirement', () => {
       const css = read(path);
       assert.doesNotMatch(css, /\.(?:ant-[a-z][\w-]*|anticon\b)/, path);
       assert.match(css, /@media /);
-      assert.ok(css.length > 9000, path + ' native structural rules must remain');
+      // Rule ownership is defined by native structure, not raw byte count:
+      // reviewed v055 declarations are deliberately retired by later v056 CSS.
+      if (path.endsWith('v055-workspace-breathing.css')) {
+        for (const marker of [
+          '--nfc-v55-page-gutter:', '--nfc-v55-dense-max:',
+          '.nfc-app-main .nfc-page-actions {',
+          '.nfc-app-main .nfc-data-panel-header {',
+          '@media (min-width: 1800px)',
+          '@media (max-width: 1399px)',
+          '@media (max-width: 767px)',
+        ]) assert.ok(css.includes(marker), 'Native v055 ownership lost: ' + marker);
+      } else {
+        assert.ok(css.length > 9000, path + ' native structural rules must remain');
+      }
     }
   });
 

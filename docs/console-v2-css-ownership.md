@@ -243,3 +243,26 @@ Only those three now-empty unconditional v055 blocks are removed. Its **higher-s
 Extended `css-historical-v055-v056-ownership.test.mjs`, already registered in `npm test`, with exact-context leaf-rule checks for all four unchanged v056 winner values, retired early blocks, independent panel/scroll ownership, dense exceptions, responsive tokens and the existing isolated read-only Chromium gates.
 
 This is **not** full historical CSS/theming consolidation or final visual/accessibility acceptance. Formal high-level acceptance stays **69/74 (93.2%)**.
+
+
+## 2026-10-17 — v055 → v056 operational surface ownership (scoped batch)
+
+After #286, audited unconditional exact-selector, exact-property shadows across the unchanged `src/main.tsx` v055→v056 import order. Removed **19 former v055 declarations** in 15 selectors, grouped by UI contract:
+
+| Area | Retired v055 properties | Later v056 owner |
+| --- | --- | --- |
+| Page action row | `padding` (1) | `0 0 1px` |
+| Dashboard command deck + metric grid | `gap`, `border-radius` (2) | `10px`, `0` |
+| Dashboard metric cards + snapshot note | `min-height`, `padding` × 2, `border-radius` (4) | `96px`, `14px 15px`, `10px 12px`, `var(--nfc-w2-radius-sm)` |
+| Dashboard layout, main column + rail | `gap` × 3 | `18px`, `18px`, `14px` |
+| Tasks worker strip + Media metrics/alert | `margin-bottom` × 2, `margin` (3) | `28px`, `28px`, `12px 14px 14px` |
+| Quarantine command center + bulk action bar | `padding`, `gap`, `padding-top`, `gap` (4) | `0`, `0`, `10px`, `8px` |
+| Plan action surface + Workflow editor | `margin-bottom`, `gap` (2) | `24px`, `28px` |
+
+The source-rule cleanup **only removes earlier equal-specificity, equal-importance, unconditional declarations already superseded by later unconditional v056 declarations**. Preserve every other v055 declaration, the dashboard command-deck 28px margin-bottom (not removed despite later v056 `margin` shorthand), the page-actions flex contract, scoped responsive overrides (1399px, 767px and narrower), custom theme/dense-width variables, v056 final declarations, and all frontend/backend security and NAS behavior. No shorthand/longhand equivalence is assumed.
+
+Extended the registered `css-historical-v055-v056-ownership.test.mjs` to assert **19 retired exact-property shadows**, each unchanged last v056 winning value, responsive and independent v055 controls, and import order. Exact-HEAD PR validation still executes `npm test` and the isolated, read-only Chromium 8-width × 4-theme visual interaction gates.
+
+This is **not** comprehensive historical CSS/theme consolidation or final human visual/accessibility acceptance. Formal high-level acceptance stays **69/74 (93.2%)**; no NAS mutation or production deployment.
+
+The existing TypeScript `console_v2_legacy_v05_css.test.ts` historical-retirement inventory was also made maintenance-safe: its arbitrary `v055.length > 9000` byte-count requirement is replaced with checks for **actual native v055 semantic owners and 1800/1399/767px responsive contexts**. Unchanged v050/v051 checks and comprehensive dedicated v055→v056 leaf-declaration checks continue to run. This ensures future proven deletion of dead v055 declarations does not spuriously fail a test that was intended to guard active behavior.
