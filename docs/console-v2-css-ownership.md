@@ -369,3 +369,51 @@ This scoped CSS cleanup **does not complete** historical CSS/theme migration
 or final visual, accessibility or real-NAS acceptance. Formal status remains
 **69/74 (93.2%)** pending independent comprehensive closure and explicit
 deployment authorization.
+
+
+## 2026-10-17 — v049 → v054 header identity and overlay/code owners
+
+After PR #291, audited **14 exactly shadowed, unconditional, normal-importance
+v049 declarations** against later-imported v054 declarations with matching
+single selectors, specificity, context, and CSS property:
+
+| Historical v049 rule | Declarations retired | Later v054 owner |
+| --- | --- | --- |
+| `.nfc-header-workspace-kicker` | `color`, `font-size`, `letter-spacing` (3) | 8.5px, subtle canonical text, 0.14em |
+| `.nfc-header-workspace-name` | `font-size`, `font-weight`, `letter-spacing` (3) | 12px, 680, -0.01em |
+| `.nfc-code-block` | `padding`, `border-radius`, `color`, `background`, `font-size` (5) | 12px 13px, 10px radius, canonical muted code surface and 10px |
+| `.nfc-overlay-section-header` | `min-height`, `padding`, `background` (3) | 52px height, 11px 13px, muted section surface |
+
+Retain all independent historical declarations: workspace kicker `font-weight:
+730`, workspace name `margin-top` and `color`, code `border-color`,
+and overlay `border-bottom-color` (including its separate earlier empty
+block). Do not modify shorthand/longhand relationships, grouped selectors,
+CSS import order, themes, reduced-motion/transparency, or responsive media
+overrides. In particular, `v054` keeps its **420px code padding/font-size**
+and **767px overlay padding** rules.
+
+Extend the registered CSS cascade regression with exact property owner
+assertions, explicit independent-retention checks, breakpoint contracts,
+and canonical import-order enforcement. The existing v048→v049
+cross-layer test also keeps its **16 original retirement checks** while
+recognizing the six Header properties now owned by v054; it continues to
+pin all remaining independent v049 declarations. The Stage 5E-D Media /
+Quarantine test similarly retains its original **12-declaration historical
+coverage** while moving three overlay properties' final authority from v049
+to v054 and keeping the independent v049 divider unchanged. Existing read-only Chromium eight
+width / four-theme CI matrix, frontend/backend/Docker validation and
+review gate remain mandatory for this exact PR HEAD.
+
+This is **a partial CSS consolidation only**, not complete historical/theme
+closure, manual final visual/a11y acceptance, real NAS verification or
+production approval. Formal progress remains **69/74 (93.2%)**.
+
+**PR #292 CI-specific read-only browser stabilization:** The initial exact-HEAD
+430px visual job reported one near-empty `/scans/1` route in `dark-light`
+mode, with no reported route redirect or React exception. The fixture
+previously waited only for shell insertion and 160ms after navigation.
+The dynamic scan-detail case now waits up to six seconds for real main
+content (at least 25 text characters), failing closed on timeout. The
+existing whole-route blank-page threshold, every width/theme screenshot,
+no-NAS-write assertions and error/overflow checks are unchanged. This
+does **not** waive the full restarted PR CI or claim manual visual sign-off.

@@ -54,8 +54,10 @@ function leafRules(css) {
 
 const read = filename => readFileSync(resolve(process.cwd(), filename), 'utf8');
 const old049 = read('src/styles/v049-workspace.css');
+const old054 = read('src/styles/v054-premium-system.css');
 const old056 = read('src/styles/v056-right-workspace-v2.css');
 const v049 = leafRules(old049);
+const v054 = leafRules(old054);
 const v056 = leafRules(old056);
 const canonicalSelector = selector => selector.replace(/\s+/g, ' ').replace(/\s*,\s*/g, ',').trim();
 const matching = (rules, selector, context = '') => rules.filter(rule =>
@@ -465,6 +467,75 @@ test('v049 workspace frame, action and metric-grid: 16 exact v056 shadows retire
   const old = entry.indexOf("import './styles/v049-workspace.css';");
   const late = entry.indexOf("import './styles/v056-right-workspace-v2.css';");
   assert.ok(old >= 0 && old < late, 'v056 continues owning final frame and metric geometry');
+  assert.match(old049, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(old049, /@media \(prefers-reduced-transparency: reduce\)/);
+});
+
+
+test('v049-v054: 14 shadowed header identity, code and overlay properties stay v054-owned', () => {
+  // Only unconditional single selectors, matching specificity and normal
+  // importance. No media flattening or shorthand/longhand equivalence.
+  const cases = [
+    ['.nfc-header-workspace-kicker', {
+      color: 'var(--nfc-text-subtle)',
+      'font-size': '8.5px',
+      'letter-spacing': '0.14em',
+    }, {'font-weight': '730'}],
+    ['.nfc-header-workspace-name', {
+      'font-size': '12px',
+      'font-weight': '680',
+      'letter-spacing': '-0.01em',
+    }, {'margin-top': '3px', color: 'var(--nfc-v49-text)'}],
+    ['.nfc-code-block', {
+      padding: '12px 13px',
+      'border-radius': '10px',
+      color: 'var(--nfc-text-muted)',
+      background: 'color-mix(in srgb, var(--nfc-surface-2) 62%, var(--nfc-surface-1))',
+      'font-size': '10px',
+    }, {'border-color': 'var(--nfc-v49-line)'}],
+    ['.nfc-overlay-section-header', {
+      'min-height': '52px',
+      padding: '11px 13px',
+      background: 'color-mix(in srgb, var(--nfc-surface-2) 48%, transparent)',
+    }, {'border-bottom-color': 'var(--nfc-border-soft)'}],
+  ];
+  let retired = 0;
+  for (const [selector, owners, independent] of cases) {
+    const early = matching(v049, selector);
+    const late = matching(v054, selector);
+    assert.equal(late.length, 1, selector + ' needs one unconditional v054 winner');
+    assert.equal(early.length, selector === '.nfc-overlay-section-header' ? 2 : 1,
+      'Retain existing historical rule identities: ' + selector);
+    const retained = early.at(-1);
+    for (const [name, expected] of Object.entries(owners)) {
+      assert.ok(early.every(rule => !rule.declarations.has(name)),
+        selector + ' obsolete v049 declaration returned: ' + name);
+      assert.equal(late[0].declarations.get(name), expected,
+        selector + ' v054 owner drifted: ' + name);
+      assert.ok(!expected.includes('!important'), 'No cascade importance escalation');
+      retired++;
+    }
+    for (const [name, value] of Object.entries(independent)) {
+      assert.equal(retained.declarations.get(name), value,
+        'Preserve independent v049 contract: ' + selector + ' / ' + name);
+    }
+  }
+  assert.equal(retired, 14);
+  assert.equal(matching(v054, '.nfc-code-block', '@media (max-width: 420px)')[0]
+    .declarations.get('font-size'), '9.5px',
+    'v054 420px code typography must survive');
+  assert.equal(matching(v054, '.nfc-code-block', '@media (max-width: 420px)')[0]
+    .declarations.get('padding'), '10px',
+    'v054 420px code padding must survive');
+  assert.equal(matching(v054, '.nfc-overlay-section-header', '@media (max-width: 767px)')[0]
+    .declarations.get('padding'), '10px 11px',
+    'v054 mobile overlay header padding must survive');
+  assert.equal([...old049.matchAll(/@media\s*\([^)]*\)/g)].length, 8);
+  const entry = read('src/main.tsx');
+  const oldPosition = entry.indexOf("import './styles/v049-workspace.css';");
+  const laterPosition = entry.indexOf("import './styles/v054-premium-system.css';");
+  assert.ok(oldPosition >= 0 && oldPosition < laterPosition,
+    'v054 must remain later in CSS import cascade');
   assert.match(old049, /@media \(prefers-reduced-motion: reduce\)/);
   assert.match(old049, /@media \(prefers-reduced-transparency: reduce\)/);
 });

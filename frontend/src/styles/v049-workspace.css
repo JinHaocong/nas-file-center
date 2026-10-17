@@ -97,18 +97,12 @@ body,
 }
 
 .nfc-header-workspace-kicker {
-  color: var(--nfc-v49-subtle);
-  font-size: 8px;
   font-weight: 730;
-  letter-spacing: 0.14em;
 }
 
 .nfc-header-workspace-name {
   margin-top: 3px;
   color: var(--nfc-v49-text);
-  font-size: 11px;
-  font-weight: 650;
-  letter-spacing: -0.01em;
 }
 
 .nfc-header-status {
@@ -688,12 +682,7 @@ body,
 }
 
 .nfc-code-block {
-  padding: 10px 11px;
   border-color: var(--nfc-v49-line);
-  border-radius: var(--nfc-v49-radius-md);
-  color: var(--nfc-v49-muted);
-  background: var(--nfc-v49-surface-soft);
-  font-size: 10.5px;
 }
 
 /* Directory picker --------------------------------------------------------- */
@@ -1217,10 +1206,7 @@ body,
 }
 
 .nfc-overlay-section-header {
-  min-height: 54px;
-  padding: 11px 13px;
   border-bottom-color: var(--nfc-border-soft);
-  background: var(--nfc-ui-panel-bg-soft);
 }
 
 /* Directory picker was one of the most visibly cramped overlays. */
