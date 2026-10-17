@@ -202,7 +202,7 @@ try {
           assert.equal(focused.keyboard, true, label + ': focus-visible ' + id);
           assert.equal(focused.disabled, false, label + ': enabled password input ' + id);
           assert.equal(focused.outlineStyle, 'solid', label + ': solid ring ' + id);
-          assert.ok(focused.outlineWidth >= 3, label + ': ring width ' + id);
+          assert.ok(focused.outlineWidth >= 3, label + ': ring width ' + id + ' / ' + JSON.stringify(focused));
           for (const surface of [focused.inputBackground, focused.portalBackground]) {
             assert.ok(computedContrastRatio(focused.outlineColor, surface) >= 3,
               label + ': focus contrast below 3:1 on ' + id + ' / ' + surface);
