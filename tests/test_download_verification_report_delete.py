@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 from app.config import Settings
 from app.main import create_app
 from app.download_verification.models import DownloadVerificationItem, DownloadVerificationRun
-from app.models import WorkJob
+from app.models import WorkJob, utcnow
 
 
 def test_delete_only_terminal_reports_keeps_task_history_and_files(tmp_path):
@@ -43,14 +43,16 @@ def test_delete_only_terminal_reports_keeps_task_history_and_files(tmp_path):
             session.commit()
         url = f"/api/download-verifications/{run_id}"
         assert client.delete(url).status_code == 409
-        assert client.get(url).status_code == 200
+        assert client.get(url).json()["can_delete"] is False
         with session_factory() as session:
             session.get(WorkJob, job_id).status = "paused"
             session.commit()
+        assert client.get(url).json()["can_delete"] is False
         assert client.delete(url).status_code == 409
         with session_factory() as session:
             session.get(WorkJob, job_id).status = "completed"
             session.commit()
+        assert client.get(url).json()["can_delete"] is True
         assert client.delete(url).status_code == 204
         assert client.get(url).status_code == 404
         assert client.get(url + "/items").status_code == 404
@@ -60,3 +62,40 @@ def test_delete_only_terminal_reports_keeps_task_history_and_files(tmp_path):
             assert session.get(DownloadVerificationRun, run_id) is None
             assert session.query(DownloadVerificationItem).filter_by(run_id=run_id).count() == 0
         assert file.read_bytes() == b"original"
+
+
+def test_orphaned_verification_reports_can_be_deleted_regardless_of_verdict(tmp_path):
+    root = tmp_path / "data"
+    root.mkdir()
+    settings = Settings(
+        _env_file=None, CONFIG_DIR=str(tmp_path / "config"), DATA_MOUNT=str(root),
+        ALLOWED_ROOTS=str(root), QUARANTINE_ROOT=str(root / ".trash"),
+        ALLOW_MUTATION=False, ALLOW_DELETE=False,
+        INITIAL_ADMIN_USERNAME="admin", INITIAL_ADMIN_PASSWORD="test-password-123",
+    )
+    with TestClient(create_app(settings)) as client:
+        client.headers.update({"Origin": "http://testserver"})
+        assert client.post("/api/auth/login", json={
+            "username": "admin", "password": "test-password-123",
+        }).status_code == 200
+        session_factory = client.app.state.service.SessionLocal
+        with session_factory() as session:
+            for verdict in ("DIFFERENT", "INCOMPLETE"):
+                session.add(DownloadVerificationRun(
+                    work_job_id=None, remote_root="", local_root=str(root),
+                    mode="metadata", result=verdict,
+                    finished_at=utcnow() if verdict == "DIFFERENT" else None,
+                ))
+            session.commit()
+            run_ids = [run.id for run in session.query(DownloadVerificationRun).order_by(
+                DownloadVerificationRun.id).all()]
+        summaries = client.get("/api/download-verifications").json()["items"]
+        assert len(summaries) == 2
+        assert {s["result"] for s in summaries} == {"DIFFERENT", "INCOMPLETE"}
+        for run_id in run_ids:
+            response = client.get(f"/api/download-verifications/{run_id}")
+            assert response.status_code == 200
+            assert response.json()["job_status"] == "unknown"
+            assert response.json()["can_delete"] is True
+            assert client.delete(f"/api/download-verifications/{run_id}").status_code == 204
+        assert client.get("/api/download-verifications").json()["total"] == 0

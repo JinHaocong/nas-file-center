@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator
 from sqlalchemy import delete, func, select, text
 
 from app.auth.dependencies import require_admin_user
@@ -27,6 +27,23 @@ class NewVerification(BaseModel):
     mode: str = Field(default="metadata", pattern="^(metadata|strict_sha256)$")
 
 
+class BulkReportDelete(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    run_ids: list[StrictInt] = Field(min_length=1, max_length=50)
+
+    @field_validator("run_ids")
+    @classmethod
+    def validate_ids(cls, run_ids: list[int]) -> list[int]:
+        if any(run_id <= 0 for run_id in run_ids) or len(run_ids) != len(set(run_ids)):
+            raise ValueError("run_ids must be unique positive integers")
+        return run_ids
+
+
+def _report_deletable(job: WorkJob | None) -> bool:
+    """Match the deletion guard for terminal or detached WorkJobs."""
+    return job is None or job.status in TERMINAL_STATES
+
+
 def _summary(run: DownloadVerificationRun, job: WorkJob | None) -> dict:
     status = job.status if job else "unknown"
     # Never surface an identical verdict while the WorkJob is unfinished.
@@ -35,6 +52,7 @@ def _summary(run: DownloadVerificationRun, job: WorkJob | None) -> dict:
         "id": run.id, "work_job_id": run.work_job_id, "remote_root": run.remote_root,
         "source_id": run.source_id, "mode": run.mode,
         "local_root": run.local_root, "result": result, "job_status": status,
+        "can_delete": _report_deletable(job),
         "checked": run.checked, "total": run.total, "bytes_checked": run.bytes_checked,
         "error_code": run.error_code, "created_at": run.created_at.isoformat(),
         "finished_at": run.finished_at.isoformat() if run.finished_at else None,
@@ -136,6 +154,32 @@ def list_verification_items(request: Request, run_id: int, page: int = 1,
         }
 
 
+@router.post("/bulk-delete")
+def bulk_delete_verification_reports(request: Request, payload: BulkReportDelete):
+    """Atomically remove only selected deletable reports and their item rows.
+
+    Validate every selected run under the same SQLite write lock used by the worker
+    before deleting anything; an active or missing report aborts the whole batch.
+    Source files and WorkJob / TaskEvent audit history remain untouched.
+    """
+    with request.app.state.service.SessionLocal() as session:
+        session.execute(text("BEGIN IMMEDIATE"))
+        runs = session.scalars(select(DownloadVerificationRun).where(
+            DownloadVerificationRun.id.in_(payload.run_ids))).all()
+        if len(runs) != len(payload.run_ids):
+            raise HTTPException(404, "VERIFICATION_NOT_FOUND")
+        if any(not _report_deletable(session.get(WorkJob, run.work_job_id)
+                                    if run.work_job_id is not None else None)
+               for run in runs):
+            raise HTTPException(409, "VERIFICATION_JOB_NOT_TERMINAL")
+        session.execute(delete(DownloadVerificationItem).where(
+            DownloadVerificationItem.run_id.in_(payload.run_ids)))
+        session.execute(delete(DownloadVerificationRun).where(
+            DownloadVerificationRun.id.in_(payload.run_ids)))
+        session.commit()
+    return {"deleted": len(payload.run_ids)}
+
+
 @router.delete("/{run_id}", status_code=204)
 def delete_verification_report(request: Request, run_id: int):
     """Remove one completed report and its rows, not the NAS data or WorkJob audit trail.
@@ -149,7 +193,7 @@ def delete_verification_report(request: Request, run_id: int):
         if run is None:
             raise HTTPException(404, "VERIFICATION_NOT_FOUND")
         job = session.get(WorkJob, run.work_job_id) if run.work_job_id is not None else None
-        if job is not None and job.status not in TERMINAL_STATES:
+        if not _report_deletable(job):
             raise HTTPException(409, "VERIFICATION_JOB_NOT_TERMINAL")
         session.execute(delete(DownloadVerificationItem).where(
             DownloadVerificationItem.run_id == run_id))
