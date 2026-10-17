@@ -27,6 +27,11 @@ class NewVerification(BaseModel):
     mode: str = Field(default="metadata", pattern="^(metadata|strict_sha256)$")
 
 
+def _report_deletable(job: WorkJob | None) -> bool:
+    """Match the deletion guard for terminal or detached WorkJobs."""
+    return job is None or job.status in TERMINAL_STATES
+
+
 def _summary(run: DownloadVerificationRun, job: WorkJob | None) -> dict:
     status = job.status if job else "unknown"
     # Never surface an identical verdict while the WorkJob is unfinished.
@@ -35,6 +40,7 @@ def _summary(run: DownloadVerificationRun, job: WorkJob | None) -> dict:
         "id": run.id, "work_job_id": run.work_job_id, "remote_root": run.remote_root,
         "source_id": run.source_id, "mode": run.mode,
         "local_root": run.local_root, "result": result, "job_status": status,
+        "can_delete": _report_deletable(job),
         "checked": run.checked, "total": run.total, "bytes_checked": run.bytes_checked,
         "error_code": run.error_code, "created_at": run.created_at.isoformat(),
         "finished_at": run.finished_at.isoformat() if run.finished_at else None,
@@ -149,7 +155,7 @@ def delete_verification_report(request: Request, run_id: int):
         if run is None:
             raise HTTPException(404, "VERIFICATION_NOT_FOUND")
         job = session.get(WorkJob, run.work_job_id) if run.work_job_id is not None else None
-        if job is not None and job.status not in TERMINAL_STATES:
+        if not _report_deletable(job):
             raise HTTPException(409, "VERIFICATION_JOB_NOT_TERMINAL")
         session.execute(delete(DownloadVerificationItem).where(
             DownloadVerificationItem.run_id == run_id))
