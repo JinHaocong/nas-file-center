@@ -8,13 +8,13 @@ const shell = read('src/styles/console-v2.css');
 
 const findRules = (source: string, selector: string): string[] => {
   const escaped = selector.replace(/[.*+?^$\x7b\x7d()|[\]\\]/g, '\\$&');
-  return [...source.matchAll(new RegExp('(?:^|\\n)\\s*' + escaped + '\\s*\\{([^}]*)\\}', 'g'))].map(match => match[1]);
+  return [...source.matchAll(new RegExp('(?:^|\\n)\s*' + escaped + '\s*\\{([^}]*)\\}', 'g'))].map(match => match[1]);
 };
 
 const expectZ = (source: string, selector: string, level: number) => {
   const rules = findRules(source, selector);
   assert.ok(rules.length > 0, 'Missing ' + selector);
-  assert.ok(rules.some(rule => new RegExp('z-index:\\s*' + level + '\\b').test(rule)),
+  assert.ok(rules.some(rule => new RegExp('z-index:\s*' + level + '\\b').test(rule)),
     selector + ' must have z-index ' + level);
 };
 
@@ -66,9 +66,9 @@ describe('Pure White portal overlay clarity and stacking', () => {
     const dark = findRules(shell, "[data-theme='dark'] .nfc-v2-dialog-form input:focus-visible");
     assert.equal(light.length, 1);
     assert.equal(dark.length, 1);
-    assert.match(light[0], /outline:\\s*3px solid #252525/);
-    assert.match(light[0], /outline-offset:\\s*2px/);
-    assert.match(dark[0], /outline-color:\\s*#e9e9e6/);
+    assert.match(light[0], /outline:\s*3px solid #252525/);
+    assert.match(light[0], /outline-offset:\s*2px/);
+    assert.match(dark[0], /outline-color:\s*#e9e9e6/);
     assert.doesNotMatch(light[0] + dark[0], /color-mix|transparent|#286ff1/);
     const dialog = read('src/components/ChangePasswordModal.tsx');
     assert.ok(dialog.includes('className="nfc-v2-dialog-form nfc-security-form"'));
