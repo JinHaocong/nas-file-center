@@ -335,3 +335,37 @@ No NAS data, RBAC, Plan, Worker, API or production deployment behavior is change
 This is **not** the complete CSS/theme consolidation, manual visual or a11y
 sign-off, real NAS acceptance or production authorization. Formal high-level
 progress remains **69/74 (93.2%)**.
+
+
+## 2026-10-17 — v049 → v056 workspace frame, page actions and metric grid
+
+Following PR #290, retired **16 unconditional exact-property v049 declarations**
+already superseded by the later imported **v056**, under identical selector,
+at-rule context, CSS importance and cascade specificity:
+
+| Earlier v049 selector | Retired declarations | Existing later v056 authority |
+| --- | --- | --- |
+| `.nfc-page-content` | `position`, `width`, `min-width`, `padding` (4) | relative, 100%, zero min-width, theme-aware outer gutters |
+| `.nfc-page-content > *` | `width`, `margin-inline` (2) | constrained content max and automatic horizontal margins |
+| `.nfc-header-action-label` | `color`, `font-size` (2) | muted foreground, 12px |
+| `.nfc-page-actions` | `align-self`, `gap` (2) | end-aligned actions, 8px gap |
+| `.nfc-metric-grid` | `overflow`, `gap`, `border`, `border-radius`, `background`, `box-shadow` (6) | overflow visible, 12px gap, flat transparent surface |
+
+Preserved independent `z-index: 1` in the historical page-content rule
+and the late v049 page-actions `padding-bottom: 0`. Removed an additional
+**already-empty** metric-grid rule, which is not counted as a declaration.
+All eight original historical `@media` conditions remain, notably
+1199px/767px metric grid columns, as do reduced motion/transparency,
+responsive gutters, the unchanged v056 full owner, CSS import order and
+Light/Dark/System theme variables.
+
+Extended the existing `frontend/scripts/css-historical-cascade-convergence.test.mjs`
+with an exact 16-property final-winner matrix, deleted-shadow assertions,
+independent-property retention, media-ancestry and entrypoint-order checks.
+All 8-width × 4-theme, local fixture-only Chromium CI matrices remain
+mandatory; no real NAS or production operation is involved.
+
+This scoped CSS cleanup **does not complete** historical CSS/theme migration
+or final visual, accessibility or real-NAS acceptance. Formal status remains
+**69/74 (93.2%)** pending independent comprehensive closure and explicit
+deployment authorization.
