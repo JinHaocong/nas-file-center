@@ -285,3 +285,22 @@ Those five now-empty **unconditional v049 blocks** are removed, with unchanged i
 Added exact-context, full-property safeguards to the already registered `css-historical-cascade-convergence.test.mjs`: old selectors must remain retired, the 16 specific v056 declarations remain pinned, and existing important description frame and responsive rules persist. Existing real read-only Chromium 8-width × 4-theme checks are unchanged.
 
 **Scope limitation:** additional conservative cross-layer cleanup, not completion of all historical CSS/theme ownership. Final human visual/a11y acceptance and isolated real NAS/deployment approval remain outstanding. Formal progress remains **69/74 (93.2%)**.
+
+
+## 2026-10-17 — v049 → v056 dashboard quick actions + summary row (scoped batch)
+
+After #288, retired **16 unconditional older v049 declarations** in five selectors whose exactly matching v056 declarations already win by later import order, equal selector specificity, and identical importance:
+
+| Retired early selector | Retired properties | v056 final owner |
+| --- | --- | --- |
+| `.nfc-dashboard-page .nfc-quick-action` | `min-height`, `padding`, `grid-template-columns`, `border-bottom-color` (4) | 66px, 11px 14px, 32px grid icon, v056 hairline |
+| `.nfc-dashboard-page .nfc-quick-action-icon` | `width`, `height`, `border`, `border-radius`, `color`, `background` (6) | 32 × 32px, zero border, 9px, v056 muted foreground/strong surface |
+| `.nfc-dashboard-page .nfc-quick-action-copy strong` | `font-size` (1) | 12.75px |
+| `.nfc-dashboard-page .nfc-quick-action-copy span` | `font-size` (1) | 11.5px |
+| `.nfc-dashboard-page .nfc-summary-row` | `min-height`, `padding-inline`, `border-bottom-color`, `font-size` (4) | 48px, 14px, v056 hairline, 12.5px |
+
+Only those obsolete, now-empty v049 blocks are removed. Preserve other earlier dashboard layout/rail properties, especially the important rail surface contract, responsive and reduced-motion/transparency overrides, Pure White light/dark/system tokens and unchanged v056 winners/import order. No backend, API, RBAC, NAS or deployment mutation.
+
+Extended the registered `css-historical-cascade-convergence.test.mjs` to pin all **16 final v056 property winners** and absence of earlier blocks, plus independent v049 layout and important rail styling. Replaced an old `v049.length > 35000` legacy TypeScript test sentinel with checks for concrete native workspace, keyboard and accessibility/media selectors, so legitimate dead CSS retirement is not penalized by file size. Existing full frontend/backend, Docker, security audit and read-only Chromium 8-width × 4-theme workflows remain mandatory on exact PR HEAD.
+
+This does **not** claim comprehensive historic CSS/theme ownership or final manual visual/a11y verification. Formal high-level progress remains **69/74 (93.2%)**; real NAS and production deployment still require separate approval.
