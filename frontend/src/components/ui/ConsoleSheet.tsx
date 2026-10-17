@@ -37,7 +37,8 @@ export const ConsoleSheet: React.FC<Props> = ({
             returnFocusTarget.current = null;
             // Lists can refresh or remove the opener; never focus detached or
             // disabled elements. Fall back to Radix's normal close semantics.
-            if (target?.isConnected && !target.matches(':disabled')) {
+            if (target?.isConnected && !target.matches(':disabled') &&
+                !target.closest('[aria-disabled="true"], [inert], [hidden]')) {
               event.preventDefault();
               target.focus();
             }

@@ -23,6 +23,7 @@ describe('Pure White Stage 5E-T controlled confirm focus return', () => {
       'const target = returnFocusTarget.current;',
       'returnFocusTarget.current = null;',
       "target?.isConnected && !target.matches(':disabled')",
+      '!target.closest(\'[aria-disabled="true"], [inert], [hidden]\')',
       'event.preventDefault();',
       'target.focus();',
       'if (!busy) onOpenChange(next);',

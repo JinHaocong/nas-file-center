@@ -143,6 +143,8 @@ try {
         const sheet = page.locator('.nfc-v2-sheet.nfc-overlay-drawer');
         await sheet.waitFor({ state: 'visible' });
         const deleteLauncher = sheet.getByRole('button', { name: '删除任务 #42' });
+        const deleteOpener = await deleteLauncher.elementHandle();
+        assert.ok(deleteOpener, 'Nested confirmation needs its original DOM launcher');
         await deleteLauncher.click();
         const confirm = page.locator('.nfc-v2-confirm-dialog');
         await confirm.waitFor({ state: 'visible' });
@@ -170,6 +172,33 @@ try {
         await page.keyboard.press('Escape');
         await sheet.waitFor({ state: 'hidden' });
         await page.waitForFunction(opener => document.activeElement === opener, detailOpener);
+        // Simulate controls becoming semantically unavailable while a nested
+        // confirmation is open. aria-disabled buttons can still receive focus,
+        // so a mounted native button alone is not a safe return target.
+        await page.keyboard.press('Enter');
+        await sheet.waitFor({ state: 'visible' });
+        await deleteLauncher.click();
+        await confirm.waitFor({ state: 'visible' });
+        await page.evaluate(node => node.setAttribute('aria-disabled', 'true'), deleteOpener);
+        await confirm.getByRole('button', { name: '取消' }).click();
+        await confirm.waitFor({ state: 'hidden' });
+        assert.equal(await page.evaluate(node => document.activeElement === node, deleteOpener),
+          false, 'Nested confirmation must not refocus an aria-disabled launcher');
+        await page.evaluate(node => node.removeAttribute('aria-disabled'), deleteOpener);
+        await sheet.getByRole('button', { name: '关闭详情抽屉' }).click();
+        await sheet.waitFor({ state: 'hidden' });
+        await page.waitForFunction(opener => document.activeElement === opener, detailOpener);
+
+        // The sheet opener can independently become aria-disabled during a
+        // refresh. Closing must not re-focus that no-longer-actionable control.
+        await page.keyboard.press('Enter');
+        await sheet.waitFor({ state: 'visible' });
+        await page.evaluate(node => node.setAttribute('aria-disabled', 'true'), detailOpener);
+        await sheet.getByRole('button', { name: '关闭详情抽屉' }).click();
+        await sheet.waitFor({ state: 'hidden' });
+        assert.equal(await page.evaluate(node => document.activeElement === node, detailOpener),
+          false, 'Sheet must not refocus an aria-disabled launcher');
+        await page.evaluate(node => node.removeAttribute('aria-disabled'), detailOpener);
         console.log('[TASK BROWSER NESTED PASS] ' + label);
 
         // Stage 5E-AA: history cleanup is a controlled Dialog with no Trigger.

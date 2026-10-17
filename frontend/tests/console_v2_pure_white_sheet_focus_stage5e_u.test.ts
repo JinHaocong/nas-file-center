@@ -24,10 +24,11 @@ describe('Pure White Stage 5E-U controlled Sheet focus recovery', () => {
     for (const token of [
       'onCloseAutoFocus={event => {', 'const target = returnFocusTarget.current;',
       'returnFocusTarget.current = null;',
-      "if (target?.isConnected && !target.matches(':disabled')) {",
+      "if (target?.isConnected && !target.matches(':disabled') &&",
+      '!target.closest(\'[aria-disabled="true"], [inert], [hidden]\')',
       'event.preventDefault();', 'target.focus();',
     ]) assert.ok(sheet.includes(token), token);
-    assert.ok(sheet.indexOf('target.focus();') > sheet.indexOf("if (target?.isConnected && !target.matches(':disabled')) {"));
+    assert.ok(sheet.indexOf('target.focus();') > sheet.indexOf("if (target?.isConnected && !target.matches(':disabled') &&"));
     assert.ok(sheet.indexOf('event.preventDefault();') > sheet.indexOf('onCloseAutoFocus={event => {'));
   });
 
@@ -43,7 +44,8 @@ describe('Pure White Stage 5E-U controlled Sheet focus recovery', () => {
       'assert.deepEqual(writes, []',
       '32/32 theme-viewport cases, 64 actual dialog screenshots',
     ]) assert.ok(browser.includes(token), token);
-    assert.equal(browser.split('await page.waitForFunction(opener => document.activeElement === opener, detailOpener);').length - 1, 2);
+    // Original Close/Escape coverage plus the new aria-disabled nested-dialog setup.
+    assert.equal(browser.split('await page.waitForFunction(opener => document.activeElement === opener, detailOpener);').length - 1, 3);
     assert.ok(browser.includes("request.method() !== 'GET'"));
     assert.ok(read('../.github/workflows/ui-v044-validation.yml').includes('node scripts/browser-task-overlays.mjs'));
   });
