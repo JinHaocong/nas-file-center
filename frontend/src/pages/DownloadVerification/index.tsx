@@ -34,11 +34,10 @@ const formatBytes = (n: number | null) =>
     : n >= 1048576 ? (n / 1048576).toFixed(2) + ' MiB'
       : n >= 1024 ? (n / 1024).toFixed(1) + ' KiB' : n + ' B';
 const formatError = (error: unknown) => getStructuredApiError(error).message || '操作失败';
-const terminal = new Set(['completed', 'failed', 'cancelled']);
 const displayJob = (state: string) =>
   ({ completed: '已完成', failed: '执行失败', cancelled: '已取消',
      queued: '排队中', running: '执行中', paused: '已暂停',
-     cancel_requested: '取消中' } as Record<string, string>)[state] || state;
+     cancel_requested: '取消中', unknown: '任务记录不存在' } as Record<string, string>)[state] || state;
 
 export const DownloadVerificationPage: React.FC = () => {
   useTitle('下载完整性校验');
@@ -226,8 +225,8 @@ export const DownloadVerificationPage: React.FC = () => {
                     leadingIcon={<ConsoleIcon name="activity" size={14} />}
                     onClick={() => navigate('/tasks?task=' + run.work_job_id)}>任务中心</ConsoleButton>
                   <ConsoleButton size="sm" variant="ghost"
-                    title={terminal.has(run.job_status) ? '删除校验报告' : '任务尚未结束，不可删除报告'}
-                    disabled={!terminal.has(run.job_status)}
+                    title={run.can_delete ? '删除校验报告' : '任务尚未结束，不可删除报告'}
+                    disabled={!run.can_delete}
                     leadingIcon={<ConsoleIcon name="trash" size={14} />}
                     onClick={() => setDeleteTarget(run)}>删除</ConsoleButton>
                 </div></td>
