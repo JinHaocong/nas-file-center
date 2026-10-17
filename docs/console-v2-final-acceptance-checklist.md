@@ -477,3 +477,10 @@ No screenshot-only mock data in runtime.
 - Scoped historical CSS convergence removes **15 proven earlier same-selector, same-media-context declarations** in `v049-workspace.css` (14) and `v056-right-workspace-v2.css` (1), keeping the late authoritative style values and independent early properties unchanged. Preserve the previous 8 `v049` media wrappers, full `main.tsx` CSS import order and reduced-motion/transparency overrides.
 - `scripts/css-historical-cascade-convergence.test.mjs` now asserts source CSS rule ownership, retained final values, responsive variants and CI registration of read-only 8-width × 4-theme Chromium visual/status/overlay matrices. See `docs/console-v2-css-ownership.md` for each exact CSS rule, scope and owner.
 - **69/74 remains unchanged.** Historical CSS consolidation is not globally complete just because this tranche is safe; no all-page human visual/accessibility or real-NAS acceptance is claimed.
+
+
+## Final acceptance — v048-detail/v049 cross-file CSS ownership tranche (2026-10-17)
+
+- Remove **16 exactly shadowed unconditional header declarations** from historical `v048-detail.css`, retaining the unchanged later `v049-workspace.css` selector/property winners and the earlier independent text-ellipsis and mobile status scrolling/overflow styles. No import order, breakpoints, API state, destructive authority or backend service change.
+- A new `frontend/scripts/css-historical-cross-layer-ownership.test.mjs` explicitly tests both versions' leaf-rule ownership, all 16 removed properties, final winners, ancestor `@media` isolation, original import order, and unchanged read-only exact-HEAD 8-width × 4-theme browser CI registration. Detailed scope: `docs/console-v2-css-ownership.md`.
+- **High-level final acceptance remains 69/74 (93.2%).** This is incremental historical CSS cleanup, not proof of globally completed CSS/theme consolidation, consolidated manual visual/a11y review or real NAS/owner sign-off.
