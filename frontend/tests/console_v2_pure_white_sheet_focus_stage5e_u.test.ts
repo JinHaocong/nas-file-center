@@ -24,10 +24,11 @@ describe('Pure White Stage 5E-U controlled Sheet focus recovery', () => {
     for (const token of [
       'onCloseAutoFocus={event => {', 'const target = returnFocusTarget.current;',
       'returnFocusTarget.current = null;',
-      "if (target?.isConnected && !target.matches(':disabled')) {",
+      "if (target?.isConnected && !target.matches(':disabled') &&",
+      '!target.closest(\'[aria-disabled="true"], [inert], [hidden]\')',
       'event.preventDefault();', 'target.focus();',
     ]) assert.ok(sheet.includes(token), token);
-    assert.ok(sheet.indexOf('target.focus();') > sheet.indexOf("if (target?.isConnected && !target.matches(':disabled')) {"));
+    assert.ok(sheet.indexOf('target.focus();') > sheet.indexOf("if (target?.isConnected && !target.matches(':disabled') &&"));
     assert.ok(sheet.indexOf('event.preventDefault();') > sheet.indexOf('onCloseAutoFocus={event => {'));
   });
 
