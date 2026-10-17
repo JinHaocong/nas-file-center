@@ -331,3 +331,68 @@ test('v049 dashboard layout and important native rail remain independently owned
   assert.match(old049, /@media \(prefers-reduced-motion: reduce\)/);
   assert.match(old049, /@media \(prefers-reduced-transparency: reduce\)/);
 });
+
+
+test('v049 metric typography and snapshot surface: 17 shadows retired, v056 remains owner', () => {
+  // Only compare unconditional, exactly matching single selectors and the same
+  // CSS properties; no shorthand, grouped selector or media inference.
+  const cases = [
+    ['.nfc-metric-label', {
+      color: 'var(--nfc-w2-text-muted)',
+      'font-size': '11.5px',
+      'font-weight': '610',
+      'letter-spacing': '0',
+    }],
+    ['.nfc-metric-value', {
+      color: 'var(--nfc-w2-text)',
+      'font-size': 'clamp(25px, 2vw, 31px)',
+      'font-weight': '660',
+      'letter-spacing': '-0.045em',
+    }],
+    ['.nfc-metric-meta', {
+      'margin-top': '9px',
+      color: 'var(--nfc-w2-text-subtle)',
+      'font-size': '11.5px',
+    }],
+    ['.nfc-dashboard-page .nfc-snapshot-note', {
+      'margin-bottom': '20px',
+      padding: '11px 14px',
+      border: '0',
+      'border-radius': 'var(--nfc-w2-radius-sm)',
+      color: 'var(--nfc-w2-text-muted)',
+      background: 'var(--nfc-w2-surface-soft)',
+    }],
+  ];
+  let retired = 0;
+  for (const [selector, finalProperties] of cases) {
+    const historical = matching(v049, selector);
+    const winner = matching(v056, selector);
+    assert.equal(winner.length, 1, 'One final unconditional v056 owner: ' + selector);
+    for (const [property, value] of Object.entries(finalProperties)) {
+      assert.ok(historical.every(rule => !rule.declarations.has(property)),
+        'Retired v049 property reintroduced: ' + selector + ' / ' + property);
+      assert.equal(winner[0].declarations.get(property), value,
+        'Final v056 property changed: ' + selector + ' / ' + property);
+      assert.ok(!value.includes('!important'), 'No importance escalation: ' + selector);
+      retired += 1;
+    }
+  }
+  assert.equal(retired, 17);
+  assert.equal(matching(v049, '.nfc-metric-label').length, 0);
+  assert.equal(matching(v049, '.nfc-metric-meta').length, 0);
+  // Preserve independent earlier declarations, not targeted for retirement.
+  assert.equal(matching(v049, '.nfc-metric-value').length, 1);
+  assert.equal(matching(v049, '.nfc-metric-value')[0]
+    .declarations.get('margin-top'), '12px');
+  assert.equal(matching(v049, '.nfc-dashboard-page .nfc-snapshot-note').length, 1);
+  assert.equal(matching(v049, '.nfc-dashboard-page .nfc-snapshot-note')[0]
+    .declarations.get('box-shadow'), 'none');
+  assert.ok(v056.some(rule => rule.context.startsWith('@media') &&
+    rule.selector === '.nfc-metric-label' && rule.declarations.get('font-size') === '11px'),
+  'Responsive 11px metric label must remain');
+  assert.ok(v056.some(rule => rule.context.startsWith('@media') &&
+    rule.selector === '.nfc-metric-value' && rule.declarations.get('font-size') === '23px'),
+  'Responsive 23px metric value must remain');
+  assert.equal([...old049.matchAll(/@media\\s*\\([^)]*\\)/g)].length, 8,
+    'Retain all eight historical media contexts');
+});
