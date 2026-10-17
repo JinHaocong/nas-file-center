@@ -339,8 +339,9 @@ test('v055 operational cleanup preserves independent declarations and mobile con
       '@media (max-width: 767px)', 'padding', '11px'],
   ];
   for (const [selector, context, property, expected] of keep) {
-    assert.ok(matching(early, selector, context).some(
-      rule => rule.declarations.get(property) === expected),
+    assert.ok(early.some(rule => rule.context === context &&
+      rule.selector.split(',').map(part => part.trim()).includes(selector) &&
+      rule.declarations.get(property) === expected),
     'Independent or media-scoped styling removed: ' +
     selector + ' / ' + context + ' / ' + property);
   }
