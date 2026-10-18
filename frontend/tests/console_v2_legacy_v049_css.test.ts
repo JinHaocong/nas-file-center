@@ -7,6 +7,7 @@ const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8'
 
 describe('Console v2 reviewed v049 legacy workspace CSS retirement', () => {
   const css = read('src/styles/v049-workspace.css');
+  const final = read('src/styles/v056-right-workspace-v2.css');
 
   test('v049 has no remaining AntD or anticon class selectors', () => {
     assert.doesNotMatch(css, /\.(?:ant-[a-z][\w-]*|anticon\b)/);
@@ -23,7 +24,12 @@ describe('Console v2 reviewed v049 legacy workspace CSS retirement', () => {
   });
 
   test('native row action keyboard visibility and mobile pagination survive mixed groups', () => {
-    assert.match(css, /\.nfc-row-actions\s*\{[^}]*opacity:\s*0\.72;/);
+    assert.doesNotMatch(css, /^\.nfc-row-actions\s*\{/m,
+      'Old unconditional 0.72 opacity and 0px gap are retired');
+    assert.match(final, /^\.nfc-row-actions\s*\{\s*gap:\s*2px;\s*opacity:\s*0\.56;\s*\}/m,
+      'Retain later v056 normal row action owner');
+    assert.match(css, /@media \(max-width: 767px\)\s*\{[\s\S]*?\.nfc-row-actions\s*\{\s*opacity:\s*1;/,
+      'Retain legacy native phone row opacity');
     assert.match(css, /\.nfc-row-actions:focus-within\s*\{[^}]*opacity:\s*1;/);
     assert.match(css, /\.nfc-mobile-pagination\s*\{[^}]*min-height:\s*50px;/);
     assert.match(css, /\.nfc-mobile-pagination\s*\{[^}]*color-mix\(in srgb, var\(--nfc-nav-surface\) 68%, transparent\)/);
