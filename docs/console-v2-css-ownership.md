@@ -417,3 +417,37 @@ content (at least 25 text characters), failing closed on timeout. The
 existing whole-route blank-page threshold, every width/theme screenshot,
 no-NAS-write assertions and error/overflow checks are unchanged. This
 does **not** waive the full restarted PR CI or claim manual visual sign-off.
+
+
+## 2026-10-19 — v049 → v056 workflow steps and row actions
+
+After PR #292, safely retired **nine** unconditional v049 leaf
+declarations already overridden by **identical single selectors** with
+the same at-rule context, CSS priority and exact CSS property in the
+later imported v056 layer:
+
+| Earlier v049 selector | Retired properties | Existing v056 owner |
+| --- | --- | --- |
+| `.nfc-row-actions` | `gap`, `opacity` (2) | 2px gap, 0.56 normal opacity |
+| `.nfc-workflow-builder-page .nfc-workflow-step-card.is-expanded` | `background`, `box-shadow` (2, both `!important`) | canonical surface and 3px inset accent |
+| `.nfc-workflow-builder-page .nfc-workflow-step-heading` | `min-height`, `padding` (2) | 62px, 11px 15px |
+| `.nfc-workflow-builder-page .nfc-workflow-step-editor` | `padding`, `border-top`, `background` (3) | 18px 16px 20px, hairline divider, soft surface |
+
+Retained the **independent** `.nfc-row-actions:focus-within`
+keyboard-visible `opacity:1`, the separate v049 **767px**
+`.nfc-row-actions` `opacity:1` rule, grouped mobile
+workflow step `padding-inline:10px`, all eight v049 historical
+media wrappers, CSS import order, themes and reduced motion/transparency.
+The v056 winners and all grouped/more-specific browser rules are unchanged.
+
+Extended the registered
+`frontend/scripts/css-historical-cascade-convergence.test.mjs`
+with exact nine-property owner validation, retired selector guards,
+important declaration checks, and independent focus/mobile retention.
+PR CI still needs frontend/backend/Docker/security checks and the full
+eight-width × four-theme isolated Chromium matrices on the exact HEAD.
+
+This is **incremental CSS ownership cleanup**, not proof of complete
+historical CSS/theme consolidation, full manual visual or accessibility
+sign-off, real NAS verification, or production approval. The formal
+high-level count remains **69/74 (93.2%)**.
