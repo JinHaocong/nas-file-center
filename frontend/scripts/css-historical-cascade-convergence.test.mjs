@@ -539,3 +539,56 @@ test('v049-v054: 14 shadowed header identity, code and overlay properties stay v
   assert.match(old049, /@media \(prefers-reduced-motion: reduce\)/);
   assert.match(old049, /@media \(prefers-reduced-transparency: reduce\)/);
 });
+
+
+test('v049 workflow step and row action: 9 same-selector v056 declarations are sole owners', () => {
+  const cases = [
+    ['.nfc-row-actions', {
+      gap: '2px',
+      opacity: '0.56',
+    }],
+    ['.nfc-workflow-builder-page .nfc-workflow-step-card.is-expanded', {
+      background: 'var(--nfc-w2-surface) !important',
+      'box-shadow': 'inset 3px 0 0 color-mix(in srgb, var(--nfc-w2-accent) 66%, transparent) !important',
+    }],
+    ['.nfc-workflow-builder-page .nfc-workflow-step-heading', {
+      'min-height': '62px',
+      padding: '11px 15px',
+    }],
+    ['.nfc-workflow-builder-page .nfc-workflow-step-editor', {
+      padding: '18px 16px 20px',
+      'border-top': '1px solid var(--nfc-w2-hairline)',
+      background: 'var(--nfc-w2-surface-soft)',
+    }],
+  ];
+  let retired = 0;
+  for (const [selector, declared] of cases) {
+    assert.equal(matching(v049, selector).length, 0, selector + ': obsolete unconditional rule returned');
+    const winners = matching(v056, selector);
+    assert.equal(winners.length, 1, selector + ': expected one unconditional v056 authority');
+    for (const [property, value] of Object.entries(declared)) {
+      assert.equal(winners[0].declarations.get(property), value,
+        selector + ': final v056 property changed: ' + property);
+      retired++;
+    }
+  }
+  assert.equal(retired, 9);
+  // Do not remove the separate keyboard/native row focus and phone overrides.
+  assert.equal(matching(v049, '.nfc-row-actions:focus-within').length, 1);
+  assert.equal(matching(v049, '.nfc-row-actions:focus-within')[0]
+    .declarations.get('opacity'), '1');
+  assert.equal(matching(v049, '.nfc-row-actions', '@media (max-width: 767px)')[0]
+    .declarations.get('opacity'), '1');
+  const mobile = matching(v049,
+    '.nfc-workflow-builder-page .nfc-workflow-step-heading,\n.nfc-workflow-builder-page .nfc-workflow-step-editor',
+    '@media (max-width: 767px)');
+  assert.equal(mobile.length, 1, 'Retain the grouped phone workflow step gutter override');
+  assert.equal(mobile[0].declarations.get('padding-inline'), '10px');
+  // Unchanged legacy ancestry and later-imported final authority.
+  assert.equal([...old049.matchAll(/@media\s*\([^)]*\)/g)].length, 8);
+  const imports = read('src/main.tsx');
+  assert.ok(imports.indexOf("import './styles/v049-workspace.css';") <
+    imports.indexOf("import './styles/v056-right-workspace-v2.css';"));
+  assert.match(old049, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(old049, /@media \(prefers-reduced-transparency: reduce\)/);
+});
