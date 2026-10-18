@@ -444,6 +444,10 @@ Extended the registered
 `frontend/scripts/css-historical-cascade-convergence.test.mjs`
 with exact nine-property owner validation, retired selector guards,
 important declaration checks, and independent focus/mobile retention.
+The existing `console_v2_legacy_v049_css.test.ts` inventory now verifies
+that v056 owns the normal 0.56 opacity/2px gap while v049 retains 767px
+`opacity:1` and keyboard `:focus-within` behavior; its outdated
+normal-state `0.72` assertion is retired without relaxing mobile checks.
 PR CI still needs frontend/backend/Docker/security checks and the full
 eight-width × four-theme isolated Chromium matrices on the exact HEAD.
 
