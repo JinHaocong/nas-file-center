@@ -280,11 +280,6 @@ body,
   font-size: 10px;
 }
 
-.nfc-row-actions {
-  gap: 0;
-  opacity: 0.72;
-}
-
 .nfc-row-actions:focus-within {
   opacity: 1;
 }
@@ -515,22 +510,6 @@ body,
 
 .nfc-workflow-builder-page .nfc-workflow-step-card:first-child {
   border-top: 0 !important;
-}
-
-.nfc-workflow-builder-page .nfc-workflow-step-card.is-expanded {
-  background: color-mix(in srgb, var(--nfc-v49-accent) 2.6%, transparent) !important;
-  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--nfc-v49-accent) 62%, transparent) !important;
-}
-
-.nfc-workflow-builder-page .nfc-workflow-step-heading {
-  min-height: 56px;
-  padding: 10px 14px;
-}
-
-.nfc-workflow-builder-page .nfc-workflow-step-editor {
-  padding: 16px 14px 18px;
-  border-top: 1px solid var(--nfc-v49-line);
-  background: color-mix(in srgb, var(--nfc-v49-surface-soft) 60%, transparent);
 }
 
 .nfc-workflow-builder-page .nfc-step-add-surface {
