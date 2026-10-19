@@ -185,6 +185,20 @@ async function assertPurgeFooterAndScroll(page, width, state) {
 }
 
 async function assertDialog(page, theme, width, selector, label) {
+  // Radix portals can report a visible dialog before their closing/opening
+  // scrims have finished reordering hit targets. Wait for actual pointer
+  // reachability instead of racing the first layout frame. This is a
+  // readiness wait, not an exemption: a permanently intercepting scrim still
+  // fails closed, and inspect() keeps its original z-index/hit-test checks.
+  await page.waitForFunction(selector => {
+    const dialog = document.querySelector(selector);
+    if (!dialog || dialog.getAttribute('data-state') !== 'open') return false;
+    const rect = dialog.getBoundingClientRect();
+    if (!rect.width || !rect.height) return false;
+    const x = Math.max(1, Math.min(innerWidth - 1, rect.left + rect.width / 2));
+    const y = Math.max(1, Math.min(innerHeight - 1, rect.top + Math.min(rect.height / 2, 100)));
+    return Boolean(document.elementFromPoint(x, y)?.closest(selector));
+  }, selector, { timeout: 5000, polling: 'raf' });
   const failures = await inspect(page, theme, width, selector);
   assert.deepEqual(failures, [], label + ': ' + failures.join('; '));
 }

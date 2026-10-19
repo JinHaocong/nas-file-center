@@ -552,3 +552,21 @@ Historical redundant declaration total after this batch: **189**
 (179 previously merged + 10 newly retired).
 Formal progress remains **69/74 (93.2%)**: incremental source cleanup
 is not final CSS/theme, manual visual/a11y, real NAS, or production approval.
+
+### PR #296 — exact-HEAD browser gate investigation and stabilization
+
+Initial PR HEAD `7813ede` failed `browser-overlay-smoke` at
+`Purge system-dark-360`: the scrim intercepted the dialog pointer
+hit test immediately after Playwright observed the Radix portal as visible.
+The preceding Restore/Purge cases and the Quarantine Plan matrix passed;
+the trace showed no failing CSS owner, build or backend assertion.
+
+The read-only bulk-overlay browser script now waits (maximum **5 seconds**)
+for an **open** dialog to become hit-test reachable, using animation-frame
+polling, before running the same comprehensive `inspect()` assertions.
+A persistently obstructing scrim **still fails**; exact `z-index` 1300/1301,
+themes, no-blur, safe viewport bounds, pointer reachability, DELETE gate,
+read-only network guards, and all width/theme combinations are unchanged.
+No safety threshold or test coverage was removed. Full CI must rerun
+from the new exact PR HEAD; the earlier failed HEAD is not acceptable
+evidence for merge.
