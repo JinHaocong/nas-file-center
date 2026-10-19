@@ -656,3 +656,36 @@ important Dashboard rail-card declarations. This tightens ownership
 coverage without weakening any visual, responsive or safety thresholds.
 Run the full CI suite again on the **new exact final HEAD**; checks from
 the initial failed HEAD are not merge evidence.
+
+## 2026-10-19 — v049 → v056 page and panel text authority
+
+Retired **9** normal-priority, unconditional historical v049 declarations.
+Each is overridden by a later v056 rule with the **same single selector,
+CSS property, specificity and at-rule context**:
+
+| Old v049 selector | Retired properties | Later v056 values |
+| --- | --- | --- |
+| `.nfc-page-title` | `color`, `line-height`, `letter-spacing` (3) | w2 text; 1.18; -0.014em |
+| `.nfc-page-description` | `max-width`, `color` (2) | 82ch; w2 muted text |
+| `.nfc-data-panel-header` | `gap` (1) | 18px |
+| `.nfc-data-panel-title` | `color`, `letter-spacing` (2) | w2 text; -0.004em |
+| `.nfc-data-panel-description` | `color` (1) | w2 subtle text |
+
+The five now-empty v049 unconditional blocks were removed. Separate
+later v049 declarations for title font-size/weight, description spacing
+and line-height, panel-header min-height/padding/border-bottom color
+and background, and panel-title/description typography were retained.
+These remain guarded in the historical cascade regression alongside
+v054's higher-specificity theme text rules and v056 final owners.
+
+Preserved all existing 767px mobile styles, theme variables, grouped
+selectors, `!important` priority, keyboard focus, reduced-motion and
+reduced-transparency contexts, and CSS import order. No shorthand
+substitution or cross-specificity retirement was attempted.
+Automated 8-width × 4-theme read-only Chromium, full backend, Docker
+and dependency checks are still mandatory on the exact final PR HEAD.
+
+After merge historical CSS redundant declaration total: **217**
+(208 previously merged + 9 in this batch).
+Formal high-level acceptance remains **69/74 (93.2%)**; manual visual,
+a11y, real isolated NAS, and deployment sign-off are not yet complete.
