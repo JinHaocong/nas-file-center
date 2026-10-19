@@ -116,3 +116,35 @@ test('actual-route Chromium audit must cover all w2 computed semantic token pair
   assert.ok(audit.includes('const PAGES = ['),
     'Real route inventory must be owned by the browser matrix');
 });
+
+
+test('real ledger headings must audit actual foreground and painted background', () => {
+  const guards = [
+    'async function auditPaintedLedgerHeading(page, item, width, theme)',
+    "page.getByRole('heading', { name: item.heading, exact: true })",
+    "element.closest('.nfc-app-main')",
+    'getComputedStyle(element)',
+    'textStyle.color',
+    'getComputedStyle(node)',
+    'style.backgroundColor',
+    "style.backgroundImage !== 'none'",
+    'Number(style.opacity) !== 1',
+    'layers[layers.length - 1].alpha !== 1',
+    'computedContrastRatio(rendered.foreground, rendered.paintedBackground)',
+    'await auditPaintedLedgerHeading(page, item, width, theme)',
+    'paintedHeadingAudit.length, WIDTHS.length * THEMES.length * (PAGES.length - 1)',
+    "writeFileSync(resolve(OUT, 'painted-ledger-heading-audit.json')",
+    'assert.deepEqual(writes, []',
+    'assert.deepEqual(outbound, []',
+  ];
+  for (const value of guards) {
+    assert.ok(browser.includes(value),
+      'Real painted ledger-heading contrast evidence removed: ' + value);
+  }
+  const workflow = readFileSync('../.github/workflows/ui-v044-validation.yml', 'utf8');
+  for (const artifact of ['w2-computed-theme-audit.json',
+    'painted-ledger-heading-audit.json', 'checkbox-keyboard-audit.json']) {
+    assert.ok(workflow.includes('frontend/artifacts/browser-workspace-cascade/' + artifact),
+      'Browser JSON evidence must actually upload to CI artifacts: ' + artifact);
+  }
+});
