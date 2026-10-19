@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 const outDir = resolve('dist-test');
 try {
   execSync('node scripts/check-ant-design-tail.mjs', { stdio: 'inherit' });
+  execSync('node --test scripts/favicon-assets.test.mjs', { stdio: 'inherit' });
   execSync('node scripts/check-console-css-ownership.mjs', { stdio: 'inherit' });
   execSync('node --test scripts/console-contrast.test.mjs', { stdio: 'inherit' });
   execSync('node --test scripts/final-integration-gates.test.mjs', { stdio: 'inherit' });
