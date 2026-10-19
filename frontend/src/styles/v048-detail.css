@@ -103,8 +103,6 @@
 }
 
 .nfc-description-item {
-  min-height: 76px;
-  padding: 14px 16px 13px;
   border-right: 1px solid var(--nfc-premium-line);
   border-bottom: 1px solid var(--nfc-premium-line);
   background: transparent;
@@ -119,23 +117,14 @@
 }
 
 .nfc-description-item dt {
-  margin-bottom: 7px;
-  color: var(--nfc-premium-subtle);
-  font-size: 9px;
-  font-weight: 680;
   letter-spacing: 0.025em;
 }
 
 .nfc-description-item dd {
-  color: var(--nfc-premium-muted);
-  font-size: 11.5px;
   line-height: 1.5;
 }
 
 .nfc-description-item dd.nfc-description-emphasis {
-  color: var(--nfc-premium-text);
-  font-size: 14px;
-  font-weight: 650;
   letter-spacing: -0.018em;
 }
 

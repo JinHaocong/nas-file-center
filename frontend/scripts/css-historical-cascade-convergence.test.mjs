@@ -53,9 +53,11 @@ function leafRules(css) {
 }
 
 const read = filename => readFileSync(resolve(process.cwd(), filename), 'utf8');
+const old048 = read('src/styles/v048-detail.css');
 const old049 = read('src/styles/v049-workspace.css');
 const old054 = read('src/styles/v054-premium-system.css');
 const old056 = read('src/styles/v056-right-workspace-v2.css');
+const v048 = leafRules(old048);
 const v049 = leafRules(old049);
 const v054 = leafRules(old054);
 const v056 = leafRules(old056);
@@ -822,4 +824,89 @@ test('v054-v056: 10 panel, media, root and workflow shadows remain retired', () 
   assert.ok(early >= 0 && early < middle && middle < late);
   assert.match(old054, /@media \(prefers-reduced-motion: reduce\)/);
   assert.match(old054, /@media \(prefers-reduced-transparency: reduce\)/);
+});
+
+
+test('v048-detail to v056: 11 description item shadows remain retired', () => {
+  // Unconditional, exact single-selector and property matches with normal
+  // priority. The earlier unique border, tracking, line-height and responsive
+  // rule bodies must remain exactly owned by v048-detail.
+  const cases = [
+    ['.nfc-description-item', {
+      'min-height': '78px',
+      padding: '14px 16px',
+    }, {
+      'border-right': '1px solid var(--nfc-premium-line)',
+      'border-bottom': '1px solid var(--nfc-premium-line)',
+      background: 'transparent',
+    }],
+    ['.nfc-description-item dt', {
+      'margin-bottom': '7px',
+      color: 'var(--nfc-w2-text-subtle)',
+      'font-size': '11px',
+      'font-weight': '620',
+    }, {
+      'letter-spacing': '0.025em',
+    }],
+    ['.nfc-description-item dd', {
+      color: 'var(--nfc-w2-text-muted)',
+      'font-size': '12.5px',
+    }, {
+      'line-height': '1.5',
+    }],
+    ['.nfc-description-item dd.nfc-description-emphasis', {
+      color: 'var(--nfc-w2-text)',
+      'font-size': '14px',
+      'font-weight': '650',
+    }, {
+      'letter-spacing': '-0.018em',
+    }],
+  ];
+  let retired = 0;
+  for (const [selector, winners, independent] of cases) {
+    const previous = matching(v048, selector);
+    const final = matching(v056, selector);
+    assert.equal(previous.length, 1, selector + ': one unconditional historical rule');
+    assert.equal(final.length, 1, selector + ': one unconditional final v056 owner');
+    assert.deepEqual([...previous[0].declarations], Object.entries(independent),
+      selector + ': preserve only independently owned v048 properties');
+    for (const [name, expected] of Object.entries(winners)) {
+      assert.equal(previous[0].declarations.has(name), false,
+        selector + ': shadowed v048 property returned: ' + name);
+      assert.equal(final[0].declarations.get(name), expected,
+        selector + ': v056 authoritative property drifted: ' + name);
+      assert.ok(!expected.includes('!important'), 'No importance escalation');
+      retired++;
+    }
+  }
+  assert.equal(retired, 11);
+
+  // Preserve distinct v048 phone geometry and the more specific item state
+  // selectors. Never flatten @media into an unconditional rule.
+  const tablet = '@media (max-width: 1199px)';
+  const phone = '@media (max-width: 767px)';
+  const narrow = '@media (max-width: 420px)';
+  assert.equal(matching(v048, '.nfc-page-header-copy', tablet)[0]
+    .declarations.get('max-width'), 'min(760px, 68vw)');
+  assert.equal(matching(v048, '.nfc-description-item', phone)[0]
+    .declarations.get('min-height'), '70px');
+  assert.equal(matching(v048, '.nfc-description-item', phone)[0]
+    .declarations.get('padding'), '12px');
+  assert.equal(matching(v048, '.nfc-description-item', phone)[0]
+    .declarations.get('border-right'), '1px solid var(--nfc-premium-line)');
+  assert.equal(matching(v048, '.nfc-description-item:nth-child(2n)', phone)[0]
+    .declarations.get('border-right'), '0');
+  assert.equal(matching(v048,
+    '.nfc-description-item,\n  .nfc-description-item:nth-child(2n),\n  .nfc-description-item:nth-child(3n)',
+    narrow)[0].declarations.get('min-height'), '64px');
+  assert.equal(matching(v048, '.nfc-description-item:last-child', narrow)[0]
+    .declarations.get('border-bottom'), '0');
+  assert.equal(matching(v048, '.nfc-row-actions:focus-within')[0]
+    .declarations.get('opacity'), '1');
+  const imports = read('src/main.tsx');
+  assert.ok(imports.indexOf("import './styles/v048-detail.css';") <
+    imports.indexOf("import './styles/v049-workspace.css';"));
+  assert.ok(imports.indexOf("import './styles/v049-workspace.css';") <
+    imports.indexOf("import './styles/v056-right-workspace-v2.css';"));
+  assert.match(old048, /@media \(prefers-reduced-motion: reduce\)/);
 });
