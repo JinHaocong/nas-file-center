@@ -171,6 +171,72 @@ function fixture(path, dense = false) {
   return { items: [], total: 0, page: 1, page_size: 50 };
 }
 
+// Browser-computed v056 semantic ownership on actual React route workspaces.
+// This checks resolved CSS custom properties (not every rendered text pixel).
+const w2ThemeAudit = [];
+const w2Surfaces = ['canvas', 'surface', 'surface-soft', 'surface-strong'];
+const w2TextRoles = ['text', 'text-muted', 'text-subtle'];
+
+function w2Luminance(hex) {
+  const channels = [1, 3, 5].map(index =>
+    Number.parseInt(hex.slice(index, index + 2), 16) / 255)
+    .map(value => value <= 0.04045
+      ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
+  return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+}
+function w2Contrast(foreground, background) {
+  const a = w2Luminance(foreground), b = w2Luminance(background);
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+}
+async function auditW2ComputedTheme(page, item, width, theme) {
+  const measured = await page.evaluate(() => {
+    const workspace = document.querySelector('.nfc-app-main');
+    if (!workspace) throw Error('Missing actual right-workspace semantic scope');
+    const style = getComputedStyle(workspace);
+    const names = ['canvas', 'surface', 'surface-soft', 'surface-strong',
+      'text', 'text-muted', 'text-subtle'];
+    return {
+      effective: document.documentElement.dataset.theme,
+      values: Object.fromEntries(names.map(name =>
+        [name, style.getPropertyValue('--nfc-w2-' + name).trim().toLowerCase()])),
+    };
+  });
+  assert.equal(measured.effective, theme.effective,
+    'Computed-theme audit must see actual effective theme: ' + item.id + '/' + width);
+  for (const [role, value] of Object.entries(measured.values)) {
+    assert.match(value, /^#[0-9a-f]{6}$/,
+      item.id + '/' + theme.mode + '/' + width + ': --nfc-w2-' + role +
+      ' must be resolved to an opaque hex CSS token');
+  }
+  const bright = w2TextRoles.map(role => w2Luminance(measured.values[role]));
+  if (theme.effective === 'light') {
+    assert.ok(bright[0] < bright[1] && bright[1] < bright[2],
+      'Light semantic text hierarchy must survive on ' + item.id);
+  } else {
+    assert.ok(bright[0] > bright[1] && bright[1] > bright[2],
+      'Dark semantic text hierarchy must survive on ' + item.id);
+  }
+  let minimum = Infinity;
+  let compared = 0;
+  for (const background of w2Surfaces) {
+    for (const foreground of w2TextRoles) {
+      const ratio = w2Contrast(measured.values[foreground], measured.values[background]);
+      assert.ok(ratio >= 4.5,
+        item.id + '/' + width + '/' + theme.mode + '-' + theme.system +
+        ': computed --nfc-w2-' + foreground + ' / --nfc-w2-' + background +
+        ' = ' + ratio.toFixed(2) + ':1, expected >= 4.5:1');
+      minimum = Math.min(minimum, ratio);
+      compared++;
+    }
+  }
+  assert.equal(compared, 12, 'Each rendered route must audit 3 text roles x 4 surfaces');
+  w2ThemeAudit.push({
+    route: item.path, width, mode: theme.mode, system: theme.system,
+    effective: measured.effective, values: measured.values,
+    compared, minimumContrast: Number(minimum.toFixed(3)),
+  });
+}
+
 async function inspect(page, theme, width, item) {
   const violations = await page.evaluate(({ theme, width, item }) => {
     const get = selector => {
@@ -448,6 +514,7 @@ try {
           await page.goto(BASE + item.path, { waitUntil: 'domcontentloaded' });
           await page.getByRole('heading', { name: item.heading, exact: true }).waitFor();
           await inspect(page, theme.effective, width, item);
+          await auditW2ComputedTheme(page, item, width, theme);
           await page.screenshot({
             path: resolve(OUT, item.id + '-' + label + '.png'),
             fullPage: false,
@@ -482,6 +549,15 @@ try {
     }
   }
   assert.equal(passed, WIDTHS.length * THEMES.length);
+  assert.equal(w2ThemeAudit.length, WIDTHS.length * THEMES.length * PAGES.length,
+    'All six real rendered routes must audit computed w2 palette at every width/theme');
+  assert.ok(w2ThemeAudit.every(item => item.compared === 12 && item.minimumContrast >= 4.5),
+    'All 192 rendered route/theme cases must preserve 12 AA contrast token pairs');
+  writeFileSync(resolve(OUT, 'w2-computed-theme-audit.json'),
+    JSON.stringify({ cases: w2ThemeAudit, total: w2ThemeAudit.length,
+      comparisons: w2ThemeAudit.length * 12, audited: 'computed-css-tokens-not-human-signoff' }, null, 2));
+  console.log('[WORKSPACE W2 THEME] 192/192 actual-route computed token cases, ' +
+    '2304/2304 solid semantic foreground/surface pairs >= 4.5:1, no NAS access.');
   assert.equal(checkboxKeyboardAudit.length, WIDTHS.length * THEMES.length * 2,
     'Every Media and Quarantine dense viewport/theme must have computed checkbox evidence');
   writeFileSync(resolve(OUT, 'checkbox-keyboard-audit.json'),
