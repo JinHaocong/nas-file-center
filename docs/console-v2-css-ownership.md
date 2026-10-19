@@ -605,3 +605,39 @@ After merge, cumulative redundant CSS declaration removals: **200**
 does **not** constitute complete CSS/theme ownership closure,
 manual visual/a11y acceptance, real NAS acceptance or deployment.
 Formal high-level milestone stays **69/74 (93.2%)**.
+
+## 2026-10-19 — v049 → v056 Dashboard geometry and form-grid ownership
+
+Retired **8** unconditional normal-priority v049 declarations shadowed by
+the exact same single selectors and CSS properties in later-imported v056:
+
+| Earlier v049 selector | Removed properties | Existing v056 same-selector values |
+| --- | --- | --- |
+| `.nfc-dashboard-page .nfc-dashboard-layout` | `margin-top`, `grid-template-columns`, `gap` (3) | 24px; minmax(0, 1fr) minmax(300px, 340px); 30px |
+| `.nfc-dashboard-page .nfc-dashboard-main-column` | `gap` (1) | 26px |
+| `.nfc-dashboard-page .nfc-dashboard-rail` | `position`, `top`, `gap` (3) | sticky; 76px; 22px |
+| `.nfc-form-grid` | `gap` (1) | 16px 22px |
+
+All four old unconditional blocks became empty and were removed.
+Crucially, the **higher-specificity** v056 Dashboard rail pair still
+owns separate `gap: 14px` / `position: static` values when applicable;
+the table above records **same-selector declarations**, not an assertion
+that those declarations always determine the final computed style.
+
+Retained v049's Dashboard rail cards' `!important` border/background,
+1600px wide-layout gap, 1199px tablet grid and rail placement, and
+767px mobile grouped gaps/rail columns. No theme, keyboard focus,
+reduced-motion, reduced-transparency, group selector or CSS import order
+was changed. Registered historical cascade regression protects
+exact v056 owners, more-specific rail override, responsive contracts
+and preserved independent styles.
+
+CI must still validate the exact final PR HEAD, including 8 viewport
+widths × 4 theme combinations, full overlay matrices, backend, Docker
+and dependency audit. Isolated mock-browser checks are not human or
+real-NAS acceptance.
+
+Cumulative historical redundant CSS declarations after this batch:
+**208** (200 previously merged + 8 reviewed here).
+Formal milestone remains **69/74 (93.2%)** until a full high-level
+acceptance task is independently closed.

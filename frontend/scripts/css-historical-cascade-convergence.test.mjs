@@ -910,3 +910,90 @@ test('v048-detail to v056: 11 description item shadows remain retired', () => {
     imports.indexOf("import './styles/v056-right-workspace-v2.css';"));
   assert.match(old048, /@media \(prefers-reduced-motion: reduce\)/);
 });
+
+
+test('v049 to v056: 8 dashboard and form desktop shadows stay retired', () => {
+  // Same single selector + property + unconditional context + normal priority.
+  // Do not flatten responsive wrappers or confuse equal-specificity
+  // declarations with later, more-specific Dashboard rail overrides.
+  const cases = [
+    ['.nfc-dashboard-page .nfc-dashboard-layout', {
+      'margin-top': '24px',
+      'grid-template-columns': 'minmax(0, 1fr) minmax(300px, 340px)',
+      gap: '30px',
+    }],
+    ['.nfc-dashboard-page .nfc-dashboard-main-column', {
+      gap: '26px',
+    }],
+    ['.nfc-dashboard-page .nfc-dashboard-rail', {
+      position: 'sticky',
+      top: '76px',
+      gap: '22px',
+    }],
+    ['.nfc-form-grid', {
+      gap: '16px 22px',
+    }],
+  ];
+  let retired = 0;
+  for (const [selector, expected] of cases) {
+    assert.equal(matching(v049, selector).length, 0,
+      'Old unconditional single-selector block must stay retired: ' + selector);
+    const later = matching(v056, selector);
+    assert.equal(later.length, 1, 'Expected one same-selector v056 owner: ' + selector);
+    for (const [property, value] of Object.entries(expected)) {
+      assert.equal(later[0].declarations.get(property), value,
+        'v056 same-selector owner changed: ' + selector + ' ' + property);
+      assert.ok(!value.includes('!important'), 'No priority difference permitted');
+      retired += 1;
+    }
+  }
+  assert.equal(retired, 8);
+
+  // Independent surface ownership: the rail's !important card styling is
+  // unrelated, while stronger v056 rail selectors override geometry as before.
+  const railCard = matching(v049,
+    '.nfc-dashboard-page .nfc-dashboard-rail > .nfc-data-panel');
+  assert.equal(railCard.length, 1);
+  assert.equal(railCard[0].declarations.get('border'),
+    '1px solid var(--nfc-v49-line) !important');
+  assert.equal(railCard[0].declarations.get('background'),
+    'color-mix(in srgb, var(--nfc-v49-surface) 76%, transparent) !important');
+  const strongerRail = matching(v056,
+    '.nfc-app-main .nfc-dashboard-page .nfc-dashboard-rail');
+  assert.equal(strongerRail.length, 2);
+  assert.equal(strongerRail[0].declarations.get('gap'), '14px');
+  assert.equal(strongerRail[1].declarations.get('position'), 'static');
+
+  // The media rules intentionally remain in their ORIGINAL at-rule contexts;
+  // moving them would change desktop and mobile computed styles.
+  const wide = matching(v049, '.nfc-dashboard-page .nfc-dashboard-layout',
+    '@media (min-width: 1600px)');
+  assert.equal(wide.length, 1);
+  assert.equal(wide[0].declarations.get('gap'), '24px');
+  const tabletLayout = matching(v049, '.nfc-dashboard-page .nfc-dashboard-layout',
+    '@media (max-width: 1199px)');
+  assert.equal(tabletLayout[0].declarations.get('grid-template-columns'), '1fr');
+  const tabletRail = matching(v049, '.nfc-dashboard-page .nfc-dashboard-rail',
+    '@media (max-width: 1199px)');
+  assert.equal(tabletRail[0].declarations.get('position'), 'static');
+  assert.equal(tabletRail[0].declarations.get('grid-template-columns'),
+    'repeat(2, minmax(0, 1fr))');
+  const mobileGroup = matching(v049, [
+    '.nfc-dashboard-page .nfc-dashboard-layout',
+    '.nfc-dashboard-page .nfc-dashboard-main-column',
+    '.nfc-dashboard-page .nfc-dashboard-rail',
+  ].join(',\n  '), '@media (max-width: 767px)');
+  assert.equal(mobileGroup.length, 1);
+  assert.equal(mobileGroup[0].declarations.get('gap'), '12px');
+  assert.equal(matching(v049, '.nfc-dashboard-page .nfc-dashboard-rail',
+    '@media (max-width: 767px)')[0].declarations.get('grid-template-columns'), '1fr');
+
+  const imports = read('src/main.tsx');
+  const early = imports.indexOf("import './styles/v049-workspace.css';");
+  const middle = imports.indexOf("import './styles/v055-workspace-breathing.css';");
+  const late = imports.indexOf("import './styles/v056-right-workspace-v2.css';");
+  assert.ok(early >= 0 && early < middle && middle < late,
+    'Identical source-order cascade required');
+  assert.match(old049, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(old049, /@media \(prefers-reduced-transparency: reduce\)/);
+});

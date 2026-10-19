@@ -301,22 +301,6 @@ body,
   box-shadow: none;
 }
 
-.nfc-dashboard-page .nfc-dashboard-layout {
-  margin-top: 18px;
-  grid-template-columns: minmax(0, 1.82fr) minmax(284px, 0.58fr);
-  gap: 22px;
-}
-
-.nfc-dashboard-page .nfc-dashboard-main-column {
-  gap: 18px;
-}
-
-.nfc-dashboard-page .nfc-dashboard-rail {
-  position: sticky;
-  top: 78px;
-  gap: 12px;
-}
-
 .nfc-dashboard-page .nfc-dashboard-rail > .nfc-data-panel {
   border: 1px solid var(--nfc-v49-line) !important;
   border-radius: var(--nfc-v49-radius-lg) !important;
@@ -377,10 +361,6 @@ body,
 
 .nfc-file-tool-form {
   max-width: 1100px;
-}
-
-.nfc-form-grid {
-  gap: 14px 18px;
 }
 
 .nfc-file-tool-primary-actions {
