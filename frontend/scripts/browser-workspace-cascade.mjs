@@ -445,6 +445,11 @@ async function auditLiveMetricThemeCascade(page, item, width, theme) {
     storedMode: localStorage.getItem('nfc_theme_mode'),
   }));
   assert.equal(original.effective, theme.effective);
+  // Chromium can briefly expose new root tokens with a still-transitioning
+  // historical Console v2 metric label. Observe post-style/repaint values,
+  // not that transient mixed-color frame. This never relaxes the AA threshold.
+  const awaitPaintFlush = () => page.evaluate(() =>
+    new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   const initial = await metricThemeSnapshot(page, card);
   const oppositeTheme = theme.effective === 'light' ? 'dark' : 'light';
   let inverted;
@@ -453,6 +458,7 @@ async function auditLiveMetricThemeCascade(page, item, width, theme) {
       document.documentElement.dataset.theme = next;
       document.documentElement.style.colorScheme = next;
     }, oppositeTheme);
+    await awaitPaintFlush();
     inverted = await metricThemeSnapshot(page, card);
     assert.equal(inverted.tokens.effective, oppositeTheme);
     for (const name of Object.keys(initial.tokens.values)) {
@@ -468,6 +474,7 @@ async function auditLiveMetricThemeCascade(page, item, width, theme) {
       document.documentElement.style.colorScheme = before.colorScheme;
     }, original);
   }
+  await awaitPaintFlush();
   const restored = await metricThemeSnapshot(page, card);
   assert.deepEqual(restored.tokens, initial.tokens,
     'Every semantic palette token must fully restore in the same document');
