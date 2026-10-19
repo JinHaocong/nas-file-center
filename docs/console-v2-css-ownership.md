@@ -752,3 +752,36 @@ After merge: historical redundant CSS declaration total **221**
 Formal milestones remain **69/74 (93.2%)**; partial historical
 CSS cleanup does not close comprehensive theme ownership, manual
 visual/a11y, isolated NAS or production sign-off.
+
+
+## 2026-10-19 — v049 → v056 metric-card surfaces and hover authority
+
+Retired **8** unconditional, normal-priority, exact-selector v049 property
+shadows, all overwritten in later-imported v056 with the same CSS property,
+specificity and unconditional at-rule context:
+
+| Historical v049 selector | Retired declarations | v056 exact-selector authority |
+| --- | --- | --- |
+| `.nfc-metric-card` | `min-height`, `padding`, `border-radius`, `background`, `box-shadow` (5) | 104px; 16px 17px; w2 medium radius; w2 mixed surface; no shadow |
+| `.nfc-metric-card:hover` | `transform`, `border-color`, `background` (3) | none; w2 strong hairline; w2 surface |
+
+Preserved the v049 metric-card independent `border` shorthand and four-part
+`transition`, distinct last-child border-right, hover **box-shadow**, and
+original v049 mobile 767px min-height/padding and 420px metric-grid columns.
+The surviving hover `box-shadow` and v056 `box-shadow: none` belong to
+different state selectors; no cross-selector equivalence was assumed.
+Retained all `!important`, focus, theme, reduced-motion and
+reduced-transparency rules and original CSS import order.
+
+Added leaf-rule exact-context/property-owner regression checks for all eight
+retired declarations, and updated the Stage 5E-C/H historical acceptance
+tests to follow five successor-layer rules while preserving their original
+24/23 coverage counts. No browser matrix, read-only guard, or CI gate
+was removed. Real read-only Chromium 8-width/4-theme validation, all PR
+CI and main post-merge checks remain mandatory.
+
+Cumulative safely retired historical CSS declarations after this tranche:
+**229** (221 previously merged + 8 new retirements).
+Formal milestones remain **69/74 (93.2%)** pending comprehensive CSS/theme
+closure, human visual/a11y approval, isolated NAS verification and deployment
+sign-off.
