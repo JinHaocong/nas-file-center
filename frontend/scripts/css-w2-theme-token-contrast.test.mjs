@@ -191,6 +191,8 @@ test('real DOM same-document workspace CSS theme inversion restores actual metri
     "document.documentElement.style.colorScheme = before.colorScheme",
     "storedMode: localStorage.getItem('nfc_theme_mode')",
     "metricCardPaintSample(card, 'normal')",
+    'new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))',
+    'await awaitPaintFlush();',
     'computedContrastRatio(role.foreground, role.background)',
     'assert.deepEqual(restored.tokens, initial.tokens',
     'assert.deepEqual(restored.contrasts.map(x => x.foreground)',
