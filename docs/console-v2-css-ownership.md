@@ -656,3 +656,65 @@ important Dashboard rail-card declarations. This tightens ownership
 coverage without weakening any visual, responsive or safety thresholds.
 Run the full CI suite again on the **new exact final HEAD**; checks from
 the initial failed HEAD are not merge evidence.
+
+## 2026-10-19 — v049 → v056 page and panel text authority
+
+Retired **9** normal-priority, unconditional historical v049 declarations.
+Each is overridden by a later v056 rule with the **same single selector,
+CSS property, specificity and at-rule context**:
+
+| Old v049 selector | Retired properties | Later v056 values |
+| --- | --- | --- |
+| `.nfc-page-title` | `color`, `line-height`, `letter-spacing` (3) | w2 text; 1.18; -0.014em |
+| `.nfc-page-description` | `max-width`, `color` (2) | 82ch; w2 muted text |
+| `.nfc-data-panel-header` | `gap` (1) | 18px |
+| `.nfc-data-panel-title` | `color`, `letter-spacing` (2) | w2 text; -0.004em |
+| `.nfc-data-panel-description` | `color` (1) | w2 subtle text |
+
+The five now-empty v049 unconditional blocks were removed. Separate
+later v049 declarations for title font-size/weight, description spacing
+and line-height, panel-header min-height/padding/border-bottom color
+and background, and panel-title/description typography were retained.
+These remain guarded in the historical cascade regression alongside
+v054's higher-specificity theme text rules and v056 final owners.
+
+Preserved all existing 767px mobile styles, theme variables, grouped
+selectors, `!important` priority, keyboard focus, reduced-motion and
+reduced-transparency contexts, and CSS import order. No shorthand
+substitution or cross-specificity retirement was attempted.
+Automated 8-width × 4-theme read-only Chromium, full backend, Docker
+and dependency checks are still mandatory on the exact final PR HEAD.
+
+After merge historical CSS redundant declaration total: **217**
+(208 previously merged + 9 in this batch).
+Formal high-level acceptance remains **69/74 (93.2%)**; manual visual,
+a11y, real isolated NAS, and deployment sign-off are not yet complete.
+
+### PR #299 — keep Stage 5E-C/H and v049 historical acceptance guards current
+
+The first PR HEAD `2bbca810` failed frontend validation in existing
+Stage 5E-C, Stage 5E-H and v049 historical test cases because they
+still demanded an earlier unconditional v049 block or historical
+values now safely retired by the later v056 canonical owner.
+The new nine-property v049→v056 regression itself passed.
+
+Rather than suppress or delete those suites, updated them to enforce
+the stronger current contract: only one independent late v049 block
+survives for each retired selector, the obsolete CSS properties do not
+return, the exact v056 canonical property values remain correct,
+v049's independent typography and header/panel geometry are kept,
+and the original 24/23/13 historical check counts remain intact.
+Unrelated responsive, theme, accessibility and read-only browser
+coverage is unchanged. Full 16-check/4-workflow validation must rerun
+on the replacement final PR HEAD; previous results are not mergeable.
+
+### PR #299 — top-level owner ordering, not substring matches
+
+A subsequent frontend test run isolated one remaining legacy guard failure:
+`indexOf('.nfc-page-title {')` matched an earlier indented mobile rule,
+while `indexOf('.nfc-data-panel-header {')` matched a qualified selector.
+The test now anchors those matches at column zero to check the intended
+**unconditional top-level owner** positions, still requiring the exact
+relative order of all six selectors. Responsive rules and qualified
+selector coverage remain unmodified. Complete CI must rerun from the
+newest PR HEAD before merging.

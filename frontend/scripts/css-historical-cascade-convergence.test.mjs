@@ -1009,3 +1009,96 @@ test('v049 to v056: 8 dashboard and form desktop shadows stay retired', () => {
   assert.match(old049, /@media \(prefers-reduced-motion: reduce\)/);
   assert.match(old049, /@media \(prefers-reduced-transparency: reduce\)/);
 });
+
+
+test('v049 -> v056: 9 exact v049 page and panel typography shadows remain retired', () => {
+  // These five old unconditional blocks contained only normal-priority
+  // declarations overridden by exactly matching later v056 selectors.
+  // The second v049 blocks below are independently meaningful and remain.
+  const cases = [
+    ['.nfc-page-title', {
+      color: 'var(--nfc-w2-text)',
+      'line-height': '1.18',
+      'letter-spacing': '-0.014em',
+    }, {
+      'font-size': 'clamp(25px, 1.85vw, 32px)',
+      'font-weight': '660',
+    }],
+    ['.nfc-page-description', {
+      'max-width': '82ch',
+      color: 'var(--nfc-w2-text-muted)',
+    }, {
+      'margin-top': '7px',
+      'font-size': '11.5px',
+      'line-height': '1.62',
+    }],
+    ['.nfc-data-panel-header', {
+      gap: '18px',
+    }, {
+      'min-height': '62px',
+      padding: '15px 18px 14px',
+      'border-bottom-color': 'var(--nfc-border-soft)',
+    }],
+    ['.nfc-data-panel-title', {
+      color: 'var(--nfc-w2-text)',
+      'letter-spacing': '-0.004em',
+    }, {
+      'font-size': '13px',
+      'font-weight': '670',
+    }],
+    ['.nfc-data-panel-description', {
+      color: 'var(--nfc-w2-text-subtle)',
+    }, {
+      'margin-top': '4px',
+      'font-size': '10.5px',
+      'line-height': '1.52',
+    }],
+  ];
+  let removed = 0;
+  for (const [selector, shadows, independent] of cases) {
+    const historical = matching(v049, selector);
+    const canonical = matching(v056, selector);
+    assert.equal(historical.length, 1,
+      'Only the independent later v049 owner must remain: ' + selector);
+    assert.equal(canonical.length, 1,
+      'Exactly one unconditional canonical v056 owner: ' + selector);
+    for (const [property, value] of Object.entries(shadows)) {
+      assert.equal(historical[0].declarations.has(property), false,
+        'Obsolete v049 property reintroduced: ' + selector + ' ' + property);
+      assert.equal(canonical[0].declarations.get(property), value,
+        'Exact same-selector v056 authority changed: ' + selector + ' ' + property);
+      assert.ok(!value.includes('!important'),
+        'Normal priority preserved: ' + selector + ' ' + property);
+      removed++;
+    }
+    for (const [property, value] of Object.entries(independent)) {
+      assert.equal(historical[0].declarations.get(property), value,
+        'Independent v049 rule must not be removed: ' + selector + ' ' + property);
+    }
+  }
+  assert.equal(removed, 9);
+
+  // Keep the independently meaningful high-specificity theme/title layer,
+  // phone/tablet CSS and status/keyboard/reduced-motion safeguards.
+  assert.equal(matching(v054, '.nfc-app-main .nfc-page-title')[0]
+    .declarations.get('color'), 'var(--nfc-text)');
+  assert.equal(matching(v054, '.nfc-app-main .nfc-page-description')[0]
+    .declarations.get('color'), 'var(--nfc-text-muted)');
+  assert.equal(matching(v049, '.nfc-page-title',
+    '@media (max-width: 767px)')[0].declarations.get('font-size'), '22px');
+  assert.equal(matching(v049, '.nfc-page-description',
+    '@media (max-width: 767px)')[0].declarations.get('font-size'), '11px');
+  assert.equal(matching(v049, '.nfc-data-panel-header',
+    '@media (max-width: 767px)')[0].declarations.get('min-height'), '56px');
+  assert.equal(matching(v049, '.nfc-data-panel-description',
+    '@media (max-width: 767px)')[0].declarations.get('display'), 'block');
+  assert.equal(matching(v049, '.nfc-row-actions:focus-within')[0]
+    .declarations.get('opacity'), '1');
+  const entry = read('src/main.tsx');
+  const early = entry.indexOf("import './styles/v049-workspace.css';");
+  const mid = entry.indexOf("import './styles/v054-premium-system.css';");
+  const late = entry.indexOf("import './styles/v056-right-workspace-v2.css';");
+  assert.ok(early >= 0 && early < mid && mid < late);
+  assert.match(old049, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(old049, /@media \(prefers-reduced-transparency: reduce\)/);
+});

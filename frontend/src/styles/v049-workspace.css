@@ -130,17 +130,6 @@ body,
   text-transform: uppercase;
 }
 
-.nfc-page-title {
-  color: var(--nfc-v49-text);
-  line-height: 1.08;
-  letter-spacing: -0.04em;
-}
-
-.nfc-page-description {
-  max-width: 76ch;
-  color: var(--nfc-v49-muted);
-}
-
 /* Core surfaces ------------------------------------------------------------ */
 
 .nfc-data-panel,
@@ -169,20 +158,6 @@ body,
 
 .nfc-data-panel-quiet {
   box-shadow: none !important;
-}
-
-.nfc-data-panel-header {
-  gap: 14px;
-
-}
-
-.nfc-data-panel-title {
-  color: var(--nfc-v49-text);
-  letter-spacing: -0.012em;
-}
-
-.nfc-data-panel-description {
-  color: var(--nfc-v49-subtle);
 }
 
 .nfc-panel-count {
