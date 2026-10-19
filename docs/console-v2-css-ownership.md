@@ -925,3 +925,60 @@ elements, gradients, icon masks, hover tooltips, entire-page pixels and
 screen-reader/manual review remain separate acceptance criteria.
 Historical redundant CSS declaration retirement stays **229**; formal
 high-level progress stays **69/74 (93.2%)**.
+
+## 2026-10-19 — same-document right-workspace CSS theme inversion and restoration
+
+Previous fixed-theme screenshots, computed tokens, painted ledger text and
+metric normal/hover audits do not establish whether a **mounted** workspace
+properly invalidates the browser CSS cascade after the effective root theme
+changes and then recovers the original computed styles.
+
+The same read-only Chromium workspace matrix now checks Dashboard and Media
+metric cards on **8 widths × 4 initial Light/Dark/System fixtures × 2 routes
+= 64 same-document inversion-and-restore sequences**. After the accepted
+screenshots and normal/hover evidence, the check reads four computed v056
+semantic tokens plus actual metric card label/value foreground and its
+alpha-composited painted background. It then temporarily changes the
+document root's **effective CSS theme only**, without navigation, and
+re-measures opposite-theme palette ownership and the actual metric ink.
+Finally it restores the root theme and original inline color-scheme,
+asserts exact token and ink restoration, and verifies persisted provider
+mode has not changed. All inverse and restored text/background pairings
+must meet 4.5:1 (64 × 2 phases × 2 roles = **256 comparisons**).
+
+**Important limitation:** direct DOM effective-theme manipulation is a
+CSS cascade invalidation probe, **not a user-facing ThemeProvider control
+test**. The existing `browser-theme-resilience.mjs` independently tests
+actual theme selection, cross-tab updates, system preferences, and storage
+denial on the login UI; neither suite alone certifies every overlay gradient
+or human interaction/a11y experience.
+
+Evidence is uploaded to `live-metric-theme-cascade-audit.json` beside
+the earlier computed-token, painted-heading, normal/hover metric and
+checkbox/focus JSON evidence. Preserve the same 352 accepted screenshots,
+GET-only requests, outbound denials, 8 width × 4 theme browser matrix,
+frontend/backend/Docker CI, and exact-HEAD merge gates.
+
+No product CSS, app logic, theme provider code, data or production changes;
+229 redundant historical CSS declarations retired and formal progress
+69/74 (93.2%) remain unchanged.
+
+### 2026-10-19 — live CSS theme probe render-frame synchronization
+
+Initial PR #307 UI CI failed at the first `light-dark-360` route:
+immediately after changing `data-theme`, the v056 semantic tokens and card
+background were already dark, while an old Console v2 metric label
+still returned the light computed ink `rgb(105, 105, 101)`. This is an
+**intermediate frame**, not sufficient evidence of the stable theme owner.
+
+The Chromium probe now waits for two `requestAnimationFrame` callbacks
+after *each* CSS-only root inversion and restoration, so the browser can
+resolve pending style invalidation/paint and very short reduced-motion
+transitions before measuring normal-text contrast. The probe **still**
+requires 4.5:1 on actual painted backgrounds, actual metric ink to differ
+between themes, and an exact color/token recovery after restoring the
+original theme; failed steady-state visuals must fail CI.
+
+This does not claim transient frames are visually acceptable or constitute
+a pixel-level transition audit. A separate future interaction study could
+evaluate transient theme-switch flashes with real user controls.

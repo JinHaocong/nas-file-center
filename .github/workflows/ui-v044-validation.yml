@@ -231,6 +231,7 @@ jobs:
             frontend/artifacts/browser-workspace-cascade/w2-computed-theme-audit.json
             frontend/artifacts/browser-workspace-cascade/painted-ledger-heading-audit.json
             frontend/artifacts/browser-workspace-cascade/metric-hover-painted-contrast-audit.json
+            frontend/artifacts/browser-workspace-cascade/live-metric-theme-cascade-audit.json
             frontend/artifacts/browser-task-ledger-states/*.png
             frontend/artifacts/browser-indexes-ledger-states/*.png
             frontend/artifacts/browser-media-ledger-states/*.png

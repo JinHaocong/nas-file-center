@@ -179,3 +179,40 @@ test('Dashboard and Media real metric hover/normal paint evidence remains in Chr
     browser.indexOf('await auditMetricHoverPaint(page, item, width, theme)'),
   'Pointer hover must happen after the accepted screenshot, never before it');
 });
+
+
+test('real DOM same-document workspace CSS theme inversion restores actual metric ink', () => {
+  const required = [
+    'async function auditLiveMetricThemeCascade(page, item, width, theme)',
+    'async function metricThemeSnapshot(page, card)',
+    "document.documentElement.dataset.theme = next",
+    "document.documentElement.style.colorScheme = next",
+    "document.documentElement.dataset.theme = before.effective",
+    "document.documentElement.style.colorScheme = before.colorScheme",
+    "storedMode: localStorage.getItem('nfc_theme_mode')",
+    "metricCardPaintSample(card, 'normal')",
+    'new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))',
+    'await awaitPaintFlush();',
+    'computedContrastRatio(role.foreground, role.background)',
+    'assert.deepEqual(restored.tokens, initial.tokens',
+    'assert.deepEqual(restored.contrasts.map(x => x.foreground)',
+    'await auditLiveMetricThemeCascade(page, item, width, theme)',
+    'liveMetricThemeAudit.length, WIDTHS.length * THEMES.length * 2',
+    "writeFileSync(resolve(OUT, 'live-metric-theme-cascade-audit.json')",
+    'assert.deepEqual(writes, []',
+    'assert.deepEqual(outbound, []',
+  ];
+  for (const invariant of required)
+    assert.ok(browser.includes(invariant),
+      'Same-document real CSS theme inversion audit removed: ' + invariant);
+  assert.ok(browser.indexOf("path: resolve(OUT, item.id + '-' + label + '.png')") <
+    browser.indexOf('await auditLiveMetricThemeCascade(page, item, width, theme)'),
+    'Theme flip must only occur after accepted screenshots');
+  const workflow = readFileSync('../.github/workflows/ui-v044-validation.yml', 'utf8');
+  assert.ok(workflow.includes(
+    'frontend/artifacts/browser-workspace-cascade/live-metric-theme-cascade-audit.json'),
+    'Real browser theme inversion evidence must be uploaded in UI Validation');
+  assert.ok(readFileSync('scripts/browser-theme-resilience.mjs', 'utf8')
+    .includes("locator('#nfc-login-theme-select').selectOption('dark')"),
+    'Actual ThemeProvider control test must be retained separately');
+});
