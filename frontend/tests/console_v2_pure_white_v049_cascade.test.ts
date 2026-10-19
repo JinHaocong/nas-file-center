@@ -68,39 +68,78 @@ describe('Pure White historical CSS cleanup: safe v049 same-selector cascade', (
     let retired = 0;
     for (const [selector, expected] of winners) {
       const rules = selectorRules(selector);
-      assert.equal(rules.length, 2, selector + ' still has an early and late source block');
-      const earlier = properties(rules[0]);
-      const later = properties(rules[1]);
+      // Only eyebrow has independent declarations in both historical
+      // blocks. Four other early text blocks were completely shadowed
+      // by v056 and must never reappear in unconditional v049.
+      const eyebrow = selector === '.nfc-page-eyebrow';
+      assert.equal(rules.length, eyebrow ? 2 : 1,
+        selector + ' unconditional v049 ownership drifted');
+      const earlier = eyebrow ? properties(rules[0]) : undefined;
+      const later = properties(rules.at(-1)!);
       for (const [property, finalValue] of Object.entries(expected)) {
-        assert.equal(earlier.has(property), false, selector + ' earlier ' + property + ' was shadowed');
-        assert.equal(later.get(property), finalValue, selector + ' later ' + property + ' is unchanged');
+        if (earlier) assert.equal(earlier.has(property), false,
+          selector + ' earlier property must remain shadow-free: ' + property);
+        assert.equal(later.get(property), finalValue,
+          selector + ' later independently meaningful property must survive: ' + property);
         retired += 1;
       }
     }
     assert.equal(retired, 13);
-  });
-
-  test('each early selector retains independent typography instead of deleting its rule', () => {
-    const expected = [
-      ['.nfc-page-eyebrow', 'font-weight', '740'],
-      ['.nfc-page-title', 'line-height', '1.08'],
-      ['.nfc-page-description', 'max-width', '76ch'],
-      ['.nfc-data-panel-title', 'letter-spacing', '-0.012em'],
-      ['.nfc-data-panel-description', 'color', 'var(--nfc-v49-subtle)'],
-    ] as const;
-    for (const [selector, property, value] of expected) {
-      const rules = selectorRules(selector);
-      assert.equal(properties(rules[0]).get(property), value);
+    for (const [selector, obsolete] of [
+      ['.nfc-page-title', ['color', 'line-height', 'letter-spacing']],
+      ['.nfc-page-description', ['max-width', 'color']],
+      ['.nfc-data-panel-title', ['color', 'letter-spacing']],
+      ['.nfc-data-panel-description', ['color']],
+    ] as const) {
+      const only = properties(selectorRules(selector)[0]);
+      for (const name of obsolete) assert.equal(only.has(name), false,
+        selector + ' obsolete early v049 property reintroduced: ' + name);
     }
   });
 
-  test('authoritative second group stays after first group and other native styles remain', () => {
-    const earlyTitle = css.indexOf('.nfc-page-title {');
-    const finalTitle = css.lastIndexOf('.nfc-page-title {');
-    const earlyPanel = css.indexOf('.nfc-data-panel-title {');
-    const finalPanel = css.lastIndexOf('.nfc-data-panel-title {');
-    assert.ok(earlyTitle >= 0 && earlyTitle < finalTitle);
-    assert.ok(earlyPanel >= 0 && earlyPanel < finalPanel);
+  test('retain independent eyebrow and late v049 typography with exact v056 text owners', () => {
+    const expected = [
+      ['.nfc-page-eyebrow', 'font-weight', '740', 0],
+      ['.nfc-page-title', 'font-weight', '660', 0],
+      ['.nfc-page-description', 'line-height', '1.62', 0],
+      ['.nfc-data-panel-title', 'font-size', '13px', 0],
+      ['.nfc-data-panel-description', 'font-size', '10.5px', 0],
+    ] as const;
+    for (const [selector, name, value, index] of expected) {
+      const rules = selectorRules(selector);
+      assert.equal(properties(rules[index]).get(name), value,
+        selector + ' independent historical typography changed');
+    }
+    // The final same-selector values are pinned independently from v049
+    // so deleting old blocks must never change the canonical text styling.
+    const v056 = read('src/styles/v056-right-workspace-v2.css');
+    for (const [selector, name, value] of [
+      ['.nfc-page-title', 'line-height', '1.18'],
+      ['.nfc-page-description', 'max-width', '82ch'],
+      ['.nfc-data-panel-title', 'letter-spacing', '-0.004em'],
+      ['.nfc-data-panel-description', 'color', 'var(--nfc-w2-text-subtle)'],
+    ] as const) {
+      const body = v056.match(new RegExp('(?:^|\\n)' +
+        selector.replace(/\./g, '\\.') + '\\s*\\{([^}]*)\\}'))?.[1];
+      assert.ok(body, 'Missing canonical v056 text rule: ' + selector);
+      assert.equal(properties(body).get(name), value, selector + ' winner changed');
+    }
+  });
+
+  test('sole historical owners stay in source order and other native styles remain', () => {
+    const eyebrow = css.indexOf('.nfc-page-eyebrow {');
+    const title = css.indexOf('.nfc-page-title {');
+    const description = css.indexOf('.nfc-page-description {');
+    const panel = css.indexOf('.nfc-data-panel-header {');
+    const panelTitle = css.indexOf('.nfc-data-panel-title {');
+    const panelDescription = css.indexOf('.nfc-data-panel-description {');
+    assert.ok(eyebrow >= 0 && eyebrow < title && title < description);
+    assert.ok(description < panel && panel < panelTitle && panelTitle < panelDescription);
+    for (const selector of [
+      '.nfc-page-title', '.nfc-page-description',
+      '.nfc-data-panel-title', '.nfc-data-panel-description',
+    ]) assert.equal(selectorRules(selector).length, 1,
+      'A retired early selector block was reintroduced: ' + selector);
     for (const marker of [
       '.nfc-data-panel-dense {', '.nfc-page-header {',
       '.nfc-directory-list-viewport {', '.nfc-system-controls-page .nfc-settings-grid {',

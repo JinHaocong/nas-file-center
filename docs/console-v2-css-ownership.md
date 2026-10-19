@@ -689,3 +689,21 @@ After merge historical CSS redundant declaration total: **217**
 (208 previously merged + 9 in this batch).
 Formal high-level acceptance remains **69/74 (93.2%)**; manual visual,
 a11y, real isolated NAS, and deployment sign-off are not yet complete.
+
+### PR #299 — keep Stage 5E-C/H and v049 historical acceptance guards current
+
+The first PR HEAD `2bbca810` failed frontend validation in existing
+Stage 5E-C, Stage 5E-H and v049 historical test cases because they
+still demanded an earlier unconditional v049 block or historical
+values now safely retired by the later v056 canonical owner.
+The new nine-property v049→v056 regression itself passed.
+
+Rather than suppress or delete those suites, updated them to enforce
+the stronger current contract: only one independent late v049 block
+survives for each retired selector, the obsolete CSS properties do not
+return, the exact v056 canonical property values remain correct,
+v049's independent typography and header/panel geometry are kept,
+and the original 24/23/13 historical check counts remain intact.
+Unrelated responsive, theme, accessibility and read-only browser
+coverage is unchanged. Full 16-check/4-workflow validation must rerun
+on the replacement final PR HEAD; previous results are not mergeable.

@@ -26,7 +26,7 @@ const retired: Array<[string, string[], number]> = [
   ['.nfc-header.nfc-header', ['top', 'min-height', 'padding', 'border-radius'], 2],
   ['.nfc-header-status', ['background'], 2],
   ['.nfc-page-header', ['background'], 2],
-  ['.nfc-data-panel-header', ['padding', 'border-bottom-color'], 2],
+  ['.nfc-data-panel-header', ['padding', 'border-bottom-color'], 1],
   ['.nfc-metric-card', ['border', 'border-radius', 'background', 'box-shadow'], 2],
   ['.nfc-metric-card:last-child', ['border-right'], 1],
   ['.nfc-metric-card:hover', ['transform', 'background'], 1],
@@ -54,6 +54,13 @@ describe('Pure White Stage 5E-H v049 late-authority convergence', () => {
         assert.ok(rules.length >= 2, selector + ' must preserve retained early props');
       }
       const winning = rules[expectedDesktopRules - 1];
+      if (selector === '.nfc-data-panel-header') {
+        assert.equal(property(winning, 'gap'), undefined,
+          'Old v049 panel-header gap must remain retired');
+        const late = read('src/styles/v056-right-workspace-v2.css');
+        assert.match(late, /\.nfc-data-panel-header\s*\{[^}]*gap:\s*18px;/,
+          'Later v056 exact-selector gap owner must survive');
+      }
       for (const name of removed) {
         if (expectedDesktopRules === 2) {
           assert.equal(property(rules[0], name), undefined,
