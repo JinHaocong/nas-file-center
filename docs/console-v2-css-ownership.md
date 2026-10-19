@@ -641,3 +641,18 @@ Cumulative historical redundant CSS declarations after this batch:
 **208** (200 previously merged + 8 reviewed here).
 Formal milestone remains **69/74 (93.2%)** until a full high-level
 acceptance task is independently closed.
+
+### PR #298 — align historical Dashboard regression with canonical v056 owner
+
+The first PR HEAD `02a6b87` had a frontend test failure because the
+pre-existing `v049 dashboard layout and important native rail` regression
+still asserted the **obsolete** v049 desktop layout declarations existed.
+The new exact-selector retirement regression already passed. The older
+regression was updated rather than removed: it now asserts the retired
+unconditional declaration block stays absent, checks the exact canonical
+v056 `margin-top` / `grid-template-columns` / `gap`, and continues to
+require the original 1600px wide gap, 1199px tablet grid and **all four**
+important Dashboard rail-card declarations. This tightens ownership
+coverage without weakening any visual, responsive or safety thresholds.
+Run the full CI suite again on the **new exact final HEAD**; checks from
+the initial failed HEAD are not merge evidence.

@@ -317,11 +317,23 @@ test('v049 → v056: 16 old dashboard quick-action and summary row shadows stay 
   assert.equal(retired, 16);
 });
 
-test('v049 dashboard layout and important native rail remain independently owned', () => {
-  const layout = matching(v049, '.nfc-dashboard-page .nfc-dashboard-layout');
-  assert.equal(layout.length, 1);
-  assert.equal(layout[0].declarations.get('margin-top'), '18px');
-  assert.equal(layout[0].declarations.get('gap'), '22px');
+test('v049 dashboard layout shadows retire while important native rail stays independent', () => {
+  const selector = '.nfc-dashboard-page .nfc-dashboard-layout';
+  const obsolete = matching(v049, selector);
+  assert.equal(obsolete.length, 0,
+    'Old unconditional dashboard geometry must not be reintroduced');
+  const canonical = matching(v056, selector);
+  assert.equal(canonical.length, 1);
+  assert.equal(canonical[0].declarations.get('margin-top'), '24px');
+  assert.equal(canonical[0].declarations.get('grid-template-columns'),
+    'minmax(0, 1fr) minmax(300px, 340px)');
+  assert.equal(canonical[0].declarations.get('gap'), '30px');
+  assert.equal(matching(v049, selector, '@media (min-width: 1600px)')[0]
+    .declarations.get('gap'), '24px',
+    'Retain the separate wide-screen dashboard rule');
+  assert.equal(matching(v049, selector, '@media (max-width: 1199px)')[0]
+    .declarations.get('grid-template-columns'), '1fr',
+    'Retain the original tablet grid');
   const rail = matching(v049, '.nfc-dashboard-page .nfc-dashboard-rail > .nfc-data-panel');
   assert.equal(rail.length, 1);
   for (const [prop, expected] of Object.entries({
