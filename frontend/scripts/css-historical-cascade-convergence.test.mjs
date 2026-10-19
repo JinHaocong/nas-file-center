@@ -592,3 +592,68 @@ test('v049 workflow step and row action: 9 same-selector v056 declarations are s
   assert.match(old049, /@media \(prefers-reduced-motion: reduce\)/);
   assert.match(old049, /@media \(prefers-reduced-transparency: reduce\)/);
 });
+
+
+test('v054-v056: 13 exact typography shadows retire with historical colors retained', () => {
+  // Exact single-selector specificity, unconditional ancestry, normal
+  // importance; responsive and independent earlier colors remain.
+  const cases = [
+    ['.nfc-app-main .nfc-page-title', {
+      'font-size': 'clamp(27px, 1.45vw, 31px)',
+      'font-weight': '620',
+      'line-height': '1.18',
+      'letter-spacing': '-0.014em',
+      'text-wrap': 'balance',
+    }, 'var(--nfc-text)'],
+    ['.nfc-app-main .nfc-page-description', {
+      'max-width': '82ch',
+      'margin-top': '8px',
+      'font-size': '13px',
+      'line-height': '1.58',
+    }, 'var(--nfc-text-muted)'],
+    ['.nfc-app-main .nfc-data-panel-title', {
+      'font-size': '14px',
+      'font-weight': '620',
+      'line-height': '1.42',
+      'letter-spacing': '-0.004em',
+    }, 'var(--nfc-text)'],
+  ];
+  let retired = 0;
+  for (const [selector, declarations, retainedColor] of cases) {
+    const old = matching(v054, selector);
+    const owners = matching(v056, selector);
+    assert.equal(old.length, 1, selector + ': one historical color-only rule');
+    assert.equal(owners.length, 1, selector + ': one final v056 owner');
+    assert.equal(old[0].declarations.size, 1, selector + ': only independent color survives');
+    assert.equal(old[0].declarations.get('color'), retainedColor, selector + ': v054 color preserved');
+    for (const [property, expected] of Object.entries(declarations)) {
+      assert.equal(old[0].declarations.has(property), false, selector + ': obsolete ' + property);
+      assert.equal(owners[0].declarations.get(property), expected, selector + ': v056 final ' + property);
+      assert.ok(!expected.includes('!important'), 'normal cascade importance unchanged');
+      retired++;
+    }
+  }
+  assert.equal(retired, 13);
+  const mobile = '@media (max-width: 767px)';
+  const phone = '@media (max-width: 420px)';
+  assert.equal(matching(v054, '.nfc-app-main .nfc-page-title', mobile)[0]
+    .declarations.get('font-size'), '23px');
+  assert.equal(matching(v054, '.nfc-app-main .nfc-page-description', mobile)[0]
+    .declarations.get('line-height'), '1.6');
+  assert.equal(matching(v054, '.nfc-app-main .nfc-page-title', phone)[0]
+    .declarations.get('font-size'), '22px');
+  assert.equal(matching(v056, '.nfc-app-main .nfc-page-title', mobile)[0]
+    .declarations.get('font-size'), '24px');
+  assert.equal(matching(v056, '.nfc-app-main .nfc-page-title', phone)[0]
+    .declarations.get('font-size'), '22px');
+  assert.equal(matching(v056, '.nfc-app-main .nfc-page-description', mobile)[0]
+    .declarations.get('font-size'), '12.75px');
+  assert.equal(matching(v056, '.nfc-app-main .nfc-data-panel-title', mobile)[0]
+    .declarations.get('font-size'), '13.5px');
+  const imports = read('src/main.tsx');
+  const early = imports.indexOf("import './styles/v054-premium-system.css';");
+  const late = imports.indexOf("import './styles/v056-right-workspace-v2.css';");
+  assert.ok(early >= 0 && early < late, 'Preserve canonical import order');
+  assert.match(old054, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(old054, /@media \(prefers-reduced-transparency: reduce\)/);
+});
