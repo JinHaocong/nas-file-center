@@ -21,7 +21,6 @@ describe('Pure White Stage 5E-C v049 historical shadows and dense ledger accepta
       ['.nfc-header.nfc-header', ['margin', 'border', 'box-shadow', 'backdrop-filter', '-webkit-backdrop-filter']],
       ['.nfc-page-header', ['min-height', 'margin', 'padding', 'align-items', 'gap', 'border', 'border-radius', 'box-shadow']],
       ['.nfc-page-header-copy', ['max-width']],
-      ['.nfc-data-panel-header', ['min-height']],
       ['.nfc-metric-card', ['min-height', 'padding']],
     ];
     let total = 0;
@@ -37,6 +36,21 @@ describe('Pure White Stage 5E-C v049 historical shadows and dense ledger accepta
         total++;
       }
     }
+    // This panel selector now has ONE unconditional v049 block (the
+    // independently meaningful later min-height/padding/background owner).
+    // The obsolete earlier min-height shadow must stay absent; the v056
+    // exact-selector owner still explicitly resets the desktop min-height.
+    const panelRoot = [...v049.matchAll(/^\.nfc-data-panel-header\s*\{([^}]*)\}/gm)];
+    assert.equal(panelRoot.length, 1,
+      'Old unconditional v049 panel-header shadow must not be reintroduced');
+    assert.match(panelRoot[0][1], /min-height:\s*62px;/);
+    assert.match(panelRoot[0][1], /padding:\s*15px 18px 14px;/);
+    const panelCanonical = v056.match(/^\.nfc-data-panel-header\s*\{([^}]*)\}/m)?.[1];
+    assert.ok(panelCanonical, 'Canonical v056 panel-header owner must survive');
+    assert.match(panelCanonical, /min-height:\s*0;/);
+    assert.match(panelCanonical, /gap:\s*18px;/);
+    total += 1;
+
     // The old action-row padding is now its sole unconditional v049 rule.
     const actionBlocks = rules('.nfc-page-actions');
     assert.equal(actionBlocks.length, 1, 'Retain only the independent v049 action padding');
