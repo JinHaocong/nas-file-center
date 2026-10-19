@@ -148,3 +148,34 @@ test('real ledger headings must audit actual foreground and painted background',
       'Browser JSON evidence must actually upload to CI artifacts: ' + artifact);
   }
 });
+
+
+test('Dashboard and Media real metric hover/normal paint evidence remains in Chromium CI', () => {
+  const required = [
+    'async function metricCardPaintSample(card, state)',
+    "node.querySelector('.nfc-metric-' + role)",
+    'getComputedStyle(target)',
+    'style.backgroundColor',
+    "style.backgroundImage !== 'none'",
+    'Number(style.opacity) !== 1',
+    'layers[layers.length - 1].alpha !== 1',
+    "for (const state of ['normal', 'hover'])",
+    "if (state === 'hover') await card.hover()",
+    "node.matches(':hover')",
+    'computedContrastRatio(role.foreground, role.background)',
+    'await auditMetricHoverPaint(page, item, width, theme)',
+    'metricHoverPaintAudit.length, WIDTHS.length * THEMES.length * 2 * 2 * 2',
+    "writeFileSync(resolve(OUT, 'metric-hover-painted-contrast-audit.json')",
+    'assert.deepEqual(writes, []',
+    'assert.deepEqual(outbound, []',
+  ];
+  for (const contract of required)
+    assert.ok(browser.includes(contract), 'Actual metric hover contrast contract lost: ' + contract);
+  const workflow = readFileSync('../.github/workflows/ui-v044-validation.yml', 'utf8');
+  assert.ok(workflow.includes(
+    'frontend/artifacts/browser-workspace-cascade/metric-hover-painted-contrast-audit.json'),
+  'CI must upload actual rendered metric hover contrast evidence');
+  assert.ok(browser.indexOf("path: resolve(OUT, item.id + '-' + label + '.png')") <
+    browser.indexOf('await auditMetricHoverPaint(page, item, width, theme)'),
+  'Pointer hover must happen after the accepted screenshot, never before it');
+});
