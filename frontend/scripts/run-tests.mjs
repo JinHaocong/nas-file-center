@@ -8,6 +8,7 @@ try {
   execSync('node --test scripts/favicon-assets.test.mjs', { stdio: 'inherit' });
   execSync('node scripts/check-console-css-ownership.mjs', { stdio: 'inherit' });
   execSync('node --test scripts/console-contrast.test.mjs', { stdio: 'inherit' });
+  execSync('node --test scripts/css-w2-theme-token-contrast.test.mjs', { stdio: 'inherit' });
   execSync('node --test scripts/final-integration-gates.test.mjs', { stdio: 'inherit' });
   execSync('node --test scripts/download-verification-delete.test.mjs', { stdio: 'inherit' });
   execSync('node --test scripts/shared-primitives-acceptance.test.mjs', { stdio: 'inherit' });
