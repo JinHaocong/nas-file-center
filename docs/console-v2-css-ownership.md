@@ -962,3 +962,23 @@ frontend/backend/Docker CI, and exact-HEAD merge gates.
 No product CSS, app logic, theme provider code, data or production changes;
 229 redundant historical CSS declarations retired and formal progress
 69/74 (93.2%) remain unchanged.
+
+### 2026-10-19 — live CSS theme probe render-frame synchronization
+
+Initial PR #307 UI CI failed at the first `light-dark-360` route:
+immediately after changing `data-theme`, the v056 semantic tokens and card
+background were already dark, while an old Console v2 metric label
+still returned the light computed ink `rgb(105, 105, 101)`. This is an
+**intermediate frame**, not sufficient evidence of the stable theme owner.
+
+The Chromium probe now waits for two `requestAnimationFrame` callbacks
+after *each* CSS-only root inversion and restoration, so the browser can
+resolve pending style invalidation/paint and very short reduced-motion
+transitions before measuring normal-text contrast. The probe **still**
+requires 4.5:1 on actual painted backgrounds, actual metric ink to differ
+between themes, and an exact color/token recovery after restoring the
+original theme; failed steady-state visuals must fail CI.
+
+This does not claim transient frames are visually acceptable or constitute
+a pixel-level transition audit. A separate future interaction study could
+evaluate transient theme-switch flashes with real user controls.
