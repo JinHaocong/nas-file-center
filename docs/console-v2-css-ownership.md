@@ -485,3 +485,37 @@ remain required on the precise PR HEAD.
 This is incremental historical CSS cleanup, **not** complete
 CSS/theme acceptance, human visual/a11y approval, real NAS verification
 or production deployment. Formal milestone **69/74 (93.2%)** unchanged.
+
+
+## 2026-10-19 — v054 → v056 page-header geometry and panel description
+
+Retired **10 unconditional historical declarations** in the v054 layer
+already overridden by identical, later-imported v056 selectors, with the
+same CSS properties, specificity, at-rule context and normal priority:
+
+| v054 historical single selector | Removed properties | Existing v056 canonical values |
+| --- | --- | --- |
+| \`.nfc-app-main .nfc-page-header\` | \`min-height\`, \`margin\`, \`padding\`, \`align-items\`, \`gap\`, \`border-bottom\` (6) | 0; 0 0 24px; 0 0 20px; flex-end; 28px; w2 hairline |
+| \`.nfc-app-main .nfc-page-header-copy\` | \`max-width\` (1) | min(980px, 74vw) |
+| \`.nfc-app-main .nfc-data-panel-description\` | \`margin-top\`, \`font-size\`, \`line-height\` (3) | 5px; 11.5px; 1.52 |
+
+The two obsolete v054 single-selector blocks are removed entirely.
+Preserved the v054 panel-description independent \`max-width: 86ch\`
+and \`color: var(--nfc-text-subtle)\`, the separately owned
+\`.nfc-app-main .nfc-page-header::after\` ornament, v055 decoration,
+the v056 \`border: 0\` reset and later exact \`border-bottom\` winner,
+1199px/767px responsive rules, 420px rules, CSS import order, focus,
+Light/Dark/System themes and reduced-motion/transparency rules.
+
+Extended \`frontend/scripts/css-historical-cascade-convergence.test.mjs\`
+with exact v056 property-owner checks, guards preventing ten historical
+declarations from returning, independent v054 declarations, ornament
+retention, responsive flex/layout overrides and import-order invariants.
+CI's read-only Chromium eight-width/four-theme matrix and all security
+and build checks remain required for the final PR head.
+
+Stage cumulative historical **redundant declaration** cleanup:
+**179** (169 previously merged + 10 in this batch).
+This does **not** finish full historical CSS/theme convergence, human
+visual/a11y acceptance, isolated real NAS verification or deployment.
+Formal milestone remains **69/74 (93.2%)**.
