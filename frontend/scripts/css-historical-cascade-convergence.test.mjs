@@ -735,3 +735,91 @@ test('v054-v056: 10 shadowed header layout and panel-description declarations re
   assert.match(old054, /@media \(prefers-reduced-transparency: reduce\)/);
   assert.match(old054, /@media \(prefers-reduced-motion: reduce\)/);
 });
+
+
+test('v054-v056: 10 panel, media, root and workflow shadows remain retired', () => {
+  // Unconditional exact single-selector and exact-property matches only.
+  // Different selector groups, @media wrappers, shorthands, and !important
+  // declarations are not used to infer additional safe removals.
+  const panel = matching(v054, '.nfc-app-main .nfc-data-panel-header');
+  const finalPanel = matching(v056, '.nfc-app-main .nfc-data-panel-header');
+  assert.equal(panel.length, 1);
+  assert.equal(finalPanel.length, 1);
+  assert.deepEqual([...panel[0].declarations], [
+    ['gap', '14px'],
+    ['border-bottom-color', 'var(--nfc-v54-line)'],
+  ], 'Independent historical panel gap and border-bottom color retained');
+  for (const [name, value] of Object.entries({
+    'min-height': '0',
+    padding: 'var(--nfc-w2-panel-header-top) var(--nfc-w2-panel-header-x) var(--nfc-w2-panel-header-bottom)',
+    background: 'transparent',
+  })) {
+    assert.equal(panel[0].declarations.has(name), false);
+    assert.equal(finalPanel[0].declarations.get(name), value);
+    assert.ok(!value.includes('!important'));
+  }
+  assert.equal(finalPanel[0].declarations.get('border'), '0');
+  assert.equal(matching(v054, '.nfc-app-main .nfc-data-panel-header',
+    '@media (max-width: 767px)')[0].declarations.get('min-height'), '58px');
+  assert.equal(matching(v054, '.nfc-app-main .nfc-data-panel-header',
+    '@media (max-width: 767px)')[0].declarations.get('padding'), '12px');
+  assert.equal(matching(v056, '.nfc-app-main .nfc-data-panel-header',
+    '@media (max-width: 767px)')[0].declarations.get('padding'), '13px 14px 11px');
+
+  assert.equal(matching(v054, '.nfc-app-main .nfc-media-page .nfc-page-alert').length, 0);
+  const media = matching(v056, '.nfc-app-main .nfc-media-page .nfc-page-alert');
+  assert.equal(media.length, 2);
+  assert.equal(media[0].declarations.get('margin'), '12px 14px 14px');
+  assert.equal(media[1].declarations.has('margin'), false);
+  assert.equal(media[1].declarations.get('border'), '0');
+  assert.equal(media[1].declarations.get('background'),
+    'color-mix(in srgb, var(--nfc-w2-warning) 6%, var(--nfc-w2-surface-soft))');
+
+  const label = matching(v054, '.nfc-app-main .nfc-root-list-label');
+  const finalLabel = matching(v056, '.nfc-app-main .nfc-root-list-label');
+  assert.equal(label.length, 1);
+  assert.equal(finalLabel.length, 1);
+  assert.deepEqual([...label[0].declarations], [
+    ['font-weight', '720'], ['letter-spacing', '0.06em'], ['text-transform', 'uppercase'],
+  ], 'Independent label font weight, tracking and capitalization retained');
+  assert.equal(finalLabel[0].declarations.get('color'), 'var(--nfc-w2-text-subtle)');
+  assert.equal(finalLabel[0].declarations.get('font-size'), '11px');
+
+  assert.equal(matching(v054, '.nfc-app-main .nfc-workflow-editor-layout').length, 0);
+  assert.equal(matching(v056, '.nfc-app-main .nfc-workflow-editor-layout').length, 1);
+  assert.equal(matching(v056, '.nfc-app-main .nfc-workflow-editor-layout')[0]
+    .declarations.get('gap'), '28px');
+  assert.equal(matching(v054, '.nfc-app-main .nfc-workflow-editor-layout',
+    '@media (max-width: 980px)')[0].declarations.get('gap'), '16px',
+    'Distinct 980px workflow rule must remain in original context');
+
+  const option = matching(v054, '.nfc-app-main .nfc-workflow-mode-option');
+  const finalOption = matching(v056, '.nfc-app-main .nfc-workflow-mode-option');
+  assert.equal(option.length, 1);
+  assert.equal(finalOption.length, 1);
+  assert.deepEqual([...option[0].declarations], [
+    ['padding', '10px 11px'], ['border', '1px solid var(--nfc-v54-line)'],
+  ], 'Historical padding and border shorthand are independent of final border-color');
+  for (const [name, value] of Object.entries({
+    'min-height': '76px',
+    'border-radius': 'var(--nfc-w2-radius-sm)',
+    background: 'var(--nfc-w2-surface-soft)',
+  })) {
+    assert.equal(option[0].declarations.has(name), false);
+    assert.equal(finalOption[0].declarations.get(name), value);
+    assert.ok(!value.includes('!important'));
+  }
+  assert.equal(finalOption[0].declarations.get('border-color'), 'var(--nfc-w2-hairline)');
+  assert.equal(matching(v054, '.nfc-app-main .nfc-workflow-mode-grid',
+    '@media (max-width: 420px)')[0].declarations.get('grid-template-columns'),
+    '1fr !important', 'Independent phone grid and priority must survive');
+
+  assert.equal(3 + 1 + 2 + 1 + 3, 10);
+  const imports = read('src/main.tsx');
+  const early = imports.indexOf("import './styles/v054-premium-system.css';");
+  const middle = imports.indexOf("import './styles/v055-workspace-breathing.css';");
+  const late = imports.indexOf("import './styles/v056-right-workspace-v2.css';");
+  assert.ok(early >= 0 && early < middle && middle < late);
+  assert.match(old054, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(old054, /@media \(prefers-reduced-transparency: reduce\)/);
+});

@@ -185,16 +185,8 @@
 }
 
 .nfc-app-main .nfc-data-panel-header {
-  min-height: 64px;
-  padding: 14px 16px 13px;
   gap: 14px;
   border-bottom-color: var(--nfc-v54-line);
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--nfc-surface-2) 34%, transparent),
-      transparent
-    );
 }
 
 .nfc-app-main .nfc-data-panel-title {
@@ -588,10 +580,6 @@
   min-height: 64px;
 }
 
-.nfc-app-main .nfc-media-page .nfc-page-alert {
-  margin: 12px;
-}
-
 .nfc-app-main .nfc-plan-action-surface,
 .nfc-app-main .nfc-dedupe-plan-surface,
 .nfc-app-main .nfc-tool-workbench {
@@ -879,8 +867,6 @@
 }
 
 .nfc-app-main .nfc-root-list-label {
-  color: var(--nfc-text-subtle);
-  font-size: 9px;
   font-weight: 720;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -924,10 +910,6 @@
 }
 
 /* Workflow composer -------------------------------------------------------- */
-.nfc-app-main .nfc-workflow-editor-layout {
-  gap: 20px;
-}
-
 .nfc-app-main .nfc-workflow-definition-rail,
 .nfc-app-main .nfc-workflow-pipeline-canvas {
   min-width: 0;
@@ -943,11 +925,8 @@
 }
 
 .nfc-app-main .nfc-workflow-mode-option {
-  min-height: 54px;
   padding: 10px 11px;
   border: 1px solid var(--nfc-v54-line);
-  border-radius: 10px;
-  background: var(--nfc-v54-surface-soft);
 }
 
 .nfc-app-main .nfc-workflow-step-list {
