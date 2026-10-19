@@ -891,3 +891,37 @@ covered by prior layout/token tests, not the new heading-paint claim.
 All high-level remaining acceptance milestones stay open. No NAS
 mutation, no production approval, historical declarations retired
 stay **229**, formal progress **69/74 (93.2%)**.
+
+## 2026-10-19 — real Dashboard/Media metric card normal + hover contrast
+
+PR #305 established actual painted ledger heading ink/background evidence.
+The metric cards retain a separate cross-generation cascade: early
+Console v2 Dashboard uses high-specificity `!important` surface and typography
+while v056 later owns the workspace card family and regular hover state.
+Comparing inherited palette tokens alone cannot verify either computed winner.
+
+The original read-only 8-viewport × 4-theme Chromium workspace suite now
+checks the first actual rendered Dashboard and Media metric cards in **normal
+and real Playwright pointer-hover states**, comparing both visible metric
+label and value text with alpha-composited actual CSS ancestor backgrounds.
+That is **2 routes × 8 widths × 4 themes × 2 states × 2 text roles = 256**
+foreground/painted-background pairs at the WCAG AA 4.5:1 normal-text gate.
+
+Every calculation preserves the exact route, width, selected/system/effective
+theme, normal/hover state, computed card background, foreground, composited
+painted background, layer ancestry and numeric ratio in
+`metric-hover-painted-contrast-audit.json` and uploads the artifact to CI.
+Unsupported color spaces, non-solid backgrounds/gradients, opacity layers,
+unresolvable alpha, or missing actual text fail closed rather than passing
+with an assumed white backdrop. No data mutation or outgoing NAS calls.
+
+The metric audit runs **after the previously accepted page screenshot**,
+preserving 352 existing screenshots, populated ledgers, 192 computed-token
+cases, 160 heading cases, native keyboard focus tests, all breakpoints and
+4 exact-HEAD PR workflows. There are no CSS style changes.
+
+Scope: ordinary painted metric label/value ink only; complex pseudo
+elements, gradients, icon masks, hover tooltips, entire-page pixels and
+screen-reader/manual review remain separate acceptance criteria.
+Historical redundant CSS declaration retirement stays **229**; formal
+high-level progress stays **69/74 (93.2%)**.
