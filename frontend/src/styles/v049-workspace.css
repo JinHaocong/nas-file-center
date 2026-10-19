@@ -1070,20 +1070,9 @@ body,
   line-height: 1.52;
 }
 
-/* Metrics stop reading like one long spreadsheet strip. */
+/* Keep native border and interaction transition; v056 owns metric-card geometry and surfaces. */
 .nfc-metric-card {
-  min-height: 108px;
-  padding: 16px 17px;
   border: 1px solid var(--nfc-border-soft);
-  border-radius: 16px;
-  background:
-    linear-gradient(
-      145deg,
-      color-mix(in srgb, var(--nfc-accent) 3.2%, transparent),
-      transparent 46%
-    ),
-    var(--nfc-ui-panel-bg-strong);
-  box-shadow: var(--nfc-ui-panel-shadow);
   transition:
     transform 150ms ease,
     border-color 150ms ease,
@@ -1096,15 +1085,7 @@ body,
 }
 
 .nfc-metric-card:hover {
-  transform: translateY(-1px);
-  border-color: color-mix(in srgb, var(--nfc-accent) 18%, var(--nfc-border-soft));
-  background:
-    linear-gradient(
-      145deg,
-      color-mix(in srgb, var(--nfc-accent) 5%, transparent),
-      transparent 52%
-    ),
-    var(--nfc-ui-panel-bg-strong);
+  /* The v056 hover owner supplies transform, border-color and background. */
   box-shadow:
     0 1px 1px color-mix(in srgb, var(--nfc-text) 3%, transparent),
     0 14px 34px color-mix(in srgb, var(--nfc-text) 7%, transparent);
