@@ -308,6 +308,95 @@ async function auditPaintedLedgerHeading(page, item, width, theme) {
     'Real ledger heading painted contrast below 4.5:1: ' + JSON.stringify(record));
 }
 
+// Actual metric card ink/surface proof for both normal and pointer-hover
+// states; unlike a token comparison, this resolves the winner after every
+// imported CSS layer and alpha-composites its actual painted ancestors.
+const metricHoverPaintAudit = [];
+async function metricCardPaintSample(card, state) {
+  return card.evaluate((node, state) => {
+    const parseColor = color => {
+      const rgb = /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d*\.?\d+)(?:\s*,\s*(\d*\.?\d+))?\s*\)$/.exec(color);
+      const srgb = /^color\(srgb\s+(\d*\.?\d+)\s+(\d*\.?\d+)\s+(\d*\.?\d+)(?:\s*\/\s*(\d*\.?\d+))?\s*\)$/.exec(color);
+      if (!rgb && !srgb) throw Error('Unsupported computed metric paint: ' + color);
+      const parts = rgb ?? srgb;
+      const channels = parts.slice(1, 4).map(Number);
+      const alpha = parts[4] === undefined ? 1 : Number(parts[4]);
+      if (srgb) for (let i = 0; i < 3; i++) channels[i] *= 255;
+      if (![...channels, alpha].every(Number.isFinite) ||
+          channels.some(c => c < 0 || c > 255) || alpha < 0 || alpha > 1)
+        throw Error('Out-of-range metric color: ' + color);
+      return { channels, alpha };
+    };
+    const roundedRgb = parts => 'rgb(' + parts.map(Math.round).join(', ') + ')';
+    const roles = ['label', 'value'];
+    const metrics = roles.map(role => {
+      const target = node.querySelector('.nfc-metric-' + role);
+      if (!target || !target.textContent?.trim())
+        throw Error('Missing real rendered metric ' + role);
+      const text = getComputedStyle(target);
+      const ink = parseColor(text.color);
+      if (ink.alpha !== 1) throw Error('Semi-transparent metric ink needs pixel-level audit');
+      const layers = [];
+      for (let parent = target; parent; parent = parent.parentElement) {
+        const style = getComputedStyle(parent);
+        if (style.backgroundImage !== 'none' || Number(style.opacity) !== 1)
+          throw Error('Non-flat metric paint requires pixel-level audit: ' + parent.tagName);
+        const color = parseColor(style.backgroundColor);
+        if (color.alpha > 0) layers.push({
+          channels: color.channels, alpha: color.alpha, node: parent.tagName.toLowerCase(),
+        });
+        if (color.alpha === 1) break;
+      }
+      if (!layers.length || layers[layers.length - 1].alpha !== 1)
+        throw Error('No opaque ancestor behind metric ' + role);
+      let painted = [0, 0, 0];
+      for (const layer of [...layers].reverse())
+        painted = painted.map((channel, i) =>
+          layer.channels[i] * layer.alpha + channel * (1 - layer.alpha));
+      return {
+        role, foreground: roundedRgb(ink.channels),
+        background: roundedRgb(painted),
+        layers: layers.map(({ node, alpha }) => ({ node, alpha })),
+      };
+    });
+    return {
+      state, hovered: node.matches(':hover'),
+      computedCardBackground: getComputedStyle(node).backgroundColor,
+      metrics,
+    };
+  }, state);
+}
+async function auditMetricHoverPaint(page, item, width, theme) {
+  if (item.id !== 'dashboard' && item.id !== 'media') return;
+  const selector = item.id === 'dashboard'
+    ? '.nfc-v2-dashboard-metrics .nfc-metric-card'
+    : '.nfc-media-page > .nfc-metric-grid .nfc-metric-card';
+  const card = page.locator(selector).first();
+  await card.waitFor({ state: 'visible' });
+  // Run AFTER its accepted screenshot; hovering must not affect baselines.
+  await page.mouse.move(0, 0);
+  for (const state of ['normal', 'hover']) {
+    if (state === 'hover') await card.hover();
+    const snap = await metricCardPaintSample(card, state);
+    assert.equal(snap.hovered, state === 'hover',
+      'Pointer state must be genuinely active when comparing metric paint');
+    assert.equal(snap.metrics.length, 2);
+    for (const role of snap.metrics) {
+      const actual = computedContrastRatio(role.foreground, role.background);
+      const record = {
+        route: item.path, width, mode: theme.mode, system: theme.system,
+        effective: theme.effective, state,
+        computedCardBackground: snap.computedCardBackground,
+        ...role, contrast: Number(actual.toFixed(3)),
+      };
+      metricHoverPaintAudit.push(record);
+      assert.ok(actual >= 4.5,
+        'Rendered metric ' + state + ' paint falls below 4.5:1: ' + JSON.stringify(record));
+    }
+  }
+  await page.mouse.move(0, 0);
+}
+
 async function inspect(page, theme, width, item) {
   const violations = await page.evaluate(({ theme, width, item }) => {
     const get = selector => {
@@ -591,6 +680,7 @@ try {
             path: resolve(OUT, item.id + '-' + label + '.png'),
             fullPage: false,
           });
+          await auditMetricHoverPaint(page, item, width, theme);
         }
         // A second pass mounts populated realistic ledgers without any backend writes.
         // Preserve six empty-state routes, add five dense real pages, including status gates.
@@ -639,6 +729,15 @@ try {
       audited: 'actual-computed-foreground-over-composited-flat-background' }, null, 2));
   console.log('[WORKSPACE PAINTED HEADING] 160/160 rendered ledger heading cases, ' +
     'computed text over verified alpha-composited opaque backgrounds >= 4.5:1.');
+  assert.equal(metricHoverPaintAudit.length, WIDTHS.length * THEMES.length * 2 * 2 * 2,
+    'Dashboard/Media metric label and value must pass normal and hover painted audits');
+  assert.ok(metricHoverPaintAudit.every(item => item.contrast >= 4.5),
+    'Every real metric ink/surface contrast must pass the same AA gate');
+  writeFileSync(resolve(OUT, 'metric-hover-painted-contrast-audit.json'),
+    JSON.stringify({ cases: metricHoverPaintAudit, total: metricHoverPaintAudit.length,
+      audited: 'real-metric-ink-over-composited-surface-in-normal-and-hover' }, null, 2));
+  console.log('[WORKSPACE METRIC HOVER] 256/256 real foreground/painted-background ' +
+    'normal and hover text pairs >= 4.5:1 on Dashboard and Media.');
   assert.equal(checkboxKeyboardAudit.length, WIDTHS.length * THEMES.length * 2,
     'Every Media and Quarantine dense viewport/theme must have computed checkbox evidence');
   writeFileSync(resolve(OUT, 'checkbox-keyboard-audit.json'),
