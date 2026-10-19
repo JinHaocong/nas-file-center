@@ -21,7 +21,6 @@ describe('Pure White Stage 5E-C v049 historical shadows and dense ledger accepta
       ['.nfc-header.nfc-header', ['margin', 'border', 'box-shadow', 'backdrop-filter', '-webkit-backdrop-filter']],
       ['.nfc-page-header', ['min-height', 'margin', 'padding', 'align-items', 'gap', 'border', 'border-radius', 'box-shadow']],
       ['.nfc-page-header-copy', ['max-width']],
-      ['.nfc-metric-card', ['min-height', 'padding']],
     ];
     let total = 0;
     for (const [selector, properties] of retired) {
@@ -36,6 +35,21 @@ describe('Pure White Stage 5E-C v049 historical shadows and dense ledger accepta
         total++;
       }
     }
+    // Both later v049 metric-card geometry shadows now belong to v056.
+    // Keep the original two assertions in the 24-property acceptance total.
+    const metricHistorical = [...v049.matchAll(/^\.nfc-metric-card\s*\{([^}]*)\}/gm)];
+    assert.equal(metricHistorical.length, 2);
+    const metricCanonical = v056.match(/^\.nfc-metric-card\s*\{([^}]*)\}/m)?.[1];
+    assert.ok(metricCanonical, 'Missing exact-selector v056 metric-card owner');
+    for (const [property, value] of [['min-height', '104px'], ['padding', '16px 17px']]) {
+      const pattern = new RegExp('(?:^|\\n)\\s*' + property + '\\s*:');
+      assert.ok(metricHistorical.every(match => !pattern.test(match[1])),
+        'Obsolete v049 metric geometry reintroduced: ' + property);
+      assert.ok(metricCanonical.includes(property + ': ' + value + ';'),
+        'Exact v056 metric geometry drift: ' + property);
+      total += 1;
+    }
+
     // This panel selector now has ONE unconditional v049 block (the
     // independently meaningful later min-height/padding/background owner).
     // The obsolete earlier min-height shadow must stay absent; the v056

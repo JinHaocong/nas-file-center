@@ -1168,3 +1168,54 @@ test('v054 → v055/v056: 4 header, eyebrow and action-bar shadows retired', () 
     && indexes[1] < indexes[2], 'CSS cascade load order must not change');
   assert.equal(2 + 1 + 1, 4);
 });
+
+
+test('v049 → v056: eight metric-card geometry, surface and hover shadows stay retired', () => {
+  const retired = [
+    ['.nfc-metric-card', {
+      'min-height': '104px',
+      padding: '16px 17px',
+      'border-radius': 'var(--nfc-w2-radius-md)',
+      background: 'color-mix(in srgb, var(--nfc-w2-surface) 88%, var(--nfc-w2-surface-soft))',
+      'box-shadow': 'none',
+    }],
+    ['.nfc-metric-card:hover', {
+      transform: 'none',
+      'border-color': 'var(--nfc-w2-hairline-strong)',
+      background: 'var(--nfc-w2-surface)',
+    }],
+  ];
+  let total = 0;
+  for (const [selector, declarations] of retired) {
+    const previous = matching(v049, selector);
+    const owner = matching(v056, selector);
+    assert.equal(owner.length, 1, 'Exactly one unconditional v056 metric owner: ' + selector);
+    for (const [property, value] of Object.entries(declarations)) {
+      assert.ok(previous.every(rule => !rule.declarations.has(property)),
+        'v049 exact-selector metric shadow reintroduced: ' + selector + ' / ' + property);
+      assert.equal(owner[0].declarations.get(property), value,
+        'v056 metric owner changed: ' + selector + ' / ' + property);
+      assert.ok(!value.includes('!important'), 'No importance escalation: ' + property);
+      total += 1;
+    }
+  }
+  assert.equal(total, 8);
+  const nativeCard = matching(v049, '.nfc-metric-card');
+  assert.equal(nativeCard.length, 2, 'Retain independent early border and late transition');
+  assert.equal(nativeCard[1].declarations.get('border'),
+    '1px solid var(--nfc-border-soft)');
+  assert.equal(nativeCard[1].declarations.get('transition'),
+    'transform 150ms ease,\n    border-color 150ms ease,\n    box-shadow 150ms ease,\n    background 150ms ease');
+  assert.equal(matching(v049, '.nfc-metric-card:hover')[0].declarations.get('box-shadow'),
+    '0 1px 1px color-mix(in srgb, var(--nfc-text) 3%, transparent),\n    0 14px 34px color-mix(in srgb, var(--nfc-text) 7%, transparent)');
+  assert.equal(matching(v049, '.nfc-metric-card', '@media (max-width: 767px)')[0]
+    .declarations.get('min-height'), '94px', 'Separate phone min-height must remain');
+  assert.equal(matching(v049, '.nfc-metric-card', '@media (max-width: 767px)')[0]
+    .declarations.get('padding'), '12px 13px', 'Separate phone padding must remain');
+  assert.match(old049, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(old049, /@media \(prefers-reduced-transparency: reduce\)/);
+  const entry = read('src/main.tsx');
+  assert.ok(entry.indexOf("./styles/v049-workspace.css") <
+    entry.indexOf("./styles/v056-right-workspace-v2.css"),
+  'The exact cross-layer import order must remain unchanged');
+});
