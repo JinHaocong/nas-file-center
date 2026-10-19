@@ -855,3 +855,39 @@ These remain explicit high-level acceptance work.
 
 Historical redundant declarations retired stays **229**; high-level
 milestone remains **69/74 (93.2%)**.
+
+## 2026-10-19 — actual painted ledger heading contrast (PR following #304)
+
+Prior checks cover **opaque source theme tokens** (PR #303) and actual
+**computed custom-property values** on six React workspaces (PR #304).
+Neither alone proves the text/background pair that Chromium renders.
+
+Extend the **same isolated read-only Chromium workspace matrix** to inspect
+the visible real accessible heading on the five operational ledger routes
+(Plans, Tasks, Indexes, Media, Quarantine). At **8 viewports × 4 theme
+variants × 5 routes = 160 heading cases**, read `getComputedStyle` for the
+actual foreground and each ancestor's background. Alpha-composite all
+translucent layers back to a provably opaque painted ancestor. Reject
+unrecognized CSS color spaces, out-of-gamut values, gradient/image
+ancestors, opacity effects and any missing opaque base rather than
+silently inventing a white background. Assert **WCAG AA 4.5:1** normal
+text contrast on this measured solid-paint scope.
+
+Record route, viewport, selected/system/effective theme, original and
+normalized computed foreground, painted background, ancestor layers
+and numeric contrast in `painted-ledger-heading-audit.json`.
+
+**CI evidence delivery correction:** explicitly upload the already
+generated `w2-computed-theme-audit.json` from PR #304, the new
+`painted-ledger-heading-audit.json` and the existing checkbox keyboard
+JSON alongside unchanged 352 screenshots. Keep all original 16 PR
+checks, 4 workflows, eight viewport audits, read-only GET interception
+and post-merge branch-cleanup gates.
+
+**Scope:** heading ink over flat, compositable ancestors; this is not
+whole-page pixel-level, gradient, pseudo-element, overlay or human
+accessibility/visual sign-off. Dashboard's separate hero remains
+covered by prior layout/token tests, not the new heading-paint claim.
+All high-level remaining acceptance milestones stay open. No NAS
+mutation, no production approval, historical declarations retired
+stay **229**, formal progress **69/74 (93.2%)**.
