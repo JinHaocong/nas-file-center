@@ -71,10 +71,8 @@
 }
 
 .nfc-app-main .nfc-page-eyebrow {
-  display: inline-flex;
   align-items: center;
   gap: 7px;
-  margin-bottom: 7px;
   color: var(--nfc-text-subtle);
   font-size: 9px;
   font-weight: 760;
@@ -103,15 +101,10 @@
   padding-bottom: 1px;
 }
 
-.nfc-app-main .nfc-page-actions .nfc-action-bar {
-  gap: 8px;
-}
-
 /* -------------------------------------------------------------------------- */
 /* Header command rail                                                        */
 /* -------------------------------------------------------------------------- */
 .nfc-header.nfc-header {
-  min-height: 60px;
   padding-top: 10px;
   padding-bottom: 9px;
   border-bottom-color: color-mix(in srgb, var(--nfc-border-soft) 88%, transparent);
