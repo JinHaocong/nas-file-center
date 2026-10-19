@@ -106,19 +106,10 @@
 
 .nfc-app-main .nfc-page-title {
   color: var(--nfc-text);
-  font-size: clamp(26px, 2.15vw, 32px);
-  font-weight: 710;
-  line-height: 1.16;
-  letter-spacing: -0.042em;
-  text-wrap: balance;
 }
 
 .nfc-app-main .nfc-page-description {
-  max-width: 82ch;
-  margin-top: 8px;
   color: var(--nfc-text-muted);
-  font-size: 12.5px;
-  line-height: 1.65;
 }
 
 .nfc-app-main .nfc-page-actions {
@@ -221,10 +212,6 @@
 
 .nfc-app-main .nfc-data-panel-title {
   color: var(--nfc-text);
-  font-size: 13.5px;
-  font-weight: 700;
-  line-height: 1.35;
-  letter-spacing: -0.015em;
 }
 
 .nfc-app-main .nfc-data-panel-description {
