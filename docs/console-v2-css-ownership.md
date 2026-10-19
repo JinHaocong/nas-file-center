@@ -814,3 +814,44 @@ every rendered pixel. Manual visual and accessibility acceptance, full CSS
 convergence, isolated NAS testing and production approval are still pending.
 Historical redundant declaration count stays **229**; formal high-level
 milestones stay **69/74 (93.2%)**.
+
+## 2026-10-19 — computed semantic palette evidence on real React workspaces
+
+The v056 source-level 24-pair check from PR #303 does not alone prove
+that the same CSS variables remain effective after the complete import
+cascade or under all responsive and theme modes.
+
+Extended the existing **read-only** `browser-workspace-cascade.mjs` suite,
+rather than replacing or shortening its accepted screenshot matrix.
+After the existing page-geometry check for each of the six actual React
+routes (Dashboard, Plans, Tasks, Indexes, Media, Quarantine), Chromium now
+reads seven `--nfc-w2-*` tokens using `getComputedStyle(.nfc-app-main)`,
+verifies the effective Light/Dark/System theme and its typography hierarchy,
+and checks all **12 text-role / solid-surface WCAG AA 4.5:1 pairs**.
+
+| Evidence dimension | Required coverage |
+| --- | --- |
+| Rendered routes | 6 workspace pages |
+| Browser widths | 360, 390, 430, 768, 1024, 1280, 1440, 1920 |
+| Theme modes | explicit light, explicit dark, System light, System dark |
+| Browser snapshots | 32 width/theme combinations × 6 routes = 192 actual-page cases |
+| Contrast pair assertions | 192 × 12 = **2,304** computed CSS-token comparisons |
+| Artifact | `frontend/artifacts/browser-workspace-cascade/w2-computed-theme-audit.json` |
+| Existing screenshot evidence | Original 352 screenshots remain unchanged |
+
+The new JSON evidence preserves route, width, chosen/system/effective theme,
+all seven computed tokens, compared pair count and minimum ratio. Registered
+`css-w2-theme-token-contrast.test.mjs` now protects this real-browser audit
+from removal. The original synthetic-GET-only browser isolation, write/outbound
+denials, focus keyboard evidence, dense ledgers, responsive and CSS source
+tests remain mandatory. No production or NAS data is accessed.
+
+**Interpretation boundary:** this proves inherited **computed CSS custom
+property** values on the real workspace scope across 192 route/theme/width
+cases, not the final painted foreground/background of every element, alpha
+blending, gradient overlays, all focus/disabled states, human visual
+acceptance, screen-reader behavior or complete CSS/theme convergence.
+These remain explicit high-level acceptance work.
+
+Historical redundant declarations retired stays **229**; high-level
+milestone remains **69/74 (93.2%)**.
