@@ -718,3 +718,37 @@ The test now anchors those matches at column zero to check the intended
 relative order of all six selectors. Responsive rules and qualified
 selector coverage remain unmodified. Complete CI must rerun from the
 newest PR HEAD before merging.
+
+## 2026-10-19 — v054 → v055/v056 header and eyebrow cascade
+
+Retired **4** unconditional, normal-priority v054 declarations.
+Every removed property was an exact single-selector, exact CSS property,
+equal-specificity loser to a later-imported rule:
+
+| v054 selector | Retired property | Later canonical owner |
+| --- | --- | --- |
+| `.nfc-app-main .nfc-page-eyebrow` | `display` (1) | v056 `none` |
+| `.nfc-app-main .nfc-page-eyebrow` | `margin-bottom` (1) | v055 `10px` |
+| `.nfc-app-main .nfc-page-actions .nfc-action-bar` | `gap` (1) | v055 `9px` |
+| `.nfc-header.nfc-header` | `min-height` (1) | v056 `68px` |
+
+The v054 action-bar gap rule became empty and was removed. Preserve
+the eyebrow's six independent alignment/typography declarations
+and `::before` ornament, header's historical padding/border-bottom
+color, and v055 `justify-content: flex-end`. The earlier eyebrow
+properties are intentionally kept even though v056 sets display none:
+the cleanup relies strictly on exact cascade shadow evidence, not
+assumptions about an element's visibility.
+
+Preserve separate 767px header `min-height: 54px`, the
+reduced-transparency `backdrop-filter: none !important`, all other
+media/theme/focus declarations and the v054→v055→v056 source order.
+The registered regression locks both the removed shadows and retained
+values; full 8-width/4-theme read-only Chromium, backend, Docker,
+and dependency validation are required on the final PR HEAD.
+
+After merge: historical redundant CSS declaration total **221**
+(217 previously merged + 4 in this tranche).
+Formal milestones remain **69/74 (93.2%)**; partial historical
+CSS cleanup does not close comprehensive theme ownership, manual
+visual/a11y, isolated NAS or production sign-off.

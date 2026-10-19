@@ -56,10 +56,12 @@ const read = filename => readFileSync(resolve(process.cwd(), filename), 'utf8');
 const old048 = read('src/styles/v048-detail.css');
 const old049 = read('src/styles/v049-workspace.css');
 const old054 = read('src/styles/v054-premium-system.css');
+const old055 = read('src/styles/v055-workspace-breathing.css');
 const old056 = read('src/styles/v056-right-workspace-v2.css');
 const v048 = leafRules(old048);
 const v049 = leafRules(old049);
 const v054 = leafRules(old054);
+const v055 = leafRules(old055);
 const v056 = leafRules(old056);
 const canonicalSelector = selector => selector.replace(/\s+/g, ' ').replace(/\s*,\s*/g, ',').trim();
 const matching = (rules, selector, context = '') => rules.filter(rule =>
@@ -1101,4 +1103,68 @@ test('v049 -> v056: 9 exact v049 page and panel typography shadows remain retire
   assert.ok(early >= 0 && early < mid && mid < late);
   assert.match(old049, /@media \(prefers-reduced-motion: reduce\)/);
   assert.match(old049, /@media \(prefers-reduced-transparency: reduce\)/);
+});
+
+
+test('v054 → v055/v056: 4 header, eyebrow and action-bar shadows retired', () => {
+  // Exact ungrouped selector, unconditional context, normal importance,
+  // and strictly later import sequence. Preserve all other declarations.
+  const eyebrow = matching(v054, '.nfc-app-main .nfc-page-eyebrow');
+  const laterEyebrow = matching(v055, '.nfc-app-main .nfc-page-eyebrow');
+  const finalEyebrow = matching(v056, '.nfc-app-main .nfc-page-eyebrow');
+  assert.equal(eyebrow.length, 1);
+  assert.equal(laterEyebrow.length, 1);
+  assert.equal(finalEyebrow.length, 1);
+  assert.deepEqual([...eyebrow[0].declarations], [
+    ['align-items', 'center'],
+    ['gap', '7px'],
+    ['color', 'var(--nfc-text-subtle)'],
+    ['font-size', '9px'],
+    ['font-weight', '760'],
+    ['letter-spacing', '0.14em'],
+  ], 'Keep six independent historical eyebrow properties');
+  assert.equal(eyebrow[0].declarations.has('display'), false);
+  assert.equal(eyebrow[0].declarations.has('margin-bottom'), false);
+  assert.equal(laterEyebrow[0].declarations.get('margin-bottom'), '10px');
+  assert.equal(finalEyebrow[0].declarations.get('display'), 'none');
+  assert.equal(matching(v054, '.nfc-app-main .nfc-page-eyebrow::before')[0]
+    .declarations.get('content'), "''", 'Original ornamental pseudo-element unchanged');
+
+  const action = '.nfc-app-main .nfc-page-actions .nfc-action-bar';
+  assert.equal(matching(v054, action).length, 0,
+    'Completely shadowed v054 action gap block cannot be reintroduced');
+  const laterAction = matching(v055, action);
+  assert.equal(laterAction.length, 1);
+  assert.equal(laterAction[0].declarations.get('gap'), '9px');
+  assert.equal(laterAction[0].declarations.get('justify-content'), 'flex-end');
+
+  const header = matching(v054, '.nfc-header.nfc-header');
+  const finalHeader = matching(v056, '.nfc-header.nfc-header');
+  assert.equal(header.length, 1);
+  assert.equal(finalHeader.length, 1);
+  assert.deepEqual([...header[0].declarations], [
+    ['padding-top', '10px'],
+    ['padding-bottom', '9px'],
+    ['border-bottom-color',
+      'color-mix(in srgb, var(--nfc-border-soft) 88%, transparent)'],
+  ], 'Keep historical header spacing and border color');
+  assert.equal(header[0].declarations.has('min-height'), false);
+  assert.equal(finalHeader[0].declarations.get('min-height'), '68px');
+  assert.equal(matching(v054, '.nfc-header.nfc-header',
+    '@media (max-width: 767px)')[0].declarations.get('min-height'),
+    '54px', 'Preserve distinct 767px header behavior');
+  assert.match(old054, /@media \(prefers-reduced-transparency: reduce\)/);
+  assert.equal(matching(v054, '.nfc-header.nfc-header',
+    '@media (prefers-reduced-transparency: reduce)')[0]
+    .declarations.get('backdrop-filter'), 'none !important');
+
+  const imports = read('src/main.tsx');
+  const indexes = [
+    "import './styles/v054-premium-system.css';",
+    "import './styles/v055-workspace-breathing.css';",
+    "import './styles/v056-right-workspace-v2.css';",
+  ].map(value => imports.indexOf(value));
+  assert.ok(indexes[0] >= 0 && indexes[0] < indexes[1]
+    && indexes[1] < indexes[2], 'CSS cascade load order must not change');
+  assert.equal(2 + 1 + 1, 4);
 });
