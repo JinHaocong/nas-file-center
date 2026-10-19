@@ -455,3 +455,33 @@ This is **incremental CSS ownership cleanup**, not proof of complete
 historical CSS/theme consolidation, full manual visual or accessibility
 sign-off, real NAS verification, or production approval. The formal
 high-level count remains **69/74 (93.2%)**.
+
+
+## 2026-10-19 — v054 → v056 title, description and panel-title typography
+
+Retire **13 unconditional, same-selector, same-property and same-priority
+v054 shadows**, already superseded by later-imported v056 normal-importance
+values:
+
+| Historical v054 selector | Retired declarations | Final v056 owner |
+| --- | --- | --- |
+| `.nfc-app-main .nfc-page-title` | `font-size`, `font-weight`, `line-height`, `letter-spacing`, `text-wrap` (5) | 27–31px clamp, 620, 1.18, -0.014em, balance |
+| `.nfc-app-main .nfc-page-description` | `max-width`, `margin-top`, `font-size`, `line-height` (4) | 82ch, 8px, 13px, 1.58 |
+| `.nfc-app-main .nfc-data-panel-title` | `font-size`, `font-weight`, `line-height`, `letter-spacing` (4) | 14px, 620, 1.42, -0.004em |
+
+Preserved independent v054 `color` for each selector
+(`--nfc-text` / `--nfc-text-muted`), all media rules including
+767px and 420px typography overrides, later v056 responsive winners,
+CSS import order and reduced-motion/transparency ownership.
+This is an exact single-selector property migration, not a shorthand
+or selector-specificity transformation.
+
+Extended registered CSS cascade regression to assert all **13** removed
+v054 declarations, exact v056 values, independent retained colors,
+responsive context and import order. Frontend/backend/Docker/dependency
+Checks and full read-only 8-width × 4-theme actual Chromium routes
+remain required on the precise PR HEAD.
+
+This is incremental historical CSS cleanup, **not** complete
+CSS/theme acceptance, human visual/a11y approval, real NAS verification
+or production deployment. Formal milestone **69/74 (93.2%)** unchanged.
