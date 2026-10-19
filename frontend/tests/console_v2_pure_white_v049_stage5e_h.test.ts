@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');
 const v049 = read('src/styles/v049-workspace.css');
+const v056 = read('src/styles/v056-right-workspace-v2.css');
 const workspace = read('scripts/browser-workspace-cascade.mjs');
 const workflow = read('../.github/workflows/ui-v044-validation.yml');
 const entry = read('src/main.tsx');
@@ -27,9 +28,9 @@ const retired: Array<[string, string[], number]> = [
   ['.nfc-header-status', ['background'], 2],
   ['.nfc-page-header', ['background'], 2],
   ['.nfc-data-panel-header', ['padding', 'border-bottom-color'], 1],
-  ['.nfc-metric-card', ['border', 'border-radius', 'background', 'box-shadow'], 2],
+  ['.nfc-metric-card', ['border'], 2],
   ['.nfc-metric-card:last-child', ['border-right'], 1],
-  ['.nfc-metric-card:hover', ['transform', 'background'], 1],
+  ['.nfc-metric-card:hover', [], 1],
   ['.nfc-metric-value', ['margin-top'], 1],
   ['.nfc-system-controls-page .nfc-settings-grid', ['gap'], 1],
   ['.nfc-system-controls-page .nfc-settings-grid > .nfc-data-panel > .nfc-data-panel-header',
@@ -71,6 +72,27 @@ describe('Pure White Stage 5E-H v049 late-authority convergence', () => {
         count++;
       }
     }
+    // Five Stage 5E-H assertions now follow the exact later-imported
+    // same-selector v056 owner instead of obsolete late v049 properties.
+    const canonicalMetric = v056.match(/^\.nfc-metric-card\s*\{([^}]*)\}/m)?.[1];
+    const canonicalHover = v056.match(/^\.nfc-metric-card:hover\s*\{([^}]*)\}/m)?.[1];
+    assert.ok(canonicalMetric && canonicalHover, 'Metric/card hover v056 authority must remain');
+    for (const [prop, expected] of [
+      ['border-radius', 'var(--nfc-w2-radius-md)'],
+      ['background', 'color-mix(in srgb, var(--nfc-w2-surface) 88%, var(--nfc-w2-surface-soft))'],
+      ['box-shadow', 'none'],
+    ]) {
+      assert.equal(property(blocks('.nfc-metric-card')[1], prop), undefined,
+        'Retired v049 metric property returned: ' + prop);
+      assert.equal(property(canonicalMetric, prop), expected);
+      count++;
+    }
+    for (const [prop, expected] of [['transform', 'none'], ['background', 'var(--nfc-w2-surface)']]) {
+      assert.equal(property(blocks('.nfc-metric-card:hover')[0], prop), undefined,
+        'Retired v049 hover property returned: ' + prop);
+      assert.equal(property(canonicalHover, prop), expected);
+      count++;
+    }
     assert.equal(count, 23);
   });
 
@@ -80,9 +102,10 @@ describe('Pure White Stage 5E-H v049 late-authority convergence', () => {
     assert.equal(property(blocks('.nfc-header.nfc-header')[1], 'top'), '12px');
     assert.equal(property(blocks('.nfc-metric-card')[0], 'border-right'),
       '1px solid var(--nfc-v49-line)');
-    assert.equal(property(blocks('.nfc-metric-card')[1], 'border-radius'), '16px');
-    assert.equal(property(blocks('.nfc-metric-card:hover')[0], 'transform'),
-      'translateY(-1px)');
+    assert.equal(property(blocks('.nfc-metric-card')[1], 'border'),
+      '1px solid var(--nfc-border-soft)');
+    assert.ok(property(blocks('.nfc-metric-card')[1], 'transition')?.includes('box-shadow 150ms ease'));
+    assert.ok(property(blocks('.nfc-metric-card:hover')[0], 'box-shadow')?.includes('0 14px 34px'));
     assert.equal(property(blocks('.nfc-metric-value')[0], 'margin-top'), '12px');
     assert.equal(property(blocks('.nfc-system-controls-page .nfc-settings-subpanel')[0],
       'border-bottom'), '1px solid var(--nfc-v49-line) !important');
