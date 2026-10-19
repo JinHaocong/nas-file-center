@@ -397,6 +397,92 @@ async function auditMetricHoverPaint(page, item, width, theme) {
   await page.mouse.move(0, 0);
 }
 
+// Same-document CSS theme invalidation: deliberately flip only the root's
+// effective CSS theme. This is NOT a replacement for ThemeProvider/user-action
+// tests, which live in browser-theme-resilience.mjs. We preserve the provider
+// mode, storage, and system settings and restore the effective theme in finally.
+const liveMetricThemeAudit = [];
+async function metricThemeSnapshot(page, card) {
+  const [tokens, paint] = await Promise.all([
+    page.evaluate(() => {
+      const root = document.documentElement;
+      const workspace = document.querySelector('.nfc-app-main');
+      if (!workspace) throw Error('No right-workspace theme owner');
+      const style = getComputedStyle(workspace);
+      const names = ['--nfc-w2-text', '--nfc-w2-text-muted',
+        '--nfc-w2-surface', '--nfc-w2-surface-soft'];
+      return {
+        effective: root.dataset.theme,
+        values: Object.fromEntries(names.map(name =>
+          [name, style.getPropertyValue(name).trim().toLowerCase()])),
+      };
+    }),
+    metricCardPaintSample(card, 'normal'),
+  ]);
+  assert.equal(paint.hovered, false, 'Live theme audit requires non-hovered metric card');
+  const contrasts = paint.metrics.map(role => {
+    const ratio = computedContrastRatio(role.foreground, role.background);
+    assert.ok(ratio >= 4.5,
+      'Live metric theme paint fell below 4.5:1: ' + JSON.stringify({ tokens, role }));
+    return { role: role.role, foreground: role.foreground,
+      background: role.background, contrast: Number(ratio.toFixed(3)) };
+  });
+  return {
+    tokens, cardBackground: paint.computedCardBackground, contrasts,
+  };
+}
+async function auditLiveMetricThemeCascade(page, item, width, theme) {
+  if (item.id !== 'dashboard' && item.id !== 'media') return;
+  const selector = item.id === 'dashboard'
+    ? '.nfc-v2-dashboard-metrics .nfc-metric-card'
+    : '.nfc-media-page > .nfc-metric-grid .nfc-metric-card';
+  const card = page.locator(selector).first();
+  await card.waitFor({ state: 'visible' });
+  await page.mouse.move(0, 0);
+  const original = await page.evaluate(() => ({
+    effective: document.documentElement.dataset.theme,
+    colorScheme: document.documentElement.style.colorScheme,
+    storedMode: localStorage.getItem('nfc_theme_mode'),
+  }));
+  assert.equal(original.effective, theme.effective);
+  const initial = await metricThemeSnapshot(page, card);
+  const oppositeTheme = theme.effective === 'light' ? 'dark' : 'light';
+  let inverted;
+  try {
+    await page.evaluate(next => {
+      document.documentElement.dataset.theme = next;
+      document.documentElement.style.colorScheme = next;
+    }, oppositeTheme);
+    inverted = await metricThemeSnapshot(page, card);
+    assert.equal(inverted.tokens.effective, oppositeTheme);
+    for (const name of Object.keys(initial.tokens.values)) {
+      assert.notEqual(inverted.tokens.values[name], initial.tokens.values[name],
+        'Live CSS theme must replace semantic owner ' + name);
+    }
+    assert.notEqual(inverted.contrasts[1].foreground,
+      initial.contrasts[1].foreground,
+      'Actual metric value ink must update without navigation');
+  } finally {
+    await page.evaluate(before => {
+      document.documentElement.dataset.theme = before.effective;
+      document.documentElement.style.colorScheme = before.colorScheme;
+    }, original);
+  }
+  const restored = await metricThemeSnapshot(page, card);
+  assert.deepEqual(restored.tokens, initial.tokens,
+    'Every semantic palette token must fully restore in the same document');
+  assert.deepEqual(restored.contrasts.map(x => x.foreground),
+    initial.contrasts.map(x => x.foreground),
+    'Actual metric ink must fully restore after opposite CSS theme');
+  assert.equal(await page.evaluate(() => localStorage.getItem('nfc_theme_mode')),
+    original.storedMode, 'CSS-only probe must never persist a theme change');
+  liveMetricThemeAudit.push({
+    route: item.path, width, mode: theme.mode, system: theme.system,
+    initialEffective: theme.effective, oppositeEffective: oppositeTheme,
+    initial, inverted, restored, providerModeUntouched: true,
+  });
+}
+
 async function inspect(page, theme, width, item) {
   const violations = await page.evaluate(({ theme, width, item }) => {
     const get = selector => {
@@ -681,6 +767,7 @@ try {
             fullPage: false,
           });
           await auditMetricHoverPaint(page, item, width, theme);
+          await auditLiveMetricThemeCascade(page, item, width, theme);
         }
         // A second pass mounts populated realistic ledgers without any backend writes.
         // Preserve six empty-state routes, add five dense real pages, including status gates.
@@ -738,6 +825,19 @@ try {
       audited: 'real-metric-ink-over-composited-surface-in-normal-and-hover' }, null, 2));
   console.log('[WORKSPACE METRIC HOVER] 256/256 real foreground/painted-background ' +
     'normal and hover text pairs >= 4.5:1 on Dashboard and Media.');
+  assert.equal(liveMetricThemeAudit.length, WIDTHS.length * THEMES.length * 2,
+    'Dashboard and Media live CSS palette inversion must cover all viewport/theme cases');
+  assert.ok(liveMetricThemeAudit.every(item =>
+    item.initial.tokens.effective === item.restored.tokens.effective &&
+    item.initial.tokens.effective !== item.inverted.tokens.effective &&
+    item.inverted.contrasts.every(role => role.contrast >= 4.5) &&
+    item.restored.contrasts.every(role => role.contrast >= 4.5)),
+  'No live theme inversion or restoration may lose metric contrast');
+  writeFileSync(resolve(OUT, 'live-metric-theme-cascade-audit.json'),
+    JSON.stringify({ cases: liveMetricThemeAudit, total: liveMetricThemeAudit.length,
+      audited: 'same-document-css-theme-invalidation-not-themeprovider-user-action' }, null, 2));
+  console.log('[WORKSPACE LIVE CSS THEME] 64/64 Dashboard/Media same-document ' +
+    'inverse-and-restore cases, 256/256 painted metric text contrasts >= 4.5:1.');
   assert.equal(checkboxKeyboardAudit.length, WIDTHS.length * THEMES.length * 2,
     'Every Media and Quarantine dense viewport/theme must have computed checkbox evidence');
   writeFileSync(resolve(OUT, 'checkbox-keyboard-audit.json'),
