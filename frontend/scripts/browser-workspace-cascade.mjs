@@ -237,6 +237,77 @@ async function auditW2ComputedTheme(page, item, width, theme) {
   });
 }
 
+// Separate from token-vs-token assertions: check the color of real heading
+// glyphs against the alpha-composited *painted ancestor* backgrounds.
+// Ledger page headers are flat by contract; fail closed for unknown color
+// spaces, background images, opacity effects or a missing solid ancestor.
+// Dashboard's separate hero/gradient styling remains outside this scoped audit.
+const paintedHeadingAudit = [];
+async function auditPaintedLedgerHeading(page, item, width, theme) {
+  if (item.id === 'dashboard') return;
+  const target = page.getByRole('heading', { name: item.heading, exact: true });
+  const rendered = await target.evaluate(element => {
+    if (!element.closest('.nfc-app-main'))
+      throw Error('Ledger heading is outside the expected workspace');
+    const bounds = element.getBoundingClientRect();
+    if (bounds.width <= 0 || bounds.height <= 0)
+      throw Error('Ledger heading has no visible layout box');
+    // Chromium may resolve color-mix() to color(srgb ... / alpha).
+    // Treat unsupported/out-of-gamut colors as unverified, never white.
+    const readColor = color => {
+      const rgb = /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*(\d*\.?\d+))?\s*\)$/.exec(color);
+      const srgb = /^color\(srgb\s+(\d*\.?\d+)\s+(\d*\.?\d+)\s+(\d*\.?\d+)(?:\s*\/\s*(\d*\.?\d+))?\s*\)$/.exec(color);
+      if (!rgb && !srgb) throw Error('Unknown rendered CSS color: ' + color);
+      const match = rgb ?? srgb;
+      const channels = match.slice(1, 4).map(Number);
+      if (srgb) for (let i = 0; i < 3; i++) channels[i] *= 255;
+      const alpha = match[4] === undefined ? 1 : Number(match[4]);
+      if (![...channels, alpha].every(Number.isFinite) ||
+          channels.some(c => c < 0 || c > 255) || alpha < 0 || alpha > 1)
+        throw Error('Invalid rendered CSS color: ' + color);
+      return { channels, alpha };
+    };
+    const textStyle = getComputedStyle(element);
+    const text = readColor(textStyle.color);
+    if (text.alpha !== 1) throw Error('Translucent heading text requires separate paint audit');
+    const layers = [];
+    for (let node = element; node; node = node.parentElement) {
+      const style = getComputedStyle(node);
+      if (style.backgroundImage !== 'none')
+        throw Error('Image/gradient ancestor needs pixel-specific audit: ' + node.tagName);
+      if (Number(style.opacity) !== 1)
+        throw Error('Opacity ancestor needs pixel-specific audit: ' + node.tagName);
+      const surface = readColor(style.backgroundColor);
+      if (surface.alpha > 0)
+        layers.push({ color: surface.channels, alpha: surface.alpha,
+          node: node.tagName.toLowerCase() });
+      if (surface.alpha === 1) break;
+    }
+    if (!layers.length || layers[layers.length - 1].alpha !== 1)
+      throw Error('No verifiable solid painted ancestor for ledger heading');
+    let background = [0, 0, 0];
+    for (const layer of [...layers].reverse())
+      background = background.map((channel, i) =>
+        layer.color[i] * layer.alpha + channel * (1 - layer.alpha));
+    const asRgb = channels => 'rgb(' + channels.map(Math.round).join(', ') + ')';
+    return {
+      selector: element.tagName.toLowerCase(),
+      actualForeground: textStyle.color,
+      foreground: asRgb(text.channels),
+      paintedBackground: asRgb(background),
+      layers: layers.map(({ node, alpha }) => ({ node, alpha })),
+    };
+  });
+  const ratio = computedContrastRatio(rendered.foreground, rendered.paintedBackground);
+  const record = {
+    route: item.path, width, mode: theme.mode, system: theme.system,
+    effective: theme.effective, ...rendered, contrast: Number(ratio.toFixed(3)),
+  };
+  paintedHeadingAudit.push(record);
+  assert.ok(ratio >= 4.5,
+    'Real ledger heading painted contrast below 4.5:1: ' + JSON.stringify(record));
+}
+
 async function inspect(page, theme, width, item) {
   const violations = await page.evaluate(({ theme, width, item }) => {
     const get = selector => {
@@ -515,6 +586,7 @@ try {
           await page.getByRole('heading', { name: item.heading, exact: true }).waitFor();
           await inspect(page, theme.effective, width, item);
           await auditW2ComputedTheme(page, item, width, theme);
+          await auditPaintedLedgerHeading(page, item, width, theme);
           await page.screenshot({
             path: resolve(OUT, item.id + '-' + label + '.png'),
             fullPage: false,
@@ -558,6 +630,15 @@ try {
       comparisons: w2ThemeAudit.length * 12, audited: 'computed-css-tokens-not-human-signoff' }, null, 2));
   console.log('[WORKSPACE W2 THEME] 192/192 actual-route computed token cases, ' +
     '2304/2304 solid semantic foreground/surface pairs >= 4.5:1, no NAS access.');
+  assert.equal(paintedHeadingAudit.length, WIDTHS.length * THEMES.length * (PAGES.length - 1),
+    'All five real ledger headings must have actual painted contrast evidence');
+  assert.ok(paintedHeadingAudit.every(item => item.contrast >= 4.5),
+    'No actual ledger heading may lose AA painted contrast');
+  writeFileSync(resolve(OUT, 'painted-ledger-heading-audit.json'),
+    JSON.stringify({ cases: paintedHeadingAudit, total: paintedHeadingAudit.length,
+      audited: 'actual-computed-foreground-over-composited-flat-background' }, null, 2));
+  console.log('[WORKSPACE PAINTED HEADING] 160/160 rendered ledger heading cases, ' +
+    'computed text over verified alpha-composited opaque backgrounds >= 4.5:1.');
   assert.equal(checkboxKeyboardAudit.length, WIDTHS.length * THEMES.length * 2,
     'Every Media and Quarantine dense viewport/theme must have computed checkbox evidence');
   writeFileSync(resolve(OUT, 'checkbox-keyboard-audit.json'),
