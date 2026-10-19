@@ -127,12 +127,19 @@ describe('Pure White historical CSS cleanup: safe v049 same-selector cascade', (
   });
 
   test('sole historical owners stay in source order and other native styles remain', () => {
-    const eyebrow = css.indexOf('.nfc-page-eyebrow {');
-    const title = css.indexOf('.nfc-page-title {');
-    const description = css.indexOf('.nfc-page-description {');
-    const panel = css.indexOf('.nfc-data-panel-header {');
-    const panelTitle = css.indexOf('.nfc-data-panel-title {');
-    const panelDescription = css.indexOf('.nfc-data-panel-description {');
+    // Search ONLY column-zero top-level blocks: a substring indexOf()
+    // incorrectly matches indented phone rules and qualified selectors
+    // such as "... > .nfc-data-panel-header {" before the actual owner.
+    const topLevelPosition = (selector: string): number => {
+      const escaped = selector.replace(/\./g, '\\.');
+      return css.search(new RegExp('^' + escaped + '\\s*\\{', 'm'));
+    };
+    const eyebrow = topLevelPosition('.nfc-page-eyebrow');
+    const title = topLevelPosition('.nfc-page-title');
+    const description = topLevelPosition('.nfc-page-description');
+    const panel = topLevelPosition('.nfc-data-panel-header');
+    const panelTitle = topLevelPosition('.nfc-data-panel-title');
+    const panelDescription = topLevelPosition('.nfc-data-panel-description');
     assert.ok(eyebrow >= 0 && eyebrow < title && title < description);
     assert.ok(description < panel && panel < panelTitle && panelTitle < panelDescription);
     for (const selector of [

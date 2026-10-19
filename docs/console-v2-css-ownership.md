@@ -707,3 +707,14 @@ and the original 24/23/13 historical check counts remain intact.
 Unrelated responsive, theme, accessibility and read-only browser
 coverage is unchanged. Full 16-check/4-workflow validation must rerun
 on the replacement final PR HEAD; previous results are not mergeable.
+
+### PR #299 — top-level owner ordering, not substring matches
+
+A subsequent frontend test run isolated one remaining legacy guard failure:
+`indexOf('.nfc-page-title {')` matched an earlier indented mobile rule,
+while `indexOf('.nfc-data-panel-header {')` matched a qualified selector.
+The test now anchors those matches at column zero to check the intended
+**unconditional top-level owner** positions, still requiring the exact
+relative order of all six selectors. Responsive rules and qualified
+selector coverage remain unmodified. Complete CI must rerun from the
+newest PR HEAD before merging.
