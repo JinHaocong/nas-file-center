@@ -785,3 +785,32 @@ Cumulative safely retired historical CSS declarations after this tranche:
 Formal milestones remain **69/74 (93.2%)** pending comprehensive CSS/theme
 closure, human visual/a11y approval, isolated NAS verification and deployment
 sign-off.
+
+
+## 2026-10-19 — v056 right-workspace semantic text contrast contract
+
+Instead of another declaration-deletion batch, this stage audits the
+v056 semantic foreground palette against its four solid background surfaces.
+Source-level WCAG AA normal-text contrast (4.5:1) exposed three token issues:
+
+| Token | Before | After | Reason |
+| --- | --- | --- | --- |
+| Light `--nfc-w2-text-muted` | `#66707c` | `#596572` | 4.44:1 on strong surface was below 4.5:1 |
+| Light `--nfc-w2-text-subtle` | `#8a94a1` | `#626d78` | 2.71–3.07:1 on light surfaces was below 4.5:1 |
+| Dark `--nfc-w2-text-subtle` | `#7f8995` | `#89939f` | 4.29:1 on strong surface was below 4.5:1 |
+
+Added `frontend/scripts/css-w2-theme-token-contrast.test.mjs` to the
+existing full `npm test` runner. Its 24 foreground/surface combinations guard
+both themes and all 11 explicitly paired semantic colors; it also retains
+the original import-order and read-only 8-viewport/System Dark fixture checks.
+Light text/muted/subtle hierarchy and dark inverse hierarchy are enforced.
+
+Only three semantic color values changed. Original responsive breakpoints,
+layout, focus and hover selectors, reduced-motion/transparency, importance,
+sidebar styles, existing contrast tests, Chromium matrices and CI remain.
+**Scope limitation:** the assertion covers opaque source-declared solid
+surfaces, not computed blending, gradients, overlays, disabled states or
+every rendered pixel. Manual visual and accessibility acceptance, full CSS
+convergence, isolated NAS testing and production approval are still pending.
+Historical redundant declaration count stays **229**; formal high-level
+milestones stay **69/74 (93.2%)**.
