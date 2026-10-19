@@ -657,3 +657,81 @@ test('v054-v056: 13 exact typography shadows retire with historical colors retai
   assert.match(old054, /@media \(prefers-reduced-motion: reduce\)/);
   assert.match(old054, /@media \(prefers-reduced-transparency: reduce\)/);
 });
+
+
+test('v054-v056: 10 shadowed header layout and panel-description declarations retire', () => {
+  // Ten unconditional normal-priority declarations had later owners under
+  // exactly the same single selector. Never derive safety from related
+  // shorthands, selector groups or responsive/important declarations.
+  assert.equal(matching(v054, '.nfc-app-main .nfc-page-header').length, 0,
+    'Obsolete six-property v054 page-header rule must not return');
+  assert.equal(matching(v054, '.nfc-app-main .nfc-page-header-copy').length, 0,
+    'Obsolete one-property v054 header-copy rule must not return');
+
+  const headerOwner = matching(v056, '.nfc-app-main .nfc-page-header');
+  const copyOwner = matching(v056, '.nfc-app-main .nfc-page-header-copy');
+  assert.equal(headerOwner.length, 1, 'Exactly one unconditional v056 header owner');
+  assert.equal(copyOwner.length, 1, 'Exactly one unconditional v056 copy owner');
+  const headerProps = {
+    'min-height': '0',
+    margin: '0 0 24px',
+    padding: '0 0 20px',
+    'align-items': 'flex-end',
+    gap: '28px',
+    'border-bottom': '1px solid var(--nfc-w2-hairline)',
+  };
+  for (const [property, value] of Object.entries(headerProps)) {
+    assert.equal(headerOwner[0].declarations.get(property), value, 'v056 header: ' + property);
+    assert.ok(!value.includes('!important'), 'Do not alter priority: ' + property);
+  }
+  assert.equal(copyOwner[0].declarations.get('max-width'), 'min(980px, 74vw)');
+  assert.equal(headerOwner[0].declarations.get('border'), '0',
+    'Preserve v056 border reset alongside final border-bottom');
+  assert.equal(copyOwner[0].declarations.get('min-width'), '0');
+
+  const oldDescription = matching(v054, '.nfc-app-main .nfc-data-panel-description');
+  const newDescription = matching(v056, '.nfc-app-main .nfc-data-panel-description');
+  assert.equal(oldDescription.length, 1);
+  assert.equal(newDescription.length, 1);
+  assert.deepEqual([...oldDescription[0].declarations], [
+    ['max-width', '86ch'],
+    ['color', 'var(--nfc-text-subtle)'],
+  ], 'Independent v054 width and theme color remain untouched');
+  for (const [property, value] of Object.entries({
+    'margin-top': '5px', 'font-size': '11.5px', 'line-height': '1.52',
+  })) {
+    assert.equal(oldDescription[0].declarations.has(property), false);
+    assert.equal(newDescription[0].declarations.get(property), value);
+    assert.ok(!value.includes('!important'));
+  }
+  assert.equal(Object.keys(headerProps).length + 1 + 3, 10);
+
+  // The ornament retains distinct historical ownership even though v056
+  // hides it; v055 decorations and responsive overrides are not flattened.
+  assert.equal(matching(v054, '.nfc-app-main .nfc-page-header::after')[0]
+    .declarations.get('position'), 'absolute');
+  const v055 = leafRules(read('src/styles/v055-workspace-breathing.css'));
+  assert.equal(matching(v055, '.nfc-app-main .nfc-page-header::after')[0]
+    .declarations.get('width'), '88px');
+  assert.equal(matching(v056, '.nfc-app-main .nfc-page-header::after')[0]
+    .declarations.get('display'), 'none');
+  assert.equal(matching(v056, '.nfc-app-main .nfc-page-header',
+    '@media (max-width: 1199px)')[0].declarations.get('flex-wrap'), 'wrap');
+  assert.equal(matching(v056, '.nfc-app-main .nfc-page-header',
+    '@media (max-width: 767px)')[0].declarations.get('margin-bottom'), '22px');
+  assert.ok(matching(v056, '.nfc-app-main .nfc-page-header',
+    '@media (max-width: 767px)').some(rule =>
+    rule.declarations.get('justify-content') === 'flex-start'));
+  assert.ok(matching(v056, '.nfc-app-main .nfc-page-header-copy',
+    '@media (max-width: 767px)').some(rule =>
+    rule.declarations.get('flex') === '0 1 auto'));
+
+  const imports = read('src/main.tsx');
+  const early = imports.indexOf("import './styles/v054-premium-system.css';");
+  const middle = imports.indexOf("import './styles/v055-workspace-breathing.css';");
+  const late = imports.indexOf("import './styles/v056-right-workspace-v2.css';");
+  assert.ok(early >= 0 && early < middle && middle < late,
+    'Unmodified v054/v055/v056 cascade order');
+  assert.match(old054, /@media \(prefers-reduced-transparency: reduce\)/);
+  assert.match(old054, /@media \(prefers-reduced-motion: reduce\)/);
+});

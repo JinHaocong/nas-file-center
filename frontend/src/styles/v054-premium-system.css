@@ -55,15 +55,6 @@
   gap: var(--nfc-v54-section-gap);
 }
 
-.nfc-app-main .nfc-page-header {
-  min-height: 96px;
-  margin: 0;
-  padding: 10px 4px 20px;
-  align-items: flex-end;
-  gap: 28px;
-  border-bottom: 1px solid var(--nfc-v54-line);
-}
-
 .nfc-app-main .nfc-page-header::after {
   content: '';
   position: absolute;
@@ -77,10 +68,6 @@
     color-mix(in srgb, var(--nfc-accent) 58%, transparent),
     color-mix(in srgb, var(--nfc-accent) 8%, transparent)
   );
-}
-
-.nfc-app-main .nfc-page-header-copy {
-  max-width: min(920px, 74vw);
 }
 
 .nfc-app-main .nfc-page-eyebrow {
@@ -216,10 +203,7 @@
 
 .nfc-app-main .nfc-data-panel-description {
   max-width: 86ch;
-  margin-top: 4px;
   color: var(--nfc-text-subtle);
-  font-size: 10.5px;
-  line-height: 1.55;
 }
 
 .nfc-app-main .nfc-panel-count {
