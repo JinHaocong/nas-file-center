@@ -519,3 +519,54 @@ Stage cumulative historical **redundant declaration** cleanup:
 This does **not** finish full historical CSS/theme convergence, human
 visual/a11y acceptance, isolated real NAS verification or deployment.
 Formal milestone remains **69/74 (93.2%)**.
+
+## 2026-10-19 — v054 → v056 panels, Media, root labels and Workflow
+
+Retired **10** additional unconditional historical declarations. Each is an
+exact single-selector, same-property, same-specificity, normal-priority
+shadow of a later-imported unconditional v056 rule:
+
+| Earlier v054 selector | Properties retired | v056 canonical authority |
+| --- | --- | --- |
+| `.nfc-app-main .nfc-data-panel-header` | `min-height`, `padding`, `background` (3) | 0; panel header token padding; transparent |
+| `.nfc-app-main .nfc-media-page .nfc-page-alert` | `margin` (1) | 12px 14px 14px |
+| `.nfc-app-main .nfc-root-list-label` | `color`, `font-size` (2) | w2 text-subtle; 11px |
+| `.nfc-app-main .nfc-workflow-editor-layout` | `gap` (1) | 28px |
+| `.nfc-app-main .nfc-workflow-mode-option` | `min-height`, `border-radius`, `background` (3) | 76px; w2 small radius; w2 soft surface |
+
+Removed two now-empty single-selector v054 rule blocks. Preserved the panel
+header `gap` and `border-bottom-color`, historical Root label `font-weight`,
+`letter-spacing` and `text-transform`, workflow option `padding` and
+`border` shorthand (v056 only overrides its `border-color`), separate
+v056 Media border/background rule, and all other selectors.
+
+Preserved 767px panel Header overrides, 980px Workflow gap, 420px
+`!important` Workflow grid, original CSS import order, theme variables,
+keyboard/focus behavior and reduced-motion/reduced-transparency rules.
+Registered historical-cascade regressions now enforce the ten v056
+owner values, all independent declarations and responsive contexts.
+Full frontend/backend/Docker/dependency and isolated read-only
+Chromium 8-width/4-theme CI remains mandatory on the exact PR HEAD.
+
+Historical redundant declaration total after this batch: **189**
+(179 previously merged + 10 newly retired).
+Formal progress remains **69/74 (93.2%)**: incremental source cleanup
+is not final CSS/theme, manual visual/a11y, real NAS, or production approval.
+
+### PR #296 — exact-HEAD browser gate investigation and stabilization
+
+Initial PR HEAD `7813ede` failed `browser-overlay-smoke` at
+`Purge system-dark-360`: the scrim intercepted the dialog pointer
+hit test immediately after Playwright observed the Radix portal as visible.
+The preceding Restore/Purge cases and the Quarantine Plan matrix passed;
+the trace showed no failing CSS owner, build or backend assertion.
+
+The read-only bulk-overlay browser script now waits (maximum **5 seconds**)
+for an **open** dialog to become hit-test reachable, using animation-frame
+polling, before running the same comprehensive `inspect()` assertions.
+A persistently obstructing scrim **still fails**; exact `z-index` 1300/1301,
+themes, no-blur, safe viewport bounds, pointer reachability, DELETE gate,
+read-only network guards, and all width/theme combinations are unchanged.
+No safety threshold or test coverage was removed. Full CI must rerun
+from the new exact PR HEAD; the earlier failed HEAD is not acceptable
+evidence for merge.
