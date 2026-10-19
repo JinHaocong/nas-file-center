@@ -86,3 +86,33 @@ test('CSS import order, 8-width visual and system theme no-write evidence remain
     assert.ok(browser.includes(invariant), 'Read-only browser evidence missing: ' + invariant);
   }
 });
+
+
+test('actual-route Chromium audit must cover all w2 computed semantic token pairings', () => {
+  // Source-value contract above is not enough if a later sheet overrides the
+  // inherited custom properties on a real routed workspace. Guard the browser
+  // counterpart and its count/evidence against silent removal.
+  const invariants = [
+    'async function auditW2ComputedTheme(page, item, width, theme)',
+    "const workspace = document.querySelector('.nfc-app-main')",
+    'getComputedStyle(workspace)',
+    "style.getPropertyValue('--nfc-w2-' + name)",
+    'await auditW2ComputedTheme(page, item, width, theme)',
+    'w2ThemeAudit.length, WIDTHS.length * THEMES.length * PAGES.length',
+    "writeFileSync(resolve(OUT, 'w2-computed-theme-audit.json')",
+    'w2ThemeAudit.length * 12',
+    'ratio >= 4.5',
+    'assert.deepEqual(writes, []',
+    'assert.deepEqual(outbound, []',
+  ];
+  for (const evidence of invariants) {
+    assert.ok(browser.includes(evidence), 'Computed browser evidence removed: ' + evidence);
+  }
+  assert.ok(browser.includes("route: item.path, width, mode: theme.mode"),
+    'Audited route/viewport/theme identity must be persisted');
+  assert.ok(browser.includes("minimumContrast: Number(minimum.toFixed(3))"),
+    'Persist numeric computed-token contrast evidence, not just pass/fail');
+  const audit = readFileSync('scripts/browser-workspace-cascade.mjs', 'utf8');
+  assert.ok(audit.includes('const PAGES = ['),
+    'Real route inventory must be owned by the browser matrix');
+});
