@@ -570,3 +570,38 @@ read-only network guards, and all width/theme combinations are unchanged.
 No safety threshold or test coverage was removed. Full CI must rerun
 from the new exact PR HEAD; the earlier failed HEAD is not acceptable
 evidence for merge.
+
+## 2026-10-19 — v048-detail → v056 description item typography and geometry
+
+Retired **11** unconditional normal-priority v048-detail declarations
+shadowed by **identical single selectors and CSS properties** in the
+later imported v056 layer (no specificity, media or importance changes):
+
+| v048-detail selector | Retired properties | Final v056 values |
+| --- | --- | --- |
+| `.nfc-description-item` | `min-height`, `padding` (2) | 78px, 14px 16px |
+| `.nfc-description-item dt` | `margin-bottom`, `color`, `font-size`, `font-weight` (4) | 7px, w2 text-subtle, 11px, 620 |
+| `.nfc-description-item dd` | `color`, `font-size` (2) | w2 text-muted, 12.5px |
+| `.nfc-description-item dd.nfc-description-emphasis` | `color`, `font-size`, `font-weight` (3) | w2 text, 14px, 650 |
+
+All four v048-detail rules retain their **independent** properties:
+grid-cell `border-right`/`border-bottom`/`background`, label
+`letter-spacing`, definition `line-height`, and emphasized value
+`letter-spacing`. In particular no shorthand border or text
+cascade conversion was attempted.
+
+Retain v048-detail's 1199px/767px/420px responsive wrappers,
+phone item min-height/padding, even-column and last-item borders,
+native row-action focus and reduced-motion. No `!important`,
+theme tokens, import order, grouped selector or keyboard state
+was modified. The registered historical-cascade regression
+now pins all **11** v056 values, the independently retained v048
+declarations and mobile inheritance/override contracts.
+
+Full read-only Chromium 8-width/4-theme route, overlays, backend, Docker
+and dependency gates remain required on the exact PR HEAD.
+After merge, cumulative redundant CSS declaration removals: **200**
+(189 previously merged + 11 now reviewed). This incremental cleanup
+does **not** constitute complete CSS/theme ownership closure,
+manual visual/a11y acceptance, real NAS acceptance or deployment.
+Formal high-level milestone stays **69/74 (93.2%)**.
