@@ -52,6 +52,32 @@ describe('Pure White Stage 5E-F Indexes complex state gates', () => {
     assert.match(entry, /import '\.\/styles\/console-v2-indexes\.css'/);
   });
 
+  test('actual Indexes 503 Reload keyboard focus and computed-painted AA gate for 32 cases', () => {
+    assert.match(indexes, /className="nfc-v2-indexes-error" role="alert"/);
+    assert.match(styles, /\.nfc-v2-indexes-page :is\(button,select,input\):focus-visible/);
+    for (const marker of [
+      "import { computedContrastRatio } from './computed-contrast.mjs'",
+      "import { parseComputedPaintColor, contrastRatioForOpaqueChannels } from './computed-paint-color.mjs'",
+      'const indexErrorPaintCases = []',
+      'async function inspectIndexesListErrorPaint(page, theme, width)',
+      "document.activeElement !== reload",
+      "reload.matches(':focus-visible')",
+      "parseComputedPaintColor(layer.color)",
+      "contrastRatioForOpaqueChannels(foreground.channels, background)",
+      "computedContrastRatio(integer(foreground.channels), integer(background))",
+      "contrast >= 4.5",
+      "contrast >= 3",
+      "await page.keyboard.press('Tab')",
+      "await page.keyboard.press('Shift+Tab')",
+      "await inspectIndexesListErrorPaint(page, theme, width)",
+      "'list-error-keyboard-' + label",
+      "indexes-list-error-reload-paint-audit.json",
+      "indexErrorPaintCases.length, WIDTHS.length * THEMES.length",
+      "64 keyboard focus/background >=3:1",
+    ]) assert.ok(browser.includes(marker), 'Missing live Indexes error AA gate: ' + marker);
+    assert.ok(workflow.includes('frontend/artifacts/browser-indexes-ledger-states/indexes-list-error-reload-paint-audit.json'));
+  });
+
   test('browser uses localhost-only synthetic GET, denies mutations and preserves prior suites', () => {
     for (const token of [
       'url.origin !== BASE', "request.method() !== 'GET'",

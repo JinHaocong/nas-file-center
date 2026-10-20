@@ -5,10 +5,12 @@
  */
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { chromium } from 'playwright';
+import { computedContrastRatio } from './computed-contrast.mjs';
+import { parseComputedPaintColor, contrastRatioForOpaqueChannels } from './computed-paint-color.mjs';
 import { visualAdminFixture, visualSafeSettingsFixture,
   visualViewports, visualThemes } from './visual-fixtures.mjs';
 
@@ -38,6 +40,7 @@ const server = spawn(process.execPath, [
 ], { cwd: process.cwd(), stdio: 'ignore' });
 let browser;
 let passed = 0;
+const indexErrorPaintCases = [];
 
 async function ready() {
   for (let i = 0; i < 100; i++) {
@@ -129,6 +132,104 @@ async function inspect(page, theme, width, state) {
     return failures;
   }, { theme, width, state });
   assert.deepEqual(failures, [], state + ' ' + width + ': ' + failures.join('; '));
+}
+
+/** Check actual mounted Indexes 503 alert text and keyboard-visible Reload ring. */
+async function inspectIndexesListErrorPaint(page, theme, width) {
+  const snapshot = await page.evaluate(() => {
+    const alert = document.querySelector('.nfc-v2-indexes-error[role="alert"]');
+    const reload = alert?.querySelector('button');
+    const title = alert?.querySelector('strong');
+    const detail = alert?.querySelector('p');
+    const label = reload?.querySelector('span');
+    if (!alert || !title?.textContent?.includes('获取索引根目录失败') ||
+        !detail?.textContent?.trim() ||
+        !reload || !label?.textContent?.includes('重新加载'))
+      throw Error('Missing mounted real Indexes list failure alert/Reload labels');
+    if (document.activeElement !== reload || !reload.matches(':focus-visible') ||
+        reload.disabled)
+      throw Error('Indexes list Reload must have actual keyboard-visible enabled focus');
+    const reloadBox = reload.getBoundingClientRect();
+    if (!reloadBox.width || !reloadBox.height || reloadBox.left < -2 ||
+        reloadBox.right > innerWidth + 2 || reloadBox.top < -2 ||
+        reloadBox.bottom > innerHeight + 2)
+      throw Error('Indexes list Reload escapes the visible viewport');
+    const ring = getComputedStyle(reload);
+    const ringWidth = Number.parseFloat(ring.outlineWidth);
+    const ringOffset = Number.parseFloat(ring.outlineOffset);
+    if (ring.outlineStyle !== 'solid' || !Number.isFinite(ringWidth) ||
+        !Number.isFinite(ringOffset) || ringWidth < 2 || ringOffset < 1)
+      throw Error('Indexes list Reload keyboard focus indicator is not solid/visible');
+    const flat = element => {
+      const ancestors = [];
+      for (let node = element; node; node = node.parentElement) {
+        const style = getComputedStyle(node);
+        if (style.backgroundImage !== 'none' || Number(style.opacity) !== 1 ||
+            style.filter !== 'none' || style.backdropFilter !== 'none' ||
+            (style.webkitBackdropFilter && style.webkitBackdropFilter !== 'none'))
+          throw Error('Unsupported Indexes alert paint ancestor: ' + node.tagName);
+        ancestors.push({ tag: node.tagName, color: style.backgroundColor });
+      }
+      return { foreground: getComputedStyle(element).color, ancestors };
+    };
+    return {
+      texts: [
+        { name: 'error-title', ...flat(title) },
+        { name: 'error-detail', ...flat(detail) },
+        { name: 'reload-label', ...flat(label) },
+      ],
+      alertPaint: flat(alert),
+      buttonPaint: flat(reload),
+      focus: { foreground: ring.outlineColor, width: ringWidth,
+        offset: ringOffset, keyboard: true },
+    };
+  });
+  const compose = (paint, name) => {
+    const layers = [];
+    for (const layer of paint.ancestors) {
+      const decoded = parseComputedPaintColor(layer.color);
+      if (decoded.alpha > 0) layers.push({ ...layer, ...decoded });
+      if (decoded.alpha === 1) break;
+    }
+    if (!layers.length || layers.at(-1).alpha !== 1)
+      throw Error('Indexes list ' + name + ' lacks opaque painted ancestor');
+    let background = [0, 0, 0];
+    for (const layer of [...layers].reverse()) {
+      background = background.map((value, i) =>
+        layer.channels[i] * layer.alpha + value * (1 - layer.alpha));
+    }
+    return { background, layers: layers.map(({ tag, color, alpha }) => ({ tag, color, alpha })) };
+  };
+  const wcag = (ink, background) => {
+    const foreground = parseComputedPaintColor(ink);
+    if (foreground.alpha !== 1)
+      throw Error('Translucent Indexes list ink or ring needs rendered-pixel audit');
+    const integer = channels => 'rgb(' + channels.map(Math.round).join(', ') + ')';
+    return Math.min(
+      contrastRatioForOpaqueChannels(foreground.channels, background),
+      computedContrastRatio(integer(foreground.channels), integer(background)),
+    );
+  };
+  const pairs = snapshot.texts.map(pair => {
+    const paint = compose(pair, pair.name);
+    const contrast = wcag(pair.foreground, paint.background);
+    assert.ok(contrast >= 4.5, 'Indexes list failure/Reload text below 4.5:1: ' +
+      JSON.stringify({ width, theme, pair, contrast, paint }));
+    return { name: pair.name, foreground: pair.foreground,
+      contrast: Number(contrast.toFixed(3)), ...paint };
+  });
+  const alert = compose(snapshot.alertPaint, 'error-banner');
+  const button = compose(snapshot.buttonPaint, 'reload-button');
+  const focusPairs = [['error-banner', alert], ['reload-button', button]].map(
+    ([name, paint]) => {
+      const contrast = wcag(snapshot.focus.foreground, paint.background);
+      assert.ok(contrast >= 3, 'Indexes list Reload outline below 3:1: ' +
+        JSON.stringify({ width, theme, name, contrast, paint, focus: snapshot.focus }));
+      return { name, contrast: Number(contrast.toFixed(3)), ...paint };
+    });
+  indexErrorPaintCases.push({ width, mode: theme.mode, system: theme.system,
+    effective: theme.effective, texts: pairs, focus: snapshot.focus,
+    focusPairs });
 }
 
 try {
@@ -332,6 +433,16 @@ try {
           .waitFor({ state: 'visible', timeout: 30000 });
         await inspect(page, theme.effective, width, 'failure');
         await page.screenshot({ path: resolve(OUT, 'list-error-' + label + '.png') });
+        // Preserve the original unfocused screenshot, then exercise real
+        // Tab / Shift+Tab keyboard modality on the mounted Reload button.
+        const reload = page.locator('.nfc-v2-indexes-error[role="alert"]')
+          .getByRole('button', { name: '重新加载', exact: true });
+        await reload.focus();
+        await page.keyboard.press('Tab');
+        await page.keyboard.press('Shift+Tab');
+        await inspectIndexesListErrorPaint(page, theme, width);
+        if ([390, 1440].includes(width))
+          await page.screenshot({ path: resolve(OUT, 'list-error-keyboard-' + label + '.png') });
         failList = false;
         await page.getByRole('button', { name: '重新加载' }).click();
         await page.locator(record).first().waitFor({ state: 'visible' });
@@ -352,6 +463,22 @@ try {
     }
   }
   assert.equal(passed, WIDTHS.length * THEMES.length);
+  assert.equal(indexErrorPaintCases.length, WIDTHS.length * THEMES.length,
+    'All Indexes 503 failures must have real keyboard focus and painted contrast');
+  assert.ok(indexErrorPaintCases.every(entry =>
+    entry.texts.length === 3 && entry.texts.every(pair => pair.contrast >= 4.5) &&
+    entry.focus.keyboard && entry.focus.width >= 2 && entry.focus.offset >= 1 &&
+    entry.focusPairs.length === 2 &&
+    entry.focusPairs.every(pair => pair.contrast >= 3)),
+    'Every actual Indexes error/Reload text and focus ring must pass AA gates');
+  writeFileSync(resolve(OUT, 'indexes-list-error-reload-paint-audit.json'),
+    JSON.stringify({ total: indexErrorPaintCases.length,
+      paintedTextPairs: indexErrorPaintCases.length * 3,
+      paintedFocusPairs: indexErrorPaintCases.length * 2,
+      scope: 'actual-React-indexes-503-keyboard-focus-flat-computed-paint-not-pixel-or-human',
+      cases: indexErrorPaintCases }, null, 2));
+  console.log('[INDEXES LIST ERROR PAINT] 32/32 real alerts, 96 text >=4.5:1, ' +
+    '64 keyboard focus/background >=3:1.');
   console.log('[INDEXES LEDGER STATES] 32/32 cases, 160 screenshots; ' +
     'long-path states, page 2, read-only dialogs and 503 recovery; zero NAS traffic.');
 } finally {
