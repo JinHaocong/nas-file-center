@@ -500,9 +500,20 @@ const providerModeLabels = {
   light: '浅色模式', dark: '深色模式', system: '跟随系统',
 };
 async function selectWorkspaceTheme(page, mode, effective) {
+  const isMobile = (page.viewportSize()?.width ?? 0) < 768;
   const menu = page.locator('.nfc-header-command-cluster details.nfc-v2-dropdown').first();
-  await menu.locator('summary[aria-label="切换界面主题"]').click();
-  await menu.getByRole('button', { name: providerModeLabels[mode] }).click();
+  if (isMobile) {
+    // CSS intentionally hides the cramped Header dropdown at phone widths.
+    // Exercise its accessible equivalent in the actual mobile navigation drawer.
+    await page.getByRole('button', { name: '打开导航菜单' }).click();
+    const dialog = page.getByRole('dialog', { name: 'NAS File Center 主导航' });
+    await dialog.getByRole('group', { name: '界面主题' })
+      .getByRole('button', { name: providerModeLabels[mode] }).click();
+    await dialog.waitFor({ state: 'hidden' });
+  } else {
+    await menu.locator('summary[aria-label="切换界面主题"]').click();
+    await menu.getByRole('button', { name: providerModeLabels[mode] }).click();
+  }
   await page.waitForFunction(({ mode, effective, label }) => {
     const root = document.documentElement;
     const selected = document.querySelector(
@@ -511,7 +522,7 @@ async function selectWorkspaceTheme(page, mode, effective) {
       localStorage.getItem('nfc_theme_mode') === mode &&
       selected?.textContent?.includes(label);
   }, { mode, effective, label: providerModeLabels[mode] }, { timeout: 10000 });
-  assert.equal(await menu.getAttribute('open'), null,
+  if (!isMobile) assert.equal(await menu.getAttribute('open'), null,
     'Real Header theme menu should close after user selection');
   // React effects and reduced-motion paint must settle before steady-state
   // contrast checks; intermediate-frame visual acceptance remains separate.
