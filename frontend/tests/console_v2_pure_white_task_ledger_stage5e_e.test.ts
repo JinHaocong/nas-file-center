@@ -129,6 +129,7 @@ describe('Pure White Stage 5E-E Tasks complex states', () => {
       'node scripts/browser-task-ledger-states.mjs',
       'frontend/artifacts/browser-task-ledger-states/*.png',
       'frontend/artifacts/browser-task-ledger-states/task-table-error-paint-contrast-audit.json',
+      'frontend/artifacts/browser-task-ledger-states/task-list-error-retry-paint-audit.json',
     ]) assert.ok(ci.includes(token), token);
     assert.doesNotMatch(browser, /(?:tasksApi|plansApi|quarantineApi)\.(?:delete|clearTaskHistory|purge|execute|freeze|validate)\(/);
   });
