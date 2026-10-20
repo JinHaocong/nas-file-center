@@ -994,7 +994,9 @@ the mounted Dashboard/Media metric cards correctly.
 
 Extended the existing read-only Chromium workspace matrix **after** each
 accepted screenshot and existing normal/hover/CSS-only probes. Using the
-real Header summary (aria-label `切换界面主题`) and its actual theme buttons,
+real Header summary (aria-label `切换界面主题`) and its actual theme buttons
+at >= 768px, or the real mobile navigation drawer's accessible theme buttons
+at < 768px,
 each Dashboard/Media page now switches from the initially selected
 Light/Dark/System fixture to the opposite **explicit** mode, then restores
 the initial choice **through the same user control**. System must return to
@@ -1007,6 +1009,16 @@ and exact palette/paint restoration.
 Coverage: **2 real routes × 8 viewports × 4 initial mode/system fixtures =
 64 user-action / recovery sequences**, with **256 changed/restored painted
 metric foreground/background comparisons**, each required to be >= 4.5:1.
+**Actual issue found on first CI attempt:** mobile `console-v2.css` intentionally
+hides the desktop Header theme dropdown below 768px without offering a
+replacement control. A real 360px Playwright click timed out because the DOM
+node was not visible. Fixed the product gap by adding three `aria-pressed`
+Light/Dark/System choices inside the existing mobile nav drawer (with 44px
+minimum touch targets and focus-visible styling); after a choice, the drawer
+closes. The phone browser test now opens the real drawer, selects a theme,
+and checks the same ThemeProvider, storage and painted metric state as desktop.
+No hidden-control or forced-click workaround is permitted.
+
 The check waits for two animation frames before steady-state contrast
 sampling, without relaxing the threshold. It writes
 `provider-metric-theme-user-action-audit.json`; the UI workflow uploads it
