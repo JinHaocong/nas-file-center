@@ -780,7 +780,10 @@ async function auditDashboardHeroPaint(page, width, theme) {
         const style = getComputedStyle(node);
         if (style.backgroundImage !== 'none' || Number(style.opacity) !== 1 ||
             style.filter !== 'none' || style.backdropFilter !== 'none')
-          throw Error('Hero text placed over gradient/compositor effect: ' + name);
+          throw Error('Hero text placed over gradient/compositor effect: ' +
+            JSON.stringify({ name, node: node.className || node.tagName,
+              backgroundImage: style.backgroundImage, opacity: style.opacity,
+              filter: style.filter, backdropFilter: style.backdropFilter }));
         const layer = parse(style.backgroundColor);
         if (layer.alpha > 0) layers.push(layer);
         if (layer.alpha === 1) break;
@@ -1091,7 +1094,14 @@ try {
             path: resolve(OUT, item.id + '-' + label + '.png'),
             fullPage: false,
           });
-          if (item.id === 'dashboard') await auditDashboardHeroPaint(page, width, theme);
+          if (item.id === 'dashboard') {
+            // PageHeader historically uses an enter animation. This audit
+            // verifies stable, fully-painted hero colors; allow two real rAF
+            // paints to settle without disabling the gradient/filter gate.
+            await page.evaluate(() => new Promise(resolve =>
+              requestAnimationFrame(() => requestAnimationFrame(resolve))));
+            await auditDashboardHeroPaint(page, width, theme);
+          }
           await auditMetricHoverPaint(page, item, width, theme);
           await auditLiveMetricThemeCascade(page, item, width, theme);
           await auditProviderMetricTheme(page, item, width, theme);
