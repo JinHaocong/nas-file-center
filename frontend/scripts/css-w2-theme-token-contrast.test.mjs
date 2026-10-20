@@ -364,7 +364,7 @@ test('Dashboard gradient isolation and real nested Radix alpha-tint contrast sta
   ];
   const requiredOverlay = [
     'async function inspectCompositedPortalPaint(page, visual, width)',
-    "'.nfc-v2-directory-list li.is-selected'",
+    "'.nfc-v2-directory-dialog .nfc-v2-directory-list li.is-selected'",
     'rowTint.alpha > 0 && rowTint.alpha < 1',
     "style.backgroundImage !== 'none'",
     'const { background, layers } = layersFor(element)',
