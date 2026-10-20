@@ -124,6 +124,26 @@ describe('Pure White Stage 5E-E Tasks complex states', () => {
       'assert.deepEqual(writes, []', 'assert.deepEqual(outbound, []',
       'await page.screenshot', 'await page.keyboard.press',
     ]) assert.ok(browser.includes(token), token);
+    // PR #315: the 20m cap cancelled the same browser job during Archive
+    // Recovery after the Tasks contrast gate passed. Keep all steps and
+    // a bounded 35m run; never promote a cancelled job to a green check.
+    assert.match(ci, /browser-overlay-smoke:\s*\n\s*runs-on: ubuntu-latest\s*\n(?:\s*#.*\n)*\s*timeout-minutes: 35/);
+    for (const requiredStep of [
+      'browser-theme-resilience.mjs',
+      'browser-archive-recovery-task-continuity.mjs',
+      'browser-overlay-smoke.mjs',
+      'browser-task-overlays.mjs',
+      'browser-quarantine-plan-overlays.mjs',
+      'browser-quarantine-bulk-overlays.mjs',
+      'browser-plan-lifecycle-overlays.mjs',
+      'browser-workflow-preview-overlays.mjs',
+      'browser-organizer-dedupe-overlays.mjs',
+      'browser-workspace-cascade.mjs',
+      'browser-task-ledger-states.mjs',
+      'browser-indexes-ledger-states.mjs',
+      'browser-media-ledger-states.mjs',
+      'browser-archive-recovery-selection.mjs',
+    ]) assert.ok(ci.includes(requiredStep), 'Browser smoke must not skip: ' + requiredStep);
     for (const token of [
       'Checkout exact candidate HEAD', 'Verify candidate identity',
       'node scripts/browser-task-ledger-states.mjs',
