@@ -425,6 +425,10 @@
   gap: 16px;
   border: 0 !important;
   background: transparent !important;
+  /* v049 gave all page headers a frosted backdrop; this transparent
+   * Dashboard title sits on solid canvas, not a translucent card. */
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 .nfc-v2-dashboard-hero .nfc-page-header::after { display: none !important; }
 .nfc-v2-dashboard-hero .nfc-page-title { color: var(--v2-text) !important; font-weight: 740 !important; font-size: clamp(28px, 2.5vw, 34px) !important; line-height: 1.18; }
