@@ -45,6 +45,7 @@ const server = spawn(process.execPath, ['node_modules/vite/bin/vite.js',
 let browser;
 let passed = 0;
 const errorPaintCases = [];
+const listErrorPaintCases = [];
 
 async function ready() {
   for (let i = 0; i < 100; i++) {
@@ -227,6 +228,110 @@ async function inspectTableErrorPaint(page, theme, width, state) {
     effective: theme.effective, ...details });
 }
 
+
+/**
+ * Actual mounted Tasks list-failure alert. Prior geometry/screenshots alone
+ * did not test the real alert text, Retry label, or keyboard outline paint.
+ * Return Chromium-computed strings, composing them with the same independently
+ * tested Oklab/RGB parser as the failed desktop task-row audit.
+ */
+async function inspectListFailurePaint(page, theme, width) {
+  const snapshot = await page.evaluate(() => {
+    const alert = document.querySelector('.nfc-v2-task-alert[role="alert"]');
+    const retry = alert?.querySelector('button');
+    const title = alert?.querySelector('strong');
+    const detail = alert?.querySelector('p');
+    const label = retry?.querySelector('span');
+    if (!alert || !title?.textContent?.includes('任务列表加载失败') ||
+        !detail?.textContent?.trim() ||
+        !retry || !label?.textContent?.includes('重试'))
+      throw Error('Missing mounted real task list failure alert/Retry labels');
+    if (document.activeElement !== retry || !retry.matches(':focus-visible') ||
+        retry.disabled)
+      throw Error('Task list Retry must have actual keyboard-visible enabled focus');
+    const retryBox = retry.getBoundingClientRect();
+    if (!retryBox.width || !retryBox.height || retryBox.left < -2 ||
+        retryBox.right > innerWidth + 2 || retryBox.top < -2 ||
+        retryBox.bottom > innerHeight + 2)
+      throw Error('Task list Retry escapes the visible viewport');
+    const ring = getComputedStyle(retry);
+    const ringWidth = Number.parseFloat(ring.outlineWidth);
+    const ringOffset = Number.parseFloat(ring.outlineOffset);
+    if (ring.outlineStyle !== 'solid' || !Number.isFinite(ringWidth) ||
+        !Number.isFinite(ringOffset) || ringWidth < 2 || ringOffset < 1)
+      throw Error('Task list Retry keyboard focus indicator is not solid/visible');
+    const flat = element => {
+      const ancestors = [];
+      for (let node = element; node; node = node.parentElement) {
+        const style = getComputedStyle(node);
+        if (style.backgroundImage !== 'none' || Number(style.opacity) !== 1 ||
+            style.filter !== 'none' || style.backdropFilter !== 'none' ||
+            (style.webkitBackdropFilter && style.webkitBackdropFilter !== 'none'))
+          throw Error('Unsupported Task alert paint ancestor: ' + node.tagName);
+        ancestors.push({ tag: node.tagName, color: style.backgroundColor });
+      }
+      return { foreground: getComputedStyle(element).color, ancestors };
+    };
+    return {
+      texts: [
+        { name: 'error-title', ...flat(title) },
+        { name: 'error-detail', ...flat(detail) },
+        { name: 'retry-label', ...flat(label) },
+      ],
+      alertPaint: flat(alert),
+      buttonPaint: flat(retry),
+      focus: { foreground: ring.outlineColor, width: ringWidth,
+        offset: ringOffset, keyboard: true },
+    };
+  });
+  const compose = (paint, name) => {
+    const layers = [];
+    for (const layer of paint.ancestors) {
+      const decoded = parseComputedPaintColor(layer.color);
+      if (decoded.alpha > 0) layers.push({ ...layer, ...decoded });
+      if (decoded.alpha === 1) break;
+    }
+    if (!layers.length || layers.at(-1).alpha !== 1)
+      throw Error('Task list ' + name + ' lacks opaque painted ancestor');
+    let background = [0, 0, 0];
+    for (const layer of [...layers].reverse()) {
+      background = background.map((value, i) =>
+        layer.channels[i] * layer.alpha + value * (1 - layer.alpha));
+    }
+    return { background, layers: layers.map(({ tag, color, alpha }) => ({ tag, color, alpha })) };
+  };
+  const wcag = (ink, background) => {
+    const foreground = parseComputedPaintColor(ink);
+    if (foreground.alpha !== 1)
+      throw Error('Translucent Task list ink or ring needs rendered-pixel audit');
+    const integer = channels => 'rgb(' + channels.map(Math.round).join(', ') + ')';
+    return Math.min(
+      contrastRatioForOpaqueChannels(foreground.channels, background),
+      computedContrastRatio(integer(foreground.channels), integer(background)),
+    );
+  };
+  const pairs = snapshot.texts.map(pair => {
+    const paint = compose(pair, pair.name);
+    const contrast = wcag(pair.foreground, paint.background);
+    assert.ok(contrast >= 4.5, 'Task list failure/Retry text below 4.5:1: ' +
+      JSON.stringify({ width, theme, pair, contrast, paint }));
+    return { name: pair.name, foreground: pair.foreground,
+      contrast: Number(contrast.toFixed(3)), ...paint };
+  });
+  const alert = compose(snapshot.alertPaint, 'error-banner');
+  const button = compose(snapshot.buttonPaint, 'retry-button');
+  const focusPairs = [['error-banner', alert], ['retry-button', button]].map(
+    ([name, paint]) => {
+      const contrast = wcag(snapshot.focus.foreground, paint.background);
+      assert.ok(contrast >= 3, 'Task list Retry outline below 3:1: ' +
+        JSON.stringify({ width, theme, name, contrast, paint, focus: snapshot.focus }));
+      return { name, contrast: Number(contrast.toFixed(3)), ...paint };
+    });
+  listErrorPaintCases.push({ width, mode: theme.mode, system: theme.system,
+    effective: theme.effective, texts: pairs, focus: snapshot.focus,
+    focusPairs });
+}
+
 try {
   await ready();
   mkdirSync(OUT, { recursive: true });
@@ -333,6 +438,17 @@ try {
         await page.getByText('任务列表加载失败').waitFor({ state: 'visible', timeout: 25000 });
         await assertBounds(page, theme.effective, width, 'failure');
         await page.screenshot({ path: resolve(OUT, 'list-error-' + label + '.png') });
+        // Keep the established error screenshot clean. Enter real keyboard
+        // modality by moving from Retry to the next focusable element and
+        // Shift+Tab back to the actual error-state control.
+        const retry = page.locator('.nfc-v2-task-alert[role="alert"]')
+          .getByRole('button', { name: '重试', exact: true });
+        await retry.focus();
+        await page.keyboard.press('Tab');
+        await page.keyboard.press('Shift+Tab');
+        await inspectListFailurePaint(page, theme, width);
+        if ([390, 1440].includes(width))
+          await page.screenshot({ path: resolve(OUT, 'list-error-keyboard-' + label + '.png') });
         failList = false;
         await page.getByRole('button', { name: '重试', exact: true }).click();
         await page.getByText('没有匹配的任务').waitFor({ state: 'visible' });
@@ -350,6 +466,22 @@ try {
     }
   }
   assert.equal(passed, WIDTHS.length * THEMES.length);
+  assert.equal(listErrorPaintCases.length, WIDTHS.length * THEMES.length,
+    'Every real task list failure must have keyboard focus and measured paint');
+  assert.ok(listErrorPaintCases.every(entry =>
+    entry.texts.length === 3 && entry.texts.every(pair => pair.contrast >= 4.5) &&
+    entry.focus.keyboard && entry.focus.width >= 2 && entry.focus.offset >= 1 &&
+    entry.focusPairs.length === 2 &&
+    entry.focusPairs.every(pair => pair.contrast >= 3)),
+  'Every actual Task list alert text and Retry ring must pass both AA gates');
+  writeFileSync(resolve(OUT, 'task-list-error-retry-paint-audit.json'),
+    JSON.stringify({ total: listErrorPaintCases.length,
+      paintedTextPairs: listErrorPaintCases.length * 3,
+      paintedFocusPairs: listErrorPaintCases.length * 2,
+      scope: 'actual-React-list-error-keyboard-focus-flat-computed-paint-not-pixel-or-human',
+      cases: listErrorPaintCases }, null, 2));
+  console.log('[TASK LIST ERROR PAINT] 32/32 real alerts, 96 text pairs >=4.5:1, ' +
+    '64 keyboard focus/background pairs >=3:1.');
   assert.equal(errorPaintCases.length,
     WIDTHS.filter(width => width >= 768).length * THEMES.length * 2,
     'Five desktop widths, four themes and actual normal/hover Tasks error states required');

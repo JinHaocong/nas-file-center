@@ -1362,3 +1362,66 @@ the previous failing contrast using that exact Chromium sample, checks the
 new light value, and the real browser still independently checks all
 40 normal/hover desktop theme cases. No threshold change or screenshot
 baseline replacement.
+
+
+## 2026-10-20 — real Tasks list-error text and Retry keyboard paint (PR after #314)
+
+The previous PR #314 measured the *failed-task table row's short diagnostic*
+in 40 desktop normal/hover states and repaired light/dark ink colors. That
+does not cover the separate **whole-list read failure**, rendered as
+`.nfc-v2-task-alert[role="alert"]` with title, detailed message, and native
+`ConsoleButton` Retry. The established 32-case
+`browser-task-ledger-states.mjs` fixture previously checked only banner
+horizontal containment and error semantics.
+
+Reuse its real React Query **synthetic-only GET HTTP 503 → alert → Retry →
+successful GET** sequence, existing 8 widths × 4 light/dark/system modes and
+unchanged `list-error-*.png` screenshots. After each baseline error
+screenshot, move focus by **Tab then Shift+Tab** back to the real Retry button,
+verify `:focus-visible`, exact focused element, enabled state, solid outline,
+minimum 2px width and 1px offset, and viewport containment. Read actual
+Chromium-computed title, description, button label, outline and underlying
+background layers, refusing gradients, filters, opacity, unknown/out-of-gamut
+colors or absent opaque paint. Compose every transparent layer using the
+strict numerical RGB/sRGB/Oklab parser from #314. Use the lower of unrounded
+and rounded WCAG ratios to enforce:
+
+- **32 × 3 = 96** real banner/title/Retry text pairs **>=4.5:1**.
+- **32 × 2 = 64** real Retry outline-to-banner/button surface pairs **>=3:1**.
+
+Keep all existing 160 baseline screenshots, and add eight focused-error
+screenshots at **390px and 1440px × four theme modes**. Persist full paint
+results to `task-list-error-retry-paint-audit.json` and upload it through the
+existing UI Validation artifact step. This is computed flat-paint evidence,
+**not human visual/screen-reader signoff**; it does not replace the formal
+accessibility/visual/NAS acceptance requirements. The fixture continues to
+reject non-GET and external-origin requests and never accesses a production
+NAS. This PR does not remove redundant CSS; the historical retired count
+stays **229** and high-level milestones remain **69/74 (93.2%)**.
+
+Note: the shared shell already overrides its default #777771 keyboard
+outline to #e9e9e6 in the dark theme, so an initial token-only concern
+must not be misreported as a proven live focus defect. This change verifies
+the mounted result before deciding whether any CSS adjustment is needed.
+
+
+### PR #315 CI cancellation and bounded recovery
+
+The first PR #315 HEAD `75866755e5120f2b2590e9a2ca84f7205b3b9577`
+completed **15/16** check runs. The Chromium `browser-overlay-smoke`
+job was **cancelled at the 20-minute job timeout**, not marked as an
+application failure or approval: all preceding Tasks (including the new
+32-list-error paint cases), Indexes and Media stages had passed, but the
+job was in its final Archive Recovery selection stage. GitHub therefore
+correctly concluded the whole `UI Validation` workflow as cancelled,
+so the PR could not be merged. This evidence is not a green result.
+
+The job now has a **bounded 35-minute timeout** matching the existing
+backend regression job, allowing the full existing read-only browser suite
+(including Archive Recovery and evidence upload) to complete. No test,
+viewport, failure threshold, mock isolation or cleanup step is removed.
+A static regression enumerates all 14 browser scripts and protects the
+new bounded timeout from regressing back to 20 minutes. All PR CI
+workflows must run again on the updated exact HEAD and **every** check
+must conclude Success; previous green stages do not substitute for the
+cancelled job.
