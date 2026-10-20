@@ -1448,3 +1448,28 @@ blocked. No runtime CSS, business API, NAS file or production deployment changes
 This automated painted-color check is not a pixel-compositor guarantee, human visual/
 assistive-technology acceptance or NAS/production sign-off. Milestones remain
 **69/74** and historical duplicate CSS removals remain **229**.
+
+## 2026-10-20 — live Media GET 503 Retry painted keyboard audit
+
+The Media read-only Chromium ledger matrix previously covered 8 widths × 4 themes,
+GET 503 error geometry and explicit retry but not painted message/Retry ink or
+keyboard outline contrast. This test-only extension uses actual React error
+responses, real Tab → Shift+Tab focus modality, enabled `:focus-visible`,
+solid outline ≥2px with offset ≥1px and button viewport boundaries.
+
+The Media error message is **a direct text node** in its flex alert: the test
+measures the alert's inherited computed foreground for that text and separately
+the Retry button's label ink. Using the existing strict RGB/sRGB/Oklab color
+decoder and opaque ancestor compositing, each of 32 states must pass **64
+message/Retry text pairs at ≥4.5:1** and **64 focus-outline vs alert/button
+surface pairs at ≥3:1**, requiring both exact and rounded ratios to pass.
+Unsupported gamut, gradients, opacity, filters, translucent ink and backgrounds
+without opaque origin are rejected. Original 256 state screenshots remain; 8
+new focus screenshots and `media-list-error-retry-paint-audit.json` provide CI
+evidence.
+
+The original synthetic localhost GET-only fixture remains; external origin
+requests are aborted and non-GET API methods fail HTTP 405. No production
+React/CSS/business code or NAS data is modified. This is not human
+visual/assistive-technology or physical NAS/production sign-off. Formal
+milestones stay **69/74** and historical CSS duplicate removals stay **229**.
