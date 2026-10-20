@@ -105,9 +105,13 @@ jobs:
 
   # Run the real React/Radix app in Chromium against read-only synthetic API fixtures.
   # This tests computed CSS/stacking at 8 viewports and light/dark/system modes.
+  # The full 15-stage read-only matrix exceeded 20m in PR #315, cancelling
+  # after Tasks, Indexes and Media passed but before Archive Recovery finished.
+  # Bound the whole job to 35m rather than truncating tests or treating
+  # cancellation as success; keep every existing fail-closed step intact.
   browser-overlay-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - name: Checkout exact candidate HEAD
         uses: actions/checkout@v4
