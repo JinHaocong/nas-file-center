@@ -1303,3 +1303,19 @@ visual/screen-reader signoff, real NAS acceptance or deployment approval.
 Historical CSS redundancy count **229** is unchanged (this is a targeted
 bug fix, not a redundant-declaration removal); high-level milestones stay
 **69/74 (93.2%)**.
+
+
+### PR #314 first Chromium finding — zero-alpha Oklab serialization
+
+The initial latest-HEAD browser run reached the real 768px light failed-task
+row and **correctly stopped before making a contrast claim**: Chromium emitted
+`oklab(0 0 0 / 0)` for an ancestor's entirely transparent computed
+background, and the audit accepted only RGB/sRGB syntax. Such a layer has
+**exactly zero alpha** and contributes no color in the composite; its numeric
+channels need not be converted. The follow-up parser recognizes *only that
+exact zero-alpha serialization*, treating it as a transparent layer.
+Any opaque/translucent nonzero Oklab, unsupported gradient, filter or missing
+opaque ancestor still fails closed. The **4.5:1** gate is unchanged; the
+CSS fix is still verified against actual Chromium output, not assumed good.
+The first candidate's 15 successful checks do not count as proof for the new
+HEAD: rerun all PR workflows and checks before any merge.
