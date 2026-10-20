@@ -490,6 +490,89 @@ async function auditLiveMetricThemeCascade(page, item, width, theme) {
   });
 }
 
+// Unlike the CSS-only inversion above, use the real authenticated Header
+// theme menu and ThemeProvider state (including System mode and persistence).
+// A mounted workspace must repaint actual metric text/surfaces after user
+// interaction, without navigation or a synthetic document.dataset mutation.
+// Run after accepted screenshots to keep their 352-image baseline intact.
+const providerMetricThemeAudit = [];
+const providerModeLabels = {
+  light: '浅色模式', dark: '深色模式', system: '跟随系统',
+};
+async function selectWorkspaceTheme(page, mode, effective) {
+  const isMobile = (page.viewportSize()?.width ?? 0) < 768;
+  const menu = page.locator('.nfc-header-command-cluster details.nfc-v2-dropdown').first();
+  if (isMobile) {
+    // CSS intentionally hides the cramped Header dropdown at phone widths.
+    // Exercise its accessible equivalent in the actual mobile navigation drawer.
+    await page.getByRole('button', { name: '打开导航菜单' }).click();
+    const dialog = page.getByRole('dialog', { name: 'NAS File Center 主导航' });
+    await dialog.getByRole('group', { name: '界面主题' })
+      .getByRole('button', { name: providerModeLabels[mode] }).click();
+    await dialog.waitFor({ state: 'hidden' });
+  } else {
+    await menu.locator('summary[aria-label="切换界面主题"]').click();
+    await menu.getByRole('button', { name: providerModeLabels[mode] }).click();
+  }
+  await page.waitForFunction(({ mode, effective, label }) => {
+    const root = document.documentElement;
+    const selected = document.querySelector(
+      '.nfc-header-command-cluster details.nfc-v2-dropdown button[aria-pressed="true"]');
+    return root.dataset.theme === effective && root.style.colorScheme === effective &&
+      localStorage.getItem('nfc_theme_mode') === mode &&
+      selected?.textContent?.includes(label);
+  }, { mode, effective, label: providerModeLabels[mode] }, { timeout: 10000 });
+  if (!isMobile) assert.equal(await menu.getAttribute('open'), null,
+    'Real Header theme menu should close after user selection');
+  // React effects and reduced-motion paint must settle before steady-state
+  // contrast checks; intermediate-frame visual acceptance remains separate.
+  await page.evaluate(() => new Promise(resolve =>
+    requestAnimationFrame(() => requestAnimationFrame(resolve))));
+}
+async function auditProviderMetricTheme(page, item, width, theme) {
+  if (item.id !== 'dashboard' && item.id !== 'media') return;
+  const selector = item.id === 'dashboard'
+    ? '.nfc-v2-dashboard-metrics .nfc-metric-card'
+    : '.nfc-media-page > .nfc-metric-grid .nfc-metric-card';
+  const card = page.locator(selector).first();
+  await card.waitFor({ state: 'visible' });
+  await page.mouse.move(0, 0);
+  const originalMode = await page.evaluate(() => localStorage.getItem('nfc_theme_mode'));
+  assert.equal(originalMode, theme.mode);
+  const initial = await metricThemeSnapshot(page, card);
+  assert.equal(initial.tokens.effective, theme.effective);
+  const opposite = theme.effective === 'light' ? 'dark' : 'light';
+  let changed;
+  try {
+    await selectWorkspaceTheme(page, opposite, opposite);
+    changed = await metricThemeSnapshot(page, card);
+    assert.equal(changed.tokens.effective, opposite);
+    for (const name of Object.keys(initial.tokens.values)) {
+      assert.notEqual(changed.tokens.values[name], initial.tokens.values[name],
+        'ThemeProvider user action must change workspace semantic palette: ' + name);
+    }
+    assert.notEqual(changed.contrasts[1].foreground, initial.contrasts[1].foreground,
+      'ThemeProvider user action must repaint real metric value ink');
+  } finally {
+    // Recover through the actual user control even if the contrast check fails.
+    // System mode must be restored as System, not replaced by its current color.
+    await selectWorkspaceTheme(page, theme.mode, theme.effective);
+  }
+  const restored = await metricThemeSnapshot(page, card);
+  assert.deepEqual(restored.tokens, initial.tokens,
+    'ThemeProvider must restore computed workspace tokens after user flow');
+  assert.deepEqual(restored.contrasts.map(x => [x.foreground, x.background]),
+    initial.contrasts.map(x => [x.foreground, x.background]),
+    'Actual painted metric ink and background must restore after user flow');
+  assert.equal(await page.evaluate(() => localStorage.getItem('nfc_theme_mode')), originalMode,
+    'ThemeProvider must restore original explicit/System user preference');
+  providerMetricThemeAudit.push({
+    route: item.path, width, mode: theme.mode, system: theme.system,
+    initialEffective: theme.effective, oppositeEffective: opposite,
+    initial, changed, restored, realUserControl: true,
+  });
+}
+
 async function inspect(page, theme, width, item) {
   const violations = await page.evaluate(({ theme, width, item }) => {
     const get = selector => {
@@ -775,6 +858,7 @@ try {
           });
           await auditMetricHoverPaint(page, item, width, theme);
           await auditLiveMetricThemeCascade(page, item, width, theme);
+          await auditProviderMetricTheme(page, item, width, theme);
         }
         // A second pass mounts populated realistic ledgers without any backend writes.
         // Preserve six empty-state routes, add five dense real pages, including status gates.
@@ -845,6 +929,19 @@ try {
       audited: 'same-document-css-theme-invalidation-not-themeprovider-user-action' }, null, 2));
   console.log('[WORKSPACE LIVE CSS THEME] 64/64 Dashboard/Media same-document ' +
     'inverse-and-restore cases, 256/256 painted metric text contrasts >= 4.5:1.');
+  assert.equal(providerMetricThemeAudit.length, WIDTHS.length * THEMES.length * 2,
+    'Actual Header/ThemeProvider metric flows must cover both routes, all widths and themes');
+  assert.ok(providerMetricThemeAudit.every(item =>
+    item.initial.tokens.effective === item.restored.tokens.effective &&
+    item.initial.tokens.effective !== item.changed.tokens.effective &&
+    item.changed.contrasts.every(role => role.contrast >= 4.5) &&
+    item.restored.contrasts.every(role => role.contrast >= 4.5)),
+  'Real user theme changes and restorations must preserve 4.5:1 painted metric contrast');
+  writeFileSync(resolve(OUT, 'provider-metric-theme-user-action-audit.json'),
+    JSON.stringify({ cases: providerMetricThemeAudit, total: providerMetricThemeAudit.length,
+      audited: 'real-header-themeprovider-user-action-steady-state-not-transient-pixels' }, null, 2));
+  console.log('[WORKSPACE REAL PROVIDER THEME] 64/64 real Header user action/restore ' +
+    'sequences, 256/256 painted metric text contrasts >= 4.5:1.');
   assert.equal(checkboxKeyboardAudit.length, WIDTHS.length * THEMES.length * 2,
     'Every Media and Quarantine dense viewport/theme must have computed checkbox evidence');
   writeFileSync(resolve(OUT, 'checkbox-keyboard-audit.json'),

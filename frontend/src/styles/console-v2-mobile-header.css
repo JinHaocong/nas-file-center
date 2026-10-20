@@ -81,3 +81,47 @@
     min-width: 0;
   }
 }
+
+
+/* The desktop Header theme dropdown is deliberately hidden below 768px to
+ * protect status badges. Restore the real ThemeProvider control in the
+ * scrollable mobile drawer instead of forcing another cramped header icon. */
+.nfc-v2-sidebar-mobile .nfc-v2-mobile-theme-switcher {
+  flex: 0 0 auto;
+  margin: 0 12px;
+  padding: 12px 7px 14px;
+  border-top: 1px solid var(--v2-sidebar-line);
+}
+.nfc-v2-mobile-theme-label {
+  display: block;
+  margin-bottom: 9px;
+  color: var(--v2-text);
+  font-size: 12px;
+  font-weight: 650;
+}
+.nfc-v2-mobile-theme-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+}
+.nfc-v2-mobile-theme-options > button {
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px 2px;
+  border: 1px solid var(--v2-sidebar-line);
+  border-radius: 9px;
+  background: var(--v2-sidebar-surface);
+  color: var(--v2-text);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.nfc-v2-mobile-theme-options > button.is-selected {
+  background: var(--v2-indigo-soft);
+  border-color: var(--v2-text);
+  font-weight: 750;
+}
+.nfc-v2-mobile-theme-options > button:focus-visible {
+  outline: 3px solid var(--v2-text);
+  outline-offset: 2px;
+}

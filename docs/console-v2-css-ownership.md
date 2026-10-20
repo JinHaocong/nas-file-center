@@ -982,3 +982,54 @@ original theme; failed steady-state visuals must fail CI.
 This does not claim transient frames are visually acceptable or constitute
 a pixel-level transition audit. A separate future interaction study could
 evaluate transient theme-switch flashes with real user controls.
+
+
+## 2026-10-20 — real authenticated workspace ThemeProvider control / metric paint
+
+The previous PR #307 exercise directly changed the root effective CSS theme,
+then restored it. That is valuable CSS-cascade invalidation evidence, but it
+cannot prove that an actual logged-in user selection in the Header menu flows
+through React's ThemeProvider, persists explicit/System mode, and repaints
+the mounted Dashboard/Media metric cards correctly.
+
+Extended the existing read-only Chromium workspace matrix **after** each
+accepted screenshot and existing normal/hover/CSS-only probes. Using the
+real Header summary (aria-label `切换界面主题`) and its actual theme buttons
+at >= 768px, or the real mobile navigation drawer's accessible theme buttons
+at < 768px,
+each Dashboard/Media page now switches from the initially selected
+Light/Dark/System fixture to the opposite **explicit** mode, then restores
+the initial choice **through the same user control**. System must return to
+System (not an explicit equivalent). For every step the browser checks
+the selected `aria-pressed` button, root `data-theme`, color-scheme,
+persisted `nfc_theme_mode`, computed workspace semantic tokens, real
+metric label/value foreground over alpha-composited painted backgrounds,
+and exact palette/paint restoration.
+
+Coverage: **2 real routes × 8 viewports × 4 initial mode/system fixtures =
+64 user-action / recovery sequences**, with **256 changed/restored painted
+metric foreground/background comparisons**, each required to be >= 4.5:1.
+**Actual issue found on first CI attempt:** mobile `console-v2.css` intentionally
+hides the desktop Header theme dropdown below 768px without offering a
+replacement control. A real 360px Playwright click timed out because the DOM
+node was not visible. Fixed the product gap by adding three `aria-pressed`
+Light/Dark/System choices inside the existing mobile nav drawer (with 44px
+minimum touch targets and focus-visible styling); after a choice, the drawer
+closes. The phone browser test now opens the real drawer, selects a theme,
+and checks the same ThemeProvider, storage and painted metric state as desktop.
+No hidden-control or forced-click workaround is permitted.
+
+The check waits for two animation frames before steady-state contrast
+sampling, without relaxing the threshold. It writes
+`provider-metric-theme-user-action-audit.json`; the UI workflow uploads it
+alongside all earlier screenshot/JSON evidence. Existing 352 accepted
+screenshots, synthetic GET-only fixtures, backend write/outbound denials,
+ThemeProvider login resilience and CSS-only inversion remain unchanged.
+
+**Limitations:** this is a real-user-control **steady-state** browser test,
+not frame-by-frame or pixel-level validation of intermediate flashes;
+gradients, pseudo-elements, overlays, human visual and assistive-technology
+sign-off still need independent work. No app business logic, production
+deployment or real NAS filesystem changes. Historical redundant CSS
+declarations remain **229** and formal milestone completion remains
+**69/74 (93.2%)** pending comprehensive closure.
