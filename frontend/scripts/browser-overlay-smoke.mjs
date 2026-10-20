@@ -277,7 +277,7 @@ try {
         const row = page.locator('.nfc-v2-directory-dialog .nfc-v2-directory-list li').first();
         await row.waitFor({ state: 'visible' });
         await row.getByRole('button', { name: '选择', exact: true }).click();
-        await row.locator('..').locator('li.is-selected').first().waitFor({ state: 'visible' });
+        await page.locator('.nfc-v2-directory-dialog .nfc-v2-directory-list li.is-selected').first().waitFor({ state: 'visible' });
         await inspectCompositedPortalPaint(page, visual, width);
         await page.keyboard.press('Escape');
         await page.locator('.nfc-v2-directory-dialog').waitFor({ state: 'hidden' });
