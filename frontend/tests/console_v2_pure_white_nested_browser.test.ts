@@ -78,6 +78,29 @@ describe('Pure White Stage 5A — actual browser portal acceptance contracts', (
     assert.doesNotMatch(browser, /https:\/\/[^'\s]*nas|POST.*\/api\/scans/);
   });
 
+  test('selected DirectoryPicker checkbox keyboard ring is composited against real tinted row', () => {
+    // Keep the original 32-case/192-text evidence and add independent
+    // keyboard-visible focus checks, not a theme-token-only approximation.
+    assert.match(directory, /\\.nfc-v2-directory-dialog input:focus-visible\\s*\\{[^}]*outline:\\s*2px solid var\\(--nfc-dialog-accent\\)/);
+    for (const phrase of [
+      "const checkbox = row.getByRole('checkbox', { name: '选择目录 Long-Test-Folder' })",
+      "await page.keyboard.press('Tab')",
+      "document.activeElement !== checkbox",
+      "checkbox.matches(':focus-visible')",
+      "focusStyle.outlineWidth",
+      "focusStyle.outlineOffset",
+      "layersFor(checkbox.parentElement)",
+      "computedContrastRatio(snapshot.focus.foreground, snapshot.focus.background)",
+      "focusRatio >= 3",
+      "c.focus.contrast >= 3",
+      "'directory-selected-focus-' + label + '.png'",
+      "keyboardFocusPairs: compositedPaintCases.length",
+    ]) assert.ok(browser.includes(phrase), 'Missing real keyboard/paint guard: ' + phrase);
+    assert.ok(browser.includes('c.pairs.length === 6 && c.pairs.every(pair => pair.contrast >= 4.5)'));
+    assert.ok(browser.includes("url.origin !== BASE_URL"));
+    assert.ok(browser.includes("request.method() !== 'GET'"));
+  });
+
   test('CI checks the exact candidate and uploads screenshot evidence without touching NAS', () => {
     const workflow = read('../.github/workflows/ui-v044-validation.yml');
     for (const marker of [
