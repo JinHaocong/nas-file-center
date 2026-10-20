@@ -128,8 +128,13 @@
   text-overflow: ellipsis;
   vertical-align: middle;
   white-space: nowrap;
-  color: #c74657;
+  color: #c03c51;
   cursor: help;
+}
+/* Short error text must remain readable on the light hover row (not just
+ * pure white) and the dark table. Keep the dark inspector's error tone. */
+[data-theme='dark'] .nfc-v2-tasks-page .nfc-v2-task-error {
+  color: #ffbdc9;
 }
 .nfc-v2-tasks-page .nfc-row-actions { display: flex; justify-content: flex-end; align-items: center; gap: 4px; white-space: nowrap; }
 .nfc-v2-tasks-page .nfc-status-badge { white-space: nowrap; }

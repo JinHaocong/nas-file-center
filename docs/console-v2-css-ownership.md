@@ -1264,3 +1264,101 @@ No production NAS read/write, runtime API/CSS/permissions change, human a11y
 approval or pixel-rendered gradient analysis. Formal milestone count remains
 **69/74 (93.2%)**, and historical safe CSS declaration retirement stays
 **229**.
+
+
+## 2026-10-20 — real Tasks desktop short-error ink on dark/hover rows (PR after #313)
+
+The previous error-state audits protect long diagnostic sheet geometry and
+DirectoryPicker read failure/retry. A different, previously unmeasured
+surface is the *truncated normal-size failed-task error* in the desktop
+Tasks table: `<span class="nfc-table-error nfc-v2-task-error">`.
+The component's unconditional `#c74657` ink comes from the light design.
+Against representative dark canvas `#242422` it only yields about
+**3.29:1**, below the standard **4.5:1** AA target for 12px error text.
+The nested Task Inspector already uses the distinct accessible dark error
+tone `#ffbdc9`. Scope the dark ink to this Tasks table error only;
+retain the existing row hover/background styling, drawer layout and all
+backend file/task behavior. The light ink receives a separate small AA fix
+when checked against the observed hover surface (see below).
+
+The existing read-only `browser-task-ledger-states.mjs` matrix already
+mounts 51 synthetic tasks including a failed task, then opens the real
+error detail sheet. After the unchanged drawer screenshots and before
+pagination, inspect the mounted first failed **desktop** row at its actual
+normal and pointer-hover states. Measure the real computed short-error ink
+and alpha-composite its actual ancestor backgrounds to the first provably
+opaque layer. Reject unrecognized color spaces, gradients/images, opacity,
+filters, backdrop effects and missing opaque roots. Enforce **>=4.5:1**
+using the existing WCAG luminance calculation. This adds **5 desktop
+widths (768–1920) × 4 theme/system modes × 2 states = 40 painted error
+text pairs** to the previous 32-route matrix, without changing the 160
+existing screenshots or mobile card coverage.
+
+Store individual theme, width, state, hover truth, computed ink, painted
+background, ancestor layers and measured contrast in
+`browser-task-ledger-states/task-table-error-paint-contrast-audit.json`.
+The browser fixture still mocks all GET requests, rejects every non-GET,
+and blocks all external-origin requests. This is a measured *flat-paint*
+computed-style regression, **not pixel-level rendering**, final human
+visual/screen-reader signoff, real NAS acceptance or deployment approval.
+Historical CSS redundancy count **229** is unchanged (this is a targeted
+bug fix, not a redundant-declaration removal); high-level milestones stay
+**69/74 (93.2%)**.
+
+
+### PR #314 first Chromium finding — zero-alpha Oklab serialization
+
+The initial latest-HEAD browser run reached the real 768px light failed-task
+row and **correctly stopped before making a contrast claim**: Chromium emitted
+`oklab(0 0 0 / 0)` for an ancestor's entirely transparent computed
+background, and the audit accepted only RGB/sRGB syntax. Such a layer has
+**exactly zero alpha** and contributes no color in the composite; its numeric
+channels need not be converted. The follow-up parser recognizes *only that
+exact zero-alpha serialization*, treating it as a transparent layer.
+Any opaque/translucent nonzero Oklab, unsupported gradient, filter or missing
+opaque ancestor still fails closed. The **4.5:1** gate is unchanged; the
+CSS fix is still verified against actual Chromium output, not assumed good.
+The first candidate's 15 successful checks do not count as proof for the new
+HEAD: rerun all PR workflows and checks before any merge.
+
+
+### PR #314 second Chromium finding — opaque Oklab and numeric precision
+
+The follow-up Chromium run passed the normal light/dark 768px failures but
+revealed that System → Light may compute a **nontransparent** ancestor as
+`oklab(0.981766 -0.000276804 0.00111037)`. Classifying all Oklab as
+unsupported would block safe modern computed CSS indefinitely. The audit
+now collects unmodified actual computed style strings inside the browser and
+parses them in the separately unit-tested
+`frontend/scripts/computed-paint-color.mjs` helper. Numeric Oklab converts
+via the published inverse matrix to **linear-light sRGB**, then the standard
+sRGB transfer curve; fully transparent numeric Oklab contributes no paint.
+Non-finite values, unknown syntax, invalid alpha, material out-of-gamut
+colors, filters, and non-solid backgrounds still reject the audit. No
+`oklch()`/Display-P3 or arbitrary color function is assumed equivalent.
+
+WCAG contrast is evaluated using **unrounded RGB channel luminance and the
+existing integer-serialized checker**; both must pass 4.5:1. The new
+`computed-paint-color.test.mjs` checks reference black/white/red/blue,
+the observed Chromium color, transparent layers, gamut rejection and numeric
+contrast. CI also uploads `task-table-error-paint-contrast-audit.json`
+rather than keeping this evidence only in the temporary runner workspace.
+
+All previous candidate failures remain recorded and only checks for the
+**newest** PR HEAD can authorize merge. The final human acceptance and
+production gates remain unchanged.
+
+
+### PR #314 third finding — measured light hover paint is slightly under 4.5:1
+
+The Chromium-computed System → Light hover background above converts to
+approximately **RGB(249, 249, 248)**. The previous light error ink
+`#c74657` reaches only about **4.49:1** on that background, so even a
+correct Oklab converter would expose a real AA failure in the 12px error
+text. Scope the light error ink to **`#c03c51`** (approximately **4.98:1**
+against the observed paint) while retaining its color family and the
+previously corrected dark `#ffbdc9` tone. A numeric regression reproduces
+the previous failing contrast using that exact Chromium sample, checks the
+new light value, and the real browser still independently checks all
+40 normal/hover desktop theme cases. No threshold change or screenshot
+baseline replacement.

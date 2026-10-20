@@ -5,10 +5,12 @@
  */
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { chromium } from 'playwright';
+import { computedContrastRatio } from './computed-contrast.mjs';
+import { parseComputedPaintColor, contrastRatioForOpaqueChannels } from './computed-paint-color.mjs';
 import { visualAdminFixture, visualSafeSettingsFixture,
   visualViewports, visualThemes } from './visual-fixtures.mjs';
 
@@ -42,6 +44,7 @@ const server = spawn(process.execPath, ['node_modules/vite/bin/vite.js',
 { cwd: process.cwd(), stdio: 'ignore' });
 let browser;
 let passed = 0;
+const errorPaintCases = [];
 
 async function ready() {
   for (let i = 0; i < 100; i++) {
@@ -156,6 +159,74 @@ async function assertBounds(page, theme, width, mode) {
   assert.deepEqual(violations, [], mode + ' ' + width + ': ' + violations.join('; '));
 }
 
+
+// Painted desktop Tasks row error: the table's normal/hover backgrounds come
+// from different historical CSS layers. Audit actual Chromium winners, with
+// real alpha composition back to a verified opaque ancestor (not palette tokens).
+async function inspectTableErrorPaint(page, theme, width, state) {
+  const snapshot = await page.evaluate(expectedState => {
+    const row = document.querySelector('.nfc-v2-task-table tbody tr');
+    const text = row?.querySelector('.nfc-v2-task-error');
+    if (!row || !text || !text.textContent?.includes('SOURCE_IDENTITY_CONFLICT'))
+      throw Error('Missing mounted failed Tasks row diagnostic');
+    if (row.matches(':hover') !== (expectedState === 'hover'))
+      throw Error('Real Tasks row pointer hover does not match requested state');
+    // Keep the actual DOM and paint effect assertions inside Chromium, but
+    // interpret colors in tested Node code, never hand-wave computed Oklab
+    // as transparent. Every ancestor must be understood until opaque paint.
+    const layers = [];
+    for (let node = text; node; node = node.parentElement) {
+      const style = getComputedStyle(node);
+      if (style.backgroundImage !== 'none' || Number(style.opacity) !== 1 ||
+          style.filter !== 'none' || style.backdropFilter !== 'none' ||
+          (style.webkitBackdropFilter && style.webkitBackdropFilter !== 'none'))
+        throw Error('Unsupported Tasks error painted ancestor: ' + node.className);
+      layers.push({
+        node: node.tagName + (node.className && typeof node.className === 'string' ?
+          '.' + node.className.trim().replace(/\s+/g, '.') : ''),
+        color: style.backgroundColor,
+      });
+    }
+    return { state: expectedState, hovered: row.matches(':hover'),
+      foreground: getComputedStyle(text).color, layers };
+  }, state);
+  const fg = parseComputedPaintColor(snapshot.foreground);
+  if (fg.alpha !== 1)
+    throw Error('Translucent Tasks error ink needs pixel-level evidence');
+  const paint = [];
+  for (const layer of snapshot.layers) {
+    const parsed = parseComputedPaintColor(layer.color);
+    if (parsed.alpha > 0)
+      paint.push({ ...layer, ...parsed });
+    if (parsed.alpha === 1) break;
+  }
+  if (!paint.length || paint.at(-1).alpha !== 1)
+    throw Error('No opaque ancestor behind Tasks error ink');
+  let composite = [0, 0, 0];
+  for (const layer of [...paint].reverse()) {
+    composite = composite.map((value, i) =>
+      layer.channels[i] * layer.alpha + value * (1 - layer.alpha));
+  }
+  const rgb = channels => 'rgb(' + channels.map(Math.round).join(', ') + ')';
+  const roundedContrast = computedContrastRatio(rgb(fg.channels), rgb(composite));
+  const exactContrast = contrastRatioForOpaqueChannels(fg.channels, composite);
+  // Require BOTH unrounded and integer-serialized results to pass. This
+  // cannot pass a borderline case by optimistic integer rounding.
+  const ratio = Math.min(exactContrast, roundedContrast);
+  const details = {
+    ...snapshot, foreground: rgb(fg.channels), background: rgb(composite),
+    layers: paint.map(({ node, color, alpha }) => ({ node, color, alpha })),
+    contrast: Number(ratio.toFixed(3)),
+    exactContrast: Number(exactContrast.toFixed(4)),
+    roundedContrast: Number(roundedContrast.toFixed(4)),
+  };
+  assert.ok(ratio >= 4.5,
+    'Actual Tasks table short error text below AA 4.5:1: ' +
+    JSON.stringify({ width, theme, ...details }));
+  errorPaintCases.push({ width, mode: theme.mode, system: theme.system,
+    effective: theme.effective, ...details });
+}
+
 try {
   await ready();
   mkdirSync(OUT, { recursive: true });
@@ -226,6 +297,16 @@ try {
         await page.keyboard.press('Escape');
         await sheet.waitFor({ state: 'hidden' });
 
+        if (width >= 768) {
+          // Existing screenshots stay unchanged; inspect table after drawer
+          // closes and before pagination changes its first failed row.
+          await page.mouse.move(0, 0);
+          await inspectTableErrorPaint(page, theme, width, 'normal');
+          await page.locator('.nfc-v2-task-table tbody tr .nfc-v2-task-error').first().hover();
+          await inspectTableErrorPaint(page, theme, width, 'hover');
+          await page.mouse.move(0, 0);
+        }
+
         await page.getByRole('button', { name: '下一页' }).click();
         await page.getByRole('button', { name: '#651', exact: true }).waitFor({ state: 'visible' });
         assert.equal(await page.locator(row).count(), 1);
@@ -269,6 +350,13 @@ try {
     }
   }
   assert.equal(passed, WIDTHS.length * THEMES.length);
+  assert.equal(errorPaintCases.length,
+    WIDTHS.filter(width => width >= 768).length * THEMES.length * 2,
+    'Five desktop widths, four themes and actual normal/hover Tasks error states required');
+  writeFileSync(resolve(OUT, 'task-table-error-paint-contrast-audit.json'),
+    JSON.stringify({ total: errorPaintCases.length, cases: errorPaintCases,
+      minimumContrast: 4.5, method: 'actual-Chromium-normal-hover-opaque-ancestor-composition' }, null, 2));
+  console.log('[TASK ERROR PAINT] 40/40 actual desktop normal/hover error text pairs >= 4.5:1.');
   console.log('[TASK LEDGER STATES] 32/32 cases, 160 screenshots; ' +
     'long failure, server pagination, compound filters, error/retry; synthetic GET only.');
 } finally {
