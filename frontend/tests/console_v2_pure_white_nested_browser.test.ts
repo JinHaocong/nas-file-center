@@ -61,8 +61,11 @@ describe('Pure White Stage 5A — actual browser portal acceptance contracts', (
     for (const marker of [
       "import { chromium } from 'playwright'",
       "await page.goto(BASE_URL + '/scans'",
-      "await page.route('**/api/**'",
+      "await page.route('**/*'",
       "request.method() !== 'GET'",
+      "url.origin !== BASE_URL",
+      "await route.abort('blockedbyclient')",
+      "assert.deepEqual(outbound, []",
       "await page.locator('.nfc-v2-directory-dialog').waitFor",
       "await page.keyboard.press('Escape')",
       "await page.screenshot",
