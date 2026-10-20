@@ -1033,3 +1033,45 @@ sign-off still need independent work. No app business logic, production
 deployment or real NAS filesystem changes. Historical redundant CSS
 declarations remain **229** and formal milestone completion remains
 **69/74 (93.2%)** pending comprehensive closure.
+
+
+## 2026-10-20 — ThemeProvider rendered-frame metric text contrast audit
+
+PR #308 verified **steady state** after clicking the actual authenticated
+Header or mobile navigation theme controls, but only after two browser paint
+ticks. Earlier CSS-only theme inversion had shown a short-lived disagreement
+between already-dark card surfaces and stale historical Console v2 metric ink;
+steady-state checks intentionally could not determine whether a real rendered
+frame could show sub-AA contrast.
+
+Extend the existing actual-user ThemeProvider workspace matrix to arm a
+`MutationObserver` on the effective root `data-theme` **before** each
+real UI selection. Beginning on the following `requestAnimationFrame`,
+capture the **first 12 animation-frame computed-style samples** for the real
+Dashboard/Media metric label and value. Alpha-composite actual solid ancestor
+backgrounds to a verifiably opaque layer, and assert each sampled ink/surface
+pair maintains **4.5:1**. Refuse unsupported color spaces, gradients,
+opacity/compositing beyond the flat-paint model and missing visible text
+rather than guessing a background.
+
+The same evidence is captured during both theme change and return to
+the original explicit/System mode:
+**2 routes x 8 widths x 4 initial modes = 64 real user-action sequences**;
+**64 x 2 directions x 12 frames x 2 text roles = 3,072 contrast comparisons**.
+Evidence is written to
+`frontend/artifacts/browser-workspace-cascade/provider-metric-theme-frame-audit.json`
+and included in the existing UI Action artifact upload. All original 352
+screenshots still precede UI theme interactions; existing storage, click,
+steady-state, CSS-only invalidation, GET-only synthetic fixture and forbidden
+write/outbound checks remain intact.
+
+**Interpretation boundary:** each sample is a computed CSS foreground over
+measured solid ancestor layers at a browser animation frame callback,
+not a screenshot/pixel-level observation of composited pixels, device
+sub-frame flicker, pseudo-elements, overlays, gradients, or every element.
+The browser matrix uses `prefers-reduced-motion: reduce`; normal-motion
+transitions and independent human visual/assistive-technology acceptance
+still require separate evaluation. This cannot by itself close the
+CSS/theme high-level milestone. No production or real NAS data operation.
+Formal milestones stay **69/74 (93.2%)**; historical redundant declarations
+retired remain **229**.
