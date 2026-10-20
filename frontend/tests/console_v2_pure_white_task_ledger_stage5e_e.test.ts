@@ -41,6 +41,33 @@ describe('Pure White Stage 5E-E Tasks complex states', () => {
     assert.match(taskDrawer, /nfc-prewrap-error/);
   });
 
+  test('real desktop failed-row text passes opaque-painted AA in light/dark normal and hover', () => {
+    const css = read('src/styles/console-v2-tasks.css');
+    assert.match(taskPage, /className="nfc-table-error nfc-v2-task-error"/);
+    assert.match(css, /\.nfc-v2-task-error\s*\{[^}]*color:\s*#c74657;/s);
+    assert.match(css, /\[data-theme='dark'\] \.nfc-v2-tasks-page \.nfc-v2-task-error\s*\{\s*color:\s*#ffbdc9;/);
+    for (const marker of [
+      "import { computedContrastRatio } from './computed-contrast.mjs'",
+      'const errorPaintCases = []',
+      'async function inspectTableErrorPaint(page, theme, width, state)',
+      "expectedState === 'hover'",
+      'row.matches',
+      "style.backgroundImage !== 'none'",
+      "style.filter !== 'none'",
+      "layer.alpha === 1",
+      'computedContrastRatio(snapshot.foreground, snapshot.background)',
+      'ratio >= 4.5',
+      'await inspectTableErrorPaint(page, theme, width,',
+      "await page.locator('.nfc-v2-task-table tbody tr .nfc-v2-task-error').first().hover()",
+      'WIDTHS.filter(width => width >= 768).length * THEMES.length * 2',
+      "task-table-error-paint-contrast-audit.json",
+      '40/40 actual desktop normal/hover error text pairs',
+    ]) assert.ok(browser.includes(marker), 'Missing fail-closed painted error gate: ' + marker);
+    for (const marker of ["url.origin !== BASE", "request.method() !== 'GET'",
+      'assert.deepEqual(writes, []', 'assert.deepEqual(outbound, []'])
+      assert.ok(browser.includes(marker), 'Missing browser isolation: ' + marker);
+  });
+
   test('only localhost Vite with synthetic GET; failed API requests never become real mutations', () => {
     for (const token of [
       "url.origin !== BASE", "request.method() !== 'GET'",
