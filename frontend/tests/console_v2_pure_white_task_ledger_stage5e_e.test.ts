@@ -43,6 +43,8 @@ describe('Pure White Stage 5E-E Tasks complex states', () => {
 
   test('real desktop failed-row text passes opaque-painted AA in light/dark normal and hover', () => {
     const css = read('src/styles/console-v2-tasks.css');
+    const paintColors = read('scripts/computed-paint-color.mjs');
+    const paintTests = read('scripts/computed-paint-color.test.mjs');
     assert.match(taskPage, /className="nfc-table-error nfc-v2-task-error"/);
     assert.match(css, /\.nfc-v2-task-error\s*\{[^}]*color:\s*#c74657;/s);
     assert.match(css, /\[data-theme='dark'\] \.nfc-v2-tasks-page \.nfc-v2-task-error\s*\{\s*color:\s*#ffbdc9;/);
@@ -54,10 +56,13 @@ describe('Pure White Stage 5E-E Tasks complex states', () => {
       'row.matches',
       "style.backgroundImage !== 'none'",
       "style.filter !== 'none'",
-      "layer.alpha === 1",
-      "if (value === 'oklab(0 0 0 / 0)') return { channels: [0, 0, 0], alpha: 0 }",
-      "if (!rgb && !srgb) throw Error('Unsupported computed Tasks error color: ' + value)",
-      'computedContrastRatio(snapshot.foreground, snapshot.background)',
+      "parsed.alpha === 1",
+      "import { parseComputedPaintColor, contrastRatioForOpaqueChannels } from './computed-paint-color.mjs'",
+      'const fg = parseComputedPaintColor(snapshot.foreground)',
+      'const parsed = parseComputedPaintColor(layer.color)',
+      'contrastRatioForOpaqueChannels(fg.channels, composite)',
+      'Math.min(exactContrast, roundedContrast)',
+      'computedContrastRatio(rgb(fg.channels), rgb(composite))',
       'ratio >= 4.5',
       'await inspectTableErrorPaint(page, theme, width,',
       "await page.locator('.nfc-v2-task-table tbody tr .nfc-v2-task-error').first().hover()",
@@ -65,6 +70,12 @@ describe('Pure White Stage 5E-E Tasks complex states', () => {
       "task-table-error-paint-contrast-audit.json",
       '40/40 actual desktop normal/hover error text pairs',
     ]) assert.ok(browser.includes(marker), 'Missing fail-closed painted error gate: ' + marker);
+    for (const marker of ["const OKLAB = new RegExp",
+      "Out-of-gamut Oklab requires rendered pixel audit",
+      "if (alpha === 0) return { channels: [0, 0, 0], alpha: 0 }",
+      "contrastRatioForOpaqueChannels"])
+      assert.ok(paintColors.includes(marker), 'Missing Oklab validation: ' + marker);
+    assert.ok(paintTests.includes('canonical black, white, red and blue references'));
     for (const marker of ["url.origin !== BASE", "request.method() !== 'GET'",
       'assert.deepEqual(writes, []', 'assert.deepEqual(outbound, []'])
       assert.ok(browser.includes(marker), 'Missing browser isolation: ' + marker);
