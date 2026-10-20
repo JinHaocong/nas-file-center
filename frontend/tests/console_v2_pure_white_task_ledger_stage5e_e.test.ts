@@ -93,6 +93,7 @@ describe('Pure White Stage 5E-E Tasks complex states', () => {
       'Checkout exact candidate HEAD', 'Verify candidate identity',
       'node scripts/browser-task-ledger-states.mjs',
       'frontend/artifacts/browser-task-ledger-states/*.png',
+      'frontend/artifacts/browser-task-ledger-states/task-table-error-paint-contrast-audit.json',
     ]) assert.ok(ci.includes(token), token);
     assert.doesNotMatch(browser, /(?:tasksApi|plansApi|quarantineApi)\.(?:delete|clearTaskHistory|purge|execute|freeze|validate)\(/);
   });
