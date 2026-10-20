@@ -46,13 +46,26 @@ describe('Console v2 reviewed v050/v051/v055 legacy CSS retirement', () => {
 
   test('v051 keeps keyboard row-actions, mobile cards and native overlay structure', () => {
     const css = read(sheets[1]);
-    assert.match(css, /\.nfc-row-actions\s*\{[^}]*opacity:\s*0\.76/);
-    assert.match(css, /\.nfc-row-actions:focus-within\s*\{[^}]*opacity:\s*1/);
+    // v051 retains only the independently owned row-action transition.
+    // Equal-specificity opacity/focus and overlay chrome were already
+    // superseded by the later v056/v054 imported native styles.
+    assert.match(css, /\.nfc-row-actions\s*\{[^}]*transition:\s*opacity 140ms ease, transform 140ms ease/);
+    assert.doesNotMatch(css, /\.nfc-row-actions\s*\{[^}]*opacity:\s*0\.76/);
+    assert.doesNotMatch(css, /\.nfc-row-actions:focus-within\s*\{/);
+    const v056 = read('src/styles/v056-right-workspace-v2.css');
+    assert.match(v056, /\.nfc-row-actions\s*\{[^}]*opacity:\s*0\.56/);
+    assert.match(v056, /\.nfc-row-actions:focus-within\s*\{[^}]*opacity:\s*1/);
+    const v054 = read('src/styles/v054-premium-system.css');
+    for (const marker of ['.nfc-drawer-title {', '.nfc-overlay-stack {',
+      '.nfc-overlay-section {', '.nfc-code-block {']) {
+      assert.ok(v054.includes(marker), 'Canonical overlay owner missing: ' + marker);
+      assert.ok(!css.includes(marker), 'Retired v051 overlay rule returned: ' + marker);
+    }
     for (const marker of [
       '.nfc-centered-state', '.nfc-file-tool-form .nfc-form-grid {',
       '.nfc-batch-page .nfc-batch-operation-grid {',
-      '.nfc-mobile-record-actions {', '.nfc-drawer-title {',
-      '.nfc-overlay-stack {', '@media (max-width: 767px)',
+      '.nfc-mobile-record-actions {', '.nfc-drawer-title-kicker {',
+      '.nfc-drawer-title-row {', '@media (max-width: 767px)',
     ]) assert.ok(css.includes(marker), marker);
   });
 
