@@ -102,6 +102,41 @@ describe('Pure White Stage 5A — actual browser portal acceptance contracts', (
     assert.ok(browser.includes("request.method() !== 'GET'"));
   });
 
+  test('live directory GET error, retry and keyboard focus are contrast-checked in Chromium', () => {
+    const picker = read('src/components/DirectoryPicker/DirectoryPickerModal.tsx');
+    const api = read('src/api/filesystem.ts');
+    for (const marker of [
+      "className=\\\"nfc-v2-directory-error\\\" role=\\\"alert\\\"",
+      'void refetchDir();',
+      "type=\\\"search\\\" aria-label=\\\"搜索子目录\\\"",
+    ]) assert.ok(picker.includes(marker), 'Lost actual error/retry semantics: ' + marker);
+    assert.ok(api.includes('/api/filesystem/list?'));
+    assert.ok(directory.includes('.nfc-v2-directory-dialog .nfc-v2-directory-error {'));
+    assert.ok(directory.includes("[data-theme='dark'] .nfc-v2-directory-dialog .nfc-v2-directory-error {"));
+    for (const marker of [
+      'const directoryErrorCases = []',
+      "simulateDirectoryFailure && url.pathname === '/api/filesystem/list'",
+      "status: 503",
+      "if ([390, 1440].includes(width))",
+      "await alert.waitFor({ state: 'visible', timeout: 20000 })",
+      "await page.keyboard.press('Tab')",
+      "node === document.activeElement",
+      "retryStyle.outlineWidth < 2",
+      "retryStyle.outlineOffset < 1",
+      "computedContrastRatio(style.ink, style.paper)",
+      "computedContrastRatio(details.retry.outline, surface)",
+      "await retry.click()",
+      "await alert.waitFor({ state: 'hidden', timeout: 10000 })",
+      "await checkbox.isChecked()",
+      "directory-error-retry-contrast-audit.json",
+      "directoryErrorCases.length, 2 * MODES.length",
+    ]) assert.ok(browser.includes(marker), 'Missing executable error/retry gate: ' + marker);
+    assert.ok(browser.includes("request.method() !== 'GET'"));
+    assert.ok(browser.includes("url.origin !== BASE_URL"));
+    assert.ok(browser.includes("assert.deepEqual(deniedMethods, []"));
+    assert.ok(browser.includes("assert.deepEqual(outbound, []"));
+  });
+
   test('CI checks the exact candidate and uploads screenshot evidence without touching NAS', () => {
     const workflow = read('../.github/workflows/ui-v044-validation.yml');
     for (const marker of [
