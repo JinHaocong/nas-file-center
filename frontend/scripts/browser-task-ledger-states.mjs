@@ -171,6 +171,10 @@ async function inspectTableErrorPaint(page, theme, width, state) {
     if (row.matches(':hover') !== (expectedState === 'hover'))
       throw Error('Real Tasks row pointer hover does not match requested state');
     const parse = value => {
+      // Chromium serializes some fully transparent color-mix paint layers as
+      // Oklab. Their exact zero alpha means zero visual contribution; accept
+      // ONLY this proven-transparent computed value, not nonzero Oklab colors.
+      if (value === 'oklab(0 0 0 / 0)') return { channels: [0, 0, 0], alpha: 0 };
       const rgb = /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*(\d*\.?\d+))?\s*\)$/.exec(value);
       const srgb = /^color\(srgb\s+(\d*\.?\d+)\s+(\d*\.?\d+)\s+(\d*\.?\d+)(?:\s*\/\s*(\d*\.?\d+))?\s*\)$/.exec(value);
       if (!rgb && !srgb) throw Error('Unsupported computed Tasks error color: ' + value);
