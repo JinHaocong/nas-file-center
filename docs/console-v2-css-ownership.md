@@ -1137,3 +1137,47 @@ compositor pixel, video flash analysis, pseudo-element/gradient overlay,
 human visual sign-off, or complete assistive-technology pass. No claim
 of production or real NAS validation. Formal milestone count stays
 **69/74 (93.2%)**, and historical safe CSS retirement stays **229**.
+
+
+## 2026-10-20 — real composited portal tint and hidden hero gradient audit (PR #311)
+
+Prior PRs #309–#310 audit real Dashboard/Media metric paint during
+ThemeProvider changes in reduced/normal-motion modes. They explicitly
+reject gradients, backdrop effects and translucent text when those cannot
+be modeled as an opaque flat ancestor.
+
+This increment checks two **different real rendered app surfaces**:
+- Actual Dashboard hero at 8 viewports x 4 theme/system fixtures. Its
+  decorative `.nfc-v2-hero-illustration` contains CSS gradients, but is
+  intentionally `display: none` in the Pure White design. The browser
+  asserts it has no layout boxes (so readable copy is **not** laid over
+  that unmodeled gradient) and checks eyebrow, heading, description and
+  caption against alpha-composited **opaque solid** ancestor paints.
+  **32 actual route/theme cases x 4 text roles = 128 AA comparisons**.
+- Actual nested ScanCreate -> DirectoryPicker Radix body portals.
+  Select the synthetic read-only directory through its real React button,
+  requiring an active `li.is-selected` whose CSS uses translucent
+  `color-mix(in srgb, var(--nfc-dialog-accent) 8%, transparent)`.
+  Walk computed paint layers from each real text node to a proven opaque
+  ancestor and alpha-composite in stacking order. Reject unknown color
+  formats, image/gradient layers, node opacity, filters and backdrop blur
+  instead of claiming unverified pixels. Check selected name/path and
+  portal title/description ink, plus both alpha-bearing scrims and
+  z-order. **8 widths x 4 themes = 32 nested portal cases x 6 real
+  text roles = 192 WCAG-AA painted comparisons**.
+
+The fixtures deny every mutating API request and now explicitly block
+outbound origins. Each accepted browser screenshot is still captured
+**before** the new user selection or hero check. Artifacts:
+`frontend/artifacts/browser-workspace-cascade/dashboard-hero-gradient-isolation-audit.json`
+and `frontend/artifacts/browser-overlay/composited-portal-text-contrast-audit.json`,
+both uploaded by UI Validation. No app product CSS/token change, NAS
+write, deployment, or production traffic.
+
+**Scope boundary:** this proves gradient *isolation* from hero text and
+flat-alpha-composited computed style in actual portals, NOT full pixel
+analysis of visible gradients, human overlay visual acceptance,
+blur/image backdrops or arbitrary CSS pseudo-elements. Do not close the
+high-level CSS/theme, human visual or a11y milestones based on this
+automated subset. Formal milestones remain **69/74 (93.2%)**; historical
+redundant declarations safely removed remain **229**.
