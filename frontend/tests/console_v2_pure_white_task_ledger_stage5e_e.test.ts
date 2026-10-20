@@ -81,6 +81,41 @@ describe('Pure White Stage 5E-E Tasks complex states', () => {
       assert.ok(browser.includes(marker), 'Missing browser isolation: ' + marker);
   });
 
+  test('real Tasks list failure Retry keyboard ring and error text pass composed AA in 32 cases', () => {
+    const css = read('src/styles/console-v2-tasks.css');
+    assert.ok(taskPage.includes('className="nfc-v2-task-alert nfc-page-alert" role="alert"'));
+    assert.ok(taskPage.includes('<strong>任务列表加载失败</strong>'));
+    assert.ok(taskPage.includes('onClick={() => refetch()}>重试'));
+    assert.ok(css.includes('.nfc-v2-shell .nfc-v2-task-alert {'));
+    assert.ok(css.includes("[data-theme='dark'] .nfc-v2-task-alert {"));
+    for (const marker of [
+      'const listErrorPaintCases = []',
+      'async function inspectListFailurePaint(page, theme, width)',
+      'document.activeElement !== retry',
+      "retry.matches(':focus-visible')",
+      'ring.outlineStyle !==',
+      'ringWidth < 2 || ringOffset < 1',
+      "parseComputedPaintColor(layer.color)",
+      "contrastRatioForOpaqueChannels(foreground.channels, background)",
+      "computedContrastRatio(integer(foreground.channels), integer(background))",
+      "contrast >= 4.5",
+      "contrast >= 3",
+      "await page.keyboard.press('Tab')",
+      "await page.keyboard.press('Shift+Tab')",
+      "await inspectListFailurePaint(page, theme, width)",
+      "list-error-keyboard-",
+      "task-list-error-retry-paint-audit.json",
+      'listErrorPaintCases.length, WIDTHS.length * THEMES.length',
+      '96 text pairs >=4.5:1',
+      '64 keyboard focus/background pairs >=3:1',
+    ]) assert.ok(browser.includes(marker), 'Missing live list error keyboard gate: ' + marker);
+    assert.ok(browser.includes("if ([390, 1440].includes(width))"));
+    assert.ok(browser.includes("request.method() !== 'GET'"));
+    assert.ok(browser.includes("url.origin !== BASE"));
+    assert.ok(browser.includes("assert.deepEqual(writes, []"));
+    assert.ok(browser.includes("assert.deepEqual(outbound, []"));
+  });
+
   test('only localhost Vite with synthetic GET; failed API requests never become real mutations', () => {
     for (const token of [
       "url.origin !== BASE", "request.method() !== 'GET'",
