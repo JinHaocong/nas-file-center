@@ -318,3 +318,34 @@ test('v056 metric theme ink and surfaces never inherit legacy color/background t
     entry.indexOf("import './styles/v049-workspace.css';"),
     'Metric transition owner must follow historical CSS transitions');
 });
+
+
+test('normal-motion ThemeProvider frame acceptance stays independent from reduced motion', () => {
+  const must = [
+    'const NORMAL_MOTION_WIDTHS = new Set([360, 768, 1440])',
+    "await page.emulateMedia({ reducedMotion: 'no-preference' })",
+    "await auditProviderMetricTheme(page, item, width, theme, 'no-preference')",
+    "await page.emulateMedia({ reducedMotion: 'reduce' })",
+    "matchMedia('(prefers-reduced-motion: reduce)').matches",
+    "'Normal motion must retain real hover and value motion: '",
+    "'Normal motion must not silently inherit reduced-motion transition suppression'",
+    "if (motion === 'no-preference') normalMotionMetricFrameAudit.push(evidence)",
+    'normalMotionMetricFrameAudit.length,',
+    "writeFileSync(resolve(OUT, 'provider-metric-theme-normal-motion-frame-audit.json')",
+    'normalMotionContrastCount,',
+    'frame.contrast >= 4.5',
+    "assert.deepEqual(writes, []",
+    "assert.deepEqual(outbound, []",
+  ];
+  for (const invariant of must) assert.ok(browser.includes(invariant),
+    'Normal-motion real-user-frame regression guard lost: ' + invariant);
+  assert.ok(browser.includes('const PROVIDER_FRAME_COUNT = 12'),
+    'Normal motion must observe the same twelve first rendered frames');
+  const workflow = readFileSync('../.github/workflows/ui-v044-validation.yml', 'utf8');
+  assert.ok(workflow.includes(
+    'frontend/artifacts/browser-workspace-cascade/provider-metric-theme-normal-motion-frame-audit.json'),
+  'Normal-motion frame JSON evidence must be attached to the UI workflow');
+  assert.ok(browser.indexOf("path: resolve(OUT, item.id + '-' + label + '.png')") <
+    browser.indexOf("await auditProviderMetricTheme(page, item, width, theme, 'no-preference')"),
+  'Normal-motion interactions must not alter the 352 accepted screenshot baselines');
+});
