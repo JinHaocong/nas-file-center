@@ -2,6 +2,7 @@ import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ConsoleIcon } from './ui/ConsoleIcon';
 import { consoleNavGroups } from './layout/navItems';
+import { useTheme } from '../contexts/ThemeContext';
 
 interface Props {
   collapsed: boolean;
@@ -18,6 +19,7 @@ export const Sidebar: React.FC<Props> = ({
 }) => {
   const location = useLocation();
   const navigate = useNavigate();
+  const { mode, setMode } = useTheme();
   const compact = collapsed && !embedded;
   const selectedKey = '/' + location.pathname.split('/')[1];
   const go = (path: string) => {
@@ -66,6 +68,22 @@ export const Sidebar: React.FC<Props> = ({
           </section>
         ))}
       </nav>
+      {embedded && (
+        <div className="nfc-v2-mobile-theme-switcher" role="group" aria-label="界面主题">
+          <span className="nfc-v2-mobile-theme-label">界面主题</span>
+          <div className="nfc-v2-mobile-theme-options">
+            {([
+              ['light', '浅色模式'], ['dark', '深色模式'], ['system', '跟随系统'],
+            ] as const).map(([key, label]) => (
+              <button key={key} type="button" aria-pressed={mode === key}
+                className={mode === key ? 'is-selected' : ''}
+                onClick={() => { setMode(key); onNavigate?.(); }}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="nfc-v2-sidebar-footer">
         <span className="nfc-v2-sidebar-footer-icon"><ConsoleIcon name="shield-check" size={17} /></span>
         {!compact && (
