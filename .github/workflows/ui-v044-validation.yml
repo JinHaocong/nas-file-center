@@ -239,6 +239,7 @@ jobs:
             frontend/artifacts/browser-workspace-cascade/provider-metric-theme-normal-motion-frame-audit.json
             frontend/artifacts/browser-task-ledger-states/*.png
             frontend/artifacts/browser-task-ledger-states/task-table-error-paint-contrast-audit.json
+            frontend/artifacts/browser-task-ledger-states/task-list-error-retry-paint-audit.json
             frontend/artifacts/browser-indexes-ledger-states/*.png
             frontend/artifacts/browser-media-ledger-states/*.png
             frontend/artifacts/browser-archive-recovery-selection/*.png
