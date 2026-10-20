@@ -40,9 +40,9 @@ describe('Pure White v2.1 dashboard and scan detail pass', () => {
   test('Transparent Dashboard hero cancels legacy frosted header compositing', () => {
     const legacy = read('src/styles/v049-workspace.css');
     const entry = read('src/main.tsx');
-    assert.match(legacy, /\\.nfc-page-header\\s*\\{[^}]*backdrop-filter:\\s*blur\\(16px\\) saturate\\(120%\\);/);
+    assert.match(legacy, /\.nfc-page-header\s*\{[^}]*backdrop-filter:\s*blur\(16px\) saturate\(120%\);/);
     assert.match(shell,
-      /\\.nfc-v2-shell \\.nfc-v2-dashboard-hero \\.nfc-page-header\\s*\\{[^}]*background:\\s*transparent !important;[^}]*backdrop-filter:\\s*none;[^}]*-webkit-backdrop-filter:\\s*none;/);
+      /\.nfc-v2-shell \.nfc-v2-dashboard-hero \.nfc-page-header\s*\{[^}]*background:\s*transparent !important;[^}]*backdrop-filter:\s*none;[^}]*-webkit-backdrop-filter:\s*none;/);
     assert.ok(entry.indexOf("import './styles/console-v2.css';") >
       entry.indexOf("import './styles/v049-workspace.css';"),
     'Scoped transparent Dashboard hero must override historical page header blur');
