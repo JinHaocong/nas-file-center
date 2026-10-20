@@ -55,6 +55,8 @@ describe('Pure White Stage 5E-E Tasks complex states', () => {
       "style.backgroundImage !== 'none'",
       "style.filter !== 'none'",
       "layer.alpha === 1",
+      "if (value === 'oklab(0 0 0 / 0)') return { channels: [0, 0, 0], alpha: 0 }",
+      "if (!rgb && !srgb) throw Error('Unsupported computed Tasks error color: ' + value)",
       'computedContrastRatio(snapshot.foreground, snapshot.background)',
       'ratio >= 4.5',
       'await inspectTableErrorPaint(page, theme, width,',
