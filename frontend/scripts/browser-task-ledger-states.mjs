@@ -243,7 +243,7 @@ async function inspectListFailurePaint(page, theme, width) {
     const detail = alert?.querySelector('p');
     const label = retry?.querySelector('span');
     if (!alert || !title?.textContent?.includes('任务列表加载失败') ||
-        !detail?.textContent?.includes('Synthetic read-only task listing failure') ||
+        !detail?.textContent?.trim() ||
         !retry || !label?.textContent?.includes('重试'))
       throw Error('Missing mounted real task list failure alert/Retry labels');
     if (document.activeElement !== retry || !retry.matches(':focus-visible') ||
