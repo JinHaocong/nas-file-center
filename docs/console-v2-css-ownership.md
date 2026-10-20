@@ -1276,9 +1276,10 @@ The component's unconditional `#c74657` ink comes from the light design.
 Against representative dark canvas `#242422` it only yields about
 **3.29:1**, below the standard **4.5:1** AA target for 12px error text.
 The nested Task Inspector already uses the distinct accessible dark error
-tone `#ffbdc9`. Scope the same dark ink to this Tasks table error only;
-do not alter light mode, dark backgrounds, the drawer, row hover animation,
-or any backend file/task action.
+tone `#ffbdc9`. Scope the dark ink to this Tasks table error only;
+retain the existing row hover/background styling, drawer layout and all
+backend file/task behavior. The light ink receives a separate small AA fix
+when checked against the observed hover surface (see below).
 
 The existing read-only `browser-task-ledger-states.mjs` matrix already
 mounts 51 synthetic tasks including a failed task, then opens the real
@@ -1346,3 +1347,18 @@ rather than keeping this evidence only in the temporary runner workspace.
 All previous candidate failures remain recorded and only checks for the
 **newest** PR HEAD can authorize merge. The final human acceptance and
 production gates remain unchanged.
+
+
+### PR #314 third finding — measured light hover paint is slightly under 4.5:1
+
+The Chromium-computed System → Light hover background above converts to
+approximately **RGB(249, 249, 248)**. The previous light error ink
+`#c74657` reaches only about **4.49:1** on that background, so even a
+correct Oklab converter would expose a real AA failure in the 12px error
+text. Scope the light error ink to **`#c03c51`** (approximately **4.98:1**
+against the observed paint) while retaining its color family and the
+previously corrected dark `#ffbdc9` tone. A numeric regression reproduces
+the previous failing contrast using that exact Chromium sample, checks the
+new light value, and the real browser still independently checks all
+40 normal/hover desktop theme cases. No threshold change or screenshot
+baseline replacement.
