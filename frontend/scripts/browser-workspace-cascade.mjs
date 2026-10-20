@@ -31,6 +31,7 @@ const server = spawn(process.execPath, [
 let browser;
 let passed = 0;
 const checkboxKeyboardAudit = [];
+const dashboardHeroPaintAudit = [];
 
 async function ready() {
   for (let i = 0; i < 100; i++) {
@@ -739,6 +740,74 @@ async function auditProviderMetricTheme(page, item, width, theme, motion = 'redu
   else providerMetricFrameAudit.push(evidence);
 }
 
+
+// Decorative dashboard gradients must remain isolated from readable hero
+// copy. Refuse any actual gradient/background image behind those text roles;
+// then compare computed ink over alpha-composited real ancestor solid paint.
+async function auditDashboardHeroPaint(page, width, theme) {
+  const result = await page.evaluate(() => {
+    const illustration = document.querySelector('.nfc-v2-hero-illustration');
+    if (!illustration || getComputedStyle(illustration).display !== 'none' ||
+        illustration.getClientRects().length !== 0)
+      throw Error('Decorative hero gradient must not overlap readable text');
+    const parse = value => {
+      const rgb = /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d*\.?\d+)(?:\s*,\s*(\d*\.?\d+))?\s*\)$/.exec(value);
+      const srgb = /^color\(srgb\s+(\d*\.?\d+)\s+(\d*\.?\d+)\s+(\d*\.?\d+)(?:\s*\/\s*(\d*\.?\d+))?\s*\)$/.exec(value);
+      if (!rgb && !srgb) throw Error('Unsupported dashboard hero computed color: ' + value);
+      const m = rgb || srgb, channels = m.slice(1, 4).map(Number);
+      const alpha = m[4] === undefined ? 1 : Number(m[4]);
+      if (srgb) for (let i = 0; i < 3; i++) channels[i] *= 255;
+      if (channels.some(n => !Number.isFinite(n) || n < 0 || n > 255) ||
+          !Number.isFinite(alpha) || alpha < 0 || alpha > 1)
+        throw Error('Invalid dashboard hero color: ' + value);
+      return { channels, alpha };
+    };
+    const rgb = x => 'rgb(' + x.map(Math.round).join(', ') + ')';
+    const pairs = [
+      ['eyebrow', '.nfc-v2-dashboard-hero .nfc-v2-hero-eyebrow'],
+      ['heading', '.nfc-v2-dashboard-hero .nfc-page-title'],
+      ['description', '.nfc-v2-dashboard-hero .nfc-page-description'],
+      ['caption', '.nfc-v2-dashboard-hero .nfc-v2-hero-caption'],
+    ].map(([name, selector]) => {
+      const element = document.querySelector(selector);
+      if (!element || !element.textContent?.trim() ||
+          !element.getClientRects().length)
+        throw Error('Missing actually rendered Dashboard hero ink: ' + selector);
+      const ink = parse(getComputedStyle(element).color);
+      if (ink.alpha !== 1) throw Error('Hero ink requires pixel audit: ' + name);
+      const layers = [];
+      for (let node = element; node; node = node.parentElement) {
+        const style = getComputedStyle(node);
+        if (style.backgroundImage !== 'none' || Number(style.opacity) !== 1 ||
+            style.filter !== 'none' || style.backdropFilter !== 'none')
+          throw Error('Hero text placed over gradient/compositor effect: ' + name);
+        const layer = parse(style.backgroundColor);
+        if (layer.alpha > 0) layers.push(layer);
+        if (layer.alpha === 1) break;
+      }
+      if (!layers.length || layers.at(-1).alpha !== 1)
+        throw Error('No opaque actual Dashboard hero ancestor: ' + name);
+      let surface = [0, 0, 0];
+      for (const layer of layers.reverse())
+        surface = surface.map((v, i) => layer.channels[i] * layer.alpha +
+          v * (1 - layer.alpha));
+      return { name, foreground: rgb(ink.channels), background: rgb(surface) };
+    });
+    return { gradientIllustrationHidden: true, pairs };
+  });
+  for (const pair of result.pairs) {
+    const contrast = computedContrastRatio(pair.foreground, pair.background);
+    pair.contrast = Number(contrast.toFixed(3));
+    assert.ok(contrast >= 4.5,
+      'Real Dashboard hero text/composited background below AA: ' +
+      JSON.stringify({ width, theme, ...pair }));
+  }
+  dashboardHeroPaintAudit.push({
+    width, mode: theme.mode, system: theme.system, effective: theme.effective,
+    ...result,
+  });
+}
+
 async function inspect(page, theme, width, item) {
   const violations = await page.evaluate(({ theme, width, item }) => {
     const get = selector => {
@@ -1022,6 +1091,7 @@ try {
             path: resolve(OUT, item.id + '-' + label + '.png'),
             fullPage: false,
           });
+          if (item.id === 'dashboard') await auditDashboardHeroPaint(page, width, theme);
           await auditMetricHoverPaint(page, item, width, theme);
           await auditLiveMetricThemeCascade(page, item, width, theme);
           await auditProviderMetricTheme(page, item, width, theme);
@@ -1066,6 +1136,18 @@ try {
     }
   }
   assert.equal(passed, WIDTHS.length * THEMES.length);
+  assert.equal(dashboardHeroPaintAudit.length, WIDTHS.length * THEMES.length,
+    'Dashboard hero gradients must stay hidden and text must pass every viewport/theme');
+  assert.ok(dashboardHeroPaintAudit.every(c =>
+    c.gradientIllustrationHidden && c.pairs.length === 4 &&
+    c.pairs.every(p => p.contrast >= 4.5)),
+  'Hero eyebrow/title/description/caption must have opaque-painted AA contrast');
+  writeFileSync(resolve(OUT, 'dashboard-hero-gradient-isolation-audit.json'),
+    JSON.stringify({ cases: dashboardHeroPaintAudit, total: dashboardHeroPaintAudit.length,
+      paintedTextPairs: dashboardHeroPaintAudit.length * 4,
+      audited: 'rendered-Dashboard-hero-solid-composited-paint-hidden-decorative-gradient' }, null, 2));
+  console.log('[WORKSPACE HERO GRADIENT ISOLATION] 32/32 visible hero cases; ' +
+    '128/128 computed opaque-painted hero text pairs >= 4.5:1; decorative gradient hidden.');
   assert.equal(w2ThemeAudit.length, WIDTHS.length * THEMES.length * PAGES.length,
     'All six real rendered routes must audit computed w2 palette at every width/theme');
   assert.ok(w2ThemeAudit.every(item => item.compared === 12 && item.minimumContrast >= 4.5),
