@@ -47,6 +47,37 @@ describe('Pure White Stage 5C Quarantine and Plan portal layering', () => {
     ]) assert.ok(browser.includes(token), token);
   });
 
+  test('real Quarantine 503 Retry keyboard focus and painted text pass strict AA', () => {
+    const page = read('src/pages/Quarantine/index.tsx');
+    const ledger = read('src/styles/console-v2-quarantine-ledger.css');
+    const workflow = read('../.github/workflows/ui-v044-validation.yml');
+    assert.match(page, /className="nfc-v2-quarantine-error" role="alert"/);
+    assert.match(ledger, /\.nfc-v2-quarantine-ledger :is\(input,select,button\):focus-visible/);
+    for (const marker of [
+      "import { computedContrastRatio } from './computed-contrast.mjs'",
+      "import { parseComputedPaintColor, contrastRatioForOpaqueChannels } from './computed-paint-color.mjs'",
+      "const quarantineErrorPaintCases = []",
+      "async function inspectQuarantineListErrorPaint(page, theme, width)",
+      "document.activeElement !== retry",
+      "retry.matches(':focus-visible')",
+      "parseComputedPaintColor(layer.color)",
+      "contrastRatioForOpaqueChannels(foreground.channels, background)",
+      "computedContrastRatio(integer(foreground.channels), integer(background))",
+      "contrast >= 4.5", "contrast >= 3",
+      "await page.keyboard.press('Tab')",
+      "await page.keyboard.press('Shift+Tab')",
+      "await inspectQuarantineListErrorPaint(page, theme, width)",
+      "'quarantine-list-503-keyboard-' + label",
+      "quarantine-list-error-retry-paint-audit.json",
+      "quarantineErrorPaintCases.length, WIDTHS.length * THEMES.length",
+      "64 keyboard focus/background >=3:1",
+      "failList && url.pathname === '/api/quarantine'",
+      "url.origin !== BASE_URL",
+      "assert.deepEqual(outbound, []",
+    ]) assert.ok(browser.includes(marker), 'Missing Quarantine 503 painted keyboard gate: ' + marker);
+    assert.ok(workflow.includes('frontend/artifacts/browser-quarantine-plan/quarantine-list-error-retry-paint-audit.json'));
+  });
+
   test('read-only fixture preserves exact DELETE and disallows all filesystem mutations', () => {
     for (const token of [
       "request.method() !== 'GET'",
