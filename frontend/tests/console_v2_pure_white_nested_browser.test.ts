@@ -81,7 +81,8 @@ describe('Pure White Stage 5A — actual browser portal acceptance contracts', (
   test('selected DirectoryPicker checkbox keyboard ring is composited against real tinted row', () => {
     // Keep the original 32-case/192-text evidence and add independent
     // keyboard-visible focus checks, not a theme-token-only approximation.
-    assert.match(directory, /\\.nfc-v2-directory-dialog input:focus-visible\\s*\\{[^}]*outline:\\s*2px solid var\\(--nfc-dialog-accent\\)/);
+    assert.ok(directory.includes('.nfc-v2-directory-dialog input:focus-visible {'));
+    assert.ok(directory.includes('outline: 2px solid var(--nfc-dialog-accent); outline-offset: 2px;'));
     for (const phrase of [
       "const checkbox = row.getByRole('checkbox', { name: '选择目录 Long-Test-Folder' })",
       "await page.keyboard.press('Tab')",
