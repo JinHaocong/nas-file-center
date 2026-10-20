@@ -529,6 +529,119 @@ async function selectWorkspaceTheme(page, mode, effective) {
   await page.evaluate(() => new Promise(resolve =>
     requestAnimationFrame(() => requestAnimationFrame(resolve))));
 }
+// Observe post-mutation browser animation frames, not just the settled
+// ThemeProvider result. Capture starts BEFORE the real theme-menu click, so
+// Playwright round-trips cannot accidentally skip the first rendered frame.
+// This is computed flat-paint contrast, NOT a screenshot/pixel-level claim.
+const providerMetricFrameAudit = [];
+const PROVIDER_FRAME_COUNT = 12;
+async function armProviderMetricFrames(page, selector, expectedBefore, expectedAfter) {
+  await page.evaluate(({ selector, expectedBefore, expectedAfter, count }) => {
+    const root = document.documentElement;
+    if (root.dataset.theme !== expectedBefore)
+      throw Error('Frame observer armed on wrong initial theme');
+    if (!document.querySelector(selector))
+      throw Error('Missing mounted metric card for frame observer');
+    let resolveFrames, rejectFrames;
+    window.__nfcMetricThemeFrameCapture = new Promise((resolve, reject) => {
+      resolveFrames = resolve;
+      rejectFrames = reject;
+    });
+    let started = false;
+    const frames = [];
+    const observer = new MutationObserver(() => {
+      if (started || root.dataset.theme !== expectedAfter) return;
+      started = true;
+      observer.disconnect();
+      const collect = timestamp => {
+        try {
+          const card = document.querySelector(selector);
+          if (!card) throw Error('Metric card disappeared during theme switch');
+          const parse = color => {
+            const rgb = /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d*\.?\d+)(?:\s*,\s*(\d*\.?\d+))?\s*\)$/.exec(color);
+            const srgb = /^color\(srgb\s+(\d*\.?\d+)\s+(\d*\.?\d+)\s+(\d*\.?\d+)(?:\s*\/\s*(\d*\.?\d+))?\s*\)$/.exec(color);
+            if (!rgb && !srgb) throw Error('Unrecognized frame color: ' + color);
+            const parts = rgb ?? srgb;
+            const channels = parts.slice(1, 4).map(Number);
+            const alpha = parts[4] === undefined ? 1 : Number(parts[4]);
+            if (srgb) for (let i = 0; i < 3; i++) channels[i] *= 255;
+            if (![...channels, alpha].every(Number.isFinite) ||
+                channels.some(channel => channel < 0 || channel > 255) ||
+                alpha < 0 || alpha > 1)
+              throw Error('Out-of-range frame color: ' + color);
+            return { channels, alpha };
+          };
+          const asRgb = channels => 'rgb(' + channels.map(Math.round).join(', ') + ')';
+          const roles = ['label', 'value'].map(role => {
+            const target = card.querySelector('.nfc-metric-' + role);
+            if (!target || !target.textContent?.trim())
+              throw Error('Missing real frame metric ' + role);
+            const ink = parse(getComputedStyle(target).color);
+            if (ink.alpha !== 1)
+              throw Error('Translucent metric ink requires pixel-level audit');
+            const layers = [];
+            for (let ancestor = target; ancestor; ancestor = ancestor.parentElement) {
+              const style = getComputedStyle(ancestor);
+              if (style.backgroundImage !== 'none' || Number(style.opacity) !== 1)
+                throw Error('Non-flat metric frame requires pixel-level audit');
+              const layer = parse(style.backgroundColor);
+              if (layer.alpha > 0) layers.push(layer);
+              if (layer.alpha === 1) break;
+            }
+            if (!layers.length || layers[layers.length - 1].alpha !== 1)
+              throw Error('No opaque ancestor behind metric frame');
+            let painted = [0, 0, 0];
+            for (const layer of [...layers].reverse())
+              painted = painted.map((channel, i) =>
+                layer.channels[i] * layer.alpha + channel * (1 - layer.alpha));
+            return { role, foreground: asRgb(ink.channels), background: asRgb(painted) };
+          });
+          frames.push({
+            frame: frames.length + 1, atMs: Number(timestamp.toFixed(2)),
+            effective: root.dataset.theme, roles,
+          });
+          if (frames.length < count) requestAnimationFrame(collect);
+          else { clearTimeout(timeout); resolveFrames(frames); }
+        } catch (error) {
+          clearTimeout(timeout);
+          rejectFrames(String(error));
+        }
+      };
+      requestAnimationFrame(collect);
+    });
+    const timeout = setTimeout(() => {
+      observer.disconnect();
+      rejectFrames('ThemeProvider frame capture did not finish in 10 seconds');
+    }, 10000);
+    observer.observe(root, { attributes: true, attributeFilter: ['data-theme'] });
+  }, { selector, expectedBefore, expectedAfter, count: PROVIDER_FRAME_COUNT });
+}
+async function readProviderMetricFrames(page, expected, item, width, theme, phase) {
+  const frames = await page.evaluate(() => window.__nfcMetricThemeFrameCapture);
+  assert.equal(frames.length, PROVIDER_FRAME_COUNT,
+    'Must sample every requested paint frame: ' + phase);
+  const contrasts = [];
+  for (const frame of frames) {
+    assert.equal(frame.effective, expected,
+      'Root theme changed unexpectedly during captured frames: ' + phase);
+    assert.equal(frame.roles.length, 2);
+    for (const role of frame.roles) {
+      const ratio = computedContrastRatio(role.foreground, role.background);
+      const record = {
+        phase, route: item.path, width, mode: theme.mode, system: theme.system,
+        expectedEffective: expected, ...frame, role: role.role,
+        foreground: role.foreground, background: role.background,
+        contrast: Number(ratio.toFixed(3)),
+      };
+      contrasts.push(record);
+      assert.ok(ratio >= 4.5,
+        'Actual per-frame metric contrast below 4.5:1: ' + JSON.stringify(record));
+    }
+  }
+  await page.evaluate(() => { delete window.__nfcMetricThemeFrameCapture; });
+  return contrasts;
+}
+
 async function auditProviderMetricTheme(page, item, width, theme) {
   if (item.id !== 'dashboard' && item.id !== 'media') return;
   const selector = item.id === 'dashboard'
@@ -542,9 +655,12 @@ async function auditProviderMetricTheme(page, item, width, theme) {
   const initial = await metricThemeSnapshot(page, card);
   assert.equal(initial.tokens.effective, theme.effective);
   const opposite = theme.effective === 'light' ? 'dark' : 'light';
-  let changed;
+  let changed, changedFrames, restoredFrames;
   try {
+    await armProviderMetricFrames(page, selector, theme.effective, opposite);
     await selectWorkspaceTheme(page, opposite, opposite);
+    changedFrames = await readProviderMetricFrames(
+      page, opposite, item, width, theme, 'changed');
     changed = await metricThemeSnapshot(page, card);
     assert.equal(changed.tokens.effective, opposite);
     for (const name of Object.keys(initial.tokens.values)) {
@@ -556,7 +672,10 @@ async function auditProviderMetricTheme(page, item, width, theme) {
   } finally {
     // Recover through the actual user control even if the contrast check fails.
     // System mode must be restored as System, not replaced by its current color.
+    await armProviderMetricFrames(page, selector, opposite, theme.effective);
     await selectWorkspaceTheme(page, theme.mode, theme.effective);
+    restoredFrames = await readProviderMetricFrames(
+      page, theme.effective, item, width, theme, 'restored');
   }
   const restored = await metricThemeSnapshot(page, card);
   assert.deepEqual(restored.tokens, initial.tokens,
@@ -570,6 +689,10 @@ async function auditProviderMetricTheme(page, item, width, theme) {
     route: item.path, width, mode: theme.mode, system: theme.system,
     initialEffective: theme.effective, oppositeEffective: opposite,
     initial, changed, restored, realUserControl: true,
+  });
+  providerMetricFrameAudit.push({
+    route: item.path, width, mode: theme.mode, system: theme.system,
+    oppositeEffective: opposite, changedFrames, restoredFrames,
   });
 }
 
@@ -942,6 +1065,22 @@ try {
       audited: 'real-header-themeprovider-user-action-steady-state-not-transient-pixels' }, null, 2));
   console.log('[WORKSPACE REAL PROVIDER THEME] 64/64 real Header user action/restore ' +
     'sequences, 256/256 painted metric text contrasts >= 4.5:1.');
+  assert.equal(providerMetricFrameAudit.length, WIDTHS.length * THEMES.length * 2,
+    'Real user theme frame audit must cover both metrics routes at all width/mode cases');
+  const frameCount = providerMetricFrameAudit.reduce((sum, c) =>
+    sum + c.changedFrames.length + c.restoredFrames.length, 0);
+  assert.equal(frameCount, WIDTHS.length * THEMES.length * 2 * 2 *
+    PROVIDER_FRAME_COUNT * 2,
+  'Capture 12 first painted frames x 2 theme actions x 2 metric roles in all 64 cases');
+  assert.ok(providerMetricFrameAudit.every(c =>
+    [...c.changedFrames, ...c.restoredFrames].every(record => record.contrast >= 4.5)),
+  'Every sampled rendered frame must preserve >= 4.5:1 metric text contrast');
+  writeFileSync(resolve(OUT, 'provider-metric-theme-frame-audit.json'),
+    JSON.stringify({ cases: providerMetricFrameAudit, sequences: providerMetricFrameAudit.length,
+      sampledContrastPairs: frameCount,
+      audited: 'real-themeprovider-rAF-computed-flat-paint-not-pixel-level-video-or-human-signoff' }, null, 2));
+  console.log('[WORKSPACE PROVIDER THEME FRAMES] 64/64 change/restore sequences, ' +
+    frameCount + ' sampled frame/role painted contrast pairs >= 4.5:1.');
   assert.equal(checkboxKeyboardAudit.length, WIDTHS.length * THEMES.length * 2,
     'Every Media and Quarantine dense viewport/theme must have computed checkbox evidence');
   writeFileSync(resolve(OUT, 'checkbox-keyboard-audit.json'),

@@ -306,6 +306,23 @@ body,
 
 /* Metrics ----------------------------------------------------------------- */
 
+/* Changing the effective root theme must not animate a stale metric ink
+ * against an already-updated surface (or vice versa). Historical index/v049
+ * transition shorthands included background on cards and color on values.
+ * Keep benign interaction motion, but update theme-bearing paint atomically. */
+.nfc-app-main .nfc-metric-card {
+  transition-property: transform, box-shadow, border-color;
+}
+.nfc-app-main .nfc-metric-label {
+  transition-property: none;
+}
+.nfc-app-main .nfc-metric-value,
+.nfc-app-main .nfc-metric-icon {
+  transition-property: transform;
+}
+
+
+
 .nfc-metric-grid {
   margin-bottom: 26px;
   display: grid;
