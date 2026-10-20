@@ -1102,3 +1102,38 @@ reduced-motion and theme token rules remain unchanged. The first-frame
 A source-level regression test pins this ownership without claiming
 that CSS source checks replace rendered frame samples. Historical
 redundant CSS declaration count **229** and milestones **69/74** unchanged.
+
+
+## 2026-10-20 — normal-motion ThemeProvider frame acceptance (PR #310)
+
+The prior PR #309 per-frame matrix exercised Chromium contexts with
+`prefers-reduced-motion: reduce`. For this separate, non-redundant
+acceptance gate, the same mounted real Dashboard/Media UI, test login
+and read-only synthetic GET fixture now explicitly switch the browser
+to `prefers-reduced-motion: no-preference` before invoking the **actual**
+Header dropdown or mobile drawer user control. The check validates
+that reduced motion is truly disabled and that computed card hover
+border transitions and value transform transition are present. It rejects
+`all`, `color` or `background` in metric card, label and value
+transition properties, then executes the previous first-12-rAF
+4.5:1 foreground/opaque-ancestor contrast capture for both the switch
+and restoration of the original Light/Dark/System preference.
+
+Coverage: 3 representative breakpoint widths (360px mobile, 768px
+tablet boundary, 1440px desktop) x 4 explicit/system mode fixtures
+x Dashboard/Media = **24 normal-motion real user sequences**;
+24 x 2 directions x 12 frames x 2 text roles =
+**1,152 independently verified normal-motion contrast pairs**.
+The original 64 reduced-motion cases / 3,072 painted pairs remain
+unchanged and are still tested in every build. All 352 screenshot
+baselines remain captured before theme interactions, with no outgoing
+or write requests; browser emulation is returned to reduce mode
+within `finally`. UI Action uploads the new
+`provider-metric-theme-normal-motion-frame-audit.json` separately
+from existing reduced-motion frame evidence.
+
+Limit: a sampled rAF computed flat CSS paint pair is not a captured
+compositor pixel, video flash analysis, pseudo-element/gradient overlay,
+human visual sign-off, or complete assistive-technology pass. No claim
+of production or real NAS validation. Formal milestone count stays
+**69/74 (93.2%)**, and historical safe CSS retirement stays **229**.

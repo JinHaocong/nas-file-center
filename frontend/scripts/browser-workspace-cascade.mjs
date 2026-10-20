@@ -534,6 +534,10 @@ async function selectWorkspaceTheme(page, mode, effective) {
 // Playwright round-trips cannot accidentally skip the first rendered frame.
 // This is computed flat-paint contrast, NOT a screenshot/pixel-level claim.
 const providerMetricFrameAudit = [];
+// Keep the existing reduced-motion acceptance unchanged. Sample normal motion
+// on mobile, tablet edge and desktop with every explicit/System theme fixture.
+const NORMAL_MOTION_WIDTHS = new Set([360, 768, 1440]);
+const normalMotionMetricFrameAudit = [];
 const PROVIDER_FRAME_COUNT = 12;
 async function armProviderMetricFrames(page, selector, expectedBefore, expectedAfter) {
   await page.evaluate(({ selector, expectedBefore, expectedAfter, count }) => {
@@ -642,7 +646,7 @@ async function readProviderMetricFrames(page, expected, item, width, theme, phas
   return contrasts;
 }
 
-async function auditProviderMetricTheme(page, item, width, theme) {
+async function auditProviderMetricTheme(page, item, width, theme, motion = 'reduce') {
   if (item.id !== 'dashboard' && item.id !== 'media') return;
   const selector = item.id === 'dashboard'
     ? '.nfc-v2-dashboard-metrics .nfc-metric-card'
@@ -652,6 +656,40 @@ async function auditProviderMetricTheme(page, item, width, theme) {
   await page.mouse.move(0, 0);
   const originalMode = await page.evaluate(() => localStorage.getItem('nfc_theme_mode'));
   assert.equal(originalMode, theme.mode);
+  let transitionEvidence;
+  if (motion === 'no-preference') {
+    transitionEvidence = await page.evaluate(selector => {
+      const card = document.querySelector(selector);
+      if (!card) throw Error('Missing actual metric for normal-motion transition audit');
+      const label = card.querySelector('.nfc-metric-label');
+      const value = card.querySelector('.nfc-metric-value');
+      if (!label || !value) throw Error('Missing metric ink for normal-motion transition audit');
+      const of = el => ({
+        property: getComputedStyle(el).transitionProperty,
+        duration: getComputedStyle(el).transitionDuration,
+      });
+      return {
+        reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
+        card: of(card), label: of(label), value: of(value),
+      };
+    }, selector);
+    assert.equal(transitionEvidence.reducedMotion, false,
+      'Normal-motion frame audit must exercise actual browser motion preferences');
+    const props = role => transitionEvidence[role].property.split(',').map(x => x.trim());
+    for (const role of ['card', 'label', 'value']) {
+      for (const forbidden of ['all', 'color', 'background', 'background-color']) {
+        assert.ok(!props(role).includes(forbidden),
+          'Metric ' + role + ' may not transition theme paint in normal motion: ' +
+          JSON.stringify(transitionEvidence));
+      }
+    }
+    assert.ok(props('card').includes('border-color') &&
+      props('value').includes('transform'),
+    'Normal motion must retain real hover and value motion: ' +
+    JSON.stringify(transitionEvidence));
+    assert.ok(transitionEvidence.card.duration.split(',').some(x => parseFloat(x) > 0),
+      'Normal motion must not silently inherit reduced-motion transition suppression');
+  }
   const initial = await metricThemeSnapshot(page, card);
   assert.equal(initial.tokens.effective, theme.effective);
   const opposite = theme.effective === 'light' ? 'dark' : 'light';
@@ -685,15 +723,20 @@ async function auditProviderMetricTheme(page, item, width, theme) {
     'Actual painted metric ink and background must restore after user flow');
   assert.equal(await page.evaluate(() => localStorage.getItem('nfc_theme_mode')), originalMode,
     'ThemeProvider must restore original explicit/System user preference');
-  providerMetricThemeAudit.push({
-    route: item.path, width, mode: theme.mode, system: theme.system,
-    initialEffective: theme.effective, oppositeEffective: opposite,
-    initial, changed, restored, realUserControl: true,
-  });
-  providerMetricFrameAudit.push({
+  if (motion === 'reduce') {
+    providerMetricThemeAudit.push({
+      route: item.path, width, mode: theme.mode, system: theme.system,
+      initialEffective: theme.effective, oppositeEffective: opposite,
+      initial, changed, restored, realUserControl: true,
+    });
+  }
+  const evidence = {
     route: item.path, width, mode: theme.mode, system: theme.system,
     oppositeEffective: opposite, changedFrames, restoredFrames,
-  });
+    motion, ...(transitionEvidence ? { transitionEvidence } : {}),
+  };
+  if (motion === 'no-preference') normalMotionMetricFrameAudit.push(evidence);
+  else providerMetricFrameAudit.push(evidence);
 }
 
 async function inspect(page, theme, width, item) {
@@ -982,6 +1025,17 @@ try {
           await auditMetricHoverPaint(page, item, width, theme);
           await auditLiveMetricThemeCascade(page, item, width, theme);
           await auditProviderMetricTheme(page, item, width, theme);
+          if (NORMAL_MOTION_WIDTHS.has(width) &&
+              (item.id === 'dashboard' || item.id === 'media')) {
+            // The same mounted, synthetic GET-only page remains authenticated.
+            // Keep the old reduced-motion run and 352 screenshot baseline intact.
+            await page.emulateMedia({ reducedMotion: 'no-preference' });
+            try {
+              await auditProviderMetricTheme(page, item, width, theme, 'no-preference');
+            } finally {
+              await page.emulateMedia({ reducedMotion: 'reduce' });
+            }
+          }
         }
         // A second pass mounts populated realistic ledgers without any backend writes.
         // Preserve six empty-state routes, add five dense real pages, including status gates.
@@ -1081,6 +1135,26 @@ try {
       audited: 'real-themeprovider-rAF-computed-flat-paint-not-pixel-level-video-or-human-signoff' }, null, 2));
   console.log('[WORKSPACE PROVIDER THEME FRAMES] 64/64 change/restore sequences, ' +
     frameCount + ' sampled frame/role painted contrast pairs >= 4.5:1.');
+  assert.equal(normalMotionMetricFrameAudit.length,
+    NORMAL_MOTION_WIDTHS.size * THEMES.length * 2,
+    'Normal-motion real user metric frames must cover all modes and selected widths/routes');
+  const normalMotionContrastCount = normalMotionMetricFrameAudit.reduce((sum, item) =>
+    sum + item.changedFrames.length + item.restoredFrames.length, 0);
+  assert.equal(normalMotionContrastCount,
+    NORMAL_MOTION_WIDTHS.size * THEMES.length * 2 * 2 * PROVIDER_FRAME_COUNT * 2,
+    'Normal-motion must capture 12 frames x 2 directions x 2 actual text roles');
+  assert.ok(normalMotionMetricFrameAudit.every(item =>
+    [...item.changedFrames, ...item.restoredFrames].every(frame => frame.contrast >= 4.5)),
+  'Normal-motion theme transitions must preserve painted text contrast on every frame');
+  writeFileSync(resolve(OUT, 'provider-metric-theme-normal-motion-frame-audit.json'),
+    JSON.stringify({ cases: normalMotionMetricFrameAudit,
+      sequences: normalMotionMetricFrameAudit.length,
+      sampledContrastPairs: normalMotionContrastCount,
+      motion: 'prefers-reduced-motion: no-preference',
+      audited: 'real-Header-or-mobile-ThemeProvider-rAF-flat-paint-not-pixel-level-visual-signoff' }, null, 2));
+  console.log('[WORKSPACE NORMAL-MOTION PROVIDER FRAMES] ' +
+    normalMotionMetricFrameAudit.length + ' real Dashboard/Media user-flow sequences, ' +
+    normalMotionContrastCount + ' frame/role pairs >= 4.5:1.');
   assert.equal(checkboxKeyboardAudit.length, WIDTHS.length * THEMES.length * 2,
     'Every Media and Quarantine dense viewport/theme must have computed checkbox evidence');
   writeFileSync(resolve(OUT, 'checkbox-keyboard-audit.json'),

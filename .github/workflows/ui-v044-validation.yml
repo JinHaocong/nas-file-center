@@ -234,6 +234,7 @@ jobs:
             frontend/artifacts/browser-workspace-cascade/live-metric-theme-cascade-audit.json
             frontend/artifacts/browser-workspace-cascade/provider-metric-theme-user-action-audit.json
             frontend/artifacts/browser-workspace-cascade/provider-metric-theme-frame-audit.json
+            frontend/artifacts/browser-workspace-cascade/provider-metric-theme-normal-motion-frame-audit.json
             frontend/artifacts/browser-task-ledger-states/*.png
             frontend/artifacts/browser-indexes-ledger-states/*.png
             frontend/artifacts/browser-media-ledger-states/*.png
