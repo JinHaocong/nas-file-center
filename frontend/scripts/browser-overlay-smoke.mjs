@@ -185,6 +185,27 @@ async function inspectCompositedPortalPaint(page, visual, width) {
       const { background, layers } = layersFor(element);
       return { name, foreground: rgba(ink.channels), background, layers };
     });
+    // Test the real keyboard focus indicator against the actual selected-row
+    // alpha-composited paint, not the portal's un-tinted token or page canvas.
+    const checkbox = row.querySelector('input[type="checkbox"]');
+    if (!checkbox || document.activeElement !== checkbox ||
+        !checkbox.matches(':focus-visible') || !checkbox.checked)
+      throw Error('Selected DirectoryPicker checkbox must have real keyboard-visible focus');
+    const focusStyle = getComputedStyle(checkbox);
+    const focusInk = parse(focusStyle.outlineColor);
+    const focusWidth = Number.parseFloat(focusStyle.outlineWidth);
+    const focusOffset = Number.parseFloat(focusStyle.outlineOffset);
+    if (focusStyle.outlineStyle !== 'solid' || focusWidth < 2 ||
+        focusOffset < 1 || focusInk.alpha !== 1 ||
+        !Number.isFinite(focusWidth) || !Number.isFinite(focusOffset))
+      throw Error('Selected DirectoryPicker checkbox has an insufficient opaque focus ring');
+    // The outline is outside the native input border, over its label/row.
+    const focusPaint = layersFor(checkbox.parentElement);
+    const focus = {
+      keyboard: true, checked: true,
+      style: focusStyle.outlineStyle, width: focusWidth, offset: focusOffset,
+      foreground: rgba(focusInk.channels), ...focusPaint,
+    };
     const scrims = ['.nfc-v2-scan-create-overlay', '.nfc-v2-directory-overlay']
       .map(selector => {
         const element = document.querySelector(selector);
@@ -202,7 +223,7 @@ async function inspectCompositedPortalPaint(page, visual, width) {
       });
     if (!(scrims[0].z < scrims[1].z))
       throw Error('Nested DirectoryPicker scrim must remain above ScanCreate scrim');
-    return { selectedAlpha: rowTint.alpha, pairs, scrims };
+    return { selectedAlpha: rowTint.alpha, pairs, focus, scrims };
   });
   assert.equal(snapshot.pairs.length, 6,
     'Both real nested portal dialogs and selected translucent row must contribute paint pairs');
@@ -213,6 +234,11 @@ async function inspectCompositedPortalPaint(page, visual, width) {
       'Opaque-composited nested portal text below 4.5:1: ' +
       JSON.stringify({ visual, width, ...pair }));
   }
+  const focusRatio = computedContrastRatio(snapshot.focus.foreground, snapshot.focus.background);
+  snapshot.focus.contrast = Number(focusRatio.toFixed(3));
+  assert.ok(focusRatio >= 3,
+    'Real keyboard focus ring below 3:1 on selected alpha row: ' +
+    JSON.stringify({ visual, width, ...snapshot.focus }));
   compositedPaintCases.push({
     width, mode: visual.mode, system: visual.system,
     effective: visual.effective, ...snapshot,
@@ -276,9 +302,15 @@ try {
         // folder. Selection is React-only; no backend action is performed.
         const row = page.locator('.nfc-v2-directory-dialog .nfc-v2-directory-list li').first();
         await row.waitFor({ state: 'visible' });
-        await row.getByRole('checkbox', { name: '选择目录 Long-Test-Folder' }).check();
+        const checkbox = row.getByRole('checkbox', { name: '选择目录 Long-Test-Folder' });
+        await checkbox.check();
         await page.locator('.nfc-v2-directory-dialog .nfc-v2-directory-list li.is-selected').first().waitFor({ state: 'visible' });
+        // Enter keyboard modality on the real row: Tab from its open control
+        // must reach the checkbox with :focus-visible, without selecting a path.
+        await row.getByRole('button', { name: '进入目录 Long-Test-Folder' }).focus();
+        await page.keyboard.press('Tab');
         await inspectCompositedPortalPaint(page, visual, width);
+        await page.screenshot({ path: resolve(OUTPUT, 'directory-selected-focus-' + label + '.png') });
         await page.keyboard.press('Escape');
         await page.locator('.nfc-v2-directory-dialog').waitFor({ state: 'hidden' });
         await scanModal.waitFor({ state: 'visible' });
@@ -347,15 +379,18 @@ try {
     'Actual selected translucent tint and portal paint must cover all widths/themes');
   assert.ok(compositedPaintCases.every(c =>
     c.pairs.length === 6 && c.pairs.every(pair => pair.contrast >= 4.5) &&
+    c.focus.keyboard && c.focus.checked && c.focus.width >= 2 &&
+    c.focus.offset >= 1 && c.focus.contrast >= 3 &&
     c.selectedAlpha > 0 && c.selectedAlpha < 1 &&
     c.scrims.length === 2 && c.scrims.every(scrim => scrim.alpha > 0 && scrim.alpha < 1)),
   'Every real dialog label and selected tinted path must meet alpha-composited 4.5:1');
   writeFileSync(resolve(OUTPUT, 'composited-portal-text-contrast-audit.json'),
     JSON.stringify({ cases: compositedPaintCases, total: compositedPaintCases.length,
       paintedTextPairs: compositedPaintCases.length * 6,
-      audited: 'actual-mounted-Radix-dialog-selected-alpha-tint-solid-composition-not-pixel-level' }, null, 2));
-  console.log('[BROWSER COMPOSITED PORTAL TEXT] 32/32 mounted nested dialogs; ' +
-    '192/192 painted label/path pairs >= 4.5:1, strict opaque ancestor, no outbound.');
+      keyboardFocusPairs: compositedPaintCases.length,
+      audited: 'actual-mounted-Radix-dialog-selected-alpha-tint-and-keyboard-focus-solid-composition-not-pixel-level' }, null, 2));
+  console.log('[BROWSER COMPOSITED PORTAL TEXT/FOCUS] 32/32 nested dialogs; ' +
+    '192/192 painted labels >= 4.5:1, 32/32 selected keyboard focus rings >= 3:1, no outbound.');
   console.log('[BROWSER OVERLAY] ' + completed + '/' + (WIDTHS.length * MODES.length) +
     ' real Chromium cases passed; mocked read-only APIs, no NAS access.');
 } finally {
