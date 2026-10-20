@@ -300,3 +300,21 @@ test('real ThemeProvider frame audits must catch intermediate painted metric con
     browser.indexOf('await auditProviderMetricTheme(page, item, width, theme)'),
   'User theme animation sampling must not change accepted screenshot baselines');
 });
+
+
+test('v056 metric theme ink and surfaces never inherit legacy color/background transitions', () => {
+  // index.css/v049 historically animated metric card background and value ink,
+  // which can expose dark text on a new light card for a rendered frame.
+  // Keep hover-only movement/shadow/border changes, not theme palette fades.
+  const required = [
+    '.nfc-app-main .nfc-metric-card {\n  transition-property: transform, box-shadow, border-color;',
+    '.nfc-app-main .nfc-metric-label {\n  transition-property: none;',
+    '.nfc-app-main .nfc-metric-value,\n.nfc-app-main .nfc-metric-icon {\n  transition-property: transform;',
+  ];
+  for (const declaration of required)
+    assert.ok(css.includes(declaration),
+      'Metric theme paint must not crossfade independently: ' + declaration);
+  assert.ok(entry.indexOf("import './styles/v056-right-workspace-v2.css';") >
+    entry.indexOf("import './styles/v049-workspace.css';"),
+    'Metric transition owner must follow historical CSS transitions');
+});
