@@ -46,7 +46,7 @@ describe('Pure White Stage 5E-E Tasks complex states', () => {
     const paintColors = read('scripts/computed-paint-color.mjs');
     const paintTests = read('scripts/computed-paint-color.test.mjs');
     assert.match(taskPage, /className="nfc-table-error nfc-v2-task-error"/);
-    assert.match(css, /\.nfc-v2-task-error\s*\{[^}]*color:\s*#c74657;/s);
+    assert.match(css, /\.nfc-v2-task-error\s*\{[^}]*color:\s*#c03c51;/s);
     assert.match(css, /\[data-theme='dark'\] \.nfc-v2-tasks-page \.nfc-v2-task-error\s*\{\s*color:\s*#ffbdc9;/);
     for (const marker of [
       "import { computedContrastRatio } from './computed-contrast.mjs'",
