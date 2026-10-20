@@ -247,6 +247,7 @@ jobs:
             frontend/artifacts/browser-indexes-ledger-states/*.png
             frontend/artifacts/browser-indexes-ledger-states/indexes-list-error-reload-paint-audit.json
             frontend/artifacts/browser-media-ledger-states/*.png
+            frontend/artifacts/browser-media-ledger-states/media-list-error-retry-paint-audit.json
             frontend/artifacts/browser-archive-recovery-selection/*.png
             frontend/artifacts/browser-archive-recovery-task-continuity/*.png
 

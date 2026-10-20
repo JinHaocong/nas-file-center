@@ -54,6 +54,33 @@ describe('Pure White Stage 5E-G Media complex-state browser acceptance', () => {
     assert.match(domain, /query\.set\('search'/);
   });
 
+  test('live Media 503 text and Retry keyboard focus meet painted AA in 32 Chromium cases', () => {
+    assert.match(page, /mediaQuery\.isError && <div className="nfc-v2-media-loading" role="alert">/);
+    assert.match(css, /\.nfc-v2-media-page :is\(input,select,button\):focus-visible/);
+    for (const marker of [
+      "import { computedContrastRatio } from './computed-contrast.mjs'",
+      "import { parseComputedPaintColor, contrastRatioForOpaqueChannels } from './computed-paint-color.mjs'",
+      'const mediaErrorPaintCases = []',
+      'async function inspectMediaListErrorPaint(page, theme, width)',
+      'node.nodeType === Node.TEXT_NODE',
+      "message.includes('Synthetic media listing failure')",
+      "document.activeElement !== retry",
+      "retry.matches(':focus-visible')",
+      "parseComputedPaintColor(layer.color)",
+      "contrastRatioForOpaqueChannels(foreground.channels, background)",
+      "computedContrastRatio(integer(foreground.channels), integer(background))",
+      "contrast >= 4.5", "contrast >= 3",
+      "await page.keyboard.press('Tab')",
+      "await page.keyboard.press('Shift+Tab')",
+      "await inspectMediaListErrorPaint(page, theme, width)",
+      "'media-list-503-keyboard-' + label",
+      "media-list-error-retry-paint-audit.json",
+      "mediaErrorPaintCases.length, WIDTHS.length * THEMES.length",
+      "64 keyboard focus/background >=3:1",
+    ]) assert.ok(browser.includes(marker), 'Missing actual Media 503 paint gate: ' + marker);
+    assert.ok(ci.includes('frontend/artifacts/browser-media-ledger-states/media-list-error-retry-paint-audit.json'));
+  });
+
   test('specific Media Radix content overrides generic dialog z-index below its scrim', () => {
     assert.match(common, /\.nfc-v2-dialog\[data-state='open'\][\s\S]*?z-index:\s*1101/);
     assert.match(css, /\.nfc-v2-media-queue-dialog\[data-state='open'\]\s*\{\s*z-index:\s*1301\s*;/);

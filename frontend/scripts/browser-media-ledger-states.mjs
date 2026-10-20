@@ -5,10 +5,12 @@
  */
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { chromium } from 'playwright';
+import { computedContrastRatio } from './computed-contrast.mjs';
+import { parseComputedPaintColor, contrastRatioForOpaqueChannels } from './computed-paint-color.mjs';
 import { visualAdminFixture, visualSafeSettingsFixture } from './visual-fixtures.mjs';
 
 const BASE = 'http://127.0.0.1:4189';
@@ -57,6 +59,7 @@ const server = spawn(process.execPath, [
 ], { cwd: process.cwd(), stdio: 'ignore' });
 let browser;
 let passed = 0;
+const mediaErrorPaintCases = [];
 
 async function ready() {
   for (let i = 0; i < 100; i++) {
@@ -185,6 +188,110 @@ async function inspect(page, theme, width, state) {
     return errors;
   }, { theme, width, state });
   assert.deepEqual(failures, [], state + '-' + width + ': ' + failures.join('; '));
+}
+
+/**
+ * Actual React Media GET-503 error message is a direct flex text node.
+ * Verify its inherited computed ink and the keyboard-visible Retry control
+ * over fail-closed, alpha-composited, opaque ancestor backgrounds.
+ */
+async function inspectMediaListErrorPaint(page, theme, width) {
+  const snapshot = await page.evaluate(() => {
+    const alert = document.querySelector('.nfc-v2-media-loading[role="alert"]');
+    const retry = alert?.querySelector('button');
+    const label = retry?.querySelector('span');
+    // The real Media message is a direct text child of the flex alert;
+    // the computed ink is inherited from the alert, not the button.
+    const message = [...(alert?.childNodes || [])]
+      .filter(node => node.nodeType === Node.TEXT_NODE)
+      .map(node => node.textContent || '').join(' ').trim();
+    if (!alert || !message.includes('媒体列表读取失败') ||
+        !message.includes('Synthetic media listing failure') ||
+        !retry || !label?.textContent?.includes('重试'))
+      throw Error('Missing mounted real Media 503 message/Retry label');
+    if (document.activeElement !== retry || !retry.matches(':focus-visible') ||
+        retry.disabled)
+      throw Error('Media list Retry must have actual keyboard-visible enabled focus');
+    const retryBox = retry.getBoundingClientRect();
+    if (!retryBox.width || !retryBox.height || retryBox.left < -2 ||
+        retryBox.right > innerWidth + 2 || retryBox.top < -2 ||
+        retryBox.bottom > innerHeight + 2)
+      throw Error('Media list Retry escapes the visible viewport');
+    const ring = getComputedStyle(retry);
+    const ringWidth = Number.parseFloat(ring.outlineWidth);
+    const ringOffset = Number.parseFloat(ring.outlineOffset);
+    if (ring.outlineStyle !== 'solid' || !Number.isFinite(ringWidth) ||
+        !Number.isFinite(ringOffset) || ringWidth < 2 || ringOffset < 1)
+      throw Error('Media list Retry keyboard focus indicator is not solid/visible');
+    const flat = element => {
+      const ancestors = [];
+      for (let node = element; node; node = node.parentElement) {
+        const style = getComputedStyle(node);
+        if (style.backgroundImage !== 'none' || Number(style.opacity) !== 1 ||
+            style.filter !== 'none' || style.backdropFilter !== 'none' ||
+            (style.webkitBackdropFilter && style.webkitBackdropFilter !== 'none'))
+          throw Error('Unsupported Media alert paint ancestor: ' + node.tagName);
+        ancestors.push({ tag: node.tagName, color: style.backgroundColor });
+      }
+      return { foreground: getComputedStyle(element).color, ancestors };
+    };
+    return {
+      texts: [
+        { name: 'error-message', ...flat(alert) },
+        { name: 'retry-label', ...flat(label) },
+      ],
+      alertPaint: flat(alert),
+      buttonPaint: flat(retry),
+      focus: { foreground: ring.outlineColor, width: ringWidth,
+        offset: ringOffset, keyboard: true },
+    };
+  });
+  const compose = (paint, name) => {
+    const layers = [];
+    for (const layer of paint.ancestors) {
+      const decoded = parseComputedPaintColor(layer.color);
+      if (decoded.alpha > 0) layers.push({ ...layer, ...decoded });
+      if (decoded.alpha === 1) break;
+    }
+    if (!layers.length || layers.at(-1).alpha !== 1)
+      throw Error('Media list ' + name + ' lacks opaque painted ancestor');
+    let background = [0, 0, 0];
+    for (const layer of [...layers].reverse()) {
+      background = background.map((value, i) =>
+        layer.channels[i] * layer.alpha + value * (1 - layer.alpha));
+    }
+    return { background, layers: layers.map(({ tag, color, alpha }) => ({ tag, color, alpha })) };
+  };
+  const wcag = (ink, background) => {
+    const foreground = parseComputedPaintColor(ink);
+    if (foreground.alpha !== 1)
+      throw Error('Translucent Media list ink or ring needs rendered-pixel audit');
+    const integer = channels => 'rgb(' + channels.map(Math.round).join(', ') + ')';
+    return Math.min(
+      contrastRatioForOpaqueChannels(foreground.channels, background),
+      computedContrastRatio(integer(foreground.channels), integer(background)),
+    );
+  };
+  const pairs = snapshot.texts.map(pair => {
+    const paint = compose(pair, pair.name);
+    const contrast = wcag(pair.foreground, paint.background);
+    assert.ok(contrast >= 4.5, 'Media list failure/Retry text below 4.5:1: ' +
+      JSON.stringify({ width, theme, pair, contrast, paint }));
+    return { name: pair.name, foreground: pair.foreground,
+      contrast: Number(contrast.toFixed(3)), ...paint };
+  });
+  const alert = compose(snapshot.alertPaint, 'error-banner');
+  const button = compose(snapshot.buttonPaint, 'retry-button');
+  const focusPairs = [['error-banner', alert], ['retry-button', button]].map(
+    ([name, paint]) => {
+      const contrast = wcag(snapshot.focus.foreground, paint.background);
+      assert.ok(contrast >= 3, 'Media list Retry outline below 3:1: ' +
+        JSON.stringify({ width, theme, name, contrast, paint, focus: snapshot.focus }));
+      return { name, contrast: Number(contrast.toFixed(3)), ...paint };
+    });
+  mediaErrorPaintCases.push({ width, mode: theme.mode, system: theme.system,
+    effective: theme.effective, texts: pairs, focus: snapshot.focus,
+    focusPairs });
 }
 
 try {
@@ -347,6 +454,16 @@ try {
         await page.getByText(/媒体列表读取失败/).waitFor({ state: 'visible' });
         await inspect(page, theme.effective, width, 'failure');
         await page.screenshot({ path: resolve(OUT, 'media-list-503-' + label + '.png') });
+        // Keep the existing 503 screenshot unchanged; drive real keyboard
+        // modality before inspecting the actual mounted Retry paint.
+        const retry = page.locator('.nfc-v2-media-loading[role="alert"]')
+          .getByRole('button', { name: '重试', exact: true });
+        await retry.focus();
+        await page.keyboard.press('Tab');
+        await page.keyboard.press('Shift+Tab');
+        await inspectMediaListErrorPaint(page, theme, width);
+        if ([390, 1440].includes(width))
+          await page.screenshot({ path: resolve(OUT, 'media-list-503-keyboard-' + label + '.png') });
         failList = false;
         await page.getByRole('button', { name: '重试', exact: true }).click();
         await page.locator(record).first().waitFor({ state: 'visible' });
@@ -365,6 +482,22 @@ try {
     }
   }
   assert.equal(passed, WIDTHS.length * THEMES.length);
+  assert.equal(mediaErrorPaintCases.length, WIDTHS.length * THEMES.length,
+    'All 32 actual Media 503 alerts require painted focus measurements');
+  assert.ok(mediaErrorPaintCases.every(entry =>
+    entry.texts.length === 2 && entry.texts.every(pair => pair.contrast >= 4.5) &&
+    entry.focus.keyboard && entry.focus.width >= 2 && entry.focus.offset >= 1 &&
+    entry.focusPairs.length === 2 &&
+    entry.focusPairs.every(pair => pair.contrast >= 3)),
+    'Media 503 message/Retry text and keyboard outline must pass AA');
+  writeFileSync(resolve(OUT, 'media-list-error-retry-paint-audit.json'),
+    JSON.stringify({ total: mediaErrorPaintCases.length,
+      paintedTextPairs: mediaErrorPaintCases.length * 2,
+      paintedFocusPairs: mediaErrorPaintCases.length * 2,
+      scope: 'actual-React-media-503-direct-text-keyboard-focus-flat-computed-paint-not-pixel-or-human',
+      cases: mediaErrorPaintCases }, null, 2));
+  console.log('[MEDIA LIST ERROR PAINT] 32/32 real alerts, 64 text >=4.5:1, ' +
+    '64 keyboard focus/background >=3:1.');
   console.log('[MEDIA LEDGER STATES] 32/32 cases, 256 screenshots; ' +
     'long media paths, page 2, compound filters, queue dialogs and GET 503 recovery; zero NAS traffic');
 } finally {
