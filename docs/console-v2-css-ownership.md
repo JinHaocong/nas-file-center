@@ -1473,3 +1473,30 @@ requests are aborted and non-GET API methods fail HTTP 405. No production
 React/CSS/business code or NAS data is modified. This is not human
 visual/assistive-technology or physical NAS/production sign-off. Formal
 milestones stay **69/74** and historical CSS duplicate removals stay **229**.
+
+## 2026-10-20 — live Quarantine 503 Retry painted keyboard audit
+
+Following Tasks, Indexes and Media list-error keyboard audits, the Quarantine
+ledger's HTTP 503 alert/Retry remained covered only by static render contracts.
+This extends the existing actual React Quarantine/Plan Chromium matrix across
+**8 widths × 4 theme configurations** using an injected synthetic GET 503,
+a successful explicit GET retry and genuine Tab → Shift+Tab focus modality.
+All 32 cases verify the mounted title/detail/Retry labels, visible enabled
+`:focus-visible` with solid ≥2px outline and ≥1px offset, and alert/button
+viewport boundaries.
+
+Fail-closed RGB/sRGB/Oklab parsing and opaque ancestor background composition
+require **96 painted text pairs ≥4.5:1** plus **64 keyboard focus-outline
+vs alert/button background pairs ≥3:1**; exact and rounded contrast must both
+pass. Unsupported paint formats, gamut, gradients, filters or opacity fail
+closed. The original 96 overlay screenshots remain; 32 list-error screenshots,
+8 keyboard focus screenshots and
+`quarantine-list-error-retry-paint-audit.json` are CI evidence.
+
+All browser traffic is now explicitly restricted to the local Vite origin
+(including non-API resources); every API write returns HTTP 405. Existing
+restore/purge/plan UI fixtures still execute without any destructive request.
+No production business, CSS, actual NAS data or deployment changes. This
+automation does not substitute for human visual, assistive technology, real NAS
+or production acceptance. Official milestone **69/74** and historical CSS
+duplicate removal count **229** remain unchanged.

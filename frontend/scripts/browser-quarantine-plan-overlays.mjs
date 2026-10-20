@@ -5,10 +5,12 @@
  */
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { chromium } from 'playwright';
+import { computedContrastRatio } from './computed-contrast.mjs';
+import { parseComputedPaintColor, contrastRatioForOpaqueChannels } from './computed-paint-color.mjs';
 
 const BASE_URL = 'http://127.0.0.1:4181';
 const OUT = resolve(process.cwd(), 'artifacts/browser-quarantine-plan');
@@ -34,6 +36,7 @@ const server = spawn(process.execPath, [
 ], { cwd: process.cwd(), stdio: 'ignore' });
 let browser;
 let completed = 0;
+const quarantineErrorPaintCases = [];
 
 async function ready() {
   for (let i = 0; i < 100; i += 1) {
@@ -90,6 +93,112 @@ async function inspect(page, theme, width, selector) {
   }, { theme, width, selector });
 }
 
+/**
+ * Real Quarantine GET-503 alert/Retry keyboard audit. Browser computed colors
+ * are decoded with the independently tested strict RGB/sRGB/Oklab parser.
+ */
+async function inspectQuarantineListErrorPaint(page, theme, width) {
+  const snapshot = await page.evaluate(() => {
+    const alert = document.querySelector('.nfc-v2-quarantine-ledger .nfc-v2-quarantine-error[role="alert"]');
+    const retry = alert?.querySelector('button');
+    const title = alert?.querySelector('strong');
+    const detail = alert?.querySelector('p');
+    const label = retry?.querySelector('span');
+    if (!alert || !title?.textContent?.includes('获取隔离区列表失败') ||
+        !detail?.textContent?.trim() ||
+        !retry || !label?.textContent?.includes('重试'))
+      throw Error('Missing mounted real Quarantine list failure alert/Retry labels');
+    if (document.activeElement !== retry || !retry.matches(':focus-visible') ||
+        retry.disabled)
+      throw Error('Quarantine list Retry must have actual keyboard-visible enabled focus');
+    const alertBox = alert.getBoundingClientRect();
+    if (!alertBox.width || !alertBox.height || alertBox.left < -2 ||
+        alertBox.right > innerWidth + 2 || alertBox.top < -2 ||
+        alertBox.bottom > innerHeight + 2)
+      throw Error('Quarantine 503 alert overflows viewport');
+    const retryBox = retry.getBoundingClientRect();
+    if (!retryBox.width || !retryBox.height || retryBox.left < -2 ||
+        retryBox.right > innerWidth + 2 || retryBox.top < -2 ||
+        retryBox.bottom > innerHeight + 2)
+      throw Error('Quarantine list Retry escapes the visible viewport');
+    const ring = getComputedStyle(retry);
+    const ringWidth = Number.parseFloat(ring.outlineWidth);
+    const ringOffset = Number.parseFloat(ring.outlineOffset);
+    if (ring.outlineStyle !== 'solid' || !Number.isFinite(ringWidth) ||
+        !Number.isFinite(ringOffset) || ringWidth < 2 || ringOffset < 1)
+      throw Error('Quarantine list Retry keyboard focus indicator is not solid/visible');
+    const flat = element => {
+      const ancestors = [];
+      for (let node = element; node; node = node.parentElement) {
+        const style = getComputedStyle(node);
+        if (style.backgroundImage !== 'none' || Number(style.opacity) !== 1 ||
+            style.filter !== 'none' || style.backdropFilter !== 'none' ||
+            (style.webkitBackdropFilter && style.webkitBackdropFilter !== 'none'))
+          throw Error('Unsupported Quarantine alert paint ancestor: ' + node.tagName);
+        ancestors.push({ tag: node.tagName, color: style.backgroundColor });
+      }
+      return { foreground: getComputedStyle(element).color, ancestors };
+    };
+    return {
+      texts: [
+        { name: 'error-title', ...flat(title) },
+        { name: 'error-detail', ...flat(detail) },
+        { name: 'retry-label', ...flat(label) },
+      ],
+      alertPaint: flat(alert),
+      buttonPaint: flat(retry),
+      focus: { foreground: ring.outlineColor, width: ringWidth,
+        offset: ringOffset, keyboard: true },
+    };
+  });
+  const compose = (paint, name) => {
+    const layers = [];
+    for (const layer of paint.ancestors) {
+      const decoded = parseComputedPaintColor(layer.color);
+      if (decoded.alpha > 0) layers.push({ ...layer, ...decoded });
+      if (decoded.alpha === 1) break;
+    }
+    if (!layers.length || layers.at(-1).alpha !== 1)
+      throw Error('Quarantine list ' + name + ' lacks opaque painted ancestor');
+    let background = [0, 0, 0];
+    for (const layer of [...layers].reverse()) {
+      background = background.map((value, i) =>
+        layer.channels[i] * layer.alpha + value * (1 - layer.alpha));
+    }
+    return { background, layers: layers.map(({ tag, color, alpha }) => ({ tag, color, alpha })) };
+  };
+  const wcag = (ink, background) => {
+    const foreground = parseComputedPaintColor(ink);
+    if (foreground.alpha !== 1)
+      throw Error('Translucent Quarantine list ink or ring needs rendered-pixel audit');
+    const integer = channels => 'rgb(' + channels.map(Math.round).join(', ') + ')';
+    return Math.min(
+      contrastRatioForOpaqueChannels(foreground.channels, background),
+      computedContrastRatio(integer(foreground.channels), integer(background)),
+    );
+  };
+  const pairs = snapshot.texts.map(pair => {
+    const paint = compose(pair, pair.name);
+    const contrast = wcag(pair.foreground, paint.background);
+    assert.ok(contrast >= 4.5, 'Quarantine list failure/Retry text below 4.5:1: ' +
+      JSON.stringify({ width, theme, pair, contrast, paint }));
+    return { name: pair.name, foreground: pair.foreground,
+      contrast: Number(contrast.toFixed(3)), ...paint };
+  });
+  const alert = compose(snapshot.alertPaint, 'error-banner');
+  const button = compose(snapshot.buttonPaint, 'retry-button');
+  const focusPairs = [['error-banner', alert], ['retry-button', button]].map(
+    ([name, paint]) => {
+      const contrast = wcag(snapshot.focus.foreground, paint.background);
+      assert.ok(contrast >= 3, 'Quarantine list Retry outline below 3:1: ' +
+        JSON.stringify({ width, theme, name, contrast, paint, focus: snapshot.focus }));
+      return { name, contrast: Number(contrast.toFixed(3)), ...paint };
+    });
+  quarantineErrorPaintCases.push({ width, mode: theme.mode, system: theme.system,
+    effective: theme.effective, texts: pairs, focus: snapshot.focus,
+    focusPairs });
+}
+
 try {
   await ready();
   mkdirSync(OUT, { recursive: true });
@@ -104,17 +213,31 @@ try {
         localStorage.setItem('nfc_theme_mode', mode);
       }, theme.mode);
       const page = await context.newPage();
-      const writes = [];
-      await page.route('**/api/**', async route => {
+      const writes = [], outbound = [];
+      let failList = false;
+      await page.route('**/*', async route => {
         const request = route.request();
+        const url = new URL(request.url());
+        if (url.origin !== BASE_URL) {
+          outbound.push(url.href);
+          await route.abort('blockedbyclient');
+          return;
+        }
+        if (!url.pathname.startsWith('/api/')) {
+          await route.continue();
+          return;
+        }
         if (request.method() !== 'GET') {
           writes.push(request.method() + ' ' + request.url());
           await route.fulfill({ status: 405, contentType: 'application/json',
             body: JSON.stringify({ detail: 'READ_ONLY_VISUAL_FIXTURE' }) });
           return;
         }
-        await route.fulfill({ status: 200, contentType: 'application/json',
-          body: JSON.stringify(fixture(request.url())) });
+        const fail = failList && url.pathname === '/api/quarantine';
+        await route.fulfill({ status: fail ? 503 : 200, contentType: 'application/json',
+          body: JSON.stringify(fail
+            ? { detail: 'Synthetic read-only quarantine listing failure' }
+            : fixture(request.url())) });
       });
       const label = theme.mode + '-' + theme.system + '-' + width;
       try {
@@ -149,6 +272,25 @@ try {
         await purge.waitFor({ state: 'hidden' });
         console.log('[QPLAN BROWSER PURGE PASS] ' + label);
 
+        failList = true;
+        await page.getByRole('button', { name: '刷新', exact: true }).click();
+        await page.getByText('获取隔离区列表失败', { exact: true })
+          .waitFor({ state: 'visible', timeout: 30000 });
+        await page.screenshot({ path: resolve(OUT, 'quarantine-list-503-' + label + '.png') });
+        const retry = page.locator('.nfc-v2-quarantine-ledger .nfc-v2-quarantine-error[role="alert"]')
+          .getByRole('button', { name: '重试', exact: true });
+        await retry.focus();
+        await page.keyboard.press('Tab');
+        await page.keyboard.press('Shift+Tab');
+        await inspectQuarantineListErrorPaint(page, theme, width);
+        if ([390, 1440].includes(width))
+          await page.screenshot({ path: resolve(OUT, 'quarantine-list-503-keyboard-' + label + '.png') });
+        failList = false;
+        await retry.click();
+        await page.getByRole('button', { name: '恢复', exact: true })
+          .first().waitFor({ state: 'visible' });
+        console.log('[QPLAN BROWSER 503 RECOVERY PASS] ' + label);
+
         await page.goto(BASE_URL + '/plans', { waitUntil: 'domcontentloaded' });
         await page.getByRole('button', { name: '清理计划历史' }).click({ timeout: 15000 });
         const plan = page.locator('.nfc-v2-plan-history-dialog');
@@ -164,6 +306,7 @@ try {
         await page.keyboard.press('Escape');
         await plan.waitFor({ state: 'hidden' });
         assert.deepEqual(writes, [], 'Fixture must issue zero mutating requests');
+        assert.deepEqual(outbound, [], 'Fixture must never issue outbound or NAS requests');
         completed += 1;
         console.log('[QPLAN BROWSER PLAN PASS] ' + label);
       } catch (error) {
@@ -176,7 +319,23 @@ try {
     }
   }
   assert.equal(completed, 32);
-  console.log('[QPLAN BROWSER] 32/32 cases; 96 screenshot files; read-only fixtures, no NAS access.');
+  assert.equal(quarantineErrorPaintCases.length, WIDTHS.length * THEMES.length,
+    'All 32 actual Quarantine list failures must have real keyboard focus and painted AA');
+  assert.ok(quarantineErrorPaintCases.every(entry =>
+    entry.texts.length === 3 && entry.texts.every(pair => pair.contrast >= 4.5) &&
+    entry.focus.keyboard && entry.focus.width >= 2 && entry.focus.offset >= 1 &&
+    entry.focusPairs.length === 2 &&
+    entry.focusPairs.every(pair => pair.contrast >= 3)),
+    'Quarantine 503 text and Retry ring must meet both contrast thresholds');
+  writeFileSync(resolve(OUT, 'quarantine-list-error-retry-paint-audit.json'),
+    JSON.stringify({ total: quarantineErrorPaintCases.length,
+      paintedTextPairs: quarantineErrorPaintCases.length * 3,
+      paintedFocusPairs: quarantineErrorPaintCases.length * 2,
+      scope: 'actual-React-quarantine-503-keyboard-focus-flat-computed-paint-not-pixel-or-human',
+      cases: quarantineErrorPaintCases }, null, 2));
+  console.log('[QUARANTINE LIST ERROR PAINT] 32/32 alerts, 96 text >=4.5:1, ' +
+    '64 keyboard focus/background >=3:1.');
+  console.log('[QPLAN BROWSER] 32/32 cases; original 96 screenshots plus 32 list 503 and 8 focus images; read-only, no NAS access.');
 } finally {
   await browser?.close();
   server.kill('SIGTERM');
