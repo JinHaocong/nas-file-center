@@ -267,3 +267,36 @@ test('real authenticated ThemeProvider menu must update and restore painted metr
     'frontend/artifacts/browser-workspace-cascade/provider-metric-theme-user-action-audit.json'),
   'CI must retain actual ThemeProvider workspace paint evidence as an artifact');
 });
+
+
+test('real ThemeProvider frame audits must catch intermediate painted metric contrast', () => {
+  const invariants = [
+    'async function armProviderMetricFrames(page, selector, expectedBefore, expectedAfter)',
+    "observer.observe(root, { attributes: true, attributeFilter: ['data-theme'] })",
+    'requestAnimationFrame(collect)',
+    'const PROVIDER_FRAME_COUNT = 12',
+    "if (style.backgroundImage !== 'none' || Number(style.opacity) !== 1)",
+    "if (!layers.length || layers[layers.length - 1].alpha !== 1)",
+    'getComputedStyle(target).color',
+    'async function readProviderMetricFrames(page, expected, item, width, theme, phase)',
+    'computedContrastRatio(role.foreground, role.background)',
+    'assert.ok(ratio >= 4.5',
+    "await armProviderMetricFrames(page, selector, theme.effective, opposite)",
+    "await armProviderMetricFrames(page, selector, opposite, theme.effective)",
+    "await readProviderMetricFrames(\n      page, opposite, item, width, theme, 'changed')",
+    "await readProviderMetricFrames(\n      page, theme.effective, item, width, theme, 'restored')",
+    'providerMetricFrameAudit.length, WIDTHS.length * THEMES.length * 2',
+    "writeFileSync(resolve(OUT, 'provider-metric-theme-frame-audit.json')",
+    'assert.deepEqual(writes, []',
+    'assert.deepEqual(outbound, []',
+  ];
+  for (const invariant of invariants) assert.ok(browser.includes(invariant),
+    'Actual ThemeProvider per-frame painted contrast evidence lost: ' + invariant);
+  const workflow = readFileSync('../.github/workflows/ui-v044-validation.yml', 'utf8');
+  assert.ok(workflow.includes(
+    'frontend/artifacts/browser-workspace-cascade/provider-metric-theme-frame-audit.json'),
+  'CI must upload all captured ThemeProvider frame contrast evidence');
+  assert.ok(browser.indexOf("path: resolve(OUT, item.id + '-' + label + '.png')") <
+    browser.indexOf('await auditProviderMetricTheme(page, item, width, theme)'),
+  'User theme animation sampling must not change accepted screenshot baselines');
+});
