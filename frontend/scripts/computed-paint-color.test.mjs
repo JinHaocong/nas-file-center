@@ -27,6 +27,14 @@ test('Oklab conversion agrees with canonical black, white, red and blue referenc
   }
 });
 
+test('observed light hover Oklab requires deeper Tasks error ink to reach AA', () => {
+  const background = parseComputedPaintColor('oklab(0.981766 -0.000276804 0.00111037)');
+  const former = contrastRatioForOpaqueChannels([0xc7, 0x46, 0x57], background.channels);
+  const fixed = contrastRatioForOpaqueChannels([0xc0, 0x3c, 0x51], background.channels);
+  assert.ok(former < 4.5, 'Legacy red must reproduce the actual hover regression');
+  assert.ok(fixed >= 4.5, 'New light error red must pass over the observed hover paint');
+});
+
 test('alpha only blends modeled colors; exact transparent Oklab contributes nothing', () => {
   assert.deepEqual(parseComputedPaintColor('oklab(0 0 0 / 0)'),
     { channels: [0, 0, 0], alpha: 0 });
