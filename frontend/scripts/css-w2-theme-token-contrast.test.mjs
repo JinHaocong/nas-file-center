@@ -349,3 +349,50 @@ test('normal-motion ThemeProvider frame acceptance stays independent from reduce
     browser.indexOf("await auditProviderMetricTheme(page, item, width, theme, 'no-preference')"),
   'Normal-motion interactions must not alter the 352 accepted screenshot baselines');
 });
+
+
+test('Dashboard gradient isolation and real nested Radix alpha-tint contrast stay in CI', () => {
+  const overlay = readFileSync('scripts/browser-overlay-smoke.mjs', 'utf8');
+  const requiredWorkspace = [
+    'async function auditDashboardHeroPaint(page, width, theme)',
+    "getComputedStyle(illustration).display !== 'none'",
+    "style.backgroundImage !== 'none'",
+    "if (item.id === 'dashboard') await auditDashboardHeroPaint(page, width, theme)",
+    'dashboardHeroPaintAudit.length, WIDTHS.length * THEMES.length',
+    "'dashboard-hero-gradient-isolation-audit.json'",
+    'c.pairs.every(p => p.contrast >= 4.5)',
+  ];
+  const requiredOverlay = [
+    'async function inspectCompositedPortalPaint(page, visual, width)',
+    "'.nfc-v2-directory-list li.is-selected'",
+    'rowTint.alpha > 0 && rowTint.alpha < 1',
+    "style.backgroundImage !== 'none'",
+    'const { background, layers } = layersFor(element)',
+    "'selected-name'",
+    "'selected-path'",
+    "'directory-title'",
+    "'scan-title'",
+    'ratio >= 4.5',
+    'await inspectCompositedPortalPaint(page, visual, width)',
+    'compositedPaintCases.length, WIDTHS.length * MODES.length',
+    "'composited-portal-text-contrast-audit.json'",
+    'assert.deepEqual(outbound, []',
+    'assert.deepEqual(deniedMethods, []',
+  ];
+  for (const required of requiredWorkspace)
+    assert.ok(browser.includes(required), 'Dashboard hero paint contract missing: ' + required);
+  for (const required of requiredOverlay)
+    assert.ok(overlay.includes(required), 'Real nested portal paint contract missing: ' + required);
+  const workflow = readFileSync('../.github/workflows/ui-v044-validation.yml', 'utf8');
+  for (const path of [
+    'frontend/artifacts/browser-workspace-cascade/dashboard-hero-gradient-isolation-audit.json',
+    'frontend/artifacts/browser-overlay/composited-portal-text-contrast-audit.json',
+  ])
+    assert.ok(workflow.includes(path), 'UI Validation must retain computed paint JSON: ' + path);
+  assert.ok(browser.indexOf("path: resolve(OUT, item.id + '-' + label + '.png')") <
+    browser.indexOf('await auditDashboardHeroPaint(page, width, theme)'),
+  'Actual hero paint checks must preserve accepted screenshot order');
+  assert.ok(overlay.indexOf("path: resolve(OUTPUT, label + '.png')") <
+    overlay.indexOf('await inspectCompositedPortalPaint(page, visual, width)'),
+  'Actual portal tint interactions must preserve accepted overlay screenshot order');
+});
