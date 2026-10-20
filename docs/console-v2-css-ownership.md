@@ -1264,3 +1264,42 @@ No production NAS read/write, runtime API/CSS/permissions change, human a11y
 approval or pixel-rendered gradient analysis. Formal milestone count remains
 **69/74 (93.2%)**, and historical safe CSS declaration retirement stays
 **229**.
+
+
+## 2026-10-20 — real Tasks desktop short-error ink on dark/hover rows (PR after #313)
+
+The previous error-state audits protect long diagnostic sheet geometry and
+DirectoryPicker read failure/retry. A different, previously unmeasured
+surface is the *truncated normal-size failed-task error* in the desktop
+Tasks table: `<span class="nfc-table-error nfc-v2-task-error">`.
+The component's unconditional `#c74657` ink comes from the light design.
+Against representative dark canvas `#242422` it only yields about
+**3.29:1**, below the standard **4.5:1** AA target for 12px error text.
+The nested Task Inspector already uses the distinct accessible dark error
+tone `#ffbdc9`. Scope the same dark ink to this Tasks table error only;
+do not alter light mode, dark backgrounds, the drawer, row hover animation,
+or any backend file/task action.
+
+The existing read-only `browser-task-ledger-states.mjs` matrix already
+mounts 51 synthetic tasks including a failed task, then opens the real
+error detail sheet. After the unchanged drawer screenshots and before
+pagination, inspect the mounted first failed **desktop** row at its actual
+normal and pointer-hover states. Measure the real computed short-error ink
+and alpha-composite its actual ancestor backgrounds to the first provably
+opaque layer. Reject unrecognized color spaces, gradients/images, opacity,
+filters, backdrop effects and missing opaque roots. Enforce **>=4.5:1**
+using the existing WCAG luminance calculation. This adds **5 desktop
+widths (768–1920) × 4 theme/system modes × 2 states = 40 painted error
+text pairs** to the previous 32-route matrix, without changing the 160
+existing screenshots or mobile card coverage.
+
+Store individual theme, width, state, hover truth, computed ink, painted
+background, ancestor layers and measured contrast in
+`browser-task-ledger-states/task-table-error-paint-contrast-audit.json`.
+The browser fixture still mocks all GET requests, rejects every non-GET,
+and blocks all external-origin requests. This is a measured *flat-paint*
+computed-style regression, **not pixel-level rendering**, final human
+visual/screen-reader signoff, real NAS acceptance or deployment approval.
+Historical CSS redundancy count **229** is unchanged (this is a targeted
+bug fix, not a redundant-declaration removal); high-level milestones stay
+**69/74 (93.2%)**.
