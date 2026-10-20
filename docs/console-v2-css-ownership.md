@@ -1425,3 +1425,26 @@ new bounded timeout from regressing back to 20 minutes. All PR CI
 workflows must run again on the updated exact HEAD and **every** check
 must conclude Success; previous green stages do not substitute for the
 cancelled job.
+
+## 2026-10-20 — live Indexes 503 Reload painted keyboard audit
+
+After the Tasks 503 Retry coverage, the Indexes root list's existing HTTP 503 alert still
+had only a bounded screenshot and successful GET-refetch test in the 8-width × 4-theme
+Chromium matrix. The real React Indexes failure now receives Tab → Shift+Tab keyboard
+focus on its enabled Reload control; Chromium asserts `:focus-visible`, a solid ≥2px
+focus outline with ≥1px offset, and the button remaining within the viewport.
+
+The same independently regression-tested strict RGB/sRGB/Oklab computed-color parser
+composes opaque ancestor backgrounds and fails closed on unsupported color formats,
+gradients, opacity, filters, non-opaque paint or translucent ink. Each of 32 alert
+cases must pass **96 title/detail/Reload text pairs at ≥4.5:1** and **64 focus-outline
+vs alert/button surface pairs at ≥3:1**; exact and rounded-channel results must
+both satisfy the threshold. The existing 160 screenshots remain; eight keyboard
+focus screenshots and `indexes-list-error-reload-paint-audit.json` are uploaded
+with the unchanged read-only Chromium evidence.
+
+Only synthetic local API GET fixtures are used; non-GET and outbound requests remain
+blocked. No runtime CSS, business API, NAS file or production deployment changes.
+This automated painted-color check is not a pixel-compositor guarantee, human visual/
+assistive-technology acceptance or NAS/production sign-off. Milestones remain
+**69/74** and historical duplicate CSS removals remain **229**.
