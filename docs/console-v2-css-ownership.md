@@ -1075,3 +1075,30 @@ still require separate evaluation. This cannot by itself close the
 CSS/theme high-level milestone. No production or real NAS data operation.
 Formal milestones stay **69/74 (93.2%)**; historical redundant declarations
 retired remain **229**.
+
+
+### 2026-10-20 — first frame-level CI failure and scoped paint-transition fix
+
+The first candidate of PR #309 failed its actual Chromium frame sample at
+`light-dark-360`, **real mobile ThemeProvider Dark -> Light recovery**:
+the first sampled frame had a newly white
+`rgb(255, 255, 255)` metric-card background while the previous dark
+text `rgb(182, 182, 176)` was still computed, yielding **2.037:1**
+for the label. The value also temporarily retained its old inverse ink.
+The existing stable two-rAF contrast assertions were not relaxed.
+
+Source review identified two independently animated historic palette layers:
+`index.css` / v049 transitioned metric card **background** while
+`index.css` transitioned metric value **color**, allowing a color/background
+mismatch when the root theme changes. v056 now explicitly owns the
+`transition-property` for actual `.nfc-app-main` metric elements:
+cards preserve hover `transform`, `box-shadow` and `border-color`
+transitions but no longer interpolate theme-bearing `background`;
+metric values/icons preserve `transform` while removing `color`
+transition; labels have no transition. All previous geometric, normal/hover,
+reduced-motion and theme token rules remain unchanged. The first-frame
+4.5:1 assertion stays in force and will be retested on the new final HEAD.
+
+A source-level regression test pins this ownership without claiming
+that CSS source checks replace rendered frame samples. Historical
+redundant CSS declaration count **229** and milestones **69/74** unchanged.
