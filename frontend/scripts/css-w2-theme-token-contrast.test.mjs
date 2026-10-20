@@ -223,7 +223,7 @@ test('real authenticated ThemeProvider menu must update and restore painted metr
   // React provider update and the persisted System/explicit theme preference.
   const guards = [
     'async function selectWorkspaceTheme(page, mode, effective)',
-    'async function auditProviderMetricTheme(page, item, width, theme)',
+    'async function auditProviderMetricTheme(page, item, width, theme, motion = \'reduce\')',
     'summary[aria-label="切换界面主题"]',
     "page.getByRole('button', { name: '打开导航菜单' })",
     "page.getByRole('dialog', { name: 'NAS File Center 主导航' })",
