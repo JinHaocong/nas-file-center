@@ -10,6 +10,7 @@ import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { chromium } from 'playwright';
 import { computedContrastRatio } from './computed-contrast.mjs';
+import { parseComputedPaintColor, contrastRatioForOpaqueChannels } from './computed-paint-color.mjs';
 import { visualAdminFixture, visualSafeSettingsFixture,
   visualViewports, visualThemes } from './visual-fixtures.mjs';
 
@@ -170,27 +171,9 @@ async function inspectTableErrorPaint(page, theme, width, state) {
       throw Error('Missing mounted failed Tasks row diagnostic');
     if (row.matches(':hover') !== (expectedState === 'hover'))
       throw Error('Real Tasks row pointer hover does not match requested state');
-    const parse = value => {
-      // Chromium serializes some fully transparent color-mix paint layers as
-      // Oklab. Their exact zero alpha means zero visual contribution; accept
-      // ONLY this proven-transparent computed value, not nonzero Oklab colors.
-      if (value === 'oklab(0 0 0 / 0)') return { channels: [0, 0, 0], alpha: 0 };
-      const rgb = /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*(\d*\.?\d+))?\s*\)$/.exec(value);
-      const srgb = /^color\(srgb\s+(\d*\.?\d+)\s+(\d*\.?\d+)\s+(\d*\.?\d+)(?:\s*\/\s*(\d*\.?\d+))?\s*\)$/.exec(value);
-      if (!rgb && !srgb) throw Error('Unsupported computed Tasks error color: ' + value);
-      const found = rgb || srgb;
-      const channels = found.slice(1, 4).map(Number);
-      const alpha = found[4] === undefined ? 1 : Number(found[4]);
-      if (srgb) for (let i = 0; i < 3; i++) channels[i] *= 255;
-      if (channels.some(n => !Number.isFinite(n) || n < 0 || n > 255) ||
-          !Number.isFinite(alpha) || alpha < 0 || alpha > 1)
-        throw Error('Out-of-range computed Tasks error color: ' + value);
-      return { channels, alpha };
-    };
-    const rgb = channels => 'rgb(' + channels.map(Math.round).join(', ') + ')';
-    const foreground = parse(getComputedStyle(text).color);
-    if (foreground.alpha !== 1)
-      throw Error('Translucent Tasks error ink needs pixel-level evidence');
+    // Keep the actual DOM and paint effect assertions inside Chromium, but
+    // interpret colors in tested Node code, never hand-wave computed Oklab
+    // as transparent. Every ancestor must be understood until opaque paint.
     const layers = [];
     for (let node = text; node; node = node.parentElement) {
       const style = getComputedStyle(node);
@@ -198,32 +181,50 @@ async function inspectTableErrorPaint(page, theme, width, state) {
           style.filter !== 'none' || style.backdropFilter !== 'none' ||
           (style.webkitBackdropFilter && style.webkitBackdropFilter !== 'none'))
         throw Error('Unsupported Tasks error painted ancestor: ' + node.className);
-      const layer = parse(style.backgroundColor);
-      if (layer.alpha > 0) layers.push({
+      layers.push({
         node: node.tagName + (node.className && typeof node.className === 'string' ?
           '.' + node.className.trim().replace(/\s+/g, '.') : ''),
-        color: style.backgroundColor, ...layer,
+        color: style.backgroundColor,
       });
-      if (layer.alpha === 1) break;
-    }
-    if (!layers.length || layers.at(-1).alpha !== 1)
-      throw Error('No opaque ancestor behind Tasks error ink');
-    let painted = [0, 0, 0];
-    for (const layer of [...layers].reverse()) {
-      painted = painted.map((value, i) =>
-        layer.channels[i] * layer.alpha + value * (1 - layer.alpha));
     }
     return { state: expectedState, hovered: row.matches(':hover'),
-      foreground: rgb(foreground.channels), background: rgb(painted),
-      layers: layers.map(({ node, color, alpha }) => ({ node, color, alpha })) };
+      foreground: getComputedStyle(text).color, layers };
   }, state);
-  const ratio = computedContrastRatio(snapshot.foreground, snapshot.background);
-  snapshot.contrast = Number(ratio.toFixed(3));
+  const fg = parseComputedPaintColor(snapshot.foreground);
+  if (fg.alpha !== 1)
+    throw Error('Translucent Tasks error ink needs pixel-level evidence');
+  const paint = [];
+  for (const layer of snapshot.layers) {
+    const parsed = parseComputedPaintColor(layer.color);
+    if (parsed.alpha > 0)
+      paint.push({ ...layer, ...parsed });
+    if (parsed.alpha === 1) break;
+  }
+  if (!paint.length || paint.at(-1).alpha !== 1)
+    throw Error('No opaque ancestor behind Tasks error ink');
+  let composite = [0, 0, 0];
+  for (const layer of [...paint].reverse()) {
+    composite = composite.map((value, i) =>
+      layer.channels[i] * layer.alpha + value * (1 - layer.alpha));
+  }
+  const rgb = channels => 'rgb(' + channels.map(Math.round).join(', ') + ')';
+  const roundedContrast = computedContrastRatio(rgb(fg.channels), rgb(composite));
+  const exactContrast = contrastRatioForOpaqueChannels(fg.channels, composite);
+  // Require BOTH unrounded and integer-serialized results to pass. This
+  // cannot pass a borderline case by optimistic integer rounding.
+  const ratio = Math.min(exactContrast, roundedContrast);
+  const details = {
+    ...snapshot, foreground: rgb(fg.channels), background: rgb(composite),
+    layers: paint.map(({ node, color, alpha }) => ({ node, color, alpha })),
+    contrast: Number(ratio.toFixed(3)),
+    exactContrast: Number(exactContrast.toFixed(4)),
+    roundedContrast: Number(roundedContrast.toFixed(4)),
+  };
   assert.ok(ratio >= 4.5,
     'Actual Tasks table short error text below AA 4.5:1: ' +
-    JSON.stringify({ width, theme, ...snapshot }));
+    JSON.stringify({ width, theme, ...details }));
   errorPaintCases.push({ width, mode: theme.mode, system: theme.system,
-    effective: theme.effective, ...snapshot });
+    effective: theme.effective, ...details });
 }
 
 try {
