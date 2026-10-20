@@ -220,6 +220,7 @@ jobs:
           path: |
             frontend/artifacts/browser-theme-resilience/*.png
             frontend/artifacts/browser-overlay/*.png
+            frontend/artifacts/browser-overlay/composited-portal-text-contrast-audit.json
             frontend/artifacts/browser-task-overlay/*.png
             frontend/artifacts/browser-quarantine-plan/*.png
             frontend/artifacts/browser-quarantine-bulk/*.png
@@ -227,6 +228,7 @@ jobs:
             frontend/artifacts/browser-workflow-preview/*.png
             frontend/artifacts/browser-organizer-dedupe/*.png
             frontend/artifacts/browser-workspace-cascade/*.png
+            frontend/artifacts/browser-workspace-cascade/dashboard-hero-gradient-isolation-audit.json
             frontend/artifacts/browser-workspace-cascade/checkbox-keyboard-audit.json
             frontend/artifacts/browser-workspace-cascade/w2-computed-theme-audit.json
             frontend/artifacts/browser-workspace-cascade/painted-ledger-heading-audit.json

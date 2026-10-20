@@ -10,7 +10,7 @@
  */
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { chromium } from 'playwright';
@@ -34,6 +34,7 @@ const server = spawn(process.execPath, [
 
 let browser;
 let completed = 0;
+const compositedPaintCases = [];
 
 async function ready() {
   for (let attempt = 0; attempt < 100; attempt += 1) {
@@ -120,6 +121,104 @@ async function inspect(page, theme, width) {
   }, { theme, width });
 }
 
+
+// Actual mounted Radix portal paint: composite transparent row tint over the
+// nearest opaque surface, refusing gradients/filters/opacity we cannot model.
+// Modal text never borrows the tinted overlay or underlying page color.
+async function inspectCompositedPortalPaint(page, visual, width) {
+  const snapshot = await page.evaluate(() => {
+    const parse = value => {
+      const rgb = /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d*\.?\d+)(?:\s*,\s*(\d*\.?\d+))?\s*\)$/.exec(value);
+      const srgb = /^color\(srgb\s+(\d*\.?\d+)\s+(\d*\.?\d+)\s+(\d*\.?\d+)(?:\s*\/\s*(\d*\.?\d+))?\s*\)$/.exec(value);
+      if (!rgb && !srgb) throw Error('Unsupported computed compositor color: ' + value);
+      const match = rgb || srgb;
+      const channels = match.slice(1, 4).map(Number);
+      const alpha = match[4] === undefined ? 1 : Number(match[4]);
+      if (srgb) for (let i = 0; i < 3; i++) channels[i] *= 255;
+      if (channels.some(n => !Number.isFinite(n) || n < 0 || n > 255) ||
+        !Number.isFinite(alpha) || alpha < 0 || alpha > 1)
+        throw Error('Out-of-range compositor color: ' + value);
+      return { channels, alpha };
+    };
+    const rgba = channels => 'rgb(' + channels.map(Math.round).join(', ') + ')';
+    const selector = '.nfc-v2-directory-dialog .nfc-v2-directory-list li.is-selected';
+    const row = document.querySelector(selector);
+    const directory = document.querySelector('.nfc-v2-directory-dialog');
+    const scan = document.querySelector('.nfc-v2-scan-create-modal');
+    if (!row || !directory || !scan || !row.getBoundingClientRect().width)
+      throw Error('Missing real mounted selected DirectoryPicker row or nested dialogs');
+    const rowTint = parse(getComputedStyle(row).backgroundColor);
+    if (!(rowTint.alpha > 0 && rowTint.alpha < 1))
+      throw Error('DirectoryPicker selected row must use a real alpha tint');
+    const layersFor = target => {
+      const layers = [];
+      for (let node = target; node; node = node.parentElement) {
+        const style = getComputedStyle(node);
+        if (style.backgroundImage !== 'none' || Number(style.opacity) !== 1 ||
+          style.filter !== 'none' || style.backdropFilter !== 'none' ||
+          (style.webkitBackdropFilter && style.webkitBackdropFilter !== 'none'))
+          throw Error('Pixel-level audit required for non-flat text paint: ' + node.className);
+        const color = parse(style.backgroundColor);
+        if (color.alpha > 0) layers.push(color);
+        if (color.alpha === 1) break;
+      }
+      if (layers.length === 0 || layers.at(-1).alpha !== 1)
+        throw Error('Selected DirectoryPicker row missing opaque painted ancestor');
+      let painted = [0, 0, 0];
+      for (const layer of layers.reverse())
+        painted = painted.map((n, i) =>
+          layer.channels[i] * layer.alpha + n * (1 - layer.alpha));
+      return { background: rgba(painted), layers: layers.length };
+    };
+    const pairs = [
+      ['directory-title', directory.querySelector('h2')],
+      ['directory-description', directory.querySelector('.nfc-directory-picker-title p')],
+      ['selected-name', row.querySelector('strong')],
+      ['selected-path', row.querySelector('small')],
+      ['scan-title', scan.querySelector('.nfc-v2-scan-create-header h2')],
+      ['scan-description', scan.querySelector('.nfc-v2-scan-create-header p')],
+    ].map(([name, element]) => {
+      if (!element || !element.textContent?.trim())
+        throw Error('Missing nonempty real portal text: ' + name);
+      const ink = parse(getComputedStyle(element).color);
+      if (ink.alpha !== 1) throw Error('Translucent text requires pixel-level inspection: ' + name);
+      const { background, layers } = layersFor(element);
+      return { name, foreground: rgba(ink.channels), background, layers };
+    });
+    const scrims = ['.nfc-v2-scan-create-overlay', '.nfc-v2-directory-overlay']
+      .map(selector => {
+        const element = document.querySelector(selector);
+        if (!element) throw Error('Missing actual portal scrim: ' + selector);
+        const style = getComputedStyle(element);
+        if (style.backgroundImage !== 'none' || Number(style.opacity) !== 1 ||
+          style.filter !== 'none' || style.backdropFilter !== 'none' ||
+          (style.webkitBackdropFilter && style.webkitBackdropFilter !== 'none') ||
+          element.children.length)
+          throw Error('Unsupported scrim effects or readable children: ' + selector);
+        const tint = parse(style.backgroundColor);
+        if (!(tint.alpha > 0 && tint.alpha < 1))
+          throw Error('Real modal scrim must alpha-composite: ' + selector);
+        return { selector, alpha: tint.alpha, channels: tint.channels, z: Number(style.zIndex) };
+      });
+    if (!(scrims[0].z < scrims[1].z))
+      throw Error('Nested DirectoryPicker scrim must remain above ScanCreate scrim');
+    return { selectedAlpha: rowTint.alpha, pairs, scrims };
+  });
+  assert.equal(snapshot.pairs.length, 6,
+    'Both real nested portal dialogs and selected translucent row must contribute paint pairs');
+  for (const pair of snapshot.pairs) {
+    const ratio = computedContrastRatio(pair.foreground, pair.background);
+    pair.contrast = Number(ratio.toFixed(3));
+    assert.ok(ratio >= 4.5,
+      'Opaque-composited nested portal text below 4.5:1: ' +
+      JSON.stringify({ visual, width, ...pair }));
+  }
+  compositedPaintCases.push({
+    width, mode: visual.mode, system: visual.system,
+    effective: visual.effective, ...snapshot,
+  });
+}
+
 try {
   await ready();
   mkdirSync(OUTPUT, { recursive: true });
@@ -136,9 +235,19 @@ try {
         localStorage.setItem('nfc_theme_mode', mode);
       }, visual.mode);
       const page = await context.newPage();
-      const deniedMethods = [];
-      await page.route('**/api/**', async route => {
+      const deniedMethods = [], outbound = [];
+      await page.route('**/*', async route => {
         const request = route.request();
+        const url = new URL(request.url());
+        if (url.origin !== BASE_URL) {
+          outbound.push(request.url());
+          await route.abort('blockedbyclient');
+          return;
+        }
+        if (!url.pathname.startsWith('/api/')) {
+          await route.continue();
+          return;
+        }
         if (request.method() !== 'GET') {
           deniedMethods.push(request.method() + ' ' + request.url());
           await route.fulfill({ status: 405, contentType: 'application/json',
@@ -163,6 +272,13 @@ try {
         const state = await inspect(page, visual.effective, width);
         assert.deepEqual(state.errors, [], label + '\n' + state.errors.join('\n'));
         await page.screenshot({ path: resolve(OUTPUT, label + '.png') });
+        // After the established screenshot baseline, choose a real local fixture
+        // folder. Selection is React-only; no backend action is performed.
+        const row = page.locator('.nfc-v2-directory-dialog .nfc-v2-directory-list li').first();
+        await row.waitFor({ state: 'visible' });
+        await row.getByRole('checkbox', { name: '选择目录 Long-Test-Folder' }).check();
+        await page.locator('.nfc-v2-directory-dialog .nfc-v2-directory-list li.is-selected').first().waitFor({ state: 'visible' });
+        await inspectCompositedPortalPaint(page, visual, width);
         await page.keyboard.press('Escape');
         await page.locator('.nfc-v2-directory-dialog').waitFor({ state: 'hidden' });
         await scanModal.waitFor({ state: 'visible' });
@@ -214,6 +330,7 @@ try {
         await passwordModal.getByRole('button', { name: '关闭密码修改窗口' }).click();
         await passwordModal.waitFor({ state: 'hidden' });
         assert.deepEqual(deniedMethods, [], 'Browser fixture must not make mutating API requests');
+        assert.deepEqual(outbound, [], 'Browser fixture must not reach outbound networks or a real NAS');
         completed += 1;
         console.log('[BROWSER OVERLAY PASS] ' + label);
       } catch (error) {
@@ -226,6 +343,19 @@ try {
     }
   }
   assert.equal(completed, WIDTHS.length * MODES.length);
+  assert.equal(compositedPaintCases.length, WIDTHS.length * MODES.length,
+    'Actual selected translucent tint and portal paint must cover all widths/themes');
+  assert.ok(compositedPaintCases.every(c =>
+    c.pairs.length === 6 && c.pairs.every(pair => pair.contrast >= 4.5) &&
+    c.selectedAlpha > 0 && c.selectedAlpha < 1 &&
+    c.scrims.length === 2 && c.scrims.every(scrim => scrim.alpha > 0 && scrim.alpha < 1)),
+  'Every real dialog label and selected tinted path must meet alpha-composited 4.5:1');
+  writeFileSync(resolve(OUTPUT, 'composited-portal-text-contrast-audit.json'),
+    JSON.stringify({ cases: compositedPaintCases, total: compositedPaintCases.length,
+      paintedTextPairs: compositedPaintCases.length * 6,
+      audited: 'actual-mounted-Radix-dialog-selected-alpha-tint-solid-composition-not-pixel-level' }, null, 2));
+  console.log('[BROWSER COMPOSITED PORTAL TEXT] 32/32 mounted nested dialogs; ' +
+    '192/192 painted label/path pairs >= 4.5:1, strict opaque ancestor, no outbound.');
   console.log('[BROWSER OVERLAY] ' + completed + '/' + (WIDTHS.length * MODES.length) +
     ' real Chromium cases passed; mocked read-only APIs, no NAS access.');
 } finally {
