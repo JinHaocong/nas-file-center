@@ -1232,3 +1232,35 @@ complete keyboard/screen-reader/manual approval. The fixture blocks outbound
 requests and non-GET APIs; no NAS mutations, production operations, or
 stylesheet/application runtime changes. Historical redundant CSS declarations
 stay **229**; high-level milestones stay **69/74 (93.2%)**.
+
+
+## 2026-10-20 — real DirectoryPicker read-error/retry contrast (PR following #312)
+
+The prior selected-row keyboard audit covered normal directory browsing, but
+not the explicit `DirectoryPickerModal` `role="alert"` branch for a failed
+directory GET or the keyboard-reachable Retry button. The same mounted
+ScanCreate → DirectoryPicker Chromium smoke suite now injects a **local-only
+HTTP 503 GET response** into the existing isolated Playwright route fixture.
+The failure originates after actual user search input changes the React Query
+key; the test waits for the real error state (including normal Query retries)
+and then tabs from Search to the live **重试** button.
+
+At **390px mobile + 1440px desktop × 4 light/dark/system variants = 8
+read-error/retry interactions**, inspect actual computed, opaque solid error
+banner and retry button paints. Reject unsupported images, opacity/filters or
+translucent calculated colors rather than guessing a background. Test both
+alert text and Retry label at **>=4.5:1**, and the actual focused Retry
+outline against both error banner and button surface at **>=3:1**. Validate
+visibility/viewport containment and that a successful locally mocked retry
+removes the alert while preserving the selected path. New
+`directory-error-retry-contrast-audit.json` and eight scoped error-state
+screenshots accompany existing artifacts. The original 32 selected-row
+keyboard focus cases, 192 composited normal-text pairs, 32 focus pairs and
+baseline portal screenshots are not replaced.
+
+Only synthetic `GET /api/filesystem/list` receives a forced error; every
+non-GET API request remains denied and every external-origin request aborted.
+No production NAS read/write, runtime API/CSS/permissions change, human a11y
+approval or pixel-rendered gradient analysis. Formal milestone count remains
+**69/74 (93.2%)**, and historical safe CSS declaration retirement stays
+**229**.
