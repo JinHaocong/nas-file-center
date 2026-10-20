@@ -558,8 +558,8 @@ async function armProviderMetricFrames(page, selector, expectedBefore, expectedA
           const card = document.querySelector(selector);
           if (!card) throw Error('Metric card disappeared during theme switch');
           const parse = color => {
-            const rgb = /^rgba?\\(\\s*(\\d{1,3})\\s*,\\s*(\\d{1,3})\\s*,\\s*(\\d*\\.?\\d+)(?:\\s*,\\s*(\\d*\\.?\\d+))?\\s*\\)$/.exec(color);
-            const srgb = /^color\\(srgb\\s+(\\d*\\.?\\d+)\\s+(\\d*\\.?\\d+)\\s+(\\d*\\.?\\d+)(?:\\s*\\/\\s*(\\d*\\.?\\d+))?\\s*\\)$/.exec(color);
+            const rgb = /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d*\.?\d+)(?:\s*,\s*(\d*\.?\d+))?\s*\)$/.exec(color);
+            const srgb = /^color\(srgb\s+(\d*\.?\d+)\s+(\d*\.?\d+)\s+(\d*\.?\d+)(?:\s*\/\s*(\d*\.?\d+))?\s*\)$/.exec(color);
             if (!rgb && !srgb) throw Error('Unrecognized frame color: ' + color);
             const parts = rgb ?? srgb;
             const channels = parts.slice(1, 4).map(Number);
