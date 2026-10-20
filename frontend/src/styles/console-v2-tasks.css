@@ -131,6 +131,12 @@
   color: #c74657;
   cursor: help;
 }
+/* Ledger short diagnostics were readable on white, but the same legacy red
+ * is insufficient against the dark table canvas. Keep the established
+ * dark Task Inspector error tone; leave the light value unchanged. */
+[data-theme='dark'] .nfc-v2-tasks-page .nfc-v2-task-error {
+  color: #ffbdc9;
+}
 .nfc-v2-tasks-page .nfc-row-actions { display: flex; justify-content: flex-end; align-items: center; gap: 4px; white-space: nowrap; }
 .nfc-v2-tasks-page .nfc-status-badge { white-space: nowrap; }
 .nfc-v2-tasks-page .nfc-console-pagination { margin: 0; }
