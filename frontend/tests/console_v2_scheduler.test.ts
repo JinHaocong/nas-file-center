@@ -194,6 +194,36 @@ describe('Console v2 native Scheduler S4 semantics', () => {
       assert.ok(h.includes(token), token);
     }
   });
+  test('all-route live Scheduler GET 503 Retry keyboard focus uses strict rendered AA', () => {
+    const browser = read('scripts/browser-full-route-visual.mjs');
+    const scheduler = page();
+    const workflow = read('../.github/workflows/ui-v044-validation.yml');
+    assert.match(scheduler, /className="nfc-v2-scheduler-note is-warning" role="alert"/);
+    for (const marker of [
+      "import { parseComputedPaintColor, contrastRatioForOpaqueChannels } from './computed-paint-color.mjs'",
+      "const schedulerErrorPaintCases = []",
+      "async function inspectSchedulerListErrorPaint(page, theme, width)",
+      "url.pathname === '/api/schedules' && failSchedulerList",
+      "Synthetic read-only scheduler listing failure",
+      "document.activeElement !== retry",
+      "retry.matches(':focus-visible')",
+      "parseComputedPaintColor(layer.color)",
+      "contrastRatioForOpaqueChannels(foreground.channels, background)",
+      "computedContrastRatio(integer(foreground.channels), integer(background))",
+      "contrast >= 4.5", "contrast >= 3",
+      "await tab.keyboard.press('Tab')",
+      "await tab.keyboard.press('Shift+Tab')",
+      "await inspectSchedulerListErrorPaint(tab, theme, width)",
+      "scheduler-list-503-keyboard-",
+      "scheduler-list-error-retry-paint-audit.json",
+      "schedulerErrorPaintCases.length, visualThemes.length",
+      "failSchedulerList = false",
+      "await retry.click()",
+      "url.origin !== BASE", "request.method() !== 'GET'",
+    ]) assert.ok(browser.includes(marker), 'Missing live Scheduler keyboard-painted AA: ' + marker);
+    assert.ok(workflow.includes('path: frontend/artifacts/full-route-visual/${{ matrix.width }}/'));
+  });
+
   test('owned CSS drops AntD scheduler selectors and keeps 767px/mobile/dark/focus', () => {
     const css = read('src/styles/pages/scheduler.css');
     for(const token of [

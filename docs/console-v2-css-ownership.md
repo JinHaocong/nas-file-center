@@ -1500,3 +1500,32 @@ No production business, CSS, actual NAS data or deployment changes. This
 automation does not substitute for human visual, assistive technology, real NAS
 or production acceptance. Official milestone **69/74** and historical CSS
 duplicate removal count **229** remain unchanged.
+
+## 2026-10-20 — live Scheduler 503 Retry keyboard contrast in full-route matrix
+
+The native Scheduler ledger's GET /api/schedules failure alert previously had
+static semantics and default-route snapshots, but no mounted Retry keyboard
+or computed-painted text contrast check. Extend the **existing full-route
+Chromium test** rather than add a separate browser job: the 8 matrix widths
+each exercise all 4 light/dark/system configurations after their unchanged
+baseline Scheduler screenshots and skip-link navigation assertions.
+
+A synthetic read-only GET 503 displays the actual React alert; genuine
+Tab → Shift+Tab returns to the enabled Retry button with `:focus-visible`,
+a solid ≥2px ring with ≥1px offset and viewport containment. The proven
+strict RGB/sRGB/Oklab parser and alpha-composited opaque ancestor paints
+require **32 × 3 = 96** title/detail/Retry text pairs ≥4.5:1 and **32 × 2 = 64**
+focus-ring vs alert/button surface pairs ≥3:1 across the eight CI jobs.
+Both unrounded and integer-serialized contrasts must pass; unsupported
+paint formats, gradients, filters, opacity or missing opaque backgrounds
+are rejected. The test explicitly retries GET 200 and verifies error
+removal. Per-width downloadable
+`scheduler-list-error-retry-paint-audit.json` and error/focus screenshots
+are included in the existing full-route evidence upload.
+
+All requests still use the same localhost Vite synthetic GET-only fixture,
+with every external origin blocked and every non-GET API request rejected.
+No real NAS data, production business logic, runtime CSS or deployment
+is modified. Automated evidence is not human visual/accessibility or
+physical NAS/production acceptance. Formal progress remains **69/74**,
+and the historical CSS duplicate-declaration removal count remains **229**.

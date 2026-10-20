@@ -13,6 +13,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { chromium } from 'playwright';
 import { visualThemes, visualViewports, visualAdminFixture, visualSafeSettingsFixture } from './visual-fixtures.mjs';
 import { computedContrastRatio } from './computed-contrast.mjs';
+import { parseComputedPaintColor, contrastRatioForOpaqueChannels } from './computed-paint-color.mjs';
 
 const routes = Object.freeze([
   { path: '/login', id: 'login', public: true },
@@ -191,6 +192,111 @@ function fixture(path) {
 let browser;
 const report = [];
 const failures = [];
+const schedulerErrorPaintCases = [];
+/** Mounted Scheduler 503 alert: real keyboard Retry, computed flat paint,
+ * strict opaque ancestor composition and full AA contrast verification. */
+async function inspectSchedulerListErrorPaint(page, theme, width) {
+  const snapshot = await page.evaluate(() => {
+    const alert = document.querySelector('.nfc-v2-scheduler-note.is-warning[role="alert"]');
+    const retry = alert?.querySelector('button');
+    const title = alert?.querySelector('strong');
+    const detail = alert?.querySelector('p');
+    const label = retry?.querySelector('span');
+    if (!alert || !title?.textContent?.includes('计划任务加载失败') ||
+        !detail?.textContent?.trim() ||
+        !retry || !label?.textContent?.includes('重试'))
+      throw Error('Missing mounted real Scheduler list failure alert/Retry labels');
+    if (document.activeElement !== retry || !retry.matches(':focus-visible') ||
+        retry.disabled)
+      throw Error('Scheduler list Retry must have actual keyboard-visible enabled focus');
+    const alertBox = alert.getBoundingClientRect();
+    if (!alertBox.width || !alertBox.height || alertBox.left < -2 ||
+        alertBox.right > innerWidth + 2 || alertBox.top < -2 ||
+        alertBox.bottom > innerHeight + 2)
+      throw Error('Scheduler 503 alert overflows viewport');
+    const retryBox = retry.getBoundingClientRect();
+    if (!retryBox.width || !retryBox.height || retryBox.left < -2 ||
+        retryBox.right > innerWidth + 2 || retryBox.top < -2 ||
+        retryBox.bottom > innerHeight + 2)
+      throw Error('Scheduler list Retry escapes the visible viewport');
+    const ring = getComputedStyle(retry);
+    const ringWidth = Number.parseFloat(ring.outlineWidth);
+    const ringOffset = Number.parseFloat(ring.outlineOffset);
+    if (ring.outlineStyle !== 'solid' || !Number.isFinite(ringWidth) ||
+        !Number.isFinite(ringOffset) || ringWidth < 2 || ringOffset < 1)
+      throw Error('Scheduler list Retry keyboard focus indicator is not solid/visible');
+    const flat = element => {
+      const ancestors = [];
+      for (let node = element; node; node = node.parentElement) {
+        const style = getComputedStyle(node);
+        if (style.backgroundImage !== 'none' || Number(style.opacity) !== 1 ||
+            style.filter !== 'none' || style.backdropFilter !== 'none' ||
+            (style.webkitBackdropFilter && style.webkitBackdropFilter !== 'none'))
+          throw Error('Unsupported Scheduler alert paint ancestor: ' + node.tagName);
+        ancestors.push({ tag: node.tagName, color: style.backgroundColor });
+      }
+      return { foreground: getComputedStyle(element).color, ancestors };
+    };
+    return {
+      texts: [
+        { name: 'error-title', ...flat(title) },
+        { name: 'error-detail', ...flat(detail) },
+        { name: 'retry-label', ...flat(label) },
+      ],
+      alertPaint: flat(alert),
+      buttonPaint: flat(retry),
+      focus: { foreground: ring.outlineColor, width: ringWidth,
+        offset: ringOffset, keyboard: true },
+    };
+  });
+  const compose = (paint, name) => {
+    const layers = [];
+    for (const layer of paint.ancestors) {
+      const decoded = parseComputedPaintColor(layer.color);
+      if (decoded.alpha > 0) layers.push({ ...layer, ...decoded });
+      if (decoded.alpha === 1) break;
+    }
+    if (!layers.length || layers.at(-1).alpha !== 1)
+      throw Error('Scheduler list ' + name + ' lacks opaque painted ancestor');
+    let background = [0, 0, 0];
+    for (const layer of [...layers].reverse()) {
+      background = background.map((value, i) =>
+        layer.channels[i] * layer.alpha + value * (1 - layer.alpha));
+    }
+    return { background, layers: layers.map(({ tag, color, alpha }) => ({ tag, color, alpha })) };
+  };
+  const wcag = (ink, background) => {
+    const foreground = parseComputedPaintColor(ink);
+    if (foreground.alpha !== 1)
+      throw Error('Translucent Scheduler list ink or ring needs rendered-pixel audit');
+    const integer = channels => 'rgb(' + channels.map(Math.round).join(', ') + ')';
+    return Math.min(
+      contrastRatioForOpaqueChannels(foreground.channels, background),
+      computedContrastRatio(integer(foreground.channels), integer(background)),
+    );
+  };
+  const pairs = snapshot.texts.map(pair => {
+    const paint = compose(pair, pair.name);
+    const contrast = wcag(pair.foreground, paint.background);
+    assert.ok(contrast >= 4.5, 'Scheduler list failure/Retry text below 4.5:1: ' +
+      JSON.stringify({ width, theme, pair, contrast, paint }));
+    return { name: pair.name, foreground: pair.foreground,
+      contrast: Number(contrast.toFixed(3)), ...paint };
+  });
+  const alert = compose(snapshot.alertPaint, 'error-banner');
+  const button = compose(snapshot.buttonPaint, 'retry-button');
+  const focusPairs = [['error-banner', alert], ['retry-button', button]].map(
+    ([name, paint]) => {
+      const contrast = wcag(snapshot.focus.foreground, paint.background);
+      assert.ok(contrast >= 3, 'Scheduler list Retry outline below 3:1: ' +
+        JSON.stringify({ width, theme, name, contrast, paint, focus: snapshot.focus }));
+      return { name, contrast: Number(contrast.toFixed(3)), ...paint };
+    });
+  schedulerErrorPaintCases.push({ width, mode: theme.mode, system: theme.system,
+    effective: theme.effective, texts: pairs, focus: snapshot.focus,
+    focusPairs });
+}
+
 try {
   await ready();
   browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
@@ -201,6 +307,7 @@ try {
     });
     const writes = [], outbound = [], pageErrors = [];
     let loginFixture = false;
+    let failSchedulerList = false;
     await context.addInitScript(mode => localStorage.setItem('nfc_theme_mode', mode), theme.mode);
     await context.route('**/*', async route => {
       const request = route.request(), url = new URL(request.url());
@@ -212,6 +319,9 @@ try {
           writes.push(request.method() + ' ' + url.pathname);
           await route.fulfill({ status: 405, contentType: 'application/json',
             body: JSON.stringify({ error: 'READ_ONLY_VISUAL_AUDIT' }) });
+        } else if (url.pathname === '/api/schedules' && failSchedulerList) {
+          await route.fulfill({ status: 503, contentType: 'application/json',
+            body: JSON.stringify({ detail: 'Synthetic read-only scheduler listing failure' }) });
         } else if (url.pathname === '/api/auth/me' && loginFixture) {
           // The login route must remain a real unauthenticated page.
           await route.fulfill({ status: 401, contentType: 'application/json',
@@ -589,6 +699,32 @@ try {
           if (pageErrors.length > beforeErrors) problems.push(
             'Uncaught detail-panel React errors: ' + pageErrors.slice(beforeErrors).join('; '));
         }
+        if (item.id === 'schedules') {
+          // Baseline happy-path screenshots and route keyboard gates above
+          // are unchanged. Exercise a real React Query HTTP 503/refetch
+          // only after the default route has been audited.
+          failSchedulerList = true;
+          await tab.getByRole('button', { name: '刷新', exact: true }).click();
+          await tab.getByText('计划任务加载失败', { exact: true })
+            .waitFor({ state: 'visible', timeout: 30000 });
+          await tab.screenshot({ path: resolve(OUT, 'scheduler-list-503-' + themeLabel + '-' + width + '.png') });
+          const retry = tab.locator('.nfc-v2-scheduler-note.is-warning[role="alert"]')
+            .getByRole('button', { name: '重试', exact: true });
+          await retry.focus();
+          await tab.keyboard.press('Tab');
+          await tab.keyboard.press('Shift+Tab');
+          await inspectSchedulerListErrorPaint(tab, theme, width);
+          if ([390, 1440].includes(width))
+            await tab.screenshot({ path: resolve(OUT, 'scheduler-list-503-keyboard-' +
+              themeLabel + '-' + width + '.png') });
+          failSchedulerList = false;
+          await retry.click();
+          await tab.getByText('计划任务加载失败', { exact: true })
+            .waitFor({ state: 'hidden', timeout: 15000 });
+          if (pageErrors.length > beforeErrors)
+            problems.push('Scheduler 503 Retry caused uncaught React errors: ' +
+              pageErrors.slice(beforeErrors).join('; '));
+        }
         if (item.id === 'download-sources') {
           // Source editor is a separate route; no POST requests are issued by this fixture.
           await tab.getByRole('button', { name: '新增来源' }).click();
@@ -612,6 +748,22 @@ try {
     if (outbound.length) failures.push({ theme: themeLabel, problems: ['External requests: ' + outbound.join(', ')] });
     await context.close();
   }
+  assert.equal(schedulerErrorPaintCases.length, visualThemes.length,
+    'Every Scheduler route theme requires real keyboard-visible retry and computed AA');
+  assert.ok(schedulerErrorPaintCases.every(entry =>
+    entry.texts.length === 3 && entry.texts.every(pair => pair.contrast >= 4.5) &&
+    entry.focus.keyboard && entry.focus.width >= 2 && entry.focus.offset >= 1 &&
+    entry.focusPairs.length === 2 &&
+    entry.focusPairs.every(pair => pair.contrast >= 3)),
+    'Scheduler text and keyboard outline must pass actual painted AA');
+  writeFileSync(resolve(OUT, 'scheduler-list-error-retry-paint-audit.json'),
+    JSON.stringify({ width, total: schedulerErrorPaintCases.length,
+      paintedTextPairs: schedulerErrorPaintCases.length * 3,
+      paintedFocusPairs: schedulerErrorPaintCases.length * 2,
+      scope: 'actual-React-scheduler-503-keyboard-focus-flat-computed-paint-not-pixel-or-human',
+      cases: schedulerErrorPaintCases }, null, 2));
+  console.log('[SCHEDULER LIST ERROR PAINT] width=' + width +
+    ' 4/4 real alerts, 12 painted texts >=4.5:1 and 8 keyboard focus pairs >=3:1');
   writeFileSync(resolve(OUT, 'manifest.json'),
     JSON.stringify({ width, routes: routes.length, themes: visualThemes.length,
       captured: report.length, failures, report }, null, 2));
