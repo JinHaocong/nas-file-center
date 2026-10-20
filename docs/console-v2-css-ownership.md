@@ -1181,3 +1181,24 @@ blur/image backdrops or arbitrary CSS pseudo-elements. Do not close the
 high-level CSS/theme, human visual or a11y milestones based on this
 automated subset. Formal milestones remain **69/74 (93.2%)**; historical
 redundant declarations safely removed remain **229**.
+
+
+### PR #311 Chromium finding — inherited frosted Dashboard header
+
+The first Dashboard hero audit failed at 360px/light on the actual
+`.nfc-page-header` ancestor with computed
+`backdrop-filter: blur(16px) saturate(1.2)`. The legacy
+`v049-workspace.css` global page-title style still owned this effect,
+even though the later Pure White `.nfc-v2-dashboard-hero .nfc-page-header`
+has a deliberately transparent background and no frosted card surface.
+Awaiting animation completion cannot make inherited blur a supported
+flat-paint layer.
+
+The fix is **specific to** `.nfc-v2-shell .nfc-v2-dashboard-hero
+.nfc-page-header` in `console-v2.css`, loaded after v049. It explicitly
+sets both `backdrop-filter: none` and `-webkit-backdrop-filter: none`,
+without changing the global title/header rules or other translucent
+surfaces. Static regression tests pin CSS cascade ownership while the
+real Chromium Dashboard hero audit still rejects actual computed
+gradients, filters and translucent/unresolved ancestors. All original
+contrast and screenshot expectations remain unchanged.
