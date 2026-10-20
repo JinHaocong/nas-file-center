@@ -1319,3 +1319,30 @@ opaque ancestor still fails closed. The **4.5:1** gate is unchanged; the
 CSS fix is still verified against actual Chromium output, not assumed good.
 The first candidate's 15 successful checks do not count as proof for the new
 HEAD: rerun all PR workflows and checks before any merge.
+
+
+### PR #314 second Chromium finding — opaque Oklab and numeric precision
+
+The follow-up Chromium run passed the normal light/dark 768px failures but
+revealed that System → Light may compute a **nontransparent** ancestor as
+`oklab(0.981766 -0.000276804 0.00111037)`. Classifying all Oklab as
+unsupported would block safe modern computed CSS indefinitely. The audit
+now collects unmodified actual computed style strings inside the browser and
+parses them in the separately unit-tested
+`frontend/scripts/computed-paint-color.mjs` helper. Numeric Oklab converts
+via the published inverse matrix to **linear-light sRGB**, then the standard
+sRGB transfer curve; fully transparent numeric Oklab contributes no paint.
+Non-finite values, unknown syntax, invalid alpha, material out-of-gamut
+colors, filters, and non-solid backgrounds still reject the audit. No
+`oklch()`/Display-P3 or arbitrary color function is assumed equivalent.
+
+WCAG contrast is evaluated using **unrounded RGB channel luminance and the
+existing integer-serialized checker**; both must pass 4.5:1. The new
+`computed-paint-color.test.mjs` checks reference black/white/red/blue,
+the observed Chromium color, transparent layers, gamut rejection and numeric
+contrast. CI also uploads `task-table-error-paint-contrast-audit.json`
+rather than keeping this evidence only in the temporary runner workspace.
+
+All previous candidate failures remain recorded and only checks for the
+**newest** PR HEAD can authorize merge. The final human acceptance and
+production gates remain unchanged.
