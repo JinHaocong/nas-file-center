@@ -225,6 +225,10 @@ test('real authenticated ThemeProvider menu must update and restore painted metr
     'async function selectWorkspaceTheme(page, mode, effective)',
     'async function auditProviderMetricTheme(page, item, width, theme)',
     'summary[aria-label="切换界面主题"]',
+    "page.getByRole('button', { name: '打开导航菜单' })",
+    "page.getByRole('dialog', { name: 'NAS File Center 主导航' })",
+    "dialog.getByRole('group', { name: '界面主题' })",
+    "await dialog.waitFor({ state: 'hidden' })",
     "menu.getByRole('button', { name: providerModeLabels[mode] })",
     "localStorage.getItem('nfc_theme_mode') === mode",
     "selected?.textContent?.includes(label)",
@@ -248,6 +252,16 @@ test('real authenticated ThemeProvider menu must update and restore painted metr
   assert.ok(browser.indexOf("path: resolve(OUT, item.id + '-' + label + '.png')") <
     browser.indexOf('await auditProviderMetricTheme(page, item, width, theme)'),
     'Actual theme user action must not alter accepted screenshots');
+  const mobileNav = readFileSync('src/components/Sidebar.tsx', 'utf8');
+  const mobileCss = readFileSync('src/styles/console-v2-mobile-header.css', 'utf8');
+  for (const invariant of ['nfc-v2-mobile-theme-switcher', 'aria-label="界面主题"',
+    'aria-pressed={mode === key}', 'setMode(key); onNavigate?.()'])
+    assert.ok(mobileNav.includes(invariant),
+      'Mobile drawer must expose an actual accessible ThemeProvider user control: ' + invariant);
+  for (const invariant of ['.nfc-v2-mobile-theme-options > button',
+    'min-height: 44px', ':focus-visible'])
+    assert.ok(mobileCss.includes(invariant),
+      'Mobile theme choices must remain reachable with visible focus: ' + invariant);
   const workflow = readFileSync('../.github/workflows/ui-v044-validation.yml', 'utf8');
   assert.ok(workflow.includes(
     'frontend/artifacts/browser-workspace-cascade/provider-metric-theme-user-action-audit.json'),
