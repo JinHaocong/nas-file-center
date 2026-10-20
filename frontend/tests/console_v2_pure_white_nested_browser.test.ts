@@ -106,9 +106,9 @@ describe('Pure White Stage 5A — actual browser portal acceptance contracts', (
     const picker = read('src/components/DirectoryPicker/DirectoryPickerModal.tsx');
     const api = read('src/api/filesystem.ts');
     for (const marker of [
-      "className=\\\"nfc-v2-directory-error\\\" role=\\\"alert\\\"",
+      'nfc-v2-directory-error" role="alert"',
       'void refetchDir();',
-      "type=\\\"search\\\" aria-label=\\\"搜索子目录\\\"",
+      'type="search" aria-label="搜索子目录"',
     ]) assert.ok(picker.includes(marker), 'Lost actual error/retry semantics: ' + marker);
     assert.ok(api.includes('/api/filesystem/list?'));
     assert.ok(directory.includes('.nfc-v2-directory-dialog .nfc-v2-directory-error {'));
