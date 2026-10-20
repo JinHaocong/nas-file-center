@@ -35,6 +35,7 @@ const server = spawn(process.execPath, [
 let browser;
 let completed = 0;
 const compositedPaintCases = [];
+const directoryErrorCases = [];
 
 async function ready() {
   for (let attempt = 0; attempt < 100; attempt += 1) {
@@ -245,6 +246,61 @@ async function inspectCompositedPortalPaint(page, visual, width) {
   });
 }
 
+// Real error + retry controls, mounted in the same Radix portal; compare
+// actual computed ink/surface, not nominal CSS variables or a screenshot guess.
+async function inspectDirectoryErrorPaint(page, visual, width) {
+  const details = await page.evaluate(() => {
+    const alert = document.querySelector('.nfc-v2-directory-dialog [role="alert"].nfc-v2-directory-error');
+    const retry = alert?.querySelector('button');
+    if (!alert || !retry || !alert.textContent?.includes('无法读取目录'))
+      throw Error('Real directory read failure must show a nonempty alert and retry button');
+    if (document.activeElement !== retry || !retry.matches(':focus-visible'))
+      throw Error('Directory error Retry must be keyboard-focus-visible');
+    const colors = element => {
+      const style = getComputedStyle(element);
+      if (style.opacity !== '1' || style.backgroundImage !== 'none' ||
+          style.filter !== 'none' || style.backdropFilter !== 'none' ||
+          (style.webkitBackdropFilter && style.webkitBackdropFilter !== 'none'))
+        throw Error('Unmodeled error/focus paint effect');
+      return { ink: style.color, paper: style.backgroundColor,
+        outline: style.outlineColor, outlineStyle: style.outlineStyle,
+        outlineWidth: Number.parseFloat(style.outlineWidth),
+        outlineOffset: Number.parseFloat(style.outlineOffset) };
+    };
+    const alertStyle = colors(alert), retryStyle = colors(retry);
+    const bounds = alert.getBoundingClientRect();
+    if (!bounds.width || !bounds.height || bounds.left < -2 ||
+        bounds.right > innerWidth + 2 || bounds.top < -2 ||
+        bounds.bottom > innerHeight + 2)
+      throw Error('Directory error banner escaped the visible viewport');
+    if (retryStyle.outlineStyle !== 'solid' ||
+        retryStyle.outlineWidth < 2 || retryStyle.outlineOffset < 1)
+      throw Error('Directory retry keyboard ring is not visibly solid');
+    return { alert: alertStyle, retry: retryStyle };
+  });
+  // The banner and retry button have independent opaque, solid backgrounds;
+  // fail closed if future CSS introduces translucent or unmodeled paint.
+  for (const [name, style] of Object.entries(details)) {
+    const ratio = computedContrastRatio(style.ink, style.paper);
+    style.textContrast = Number(ratio.toFixed(3));
+    assert.ok(ratio >= 4.5,
+      'Directory ' + name + ' error text below AA 4.5:1: ' +
+      JSON.stringify({ width, visual, style }));
+  }
+  for (const [name, surface] of [
+    ['error banner', details.alert.paper], ['retry surface', details.retry.paper],
+  ]) {
+    const ratio = computedContrastRatio(details.retry.outline, surface);
+    assert.ok(ratio >= 3,
+      'Directory retry keyboard outline below 3:1 against ' + name +
+      ': ' + JSON.stringify({ width, visual, details }));
+  }
+  directoryErrorCases.push({
+    width, mode: visual.mode, system: visual.system,
+    effective: visual.effective, ...details,
+  });
+}
+
 try {
   await ready();
   mkdirSync(OUTPUT, { recursive: true });
@@ -262,6 +318,7 @@ try {
       }, visual.mode);
       const page = await context.newPage();
       const deniedMethods = [], outbound = [];
+      let simulateDirectoryFailure = false;
       await page.route('**/*', async route => {
         const request = route.request();
         const url = new URL(request.url());
@@ -278,6 +335,13 @@ try {
           deniedMethods.push(request.method() + ' ' + request.url());
           await route.fulfill({ status: 405, contentType: 'application/json',
             body: JSON.stringify({ error: 'READ_ONLY_BROWSER_FIXTURE' }) });
+          return;
+        }
+        // Synthetic GET failure is never forwarded to any backend. The retry
+        // uses the real UI and the same local-only read-only fixture.
+        if (simulateDirectoryFailure && url.pathname === '/api/filesystem/list') {
+          await route.fulfill({ status: 503, contentType: 'application/json',
+            body: JSON.stringify({ message: '模拟目录读取失败' }) });
           return;
         }
         await route.fulfill({ status: 200, contentType: 'application/json',
@@ -311,6 +375,28 @@ try {
         await page.keyboard.press('Tab');
         await inspectCompositedPortalPaint(page, visual, width);
         await page.screenshot({ path: resolve(OUTPUT, 'directory-selected-focus-' + label + '.png') });
+        if ([390, 1440].includes(width)) {
+          // Force a new read-only query key, wait for actual React Query error
+          // handling (including its retries), then test recovery with Retry.
+          simulateDirectoryFailure = true;
+          const search = page.getByRole('searchbox', { name: '搜索子目录' });
+          await search.fill('__synthetic_unavailable__');
+          const alert = page.locator('.nfc-v2-directory-dialog .nfc-v2-directory-error[role="alert"]');
+          await alert.waitFor({ state: 'visible', timeout: 20000 });
+          await search.focus();
+          await page.keyboard.press('Tab');
+          const retry = alert.getByRole('button', { name: '重试' });
+          assert.equal(await retry.evaluate(node => node === document.activeElement), true,
+            label + ': keyboard Tab from search must reach visible Retry');
+          await inspectDirectoryErrorPaint(page, visual, width);
+          await page.screenshot({ path: resolve(OUTPUT, 'directory-error-retry-' + label + '.png') });
+          simulateDirectoryFailure = false;
+          await retry.click();
+          await alert.waitFor({ state: 'hidden', timeout: 10000 });
+          await row.waitFor({ state: 'visible', timeout: 10000 });
+          assert.equal(await checkbox.isChecked(), true,
+            label + ': read-only Retry must retain previously selected path');
+        }
         await page.keyboard.press('Escape');
         await page.locator('.nfc-v2-directory-dialog').waitFor({ state: 'hidden' });
         await scanModal.waitFor({ state: 'visible' });
@@ -377,6 +463,8 @@ try {
   assert.equal(completed, WIDTHS.length * MODES.length);
   assert.equal(compositedPaintCases.length, WIDTHS.length * MODES.length,
     'Actual selected translucent tint and portal paint must cover all widths/themes');
+  assert.equal(directoryErrorCases.length, 2 * MODES.length,
+    'Real directory 503/error/retry must cover 390px and 1440px in four themes');
   assert.ok(compositedPaintCases.every(c =>
     c.pairs.length === 6 && c.pairs.every(pair => pair.contrast >= 4.5) &&
     c.focus.keyboard && c.focus.checked && c.focus.width >= 2 &&
@@ -389,6 +477,13 @@ try {
       paintedTextPairs: compositedPaintCases.length * 6,
       keyboardFocusPairs: compositedPaintCases.length,
       audited: 'actual-mounted-Radix-dialog-selected-alpha-tint-and-keyboard-focus-solid-composition-not-pixel-level' }, null, 2));
+  writeFileSync(resolve(OUTPUT, 'directory-error-retry-contrast-audit.json'),
+    JSON.stringify({ cases: directoryErrorCases, total: directoryErrorCases.length,
+      textPairs: directoryErrorCases.length * 2,
+      focusPairs: directoryErrorCases.length * 2,
+      scope: 'real-React-Radix-GET-only-synthetic-503-solid-paint-not-pixel-or-manual' }, null, 2));
+  console.log('[BROWSER DIRECTORY ERROR/RETRY] 8/8 real mounted error/retry sequences; ' +
+    '16/16 banner/retry text pairs >=4.5:1, 16/16 outline/surface pairs >=3:1.');
   console.log('[BROWSER COMPOSITED PORTAL TEXT/FOCUS] 32/32 nested dialogs; ' +
     '192/192 painted labels >= 4.5:1, 32/32 selected keyboard focus rings >= 3:1, no outbound.');
   console.log('[BROWSER OVERLAY] ' + completed + '/' + (WIDTHS.length * MODES.length) +
