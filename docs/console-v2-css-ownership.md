@@ -1403,3 +1403,25 @@ Note: the shared shell already overrides its default #777771 keyboard
 outline to #e9e9e6 in the dark theme, so an initial token-only concern
 must not be misreported as a proven live focus defect. This change verifies
 the mounted result before deciding whether any CSS adjustment is needed.
+
+
+### PR #315 CI cancellation and bounded recovery
+
+The first PR #315 HEAD `75866755e5120f2b2590e9a2ca84f7205b3b9577`
+completed **15/16** check runs. The Chromium `browser-overlay-smoke`
+job was **cancelled at the 20-minute job timeout**, not marked as an
+application failure or approval: all preceding Tasks (including the new
+32-list-error paint cases), Indexes and Media stages had passed, but the
+job was in its final Archive Recovery selection stage. GitHub therefore
+correctly concluded the whole `UI Validation` workflow as cancelled,
+so the PR could not be merged. This evidence is not a green result.
+
+The job now has a **bounded 35-minute timeout** matching the existing
+backend regression job, allowing the full existing read-only browser suite
+(including Archive Recovery and evidence upload) to complete. No test,
+viewport, failure threshold, mock isolation or cleanup step is removed.
+A static regression enumerates all 14 browser scripts and protects the
+new bounded timeout from regressing back to 20 minutes. All PR CI
+workflows must run again on the updated exact HEAD and **every** check
+must conclude Success; previous green stages do not substitute for the
+cancelled job.
