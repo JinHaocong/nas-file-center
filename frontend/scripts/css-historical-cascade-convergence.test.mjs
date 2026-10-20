@@ -1219,3 +1219,196 @@ test('v049 → v056: eight metric-card geometry, surface and hover shadows stay 
     entry.indexOf("./styles/v056-right-workspace-v2.css"),
   'The exact cross-layer import order must remain unchanged');
 });
+
+test('v050-v051: 32 exact-context cross-file historical shadows remain retired', () => {
+  // Same unconditional selector, same property and normal importance.
+  // Later v054/v056 rules win; earlier independent declarations still work.
+  const earlyFiles = {
+    f050: leafRules(read('src/styles/v050-layout.css')),
+    f051: leafRules(read('src/styles/v051-product-polish.css')),
+  };
+  const owners = {
+    v054: leafRules(read('src/styles/v054-premium-system.css')),
+    v056: leafRules(read('src/styles/v056-right-workspace-v2.css')),
+  };
+  const shadows = [
+  [
+    "f050",
+    ".nfc-dashboard-page .nfc-dashboard-layout",
+    [
+      "margin-top",
+      "grid-template-columns",
+      "gap"
+    ],
+    "v056"
+  ],
+  [
+    "f050",
+    ".nfc-dashboard-page .nfc-dashboard-main-column",
+    [
+      "gap"
+    ],
+    "v056"
+  ],
+  [
+    "f050",
+    ".nfc-dashboard-page .nfc-dashboard-rail",
+    [
+      "position",
+      "top",
+      "gap"
+    ],
+    "v056"
+  ],
+  [
+    "f050",
+    ".nfc-dashboard-page .nfc-quick-action",
+    [
+      "min-height",
+      "padding"
+    ],
+    "v056"
+  ],
+  [
+    "f050",
+    ".nfc-dashboard-page .nfc-summary-row",
+    [
+      "min-height",
+      "padding-inline"
+    ],
+    "v056"
+  ],
+  [
+    "f051",
+    ".nfc-row-actions",
+    [
+      "gap",
+      "opacity"
+    ],
+    "v056"
+  ],
+  [
+    "f051",
+    ".nfc-row-actions:focus-within",
+    [
+      "opacity"
+    ],
+    "v056"
+  ],
+  [
+    "f051",
+    ".nfc-drawer-title",
+    [
+      "min-width"
+    ],
+    "v054"
+  ],
+  [
+    "f051",
+    ".nfc-drawer-title-kicker",
+    [
+      "color",
+      "font-size",
+      "font-weight",
+      "letter-spacing",
+      "text-transform"
+    ],
+    "v054"
+  ],
+  [
+    "f051",
+    ".nfc-drawer-title-row",
+    [
+      "min-width",
+      "display",
+      "align-items",
+      "gap"
+    ],
+    "v054"
+  ],
+  [
+    "f051",
+    ".nfc-overlay-stack",
+    [
+      "display",
+      "gap"
+    ],
+    "v054"
+  ],
+  [
+    "f051",
+    ".nfc-overlay-section",
+    [
+      "overflow"
+    ],
+    "v054"
+  ],
+  [
+    "f051",
+    ".nfc-overlay-section-header",
+    [
+      "min-height",
+      "padding"
+    ],
+    "v054"
+  ],
+  [
+    "f051",
+    ".nfc-code-block",
+    [
+      "border",
+      "border-radius",
+      "background"
+    ],
+    "v054"
+  ]
+];
+  const retained = new Map([
+    ['.nfc-dashboard-page .nfc-dashboard-layout', ['align-items', 'start']],
+    ['.nfc-dashboard-page .nfc-quick-action', ['border-radius', '12px']],
+    ['.nfc-dashboard-page .nfc-summary-row', ['border-bottom-style', 'dashed']],
+    ['.nfc-row-actions', ['transition', 'opacity 140ms ease, transform 140ms ease']],
+    ['.nfc-drawer-title-kicker', ['margin-bottom', '4px']],
+    ['.nfc-drawer-title-row', ['font-weight', '680']],
+  ]);
+  let retired = 0;
+  for (const [file, selector, properties, owner] of shadows) {
+    const previous = matching(earlyFiles[file], selector);
+    const later = matching(owners[owner], selector);
+    assert.ok(later.length >= 1, 'Missing authoritative winner: ' + selector);
+    for (const property of properties) {
+      assert.ok(previous.every(rule => !rule.declarations.has(property)),
+        'Retired historical declaration returned: ' + selector + '/' + property);
+      assert.ok(later.some(rule => rule.declarations.has(property)),
+        'Final same-selector rule no longer owns ' + selector + '/' + property);
+      retired++;
+    }
+    if (retained.has(selector)) {
+      const [property, value] = retained.get(selector);
+      assert.ok(previous.some(rule => rule.declarations.get(property) === value),
+        'Independent historical declaration lost: ' + selector + '/' + property);
+    } else {
+      assert.equal(previous.length, 0,
+        'Fully shadowed legacy selector must be retired: ' + selector);
+    }
+  }
+  assert.equal(retired, 32);
+  const entry = read('src/main.tsx');
+  const imports = [
+    "import './styles/v050-layout.css';",
+    "import './styles/v051-product-polish.css';",
+    "import './styles/v054-premium-system.css';",
+    "import './styles/v056-right-workspace-v2.css';",
+    "import './styles/console-v2.css';",
+  ];
+  for (let i = 1; i < imports.length; i++) {
+    assert.ok(entry.indexOf(imports[i-1]) < entry.indexOf(imports[i]),
+      'Exact cascade import order changed: ' + imports[i]);
+  }
+  // Do not weaken the 8-width/4-theme actual Chromium evidence.
+  const ci = read('../.github/workflows/ui-v044-validation.yml');
+  for (const gate of ['browser-workspace-cascade.mjs',
+    'browser-full-route-visual.mjs','browser-overlay-smoke.mjs']) {
+    assert.ok(ci.includes(gate), 'Missing latest-head browser evidence: ' + gate);
+  }
+});

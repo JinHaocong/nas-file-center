@@ -8,12 +8,8 @@
 /* -------------------------------------------------------------------------- */
 
 .nfc-row-actions {
-  gap: 4px;
-  opacity: 0.76;
+
   transition: opacity 140ms ease, transform 140ms ease;
-}
-.nfc-row-actions:focus-within {
-  opacity: 1;
 }
 
 .nfc-table-link,
@@ -267,25 +263,14 @@
 /* Drawers / inspectors                                                       */
 /* -------------------------------------------------------------------------- */
 
-.nfc-drawer-title {
-  min-width: 0;
-}
-
 .nfc-drawer-title-kicker {
   display: block;
   margin-bottom: 4px;
-  color: var(--nfc-text-subtle);
-  font-size: 8px;
-  font-weight: 720;
-  letter-spacing: .13em;
-  text-transform: uppercase;
+
 }
 
 .nfc-drawer-title-row {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
+
   color: var(--nfc-text);
   font-size: 13px;
   font-weight: 680;
@@ -295,20 +280,6 @@
   display: flex;
   align-items: center;
   gap: 7px;
-}
-
-.nfc-overlay-stack {
-  display: grid;
-  gap: 12px;
-}
-
-.nfc-overlay-section {
-  overflow: clip;
-}
-
-.nfc-overlay-section-header {
-  min-height: 52px;
-  padding: 11px 13px;
 }
 
 .nfc-overlay-section:not(.nfc-overlay-section-flush) > :not(.nfc-overlay-section-header) {
@@ -375,12 +346,6 @@
 
 .nfc-audit-json {
   margin-top: 4px;
-}
-
-.nfc-code-block {
-  border: 1px solid var(--nfc-border-soft);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--nfc-v49-canvas) 80%, var(--nfc-surface-1));
 }
 
 /* -------------------------------------------------------------------------- */

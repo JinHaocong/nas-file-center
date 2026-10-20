@@ -103,20 +103,8 @@
 }
 
 .nfc-dashboard-page .nfc-dashboard-layout {
-  margin-top: 0;
-  grid-template-columns: minmax(0, 1.72fr) minmax(260px, 0.48fr);
-  gap: 18px;
+
   align-items: start;
-}
-
-.nfc-dashboard-page .nfc-dashboard-main-column {
-  gap: 18px;
-}
-
-.nfc-dashboard-page .nfc-dashboard-rail {
-  position: sticky;
-  top: 88px;
-  gap: 14px;
 }
 
 .nfc-dashboard-page .nfc-dashboard-main-column > .nfc-data-panel {
@@ -131,8 +119,7 @@
 }
 
 .nfc-dashboard-page .nfc-quick-action {
-  min-height: 68px;
-  padding: 11px 12px;
+
   border: 1px solid transparent;
   border-radius: 12px;
 }
@@ -147,8 +134,7 @@
 }
 
 .nfc-dashboard-page .nfc-summary-row {
-  min-height: 45px;
-  padding-inline: 7px;
+
   border-bottom-style: dashed;
 }
 
