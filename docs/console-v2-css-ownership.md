@@ -1202,3 +1202,33 @@ surfaces. Static regression tests pin CSS cascade ownership while the
 real Chromium Dashboard hero audit still rejects actual computed
 gradients, filters and translucent/unresolved ancestors. All original
 contrast and screenshot expectations remain unchanged.
+
+
+## 2026-10-20 — selected DirectoryPicker keyboard focus against translucent paint (PR after #311)
+
+PR #311 verified six real portal text roles on translucent selected rows,
+but did not prove that the **native checkbox keyboard focus indicator** remains
+legible on the same composited surface. The existing isolated Chromium
+ScanCreate → DirectoryPicker scenario now checks the actual row selection,
+focuses its directory-open button and presses **Tab** to the adjacent real
+checkbox. It fails closed unless that selected, checked checkbox is the
+active element with `:focus-visible` and an opaque solid outline at least
+2px wide with 1px offset.
+
+The audit alpha-composites the checkbox's **label/selected-row background**
+through actual DOM ancestors to the first provably opaque surface, rejecting
+unsupported gradients, filters, opacity effects, and unknown computed colors.
+It compares the actual computed outline against that painted surface at the
+**3:1 non-text indicator** threshold, adding **32 independently measured
+keyboard-focus pairs** across eight widths and four theme/system scenarios.
+Existing **192 text comparisons >=4.5:1**, both portal scrims, page screenshots
+and all safety gates remain untouched. Each accepted case also captures a
+new `directory-selected-focus-<mode>-<system>-<width>.png` evidence image,
+and the existing `composited-portal-text-contrast-audit.json` now contains
+the focus style, offset, width, painted background and measured ratio.
+
+This is **computed flat-paint focus evidence**, not pixel-level output or
+complete keyboard/screen-reader/manual approval. The fixture blocks outbound
+requests and non-GET APIs; no NAS mutations, production operations, or
+stylesheet/application runtime changes. Historical redundant CSS declarations
+stay **229**; high-level milestones stay **69/74 (93.2%)**.
