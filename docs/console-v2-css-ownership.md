@@ -1557,3 +1557,30 @@ cross-layer overrides, a complete CSS/theming migration, a pixel-identical
 visual signoff, a screen-reader acceptance or a real-NAS deployment.
 The high-level **69/74** final acceptance checklist remains unchanged
 until the complete CSS ownership/theming gate is actually satisfied.
+
+## 2026-10-21 — v048 base unconditional shadow retirement
+
+Following the fully green PR #320 (261 historical redundant property retirements
+cumulatively), an exact top-level CSS rule inventory found 27 v048 base selectors
+holding **112 unconditional, normal-importance properties** that are already
+overridden by identically spelled selector/property owners in the later imported
+v048-detail, v049, v054 and v056 native CSS sheets. This removes exactly those
+112 obsolete declarations and 22 now-empty earlier blocks; five partially
+owned original selectors retain their independent values unchanged.
+
+For safety, this tranche deliberately excludes root and dark theme tokens,
+grouped selectors, pseudo-element / hover / last-child behaviors, responsive
+or support-conditional declarations and any important property. No new
+override stylesheet, specificity change, media move, class rename or entrypoint
+import reordering is introduced. `css-historical-cascade-convergence.test.mjs`
+checks all **27 selectors / 112 properties**, exact later owners,
+retained independent declarations, token and responsive presence, CSS load
+order and CI Chromium registration. The latest exact PR HEAD must pass
+all 16 checks and 4 workflows, followed by main verification.
+
+Target historical tracked removals **261 + 112 = 373** only after successful
+PR and post-merge main CI. This is meaningful structural reduction, **not yet
+the global CSS/theme consolidation milestone**, which also requires
+remaining ownership overlap review and computed-style/visual verification.
+Formal acceptance therefore stays 69/74 until the whole gate is met. No
+real NAS, production deployment, filesystem writes or user data was touched.
