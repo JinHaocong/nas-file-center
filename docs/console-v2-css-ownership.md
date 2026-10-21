@@ -1584,3 +1584,37 @@ the global CSS/theme consolidation milestone**, which also requires
 remaining ownership overlap review and computed-style/visual verification.
 Formal acceptance therefore stays 69/74 until the whole gate is met. No
 real NAS, production deployment, filesystem writes or user data was touched.
+
+## 2026-10-21 — native Media / Indexes / Audit neutral fallback ownership
+
+A post-#324 review of the original CSS source (after post-merge main
+4/4 Checks and 3/3 Workflows Success) found old *fallback literals* in
+three last-loaded native CSS owners. Normal `--v2-*` and `--nfc-*`
+variables already resolve to the Pure White neutral palette, but if a
+variable is absent in a detached Radix Portal or a styling consumer,
+the prior defaults could resurrect blue focus rings and navy surfaces.
+
+The changed fallback entries are **22 in Media**, **22 in Indexes**,
+and **18 in Audit/Worker** (**62 `var(..., #color)` calls total**).
+Native active CSS selectors, declaration properties, variable names,
+selector specificity, media queries, import order and all status
+colors are unchanged. The fallback whites/charcoal and independent
+dark surfaces use the same neutral values as the approved design:
+light `#ffffff` / `#f7f7f5` / `#20201f` /
+`#262625`; dark `#171716` / `#242422` /
+`#2d2d2a` / `#f5f5f2` / `#e9e9e6`.
+
+A native CSS ownership regression checks all 62 entries, rejects known
+obsolete blue literals in these owners, verifies the real shared alias
+authority and CSS imports, preserves Media's red/green semantic states,
+and requires >=4.5:1 normal text and >=3:1 focus contrast for the
+fallback primary surface/text pairs.
+
+**Acceptance boundary:** this is *fail-safe palette consolidation*,
+not evidence that the fallback was active in current normal rendering,
+not proof that all other historical CSS overrides have been removed,
+and not full manual visual or assistive-technology review. The
+`69/74` high-level checklist remains unchanged. On the exact PR
+HEAD, require full 16/16 Checks and 4/4 Workflows before squash merge,
+then post-merge main CI and branch cleanup. Human visual and real-NAS
+gates remain separate.
