@@ -1412,3 +1412,463 @@ test('v050-v051: 32 exact-context cross-file historical shadows remain retired',
     assert.ok(ci.includes(gate), 'Missing latest-head browser evidence: ' + gate);
   }
 });
+
+test('v048 base: 112 earlier cross-layer shadows retired with final owners preserved', () => {
+  const early = leafRules(read('src/styles/v048.css'));
+  const final = ['v048-detail.css', 'v049-workspace.css',
+    'v054-premium-system.css', 'v056-right-workspace-v2.css']
+    .map(f => ({file:f, rules:leafRules(read('src/styles/' + f))}));
+  const cases = [
+  [
+    ".nfc-header.nfc-header",
+    [
+      "position",
+      "top",
+      "z-index",
+      "min-height",
+      "margin",
+      "padding",
+      "border",
+      "border-bottom",
+      "border-radius",
+      "background",
+      "box-shadow",
+      "backdrop-filter",
+      "-webkit-backdrop-filter"
+    ],
+    [],
+    [
+      "v048-detail.css",
+      "v049-workspace.css",
+      "v056-right-workspace-v2.css"
+    ]
+  ],
+  [
+    ".nfc-header-left",
+    [
+      "gap"
+    ],
+    [
+      [
+        "min-width",
+        "0"
+      ]
+    ],
+    [
+      "v049-workspace.css"
+    ]
+  ],
+  [
+    ".nfc-header-workspace",
+    [
+      "min-width",
+      "padding",
+      "border-right"
+    ],
+    [],
+    [
+      "v049-workspace.css"
+    ]
+  ],
+  [
+    ".nfc-header-workspace-kicker",
+    [
+      "color",
+      "font-size",
+      "font-weight",
+      "letter-spacing"
+    ],
+    [
+      [
+        "display",
+        "block"
+      ],
+      [
+        "line-height",
+        "1.1"
+      ]
+    ],
+    [
+      "v049-workspace.css",
+      "v054-premium-system.css"
+    ]
+  ],
+  [
+    ".nfc-header-workspace-name",
+    [
+      "margin-top",
+      "color",
+      "font-size",
+      "font-weight"
+    ],
+    [
+      [
+        "display",
+        "block"
+      ],
+      [
+        "line-height",
+        "1.15"
+      ]
+    ],
+    [
+      "v049-workspace.css",
+      "v054-premium-system.css"
+    ]
+  ],
+  [
+    ".nfc-header-status",
+    [
+      "gap"
+    ],
+    [],
+    [
+      "v049-workspace.css",
+      "v056-right-workspace-v2.css"
+    ]
+  ],
+  [
+    ".nfc-header-command-cluster",
+    [
+      "display",
+      "align-items",
+      "gap"
+    ],
+    [],
+    [
+      "v048-detail.css",
+      "v054-premium-system.css"
+    ]
+  ],
+  [
+    ".nfc-header-action-label",
+    [
+      "color",
+      "font-size"
+    ],
+    [
+      [
+        "margin-left",
+        "5px"
+      ]
+    ],
+    [
+      "v056-right-workspace-v2.css"
+    ]
+  ],
+  [
+    ".nfc-page-content",
+    [
+      "position",
+      "z-index",
+      "width",
+      "padding"
+    ],
+    [],
+    [
+      "v049-workspace.css",
+      "v056-right-workspace-v2.css"
+    ]
+  ],
+  [
+    ".nfc-page-content > *",
+    [
+      "width",
+      "margin-inline"
+    ],
+    [],
+    [
+      "v056-right-workspace-v2.css"
+    ]
+  ],
+  [
+    ".nfc-page-header",
+    [
+      "min-height",
+      "margin",
+      "padding",
+      "align-items",
+      "gap",
+      "border",
+      "border-bottom",
+      "border-radius",
+      "background",
+      "box-shadow"
+    ],
+    [],
+    [
+      "v049-workspace.css",
+      "v056-right-workspace-v2.css"
+    ]
+  ],
+  [
+    ".nfc-page-eyebrow",
+    [
+      "margin-bottom",
+      "color",
+      "font-size",
+      "font-weight",
+      "letter-spacing",
+      "text-transform"
+    ],
+    [],
+    [
+      "v049-workspace.css"
+    ]
+  ],
+  [
+    ".nfc-page-title",
+    [
+      "color",
+      "font-size",
+      "font-weight",
+      "line-height",
+      "letter-spacing"
+    ],
+    [],
+    [
+      "v049-workspace.css",
+      "v056-right-workspace-v2.css"
+    ]
+  ],
+  [
+    ".nfc-page-description",
+    [
+      "max-width",
+      "margin-top",
+      "color",
+      "font-size",
+      "line-height"
+    ],
+    [],
+    [
+      "v049-workspace.css",
+      "v056-right-workspace-v2.css"
+    ]
+  ],
+  [
+    ".nfc-page-actions",
+    [
+      "align-self",
+      "gap",
+      "padding-bottom"
+    ],
+    [],
+    [
+      "v049-workspace.css",
+      "v056-right-workspace-v2.css"
+    ]
+  ],
+  [
+    ".nfc-data-panel",
+    [
+      "overflow"
+    ],
+    [],
+    [
+      "v049-workspace.css",
+      "v056-right-workspace-v2.css"
+    ]
+  ],
+  [
+    ".nfc-data-panel-header",
+    [
+      "min-height",
+      "padding"
+    ],
+    [
+      [
+        "border-bottom",
+        "1px solid var(--nfc-premium-line)"
+      ],
+      [
+        "background",
+        "transparent !important"
+      ]
+    ],
+    [
+      "v049-workspace.css",
+      "v056-right-workspace-v2.css"
+    ]
+  ],
+  [
+    ".nfc-data-panel-title",
+    [
+      "color",
+      "font-size",
+      "font-weight",
+      "letter-spacing"
+    ],
+    [],
+    [
+      "v049-workspace.css",
+      "v056-right-workspace-v2.css"
+    ]
+  ],
+  [
+    ".nfc-data-panel-description",
+    [
+      "margin-top",
+      "color",
+      "font-size",
+      "line-height"
+    ],
+    [],
+    [
+      "v049-workspace.css",
+      "v056-right-workspace-v2.css"
+    ]
+  ],
+  [
+    ".nfc-panel-count",
+    [
+      "color",
+      "font-size",
+      "font-weight",
+      "letter-spacing"
+    ],
+    [],
+    [
+      "v049-workspace.css"
+    ]
+  ],
+  [
+    ".nfc-metric-grid",
+    [
+      "gap",
+      "overflow",
+      "border",
+      "border-radius",
+      "background",
+      "box-shadow"
+    ],
+    [],
+    [
+      "v056-right-workspace-v2.css"
+    ]
+  ],
+  [
+    ".nfc-metric-card",
+    [
+      "min-height",
+      "padding",
+      "border",
+      "border-right",
+      "border-radius",
+      "background",
+      "box-shadow"
+    ],
+    [],
+    [
+      "v049-workspace.css",
+      "v056-right-workspace-v2.css"
+    ]
+  ],
+  [
+    ".nfc-metric-label",
+    [
+      "color",
+      "font-size",
+      "font-weight",
+      "letter-spacing",
+      "text-transform"
+    ],
+    [],
+    [
+      "v056-right-workspace-v2.css"
+    ]
+  ],
+  [
+    ".nfc-metric-value",
+    [
+      "margin-top",
+      "color",
+      "font-size",
+      "font-weight",
+      "letter-spacing"
+    ],
+    [],
+    [
+      "v049-workspace.css",
+      "v056-right-workspace-v2.css"
+    ]
+  ],
+  [
+    ".nfc-metric-meta",
+    [
+      "margin-top",
+      "color",
+      "font-size"
+    ],
+    [],
+    [
+      "v056-right-workspace-v2.css"
+    ]
+  ],
+  [
+    ".nfc-filter-control",
+    [
+      "color",
+      "font-size",
+      "font-weight"
+    ],
+    [],
+    [
+      "v056-right-workspace-v2.css"
+    ]
+  ],
+  [
+    ".nfc-mobile-pagination",
+    [
+      "border-top-color",
+      "background"
+    ],
+    [],
+    [
+      "v048-detail.css",
+      "v049-workspace.css"
+    ]
+  ]
+];
+  let removed = 0;
+  for (const [selector, deleted, independent, owners] of cases) {
+    const old = matching(early, selector);
+    if (independent.length === 0) {
+      assert.equal(old.length, 0, selector + ': shadowed empty rule returned');
+    } else {
+      assert.equal(old.length, 1, selector + ': independent rule lost');
+      for (const [key, value] of independent) {
+        assert.equal(old[0].declarations.get(key), value,
+          selector + ': retained independent property ' + key);
+      }
+    }
+    for (const property of deleted) {
+      assert.ok(old.every(rule => !rule.declarations.has(property)),
+        selector + ': retired v048 declaration returned ' + property);
+      assert.ok(owners.some(f => final.some(entry => entry.file === f &&
+        matching(entry.rules, selector).some(rule => rule.declarations.has(property)))),
+        selector + ': late owner missing for ' + property);
+      removed++;
+    }
+  }
+  assert.equal(removed, 112);
+  assert.equal(cases.length, 27);
+  const src = read('src/styles/v048.css');
+  for (const marker of [':root {', "[data-theme='dark'] {",
+    '--nfc-premium-control: 38px', '@media (max-width: 767px)',
+    '@media (prefers-reduced-motion: reduce)']) {
+    assert.ok(src.includes(marker), 'Theme or responsive property lost: ' + marker);
+  }
+  const entry = read('src/main.tsx');
+  const order = ['v048.css','v048-detail.css','v049-workspace.css',
+    'v054-premium-system.css','v056-right-workspace-v2.css','console-v2.css'];
+  for (let i=1;i<order.length;i++) assert.ok(
+    entry.indexOf("import './styles/" + order[i-1] + "';") <
+      entry.indexOf("import './styles/" + order[i] + "';"),
+    'Original CSS import precedence changed at ' + order[i]);
+  const ci = read('../.github/workflows/ui-v044-validation.yml');
+  for (const runner of ['browser-full-route-visual.mjs',
+    'browser-workspace-cascade.mjs', 'browser-overlay-smoke.mjs']) {
+    assert.ok(ci.includes(runner), 'Full read-only Chromium evidence lost ' + runner);
+  }
+});
