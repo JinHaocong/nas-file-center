@@ -196,3 +196,59 @@ refactor. No NAS/API/storage/React behavior, destructive operation, or
 production deployment changes. Human end-to-end visual, assistive
 technology and real-NAS acceptance remain pending; formal milestones
 still **69/74** until every CSS/theme acceptance condition is met.
+
+## 2026-10-21 — Login and Settings late-owner neutral theme convergence
+
+Full-route **actual Chromium dark 768px captures** following PR #323
+showed two more independently verifiable Pure White regressions:
+Login's almost-black canvas/card still inherited v049's cool/blue
+legacy theme and an earlier decorative radial gradient; Settings'
+large panels and inner safety cards retained the older v056
+blue-black `--nfc-shell-card-*` and `--nfc-w2-*` surfaces.
+
+Rather than globally rewriting shared v049/W2 theme variables (which
+would affect every module), this scoped correction reuses existing
+last-loaded owners `console-v2-scan-login.css` and
+`console-v2-settings.css`. The login shell and card use
+`#ffffff` light or `#171716`/`#242422` dark, with no decorative
+background image, and neutral border/muted text. Settings owns
+neutral per-page card/surface variables (dark `#242422`/`#2d2d2a`);
+other routes keep their existing W2 behavior. No new override file,
+no CSS import reordering, no API/React changes.
+
+The **existing** 25-route × 8-width × 4-theme read-only Chromium CI
+now records and checks actual computed Login shell/panel background
+and gradient absence, plus real Settings card/subpanel backgrounds
+across all 32 theme/viewport combinations; any missing DOM or
+mismatch fails CI. This is deliberately broader than a source test,
+but it is still synthetic data and not human visual, assistive-tech
+or real NAS acceptance. All auth single-flight, session controls,
+settings confirmations, semantic status colors and filesystem guards
+remain unchanged. The CSS/theme consolidation checkbox and formal
+**69/74** progress must remain open until the complete final gate
+and owner acceptance criteria are satisfied.
+
+### CI refinement — actual Settings v049 cascade and sRGB color-mix
+
+The first PR #324 Chromium run detected an **actual remaining dark
+Settings regression**: the Settings card computed as
+`rgb(19, 23, 28)` (old v049 `#13171c`), despite neutral local W2
+tokens. This is because the older
+`.nfc-system-controls-page .nfc-settings-grid > .nfc-data-panel`
+has a higher-specificity `background:var(--nfc-v49-surface)!important`
+rule, so the later lower-specificity shell card rule cannot win.
+The fix maps **`--nfc-v49-surface` only on the Settings root**, to
+white / `#242422`, without touching v049 globals or changing
+selector specificity.
+
+For the native Settings inner subpanel, the CSS uses `color-mix()`
+and Chrome serializes its rendered background as `color(srgb ...)`.
+The real CI returns `color(srgb 0.121882 0.121882 0.114039)` in
+dark and `color(srgb 0.988078 0.988078 0.985098)` in light.
+The strict computed-paint parser now checks sRGB channel neutrality
+(max-min ≤ 4 on 0–255 channels), opacity=1, and bounded neutral
+brightness in each theme. The card itself must still equal exact
+`rgb(36, 36, 34)` dark or white light. Login's exact-color and
+no-gradient assertions are **unchanged**. The first failure is
+preserved in the GitHub Actions run linked to the previous PR HEAD;
+a new commit must rerun all checks before merge.
