@@ -46,6 +46,20 @@ describe('Pure White Stage 5E-H v049 late-authority convergence', () => {
     let count = 0;
     for (const [selector, removed, expectedDesktopRules] of retired) {
       const rules = blocks(selector);
+      // The formerly empty :last-child v049 block is now fully retired;
+      // verify the exact later-imported v056 author instead of requiring
+      // a dead v049 placeholder to remain solely for the old test.
+      if (selector === '.nfc-metric-card:last-child') {
+        assert.equal(rules.length, 0,
+          'Fully superseded v049 last-child selector must stay retired');
+        const canonical = v056.match(/^\\.nfc-metric-card:last-child\\s*\\{([^}]*)\\}/m)?.[1];
+        assert.ok(canonical, 'Exact v056 last-child owner must stay installed');
+        assert.equal(property(canonical, 'border-right'),
+          '1px solid var(--nfc-w2-hairline)',
+          'Exact later v056 last-child border must remain unchanged');
+        count += removed.length;
+        continue;
+      }
       assert.ok(rules.length >= expectedDesktopRules, selector + ' missing late winner');
       // Some selectors also have a separate later @media mobile version.
       if (expectedDesktopRules === 1) {
