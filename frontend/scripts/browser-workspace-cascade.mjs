@@ -33,6 +33,7 @@ let passed = 0;
 const checkboxKeyboardAudit = [];
 const dashboardHeroPaintAudit = [];
 const nativeHeaderOwnerAudit = [];
+const nativePanelHeaderOwnerAudit = [];
 
 async function ready() {
   for (let i = 0; i < 100; i++) {
@@ -859,6 +860,62 @@ async function auditNativeHeaderOwnership(page, item, width, theme) {
   });
 }
 
+// Source Stage 70 overlaps cannot tell whether v048's global !important
+// transparent data-panel header or later v054 dark gradient has final paint.
+// Test the actual mounted React DataPanel after the complete import graph,
+// including the more specific v056 native panel rule.
+async function auditNativePanelHeaderOwnership(page, item, width, theme) {
+  const measured = await page.evaluate(item => {
+    const root = document.querySelector(item.selector);
+    if (!root) throw Error('Missing real mounted page for DataPanel owner audit');
+    const candidates = [...root.querySelectorAll(
+      '.nfc-data-panel > .nfc-data-panel-header')];
+    const visible = candidates.filter(node => {
+      const box = node.getBoundingClientRect();
+      return box.width > 0 && box.height > 0;
+    });
+    if (!visible.length)
+      throw Error('Missing visible mounted DataPanel header on ' + item.path);
+    const panels = visible.map(node => {
+      const style = getComputedStyle(node);
+      const rect = node.getBoundingClientRect();
+      return {
+        backgroundColor: style.backgroundColor,
+        backgroundImage: style.backgroundImage,
+        borderBottomWidth: style.borderBottomWidth,
+        borderBottomStyle: style.borderBottomStyle,
+        borderBottomColor: style.borderBottomColor,
+        panelClass: node.parentElement?.className,
+        visible: rect.width > 0 && rect.height > 0,
+      };
+    });
+    // These old overlay sections may be used by legacy dialogs. Their
+    // absence in a closed route is not proof they are globally unreachable.
+    const mountedHistoricalOverlaySections =
+      document.querySelectorAll('.nfc-overlay-section').length;
+    return { effective: document.documentElement.dataset.theme,
+      panels, mountedHistoricalOverlaySections };
+  }, item);
+  const label = item.id + '/' + width + '/' + theme.mode + '-' + theme.system;
+  assert.equal(measured.effective, theme.effective, label + ': wrong effective theme');
+  for (const panel of measured.panels) {
+    assert.equal(panel.backgroundColor, 'rgba(0, 0, 0, 0)',
+      label + ': historical gradient or opaque legacy panel header returned');
+    assert.equal(panel.backgroundImage, 'none',
+      label + ': historical dark-mode gradient returned');
+    assert.equal(panel.borderBottomWidth, '1px',
+      label + ': DataPanel bottom separator thickness changed');
+    assert.equal(panel.borderBottomStyle, 'solid',
+      label + ': DataPanel bottom separator style changed');
+    assert.equal(panel.visible, true);
+  }
+  nativePanelHeaderOwnerAudit.push({
+    route: item.path, width, mode: theme.mode, system: theme.system,
+    ...measured,
+    scope: 'actual-mounted-React-DataPanel-computed-paint; closed-route-overlay-count-is-not-global-absence-proof',
+  });
+}
+
 async function inspect(page, theme, width, item) {
   const violations = await page.evaluate(({ theme, width, item }) => {
     const get = selector => {
@@ -1137,6 +1194,7 @@ try {
           await page.getByRole('heading', { name: item.heading, exact: true }).waitFor();
           await inspect(page, theme.effective, width, item);
           await auditNativeHeaderOwnership(page, item, width, theme);
+          await auditNativePanelHeaderOwnership(page, item, width, theme);
           await auditW2ComputedTheme(page, item, width, theme);
           await auditPaintedLedgerHeading(page, item, width, theme);
           await page.screenshot({
@@ -1210,6 +1268,28 @@ try {
     }, null, 2));
   console.log('[NATIVE HEADER CASCADE] ' + nativeHeaderOwnerAudit.length +
     ' mounted six-route/header cases; bottom-only border, native paper and no historic glass.');
+
+  assert.equal(nativePanelHeaderOwnerAudit.length,
+    WIDTHS.length * THEMES.length * PAGES.length,
+    'Every route/width/theme must measure real mounted DataPanel header paint');
+  assert.ok(nativePanelHeaderOwnerAudit.every(item => item.panels.length > 0 &&
+    item.panels.every(panel => panel.visible &&
+      panel.backgroundColor === 'rgba(0, 0, 0, 0)' &&
+      panel.backgroundImage === 'none' &&
+      panel.borderBottomWidth === '1px' &&
+      panel.borderBottomStyle === 'solid')),
+  'Every real DataPanel header must keep transparent fill and a bottom-only hairline');
+  writeFileSync(resolve(OUT, 'native-data-panel-header-cascade-audit.json'),
+    JSON.stringify({
+      total: nativePanelHeaderOwnerAudit.length,
+      panelSamples: nativePanelHeaderOwnerAudit.reduce(
+        (count, entry) => count + entry.panels.length, 0),
+      widths: WIDTHS, routes: PAGES.map(item => item.path),
+      cases: nativePanelHeaderOwnerAudit,
+      scope: 'real-React-GET-only-computed-style-not-pixel-manual-or-all-overlay-states',
+    }, null, 2));
+  console.log('[NATIVE PANEL HEADER CASCADE] ' + nativePanelHeaderOwnerAudit.length +
+    ' route/theme/width cases; actual transparent headers and bottom hairlines.');
 
   assert.equal(dashboardHeroPaintAudit.length, WIDTHS.length * THEMES.length,
     'Dashboard hero gradients must stay hidden and text must pass every viewport/theme');

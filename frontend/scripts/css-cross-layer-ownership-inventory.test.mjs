@@ -190,3 +190,27 @@ test('real Chromium matrix pins native header computed winner over legacy import
   assert.ok(ci.includes('node scripts/browser-workspace-cascade.mjs'),
     'Computed CSS owner audit must stay inside the exact-HEAD Chromium gate');
 });
+
+test('actual DataPanel Chromium paint guards legacy gradient and important background', () => {
+  const browser = read('scripts/browser-workspace-cascade.mjs');
+  for (const marker of [
+    'async function auditNativePanelHeaderOwnership(page, item, width, theme)',
+    'await auditNativePanelHeaderOwnership(page, item, width, theme);',
+    'native-data-panel-header-cascade-audit.json',
+    'WIDTHS.length * THEMES.length * PAGES.length',
+    "panel.backgroundImage === 'none'",
+    "document.querySelectorAll('.nfc-overlay-section').length",
+  ]) {
+    assert.ok(browser.includes(marker),
+      'Real mounted DataPanel style/audit coverage lost: ' + marker);
+  }
+  const native = read('src/styles/v056-right-workspace-v2.css');
+  assert.match(native,
+    /\.nfc-app-main \.nfc-data-panel > \.nfc-data-panel-header,[\s\S]*?border-bottom: 1px solid var\(--nfc-shell-card-border\) !important;[\s\S]*?background: transparent !important;/,
+    'The late native DataPanel must retain its own bottom separator and transparent background');
+  const old = read('src/styles/v048.css');
+  assert.match(old, /\.nfc-data-panel-header\s*\{[^}]*background: transparent !important;/,
+    'Historical global declaration inventory changed; rerun owner review');
+  const ci = read('../.github/workflows/ui-v044-validation.yml');
+  assert.ok(ci.includes('node scripts/browser-workspace-cascade.mjs'));
+});
