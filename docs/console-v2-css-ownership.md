@@ -1682,3 +1682,55 @@ validation*), **not** completion of all CSS ownership, full manual
 visual/a11y review, live NAS verification or owner deployment approval.
 Formal checklist remains **69/74** until the final integrated gate
 is genuinely satisfied.
+
+
+## 2026-10-21 — cross-layer owner inventory and precedence guard (Stage 70 evidence)
+
+After PR #327 was **Squash Merged** as
+a7077e3acbb0db42a28922bd3b944aaa987674d1, the merged main
+passed **4/4 Checks, 3/3 Workflows**, and its feature branch was deleted.
+The verified historic shadow-declaration retirement count is now **394**;
+this is separate from 62 historical fallback-color value replacements.
+
+The next high-level CSS audit examined all **nine top-level historical
+workspace CSS layers** from v048.css through v056-right-workspace-v2.css
+in the **actual main.tsx import order**. The source inventory found:
+
+- **212 cross-file candidate groups** sharing precisely the same
+  at-rule ancestry, spelled selector and property; **161** of these
+  groups contain differing authored values.
+- **6 groups** where an *earlier* !important declaration can defeat
+  the final ordinary declaration: desktop data-panel header background;
+  desktop shell header border and background; overlay-section radius
+  and background; and mobile shell header border.
+- Matching selectors under different media/supports conditions are
+  never conflated. The existing native Console v2 feature-owned
+  styles are **not** relabeled dead just because they follow the
+  historical workspace sheets.
+
+**Crucial distinction:** a cross-file overlap is not necessarily a
+defect or a safely removable declaration. This source-level inventory
+does not evaluate full selector specificity or overlapping selector
+matches, shorthand interactions, every conditional CSS support path,
+computed browser paint or production behavior. In particular, the six
+importance barriers must **not** be deleted under a naive "later file
+wins" assumption.
+
+The new executable frontend/scripts/css-cross-layer-ownership-inventory.test.mjs
+is registered in the existing npm test CI runner. It asserts historical
+import precedence, at-rule-aware source matching, an upper bound on
+new unreviewed cross-file overlaps, all six known importance barriers,
+and continued registration of read-only Chromium gates. Changes to
+the protected cases must be explicitly reviewed rather than hidden
+behind a raised baseline. This is a prevention and evidence tranche:
+**no CSS values, selectors, React/API behavior or NAS file-operation
+authorities are changed.** Exact PR-head full CI remains mandatory.
+
+**Milestone 70 remains OPEN.** Closing the complete global CSS owner
+consolidation still requires actual computed-style/PNG comparison of
+the remaining overlapping owners at relevant widths/themes/states,
+classification of intentionally effective responsive/page rules,
+correction of any genuine ownership contradictions, and a documented
+whole-site closing review. The eight-width human visual review, broad
+keyboard/assistive-technology review, isolated real NAS testing and
+owner deployment approval remain separate acceptance gates.
