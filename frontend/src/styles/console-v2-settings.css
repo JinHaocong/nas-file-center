@@ -7,6 +7,7 @@
   --nfc-v2-set-muted:var(--nfc-text-muted);
   --nfc-v2-set-accent:var(--nfc-accent);
   /* Local Settings ownership. Other routes retain the original W2 palette. */
+  --nfc-v49-surface:#ffffff;
   --nfc-shell-card-bg:#ffffff;
   --nfc-shell-card-border:#eaeae7;
   --nfc-w2-surface:#ffffff;
@@ -88,6 +89,7 @@
   --nfc-v2-set-ink:var(--nfc-text);
   --nfc-v2-set-muted:var(--nfc-text-muted);
   --nfc-v2-set-accent:var(--nfc-accent);
+  --nfc-v49-surface:#242422;
   --nfc-shell-card-bg:#242422;
   --nfc-shell-card-border:#383834;
   --nfc-w2-surface:#242422;

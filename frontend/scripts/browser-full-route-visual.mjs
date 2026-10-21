@@ -436,13 +436,25 @@ try {
                 soft: 'rgb(45, 45, 42)' }
             : { canvas: 'rgb(255, 255, 255)', panel: 'rgb(255, 255, 255)',
                 soft: 'rgb(247, 247, 245)' };
-          audit.loginSettingsPaint = { ...painted, required };
+          // A Settings subpanel may use CSS color-mix(). Chromium returns
+          // color(srgb …), not necessarily integer rgb(); parse strictly and
+          // verify painted neutral channels instead of string-equating CSS.
+          const soft = painted.subpanel?.background
+            ? parseComputedPaintColor(painted.subpanel.background) : null;
+          const softChannels = soft?.channels ?? [];
+          const neutralSoft = soft?.alpha === 1 && softChannels.length === 3 &&
+            Math.max(...softChannels) - Math.min(...softChannels) <= 4 &&
+            (theme.effective === 'dark'
+              ? softChannels.every(v => v >= 24 && v <= 75)
+              : softChannels.every(v => v >= 235 && v <= 255));
+          audit.loginSettingsPaint = { ...painted, required,
+            softChannels: softChannels.map(v => Number(v.toFixed(2))),
+            neutralSoft };
           const match = item.id === 'login'
             ? painted.shell?.background === required.canvas &&
               painted.shell?.image === 'none' &&
               painted.panel?.background === required.panel
-            : painted.panel?.background === required.panel &&
-              painted.subpanel?.background === required.soft;
+            : painted.panel?.background === required.panel && neutralSoft;
           if (!match) problems.push('Login/Settings actual neutral paint mismatch: ' +
             JSON.stringify({ route: item.id, effectiveTheme: theme.effective, painted }));
         }

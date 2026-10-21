@@ -227,3 +227,28 @@ settings confirmations, semantic status colors and filesystem guards
 remain unchanged. The CSS/theme consolidation checkbox and formal
 **69/74** progress must remain open until the complete final gate
 and owner acceptance criteria are satisfied.
+
+### CI refinement — actual Settings v049 cascade and sRGB color-mix
+
+The first PR #324 Chromium run detected an **actual remaining dark
+Settings regression**: the Settings card computed as
+`rgb(19, 23, 28)` (old v049 `#13171c`), despite neutral local W2
+tokens. This is because the older
+`.nfc-system-controls-page .nfc-settings-grid > .nfc-data-panel`
+has a higher-specificity `background:var(--nfc-v49-surface)!important`
+rule, so the later lower-specificity shell card rule cannot win.
+The fix maps **`--nfc-v49-surface` only on the Settings root**, to
+white / `#242422`, without touching v049 globals or changing
+selector specificity.
+
+For the native Settings inner subpanel, the CSS uses `color-mix()`
+and Chrome serializes its rendered background as `color(srgb ...)`.
+The real CI returns `color(srgb 0.121882 0.121882 0.114039)` in
+dark and `color(srgb 0.988078 0.988078 0.985098)` in light.
+The strict computed-paint parser now checks sRGB channel neutrality
+(max-min ≤ 4 on 0–255 channels), opacity=1, and bounded neutral
+brightness in each theme. The card itself must still equal exact
+`rgb(36, 36, 34)` dark or white light. Login's exact-color and
+no-gradient assertions are **unchanged**. The first failure is
+preserved in the GitHub Actions run linked to the previous PR HEAD;
+a new commit must rerun all checks before merge.

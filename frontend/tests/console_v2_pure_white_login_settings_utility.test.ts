@@ -81,6 +81,7 @@ describe('Pure White Stage 4A login, settings and utility preview', () => {
     for (const token of [
       '--nfc-shell-card-bg:#ffffff;', '--nfc-shell-card-bg:#242422;',
       '--nfc-shell-card-border:#eaeae7;', '--nfc-shell-card-border:#383834;',
+      '--nfc-v49-surface:#ffffff;', '--nfc-v49-surface:#242422;',
       '--nfc-w2-surface:#ffffff;', '--nfc-w2-surface:#242422;',
       '--nfc-w2-surface-soft:#f7f7f5;', '--nfc-w2-surface-soft:#2d2d2a;',
       '--nfc-v2-set-paper:#242422;', '--nfc-v2-set-soft:#2d2d2a;',
@@ -92,7 +93,9 @@ describe('Pure White Stage 4A login, settings and utility preview', () => {
       "readPaint('.nfc-v2-settings .nfc-settings-grid > .nfc-data-panel')",
       "readPaint('.nfc-v2-settings .nfc-settings-subpanel')",
       "painted.shell?.image === 'none'",
-      "painted.subpanel?.background === required.soft",
+      'parseComputedPaintColor(painted.subpanel.background)',
+      'Math.max(...softChannels) - Math.min(...softChannels) <= 4',
+      'painted.panel?.background === required.panel && neutralSoft',
       'audit.loginSettingsPaint = { ...painted, required }',
       'Login/Settings actual neutral paint mismatch',
     ]) assert.ok(browser.includes(marker), 'Missing live paint audit: ' + marker);
