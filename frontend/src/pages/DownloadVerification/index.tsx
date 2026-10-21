@@ -12,7 +12,6 @@ import { downloadVerificationApi } from '../../api/downloadVerification';
 import type { DownloadVerificationRun } from '../../api/downloadVerification';
 import { getStructuredApiError } from '../../api/errors';
 import { RemoteDirectoryPicker } from './RemoteDirectoryPicker';
-import '../../styles/console-v2-download-verify.css';
 
 const verdict: Record<string, string> = {
   METADATA_IDENTICAL: '快速清单一致（未校验内容）',

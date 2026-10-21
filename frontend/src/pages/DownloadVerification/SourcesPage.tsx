@@ -10,7 +10,6 @@ import { useTitle } from '../../hooks/useTitle';
 import { downloadVerificationApi } from '../../api/downloadVerification';
 import type { SourceInput, VerificationSource } from '../../api/downloadVerification';
 import { getStructuredApiError } from '../../api/errors';
-import '../../styles/console-v2-download-verify.css';
 
 const empty: SourceInput = { name: '', provider: 'openlist', base_url: '', username: '', password: '' };
 const message = (error: unknown) => getStructuredApiError(error).message || '操作失败';

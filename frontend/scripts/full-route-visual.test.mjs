@@ -73,6 +73,34 @@ test('download verification actual 390px form/table defect has owned responsive 
 });
 
 
+test('Download Verification owns both stylesheets in deterministic main order, not route chunks', () => {
+  const entry = readFileSync('src/main.tsx', 'utf8');
+  const verify = readFileSync('src/pages/DownloadVerification/index.tsx', 'utf8');
+  const sources = readFileSync('src/pages/DownloadVerification/SourcesPage.tsx', 'utf8');
+  const base = "import './styles/console-v2-download-verify.css';";
+  const mobile = "import './styles/console-v2-download-verification.css';";
+  assert.equal(entry.split(base).length - 1, 1, 'Full feature owner imported exactly once');
+  assert.equal(entry.split(mobile).length - 1, 1, 'Responsive repair imported exactly once');
+  assert.ok(entry.indexOf(mobile) < entry.indexOf(base),
+    'Responsive patch keeps its former earlier priority than late-loaded route CSS');
+  for (const [name, page] of [['verify', verify], ['sources', sources]]) {
+    assert.doesNotMatch(page, /import\s+['"]\.\.\/\.\.\/styles\/console-v2-download-verify\.css['"]/,
+      name + ' must not load CSS from a lazy feature chunk');
+  }
+  const feature = readFileSync('src/styles/console-v2-download-verify.css', 'utf8');
+  const responsive = readFileSync('src/styles/console-v2-download-verification.css', 'utf8');
+  assert.match(feature, /\.nfc-download-verify\s*\{/);
+  assert.match(feature, /\.nfc-dv-manager-grid/);
+  assert.match(feature, /\.nfc-dv-table/);
+  assert.match(responsive, /\.nfc-download-verify-page\s+\.nfc-form-grid/);
+  assert.match(responsive, /@media \(max-width: 767px\)/);
+  assert.ok(browser.includes("item.id === 'download-verification' || item.id === 'download-sources'"));
+  assert.ok(browser.includes('audit.downloadVerificationCssOwner = owner'));
+  assert.ok(browser.includes("owner.display !== 'grid'"));
+  assert.ok(browser.includes('!owner.line || !owner.text || owner.width < 100'));
+  assert.ok(browser.includes("path: '/download-sources', id: 'download-sources'"));
+});
+
 test('download source settings and modal browser remain covered by real route audit', () => {
   const settings = readFileSync('src/pages/DownloadVerification/SourcesPage.tsx', 'utf8');
   const verify = readFileSync('src/pages/DownloadVerification/index.tsx', 'utf8');

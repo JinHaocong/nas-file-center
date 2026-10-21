@@ -566,6 +566,27 @@ try {
                 JSON.stringify(scans));
           }
         }
+        if (item.id === 'download-verification' || item.id === 'download-sources') {
+          // Assert that the preloaded CSS owner reaches both mounted routes.
+          const owner = await tab.evaluate(() => {
+            const root = document.querySelector('.nfc-download-verify');
+            if (!root) return null;
+            const style = getComputedStyle(root);
+            return {
+              display: style.display,
+              paper: style.getPropertyValue('--dv-paper').trim(),
+              line: style.getPropertyValue('--dv-line').trim(),
+              text: style.getPropertyValue('--dv-text').trim(),
+              width: root.getBoundingClientRect().width,
+            };
+          });
+          audit.downloadVerificationCssOwner = owner;
+          if (!owner || owner.display !== 'grid' || !owner.paper ||
+              !owner.line || !owner.text || owner.width < 100) {
+            problems.push('Download Verification route CSS owner missing or unpainted: ' +
+              JSON.stringify({ route: item.id, owner }));
+          }
+        }
         if (item.id === 'download-verification') {
           const form = await tab.evaluate(() => {
             const field = document.querySelector('.nfc-download-verify-field');
