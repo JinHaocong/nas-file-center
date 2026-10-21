@@ -196,3 +196,34 @@ refactor. No NAS/API/storage/React behavior, destructive operation, or
 production deployment changes. Human end-to-end visual, assistive
 technology and real-NAS acceptance remain pending; formal milestones
 still **69/74** until every CSS/theme acceptance condition is met.
+
+## 2026-10-21 — Login and Settings late-owner neutral theme convergence
+
+Full-route **actual Chromium dark 768px captures** following PR #323
+showed two more independently verifiable Pure White regressions:
+Login's almost-black canvas/card still inherited v049's cool/blue
+legacy theme and an earlier decorative radial gradient; Settings'
+large panels and inner safety cards retained the older v056
+blue-black `--nfc-shell-card-*` and `--nfc-w2-*` surfaces.
+
+Rather than globally rewriting shared v049/W2 theme variables (which
+would affect every module), this scoped correction reuses existing
+last-loaded owners `console-v2-scan-login.css` and
+`console-v2-settings.css`. The login shell and card use
+`#ffffff` light or `#171716`/`#242422` dark, with no decorative
+background image, and neutral border/muted text. Settings owns
+neutral per-page card/surface variables (dark `#242422`/`#2d2d2a`);
+other routes keep their existing W2 behavior. No new override file,
+no CSS import reordering, no API/React changes.
+
+The **existing** 25-route × 8-width × 4-theme read-only Chromium CI
+now records and checks actual computed Login shell/panel background
+and gradient absence, plus real Settings card/subpanel backgrounds
+across all 32 theme/viewport combinations; any missing DOM or
+mismatch fails CI. This is deliberately broader than a source test,
+but it is still synthetic data and not human visual, assistive-tech
+or real NAS acceptance. All auth single-flight, session controls,
+settings confirmations, semantic status colors and filesystem guards
+remain unchanged. The CSS/theme consolidation checkbox and formal
+**69/74** progress must remain open until the complete final gate
+and owner acceptance criteria are satisfied.

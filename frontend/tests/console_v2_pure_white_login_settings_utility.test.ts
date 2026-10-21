@@ -69,6 +69,42 @@ describe('Pure White Stage 4A login, settings and utility preview', () => {
     }
   });
 
+  test('Login/Settings old blue-black surfaces defer to scoped Pure White owners with live Chromium paint guards', () => {
+    for (const token of [
+      '--nfc-v2-login-canvas: #ffffff', '--nfc-v2-login-canvas: #171716',
+      '--nfc-v2-login-panel: #ffffff', '--nfc-v2-login-panel: #242422',
+      '--nfc-v2-login-line: #eaeae7', '--nfc-v2-login-line: #383834',
+      '--nfc-v2-login-muted: #62625e', '--nfc-v2-login-muted: #bebeba',
+      'background: var(--nfc-v2-login-canvas);',
+      '.nfc-v2-login-shell .nfc-login-panel',
+    ]) assert.ok(loginControls.includes(token), token);
+    for (const token of [
+      '--nfc-shell-card-bg:#ffffff;', '--nfc-shell-card-bg:#242422;',
+      '--nfc-shell-card-border:#eaeae7;', '--nfc-shell-card-border:#383834;',
+      '--nfc-w2-surface:#ffffff;', '--nfc-w2-surface:#242422;',
+      '--nfc-w2-surface-soft:#f7f7f5;', '--nfc-w2-surface-soft:#2d2d2a;',
+      '--nfc-v2-set-paper:#242422;', '--nfc-v2-set-soft:#2d2d2a;',
+    ]) assert.ok(settings.includes(token), token);
+    const browser = read('scripts/browser-full-route-visual.mjs');
+    for (const marker of [
+      "item.id === 'login' || item.id === 'settings'",
+      "readPaint('.nfc-v2-login-shell')",
+      "readPaint('.nfc-v2-settings .nfc-settings-grid > .nfc-data-panel')",
+      "readPaint('.nfc-v2-settings .nfc-settings-subpanel')",
+      "painted.shell?.image === 'none'",
+      "painted.subpanel?.background === required.soft",
+      'audit.loginSettingsPaint = { ...painted, required }',
+      'Login/Settings actual neutral paint mismatch',
+    ]) assert.ok(browser.includes(marker), 'Missing live paint audit: ' + marker);
+    assert.ok(read('../.github/workflows/ui-v044-validation.yml')
+      .includes('node scripts/browser-full-route-visual.mjs'));
+    const src = read('src/main.tsx');
+    assert.ok(src.indexOf("import './styles/v056-right-workspace-v2.css';") <
+      src.indexOf("import './styles/console-v2-scan-login.css';"));
+    assert.ok(src.indexOf("import './styles/v056-right-workspace-v2.css';") <
+      src.indexOf("import './styles/console-v2-settings.css';"));
+  });
+
   test('login still has auth single-flight and tri-state theme without storing credentials', () => {
     const src = read('src/pages/Login/index.tsx');
     for (const token of [

@@ -414,6 +414,38 @@ try {
               'Mobile header actions exceed viewport width');
           }
         }
+        if (item.id === 'login' || item.id === 'settings') {
+          // Measured from mounted native React DOM, after late legacy owners.
+          // Keep read-only: never submit login or mutate Settings state.
+          const painted = await tab.evaluate(route => {
+            const readPaint = selector => {
+              const node = document.querySelector(selector);
+              if (!node) return null;
+              const style = getComputedStyle(node);
+              return { background: style.backgroundColor,
+                image: style.backgroundImage };
+            };
+            return route === 'login'
+              ? { shell: readPaint('.nfc-v2-login-shell'),
+                  panel: readPaint('.nfc-v2-login-shell .nfc-login-panel') }
+              : { panel: readPaint('.nfc-v2-settings .nfc-settings-grid > .nfc-data-panel'),
+                  subpanel: readPaint('.nfc-v2-settings .nfc-settings-subpanel') };
+          }, item.id);
+          const required = theme.effective === 'dark'
+            ? { canvas: 'rgb(23, 23, 22)', panel: 'rgb(36, 36, 34)',
+                soft: 'rgb(45, 45, 42)' }
+            : { canvas: 'rgb(255, 255, 255)', panel: 'rgb(255, 255, 255)',
+                soft: 'rgb(247, 247, 245)' };
+          audit.loginSettingsPaint = { ...painted, required };
+          const match = item.id === 'login'
+            ? painted.shell?.background === required.canvas &&
+              painted.shell?.image === 'none' &&
+              painted.panel?.background === required.panel
+            : painted.panel?.background === required.panel &&
+              painted.subpanel?.background === required.soft;
+          if (!match) problems.push('Login/Settings actual neutral paint mismatch: ' +
+            JSON.stringify({ route: item.id, effectiveTheme: theme.effective, painted }));
+        }
         if (item.id === 'organizer') {
           // The catalog-owned neutral theme token must survive the older shared
           // v056 !important filter toolbar rule in the actual rendered DOM.

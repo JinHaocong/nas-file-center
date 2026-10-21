@@ -38,6 +38,30 @@
   border:1px solid var(--nfc-v2-choice-line);border-radius:7px;
   padding:3px 6px;background:var(--nfc-surface-2,#f5f5f3);
 }
+/* Last-loaded native login owner: retire earlier v049 blue gradient and dark panel. */
+.nfc-v2-login-shell {
+  --nfc-v2-login-canvas: #ffffff;
+  --nfc-v2-login-panel: #ffffff;
+  --nfc-v2-login-line: #eaeae7;
+  --nfc-v2-login-muted: #62625e;
+  background: var(--nfc-v2-login-canvas);
+}
+[data-theme='dark'] .nfc-v2-login-shell {
+  --nfc-v2-login-canvas: #171716;
+  --nfc-v2-login-panel: #242422;
+  --nfc-v2-login-line: #383834;
+  --nfc-v2-login-muted: #bebeba;
+}
+.nfc-v2-login-shell .nfc-login-panel {
+  background: var(--nfc-v2-login-panel);
+  border-color: var(--nfc-v2-login-line);
+}
+.nfc-v2-login-shell :is(.nfc-login-security-note,.nfc-login-brand-mark) {
+  border-color: var(--nfc-v2-login-line);
+}
+.nfc-v2-login-shell :is(.nfc-login-security-note,.nfc-login-footer) {
+  color: var(--nfc-v2-login-muted);
+}
 .nfc-v2-login-shell .nfc-login-theme {
   display:flex;align-items:center;gap:8px;z-index:1;
 }

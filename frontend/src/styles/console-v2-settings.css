@@ -1,11 +1,16 @@
 /* Console v2 Settings — native controls and semantic sessions (scoped after pages/settings.css). */
 .nfc-v2-settings {
-  --nfc-v2-set-paper:var(--nfc-surface-1);
-  --nfc-v2-set-soft:var(--nfc-surface-2);
-  --nfc-v2-set-line:var(--nfc-hairline);
+  --nfc-v2-set-paper:#ffffff;
+  --nfc-v2-set-soft:#f7f7f5;
+  --nfc-v2-set-line:#eaeae7;
   --nfc-v2-set-ink:var(--nfc-text);
   --nfc-v2-set-muted:var(--nfc-text-muted);
   --nfc-v2-set-accent:var(--nfc-accent);
+  /* Local Settings ownership. Other routes retain the original W2 palette. */
+  --nfc-shell-card-bg:#ffffff;
+  --nfc-shell-card-border:#eaeae7;
+  --nfc-w2-surface:#ffffff;
+  --nfc-w2-surface-soft:#f7f7f5;
 }
 .nfc-v2-settings-notice { display:flex;align-items:flex-start;gap:10px;min-width:0;
   margin:0;border:1px solid var(--nfc-v2-set-line);border-radius:9px;
@@ -77,12 +82,16 @@
   font-size:12px;line-height:1.65; }
 .nfc-v2-settings-confirm-copy p { margin:0; }
 [data-theme='dark'] .nfc-v2-settings {
-  --nfc-v2-set-paper:var(--nfc-surface-1);
-  --nfc-v2-set-soft:var(--nfc-surface-2);
-  --nfc-v2-set-line:var(--nfc-hairline);
+  --nfc-v2-set-paper:#242422;
+  --nfc-v2-set-soft:#2d2d2a;
+  --nfc-v2-set-line:#383834;
   --nfc-v2-set-ink:var(--nfc-text);
   --nfc-v2-set-muted:var(--nfc-text-muted);
   --nfc-v2-set-accent:var(--nfc-accent);
+  --nfc-shell-card-bg:#242422;
+  --nfc-shell-card-border:#383834;
+  --nfc-w2-surface:#242422;
+  --nfc-w2-surface-soft:#2d2d2a;
 }
 @media(max-width:767px) {
   .nfc-v2-settings .nfc-settings-inline-control { width:100%;grid-template-columns:1fr; }
