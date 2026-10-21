@@ -1772,3 +1772,35 @@ safe, review every CSS owner, establish human screenshot acceptance,
 test a live NAS or authorize a production deployment. No CSS declaration,
 application behavior or filesystem authority is changed. Formal Stage
 70 and overall 69/74 acceptance remain unchanged.
+
+
+## 2026-10-21 — mounted DataPanel header CSS ownership audit (Stage 70)
+
+The nine-layer historical inventory identified a global
+`.nfc-data-panel-header` background precedence barrier: v048 declares
+`background: transparent !important`, and later v056 contains an ordinary
+background override. The *effective* native rule is more specific:
+`.nfc-app-main .nfc-data-panel > .nfc-data-panel-header`, with a later
+important transparent background and a single card-border hairline.
+Legacy v054 also contains a differently-valued dark-mode gradient.
+Source-order inspection by itself cannot establish the actual paint.
+
+The existing safe, GET-only, outbound-blocked Chromium workspace matrix now
+captures **8 viewport widths x 4 mode/system combinations x 6 actual React
+routes = 192 route-level computed DataPanel cases**, inspecting all visible
+mounted `DataPanel` headers in each case. The new audit enforces transparent
+computed fill, no background image/gradient and a 1px solid bottom
+separator. It saves `native-data-panel-header-cascade-audit.json` alongside
+the existing browser acceptance artifacts and records how many legacy
+`.nfc-overlay-section` nodes are present on each *closed* route.
+
+The source regression guard links the historical v048 rule to the later
+v056 important native owner and the exact-HEAD Chromium CI registration.
+
+**Limitations:** a zero overlay count on a closed page is not evidence that
+a legacy overlay can never appear in other dialog states. This audit does
+not prove the two historical overlay-section importance barriers are
+unreachable or safe to retire, nor does it substitute for human review.
+The browser assertions become supported runtime evidence only after
+the PR-head Chromium CI succeeds. No style declarations or NAS behavior
+are modified. Stage 70 and overall **69/74** remain open.
