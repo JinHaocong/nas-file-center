@@ -16,6 +16,7 @@ try {
   execSync('node --test scripts/css-historical-cascade-convergence.test.mjs', { stdio: 'inherit' });
   execSync('node --test scripts/css-historical-cross-layer-ownership.test.mjs', { stdio: 'inherit' });
   execSync('node --test scripts/css-cross-layer-ownership-inventory.test.mjs', { stdio: 'inherit' });
+  execSync('node --test scripts/css-v049-v056-proven-retirement.test.mjs', { stdio: 'inherit' });
   execSync('node --test scripts/css-historical-v055-v056-ownership.test.mjs', { stdio: 'inherit' });
   execSync('node --test scripts/visual-fixtures-archive.test.mjs', { stdio: 'inherit' });
   execSync('node --test scripts/full-route-visual.test.mjs', { stdio: 'inherit' });
