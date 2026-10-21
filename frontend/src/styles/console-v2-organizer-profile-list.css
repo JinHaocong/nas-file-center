@@ -1,13 +1,13 @@
 /* Console v2 Organizer profile catalog + JSON import portal. */
 .nfc-v2-organizer-profile-list {
-  --nfc-opl-surface: #fff; --nfc-opl-soft: #f6f8fc;
-  --nfc-opl-text: #1c293d; --nfc-opl-muted: #64748b;
-  --nfc-opl-line: #dce5ee; --nfc-opl-accent: #2878ef;
+  --nfc-opl-surface: #ffffff; --nfc-opl-soft: #f7f7f5;
+  --nfc-opl-text: #20201f; --nfc-opl-muted: #62625e;
+  --nfc-opl-line: #eaeae7; --nfc-opl-accent: #262625;
 }
 [data-theme='dark'] .nfc-v2-organizer-profile-list {
-  --nfc-opl-surface: #1a2434; --nfc-opl-soft: #222e41;
-  --nfc-opl-text: #f0f4fa; --nfc-opl-muted: #adbed4;
-  --nfc-opl-line: #36435a; --nfc-opl-accent: #83b5ff;
+  --nfc-opl-surface: #242422; --nfc-opl-soft: #2d2d2a;
+  --nfc-opl-text: #f5f5f2; --nfc-opl-muted: #bebeba;
+  --nfc-opl-line: #383834; --nfc-opl-accent: #e9e9e6;
 }
 .nfc-v2-organizer-profile-toolbar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
 .nfc-v2-organizer-search { min-width: min(250px,100%); flex:1 1 260px; display:flex;gap:8px;align-items:center;
@@ -43,17 +43,17 @@
 /* Portal-owned import: standalone from Profile CRUD and delete confirmation. */
 .nfc-v2-organizer-import-overlay { z-index:1170; }
 .nfc-v2-organizer-import-dialog.nfc-overlay-modal {
-  --nfc-import-paper:#fff;--nfc-import-text:#1c293d;--nfc-import-muted:#64748b;
-  --nfc-import-line:#dce5ee;--nfc-import-accent:#2878ef;
+  --nfc-import-paper:#ffffff;--nfc-import-text:#20201f;--nfc-import-muted:#62625e;
+  --nfc-import-line:#eaeae7;--nfc-import-accent:#262625;
   position:fixed;z-index:1171;top:50%;left:50%;transform:translate(-50%,-50%);
   box-sizing:border-box;width:min(620px,calc(100vw - 24px));max-height:min(90dvh,850px);
   padding:0;border-radius:13px;overflow:hidden;display:flex;flex-direction:column;
   border:1px solid var(--nfc-import-line);background:var(--nfc-import-paper);
-  box-shadow:0 23px 70px rgba(8,22,46,.25);color:var(--nfc-import-text);font-family:inherit;
+  box-shadow:0 23px 70px rgba(12,12,12,.22);color:var(--nfc-import-text);font-family:inherit;
 }
 [data-theme='dark'] .nfc-v2-organizer-import-dialog {
-  --nfc-import-paper:#1a2434;--nfc-import-text:#f1f5fb;--nfc-import-muted:#afbdce;
-  --nfc-import-line:#36435a;--nfc-import-accent:#83b5ff;
+  --nfc-import-paper:#242422;--nfc-import-text:#f5f5f2;--nfc-import-muted:#bebeba;
+  --nfc-import-line:#383834;--nfc-import-accent:#e9e9e6;
 }
 .nfc-v2-organizer-import-heading { flex:0 0 auto;padding:20px 23px;display:flex;
   justify-content:space-between;gap:14px;align-items:flex-start;border-bottom:1px solid var(--nfc-import-line); }

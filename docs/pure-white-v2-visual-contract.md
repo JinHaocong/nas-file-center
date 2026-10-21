@@ -139,3 +139,31 @@
 - Dashboard 的 CSS 初步隐藏旧装饰性 NAS 设备图形；先保持现有真实数据 API、DOM 和事件模型不变，后续在 Dashboard 独立 PR 中处理结构和死代码。
 - Portal 可能挂在 `.nfc-v2-shell` 之外；须由 `tokens.css` 的文档根 Token 和相应 Radix 样式共同覆盖浅色/深色模式。
 - 上述修改只建立视觉基底，现有页面级硬编码色、历史覆盖链、以及实际浏览器里的细节问题仍需要逐页修正和统一验收。
+
+## 2026-10-21 — Organizer profile list + JSON import neutral-theme defect
+
+During review of **actual GitHub Actions PR #321 screenshots**, the 768px
+Organizer route in dark mode still displayed a blue/navy search background.
+Source inspection confirmed the existing owned
+`console-v2-organizer-profile-list.css` hardcoded legacy steel-blue values
+(`#1a2434`/ `#222e41`) plus old blue focus (`#83b5ff`) for the
+profile catalog and its separate JSON import Portal. These were not
+intentional success/warning/error semantic colors and violate Pure White v2.1.
+
+The change repairs these values **in the existing owner** rather than add
+another override sheet: light uses white/neutral gray/charcoal and dark uses
+`#242422`/`#2d2d2a` with ivory text and pale focus outline. Import shadow
+is neutral-black instead of blue. The dedicated regression checks the exact
+catalog/Portal theme tokens and sRGB WCAG contrast:
+light text 16.31:1, muted 6.13:1, focus 15.15:1;
+dark text 14.24:1, muted 8.34:1, focus 12.78:1
+on the primary panel surfaces. Theme mode follows the existing
+`[data-theme='dark']` switch, not manual JS.
+
+Preserved: danger red, error red, importer z1170/1171, 44px mobile targets,
+reduced-motion rules, import JSON validation, destructive safeguards and
+all API behavior. This is a **source-level verified visual fix**: exact
+live before/after browser computed paint and updated screenshots must pass
+the new HEAD CI before merge; it does not constitute human full-site
+visual acceptance or owner deployment approval. The historic CSS shadow
+retirement tally remains **373**; milestone **69/74** is not yet closed.
