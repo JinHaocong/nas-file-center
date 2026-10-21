@@ -32,6 +32,7 @@ let browser;
 let passed = 0;
 const checkboxKeyboardAudit = [];
 const dashboardHeroPaintAudit = [];
+const nativeHeaderOwnerAudit = [];
 
 async function ready() {
   for (let i = 0; i < 100; i++) {
@@ -811,6 +812,53 @@ async function auditDashboardHeroPaint(page, width, theme) {
   });
 }
 
+// Stage 70: sample the ACTUAL mounted native Header, not legacy CSS source
+// text. v049 contains historical !important borders/glass background and
+// v056 later tries ordinary rules; only the higher-specificity Console v2
+// owner can decide the final paint on the modern app shell. Fail closed if
+// any theme/viewport/route falls back to that historical floating header.
+async function auditNativeHeaderOwnership(page, item, width, theme) {
+  const measured = await page.evaluate(() => {
+    const header = document.querySelector(
+      '.nfc-v2-shell .nfc-v2-header.nfc-header');
+    if (!header || !header.getBoundingClientRect().width)
+      throw Error('No visible mounted Console v2 Header for cascade audit');
+    const style = getComputedStyle(header);
+    return {
+      effective: document.documentElement.dataset.theme,
+      background: style.backgroundColor,
+      top: style.borderTopWidth,
+      right: style.borderRightWidth,
+      bottom: style.borderBottomWidth,
+      left: style.borderLeftWidth,
+      bottomColor: style.borderBottomColor,
+      radius: style.borderTopLeftRadius,
+      shadow: style.boxShadow,
+      backdrop: style.backdropFilter,
+    };
+  });
+  const label = item.id + '/' + width + '/' + theme.mode + '-' + theme.system;
+  assert.equal(measured.effective, theme.effective, label + ': wrong theme');
+  const expected = theme.effective === 'dark'
+    ? { background: 'rgb(36, 36, 34)', bottomColor: 'rgb(56, 56, 52)' }
+    : { background: 'rgb(255, 255, 255)', bottomColor: 'rgb(234, 234, 231)' };
+  assert.equal(measured.background, expected.background,
+    label + ': native paper background lost to historic !important glass');
+  assert.equal(measured.bottomColor, expected.bottomColor,
+    label + ': native semantic hairline lost to historic border');
+  assert.deepEqual([measured.top, measured.right, measured.bottom, measured.left],
+    ['0px', '0px', '1px', '0px'],
+    label + ': native bottom-only separator lost to historic floating border');
+  assert.equal(measured.radius, '0px', label + ': historical floating corner returned');
+  assert.equal(measured.shadow, 'none', label + ': historical floating shadow returned');
+  assert.equal(measured.backdrop, 'none', label + ': historical glass blur returned');
+  nativeHeaderOwnerAudit.push({
+    route: item.path, width, mode: theme.mode, system: theme.system,
+    ...measured, expectedOwner: 'console-v2.css/native-header',
+    scope: 'mounted-React-header-computed-CSS-not-pixel-human-or-full-CSS-closure',
+  });
+}
+
 async function inspect(page, theme, width, item) {
   const violations = await page.evaluate(({ theme, width, item }) => {
     const get = selector => {
@@ -1088,6 +1136,7 @@ try {
           await page.goto(BASE + item.path, { waitUntil: 'domcontentloaded' });
           await page.getByRole('heading', { name: item.heading, exact: true }).waitFor();
           await inspect(page, theme.effective, width, item);
+          await auditNativeHeaderOwnership(page, item, width, theme);
           await auditW2ComputedTheme(page, item, width, theme);
           await auditPaintedLedgerHeading(page, item, width, theme);
           await page.screenshot({
@@ -1146,6 +1195,22 @@ try {
     }
   }
   assert.equal(passed, WIDTHS.length * THEMES.length);
+  assert.equal(nativeHeaderOwnerAudit.length,
+    WIDTHS.length * THEMES.length * PAGES.length,
+    'Every mounted Header must retain native CSS ownership for all routes/widths/themes');
+  writeFileSync(resolve(OUT, 'native-header-cross-layer-owner-audit.json'),
+    JSON.stringify({
+      total: nativeHeaderOwnerAudit.length,
+      widths: WIDTHS, modes: THEMES.map(mode => ({
+        mode: mode.mode, system: mode.system, effective: mode.effective,
+      })),
+      routes: PAGES.map(item => item.path),
+      cases: nativeHeaderOwnerAudit,
+      scope: 'computed-mounted-header-only; historical-important-barriers-source-guarded',
+    }, null, 2));
+  console.log('[NATIVE HEADER CASCADE] ' + nativeHeaderOwnerAudit.length +
+    ' mounted six-route/header cases; bottom-only border, native paper and no historic glass.');
+
   assert.equal(dashboardHeroPaintAudit.length, WIDTHS.length * THEMES.length,
     'Dashboard hero gradients must stay hidden and text must pass every viewport/theme');
   assert.ok(dashboardHeroPaintAudit.every(c =>
