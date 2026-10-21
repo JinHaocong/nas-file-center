@@ -33,7 +33,7 @@ describe('Console v2 reviewed historical index.css retirement', () => {
 
   test('native theme tokens, animation, responsive and reduced motion remain', () => {
     for (const marker of [
-      ':root {', "[data-theme='dark']", '--nfc-accent:',
+      ':root {', "[data-theme='dark']", '--nfc-info:',
       '--nfc-shadow-sm', '--nfc-motion-enter',
       '@keyframes nfc-enter', '@keyframes nfc-status-pulse',
       '@media (max-width: 767px)', '@media (max-width: 1023px)',
@@ -42,6 +42,65 @@ describe('Console v2 reviewed historical index.css retirement', () => {
     ]) assert.ok(css.includes(marker), marker);
     assert.match(css, /\.nfc-touch-button\s*\{[^}]*min-width:\s*44px;[^}]*min-height:\s*44px;/);
     assert.match(css, /\.nfc-directory-picker-path-row\s*\{[^}]*min-height:\s*44px;/);
+  });
+
+  test('21 historical root theme shadows are retired in favor of v047 canonical tokens', () => {
+    const canonical = read('src/styles/tokens.css');
+    const root = (source: string, dark: boolean) => {
+      const re = dark ? /^\[data-theme='dark'\]\s*\{([^}]*)\}/m
+        : /^:root\s*\{([^}]*)\}/m;
+      const match = source.match(re);
+      assert.ok(match, 'Theme root must exist');
+      const entries = [...match[1].matchAll(/^\s*(--[a-z0-9-]+)\s*:\s*([^;]+);/gm)];
+      const result = new Map(entries.map(x => [x[1], x[2].trim()]));
+      assert.equal(entries.length, result.size, 'No duplicate properties in one theme root');
+      return result;
+    };
+    const light = root(css, false), dark = root(css, true);
+    const canonicalLight = root(canonical, false), canonicalDark = root(canonical, true);
+    // Earlier index.css :root/[dark] declarations were always shadowed by
+    // the identical-specificity canonical declarations in v047/tokens.css.
+    const formerOwners = ['accent', 'canvas', 'surface-1', 'surface-2',
+      'surface-raised', 'hairline', 'hairline-strong', 'text',
+      'text-muted', 'text-subtle'];
+    for (const role of formerOwners) {
+      const key = '--nfc-' + role;
+      for (const [name, early, late] of [
+        ['light', light, canonicalLight], ['dark', dark, canonicalDark],
+      ] as const) {
+        assert.equal(early.has(key), false, key + ' duplicated in index ' + name);
+        assert.ok(late.has(key), key + ' missing in canonical ' + name);
+      }
+    }
+    assert.equal(light.has('--nfc-page-gutter'), false);
+    assert.equal(canonicalLight.get('--nfc-page-gutter'), '28px');
+    assert.equal(light.size, 13, 'Preserve only independent early native theme tokens');
+    assert.equal(dark.size, 8, 'Preserve independent dark semantic theme tokens');
+    for (const mode of [light, dark]) {
+      for (const key of ['--nfc-success', '--nfc-success-soft',
+        '--nfc-warning', '--nfc-warning-soft', '--nfc-danger',
+        '--nfc-danger-soft', '--nfc-info', '--nfc-info-soft']) {
+        assert.ok(mode.has(key), 'Semantic status authority missing: ' + key);
+      }
+    }
+    for (const key of ['--nfc-radius-sm', '--nfc-radius-md', '--nfc-radius-lg',
+      '--nfc-motion-fast', '--nfc-motion-normal']) {
+      assert.ok(light.has(key), 'Independent dimension/motion lost ' + key);
+    }
+    assert.deepEqual([...light.keys()].filter(key => canonicalLight.has(key)), []);
+    assert.deepEqual([...dark.keys()].filter(key => canonicalDark.has(key)), []);
+
+    const v047 = read('src/styles/v047.css');
+    assert.ok(v047.startsWith("@import './tokens.css';"),
+      'Canonical CSS must load before all v047 selectors');
+    const entry = read('src/main.tsx');
+    assert.ok(entry.indexOf("import './index.css';") <
+      entry.indexOf("import './styles/v047.css';"),
+    'Canonical root declaration must remain later in the same author cascade');
+    const workflow = read('../.github/workflows/ui-v044-validation.yml');
+    assert.ok(workflow.includes('browser-full-route-visual.mjs'));
+    assert.ok(workflow.includes('browser-workspace-cascade.mjs'));
+    assert.ok(workflow.includes('browser-overlay-smoke.mjs'));
   });
 
   test('native keyboard and dialog focus remain in later component-owned CSS', () => {

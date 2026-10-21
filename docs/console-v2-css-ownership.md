@@ -1618,3 +1618,38 @@ and not full manual visual or assistive-technology review. The
 HEAD, require full 16/16 Checks and 4/4 Workflows before squash merge,
 then post-merge main CI and branch cleanup. Human visual and real-NAS
 gates remain separate.
+
+## 2026-10-21 — canonical root-token ownership (21 dead index.css shadows)
+
+A top-level `index.css` versus `v047.css` imported `tokens.css` inventory
+found **21 declarations with precisely identical selectors/properties**
+(`11 :root` light, `10 [data-theme='dark']`), all shadowed by a later
+**unconditional same-specificity** canonical value in the same author
+origin. The removed values included old blue `--nfc-accent`, stale
+canvas/paper/ink/border neutrals and the outdated 24px page gutter.
+Exactly those 21 historical properties were removed from `index.css`;
+the canonical `tokens.css` declarations are left unchanged.
+
+The early `index.css` block intentionally retains **13 independent
+light tokens**, including semantic success/warning/danger/info,
+radii and motion timing; its dark block retains **8 independent
+semantic status tokens**. These do **not** have a corresponding
+declaration in the later canonical file and cannot safely be deleted.
+All current CSS import order, theme preference behavior, specificities,
+selectors, responsive rules, `!important`, animations and business
+code remain unchanged. Canonical tokens continue loading via
+`@import './tokens.css'` at the start of `v047.css`,
+after the original `index.css` entrypoint.
+
+The original historical-index regression now checks for **zero
+cross-owner duplicate root token keys in both themes**, the exact
+11+10 retirement inventory, independent semantic survival and canonical
+import precedence, together with existing read-only Chromium
+registration. Actual latest-head CI screenshots and post-merge
+production build/regression remain required before acceptance. This
+is meaningful root ownership consolidation (total historic redundant
+declarations **373 + 21 = 394** after *successful merge and post-merge
+validation*), **not** completion of all CSS ownership, full manual
+visual/a11y review, live NAS verification or owner deployment approval.
+Formal checklist remains **69/74** until the final integrated gate
+is genuinely satisfied.
