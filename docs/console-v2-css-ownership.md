@@ -1917,3 +1917,36 @@ owner exceptions are reviewed and accepted. Browser CI does not replace
 human 25-route/8-width/4-theme visual signoff, accessible keyboard
 coverage, isolated NAS testing or owner deployment approval. Overall
 formal acceptance remains **69/74**.
+
+
+## 2026-10-21 — v054 → v056 exact-context responsive CSS retirement (Stage 70)
+
+After #333's merged-main CI completed **4/4 Checks and 3/3 Workflows
+success**, this next source tranche removes **11 historical property
+declarations** from `v054-premium-system.css` that the later
+`v056-right-workspace-v2.css` already owns with the **exact same
+selector text, at-rule scope and property**, at equal-or-higher CSS
+importance. This includes desktop/tablet (1199px) page header/copy
+layout and phone/compact (767px, 420px) header geometry, title/
+description typography, panel header padding and native header height.
+
+Six selector blocks now empty after removing these properties are
+also retired. They are not counted as property declarations. The
+independent mobile page header gap, mobile page content, panel height,
+action bar, 420px metric geometry, keyboard focus and accessibility
+media rules all remain present. No later owner value, routing logic,
+component behavior, NAS data or production release settings change.
+
+`frontend/scripts/css-v054-v056-proven-retirement.test.mjs` is
+registered in the existing `npm test` CI command. It asserts the
+absence of all 11 old (media, selector, property) triples, pins
+the exact final v056 values, and guards retained independent
+responsive and accessibility source plus exact-HEAD read-only Chromium.
+
+On successful exact-HEAD PR and post-merge main validation, the
+cumulative number of retired historical CSS **declarations** rises
+**447 → 458**. Additional deleted empty blocks and the earlier
+fallback normalizations are separate. The broader Stage 70 CSS
+owner review is still OPEN; automated screenshots do not constitute
+human visual signoff, accessibility signoff, isolated NAS acceptance
+or deployment authorization. Overall milestone count **69/74**.
