@@ -414,6 +414,38 @@ try {
               'Mobile header actions exceed viewport width');
           }
         }
+        if (item.id === 'organizer') {
+          // The catalog-owned neutral theme token must survive the older shared
+          // v056 !important filter toolbar rule in the actual rendered DOM.
+          // The input uses the same token: compare resolved painted surfaces.
+          const toolbarPaint = await tab.evaluate(() => {
+            const panel = document.querySelector('.nfc-v2-organizer-profile-list');
+            const toolbar = panel?.querySelector('.nfc-v2-organizer-profile-toolbar');
+            const search = panel?.querySelector('.nfc-v2-organizer-search');
+            if (!panel || !toolbar || !search) return null;
+            const toolbarStyle = getComputedStyle(toolbar);
+            const searchStyle = getComputedStyle(search);
+            const panelStyle = getComputedStyle(panel);
+            const rect = toolbar.getBoundingClientRect();
+            return {
+              toolbarBackground: toolbarStyle.backgroundColor,
+              searchBackground: searchStyle.backgroundColor,
+              panelToken: panelStyle.getPropertyValue('--nfc-opl-surface').trim(),
+              toolbarToken: toolbarStyle.getPropertyValue('--nfc-opl-surface').trim(),
+              bounds: { left: rect.left, right: rect.right, width: rect.width },
+            };
+          });
+          audit.organizerToolbarPaint = toolbarPaint;
+          if (!toolbarPaint || !toolbarPaint.panelToken ||
+              toolbarPaint.panelToken !== toolbarPaint.toolbarToken ||
+              toolbarPaint.toolbarBackground !== toolbarPaint.searchBackground ||
+              toolbarPaint.bounds.width < 100 ||
+              toolbarPaint.bounds.left < -2 ||
+              toolbarPaint.bounds.right > width + 2) {
+            problems.push('Organizer theme toolbar does not match owned neutral search surface: ' +
+              JSON.stringify(toolbarPaint));
+          }
+        }
         if (item.id === 'dashboard') {
           // Actual 768/1024 Chromium PNGs show a huge blank heading-to-action gap.
           // Inspect resolved layout after all CSS layers, not source token text.

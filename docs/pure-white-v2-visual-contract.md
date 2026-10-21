@@ -167,3 +167,32 @@ live before/after browser computed paint and updated screenshots must pass
 the new HEAD CI before merge; it does not constitute human full-site
 visual acceptance or owner deployment approval. The historic CSS shadow
 retirement tally remains **373**; milestone **69/74** is not yet closed.
+
+## 2026-10-21 — Organizer catalog toolbar old W2 background discovered after PR #322
+
+PR #322 neutralized the profile-search and JSON import local tokens and
+passed its 16 check/4 workflow gates. Inspecting the **real PR #322 Chromium
+768px dark-mode Organizer screenshot**, however, showed that the *outer*
+filter toolbar strip remained navy (`rgb(21,25,31)`) while the actual search
+surface had already become neutral (`rgb(36,36,34)`). The cause is the
+existing `v056-right-workspace-v2.css` shared `nfc-filter-bar` rule:
+`background: var(--nfc-w2-surface) !important`, which takes precedence over
+the neutral panel-local token due to cascade importance.
+
+The correction happens **inside that existing owner** without creating
+another override block or changing specificity, import order or other page
+styles: `background: var(--nfc-opl-surface, var(--nfc-w2-surface)) !important`.
+Only the Organizer catalog provides the inherited local token; all other
+filter/action bars continue using exactly the old W2 value. The existing
+8-viewport × 4-theme full-route browser CI now compares actual computed
+Organizer toolbar and search surface paints on every route fixture;
+mismatches or out-of-viewport toolbars fail closed. It also records the
+resolved token and painted colors in each `manifest.json` for screenshot
+provenance. The native regression protects CSS ownership and CI gate
+registration.
+
+This addresses an observed **computed style defect**, not a broad CSS
+refactor. No NAS/API/storage/React behavior, destructive operation, or
+production deployment changes. Human end-to-end visual, assistive
+technology and real-NAS acceptance remain pending; formal milestones
+still **69/74** until every CSS/theme acceptance condition is met.

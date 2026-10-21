@@ -107,6 +107,29 @@ describe('Console v2 Organizer native catalog', () => {
     assert.match(css, /nfc-v2-organizer-list-error[^}]*#c66b83/);
   });
 
+  test('Organizer shared v056 filter toolbar respects scoped neutral catalog token in real Chromium', () => {
+    const owner = read('src/styles/v056-right-workspace-v2.css');
+    const catalog = read('src/styles/console-v2-organizer-profile-list.css');
+    const browser = read('scripts/browser-full-route-visual.mjs');
+    assert.ok(owner.includes('background: var(--nfc-opl-surface, var(--nfc-w2-surface)) !important;'));
+    for (const marker of [
+      '.nfc-filter-bar,', '.nfc-organizer-profile-toolbar,',
+      '.nfc-organizer-preview-filter {', '--nfc-opl-surface: #ffffff',
+      '--nfc-opl-surface: #242422',
+    ]) assert.ok((owner + catalog).includes(marker), 'Missing toolbar ownership: ' + marker);
+    for (const marker of [
+      "item.id === 'organizer'",
+      "panelStyle.getPropertyValue('--nfc-opl-surface').trim()",
+      "toolbarStyle.backgroundColor",
+      "searchStyle.backgroundColor",
+      "toolbarPaint.toolbarBackground !== toolbarPaint.searchBackground",
+      "audit.organizerToolbarPaint = toolbarPaint",
+      "Organizer theme toolbar does not match owned neutral search surface",
+    ]) assert.ok(browser.includes(marker), 'Missing actual DOM paint gate: ' + marker);
+    assert.ok(read('../.github/workflows/ui-v044-validation.yml')
+      .includes('node scripts/browser-full-route-visual.mjs'));
+  });
+
   test('scoped dark/mobile/keyboard CSS and registered test runner', () => {
     const css=read('src/styles/console-v2-organizer-profile-list.css');
     for(const item of ['.nfc-v2-organizer-table','.nfc-v2-organizer-mobile-list',
