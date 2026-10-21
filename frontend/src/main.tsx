@@ -59,7 +59,10 @@ import './styles/console-v2-utility-preview.css';
 import './styles/console-v2-workflow-legacy-preview.css';
 import './styles/console-v2-plan-detail.css';
 import './styles/console-v2-archive-recovery.css';
+/* Download Verification has one CSS owner/import path for both lazy routes.
+ * Mobile repair loads first, then the existing route-scoped base owner to retain prior late-route precedence. */
 import './styles/console-v2-download-verification.css';
+import './styles/console-v2-download-verify.css';
 import './styles/console-v2-mobile-header.css';
 import './styles/console-v2-keyboard-navigation.css';
 
