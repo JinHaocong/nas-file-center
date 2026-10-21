@@ -1,11 +1,11 @@
 /* Console v2 audit ledger and task-side residual controls. */
 .nfc-v2-audit-page {
-  --nfc-audit-paper:var(--v2-paper,#fff);
-  --nfc-audit-soft:var(--v2-canvas,#f6f8fc);
-  --nfc-audit-text:var(--v2-text,#172338);
-  --nfc-audit-muted:var(--v2-muted,#65738a);
-  --nfc-audit-line:var(--v2-line,#e7ebf1);
-  --nfc-audit-accent:var(--v2-indigo,#286ff1);
+  --nfc-audit-paper:var(--v2-paper,#ffffff);
+  --nfc-audit-soft:var(--v2-canvas,#f7f7f5);
+  --nfc-audit-text:var(--v2-text,#20201f);
+  --nfc-audit-muted:var(--v2-muted,#62625e);
+  --nfc-audit-line:var(--v2-line,#eaeae7);
+  --nfc-audit-accent:var(--v2-indigo,#262625);
 }
 .nfc-v2-audit-page .nfc-data-panel-body {
   padding:0;overflow:hidden;background:var(--nfc-audit-paper);
@@ -48,17 +48,17 @@
   outline:2px solid var(--nfc-audit-accent);outline-offset:2px;
 }
 [data-theme='dark'] .nfc-v2-audit-page {
-  --nfc-audit-paper:var(--v2-paper,#1a2434);
-  --nfc-audit-soft:var(--v2-canvas,#111827);
-  --nfc-audit-text:var(--v2-text,#f1f5fb);
-  --nfc-audit-muted:var(--v2-muted,#afbdce);
-  --nfc-audit-line:var(--v2-line,#2c3a4e);
-  --nfc-audit-accent:var(--v2-indigo,#83b5ff);
+  --nfc-audit-paper:var(--v2-paper,#242422);
+  --nfc-audit-soft:var(--v2-canvas,#171716);
+  --nfc-audit-text:var(--v2-text,#f5f5f2);
+  --nfc-audit-muted:var(--v2-muted,#bebeba);
+  --nfc-audit-line:var(--v2-line,#383834);
+  --nfc-audit-accent:var(--v2-indigo,#e9e9e6);
 }
 .nfc-v2-audit-detail-modal {
-  --nfc-audit-inspector-paper:var(--nfc-surface-1,#fff);
-  --nfc-audit-inspector-ink:var(--nfc-text,#172338);
-  --nfc-audit-inspector-line:var(--nfc-hairline,#e7ebf1);
+  --nfc-audit-inspector-paper:var(--nfc-surface-1,#ffffff);
+  --nfc-audit-inspector-ink:var(--nfc-text,#20201f);
+  --nfc-audit-inspector-line:var(--nfc-hairline,#eaeae7);
   width:min(94vw,690px);max-width:690px;max-height:85dvh;overflow-y:auto;
   background:var(--nfc-audit-inspector-paper);color:var(--nfc-audit-inspector-ink);
 }
@@ -70,9 +70,9 @@
 .nfc-v2-audit-detail-modal .nfc-code-block { max-height:310px;max-width:100%;overflow:auto; }
 .nfc-v2-audit-detail-modal .nfc-v2-confirm-actions { padding-top:13px; }
 [data-theme='dark'] .nfc-v2-audit-detail-modal {
-  --nfc-audit-inspector-paper:var(--nfc-surface-1,#1a2434);
-  --nfc-audit-inspector-ink:var(--nfc-text,#f1f5fb);
-  --nfc-audit-inspector-line:var(--nfc-hairline,#36435a);
+  --nfc-audit-inspector-paper:var(--nfc-surface-1,#242422);
+  --nfc-audit-inspector-ink:var(--nfc-text,#f5f5f2);
+  --nfc-audit-inspector-line:var(--nfc-hairline,#383834);
 }
 .nfc-v2-worker-warning { display:flex;gap:10px;align-items:flex-start;
   padding:13px 15px;border:1px solid #eac68f;border-radius:9px;background:#fff8ed;
