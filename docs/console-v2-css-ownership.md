@@ -1529,3 +1529,31 @@ No real NAS data, production business logic, runtime CSS or deployment
 is modified. Automated evidence is not human visual/accessibility or
 physical NAS/production acceptance. Formal progress remains **69/74**,
 and the historical CSS duplicate-declaration removal count remains **229**.
+
+## 2026-10-20 — v050/v051 historical cross-file ownership convergence
+
+This tranche retires **32 guaranteed later-shadowed, equal-specificity and
+unconditional non-important declarations** across the imported v050 Layout
+(**11**) and v051 Product Polish (**21**) sheets. Later v054 and v056
+declarations for the **same exact selector/property** already own the effective
+style. Eight now-empty historical rule blocks disappear; independent prior
+properties (Dashboard layout alignment, quick-action border/radius, summary
+separator, row-action animation, drawer kicker spacing, title typography)
+remain in their original positions. There is **no CSS import order change,
+no new override CSS, no breakpoint move and no change to production
+React/API/Worker/storage**.
+
+New `css-historical-cascade-convergence.test.mjs` assertions compare all
+14 historical selector cases to their v054/v056 owners, forbid returning
+old properties, preserve six independent declarations, check the exact
+32-property total and protect the original CSS load order and synthetic
+8-width/4-theme Chromium CI evidence. The per-PR checks must all succeed
+on the latest exact HEAD, followed by merged-main checks.
+
+Prior audited historical redundant property removals **229**; plus these
+**32** = **261 cumulative tracked retirements**, conditional on the
+latest-head and post-merge CI gates. This does not assert zero remaining
+cross-layer overrides, a complete CSS/theming migration, a pixel-identical
+visual signoff, a screen-reader acceptance or a real-NAS deployment.
+The high-level **69/74** final acceptance checklist remains unchanged
+until the complete CSS ownership/theming gate is actually satisfied.
