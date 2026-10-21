@@ -169,3 +169,24 @@ test('remaining historical ownership overlaps stay inventoried, not auto-retired
     changedValues.length + ' differing-value candidates; ' +
     barriers.length + ' important-precedence barriers. Not dead-code counts.');
 });
+
+test('real Chromium matrix pins native header computed winner over legacy importance barriers', () => {
+  const browser = read('scripts/browser-workspace-cascade.mjs');
+  for (const marker of [
+    'async function auditNativeHeaderOwnership(page, item, width, theme)',
+    'await auditNativeHeaderOwnership(page, item, width, theme);',
+    'native-header-cross-layer-owner-audit.json',
+    'WIDTHS.length * THEMES.length * PAGES.length',
+    "['0px', '0px', '1px', '0px']",
+    "label + ': historical floating shadow returned'",
+  ]) {
+    assert.ok(browser.includes(marker), 'Actual browser cascade gate is missing: ' + marker);
+  }
+  const native = read('src/styles/console-v2.css');
+  assert.match(native,
+    /\.nfc-v2-shell \.nfc-v2-header\.nfc-header\s*\{[^}]*border: 0 !important;[^}]*border-bottom: 1px solid var\(--v2-line\) !important;[^}]*background: var\(--v2-paper\) !important;/,
+    'Native shell must keep a higher-specificity important header owner');
+  const ci = read('../.github/workflows/ui-v044-validation.yml');
+  assert.ok(ci.includes('node scripts/browser-workspace-cascade.mjs'),
+    'Computed CSS owner audit must stay inside the exact-HEAD Chromium gate');
+});
