@@ -8,18 +8,14 @@
 
 /* Page composition --------------------------------------------------------- */
 .nfc-page-header {
-  min-height: 88px;
+
   margin-bottom: 20px;
-  gap: 22px;
+
 }
 
-.nfc-page-header-copy {
-  min-width: 0;
-  max-width: min(880px, 72vw);
-}
 
 .nfc-page-description {
-  max-width: 78ch;
+
   text-wrap: pretty;
 }
 
@@ -35,7 +31,7 @@
 
 .nfc-data-panel-header {
   min-width: 0;
-  gap: 12px;
+
 }
 
 .nfc-data-panel-heading {
@@ -233,12 +229,9 @@
 /* Login -------------------------------------------------------------------- */
 .nfc-login-shell {
   min-height: 100dvh;
-  padding: clamp(18px, 4vw, 42px);
+
 }
 
-.nfc-login-panel {
-  width: min(420px, 100%);
-}
 
 .nfc-login-brand {
   align-items: center;
@@ -290,11 +283,7 @@
 }
 
 @media (max-width: 767px) {
-  .nfc-page-header {
-    margin-bottom: 16px;
-    padding-bottom: 12px;
-    gap: 10px;
-  }
+
 
   .nfc-page-header-copy,
   .nfc-page-actions {
@@ -308,7 +297,7 @@
   }
 
   .nfc-data-panel-header {
-    align-items: flex-start;
+
     flex-wrap: wrap;
   }
 
@@ -363,7 +352,7 @@
   }
 
   .nfc-login-panel {
-    padding: 22px 18px;
+
     border-radius: 16px;
   }
 
