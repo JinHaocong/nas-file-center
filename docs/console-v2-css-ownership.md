@@ -1734,3 +1734,41 @@ correction of any genuine ownership contradictions, and a documented
 whole-site closing review. The eight-width human visual review, broad
 keyboard/assistive-technology review, isolated real NAS testing and
 owner deployment approval remain separate acceptance gates.
+
+
+## 2026-10-21 — native Header computed-owner Chromium matrix (Stage 70)
+
+The nine-layer source inventory established six `!important`
+precedence barriers, but a **source declaration is not proof of final
+paint** on the actual React application. The current Console v2 shell
+uses a more specific native rule,
+`.nfc-v2-shell .nfc-v2-header.nfc-header`, with its own important
+border, bottom hairline and paper background. The historical floating
+header can therefore be present in source without winning for the
+modern mounted Header. It would be unsafe either to declare the
+historical rule a user-visible bug or to remove it purely from source
+order.
+
+The existing read-only `browser-workspace-cascade.mjs` now checks
+**all 8 viewport widths x 4 effective mode/system combinations x 6
+workspace routes = 192 mounted native Header cases**. Each actual
+Chromium `getComputedStyle` sample must show:
+
+- the correct theme-specific native paper background and hairline;
+- top, right and left borders of 0px, bottom border of 1px;
+- zero floating radius, no shadow and no historical blur.
+
+The script writes
+`artifacts/browser-workspace-cascade/native-header-cross-layer-owner-audit.json`
+alongside the existing actual-React visual evidence. The historical
+cross-file ownership unit suite pins both the browser runner wiring
+and the native source owner selector/important declarations. It runs
+on the exact candidate HEAD through the full CI workflow.
+
+**Scope:** proves the actual native Header computed winner on the six
+specified routes and tested themes/widths, provided the Chromium gate
+passes. Does **not** prove the other five source importance cases
+safe, review every CSS owner, establish human screenshot acceptance,
+test a live NAS or authorize a production deployment. No CSS declaration,
+application behavior or filesystem authority is changed. Formal Stage
+70 and overall 69/74 acceptance remain unchanged.
