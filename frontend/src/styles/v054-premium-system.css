@@ -627,13 +627,10 @@
   }
 
   .nfc-app-main .nfc-page-header {
-    min-height: 88px;
+
     gap: 18px;
   }
 
-  .nfc-app-main .nfc-page-header-copy {
-    max-width: min(760px, 100%);
-  }
 
   .nfc-app-main .nfc-dashboard-layout,
   .nfc-app-main .nfc-dashboard-main-column,
@@ -652,25 +649,12 @@
     padding-bottom: calc(var(--nfc-mobile-dock-height, 78px) + 22px + env(safe-area-inset-bottom));
   }
 
-  .nfc-app-main .nfc-page-header {
-    min-height: 0;
-    padding: 6px 0 15px;
-    gap: 12px;
-  }
 
   .nfc-app-main .nfc-page-header::after {
     left: 0;
     width: 52px;
   }
 
-  .nfc-app-main .nfc-page-title {
-    font-size: 23px;
-  }
-
-  .nfc-app-main .nfc-page-description {
-    font-size: 11px;
-    line-height: 1.6;
-  }
 
   .nfc-app-main .nfc-page-actions .nfc-action-bar {
     justify-content: flex-start;
@@ -682,7 +666,7 @@
 
   .nfc-app-main .nfc-data-panel-header {
     min-height: 58px;
-    padding: 12px;
+
   }
 
   .nfc-app-main .nfc-data-panel-action,
@@ -710,9 +694,7 @@
 }
 
 @media (max-width: 420px) {
-  .nfc-app-main .nfc-page-title {
-    font-size: 22px;
-  }
+
 
   .nfc-app-main .nfc-metric-card {
     min-height: 102px;
@@ -1140,9 +1122,7 @@
 }
 
 @media (max-width: 767px) {
-  .nfc-header.nfc-header {
-    min-height: 54px;
-  }
+
 
   .nfc-app-main .nfc-lifecycle-strip {
     grid-template-columns: 1fr;
