@@ -1883,3 +1883,37 @@ are not counted as declarations; prior fallback normalization is separate.
 This remains partial evidence toward Stage 70, **not** a claim that all
 CSS ownership is resolved or that human visual/NAS/deployment acceptance
 has occurred. The formal checklist remains **69/74**.
+
+
+## 2026-10-21 — v048 → v056 exact-context historical shadow retirement (Stage 70)
+
+After #332 merged successfully, another source cleanup retires **15**
+historical declarations from `frontend/src/styles/v048.css`. Each has
+an exact, later-loaded `v056-right-workspace-v2.css` owner with the same
+complete selector (including selector-list groups), CSS property, and
+exact at-rule ancestry. The later value is at least as important: the
+phone-only header margin successor is `!important` and the earlier
+margin is normal priority. No values in the final owner are modified.
+
+Affected early rules include the canvas, Metric final-card edge and
+hover treatment, table links and metadata, worker border tone, 1199px
+page horizontal padding, and 767px page content/header/description
+properties. **Eight now-empty old selector blocks** are also removed,
+without counting them as property declarations. This excludes mobile
+Header, mobile Metric geometry and DataPanel description visibility,
+which retain their existing independent early declarations.
+
+`frontend/scripts/css-v048-v056-proven-retirement.test.mjs` is now
+registered in `npm test` and pins all 15 (at-rule, selector, property)
+absences together with the unchanged final v056 values; it also
+protects seven independent early properties, CSS import order and
+existing read-only full-route/overlay Chromium checks.
+
+If both the exact-HEAD PR gates and post-merge main gates pass, the
+cumulative number of retired historical CSS **declarations** becomes
+**432 → 447**. Empty rule removals and prior fallback normalizations
+are not counted toward that total. Stage 70 continues until all CSS
+owner exceptions are reviewed and accepted. Browser CI does not replace
+human 25-route/8-width/4-theme visual signoff, accessible keyboard
+coverage, isolated NAS testing or owner deployment approval. Overall
+formal acceptance remains **69/74**.
