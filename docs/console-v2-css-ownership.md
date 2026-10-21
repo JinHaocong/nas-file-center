@@ -1804,3 +1804,50 @@ unreachable or safe to retire, nor does it substitute for human review.
 The browser assertions become supported runtime evidence only after
 the PR-head Chromium CI succeeds. No style declarations or NAS behavior
 are modified. Stage 70 and overall **69/74** remain open.
+
+
+## 2026-10-21 — v049 → v056 same-precedence historical CSS retirement (Stage 70)
+
+After #328 (source overlap inventory), #329 (192 computed native Header
+cases), and #330 (192 mounted DataPanel header case groups) all passed
+exact-HEAD full CI and merged-main CI, the next tranche makes **a real
+source reduction rather than another evidence-only PR**.
+
+Removed **25 historical property declarations** from
+`frontend/src/styles/v049-workspace.css` that were shadowed by later
+`v056-right-workspace-v2.css` declarations with:
+
+- the **same complete selector text**, including grouped selectors;
+- the **same exact at-rule ancestry**, including phone-only conditions;
+- the **same property name** and at least equivalent CSS importance;
+- an unchanged latter owner loaded in the established `main.tsx` order.
+
+The retired values covered application canvas, table link/meta typography,
+worker widgets, scan/plan lifecycle steps, quarantine bulk bar, login
+panel, metric last-child border and phone page actions/login padding.
+The two earlier `!important` quarantine declarations were retired only
+because the final v056 declarations have **the same important priority**.
+The source diff additionally removes **nine empty selector blocks** left
+by this tranche; the one empty grouped mobile action block needed by a
+previous source-contract marker is preserved intentionally.
+
+This increases cumulative provably shadowed **property** retirements
+from **394 to 419**. The nine empty blocks are not double-counted as
+declarations; the 62 historical fallback-value changes are likewise
+separate.
+
+A new `frontend/scripts/css-v049-v056-proven-retirement.test.mjs`
+is executed from `npm test`. It pins all 25 retired
+(context, selector, property) triples, exact current v056 winning
+authored values, CSS import order, five protected early important
+barriers, the independent mobile toolbar padding and existing
+read-only Chromium coverage. Existing CSS cascade, theme, business
+logic, NAS filesystem and deployment behavior are otherwise unchanged.
+
+**Milestone 70 remains OPEN** until remaining historical owner conflicts,
+real computed-style/PNG comparison over relevant widths/themes/states
+and integrated CSS sign-off are complete. No one may infer human
+visual acceptance from automated Chromium screenshots, nor infer
+real NAS acceptance from synthetic GET-only fixtures. Post-merge
+full CI must be recorded separately. Formal overall acceptance
+remains **69/74**.
