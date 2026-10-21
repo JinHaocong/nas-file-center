@@ -1,14 +1,4 @@
 :root {
-  --nfc-accent: #335cff;
-  --nfc-canvas: #f6f7f9;
-  --nfc-surface-1: #ffffff;
-  --nfc-surface-2: #f1f3f6;
-  --nfc-surface-raised: #ffffff;
-  --nfc-hairline: #e4e7ec;
-  --nfc-hairline-strong: #c9ced8;
-  --nfc-text: #17191c;
-  --nfc-text-muted: #5f6672;
-  --nfc-text-subtle: #858c98;
   --nfc-success: #168a54;
   --nfc-success-soft: #eaf7f0;
   --nfc-warning: #a86406;
@@ -17,7 +7,6 @@
   --nfc-danger-soft: #fff0f2;
   --nfc-info: #335cff;
   --nfc-info-soft: #eef1ff;
-  --nfc-page-gutter: 24px;
   --nfc-radius-sm: 6px;
   --nfc-radius-md: 8px;
   --nfc-radius-lg: 10px;
@@ -26,16 +15,6 @@
 }
 
 [data-theme='dark'] {
-  --nfc-accent: #7f8cff;
-  --nfc-canvas: #0d0f12;
-  --nfc-surface-1: #13161a;
-  --nfc-surface-2: #191d22;
-  --nfc-surface-raised: #1d2228;
-  --nfc-hairline: #282d34;
-  --nfc-hairline-strong: #3a414b;
-  --nfc-text: #f3f5f7;
-  --nfc-text-muted: #b4bac3;
-  --nfc-text-subtle: #858d99;
   --nfc-success: #5ccf93;
   --nfc-success-soft: #10251c;
   --nfc-warning: #e8b04f;
