@@ -96,7 +96,9 @@ describe('Pure White Stage 4A login, settings and utility preview', () => {
       'parseComputedPaintColor(painted.subpanel.background)',
       'Math.max(...softChannels) - Math.min(...softChannels) <= 4',
       'painted.panel?.background === required.panel && neutralSoft',
-      'audit.loginSettingsPaint = { ...painted, required }',
+      'audit.loginSettingsPaint = { ...painted, required,',
+      'softChannels: softChannels.map(v => Number(v.toFixed(2)))',
+      'neutralSoft',
       'Login/Settings actual neutral paint mismatch',
     ]) assert.ok(browser.includes(marker), 'Missing live paint audit: ' + marker);
     assert.ok(read('../.github/workflows/ui-v044-validation.yml')
