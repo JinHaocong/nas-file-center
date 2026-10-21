@@ -652,12 +652,15 @@ test('v054-v056: 13 exact typography shadows retire with historical colors retai
   assert.equal(retired, 13);
   const mobile = '@media (max-width: 767px)';
   const phone = '@media (max-width: 420px)';
-  assert.equal(matching(v054, '.nfc-app-main .nfc-page-title', mobile)[0]
-    .declarations.get('font-size'), '23px');
-  assert.equal(matching(v054, '.nfc-app-main .nfc-page-description', mobile)[0]
-    .declarations.get('line-height'), '1.6');
-  assert.equal(matching(v054, '.nfc-app-main .nfc-page-title', phone)[0]
-    .declarations.get('font-size'), '22px');
+  assert.equal(matching(v054, '.nfc-app-main .nfc-page-title', mobile).length, 0,
+    'Fully shadowed old 767px v054 title rule must stay retired');
+  assert.equal(matching(v054, '.nfc-app-main .nfc-page-description', mobile).length, 0,
+    'Fully shadowed old 767px v054 description rule must stay retired');
+  assert.equal(matching(v054, '.nfc-app-main .nfc-page-title', phone).length, 0,
+    'Fully shadowed old 420px v054 title rule must stay retired');
+  assert.equal(matching(v056, '.nfc-app-main .nfc-page-description', mobile)[0]
+    .declarations.get('line-height'), '1.6',
+    'The final 767px description line-height must remain unchanged');
   assert.equal(matching(v056, '.nfc-app-main .nfc-page-title', mobile)[0]
     .declarations.get('font-size'), '24px');
   assert.equal(matching(v056, '.nfc-app-main .nfc-page-title', phone)[0]
@@ -778,7 +781,8 @@ test('v054-v056: 10 panel, media, root and workflow shadows remain retired', () 
   assert.equal(matching(v054, '.nfc-app-main .nfc-data-panel-header',
     '@media (max-width: 767px)')[0].declarations.get('min-height'), '58px');
   assert.equal(matching(v054, '.nfc-app-main .nfc-data-panel-header',
-    '@media (max-width: 767px)')[0].declarations.get('padding'), '12px');
+    '@media (max-width: 767px)')[0].declarations.has('padding'), false,
+    'Retired 767px v054 panel padding must not return');
   assert.equal(matching(v056, '.nfc-app-main .nfc-data-panel-header',
     '@media (max-width: 767px)')[0].declarations.get('padding'), '13px 14px 11px');
 
@@ -1151,8 +1155,11 @@ test('v054 → v055/v056: 4 header, eyebrow and action-bar shadows retired', () 
   assert.equal(header[0].declarations.has('min-height'), false);
   assert.equal(finalHeader[0].declarations.get('min-height'), '68px');
   assert.equal(matching(v054, '.nfc-header.nfc-header',
+    '@media (max-width: 767px)').length, 0,
+    'Fully shadowed 767px v054 header block must stay retired');
+  assert.equal(matching(v056, '.nfc-header.nfc-header',
     '@media (max-width: 767px)')[0].declarations.get('min-height'),
-    '54px', 'Preserve distinct 767px header behavior');
+    '52px', 'Preserve the final 767px header behavior');
   assert.match(old054, /@media \(prefers-reduced-transparency: reduce\)/);
   assert.equal(matching(v054, '.nfc-header.nfc-header',
     '@media (prefers-reduced-transparency: reduce)')[0]
