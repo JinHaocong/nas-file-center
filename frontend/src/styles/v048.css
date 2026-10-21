@@ -43,11 +43,6 @@
 /* Canvas + shell                                                             */
 /* -------------------------------------------------------------------------- */
 
-body,
-.nfc-app-shell,
-.nfc-app-main {
-  background: var(--nfc-premium-canvas);
-}
 
 body {
   color: var(--nfc-premium-text);
@@ -147,13 +142,9 @@ body {
 /* Instrument strip: one continuous surface instead of a deck of cards. */
 
 
-.nfc-metric-card:last-child {
-  border-right: 0;
-}
-
 .nfc-metric-card:hover {
-  transform: none;
-  background: color-mix(in srgb, var(--nfc-premium-accent) 2.7%, transparent);
+
+
   box-shadow: none;
 }
 
@@ -222,12 +213,6 @@ body {
 /* Tables                                                                     */
 /* -------------------------------------------------------------------------- */
 
-.nfc-table-link,
-.nfc-plan-name,
-.nfc-mobile-record-title {
-  color: var(--nfc-premium-text);
-  font-weight: 610;
-}
 
 .nfc-table-link:hover,
 .nfc-plan-name:hover,
@@ -235,10 +220,6 @@ body {
   color: var(--nfc-premium-accent);
 }
 
-.nfc-table-meta,
-.nfc-table-muted {
-  color: var(--nfc-premium-subtle);
-}
 
 /* -------------------------------------------------------------------------- */
 /* Filters, toolbars, controls                                                */
@@ -306,10 +287,6 @@ body {
   grid-template-columns: minmax(210px, 0.58fr) minmax(0, 1.42fr);
 }
 
-.nfc-worker-primary,
-.nfc-worker-identity {
-  border-right-color: var(--nfc-premium-line);
-}
 
 .nfc-worker-facts > div,
 .nfc-description-item,
@@ -427,9 +404,7 @@ body {
 /* -------------------------------------------------------------------------- */
 
 @media (max-width: 1199px) {
-  .nfc-page-content {
-    padding-inline: 24px;
-  }
+
 
   .nfc-dashboard-layout {
     grid-template-columns: 1fr;
@@ -455,25 +430,17 @@ body {
     display: none;
   }
 
-  .nfc-page-content {
-    padding: 20px 14px max(32px, env(safe-area-inset-bottom));
-  }
 
   .nfc-page-header {
     min-height: auto;
-    margin-bottom: 20px;
-    padding-bottom: 18px;
-    align-items: stretch;
-    gap: 14px;
+
+
   }
 
   .nfc-page-title {
     font-size: 26px;
   }
 
-  .nfc-page-description {
-    font-size: 12px;
-  }
 
   .nfc-page-actions {
     width: 100%;
