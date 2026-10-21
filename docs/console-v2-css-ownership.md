@@ -1851,3 +1851,35 @@ visual acceptance from automated Chromium screenshots, nor infer
 real NAS acceptance from synthetic GET-only fixtures. Post-merge
 full CI must be recorded separately. Formal overall acceptance
 remains **69/74**.
+
+
+## 2026-10-21 — v052 → v056 source-owned property retirement (Stage 70)
+
+The prior #331 tranche reached **419** historically shadowed property retirements
+and its merged-main release gate finished **4/4 Checks and 3/3 Workflows
+success**. The next source tranche removes **13 more property declarations**
+from `v052-final-audit.css`, each proven to have the **same exact authored
+selector**, **same at-rule ancestry**, and **same CSS property** in later
+`v056-right-workspace-v2.css`. The later declaration is at least as
+important: the phone-only page header margin successor is explicitly
+`!important`, while the earlier value was ordinary.
+
+The source removals cover page header geometry, page description width,
+DataPanel header gap/alignment, and login panel/shell dimensions across
+unconditional and mobile scopes. Three selector blocks made empty by this
+retirement were deleted as blocks; untouched rules for responsive layout,
+keyboard focus, reduced motion and independent source declarations remain.
+
+The new `css-v052-v056-proven-retirement.test.mjs`, registered in the
+existing `npm test` runner, pins the absence of the thirteen old properties,
+the exact successor values and at-rule scopes, six independent retained
+properties, immutable stylesheet import ordering and the existing
+read-only Chromium regression gate. The prior source inventory ceiling and
+all importance barriers remain independently monitored.
+
+If the exact-head PR and merged-main full CI both pass, cumulative
+historical declaration retirements increase **419 → 432**. Empty rules
+are not counted as declarations; prior fallback normalization is separate.
+This remains partial evidence toward Stage 70, **not** a claim that all
+CSS ownership is resolved or that human visual/NAS/deployment acceptance
+has occurred. The formal checklist remains **69/74**.
