@@ -1619,6 +1619,35 @@ HEAD, require full 16/16 Checks and 4/4 Workflows before squash merge,
 then post-merge main CI and branch cleanup. Human visual and real-NAS
 gates remain separate.
 
+## 2026-10-21 — Download Verification single-entry CSS cascade ownership
+
+The *actual import graph* exposed a dual entrypoint: both Download
+Verification and SourcesPage imported `console-v2-download-verify.css`
+as a side effect inside their route components, while the 390px
+screenshot-led `console-v2-download-verification.css` responsive
+repair was globally imported from `main.tsx`. A route-specific
+chunk can load styles only when its route is evaluated, making the
+sheet ordering less obvious to reviewers and potentially sensitive
+to route loading.
+
+Both sheets now have **exactly one global import** in `main.tsx`,
+preserving their previous effective late-feature precedence:
+responsive fix first; route-specific base sheet second. The two
+React route components no longer import CSS. All selectors,
+declarations, breakpoints, visual tokens, APIs and permissions
+remain byte-for-byte unchanged. Styles are now present before either
+route renders, and their relative order is deterministic on direct
+navigation and subsequent route changes.
+
+The existing all-route browser checks still cover both Download
+Verification and SourcesPage and the selected detail/modal fixtures;
+the new source regression pins exact single imports, import order,
+route CSS isolation and ownership class names. **Latest HEAD**
+Chromium screenshots, overlay regressions, full frontend/backend CI
+and Docker must all pass before merge. This is a structural CSS
+entrypoint improvement, not final human visual, accessibility, real
+NAS or owner acceptance; the high-level tally remains **69/74**.
+
 ## 2026-10-21 — canonical root-token ownership (21 dead index.css shadows)
 
 A top-level `index.css` versus `v047.css` imported `tokens.css` inventory
