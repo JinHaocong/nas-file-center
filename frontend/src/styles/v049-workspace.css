@@ -47,7 +47,6 @@
 body,
 .nfc-app-shell,
 .nfc-app-main {
-  background: var(--nfc-v49-canvas);
 }
 
 .nfc-app-main {
@@ -245,14 +244,10 @@ body,
 .nfc-table-link,
 .nfc-plan-name,
 .nfc-mobile-record-title {
-  color: var(--nfc-v49-text);
-  font-weight: 620;
 }
 
 .nfc-table-meta,
 .nfc-table-muted {
-  color: var(--nfc-v49-subtle);
-  font-size: 10px;
 }
 
 .nfc-row-actions:focus-within {
@@ -294,9 +289,6 @@ body,
 
 .nfc-worker-primary,
 .nfc-worker-identity {
-  min-height: 74px;
-  padding: 13px 15px;
-  border-right-color: var(--nfc-v49-line);
 }
 
 .nfc-worker-stat,
@@ -308,14 +300,10 @@ body,
 .nfc-worker-eyebrow,
 .nfc-worker-stat > span,
 .nfc-worker-facts span {
-  color: var(--nfc-v49-subtle);
-  font-size: 8.5px;
 }
 
 .nfc-worker-stat > strong,
 .nfc-worker-facts strong {
-  color: var(--nfc-v49-muted);
-  font-size: 10.5px;
 }
 
 /* File tool pages ---------------------------------------------------------- */
@@ -396,9 +384,6 @@ body,
 
 .nfc-plan-detail-page .nfc-lifecycle-step,
 .nfc-scan-detail-page .nfc-lifecycle-step {
-  min-height: 58px;
-  padding: 9px 12px;
-  border-right-color: var(--nfc-v49-line);
 }
 
 .nfc-plan-detail-page .nfc-plan-action-surface {
@@ -524,10 +509,7 @@ body,
 /* Quarantine --------------------------------------------------------------- */
 
 .nfc-quarantine-page .nfc-bulk-action-bar {
-  margin: 0;
-  border: 0 !important;
   border-bottom: 1px solid var(--nfc-v49-line) !important;
-  background: color-mix(in srgb, var(--nfc-v49-accent) 3%, var(--nfc-v49-surface-soft)) !important;
 }
 
 .nfc-selection-count {
@@ -644,15 +626,12 @@ body,
 /* Login ------------------------------------------------------------------- */
 
 .nfc-login-shell {
-  padding: 28px;
   background:
     radial-gradient(circle at 75% 10%, color-mix(in srgb, var(--nfc-v49-accent) 5%, transparent), transparent 32rem),
     var(--nfc-v49-canvas);
 }
 
 .nfc-login-panel {
-  width: min(408px, 100%);
-  padding: 28px;
   border: 1px solid var(--nfc-v49-line);
   border-radius: var(--nfc-v49-radius-xl);
   background: var(--nfc-v49-surface);
@@ -748,8 +727,6 @@ body,
 
   .nfc-page-actions,
   .nfc-page-actions .nfc-action-bar {
-    width: 100%;
-    justify-content: flex-start;
   }
 
   .nfc-metric-card:nth-child(2n) {
@@ -829,7 +806,6 @@ body,
   }
 
   .nfc-login-panel {
-    padding: 24px 20px;
   }
 }
 
@@ -1081,7 +1057,6 @@ body,
 }
 
 .nfc-metric-card:last-child {
-  border-right: 1px solid var(--nfc-border-soft);
 }
 
 .nfc-metric-card:hover {
