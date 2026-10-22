@@ -139,14 +139,10 @@ describe('Pure White historical CSS cleanup: safe v049 same-selector cascade', (
       ['.nfc-metric-card','min-height','96px'],
       ['.nfc-metric-card','padding','13px'],
     ] as const){
-      const oldRule=new RegExp(sel.replace(/\./g,'\\.')+'\\s*\\{([^}]*)\\}','g');
-      const all=[...css.matchAll(oldRule)].map(r=>r[1]);
-      // The unconditional baseline may own these properties. Only the phone
-      // context is retired, and the 122-case guard tests that context exactly.
+      // Mobile context and early absence are pinned exactly by the 122-case guard.
       const finalMedia=late.slice(late.indexOf('@media (max-width: 767px)'));
       assert.ok(finalMedia.includes(prop+': '+v+';'),
         'Phone authority changed in v056: '+sel+' '+prop);
-      assert.ok(all.length>=0);
     }
     assert.match(css,/\.nfc-header\.nfc-header\s*\{[^}]*border:\s*1px solid var\(--nfc-border-soft\) !important/,
       'Early important header border remains protected');
