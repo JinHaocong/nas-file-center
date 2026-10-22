@@ -5,7 +5,7 @@
  */
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { chromium } from 'playwright';
@@ -35,6 +35,7 @@ const server = spawn(process.execPath, ['node_modules/vite/bin/vite.js',
   'preview', '--host', '127.0.0.1', '--port', '4180', '--strictPort'],
 { cwd: process.cwd(), stdio: 'ignore' });
 let browser;
+const overlaySectionOwnerAudit = [];
 let completed = 0;
 
 async function ready() {
@@ -107,6 +108,59 @@ async function inspect(page, theme, width, mode) {
   }, { theme, width, mode });
 }
 
+/**
+ * Stage 70: measure mounted overlay sections in an actual Task Detail Radix
+ * portal, not unmounted CSS or the page shell. Earlier v049 !important
+ * background/radius may override v054 and native normal-priority rules.
+ * Resolve the expected root token with a short-lived child probe; remove it
+ * before screenshots and keep the request fixture completely read-only.
+ */
+async function auditMountedOverlaySectionOwnership(page, theme, width, phase) {
+  const result = await page.evaluate(({ theme, width, phase }) => {
+    const sheet = document.querySelector('.nfc-v2-sheet.nfc-task-detail-drawer');
+    const sections = [...document.querySelectorAll(
+      '.nfc-v2-sheet.nfc-task-detail-drawer .nfc-v2-task-inspector .nfc-overlay-section')];
+    if (!sheet || sections.length < 4)
+      throw Error('Missing real mounted Task Inspector overlay sections: ' + sections.length);
+    const samples = sections.map((section, index) => {
+      const probe = document.createElement('span');
+      probe.setAttribute('aria-hidden', 'true');
+      probe.style.setProperty('background-color', 'var(--nfc-ui-panel-bg-strong)');
+      probe.style.setProperty('border-radius', 'var(--nfc-ui-inner-radius)');
+      probe.style.setProperty('display', 'none');
+      section.append(probe);
+      const expectedStyle = getComputedStyle(probe);
+      const background = expectedStyle.backgroundColor;
+      const radius = expectedStyle.borderRadius;
+      probe.remove();
+
+      const style = getComputedStyle(section);
+      const actual = {
+        background: style.backgroundColor,
+        radius: style.borderRadius,
+        image: style.backgroundImage,
+        borderStyle: style.borderTopStyle,
+      };
+      const rect = section.getBoundingClientRect();
+      if (!background || background === 'transparent' ||
+          background === 'rgba(0, 0, 0, 0)' || radius !== '13px' ||
+          actual.background !== background || actual.radius !== radius ||
+          actual.image !== 'none' || actual.borderStyle !== 'solid' ||
+          rect.width <= 0 || rect.height <= 0 || rect.left < -2 ||
+          rect.right > width + 2) {
+        throw Error('Mounted Task overlay precedence changed: ' + JSON.stringify({
+          theme, width, phase, index, expected: { background, radius },
+          actual, rect: { left: rect.left, right: rect.right, width: rect.width },
+        }));
+      }
+      return { index, className: section.className,
+        expected: { background, radius }, actual };
+    });
+    return { theme, width, phase, sections: samples };
+  }, { theme, width, phase });
+  overlaySectionOwnerAudit.push(result);
+}
+
 try {
   await ready();
   mkdirSync(OUT, { recursive: true });
@@ -142,12 +196,14 @@ try {
         await detailLauncher.click({ timeout: 15000 });
         const sheet = page.locator('.nfc-v2-sheet.nfc-overlay-drawer');
         await sheet.waitFor({ state: 'visible' });
+        await auditMountedOverlaySectionOwnership(page, theme.effective, width, 'sheet');
         const deleteLauncher = sheet.getByRole('button', { name: '删除任务 #42' });
         const deleteOpener = await deleteLauncher.elementHandle();
         assert.ok(deleteOpener, 'Nested confirmation needs its original DOM launcher');
         await deleteLauncher.click();
         const confirm = page.locator('.nfc-v2-confirm-dialog');
         await confirm.waitFor({ state: 'visible' });
+        await auditMountedOverlaySectionOwnership(page, theme.effective, width, 'nested');
         const nestedErrors = await inspect(page, theme.effective, width, 'nested');
         assert.deepEqual(nestedErrors, [], 'Nested ' + label + ': ' + nestedErrors.join(', '));
         await page.screenshot({ path: resolve(OUT, 'nested-' + label + '.png') });
@@ -246,6 +302,19 @@ try {
     }
   }
   assert.equal(completed, 32);
+  assert.equal(overlaySectionOwnerAudit.length, WIDTHS.length * THEMES.length * 2,
+    'All widths and themes must measure both Sheet and nested task dialog');
+  assert.ok(overlaySectionOwnerAudit.every(x => x.sections.length >= 4),
+    'Real mounted Task Inspector sections must all be audited');
+  writeFileSync(resolve(OUT, 'mounted-overlay-section-important-owner-audit.json'),
+    JSON.stringify({
+      total: overlaySectionOwnerAudit.length,
+      sampledSections: overlaySectionOwnerAudit.reduce((n, x) => n + x.sections.length, 0),
+      scope: 'real-React-GET-only-computed-style-v049-important-v054-normal-not-human-pixel-or-real-NAS',
+      cases: overlaySectionOwnerAudit,
+    }, null, 2));
+  console.log('[STAGE 70 OVERLAY IMPORTANT] ' + overlaySectionOwnerAudit.length +
+    ' mounted Sheet/nested theme-width groups with computed background/radius preserved.');
   console.log('[TASK BROWSER] 32/32 theme-viewport cases, 64 actual dialog screenshots; read-only synthetic APIs.');
 } finally {
   await browser?.close();
