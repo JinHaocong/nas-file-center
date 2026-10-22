@@ -135,7 +135,13 @@ test('v048-detail: preserve meaningful early properties and responsive-only rule
   const responsiveStatus = detailRules.filter(rule =>
     rule.selector === '.nfc-header-status' && rule.context.startsWith('@media'));
   assert.ok(responsiveStatus.length >= 2, 'Keep responsive header-status scrolling and sizing');
-  assert.ok(responsiveStatus.some(rule => rule.declarations.get('scrollbar-width') === 'none'));
+  assert.ok(responsiveStatus.every(rule => !rule.declarations.has('scrollbar-width')),
+    'Retired phone scrollbar duplicate should not return');
+  const finalPhoneStatus = cssRules(read('src/styles/v056-right-workspace-v2.css'))
+    .filter(rule => rule.selector === '.nfc-header-status' &&
+      rule.context === '@media (max-width: 767px)');
+  assert.ok(finalPhoneStatus.some(rule => rule.declarations.get('scrollbar-width') === 'none'),
+    'Final v056 phone status must preserve hidden scrollbar');
   assert.ok(responsiveStatus.some(rule => rule.declarations.get('max-width') === 'calc(100vw - 136px)'));
   for (const marker of ['.nfc-header-status-badge.is-safe',
     '.nfc-header-status-badge.is-warning', '.nfc-header-status-badge.is-danger',

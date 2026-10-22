@@ -899,17 +899,22 @@ test('v048-detail to v056: 11 description item shadows remain retired', () => {
   }
   assert.equal(retired, 11);
 
-  // Preserve distinct v048 phone geometry and the more specific item state
-  // selectors. Never flatten @media into an unconditional rule.
+  // Preserve distinct v048 phone border and more specific item states;
+  // tablet/phone sizing and focus opacity are now checked at their later owners.
   const tablet = '@media (max-width: 1199px)';
   const phone = '@media (max-width: 767px)';
   const narrow = '@media (max-width: 420px)';
-  assert.equal(matching(v048, '.nfc-page-header-copy', tablet)[0]
-    .declarations.get('max-width'), 'min(760px, 68vw)');
-  assert.equal(matching(v048, '.nfc-description-item', phone)[0]
-    .declarations.get('min-height'), '70px');
-  assert.equal(matching(v048, '.nfc-description-item', phone)[0]
-    .declarations.get('padding'), '12px');
+  assert.ok(matching(v048, '.nfc-page-header-copy', tablet).every(rule =>
+    !rule.declarations.has('max-width')), 'Retired tablet copy width must not return');
+  assert.equal(matching(v056, '.nfc-page-header-copy', tablet).at(-1)
+    .declarations.get('max-width'), 'min(860px, 68vw)');
+  assert.ok(matching(v048, '.nfc-description-item', phone).every(rule =>
+    !rule.declarations.has('min-height') && !rule.declarations.has('padding')),
+  'Retired phone description sizing must not return');
+  assert.equal(matching(v049, '.nfc-description-item', phone).at(-1)
+    .declarations.get('min-height'), '66px');
+  assert.equal(matching(v049, '.nfc-description-item', phone).at(-1)
+    .declarations.get('padding'), '10px 11px');
   assert.equal(matching(v048, '.nfc-description-item', phone)[0]
     .declarations.get('border-right'), '1px solid var(--nfc-premium-line)');
   assert.equal(matching(v048, '.nfc-description-item:nth-child(2n)', phone)[0]
@@ -919,7 +924,9 @@ test('v048-detail to v056: 11 description item shadows remain retired', () => {
     narrow)[0].declarations.get('min-height'), '64px');
   assert.equal(matching(v048, '.nfc-description-item:last-child', narrow)[0]
     .declarations.get('border-bottom'), '0');
-  assert.equal(matching(v048, '.nfc-row-actions:focus-within')[0]
+  assert.ok(matching(v048, '.nfc-row-actions:focus-within').every(rule =>
+    !rule.declarations.has('opacity')), 'Retired focus duplication must stay absent');
+  assert.equal(matching(v056, '.nfc-row-actions:focus-within').at(-1)
     .declarations.get('opacity'), '1');
   const imports = read('src/main.tsx');
   assert.ok(imports.indexOf("import './styles/v048-detail.css';") <

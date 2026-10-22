@@ -133,29 +133,35 @@ describe('v0.4.8 detail polish pass', () => {
   });
 
   test('status island restores semantic safety and queue tones', () => {
-    const css = read('src/styles/v048-detail.css');
-    assert.match(css, /\.nfc-header-status[\s\S]*border-radius: 999px/);
-    assert.match(css, /\.nfc-header-status-badge\.is-safe[\s\S]*var\(--nfc-success\)/);
-    assert.match(css, /\.nfc-header-status-badge\.is-danger[\s\S]*var\(--nfc-danger\)/);
-    assert.match(css, /\.nfc-header-status-badge\.is-processing[\s\S]*var\(--nfc-premium-accent\)/);
+    const old = read('src/styles/v048-detail.css');
+    const later = read('src/styles/v049-workspace.css');
+    assert.match(later, /\.nfc-header-status\s*\{[^}]*border-radius:\s*999px/);
+    assert.match(old, /\.nfc-header-status-badge\.is-safe\s*\{[^}]*var\(--nfc-success\)/);
+    assert.match(old, /\.nfc-header-status-badge\.is-danger\s*\{[^}]*var\(--nfc-danger\)/);
+    assert.match(old, /\.nfc-header-status-badge\.is-processing\s*\{[^}]*var\(--nfc-premium-accent\)/);
   });
 
   test('native descriptions, empty state and pagination preserve detail treatment', () => {
-    const css = read('src/styles/v048-detail.css');
-    assert.match(css, /\.nfc-responsive-descriptions[\s\S]*border-radius: 0 !important/);
-    assert.match(css, /\.nfc-centered-state\s*\{[^}]*min-height: 260px/);
-    assert.match(css, /\.nfc-mobile-pagination\s*\{[^}]*min-height: 52px/);
-    assert.doesNotMatch(css, /\.ant-[a-z]|\.anticon\b/);
+    const old = read('src/styles/v048-detail.css');
+    const final = read('src/styles/v049-workspace.css');
+    assert.match(old, /\.nfc-responsive-descriptions\s*\{[^}]*border-top:\s*1px solid var\(--nfc-premium-line\) !important/);
+    assert.match(final, /\.nfc-responsive-descriptions\s*\{[^}]*border-radius:\s*var\(--nfc-v49-radius-lg\) !important/);
+    assert.match(final, /\.nfc-centered-state\s*\{[^}]*min-height:\s*240px/);
+    assert.match(final, /\.nfc-mobile-pagination\s*\{[^}]*min-height:\s*50px/);
+    assert.doesNotMatch(old, /\.ant-[a-z]|\.anticon\b/);
     const native = read('src/styles/console-v2-phase2.css');
     assert.match(native, /\.nfc-console-empty\s*\{/);
     assert.match(native, /\.nfc-console-pagination\s*\{/);
   });
 
   test('row actions remain accessible while becoming quieter at rest', () => {
-    const css = read('src/styles/v048-detail.css');
-    assert.match(css, /\.nfc-row-actions[\s\S]*opacity: 0\.78/);
-    assert.match(css, /\.nfc-row-actions:focus-within[\s\S]*opacity: 1/);
-    assert.match(css, /@media \(max-width: 767px\)[\s\S]*\.nfc-row-actions[\s\S]*opacity: 1/);
+    const old = read('src/styles/v048-detail.css');
+    const final = read('src/styles/v056-right-workspace-v2.css');
+    const mobile = read('src/styles/v051-product-polish.css');
+    assert.doesNotMatch(old, /\.nfc-row-actions\s*\{[^}]*opacity:\s*0\.78/);
+    assert.match(final, /\.nfc-row-actions\s*\{[^}]*opacity:\s*0\.56/);
+    assert.match(final, /\.nfc-row-actions:focus-within\s*\{[^}]*opacity:\s*1/);
+    assert.match(mobile, /@media \(max-width: 767px\)[\s\S]*\.nfc-row-actions\s*\{[^}]*opacity:\s*1/);
   });
 
   test('live status motion respects reduced-motion preference', () => {
