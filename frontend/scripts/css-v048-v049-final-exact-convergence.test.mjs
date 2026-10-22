@@ -1050,6 +1050,11 @@ test('native import, reduced-motion, and read-only computed browser contract pre
   assert.match(read(f),/@media \(max-width: 767px\)/);
   assert.match(read(f),/@media \(prefers-reduced-motion: reduce\)/);
  }
+ // A retired multiline selector group must not leave a dangling comma
+ // that silently joins the following independent responsive rule.
+ assert.ok(matching('v049-workspace.css','@media (max-width: 767px)',
+   '.nfc-metric-card:nth-child(2n)').some(r=>r.props.get('border-right')==='0'),
+   'Independent even-card phone border must not become grouped with retired action selector');
  assert.match(read('v048.css'),/\.nfc-data-panel-header\s*\{[^}]*background:\s*transparent !important/);
  assert.match(read('v049-workspace.css'),/\.nfc-overlay-section\s*\{[^}]*background:\s*var\(--nfc-ui-panel-bg-strong\) !important/);
  const ci=readFileSync(resolve('../.github/workflows/ui-v044-validation.yml'),'utf8');
