@@ -81,7 +81,15 @@ test('release regression, Docker and dependency audit use the exact candidate an
   assert.ok(docker.includes('test "${CANDIDATE_SHA}" = "${EXPECTED_SHA}"'));
   requireExactCandidate(dependency, 'Dependency Audit');
   assert.ok(dependency.includes('npm ci --ignore-scripts'));
-  assert.ok(dependency.includes('npm audit --omit=dev --audit-level=moderate'));
+  assert.ok(dependency.includes('node scripts/run-production-dependency-audit.mjs'),
+    'Dependency gate must invoke bounded, fail-closed production audit');
+  assert.ok(!dependency.includes('continue-on-error: true'), 'Dependency gate must not fail open');
+  const auditor = readFileSync('scripts/run-production-dependency-audit.mjs', 'utf8');
+  for(const option of ['--omit=dev','--audit-level=moderate',
+    '--fetch-retries=0','--fetch-timeout=45000']) {
+    assert.ok(auditor.includes(option), 'Production severity or bounded network protection missing: ' + option);
+  }
+  assert.ok(auditor.includes('process.exit(1)'), 'No audit failure may be accepted');
   assert.ok(dependency.includes('  pull_request:'));
   assert.ok(dependency.includes('  push:'));
 });

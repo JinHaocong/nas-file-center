@@ -53,4 +53,4 @@ jobs:
 
       - name: Reject moderate or higher production dependency advisories
         working-directory: frontend
-        run: npm audit --omit=dev --audit-level=moderate
+        run: node scripts/run-production-dependency-audit.mjs
