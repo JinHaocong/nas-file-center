@@ -243,4 +243,6 @@ test('mounted Task Inspector validates protected overlay priorities with real co
   const workflow = read('../.github/workflows/ui-v044-validation.yml');
   assert.match(workflow, /run: node scripts\/browser-task-overlays\.mjs/);
   assert.match(workflow, /frontend\/artifacts\/browser-task-overlay\/\*\.png/);
+  assert.ok(workflow.includes('frontend/artifacts/browser-task-overlay/mounted-overlay-section-important-owner-audit.json'),
+    'Mounted computed CSS JSON evidence must be uploaded from exact PR HEAD');
 });
