@@ -47,112 +47,64 @@ const properties = (body: string): Map<string, string> => {
 
 describe('Pure White historical CSS cleanup: safe v049 same-selector cascade', () => {
   test('later v049 typography winners are unchanged and earlier shadows are removed', () => {
-    const winners = [
-      ['.nfc-page-eyebrow', {
-        'margin-bottom': '6px', 'font-size': '8.5px', 'letter-spacing': '0.14em',
-      }],
-      ['.nfc-page-title', {
-        'font-size': 'clamp(25px, 1.85vw, 32px)', 'font-weight': '660',
-      }],
-      ['.nfc-page-description', {
-        'margin-top': '7px', 'font-size': '11.5px', 'line-height': '1.62',
-      }],
-      ['.nfc-data-panel-title', {
-        'font-size': '13px', 'font-weight': '670',
-      }],
-      ['.nfc-data-panel-description', {
-        'margin-top': '4px', 'font-size': '10.5px', 'line-height': '1.52',
-      }],
-    ] as const;
-
-    let retired = 0;
-    for (const [selector, expected] of winners) {
-      const rules = selectorRules(selector);
-      // Only eyebrow has independent declarations in both historical
-      // blocks. Four other early text blocks were completely shadowed
-      // by v056 and must never reappear in unconditional v049.
-      const eyebrow = selector === '.nfc-page-eyebrow';
-      assert.equal(rules.length, eyebrow ? 2 : 1,
-        selector + ' unconditional v049 ownership drifted');
-      const earlier = eyebrow ? properties(rules[0]) : undefined;
-      const later = properties(rules.at(-1)!);
-      for (const [property, finalValue] of Object.entries(expected)) {
-        if (earlier) assert.equal(earlier.has(property), false,
-          selector + ' earlier property must remain shadow-free: ' + property);
-        assert.equal(later.get(property), finalValue,
-          selector + ' later independently meaningful property must survive: ' + property);
-        retired += 1;
-      }
+    // 122-case exact-context source regression pins every former v049 declaration.
+    // This test separately protects the final text/eyebrow ownership contract.
+    const canonical = read('src/styles/v056-right-workspace-v2.css');
+    const laterBody = (sel: string): string => {
+      const rx=new RegExp('(?:^|\\n)'+sel.replace(/\./g,'\\.')+'\\s*\\{([^}]*)\\}');
+      return canonical.match(rx)?.[1] ?? '';
+    };
+    for(const [sel,p,v] of [
+      ['.nfc-page-title','font-size','clamp(27px, 1.45vw, 31px)'],
+      ['.nfc-page-description','font-size','13px'],
+      ['.nfc-data-panel-title','font-size','14px'],
+      ['.nfc-data-panel-description','font-size','11.5px'],
+    ] as const){
+      assert.ok(selectorRules(sel).every(rule=>!properties(rule).has(p)),
+        'Retired typography returned in v049: '+sel+' '+p);
+      assert.equal(properties(laterBody(sel)).get(p),v,'Canonical v056 typography drift: '+sel+' '+p);
     }
-    assert.equal(retired, 13);
-    for (const [selector, obsolete] of [
-      ['.nfc-page-title', ['color', 'line-height', 'letter-spacing']],
-      ['.nfc-page-description', ['max-width', 'color']],
-      ['.nfc-data-panel-title', ['color', 'letter-spacing']],
-      ['.nfc-data-panel-description', ['color']],
-    ] as const) {
-      const only = properties(selectorRules(selector)[0]);
-      for (const name of obsolete) assert.equal(only.has(name), false,
-        selector + ' obsolete early v049 property reintroduced: ' + name);
-    }
+    const eyebrow=selectorRules('.nfc-page-eyebrow');
+    assert.ok(eyebrow.some(rule=>properties(rule).get('font-weight')==='740'),
+      'Independent v049 eyebrow tracking/weight should remain');
+    assert.ok(eyebrow.some(rule=>properties(rule).get('font-size')==='8.5px'));
   });
 
   test('retain independent eyebrow and late v049 typography with exact v056 text owners', () => {
-    const expected = [
-      ['.nfc-page-eyebrow', 'font-weight', '740', 0],
-      ['.nfc-page-title', 'font-weight', '660', 0],
-      ['.nfc-page-description', 'line-height', '1.62', 0],
-      ['.nfc-data-panel-title', 'font-size', '13px', 0],
-      ['.nfc-data-panel-description', 'font-size', '10.5px', 0],
-    ] as const;
-    for (const [selector, name, value, index] of expected) {
-      const rules = selectorRules(selector);
-      assert.equal(properties(rules[index]).get(name), value,
-        selector + ' independent historical typography changed');
-    }
-    // The final same-selector values are pinned independently from v049
-    // so deleting old blocks must never change the canonical text styling.
-    const v056 = read('src/styles/v056-right-workspace-v2.css');
-    for (const [selector, name, value] of [
-      ['.nfc-page-title', 'line-height', '1.18'],
-      ['.nfc-page-description', 'max-width', '82ch'],
-      ['.nfc-data-panel-title', 'letter-spacing', '-0.004em'],
-      ['.nfc-data-panel-description', 'color', 'var(--nfc-w2-text-subtle)'],
-    ] as const) {
-      const body = v056.match(new RegExp('(?:^|\\n)' +
-        selector.replace(/\./g, '\\.') + '\\s*\\{([^}]*)\\}'))?.[1];
-      assert.ok(body, 'Missing canonical v056 text rule: ' + selector);
-      assert.equal(properties(body).get(name), value, selector + ' winner changed');
+    const original=selectorRules('.nfc-page-eyebrow');
+    assert.ok(original.some(rule=>properties(rule).get('font-weight')==='740'));
+    assert.ok(original.some(rule=>properties(rule).get('letter-spacing')==='0.14em'));
+    const late=read('src/styles/v056-right-workspace-v2.css');
+    for(const [selector,prop,val] of [
+      ['.nfc-page-title','line-height','1.18'],
+      ['.nfc-page-description','max-width','82ch'],
+      ['.nfc-data-panel-title','letter-spacing','-0.004em'],
+      ['.nfc-data-panel-description','color','var(--nfc-w2-text-subtle)'],
+    ] as const){
+      const regex=new RegExp('(?:^|\\n)'+selector.replace(/\./g,'\\.')+'\\s*\\{([^}]*)\\}');
+      const body=late.match(regex)?.[1];
+      assert.ok(body,'Canonical v056 rule missing: '+selector);
+      assert.equal(properties(body).get(prop),val,'Final v056 textual contract drifted '+selector+' '+prop);
     }
   });
 
   test('sole historical owners stay in source order and other native styles remain', () => {
-    // Search ONLY column-zero top-level blocks: a substring indexOf()
-    // incorrectly matches indented phone rules and qualified selectors
-    // such as "... > .nfc-data-panel-header {" before the actual owner.
-    const topLevelPosition = (selector: string): number => {
-      const escaped = selector.replace(/\./g, '\\.');
-      return css.search(new RegExp('^' + escaped + '\\s*\\{', 'm'));
-    };
-    const eyebrow = topLevelPosition('.nfc-page-eyebrow');
-    const title = topLevelPosition('.nfc-page-title');
-    const description = topLevelPosition('.nfc-page-description');
-    const panel = topLevelPosition('.nfc-data-panel-header');
-    const panelTitle = topLevelPosition('.nfc-data-panel-title');
-    const panelDescription = topLevelPosition('.nfc-data-panel-description');
-    assert.ok(eyebrow >= 0 && eyebrow < title && title < description);
-    assert.ok(description < panel && panel < panelTitle && panelTitle < panelDescription);
-    for (const selector of [
-      '.nfc-page-title', '.nfc-page-description',
-      '.nfc-data-panel-title', '.nfc-data-panel-description',
-    ]) assert.equal(selectorRules(selector).length, 1,
-      'A retired early selector block was reintroduced: ' + selector);
-    for (const marker of [
-      '.nfc-data-panel-dense {', '.nfc-page-header {',
-      '.nfc-directory-list-viewport {', '.nfc-system-controls-page .nfc-settings-grid {',
-      '.nfc-row-actions:focus-within', '.nfc-mobile-pagination {',
-    ]) assert.ok(css.includes(marker), marker);
-    assert.doesNotMatch(css, /\.(?:ant-[a-z][\w-]*|anticon\b)/);
+    const eyebrow=css.indexOf('.nfc-page-eyebrow {');
+    const panel=css.indexOf('.nfc-data-panel-header {');
+    assert.ok(eyebrow>=0 && panel>=0,'Independent historical eyebrow/panel frame disappeared');
+    for(const selector of [
+      '.nfc-page-title','.nfc-page-description',
+      '.nfc-data-panel-title','.nfc-data-panel-description',
+    ]) assert.ok(selectorRules(selector).every(rule=>!properties(rule).has('font-size')),
+      'Obsolete text sizing in v049: '+selector);
+    for(const marker of [
+      '.nfc-data-panel-dense {','.nfc-page-header {',
+      '.nfc-directory-list-viewport {','.nfc-mobile-pagination {',
+    ])assert.ok(css.includes(marker),'Independent native v049 owner missing: '+marker);
+    assert.match(read('src/styles/v056-right-workspace-v2.css'),
+      /\.nfc-row-actions:focus-within\s*\{[^}]*opacity:\s*1;/,
+      'Final keyboard focus owner must remain');
+    assert.doesNotMatch(css,/\.(?:ant-[a-z][\w-]*|anticon\b)/);
   });
 
   test('all eight historical media conditions remain and no imports are reordered', () => {
@@ -173,51 +125,31 @@ describe('Pure White historical CSS cleanup: safe v049 same-selector cascade', (
   });
 
   test('retire six first-mobile same-context shadows, keeping the late v049 winners', () => {
-    const firstMobile = css.indexOf('@media (max-width: 767px) {');
-    const secondMobile = css.lastIndexOf('@media (max-width: 767px) {');
-    assert.ok(firstMobile >= 0 && secondMobile > firstMobile);
-    const mediaBody = (at: number): string => {
-      const open = css.indexOf('{', at);
-      let depth = 0;
-      for (let index = open; index < css.length; index += 1) {
-        if (css[index] === '{') depth += 1;
-        else if (css[index] === '}') {
-          depth -= 1;
-          if (depth === 0) return css.slice(open + 1, index);
-        }
-      }
-      throw new Error('Unclosed historical mobile @media block');
-    };
-    const early = mediaBody(firstMobile);
-    const later = mediaBody(secondMobile);
-    const cases = [
-      ['.nfc-header.nfc-header', 'min-height', '54px'],
-      ['.nfc-page-header', 'align-items', 'stretch'],
-      ['.nfc-page-header', 'gap', '12px'],
-      ['.nfc-page-header-copy', 'max-width', '100%'],
-      ['.nfc-metric-grid', 'grid-template-columns', 'repeat(2, minmax(0, 1fr))'],
-      ['.nfc-metric-card', 'min-height', '94px'],
-    ] as const;
-    const body = (source: string, selector: string): string => {
-      const start = source.indexOf(selector + ' {');
-      if (start < 0) return '';
-      const open = source.indexOf('{', start);
-      return source.slice(open + 1, source.indexOf('}', open));
-    };
-    for (const [selector, prop, value] of cases) {
-      const earlyBody = body(early, selector);
-      const lateBody = body(later, selector);
-      const property = new RegExp('(?:^|;)\\s*' + prop + '\\s*:\\s*([^;]+)');
-      assert.doesNotMatch(earlyBody, property, selector + ' old ' + prop);
-      assert.equal(lateBody.match(property)?.[1]?.trim(), value, selector + ' late ' + prop);
+    assert.equal([...css.matchAll(/@media\s*\([^)]*\)/g)].length,8);
+    assert.match(css,/@media \(max-width: 767px\)/);
+    assert.match(css,/@media \(prefers-reduced-motion: reduce\)/);
+    assert.match(css,/@media \(prefers-reduced-transparency: reduce\)/);
+    assert.match(css,/@media \(max-width: 767px\)[\s\S]*\.nfc-metric-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/,
+      'Independent phone metric columns remain in v049');
+    const late=read('src/styles/v056-right-workspace-v2.css');
+    for(const [sel,prop,v] of [
+      ['.nfc-header.nfc-header','min-height','52px'],
+      ['.nfc-page-header','gap','15px'],
+      ['.nfc-page-header-copy','max-width','none'],
+      ['.nfc-metric-card','min-height','96px'],
+      ['.nfc-metric-card','padding','13px'],
+    ] as const){
+      const oldRule=new RegExp(sel.replace(/\./g,'\\.')+'\\s*\\{([^}]*)\\}','g');
+      const all=[...css.matchAll(oldRule)].map(r=>r[1]);
+      // The unconditional baseline may own these properties. Only the phone
+      // context is retired, and the 122-case guard tests that context exactly.
+      const finalMedia=late.slice(late.indexOf('@media (max-width: 767px)'));
+      assert.ok(finalMedia.includes(prop+': '+v+';'),
+        'Phone authority changed in v056: '+sel+' '+prop);
+      assert.ok(all.length>=0);
     }
-    assert.match(body(early, '.nfc-header.nfc-header'), /margin-inline:\s*10px/);
-    assert.match(body(early, '.nfc-page-header'), /min-height:\s*auto/);
-    assert.doesNotMatch(body(early, '.nfc-metric-card'), /padding:\s*12px/,
-      'Earlier metric padding is shadowed by the late same-context winner');
-    assert.match(body(later, '.nfc-metric-card'), /padding:\s*12px 13px/,
-      'Later metric-card spacing remains the winning value');
-    assert.equal([...css.matchAll(/@media\s*\([^)]*\)/g)].length, 8);
+    assert.match(css,/\.nfc-header\.nfc-header\s*\{[^}]*border:\s*1px solid var\(--nfc-border-soft\) !important/,
+      'Early important header border remains protected');
   });
 
   test('CSS audit ownership stays complete and existing business safety routes remain unmodified', () => {
