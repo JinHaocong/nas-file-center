@@ -26,6 +26,15 @@ full-route job, blocking downstream unified review bundling and PR merge.
 These new tests use the same GET-only synthetic API and explicitly block
 mutating and off-origin requests. They do not change runtime React or CSS.
 
+## Confirmed defect and repair
+
+On the first exact-HEAD Chromium run, the new audit rejected the visible
+`/audit` search field in light/dark/system configurations at several widths:
+`input#audit-search-input[type=search]` had only a search icon and placeholder,
+neither providing a reliable programmatic control name. This PR adds
+`aria-label="搜索审计事件（操作或路径）"` to the actual Audit search input
+and registers a dedicated regression assertion. This is an accessibility
+bug fix, not a cosmetic stylesheet change or a human signoff.
 ## Limitations / remaining human work
 
 **No owner/manual checkboxes have been closed.** This audit does not certify
