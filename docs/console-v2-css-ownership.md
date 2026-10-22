@@ -1970,3 +1970,25 @@ Baseline merged main d25832de92e79e4743ee6f0f497d92a73667aa71 has **145** exact-
 After cleanup the same restricted historical nine-layer scan yields **122** exact-overlap keys (**94** differently-valued). These counts are not unresolved paint bugs and do not cover selector intersection, shorthand, complex importance, or later Console v2 page styles. All six original historical important-precedence barriers still require contextual classification; browser actual paint and open-overlay states must be reviewed before concluding Stage 70.
 
 Cumulative historical retired declarations **491 → 519** only after full PR and merged-main CI success; 69/74 remains unchanged. Human 25-route visual review, keyboard/accessibility testing, isolated NAS, and owner deployment sign-off are still independent, unfinished gates. No runtime API, NAS data or deployment change.
+
+
+### 2026-10-22: Dependency Audit registry-outage recovery (main after PR #336)
+
+The PR #336 exact-HEAD **16/16 checks / 4/4 workflows** passed. Its merged-main
+commit `f69dd16b8c6da3765ba28bba42d5afe0075009ae` then encountered two distinct `npm audit` HTTP **503 Service
+Unavailable** responses from `https://registry.npmjs.org/-/npm/v1/security/audits/quick`.
+The npm security service did not return advisory findings, so those failed runs
+neither establish a vulnerability nor certify a clean dependency tree.
+
+To keep the full production dependency check fail-closed, the existing
+`npm ci --ignore-scripts` remains unchanged and the audit invocation uses
+`frontend/scripts/run-production-dependency-audit.mjs`: `npm audit --omit=dev
+--audit-level=moderate --fetch-retries=0 --fetch-timeout=45000`. Retry **only**
+a specifically identified HTTP 503 from npm's audit service, at most three
+attempts with bounded timeouts/backoff. A moderate+ advisory, different
+network error, timeout, interrupted process, or three repeated 503s exits
+nonzero, blocking merge. No advisory severity or security gate is relaxed.
+Mocked unit scenarios validate recovery, persistent 503, real advisory,
+unknown failure and clean success. The Stage 70 full CSS cascade/visual
+signoff, 25-route human review, accessibility, isolated NAS and owner approval
+are unchanged; formal completion remains **69/74**.
