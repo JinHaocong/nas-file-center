@@ -1950,3 +1950,14 @@ fallback normalizations are separate. The broader Stage 70 CSS
 owner review is still OPEN; automated screenshots do not constitute
 human visual signoff, accessibility signoff, isolated NAS acceptance
 or deployment authorization. Overall milestone count **69/74**.
+
+
+## 2026-10-22 — v048-detail cross-layer exact-owner retirement (Stage 70)
+
+Rescanning the nine historical CSS layers at `eb010fa0700adb4a9cfafafeea3b7a646cae59d6` before this change found **172** exact selector, media context and property cross-file overlap keys, **129** with differing authored values. These are *candidates*, not dead-code counts.
+
+Retire **33** redundant CSS declarations from `frontend/src/styles/v048-detail.css`, matching complete selectors and at-rule ancestry to later `v056-right-workspace-v2.css`, `v054-premium-system.css`, `v052-final-audit.css`, `v049-workspace.css`, `v051-product-polish.css` property owners with equal/higher importance. Remove the newly empty rules; retain independent status badge colors, responsive description borders, mobile focus/responsive and reduced-motion safeguards. Original import order and later values remain intact, with no React, backend or filesystem changes. A new exact-owner test pins all 33 absent earlier declarations and unchanged later values; existing Chromium matrices remain required.
+
+After this source change the same narrow nine-layer scan finds **145** cross-file overlap keys and **113** differing-value keys. This intentionally excludes broader selector intersections, specificity and shorthand interactions, Console v2 native page CSS, unmounted dialog states, and final computed/browser visual verification. Six known important-precedence barriers need individual review. The historical property retirement total increases **458 → 491** only if full PR and merged-main CI gates pass.
+
+**Stage 70 remains OPEN**, with actual CSS ownership/paint review outstanding; 25 route × 8 width × 4 mode human visual approval, accessibility and keyboard audit, isolated real NAS verification and final owner approval remain separate, unfinished gates. Overall project count **69/74** is unchanged.
