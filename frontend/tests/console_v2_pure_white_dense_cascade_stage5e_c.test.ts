@@ -11,7 +11,8 @@ const workflow = read('../.github/workflows/ui-v044-validation.yml');
 
 function rules(selector: string): string[] {
   const escaped = selector.replace(/[.*+?^$\x7b\x7d()|[\]\\]/g, '\\$&');
-  const expression = new RegExp('(?:^|\\n)\\s*' + escaped + '\\s*\\{([^}]*)\\}', 'g');
+  // Desktop-only: @media child rules are indented and must not be treated as unconditional declarations.
+  const expression = new RegExp('(?:^|\\n)' + escaped + '\\s*\\{([^}]*)\\}', 'g');
   return [...v049.matchAll(expression)].map(match => match[1]);
 }
 
