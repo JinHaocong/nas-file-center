@@ -243,10 +243,14 @@ test('earlier important priorities and independent responsive owner remain prote
     'Protected source importance barrier must not be silently retired: ' +
       selector + ' ' + property);
   }
-  assert.ok(matches(earlier,
-    '.nfc-filter-bar, .nfc-bulk-action-bar', '@media (max-width: 767px)')
-    .some(rule => rule.declarations.get('padding') === '9px 10px'),
-  'Older explicitly audited responsive toolbar padding stays preserved');
+  const phone = '@media (max-width: 767px)';
+  const bar = '.nfc-filter-bar, .nfc-bulk-action-bar';
+  assert.ok(matches(earlier, bar, phone).every(rule =>
+    !rule.declarations.has('padding')),
+  'Old responsive toolbar padding must stay retired after exact-context v056 migration');
+  assert.ok(matches(later, bar, phone).some(rule =>
+    rule.declarations.get('padding') === '10px'),
+  'Final v056 responsive toolbar padding must remain 10px');
 });
 
 test('historical stylesheet precedence and readonly browser gates are unchanged', () => {
