@@ -227,23 +227,6 @@
     --nfc-v55-hero-y: 17px;
   }
 
-  .nfc-app-main .nfc-page-content {
-    padding:
-      var(--nfc-v55-page-top)
-      var(--nfc-v55-page-gutter)
-      var(--nfc-v55-page-bottom);
-  }
-
-  .nfc-app-main .nfc-page-header {
-    min-height: 0;
-    margin-bottom: 18px;
-    padding:
-      var(--nfc-v55-hero-y)
-      var(--nfc-v55-hero-x)
-      18px;
-    border-radius: 14px;
-    gap: 12px;
-  }
 
   .nfc-app-main .nfc-page-header::after {
     left: var(--nfc-v55-hero-x);
@@ -264,17 +247,9 @@
 
   .nfc-app-main .nfc-dashboard-page .nfc-dashboard-command-deck {
     margin-bottom: 18px;
-    gap: 12px;
+
   }
 
-  .nfc-app-main .nfc-dashboard-page .nfc-dashboard-command-deck .nfc-metric-card {
-    min-height: 106px;
-    padding: 15px 14px;
-  }
-
-  .nfc-app-main .nfc-dashboard-page .nfc-dashboard-command-deck .nfc-snapshot-note {
-    padding: 14px;
-  }
 
   .nfc-app-main .nfc-dashboard-page .nfc-dashboard-layout,
   .nfc-app-main .nfc-dashboard-page .nfc-dashboard-main-column,
