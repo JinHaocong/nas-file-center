@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NAS File Center — 人工视觉验收工作台</title>
+<style>
+:root { color-scheme: light; font-family: system-ui, sans-serif; background: #f4f4f2; color: #242424; }
+body { margin: 0 auto; padding: 1.5rem; max-width: 1500px; }
+h1 { margin: 0 0 .5rem; font-size: 1.5rem; }
+.note { line-height: 1.55; max-width: 84ch; }
+.warning { border-left: 4px solid #805200; background: #fff5dd; padding: .8rem 1rem; }
+.controls { display: flex; flex-wrap: wrap; gap: .8rem; align-items: end; margin: 1rem 0; }
+.controls label { display: grid; gap: .25rem; font-weight: 600; }
+select, input, textarea, button { border: 1px solid #777; background: white; color: #222; border-radius: 5px; padding: .45rem; font: inherit; }
+button { cursor: pointer; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid #1756b5; outline-offset: 2px; }
+#summary { font-weight: 700; }
+#gallery { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,360px),1fr)); gap: 1rem; }
+.review { background: white; border: 1px solid #ccc; border-radius: 8px; padding: .8rem; min-width: 0; }
+.review h2 { font-size: 1rem; overflow-wrap: anywhere; }
+.review a { display: block; }
+.review img { width: 100%; height: 250px; object-fit: contain; object-position: top center; background: #f0f0f0; border: 1px solid #ddd; }
+.review label { display: grid; gap: .25rem; margin: .5rem 0; }
+.review textarea { box-sizing: border-box; width: 100%; min-height: 3.5rem; resize: vertical; }
+small { color: #555; overflow-wrap: anywhere; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<h1>NAS File Center — 800 组人工视觉验收</h1>
+<p class="note warning"><strong>全部初始状态为未检查。</strong>自动化 Chromium 截图、零错误检查和已合并的 GitHub CI 不等于人工视觉验收。仅在逐张查看截图并确认后才能选择「通过」；这里的导出文件只是人工记录，不会自动修改仓库里程碑或批准生产 NAS 部署。</p>
+<p class="note">离线查看同一 PR HEAD 的 25 路由 × 8 宽度 × 4 主题。点击图片打开原始分辨率。请同时查看额外弹窗、错误态截图，人工检查遮挡、汉字字体、纵向层级、滚动、主题、聚焦和响应式细节。遇到缺陷选「发现问题」并填写说明。所有结果仅保存在当前页面内，请定期导出 JSON，重新打开时使用导入恢复。</p>
+<p id="sha"></p>
+<div class="controls">
+<label>审查人<input id="reviewer" placeholder="人工审查人 / owner" autocomplete="off"></label>
+<label>路由<select id="route"></select></label>
+<label>宽度<select id="width"></select></label>
+<label>主题<select id="theme"></select></label>
+<button id="export" type="button">导出人工检查记录 JSON</button>
+<label>导入先前的 JSON<input id="import" type="file" accept=".json,application/json"></label>
+</div>
+<p id="summary" role="status" aria-live="polite"></p>
+<main id="gallery"></main>
+<script type="application/json" id="review-data">__REVIEW_DATA__</script>
+<script>
+'use strict';
+const source = JSON.parse(document.getElementById('review-data').textContent);
+const allowed = ['UNREVIEWED', 'PASS', 'DEFECT', 'FOLLOW_UP'];
+const records = source.rows.map(row => ({ ...row }));
+const idFor = row => [row.route, row.width, row.theme].join('|');
+const route = document.getElementById('route');
+const width = document.getElementById('width');
+const theme = document.getElementById('theme');
+const gallery = document.getElementById('gallery');
+const summary = document.getElementById('summary');
+document.getElementById('sha').textContent = '截图工件预期 GitHub HEAD SHA: ' + source.sourceHeadSha +
+  '（请人工核对下载的 8 个 artifact 文件名与 PR HEAD 完全一致）';
+function options(target, values, allLabel) {
+  const all = document.createElement('option');
+  all.value = ''; all.textContent = allLabel;
+  target.append(all);
+  for (const item of values) {
+    const opt = document.createElement('option');
+    opt.value = String(item); opt.textContent = String(item);
+    target.append(opt);
+  }
+}
+options(route, [...new Set(records.map(x => x.route))], '全部路由');
+options(width, [...new Set(records.map(x => x.width))], '全部宽度');
+options(theme, [...new Set(records.map(x => x.theme))], '全部主题');
+route.value = records[0].route;
+function updateSummary() {
+  const count = status => records.filter(x => x.status === status).length;
+  summary.textContent = '总计 800 / 人工通过 ' + count('PASS') +
+    ' / 缺陷 ' + count('DEFECT') + ' / 待跟进 ' + count('FOLLOW_UP') +
+    ' / 尚未复核 ' + count('UNREVIEWED');
+}
+function render() {
+  gallery.replaceChildren();
+  const selected = records.filter(row => (!route.value || row.route === route.value) &&
+    (!width.value || String(row.width) === width.value) &&
+    (!theme.value || row.theme === theme.value));
+  for (const row of selected) {
+    const card = document.createElement('article'); card.className = 'review';
+    const heading = document.createElement('h2');
+    heading.textContent = row.route + ' · ' + row.width + 'px · ' + row.theme;
+    const link = document.createElement('a');
+    link.href = row.image; link.target = '_blank'; link.rel = 'noopener';
+    link.setAttribute('aria-label', '打开原图 ' + heading.textContent);
+    const img = document.createElement('img');
+    img.src = row.image; img.loading = 'lazy'; img.alt = heading.textContent;
+    link.append(img);
+    const statusLabel = document.createElement('label');
+    statusLabel.textContent = '人工结论';
+    const select = document.createElement('select');
+    for (const [value, label] of [
+      ['UNREVIEWED', '未复核'], ['PASS', '人工通过'],
+      ['DEFECT', '发现问题'], ['FOLLOW_UP', '需要进一步核实']
+    ]) {
+      const opt = document.createElement('option');
+      opt.value = value; opt.textContent = label; select.append(opt);
+    }
+    select.value = row.status;
+    select.addEventListener('change', () => { row.status = select.value; updateSummary(); });
+    statusLabel.append(select);
+    const noteLabel = document.createElement('label');
+    noteLabel.textContent = '缺陷或检查说明';
+    const notes = document.createElement('textarea');
+    notes.maxLength = 1000; notes.value = row.notes;
+    notes.addEventListener('input', () => { row.notes = notes.value; });
+    noteLabel.append(notes);
+    card.append(heading, link, statusLabel, noteLabel);
+    gallery.append(card);
+  }
+  updateSummary();
+}
+route.addEventListener('change', render);
+width.addEventListener('change', render);
+theme.addEventListener('change', render);
+document.getElementById('export').addEventListener('click', () => {
+  const reviewer = document.getElementById('reviewer').value.trim();
+  if (!reviewer && records.some(x => x.status !== 'UNREVIEWED')) {
+    alert('请填写实际人工审查人，然后再导出已复核记录。'); return;
+  }
+  const result = JSON.stringify({
+    sourceHeadSha: source.sourceHeadSha, reviewer,
+    exportedAt: new Date().toISOString(), manualReviewComplete: false,
+    records: records.map(({ route, width, theme, status, notes }) =>
+      ({ route, width, theme, status, notes })),
+  }, null, 2);
+  const url = URL.createObjectURL(new Blob([result], { type: 'application/json' }));
+  const a = document.createElement('a'); a.href = url;
+  a.download = 'nfc-human-visual-review-' + source.sourceHeadSha.slice(0, 12) + '.json';
+  a.click(); URL.revokeObjectURL(url);
+});
+document.getElementById('import').addEventListener('change', async event => {
+  const file = event.target.files[0]; if (!file) return;
+  try {
+    const data = JSON.parse(await file.text());
+    if (data.sourceHeadSha !== source.sourceHeadSha ||
+        !Array.isArray(data.records) || data.records.length !== records.length)
+      throw Error('SHA 或 800 条记录不匹配');
+    const keyed = new Map(records.map((x, i) => [idFor(x), i]));
+    const seen = new Set();
+    for (const row of data.records) {
+      const key = idFor(row);
+      if (!keyed.has(key) || seen.has(key) || !allowed.includes(row.status) ||
+          typeof row.notes !== 'string' || row.notes.length > 1000)
+        throw Error('无效、重复或不完整的人工记录: ' + key);
+      seen.add(key);
+    }
+    for (const row of data.records) {
+      const original = records[keyed.get(idFor(row))];
+      original.status = row.status; original.notes = row.notes;
+    }
+    document.getElementById('reviewer').value = String(data.reviewer || '');
+    render();
+  } catch (error) { alert('无法导入: ' + error.message); }
+  event.target.value = '';
+});
+render();
+</script>
+</body>
+</html>
