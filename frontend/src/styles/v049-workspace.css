@@ -109,6 +109,8 @@
 
 /* Page headers ------------------------------------------------------------- */
 
+.nfc-page-header-copy {
+}
 
 /* Historical global header must use canonical Pure White text, not v049 blue-gray. */
 .nfc-page-eyebrow {
@@ -130,7 +132,6 @@
   background: var(--nfc-v49-surface) !important;
   box-shadow: var(--nfc-v49-shadow-soft) !important;
 }
-
 
 .nfc-data-panel-default {
   box-shadow: var(--nfc-v49-shadow-soft) !important;
@@ -226,7 +227,6 @@
 
 /* Tables ------------------------------------------------------------------ */
 
-
 /* Metrics ----------------------------------------------------------------- */
 
 .nfc-metric-card {
@@ -292,9 +292,7 @@
   border-top-color: var(--nfc-v49-line);
 }
 
-
 /* Dedupe ------------------------------------------------------------------ */
-
 
 .nfc-advanced-dedupe-page .nfc-root-list {
   padding: 12px 14px;
@@ -369,7 +367,6 @@
   background: var(--nfc-v49-surface-soft);
 }
 
-
 /* Workflow ----------------------------------------------------------------- */
 
 .nfc-workflows-page .nfc-data-panel,
@@ -433,9 +430,6 @@
 .nfc-system-controls-page .nfc-settings-subpanel:last-child {
   border-bottom: 0 !important;
 }
-
-.nfc-system-controls-page .nfc-settings-subpanel-header,
-
 
 .nfc-system-controls-page .nfc-settings-subpanel-danger {
   margin: 12px 0 2px;
@@ -526,6 +520,11 @@
 
 /* Overlays ---------------------------------------------------------------- */
 
+.nfc-overlay-section {
+}
+
+.nfc-overlay-section-header {
+}
 
 .nfc-code-block {
   border-color: var(--nfc-v49-line);
@@ -533,6 +532,8 @@
 
 /* Directory picker --------------------------------------------------------- */
 
+.nfc-directory-picker-body {
+}
 
 .nfc-directory-browser-toolbar {
   border-bottom-color: var(--nfc-v49-line);
@@ -611,7 +612,6 @@
     padding: 24px 24px 48px;
   }
 
-
   .nfc-system-controls-page .nfc-settings-grid {
     gap: 18px;
   }
@@ -633,13 +633,13 @@
     display: none;
   }
 
-
   .nfc-page-header {
     min-height: auto;
   }
 
   .nfc-page-actions,
-
+  .nfc-page-actions .nfc-action-bar {
+  }
 
   .nfc-metric-card:nth-child(2n) {
     border-right: 0;
@@ -670,7 +670,6 @@
     gap: 12px;
   }
 
-
   .nfc-path-match-page .nfc-tool-workbench,
   .nfc-rename-page .nfc-tool-workbench,
   .nfc-batch-page .nfc-tool-workbench {
@@ -697,7 +696,6 @@
     padding: 10px 11px;
   }
 
-
   .nfc-workflow-builder-page .nfc-workflow-step-heading,
   .nfc-workflow-builder-page .nfc-workflow-step-editor {
     padding-inline: 10px;
@@ -710,7 +708,6 @@
   .nfc-page-content {
     padding-inline: 10px;
   }
-
 
   .nfc-metric-grid {
     grid-template-columns: 1fr 1fr;
@@ -850,13 +847,11 @@
   -webkit-backdrop-filter: blur(16px) saturate(120%);
 }
 
-
 .nfc-page-eyebrow {
   margin-bottom: 6px;
   font-size: 8.5px;
   letter-spacing: 0.14em;
 }
-
 
 /* All primary workspace containers share one radius/depth/surface system. */
 .nfc-data-panel,
@@ -874,7 +869,6 @@
   box-shadow: var(--nfc-ui-panel-shadow) !important;
 }
 
-
 .nfc-data-panel-dense {
   border-radius: var(--nfc-ui-panel-radius) !important;
 }
@@ -890,7 +884,6 @@
   border-bottom-color: var(--nfc-border-soft);
 
 }
-
 
 /* Keep native border and interaction transition; v056 owns metric-card geometry and surfaces. */
 .nfc-metric-card {
@@ -909,7 +902,6 @@
     0 1px 1px color-mix(in srgb, var(--nfc-text) 3%, transparent),
     0 14px 34px color-mix(in srgb, var(--nfc-text) 7%, transparent);
 }
-
 
 /* Controls and toolbars feel inset instead of forming another flat divider. */
 .nfc-filter-bar,
@@ -967,7 +959,6 @@
 
 /* Settings and form-heavy pages get more breathing room without wasting space. */
 
-
 .nfc-system-controls-page .nfc-settings-grid > .nfc-data-panel > .nfc-data-panel-header {
 
   padding: 15px 18px 14px;
@@ -976,7 +967,6 @@
 .nfc-system-controls-page .nfc-settings-grid > .nfc-data-panel > .nfc-data-panel-body {
   padding: 17px 18px 18px;
 }
-
 
 .nfc-tool-workbench,
 .nfc-complex-form-panel {
@@ -1005,7 +995,6 @@
     border-radius: 15px;
   }
 
-
   .nfc-data-panel,
   .nfc-tool-workbench,
   .nfc-complex-form-panel,
@@ -1022,7 +1011,6 @@
     min-height: 56px;
     padding: 12px 14px;
   }
-
 
   .nfc-metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
