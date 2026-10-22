@@ -329,12 +329,6 @@ test('v055 operational cleanup preserves independent declarations and mobile con
       '', 'margin-bottom', '28px'],
     ['.nfc-app-main .nfc-dashboard-page .nfc-dashboard-main-column',
       '@media (max-width: 1399px)', 'gap', '20px'],
-    ['.nfc-app-main .nfc-dashboard-page .nfc-dashboard-command-deck .nfc-metric-card',
-      '@media (max-width: 767px)', 'min-height', '106px'],
-    ['.nfc-app-main .nfc-dashboard-page .nfc-dashboard-command-deck .nfc-metric-card',
-      '@media (max-width: 767px)', 'padding', '15px 14px'],
-    ['.nfc-app-main .nfc-dashboard-page .nfc-dashboard-command-deck .nfc-snapshot-note',
-      '@media (max-width: 767px)', 'padding', '14px'],
     ['.nfc-app-main .nfc-quarantine-command-center',
       '@media (max-width: 767px)', 'padding', '11px'],
   ];
@@ -344,6 +338,18 @@ test('v055 operational cleanup preserves independent declarations and mobile con
       rule.declarations.get(property) === expected),
     'Independent or media-scoped styling removed: ' +
     selector + ' / ' + context + ' / ' + property);
+  }
+  // Preserve the actual v056 phone owner rather than requiring retired v055 shadows.
+  for(const [selector, property, value] of [
+    ['.nfc-app-main .nfc-dashboard-page .nfc-dashboard-command-deck .nfc-metric-card','min-height','86px'],
+    ['.nfc-app-main .nfc-dashboard-page .nfc-dashboard-command-deck .nfc-metric-card','padding','11px 12px'],
+    ['.nfc-app-main .nfc-dashboard-page .nfc-dashboard-command-deck .nfc-snapshot-note','padding','9px 11px'],
+  ]) {
+    const ctx='@media (max-width: 767px)';
+    assert.ok(matching(early,selector,ctx).every(rule=>!rule.declarations.has(property)),
+      'Old phone CSS returned: '+selector+' '+property);
+    assert.ok(matching(late,selector,ctx).some(rule=>rule.declarations.get(property)===value),
+      'Final phone CSS changed: '+selector+' '+property);
   }
   const entry = read('src/main.tsx');
   assert.ok(entry.indexOf("import './styles/v055-workspace-breathing.css';") <
