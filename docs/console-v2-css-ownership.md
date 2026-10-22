@@ -1992,3 +1992,12 @@ Mocked unit scenarios validate recovery, persistent 503, real advisory,
 unknown failure and clean success. The Stage 70 full CSS cascade/visual
 signoff, 25-route human review, accessibility, isolated NAS and owner approval
 are unchanged; formal completion remains **69/74**.
+
+
+## 2026-10-22 — v048/v049 whole-layer exact-context convergence (Stage 70)
+
+Baseline merged main `93d2922d7e7267025bf2c1a0561cab1bf3d4ec0b` passed **4/4 Checks and 3/3 Workflows** after the fail-closed audit reliability fix. Across nine historical imported layers, there were **122** exact full-selector/same-at-rule/same-property cross-file overlap keys (94 differently valued). This tranche removes **122** property declarations from `v048.css` (**30**) and `v049-workspace.css` (**92**), but only when a later stylesheet preserves the exact selector and at-rule with at least matching priority. Independent selectors and nonshadowed properties remain, and any newly empty rule block is separate from the property count.
+
+The same nine-layer inventory now identifies **exactly 6** remaining overlaps, **all 6 protected `!important` precedence barriers**: DataPanel header background; Header unconditional border/background and mobile border; overlay section border-radius/background. Unlike normal shadows, earlier important properties may outrank later ordinary declarations. These cases remain intact for computed-style/overlay review and are locked by both old inventory and new 122-case regression. The source scan is NOT a proof about intersecting selectors, nested cascade shorthand, native Console page CSS or live dialog paint.
+
+After full exact-HEAD PR and independently green post-merge main CI, cumulative retired historical declarations become **519 → 641**. Formal milestone #70 is still OPEN pending higher-order and browser owner/paint signoff; #71 25 routes × 8 widths × 4 themes, accessibility, isolated NAS and final owner authorization remain separate. Overall formal count remains **69/74**. No API, NAS filesystem or deployment changes.
