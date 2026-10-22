@@ -226,6 +226,7 @@ jobs:
             frontend/artifacts/browser-overlay/*.png
             frontend/artifacts/browser-overlay/composited-portal-text-contrast-audit.json
             frontend/artifacts/browser-task-overlay/*.png
+            frontend/artifacts/browser-task-overlay/mounted-overlay-section-important-owner-audit.json
             frontend/artifacts/browser-quarantine-plan/*.png
             frontend/artifacts/browser-quarantine-plan/quarantine-list-error-retry-paint-audit.json
             frontend/artifacts/browser-quarantine-bulk/*.png
