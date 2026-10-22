@@ -58,16 +58,10 @@
 .nfc-app-main .nfc-page-header::after {
   content: '';
   position: absolute;
-  left: 4px;
-  bottom: -1px;
-  width: 72px;
-  height: 1px;
+
+
   border-radius: var(--nfc-radius-pill);
-  background: linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--nfc-accent) 58%, transparent),
-    color-mix(in srgb, var(--nfc-accent) 8%, transparent)
-  );
+
 }
 
 .nfc-app-main .nfc-page-eyebrow {
@@ -647,12 +641,6 @@
   .nfc-app-main .nfc-page-content {
     padding-top: 16px;
     padding-bottom: calc(var(--nfc-mobile-dock-height, 78px) + 22px + env(safe-area-inset-bottom));
-  }
-
-
-  .nfc-app-main .nfc-page-header::after {
-    left: 0;
-    width: 52px;
   }
 
 
