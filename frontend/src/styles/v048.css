@@ -124,7 +124,6 @@ body {
   box-shadow: var(--nfc-premium-shadow) !important;
 }
 
-
 .nfc-data-panel-header {
   border-bottom: 1px solid var(--nfc-premium-line);
   background: transparent !important;
@@ -209,8 +208,6 @@ body {
 /* -------------------------------------------------------------------------- */
 /* Filters, toolbars, controls                                                */
 /* -------------------------------------------------------------------------- */
-
-.nfc-filter-bar,
 
 
 /* -------------------------------------------------------------------------- */
@@ -400,11 +397,9 @@ body {
     width: 100%;
   }
 
-
   .nfc-dashboard-rail {
     grid-template-columns: 1fr;
   }
-
 
   .nfc-settings-panel-body,
   .nfc-settings-stack {
@@ -413,7 +408,4 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .nfc-app-shell *,
-  .nfc-app-shell *::before,
-
 }
