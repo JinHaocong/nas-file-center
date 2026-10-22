@@ -72,6 +72,7 @@ export const AuditPage: React.FC = () => {
           <label className="nfc-v2-audit-search" htmlFor="audit-search-input">
             <ConsoleIcon name="search" size={17} />
             <input id="audit-search-input" type="search" value={searchText}
+              aria-label="搜索审计事件（操作或路径）"
               placeholder="搜索操作/路径..."
               onChange={event => { setSearchText(event.target.value); setPage(1); }} />
           </label>
