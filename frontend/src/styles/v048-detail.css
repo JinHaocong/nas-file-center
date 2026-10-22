@@ -14,9 +14,6 @@
 /* Route-aware command rail                                                   */
 /* -------------------------------------------------------------------------- */
 
-.nfc-header.nfc-header {
-  min-height: 60px;
-}
 
 .nfc-header-workspace {
   padding-right: 16px;
@@ -59,46 +56,25 @@
   color: var(--nfc-premium-muted) !important;
 }
 
-.nfc-header-command-cluster {
-  gap: 2px;
-}
 
 /* -------------------------------------------------------------------------- */
 /* Page header precision                                                      */
 /* -------------------------------------------------------------------------- */
 
-.nfc-page-header-copy {
-  max-width: min(920px, 72vw);
-}
-
-.nfc-page-title {
-  text-wrap: balance;
-}
-
-.nfc-page-description {
-  text-wrap: pretty;
-}
 
 .nfc-page-actions {
   flex-wrap: wrap;
   justify-content: flex-end;
 }
 
-.nfc-page-actions .nfc-action-bar {
-  justify-content: flex-end;
-}
 
 /* -------------------------------------------------------------------------- */
 /* Definition/spec surfaces                                                   */
 /* -------------------------------------------------------------------------- */
 
 .nfc-responsive-descriptions {
-  overflow: hidden;
-  border: 0 !important;
   border-top: 1px solid var(--nfc-premium-line) !important;
   border-bottom: 1px solid var(--nfc-premium-line) !important;
-  border-radius: 0 !important;
-  background: transparent !important;
   box-shadow: none !important;
 }
 
@@ -132,14 +108,6 @@
 /* Native row actions                                                         */
 /* -------------------------------------------------------------------------- */
 
-.nfc-row-actions {
-  gap: 1px;
-  opacity: 0.78;
-  transition: opacity 120ms ease;
-}
-.nfc-row-actions:focus-within {
-  opacity: 1;
-}
 
 /* -------------------------------------------------------------------------- */
 /* Status, path and metadata                                                  */
@@ -154,8 +122,6 @@
 }
 
 .nfc-status-dot {
-  width: 5px;
-  height: 5px;
   box-shadow: none;
 }
 
@@ -203,16 +169,9 @@
 /* Native loading and pagination                                              */
 /* -------------------------------------------------------------------------- */
 
-.nfc-centered-state {
-  min-height: 260px;
-  color: var(--nfc-premium-muted);
-}
 
 .nfc-mobile-pagination {
-  min-height: 52px;
-  padding: 10px 4px;
   border-top: 1px solid var(--nfc-premium-line);
-  background: transparent;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -283,9 +242,7 @@
 /* -------------------------------------------------------------------------- */
 
 @media (max-width: 1199px) {
-  .nfc-page-header-copy {
-    max-width: min(760px, 68vw);
-  }
+
 
   .nfc-header-workspace {
     min-width: 120px;
@@ -295,35 +252,16 @@
 
 @media (max-width: 767px) {
   .nfc-header-status {
-    max-width: calc(100vw - 152px);
     padding: 2px;
-    overflow-x: auto;
-    scrollbar-width: none;
   }
 
-  .nfc-header-status::-webkit-scrollbar {
-    display: none;
-  }
-
-  .nfc-page-header-copy {
-    max-width: 100%;
-  }
 
   .nfc-page-actions {
     justify-content: flex-start;
   }
 
-  .nfc-page-actions .nfc-action-bar {
-    justify-content: flex-start;
-  }
-
-  .nfc-responsive-descriptions {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 
   .nfc-description-item {
-    min-height: 70px;
-    padding: 12px;
     border-right: 1px solid var(--nfc-premium-line);
   }
 
@@ -343,16 +281,11 @@
     border-bottom: 0;
   }
 
-  .nfc-row-actions {
-    opacity: 1;
-  }
 
 }
 
 @media (max-width: 420px) {
-  .nfc-responsive-descriptions {
-    grid-template-columns: 1fr;
-  }
+
 
   .nfc-description-item,
   .nfc-description-item:nth-child(2n),
