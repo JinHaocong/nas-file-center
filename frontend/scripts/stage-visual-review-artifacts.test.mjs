@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  mkdtempSync, mkdirSync, writeFileSync, existsSync, readdirSync, rmSync, renameSync,
+  mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, rmSync, renameSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -78,4 +78,30 @@ test('rejects preexisting output or untrusted malformed exact HEAD', () => {
     assert.throws(() => stageVisualArtifacts(input, output, 'deadbeef'),
       /full exact GitHub/);
   });
+});
+
+
+test('unified artifact job waits for all eight real Chromium jobs and preserves exact SHA', () => {
+  const workflow = readFileSync('../.github/workflows/ui-v044-validation.yml', 'utf8');
+  const start = workflow.indexOf('  human-visual-review-pack:');
+  assert.ok(start !== -1, 'Missing post-Chromium human review job');
+  const job = workflow.slice(start);
+  for (const phrase of [
+    'needs: full-route-visual-audit',
+    'Checkout exact candidate HEAD',
+    'Verify candidate identity',
+    'actions/download-artifact@v4',
+    'full-route-visual-*-${{ github.event.pull_request.head.sha || github.sha }}',
+    'merge-multiple: false',
+    'node scripts/stage-visual-review-artifacts.mjs',
+    'node scripts/build-visual-review-pack.mjs',
+    'actions/upload-artifact@v4',
+    'human-visual-review-800-${{ github.event.pull_request.head.sha || github.sha }}',
+    'if-no-files-found: error',
+    'frontend/artifacts/full-route-visual/',
+    'frontend/artifacts/visual-review-pack/',
+  ]) assert.ok(job.includes(phrase), 'Lost review delivery rule: ' + phrase);
+  assert.doesNotMatch(job, /continue-on-error:\s*true/);
+  const runner = readFileSync('scripts/run-tests.mjs', 'utf8');
+  assert.ok(runner.includes('node --test scripts/stage-visual-review-artifacts.test.mjs'));
 });
