@@ -214,3 +214,33 @@ test('actual DataPanel Chromium paint guards legacy gradient and important backg
   const ci = read('../.github/workflows/ui-v044-validation.yml');
   assert.ok(ci.includes('node scripts/browser-workspace-cascade.mjs'));
 });
+
+test('mounted Task Inspector validates protected overlay priorities with real computed CSS', () => {
+  const browser = read('scripts/browser-task-overlays.mjs');
+  for (const marker of [
+    'async function auditMountedOverlaySectionOwnership(page, theme, width, phase)',
+    "await auditMountedOverlaySectionOwnership(page, theme.effective, width, 'sheet');",
+    "await auditMountedOverlaySectionOwnership(page, theme.effective, width, 'nested');",
+    'mounted-overlay-section-important-owner-audit.json',
+    'WIDTHS.length * THEMES.length * 2',
+    'actual.background !== background',
+    'actual.radius !== radius',
+    "actual.image !== 'none'",
+    'assert.deepEqual(writes, []',
+  ]) assert.ok(browser.includes(marker), 'Mounted computed CSS owner gate missing: ' + marker);
+  const historical = read('src/styles/v049-workspace.css');
+  const next = read('src/styles/v054-premium-system.css');
+  const native = read('src/styles/console-v2-task-overlays.css');
+  assert.match(historical,
+    /\.nfc-overlay-section\s*\{[^}]*border-radius: var\(--nfc-ui-inner-radius\) !important;[^}]*background: var\(--nfc-ui-panel-bg-strong\) !important;/,
+    'Historical important owner must not silently disappear');
+  assert.match(next,
+    /\.nfc-overlay-section\s*\{[^}]*border-radius: 12px;[^}]*background: var\(--nfc-surface-1\);/,
+    'Later ordinary competitor must remain visible in the inventory');
+  assert.match(native,
+    /\.nfc-v2-task-inspector \.nfc-overlay-section\s*\{[^}]*border-radius: 13px;[^}]*background: var\(--v2-paper\);/,
+    'Native normal-priority candidate must stay separately reviewed');
+  const workflow = read('../.github/workflows/ui-v044-validation.yml');
+  assert.match(workflow, /run: node scripts\/browser-task-overlays\.mjs/);
+  assert.match(workflow, /frontend\/artifacts\/browser-task-overlay\/\*\.png/);
+});
