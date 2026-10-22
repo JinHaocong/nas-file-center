@@ -22,6 +22,7 @@ try {
   execSync('node --test scripts/css-v048-detail-cross-layer-retirement.test.mjs', { stdio: 'inherit' });
   execSync('node --test scripts/production-dependency-audit-retry.test.mjs', { stdio: 'inherit' });
   execSync('node --test scripts/css-v050-v054-v055-exact-owner-retirement.test.mjs', { stdio: 'inherit' });
+  execSync('node --test scripts/css-v048-v049-final-exact-convergence.test.mjs', { stdio: 'inherit' });
   execSync('node --test scripts/css-v054-v056-proven-retirement.test.mjs', { stdio: 'inherit' });
   execSync('node --test scripts/css-historical-v055-v056-ownership.test.mjs', { stdio: 'inherit' });
   execSync('node --test scripts/visual-fixtures-archive.test.mjs', { stdio: 'inherit' });

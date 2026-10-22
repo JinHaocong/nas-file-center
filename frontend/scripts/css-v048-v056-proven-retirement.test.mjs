@@ -163,21 +163,29 @@ test('15 exact-selector, equal-at-rule v048 shadows stay retired with pinned v05
   }
 });
 
-test('v048 keeps independent desktop/mobile, premium, hover and reduced-motion values', () => {
-  for (const [context, selector, property, expected] of [
-    ['', '.nfc-metric-card:hover', 'box-shadow', 'none'],
-    ['', '.nfc-data-panel-header', 'background', 'transparent !important'],
-    ['@media (max-width: 767px)', '.nfc-header.nfc-header', 'min-height', '54px'],
-    ['@media (max-width: 767px)', '.nfc-page-header', 'min-height', 'auto'],
-    ['@media (max-width: 767px)', '.nfc-metric-card', 'min-height', '102px'],
-    ['@media (max-width: 767px)', '.nfc-metric-card', 'padding', '14px'],
-    ['@media (max-width: 767px)', '.nfc-data-panel-description', 'display', 'none'],
-  ]) assert.ok(owners(oldRules, context, selector).some(rule =>
-    rule.declarations.get(property) === expected),
-  'Independent early CSS must remain: ' + selector + ' ' + property);
-  assert.match(earlier, /@media \(prefers-reduced-motion: reduce\)/);
-  assert.match(earlier, /--nfc-premium-control: 38px/);
-  assert.doesNotMatch(earlier, /^[ \t]+$/m,
+test('v048 independent important background and migrated responsive owners stay protected', () => {
+  // Exact-context copies were removed in this tranche. Their effective values
+  // remain pinned at v049/v056; the early important DataPanel rule must survive.
+  assert.ok(owners(oldRules,'','.nfc-data-panel-header').some(r=>
+    r.declarations.get('background')==='transparent !important'));
+  const middle=leafRules(read('src/styles/v049-workspace.css'));
+  for(const [context,selector,property,sheet,value] of [
+    ['', '.nfc-metric-card:hover','box-shadow',middle,
+      '0 1px 1px color-mix(in srgb, var(--nfc-text) 3%, transparent),\n    0 14px 34px color-mix(in srgb, var(--nfc-text) 7%, transparent)'],
+    ['@media (max-width: 767px)','.nfc-header.nfc-header','min-height',newRules,'52px'],
+    ['@media (max-width: 767px)','.nfc-page-header','min-height',middle,'auto'],
+    ['@media (max-width: 767px)','.nfc-metric-card','min-height',newRules,'96px'],
+    ['@media (max-width: 767px)','.nfc-metric-card','padding',newRules,'13px'],
+    ['@media (max-width: 767px)','.nfc-data-panel-description','display',newRules,'block'],
+  ]){
+    assert.ok(owners(oldRules,context,selector).every(r=>!r.declarations.has(property)),
+      'Early exact-context shadow returned: '+selector+' '+property);
+    assert.ok(owners(sheet,context,selector).some(r=>r.declarations.get(property)===value),
+      'Final exact-context responsive owner changed: '+selector+' '+property);
+  }
+  assert.match(earlier,/@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(earlier,/--nfc-premium-control: 38px/);
+  assert.doesNotMatch(earlier,/^[ \t]+$/m,
     'Source removal must not introduce whitespace-only lines');
 });
 

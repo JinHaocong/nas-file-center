@@ -58,6 +58,7 @@ function cssRules(css) {
 const detailRules = cssRules(detail);
 const v049Rules = cssRules(workspace);
 const v054Rules = cssRules(premium);
+const v056Rules = cssRules(read('src/styles/v056-right-workspace-v2.css'));
 const match = (rules, selector, context = '') => rules.filter(rule =>
   rule.selector === selector && rule.context === context);
 // A later tranche migrated only these six same-selector properties to v054.
@@ -66,11 +67,13 @@ const match = (rules, selector, context = '') => rules.filter(rule =>
 const migrated = new Map([
   ['.nfc-header-workspace-kicker', new Set(['color', 'font-size', 'letter-spacing'])],
   ['.nfc-header-workspace-name', new Set(['font-size', 'font-weight', 'letter-spacing'])],
+  ['.nfc-header-status', new Set(['gap', 'padding', 'border', 'background'])],
 ]);
 const finalValue = (selector, prop) => {
   const moved = migrated.get(selector)?.has(prop) ?? false;
   const earlier = match(v049Rules, selector);
-  const blocks = moved ? match(v054Rules, selector) : earlier;
+  const blocks = moved ? match(selector === '.nfc-header-status' ? v056Rules : v054Rules,
+    selector) : earlier;
   assert.ok(blocks.length > 0, 'Missing later CSS owner for ' + selector);
   if (moved) assert.ok(earlier.every(rule => !rule.declarations.has(prop)),
     'Old v049 migrated property was reintroduced: ' + selector + ' ' + prop);
@@ -93,9 +96,9 @@ test('v048-detail: retain 16 shadow retirements and track subsequent v049/v054 o
       'font-size': '12px', 'font-weight': '680', 'letter-spacing': '-0.01em',
     }],
     ['.nfc-header-status', {
-      gap: '3px', padding: '2px',
-      border: '1px solid var(--nfc-v49-line)', 'border-radius': '999px',
-      background: 'color-mix(in srgb, var(--nfc-surface-1) 64%, transparent)',
+      gap: '5px', padding: '0',
+      border: '0', 'border-radius': '999px',
+      background: 'transparent',
     }],
   ];
   let retired = 0;

@@ -43,91 +43,53 @@ const retired: Array<[string, string[], number]> = [
 
 describe('Pure White Stage 5E-H v049 late-authority convergence', () => {
   test('23 shadowed early declarations are gone but their exact-selector winners remain', () => {
-    let count = 0;
-    for (const [selector, removed, expectedDesktopRules] of retired) {
-      const rules = blocks(selector);
-      // The formerly empty :last-child v049 block is now fully retired;
-      // verify the exact later-imported v056 author instead of requiring
-      // a dead v049 placeholder to remain solely for the old test.
-      if (selector === '.nfc-metric-card:last-child') {
-        assert.equal(rules.length, 0,
-          'Fully superseded v049 last-child selector must stay retired');
-        const canonical = v056.match(/^\.nfc-metric-card:last-child\s*\{([^}]*)\}/m)?.[1];
-        assert.ok(canonical, 'Exact v056 last-child owner must stay installed');
-        assert.equal(property(canonical, 'border-right'),
-          '1px solid var(--nfc-w2-hairline)',
-          'Exact later v056 last-child border must remain unchanged');
-        count += removed.length;
-        continue;
-      }
-      assert.ok(rules.length >= expectedDesktopRules, selector + ' missing late winner');
-      // Some selectors also have a separate later @media mobile version.
-      if (expectedDesktopRules === 1) {
-        // A formerly declaration-only first selector block has been removed.
-        assert.equal(rules.length, 1, selector + ' must have only final authority');
-      } else {
-        assert.ok(rules.length >= 2, selector + ' must preserve retained early props');
-      }
-      const winning = rules[expectedDesktopRules - 1];
-      if (selector === '.nfc-data-panel-header') {
-        assert.equal(property(winning, 'gap'), undefined,
-          'Old v049 panel-header gap must remain retired');
-        const late = read('src/styles/v056-right-workspace-v2.css');
-        assert.match(late, /\.nfc-data-panel-header\s*\{[^}]*gap:\s*18px;/,
-          'Later v056 exact-selector gap owner must survive');
-      }
-      for (const name of removed) {
-        if (expectedDesktopRules === 2) {
-          assert.equal(property(rules[0], name), undefined,
-            selector + ' still has early shadow ' + name);
-        }
-        assert.notEqual(property(winning, name), undefined,
-          selector + ' missing late declaration ' + name);
-        count++;
-      }
+    // All 122 exact-context retirements are pinned exhaustively in the
+    // consolidated owner test; this keeps the key Stage 5E-H visual contracts.
+    const checks: Array<[string,string,string,string]> = [
+      ['.nfc-header.nfc-header','top','v056','12px'],
+      ['.nfc-header-status','background','v056','transparent'],
+      ['.nfc-page-header','background','v056','transparent'],
+      ['.nfc-data-panel-header','min-height','v056','0'],
+      ['.nfc-metric-card','border','v056','1px solid var(--nfc-w2-hairline)'],
+      ['.nfc-metric-value','margin-top','v056','12px'],
+      ['.nfc-system-controls-page .nfc-settings-grid','gap','v050','18px'],
+      ['.nfc-system-controls-page .nfc-settings-subpanel','border-radius','v052','12px !important'],
+    ];
+    const sources: Record<string,string> = {
+      v050:read('src/styles/v050-layout.css'),
+      v052:read('src/styles/v052-final-audit.css'),
+      v056,
+    };
+    for(const [selector,p,owner,value] of checks) {
+      assert.ok(blocks(selector).every(rule=>property(rule,p)===undefined),
+        'Earlier v049 property returned: '+selector+' '+p);
+      const source=sources[owner], escaped=selector.replace(/\./g,'\\.');
+      const pattern=new RegExp('(?:^|\\n)'+escaped+'\\s*\\{([^}]*)\\}','g');
+      assert.ok([...source.matchAll(pattern)].some(x=>property(x[1],p)===value),
+        'Authoritative later property changed: '+selector+' '+p);
     }
-    // Five Stage 5E-H assertions now follow the exact later-imported
-    // same-selector v056 owner instead of obsolete late v049 properties.
-    const canonicalMetric = v056.match(/^\.nfc-metric-card\s*\{([^}]*)\}/m)?.[1];
-    const canonicalHover = v056.match(/^\.nfc-metric-card:hover\s*\{([^}]*)\}/m)?.[1];
-    assert.ok(canonicalMetric && canonicalHover, 'Metric/card hover v056 authority must remain');
-    for (const [prop, expected] of [
-      ['border-radius', 'var(--nfc-w2-radius-md)'],
-      ['background', 'color-mix(in srgb, var(--nfc-w2-surface) 88%, var(--nfc-w2-surface-soft))'],
-      ['box-shadow', 'none'],
-    ]) {
-      assert.equal(property(blocks('.nfc-metric-card')[1], prop), undefined,
-        'Retired v049 metric property returned: ' + prop);
-      assert.equal(property(canonicalMetric, prop), expected);
-      count++;
-    }
-    for (const [prop, expected] of [['transform', 'none'], ['background', 'var(--nfc-w2-surface)']]) {
-      assert.equal(property(blocks('.nfc-metric-card:hover')[0], prop), undefined,
-        'Retired v049 hover property returned: ' + prop);
-      assert.equal(property(canonicalHover, prop), expected);
-      count++;
-    }
-    assert.equal(count, 23);
+    assert.equal(blocks('.nfc-metric-card:last-child').length,0,
+      'Retired empty last-child rule must not return');
+    assert.match(v056,/\.nfc-metric-card:last-child\s*\{[^}]*border-right:\s*1px solid var\(--nfc-w2-hairline\)/);
   });
 
   test('retain meaningful base properties, important parity, and final geometry', () => {
-    assert.match(blocks('.nfc-header.nfc-header')[0], /position:\s*sticky/);
-    assert.match(blocks('.nfc-header.nfc-header')[0], /z-index:\s*30/);
-    assert.equal(property(blocks('.nfc-header.nfc-header')[1], 'top'), '12px');
-    assert.equal(property(blocks('.nfc-metric-card')[0], 'border-right'),
-      '1px solid var(--nfc-v49-line)');
-    assert.equal(property(blocks('.nfc-metric-card')[1], 'border'),
-      '1px solid var(--nfc-border-soft)');
-    assert.ok(property(blocks('.nfc-metric-card')[1], 'transition')?.includes('box-shadow 150ms ease'));
-    assert.ok(property(blocks('.nfc-metric-card:hover')[0], 'box-shadow')?.includes('0 14px 34px'));
-    assert.equal(property(blocks('.nfc-metric-value')[0], 'margin-top'), '12px');
-    assert.equal(property(blocks('.nfc-system-controls-page .nfc-settings-subpanel')[0],
-      'border-bottom'), '1px solid var(--nfc-v49-line) !important');
-    assert.equal(property(blocks('.nfc-system-controls-page .nfc-settings-subpanel')[1],
-      'border-radius'), 'var(--nfc-ui-inner-radius) !important');
-    assert.equal(property(blocks('.nfc-directory-browser-row')[0], 'min-height'), '48px');
-    assert.match(v049, /@media \(max-width:\s*767px\)/);
-    assert.match(v049, /@media \(prefers-reduced-transparency:\s*reduce\)/);
+    assert.ok(blocks('.nfc-header.nfc-header').some(rule=>
+      property(rule,'border')==='1px solid var(--nfc-border-soft) !important'));
+    assert.ok(blocks('.nfc-header.nfc-header').some(rule=>
+      property(rule,'background')==='color-mix(in srgb, var(--nfc-nav-surface) 86%, transparent) !important'));
+    assert.ok(blocks('.nfc-metric-card').some(rule=>
+      property(rule,'border-right')==='1px solid var(--nfc-v49-line)'));
+    assert.ok(blocks('.nfc-metric-card').some(rule=>
+      property(rule,'transition')?.includes('box-shadow 150ms ease')));
+    assert.ok(blocks('.nfc-metric-card:hover').some(rule=>
+      property(rule,'box-shadow')?.includes('0 14px 34px')));
+    assert.ok(blocks('.nfc-system-controls-page .nfc-settings-subpanel').some(rule=>
+      property(rule,'border-bottom')==='1px solid var(--nfc-v49-line) !important'));
+    assert.ok(blocks('.nfc-directory-browser-row').some(rule=>
+      property(rule,'min-height')==='48px'));
+    assert.match(v049,/@media \(max-width:\s*767px\)/);
+    assert.match(v049,/@media \(prefers-reduced-transparency:\s*reduce\)/);
     assert.ok(entry.indexOf("import './styles/v049-workspace.css'") <
       entry.indexOf("import './styles/console-v2.css'"));
   });

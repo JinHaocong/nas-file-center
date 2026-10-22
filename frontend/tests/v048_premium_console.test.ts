@@ -37,7 +37,11 @@ describe('v0.4.8 premium console visual system', () => {
 
   test('metrics remain one instrument strip and do not regress to card deck chrome', () => {
     const css = read('src/styles/v048.css');
-    assert.match(css, /\.nfc-metric-grid[\s\S]*gap: 0[\s\S]*border-radius: var\(--nfc-premium-radius-lg\)/);
+    assert.doesNotMatch(css, /\.nfc-metric-grid\s*\{/,
+      'Retired base instrument grid must not override current responsive layout');
+    const final = read('src/styles/v056-right-workspace-v2.css');
+    assert.match(final, /\.nfc-metric-grid\s*\{[^}]*gap:\s*12px;/,
+      'Current native metric grid spacing remains pinned');
     assert.match(css, /\.nfc-metric-card[\s\S]*border-radius: 0[\s\S]*box-shadow: none/);
   });
 

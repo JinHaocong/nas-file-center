@@ -10,11 +10,19 @@ describe('Console v2 reviewed v048 base CSS and safe branch cleanup', () => {
     assert.doesNotMatch(css, /\.(?:ant-[a-z][\w-]*|anticon\b)/);
     for (const marker of [
       ':root {', "[data-theme='dark'] {", '--nfc-premium-control: 38px',
-      '.nfc-data-panel', '.nfc-data-panel-header', '.nfc-metric-grid',
+      '.nfc-data-panel', '.nfc-data-panel-header',
       '.nfc-snapshot-note', '.nfc-form-note', '.nfc-dedupe-config-note',
       '.nfc-task-mobile-card', '@media (max-width: 767px)',
       '@media (prefers-reduced-motion: reduce)',
     ]) assert.ok(css.includes(marker), marker);
+    assert.doesNotMatch(css, /\.nfc-metric-grid\s*\{/,
+      'Superseded v048 unconditional metric grid must remain retired');
+    assert.match(read('src/styles/v049-workspace.css'),
+      /@media \(max-width: 767px\)[\s\S]*\.nfc-metric-grid\s*\{/,
+      'Independent phone metric columns still exist in v049');
+    assert.match(read('src/styles/v056-right-workspace-v2.css'),
+      /\.nfc-metric-grid\s*\{[^}]*gap:\s*12px;/,
+      'Final v056 metric spacing must stay unchanged');
   });
   test('native overlay and pagination authority stays loaded later than legacy stylesheet', () => {
     const entry = read('src/main.tsx');
