@@ -77,10 +77,10 @@ describe('Console v2 reviewed v050/v051/v055 legacy CSS retirement', () => {
       '.nfc-app-main .nfc-page-actions .nfc-action-bar {',
       '@media (min-width: 1800px)', '@media (max-width: 767px)',
     ]) assert.ok(css.includes(marker), marker);
-    assert.doesNotMatch(css, /\\.nfc-app-main \\.nfc-page-content\\s*\\{/,
+    assert.doesNotMatch(css, /\.nfc-app-main \.nfc-page-content\s*\{/,
       'Earlier v055 phone padding should remain absent');
     assert.match(read('src/styles/v056-right-workspace-v2.css'),
-      /@media \\(max-width: 767px\\)[\\s\\S]*\\.nfc-app-main \\.nfc-page-content\\s*\\{[^}]*padding:/,
+      /@media \(max-width: 767px\)[\s\S]*\.nfc-app-main \.nfc-page-content\s*\{[^}]*padding:/,
       'v056 still owns phone page padding');
   });
 
