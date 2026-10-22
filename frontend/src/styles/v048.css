@@ -53,15 +53,11 @@ body {
 }
 
 .nfc-app-main::before {
-  content: '';
-  position: fixed;
+
+
   inset: 0 0 auto 220px;
-  height: 220px;
-  pointer-events: none;
-  background:
-    radial-gradient(circle at 72% 0%, color-mix(in srgb, var(--nfc-premium-accent) 4.2%, transparent), transparent 52%),
-    linear-gradient(to bottom, color-mix(in srgb, var(--nfc-premium-surface-strong) 52%, transparent), transparent);
-  opacity: 0.72;
+
+
 }
 
 
@@ -128,10 +124,6 @@ body {
   box-shadow: var(--nfc-premium-shadow) !important;
 }
 
-.nfc-data-panel-quiet {
-  border-color: transparent !important;
-  background: var(--nfc-premium-surface-subtle) !important;
-}
 
 .nfc-data-panel-header {
   border-bottom: 1px solid var(--nfc-premium-line);
@@ -140,13 +132,6 @@ body {
 
 
 /* Instrument strip: one continuous surface instead of a deck of cards. */
-
-
-.nfc-metric-card:hover {
-
-
-  box-shadow: none;
-}
 
 
 /* -------------------------------------------------------------------------- */
@@ -226,13 +211,6 @@ body {
 /* -------------------------------------------------------------------------- */
 
 .nfc-filter-bar,
-.nfc-bulk-action-bar {
-  min-height: 58px;
-  padding: 10px 14px;
-  border-color: var(--nfc-premium-line) !important;
-  background: transparent !important;
-  box-shadow: none !important;
-}
 
 
 /* -------------------------------------------------------------------------- */
@@ -262,7 +240,7 @@ body {
 .nfc-operation-badge {
   border-radius: 7px;
   color: var(--nfc-premium-muted);
-  background: var(--nfc-premium-surface-subtle);
+
 }
 
 .nfc-code-path,
@@ -416,57 +394,17 @@ body {
 }
 
 @media (max-width: 767px) {
-  .nfc-app-main::before {
-    display: none;
-  }
-
-  .nfc-header.nfc-header {
-    min-height: 54px;
-    margin-inline: 10px;
-    padding-block: 6px;
-  }
-
-  .nfc-header-workspace {
-    display: none;
-  }
-
-
-  .nfc-page-header {
-    min-height: auto;
-
-
-  }
-
-  .nfc-page-title {
-    font-size: 26px;
-  }
 
 
   .nfc-page-actions {
     width: 100%;
   }
 
-  .nfc-metric-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .nfc-metric-card {
-    min-height: 102px;
-    padding: 14px;
-  }
 
   .nfc-dashboard-rail {
     grid-template-columns: 1fr;
   }
 
-  .nfc-data-panel-header {
-    min-height: 58px;
-    padding: 13px 14px;
-  }
-
-  .nfc-data-panel-description {
-    display: none;
-  }
 
   .nfc-settings-panel-body,
   .nfc-settings-stack {
@@ -477,8 +415,5 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .nfc-app-shell *,
   .nfc-app-shell *::before,
-  .nfc-app-shell *::after {
-    transition-duration: 0.01ms !important;
-    animation-duration: 0.01ms !important;
-  }
+
 }
