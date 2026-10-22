@@ -72,11 +72,16 @@ describe('Console v2 reviewed v050/v051/v055 legacy CSS retirement', () => {
   test('v055 retains wide workspace, responsive gutters and native header controls', () => {
     const css = read(sheets[2]);
     for (const marker of [
-      '--nfc-v55-page-gutter:', '.nfc-app-main .nfc-page-content {',
+      '--nfc-v55-page-gutter:',
       '.nfc-app-main .nfc-page-header {', '.nfc-app-main .nfc-page-actions {',
       '.nfc-app-main .nfc-page-actions .nfc-action-bar {',
       '@media (min-width: 1800px)', '@media (max-width: 767px)',
     ]) assert.ok(css.includes(marker), marker);
+    assert.doesNotMatch(css, /\\.nfc-app-main \\.nfc-page-content\\s*\\{/,
+      'Earlier v055 phone padding should remain absent');
+    assert.match(read('src/styles/v056-right-workspace-v2.css'),
+      /@media \\(max-width: 767px\\)[\\s\\S]*\\.nfc-app-main \\.nfc-page-content\\s*\\{[^}]*padding:/,
+      'v056 still owns phone page padding');
   });
 
   test('cascade order is stable and CI checks all 51 owned/reviewed files', () => {
