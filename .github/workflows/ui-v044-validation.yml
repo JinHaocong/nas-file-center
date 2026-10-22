@@ -317,3 +317,58 @@ jobs:
           retention-days: 14
           if-no-files-found: warn
           path: frontend/artifacts/full-route-visual/${{ matrix.width }}/
+
+  # Consolidate the eight already-successful, exact-HEAD Chromium screenshot
+  # artifacts into ONE downloadable offline human-review bundle. No approval.
+  human-visual-review-pack:
+    needs: full-route-visual-audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact candidate HEAD
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify candidate identity
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${EXPECTED_SHA}"
+          git diff --check
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Download eight width-specific artifacts from this workflow run
+        uses: actions/download-artifact@v4
+        with:
+          pattern: full-route-visual-*-${{ github.event.pull_request.head.sha || github.sha }}
+          path: frontend/visual-review-downloads
+          merge-multiple: false
+
+      - name: Reject mixed HEAD, missing widths and unexpected artifact names
+        working-directory: frontend
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: node scripts/stage-visual-review-artifacts.mjs visual-review-downloads artifacts/full-route-visual "$EXPECTED_SHA"
+
+      - name: Verify all 800 cases and build offline human review
+        working-directory: frontend
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: node scripts/build-visual-review-pack.mjs artifacts/full-route-visual artifacts/visual-review-pack "$EXPECTED_SHA"
+
+      - name: Upload single bundled review gallery and screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: human-visual-review-800-${{ github.event.pull_request.head.sha || github.sha }}
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            frontend/artifacts/full-route-visual/
+            frontend/artifacts/visual-review-pack/
