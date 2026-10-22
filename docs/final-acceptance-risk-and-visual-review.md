@@ -16,6 +16,32 @@ This is an evidence handoff and operator review aid, not CSS closure, human visu
 
 Stage 70 remains **OPEN** until selector intersections, shorthand and cascade interaction risks are reviewed and resolved or explicitly justified; actual browser paint evidence is assessed, and the relevant human visual authority confirms the remaining CSS behavior. The six important-precedence entries are intentional priority barriers, not six automatically confirmed defects.
 
+## Automated single-ZIP review handoff (from this CI enhancement)
+
+Every **new UI Validation PR run** now includes a `human-visual-review-pack`
+job that depends on all eight `full-route-visual-audit` jobs succeeding.
+The job downloads the eight artifacts from **that same workflow run**,
+checks the exact PR HEAD embedded in their names, rejects missing/duplicate
+widths, then validates all 800 screenshot paths and JSON manifests.
+It uploads one additional artifact named `human-visual-review-800-<PR HEAD SHA>`
+with these two directories:
+
+- `visual-review-pack/index.html`, `review-worklist.csv`, `evidence.json`
+- `full-route-visual/{360,390,430,768,1024,1280,1440,1920}/` screenshot PNGs and manifests
+
+Download that **one ZIP** from the successful UI Validation run, extract the
+entire ZIP to one directory, and open `visual-review-pack/index.html`.
+Do not open only the HTML outside the ZIP; screenshot links are relative.
+All 800 cases start as UNREVIEWED. The operator must review screenshots and
+export explicit decisions; artifact creation does not imply any human pass.
+Artifacts retain the existing 14-day expiration window.
+
+**Safety:** no CI write API requests, no NAS access, no background deployment,
+no auto-accept state, no weakening existing browser/security gates. The
+bundle job itself fails if any upstream full-route job fails. The exact-HEAD
+bundle is valid for its PR HEAD; after subsequent production CSS/UI edits,
+refresh it for the new inspected HEAD before final owner sign-off.
+
 ## Stage 71 — existing exact-HEAD artifacts
 
 PR #339 exact HEAD: 7b561c89988f5298f08d7894b1b4642020cd7db3.
