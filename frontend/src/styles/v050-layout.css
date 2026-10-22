@@ -236,16 +236,16 @@
 .nfc-tasks-page .nfc-filter-bar {
   min-height: 60px;
   padding: 10px 14px;
-  justify-content: flex-start;
-  gap: 10px;
+
+
   border: 0 !important;
   border-bottom: 1px solid var(--nfc-border-soft) !important;
 }
 
 .nfc-tasks-page .nfc-filter-control {
-  min-width: 180px;
+
   display: grid;
-  grid-template-columns: auto minmax(110px, 1fr);
+
   align-items: center;
   gap: 10px;
 }
@@ -353,7 +353,7 @@
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: 18px;
-  align-items: start;
+
 }
 
 .nfc-system-controls-page .nfc-settings-panel-runtime {
@@ -394,7 +394,7 @@
 .nfc-system-controls-page .nfc-settings-subpanel {
   overflow: clip;
   border: 1px solid var(--nfc-border-soft) !important;
-  border-radius: 13px !important;
+
   background: var(--nfc-ui-panel-bg-soft) !important;
 }
 
@@ -505,14 +505,6 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .nfc-dashboard-page .nfc-dashboard-layout {
-    grid-template-columns: 1fr;
-  }
-
-  .nfc-dashboard-page .nfc-dashboard-rail {
-    position: static;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 
   .nfc-dedupe-cockpit,
   .nfc-workflow-editor-layout {
@@ -573,7 +565,7 @@
 
   .nfc-dashboard-page .nfc-dashboard-rail {
     display: grid;
-    grid-template-columns: 1fr;
+
     gap: 12px;
   }
 
@@ -598,7 +590,7 @@
 
   .nfc-tasks-page .nfc-filter-control {
     width: 100%;
-    grid-template-columns: 72px minmax(0, 1fr);
+
   }
 
   .nfc-quarantine-command-center {

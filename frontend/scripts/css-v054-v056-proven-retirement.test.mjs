@@ -144,7 +144,6 @@ test('mobile layout, command controls, and accessibility-independent declaration
   for (const [media, selector, property, value] of [
     ['@media (max-width: 1199px)', '.nfc-app-main .nfc-page-header', 'gap', '18px'],
     ['@media (max-width: 767px)', '.nfc-app-main .nfc-page-content', 'padding-top', '16px'],
-    ['@media (max-width: 767px)', '.nfc-app-main .nfc-page-header::after', 'width', '52px'],
     ['@media (max-width: 767px)', '.nfc-app-main .nfc-data-panel-header', 'min-height', '58px'],
     ['@media (max-width: 767px)', '.nfc-app-main .nfc-page-actions .nfc-action-bar',
       'justify-content', 'flex-start'],
@@ -152,6 +151,16 @@ test('mobile layout, command controls, and accessibility-independent declaration
   ]) assert.ok(rules(early, media, selector).some(x =>
     x.declarations.get(property) === value),
   'Unrelated retained v054 property disappeared: ' + media + ' ' + selector + ' ' + property);
+  // v055 now exclusively owns the mobile ornament width under the same media context.
+  assert.ok(rules(early, '@media (max-width: 767px)',
+    '.nfc-app-main .nfc-page-header::after').every(rule =>
+    !rule.declarations.has('width')),
+  'Superseded mobile v054 ornament width returned');
+  const next = leafRules(read('src/styles/v055-workspace-breathing.css'));
+  assert.ok(rules(next, '@media (max-width: 767px)',
+    '.nfc-app-main .nfc-page-header::after').some(rule =>
+    rule.declarations.get('width') === '58px'),
+  'Final mobile ornament width must stay in v055');
   for (const marker of [
     '.nfc-app-main .nfc-row-actions:focus-within',
     '@media (prefers-reduced-motion: reduce)',

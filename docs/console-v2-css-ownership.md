@@ -1961,3 +1961,12 @@ Retire **33** redundant CSS declarations from `frontend/src/styles/v048-detail.c
 After this source change the same narrow nine-layer scan finds **145** cross-file overlap keys and **113** differing-value keys. This intentionally excludes broader selector intersections, specificity and shorthand interactions, Console v2 native page CSS, unmounted dialog states, and final computed/browser visual verification. Six known important-precedence barriers need individual review. The historical property retirement total increases **458 → 491** only if full PR and merged-main CI gates pass.
 
 **Stage 70 remains OPEN**, with actual CSS ownership/paint review outstanding; 25 route × 8 width × 4 mode human visual approval, accessibility and keyboard audit, isolated real NAS verification and final owner approval remain separate, unfinished gates. Overall project count **69/74** is unchanged.
+
+
+## 2026-10-22 — v050/v054/v055 cross-layer exact-owner reduction (Stage 70)
+
+Baseline merged main d25832de92e79e4743ee6f0f497d92a73667aa71 has **145** exact-selector, same property and at-rule cross-file candidate keys (113 differently valued). This PR removes **28** provably overwritten declarations: v050 **11**, v054 **7**, v055 **10**. Every retired property has a later, equally/higher priority declaration under the identical full selector and at-rule scope. The approved final values are unchanged. Newly empty blocks are removed separately. Retained styles include task bar independent sizing, page-ornament content/position, mobile dashboard layout, theme, keyboard and reduced-motion declarations. New 28-case source regression pins all old absences and late exact owners; Chromium gate remains required.
+
+After cleanup the same restricted historical nine-layer scan yields **122** exact-overlap keys (**94** differently-valued). These counts are not unresolved paint bugs and do not cover selector intersection, shorthand, complex importance, or later Console v2 page styles. All six original historical important-precedence barriers still require contextual classification; browser actual paint and open-overlay states must be reviewed before concluding Stage 70.
+
+Cumulative historical retired declarations **491 → 519** only after full PR and merged-main CI success; 69/74 remains unchanged. Human 25-route visual review, keyboard/accessibility testing, isolated NAS, and owner deployment sign-off are still independent, unfinished gates. No runtime API, NAS data or deployment change.
