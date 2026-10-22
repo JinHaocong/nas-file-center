@@ -9,6 +9,9 @@
 export function captureRouteAccessibility() {
   const controls = [];
   const refs = [];
+  const idCounts = new Map();
+  for (const node of document.querySelectorAll('[id]'))
+    idCounts.set(node.id, (idCounts.get(node.id) || 0) + 1);
   const images = [];
   const positiveTabstops = [];
   const interactive = 'button,a[href],input:not([type="hidden"]),select,textarea,' +
@@ -38,9 +41,7 @@ export function captureRouteAccessibility() {
         refs.push({
           source: describe(node), attribute, id, found: Boolean(found),
           // Duplicate referenced IDs cause ambiguous associations.
-          matches: document.querySelectorAll('[id]').length > 0
-            ? [...document.querySelectorAll('[id]')].filter(item => item.id === id).length
-            : 0,
+          matches: idCounts.get(id) || 0,
         });
       }
     }
