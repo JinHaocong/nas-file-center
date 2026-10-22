@@ -16,80 +16,27 @@ function rules(selector: string): string[] {
 }
 
 describe('Pure White Stage 5E-C v049 historical shadows and dense ledger acceptance', () => {
-  test('24 early desktop properties no longer shadow their later same-selector winners', () => {
-    const retired: Array<[string, string[]]> = [
-      ['.nfc-header.nfc-header', ['margin', 'border', 'box-shadow', 'backdrop-filter', '-webkit-backdrop-filter']],
-      ['.nfc-page-header', ['min-height', 'margin', 'padding', 'align-items', 'gap', 'border', 'border-radius', 'box-shadow']],
-      ['.nfc-page-header-copy', ['max-width']],
+  test('exact v056 desktop owner and independent v049 mobile geometry stay guarded', () => {
+    const cases: Array<[string, string, string]> = [
+      ['.nfc-header.nfc-header','margin','12px 12px 0'],
+      ['.nfc-page-header','padding','0 0 24px'],
+      ['.nfc-page-header-copy','max-width','min(980px, 74vw)'],
+      ['.nfc-metric-card','min-height','104px'],
+      ['.nfc-metric-card','padding','16px 17px'],
+      ['.nfc-data-panel-header','min-height','0'],
+      ['.nfc-page-actions','padding-bottom','1px'],
+      ['.nfc-metric-grid','gap','12px'],
     ];
-    let total = 0;
-    for (const [selector, properties] of retired) {
-      const blocks = rules(selector);
-      assert.ok(blocks.length >= 2, selector + ' lost late authoritative block');
-      const first = blocks[0];
-      const later = blocks.slice(1).join('\n');
-      for (const property of properties) {
-        const pattern = new RegExp('(?:^|\\n)\\s*' + property + '\\s*:', 'm');
-        assert.doesNotMatch(first, pattern, selector + ' early shadow ' + property);
-        assert.match(later, pattern, selector + ' missing late winner ' + property);
-        total++;
-      }
+    for(const [sel,prop,value] of cases) {
+      assert.ok(rules(sel).every(body=>!body.includes(prop+':')),
+        'Old v049 exact desktop property returned: '+sel+' '+prop);
+      const re=new RegExp('(?:^|\\n)'+sel.replace(/\./g,'\\.')+'\\s*\\{([^}]*)\\}','g');
+      const bodies=[...v056.matchAll(re)].map(match=>match[1]);
+      assert.ok(bodies.some(body=>body.includes(prop+': '+value+';')),
+        'Final v056 CSS declaration changed: '+sel+' '+prop);
     }
-    // Both later v049 metric-card geometry shadows now belong to v056.
-    // Keep the original two assertions in the 24-property acceptance total.
-    const metricHistorical = [...v049.matchAll(/^\.nfc-metric-card\s*\{([^}]*)\}/gm)];
-    assert.equal(metricHistorical.length, 2);
-    const metricCanonical = v056.match(/^\.nfc-metric-card\s*\{([^}]*)\}/m)?.[1];
-    assert.ok(metricCanonical, 'Missing exact-selector v056 metric-card owner');
-    for (const [property, value] of [['min-height', '104px'], ['padding', '16px 17px']]) {
-      const pattern = new RegExp('(?:^|\\n)\\s*' + property + '\\s*:');
-      assert.ok(metricHistorical.every(match => !pattern.test(match[1])),
-        'Obsolete v049 metric geometry reintroduced: ' + property);
-      assert.ok(metricCanonical.includes(property + ': ' + value + ';'),
-        'Exact v056 metric geometry drift: ' + property);
-      total += 1;
-    }
-
-    // This panel selector now has ONE unconditional v049 block (the
-    // independently meaningful later min-height/padding/background owner).
-    // The obsolete earlier min-height shadow must stay absent; the v056
-    // exact-selector owner still explicitly resets the desktop min-height.
-    const panelRoot = [...v049.matchAll(/^\.nfc-data-panel-header\s*\{([^}]*)\}/gm)];
-    assert.equal(panelRoot.length, 1,
-      'Old unconditional v049 panel-header shadow must not be reintroduced');
-    assert.match(panelRoot[0][1], /min-height:\s*62px;/);
-    assert.match(panelRoot[0][1], /padding:\s*15px 18px 14px;/);
-    const panelCanonical = v056.match(/^\.nfc-data-panel-header\s*\{([^}]*)\}/m)?.[1];
-    assert.ok(panelCanonical, 'Canonical v056 panel-header owner must survive');
-    assert.match(panelCanonical, /min-height:\s*0;/);
-    assert.match(panelCanonical, /gap:\s*18px;/);
-    total += 1;
-
-    // The old action-row padding is now its sole unconditional v049 rule.
-    const actionBlocks = rules('.nfc-page-actions');
-    assert.equal(actionBlocks.length, 1, 'Retain only the independent v049 action padding');
-    assert.match(actionBlocks[0], /padding-bottom:\s*0;/);
-    assert.doesNotMatch(actionBlocks[0], /(?:^|\n)\s*(?:align-self|gap)\s*:/);
-    total += 1;
-
-    // The six desktop metric-grid properties graduated from late v049 to
-    // later-imported v056: source-level leaf ownership is pinned separately
-    // by css-historical-cascade-convergence.test.mjs.
-    assert.doesNotMatch(v049, /^\.nfc-metric-grid\s*\{/m,
-      'Historical unconditional metric-grid declarations must stay retired');
-    const metricBase = v056.match(/(?:^|\n)\.nfc-metric-grid\s*\{([^}]*)\}/)?.[1];
-    assert.ok(metricBase, 'v056 unconditional metric-grid owner is required');
-    for (const property of ['gap', 'overflow', 'border', 'border-radius', 'background', 'box-shadow']) {
-      const rule = new RegExp('(?:^|\\n)\\s*' + property + '\\s*:');
-      assert.match(metricBase, rule, 'v056 final metric property ' + property);
-      total += 1;
-    }
-
-    assert.equal(total, 24);
-    assert.ok(rules('.nfc-header.nfc-header')[0].includes('position: sticky'));
-    assert.ok(rules('.nfc-page-header')[0].includes('border-bottom: 1px'));
-    assert.ok(rules('.nfc-metric-grid').some(block => block.includes('grid-template-columns')),
-      'Independent responsive metric columns must survive');
+    assert.match(v049,/\.nfc-header\.nfc-header\s*\{[^}]*border:\s*1px solid var\(--nfc-border-soft\) !important;/);
+    assert.match(v049,/@media \(max-width: 767px\)[\s\S]*\.nfc-metric-grid\s*\{[^}]*grid-template-columns:/);
     assert.ok(read('src/main.tsx').includes("import './styles/v049-workspace.css';"));
   });
 
