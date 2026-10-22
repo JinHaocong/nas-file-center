@@ -27,6 +27,7 @@ try {
   execSync('node --test scripts/css-historical-v055-v056-ownership.test.mjs', { stdio: 'inherit' });
   execSync('node --test scripts/visual-fixtures-archive.test.mjs', { stdio: 'inherit' });
   execSync('node --test scripts/full-route-visual.test.mjs', { stdio: 'inherit' });
+  execSync('node --test scripts/route-accessibility-audit.test.mjs', { stdio: 'inherit' });
   execSync('node --test scripts/build-visual-review-pack.test.mjs', { stdio: 'inherit' });
   execSync('node --test scripts/stage-visual-review-artifacts.test.mjs', { stdio: 'inherit' });
   execSync('python3 ../scripts/tests/test_cleanup_merged_branches.py', { stdio: 'inherit' });
