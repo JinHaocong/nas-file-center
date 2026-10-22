@@ -68,64 +68,41 @@ const matching = (rules, selector, context = '') => rules.filter(rule =>
   canonicalSelector(rule.selector) === canonicalSelector(selector) && rule.context === context);
 
 test('v049 desktop: 5 earlier shadows retired without changing late winners', () => {
-  const header = matching(v049, '.nfc-header.nfc-header');
-  assert.equal(header.length, 2);
-  assert.equal(header[0].declarations.has('background'), false);
-  assert.equal(header[0].declarations.get('position'), 'sticky');
-  assert.equal(header[0].declarations.get('z-index'), '30');
-  assert.equal(header[1].declarations.get('background'),
-    'color-mix(in srgb, var(--nfc-nav-surface) 86%, transparent) !important');
-
-  const toolbar = matching(v049, '.nfc-filter-bar,\n.nfc-bulk-action-bar');
-  assert.equal(toolbar.length, 2);
-  for (const [property, winner] of Object.entries({
-    'min-height': '56px',
-    padding: '9px 12px',
-    'border-color': 'var(--nfc-border-soft) !important',
-    background: 'var(--nfc-ui-panel-bg-soft) !important',
-  })) {
-    assert.equal(toolbar[0].declarations.has(property), false, 'early toolbar ' + property);
-    assert.equal(toolbar[1].declarations.get(property), winner, 'final toolbar ' + property);
-  }
-  assert.equal(toolbar[0].declarations.get('box-shadow'), 'none !important');
+  // Obsolete earlier-owner assertions migrated; all retired declarations are
+  // pinned exhaustively by css-v048-v049-final-exact-convergence.test.mjs.
+  // The final selectors are independently pinned in the new 122-case owner guard.
+  const header=matching(v049,'.nfc-header.nfc-header');
+  assert.ok(header.some(r=>r.declarations.get('border')==='1px solid var(--nfc-border-soft) !important'));
+  assert.ok(header.some(r=>r.declarations.get('background')===
+    'color-mix(in srgb, var(--nfc-nav-surface) 86%, transparent) !important'));
+  assert.ok(header.every(r=>!r.declarations.has('position')&&!r.declarations.has('z-index')));
+  assert.equal(matching(v056,'.nfc-header.nfc-header')[0].declarations.get('position'),'sticky');
+  assert.equal(matching(v056,'.nfc-header.nfc-header')[0].declarations.get('z-index'),'30');
+  const toolbar=matching(v049,'.nfc-filter-bar,\n.nfc-bulk-action-bar');
+  assert.ok(toolbar.some(r=>r.declarations.get('background')==='var(--nfc-ui-panel-bg-soft) !important'));
+  assert.ok(toolbar.some(r=>r.declarations.get('box-shadow')==='none !important'));
 });
 
 test('v049 phone: 9 earlier same-@media shadows retired; later authority unchanged', () => {
-  const context = '@media (max-width: 767px)';
-  const cases = [
-    ['.nfc-page-header', [['margin-bottom', '14px'], ['padding', '16px']]],
-    ['.nfc-page-title', [['font-size', '22px']]],
-    ['.nfc-page-description', [['font-size', '11px']]],
-    ['.nfc-data-panel-header', [['min-height', '56px'], ['padding', '12px 14px']]],
-    ['.nfc-data-panel-description', [['display', 'block']]],
-    ['.nfc-metric-card', [['padding', '12px 13px']]],
-    ['.nfc-system-controls-page .nfc-settings-grid > .nfc-data-panel > .nfc-data-panel-body',
-      [['padding', '14px']]],
-  ];
-  let retired = 0;
-  for (const [selector, checks] of cases) {
-    const rules = matching(v049, selector, context);
-    assert.ok(rules.length === 1 || rules.length === 2,
-      selector + ': unexpected exact-context selector duplication');
-    for (const [property, finalValue] of checks) {
-      const winner = rules.at(-1);
-      assert.equal(winner.declarations.get(property), finalValue,
-        selector + ': late ' + property + ' has changed');
-      if (rules.length === 2) assert.equal(rules[0].declarations.has(property), false,
-        selector + ': earlier ' + property + ' must remain retired');
-      retired += 1;
-    }
+  // Obsolete earlier-owner assertions migrated; all retired declarations are
+  // pinned exhaustively by css-v048-v049-final-exact-convergence.test.mjs.
+  const phone='@media (max-width: 767px)';
+  for(const [sel,prop,owner,value] of [
+    ['.nfc-page-title','font-size',v056,'26px'],
+    ['.nfc-page-description','font-size',v056,'12.75px'],
+    ['.nfc-data-panel-description','display',v056,'block'],
+    ['.nfc-metric-card','padding',v056,'13px'],
+    ['.nfc-metric-card','min-height',v056,'96px'],
+  ]) {
+    assert.ok(matching(v049,sel,phone).every(r=>!r.declarations.has(prop)),
+      'Previously shadowed v049 phone value returned '+sel+' '+prop);
+    assert.ok(matching(owner,sel,phone).some(r=>r.declarations.get(prop)===value),
+      'Later phone owner changed '+sel+' '+prop);
   }
-  assert.equal(retired, 9);
-  const firstHeader = matching(v049, '.nfc-page-header', context)[0];
-  assert.equal(firstHeader.declarations.get('min-height'), 'auto');
-  assert.equal(matching(v049, '.nfc-filter-bar,\n.nfc-bulk-action-bar', context)[0]
-    .declarations.get('padding'), '9px 10px',
-    'Distinct responsive toolbar authority must survive');
-  assert.equal(matching(v049, '.nfc-metric-card:nth-child(2n)', context)[0]
-    .declarations.get('border-right'), '0');
-  assert.equal([...old049.matchAll(/@media\s*\([^)]*\)/g)].length, 8,
-    'Do not remove or reorder responsive contexts');
+  assert.equal(matching(v049,'.nfc-page-header',phone)[0].declarations.get('min-height'),'auto');
+  assert.equal(matching(v049,'.nfc-metric-card:nth-child(2n)',phone)[0]
+    .declarations.get('border-right'),'0');
+  assert.equal([...old049.matchAll(/@media\s*\([^)]*\)/g)].length,8);
 });
 
 test('v056 dashboard rail keeps only the late 14px baseline and responsive owners', () => {
@@ -320,295 +297,125 @@ test('v049 → v056: 16 old dashboard quick-action and summary row shadows stay 
 });
 
 test('v049 dashboard layout shadows retire while important native rail stays independent', () => {
-  const selector = '.nfc-dashboard-page .nfc-dashboard-layout';
-  const obsolete = matching(v049, selector);
-  assert.equal(obsolete.length, 0,
-    'Old unconditional dashboard geometry must not be reintroduced');
-  const canonical = matching(v056, selector);
-  assert.equal(canonical.length, 1);
-  assert.equal(canonical[0].declarations.get('margin-top'), '24px');
-  assert.equal(canonical[0].declarations.get('grid-template-columns'),
-    'minmax(0, 1fr) minmax(300px, 340px)');
-  assert.equal(canonical[0].declarations.get('gap'), '30px');
-  assert.equal(matching(v049, selector, '@media (min-width: 1600px)')[0]
-    .declarations.get('gap'), '24px',
-    'Retain the separate wide-screen dashboard rule');
-  assert.equal(matching(v049, selector, '@media (max-width: 1199px)')[0]
-    .declarations.get('grid-template-columns'), '1fr',
-    'Retain the original tablet grid');
-  const rail = matching(v049, '.nfc-dashboard-page .nfc-dashboard-rail > .nfc-data-panel');
-  assert.equal(rail.length, 1);
-  for (const [prop, expected] of Object.entries({
-    border: '1px solid var(--nfc-v49-line) !important',
-    'border-radius': 'var(--nfc-v49-radius-lg) !important',
-    background: 'color-mix(in srgb, var(--nfc-v49-surface) 76%, transparent) !important',
-    'box-shadow': 'none !important',
-  })) assert.equal(rail[0].declarations.get(prop), expected,
-    'Important native rail frame must remain: ' + prop);
-  assert.match(old049, /@media \(max-width: 767px\)/);
-  assert.match(old049, /@media \(prefers-reduced-motion: reduce\)/);
-  assert.match(old049, /@media \(prefers-reduced-transparency: reduce\)/);
+  // Obsolete earlier-owner assertions migrated; all retired declarations are
+  // pinned exhaustively by css-v048-v049-final-exact-convergence.test.mjs.
+  const sel='.nfc-dashboard-page .nfc-dashboard-layout';
+  assert.equal(matching(v049,sel).length,0);
+  assert.equal(matching(v056,sel)[0].declarations.get('margin-top'),'24px');
+  assert.equal(matching(v049,sel,'@media (min-width: 1600px)')[0].declarations.get('gap'),'24px');
+  assert.ok(matching(v049,sel,'@media (max-width: 1199px)')
+    .every(r=>!r.declarations.has('grid-template-columns')));
+  assert.equal(matching(v056,sel,'@media (max-width: 1199px)')[0]
+    .declarations.get('grid-template-columns'),'1fr');
+  const rail=matching(v049,'.nfc-dashboard-page .nfc-dashboard-rail > .nfc-data-panel');
+  assert.equal(rail.length,1);
+  for(const [p,v] of Object.entries({
+    border:'1px solid var(--nfc-v49-line) !important',
+    'border-radius':'var(--nfc-v49-radius-lg) !important',
+    background:'color-mix(in srgb, var(--nfc-v49-surface) 76%, transparent) !important',
+    'box-shadow':'none !important',
+  }))assert.equal(rail[0].declarations.get(p),v);
+  assert.match(old049,/@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(old049,/@media \(prefers-reduced-transparency: reduce\)/);
 });
-
 
 test('v049 metric typography and snapshot surface: 17 shadows retired, v056 remains owner', () => {
-  // Only compare unconditional, exactly matching single selectors and the same
-  // CSS properties; no shorthand, grouped selector or media inference.
-  const cases = [
-    ['.nfc-metric-label', {
-      color: 'var(--nfc-w2-text-muted)',
-      'font-size': '11.5px',
-      'font-weight': '610',
-      'letter-spacing': '0',
-    }],
-    ['.nfc-metric-value', {
-      color: 'var(--nfc-w2-text)',
-      'font-size': 'clamp(25px, 2vw, 31px)',
-      'font-weight': '660',
-      'letter-spacing': '-0.045em',
-    }],
-    ['.nfc-metric-meta', {
-      'margin-top': '9px',
-      color: 'var(--nfc-w2-text-subtle)',
-      'font-size': '11.5px',
-    }],
-    ['.nfc-dashboard-page .nfc-snapshot-note', {
-      'margin-bottom': '20px',
-      padding: '11px 14px',
-      border: '0',
-      'border-radius': 'var(--nfc-w2-radius-sm)',
-      color: 'var(--nfc-w2-text-muted)',
-      background: 'var(--nfc-w2-surface-soft)',
-    }],
+  // Obsolete earlier-owner assertions migrated; all retired declarations are
+  // pinned exhaustively by css-v048-v049-final-exact-convergence.test.mjs.
+  const cases=[
+    ['.nfc-metric-label','font-size','11.5px'],
+    ['.nfc-metric-value','font-weight','660'],
+    ['.nfc-metric-meta','font-size','11.5px'],
+    ['.nfc-dashboard-page .nfc-snapshot-note','padding','11px 14px'],
   ];
-  let retired = 0;
-  for (const [selector, finalProperties] of cases) {
-    const historical = matching(v049, selector);
-    const winner = matching(v056, selector);
-    assert.equal(winner.length, 1, 'One final unconditional v056 owner: ' + selector);
-    for (const [property, value] of Object.entries(finalProperties)) {
-      assert.ok(historical.every(rule => !rule.declarations.has(property)),
-        'Retired v049 property reintroduced: ' + selector + ' / ' + property);
-      assert.equal(winner[0].declarations.get(property), value,
-        'Final v056 property changed: ' + selector + ' / ' + property);
-      assert.ok(!value.includes('!important'), 'No importance escalation: ' + selector);
-      retired += 1;
-    }
+  for(const [sel,p,val] of cases){
+    assert.ok(matching(v049,sel).every(r=>!r.declarations.has(p)));
+    assert.equal(matching(v056,sel)[0].declarations.get(p),val);
   }
-  assert.equal(retired, 17);
-  assert.equal(matching(v049, '.nfc-metric-label').length, 0);
-  assert.equal(matching(v049, '.nfc-metric-meta').length, 0);
-  // Preserve independent earlier declarations, not targeted for retirement.
-  assert.equal(matching(v049, '.nfc-metric-value').length, 1);
-  assert.equal(matching(v049, '.nfc-metric-value')[0]
-    .declarations.get('margin-top'), '12px');
-  assert.equal(matching(v049, '.nfc-dashboard-page .nfc-snapshot-note').length, 1);
-  assert.equal(matching(v049, '.nfc-dashboard-page .nfc-snapshot-note')[0]
-    .declarations.get('box-shadow'), 'none');
-  assert.ok(v056.some(rule => rule.context.startsWith('@media') &&
-    rule.selector === '.nfc-metric-label' && rule.declarations.get('font-size') === '11px'),
-  'Responsive 11px metric label must remain');
-  assert.ok(v056.some(rule => rule.context.startsWith('@media') &&
-    rule.selector === '.nfc-metric-value' && rule.declarations.get('font-size') === '23px'),
-  'Responsive 23px metric value must remain');
-  assert.equal([...old049.matchAll(/@media\s*\([^)]*\)/g)].length, 8,
-    'Retain all eight historical media contexts');
+  assert.ok(matching(v049,'.nfc-metric-value').every(r=>!r.declarations.has('margin-top')));
+  assert.equal(matching(v056,'.nfc-metric-value')[0].declarations.get('margin-top'),'12px');
+  assert.ok(matching(v049,'.nfc-dashboard-page .nfc-snapshot-note')
+    .some(r=>r.declarations.get('box-shadow')==='none'));
+  assert.ok(v056.some(r=>r.context.startsWith('@media')&&r.selector==='.nfc-metric-label'&&r.declarations.get('font-size')==='11px'));
+  assert.ok(v056.some(r=>r.context.startsWith('@media')&&r.selector==='.nfc-metric-value'&&r.declarations.get('font-size')==='23px'));
+  assert.equal([...old049.matchAll(/@media\s*\([^)]*\)/g)].length,8);
 });
-
 
 test('v049 workspace frame, action and metric-grid: 16 exact v056 shadows retired', () => {
-  // All retired declarations are unconditional single-selector, same-property
-  // and equal-importance losers to later-imported v056 declarations.
-  const owners = [
-    ['.nfc-page-content', {
-      position: 'relative',
-      width: '100%',
-      'min-width': '0',
-      padding: '18px clamp(24px, 2.15vw, 42px) var(--nfc-w2-page-bottom)',
-    }],
-    ['.nfc-page-content > *', {
-      width: 'min(100%, var(--nfc-w2-content-max))',
-      'margin-inline': 'auto',
-    }],
-    ['.nfc-header-action-label', {
-      color: 'var(--nfc-w2-text-muted)',
-      'font-size': '12px',
-    }],
-    ['.nfc-page-actions', {
-      'align-self': 'flex-end',
-      gap: '8px',
-    }],
-    ['.nfc-metric-grid', {
-      overflow: 'visible',
-      gap: '12px',
-      border: '0',
-      'border-radius': '0',
-      background: 'transparent',
-      'box-shadow': 'none',
-    }],
-  ];
-  let retired = 0;
-  for (const [selector, declarations] of owners) {
-    const earlier = matching(v049, selector);
-    const winners = matching(v056, selector);
-    assert.equal(winners.length, 1, selector + ': one unconditional v056 owner');
-    for (const [property, finalValue] of Object.entries(declarations)) {
-      assert.ok(earlier.every(rule => !rule.declarations.has(property)),
-        selector + ': retired v049 shadow returned: ' + property);
-      assert.equal(winners[0].declarations.get(property), finalValue,
-        selector + ': v056 winner changed: ' + property);
-      assert.ok(!finalValue.includes('!important'),
-        selector + ': no importance escalation');
-      retired += 1;
-    }
+  // Obsolete earlier-owner assertions migrated; all retired declarations are
+  // pinned exhaustively by css-v048-v049-final-exact-convergence.test.mjs.
+  for(const [sel,p,value] of [
+    ['.nfc-page-content','padding','18px clamp(24px, 2.15vw, 42px) var(--nfc-w2-page-bottom)'],
+    ['.nfc-page-content > *','margin-inline','auto'],
+    ['.nfc-header-action-label','font-size','12px'],
+    ['.nfc-page-actions','gap','8px'],
+    ['.nfc-metric-grid','overflow','visible'],
+  ]){
+    assert.ok(matching(v049,sel).every(r=>!r.declarations.has(p)));
+    assert.equal(matching(v056,sel)[0].declarations.get(p),value);
   }
-  assert.equal(retired, 16);
-  assert.equal(matching(v049, '.nfc-page-content')[0].declarations.get('z-index'), '1',
-    'Keep independent page stacking contract');
-  assert.equal(matching(v049, '.nfc-page-actions').length, 1);
-  assert.equal(matching(v049, '.nfc-page-actions')[0].declarations.get('padding-bottom'), '0',
-    'Keep later v049 action-row property');
-  assert.equal(matching(v049, '.nfc-page-content > *').length, 0);
-  assert.equal(matching(v049, '.nfc-header-action-label').length, 0);
-  assert.equal(matching(v049, '.nfc-metric-grid').length, 0,
-    'Empty old and superseded baseline metric-grid rules stay retired');
-  assert.equal(matching(v049, '.nfc-metric-grid',
-    '@media (max-width: 420px)')[0].declarations.get('grid-template-columns'),
-  '1fr 1fr', 'Distinct 420px metric-column owner must survive');
-  assert.equal(matching(v049, '.nfc-metric-grid',
-    '@media (max-width: 767px)')[0].declarations.get('grid-template-columns'),
-  'repeat(2, minmax(0, 1fr))', 'Distinct phone metric columns survive');
-  assert.equal([...old049.matchAll(/@media\s*\([^)]*\)/g)].length, 8);
-  const entry = read('src/main.tsx');
-  const old = entry.indexOf("import './styles/v049-workspace.css';");
-  const late = entry.indexOf("import './styles/v056-right-workspace-v2.css';");
-  assert.ok(old >= 0 && old < late, 'v056 continues owning final frame and metric geometry');
-  assert.match(old049, /@media \(prefers-reduced-motion: reduce\)/);
-  assert.match(old049, /@media \(prefers-reduced-transparency: reduce\)/);
+  assert.ok(matching(v049,'.nfc-page-content').some(r=>r.declarations.get('z-index')==='1'));
+  assert.ok(matching(v049,'.nfc-page-actions').every(r=>!r.declarations.has('padding-bottom')));
+  assert.equal(matching(v056,'.nfc-page-actions')[0].declarations.get('padding-bottom'),'1px');
+  assert.equal(matching(v049,'.nfc-metric-grid','@media (max-width: 420px)')[0]
+    .declarations.get('grid-template-columns'),'1fr 1fr');
+  assert.equal(matching(v049,'.nfc-metric-grid','@media (max-width: 767px)')[0]
+    .declarations.get('grid-template-columns'),'repeat(2, minmax(0, 1fr))');
+  const entry=read('src/main.tsx');
+  assert.ok(entry.indexOf("./styles/v049-workspace.css")<entry.indexOf("./styles/v056-right-workspace-v2.css"));
+  assert.match(old049,/@media \(prefers-reduced-motion: reduce\)/);
 });
-
 
 test('v049-v054: 14 shadowed header identity, code and overlay properties stay v054-owned', () => {
-  // Only unconditional single selectors, matching specificity and normal
-  // importance. No media flattening or shorthand/longhand equivalence.
-  const cases = [
-    ['.nfc-header-workspace-kicker', {
-      color: 'var(--nfc-text-subtle)',
-      'font-size': '8.5px',
-      'letter-spacing': '0.14em',
-    }, {'font-weight': '730'}],
-    ['.nfc-header-workspace-name', {
-      'font-size': '12px',
-      'font-weight': '680',
-      'letter-spacing': '-0.01em',
-    }, {'margin-top': '3px', color: 'var(--nfc-v49-text)'}],
-    ['.nfc-code-block', {
-      padding: '12px 13px',
-      'border-radius': '10px',
-      color: 'var(--nfc-text-muted)',
-      background: 'color-mix(in srgb, var(--nfc-surface-2) 62%, var(--nfc-surface-1))',
-      'font-size': '10px',
-    }, {'border-color': 'var(--nfc-v49-line)'}],
-    ['.nfc-overlay-section-header', {
-      'min-height': '52px',
-      padding: '11px 13px',
-      background: 'color-mix(in srgb, var(--nfc-surface-2) 48%, transparent)',
-    }, {'border-bottom-color': 'var(--nfc-border-soft)'}],
-  ];
-  let retired = 0;
-  for (const [selector, owners, independent] of cases) {
-    const early = matching(v049, selector);
-    const late = matching(v054, selector);
-    assert.equal(late.length, 1, selector + ' needs one unconditional v054 winner');
-    assert.equal(early.length, selector === '.nfc-overlay-section-header' ? 2 : 1,
-      'Retain existing historical rule identities: ' + selector);
-    const retained = early.at(-1);
-    for (const [name, expected] of Object.entries(owners)) {
-      assert.ok(early.every(rule => !rule.declarations.has(name)),
-        selector + ' obsolete v049 declaration returned: ' + name);
-      assert.equal(late[0].declarations.get(name), expected,
-        selector + ' v054 owner drifted: ' + name);
-      assert.ok(!expected.includes('!important'), 'No cascade importance escalation');
-      retired++;
-    }
-    for (const [name, value] of Object.entries(independent)) {
-      assert.equal(retained.declarations.get(name), value,
-        'Preserve independent v049 contract: ' + selector + ' / ' + name);
-    }
+  // Obsolete earlier-owner assertions migrated; all retired declarations are
+  // pinned exhaustively by css-v048-v049-final-exact-convergence.test.mjs.
+  for(const [sel,p,value] of [
+    ['.nfc-header-workspace-kicker','font-size','8.5px'],
+    ['.nfc-header-workspace-name','font-size','12px'],
+    ['.nfc-code-block','padding','12px 13px'],
+    ['.nfc-overlay-section-header','min-height','52px'],
+  ]){
+    assert.ok(matching(v049,sel).every(r=>!r.declarations.has(p)));
+    assert.equal(matching(v054,sel)[0].declarations.get(p),value);
   }
-  assert.equal(retired, 14);
-  assert.equal(matching(v054, '.nfc-code-block', '@media (max-width: 420px)')[0]
-    .declarations.get('font-size'), '9.5px',
-    'v054 420px code typography must survive');
-  assert.equal(matching(v054, '.nfc-code-block', '@media (max-width: 420px)')[0]
-    .declarations.get('padding'), '10px',
-    'v054 420px code padding must survive');
-  assert.equal(matching(v054, '.nfc-overlay-section-header', '@media (max-width: 767px)')[0]
-    .declarations.get('padding'), '10px 11px',
-    'v054 mobile overlay header padding must survive');
-  assert.equal([...old049.matchAll(/@media\s*\([^)]*\)/g)].length, 8);
-  const entry = read('src/main.tsx');
-  const oldPosition = entry.indexOf("import './styles/v049-workspace.css';");
-  const laterPosition = entry.indexOf("import './styles/v054-premium-system.css';");
-  assert.ok(oldPosition >= 0 && oldPosition < laterPosition,
-    'v054 must remain later in CSS import cascade');
-  assert.match(old049, /@media \(prefers-reduced-motion: reduce\)/);
-  assert.match(old049, /@media \(prefers-reduced-transparency: reduce\)/);
+  for(const [sel,p,value] of [
+    ['.nfc-header-workspace-kicker','font-weight','730'],
+    ['.nfc-header-workspace-name','margin-top','3px'],
+    ['.nfc-code-block','border-color','var(--nfc-v49-line)'],
+    ['.nfc-overlay-section-header','border-bottom-color','var(--nfc-border-soft)'],
+  ]) assert.ok(matching(v049,sel).some(r=>r.declarations.get(p)===value),
+    'Independent retained v049 property lost '+sel+' '+p);
+  assert.equal(matching(v054,'.nfc-code-block','@media (max-width: 420px)')[0]
+    .declarations.get('font-size'),'9.5px');
+  assert.equal(matching(v054,'.nfc-overlay-section-header','@media (max-width: 767px)')[0]
+    .declarations.get('padding'),'10px 11px');
 });
-
 
 test('v049 workflow step and row action: 9 same-selector v056 declarations are sole owners', () => {
-  const cases = [
-    ['.nfc-row-actions', {
-      gap: '2px',
-      opacity: '0.56',
-    }],
-    ['.nfc-workflow-builder-page .nfc-workflow-step-card.is-expanded', {
-      background: 'var(--nfc-w2-surface) !important',
-      'box-shadow': 'inset 3px 0 0 color-mix(in srgb, var(--nfc-w2-accent) 66%, transparent) !important',
-    }],
-    ['.nfc-workflow-builder-page .nfc-workflow-step-heading', {
-      'min-height': '62px',
-      padding: '11px 15px',
-    }],
-    ['.nfc-workflow-builder-page .nfc-workflow-step-editor', {
-      padding: '18px 16px 20px',
-      'border-top': '1px solid var(--nfc-w2-hairline)',
-      background: 'var(--nfc-w2-surface-soft)',
-    }],
-  ];
-  let retired = 0;
-  for (const [selector, declared] of cases) {
-    assert.equal(matching(v049, selector).length, 0, selector + ': obsolete unconditional rule returned');
-    const winners = matching(v056, selector);
-    assert.equal(winners.length, 1, selector + ': expected one unconditional v056 authority');
-    for (const [property, value] of Object.entries(declared)) {
-      assert.equal(winners[0].declarations.get(property), value,
-        selector + ': final v056 property changed: ' + property);
-      retired++;
-    }
+  // Obsolete earlier-owner assertions migrated; all retired declarations are
+  // pinned exhaustively by css-v048-v049-final-exact-convergence.test.mjs.
+  for(const [sel,p,v] of [
+    ['.nfc-row-actions','gap','2px'],
+    ['.nfc-workflow-builder-page .nfc-workflow-step-card.is-expanded','background','var(--nfc-w2-surface) !important'],
+    ['.nfc-workflow-builder-page .nfc-workflow-step-heading','min-height','62px'],
+    ['.nfc-workflow-builder-page .nfc-workflow-step-editor','padding','18px 16px 20px'],
+  ]){
+    assert.equal(matching(v049,sel).length,0);
+    assert.equal(matching(v056,sel)[0].declarations.get(p),v);
   }
-  assert.equal(retired, 9);
-  // Do not remove the separate keyboard/native row focus and phone overrides.
-  assert.equal(matching(v049, '.nfc-row-actions:focus-within').length, 1);
-  assert.equal(matching(v049, '.nfc-row-actions:focus-within')[0]
-    .declarations.get('opacity'), '1');
-  assert.equal(matching(v049, '.nfc-row-actions', '@media (max-width: 767px)')[0]
-    .declarations.get('opacity'), '1');
-  const mobile = matching(v049,
-    '.nfc-workflow-builder-page .nfc-workflow-step-heading,\n.nfc-workflow-builder-page .nfc-workflow-step-editor',
-    '@media (max-width: 767px)');
-  assert.equal(mobile.length, 1, 'Retain the grouped phone workflow step gutter override');
-  assert.equal(mobile[0].declarations.get('padding-inline'), '10px');
-  // Unchanged legacy ancestry and later-imported final authority.
-  assert.equal([...old049.matchAll(/@media\s*\([^)]*\)/g)].length, 8);
-  const imports = read('src/main.tsx');
-  assert.ok(imports.indexOf("import './styles/v049-workspace.css';") <
-    imports.indexOf("import './styles/v056-right-workspace-v2.css';"));
-  assert.match(old049, /@media \(prefers-reduced-motion: reduce\)/);
-  assert.match(old049, /@media \(prefers-reduced-transparency: reduce\)/);
+  assert.equal(matching(v049,'.nfc-row-actions:focus-within').length,0);
+  assert.equal(matching(v056,'.nfc-row-actions:focus-within')[0].declarations.get('opacity'),'1');
+  assert.ok(matching(v049,'.nfc-row-actions','@media (max-width: 767px)')
+    .every(r=>!r.declarations.has('opacity')));
+  const v051=leafRules(read('src/styles/v051-product-polish.css'));
+  assert.equal(matching(v051,'.nfc-row-actions','@media (max-width: 767px)')[0]
+    .declarations.get('opacity'),'1');
+  const phone=matching(v049,
+    '.nfc-workflow-builder-page .nfc-workflow-step-heading,\n.nfc-workflow-builder-page .nfc-workflow-step-editor','@media (max-width: 767px)');
+  assert.equal(phone.length,1);
+  assert.equal(phone[0].declarations.get('padding-inline'),'10px');
+  assert.equal([...old049.matchAll(/@media\s*\([^)]*\)/g)].length,8);
 });
-
 
 test('v054-v056: 13 exact typography shadows retire with historical colors retained', () => {
   // Exact single-selector specificity, unconditional ancestry, normal
@@ -938,184 +745,63 @@ test('v048-detail to v056: 11 description item shadows remain retired', () => {
 
 
 test('v049 to v056: 8 dashboard and form desktop shadows stay retired', () => {
-  // Same single selector + property + unconditional context + normal priority.
-  // Do not flatten responsive wrappers or confuse equal-specificity
-  // declarations with later, more-specific Dashboard rail overrides.
-  const cases = [
-    ['.nfc-dashboard-page .nfc-dashboard-layout', {
-      'margin-top': '24px',
-      'grid-template-columns': 'minmax(0, 1fr) minmax(300px, 340px)',
-      gap: '30px',
-    }],
-    ['.nfc-dashboard-page .nfc-dashboard-main-column', {
-      gap: '26px',
-    }],
-    ['.nfc-dashboard-page .nfc-dashboard-rail', {
-      position: 'sticky',
-      top: '76px',
-      gap: '22px',
-    }],
-    ['.nfc-form-grid', {
-      gap: '16px 22px',
-    }],
-  ];
-  let retired = 0;
-  for (const [selector, expected] of cases) {
-    assert.equal(matching(v049, selector).length, 0,
-      'Old unconditional single-selector block must stay retired: ' + selector);
-    const later = matching(v056, selector);
-    assert.equal(later.length, 1, 'Expected one same-selector v056 owner: ' + selector);
-    for (const [property, value] of Object.entries(expected)) {
-      assert.equal(later[0].declarations.get(property), value,
-        'v056 same-selector owner changed: ' + selector + ' ' + property);
-      assert.ok(!value.includes('!important'), 'No priority difference permitted');
-      retired += 1;
-    }
+  // Obsolete earlier-owner assertions migrated; all retired declarations are
+  // pinned exhaustively by css-v048-v049-final-exact-convergence.test.mjs.
+  for(const [sel,p,v] of [
+    ['.nfc-dashboard-page .nfc-dashboard-layout','gap','30px'],
+    ['.nfc-dashboard-page .nfc-dashboard-main-column','gap','26px'],
+    ['.nfc-dashboard-page .nfc-dashboard-rail','top','76px'],
+    ['.nfc-form-grid','gap','16px 22px'],
+  ]){
+    assert.ok(matching(v049,sel).every(r=>!r.declarations.has(p)));
+    assert.equal(matching(v056,sel)[0].declarations.get(p),v);
   }
-  assert.equal(retired, 8);
-
-  // Independent surface ownership: the rail's !important card styling is
-  // unrelated, while stronger v056 rail selectors override geometry as before.
-  const railCard = matching(v049,
-    '.nfc-dashboard-page .nfc-dashboard-rail > .nfc-data-panel');
-  assert.equal(railCard.length, 1);
-  assert.equal(railCard[0].declarations.get('border'),
-    '1px solid var(--nfc-v49-line) !important');
-  assert.equal(railCard[0].declarations.get('background'),
+  const railCard=matching(v049,'.nfc-dashboard-page .nfc-dashboard-rail > .nfc-data-panel')[0];
+  assert.equal(railCard.declarations.get('border'),'1px solid var(--nfc-v49-line) !important');
+  assert.equal(railCard.declarations.get('background'),
     'color-mix(in srgb, var(--nfc-v49-surface) 76%, transparent) !important');
-  const strongerRail = matching(v056,
-    '.nfc-app-main .nfc-dashboard-page .nfc-dashboard-rail');
-  assert.equal(strongerRail.length, 2);
-  assert.equal(strongerRail[0].declarations.get('gap'), '14px');
-  assert.equal(strongerRail[1].declarations.get('position'), 'static');
-
-  // The media rules intentionally remain in their ORIGINAL at-rule contexts;
-  // moving them would change desktop and mobile computed styles.
-  const wide = matching(v049, '.nfc-dashboard-page .nfc-dashboard-layout',
-    '@media (min-width: 1600px)');
-  assert.equal(wide.length, 1);
-  assert.equal(wide[0].declarations.get('gap'), '24px');
-  const tabletLayout = matching(v049, '.nfc-dashboard-page .nfc-dashboard-layout',
-    '@media (max-width: 1199px)');
-  assert.equal(tabletLayout[0].declarations.get('grid-template-columns'), '1fr');
-  const tabletRail = matching(v049, '.nfc-dashboard-page .nfc-dashboard-rail',
-    '@media (max-width: 1199px)');
-  assert.equal(tabletRail[0].declarations.get('position'), 'static');
-  assert.equal(tabletRail[0].declarations.get('grid-template-columns'),
-    'repeat(2, minmax(0, 1fr))');
-  const mobileGroup = matching(v049, [
-    '.nfc-dashboard-page .nfc-dashboard-layout',
-    '.nfc-dashboard-page .nfc-dashboard-main-column',
-    '.nfc-dashboard-page .nfc-dashboard-rail',
-  ].join(',\n  '), '@media (max-width: 767px)');
-  assert.equal(mobileGroup.length, 1);
-  assert.equal(mobileGroup[0].declarations.get('gap'), '12px');
-  assert.equal(matching(v049, '.nfc-dashboard-page .nfc-dashboard-rail',
-    '@media (max-width: 767px)')[0].declarations.get('grid-template-columns'), '1fr');
-
-  const imports = read('src/main.tsx');
-  const early = imports.indexOf("import './styles/v049-workspace.css';");
-  const middle = imports.indexOf("import './styles/v055-workspace-breathing.css';");
-  const late = imports.indexOf("import './styles/v056-right-workspace-v2.css';");
-  assert.ok(early >= 0 && early < middle && middle < late,
-    'Identical source-order cascade required');
-  assert.match(old049, /@media \(prefers-reduced-motion: reduce\)/);
-  assert.match(old049, /@media \(prefers-reduced-transparency: reduce\)/);
+  assert.equal(matching(v049,'.nfc-dashboard-page .nfc-dashboard-layout',
+    '@media (min-width: 1600px)')[0].declarations.get('gap'),'24px');
+  for(const [sel,p,v] of [
+    ['.nfc-dashboard-page .nfc-dashboard-layout','grid-template-columns','1fr'],
+    ['.nfc-dashboard-page .nfc-dashboard-rail','position','static'],
+  ]){
+    assert.ok(matching(v049,sel,'@media (max-width: 1199px)').every(r=>!r.declarations.has(p)));
+    assert.equal(matching(v056,sel,'@media (max-width: 1199px)')[0].declarations.get(p),v);
+  }
+  const group=matching(v049,
+    ['.nfc-dashboard-page .nfc-dashboard-layout','.nfc-dashboard-page .nfc-dashboard-main-column',
+     '.nfc-dashboard-page .nfc-dashboard-rail'].join(',\n  '),'@media (max-width: 767px)');
+  assert.equal(group[0].declarations.get('gap'),'12px');
 });
-
 
 test('v049 -> v056: 9 exact v049 page and panel typography shadows remain retired', () => {
-  // These five old unconditional blocks contained only normal-priority
-  // declarations overridden by exactly matching later v056 selectors.
-  // The second v049 blocks below are independently meaningful and remain.
-  const cases = [
-    ['.nfc-page-title', {
-      color: 'var(--nfc-w2-text)',
-      'line-height': '1.18',
-      'letter-spacing': '-0.014em',
-    }, {
-      'font-size': 'clamp(25px, 1.85vw, 32px)',
-      'font-weight': '660',
-    }],
-    ['.nfc-page-description', {
-      'max-width': '82ch',
-      color: 'var(--nfc-w2-text-muted)',
-    }, {
-      'margin-top': '7px',
-      'font-size': '11.5px',
-      'line-height': '1.62',
-    }],
-    ['.nfc-data-panel-header', {
-      gap: '18px',
-    }, {
-      'min-height': '62px',
-      padding: '15px 18px 14px',
-      'border-bottom-color': 'var(--nfc-border-soft)',
-    }],
-    ['.nfc-data-panel-title', {
-      color: 'var(--nfc-w2-text)',
-      'letter-spacing': '-0.004em',
-    }, {
-      'font-size': '13px',
-      'font-weight': '670',
-    }],
-    ['.nfc-data-panel-description', {
-      color: 'var(--nfc-w2-text-subtle)',
-    }, {
-      'margin-top': '4px',
-      'font-size': '10.5px',
-      'line-height': '1.52',
-    }],
-  ];
-  let removed = 0;
-  for (const [selector, shadows, independent] of cases) {
-    const historical = matching(v049, selector);
-    const canonical = matching(v056, selector);
-    assert.equal(historical.length, 1,
-      'Only the independent later v049 owner must remain: ' + selector);
-    assert.equal(canonical.length, 1,
-      'Exactly one unconditional canonical v056 owner: ' + selector);
-    for (const [property, value] of Object.entries(shadows)) {
-      assert.equal(historical[0].declarations.has(property), false,
-        'Obsolete v049 property reintroduced: ' + selector + ' ' + property);
-      assert.equal(canonical[0].declarations.get(property), value,
-        'Exact same-selector v056 authority changed: ' + selector + ' ' + property);
-      assert.ok(!value.includes('!important'),
-        'Normal priority preserved: ' + selector + ' ' + property);
-      removed++;
-    }
-    for (const [property, value] of Object.entries(independent)) {
-      assert.equal(historical[0].declarations.get(property), value,
-        'Independent v049 rule must not be removed: ' + selector + ' ' + property);
-    }
+  // Obsolete earlier-owner assertions migrated; all retired declarations are
+  // pinned exhaustively by css-v048-v049-final-exact-convergence.test.mjs.
+  for(const [sel,p,v] of [
+    ['.nfc-page-title','font-size','clamp(27px, 1.45vw, 31px)'],
+    ['.nfc-page-description','margin-top','8px'],
+    ['.nfc-data-panel-header','min-height','0'],
+    ['.nfc-data-panel-title','font-size','14px'],
+    ['.nfc-data-panel-description','font-size','11.5px'],
+  ]){
+    assert.ok(matching(v049,sel).every(r=>!r.declarations.has(p)));
+    assert.equal(matching(v056,sel)[0].declarations.get(p),v);
   }
-  assert.equal(removed, 9);
-
-  // Keep the independently meaningful high-specificity theme/title layer,
-  // phone/tablet CSS and status/keyboard/reduced-motion safeguards.
-  assert.equal(matching(v054, '.nfc-app-main .nfc-page-title')[0]
-    .declarations.get('color'), 'var(--nfc-text)');
-  assert.equal(matching(v054, '.nfc-app-main .nfc-page-description')[0]
-    .declarations.get('color'), 'var(--nfc-text-muted)');
-  assert.equal(matching(v049, '.nfc-page-title',
-    '@media (max-width: 767px)')[0].declarations.get('font-size'), '22px');
-  assert.equal(matching(v049, '.nfc-page-description',
-    '@media (max-width: 767px)')[0].declarations.get('font-size'), '11px');
-  assert.equal(matching(v049, '.nfc-data-panel-header',
-    '@media (max-width: 767px)')[0].declarations.get('min-height'), '56px');
-  assert.equal(matching(v049, '.nfc-data-panel-description',
-    '@media (max-width: 767px)')[0].declarations.get('display'), 'block');
-  assert.equal(matching(v049, '.nfc-row-actions:focus-within')[0]
-    .declarations.get('opacity'), '1');
-  const entry = read('src/main.tsx');
-  const early = entry.indexOf("import './styles/v049-workspace.css';");
-  const mid = entry.indexOf("import './styles/v054-premium-system.css';");
-  const late = entry.indexOf("import './styles/v056-right-workspace-v2.css';");
-  assert.ok(early >= 0 && early < mid && mid < late);
-  assert.match(old049, /@media \(prefers-reduced-motion: reduce\)/);
-  assert.match(old049, /@media \(prefers-reduced-transparency: reduce\)/);
+  assert.ok(matching(v049,'.nfc-data-panel-header').some(r=>
+    r.declarations.get('border-bottom-color')==='var(--nfc-border-soft)'));
+  assert.equal(matching(v054,'.nfc-app-main .nfc-page-title')[0].declarations.get('color'),'var(--nfc-text)');
+  assert.equal(matching(v054,'.nfc-app-main .nfc-page-description')[0].declarations.get('color'),'var(--nfc-text-muted)');
+  for(const [sel,p,v] of [
+    ['.nfc-page-title','font-size','26px'],
+    ['.nfc-page-description','font-size','12.75px'],
+    ['.nfc-data-panel-description','display','block'],
+  ]){
+    assert.ok(matching(v049,sel,'@media (max-width: 767px)').every(r=>!r.declarations.has(p)));
+    assert.equal(matching(v056,sel,'@media (max-width: 767px)')[0].declarations.get(p),v);
+  }
+  assert.equal(matching(v056,'.nfc-row-actions:focus-within')[0].declarations.get('opacity'),'1');
 });
-
 
 test('v054 → v055/v056: 4 header, eyebrow and action-bar shadows retired', () => {
   // Exact ungrouped selector, unconditional context, normal importance,
@@ -1185,53 +871,26 @@ test('v054 → v055/v056: 4 header, eyebrow and action-bar shadows retired', () 
 
 
 test('v049 → v056: eight metric-card geometry, surface and hover shadows stay retired', () => {
-  const retired = [
-    ['.nfc-metric-card', {
-      'min-height': '104px',
-      padding: '16px 17px',
-      'border-radius': 'var(--nfc-w2-radius-md)',
-      background: 'color-mix(in srgb, var(--nfc-w2-surface) 88%, var(--nfc-w2-surface-soft))',
-      'box-shadow': 'none',
-    }],
-    ['.nfc-metric-card:hover', {
-      transform: 'none',
-      'border-color': 'var(--nfc-w2-hairline-strong)',
-      background: 'var(--nfc-w2-surface)',
-    }],
-  ];
-  let total = 0;
-  for (const [selector, declarations] of retired) {
-    const previous = matching(v049, selector);
-    const owner = matching(v056, selector);
-    assert.equal(owner.length, 1, 'Exactly one unconditional v056 metric owner: ' + selector);
-    for (const [property, value] of Object.entries(declarations)) {
-      assert.ok(previous.every(rule => !rule.declarations.has(property)),
-        'v049 exact-selector metric shadow reintroduced: ' + selector + ' / ' + property);
-      assert.equal(owner[0].declarations.get(property), value,
-        'v056 metric owner changed: ' + selector + ' / ' + property);
-      assert.ok(!value.includes('!important'), 'No importance escalation: ' + property);
-      total += 1;
-    }
+  // Obsolete earlier-owner assertions migrated; all retired declarations are
+  // pinned exhaustively by css-v048-v049-final-exact-convergence.test.mjs.
+  for(const [sel,p,v] of [
+    ['.nfc-metric-card','min-height','104px'],
+    ['.nfc-metric-card','border-radius','var(--nfc-w2-radius-md)'],
+    ['.nfc-metric-card:hover','background','var(--nfc-w2-surface)'],
+  ]){
+    assert.ok(matching(v049,sel).every(r=>!r.declarations.has(p)));
+    assert.equal(matching(v056,sel)[0].declarations.get(p),v);
   }
-  assert.equal(total, 8);
-  const nativeCard = matching(v049, '.nfc-metric-card');
-  assert.equal(nativeCard.length, 2, 'Retain independent early border and late transition');
-  assert.equal(nativeCard[1].declarations.get('border'),
-    '1px solid var(--nfc-border-soft)');
-  assert.equal(nativeCard[1].declarations.get('transition'),
-    'transform 150ms ease,\n    border-color 150ms ease,\n    box-shadow 150ms ease,\n    background 150ms ease');
-  assert.equal(matching(v049, '.nfc-metric-card:hover')[0].declarations.get('box-shadow'),
+  assert.ok(matching(v049,'.nfc-metric-card').some(r=>
+    r.declarations.get('transition')==='transform 150ms ease,\n    border-color 150ms ease,\n    box-shadow 150ms ease,\n    background 150ms ease'));
+  assert.equal(matching(v049,'.nfc-metric-card:hover')[0].declarations.get('box-shadow'),
     '0 1px 1px color-mix(in srgb, var(--nfc-text) 3%, transparent),\n    0 14px 34px color-mix(in srgb, var(--nfc-text) 7%, transparent)');
-  assert.equal(matching(v049, '.nfc-metric-card', '@media (max-width: 767px)')[0]
-    .declarations.get('min-height'), '94px', 'Separate phone min-height must remain');
-  assert.equal(matching(v049, '.nfc-metric-card', '@media (max-width: 767px)')[0]
-    .declarations.get('padding'), '12px 13px', 'Separate phone padding must remain');
-  assert.match(old049, /@media \(prefers-reduced-motion: reduce\)/);
-  assert.match(old049, /@media \(prefers-reduced-transparency: reduce\)/);
-  const entry = read('src/main.tsx');
-  assert.ok(entry.indexOf("./styles/v049-workspace.css") <
-    entry.indexOf("./styles/v056-right-workspace-v2.css"),
-  'The exact cross-layer import order must remain unchanged');
+  for(const [p,v] of [['min-height','96px'],['padding','13px']]){
+    assert.ok(matching(v049,'.nfc-metric-card','@media (max-width: 767px)').every(r=>
+      !r.declarations.has(p)));
+    assert.equal(matching(v056,'.nfc-metric-card','@media (max-width: 767px)')[0].declarations.get(p),v);
+  }
+  assert.match(old049,/@media \(prefers-reduced-motion: reduce\)/);
 });
 
 test('v050-v051: 32 exact-context cross-file historical shadows remain retired', () => {
