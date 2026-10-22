@@ -109,3 +109,9 @@ test('all real route and theme visits run fail-closed mounted a11y checks', () =
   assert.ok(workflow.includes('node scripts/browser-full-route-visual.mjs'));
   assert.ok(suite.includes('node --test scripts/route-accessibility-audit.test.mjs'));
 });
+
+test('Audit search has an explicit accessible name instead of placeholder-only labeling', () => {
+  const auditPage = readFileSync('src/pages/Audit/index.tsx', 'utf8');
+  assert.match(auditPage, /<input id="audit-search-input" type="search" value=\{searchText\}[\s\S]*?aria-label="搜索审计事件（操作或路径）"/);
+  assert.match(auditPage, /placeholder="搜索操作\/路径\.\.\."/);
+});
