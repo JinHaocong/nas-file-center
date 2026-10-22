@@ -13,6 +13,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { chromium } from 'playwright';
 import { visualThemes, visualViewports, visualAdminFixture, visualSafeSettingsFixture } from './visual-fixtures.mjs';
 import { computedContrastRatio } from './computed-contrast.mjs';
+import { captureRouteAccessibility, assessRouteAccessibility } from './route-accessibility-audit.mjs';
 import { parseComputedPaintColor, contrastRatioForOpaqueChannels } from './computed-paint-color.mjs';
 
 const routes = Object.freeze([
@@ -610,6 +611,17 @@ try {
           if (form.scrollerOverflow !== 'auto') problems.push(
             'Download verification table lost local horizontal scrollbar');
         }
+        // Stage #72: on every real route/viewport/theme, inspect rendered
+        // controls (including disabled ones), labels and broken ARIA relations.
+        // Keep this BEFORE screenshots, independent of keyboard focus/overlay
+        // tests. No writes or external requests; fail closed on actual defects.
+        const a11ySnapshot = await tab.evaluate(captureRouteAccessibility);
+        audit.accessibility = assessRouteAccessibility(a11ySnapshot);
+        if (audit.accessibility.issues.length) problems.push(
+          'Mounted accessibility semantics: ' +
+          audit.accessibility.issues.slice(0, 12).join('; ') +
+          (audit.accessibility.issues.length > 12 ?
+            ' (+' + (audit.accessibility.issues.length - 12) + ' more)' : ''));
         if (pageErrors.length > beforeErrors) problems.push(
           'Uncaught React errors: ' + pageErrors.slice(beforeErrors).join('; '));
         const name = item.id + '-' + themeLabel + '-' + width;
