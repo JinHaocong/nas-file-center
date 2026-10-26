@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { visualViewports, visualThemes } from './visual-fixtures.mjs';
 import { requiresFullPageReview, FULL_PAGE_REVIEW_WIDTHS,
-  requiresWorkspaceScrollReview } from './visual-screenshot-policy.mjs';
+  requiresWorkspaceScrollReview, requiresExpandedInteractionFullPageReview } from './visual-screenshot-policy.mjs';
 import { computedContrastRatio } from './computed-contrast.mjs';
 
 const browser = readFileSync('scripts/browser-full-route-visual.mjs', 'utf8');
@@ -369,7 +369,7 @@ test('real download-verification detail screenshots use equal full-page depth fo
         viewport + ' ' + theme.mode + '-' + theme.system);
   }
   for (const phrase of [
-    'const detailFullPage = requiresFullPageReview(width)',
+    'const detailFullPage = requiresExpandedInteractionFullPageReview(width)',
     "name + '-selected-detail.png'",
     'fullPage: detailFullPage',
     'detailPng.readUInt32BE(16)',
@@ -382,19 +382,30 @@ test('real download-verification detail screenshots use equal full-page depth fo
     /fullPage:\s*width\s*===\s*390\s*&&\s*theme\.mode\s*===\s*['"]light['"]/);
 });
 
-test('390px source-editor interaction screenshot exposes the whole expanded form in all themes', () => {
+test('all phone source-editor screenshots expose the full expanded form in all themes', () => {
   for (const theme of visualThemes)
     assert.equal(requiresFullPageReview(390), true, theme.mode + '-' + theme.system);
   for (const phrase of [
-    'const editorFullPage = requiresFullPageReview(width)',
+    'const editorFullPage = requiresExpandedInteractionFullPageReview(width)',
     "name + '-source-editor.png'",
     'fullPage: editorFullPage',
     'editorPng.readUInt32BE(16)',
     'editorPng.readUInt32BE(20)',
     'audit.sourceEditorScreenshotPixels = editorPixels',
     'editorPixels.height < editorPixels.documentHeight - 2',
-    'width === 390 && editorPixels.documentHeight <= 900',
+    'width <= 430 && editorPixels.documentHeight <= 900',
     'Source editor screenshot missing below-the-fold form pixels:',
   ]) assert.ok(browser.includes(phrase),
     'Missing mounted source-editor full-page screenshot evidence: ' + phrase);
+});
+
+test('full-depth interactive mobile review policy is independent of visual theme', () => {
+  for (const width of visualViewports) for (const theme of visualThemes) {
+    assert.equal(requiresExpandedInteractionFullPageReview(width),
+      [360, 390, 430, 1440].includes(width),
+      width + ' ' + theme.mode + '-' + theme.system);
+  }
+  assert.ok(browser.includes('width <= 430 && detailPixels.documentHeight <= 900'));
+  assert.ok(browser.includes('width <= 430 && editorPixels.documentHeight <= 900'));
+  assert.doesNotMatch(browser, /fullPage:\s*width\s*===\s*390\s*&&\s*theme\.mode/);
 });
