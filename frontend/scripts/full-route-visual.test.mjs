@@ -301,6 +301,13 @@ test('all four theme modes capture full-page 390/1440 screenshots without clippi
   }
   assert.ok(browser.includes('audit.screenshotFullPage = requiresFullPageReview(width)'));
   assert.ok(browser.includes('fullPage: audit.screenshotFullPage'));
+  for (const probe of [
+    'baselinePng.readUInt32BE(16)', 'baselinePng.readUInt32BE(20)',
+    'document.documentElement.scrollHeight',
+    'audit.screenshotPixels = { width: pixelWidth, height: pixelHeight, documentHeight }',
+    'pixelHeight < documentHeight - 2',
+    'Baseline screenshot missing required viewport/full-page pixels:',
+  ]) assert.ok(browser.includes(probe), 'Missing actual screenshot-depth check: ' + probe);
   assert.doesNotMatch(browser, /fullPage:\s*\([^\n]+\)\s*&&\s*theme\.mode\s*===\s*['"]light['"]/);
   assert.ok(browser.indexOf('audit.screenshotFullPage = requiresFullPageReview(width)') <
     browser.indexOf('await tab.screenshot({\n          path: resolve(OUT, name +'));
