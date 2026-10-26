@@ -628,9 +628,25 @@ try {
               if (!card || !heading || !weight) return null;
               const h = heading.getBoundingClientRect();
               const w = weight.getBoundingClientRect();
+              const c = card.getBoundingClientRect();
+              const cardStyle = getComputedStyle(card);
+              const weightStyle = getComputedStyle(weight);
+              const children = [...weight.children].map(el => ({
+                tag: el.tagName.toLowerCase(), height: Math.round(el.getBoundingClientRect().height),
+                top: Math.round(el.getBoundingClientRect().top - w.top),
+              }));
               return {
-                height: Math.round(card.getBoundingClientRect().height),
+                height: Math.round(c.height),
                 gapToWeight: Math.round(w.top - h.bottom),
+                remainingBelowWeight: Math.round(c.bottom - w.bottom),
+                headingHeight: Math.round(h.height),
+                weightHeight: Math.round(w.height),
+                minHeight: cardStyle.minHeight, cardHeight: cardStyle.height,
+                cardDisplay: cardStyle.display, cardFlex: cardStyle.flex,
+                weightMinHeight: weightStyle.minHeight,
+                weightJustify: weightStyle.justifyContent,
+                weightFlex: weightStyle.flex,
+                children,
                 active: Boolean(card.querySelector('input[type="checkbox"]')?.checked),
               };
             };
