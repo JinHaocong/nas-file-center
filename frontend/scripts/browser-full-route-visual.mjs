@@ -12,7 +12,7 @@ import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { chromium } from 'playwright';
 import { visualThemes, visualViewports, visualAdminFixture, visualSafeSettingsFixture } from './visual-fixtures.mjs';
-import { requiresFullPageReview } from './visual-screenshot-policy.mjs';
+import { requiresFullPageReview, requiresWorkspaceScrollReview } from './visual-screenshot-policy.mjs';
 import { computedContrastRatio } from './computed-contrast.mjs';
 import { captureRouteAccessibility, assessRouteAccessibility } from './route-accessibility-audit.mjs';
 import { parseComputedPaintColor, contrastRatioForOpaqueChannels } from './computed-paint-color.mjs';
@@ -712,6 +712,51 @@ try {
           problems.push('Baseline screenshot missing required viewport/full-page pixels: ' +
             JSON.stringify({ width, theme: themeLabel, fullPage: audit.screenshotFullPage,
               pixelWidth, pixelHeight, documentHeight }));
+        }
+        if (requiresWorkspaceScrollReview(width, item.path)) {
+          // The desktop .nfc-page-content is a nested overflow-y:auto region
+          // inside a fixed-height app shell. Chromium fullPage does NOT include
+          // its offscreen contents. Keep the 800 baseline screenshots unchanged;
+          // add a separately labeled bottom-of-workspace review PNG when needed.
+          const scroll = await tab.evaluate(() => {
+            const pane = document.querySelector('.nfc-app-main .nfc-page-content');
+            if (!pane) return null;
+            const computed = getComputedStyle(pane);
+            const maxScroll = Math.max(0, pane.scrollHeight - pane.clientHeight);
+            const scrollable = maxScroll > 48 && ['auto', 'scroll'].includes(computed.overflowY);
+            if (scrollable) pane.scrollTop = maxScroll;
+            return {
+              overflowY: computed.overflowY,
+              maxScroll, scrollable,
+              bottomReached: !scrollable || pane.scrollTop >= maxScroll - 2,
+              visibleHeight: pane.clientHeight,
+            };
+          });
+          if (!scroll || scroll.visibleHeight < 100 ||
+              (item.id === 'settings' && (!scroll.scrollable || scroll.maxScroll < 100)) ||
+              !scroll.bottomReached) {
+            problems.push('Desktop workspace nested scroll unavailable or bottom unreachable: ' +
+              JSON.stringify({ route: item.path, scroll }));
+          }
+          let captured = false;
+          try {
+            if (scroll?.scrollable && scroll.bottomReached) {
+              const png = await tab.screenshot({
+                path: resolve(OUT, name + '-workspace-bottom.png'),
+                fullPage: false, animations: 'disabled',
+              });
+              captured = png.readUInt32BE(16) === width &&
+                png.readUInt32BE(20) === 900;
+              if (!captured) problems.push(
+                'Desktop workspace bottom screenshot has incorrect PNG dimensions');
+            }
+          } finally {
+            await tab.evaluate(() => {
+              const pane = document.querySelector('.nfc-app-main .nfc-page-content');
+              if (pane) pane.scrollTop = 0;
+            });
+          }
+          audit.workspaceScroll = scroll ? { ...scroll, captured } : null;
         }
         // Real keyboard bypass regression: the first Tab on every authenticated
         // page must expose a legible skip link; Enter moves focus to the real

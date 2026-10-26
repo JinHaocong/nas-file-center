@@ -3,7 +3,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { visualViewports, visualThemes } from './visual-fixtures.mjs';
-import { requiresFullPageReview, FULL_PAGE_REVIEW_WIDTHS } from './visual-screenshot-policy.mjs';
+import { requiresFullPageReview, FULL_PAGE_REVIEW_WIDTHS,
+  requiresWorkspaceScrollReview } from './visual-screenshot-policy.mjs';
 import { computedContrastRatio } from './computed-contrast.mjs';
 
 const browser = readFileSync('scripts/browser-full-route-visual.mjs', 'utf8');
@@ -335,4 +336,27 @@ test('mobile advanced-dedupe disabled scorer cards pack by content, with live Ch
     'Mobile inactive dedupe scorer card has excessive whitespace:',
     'assert.deepEqual(failures, []',
   ]) assert.ok(browser.includes(phrase), 'Missing real mounted scorer geometry audit: ' + phrase);
+});
+
+test('1440px desktop full-page evidence also inspects real nested workspace scroll in all themes', () => {
+  assert.equal(requiresWorkspaceScrollReview(1440, '/settings'), true);
+  assert.equal(requiresWorkspaceScrollReview(1440, '/login'), false);
+  for (const width of visualViewports) {
+    for (const theme of visualThemes) {
+      assert.equal(requiresWorkspaceScrollReview(width, '/dashboard'), width === 1440,
+        width + ' ' + theme.mode + '-' + theme.system);
+    }
+  }
+  for (const phrase of [
+    'requiresWorkspaceScrollReview(width, item.path)',
+    "document.querySelector('.nfc-app-main .nfc-page-content')",
+    "['auto', 'scroll'].includes(computed.overflowY)",
+    "pane.scrollTop = maxScroll",
+    "name + '-workspace-bottom.png'",
+    "fullPage: false, animations: 'disabled'",
+    'item.id === \'settings\'',
+    'audit.workspaceScroll = scroll ? { ...scroll, captured } : null',
+    'if (pane) pane.scrollTop = 0',
+    'assert.deepEqual(failures, []',
+  ]) assert.ok(browser.includes(phrase), 'Missing real desktop scrolled-content evidence: ' + phrase);
 });

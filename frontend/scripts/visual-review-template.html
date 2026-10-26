@@ -30,7 +30,7 @@ small { color: #555; overflow-wrap: anywhere; }
 <body>
 <h1>NAS File Center — 800 组人工视觉验收</h1>
 <p class="note warning"><strong>全部初始状态为未检查。</strong>自动化 Chromium 截图、零错误检查和已合并的 GitHub CI 不等于人工视觉验收。仅在逐张查看截图并确认后才能选择「通过」；这里的导出文件只是人工记录，不会自动修改仓库里程碑或批准生产 NAS 部署。</p>
-<p class="note">离线查看同一 PR HEAD 的 25 路由 × 8 宽度 × 4 主题。点击图片打开原始分辨率。请同时查看额外弹窗、错误态截图，人工检查遮挡、汉字字体、纵向层级、滚动、主题、聚焦和响应式细节。遇到缺陷选「发现问题」并填写说明。所有结果仅保存在当前页面内，请定期导出 JSON，重新打开时使用导入恢复。</p>
+<p class="note">离线查看同一 PR HEAD 的 25 路由 × 8 宽度 × 4 主题。点击图片打开原始分辨率。1440px 桌面页面如果存在独立滚动的主工作区，会同时显示该工作区实际滚到底后的额外截图；需连同首屏一起审查。其他内部滚动表格、弹窗及页面仍需额外人工检查。遇到缺陷选「发现问题」并填写说明。所有结果仅保存在当前页面内，请定期导出 JSON，重新打开时使用导入恢复。</p>
 <p id="sha"></p>
 <div class="controls">
 <label>审查人<input id="reviewer" placeholder="人工审查人 / owner" autocomplete="off"></label>
@@ -95,6 +95,21 @@ function render() {
     const img = document.createElement('img');
     img.src = row.image; img.loading = 'lazy'; img.alt = heading.textContent;
     link.append(img);
+    let bottomLink = null;
+    if (row.workspaceBottom) {
+      bottomLink = document.createElement('a');
+      bottomLink.href = row.workspaceBottom;
+      bottomLink.target = '_blank';
+      bottomLink.rel = 'noopener';
+      bottomLink.setAttribute('aria-label', '打开滚动到底部的工作区 ' + heading.textContent);
+      const description = document.createElement('small');
+      description.textContent = '补充证据：桌面主工作区已独立滚动到底部';
+      const bottomImage = document.createElement('img');
+      bottomImage.src = row.workspaceBottom;
+      bottomImage.loading = 'lazy';
+      bottomImage.alt = '滚动后的工作区 · ' + heading.textContent;
+      bottomLink.append(description, bottomImage);
+    }
     const statusLabel = document.createElement('label');
     statusLabel.textContent = '人工结论';
     const select = document.createElement('select');
@@ -114,7 +129,9 @@ function render() {
     notes.maxLength = 1000; notes.value = row.notes;
     notes.addEventListener('input', () => { row.notes = notes.value; });
     noteLabel.append(notes);
-    card.append(heading, coverage, link, statusLabel, noteLabel);
+    card.append(heading, coverage, link);
+    if (bottomLink) card.append(bottomLink);
+    card.append(statusLabel, noteLabel);
     gallery.append(card);
   }
   updateSummary();
