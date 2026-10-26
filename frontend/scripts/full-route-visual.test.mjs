@@ -322,6 +322,8 @@ test('mobile advanced-dedupe disabled scorer cards pack by content, with live Ch
   const mobile = css.slice(css.indexOf('@media (max-width: 767px)'));
   assert.match(mobile, /\.nfc-v2-scorer-editor\s*\{\s*grid-auto-rows:\s*max-content;\s*align-content:\s*start;/);
   assert.match(mobile, /\.nfc-v2-scorer-card\s*\{\s*align-self:\s*start;/);
+  assert.match(mobile, /\.nfc-v2-scorer-heading h3\s*\{\s*flex:\s*0 0 auto;/);
+  assert.match(css, /\.nfc-v2-scorer-heading h3\s*\{\s*flex:\s*1 1 180px;/);
   assert.ok(editor.includes('nfc-dedupe-config-card nfc-v2-scorer-card'));
   assert.ok(editor.includes('nfc-v2-scorer-weight'));
   for (const phrase of [
