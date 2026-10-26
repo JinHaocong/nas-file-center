@@ -32,6 +32,13 @@ function fixture() {
       const scrolled = nested && item.route === '/settings';
       report.push({ route: item.route, width, theme,
         screenshotFullPage: requiresFullPageReview(width),
+        ...(item.route === '/download-sources' && {
+          sourceEditorScreenshotPixels: {
+            width, height: width === 390 ? 1480 : 900,
+            documentHeight: width === 390 ? 1480 : 900,
+            fullPage: requiresFullPageReview(width),
+          },
+        }),
         ...(item.route === '/download-verification' && {
           detailScreenshotPixels: {
             width, height: width === 390 ? 1999 : 900,
@@ -207,5 +214,29 @@ test('rejects missing supplemental interaction screenshots and mode-dependent fu
     writeFileSync(file, JSON.stringify(manifest));
     assert.throws(() => buildReviewPack(f.input, f.output, SHA),
       /Download selected-detail theme\/full-page evidence missing/);
+  } finally { rmSync(f.dir, { recursive: true, force: true }); }
+});
+
+test('rejects source editor cropped mobile form, wrong theme depth and missing metrics', () => {
+  const f = fixture();
+  try {
+    const file = join(f.input, '390', 'manifest.json');
+    const manifest = JSON.parse(readFileSync(file, 'utf8'));
+    const row = manifest.report.find(x =>
+      x.route === '/download-sources' && x.theme === 'system-dark');
+    row.sourceEditorScreenshotPixels.height = 900;
+    writeFileSync(file, JSON.stringify(manifest));
+    assert.throws(() => buildReviewPack(f.input, f.output, SHA),
+      /Source editor complete mobile screenshot missing/);
+    row.sourceEditorScreenshotPixels.height = 1480;
+    row.sourceEditorScreenshotPixels.fullPage = false;
+    writeFileSync(file, JSON.stringify(manifest));
+    assert.throws(() => buildReviewPack(f.input, f.output, SHA),
+      /Source editor complete mobile screenshot missing/);
+    row.sourceEditorScreenshotPixels.fullPage = true;
+    delete row.sourceEditorScreenshotPixels;
+    writeFileSync(file, JSON.stringify(manifest));
+    assert.throws(() => buildReviewPack(f.input, f.output, SHA),
+      /Source editor complete mobile screenshot missing/);
   } finally { rmSync(f.dir, { recursive: true, force: true }); }
 });
