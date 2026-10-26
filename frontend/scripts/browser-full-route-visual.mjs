@@ -629,11 +629,29 @@ try {
         // The same long-page coverage MUST apply to light/dark/system cases.
         // 390px and 1440px capture the entire document, not just the first fold.
         audit.screenshotFullPage = requiresFullPageReview(width);
-        await tab.screenshot({
+        const baselinePng = await tab.screenshot({
           path: resolve(OUT, name + '.png'),
           fullPage: audit.screenshotFullPage,
           animations: 'disabled',
         });
+        // Verify actual PNG dimensions, not merely the requested Playwright
+        // option: a dark/system screenshot clipped to the first viewport must
+        // fail before any reviewer can mistake it for full-page evidence.
+        const pixelWidth = baselinePng.readUInt32BE(16);
+        const pixelHeight = baselinePng.readUInt32BE(20);
+        const documentHeight = await tab.evaluate(() => Math.ceil(Math.max(
+          document.documentElement.scrollHeight,
+          document.body?.scrollHeight || 0,
+        )));
+        audit.screenshotPixels = { width: pixelWidth, height: pixelHeight, documentHeight };
+        if (pixelWidth !== width ||
+            (audit.screenshotFullPage
+              ? pixelHeight < documentHeight - 2
+              : pixelHeight !== 900)) {
+          problems.push('Baseline screenshot missing required viewport/full-page pixels: ' +
+            JSON.stringify({ width, theme: themeLabel, fullPage: audit.screenshotFullPage,
+              pixelWidth, pixelHeight, documentHeight }));
+        }
         // Real keyboard bypass regression: the first Tab on every authenticated
         // page must expose a legible skip link; Enter moves focus to the real
         // main landmark. Keep this AFTER baseline screenshots, not in their pixels.
