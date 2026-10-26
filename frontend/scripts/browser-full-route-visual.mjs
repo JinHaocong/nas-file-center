@@ -461,6 +461,37 @@ try {
           if (!match) problems.push('Login/Settings actual neutral paint mismatch: ' +
             JSON.stringify({ route: item.id, effectiveTheme: theme.effective, painted }));
         }
+        if (item.id === 'indexes' && width <= 767) {
+          // Stage #70: actual 360/390px dark screenshots exposed inherited
+          // v056 navy mobile-list/card backgrounds (#15191f) in Indexes.
+          // Assert computed paint on mounted content, not token text alone.
+          const indexPaint = await tab.evaluate(() => {
+            const page = document.querySelector('.nfc-v2-indexes-page');
+            const list = page?.querySelector('.nfc-v2-indexes-mobile');
+            const card = list?.querySelector('.nfc-index-mobile-card');
+            const read = node => node ? {
+              background: getComputedStyle(node).backgroundColor,
+              width: Math.round(node.getBoundingClientRect().width),
+            } : null;
+            return {
+              list: read(list), card: read(card),
+              localPaper: page && getComputedStyle(page)
+                .getPropertyValue('--nfc-idx-bg').trim(),
+              inheritedW2Surface: page && getComputedStyle(page)
+                .getPropertyValue('--nfc-w2-surface').trim(),
+            };
+          });
+          const paperColor = theme.effective === 'dark'
+            ? 'rgb(36, 36, 34)' : 'rgb(255, 255, 255)';
+          audit.indexMobileNeutralPaint = { ...indexPaint, required: paperColor };
+          if (!indexPaint.list || !indexPaint.card ||
+              indexPaint.list.background !== paperColor ||
+              indexPaint.card.background !== paperColor ||
+              indexPaint.list.width <= 100 || indexPaint.card.width <= 100) {
+            problems.push('Indexes mobile card/list inherited non-neutral painted surface: ' +
+              JSON.stringify({ width, theme: themeLabel, ...audit.indexMobileNeutralPaint }));
+          }
+        }
         if (item.id === 'workflows') {
           // Stage #70: real screenshots showed navy workflow cards on a dark
           // mobile page despite the Pure White neutral theme contract.
