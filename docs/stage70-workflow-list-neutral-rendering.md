@@ -67,3 +67,41 @@ This repair addresses one actual Stage #70 color defect, **not** all
 CSS selector intersections, pixel-level manual assessment, human screen
 reader approval, isolated NAS acceptance, or deployment. #70–#74 remain
 OPEN; formal status **69/74**. No backend or NAS operation is changed.
+
+## First real Chromium run exposed a second inherited owner (do not suppress)
+
+The first PR HEAD `378aa332d5b8bcc2e1d62729c243016d9be48c1b`
+failed its new all-route Chromium gates as designed. The saved 360px
+manifest demonstrated that the main Workflow card was **already repaired**:
+`rgb(255,255,255)` light and `rgb(36,36,34)` dark. The outer DataPanel
+had a **different, already neutral** skin: `rgb(251,251,250)` light and
+`rgb(30,30,28)` dark. The initial guard incorrectly equated the outer
+panel with the raised card. It was corrected to require these *distinct*
+approved neutral surfaces, rather than weaken/remove painted-style checks.
+
+Independent inspection of the first PR Chromium screenshot then showed
+blue-black **behind** the neutralized mobile card. The culprit is an
+additional later owner in `v056-right-workspace-v2.css`:
+
+```css
+.nfc-app-main .nfc-data-panel-body:not(:empty) {
+  background: var(--nfc-w2-surface);
+}
+.nfc-app-main .nfc-mobile-record-list {
+  background: var(--nfc-w2-surface);
+}
+```
+
+These rules affect descendants even when the parent DataPanel and
+raised mobile card are already neutral. The narrow correction therefore
+also maps `--nfc-w2-surface: var(--nfc-wfl-soft)` **on the workflow-list
+root only**, preserving historical v056 stylesheet rules and other routes.
+The actual Chromium manifest now checks **four distinct computed fills**
+where applicable: outer panel, inner body, mobile list backdrop, raised
+record card / desktop header. All outputs must be opaque neutral and
+match the documented Pure White values. A resumed CI can fail closed on
+any additional cascade owner rather than invent an approval.
+
+The first failed CI is intentionally preserved as causal evidence.
+No global `--nfc-w2-*` token is changed, no blanket `!important`
+override is introduced, and no production NAS file operation occurs.
