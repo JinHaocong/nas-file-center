@@ -469,13 +469,16 @@ try {
           const paint = await tab.evaluate(() => {
             const page = document.querySelector('.nfc-v2-workflow-list-page');
             const panel = page?.querySelector('.nfc-data-panel-dense');
-            const card = page?.querySelector('.nfc-v2-workflow-mobile-list .nfc-workflow-mobile-card');
+            const body = panel?.querySelector('.nfc-data-panel-body');
+            const list = page?.querySelector('.nfc-v2-workflow-mobile-list');
+            const card = list?.querySelector('.nfc-workflow-mobile-card');
             const heading = page?.querySelector('.nfc-v2-workflow-table th');
             const read = node => node ? {
               background: getComputedStyle(node).backgroundColor,
               width: Math.round(node.getBoundingClientRect().width),
             } : null;
-            return { panel: read(panel), card: read(card), heading: read(heading),
+            return { panel: read(panel), body: read(body), list: read(list),
+              card: read(card), heading: read(heading),
               localSurface: page && getComputedStyle(page)
                 .getPropertyValue('--nfc-wfl-bg').trim() };
           });
@@ -493,7 +496,11 @@ try {
             required: { panelColor, cardColor, headColor } };
           if (!paint.panel || paint.panel.background !== panelColor ||
               paint.panel.width <= 100 ||
-              (mobile ? (!paint.card || paint.card.background !== cardColor ||
+              !paint.body || paint.body.background !== headColor ||
+              paint.body.width <= 100 ||
+              (mobile ? (!paint.list || paint.list.background !== headColor ||
+                paint.list.width <= 100 ||
+                !paint.card || paint.card.background !== cardColor ||
                 paint.card.width <= 100) :
                 (!paint.heading || paint.heading.background !== headColor ||
                 paint.heading.width <= 20))) {
