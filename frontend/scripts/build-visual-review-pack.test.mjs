@@ -32,6 +32,13 @@ function fixture() {
       const scrolled = nested && item.route === '/settings';
       report.push({ route: item.route, width, theme,
         screenshotFullPage: requiresFullPageReview(width),
+        ...(item.route === '/download-verification' && {
+          detailScreenshotPixels: {
+            width, height: width === 390 ? 1999 : 900,
+            documentHeight: width === 390 ? 1999 : 900,
+            fullPage: requiresFullPageReview(width),
+          },
+        }),
         ...(nested && { workspaceScroll: {
           overflowY: 'auto', maxScroll: scrolled ? 1800 : 0,
           scrollable: scrolled, bottomReached: true,
@@ -41,6 +48,18 @@ function fixture() {
       writeFileSync(join(place, item.id + '-' + theme + '-' + width + '.png'), png);
       if (scrolled) writeFileSync(
         join(place, item.id + '-' + theme + '-' + width + '-workspace-bottom.png'), png);
+      const addExtra = filename =>
+        writeFileSync(join(place, filename + '.png'), png);
+      if (item.route === '/download-verification') {
+        addExtra(item.id + '-' + theme + '-' + width + '-remote-picker');
+        addExtra(item.id + '-' + theme + '-' + width + '-selected-detail');
+      } else if (item.route === '/download-sources') {
+        addExtra(item.id + '-' + theme + '-' + width + '-source-editor');
+      } else if (item.route === '/schedules') {
+        addExtra('scheduler-list-503-' + theme + '-' + width);
+        if ([390, 1440].includes(width))
+          addExtra('scheduler-list-503-keyboard-' + theme + '-' + width);
+      }
     }
     writeFileSync(join(place, 'manifest.json'), JSON.stringify({
       width, routes: cases.length, themes: themes.length,
@@ -64,6 +83,9 @@ test('produces exactly 800 separately unapproved human decisions and an offline 
     assert.ok(page.includes('补充证据：桌面主工作区已独立滚动到底部'));
     assert.ok(page.includes('settings-light-dark-1440-workspace-bottom.png'));
     assert.ok(page.includes('"workspaceBottom":""'));
+    assert.ok(page.includes('交互态补充证据：'));
+    assert.ok(page.includes('download-verification-system-dark-390-selected-detail.png'));
+    assert.ok(page.includes('scheduler-list-503-keyboard-dark-light-1440.png'));
 
     assert.ok(page.includes('浏览器全页截图（仅文档滚动；内部滚动区仍需另查）'));
     assert.ok(page.includes('视口首屏截图（长页及内部滚动区仍需补充审查）'));
@@ -77,6 +99,9 @@ test('produces exactly 800 separately unapproved human decisions and an offline 
     const evidence = JSON.parse(readFileSync(join(f.output, 'evidence.json'), 'utf8'));
     assert.equal(evidence.desktopWorkspaceWidth, 1440);
     assert.equal(evidence.desktopWorkspaceBottomCases, 4);
+    assert.equal(evidence.interactionScreenshots, 136);
+    assert.equal(csv.trimEnd().split('\n').filter(x =>
+      x.includes('"2","FULL_PAGE"')).length >= 1, true);
     assert.equal(csv.trimEnd().split('\n').filter(x =>
       x.includes('workspace-bottom.png')).length, 4);
     assert.deepEqual([evidence.fullPageWidths, evidence.fullPageCases, evidence.viewportCases],
@@ -153,5 +178,34 @@ test('fails closed on missing, forged or unstated desktop workspace-bottom evide
     writeFileSync(file, JSON.stringify(manifest));
     assert.throws(() => buildReviewPack(f.input, f.output, SHA),
       /Missing desktop inner scroll provenance/);
+  } finally { rmSync(f.dir, { recursive: true, force: true }); }
+});
+
+test('rejects missing supplemental interaction screenshots and mode-dependent full-page metadata', () => {
+  const f = fixture();
+  try {
+    const missing = join(f.input, '390',
+      'download-verification-system-dark-390-selected-detail.png');
+    unlinkSync(missing);
+    assert.throws(() => buildReviewPack(f.input, f.output, SHA),
+      /Missing interaction screenshot/);
+    writeFileSync(missing, png);
+    const file = join(f.input, '390', 'manifest.json');
+    const manifest = JSON.parse(readFileSync(file, 'utf8'));
+    const row = manifest.report.find(x =>
+      x.route === '/download-verification' && x.theme === 'system-dark');
+    row.detailScreenshotPixels.fullPage = false;
+    writeFileSync(file, JSON.stringify(manifest));
+    assert.throws(() => buildReviewPack(f.input, f.output, SHA),
+      /Download selected-detail theme\/full-page evidence missing/);
+    row.detailScreenshotPixels.fullPage = true;
+    row.detailScreenshotPixels.height = 900;
+    writeFileSync(file, JSON.stringify(manifest));
+    assert.throws(() => buildReviewPack(f.input, f.output, SHA),
+      /Download selected-detail theme\/full-page evidence missing/);
+    delete row.detailScreenshotPixels;
+    writeFileSync(file, JSON.stringify(manifest));
+    assert.throws(() => buildReviewPack(f.input, f.output, SHA),
+      /Download selected-detail theme\/full-page evidence missing/);
   } finally { rmSync(f.dir, { recursive: true, force: true }); }
 });
