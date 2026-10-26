@@ -17,7 +17,8 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { visualViewports, visualThemes } from './visual-fixtures.mjs';
 import { requiresFullPageReview, FULL_PAGE_REVIEW_WIDTHS,
-  requiresWorkspaceScrollReview, WORKSPACE_SCROLL_REVIEW_WIDTH } from './visual-screenshot-policy.mjs';
+  requiresWorkspaceScrollReview, WORKSPACE_SCROLL_REVIEW_WIDTH,
+  requiresExpandedInteractionFullPageReview } from './visual-screenshot-policy.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(join(ROOT, 'browser-full-route-visual.mjs'), 'utf8');
@@ -72,25 +73,26 @@ export function buildReviewPack(rootDir, destination, expectedHeadSha) {
       }
       if (result.route === '/download-verification') {
         const pixels = result.detailScreenshotPixels;
-        const expectedFullPage = requiresFullPageReview(width);
+        const expectedFullPage = requiresExpandedInteractionFullPageReview(width);
         assert.ok(pixels && pixels.fullPage === expectedFullPage &&
           pixels.width === width && Number.isFinite(pixels.documentHeight) &&
           pixels.documentHeight >= 900 &&
           (expectedFullPage
             ? pixels.height >= pixels.documentHeight - 2
-            : pixels.height === 900),
+            : pixels.height === 900) &&
+          (width > 430 || pixels.documentHeight > 900),
           'Download selected-detail theme/full-page evidence missing: ' +
             [width, result.theme].join(' '));
       }
       if (result.route === '/download-sources') {
         const pixels = result.sourceEditorScreenshotPixels;
-        const fullPage = requiresFullPageReview(width);
+        const fullPage = requiresExpandedInteractionFullPageReview(width);
         assert.ok(pixels && pixels.width === width && pixels.fullPage === fullPage &&
           Number.isFinite(pixels.documentHeight) && pixels.documentHeight >= 900 &&
           (fullPage
             ? pixels.height >= pixels.documentHeight - 2
             : pixels.height === 900) &&
-          (width !== 390 || pixels.documentHeight > 900),
+          (width > 430 || pixels.documentHeight > 900),
           'Source editor complete mobile screenshot missing: ' +
             [width, result.theme].join(' '));
       }
