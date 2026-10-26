@@ -360,3 +360,24 @@ test('1440px desktop full-page evidence also inspects real nested workspace scro
     'assert.deepEqual(failures, []',
   ]) assert.ok(browser.includes(phrase), 'Missing real desktop scrolled-content evidence: ' + phrase);
 });
+
+
+test('real download-verification detail screenshots use equal full-page depth for all four themes', () => {
+  for (const theme of visualThemes) {
+    for (const viewport of visualViewports)
+      assert.equal(requiresFullPageReview(viewport), [390, 1440].includes(viewport),
+        viewport + ' ' + theme.mode + '-' + theme.system);
+  }
+  for (const phrase of [
+    'const detailFullPage = requiresFullPageReview(width)',
+    "name + '-selected-detail.png'",
+    'fullPage: detailFullPage',
+    'detailPng.readUInt32BE(16)',
+    'detailPng.readUInt32BE(20)',
+    'audit.detailScreenshotPixels = detailPixels',
+    'detailPixels.height < detailPixels.documentHeight - 2',
+    'Selected-detail screenshot missing required full-page pixels:',
+  ]) assert.ok(browser.includes(phrase), 'Missing real selected-detail parity guard: ' + phrase);
+  assert.doesNotMatch(browser,
+    /fullPage:\s*width\s*===\s*390\s*&&\s*theme\.mode\s*===\s*['"]light['"]/);
+});
