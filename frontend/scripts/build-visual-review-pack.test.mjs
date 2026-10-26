@@ -51,8 +51,8 @@ test('produces exactly 800 separately unapproved human decisions and an offline 
     assert.ok(page.includes(SHA));
     assert.ok(page.includes('manualReviewComplete: false'));
     assert.ok(page.includes('人工通过'));
-    assert.ok(page.includes('完整页面截图（含首屏以下内容）'));
-    assert.ok(page.includes('视口截图（仅展示首屏；长页需补充审查）'));
+    assert.ok(page.includes('浏览器全页截图（仅文档滚动；内部滚动区仍需另查）'));
+    assert.ok(page.includes('视口首屏截图（长页及内部滚动区仍需补充审查）'));
     assert.ok(page.includes('"capture":"FULL_PAGE"'));
     assert.ok(page.includes('"capture":"VIEWPORT"'));
     assert.equal(csv.trimEnd().split('\n').filter(x => x.includes('"FULL_PAGE"')).length, 200);
