@@ -422,6 +422,7 @@ test('Stage 70 workflow list neutralizes actual v049 panel owner and dark mobile
     '--nfc-wfl-bg: #ffffff', '--nfc-wfl-soft: #f5f5f3',
     '--nfc-wfl-text: #20201f', '--nfc-wfl-line: #eaeae7',
     '--nfc-wfl-accent: #262625', '--nfc-v49-surface: var(--nfc-wfl-bg)',
+    '--nfc-w2-surface: var(--nfc-wfl-soft)',
   ]) assert.ok(root.includes(prop), 'Missing light workflow-neutral owner: ' + prop);
   for (const prop of [
     '--nfc-wfl-bg: #242422', '--nfc-wfl-soft: #2d2d2a',
@@ -434,10 +435,19 @@ test('Stage 70 workflow list neutralizes actual v049 panel owner and dark mobile
     entry.indexOf("import './styles/console-v2-workflow-list.css';"));
   assert.match(css, /\.nfc-v2-workflow-mobile-list \.nfc-workflow-mobile-card \{ background: var\(--nfc-wfl-bg\)/);
   assert.ok(browser.includes("if (item.id === 'workflows')"));
+  assert.ok(browser.includes('paint.body.background !== headColor'));
+  assert.ok(browser.includes('paint.list.background !== headColor'));
+  assert.ok(v049.includes('var(--nfc-v49-surface) !important'));
+  const w2 = readFileSync('src/styles/v056-right-workspace-v2.css', 'utf8');
+  assert.ok(w2.includes('.nfc-app-main .nfc-mobile-record-list'));
+  assert.ok(w2.includes('background: var(--nfc-w2-surface)'));
+
   for (const phrase of [
     "document.querySelector('.nfc-v2-workflow-list-page')",
     "page?.querySelector('.nfc-data-panel-dense')",
-    "page?.querySelector('.nfc-v2-workflow-mobile-list .nfc-workflow-mobile-card')",
+    "panel?.querySelector('.nfc-data-panel-body')",
+    "page?.querySelector('.nfc-v2-workflow-mobile-list')",
+    "list?.querySelector('.nfc-workflow-mobile-card')",
     "page?.querySelector('.nfc-v2-workflow-table th')",
     'audit.workflowListNeutralPaint = { ...paint, mobile',
     'Workflow list inherited non-neutral rendered surface:',
