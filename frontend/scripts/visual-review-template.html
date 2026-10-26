@@ -85,6 +85,9 @@ function render() {
     const card = document.createElement('article'); card.className = 'review';
     const heading = document.createElement('h2');
     heading.textContent = row.route + ' · ' + row.width + 'px · ' + row.theme;
+    const coverage = document.createElement('small');
+    coverage.textContent = row.capture === 'FULL_PAGE'
+      ? '完整页面截图（含首屏以下内容）' : '视口截图（仅展示首屏；长页需补充审查）';
     const link = document.createElement('a');
     link.href = row.image; link.target = '_blank'; link.rel = 'noopener';
     link.setAttribute('aria-label', '打开原图 ' + heading.textContent);
@@ -110,7 +113,7 @@ function render() {
     notes.maxLength = 1000; notes.value = row.notes;
     notes.addEventListener('input', () => { row.notes = notes.value; });
     noteLabel.append(notes);
-    card.append(heading, link, statusLabel, noteLabel);
+    card.append(heading, coverage, link, statusLabel, noteLabel);
     gallery.append(card);
   }
   updateSummary();
