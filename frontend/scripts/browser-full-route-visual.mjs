@@ -987,7 +987,34 @@ try {
           // Source editor is a separate route; no POST requests are issued by this fixture.
           await tab.getByRole('button', { name: '新增来源' }).click();
           await tab.getByRole('textbox', { name: '来源名称' }).waitFor();
-          await tab.screenshot({ path: resolve(OUT, name + '-source-editor.png'), animations: 'disabled' });
+          // A 390px source editor grows beyond the first 900px viewport.
+          // The original extra interaction PNG ended inside the editor form;
+          // capture the complete document for BOTH effective light/dark and
+          // system themes, without changing runtime UI or safe network rules.
+          const editorFullPage = requiresFullPageReview(width);
+          const editorPng = await tab.screenshot({
+            path: resolve(OUT, name + '-source-editor.png'),
+            fullPage: editorFullPage,
+            animations: 'disabled',
+          });
+          const editorPixels = {
+            width: editorPng.readUInt32BE(16),
+            height: editorPng.readUInt32BE(20),
+            documentHeight: await tab.evaluate(() => Math.ceil(Math.max(
+              document.documentElement.scrollHeight,
+              document.body?.scrollHeight || 0,
+            ))),
+            fullPage: editorFullPage,
+          };
+          audit.sourceEditorScreenshotPixels = editorPixels;
+          if (editorPixels.width !== width ||
+              (editorFullPage
+                ? editorPixels.height < editorPixels.documentHeight - 2
+                : editorPixels.height !== 900) ||
+              (width === 390 && editorPixels.documentHeight <= 900)) {
+            problems.push('Source editor screenshot missing below-the-fold form pixels: ' +
+              JSON.stringify({ width, theme: themeLabel, ...editorPixels }));
+          }
           await tab.getByRole('button', { name: '取消' }).click();
         }
         report.push({ route: item.path, width, theme: themeLabel, ...audit, problems });
