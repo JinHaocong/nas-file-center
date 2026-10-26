@@ -496,7 +496,9 @@ try {
             required: { panelColor, cardColor, headColor } };
           if (!paint.panel || paint.panel.background !== panelColor ||
               paint.panel.width <= 100 ||
-              !paint.body || paint.body.background !== headColor ||
+              // DataPanel's structural body is deliberately transparent:
+              // the mobile list / desktop table below it owns visible paint.
+              !paint.body || paint.body.background !== 'rgba(0, 0, 0, 0)' ||
               paint.body.width <= 100 ||
               (mobile ? (!paint.list || paint.list.background !== headColor ||
                 paint.list.width <= 100 ||
