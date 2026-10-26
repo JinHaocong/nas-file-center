@@ -6,7 +6,8 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { visualViewports, visualThemes } from './visual-fixtures.mjs';
-import { requiresFullPageReview, requiresWorkspaceScrollReview } from './visual-screenshot-policy.mjs';
+import { requiresFullPageReview, requiresWorkspaceScrollReview,
+  requiresExpandedInteractionFullPageReview } from './visual-screenshot-policy.mjs';
 import { buildReviewPack } from './build-visual-review-pack.mjs';
 
 const SHA = '7b561c89988f5298f08d7894b1b4642020cd7db3';
@@ -34,16 +35,16 @@ function fixture() {
         screenshotFullPage: requiresFullPageReview(width),
         ...(item.route === '/download-sources' && {
           sourceEditorScreenshotPixels: {
-            width, height: width === 390 ? 1480 : 900,
-            documentHeight: width === 390 ? 1480 : 900,
-            fullPage: requiresFullPageReview(width),
+            width, height: width <= 430 ? 1480 : 900,
+            documentHeight: width <= 430 ? 1480 : 900,
+            fullPage: requiresExpandedInteractionFullPageReview(width),
           },
         }),
         ...(item.route === '/download-verification' && {
           detailScreenshotPixels: {
-            width, height: width === 390 ? 1999 : 900,
-            documentHeight: width === 390 ? 1999 : 900,
-            fullPage: requiresFullPageReview(width),
+            width, height: width <= 430 ? 1999 : 900,
+            documentHeight: width <= 430 ? 1999 : 900,
+            fullPage: requiresExpandedInteractionFullPageReview(width),
           },
         }),
         ...(nested && { workspaceScroll: {
@@ -238,5 +239,31 @@ test('rejects source editor cropped mobile form, wrong theme depth and missing m
     writeFileSync(file, JSON.stringify(manifest));
     assert.throws(() => buildReviewPack(f.input, f.output, SHA),
       /Source editor complete mobile screenshot missing/);
+  } finally { rmSync(f.dir, { recursive: true, force: true }); }
+});
+
+test('rejects cropped expanded interaction states in both outer phone widths, including system themes', () => {
+  const f = fixture();
+  try {
+    for (const width of [360, 430]) {
+      const manifestPath = join(f.input, String(width), 'manifest.json');
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+      const detail = manifest.report.find(x =>
+        x.route === '/download-verification' && x.theme === 'system-dark');
+      detail.detailScreenshotPixels.height = 900;
+      writeFileSync(manifestPath, JSON.stringify(manifest));
+      assert.throws(() => buildReviewPack(f.input, f.output, SHA),
+        /Download selected-detail theme\/full-page evidence missing/);
+      detail.detailScreenshotPixels.height = 1999;
+      const editor = manifest.report.find(x =>
+        x.route === '/download-sources' && x.theme === 'light-dark');
+      editor.sourceEditorScreenshotPixels.fullPage = false;
+      writeFileSync(manifestPath, JSON.stringify(manifest));
+      assert.throws(() => buildReviewPack(f.input, f.output, SHA),
+        /Source editor complete mobile screenshot missing/);
+      editor.sourceEditorScreenshotPixels.fullPage = true;
+      writeFileSync(manifestPath, JSON.stringify(manifest));
+      assert.equal(buildReviewPack(f.input, f.output, SHA), 800);
+    }
   } finally { rmSync(f.dir, { recursive: true, force: true }); }
 });
