@@ -118,6 +118,9 @@
    * content height; never distribute extra panel height into empty cards. */
   .nfc-v2-scorer-editor { grid-auto-rows: max-content; align-content: start; }
   .nfc-v2-scorer-card { align-self: start; padding: 12px; }
+  /* components.css switches the heading flex axis to column on phones.
+   * Its desktop 180px flex-basis would then become 180px of empty HEIGHT. */
+  .nfc-v2-scorer-heading h3 { flex: 0 0 auto; }
   .nfc-v2-scorer-rule-scope, .nfc-v2-scorer-rule-pattern { flex: 1 1 100%; }
   .nfc-v2-scorer-rule-actions { margin-left: auto; }
   .nfc-v2-scorer-rule-actions .nfc-console-button { min-height: 44px; min-width: 44px; }
