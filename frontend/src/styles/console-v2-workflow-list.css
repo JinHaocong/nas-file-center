@@ -5,6 +5,9 @@
   --nfc-wfl-bg: #ffffff; --nfc-wfl-soft: #f5f5f3; --nfc-wfl-text: #20201f;
   --nfc-wfl-muted: #62625e; --nfc-wfl-line: #eaeae7; --nfc-wfl-accent: #262625;
   --nfc-v49-surface: var(--nfc-wfl-bg);
+  /* v056's later .nfc-data-panel-body and .nfc-mobile-record-list use
+     this inherited surface; keep their surrounding fill neutral too. */
+  --nfc-w2-surface: var(--nfc-wfl-soft);
 }
 [data-theme='dark'] .nfc-v2-workflow-list-page {
   --nfc-wfl-bg: #242422; --nfc-wfl-soft: #2d2d2a; --nfc-wfl-text: #f5f5f2;
