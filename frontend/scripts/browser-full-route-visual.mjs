@@ -928,11 +928,32 @@ try {
           const action = tab.getByRole('button', { name: '查看条目' }).first();
           await action.click();
           await tab.getByRole('table', { name: '校验明细' }).waitFor();
-          await tab.screenshot({
+          // Selected-detail interaction evidence needs the SAME full-page
+          // policy in explicit and system light/dark. Old code captured the
+          // 390px long table only in explicit light, hiding lower dark content.
+          const detailFullPage = requiresFullPageReview(width);
+          const detailPng = await tab.screenshot({
             path: resolve(OUT, name + '-selected-detail.png'),
-            fullPage: width === 390 && theme.mode === 'light',
+            fullPage: detailFullPage,
             animations: 'disabled',
           });
+          const detailPixels = {
+            width: detailPng.readUInt32BE(16),
+            height: detailPng.readUInt32BE(20),
+            documentHeight: await tab.evaluate(() => Math.ceil(Math.max(
+              document.documentElement.scrollHeight,
+              document.body?.scrollHeight || 0,
+            ))),
+            fullPage: detailFullPage,
+          };
+          audit.detailScreenshotPixels = detailPixels;
+          if (detailPixels.width !== width ||
+              (detailFullPage
+                ? detailPixels.height < detailPixels.documentHeight - 2
+                : detailPixels.height !== 900)) {
+            problems.push('Selected-detail screenshot missing required full-page pixels: ' +
+              JSON.stringify({ width, theme: themeLabel, ...detailPixels }));
+          }
           if (pageErrors.length > beforeErrors) problems.push(
             'Uncaught detail-panel React errors: ' + pageErrors.slice(beforeErrors).join('; '));
         }
