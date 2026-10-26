@@ -435,7 +435,7 @@ test('Stage 70 workflow list neutralizes actual v049 panel owner and dark mobile
     entry.indexOf("import './styles/console-v2-workflow-list.css';"));
   assert.match(css, /\.nfc-v2-workflow-mobile-list \.nfc-workflow-mobile-card \{ background: var\(--nfc-wfl-bg\)/);
   assert.ok(browser.includes("if (item.id === 'workflows')"));
-  assert.ok(browser.includes('paint.body.background !== headColor'));
+  assert.ok(browser.includes("paint.body.background !== 'rgba(0, 0, 0, 0)'"));
   assert.ok(browser.includes('paint.list.background !== headColor'));
   assert.ok(v049.includes('var(--nfc-v49-surface) !important'));
   const w2 = readFileSync('src/styles/v056-right-workspace-v2.css', 'utf8');
