@@ -24,6 +24,9 @@ found a screenshot-depth disparity, **not a proven runtime UI defect**:
   **200 full-page cases and 600 viewport cases** are identified separately
   in `visual-review-pack/evidence.json`, offline gallery and review CSV.
 - Each actual React Chromium route result includes `screenshotFullPage`.
+  The runner also decodes the real PNG header and checks image width and
+  height against the page's actual scroll height. An incorrectly clipped
+  full-page capture fails the viewport's CI job immediately.
   Pack generation rejects missing/incorrect screenshot-depth metadata for any
   viewport/theme/route, and rejects all prior manifest failures as before.
 - Regression tests pin the theme-independent policy, exact cases, CSV and
