@@ -13,15 +13,30 @@ both scorer factors are disabled. The labels, toggle, weight and explanatory
 text are spread out across the empty cards, creating unnecessary scrolling.
 This is a visible layout/spacing defect; it is not a deduplication logic issue.
 
+## Root cause proved by real Chromium
+
+The first CSS grid-row packing hypothesis was **insufficient**. Its
+GET-only Chromium run deliberately failed at 360px in all four themes,
+reporting the Path Priority card at **403px** and Preferred Extension
+at **420px**, even though the content after the heading is compact
+(`gapToWeight: 16px`). Instrumented computed geometry confirmed
+`headingHeight: 244px` with card `minHeight: auto` and weight block
+heights of only 104px and 121px.
+
+Root cause: the desktop rule `.nfc-v2-scorer-heading h3 { flex: 1 1 180px }`
+specifies a horizontal heading flex-basis. The historical 767px mobile
+rule changes `.nfc-dedupe-config-heading` to a **column** flex direction,
+turning that width basis into **180px of vertical height** in the title.
+Both light and dark modes inherit this same layout bug.
+
 ## Narrow CSS fix
 
-The reusable scorer `.nfc-v2-scorer-editor` uses a CSS grid. At mobile
-widths (up to 767px), make implicit tracks `max-content` and pin
-`align-content: start`, plus `align-self: start` for its scorer cards.
-This prevents spare panel height from being distributed into disabled
-configuration cards. Keep existing labels, controls, factor defaults,
-disabled states, keyboard focus styles, theme tokens and backend behavior
-unchanged. Desktop layout is not changed.
+At <=767px, reset only the scorer title flex item to
+`flex: 0 0 auto`. Also use `grid-auto-rows: max-content`,
+`align-content: start` and `align-self: start` on the scorer grid/cards
+to keep unused parent height from being distributed into inactive factors.
+No factor configurations, controls, handler logic, keyboard focus, theme
+tokens or backend behavior are changed; desktop remains unchanged.
 
 ## Acceptance evidence
 
