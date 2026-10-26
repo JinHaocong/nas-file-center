@@ -82,6 +82,18 @@ export function buildReviewPack(rootDir, destination, expectedHeadSha) {
           'Download selected-detail theme/full-page evidence missing: ' +
             [width, result.theme].join(' '));
       }
+      if (result.route === '/download-sources') {
+        const pixels = result.sourceEditorScreenshotPixels;
+        const fullPage = requiresFullPageReview(width);
+        assert.ok(pixels && pixels.width === width && pixels.fullPage === fullPage &&
+          Number.isFinite(pixels.documentHeight) && pixels.documentHeight >= 900 &&
+          (fullPage
+            ? pixels.height >= pixels.documentHeight - 2
+            : pixels.height === 900) &&
+          (width !== 390 || pixels.documentHeight > 900),
+          'Source editor complete mobile screenshot missing: ' +
+            [width, result.theme].join(' '));
+      }
       const key = result.route + '|' + result.theme;
       assert.ok(!indexed.has(key), 'Duplicate screenshot case: ' + key);
       indexed.set(key, result);
