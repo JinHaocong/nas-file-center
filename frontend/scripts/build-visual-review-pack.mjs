@@ -70,6 +70,18 @@ export function buildReviewPack(rootDir, destination, expectedHeadSha) {
         if (result.route === '/settings') assert.ok(scroll.scrollable && scroll.maxScroll >= 100,
           'Settings desktop workspace lower content is not covered');
       }
+      if (result.route === '/download-verification') {
+        const pixels = result.detailScreenshotPixels;
+        const expectedFullPage = requiresFullPageReview(width);
+        assert.ok(pixels && pixels.fullPage === expectedFullPage &&
+          pixels.width === width && Number.isFinite(pixels.documentHeight) &&
+          pixels.documentHeight >= 900 &&
+          (expectedFullPage
+            ? pixels.height >= pixels.documentHeight - 2
+            : pixels.height === 900),
+          'Download selected-detail theme/full-page evidence missing: ' +
+            [width, result.theme].join(' '));
+      }
       const key = result.route + '|' + result.theme;
       assert.ok(!indexed.has(key), 'Duplicate screenshot case: ' + key);
       indexed.set(key, result);
@@ -92,8 +104,31 @@ export function buildReviewPack(rootDir, destination, expectedHeadSha) {
           'Missing desktop scroll-bottom PNG: ' + bottom);
         workspaceBottom = relative(output, bottom).split(sep).join('/');
       }
+      // Additional real interaction states were previously present in ZIP
+      // files but not surfaced in the human gallery. Require exact-HEAD
+      // evidence of their existence and attach it to the SAME route decision.
+      const supplements = [];
+      const add = (name, label) => {
+        const extra = join(directory, name + '.png');
+        assert.ok(existsSync(extra) && statSync(extra).isFile() &&
+          statSync(extra).size > 8, 'Missing interaction screenshot: ' + extra);
+        supplements.push({
+          label, image: relative(output, extra).split(sep).join('/'),
+        });
+      };
+      if (route.id === 'download-verification') {
+        add(route.id + '-' + theme + '-' + width + '-remote-picker', '来源目录选择弹窗');
+        add(route.id + '-' + theme + '-' + width + '-selected-detail', '校验明细展开态');
+      } else if (route.id === 'download-sources') {
+        add(route.id + '-' + theme + '-' + width + '-source-editor', '新增来源编辑弹窗');
+      } else if (route.id === 'schedules') {
+        add('scheduler-list-503-' + theme + '-' + width, '调度列表 503 错误态');
+        if ([390, 1440].includes(width))
+          add('scheduler-list-503-keyboard-' + theme + '-' + width,
+            '调度列表重试按钮键盘聚焦');
+      }
       rows.push({ route: route.path, width, theme, image: imageHref,
-        workspaceBottom,
+        workspaceBottom, supplements,
         capture: requiresFullPageReview(width) ? 'FULL_PAGE' : 'VIEWPORT',
         status: 'UNREVIEWED', notes: '' });
     }
@@ -102,8 +137,9 @@ export function buildReviewPack(rootDir, destination, expectedHeadSha) {
   mkdirSync(output, { recursive: true });
   const csvValue = x => '"' + String(x).replaceAll('"', '""') + '"';
   const csv = [
-    'route,width,theme,image,workspace_bottom_image,capture,manual_status,notes',
-    ...rows.map(r => [r.route, r.width, r.theme, r.image, r.workspaceBottom, r.capture, r.status, r.notes]
+    'route,width,theme,image,workspace_bottom_image,interaction_count,capture,manual_status,notes',
+    ...rows.map(r => [r.route, r.width, r.theme, r.image, r.workspaceBottom,
+      r.supplements.length, r.capture, r.status, r.notes]
       .map(csvValue).join(',')),
   ].join('\n') + '\n';
   writeFileSync(join(output, 'review-worklist.csv'), csv);
@@ -118,6 +154,7 @@ export function buildReviewPack(rootDir, destination, expectedHeadSha) {
     automatedCases: rows.length, widths: WIDTHS, themes: THEMES,
     desktopWorkspaceWidth: WORKSPACE_SCROLL_REVIEW_WIDTH,
     desktopWorkspaceBottomCases: rows.filter(row => Boolean(row.workspaceBottom)).length,
+    interactionScreenshots: rows.reduce((total, row) => total + row.supplements.length, 0),
     fullPageWidths: FULL_PAGE_REVIEW_WIDTHS,
     fullPageCases: rows.filter(row => row.capture === 'FULL_PAGE').length,
     viewportCases: rows.filter(row => row.capture === 'VIEWPORT').length,
