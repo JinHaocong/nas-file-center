@@ -34,6 +34,17 @@ found a screenshot-depth disparity, **not a proven runtime UI defect**:
 - CI continues using synthetic GET-only fixtures with off-origin and mutation
   requests blocked; screenshots cannot approve a case or operate on real NAS.
 
+## Exact-head CI screenshot spot check
+
+From the first PR #343 exact-HEAD 1440px Chromium artifact, the newly recorded
+`/settings` capture metadata confirms `screenshotFullPage: true` for all
+four themes, but each PNG remains **1440 × 900** because the page-level
+`documentHeight` is 900px. This means Chromium's `fullPage` covers the DOM
+document but **does not automatically expand independently scrolling inner
+content panels**. Offline gallery labels distinguish this; human reviewers
+must inspect lower/scrollable panels separately. The 390px long-page
+Settings defect remains the clearest useful parity correction.
+
 ## Review boundaries
 
 A fresh **exact-HEAD** artifact is required after this PR's successful UI
