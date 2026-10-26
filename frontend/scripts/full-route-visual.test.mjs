@@ -312,3 +312,27 @@ test('all four theme modes capture full-page 390/1440 screenshots without clippi
   assert.ok(browser.indexOf('audit.screenshotFullPage = requiresFullPageReview(width)') <
     browser.indexOf('await tab.screenshot({\n          path: resolve(OUT, name +'));
 });
+
+
+test('mobile advanced-dedupe disabled scorer cards pack by content, with live Chromium geometry gate', () => {
+  const css = readFileSync('src/styles/console-v2-dedupe-scorer.css', 'utf8');
+  const editor = readFileSync('src/components/dedupe/DedupeScorerConfigEditor.tsx', 'utf8');
+  const entry = readFileSync('src/main.tsx', 'utf8');
+  assert.ok(entry.includes("import './styles/console-v2-dedupe-scorer.css';"));
+  const mobile = css.slice(css.indexOf('@media (max-width: 767px)'));
+  assert.match(mobile, /\.nfc-v2-scorer-editor\s*\{\s*grid-auto-rows:\s*max-content;\s*align-content:\s*start;/);
+  assert.match(mobile, /\.nfc-v2-scorer-card\s*\{\s*align-self:\s*start;/);
+  assert.match(mobile, /\.nfc-v2-scorer-heading h3\s*\{\s*flex:\s*0 0 auto;/);
+  assert.match(css, /\.nfc-v2-scorer-heading h3\s*\{\s*flex:\s*1 1 180px;/);
+  assert.ok(editor.includes('nfc-dedupe-config-card nfc-v2-scorer-card'));
+  assert.ok(editor.includes('nfc-v2-scorer-weight'));
+  for (const phrase of [
+    "item.id === 'scan-dedupe' && width <= 430",
+    'audit.scorerMobileGeometry = geometry',
+    "geometry.gridAutoRows !== 'max-content'",
+    "geometry.alignContent !== 'start'",
+    "card.height > 270 || card.gapToWeight > 90",
+    'Mobile inactive dedupe scorer card has excessive whitespace:',
+    'assert.deepEqual(failures, []',
+  ]) assert.ok(browser.includes(phrase), 'Missing real mounted scorer geometry audit: ' + phrase);
+});

@@ -612,6 +612,67 @@ try {
           if (form.scrollerOverflow !== 'auto') problems.push(
             'Download verification table lost local horizontal scrollbar');
         }
+        if (item.id === 'scan-dedupe' && width <= 430) {
+          // Stage #71 actual screenshot defect: inactive path/extension scorer
+          // cards stretched to hundreds of blank pixels on 390px light/dark.
+          // Assert rendered geometry in Chromium, not just CSS source text.
+          const geometry = await tab.evaluate(() => {
+            const editor = document.querySelector('.nfc-v2-scorer-editor');
+            if (!editor) return null;
+            const style = getComputedStyle(editor);
+            const measure = suffix => {
+              const card = editor.querySelector(
+                'section.nfc-v2-scorer-card[aria-labelledby$="' + suffix + '"]');
+              const heading = card?.querySelector('.nfc-v2-scorer-heading');
+              const weight = card?.querySelector('.nfc-v2-scorer-weight');
+              if (!card || !heading || !weight) return null;
+              const h = heading.getBoundingClientRect();
+              const w = weight.getBoundingClientRect();
+              const c = card.getBoundingClientRect();
+              const cardStyle = getComputedStyle(card);
+              const weightStyle = getComputedStyle(weight);
+              const children = [...weight.children].map(el => ({
+                tag: el.tagName.toLowerCase(), height: Math.round(el.getBoundingClientRect().height),
+                top: Math.round(el.getBoundingClientRect().top - w.top),
+              }));
+              return {
+                height: Math.round(c.height),
+                gapToWeight: Math.round(w.top - h.bottom),
+                remainingBelowWeight: Math.round(c.bottom - w.bottom),
+                headingHeight: Math.round(h.height),
+                weightHeight: Math.round(w.height),
+                minHeight: cardStyle.minHeight, cardHeight: cardStyle.height,
+                cardDisplay: cardStyle.display, cardFlex: cardStyle.flex,
+                weightMinHeight: weightStyle.minHeight,
+                weightJustify: weightStyle.justifyContent,
+                weightFlex: weightStyle.flex,
+                children,
+                active: Boolean(card.querySelector('input[type="checkbox"]')?.checked),
+              };
+            };
+            return {
+              gridAutoRows: style.gridAutoRows, alignContent: style.alignContent,
+              path: measure('-path-priority-heading'),
+              extension: measure('-preferred-extension-heading'),
+            };
+          });
+          audit.scorerMobileGeometry = geometry;
+          if (!geometry || geometry.gridAutoRows !== 'max-content' ||
+              geometry.alignContent !== 'start' ||
+              !geometry.path || !geometry.extension) {
+            problems.push('Mobile dedupe scorer content-height layout missing: ' +
+              JSON.stringify(geometry));
+          } else {
+            for (const [factor, card] of [
+              ['path', geometry.path], ['extension', geometry.extension],
+            ]) {
+              if (!card.active && (card.height > 270 || card.gapToWeight > 90)) {
+                problems.push('Mobile inactive dedupe scorer card has excessive whitespace: ' +
+                  JSON.stringify({ factor, ...card }));
+              }
+            }
+          }
+        }
         // Stage #72: on every real route/viewport/theme, inspect rendered
         // controls (including disabled ones), labels and broken ARIA relations.
         // Keep this BEFORE screenshots, independent of keyboard focus/overlay
