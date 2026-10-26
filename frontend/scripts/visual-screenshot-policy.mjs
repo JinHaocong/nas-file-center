@@ -21,3 +21,16 @@ export const WORKSPACE_SCROLL_REVIEW_WIDTH = 1440;
 export function requiresWorkspaceScrollReview(width, route) {
   return width === WORKSPACE_SCROLL_REVIEW_WIDTH && route !== '/login';
 }
+
+/**
+ * In the 800 baseline matrix, only 390px and 1440px are whole-document
+ * frames. Opened source-editor and selected-detail states are separate
+ * screenshots: all THREE supported phone widths need the lower form/table,
+ * not only 390px. Retain prior 1440px capture policy.
+ * Other viewport screenshots are deliberately unchanged.
+ */
+export const EXPANDED_INTERACTION_FULL_PAGE_WIDTHS = Object.freeze([360, 390, 430, 1440]);
+
+export function requiresExpandedInteractionFullPageReview(width) {
+  return EXPANDED_INTERACTION_FULL_PAGE_WIDTHS.includes(width);
+}
