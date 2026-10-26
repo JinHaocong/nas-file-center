@@ -381,3 +381,20 @@ test('real download-verification detail screenshots use equal full-page depth fo
   assert.doesNotMatch(browser,
     /fullPage:\s*width\s*===\s*390\s*&&\s*theme\.mode\s*===\s*['"]light['"]/);
 });
+
+test('390px source-editor interaction screenshot exposes the whole expanded form in all themes', () => {
+  for (const theme of visualThemes)
+    assert.equal(requiresFullPageReview(390), true, theme.mode + '-' + theme.system);
+  for (const phrase of [
+    'const editorFullPage = requiresFullPageReview(width)',
+    "name + '-source-editor.png'",
+    'fullPage: editorFullPage',
+    'editorPng.readUInt32BE(16)',
+    'editorPng.readUInt32BE(20)',
+    'audit.sourceEditorScreenshotPixels = editorPixels',
+    'editorPixels.height < editorPixels.documentHeight - 2',
+    'width === 390 && editorPixels.documentHeight <= 900',
+    'Source editor screenshot missing below-the-fold form pixels:',
+  ]) assert.ok(browser.includes(phrase),
+    'Missing mounted source-editor full-page screenshot evidence: ' + phrase);
+});
