@@ -113,7 +113,11 @@
 .nfc-v2-scorer-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .nfc-v2-scorer-footer .nfc-form-safety-note { display: inline-flex; align-items: center; gap: 7px; color: var(--nfc-scorer-muted); line-height: 1.7; flex: 1; }
 @media (max-width: 767px) {
-  .nfc-v2-scorer-card { padding: 12px; }
+  /* Real 390px full-page screenshots showed inactive path/extension cards
+   * stretched into tall blank grid tracks. Pack scorer rows by intrinsic
+   * content height; never distribute extra panel height into empty cards. */
+  .nfc-v2-scorer-editor { grid-auto-rows: max-content; align-content: start; }
+  .nfc-v2-scorer-card { align-self: start; padding: 12px; }
   .nfc-v2-scorer-rule-scope, .nfc-v2-scorer-rule-pattern { flex: 1 1 100%; }
   .nfc-v2-scorer-rule-actions { margin-left: auto; }
   .nfc-v2-scorer-rule-actions .nfc-console-button { min-height: 44px; min-width: 44px; }
