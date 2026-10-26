@@ -453,3 +453,28 @@ test('Stage 70 workflow list neutralizes actual v049 panel owner and dark mobile
     'Workflow list inherited non-neutral rendered surface:',
   ]) assert.ok(browser.includes(phrase), 'Missing mounted-theme guard: ' + phrase);
 });
+
+test('Stage 70 Indexes mobile list neutralizes v056 inherited blue surface', () => {
+  const css = readFileSync('src/styles/console-v2-indexes.css', 'utf8');
+  const v056 = readFileSync('src/styles/v056-right-workspace-v2.css', 'utf8');
+  const entry = readFileSync('src/main.tsx', 'utf8');
+  const browser = readFileSync('scripts/browser-full-route-visual.mjs', 'utf8');
+  const root = css.slice(css.indexOf('.nfc-v2-indexes-page {'),
+    css.indexOf('.nfc-v2-indexes-page > .nfc-page-header'));
+  assert.ok(root.includes('--nfc-w2-surface:var(--nfc-idx-bg)'),
+    'Indexes must own v056 mobile paint via local paper token');
+  assert.ok(v056.includes('.nfc-app-main .nfc-index-mobile-card'));
+  assert.ok(v056.includes('.nfc-app-main .nfc-mobile-record-list'));
+  assert.ok(v056.includes('background: var(--nfc-w2-surface)'));
+  assert.ok(entry.indexOf("import './styles/v056-right-workspace-v2.css';") <
+    entry.indexOf("import './styles/console-v2-indexes.css';"),
+    'Indexes owner must load after inherited v056 rules');
+  for (const phrase of [
+    "if (item.id === 'indexes' && width <= 767)",
+    "document.querySelector('.nfc-v2-indexes-page')",
+    "page?.querySelector('.nfc-v2-indexes-mobile')",
+    "list?.querySelector('.nfc-index-mobile-card')",
+    'audit.indexMobileNeutralPaint = { ...indexPaint, required: paperColor }',
+    'Indexes mobile card/list inherited non-neutral painted surface:',
+  ]) assert.ok(browser.includes(phrase), 'Missing computed paint guard: ' + phrase);
+});
