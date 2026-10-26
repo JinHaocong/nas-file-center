@@ -461,6 +461,55 @@ try {
           if (!match) problems.push('Login/Settings actual neutral paint mismatch: ' +
             JSON.stringify({ route: item.id, effectiveTheme: theme.effective, painted }));
         }
+        if (item.id === 'workflows') {
+          // Stage #70: real screenshots showed navy workflow cards on a dark
+          // mobile page despite the Pure White neutral theme contract.
+          // Verify actual painted panel plus visible mobile card / desktop
+          // table head after every historical stylesheet has been applied.
+          const paint = await tab.evaluate(() => {
+            const page = document.querySelector('.nfc-v2-workflow-list-page');
+            const panel = page?.querySelector('.nfc-data-panel-dense');
+            const body = panel?.querySelector('.nfc-data-panel-body');
+            const list = page?.querySelector('.nfc-v2-workflow-mobile-list');
+            const card = list?.querySelector('.nfc-workflow-mobile-card');
+            const heading = page?.querySelector('.nfc-v2-workflow-table th');
+            const read = node => node ? {
+              background: getComputedStyle(node).backgroundColor,
+              width: Math.round(node.getBoundingClientRect().width),
+            } : null;
+            return { panel: read(panel), body: read(body), list: read(list),
+              card: read(card), heading: read(heading),
+              localSurface: page && getComputedStyle(page)
+                .getPropertyValue('--nfc-wfl-bg').trim() };
+          });
+          // Actual Chromium shows a deliberately distinct neutral panel
+          // (#fbfbfa / #1e1e1c), while the mobile card uses the raised
+          // paper surface (#fff / #242422); they must NOT be equalized.
+          const panelColor = theme.effective === 'dark'
+            ? 'rgb(30, 30, 28)' : 'rgb(251, 251, 250)';
+          const cardColor = theme.effective === 'dark'
+            ? 'rgb(36, 36, 34)' : 'rgb(255, 255, 255)';
+          const headColor = theme.effective === 'dark'
+            ? 'rgb(45, 45, 42)' : 'rgb(245, 245, 243)';
+          const mobile = width <= 767;
+          audit.workflowListNeutralPaint = { ...paint, mobile,
+            required: { panelColor, cardColor, headColor } };
+          if (!paint.panel || paint.panel.background !== panelColor ||
+              paint.panel.width <= 100 ||
+              // DataPanel's structural body is deliberately transparent:
+              // the mobile list / desktop table below it owns visible paint.
+              !paint.body || paint.body.background !== 'rgba(0, 0, 0, 0)' ||
+              paint.body.width <= 100 ||
+              (mobile ? (!paint.list || paint.list.background !== headColor ||
+                paint.list.width <= 100 ||
+                !paint.card || paint.card.background !== cardColor ||
+                paint.card.width <= 100) :
+                (!paint.heading || paint.heading.background !== headColor ||
+                paint.heading.width <= 20))) {
+            problems.push('Workflow list inherited non-neutral rendered surface: ' +
+              JSON.stringify({ width, theme: themeLabel, ...audit.workflowListNeutralPaint }));
+          }
+        }
         if (item.id === 'organizer') {
           // The catalog-owned neutral theme token must survive the older shared
           // v056 !important filter toolbar rule in the actual rendered DOM.
