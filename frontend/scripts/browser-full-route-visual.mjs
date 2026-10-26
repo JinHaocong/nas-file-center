@@ -12,6 +12,7 @@ import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { chromium } from 'playwright';
 import { visualThemes, visualViewports, visualAdminFixture, visualSafeSettingsFixture } from './visual-fixtures.mjs';
+import { requiresFullPageReview } from './visual-screenshot-policy.mjs';
 import { computedContrastRatio } from './computed-contrast.mjs';
 import { captureRouteAccessibility, assessRouteAccessibility } from './route-accessibility-audit.mjs';
 import { parseComputedPaintColor, contrastRatioForOpaqueChannels } from './computed-paint-color.mjs';
@@ -625,9 +626,12 @@ try {
         if (pageErrors.length > beforeErrors) problems.push(
           'Uncaught React errors: ' + pageErrors.slice(beforeErrors).join('; '));
         const name = item.id + '-' + themeLabel + '-' + width;
+        // The same long-page coverage MUST apply to light/dark/system cases.
+        // 390px and 1440px capture the entire document, not just the first fold.
+        audit.screenshotFullPage = requiresFullPageReview(width);
         await tab.screenshot({
           path: resolve(OUT, name + '.png'),
-          fullPage: (width === 390 || width === 1440) && theme.mode === 'light',
+          fullPage: audit.screenshotFullPage,
           animations: 'disabled',
         });
         // Real keyboard bypass regression: the first Tab on every authenticated
