@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { visualViewports, visualThemes } from './visual-fixtures.mjs';
+import { requiresFullPageReview, FULL_PAGE_REVIEW_WIDTHS } from './visual-screenshot-policy.mjs';
 import { computedContrastRatio } from './computed-contrast.mjs';
 
 const browser = readFileSync('scripts/browser-full-route-visual.mjs', 'utf8');
@@ -286,4 +287,28 @@ test('dynamic scan detail waits for real route content without weakening the bla
   assert.match(browser, /assert\.deepEqual\(failures, \[\]/);
   assert.ok(browser.includes("if (request.method() !== 'GET')"));
   assert.ok(browser.includes("url.origin !== BASE"));
+});
+
+
+test('all four theme modes capture full-page 390/1440 screenshots without clipping dark/system below the fold', () => {
+  assert.deepEqual(FULL_PAGE_REVIEW_WIDTHS, [390, 1440]);
+  for (const width of visualViewports) {
+    for (const theme of visualThemes) {
+      // Coverage depends on viewport size alone, never on explicit/system theme.
+      assert.equal(requiresFullPageReview(width), [390, 1440].includes(width),
+        width + ' ' + theme.mode + '-' + theme.system);
+    }
+  }
+  assert.ok(browser.includes('audit.screenshotFullPage = requiresFullPageReview(width)'));
+  assert.ok(browser.includes('fullPage: audit.screenshotFullPage'));
+  for (const probe of [
+    'baselinePng.readUInt32BE(16)', 'baselinePng.readUInt32BE(20)',
+    'document.documentElement.scrollHeight',
+    'audit.screenshotPixels = { width: pixelWidth, height: pixelHeight, documentHeight }',
+    'pixelHeight < documentHeight - 2',
+    'Baseline screenshot missing required viewport/full-page pixels:',
+  ]) assert.ok(browser.includes(probe), 'Missing actual screenshot-depth check: ' + probe);
+  assert.doesNotMatch(browser, /fullPage:\s*\([^\n]+\)\s*&&\s*theme\.mode\s*===\s*['"]light['"]/);
+  assert.ok(browser.indexOf('audit.screenshotFullPage = requiresFullPageReview(width)') <
+    browser.indexOf('await tab.screenshot({\n          path: resolve(OUT, name +'));
 });
