@@ -16,6 +16,7 @@ import {
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { visualViewports, visualThemes } from './visual-fixtures.mjs';
+import { requiresFullPageReview, FULL_PAGE_REVIEW_WIDTHS } from './visual-screenshot-policy.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(join(ROOT, 'browser-full-route-visual.mjs'), 'utf8');
@@ -52,6 +53,8 @@ export function buildReviewPack(rootDir, destination, expectedHeadSha) {
       assert.ok(cases.some(item => item.path === result.route), 'Unknown route: ' + result.route);
       assert.ok(THEMES.includes(result.theme), 'Unknown theme: ' + result.theme);
       assert.deepEqual(result.problems, [], 'Browser failure for ' + result.route);
+      assert.equal(result.screenshotFullPage, requiresFullPageReview(width),
+        'Missing or wrong theme-independent screenshot depth for ' + [width, result.route, result.theme].join(' '));
       const key = result.route + '|' + result.theme;
       assert.ok(!indexed.has(key), 'Duplicate screenshot case: ' + key);
       indexed.set(key, result);
@@ -65,6 +68,7 @@ export function buildReviewPack(rootDir, destination, expectedHeadSha) {
         'Missing or empty screenshot: ' + image);
       const imageHref = relative(output, image).split(sep).join('/');
       rows.push({ route: route.path, width, theme, image: imageHref,
+        capture: requiresFullPageReview(width) ? 'FULL_PAGE' : 'VIEWPORT',
         status: 'UNREVIEWED', notes: '' });
     }
   }
@@ -72,8 +76,8 @@ export function buildReviewPack(rootDir, destination, expectedHeadSha) {
   mkdirSync(output, { recursive: true });
   const csvValue = x => '"' + String(x).replaceAll('"', '""') + '"';
   const csv = [
-    'route,width,theme,image,manual_status,notes',
-    ...rows.map(r => [r.route, r.width, r.theme, r.image, r.status, r.notes]
+    'route,width,theme,image,capture,manual_status,notes',
+    ...rows.map(r => [r.route, r.width, r.theme, r.image, r.capture, r.status, r.notes]
       .map(csvValue).join(',')),
   ].join('\n') + '\n';
   writeFileSync(join(output, 'review-worklist.csv'), csv);
@@ -86,6 +90,9 @@ export function buildReviewPack(rootDir, destination, expectedHeadSha) {
   writeFileSync(join(output, 'evidence.json'), JSON.stringify({
     sourceHeadSha: expectedHeadSha, source: '8 separate GitHub UI Validation artifacts',
     automatedCases: rows.length, widths: WIDTHS, themes: THEMES,
+    fullPageWidths: FULL_PAGE_REVIEW_WIDTHS,
+    fullPageCases: rows.filter(row => row.capture === 'FULL_PAGE').length,
+    viewportCases: rows.filter(row => row.capture === 'VIEWPORT').length,
     manualApproved: 0, manualReviewComplete: false,
     warning: 'Artifact names/HEAD must be verified against GitHub by the operator. Automated browser success does not constitute human review or NAS acceptance.',
   }, null, 2) + '\n');
