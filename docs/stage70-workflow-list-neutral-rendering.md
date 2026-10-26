@@ -105,3 +105,24 @@ any additional cascade owner rather than invent an approval.
 The first failed CI is intentionally preserved as causal evidence.
 No global `--nfc-w2-*` token is changed, no blanket `!important`
 override is introduced, and no production NAS file operation occurs.
+
+### Second fail-closed test iteration: transparent structural wrapper
+
+On intermediate HEAD `c1c42b722821beefac8dd94a58b942945ca6c9b8`,
+[390px real Chromium](https://github.com/JinHaocong/nas-file-center/actions/runs/40308264744)
+reported **all four effective themes** consistently:
+
+| Paint element | Light | Dark |
+| --- | --- | --- |
+| Outer DataPanel | `rgb(251,251,250)` | `rgb(30,30,28)` |
+| Structural `.nfc-data-panel-body` | `rgba(0,0,0,0)` | `rgba(0,0,0,0)` |
+| Visible mobile list | `rgb(245,245,243)` | `rgb(45,45,42)` |
+| Visible record card | `rgb(255,255,255)` | `rgb(36,36,34)` |
+
+The new Workflow body guard mistakenly expected an opaque body fill.
+That structural wrapper is **intentionally transparent**; the immediate
+mobile list is responsible for visible painted content and is verified
+separately. The fail-closed guard now requires body *transparency*
+plus exact visible list/card/outer panel neutral fills. This keeps a
+stronger actual-painted-surface contract without forcing an unnecessary
+CSS property or hiding a failure.
