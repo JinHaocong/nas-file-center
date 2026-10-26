@@ -12,7 +12,8 @@ import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { chromium } from 'playwright';
 import { visualThemes, visualViewports, visualAdminFixture, visualSafeSettingsFixture } from './visual-fixtures.mjs';
-import { requiresFullPageReview, requiresWorkspaceScrollReview } from './visual-screenshot-policy.mjs';
+import { requiresFullPageReview, requiresWorkspaceScrollReview,
+  requiresExpandedInteractionFullPageReview } from './visual-screenshot-policy.mjs';
 import { computedContrastRatio } from './computed-contrast.mjs';
 import { captureRouteAccessibility, assessRouteAccessibility } from './route-accessibility-audit.mjs';
 import { parseComputedPaintColor, contrastRatioForOpaqueChannels } from './computed-paint-color.mjs';
@@ -931,7 +932,7 @@ try {
           // Selected-detail interaction evidence needs the SAME full-page
           // policy in explicit and system light/dark. Old code captured the
           // 390px long table only in explicit light, hiding lower dark content.
-          const detailFullPage = requiresFullPageReview(width);
+          const detailFullPage = requiresExpandedInteractionFullPageReview(width);
           const detailPng = await tab.screenshot({
             path: resolve(OUT, name + '-selected-detail.png'),
             fullPage: detailFullPage,
@@ -950,7 +951,8 @@ try {
           if (detailPixels.width !== width ||
               (detailFullPage
                 ? detailPixels.height < detailPixels.documentHeight - 2
-                : detailPixels.height !== 900)) {
+                : detailPixels.height !== 900) ||
+              (width <= 430 && detailPixels.documentHeight <= 900)) {
             problems.push('Selected-detail screenshot missing required full-page pixels: ' +
               JSON.stringify({ width, theme: themeLabel, ...detailPixels }));
           }
@@ -991,7 +993,7 @@ try {
           // The original extra interaction PNG ended inside the editor form;
           // capture the complete document for BOTH effective light/dark and
           // system themes, without changing runtime UI or safe network rules.
-          const editorFullPage = requiresFullPageReview(width);
+          const editorFullPage = requiresExpandedInteractionFullPageReview(width);
           const editorPng = await tab.screenshot({
             path: resolve(OUT, name + '-source-editor.png'),
             fullPage: editorFullPage,
@@ -1011,7 +1013,7 @@ try {
               (editorFullPage
                 ? editorPixels.height < editorPixels.documentHeight - 2
                 : editorPixels.height !== 900) ||
-              (width === 390 && editorPixels.documentHeight <= 900)) {
+              (width <= 430 && editorPixels.documentHeight <= 900)) {
             problems.push('Source editor screenshot missing below-the-fold form pixels: ' +
               JSON.stringify({ width, theme: themeLabel, ...editorPixels }));
           }
