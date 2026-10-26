@@ -479,15 +479,21 @@ try {
               localSurface: page && getComputedStyle(page)
                 .getPropertyValue('--nfc-wfl-bg').trim() };
           });
+          // Actual Chromium shows a deliberately distinct neutral panel
+          // (#fbfbfa / #1e1e1c), while the mobile card uses the raised
+          // paper surface (#fff / #242422); they must NOT be equalized.
           const panelColor = theme.effective === 'dark'
+            ? 'rgb(30, 30, 28)' : 'rgb(251, 251, 250)';
+          const cardColor = theme.effective === 'dark'
             ? 'rgb(36, 36, 34)' : 'rgb(255, 255, 255)';
           const headColor = theme.effective === 'dark'
             ? 'rgb(45, 45, 42)' : 'rgb(245, 245, 243)';
           const mobile = width <= 767;
-          audit.workflowListNeutralPaint = { ...paint, mobile, required: { panelColor, headColor } };
+          audit.workflowListNeutralPaint = { ...paint, mobile,
+            required: { panelColor, cardColor, headColor } };
           if (!paint.panel || paint.panel.background !== panelColor ||
               paint.panel.width <= 100 ||
-              (mobile ? (!paint.card || paint.card.background !== panelColor ||
+              (mobile ? (!paint.card || paint.card.background !== cardColor ||
                 paint.card.width <= 100) :
                 (!paint.heading || paint.heading.background !== headColor ||
                 paint.heading.width <= 20))) {
