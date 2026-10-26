@@ -6,7 +6,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { visualViewports, visualThemes } from './visual-fixtures.mjs';
-import { requiresFullPageReview } from './visual-screenshot-policy.mjs';
+import { requiresFullPageReview, requiresWorkspaceScrollReview } from './visual-screenshot-policy.mjs';
 import { buildReviewPack } from './build-visual-review-pack.mjs';
 
 const SHA = '7b561c89988f5298f08d7894b1b4642020cd7db3';
@@ -28,9 +28,19 @@ function fixture() {
     mkdirSync(place, { recursive: true });
     const report = [];
     for (const theme of themes) for (const item of cases) {
+      const nested = requiresWorkspaceScrollReview(width, item.route);
+      const scrolled = nested && item.route === '/settings';
       report.push({ route: item.route, width, theme,
-        screenshotFullPage: requiresFullPageReview(width), problems: [] });
+        screenshotFullPage: requiresFullPageReview(width),
+        ...(nested && { workspaceScroll: {
+          overflowY: 'auto', maxScroll: scrolled ? 1800 : 0,
+          scrollable: scrolled, bottomReached: true,
+          visibleHeight: 700, captured: scrolled,
+        } }),
+        problems: [] });
       writeFileSync(join(place, item.id + '-' + theme + '-' + width + '.png'), png);
+      if (scrolled) writeFileSync(
+        join(place, item.id + '-' + theme + '-' + width + '-workspace-bottom.png'), png);
     }
     writeFileSync(join(place, 'manifest.json'), JSON.stringify({
       width, routes: cases.length, themes: themes.length,
@@ -51,6 +61,10 @@ test('produces exactly 800 separately unapproved human decisions and an offline 
     assert.ok(page.includes(SHA));
     assert.ok(page.includes('manualReviewComplete: false'));
     assert.ok(page.includes('人工通过'));
+    assert.ok(page.includes('补充证据：桌面主工作区已独立滚动到底部'));
+    assert.ok(page.includes('settings-light-dark-1440-workspace-bottom.png'));
+    assert.ok(page.includes('"workspaceBottom":""'));
+
     assert.ok(page.includes('浏览器全页截图（仅文档滚动；内部滚动区仍需另查）'));
     assert.ok(page.includes('视口首屏截图（长页及内部滚动区仍需补充审查）'));
     assert.ok(page.includes('"capture":"FULL_PAGE"'));
@@ -61,6 +75,10 @@ test('produces exactly 800 separately unapproved human decisions and an offline 
     assert.ok(page.includes('../screenshots/1920/settings-system-dark-1920.png'));
     assert.ok(!page.includes('__REVIEW_DATA__'));
     const evidence = JSON.parse(readFileSync(join(f.output, 'evidence.json'), 'utf8'));
+    assert.equal(evidence.desktopWorkspaceWidth, 1440);
+    assert.equal(evidence.desktopWorkspaceBottomCases, 4);
+    assert.equal(csv.trimEnd().split('\n').filter(x =>
+      x.includes('workspace-bottom.png')).length, 4);
     assert.deepEqual([evidence.fullPageWidths, evidence.fullPageCases, evidence.viewportCases],
       [[390, 1440], 200, 600]);
     assert.deepEqual([evidence.sourceHeadSha, evidence.automatedCases,
@@ -111,5 +129,29 @@ test('rejects a missing or theme-specific full-page screenshot contract in any m
     writeFileSync(file, JSON.stringify(manifest));
     assert.throws(() => buildReviewPack(f.input, f.output, SHA),
       /Missing or wrong theme-independent screenshot depth/);
+  } finally { rmSync(f.dir, { recursive: true, force: true }); }
+});
+
+test('fails closed on missing, forged or unstated desktop workspace-bottom evidence', () => {
+  const f = fixture();
+  try {
+    const image = join(f.input, '1440', 'settings-dark-light-1440-workspace-bottom.png');
+    unlinkSync(image);
+    assert.throws(() => buildReviewPack(f.input, f.output, SHA),
+      /Missing desktop scroll-bottom PNG/);
+    writeFileSync(image, png);
+    const file = join(f.input, '1440', 'manifest.json');
+    const manifest = JSON.parse(readFileSync(file, 'utf8'));
+    const settings = manifest.report.find(x =>
+      x.route === '/settings' && x.theme === 'dark-light');
+    settings.workspaceScroll.captured = false;
+    writeFileSync(file, JSON.stringify(manifest));
+    assert.throws(() => buildReviewPack(f.input, f.output, SHA),
+      /Missing desktop scroll-bottom screenshot/);
+    settings.workspaceScroll.captured = true;
+    delete settings.workspaceScroll;
+    writeFileSync(file, JSON.stringify(manifest));
+    assert.throws(() => buildReviewPack(f.input, f.output, SHA),
+      /Missing desktop inner scroll provenance/);
   } finally { rmSync(f.dir, { recursive: true, force: true }); }
 });
