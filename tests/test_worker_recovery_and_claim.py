@@ -425,4 +425,3 @@ def test_batch_plan_durable_checkpoint_must_precede_item_mutations():
     assert "checkpoint_data=restart_checkpoint" in source[boundary:phase1]
     assert "schema_version" in source[start:reconciliation]
     assert "plan_id" in source[start:reconciliation]
-
