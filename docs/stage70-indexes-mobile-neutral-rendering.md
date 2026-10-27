@@ -38,6 +38,32 @@ Rather than replace shared legacy theme tokens, the existing Indexes CSS owner n
 This resolves to `#ffffff` in light mode and `#242422` in dark mode.
 Other pages, shared v056 selectors and old `!important` barriers remain unchanged.
 
+## First CI failure: distinguish direct card paint from composite
+
+The initial HEAD `51c320bfddd13bb07c1d293d26a934640bc11efe`
+[UI Validation run](https://github.com/JinHaocong/nas-file-center/actions/runs/40315054034)
+correctly stopped the merge: mobile visual audit at 360/390/430 failed.
+Real rendered computed styles showed that the **list** was already fully neutral
+(`rgb(255,255,255)` light / `rgb(36,36,34)` dark), but the card itself
+was deliberately transparent (`rgba(0,0,0,0)`). The actual 430px PNG shows
+a visible bounded card sitting on that neutral list; its effective composite
+is neutral, not navy. The original assertion incorrectly equated card's direct
+paint with visible composite. Revised guard retains strict opaque exact list
+color and requires no list/card background image, positive solid card border,
+visible card width and actual card containment in the neutral list. Card paint
+may be exactly the required opaque color **or** transparent over that verified
+neutral surface. No decorative CSS override or weakening of the required
+visible backdrop was necessary.
+
+The same 430px CI artifact also exposed an unrelated short
+`download-verification` selected-detail interaction capture in system light/dark:
+PNG 430×1854 vs *postcapture* document height 1939. The existing fail-closed
+full-page assertion remains unchanged. The browser evidence helper now waits
+two animation frames and **recaptures up to 3 times** if pixels remain short,
+always measuring the real document afterward and preserving the failure if
+none of the captures covers it. This addresses a late-layout timing race,
+not a lower screenshot-depth standard.
+
 ## Fail-closed checks
 
 `frontend/scripts/browser-full-route-visual.mjs` now checks the **final computed styles**
