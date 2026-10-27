@@ -104,7 +104,12 @@
   cursor: pointer;
 }
 
-.nfc-v2-shell .nfc-v2-plans-page { max-width: min(100%, 1690px) !important; }
+.nfc-v2-shell .nfc-v2-plans-page {
+  max-width: min(100%, 1690px) !important;
+  /* Historic v056 paints mobile record lists with inherited navy
+     --nfc-w2-surface (#15191f in dark mode). Plans owns v2.1 paper. */
+  --nfc-w2-surface: var(--v2-paper);
+}
 .nfc-v2-plans-page > .nfc-page-header { margin-bottom: 22px !important; }
 .nfc-v2-shell .nfc-v2-plans-page .nfc-data-panel-body {
   padding: 0 !important;
