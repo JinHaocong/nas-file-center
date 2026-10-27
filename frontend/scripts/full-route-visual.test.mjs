@@ -482,9 +482,12 @@ test('Stage 70 Plan Detail lifecycle/action/mobile ledger use v2.1 neutral paint
     "detailPaint.lifecycle.background !== paper",
     "detailPaint.actions.background !== soft",
     "detailPaint.list.background !== paper",
-    "!cardNeutralComposite",
-    "!detailPaint.cardContained",
-    "detailPaint.card.borderWidth === '0px'",
+    "list?.querySelector('.nfc-console-empty[role=\"status\"]')",
+    "detailPaint.cardContained",
+    "detailPaint.card.borderWidth !== '0px'",
+    "emptyNeutralComposite && detailPaint.hasEmptyMessage",
+    "!ledgerContentValid",
+    "detailPaint.lifecycle.height <= (mobile ? 100 : 40)",
     "Plan Detail legacy navy lifecycle/action/ledger paint:",
   ]) assert.ok(browser.includes(phrase), 'Missing mounted Plan Detail paint guard: ' + phrase);
 });
