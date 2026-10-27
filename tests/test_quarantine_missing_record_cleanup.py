@@ -295,3 +295,93 @@ def test_api_requires_admin_and_exact_confirmation(maintenance_env):
     ).status_code == 403
     assert _cleanup(env, entry_id, token="DELETE_RECORD").status_code == 400
     _assert_retained(env, entry_id)
+
+
+def test_transactional_recovery_diagnostic_reports_missing_payload_and_retained_tx(maintenance_env, monkeypatch):
+    """A manually removed public payload does NOT override frozen evidence."""
+    env = maintenance_env
+    entry_id, path = _record(
+        env, state="purging", tx_phase="purging",
+        transaction_mode="cross_storage_transactional",
+        active_attempt_generation=2,
+    )
+    tx_dir = env["trash"] / ".tx" / f"entry-{entry_id}"
+    tx_dir.mkdir(parents=True)
+    (tx_dir / "frozen-evidence").write_text("DO NOT TOUCH")
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Read-only diagnosis must not remove filesystem evidence")
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "unlink", forbidden)
+        patch.setattr(os, "rmdir", forbidden)
+        response = env["admin"].get(f"/api/quarantine/{entry_id}/recovery-diagnostic")
+    assert response.status_code == 200, response.text
+    fields = response.json()
+    assert fields["state"] == "purging"
+    assert fields["tx_phase"] == "purging"
+    assert fields["transaction_mode"] == "cross_storage_transactional"
+    assert fields["active_attempt_generation"] == 2
+    assert fields["payload_path_observation"] == "absent"
+    assert fields["transaction_evidence_observation"] == "present"
+    assert fields["observation_is_cleanup_authority"] is False
+    assert tx_dir.joinpath("frozen-evidence").read_text() == "DO NOT TOUCH"
+    assert not path.exists()
+    _assert_retained(env, entry_id)
+    assert _cleanup(env, entry_id).status_code == 409
+    _assert_retained(env, entry_id)
+
+
+def test_transactional_recovery_diagnostic_observations_distinguish_present_and_missing(maintenance_env):
+    env = maintenance_env
+    entry_id, path = _record(env, state="purging", tx_phase="purging",
+                             transaction_mode="cross_storage_transactional")
+    path.write_text("present quarantine bytes")
+    evidence = env["trash"] / ".tx" / f"entry-{entry_id}"
+    result = env["admin"].get(f"/api/quarantine/{entry_id}/recovery-diagnostic")
+    assert result.status_code == 200
+    assert result.json()["payload_path_observation"] == "present"
+    assert result.json()["transaction_evidence_observation"] == "absent"
+    assert path.read_text() == "present quarantine bytes"
+
+    evidence.mkdir(parents=True)
+    result = env["admin"].get(f"/api/quarantine/{entry_id}/recovery-diagnostic")
+    assert result.json()["transaction_evidence_observation"] == "present"
+    _assert_retained(env, entry_id)
+
+
+def test_transactional_recovery_diagnostic_fails_closed_on_unknown_mount(maintenance_env):
+    env = maintenance_env
+    entry_id, _ = _record(env, state="purging", tx_phase="purging",
+                          transaction_mode="cross_storage_transactional")
+    offline_root = env["data"] / "temporarily-offline"
+    env["trash"].rename(offline_root)
+    try:
+        response = env["admin"].get(f"/api/quarantine/{entry_id}/recovery-diagnostic")
+        assert response.status_code == 200
+        assert response.json()["payload_path_observation"] == "indeterminate"
+        assert response.json()["transaction_evidence_observation"] == "indeterminate"
+        _assert_retained(env, entry_id)
+    finally:
+        offline_root.rename(env["trash"])
+
+
+def test_transactional_recovery_diagnostic_requires_admin(maintenance_env):
+    env = maintenance_env
+    entry_id, _ = _record(env, state="purging", tx_phase="purging")
+    app = env["admin"].app
+    anonymous = TestClient(app)
+    assert anonymous.get(f"/api/quarantine/{entry_id}/recovery-diagnostic").status_code in (401, 403)
+    with env["service"].SessionLocal() as session:
+        session.add(User(
+            username="diagnostic-regular", role="user",
+            password_hash=hash_password("RegularPassword123!"),
+        ))
+        session.commit()
+    regular = TestClient(app)
+    assert regular.post(
+        "/api/auth/login",
+        json={"username": "diagnostic-regular", "password": "RegularPassword123!"},
+        headers={"Origin": "http://testserver"},
+    ).status_code == 200
+    assert regular.get(f"/api/quarantine/{entry_id}/recovery-diagnostic").status_code == 403
+    _assert_retained(env, entry_id)
