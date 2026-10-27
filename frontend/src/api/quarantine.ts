@@ -1,6 +1,7 @@
 import { api } from './client';
 import {
   QuarantineEntry,
+  QuarantineRecoveryDiagnostic,
   QuarantineListResponse,
   QuarantineRestoreRequest,
   QuarantineRestoreResponse,
@@ -66,6 +67,9 @@ export const quarantineApi = {
   },
 
   get: (id: number) => api.get<QuarantineEntry>(`/api/quarantine/${id}`),
+
+  recoveryDiagnostic: (id: number) =>
+    api.get<QuarantineRecoveryDiagnostic>(`/api/quarantine/${id}/recovery-diagnostic`),
 
   restore: (id: number, payload: QuarantineRestoreRequest = {}) =>
     api.post<QuarantineRestoreResponse>(`/api/quarantine/${id}/restore`, payload),
