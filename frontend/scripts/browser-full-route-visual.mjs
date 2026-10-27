@@ -461,6 +461,47 @@ try {
           if (!match) problems.push('Login/Settings actual neutral paint mismatch: ' +
             JSON.stringify({ route: item.id, effectiveTheme: theme.effective, painted }));
         }
+        if (item.id === 'scans' && width <= 767) {
+          // Stage #70: exact-HEAD 390px Chromium screenshots exposed a
+          // #15191f navy block behind scan history's mobile card. v056 paints
+          // .nfc-mobile-record-list via inherited --nfc-w2-surface even when
+          // this page already owns Pure White v2.1 card and panel styles.
+          // Fail closed on the actual mounted/list/card computed backgrounds
+          // at all three phone widths, including system theme parity.
+          const scanPaint = await tab.evaluate(() => {
+            const page = document.querySelector('.nfc-v2-scans-page');
+            const list = page?.querySelector('.nfc-mobile-record-list');
+            const card = list?.querySelector('.nfc-scan-mobile-card');
+            const read = node => node ? {
+              background: getComputedStyle(node).backgroundColor,
+              backgroundImage: getComputedStyle(node).backgroundImage,
+              width: Math.round(node.getBoundingClientRect().width),
+              height: Math.round(node.getBoundingClientRect().height),
+            } : null;
+            return {
+              list: read(list), card: read(card),
+              cardContained: !!list && !!card &&
+                card.getBoundingClientRect().left >= list.getBoundingClientRect().left &&
+                card.getBoundingClientRect().right <= list.getBoundingClientRect().right,
+              inheritedW2Surface: page && getComputedStyle(page)
+                .getPropertyValue('--nfc-w2-surface').trim(),
+            };
+          });
+          const required = theme.effective === 'dark'
+            ? 'rgb(36, 36, 34)' : 'rgb(255, 255, 255)';
+          audit.scanMobileNeutralPaint = { ...scanPaint, required };
+          if (!scanPaint.list || !scanPaint.card ||
+              scanPaint.list.background !== required ||
+              scanPaint.card.background !== required ||
+              scanPaint.list.backgroundImage !== 'none' ||
+              scanPaint.card.backgroundImage !== 'none' ||
+              !scanPaint.cardContained ||
+              scanPaint.list.width <= 100 || scanPaint.list.height <= 100 ||
+              scanPaint.card.width <= 100 || scanPaint.card.height <= 100) {
+            problems.push('Scans mobile inherited non-neutral navy list/card: ' +
+              JSON.stringify({ width, theme: themeLabel, ...audit.scanMobileNeutralPaint }));
+          }
+        }
         if (item.id === 'indexes' && width <= 767) {
           // Stage #70: actual 360/390px dark screenshots exposed inherited
           // v056 navy mobile-list/card backgrounds (#15191f) in Indexes.
