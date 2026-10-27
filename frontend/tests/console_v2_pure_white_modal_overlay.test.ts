@@ -92,6 +92,18 @@ describe('Pure White portal overlay clarity and stacking', () => {
       .includes('node scripts/browser-overlay-smoke.mjs'));
   });
 
+  test('Quarantine Restore-to-Purge transition waits for actual portal pointer ownership', () => {
+    const browser = read('scripts/browser-quarantine-plan-overlays.mjs');
+    assert.ok(browser.includes('async function waitForInteractivePortal(page, selector)'));
+    assert.ok(browser.includes("dialog.getAttribute('data-state') !== 'open'"));
+    assert.ok(browser.includes('document.elementFromPoint(x, y)?.closest(sel)'));
+    assert.ok(browser.includes("await waitForInteractivePortal(page, '.nfc-v2-quarantine-dialog')"));
+    assert.ok(browser.includes("check(Boolean(hit?.closest(selector)), 'Scrim intercepts pointer hits')"),
+      'Never remove strict final scrim/portal hit test');
+    assert.ok(browser.includes('timeout: 3500, polling: 50'),
+      'The stabilizing wait must be bounded: a real obstruction still fails');
+  });
+
   test('Radix pairing and focus/escape safety remain wired through actual components', () => {
     for (const path of [
       'src/components/scans/ScanCreateModal.tsx',
