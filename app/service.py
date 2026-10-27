@@ -441,6 +441,7 @@ def _freeze_capture_stable_quarantine_hash(
 class FileCenterService:
     def __init__(self, settings: Settings):
         self.settings = settings
+        self._quarantine_service_started_at = utcnow()
         for directory in (settings.config_dir, settings.reports_dir, settings.backups_dir, settings.logs_dir, settings.fclones_home):
             directory.mkdir(parents=True, exist_ok=True)
         self.engine, self.SessionLocal = create_engine_and_session(settings.database_path)
@@ -5871,6 +5872,65 @@ class FileCenterService:
                 "deleted_count": len(normalized_ids),
                 "deleted_ids": normalized_ids,
             }
+
+    def cleanup_missing_quarantine_record(
+        self,
+        entry_id: int,
+        *,
+        confirmation: str,
+        is_admin: bool = False,
+        user_id: int | None = None,
+    ) -> dict:
+        """Retire ONLY database metadata when an ordinary payload is provably missing.
+
+        This path intentionally never uses terminal record cleanup, since that
+        path can remove private .tx artifacts or invoke a Worker. No file is
+        touched here; all checks and AuditEvent share one SQLite write lock.
+        """
+        if not is_admin:
+            raise PermissionError("Only administrator can clean missing quarantine records")
+        if confirmation != "CLEANUP_MISSING_RECORD":
+            raise ValueError("Missing-record cleanup requires 'CLEANUP_MISSING_RECORD' confirmation")
+        if not self.settings.allow_mutation or not self.settings.allow_delete:
+            raise ValueError("Missing-record cleanup requires ALLOW_MUTATION and ALLOW_DELETE")
+
+        from app.quarantine.missing_record_cleanup import assert_missing_quarantine_entry_safe
+
+        with self.SessionLocal() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            entry = session.get(QuarantineEntry, int(entry_id))
+            if entry is None:
+                raise KeyError(f"Quarantine entry #{entry_id} not found")
+
+            proof = dict(
+                quarantine_root=Path(self.settings.quarantine_root),
+                service_started_at=self._quarantine_service_started_at,
+            )
+            assert_missing_quarantine_entry_safe(session, entry, **proof)
+            # Repeat the nofollow observation immediately before the database
+            # write to narrow filesystem TOCTOU. There is NO unlink on this
+            # API, even if an external process races in after the observation.
+            assert_missing_quarantine_entry_safe(session, entry, **proof)
+            audit_snapshot = {
+                "quarantine_entry_id": int(entry.id),
+                "original_path": str(entry.original_path),
+                "quarantine_path": str(entry.quarantine_path),
+                "prior_state": str(entry.state),
+                "requested_by_user_id": user_id,
+                "external_payload_missing": True,
+                "metadata_only": True,
+                "filesystem_mutations": 0,
+            }
+            deleted_id = int(entry.id)
+            session.delete(entry)
+            session.add(AuditEvent(
+                operation="quarantine.missing_record_cleanup",
+                path=audit_snapshot["original_path"],
+                result="deleted",
+                details_json=json.dumps(audit_snapshot, ensure_ascii=False),
+            ))
+            session.commit()
+            return {"status": "ok", "deleted": True, "id": deleted_id, "metadata_only": True}
 
     def delete_quarantine_record(
         self,
