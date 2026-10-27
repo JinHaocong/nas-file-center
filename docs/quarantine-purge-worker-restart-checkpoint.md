@@ -57,6 +57,27 @@ contract test pins the checkpoint before initial reconciliation and
 before item Phase 1 DB intent. Existing no-checkpoint restart tests
 continue to assert fail-closed behavior.
 
+## Full-regression pause-fixture correction
+
+The first candidate HEAD `690f5b67a4704de92f8fd61e3a8f45695a4e7534`
+failed both Release Validation and Organizer C5 full regression at
+`tests/test_gate2_worker_execution.py::test_worker_safe_pause_and_resume`.
+Its test mocked `JobContext.checkpoint` and injected a pause at the
+**third checkpoint invocation**, historically the boundary before item #2.
+The newly committed startup checkpoint is now the first call, so ordinal
+#3 occurs **before item #1**; the fixture incorrectly expected item #1
+to have been moved. This is a deterministically observed test assumption,
+not a production filesystem mutation.
+
+The corrected regression injects the simulated pause only when the
+actual `progress_message` begins `Executing item #2:`. This keeps
+the exact intended item boundary and tests existing pause/resume behavior
+independently of legitimate startup or progress checkpoints. It does not
+disable assertions, change production pause/restore behavior, or authorize
+a replay without a valid lease/frozen authority. Latest-head complete
+regressions are required before merge; the original failures remain
+historical evidence, not proof of new-head CI success.
+
 ## Release / owner constraints
 
 Merge only after exact latest-HEAD CI, regression, snapshot and reviewer
