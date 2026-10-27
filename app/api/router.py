@@ -1873,6 +1873,31 @@ def restore_quarantine_entry(
         raise HTTPException(500, str(exc)) from exc
 
 
+@router.delete("/quarantine/{id}/missing-record")
+def cleanup_missing_quarantine_record(
+    request: Request,
+    id: int,
+    confirmation: str = Query(...),
+    admin_user: User = Depends(require_admin_user),
+):
+    """Explicit admin-only, metadata-only retirement; never purge filesystem."""
+    try:
+        return request.app.state.service.cleanup_missing_quarantine_record(
+            id,
+            confirmation=confirmation,
+            is_admin=True,
+            user_id=admin_user.id,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except StateConflictError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @router.delete("/quarantine/{id}/record")
 def delete_quarantine_record(
     request: Request,
