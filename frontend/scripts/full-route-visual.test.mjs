@@ -463,8 +463,10 @@ test('Stage 70 Scans mobile history paints neutral list and card in real Chromiu
     css.indexOf('.nfc-v2-scans-page > .nfc-page-header'));
   assert.ok(root.includes('--nfc-w2-surface: var(--v2-paper)'),
     'Scans must override inherited v056 navy only inside the owned page');
-  assert.ok(css.includes('.nfc-v2-shell .nfc-v2-scans-page .nfc-scan-mobile-card {'),
-    'Scans must own the card instead of mutating shared v054 legacy selectors');
+  assert.ok(css.includes('.nfc-v2-scans-page .nfc-scan-mobile-card {'),
+    'Existing Scans card background rule must remain page-owned');
+  assert.ok(css.includes('background: var(--v2-paper)'),
+    'Scans card owner must retain neutral paper token');
   assert.ok(v056.includes('.nfc-app-main .nfc-mobile-record-list'));
   assert.ok(v056.includes('background: var(--nfc-w2-surface)'));
   assert.ok(v054.includes('.nfc-app-main .nfc-scan-mobile-card'));
@@ -476,12 +478,15 @@ test('Stage 70 Scans mobile history paints neutral list and card in real Chromiu
     "document.querySelector('.nfc-v2-scans-page')",
     "page?.querySelector('.nfc-mobile-record-list')",
     "list?.querySelector('.nfc-scan-mobile-card')",
-    "audit.scanMobileNeutralPaint = { ...scanPaint, required }",
+    "audit.scanMobileNeutralPaint = { ...scanPaint, required, cardShowsNeutralPaper }",
     "scanPaint.list.background !== required",
-    "scanPaint.card.background !== required",
+    "scanPaint.card.background === 'rgba(0, 0, 0, 0)'",
+    "!cardShowsNeutralPaper",
     "scanPaint.list.backgroundImage !== 'none'",
     "scanPaint.card.backgroundImage !== 'none'",
     "!scanPaint.cardContained",
+    "scanPaint.card.borderStyle !== 'solid'",
+    "scanPaint.card.borderWidth === '0px'",
     "Scans mobile inherited non-neutral navy list/card:",
   ]) assert.ok(browser.includes(phrase), 'Missing mounted Scans paint guard: ' + phrase);
 });
