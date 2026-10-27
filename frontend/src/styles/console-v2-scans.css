@@ -213,7 +213,7 @@
     gap: 10px;
     padding: 13px;
   }
-  .nfc-v2-shell .nfc-v2-scans-page .nfc-scan-mobile-card {
+  .nfc-v2-scans-page .nfc-scan-mobile-card {
     background: var(--v2-paper);
     border: 1px solid var(--v2-line);
     border-radius: 10px;
