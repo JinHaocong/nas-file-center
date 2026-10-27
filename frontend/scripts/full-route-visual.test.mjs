@@ -454,6 +454,36 @@ test('Stage 70 workflow list neutralizes actual v049 panel owner and dark mobile
   ]) assert.ok(browser.includes(phrase), 'Missing mounted-theme guard: ' + phrase);
 });
 
+test('Stage 70 Tasks filter uses route-owned neutral v2 paper in mounted Chromium', () => {
+  const css = readFileSync('src/styles/console-v2-tasks.css', 'utf8');
+  const legacy = readFileSync('src/styles/v056-right-workspace-v2.css', 'utf8');
+  const entry = readFileSync('src/main.tsx', 'utf8');
+  const owner = css.slice(css.indexOf('.nfc-v2-shell .nfc-v2-tasks-page {'),
+    css.indexOf('.nfc-v2-tasks-page > .nfc-page-header'));
+  assert.ok(owner.includes('--nfc-w2-surface: var(--v2-paper)'),
+    'Tasks must remap W2 navy only within its v2.1 route');
+  assert.ok(legacy.includes('background: var(--nfc-opl-surface, var(--nfc-w2-surface)) !important'),
+    'Legacy filter uses important inherited W2 paint');
+  assert.ok(legacy.includes('.nfc-app-main .nfc-mobile-record-list'));
+  assert.ok(entry.indexOf("import './styles/v056-right-workspace-v2.css';") <
+    entry.indexOf("import './styles/console-v2-tasks.css';"),
+    'Page owner must load after historical W2 styles');
+  for (const phrase of [
+    "if (item.id === 'tasks')",
+    "document.querySelector('.nfc-v2-tasks-page')",
+    "page?.querySelector('.nfc-v2-task-filter-bar')",
+    "page?.querySelector('.nfc-mobile-record-list')",
+    "list?.querySelector('.nfc-task-mobile-card')",
+    "audit.tasksFilterNeutralPaint = { ...taskPaint, required, cardNeutralComposite }",
+    "taskPaint.filter.background !== required",
+    "taskPaint.filter.backgroundImage !== 'none'",
+    "taskPaint.list.background !== required",
+    "taskPaint.card.background === 'rgba(0, 0, 0, 0)'",
+    "!taskPaint.cardContained",
+    "Tasks filter/mobile list inherited non-neutral navy paint:",
+  ]) assert.ok(browser.includes(phrase), 'Missing mounted Tasks computed-paint guard: ' + phrase);
+});
+
 test('Stage 70 Plan Detail lifecycle/action/mobile ledger use v2.1 neutral paint', () => {
   const css = readFileSync('src/styles/console-v2-plan-detail.css', 'utf8');
   const legacy = readFileSync('src/styles/v056-right-workspace-v2.css', 'utf8');
