@@ -461,6 +461,56 @@ try {
           if (!match) problems.push('Login/Settings actual neutral paint mismatch: ' +
             JSON.stringify({ route: item.id, effectiveTheme: theme.effective, painted }));
         }
+        if (item.id === 'indexes' && width <= 767) {
+          // Stage #70: actual 360/390px dark screenshots exposed inherited
+          // v056 navy mobile-list/card backgrounds (#15191f) in Indexes.
+          // Assert computed paint on mounted content, not token text alone.
+          const indexPaint = await tab.evaluate(() => {
+            const page = document.querySelector('.nfc-v2-indexes-page');
+            const list = page?.querySelector('.nfc-v2-indexes-mobile');
+            const card = list?.querySelector('.nfc-index-mobile-card');
+            const read = node => node ? {
+              background: getComputedStyle(node).backgroundColor,
+              backgroundImage: getComputedStyle(node).backgroundImage,
+              width: Math.round(node.getBoundingClientRect().width),
+              borderStyle: getComputedStyle(node).borderTopStyle,
+              borderWidth: getComputedStyle(node).borderTopWidth,
+            } : null;
+            return {
+              list: read(list), card: read(card),
+              cardContained: !!list && !!card &&
+                card.getBoundingClientRect().left >= list.getBoundingClientRect().left &&
+                card.getBoundingClientRect().right <= list.getBoundingClientRect().right,
+              localPaper: page && getComputedStyle(page)
+                .getPropertyValue('--nfc-idx-bg').trim(),
+              inheritedW2Surface: page && getComputedStyle(page)
+                .getPropertyValue('--nfc-w2-surface').trim(),
+            };
+          });
+          const paperColor = theme.effective === 'dark'
+            ? 'rgb(36, 36, 34)' : 'rgb(255, 255, 255)';
+          // The card's structural box is actually transparent in Chromium:
+          // the visible color is its *verified opaque parent list*. Retain the
+          // card's painted border and geometry rather than adding new CSS paint
+          // or asserting an opaque background on a deliberately clear layer.
+          const cardShowsNeutralPaper = !!indexPaint.card &&
+            (indexPaint.card.background === paperColor ||
+              indexPaint.card.background === 'rgba(0, 0, 0, 0)');
+          audit.indexMobileNeutralPaint = { ...indexPaint, required: paperColor,
+            cardShowsNeutralPaper };
+          if (!indexPaint.list || !indexPaint.card ||
+              indexPaint.list.background !== paperColor ||
+              indexPaint.list.backgroundImage !== 'none' ||
+              !cardShowsNeutralPaper ||
+              indexPaint.card.backgroundImage !== 'none' ||
+              !indexPaint.cardContained ||
+              indexPaint.card.borderStyle !== 'solid' ||
+              indexPaint.card.borderWidth === '0px' ||
+              indexPaint.list.width <= 100 || indexPaint.card.width <= 100) {
+            problems.push('Indexes mobile card/list inherited non-neutral painted surface: ' +
+              JSON.stringify({ width, theme: themeLabel, ...audit.indexMobileNeutralPaint }));
+          }
+        }
         if (item.id === 'workflows') {
           // Stage #70: real screenshots showed navy workflow cards on a dark
           // mobile page despite the Pure White neutral theme contract.
@@ -982,20 +1032,35 @@ try {
           // policy in explicit and system light/dark. Old code captured the
           // 390px long table only in explicit light, hiding lower dark content.
           const detailFullPage = requiresExpandedInteractionFullPageReview(width);
-          const detailPng = await tab.screenshot({
-            path: resolve(OUT, name + '-selected-detail.png'),
-            fullPage: detailFullPage,
-            animations: 'disabled',
-          });
-          const detailPixels = {
-            width: detailPng.readUInt32BE(16),
-            height: detailPng.readUInt32BE(20),
-            documentHeight: await tab.evaluate(() => Math.ceil(Math.max(
-              document.documentElement.scrollHeight,
-              document.body?.scrollHeight || 0,
-            ))),
-            fullPage: detailFullPage,
-          };
+          // Chromium can complete the first fullPage capture just before a
+          // system-theme layout/late font settles (observed 430px screenshot
+          // 1854px high vs subsequent document 1939px). Retry *capturing*,
+          // never relax the required actual pixel height or omit the evidence.
+          let detailPixels;
+          for (let captureAttempt = 1; captureAttempt <= 3; captureAttempt++) {
+            if (detailFullPage) {
+              await tab.evaluate(() => new Promise(resolve => {
+                requestAnimationFrame(() => requestAnimationFrame(resolve));
+              }));
+            }
+            const detailPng = await tab.screenshot({
+              path: resolve(OUT, name + '-selected-detail.png'),
+              fullPage: detailFullPage,
+              animations: 'disabled',
+            });
+            detailPixels = {
+              width: detailPng.readUInt32BE(16),
+              height: detailPng.readUInt32BE(20),
+              documentHeight: await tab.evaluate(() => Math.ceil(Math.max(
+                document.documentElement.scrollHeight,
+                document.body?.scrollHeight || 0,
+              ))),
+              fullPage: detailFullPage,
+              captureAttempt,
+            };
+            if (!detailFullPage ||
+                detailPixels.height >= detailPixels.documentHeight - 2) break;
+          }
           audit.detailScreenshotPixels = detailPixels;
           if (detailPixels.width !== width ||
               (detailFullPage

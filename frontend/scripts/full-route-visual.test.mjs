@@ -453,3 +453,49 @@ test('Stage 70 workflow list neutralizes actual v049 panel owner and dark mobile
     'Workflow list inherited non-neutral rendered surface:',
   ]) assert.ok(browser.includes(phrase), 'Missing mounted-theme guard: ' + phrase);
 });
+
+test('Stage 70 Indexes mobile list neutralizes v056 inherited blue surface', () => {
+  const css = readFileSync('src/styles/console-v2-indexes.css', 'utf8');
+  const v056 = readFileSync('src/styles/v056-right-workspace-v2.css', 'utf8');
+  const entry = readFileSync('src/main.tsx', 'utf8');
+  const browser = readFileSync('scripts/browser-full-route-visual.mjs', 'utf8');
+  const root = css.slice(css.indexOf('.nfc-v2-indexes-page {'),
+    css.indexOf('.nfc-v2-indexes-page > .nfc-page-header'));
+  assert.ok(root.includes('--nfc-w2-surface:var(--nfc-idx-bg)'),
+    'Indexes must own v056 mobile paint via local paper token');
+  assert.ok(v056.includes('.nfc-app-main .nfc-index-mobile-card'));
+  assert.ok(v056.includes('.nfc-app-main .nfc-mobile-record-list'));
+  assert.ok(v056.includes('background: var(--nfc-w2-surface)'));
+  assert.ok(entry.indexOf("import './styles/v056-right-workspace-v2.css';") <
+    entry.indexOf("import './styles/console-v2-indexes.css';"),
+    'Indexes owner must load after inherited v056 rules');
+  for (const phrase of [
+    "if (item.id === 'indexes' && width <= 767)",
+    "document.querySelector('.nfc-v2-indexes-page')",
+    "page?.querySelector('.nfc-v2-indexes-mobile')",
+    "list?.querySelector('.nfc-index-mobile-card')",
+    'audit.indexMobileNeutralPaint = { ...indexPaint, required: paperColor,',
+    'Indexes mobile card/list inherited non-neutral painted surface:',
+    "indexPaint.list.backgroundImage !== 'none'",
+    "indexPaint.card.background === 'rgba(0, 0, 0, 0)'",
+    "indexPaint.card.backgroundImage !== 'none'",
+    "!indexPaint.cardContained",
+    "indexPaint.card.borderWidth === '0px'",
+  ]) assert.ok(browser.includes(phrase), 'Missing computed paint guard: ' + phrase);
+});
+
+test('expanded interaction full-page capture retries a short image without relaxing height', () => {
+  const start = browser.indexOf("const detailFullPage = requiresExpandedInteractionFullPageReview(width)");
+  const end = browser.indexOf('audit.detailScreenshotPixels = detailPixels;', start);
+  assert.ok(start > 0 && end > start);
+  const excerpt = browser.slice(start, end);
+  for (const phrase of [
+    'captureAttempt <= 3',
+    'requestAnimationFrame(() => requestAnimationFrame(resolve))',
+    "detailPng.readUInt32BE(20)",
+    "document.documentElement.scrollHeight",
+    'detailPixels.height >= detailPixels.documentHeight - 2',
+  ]) assert.ok(excerpt.includes(phrase), 'Missing fail-closed recapture: ' + phrase);
+  assert.ok(browser.includes('detailPixels.height < detailPixels.documentHeight - 2'),
+    'Final image must still fail when it truncates any page content');
+});

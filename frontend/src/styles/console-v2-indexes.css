@@ -6,6 +6,9 @@
   --nfc-idx-muted:var(--v2-muted,#62625e);
   --nfc-idx-line:var(--v2-line,#eaeae7);
   --nfc-idx-accent:var(--v2-indigo,#262625);
+  /* v056 still paints mobile list and card via this inherited token.
+     Scope its surface to the Indexes page's own Pure White paper. */
+  --nfc-w2-surface:var(--nfc-idx-bg);
 }
 .nfc-v2-indexes-page > .nfc-page-header { margin-bottom:20px; }
 .nfc-v2-shell .nfc-v2-indexes-page .nfc-data-panel-body {
