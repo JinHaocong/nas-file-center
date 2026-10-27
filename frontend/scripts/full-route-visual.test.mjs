@@ -476,5 +476,26 @@ test('Stage 70 Indexes mobile list neutralizes v056 inherited blue surface', () 
     "list?.querySelector('.nfc-index-mobile-card')",
     'audit.indexMobileNeutralPaint = { ...indexPaint, required: paperColor }',
     'Indexes mobile card/list inherited non-neutral painted surface:',
+    "indexPaint.list.backgroundImage !== 'none'",
+    "indexPaint.card.background === 'rgba(0, 0, 0, 0)'",
+    "indexPaint.card.backgroundImage !== 'none'",
+    "!indexPaint.cardContained",
+    "indexPaint.card.borderWidth === '0px'",
   ]) assert.ok(browser.includes(phrase), 'Missing computed paint guard: ' + phrase);
+});
+
+test('expanded interaction full-page capture retries a short image without relaxing height', () => {
+  const start = browser.indexOf("const detailFullPage = requiresExpandedInteractionFullPageReview(width)");
+  const end = browser.indexOf('audit.detailScreenshotPixels = detailPixels;', start);
+  assert.ok(start > 0 && end > start);
+  const excerpt = browser.slice(start, end);
+  for (const phrase of [
+    'captureAttempt <= 3',
+    'requestAnimationFrame(() => requestAnimationFrame(resolve))',
+    "detailPng.readUInt32BE(20)",
+    "document.documentElement.scrollHeight",
+    'detailPixels.height >= detailPixels.documentHeight - 2',
+  ]) assert.ok(excerpt.includes(phrase), 'Missing fail-closed recapture: ' + phrase);
+  assert.ok(browser.includes('detailPixels.height < detailPixels.documentHeight - 2'),
+    'Final image must still fail when it truncates any page content');
 });
