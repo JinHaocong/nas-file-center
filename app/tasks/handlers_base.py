@@ -1911,6 +1911,21 @@ class BatchPlanExecuteHandler(TaskHandler):
         if not plan_id:
             raise ValueError("Job state missing 'plan_id'")
         user_id = state.get("requested_by_user_id")
+        # A resumable batch execution MUST persist a versioned checkpoint
+        # before any plan/item reconciliation or filesystem mutation. Without
+        # this durable fence, Worker restart marks an interrupted job failed
+        # (WORKER_INTERRUPTED) and leaves its purging transaction awaiting
+        # manual review even though the handler supports safe replay.
+        #
+        # This records replay *eligibility*, never irreversible delete
+        # authority. Recovery still requires a new live Worker lease and the
+        # existing frozen plan, item identity and transactional witnesses.
+        restart_checkpoint = {
+            "schema_version": 1,
+            "plan_id": plan_id,
+            "resume_mode": "reconcile_executing_items",
+        }
+        context.checkpoint(checkpoint_data=restart_checkpoint)
         # Re-probing zfuse/FUSE NOREPLACE support creates disposable files for
         # every item. A negative result is fail-closed and safe to reuse for the
         # lifetime of this one Worker job, while descriptor/path/device checks
@@ -2782,6 +2797,7 @@ class BatchPlanExecuteHandler(TaskHandler):
                 progress_current=completed_or_skipped,
                 progress_total=total_count,
                 progress_message=f"Executing item #{item_meta.sequence}: {item_meta.operation}...",
+                checkpoint_data=restart_checkpoint,
             )
 
             # --- PHASE 1: DB INTENT ---
