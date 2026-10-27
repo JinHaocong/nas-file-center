@@ -510,7 +510,9 @@ try {
               detailPaint.lifecycle.backgroundImage !== 'none' ||
               detailPaint.actions.backgroundImage !== 'none' ||
               detailPaint.lifecycle.width <= 100 ||
-              detailPaint.lifecycle.height <= 100 ||
+              // Desktop steps are laid out in one short horizontal row
+              // (v056 min-height 66px); phones stack into a taller strip.
+              detailPaint.lifecycle.height <= (mobile ? 100 : 40) ||
               detailPaint.actions.width <= 100 ||
               detailPaint.actions.height <= 20 ||
               (mobile && (
