@@ -59,6 +59,27 @@ page; these return less transaction/plan context than the new endpoint.
 Avoid pasting original paths or passwords into public issue discussions;
 redact user-specific filesystem details before sharing logs.
 
+## CI browser overlay transition hardening (PR #356)
+
+During post-#355 exact-HEAD UI Validation on `91b2d95fe5ac36269c692931690e1df1bc1897ac`,
+the `browser-overlay-smoke` job failed only on the
+`Purge dark-light-1920` sequence: after closing Restore and immediately
+opening Purge, `inspect()` observed `Scrim intercepts pointer hits`.
+All earlier 31 modal sequences and the Portal theme/paint checks had passed.
+This is **an observed transition race, not proof that live quarantine
+destruction was triggered or that masking is safe**.
+
+The real Chromium test now waits **at most 3.5 seconds** for Radix's
+new Purge dialog to be `data-state=open` and for its actual center
+to receive `document.elementFromPoint` hits after the prior Restore
+scrim retires. The original, strict `inspect()` z-index/viewport/
+background/pointer assertion is **still run after the wait**.
+A persistent overlay obstruction must still fail the test.
+A source regression test pins the bounded wait and retained safety check.
+Only the synthetic read-only browser harness was changed; no
+production dialog, API, Docker or filesystem delete behavior changed.
+New exact-HEAD CI must pass before merge.
+
 ## Deployment and signoff separation
 
 This PR only adds a **read-only diagnostic path**, not an automatic
