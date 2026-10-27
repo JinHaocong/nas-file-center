@@ -472,6 +472,7 @@ try {
             const actions = page?.querySelector('.nfc-plan-action-surface');
             const list = page?.querySelector('.nfc-mobile-record-list');
             const card = list?.querySelector('.nfc-plan-item-mobile-card');
+            const empty = list?.querySelector('.nfc-console-empty[role="status"]');
             const read = node => node ? {
               background: getComputedStyle(node).backgroundColor,
               backgroundImage: getComputedStyle(node).backgroundImage,
@@ -482,7 +483,9 @@ try {
             } : null;
             return {
               lifecycle: read(lifecycle), actions: read(actions),
-              list: read(list), card: read(card),
+              list: read(list), card: read(card), empty: read(empty),
+              hasEmptyMessage: !!empty && !!empty.querySelector('strong') &&
+                !!empty.querySelector('strong').textContent.trim(),
               cardContained: !!list && !!card &&
                 card.getBoundingClientRect().left >= list.getBoundingClientRect().left &&
                 card.getBoundingClientRect().right <= list.getBoundingClientRect().right,
@@ -500,9 +503,25 @@ try {
           const cardNeutralComposite = !!detailPaint.card &&
             (detailPaint.card.background === paper ||
               detailPaint.card.background === 'rgba(0, 0, 0, 0)');
+          const emptyNeutralComposite = !!detailPaint.empty &&
+            (detailPaint.empty.background === paper ||
+              detailPaint.empty.background === 'rgba(0, 0, 0, 0)');
+          // The fixture can legitimately have zero PlanItems. In that case,
+          // require a real role=status empty message instead of a card.
+          const ledgerContentValid = detailPaint.card
+            ? cardNeutralComposite &&
+              detailPaint.card.backgroundImage === 'none' &&
+              detailPaint.cardContained &&
+              detailPaint.card.borderStyle === 'solid' &&
+              detailPaint.card.borderWidth !== '0px' &&
+              detailPaint.card.width > 100 && detailPaint.card.height > 100
+            : emptyNeutralComposite && detailPaint.hasEmptyMessage &&
+              detailPaint.empty.backgroundImage === 'none' &&
+              detailPaint.empty.width > 100 &&
+              detailPaint.empty.height > 30;
           audit.planDetailNeutralPaint = {
             ...detailPaint, requiredPaper: paper, requiredSoft: soft,
-            mobile, cardNeutralComposite,
+            mobile, cardNeutralComposite, ledgerContentValid,
           };
           if (!detailPaint.lifecycle || !detailPaint.actions ||
               detailPaint.lifecycle.background !== paper ||
@@ -519,12 +538,7 @@ try {
                 !detailPaint.list || detailPaint.list.background !== paper ||
                 detailPaint.list.backgroundImage !== 'none' ||
                 detailPaint.list.width <= 100 || detailPaint.list.height <= 100 ||
-                !detailPaint.card || !cardNeutralComposite ||
-                detailPaint.card.backgroundImage !== 'none' ||
-                !detailPaint.cardContained ||
-                detailPaint.card.borderStyle !== 'solid' ||
-                detailPaint.card.borderWidth === '0px' ||
-                detailPaint.card.width <= 100 || detailPaint.card.height <= 100
+                !ledgerContentValid
               ))) {
             problems.push('Plan Detail legacy navy lifecycle/action/ledger paint: ' +
               JSON.stringify({ width, theme: themeLabel, ...audit.planDetailNeutralPaint }));
