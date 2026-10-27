@@ -83,6 +83,11 @@ export const quarantineApi = {
   bulkPlan: (payload: QuarantineBulkPlanRequest) =>
     api.post<QuarantineBulkPlanResponse>('/api/quarantine/bulk-plan', payload),
 
+  cleanupMissingRecord: (id: number) =>
+    api.delete<{ status: 'ok'; deleted: true; id: number; metadata_only: true }>(
+      `/api/quarantine/${id}/missing-record?confirmation=CLEANUP_MISSING_RECORD`
+    ),
+
   deleteRecord: (id: number) =>
     api.delete<{
       status: string;

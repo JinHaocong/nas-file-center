@@ -150,9 +150,26 @@ jobs:
       - name: Install and verify Chinese screenshot fonts
         shell: bash
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends fonts-noto-cjk
-          fc-cache -f
+          # Network/mirror stalls must fail closed instead of silently consuming
+          # the entire browser matrix job. Never skip the required CJK font proof.
+          installed=false
+          for attempt in 1 2 3; do
+            if timeout --kill-after=10s 90s sudo apt-get \
+                -o Acquire::Retries=1 -o Acquire::http::Timeout=20 update -qq \
+              && timeout --kill-after=10s 150s sudo apt-get \
+                -o Acquire::Retries=1 -o Acquire::http::Timeout=20 \
+                install -y --no-install-recommends fonts-noto-cjk; then
+              installed=true
+              break
+            fi
+            echo "::warning::Chinese font install attempt ${attempt}/3 failed or timed out"
+            if [ "${attempt}" -lt 3 ]; then sleep 5; fi
+          done
+          if [ "${installed}" != true ]; then
+            echo "::error::Required Chinese screenshot fonts are unavailable"
+            exit 1
+          fi
+          timeout --kill-after=10s 90s fc-cache -f
           fc-match -f '%{family}\n' ':lang=zh-cn' | grep -E 'Noto (Sans|Serif) CJK'
 
       # Verify theme switching, cross-tab state and blocked browser APIs in the
@@ -298,9 +315,26 @@ jobs:
       - name: Install and verify Chinese screenshot fonts
         shell: bash
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends fonts-noto-cjk
-          fc-cache -f
+          # Network/mirror stalls must fail closed instead of silently consuming
+          # the entire browser matrix job. Never skip the required CJK font proof.
+          installed=false
+          for attempt in 1 2 3; do
+            if timeout --kill-after=10s 90s sudo apt-get \
+                -o Acquire::Retries=1 -o Acquire::http::Timeout=20 update -qq \
+              && timeout --kill-after=10s 150s sudo apt-get \
+                -o Acquire::Retries=1 -o Acquire::http::Timeout=20 \
+                install -y --no-install-recommends fonts-noto-cjk; then
+              installed=true
+              break
+            fi
+            echo "::warning::Chinese font install attempt ${attempt}/3 failed or timed out"
+            if [ "${attempt}" -lt 3 ]; then sleep 5; fi
+          done
+          if [ "${installed}" != true ]; then
+            echo "::error::Required Chinese screenshot fonts are unavailable"
+            exit 1
+          fi
+          timeout --kill-after=10s 90s fc-cache -f
           fc-match -f '%{family}\\n' ':lang=zh-cn' | grep -E 'Noto (Sans|Serif) CJK'
 
       - name: Visit every React route with safe mock data and capture real screenshots
