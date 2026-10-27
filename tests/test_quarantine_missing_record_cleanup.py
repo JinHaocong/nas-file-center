@@ -365,6 +365,30 @@ def test_transactional_recovery_diagnostic_fails_closed_on_unknown_mount(mainten
         offline_root.rename(env["trash"])
 
 
+def test_transactional_recovery_diagnostic_nofollow_symlink_paths(maintenance_env):
+    env = maintenance_env
+    entry_id, path = _record(
+        env, state="purging", tx_phase="purging",
+        transaction_mode="cross_storage_transactional",
+    )
+    safe_target = env["data"] / "outside.txt"
+    safe_target.write_text("leave unchanged")
+    path.symlink_to(safe_target)
+    response = env["admin"].get(f"/api/quarantine/{entry_id}/recovery-diagnostic")
+    assert response.status_code == 200
+    assert response.json()["payload_path_observation"] == "present"
+    assert safe_target.read_text() == "leave unchanged"
+
+    path.unlink()
+    path.parent.rmdir()
+    path.parent.symlink_to(env["data"], target_is_directory=True)
+    response = env["admin"].get(f"/api/quarantine/{entry_id}/recovery-diagnostic")
+    assert response.status_code == 200
+    assert response.json()["payload_path_observation"] == "indeterminate"
+    assert safe_target.read_text() == "leave unchanged"
+    _assert_retained(env, entry_id)
+
+
 def test_transactional_recovery_diagnostic_requires_admin(maintenance_env):
     env = maintenance_env
     entry_id, _ = _record(env, state="purging", tx_phase="purging")
