@@ -325,8 +325,10 @@ def test_interrupted_purge_diagnostic_is_read_only_and_admin_only(tmp_path: Path
             quarantined_at=utcnow(),
         )
         session.add(entry)
+        session.flush()
+        eid = int(entry.id)
+        plan_id = int(plan.id)
         session.commit()
-        eid = entry.id
 
     url = f"/api/quarantine/{eid}/recovery-diagnostic"
     assert env["unauth_client"].get(url).status_code == 401
@@ -340,7 +342,7 @@ def test_interrupted_purge_diagnostic_is_read_only_and_admin_only(tmp_path: Path
     assert data["reason"] == "transactional_purge_needs_authority"
     assert data["work_job_status"] == "failed"
     assert data["work_job_error_code"] == "WORKER_INTERRUPTED"
-    assert data["plan_id"] == plan.id
+    assert data["plan_id"] == plan_id
     assert data["plan_status"] == "partial"
     assert data["plan_item_state"] == "executing"
     assert data["automatic_cleanup_performed"] is False
