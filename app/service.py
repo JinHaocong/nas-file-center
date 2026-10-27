@@ -6230,8 +6230,9 @@ class FileCenterService:
             }
 
     def get_quarantine_recovery_diagnostic(self, entry_id: int) -> dict:
-        """Read-only, metadata-only diagnosis for a transitional quarantine entry.
+        """Read-only DB and nofollow path observations for a quarantine entry.
 
+        No payload bytes are opened and no DB or filesystem mutation occurs.
         Interrupted transactional purges may have irreversible, partially
         completed filesystem effects. Never reset purging to active/purged,
         replay destruction, or discard .tx evidence from an API diagnostic.
