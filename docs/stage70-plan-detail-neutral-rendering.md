@@ -38,11 +38,28 @@ did not remap these two inherited v056 surfaces.
   `rgb(255,255,255)` / dark `rgb(36,36,34)`. The action surface
   must paint neutral soft light `rgb(245,245,243)` / dark
   `rgb(43,43,40)`. No background images or missing/small geometry.
-  At 360/390/430 require an opaque neutral mobile ledger list and
-  a visible, contained PlanItem card, either opaque neutral or
-  transparent over its already-verified neutral parent.
+  At 360/390/430 require an opaque neutral mobile ledger list;
+  where actual PlanItems exist, require a visible, contained bordered
+  PlanItem card, opaque neutral or transparent over verified paper;
+  where the read-only mock genuinely has **zero items**, instead require
+  a real nonempty `nfc-console-empty[role=status]` status message on
+  that neutral parent. Do not fabricate a card for an empty plan.
   Fail CI on any violation, with `planDetailNeutralPaint` in the
   visual manifest. Source tests pin CSS ownership and import order.
+
+**First-CI evidence and correction:** The original PR #354 exact-head
+[UI Validation](https://github.com/JinHaocong/nas-file-center/actions/runs/40454262510)
+failed at 1440px/430px due to overly restrictive geometry assumptions.
+The real mounted data proved *the repaired paint was already exact neutral*
+at both widths and all themes: lifecycle paper dark `rgb(36,36,34)`,
+actions soft `rgb(43,43,40)`, 430px record list `rgb(36,36,34)`.
+At desktop, a valid horizontal lifecycle strip is only 80px high,
+not 100px; the threshold was corrected to >40px for desktop.
+At 430px the fixture's plan had **no PlanItem card** and rendered a
+240px-high neutral ledger with a legitimate empty-state status instead;
+the guard now distinguishes genuine empty state from a missing/invalid
+nonempty PlanItem. These regressions still fail closed on incorrect
+colors or geometry; the full new HEAD needs CI before merging.
 - Re-evaluate the **same actual pixel regions** from the new exact-head
   screenshots and confirm navy disappearance before any merge. The
   unmodified 800-case matrix and full-page interactive captures must
