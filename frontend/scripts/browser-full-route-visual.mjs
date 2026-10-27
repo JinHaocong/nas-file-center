@@ -461,6 +461,61 @@ try {
           if (!match) problems.push('Login/Settings actual neutral paint mismatch: ' +
             JSON.stringify({ route: item.id, effectiveTheme: theme.effective, painted }));
         }
+        if (item.id === 'tasks') {
+          // Stage #70: actual 390/1440px dark screenshots of Tasks from
+          // merged #354 show #15191f behind the filter controls. Historical
+          // v056 paints .nfc-filter-bar !important from W2 surface.
+          // Assert the rendered element's computed paint at ALL widths and
+          // all light/dark/system theme configurations.
+          const taskPaint = await tab.evaluate(() => {
+            const page = document.querySelector('.nfc-v2-tasks-page');
+            const filter = page?.querySelector('.nfc-v2-task-filter-bar');
+            const list = page?.querySelector('.nfc-mobile-record-list');
+            const card = list?.querySelector('.nfc-task-mobile-card');
+            const read = node => node ? {
+              background: getComputedStyle(node).backgroundColor,
+              backgroundImage: getComputedStyle(node).backgroundImage,
+              width: Math.round(node.getBoundingClientRect().width),
+              height: Math.round(node.getBoundingClientRect().height),
+              borderStyle: getComputedStyle(node).borderTopStyle,
+              borderWidth: getComputedStyle(node).borderTopWidth,
+            } : null;
+            return {
+              filter: read(filter), list: read(list), card: read(card),
+              cardContained: !!list && !!card &&
+                card.getBoundingClientRect().left >= list.getBoundingClientRect().left &&
+                card.getBoundingClientRect().right <= list.getBoundingClientRect().right,
+              inheritedW2Surface: page && getComputedStyle(page)
+                .getPropertyValue('--nfc-w2-surface').trim(),
+            };
+          });
+          const required = theme.effective === 'dark'
+            ? 'rgb(36, 36, 34)' : 'rgb(255, 255, 255)';
+          const cardNeutralComposite = !!taskPaint.card &&
+            (taskPaint.card.background === required ||
+              taskPaint.card.background === 'rgba(0, 0, 0, 0)');
+          audit.tasksFilterNeutralPaint = { ...taskPaint, required, cardNeutralComposite };
+          // Mock Tasks can have zero jobs: an absent mobile list/card
+          // is legitimate, but an existing list or card MUST be neutral.
+          if (!taskPaint.filter ||
+              taskPaint.filter.background !== required ||
+              taskPaint.filter.backgroundImage !== 'none' ||
+              taskPaint.filter.width <= 100 || taskPaint.filter.height <= 40 ||
+              (width <= 767 && taskPaint.list && (
+                taskPaint.list.background !== required ||
+                taskPaint.list.backgroundImage !== 'none' ||
+                taskPaint.list.width <= 100 || taskPaint.list.height <= 40 ||
+                !taskPaint.card || !cardNeutralComposite ||
+                taskPaint.card.backgroundImage !== 'none' ||
+                !taskPaint.cardContained ||
+                taskPaint.card.borderStyle !== 'solid' ||
+                taskPaint.card.borderWidth === '0px' ||
+                taskPaint.card.width <= 100 || taskPaint.card.height <= 40
+              ))) {
+            problems.push('Tasks filter/mobile list inherited non-neutral navy paint: ' +
+              JSON.stringify({ width, theme: themeLabel, ...audit.tasksFilterNeutralPaint }));
+          }
+        }
         if (item.id === 'plan-detail') {
           // Stage #70: original merged-#353 screenshots showed #15191f
           // lifecycle/ledger and #191e25 action surfaces even on the v2.1
