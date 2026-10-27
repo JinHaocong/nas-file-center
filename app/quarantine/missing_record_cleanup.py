@@ -26,12 +26,16 @@ def _as_aware(value: datetime) -> datetime:
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
 
 
-def require_absent_beneath_quarantine_root(root: Path, candidate: Path, *, label: str) -> None:
+def require_absent_beneath_quarantine_root(
+    root: Path, candidate: Path, *, label: str, require_intact_parent: bool = False
+) -> None:
     """Walk from / through nofollow directory FDs; only ENOENT proves absence.
 
-    A missing intermediate directory *below* an open valid quarantine root is
-    sufficient; a missing root, symlink, inaccessible mount or non-directory
-    ancestor is not. The API never follows a possibly swapped pathname.
+    Payload cleanup requires an intact, accessible parent chain: an absent
+    intermediate directory could be a temporarily unmounted subtree, not an
+    externally deleted file. Only the final missing leaf proves payload
+    absence. For the optional private .tx namespace, absent .tx itself can
+    demonstrate no visible residue. Never follow a swapped pathname.
     """
     root = Path(root)
     candidate = Path(candidate)
@@ -62,7 +66,11 @@ def require_absent_beneath_quarantine_root(root: Path, candidate: Path, *, label
             for component in relative_parts[:-1]:
                 try:
                     next_fd = os.open(component, flags, dir_fd=fd)
-                except FileNotFoundError:
+                except FileNotFoundError as exc:
+                    if require_intact_parent:
+                        raise StateConflictError(
+                            f"Cannot prove {label} absence: an ancestor directory is missing"
+                        ) from exc
                     return
                 stack.callback(os.close, next_fd)
                 fd = next_fd
@@ -159,7 +167,8 @@ def assert_missing_quarantine_entry_safe(
 
     root = Path(quarantine_root).absolute()
     require_absent_beneath_quarantine_root(
-        root, Path(entry.quarantine_path), label="quarantine payload"
+        root, Path(entry.quarantine_path), label="quarantine payload",
+        require_intact_parent=True,
     )
     # Even an empty private tx namespace is evidence until a lease-fenced
     # Worker has retired it. Metadata cleanup never removes that namespace.
