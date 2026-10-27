@@ -41,6 +41,10 @@ requeues, lease changes or state transitions are made.** Ordinary
 users are forbidden (`403`); unauthenticated requests return `401`.
 
 For #1106 / #884, review **both separate diagnostic responses**.
+Note: a QuarantineEntry's persisted `task_id` and `plan_item_id` are
+**provenance references**, which may identify the original quarantine job,
+not the subsequently interrupted purge executor. Resolve the actual purge
+plan from plan item metadata / task logs before attempting any retry.
 Collect the result plus Worker log excerpts around the restart and
 the state of any linked job/plan. A valid current Worker lease and
 retained frozen transaction authority must be assessed before
