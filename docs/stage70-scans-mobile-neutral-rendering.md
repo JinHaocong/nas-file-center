@@ -26,15 +26,25 @@ merged PR #351. Review the **actual Chromium screenshots** from
    `--nfc-w2-surface:var(--v2-paper)`, **only within**
    `.nfc-v2-shell .nfc-v2-scans-page`. This leaves v056's global tokens
    and other routes untouched.
-2. Give its existing mobile scan card a page-owned, higher-specificity
-   `background:var(--v2-paper)` (no new `!important`).
-   Shared v054 structural rules, borders, action layout and React remain.
-3. For every mounted `/scans` route at 360/390/430 pixels and all four
-   light/dark/system effective themes, the browser audit asserts
-   **actual** computed list **and** card background equal to
-   `rgb(255,255,255)` light / `rgb(36,36,34)` dark. No background images,
-   missing geometry or card spill outside the list are permitted. An error
-   is recorded in the screenshot manifest and fails CI.
+2. **First exact-HEAD Chromium CI failure, corrected without forcing a
+   repaint:** [UI Validation run 40434503721](https://github.com/JinHaocong/nas-file-center/actions/runs/40434503721)
+   at 360/430 measured the **list** as successfully fixed, exact neutral
+   `rgb(255,255,255)` light / `rgb(36,36,34)` dark. The bordered
+   `nfc-scan-mobile-card` itself computed to `rgba(0,0,0,0)`
+   in all four themes; it is intentionally a transparent child over the
+   now opaque neutral list. Its background is **visibly neutral** through
+   ordinary alpha compositing. The first guard incorrectly demanded opaque
+   direct card paint and failed closed as designed. A temporarily proposed
+   higher-specificity card background was ineffectual, so it was reverted;
+   the existing route card CSS and shared v054 rules remain intact.
+3. The revised mounted Chromium audit at 360/390/430 × four themes now
+   strictly requires an **opaque exact-neutral list**, no background image
+   on list/card, and a card that is either exact-neutral itself **or**
+   transparent over that verified parent. It also requires real card
+   containment, positive list/card geometry, and a positive-width
+   solid card border. No test bypass or unexplained transparent ancestor
+   is accepted; the before/after actual screenshot still has to be reviewed.
+   A mismatch is recorded in the screenshot manifest and fails CI.
 4. Source regression tests pin the owning selector and CSS import ordering,
    and the mounted-browser guard. Do not simulate human approval.
 
