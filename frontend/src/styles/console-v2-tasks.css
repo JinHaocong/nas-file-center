@@ -1,5 +1,11 @@
 /* Console v2: Tasks ledger and filter controls — keep global Ant controls untouched. */
-.nfc-v2-shell .nfc-v2-tasks-page { max-width: min(100%, 1690px) !important; }
+.nfc-v2-shell .nfc-v2-tasks-page {
+  max-width: min(100%, 1690px) !important;
+  /* Historical v056 paints .nfc-filter-bar !important and populated
+     .nfc-mobile-record-list from inherited #15191f in dark mode.
+     Tasks owns v2.1 neutral paper; keep the correction page-local. */
+  --nfc-w2-surface: var(--v2-paper);
+}
 .nfc-v2-tasks-page > .nfc-page-header { margin-bottom: 20px !important; }
 .nfc-v2-tasks-page .nfc-data-panel-header { padding: 13px 1px 15px; }
 .nfc-v2-tasks-page .nfc-data-panel-title { color: var(--v2-text); font-size: 15px; }
