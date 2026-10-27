@@ -6268,9 +6268,26 @@ class FileCenterService:
                     "核实 API/Worker 是否实际重启并查看日志。禁止手工改为已清除。"
                 )
 
+            # A read-only, momentary filesystem observation; never a recovery
+            # decision or a pretext for bypassing frozen Worker authority.
+            from app.quarantine.missing_record_cleanup import observe_quarantine_candidate
+            quarantine_root = Path(self.settings.quarantine_root).absolute()
+            payload_observation = observe_quarantine_candidate(
+                quarantine_root, Path(entry.quarantine_path),
+                label="quarantine payload", require_intact_parent=True,
+            )
+            tx_observation = observe_quarantine_candidate(
+                quarantine_root,
+                quarantine_root / ".tx" / f"entry-{entry.id}",
+                label="transaction evidence",
+            )
+
             return {
                 "id": int(entry.id),
                 "state": str(entry.state),
+                "payload_path_observation": payload_observation,
+                "transaction_evidence_observation": tx_observation,
+                "observation_is_cleanup_authority": False,
                 "tx_phase": entry.tx_phase,
                 "transaction_mode": entry.transaction_mode,
                 "has_authoritative_anchor": entry.authoritative_anchor_path is not None,
