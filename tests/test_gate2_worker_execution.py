@@ -196,13 +196,14 @@ def test_worker_safe_pause_and_resume(tmp_path: Path):
 
         context = JobContext(service.engine, service.SessionLocal, job.id, worker_id="worker-p")
 
-        # Request pause right after first item
+        # Request pause at the semantic boundary before item #2, not at
+        # an assumed ordinal checkpoint call. A durable startup resume fence
+        # adds an earlier checkpoint without changing pause semantics.
         original_checkpoint = context.checkpoint
-        call_count = [0]
         from app.tasks.state_machine import JobPauseRequested
         def mock_checkpoint(*args, **kwargs):
-            call_count[0] += 1
-            if call_count[0] == 3:  # boundary before item 2
+            message = str(kwargs.get("progress_message") or "")
+            if message.startswith("Executing item #2:"):
                 raise JobPauseRequested("Simulated pause request")
             return original_checkpoint(*args, **kwargs)
         context.checkpoint = mock_checkpoint
