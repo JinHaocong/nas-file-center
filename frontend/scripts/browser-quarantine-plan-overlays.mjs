@@ -94,6 +94,25 @@ async function inspect(page, theme, width, selector) {
 }
 
 /**
+ * Wait for Radix's closing Restore scrim to relinquish pointer ownership
+ * before examining the newly visible Purge dialog. Visibility alone does
+ * not mean a portal transition has finished (notably at 1920px dark).
+ * Fail closed: a persistent mask/dialog stacking defect still times out.
+ */
+async function waitForInteractivePortal(page, selector) {
+  await page.waitForFunction(sel => {
+    const dialog = document.querySelector(sel);
+    if (!dialog || getComputedStyle(dialog).visibility !== 'visible' ||
+        dialog.getAttribute('data-state') !== 'open') return false;
+    const box = dialog.getBoundingClientRect();
+    if (box.width <= 0 || box.height <= 0) return false;
+    const x = Math.max(1, Math.min(innerWidth - 1, box.left + box.width / 2));
+    const y = Math.max(1, Math.min(innerHeight - 1, box.top + Math.min(box.height / 2, 100)));
+    return Boolean(document.elementFromPoint(x, y)?.closest(sel));
+  }, selector, { timeout: 3500, polling: 50 });
+}
+
+/**
  * Real Quarantine GET-503 alert/Retry keyboard audit. Browser computed colors
  * are decoded with the independently tested strict RGB/sRGB/Oklab parser.
  */
@@ -258,6 +277,7 @@ try {
         await page.getByRole('button', { name: '清除', exact: true }).first().click();
         const purge = page.locator('.nfc-v2-quarantine-dialog');
         await purge.waitFor({ state: 'visible' });
+        await waitForInteractivePortal(page, '.nfc-v2-quarantine-dialog');
         errors = await inspect(page, theme.effective, width, '.nfc-v2-quarantine-dialog');
         assert.deepEqual(errors, [], 'Purge ' + label + ': ' + errors.join('; '));
         const purgeButton = purge.getByRole('button', { name: '永久清除 (unlink)' });

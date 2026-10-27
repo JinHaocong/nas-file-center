@@ -31,6 +31,25 @@ export interface QuarantineEntry {
   updated_at: string | null;
 }
 
+export interface QuarantineRecoveryDiagnostic {
+  id: number;
+  state: QuarantineState;
+  tx_phase: string | null;
+  transaction_mode: string | null;
+  has_authoritative_anchor: boolean;
+  active_attempt_generation: number;
+  work_job_id: number | null;
+  work_job_status: string | null;
+  work_job_error_code: string | null;
+  plan_id: number | null;
+  plan_status: string | null;
+  plan_item_state: string | null;
+  last_error: string | null;
+  reason: 'not_purging' | 'transactional_purge_needs_authority' | 'legacy_purge_requires_verification';
+  guidance: string;
+  automatic_cleanup_performed: false;
+}
+
 export interface QuarantineListResponse {
   items: QuarantineEntry[];
   total: number;

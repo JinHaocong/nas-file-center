@@ -6169,6 +6169,64 @@ class FileCenterService:
                 "page_size": page_size,
             }
 
+    def get_quarantine_recovery_diagnostic(self, entry_id: int) -> dict:
+        """Read-only, metadata-only diagnosis for a transitional quarantine entry.
+
+        Interrupted transactional purges may have irreversible, partially
+        completed filesystem effects. Never reset purging to active/purged,
+        replay destruction, or discard .tx evidence from an API diagnostic.
+        Only a lease-fenced Worker with frozen authority may reconcile them.
+        """
+        with self.SessionLocal() as session:
+            entry = session.get(QuarantineEntry, entry_id)
+            if entry is None:
+                raise KeyError(f"Quarantine entry #{entry_id} not found")
+
+            job = session.get(WorkJob, entry.task_id) if entry.task_id else None
+            item = session.get(BatchPlanItem, entry.plan_item_id) if entry.plan_item_id else None
+            plan = session.get(BatchPlan, item.plan_id) if item else None
+            transactional = (
+                entry.tx_phase is not None
+                or entry.authoritative_anchor_path is not None
+                or entry.transaction_mode is not None
+            )
+            if entry.state != "purging":
+                reason = "not_purging"
+                guidance = "这条记录当前不处于清除中；请刷新列表后按实际状态操作。"
+            elif transactional:
+                reason = "transactional_purge_needs_authority"
+                guidance = (
+                    "事务型清除在中断后需要原计划的冻结证据和持有有效租约的 Worker "
+                    "安全恢复。请检查关联任务/计划与 Worker 日志；不要手动修改状态、"
+                    "删除 .tx 或直接重试不可逆清除。"
+                )
+            else:
+                reason = "legacy_purge_requires_verification"
+                guidance = (
+                    "普通清除在 Docker 中断后需要核对隔离目标是否仍完整。"
+                    "正常启动恢复应重新判定状态；如持续清除中，请先备份数据库、"
+                    "核实 API/Worker 是否实际重启并查看日志。禁止手工改为已清除。"
+                )
+
+            return {
+                "id": int(entry.id),
+                "state": str(entry.state),
+                "tx_phase": entry.tx_phase,
+                "transaction_mode": entry.transaction_mode,
+                "has_authoritative_anchor": entry.authoritative_anchor_path is not None,
+                "active_attempt_generation": int(entry.active_attempt_generation or 0),
+                "work_job_id": int(job.id) if job is not None else (int(entry.task_id) if entry.task_id else None),
+                "work_job_status": str(job.status) if job is not None else None,
+                "work_job_error_code": job.error_code if job is not None else None,
+                "plan_id": int(plan.id) if plan is not None else None,
+                "plan_status": str(plan.status) if plan is not None else None,
+                "plan_item_state": str(item.state) if item is not None else None,
+                "last_error": entry.last_error,
+                "reason": reason,
+                "guidance": guidance,
+                "automatic_cleanup_performed": False,
+            }
+
     def get_quarantine_entry(self, entry_id: int) -> dict:
         with self.SessionLocal() as session:
             entry = session.get(QuarantineEntry, entry_id)
