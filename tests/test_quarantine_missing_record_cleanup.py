@@ -193,6 +193,17 @@ def test_symlink_leaf_and_symlink_parent_fail_closed(maintenance_env):
     _assert_retained(env, entry_id)
 
 
+def test_missing_payload_parent_is_not_proof_of_external_deletion(maintenance_env):
+    """A missing parent may be an offline subtree or transient mount."""
+    env = maintenance_env
+    entry_id, path = _record(env)
+    path.parent.rmdir()
+    response = _cleanup(env, entry_id)
+    assert response.status_code == 409
+    assert "ancestor directory is missing" in response.text
+    _assert_retained(env, entry_id)
+
+
 def test_missing_or_unavailable_quarantine_root_is_not_proof(maintenance_env):
     env = maintenance_env
     entry_id, _ = _record(env)
@@ -247,12 +258,15 @@ def test_missing_payload_reappears_at_final_check(maintenance_env, monkeypatch):
     entry_id, path = _record(env)
     original = missing_record_cleanup.require_absent_beneath_quarantine_root
     seen = [0]
-    def race(root, candidate, *, label):
+    def race(root, candidate, *, label, require_intact_parent=False):
         if label == "quarantine payload":
             seen[0] += 1
             if seen[0] == 2:
                 path.write_text("externally replaced")
-        return original(root, candidate, label=label)
+        return original(
+            root, candidate, label=label,
+            require_intact_parent=require_intact_parent,
+        )
     monkeypatch.setattr(missing_record_cleanup, "require_absent_beneath_quarantine_root", race)
     assert _cleanup(env, entry_id).status_code == 409
     assert path.read_text() == "externally replaced"
