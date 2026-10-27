@@ -89,6 +89,8 @@ export const QuarantinePage: React.FC = () => {
   const [resolvingTerminalRecords, setResolvingTerminalRecords] = useState(false);
   const [cleanupTarget, setCleanupTarget] = useState<RecordCleanupTarget | null>(null);
   const [cleanupBusy, setCleanupBusy] = useState(false);
+  const [missingCleanupTarget, setMissingCleanupTarget] = useState<QuarantineEntry | null>(null);
+  const [missingCleanupBusy, setMissingCleanupBusy] = useState(false);
   const [recoveryDiagnostic, setRecoveryDiagnostic] = useState<QuarantineRecoveryDiagnostic | null>(null);
   const [recoveryDiagnosticBusyId, setRecoveryDiagnosticBusyId] = useState<number | null>(null);
   const recoveryDiagnosticEpoch = useRef(0);
@@ -122,6 +124,23 @@ export const QuarantinePage: React.FC = () => {
     onError: (err: unknown) => {
       const structured = getStructuredApiError(err);
       toast.error(structured.message || '删除隔离记录失败');
+    },
+  });
+
+  const cleanupMissingRecordMutation = useMutation({
+    mutationFn: (entryId: number) => quarantineApi.cleanupMissingRecord(entryId),
+    onSuccess: (result, entryId) => {
+      if (result.metadata_only !== true) {
+        toast.error('服务端未确认纯元数据清理；请检查记录');
+        return;
+      }
+      toast.success('隔离记录 #' + entryId + ' 的缺失文件元数据已清理（未删除任何文件）');
+      void queryClient.invalidateQueries({ queryKey: ['quarantineList'] });
+      void queryClient.invalidateQueries({ queryKey: ['auditEvents'] });
+      void refetch();
+    },
+    onError: (err: unknown) => {
+      toast.error(getStructuredApiError(err).message || '安全校验未通过，记录已保留');
     },
   });
 
@@ -289,6 +308,26 @@ export const QuarantinePage: React.FC = () => {
     if (!next && !cleanupInFlight.current && !cleanupBusy) setCleanupTarget(null);
   };
 
+  const confirmMissingCleanup = (record: QuarantineEntry) => {
+    if (!isAdmin || isSafeMode || !allowDelete || missingCleanupBusy ||
+        !['active', 'purging'].includes(record.state)) return;
+    setMissingCleanupTarget(record);
+  };
+  const handleConfirmMissingCleanup = async () => {
+    const target = missingCleanupTarget;
+    if (!target || !isAdmin || isSafeMode || !allowDelete || missingCleanupBusy ||
+        cleanupMissingRecordMutation.isPending) return;
+    setMissingCleanupBusy(true);
+    try {
+      await cleanupMissingRecordMutation.mutateAsync(target.id);
+      setMissingCleanupTarget(null);
+    } catch {
+      // Server revalidates absent payload, task/transaction evidence and state.
+    } finally {
+      setMissingCleanupBusy(false);
+    }
+  };
+
   const inspectInterruptedPurge = async (entryId: number) => {
     const requestId = ++recoveryDiagnosticEpoch.current;
     setRecoveryDiagnosticBusyId(entryId);
@@ -324,6 +363,13 @@ export const QuarantinePage: React.FC = () => {
           <ConsoleButton size={size} variant="ghost" leadingIcon={<ConsoleIcon name="info" size={15} />}
             loading={recoveryDiagnosticBusyId === record.id}
             onClick={() => { void inspectInterruptedPurge(record.id); }}>恢复诊断</ConsoleButton>
+        )}
+        {(record.state === 'active' || record.state === 'purging') && isAdmin && (
+          <span title="仅当服务端证明隔离文件已被外部删除、无活动任务和事务证据时清理数据库元数据；不会执行文件删除">
+            <ConsoleButton size={size} variant="ghost" leadingIcon={<ConsoleIcon name="trash" size={15} />}
+              disabled={isSafeMode || !allowDelete || missingCleanupBusy || cleanupMissingRecordMutation.isPending}
+              onClick={() => confirmMissingCleanup(record)}>清理缺失文件记录</ConsoleButton>
+          </span>
         )}
         {canRestore && (
           <span title={isSafeMode ? '只读保护模式 (ALLOW_MUTATION=false) 生效中，禁止恢复' : '恢复到原路径或指定路径'}>
@@ -536,6 +582,13 @@ export const QuarantinePage: React.FC = () => {
         )}
       </DataPanel>
 
+      <ConsoleConfirmDialog open={missingCleanupTarget !== null}
+        onOpenChange={next => { if (!next && !missingCleanupBusy) setMissingCleanupTarget(null); }}
+        title={'清理隔离记录 #' + (missingCleanupTarget?.id ?? '') + ' 的缺失文件元数据？'}
+        description="只清理经服务端确认已丢失隔离文件的普通 active / purging 数据库记录并保留审计。不会删除任何文件、不会重置事务或绕过 Worker 恢复；如路径存在、仍有任务/事务证据或无法证明缺失，会拒绝操作。"
+        confirmText="确认仅删除数据库记录" busy={missingCleanupBusy}
+        disabled={!isAdmin || isSafeMode || !allowDelete || !missingCleanupTarget}
+        onConfirm={() => { void handleConfirmMissingCleanup(); }} />
       <ConsoleConfirmDialog open={cleanupTarget !== null} onOpenChange={closeCleanup}
         title={cleanupTitle} description={cleanupDescription}
         confirmText="删除记录" busy={cleanupBusy}
