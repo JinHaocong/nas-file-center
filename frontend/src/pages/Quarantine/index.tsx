@@ -453,10 +453,10 @@ export const QuarantinePage: React.FC = () => {
                 事务阶段：{recoveryDiagnostic.tx_phase || '无'}；
                 模式：{recoveryDiagnostic.transaction_mode || '普通'}；
                 尝试代次：{recoveryDiagnostic.active_attempt_generation}</p>
-              <p>关联任务：{recoveryDiagnostic.work_job_id == null
+              <p>记录来源关联任务（未必是本次清理）：{recoveryDiagnostic.work_job_id == null
                 ? '未关联' : '#' + recoveryDiagnostic.work_job_id + '（' +
                   (recoveryDiagnostic.work_job_status || '任务缺失') + '）'}；
-                关联计划：{recoveryDiagnostic.plan_id == null
+                记录来源关联计划（未必是本次清理）：{recoveryDiagnostic.plan_id == null
                   ? '未关联' : '#' + recoveryDiagnostic.plan_id + '（' +
                     (recoveryDiagnostic.plan_status || '状态未知') + '）'}</p>
               {recoveryDiagnostic.work_job_error_code && <p>任务错误码：{recoveryDiagnostic.work_job_error_code}</p>}
