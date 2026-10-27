@@ -59,6 +59,20 @@ page; these return less transaction/plan context than the new endpoint.
 Avoid pasting original paths or passwords into public issue discussions;
 redact user-specific filesystem details before sharing logs.
 
+## Cross-storage transactional purge after external NAS file deletion (2026-10-27)
+
+Incident #357: owner reports **both #1106 and #884** stuck `purging` after Docker restart, and says the public quarantine payloads were manually removed from the NAS. The visible diagnosis for #1106 showed `state=purging`, `tx_phase=purging`, `transaction_mode=cross_storage_transactional`, generation 2 and no provenance task/plan pointers. Owner reports #884 follows the same pattern. **This does not prove** whether the private `.tx/entry-{id}` namespace, destructive intent markers, or an executing frozen Plan still exists.
+
+The admin-only **恢复诊断** now additionally observes two paths without following symlinks:
+- **隔离载荷路径**: `absent`, `present` (including a symlink leaf), or `indeterminate`.
+- **私有事务目录**: the same three statuses for the configured quarantine root's `.tx/entry-{id}` namespace, even if it is an empty directory.
+
+These observations use the same secure nofollow root traversal as the existing missing-record guard; a missing parent of the public payload, inaccessible/offline root, symlinked ancestor or unsafe path is `indeterminate`, not treated as deletion. The status is point-in-time and can become stale if a NAS operator changes the mount during diagnosis. A present `.tx` namespace is **not deleted** by this route.
+
+All observations are read-only: no file unlink, rename, record deletion, state transition, worker lease change, or forced replay. The existing metadata-only endpoint **still denies any transactional/frozen entry with HTTP 409**, independently of observed public payload absence. A lost public payload does not prove a transaction is terminal. In particular, the UI's lack of linked provenance WorkJob/Plan is **not** proof the original purge executor is absent.
+
+Next, owner may screenshot the updated read-only diagnosis for both IDs **only after owner-controlled deployment of a compatible build**. If `.tx` evidence is present or either result indeterminate, preserve evidence and diagnose frozen Plan and Worker logs. If all public/private paths are absent, still inspect DB Worker/Plan/alias evidence before a separately designed, lease-fenced, audited metadata-retirement pathway. Do not run raw SQL updates, manual `.tx` removal, or force `purged`.
+
 ## CI browser overlay transition hardening (PR #356)
 
 During post-#355 exact-HEAD UI Validation on `91b2d95fe5ac36269c692931690e1df1bc1897ac`,
