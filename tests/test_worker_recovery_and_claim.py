@@ -19,6 +19,8 @@ from app.tasks.recovery import (
     WORKER_STALE_THRESHOLD_SECONDS,
 )
 from app.tasks.state_machine import JobState
+from app.tasks.context import JobContext
+from app.tasks.handlers import get_handler
 
 
 def test_worker_status_computation():
@@ -298,3 +300,128 @@ def test_worker_restart_does_not_repair_plan_with_active_execution_job(tmp_path:
         plan = session.get(BatchPlan, plan_id)
         assert plan is not None
         assert plan.status == "executing"
+
+
+def test_batch_execution_restart_checkpoint_is_durable_before_purge_replay(
+    tmp_path: Path, monkeypatch,
+):
+    """Crash at the first checkpoint: restart requeues frozen plan, not a purge.
+
+    This is deliberately a synthetic local DB/payload, never a live NAS path.
+    The real batch handler must publish a versioned checkpoint *before* any
+    potentially irreversible item recovery or purge execution.
+    """
+    from app.models import QuarantineEntry
+
+    db_path = tmp_path / "checkpoint_restart.db"
+    engine, SessionLocal = create_engine_and_session(db_path)
+    init_db(engine, db_path=db_path)
+    qroot = tmp_path / ".nas-file-center-trash"
+    qroot.mkdir()
+    payload = qroot / "synthetic-interrupted.bin"
+    payload.write_bytes(b"NEVER DELETE DURING CHECKPOINT")
+    baseline = payload.read_bytes()
+
+    with SessionLocal() as session:
+        plan = BatchPlan(
+            name="Synthetic restartable purge plan",
+            kind="quarantine-bulk-purge",
+            status="executing",
+            expected_changes=1,
+        )
+        session.add(plan)
+        session.flush()
+        item = BatchPlanItem(
+            plan_id=plan.id,
+            sequence=1,
+            operation="quarantine_purge",
+            source_path=str(payload),
+            state="executing",
+        )
+        entry = QuarantineEntry(
+            original_path=str(tmp_path / "never-touch-original.bin"),
+            quarantine_path=str(payload),
+            state="purging",
+            tx_phase="purging",
+            transaction_mode="transactional",
+            quarantined_at=utcnow(),
+        )
+        session.add_all([item, entry])
+        job = WorkJob(
+            kind="batch-plan-execute",
+            status=JobState.RUNNING.value,
+            state_json=json.dumps({"plan_id": plan.id}),
+            checkpoint_json=None,
+        )
+        session.add(job)
+        session.commit()
+        plan_id, job_id, item_id, entry_id = plan.id, job.id, item.id, entry.id
+
+    handler = get_handler("batch-plan-execute")
+    assert handler is not None and handler.supports_resume
+    assert acquire_worker_ownership(
+        engine, SessionLocal, worker_id="worker-before-crash",
+    )
+    context = JobContext(engine, SessionLocal, job_id, worker_id="worker-before-crash")
+    persist_checkpoint = context.checkpoint
+    observed = []
+
+    def stop_at_first_durable_checkpoint(**kwargs):
+        persist_checkpoint(**kwargs)
+        observed.append(kwargs.get("checkpoint_data"))
+        # Simulate a terminated worker *after* the SQLite transaction commits,
+        # but before any filesystem-affecting reconcile/execute step.
+        raise RuntimeError("simulated Docker worker termination")
+
+    monkeypatch.setattr(context, "checkpoint", stop_at_first_durable_checkpoint)
+    with SessionLocal() as session:
+        running_job = session.get(WorkJob, job_id)
+        with pytest.raises(RuntimeError, match="simulated Docker worker termination"):
+            handler.run(running_job, context, None)
+
+    assert observed == [{
+        "schema_version": 1,
+        "plan_id": plan_id,
+        "resume_mode": "reconcile_executing_items",
+    }]
+    with SessionLocal() as session:
+        stored = session.get(WorkJob, job_id)
+        assert json.loads(stored.checkpoint_json) == observed[0]
+        assert stored.status == JobState.RUNNING.value
+        assert session.get(QuarantineEntry, entry_id).state == "purging"
+        assert session.get(BatchPlanItem, item_id).state == "executing"
+    assert payload.read_bytes() == baseline
+
+    # On restart, existing lease-fenced policy now recognizes the
+    # checkpoint and requeues the original job; it does not mutate data.
+    stats = recover_interrupted_jobs(
+        engine, SessionLocal, worker_id="worker-before-crash",
+    )
+    assert stats["recovered_requeued"] == 1
+    assert stats["failed_interrupted"] == 0
+    with SessionLocal() as session:
+        job = session.get(WorkJob, job_id)
+        assert job.status == JobState.QUEUED.value
+        assert job.error_code is None
+        assert session.get(BatchPlan, plan_id).status == "executing"
+        assert session.get(BatchPlanItem, item_id).state == "executing"
+        entry = session.get(QuarantineEntry, entry_id)
+        assert entry.state == "purging"
+        assert entry.tx_phase == "purging"
+    assert payload.read_bytes() == baseline
+
+
+def test_batch_plan_durable_checkpoint_must_precede_item_mutations():
+    """Pin restart eligibility at initial/boundary checkpoints, not on replay."""
+    from pathlib import Path
+    source = Path("app/tasks/handlers_base.py").read_text(encoding="utf-8")
+    start = source.index('        restart_checkpoint = {')
+    reconciliation = source.index('        # 1. Announce start & reconcile interrupted items', start)
+    assert source.index(
+        '        context.checkpoint(checkpoint_data=restart_checkpoint)', start,
+    ) < reconciliation
+    boundary = source.index('            # Checkpoint at item boundary', reconciliation)
+    phase1 = source.index('            # --- PHASE 1: DB INTENT ---', boundary)
+    assert "checkpoint_data=restart_checkpoint" in source[boundary:phase1]
+    assert "schema_version" in source[start:reconciliation]
+    assert "plan_id" in source[start:reconciliation]
