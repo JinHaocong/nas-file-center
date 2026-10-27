@@ -461,6 +461,54 @@ try {
           if (!match) problems.push('Login/Settings actual neutral paint mismatch: ' +
             JSON.stringify({ route: item.id, effectiveTheme: theme.effective, painted }));
         }
+        if (item.id === 'plans' && width <= 767) {
+          // Stage #70: actual 390px dark screenshots from merged #352
+          // contain a large #15191f navy region in Plans' mobile list.
+          // Require neutral *painted* list/card composition, not merely
+          // a CSS variable string; preserve the border and geometry.
+          const planPaint = await tab.evaluate(() => {
+            const page = document.querySelector('.nfc-v2-plans-page');
+            const list = page?.querySelector('.nfc-mobile-record-list');
+            const card = list?.querySelector('.nfc-plan-mobile-card');
+            const read = node => node ? {
+              background: getComputedStyle(node).backgroundColor,
+              backgroundImage: getComputedStyle(node).backgroundImage,
+              width: Math.round(node.getBoundingClientRect().width),
+              height: Math.round(node.getBoundingClientRect().height),
+              borderStyle: getComputedStyle(node).borderTopStyle,
+              borderWidth: getComputedStyle(node).borderTopWidth,
+            } : null;
+            return {
+              list: read(list), card: read(card),
+              cardContained: !!list && !!card &&
+                card.getBoundingClientRect().left >= list.getBoundingClientRect().left &&
+                card.getBoundingClientRect().right <= list.getBoundingClientRect().right,
+              inheritedW2Surface: page && getComputedStyle(page)
+                .getPropertyValue('--nfc-w2-surface').trim(),
+            };
+          });
+          const required = theme.effective === 'dark'
+            ? 'rgb(36, 36, 34)' : 'rgb(255, 255, 255)';
+          // A transparent bordered card composites the verified opaque
+          // parent list; it need not independently paint the same color.
+          const cardShowsNeutralPaper = !!planPaint.card &&
+            (planPaint.card.background === required ||
+              planPaint.card.background === 'rgba(0, 0, 0, 0)');
+          audit.planMobileNeutralPaint = { ...planPaint, required, cardShowsNeutralPaper };
+          if (!planPaint.list || !planPaint.card ||
+              planPaint.list.background !== required ||
+              !cardShowsNeutralPaper ||
+              planPaint.list.backgroundImage !== 'none' ||
+              planPaint.card.backgroundImage !== 'none' ||
+              !planPaint.cardContained ||
+              planPaint.card.borderStyle !== 'solid' ||
+              planPaint.card.borderWidth === '0px' ||
+              planPaint.list.width <= 100 || planPaint.list.height <= 100 ||
+              planPaint.card.width <= 100 || planPaint.card.height <= 100) {
+            problems.push('Plans mobile inherited non-neutral navy list/card: ' +
+              JSON.stringify({ width, theme: themeLabel, ...audit.planMobileNeutralPaint }));
+          }
+        }
         if (item.id === 'scans' && width <= 767) {
           // Stage #70: exact-HEAD 390px Chromium screenshots exposed a
           // #15191f navy block behind scan history's mobile card. v056 paints
