@@ -454,6 +454,39 @@ test('Stage 70 workflow list neutralizes actual v049 panel owner and dark mobile
   ]) assert.ok(browser.includes(phrase), 'Missing mounted-theme guard: ' + phrase);
 });
 
+test('Stage 70 Plans mobile list uses neutral v2 paper instead of legacy v056 navy', () => {
+  const css = readFileSync('src/styles/console-v2-phase2.css', 'utf8');
+  const legacy = readFileSync('src/styles/v056-right-workspace-v2.css', 'utf8');
+  const entry = readFileSync('src/main.tsx', 'utf8');
+  const owner = css.slice(css.indexOf('.nfc-v2-shell .nfc-v2-plans-page {'),
+    css.indexOf('.nfc-v2-plans-page > .nfc-page-header'));
+  assert.ok(owner.includes('--nfc-w2-surface: var(--v2-paper)'),
+    'Plans must remap the inherited mobile list paint only inside its own page');
+  assert.ok(css.includes('.nfc-v2-plans-page .nfc-mobile-record-list'));
+  assert.ok(css.includes('.nfc-v2-plans-page .nfc-plan-mobile-card'));
+  assert.ok(legacy.includes('.nfc-app-main .nfc-mobile-record-list'));
+  assert.ok(legacy.includes('background: var(--nfc-w2-surface)'));
+  assert.ok(entry.indexOf("import './styles/v056-right-workspace-v2.css';") <
+    entry.indexOf("import './styles/console-v2-phase2.css';"),
+    'Plans local paper must be loaded after historical v056 styles');
+  for (const phrase of [
+    "if (item.id === 'plans' && width <= 767)",
+    "document.querySelector('.nfc-v2-plans-page')",
+    "page?.querySelector('.nfc-mobile-record-list')",
+    "list?.querySelector('.nfc-plan-mobile-card')",
+    "audit.planMobileNeutralPaint = { ...planPaint, required, cardShowsNeutralPaper }",
+    "planPaint.list.background !== required",
+    "planPaint.card.background === 'rgba(0, 0, 0, 0)'",
+    "!cardShowsNeutralPaper",
+    "planPaint.list.backgroundImage !== 'none'",
+    "planPaint.card.backgroundImage !== 'none'",
+    "!planPaint.cardContained",
+    "planPaint.card.borderStyle !== 'solid'",
+    "planPaint.card.borderWidth === '0px'",
+    "Plans mobile inherited non-neutral navy list/card:",
+  ]) assert.ok(browser.includes(phrase), 'Missing real Plans browser paint guard: ' + phrase);
+});
+
 test('Stage 70 Scans mobile history paints neutral list and card in real Chromium', () => {
   const css = readFileSync('src/styles/console-v2-scans.css', 'utf8');
   const v054 = readFileSync('src/styles/v054-premium-system.css', 'utf8');
