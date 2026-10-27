@@ -477,6 +477,8 @@ try {
               backgroundImage: getComputedStyle(node).backgroundImage,
               width: Math.round(node.getBoundingClientRect().width),
               height: Math.round(node.getBoundingClientRect().height),
+              borderStyle: getComputedStyle(node).borderTopStyle,
+              borderWidth: getComputedStyle(node).borderTopWidth,
             } : null;
             return {
               list: read(list), card: read(card),
@@ -489,13 +491,23 @@ try {
           });
           const required = theme.effective === 'dark'
             ? 'rgb(36, 36, 34)' : 'rgb(255, 255, 255)';
-          audit.scanMobileNeutralPaint = { ...scanPaint, required };
+          // Chromium reports the *card* itself as transparent; the painted
+          // navy pixels came from the list behind it. Require that ancestor
+          // list to be opaque exact neutral paper, and verify the bounded
+          // card has its intended visible border and cannot expose a
+          // non-neutral background image. No fake card repaint is needed.
+          const cardShowsNeutralPaper = !!scanPaint.card &&
+            (scanPaint.card.background === required ||
+              scanPaint.card.background === 'rgba(0, 0, 0, 0)');
+          audit.scanMobileNeutralPaint = { ...scanPaint, required, cardShowsNeutralPaper };
           if (!scanPaint.list || !scanPaint.card ||
               scanPaint.list.background !== required ||
-              scanPaint.card.background !== required ||
+              !cardShowsNeutralPaper ||
               scanPaint.list.backgroundImage !== 'none' ||
               scanPaint.card.backgroundImage !== 'none' ||
               !scanPaint.cardContained ||
+              scanPaint.card.borderStyle !== 'solid' ||
+              scanPaint.card.borderWidth === '0px' ||
               scanPaint.list.width <= 100 || scanPaint.list.height <= 100 ||
               scanPaint.card.width <= 100 || scanPaint.card.height <= 100) {
             problems.push('Scans mobile inherited non-neutral navy list/card: ' +
