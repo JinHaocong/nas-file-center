@@ -169,10 +169,8 @@ def test_symlink_leaf_and_symlink_parent_fail_closed(maintenance_env):
 def test_missing_or_unavailable_quarantine_root_is_not_proof(maintenance_env):
     env = maintenance_env
     entry_id, _ = _record(env)
-    env["trash"].rmdir() if not list(env["trash"].iterdir()) else None
-    # A path under a missing/altered mount must not be treated as safely gone.
-    root = env["trash"]
-    env["admin"].app.state.service.settings.quarantine_root = env["data"] / "unmounted-trash"
+    # Simulate an unmounted/moved quarantine root (no payload deletion).
+    env["trash"].rename(env["data"] / ".detached-trash")
     assert _cleanup(env, entry_id).status_code == 409
     _assert_retained(env, entry_id)
 
