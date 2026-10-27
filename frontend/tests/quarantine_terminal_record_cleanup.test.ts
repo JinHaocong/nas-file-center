@@ -30,7 +30,7 @@ describe('quarantine terminal record cleanup', () => {
     assert.match(page, /record\.state === 'purging' && isAdmin/);
     assert.match(page, /恢复诊断/);
     assert.match(page, /quarantineApi\.recoveryDiagnostic\(entryId\)/);
-    assert.match(page, /automatic_cleanup_performed/);
+    assert.match(types, /automatic_cleanup_performed: false/);
     assert.match(page, /没有执行删除、状态重置或事务恢复/);
     assert.match(api, /\/api\/quarantine\/\$\{id\}\/recovery-diagnostic/);
     assert.match(types, /export interface QuarantineRecoveryDiagnostic/);
