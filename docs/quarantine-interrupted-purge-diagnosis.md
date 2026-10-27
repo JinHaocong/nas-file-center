@@ -33,10 +33,13 @@ and click **恢复诊断**. This invokes:
 
 `GET /api/quarantine/{id}/recovery-diagnostic`
 
-It reads metadata only and reports: state, transaction mode / phase,
+It reads DB metadata and observes configured quarantine filesystem
+paths **without following symlinks**, reporting transaction mode / phase,
 attempt generation, linked WorkJob ID/status/error code, linked
-BatchPlan ID/status, PlanItem state, last error, a descriptive reason and
-a cautious next-step message. **No file probes, deletions, writes,
+BatchPlan ID/status, PlanItem state, last error, and the observed presence
+of the public payload and private `.tx/entry-{id}` directory (or
+`indeterminate` when verification is unsafe). Observations do **not**
+open, read, mutate or delete payload contents. **No deletions, writes,
 requeues, lease changes or state transitions are made.** Ordinary
 users are forbidden (`403`); unauthenticated requests return `401`.
 
