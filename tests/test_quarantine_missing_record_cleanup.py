@@ -12,10 +12,37 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app.auth.password import hash_password
+from app.config import Settings
+from app.service import FileCenterService
 from app.main import create_app
 from app.models import AuditEvent, BatchPlan, BatchPlanItem, QuarantineEntry, User, WorkJob, utcnow
 from app.quarantine import missing_record_cleanup
-from tests.test_quarantine_terminal_record_cleanup import maintenance_env
+
+
+
+@pytest.fixture
+def maintenance_env(tmp_path: Path):
+    data = tmp_path / "data"
+    data.mkdir()
+    trash = data / ".nas-file-center-trash"
+    trash.mkdir()
+    settings = Settings(
+        config_dir=tmp_path / "config",
+        data_mount=data,
+        allowed_roots_raw=str(data),
+        quarantine_root=trash,
+        initial_admin_username="admin",
+        initial_admin_password="AdminPassword123!",
+        allow_mutation=True,
+        allow_delete=True,
+    )
+    service = FileCenterService(settings)
+    client = TestClient(create_app(settings))
+    client.headers["Origin"] = "http://testserver"
+    assert client.post("/api/auth/login",
+        json={"username": "admin", "password": "AdminPassword123!"},
+        headers={"Origin": "http://testserver"}).status_code == 200
+    return {"data": data, "trash": trash, "service": service, "admin": client}
 
 
 def _record(env, name="missing.q", *, state="active", **attributes):
