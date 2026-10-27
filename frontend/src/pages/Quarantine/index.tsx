@@ -7,7 +7,7 @@ import { settingsApi } from '../../api/domain';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTitle } from '../../hooks/useTitle';
 import { formatBytes, formatDateTime } from '../../utils/format';
-import type { QuarantineEntry, QuarantineState } from '../../types';
+import type { QuarantineEntry, QuarantineRecoveryDiagnostic, QuarantineState } from '../../types';
 import { getBulkSelectableEntryIds } from '../../components/quarantine/quarantine_rules';
 import { RestoreModal } from './RestoreModal';
 import { PurgeConfirmModal } from './PurgeConfirmModal';
@@ -89,6 +89,9 @@ export const QuarantinePage: React.FC = () => {
   const [resolvingTerminalRecords, setResolvingTerminalRecords] = useState(false);
   const [cleanupTarget, setCleanupTarget] = useState<RecordCleanupTarget | null>(null);
   const [cleanupBusy, setCleanupBusy] = useState(false);
+  const [recoveryDiagnostic, setRecoveryDiagnostic] = useState<QuarantineRecoveryDiagnostic | null>(null);
+  const [recoveryDiagnosticBusyId, setRecoveryDiagnosticBusyId] = useState<number | null>(null);
+  const recoveryDiagnosticEpoch = useRef(0);
   const cleanupInFlight = useRef(false);
   const filterRequestEpoch = useRef(0);
   const terminalRequestEpoch = useRef(0);
@@ -286,16 +289,42 @@ export const QuarantinePage: React.FC = () => {
     if (!next && !cleanupInFlight.current && !cleanupBusy) setCleanupTarget(null);
   };
 
+  const inspectInterruptedPurge = async (entryId: number) => {
+    const requestId = ++recoveryDiagnosticEpoch.current;
+    setRecoveryDiagnosticBusyId(entryId);
+    setRecoveryDiagnostic(null);
+    try {
+      const result = await quarantineApi.recoveryDiagnostic(entryId);
+      if (recoveryDiagnosticEpoch.current === requestId) setRecoveryDiagnostic(result);
+    } catch (err: unknown) {
+      if (recoveryDiagnosticEpoch.current === requestId) {
+        toast.error(getStructuredApiError(err).message || '读取清除中断诊断失败');
+      }
+    } finally {
+      if (recoveryDiagnosticEpoch.current === requestId) setRecoveryDiagnosticBusyId(null);
+    }
+  };
+  const closeRecoveryDiagnostic = () => {
+    recoveryDiagnosticEpoch.current += 1;
+    setRecoveryDiagnosticBusyId(null);
+    setRecoveryDiagnostic(null);
+  };
+
   const actionButtons = (record: QuarantineEntry, compact = true) => {
     const canRestore = record.state === 'active';
     const canPurge = record.state === 'active';
     const canDeleteRecord = ['restored', 'purged', 'abandoned', 'conflict'].includes(record.state);
-    if (!canRestore && !canPurge && !canDeleteRecord) {
+    if (!canRestore && !canPurge && !canDeleteRecord && !(record.state === 'purging' && isAdmin)) {
       return <span className="nfc-table-muted">—</span>;
     }
     const size = compact ? 'sm' : 'md';
     return (
       <div className="nfc-row-actions nfc-v2-quarantine-actions">
+        {record.state === 'purging' && isAdmin && (
+          <ConsoleButton size={size} variant="ghost" leadingIcon={<ConsoleIcon name="info" size={15} />}
+            loading={recoveryDiagnosticBusyId === record.id}
+            onClick={() => { void inspectInterruptedPurge(record.id); }}>恢复诊断</ConsoleButton>
+        )}
         {canRestore && (
           <span title={isSafeMode ? '只读保护模式 (ALLOW_MUTATION=false) 生效中，禁止恢复' : '恢复到原路径或指定路径'}>
             <ConsoleButton size={size} variant="ghost" leadingIcon={<ConsoleIcon name="archive" size={15} />}
@@ -414,6 +443,29 @@ export const QuarantinePage: React.FC = () => {
           </div>}
         </div>
 
+        {recoveryDiagnostic && isAdmin && (
+          <section className="nfc-v2-quarantine-selection-notice nfc-selection-notice"
+            role="status" aria-live="polite" aria-label={'隔离条目 #' + recoveryDiagnostic.id + ' 的清除诊断'}>
+            <div>
+              <strong>隔离条目 #{recoveryDiagnostic.id}：只读清除诊断</strong>
+              <p>{recoveryDiagnostic.guidance}</p>
+              <p>记录状态：{recoveryDiagnostic.state}；
+                事务阶段：{recoveryDiagnostic.tx_phase || '无'}；
+                模式：{recoveryDiagnostic.transaction_mode || '普通'}；
+                尝试代次：{recoveryDiagnostic.active_attempt_generation}</p>
+              <p>记录来源关联任务（未必是本次清理）：{recoveryDiagnostic.work_job_id == null
+                ? '未关联' : '#' + recoveryDiagnostic.work_job_id + '（' +
+                  (recoveryDiagnostic.work_job_status || '任务缺失') + '）'}；
+                记录来源关联计划（未必是本次清理）：{recoveryDiagnostic.plan_id == null
+                  ? '未关联' : '#' + recoveryDiagnostic.plan_id + '（' +
+                    (recoveryDiagnostic.plan_status || '状态未知') + '）'}</p>
+              {recoveryDiagnostic.work_job_error_code && <p>任务错误码：{recoveryDiagnostic.work_job_error_code}</p>}
+              {recoveryDiagnostic.last_error && <p>记录错误：{recoveryDiagnostic.last_error}</p>}
+              <strong>此操作没有执行删除、状态重置或事务恢复。</strong>
+            </div>
+            <ConsoleButton size="sm" onClick={closeRecoveryDiagnostic}>关闭诊断</ConsoleButton>
+          </section>
+        )}
         {isError && <div className="nfc-v2-quarantine-error" role="alert">
           <strong>获取隔离区列表失败</strong>
           <p>{getStructuredApiError(error).message || '服务暂时不可用，请重试。'}</p>

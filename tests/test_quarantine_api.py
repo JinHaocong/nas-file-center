@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.config import Settings
 from app.main import create_app
-from app.models import QuarantineEntry, User, utcnow
+from app.models import BatchPlan, BatchPlanItem, QuarantineEntry, User, WorkJob, utcnow
 from app.quarantine.paths import safe_quarantine_hash
 from app.service import FileCenterService
 
@@ -287,3 +287,95 @@ def test_api_purge_flow(tmp_path: Path):
         persisted = session.get(QuarantineEntry, entry_id)
         assert persisted is not None
         assert persisted.state == "active"
+
+
+def test_interrupted_purge_diagnostic_is_read_only_and_admin_only(tmp_path: Path):
+    """Docker restart must not expose a destructive 'clear stuck state' shortcut."""
+    env = _setup_api_env(tmp_path)
+    service = env["service"]
+    path = env["trash"] / "interrupted-purge.bin"
+    path.write_bytes(b"preserve forensic payload")
+    before = path.read_bytes()
+
+    with service.SessionLocal() as session:
+        job = WorkJob(
+            kind="batch-plan-execute",
+            status="failed",
+            error_code="WORKER_INTERRUPTED",
+            state_json='{"plan_id": 12}',
+        )
+        plan = BatchPlan(name="interrupted purge", kind="quarantine-bulk-purge", status="partial")
+        session.add_all([job, plan])
+        session.flush()
+        item = BatchPlanItem(
+            plan_id=plan.id, sequence=1, operation="quarantine_purge",
+            source_path=str(path), state="executing", metadata_json='{}',
+        )
+        session.add(item)
+        session.flush()
+        entry = QuarantineEntry(
+            original_path=str(env["data"] / "original.bin"),
+            quarantine_path=str(path),
+            state="purging",
+            tx_phase="purging",
+            transaction_mode="transactional",
+            active_attempt_generation=2,
+            task_id=job.id,
+            plan_item_id=item.id,
+            quarantined_at=utcnow(),
+        )
+        session.add(entry)
+        session.flush()
+        eid = int(entry.id)
+        plan_id = int(plan.id)
+        session.commit()
+
+    url = f"/api/quarantine/{eid}/recovery-diagnostic"
+    assert env["unauth_client"].get(url).status_code == 401
+    assert env["regular_client"].get(url).status_code == 403
+    response = env["admin_client"].get(url)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["id"] == eid
+    assert data["state"] == "purging"
+    assert data["tx_phase"] == "purging"
+    assert data["reason"] == "transactional_purge_needs_authority"
+    assert data["work_job_status"] == "failed"
+    assert data["work_job_error_code"] == "WORKER_INTERRUPTED"
+    assert data["plan_id"] == plan_id
+    assert data["plan_status"] == "partial"
+    assert data["plan_item_state"] == "executing"
+    assert data["automatic_cleanup_performed"] is False
+    assert "quarantine_path" not in data
+    assert path.read_bytes() == before
+    with service.SessionLocal() as session:
+        row = session.get(QuarantineEntry, eid)
+        assert row.state == "purging"
+        assert row.tx_phase == "purging"
+    assert env["admin_client"].get("/api/quarantine/999999/recovery-diagnostic").status_code == 404
+
+
+def test_legacy_purging_diagnostic_requires_verification_not_forced_purged(tmp_path: Path):
+    env = _setup_api_env(tmp_path)
+    path = env["trash"] / "legacy-interrupted.bin"
+    path.write_bytes(b"still present")
+    with env["service"].SessionLocal() as session:
+        entry = QuarantineEntry(
+            original_path=str(env["data"] / "original-legacy.bin"),
+            quarantine_path=str(path),
+            state="purging",
+            quarantined_at=utcnow(),
+        )
+        session.add(entry)
+        session.commit()
+        eid = entry.id
+
+    resp = env["admin_client"].get(f"/api/quarantine/{eid}/recovery-diagnostic")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["reason"] == "legacy_purge_requires_verification"
+    assert data["work_job_id"] is None
+    assert data["automatic_cleanup_performed"] is False
+    assert path.read_bytes() == b"still present"
+    with env["service"].SessionLocal() as session:
+        assert session.get(QuarantineEntry, eid).state == "purging"

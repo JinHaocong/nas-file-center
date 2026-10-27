@@ -1836,6 +1836,19 @@ def get_quarantine_entry(request: Request, id: int):
         raise HTTPException(404, str(exc)) from exc
 
 
+@router.get("/quarantine/{id}/recovery-diagnostic")
+def quarantine_recovery_diagnostic(
+    request: Request,
+    id: int,
+    admin_user: User = Depends(require_admin_user),
+):
+    """Admin-only metadata inspection; never triggers replay, purge or DB writes."""
+    try:
+        return request.app.state.service.get_quarantine_recovery_diagnostic(id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
 @router.post("/quarantine/{id}/restore")
 def restore_quarantine_entry(
     request: Request,
