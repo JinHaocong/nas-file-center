@@ -474,7 +474,7 @@ test('Stage 70 Indexes mobile list neutralizes v056 inherited blue surface', () 
     "document.querySelector('.nfc-v2-indexes-page')",
     "page?.querySelector('.nfc-v2-indexes-mobile')",
     "list?.querySelector('.nfc-index-mobile-card')",
-    'audit.indexMobileNeutralPaint = { ...indexPaint, required: paperColor }',
+    'audit.indexMobileNeutralPaint = { ...indexPaint, required: paperColor,',
     'Indexes mobile card/list inherited non-neutral painted surface:',
     "indexPaint.list.backgroundImage !== 'none'",
     "indexPaint.card.background === 'rgba(0, 0, 0, 0)'",
