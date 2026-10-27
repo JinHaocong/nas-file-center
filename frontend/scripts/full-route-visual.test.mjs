@@ -454,6 +454,43 @@ test('Stage 70 workflow list neutralizes actual v049 panel owner and dark mobile
   ]) assert.ok(browser.includes(phrase), 'Missing mounted-theme guard: ' + phrase);
 });
 
+test('Stage 70 Scans mobile history paints neutral list and card in real Chromium', () => {
+  const css = readFileSync('src/styles/console-v2-scans.css', 'utf8');
+  const v054 = readFileSync('src/styles/v054-premium-system.css', 'utf8');
+  const v056 = readFileSync('src/styles/v056-right-workspace-v2.css', 'utf8');
+  const entry = readFileSync('src/main.tsx', 'utf8');
+  const root = css.slice(css.indexOf('.nfc-v2-shell .nfc-v2-scans-page {'),
+    css.indexOf('.nfc-v2-scans-page > .nfc-page-header'));
+  assert.ok(root.includes('--nfc-w2-surface: var(--v2-paper)'),
+    'Scans must override inherited v056 navy only inside the owned page');
+  assert.ok(css.includes('.nfc-v2-scans-page .nfc-scan-mobile-card {'),
+    'Existing Scans card background rule must remain page-owned');
+  assert.ok(css.includes('background: var(--v2-paper)'),
+    'Scans card owner must retain neutral paper token');
+  assert.ok(v056.includes('.nfc-app-main .nfc-mobile-record-list'));
+  assert.ok(v056.includes('background: var(--nfc-w2-surface)'));
+  assert.ok(v054.includes('.nfc-app-main .nfc-scan-mobile-card'));
+  assert.ok(entry.indexOf("import './styles/v056-right-workspace-v2.css';") <
+    entry.indexOf("import './styles/console-v2-scans.css';"),
+    'Scans CSS must stay deterministically after the v056 historical owner');
+  for (const phrase of [
+    "if (item.id === 'scans' && width <= 767)",
+    "document.querySelector('.nfc-v2-scans-page')",
+    "page?.querySelector('.nfc-mobile-record-list')",
+    "list?.querySelector('.nfc-scan-mobile-card')",
+    "audit.scanMobileNeutralPaint = { ...scanPaint, required, cardShowsNeutralPaper }",
+    "scanPaint.list.background !== required",
+    "scanPaint.card.background === 'rgba(0, 0, 0, 0)'",
+    "!cardShowsNeutralPaper",
+    "scanPaint.list.backgroundImage !== 'none'",
+    "scanPaint.card.backgroundImage !== 'none'",
+    "!scanPaint.cardContained",
+    "scanPaint.card.borderStyle !== 'solid'",
+    "scanPaint.card.borderWidth === '0px'",
+    "Scans mobile inherited non-neutral navy list/card:",
+  ]) assert.ok(browser.includes(phrase), 'Missing mounted Scans paint guard: ' + phrase);
+});
+
 test('Stage 70 Indexes mobile list neutralizes v056 inherited blue surface', () => {
   const css = readFileSync('src/styles/console-v2-indexes.css', 'utf8');
   const v056 = readFileSync('src/styles/v056-right-workspace-v2.css', 'utf8');

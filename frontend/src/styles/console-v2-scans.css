@@ -6,6 +6,9 @@
   flex-direction: column;
   gap: 20px;
   min-width: 0;
+  /* v056 paints .nfc-mobile-record-list using the inherited W2 surface;
+     its dark default is navy #15191f. Keep Scans on v2.1 neutral paper. */
+  --nfc-w2-surface: var(--v2-paper);
 }
 .nfc-v2-scans-page > .nfc-page-header {
   margin: 0 0 3px !important;
