@@ -461,6 +461,89 @@ try {
           if (!match) problems.push('Login/Settings actual neutral paint mismatch: ' +
             JSON.stringify({ route: item.id, effectiveTheme: theme.effective, painted }));
         }
+        if (item.id === 'plan-detail') {
+          // Stage #70: original merged-#353 screenshots showed #15191f
+          // lifecycle/ledger and #191e25 action surfaces even on the v2.1
+          // neutral Plan Detail route. Audit real computed paint after all
+          // CSS owners have loaded, at all eight widths/four theme modes.
+          const detailPaint = await tab.evaluate(() => {
+            const page = document.querySelector('.nfc-plan-detail-page');
+            const lifecycle = page?.querySelector('.nfc-lifecycle-strip');
+            const actions = page?.querySelector('.nfc-plan-action-surface');
+            const list = page?.querySelector('.nfc-mobile-record-list');
+            const card = list?.querySelector('.nfc-plan-item-mobile-card');
+            const empty = list?.querySelector('.nfc-console-empty[role="status"]');
+            const read = node => node ? {
+              background: getComputedStyle(node).backgroundColor,
+              backgroundImage: getComputedStyle(node).backgroundImage,
+              width: Math.round(node.getBoundingClientRect().width),
+              height: Math.round(node.getBoundingClientRect().height),
+              borderStyle: getComputedStyle(node).borderTopStyle,
+              borderWidth: getComputedStyle(node).borderTopWidth,
+            } : null;
+            return {
+              lifecycle: read(lifecycle), actions: read(actions),
+              list: read(list), card: read(card), empty: read(empty),
+              hasEmptyMessage: !!empty && !!empty.querySelector('strong') &&
+                !!empty.querySelector('strong').textContent.trim(),
+              cardContained: !!list && !!card &&
+                card.getBoundingClientRect().left >= list.getBoundingClientRect().left &&
+                card.getBoundingClientRect().right <= list.getBoundingClientRect().right,
+              w2Surface: page && getComputedStyle(page)
+                .getPropertyValue('--nfc-w2-surface').trim(),
+              w2Soft: page && getComputedStyle(page)
+                .getPropertyValue('--nfc-w2-surface-soft').trim(),
+            };
+          });
+          const paper = theme.effective === 'dark'
+            ? 'rgb(36, 36, 34)' : 'rgb(255, 255, 255)';
+          const soft = theme.effective === 'dark'
+            ? 'rgb(43, 43, 40)' : 'rgb(245, 245, 243)';
+          const mobile = width <= 767;
+          const cardNeutralComposite = !!detailPaint.card &&
+            (detailPaint.card.background === paper ||
+              detailPaint.card.background === 'rgba(0, 0, 0, 0)');
+          const emptyNeutralComposite = !!detailPaint.empty &&
+            (detailPaint.empty.background === paper ||
+              detailPaint.empty.background === 'rgba(0, 0, 0, 0)');
+          // The fixture can legitimately have zero PlanItems. In that case,
+          // require a real role=status empty message instead of a card.
+          const ledgerContentValid = detailPaint.card
+            ? cardNeutralComposite &&
+              detailPaint.card.backgroundImage === 'none' &&
+              detailPaint.cardContained &&
+              detailPaint.card.borderStyle === 'solid' &&
+              detailPaint.card.borderWidth !== '0px' &&
+              detailPaint.card.width > 100 && detailPaint.card.height > 100
+            : emptyNeutralComposite && detailPaint.hasEmptyMessage &&
+              detailPaint.empty.backgroundImage === 'none' &&
+              detailPaint.empty.width > 100 &&
+              detailPaint.empty.height > 30;
+          audit.planDetailNeutralPaint = {
+            ...detailPaint, requiredPaper: paper, requiredSoft: soft,
+            mobile, cardNeutralComposite, ledgerContentValid,
+          };
+          if (!detailPaint.lifecycle || !detailPaint.actions ||
+              detailPaint.lifecycle.background !== paper ||
+              detailPaint.actions.background !== soft ||
+              detailPaint.lifecycle.backgroundImage !== 'none' ||
+              detailPaint.actions.backgroundImage !== 'none' ||
+              detailPaint.lifecycle.width <= 100 ||
+              // Desktop steps are laid out in one short horizontal row
+              // (v056 min-height 66px); phones stack into a taller strip.
+              detailPaint.lifecycle.height <= (mobile ? 100 : 40) ||
+              detailPaint.actions.width <= 100 ||
+              detailPaint.actions.height <= 20 ||
+              (mobile && (
+                !detailPaint.list || detailPaint.list.background !== paper ||
+                detailPaint.list.backgroundImage !== 'none' ||
+                detailPaint.list.width <= 100 || detailPaint.list.height <= 100 ||
+                !ledgerContentValid
+              ))) {
+            problems.push('Plan Detail legacy navy lifecycle/action/ledger paint: ' +
+              JSON.stringify({ width, theme: themeLabel, ...audit.planDetailNeutralPaint }));
+          }
+        }
         if (item.id === 'plans' && width <= 767) {
           // Stage #70: actual 390px dark screenshots from merged #352
           // contain a large #15191f navy region in Plans' mobile list.

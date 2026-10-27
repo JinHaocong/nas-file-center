@@ -454,6 +454,44 @@ test('Stage 70 workflow list neutralizes actual v049 panel owner and dark mobile
   ]) assert.ok(browser.includes(phrase), 'Missing mounted-theme guard: ' + phrase);
 });
 
+test('Stage 70 Plan Detail lifecycle/action/mobile ledger use v2.1 neutral paint', () => {
+  const css = readFileSync('src/styles/console-v2-plan-detail.css', 'utf8');
+  const legacy = readFileSync('src/styles/v056-right-workspace-v2.css', 'utf8');
+  const entry = readFileSync('src/main.tsx', 'utf8');
+  const browser = readFileSync('scripts/browser-full-route-visual.mjs', 'utf8');
+  const root = css.slice(css.indexOf('.nfc-plan-detail-page {'),
+    css.indexOf('.nfc-v2-plan-load'));
+  assert.ok(root.includes('--nfc-w2-surface:var(--v2-paper)'),
+    'Plan Detail must locally override v056 paper');
+  assert.ok(root.includes('--nfc-w2-surface-soft:var(--v2-sidebar-surface)'),
+    'Plan Detail must locally override v056 blue soft surface');
+  assert.ok(legacy.includes('.nfc-plan-detail-page .nfc-lifecycle-strip'));
+  assert.ok(legacy.includes('.nfc-app-main .nfc-mobile-record-list'));
+  assert.ok(legacy.includes('.nfc-app-main .nfc-plan-detail-page .nfc-plan-action-surface'));
+  assert.ok(entry.indexOf("import './styles/v056-right-workspace-v2.css';") <
+    entry.indexOf("import './styles/console-v2-plan-detail.css';"),
+    'Plan Detail neutral owner must load after historical v056 stylesheet');
+  for (const phrase of [
+    "if (item.id === 'plan-detail')",
+    "document.querySelector('.nfc-plan-detail-page')",
+    "page?.querySelector('.nfc-lifecycle-strip')",
+    "page?.querySelector('.nfc-plan-action-surface')",
+    "page?.querySelector('.nfc-mobile-record-list')",
+    "list?.querySelector('.nfc-plan-item-mobile-card')",
+    "audit.planDetailNeutralPaint = {",
+    "detailPaint.lifecycle.background !== paper",
+    "detailPaint.actions.background !== soft",
+    "detailPaint.list.background !== paper",
+    "list?.querySelector('.nfc-console-empty[role=\"status\"]')",
+    "detailPaint.cardContained",
+    "detailPaint.card.borderWidth !== '0px'",
+    "emptyNeutralComposite && detailPaint.hasEmptyMessage",
+    "!ledgerContentValid",
+    "detailPaint.lifecycle.height <= (mobile ? 100 : 40)",
+    "Plan Detail legacy navy lifecycle/action/ledger paint:",
+  ]) assert.ok(browser.includes(phrase), 'Missing mounted Plan Detail paint guard: ' + phrase);
+});
+
 test('Stage 70 Plans mobile list uses neutral v2 paper instead of legacy v056 navy', () => {
   const css = readFileSync('src/styles/console-v2-phase2.css', 'utf8');
   const legacy = readFileSync('src/styles/v056-right-workspace-v2.css', 'utf8');
