@@ -396,12 +396,15 @@ export const QuarantinePage: React.FC = () => {
             onClick={() => { void inspectInterruptedPurge(record.id); }}>恢复诊断</ConsoleButton>
         )}
         {(record.state === 'active' || record.state === 'purging') && isAdmin && (
-          <span title="仅当服务端证明隔离文件已被外部删除、无活动任务和事务证据时清理数据库元数据；不会执行文件删除">
+          <span title={record.state === 'purging'
+            ? '清除中记录须先读取只读恢复诊断；存在冻结事务时不能删除记录'
+            : '仅当服务端证明隔离文件已被外部删除、无活动任务和事务证据时清理数据库元数据；不会执行文件删除'}>
             <ConsoleButton size={size} variant="ghost" leadingIcon={<ConsoleIcon name="trash" size={15} />}
               disabled={isSafeMode || !allowDelete || missingCleanupBusy ||
                 missingCleanupPreflightId !== null || cleanupMissingRecordMutation.isPending}
               loading={missingCleanupPreflightId === record.id}
-              onClick={() => { void confirmMissingCleanup(record); }}>清理缺失文件记录</ConsoleButton>
+              onClick={() => { void confirmMissingCleanup(record); }}>{record.state === 'purging'
+                ? '核查缺失文件记录' : '清理缺失文件记录'}</ConsoleButton>
           </span>
         )}
         {canRestore && (
