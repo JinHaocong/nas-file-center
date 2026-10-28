@@ -27,6 +27,7 @@ import { ConsolePagination } from '../../components/ui/ConsolePagination';
 import { ConsoleEmpty } from '../../components/ui/ConsoleEmpty';
 import { ConsoleConfirmDialog } from '../../components/ui/ConsoleConfirmDialog';
 import { useConsoleToast } from '../../components/ui/ConsoleToast';
+import { canOfferMissingPurgingRecordConfirmation, isFrozenMissingRecordConflict } from './missingCleanupPreflight';
 
 const STATE_CONFIG: Record<QuarantineState, { label: string; status: string }> = {
   preparing: { label: '准备中', status: 'queued' },
@@ -91,6 +92,8 @@ export const QuarantinePage: React.FC = () => {
   const [cleanupBusy, setCleanupBusy] = useState(false);
   const [missingCleanupTarget, setMissingCleanupTarget] = useState<QuarantineEntry | null>(null);
   const [missingCleanupBusy, setMissingCleanupBusy] = useState(false);
+  const [missingCleanupPreflightId, setMissingCleanupPreflightId] = useState<number | null>(null);
+  const missingCleanupPreflightInFlight = useRef(false);
   const [recoveryDiagnostic, setRecoveryDiagnostic] = useState<QuarantineRecoveryDiagnostic | null>(null);
   const [recoveryDiagnosticBusyId, setRecoveryDiagnosticBusyId] = useState<number | null>(null);
   const recoveryDiagnosticEpoch = useRef(0);
@@ -140,6 +143,10 @@ export const QuarantinePage: React.FC = () => {
       void refetch();
     },
     onError: (err: unknown) => {
+      if (isFrozenMissingRecordConflict(err)) {
+        toast.error('记录仍有冻结事务证据，无法直接清理数据库。请使用「恢复诊断」确认事务和 Worker 状态。');
+        return;
+      }
       toast.error(getStructuredApiError(err).message || '安全校验未通过，记录已保留');
     },
   });
@@ -308,9 +315,33 @@ export const QuarantinePage: React.FC = () => {
     if (!next && !cleanupInFlight.current && !cleanupBusy) setCleanupTarget(null);
   };
 
-  const confirmMissingCleanup = (record: QuarantineEntry) => {
+  const confirmMissingCleanup = async (record: QuarantineEntry) => {
     if (!isAdmin || isSafeMode || !allowDelete || missingCleanupBusy ||
+        missingCleanupPreflightInFlight.current || recoveryDiagnosticBusyId !== null ||
         !['active', 'purging'].includes(record.state)) return;
+
+    // Transitional entries can carry frozen Worker authority even when the
+    // public payload was manually removed. Inspect before offering DELETE.
+    if (record.state === 'purging') {
+      missingCleanupPreflightInFlight.current = true;
+      setMissingCleanupPreflightId(record.id);
+      setMissingCleanupTarget(null);
+      try {
+        const diagnostic = await quarantineApi.recoveryDiagnostic(record.id);
+        if (!canOfferMissingPurgingRecordConfirmation(diagnostic)) {
+          setRecoveryDiagnostic(diagnostic);
+          toast.info('记录 #' + record.id + ' 仍有冻结事务证据，或路径缺失尚无法安全证实；已打开只读恢复诊断，不能直接清理。');
+          return;
+        }
+      } catch (err: unknown) {
+        toast.error('无法完成清理前安全诊断：' +
+          (getStructuredApiError(err).message || '请检查服务端状态'));
+        return;
+      } finally {
+        missingCleanupPreflightInFlight.current = false;
+        setMissingCleanupPreflightId(null);
+      }
+    }
     setMissingCleanupTarget(record);
   };
   const handleConfirmMissingCleanup = async () => {
@@ -367,8 +398,10 @@ export const QuarantinePage: React.FC = () => {
         {(record.state === 'active' || record.state === 'purging') && isAdmin && (
           <span title="仅当服务端证明隔离文件已被外部删除、无活动任务和事务证据时清理数据库元数据；不会执行文件删除">
             <ConsoleButton size={size} variant="ghost" leadingIcon={<ConsoleIcon name="trash" size={15} />}
-              disabled={isSafeMode || !allowDelete || missingCleanupBusy || cleanupMissingRecordMutation.isPending}
-              onClick={() => confirmMissingCleanup(record)}>清理缺失文件记录</ConsoleButton>
+              disabled={isSafeMode || !allowDelete || missingCleanupBusy ||
+                missingCleanupPreflightId !== null || cleanupMissingRecordMutation.isPending}
+              loading={missingCleanupPreflightId === record.id}
+              onClick={() => { void confirmMissingCleanup(record); }}>清理缺失文件记录</ConsoleButton>
           </span>
         )}
         {canRestore && (
