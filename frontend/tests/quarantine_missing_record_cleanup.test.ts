@@ -38,6 +38,18 @@ describe('externally missing quarantine payload metadata-only cleanup', () => {
     assert.match(source, /\['restored', 'purged', 'abandoned', 'conflict'\]\.includes\(record\.state\)/);
   });
 
+  test('shows read-only filesystem evidence without lifting transactional blockers', () => {
+    const source = read('src/pages/Quarantine/index.tsx');
+    const types = read('src/types/quarantine.ts');
+    assert.match(source, /payload_path_observation/);
+    assert.match(source, /transaction_evidence_observation/);
+    assert.match(source, /不证明事务完成/);
+    assert.match(source, /不会放宽事务型记录的清理保护/);
+    assert.match(types, /observation_is_cleanup_authority\?: false/);
+    assert.match(source, /quarantineApi\.recoveryDiagnostic\(entryId\)/);
+    assert.match(source, /cleanupMissingRecordMutation\.mutateAsync\(target\.id\)/);
+  });
+
   test('does not silently convert recovery diagnosis into destructive mutation', () => {
     const source = read('src/pages/Quarantine/index.tsx');
     assert.match(source, /quarantineApi\.recoveryDiagnostic\(entryId\)/);

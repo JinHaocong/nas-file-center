@@ -175,3 +175,25 @@ def assert_missing_quarantine_entry_safe(
     require_absent_beneath_quarantine_root(
         root, root / ".tx" / f"entry-{entry.id}", label="transaction evidence"
     )
+
+
+def observe_quarantine_candidate(
+    root: Path, candidate: Path, *, label: str, require_intact_parent: bool = False
+) -> str:
+    """Admin diagnostic only: observe absent/present/indeterminate without mutating.
+
+    Reuse the exact nofollow proof used by metadata cleanup, but do NOT grant
+    cleanup permission based on this point-in-time observation. In particular,
+    a vanished outer mount or a symlink ancestor is indeterminate; a present
+    leaf (including a symlink) is present. Read-only calls never change DB or FS.
+    """
+    try:
+        require_absent_beneath_quarantine_root(
+            root, candidate, label=label,
+            require_intact_parent=require_intact_parent,
+        )
+    except StateConflictError as exc:
+        if str(exc) == f"{label} still exists (including symlinks); cannot delete record":
+            return "present"
+        return "indeterminate"
+    return "absent"

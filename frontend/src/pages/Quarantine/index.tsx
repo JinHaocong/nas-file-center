@@ -505,6 +505,16 @@ export const QuarantinePage: React.FC = () => {
                 记录来源关联计划（未必是本次清理）：{recoveryDiagnostic.plan_id == null
                   ? '未关联' : '#' + recoveryDiagnostic.plan_id + '（' +
                     (recoveryDiagnostic.plan_status || '状态未知') + '）'}</p>
+              {(recoveryDiagnostic.payload_path_observation ||
+                recoveryDiagnostic.transaction_evidence_observation) && (
+                <>
+                  <p>隔离载荷路径（只读观察）：{recoveryDiagnostic.payload_path_observation === 'absent' ? '当前未发现' :
+                    recoveryDiagnostic.payload_path_observation === 'present' ? '仍存在（可能为符号链接）' : '无法安全判定'}；
+                    私有事务目录（.tx/entry-编号）：{recoveryDiagnostic.transaction_evidence_observation === 'absent' ? '当前未发现' :
+                    recoveryDiagnostic.transaction_evidence_observation === 'present' ? '仍存在（保留事务证据）' : '无法安全判定'}。</p>
+                  <p>路径观察只代表当前读取结果，不证明事务完成，也不会放宽事务型记录的清理保护。</p>
+                </>
+              )}
               {recoveryDiagnostic.work_job_error_code && <p>任务错误码：{recoveryDiagnostic.work_job_error_code}</p>}
               {recoveryDiagnostic.last_error && <p>记录错误：{recoveryDiagnostic.last_error}</p>}
               <strong>此操作没有执行删除、状态重置或事务恢复。</strong>

@@ -38,6 +38,10 @@ export interface QuarantineRecoveryDiagnostic {
   transaction_mode: string | null;
   has_authoritative_anchor: boolean;
   active_attempt_generation: number;
+  /** Momentary, nofollow and read-only observation; never authorizes cleanup. */
+  payload_path_observation?: 'absent' | 'present' | 'indeterminate';
+  transaction_evidence_observation?: 'absent' | 'present' | 'indeterminate';
+  observation_is_cleanup_authority?: false;
   work_job_id: number | null;
   work_job_status: string | null;
   work_job_error_code: string | null;
