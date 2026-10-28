@@ -5,6 +5,8 @@ import { resolve } from 'node:path';
 
 import { api } from '../src/api/client';
 import { quarantineApi } from '../src/api/quarantine';
+import { canOfferMissingPurgingRecordConfirmation, isFrozenMissingRecordConflict } from '../src/pages/Quarantine/missingCleanupPreflight';
+import type { QuarantineRecoveryDiagnostic } from '../src/types';
 
 const read = (file: string) => readFileSync(resolve(process.cwd(), file), 'utf8');
 
@@ -48,6 +50,55 @@ describe('externally missing quarantine payload metadata-only cleanup', () => {
     assert.match(types, /observation_is_cleanup_authority\?: false/);
     assert.match(source, /quarantineApi\.recoveryDiagnostic\(entryId\)/);
     assert.match(source, /cleanupMissingRecordMutation\.mutateAsync\(target\.id\)/);
+  });
+
+  test('never offers frozen or unverifiable purging cleanup even after public file deletion', () => {
+    const legacy: QuarantineRecoveryDiagnostic = {
+      id: 1106, state: 'purging', tx_phase: null, transaction_mode: null,
+      has_authoritative_anchor: false, active_attempt_generation: 0,
+      payload_path_observation: 'absent', transaction_evidence_observation: 'absent',
+      work_job_id: null, work_job_status: null, work_job_error_code: null,
+      plan_id: null, plan_status: null, plan_item_state: null, last_error: null,
+      reason: 'legacy_purge_requires_verification',
+      guidance: '只读诊断', automatic_cleanup_performed: false,
+    };
+    assert.equal(canOfferMissingPurgingRecordConfirmation(legacy), true);
+    assert.equal(canOfferMissingPurgingRecordConfirmation({
+      ...legacy, id: 884, tx_phase: 'purging',
+      transaction_mode: 'cross_storage_transactional', active_attempt_generation: 2,
+      reason: 'transactional_purge_needs_authority',
+    }), false);
+    assert.equal(canOfferMissingPurgingRecordConfirmation({
+      ...legacy, transaction_evidence_observation: 'present',
+    }), false);
+    assert.equal(canOfferMissingPurgingRecordConfirmation({
+      ...legacy, payload_path_observation: 'indeterminate',
+    }), false);
+    assert.equal(canOfferMissingPurgingRecordConfirmation({
+      ...legacy, payload_path_observation: undefined,
+    }), false);
+    assert.equal(canOfferMissingPurgingRecordConfirmation({
+      ...legacy, state: 'active',
+    }), false);
+    assert.equal(canOfferMissingPurgingRecordConfirmation({
+      ...legacy, has_authoritative_anchor: true,
+    }), false);
+  });
+
+  test('localizes the exact frozen-transaction 409 while not masking other errors', () => {
+    assert.equal(isFrozenMissingRecordConflict({
+      status: 409,
+      message: 'Quarantine entry #1106 has transactional/frozen evidence; use Worker recovery, never metadata cleanup',
+    }), true);
+    assert.equal(isFrozenMissingRecordConflict({ status: 409, message: 'A batch/quarantine Worker job is still active' }), false);
+    assert.equal(isFrozenMissingRecordConflict({ status: 403, message: 'transactional/frozen evidence' }), false);
+    const source = read('src/pages/Quarantine/index.tsx');
+    assert.match(source, /await quarantineApi\.recoveryDiagnostic\(record\.id\)/);
+    assert.match(source, /!canOfferMissingPurgingRecordConfirmation\(diagnostic\)/);
+    assert.match(source, /setRecoveryDiagnostic\(diagnostic\)/);
+    assert.match(source, /不能直接清理/);
+    assert.match(source, /isFrozenMissingRecordConflict\(err\)/);
+    assert.match(source, /void confirmMissingCleanup\(record\)/);
   });
 
   test('does not silently convert recovery diagnosis into destructive mutation', () => {
