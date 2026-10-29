@@ -11,6 +11,45 @@ import type { QuarantineRecoveryDiagnostic } from '../src/types';
 const read = (file: string) => readFileSync(resolve(process.cwd(), file), 'utf8');
 
 describe('externally missing quarantine payload metadata-only cleanup', () => {
+  test('routes orphaned transaction retirement through a separate per-id confirmation', async () => {
+    const original = api.delete;
+    let path = '';
+    api.delete = ((endpoint: string) => {
+      path = endpoint;
+      return Promise.resolve({
+        status: 'ok', deleted: true, id: 1106, metadata_only: true,
+        transaction_finalized: false,
+      });
+    }) as typeof api.delete;
+    try {
+      const result = await quarantineApi.retireOrphanTransactionRecord(1106);
+      assert.equal(path,
+        '/api/quarantine/1106/orphan-transaction-record?confirmation=RETIRE_ORPHAN_TX_1106');
+      assert.equal(result.metadata_only, true);
+      assert.equal(result.transaction_finalized, false);
+    } finally {
+      api.delete = original;
+    }
+  });
+
+  test('orphan retirement is visible only within verified admin recovery diagnosis', () => {
+    const source = read('src/pages/Quarantine/index.tsx');
+    assert.match(source, /recoveryDiagnostic\.transaction_mode === 'cross_storage_transactional'/);
+    assert.match(source, /recoveryDiagnostic\.transaction_evidence_observation === 'absent'/);
+    assert.match(source, /recoveryDiagnostic\.payload_path_observation !== 'present'/);
+    assert.match(source, /recoveryDiagnostic\.work_job_id === null/);
+    assert.match(source, /recoveryDiagnostic\.plan_id === null/);
+    assert.match(source, /已手动删除文件：清理孤儿事务记录/);
+    assert.match(source, /setOrphanRetireTarget\(recoveryDiagnostic\.id\)/);
+    assert.match(source, /retireOrphanTransactionRecord\(entryId\)/);
+    assert.match(source, /result\.transaction_finalized !== false/);
+    assert.match(source, /永久移除孤儿事务记录/);
+    assert.match(source, /我已手动删除文件，确认仅清除记录/);
+    assert.match(source, /onConfirm=\{\(\) => \{ void confirmOrphanTransactionRetirement\(\); \}\}/);
+    assert.match(source, /不恢复文件，不删除任何文件/);
+    assert.match(source, /安全校验拒绝清理/);
+  });
+
   test('uses a separate, exact-confirmation endpoint instead of permanent purge', async () => {
     const original = api.delete;
     let path = '';
