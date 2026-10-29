@@ -94,6 +94,8 @@ export const QuarantinePage: React.FC = () => {
   const [missingCleanupBusy, setMissingCleanupBusy] = useState(false);
   const [orphanRetireTarget, setOrphanRetireTarget] = useState<number | null>(null);
   const [orphanRetireBusy, setOrphanRetireBusy] = useState(false);
+  const [ownerForgetTarget, setOwnerForgetTarget] = useState<number | null>(null);
+  const [ownerForgetBusy, setOwnerForgetBusy] = useState(false);
   const [missingCleanupPreflightId, setMissingCleanupPreflightId] = useState<number | null>(null);
   const missingCleanupPreflightInFlight = useRef(false);
   const [recoveryDiagnostic, setRecoveryDiagnostic] = useState<QuarantineRecoveryDiagnostic | null>(null);
@@ -361,6 +363,26 @@ export const QuarantinePage: React.FC = () => {
     }
   };
 
+  const confirmOwnerForget = async () => {
+    const id = ownerForgetTarget;
+    if (!id || !isAdmin || isSafeMode || !allowDelete || ownerForgetBusy) return;
+    setOwnerForgetBusy(true);
+    try {
+      const result = await quarantineApi.forgetOwnerDeletedRecord(id);
+      if (!result.metadata_only || result.transaction_finalized !== false) throw new Error('服务端未确认仅清除记录');
+      setOwnerForgetTarget(null);
+      setRecoveryDiagnostic(null);
+      toast.success('已删除隔离区残留记录 #' + id + '；没有操作 NAS 文件');
+      void queryClient.invalidateQueries({ queryKey: ['quarantineList'] });
+      void queryClient.invalidateQueries({ queryKey: ['auditEvents'] });
+      void refetch();
+    } catch (err: unknown) {
+      toast.error(getStructuredApiError(err).message || '删除残留记录失败');
+    } finally {
+      setOwnerForgetBusy(false);
+    }
+  };
+
   const confirmOrphanTransactionRetirement = async () => {
     const entryId = orphanRetireTarget;
     if (!entryId || !isAdmin || isSafeMode || !allowDelete || orphanRetireBusy) return;
@@ -584,6 +606,16 @@ export const QuarantinePage: React.FC = () => {
               {recoveryDiagnostic.last_error && <p>记录错误：{recoveryDiagnostic.last_error}</p>}
               <strong>此诊断没有执行删除、状态重置或事务恢复。</strong>
               {isAdmin && !isSafeMode && allowDelete &&
+                (recoveryDiagnostic.id === 1106 || recoveryDiagnostic.id === 884) &&
+                recoveryDiagnostic.state === 'purging' &&
+                recoveryDiagnostic.tx_phase === 'purging' &&
+                recoveryDiagnostic.transaction_mode === 'cross_storage_transactional' && (
+                  <ConsoleButton size="sm" variant="ghost"
+                    onClick={() => setOwnerForgetTarget(recoveryDiagnostic.id)}>
+                    我已删除 NAS 文件：仅移除本条残留记录
+                  </ConsoleButton>
+                )}
+              {isAdmin && !isSafeMode && allowDelete &&
                 recoveryDiagnostic.state === 'purging' &&
                 recoveryDiagnostic.tx_phase === 'purging' &&
                 recoveryDiagnostic.transaction_mode === 'cross_storage_transactional' &&
@@ -671,6 +703,13 @@ export const QuarantinePage: React.FC = () => {
         )}
       </DataPanel>
 
+      <ConsoleConfirmDialog open={ownerForgetTarget !== null}
+        onOpenChange={next => { if (!next && !ownerForgetBusy) setOwnerForgetTarget(null); }}
+        title={'仅移除隔离残留记录 #' + (ownerForgetTarget ?? '') + '？'}
+        description="仅针对事故 #357 的 #1106 和 #884。你已确认 NAS 上对应文件由你手动删除。本操作跳过通常的冻结事务证据保护，仅删除这一条数据库记录并写入审计，不检查或操作 NAS 文件，不执行恢复，也不能撤销。建议先备份数据库并暂停相关 Worker。"
+        confirmText="我确认文件已删除，仅删除此数据库记录"
+        busy={ownerForgetBusy} disabled={!isAdmin || isSafeMode || !allowDelete || !ownerForgetTarget}
+        onConfirm={() => { void confirmOwnerForget(); }} />
       <ConsoleConfirmDialog open={orphanRetireTarget !== null}
         onOpenChange={next => { if (!next && !orphanRetireBusy) setOrphanRetireTarget(null); }}
         title={'永久移除孤儿事务记录 #' + (orphanRetireTarget ?? '') + '？'}
