@@ -5932,6 +5932,77 @@ class FileCenterService:
             session.commit()
             return {"status": "ok", "deleted": True, "id": deleted_id, "metadata_only": True}
 
+    def forget_owner_deleted_quarantine_record(
+        self,
+        entry_id: int,
+        *,
+        confirmation: str,
+        is_admin: bool = False,
+        user_id: int | None = None,
+    ) -> dict:
+        """Owner-attested, DB-only emergency retirement for incident #357.
+
+        Only entries 1106 and 884 are eligible. This deliberately does NOT
+        inspect or mutate NAS paths, call a Worker, or finalize a transaction.
+        The operator has confirmed those public payloads were removed
+        separately, and accepts loss of the stale recovery metadata.
+        """
+        if not is_admin:
+            raise PermissionError("Only an administrator may forget incident records")
+        if entry_id not in (1106, 884):
+            raise ValueError("Manual record-only retirement is restricted to #1106 and #884")
+        if confirmation != f"FORGET_OWNER_DELETED_{entry_id}":
+            raise ValueError("Explicit per-entry manual deletion confirmation is required")
+        if not self.settings.allow_mutation or not self.settings.allow_delete:
+            raise ValueError("Manual record retirement requires ALLOW_MUTATION and ALLOW_DELETE")
+
+        with self.SessionLocal() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            entry = session.get(QuarantineEntry, entry_id)
+            if entry is None:
+                raise KeyError(f"Quarantine entry #{entry_id} not found")
+            if not (
+                entry.state == "purging"
+                and entry.tx_phase == "purging"
+                and entry.transaction_mode == "cross_storage_transactional"
+            ):
+                raise StateConflictError(
+                    "Incident-only override is limited to interrupted cross-storage purging"
+                )
+
+            evidence = {
+                "quarantine_entry_id": int(entry.id),
+                "prior_state": str(entry.state),
+                "prior_tx_phase": str(entry.tx_phase),
+                "prior_transaction_mode": str(entry.transaction_mode),
+                "prior_attempt_generation": int(entry.active_attempt_generation or 0),
+                "original_path": str(entry.original_path),
+                "quarantine_path": str(entry.quarantine_path),
+                "actor_user_id": user_id,
+                "owner_attests_nas_payload_manually_removed": True,
+                "override_reason": "incident_357_exact_two_records_only",
+                "normal_frozen_transaction_checks_bypassed": True,
+                "filesystem_checked": False,
+                "filesystem_mutations": 0,
+                "metadata_only": True,
+                "transaction_finalized": False,
+            }
+            session.delete(entry)
+            session.add(AuditEvent(
+                operation="quarantine.owner_manual_record_forget",
+                path=evidence["original_path"],
+                result="retired_metadata_only",
+                details_json=json.dumps(evidence, ensure_ascii=False),
+            ))
+            session.commit()
+            return {
+                "status": "ok",
+                "deleted": True,
+                "id": entry_id,
+                "metadata_only": True,
+                "transaction_finalized": False,
+            }
+
     def retire_orphaned_quarantine_transaction_record(
         self,
         entry_id: int,
