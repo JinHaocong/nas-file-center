@@ -11,6 +11,16 @@ import type { QuarantineRecoveryDiagnostic } from '../src/types';
 const read = (file: string) => readFileSync(resolve(process.cwd(), file), 'utf8');
 
 describe('externally missing quarantine payload metadata-only cleanup', () => {
+  test('incident-only override explicitly targets #1106/#884 and never invokes NAS deletion', () => {
+    const page = read('src/pages/Quarantine/index.tsx');
+    const client = read('src/api/quarantine.ts');
+    assert.match(page, /recoveryDiagnostic\.id === 1106 \|\| recoveryDiagnostic\.id === 884/);
+    assert.match(page, /quarantineApi\.forgetOwnerDeletedRecord\(id\)/);
+    assert.match(page, /我确认文件已删除，仅删除此数据库记录/);
+    assert.match(client, /owner-deleted-record\?confirmation=FORGET_OWNER_DELETED_/);
+    assert.match(page, /result\.transaction_finalized !== false/);
+  });
+
   test('routes orphaned transaction retirement through a separate per-id confirmation', async () => {
     const original = api.delete;
     let path = '';
