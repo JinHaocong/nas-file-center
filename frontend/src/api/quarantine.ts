@@ -88,6 +88,11 @@ export const quarantineApi = {
       `/api/quarantine/${id}/missing-record?confirmation=CLEANUP_MISSING_RECORD`
     ),
 
+  forgetOwnerDeletedRecord: (id: number) =>
+    api.delete<{ status: 'ok'; deleted: true; id: number; metadata_only: true; transaction_finalized: false }>(
+      `/api/quarantine/${id}/owner-deleted-record?confirmation=FORGET_OWNER_DELETED_${id}`
+    ),
+
   retireOrphanTransactionRecord: (id: number) =>
     api.delete<{ status: 'ok'; deleted: true; id: number; metadata_only: true; transaction_finalized: false }>(
       `/api/quarantine/${id}/orphan-transaction-record?confirmation=RETIRE_ORPHAN_TX_${id}`
