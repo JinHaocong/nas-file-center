@@ -92,6 +92,8 @@ export const QuarantinePage: React.FC = () => {
   const [cleanupBusy, setCleanupBusy] = useState(false);
   const [missingCleanupTarget, setMissingCleanupTarget] = useState<QuarantineEntry | null>(null);
   const [missingCleanupBusy, setMissingCleanupBusy] = useState(false);
+  const [orphanRetireTarget, setOrphanRetireTarget] = useState<number | null>(null);
+  const [orphanRetireBusy, setOrphanRetireBusy] = useState(false);
   const [missingCleanupPreflightId, setMissingCleanupPreflightId] = useState<number | null>(null);
   const missingCleanupPreflightInFlight = useRef(false);
   const [recoveryDiagnostic, setRecoveryDiagnostic] = useState<QuarantineRecoveryDiagnostic | null>(null);
@@ -359,6 +361,33 @@ export const QuarantinePage: React.FC = () => {
     }
   };
 
+  const confirmOrphanTransactionRetirement = async () => {
+    const entryId = orphanRetireTarget;
+    if (!entryId || !isAdmin || isSafeMode || !allowDelete || orphanRetireBusy) return;
+    setOrphanRetireBusy(true);
+    try {
+      const result = await quarantineApi.retireOrphanTransactionRecord(entryId);
+      if (result.metadata_only !== true || result.transaction_finalized !== false) {
+        throw new Error('服务端没有确认仅删除孤儿事务元数据');
+      }
+      setOrphanRetireTarget(null);
+      setRecoveryDiagnostic(null);
+      toast.success('隔离记录 #' + entryId + ' 的孤儿事务元数据已清理，未删除 NAS 文件');
+      void queryClient.invalidateQueries({ queryKey: ['quarantineList'] });
+      void queryClient.invalidateQueries({ queryKey: ['auditEvents'] });
+      void refetch();
+    } catch (err: unknown) {
+      const structured = getStructuredApiError(err);
+      if (structured.status === 409) {
+        toast.error('安全校验拒绝清理：文件、挂载设备、私有事务证据或任务状态尚不满足孤儿记录收尾条件。记录已保留。');
+      } else {
+        toast.error(structured.message || '孤儿事务记录清理失败，记录已保留');
+      }
+    } finally {
+      setOrphanRetireBusy(false);
+    }
+  };
+
   const inspectInterruptedPurge = async (entryId: number) => {
     const requestId = ++recoveryDiagnosticEpoch.current;
     setRecoveryDiagnosticBusyId(entryId);
@@ -553,7 +582,21 @@ export const QuarantinePage: React.FC = () => {
               )}
               {recoveryDiagnostic.work_job_error_code && <p>任务错误码：{recoveryDiagnostic.work_job_error_code}</p>}
               {recoveryDiagnostic.last_error && <p>记录错误：{recoveryDiagnostic.last_error}</p>}
-              <strong>此操作没有执行删除、状态重置或事务恢复。</strong>
+              <strong>此诊断没有执行删除、状态重置或事务恢复。</strong>
+              {isAdmin && !isSafeMode && allowDelete &&
+                recoveryDiagnostic.state === 'purging' &&
+                recoveryDiagnostic.tx_phase === 'purging' &&
+                recoveryDiagnostic.transaction_mode === 'cross_storage_transactional' &&
+                recoveryDiagnostic.transaction_evidence_observation === 'absent' &&
+                recoveryDiagnostic.payload_path_observation !== 'present' &&
+                recoveryDiagnostic.payload_path_observation !== undefined &&
+                recoveryDiagnostic.work_job_id === null && recoveryDiagnostic.plan_id === null && (
+                  <ConsoleButton size="sm" variant="ghost"
+                    leadingIcon={<ConsoleIcon name="trash" size={15} />}
+                    onClick={() => setOrphanRetireTarget(recoveryDiagnostic.id)}>
+                    已手动删除文件：清理孤儿事务记录
+                  </ConsoleButton>
+                )}
             </div>
             <ConsoleButton size="sm" onClick={closeRecoveryDiagnostic}>关闭诊断</ConsoleButton>
           </section>
@@ -628,6 +671,13 @@ export const QuarantinePage: React.FC = () => {
         )}
       </DataPanel>
 
+      <ConsoleConfirmDialog open={orphanRetireTarget !== null}
+        onOpenChange={next => { if (!next && !orphanRetireBusy) setOrphanRetireTarget(null); }}
+        title={'永久移除孤儿事务记录 #' + (orphanRetireTarget ?? '') + '？'}
+        description="仅适用于你已经在 NAS 上手动删除隔离文件的中断跨存储事务。确认后服务端将再次检查原隔离挂载设备、文件及私有 .tx 缺失、任务与计划均不活跃，才会删除这条数据库记录并保存审计。不恢复文件，不删除任何文件，也不把事务标为成功。若仍有任何证据或挂载身份无法验证，操作会被拒绝。"
+        confirmText="我已手动删除文件，确认仅清除记录" busy={orphanRetireBusy}
+        disabled={!isAdmin || isSafeMode || !allowDelete || !orphanRetireTarget}
+        onConfirm={() => { void confirmOrphanTransactionRetirement(); }} />
       <ConsoleConfirmDialog open={missingCleanupTarget !== null}
         onOpenChange={next => { if (!next && !missingCleanupBusy) setMissingCleanupTarget(null); }}
         title={'清理隔离记录 #' + (missingCleanupTarget?.id ?? '') + ' 的缺失文件元数据？'}
