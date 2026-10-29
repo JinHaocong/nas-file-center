@@ -1873,6 +1873,28 @@ def restore_quarantine_entry(
         raise HTTPException(500, str(exc)) from exc
 
 
+@router.delete("/quarantine/{id}/owner-deleted-record")
+def forget_owner_deleted_quarantine_record(
+    request: Request,
+    id: int,
+    confirmation: str = Query(...),
+    admin_user: User = Depends(require_admin_user),
+):
+    """Incident #357: database-only, explicit administrator override."""
+    try:
+        return request.app.state.service.forget_owner_deleted_quarantine_record(
+            id, confirmation=confirmation, is_admin=True, user_id=admin_user.id,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except StateConflictError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @router.delete("/quarantine/{id}/orphan-transaction-record")
 def retire_orphaned_quarantine_transaction_record(
     request: Request,
