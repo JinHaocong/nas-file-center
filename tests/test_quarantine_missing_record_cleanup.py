@@ -409,3 +409,186 @@ def test_transactional_recovery_diagnostic_requires_admin(maintenance_env):
     ).status_code == 200
     assert regular.get(f"/api/quarantine/{entry_id}/recovery-diagnostic").status_code == 403
     _assert_retained(env, entry_id)
+
+
+# Distinct high-friction manual-retirement endpoint. Public payload deletion
+# does not itself finalize cross-storage transactions.
+def _orphan_tx(env, entry_id, token=None):
+    return env["admin"].delete(
+        f"/api/quarantine/{entry_id}/orphan-transaction-record?"
+        f"confirmation={token or ('RETIRE_ORPHAN_TX_' + str(entry_id))}"
+    )
+
+
+def _frozen_orphan(env, *, device=None, **attrs):
+    attributes = dict(
+        state="purging", tx_phase="purging",
+        transaction_mode="cross_storage_transactional",
+        active_attempt_generation=2,
+        quarantine_device=int(env["trash"].stat().st_dev) if device is None else device,
+        quarantine_inode=44556,
+    )
+    attributes.update(attrs)
+    entry_id, path = _record(env, name="orphan.q", **attributes)
+    return entry_id, path
+
+
+def test_orphan_purging_with_manually_missing_parent_is_db_only_and_audited(maintenance_env, monkeypatch):
+    env = maintenance_env
+    entry_id, path = _frozen_orphan(env)
+    path.parent.rmdir()  # NAS operator removed the entire leaf directory
+    sentinel = env["data"] / "original-untouched"
+    sentinel.write_text("no filesystem mutation")
+    app = env["admin"].app
+    app.state.service._quarantine_service_started_at = utcnow()
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Orphan retirement must never remove filesystem objects")
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "unlink", forbidden)
+        patch.setattr(os, "rmdir", forbidden)
+        response = _orphan_tx(env, entry_id)
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "status": "ok", "deleted": True, "id": entry_id,
+        "metadata_only": True, "transaction_finalized": False,
+    }
+    assert sentinel.read_text() == "no filesystem mutation"
+    assert not path.parent.exists()
+    with env["service"].SessionLocal() as session:
+        assert session.get(QuarantineEntry, entry_id) is None
+        event = session.scalar(select(AuditEvent).where(
+            AuditEvent.operation == "quarantine.orphan_transaction_record_retire"
+        ))
+        assert event is not None
+        payload = json.loads(event.details_json)
+        assert payload["quarantine_entry_id"] == entry_id
+        assert payload["prior_tx_phase"] == "purging"
+        assert payload["prior_transaction_mode"] == "cross_storage_transactional"
+        assert payload["prior_generation"] == 2
+        assert payload["filesystem_mutations"] == 0
+        assert payload["transaction_finalized"] is False
+
+
+@pytest.mark.parametrize("variant", [
+    "tx_present", "tx_empty", "payload_present", "symlink_leaf",
+    "symlink_parent", "missing_mount", "device_mismatch",
+    "device_unrecorded", "active_job", "pending_plan", "anchor_outside",
+    "restore_authority", "recent_transition", "wrong_mode",
+])
+def test_orphan_manual_retirement_fails_closed(maintenance_env, variant):
+    env = maintenance_env
+    entry_id, path = _frozen_orphan(env)
+    original_trash = env["trash"]
+    outside = env["data"] / "sentinel"
+    outside.write_text("untouched")
+    detached = None
+
+    if variant == "tx_present" or variant == "tx_empty":
+        tx_dir = original_trash / ".tx" / f"entry-{entry_id}"
+        tx_dir.mkdir(parents=True)
+        if variant == "tx_present":
+            (tx_dir / "frozen-intent").write_text("retain")
+    elif variant == "payload_present":
+        path.write_text("do not delete")
+    elif variant == "symlink_leaf":
+        path.symlink_to(outside)
+    elif variant == "symlink_parent":
+        path.parent.rmdir()
+        path.parent.symlink_to(env["data"], target_is_directory=True)
+    elif variant == "missing_mount":
+        detached = env["data"] / "detached-trash"
+        original_trash.rename(detached)
+    elif variant in {"device_mismatch", "device_unrecorded", "anchor_outside", "restore_authority", "recent_transition", "wrong_mode"}:
+        with env["service"].SessionLocal() as session:
+            row = session.get(QuarantineEntry, entry_id)
+            if variant == "device_mismatch":
+                row.quarantine_device = int(original_trash.stat().st_dev) + 1
+            elif variant == "device_unrecorded":
+                row.quarantine_device = None
+            elif variant == "anchor_outside":
+                row.authoritative_anchor_path = str(outside)
+            elif variant == "restore_authority":
+                row.restore_target_path = str(outside)
+            elif variant == "recent_transition":
+                row.updated_at = utcnow()
+            elif variant == "wrong_mode":
+                row.transaction_mode = "other"
+            session.commit()
+    elif variant == "active_job":
+        with env["service"].SessionLocal() as session:
+            session.add(WorkJob(kind="batch-plan-execute", status="running", state_json="{}"))
+            session.commit()
+    elif variant == "pending_plan":
+        with env["service"].SessionLocal() as session:
+            plan = BatchPlan(name="frozen cleanup", kind="quarantine-bulk-purge", status="draft")
+            session.add(plan)
+            session.flush()
+            session.add(BatchPlanItem(plan_id=plan.id, sequence=1,
+                operation="quarantine_purge", source_path=str(path), state="planned"))
+            session.commit()
+
+    try:
+        response = _orphan_tx(env, entry_id)
+        assert response.status_code == 409, (variant, response.status_code, response.text)
+        with env["service"].SessionLocal() as session:
+            assert session.get(QuarantineEntry, entry_id) is not None
+            assert session.scalar(select(AuditEvent).where(
+                AuditEvent.operation == "quarantine.orphan_transaction_record_retire"
+            )) is None
+        assert outside.read_text() == "untouched"
+    finally:
+        if detached:
+            detached.rename(original_trash)
+
+
+def test_orphan_old_missing_record_endpoint_is_still_blocked(maintenance_env):
+    env = maintenance_env
+    entry_id, _ = _frozen_orphan(env)
+    assert _cleanup(env, entry_id).status_code == 409
+    response = _orphan_tx(env, entry_id, token="CLEANUP_MISSING_RECORD")
+    assert response.status_code == 400
+    _assert_retained(env, entry_id)
+
+
+def test_orphan_repeat_check_rejects_external_payload_reappearance(maintenance_env, monkeypatch):
+    env = maintenance_env
+    entry_id, path = _frozen_orphan(env)
+    original = missing_record_cleanup.require_absent_beneath_quarantine_root
+    seen = [0]
+    def race(root, candidate, *, label, require_intact_parent=False, expected_root_device=None):
+        if label == "orphan quarantine payload":
+            seen[0] += 1
+            if seen[0] == 2:
+                path.write_text("reappeared")
+        return original(
+            root, candidate, label=label, require_intact_parent=require_intact_parent,
+            expected_root_device=expected_root_device,
+        )
+    monkeypatch.setattr(missing_record_cleanup, "require_absent_beneath_quarantine_root", race)
+    response = _orphan_tx(env, entry_id)
+    assert response.status_code == 409
+    assert path.read_text() == "reappeared"
+    _assert_retained(env, entry_id)
+
+
+def test_orphan_retirement_endpoint_admin_only(maintenance_env):
+    env = maintenance_env
+    entry_id, _ = _frozen_orphan(env)
+    anonymous = TestClient(env["admin"].app)
+    assert anonymous.delete(
+        f"/api/quarantine/{entry_id}/orphan-transaction-record?confirmation=RETIRE_ORPHAN_TX_{entry_id}"
+    ).status_code in (401, 403)
+
+    with env["service"].SessionLocal() as session:
+        session.add(User(username="orphan-retire-user", role="user",
+                         password_hash=hash_password("RegularPassword123!")))
+        session.commit()
+    regular = TestClient(env["admin"].app)
+    assert regular.post("/api/auth/login",
+        json={"username": "orphan-retire-user", "password": "RegularPassword123!"},
+        headers={"Origin": "http://testserver"}).status_code == 200
+    assert regular.delete(
+        f"/api/quarantine/{entry_id}/orphan-transaction-record?confirmation=RETIRE_ORPHAN_TX_{entry_id}"
+    ).status_code == 403
+    _assert_retained(env, entry_id)
