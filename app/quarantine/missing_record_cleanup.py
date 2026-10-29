@@ -27,7 +27,8 @@ def _as_aware(value: datetime) -> datetime:
 
 
 def require_absent_beneath_quarantine_root(
-    root: Path, candidate: Path, *, label: str, require_intact_parent: bool = False
+    root: Path, candidate: Path, *, label: str, require_intact_parent: bool = False,
+    expected_root_device: int | None = None,
 ) -> None:
     """Walk from / through nofollow directory FDs; only ENOENT proves absence.
 
@@ -61,6 +62,13 @@ def require_absent_beneath_quarantine_root(
             root_identity = os.fstat(fd)
             if not stat.S_ISDIR(root_identity.st_mode):
                 raise StateConflictError("Quarantine root is not a plain directory")
+            if expected_root_device is not None and (
+                expected_root_device <= 0 or root_identity.st_dev != expected_root_device
+            ):
+                raise StateConflictError(
+                    "Recorded quarantine payload device differs from current root; "
+                    "mount may be detached or replaced"
+                )
 
             relative_parts = candidate.relative_to(root).parts
             for component in relative_parts[:-1]:
@@ -197,3 +205,94 @@ def observe_quarantine_candidate(
             return "present"
         return "indeterminate"
     return "absent"
+
+
+def assert_orphaned_transaction_record_safe(
+    session,
+    entry: QuarantineEntry,
+    *,
+    quarantine_root: Path,
+    service_started_at: datetime,
+) -> None:
+    """Human-attested DB-only retirement of a stale, evidence-free purge.
+
+    This is deliberately NOT normal missing-record cleanup. An absent parent
+    can mean an offline nested mount: allow it only on the *same device* as
+    the frozen public payload and only with explicit admin confirmation.
+    Never touch filesystem bytes or pretend a frozen purge succeeded.
+    """
+    if not (
+        entry.state == "purging"
+        and entry.tx_phase == "purging"
+        and entry.transaction_mode == "cross_storage_transactional"
+        and int(entry.active_attempt_generation or 0) > 0
+    ):
+        raise StateConflictError("Only interrupted cross-storage purging records may use orphan retirement")
+    if (
+        entry.task_id is not None or entry.plan_item_id is not None
+        or entry.restore_target_path is not None
+        or entry.restore_device is not None or entry.restore_inode is not None
+    ):
+        raise StateConflictError("Record has task/plan/restore authority; manual retirement is blocked")
+    changed = _as_aware(entry.updated_at) if entry.updated_at else None
+    if (
+        changed is None or changed >= _as_aware(service_started_at)
+        or utcnow() - changed < timedelta(minutes=10)
+    ):
+        raise StateConflictError("Purging transition may still be in flight; require an old pre-restart state")
+
+    # Existence of *any* destructive executor can make a later frozen retry
+    # possible. Fail closed, even if provenance IDs are absent on this row.
+    active_job = session.scalars(
+        select(WorkJob.id).where(
+            WorkJob.status.in_(_ACTIVE_JOB_STATES),
+            WorkJob.kind.in_(
+                ("batch-plan-execute", "quarantine-record-cleanup",
+                 "quarantine-purge", "quarantine-restore")
+            ),
+        ).limit(1)
+    ).first()
+    if active_job is not None:
+        raise StateConflictError("Destructive Worker job is active; orphan retirement blocked")
+
+    plan_ref = session.scalars(
+        select(BatchPlanItem.id).where(
+            BatchPlanItem.operation.in_(("quarantine_purge", "quarantine_restore")),
+            BatchPlanItem.state.in_(_ACTIVE_ITEM_STATES),
+            or_(
+                BatchPlanItem.source_path.in_((entry.original_path, entry.quarantine_path)),
+                BatchPlanItem.target_path.in_((entry.original_path, entry.quarantine_path)),
+            ),
+        ).limit(1)
+    ).first()
+    if plan_ref is not None:
+        raise StateConflictError("Unfinished frozen plan item references the orphan record")
+
+    root = Path(quarantine_root).absolute()
+    private_root = root / ".tx" / f"entry-{entry.id}"
+    if entry.authoritative_anchor_path:
+        anchor = Path(entry.authoritative_anchor_path)
+        if (
+            not anchor.is_absolute() or ".." in anchor.parts
+            or not anchor.is_relative_to(private_root)
+        ):
+            raise StateConflictError("Authoritative anchor is outside the expected .tx entry namespace")
+
+    frozen_device = int(entry.quarantine_device or 0)
+    if frozen_device <= 0:
+        raise StateConflictError(
+            "Cannot prove quarantine mount identity without frozen payload device"
+        )
+
+    # Same securely opened nofollow root FD for device and absence proofs.
+    # For manually removed directories, only this narrowly scoped path may
+    # accept missing intermediate directories. Inaccessible/symlinked roots
+    # and mount/device changes still fail closed.
+    require_absent_beneath_quarantine_root(
+        root, Path(entry.quarantine_path),
+        label="orphan quarantine payload", expected_root_device=frozen_device,
+    )
+    require_absent_beneath_quarantine_root(
+        root, private_root, label="orphan private transaction evidence",
+        expected_root_device=frozen_device,
+    )

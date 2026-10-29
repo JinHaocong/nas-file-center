@@ -5932,6 +5932,74 @@ class FileCenterService:
             session.commit()
             return {"status": "ok", "deleted": True, "id": deleted_id, "metadata_only": True}
 
+    def retire_orphaned_quarantine_transaction_record(
+        self,
+        entry_id: int,
+        *,
+        confirmation: str,
+        is_admin: bool = False,
+        user_id: int | None = None,
+    ) -> dict:
+        """Retire only a manually-deleted, unowned orphan row; preserve audit.
+
+        No filesystem write, transaction replay, or fake 'purged' transition.
+        This is a separate, narrowly guarded action from ordinary cleanup.
+        """
+        if not is_admin:
+            raise PermissionError("Only administrators may retire orphan transactions")
+        if confirmation != f"RETIRE_ORPHAN_TX_{int(entry_id)}":
+            raise ValueError("Explicit per-record orphan transaction confirmation required")
+        if not self.settings.allow_mutation or not self.settings.allow_delete:
+            raise ValueError("Orphan retirement requires ALLOW_MUTATION and ALLOW_DELETE")
+
+        from app.quarantine.missing_record_cleanup import assert_orphaned_transaction_record_safe
+
+        with self.SessionLocal() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            entry = session.get(QuarantineEntry, int(entry_id))
+            if entry is None:
+                raise KeyError(f"Quarantine entry #{entry_id} not found")
+
+            conditions = dict(
+                quarantine_root=Path(self.settings.quarantine_root),
+                service_started_at=self._quarantine_service_started_at,
+            )
+            assert_orphaned_transaction_record_safe(session, entry, **conditions)
+            # Recheck after all job/plan queries, as close as possible to DELETE.
+            assert_orphaned_transaction_record_safe(session, entry, **conditions)
+            audit_snapshot = {
+                "quarantine_entry_id": int(entry.id),
+                "original_path": str(entry.original_path),
+                "quarantine_path": str(entry.quarantine_path),
+                "prior_state": str(entry.state),
+                "prior_tx_phase": str(entry.tx_phase),
+                "prior_transaction_mode": str(entry.transaction_mode),
+                "prior_generation": int(entry.active_attempt_generation or 0),
+                "prior_quarantine_device": int(entry.quarantine_device or 0),
+                "prior_quarantine_inode": int(entry.quarantine_inode or 0),
+                "actor_user_id": user_id,
+                "manual_external_deletion_attested": True,
+                "payload_absence_checked_with_stored_mount_device": True,
+                "private_tx_entry_absent": True,
+                "no_active_executor_or_pending_plan_item": True,
+                "metadata_only": True,
+                "filesystem_mutations": 0,
+                "transaction_finalized": False,
+            }
+            retired_id = int(entry.id)
+            session.delete(entry)
+            session.add(AuditEvent(
+                operation="quarantine.orphan_transaction_record_retire",
+                path=audit_snapshot["original_path"],
+                result="retired_metadata_only",
+                details_json=json.dumps(audit_snapshot, ensure_ascii=False),
+            ))
+            session.commit()
+            return {
+                "status": "ok", "deleted": True, "id": retired_id,
+                "metadata_only": True, "transaction_finalized": False,
+            }
+
     def delete_quarantine_record(
         self,
         entry_id: int,
