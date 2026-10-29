@@ -592,3 +592,72 @@ def test_orphan_retirement_endpoint_admin_only(maintenance_env):
         f"/api/quarantine/{entry_id}/orphan-transaction-record?confirmation=RETIRE_ORPHAN_TX_{entry_id}"
     ).status_code == 403
     _assert_retained(env, entry_id)
+
+
+def test_owner_confirmed_two_incident_rows_are_db_only_and_audited(maintenance_env, monkeypatch):
+    env = maintenance_env
+    for entry_id in (1106, 884):
+        with env["service"].SessionLocal() as session:
+            record = QuarantineEntry(
+                id=entry_id,
+                original_path=str(env["data"] / f"old-{entry_id}"),
+                quarantine_path=str(env["trash"] / f"old-{entry_id}"),
+                state="purging", tx_phase="purging",
+                transaction_mode="cross_storage_transactional",
+                active_attempt_generation=2,
+            )
+            session.add(record)
+            session.commit()
+        sentinel = env["data"] / "sentinel"
+        sentinel.write_text("unchanged")
+        def forbidden(*args, **kwargs):
+            raise AssertionError("DB-only cleanup must not remove filesystem objects")
+        with monkeypatch.context() as patch:
+            patch.setattr(os, "unlink", forbidden)
+            patch.setattr(os, "rmdir", forbidden)
+            response = env["admin"].delete(
+                f"/api/quarantine/{entry_id}/owner-deleted-record?confirmation=FORGET_OWNER_DELETED_{entry_id}"
+            )
+        assert response.status_code == 200, response.text
+        assert response.json()["transaction_finalized"] is False
+        assert sentinel.read_text() == "unchanged"
+        with env["service"].SessionLocal() as session:
+            assert session.get(QuarantineEntry, entry_id) is None
+            event = session.scalar(select(AuditEvent).where(
+                AuditEvent.operation == "quarantine.owner_manual_record_forget",
+                AuditEvent.details_json.like(f'%"quarantine_entry_id": {entry_id}%'),
+            ))
+            assert event is not None
+
+
+def test_owner_confirmed_cleanup_denies_unlisted_ids_bad_confirmation_and_wrong_state(maintenance_env):
+    env = maintenance_env
+    id_other, _ = _record(env, state="purging", tx_phase="purging",
+                          transaction_mode="cross_storage_transactional")
+    assert env["admin"].delete(
+        f"/api/quarantine/{id_other}/owner-deleted-record?confirmation=FORGET_OWNER_DELETED_{id_other}"
+    ).status_code == 400
+    with env["service"].SessionLocal() as session:
+        row = QuarantineEntry(
+            id=1106, original_path=str(env["data"] / "test1106"),
+            quarantine_path=str(env["trash"] / "test1106"), state="active",
+        )
+        session.add(row)
+        session.commit()
+    assert env["admin"].delete(
+        "/api/quarantine/1106/owner-deleted-record?confirmation=WRONG"
+    ).status_code == 400
+    assert env["admin"].delete(
+        "/api/quarantine/1106/owner-deleted-record?confirmation=FORGET_OWNER_DELETED_1106"
+    ).status_code == 409
+    with env["service"].SessionLocal() as session:
+        assert session.get(QuarantineEntry, 1106) is not None
+        assert session.get(QuarantineEntry, id_other) is not None
+
+
+def test_owner_confirmed_cleanup_is_admin_only(maintenance_env):
+    env = maintenance_env
+    anonymous = TestClient(env["admin"].app)
+    assert anonymous.delete(
+        "/api/quarantine/1106/owner-deleted-record?confirmation=FORGET_OWNER_DELETED_1106"
+    ).status_code in (401, 403)
