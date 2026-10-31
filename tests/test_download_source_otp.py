@@ -63,6 +63,7 @@ def test_otp_session_reused_by_separate_worker_client(tmp_path):
 
 def test_expired_session_requires_fresh_otp(tmp_path):
     name = "source-" + "b" * 32 + ".secret"
+    write_secret(tmp_path, name, "example-password")
     save_source_session(tmp_path, name, "http://openlist:5244", "read", "expired-soon")
     cache = source_secret_path(tmp_path, name).with_suffix(".session")
     obj = json.loads(cache.read_text())
