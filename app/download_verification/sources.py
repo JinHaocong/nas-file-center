@@ -168,7 +168,15 @@ class AListAPIClient:
                 if response.status != 200 or response.headers.get("Content-Encoding", "identity").lower() != "identity":
                     raise WebDAVError("SOURCE_API_UNAVAILABLE")
                 raw = response.read(MAX_RESPONSE_BYTES + 1)
-        except (HTTPError, URLError, OSError, TimeoutError):
+        except HTTPError as exc:
+            if exc.code in (401, 403) and self._token and path == "/api/fs/list":
+                if self._session_config_dir is not None:
+                    clear_source_session(self._session_config_dir, self._session_secret_name)
+                raise WebDAVError("SOURCE_SESSION_EXPIRED") from None
+            if path == "/api/auth/login" and exc.code in (401, 403):
+                raise WebDAVError("SOURCE_AUTH_FAILED_OR_OTP_REQUIRED") from None
+            raise WebDAVError("SOURCE_API_UNAVAILABLE") from None
+        except (URLError, OSError, TimeoutError):
             raise WebDAVError("SOURCE_API_UNAVAILABLE") from None
         if len(raw) > MAX_RESPONSE_BYTES:
             raise WebDAVError("SOURCE_RESPONSE_LIMIT")
