@@ -10,7 +10,7 @@ from sqlalchemy import select, text
 
 from app.auth.dependencies import require_admin_user
 from .models import DownloadVerificationSource
-from .sources import AListAPIClient, validate_source_url, source_secret_path, write_secret
+from .sources import AListAPIClient, validate_source_url, source_secret_path, write_secret, clear_source_session
 from .webdav import WebDAVError, relative_parts
 
 
@@ -25,6 +25,11 @@ class SourceCreate(BaseModel):
     base_url: str = Field(min_length=8, max_length=512)
     username: str = Field(default="", max_length=255)
     password: SecretStr | None = None
+
+
+class SourceOTP(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    otp_code: str = Field(pattern=r"^[0-9]{6,8}$")
 
 
 class SourceUpdate(BaseModel):
@@ -135,6 +140,7 @@ def update_source(request: Request, source_id: int, body: SourceUpdate):
             current_secret = source.secret_file
         if old_secret and old_secret != current_secret:
             try:
+                clear_source_session(config_dir, old_secret)
                 source_secret_path(config_dir, old_secret).unlink(missing_ok=True)
             except OSError:
                 pass
@@ -158,6 +164,7 @@ def disable_source(request: Request, source_id: int):
         session.commit()
     if old_secret:
         try:
+            clear_source_session(Path(request.app.state.settings.config_dir), old_secret)
             source_secret_path(Path(request.app.state.settings.config_dir), old_secret).unlink(missing_ok=True)
         except OSError:
             pass
@@ -176,7 +183,9 @@ def browse_source(request: Request, source_id: int, path: str = ""):
     try:
         password_file = str(source_secret_path(
             Path(request.app.state.settings.config_dir), secret_name)) if secret_name else None
-        client = AListAPIClient(base_url=base_url, username=username, password_file=password_file)
+        client = AListAPIClient(base_url=base_url, username=username, password_file=password_file,
+                                session_config_dir=Path(request.app.state.settings.config_dir),
+                                session_secret_name=secret_name)
         items = client.list_directory(parts)
     except (ValueError, OSError, WebDAVError):
         raise HTTPException(502, "SOURCE_BROWSE_UNAVAILABLE") from None
@@ -184,3 +193,25 @@ def browse_source(request: Request, source_id: int, path: str = ""):
         {"name": key[-1], "kind": meta["kind"], "size": meta["size"]}
         for key, meta in sorted(items.items(), key=lambda p: (p[1]["kind"] != "directory", p[0]))
     ]}
+
+
+@router.post("/{source_id}/authenticate")
+def authenticate_source(request: Request, source_id: int, body: SourceOTP):
+    """Administrator supplies an ephemeral OTP; never persist or echo the code."""
+    with request.app.state.service.SessionLocal() as session:
+        source = _source(session, source_id)
+        base_url, username, secret_name = source.base_url, source.username, source.secret_file
+    if not username or not secret_name:
+        raise HTTPException(422, "SOURCE_CREDENTIALS_REQUIRED")
+    config_dir = Path(request.app.state.settings.config_dir)
+    try:
+        # Force fresh login even if an older cached session exists.
+        client = AListAPIClient(
+            base_url=base_url, username=username,
+            password_file=str(source_secret_path(config_dir, secret_name)),
+            session_config_dir=config_dir, session_secret_name=secret_name,
+            otp_code=body.otp_code)
+        client.list_directory(())
+    except (ValueError, OSError, WebDAVError):
+        raise HTTPException(401, "SOURCE_OTP_AUTH_FAILED") from None
+    return {"authenticated": True}
