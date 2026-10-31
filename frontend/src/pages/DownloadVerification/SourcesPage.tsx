@@ -23,6 +23,8 @@ export const DownloadSourcesPage: React.FC = () => {
   const [draft, setDraft] = useState<SourceInput>({ ...empty });
   const [deleteTarget, setDeleteTarget] = useState<VerificationSource | null>(null);
   const [feedback, setFeedback] = useState('');
+  const [otpSource, setOtpSource] = useState<VerificationSource | null>(null);
+  const [otpCode, setOtpCode] = useState('');
   const [error, setError] = useState('');
 
   const list = useQuery({
@@ -59,6 +61,17 @@ export const DownloadSourcesPage: React.FC = () => {
       setDeleteTarget(null);
       setError(message(err));
     },
+  });
+
+  const authenticate = useMutation({
+    mutationFn: () => downloadVerificationApi.authenticate(otpSource!.id, otpCode),
+    onSuccess: () => {
+      setFeedback('双因素验证成功，可以浏览来源目录');
+      setError('');
+      setOtpCode('');
+      setOtpSource(null);
+    },
+    onError: () => setError('双因素验证失败，请检查动态验证码或来源连接'),
   });
 
   const add = () => {
@@ -108,6 +121,9 @@ export const DownloadSourcesPage: React.FC = () => {
               <small>{source.username ? '服务账号：' + source.username : '公开目录访问'} · {source.has_password ? '已配置密码' : '无需密码'}</small>
             </div>
             <div className="nfc-dv-source-buttons">
+              {source.username && <ConsoleButton size="sm" onClick={() => {
+                setOtpSource(source); setOtpCode(''); setError('');
+              }}>双因素验证</ConsoleButton>}
               <ConsoleButton size="sm" onClick={() => edit(source)}
                 leadingIcon={<ConsoleIcon name="pencil" size={14} />}>编辑</ConsoleButton>
               <ConsoleButton size="sm" variant="ghost" onClick={() => setDeleteTarget(source)}
@@ -157,6 +173,20 @@ export const DownloadSourcesPage: React.FC = () => {
               disabled={save.isPending}>取消</ConsoleButton>
           </div>
           {error && <p role="alert" className="nfc-dv-error">{error}</p>}
+        </form>
+      </DataPanel>}
+      {otpSource && <DataPanel title={'双因素验证 · ' + otpSource.name}
+        description="输入当前一次性验证码。验证码仅用于本次登录，不会保存；会话过期后可再次验证。">
+        <form onSubmit={event => { event.preventDefault(); authenticate.mutate(); }}>
+          <label>动态验证码
+            <input aria-label="动态验证码" inputMode="numeric" autoComplete="one-time-code"
+              type="text" pattern="[0-9]{6,8}" minLength={6} maxLength={8} required
+              value={otpCode} onChange={event => setOtpCode(event.target.value)} />
+          </label>
+          <div className="nfc-dv-actions">
+            <ConsoleButton type="submit" variant="primary" loading={authenticate.isPending}>验证并连接</ConsoleButton>
+            <ConsoleButton onClick={() => { setOtpSource(null); setOtpCode(''); }}>取消</ConsoleButton>
+          </div>
         </form>
       </DataPanel>}
       <ConsoleConfirmDialog open={deleteTarget !== null}

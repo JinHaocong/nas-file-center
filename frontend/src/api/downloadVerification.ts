@@ -55,6 +55,8 @@ export const downloadVerificationApi = {
   updateSource: (id: number, input: Partial<SourceInput>) =>
     api.put<VerificationSource>('/api/download-verifications/sources/' + id, input),
   deleteSource: (id: number) => api.delete<{ disabled: boolean }>('/api/download-verifications/sources/' + id),
+  authenticate: (id: number, otp_code: string) =>
+    api.post<{ authenticated: boolean }>('/api/download-verifications/sources/' + id + '/authenticate', { otp_code }),
   browse: (id: number, path: string) =>
     api.get<RemoteDirectory>('/api/download-verifications/sources/' + id + '/browse?path=' + encodeURIComponent(path)),
   configuration: () => api.get<{ configured: boolean; endpoint: string; mode: string; read_only: boolean }>('/api/download-verifications/configuration'),

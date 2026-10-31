@@ -32,7 +32,8 @@ def source_client(source: DownloadVerificationSource, settings, *, mode: str):
               if source.secret_file else None)
     if mode == "metadata":
         return AListAPIClient(base_url=source.base_url, username=source.username,
-                              password_file=secret)
+                              password_file=secret, session_config_dir=settings.config_dir,
+                              session_secret_name=source.secret_file)
     if mode == "strict_sha256":
         return WebDAVClient(base_url=source.base_url + "/dav/",
                             username=source.username, password_file=secret or "",

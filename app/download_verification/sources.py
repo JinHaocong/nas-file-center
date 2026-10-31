@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import ipaddress
+import hashlib
+import time
+from uuid import uuid4
 import json
 import os
 import re
@@ -69,15 +72,70 @@ def write_secret(config_dir: Path, filename: str, password: str) -> None:
         raise
 
 
+def _session_path(config_dir: Path, secret_filename: str) -> Path:
+    return source_secret_path(config_dir, secret_filename).with_suffix(".session")
+
+
+def _session_binding(base_url: str, username: str, secret_filename: str) -> str:
+    return hashlib.sha256(json.dumps([base_url, username, secret_filename]).encode()).hexdigest()
+
+
+def read_source_session(config_dir: Path, secret_filename: str, base_url: str, username: str) -> str:
+    """Tokens are scoped to the exact origin/account/secret, shared by API and Worker."""
+    path = _session_path(config_dir, secret_filename)
+    try:
+        if path.is_symlink() or not path.is_file() or path.stat().st_size > 8192:
+            return ""
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if (data.get("binding") != _session_binding(base_url, username, secret_filename)
+                or type(data.get("expires_at")) not in (int, float)
+                or data["expires_at"] <= time.time()):
+            return ""
+        token = data.get("token")
+        return token if isinstance(token, str) and 0 < len(token) <= 4096 else ""
+    except (OSError, ValueError, TypeError, AttributeError):
+        return ""
+
+
+def save_source_session(config_dir: Path, secret_filename: str, base_url: str,
+                        username: str, token: str) -> None:
+    """Atomic, mode-0600 cache. Never put tokens/OTP in SQLite, job state or API output."""
+    if not token or len(token) > 4096:
+        raise ValueError("INVALID_SOURCE_TOKEN")
+    path = _session_path(config_dir, secret_filename)
+    temp = path.with_name(path.name + "." + uuid4().hex + ".tmp")
+    fd = os.open(str(temp), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as out:
+            json.dump({"binding": _session_binding(base_url, username, secret_filename),
+                       "token": token, "expires_at": time.time() + 24 * 3600}, out)
+            out.flush()
+            os.fsync(out.fileno())
+        os.replace(temp, path)
+    finally:
+        temp.unlink(missing_ok=True)
+
+
+def clear_source_session(config_dir: Path, secret_filename: str | None) -> None:
+    if secret_filename:
+        _session_path(config_dir, secret_filename).unlink(missing_ok=True)
+
+
 class AListAPIClient:
     """AList/OpenList compatible API: login (optional) and paginated /api/fs/list."""
 
     def __init__(self, *, base_url: str, username: str = "", password_file: str | None = None,
-                 opener=None):
+                 opener=None, session_config_dir: Path | None = None,
+                 session_secret_name: str | None = None, otp_code: str | None = None):
         self.base = validate_source_url(base_url)
         self._opener = opener or build_opener(ProxyHandler({}), _NoRedirect(), HTTPHandler(), HTTPSHandler())
         self._token = ""
-        if username:
+        self._session_config_dir = session_config_dir
+        self._session_secret_name = session_secret_name
+        if (session_config_dir is not None and session_secret_name and username
+                and otp_code is None):
+            self._token = read_source_session(session_config_dir, session_secret_name, self.base, username)
+        if username and not self._token:
             if not password_file:
                 raise WebDAVError("SOURCE_AUTH_REQUIRED")
             file = Path(password_file)
@@ -85,11 +143,18 @@ class AListAPIClient:
                 raise WebDAVError("SOURCE_SECRET_MISSING")
             password = file.read_text(encoding="utf-8").rstrip("\r\n")
             # Password is never serialized into a queued job or a result record.
-            result = self._json("/api/auth/login", {"username": username, "password": password})
+            payload = {"username": username, "password": password}
+            if otp_code is not None:
+                if not re.fullmatch(r"[0-9]{6,8}", otp_code):
+                    raise WebDAVError("SOURCE_OTP_INVALID")
+                payload["otp_code"] = otp_code
+            result = self._json("/api/auth/login", payload)
             token = result.get("data", {}).get("token") if isinstance(result.get("data"), dict) else None
             if not isinstance(token, str) or not token:
                 raise WebDAVError("SOURCE_AUTH_FAILED")
             self._token = token
+            if session_config_dir is not None and session_secret_name:
+                save_source_session(session_config_dir, session_secret_name, self.base, username, token)
 
     def _json(self, path: str, payload: dict) -> dict:
         headers = {"Content-Type": "application/json", "Accept": "application/json",
@@ -103,7 +168,15 @@ class AListAPIClient:
                 if response.status != 200 or response.headers.get("Content-Encoding", "identity").lower() != "identity":
                     raise WebDAVError("SOURCE_API_UNAVAILABLE")
                 raw = response.read(MAX_RESPONSE_BYTES + 1)
-        except (HTTPError, URLError, OSError, TimeoutError):
+        except HTTPError as exc:
+            if exc.code in (401, 403) and self._token and path == "/api/fs/list":
+                if self._session_config_dir is not None:
+                    clear_source_session(self._session_config_dir, self._session_secret_name)
+                raise WebDAVError("SOURCE_SESSION_EXPIRED") from None
+            if path == "/api/auth/login" and exc.code in (401, 403):
+                raise WebDAVError("SOURCE_AUTH_FAILED_OR_OTP_REQUIRED") from None
+            raise WebDAVError("SOURCE_API_UNAVAILABLE") from None
+        except (URLError, OSError, TimeoutError):
             raise WebDAVError("SOURCE_API_UNAVAILABLE") from None
         if len(raw) > MAX_RESPONSE_BYTES:
             raise WebDAVError("SOURCE_RESPONSE_LIMIT")
@@ -112,6 +185,12 @@ class AListAPIClient:
         except (ValueError, UnicodeDecodeError):
             raise WebDAVError("SOURCE_INVALID_RESPONSE") from None
         if not isinstance(parsed, dict) or parsed.get("code") != 200:
+            if self._token and path == "/api/fs/list":
+                if self._session_config_dir is not None:
+                    clear_source_session(self._session_config_dir, self._session_secret_name)
+                raise WebDAVError("SOURCE_SESSION_EXPIRED")
+            if path == "/api/auth/login":
+                raise WebDAVError("SOURCE_AUTH_FAILED_OR_OTP_REQUIRED")
             raise WebDAVError("SOURCE_API_DENIED")
         return parsed
 
