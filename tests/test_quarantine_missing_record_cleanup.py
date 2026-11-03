@@ -661,3 +661,64 @@ def test_owner_confirmed_cleanup_is_admin_only(maintenance_env):
     assert anonymous.delete(
         "/api/quarantine/1106/owner-deleted-record?confirmation=FORGET_OWNER_DELETED_1106"
     ).status_code in (401, 403)
+
+
+@pytest.mark.parametrize("entry_id", [1106, 884])
+def test_owner_confirmed_active_cross_storage_rows_are_metadata_only(
+    maintenance_env, monkeypatch, entry_id
+):
+    env = maintenance_env
+    with env["service"].SessionLocal() as session:
+        session.add(QuarantineEntry(
+            id=entry_id,
+            original_path=str(env["data"] / f"active-{entry_id}"),
+            quarantine_path=str(env["trash"] / f"active-{entry_id}"),
+            state="active", tx_phase="active",
+            transaction_mode="cross_storage_transactional",
+            active_attempt_generation=2,
+        ))
+        session.commit()
+    sentinel = env["data"] / "unrelated-live-file"
+    sentinel.write_text("leave untouched")
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Owner-attested record removal may not unlink files")
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "unlink", forbidden)
+        patch.setattr(os, "rmdir", forbidden)
+        result = env["admin"].delete(
+            f"/api/quarantine/{entry_id}/owner-deleted-record"
+            f"?confirmation=FORGET_OWNER_DELETED_{entry_id}"
+        )
+    assert result.status_code == 200, result.text
+    assert result.json()["metadata_only"] is True
+    assert result.json()["transaction_finalized"] is False
+    assert sentinel.read_text() == "leave untouched"
+    with env["service"].SessionLocal() as session:
+        assert session.get(QuarantineEntry, entry_id) is None
+        event = session.scalar(select(AuditEvent).where(
+            AuditEvent.operation == "quarantine.owner_manual_record_forget",
+        ))
+        assert event is not None
+        detail = json.loads(event.details_json)
+        assert detail["prior_state"] == "active"
+        assert detail["prior_tx_phase"] == "active"
+        assert detail["filesystem_mutations"] == 0
+
+
+def test_owner_confirmed_active_incident_denies_non_cross_storage(maintenance_env):
+    env = maintenance_env
+    with env["service"].SessionLocal() as session:
+        session.add(QuarantineEntry(
+            id=1106, original_path=str(env["data"] / "ordinary"),
+            quarantine_path=str(env["trash"] / "ordinary"),
+            state="active", tx_phase="active",
+            transaction_mode="same_storage_transactional",
+        ))
+        session.commit()
+    result = env["admin"].delete(
+        "/api/quarantine/1106/owner-deleted-record"
+        "?confirmation=FORGET_OWNER_DELETED_1106"
+    )
+    assert result.status_code == 409
+    with env["service"].SessionLocal() as session:
+        assert session.get(QuarantineEntry, 1106) is not None
