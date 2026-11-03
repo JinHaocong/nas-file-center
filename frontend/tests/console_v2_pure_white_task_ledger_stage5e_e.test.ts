@@ -127,7 +127,7 @@ describe('Pure White Stage 5E-E Tasks complex states', () => {
     // PR #315: the 20m cap cancelled the same browser job during Archive
     // Recovery after the Tasks contrast gate passed. Keep all steps and
     // a bounded 35m run; never promote a cancelled job to a green check.
-    assert.match(ci, /browser-overlay-smoke:\s*\n\s*runs-on: ubuntu-latest\s*\n(?:\s*#.*\n)*\s*timeout-minutes: 35/);
+    assert.match(ci, /browser-overlay-smoke:\s*\n(?:\s*#.*\n)*\s*runs-on: ubuntu-24\.04\s*\n(?:\s*#.*\n)*\s*timeout-minutes: 35/);
     for (const requiredStep of [
       'browser-theme-resilience.mjs',
       'browser-archive-recovery-task-continuity.mjs',
