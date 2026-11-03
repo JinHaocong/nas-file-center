@@ -458,6 +458,16 @@ export const QuarantinePage: React.FC = () => {
                 ? '核查缺失文件记录' : '清理缺失文件记录'}</ConsoleButton>
           </span>
         )}
+        {isAdmin && (record.id === 1106 || record.id === 884) && record.state === 'active' && (
+          <span title="仅针对已手动删除 NAS 文件的两条事故记录；只删除数据库记录，不执行 unlink">
+            <ConsoleButton size={size} variant="ghost"
+              disabled={isSafeMode || !allowDelete || ownerForgetBusy}
+              leadingIcon={<ConsoleIcon name="trash" size={15} />}
+              onClick={() => setOwnerForgetTarget(record.id)}>
+              已手动删除文件：仅清理记录
+            </ConsoleButton>
+          </span>
+        )}
         {canRestore && (
           <span title={isSafeMode ? '只读保护模式 (ALLOW_MUTATION=false) 生效中，禁止恢复' : '恢复到原路径或指定路径'}>
             <ConsoleButton size={size} variant="ghost" leadingIcon={<ConsoleIcon name="archive" size={15} />}
@@ -706,7 +716,7 @@ export const QuarantinePage: React.FC = () => {
       <ConsoleConfirmDialog open={ownerForgetTarget !== null}
         onOpenChange={next => { if (!next && !ownerForgetBusy) setOwnerForgetTarget(null); }}
         title={'仅移除隔离残留记录 #' + (ownerForgetTarget ?? '') + '？'}
-        description="仅针对事故 #357 的 #1106 和 #884。你已确认 NAS 上对应文件由你手动删除。本操作跳过通常的冻结事务证据保护，仅删除这一条数据库记录并写入审计，不检查或操作 NAS 文件，不执行恢复，也不能撤销。建议先备份数据库并暂停相关 Worker。"
+        description="仅针对事故 #357 的 #1106 和 #884（包括 active 状态）。你已确认 NAS 上对应文件由你手动删除。本操作跳过通常的冻结事务证据保护，仅删除这一条数据库记录并写入审计，不检查或操作 NAS 文件，不执行恢复，也不能撤销。建议先备份数据库并暂停相关 Worker。"
         confirmText="我确认文件已删除，仅删除此数据库记录"
         busy={ownerForgetBusy} disabled={!isAdmin || isSafeMode || !allowDelete || !ownerForgetTarget}
         onConfirm={() => { void confirmOwnerForget(); }} />
