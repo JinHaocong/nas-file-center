@@ -5942,7 +5942,7 @@ class FileCenterService:
     ) -> dict:
         """Owner-attested, DB-only emergency retirement for incident #357.
 
-        Only entries 1106 and 884 are eligible. This deliberately does NOT
+        Only entries 1106 and 884 in active/active or purging/purging are eligible.\n        This deliberately does NOT
         inspect or mutate NAS paths, call a Worker, or finalize a transaction.
         The operator has confirmed those public payloads were removed
         separately, and accepts loss of the stale recovery metadata.
@@ -5962,12 +5962,15 @@ class FileCenterService:
             if entry is None:
                 raise KeyError(f"Quarantine entry #{entry_id} not found")
             if not (
-                entry.state == "purging"
-                and entry.tx_phase == "purging"
-                and entry.transaction_mode == "cross_storage_transactional"
+                entry.transaction_mode == "cross_storage_transactional"
+                and (entry.state, entry.tx_phase) in (
+                    ("purging", "purging"),
+                    ("active", "active"),
+                )
             ):
                 raise StateConflictError(
-                    "Incident-only override is limited to interrupted cross-storage purging"
+                    "Incident-only override requires the original active or interrupted "
+                    "cross-storage transaction state"
                 )
 
             evidence = {
