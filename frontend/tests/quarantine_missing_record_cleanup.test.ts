@@ -15,6 +15,9 @@ describe('externally missing quarantine payload metadata-only cleanup', () => {
     const page = read('src/pages/Quarantine/index.tsx');
     const client = read('src/api/quarantine.ts');
     assert.match(page, /recoveryDiagnostic\.id === 1106 \|\| recoveryDiagnostic\.id === 884/);
+    assert.match(page, /record\.id === 1106 \|\| record\.id === 884/);
+    assert.match(page, /record\.state === 'active'/);
+    assert.match(page, /已手动删除文件：仅清理记录/);
     assert.match(page, /quarantineApi\.forgetOwnerDeletedRecord\(id\)/);
     assert.match(page, /我确认文件已删除，仅删除此数据库记录/);
     assert.match(client, /owner-deleted-record\?confirmation=FORGET_OWNER_DELETED_/);

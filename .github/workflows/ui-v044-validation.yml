@@ -110,7 +110,9 @@ jobs:
   # Bound the whole job to 35m rather than truncating tests or treating
   # cancellation as success; keep every existing fail-closed step intact.
   browser-overlay-smoke:
-    runs-on: ubuntu-latest
+    # Playwright 1.56.1 Chromium is not supported on ubuntu-26.04.
+    # Pin the browser-only jobs; keep the actual Chromium gates enabled.
+    runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
       - name: Checkout exact candidate HEAD
@@ -273,7 +275,7 @@ jobs:
   # Every router path with read-only mock APIs, 8 viewports x 4 themes.
   # Captures actual React screenshots and JSON diagnostics, NOT owner sign-off.
   full-route-visual-audit:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     strategy:
       fail-fast: false
