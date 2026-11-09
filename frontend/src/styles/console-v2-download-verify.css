@@ -184,3 +184,21 @@
   .nfc-dv-remote-dialog .nfc-directory-picker-footer {align-items:stretch;flex-wrap:wrap;}
   .nfc-dv-remote-dialog .nfc-directory-picker-footer-actions {width:100%;justify-content:flex-end;}
 }
+
+
+/* Download verification item-only filter: remain readable on desktop and mobile. */
+.nfc-download-verify-page .nfc-dv-detail-toolbar {
+  display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
+  margin-bottom:12px;
+}
+.nfc-download-verify-page .nfc-dv-detail-filter {
+  display:inline-flex;align-items:center;gap:9px;cursor:pointer;
+  font-size:12px;font-weight:650;color:var(--dv-text);
+}
+.nfc-download-verify-page .nfc-dv-detail-filter input[type=checkbox] {
+  width:16px;height:16px;min-height:16px;margin:0;padding:0;
+  accent-color:var(--nfc-accent);flex:0 0 auto;
+}
+.nfc-download-verify-page .nfc-dv-detail-count {
+  font-size:12px;color:var(--dv-muted);font-variant-numeric:tabular-nums;
+}
