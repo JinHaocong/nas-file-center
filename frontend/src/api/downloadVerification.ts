@@ -67,6 +67,8 @@ export const downloadVerificationApi = {
   removeReport: (id: number) => api.delete<Record<string, never>>('/api/download-verifications/' + id),
   bulkDeleteReports: (run_ids: number[]) =>
     api.post<{ deleted: number }>('/api/download-verifications/bulk-delete', { run_ids }),
-  items: (id: number, page: number, status?: string) =>
-    api.get<Page<DownloadVerificationItem>>('/api/download-verifications/' + id + '/items?page=' + page + '&page_size=50' + (status ? '&status=' + encodeURIComponent(status) : '')),
+  items: (id: number, page: number, status?: string, abnormalOnly = false) =>
+    api.get<Page<DownloadVerificationItem>>('/api/download-verifications/' + id + '/items?page=' + page + '&page_size=50' +
+      (status ? '&status=' + encodeURIComponent(status) : '') +
+      (abnormalOnly ? '&abnormal_only=true' : '')),
 };

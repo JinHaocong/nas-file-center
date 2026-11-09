@@ -18,6 +18,12 @@ from app.download_verification.models import DownloadVerificationRun, DownloadVe
 router = APIRouter(prefix="/api/download-verifications", tags=["download-verification"],
                    dependencies=[Depends(require_admin_user)])
 
+# A metadata match does not prove a SHA256 match. Only actual discrepancies
+# belong in the "abnormal only" view; pending work is not a discrepancy.
+ABNORMAL_ITEM_STATUSES = (
+    "ONLY_LOCAL", "ONLY_REMOTE", "SIZE_MISMATCH", "TYPE_MISMATCH", "HASH_MISMATCH",
+)
+
 
 class NewVerification(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -131,7 +137,8 @@ def get_verification(request: Request, run_id: int):
 
 @router.get("/{run_id}/items")
 def list_verification_items(request: Request, run_id: int, page: int = 1,
-                            page_size: int = 50, status: str | None = None):
+                            page_size: int = 50, status: str | None = None,
+                            abnormal_only: bool = False):
     page = max(1, page)
     page_size = max(1, min(200, page_size))
     with request.app.state.service.SessionLocal() as session:
@@ -140,6 +147,8 @@ def list_verification_items(request: Request, run_id: int, page: int = 1,
         condition = [DownloadVerificationItem.run_id == run_id]
         if status:
             condition.append(DownloadVerificationItem.status == status)
+        if abnormal_only:
+            condition.append(DownloadVerificationItem.status.in_(ABNORMAL_ITEM_STATUSES))
         total = session.scalar(select(func.count(DownloadVerificationItem.id)).where(*condition)) or 0
         rows = session.scalars(select(DownloadVerificationItem).where(*condition).order_by(
             DownloadVerificationItem.relative_path).limit(page_size).offset((page - 1) * page_size)).all()

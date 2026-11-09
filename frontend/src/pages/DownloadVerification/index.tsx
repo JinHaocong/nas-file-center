@@ -50,6 +50,7 @@ export const DownloadVerificationPage: React.FC = () => {
   const [mode, setMode] = useState<'metadata' | 'strict_sha256'>('metadata');
   const [selected, setSelected] = useState<number | null>(null);
   const [page, setPage] = useState(1);
+  const [abnormalOnly, setAbnormalOnly] = useState(false);
   const [historyPage, setHistoryPage] = useState(1);
   const [deleteTarget, setDeleteTarget] = useState<DownloadVerificationRun | null>(null);
   const [selectedReportIds, setSelectedReportIds] = useState<number[]>([]);
@@ -70,8 +71,8 @@ export const DownloadVerificationPage: React.FC = () => {
     refetchInterval: 5000,
   });
   const details = useQuery({
-    queryKey: ['download-verify-items', selected, page],
-    queryFn: () => downloadVerificationApi.items(selected!, page),
+    queryKey: ['download-verify-items', selected, page, abnormalOnly],
+    queryFn: () => downloadVerificationApi.items(selected!, page, undefined, abnormalOnly),
     enabled: selected !== null,
     refetchInterval: selected === null ? false : 5000,
   });
@@ -82,6 +83,7 @@ export const DownloadVerificationPage: React.FC = () => {
       setFeedback('已提交只读校验任务 #' + run.id + '，可在历史记录中查看进度');
       setSelected(run.id);
       setPage(1);
+      setAbnormalOnly(false);
       setHistoryPage(1);
       void qc.invalidateQueries({ queryKey: ['download-verify-runs'] });
     },
@@ -278,7 +280,7 @@ export const DownloadVerificationPage: React.FC = () => {
                   <small>{displayJob(run.job_status)}{run.error_code ? ' · ' + run.error_code : ''}</small></td>
                 <td>{run.checked}/{run.total}</td>
                 <td><div className="nfc-dv-row-actions">
-                  <ConsoleButton size="sm" onClick={() => { setSelected(run.id); setPage(1); }}>查看条目</ConsoleButton>
+                  <ConsoleButton size="sm" onClick={() => { setSelected(run.id); setPage(1); setAbnormalOnly(false); }}>查看条目</ConsoleButton>
                   <ConsoleButton size="sm" variant="secondary"
                     leadingIcon={<ConsoleIcon name="activity" size={14} />}
                     onClick={() => navigate('/tasks?task=' + run.work_job_id)}>任务中心</ConsoleButton>
@@ -304,7 +306,19 @@ export const DownloadVerificationPage: React.FC = () => {
       {selected !== null && <DataPanel title={'校验明细 #' + selected}
         action={<ConsoleButton size="sm" onClick={() => setSelected(null)}>关闭</ConsoleButton>}
         description="逐条查看相对路径与文件大小差异。快速核对不会声称内容 SHA256 一致。">
-        {details.isError && <p role="alert">读取明细失败</p>}
+        <div className="nfc-dv-detail-toolbar">
+          <label className="nfc-dv-detail-filter">
+            <input type="checkbox" checked={abnormalOnly} aria-label="只看异常条目"
+              onChange={event => { setAbnormalOnly(event.target.checked); setPage(1); }} />
+            <span>只看异常</span>
+          </label>
+          <span className="nfc-dv-detail-count" aria-live="polite">
+            {details.isLoading ? '正在读取明细…'
+              : details.isError ? '明细读取失败'
+                : (abnormalOnly ? '异常 ' : '全部 ') + (details.data?.total ?? 0) + ' 项'}
+          </span>
+        </div>
+        {details.isError && <p role="alert" className="nfc-dv-error">读取明细失败，请稍后重试</p>}
         <div className="nfc-dv-table-scroll nfc-download-verify-table-scroll">
           <table className="nfc-dv-table nfc-download-verify-table" aria-label="校验明细">
             <thead><tr><th>相对路径</th><th>结果</th><th>云端大小</th><th>NAS 大小</th><th>内容 SHA256</th></tr></thead>
@@ -314,7 +328,12 @@ export const DownloadVerificationPage: React.FC = () => {
               <td>{formatBytes(item.remote_size)}</td><td>{formatBytes(item.local_size)}</td>
               <td>{item.remote_sha256 && item.local_sha256
                 ? item.remote_sha256 === item.local_sha256 ? '一致' : '不一致' : '未检查'}</td>
-            </tr>)}</tbody>
+            </tr>)}
+              {details.isSuccess && details.data.items.length === 0 &&
+                <tr><td colSpan={5} className="nfc-dv-no-rows">
+                  {abnormalOnly ? '没有发现异常条目' : '暂无校验条目'}
+                </td></tr>}
+            </tbody>
           </table>
         </div>
         <div className="nfc-dv-pagination">
