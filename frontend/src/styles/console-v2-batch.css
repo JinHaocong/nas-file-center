@@ -63,3 +63,29 @@
 @media (prefers-reduced-motion:reduce) {
   .nfc-v2-batch * { animation:none;transition:none;scroll-behavior:auto; }
 }
+
+/* P / V sorter inherits native Batch tokens in both light and dark themes. */
+.nfc-v2-batch-media-panel { min-width:0; }
+.nfc-v2-batch-media-stats { display:flex;gap:10px;flex-wrap:wrap;padding:12px 16px;
+  border-bottom:1px solid var(--nfc-batch-line);font-size:12px;color:var(--nfc-batch-muted); }
+.nfc-v2-batch-media-stats > span { display:inline-flex;align-items:center;gap:6px;
+  border:1px solid var(--nfc-batch-line);border-radius:8px;
+  background:var(--nfc-batch-soft);padding:7px 10px; }
+.nfc-v2-batch-media-stats strong { font-variant-numeric:tabular-nums;color:var(--nfc-batch-text); }
+.nfc-v2-batch-media-scroll { overflow-x:auto;min-width:0; }
+.nfc-v2-batch-media-table { width:100%;border-collapse:collapse;text-align:left;
+  font-size:12px;color:var(--nfc-batch-text); }
+.nfc-v2-batch-media-table th { padding:12px 14px;white-space:nowrap;
+  background:var(--nfc-batch-soft);color:var(--nfc-batch-muted);font-weight:650; }
+.nfc-v2-batch-media-table td { border-top:1px solid var(--nfc-batch-line);
+  padding:12px 14px;vertical-align:middle; }
+.nfc-v2-batch-media-table :is(td:nth-child(2),td:nth-child(3)) { min-width:220px;max-width:420px; }
+.nfc-v2-batch-media-table .nfc-code-path { max-width:100%; }
+.nfc-v2-batch-media-sr-only { position:absolute;width:1px;height:1px;padding:0;margin:-1px;
+  overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0; }
+.nfc-v2-batch-media-mobile-list { padding:12px; }
+@media (max-width:767px) {
+  .nfc-v2-batch-media-stats { padding:10px 12px;gap:7px; }
+  .nfc-v2-batch-media-stats > span { flex:1 1 calc(50% - 7px);box-sizing:border-box;
+    justify-content:space-between; }
+}
