@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { buildBatchDraft, isBatchOperation } from '../src/utils/batchDraftSafety';
+import { buildMediaSortDraft } from '../src/utils/mediaSortSafety';
 
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');
 
@@ -117,5 +118,59 @@ describe('Console v2 Batch native Draft-only UI', () => {
       '@media (prefers-reduced-motion:reduce)', 'min-height:44px',
     ]) assert.ok(css.includes(token), token);
     assert.ok(read('src/main.tsx').includes("import './styles/console-v2-batch.css';"));
+  });
+});
+
+
+describe('P/V media sort preview to Move Plan integration', () => {
+  test('builds exact safe move draft only from conflict-free preview', () => {
+    const base = {
+      parent: '/data/mixed', count: 2, image_count: 1, video_count: 1,
+      ready_count: 2, conflict_count: 0,
+      items: [
+        { media_kind: 'image' as const, source: '/data/mixed/image.JPG',
+          target: '/data/mixed/P/image.JPG', expected_size: 10,
+          conflict: false, conflict_reason: null },
+        { media_kind: 'video' as const, source: '/data/mixed/clip.MP4',
+          target: '/data/mixed/V/clip.MP4', expected_size: 12,
+          conflict: false, conflict_reason: null },
+      ],
+    };
+    assert.deepEqual(buildMediaSortDraft(base), {
+      name: '媒体文件分类（P / V）', kind: 'media-sort',
+      items: [
+        { operation: 'move', source: '/data/mixed/image.JPG',
+          target: '/data/mixed/P/image.JPG', expected_size: 10 },
+        { operation: 'move', source: '/data/mixed/clip.MP4',
+          target: '/data/mixed/V/clip.MP4', expected_size: 12 },
+      ],
+    });
+    assert.equal(buildMediaSortDraft({ ...base, conflict_count: 1 }), null);
+    assert.equal(buildMediaSortDraft({ ...base, items: [] }), null);
+    assert.equal(buildMediaSortDraft({ ...base, count: 3 }), null);
+    assert.equal(buildMediaSortDraft({ ...base, items: [
+      { ...base.items[0], conflict: true },
+      base.items[1],
+    ] }), null);
+    assert.equal(buildMediaSortDraft(null), null);
+  });
+
+  test('media sort is read-only until generic Plan lifecycle', () => {
+    const page = read('src/pages/Batch/index.tsx');
+    const editor = read('src/pages/Batch/MediaSortEditor.tsx');
+    const api = read('src/api/mediaSort.ts');
+    const css = read('src/styles/console-v2-batch.css');
+    assert.match(page, /media-sort/);
+    assert.match(page, /<MediaSortEditor\s*\/>/);
+    assert.match(editor, /<DirectoryPicker\s+multiple=\{false\}/);
+    assert.match(editor, /buildMediaSortDraft\(preview\)/);
+    assert.match(editor, /await previewMutation\.mutateAsync\(selected\)/);
+    assert.match(editor, /await planMutation\.mutateAsync\(draft\)/);
+    assert.match(editor, /previewKeyRef\.current !== directory\.trim\(\)/);
+    assert.doesNotMatch(editor, /executePlan|freezePlan|validatePlan|deletePlan/);
+    assert.match(api, /\/api\/media-sort\/preview/);
+    for (const selector of ['nfc-v2-batch-media-stats', 'nfc-v2-batch-media-table']) {
+      assert.ok(css.includes(selector), selector);
+    }
   });
 });

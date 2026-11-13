@@ -13,12 +13,15 @@ import { ActionBar } from '../../components/ui/ActionBar';
 import { ConsoleButton } from '../../components/ui/ConsoleButton';
 import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
 import { useConsoleToast } from '../../components/ui/ConsoleToast';
+import { MediaSortEditor } from './MediaSortEditor';
 
-const operations: readonly { op: BatchOperation; title: string; detail: string }[] = [
+type BatchMode = BatchOperation | 'media-sort';
+const operations: readonly { op: BatchMode; title: string; detail: string }[] = [
   { op: 'quarantine', title: '批量隔离', detail: 'Quarantine' },
   { op: 'touch', title: '更新时间戳', detail: 'Touch' },
   { op: 'move', title: '批量移动', detail: 'Move' },
   { op: 'rename', title: '批量改名', detail: 'Rename' },
+  { op: 'media-sort', title: '媒体分类', detail: 'P / V' },
 ];
 
 /** Only create a Plan Draft, never Freeze/Validate/Execute a filesystem operation. */
@@ -27,7 +30,7 @@ export const BatchPage: React.FC = () => {
   const navigate = useNavigate();
   const toast = useConsoleToast();
   const [name, setName] = useState('批量处理');
-  const [operation, setOperation] = useState<BatchOperation>('quarantine');
+  const [operation, setOperation] = useState<BatchMode>('quarantine');
   const [paths, setPaths] = useState<string[]>([]);
   const [mappingsText, setMappingsText] = useState('');
   const [planLoading, setPlanLoading] = useState(false);
@@ -68,7 +71,7 @@ export const BatchPage: React.FC = () => {
     }
   };
 
-  const onOperationChange = (next: BatchOperation) => {
+  const onOperationChange = (next: BatchMode) => {
     if (planGuard.current) return;
     setOperation(next);
     setValidationError('');
@@ -82,17 +85,19 @@ export const BatchPage: React.FC = () => {
   return (
     <div className="nfc-operations-page nfc-batch-page nfc-page-layout-workbench nfc-v2-batch">
       <PageHeader title="批量文件处理"
-        description="批量隔离、Touch、Move 与 Rename 统一先创建 Plan；真正文件操作仍通过 Freeze → Validate → Execute。" />
+        description="批量隔离、Touch、Move、Rename 和媒体分类统一先预览或创建 Plan；真正文件操作仍通过 Freeze → Validate → Execute。" />
       <DataPanel title="批量操作定义"
-        description="选择操作类型并明确输入源路径/映射。这里创建 Plan，不会立即执行文件系统变更。"
+        description={operation === 'media-sort'
+           ? '选择媒体分类后，按 P / V 规则预览当前目录内的图片和视频。'
+           : '选择操作类型并明确输入源路径/映射。这里创建 Plan，不会立即执行文件系统变更。'}
         className="nfc-complex-form-panel nfc-file-tool-form nfc-tool-workbench">
         <div className="nfc-batch-form nfc-v2-batch-form">
-          <label className="nfc-v2-batch-field">
+          {operation !== 'media-sort' && <label className="nfc-v2-batch-field">
             <span>计划名称</span>
             <input value={name} required disabled={planLoading}
               placeholder="批量处理计划" aria-invalid={Boolean(validationError) && !name.trim()}
               onChange={event => { setName(event.target.value); setValidationError(''); }} />
-          </label>
+          </label>}
           <fieldset className="nfc-v2-batch-operations">
             <legend>操作类型</legend>
             <div className="nfc-batch-operation-grid">
@@ -115,6 +120,7 @@ export const BatchPage: React.FC = () => {
               </label>
             </div>
           </fieldset>
+          {operation !== 'media-sort' && <>
           {operation === 'quarantine' && (
             <div className="nfc-v2-batch-notice nfc-page-alert" role="note">
               <ConsoleIcon name="shield-check" size={19} />
@@ -153,8 +159,10 @@ export const BatchPage: React.FC = () => {
               Plan 创建后仍需在计划详情完成 Freeze、Validate 与 Execute。
             </span>
           </ActionBar>
+          </>}
         </div>
       </DataPanel>
+      {operation === 'media-sort' && <MediaSortEditor />}
     </div>
   );
 };

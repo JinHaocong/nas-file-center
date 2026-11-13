@@ -13,6 +13,7 @@ from app.batch.rename import RenameRule
 from app.batch.directory_rename import preview_immediate_directory_renames
 from app.batch.file_rename import preview_immediate_file_renames
 from app.batch.filename_audit import audit_immediate_filenames
+from app.batch.media_sort import preview_media_sort
 from app.batch.directory_compare import compare_directories, verify_directory_pair
 from app.exceptions import PlanStaleError
 from app.filters.schema import FilterPreviewRequest, FilterPreviewResponse
@@ -451,6 +452,11 @@ class ImmediateDirectoryRenamePreviewRequest(BaseModel):
 
 
 class FilenameAuditPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    parent: str = Field(min_length=1, max_length=4096)
+
+
+class MediaSortPreviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     parent: str = Field(min_length=1, max_length=4096)
 
@@ -1377,6 +1383,19 @@ def filename_quality_audit_preview(request: Request, payload: FilenameAuditPrevi
     """Inspect only immediate regular file names. Never changes filesystem data."""
     try:
         return audit_immediate_filenames(
+            payload.parent,
+            allowed_roots=request.app.state.settings.allowed_roots,
+            quarantine_root=request.app.state.settings.quarantine_root,
+        )
+    except (ValueError, OSError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/media-sort/preview")
+def media_sort_preview(request: Request, payload: MediaSortPreviewRequest):
+    """Read-only preview; creates only generic Move Plan proposals."""
+    try:
+        return preview_media_sort(
             payload.parent,
             allowed_roots=request.app.state.settings.allowed_roots,
             quarantine_root=request.app.state.settings.quarantine_root,
