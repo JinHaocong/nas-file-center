@@ -11,6 +11,8 @@ export interface MediaSortRow {
 
 export interface MediaSortPreview {
   parent: string;
+  recursive: boolean;
+  scanned_directories: number;
   count: number;
   image_count: number;
   video_count: number;
@@ -20,6 +22,6 @@ export interface MediaSortPreview {
 }
 
 export const mediaSortApi = {
-  preview: (parent: string) =>
-    api.post<MediaSortPreview>('/api/media-sort/preview', { parent }),
+  preview: (payload: { parent: string; recursive: boolean }) =>
+    api.post<MediaSortPreview>('/api/media-sort/preview', payload),
 };

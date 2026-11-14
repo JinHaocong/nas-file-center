@@ -89,3 +89,19 @@
   .nfc-v2-batch-media-stats > span { flex:1 1 calc(50% - 7px);box-sizing:border-box;
     justify-content:space-between; }
 }
+
+/* Recursive toggle shares the Batch workbench's light/dark color tokens. */
+.nfc-v2-batch-media-recursive { display:flex;align-items:flex-start;gap:10px;
+  padding:12px 13px;border:1px solid var(--nfc-batch-line);border-radius:10px;
+  color:var(--nfc-batch-text);background:var(--nfc-batch-paper);cursor:pointer; }
+.nfc-v2-batch-media-recursive input[type="checkbox"] { flex:0 0 auto;width:18px;height:18px;
+  margin:1px 0 0;accent-color:var(--nfc-batch-accent);cursor:pointer; }
+.nfc-v2-batch-media-recursive > span { display:grid;gap:5px;min-width:0; }
+.nfc-v2-batch-media-recursive strong { font-size:12px;font-weight:650;line-height:1.4; }
+.nfc-v2-batch-media-recursive small { color:var(--nfc-batch-muted);font-size:11px;
+  font-weight:400;line-height:1.6; }
+.nfc-v2-batch-media-recursive:focus-within { outline:2px solid var(--nfc-batch-accent);
+  outline-offset:2px; }
+@media (max-width:767px) {
+  .nfc-v2-batch-media-recursive { min-height:44px; }
+}
