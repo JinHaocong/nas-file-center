@@ -125,7 +125,8 @@ describe('Console v2 Batch native Draft-only UI', () => {
 describe('P/V media sort preview to Move Plan integration', () => {
   test('builds exact safe move draft only from conflict-free preview', () => {
     const base = {
-      parent: '/data/mixed', count: 2, image_count: 1, video_count: 1,
+      parent: '/data/mixed', recursive: false, scanned_directories: 1,
+      count: 2, image_count: 1, video_count: 1,
       ready_count: 2, conflict_count: 0,
       items: [
         { media_kind: 'image' as const, source: '/data/mixed/image.JPG',
@@ -138,6 +139,16 @@ describe('P/V media sort preview to Move Plan integration', () => {
     };
     assert.deepEqual(buildMediaSortDraft(base), {
       name: '媒体文件分类（P / V）', kind: 'media-sort',
+      items: [
+        { operation: 'move', source: '/data/mixed/image.JPG',
+          target: '/data/mixed/P/image.JPG', expected_size: 10 },
+        { operation: 'move', source: '/data/mixed/clip.MP4',
+          target: '/data/mixed/V/clip.MP4', expected_size: 12 },
+      ],
+    });
+    assert.deepEqual(buildMediaSortDraft({ ...base, recursive: true }), {
+      name: '媒体文件递归分类（每目录 P / V）',
+      kind: 'media-sort',
       items: [
         { operation: 'move', source: '/data/mixed/image.JPG',
           target: '/data/mixed/P/image.JPG', expected_size: 10 },
@@ -164,12 +175,19 @@ describe('P/V media sort preview to Move Plan integration', () => {
     assert.match(page, /<MediaSortEditor\s*\/>/);
     assert.match(editor, /<DirectoryPicker\s+multiple=\{false\}/);
     assert.match(editor, /buildMediaSortDraft\(preview\)/);
-    assert.match(editor, /await previewMutation\.mutateAsync\(selected\)/);
+    assert.match(editor, /await previewMutation\.mutateAsync\(\{ parent: selected, recursive \}\)/);
     assert.match(editor, /await planMutation\.mutateAsync\(draft\)/);
-    assert.match(editor, /previewKeyRef\.current !== directory\.trim\(\)/);
+    assert.match(editor, /previewKeyRef\.current !== previewKey\(directory, recursive\)/);
     assert.doesNotMatch(editor, /executePlan|freezePlan|validatePlan|deletePlan/);
     assert.match(api, /\/api\/media-sort\/preview/);
-    for (const selector of ['nfc-v2-batch-media-stats', 'nfc-v2-batch-media-table']) {
+    assert.match(api, /recursive: boolean/);
+    assert.match(editor, /useState\(false\)/);
+    assert.match(editor, /<ConsoleCheckbox checked=\{recursive\}/);
+    assert.match(editor, /onCheckedChange=\{changeRecursive\}/);
+    assert.match(editor, /invalidatePreview\(\)/);
+    assert.match(editor, /递归处理子目录/);
+    assert.match(editor, /P_1\/V_1/);
+    for (const selector of ['nfc-v2-batch-media-stats', 'nfc-v2-batch-media-table', 'nfc-v2-batch-media-recursive']) {
       assert.ok(css.includes(selector), selector);
     }
   });
