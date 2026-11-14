@@ -14,6 +14,7 @@ export interface MediaSortPlanDraft {
 /** The frontend can only create a draft from a complete, conflict-free preview. */
 export function buildMediaSortDraft(preview: MediaSortPreview | null): MediaSortPlanDraft | null {
   if (!preview || typeof preview.recursive !== 'boolean' ||
+      typeof preview.smart_skip !== 'boolean' ||
       preview.items.length === 0 || preview.conflict_count > 0 ||
       preview.count !== preview.items.length ||
       preview.items.some(item => item.conflict ||
