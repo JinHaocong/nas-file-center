@@ -279,7 +279,9 @@ export const MediaSortEditor: React.FC = () => {
                     <tr key={item.path}>
                       <td><CodePath value={item.path} /></td>
                       <td><StatusBadge status="skipped" label={skipReasonLabel[item.reason]} /></td>
-                      <td>图片 {item.image_count} · 视频 {item.video_count}</td>
+                      <td>{item.reason === 'preclassified'
+                        ? '未扫描（保留现有分类目录）'
+                        : `图片 ${item.image_count} · 视频 ${item.video_count}`}</td>
                     </tr>
                   ))}</tbody>
                 </table>
@@ -294,7 +296,9 @@ export const MediaSortEditor: React.FC = () => {
                     </div>
                     <CodePath value={item.path} />
                     <span className="nfc-form-note">
-                      本层图片 {item.image_count} · 视频 {item.video_count}
+                      {item.reason === 'preclassified'
+                        ? '未扫描（保留现有分类目录）'
+                        : `本层图片 ${item.image_count} · 视频 ${item.video_count}`}
                     </span>
                   </article>
                 ))}
