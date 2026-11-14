@@ -15,15 +15,18 @@ import { ConsoleButton } from '../../components/ui/ConsoleButton';
 import { ConsoleIcon } from '../../components/ui/ConsoleIcon';
 import { ConsoleEmpty } from '../../components/ui/ConsoleEmpty';
 import { ConsolePagination } from '../../components/ui/ConsolePagination';
+import { ConsoleCheckbox } from '../../components/ui/ConsoleCheckbox';
 import { useConsoleToast } from '../../components/ui/ConsoleToast';
 
 const mediaLabel = (kind: MediaSortRow['media_kind']) => kind === 'image' ? '图片 → P' : '视频 → V';
+const previewKey = (directory: string, recursive: boolean) => JSON.stringify([directory.trim(), recursive]);
 
 /** Only creates a read-only preview and a generic Move Plan draft. Never executes moves. */
 export const MediaSortEditor: React.FC = () => {
   const navigate = useNavigate();
   const toast = useConsoleToast();
   const [directory, setDirectory] = useState('');
+  const [recursive, setRecursive] = useState(false);
   const [preview, setPreview] = useState<MediaSortPreview | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [planLoading, setPlanLoading] = useState(false);
@@ -37,7 +40,7 @@ export const MediaSortEditor: React.FC = () => {
   const draft = useMemo(() => buildMediaSortDraft(preview), [preview]);
   const busy = previewLoading || planLoading;
   const canPlan = Boolean(draft && !busy && !previewGuard.current &&
-    !planGuard.current && previewKeyRef.current === directory.trim());
+    !planGuard.current && previewKeyRef.current === previewKey(directory, recursive));
   const shown = preview?.items.slice((page - 1) * pageSize, page * pageSize) || [];
 
   const invalidatePreview = () => {
@@ -51,6 +54,12 @@ export const MediaSortEditor: React.FC = () => {
     invalidatePreview();
   };
 
+  const changeRecursive = (enabled: boolean) => {
+    if (planGuard.current) return;
+    setRecursive(enabled);
+    invalidatePreview();
+  };
+
   const generatePreview = async () => {
     if (previewGuard.current || planGuard.current) return;
     const selected = directory.trim();
@@ -59,12 +68,13 @@ export const MediaSortEditor: React.FC = () => {
       return;
     }
     invalidatePreview();
-    previewKeyRef.current = selected;
+    const key = previewKey(selected, recursive);
+    previewKeyRef.current = key;
     previewGuard.current = true;
     setPreviewLoading(true);
     try {
-      const result = await previewMutation.mutateAsync(selected);
-      if (previewKeyRef.current !== selected) return;
+      const result = await previewMutation.mutateAsync({ parent: selected, recursive });
+      if (previewKeyRef.current !== key) return;
       setPreview(result);
       if (result.conflict_count) {
         toast.error(`发现 ${result.conflict_count} 项冲突，请先解决后重新预览`);
@@ -72,7 +82,7 @@ export const MediaSortEditor: React.FC = () => {
         toast.success(`找到 ${result.image_count} 张图片、${result.video_count} 个视频`);
       }
     } catch (error: unknown) {
-      if (previewKeyRef.current === selected) {
+      if (previewKeyRef.current === key) {
         invalidatePreview();
         toast.error(getStructuredApiError(error).message || '媒体分类预览失败');
       }
@@ -85,7 +95,7 @@ export const MediaSortEditor: React.FC = () => {
   const createPlan = async () => {
     if (planGuard.current || previewGuard.current || !canPlan || !draft) return;
     // The response belongs to this exact directory input, not an earlier Preview.
-    if (previewKeyRef.current !== directory.trim()) return;
+    if (previewKeyRef.current !== previewKey(directory, recursive)) return;
     planGuard.current = true;
     setPlanLoading(true);
     try {
@@ -108,7 +118,9 @@ export const MediaSortEditor: React.FC = () => {
   return (
     <>
       <DataPanel title="图片 / 视频自动分类"
-        description="仅处理选中目录下的一级普通文件：图片移入 P、视频移入 V；不扫描子目录，不删除文件。"
+        description={recursive
+          ? '递归检查选中目录及其子目录：每层文件分别放到本目录自己的 P / V 下。'
+          : '仅处理选中目录下的一级普通文件：图片移入 P、视频移入 V；不扫描子目录。'}
         className="nfc-complex-form-panel nfc-file-tool-form nfc-tool-workbench nfc-v2-batch-media-panel">
         <div className="nfc-v2-batch-form">
           <div className="nfc-v2-batch-field">
@@ -116,14 +128,24 @@ export const MediaSortEditor: React.FC = () => {
             <DirectoryPicker multiple={false} value={directory} disabled={planLoading}
               placeholder="选择图片和视频混放的目录"
               onChange={changeDirectory} />
-            <small>P、V 均位于选中目录之下；若不存在，执行 Move Plan 时自动创建。</small>
+            <small>每个目录分别归类；目标 P/V 不存在时，执行 Move Plan 时自动创建。</small>
           </div>
+          <label className="nfc-v2-batch-media-recursive">
+            <ConsoleCheckbox checked={recursive} disabled={planLoading}
+              onCheckedChange={changeRecursive} aria-label="递归处理子目录" />
+            <span>
+              <strong>递归处理子目录</strong>
+              <small>默认关闭。开启后扫描所有下级目录，每个目录建立自己的 P/V；
+                跳过已有的 P、V 和 P_数字、V_数字 分类目录。</small>
+            </span>
+          </label>
           <div className="nfc-v2-batch-notice" role="note">
             <ConsoleIcon name="shield-check" size={19} />
             <div><strong>先预览，再生成 Move Plan</strong>
-              <p>仅按文件扩展名识别媒体类型，不转码、不修改名称；跳过符号链接。
-                目标已有同名文件（含大小写差异）会阻止创建整个计划，不会覆盖原文件。
-                执行仍需在计划详情完成 Freeze → Validate → Execute。</p>
+              <p>仅按扩展名分类，不转码；跳过符号链接。
+                目标 P/V 名称已被占用时，自动改用 P_1/V_1 等名称；
+                同目录内的重名文件使用 _1、_2 等后缀，不覆盖任何原文件。
+                仍需在计划详情完成 Freeze → Validate → Execute。</p>
             </div>
           </div>
           <ActionBar className="nfc-file-tool-primary-actions">
@@ -152,6 +174,7 @@ export const MediaSortEditor: React.FC = () => {
           action={<span className="nfc-panel-count">{preview.count} 项</span>}
           className="nfc-panel-flush nfc-file-tool-result-panel nfc-v2-batch-media-panel">
           <div className="nfc-v2-batch-media-stats" role="status" aria-live="polite">
+            <span>扫描目录 <strong>{preview.scanned_directories}</strong></span>
             <span>图片 <strong>{preview.image_count}</strong></span>
             <span>视频 <strong>{preview.video_count}</strong></span>
             <span>可移动 <strong>{preview.ready_count}</strong></span>
@@ -159,7 +182,7 @@ export const MediaSortEditor: React.FC = () => {
           </div>
           {preview.items.length === 0 ? (
             <ConsoleEmpty title="当前目录没有待分类的图片或视频"
-              description="只会处理当前目录下的一级普通媒体文件。" />
+              description={recursive ? "已跳过现有 P/V 分类目录和符号链接。" : "只会处理当前目录下的一级普通媒体文件。"} />
           ) : (
             <ResponsiveDataView
               desktop={
