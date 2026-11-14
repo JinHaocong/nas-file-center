@@ -376,3 +376,69 @@ def test_api_recursive_option_and_suffixed_paths(tmp_path):
         })
         assert plan.status_code == 200, plan.text
         assert not (nested / "V_1").exists()
+
+
+def test_recursive_move_plan_executes_with_per_directory_suffixes(tmp_path):
+    """The ordinary Move Plan must actually create each local target, not flatten."""
+    from fastapi.testclient import TestClient
+    from app.config import Settings
+    from app.main import create_app
+    from app.worker import process_work_job
+
+    data = tmp_path / "data"
+    config = tmp_path / "config"
+    album = data / "Album"
+    album.mkdir(parents=True)
+    config.mkdir()
+    (data / "cover.jpg").write_bytes(b"cover")
+    (album / "Photo.jpg").write_bytes(b"photo-upper")
+    (album / "photo.JPG").write_bytes(b"photo-lower")
+    (album / "clip.MP4").write_bytes(b"clip")
+    (album / "P").mkdir()
+    (album / "P" / "old.jpg").write_bytes(b"old")
+    settings = Settings(
+        _env_file=None, CONFIG_DIR=str(config), DATA_MOUNT=str(data),
+        ALLOWED_ROOTS=str(data), QUARANTINE_ROOT=str(data / ".trash"),
+        ALLOW_MUTATION=True, ALLOW_DELETE=False,
+        INITIAL_ADMIN_USERNAME="admin",
+        INITIAL_ADMIN_PASSWORD="test-password-123",
+    )
+    with TestClient(create_app(settings)) as client:
+        client.headers.update({"Origin": "http://testserver"})
+        assert client.post("/api/auth/login", json={
+            "username": "admin", "password": "test-password-123",
+        }).status_code == 200
+        preview_resp = client.post("/api/media-sort/preview", json={
+            "parent": str(data), "recursive": True,
+        })
+        assert preview_resp.status_code == 200, preview_resp.text
+        preview_rows = preview_resp.json()["items"]
+        assert len(preview_rows) == 4
+        assert not any(row["conflict"] for row in preview_rows)
+        created = client.post("/api/plans", json={
+            "name": "Recursive P/V execution",
+            "kind": "media-sort",
+            "items": [
+                {"operation": "move", "source": row["source"],
+                 "target": row["target"], "expected_size": row["expected_size"]}
+                for row in preview_rows
+            ],
+        })
+        assert created.status_code == 200, created.text
+        plan_id = created.json()["id"]
+        assert client.post(f"/api/plans/{plan_id}/freeze").status_code == 200
+        validated = client.post(f"/api/plans/{plan_id}/validate")
+        assert validated.status_code == 200, validated.text
+        job = client.post(f"/api/plans/{plan_id}/execute")
+        assert job.status_code == 200, job.text
+        process_work_job(settings, job.json()["work_job_id"])
+        assert client.get(f"/api/plans/{plan_id}").json()["status"] == "completed"
+        assert (data / "P" / "cover.jpg").read_bytes() == b"cover"
+        assert (album / "P" / "old.jpg").read_bytes() == b"old"
+        assert (album / "V" / "clip.MP4").read_bytes() == b"clip"
+        pictures = sorted((album / "P_1").iterdir())
+        assert len(pictures) == 2
+        assert {item.read_bytes() for item in pictures} == {b"photo-upper", b"photo-lower"}
+        assert len({item.name.casefold() for item in pictures}) == 2
+        assert not (album / "Photo.jpg").exists()
+        assert not (album / "photo.JPG").exists()
