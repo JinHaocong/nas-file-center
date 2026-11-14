@@ -125,7 +125,8 @@ describe('Console v2 Batch native Draft-only UI', () => {
 describe('P/V media sort preview to Move Plan integration', () => {
   test('builds exact safe move draft only from conflict-free preview', () => {
     const base = {
-      parent: '/data/mixed', recursive: false, scanned_directories: 1,
+      parent: '/data/mixed', recursive: false, smart_skip: true, scanned_directories: 1,
+      skipped_directory_count: 0, skipped_directories: [],
       count: 2, image_count: 1, video_count: 1,
       ready_count: 2, conflict_count: 0,
       items: [
@@ -157,6 +158,7 @@ describe('P/V media sort preview to Move Plan integration', () => {
       ],
     });
     assert.equal(buildMediaSortDraft({ ...base, conflict_count: 1 }), null);
+    assert.equal(buildMediaSortDraft({ ...base, smart_skip: undefined as unknown as boolean }), null);
     assert.equal(buildMediaSortDraft({ ...base, items: [] }), null);
     assert.equal(buildMediaSortDraft({ ...base, count: 3 }), null);
     assert.equal(buildMediaSortDraft({ ...base, items: [
@@ -175,14 +177,24 @@ describe('P/V media sort preview to Move Plan integration', () => {
     assert.match(page, /<MediaSortEditor\s*\/>/);
     assert.match(editor, /<DirectoryPicker\s+multiple=\{false\}/);
     assert.match(editor, /buildMediaSortDraft\(preview\)/);
-    assert.match(editor, /await previewMutation\.mutateAsync\(\{ parent: selected, recursive \}\)/);
+    assert.match(editor, /await previewMutation\.mutateAsync\(\{ parent: selected, recursive, smart_skip: smartSkip \}\)/);
     assert.match(editor, /await planMutation\.mutateAsync\(draft\)/);
-    assert.match(editor, /previewKeyRef\.current !== previewKey\(directory, recursive\)/);
+    assert.match(editor, /previewKeyRef\.current !== previewKey\(directory, recursive, smartSkip\)/);
     assert.doesNotMatch(editor, /executePlan|freezePlan|validatePlan|deletePlan/);
     assert.match(api, /\/api\/media-sort\/preview/);
     assert.match(api, /recursive: boolean/);
+    assert.match(api, /smart_skip: boolean/);
     assert.match(editor, /useState\(false\)/);
     assert.match(editor, /<ConsoleCheckbox checked=\{recursive\}/);
+    assert.match(editor, /const \[smartSkip, setSmartSkip\] = useState\(true\)/);
+    assert.match(editor, /<ConsoleCheckbox checked=\{smartSkip\}/);
+    assert.match(editor, /onCheckedChange=\{changeSmartSkip\}/);
+    assert.match(editor, /setSmartSkip\(enabled\);\s*invalidatePreview\(\)/);
+    assert.match(editor, /跳过目录明细/);
+    assert.match(editor, /pure_images/);
+    assert.match(editor, /pure_videos/);
+    assert.match(editor, /preclassified/);
+    assert.match(editor, /preview\.skipped_directory_count/);
     assert.match(editor, /onCheckedChange=\{changeRecursive\}/);
     assert.match(editor, /invalidatePreview\(\)/);
     assert.match(editor, /递归处理子目录/);

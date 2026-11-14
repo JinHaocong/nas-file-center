@@ -460,6 +460,7 @@ class MediaSortPreviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     parent: str = Field(min_length=1, max_length=4096)
     recursive: bool = Field(default=False, strict=True)
+    smart_skip: bool = Field(default=True, strict=True)
 
 
 class ImmediateFileRenamePreviewRequest(ImmediateDirectoryRenamePreviewRequest):
@@ -1399,6 +1400,7 @@ def media_sort_preview(request: Request, payload: MediaSortPreviewRequest):
         return preview_media_sort(
             payload.parent,
             recursive=payload.recursive,
+            smart_skip=payload.smart_skip,
             allowed_roots=request.app.state.settings.allowed_roots,
             quarantine_root=request.app.state.settings.quarantine_root,
         )

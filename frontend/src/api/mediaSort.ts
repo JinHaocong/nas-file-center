@@ -9,10 +9,22 @@ export interface MediaSortRow {
   conflict_reason: string | null;
 }
 
+export type MediaSortSkipReason = 'pure_images' | 'pure_videos' | 'no_media' | 'preclassified';
+
+export interface MediaSortSkippedDirectory {
+  path: string;
+  reason: MediaSortSkipReason;
+  image_count: number;
+  video_count: number;
+}
+
 export interface MediaSortPreview {
   parent: string;
   recursive: boolean;
+  smart_skip: boolean;
   scanned_directories: number;
+  skipped_directory_count: number;
+  skipped_directories: MediaSortSkippedDirectory[];
   count: number;
   image_count: number;
   video_count: number;
@@ -22,6 +34,6 @@ export interface MediaSortPreview {
 }
 
 export const mediaSortApi = {
-  preview: (payload: { parent: string; recursive: boolean }) =>
+  preview: (payload: { parent: string; recursive: boolean; smart_skip: boolean }) =>
     api.post<MediaSortPreview>('/api/media-sort/preview', payload),
 };
