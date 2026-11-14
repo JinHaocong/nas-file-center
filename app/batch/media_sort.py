@@ -4,7 +4,9 @@ Default: classify immediate regular files into P/ and V/.
 Recursive: classify each directory's own regular files into its own P/ and V/.
 Existing P/V names are never reused: choose P_1/V_1, P_2/V_2, ...
 Already classified P/V directories (including numbered variants) are not
-traversed recursively. No preview operation modifies the filesystem.
+traversed recursively. Smart skip (default on) leaves folders containing only
+one media kind unchanged; the walker still visits their normal descendants.
+No preview operation modifies the filesystem.
 """
 from __future__ import annotations
 
@@ -29,6 +31,7 @@ MAX_RECURSIVE_DEPTH = 64
 MAX_SUFFIX_ATTEMPTS = 10_000
 _DESTINATION_DIRS = {"image": "P", "video": "V"}
 _SORT_FOLDER_PATTERN = re.compile(r"(?:P|V)(?:_[1-9][0-9]*)?", re.IGNORECASE)
+_IGNORED_SYSTEM_FILES = frozenset({".ds_store", "thumbs.db"})
 
 
 def _choose_folder_name(folder: str, occupied: set[str]) -> str:
@@ -71,15 +74,18 @@ def _scan_directory(
     directory: Path,
     *,
     recursive: bool,
+    smart_skip: bool,
     allowed_roots: list[str | Path],
     quarantine_root: str | Path | None,
-) -> tuple[list[dict], list[Path], int]:
-    """Read one directory via a no-follow FD and generate proposals for it."""
+) -> tuple[list[dict], list[Path], int, list[dict]]:
+    """Read one directory; only its direct files may be considered for moves."""
     directory_fd = _open_directory_nofollow(directory)
     try:
         occupied: set[str] = set()
         regular_files: list[tuple[str, str, tuple[int, int, int, int]]] = []
+        other_regular_files = 0
         children: list[Path] = []
+        skipped: list[dict] = []
         with os.scandir(directory_fd) as entries:
             count = 0
             for entry in entries:
@@ -92,23 +98,46 @@ def _scan_directory(
                 info = entry.stat(follow_symlinks=False)
                 if stat.S_ISDIR(info.st_mode):
                     child = directory / entry.name
-                    if (
-                        recursive
-                        and not _SORT_FOLDER_PATTERN.fullmatch(entry.name)
-                        and not is_reserved_quarantine_path(child, quarantine_root)
-                    ):
-                        children.append(child)
+                    if recursive and not is_reserved_quarantine_path(child, quarantine_root):
+                        if _SORT_FOLDER_PATTERN.fullmatch(entry.name):
+                            skipped.append({
+                                "path": str(child), "reason": "preclassified",
+                                "image_count": 0, "video_count": 0,
+                            })
+                        else:
+                            children.append(child)
                     continue
                 if not stat.S_ISREG(info.st_mode):
+                    # Never follow symlinks (even those pointing to media files).
                     continue
                 kind = get_media_type(Path(entry.name).suffix)
                 if kind not in _DESTINATION_DIRS:
+                    if entry.name.casefold() not in _IGNORED_SYSTEM_FILES:
+                        other_regular_files += 1
                     continue
                 snapshot = (
                     int(info.st_dev), int(info.st_ino),
                     int(info.st_size), int(info.st_mtime_ns),
                 )
                 regular_files.append((entry.name, kind, snapshot))
+
+        image_count = sum(kind == "image" for _, kind, _ in regular_files)
+        video_count = sum(kind == "video" for _, kind, _ in regular_files)
+        reason: str | None = None
+        if smart_skip:
+            if image_count and not video_count and other_regular_files == 0:
+                reason = "pure_images"
+            elif video_count and not image_count and other_regular_files == 0:
+                reason = "pure_videos"
+            elif not image_count and not video_count:
+                reason = "no_media"
+        if reason is not None:
+            # Skipping moves in this directory does NOT prune its descendants.
+            skipped.append({
+                "path": str(directory), "reason": reason,
+                "image_count": image_count, "video_count": video_count,
+            })
+            return [], sorted(children, key=lambda item: item.name), count, skipped
 
         # A destination is an *unoccupied* name under this exact directory,
         # never an already existing P/V directory, file or symlink.
@@ -154,7 +183,7 @@ def _scan_directory(
                 "conflict_reason": conflict_reason,
             })
 
-        return rows, sorted(children, key=lambda item: item.name), count
+        return rows, sorted(children, key=lambda item: item.name), count, skipped
     finally:
         os.close(directory_fd)
 
@@ -162,6 +191,7 @@ def _scan_directory(
 def preview_media_sort(
     parent: str | Path, *,
     recursive: bool = False,
+    smart_skip: bool = True,
     allowed_roots: list[str | Path],
     quarantine_root: str | Path | None = None,
 ) -> dict:
@@ -173,6 +203,8 @@ def preview_media_sort(
     """
     if not isinstance(recursive, bool):
         raise ValueError("recursive must be a boolean")
+    if not isinstance(smart_skip, bool):
+        raise ValueError("smart_skip must be a boolean")
     raw_parent = Path(parent).expanduser()
     if not raw_parent.is_absolute() or raw_parent.is_symlink():
         raise ValueError("Selected parent must be an absolute non-symlink directory")
@@ -183,6 +215,7 @@ def preview_media_sort(
         raise ValueError("Selected parent directory does not exist")
 
     rows: list[dict] = []
+    skipped: list[dict] = []
     pending: list[tuple[Path, int]] = [(safe_parent, 0)]
     scanned_dirs = 0
     scanned_entries = 0
@@ -192,13 +225,15 @@ def preview_media_sort(
         scanned_dirs += 1
         if recursive and scanned_dirs > MAX_RECURSIVE_DIRECTORIES:
             raise ValueError(f"Too many directories (limit: {MAX_RECURSIVE_DIRECTORIES})")
-        proposed, children, count = _scan_directory(
+        proposed, children, count, ignored = _scan_directory(
             directory,
             recursive=recursive,
+            smart_skip=smart_skip,
             allowed_roots=allowed_roots,
             quarantine_root=quarantine_root,
         )
         rows.extend(proposed)
+        skipped.extend(ignored)
         scanned_entries += count
         if recursive and scanned_entries > MAX_RECURSIVE_ENTRIES:
             raise ValueError(f"Too many recursive entries (limit: {MAX_RECURSIVE_ENTRIES})")
@@ -207,11 +242,15 @@ def preview_media_sort(
         pending.extend((child, depth + 1) for child in reversed(children))
 
     rows.sort(key=lambda item: item["source"])
+    skipped.sort(key=lambda item: (item["path"], item["reason"]))
     conflicts = sum(1 for item in rows if item["conflict"])
     return {
         "parent": str(safe_parent),
         "recursive": recursive,
+        "smart_skip": smart_skip,
         "scanned_directories": scanned_dirs,
+        "skipped_directory_count": len(skipped),
+        "skipped_directories": skipped,
         "count": len(rows),
         "image_count": sum(item["media_kind"] == "image" for item in rows),
         "video_count": sum(item["media_kind"] == "video" for item in rows),
