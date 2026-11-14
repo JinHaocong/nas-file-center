@@ -7,10 +7,11 @@ from app.batch import media_sort
 from app.batch.media_sort import preview_media_sort
 
 
-def preview(parent: Path, *, roots=None, trash=None, recursive=False):
+def preview(parent: Path, *, roots=None, trash=None, recursive=False, smart_skip=True):
     return preview_media_sort(
         parent,
         recursive=recursive,
+        smart_skip=smart_skip,
         allowed_roots=roots if roots is not None else [parent.parent],
         quarantine_root=trash,
     )
@@ -199,7 +200,7 @@ def test_recursive_places_pv_inside_each_source_directory(tmp_path):
     (deep / "clip.mp4").write_bytes(b"three")
     (deep / "memo.txt").write_bytes(b"leave alone")
 
-    result = preview(parent, recursive=True)
+    result = preview(parent, recursive=True, smart_skip=False)
     assert result["recursive"] is True
     assert result["scanned_directories"] == 3
     assert result["count"] == 4
@@ -225,7 +226,7 @@ def test_disabled_recursion_does_not_include_nested_files(tmp_path):
     (parent / "cover.jpg").write_bytes(b"root")
     (deep / "nested.mp4").write_bytes(b"nested")
 
-    result = preview(parent)
+    result = preview(parent, smart_skip=False)
     assert result["recursive"] is False
     assert result["scanned_directories"] == 1
     assert result["count"] == 1
@@ -249,7 +250,7 @@ def test_recursive_skips_classification_directories_symlinks_and_quarantine(tmp_
     (trash / "private.mp4").write_bytes(b"private")
     (parent / "child-link").symlink_to(nested, target_is_directory=True)
 
-    result = preview(parent, recursive=True, trash=trash)
+    result = preview(parent, recursive=True, trash=trash, smart_skip=False)
     assert result["count"] == 2
     assert result["scanned_directories"] == 2
     assert result["conflict_count"] == 0
@@ -299,7 +300,7 @@ def test_file_suffix_keeps_filesystem_component_length_bounded(tmp_path):
     parent.mkdir()
     (parent / ("a" * 250 + ".jpg")).write_bytes(b"a")
     (parent / ("A" * 250 + ".JPG")).write_bytes(b"b")
-    result = preview(parent)
+    result = preview(parent, smart_skip=False)
     assert result["conflict_count"] == 0
     for item in result["items"]:
         assert len(Path(item["target"]).name.encode()) <= 255
@@ -347,12 +348,12 @@ def test_api_recursive_option_and_suffixed_paths(tmp_path):
         assert client.post("/api/auth/login", json={
             "username": "admin", "password": "test-password-123",
         }).status_code == 200
-        default = client.post("/api/media-sort/preview", json={"parent": str(data)})
+        default = client.post("/api/media-sort/preview", json={"parent": str(data), "smart_skip": False})
         assert default.status_code == 200, default.text
         assert default.json()["recursive"] is False
         assert default.json()["count"] == 1
         response = client.post("/api/media-sort/preview", json={
-            "parent": str(data), "recursive": True,
+            "parent": str(data), "recursive": True, "smart_skip": False,
         })
         assert response.status_code == 200, response.text
         body = response.json()
@@ -409,7 +410,7 @@ def test_recursive_move_plan_executes_with_per_directory_suffixes(tmp_path):
             "username": "admin", "password": "test-password-123",
         }).status_code == 200
         preview_resp = client.post("/api/media-sort/preview", json={
-            "parent": str(data), "recursive": True,
+            "parent": str(data), "recursive": True, "smart_skip": False,
         })
         assert preview_resp.status_code == 200, preview_resp.text
         preview_rows = preview_resp.json()["items"]
@@ -442,3 +443,172 @@ def test_recursive_move_plan_executes_with_per_directory_suffixes(tmp_path):
         assert len({item.name.casefold() for item in pictures}) == 2
         assert not (album / "Photo.jpg").exists()
         assert not (album / "photo.JPG").exists()
+
+
+def test_screenshot_scenario_keeps_chinese_video_and_lowercase_p_unchanged(tmp_path):
+    """An already-sorted nonstandard folder must not get a nested V/V or P/P."""
+    root = tmp_path / "1.13G"
+    videos = root / "视频"
+    pictures = root / "p"
+    videos.mkdir(parents=True)
+    pictures.mkdir()
+    (videos / "001.mp4").write_bytes(b"video")
+    (videos / "002.MKV").write_bytes(b"movie")
+    (pictures / "001.jpg").write_bytes(b"photo")
+    (pictures / "002.png").write_bytes(b"pic")
+    (root / ".DS_Store").write_bytes(b"metadata")
+
+    result = preview(root, recursive=True)
+    assert result["smart_skip"] is True
+    assert result["scanned_directories"] == 2  # p is a known classification folder
+    assert result["count"] == 0
+    assert result["skipped_directory_count"] == 3
+    reasons = {row["path"]: row["reason"] for row in result["skipped_directories"]}
+    assert reasons == {
+        str(root): "no_media",
+        str(pictures): "preclassified",
+        str(videos): "pure_videos",
+    }
+    assert (videos / "001.mp4").read_bytes() == b"video"
+    assert (pictures / "001.jpg").read_bytes() == b"photo"
+    assert not (videos / "V").exists()
+
+
+def test_pure_media_with_system_sidecars_is_skipped_and_recurses_children(tmp_path):
+    root = tmp_path / "archive"
+    root.mkdir()
+    pure_image = root / "旅行照片"
+    pure_image.mkdir()
+    (pure_image / "01.jpg").write_bytes(b"image")
+    (pure_image / ".DS_Store").write_bytes(b"meta")
+    (pure_image / "Thumbs.DB").write_bytes(b"meta")
+    child = pure_image / "mixed"
+    child.mkdir()
+    (child / "a.jpg").write_bytes(b"photo")
+    (child / "a.mp4").write_bytes(b"video")
+    pure_video = root / "电影"
+    pure_video.mkdir()
+    (pure_video / "01.mkv").write_bytes(b"movie")
+    # A media-looking symlink cannot turn this into a mixed directory.
+    (pure_video / "link.jpg").symlink_to(pure_image / "01.jpg")
+
+    result = preview(root, recursive=True)
+    assert result["count"] == 2
+    assert {
+        (Path(row["source"]).relative_to(root).as_posix(),
+         Path(row["target"]).relative_to(root).as_posix())
+        for row in result["items"]
+    } == {
+        ("旅行照片/mixed/a.jpg", "旅行照片/mixed/P/a.jpg"),
+        ("旅行照片/mixed/a.mp4", "旅行照片/mixed/V/a.mp4"),
+    }
+    skipped = {row["path"]: row["reason"] for row in result["skipped_directories"]}
+    assert skipped[str(pure_image)] == "pure_images"
+    assert skipped[str(pure_video)] == "pure_videos"
+    assert (pure_image / "01.jpg").read_bytes() == b"image"
+    assert (pure_video / "01.mkv").read_bytes() == b"movie"
+
+
+@pytest.mark.parametrize("other", ["subtitle.srt", "details.nfo", "notes.txt", "music.mp3"])
+def test_non_system_files_prevent_false_pure_media_skip(tmp_path, other):
+    root = tmp_path / "library"
+    root.mkdir()
+    (root / "movie.MP4").write_bytes(b"video")
+    (root / other).write_bytes(b"sidecar")
+
+    result = preview(root)
+    assert result["count"] == 1
+    assert result["video_count"] == 1
+    assert result["skipped_directory_count"] == 0
+    assert result["items"][0]["target"] == str(root / "V" / "movie.MP4")
+    assert (root / other).read_bytes() == b"sidecar"
+
+
+def test_smart_skip_can_be_disabled_to_preserve_original_classification(tmp_path):
+    parent = tmp_path / "media"
+    parent.mkdir()
+    (parent / "01.JPG").write_bytes(b"image")
+    (parent / "Thumbs.db").write_bytes(b"metadata")
+    smart = preview(parent)
+    assert smart["count"] == 0
+    assert smart["skipped_directories"] == [{
+        "path": str(parent), "reason": "pure_images",
+        "image_count": 1, "video_count": 0,
+    }]
+    classic = preview(parent, smart_skip=False)
+    assert classic["smart_skip"] is False
+    assert classic["count"] == 1
+    assert classic["items"][0]["target"] == str(parent / "P" / "01.JPG")
+    assert classic["skipped_directory_count"] == 0
+    assert not (parent / "P").exists()
+
+
+def test_mixed_media_still_sorted_with_existing_pv_suffixes(tmp_path):
+    parent = tmp_path / "mixed"
+    parent.mkdir()
+    (parent / "old.jpg").write_bytes(b"picture")
+    (parent / "old.mp4").write_bytes(b"movie")
+    (parent / "P").mkdir()
+    (parent / "V").mkdir()
+    result = preview(parent, smart_skip=True)
+    assert result["count"] == 2
+    assert result["skipped_directory_count"] == 0
+    assert {Path(row["target"]).relative_to(parent).as_posix()
+            for row in result["items"]} == {"P_1/old.jpg", "V_1/old.mp4"}
+
+
+def test_no_media_directory_still_recurses_into_mixed_grandchild(tmp_path):
+    root = tmp_path / "root"
+    grandchild = root / "empty-level" / "mixed"
+    grandchild.mkdir(parents=True)
+    (grandchild / "one.jpg").write_bytes(b"a")
+    (grandchild / "one.mp4").write_bytes(b"b")
+    result = preview(root, recursive=True)
+    assert result["count"] == 2
+    assert result["scanned_directories"] == 3
+    reasons = {row["path"]: row["reason"] for row in result["skipped_directories"]}
+    assert reasons[str(root)] == "no_media"
+    assert reasons[str(grandchild.parent)] == "no_media"
+    assert str(grandchild) not in reasons
+
+
+def test_smart_skip_api_defaults_to_true_and_rejects_nonboolean(tmp_path):
+    from fastapi.testclient import TestClient
+    from app.config import Settings
+    from app.main import create_app
+
+    data = tmp_path / "data"
+    data.mkdir()
+    config = tmp_path / "config"
+    config.mkdir()
+    (data / "photo.jpg").write_bytes(b"pic")
+    settings = Settings(
+        _env_file=None, CONFIG_DIR=str(config), DATA_MOUNT=str(data),
+        ALLOWED_ROOTS=str(data), QUARANTINE_ROOT=str(data / ".trash"),
+        ALLOW_MUTATION=False,
+        INITIAL_ADMIN_USERNAME="admin",
+        INITIAL_ADMIN_PASSWORD="test-password-123",
+    )
+    with TestClient(create_app(settings)) as client:
+        client.headers.update({"Origin": "http://testserver"})
+        assert client.post("/api/auth/login", json={
+            "username": "admin", "password": "test-password-123",
+        }).status_code == 200
+        smart = client.post("/api/media-sort/preview", json={"parent": str(data)})
+        assert smart.status_code == 200, smart.text
+        assert smart.json()["smart_skip"] is True
+        assert smart.json()["count"] == 0
+        assert smart.json()["skipped_directory_count"] == 1
+        classic = client.post("/api/media-sort/preview", json={
+            "parent": str(data), "smart_skip": False,
+        })
+        assert classic.status_code == 200
+        assert classic.json()["count"] == 1
+        assert client.post("/api/media-sort/preview", json={
+            "parent": str(data), "smart_skip": "yes",
+        }).status_code == 422
+        assert client.post("/api/media-sort/preview", json={
+            "parent": str(data), "smart_skip": 1,
+        }).status_code == 422
+        assert (data / "photo.jpg").read_bytes() == b"pic"
+        assert not (data / "P").exists()
