@@ -13,7 +13,8 @@ export interface MediaSortPlanDraft {
 
 /** The frontend can only create a draft from a complete, conflict-free preview. */
 export function buildMediaSortDraft(preview: MediaSortPreview | null): MediaSortPlanDraft | null {
-  if (!preview || preview.items.length === 0 || preview.conflict_count > 0 ||
+  if (!preview || typeof preview.recursive !== 'boolean' ||
+      preview.items.length === 0 || preview.conflict_count > 0 ||
       preview.count !== preview.items.length ||
       preview.items.some(item => item.conflict ||
         (item.media_kind !== 'image' && item.media_kind !== 'video') ||
@@ -21,7 +22,7 @@ export function buildMediaSortDraft(preview: MediaSortPreview | null): MediaSort
         item.expected_size < 0)) return null;
 
   return {
-    name: '媒体文件分类（P / V）',
+    name: preview.recursive ? '媒体文件递归分类（每目录 P / V）' : '媒体文件分类（P / V）',
     kind: 'media-sort',
     items: preview.items.map(item => ({
       operation: 'move',
