@@ -123,7 +123,9 @@ def enqueue_media_package_preview(session_factory, settings: Settings, *, select
 
 def get_media_package_preview(session_factory, settings: Settings, job_id: int, *,
                        page: int = 1, page_size: int = 25, status_filter: str = "all") -> dict:
-    if status_filter not in {"all", "ready", "blocked", "already_organized", "skipped"}:\n        raise ValueError("Invalid MediaPackage preview status filter")\n    if not 1 <= page or not 1 <= page_size <= 100:
+    if status_filter not in {"all", "ready", "blocked", "already_organized", "skipped"}:
+        raise ValueError("Invalid MediaPackage preview status filter")
+    if not 1 <= page or not 1 <= page_size <= 100:
         raise ValueError("Invalid MediaPackage preview pagination")
     with session_factory() as session:
         job = session.get(WorkJob, job_id)
@@ -147,12 +149,19 @@ def get_media_package_preview(session_factory, settings: Settings, job_id: int, 
             raise ValueError("Completed MediaPackage preview artifacts are incomplete; scan again")
         with summary_path.open("r", encoding="utf-8") as stream:
             summary = json.load(stream)
-        if status_filter == "all":\n            packages = _read_page(data, index, page=page, size=page_size)\n            filtered_total = summary["package_count"]\n        else:\n            packages, filtered_total = _read_filtered_page(\n                data, page=page, size=page_size, status=status_filter,\n            )
+        if status_filter == "all":
+            packages = _read_page(data, index, page=page, size=page_size)
+            filtered_total = summary["package_count"]
+        else:
+            packages, filtered_total = _read_filtered_page(
+                data, page=page, size=page_size, status=status_filter,
+            )
     return {
         "job_id": job_id, "status": status, "error": error,
         "selection": state.get("selection", ""),
         "progress": progress, "summary": summary,
-        "packages": packages, "page": page, "page_size": page_size,\n        "filtered_total": filtered_total if status == "completed" else 0,
+        "packages": packages, "page": page, "page_size": page_size,
+        "filtered_total": filtered_total if status == "completed" else 0,
         "read_only": True,
     }
 
