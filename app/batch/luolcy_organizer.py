@@ -242,7 +242,7 @@ def _input_fingerprint(files: list[dict], package: Path) -> str:
 def preview_luolcy_package(package: str | Path, *, luolcy_root: str | Path,
                            allowed_roots: list[Path],
                            quarantine_root: Path | None = None,
-                           max_rows: int = 100) -> dict:
+                           max_rows: int = 100, include_items: bool = False) -> dict:
     """Build a bounded, read-only manifest for one exact resource package.
 
     Pure image/video packages with up to 200 files are flattened into
@@ -264,6 +264,7 @@ def preview_luolcy_package(package: str | Path, *, luolcy_root: str | Path,
             "groups": [], "conflicts": [], "sample_moves": [],
             "total_proposals": 0, "needed_moves": 0, "truncated": False,
             "read_only": True,
+            **({"_snapshot_items": items} if include_items else {}),
         }
 
     # Homogeneous packages have two fixed modes. <=200 files: flatten
@@ -303,6 +304,7 @@ def preview_luolcy_package(package: str | Path, *, luolcy_root: str | Path,
             "truncated": len(moves) > max_rows,
             "read_only": True,
             "operation": "flatten_pure_media",
+            **({"_snapshot_items": items} if include_items else {}),
         }
 
     # Avoid reordering when readdir() order changes. Only metadata, never
@@ -397,4 +399,5 @@ def preview_luolcy_package(package: str | Path, *, luolcy_root: str | Path,
         "operation": ("bucket_pure_media" if totals["Other"] == 0
                       and (totals["P"] == 0 or totals["V"] == 0)
                       else "sort_mixed_media"),
+        **({"_snapshot_items": items} if include_items else {}),
     }
