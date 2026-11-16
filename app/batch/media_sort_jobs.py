@@ -269,7 +269,7 @@ class MediaSortPreviewHandler(TaskHandler):
                     dirs = int(facts["scanned_directories"])
                     name = str(facts["current_directory"] or "")
                     context.checkpoint(
-                        progress_current=scanned, progress_total=0,
+                        progress_current=scanned,
                         progress_message=f"已检查 {scanned:,} 项，{dirs:,} 个目录；当前 {name[-140:]}",
                         checkpoint_data={"schema_version": 1, **facts},
                     )
@@ -293,7 +293,7 @@ class MediaSortPreviewHandler(TaskHandler):
                 stream.flush()
                 os.fsync(stream.fileno())
             context.checkpoint(
-                progress_current=summary["scanned_entries"], progress_total=0,
+                progress_current=summary["scanned_entries"],
                 progress_message=f"预览完成：{summary['count']:,} 个待移动文件，跳过 {summary['skipped_directory_count']:,} 个目录",
             )
         except BaseException:
