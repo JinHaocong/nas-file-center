@@ -544,7 +544,7 @@ def test_smart_skip_can_be_disabled_to_preserve_original_classification(tmp_path
     assert not (parent / "P").exists()
 
 
-def test_mixed_media_still_sorted_with_existing_pv_suffixes(tmp_path):
+def test_mixed_media_reuses_existing_pv_destinations(tmp_path):
     parent = tmp_path / "mixed"
     parent.mkdir()
     (parent / "old.jpg").write_bytes(b"picture")
@@ -555,7 +555,7 @@ def test_mixed_media_still_sorted_with_existing_pv_suffixes(tmp_path):
     assert result["count"] == 2
     assert result["skipped_directory_count"] == 0
     assert {Path(row["target"]).relative_to(parent).as_posix()
-            for row in result["items"]} == {"P_1/old.jpg", "V_1/old.mp4"}
+            for row in result["items"]} == {"P/old.jpg", "V/old.mp4"}
 
 
 def test_no_media_directory_still_recurses_into_mixed_grandchild(tmp_path):
