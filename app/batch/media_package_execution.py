@@ -18,7 +18,7 @@ from typing import Callable
 from app.batch.file_rename import _open_directory_nofollow
 from app.batch.media_package_naming import allocate_names
 from app.batch.media_package_organizer import (
-    MAX_FILES_PER_GROUP, _input_fingerprint, _package_path,
+    MAX_FILES_PER_GROUP, _input_fingerprint, _package_path, _walk_package,
     preview_media_package_package,
 )
 from app.fs_ops import rename_directory_noreplace_compat, rename_noreplace_at
@@ -786,6 +786,27 @@ def execute_frozen_manifest(manifest: dict, *, lease_fence: Callable[[], None],
             raise MediaPackageExecutionConflict("Protected resource package identity changed")
     finally:
         os.close(fd)
+    # Before the first mutation of a new package job, reject any source or
+    # target drift since Freeze. This catches late-arriving root files before
+    # we relocate the first source into staging. Recovery is different:
+    # the original snapshot cannot match after intentional partial moves,
+    # so only an existing job-owned staging or published final bypasses it.
+    root_stage = manifest.get("root_stage")
+    recovery_artifact = (
+        (package / root_stage).exists()
+        if root_stage
+        else any(
+            os.path.lexists(package / group["stage"]) or
+            os.path.lexists(package / group["final"])
+            for group in manifest["groups"]
+        )
+    )
+    if not recovery_artifact:
+        live = list(_walk_package(package))
+        if _input_fingerprint(live, package) != manifest["input_fingerprint"]:
+            raise MediaPackageExecutionConflict(
+                "Package changed since frozen preview; refusing file mutation"
+            )
     if manifest.get("root_stage"):
         result = _execute_flat_manifest(manifest, lease_fence, progress)
         result["empty_dirs_removed"] = _remove_empty_sources(manifest, lease_fence)
