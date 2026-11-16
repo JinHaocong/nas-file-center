@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import {
-  mediaSortApi, type MediaSortPreviewPage, type MediaSortRow, type MediaSortSkipReason,
+  mediaSortApi, type MediaSortRow, type MediaSortSkipReason,
 } from '../../api/mediaSort';
 import { tasksApi } from '../../api/tasks';
 import { getStructuredApiError } from '../../api/errors';
@@ -81,14 +81,13 @@ export const MediaSortEditor: React.FC = () => {
 
   const summary = previewResponse?.summary;
   const busy = previewMutation.isPending || planMutation.isPending ||
+    (previewJobId !== null && previewResponse == null) ||
+    (planJobId !== null && planJob == null) ||
     isActive(previewResponse?.status) || isActive(planJob?.status);
   const ready = previewResponse?.status === 'completed' && summary !== null && summary !== undefined;
   const canPlan = Boolean(ready && summary && summary.count > 0 && summary.conflict_count === 0 &&
     previewKeyRef.current === previewKey(directory, recursive, smartSkip) &&
     !planGuard.current && !previewGuard.current && !busy && planJobId === null);
-  const alreadySorted = previewResponse?.skipped_directories.filter(
-    item => item.reason === 'pure_images' || item.reason === 'pure_videos',
-  ).length || 0;
 
   const invalidatePreview = () => {
     previewKeyRef.current = null;
