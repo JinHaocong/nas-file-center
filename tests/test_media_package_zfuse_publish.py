@@ -84,6 +84,48 @@ def test_zfuse_without_either_safe_directory_rename_publishes_all_groups(tmp_pat
     assert again["files_reconciled"] == 201
 
 
+def test_old_labelled_video_bucket_rebuilds_with_safe_fuse_publication(
+    tmp_path, monkeypatch,
+):
+    root = tmp_path / "data" / "Else" / "Collection"
+    package = root / "2611" / "261116" / "ExampleAuthor" / "ExampleBundle"
+    old = package / "V [200 200B]"
+    old.mkdir(parents=True)
+    for index in range(200):
+        (old / f"{index + 1:03d}.mp4").write_bytes(bytes([index % 251]))
+    (package / "new.mp4").write_bytes(b"z")
+    roots = [root.parent.parent]
+    preview = preview_media_package_package(
+        package, media_package_root=root, allowed_roots=roots,
+    )
+    assert preview["status"] == "ready", preview
+    assert preview["conflicts"] == []
+    manifest = executor.prepare_media_package_manifest(
+        package, media_package_root=root, allowed_roots=roots,
+        quarantine_root=None, preview_record=preview, job_id=730,
+    )
+    force_zos_no_directory_rename(monkeypatch)
+    result = executor.execute_frozen_manifest(
+        manifest, lease_fence=lambda: None, allow_fuse_compat=True,
+    )
+    assert result["files_moved"] == 201
+    assert result["groups_published"] == 2
+    assert sorted(p.name for p in package.iterdir()) == [
+        "V [200 200B]", "V_1 [1 1B]",
+    ]
+    files = sorted(package.glob("V*/*.mp4"))
+    assert len(files) == 201
+    assert sorted(p.read_bytes() for p in files) == sorted(
+        [bytes([index % 251]) for index in range(200)] + [b"z"]
+    )
+    assert not any(p.name.startswith(".nfc-") for p in package.iterdir())
+    replay = executor.execute_frozen_manifest(
+        manifest, lease_fence=lambda: None, allow_fuse_compat=True,
+    )
+    assert replay["files_moved"] == 0
+    assert replay["files_reconciled"] == 201
+
+
 def test_crash_after_partial_final_hardlinks_resumes_without_renaming_or_overwrite(
     tmp_path, monkeypatch,
 ):
