@@ -10,7 +10,6 @@ import os
 import re
 import stat
 from pathlib import Path
-from collections import defaultdict
 
 from app.batch.file_rename import _open_directory_nofollow
 from app.filters.media_types import get_media_type
@@ -20,11 +19,6 @@ MAX_FILES_PER_GROUP = 200
 MAX_PACKAGE_FILES = 300_000
 MAX_PACKAGE_DIRECTORIES = 100_000
 MAX_DEPTH = 64
-_GROUP_NAME = re.compile(
-    r"^(P|V)(?:_([1-9][0-9]*))? \\[([0-9]+) ([0-9]+(?:\\.[0-9]+)?(?:B|KiB|MiB|GiB|TiB))\\]$",
-    re.IGNORECASE,
-)
-_BASE_GROUP = re.compile(r"^(?:P|V)(?:_[1-9][0-9]*)?$", re.IGNORECASE)
 _MONTH = re.compile(r"^\\d{2}(?:0[1-9]|1[0-2])$")
 _DAY = re.compile(r"^\\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12][0-9]|3[01])$")
 
@@ -149,6 +143,7 @@ def preview_luolcy_package(package: str | Path, *, luolcy_root: str | Path,
     conflicts = []
     sample = []
     planned = 0
+    needed_moves = 0
     observed = {}
     for item in items:
         kind = item["kind"]
@@ -168,9 +163,9 @@ def preview_luolcy_package(package: str | Path, *, luolcy_root: str | Path,
             folder = f"{stem} [{len(chunk)} {_size_label(size)}]"
             dest = source / folder
             existing = occupied.get(folder.casefold())
-            if existing is not None:
-                # No staging, deletion, renaming or overwriting is authorized
-                # by a preview; pre-existing final names require review.
+            if existing is not None and any(Path(row["path"]).parent != dest for row in chunk):
+                # Existing destination with incoming files requires a guarded
+                # merge/execution policy; do not silently overwrite.
                 conflicts.append({"directory": str(dest), "reason": "target_directory_exists"})
             # An old P/V folder or another numbered bucket with a different
             # capacity label is expected during migration; not an error until
@@ -186,15 +181,18 @@ def preview_luolcy_package(package: str | Path, *, luolcy_root: str | Path,
                     sample.append({"source": row["path"], "target": str(dest / candidate),
                                    "bytes": row["bytes"], "kind": kind})
                 planned += 1
+                if row["path"] != str(dest / candidate):
+                    needed_moves += 1
             groups.append({"name": folder, "kind": kind, "count": len(chunk),
                            "bytes": size, "destination": str(dest)})
     return {
         "package": str(source),
-        "status": "blocked" if conflicts else "preview",
+        "status": "blocked" if conflicts else "ready" if needed_moves else "already_organized",
         "reason": None, "total_files": len(items), "totals": totals,
         "groups": groups, "conflicts": conflicts,
         "sample_moves": sample,
         "total_proposals": planned,
+        "needed_moves": needed_moves,
         "truncated": len(sample) < planned,
         "read_only": True,
     }
