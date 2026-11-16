@@ -1408,6 +1408,63 @@ def media_sort_preview(request: Request, payload: MediaSortPreviewRequest):
         raise HTTPException(400, str(exc)) from exc
 
 
+@router.post("/media-sort/previews")
+def enqueue_media_sort_preview(request: Request, payload: MediaSortPreviewRequest):
+    """Queue an incremental read-only scan; no 50k-entry HTTP request."""
+    from app.batch.media_sort_jobs import enqueue_media_preview
+    try:
+        return enqueue_media_preview(
+            request.app.state.service.SessionLocal, request.app.state.settings,
+            parent=payload.parent, recursive=payload.recursive,
+            smart_skip=payload.smart_skip,
+        )
+    except (ValueError, OSError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.get("/media-sort/previews/{job_id}")
+def media_sort_preview_page(
+    request: Request, job_id: int,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=25, ge=1, le=100),
+    skip_page: int = Query(default=1, ge=1),
+    skip_page_size: int = Query(default=25, ge=1, le=100),
+):
+    from app.batch.media_sort_jobs import get_media_preview
+    try:
+        return get_media_preview(
+            request.app.state.service.SessionLocal, request.app.state.settings,
+            job_id, page=page, page_size=page_size,
+            skip_page=skip_page, skip_page_size=skip_page_size,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, "Preview task not found") from exc
+    except (ValueError, OSError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/media-sort/previews/{job_id}/plan")
+def media_sort_generate_plan(request: Request, job_id: int):
+    from app.batch.media_sort_jobs import enqueue_media_plan
+    try:
+        return enqueue_media_plan(
+            request.app.state.service.SessionLocal, request.app.state.settings, job_id
+        )
+    except KeyError as exc:
+        raise HTTPException(404, "Preview task not found") from exc
+    except (ValueError, OSError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.get("/media-sort/plan-jobs/{job_id}")
+def media_sort_plan_job(request: Request, job_id: int):
+    from app.batch.media_sort_jobs import get_media_plan_job
+    try:
+        return get_media_plan_job(request.app.state.service.SessionLocal, job_id)
+    except KeyError as exc:
+        raise HTTPException(404, "Plan generation task not found") from exc
+
+
 @router.post("/directories/compare/preview")
 def directory_diff_preview(request: Request, payload: DirectoryDiffRequest):
     """Read-only relative-path comparison; equal sizes are not proof of equal content."""
@@ -1514,6 +1571,30 @@ def plan_items(
         return request.app.state.service.plan_items(plan_id, page=page, page_size=page_size)
     except KeyError as exc:
         raise HTTPException(404, "plan not found") from exc
+
+
+@router.post("/plans/{plan_id}/stage-tasks/{stage}")
+def enqueue_media_sort_plan_stage(
+    request: Request, plan_id: int, stage: Literal["freeze", "validate"],
+    current_user: User = Depends(get_current_user),
+):
+    _require_restricted_plan_admin(request, plan_id, current_user)
+    from app.batch.media_sort_jobs import enqueue_plan_stage
+    try:
+        return enqueue_plan_stage(request.app.state.service.SessionLocal, plan_id, stage)
+    except KeyError as exc:
+        raise HTTPException(404, "Plan not found") from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.get("/plans/{plan_id}/stage-task")
+def media_sort_plan_stage_status(request: Request, plan_id: int):
+    from app.batch.media_sort_jobs import get_plan_stage
+    try:
+        return {"job": get_plan_stage(request.app.state.service.SessionLocal, plan_id)}
+    except KeyError as exc:
+        raise HTTPException(404, "Plan not found") from exc
 
 
 @router.post("/plans/{plan_id}/freeze")
