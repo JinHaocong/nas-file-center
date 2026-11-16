@@ -234,6 +234,8 @@ describe('P/V media sort preview to Move Plan integration', () => {
       '文件执行进度',
       '冻结进度',
       '实时校验进度',
+      'skipped_conflict_count',
+      '冲突项已从执行计划中排除',
       'refetchInterval',
       '<TaskProgress',
     ]) assert.ok(plan.includes(token), token);
