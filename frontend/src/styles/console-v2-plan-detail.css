@@ -80,3 +80,8 @@
   .nfc-plan-detail-page *, .nfc-v2-plan-confirm * {
     animation:none;transition:none;scroll-behavior:auto; }
 }
+
+/* Background Freeze/Validate/Execute progress shown directly in Plan Detail. */
+.nfc-v2-plan-stage-progress { min-width:0; }
+.nfc-v2-plan-stage-progress .nfc-task-progress { width:100%; }
+.nfc-v2-plan-stage-progress .nfc-task-progress-message { overflow-wrap:anywhere; }
