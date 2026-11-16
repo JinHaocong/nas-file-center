@@ -21,17 +21,19 @@ def preview(root, package, **kwargs):
 
 
 @pytest.mark.parametrize("extension", [".jpg", ".MP4"])
-def test_pure_media_is_left_entirely_unchanged(tmp_path, extension):
+def test_pure_media_nested_files_flatten_only_to_package_root(tmp_path, extension):
     root, package = make_package(tmp_path)
     nested = package / "额外的目录"
     nested.mkdir()
     for i in range(205):
         (nested / f"{i:03d}{extension}").write_bytes(b"payload")
     result = preview(root, package)
-    assert result["status"] == "skipped"
-    assert result["reason"] == "pure_media"
+    assert result["status"] == "ready"
+    assert result["operation"] == "flatten_pure_media"
+    assert result["needed_moves"] == 205
     assert result["groups"] == []
     assert len(list(nested.iterdir())) == 205
+    assert result["sample_moves"][0]["target"].startswith(str(package) + "/")
     assert not any(child.name.startswith("P") for child in package.iterdir())
     assert not any(child.name.startswith("V") for child in package.iterdir())
 
@@ -126,3 +128,38 @@ def test_bad_directory_name_outside_fixed_layout_rejected(tmp_path):
     alternate.mkdir(parents=True)
     with pytest.raises(ValueError, match="Expected"):
         preview(root, alternate)
+
+
+def test_pure_video_flatten_collision_requires_manual_review(tmp_path):
+    root, package = make_package(tmp_path)
+    (package / "视频A").mkdir()
+    (package / "视频B").mkdir()
+    (package / "视频A" / "001.mp4").write_bytes(b"one")
+    (package / "视频B" / "001.mp4").write_bytes(b"two")
+    result = preview(root, package)
+    assert result["status"] == "blocked"
+    assert result["operation"] == "flatten_pure_media"
+    assert any(x["reason"] == "flatten_filename_collision"
+               for x in result["conflicts"])
+    assert (package / "视频A" / "001.mp4").read_bytes() == b"one"
+    assert (package / "视频B" / "001.mp4").read_bytes() == b"two"
+
+
+def test_flat_pure_media_is_idempotently_skipped(tmp_path):
+    root, package = make_package(tmp_path)
+    (package / "001.mp4").write_bytes(b"video")
+    result = preview(root, package)
+    assert result["status"] == "skipped"
+    assert result["reason"] == "already_flat"
+    assert result["needed_moves"] == 0
+
+
+def test_nested_pure_media_conflict_with_existing_root_file(tmp_path):
+    root, package = make_package(tmp_path)
+    (package / "001.jpg").write_bytes(b"original")
+    (package / "图片").mkdir()
+    (package / "图片" / "001.JPG").write_bytes(b"nested")
+    result = preview(root, package)
+    assert result["status"] == "blocked"
+    assert any(x["reason"] == "flatten_filename_collision"
+               for x in result["conflicts"])
