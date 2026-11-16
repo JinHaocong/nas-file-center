@@ -1,4 +1,5 @@
 """MediaPackage execute queue and Worker e2e run on isolated temporary files."""
+import errno
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -250,3 +251,101 @@ def test_failed_recovery_rejects_unknown_stage_without_running(tmp_path, monkeyp
     assert result.status_code == 409, result.text
     assert (stage / "foreign.txt").read_bytes() == b"foreign"
     assert client.get(f"/api/media_package/executions/{failed_id}").json()["status"] == "failed"
+
+
+def test_original_zos_errno95_failed_task_recovers_with_same_manifest_and_stage(
+    tmp_path, monkeypatch,
+):
+    """Old failed WorkJob remains immutable; the new one reuses its stage."""
+    client, settings, root = _fixture(tmp_path)
+    package = root / "2611" / "261116" / "ExampleAuthor" / "ExampleBundle"
+    inner = package / "clips"
+    inner.mkdir(parents=True)
+    for index in range(201):
+        (inner / f"{index:03d}.mp4").write_bytes(f"video-{index}".encode())
+    pid = _preview(client, settings, package)
+    started = client.post(f"/api/media_package/previews/{pid}/execute", json={
+        "confirmation": f"EXECUTE_MEDIA_PACKAGE_PREVIEW_{pid}",
+    })
+    assert started.status_code == 200, started.text
+    old_id = started.json()["job_id"]
+    engine, factory = create_engine_and_session(settings.database_path)
+    owner = "media-package-zos-recovery"
+    assert acquire_worker_ownership(engine, factory, worker_id=owner)
+
+    real_publish = executor._publish_group
+
+    def old_incompatible_publish(frozen, group_index, fence):
+        raise OSError(
+            errno.EOPNOTSUPP,
+            "Plain directory rename no-clobber semantics are not positively proven",
+            str(package / frozen["groups"][group_index]["stage"]),
+        )
+
+    monkeypatch.setattr(executor, "_publish_group", old_incompatible_publish)
+    assert not process_work_job(settings, old_id, session_factory=factory,
+                                engine=engine, worker_id=owner)
+    old = client.get(f"/api/media_package/executions/{old_id}").json()
+    assert old["status"] == "failed"
+    assert old["error"].startswith(
+        "[Errno 95] Plain directory rename no-clobber semantics are not positively proven: "
+    )
+    assert len(list((package / f".nfc-media_package-stage-{old_id}-0").iterdir())) == 200
+    assert len(list((package / f".nfc-media_package-stage-{old_id}-1").iterdir())) == 1
+
+    # The old preview WorkJob was removed on a prior operator action.
+    assert client.delete(f"/api/tasks/{pid}").status_code == 200
+    recovery_url = f"/api/media_package/executions/{old_id}/recover"
+    token = f"RECOVER_MEDIA_PACKAGE_EXECUTION_{old_id}"
+    assert client.post(recovery_url, json={"confirmation": "wrong"}).status_code == 409
+    scheduled = client.post(recovery_url, json={"confirmation": token})
+    assert scheduled.status_code == 200, scheduled.text
+    new_id = scheduled.json()["job_id"]
+    assert new_id != old_id
+
+    native = executor.rename_noreplace_at
+
+    def reject_group_rename(srcfd, srcname, dstfd, dstname):
+        if str(srcname).startswith(".nfc-media_package-stage-"):
+            raise OSError(errno.EOPNOTSUPP, "zfuse does not support atomic directory rename")
+        return native(srcfd, srcname, dstfd, dstname)
+
+    def reject_plain_rename(src, dst):
+        raise OSError(
+            errno.EOPNOTSUPP,
+            "Plain directory rename no-clobber semantics are not positively proven",
+            str(src),
+        )
+
+    monkeypatch.setattr(executor, "_publish_group", real_publish)
+    monkeypatch.setattr(executor, "rename_noreplace_at", reject_group_rename)
+    monkeypatch.setattr(executor, "rename_directory_noreplace_compat", reject_plain_rename)
+    assert process_work_job(settings, new_id, session_factory=factory,
+                            engine=engine, worker_id=owner)
+    done = client.get(f"/api/media_package/executions/{new_id}").json()
+    assert done["status"] == "completed"
+    assert client.get(f"/api/media_package/executions/{old_id}").json()["status"] == "failed"
+    published = sorted(package.glob("V*/*.mp4"))
+    assert len(published) == 201
+    assert not any(x.name.startswith(".nfc-") for x in package.iterdir())
+    assert not inner.exists()
+    assert client.post(recovery_url, json={"confirmation": token}).json()["job_id"] == new_id
+
+
+def test_errno95_recovery_error_allowlist_rejects_unrelated_failures():
+    from app.batch.media_package_execute_jobs import is_recoverable_media_package_publish_error
+
+    assert is_recoverable_media_package_publish_error(
+        "EXECUTION_ERROR",
+        "[Errno 95] Plain directory rename no-clobber semantics are not positively proven: '/safe/stage'",
+    )
+    assert is_recoverable_media_package_publish_error(
+        "EXECUTION_ERROR", "Package directory changed before publish",
+    )
+    for code, error in (
+        ("AUTH_FAILURE", "Package directory changed before publish"),
+        ("EXECUTION_ERROR", "[Errno 95] Unexpected filesystem error"),
+        ("EXECUTION_ERROR", "Missing file in frozen package"),
+        (None, "Package directory changed before publish"),
+    ):
+        assert not is_recoverable_media_package_publish_error(code, error)
