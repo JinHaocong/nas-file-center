@@ -1,0 +1,48 @@
+name: Luolcy Read-Only Preview Regression
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'app/batch/luolcy_organizer.py'
+      - 'app/batch/luolcy_jobs.py'
+      - 'app/api/router.py'
+      - 'app/tasks/handlers.py'
+      - 'app/tasks/handlers_base.py'
+      - 'app/worker.py'
+      - 'frontend/src/pages/Batch/LuolcyOrganizerEditor.tsx'
+      - 'frontend/src/pages/Batch/index.tsx'
+      - 'frontend/src/api/luolcy.ts'
+      - 'tests/test_luolcy_organizer.py'
+      - 'tests/test_luolcy_jobs.py'
+      - '.github/workflows/luolcy-preview-regression.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: luolcy-preview-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  luolcy-preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CONFIG_DIR: /tmp/nfc-config
+      DATA_MOUNT: /tmp/nfc-data
+      ALLOWED_ROOTS: /tmp/nfc-data
+      QUARANTINE_ROOT: /tmp/nfc-data/.nas-file-center-trash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install backend test dependencies
+        run: python -m pip install -e '.[test]'
+      - name: Test scope, 200-file partitioning, security and Worker paging
+        env:
+          PYTHONPATH: .
+        run: pytest -q tests/test_luolcy_organizer.py tests/test_luolcy_jobs.py
