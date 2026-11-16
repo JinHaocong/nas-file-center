@@ -367,6 +367,112 @@ def _ensure_staging(manifest: dict, group_index: int, lease_fence: Callable[[], 
         os.close(fd)
 
 
+def _frozen_artifact_proves_package(manifest: dict) -> bool:
+    """Permit directory inode drift only when an existing frozen file proves custody.
+
+    Some NAS/FUSE mounts report a different directory inode after adding
+    children. A replacement directory is *not* accepted just because the path
+    still exists: require an intact staged or published file matching the
+    checksum-validated original manifest's device/inode/size/mtime tuple.
+    Unknown staging entries, symlinks, or an incomplete published group fail
+    closed. This never creates, deletes or renames any file.
+    """
+    package = Path(manifest["package"])
+    if manifest.get("root_stage") is not None:
+        stage = package / manifest["root_stage"]
+        if os.path.lexists(stage):
+            _flat_stage_inspect(manifest, stage)
+            fd = _open_folder(stage)
+            try:
+                with os.scandir(fd) as entries:
+                    if any(e.name != _ROOT_READY_MARKER for e in entries):
+                        return True
+            finally:
+                os.close(fd)
+        return _root_finals_complete(manifest)
+
+    confirmed = False
+    for index, group in enumerate(manifest["groups"]):
+        staged = package / group["stage"]
+        published = package / group["final"]
+        has_stage = os.path.lexists(staged)
+        has_final = os.path.lexists(published)
+        if has_stage and has_final:
+            raise MediaPackageExecutionConflict(
+                "Both frozen stage and final directory exist; manual review required"
+            )
+        if not has_stage and not has_final:
+            continue
+        target = published if has_final else staged
+        expected_rows = _group_files(manifest, index)
+        expected = {
+            Path(row["final" if has_final else "target"]).name.casefold(): row["identity"]
+            for row in expected_rows
+        }
+        if len(expected) != len(expected_rows):
+            raise MediaPackageExecutionConflict("Frozen destination names are not unique")
+        fd = _open_folder(target)
+        seen = set()
+        try:
+            _check_directory(os.fstat(fd), target, manifest["package_dev"])
+            with os.scandir(fd) as entries:
+                for entry in entries:
+                    folded = entry.name.casefold()
+                    if folded not in expected or folded in seen:
+                        raise MediaPackageExecutionConflict(
+                            "Unknown or repeated file in frozen recovery directory"
+                        )
+                    seen.add(folded)
+                    _check_file(entry.stat(follow_symlinks=False),
+                                expected[folded], target / entry.name)
+            if has_final and len(seen) != len(expected_rows):
+                raise MediaPackageExecutionConflict(
+                    "Published folder is incomplete during recovery"
+                )
+            confirmed |= bool(seen)
+        finally:
+            os.close(fd)
+    return confirmed
+
+
+def _open_verified_package(manifest: dict) -> int:
+    """Open the literal package path without following symlinks.
+
+    Check the parent-to-package binding at the time of use. The frozen
+    directory inode remains authoritative until trusted staged/published file
+    evidence proves this is the original frozen job despite NAS inode drift.
+    Device changes are never tolerated.
+    """
+    package = Path(manifest["package"])
+    fd = _open_folder(package)
+    try:
+        current = os.fstat(fd)
+        _check_directory(current, package, manifest["package_dev"])
+        parent_fd = _open_folder(package.parent)
+        try:
+            parent_entry = os.stat(package.name, dir_fd=parent_fd,
+                                   follow_symlinks=False)
+            _check_directory(parent_entry, package, manifest["package_dev"])
+            if (int(parent_entry.st_dev), int(parent_entry.st_ino)) != (
+                int(current.st_dev), int(current.st_ino)
+            ):
+                raise MediaPackageExecutionConflict(
+                    "Package directory binding changed between verification and use"
+                )
+        finally:
+            os.close(parent_fd)
+
+        if int(current.st_ino) != manifest["package_ino"]:
+            if not _frozen_artifact_proves_package(manifest):
+                raise MediaPackageExecutionConflict(
+                    "Package directory identity changed without trusted frozen files"
+                )
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
 def _publish_group(manifest: dict, group_index: int,
                    lease_fence: Callable[[], None]) -> str:
     package = Path(manifest["package"])
@@ -380,11 +486,8 @@ def _publish_group(manifest: dict, group_index: int,
         return "already_published"
     _verify_group_contents(manifest, group_index, stage)
     lease_fence()
-    fd = _open_folder(package)
+    fd = _open_verified_package(manifest)
     try:
-        if (os.fstat(fd).st_ino != manifest["package_ino"]
-                or os.fstat(fd).st_dev != manifest["package_dev"]):
-            raise MediaPackageExecutionConflict("Package directory changed before publish")
         live_stage = os.stat(group["stage"], dir_fd=fd, follow_symlinks=False)
         _check_directory(live_stage, stage, manifest["package_dev"])
         stage_fd = _open_folder(stage)
@@ -779,13 +882,8 @@ def execute_frozen_manifest(manifest: dict, *, lease_fence: Callable[[], None],
     if manifest.get("schema_version") != MANIFEST_VERSION:
         raise MediaPackageExecutionConflict("Unsupported frozen manifest version")
     _validate_frozen_paths(manifest)
-    fd = _open_folder(package)
-    try:
-        st = os.fstat(fd)
-        if st.st_dev != manifest["package_dev"] or st.st_ino != manifest["package_ino"]:
-            raise MediaPackageExecutionConflict("Protected resource package identity changed")
-    finally:
-        os.close(fd)
+    fd = _open_verified_package(manifest)
+    os.close(fd)
     # Before the first mutation of a new package job, reject any source or
     # target drift since Freeze. This catches late-arriving root files before
     # we relocate the first source into staging. Recovery is different:
