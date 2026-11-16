@@ -37,7 +37,8 @@ export const MediaPackageOrganizerEditor: React.FC = () => {
   const [selection, setSelection] = useState('');
   const [jobId, setJobId] = useState<number | null>(null);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);\n  const [statusFilter, setStatusFilter] = useState("all");
+  const [pageSize, setPageSize] = useState(25);
+  const [statusFilter, setStatusFilter] = useState('all');
   const [executionJobId, setExecutionJobId] = useState<number | null>(null);
   const [executionConfirmation, setExecutionConfirmation] = useState('');
   const enqueue = useMutation({ mutationFn: media_packageApi.startPreview });
@@ -74,6 +75,7 @@ export const MediaPackageOrganizerEditor: React.FC = () => {
     setExecutionJobId(null);
     setExecutionConfirmation('');
     setPage(1);
+    setStatusFilter('all');
   };
   const start = async () => {
     const chosen = selection.trim();
@@ -86,6 +88,7 @@ export const MediaPackageOrganizerEditor: React.FC = () => {
     setExecutionJobId(null);
     setExecutionConfirmation('');
     setPage(1);
+    setStatusFilter('all');
     try {
       const result = await enqueue.mutateAsync(chosen);
       setJobId(result.job_id);
@@ -196,7 +199,18 @@ export const MediaPackageOrganizerEditor: React.FC = () => {
             <span>跳过 <strong>{summary.skipped_count.toLocaleString()}</strong></span>
             <span>预计移动 <strong>{summary.needed_moves.toLocaleString()}</strong></span>
           </div>
-          <div className="nfc-v2-batch-field">\n            <label htmlFor="media-package-status-filter">按状态筛选</label>\n            <select id="media-package-status-filter" value={statusFilter}\n              onChange={event => { setStatusFilter(event.target.value); setPage(1); }}>\n              <option value="all">全部</option>\n              <option value="blocked">冲突（{summary.blocked_count}）</option>\n              <option value="ready">待整理（{summary.ready_count}）</option>\n              <option value="already_organized">已整理（{summary.already_organized_count}）</option>\n              <option value="skipped">跳过（{summary.skipped_count}）</option>\n            </select>\n          </div>\n          {!data.packages.length ? (
+          <div className="nfc-v2-batch-field">
+            <label htmlFor="media-package-status-filter">按状态筛选</label>
+            <select id="media-package-status-filter" value={statusFilter}
+              onChange={event => { setStatusFilter(event.target.value); setPage(1); }}>
+              <option value="all">全部</option>
+              <option value="blocked">冲突（{summary.blocked_count}）</option>
+              <option value="ready">待整理（{summary.ready_count}）</option>
+              <option value="already_organized">已整理（{summary.already_organized_count}）</option>
+              <option value="skipped">跳过（{summary.skipped_count}）</option>
+            </select>
+          </div>
+          {!data.packages.length ? (
             <ConsoleEmpty title="当前范围没有可显示的资源包"
               description="可以选择更高一级 资源包根目录或月份目录，或检查路径结构。" />
           ) : (
