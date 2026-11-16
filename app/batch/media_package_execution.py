@@ -1242,6 +1242,29 @@ def _validate_frozen_paths(manifest: dict) -> None:
                 raise MediaPackageExecutionConflict("Frozen group target filename collision")
 
 
+def _exact_published_snapshot(manifest: dict, live: list[dict]) -> bool:
+    """Only a complete verified final layout can bypass the original snapshot."""
+    if not manifest["groups"] or len(live) != len(manifest["moves"]):
+        return False
+    expected = {
+        row["final"]: tuple(row["identity"]) for row in manifest["moves"]
+    }
+    if len(expected) != len(manifest["moves"]):
+        return False
+    for row in live:
+        if expected.get(row["path"]) != (
+            row["dev"], row["ino"], row["bytes"], row["mtime_ns"],
+        ):
+            return False
+    try:
+        for index, group in enumerate(manifest["groups"]):
+            _verify_group_contents(manifest, index,
+                                   Path(manifest["package"]) / group["final"])
+    except (MediaPackageExecutionConflict, OSError, ValueError):
+        return False
+    return True
+
+
 def execute_frozen_manifest(manifest: dict, *, lease_fence: Callable[[], None],
                             progress: Callable[[int, int], None] | None = None,
                             allow_fuse_compat: bool = False) -> dict:
@@ -1258,21 +1281,20 @@ def execute_frozen_manifest(manifest: dict, *, lease_fence: Callable[[], None],
                 )
     fd = _open_verified_package(manifest)
     os.close(fd)
-    # Before the first mutation of a new package job, reject any source or
-    # target drift since Freeze. This catches late-arriving root files before
-    # we relocate the first source into staging. Recovery is different:
-    # the original snapshot cannot match after intentional partial moves,
-    # so only an existing job-owned staging or published final bypasses it.
+    # An old P/V directory is not recovery evidence merely because its
+    # pathname equals a proposed final. Trust only owned stage names, verified
+    # compatible-publication witnesses, or an exact complete final snapshot.
     root_stage = manifest.get("root_stage")
-    recovery_artifact = (
-        ((package / root_stage).exists() or _root_finals_complete(manifest))
-        if root_stage
-        else any(
-            os.path.lexists(package / group["stage"]) or
-            os.path.lexists(package / group["final"])
-            for group in manifest["groups"]
+    if root_stage:
+        recovery_artifact = (
+            (package / root_stage).exists() or _root_finals_complete(manifest)
         )
-    )
+    else:
+        recovery_artifact = any(
+            os.path.lexists(package / group["stage"])
+            or _compat_inspect_group(manifest, index) is not None
+            for index, group in enumerate(manifest["groups"])
+        )
     if not recovery_artifact:
         try:
             live = list(_walk_package(package))
@@ -1280,7 +1302,8 @@ def execute_frozen_manifest(manifest: dict, *, lease_fence: Callable[[], None],
             raise MediaPackageExecutionConflict(
                 f"Unsafe package changed since frozen preview: {exc}"
             ) from exc
-        if _input_fingerprint(live, package) != manifest["input_fingerprint"]:
+        if (_input_fingerprint(live, package) != manifest["input_fingerprint"]
+                and not _exact_published_snapshot(manifest, live)):
             raise MediaPackageExecutionConflict(
                 "Package changed since frozen preview; refusing file mutation"
             )
@@ -1290,22 +1313,29 @@ def execute_frozen_manifest(manifest: dict, *, lease_fence: Callable[[], None],
         result["total_files"] = len(manifest["moves"])
         result["package"] = str(package)
         return result
-    compat_groups: set[int] = set()
-    for i in range(len(manifest["groups"])):
-        _ensure_staging(manifest, i, lease_fence)
-        if _compat_inspect_group(manifest, i) is not None:
-            compat_groups.add(i)
+    group_modes = [
+        _ensure_staging(manifest, index, lease_fence)
+        for index in range(len(manifest["groups"]))
+    ]
     completed = recovered = 0
     total = len(manifest["moves"])
     for index, row in enumerate(manifest["moves"], start=1):
-        result = _move_one(
-            row, lease_fence=lease_fence,
-            compat_hardlink=row["group"] in compat_groups,
-        )
-        completed += result == "moved"
-        recovered += result != "moved"
+        mode = group_modes[row["group"]]
+        if mode in ("published", "compat"):
+            # Every frozen file identity was already checked in the verified
+            # output or authenticated compatible-publication witness.
+            recovered += 1
+        else:
+            # The public label may still contain original inputs. During
+            # staging it is NEVER authority for a file's final destination.
+            result = _move_one(row, lease_fence=lease_fence, ignore_final=True)
+            completed += result == "moved"
+            recovered += result != "moved"
         if progress and (index % 25 == 0 or index == total):
             progress(index, total)
+    retired = _retire_staged_destination_sources(
+        manifest, group_modes, lease_fence,
+    )
     published = 0
     for i in range(len(manifest["groups"])):
         if allow_fuse_compat:
@@ -1316,9 +1346,9 @@ def execute_frozen_manifest(manifest: dict, *, lease_fence: Callable[[], None],
             result = _publish_group(manifest, i, lease_fence)
         if result == "published":
             published += 1
-    cleaned = _remove_empty_sources(manifest, lease_fence)
+    cleaned = _remove_empty_sources(manifest, lease_fence, skip_finals=True)
     return {
         "files_moved": completed, "files_reconciled": recovered,
-        "groups_published": published, "empty_dirs_removed": cleaned,
+        "groups_published": published, "empty_dirs_removed": retired + cleaned,
         "total_files": total, "package": str(package),
     }
