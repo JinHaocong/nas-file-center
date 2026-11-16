@@ -210,3 +210,77 @@ def test_crashed_compat_link_is_not_unlinked_automatically(tmp_path):
         executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
     assert src.exists()
     assert (package / "001.mp4").exists()
+
+
+def test_crash_during_group_publication_resumes_from_frozen_stage(tmp_path, monkeypatch):
+    root, package = example(tmp_path)
+    nested = package / "only-videos"
+    nested.mkdir()
+    for i in range(201):
+        (nested / f"{i:03d}.mp4").write_bytes(b"clip")
+    manifest = manifest_for(root, package, job_id=531)
+    original = executor.rename_noreplace_at
+    failed = {"value": False}
+
+    def crash_before_publish(src_fd, src_name, dst_fd, dst_name):
+        if src_name.startswith(".nfc-luolcy-stage-") and not failed["value"]:
+            failed["value"] = True
+            raise RuntimeError("synthetic publish failure")
+        return original(src_fd, src_name, dst_fd, dst_name)
+
+    monkeypatch.setattr(executor, "rename_noreplace_at", crash_before_publish)
+    with pytest.raises(RuntimeError, match="publish failure"):
+        executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+    monkeypatch.setattr(executor, "rename_noreplace_at", original)
+    assert nested.exists()  # empty dirs are not pruned before publication
+    assert not (package / manifest["groups"][0]["final"]).exists()
+    result = executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+    assert result["files_reconciled"] == 201
+    assert (package / manifest["groups"][0]["final"]).is_dir()
+    assert (package / manifest["groups"][1]["final"]).is_dir()
+    assert not nested.exists()
+
+
+def test_tampered_target_outside_package_is_rejected_before_mutation(tmp_path):
+    root, package = example(tmp_path)
+    nested = package / "video"
+    nested.mkdir()
+    (nested / "one.mp4").write_bytes(b"movie")
+    manifest = manifest_for(root, package)
+    manifest["moves"][0]["target"] = str(tmp_path / "outside.mp4")
+    with pytest.raises(executor.LuolcyExecutionConflict, match="escaped"):
+        executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+    assert (nested / "one.mp4").read_bytes() == b"movie"
+    assert not (tmp_path / "outside.mp4").exists()
+
+
+def test_cleanup_leaves_nonempty_original_directory_untouched(tmp_path):
+    root, package = example(tmp_path)
+    inner = package / "images"
+    inner.mkdir()
+    (inner / "001.jpg").write_bytes(b"pic")
+    manifest = manifest_for(root, package)
+    # A user drops an unrelated file after freeze, before moving.
+    (inner / "user-readme.txt").write_bytes(b"preserve me")
+    result = executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+    assert result["files_moved"] == 1
+    assert result["empty_dirs_removed"] == 0
+    assert (inner / "user-readme.txt").read_bytes() == b"preserve me"
+    assert (package / "001.jpg").read_bytes() == b"pic"
+
+
+def test_symlink_parent_replacement_does_not_escape_package(tmp_path):
+    root, package = example(tmp_path)
+    inner = package / "gallery"
+    inner.mkdir()
+    (inner / "01.jpg").write_bytes(b"image")
+    manifest = manifest_for(root, package)
+    other = tmp_path / "other"
+    other.mkdir()
+    (inner / "01.jpg").rename(other / "01.jpg")
+    inner.rmdir()
+    inner.symlink_to(other, target_is_directory=True)
+    with pytest.raises((OSError, executor.LuolcyExecutionConflict)):
+        executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+    assert (other / "01.jpg").read_bytes() == b"image"
+    assert not (package / "01.jpg").exists()
