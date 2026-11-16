@@ -793,7 +793,7 @@ def execute_frozen_manifest(manifest: dict, *, lease_fence: Callable[[], None],
     # so only an existing job-owned staging or published final bypasses it.
     root_stage = manifest.get("root_stage")
     recovery_artifact = (
-        (package / root_stage).exists()
+        ((package / root_stage).exists() or _root_finals_complete(manifest))
         if root_stage
         else any(
             os.path.lexists(package / group["stage"]) or
