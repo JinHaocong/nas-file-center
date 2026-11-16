@@ -144,7 +144,7 @@ def _scan_directory(
         reason: str | None = None
         # A P/V destination means this directory has already been partially
         # organized. Never skip media left beside an existing classification dir.
-        if smart_skip and not existing_destinations:
+        if smart_skip and not ({"p", "v"} & occupied):
             if image_count and not video_count and other_regular_files == 0:
                 reason = "pure_images"
             elif video_count and not image_count and other_regular_files == 0:
@@ -169,7 +169,9 @@ def _scan_directory(
         regular_files.sort(key=lambda item: item[0])
         proposed: dict[str, set[str]] = {kind: set() for kind in _DESTINATION_DIRS}
         for kind, folder in _DESTINATION_DIRS.items():
-            if folder.casefold() not in existing_destinations:
+            if folder.casefold() not in existing_destinations or not any(
+                file_kind == kind for _, file_kind, _ in regular_files
+            ):
                 continue
             # Case-insensitive collision guard must include files already
             # present in a reused destination, not just this preview's rows.
