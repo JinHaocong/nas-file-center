@@ -1429,15 +1429,16 @@ def get_media_package_preview_request(
     request: Request, job_id: int,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=25, ge=1, le=100),
+    status_filter: str = Query(default="all"),
     _user: User = Depends(require_admin_user),
 ):
-    """Paged report only. No MediaPackage execute endpoint exists yet."""
+    """Paged, status-filtered read-only MediaPackage preview report."""
     from app.batch.media_package_jobs import get_media_package_preview
     try:
         return get_media_package_preview(
             request.app.state.service.SessionLocal,
             request.app.state.settings, job_id,
-            page=page, page_size=page_size,
+            page=page, page_size=page_size, status_filter=status_filter,
         )
     except KeyError as exc:
         raise HTTPException(404, "MediaPackage preview task not found") from exc
