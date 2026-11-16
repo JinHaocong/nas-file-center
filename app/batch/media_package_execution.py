@@ -802,7 +802,12 @@ def execute_frozen_manifest(manifest: dict, *, lease_fence: Callable[[], None],
         )
     )
     if not recovery_artifact:
-        live = list(_walk_package(package))
+        try:
+            live = list(_walk_package(package))
+        except (OSError, ValueError) as exc:
+            raise MediaPackageExecutionConflict(
+                f"Unsafe package changed since frozen preview: {exc}"
+            ) from exc
         if _input_fingerprint(live, package) != manifest["input_fingerprint"]:
             raise MediaPackageExecutionConflict(
                 "Package changed since frozen preview; refusing file mutation"
