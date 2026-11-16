@@ -118,7 +118,7 @@ def preview_luolcy_package(package: str | Path, *, luolcy_root: str | Path,
                            max_rows: int = 100) -> dict:
     """Build a bounded, read-only manifest for one exact resource package.
 
-    Pure image/video packages are skipped without changing nested structure.
+    Pure image/video packages are flattened at the package boundary only.
     Existing targets are never assumed safe to overwrite; unresolved target
     occupancy is reported as a blocking conflict for manual review.
     """
@@ -127,12 +127,50 @@ def preview_luolcy_package(package: str | Path, *, luolcy_root: str | Path,
     source = _package_path(package, luolcy_root, allowed_roots, quarantine_root)
     items = list(_walk_package(source))
     totals = {kind: sum(x["kind"] == kind for x in items) for kind in ("P", "V", "Other")}
-    if not items or (totals["Other"] == 0 and (totals["P"] == 0 or totals["V"] == 0)):
+    if not items:
         return {
             "package": str(source), "status": "skipped",
-            "reason": "empty" if not items else "pure_media",
-            "total_files": len(items), "totals": totals,
+            "reason": "empty", "total_files": 0, "totals": totals,
             "groups": [], "conflicts": [], "sample_moves": [],
+            "total_proposals": 0, "needed_moves": 0, "truncated": False,
+            "read_only": True,
+        }
+
+    # A homogeneous resource package needs *flattening*, not P/V buckets.
+    # Existing root-level files remain untouched. No source name is changed;
+    # duplicate basenames (even with different case) require manual review.
+    if totals["Other"] == 0 and (totals["P"] == 0 or totals["V"] == 0):
+        ordered = sorted(items, key=lambda row: (
+            os.path.relpath(row["path"], source).casefold(),
+            os.path.relpath(row["path"], source),
+        ))
+        by_name: dict[str, list[dict]] = {}
+        for row in ordered:
+            by_name.setdefault(row["name"].casefold(), []).append(row)
+        conflicts: list[dict] = []
+        for rows in by_name.values():
+            if len(rows) > 1:
+                conflicts.append({
+                    "reason": "flatten_filename_collision",
+                    "sources": [item["path"] for item in rows],
+                    "target": str(source / rows[0]["name"]),
+                })
+        moves = [
+            {"source": row["path"], "target": str(source / row["name"]),
+             "bytes": row["bytes"], "kind": row["kind"]}
+            for row in ordered
+            if Path(row["path"]).parent != source
+        ]
+        return {
+            "package": str(source),
+            "status": "blocked" if conflicts else "ready" if moves else "skipped",
+            "reason": None if moves else "already_flat",
+            "total_files": len(items), "totals": totals, "groups": [],
+            "conflicts": conflicts, "sample_moves": moves[:max_rows],
+            "total_proposals": len(moves), "needed_moves": len(moves),
+            "truncated": len(moves) > max_rows,
+            "read_only": True,
+            "operation": "flatten_pure_media",
         }
 
     # Avoid reordering when readdir() order changes. Only metadata, never
