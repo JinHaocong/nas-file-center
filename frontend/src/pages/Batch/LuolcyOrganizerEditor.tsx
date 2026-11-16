@@ -38,8 +38,20 @@ export const LuolcyOrganizerEditor: React.FC = () => {
   const [jobId, setJobId] = useState<number | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
+  const [executionJobId, setExecutionJobId] = useState<number | null>(null);
+  const [executionConfirmation, setExecutionConfirmation] = useState('');
   const enqueue = useMutation({ mutationFn: luolcyApi.startPreview });
   const cancel = useMutation({ mutationFn: tasksApi.cancelTask });
+  const executeMutation = useMutation({
+    mutationFn: ({ previewId, confirmation }: { previewId: number; confirmation: string }) =>
+      luolcyApi.startExecution(previewId, confirmation),
+  });
+  const { data: executionJob, isError: executionFailedToLoad, error: executionLoadError } = useQuery({
+    queryKey: ['luolcyExecution', executionJobId],
+    queryFn: () => luolcyApi.getExecution(executionJobId!),
+    enabled: executionJobId !== null,
+    refetchInterval: (query) => inProgress(query.state.data?.status) ? 1500 : false,
+  });
   const { data, isError, error, isFetching } = useQuery({
     queryKey: ['luolcyPreview', jobId, page, pageSize],
     queryFn: () => luolcyApi.getPreview(jobId!, page, pageSize),
@@ -47,12 +59,20 @@ export const LuolcyOrganizerEditor: React.FC = () => {
     refetchInterval: (query) => inProgress(query.state.data?.status) ? 1300 : false,
   });
   const busy = enqueue.isPending || inProgress(data?.status) ||
+    inProgress(executionJob?.status) ||
     (jobId !== null && data == null);
   const summary = data?.summary;
+  const confirmationToken = jobId === null ? '' : `EXECUTE_LUOLCY_PREVIEW_${jobId}`;
+  const canExecute = jobId !== null && data?.status === 'completed' &&
+    summary != null && summary.ready_count > 0 && summary.blocked_count === 0 &&
+    !busy && !executeMutation.isPending && executionJobId === null &&
+    executionConfirmation === confirmationToken;
   const changeSelection = (next: string | string[]) => {
     if (busy) return;
     setSelection(Array.isArray(next) ? next[0] || '' : next);
     setJobId(null);
+    setExecutionJobId(null);
+    setExecutionConfirmation('');
     setPage(1);
   };
   const start = async () => {
@@ -63,6 +83,8 @@ export const LuolcyOrganizerEditor: React.FC = () => {
     }
     if (busy) return;
     setJobId(null);
+    setExecutionJobId(null);
+    setExecutionConfirmation('');
     setPage(1);
     try {
       const result = await enqueue.mutateAsync(chosen);
@@ -72,6 +94,20 @@ export const LuolcyOrganizerEditor: React.FC = () => {
       toast.error(getStructuredApiError(e).message || '无法启动 Luolcy 预览');
     }
   };
+  const beginExecution = async () => {
+    if (!canExecute || jobId === null) return;
+    try {
+      const result = await executeMutation.mutateAsync({
+        previewId: jobId, confirmation: executionConfirmation,
+      });
+      setExecutionJobId(result.job_id);
+      setExecutionConfirmation('');
+      toast.success(`Luolcy 安全执行任务 #${result.job_id} 已提交 Worker`);
+    } catch (e: unknown) {
+      toast.error(getStructuredApiError(e).message || '安全执行任务无法启动');
+    }
+  };
+
   const stop = async () => {
     if (jobId === null || !inProgress(data?.status) || cancel.isPending) return;
     try {
@@ -84,8 +120,8 @@ export const LuolcyOrganizerEditor: React.FC = () => {
 
   return (
     <>
-      <DataPanel title="Luolcy 专用整理 · 只读预览"
-        description="规则固定不可配置；当前版本只生成检查报告，不移动或删除 NAS 文件。"
+      <DataPanel title="Luolcy 专用整理"
+        description="先只读预览并检查冲突；只有管理员完成精确确认，才会启动 Worker 实际整理。"
         className="nfc-v2-batch-media-panel nfc-tool-workbench">
         <div className="nfc-v2-batch-form">
           <div className="nfc-v2-batch-field">
@@ -101,7 +137,7 @@ export const LuolcyOrganizerEditor: React.FC = () => {
               <strong>资源包及上级目录始终保持不变</strong>
               <p>纯图片或纯视频不超过 200 个时平铺到资源包根目录；超过 200 个按 P/V 每组最多 200 个分类；
                 混合文件放 P/V/Other。文件夹名称包含实际数量和大小，冲突需要人工检查。
-                这里只扫描并显示计划，不开放实际移动。</p>
+                执行前重新校验文件身份；禁止覆盖，失败时保留原文件与恢复证据。</p>
             </div>
           </div>
           <div className="nfc-file-tool-primary-actions">
@@ -150,7 +186,7 @@ export const LuolcyOrganizerEditor: React.FC = () => {
       {summary && data?.status === 'completed' && (
         <DataPanel title="资源包整理检查报告" variant="dense"
           className="nfc-v2-batch-media-panel"
-          description="结果仅供核对；不会自动修改文件。"
+          description="这些是只读预览结果；仅提交明确确认的执行请求才会修改文件。"
           action={<span className="nfc-panel-count">{summary.package_count.toLocaleString()} 个资源包</span>}>
           <div className="nfc-v2-batch-media-stats" role="status">
             <span>已扫描 <strong>{summary.package_count.toLocaleString()}</strong></span>
@@ -205,8 +241,79 @@ export const LuolcyOrganizerEditor: React.FC = () => {
             total={summary.package_count} pageSizes={[10, 25, 50, 100]}
             onChange={(next, size) => { setPage(next); setPageSize(size); }} />
           <p className="nfc-form-note">
-            下一阶段将单独加入带冻结、实时校验、无覆盖移动、空目录清理与中断恢复的执行流程。
+            执行使用冻结清单、Worker 租约、逐文件重新校验和禁止覆盖的移动操作；
+            只有源目录真正为空才进行删除。操作中断可按同一任务清单恢复。
           </p>
+        </DataPanel>
+      )}
+
+      {jobId !== null && data?.status === 'completed' && summary && (
+        <DataPanel title="确认 Luolcy 安全执行" variant="dense"
+          className="nfc-v2-batch-media-panel"
+          description="执行将真正移动文件并清理已确认的空子目录。需要管理员权限和 ALLOW_MUTATION / ALLOW_DELETE 开关。">
+          {summary.blocked_count > 0 ? (
+            <p role="alert" className="nfc-v2-batch-error">
+              发现 {summary.blocked_count.toLocaleString()} 个冲突资源包，请先人工处理并重新扫描。
+              禁止跳过冲突而直接执行整个范围。
+            </p>
+          ) : summary.ready_count === 0 ? (
+            <p className="nfc-form-note">没有待整理的资源包，无须执行。</p>
+          ) : executionJobId === null ? (
+            <div className="nfc-v2-batch-form">
+              <p className="nfc-form-note">
+                即将处理 {summary.ready_count.toLocaleString()} 个待整理资源包，
+                预计移动 {summary.needed_moves.toLocaleString()} 个文件。
+                为防止误操作，请完整输入下方确认码，提交后不能自动撤销。
+              </p>
+              <div className="nfc-v2-batch-field">
+                <label htmlFor="luolcy-execution-confirmation">执行确认码</label>
+                <code>{confirmationToken}</code>
+                <input id="luolcy-execution-confirmation" type="text"
+                  autoComplete="off" spellCheck={false}
+                  value={executionConfirmation}
+                  onChange={event => setExecutionConfirmation(event.target.value)}
+                  placeholder="输入完整确认码" disabled={busy || executeMutation.isPending} />
+              </div>
+              <ConsoleButton variant="danger" disabled={!canExecute}
+                loading={executeMutation.isPending}
+                onClick={() => { void beginExecution(); }}>
+                确认并执行 Luolcy 资源包整理
+              </ConsoleButton>
+            </div>
+          ) : (
+            <div role="status">
+              <p>执行任务 #{executionJobId}</p>
+              {executionJob ? (
+                <>
+                  <TaskProgress status={executionJob.status} showDetails progress={{
+                    current: executionJob.progress.current,
+                    total: executionJob.progress.total,
+                    percent: null,
+                    message: executionJob.progress.message,
+                  }} />
+                  {executionJob.progress.package && (
+                    <p className="nfc-form-note">
+                      当前资源包：{executionJob.progress.package}
+                    </p>
+                  )}
+                  {executionJob.status === 'failed' && (
+                    <p role="alert" className="nfc-v2-batch-error">
+                      执行中断：{executionJob.error || '请检查任务日志'}。
+                      不要手动删除正在使用的中间目录；须先检查恢复清单。
+                    </p>
+                  )}
+                  {executionJob.status === 'completed' && (
+                    <p className="nfc-form-note">整理任务已完成，建议重新进行一次只读扫描核对结果。</p>
+                  )}
+                </>
+              ) : (
+                <p className="nfc-form-note">
+                  {executionFailedToLoad ? getStructuredApiError(executionLoadError).message :
+                    '正在查询执行任务…'}
+                </p>
+              )}
+            </div>
+          )}
         </DataPanel>
       )}
     </>
