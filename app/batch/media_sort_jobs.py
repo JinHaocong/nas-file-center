@@ -472,7 +472,11 @@ class MediaSortPlanHandler(TaskHandler):
 
         context.checkpoint(
             progress_current=0,
-            progress_message=f"正在以安全事务批量生成 {count:,} 项 Move Plan（源文件不变）",
+            progress_message=(
+                f"正在以安全事务生成 {ready:,} 项 Move Plan"
+                + (f"（跳过 {conflicting:,} 项冲突）" if conflicting else "")
+                + "，源文件不变"
+            ),
         )
         from app.batch.media_sort_bulk_plan import create_media_sort_bulk_plan
 
@@ -490,8 +494,12 @@ class MediaSortPlanHandler(TaskHandler):
             current["plan_id"] = int(plan.id)
             tracked.state_json = json.dumps(current)
             session.commit()
-        context.checkpoint(progress_current=count, progress_total=count,
-                           progress_message=f"已创建移动计划 #{plan.id}，等待 Freeze → Validate → Execute")
+        context.checkpoint(progress_current=ready, progress_total=ready,
+                           progress_message=(
+                               f"已创建移动计划 #{plan.id}（{ready:,} 项）"
+                               + (f"，跳过冲突 {conflicting:,} 项" if conflicting else "")
+                               + "；等待 Freeze → Validate → Execute"
+                           ))
 
 
 @register_handler
