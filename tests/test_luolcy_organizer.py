@@ -25,14 +25,14 @@ def test_pure_media_nested_files_flatten_only_to_package_root(tmp_path, extensio
     root, package = make_package(tmp_path)
     nested = package / "额外的目录"
     nested.mkdir()
-    for i in range(205):
+    for i in range(200):
         (nested / f"{i:03d}{extension}").write_bytes(b"payload")
     result = preview(root, package)
     assert result["status"] == "ready"
     assert result["operation"] == "flatten_pure_media"
-    assert result["needed_moves"] == 205
+    assert result["needed_moves"] == 200
     assert result["groups"] == []
-    assert len(list(nested.iterdir())) == 205
+    assert len(list(nested.iterdir())) == 200
     assert result["sample_moves"][0]["target"].startswith(str(package) + "/")
     assert not any(child.name.startswith("P") for child in package.iterdir())
     assert not any(child.name.startswith("V") for child in package.iterdir())
@@ -162,4 +162,74 @@ def test_nested_pure_media_conflict_with_existing_root_file(tmp_path):
     result = preview(root, package)
     assert result["status"] == "blocked"
     assert any(x["reason"] == "flatten_filename_collision"
+               for x in result["conflicts"])
+
+
+@pytest.mark.parametrize("extension,kind", [(".jpg", "P"), (".mp4", "V")])
+@pytest.mark.parametrize("count", [201, 400, 401])
+def test_pure_media_over_200_must_use_numbered_count_size_buckets(
+    tmp_path, extension, kind, count
+):
+    root, package = make_package(tmp_path)
+    # Nested paths do not change the 200-file group capacity.
+    folder = package / "nested"
+    folder.mkdir()
+    for i in range(count):
+        (folder / f"{i:04d}{extension}").write_bytes(b"123")
+    result = preview(root, package)
+    assert result["status"] == "ready", result
+    assert result["operation"] == "bucket_pure_media"
+    assert result["total_files"] == count
+    expected_counts = [200] * (count // 200)
+    if count % 200:
+        expected_counts.append(count % 200)
+    assert [group["count"] for group in result["groups"]] == expected_counts
+    assert [group["name"] for group in result["groups"]] == [
+        f"{kind if i == 0 else f'{kind}_{i}'} [{size} {size*3}B]"
+        for i, size in enumerate(expected_counts)
+    ]
+    assert result["needed_moves"] == count
+    assert not any(entry.is_dir() and entry.name.startswith(kind + " [")
+                   for entry in package.iterdir())
+    assert len(list(folder.iterdir())) == count
+
+
+@pytest.mark.parametrize("extension,kind", [(".jpg", "P"), (".mp4", "V")])
+def test_flat_pure_media_over_200_is_still_bucketed(tmp_path, extension, kind):
+    root, package = make_package(tmp_path)
+    for i in range(201):
+        (package / f"{i:03d}{extension}").write_bytes(b"x")
+    result = preview(root, package)
+    assert result["operation"] == "bucket_pure_media"
+    assert [(x["kind"], x["count"]) for x in result["groups"]] == [
+        (kind, 200), (kind, 1)
+    ]
+    assert result["needed_moves"] == 201
+
+
+@pytest.mark.parametrize("extension", [".jpg", ".mp4"])
+def test_flat_pure_media_exactly_200_remains_unchanged(tmp_path, extension):
+    root, package = make_package(tmp_path)
+    for i in range(200):
+        (package / f"{i:03d}{extension}").write_bytes(b"x")
+    result = preview(root, package)
+    assert result["status"] == "skipped"
+    assert result["reason"] == "already_flat"
+    assert result["groups"] == []
+    assert result["needed_moves"] == 0
+
+
+def test_pure_media_201_filename_collision_blocks_bucket(tmp_path):
+    root, package = make_package(tmp_path)
+    first = package / "A"
+    second = package / "B"
+    first.mkdir()
+    second.mkdir()
+    for i in range(200):
+        (first / f"{i:03d}.jpg").write_bytes(b"photo")
+    (second / "000.jpg").write_bytes(b"different")
+    result = preview(root, package)
+    assert result["status"] == "blocked"
+    assert result["operation"] == "bucket_pure_media"
+    assert any(x["reason"] == "duplicate_filename_in_bucket"
                for x in result["conflicts"])
