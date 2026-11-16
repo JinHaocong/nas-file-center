@@ -133,7 +133,7 @@ def test_preexisting_target_cannot_be_overwritten(tmp_path):
     (child / "001.mp4").write_bytes(b"source")
     manifest = manifest_for(root, package)
     (package / "001.mp4").write_bytes(b"untouchable")
-    with pytest.raises(executor.MediaPackageExecutionConflict, match="Root destination occupied"):
+    with pytest.raises(executor.MediaPackageExecutionConflict, match="changed since frozen preview"):
         executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
     assert (package / "001.mp4").read_bytes() == b"untouchable"
     assert (child / "001.mp4").read_bytes() == b"source"
@@ -206,7 +206,7 @@ def test_crashed_compat_link_is_not_unlinked_automatically(tmp_path):
     manifest = manifest_for(root, package)
     # Simulates two hardlinks after a crash in a COMPAT publish path.
     (package / "001.mp4").hardlink_to(src)
-    with pytest.raises(executor.MediaPackageExecutionConflict, match="Root destination occupied"):
+    with pytest.raises(executor.MediaPackageExecutionConflict, match="changed since frozen preview"):
         executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
     assert src.exists()
     assert (package / "001.mp4").exists()
@@ -254,19 +254,19 @@ def test_tampered_target_outside_package_is_rejected_before_mutation(tmp_path):
     assert not (tmp_path / "outside.mp4").exists()
 
 
-def test_cleanup_leaves_nonempty_original_directory_untouched(tmp_path):
+def test_new_file_after_freeze_blocks_before_mutation_or_cleanup(tmp_path):
     root, package = example(tmp_path)
     inner = package / "images"
     inner.mkdir()
     (inner / "001.jpg").write_bytes(b"pic")
     manifest = manifest_for(root, package)
-    # A user drops an unrelated file after freeze, before moving.
+    # New files anywhere inside the package invalidate the frozen snapshot.
     (inner / "user-readme.txt").write_bytes(b"preserve me")
-    result = executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
-    assert result["files_moved"] == 1
-    assert result["empty_dirs_removed"] == 0
+    with pytest.raises(executor.MediaPackageExecutionConflict, match="changed since frozen preview"):
+        executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
     assert (inner / "user-readme.txt").read_bytes() == b"preserve me"
-    assert (package / "001.jpg").read_bytes() == b"pic"
+    assert (inner / "001.jpg").read_bytes() == b"pic"
+    assert not (package / "001.jpg").exists()
 
 
 def test_symlink_parent_replacement_does_not_escape_package(tmp_path):
