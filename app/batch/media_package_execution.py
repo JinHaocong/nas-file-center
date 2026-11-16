@@ -461,15 +461,33 @@ def _root_finals_complete(manifest: dict) -> bool:
     package without all of its other source bindings having retired.
     """
     package = Path(manifest["package"])
+    manifest_final_targets = {
+        row["final"]: row["identity"] for row in _flat_rows(manifest)
+    }
+    if len(manifest_final_targets) != len(manifest["moves"]):
+        raise MediaPackageExecutionConflict("Duplicate flat final targets")
     for row in _flat_rows(manifest):
         target = Path(row["final"])
         st = _entry(package, target.name)
         if st is None or not stat.S_ISREG(st.st_mode) or _identity(st) != row["identity"]:
             return False
         src = Path(row["source"])
-        if src != target:
-            if src.parent.is_dir() and _entry(src.parent, src.name) is not None:
-                return False
+        if src != target and src.parent.is_dir():
+            prior_binding = _entry(src.parent, src.name)
+            if prior_binding is not None:
+                # The old basename can now be another row's new final name.
+                # Only treat it as an unretired source if its inode is still
+                # this row's original identity; never confuse a harmless
+                # final-name permutation with a partial pending move.
+                if _identity(prior_binding) == row["identity"]:
+                    return False
+                # A foreign name that is not part of the frozen final map
+                # must also prevent automatic publication/cleanup.
+                if str(src) not in manifest_final_targets:
+                    return False
+                expected_other = manifest_final_targets[str(src)]
+                if _identity(prior_binding) != expected_other:
+                    return False
     return True
 
 
@@ -705,6 +723,7 @@ def _validate_frozen_paths(manifest: dict) -> None:
         src, dest, final = (Path(row["source"]), Path(row["target"]),
                             Path(row["final"]))
         if (not src.is_absolute() or not src.is_relative_to(package)
+                or ".." in src.relative_to(package).parts
                 or src == package or src.name in (".", "..")
                 or row.get("identity") is None or
                 len(row["identity"]) != 4 or
