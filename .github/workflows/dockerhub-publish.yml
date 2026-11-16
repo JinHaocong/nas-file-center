@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/dockerhub-publish.yml'
+      - 'pyproject.toml'
 
 permissions:
   contents: read
@@ -39,6 +40,25 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "short_sha=${GITHUB_SHA:0:12}" >> "$GITHUB_OUTPUT"
           git diff --check
+
+      - name: Verify application version agreement before publishing
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import pathlib
+          import tomllib
+          root = pathlib.Path(".")
+          py = tomllib.loads((root / "pyproject.toml").read_text())["project"]["version"]
+          front = json.loads((root / "frontend/package.json").read_text())["version"]
+          lock = json.loads((root / "frontend/package-lock.json").read_text())
+          if not (py == front == lock["version"] == lock["packages"][""]["version"]):
+              raise SystemExit("Refusing to publish: package versions disagree")
+          for path in ("compose.yaml", "compose.komodo.yaml"):
+              if f"nas-file-center:{py}" not in (root / path).read_text():
+                  raise SystemExit(f"Refusing to publish: {path} has the wrong image tag")
+          print(f"Verified release version: {py}")
+          PY
 
       - name: Require an authorized Docker Hub push token
         shell: bash
