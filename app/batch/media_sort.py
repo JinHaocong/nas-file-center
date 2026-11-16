@@ -100,8 +100,10 @@ def _scan_directory(
                         f"Too many immediate entries (limit: {MAX_IMMEDIATE_ENTRIES}) in {directory}"
                     )
                 occupied.add(entry.name.casefold())
-                info = entry.stat(follow_symlinks=False)
-                if stat.S_ISDIR(info.st_mode):
+                # DirEntry.is_dir/is_file use d_type on most NAS mounts: avoid
+                # lstat on every unrelated file. DT_UNKNOWN still falls back
+                # to a no-follow stat, preserving the original semantics.
+                if entry.is_dir(follow_symlinks=False):
                     child = directory / entry.name
                     if recursive and not is_reserved_quarantine_path(child, quarantine_root):
                         if _SORT_FOLDER_PATTERN.fullmatch(entry.name):
@@ -112,13 +114,19 @@ def _scan_directory(
                         else:
                             children.append(child)
                     continue
-                if not stat.S_ISREG(info.st_mode):
-                    # Never follow symlinks (even those pointing to media files).
-                    continue
                 kind = get_media_type(Path(entry.name).suffix)
                 if kind not in _DESTINATION_DIRS:
-                    if entry.name.casefold() not in _IGNORED_SYSTEM_FILES:
+                    if (entry.name.casefold() not in _IGNORED_SYSTEM_FILES
+                            and entry.is_file(follow_symlinks=False)):
                         other_regular_files += 1
+                    continue
+                if not entry.is_file(follow_symlinks=False):
+                    # Do not classify symlinks, sockets, or other special files.
+                    continue
+                # Identity snapshot is still mandatory for media candidates;
+                # the second dir_fd stat below protects preview race windows.
+                info = entry.stat(follow_symlinks=False)
+                if not stat.S_ISREG(info.st_mode):
                     continue
                 snapshot = (
                     int(info.st_dev), int(info.st_ino),
