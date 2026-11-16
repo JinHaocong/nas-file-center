@@ -17,6 +17,7 @@ from app.batch.media_package_execution import (
     MediaPackageExecutionConflict, execute_frozen_manifest, load_frozen_manifest,
     prepare_media_package_manifest, save_frozen_manifest,
     _validate_frozen_paths, _open_verified_package,
+    _frozen_artifact_proves_package,
 )
 from app.config import Settings
 from app.models import WorkJob
@@ -166,6 +167,10 @@ def enqueue_media_package_recovery(session_factory, settings: Settings, *,
         raise ValueError("Frozen recovery authority differs from the original preview")
     fd = _open_verified_package(manifest)
     os.close(fd)
+    # Even if the directory inode has NOT drifted, a foreign stage entry
+    # must stop assisted recovery before a new Worker job is queued.
+    if not _frozen_artifact_proves_package(manifest):
+        raise ValueError("No intact frozen staged/published files to recover")
 
     with session_factory() as session:
         session.execute(text("BEGIN IMMEDIATE"))
