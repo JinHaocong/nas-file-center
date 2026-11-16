@@ -80,6 +80,7 @@ export interface MediaPackagePreviewPage {
   packages: MediaPackagePreview[];
   page: number;
   page_size: number;
+  filtered_total: number;
   read_only: true;
 }
 
@@ -112,9 +113,9 @@ export const media_packageApi = {
     api.post<{ job_id: number; status: MediaPackageJobStatus; recovery_of_job_id: number }>(
       `/api/media_package/executions/${failedJobId}/recover`, { confirmation },
     ),
-  getPreview: (jobId: number, page: number = 1, pageSize: number = 25) => {
+  getPreview: (jobId: number, page: number = 1, pageSize: number = 25, statusFilter: string = "all") => {
     const query = new URLSearchParams({
-      page: String(page), page_size: String(pageSize),
+      page: String(page), page_size: String(pageSize), status_filter: statusFilter,
     });
     return api.get<MediaPackagePreviewPage>(`/api/media_package/previews/${jobId}?${query}`);
   },

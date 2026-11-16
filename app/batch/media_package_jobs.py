@@ -81,6 +81,22 @@ def _read_page(data: Path, index: Path, *, page: int, size: int) -> list[dict]:
                 itertools.islice(stream, offset - base, offset - base + size)]
 
 
+def _read_filtered_page(data: Path, *, page: int, size: int, status: str) -> tuple[list[dict], int]:
+    """Filter the complete frozen report before applying pagination."""
+    offset = (page - 1) * size
+    rows: list[dict] = []
+    matched = 0
+    with data.open("r", encoding="utf-8") as stream:
+        for line in stream:
+            record = json.loads(line)
+            if record.get("status") != status:
+                continue
+            if offset <= matched < offset + size:
+                rows.append(record)
+            matched += 1
+    return rows, matched
+
+
 def enqueue_media_package_preview(session_factory, settings: Settings, *, selection: str) -> dict:
     chosen, _ = _validate_scope(
         selection, media_package_root=_root(settings),
@@ -106,7 +122,9 @@ def enqueue_media_package_preview(session_factory, settings: Settings, *, select
 
 
 def get_media_package_preview(session_factory, settings: Settings, job_id: int, *,
-                       page: int = 1, page_size: int = 25) -> dict:
+                       page: int = 1, page_size: int = 25, status_filter: str = "all") -> dict:
+    if status_filter not in {"all", "ready", "blocked", "already_organized", "skipped"}:
+        raise ValueError("Invalid MediaPackage preview status filter")
     if not 1 <= page or not 1 <= page_size <= 100:
         raise ValueError("Invalid MediaPackage preview pagination")
     with session_factory() as session:
@@ -131,12 +149,19 @@ def get_media_package_preview(session_factory, settings: Settings, job_id: int, 
             raise ValueError("Completed MediaPackage preview artifacts are incomplete; scan again")
         with summary_path.open("r", encoding="utf-8") as stream:
             summary = json.load(stream)
-        packages = _read_page(data, index, page=page, size=page_size)
+        if status_filter == "all":
+            packages = _read_page(data, index, page=page, size=page_size)
+            filtered_total = summary["package_count"]
+        else:
+            packages, filtered_total = _read_filtered_page(
+                data, page=page, size=page_size, status=status_filter,
+            )
     return {
         "job_id": job_id, "status": status, "error": error,
         "selection": state.get("selection", ""),
         "progress": progress, "summary": summary,
         "packages": packages, "page": page, "page_size": page_size,
+        "filtered_total": filtered_total if status == "completed" else 0,
         "read_only": True,
     }
 
