@@ -413,6 +413,7 @@ class WorkerHeartbeatThread(threading.Thread):
         wait_seconds = self.interval
         contention_since: float | None = None
         last_busy_log_at = 0.0
+        denial_reported = False
         while not self.stop_event.wait(wait_seconds):
             try:
                 renewed = update_worker_heartbeat(
@@ -420,18 +421,22 @@ class WorkerHeartbeatThread(threading.Thread):
                     worker_id=self.worker_id, raise_on_busy=True,
                 )
                 if not renewed:
-                    logger.error(
-                        "Worker %s heartbeat rejected: exclusive lease lost or expired; "
-                        "stopping ownership of new tasks",
-                        self.worker_id,
-                    )
+                    if not denial_reported:
+                        logger.warning(
+                            "Worker %s heartbeat rejected: not current owner or lease expired; "
+                            "task lease fencing remains active",
+                            self.worker_id,
+                        )
+                    denial_reported = True
                     if self.lease_lost_event is not None:
                         self.lease_lost_event.set()
-                elif contention_since is not None:
-                    logger.info(
-                        "Worker %s heartbeat resumed after %.2fs of SQLite writer contention",
-                        self.worker_id, time.monotonic() - contention_since,
-                    )
+                else:
+                    denial_reported = False
+                    if contention_since is not None:
+                        logger.info(
+                            "Worker %s heartbeat resumed after %.2fs of SQLite writer contention",
+                            self.worker_id, time.monotonic() - contention_since,
+                        )
                 contention_since = None
                 wait_seconds = self.interval
             except WorkerHeartbeatDatabaseBusy:
