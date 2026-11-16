@@ -70,7 +70,7 @@ def test_fixed_package_boundary_rejects_parent_and_other_tree(tmp_path):
     (package / "a.jpg").touch()
     with pytest.raises(ValueError, match="Expected"):
         preview(root, package.parent)
-    with pytest.raises(ValueError, match="below the configured"):
+    with pytest.raises(ValueError, match="outside configured roots"):
         preview(root, tmp_path / "outside")
 
 
@@ -185,7 +185,7 @@ def test_pure_media_over_200_must_use_numbered_count_size_buckets(
         expected_counts.append(count % 200)
     assert [group["count"] for group in result["groups"]] == expected_counts
     assert [group["name"] for group in result["groups"]] == [
-        f"{kind if i == 0 else f'{kind}_{i}'} [{size} {size*3}B]"
+        f"{kind if i == 0 else kind + '_' + str(i)} [{size} {size*3}B]"
         for i, size in enumerate(expected_counts)
     ]
     assert result["needed_moves"] == count
@@ -225,9 +225,10 @@ def test_pure_media_201_filename_collision_blocks_bucket(tmp_path):
     second = package / "B"
     first.mkdir()
     second.mkdir()
-    for i in range(200):
+    for i in range(1, 200):
         (first / f"{i:03d}.jpg").write_bytes(b"photo")
-    (second / "000.jpg").write_bytes(b"different")
+    (second / "001.jpg").write_bytes(b"different")
+    (second / "extra.jpg").write_bytes(b"last")
     result = preview(root, package)
     assert result["status"] == "blocked"
     assert result["operation"] == "bucket_pure_media"
