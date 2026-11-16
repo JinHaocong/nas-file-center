@@ -53,6 +53,7 @@ def _validated_move(row: dict, settings: Settings, *, sequence: int) -> dict:
         raise ValueError(f"Media-sort source is missing or not a file: {source_text}")
     target = validate_mutation_destination(
         raw_target, settings.allowed_roots, quarantine_root=settings.quarantine_root,
+        existing_media_source=source,
     )
     folder = _TARGET_FOLDER_PATTERN.fullmatch(target.parent.name)
     expected_letter = "P" if row["media_kind"] == "image" else "V"
