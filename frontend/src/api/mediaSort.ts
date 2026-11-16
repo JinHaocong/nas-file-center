@@ -33,6 +33,8 @@ export interface MediaSortPreview {
   items: MediaSortRow[];
 }
 
+export type MediaSortItemFilter = 'all' | 'ready' | 'conflict';
+
 export type MediaSortJobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'cancel_requested' | 'paused';
 
 export interface MediaSortProgress {
@@ -62,6 +64,8 @@ export interface MediaSortPreviewPage {
   summary: MediaSortSummary | null;
   items: MediaSortRow[];
   skipped_directories: MediaSortSkippedDirectory[];
+  item_filter: MediaSortItemFilter;
+  item_total: number | null;
   page: number;
   page_size: number;
   skip_page: number;
@@ -86,15 +90,18 @@ export const mediaSortApi = {
     jobId: number,
     page: number = 1, pageSize: number = 25,
     skipPage: number = 1, skipPageSize: number = 25,
+    itemFilter: MediaSortItemFilter = 'all',
   ) => {
     const q = new URLSearchParams({
       page: String(page), page_size: String(pageSize),
       skip_page: String(skipPage), skip_page_size: String(skipPageSize),
+      item_filter: itemFilter,
     });
     return api.get<MediaSortPreviewPage>(`/api/media-sort/previews/${jobId}?${q}`);
   },
-  createPlanFromPreview: (jobId: number) =>
-    api.post<MediaSortJobResult>(`/api/media-sort/previews/${jobId}/plan`),
+  createPlanFromPreview: ({ jobId, skipConflicts }: { jobId: number; skipConflicts: boolean }) =>
+    api.post<MediaSortJobResult>(`/api/media-sort/previews/${jobId}/plan`,
+      { skip_conflicts: skipConflicts }),
   getPlanJob: (jobId: number) =>
     api.get<MediaSortJobResult>(`/api/media-sort/plan-jobs/${jobId}`),
   startPlanStage: (planId: number, stage: 'freeze' | 'validate') =>
