@@ -12,6 +12,7 @@ import re
 import stat
 import time
 from uuid import uuid4
+from typing import Callable
 
 
 from app.utils.sorting import _MaxHeapCandidate, natural_sort_key
@@ -1610,7 +1611,7 @@ class FileCenterService:
             session.commit()
         return {"id": plan.id, "status": plan.status, "items": len(generated.items), "delete_counts": generated.delete_counts}
 
-    def validate_plan(self, plan_id: int) -> dict:
+    def validate_plan(self, plan_id: int, *, progress_callback: Callable[[int, int], None] | None = None) -> dict:
         with self.SessionLocal() as session:
             plan = session.get(BatchPlan, plan_id)
             if plan is None:
@@ -1636,7 +1637,9 @@ class FileCenterService:
         planned_mkdir_targets: set[Path] = set()
         recursive_protection_snapshot_cache: dict[str, Any] = {}
 
-        for row in rows:
+        for item_number, row in enumerate(rows, 1):
+            if progress_callback is not None:
+                progress_callback(item_number, len(rows))
             if row.state == "completed":
                 continue
 
@@ -2453,7 +2456,7 @@ class FileCenterService:
             session.refresh(plan)
             return plan
 
-    def freeze_plan(self, plan_id: int) -> BatchPlan:
+    def freeze_plan(self, plan_id: int, *, progress_callback: Callable[[int, int], None] | None = None) -> BatchPlan:
         with self.SessionLocal() as session:
             plan = session.get(BatchPlan, plan_id)
             if plan is None:
@@ -2485,7 +2488,9 @@ class FileCenterService:
         planned_producers: list[dict[str, Any]] = []
         item_updates: dict[int, dict[str, Any]] = {}
         recursive_protection_snapshot_cache: dict[str, Any] = {}
-        for it in items_data:
+        for item_number, it in enumerate(items_data, 1):
+            if progress_callback is not None:
+                progress_callback(item_number, len(items_data))
             item_id = it["id"]
             src_p = Path(it["source_path"])
             upd: dict[str, Any] = {}
@@ -3020,6 +3025,16 @@ class FileCenterService:
                 raise StateConflictError(
                     f"Plan must be validated before execution (status must be 'ready' or 'partial'), current status={plan.status}"
                 )
+            if plan.kind == "media-sort":
+                active_stage = session.scalar(select(WorkJob.id).where(
+                    WorkJob.kind == "media-sort-plan-stage",
+                    WorkJob.status.in_(("queued", "running", "paused", "cancel_requested")),
+                    func.json_extract(WorkJob.state_json, "$.plan_id") == plan_id,
+                ).limit(1))
+                if active_stage is not None:
+                    raise StateConflictError(
+                        f"Plan #{plan_id} has active freeze/validation task #{active_stage}"
+                    )
             active_job = _get_active_execution_job(session, plan_id)
             if active_job is not None:
                 raise StateConflictError(
