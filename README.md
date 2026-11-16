@@ -1,10 +1,10 @@
-# NAS File Center v1.4.2
+# NAS File Center v1.4.3
 
-> **说明**：当前版本为 **NAS File Center v1.4.2**，在既有 NAS 安全执行与 Worker 体系上集成媒体资源包整理、每个 P/V 分组独立从 001 编号、普通文件重名自动避让、原路径映射及恢复保护。真实存储设备上的正式执行仍应先进行小范围兼容性验收。
+> **说明**：当前版本为 **NAS File Center v1.4.3**，在既有 NAS 安全执行与 Worker 体系上集成媒体资源包整理、每个 P/V 分组独立从 001 编号、普通文件重名自动避让、原路径映射及恢复保护。真实存储设备上的正式执行仍应先进行小范围兼容性验收。
 
 面向几十 TB NAS 数据的**中文 Web 文件批处理与精确去重中心**。
 
-> **版本权威**：当前产品 / Python package / Docker image 版本统一为 **1.4.2**。
+> **版本权威**：当前产品 / Python package / Docker image 版本统一为 **1.4.3**。
 >
 > 当前开发顺序以 [`docs/roadmap-current.md`](docs/roadmap-current.md) 为准；旧 roadmap 仅作历史证据。
 
@@ -12,7 +12,7 @@
 
 ---
 
-## v0.4.7 历史功能亮点（延续至 v1.4.2）
+## v0.4.7 历史功能亮点（延续至 v1.4.3）
 
 > **新增只读功能（实现 PR #261，须待 CI / NAS 验收）：** OpenList WebDAV → NAS 下载完整性校验，原始目录结构严格匹配，双端完整 SHA256，支持后台 Worker 与分页差异报告。默认禁用；凭据必须由运维通过只读 secret 文件部署。配置与限制见 [WebDAV 下载完整性校验](docs/webdav-download-verification.md)。
 
@@ -76,7 +76,7 @@ nas-file-center-api:8080 (容器内 HTTP 端口，禁止直接映射宿主机端
 ```yaml
 services:
   nas-file-center-api:
-    image: kerwinjhc/nas-file-center:1.4.2
+    image: kerwinjhc/nas-file-center:1.4.3
     container_name: nas-file-center-api
     volumes:
       - /tmp/zfsv3/nvme13/15246330601/data/NasFileCenter:/config
@@ -105,7 +105,7 @@ services:
     restart: unless-stopped
 
   nas-file-center-worker:
-    image: kerwinjhc/nas-file-center:1.4.2
+    image: kerwinjhc/nas-file-center:1.4.3
     container_name: nas-file-center-worker
     command:
       - python
@@ -148,13 +148,13 @@ networks:
 > 查看 [Worker 心跳、重启与 NAS 排障手册](docs/worker-restart-diagnosis.md)，
 > 包含 Komodo/Docker Inspect、OOM、数据库写锁与恢复建议。
 >
-## 2. 升级到 v1.4.2
+## 2. 升级到 v1.4.3
 
 1. 在构建机器构建 `linux/amd64` 镜像并推送：
    ```bash
    docker buildx build \
      --platform linux/amd64 \
-     -t kerwinjhc/nas-file-center:1.4.2 \
+     -t kerwinjhc/nas-file-center:1.4.3 \
      --push \
      .
    ```
