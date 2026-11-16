@@ -412,7 +412,9 @@ def preview_media_package_package(package: str | Path, *, media_package_root: st
         "groups": groups, "conflicts": conflicts,
         "sample_moves": sample,
         "total_proposals": planned,
-        "needed_moves": needed_moves,
+        # Group publishing requires staging each file, even an already-numbered
+        # source in one bucket, to guarantee a no-clobber final publication.
+        "needed_moves": planned if needed_moves else 0,
         "renamed_count": renamed_count,
         "resolved_collision_count": resolved_collision_count,
         "truncated": len(sample) < planned,
