@@ -185,6 +185,9 @@ def test_explicit_failed_publish_recovery_reuses_original_manifest_without_reexe
     cleared = client.post("/api/tasks/clear-history", json={"statuses": ["failed"]})
     assert cleared.status_code == 200, cleared.text
     assert client.get(f"/api/media_package/executions/{failed_id}").status_code == 200
+    # An earlier operator action may have deleted the *completed preview*
+    # task after it was used for approval. Its immutable report remains.
+    assert client.delete(f"/api/tasks/{pid}").status_code == 200
     assert not nested.joinpath("000.mp4").exists()
     assert any(p.name.startswith(".nfc-media_package-stage-") for p in package.iterdir())
 
