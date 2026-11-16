@@ -15,6 +15,7 @@ on:
       - 'frontend/src/api/luolcy.ts'
       - 'tests/test_luolcy_organizer.py'
       - 'tests/test_luolcy_jobs.py'
+      - 'benchmarks/luolcy_preview_benchmark.py'
       - '.github/workflows/luolcy-preview-regression.yml'
   workflow_dispatch:
 
@@ -46,3 +47,23 @@ jobs:
         env:
           PYTHONPATH: .
         run: pytest -q tests/test_luolcy_organizer.py tests/test_luolcy_jobs.py
+      - name: Synthetic read-only scan throughput baseline
+        env:
+          PYTHONPATH: .
+        run: |
+          python benchmarks/luolcy_preview_benchmark.py --packages 12 --images 70 --videos 30 --json luolcy-preview-benchmark.json
+          {
+            echo '### Luolcy preview synthetic baseline'
+            echo '```json'
+            cat luolcy-preview-benchmark.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload synthetic performance measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: luolcy-preview-bench-${{ github.sha }}
+          path: luolcy-preview-benchmark.json
+          if-no-files-found: ignore
+          retention-days: 14
+
