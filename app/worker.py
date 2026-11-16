@@ -525,6 +525,7 @@ def worker_loop(
 
     worker_id = generate_worker_id()
     stop_event = stop_event or threading.Event()
+    heartbeat_stop_event = threading.Event()
     lease_lost_event = threading.Event()
 
     def _sig_handler(signum, frame):
@@ -549,7 +550,9 @@ def worker_loop(
         SessionLocal,
         worker_id=worker_id,
         interval=heartbeat_interval,
-        stop_event=stop_event,
+        # Keep heartbeats alive while the current task unwinds after SIGTERM.
+        # Stop the heartbeat only when the main Worker loop actually exits.
+        stop_event=heartbeat_stop_event,
         lease_lost_event=lease_lost_event,
     )
     heartbeat_thread.start()
@@ -645,6 +648,7 @@ def worker_loop(
     finally:
         logger.info("Worker stopping worker_id=%s pid=%s", worker_id, os.getpid())
         stop_event.set()
+        heartbeat_stop_event.set()
         heartbeat_thread.join(timeout=1.0)
 
 
