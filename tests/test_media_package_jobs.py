@@ -109,6 +109,39 @@ def test_worker_marks_unsafe_package_blocked_and_continues_read_only(tmp_path):
     assert p.joinpath("bad-link").is_symlink()
     assert (q / "001.mp4").read_bytes() == b"movie"
 
+    # Filter the entire frozen report *before* pagination, even when the
+    # matching row would not be present on the first unfiltered page.
+    blocked = client.get(f"/api/media_package/previews/{job_id}", params={
+        "status_filter": "blocked", "page": 1, "page_size": 1,
+    })
+    assert blocked.status_code == 200, blocked.text
+    assert blocked.json()["summary"]["package_count"] == 2
+    assert blocked.json()["filtered_total"] == 1
+    assert [x["package"] for x in blocked.json()["packages"]] == [str(p)]
+
+    ready = client.get(f"/api/media_package/previews/{job_id}", params={
+        "status_filter": "ready", "page": 1, "page_size": 1,
+    })
+    assert ready.status_code == 200, ready.text
+    assert ready.json()["filtered_total"] == 1
+    assert [x["package"] for x in ready.json()["packages"]] == [str(q)]
+
+    assert client.get(f"/api/media_package/previews/{job_id}", params={
+        "status_filter": "blocked", "page": 2, "page_size": 1,
+    }).json()["packages"] == []
+    assert client.get(f"/api/media_package/previews/{job_id}", params={
+        "status_filter": "skipped",
+    }).json()["filtered_total"] == 0
+    assert client.get(f"/api/media_package/previews/{job_id}", params={
+        "status_filter": "already_organized",
+    }).json()["filtered_total"] == 0
+    assert client.get(f"/api/media_package/previews/{job_id}", params={
+        "status_filter": "all", "page": 1, "page_size": 1,
+    }).json()["filtered_total"] == 2
+    assert client.get(f"/api/media_package/previews/{job_id}", params={
+        "status_filter": "unknown",
+    }).status_code == 409
+
 
 def test_worker_media_package_enforces_auth_exact_root_and_bounded_pagination(tmp_path):
     client, root, settings = _app(tmp_path)
