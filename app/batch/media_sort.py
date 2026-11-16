@@ -2,7 +2,7 @@
 
 Default: classify immediate regular files into P/ and V/.
 Recursive: classify each directory's own regular files into its own P/ and V/.
-Existing P/V names are never reused: choose P_1/V_1, P_2/V_2, ...
+Existing safe P/V directories are reused; occupied unsafe names use suffixes.
 Already classified P/V directories (including numbered variants) are not
 traversed recursively. Smart skip (default on) leaves folders containing only
 one media kind unchanged; the walker still visits their normal descendants.
@@ -87,6 +87,8 @@ def _scan_directory(
     directory_fd = _open_directory_nofollow(directory)
     try:
         occupied: set[str] = set()
+        existing_destinations: dict[str, str] = {}
+        parent_device = os.fstat(directory_fd).st_dev
         regular_files: list[tuple[str, str, tuple[int, int, int, int]]] = []
         other_regular_files = 0
         children: list[Path] = []
@@ -104,6 +106,9 @@ def _scan_directory(
                 # lstat on every unrelated file. DT_UNKNOWN still falls back
                 # to a no-follow stat, preserving the original semantics.
                 if entry.is_dir(follow_symlinks=False):
+                    if (entry.name.casefold() in ("p", "v")
+                            and entry.stat(follow_symlinks=False).st_dev == parent_device):
+                        existing_destinations[entry.name.casefold()] = entry.name
                     child = directory / entry.name
                     if recursive and not is_reserved_quarantine_path(child, quarantine_root):
                         if _SORT_FOLDER_PATTERN.fullmatch(entry.name):
@@ -137,7 +142,9 @@ def _scan_directory(
         image_count = sum(kind == "image" for _, kind, _ in regular_files)
         video_count = sum(kind == "video" for _, kind, _ in regular_files)
         reason: str | None = None
-        if smart_skip:
+        # A P/V destination means this directory has already been partially
+        # organized. Never skip media left beside an existing classification dir.
+        if smart_skip and not existing_destinations:
             if image_count and not video_count and other_regular_files == 0:
                 reason = "pure_images"
             elif video_count and not image_count and other_regular_files == 0:
@@ -152,14 +159,31 @@ def _scan_directory(
             })
             return [], sorted(children, key=lambda item: item.name), count, skipped
 
-        # A destination is an *unoccupied* name under this exact directory,
-        # never an already existing P/V directory, file or symlink.
+        # Reuse only a real same-filesystem P/V directory. If the canonical
+        # name is a file, symlink or unsafe mount, use a fresh suffix instead.
         folders = {
-            kind: _choose_folder_name(folder, occupied)
+            kind: existing_destinations.get(folder.casefold())
+                  or _choose_folder_name(folder, occupied)
             for kind, folder in _DESTINATION_DIRS.items()
         }
         regular_files.sort(key=lambda item: item[0])
         proposed: dict[str, set[str]] = {kind: set() for kind in _DESTINATION_DIRS}
+        for kind, folder in _DESTINATION_DIRS.items():
+            if folder.casefold() not in existing_destinations:
+                continue
+            # Case-insensitive collision guard must include files already
+            # present in a reused destination, not just this preview's rows.
+            target_fd = _open_directory_nofollow(directory / folders[kind])
+            try:
+                if os.fstat(target_fd).st_dev != parent_device:
+                    raise ValueError("Media destination changed filesystem during preview")
+                with os.scandir(target_fd) as target_entries:
+                    for index, target_entry in enumerate(target_entries, start=1):
+                        if index > MAX_IMMEDIATE_ENTRIES:
+                            raise ValueError("Too many media destination entries")
+                        proposed[kind].add(target_entry.name.casefold())
+            finally:
+                os.close(target_fd)
         rows: list[dict] = []
 
         for name, kind, snapshot in regular_files:
