@@ -118,7 +118,8 @@ def preview_luolcy_package(package: str | Path, *, luolcy_root: str | Path,
                            max_rows: int = 100) -> dict:
     """Build a bounded, read-only manifest for one exact resource package.
 
-    Pure image/video packages are flattened at the package boundary only.
+    Pure image/video packages with up to 200 files are flattened into
+    their package root; larger pure packages are grouped in sized P/V buckets.
     Existing targets are never assumed safe to overwrite; unresolved target
     occupancy is reported as a blocking conflict for manual review.
     """
@@ -136,10 +137,11 @@ def preview_luolcy_package(package: str | Path, *, luolcy_root: str | Path,
             "read_only": True,
         }
 
-    # A homogeneous resource package needs *flattening*, not P/V buckets.
-    # Existing root-level files remain untouched. No source name is changed;
-    # duplicate basenames (even with different case) require manual review.
-    if totals["Other"] == 0 and (totals["P"] == 0 or totals["V"] == 0):
+    # Homogeneous packages have two fixed modes. <=200 files: flatten
+    # nested files to the package root. >200 files: use P/V size-labelled
+    # buckets, even when all files are already flat. No configuration toggle.
+    if (len(items) <= MAX_FILES_PER_GROUP and totals["Other"] == 0
+            and (totals["P"] == 0 or totals["V"] == 0)):
         ordered = sorted(items, key=lambda row: (
             os.path.relpath(row["path"], source).casefold(),
             os.path.relpath(row["path"], source),
@@ -245,4 +247,7 @@ def preview_luolcy_package(package: str | Path, *, luolcy_root: str | Path,
         "needed_moves": needed_moves,
         "truncated": len(sample) < planned,
         "read_only": True,
+        "operation": ("bucket_pure_media" if totals["Other"] == 0
+                      and (totals["P"] == 0 or totals["V"] == 0)
+                      else "sort_mixed_media"),
     }
