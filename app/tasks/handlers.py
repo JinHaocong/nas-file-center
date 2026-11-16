@@ -152,3 +152,4 @@ from app.batch.media_sort_jobs import (
 
 # Luolcy package preview is read-only; no execution capability is registered.
 from app.batch.luolcy_jobs import LuolcyPackagePreviewHandler as LuolcyPackagePreviewHandler
+from app.batch.luolcy_execute_jobs import LuolcyPackageExecuteHandler as LuolcyPackageExecuteHandler
