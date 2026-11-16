@@ -107,3 +107,22 @@ def test_existing_unrelated_target_requires_manual_review(tmp_path):
     result = preview(root, package)
     assert result["status"] == "blocked"
     assert any(x["reason"] == "target_directory_exists" for x in result["conflicts"])
+
+
+def test_existing_numbered_bucket_is_reported_for_manual_review(tmp_path):
+    root, package = make_package(tmp_path)
+    (package / "one.jpg").write_bytes(b"x")
+    (package / "one.mp4").write_bytes(b"y")
+    (package / "P").mkdir()
+    result = preview(root, package)
+    assert result["status"] == "blocked"
+    assert any(x["reason"] == "existing_bucket_name_requires_review"
+               for x in result["conflicts"])
+
+
+def test_bad_directory_name_outside_fixed_layout_rejected(tmp_path):
+    root, package = make_package(tmp_path)
+    alternate = root / "misc" / "misc" / "person" / "package"
+    alternate.mkdir(parents=True)
+    with pytest.raises(ValueError, match="Expected"):
+        preview(root, alternate)
