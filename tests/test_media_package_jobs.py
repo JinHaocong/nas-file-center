@@ -1,6 +1,7 @@
 """MediaPackage read-only Worker preview: admin API, per-package pagination and safety."""
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.config import Settings
@@ -126,3 +127,22 @@ def test_worker_media_package_enforces_auth_exact_root_and_bounded_pagination(tm
     assert client.post("/api/media_package/previews", json={
         "selection": str(selection),
     }).status_code == 401
+
+
+def test_media_package_scope_requires_deploy_private_absolute_root(tmp_path):
+    from app.batch.media_package_jobs import _root
+    data = tmp_path / "data"
+    data.mkdir()
+    base = {"_env_file": None, "DATA_MOUNT": str(data),
+            "ALLOWED_ROOTS": str(data)}
+    unconfigured = Settings(**base)
+    with pytest.raises(ValueError, match="MEDIA_PACKAGE_ROOT is not configured"):
+        _root(unconfigured)
+    relative = Settings(**base, MEDIA_PACKAGE_ROOT="private/relative/path")
+    with pytest.raises(ValueError, match="absolute path"):
+        _root(relative)
+    outside = Settings(**base, MEDIA_PACKAGE_ROOT=str(tmp_path / "outside"))
+    with pytest.raises(ValueError, match="outside configured roots"):
+        _root(outside)
+    protected = Settings(**base, MEDIA_PACKAGE_ROOT=str(data / "Else" / "Collection"))
+    assert _root(protected) == data / "Else" / "Collection"
