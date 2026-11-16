@@ -140,3 +140,68 @@ def test_expired_worker_still_cannot_renew_even_with_retry_mode(lease_db):
     ) is False
     with factory() as session:
         assert session.get(TaskLock, 1).owner == "owner-2"
+
+def test_sigterm_request_does_not_stop_heartbeat_before_active_job_finishes(
+    monkeypatch, tmp_path: Path,
+):
+    """When a deployment asks Worker to stop, finish the in-flight job fenced."""
+    from types import SimpleNamespace
+    from app import worker
+
+    stop = threading.Event()
+    job_started = threading.Event()
+    after_shutdown_heartbeats: list[bool] = []
+    claimed = {"once": False}
+
+    settings = SimpleNamespace(
+        database_path=tmp_path / "dummy.db",
+        backups_dir=tmp_path / "backups",
+        initial_admin_username=None,
+        initial_admin_password=None,
+    )
+    monkeypatch.setattr(worker, "create_engine_and_session", lambda *_: (None, None))
+    monkeypatch.setattr(worker, "init_db", lambda *args, **kwargs: None)
+    monkeypatch.setattr(worker, "acquire_worker_ownership", lambda *args, **kwargs: True)
+    monkeypatch.setattr(worker, "recover_interrupted_jobs", lambda *args, **kwargs: {
+        "recovered_requeued": 0, "failed_interrupted": 0,
+        "cancelled": 0, "repaired_orphan_plans": 0,
+    })
+    monkeypatch.setattr(worker, "_cleanup_transaction_residue_after_recovery",
+                        lambda *args, **kwargs: None)
+    monkeypatch.setattr(worker, "_cleanup_archive_after_recovery",
+                        lambda *args, **kwargs: None)
+    monkeypatch.setattr(worker, "run_scheduler_tick", lambda *args, **kwargs: None)
+
+    def claim(*args, **kwargs):
+        if claimed["once"]:
+            return None
+        claimed["once"] = True
+        return 123
+
+    def update(*args, **kwargs):
+        if stop.is_set():
+            after_shutdown_heartbeats.append(True)
+        return True
+
+    def process(*args, **kwargs):
+        job_started.set()
+        stop.set()  # Mimic SIGTERM during an active task.
+        time.sleep(0.14)
+        return True
+
+    monkeypatch.setattr(worker, "claim_next_job", claim)
+    monkeypatch.setattr(worker, "update_worker_heartbeat", update)
+    monkeypatch.setattr(worker, "process_work_job", process)
+
+    thread = threading.Thread(
+        target=worker.worker_loop,
+        kwargs={"settings": settings, "heartbeat_interval": 0.02, "stop_event": stop},
+        daemon=True,
+    )
+    thread.start()
+    thread.join(timeout=2.0)
+    assert job_started.is_set()
+    assert not thread.is_alive()
+    assert after_shutdown_heartbeats, (
+        "Heartbeat must continue until the active job finishes, even after SIGTERM"
+    )
