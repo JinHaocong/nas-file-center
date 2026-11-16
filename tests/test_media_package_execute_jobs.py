@@ -179,6 +179,12 @@ def test_explicit_failed_publish_recovery_reuses_original_manifest_without_reexe
     failed = client.get(f"/api/media_package/executions/{failed_id}").json()
     assert failed["status"] == "failed"
     assert failed["error"] == "Package directory changed before publish"
+    # Task deletion and generic failed-history cleanup must preserve the
+    # original job ID and audit trail needed by the frozen stage.
+    assert client.delete(f"/api/tasks/{failed_id}").status_code == 409
+    cleared = client.post("/api/tasks/clear-history", json={"statuses": ["failed"]})
+    assert cleared.status_code == 200, cleared.text
+    assert client.get(f"/api/media_package/executions/{failed_id}").status_code == 200
     assert not nested.joinpath("000.mp4").exists()
     assert any(p.name.startswith(".nfc-media_package-stage-") for p in package.iterdir())
 
