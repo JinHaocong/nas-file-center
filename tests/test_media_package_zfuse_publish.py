@@ -71,11 +71,15 @@ def assert_published(package: Path, manifest: dict):
 def test_zfuse_without_either_safe_directory_rename_publishes_all_groups(tmp_path, monkeypatch):
     _root, package, manifest = frozen(tmp_path)
     force_zos_no_directory_rename(monkeypatch)
-    result = executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+    result = executor.execute_frozen_manifest(
+            manifest, lease_fence=lambda: None, allow_fuse_compat=True,
+        )
     assert result["files_moved"] == 201
     assert result["groups_published"] == 2
     assert_published(package, manifest)
-    again = executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+    again = executor.execute_frozen_manifest(
+            manifest, lease_fence=lambda: None, allow_fuse_compat=True,
+        )
     assert again["files_moved"] == 0
     assert again["files_reconciled"] == 201
 
@@ -97,14 +101,18 @@ def test_crash_after_partial_final_hardlinks_resumes_without_renaming_or_overwri
 
     monkeypatch.setattr(executor.os, "link", crash_on_fourth_link)
     with pytest.raises(RuntimeError, match="power lost"):
-        executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+        executor.execute_frozen_manifest(
+            manifest, lease_fence=lambda: None, allow_fuse_compat=True,
+        )
     stage = package / manifest["groups"][0]["stage"]
     final = package / manifest["groups"][0]["final"]
     assert stage.exists() and final.exists()
     assert len(list(stage.iterdir())) == 200
     assert len([p for p in final.iterdir() if p.suffix == ".mp4"]) == 3
     monkeypatch.setattr(executor.os, "link", real_link)
-    recovered = executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+    recovered = executor.execute_frozen_manifest(
+            manifest, lease_fence=lambda: None, allow_fuse_compat=True,
+        )
     assert recovered["files_reconciled"] == 201
     assert_published(package, manifest)
 
@@ -126,14 +134,18 @@ def test_crash_during_stage_cleanup_keeps_final_links_and_reconciles(
 
     monkeypatch.setattr(executor.os, "unlink", fail_on_third_stage_retirement)
     with pytest.raises(RuntimeError, match="stage hardlink retirement"):
-        executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+        executor.execute_frozen_manifest(
+            manifest, lease_fence=lambda: None, allow_fuse_compat=True,
+        )
     stage = package / manifest["groups"][0]["stage"]
     final = package / manifest["groups"][0]["final"]
     assert stage.exists() and final.exists()
     assert len([p for p in final.iterdir() if p.suffix == ".mp4"]) == 200
     assert (final / executor._COMPAT_COMPLETE_MARKER).exists()
     monkeypatch.setattr(executor.os, "unlink", real_unlink)
-    executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+    executor.execute_frozen_manifest(
+            manifest, lease_fence=lambda: None, allow_fuse_compat=True,
+        )
     assert_published(package, manifest)
 
 
@@ -151,14 +163,18 @@ def test_crash_after_exclusive_mkdir_before_owner_witness_is_not_adopted(
 
     monkeypatch.setattr(executor, "_compat_create_marker", fail_on_owner)
     with pytest.raises(RuntimeError, match="before durable owner"):
-        executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+        executor.execute_frozen_manifest(
+            manifest, lease_fence=lambda: None, allow_fuse_compat=True,
+        )
     stage = package / manifest["groups"][0]["stage"]
     final = package / manifest["groups"][0]["final"]
     assert stage.exists() and final.is_dir()
     assert list(final.iterdir()) == []
     monkeypatch.setattr(executor, "_compat_create_marker", original)
     with pytest.raises(executor.MediaPackageExecutionConflict, match="foreign published"):
-        executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+        executor.execute_frozen_manifest(
+            manifest, lease_fence=lambda: None, allow_fuse_compat=True,
+        )
     assert len(list(stage.iterdir())) == 200
     assert list(final.iterdir()) == []
 
@@ -176,7 +192,9 @@ def test_foreign_preexisting_final_directory_is_not_adopted(tmp_path, monkeypatc
 
     monkeypatch.setattr(executor, "_publish_group", create_foreign_final)
     with pytest.raises(executor.MediaPackageExecutionConflict, match="foreign"):
-        executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+        executor.execute_frozen_manifest(
+            manifest, lease_fence=lambda: None, allow_fuse_compat=True,
+        )
     assert (package / manifest["groups"][0]["final"] / "foreign.txt").read_bytes() == b"do not replace"
     assert len(list((package / manifest["groups"][0]["stage"]).iterdir())) == 200
 
@@ -193,16 +211,22 @@ def test_owned_marker_tampering_or_foreign_public_file_blocks_resume(tmp_path, m
 
     monkeypatch.setattr(executor, "_compat_create_marker", stop_after_owner)
     with pytest.raises(RuntimeError, match="durable owner"):
-        executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+        executor.execute_frozen_manifest(
+            manifest, lease_fence=lambda: None, allow_fuse_compat=True,
+        )
     monkeypatch.setattr(executor, "_compat_create_marker", original)
     final = package / manifest["groups"][0]["final"]
     (final / "foreign.txt").write_bytes(b"do not touch")
     with pytest.raises(executor.MediaPackageExecutionConflict, match="Foreign entry"):
-        executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+        executor.execute_frozen_manifest(
+            manifest, lease_fence=lambda: None, allow_fuse_compat=True,
+        )
     (final / "foreign.txt").unlink()
     (final / executor._COMPAT_OWNER_MARKER).write_bytes(b"tampered")
     with pytest.raises(executor.MediaPackageExecutionConflict, match="witness"):
-        executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+        executor.execute_frozen_manifest(
+            manifest, lease_fence=lambda: None, allow_fuse_compat=True,
+        )
     assert len(list((package / manifest["groups"][0]["stage"]).iterdir())) == 200
 
 
@@ -220,6 +244,22 @@ def test_unsupported_directory_fsync_stops_before_creating_final_name(
 
     monkeypatch.setattr(executor.os, "fsync", no_directory_fsync)
     with pytest.raises(OSError, match="fsync unsupported"):
-        executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+        executor.execute_frozen_manifest(
+            manifest, lease_fence=lambda: None, allow_fuse_compat=True,
+        )
+    assert not (package / manifest["groups"][0]["final"]).exists()
+    assert len(list((package / manifest["groups"][0]["stage"]).iterdir())) == 200
+
+
+def test_disabled_fuse_compatibility_blocks_before_first_target_mkdir(
+    tmp_path, monkeypatch,
+):
+    _root, package, manifest = frozen(tmp_path, job_id=727)
+    force_zos_no_directory_rename(monkeypatch)
+    with pytest.raises(executor.MediaPackageExecutionConflict,
+                       match="FUSE grouped publication disabled"):
+        executor.execute_frozen_manifest(
+            manifest, lease_fence=lambda: None, allow_fuse_compat=False,
+        )
     assert not (package / manifest["groups"][0]["final"]).exists()
     assert len(list((package / manifest["groups"][0]["stage"]).iterdir())) == 200
