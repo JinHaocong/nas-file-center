@@ -3,8 +3,10 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 import logging
+import sqlite3
 from typing import Any
 from sqlalchemy import Integer, func, select, update, text
+from sqlalchemy.exc import OperationalError as SQLAlchemyOperationalError
 from sqlalchemy.orm import sessionmaker
 
 from app.models import BatchPlan, ResourcePolicy, ScanJob, TaskLock, TaskEvent, WorkJob, WorkerState, utcnow
@@ -24,6 +26,19 @@ logger = logging.getLogger(__name__)
 WORKER_ONLINE_THRESHOLD_SECONDS = 30.0
 WORKER_STALE_THRESHOLD_SECONDS = 90.0
 WORKER_LEASE_TIMEOUT_SECONDS: float = 30.0
+
+
+class WorkerHeartbeatDatabaseBusy(RuntimeError):
+    """SQLite writer contention, not evidence that the Worker lost its lease."""
+
+
+def _is_sqlite_writer_contention(error: Exception) -> bool:
+    original = getattr(error, "orig", error)
+    code = getattr(original, "sqlite_errorcode", None)
+    return code in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED) or any(
+        token in str(original).lower()
+        for token in ("database is locked", "database table is locked", "database is busy")
+    )
 RESOURCE_CONTROLLED_JOB_KINDS: tuple[str, ...] = (
     "index-root",
     "fclones-scan",
@@ -184,20 +199,29 @@ def update_worker_heartbeat(
     session_factory: sessionmaker,
     worker_id: str,
     timeout_seconds: float = WORKER_LEASE_TIMEOUT_SECONDS,
+    *,
+    raise_on_busy: bool = False,
 ) -> bool:
     """
-    Update worker heartbeat in worker_state and task_lock.
-    Only the current active, unexpired lease owner is allowed to renew the lease.
-    Expired leases CANNOT be resurrected by heartbeat and return False.
+    Renew only a fresh lease owned by this worker, in a short write transaction.
+
+    False means the lease was rejected (expired, replaced or unavailable).
+    When raise_on_busy=True, a SQLITE_BUSY/LOCKED writer-contention failure
+    raises WorkerHeartbeatDatabaseBusy instead of being indistinguishable from
+    a definitively lost lease. The heartbeat loop can retry promptly, but it
+    MUST NOT extend the lease or authorize filesystem operations while busy.
     """
     try:
         with session_factory() as session:
             session.execute(text("BEGIN IMMEDIATE"))
+            # Sample time AFTER acquiring the write lock. Never resurrect an
+            # expired lease just because BEGIN IMMEDIATE blocked.
             now = utcnow()
             try:
                 assert_active_worker_lease(session, worker_id, now=now, timeout_seconds=timeout_seconds)
-            except JobLeaseLost:
+            except JobLeaseLost as exc:
                 session.rollback()
+                logger.warning("Worker heartbeat lease denied for %s: %s", worker_id, exc)
                 return False
 
             lock = session.get(TaskLock, 1)
@@ -209,7 +233,16 @@ def update_worker_heartbeat(
                 state.updated_at = now
             session.commit()
             return True
+    except (sqlite3.OperationalError, SQLAlchemyOperationalError) as exc:
+        if raise_on_busy and _is_sqlite_writer_contention(exc):
+            raise WorkerHeartbeatDatabaseBusy("SQLite writer lock prevented heartbeat") from exc
+        logger.warning(
+            "Worker heartbeat database operation failed for %s (busy=%s): %s",
+            worker_id, _is_sqlite_writer_contention(exc), exc,
+        )
+        return False
     except Exception:
+        logger.exception("Worker heartbeat unexpectedly failed for %s", worker_id)
         return False
 
 

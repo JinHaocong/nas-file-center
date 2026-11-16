@@ -143,6 +143,11 @@ networks:
 
 ---
 
+> **Worker 任务中断/重启排查：** 任务提示 `Worker restarted while job was running`
+> 不代表 Docker 必然重启，也可能是 SQLite 写锁争用或 Worker 租约失效。
+> 查看 [Worker 心跳、重启与 NAS 排障手册](docs/worker-restart-diagnosis.md)，
+> 包含 Komodo/Docker Inspect、OOM、数据库写锁与恢复建议。
+>
 ## 2. 升级到 v0.4.7
 
 1. 在构建机器构建 `linux/amd64` 镜像并推送：
