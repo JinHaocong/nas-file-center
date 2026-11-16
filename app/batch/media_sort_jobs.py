@@ -338,29 +338,17 @@ class MediaSortPlanHandler(TaskHandler):
         if not 0 < count <= MAX_PLAN_ITEMS or summary["conflict_count"] != 0:
             raise ValueError("Media sort preview is empty, conflicting or oversized")
 
-        context.checkpoint(progress_current=0, progress_message="读取预览结果")
-        rows: list[dict] = []
-        with items_file.open("r", encoding="utf-8") as stream:
-            for line in stream:
-                item = json.loads(line)
-                if item.get("conflict"):
-                    raise ValueError("A conflict was found in the preview")
-                rows.append({"operation": "move", "source": item["source"],
-                             "target": item["target"], "expected_size": item["expected_size"]})
-                if len(rows) % 500 == 0:
-                    context.checkpoint(progress_current=len(rows),
-                                       progress_message=f"读取文件 {len(rows):,}/{count:,}")
-        if len(rows) != count:
-            raise ValueError("Preview row count has changed")
-        context.checkpoint(progress_current=count,
-                           progress_message="正在保存 Move Plan（原文件尚未改动，写入阶段无法估算百分比）")
-        service = _worker_plan_service(settings, context)
-        plan = service.create_plan(
-            name=("媒体文件递归分类（每目录 P / V）" if summary.get("recursive")
-                  else "媒体文件分类（P / V）"),
-            kind="media-sort", items=rows,
-            metadata={"source": "media-sort", "preview_job_id": preview_job_id,
-                      "recursive": summary.get("recursive"), "smart_skip": summary.get("smart_skip")},
+        context.checkpoint(
+            progress_current=0,
+            progress_message=f"正在以安全事务批量生成 {count:,} 项 Move Plan（源文件不变）",
+        )
+        from app.batch.media_sort_bulk_plan import create_media_sort_bulk_plan
+
+        # Stream and validate every row inside one atomic SQLite transaction.
+        # No 300k-element Python/ORM list, no partially published draft Plan.
+        plan = create_media_sort_bulk_plan(
+            context.SessionLocal, settings,
+            items_file=items_file, summary=summary, preview_job_id=preview_job_id,
         )
         with context.SessionLocal() as session:
             session.execute(text("BEGIN IMMEDIATE"))
