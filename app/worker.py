@@ -644,4 +644,11 @@ def worker_loop(
 
 
 if __name__ == "__main__":
+    # Keep normal application logs at WARNING, but record Worker lifecycle
+    # events and successful heartbeat recovery at INFO for NAS diagnostics.
+    logging.basicConfig(
+        level=logging.WARNING,
+        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    )
+    logger.setLevel(logging.INFO)
     worker_loop()
