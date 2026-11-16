@@ -113,14 +113,28 @@ def test_existing_unrelated_target_requires_manual_review(tmp_path):
     assert any(x["reason"] == "target_directory_exists" for x in result["conflicts"])
 
 
-def test_existing_numbered_bucket_is_reported_for_manual_review(tmp_path):
+def test_plain_legacy_pv_folders_are_inputs_not_automatic_conflicts(tmp_path):
+    root, package = make_package(tmp_path)
+    (package / "P").mkdir()
+    (package / "V").mkdir()
+    (package / "P" / "one.jpg").write_bytes(b"x")
+    (package / "V" / "one.mp4").write_bytes(b"y")
+    result = preview(root, package)
+    assert result["status"] == "ready"
+    assert result["conflicts"] == []
+    assert [g["name"] for g in result["groups"]] == [
+        "P [1 1B]", "V [1 1B]",
+    ]
+
+
+def test_existing_numbered_legacy_bucket_is_reported_for_manual_review(tmp_path):
     root, package = make_package(tmp_path)
     (package / "one.jpg").write_bytes(b"x")
     (package / "one.mp4").write_bytes(b"y")
-    (package / "P").mkdir()
+    (package / "P_1").mkdir()
     result = preview(root, package)
     assert result["status"] == "blocked"
-    assert any(x["reason"] == "existing_bucket_name_requires_review"
+    assert any(x["reason"] == "legacy_numbered_bucket_requires_review"
                for x in result["conflicts"])
 
 
