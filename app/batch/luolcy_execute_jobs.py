@@ -12,6 +12,7 @@ from pathlib import Path
 
 from sqlalchemy import func, select, text
 from app.batch.luolcy_jobs import PREVIEW_KIND, _files as _preview_files, _root
+from app.batch.luolcy_organizer import _package_path
 from app.batch.luolcy_execution import (
     LuolcyExecutionConflict, execute_frozen_manifest, load_frozen_manifest,
     prepare_luolcy_manifest, save_frozen_manifest,
@@ -163,6 +164,11 @@ class LuolcyPackageExecuteHandler(TaskHandler):
                     raise ValueError("Preview contains more packages than its frozen summary")
                 record = json.loads(line)
                 package = Path(record["package"])
+                checked = _package_path(
+                    package, _root(settings), settings.allowed_roots, settings.quarantine_root,
+                )
+                if package != checked:
+                    raise LuolcyExecutionConflict("Preview package escaped the configured Luolcy root")
                 package_name = str(package)[-120:]
                 manifest_path = folder / f"{ordinal:07d}.manifest.json"
 
@@ -171,6 +177,8 @@ class LuolcyPackageExecuteHandler(TaskHandler):
                         manifest = load_frozen_manifest(
                             manifest_path, job_id=int(job.id), package=package,
                         )
+                        if manifest.get("luolcy_root") != str(_root(settings)):
+                            raise LuolcyExecutionConflict("Frozen manifest root differs from configured Luolcy root")
                     else:
                         # Newly frozen packages must match every file identity
                         # in the original preview. No stale preview may run.
