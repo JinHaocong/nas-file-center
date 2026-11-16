@@ -148,6 +148,13 @@ def enqueue_media_package_recovery(session_factory, settings: Settings, *,
         if original is None:
             raise KeyError(failed_job_id)
         pid, original_state = _failed_publish_job_authority(original)
+        if (str(original.error_text or "").startswith(
+            "[Errno 95] Plain directory rename no-clobber semantics are not positively proven: "
+        ) and not settings.media_package_fuse_compat_enabled):
+            raise ValueError(
+                "FUSE compatibility is disabled: run isolated NAS probe and "
+                "explicitly enable MEDIA_PACKAGE_FUSE_COMPAT_ENABLED"
+            )
         failed_ordinal = int(original.progress_current)
         preview = session.get(WorkJob, pid)
         # An operator may have deleted the completed preview WorkJob after
@@ -375,6 +382,7 @@ class MediaPackageExecuteHandler(TaskHandler):
 
                     result = execute_frozen_manifest(
                         manifest, lease_fence=fence, progress=file_progress,
+                        allow_fuse_compat=settings.media_package_fuse_compat_enabled,
                     )
                     results.append(result)
                 elif record["status"] in ("skipped", "already_organized"):
