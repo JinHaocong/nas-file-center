@@ -359,6 +359,7 @@ def preview_media_package_package(package: str | Path, *, media_package_root: st
             size = sum(row["bytes"] for row in chunk)
             folder = f"{stem} [{len(chunk)} {_size_label(size)}]"
             dest = source / folder
+            assigned, automatic_other = allocate_names(chunk, kind=kind)
             existing = occupied.get(folder.casefold())
             # A prior P, P_1, V, V_1 bucket with unknown or stale count/size
             # is not silently replaced, merged or renamed.
@@ -377,11 +378,14 @@ def preview_media_package_package(package: str | Path, *, media_package_root: st
                 conflicts.append({"directory": str(dest),
                                   "existing": sorted(competing),
                                   "reason": "existing_bucket_name_requires_review"})
-            if existing is not None and any(Path(row["path"]).parent != dest for row in chunk):
-                # Existing destination with incoming files requires a guarded
-                # merge/execution policy; do not silently overwrite.
+            if existing is not None and any(
+                row["path"] != str(dest / name) for row, name in zip(chunk, assigned)
+            ):
+                # Replacing an existing labelled target folder needs a
+                # separate no-clobber migration procedure. Name collisions
+                # within a *new* target are automatically numbered, but a
+                # pre-existing target directory is not safe to overwrite.
                 conflicts.append({"directory": str(dest), "reason": "target_directory_exists"})
-            assigned, automatic_other = allocate_names(chunk, kind=kind)
             seen_original = set()
             resolved_collision_count += automatic_other
             for row, candidate in zip(chunk, assigned):
