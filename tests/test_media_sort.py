@@ -651,7 +651,7 @@ def test_pv_symlink_is_not_reused_with_partial_smart_skip(tmp_path):
     (root / "leftover.jpg").write_bytes(b"new")
     # A symlink is never treated as an existing safe P destination.
     result = preview(root)
-    assert result["count"] == 0  # standalone pure-image directory still skipped
-    result = preview(root, smart_skip=False)
+    assert result["count"] == 1
+    assert result["skipped_directory_count"] == 0
     assert result["items"][0]["target"] == str(root / "P_1" / "leftover.jpg")
     assert not list(outside.iterdir())
