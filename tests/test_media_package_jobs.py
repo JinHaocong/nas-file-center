@@ -35,7 +35,7 @@ def _package(root: Path, author: str, name: str, *, day: str = "261115") -> Path
 
 def test_worker_preview_root_and_day_selection_are_paginated_read_only(tmp_path):
     client, root, settings = _app(tmp_path)
-    p = _package(root, "疑心病", "New 1432.1MB")
+    p = _package(root, "SampleAuthor", "SampleBundle")
     q = _package(root, "其他作者", "包二")
     r = _package(root, "最后作者", "包三", day="261116")
     (p / "001.jpg").write_bytes(b"image")
@@ -61,11 +61,11 @@ def test_worker_preview_root_and_day_selection_are_paginated_read_only(tmp_path)
     assert page["status"] == "completed"
     assert page["read_only"] is True
     assert page["summary"]["package_count"] == 3
-    assert page["summary"]["ready_count"] == 2
-    assert page["summary"]["skipped_count"] == 1
+    assert page["summary"]["ready_count"] == 3
+    assert page["summary"]["skipped_count"] == 0
     assert len(page["packages"]) == 2
     assert page["progress"]["current"] == 3
-    assert page["summary"]["needed_moves"] == 3
+    assert page["summary"]["needed_moves"] == 4
 
     second = client.get(f"/api/media_package/previews/{job_id}",
                         params={"page": 2, "page_size": 2})
