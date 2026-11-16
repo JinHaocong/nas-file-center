@@ -343,9 +343,16 @@ def test_errno95_recovery_error_allowlist_rejects_unrelated_failures():
     assert is_recoverable_media_package_publish_error(
         "EXECUTION_ERROR", "Package directory changed before publish",
     )
+    assert is_recoverable_media_package_publish_error(
+        "EXECUTION_ERROR",
+        "FUSE grouped publication disabled: run the isolated NAS probe and "
+        "explicitly enable MEDIA_PACKAGE_FUSE_COMPAT_ENABLED",
+    )
     for code, error in (
         ("AUTH_FAILURE", "Package directory changed before publish"),
         ("EXECUTION_ERROR", "[Errno 95] Unexpected filesystem error"),
+        ("EXECUTION_ERROR", "FUSE grouped publication disabled"),
+        ("NOT_EXECUTION_ERROR", "FUSE grouped publication disabled: run the isolated NAS probe and explicitly enable MEDIA_PACKAGE_FUSE_COMPAT_ENABLED"),
         ("EXECUTION_ERROR", "Missing file in frozen package"),
         (None, "Package directory changed before publish"),
     ):
@@ -384,3 +391,84 @@ def test_zos_recovery_requires_private_capability_opt_in(tmp_path, monkeypatch):
     assert recovery.status_code == 409
     assert "FUSE compatibility is disabled" in recovery.text
     assert (package / f".nfc-media_package-stage-{old_id}-0").is_dir()
+
+
+def test_failed_disabled_fuse_gate_task_resumes_exact_frozen_stage_after_private_opt_in(
+    tmp_path, monkeypatch,
+):
+    """Production-style: 201 staged files, no new plan, no automatic retry."""
+    client, settings, root = _fixture(tmp_path, fuse_compat=False)
+    package = root / "2611" / "261116" / "ExampleAuthor" / "ExampleBundle"
+    clips = package / "clips"
+    clips.mkdir(parents=True)
+    for index in range(201):
+        (clips / f"{index:03d}.mp4").write_bytes(f"movie-{index}".encode())
+    preview_id = _preview(client, settings, package)
+    start = client.post(f"/api/media_package/previews/{preview_id}/execute", json={
+        "confirmation": f"EXECUTE_MEDIA_PACKAGE_PREVIEW_{preview_id}",
+    })
+    assert start.status_code == 200, start.text
+    failed_id = start.json()["job_id"]
+    engine, factory = create_engine_and_session(settings.database_path)
+    worker_id = "media-package-disabled-fuse-recovery"
+    assert acquire_worker_ownership(engine, factory, worker_id=worker_id)
+
+    native = executor.rename_noreplace_at
+
+    def unsupported_directory_rename(srcfd, srcname, dstfd, dstname):
+        if str(srcname).startswith(".nfc-media_package-stage-"):
+            raise OSError(errno.EOPNOTSUPP, "zfuse directory no-replace unavailable")
+        return native(srcfd, srcname, dstfd, dstname)
+
+    def unsafe_plain_directory_rename(source, destination):
+        raise OSError(
+            errno.EOPNOTSUPP,
+            "Plain directory rename no-clobber semantics are not positively proven",
+            str(source),
+        )
+
+    monkeypatch.setattr(executor, "rename_noreplace_at", unsupported_directory_rename)
+    monkeypatch.setattr(executor, "rename_directory_noreplace_compat", unsafe_plain_directory_rename)
+
+    assert process_work_job(settings, failed_id, session_factory=factory,
+                            engine=engine, worker_id=worker_id) is False
+    failed = client.get(f"/api/media_package/executions/{failed_id}").json()
+    assert failed["status"] == "failed"
+    assert failed["error"] == (
+        "FUSE grouped publication disabled: run the isolated NAS probe "
+        "and explicitly enable MEDIA_PACKAGE_FUSE_COMPAT_ENABLED"
+    )
+    first = package / f".nfc-media_package-stage-{failed_id}-0"
+    second = package / f".nfc-media_package-stage-{failed_id}-1"
+    assert len(list(first.iterdir())) == 200
+    assert len(list(second.iterdir())) == 1
+    assert not (package / "clips" / "000.mp4").exists()
+    assert not any(p.name.startswith("V [") for p in package.iterdir())
+
+    recover_url = f"/api/media_package/executions/{failed_id}/recover"
+    confirmation = f"RECOVER_MEDIA_PACKAGE_EXECUTION_{failed_id}"
+    rejected = client.post(recover_url, json={"confirmation": confirmation})
+    assert rejected.status_code == 409, rejected.text
+    assert "FUSE compatibility is disabled" in rejected.text
+    assert client.delete(f"/api/tasks/{failed_id}").status_code == 409
+    # Emulate a separately authorized deployment after isolated NAS testing.
+    settings.media_package_fuse_compat_enabled = True
+    assert client.delete(f"/api/tasks/{preview_id}").status_code == 200
+    accepted = client.post(recover_url, json={"confirmation": confirmation})
+    assert accepted.status_code == 200, accepted.text
+    recovery_id = accepted.json()["job_id"]
+    assert recovery_id != failed_id
+    assert client.post(recover_url, json={"confirmation": confirmation}).json()["job_id"] == recovery_id
+
+    assert process_work_job(settings, recovery_id, session_factory=factory,
+                            engine=engine, worker_id=worker_id) is True
+    result = client.get(f"/api/media_package/executions/{recovery_id}").json()
+    assert result["status"] == "completed"
+    assert client.get(f"/api/media_package/executions/{failed_id}").json()["status"] == "failed"
+    final_files = list(package.glob("V*/*.mp4"))
+    assert len(final_files) == 201
+    assert not first.exists() and not second.exists()
+    assert not clips.exists()
+    assert sorted(p.name for p in package.iterdir()) == sorted(
+        [p.parent.name for p in final_files if p.name == "001.mp4"]
+    )
