@@ -6,7 +6,7 @@ import { resolve } from 'node:path';
 const read = (path: string) =>
   readFileSync(resolve(process.cwd(), path), 'utf8');
 
-test('Luolcy has an isolated read-only Batch operation with no execute button', () => {
+test('Luolcy has an isolated, confirmation-gated Batch operation', () => {
   const batch = read('src/pages/Batch/index.tsx');
   const view = read('src/pages/Batch/LuolcyOrganizerEditor.tsx');
   const api = read('src/api/luolcy.ts');
@@ -21,8 +21,14 @@ test('Luolcy has an isolated read-only Batch operation with no execute button', 
   assert.match(view, /needed_moves/);
   assert.match(view, /只读/);
   assert.match(api, /\/api\/luolcy\/previews/);
-  assert.doesNotMatch(api, /execute|delete|rename|\/plans/);
-  assert.doesNotMatch(view, /createPlan|startExecute|runMove/);
+  assert.match(api, /startExecution/);
+  assert.match(api, /getExecution/);
+  assert.match(view, /confirmationToken/);
+  assert.match(view, /canExecute/);
+  assert.match(view, /blocked_count === 0/);
+  assert.match(view, /executionConfirmation === confirmationToken/);
+  assert.match(view, /确认并执行 Luolcy 资源包整理/);
+  assert.doesNotMatch(api, /\/plans/);
 });
 
 test('Luolcy preview is a fixed rule not a configurable processing toggle', () => {
