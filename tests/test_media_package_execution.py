@@ -331,8 +331,7 @@ def test_root_cycle_stages_all_files_before_publish(tmp_path):
 def test_flat_publish_interrupted_after_first_file_resumes_without_overwrite(tmp_path, monkeypatch):
     root, package = example(tmp_path)
     (package / "clips").mkdir()
-    for i in range(3):
-        (package / "clips" / "001.mp4").write_bytes(b"first") if i == 0 else None
+    (package / "clips" / "001.mp4").write_bytes(b"first")
     (package / "clips" / "002.mp4").write_bytes(b"second")
     (package / "clips" / "003.mp4").write_bytes(b"third")
     manifest = manifest_for(root, package, job_id=642)
@@ -356,3 +355,62 @@ def test_flat_publish_interrupted_after_first_file_resumes_without_overwrite(tmp
     assert (package / "002.mp4").read_bytes() == b"second"
     assert (package / "003.mp4").read_bytes() == b"third"
     assert not any(p.name.startswith(".nfc-") for p in package.iterdir())
+
+
+def test_complete_flat_permutation_has_idempotent_restart(tmp_path):
+    root, package = example(tmp_path)
+    (package / "002.mp4").write_bytes(b"first")
+    (package / "clips").mkdir()
+    (package / "clips" / "001.mp4").write_bytes(b"second")
+    manifest = manifest_for(root, package, job_id=644)
+    assert [row["target_name"] for row in manifest["moves"]] == [
+        "001.mp4", "002.mp4",
+    ]
+    outcome = executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+    assert outcome["files_moved"] == 2
+    assert (package / "001.mp4").read_bytes() == b"first"
+    assert (package / "002.mp4").read_bytes() == b"second"
+    replay = executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+    assert replay["files_moved"] == 0
+    assert replay["files_reconciled"] == 2
+
+
+def test_frozen_mapping_records_every_original_and_final_path(tmp_path):
+    root, package = example(tmp_path)
+    (package / "A").mkdir()
+    (package / "B").mkdir()
+    (package / "A" / "001.mp4").write_bytes(b"movie_a")
+    (package / "B" / "001.mp4").write_bytes(b"movie_b")
+    manifest = manifest_for(root, package, job_id=645)
+    assert len(manifest["moves"]) == 2
+    assert [row["original_relative_path"] for row in manifest["moves"]] == [
+        "A/001.mp4", "B/001.mp4",
+    ]
+    assert [row["final_relative_path"] for row in manifest["moves"]] == [
+        "001.mp4", "002.mp4",
+    ]
+    frozen = tmp_path / "config" / "mapping.json"
+    executor.save_frozen_manifest(frozen, manifest)
+    copy = executor.load_frozen_manifest(frozen, job_id=645, package=package)
+    assert [(row["original_relative_path"], row["final_relative_path"])
+            for row in copy["moves"]] == [
+        ("A/001.mp4", "001.mp4"), ("B/001.mp4", "002.mp4"),
+    ]
+
+
+def test_other_duplicate_names_are_suffixed_without_loss(tmp_path):
+    root, package = example(tmp_path)
+    (package / "A").mkdir()
+    (package / "B").mkdir()
+    (package / "A" / "notes.txt").write_bytes(b"note_a")
+    (package / "B" / "notes.txt").write_bytes(b"note_b")
+    (package / "A" / "image.jpg").write_bytes(b"img")
+    manifest = manifest_for(root, package, job_id=646)
+    result = executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+    assert result["files_moved"] == 3
+    folder = package / "Other [2 12B]"
+    assert sorted(p.name for p in folder.iterdir()) == [
+        "notes.txt", "notes__dup002.txt",
+    ]
+    assert (folder / "notes.txt").read_bytes() == b"note_a"
+    assert (folder / "notes__dup002.txt").read_bytes() == b"note_b"
