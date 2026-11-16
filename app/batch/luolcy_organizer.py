@@ -322,6 +322,17 @@ def preview_luolcy_package(package: str | Path, *, luolcy_root: str | Path,
     # Reserve original top-level names to avoid ambiguous destination merges.
     with os.scandir(source) as entries:
         occupied = {entry.name.casefold(): entry.name for entry in entries}
+    # Numbered directories from older runs have ambiguous bucket ownership.
+    # Reject instead of silently combining them or overwriting their content.
+    legacy_numbered = sorted(
+        original for folded, original in occupied.items()
+        if re.fullmatch(r"(?:p|v)_[1-9][0-9]*", folded)
+    )
+    if legacy_numbered:
+        conflicts.append({
+            "reason": "legacy_numbered_bucket_requires_review",
+            "existing": legacy_numbered,
+        })
     for kind in ("P", "V", "Other"):
         files = observed.get(kind, [])
         if not files:
@@ -338,7 +349,12 @@ def preview_luolcy_package(package: str | Path, *, luolcy_root: str | Path,
             stem_folded = stem.casefold()
             competing = [
                 value for key, value in occupied.items()
-                if (key == stem_folded or key.startswith(stem_folded + " ["))
+                if (
+                    # Legacy unnumbered P/ and V/ folders are ordinary *sources*:
+                    # their contents are collected and migrated into sized groups.
+                    (key == stem_folded and index > 0)
+                    or key.startswith(stem_folded + " [")
+                )
                 and key != folder.casefold()
             ]
             if competing:
