@@ -232,7 +232,8 @@ def _entry(folder: Path, name: str):
         return None
 
 
-def _move_one(move: dict, *, lease_fence: Callable[[], None]) -> str:
+def _move_one(move: dict, *, lease_fence: Callable[[], None],
+              ignore_final: bool = False) -> str:
     """Reconcile crashed no-clobber moves and perform at most one filesystem move."""
     src = Path(move["source"])
     stage = Path(move["target"])
@@ -241,7 +242,8 @@ def _move_one(move: dict, *, lease_fence: Callable[[], None]) -> str:
     # Published group may already have renamed staging -> final on crash.
     stage_stat = _entry(stage.parent, stage.name) if stage.parent.is_dir() else None
     final_stat = (_entry(final.parent, final.name)
-                  if final != stage and final.parent.is_dir() else None)
+                  if not ignore_final and final != stage and final.parent.is_dir()
+                  else None)
     if stage_stat is not None and final_stat is not None:
         raise MediaPackageExecutionConflict("Both staged and published file bindings exist")
     existing = final_stat if final_stat is not None else stage_stat
