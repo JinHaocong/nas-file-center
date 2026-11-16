@@ -26,6 +26,7 @@ from app.tasks.recovery import (
     generate_worker_id,
     recover_interrupted_jobs,
     update_worker_heartbeat,
+    WorkerHeartbeatDatabaseBusy,
 )
 from app.tasks.state_machine import (
     JobCancelRequested,
@@ -405,15 +406,51 @@ class WorkerHeartbeatThread(threading.Thread):
         self.lease_lost_event = lease_lost_event
 
     def run(self) -> None:
-        while not self.stop_event.is_set():
-            if self.stop_event.wait(self.interval):
-                break
+        # SQLITE_BUSY is not a proof of lost ownership: retry quickly instead
+        # of waiting another full heartbeat interval. Every real renewal still
+        # checks the original 30s lease limit; no expired owner is resurrected.
+        retry_interval = max(0.05, min(1.0, self.interval / 3.0))
+        wait_seconds = self.interval
+        contention_since: float | None = None
+        last_busy_log_at = 0.0
+        while not self.stop_event.wait(wait_seconds):
             try:
-                renewed = update_worker_heartbeat(self.engine, self.session_factory, worker_id=self.worker_id)
-                if not renewed and self.lease_lost_event is not None:
-                    self.lease_lost_event.set()
+                renewed = update_worker_heartbeat(
+                    self.engine, self.session_factory,
+                    worker_id=self.worker_id, raise_on_busy=True,
+                )
+                if not renewed:
+                    logger.error(
+                        "Worker %s heartbeat rejected: exclusive lease lost or expired; "
+                        "stopping ownership of new tasks",
+                        self.worker_id,
+                    )
+                    if self.lease_lost_event is not None:
+                        self.lease_lost_event.set()
+                elif contention_since is not None:
+                    logger.info(
+                        "Worker %s heartbeat resumed after %.2fs of SQLite writer contention",
+                        self.worker_id, time.monotonic() - contention_since,
+                    )
+                contention_since = None
+                wait_seconds = self.interval
+            except WorkerHeartbeatDatabaseBusy:
+                now = time.monotonic()
+                if contention_since is None:
+                    contention_since = now
+                if now - last_busy_log_at >= 5.0:
+                    logger.warning(
+                        "Worker %s heartbeat waiting on SQLite writer (%.2fs elapsed); "
+                        "will retry promptly, without extending lease",
+                        self.worker_id, now - contention_since,
+                    )
+                    last_busy_log_at = now
+                wait_seconds = retry_interval
             except Exception:
-                pass
+                # Unexpected errors are observable and the next heartbeat still
+                # enforces the lease fence; never silently hide failures.
+                logger.exception("Worker %s heartbeat thread raised an error", self.worker_id)
+                wait_seconds = retry_interval
 
 
 def recover_running_jobs(settings: Settings) -> int:
@@ -496,6 +533,11 @@ def worker_loop(
         pass
 
     acquired = acquire_worker_ownership(engine, SessionLocal, worker_id=worker_id)
+    logger.info(
+        "Worker started worker_id=%s pid=%s owner_acquired=%s "
+        "heartbeat_interval=%.2fs lease_timeout=30s",
+        worker_id, os.getpid(), acquired, heartbeat_interval,
+    )
 
     heartbeat_thread = WorkerHeartbeatThread(
         engine,
@@ -508,7 +550,9 @@ def worker_loop(
     heartbeat_thread.start()
 
     if acquired:
-        recover_interrupted_jobs(engine, SessionLocal, worker_id=worker_id)
+        stats = recover_interrupted_jobs(engine, SessionLocal, worker_id=worker_id)
+        if any(stats.values()):
+            logger.warning("Worker %s recovered interrupted tasks: %s", worker_id, stats)
         _cleanup_transaction_residue_after_recovery(settings, SessionLocal, worker_id)
         _cleanup_archive_after_recovery(settings, SessionLocal, worker_id)
 
@@ -520,6 +564,11 @@ def worker_loop(
                 break
 
             if lease_lost_event.is_set():
+                logger.warning(
+                    "Worker %s released task ownership after a confirmed lease denial; "
+                    "new ownership must be acquired before any further work",
+                    worker_id,
+                )
                 acquired = False
                 lease_lost_event.clear()
 
@@ -528,7 +577,9 @@ def worker_loop(
                 if not acquired:
                     time.sleep(poll_seconds)
                     continue
-                recover_interrupted_jobs(engine, SessionLocal, worker_id=worker_id)
+                stats = recover_interrupted_jobs(engine, SessionLocal, worker_id=worker_id)
+                if any(stats.values()):
+                    logger.warning("Worker %s recovered interrupted tasks: %s", worker_id, stats)
                 _cleanup_transaction_residue_after_recovery(settings, SessionLocal, worker_id)
                 _cleanup_archive_after_recovery(settings, SessionLocal, worker_id)
 
@@ -587,6 +638,7 @@ def worker_loop(
                 # Individual job failures do not terminate the worker container
                 pass
     finally:
+        logger.info("Worker stopping worker_id=%s pid=%s", worker_id, os.getpid())
         stop_event.set()
         heartbeat_thread.join(timeout=1.0)
 
