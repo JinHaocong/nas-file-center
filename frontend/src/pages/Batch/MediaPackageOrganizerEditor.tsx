@@ -78,7 +78,7 @@ export const MediaPackageOrganizerEditor: React.FC = () => {
   const start = async () => {
     const chosen = selection.trim();
     if (!chosen.startsWith('/')) {
-      toast.error('请选择 MediaPackage、月份、日期、作者或资源包的绝对目录');
+      toast.error('请选择 媒体资源包根目录、月份、日期、作者或资源包的绝对目录');
       return;
     }
     if (busy) return;
@@ -89,9 +89,9 @@ export const MediaPackageOrganizerEditor: React.FC = () => {
     try {
       const result = await enqueue.mutateAsync(chosen);
       setJobId(result.job_id);
-      toast.success(`MediaPackage 只读预览任务 #${result.job_id} 已加入 Worker 队列`);
+      toast.success(`媒体资源包只读预览任务 #${result.job_id} 已加入 Worker 队列`);
     } catch (e: unknown) {
-      toast.error(getStructuredApiError(e).message || '无法启动 MediaPackage 预览');
+      toast.error(getStructuredApiError(e).message || '无法启动 媒体资源包预览');
     }
   };
   const beginExecution = async () => {
@@ -112,7 +112,7 @@ export const MediaPackageOrganizerEditor: React.FC = () => {
     if (jobId === null || !inProgress(data?.status) || cancel.isPending) return;
     try {
       await cancel.mutateAsync(jobId);
-      toast.success('已请求取消 MediaPackage 只读预览');
+      toast.success('已请求取消 媒体资源包只读预览');
     } catch (e: unknown) {
       toast.error(getStructuredApiError(e).message || '取消预览失败');
     }
@@ -127,9 +127,9 @@ export const MediaPackageOrganizerEditor: React.FC = () => {
           <div className="nfc-v2-batch-field">
             <span>选择扫描范围</span>
             <DirectoryPicker multiple={false} value={selection} disabled={busy}
-              placeholder="选择 /data/Else/MediaPackage 或其中的月份、日期、作者、资源包"
+              placeholder="选择已配置的媒体资源包根目录，或其下的月份、日期、作者、资源包"
               onChange={changeSelection} />
-            <small>支持 MediaPackage / 年月 / 年月日 / 作者 / 资源包；只允许该库下的固定层级。</small>
+            <small>支持 媒体资源包根目录 / 年月 / 年月日 / 作者 / 资源包；只允许该库下的固定层级。</small>
           </div>
           <div className="nfc-v2-batch-notice" role="note">
             <ConsoleIcon name="shield-check" size={19} />
@@ -198,7 +198,7 @@ export const MediaPackageOrganizerEditor: React.FC = () => {
           </div>
           {!data.packages.length ? (
             <ConsoleEmpty title="当前范围没有可显示的资源包"
-              description="可以选择更高一级 MediaPackage/月份目录，或检查路径结构。" />
+              description="可以选择更高一级 资源包根目录或月份目录，或检查路径结构。" />
           ) : (
             <div className="nfc-v2-batch-media-scroll">
               <table className="nfc-v2-batch-media-table">
@@ -219,6 +219,17 @@ export const MediaPackageOrganizerEditor: React.FC = () => {
                         <td>{row.needed_moves.toLocaleString()}</td>
                         <td className="nfc-v2-batch-media-reason">
                           <div>{operationText(row)}</div>
+                          {(row.resolved_collision_count || 0) > 0 && (
+                            <small>已自动避让 {row.resolved_collision_count} 个同名文件</small>
+                          )}
+                          {(row.renamed_count || 0) > 0 && (
+                            <small>将统一编号 / 改名 {row.renamed_count} 个文件</small>
+                          )}
+                          {row.sample_moves.slice(0, 3).map((move, i) => (
+                            <div key={move.source + i} className="nfc-form-note">
+                              {move.original_relative_path || move.source} → {move.target_name || move.target}
+                            </div>
+                          ))}
                           {row.groups.map(group => (
                             <div key={group.destination}><CodePath value={group.name} /></div>
                           ))}
