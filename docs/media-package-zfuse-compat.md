@@ -20,6 +20,8 @@ docker exec nas-file-center-worker python -m app.batch.media_package_zfuse_probe
 
 The probe creates a randomly named `.nfc-media-fs-probe-*` scratch directory under the selected mount. It uses only tiny synthetic files to verify directory fsync, O_EXCL file marker fsync, exclusive mkdir, hardlink no-overwrite, source-link retirement and cleanup. Unexpected entries or changed identities are never automatically deleted. Exit 0 with `compatible: true` is required before even considering live recovery. A positive result is not proof against later firmware changes or concurrent external modifications.
 
+After the same-mount probe passes, an administrator must explicitly set `MEDIA_PACKAGE_FUSE_COMPAT_ENABLED=true` in **both** API and Worker private environment variables and recreate the containers. The default is `false`, which refuses the FUSE fallback without creating any new final target directory. Do **not** enable it from GitHub or automatically on a fresh untested NAS. Normal native NOREPLACE paths remain available when the flag is off.
+
 ## Existing failed jobs
 
 Before recovery, back up the dataset or take a storage snapshot. Keep the failed WorkJob, original frozen manifests and preview reports in CONFIG_DIR, and all `.nfc-media_package-stage-*` directories. Never restart a fresh sort over the same partially staged resource package.
