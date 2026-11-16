@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import {
-  mediaSortApi, type MediaSortRow, type MediaSortSkipReason,
+  mediaSortApi, type MediaSortItemFilter, type MediaSortRow, type MediaSortSkipReason,
 } from '../../api/mediaSort';
 import { tasksApi } from '../../api/tasks';
 import { getStructuredApiError } from '../../api/errors';
@@ -41,6 +41,8 @@ export const MediaSortEditor: React.FC = () => {
   const [previewJobId, setPreviewJobId] = useState<number | null>(null);
   const [planJobId, setPlanJobId] = useState<number | null>(null);
   const [page, setPage] = useState(1);
+  const [itemFilter, setItemFilter] = useState<MediaSortItemFilter>('all');
+  const [skipConflicts, setSkipConflicts] = useState(false);
   const [pageSize, setPageSize] = useState(25);
   const [skipPage, setSkipPage] = useState(1);
   const [skipPageSize, setSkipPageSize] = useState(25);
@@ -58,8 +60,10 @@ export const MediaSortEditor: React.FC = () => {
     isError: previewFailedToLoad,
     error: previewLoadError,
   } = useQuery({
-    queryKey: ['mediaSortPreviewJob', previewJobId, page, pageSize, skipPage, skipPageSize],
-    queryFn: () => mediaSortApi.getPreview(previewJobId!, page, pageSize, skipPage, skipPageSize),
+    queryKey: ['mediaSortPreviewJob', previewJobId, page, pageSize, skipPage, skipPageSize, itemFilter],
+    queryFn: () => mediaSortApi.getPreview(
+      previewJobId!, page, pageSize, skipPage, skipPageSize, itemFilter,
+    ),
     enabled: previewJobId !== null,
     refetchInterval: (query) => isActive(query.state.data?.status) ? 1400 : false,
   });
@@ -85,7 +89,8 @@ export const MediaSortEditor: React.FC = () => {
     (planJobId !== null && planJob == null) ||
     isActive(previewResponse?.status) || isActive(planJob?.status);
   const ready = previewResponse?.status === 'completed' && summary !== null && summary !== undefined;
-  const canPlan = Boolean(ready && summary && summary.count > 0 && summary.conflict_count === 0 &&
+  const canPlan = Boolean(ready && summary && summary.ready_count > 0 &&
+    (summary.conflict_count === 0 || skipConflicts) &&
     previewKeyRef.current === previewKey(directory, recursive, smartSkip) &&
     !planGuard.current && !previewGuard.current && !busy && planJobId === null);
 
@@ -96,6 +101,8 @@ export const MediaSortEditor: React.FC = () => {
     navigationRef.current = null;
     setPage(1);
     setSkipPage(1);
+    setItemFilter('all');
+    setSkipConflicts(false);
   };
   const changeDirectory = (value: string | string[]) => {
     if (busy || planGuard.current) return;
@@ -145,7 +152,9 @@ export const MediaSortEditor: React.FC = () => {
     if (!previewJobId || !canPlan || planGuard.current) return;
     planGuard.current = true;
     try {
-      const result = await planMutation.mutateAsync(previewJobId);
+      const result = await planMutation.mutateAsync({
+        jobId: previewJobId, skipConflicts,
+      });
       setPlanJobId(result.job_id);
       toast.success(`移动计划生成任务 #${result.job_id} 已入队`);
     } catch (error: unknown) {
@@ -167,8 +176,15 @@ export const MediaSortEditor: React.FC = () => {
 
   const renderStatus = (item: MediaSortRow) => (
     <StatusBadge status={item.conflict ? 'failed' : 'completed'}
-      label={item.conflict ? item.conflict_reason || '目标冲突' : '可移动'} />
+      label={item.conflict ? '冲突' : '可移动'} />
   );
+  const selectItemFilter = (filter: MediaSortItemFilter) => {
+    setItemFilter(filter);
+    setPage(1);
+  };
+  const filteredTotal = previewResponse?.item_total ??
+    (itemFilter === 'ready' ? summary?.ready_count :
+      itemFilter === 'conflict' ? summary?.conflict_count : summary?.count) ?? 0;
   const skippedShown = previewResponse?.skipped_directories || [];
   const shown = previewResponse?.items || [];
 
@@ -216,11 +232,12 @@ export const MediaSortEditor: React.FC = () => {
               <ConsoleButton disabled={cancelMutation.isPending}
                 onClick={() => { void cancelPreview(); }}>取消扫描</ConsoleButton>
             )}
-            {ready && summary && summary.count > 0 && (
+            {ready && summary && summary.ready_count > 0 && (
               <ConsoleButton loading={planMutation.isPending} disabled={!canPlan}
                 leadingIcon={<ConsoleIcon name="calendar" size={17} />}
                 onClick={() => { void createPlan(); }}>
-                生成移动 Plan（{summary.count.toLocaleString()} 项）
+                {summary.conflict_count > 0 && skipConflicts ? '跳过冲突，生成 Plan' : '生成移动 Plan'}
+                （{summary.ready_count.toLocaleString()} 项）
               </ConsoleButton>
             )}
           </ActionBar>
@@ -295,25 +312,67 @@ export const MediaSortEditor: React.FC = () => {
             <span>冲突 <strong>{summary.conflict_count.toLocaleString()}</strong></span>
             <span>跳过目录 <strong>{summary.skipped_directory_count.toLocaleString()}</strong></span>
           </div>
-          {summary.conflict_count > 0 && <p role="alert" className="nfc-v2-batch-error">
-            有 {summary.conflict_count.toLocaleString()} 项目标冲突，不能生成 Plan；现有文件不会被覆盖。
-          </p>}
+          {summary.conflict_count > 0 && (
+            <div className="nfc-v2-batch-media-conflict-notice" role="group"
+              aria-label="预览冲突处理">
+              <p role="alert">
+                发现 <strong>{summary.conflict_count.toLocaleString()}</strong> 项冲突。
+                冲突文件不会被修改；可通过「只看冲突」查看具体路径和原因。
+              </p>
+              <ConsoleButton size="sm" variant="secondary"
+                onClick={() => selectItemFilter('conflict')}>
+                只看冲突（{summary.conflict_count.toLocaleString()}）
+              </ConsoleButton>
+              {summary.ready_count > 0 && (
+                <label className="nfc-v2-batch-media-conflict-optin">
+                  <ConsoleCheckbox checked={skipConflicts} disabled={busy}
+                    onCheckedChange={setSkipConflicts} aria-label="确认跳过冲突项继续生成 Plan" />
+                  <span>我确认跳过这 {summary.conflict_count.toLocaleString()} 项冲突，
+                    仅为 {summary.ready_count.toLocaleString()} 个可移动文件生成 Plan；
+                    不删除、不覆盖冲突文件。</span>
+                </label>
+              )}
+              {summary.ready_count === 0 && <p>全部候选项均有冲突，没有可生成的移动 Plan。</p>}
+            </div>
+          )}
+          <div className="nfc-v2-batch-media-filter" role="group" aria-label="媒体分类结果筛选">
+            <span>按状态筛选</span>
+            {([
+              ['all', '全部', summary.count],
+              ['ready', '可移动', summary.ready_count],
+              ['conflict', '冲突', summary.conflict_count],
+            ] as const).map(([filter, name, count]) => (
+              <ConsoleButton key={filter} size="sm"
+                variant={itemFilter === filter ? 'primary' : 'secondary'}
+                aria-pressed={itemFilter === filter}
+                onClick={() => selectItemFilter(filter)}>
+                {name}（{count.toLocaleString()}）
+              </ConsoleButton>
+            ))}
+          </div>
           {summary.count === 0 ? (
             <ConsoleEmpty title="当前范围没有待分类的媒体文件"
               description="纯图片/纯视频目录已保留，详见下方跳过目录明细。" />
+          ) : filteredTotal === 0 ? (
+            <ConsoleEmpty title="当前筛选没有匹配的文件"
+              description="可切换为「全部」或其他状态继续查看。" />
           ) : (
             <ResponsiveDataView
               desktop={<div className="nfc-v2-batch-media-scroll">
                 <table className="nfc-v2-batch-media-table">
                   <caption className="nfc-v2-batch-media-sr-only">图片和视频目标位置预览</caption>
                   <thead><tr><th scope="col">类型</th><th scope="col">源文件</th>
-                    <th scope="col">目标位置</th><th scope="col">状态</th></tr></thead>
+                    <th scope="col">目标位置</th><th scope="col">状态</th>
+                    <th scope="col">原因 / 说明</th></tr></thead>
                   <tbody>{shown.map(item => (
                     <tr key={item.source}>
                       <td>{mediaLabel(item.media_kind)}</td>
                       <td><CodePath value={item.source} /></td>
                       <td><CodePath value={item.target} muted={item.conflict} /></td>
                       <td>{renderStatus(item)}</td>
+                      <td className="nfc-v2-batch-media-reason">
+                        {item.conflict ? item.conflict_reason || '目标路径冲突' : '—'}
+                      </td>
                     </tr>
                   ))}</tbody>
                 </table>
@@ -329,12 +388,15 @@ export const MediaSortEditor: React.FC = () => {
                       <div className="nfc-plan-item-path-row"><span>源文件</span><CodePath value={item.source}/></div>
                       <div className="nfc-plan-item-path-row"><span>目标</span><CodePath value={item.target} muted={item.conflict}/></div>
                     </div>
+                    {item.conflict && <p className="nfc-v2-batch-media-reason">
+                      冲突原因：{item.conflict_reason || '目标路径冲突'}
+                    </p>}
                   </article>
                 ))}
               </div>}
             />
           )}
-          <ConsolePagination page={page} pageSize={pageSize} total={summary.count}
+          <ConsolePagination page={page} pageSize={pageSize} total={filteredTotal}
             pageSizes={[10, 25, 50, 100]}
             onChange={(next, size) => { setPage(next); setPageSize(size); }} />
         </DataPanel>

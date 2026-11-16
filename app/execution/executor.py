@@ -98,6 +98,36 @@ def _compat_regular_file_move_noreplace(source: Path, target: Path) -> None:
         raise
 
 
+# A small per-Worker cache avoids repeat mkdir(exist_ok=True) for thousands
+# of moves into the same P/V directory. Each hit must still lstat and compare
+# the live directory identity. A replaced directory fails closed instead of
+# blindly trusting cached existence (including symlink replacement).
+_MEDIA_MOVE_PARENT_CACHE_LIMIT = 512
+
+
+def _ensure_move_parent(
+    parent: Path,
+    cache: dict[str, tuple[int, int]] | None,
+) -> None:
+    if cache is None:
+        parent.mkdir(parents=True, exist_ok=True)
+        return
+    key = str(parent)
+    expected = cache.get(key)
+    if expected is None:
+        parent.mkdir(parents=True, exist_ok=True)
+    current = os.lstat(parent)
+    if not stat.S_ISDIR(current.st_mode):
+        raise OSError(errno.ENOTDIR, "Media move target parent is no longer a directory", key)
+    identity = (int(current.st_dev), int(current.st_ino))
+    if expected is not None and identity != expected:
+        raise OSError(errno.ESTALE, "Media move target parent changed during execution", key)
+    if expected is None:
+        if len(cache) >= _MEDIA_MOVE_PARENT_CACHE_LIMIT:
+            cache.pop(next(iter(cache)))
+        cache[key] = identity
+
+
 def _containing_root(path: Path, roots: Iterable[Path | str]) -> tuple[int, Path] | None:
     resolved_roots = [Path(r).expanduser().resolve(strict=False) for r in roots]
     matches = [(i, r) for i, r in enumerate(resolved_roots) if path == r or path.is_relative_to(r)]
@@ -420,6 +450,7 @@ def execute_item(
     unlink_manifest: dict | None = None,
     negative_capability_probe_cache: set[int] | None = None,
     directory_move_transaction_id: str | None = None,
+    move_parent_cache: dict[str, tuple[int, int]] | None = None,
 ) -> ItemResult:
     if item.state == "completed":
         return ItemResult("completed", "already completed")
@@ -720,7 +751,10 @@ def execute_item(
             if target_raw.is_symlink():
                 return _skip("target symlink is not allowed")
             target = require_allowed_path(target_raw, allowed_roots)
-            target.parent.mkdir(parents=True, exist_ok=True)
+            _ensure_move_parent(
+                target.parent,
+                move_parent_cache if item.operation == "move" else None,
+            )
             try:
                 from app.fs_ops import rename_directory_noreplace_compat, rename_noreplace
                 try:

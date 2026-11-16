@@ -9,8 +9,10 @@ from __future__ import annotations
 import itertools
 import json
 import os
+import struct
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from sqlalchemy import func, select, text
 
@@ -27,6 +29,7 @@ GENERATE_KIND = "media-sort-plan"
 STAGE_KIND = "media-sort-plan-stage"
 ACTIVE_STATUSES = ("queued", "running", "paused", "cancel_requested")
 MAX_PLAN_ITEMS = 300_000
+PAGE_INDEX_STRIDE = 256  # at most 255 JSONL rows skipped for deep pages
 
 
 def _folder(settings: Settings) -> Path:
@@ -51,9 +54,81 @@ def _write_new(path: Path):
     return os.fdopen(fd, "w", encoding="utf-8")
 
 
-def _read_page(path: Path, offset: int, page_size: int) -> list[dict]:
+def _index_path(path: Path) -> Path:
+    return path.with_name(path.name + ".idx")
+
+
+def _status_index_path(path: Path, item_filter: str) -> Path:
+    if item_filter not in ("ready", "conflict"):
+        raise ValueError("Invalid media-sort preview item filter")
+    return path.with_name(path.name + f".{item_filter}.offsets")
+
+
+def _write_new_binary(path: Path):
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    return os.fdopen(fd, "wb")
+
+
+def _read_filtered_page(path: Path, *, item_filter: Literal["ready", "conflict"],
+                        offset: int, page_size: int) -> list[dict]:
+    index_path = _status_index_path(path, item_filter)
+    if index_path.is_file():
+        results: list[dict] = []
+        with index_path.open("rb") as offsets, path.open("r", encoding="utf-8") as rows:
+            offsets.seek(offset * 8)
+            for _ in range(page_size):
+                raw_offset = offsets.read(8)
+                if not raw_offset:
+                    break
+                if len(raw_offset) != 8:
+                    raise ValueError("Incomplete preview status index; start a new preview")
+                position = struct.unpack("<Q", raw_offset)[0]
+                rows.seek(position)
+                record = json.loads(rows.readline())
+                if bool(record.get("conflict")) != (item_filter == "conflict"):
+                    raise ValueError("Preview status index does not match row status")
+                results.append(record)
+        return results
+
+    # Backwards compatibility: older saved previews have no filter offsets.
+    # Stream rather than materialize the full file in Python memory.
     with path.open("r", encoding="utf-8") as stream:
-        return [json.loads(line) for line in itertools.islice(stream, offset, offset + page_size)]
+        filtered = (
+            record for line in stream
+            if isinstance((record := json.loads(line)), dict)
+            and bool(record.get("conflict")) == (item_filter == "conflict")
+        )
+        return list(itertools.islice(filtered, offset, offset + page_size))
+
+
+def _read_page(path: Path, offset: int, page_size: int) -> list[dict]:
+    # Sparse byte offsets are produced by the same Worker writing the JSONL.
+    # Historic previews without an index use the original safe linear reader.
+    row_base = 0
+    byte_pos = 0
+    index_file = _index_path(path)
+    if index_file.is_file():
+        try:
+            with index_file.open("r", encoding="utf-8") as index:
+                for line in index:
+                    raw_row, raw_pos = line.rstrip("\n").split("\t", 1)
+                    candidate_row, candidate_pos = int(raw_row), int(raw_pos)
+                    if candidate_row > offset:
+                        break
+                    if (candidate_row < row_base or candidate_row < 0
+                            or candidate_pos < byte_pos):
+                        raise ValueError("Invalid preview page index ordering")
+                    row_base, byte_pos = candidate_row, candidate_pos
+        except (OSError, ValueError):
+            # Index is only a speed hint; it must never influence correctness.
+            row_base, byte_pos = 0, 0
+    with path.open("r", encoding="utf-8") as stream:
+        if byte_pos:
+            stream.seek(byte_pos)
+        return [
+            json.loads(line) for line in
+            itertools.islice(stream, offset - row_base, offset - row_base + page_size)
+        ]
 
 
 def enqueue_media_preview(session_factory, settings: Settings, *, parent: str,
@@ -88,7 +163,10 @@ def enqueue_media_preview(session_factory, settings: Settings, *, parent: str,
 
 def get_media_preview(session_factory, settings: Settings, job_id: int, *,
                       page: int = 1, page_size: int = 25, skip_page: int = 1,
-                      skip_page_size: int = 25) -> dict:
+                      skip_page_size: int = 25,
+                      item_filter: Literal["all", "ready", "conflict"] = "all") -> dict:
+    if item_filter not in ("all", "ready", "conflict"):
+        raise ValueError("Invalid media-sort preview item filter")
     with session_factory() as session:
         job = session.get(WorkJob, job_id)
         if job is None or job.kind != PREVIEW_KIND:
@@ -116,7 +194,13 @@ def get_media_preview(session_factory, settings: Settings, job_id: int, *,
             raise ValueError("Completed media preview artifacts are missing; run a new preview")
         with summary_file.open("r", encoding="utf-8") as stream:
             summary = json.load(stream)
-        items = _read_page(items_file, (page - 1) * page_size, page_size)
+        if item_filter == "all":
+            items = _read_page(items_file, (page - 1) * page_size, page_size)
+        else:
+            items = _read_filtered_page(
+                items_file, item_filter=item_filter,
+                offset=(page - 1) * page_size, page_size=page_size,
+            )
         skipped = _read_page(skips_file, (skip_page - 1) * skip_page_size, skip_page_size)
 
     return {
@@ -125,12 +209,22 @@ def get_media_preview(session_factory, settings: Settings, job_id: int, *,
         "recursive": state.get("recursive", False),
         "smart_skip": state.get("smart_skip", True),
         "summary": summary, "items": items, "skipped_directories": skipped,
+        "item_filter": item_filter,
+        "item_total": (
+            None if summary is None
+            else int(summary["ready_count"] if item_filter == "ready"
+                     else summary["conflict_count"] if item_filter == "conflict"
+                     else summary["count"])
+        ),
         "page": page, "page_size": page_size, "skip_page": skip_page,
         "skip_page_size": skip_page_size,
     }
 
 
-def enqueue_media_plan(session_factory, settings: Settings, job_id: int) -> dict:
+def enqueue_media_plan(session_factory, settings: Settings, job_id: int, *,
+                       skip_conflicts: bool = False) -> dict:
+    if not isinstance(skip_conflicts, bool):
+        raise ValueError("skip_conflicts must be a boolean")
     with session_factory() as session:
         session.execute(text("BEGIN IMMEDIATE"))
         preview = session.get(WorkJob, job_id)
@@ -143,10 +237,19 @@ def enqueue_media_plan(session_factory, settings: Settings, job_id: int) -> dict
             raise ValueError("Preview results were removed; please preview again")
         with summary_file.open("r", encoding="utf-8") as stream:
             summary = json.load(stream)
-        if not 0 < int(summary.get("count", 0)) <= MAX_PLAN_ITEMS:
-            raise ValueError("No valid media files, or too many items for one Plan")
-        if int(summary.get("conflict_count", 0)) > 0:
-            raise ValueError("Preview contains conflicting paths; fix them first")
+        count = summary.get("count")
+        conflicting = summary.get("conflict_count")
+        ready = summary.get("ready_count")
+        if not all(isinstance(n, int) and not isinstance(n, bool) for n in (count, conflicting, ready)):
+            raise ValueError("Invalid media preview counts")
+        if count != ready + conflicting or not 0 <= conflicting <= count:
+            raise ValueError("Inconsistent media preview counts")
+        if not 0 < ready <= MAX_PLAN_ITEMS:
+            raise ValueError("No conflict-free media files to move, or too many items for one Plan")
+        if conflicting and not skip_conflicts:
+            raise ValueError(
+                f"有 {conflicting} 项冲突；请先查看冲突筛选，或明确选择跳过冲突后再生成 Plan"
+            )
         # A completed job is also returned to prevent duplicate plans from
         # browser retries or simultaneous clicks.
         previous = session.scalar(
@@ -161,7 +264,8 @@ def enqueue_media_plan(session_factory, settings: Settings, job_id: int) -> dict
             kind=GENERATE_KIND, status="queued",
             progress_current=0, progress_total=0,
             progress_message="等待 Worker 生成移动计划",
-            state_json=json.dumps({"preview_job_id": job_id}),
+            state_json=json.dumps({"preview_job_id": job_id,
+                                   "skip_conflicts": skip_conflicts}),
         )
         session.add(work)
         session.commit()
@@ -266,17 +370,41 @@ class MediaSortPreviewHandler(TaskHandler):
     def run(self, job: WorkJob, context: JobContext, settings: Settings) -> None:
         payload = json.loads(job.state_json or "{}")
         items_file, skipped_file, summary_file = _paths(settings, int(job.id))
-        for path in (items_file, skipped_file, summary_file):
+        items_index, skipped_index = _index_path(items_file), _index_path(skipped_file)
+        ready_index = _status_index_path(items_file, "ready")
+        conflict_index = _status_index_path(items_file, "conflict")
+        artifact_paths = (
+            items_file, skipped_file, summary_file, items_index,
+            skipped_index, ready_index, conflict_index,
+        )
+        for path in artifact_paths:
             path.unlink(missing_ok=True)
         try:
-            with _write_new(items_file) as items, _write_new(skipped_file) as skipped:
+            with (_write_new(items_file) as items, _write_new(skipped_file) as skipped,
+                  _write_new(items_index) as item_offsets, _write_new(skipped_index) as skip_offsets,
+                  _write_new_binary(ready_index) as ready_offsets,
+                  _write_new_binary(conflict_index) as conflict_offsets):
+                written_items = 0
+                written_skipped = 0
+
                 def _write_rows(batch: list[dict]) -> None:
+                    nonlocal written_items
                     for row in batch:
+                        position = items.tell()
+                        if written_items % PAGE_INDEX_STRIDE == 0:
+                            item_offsets.write(f"{written_items}\t{position}\n")
+                        offsets = conflict_offsets if row.get("conflict") else ready_offsets
+                        offsets.write(struct.pack("<Q", position))
                         items.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n")
+                        written_items += 1
 
                 def _write_skipped(batch: list[dict]) -> None:
+                    nonlocal written_skipped
                     for row in batch:
+                        if written_skipped % PAGE_INDEX_STRIDE == 0:
+                            skip_offsets.write(f"{written_skipped}\t{skipped.tell()}\n")
                         skipped.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n")
+                        written_skipped += 1
 
                 def _progress(facts: dict) -> None:
                     scanned = int(facts["scanned_entries"])
@@ -296,10 +424,9 @@ class MediaSortPreviewHandler(TaskHandler):
                     on_rows=_write_rows, on_skipped=_write_skipped,
                     on_progress=_progress, collect_items=False,
                 )
-                items.flush()
-                skipped.flush()
-                os.fsync(items.fileno())
-                os.fsync(skipped.fileno())
+                for stream in (items, skipped, item_offsets, skip_offsets, ready_offsets, conflict_offsets):
+                    stream.flush()
+                    os.fsync(stream.fileno())
             with _write_new(summary_file) as stream:
                 clean_summary = {key: value for key, value in summary.items()
                                  if key not in {"items", "skipped_directories"}}
@@ -311,7 +438,7 @@ class MediaSortPreviewHandler(TaskHandler):
                 progress_message=f"预览完成：{summary['count']:,} 个待移动文件，跳过 {summary['skipped_directory_count']:,} 个目录",
             )
         except BaseException:
-            for path in (items_file, skipped_file, summary_file):
+            for path in artifact_paths:
                 path.unlink(missing_ok=True)
             raise
 
@@ -335,32 +462,30 @@ class MediaSortPlanHandler(TaskHandler):
         with summary_file.open("r", encoding="utf-8") as stream:
             summary = json.load(stream)
         count = int(summary["count"])
-        if not 0 < count <= MAX_PLAN_ITEMS or summary["conflict_count"] != 0:
-            raise ValueError("Media sort preview is empty, conflicting or oversized")
+        conflicting = int(summary["conflict_count"])
+        ready = int(summary["ready_count"])
+        skip_conflicts = state.get("skip_conflicts") is True
+        if not 0 < ready <= MAX_PLAN_ITEMS or ready + conflicting != count:
+            raise ValueError("Media sort preview is empty or has invalid counts")
+        if conflicting > 0 and not skip_conflicts:
+            raise ValueError("Media sort preview has unresolved conflicts; explicit skip confirmation required")
 
-        context.checkpoint(progress_current=0, progress_message="读取预览结果")
-        rows: list[dict] = []
-        with items_file.open("r", encoding="utf-8") as stream:
-            for line in stream:
-                item = json.loads(line)
-                if item.get("conflict"):
-                    raise ValueError("A conflict was found in the preview")
-                rows.append({"operation": "move", "source": item["source"],
-                             "target": item["target"], "expected_size": item["expected_size"]})
-                if len(rows) % 500 == 0:
-                    context.checkpoint(progress_current=len(rows),
-                                       progress_message=f"读取文件 {len(rows):,}/{count:,}")
-        if len(rows) != count:
-            raise ValueError("Preview row count has changed")
-        context.checkpoint(progress_current=count,
-                           progress_message="正在保存 Move Plan（原文件尚未改动，写入阶段无法估算百分比）")
-        service = _worker_plan_service(settings, context)
-        plan = service.create_plan(
-            name=("媒体文件递归分类（每目录 P / V）" if summary.get("recursive")
-                  else "媒体文件分类（P / V）"),
-            kind="media-sort", items=rows,
-            metadata={"source": "media-sort", "preview_job_id": preview_job_id,
-                      "recursive": summary.get("recursive"), "smart_skip": summary.get("smart_skip")},
+        context.checkpoint(
+            progress_current=0,
+            progress_message=(
+                f"正在以安全事务生成 {ready:,} 项 Move Plan"
+                + (f"（跳过 {conflicting:,} 项冲突）" if conflicting else "")
+                + "，源文件不变"
+            ),
+        )
+        from app.batch.media_sort_bulk_plan import create_media_sort_bulk_plan
+
+        # Stream and validate every row inside one atomic SQLite transaction.
+        # No 300k-element Python/ORM list, no partially published draft Plan.
+        plan = create_media_sort_bulk_plan(
+            context.SessionLocal, settings,
+            items_file=items_file, summary=summary, preview_job_id=preview_job_id,
+            skip_conflicts=skip_conflicts,
         )
         with context.SessionLocal() as session:
             session.execute(text("BEGIN IMMEDIATE"))
@@ -369,8 +494,12 @@ class MediaSortPlanHandler(TaskHandler):
             current["plan_id"] = int(plan.id)
             tracked.state_json = json.dumps(current)
             session.commit()
-        context.checkpoint(progress_current=count, progress_total=count,
-                           progress_message=f"已创建移动计划 #{plan.id}，等待 Freeze → Validate → Execute")
+        context.checkpoint(progress_current=ready, progress_total=ready,
+                           progress_message=(
+                               f"已创建移动计划 #{plan.id}（{ready:,} 项）"
+                               + (f"，跳过冲突 {conflicting:,} 项" if conflicting else "")
+                               + "；等待 Freeze → Validate → Execute"
+                           ))
 
 
 @register_handler
@@ -398,13 +527,27 @@ class MediaSortPlanStageHandler(TaskHandler):
         verb = "冻结" if stage == "freeze" else "校验"
         context.checkpoint(progress_current=0, progress_total=count,
                            progress_message=f"开始{verb} {count:,} 个文件")
+        last_check_at = time.monotonic()
+        last_checked_item = 0
+
         def _progress(current: int, total: int) -> None:
-            # Avoid one SQLite checkpoint per item on NAS network filesystems.
-            if current == 1 or current % 25 == 0 or current == total:
+            nonlocal last_check_at, last_checked_item
+            # A DB commit for every 25 files is expensive on NAS metadata
+            # storage. Maintain a bounded cancellation/heartbeat interval:
+            # check at most 250 items or ~0.75 seconds apart.
+            now = time.monotonic()
+            if (current == 1 or current == total
+                    or current - last_checked_item >= 250
+                    or now - last_check_at >= 0.75):
+                # The service reports *before* examining this item. Don't
+                # display 100% until the last item and DB commit both succeed.
+                processed = max(0, current - 1)
                 context.checkpoint(
-                    progress_current=current, progress_total=total,
-                    progress_message=f"{verb}文件 {current:,}/{total:,}",
+                    progress_current=processed, progress_total=total,
+                    progress_message=f"正在{verb}文件 {current:,}/{total:,}",
                 )
+                last_check_at = now
+                last_checked_item = current
 
         if stage == "freeze":
             service.freeze_plan(plan_id, progress_callback=_progress)

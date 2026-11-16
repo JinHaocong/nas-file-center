@@ -463,6 +463,11 @@ class MediaSortPreviewRequest(BaseModel):
     smart_skip: bool = Field(default=True, strict=True)
 
 
+class MediaSortPlanRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    skip_conflicts: bool = Field(default=False, strict=True)
+
+
 class ImmediateFileRenamePreviewRequest(ImmediateDirectoryRenamePreviewRequest):
     preserve_extension: bool = True
 
@@ -1429,6 +1434,7 @@ def media_sort_preview_page(
     page_size: int = Query(default=25, ge=1, le=100),
     skip_page: int = Query(default=1, ge=1),
     skip_page_size: int = Query(default=25, ge=1, le=100),
+    item_filter: Literal["all", "ready", "conflict"] = "all",
 ):
     from app.batch.media_sort_jobs import get_media_preview
     try:
@@ -1436,6 +1442,7 @@ def media_sort_preview_page(
             request.app.state.service.SessionLocal, request.app.state.settings,
             job_id, page=page, page_size=page_size,
             skip_page=skip_page, skip_page_size=skip_page_size,
+            item_filter=item_filter,
         )
     except KeyError as exc:
         raise HTTPException(404, "Preview task not found") from exc
@@ -1444,11 +1451,15 @@ def media_sort_preview_page(
 
 
 @router.post("/media-sort/previews/{job_id}/plan")
-def media_sort_generate_plan(request: Request, job_id: int):
+def media_sort_generate_plan(
+    request: Request, job_id: int,
+    payload: MediaSortPlanRequest | None = None,
+):
     from app.batch.media_sort_jobs import enqueue_media_plan
     try:
         return enqueue_media_plan(
-            request.app.state.service.SessionLocal, request.app.state.settings, job_id
+            request.app.state.service.SessionLocal, request.app.state.settings, job_id,
+            skip_conflicts=payload.skip_conflicts if payload is not None else False,
         )
     except KeyError as exc:
         raise HTTPException(404, "Preview task not found") from exc

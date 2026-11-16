@@ -181,7 +181,8 @@ describe('P/V media sort preview to Move Plan integration', () => {
     assert.match(editor, /mediaSortApi\.startPreview/);
     assert.match(editor, /await previewMutation\.mutateAsync\(\{/);
     assert.match(editor, /parent: selected, recursive, smart_skip: smartSkip/);
-    assert.match(editor, /await planMutation\.mutateAsync\(previewJobId\)/);
+    assert.match(editor, /await planMutation\.mutateAsync\(\{/);
+    assert.match(editor, /jobId: previewJobId, skipConflicts/);
     assert.match(editor, /previewKeyRef\.current === previewKey\(directory, recursive, smartSkip\)/);
     assert.match(editor, /refetchInterval/);
     assert.match(editor, /<TaskProgress/);
@@ -192,6 +193,16 @@ describe('P/V media sort preview to Move Plan integration', () => {
     assert.match(editor, /previewResponse\?\.items/);
     assert.match(editor, /previewResponse\?\.skipped_directories/);
     assert.match(editor, /summary\.skipped_directory_count/);
+    assert.match(editor, /const \[itemFilter, setItemFilter\] = useState<MediaSortItemFilter>\('all'\)/);
+    assert.match(editor, /const \[skipConflicts, setSkipConflicts\] = useState\(false\)/);
+    assert.match(editor, /setSkipConflicts\(false\)/);
+    assert.match(editor, /selectItemFilter\('conflict'\)/);
+    assert.match(editor, /itemFilter/);
+    assert.match(editor, /previewResponse\?\.item_total/);
+    assert.match(editor, /只看冲突/);
+    assert.match(editor, /确认跳过冲突项继续生成 Plan/);
+    assert.match(editor, /冲突原因/);
+    assert.match(editor, /summary\.ready_count > 0/);
     assert.match(editor, /<ConsolePagination/);
     assert.match(editor, /const \[smartSkip, setSmartSkip\] = useState\(true\)/);
     assert.match(editor, /const \[recursive, setRecursive\] = useState\(false\)/);
@@ -213,6 +224,8 @@ describe('P/V media sort preview to Move Plan integration', () => {
       'startPlanStage',
       'getPlanStage',
       'smart_skip: boolean',
+      'item_filter: itemFilter',
+      'skip_conflicts: skipConflicts',
     ]) assert.ok(api.includes(token), token);
     for (const token of [
       'mediaSortApi.startPlanStage',
@@ -221,12 +234,15 @@ describe('P/V media sort preview to Move Plan integration', () => {
       '文件执行进度',
       '冻结进度',
       '实时校验进度',
+      'skipped_conflict_count',
+      '冲突项已从执行计划中排除',
       'refetchInterval',
       '<TaskProgress',
     ]) assert.ok(plan.includes(token), token);
     for (const selector of [
       'nfc-v2-batch-media-stats', 'nfc-v2-batch-media-table',
       'nfc-v2-batch-media-recursive', 'nfc-v2-media-scan-progress',
+      'nfc-v2-batch-media-filter', 'nfc-v2-batch-media-conflict-optin',
     ]) assert.ok(css.includes(selector), selector);
   });
 });
