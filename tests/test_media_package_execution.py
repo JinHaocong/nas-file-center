@@ -414,3 +414,74 @@ def test_other_duplicate_names_are_suffixed_without_loss(tmp_path):
     ]
     assert (folder / "notes.txt").read_bytes() == b"note_a"
     assert (folder / "notes__dup002.txt").read_bytes() == b"note_b"
+
+
+def test_nas_directory_inode_drift_after_staging_uses_original_frozen_file_proof(tmp_path, monkeypatch):
+    """Only trusted frozen-stage files can authorize an inode-drift publication."""
+    root, package = example(tmp_path)
+    nested = package / "nested"
+    nested.mkdir()
+    for i in range(201):
+        (nested / f"{i:03d}.mp4").write_bytes(f"movie-{i}".encode())
+    manifest = manifest_for(root, package, job_id=789)
+    publish = executor._publish_group
+    hit = {"count": 0}
+
+    def virtual_inode_shift(frozen, index, lease_fence):
+        hit["count"] += 1
+        # Simulate NAS/FUSE changing the visible package directory inode
+        # AFTER files were staged, while the original file IDs remain valid.
+        frozen["package_ino"] = -1
+        return publish(frozen, index, lease_fence)
+
+    monkeypatch.setattr(executor, "_publish_group", virtual_inode_shift)
+    outcome = executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+    assert hit["count"] == 2
+    assert outcome["files_moved"] == 201
+    assert (package / manifest["groups"][0]["final"] / "001.mp4").read_bytes() == b"movie-0"
+    assert sorted(p.name for p in package.iterdir()) == [
+        group["final"] for group in manifest["groups"]
+    ]
+    # The same frozen manifest remains resumable with a changed directory ID.
+    again = executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+    assert again["files_reconciled"] == 201
+    assert not nested.exists()
+
+
+def test_nas_inode_drift_without_stage_evidence_refuses_initial_mutation(tmp_path):
+    root, package = example(tmp_path)
+    nested = package / "clips"
+    nested.mkdir()
+    (nested / "movie.mp4").write_bytes(b"original")
+    manifest = manifest_for(root, package, job_id=790)
+    manifest["package_ino"] = -1
+    with pytest.raises(executor.MediaPackageExecutionConflict,
+                       match="without trusted frozen files"):
+        executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+    assert (nested / "movie.mp4").read_bytes() == b"original"
+    assert not any(p.name.startswith(".nfc-") for p in package.iterdir())
+
+
+def test_nas_inode_drift_rejects_foreign_file_in_recovery_stage(tmp_path, monkeypatch):
+    root, package = example(tmp_path)
+    nested = package / "clips"
+    nested.mkdir()
+    for i in range(201):
+        (nested / f"{i:03d}.jpg").write_bytes(b"x")
+    manifest = manifest_for(root, package, job_id=791)
+    publish = executor._publish_group
+
+    def crash_before_publish(*args, **kwargs):
+        raise RuntimeError("crash after staging")
+
+    monkeypatch.setattr(executor, "_publish_group", crash_before_publish)
+    with pytest.raises(RuntimeError, match="crash after staging"):
+        executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+    monkeypatch.setattr(executor, "_publish_group", publish)
+    stage = package / manifest["groups"][0]["stage"]
+    (stage / "foreign.txt").write_bytes(b"unexpected")
+    manifest["package_ino"] = -1
+    with pytest.raises(executor.MediaPackageExecutionConflict, match="Unknown"):
+        executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+    assert (stage / "foreign.txt").read_bytes() == b"unexpected"
+    assert not (package / manifest["groups"][0]["final"]).exists()

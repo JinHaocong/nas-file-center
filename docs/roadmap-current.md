@@ -1,7 +1,7 @@
 # NAS File Center — Current Roadmap
 
 Status: CANONICAL CURRENT ROADMAP  
-Release authority: **v1.4.1**  
+Release authority: **v1.4.2**
 Source authority: **default branch `main`**  
 Last reconciled: 2026-09-30
 
@@ -20,7 +20,7 @@ release/package/image metadata explicitly promotes them.
 
 ## 2. Current release baseline
 
-The current product, Python package and Docker image version is **1.4.1**.
+The current product, Python package and Docker image version is **1.4.2**.
 
 Current runtime architecture remains:
 

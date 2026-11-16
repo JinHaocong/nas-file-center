@@ -108,6 +108,10 @@ export const media_packageApi = {
     ),
   getExecution: (jobId: number) =>
     api.get<MediaPackageExecuteStatus>(`/api/media_package/executions/${jobId}`),
+  recoverExecution: (failedJobId: number, confirmation: string) =>
+    api.post<{ job_id: number; status: MediaPackageJobStatus; recovery_of_job_id: number }>(
+      `/api/media_package/executions/${failedJobId}/recover`, { confirmation },
+    ),
   getPreview: (jobId: number, page: number = 1, pageSize: number = 25) => {
     const query = new URLSearchParams({
       page: String(page), page_size: String(pageSize),

@@ -8,6 +8,7 @@ import { sanitizeContext } from '../../utils/sanitize';
 import { calculateTaskEta } from './task_utils';
 import { TaskActionBar } from './TaskActionBar';
 import { TaskDeleteButton } from './TaskDeleteButton';
+import { MediaPackageRecoveryPanel } from './MediaPackageRecoveryPanel';
 import { ConsoleSheet } from '../ui/ConsoleSheet';
 import { StatusBadge } from '../ui/StatusBadge';
 
@@ -148,11 +149,21 @@ export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose, onVie
           <section className="nfc-overlay-section">
             <header className="nfc-overlay-section-header nfc-overlay-section-header-actions">
               <div><span>Controls</span><h3>任务操作</h3></div>
-              <TaskDeleteButton key={task.id} task={task} size="small" type="default"
-                danger onSuccess={onClose} />
+              {!(task.job_type === 'media_package-package-execute' && task.status === 'failed') && (
+                <TaskDeleteButton key={task.id} task={task} size="small" type="default"
+                  danger onSuccess={onClose} />
+              )}
             </header>
             <TaskActionBar key={task.id} task={task} onViewTask={onViewTask} />
           </section>
+
+          {task.job_type === 'media_package-package-execute' &&
+            task.status === 'failed' &&
+            task.error_code === 'EXECUTION_ERROR' &&
+            task.error === 'Package directory changed before publish' && (
+              <MediaPackageRecoveryPanel key={task.id} failedJobId={task.id}
+                onViewTask={onViewTask} />
+            )}
 
           <section className="nfc-overlay-section">
             <header className="nfc-overlay-section-header">

@@ -1464,6 +1464,24 @@ def start_media_package_execution(
         raise HTTPException(409, str(exc)) from exc
 
 
+@router.post("/media_package/executions/{job_id}/recover")
+def recover_failed_media_package_execution(
+    request: Request, job_id: int, payload: MediaPackageExecuteRequest,
+    _user: User = Depends(require_admin_user),
+):
+    """One-shot, explicit reconciliation of a specific failed frozen execution."""
+    from app.batch.media_package_execute_jobs import enqueue_media_package_recovery
+    try:
+        return enqueue_media_package_recovery(
+            request.app.state.service.SessionLocal, request.app.state.settings,
+            failed_job_id=job_id, confirmation=payload.confirmation,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, "Failed media package execution task not found") from exc
+    except (ValueError, PermissionError, OSError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
 @router.get("/media_package/executions/{job_id}")
 def get_media_package_execution_status(
     request: Request, job_id: int,
