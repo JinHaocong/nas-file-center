@@ -28,6 +28,7 @@ GENERATE_KIND = "media-sort-plan"
 STAGE_KIND = "media-sort-plan-stage"
 ACTIVE_STATUSES = ("queued", "running", "paused", "cancel_requested")
 MAX_PLAN_ITEMS = 300_000
+PAGE_INDEX_STRIDE = 256  # at most 255 JSONL rows skipped for deep pages
 
 
 def _folder(settings: Settings) -> Path:
@@ -52,9 +53,38 @@ def _write_new(path: Path):
     return os.fdopen(fd, "w", encoding="utf-8")
 
 
+def _index_path(path: Path) -> Path:
+    return path.with_name(path.name + ".idx")
+
+
 def _read_page(path: Path, offset: int, page_size: int) -> list[dict]:
+    # Sparse byte offsets are produced by the same Worker writing the JSONL.
+    # Historic previews without an index use the original safe linear reader.
+    row_base = 0
+    byte_pos = 0
+    index_file = _index_path(path)
+    if index_file.is_file():
+        try:
+            with index_file.open("r", encoding="utf-8") as index:
+                for line in index:
+                    raw_row, raw_pos = line.rstrip("\n").split("\t", 1)
+                    candidate_row, candidate_pos = int(raw_row), int(raw_pos)
+                    if candidate_row > offset:
+                        break
+                    if (candidate_row < row_base or candidate_row < 0
+                            or candidate_pos < byte_pos):
+                        raise ValueError("Invalid preview page index ordering")
+                    row_base, byte_pos = candidate_row, candidate_pos
+        except (OSError, ValueError):
+            # Index is only a speed hint; it must never influence correctness.
+            row_base, byte_pos = 0, 0
     with path.open("r", encoding="utf-8") as stream:
-        return [json.loads(line) for line in itertools.islice(stream, offset, offset + page_size)]
+        if byte_pos:
+            stream.seek(byte_pos)
+        return [
+            json.loads(line) for line in
+            itertools.islice(stream, offset - row_base, offset - row_base + page_size)
+        ]
 
 
 def enqueue_media_preview(session_factory, settings: Settings, *, parent: str,
@@ -267,17 +297,30 @@ class MediaSortPreviewHandler(TaskHandler):
     def run(self, job: WorkJob, context: JobContext, settings: Settings) -> None:
         payload = json.loads(job.state_json or "{}")
         items_file, skipped_file, summary_file = _paths(settings, int(job.id))
-        for path in (items_file, skipped_file, summary_file):
+        items_index, skipped_index = _index_path(items_file), _index_path(skipped_file)
+        for path in (items_file, skipped_file, summary_file, items_index, skipped_index):
             path.unlink(missing_ok=True)
         try:
-            with _write_new(items_file) as items, _write_new(skipped_file) as skipped:
+            with (_write_new(items_file) as items, _write_new(skipped_file) as skipped,
+                  _write_new(items_index) as item_offsets, _write_new(skipped_index) as skip_offsets):
+                written_items = 0
+                written_skipped = 0
+
                 def _write_rows(batch: list[dict]) -> None:
+                    nonlocal written_items
                     for row in batch:
+                        if written_items % PAGE_INDEX_STRIDE == 0:
+                            item_offsets.write(f"{written_items}\t{items.tell()}\n")
                         items.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n")
+                        written_items += 1
 
                 def _write_skipped(batch: list[dict]) -> None:
+                    nonlocal written_skipped
                     for row in batch:
+                        if written_skipped % PAGE_INDEX_STRIDE == 0:
+                            skip_offsets.write(f"{written_skipped}\t{skipped.tell()}\n")
                         skipped.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n")
+                        written_skipped += 1
 
                 def _progress(facts: dict) -> None:
                     scanned = int(facts["scanned_entries"])
@@ -297,10 +340,9 @@ class MediaSortPreviewHandler(TaskHandler):
                     on_rows=_write_rows, on_skipped=_write_skipped,
                     on_progress=_progress, collect_items=False,
                 )
-                items.flush()
-                skipped.flush()
-                os.fsync(items.fileno())
-                os.fsync(skipped.fileno())
+                for stream in (items, skipped, item_offsets, skip_offsets):
+                    stream.flush()
+                    os.fsync(stream.fileno())
             with _write_new(summary_file) as stream:
                 clean_summary = {key: value for key, value in summary.items()
                                  if key not in {"items", "skipped_directories"}}
@@ -312,7 +354,7 @@ class MediaSortPreviewHandler(TaskHandler):
                 progress_message=f"预览完成：{summary['count']:,} 个待移动文件，跳过 {summary['skipped_directory_count']:,} 个目录",
             )
         except BaseException:
-            for path in (items_file, skipped_file, summary_file):
+            for path in (items_file, skipped_file, summary_file, items_index, skipped_index):
                 path.unlink(missing_ok=True)
             raise
 
