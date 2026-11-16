@@ -189,8 +189,8 @@ describe('P/V media sort preview to Move Plan integration', () => {
     assert.match(editor, /扫描目录/);
     assert.match(editor, /current_directory/);
     assert.match(editor, /previewResponse\.progress\.candidate_count/);
-    assert.match(editor, /previewResponse\.items/);
-    assert.match(editor, /previewResponse\.skipped_directories/);
+    assert.match(editor, /previewResponse\?\.items/);
+    assert.match(editor, /previewResponse\?\.skipped_directories/);
     assert.match(editor, /summary\.skipped_directory_count/);
     assert.match(editor, /<ConsolePagination/);
     assert.match(editor, /const \[smartSkip, setSmartSkip\] = useState\(true\)/);
