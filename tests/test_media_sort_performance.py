@@ -168,7 +168,7 @@ def test_bulk_plan_rolls_back_all_rows_on_validation_failure(tmp_path, fault):
     settings = _settings(tmp_path)
     root = settings.data_mount
     (root / "one.jpg").write_bytes(b"one")
-    (root / "two.mp4").write_bytes(b"two")
+    (root / "two.jpg").write_bytes(b"two")
     service = FileCenterService(settings)
     rows = preview_media_sort(
         root, allowed_roots=settings.allowed_roots, smart_skip=False,
@@ -178,7 +178,7 @@ def test_bulk_plan_rolls_back_all_rows_on_validation_failure(tmp_path, fault):
         (root / "one.jpg").unlink()
     elif fault == "symlink_source":
         (root / "one.jpg").unlink()
-        (root / "one.jpg").symlink_to(root / "two.mp4")
+        (root / "one.jpg").symlink_to(root / "two.jpg")
     elif fault == "wrong_kind":
         rows[0]["media_kind"] = "video"
     elif fault == "outside_root":
