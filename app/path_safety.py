@@ -73,6 +73,8 @@ def _preserves_existing_media_basename(
         if (not stat.S_ISREG(source_stat.st_mode)
                 or source_stat.st_dev != parent_stat.st_dev):
             return False
+        if target.parent.is_symlink():
+            return False
         if target.parent.exists():
             target_parent_stat = os.lstat(target.parent)
             if (not stat.S_ISDIR(target_parent_stat.st_mode)
