@@ -14,6 +14,7 @@ import stat
 from pathlib import Path
 
 from app.batch.file_rename import _open_directory_nofollow
+from app.batch.media_package_naming import allocate_names
 from app.filters.media_types import get_media_type
 from app.path_safety import require_allowed_path, require_unreserved_path
 
@@ -196,6 +197,8 @@ def _walk_package(package: Path):
         try:
             with os.scandir(fd) as it:
                 for entry in it:
+                    if entry.name.casefold().startswith(".nfc-"):
+                        raise ValueError(f"Reserved organizer workspace requires recovery: {directory / entry.name}")
                     if entry.is_symlink():
                         raise ValueError(f"Symlink requires manual review: {directory / entry.name}")
                     if entry.is_dir(follow_symlinks=False):
@@ -262,46 +265,55 @@ def preview_media_package_package(package: str | Path, *, media_package_root: st
             "input_fingerprint": input_fingerprint,
             "reason": "empty", "total_files": 0, "totals": totals,
             "groups": [], "conflicts": [], "sample_moves": [],
-            "total_proposals": 0, "needed_moves": 0, "truncated": False,
+            "total_proposals": 0, "needed_moves": 0,
+            "renamed_count": 0, "resolved_collision_count": 0,
+            "truncated": False,
             "read_only": True,
             **({"_snapshot_items": items} if include_items else {}),
         }
 
-    # Homogeneous packages have two fixed modes. <=200 files: flatten
-    # nested files to the package root. >200 files: use P/V size-labelled
-    # buckets, even when all files are already flat. No configuration toggle.
+    # Homogeneous packages <=200 must be flattened *and* renumbered.
+    # To avoid a root-level 001/002 rename cycle, the frozen executor stages
+    # every file before publishing any numbered basename.
     if (len(items) <= MAX_FILES_PER_GROUP and totals["Other"] == 0
             and (totals["P"] == 0 or totals["V"] == 0)):
         ordered = sorted(items, key=lambda row: (
             os.path.relpath(row["path"], source).casefold(),
             os.path.relpath(row["path"], source),
         ))
-        by_name: dict[str, list[dict]] = {}
+        new_names, _ = allocate_names(ordered, kind="flat")
+        rename_count = sum(row["name"] != name
+                           for row, name in zip(ordered, new_names))
+        seen_original = set()
+        collision_count = 0
         for row in ordered:
-            by_name.setdefault(row["name"].casefold(), []).append(row)
-        conflicts: list[dict] = []
-        for rows in by_name.values():
-            if len(rows) > 1:
-                conflicts.append({
-                    "reason": "flatten_filename_collision",
-                    "sources": [item["path"] for item in rows],
-                    "target": str(source / rows[0]["name"]),
-                })
-        moves = [
-            {"source": row["path"], "target": str(source / row["name"]),
+            key = row["name"].casefold()
+            collision_count += key in seen_original
+            seen_original.add(key)
+        needs_work = any(
+            row["path"] != str(source / name)
+            for row, name in zip(ordered, new_names)
+        )
+        # The execution phase must stage ALL files, including already-numbered
+        # root entries that currently occupy another file's desired target.
+        planned = [
+            {"source": row["path"], "target": str(source / name),
+             "source_name": row["name"], "target_name": name,
+             "original_relative_path": os.path.relpath(row["path"], source),
              "bytes": row["bytes"], "kind": row["kind"]}
-            for row in ordered
-            if Path(row["path"]).parent != source
-        ]
+            for row, name in zip(ordered, new_names)
+        ] if needs_work else []
         return {
             "package": str(source),
             "input_fingerprint": input_fingerprint,
-            "status": "blocked" if conflicts else "ready" if moves else "skipped",
-            "reason": None if moves else "already_flat",
+            "status": "ready" if needs_work else "skipped",
+            "reason": None if needs_work else "already_flat_numbered",
             "total_files": len(items), "totals": totals, "groups": [],
-            "conflicts": conflicts, "sample_moves": moves[:max_rows],
-            "total_proposals": len(moves), "needed_moves": len(moves),
-            "truncated": len(moves) > max_rows,
+            "conflicts": [], "sample_moves": planned[:max_rows],
+            "total_proposals": len(planned), "needed_moves": len(planned),
+            "renamed_count": rename_count,
+            "resolved_collision_count": collision_count,
+            "truncated": len(planned) > max_rows,
             "read_only": True,
             "operation": "flatten_pure_media",
             **({"_snapshot_items": items} if include_items else {}),
@@ -316,6 +328,8 @@ def preview_media_package_package(package: str | Path, *, media_package_root: st
     sample = []
     planned = 0
     needed_moves = 0
+    renamed_count = 0
+    resolved_collision_count = 0
     observed = {}
     for item in items:
         kind = item["kind"]
@@ -367,19 +381,24 @@ def preview_media_package_package(package: str | Path, *, media_package_root: st
                 # Existing destination with incoming files requires a guarded
                 # merge/execution policy; do not silently overwrite.
                 conflicts.append({"directory": str(dest), "reason": "target_directory_exists"})
-            # An old P/V folder or another numbered bucket with a different
-            # capacity label is expected during migration; not an error until
-            # it is treated as a target by a protected executor.
-            seen_names = set()
-            for row in chunk:
-                candidate = row["name"]
-                folded = candidate.casefold()
-                if folded in seen_names:
-                    conflicts.append({"source": row["path"], "reason": "duplicate_filename_in_bucket"})
-                seen_names.add(folded)
+            assigned, automatic_other = allocate_names(chunk, kind=kind)
+            seen_original = set()
+            resolved_collision_count += automatic_other
+            for row, candidate in zip(chunk, assigned):
+                # Numbering makes duplicate original basenames harmless.
+                # Report how many collisions were avoided, without merging.
+                if kind in ("P", "V"):
+                    folded = row["name"].casefold()
+                    resolved_collision_count += folded in seen_original
+                    seen_original.add(folded)
+                renamed_count += row["name"] != candidate
                 if len(sample) < max_rows:
-                    sample.append({"source": row["path"], "target": str(dest / candidate),
-                                   "bytes": row["bytes"], "kind": kind})
+                    sample.append({
+                        "source": row["path"], "target": str(dest / candidate),
+                        "source_name": row["name"], "target_name": candidate,
+                        "original_relative_path": os.path.relpath(row["path"], source),
+                        "bytes": row["bytes"], "kind": kind,
+                    })
                 planned += 1
                 if row["path"] != str(dest / candidate):
                     needed_moves += 1
@@ -394,6 +413,8 @@ def preview_media_package_package(package: str | Path, *, media_package_root: st
         "sample_moves": sample,
         "total_proposals": planned,
         "needed_moves": needed_moves,
+        "renamed_count": renamed_count,
+        "resolved_collision_count": resolved_collision_count,
         "truncated": len(sample) < planned,
         "read_only": True,
         "operation": ("bucket_pure_media" if totals["Other"] == 0
