@@ -284,3 +284,24 @@ def test_symlink_parent_replacement_does_not_escape_package(tmp_path):
         executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
     assert (other / "01.jpg").read_bytes() == b"image"
     assert not (package / "01.jpg").exists()
+
+
+def test_existing_plain_p_and_v_are_migrated_into_count_size_folders(tmp_path):
+    root, package = example(tmp_path)
+    legacy_p = package / "P"
+    legacy_v = package / "V"
+    legacy_p.mkdir()
+    legacy_v.mkdir()
+    (legacy_p / "001.jpg").write_bytes(b"image")
+    (legacy_v / "001.mp4").write_bytes(b"video")
+    manifest = manifest_for(root, package, job_id=532)
+    assert [g["final"] for g in manifest["groups"]] == [
+        "P [1 5B]", "V [1 5B]",
+    ]
+    result = executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+    assert result["files_moved"] == 2
+    assert result["empty_dirs_removed"] == 2
+    assert not legacy_p.exists()
+    assert not legacy_v.exists()
+    assert (package / "P [1 5B]" / "001.jpg").read_bytes() == b"image"
+    assert (package / "V [1 5B]" / "001.mp4").read_bytes() == b"video"
