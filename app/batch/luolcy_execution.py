@@ -129,14 +129,14 @@ def prepare_luolcy_manifest(package: Path, *, luolcy_root: Path,
             row["kind"], os.path.relpath(row["path"], source).casefold(),
             os.path.relpath(row["path"], source),
         ))
+        by_kind = {kind: [item for item in items if item["kind"] == kind]
+                   for kind in ("P", "V", "Other")}
+        offsets = {"P": 0, "V": 0, "Other": 0}
         for idx, group in enumerate(fresh["groups"]):
             kind = group["kind"]
-            relevant = [item for item in items if item["kind"] == kind]
-            group_number = len([prev for prev in fresh["groups"][:idx]
-                                if prev["kind"] == kind])
-            segment = (relevant[group_number * MAX_FILES_PER_GROUP:
-                                (group_number + 1) * MAX_FILES_PER_GROUP]
-                       if kind != "Other" else relevant)
+            start = offsets[kind]
+            segment = by_kind[kind][start:start + int(group["count"])]
+            offsets[kind] = start + len(segment)
             if not segment or len(segment) != group["count"] or sum(
                 item["bytes"] for item in segment
             ) != group["bytes"]:
@@ -145,7 +145,7 @@ def prepare_luolcy_manifest(package: Path, *, luolcy_root: Path,
             final = source / group["name"]
             groups.append({
                 "stage": stage, "final": group["name"], "count": len(segment),
-                "bytes": group["bytes"], "kind": kind,
+                "bytes": group["bytes"], "kind": kind, "move_start": len(moves),
             })
             for item in segment:
                 target = source / stage / item["name"]
@@ -240,16 +240,13 @@ def _move_one(move: dict, *, lease_fence: Callable[[], None]) -> str:
         if src_stat is None:
             return "resumed"
         _check_file(src_stat, expected, src)
-        # A COMPAT hardlink+unlink may have been interrupted after publication.
-        lease_fence()
-        fd = _open_folder(src.parent)
-        try:
-            live = os.stat(src.name, dir_fd=fd, follow_symlinks=False)
-            _check_file(live, expected, src)
-            os.unlink(src.name, dir_fd=fd)
-        finally:
-            os.close(fd)
-        return "recovered_link"
+        # A source and target with identical inode can be an interrupted
+        # COMPAT hardlink operation, but it can also be a pre-existing alias.
+        # Without an independently committed per-file publication intent,
+        # NEVER unlink a source in this ambiguous state. Require review.
+        raise LuolcyExecutionConflict(
+            f"Both source and destination exist; manual review: {src}"
+        )
 
     src_fd = _open_folder(src.parent)
     try:
@@ -289,7 +286,9 @@ def _move_one(move: dict, *, lease_fence: Callable[[], None]) -> str:
 
 
 def _group_files(manifest: dict, group_index: int) -> list[dict]:
-    return [item for item in manifest["moves"] if item["group"] == group_index]
+    group = manifest["groups"][group_index]
+    start = group["move_start"]
+    return manifest["moves"][start:start + group["count"]]
 
 
 def _verify_group_contents(manifest: dict, group_index: int, directory: Path) -> None:
@@ -331,6 +330,19 @@ def _ensure_staging(manifest: dict, group_index: int, lease_fence: Callable[[], 
         fd = _open_folder(stage)
         try:
             _check_directory(os.fstat(fd), stage, manifest["package_dev"])
+            # A pre-existing staging name cannot be trusted just because it
+            # looks like a prior Worker run. Validate every existing entry.
+            expected = {Path(row["target"]).name.casefold(): row["identity"]
+                        for row in _group_files(manifest, group_index)}
+            seen = set()
+            with os.scandir(fd) as entries:
+                for entry in entries:
+                    folded = entry.name.casefold()
+                    if folded in seen or folded not in expected:
+                        raise LuolcyExecutionConflict("Foreign entry in existing stage")
+                    seen.add(folded)
+                    _check_file(entry.stat(follow_symlinks=False), expected[folded],
+                                stage / entry.name)
         finally:
             os.close(fd)
         return
