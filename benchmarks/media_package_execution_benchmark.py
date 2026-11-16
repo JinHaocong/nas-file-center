@@ -1,4 +1,4 @@
-"""Temporary-files-only benchmark for Luolcy execution engine.
+"""Temporary-files-only benchmark for MediaPackage execution engine.
 
 No production NAS path is accessed. This measures unleased filesystem engine
 cost; Worker lease/database and real NAS storage latency are excluded.
@@ -12,15 +12,15 @@ import time
 import tracemalloc
 from pathlib import Path
 
-from app.batch.luolcy_organizer import preview_luolcy_package
-from app.batch.luolcy_execution import (
-    execute_frozen_manifest, prepare_luolcy_manifest,
+from app.batch.media_package_organizer import preview_media_package_package
+from app.batch.media_package_execution import (
+    execute_frozen_manifest, prepare_media_package_manifest,
 )
 
 
 def run(files: int) -> dict:
-    with tempfile.TemporaryDirectory(prefix="luolcy-execute-bench-") as temp:
-        root = Path(temp) / "data" / "Else" / "Luolcy"
+    with tempfile.TemporaryDirectory(prefix="media_package-execute-bench-") as temp:
+        root = Path(temp) / "data" / "Else" / "Collection"
         package = root / "2611" / "261115" / "benchmark" / "New1GB"
         nested = package / "video-source"
         nested.mkdir(parents=True)
@@ -29,11 +29,11 @@ def run(files: int) -> dict:
 
         tracemalloc.start()
         started = time.perf_counter()
-        preview = preview_luolcy_package(
-            package, luolcy_root=root, allowed_roots=[root.parent.parent],
+        preview = preview_media_package_package(
+            package, media_package_root=root, allowed_roots=[root.parent.parent],
         )
-        manifest = prepare_luolcy_manifest(
-            package, luolcy_root=root, allowed_roots=[root.parent.parent],
+        manifest = prepare_media_package_manifest(
+            package, media_package_root=root, allowed_roots=[root.parent.parent],
             quarantine_root=None, preview_record=preview, job_id=201,
         )
         planned_at = time.perf_counter()

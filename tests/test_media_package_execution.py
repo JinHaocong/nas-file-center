@@ -1,14 +1,14 @@
-"""Real filesystem Luolcy move tests use only pytest temporary directories."""
+"""Real filesystem MediaPackage move tests use only pytest temporary directories."""
 from pathlib import Path
 
 import pytest
 
-from app.batch.luolcy_organizer import preview_luolcy_package
-from app.batch import luolcy_execution as executor
+from app.batch.media_package_organizer import preview_media_package_package
+from app.batch import media_package_execution as executor
 
 
 def example(tmp_path):
-    root = tmp_path / "data" / "Else" / "Luolcy"
+    root = tmp_path / "data" / "Else" / "Collection"
     package = root / "2611" / "261115" / "疑心病" / "New 1432.1MB"
     package.mkdir(parents=True)
     return root, package
@@ -16,12 +16,12 @@ def example(tmp_path):
 
 def manifest_for(root, package, job_id=521):
     roots = [root.parent.parent]
-    preview = preview_luolcy_package(
-        package, luolcy_root=root, allowed_roots=roots,
+    preview = preview_media_package_package(
+        package, media_package_root=root, allowed_roots=roots,
     )
     assert preview["status"] == "ready", preview
-    manifest = executor.prepare_luolcy_manifest(
-        package, luolcy_root=root, allowed_roots=roots,
+    manifest = executor.prepare_media_package_manifest(
+        package, media_package_root=root, allowed_roots=roots,
         quarantine_root=None, preview_record=preview, job_id=job_id,
     )
     assert manifest["input_fingerprint"] == preview["input_fingerprint"]
@@ -103,7 +103,7 @@ def test_changed_source_fails_closed_before_move(tmp_path):
     source.write_bytes(b"original")
     manifest = manifest_for(root, package)
     source.write_bytes(b"modified after plan")
-    with pytest.raises(executor.LuolcyExecutionConflict, match="changed"):
+    with pytest.raises(executor.MediaPackageExecutionConflict, match="changed"):
         executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
     assert source.read_bytes() == b"modified after plan"
     assert not (package / "001.mp4").exists()
@@ -114,13 +114,13 @@ def test_stale_preview_rejected_without_mutation(tmp_path):
     folder = package / "nested"
     folder.mkdir()
     (folder / "001.mp4").write_bytes(b"a")
-    preview = preview_luolcy_package(
-        package, luolcy_root=root, allowed_roots=[root.parent.parent],
+    preview = preview_media_package_package(
+        package, media_package_root=root, allowed_roots=[root.parent.parent],
     )
     (folder / "002.mp4").write_bytes(b"b")
-    with pytest.raises(executor.LuolcyExecutionConflict, match="changed"):
-        executor.prepare_luolcy_manifest(
-            package, luolcy_root=root, allowed_roots=[root.parent.parent],
+    with pytest.raises(executor.MediaPackageExecutionConflict, match="changed"):
+        executor.prepare_media_package_manifest(
+            package, media_package_root=root, allowed_roots=[root.parent.parent],
             quarantine_root=None, preview_record=preview, job_id=522,
         )
     assert (folder / "001.mp4").exists()
@@ -133,7 +133,7 @@ def test_preexisting_target_cannot_be_overwritten(tmp_path):
     (child / "001.mp4").write_bytes(b"source")
     manifest = manifest_for(root, package)
     (package / "001.mp4").write_bytes(b"untouchable")
-    with pytest.raises(executor.LuolcyExecutionConflict, match="changed"):
+    with pytest.raises(executor.MediaPackageExecutionConflict, match="changed"):
         executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
     assert (package / "001.mp4").read_bytes() == b"untouchable"
     assert (child / "001.mp4").read_bytes() == b"source"
@@ -177,7 +177,7 @@ def test_foreign_entry_in_staging_is_blocked_without_moving_source(tmp_path):
     stage = package / manifest["groups"][0]["stage"]
     stage.mkdir()
     (stage / "unexpected.txt").write_bytes(b"foreign")
-    with pytest.raises(executor.LuolcyExecutionConflict, match="Foreign entry"):
+    with pytest.raises(executor.MediaPackageExecutionConflict, match="Foreign entry"):
         executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
     assert (folder / "000.jpg").read_bytes() == b"x"
     assert (stage / "unexpected.txt").read_bytes() == b"foreign"
@@ -193,7 +193,7 @@ def test_manifest_tampering_is_rejected(tmp_path):
     executor.save_frozen_manifest(path, manifest)
     payload = path.read_text(encoding="utf-8").replace("001.jpg", "002.jpg")
     path.write_text(payload, encoding="utf-8")
-    with pytest.raises(executor.LuolcyExecutionConflict, match="integrity"):
+    with pytest.raises(executor.MediaPackageExecutionConflict, match="integrity"):
         executor.load_frozen_manifest(path, job_id=521, package=package)
 
 
@@ -206,7 +206,7 @@ def test_crashed_compat_link_is_not_unlinked_automatically(tmp_path):
     manifest = manifest_for(root, package)
     # Simulates two hardlinks after a crash in a COMPAT publish path.
     (package / "001.mp4").hardlink_to(src)
-    with pytest.raises(executor.LuolcyExecutionConflict, match="Both source"):
+    with pytest.raises(executor.MediaPackageExecutionConflict, match="Both source"):
         executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
     assert src.exists()
     assert (package / "001.mp4").exists()
@@ -223,7 +223,7 @@ def test_crash_during_group_publication_resumes_from_frozen_stage(tmp_path, monk
     failed = {"value": False}
 
     def crash_before_publish(src_fd, src_name, dst_fd, dst_name):
-        if src_name.startswith(".nfc-luolcy-stage-") and not failed["value"]:
+        if src_name.startswith(".nfc-media_package-stage-") and not failed["value"]:
             failed["value"] = True
             raise RuntimeError("synthetic publish failure")
         return original(src_fd, src_name, dst_fd, dst_name)
@@ -248,7 +248,7 @@ def test_tampered_target_outside_package_is_rejected_before_mutation(tmp_path):
     (nested / "one.mp4").write_bytes(b"movie")
     manifest = manifest_for(root, package)
     manifest["moves"][0]["target"] = str(tmp_path / "outside.mp4")
-    with pytest.raises(executor.LuolcyExecutionConflict, match="escaped"):
+    with pytest.raises(executor.MediaPackageExecutionConflict, match="escaped"):
         executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
     assert (nested / "one.mp4").read_bytes() == b"movie"
     assert not (tmp_path / "outside.mp4").exists()
@@ -280,7 +280,7 @@ def test_symlink_parent_replacement_does_not_escape_package(tmp_path):
     (inner / "01.jpg").rename(other / "01.jpg")
     inner.rmdir()
     inner.symlink_to(other, target_is_directory=True)
-    with pytest.raises((OSError, executor.LuolcyExecutionConflict)):
+    with pytest.raises((OSError, executor.MediaPackageExecutionConflict)):
         executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
     assert (other / "01.jpg").read_bytes() == b"image"
     assert not (package / "01.jpg").exists()

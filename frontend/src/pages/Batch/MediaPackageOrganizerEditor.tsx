@@ -12,27 +12,27 @@ import { TaskProgress } from '../../components/tasks/TaskProgress';
 import { useConsoleToast } from '../../components/ui/ConsoleToast';
 import { tasksApi } from '../../api/tasks';
 import { getStructuredApiError } from '../../api/errors';
-import { luolcyApi, type LuolcyPackagePreview } from '../../api/luolcy';
+import { media_packageApi, type MediaPackagePreview } from '../../api/media_package';
 
 const inProgress = (status: string | undefined) =>
   status === 'queued' || status === 'running' ||
   status === 'cancel_requested' || status === 'paused';
 
-const packageStatus = (row: LuolcyPackagePreview): [string, string] => {
+const packageStatus = (row: MediaPackagePreview): [string, string] => {
   if (row.status === 'blocked') return ['failed', '需要人工检查'];
   if (row.status === 'ready') return ['ready', '待整理'];
   if (row.status === 'already_organized') return ['completed', '已整理'];
   return ['skipped', '无需处理'];
 };
 
-const operationText = (row: LuolcyPackagePreview) => {
+const operationText = (row: MediaPackagePreview) => {
   if (row.operation === 'flatten_pure_media') return '纯媒体平铺到资源包根目录';
   if (row.operation === 'bucket_pure_media') return '纯媒体超过 200 个，按 P/V 分组';
   if (row.operation === 'sort_mixed_media') return '混合媒体分类到 P/V/Other';
   return row.reason === 'already_flat' ? '纯媒体已平铺' : '没有待整理文件';
 };
 
-export const LuolcyOrganizerEditor: React.FC = () => {
+export const MediaPackageOrganizerEditor: React.FC = () => {
   const toast = useConsoleToast();
   const [selection, setSelection] = useState('');
   const [jobId, setJobId] = useState<number | null>(null);
@@ -40,21 +40,21 @@ export const LuolcyOrganizerEditor: React.FC = () => {
   const [pageSize, setPageSize] = useState(25);
   const [executionJobId, setExecutionJobId] = useState<number | null>(null);
   const [executionConfirmation, setExecutionConfirmation] = useState('');
-  const enqueue = useMutation({ mutationFn: luolcyApi.startPreview });
+  const enqueue = useMutation({ mutationFn: media_packageApi.startPreview });
   const cancel = useMutation({ mutationFn: tasksApi.cancelTask });
   const executeMutation = useMutation({
     mutationFn: ({ previewId, confirmation }: { previewId: number; confirmation: string }) =>
-      luolcyApi.startExecution(previewId, confirmation),
+      media_packageApi.startExecution(previewId, confirmation),
   });
   const { data: executionJob, isError: executionFailedToLoad, error: executionLoadError } = useQuery({
-    queryKey: ['luolcyExecution', executionJobId],
-    queryFn: () => luolcyApi.getExecution(executionJobId!),
+    queryKey: ['media_packageExecution', executionJobId],
+    queryFn: () => media_packageApi.getExecution(executionJobId!),
     enabled: executionJobId !== null,
     refetchInterval: (query) => inProgress(query.state.data?.status) ? 1500 : false,
   });
   const { data, isError, error, isFetching } = useQuery({
-    queryKey: ['luolcyPreview', jobId, page, pageSize],
-    queryFn: () => luolcyApi.getPreview(jobId!, page, pageSize),
+    queryKey: ['media_packagePreview', jobId, page, pageSize],
+    queryFn: () => media_packageApi.getPreview(jobId!, page, pageSize),
     enabled: jobId !== null,
     refetchInterval: (query) => inProgress(query.state.data?.status) ? 1300 : false,
   });
@@ -62,7 +62,7 @@ export const LuolcyOrganizerEditor: React.FC = () => {
     inProgress(executionJob?.status) ||
     (jobId !== null && data == null);
   const summary = data?.summary;
-  const confirmationToken = jobId === null ? '' : `EXECUTE_LUOLCY_PREVIEW_${jobId}`;
+  const confirmationToken = jobId === null ? '' : `EXECUTE_MEDIA_PACKAGE_PREVIEW_${jobId}`;
   const canExecute = jobId !== null && data?.status === 'completed' &&
     summary != null && summary.ready_count > 0 && summary.blocked_count === 0 &&
     !busy && !executeMutation.isPending && executionJobId === null &&
@@ -78,7 +78,7 @@ export const LuolcyOrganizerEditor: React.FC = () => {
   const start = async () => {
     const chosen = selection.trim();
     if (!chosen.startsWith('/')) {
-      toast.error('请选择 Luolcy、月份、日期、作者或资源包的绝对目录');
+      toast.error('请选择 MediaPackage、月份、日期、作者或资源包的绝对目录');
       return;
     }
     if (busy) return;
@@ -89,9 +89,9 @@ export const LuolcyOrganizerEditor: React.FC = () => {
     try {
       const result = await enqueue.mutateAsync(chosen);
       setJobId(result.job_id);
-      toast.success(`Luolcy 只读预览任务 #${result.job_id} 已加入 Worker 队列`);
+      toast.success(`MediaPackage 只读预览任务 #${result.job_id} 已加入 Worker 队列`);
     } catch (e: unknown) {
-      toast.error(getStructuredApiError(e).message || '无法启动 Luolcy 预览');
+      toast.error(getStructuredApiError(e).message || '无法启动 MediaPackage 预览');
     }
   };
   const beginExecution = async () => {
@@ -102,7 +102,7 @@ export const LuolcyOrganizerEditor: React.FC = () => {
       });
       setExecutionJobId(result.job_id);
       setExecutionConfirmation('');
-      toast.success(`Luolcy 安全执行任务 #${result.job_id} 已提交 Worker`);
+      toast.success(`资源包安全执行任务 #${result.job_id} 已提交 Worker`);
     } catch (e: unknown) {
       toast.error(getStructuredApiError(e).message || '安全执行任务无法启动');
     }
@@ -112,7 +112,7 @@ export const LuolcyOrganizerEditor: React.FC = () => {
     if (jobId === null || !inProgress(data?.status) || cancel.isPending) return;
     try {
       await cancel.mutateAsync(jobId);
-      toast.success('已请求取消 Luolcy 只读预览');
+      toast.success('已请求取消 MediaPackage 只读预览');
     } catch (e: unknown) {
       toast.error(getStructuredApiError(e).message || '取消预览失败');
     }
@@ -120,16 +120,16 @@ export const LuolcyOrganizerEditor: React.FC = () => {
 
   return (
     <>
-      <DataPanel title="Luolcy 专用整理"
+      <DataPanel title="媒体资源包整理"
         description="先只读预览并检查冲突；只有管理员完成精确确认，才会启动 Worker 实际整理。"
         className="nfc-v2-batch-media-panel nfc-tool-workbench">
         <div className="nfc-v2-batch-form">
           <div className="nfc-v2-batch-field">
             <span>选择扫描范围</span>
             <DirectoryPicker multiple={false} value={selection} disabled={busy}
-              placeholder="选择 /data/Else/Luolcy 或其中的月份、日期、作者、资源包"
+              placeholder="选择 /data/Else/MediaPackage 或其中的月份、日期、作者、资源包"
               onChange={changeSelection} />
-            <small>支持 Luolcy / 年月 / 年月日 / 作者 / 资源包；只允许该库下的固定层级。</small>
+            <small>支持 MediaPackage / 年月 / 年月日 / 作者 / 资源包；只允许该库下的固定层级。</small>
           </div>
           <div className="nfc-v2-batch-notice" role="note">
             <ConsoleIcon name="shield-check" size={19} />
@@ -153,7 +153,7 @@ export const LuolcyOrganizerEditor: React.FC = () => {
       </DataPanel>
 
       {jobId !== null && (
-        <DataPanel title="Luolcy 后台扫描任务" variant="dense"
+        <DataPanel title="资源包后台扫描任务" variant="dense"
           className="nfc-v2-batch-media-panel"
           action={<span className="nfc-panel-count">任务 #{jobId}</span>}
           description="按资源包独立扫描并写入分页报告；关闭页面不会停止 Worker。">
@@ -198,11 +198,11 @@ export const LuolcyOrganizerEditor: React.FC = () => {
           </div>
           {!data.packages.length ? (
             <ConsoleEmpty title="当前范围没有可显示的资源包"
-              description="可以选择更高一级 Luolcy/月份目录，或检查路径结构。" />
+              description="可以选择更高一级 MediaPackage/月份目录，或检查路径结构。" />
           ) : (
             <div className="nfc-v2-batch-media-scroll">
               <table className="nfc-v2-batch-media-table">
-                <caption className="nfc-v2-batch-media-sr-only">Luolcy 资源包逐包只读整理预览</caption>
+                <caption className="nfc-v2-batch-media-sr-only">媒体资源包逐包只读整理预览</caption>
                 <thead>
                   <tr><th scope="col">资源包</th><th scope="col">状态</th>
                     <th scope="col">文件</th><th scope="col">预计移动</th>
@@ -248,7 +248,7 @@ export const LuolcyOrganizerEditor: React.FC = () => {
       )}
 
       {jobId !== null && data?.status === 'completed' && summary && (
-        <DataPanel title="确认 Luolcy 安全执行" variant="dense"
+        <DataPanel title="确认 资源包安全执行" variant="dense"
           className="nfc-v2-batch-media-panel"
           description="执行将真正移动文件并清理已确认的空子目录。需要管理员权限和 ALLOW_MUTATION / ALLOW_DELETE 开关。">
           {summary.blocked_count > 0 ? (
@@ -266,9 +266,9 @@ export const LuolcyOrganizerEditor: React.FC = () => {
                 为防止误操作，请完整输入下方确认码，提交后不能自动撤销。
               </p>
               <div className="nfc-v2-batch-field">
-                <label htmlFor="luolcy-execution-confirmation">执行确认码</label>
+                <label htmlFor="media_package-execution-confirmation">执行确认码</label>
                 <code>{confirmationToken}</code>
-                <input id="luolcy-execution-confirmation" type="text"
+                <input id="media_package-execution-confirmation" type="text"
                   autoComplete="off" spellCheck={false}
                   value={executionConfirmation}
                   onChange={event => setExecutionConfirmation(event.target.value)}
@@ -277,7 +277,7 @@ export const LuolcyOrganizerEditor: React.FC = () => {
               <ConsoleButton variant="danger" disabled={!canExecute}
                 loading={executeMutation.isPending}
                 onClick={() => { void beginExecution(); }}>
-                确认并执行 Luolcy 资源包整理
+                确认并执行 媒体资源包整理
               </ConsoleButton>
             </div>
           ) : (

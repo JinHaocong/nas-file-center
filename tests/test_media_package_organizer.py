@@ -1,23 +1,23 @@
-"""Luolcy-only fixed policy: read-only, bounded, safe package preview."""
+"""MediaPackage-only fixed policy: read-only, bounded, safe package preview."""
 from pathlib import Path
 
 import pytest
 
-from app.batch.luolcy_organizer import (
-    preview_luolcy_package, iter_luolcy_packages, iter_luolcy_previews,
+from app.batch.media_package_organizer import (
+    preview_media_package_package, iter_media_package_packages, iter_media_package_previews,
 )
 
 
 def make_package(tmp_path):
-    root = tmp_path / "data" / "Else" / "Luolcy"
+    root = tmp_path / "data" / "Else" / "Collection"
     package = root / "2611" / "261115" / "疑心病" / "New 1432.1MB"
     package.mkdir(parents=True)
     return root, package
 
 
 def preview(root, package, **kwargs):
-    return preview_luolcy_package(
-        package, luolcy_root=root,
+    return preview_media_package_package(
+        package, media_package_root=root,
         allowed_roots=[root.parent.parent], **kwargs
     )
 
@@ -252,7 +252,7 @@ def test_pure_media_201_filename_collision_blocks_bucket(tmp_path):
                for x in result["conflicts"])
 
 
-def test_luolcy_root_month_day_scope_discovers_only_resource_packages(tmp_path):
+def test_media_package_root_month_day_scope_discovers_only_resource_packages(tmp_path):
     root, first = make_package(tmp_path)
     same_day = root / "2611" / "261115" / "第二作者" / "Package2"
     same_day.mkdir(parents=True)
@@ -264,18 +264,18 @@ def test_luolcy_root_month_day_scope_discovers_only_resource_packages(tmp_path):
     nonconforming.mkdir(parents=True)
     wrong_month_day = root / "2611" / "261015" / "作者" / "WrongDate"
     wrong_month_day.mkdir(parents=True)
-    kwargs = {"luolcy_root": root, "allowed_roots": [root.parent.parent]}
-    assert list(iter_luolcy_packages(root, **kwargs)) == [
+    kwargs = {"media_package_root": root, "allowed_roots": [root.parent.parent]}
+    assert list(iter_media_package_packages(root, **kwargs)) == [
         other_month, first, same_day, other_day,
     ]
-    assert list(iter_luolcy_packages(root / "2611", **kwargs)) == [
+    assert list(iter_media_package_packages(root / "2611", **kwargs)) == [
         first, same_day, other_day,
     ]
-    assert list(iter_luolcy_packages(root / "2611" / "261115", **kwargs)) == [
+    assert list(iter_media_package_packages(root / "2611" / "261115", **kwargs)) == [
         first, same_day,
     ]
-    assert list(iter_luolcy_packages(first, **kwargs)) == [first]
-    assert list(iter_luolcy_packages(first.parent, **kwargs)) == [first]
+    assert list(iter_media_package_packages(first, **kwargs)) == [first]
+    assert list(iter_media_package_packages(first.parent, **kwargs)) == [first]
 
 
 def test_day_scope_generates_independent_read_only_package_previews(tmp_path):
@@ -284,29 +284,29 @@ def test_day_scope_generates_independent_read_only_package_previews(tmp_path):
     another.mkdir(parents=True)
     (first / "001.jpg").write_bytes(b"photo")
     (another / "001.mp4").write_bytes(b"movie")
-    kwargs = {"luolcy_root": root, "allowed_roots": [root.parent.parent]}
-    previews = list(iter_luolcy_previews(root / "2611" / "261115", **kwargs))
+    kwargs = {"media_package_root": root, "allowed_roots": [root.parent.parent]}
+    previews = list(iter_media_package_previews(root / "2611" / "261115", **kwargs))
     assert {result["package"] for result in previews} == {str(first), str(another)}
     assert all(result["status"] == "skipped" for result in previews)
     assert (first / "001.jpg").read_bytes() == b"photo"
     assert (another / "001.mp4").read_bytes() == b"movie"
 
 
-def test_luolcy_scope_rejects_outside_tree_and_invalid_day(tmp_path):
+def test_media_package_scope_rejects_outside_tree_and_invalid_day(tmp_path):
     root, first = make_package(tmp_path)
-    kwargs = {"luolcy_root": root, "allowed_roots": [root.parent.parent]}
-    with pytest.raises(ValueError, match="configured Luolcy root"):
-        list(iter_luolcy_packages(root.parent, **kwargs))
-    with pytest.raises(ValueError, match="Select Luolcy"):
-        list(iter_luolcy_packages(root / "2611" / "261016", **kwargs))
-    with pytest.raises(ValueError, match="Select Luolcy"):
-        list(iter_luolcy_packages(first / "P", **kwargs))
+    kwargs = {"media_package_root": root, "allowed_roots": [root.parent.parent]}
+    with pytest.raises(ValueError, match="configured MediaPackage root"):
+        list(iter_media_package_packages(root.parent, **kwargs))
+    with pytest.raises(ValueError, match="Select MediaPackage"):
+        list(iter_media_package_packages(root / "2611" / "261016", **kwargs))
+    with pytest.raises(ValueError, match="Select MediaPackage"):
+        list(iter_media_package_packages(first / "P", **kwargs))
 
 
-def test_luolcy_scope_does_not_follow_symlinked_author(tmp_path):
+def test_media_package_scope_does_not_follow_symlinked_author(tmp_path):
     root, first = make_package(tmp_path)
     sibling = root / "2611" / "261115" / "alias"
     sibling.symlink_to(first.parent, target_is_directory=True)
-    kwargs = {"luolcy_root": root, "allowed_roots": [root.parent.parent]}
+    kwargs = {"media_package_root": root, "allowed_roots": [root.parent.parent]}
     with pytest.raises(ValueError, match="contains a symlink"):
-        list(iter_luolcy_packages(root / "2611" / "261115", **kwargs))
+        list(iter_media_package_packages(root / "2611" / "261115", **kwargs))

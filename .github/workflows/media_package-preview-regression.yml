@@ -1,0 +1,92 @@
+name: Media Package Organizer Regression
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'app/batch/media_package_organizer.py'
+      - 'app/batch/media_package_jobs.py'
+      - 'app/batch/media_package_execution.py'
+      - 'app/batch/media_package_execute_jobs.py'
+      - 'app/api/router.py'
+      - 'app/tasks/handlers.py'
+      - 'app/tasks/handlers_base.py'
+      - 'app/worker.py'
+      - 'frontend/src/pages/Batch/MediaPackageOrganizerEditor.tsx'
+      - 'frontend/src/pages/Batch/index.tsx'
+      - 'frontend/src/api/media_package.ts'
+      - 'tests/test_media_package_organizer.py'
+      - 'tests/test_media_package_jobs.py'
+      - 'tests/test_media_package_execution.py'
+      - 'tests/test_media_package_execute_jobs.py'
+      - 'benchmarks/media_package_preview_benchmark.py'
+      - 'benchmarks/media_package_execution_benchmark.py'
+      - '.github/workflows/media_package-preview-regression.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: media_package-preview-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  media_package-preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CONFIG_DIR: /tmp/nfc-config
+      DATA_MOUNT: /tmp/nfc-data
+      ALLOWED_ROOTS: /tmp/nfc-data
+      QUARANTINE_ROOT: /tmp/nfc-data/.nas-file-center-trash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install backend test dependencies
+        run: python -m pip install -e '.[test]'
+      - name: Test scope, 200-file partitioning, security and Worker paging
+        env:
+          PYTHONPATH: .
+        run: pytest -q tests/test_media_package_organizer.py tests/test_media_package_jobs.py tests/test_media_package_execution.py tests/test_media_package_execute_jobs.py
+      - name: Synthetic read-only scan throughput baseline
+        env:
+          PYTHONPATH: .
+        run: |
+          python benchmarks/media_package_preview_benchmark.py --packages 12 --images 70 --videos 30 --json media_package-preview-benchmark.json
+          {
+            echo '### MediaPackage preview synthetic baseline'
+            echo '```json'
+            cat media_package-preview-benchmark.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload synthetic performance measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: media_package-preview-bench-${{ github.sha }}
+          path: media_package-preview-benchmark.json
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Synthetic bounded no-replace execution baseline
+        env:
+          PYTHONPATH: .
+        run: |
+          python benchmarks/media_package_execution_benchmark.py --files 220 --json media_package-execute-benchmark.json
+          {
+            echo '### MediaPackage execution synthetic baseline (no Worker lease)'
+            echo '```json'
+            cat media_package-execute-benchmark.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload synthetic execution benchmark
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: media_package-execution-bench-${{ github.sha }}
+          path: media_package-execute-benchmark.json
+          if-no-files-found: ignore
+          retention-days: 14
