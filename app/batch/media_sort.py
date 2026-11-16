@@ -174,6 +174,7 @@ def _scan_directory(
                 target = validate_mutation_destination(
                     directory / folder / target_name, allowed_roots,
                     quarantine_root=quarantine_root,
+                    existing_media_source=source,
                 )
                 if target.parent != directory / folder:
                     raise ValueError("Target must remain in this directory's P/V folder")
