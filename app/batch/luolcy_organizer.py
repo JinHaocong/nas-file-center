@@ -66,6 +66,115 @@ def _package_path(package: str | Path, root: str | Path,
     return raw
 
 
+
+MAX_SCOPE_DISCOVERED_PACKAGES = 60_000
+MAX_SCOPE_ENTRIES_PER_DIRECTORY = 100_000
+
+
+def _validate_scope(selection: str | Path, *, luolcy_root: str | Path,
+                    allowed_roots: list[Path],
+                    quarantine_root: Path | None) -> tuple[Path, int]:
+    """Restrict a selection to the Luolcy root or one of its four fixed levels.
+
+    A selected month/day is a *discovery scope*, never a move destination.
+    Only the resource package's descendants may be changed by a future runner.
+    """
+    root = Path(luolcy_root).expanduser()
+    raw = Path(selection).expanduser()
+    if not raw.is_absolute() or not root.is_absolute():
+        raise ValueError("Luolcy selection and root must be absolute paths")
+    safe = require_unreserved_path(
+        require_allowed_path(raw, allowed_roots), quarantine_root,
+    )
+    if raw != safe:
+        raise ValueError("Luolcy selection must use a literal canonical path")
+    try:
+        components = raw.relative_to(root).parts
+    except ValueError as exc:
+        raise ValueError("Selection must stay below the configured Luolcy root") from exc
+    if (len(components) > 4
+            or (len(components) >= 1 and not _MONTH.fullmatch(components[0]))
+            or (len(components) >= 2 and
+                (not _DAY.fullmatch(components[1]) or
+                 components[1][:4] != components[0]))):
+        raise ValueError("Select Luolcy, YYMM, YYMMDD, author or resource package")
+    fd = _open_directory_nofollow(raw)
+    os.close(fd)
+    return raw, len(components)
+
+
+def _child_directories(directory: Path) -> list[str]:
+    """List immediate directories without symlink traversal or file content I/O."""
+    fd = _open_directory_nofollow(directory)
+    names: list[str] = []
+    try:
+        with os.scandir(fd) as entries:
+            for count, entry in enumerate(entries, 1):
+                if count > MAX_SCOPE_ENTRIES_PER_DIRECTORY:
+                    raise ValueError("Too many Luolcy discovery entries in one directory")
+                # Symlinked folders may point outside the protected resource
+                # hierarchy. Never silently treat them as resource packages.
+                if entry.is_symlink():
+                    raise ValueError(f"Luolcy scope contains a symlink: {directory / entry.name}")
+                if entry.is_dir(follow_symlinks=False):
+                    names.append(entry.name)
+    finally:
+        os.close(fd)
+    return sorted(names)
+
+
+def iter_luolcy_packages(selection: str | Path, *,
+                         luolcy_root: str | Path,
+                         allowed_roots: list[Path],
+                         quarantine_root: Path | None = None):
+    """Stream package paths from Luolcy/YYMM/YYMMDD/author/package.
+
+    A Luolcy root selection enumerates all packages; month/day selections
+    enumerate only matching descendants. No unrelated directory is modified.
+    The iterator is bounded and does not materialize the full library.
+    """
+    selected, level = _validate_scope(
+        selection, luolcy_root=luolcy_root,
+        allowed_roots=allowed_roots, quarantine_root=quarantine_root,
+    )
+    pending = [(selected, level)]
+    discovered = 0
+    while pending:
+        directory, depth = pending.pop()
+        if depth == 4:
+            discovered += 1
+            if discovered > MAX_SCOPE_DISCOVERED_PACKAGES:
+                raise ValueError("Too many Luolcy resource packages in selected scope")
+            yield directory
+            continue
+        children = []
+        for name in _child_directories(directory):
+            if depth == 0 and not _MONTH.fullmatch(name):
+                continue
+            if depth == 1 and (not _DAY.fullmatch(name) or
+                               name[:4] != directory.name):
+                continue
+            children.append((directory / name, depth + 1))
+        pending.extend(reversed(children))
+
+
+def iter_luolcy_previews(selection: str | Path, *,
+                         luolcy_root: str | Path,
+                         allowed_roots: list[Path],
+                         quarantine_root: Path | None = None,
+                         max_rows: int = 100):
+    """Yield read-only previews one resource package at a time (bounded RAM)."""
+    for package in iter_luolcy_packages(
+        selection, luolcy_root=luolcy_root,
+        allowed_roots=allowed_roots, quarantine_root=quarantine_root,
+    ):
+        yield preview_luolcy_package(
+            package, luolcy_root=luolcy_root,
+            allowed_roots=allowed_roots, quarantine_root=quarantine_root,
+            max_rows=max_rows,
+        )
+
+
 def _classify(filename: str) -> str:
     media_type = get_media_type(Path(filename).suffix)
     return "P" if media_type == "image" else "V" if media_type == "video" else "Other"
