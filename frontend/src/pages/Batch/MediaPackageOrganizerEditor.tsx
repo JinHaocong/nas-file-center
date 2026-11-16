@@ -37,7 +37,7 @@ export const MediaPackageOrganizerEditor: React.FC = () => {
   const [selection, setSelection] = useState('');
   const [jobId, setJobId] = useState<number | null>(null);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);
+  const [pageSize, setPageSize] = useState(25);\n  const [statusFilter, setStatusFilter] = useState("all");
   const [executionJobId, setExecutionJobId] = useState<number | null>(null);
   const [executionConfirmation, setExecutionConfirmation] = useState('');
   const enqueue = useMutation({ mutationFn: media_packageApi.startPreview });
@@ -53,8 +53,8 @@ export const MediaPackageOrganizerEditor: React.FC = () => {
     refetchInterval: (query) => inProgress(query.state.data?.status) ? 1500 : false,
   });
   const { data, isError, error, isFetching } = useQuery({
-    queryKey: ['media_packagePreview', jobId, page, pageSize],
-    queryFn: () => media_packageApi.getPreview(jobId!, page, pageSize),
+    queryKey: ['media_packagePreview', jobId, page, pageSize, statusFilter],
+    queryFn: () => media_packageApi.getPreview(jobId!, page, pageSize, statusFilter),
     enabled: jobId !== null,
     refetchInterval: (query) => inProgress(query.state.data?.status) ? 1300 : false,
   });
@@ -196,7 +196,7 @@ export const MediaPackageOrganizerEditor: React.FC = () => {
             <span>跳过 <strong>{summary.skipped_count.toLocaleString()}</strong></span>
             <span>预计移动 <strong>{summary.needed_moves.toLocaleString()}</strong></span>
           </div>
-          {!data.packages.length ? (
+          <div className="nfc-v2-batch-field">\n            <label htmlFor="media-package-status-filter">按状态筛选</label>\n            <select id="media-package-status-filter" value={statusFilter}\n              onChange={event => { setStatusFilter(event.target.value); setPage(1); }}>\n              <option value="all">全部</option>\n              <option value="blocked">冲突（{summary.blocked_count}）</option>\n              <option value="ready">待整理（{summary.ready_count}）</option>\n              <option value="already_organized">已整理（{summary.already_organized_count}）</option>\n              <option value="skipped">跳过（{summary.skipped_count}）</option>\n            </select>\n          </div>\n          {!data.packages.length ? (
             <ConsoleEmpty title="当前范围没有可显示的资源包"
               description="可以选择更高一级 资源包根目录或月份目录，或检查路径结构。" />
           ) : (
@@ -249,7 +249,7 @@ export const MediaPackageOrganizerEditor: React.FC = () => {
             </div>
           )}
           <ConsolePagination page={page} pageSize={pageSize}
-            total={summary.package_count} pageSizes={[10, 25, 50, 100]}
+            total={data.filtered_total} pageSizes={[10, 25, 50, 100]}
             onChange={(next, size) => { setPage(next); setPageSize(size); }} />
           <p className="nfc-form-note">
             执行使用冻结清单、Worker 租约、逐文件重新校验和禁止覆盖的移动操作；
