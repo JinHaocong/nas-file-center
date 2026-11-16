@@ -1931,6 +1931,10 @@ class BatchPlanExecuteHandler(TaskHandler):
         # lifetime of this one Worker job, while descriptor/path/device checks
         # still run for every mutation.
         negative_capability_probe_cache: set[int] = set()
+        # This cache only avoids duplicate mkdir; executor still validates
+        # each pathname and lstat-fences each cached parent before no-clobber.
+        media_sort_move_parent_cache: dict[str, tuple[int, int]] = {}
+        is_media_sort_plan = False
 
         # 1. Announce start & reconcile interrupted items
         # Precompute reconciliation evidence outside DB write lock.
@@ -2128,6 +2132,7 @@ class BatchPlanExecuteHandler(TaskHandler):
             if not plan:
                 raise KeyError(f"Plan #{plan_id} not found")
             is_gate6a_bulk_restore = plan.kind == "quarantine-bulk-restore"
+            is_media_sort_plan = plan.kind == "media-sort"
             plan.status = "executing"
             plan_meta = json.loads(plan.metadata_json or "{}")
             is_organizer = plan_meta.get("is_organizer", False)
@@ -3530,6 +3535,9 @@ class BatchPlanExecuteHandler(TaskHandler):
                         purge_manifest=purge_manifest,
                         negative_capability_probe_cache=negative_capability_probe_cache,
                         directory_move_transaction_id=directory_move_transaction_id,
+                        move_parent_cache=(
+                            media_sort_move_parent_cache if is_media_sort_plan else None
+                        ),
                     )
             except JobLeaseLost:
                 raise
