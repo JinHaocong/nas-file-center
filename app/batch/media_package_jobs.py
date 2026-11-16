@@ -167,6 +167,7 @@ class MediaPackagePreviewHandler(TaskHandler):
         for path in (*staged, data, index, summary):
             path.unlink(missing_ok=True)
         seen = ready = blocked = skipped = already_organized = files_seen = changes = 0
+        renamed = automatically_resolved = 0
         start = last_checkpoint = time.monotonic()
         try:
             with _create_private(staged[0]) as out, _create_private(staged[1]) as offsets:
@@ -205,6 +206,8 @@ class MediaPackagePreviewHandler(TaskHandler):
                     already_organized += status == "already_organized"
                     files_seen += int(record.get("total_files", 0))
                     changes += int(record.get("needed_moves", 0))
+                    renamed += int(record.get("renamed_count", 0))
+                    automatically_resolved += int(record.get("resolved_collision_count", 0))
                     now = time.monotonic()
                     if seen == 1 or seen % 25 == 0 or now - last_checkpoint >= 0.8:
                         context.checkpoint(
@@ -224,6 +227,8 @@ class MediaPackagePreviewHandler(TaskHandler):
                 "package_count": seen, "ready_count": ready, "blocked_count": blocked,
                 "skipped_count": skipped, "already_organized_count": already_organized,
                 "file_count": files_seen, "needed_moves": changes,
+                "renamed_count": renamed,
+                "resolved_collision_count": automatically_resolved,
                 "elapsed_seconds": round(time.monotonic() - start, 3),
             }
             with _create_private(staged[2]) as output:
