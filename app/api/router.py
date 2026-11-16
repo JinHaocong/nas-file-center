@@ -463,6 +463,11 @@ class MediaSortPreviewRequest(BaseModel):
     smart_skip: bool = Field(default=True, strict=True)
 
 
+class LuolcyPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    selection: str = Field(min_length=1, max_length=4096)
+
+
 class MediaSortPlanRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     skip_conflicts: bool = Field(default=False, strict=True)
@@ -1396,6 +1401,43 @@ def filename_quality_audit_preview(request: Request, payload: FilenameAuditPrevi
         )
     except (ValueError, OSError) as exc:
         raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/luolcy/previews")
+def enqueue_luolcy_preview_request(
+    request: Request, payload: LuolcyPreviewRequest,
+    _user: User = Depends(require_admin_user),
+):
+    """Read-only Luolcy package scan, scoped to configured DATA_MOUNT."""
+    from app.batch.luolcy_jobs import enqueue_luolcy_preview
+    try:
+        return enqueue_luolcy_preview(
+            request.app.state.service.SessionLocal,
+            request.app.state.settings, selection=payload.selection,
+        )
+    except (ValueError, OSError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.get("/luolcy/previews/{job_id}")
+def get_luolcy_preview_request(
+    request: Request, job_id: int,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=25, ge=1, le=100),
+    _user: User = Depends(require_admin_user),
+):
+    """Paged report only. No Luolcy execute endpoint exists yet."""
+    from app.batch.luolcy_jobs import get_luolcy_preview
+    try:
+        return get_luolcy_preview(
+            request.app.state.service.SessionLocal,
+            request.app.state.settings, job_id,
+            page=page, page_size=page_size,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, "Luolcy preview task not found") from exc
+    except (ValueError, OSError) as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 @router.post("/media-sort/preview")
