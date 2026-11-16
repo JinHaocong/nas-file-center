@@ -144,7 +144,7 @@ def _scan_directory(
         reason: str | None = None
         # A P/V destination means this directory has already been partially
         # organized. Never skip media left beside an existing classification dir.
-        if smart_skip and not ({"p", "v"} & occupied):
+        if smart_skip and (not ({"p", "v"} & occupied) or not regular_files):
             if image_count and not video_count and other_regular_files == 0:
                 reason = "pure_images"
             elif video_count and not image_count and other_regular_files == 0:
