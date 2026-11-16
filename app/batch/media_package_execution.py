@@ -233,7 +233,8 @@ def _entry(folder: Path, name: str):
 
 
 def _move_one(move: dict, *, lease_fence: Callable[[], None],
-              ignore_final: bool = False, compat_hardlink: bool = False) -> str:
+              ignore_final: bool = False, compat_hardlink: bool = False,
+              source_replaced_by: list[int] | None = None) -> str:
     """Reconcile crashed no-clobber moves and perform at most one filesystem move."""
     src = Path(move["source"])
     stage = Path(move["target"])
@@ -260,6 +261,12 @@ def _move_one(move: dict, *, lease_fence: Callable[[], None],
         src_stat = _entry(src.parent, src.name) if src.parent.is_dir() else None
         if src_stat is None:
             return "resumed"
+        if source_replaced_by is not None:
+            # An earlier group has safely published a different frozen file
+            # at this old source pathname. Its exact manifest identity has
+            # already been proved; never move/unlink the new published file.
+            _check_file(src_stat, source_replaced_by, src)
+            return "resumed"
         _check_file(src_stat, expected, src)
         # A source and target with identical inode can be an interrupted
         # COMPAT hardlink operation, but it can also be a pre-existing alias.
@@ -269,6 +276,12 @@ def _move_one(move: dict, *, lease_fence: Callable[[], None],
             f"Both source and destination exist; manual review: {src}"
         )
 
+    if source_replaced_by is not None:
+        # Stage custody cannot be recovered by moving a new published file
+        # back out of a prior group's final directory.
+        raise MediaPackageExecutionConflict(
+            f"Frozen stage is missing after source path reuse: {src}"
+        )
     src_fd = _open_folder(src.parent)
     try:
         source_stat = os.stat(src.name, dir_fd=src_fd, follow_symlinks=False)
@@ -1317,6 +1330,24 @@ def execute_frozen_manifest(manifest: dict, *, lease_fence: Callable[[], None],
         _ensure_staging(manifest, index, lease_fence)
         for index in range(len(manifest["groups"]))
     ]
+    # Previously published buckets can reuse original source pathnames
+    # from rows still in staging. The reoccupied paths are authorized only
+    # by the exact frozen output identity, never by a basename alone.
+    published_identities = {
+        row["final"]: row["identity"]
+        for row in manifest["moves"]
+        if group_modes[row["group"]] == "published"
+    }
+    for group_index, mode in enumerate(group_modes):
+        if mode == "compat":
+            evidence = _compat_inspect_group(manifest, group_index)
+            if evidence is None:
+                raise MediaPackageExecutionConflict(
+                    "Authenticated grouped publication witness disappeared"
+                )
+            for row in _group_files(manifest, group_index):
+                if row["target_name"].casefold() in evidence["public_names"]:
+                    published_identities[row["final"]] = row["identity"]
     completed = recovered = 0
     total = len(manifest["moves"])
     for index, row in enumerate(manifest["moves"], start=1):
@@ -1328,7 +1359,10 @@ def execute_frozen_manifest(manifest: dict, *, lease_fence: Callable[[], None],
         else:
             # The public label may still contain original inputs. During
             # staging it is NEVER authority for a file's final destination.
-            result = _move_one(row, lease_fence=lease_fence, ignore_final=True)
+            result = _move_one(
+                row, lease_fence=lease_fence, ignore_final=True,
+                source_replaced_by=published_identities.get(row["source"]),
+            )
             completed += result == "moved"
             recovered += result != "moved"
         if progress and (index % 25 == 0 or index == total):
