@@ -17,7 +17,7 @@ from typing import Callable
 
 from app.batch.file_rename import _open_directory_nofollow
 from app.batch.luolcy_organizer import (
-    MAX_FILES_PER_GROUP, _input_fingerprint, _package_path, _walk_package,
+    MAX_FILES_PER_GROUP, _input_fingerprint, _package_path,
     preview_luolcy_package,
 )
 from app.fs_ops import rename_directory_noreplace_compat, rename_noreplace_at
@@ -70,7 +70,7 @@ def prepare_luolcy_manifest(package: Path, *, luolcy_root: Path,
         raise LuolcyExecutionConflict("Selected package was not ready in the preview")
     fresh = preview_luolcy_package(
         source, luolcy_root=luolcy_root, allowed_roots=allowed_roots,
-        quarantine_root=quarantine_root,
+        quarantine_root=quarantine_root, include_items=True,
     )
     if (fresh.get("status") != "ready"
             or not isinstance(preview_record.get("input_fingerprint"), str)
@@ -80,9 +80,9 @@ def prepare_luolcy_manifest(package: Path, *, luolcy_root: Path,
             or fresh.get("operation") != preview_record.get("operation")):
         raise LuolcyExecutionConflict(f"Package changed since preview: {source}")
 
-    items = list(_walk_package(source))
+    items = fresh.pop("_snapshot_items")
     if _input_fingerprint(items, source) != fresh["input_fingerprint"]:
-        raise LuolcyExecutionConflict("Package changed while freezing its file manifest")
+        raise LuolcyExecutionConflict("Package snapshot changed during its frozen preflight")
     package_stat = os.stat(source, follow_symlinks=False)
     _check_directory(package_stat, source)
     dev = int(package_stat.st_dev)
