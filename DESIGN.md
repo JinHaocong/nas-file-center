@@ -2,7 +2,7 @@
 
 > **Current visual authority (2026-10-09):** The user approved a dark-sidebar + light-workspace NAS File Center redesign and expressly authorized replacing Ant Design. New migration authority: [Console v2 Phase 1](docs/console-v2-phase1.md). Earlier clauses saying “Ant Design must remain” describe prior historical phases and are superseded for this approved UI track. Existing business safety/lifecycle contracts remain binding.
 
-> Product release authority: **v1.4.1**
+> Product release authority: **v1.4.2**
 > Historical design baseline: v0.4.0 C0 FROZEN
 > Baseline: `main@08ce4046a556e7f3dec1d2de1a7d4ea37c610f7f`
 > Design amendment labels are visual-history identifiers unless explicitly promoted by release metadata; e.g. **v0.5.6 Right Workspace v2 does not mean the package/image version is 0.5.6**.
@@ -770,7 +770,7 @@ This redesign does not change filesystem, Plan, Worker, Quarantine, purge, RBAC 
 
 ## v0.5.6 Right Workspace v2 — Calm NAS Workbench
 
-> **Design revision only**: this heading is retained as design-history provenance. The current product/package/Docker release is **v1.4.1**.
+> **Design revision only**: this heading is retained as design-history provenance. The current product/package/Docker release is **v1.4.2**.
 
 This pass supersedes the accumulated right-side workspace skins while preserving the accepted left navigation, mobile dock and every file-operation safety boundary.
 
