@@ -19,8 +19,8 @@ MAX_FILES_PER_GROUP = 200
 MAX_PACKAGE_FILES = 300_000
 MAX_PACKAGE_DIRECTORIES = 100_000
 MAX_DEPTH = 64
-_MONTH = re.compile(r"^\\d{2}(?:0[1-9]|1[0-2])$")
-_DAY = re.compile(r"^\\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12][0-9]|3[01])$")
+_MONTH = re.compile(r"^\d{2}(?:0[1-9]|1[0-2])$")
+_DAY = re.compile(r"^\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12][0-9]|3[01])$")
 
 
 def _size_label(size: int) -> str:
