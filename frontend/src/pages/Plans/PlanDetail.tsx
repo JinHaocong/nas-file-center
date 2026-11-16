@@ -418,6 +418,13 @@ export const PlanDetailPage: React.FC = () => {
             onClick={() => { void refetch(); }} loading={isFetching}>刷新</ConsoleButton>
         </ActionBar>}
       />
+      {plan.kind === 'media-sort' &&
+        Number(plan.metadata?.skipped_conflict_count || 0) > 0 &&
+        notice('媒体分类：冲突项已从执行计划中排除',
+          `本计划仅包含 ${plan.expected_changes.toLocaleString()} 个可移动文件；
+          预览中的 ${Number(plan.metadata?.skipped_conflict_count || 0).toLocaleString()} 项冲突已跳过，
+          不会删除或移动这些冲突文件。如需处理冲突，请先检查原始目录，再重新预览。`,
+          'warning')}
       {planStorageAction === 'hardlink' &&
         notice('Hardlink 计划：两个路径会共享同一个 inode',
           'Hardlink 后两个路径共享同一个 inode，未来通过任一路径写入都会修改同一份文件内容。Freeze / Validate / Worker Execute 仍会重新验证 SHA-256、身份与运行时能力。',
