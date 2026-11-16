@@ -1,7 +1,7 @@
 services:
   nas-file-center-api:
-    image: kerwinjhc/nas-file-center:1.4.3
-    pull_policy: never
+    image: kerwinjhc/nas-file-center:1.4.4
+    pull_policy: missing
     container_name: nas-file-center-api
     volumes:
       - /tmp/zfsv3/nvme13/15246330601/data/NasFileCenter:/config
@@ -30,8 +30,8 @@ services:
     restart: unless-stopped
 
   nas-file-center-worker:
-    image: kerwinjhc/nas-file-center:1.4.3
-    pull_policy: never
+    image: kerwinjhc/nas-file-center:1.4.4
+    pull_policy: missing
     container_name: nas-file-center-worker
     command:
       - python
