@@ -20,6 +20,7 @@ on:
       - 'tests/test_luolcy_execution.py'
       - 'tests/test_luolcy_execute_jobs.py'
       - 'benchmarks/luolcy_preview_benchmark.py'
+      - 'benchmarks/luolcy_execution_benchmark.py'
       - '.github/workflows/luolcy-preview-regression.yml'
   workflow_dispatch:
 
@@ -68,5 +69,24 @@ jobs:
         with:
           name: luolcy-preview-bench-${{ github.sha }}
           path: luolcy-preview-benchmark.json
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Synthetic bounded no-replace execution baseline
+        env:
+          PYTHONPATH: .
+        run: |
+          python benchmarks/luolcy_execution_benchmark.py --files 220 --json luolcy-execute-benchmark.json
+          {
+            echo '### Luolcy execution synthetic baseline (no Worker lease)'
+            echo '```json'
+            cat luolcy-execute-benchmark.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload synthetic execution benchmark
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: luolcy-execution-bench-${{ github.sha }}
+          path: luolcy-execute-benchmark.json
           if-no-files-found: ignore
           retention-days: 14
