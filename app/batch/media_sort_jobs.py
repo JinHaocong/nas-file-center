@@ -9,6 +9,7 @@ from __future__ import annotations
 import itertools
 import json
 import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -386,13 +387,27 @@ class MediaSortPlanStageHandler(TaskHandler):
         verb = "冻结" if stage == "freeze" else "校验"
         context.checkpoint(progress_current=0, progress_total=count,
                            progress_message=f"开始{verb} {count:,} 个文件")
+        last_check_at = time.monotonic()
+        last_checked_item = 0
+
         def _progress(current: int, total: int) -> None:
-            # Avoid one SQLite checkpoint per item on NAS network filesystems.
-            if current == 1 or current % 25 == 0 or current == total:
+            nonlocal last_check_at, last_checked_item
+            # A DB commit for every 25 files is expensive on NAS metadata
+            # storage. Maintain a bounded cancellation/heartbeat interval:
+            # check at most 250 items or ~0.75 seconds apart.
+            now = time.monotonic()
+            if (current == 1 or current == total
+                    or current - last_checked_item >= 250
+                    or now - last_check_at >= 0.75):
+                # The service reports *before* examining this item. Don't
+                # display 100% until the last item and DB commit both succeed.
+                processed = max(0, current - 1)
                 context.checkpoint(
-                    progress_current=current, progress_total=total,
-                    progress_message=f"{verb}文件 {current:,}/{total:,}",
+                    progress_current=processed, progress_total=total,
+                    progress_message=f"正在{verb}文件 {current:,}/{total:,}",
                 )
+                last_check_at = now
+                last_checked_item = current
 
         if stage == "freeze":
             service.freeze_plan(plan_id, progress_callback=_progress)
