@@ -93,13 +93,22 @@ def enqueue_media_package_execution(session_factory, settings: Settings,
         return {"job_id": int(job.id), "status": job.status}
 
 
+_FUSE_COMPAT_DISABLED_PUBLISH_ERROR = (
+    "FUSE grouped publication disabled: run the isolated NAS probe "
+    "and explicitly enable MEDIA_PACKAGE_FUSE_COMPAT_ENABLED"
+)
+
+
 def is_recoverable_media_package_publish_error(error_code: str | None,
                                               error_text: str | None) -> bool:
-    """Allowlist two exact publication failures; never retry arbitrary errors."""
+    """Allowlist known publication failures; never retry arbitrary errors."""
     if error_code != "EXECUTION_ERROR" or not isinstance(error_text, str):
         return False
     return (
-        error_text == "Package directory changed before publish"
+        error_text in (
+            "Package directory changed before publish",
+            _FUSE_COMPAT_DISABLED_PUBLISH_ERROR,
+        )
         or error_text.startswith(
             "[Errno 95] Plain directory rename no-clobber semantics are not positively proven: "
         )
@@ -148,9 +157,15 @@ def enqueue_media_package_recovery(session_factory, settings: Settings, *,
         if original is None:
             raise KeyError(failed_job_id)
         pid, original_state = _failed_publish_job_authority(original)
-        if (str(original.error_text or "").startswith(
-            "[Errno 95] Plain directory rename no-clobber semantics are not positively proven: "
-        ) and not settings.media_package_fuse_compat_enabled):
+        if (
+            (
+                original.error_text == _FUSE_COMPAT_DISABLED_PUBLISH_ERROR
+                or str(original.error_text or "").startswith(
+                    "[Errno 95] Plain directory rename no-clobber semantics are not positively proven: "
+                )
+            )
+            and not settings.media_package_fuse_compat_enabled
+        ):
             raise ValueError(
                 "FUSE compatibility is disabled: run isolated NAS probe and "
                 "explicitly enable MEDIA_PACKAGE_FUSE_COMPAT_ENABLED"
