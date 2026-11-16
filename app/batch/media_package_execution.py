@@ -675,6 +675,14 @@ def _validate_frozen_paths(manifest: dict) -> None:
     dev = manifest.get("package_dev")
     if not isinstance(dev, int) or dev <= 0:
         raise MediaPackageExecutionConflict("Invalid frozen filesystem identity")
+    root_stage = manifest.get("root_stage")
+    if root_stage is not None:
+        if (manifest.get("operation") != "flatten_pure_media"
+                or root_stage != f".nfc-media_package-stage-{manifest['job_id']}-root"
+                or manifest.get("groups")):
+            raise MediaPackageExecutionConflict("Invalid frozen flat staging scope")
+    elif manifest.get("operation") == "flatten_pure_media":
+        raise MediaPackageExecutionConflict("Missing flat staging authority")
     for index, group in enumerate(manifest.get("groups", [])):
         stage = f".nfc-media_package-stage-{manifest['job_id']}-{index}"
         if group.get("stage") != stage:
@@ -702,24 +710,47 @@ def _validate_frozen_paths(manifest: dict) -> None:
                 len(row["identity"]) != 4 or
                 row["identity"][0] != dev):
             raise MediaPackageExecutionConflict("Unsafe frozen MediaPackage source")
+        target_name = row.get("target_name")
+        if (not isinstance(target_name, str) or not target_name
+                or Path(target_name).name != target_name
+                or target_name in (".", "..")
+                or Path(target_name).suffix != src.suffix
+                or row.get("original_name") != src.name
+                or row.get("original_relative_path") != os.path.relpath(src, package)
+                or row.get("final_relative_path") != os.path.relpath(final, package)):
+            raise MediaPackageExecutionConflict("Invalid frozen source-to-target filename mapping")
         group_index = row.get("group")
         if group_index is None:
-            expected_target = package / src.name
-            expected_final = expected_target
+            if root_stage is None:
+                raise MediaPackageExecutionConflict("Flat target without frozen staging")
+            expected_target = package / root_stage / target_name
+            expected_final = package / target_name
         else:
             if not isinstance(group_index, int) or not 0 <= group_index < len(manifest["groups"]):
                 raise MediaPackageExecutionConflict("Invalid frozen group association")
             group = manifest["groups"][group_index]
-            expected_target = package / group["stage"] / src.name
-            expected_final = package / group["final"] / src.name
+            expected_target = package / group["stage"] / target_name
+            expected_final = package / group["final"] / target_name
         if dest != expected_target or final != expected_final or src == dest:
-            raise MediaPackageExecutionConflict("Frozen MediaPackage move target escaped its package")
+            raise MediaPackageExecutionConflict("Frozen media package move target escaped its package")
     for index, group in enumerate(manifest["groups"]):
         start, count = group["move_start"], group["count"]
         if start + count > len(rows) or any(
             row["group"] != index for row in rows[start:start + count]
         ):
             raise MediaPackageExecutionConflict("Frozen MediaPackage group rows are inconsistent")
+    if root_stage is not None:
+        if (len(rows) > MAX_FILES_PER_GROUP or any(row["group"] is not None for row in rows)
+                or len({row["target_name"].casefold() for row in rows}) != len(rows)):
+            raise MediaPackageExecutionConflict("Flat frozen numbering is inconsistent")
+    else:
+        covered = sum(group["count"] for group in manifest["groups"])
+        if covered != len(rows):
+            raise MediaPackageExecutionConflict("Frozen grouped move count is inconsistent")
+        for index, group in enumerate(manifest["groups"]):
+            part = rows[group["move_start"]:group["move_start"] + group["count"]]
+            if len({row["target_name"].casefold() for row in part}) != len(part):
+                raise MediaPackageExecutionConflict("Frozen group target filename collision")
 
 
 def execute_frozen_manifest(manifest: dict, *, lease_fence: Callable[[], None],
