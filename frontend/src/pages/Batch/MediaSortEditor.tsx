@@ -176,7 +176,7 @@ export const MediaSortEditor: React.FC = () => {
 
   const renderStatus = (item: MediaSortRow) => (
     <StatusBadge status={item.conflict ? 'failed' : 'completed'}
-      label={item.conflict ? '冲突（跳过）' : '可移动'} />
+      label={item.conflict ? '冲突' : '可移动'} />
   );
   const selectItemFilter = (filter: MediaSortItemFilter) => {
     setItemFilter(filter);
