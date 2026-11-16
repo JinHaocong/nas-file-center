@@ -37,8 +37,9 @@ describe('Pure White v2.1 visual foundation and details', () => {
     const sidebar = read('src/components/Sidebar.tsx');
     assert.match(sidebar, /aria-current=\{selectedKey === item\.path \? 'page' : undefined\}/);
     assert.ok(sidebar.includes('PRIVATE FILE WORKSPACE'));
-    assert.match(sidebar, /className="nfc-v2-release-version">v0\.4\.7<\/small>/);
-    assert.doesNotMatch(sidebar, /SECURE FILE OPERATIONS · v0\.4\.7/);
+    const productVersion = JSON.parse(read('package.json')).version as string;
+    assert.ok(sidebar.includes(`className="nfc-v2-release-version">v${productVersion}</small>`));
+    assert.doesNotMatch(sidebar, /SECURE FILE OPERATIONS · v[0-9]/);
   });
 
   test('header is truly white with one-pixel divider and accessible focus', () => {
