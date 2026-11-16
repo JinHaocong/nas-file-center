@@ -57,12 +57,6 @@ def enqueue_luolcy_execution(session_factory, settings: Settings,
                 or summary["ready_count"] <= 0 or
                 summary.get("blocked_count") != 0):
             raise ValueError("Preview has no ready packages or unresolved conflicts")
-        active = session.scalar(select(WorkJob.id).where(
-            WorkJob.kind == EXECUTE_KIND,
-            WorkJob.status.in_(ACTIVE),
-        ).limit(1))
-        if active is not None:
-            raise ValueError(f"Another Luolcy execution task #{active} is running")
         existing = session.scalar(select(WorkJob).where(
             WorkJob.kind == EXECUTE_KIND,
             func.json_extract(WorkJob.state_json, "$.preview_job_id") == preview_job_id,
@@ -75,6 +69,12 @@ def enqueue_luolcy_execution(session_factory, settings: Settings,
             raise ValueError(
                 "Previous execution failed or was cancelled; manual recovery is required"
             )
+        active = session.scalar(select(WorkJob.id).where(
+            WorkJob.kind == EXECUTE_KIND,
+            WorkJob.status.in_(ACTIVE),
+        ).limit(1))
+        if active is not None:
+            raise ValueError(f"Another Luolcy execution task #{active} is running")
         job = WorkJob(
             kind=EXECUTE_KIND, status="queued", progress_current=0,
             progress_total=summary["package_count"],
