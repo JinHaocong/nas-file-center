@@ -556,6 +556,11 @@ def _publish_group_compat(manifest: dict, group_index: int,
         _check_directory(os.fstat(dst_fd), final, manifest["package_dev"])
         if not _compat_marker_matches(dst_fd, _COMPAT_OWNER_MARKER, marker):
             raise MediaPackageExecutionConflict("Publication owner witness disappeared")
+        # Never resume pending writes when the mount has lost durability
+        # support, even if a marker happened to survive a prior crash.
+        os.fsync(dst_fd)
+        if src_fd is not None:
+            os.fsync(src_fd)
         # Phase I: create ALL final file links with exclusive link(2).
         for row in _group_files(manifest, group_index):
             name = row["target_name"]
