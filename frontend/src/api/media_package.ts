@@ -80,6 +80,7 @@ export interface MediaPackagePreviewPage {
   packages: MediaPackagePreview[];
   page: number;
   page_size: number;
+  filtered_total: number;
   read_only: true;
 }
 
