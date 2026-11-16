@@ -446,6 +446,226 @@ def _remove_empty_sources(manifest: dict, lease_fence: Callable[[], None]) -> in
     return removed
 
 
+_ROOT_READY_MARKER = ".nfc-publish-ready"
+
+
+def _flat_rows(manifest: dict) -> list[dict]:
+    return manifest["moves"]
+
+
+def _root_finals_complete(manifest: dict) -> bool:
+    """Recognize a previously published flat package only by EVERY frozen inode.
+
+    During normal preflight some original root filenames may already be
+    numbered, but the full expected final set cannot match a ready-to-rename
+    package without all of its other source bindings having retired.
+    """
+    package = Path(manifest["package"])
+    for row in _flat_rows(manifest):
+        target = Path(row["final"])
+        st = _entry(package, target.name)
+        if st is None or not stat.S_ISREG(st.st_mode) or _identity(st) != row["identity"]:
+            return False
+        src = Path(row["source"])
+        if src != target:
+            if src.parent.is_dir() and _entry(src.parent, src.name) is not None:
+                return False
+    return True
+
+
+def _flat_stage_inspect(manifest: dict, stage: Path) -> bool:
+    """Validate all existing stage entries; return whether publish marker exists."""
+    expected = {Path(row["target"]).name.casefold(): row["identity"]
+                for row in _flat_rows(manifest)}
+    if len(expected) != len(manifest["moves"]):
+        raise MediaPackageExecutionConflict("Flat numbered destination collision")
+    folder = _open_folder(stage)
+    has_marker = False
+    try:
+        st = os.fstat(folder)
+        if int(st.st_dev) != manifest["package_dev"]:
+            raise MediaPackageExecutionConflict("Flat staging device changed")
+        with os.scandir(folder) as entries:
+            for entry in entries:
+                if entry.name == _ROOT_READY_MARKER:
+                    if entry.is_symlink() or not entry.is_file(follow_symlinks=False):
+                        raise MediaPackageExecutionConflict("Invalid publish marker type")
+                    has_marker = True
+                    continue
+                key = entry.name.casefold()
+                if key not in expected:
+                    raise MediaPackageExecutionConflict("Foreign file in flat staging directory")
+                _check_file(entry.stat(follow_symlinks=False),
+                            expected[key], stage / entry.name)
+        if has_marker:
+            marker_fd = os.open(
+                _ROOT_READY_MARKER, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=folder,
+            )
+            try:
+                contents = os.read(marker_fd, 128)
+            finally:
+                os.close(marker_fd)
+            if contents != _manifest_checksum(manifest).encode("ascii"):
+                raise MediaPackageExecutionConflict("Frozen flat publish marker mismatched")
+    finally:
+        os.close(folder)
+    return has_marker
+
+
+def _flat_stage_complete(manifest: dict, stage: Path) -> None:
+    expected = {Path(row["target"]).name.casefold(): row["identity"]
+                for row in _flat_rows(manifest)}
+    seen = set()
+    fd = _open_folder(stage)
+    try:
+        with os.scandir(fd) as entries:
+            for entry in entries:
+                key = entry.name.casefold()
+                if key not in expected or key in seen:
+                    raise MediaPackageExecutionConflict("Unexpected entry in complete flat stage")
+                seen.add(key)
+                _check_file(entry.stat(follow_symlinks=False),
+                            expected[key], stage / entry.name)
+        if seen != set(expected):
+            raise MediaPackageExecutionConflict("Flat media package has incomplete staging")
+    finally:
+        os.close(fd)
+
+
+def _mark_flat_ready(manifest: dict, stage: Path,
+                     lease_fence: Callable[[], None]) -> None:
+    lease_fence()
+    fd = _open_folder(stage)
+    try:
+        marker = os.open(
+            _ROOT_READY_MARKER,
+            os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW,
+            0o600, dir_fd=fd,
+        )
+        try:
+            os.write(marker, _manifest_checksum(manifest).encode("ascii"))
+            os.fsync(marker)
+        finally:
+            os.close(marker)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _publish_flat_file(row: dict, stage: Path, package: Path,
+                       lease_fence: Callable[[], None]) -> str:
+    name = Path(row["target"]).name
+    before = _entry(stage, name)
+    published = _entry(package, name)
+    if before is None:
+        _check_file(published, row["identity"], package / name)
+        return "resumed"
+    _check_file(before, row["identity"], stage / name)
+    if published is not None:
+        raise MediaPackageExecutionConflict(
+            f"Root destination occupied; refuse overwrite: {package / name}"
+        )
+    stage_fd = _open_folder(stage)
+    package_fd = _open_folder(package)
+    try:
+        lease_fence()
+        _check_file(os.stat(name, dir_fd=stage_fd, follow_symlinks=False),
+                    row["identity"], stage / name)
+        try:
+            rename_noreplace_at(stage_fd, name, package_fd, name)
+        except OSError as exc:
+            if exc.errno != errno.EOPNOTSUPP:
+                raise
+            # Atomic link publication never clobbers an existing name.
+            # A crash between link and unlink leaves two names: block and
+            # require human reconciliation rather than risking data loss.
+            os.link(name, name, src_dir_fd=stage_fd,
+                    dst_dir_fd=package_fd, follow_symlinks=False)
+            _check_file(os.stat(name, dir_fd=package_fd, follow_symlinks=False),
+                        row["identity"], package / name)
+            lease_fence()
+            os.unlink(name, dir_fd=stage_fd)
+        _check_file(os.stat(name, dir_fd=package_fd, follow_symlinks=False),
+                    row["identity"], package / name)
+    finally:
+        os.close(package_fd)
+        os.close(stage_fd)
+    return "published"
+
+
+def _remove_flat_stage(manifest: dict, stage: Path,
+                       lease_fence: Callable[[], None]) -> None:
+    if not _root_finals_complete(manifest):
+        raise MediaPackageExecutionConflict("Flat result is incomplete; refusing cleanup")
+    if not stage.exists():
+        return
+    if stage.is_symlink():
+        raise MediaPackageExecutionConflict("Unsafe flat staging symlink")
+    fd = _open_folder(stage)
+    try:
+        try:
+            st = os.stat(_ROOT_READY_MARKER, dir_fd=fd, follow_symlinks=False)
+        except FileNotFoundError:
+            st = None
+        if st is not None:
+            if not stat.S_ISREG(st.st_mode):
+                raise MediaPackageExecutionConflict("Unsafe flat publish marker")
+            lease_fence()
+            os.unlink(_ROOT_READY_MARKER, dir_fd=fd)
+    finally:
+        os.close(fd)
+    lease_fence()
+    parent_fd = _open_folder(stage.parent)
+    try:
+        os.rmdir(stage.name, dir_fd=parent_fd)
+    finally:
+        os.close(parent_fd)
+
+
+def _execute_flat_manifest(manifest: dict, lease_fence: Callable[[], None],
+                           progress: Callable[[int, int], None] | None) -> dict:
+    package = Path(manifest["package"])
+    stage = package / manifest["root_stage"]
+    total = len(_flat_rows(manifest))
+    if _root_finals_complete(manifest):
+        _remove_flat_stage(manifest, stage, lease_fence)
+        return {"files_moved": 0, "files_reconciled": total,
+                "groups_published": 0}
+
+    if stage.is_symlink():
+        raise MediaPackageExecutionConflict("Unsafe flat staging symlink")
+    if not stage.exists():
+        lease_fence()
+        fd = _open_folder(package)
+        try:
+            os.mkdir(stage.name, 0o700, dir_fd=fd)
+        finally:
+            os.close(fd)
+    marked = _flat_stage_inspect(manifest, stage)
+    completed = 0
+    recovered = 0
+    if not marked:
+        for i, row in enumerate(_flat_rows(manifest), 1):
+            outcome = _move_one(row, lease_fence=lease_fence, ignore_final=True)
+            completed += outcome == "moved"
+            recovered += outcome != "moved"
+            if progress and (i % 25 == 0 or i == total):
+                progress(i, total)
+        _flat_stage_complete(manifest, stage)
+        _mark_flat_ready(manifest, stage, lease_fence)
+    else:
+        # The durable marker is recorded before ANY final name publication.
+        # After a crash, do not re-stage a file whose final name is already
+        # published, including an item whose original source name is identical.
+        recovered = total
+
+    for row in _flat_rows(manifest):
+        _publish_flat_file(row, stage, package, lease_fence)
+    _remove_flat_stage(manifest, stage, lease_fence)
+    return {"files_moved": completed, "files_reconciled": recovered,
+            "groups_published": 0}
+
+
 def _validate_frozen_paths(manifest: dict) -> None:
     """Reject any corrupt/artifact-rewritten path outside the resource package."""
     package = Path(manifest["package"])
@@ -516,6 +736,12 @@ def execute_frozen_manifest(manifest: dict, *, lease_fence: Callable[[], None],
             raise MediaPackageExecutionConflict("Protected resource package identity changed")
     finally:
         os.close(fd)
+    if manifest.get("root_stage"):
+        result = _execute_flat_manifest(manifest, lease_fence, progress)
+        result["empty_dirs_removed"] = _remove_empty_sources(manifest, lease_fence)
+        result["total_files"] = len(manifest["moves"])
+        result["package"] = str(package)
+        return result
     for i in range(len(manifest["groups"])):
         _ensure_staging(manifest, i, lease_fence)
     completed = recovered = 0
