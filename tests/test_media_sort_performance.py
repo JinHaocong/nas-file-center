@@ -260,3 +260,37 @@ def test_media_parent_cache_detects_directory_replacement(tmp_path):
     assert second.read_bytes() == b"second"
     assert not (root / "P" / "b.jpg").exists()
     assert (root / "old_p" / "a.jpg").read_bytes() == b"first"
+
+
+def test_sparse_jsonl_pagination_jumps_to_nearby_offset_and_supports_legacy(tmp_path, monkeypatch):
+    import app.batch.media_sort_jobs as jobs
+
+    rows_file = tmp_path / "preview.items.jsonl"
+    index_file = jobs._index_path(rows_file)
+    with rows_file.open("w", encoding="utf-8") as rows, index_file.open("w", encoding="utf-8") as index:
+        for number in range(1300):
+            if number % jobs.PAGE_INDEX_STRIDE == 0:
+                index.write(f"{number}\t{rows.tell()}\n")
+            rows.write(json.dumps({"number": number, "name": "风景图片"}, ensure_ascii=False) + "\n")
+
+    original_islice = jobs.itertools.islice
+    requested_offsets: list[int] = []
+
+    def observed_islice(iterator, start, stop):
+        requested_offsets.append(start)
+        return original_islice(iterator, start, stop)
+
+    monkeypatch.setattr(jobs.itertools, "islice", observed_islice)
+    page = jobs._read_page(rows_file, offset=1125, page_size=25)
+    assert [item["number"] for item in page] == list(range(1125, 1150))
+    assert requested_offsets[-1] < jobs.PAGE_INDEX_STRIDE
+
+    # Older previews without sparse indexes must retain exact pagination.
+    index_file.unlink()
+    legacy = jobs._read_page(rows_file, offset=1125, page_size=25)
+    assert legacy == page
+    assert requested_offsets[-1] == 1125
+
+    index_file.write_text("malformed-index\n", encoding="utf-8")
+    corrupt = jobs._read_page(rows_file, offset=1125, page_size=25)
+    assert corrupt == page  # Fail-safe fallback, never wrong rows.
