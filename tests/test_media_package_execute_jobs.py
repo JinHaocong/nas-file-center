@@ -45,7 +45,7 @@ def _preview(client, settings, package: Path):
 
 def test_confirmed_media_package_execute_moves_only_inner_files_and_deletes_empty_wrapper(tmp_path):
     client, settings, root = _fixture(tmp_path)
-    package = root / "2611" / "261115" / "作者" / "New 1432.1MB"
+    package = root / "2611" / "261115" / "作者" / "SampleBundle"
     a = package / "视频A"
     b = package / "视频B"
     a.mkdir(parents=True)
@@ -80,7 +80,7 @@ def test_confirmed_media_package_execute_moves_only_inner_files_and_deletes_empt
     assert (package / "002.mp4").read_bytes() == b"two"
     assert not a.exists()
     assert not b.exists()
-    assert package.name == "New 1432.1MB"
+    assert package.name == "SampleBundle"
     assert package.parent.name == "作者"
 
 
@@ -127,6 +127,8 @@ def test_execute_queue_rejects_preview_with_any_conflict(tmp_path):
     (package / "B").mkdir()
     (package / "A" / "same.jpg").write_bytes(b"one")
     (package / "B" / "same.jpg").write_bytes(b"two")
+    (package / "extra.mp4").write_bytes(b"video")
+    (package / "P_1").mkdir()
     created = client.post("/api/media_package/previews", json={
         "selection": str(package),
     })
