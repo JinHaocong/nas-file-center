@@ -76,11 +76,31 @@ export interface LuolcyPreviewPage {
   read_only: true;
 }
 
+export interface LuolcyExecuteStatus {
+  job_id: number;
+  status: LuolcyJobStatus;
+  error: string | null;
+  preview_job_id: number;
+  progress: {
+    current: number;
+    total: number;
+    message: string | null;
+    package?: string;
+    package_file_progress?: number;
+  };
+}
+
 export const luolcyApi = {
   startPreview: (selection: string) =>
     api.post<{ job_id: number; status: LuolcyJobStatus }>(
       '/api/luolcy/previews', { selection },
     ),
+  startExecution: (previewJobId: number, confirmation: string) =>
+    api.post<{ job_id: number; status: LuolcyJobStatus }>(
+      `/api/luolcy/previews/${previewJobId}/execute`, { confirmation },
+    ),
+  getExecution: (jobId: number) =>
+    api.get<LuolcyExecuteStatus>(`/api/luolcy/executions/${jobId}`),
   getPreview: (jobId: number, page: number = 1, pageSize: number = 25) => {
     const query = new URLSearchParams({
       page: String(page), page_size: String(pageSize),
