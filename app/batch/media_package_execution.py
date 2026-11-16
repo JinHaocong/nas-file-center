@@ -158,9 +158,9 @@ def prepare_media_package_manifest(package: Path, *, media_package_root: Path,
             assigned, _ = allocate_names(segment, kind=kind)
             for item, target_name in zip(segment, assigned):
                 target = source / stage / target_name
-                if item["path"] == str(final / target_name):
-                    # Existing destination buckets may not be silently replaced.
-                    raise MediaPackageExecutionConflict("Unexpected source inside a final bucket")
+                # Original files may already live under this final label.
+                # Every such source is staged before the old empty bucket
+                # can be retired, so original and output names may coincide.
                 moves.append({
                     "source": item["path"], "target": str(target),
                     "final": str(final / target_name),
@@ -337,24 +337,52 @@ def _verify_group_contents(manifest: dict, group_index: int, directory: Path) ->
         os.close(fd)
 
 
-def _ensure_staging(manifest: dict, group_index: int, lease_fence: Callable[[], None]) -> None:
+def _frozen_original_directory(manifest: dict, path: Path) -> bool:
+    """Prove a pre-existing target is an original, identity-bound input."""
+    identity = manifest["origin_directories"].get(str(path))
+    if identity is None:
+        return False
+    fd = _open_folder(path)
+    try:
+        st = os.fstat(fd)
+        if [int(st.st_dev), int(st.st_ino)] != identity:
+            raise MediaPackageExecutionConflict(
+                "Previously scanned MediaPackage bucket directory was replaced"
+            )
+    finally:
+        os.close(fd)
+    return True
+
+
+def _ensure_staging(manifest: dict, group_index: int,
+                    lease_fence: Callable[[], None]) -> str:
+    """Distinguish an old scanned bucket from an already-published output."""
     package = Path(manifest["package"])
     group = manifest["groups"][group_index]
     stage = package / group["stage"]
     final = package / group["final"]
-    if final.exists() or final.is_symlink():
+    has_stage = os.path.lexists(stage)
+    if os.path.lexists(final):
         if _compat_inspect_group(manifest, group_index) is not None:
-            return
-        if stage.exists() or stage.is_symlink():
-            raise MediaPackageExecutionConflict("Both staging and foreign published directories exist")
-        _verify_group_contents(manifest, group_index, final)
-        return
-    if stage.exists() or stage.is_symlink():
+            return "compat"
+        if not has_stage:
+            # A fully matching output is safe to reuse; all other occupants
+            # must be independently proven original scanned input folders.
+            try:
+                _verify_group_contents(manifest, group_index, final)
+            except MediaPackageExecutionConflict:
+                if not _frozen_original_directory(manifest, final):
+                    raise
+            else:
+                return "published"
+        elif not _frozen_original_directory(manifest, final):
+            raise MediaPackageExecutionConflict(
+                "Both staging and foreign published directories exist"
+            )
+    if has_stage:
         fd = _open_folder(stage)
         try:
             _check_directory(os.fstat(fd), stage, manifest["package_dev"])
-            # A pre-existing staging name cannot be trusted just because it
-            # looks like a prior Worker run. Validate every existing entry.
             expected = {Path(row["target"]).name.casefold(): row["identity"]
                         for row in _group_files(manifest, group_index)}
             seen = set()
@@ -368,14 +396,14 @@ def _ensure_staging(manifest: dict, group_index: int, lease_fence: Callable[[], 
                                 stage / entry.name)
         finally:
             os.close(fd)
-        return
+        return "staging"
     lease_fence()
     fd = _open_folder(package)
     try:
         os.mkdir(group["stage"], mode=0o755, dir_fd=fd)
     finally:
         os.close(fd)
-
+    return "staging"
 
 _COMPAT_OWNER_MARKER = ".nfc-media-publish-owner"
 _COMPAT_COMPLETE_MARKER = ".nfc-media-publish-complete"
