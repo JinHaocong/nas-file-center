@@ -20,7 +20,6 @@ from app.config import Settings
 from app.models import WorkJob
 from app.tasks.handlers_base import TaskHandler, register_handler
 from app.tasks.context import JobContext
-from app.tasks.recovery import renew_and_assert_worker_lease
 
 EXECUTE_KIND = "luolcy-package-execute"
 ACTIVE = ("queued", "running", "paused", "cancel_requested")
@@ -153,6 +152,8 @@ class LuolcyPackageExecuteHandler(TaskHandler):
         folder.mkdir(parents=True, exist_ok=True, mode=0o700)
 
         def fence() -> None:
+            # Lazy import avoids recovery -> handler registry -> execute-job cycle.
+            from app.tasks.recovery import renew_and_assert_worker_lease
             renew_and_assert_worker_lease(context.SessionLocal, context.worker_id)
 
         results = []
