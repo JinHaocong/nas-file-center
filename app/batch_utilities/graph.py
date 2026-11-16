@@ -177,7 +177,8 @@ def resolve_suffix_transform_graph(
             effective_items.append(item)
         except ValueError as e:
             msg = str(e)
-            if "超过文件系统限制" in msg or "过长" in msg:
+            if ("超过文件系统限制" in msg or "目标文件名超过" in msg
+                    or "过长" in msg):
                 conflicts.append(
                     BlockingConflict(
                         source_path=item.source_path,
