@@ -1,4 +1,4 @@
-"""Read-only Luolcy-specific resource package planner.
+"""Read-only MediaPackage-specific resource package planner.
 
 This is deliberately separate from generic media sort. No filesystem mutation
 is permitted here: a future executor must validate a fresh manifest and use
@@ -44,25 +44,25 @@ def _package_path(package: str | Path, root: str | Path,
     base = Path(root).expanduser()
     raw = Path(package).expanduser()
     if not raw.is_absolute() or not base.is_absolute():
-        raise ValueError("Luolcy paths must be absolute")
+        raise ValueError("MediaPackage paths must be absolute")
     # No symlink traversal even if an attacker points a directory inside the
-    # Luolcy tree to an unrelated storage area.
+    # MediaPackage tree to an unrelated storage area.
     safe = require_unreserved_path(
         require_allowed_path(raw, allowed_roots), quarantine_root
     )
     if raw != safe:
-        raise ValueError("Luolcy path must use its literal canonical location")
+        raise ValueError("MediaPackage path must use its literal canonical location")
     try:
         components = raw.relative_to(base).parts
     except ValueError as exc:
-        raise ValueError("Package must be below the configured Luolcy root") from exc
+        raise ValueError("Package must be below the configured MediaPackage root") from exc
     if (len(components) != 4
             or not _MONTH.fullmatch(components[0])
             or not _DAY.fullmatch(components[1])
             or components[1][:4] != components[0]
             or components[2] in (".", "..")
             or components[3] in (".", "..")):
-        raise ValueError("Expected Luolcy/YYMM/YYMMDD/author/package")
+        raise ValueError("Expected MediaPackage/YYMM/YYMMDD/author/package")
     fd = _open_directory_nofollow(raw)
     os.close(fd)
     return raw
@@ -73,33 +73,33 @@ MAX_SCOPE_DISCOVERED_PACKAGES = 60_000
 MAX_SCOPE_ENTRIES_PER_DIRECTORY = 100_000
 
 
-def _validate_scope(selection: str | Path, *, luolcy_root: str | Path,
+def _validate_scope(selection: str | Path, *, media_package_root: str | Path,
                     allowed_roots: list[Path],
                     quarantine_root: Path | None) -> tuple[Path, int]:
-    """Restrict a selection to the Luolcy root or one of its four fixed levels.
+    """Restrict a selection to the MediaPackage root or one of its four fixed levels.
 
     A selected month/day is a *discovery scope*, never a move destination.
     Only the resource package's descendants may be changed by a future runner.
     """
-    root = Path(luolcy_root).expanduser()
+    root = Path(media_package_root).expanduser()
     raw = Path(selection).expanduser()
     if not raw.is_absolute() or not root.is_absolute():
-        raise ValueError("Luolcy selection and root must be absolute paths")
+        raise ValueError("MediaPackage selection and root must be absolute paths")
     safe = require_unreserved_path(
         require_allowed_path(raw, allowed_roots), quarantine_root,
     )
     if raw != safe:
-        raise ValueError("Luolcy selection must use a literal canonical path")
+        raise ValueError("MediaPackage selection must use a literal canonical path")
     try:
         components = raw.relative_to(root).parts
     except ValueError as exc:
-        raise ValueError("Selection must stay below the configured Luolcy root") from exc
+        raise ValueError("Selection must stay below the configured MediaPackage root") from exc
     if (len(components) > 4
             or (len(components) >= 1 and not _MONTH.fullmatch(components[0]))
             or (len(components) >= 2 and
                 (not _DAY.fullmatch(components[1]) or
                  components[1][:4] != components[0]))):
-        raise ValueError("Select Luolcy, YYMM, YYMMDD, author or resource package")
+        raise ValueError("Select MediaPackage, YYMM, YYMMDD, author or resource package")
     fd = _open_directory_nofollow(raw)
     os.close(fd)
     return raw, len(components)
@@ -113,11 +113,11 @@ def _child_directories(directory: Path) -> list[str]:
         with os.scandir(fd) as entries:
             for count, entry in enumerate(entries, 1):
                 if count > MAX_SCOPE_ENTRIES_PER_DIRECTORY:
-                    raise ValueError("Too many Luolcy discovery entries in one directory")
+                    raise ValueError("Too many MediaPackage discovery entries in one directory")
                 # Symlinked folders may point outside the protected resource
                 # hierarchy. Never silently treat them as resource packages.
                 if entry.is_symlink():
-                    raise ValueError(f"Luolcy scope contains a symlink: {directory / entry.name}")
+                    raise ValueError(f"MediaPackage scope contains a symlink: {directory / entry.name}")
                 if entry.is_dir(follow_symlinks=False):
                     names.append(entry.name)
     finally:
@@ -125,18 +125,18 @@ def _child_directories(directory: Path) -> list[str]:
     return sorted(names)
 
 
-def iter_luolcy_packages(selection: str | Path, *,
-                         luolcy_root: str | Path,
+def iter_media_package_packages(selection: str | Path, *,
+                         media_package_root: str | Path,
                          allowed_roots: list[Path],
                          quarantine_root: Path | None = None):
-    """Stream package paths from Luolcy/YYMM/YYMMDD/author/package.
+    """Stream package paths from MediaPackage/YYMM/YYMMDD/author/package.
 
-    A Luolcy root selection enumerates all packages; month/day selections
+    A MediaPackage root selection enumerates all packages; month/day selections
     enumerate only matching descendants. No unrelated directory is modified.
     The iterator is bounded and does not materialize the full library.
     """
     selected, level = _validate_scope(
-        selection, luolcy_root=luolcy_root,
+        selection, media_package_root=media_package_root,
         allowed_roots=allowed_roots, quarantine_root=quarantine_root,
     )
     pending = [(selected, level)]
@@ -146,7 +146,7 @@ def iter_luolcy_packages(selection: str | Path, *,
         if depth == 4:
             discovered += 1
             if discovered > MAX_SCOPE_DISCOVERED_PACKAGES:
-                raise ValueError("Too many Luolcy resource packages in selected scope")
+                raise ValueError("Too many MediaPackage resource packages in selected scope")
             yield directory
             continue
         children = []
@@ -160,18 +160,18 @@ def iter_luolcy_packages(selection: str | Path, *,
         pending.extend(reversed(children))
 
 
-def iter_luolcy_previews(selection: str | Path, *,
-                         luolcy_root: str | Path,
+def iter_media_package_previews(selection: str | Path, *,
+                         media_package_root: str | Path,
                          allowed_roots: list[Path],
                          quarantine_root: Path | None = None,
                          max_rows: int = 100):
     """Yield read-only previews one resource package at a time (bounded RAM)."""
-    for package in iter_luolcy_packages(
-        selection, luolcy_root=luolcy_root,
+    for package in iter_media_package_packages(
+        selection, media_package_root=media_package_root,
         allowed_roots=allowed_roots, quarantine_root=quarantine_root,
     ):
-        yield preview_luolcy_package(
-            package, luolcy_root=luolcy_root,
+        yield preview_media_package_package(
+            package, media_package_root=media_package_root,
             allowed_roots=allowed_roots, quarantine_root=quarantine_root,
             max_rows=max_rows,
         )
@@ -190,7 +190,7 @@ def _walk_package(package: Path):
         directory, depth = stack.pop()
         directory_count += 1
         if directory_count > MAX_PACKAGE_DIRECTORIES or depth > MAX_DEPTH:
-            raise ValueError("Luolcy directory/depth safety limit exceeded")
+            raise ValueError("MediaPackage directory/depth safety limit exceeded")
         fd = _open_directory_nofollow(directory)
         children = []
         try:
@@ -208,7 +208,7 @@ def _walk_package(package: Path):
                         raise ValueError("Source file changed during scan")
                     file_count += 1
                     if file_count > MAX_PACKAGE_FILES:
-                        raise ValueError("Luolcy package file safety limit exceeded")
+                        raise ValueError("MediaPackage package file safety limit exceeded")
                     yield {
                         "path": str(directory / entry.name),
                         "name": entry.name,
@@ -225,7 +225,7 @@ def _walk_package(package: Path):
 
 def _input_fingerprint(files: list[dict], package: Path) -> str:
     """Stable digest of the entire package file snapshot, not a sampled page."""
-    digest = hashlib.sha256(b"luolcy-snapshot-v2\\n")
+    digest = hashlib.sha256(b"media_package-snapshot-v2\\n")
     for item in sorted(files, key=lambda row: (
         os.path.relpath(row["path"], package).casefold(),
         os.path.relpath(row["path"], package),
@@ -239,7 +239,7 @@ def _input_fingerprint(files: list[dict], package: Path) -> str:
     return digest.hexdigest()
 
 
-def preview_luolcy_package(package: str | Path, *, luolcy_root: str | Path,
+def preview_media_package_package(package: str | Path, *, media_package_root: str | Path,
                            allowed_roots: list[Path],
                            quarantine_root: Path | None = None,
                            max_rows: int = 100, include_items: bool = False) -> dict:
@@ -252,7 +252,7 @@ def preview_luolcy_package(package: str | Path, *, luolcy_root: str | Path,
     """
     if not isinstance(max_rows, int) or not 1 <= max_rows <= 200:
         raise ValueError("max_rows must be between 1 and 200")
-    source = _package_path(package, luolcy_root, allowed_roots, quarantine_root)
+    source = _package_path(package, media_package_root, allowed_roots, quarantine_root)
     items = list(_walk_package(source))
     input_fingerprint = _input_fingerprint(items, source)
     totals = {kind: sum(x["kind"] == kind for x in items) for kind in ("P", "V", "Other")}

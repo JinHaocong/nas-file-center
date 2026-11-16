@@ -1,4 +1,4 @@
-"""Luolcy per-package execution engine: frozen manifest + fail-closed no-replace moves.
+"""MediaPackage per-package execution engine: frozen manifest + fail-closed no-replace moves.
 
 This module has no HTTP mutation API. Only a future Worker with a live lease
 may call execute_manifest. A report snapshot is revalidated against a live
@@ -16,14 +16,14 @@ from pathlib import Path
 from typing import Callable
 
 from app.batch.file_rename import _open_directory_nofollow
-from app.batch.luolcy_organizer import (
+from app.batch.media_package_organizer import (
     MAX_FILES_PER_GROUP, _input_fingerprint, _package_path,
-    preview_luolcy_package,
+    preview_media_package_package,
 )
 from app.fs_ops import rename_directory_noreplace_compat, rename_noreplace_at
 
 
-class LuolcyExecutionConflict(ValueError):
+class MediaPackageExecutionConflict(ValueError):
     """A package cannot be safely executed without an operator reviewing it."""
 
 
@@ -52,24 +52,24 @@ def _stat_entry(folder: Path, name: str):
 def _check_file(st, expected: list[int], path: Path) -> None:
     if (st is None or not stat.S_ISREG(st.st_mode)
             or _identity(st) != expected):
-        raise LuolcyExecutionConflict(f"File changed or missing: {path}")
+        raise MediaPackageExecutionConflict(f"File changed or missing: {path}")
 
 
 def _check_directory(st, path: Path, dev: int | None = None) -> None:
     if (st is None or not stat.S_ISDIR(st.st_mode)
             or (dev is not None and st.st_dev != dev)):
-        raise LuolcyExecutionConflict(f"Unsafe destination directory: {path}")
+        raise MediaPackageExecutionConflict(f"Unsafe destination directory: {path}")
 
 
-def prepare_luolcy_manifest(package: Path, *, luolcy_root: Path,
+def prepare_media_package_manifest(package: Path, *, media_package_root: Path,
                             allowed_roots: list[Path], quarantine_root: Path | None,
                             preview_record: dict, job_id: int) -> dict:
     """Freeze one ready package with full source identities and exact targets."""
-    source = _package_path(package, luolcy_root, allowed_roots, quarantine_root)
+    source = _package_path(package, media_package_root, allowed_roots, quarantine_root)
     if preview_record.get("package") != str(source) or preview_record.get("status") != "ready":
-        raise LuolcyExecutionConflict("Selected package was not ready in the preview")
-    fresh = preview_luolcy_package(
-        source, luolcy_root=luolcy_root, allowed_roots=allowed_roots,
+        raise MediaPackageExecutionConflict("Selected package was not ready in the preview")
+    fresh = preview_media_package_package(
+        source, media_package_root=media_package_root, allowed_roots=allowed_roots,
         quarantine_root=quarantine_root, include_items=True,
     )
     if (fresh.get("status") != "ready"
@@ -78,24 +78,24 @@ def prepare_luolcy_manifest(package: Path, *, luolcy_root: Path,
             or fresh.get("needed_moves") != preview_record.get("needed_moves")
             or fresh.get("groups") != preview_record.get("groups")
             or fresh.get("operation") != preview_record.get("operation")):
-        raise LuolcyExecutionConflict(f"Package changed since preview: {source}")
+        raise MediaPackageExecutionConflict(f"Package changed since preview: {source}")
 
     items = fresh.pop("_snapshot_items")
     if _input_fingerprint(items, source) != fresh["input_fingerprint"]:
-        raise LuolcyExecutionConflict("Package snapshot changed during its frozen preflight")
+        raise MediaPackageExecutionConflict("Package snapshot changed during its frozen preflight")
     package_stat = os.stat(source, follow_symlinks=False)
     _check_directory(package_stat, source)
     dev = int(package_stat.st_dev)
     for item in items:
         if item["dev"] != dev:
-            raise LuolcyExecutionConflict("Cross-filesystem package cannot be moved safely")
+            raise MediaPackageExecutionConflict("Cross-filesystem package cannot be moved safely")
 
     directories: dict[str, list[int]] = {}
     for item in items:
         parent = Path(item["path"]).parent
         while parent != source:
             if not parent.is_relative_to(source):
-                raise LuolcyExecutionConflict("Source escaped protected package")
+                raise MediaPackageExecutionConflict("Source escaped protected package")
             key = str(parent)
             if key not in directories:
                 fd = _open_folder(parent)
@@ -140,8 +140,8 @@ def prepare_luolcy_manifest(package: Path, *, luolcy_root: Path,
             if not segment or len(segment) != group["count"] or sum(
                 item["bytes"] for item in segment
             ) != group["bytes"]:
-                raise LuolcyExecutionConflict("Proposed grouping changed during freeze")
-            stage = f".nfc-luolcy-stage-{job_id}-{idx}"
+                raise MediaPackageExecutionConflict("Proposed grouping changed during freeze")
+            stage = f".nfc-media_package-stage-{job_id}-{idx}"
             final = source / group["name"]
             groups.append({
                 "stage": stage, "final": group["name"], "count": len(segment),
@@ -152,7 +152,7 @@ def prepare_luolcy_manifest(package: Path, *, luolcy_root: Path,
                 if item["path"] == str(final / item["name"]):
                     # A ready package cannot rely on a preexisting ambiguous
                     # destination; only a fully organized package may be no-op.
-                    raise LuolcyExecutionConflict("Unexpected source inside a final bucket")
+                    raise MediaPackageExecutionConflict("Unexpected source inside a final bucket")
                 moves.append({
                     "source": item["path"], "target": str(target),
                     "final": str(final / item["name"]),
@@ -161,10 +161,10 @@ def prepare_luolcy_manifest(package: Path, *, luolcy_root: Path,
                 })
 
     if len(moves) != int(fresh["needed_moves"]):
-        raise LuolcyExecutionConflict("Frozen move count differs from reviewed preview")
+        raise MediaPackageExecutionConflict("Frozen move count differs from reviewed preview")
     manifest = {
         "schema_version": MANIFEST_VERSION,
-        "job_id": job_id, "package": str(source), "luolcy_root": str(luolcy_root),
+        "job_id": job_id, "package": str(source), "media_package_root": str(media_package_root),
         "package_dev": dev, "package_ino": int(package_stat.st_ino),
         "input_fingerprint": fresh["input_fingerprint"],
         "operation": fresh["operation"],
@@ -181,11 +181,11 @@ def _manifest_checksum(manifest: dict) -> str:
 def save_frozen_manifest(path: Path, manifest: dict) -> None:
     """Exclusive, crash-safe publication on CONFIG_DIR; never overwrite."""
     if path.exists() or path.is_symlink():
-        raise LuolcyExecutionConflict("Frozen manifest path already exists")
+        raise MediaPackageExecutionConflict("Frozen manifest path already exists")
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     staging = path.with_name(path.name + ".tmp")
     if os.path.lexists(staging):
-        raise LuolcyExecutionConflict("Untrusted partial manifest artifact exists")
+        raise MediaPackageExecutionConflict("Untrusted partial manifest artifact exists")
     body = {"manifest": manifest, "checksum": _manifest_checksum(manifest)}
     fd = os.open(staging, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     try:
@@ -201,7 +201,7 @@ def save_frozen_manifest(path: Path, manifest: dict) -> None:
 
 def load_frozen_manifest(path: Path, *, job_id: int, package: Path) -> dict:
     if path.is_symlink() or not path.is_file():
-        raise LuolcyExecutionConflict("Frozen manifest is missing or unsafe")
+        raise MediaPackageExecutionConflict("Frozen manifest is missing or unsafe")
     with path.open("r", encoding="utf-8") as stream:
         body = json.load(stream)
     manifest = body.get("manifest")
@@ -210,7 +210,7 @@ def load_frozen_manifest(path: Path, *, job_id: int, package: Path) -> dict:
             or manifest.get("schema_version") != MANIFEST_VERSION
             or manifest.get("job_id") != job_id
             or manifest.get("package") != str(package)):
-        raise LuolcyExecutionConflict("Frozen manifest integrity mismatch")
+        raise MediaPackageExecutionConflict("Frozen manifest integrity mismatch")
     return manifest
 
 
@@ -232,7 +232,7 @@ def _move_one(move: dict, *, lease_fence: Callable[[], None]) -> str:
     final_stat = (_entry(final.parent, final.name)
                   if final != stage and final.parent.is_dir() else None)
     if stage_stat is not None and final_stat is not None:
-        raise LuolcyExecutionConflict("Both staged and published file bindings exist")
+        raise MediaPackageExecutionConflict("Both staged and published file bindings exist")
     existing = final_stat if final_stat is not None else stage_stat
     if existing is not None:
         _check_file(existing, expected, final if final_stat else stage)
@@ -244,7 +244,7 @@ def _move_one(move: dict, *, lease_fence: Callable[[], None]) -> str:
         # COMPAT hardlink operation, but it can also be a pre-existing alias.
         # Without an independently committed per-file publication intent,
         # NEVER unlink a source in this ambiguous state. Require review.
-        raise LuolcyExecutionConflict(
+        raise MediaPackageExecutionConflict(
             f"Both source and destination exist; manual review: {src}"
         )
 
@@ -255,7 +255,7 @@ def _move_one(move: dict, *, lease_fence: Callable[[], None]) -> str:
         dst_fd = _open_folder(stage.parent)
         try:
             if os.fstat(dst_fd).st_dev != source_stat.st_dev:
-                raise LuolcyExecutionConflict("Cross-filesystem move rejected")
+                raise MediaPackageExecutionConflict("Cross-filesystem move rejected")
             lease_fence()
             # Recheck immediately before mutation and rely on kernel NOREPLACE.
             _check_file(os.stat(src.name, dir_fd=src_fd, follow_symlinks=False),
@@ -296,7 +296,7 @@ def _verify_group_contents(manifest: dict, group_index: int, directory: Path) ->
     expected = {Path(row["final"]).name.casefold(): row["identity"]
                 for row in _group_files(manifest, group_index)}
     if len(expected) != group["count"]:
-        raise LuolcyExecutionConflict("Group filename collision in frozen manifest")
+        raise MediaPackageExecutionConflict("Group filename collision in frozen manifest")
     fd = _open_folder(directory)
     try:
         seen = set()
@@ -305,13 +305,13 @@ def _verify_group_contents(manifest: dict, group_index: int, directory: Path) ->
             for entry in entries:
                 folded = entry.name.casefold()
                 if folded in seen or folded not in expected:
-                    raise LuolcyExecutionConflict("Unrecognized file inside Luolcy stage/group")
+                    raise MediaPackageExecutionConflict("Unrecognized file inside MediaPackage stage/group")
                 seen.add(folded)
                 st = entry.stat(follow_symlinks=False)
                 _check_file(st, expected[folded], directory / entry.name)
                 size += int(st.st_size)
         if len(seen) != group["count"] or size != group["bytes"]:
-            raise LuolcyExecutionConflict("Group count/size is incomplete")
+            raise MediaPackageExecutionConflict("Group count/size is incomplete")
     finally:
         os.close(fd)
 
@@ -323,7 +323,7 @@ def _ensure_staging(manifest: dict, group_index: int, lease_fence: Callable[[], 
     final = package / group["final"]
     if final.exists() or final.is_symlink():
         if stage.exists() or stage.is_symlink():
-            raise LuolcyExecutionConflict("Both staging and published directories exist")
+            raise MediaPackageExecutionConflict("Both staging and published directories exist")
         _verify_group_contents(manifest, group_index, final)
         return
     if stage.exists() or stage.is_symlink():
@@ -339,7 +339,7 @@ def _ensure_staging(manifest: dict, group_index: int, lease_fence: Callable[[], 
                 for entry in entries:
                     folded = entry.name.casefold()
                     if folded in seen or folded not in expected:
-                        raise LuolcyExecutionConflict("Foreign entry in existing stage")
+                        raise MediaPackageExecutionConflict("Foreign entry in existing stage")
                     seen.add(folded)
                     _check_file(entry.stat(follow_symlinks=False), expected[folded],
                                 stage / entry.name)
@@ -362,7 +362,7 @@ def _publish_group(manifest: dict, group_index: int,
     final = package / group["final"]
     if final.exists() or final.is_symlink():
         if stage.exists() or stage.is_symlink():
-            raise LuolcyExecutionConflict("Published name and staging both exist")
+            raise MediaPackageExecutionConflict("Published name and staging both exist")
         _verify_group_contents(manifest, group_index, final)
         return "already_published"
     _verify_group_contents(manifest, group_index, stage)
@@ -371,7 +371,7 @@ def _publish_group(manifest: dict, group_index: int,
     try:
         if (os.fstat(fd).st_ino != manifest["package_ino"]
                 or os.fstat(fd).st_dev != manifest["package_dev"]):
-            raise LuolcyExecutionConflict("Package directory changed before publish")
+            raise MediaPackageExecutionConflict("Package directory changed before publish")
         live_stage = os.stat(group["stage"], dir_fd=fd, follow_symlinks=False)
         _check_directory(live_stage, stage, manifest["package_dev"])
         stage_fd = _open_folder(stage)
@@ -379,7 +379,7 @@ def _publish_group(manifest: dict, group_index: int,
             opened_stage = os.fstat(stage_fd)
             if (opened_stage.st_ino != live_stage.st_ino
                     or opened_stage.st_dev != live_stage.st_dev):
-                raise LuolcyExecutionConflict("Staging directory replaced before publish")
+                raise MediaPackageExecutionConflict("Staging directory replaced before publish")
         finally:
             os.close(stage_fd)
         try:
@@ -403,16 +403,16 @@ def _remove_empty_sources(manifest: dict, lease_fence: Callable[[], None]) -> in
                                  key=lambda entry: (-len(Path(entry[0]).parts), entry[0])):
         folder = Path(name)
         if not folder.is_relative_to(package) or folder == package:
-            raise LuolcyExecutionConflict("Unsafe original directory cleanup scope")
+            raise MediaPackageExecutionConflict("Unsafe original directory cleanup scope")
         if not folder.exists():
             continue
         if folder.is_symlink():
-            raise LuolcyExecutionConflict("Original directory became a symlink")
+            raise MediaPackageExecutionConflict("Original directory became a symlink")
         fd = _open_folder(folder)
         try:
             st = os.fstat(fd)
             if [int(st.st_dev), int(st.st_ino)] != identity:
-                raise LuolcyExecutionConflict("Original directory replaced during cleanup")
+                raise MediaPackageExecutionConflict("Original directory replaced during cleanup")
         finally:
             os.close(fd)
         lease_fence()
@@ -421,7 +421,7 @@ def _remove_empty_sources(manifest: dict, lease_fence: Callable[[], None]) -> in
             live = os.stat(folder.name, dir_fd=parent_fd, follow_symlinks=False)
             if (not stat.S_ISDIR(live.st_mode) or
                     [int(live.st_dev), int(live.st_ino)] != identity):
-                raise LuolcyExecutionConflict("Original directory changed before rmdir")
+                raise MediaPackageExecutionConflict("Original directory changed before rmdir")
             try:
                 os.rmdir(folder.name, dir_fd=parent_fd)
                 removed += 1
@@ -438,14 +438,14 @@ def _validate_frozen_paths(manifest: dict) -> None:
     package = Path(manifest["package"])
     if (not package.is_absolute() or
             not isinstance(manifest.get("job_id"), int) or manifest["job_id"] < 1):
-        raise LuolcyExecutionConflict("Invalid protected package / job identity")
+        raise MediaPackageExecutionConflict("Invalid protected package / job identity")
     dev = manifest.get("package_dev")
     if not isinstance(dev, int) or dev <= 0:
-        raise LuolcyExecutionConflict("Invalid frozen filesystem identity")
+        raise MediaPackageExecutionConflict("Invalid frozen filesystem identity")
     for index, group in enumerate(manifest.get("groups", [])):
-        stage = f".nfc-luolcy-stage-{manifest['job_id']}-{index}"
+        stage = f".nfc-media_package-stage-{manifest['job_id']}-{index}"
         if group.get("stage") != stage:
-            raise LuolcyExecutionConflict("Untrusted Luolcy staging directory name")
+            raise MediaPackageExecutionConflict("Untrusted MediaPackage staging directory name")
         final = Path(group.get("final", ""))
         if (not final.name or final.is_absolute() or len(final.parts) != 1
                 or final.name in (".", "..") or
@@ -453,13 +453,13 @@ def _validate_frozen_paths(manifest: dict) -> None:
                 group["count"] < 1 or group["count"] > 300_000 or
                 group.get("move_start", -1) < 0 or
                 group.get("kind") not in ("P", "V", "Other")):
-            raise LuolcyExecutionConflict("Invalid frozen Luolcy group metadata")
+            raise MediaPackageExecutionConflict("Invalid frozen MediaPackage group metadata")
         if group["kind"] in ("P", "V") and group["count"] > MAX_FILES_PER_GROUP:
-            raise LuolcyExecutionConflict("200-file Luolcy capacity exceeded")
+            raise MediaPackageExecutionConflict("200-file MediaPackage capacity exceeded")
 
     rows = manifest.get("moves")
     if not isinstance(rows, list):
-        raise LuolcyExecutionConflict("Invalid frozen Luolcy move list")
+        raise MediaPackageExecutionConflict("Invalid frozen MediaPackage move list")
     for row in rows:
         src, dest, final = (Path(row["source"]), Path(row["target"]),
                             Path(row["final"]))
@@ -468,25 +468,25 @@ def _validate_frozen_paths(manifest: dict) -> None:
                 or row.get("identity") is None or
                 len(row["identity"]) != 4 or
                 row["identity"][0] != dev):
-            raise LuolcyExecutionConflict("Unsafe frozen Luolcy source")
+            raise MediaPackageExecutionConflict("Unsafe frozen MediaPackage source")
         group_index = row.get("group")
         if group_index is None:
             expected_target = package / src.name
             expected_final = expected_target
         else:
             if not isinstance(group_index, int) or not 0 <= group_index < len(manifest["groups"]):
-                raise LuolcyExecutionConflict("Invalid frozen group association")
+                raise MediaPackageExecutionConflict("Invalid frozen group association")
             group = manifest["groups"][group_index]
             expected_target = package / group["stage"] / src.name
             expected_final = package / group["final"] / src.name
         if dest != expected_target or final != expected_final or src == dest:
-            raise LuolcyExecutionConflict("Frozen Luolcy move target escaped its package")
+            raise MediaPackageExecutionConflict("Frozen MediaPackage move target escaped its package")
     for index, group in enumerate(manifest["groups"]):
         start, count = group["move_start"], group["count"]
         if start + count > len(rows) or any(
             row["group"] != index for row in rows[start:start + count]
         ):
-            raise LuolcyExecutionConflict("Frozen Luolcy group rows are inconsistent")
+            raise MediaPackageExecutionConflict("Frozen MediaPackage group rows are inconsistent")
 
 
 def execute_frozen_manifest(manifest: dict, *, lease_fence: Callable[[], None],
@@ -494,13 +494,13 @@ def execute_frozen_manifest(manifest: dict, *, lease_fence: Callable[[], None],
     """Run one package idempotently; the caller owns lease checkpoints/recovery."""
     package = Path(manifest["package"])
     if manifest.get("schema_version") != MANIFEST_VERSION:
-        raise LuolcyExecutionConflict("Unsupported frozen manifest version")
+        raise MediaPackageExecutionConflict("Unsupported frozen manifest version")
     _validate_frozen_paths(manifest)
     fd = _open_folder(package)
     try:
         st = os.fstat(fd)
         if st.st_dev != manifest["package_dev"] or st.st_ino != manifest["package_ino"]:
-            raise LuolcyExecutionConflict("Protected resource package identity changed")
+            raise MediaPackageExecutionConflict("Protected resource package identity changed")
     finally:
         os.close(fd)
     for i in range(len(manifest["groups"])):

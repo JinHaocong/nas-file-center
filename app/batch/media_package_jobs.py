@@ -1,4 +1,4 @@
-"""Background read-only Luolcy package previews and bounded pagination.
+"""Background read-only MediaPackage package previews and bounded pagination.
 
 The job performs *no* mutation under DATA_MOUNT. Only 0600 report artifacts
 under CONFIG_DIR are created. No Move Plan is exposed by these endpoints.
@@ -12,29 +12,40 @@ import time
 from pathlib import Path
 
 from sqlalchemy import func, select
-from app.batch.luolcy_organizer import (
-    _validate_scope, iter_luolcy_packages, preview_luolcy_package,
+from app.batch.media_package_organizer import (
+    _validate_scope, iter_media_package_packages, preview_media_package_package,
 )
 from app.config import Settings
 from app.models import WorkJob
 from app.tasks.handlers_base import TaskHandler, register_handler
 from app.tasks.context import JobContext
 
-PREVIEW_KIND = "luolcy-package-preview"
+PREVIEW_KIND = "media_package-package-preview"
 ACTIVE_STATUSES = ("queued", "running", "paused", "cancel_requested")
 PAGE_INDEX_STRIDE = 128
 MAX_QUEUED_PREVIEWS = 3
 
 
 def _root(settings: Settings) -> Path:
-    # This rule is fixed; selecting another 'Luolcy' directory is not allowed.
-    return settings.data_mount / "Else" / "Luolcy"
+    # Scope is supplied privately at deployment time and cannot be widened
+    # or inferred from a user-selected path.
+    configured = settings.media_package_root
+    if configured is None:
+        raise ValueError("MEDIA_PACKAGE_ROOT is not configured")
+    raw = Path(configured).expanduser()
+    if not raw.is_absolute():
+        raise ValueError("MEDIA_PACKAGE_ROOT must be an absolute path")
+    from app.path_safety import require_allowed_path, require_unreserved_path
+    return require_unreserved_path(
+        require_allowed_path(raw, settings.allowed_roots),
+        settings.quarantine_root,
+    )
 
 
 def _files(settings: Settings, job_id: int) -> tuple[Path, Path, Path]:
     if not isinstance(job_id, int) or job_id < 1:
-        raise ValueError("Invalid Luolcy preview job id")
-    root = settings.reports_dir / "luolcy-previews"
+        raise ValueError("Invalid MediaPackage preview job id")
+    root = settings.reports_dir / "media_package-previews"
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     return (
         root / f"{job_id}.packages.jsonl",
@@ -62,7 +73,7 @@ def _read_page(data: Path, index: Path, *, page: int, size: int) -> list[dict]:
                 if row > offset:
                     break
                 if row < base or pos < byte_position:
-                    raise ValueError("Luolcy preview index is corrupt")
+                    raise ValueError("MediaPackage preview index is corrupt")
                 base, byte_position = row, pos
     with data.open("r", encoding="utf-8") as stream:
         stream.seek(byte_position)
@@ -70,9 +81,9 @@ def _read_page(data: Path, index: Path, *, page: int, size: int) -> list[dict]:
                 itertools.islice(stream, offset - base, offset - base + size)]
 
 
-def enqueue_luolcy_preview(session_factory, settings: Settings, *, selection: str) -> dict:
+def enqueue_media_package_preview(session_factory, settings: Settings, *, selection: str) -> dict:
     chosen, _ = _validate_scope(
-        selection, luolcy_root=_root(settings),
+        selection, media_package_root=_root(settings),
         allowed_roots=settings.allowed_roots,
         quarantine_root=settings.quarantine_root,
     )
@@ -81,11 +92,11 @@ def enqueue_luolcy_preview(session_factory, settings: Settings, *, selection: st
             WorkJob.kind == PREVIEW_KIND, WorkJob.status.in_(ACTIVE_STATUSES),
         )) or 0
         if active >= MAX_QUEUED_PREVIEWS:
-            raise ValueError("Too many Luolcy previews are active; cancel or finish one first")
+            raise ValueError("Too many MediaPackage previews are active; cancel or finish one first")
         job = WorkJob(
             kind=PREVIEW_KIND, status="queued",
             progress_current=0, progress_total=0,
-            progress_message="等待 Worker 扫描 Luolcy 资源包",
+            progress_message="等待 Worker 扫描 MediaPackage 资源包",
             state_json=json.dumps({"selection": str(chosen)}, ensure_ascii=False),
         )
         session.add(job)
@@ -94,10 +105,10 @@ def enqueue_luolcy_preview(session_factory, settings: Settings, *, selection: st
         return {"job_id": int(job.id), "status": job.status}
 
 
-def get_luolcy_preview(session_factory, settings: Settings, job_id: int, *,
+def get_media_package_preview(session_factory, settings: Settings, job_id: int, *,
                        page: int = 1, page_size: int = 25) -> dict:
     if not 1 <= page or not 1 <= page_size <= 100:
-        raise ValueError("Invalid Luolcy preview pagination")
+        raise ValueError("Invalid MediaPackage preview pagination")
     with session_factory() as session:
         job = session.get(WorkJob, job_id)
         if job is None or job.kind != PREVIEW_KIND:
@@ -117,7 +128,7 @@ def get_luolcy_preview(session_factory, settings: Settings, job_id: int, *,
     if status == "completed":
         data, index, summary_path = _files(settings, job_id)
         if not all(path.is_file() for path in (data, index, summary_path)):
-            raise ValueError("Completed Luolcy preview artifacts are incomplete; scan again")
+            raise ValueError("Completed MediaPackage preview artifacts are incomplete; scan again")
         with summary_path.open("r", encoding="utf-8") as stream:
             summary = json.load(stream)
         packages = _read_page(data, index, page=page, size=page_size)
@@ -131,7 +142,7 @@ def get_luolcy_preview(session_factory, settings: Settings, job_id: int, *,
 
 
 @register_handler
-class LuolcyPackagePreviewHandler(TaskHandler):
+class MediaPackagePreviewHandler(TaskHandler):
     job_type = PREVIEW_KIND
     supports_cancel = True
     supports_retry = False
@@ -144,9 +155,9 @@ class LuolcyPackagePreviewHandler(TaskHandler):
         state = json.loads(job.state_json or "{}")
         selection = state.get("selection")
         if not isinstance(selection, str):
-            raise ValueError("Luolcy preview requires a literal selection path")
+            raise ValueError("MediaPackage preview requires a literal selection path")
         _validate_scope(
-            selection, luolcy_root=_root(settings),
+            selection, media_package_root=_root(settings),
             allowed_roots=settings.allowed_roots,
             quarantine_root=settings.quarantine_root,
         )
@@ -159,16 +170,16 @@ class LuolcyPackagePreviewHandler(TaskHandler):
         start = last_checkpoint = time.monotonic()
         try:
             with _create_private(staged[0]) as out, _create_private(staged[1]) as offsets:
-                for package in iter_luolcy_packages(
-                    selection, luolcy_root=_root(settings),
+                for package in iter_media_package_packages(
+                    selection, media_package_root=_root(settings),
                     allowed_roots=settings.allowed_roots,
                     quarantine_root=settings.quarantine_root,
                 ):
                     # Invalid, changing or unreadable packages are presented as
                     # blocked. An unsafe discovery scope instead fails closed.
                     try:
-                        record = preview_luolcy_package(
-                            package, luolcy_root=_root(settings),
+                        record = preview_media_package_package(
+                            package, media_package_root=_root(settings),
                             allowed_roots=settings.allowed_roots,
                             quarantine_root=settings.quarantine_root,
                             max_rows=10,
@@ -225,7 +236,7 @@ class LuolcyPackagePreviewHandler(TaskHandler):
             os.replace(staged[2], summary)
             context.checkpoint(
                 progress_current=seen,
-                progress_message=f"Luolcy 预览完成：{seen:,} 包，待整理 {ready:,}，冲突 {blocked:,}",
+                progress_message=f"MediaPackage 预览完成：{seen:,} 包，待整理 {ready:,}，冲突 {blocked:,}",
                 checkpoint_data={"schema_version": 1, "packages_scanned": seen, "finished": True},
             )
         except BaseException:
