@@ -20,6 +20,8 @@ on:
       - 'tests/test_media_package_execution.py'
       - 'tests/test_media_package_execute_jobs.py'
       - 'tests/test_media_package_zfuse_publish.py'
+      - 'tests/test_media_package_zfuse_probe.py'
+      - 'app/batch/media_package_zfuse_probe.py'
       - 'frontend/src/components/tasks/TaskDetailDrawer.tsx'
       - 'benchmarks/media_package_preview_benchmark.py'
       - 'benchmarks/media_package_execution_benchmark.py'
@@ -53,7 +55,7 @@ jobs:
       - name: Test scope, 200-file partitioning, security and Worker paging
         env:
           PYTHONPATH: .
-        run: pytest -q tests/test_media_package_organizer.py tests/test_media_package_jobs.py tests/test_media_package_execution.py tests/test_media_package_execute_jobs.py tests/test_media_package_zfuse_publish.py
+        run: pytest -q tests/test_media_package_organizer.py tests/test_media_package_jobs.py tests/test_media_package_execution.py tests/test_media_package_execute_jobs.py tests/test_media_package_zfuse_publish.py tests/test_media_package_zfuse_probe.py
       - name: Synthetic read-only scan throughput baseline
         env:
           PYTHONPATH: .
