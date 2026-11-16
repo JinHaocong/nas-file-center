@@ -16,9 +16,11 @@ from app.batch.media_package_organizer import _package_path
 from app.batch.media_package_execution import (
     MediaPackageExecutionConflict, execute_frozen_manifest, load_frozen_manifest,
     prepare_media_package_manifest, save_frozen_manifest,
+    _validate_frozen_paths, _open_verified_package,
 )
 from app.config import Settings
 from app.models import WorkJob
+from app.tasks.logging import log_task_event
 from app.tasks.handlers_base import TaskHandler, register_handler
 from app.tasks.context import JobContext
 
@@ -90,6 +92,129 @@ def enqueue_media_package_execution(session_factory, settings: Settings,
         return {"job_id": int(job.id), "status": job.status}
 
 
+def _failed_publish_job_authority(job: WorkJob) -> tuple[int, dict]:
+    """Only the known publication-check failure is eligible for assisted recovery.
+
+    Never loosen generic task terminal-state or retry semantics. Recovery
+    creates a NEW task bound to the original frozen manifest namespace.
+    """
+    if (job.kind != EXECUTE_KIND or job.status != "failed"
+            or job.error_code != "EXECUTION_ERROR"
+            or job.error_text != "Package directory changed before publish"):
+        raise ValueError("Only the verified package-publication failure can be recovered")
+    state = json.loads(job.state_json or "{}")
+    checkpoint = json.loads(job.checkpoint_json or "{}")
+    pid = state.get("preview_job_id")
+    if (not isinstance(pid, int) or pid < 1
+            or state.get("recovery_of_job_id") is not None
+            or checkpoint.get("schema_version") != 1
+            or checkpoint.get("preview_job_id") != pid
+            or checkpoint.get("mode") != "frozen_manifest_reconcile"
+            or not isinstance(job.progress_current, int)
+            or job.progress_current < 0):
+        raise ValueError("Missing original failed-job frozen recovery authority")
+    return pid, state
+
+
+def enqueue_media_package_recovery(session_factory, settings: Settings, *,
+                                    failed_job_id: int, confirmation: str) -> dict:
+    """Explicit admin-approved continuation; never mutate files on the HTTP path.
+
+    The old job stays terminal/failed for immutable audit history. A new WorkJob
+    resumes the SAME checksum-validated manifest and its old staging namespace.
+    """
+    if not settings.allow_mutation or not settings.allow_delete:
+        raise ValueError("Recovery requires ALLOW_MUTATION and ALLOW_DELETE")
+    if confirmation != f"RECOVER_MEDIA_PACKAGE_EXECUTION_{failed_job_id}":
+        raise ValueError("Exact original-job recovery confirmation is required")
+
+    with session_factory() as session:
+        original = session.get(WorkJob, failed_job_id)
+        if original is None:
+            raise KeyError(failed_job_id)
+        pid, original_state = _failed_publish_job_authority(original)
+        failed_ordinal = int(original.progress_current)
+        preview = session.get(WorkJob, pid)
+        if preview is None or preview.kind != PREVIEW_KIND or preview.status != "completed":
+            raise ValueError("Approved preview evidence is unavailable")
+
+    # Read-only proof BEFORE queuing a new Worker job: the original exact
+    # manifest and a verified staging/final file must still exist.
+    folder = _execution_folder(settings, failed_job_id)
+    manifest_file = folder / f"{failed_ordinal:07d}.manifest.json"
+    preview_data, _idx, _summary = _preview_files(settings, pid)
+    if not preview_data.is_file() or not manifest_file.is_file():
+        raise ValueError("Original frozen manifest / preview report is missing")
+    with preview_data.open("r", encoding="utf-8") as stream:
+        for ordinal, line in enumerate(stream):
+            if ordinal == failed_ordinal:
+                record = json.loads(line)
+                break
+        else:
+            raise ValueError("Failed package index is outside original preview")
+    if record.get("status") != "ready" or not isinstance(record.get("package"), str):
+        raise ValueError("Frozen failed-package preview is not ready")
+    package = Path(record["package"])
+    _package_path(package, _root(settings), settings.allowed_roots,
+                  settings.quarantine_root)
+    manifest = load_frozen_manifest(
+        manifest_file, job_id=failed_job_id, package=package,
+    )
+    _validate_frozen_paths(manifest)
+    if (manifest.get("media_package_root") != str(_root(settings))
+            or manifest.get("input_fingerprint") != record.get("input_fingerprint")):
+        raise ValueError("Frozen recovery authority differs from the original preview")
+    fd = _open_verified_package(manifest)
+    os.close(fd)
+
+    with session_factory() as session:
+        session.execute(text("BEGIN IMMEDIATE"))
+        original = session.get(WorkJob, failed_job_id)
+        if original is None:
+            raise KeyError(failed_job_id)
+        verified_pid, _state = _failed_publish_job_authority(original)
+        if verified_pid != pid or int(original.progress_current) != failed_ordinal:
+            raise ValueError("Failed task changed during recovery preflight")
+
+        existing = session.scalar(select(WorkJob).where(
+            WorkJob.kind == EXECUTE_KIND,
+            func.json_extract(WorkJob.state_json, "$.recovery_of_job_id") == failed_job_id,
+        ).order_by(WorkJob.id.desc()).limit(1))
+        if existing is not None:
+            if existing.status in (*ACTIVE, "completed"):
+                return {"job_id": int(existing.id), "status": existing.status,
+                        "recovery_of_job_id": failed_job_id}
+            raise ValueError("Previous assisted recovery failed; manual inspection is required")
+        active = session.scalar(select(WorkJob.id).where(
+            WorkJob.kind == EXECUTE_KIND,
+            WorkJob.status.in_(ACTIVE),
+        ).limit(1))
+        if active is not None:
+            raise ValueError(f"Another media package execution task #{active} is active")
+
+        payload = {
+            "preview_job_id": pid,
+            "selection": original_state.get("selection", ""),
+            "recovery_of_job_id": failed_job_id,
+        }
+        job = WorkJob(kind=EXECUTE_KIND, status="queued",
+                      progress_current=failed_ordinal, progress_total=original.progress_total,
+                      progress_message="Awaiting explicit frozen-manifest reconciliation",
+                      state_json=json.dumps(payload, ensure_ascii=False),
+                      retry_of=failed_job_id)
+        session.add(job)
+        session.flush()
+        log_task_event(
+            session, job_id=job.id, event_type="media_package_recovery_authorized",
+            message=f"Recovery #{job.id} continues frozen execution #{failed_job_id}",
+            level="warning",
+            context={"recovery_of_job_id": failed_job_id, "preview_job_id": pid},
+        )
+        session.commit()
+        return {"job_id": int(job.id), "status": job.status,
+                "recovery_of_job_id": failed_job_id}
+
+
 def get_media_package_execution(session_factory, job_id: int) -> dict:
     with session_factory() as session:
         job = session.get(WorkJob, job_id)
@@ -124,6 +249,19 @@ class MediaPackageExecuteHandler(TaskHandler):
         if not context.worker_id:
             raise PermissionError("MediaPackage execution requires an exclusive Worker lease")
         state = json.loads(job.state_json or "{}")
+        original_id = state.get("recovery_of_job_id")
+        frozen_job_id = int(job.id)
+        if original_id is not None:
+            if not isinstance(original_id, int) or original_id <= 0:
+                raise ValueError("Invalid original frozen job identity")
+            with context.SessionLocal() as session:
+                original = session.get(WorkJob, original_id)
+                if original is None:
+                    raise ValueError("Original failed execution task no longer exists")
+                verified_pid, _ = _failed_publish_job_authority(original)
+                if verified_pid != state.get("preview_job_id"):
+                    raise ValueError("Recovery preview authority changed")
+            frozen_job_id = original_id
         preview_job_id = state.get("preview_job_id")
         if not isinstance(preview_job_id, int) or preview_job_id <= 0:
             raise ValueError("Missing MediaPackage preview authority")
@@ -149,7 +287,7 @@ class MediaPackageExecuteHandler(TaskHandler):
                 "mode": "frozen_manifest_reconcile",
             },
         )
-        folder = _execution_folder(settings, int(job.id))
+        folder = _execution_folder(settings, frozen_job_id)
         folder.mkdir(parents=True, exist_ok=True, mode=0o700)
 
         def fence() -> None:
@@ -175,7 +313,7 @@ class MediaPackageExecuteHandler(TaskHandler):
                 if record["status"] == "ready":
                     if manifest_path.is_file():
                         manifest = load_frozen_manifest(
-                            manifest_path, job_id=int(job.id), package=package,
+                            manifest_path, job_id=frozen_job_id, package=package,
                         )
                         if manifest.get("media_package_root") != str(_root(settings)):
                             raise MediaPackageExecutionConflict("Frozen manifest root differs from configured MediaPackage root")
@@ -186,7 +324,7 @@ class MediaPackageExecuteHandler(TaskHandler):
                             package, media_package_root=_root(settings),
                             allowed_roots=settings.allowed_roots,
                             quarantine_root=settings.quarantine_root,
-                            preview_record=record, job_id=int(job.id),
+                            preview_record=record, job_id=frozen_job_id,
                         )
                         save_frozen_manifest(manifest_path, manifest)
 
@@ -233,6 +371,7 @@ class MediaPackageExecuteHandler(TaskHandler):
             with os.fdopen(fd, "w", encoding="utf-8") as output:
                 json.dump({
                     "preview_job_id": preview_job_id, "job_id": int(job.id),
+                    "recovery_of_job_id": original_id,
                     "packages": len(results),
                     "files_moved": sum(r.get("files_moved", 0) for r in results),
                     "files_reconciled": sum(r.get("files_reconciled", 0) for r in results),
