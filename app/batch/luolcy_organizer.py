@@ -6,6 +6,8 @@ existing freeze/validate/execute safety mechanisms.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import re
 import stat
@@ -221,6 +223,22 @@ def _walk_package(package: Path):
         stack.extend((child, depth + 1) for child in reversed(sorted(children)))
 
 
+def _input_fingerprint(files: list[dict], package: Path) -> str:
+    """Stable digest of the entire package file snapshot, not a sampled page."""
+    digest = hashlib.sha256(b"luolcy-snapshot-v2\\n")
+    for item in sorted(files, key=lambda row: (
+        os.path.relpath(row["path"], package).casefold(),
+        os.path.relpath(row["path"], package),
+    )):
+        record = [
+            os.path.relpath(item["path"], package), item["kind"],
+            item["bytes"], item["dev"], item["ino"], item["mtime_ns"],
+        ]
+        digest.update(json.dumps(record, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+        digest.update(b"\\n")
+    return digest.hexdigest()
+
+
 def preview_luolcy_package(package: str | Path, *, luolcy_root: str | Path,
                            allowed_roots: list[Path],
                            quarantine_root: Path | None = None,
@@ -236,10 +254,12 @@ def preview_luolcy_package(package: str | Path, *, luolcy_root: str | Path,
         raise ValueError("max_rows must be between 1 and 200")
     source = _package_path(package, luolcy_root, allowed_roots, quarantine_root)
     items = list(_walk_package(source))
+    input_fingerprint = _input_fingerprint(items, source)
     totals = {kind: sum(x["kind"] == kind for x in items) for kind in ("P", "V", "Other")}
     if not items:
         return {
             "package": str(source), "status": "skipped",
+            "input_fingerprint": input_fingerprint,
             "reason": "empty", "total_files": 0, "totals": totals,
             "groups": [], "conflicts": [], "sample_moves": [],
             "total_proposals": 0, "needed_moves": 0, "truncated": False,
@@ -274,6 +294,7 @@ def preview_luolcy_package(package: str | Path, *, luolcy_root: str | Path,
         ]
         return {
             "package": str(source),
+            "input_fingerprint": input_fingerprint,
             "status": "blocked" if conflicts else "ready" if moves else "skipped",
             "reason": None if moves else "already_flat",
             "total_files": len(items), "totals": totals, "groups": [],
@@ -348,6 +369,7 @@ def preview_luolcy_package(package: str | Path, *, luolcy_root: str | Path,
                            "bytes": size, "destination": str(dest)})
     return {
         "package": str(source),
+        "input_fingerprint": input_fingerprint,
         "status": "blocked" if conflicts else "ready" if needed_moves else "already_organized",
         "reason": None, "total_files": len(items), "totals": totals,
         "groups": groups, "conflicts": conflicts,
