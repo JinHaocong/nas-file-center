@@ -392,6 +392,10 @@ class TaskService:
         def _transition(session: Session, job: WorkJob, *args: Any):
             if job.status not in TERMINAL_STATES:
                 raise ValueError(f"Only terminal jobs can be deleted (current status is '{job.status}')")
+            if job.kind == "media_package-package-execute" and job.status == "failed":
+                raise ValueError(
+                    "Failed media-package execution audit is protected; preserve frozen manifests for recovery"
+                )
 
             session.execute(delete(TaskEvent).where(TaskEvent.job_id == task_id))
             session.delete(job)
@@ -412,7 +416,13 @@ class TaskService:
                 raise ValueError(f"Cannot clear non-terminal status '{s}'")
 
         with self.SessionLocal() as session:
-            del_stmt = delete(WorkJob).where(WorkJob.status.in_(list(target_statuses)))
+            del_stmt = delete(WorkJob).where(
+                WorkJob.status.in_(list(target_statuses)),
+                (WorkJob.kind != "media_package-package-execute") |
+                (WorkJob.status != "failed"),
+            )
+            # Failed media-package execution records retain the only durable
+            # link between an interrupted stage and its frozen manifest.
             result = session.execute(del_stmt)
             count = result.rowcount
             session.commit()
