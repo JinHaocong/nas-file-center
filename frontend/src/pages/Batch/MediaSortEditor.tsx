@@ -215,13 +215,13 @@ export const MediaSortEditor: React.FC = () => {
             <ConsoleCheckbox checked={smartSkip} disabled={busy}
               onCheckedChange={changeSmartSkip} aria-label="智能跳过已整理目录" />
             <span><strong>智能跳过已整理目录（推荐）</strong>
-              <small>默认开启。纯图片/纯视频目录保留原有名称；其他普通子目录仍继续检查。</small>
+              <small>默认开启。纯图片/纯视频目录保留原有名称；如本层已有 P/V，仍检查并整理残留文件。</small>
             </span>
           </label>
           <div className="nfc-v2-batch-notice" role="note">
             <ConsoleIcon name="shield-check" size={19} />
             <div><strong>先只读预览，再生成安全 Move Plan</strong>
-              <p>目标 P/V 或文件重名时自动追加后缀，不覆盖任何原文件。
+              <p>已有安全 P/V 目录会直接复用；目录名不安全或文件重名时使用安全后缀，不覆盖任何原文件。
                 实际移动仍需完成 Freeze → Validate → Execute。递归总扫描项数可能未知，
                 因此扫描阶段显示实时计数而非虚构百分比；冻结、校验和执行会显示已处理项数。</p>
             </div>

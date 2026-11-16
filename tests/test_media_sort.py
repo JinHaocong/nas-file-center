@@ -60,7 +60,7 @@ def test_preview_sorts_images_and_videos_without_mutating(tmp_path):
     assert (parent / "link.jpg").is_symlink()
 
 
-def test_existing_pv_dirs_choose_numbered_folder_instead_of_reusing(tmp_path):
+def test_existing_pv_dirs_are_reused_with_case_insensitive_filename_collision(tmp_path):
     parent = tmp_path / "mixed"
     parent.mkdir()
     (parent / "Photo.JPG").write_bytes(b"source")
@@ -75,9 +75,10 @@ def test_existing_pv_dirs_choose_numbered_folder_instead_of_reusing(tmp_path):
     assert result["ready_count"] == 2
     photo = next(row for row in result["items"] if row["media_kind"] == "image")
     movie = next(row for row in result["items"] if row["media_kind"] == "video")
-    assert photo["target"] == str(parent / "P_1" / "Photo.JPG")
-    assert movie["target"] == str(parent / "V_1" / "movie.mp4")
+    assert photo["target"] == str(parent / "P" / "Photo_1.JPG")
+    assert movie["target"] == str(parent / "V" / "movie.mp4")
     assert (parent / "P" / "photo.jpg").read_bytes() == b"existing"
+    assert not (parent / "P" / "Photo_1.JPG").exists()
     assert not (parent / "P_1").exists()
     assert not (parent / "V_1").exists()
 
@@ -257,9 +258,9 @@ def test_recursive_skips_classification_directories_symlinks_and_quarantine(tmp_
     assert {
         Path(row["target"]).relative_to(parent).as_posix()
         for row in result["items"]
-    } == {"P_1/root.jpg", "child/V_1/video.mp4"}
+    } == {"P/root.jpg", "child/V/video.mp4"}
     assert (trash / "private.mp4").exists()
-    assert not (nested / "V_1").exists()
+    assert not (nested / "V" / "video.mp4").exists()
     assert (nested / "P" / "already.jpg").exists()
 
 
@@ -275,7 +276,7 @@ def test_folder_suffix_skips_numbered_and_casefold_existing_names(tmp_path):
     assert {
         Path(row["target"]).relative_to(parent).as_posix()
         for row in rows
-    } == {"P_3/A.jpg", "V_2/B.mp4"}
+    } == {"p/A.jpg", "v/B.mp4"}
 
 
 def test_duplicate_casefold_filenames_get_unique_suffixes(tmp_path):
@@ -360,12 +361,12 @@ def test_api_recursive_option_and_suffixed_paths(tmp_path):
         assert body["recursive"] is True
         assert body["count"] == 2
         assert body["scanned_directories"] == 3
-        assert str(nested / "V_1" / "video.mp4") in [row["target"] for row in body["items"]]
+        assert str(nested / "V" / "video.mp4") in [row["target"] for row in body["items"]]
         assert client.post("/api/media-sort/preview", json={
             "parent": str(data), "recursive": "yes",
         }).status_code == 422
         assert (nested / "video.mp4").read_bytes() == b"video"
-        assert not (nested / "V_1").exists()
+        assert not (nested / "V" / "video.mp4").exists()
         plan = client.post("/api/plans", json={
             "name": "递归 P/V",
             "kind": "media-sort",
@@ -376,7 +377,7 @@ def test_api_recursive_option_and_suffixed_paths(tmp_path):
             ],
         })
         assert plan.status_code == 200, plan.text
-        assert not (nested / "V_1").exists()
+        assert not (nested / "V" / "video.mp4").exists()
 
 
 def test_recursive_move_plan_executes_with_per_directory_suffixes(tmp_path):
@@ -437,7 +438,7 @@ def test_recursive_move_plan_executes_with_per_directory_suffixes(tmp_path):
         assert (data / "P" / "cover.jpg").read_bytes() == b"cover"
         assert (album / "P" / "old.jpg").read_bytes() == b"old"
         assert (album / "V" / "clip.MP4").read_bytes() == b"clip"
-        pictures = sorted((album / "P_1").iterdir())
+        pictures = sorted(item for item in (album / "P").iterdir() if item.name != "old.jpg")
         assert len(pictures) == 2
         assert {item.read_bytes() for item in pictures} == {b"photo-upper", b"photo-lower"}
         assert len({item.name.casefold() for item in pictures}) == 2
@@ -543,7 +544,7 @@ def test_smart_skip_can_be_disabled_to_preserve_original_classification(tmp_path
     assert not (parent / "P").exists()
 
 
-def test_mixed_media_still_sorted_with_existing_pv_suffixes(tmp_path):
+def test_mixed_media_reuses_existing_pv_destinations(tmp_path):
     parent = tmp_path / "mixed"
     parent.mkdir()
     (parent / "old.jpg").write_bytes(b"picture")
@@ -554,7 +555,7 @@ def test_mixed_media_still_sorted_with_existing_pv_suffixes(tmp_path):
     assert result["count"] == 2
     assert result["skipped_directory_count"] == 0
     assert {Path(row["target"]).relative_to(parent).as_posix()
-            for row in result["items"]} == {"P_1/old.jpg", "V_1/old.mp4"}
+            for row in result["items"]} == {"P/old.jpg", "V/old.mp4"}
 
 
 def test_no_media_directory_still_recurses_into_mixed_grandchild(tmp_path):
@@ -612,3 +613,45 @@ def test_smart_skip_api_defaults_to_true_and_rejects_nonboolean(tmp_path):
         }).status_code == 422
         assert (data / "photo.jpg").read_bytes() == b"pic"
         assert not (data / "P").exists()
+
+
+def test_partial_pv_directory_disables_pure_media_smart_skip(tmp_path):
+    root = tmp_path / "partly-sorted"
+    root.mkdir()
+    (root / "P").mkdir()
+    (root / "P" / "already.jpg").write_bytes(b"existing")
+    (root / "leftover.jpg").write_bytes(b"left")
+    result = preview(root)
+    assert result["count"] == 1
+    assert result["skipped_directory_count"] == 0
+    assert result["items"][0]["target"] == str(root / "P" / "leftover.jpg")
+
+
+def test_existing_pv_collision_includes_existing_symlinks_and_casefold(tmp_path):
+    root = tmp_path / "mixed"
+    root.mkdir()
+    (root / "P").mkdir()
+    (root / "P" / "photo.jpg").write_bytes(b"old")
+    (root / "P" / "photo_1.JPG").symlink_to(root / "P" / "photo.jpg")
+    (root / "PHOTO.JPG").write_bytes(b"new")
+    rows = preview(root)["items"]
+    assert len(rows) == 1
+    assert rows[0]["target"] == str(root / "P" / "PHOTO_2.JPG")
+    assert rows[0]["conflict"] is False
+    assert (root / "P" / "photo.jpg").read_bytes() == b"old"
+    assert (root / "PHOTO.JPG").read_bytes() == b"new"
+
+
+def test_pv_symlink_is_not_reused_with_partial_smart_skip(tmp_path):
+    root = tmp_path / "mixed"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (root / "P").symlink_to(outside, target_is_directory=True)
+    (root / "leftover.jpg").write_bytes(b"new")
+    # A symlink is never treated as an existing safe P destination.
+    result = preview(root)
+    assert result["count"] == 1
+    assert result["skipped_directory_count"] == 0
+    assert result["items"][0]["target"] == str(root / "P_1" / "leftover.jpg")
+    assert not list(outside.iterdir())
