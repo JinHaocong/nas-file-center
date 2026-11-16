@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Callable
 
 from app.batch.file_rename import _open_directory_nofollow
+from app.batch.media_package_naming import allocate_names
 from app.batch.media_package_organizer import (
     MAX_FILES_PER_GROUP, _input_fingerprint, _package_path,
     preview_media_package_package,
@@ -27,7 +28,7 @@ class MediaPackageExecutionConflict(ValueError):
     """A package cannot be safely executed without an operator reviewing it."""
 
 
-MANIFEST_VERSION = 1
+MANIFEST_VERSION = 2
 
 
 def _identity(st) -> list[int]:
@@ -110,20 +111,27 @@ def prepare_media_package_manifest(package: Path, *, media_package_root: Path,
     moves = []
     groups = []
     is_flat = fresh["operation"] == "flatten_pure_media"
+    root_stage = f".nfc-media_package-stage-{job_id}-root" if is_flat else None
     if is_flat:
         ordered = sorted(items, key=lambda row: (
             os.path.relpath(row["path"], source).casefold(),
             os.path.relpath(row["path"], source),
         ))
-        for item in ordered:
-            target = source / item["name"]
-            if item["path"] != str(target):
-                moves.append({
-                    "source": item["path"], "target": str(target),
-                    "final": str(target), "identity": [
-                        item["dev"], item["ino"], item["bytes"], item["mtime_ns"],
-                    ], "group": None,
-                })
+        names, _ = allocate_names(ordered, kind="flat")
+        for item, target_name in zip(ordered, names):
+            # Even a root file that is already numbered must be staged:
+            # it could occupy another source file's desired final name.
+            target = source / root_stage / target_name
+            final = source / target_name
+            moves.append({
+                "source": item["path"], "target": str(target),
+                "final": str(final), "identity": [
+                    item["dev"], item["ino"], item["bytes"], item["mtime_ns"],
+                ], "group": None, "target_name": target_name,
+                "original_name": item["name"],
+                "original_relative_path": os.path.relpath(item["path"], source),
+                "final_relative_path": target_name,
+            })
     else:
         items.sort(key=lambda row: (
             row["kind"], os.path.relpath(row["path"], source).casefold(),
@@ -147,17 +155,20 @@ def prepare_media_package_manifest(package: Path, *, media_package_root: Path,
                 "stage": stage, "final": group["name"], "count": len(segment),
                 "bytes": group["bytes"], "kind": kind, "move_start": len(moves),
             })
-            for item in segment:
-                target = source / stage / item["name"]
-                if item["path"] == str(final / item["name"]):
-                    # A ready package cannot rely on a preexisting ambiguous
-                    # destination; only a fully organized package may be no-op.
+            assigned, _ = allocate_names(segment, kind=kind)
+            for item, target_name in zip(segment, assigned):
+                target = source / stage / target_name
+                if item["path"] == str(final / target_name):
+                    # Existing destination buckets may not be silently replaced.
                     raise MediaPackageExecutionConflict("Unexpected source inside a final bucket")
                 moves.append({
                     "source": item["path"], "target": str(target),
-                    "final": str(final / item["name"]),
+                    "final": str(final / target_name),
                     "identity": [item["dev"], item["ino"], item["bytes"], item["mtime_ns"]],
-                    "group": idx,
+                    "group": idx, "target_name": target_name,
+                    "original_name": item["name"],
+                    "original_relative_path": os.path.relpath(item["path"], source),
+                    "final_relative_path": os.path.relpath(final / target_name, source),
                 })
 
     if len(moves) != int(fresh["needed_moves"]):
@@ -167,7 +178,7 @@ def prepare_media_package_manifest(package: Path, *, media_package_root: Path,
         "job_id": job_id, "package": str(source), "media_package_root": str(media_package_root),
         "package_dev": dev, "package_ino": int(package_stat.st_ino),
         "input_fingerprint": fresh["input_fingerprint"],
-        "operation": fresh["operation"],
+        "operation": fresh["operation"], "root_stage": root_stage,
         "groups": groups, "moves": moves, "origin_directories": directories,
     }
     return manifest
