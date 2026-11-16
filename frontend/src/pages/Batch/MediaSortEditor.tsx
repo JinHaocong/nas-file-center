@@ -390,7 +390,7 @@ export const MediaSortEditor: React.FC = () => {
                     </div>
                     {item.conflict && <p className="nfc-v2-batch-media-reason">
                       冲突原因：{item.conflict_reason || '目标路径冲突'}
-                    </p>
+                    </p>}
                   </article>
                 ))}
               </div>}
