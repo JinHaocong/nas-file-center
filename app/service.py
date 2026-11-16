@@ -587,8 +587,14 @@ class FileCenterService:
         page_size = max(1, min(int(page_size), 500))
         offset = (page - 1) * page_size
         with self.SessionLocal() as session:
-            total = session.scalar(select(func.count(BatchPlan.id))) or 0
-            rows = list(session.scalars(select(BatchPlan).order_by(BatchPlan.id.desc()).limit(page_size).offset(offset)))
+            # Staged media-sort Plans must not appear as user-executable drafts.
+            total = session.scalar(select(func.count(BatchPlan.id)).where(
+                BatchPlan.status != "building",
+            )) or 0
+            rows = list(session.scalars(
+                select(BatchPlan).where(BatchPlan.status != "building")
+                .order_by(BatchPlan.id.desc()).limit(page_size).offset(offset)
+            ))
             plan_ids = [row.id for row in rows]
             active_jobs_map: dict[int, WorkJob] = {}
             if plan_ids:
