@@ -250,8 +250,8 @@ def preview_media_package_package(package: str | Path, *, media_package_root: st
 
     Pure image/video packages with up to 200 files are flattened into
     their package root; larger pure packages are grouped in sized P/V buckets.
-    Existing targets are never assumed safe to overwrite; unresolved target
-    occupancy is reported as a blocking conflict for manual review.
+    An existing group folder containing scanned inputs can be rebuilt by the
+    frozen executor; empty/foreign occupants still block unsafe publication.
     """
     if not isinstance(max_rows, int) or not 1 <= max_rows <= 200:
         raise ValueError("max_rows must be between 1 and 200")
@@ -335,14 +335,20 @@ def preview_media_package_package(package: str | Path, *, media_package_root: st
         kind = item["kind"]
         observed.setdefault(kind, []).append(item)
 
-    # Reserve original top-level names to avoid ambiguous destination merges.
+    # Every existing directory containing a scanned file is an input, even
+    # when it is named like a former P/V bucket. Only a *non-input* occupant
+    # may block a future final name; never decide this from its label alone.
+    source_directory_names = {
+        Path(item["path"]).relative_to(source).parts[0].casefold()
+        for item in items
+        if len(Path(item["path"]).relative_to(source).parts) > 1
+    }
     with os.scandir(source) as entries:
         occupied = {entry.name.casefold(): entry.name for entry in entries}
-    # Numbered directories from older runs have ambiguous bucket ownership.
-    # Reject instead of silently combining them or overwriting their content.
     legacy_numbered = sorted(
         original for folded, original in occupied.items()
         if re.fullmatch(r"(?:p|v)_[1-9][0-9]*", folded)
+        and folded not in source_directory_names
     )
     if legacy_numbered:
         conflicts.append({
@@ -373,14 +379,16 @@ def preview_media_package_package(package: str | Path, *, media_package_root: st
                     or key.startswith(stem_folded + " [")
                 )
                 and key != folder.casefold()
+                and key not in source_directory_names
             ]
             if competing:
                 conflicts.append({"directory": str(dest),
                                   "existing": sorted(competing),
                                   "reason": "existing_bucket_name_requires_review"})
-            if existing is not None and any(
-                row["path"] != str(dest / name) for row, name in zip(chunk, assigned)
-            ):
+            if (existing is not None
+                    and folder.casefold() not in source_directory_names
+                    and any(row["path"] != str(dest / name)
+                            for row, name in zip(chunk, assigned))):
                 # Replacing an existing labelled target folder needs a
                 # separate no-clobber migration procedure. Name collisions
                 # within a *new* target are automatically numbered, but a

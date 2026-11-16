@@ -241,6 +241,206 @@ def test_crash_during_group_publication_resumes_from_frozen_stage(tmp_path, monk
     assert not nested.exists()
 
 
+def _old_labelled_mixed_package(tmp_path):
+    root, package = example(tmp_path)
+    bucket = package / "P [2 2B]"
+    bucket.mkdir()
+    (bucket / "old-a.jpg").write_bytes(b"a")
+    (bucket / "old-b.jpg").write_bytes(b"b")
+    (package / "movie.mp4").write_bytes(b"v")
+    return root, package, bucket
+
+
+def test_existing_labelled_bucket_with_same_final_name_is_safely_rebuilt(tmp_path):
+    root, package, bucket = _old_labelled_mixed_package(tmp_path)
+    manifest = manifest_for(root, package, job_id=821)
+    assert [g["final"] for g in manifest["groups"]] == [
+        "P [2 2B]", "V [1 1B]",
+    ]
+    result = executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+    assert result["files_moved"] == 3
+    assert result["empty_dirs_removed"] >= 1
+    assert (bucket / "001.jpg").read_bytes() == b"a"
+    assert (bucket / "002.jpg").read_bytes() == b"b"
+    assert (package / "V [1 1B]" / "001.mp4").read_bytes() == b"v"
+    assert not (bucket / "old-a.jpg").exists()
+    assert not any(p.name.startswith(".nfc-") for p in package.iterdir())
+    replay = executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+    assert replay["files_moved"] == 0
+    assert replay["files_reconciled"] == 3
+
+
+def test_complete_group_is_reused_without_replacing_its_directory(tmp_path):
+    root, package = example(tmp_path)
+    bucket = package / "P [2 2B]"
+    bucket.mkdir()
+    (bucket / "001.jpg").write_bytes(b"a")
+    (bucket / "002.jpg").write_bytes(b"b")
+    (package / "movie.mp4").write_bytes(b"v")
+    inode = bucket.stat().st_ino
+    manifest = manifest_for(root, package, job_id=822)
+    result = executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+    assert result["files_moved"] == 1
+    assert result["files_reconciled"] == 2
+    assert bucket.stat().st_ino == inode
+    assert (bucket / "001.jpg").read_bytes() == b"a"
+    assert (bucket / "002.jpg").read_bytes() == b"b"
+    assert (package / "V [1 1B]" / "001.mp4").read_bytes() == b"v"
+
+
+def test_crash_after_first_staged_move_reconciles_old_and_staged_bucket(
+    tmp_path, monkeypatch,
+):
+    root, package, bucket = _old_labelled_mixed_package(tmp_path)
+    manifest = manifest_for(root, package, job_id=823)
+    original = executor._move_one
+    calls = {"count": 0}
+
+    def crash_after_move(*args, **kwargs):
+        value = original(*args, **kwargs)
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise RuntimeError("crash with old bucket and staging both present")
+        return value
+
+    monkeypatch.setattr(executor, "_move_one", crash_after_move)
+    with pytest.raises(RuntimeError, match="old bucket and staging"):
+        executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+    monkeypatch.setattr(executor, "_move_one", original)
+    assert bucket.exists()
+    assert (bucket / "old-b.jpg").exists()
+    assert (package / manifest["groups"][0]["stage"] / "001.jpg").exists()
+    result = executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+    assert result["files_reconciled"] >= 1
+    assert (bucket / "001.jpg").read_bytes() == b"a"
+    assert (bucket / "002.jpg").read_bytes() == b"b"
+    assert (package / "V [1 1B]" / "001.mp4").read_bytes() == b"v"
+
+
+def test_crash_after_retiring_old_bucket_resumes_from_frozen_stage(
+    tmp_path, monkeypatch,
+):
+    root, package, bucket = _old_labelled_mixed_package(tmp_path)
+    manifest = manifest_for(root, package, job_id=824)
+    original = executor._publish_group
+
+    def crash_before_group_publication(*args, **kwargs):
+        raise RuntimeError("crash after retired old grouped destination")
+
+    monkeypatch.setattr(executor, "_publish_group", crash_before_group_publication)
+    with pytest.raises(RuntimeError, match="retired old grouped"):
+        executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+    monkeypatch.setattr(executor, "_publish_group", original)
+    assert not bucket.exists()
+    assert (package / manifest["groups"][0]["stage"] / "001.jpg").exists()
+    assert (package / manifest["groups"][1]["stage"] / "001.mp4").exists()
+    result = executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+    assert result["files_reconciled"] == 3
+    assert (bucket / "001.jpg").read_bytes() == b"a"
+    assert (bucket / "002.jpg").read_bytes() == b"b"
+    assert (package / "V [1 1B]" / "001.mp4").read_bytes() == b"v"
+
+
+def test_unplanned_file_in_old_bucket_blocks_publication_without_loss(
+    tmp_path, monkeypatch,
+):
+    root, package, bucket = _old_labelled_mixed_package(tmp_path)
+    manifest = manifest_for(root, package, job_id=825)
+    original = executor._move_one
+
+    def crash_after_first(*args, **kwargs):
+        value = original(*args, **kwargs)
+        raise RuntimeError("crash before other source moves")
+
+    monkeypatch.setattr(executor, "_move_one", crash_after_first)
+    with pytest.raises(RuntimeError, match="crash before"):
+        executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+    monkeypatch.setattr(executor, "_move_one", original)
+    (bucket / "intruder.txt").write_bytes(b"do not delete")
+    with pytest.raises(executor.MediaPackageExecutionConflict, match="not safely empty"):
+        executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+    assert (bucket / "intruder.txt").read_bytes() == b"do not delete"
+    assert not (bucket / "001.jpg").exists()
+    assert (package / manifest["groups"][0]["stage"] / "001.jpg").read_bytes() == b"a"
+    assert (package / manifest["groups"][0]["stage"] / "002.jpg").read_bytes() == b"b"
+
+
+def test_external_change_in_old_bucket_is_rejected_before_staging(tmp_path):
+    root, package, bucket = _old_labelled_mixed_package(tmp_path)
+    manifest = manifest_for(root, package, job_id=826)
+    (bucket / "new.txt").write_bytes(b"extra")
+    with pytest.raises(executor.MediaPackageExecutionConflict,
+                       match="changed since frozen preview"):
+        executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+    assert (bucket / "old-a.jpg").read_bytes() == b"a"
+    assert (bucket / "old-b.jpg").read_bytes() == b"b"
+    assert (bucket / "new.txt").read_bytes() == b"extra"
+    assert not any(p.name.startswith(".nfc-") for p in package.iterdir())
+
+
+def test_201_video_files_regroup_without_filename_loss(tmp_path):
+    root, package = example(tmp_path)
+    old = package / "V [200 200B]"
+    old.mkdir()
+    for index in range(200):
+        (old / f"{index + 1:03d}.mp4").write_bytes(bytes([index % 251]))
+    (package / "new.mp4").write_bytes(b"z")
+    manifest = manifest_for(root, package, job_id=827)
+    assert [g["count"] for g in manifest["groups"]] == [200, 1]
+    assert [g["final"] for g in manifest["groups"]] == [
+        "V [200 200B]", "V_1 [1 1B]",
+    ]
+    executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+    files = sorted(package.glob("V*/*.mp4"))
+    assert len(files) == 201
+    assert sorted(path.read_bytes() for path in files) == sorted(
+        [bytes([index % 251]) for index in range(200)] + [b"z"]
+    )
+    assert not any(p.name.startswith(".nfc-") for p in package.iterdir())
+
+
+def test_multigroup_crash_after_first_publish_does_not_move_reused_source(
+    tmp_path, monkeypatch,
+):
+    root, package = example(tmp_path)
+    old = package / "V [200 200B]"
+    old.mkdir()
+    for index in range(200):
+        (old / f"{index + 1:03d}.mp4").write_bytes(bytes([index % 251]))
+    (package / "new.mp4").write_bytes(b"z")
+    manifest = manifest_for(root, package, job_id=828)
+    publish = executor._publish_group
+    calls = {"done": False}
+
+    def crash_after_first_group(frozen, group_index, lease_fence, **kwargs):
+        if group_index == 1 and not calls["done"]:
+            calls["done"] = True
+            raise RuntimeError("interrupted between grouped publications")
+        return publish(frozen, group_index, lease_fence, **kwargs)
+
+    monkeypatch.setattr(executor, "_publish_group", crash_after_first_group)
+    with pytest.raises(RuntimeError, match="between grouped publications"):
+        executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+    monkeypatch.setattr(executor, "_publish_group", publish)
+
+    first = package / "V [200 200B]"
+    second_stage = package / manifest["groups"][1]["stage"]
+    assert first.is_dir()
+    assert second_stage.is_dir()
+    # 200.mp4 was originally the other group's source, but is now a
+    # published file with a DIFFERENT frozen identity.
+    assert (first / "200.mp4").read_bytes() == bytes([198])
+    assert (second_stage / "001.mp4").read_bytes() == bytes([199])
+    replay = executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+    assert replay["files_moved"] == 0
+    assert replay["files_reconciled"] == 201
+    files = sorted(package.glob("V*/*.mp4"))
+    assert len(files) == 201
+    assert sorted(path.read_bytes() for path in files) == sorted(
+        [bytes([index % 251]) for index in range(200)] + [b"z"]
+    )
+
+
 def test_tampered_target_outside_package_is_rejected_before_mutation(tmp_path):
     root, package = example(tmp_path)
     nested = package / "video"

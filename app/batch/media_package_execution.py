@@ -158,9 +158,9 @@ def prepare_media_package_manifest(package: Path, *, media_package_root: Path,
             assigned, _ = allocate_names(segment, kind=kind)
             for item, target_name in zip(segment, assigned):
                 target = source / stage / target_name
-                if item["path"] == str(final / target_name):
-                    # Existing destination buckets may not be silently replaced.
-                    raise MediaPackageExecutionConflict("Unexpected source inside a final bucket")
+                # Original files may already live under this final label.
+                # Every such source is staged before the old empty bucket
+                # can be retired, so original and output names may coincide.
                 moves.append({
                     "source": item["path"], "target": str(target),
                     "final": str(final / target_name),
@@ -233,7 +233,8 @@ def _entry(folder: Path, name: str):
 
 
 def _move_one(move: dict, *, lease_fence: Callable[[], None],
-              ignore_final: bool = False, compat_hardlink: bool = False) -> str:
+              ignore_final: bool = False, compat_hardlink: bool = False,
+              source_replaced_by: list[int] | None = None) -> str:
     """Reconcile crashed no-clobber moves and perform at most one filesystem move."""
     src = Path(move["source"])
     stage = Path(move["target"])
@@ -260,6 +261,12 @@ def _move_one(move: dict, *, lease_fence: Callable[[], None],
         src_stat = _entry(src.parent, src.name) if src.parent.is_dir() else None
         if src_stat is None:
             return "resumed"
+        if source_replaced_by is not None:
+            # An earlier group has safely published a different frozen file
+            # at this old source pathname. Its exact manifest identity has
+            # already been proved; never move/unlink the new published file.
+            _check_file(src_stat, source_replaced_by, src)
+            return "resumed"
         _check_file(src_stat, expected, src)
         # A source and target with identical inode can be an interrupted
         # COMPAT hardlink operation, but it can also be a pre-existing alias.
@@ -269,6 +276,12 @@ def _move_one(move: dict, *, lease_fence: Callable[[], None],
             f"Both source and destination exist; manual review: {src}"
         )
 
+    if source_replaced_by is not None:
+        # Stage custody cannot be recovered by moving a new published file
+        # back out of a prior group's final directory.
+        raise MediaPackageExecutionConflict(
+            f"Frozen stage is missing after source path reuse: {src}"
+        )
     src_fd = _open_folder(src.parent)
     try:
         source_stat = os.stat(src.name, dir_fd=src_fd, follow_symlinks=False)
@@ -337,24 +350,52 @@ def _verify_group_contents(manifest: dict, group_index: int, directory: Path) ->
         os.close(fd)
 
 
-def _ensure_staging(manifest: dict, group_index: int, lease_fence: Callable[[], None]) -> None:
+def _frozen_original_directory(manifest: dict, path: Path) -> bool:
+    """Prove a pre-existing target is an original, identity-bound input."""
+    identity = manifest["origin_directories"].get(str(path))
+    if identity is None:
+        return False
+    fd = _open_folder(path)
+    try:
+        st = os.fstat(fd)
+        if [int(st.st_dev), int(st.st_ino)] != identity:
+            raise MediaPackageExecutionConflict(
+                "Previously scanned MediaPackage bucket directory was replaced"
+            )
+    finally:
+        os.close(fd)
+    return True
+
+
+def _ensure_staging(manifest: dict, group_index: int,
+                    lease_fence: Callable[[], None]) -> str:
+    """Distinguish an old scanned bucket from an already-published output."""
     package = Path(manifest["package"])
     group = manifest["groups"][group_index]
     stage = package / group["stage"]
     final = package / group["final"]
-    if final.exists() or final.is_symlink():
+    has_stage = os.path.lexists(stage)
+    if os.path.lexists(final):
         if _compat_inspect_group(manifest, group_index) is not None:
-            return
-        if stage.exists() or stage.is_symlink():
-            raise MediaPackageExecutionConflict("Both staging and foreign published directories exist")
-        _verify_group_contents(manifest, group_index, final)
-        return
-    if stage.exists() or stage.is_symlink():
+            return "compat"
+        if not has_stage:
+            # A fully matching output is safe to reuse; all other occupants
+            # must be independently proven original scanned input folders.
+            try:
+                _verify_group_contents(manifest, group_index, final)
+            except MediaPackageExecutionConflict:
+                if not _frozen_original_directory(manifest, final):
+                    raise
+            else:
+                return "published"
+        elif not _frozen_original_directory(manifest, final):
+            raise MediaPackageExecutionConflict(
+                "Both staging and foreign published directories exist"
+            )
+    if has_stage:
         fd = _open_folder(stage)
         try:
             _check_directory(os.fstat(fd), stage, manifest["package_dev"])
-            # A pre-existing staging name cannot be trusted just because it
-            # looks like a prior Worker run. Validate every existing entry.
             expected = {Path(row["target"]).name.casefold(): row["identity"]
                         for row in _group_files(manifest, group_index)}
             seen = set()
@@ -368,14 +409,14 @@ def _ensure_staging(manifest: dict, group_index: int, lease_fence: Callable[[], 
                                 stage / entry.name)
         finally:
             os.close(fd)
-        return
+        return "staging"
     lease_fence()
     fd = _open_folder(package)
     try:
         os.mkdir(group["stage"], mode=0o755, dir_fd=fd)
     finally:
         os.close(fd)
-
+    return "staging"
 
 _COMPAT_OWNER_MARKER = ".nfc-media-publish-owner"
 _COMPAT_COMPLETE_MARKER = ".nfc-media-publish-complete"
@@ -671,9 +712,13 @@ def _frozen_artifact_proves_package(manifest: dict) -> bool:
                 confirmed |= bool(compat["public_names"] or compat["stage_names"])
                 continue
             if has_stage:
-                raise MediaPackageExecutionConflict(
-                    "Both frozen stage and foreign final directory exist"
-                )
+                if not _frozen_original_directory(manifest, published):
+                    raise MediaPackageExecutionConflict(
+                        "Both frozen stage and foreign final directory exist"
+                    )
+                # An untouched old bucket is still a frozen *source*, not a
+                # partial publication. Only job-owned staged files prove custody.
+                has_final = False
         if not has_stage and not has_final:
             continue
         target = published if has_final else staged
@@ -802,18 +847,35 @@ def _publish_group(manifest: dict, group_index: int,
     return "published"
 
 
-def _remove_empty_sources(manifest: dict, lease_fence: Callable[[], None]) -> int:
+def _remove_empty_sources(manifest: dict, lease_fence: Callable[[], None], *,
+                          only_under: set[Path] | None = None,
+                          skip_finals: bool = False) -> int:
+    """Remove only original, identity-matched and actually empty directories.
+
+    'only_under' is used before publication solely for old destination
+    buckets whose frozen contents have ALL been staged. After publication,
+    output final paths are excluded so an old source name cannot cause the
+    newly published folder to be mistaken for a disposable directory.
+    """
     package = Path(manifest["package"])
+    finals = ({package / group["final"] for group in manifest["groups"]}
+              if skip_finals else set())
     removed = 0
     for name, identity in sorted(manifest["origin_directories"].items(),
                                  key=lambda entry: (-len(Path(entry[0]).parts), entry[0])):
         folder = Path(name)
         if not folder.is_relative_to(package) or folder == package:
             raise MediaPackageExecutionConflict("Unsafe original directory cleanup scope")
-        if not folder.exists():
+        if folder in finals:
+            continue
+        if only_under is not None and not any(
+            folder == root or folder.is_relative_to(root) for root in only_under
+        ):
             continue
         if folder.is_symlink():
             raise MediaPackageExecutionConflict("Original directory became a symlink")
+        if not folder.exists():
+            continue
         fd = _open_folder(folder)
         try:
             st = os.fstat(fd)
@@ -838,6 +900,34 @@ def _remove_empty_sources(manifest: dict, lease_fence: Callable[[], None]) -> in
             os.close(parent_fd)
     return removed
 
+
+def _retire_staged_destination_sources(
+    manifest: dict, modes: list[str], lease_fence: Callable[[], None],
+) -> int:
+    """Free labels occupied exclusively by frozen, now-staged source folders.
+
+    Never force-remove a foreign occupant, rename over another directory or
+    delete a directory containing files. The published group owns the name
+    only after a no-replace operation succeeds.
+    """
+    package = Path(manifest["package"])
+    retired = {
+        package / group["final"]
+        for index, group in enumerate(manifest["groups"])
+        if modes[index] == "staging"
+        and str(package / group["final"]) in manifest["origin_directories"]
+    }
+    if not retired:
+        return 0
+    removed = _remove_empty_sources(
+        manifest, lease_fence, only_under=retired,
+    )
+    for target in retired:
+        if os.path.lexists(target):
+            raise MediaPackageExecutionConflict(
+                f"Original grouped destination is not safely empty: {target}"
+            )
+    return removed
 
 _ROOT_READY_MARKER = ".nfc-publish-ready"
 
@@ -1165,6 +1255,29 @@ def _validate_frozen_paths(manifest: dict) -> None:
                 raise MediaPackageExecutionConflict("Frozen group target filename collision")
 
 
+def _exact_published_snapshot(manifest: dict, live: list[dict]) -> bool:
+    """Only a complete verified final layout can bypass the original snapshot."""
+    if not manifest["groups"] or len(live) != len(manifest["moves"]):
+        return False
+    expected = {
+        row["final"]: tuple(row["identity"]) for row in manifest["moves"]
+    }
+    if len(expected) != len(manifest["moves"]):
+        return False
+    for row in live:
+        if expected.get(row["path"]) != (
+            row["dev"], row["ino"], row["bytes"], row["mtime_ns"],
+        ):
+            return False
+    try:
+        for index, group in enumerate(manifest["groups"]):
+            _verify_group_contents(manifest, index,
+                                   Path(manifest["package"]) / group["final"])
+    except (MediaPackageExecutionConflict, OSError, ValueError):
+        return False
+    return True
+
+
 def execute_frozen_manifest(manifest: dict, *, lease_fence: Callable[[], None],
                             progress: Callable[[int, int], None] | None = None,
                             allow_fuse_compat: bool = False) -> dict:
@@ -1181,21 +1294,20 @@ def execute_frozen_manifest(manifest: dict, *, lease_fence: Callable[[], None],
                 )
     fd = _open_verified_package(manifest)
     os.close(fd)
-    # Before the first mutation of a new package job, reject any source or
-    # target drift since Freeze. This catches late-arriving root files before
-    # we relocate the first source into staging. Recovery is different:
-    # the original snapshot cannot match after intentional partial moves,
-    # so only an existing job-owned staging or published final bypasses it.
+    # An old P/V directory is not recovery evidence merely because its
+    # pathname equals a proposed final. Trust only owned stage names, verified
+    # compatible-publication witnesses, or an exact complete final snapshot.
     root_stage = manifest.get("root_stage")
-    recovery_artifact = (
-        ((package / root_stage).exists() or _root_finals_complete(manifest))
-        if root_stage
-        else any(
-            os.path.lexists(package / group["stage"]) or
-            os.path.lexists(package / group["final"])
-            for group in manifest["groups"]
+    if root_stage:
+        recovery_artifact = (
+            (package / root_stage).exists() or _root_finals_complete(manifest)
         )
-    )
+    else:
+        recovery_artifact = any(
+            os.path.lexists(package / group["stage"])
+            or _compat_inspect_group(manifest, index) is not None
+            for index, group in enumerate(manifest["groups"])
+        )
     if not recovery_artifact:
         try:
             live = list(_walk_package(package))
@@ -1203,7 +1315,8 @@ def execute_frozen_manifest(manifest: dict, *, lease_fence: Callable[[], None],
             raise MediaPackageExecutionConflict(
                 f"Unsafe package changed since frozen preview: {exc}"
             ) from exc
-        if _input_fingerprint(live, package) != manifest["input_fingerprint"]:
+        if (_input_fingerprint(live, package) != manifest["input_fingerprint"]
+                and not _exact_published_snapshot(manifest, live)):
             raise MediaPackageExecutionConflict(
                 "Package changed since frozen preview; refusing file mutation"
             )
@@ -1213,22 +1326,50 @@ def execute_frozen_manifest(manifest: dict, *, lease_fence: Callable[[], None],
         result["total_files"] = len(manifest["moves"])
         result["package"] = str(package)
         return result
-    compat_groups: set[int] = set()
-    for i in range(len(manifest["groups"])):
-        _ensure_staging(manifest, i, lease_fence)
-        if _compat_inspect_group(manifest, i) is not None:
-            compat_groups.add(i)
+    group_modes = [
+        _ensure_staging(manifest, index, lease_fence)
+        for index in range(len(manifest["groups"]))
+    ]
+    # Previously published buckets can reuse original source pathnames
+    # from rows still in staging. The reoccupied paths are authorized only
+    # by the exact frozen output identity, never by a basename alone.
+    published_identities = {
+        row["final"]: row["identity"]
+        for row in manifest["moves"]
+        if group_modes[row["group"]] == "published"
+    }
+    for group_index, mode in enumerate(group_modes):
+        if mode == "compat":
+            evidence = _compat_inspect_group(manifest, group_index)
+            if evidence is None:
+                raise MediaPackageExecutionConflict(
+                    "Authenticated grouped publication witness disappeared"
+                )
+            for row in _group_files(manifest, group_index):
+                if row["target_name"].casefold() in evidence["public_names"]:
+                    published_identities[row["final"]] = row["identity"]
     completed = recovered = 0
     total = len(manifest["moves"])
     for index, row in enumerate(manifest["moves"], start=1):
-        result = _move_one(
-            row, lease_fence=lease_fence,
-            compat_hardlink=row["group"] in compat_groups,
-        )
-        completed += result == "moved"
-        recovered += result != "moved"
+        mode = group_modes[row["group"]]
+        if mode in ("published", "compat"):
+            # Every frozen file identity was already checked in the verified
+            # output or authenticated compatible-publication witness.
+            recovered += 1
+        else:
+            # The public label may still contain original inputs. During
+            # staging it is NEVER authority for a file's final destination.
+            result = _move_one(
+                row, lease_fence=lease_fence, ignore_final=True,
+                source_replaced_by=published_identities.get(row["source"]),
+            )
+            completed += result == "moved"
+            recovered += result != "moved"
         if progress and (index % 25 == 0 or index == total):
             progress(index, total)
+    retired = _retire_staged_destination_sources(
+        manifest, group_modes, lease_fence,
+    )
     published = 0
     for i in range(len(manifest["groups"])):
         if allow_fuse_compat:
@@ -1239,9 +1380,9 @@ def execute_frozen_manifest(manifest: dict, *, lease_fence: Callable[[], None],
             result = _publish_group(manifest, i, lease_fence)
         if result == "published":
             published += 1
-    cleaned = _remove_empty_sources(manifest, lease_fence)
+    cleaned = _remove_empty_sources(manifest, lease_fence, skip_finals=True)
     return {
         "files_moved": completed, "files_reconciled": recovered,
-        "groups_published": published, "empty_dirs_removed": cleaned,
+        "groups_published": published, "empty_dirs_removed": retired + cleaned,
         "total_files": total, "package": str(package),
     }
