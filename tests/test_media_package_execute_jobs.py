@@ -181,9 +181,17 @@ def test_explicit_failed_publish_recovery_reuses_original_manifest_without_reexe
     failed = client.get(f"/api/media_package/executions/{failed_id}").json()
     assert failed["status"] == "failed"
     assert failed["error"] == "Package directory changed before publish"
-    # Task deletion and generic failed-history cleanup must preserve the
-    # original job ID and audit trail needed by the frozen stage.
-    assert client.delete(f"/api/tasks/{failed_id}").status_code == 409
+    # The task can be dismissed from the queue without removing its
+    # frozen manifest or the failed execution's recoverable audit record.
+    dismissed = client.delete(f"/api/tasks/{failed_id}")
+    assert dismissed.status_code == 200, dismissed.text
+    assert dismissed.json()["deleted"] is True
+    listing = client.get("/api/tasks")
+    assert listing.status_code == 200, listing.text
+    assert all(item["id"] != failed_id for item in listing.json()["items"])
+    # Dismissal is idempotent and does not destroy execution details.
+    assert client.delete(f"/api/tasks/{failed_id}").status_code == 200
+    assert client.get(f"/api/media_package/executions/{failed_id}").status_code == 200
     cleared = client.post("/api/tasks/clear-history", json={"statuses": ["failed"]})
     assert cleared.status_code == 200, cleared.text
     assert client.get(f"/api/media_package/executions/{failed_id}").status_code == 200
