@@ -1,12 +1,12 @@
 import { api } from './client';
 
-export type LuolcyJobStatus = 'queued' | 'running' | 'completed' | 'failed' |
+export type MediaPackageJobStatus = 'queued' | 'running' | 'completed' | 'failed' |
   'cancelled' | 'cancel_requested' | 'paused';
 
-export type LuolcyPackageStatus =
+export type MediaPackageStatus =
   'ready' | 'blocked' | 'skipped' | 'already_organized';
 
-export interface LuolcyGroup {
+export interface MediaPackageGroup {
   name: string;
   kind: 'P' | 'V' | 'Other';
   count: number;
@@ -14,14 +14,17 @@ export interface LuolcyGroup {
   destination: string;
 }
 
-export interface LuolcySampleMove {
+export interface MediaPackageSampleMove {
   source: string;
   target: string;
   bytes: number;
   kind: 'P' | 'V' | 'Other';
+  source_name?: string;
+  target_name?: string;
+  original_relative_path?: string;
 }
 
-export interface LuolcyConflict {
+export interface MediaPackageConflict {
   reason: string;
   directory?: string;
   source?: string;
@@ -31,23 +34,25 @@ export interface LuolcyConflict {
   sources?: string[];
 }
 
-export interface LuolcyPackagePreview {
+export interface MediaPackagePreview {
   package: string;
-  status: LuolcyPackageStatus;
+  status: MediaPackageStatus;
   reason: string | null;
   total_files: number;
   totals: { P: number; V: number; Other: number };
-  groups: LuolcyGroup[];
-  conflicts: LuolcyConflict[];
-  sample_moves: LuolcySampleMove[];
+  groups: MediaPackageGroup[];
+  conflicts: MediaPackageConflict[];
+  sample_moves: MediaPackageSampleMove[];
   total_proposals: number;
   needed_moves: number;
+  renamed_count?: number;
+  resolved_collision_count?: number;
   operation?: 'flatten_pure_media' | 'bucket_pure_media' | 'sort_mixed_media';
   truncated: boolean;
   read_only: true;
 }
 
-export interface LuolcyPreviewSummary {
+export interface MediaPackagePreviewSummary {
   package_count: number;
   ready_count: number;
   blocked_count: number;
@@ -55,12 +60,14 @@ export interface LuolcyPreviewSummary {
   already_organized_count: number;
   file_count: number;
   needed_moves: number;
+  renamed_count?: number;
+  resolved_collision_count?: number;
   elapsed_seconds: number;
 }
 
-export interface LuolcyPreviewPage {
+export interface MediaPackagePreviewPage {
   job_id: number;
-  status: LuolcyJobStatus;
+  status: MediaPackageJobStatus;
   error: string | null;
   selection: string;
   progress: {
@@ -69,16 +76,16 @@ export interface LuolcyPreviewPage {
     message: string | null;
     current_package?: string;
   };
-  summary: LuolcyPreviewSummary | null;
-  packages: LuolcyPackagePreview[];
+  summary: MediaPackagePreviewSummary | null;
+  packages: MediaPackagePreview[];
   page: number;
   page_size: number;
   read_only: true;
 }
 
-export interface LuolcyExecuteStatus {
+export interface MediaPackageExecuteStatus {
   job_id: number;
-  status: LuolcyJobStatus;
+  status: MediaPackageJobStatus;
   error: string | null;
   preview_job_id: number;
   progress: {
@@ -90,21 +97,21 @@ export interface LuolcyExecuteStatus {
   };
 }
 
-export const luolcyApi = {
+export const media_packageApi = {
   startPreview: (selection: string) =>
-    api.post<{ job_id: number; status: LuolcyJobStatus }>(
-      '/api/luolcy/previews', { selection },
+    api.post<{ job_id: number; status: MediaPackageJobStatus }>(
+      '/api/media_package/previews', { selection },
     ),
   startExecution: (previewJobId: number, confirmation: string) =>
-    api.post<{ job_id: number; status: LuolcyJobStatus }>(
-      `/api/luolcy/previews/${previewJobId}/execute`, { confirmation },
+    api.post<{ job_id: number; status: MediaPackageJobStatus }>(
+      `/api/media_package/previews/${previewJobId}/execute`, { confirmation },
     ),
   getExecution: (jobId: number) =>
-    api.get<LuolcyExecuteStatus>(`/api/luolcy/executions/${jobId}`),
+    api.get<MediaPackageExecuteStatus>(`/api/media_package/executions/${jobId}`),
   getPreview: (jobId: number, page: number = 1, pageSize: number = 25) => {
     const query = new URLSearchParams({
       page: String(page), page_size: String(pageSize),
     });
-    return api.get<LuolcyPreviewPage>(`/api/luolcy/previews/${jobId}?${query}`);
+    return api.get<MediaPackagePreviewPage>(`/api/media_package/previews/${jobId}?${query}`);
   },
 };

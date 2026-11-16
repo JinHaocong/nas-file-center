@@ -1,8 +1,8 @@
-"""Isolated, read-only Luolcy planner benchmark.
+"""Isolated, read-only MediaPackage planner benchmark.
 
 All inputs are created under a temporary directory; no production NAS paths
 are accessed. Timing is informational, never a nondeterministic CI gate.
-Run: PYTHONPATH=. python benchmarks/luolcy_preview_benchmark.py --packages 16
+Run: PYTHONPATH=. python benchmarks/media_package_preview_benchmark.py --packages 16
 """
 from __future__ import annotations
 
@@ -13,12 +13,12 @@ import time
 import tracemalloc
 from pathlib import Path
 
-from app.batch.luolcy_organizer import iter_luolcy_previews
+from app.batch.media_package_organizer import iter_media_package_previews
 
 
 def run(packages: int, images: int, videos: int) -> dict:
-    with tempfile.TemporaryDirectory(prefix="luolcy-preview-bench-") as temp:
-        root = Path(temp) / "data" / "Else" / "Luolcy"
+    with tempfile.TemporaryDirectory(prefix="media_package-preview-bench-") as temp:
+        root = Path(temp) / "data" / "Else" / "Collection"
         for index in range(packages):
             package = root / "2611" / "261115" / f"Author{index:04d}" / "New1GB"
             pic = package / "图包"
@@ -34,8 +34,8 @@ def run(packages: int, images: int, videos: int) -> dict:
         summaries = 0
         scanned = 0
         expected = packages * (images + videos)
-        for result in iter_luolcy_previews(
-            root, luolcy_root=root, allowed_roots=[root.parent.parent],
+        for result in iter_media_package_previews(
+            root, media_package_root=root, allowed_roots=[root.parent.parent],
             max_rows=10,
         ):
             summaries += 1

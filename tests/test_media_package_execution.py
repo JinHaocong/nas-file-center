@@ -1,27 +1,27 @@
-"""Real filesystem Luolcy move tests use only pytest temporary directories."""
+"""Real filesystem MediaPackage move tests use only pytest temporary directories."""
 from pathlib import Path
 
 import pytest
 
-from app.batch.luolcy_organizer import preview_luolcy_package
-from app.batch import luolcy_execution as executor
+from app.batch.media_package_organizer import preview_media_package_package
+from app.batch import media_package_execution as executor
 
 
 def example(tmp_path):
-    root = tmp_path / "data" / "Else" / "Luolcy"
-    package = root / "2611" / "261115" / "疑心病" / "New 1432.1MB"
+    root = tmp_path / "data" / "Else" / "Collection"
+    package = root / "2611" / "261115" / "SampleAuthor" / "SampleBundle"
     package.mkdir(parents=True)
     return root, package
 
 
 def manifest_for(root, package, job_id=521):
     roots = [root.parent.parent]
-    preview = preview_luolcy_package(
-        package, luolcy_root=root, allowed_roots=roots,
+    preview = preview_media_package_package(
+        package, media_package_root=root, allowed_roots=roots,
     )
     assert preview["status"] == "ready", preview
-    manifest = executor.prepare_luolcy_manifest(
-        package, luolcy_root=root, allowed_roots=roots,
+    manifest = executor.prepare_media_package_manifest(
+        package, media_package_root=root, allowed_roots=roots,
         quarantine_root=None, preview_record=preview, job_id=job_id,
     )
     assert manifest["input_fingerprint"] == preview["input_fingerprint"]
@@ -66,8 +66,8 @@ def test_over_200_files_staged_and_published_with_exact_count_size(tmp_path):
     ]
     finished = executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
     assert finished["files_moved"] == 201
-    assert (package / "P [200 600B]" / "199.jpg").read_bytes() == b"123"
-    assert (package / "P_1 [1 3B]" / "200.jpg").read_bytes() == b"123"
+    assert (package / "P [200 600B]" / "200.jpg").read_bytes() == b"123"
+    assert (package / "P_1 [1 3B]" / "001.jpg").read_bytes() == b"123"
     assert not nested.exists()
     assert sorted(p.name for p in package.iterdir()) == [
         "P [200 600B]", "P_1 [1 3B]",
@@ -88,11 +88,11 @@ def test_mixed_uses_p_v_other_and_preserves_package_name(tmp_path):
     assert [x["kind"] for x in manifest["groups"]] == ["P", "V", "Other"]
     outcome = executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
     assert outcome["files_moved"] == 3
-    assert (package / "P [1 5B]" / "photo.jpg").read_bytes() == b"photo"
-    assert (package / "V [1 5B]" / "video.mp4").read_bytes() == b"movie"
+    assert (package / "P [1 5B]" / "001.jpg").read_bytes() == b"photo"
+    assert (package / "V [1 5B]" / "001.mp4").read_bytes() == b"movie"
     assert (package / "Other [1 4B]" / "info.txt").read_bytes() == b"info"
     assert not inner.exists()
-    assert package.name == "New 1432.1MB"
+    assert package.name == "SampleBundle"
 
 
 def test_changed_source_fails_closed_before_move(tmp_path):
@@ -103,7 +103,7 @@ def test_changed_source_fails_closed_before_move(tmp_path):
     source.write_bytes(b"original")
     manifest = manifest_for(root, package)
     source.write_bytes(b"modified after plan")
-    with pytest.raises(executor.LuolcyExecutionConflict, match="changed"):
+    with pytest.raises(executor.MediaPackageExecutionConflict, match="changed"):
         executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
     assert source.read_bytes() == b"modified after plan"
     assert not (package / "001.mp4").exists()
@@ -114,13 +114,13 @@ def test_stale_preview_rejected_without_mutation(tmp_path):
     folder = package / "nested"
     folder.mkdir()
     (folder / "001.mp4").write_bytes(b"a")
-    preview = preview_luolcy_package(
-        package, luolcy_root=root, allowed_roots=[root.parent.parent],
+    preview = preview_media_package_package(
+        package, media_package_root=root, allowed_roots=[root.parent.parent],
     )
     (folder / "002.mp4").write_bytes(b"b")
-    with pytest.raises(executor.LuolcyExecutionConflict, match="changed"):
-        executor.prepare_luolcy_manifest(
-            package, luolcy_root=root, allowed_roots=[root.parent.parent],
+    with pytest.raises(executor.MediaPackageExecutionConflict, match="changed"):
+        executor.prepare_media_package_manifest(
+            package, media_package_root=root, allowed_roots=[root.parent.parent],
             quarantine_root=None, preview_record=preview, job_id=522,
         )
     assert (folder / "001.mp4").exists()
@@ -133,7 +133,7 @@ def test_preexisting_target_cannot_be_overwritten(tmp_path):
     (child / "001.mp4").write_bytes(b"source")
     manifest = manifest_for(root, package)
     (package / "001.mp4").write_bytes(b"untouchable")
-    with pytest.raises(executor.LuolcyExecutionConflict, match="changed"):
+    with pytest.raises(executor.MediaPackageExecutionConflict, match="changed since frozen preview"):
         executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
     assert (package / "001.mp4").read_bytes() == b"untouchable"
     assert (child / "001.mp4").read_bytes() == b"source"
@@ -177,7 +177,7 @@ def test_foreign_entry_in_staging_is_blocked_without_moving_source(tmp_path):
     stage = package / manifest["groups"][0]["stage"]
     stage.mkdir()
     (stage / "unexpected.txt").write_bytes(b"foreign")
-    with pytest.raises(executor.LuolcyExecutionConflict, match="Foreign entry"):
+    with pytest.raises(executor.MediaPackageExecutionConflict, match="Foreign entry"):
         executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
     assert (folder / "000.jpg").read_bytes() == b"x"
     assert (stage / "unexpected.txt").read_bytes() == b"foreign"
@@ -193,7 +193,7 @@ def test_manifest_tampering_is_rejected(tmp_path):
     executor.save_frozen_manifest(path, manifest)
     payload = path.read_text(encoding="utf-8").replace("001.jpg", "002.jpg")
     path.write_text(payload, encoding="utf-8")
-    with pytest.raises(executor.LuolcyExecutionConflict, match="integrity"):
+    with pytest.raises(executor.MediaPackageExecutionConflict, match="integrity"):
         executor.load_frozen_manifest(path, job_id=521, package=package)
 
 
@@ -206,7 +206,7 @@ def test_crashed_compat_link_is_not_unlinked_automatically(tmp_path):
     manifest = manifest_for(root, package)
     # Simulates two hardlinks after a crash in a COMPAT publish path.
     (package / "001.mp4").hardlink_to(src)
-    with pytest.raises(executor.LuolcyExecutionConflict, match="Both source"):
+    with pytest.raises(executor.MediaPackageExecutionConflict, match="changed since frozen preview"):
         executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
     assert src.exists()
     assert (package / "001.mp4").exists()
@@ -223,7 +223,7 @@ def test_crash_during_group_publication_resumes_from_frozen_stage(tmp_path, monk
     failed = {"value": False}
 
     def crash_before_publish(src_fd, src_name, dst_fd, dst_name):
-        if src_name.startswith(".nfc-luolcy-stage-") and not failed["value"]:
+        if src_name.startswith(".nfc-media_package-stage-") and not failed["value"]:
             failed["value"] = True
             raise RuntimeError("synthetic publish failure")
         return original(src_fd, src_name, dst_fd, dst_name)
@@ -248,25 +248,25 @@ def test_tampered_target_outside_package_is_rejected_before_mutation(tmp_path):
     (nested / "one.mp4").write_bytes(b"movie")
     manifest = manifest_for(root, package)
     manifest["moves"][0]["target"] = str(tmp_path / "outside.mp4")
-    with pytest.raises(executor.LuolcyExecutionConflict, match="escaped"):
+    with pytest.raises(executor.MediaPackageExecutionConflict, match="escaped"):
         executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
     assert (nested / "one.mp4").read_bytes() == b"movie"
     assert not (tmp_path / "outside.mp4").exists()
 
 
-def test_cleanup_leaves_nonempty_original_directory_untouched(tmp_path):
+def test_new_file_after_freeze_blocks_before_mutation_or_cleanup(tmp_path):
     root, package = example(tmp_path)
     inner = package / "images"
     inner.mkdir()
     (inner / "001.jpg").write_bytes(b"pic")
     manifest = manifest_for(root, package)
-    # A user drops an unrelated file after freeze, before moving.
+    # New files anywhere inside the package invalidate the frozen snapshot.
     (inner / "user-readme.txt").write_bytes(b"preserve me")
-    result = executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
-    assert result["files_moved"] == 1
-    assert result["empty_dirs_removed"] == 0
+    with pytest.raises(executor.MediaPackageExecutionConflict, match="changed since frozen preview"):
+        executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
     assert (inner / "user-readme.txt").read_bytes() == b"preserve me"
-    assert (package / "001.jpg").read_bytes() == b"pic"
+    assert (inner / "001.jpg").read_bytes() == b"pic"
+    assert not (package / "001.jpg").exists()
 
 
 def test_symlink_parent_replacement_does_not_escape_package(tmp_path):
@@ -280,10 +280,10 @@ def test_symlink_parent_replacement_does_not_escape_package(tmp_path):
     (inner / "01.jpg").rename(other / "01.jpg")
     inner.rmdir()
     inner.symlink_to(other, target_is_directory=True)
-    with pytest.raises((OSError, executor.LuolcyExecutionConflict)):
+    with pytest.raises((OSError, executor.MediaPackageExecutionConflict)):
         executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
     assert (other / "01.jpg").read_bytes() == b"image"
-    assert not (package / "01.jpg").exists()
+    assert not (package / "001.jpg").exists()
 
 
 def test_existing_plain_p_and_v_are_migrated_into_count_size_folders(tmp_path):
@@ -305,3 +305,112 @@ def test_existing_plain_p_and_v_are_migrated_into_count_size_folders(tmp_path):
     assert not legacy_v.exists()
     assert (package / "P [1 5B]" / "001.jpg").read_bytes() == b"image"
     assert (package / "V [1 5B]" / "001.mp4").read_bytes() == b"video"
+
+
+def test_root_cycle_stages_all_files_before_publish(tmp_path):
+    root, package = example(tmp_path)
+    (package / "001.mp4").write_bytes(b"one")
+    (package / "clips").mkdir()
+    (package / "clips" / "001.mp4").write_bytes(b"two")
+    manifest = manifest_for(root, package, job_id=641)
+    assert len(manifest["moves"]) == 2
+    assert [row["original_relative_path"] for row in manifest["moves"]] == [
+        "001.mp4", "clips/001.mp4",
+    ]
+    assert [row["target_name"] for row in manifest["moves"]] == [
+        "001.mp4", "002.mp4",
+    ]
+    results = executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+    assert results["files_moved"] == 2
+    assert (package / "001.mp4").read_bytes() == b"one"
+    assert (package / "002.mp4").read_bytes() == b"two"
+    assert not (package / "clips").exists()
+    assert not any(p.name.startswith(".nfc-") for p in package.iterdir())
+
+
+def test_flat_publish_interrupted_after_first_file_resumes_without_overwrite(tmp_path, monkeypatch):
+    root, package = example(tmp_path)
+    (package / "clips").mkdir()
+    (package / "clips" / "001.mp4").write_bytes(b"first")
+    (package / "clips" / "002.mp4").write_bytes(b"second")
+    (package / "clips" / "003.mp4").write_bytes(b"third")
+    manifest = manifest_for(root, package, job_id=642)
+    move = executor.rename_noreplace_at
+    seen = {"count": 0}
+
+    def fail_on_second_publish(srcfd, srcname, dstfd, dstname):
+        if srcname in ("001.mp4", "002.mp4", "003.mp4") and dstname == srcname:
+            seen["count"] += 1
+            if seen["count"] == 5:
+                raise RuntimeError("inject post-publication crash")
+        return move(srcfd, srcname, dstfd, dstname)
+
+    monkeypatch.setattr(executor, "rename_noreplace_at", fail_on_second_publish)
+    with pytest.raises(RuntimeError, match="post-publication crash"):
+        executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+    monkeypatch.setattr(executor, "rename_noreplace_at", move)
+    again = executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+    assert again["files_reconciled"] == 3
+    assert (package / "001.mp4").read_bytes() == b"first"
+    assert (package / "002.mp4").read_bytes() == b"second"
+    assert (package / "003.mp4").read_bytes() == b"third"
+    assert not any(p.name.startswith(".nfc-") for p in package.iterdir())
+
+
+def test_complete_flat_permutation_has_idempotent_restart(tmp_path):
+    root, package = example(tmp_path)
+    (package / "002.mp4").write_bytes(b"first")
+    (package / "clips").mkdir()
+    (package / "clips" / "001.mp4").write_bytes(b"second")
+    manifest = manifest_for(root, package, job_id=644)
+    assert [row["target_name"] for row in manifest["moves"]] == [
+        "001.mp4", "002.mp4",
+    ]
+    outcome = executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+    assert outcome["files_moved"] == 2
+    assert (package / "001.mp4").read_bytes() == b"first"
+    assert (package / "002.mp4").read_bytes() == b"second"
+    replay = executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+    assert replay["files_moved"] == 0
+    assert replay["files_reconciled"] == 2
+
+
+def test_frozen_mapping_records_every_original_and_final_path(tmp_path):
+    root, package = example(tmp_path)
+    (package / "A").mkdir()
+    (package / "B").mkdir()
+    (package / "A" / "001.mp4").write_bytes(b"movie_a")
+    (package / "B" / "001.mp4").write_bytes(b"movie_b")
+    manifest = manifest_for(root, package, job_id=645)
+    assert len(manifest["moves"]) == 2
+    assert [row["original_relative_path"] for row in manifest["moves"]] == [
+        "A/001.mp4", "B/001.mp4",
+    ]
+    assert [row["final_relative_path"] for row in manifest["moves"]] == [
+        "001.mp4", "002.mp4",
+    ]
+    frozen = tmp_path / "config" / "mapping.json"
+    executor.save_frozen_manifest(frozen, manifest)
+    copy = executor.load_frozen_manifest(frozen, job_id=645, package=package)
+    assert [(row["original_relative_path"], row["final_relative_path"])
+            for row in copy["moves"]] == [
+        ("A/001.mp4", "001.mp4"), ("B/001.mp4", "002.mp4"),
+    ]
+
+
+def test_other_duplicate_names_are_suffixed_without_loss(tmp_path):
+    root, package = example(tmp_path)
+    (package / "A").mkdir()
+    (package / "B").mkdir()
+    (package / "A" / "notes.txt").write_bytes(b"note_a")
+    (package / "B" / "notes.txt").write_bytes(b"note_b")
+    (package / "A" / "image.jpg").write_bytes(b"img")
+    manifest = manifest_for(root, package, job_id=646)
+    result = executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+    assert result["files_moved"] == 3
+    folder = package / "Other [2 12B]"
+    assert sorted(p.name for p in folder.iterdir()) == [
+        "notes.txt", "notes__dup002.txt",
+    ]
+    assert (folder / "notes.txt").read_bytes() == b"note_a"
+    assert (folder / "notes__dup002.txt").read_bytes() == b"note_b"

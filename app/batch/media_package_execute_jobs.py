@@ -1,4 +1,4 @@
-"""Luolcy guarded execution queue: preview -> freeze/check -> no-replace Worker.
+"""MediaPackage guarded execution queue: preview -> freeze/check -> no-replace Worker.
 
 Mutation is never triggered by a scan or ordinary GET. An administrator must
 submit the exact preview-bound confirmation after completed read-only review.
@@ -11,45 +11,45 @@ import os
 from pathlib import Path
 
 from sqlalchemy import func, select, text
-from app.batch.luolcy_jobs import PREVIEW_KIND, _files as _preview_files, _root
-from app.batch.luolcy_organizer import _package_path
-from app.batch.luolcy_execution import (
-    LuolcyExecutionConflict, execute_frozen_manifest, load_frozen_manifest,
-    prepare_luolcy_manifest, save_frozen_manifest,
+from app.batch.media_package_jobs import PREVIEW_KIND, _files as _preview_files, _root
+from app.batch.media_package_organizer import _package_path
+from app.batch.media_package_execution import (
+    MediaPackageExecutionConflict, execute_frozen_manifest, load_frozen_manifest,
+    prepare_media_package_manifest, save_frozen_manifest,
 )
 from app.config import Settings
 from app.models import WorkJob
 from app.tasks.handlers_base import TaskHandler, register_handler
 from app.tasks.context import JobContext
 
-EXECUTE_KIND = "luolcy-package-execute"
+EXECUTE_KIND = "media_package-package-execute"
 ACTIVE = ("queued", "running", "paused", "cancel_requested")
 
 
 def _execution_folder(settings: Settings, job_id: int) -> Path:
     if job_id <= 0:
-        raise ValueError("Invalid Luolcy execution job ID")
-    return settings.reports_dir / "luolcy-executions" / str(job_id)
+        raise ValueError("Invalid MediaPackage execution job ID")
+    return settings.reports_dir / "media_package-executions" / str(job_id)
 
 
-def enqueue_luolcy_execution(session_factory, settings: Settings,
+def enqueue_media_package_execution(session_factory, settings: Settings,
                              *, preview_job_id: int, confirmation: str) -> dict:
     """Only an exact user-confirmed, completed and conflict-free preview may execute."""
     if not settings.allow_mutation or not settings.allow_delete:
-        raise ValueError("Luolcy execution requires ALLOW_MUTATION and ALLOW_DELETE")
-    expected = f"EXECUTE_LUOLCY_PREVIEW_{preview_job_id}"
+        raise ValueError("MediaPackage execution requires ALLOW_MUTATION and ALLOW_DELETE")
+    expected = f"EXECUTE_MEDIA_PACKAGE_PREVIEW_{preview_job_id}"
     if not isinstance(confirmation, str) or confirmation != expected:
-        raise ValueError("Exact Luolcy preview execution confirmation is required")
+        raise ValueError("Exact MediaPackage preview execution confirmation is required")
     with session_factory() as session:
         session.execute(text("BEGIN IMMEDIATE"))
         preview = session.get(WorkJob, preview_job_id)
         if preview is None or preview.kind != PREVIEW_KIND:
             raise KeyError(preview_job_id)
         if preview.status != "completed":
-            raise ValueError("Luolcy preview must be completed before execution")
+            raise ValueError("MediaPackage preview must be completed before execution")
         data, index, summary_path = _preview_files(settings, preview_job_id)
         if not (data.is_file() and index.is_file() and summary_path.is_file()):
-            raise ValueError("Luolcy preview evidence is incomplete")
+            raise ValueError("MediaPackage preview evidence is incomplete")
         with summary_path.open("r", encoding="utf-8") as file:
             summary = json.load(file)
         if (not isinstance(summary.get("package_count"), int)
@@ -75,7 +75,7 @@ def enqueue_luolcy_execution(session_factory, settings: Settings,
             WorkJob.status.in_(ACTIVE),
         ).limit(1))
         if active is not None:
-            raise ValueError(f"Another Luolcy execution task #{active} is running")
+            raise ValueError(f"Another MediaPackage execution task #{active} is running")
         job = WorkJob(
             kind=EXECUTE_KIND, status="queued", progress_current=0,
             progress_total=summary["package_count"],
@@ -90,7 +90,7 @@ def enqueue_luolcy_execution(session_factory, settings: Settings,
         return {"job_id": int(job.id), "status": job.status}
 
 
-def get_luolcy_execution(session_factory, job_id: int) -> dict:
+def get_media_package_execution(session_factory, job_id: int) -> dict:
     with session_factory() as session:
         job = session.get(WorkJob, job_id)
         if job is None or job.kind != EXECUTE_KIND:
@@ -111,7 +111,7 @@ def get_luolcy_execution(session_factory, job_id: int) -> dict:
 
 
 @register_handler
-class LuolcyPackageExecuteHandler(TaskHandler):
+class MediaPackageExecuteHandler(TaskHandler):
     job_type = EXECUTE_KIND
     supports_cancel = False
     supports_retry = False
@@ -120,17 +120,17 @@ class LuolcyPackageExecuteHandler(TaskHandler):
 
     def run(self, job: WorkJob, context: JobContext, settings: Settings) -> None:
         if not settings.allow_mutation or not settings.allow_delete:
-            raise PermissionError("Luolcy execution mutation gates are disabled")
+            raise PermissionError("MediaPackage execution mutation gates are disabled")
         if not context.worker_id:
-            raise PermissionError("Luolcy execution requires an exclusive Worker lease")
+            raise PermissionError("MediaPackage execution requires an exclusive Worker lease")
         state = json.loads(job.state_json or "{}")
         preview_job_id = state.get("preview_job_id")
         if not isinstance(preview_job_id, int) or preview_job_id <= 0:
-            raise ValueError("Missing Luolcy preview authority")
+            raise ValueError("Missing MediaPackage preview authority")
         with context.SessionLocal() as session:
             preview = session.get(WorkJob, preview_job_id)
             if preview is None or preview.kind != PREVIEW_KIND or preview.status != "completed":
-                raise ValueError("Approved Luolcy preview is no longer available")
+                raise ValueError("Approved MediaPackage preview is no longer available")
         data, _index, summary_path = _preview_files(settings, preview_job_id)
         with summary_path.open("r", encoding="utf-8") as file:
             summary = json.load(file)
@@ -138,12 +138,12 @@ class LuolcyPackageExecuteHandler(TaskHandler):
         if not isinstance(total, int) or not 1 <= total <= 60_000:
             raise ValueError("Unsafe execution package count")
         if summary.get("blocked_count") != 0:
-            raise ValueError("Luolcy execution is blocked by unresolved preview conflicts")
+            raise ValueError("MediaPackage execution is blocked by unresolved preview conflicts")
 
         # The resume checkpoint is committed BEFORE any filesystem operation.
         context.checkpoint(
             progress_total=total,
-            progress_message="Luolcy 开始逐资源包冻结、校验与执行",
+            progress_message="MediaPackage 开始逐资源包冻结、校验与执行",
             checkpoint_data={
                 "schema_version": 1, "preview_job_id": preview_job_id,
                 "mode": "frozen_manifest_reconcile",
@@ -168,7 +168,7 @@ class LuolcyPackageExecuteHandler(TaskHandler):
                     package, _root(settings), settings.allowed_roots, settings.quarantine_root,
                 )
                 if package != checked:
-                    raise LuolcyExecutionConflict("Preview package escaped the configured Luolcy root")
+                    raise MediaPackageExecutionConflict("Preview package escaped the configured MediaPackage root")
                 package_name = str(package)[-120:]
                 manifest_path = folder / f"{ordinal:07d}.manifest.json"
 
@@ -177,13 +177,13 @@ class LuolcyPackageExecuteHandler(TaskHandler):
                         manifest = load_frozen_manifest(
                             manifest_path, job_id=int(job.id), package=package,
                         )
-                        if manifest.get("luolcy_root") != str(_root(settings)):
-                            raise LuolcyExecutionConflict("Frozen manifest root differs from configured Luolcy root")
+                        if manifest.get("media_package_root") != str(_root(settings)):
+                            raise MediaPackageExecutionConflict("Frozen manifest root differs from configured MediaPackage root")
                     else:
                         # Newly frozen packages must match every file identity
                         # in the original preview. No stale preview may run.
-                        manifest = prepare_luolcy_manifest(
-                            package, luolcy_root=_root(settings),
+                        manifest = prepare_media_package_manifest(
+                            package, media_package_root=_root(settings),
                             allowed_roots=settings.allowed_roots,
                             quarantine_root=settings.quarantine_root,
                             preview_record=record, job_id=int(job.id),
@@ -209,7 +209,7 @@ class LuolcyPackageExecuteHandler(TaskHandler):
                 elif record["status"] in ("skipped", "already_organized"):
                     results.append({"package": str(package), "skipped": True})
                 else:
-                    raise LuolcyExecutionConflict(
+                    raise MediaPackageExecutionConflict(
                         "Preview contains blocked or unsupported packages; refusing execution"
                     )
                 context.checkpoint(

@@ -1,4 +1,4 @@
-"""Read-only Luolcy-specific resource package planner.
+"""Read-only MediaPackage-specific resource package planner.
 
 This is deliberately separate from generic media sort. No filesystem mutation
 is permitted here: a future executor must validate a fresh manifest and use
@@ -14,6 +14,7 @@ import stat
 from pathlib import Path
 
 from app.batch.file_rename import _open_directory_nofollow
+from app.batch.media_package_naming import allocate_names
 from app.filters.media_types import get_media_type
 from app.path_safety import require_allowed_path, require_unreserved_path
 
@@ -44,25 +45,25 @@ def _package_path(package: str | Path, root: str | Path,
     base = Path(root).expanduser()
     raw = Path(package).expanduser()
     if not raw.is_absolute() or not base.is_absolute():
-        raise ValueError("Luolcy paths must be absolute")
+        raise ValueError("MediaPackage paths must be absolute")
     # No symlink traversal even if an attacker points a directory inside the
-    # Luolcy tree to an unrelated storage area.
+    # MediaPackage tree to an unrelated storage area.
     safe = require_unreserved_path(
         require_allowed_path(raw, allowed_roots), quarantine_root
     )
     if raw != safe:
-        raise ValueError("Luolcy path must use its literal canonical location")
+        raise ValueError("MediaPackage path must use its literal canonical location")
     try:
         components = raw.relative_to(base).parts
     except ValueError as exc:
-        raise ValueError("Package must be below the configured Luolcy root") from exc
+        raise ValueError("Package must be below the configured MediaPackage root") from exc
     if (len(components) != 4
             or not _MONTH.fullmatch(components[0])
             or not _DAY.fullmatch(components[1])
             or components[1][:4] != components[0]
             or components[2] in (".", "..")
             or components[3] in (".", "..")):
-        raise ValueError("Expected Luolcy/YYMM/YYMMDD/author/package")
+        raise ValueError("Expected MediaPackage/YYMM/YYMMDD/author/package")
     fd = _open_directory_nofollow(raw)
     os.close(fd)
     return raw
@@ -73,33 +74,33 @@ MAX_SCOPE_DISCOVERED_PACKAGES = 60_000
 MAX_SCOPE_ENTRIES_PER_DIRECTORY = 100_000
 
 
-def _validate_scope(selection: str | Path, *, luolcy_root: str | Path,
+def _validate_scope(selection: str | Path, *, media_package_root: str | Path,
                     allowed_roots: list[Path],
                     quarantine_root: Path | None) -> tuple[Path, int]:
-    """Restrict a selection to the Luolcy root or one of its four fixed levels.
+    """Restrict a selection to the MediaPackage root or one of its four fixed levels.
 
     A selected month/day is a *discovery scope*, never a move destination.
     Only the resource package's descendants may be changed by a future runner.
     """
-    root = Path(luolcy_root).expanduser()
+    root = Path(media_package_root).expanduser()
     raw = Path(selection).expanduser()
     if not raw.is_absolute() or not root.is_absolute():
-        raise ValueError("Luolcy selection and root must be absolute paths")
+        raise ValueError("MediaPackage selection and root must be absolute paths")
     safe = require_unreserved_path(
         require_allowed_path(raw, allowed_roots), quarantine_root,
     )
     if raw != safe:
-        raise ValueError("Luolcy selection must use a literal canonical path")
+        raise ValueError("MediaPackage selection must use a literal canonical path")
     try:
         components = raw.relative_to(root).parts
     except ValueError as exc:
-        raise ValueError("Selection must stay below the configured Luolcy root") from exc
+        raise ValueError("Selection must stay below the configured MediaPackage root") from exc
     if (len(components) > 4
             or (len(components) >= 1 and not _MONTH.fullmatch(components[0]))
             or (len(components) >= 2 and
                 (not _DAY.fullmatch(components[1]) or
                  components[1][:4] != components[0]))):
-        raise ValueError("Select Luolcy, YYMM, YYMMDD, author or resource package")
+        raise ValueError("Select MediaPackage, YYMM, YYMMDD, author or resource package")
     fd = _open_directory_nofollow(raw)
     os.close(fd)
     return raw, len(components)
@@ -113,11 +114,11 @@ def _child_directories(directory: Path) -> list[str]:
         with os.scandir(fd) as entries:
             for count, entry in enumerate(entries, 1):
                 if count > MAX_SCOPE_ENTRIES_PER_DIRECTORY:
-                    raise ValueError("Too many Luolcy discovery entries in one directory")
+                    raise ValueError("Too many MediaPackage discovery entries in one directory")
                 # Symlinked folders may point outside the protected resource
                 # hierarchy. Never silently treat them as resource packages.
                 if entry.is_symlink():
-                    raise ValueError(f"Luolcy scope contains a symlink: {directory / entry.name}")
+                    raise ValueError(f"MediaPackage scope contains a symlink: {directory / entry.name}")
                 if entry.is_dir(follow_symlinks=False):
                     names.append(entry.name)
     finally:
@@ -125,18 +126,18 @@ def _child_directories(directory: Path) -> list[str]:
     return sorted(names)
 
 
-def iter_luolcy_packages(selection: str | Path, *,
-                         luolcy_root: str | Path,
+def iter_media_package_packages(selection: str | Path, *,
+                         media_package_root: str | Path,
                          allowed_roots: list[Path],
                          quarantine_root: Path | None = None):
-    """Stream package paths from Luolcy/YYMM/YYMMDD/author/package.
+    """Stream package paths from MediaPackage/YYMM/YYMMDD/author/package.
 
-    A Luolcy root selection enumerates all packages; month/day selections
+    A MediaPackage root selection enumerates all packages; month/day selections
     enumerate only matching descendants. No unrelated directory is modified.
     The iterator is bounded and does not materialize the full library.
     """
     selected, level = _validate_scope(
-        selection, luolcy_root=luolcy_root,
+        selection, media_package_root=media_package_root,
         allowed_roots=allowed_roots, quarantine_root=quarantine_root,
     )
     pending = [(selected, level)]
@@ -146,7 +147,7 @@ def iter_luolcy_packages(selection: str | Path, *,
         if depth == 4:
             discovered += 1
             if discovered > MAX_SCOPE_DISCOVERED_PACKAGES:
-                raise ValueError("Too many Luolcy resource packages in selected scope")
+                raise ValueError("Too many MediaPackage resource packages in selected scope")
             yield directory
             continue
         children = []
@@ -160,18 +161,18 @@ def iter_luolcy_packages(selection: str | Path, *,
         pending.extend(reversed(children))
 
 
-def iter_luolcy_previews(selection: str | Path, *,
-                         luolcy_root: str | Path,
+def iter_media_package_previews(selection: str | Path, *,
+                         media_package_root: str | Path,
                          allowed_roots: list[Path],
                          quarantine_root: Path | None = None,
                          max_rows: int = 100):
     """Yield read-only previews one resource package at a time (bounded RAM)."""
-    for package in iter_luolcy_packages(
-        selection, luolcy_root=luolcy_root,
+    for package in iter_media_package_packages(
+        selection, media_package_root=media_package_root,
         allowed_roots=allowed_roots, quarantine_root=quarantine_root,
     ):
-        yield preview_luolcy_package(
-            package, luolcy_root=luolcy_root,
+        yield preview_media_package_package(
+            package, media_package_root=media_package_root,
             allowed_roots=allowed_roots, quarantine_root=quarantine_root,
             max_rows=max_rows,
         )
@@ -190,12 +191,14 @@ def _walk_package(package: Path):
         directory, depth = stack.pop()
         directory_count += 1
         if directory_count > MAX_PACKAGE_DIRECTORIES or depth > MAX_DEPTH:
-            raise ValueError("Luolcy directory/depth safety limit exceeded")
+            raise ValueError("MediaPackage directory/depth safety limit exceeded")
         fd = _open_directory_nofollow(directory)
         children = []
         try:
             with os.scandir(fd) as it:
                 for entry in it:
+                    if entry.name.casefold().startswith(".nfc-"):
+                        raise ValueError(f"Reserved organizer workspace requires recovery: {directory / entry.name}")
                     if entry.is_symlink():
                         raise ValueError(f"Symlink requires manual review: {directory / entry.name}")
                     if entry.is_dir(follow_symlinks=False):
@@ -208,7 +211,7 @@ def _walk_package(package: Path):
                         raise ValueError("Source file changed during scan")
                     file_count += 1
                     if file_count > MAX_PACKAGE_FILES:
-                        raise ValueError("Luolcy package file safety limit exceeded")
+                        raise ValueError("MediaPackage package file safety limit exceeded")
                     yield {
                         "path": str(directory / entry.name),
                         "name": entry.name,
@@ -225,7 +228,7 @@ def _walk_package(package: Path):
 
 def _input_fingerprint(files: list[dict], package: Path) -> str:
     """Stable digest of the entire package file snapshot, not a sampled page."""
-    digest = hashlib.sha256(b"luolcy-snapshot-v2\\n")
+    digest = hashlib.sha256(b"media_package-snapshot-v2\\n")
     for item in sorted(files, key=lambda row: (
         os.path.relpath(row["path"], package).casefold(),
         os.path.relpath(row["path"], package),
@@ -239,7 +242,7 @@ def _input_fingerprint(files: list[dict], package: Path) -> str:
     return digest.hexdigest()
 
 
-def preview_luolcy_package(package: str | Path, *, luolcy_root: str | Path,
+def preview_media_package_package(package: str | Path, *, media_package_root: str | Path,
                            allowed_roots: list[Path],
                            quarantine_root: Path | None = None,
                            max_rows: int = 100, include_items: bool = False) -> dict:
@@ -252,7 +255,7 @@ def preview_luolcy_package(package: str | Path, *, luolcy_root: str | Path,
     """
     if not isinstance(max_rows, int) or not 1 <= max_rows <= 200:
         raise ValueError("max_rows must be between 1 and 200")
-    source = _package_path(package, luolcy_root, allowed_roots, quarantine_root)
+    source = _package_path(package, media_package_root, allowed_roots, quarantine_root)
     items = list(_walk_package(source))
     input_fingerprint = _input_fingerprint(items, source)
     totals = {kind: sum(x["kind"] == kind for x in items) for kind in ("P", "V", "Other")}
@@ -262,46 +265,55 @@ def preview_luolcy_package(package: str | Path, *, luolcy_root: str | Path,
             "input_fingerprint": input_fingerprint,
             "reason": "empty", "total_files": 0, "totals": totals,
             "groups": [], "conflicts": [], "sample_moves": [],
-            "total_proposals": 0, "needed_moves": 0, "truncated": False,
+            "total_proposals": 0, "needed_moves": 0,
+            "renamed_count": 0, "resolved_collision_count": 0,
+            "truncated": False,
             "read_only": True,
             **({"_snapshot_items": items} if include_items else {}),
         }
 
-    # Homogeneous packages have two fixed modes. <=200 files: flatten
-    # nested files to the package root. >200 files: use P/V size-labelled
-    # buckets, even when all files are already flat. No configuration toggle.
+    # Homogeneous packages <=200 must be flattened *and* renumbered.
+    # To avoid a root-level 001/002 rename cycle, the frozen executor stages
+    # every file before publishing any numbered basename.
     if (len(items) <= MAX_FILES_PER_GROUP and totals["Other"] == 0
             and (totals["P"] == 0 or totals["V"] == 0)):
         ordered = sorted(items, key=lambda row: (
             os.path.relpath(row["path"], source).casefold(),
             os.path.relpath(row["path"], source),
         ))
-        by_name: dict[str, list[dict]] = {}
+        new_names, _ = allocate_names(ordered, kind="flat")
+        rename_count = sum(row["name"] != name
+                           for row, name in zip(ordered, new_names))
+        seen_original = set()
+        collision_count = 0
         for row in ordered:
-            by_name.setdefault(row["name"].casefold(), []).append(row)
-        conflicts: list[dict] = []
-        for rows in by_name.values():
-            if len(rows) > 1:
-                conflicts.append({
-                    "reason": "flatten_filename_collision",
-                    "sources": [item["path"] for item in rows],
-                    "target": str(source / rows[0]["name"]),
-                })
-        moves = [
-            {"source": row["path"], "target": str(source / row["name"]),
+            key = row["name"].casefold()
+            collision_count += key in seen_original
+            seen_original.add(key)
+        needs_work = any(
+            row["path"] != str(source / name)
+            for row, name in zip(ordered, new_names)
+        )
+        # The execution phase must stage ALL files, including already-numbered
+        # root entries that currently occupy another file's desired target.
+        planned = [
+            {"source": row["path"], "target": str(source / name),
+             "source_name": row["name"], "target_name": name,
+             "original_relative_path": os.path.relpath(row["path"], source),
              "bytes": row["bytes"], "kind": row["kind"]}
-            for row in ordered
-            if Path(row["path"]).parent != source
-        ]
+            for row, name in zip(ordered, new_names)
+        ] if needs_work else []
         return {
             "package": str(source),
             "input_fingerprint": input_fingerprint,
-            "status": "blocked" if conflicts else "ready" if moves else "skipped",
-            "reason": None if moves else "already_flat",
+            "status": "ready" if needs_work else "skipped",
+            "reason": None if needs_work else "already_flat_numbered",
             "total_files": len(items), "totals": totals, "groups": [],
-            "conflicts": conflicts, "sample_moves": moves[:max_rows],
-            "total_proposals": len(moves), "needed_moves": len(moves),
-            "truncated": len(moves) > max_rows,
+            "conflicts": [], "sample_moves": planned[:max_rows],
+            "total_proposals": len(planned), "needed_moves": len(planned),
+            "renamed_count": rename_count,
+            "resolved_collision_count": collision_count,
+            "truncated": len(planned) > max_rows,
             "read_only": True,
             "operation": "flatten_pure_media",
             **({"_snapshot_items": items} if include_items else {}),
@@ -316,6 +328,8 @@ def preview_luolcy_package(package: str | Path, *, luolcy_root: str | Path,
     sample = []
     planned = 0
     needed_moves = 0
+    renamed_count = 0
+    resolved_collision_count = 0
     observed = {}
     for item in items:
         kind = item["kind"]
@@ -345,6 +359,7 @@ def preview_luolcy_package(package: str | Path, *, luolcy_root: str | Path,
             size = sum(row["bytes"] for row in chunk)
             folder = f"{stem} [{len(chunk)} {_size_label(size)}]"
             dest = source / folder
+            assigned, automatic_other = allocate_names(chunk, kind=kind)
             existing = occupied.get(folder.casefold())
             # A prior P, P_1, V, V_1 bucket with unknown or stale count/size
             # is not silently replaced, merged or renamed.
@@ -363,23 +378,31 @@ def preview_luolcy_package(package: str | Path, *, luolcy_root: str | Path,
                 conflicts.append({"directory": str(dest),
                                   "existing": sorted(competing),
                                   "reason": "existing_bucket_name_requires_review"})
-            if existing is not None and any(Path(row["path"]).parent != dest for row in chunk):
-                # Existing destination with incoming files requires a guarded
-                # merge/execution policy; do not silently overwrite.
+            if existing is not None and any(
+                row["path"] != str(dest / name) for row, name in zip(chunk, assigned)
+            ):
+                # Replacing an existing labelled target folder needs a
+                # separate no-clobber migration procedure. Name collisions
+                # within a *new* target are automatically numbered, but a
+                # pre-existing target directory is not safe to overwrite.
                 conflicts.append({"directory": str(dest), "reason": "target_directory_exists"})
-            # An old P/V folder or another numbered bucket with a different
-            # capacity label is expected during migration; not an error until
-            # it is treated as a target by a protected executor.
-            seen_names = set()
-            for row in chunk:
-                candidate = row["name"]
-                folded = candidate.casefold()
-                if folded in seen_names:
-                    conflicts.append({"source": row["path"], "reason": "duplicate_filename_in_bucket"})
-                seen_names.add(folded)
+            seen_original = set()
+            resolved_collision_count += automatic_other
+            for row, candidate in zip(chunk, assigned):
+                # Numbering makes duplicate original basenames harmless.
+                # Report how many collisions were avoided, without merging.
+                if kind in ("P", "V"):
+                    folded = row["name"].casefold()
+                    resolved_collision_count += folded in seen_original
+                    seen_original.add(folded)
+                renamed_count += row["name"] != candidate
                 if len(sample) < max_rows:
-                    sample.append({"source": row["path"], "target": str(dest / candidate),
-                                   "bytes": row["bytes"], "kind": kind})
+                    sample.append({
+                        "source": row["path"], "target": str(dest / candidate),
+                        "source_name": row["name"], "target_name": candidate,
+                        "original_relative_path": os.path.relpath(row["path"], source),
+                        "bytes": row["bytes"], "kind": kind,
+                    })
                 planned += 1
                 if row["path"] != str(dest / candidate):
                     needed_moves += 1
@@ -393,7 +416,11 @@ def preview_luolcy_package(package: str | Path, *, luolcy_root: str | Path,
         "groups": groups, "conflicts": conflicts,
         "sample_moves": sample,
         "total_proposals": planned,
-        "needed_moves": needed_moves,
+        # Group publishing requires staging each file, even an already-numbered
+        # source in one bucket, to guarantee a no-clobber final publication.
+        "needed_moves": planned if needed_moves else 0,
+        "renamed_count": renamed_count,
+        "resolved_collision_count": resolved_collision_count,
         "truncated": len(sample) < planned,
         "read_only": True,
         "operation": ("bucket_pure_media" if totals["Other"] == 0
