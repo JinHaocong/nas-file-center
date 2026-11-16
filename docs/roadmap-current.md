@@ -1,7 +1,7 @@
 # NAS File Center — Current Roadmap
 
 Status: CANONICAL CURRENT ROADMAP  
-Release authority: **v1.4.2**  
+Release authority: **v1.4.2**
 Source authority: **default branch `main`**  
 Last reconciled: 2026-09-30
 
