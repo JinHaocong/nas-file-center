@@ -163,6 +163,18 @@ def preview_luolcy_package(package: str | Path, *, luolcy_root: str | Path,
             folder = f"{stem} [{len(chunk)} {_size_label(size)}]"
             dest = source / folder
             existing = occupied.get(folder.casefold())
+            # A prior P, P_1, V, V_1 bucket with unknown or stale count/size
+            # is not silently replaced, merged or renamed.
+            stem_folded = stem.casefold()
+            competing = [
+                value for key, value in occupied.items()
+                if (key == stem_folded or key.startswith(stem_folded + " ["))
+                and key != folder.casefold()
+            ]
+            if competing:
+                conflicts.append({"directory": str(dest),
+                                  "existing": sorted(competing),
+                                  "reason": "existing_bucket_name_requires_review"})
             if existing is not None and any(Path(row["path"]).parent != dest for row in chunk):
                 # Existing destination with incoming files requires a guarded
                 # merge/execution policy; do not silently overwrite.
