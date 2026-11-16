@@ -399,6 +399,48 @@ def test_201_video_files_regroup_without_filename_loss(tmp_path):
     assert not any(p.name.startswith(".nfc-") for p in package.iterdir())
 
 
+def test_multigroup_crash_after_first_publish_does_not_move_reused_source(
+    tmp_path, monkeypatch,
+):
+    root, package = example(tmp_path)
+    old = package / "V [200 200B]"
+    old.mkdir()
+    for index in range(200):
+        (old / f"{index + 1:03d}.mp4").write_bytes(bytes([index % 251]))
+    (package / "new.mp4").write_bytes(b"z")
+    manifest = manifest_for(root, package, job_id=828)
+    publish = executor._publish_group
+    calls = {"done": False}
+
+    def crash_after_first_group(frozen, group_index, lease_fence, **kwargs):
+        if group_index == 1 and not calls["done"]:
+            calls["done"] = True
+            raise RuntimeError("interrupted between grouped publications")
+        return publish(frozen, group_index, lease_fence, **kwargs)
+
+    monkeypatch.setattr(executor, "_publish_group", crash_after_first_group)
+    with pytest.raises(RuntimeError, match="between grouped publications"):
+        executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+    monkeypatch.setattr(executor, "_publish_group", publish)
+
+    first = package / "V [200 200B]"
+    second_stage = package / manifest["groups"][1]["stage"]
+    assert first.is_dir()
+    assert second_stage.is_dir()
+    # 200.mp4 was originally the other group's source, but is now a
+    # published file with a DIFFERENT frozen identity.
+    assert (first / "200.mp4").read_bytes() == bytes([198])
+    assert (second_stage / "001.mp4").read_bytes() == bytes([199])
+    replay = executor.execute_frozen_manifest(manifest, lease_fence=lambda: None)
+    assert replay["files_moved"] == 0
+    assert replay["files_reconciled"] == 201
+    files = sorted(package.glob("V*/*.mp4"))
+    assert len(files) == 201
+    assert sorted(path.read_bytes() for path in files) == sorted(
+        [bytes([index % 251]) for index in range(200)] + [b"z"]
+    )
+
+
 def test_tampered_target_outside_package_is_rejected_before_mutation(tmp_path):
     root, package = example(tmp_path)
     nested = package / "video"
