@@ -15,6 +15,7 @@ on:
       - 'tests/test_media_sort.py'
       - 'tests/test_media_sort_async.py'
       - 'tests/test_media_sort_performance.py'
+      - 'tests/test_media_sort_conflicts.py'
       - 'benchmarks/media_sort_benchmark.py'
       - '.github/workflows/media-sort-large-roots.yml'
   workflow_dispatch:
@@ -46,7 +47,7 @@ jobs:
       - name: Run large-root worker and existing media-sort regression
         env:
           PYTHONPATH: .
-        run: pytest -q tests/test_media_sort_async.py tests/test_media_sort.py tests/test_media_sort_performance.py
+        run: pytest -q tests/test_media_sort_async.py tests/test_media_sort.py tests/test_media_sort_performance.py tests/test_media_sort_conflicts.py
       - name: Run isolated performance benchmark (timing informational)
         env:
           PYTHONPATH: .
