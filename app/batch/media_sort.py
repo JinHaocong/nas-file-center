@@ -14,6 +14,8 @@ import os
 from pathlib import Path
 import re
 import stat
+import time
+from typing import Callable
 
 from app.batch.file_rename import _open_directory_nofollow
 from app.filters.media_types import get_media_type
@@ -24,9 +26,12 @@ from app.path_safety import (
     validate_mutation_destination,
 )
 
-MAX_IMMEDIATE_ENTRIES = 50_000
-MAX_RECURSIVE_ENTRIES = 50_000
-MAX_RECURSIVE_DIRECTORIES = 10_000
+# Bounded to protect NAS resources, but large enough for root-level scans.
+# Background preview streams results and never buffers the entire root in RAM.
+MAX_IMMEDIATE_ENTRIES = 300_000
+MAX_RECURSIVE_ENTRIES = 2_000_000
+MAX_RECURSIVE_DIRECTORIES = 250_000
+MAX_PREVIEW_PROPOSALS = 300_000
 MAX_RECURSIVE_DEPTH = 64
 MAX_SUFFIX_ATTEMPTS = 10_000
 _DESTINATION_DIRS = {"image": "P", "video": "V"}
@@ -194,6 +199,10 @@ def preview_media_sort(
     smart_skip: bool = True,
     allowed_roots: list[str | Path],
     quarantine_root: str | Path | None = None,
+    on_rows: Callable[[list[dict]], None] | None = None,
+    on_skipped: Callable[[list[dict]], None] | None = None,
+    on_progress: Callable[[dict], None] | None = None,
+    collect_items: bool = True,
 ) -> dict:
     """Preview per-directory classification, optionally traversing descendants.
 
@@ -219,6 +228,12 @@ def preview_media_sort(
     pending: list[tuple[Path, int]] = [(safe_parent, 0)]
     scanned_dirs = 0
     scanned_entries = 0
+    move_count = 0
+    images = 0
+    videos = 0
+    skipped_count = 0
+    conflicts = 0
+    last_progress_report = 0.0
 
     while pending:
         directory, depth = pending.pop()
@@ -232,29 +247,68 @@ def preview_media_sort(
             allowed_roots=allowed_roots,
             quarantine_root=quarantine_root,
         )
-        rows.extend(proposed)
-        skipped.extend(ignored)
+        # Stream bounded batches to a Worker-owned output, keeping root scans
+        # independent of HTTP request size and browser memory.
+        if on_rows and proposed:
+            on_rows(proposed)
+        if on_skipped and ignored:
+            on_skipped(ignored)
+        if collect_items:
+            rows.extend(proposed)
+            skipped.extend(ignored)
+        move_count += len(proposed)
+        skipped_count += len(ignored)
+        images += sum(item["media_kind"] == "image" for item in proposed)
+        videos += sum(item["media_kind"] == "video" for item in proposed)
+        conflicts += sum(bool(item["conflict"]) for item in proposed)
+        if move_count > MAX_PREVIEW_PROPOSALS:
+            raise ValueError(
+                f"Too many media proposals (limit: {MAX_PREVIEW_PROPOSALS}). "
+                "Please select smaller roots."
+            )
         scanned_entries += count
         if recursive and scanned_entries > MAX_RECURSIVE_ENTRIES:
             raise ValueError(f"Too many recursive entries (limit: {MAX_RECURSIVE_ENTRIES})")
         if children and depth >= MAX_RECURSIVE_DEPTH:
             raise ValueError(f"Recursive nesting exceeds depth limit: {MAX_RECURSIVE_DEPTH}")
         pending.extend((child, depth + 1) for child in reversed(children))
+        now = time.monotonic()
+        if on_progress and (scanned_dirs == 1 or scanned_dirs % 25 == 0
+                            or now - last_progress_report >= 0.65):
+            on_progress({
+                "scanned_directories": scanned_dirs,
+                "scanned_entries": scanned_entries,
+                "pending_directories": len(pending),
+                "current_directory": str(directory),
+                "candidate_count": move_count,
+                "skipped_directory_count": skipped_count,
+            })
+            last_progress_report = now
 
-    rows.sort(key=lambda item: item["source"])
-    skipped.sort(key=lambda item: (item["path"], item["reason"]))
-    conflicts = sum(1 for item in rows if item["conflict"])
+    if on_progress:
+        on_progress({
+            "scanned_directories": scanned_dirs,
+            "scanned_entries": scanned_entries,
+            "pending_directories": 0,
+            "current_directory": "",
+            "candidate_count": move_count,
+            "skipped_directory_count": skipped_count,
+        })
+    if collect_items:
+        rows.sort(key=lambda item: item["source"])
+        skipped.sort(key=lambda item: (item["path"], item["reason"]))
     return {
         "parent": str(safe_parent),
         "recursive": recursive,
         "smart_skip": smart_skip,
         "scanned_directories": scanned_dirs,
-        "skipped_directory_count": len(skipped),
+        "scanned_entries": scanned_entries,
+        "skipped_directory_count": skipped_count,
         "skipped_directories": skipped,
-        "count": len(rows),
-        "image_count": sum(item["media_kind"] == "image" for item in rows),
-        "video_count": sum(item["media_kind"] == "video" for item in rows),
-        "ready_count": len(rows) - conflicts,
+        "count": move_count,
+        "image_count": images,
+        "video_count": videos,
+        "ready_count": move_count - conflicts,
         "conflict_count": conflicts,
         "items": rows,
     }
