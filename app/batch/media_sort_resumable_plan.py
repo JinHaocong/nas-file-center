@@ -8,6 +8,8 @@ WorkJob result. The existing fully-atomic small Plan builder remains available.
 from __future__ import annotations
 
 import json
+import logging
+import time
 from pathlib import Path
 from typing import Callable
 
@@ -23,6 +25,7 @@ from app.models import BatchPlan, BatchPlanItem, WorkJob, utcnow
 from app.tasks.recovery import assert_active_worker_lease
 
 MAX_BUILD_ITEMS = 300_000
+logger = logging.getLogger(__name__)
 
 
 def _counts(summary: dict, skip_conflicts: bool) -> tuple[int, int, int]:
@@ -191,6 +194,7 @@ def create_media_sort_resumable_plan(
         nonlocal inserted
         if not staged:
             return
+        batch_started_at = time.monotonic()
         with session_factory() as session:
             session.execute(text("BEGIN IMMEDIATE"))
             _assert_lease(session, worker_id)
@@ -204,6 +208,14 @@ def create_media_sort_resumable_plan(
                 raise ValueError("Concurrent or inconsistent staged media Plan rows")
             session.execute(insert(BatchPlanItem), staged)
             session.commit()
+        elapsed = time.monotonic() - batch_started_at
+        if elapsed >= 2.0:
+            logger.warning(
+                "Slow media-sort Plan SQLite batch: job_id=%d plan_id=%d "
+                "rows=%d duration=%.2fs; check /config DB storage latency and "
+                "heartbeat lock contention",
+                job_id, plan_id, len(staged), elapsed,
+            )
         inserted += len(staged)
         staged.clear()
         if on_committed:
