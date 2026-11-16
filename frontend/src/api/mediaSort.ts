@@ -44,6 +44,7 @@ export interface MediaSortProgress {
   candidate_count?: number;
   skipped_directory_count?: number;
   current_directory?: string;
+  pending_directories?: number;
 }
 
 export interface MediaSortSummary extends Omit<MediaSortPreview, 'items' | 'skipped_directories'> {
