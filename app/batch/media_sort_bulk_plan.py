@@ -85,17 +85,25 @@ def create_media_sort_bulk_plan(
     items_file: Path,
     summary: dict,
     preview_job_id: int,
+    skip_conflicts: bool = False,
 ) -> BatchPlan:
+    if not isinstance(skip_conflicts, bool):
+        raise ValueError("skip_conflicts must be boolean")
     """Insert rows in batches under ONE transaction: all-or-nothing on errors.
 
     No intermediate, half-generated Plan can be frozen or executed. SQLAlchemy
     Core executemany avoids the enormous per-row ORM identity-map overhead.
     """
     count = summary.get("count")
-    if not isinstance(count, int) or isinstance(count, bool) or count <= 0 or count > 300_000:
-        raise ValueError("Media-sort preview count is invalid")
-    if summary.get("conflict_count") != 0:
-        raise ValueError("Media-sort preview contains conflicts")
+    conflicting = summary.get("conflict_count")
+    ready_count = summary.get("ready_count", count)
+    if not all(isinstance(n, int) and not isinstance(n, bool) for n in (count, conflicting, ready_count)):
+        raise ValueError("Media-sort preview counts must be integers")
+    if (count <= 0 or count > 300_000 or not 0 < ready_count <= count
+            or conflicting < 0 or ready_count + conflicting != count):
+        raise ValueError("Media-sort preview counts are invalid")
+    if conflicting and not skip_conflicts:
+        raise ValueError("Media-sort preview contains conflicts; skipping requires explicit confirmation")
 
     name = ("媒体文件递归分类（每目录 P / V）"
             if summary.get("recursive") else "媒体文件分类（P / V）")
@@ -104,6 +112,8 @@ def create_media_sort_bulk_plan(
         "preview_job_id": preview_job_id,
         "recursive": summary.get("recursive", False),
         "smart_skip": summary.get("smart_skip", True),
+        "conflict_policy": "skip" if skip_conflicts else "block",
+        "skipped_conflict_count": conflicting if skip_conflicts else 0,
     }
 
     with session_factory() as session:
@@ -111,21 +121,31 @@ def create_media_sort_bulk_plan(
         # If any row is invalid, nothing remains in the database.
         plan = BatchPlan(
             name=name, kind="media-sort", status="draft",
-            expected_changes=count, metadata_json=json.dumps(metadata, ensure_ascii=False),
+            expected_changes=ready_count, metadata_json=json.dumps(metadata, ensure_ascii=False),
         )
         session.add(plan)
         session.flush()
         batch: list[dict] = []
         seen_targets: set[str] = set()
         written = 0
+        seen = 0
+        skipped = 0
         with items_file.open("r", encoding="utf-8") as stream:
-            for sequence, line in enumerate(stream, 1):
-                if sequence > count:
+            for line in stream:
+                seen += 1
+                if seen > count:
                     raise ValueError("Media preview contains extra plan items")
                 raw = json.loads(line)
                 if not isinstance(raw, dict):
-                    raise ValueError(f"Invalid media preview item {sequence}")
-                move = _validated_move(raw, settings, sequence=sequence)
+                    raise ValueError(f"Invalid media preview item {seen}")
+                if raw.get("conflict") is True:
+                    if not skip_conflicts:
+                        raise ValueError("Media preview contains unresolved conflicts")
+                    skipped += 1
+                    continue
+                if raw.get("conflict") is not False:
+                    raise ValueError(f"Media preview item {seen} has invalid conflict status")
+                move = _validated_move(raw, settings, sequence=written + 1)
                 folded = move["target_path"].casefold()
                 if folded in seen_targets:
                     raise ValueError(f"Duplicate media-sort target in preview: {move['target_path']}")
@@ -136,8 +156,8 @@ def create_media_sort_bulk_plan(
                 if len(batch) >= INSERT_BATCH_SIZE:
                     session.execute(insert(BatchPlanItem), batch)
                     batch.clear()
-        if written != count:
-            raise ValueError(f"Media preview item count changed ({written} != {count})")
+        if seen != count or written != ready_count or skipped != conflicting:
+            raise ValueError("Media preview item counts changed; please rescan")
         if batch:
             session.execute(insert(BatchPlanItem), batch)
         session.commit()
