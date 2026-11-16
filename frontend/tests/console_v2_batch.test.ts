@@ -197,7 +197,7 @@ describe('P/V media sort preview to Move Plan integration', () => {
     assert.match(editor, /const \[skipConflicts, setSkipConflicts\] = useState\(false\)/);
     assert.match(editor, /setSkipConflicts\(false\)/);
     assert.match(editor, /selectItemFilter\('conflict'\)/);
-    assert.match(editor, /item_filter/);
+    assert.match(editor, /itemFilter/);
     assert.match(editor, /previewResponse\?\.item_total/);
     assert.match(editor, /只看冲突/);
     assert.match(editor, /确认跳过冲突项继续生成 Plan/);
