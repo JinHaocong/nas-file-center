@@ -1,0 +1,200 @@
+"""Read-only Luolcy-specific resource package planner.
+
+This is deliberately separate from generic media sort. No filesystem mutation
+is permitted here: a future executor must validate a fresh manifest and use
+existing freeze/validate/execute safety mechanisms.
+"""
+from __future__ import annotations
+
+import os
+import re
+import stat
+from pathlib import Path
+from collections import defaultdict
+
+from app.batch.file_rename import _open_directory_nofollow
+from app.filters.media_types import get_media_type
+from app.path_safety import require_allowed_path, require_unreserved_path
+
+MAX_FILES_PER_GROUP = 200
+MAX_PACKAGE_FILES = 300_000
+MAX_PACKAGE_DIRECTORIES = 100_000
+MAX_DEPTH = 64
+_GROUP_NAME = re.compile(
+    r"^(P|V)(?:_([1-9][0-9]*))? \\[([0-9]+) ([0-9]+(?:\\.[0-9]+)?(?:B|KiB|MiB|GiB|TiB))\\]$",
+    re.IGNORECASE,
+)
+_BASE_GROUP = re.compile(r"^(?:P|V)(?:_[1-9][0-9]*)?$", re.IGNORECASE)
+_MONTH = re.compile(r"^\\d{2}(?:0[1-9]|1[0-2])$")
+_DAY = re.compile(r"^\\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12][0-9]|3[01])$")
+
+
+def _size_label(size: int) -> str:
+    if size < 1024:
+        return f"{size}B"
+    for unit, factor in (("TiB", 1024 ** 4), ("GiB", 1024 ** 3),
+                         ("MiB", 1024 ** 2), ("KiB", 1024)):
+        if size >= factor:
+            # Deterministic names, no floating point precision loss.
+            tenths = (size * 10 + factor // 2) // factor
+            if tenths % 10 == 0:
+                return f"{tenths // 10}{unit}"
+            return f"{tenths // 10}.{tenths % 10}{unit}"
+    return f"{size}B"
+
+
+def _package_path(package: str | Path, root: str | Path,
+                  allowed_roots: list[Path], quarantine_root: Path | None) -> Path:
+    base = Path(root).expanduser()
+    raw = Path(package).expanduser()
+    if not raw.is_absolute() or not base.is_absolute():
+        raise ValueError("Luolcy paths must be absolute")
+    # No symlink traversal even if an attacker points a directory inside the
+    # Luolcy tree to an unrelated storage area.
+    safe = require_unreserved_path(
+        require_allowed_path(raw, allowed_roots), quarantine_root
+    )
+    if raw != safe:
+        raise ValueError("Luolcy path must use its literal canonical location")
+    try:
+        components = raw.relative_to(base).parts
+    except ValueError as exc:
+        raise ValueError("Package must be below the configured Luolcy root") from exc
+    if (len(components) != 4
+            or not _MONTH.fullmatch(components[0])
+            or not _DAY.fullmatch(components[1])
+            or components[1][:4] != components[0]
+            or components[2] in (".", "..")
+            or components[3] in (".", "..")):
+        raise ValueError("Expected Luolcy/YYMM/YYMMDD/author/package")
+    fd = _open_directory_nofollow(raw)
+    os.close(fd)
+    return raw
+
+
+def _classify(filename: str) -> str:
+    media_type = get_media_type(Path(filename).suffix)
+    return "P" if media_type == "image" else "V" if media_type == "video" else "Other"
+
+
+def _walk_package(package: Path):
+    """Yield bounded file metadata without opening or reading file contents."""
+    stack = [(package, 0)]
+    directory_count = file_count = 0
+    while stack:
+        directory, depth = stack.pop()
+        directory_count += 1
+        if directory_count > MAX_PACKAGE_DIRECTORIES or depth > MAX_DEPTH:
+            raise ValueError("Luolcy directory/depth safety limit exceeded")
+        fd = _open_directory_nofollow(directory)
+        children = []
+        try:
+            with os.scandir(fd) as it:
+                for entry in it:
+                    if entry.is_symlink():
+                        raise ValueError(f"Symlink requires manual review: {directory / entry.name}")
+                    if entry.is_dir(follow_symlinks=False):
+                        children.append(directory / entry.name)
+                        continue
+                    if not entry.is_file(follow_symlinks=False):
+                        raise ValueError(f"Special file requires manual review: {directory / entry.name}")
+                    info = entry.stat(follow_symlinks=False)
+                    if not stat.S_ISREG(info.st_mode):
+                        raise ValueError("Source file changed during scan")
+                    file_count += 1
+                    if file_count > MAX_PACKAGE_FILES:
+                        raise ValueError("Luolcy package file safety limit exceeded")
+                    yield {
+                        "path": str(directory / entry.name),
+                        "name": entry.name,
+                        "kind": _classify(entry.name),
+                        "bytes": int(info.st_size),
+                        "dev": int(info.st_dev),
+                        "ino": int(info.st_ino),
+                        "mtime_ns": int(info.st_mtime_ns),
+                    }
+        finally:
+            os.close(fd)
+        stack.extend((child, depth + 1) for child in reversed(sorted(children)))
+
+
+def preview_luolcy_package(package: str | Path, *, luolcy_root: str | Path,
+                           allowed_roots: list[Path],
+                           quarantine_root: Path | None = None,
+                           max_rows: int = 100) -> dict:
+    """Build a bounded, read-only manifest for one exact resource package.
+
+    Pure image/video packages are skipped without changing nested structure.
+    Existing targets are never assumed safe to overwrite; unresolved target
+    occupancy is reported as a blocking conflict for manual review.
+    """
+    if not isinstance(max_rows, int) or not 1 <= max_rows <= 200:
+        raise ValueError("max_rows must be between 1 and 200")
+    source = _package_path(package, luolcy_root, allowed_roots, quarantine_root)
+    items = list(_walk_package(source))
+    totals = {kind: sum(x["kind"] == kind for x in items) for kind in ("P", "V", "Other")}
+    if not items or (totals["Other"] == 0 and (totals["P"] == 0 or totals["V"] == 0)):
+        return {
+            "package": str(source), "status": "skipped",
+            "reason": "empty" if not items else "pure_media",
+            "total_files": len(items), "totals": totals,
+            "groups": [], "conflicts": [], "sample_moves": [],
+        }
+
+    # Avoid reordering when readdir() order changes. Only metadata, never
+    # data file bytes, are read. Bounded to one package, not the whole library.
+    items.sort(key=lambda x: (x["kind"], os.path.relpath(x["path"], source).casefold(),
+                              os.path.relpath(x["path"], source)))
+    groups = []
+    conflicts = []
+    sample = []
+    planned = 0
+    observed = {}
+    for item in items:
+        kind = item["kind"]
+        observed.setdefault(kind, []).append(item)
+
+    # Reserve original top-level names to avoid ambiguous destination merges.
+    with os.scandir(source) as entries:
+        occupied = {entry.name.casefold(): entry.name for entry in entries}
+    for kind in ("P", "V", "Other"):
+        files = observed.get(kind, [])
+        if not files:
+            continue
+        groups_of_kind = [files[i:i + MAX_FILES_PER_GROUP] for i in range(0, len(files), MAX_FILES_PER_GROUP)] if kind != "Other" else [files]
+        for index, chunk in enumerate(groups_of_kind):
+            stem = kind if index == 0 else f"{kind}_{index}"
+            size = sum(row["bytes"] for row in chunk)
+            folder = f"{stem} [{len(chunk)} {_size_label(size)}]"
+            dest = source / folder
+            existing = occupied.get(folder.casefold())
+            if existing is not None:
+                # No staging, deletion, renaming or overwriting is authorized
+                # by a preview; pre-existing final names require review.
+                conflicts.append({"directory": str(dest), "reason": "target_directory_exists"})
+            # An old P/V folder or another numbered bucket with a different
+            # capacity label is expected during migration; not an error until
+            # it is treated as a target by a protected executor.
+            seen_names = set()
+            for row in chunk:
+                candidate = row["name"]
+                folded = candidate.casefold()
+                if folded in seen_names:
+                    conflicts.append({"source": row["path"], "reason": "duplicate_filename_in_bucket"})
+                seen_names.add(folded)
+                if len(sample) < max_rows:
+                    sample.append({"source": row["path"], "target": str(dest / candidate),
+                                   "bytes": row["bytes"], "kind": kind})
+                planned += 1
+            groups.append({"name": folder, "kind": kind, "count": len(chunk),
+                           "bytes": size, "destination": str(dest)})
+    return {
+        "package": str(source),
+        "status": "blocked" if conflicts else "preview",
+        "reason": None, "total_files": len(items), "totals": totals,
+        "groups": groups, "conflicts": conflicts,
+        "sample_moves": sample,
+        "total_proposals": planned,
+        "truncated": len(sample) < planned,
+        "read_only": True,
+    }
