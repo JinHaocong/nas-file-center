@@ -159,7 +159,7 @@ def enqueue_media_plan(session_factory, settings: Settings, job_id: int) -> dict
             return {"job_id": previous.id, "status": previous.status}
         work = WorkJob(
             kind=GENERATE_KIND, status="queued",
-            progress_current=0, progress_total=int(summary["count"]),
+            progress_current=0, progress_total=0,
             progress_message="等待 Worker 生成移动计划",
             state_json=json.dumps({"preview_job_id": job_id}),
         )
@@ -338,7 +338,7 @@ class MediaSortPlanHandler(TaskHandler):
         if not 0 < count <= MAX_PLAN_ITEMS or summary["conflict_count"] != 0:
             raise ValueError("Media sort preview is empty, conflicting or oversized")
 
-        context.checkpoint(progress_current=0, progress_total=count, progress_message="读取预览结果")
+        context.checkpoint(progress_current=0, progress_message="读取预览结果")
         rows: list[dict] = []
         with items_file.open("r", encoding="utf-8") as stream:
             for line in stream:
@@ -348,12 +348,12 @@ class MediaSortPlanHandler(TaskHandler):
                 rows.append({"operation": "move", "source": item["source"],
                              "target": item["target"], "expected_size": item["expected_size"]})
                 if len(rows) % 500 == 0:
-                    context.checkpoint(progress_current=len(rows), progress_total=count,
+                    context.checkpoint(progress_current=len(rows),
                                        progress_message=f"读取文件 {len(rows):,}/{count:,}")
         if len(rows) != count:
             raise ValueError("Preview row count has changed")
-        context.checkpoint(progress_current=count, progress_total=count,
-                           progress_message="正在保存 Move Plan（原文件尚未改动）")
+        context.checkpoint(progress_current=count,
+                           progress_message="正在保存 Move Plan（原文件尚未改动，写入阶段无法估算百分比）")
         service = _worker_plan_service(settings, context)
         plan = service.create_plan(
             name=("媒体文件递归分类（每目录 P / V）" if summary.get("recursive")
