@@ -168,25 +168,34 @@ describe('P/V media sort preview to Move Plan integration', () => {
     assert.equal(buildMediaSortDraft(null), null);
   });
 
-  test('media sort is read-only until generic Plan lifecycle', () => {
+  test('large media preview runs on Worker with polling, pagination and progress', () => {
     const page = read('src/pages/Batch/index.tsx');
     const editor = read('src/pages/Batch/MediaSortEditor.tsx');
     const api = read('src/api/mediaSort.ts');
     const css = read('src/styles/console-v2-batch.css');
+    const plan = read('src/pages/Plans/PlanDetail.tsx');
+
     assert.match(page, /media-sort/);
     assert.match(page, /<MediaSortEditor\s*\/>/);
     assert.match(editor, /<DirectoryPicker\s+multiple=\{false\}/);
-    assert.match(editor, /buildMediaSortDraft\(preview\)/);
-    assert.match(editor, /await previewMutation\.mutateAsync\(\{ parent: selected, recursive, smart_skip: smartSkip \}\)/);
-    assert.match(editor, /await planMutation\.mutateAsync\(draft\)/);
-    assert.match(editor, /previewKeyRef\.current !== previewKey\(directory, recursive, smartSkip\)/);
-    assert.doesNotMatch(editor, /executePlan|freezePlan|validatePlan|deletePlan/);
-    assert.match(api, /\/api\/media-sort\/preview/);
-    assert.match(api, /recursive: boolean/);
-    assert.match(api, /smart_skip: boolean/);
-    assert.match(editor, /useState\(false\)/);
-    assert.match(editor, /<ConsoleCheckbox checked=\{recursive\}/);
+    assert.match(editor, /mediaSortApi\.startPreview/);
+    assert.match(editor, /await previewMutation\.mutateAsync\(\{/);
+    assert.match(editor, /parent: selected, recursive, smart_skip: smartSkip/);
+    assert.match(editor, /await planMutation\.mutateAsync\(previewJobId\)/);
+    assert.match(editor, /previewKeyRef\.current === previewKey\(directory, recursive, smartSkip\)/);
+    assert.match(editor, /refetchInterval/);
+    assert.match(editor, /<TaskProgress/);
+    assert.match(editor, /已检查条目/);
+    assert.match(editor, /扫描目录/);
+    assert.match(editor, /current_directory/);
+    assert.match(editor, /previewResponse\.progress\.candidate_count/);
+    assert.match(editor, /previewResponse\.items/);
+    assert.match(editor, /previewResponse\.skipped_directories/);
+    assert.match(editor, /summary\.skipped_directory_count/);
+    assert.match(editor, /<ConsolePagination/);
     assert.match(editor, /const \[smartSkip, setSmartSkip\] = useState\(true\)/);
+    assert.match(editor, /const \[recursive, setRecursive\] = useState\(false\)/);
+    assert.match(editor, /<ConsoleCheckbox checked=\{recursive\}/);
     assert.match(editor, /<ConsoleCheckbox checked=\{smartSkip\}/);
     assert.match(editor, /onCheckedChange=\{changeSmartSkip\}/);
     assert.match(editor, /setSmartSkip\(enabled\);\s*invalidatePreview\(\)/);
@@ -194,13 +203,30 @@ describe('P/V media sort preview to Move Plan integration', () => {
     assert.match(editor, /pure_images/);
     assert.match(editor, /pure_videos/);
     assert.match(editor, /preclassified/);
-    assert.match(editor, /preview\.skipped_directory_count/);
-    assert.match(editor, /onCheckedChange=\{changeRecursive\}/);
-    assert.match(editor, /invalidatePreview\(\)/);
-    assert.match(editor, /递归处理子目录/);
-    assert.match(editor, /P_1\/V_1/);
-    for (const selector of ['nfc-v2-batch-media-stats', 'nfc-v2-batch-media-table', 'nfc-v2-batch-media-recursive']) {
-      assert.ok(css.includes(selector), selector);
-    }
+    assert.doesNotMatch(editor, /executePlan|freezePlan|validatePlan|deletePlan/);
+
+    for (const token of [
+      '/api/media-sort/previews',
+      'getPreview',
+      'createPlanFromPreview',
+      'getPlanJob',
+      'startPlanStage',
+      'getPlanStage',
+      'smart_skip: boolean',
+    ]) assert.ok(api.includes(token), token);
+    for (const token of [
+      'mediaSortApi.startPlanStage',
+      'mediaSortApi.getPlanStage',
+      'tasksApi.getTaskDetail',
+      '文件执行进度',
+      '冻结进度',
+      '实时校验进度',
+      'refetchInterval',
+      '<TaskProgress',
+    ]) assert.ok(plan.includes(token), token);
+    for (const selector of [
+      'nfc-v2-batch-media-stats', 'nfc-v2-batch-media-table',
+      'nfc-v2-batch-media-recursive', 'nfc-v2-media-scan-progress',
+    ]) assert.ok(css.includes(selector), selector);
   });
 });
