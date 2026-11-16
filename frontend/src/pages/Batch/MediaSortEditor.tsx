@@ -89,10 +89,12 @@ export const MediaSortEditor: React.FC = () => {
     (planJobId !== null && planJob == null) ||
     isActive(previewResponse?.status) || isActive(planJob?.status);
   const ready = previewResponse?.status === 'completed' && summary !== null && summary !== undefined;
+  const retryPlan = planJob?.status === 'failed' || planJob?.status === 'cancelled';
   const canPlan = Boolean(ready && summary && summary.ready_count > 0 &&
     (summary.conflict_count === 0 || skipConflicts) &&
     previewKeyRef.current === previewKey(directory, recursive, smartSkip) &&
-    !planGuard.current && !previewGuard.current && !busy && planJobId === null);
+    !planGuard.current && !previewGuard.current && !busy &&
+    (planJobId === null || retryPlan));
 
   const invalidatePreview = () => {
     previewKeyRef.current = null;
@@ -236,7 +238,8 @@ export const MediaSortEditor: React.FC = () => {
               <ConsoleButton loading={planMutation.isPending} disabled={!canPlan}
                 leadingIcon={<ConsoleIcon name="calendar" size={17} />}
                 onClick={() => { void createPlan(); }}>
-                {summary.conflict_count > 0 && skipConflicts ? '跳过冲突，生成 Plan' : '生成移动 Plan'}
+                {retryPlan ? '重新生成 Plan' :
+                  summary.conflict_count > 0 && skipConflicts ? '跳过冲突，生成 Plan' : '生成移动 Plan'}
                 （{summary.ready_count.toLocaleString()} 项）
               </ConsoleButton>
             )}
@@ -295,6 +298,8 @@ export const MediaSortEditor: React.FC = () => {
           ) : <p className="nfc-form-note">正在读取任务状态…</p>}
           {planJob?.status === 'failed' && <p className="nfc-v2-batch-error" role="alert">
             生成计划失败：{planJob.error || '请查看任务中心'}
+            {planJob.error?.includes('Worker restarted') &&
+              '。Worker 重启导致旧任务终止，可以在上方使用原预览重新生成，不必先重复扫描。'}
           </p>}
         </DataPanel>
       )}

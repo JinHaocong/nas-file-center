@@ -449,58 +449,81 @@ class MediaSortPlanHandler(TaskHandler):
     supports_cancel = True
     supports_retry = False
     supports_pause = False
-    supports_resume = False
+    supports_resume = True
 
     def run(self, job: WorkJob, context: JobContext, settings: Settings) -> None:
         state = json.loads(job.state_json or "{}")
         preview_job_id = int(state["preview_job_id"])
         with context.SessionLocal() as session:
             preview_job = session.get(WorkJob, preview_job_id)
-            if preview_job is None or preview_job.kind != PREVIEW_KIND or preview_job.status != "completed":
+            if (preview_job is None or preview_job.kind != PREVIEW_KIND
+                    or preview_job.status != "completed"):
                 raise ValueError("The selected media preview is no longer available")
         items_file, _, summary_file = _paths(settings, preview_job_id)
         with summary_file.open("r", encoding="utf-8") as stream:
             summary = json.load(stream)
-        count = int(summary["count"])
-        conflicting = int(summary["conflict_count"])
-        ready = int(summary["ready_count"])
+        from app.batch.media_sort_resumable_plan import (
+            _counts, cleanup_unpublished_plan, create_media_sort_resumable_plan,
+        )
+        from app.tasks.state_machine import JobCancelRequested, JobLeaseLost
+
         skip_conflicts = state.get("skip_conflicts") is True
-        if not 0 < ready <= MAX_PLAN_ITEMS or ready + conflicting != count:
-            raise ValueError("Media sort preview is empty or has invalid counts")
-        if conflicting > 0 and not skip_conflicts:
-            raise ValueError("Media sort preview has unresolved conflicts; explicit skip confirmation required")
+        _total, ready, conflicts = _counts(summary, skip_conflicts)
+
+        # A durable versioned checkpoint is written before staging the Plan.
+        # Restart recovery is then allowed to requeue the SAME WorkJob rather
+        # than failing after a long SQLite write transaction is interrupted.
+        context.checkpoint(
+            progress_total=ready,
+            progress_message="准备生成可断点续建的媒体移动计划",
+            checkpoint_data={
+                "schema_version": 1,
+                "kind": GENERATE_KIND,
+                "preview_job_id": preview_job_id,
+                "resume_mode": "committed_plan_batches",
+            },
+        )
+
+        def _progress(committed: int, total: int) -> None:
+            context.checkpoint(
+                progress_current=committed,
+                progress_total=total,
+                progress_message=(
+                    f"已安全写入 Plan {committed:,}/{total:,} 项"
+                    + (f"；跳过 {conflicts:,} 项冲突" if conflicts else "")
+                ),
+            )
+
+        try:
+            plan_id = create_media_sort_resumable_plan(
+                context.SessionLocal, settings,
+                job_id=int(job.id), preview_job_id=preview_job_id,
+                items_file=items_file, summary=summary,
+                skip_conflicts=skip_conflicts,
+                worker_id=context.worker_id,
+                on_committed=_progress,
+            )
+        except JobLeaseLost:
+            # A new Worker owns recovery; never alter its private staging Plan.
+            raise
+        except (JobCancelRequested, Exception):
+            # A cancelled/invalid job must not leak an indefinitely building
+            # Plan. Power loss, however, bypasses this cleanup and resumes from
+            # committed rows after recovery.
+            cleanup_unpublished_plan(
+                context.SessionLocal, job_id=int(job.id),
+                worker_id=context.worker_id,
+            )
+            raise
 
         context.checkpoint(
-            progress_current=0,
+            progress_current=ready, progress_total=ready,
             progress_message=(
-                f"正在以安全事务生成 {ready:,} 项 Move Plan"
-                + (f"（跳过 {conflicting:,} 项冲突）" if conflicting else "")
-                + "，源文件不变"
+                f"已创建移动计划 #{plan_id}（{ready:,} 项）"
+                + (f"，跳过冲突 {conflicts:,} 项" if conflicts else "")
+                + "；等待 Freeze → Validate → Execute"
             ),
         )
-        from app.batch.media_sort_bulk_plan import create_media_sort_bulk_plan
-
-        # Stream and validate every row inside one atomic SQLite transaction.
-        # No 300k-element Python/ORM list, no partially published draft Plan.
-        plan = create_media_sort_bulk_plan(
-            context.SessionLocal, settings,
-            items_file=items_file, summary=summary, preview_job_id=preview_job_id,
-            skip_conflicts=skip_conflicts,
-        )
-        with context.SessionLocal() as session:
-            session.execute(text("BEGIN IMMEDIATE"))
-            tracked = session.get(WorkJob, int(job.id))
-            current = json.loads(tracked.state_json or "{}")
-            current["plan_id"] = int(plan.id)
-            tracked.state_json = json.dumps(current)
-            session.commit()
-        context.checkpoint(progress_current=ready, progress_total=ready,
-                           progress_message=(
-                               f"已创建移动计划 #{plan.id}（{ready:,} 项）"
-                               + (f"，跳过冲突 {conflicting:,} 项" if conflicting else "")
-                               + "；等待 Freeze → Validate → Execute"
-                           ))
-
 
 @register_handler
 class MediaSortPlanStageHandler(TaskHandler):

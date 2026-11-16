@@ -587,8 +587,14 @@ class FileCenterService:
         page_size = max(1, min(int(page_size), 500))
         offset = (page - 1) * page_size
         with self.SessionLocal() as session:
-            total = session.scalar(select(func.count(BatchPlan.id))) or 0
-            rows = list(session.scalars(select(BatchPlan).order_by(BatchPlan.id.desc()).limit(page_size).offset(offset)))
+            # Staged media-sort Plans must not appear as user-executable drafts.
+            total = session.scalar(select(func.count(BatchPlan.id)).where(
+                BatchPlan.status != "building",
+            )) or 0
+            rows = list(session.scalars(
+                select(BatchPlan).where(BatchPlan.status != "building")
+                .order_by(BatchPlan.id.desc()).limit(page_size).offset(offset)
+            ))
             plan_ids = [row.id for row in rows]
             active_jobs_map: dict[int, WorkJob] = {}
             if plan_ids:
@@ -2391,7 +2397,12 @@ class FileCenterService:
 
             # Track planned target paths from renames/moves within this plan
             planned_targets: set[str] = {
-                str(validate_mutation_destination(raw["target"], self.settings.allowed_roots, quarantine_root=self.settings.quarantine_root))
+                str(validate_mutation_destination(
+                    raw["target"], self.settings.allowed_roots,
+                    quarantine_root=self.settings.quarantine_root,
+                    **({"existing_media_source": raw.get("source")}
+                       if kind == "media-sort" and raw.get("operation") == "move" else {}),
+                ))
                 for raw in items
                 if raw.get("operation") in {"rename", "move"} and raw.get("target")
             }
@@ -2422,7 +2433,12 @@ class FileCenterService:
                 keep = raw.get("keep")
                 protected_dir = raw.get("protected_dir")
                 if target and operation in {"rename", "move"}:
-                    target_path = str(validate_mutation_destination(target, self.settings.allowed_roots, quarantine_root=self.settings.quarantine_root))
+                    target_path = str(validate_mutation_destination(
+                        target, self.settings.allowed_roots,
+                        quarantine_root=self.settings.quarantine_root,
+                        **({"existing_media_source": source}
+                           if kind == "media-sort" and operation == "move" else {}),
+                    ))
                 elif target:
                     target_path = str(require_unreserved_path(require_allowed_path(target, self.settings.allowed_roots), self.settings.quarantine_root))
                 else:
