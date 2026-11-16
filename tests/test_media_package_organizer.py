@@ -87,7 +87,7 @@ def test_symlinks_are_never_traversed(tmp_path):
     assert (target / "secret.mp4").read_bytes() == b"do-not-read"
 
 
-def test_legacy_labelled_targets_with_old_names_require_review(tmp_path):
+def test_legacy_labelled_targets_with_original_files_are_replanned(tmp_path):
     root, package = make_package(tmp_path)
     p = package / "P [1 5B]"
     v = package / "V [1 7B]"
@@ -96,8 +96,9 @@ def test_legacy_labelled_targets_with_old_names_require_review(tmp_path):
     (p / "one.jpg").write_bytes(b"image")
     (v / "one.mp4").write_bytes(b"example")
     result = preview(root, package)
-    assert result["status"] == "blocked"
-    assert any(c["reason"] == "target_directory_exists" for c in result["conflicts"])
+    assert result["status"] == "ready"
+    assert result["conflicts"] == []
+    assert [g["name"] for g in result["groups"]] == ["P [1 5B]", "V [1 7B]"]
     assert (p / "one.jpg").read_bytes() == b"image"
     assert (v / "one.mp4").read_bytes() == b"example"
 
@@ -136,6 +137,54 @@ def test_existing_numbered_legacy_bucket_is_reported_for_manual_review(tmp_path)
     assert result["status"] == "blocked"
     assert any(x["reason"] == "legacy_numbered_bucket_requires_review"
                for x in result["conflicts"])
+
+
+
+def test_existing_labelled_buckets_and_legacy_numbered_inputs_do_not_block(tmp_path):
+    root, package = make_package(tmp_path)
+    legacy = package / "P_1"
+    old_label = package / "V [1 1B]"
+    legacy.mkdir()
+    old_label.mkdir()
+    (legacy / "001.jpg").write_bytes(b"a")
+    (old_label / "old.mp4").write_bytes(b"b")
+    (package / "new.mp4").write_bytes(b"c")
+    result = preview(root, package)
+    assert result["status"] == "ready", result["conflicts"]
+    assert result["conflicts"] == []
+    assert result["totals"] == {"P": 1, "V": 2, "Other": 0}
+    assert sorted(group["name"] for group in result["groups"]) == [
+        "P [1 1B]", "V [2 2B]",
+    ]
+
+
+def test_renamed_existing_bucket_is_an_input_not_a_foreign_competing_target(tmp_path):
+    root, package = make_package(tmp_path)
+    bucket = package / "P [1 1B]"
+    bucket.mkdir()
+    (bucket / "old.jpg").write_bytes(b"a")
+    (package / "new.jpg").write_bytes(b"b")
+    (package / "movie.mp4").write_bytes(b"c")
+    result = preview(root, package)
+    assert result["status"] == "ready"
+    assert result["conflicts"] == []
+    assert [group["name"] for group in result["groups"]] == [
+        "P [2 2B]", "V [1 1B]",
+    ]
+    assert (bucket / "old.jpg").exists()
+
+
+def test_empty_legacy_numbered_folder_is_not_adopted_as_an_input(tmp_path):
+    root, package = make_package(tmp_path)
+    (package / "P_1").mkdir()
+    (package / "one.jpg").write_bytes(b"a")
+    (package / "one.mp4").write_bytes(b"b")
+    result = preview(root, package)
+    assert result["status"] == "blocked"
+    assert any(
+        conflict["reason"] == "legacy_numbered_bucket_requires_review"
+        for conflict in result["conflicts"]
+    )
 
 
 def test_bad_directory_name_outside_fixed_layout_rejected(tmp_path):
