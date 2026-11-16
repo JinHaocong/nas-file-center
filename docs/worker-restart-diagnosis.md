@@ -26,6 +26,11 @@ timeout**. When the database becomes writable, the lease is checked again
 using the current time. A lease that has genuinely expired or changed owner
 is still rejected, and the Worker fences itself.
 
+The heartbeat also stays alive while an in-flight job finishes after a
+graceful SIGTERM; a deployment may still force-kill the container when Docker's
+stop grace period expires. Resumable jobs can then restart from committed
+batches, but an abrupt crash remains observable in Docker events.
+
 These logs expose details rather than silently swallowing transient errors:
 
 - `heartbeat waiting on SQLite writer`: database write contention, not
