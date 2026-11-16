@@ -233,7 +233,7 @@ def _entry(folder: Path, name: str):
 
 
 def _move_one(move: dict, *, lease_fence: Callable[[], None],
-              ignore_final: bool = False) -> str:
+              ignore_final: bool = False, compat_hardlink: bool = False) -> str:
     """Reconcile crashed no-clobber moves and perform at most one filesystem move."""
     src = Path(move["source"])
     stage = Path(move["target"])
@@ -245,7 +245,15 @@ def _move_one(move: dict, *, lease_fence: Callable[[], None],
                   if not ignore_final and final != stage and final.parent.is_dir()
                   else None)
     if stage_stat is not None and final_stat is not None:
-        raise MediaPackageExecutionConflict("Both staged and published file bindings exist")
+        if not compat_hardlink:
+            raise MediaPackageExecutionConflict("Both staged and published file bindings exist")
+        _check_file(stage_stat, expected, stage)
+        _check_file(final_stat, expected, final)
+        # This combination is only allowed after the authenticated group
+        # witness has been verified by execute_frozen_manifest.
+        if src.parent.is_dir() and _entry(src.parent, src.name) is not None:
+            raise MediaPackageExecutionConflict("Source still exists alongside published links")
+        return "resumed"
     existing = final_stat if final_stat is not None else stage_stat
     if existing is not None:
         _check_file(existing, expected, final if final_stat else stage)
@@ -335,8 +343,10 @@ def _ensure_staging(manifest: dict, group_index: int, lease_fence: Callable[[], 
     stage = package / group["stage"]
     final = package / group["final"]
     if final.exists() or final.is_symlink():
+        if _compat_inspect_group(manifest, group_index) is not None:
+            return
         if stage.exists() or stage.is_symlink():
-            raise MediaPackageExecutionConflict("Both staging and published directories exist")
+            raise MediaPackageExecutionConflict("Both staging and foreign published directories exist")
         _verify_group_contents(manifest, group_index, final)
         return
     if stage.exists() or stage.is_symlink():
@@ -365,6 +375,259 @@ def _ensure_staging(manifest: dict, group_index: int, lease_fence: Callable[[], 
         os.mkdir(group["stage"], mode=0o755, dir_fd=fd)
     finally:
         os.close(fd)
+
+
+_COMPAT_OWNER_MARKER = ".nfc-media-publish-owner"
+_COMPAT_COMPLETE_MARKER = ".nfc-media-publish-complete"
+
+
+def _compat_marker_bytes(manifest: dict, group_index: int) -> bytes:
+    """Manifest-bound recovery witness, never a substitute for file identities."""
+    group = manifest["groups"][group_index]
+    return json.dumps({
+        "version": 1,
+        "job_id": manifest["job_id"],
+        "group_index": group_index,
+        "manifest_checksum": _manifest_checksum(manifest),
+        "stage": group["stage"],
+        "final": group["final"],
+        "count": group["count"],
+        "bytes": group["bytes"],
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def _compat_marker_matches(dir_fd: int, name: str, expected: bytes) -> bool:
+    """Require exact regular marker bytes; never follow a substituted symlink."""
+    try:
+        fd = os.open(
+            name, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=dir_fd,
+        )
+    except FileNotFoundError:
+        return False
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_size != len(expected):
+            raise MediaPackageExecutionConflict("Invalid frozen publication witness")
+        if os.read(fd, len(expected) + 1) != expected:
+            raise MediaPackageExecutionConflict("Frozen publication witness changed")
+        return True
+    finally:
+        os.close(fd)
+
+
+def _compat_create_marker(dir_fd: int, name: str, data: bytes) -> None:
+    fd = os.open(
+        name,
+        os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0),
+        0o600, dir_fd=dir_fd,
+    )
+    try:
+        if os.write(fd, data) != len(data):
+            raise MediaPackageExecutionConflict("Incomplete frozen publication witness")
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    os.fsync(dir_fd)
+
+
+def _compat_inspect_group(manifest: dict, group_index: int) -> dict | None:
+    """Read-only validation of a partially published, job-owned group.
+
+    The marker alone grants NO authority. Every existing source-stage and
+    public binding must match its frozen file identity; all rows must still
+    have at least one matching binding. A foreign directory or unknown file
+    causes a hard failure without touching it.
+    """
+    group = manifest["groups"][group_index]
+    package = Path(manifest["package"])
+    stage = package / group["stage"]
+    final = package / group["final"]
+    if not os.path.lexists(final):
+        return None
+    dst_fd = _open_folder(final)
+    data = _compat_marker_bytes(manifest, group_index)
+    try:
+        _check_directory(os.fstat(dst_fd), final, manifest["package_dev"])
+        if not _compat_marker_matches(dst_fd, _COMPAT_OWNER_MARKER, data):
+            return None
+        done = _compat_marker_matches(dst_fd, _COMPAT_COMPLETE_MARKER, data)
+        expected = {
+            Path(row["final"]).name.casefold(): row["identity"]
+            for row in _group_files(manifest, group_index)
+        }
+        if len(expected) != len(_group_files(manifest, group_index)):
+            raise MediaPackageExecutionConflict("Frozen publication duplicate names")
+        public_names: set[str] = set()
+        with os.scandir(dst_fd) as entries:
+            for entry in entries:
+                if entry.name in (_COMPAT_OWNER_MARKER, _COMPAT_COMPLETE_MARKER):
+                    continue
+                key = entry.name.casefold()
+                if key not in expected or key in public_names:
+                    raise MediaPackageExecutionConflict("Foreign entry in owned publication")
+                public_names.add(key)
+                _check_file(entry.stat(follow_symlinks=False),
+                            expected[key], final / entry.name)
+    finally:
+        os.close(dst_fd)
+
+    stage_names: set[str] = set()
+    has_stage = os.path.lexists(stage)
+    if has_stage:
+        src_fd = _open_folder(stage)
+        try:
+            _check_directory(os.fstat(src_fd), stage, manifest["package_dev"])
+            with os.scandir(src_fd) as entries:
+                for entry in entries:
+                    key = entry.name.casefold()
+                    if key not in expected or key in stage_names:
+                        raise MediaPackageExecutionConflict("Foreign entry in owned staging")
+                    stage_names.add(key)
+                    _check_file(entry.stat(follow_symlinks=False),
+                                expected[key], stage / entry.name)
+        finally:
+            os.close(src_fd)
+
+    if public_names | stage_names != set(expected):
+        raise MediaPackageExecutionConflict("Frozen publication is incomplete")
+    if done and public_names != set(expected):
+        raise MediaPackageExecutionConflict("Completed publication has missing files")
+    if not has_stage and public_names != set(expected):
+        raise MediaPackageExecutionConflict("Missing stage before publication completed")
+    return {
+        "stage_exists": has_stage,
+        "public_names": public_names,
+        "stage_names": stage_names,
+        "complete": done,
+        "all_public": public_names == set(expected),
+    }
+
+
+def _publish_group_compat(manifest: dict, group_index: int,
+                          lease_fence: Callable[[], None]) -> str:
+    """FUSE-safe publication: exclusive mkdir, hardlinks, durable witness.
+
+    NO plain directory rename, NO adopted foreign final, NO copy/delete.
+    Files remain reachable from original stage until ALL final links have
+    been individually verified. A crash at any point retains the original
+    frozen manifest and can be reconciled without re-numbering.
+    """
+    package = Path(manifest["package"])
+    group = manifest["groups"][group_index]
+    stage = package / group["stage"]
+    final = package / group["final"]
+    marker = _compat_marker_bytes(manifest, group_index)
+    evidence = _compat_inspect_group(manifest, group_index)
+    if evidence is None:
+        # This is the only path permitted to allocate the final name. An
+        # unexpected existing directory without our witness cannot be used.
+        if os.path.lexists(final):
+            raise MediaPackageExecutionConflict("Foreign target directory cannot be adopted")
+        _verify_group_contents(manifest, group_index, stage)
+        package_fd = _open_verified_package(manifest)
+        try:
+            # On filesystems without directory fsync we cannot guarantee the
+            # metadata journal survives a crash; refuse BEFORE mkdir.
+            os.fsync(package_fd)
+            lease_fence()
+            os.mkdir(group["final"], mode=0o755, dir_fd=package_fd)
+            os.fsync(package_fd)
+        finally:
+            os.close(package_fd)
+        # A crash between mkdir and this write leaves an unmarked target,
+        # which is intentionally held for MANUAL review, never adopted.
+        final_fd = _open_folder(final)
+        try:
+            _compat_create_marker(final_fd, _COMPAT_OWNER_MARKER, marker)
+        finally:
+            os.close(final_fd)
+        evidence = _compat_inspect_group(manifest, group_index)
+        if evidence is None:
+            raise MediaPackageExecutionConflict("Publication ownership marker missing")
+
+    if evidence["stage_exists"]:
+        src_fd = _open_folder(stage)
+    else:
+        src_fd = None
+    dst_fd = _open_folder(final)
+    try:
+        if src_fd is not None:
+            _check_directory(os.fstat(src_fd), stage, manifest["package_dev"])
+        _check_directory(os.fstat(dst_fd), final, manifest["package_dev"])
+        if not _compat_marker_matches(dst_fd, _COMPAT_OWNER_MARKER, marker):
+            raise MediaPackageExecutionConflict("Publication owner witness disappeared")
+        # Phase I: create ALL final file links with exclusive link(2).
+        for row in _group_files(manifest, group_index):
+            name = row["target_name"]
+            expected = row["identity"]
+            target_st = _entry(final, name)
+            if target_st is not None:
+                _check_file(target_st, expected, final / name)
+                continue
+            if src_fd is None:
+                raise MediaPackageExecutionConflict("Frozen stage missing during publication")
+            source_st = os.stat(name, dir_fd=src_fd, follow_symlinks=False)
+            _check_file(source_st, expected, stage / name)
+            lease_fence()
+            os.link(name, name, src_dir_fd=src_fd, dst_dir_fd=dst_fd,
+                    follow_symlinks=False)
+            _check_file(os.stat(name, dir_fd=dst_fd, follow_symlinks=False),
+                        expected, final / name)
+        # The completeness check ignores only the two exact owned witnesses.
+        evidence = _compat_inspect_group(manifest, group_index)
+        if evidence is None or not evidence["all_public"]:
+            raise MediaPackageExecutionConflict("Publication not yet complete")
+        if not evidence["complete"]:
+            lease_fence()
+            _compat_create_marker(dst_fd, _COMPAT_COMPLETE_MARKER, marker)
+
+        # Phase II: retire only proven duplicate stage links, never payloads.
+        # A power loss here still leaves every final link present with the
+        # original inode and a durable committed publication witness.
+        if src_fd is not None:
+            for row in _group_files(manifest, group_index):
+                name = row["target_name"]
+                before = _entry(stage, name)
+                if before is None:
+                    continue
+                _check_file(before, row["identity"], stage / name)
+                _check_file(os.stat(name, dir_fd=dst_fd, follow_symlinks=False),
+                            row["identity"], final / name)
+                lease_fence()
+                os.unlink(name, dir_fd=src_fd)
+                _check_file(os.stat(name, dir_fd=dst_fd, follow_symlinks=False),
+                            row["identity"], final / name)
+            os.fsync(dst_fd)
+    finally:
+        os.close(dst_fd)
+        if src_fd is not None:
+            os.close(src_fd)
+
+    # Stage is now provably empty and no longer needed. Do NOT remove the
+    # public owner marker until the former stage name has been retired.
+    _compat_inspect_group(manifest, group_index)
+    if os.path.lexists(stage):
+        package_fd = _open_verified_package(manifest)
+        try:
+            lease_fence()
+            os.rmdir(group["stage"], dir_fd=package_fd)
+            os.fsync(package_fd)
+        finally:
+            os.close(package_fd)
+
+    final_fd = _open_folder(final)
+    try:
+        if not _compat_marker_matches(final_fd, _COMPAT_OWNER_MARKER, marker):
+            raise MediaPackageExecutionConflict("Publication witness lost before completion")
+        for name in (_COMPAT_COMPLETE_MARKER, _COMPAT_OWNER_MARKER):
+            if _compat_marker_matches(final_fd, name, marker):
+                lease_fence()
+                os.unlink(name, dir_fd=final_fd)
+                os.fsync(final_fd)
+    finally:
+        os.close(final_fd)
+    _verify_group_contents(manifest, group_index, final)
+    return "published"
 
 
 def _frozen_artifact_proves_package(manifest: dict) -> bool:
@@ -397,10 +660,15 @@ def _frozen_artifact_proves_package(manifest: dict) -> bool:
         published = package / group["final"]
         has_stage = os.path.lexists(staged)
         has_final = os.path.lexists(published)
-        if has_stage and has_final:
-            raise MediaPackageExecutionConflict(
-                "Both frozen stage and final directory exist; manual review required"
-            )
+        if has_final:
+            compat = _compat_inspect_group(manifest, index)
+            if compat is not None:
+                confirmed |= bool(compat["public_names"] or compat["stage_names"])
+                continue
+            if has_stage:
+                raise MediaPackageExecutionConflict(
+                    "Both frozen stage and foreign final directory exist"
+                )
         if not has_stage and not has_final:
             continue
         target = published if has_final else staged
@@ -480,8 +748,10 @@ def _publish_group(manifest: dict, group_index: int,
     stage = package / group["stage"]
     final = package / group["final"]
     if final.exists() or final.is_symlink():
+        if _compat_inspect_group(manifest, group_index) is not None:
+            return _publish_group_compat(manifest, group_index, lease_fence)
         if stage.exists() or stage.is_symlink():
-            raise MediaPackageExecutionConflict("Published name and staging both exist")
+            raise MediaPackageExecutionConflict("Published name and foreign staging both exist")
         _verify_group_contents(manifest, group_index, final)
         return "already_published"
     _verify_group_contents(manifest, group_index, stage)
@@ -503,9 +773,14 @@ def _publish_group(manifest: dict, group_index: int,
         except OSError as exc:
             if exc.errno != errno.EOPNOTSUPP:
                 raise
-            # The project already supports a positively-probed directory-only
-            # no-clobber fallback for NAS/FUSE filesystems.
-            rename_directory_noreplace_compat(stage, final)
+            # Prefer a positive-probed plain directory rename, but ZOS FUSE
+            # may not prove no-clobber. Never weaken that proof requirement.
+            try:
+                rename_directory_noreplace_compat(stage, final)
+            except OSError as compat_exc:
+                if compat_exc.errno != errno.EOPNOTSUPP:
+                    raise
+                return _publish_group_compat(manifest, group_index, lease_fence)
     finally:
         os.close(fd)
     _verify_group_contents(manifest, group_index, final)
@@ -916,12 +1191,18 @@ def execute_frozen_manifest(manifest: dict, *, lease_fence: Callable[[], None],
         result["total_files"] = len(manifest["moves"])
         result["package"] = str(package)
         return result
+    compat_groups: set[int] = set()
     for i in range(len(manifest["groups"])):
         _ensure_staging(manifest, i, lease_fence)
+        if _compat_inspect_group(manifest, i) is not None:
+            compat_groups.add(i)
     completed = recovered = 0
     total = len(manifest["moves"])
     for index, row in enumerate(manifest["moves"], start=1):
-        result = _move_one(row, lease_fence=lease_fence)
+        result = _move_one(
+            row, lease_fence=lease_fence,
+            compat_hardlink=row["group"] in compat_groups,
+        )
         completed += result == "moved"
         recovered += result != "moved"
         if progress and (index % 25 == 0 or index == total):
