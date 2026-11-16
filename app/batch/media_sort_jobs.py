@@ -241,6 +241,20 @@ def get_plan_stage(session_factory, plan_id: int) -> dict | None:
         }
 
 
+def _worker_plan_service(settings: Settings, context: JobContext):
+    """Use the Worker's existing DB sessions; do not replay startup reconciliation.
+
+    The generic create/freeze/validate Plan methods need only settings and the
+    SessionLocal factory. Instantiating the full API Service during a live Worker
+    task would unnecessarily call init_db and startup reconciliation.
+    """
+    from app.service import FileCenterService
+    service = object.__new__(FileCenterService)
+    service.settings = settings
+    service.SessionLocal = context.SessionLocal
+    return service
+
+
 @register_handler
 class MediaSortPreviewHandler(TaskHandler):
     job_type = PREVIEW_KIND
@@ -340,8 +354,7 @@ class MediaSortPlanHandler(TaskHandler):
             raise ValueError("Preview row count has changed")
         context.checkpoint(progress_current=count, progress_total=count,
                            progress_message="正在保存 Move Plan（原文件尚未改动）")
-        from app.service import FileCenterService
-        service = FileCenterService(settings)
+        service = _worker_plan_service(settings, context)
         plan = service.create_plan(
             name=("媒体文件递归分类（每目录 P / V）" if summary.get("recursive")
                   else "媒体文件分类（P / V）"),
@@ -374,8 +387,7 @@ class MediaSortPlanStageHandler(TaskHandler):
         stage = state["stage"]
         if stage not in {"freeze", "validate"}:
             raise ValueError("Unknown media sort stage")
-        from app.service import FileCenterService
-        service = FileCenterService(settings)
+        service = _worker_plan_service(settings, context)
         with context.SessionLocal() as session:
             plan = session.get(BatchPlan, plan_id)
             if plan is None or plan.kind != "media-sort":
