@@ -32,8 +32,8 @@ def test_pure_media_is_left_entirely_unchanged(tmp_path, extension):
     assert result["reason"] == "pure_media"
     assert result["groups"] == []
     assert len(list(nested.iterdir())) == 205
-    assert not any(package.glob("P*"))
-    assert not any(package.glob("V*"))
+    assert not any(child.name.startswith("P") for child in package.iterdir())
+    assert not any(child.name.startswith("V") for child in package.iterdir())
 
 
 def test_mixed_media_is_grouped_at_two_hundred_and_not_mutated(tmp_path):
@@ -60,7 +60,7 @@ def test_mixed_media_is_grouped_at_two_hundred_and_not_mutated(tmp_path):
     assert result["truncated"] is True
     assert (images / "000.jpg").read_bytes() == b"x"
     assert (videos / "201.mp4").read_bytes() == b"xy"
-    assert not any(package.glob("P [*"))
+    assert not any(child.name.startswith("P [") for child in package.iterdir())
 
 
 def test_fixed_package_boundary_rejects_parent_and_other_tree(tmp_path):
