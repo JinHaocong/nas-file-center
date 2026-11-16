@@ -141,3 +141,10 @@ sys.modules[__name__].__class__ = _HandlerCompatibilityModule
 # Archive recovery uses the canonical Worker handler registry.
 from app.archive_recovery.integration import ArchiveRecoveryHandler as ArchiveRecoveryHandler
 from app.download_verification.handler import DownloadVerificationHandler as DownloadVerificationHandler
+
+# Large media sort previews and Plan lifecycle use the existing Worker registry.
+from app.batch.media_sort_jobs import (
+    MediaSortPreviewHandler as MediaSortPreviewHandler,
+    MediaSortPlanHandler as MediaSortPlanHandler,
+    MediaSortPlanStageHandler as MediaSortPlanStageHandler,
+)
