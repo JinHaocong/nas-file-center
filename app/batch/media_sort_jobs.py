@@ -152,7 +152,7 @@ def enqueue_media_plan(session_factory, settings: Settings, job_id: int) -> dict
         previous = session.scalar(
             select(WorkJob).where(
                 WorkJob.kind == GENERATE_KIND,
-                func.cast(func.json_extract(WorkJob.state_json, "$.preview_job_id"), type_=None) == job_id,
+                func.json_extract(WorkJob.state_json, "$.preview_job_id") == job_id,
             ).order_by(WorkJob.id.desc()).limit(1)
         )
         if previous is not None and previous.status in (*ACTIVE_STATUSES, "completed"):
@@ -201,7 +201,7 @@ def enqueue_plan_stage(session_factory, plan_id: int, stage: str) -> dict:
         active = session.scalar(select(WorkJob.id).where(
             WorkJob.kind.in_((STAGE_KIND, "batch-plan-execute")),
             WorkJob.status.in_(ACTIVE_STATUSES),
-            func.cast(func.json_extract(WorkJob.state_json, "$.plan_id"), type_=None) == plan_id,
+            func.json_extract(WorkJob.state_json, "$.plan_id") == plan_id,
         ).limit(1))
         if active is not None:
             raise ValueError(f"Another Plan stage or execution task #{active} is already active")
@@ -227,7 +227,7 @@ def get_plan_stage(session_factory, plan_id: int) -> dict | None:
         job = session.scalar(
             select(WorkJob).where(
                 WorkJob.kind == STAGE_KIND,
-                func.cast(func.json_extract(WorkJob.state_json, "$.plan_id"), type_=None) == plan_id,
+                func.json_extract(WorkJob.state_json, "$.plan_id") == plan_id,
             ).order_by(WorkJob.id.desc()).limit(1)
         )
         if job is None:
