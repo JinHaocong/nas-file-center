@@ -1,0 +1,44 @@
+name: Media Sort Large-Root Regression
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'app/batch/media_sort.py'
+      - 'app/batch/media_sort_jobs.py'
+      - 'app/service.py'
+      - 'app/api/router.py'
+      - 'app/tasks/handlers.py'
+      - 'tests/test_media_sort.py'
+      - 'tests/test_media_sort_async.py'
+      - '.github/workflows/media-sort-large-roots.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: media-sort-large-root-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  focused-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CONFIG_DIR: /tmp/nfc-config
+      DATA_MOUNT: /tmp/nfc-data
+      ALLOWED_ROOTS: /tmp/nfc-data
+      QUARANTINE_ROOT: /tmp/nfc-data/.nas-file-center-trash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install backend test dependencies
+        run: python -m pip install -e '.[test]'
+      - name: Run large-root worker and existing media-sort regression
+        env:
+          PYTHONPATH: .
+        run: pytest -q tests/test_media_sort_async.py tests/test_media_sort.py

@@ -105,3 +105,9 @@
 @media (max-width:767px) {
   .nfc-v2-batch-media-recursive { min-height:44px; }
 }
+
+/* Durable large-root scan progress, visible while Worker is running. */
+.nfc-v2-media-scan-progress { display:grid;gap:13px;min-width:0;padding:8px 0; }
+.nfc-v2-media-scan-progress > .nfc-v2-batch-media-stats { padding:0 0 10px; }
+.nfc-v2-media-scan-progress > .nfc-form-note { margin:0;overflow-wrap:anywhere; }
+.nfc-v2-media-scan-progress .nfc-task-progress { width:100%; }

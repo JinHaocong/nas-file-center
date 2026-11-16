@@ -1,10 +1,14 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { OperationJournalDrawer } from './OperationJournalDrawer';
 import { StaleRebuildDrawer } from '../../components/plans/StaleRebuildDrawer';
 import { isWorkflowPlanMetadata, WorkflowPlanMetadata } from '../../types/workflow';
 import { plansApi, settingsApi } from '../../api/domain';
+import { mediaSortApi } from '../../api/mediaSort';
+import { tasksApi } from '../../api/tasks';
+import { getStructuredApiError } from '../../api/errors';
+import { TaskProgress } from '../../components/tasks/TaskProgress';
 import { useTitle } from '../../hooks/useTitle';
 import { formatBytes, formatDateTime } from '../../utils/format';
 import type { PlanItem } from '../../types';
@@ -47,6 +51,7 @@ export const PlanDetailPage: React.FC = () => {
   const queryClient = useQueryClient();
   const toast = useConsoleToast();
   const actionInFlight = useRef(false);
+  const lastHandledStageRef = useRef<number | null>(null);
   const [confirmation, setConfirmation] = useState<PlanConfirmationSnapshot | null>(null);
   useTitle(`计划详情 #${planId}`);
 
@@ -71,6 +76,7 @@ export const PlanDetailPage: React.FC = () => {
     queryKey: ['planDetail', planId, page, pageSize],
     queryFn: () => plansApi.getPlanDetail(planId, page, pageSize),
     enabled: Number.isSafeInteger(planId) && planId > 0,
+    refetchInterval: (query) => query.state.data?.active_work_job_id ? 1600 : false,
   });
 
   const {
@@ -83,6 +89,39 @@ export const PlanDetailPage: React.FC = () => {
     queryFn: () => plansApi.getOperationJournal(planId, 1, 1),
     enabled: Number.isSafeInteger(planId) && planId > 0,
   });
+
+  const isMediaSortPlan = plan?.kind === 'media-sort';
+  const { data: stageResult } = useQuery({
+    queryKey: ['mediaSortPlanStage', planId],
+    queryFn: () => mediaSortApi.getPlanStage(planId),
+    enabled: isMediaSortPlan,
+    refetchInterval: (query) => {
+      const status = query.state.data?.job?.status;
+      return status === 'queued' || status === 'running' ||
+        status === 'cancel_requested' ? 1300 : false;
+    },
+  });
+  const stageJob = stageResult?.job;
+  const stageActive = stageJob?.status === 'queued' || stageJob?.status === 'running' ||
+    stageJob?.status === 'cancel_requested';
+  const executionJobId = isMediaSortPlan ? plan?.active_work_job_id : null;
+  const { data: executionTask } = useQuery({
+    queryKey: ['mediaSortExecutionTask', executionJobId],
+    queryFn: () => tasksApi.getTaskDetail(executionJobId!),
+    enabled: Boolean(executionJobId),
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === 'queued' || status === 'running' ||
+        status === 'cancel_requested' ? 1600 : false;
+    },
+  });
+
+  useEffect(() => {
+    if (!stageJob || stageActive || lastHandledStageRef.current === stageJob.job_id) return;
+    lastHandledStageRef.current = stageJob.job_id;
+    void refetch();
+    void queryClient.invalidateQueries({ queryKey: ['plansList'] });
+  }, [stageJob?.job_id, stageJob?.status, stageActive, refetch, queryClient]);
 
   const undoPlanMutation = useMutation({
     mutationFn: () => plansApi.createUndoPlan(planId),
@@ -109,6 +148,15 @@ export const PlanDetailPage: React.FC = () => {
     },
   });
 
+  const freezeStageMutation = useMutation({
+    mutationFn: () => mediaSortApi.startPlanStage(planId, 'freeze'),
+    onSuccess: data => {
+      toast.success(`冻结已加入任务队列 #${data.job_id}，可查看逐项进度`);
+      void queryClient.invalidateQueries({ queryKey: ['mediaSortPlanStage', planId] });
+    },
+    onError: (err: unknown) => toast.error(getStructuredApiError(err).message || '创建冻结任务失败'),
+  });
+
   const validateMutation = useMutation({
     mutationFn: () => plansApi.validatePlan(planId),
     onSuccess: () => {
@@ -119,6 +167,15 @@ export const PlanDetailPage: React.FC = () => {
     onError: (err: any) => {
       toast.error(err.message || '校验失败');
     },
+  });
+
+  const validateStageMutation = useMutation({
+    mutationFn: () => mediaSortApi.startPlanStage(planId, 'validate'),
+    onSuccess: data => {
+      toast.success(`实时校验已加入任务队列 #${data.job_id}，可查看逐项进度`);
+      void queryClient.invalidateQueries({ queryKey: ['mediaSortPlanStage', planId] });
+    },
+    onError: (err: unknown) => toast.error(getStructuredApiError(err).message || '创建校验任务失败'),
   });
 
   const executeMutation = useMutation({
@@ -201,6 +258,7 @@ export const PlanDetailPage: React.FC = () => {
   const lifecycleIndex = getLifecycleIndex(plan.status);
 
   const pendingAction = freezeMutation.isPending || validateMutation.isPending ||
+    freezeStageMutation.isPending || validateStageMutation.isPending || stageActive ||
     executeMutation.isPending || undoPlanMutation.isPending || deleteMutation.isPending;
   const actionContext = {
     plan, allowMutation: !isSafeMode, journalTotal,
@@ -217,8 +275,13 @@ export const PlanDetailPage: React.FC = () => {
   const beginAction = (action: 'freeze' | 'validate') => {
     if (actionInFlight.current || !canPlanLifecycleAction(action, actionContext)) return;
     actionInFlight.current = true;
-    const mutation = action === 'freeze' ? freezeMutation : validateMutation;
-    mutation.mutate(undefined, { onSettled: () => { actionInFlight.current = false; } });
+    if (isMediaSortPlan) {
+      const mutation = action === 'freeze' ? freezeStageMutation : validateStageMutation;
+      mutation.mutate(undefined, { onSettled: () => { actionInFlight.current = false; } });
+    } else {
+      const mutation = action === 'freeze' ? freezeMutation : validateMutation;
+      mutation.mutate(undefined, { onSettled: () => { actionInFlight.current = false; } });
+    }
   };
   const openConfirmation = (action: 'execute' | 'undo') => {
     if (!actionInFlight.current) setConfirmation(planConfirmationSnapshot(action, actionContext));
@@ -383,12 +446,41 @@ export const PlanDetailPage: React.FC = () => {
         })}
       </div>
 
+      {isMediaSortPlan && stageJob && (
+        <DataPanel title={stageJob.stage === 'freeze' ? '冻结进度（Freeze）' : '实时校验进度（Validate）'}
+          description={`Worker 任务 #${stageJob.job_id}，可在任务中心继续查看。`}
+          className="nfc-v2-plan-stage-progress">
+          <TaskProgress status={stageJob.status}
+            progress={{
+              current: stageJob.progress?.current || 0,
+              total: stageJob.progress?.total || 0,
+              message: stageJob.progress?.message || null,
+              percent: null,
+            }} showDetails />
+          {stageJob.status === 'failed' && (
+            <p className="nfc-v2-batch-error" role="alert">
+              {stageJob.stage === 'freeze' ? '冻结' : '校验'}失败：{stageJob.error || '请检查任务日志'}
+            </p>
+          )}
+        </DataPanel>
+      )}
+      {isMediaSortPlan && plan?.active_work_job_id && (
+        <DataPanel title="文件执行进度（Execute）"
+          description={`执行任务 #${plan.active_work_job_id}，可在任务中心查看日志并取消或暂停。`}
+          className="nfc-v2-plan-stage-progress">
+          {executionTask ? (
+            <TaskProgress status={executionTask.status} progress={executionTask.progress}
+              startedAt={executionTask.started_at} showDetails />
+          ) : <p role="status" className="nfc-form-note">正在获取 Worker 执行进度…</p>}
+        </DataPanel>
+      )}
+
       <section className="nfc-plan-action-surface nfc-v2-plan-actions" aria-label="计划安全操作">
         <ActionBar>
           {plan.status === 'draft' && (
             <ConsoleButton leadingIcon={<ConsoleIcon name="lock" size={16} />}
               onClick={() => beginAction('freeze')} disabled={!canFreeze}
-              loading={freezeMutation.isPending}>
+              loading={freezeMutation.isPending || freezeStageMutation.isPending}>
               冻结计划 (Freeze)
             </ConsoleButton>
           )}
@@ -396,7 +488,7 @@ export const PlanDetailPage: React.FC = () => {
             <span title={hasActiveJob ?
               '该计划当前已有执行任务进行中 (任务 #' + plan.active_work_job_id + ')' : undefined}>
               <ConsoleButton leadingIcon={<ConsoleIcon name="check-circle" size={16} />}
-                disabled={!canValidate} loading={validateMutation.isPending}
+                disabled={!canValidate} loading={validateMutation.isPending || validateStageMutation.isPending}
                 onClick={() => beginAction('validate')}>
                 SHA256 实时校验 (Validate)
               </ConsoleButton>
