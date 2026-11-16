@@ -747,13 +747,18 @@ def _open_verified_package(manifest: dict) -> int:
 
 
 def _publish_group(manifest: dict, group_index: int,
-                   lease_fence: Callable[[], None]) -> str:
+                   lease_fence: Callable[[], None], *,
+                   allow_fuse_compat: bool = False) -> str:
     package = Path(manifest["package"])
     group = manifest["groups"][group_index]
     stage = package / group["stage"]
     final = package / group["final"]
     if final.exists() or final.is_symlink():
         if _compat_inspect_group(manifest, group_index) is not None:
+            if not allow_fuse_compat:
+                raise MediaPackageExecutionConflict(
+                    "FUSE compatible publication is disabled until same-mount capability testing"
+                )
             return _publish_group_compat(manifest, group_index, lease_fence)
         if stage.exists() or stage.is_symlink():
             raise MediaPackageExecutionConflict("Published name and foreign staging both exist")
@@ -785,6 +790,11 @@ def _publish_group(manifest: dict, group_index: int,
             except OSError as compat_exc:
                 if compat_exc.errno != errno.EOPNOTSUPP:
                     raise
+                if not allow_fuse_compat:
+                    raise MediaPackageExecutionConflict(
+                        "FUSE grouped publication disabled: run the isolated NAS probe "
+                        "and explicitly enable MEDIA_PACKAGE_FUSE_COMPAT_ENABLED"
+                    ) from compat_exc
                 return _publish_group_compat(manifest, group_index, lease_fence)
     finally:
         os.close(fd)
@@ -1156,12 +1166,19 @@ def _validate_frozen_paths(manifest: dict) -> None:
 
 
 def execute_frozen_manifest(manifest: dict, *, lease_fence: Callable[[], None],
-                            progress: Callable[[int, int], None] | None = None) -> dict:
+                            progress: Callable[[int, int], None] | None = None,
+                            allow_fuse_compat: bool = False) -> dict:
     """Run one package idempotently; the caller owns lease checkpoints/recovery."""
     package = Path(manifest["package"])
     if manifest.get("schema_version") != MANIFEST_VERSION:
         raise MediaPackageExecutionConflict("Unsupported frozen manifest version")
     _validate_frozen_paths(manifest)
+    if not allow_fuse_compat:
+        for index in range(len(manifest["groups"])):
+            if _compat_inspect_group(manifest, index) is not None:
+                raise MediaPackageExecutionConflict(
+                    "FUSE compatibility recovery requires explicit operator opt-in"
+                )
     fd = _open_verified_package(manifest)
     os.close(fd)
     # Before the first mutation of a new package job, reject any source or
@@ -1214,7 +1231,13 @@ def execute_frozen_manifest(manifest: dict, *, lease_fence: Callable[[], None],
             progress(index, total)
     published = 0
     for i in range(len(manifest["groups"])):
-        if _publish_group(manifest, i, lease_fence) == "published":
+        if allow_fuse_compat:
+            result = _publish_group(
+                manifest, i, lease_fence, allow_fuse_compat=True,
+            )
+        else:
+            result = _publish_group(manifest, i, lease_fence)
+        if result == "published":
             published += 1
     cleaned = _remove_empty_sources(manifest, lease_fence)
     return {
