@@ -10,7 +10,7 @@ from app.batch.media_package_organizer import (
 
 def make_package(tmp_path):
     root = tmp_path / "data" / "Else" / "Collection"
-    package = root / "2611" / "261115" / "疑心病" / "New 1432.1MB"
+    package = root / "2611" / "261115" / "SampleAuthor" / "SampleBundle"
     package.mkdir(parents=True)
     return root, package
 
@@ -87,7 +87,7 @@ def test_symlinks_are_never_traversed(tmp_path):
     assert (target / "secret.mp4").read_bytes() == b"do-not-read"
 
 
-def test_existing_final_folder_is_idempotent(tmp_path):
+def test_legacy_labelled_targets_with_old_names_require_review(tmp_path):
     root, package = make_package(tmp_path)
     p = package / "P [1 5B]"
     v = package / "V [1 7B]"
@@ -96,10 +96,10 @@ def test_existing_final_folder_is_idempotent(tmp_path):
     (p / "one.jpg").write_bytes(b"image")
     (v / "one.mp4").write_bytes(b"example")
     result = preview(root, package)
-    assert result["status"] == "already_organized"
-    assert result["needed_moves"] == 0
-    assert result["conflicts"] == []
-    assert not (package / "P_1").exists()
+    assert result["status"] == "blocked"
+    assert any(c["reason"] == "target_directory_exists" for c in result["conflicts"])
+    assert (p / "one.jpg").read_bytes() == b"image"
+    assert (v / "one.mp4").read_bytes() == b"example"
 
 
 def test_existing_unrelated_target_requires_manual_review(tmp_path):
@@ -146,19 +146,22 @@ def test_bad_directory_name_outside_fixed_layout_rejected(tmp_path):
         preview(root, alternate)
 
 
-def test_pure_video_flatten_collision_requires_manual_review(tmp_path):
+def test_pure_video_flatten_collision_is_auto_numbered(tmp_path):
     root, package = make_package(tmp_path)
-    (package / "视频A").mkdir()
-    (package / "视频B").mkdir()
-    (package / "视频A" / "001.mp4").write_bytes(b"one")
-    (package / "视频B" / "001.mp4").write_bytes(b"two")
+    a = package / "clips-a"
+    b = package / "clips-b"
+    a.mkdir()
+    b.mkdir()
+    (a / "001.mp4").write_bytes(b"one")
+    (b / "001.mp4").write_bytes(b"two")
     result = preview(root, package)
-    assert result["status"] == "blocked"
+    assert result["status"] == "ready"
     assert result["operation"] == "flatten_pure_media"
-    assert any(x["reason"] == "flatten_filename_collision"
-               for x in result["conflicts"])
-    assert (package / "视频A" / "001.mp4").read_bytes() == b"one"
-    assert (package / "视频B" / "001.mp4").read_bytes() == b"two"
+    assert result["conflicts"] == []
+    assert result["resolved_collision_count"] == 1
+    assert [Path(row["target"]).name for row in result["sample_moves"]] == [
+        "001.mp4", "002.mp4",
+    ]
 
 
 def test_flat_pure_media_is_idempotently_skipped(tmp_path):
@@ -166,19 +169,22 @@ def test_flat_pure_media_is_idempotently_skipped(tmp_path):
     (package / "001.mp4").write_bytes(b"video")
     result = preview(root, package)
     assert result["status"] == "skipped"
-    assert result["reason"] == "already_flat"
+    assert result["reason"] == "already_flat_numbered"
     assert result["needed_moves"] == 0
 
 
-def test_nested_pure_media_conflict_with_existing_root_file(tmp_path):
+def test_root_and_nested_homonyms_can_be_staged(tmp_path):
     root, package = make_package(tmp_path)
     (package / "001.jpg").write_bytes(b"original")
-    (package / "图片").mkdir()
-    (package / "图片" / "001.JPG").write_bytes(b"nested")
+    (package / "images").mkdir()
+    (package / "images" / "001.JPG").write_bytes(b"nested")
     result = preview(root, package)
-    assert result["status"] == "blocked"
-    assert any(x["reason"] == "flatten_filename_collision"
-               for x in result["conflicts"])
+    assert result["status"] == "ready"
+    assert result["conflicts"] == []
+    assert result["resolved_collision_count"] == 1
+    assert [Path(row["target"]).name for row in result["sample_moves"]] == [
+        "001.jpg", "002.JPG",
+    ]
 
 
 @pytest.mark.parametrize("extension,kind", [(".jpg", "P"), (".mp4", "V")])
@@ -224,18 +230,18 @@ def test_flat_pure_media_over_200_is_still_bucketed(tmp_path, extension, kind):
 
 
 @pytest.mark.parametrize("extension", [".jpg", ".mp4"])
-def test_flat_pure_media_exactly_200_remains_unchanged(tmp_path, extension):
+def test_flat_pure_media_exactly_200_is_renumbered(tmp_path, extension):
     root, package = make_package(tmp_path)
     for i in range(200):
         (package / f"{i:03d}{extension}").write_bytes(b"x")
     result = preview(root, package)
-    assert result["status"] == "skipped"
-    assert result["reason"] == "already_flat"
+    assert result["status"] == "ready"
     assert result["groups"] == []
-    assert result["needed_moves"] == 0
+    assert result["needed_moves"] == 200
+    assert result["sample_moves"][0]["target"].endswith("001" + extension)
 
 
-def test_pure_media_201_filename_collision_blocks_bucket(tmp_path):
+def test_pure_media_201_filename_collision_is_auto_numbered(tmp_path):
     root, package = make_package(tmp_path)
     first = package / "A"
     second = package / "B"
@@ -246,10 +252,11 @@ def test_pure_media_201_filename_collision_blocks_bucket(tmp_path):
     (second / "001.jpg").write_bytes(b"different")
     (second / "extra.jpg").write_bytes(b"last")
     result = preview(root, package)
-    assert result["status"] == "blocked"
+    assert result["status"] == "ready"
     assert result["operation"] == "bucket_pure_media"
-    assert any(x["reason"] == "duplicate_filename_in_bucket"
-               for x in result["conflicts"])
+    assert result["conflicts"] == []
+    assert result["resolved_collision_count"] == 1
+    assert len({row["target"] for row in result["sample_moves"]}) == len(result["sample_moves"])
 
 
 def test_media_package_root_month_day_scope_discovers_only_resource_packages(tmp_path):
@@ -310,3 +317,30 @@ def test_media_package_scope_does_not_follow_symlinked_author(tmp_path):
     kwargs = {"media_package_root": root, "allowed_roots": [root.parent.parent]}
     with pytest.raises(ValueError, match="contains a symlink"):
         list(iter_media_package_packages(root / "2611" / "261115", **kwargs))
+
+
+def test_already_numbered_grouped_media_is_idempotent(tmp_path):
+    root, package = make_package(tmp_path)
+    p = package / "P [1 5B]"
+    v = package / "V [1 7B]"
+    p.mkdir()
+    v.mkdir()
+    (p / "001.jpg").write_bytes(b"image")
+    (v / "001.mp4").write_bytes(b"example")
+    result = preview(root, package)
+    assert result["status"] == "already_organized"
+    assert result["needed_moves"] == 0
+    assert result["conflicts"] == []
+
+
+def test_flat_root_numbering_keeps_original_path_mapping(tmp_path):
+    root, package = make_package(tmp_path)
+    (package / "001.mp4").write_bytes(b"first")
+    (package / "clips").mkdir()
+    (package / "clips" / "001.mp4").write_bytes(b"second")
+    result = preview(root, package)
+    assert result["status"] == "ready"
+    assert result["needed_moves"] == 2
+    assert result["resolved_collision_count"] == 1
+    assert [row["target_name"] for row in result["sample_moves"]] == ["001.mp4", "002.mp4"]
+    assert all("original_relative_path" in row for row in result["sample_moves"])
