@@ -7,6 +7,7 @@ on:
       - 'app/batch/luolcy_organizer.py'
       - 'app/batch/luolcy_jobs.py'
       - 'app/batch/luolcy_execution.py'
+      - 'app/batch/luolcy_execute_jobs.py'
       - 'app/api/router.py'
       - 'app/tasks/handlers.py'
       - 'app/tasks/handlers_base.py'
@@ -17,6 +18,7 @@ on:
       - 'tests/test_luolcy_organizer.py'
       - 'tests/test_luolcy_jobs.py'
       - 'tests/test_luolcy_execution.py'
+      - 'tests/test_luolcy_execute_jobs.py'
       - 'benchmarks/luolcy_preview_benchmark.py'
       - '.github/workflows/luolcy-preview-regression.yml'
   workflow_dispatch:
@@ -48,7 +50,7 @@ jobs:
       - name: Test scope, 200-file partitioning, security and Worker paging
         env:
           PYTHONPATH: .
-        run: pytest -q tests/test_luolcy_organizer.py tests/test_luolcy_jobs.py tests/test_luolcy_execution.py
+        run: pytest -q tests/test_luolcy_organizer.py tests/test_luolcy_jobs.py tests/test_luolcy_execution.py tests/test_luolcy_execute_jobs.py
       - name: Synthetic read-only scan throughput baseline
         env:
           PYTHONPATH: .
