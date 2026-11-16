@@ -418,12 +418,69 @@ def _remove_empty_sources(manifest: dict, lease_fence: Callable[[], None]) -> in
     return removed
 
 
+def _validate_frozen_paths(manifest: dict) -> None:
+    """Reject any corrupt/artifact-rewritten path outside the resource package."""
+    package = Path(manifest["package"])
+    if (not package.is_absolute() or
+            not isinstance(manifest.get("job_id"), int) or manifest["job_id"] < 1):
+        raise LuolcyExecutionConflict("Invalid protected package / job identity")
+    dev = manifest.get("package_dev")
+    if not isinstance(dev, int) or dev <= 0:
+        raise LuolcyExecutionConflict("Invalid frozen filesystem identity")
+    for index, group in enumerate(manifest.get("groups", [])):
+        stage = f".nfc-luolcy-stage-{manifest['job_id']}-{index}"
+        if group.get("stage") != stage:
+            raise LuolcyExecutionConflict("Untrusted Luolcy staging directory name")
+        final = Path(group.get("final", ""))
+        if (not final.name or final.is_absolute() or len(final.parts) != 1
+                or final.name in (".", "..") or
+                not isinstance(group.get("count"), int) or
+                group["count"] < 1 or group["count"] > 300_000 or
+                group.get("move_start", -1) < 0 or
+                group.get("kind") not in ("P", "V", "Other")):
+            raise LuolcyExecutionConflict("Invalid frozen Luolcy group metadata")
+        if group["kind"] in ("P", "V") and group["count"] > MAX_FILES_PER_GROUP:
+            raise LuolcyExecutionConflict("200-file Luolcy capacity exceeded")
+
+    rows = manifest.get("moves")
+    if not isinstance(rows, list):
+        raise LuolcyExecutionConflict("Invalid frozen Luolcy move list")
+    for row in rows:
+        src, dest, final = (Path(row["source"]), Path(row["target"]),
+                            Path(row["final"]))
+        if (not src.is_absolute() or not src.is_relative_to(package)
+                or src == package or src.name in (".", "..")
+                or row.get("identity") is None or
+                len(row["identity"]) != 4 or
+                row["identity"][0] != dev):
+            raise LuolcyExecutionConflict("Unsafe frozen Luolcy source")
+        group_index = row.get("group")
+        if group_index is None:
+            expected_target = package / src.name
+            expected_final = expected_target
+        else:
+            if not isinstance(group_index, int) or not 0 <= group_index < len(manifest["groups"]):
+                raise LuolcyExecutionConflict("Invalid frozen group association")
+            group = manifest["groups"][group_index]
+            expected_target = package / group["stage"] / src.name
+            expected_final = package / group["final"] / src.name
+        if dest != expected_target or final != expected_final or src == dest:
+            raise LuolcyExecutionConflict("Frozen Luolcy move target escaped its package")
+    for index, group in enumerate(manifest["groups"]):
+        start, count = group["move_start"], group["count"]
+        if start + count > len(rows) or any(
+            row["group"] != index for row in rows[start:start + count]
+        ):
+            raise LuolcyExecutionConflict("Frozen Luolcy group rows are inconsistent")
+
+
 def execute_frozen_manifest(manifest: dict, *, lease_fence: Callable[[], None],
                             progress: Callable[[int, int], None] | None = None) -> dict:
     """Run one package idempotently; the caller owns lease checkpoints/recovery."""
     package = Path(manifest["package"])
     if manifest.get("schema_version") != MANIFEST_VERSION:
         raise LuolcyExecutionConflict("Unsupported frozen manifest version")
+    _validate_frozen_paths(manifest)
     fd = _open_folder(package)
     try:
         st = os.fstat(fd)
