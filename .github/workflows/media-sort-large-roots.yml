@@ -51,7 +51,7 @@ jobs:
         env:
           PYTHONPATH: .
         run: |
-          python benchmarks/media_sort_benchmark.py --media 80 --nonmedia 400 --directories 4 --json media-sort-perf.json
+          python benchmarks/media_sort_benchmark.py --media 80 --nonmedia 400 --directories 4 --execute --json media-sort-perf.json
           {
             echo '### Media sort performance (synthetic tmpfs/CI disk only)'
             echo '```json'
