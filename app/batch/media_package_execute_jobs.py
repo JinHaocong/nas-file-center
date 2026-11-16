@@ -136,8 +136,13 @@ def enqueue_media_package_recovery(session_factory, settings: Settings, *,
         pid, original_state = _failed_publish_job_authority(original)
         failed_ordinal = int(original.progress_current)
         preview = session.get(WorkJob, pid)
-        if preview is None or preview.kind != PREVIEW_KIND or preview.status != "completed":
-            raise ValueError("Approved preview evidence is unavailable")
+        # An operator may have deleted the completed preview WorkJob after
+        # the original execution was approved. The immutable private report
+        # and original frozen manifest still provide independent authority.
+        if preview is not None and (
+            preview.kind != PREVIEW_KIND or preview.status != "completed"
+        ):
+            raise ValueError("Approved preview evidence has an unsafe status")
 
     # Read-only proof BEFORE queuing a new Worker job: the original exact
     # manifest and a verified staging/final file must still exist.
@@ -272,9 +277,18 @@ class MediaPackageExecuteHandler(TaskHandler):
             raise ValueError("Missing MediaPackage preview authority")
         with context.SessionLocal() as session:
             preview = session.get(WorkJob, preview_job_id)
-            if preview is None or preview.kind != PREVIEW_KIND or preview.status != "completed":
-                raise ValueError("Approved MediaPackage preview is no longer available")
+            if original_id is None:
+                if preview is None or preview.kind != PREVIEW_KIND or preview.status != "completed":
+                    raise ValueError("Approved MediaPackage preview is no longer available")
+            elif preview is not None and (
+                preview.kind != PREVIEW_KIND or preview.status != "completed"
+            ):
+                raise ValueError("Recovered preview evidence has an unsafe status")
+            # For explicit recovery, the original operator-approved WorkJob
+            # and persisted preview artifacts can outlive a deleted preview row.
         data, _index, summary_path = _preview_files(settings, preview_job_id)
+        if not data.is_file() or not summary_path.is_file():
+            raise ValueError("Frozen preview report missing; refusing recovery")
         with summary_path.open("r", encoding="utf-8") as file:
             summary = json.load(file)
         total = summary["package_count"]
