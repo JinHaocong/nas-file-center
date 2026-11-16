@@ -6,6 +6,8 @@ on:
     paths:
       - 'app/batch/media_sort.py'
       - 'app/batch/media_sort_jobs.py'
+      - 'app/worker.py'
+      - 'app/tasks/recovery.py'
       - 'app/batch/media_sort_resumable_plan.py'
       - 'app/path_safety.py'
       - 'app/batch/media_sort_bulk_plan.py'
@@ -20,6 +22,7 @@ on:
       - 'tests/test_media_sort_performance.py'
       - 'tests/test_media_sort_conflicts.py'
       - 'tests/test_media_sort_recovery.py'
+      - 'tests/test_worker_heartbeat_contention.py'
       - 'tests/test_gate5e_e2_api.py'
       - 'tests/test_gate5e_e2_graph.py'
       - 'benchmarks/media_sort_benchmark.py'
@@ -53,7 +56,7 @@ jobs:
       - name: Run large-root worker and existing media-sort regression
         env:
           PYTHONPATH: .
-        run: pytest -q tests/test_media_sort_async.py tests/test_media_sort.py tests/test_media_sort_performance.py tests/test_media_sort_conflicts.py tests/test_media_sort_recovery.py tests/test_gate5e_e2_api.py tests/test_gate5e_e2_graph.py
+        run: pytest -q tests/test_media_sort_async.py tests/test_media_sort.py tests/test_media_sort_performance.py tests/test_media_sort_conflicts.py tests/test_media_sort_recovery.py tests/test_gate5e_e2_api.py tests/test_gate5e_e2_graph.py tests/test_worker_heartbeat_contention.py tests/test_fixed6_regressions.py tests/test_fixed9_regressions.py
       - name: Run isolated performance benchmark (timing informational)
         env:
           PYTHONPATH: .
