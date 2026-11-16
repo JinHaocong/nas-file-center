@@ -19,6 +19,9 @@ export interface MediaPackageSampleMove {
   target: string;
   bytes: number;
   kind: 'P' | 'V' | 'Other';
+  source_name?: string;
+  target_name?: string;
+  original_relative_path?: string;
 }
 
 export interface MediaPackageConflict {
@@ -42,6 +45,8 @@ export interface MediaPackagePreview {
   sample_moves: MediaPackageSampleMove[];
   total_proposals: number;
   needed_moves: number;
+  renamed_count?: number;
+  resolved_collision_count?: number;
   operation?: 'flatten_pure_media' | 'bucket_pure_media' | 'sort_mixed_media';
   truncated: boolean;
   read_only: true;
@@ -55,6 +60,8 @@ export interface MediaPackagePreviewSummary {
   already_organized_count: number;
   file_count: number;
   needed_moves: number;
+  renamed_count?: number;
+  resolved_collision_count?: number;
   elapsed_seconds: number;
 }
 
