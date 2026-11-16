@@ -41,8 +41,12 @@ export const MediaPackageRecoveryPanel: React.FC<Props> = ({
       </header>
       <div className="nfc-v2-task-inline-alert">
         <strong>原任务保留，不允许普通重试或重新扫描后直接执行。</strong>
-        <p>仅对发布前目录标识误判开放恢复。服务端会重新验证原冻结清单、
-          文件身份、暂存内容及目标路径，出现任何异常立即拒绝。</p>
+        <p>仅对明确识别的目录标识误判或极空间目录无覆盖重命名不兼容开放恢复。
+          服务端会验证原冻结清单、文件身份、暂存内容及目标路径，
+          出现任何异常立即拒绝。</p>
+        <p>极空间 FUSE 兼容恢复前，请先在相同挂载上通过隔离测试，
+          然后由管理员显式启用 MEDIA_PACKAGE_FUSE_COMPAT_ENABLED；
+          默认关闭，不会自动启用。</p>
         <p>恢复会继续实际移动文件，请先检查 NAS 上的原任务、数据与磁盘状态；
           不要删除隐藏暂存目录。</p>
       </div>

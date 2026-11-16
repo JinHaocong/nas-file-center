@@ -93,6 +93,19 @@ def enqueue_media_package_execution(session_factory, settings: Settings,
         return {"job_id": int(job.id), "status": job.status}
 
 
+def is_recoverable_media_package_publish_error(error_code: str | None,
+                                              error_text: str | None) -> bool:
+    """Allowlist two exact publication failures; never retry arbitrary errors."""
+    if error_code != "EXECUTION_ERROR" or not isinstance(error_text, str):
+        return False
+    return (
+        error_text == "Package directory changed before publish"
+        or error_text.startswith(
+            "[Errno 95] Plain directory rename no-clobber semantics are not positively proven: "
+        )
+    )
+
+
 def _failed_publish_job_authority(job: WorkJob) -> tuple[int, dict]:
     """Only the known publication-check failure is eligible for assisted recovery.
 
@@ -100,9 +113,10 @@ def _failed_publish_job_authority(job: WorkJob) -> tuple[int, dict]:
     creates a NEW task bound to the original frozen manifest namespace.
     """
     if (job.kind != EXECUTE_KIND or job.status != "failed"
-            or job.error_code != "EXECUTION_ERROR"
-            or job.error_text != "Package directory changed before publish"):
-        raise ValueError("Only the verified package-publication failure can be recovered")
+            or not is_recoverable_media_package_publish_error(
+                job.error_code, job.error_text,
+            )):
+        raise ValueError("Only recognized frozen package-publication failures can be recovered")
     state = json.loads(job.state_json or "{}")
     checkpoint = json.loads(job.checkpoint_json or "{}")
     pid = state.get("preview_job_id")
@@ -134,6 +148,13 @@ def enqueue_media_package_recovery(session_factory, settings: Settings, *,
         if original is None:
             raise KeyError(failed_job_id)
         pid, original_state = _failed_publish_job_authority(original)
+        if (str(original.error_text or "").startswith(
+            "[Errno 95] Plain directory rename no-clobber semantics are not positively proven: "
+        ) and not settings.media_package_fuse_compat_enabled):
+            raise ValueError(
+                "FUSE compatibility is disabled: run isolated NAS probe and "
+                "explicitly enable MEDIA_PACKAGE_FUSE_COMPAT_ENABLED"
+            )
         failed_ordinal = int(original.progress_current)
         preview = session.get(WorkJob, pid)
         # An operator may have deleted the completed preview WorkJob after
@@ -361,6 +382,7 @@ class MediaPackageExecuteHandler(TaskHandler):
 
                     result = execute_frozen_manifest(
                         manifest, lease_fence=fence, progress=file_progress,
+                        allow_fuse_compat=settings.media_package_fuse_compat_enabled,
                     )
                     results.append(result)
                 elif record["status"] in ("skipped", "already_organized"):

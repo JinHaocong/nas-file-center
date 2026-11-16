@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     data_mount: Path = Field(default=Path("/data"), validation_alias="DATA_MOUNT")
     # Private scope injected by deployment. Never commit the actual root path.
     media_package_root: Path | None = Field(default=None, validation_alias="MEDIA_PACKAGE_ROOT")
+    # Off until a disposable same-mount probe has passed on the actual NAS.
+    media_package_fuse_compat_enabled: bool = Field(
+        default=False, validation_alias="MEDIA_PACKAGE_FUSE_COMPAT_ENABLED",
+    )
     allowed_roots_raw: str = Field(default="/data", validation_alias="ALLOWED_ROOTS")
     allow_delete: bool = Field(default=False, validation_alias="ALLOW_DELETE")
     allow_mutation: bool = Field(default=False, validation_alias="ALLOW_MUTATION")

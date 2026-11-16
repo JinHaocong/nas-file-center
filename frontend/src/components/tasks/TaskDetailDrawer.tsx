@@ -160,7 +160,8 @@ export const TaskDetailDrawer: React.FC<Props> = ({ taskId, open, onClose, onVie
           {task.job_type === 'media_package-package-execute' &&
             task.status === 'failed' &&
             task.error_code === 'EXECUTION_ERROR' &&
-            task.error === 'Package directory changed before publish' && (
+            (task.error === 'Package directory changed before publish' ||
+              task.error?.startsWith('[Errno 95] Plain directory rename no-clobber semantics are not positively proven: ')) && (
               <MediaPackageRecoveryPanel key={task.id} failedJobId={task.id}
                 onViewTask={onViewTask} />
             )}
