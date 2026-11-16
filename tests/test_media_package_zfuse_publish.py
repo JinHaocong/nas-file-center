@@ -184,11 +184,11 @@ def test_foreign_preexisting_final_directory_is_not_adopted(tmp_path, monkeypatc
     force_zos_no_directory_rename(monkeypatch)
     original = executor._publish_group
 
-    def create_foreign_final(frozen, index, lease_fence):
+    def create_foreign_final(frozen, index, lease_fence, **kwargs):
         final = package / frozen["groups"][index]["final"]
         final.mkdir()
         (final / "foreign.txt").write_bytes(b"do not replace")
-        return original(frozen, index, lease_fence)
+        return original(frozen, index, lease_fence, **kwargs)
 
     monkeypatch.setattr(executor, "_publish_group", create_foreign_final)
     with pytest.raises(executor.MediaPackageExecutionConflict, match="foreign"):
