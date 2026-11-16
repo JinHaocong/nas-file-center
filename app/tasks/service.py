@@ -139,6 +139,11 @@ class TaskService:
             stmt = select(WorkJob)
             count_stmt = select(func.count(WorkJob.id))
 
+            # A dismissed failed media-package execution remains durable for recovery,
+            # but is no longer part of the user-facing task queue.
+            visible = func.coalesce(func.json_extract(WorkJob.checkpoint_json, "$._task_queue_dismissed"), 0) != 1
+            stmt = stmt.where(visible)
+            count_stmt = count_stmt.where(visible)
             if status:
                 stmt = stmt.where(WorkJob.status == status)
                 count_stmt = count_stmt.where(WorkJob.status == status)
@@ -393,9 +398,17 @@ class TaskService:
             if job.status not in TERMINAL_STATES:
                 raise ValueError(f"Only terminal jobs can be deleted (current status is '{job.status}')")
             if job.kind == "media_package-package-execute" and job.status == "failed":
-                raise ValueError(
-                    "Failed media-package execution audit is protected; preserve frozen manifests for recovery"
-                )
+                # Hide from the task queue without destroying the execution audit,
+                # frozen manifest references, checkpoints, or event history.
+                try:
+                    checkpoint = json.loads(job.checkpoint_json or "{}")
+                except (TypeError, ValueError):
+                    checkpoint = {}
+                if not isinstance(checkpoint, dict):
+                    checkpoint = {}
+                checkpoint["_task_queue_dismissed"] = True
+                job.checkpoint_json = json.dumps(checkpoint, ensure_ascii=False)
+                return {"deleted": True, "id": task_id}
 
             session.execute(delete(TaskEvent).where(TaskEvent.job_id == task_id))
             session.delete(job)
