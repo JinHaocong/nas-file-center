@@ -13,7 +13,7 @@ from app.tasks.recovery import acquire_worker_ownership
 from app.worker import process_work_job
 
 
-def _fixture(tmp_path: Path, *, mutation=True, deletion=True):
+def _fixture(tmp_path: Path, *, mutation=True, deletion=True, fuse_compat=False):
     data = tmp_path / "data"
     config = tmp_path / "config"
     data.mkdir()
@@ -22,6 +22,7 @@ def _fixture(tmp_path: Path, *, mutation=True, deletion=True):
         _env_file=None, CONFIG_DIR=str(config), DATA_MOUNT=str(data), MEDIA_PACKAGE_ROOT=str(data / "Else" / "Collection"),
         ALLOWED_ROOTS=str(data), QUARANTINE_ROOT=str(data / ".trash"),
         ALLOW_MUTATION=mutation, ALLOW_DELETE=deletion,
+        MEDIA_PACKAGE_FUSE_COMPAT_ENABLED=fuse_compat,
         INITIAL_ADMIN_USERNAME="admin", INITIAL_ADMIN_PASSWORD="test-password-123",
     )
     client = TestClient(create_app(settings))
@@ -257,7 +258,7 @@ def test_original_zos_errno95_failed_task_recovers_with_same_manifest_and_stage(
     tmp_path, monkeypatch,
 ):
     """Old failed WorkJob remains immutable; the new one reuses its stage."""
-    client, settings, root = _fixture(tmp_path)
+    client, settings, root = _fixture(tmp_path, fuse_compat=True)
     package = root / "2611" / "261116" / "ExampleAuthor" / "ExampleBundle"
     inner = package / "clips"
     inner.mkdir(parents=True)
@@ -275,7 +276,7 @@ def test_original_zos_errno95_failed_task_recovers_with_same_manifest_and_stage(
 
     real_publish = executor._publish_group
 
-    def old_incompatible_publish(frozen, group_index, fence):
+    def old_incompatible_publish(frozen, group_index, fence, **_kwargs):
         raise OSError(
             errno.EOPNOTSUPP,
             "Plain directory rename no-clobber semantics are not positively proven",
@@ -349,3 +350,37 @@ def test_errno95_recovery_error_allowlist_rejects_unrelated_failures():
         (None, "Package directory changed before publish"),
     ):
         assert not is_recoverable_media_package_publish_error(code, error)
+
+
+def test_zos_recovery_requires_private_capability_opt_in(tmp_path, monkeypatch):
+    client, settings, root = _fixture(tmp_path, fuse_compat=False)
+    package = root / "2611" / "261116" / "ExampleAuthor" / "ExampleBundle"
+    inner = package / "clips"
+    inner.mkdir(parents=True)
+    for index in range(201):
+        (inner / f"{index:03d}.mp4").write_bytes(b"x")
+    pid = _preview(client, settings, package)
+    started = client.post(f"/api/media_package/previews/{pid}/execute", json={
+        "confirmation": f"EXECUTE_MEDIA_PACKAGE_PREVIEW_{pid}",
+    })
+    old_id = started.json()["job_id"]
+    engine, factory = create_engine_and_session(settings.database_path)
+    owner = "zos-capability-fence"
+    assert acquire_worker_ownership(engine, factory, worker_id=owner)
+
+    def legacy_errno95(frozen, index, fence):
+        raise OSError(
+            errno.EOPNOTSUPP,
+            "Plain directory rename no-clobber semantics are not positively proven",
+            str(package / frozen["groups"][index]["stage"]),
+        )
+
+    monkeypatch.setattr(executor, "_publish_group", legacy_errno95)
+    assert process_work_job(settings, old_id, session_factory=factory,
+                            engine=engine, worker_id=owner) is False
+    recovery = client.post(f"/api/media_package/executions/{old_id}/recover", json={
+        "confirmation": f"RECOVER_MEDIA_PACKAGE_EXECUTION_{old_id}",
+    })
+    assert recovery.status_code == 409
+    assert "FUSE compatibility is disabled" in recovery.text
+    assert (package / f".nfc-media_package-stage-{old_id}-0").is_dir()
