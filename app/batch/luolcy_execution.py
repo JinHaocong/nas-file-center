@@ -369,8 +369,19 @@ def _publish_group(manifest: dict, group_index: int,
     lease_fence()
     fd = _open_folder(package)
     try:
-        if os.fstat(fd).st_ino != manifest["package_ino"]:
+        if (os.fstat(fd).st_ino != manifest["package_ino"]
+                or os.fstat(fd).st_dev != manifest["package_dev"]):
             raise LuolcyExecutionConflict("Package directory changed before publish")
+        live_stage = os.stat(group["stage"], dir_fd=fd, follow_symlinks=False)
+        _check_directory(live_stage, stage, manifest["package_dev"])
+        stage_fd = _open_folder(stage)
+        try:
+            opened_stage = os.fstat(stage_fd)
+            if (opened_stage.st_ino != live_stage.st_ino
+                    or opened_stage.st_dev != live_stage.st_dev):
+                raise LuolcyExecutionConflict("Staging directory replaced before publish")
+        finally:
+            os.close(stage_fd)
         try:
             rename_noreplace_at(fd, group["stage"], fd, group["final"])
         except OSError as exc:
@@ -407,6 +418,10 @@ def _remove_empty_sources(manifest: dict, lease_fence: Callable[[], None]) -> in
         lease_fence()
         parent_fd = _open_folder(folder.parent)
         try:
+            live = os.stat(folder.name, dir_fd=parent_fd, follow_symlinks=False)
+            if (not stat.S_ISDIR(live.st_mode) or
+                    [int(live.st_dev), int(live.st_ino)] != identity):
+                raise LuolcyExecutionConflict("Original directory changed before rmdir")
             try:
                 os.rmdir(folder.name, dir_fd=parent_fd)
                 removed += 1
