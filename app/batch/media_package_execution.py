@@ -699,9 +699,13 @@ def _frozen_artifact_proves_package(manifest: dict) -> bool:
                 confirmed |= bool(compat["public_names"] or compat["stage_names"])
                 continue
             if has_stage:
-                raise MediaPackageExecutionConflict(
-                    "Both frozen stage and foreign final directory exist"
-                )
+                if not _frozen_original_directory(manifest, published):
+                    raise MediaPackageExecutionConflict(
+                        "Both frozen stage and foreign final directory exist"
+                    )
+                # An untouched old bucket is still a frozen *source*, not a
+                # partial publication. Only job-owned staged files prove custody.
+                has_final = False
         if not has_stage and not has_final:
             continue
         target = published if has_final else staged
@@ -830,18 +834,35 @@ def _publish_group(manifest: dict, group_index: int,
     return "published"
 
 
-def _remove_empty_sources(manifest: dict, lease_fence: Callable[[], None]) -> int:
+def _remove_empty_sources(manifest: dict, lease_fence: Callable[[], None], *,
+                          only_under: set[Path] | None = None,
+                          skip_finals: bool = False) -> int:
+    """Remove only original, identity-matched and actually empty directories.
+
+    'only_under' is used before publication solely for old destination
+    buckets whose frozen contents have ALL been staged. After publication,
+    output final paths are excluded so an old source name cannot cause the
+    newly published folder to be mistaken for a disposable directory.
+    """
     package = Path(manifest["package"])
+    finals = ({package / group["final"] for group in manifest["groups"]}
+              if skip_finals else set())
     removed = 0
     for name, identity in sorted(manifest["origin_directories"].items(),
                                  key=lambda entry: (-len(Path(entry[0]).parts), entry[0])):
         folder = Path(name)
         if not folder.is_relative_to(package) or folder == package:
             raise MediaPackageExecutionConflict("Unsafe original directory cleanup scope")
-        if not folder.exists():
+        if folder in finals:
+            continue
+        if only_under is not None and not any(
+            folder == root or folder.is_relative_to(root) for root in only_under
+        ):
             continue
         if folder.is_symlink():
             raise MediaPackageExecutionConflict("Original directory became a symlink")
+        if not folder.exists():
+            continue
         fd = _open_folder(folder)
         try:
             st = os.fstat(fd)
@@ -866,6 +887,34 @@ def _remove_empty_sources(manifest: dict, lease_fence: Callable[[], None]) -> in
             os.close(parent_fd)
     return removed
 
+
+def _retire_staged_destination_sources(
+    manifest: dict, modes: list[str], lease_fence: Callable[[], None],
+) -> int:
+    """Free labels occupied exclusively by frozen, now-staged source folders.
+
+    Never force-remove a foreign occupant, rename over another directory or
+    delete a directory containing files. The published group owns the name
+    only after a no-replace operation succeeds.
+    """
+    package = Path(manifest["package"])
+    retired = {
+        package / group["final"]
+        for index, group in enumerate(manifest["groups"])
+        if modes[index] == "staging"
+        and str(package / group["final"]) in manifest["origin_directories"]
+    }
+    if not retired:
+        return 0
+    removed = _remove_empty_sources(
+        manifest, lease_fence, only_under=retired,
+    )
+    for target in retired:
+        if os.path.lexists(target):
+            raise MediaPackageExecutionConflict(
+                f"Original grouped destination is not safely empty: {target}"
+            )
+    return removed
 
 _ROOT_READY_MARKER = ".nfc-publish-ready"
 
