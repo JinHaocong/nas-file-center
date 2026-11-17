@@ -26,6 +26,7 @@ _AMBIGUOUS = re.compile(r"^(?:\d{1,3}|新建文件夹(?:\s*\(\d+\))?)$", re.IGNO
 
 def discover_semantic_units(selection: Path, *, allowed_roots: list[Path],
                             quarantine_root: Path | None = None,
+                            exclude_roots: list[Path] | None = None,
                             check_cancelled: Callable[[], None] | None = None,
                             ) -> Iterator[dict]:
     """Yield candidate unit previews and isolated blockers in path order.
@@ -37,6 +38,14 @@ def discover_semantic_units(selection: Path, *, allowed_roots: list[Path],
     root = Path(selection)
     allowed_roots = [Path(p) for p in allowed_roots]
     quarantine = Path(quarantine_root) if quarantine_root is not None else None
+    excluded = [os.path.abspath(p) for p in (exclude_roots or [])]
+    if any(not Path(p).is_absolute() for p in (exclude_roots or [])):
+        yield _blocked_result(root, "excluded roots must be absolute")
+        return
+
+    def is_excluded(path: Path) -> bool:
+        raw = os.path.abspath(path)
+        return any(os.path.commonpath((raw, marker)) == marker for marker in excluded)
     try:
         _check_scope(root, allowed_roots, quarantine)
         dev = os.lstat(root).st_dev
@@ -48,6 +57,8 @@ def discover_semantic_units(selection: Path, *, allowed_roots: list[Path],
     visited = 0
     while stack:
         current, depth = stack.pop()
+        if is_excluded(current):
+            continue
         if check_cancelled is not None:
             check_cancelled()
         visited += 1
@@ -78,6 +89,8 @@ def discover_semantic_units(selection: Path, *, allowed_roots: list[Path],
         children = []
         for name, info in entries:
             path = current / name
+            if is_excluded(path):
+                continue
             if name.casefold().startswith('.nfc-'):
                 yield _blocked_result(path, "reserved workspace requires recovery")
                 continue
