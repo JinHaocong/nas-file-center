@@ -9,6 +9,7 @@ No API/Worker execution route registers this module yet.
 """
 from __future__ import annotations
 
+import errno
 import os
 import stat
 from pathlib import Path
@@ -281,41 +282,85 @@ def _retire_wrappers(unit: Path, manifest: dict, witness: bytes,
 
 
 def _create_public_group(unit: Path, name: str, manifest: dict, witness: bytes,
-                         fence: Callable[[], None]) -> None:
+                         fence: Callable[[], None], *, resume: bool = False) -> None:
+    """Prepare group in private stage, then promote via atomic NOREPLACE.
+
+    No public directory name is ever created as an unwitnessed empty folder.
+    A crash before promotion leaves a frozen, witnessed private directory
+    that is recognizable only by this exact manifest and lease.
+    """
+    names = [group["name"] for group in manifest["groups"]]
+    if name not in names:
+        raise PublishingConflict("public group not present in frozen plan")
+    ordinal = names.index(name) + 1
+    pending_name = f".nfc-publish-pending-{ordinal:06d}"
+    stage = unit / manifest["stage_directory"]
     _check_unit(unit, manifest, fence)
+    stage_fd = _open_directory_nofollow(stage)
     unit_fd = _open_directory_nofollow(unit)
     try:
-        # Do not publish into a same-named directory merely because our mkdir
-        # returned. A concurrent rename can replace its binding before open.
-        os.mkdir(name, mode=0o755, dir_fd=unit_fd)
-        created = os.stat(name, dir_fd=unit_fd, follow_symlinks=False)
-        if (not stat.S_ISDIR(created.st_mode)
-                or int(created.st_dev) != manifest["unit_dev"]):
-            raise PublishingConflict("created public directory has unsafe identity")
-        os.fsync(unit_fd)
-        target_fd = os.open(
-            name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
-            dir_fd=unit_fd,
-        )
+        if (int(os.fstat(stage_fd).st_dev) != manifest["unit_dev"] or
+                not _read_marker(stage_fd, ".nfc-stage-authority", witness) or
+                not _read_marker(stage_fd, ".nfc-stage-complete", witness)):
+            raise PublishingConflict("private stage ownership or completion is missing")
+        existing = _entry(stage_fd, pending_name)
+        if existing is not None and not resume:
+            raise PublishingConflict("unexpected private publication workspace")
+        if existing is None:
+            fence()
+            os.mkdir(pending_name, mode=0o700, dir_fd=stage_fd)
+            os.fsync(stage_fd)
+
+        pending_fd = os.open(pending_name, os.O_RDONLY | os.O_DIRECTORY |
+                             os.O_NOFOLLOW, dir_fd=stage_fd)
         try:
-            opened = os.fstat(target_fd)
-            bound = os.stat(name, dir_fd=unit_fd, follow_symlinks=False)
-            created_id = (int(created.st_dev), int(created.st_ino))
-            if (not stat.S_ISDIR(opened.st_mode)
-                    or (int(opened.st_dev), int(opened.st_ino)) != created_id
-                    or (int(bound.st_dev), int(bound.st_ino)) != created_id):
-                raise PublishingConflict("created public directory replaced before ownership witness")
-            # A foreign directory swapped into this name may already have
-            # contents. Never write our owner witness into such a directory.
-            with os.scandir(target_fd) as entries:
-                if next(entries, None) is not None:
-                    raise PublishingConflict("foreign public directory occupied before witness")
+            info = os.fstat(pending_fd)
+            bound = _entry(stage_fd, pending_name)
+            if (bound is None or not stat.S_ISDIR(bound.st_mode)
+                    or (int(info.st_dev), int(info.st_ino)) !=
+                    (int(bound.st_dev), int(bound.st_ino)) or
+                    int(info.st_dev) != manifest["unit_dev"]):
+                raise PublishingConflict("private group replaced before publication")
+            if existing is None:
+                with os.scandir(pending_fd) as entries:
+                    if next(entries, None) is not None:
+                        raise PublishingConflict("foreign entry in new private group")
+                _check_unit(unit, manifest, fence)
+                _write_marker(pending_fd, _PUBLIC_OWNER, witness)
+            elif not _read_marker(pending_fd, _PUBLIC_OWNER, witness):
+                raise PublishingConflict("private publication owner witness missing")
+            with os.scandir(pending_fd) as entries:
+                if {entry.name for entry in entries} != {_PUBLIC_OWNER}:
+                    raise PublishingConflict("foreign entry in private publication workspace")
+            os.fsync(pending_fd)
+            os.fsync(stage_fd)
+            if _entry(unit_fd, name) is not None:
+                raise PublishingConflict("foreign public group occupied before promotion")
             _check_unit(unit, manifest, fence)
-            _write_marker(target_fd, _PUBLIC_OWNER, witness)
+            if not _read_marker(pending_fd, _PUBLIC_OWNER, witness):
+                raise PublishingConflict("private group owner witness changed")
+            if _entry(stage_fd, pending_name) is None:
+                raise PublishingConflict("private publication directory disappeared")
+            try:
+                rename_noreplace_at(stage_fd, pending_name, unit_fd, name)
+            except FileExistsError as exc:
+                raise PublishingConflict("foreign public group raced with no-replace promotion") from exc
+            except OSError as exc:
+                if exc.errno in (errno.EEXIST, errno.ENOTEMPTY):
+                    raise PublishingConflict("foreign group occupied at promotion") from exc
+                raise
+            os.fsync(stage_fd)
+            os.fsync(unit_fd)
+            promoted = _entry(unit_fd, name)
+            if (promoted is None or not stat.S_ISDIR(promoted.st_mode)
+                    or (int(promoted.st_dev), int(promoted.st_ino)) !=
+                    (int(info.st_dev), int(info.st_ino))):
+                raise PublishingConflict("public group changed after atomic promotion")
         finally:
-            os.close(target_fd)
+            os.close(pending_fd)
     finally:
         os.close(unit_fd)
+        os.close(stage_fd)
 
 
 def _link_one(row: dict, *, stage: Path, unit: Path, witness: bytes,
@@ -415,7 +460,8 @@ def publish_frozen_stage(
                     raise PublishingConflict("foreign group cannot be adopted without resume")
                 _inspect_existing_group(folder, part, witness, require_owner=True)
             else:
-                _create_public_group(unit, name, manifest, witness, lease_fence)
+                _create_public_group(unit, name, manifest, witness, lease_fence,
+                                     resume=resume)
         published = reconciled = 0
         for row in rows:
             if _link_one(row, stage=stage, unit=unit, witness=witness,
