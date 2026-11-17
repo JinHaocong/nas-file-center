@@ -13,7 +13,7 @@ import stat
 from pathlib import Path
 
 from app.batch.file_rename import _open_directory_nofollow
-from app.batch.media_organizer_planner import preview_semantic_unit
+from app.batch.media_organizer_planner import preview_semantic_unit, _normalized_excluded_dir_names
 
 MANIFEST_VERSION = 1
 MAX_MANIFEST_BYTES = 256 * 1024 * 1024
@@ -26,6 +26,7 @@ class FrozenPreviewError(ValueError):
 def build_frozen_preview_manifest(
     unit: Path, *, preview_record: dict, allowed_roots: list[Path],
     job_id: int, quarantine_root: Path | None = None,
+    exclude_dir_names: list[str] | None = None,
 ) -> dict:
     """Build a deterministic full per-file manifest without moving any file."""
     unit = Path(unit)
@@ -34,8 +35,10 @@ def build_frozen_preview_manifest(
     if (preview_record.get("status") != "ready"
             or preview_record.get("unit") != str(unit)):
         raise FrozenPreviewError("preview is not ready for freezing")
+    names = sorted(_normalized_excluded_dir_names(exclude_dir_names))
     fresh = preview_semantic_unit(
         unit, allowed_roots=allowed_roots, quarantine_root=quarantine_root,
+        exclude_dir_names=names,
     )
     expected_fields = ("status", "input_fingerprint", "operation", "groups",
                        "totals", "needed_moves", "renamed_count")
@@ -114,6 +117,7 @@ def build_frozen_preview_manifest(
             os.close(folder_fd)
     return {
         "schema_version": MANIFEST_VERSION,
+        "excluded_dir_names": names,
         "job_id": job_id,
         "unit": source,
         "unit_dev": base_dev,
