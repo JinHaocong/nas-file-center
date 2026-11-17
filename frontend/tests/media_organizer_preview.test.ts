@@ -26,14 +26,23 @@ test('semantic organizer has an isolated read-only Batch operation', () => {
   assert.match(api, /\/api\/media-organizer\/previews/);
   assert.match(api, /startPreview/);
   assert.match(api, /getPreview/);
-  assert.doesNotMatch(api, /startExecution|executePlan|\/execute/);
-  assert.doesNotMatch(view, /startExecution|executePlan|\/execute/);
+  assert.match(api, /startExecution/);
+  assert.match(api, /getExecution/);
+  assert.match(api, /recoverExecution/);
+  assert.doesNotMatch(api, /executePlan/);
 });
 
-test('the semantic organizer cannot generate a mutation Plan without a freeze gate', () => {
+test('the semantic organizer executes only one approved unit with explicit confirmation', () => {
   const batch = read('src/pages/Batch/index.tsx');
   const view = read('src/pages/Batch/SemanticMediaOrganizerEditor.tsx');
   assert.match(batch, /operation !== 'semantic-media-organize'/);
-  assert.match(view, /目前只支持只读预览/);
-  assert.doesNotMatch(view, /确认并执行|执行确认码/);
+  assert.match(view, /execution_enabled/);
+  assert.match(view, /confirmation_tokens/);
+  assert.match(view, /selectedUnit/);
+  assert.match(view, /executionConfirmation === expectedConfirmation/);
+  assert.match(view, /summary.blocked_count === 0/);
+  assert.match(view, /canExecute/);
+  assert.match(view, /recoverExecution/);
+  assert.match(view, /确认并执行当前作品/);
+  assert.doesNotMatch(view, /executePlan|freezePlan|validatePlan/);
 });
