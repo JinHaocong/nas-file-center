@@ -130,7 +130,7 @@ def _inspect_stage(stage_fd: int, stage: Path, moves: list[dict],
                 if not stat.S_ISREG(info.st_mode):
                     raise StagingConflict("special file in staging workspace")
     complete = _read_marker(stage_fd, _COMPLETE, expected)
-    if complete and not names.issubset(seen):
+    if complete and not set(by_name).issubset(seen):
         raise StagingConflict("staging completion marker disagrees with files")
     return complete
 
