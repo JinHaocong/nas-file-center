@@ -258,14 +258,28 @@ def enqueue_media_organizer_recovery(
         stage = Path(unit) / manifest["stage_directory"]
         if not stage.is_dir() or stage.is_symlink():
             raise ValueError("trusted staged custody is absent; manual review required")
-        # New recovery authorization proves the *contents* of the stage
-        # ownership witness, not merely that a similarly named file exists.
+        # New recovery authorization proves the original stage witness.
+        # A PUBLISHED task may also have entered the last-marker/rmdir gap:
+        # in that special case ONLY a completely empty, inode-bound stage
+        # plus the independently durable private receipt is acceptable.
         from app.batch.file_rename import _open_directory_nofollow
         from app.batch.media_organizer_stage import _read_marker, _authority
+        from app.batch.media_organizer_retire import (
+            _read_retirement_receipt, _retirement_receipt_path,
+        )
         fd = _open_directory_nofollow(stage)
         try:
-            if not _read_marker(fd, ".nfc-stage-authority", _authority(manifest)):
-                raise ValueError("original staged ownership witness is missing")
+            owner_present = _read_marker(fd, ".nfc-stage-authority", _authority(manifest))
+            if not owner_present:
+                if phase != "published":
+                    raise ValueError("original staged ownership witness is missing")
+                with os.scandir(fd) as entries:
+                    if next(entries, None) is not None:
+                        raise ValueError("unwitnessed stage is not empty; manual recovery required")
+                _read_retirement_receipt(
+                    _retirement_receipt_path(manifest_path),
+                    manifest, os.fstat(fd),
+                )
         finally:
             os.close(fd)
         active = session.scalar(select(WorkJob.id).where(
