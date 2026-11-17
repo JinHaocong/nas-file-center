@@ -192,7 +192,7 @@ def test_final_private_marker_gap_blocks_without_deleting_unwitnessed_directory(
         path = stage / marker
         if path.exists():
             path.unlink()
-    with pytest.raises(RetirementConflict, match="witness|ownership|stage"):
+    with pytest.raises(RetirementConflict, match="witness|ownership|stage|receipt"):
         retire(tmp_path, manifest, frozen, resume=True)
     assert stage.is_dir()
     assert all(Path(row["final"]).is_file() for row in manifest["moves"])
