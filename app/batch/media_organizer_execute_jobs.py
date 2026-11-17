@@ -238,18 +238,8 @@ def enqueue_media_organizer_recovery(
         original_preview_id = state.get("preview_job_id")
         if not isinstance(original_preview_id, int) or original_preview_id <= 0:
             raise ValueError("recovery preview identity missing")
-        manifest_path = _manifest_file(settings, failed_job_id)
-        manifest = load_frozen_preview_manifest(
-            manifest_path, job_id=failed_job_id, unit=Path(unit),
-        )
-        if manifest.get("job_id") != failed_job_id:
-            raise ValueError("frozen job identity changed")
-        stage = Path(unit) / manifest["stage_directory"]
-        # Never auto-adopt an unmarked stage. The stage module will conduct
-        # the full frozen inode and witness proof inside the leased Worker.
-        if (not stage.is_dir() or stage.is_symlink()
-                or not (stage / ".nfc-stage-authority").is_file()):
-            raise ValueError("trusted staged custody is absent; manual review required")
+        # Idempotent retransmission of an already-authorized recovery must
+        # not demand a staging directory that successful cleanup has removed.
         existing = session.scalar(select(WorkJob).where(
             WorkJob.kind == EXECUTE_KIND,
             func.json_extract(WorkJob.state_json, "$.recovery_of_job_id") == failed_job_id,
@@ -259,6 +249,25 @@ def enqueue_media_organizer_recovery(
                 return {"job_id": int(existing.id), "status": existing.status,
                         "recovery_of_job_id": failed_job_id}
             raise ValueError("prior recovery failed; manual review required")
+        manifest_path = _manifest_file(settings, failed_job_id)
+        manifest = load_frozen_preview_manifest(
+            manifest_path, job_id=failed_job_id, unit=Path(unit),
+        )
+        if manifest.get("job_id") != failed_job_id:
+            raise ValueError("frozen job identity changed")
+        stage = Path(unit) / manifest["stage_directory"]
+        if not stage.is_dir() or stage.is_symlink():
+            raise ValueError("trusted staged custody is absent; manual review required")
+        # New recovery authorization proves the *contents* of the stage
+        # ownership witness, not merely that a similarly named file exists.
+        from app.batch.file_rename import _open_directory_nofollow
+        from app.batch.media_organizer_stage import _read_marker, _authority
+        fd = _open_directory_nofollow(stage)
+        try:
+            if not _read_marker(fd, ".nfc-stage-authority", _authority(manifest)):
+                raise ValueError("original staged ownership witness is missing")
+        finally:
+            os.close(fd)
         active = session.scalar(select(WorkJob.id).where(
             WorkJob.kind == EXECUTE_KIND, WorkJob.status.in_(ACTIVE),
         ).limit(1))
