@@ -15,7 +15,7 @@ from typing import Callable, Iterator
 from app.batch.file_rename import _open_directory_nofollow
 from app.batch.media_organizer_planner import (
     MAX_IMMEDIATE_ENTRIES, _check_scope, _is_wrapper, _blocked_result,
-    preview_semantic_unit,
+    _normalized_excluded_dir_names, preview_semantic_unit,
 )
 
 MAX_TRAVERSAL_DIRS = 250_000
@@ -27,6 +27,7 @@ _AMBIGUOUS = re.compile(r"^(?:\d{1,3}|新建文件夹(?:\s*\(\d+\))?)$", re.IGNO
 def discover_semantic_units(selection: Path, *, allowed_roots: list[Path],
                             quarantine_root: Path | None = None,
                             exclude_roots: list[Path] | None = None,
+                            exclude_dir_names: list[str] | None = None,
                             check_cancelled: Callable[[], None] | None = None,
                             ) -> Iterator[dict]:
     """Yield candidate unit previews and isolated blockers in path order.
@@ -36,6 +37,11 @@ def discover_semantic_units(selection: Path, *, allowed_roots: list[Path],
     without a separately frozen, audited manifest.
     """
     root = Path(selection)
+    try:
+        excluded_names = _normalized_excluded_dir_names(exclude_dir_names)
+    except ValueError as exc:
+        yield _blocked_result(root, str(exc))
+        return
     allowed_roots = [Path(p) for p in allowed_roots]
     quarantine = Path(quarantine_root) if quarantine_root is not None else None
     excluded = [os.path.abspath(p) for p in (exclude_roots or [])]
@@ -45,7 +51,10 @@ def discover_semantic_units(selection: Path, *, allowed_roots: list[Path],
 
     def is_excluded(path: Path) -> bool:
         raw = os.path.abspath(path)
-        return any(os.path.commonpath((raw, marker)) == marker for marker in excluded)
+        return (
+            any(piece.casefold() in excluded_names for piece in Path(raw).parts)
+            or any(os.path.commonpath((raw, marker)) == marker for marker in excluded)
+        )
     try:
         _check_scope(root, allowed_roots, quarantine)
         dev = os.lstat(root).st_dev
@@ -89,7 +98,7 @@ def discover_semantic_units(selection: Path, *, allowed_roots: list[Path],
         children = []
         for name, info in entries:
             path = current / name
-            if is_excluded(path):
+            if stat.S_ISDIR(info.st_mode) and is_excluded(path):
                 continue
             if name.casefold().startswith('.nfc-'):
                 yield _blocked_result(path, "reserved workspace requires recovery")
@@ -110,14 +119,16 @@ def discover_semantic_units(selection: Path, *, allowed_roots: list[Path],
 
         if has_regular_files or has_wrappers:
             record = preview_semantic_unit(current, allowed_roots=allowed_roots,
-                                           quarantine_root=quarantine)
+                                           quarantine_root=quarantine,
+                                           exclude_dir_names=list(excluded_names))
             yield record
             if has_wrappers and record['status'] == 'blocked':
                 # A historical P/V folder can itself contain numbered works.
                 # Do not flatten its parent, but safely discover unambiguous
                 # work directories inside it as independent future units.
                 for name, info in entries:
-                    if not stat.S_ISDIR(info.st_mode) or not _is_wrapper(name):
+                    if (not stat.S_ISDIR(info.st_mode) or
+                            is_excluded(current / name) or not _is_wrapper(name)):
                         continue
                     wrapper = current / name
                     try:
@@ -130,7 +141,7 @@ def discover_semantic_units(selection: Path, *, allowed_roots: list[Path],
                                 if len(inside) > MAX_IMMEDIATE_ENTRIES:
                                     raise ValueError("wrapper entry limit")
                                 for entry in inside:
-                                    if _CLEAR_WORK.match(entry.name):
+                                    if _CLEAR_WORK.match(entry.name) and not is_excluded(wrapper / entry.name):
                                         info = entry.stat(follow_symlinks=False)
                                         if stat.S_ISDIR(info.st_mode) and info.st_dev == dev:
                                             children.append(wrapper / entry.name)
