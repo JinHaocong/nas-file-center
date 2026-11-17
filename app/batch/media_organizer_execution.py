@@ -11,7 +11,7 @@ from pathlib import Path
 
 from app.batch.file_rename import _open_directory_nofollow
 from app.batch.media_organizer_manifest import MANIFEST_VERSION
-from app.batch.media_organizer_planner import _check_scope, preview_semantic_unit
+from app.batch.media_organizer_planner import _check_scope, preview_semantic_unit, _normalized_excluded_dir_names
 
 
 class ExecutionPreflightError(ValueError):
@@ -96,9 +96,12 @@ def validate_execution_preflight(manifest: dict, *, allowed_roots: list[Path],
                 raise ExecutionPreflightError("duplicate frozen source or target")
             sources.add(str(src))
             targets.add(str(final).casefold())
+        names = sorted(_normalized_excluded_dir_names(
+            manifest.get("excluded_dir_names", []),
+        ))
         fresh = preview_semantic_unit(
             unit, allowed_roots=[Path(x) for x in allowed_roots],
-            quarantine_root=quarantine_root,
+            quarantine_root=quarantine_root, exclude_dir_names=names,
         )
         if fresh.get("status") != "ready":
             raise ExecutionPreflightError("organizing unit changed since freeze")
