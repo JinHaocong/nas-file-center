@@ -85,3 +85,13 @@ def test_work_subfolders_inside_legacy_media_wrapper_are_scanned_independently(t
     candidates = [r for r in rows if r['status'] == 'ready']
     assert {Path(r['unit']).name for r in candidates} == {'NO.001 Set One', 'NO.002 Set Two'}
     assert all(Path(r['items'][0]['target']).parent == Path(r['unit']) for r in candidates)
+
+
+def test_exact_excluded_subtree_is_never_scanned(tmp_path):
+    root = tmp_path/'Else'
+    file(root/'ordinary'/'a.jpg')
+    excluded = root/'fixed-source-archive'
+    file(excluded/'secret-work'/'private.jpg')
+    rows = list(discover_semantic_units(root, allowed_roots=[root.parent], exclude_roots=[excluded]))
+    assert any(r['unit']==str(root/'ordinary') and r['status']=='ready' for r in rows)
+    assert all(not r['unit'].startswith(str(excluded)) for r in rows)
