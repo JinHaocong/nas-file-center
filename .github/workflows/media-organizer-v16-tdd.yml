@@ -57,7 +57,7 @@ jobs:
         working-directory: frontend
       - name: Read-only preview UI behavior contracts
         working-directory: frontend
-        run: node --test tests/media_organizer_preview.test.ts
+        run: node --experimental-strip-types --test tests/media_organizer_preview.test.ts
       - name: Typecheck frontend
         working-directory: frontend
         run: npm run typecheck
