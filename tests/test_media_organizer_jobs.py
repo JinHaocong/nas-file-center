@@ -51,3 +51,14 @@ def test_worker_does_not_overwrite_prior_report_artifacts(tmp_path):
     with pytest.raises(ValueError, match='already exists'):
         MediaOrganizerPreviewHandler().run(job,FakeContext(),settings)
     assert summary.read_text()=='keep me'
+
+
+def test_worker_refuses_selection_inside_excluded_directory_name(tmp_path):
+    from app.batch.media_organizer_jobs import _validate_selection
+    root, settings, job = setup(tmp_path)
+    blocked = root / "author" / "PRIVATE_SOURCE" / "NO.003"
+    item(blocked / "private.jpg")
+    settings.media_organizer_excluded_dir_names_raw = "private_source"
+    with pytest.raises(ValueError, match="excluded|protected"):
+        _validate_selection(str(blocked), settings)
+    assert (blocked / "private.jpg").is_file()
