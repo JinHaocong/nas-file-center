@@ -235,3 +235,66 @@ def test_nonempty_old_wrapper_blocks_cleanup_without_removing_foreign_file(tmp_p
         publish(tmp_path, manifest, frozen)
     assert (root / "P" / "foreign-sidecar.txt").read_bytes() == b"unscanned"
     assert all(Path(row["target"]).exists() for row in manifest["moves"])
+
+
+def test_nested_classification_wrappers_retire_from_inside_out(tmp_path):
+    root, manifest, frozen = prepared(
+        tmp_path, {"P/P1/photo.jpg": b"image", "P/P1/second.png": b"another"},
+    )
+    outcome = publish(tmp_path, manifest, frozen)
+    assert outcome["retired_wrappers"] == 2
+    assert not (root / "P").exists()
+    assert not (root / "P" / "P1").exists()
+    assert all(Path(row["final"]).is_file() for row in manifest["moves"])
+
+
+def test_retirement_tombstone_can_resume_without_discarding_stage(tmp_path, monkeypatch):
+    import os
+    from app.batch import media_organizer_publish as publishing
+    root, manifest, frozen = prepared(
+        tmp_path, {"P1/photo.jpg": b"image", "V1/clip.mp4": b"video"},
+    )
+    actual = os.rmdir
+    interrupted = False
+
+    def fail_once(name, *args, **kwargs):
+        nonlocal interrupted
+        if str(name).startswith(".nfc-retired-") and not interrupted:
+            interrupted = True
+            raise RuntimeError("synthetic retirement interruption")
+        return actual(name, *args, **kwargs)
+
+    monkeypatch.setattr(publishing.os, "rmdir", fail_once)
+    with pytest.raises(RuntimeError, match="synthetic retirement interruption"):
+        publish(tmp_path, manifest, frozen)
+    assert all(Path(row["target"]).exists() for row in manifest["moves"])
+    monkeypatch.setattr(publishing.os, "rmdir", actual)
+    result = publish(tmp_path, manifest, frozen, resume=True)
+    assert result["ready_for_retirement"] is True
+    assert not any(p.name.startswith(".nfc-retired-")
+                   for p in root.rglob("*") if p.is_dir())
+    assert all(Path(row["final"]).is_file() for row in manifest["moves"])
+
+
+def test_preexisting_canonical_bucket_with_matching_final_label_is_rebuilt_without_adoption(tmp_path):
+    from app.batch.media_package_organizer import _size_label
+    root = tmp_path / "work"
+    root.mkdir()
+    photo = b"same-bytes"
+    old = root / f"P [1 {_size_label(len(photo))}]"
+    old.mkdir()
+    (old / "001.jpg").write_bytes(photo)
+    (root / "clip.mp4").write_bytes(b"video")
+    snapshot = preview_semantic_unit(root, allowed_roots=[tmp_path])
+    assert snapshot["status"] == "ready"
+    manifest = build_frozen_preview_manifest(
+        root, preview_record=snapshot, allowed_roots=[tmp_path], job_id=920,
+    )
+    frozen = tmp_path / "private" / "920.manifest.json"
+    save_frozen_preview_manifest(frozen, manifest)
+    stage_frozen_sources(manifest, frozen_manifest_path=frozen,
+                         allowed_roots=[tmp_path], lease_fence=lambda: None)
+    result = publish(tmp_path, manifest, frozen)
+    assert result["ready_for_retirement"]
+    assert (old / "001.jpg").read_bytes() == photo
+    assert any(g["name"] == old.name for g in manifest["groups"])
