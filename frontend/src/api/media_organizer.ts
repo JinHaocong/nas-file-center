@@ -63,9 +63,38 @@ export interface SemanticPreviewPage {
   page_size: number;
   filtered_total: number;
   read_only: true;
+  execution_enabled: boolean;
+  confirmation_tokens: Record<string, string>;
+}
+
+export interface SemanticExecutionStatus {
+  job_id: number;
+  status: SemanticPreviewStatus;
+  error: string | null;
+  preview_job_id: number;
+  unit: string;
+  recovery_of_job_id: number | null;
+  progress: {
+    current: number;
+    total: number;
+    message: string | null;
+    phase?: string;
+  };
 }
 
 export const mediaOrganizerApi = {
+  startExecution: (previewJobId: number, unit: string, confirmation: string) =>
+    api.post<{ job_id: number; status: SemanticPreviewStatus }>(
+      `/api/media-organizer/previews/${previewJobId}/execute`,
+      { unit, confirmation },
+    ),
+  getExecution: (jobId: number) =>
+    api.get<SemanticExecutionStatus>(`/api/media-organizer/executions/${jobId}`),
+  recoverExecution: (jobId: number, confirmation: string) =>
+    api.post<{ job_id: number; status: SemanticPreviewStatus; recovery_of_job_id: number }>(
+      `/api/media-organizer/executions/${jobId}/recover`,
+      { confirmation },
+    ),
   startPreview: (selection: string) =>
     api.post<{ job_id: number; status: SemanticPreviewStatus }>(
       '/api/media-organizer/previews', { selection },
