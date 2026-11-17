@@ -32,7 +32,7 @@ const kindDescription = (item: SemanticUnitPreview) => {
   return item.reason || '当前目录无待处理文件';
 };
 
-/** Preview only. A separate frozen-manifest execution feature is required before any mutation. */
+/** Preview-first workflow. Execution is default-off and requires explicit unit approval. */
 export const SemanticMediaOrganizerEditor: React.FC = () => {
   const toast = useConsoleToast();
   const [selection, setSelection] = useState('');
@@ -40,7 +40,21 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const [statusFilter, setStatusFilter] = useState('all');
+  const [selectedUnit, setSelectedUnit] = useState('');
+  const [executionConfirmation, setExecutionConfirmation] = useState('');
+  const [executionJobId, setExecutionJobId] = useState<number | null>(null);
+  const [recoveryConfirmation, setRecoveryConfirmation] = useState('');
   const enqueue = useMutation({ mutationFn: mediaOrganizerApi.startPreview });
+  const startExecution = useMutation({
+    mutationFn: ({ previewId, unit, confirmation }: {
+      previewId: number; unit: string; confirmation: string;
+    }) => mediaOrganizerApi.startExecution(previewId, unit, confirmation),
+  });
+  const recoverExecution = useMutation({
+    mutationFn: ({ executionId, confirmation }: {
+      executionId: number; confirmation: string;
+    }) => mediaOrganizerApi.recoverExecution(executionId, confirmation),
+  });
   const cancel = useMutation({ mutationFn: tasksApi.cancelTask });
   const { data, isError, error, isFetching } = useQuery({
     queryKey: ['semanticMediaPreview', jobId, page, pageSize, statusFilter],
@@ -48,13 +62,38 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
     enabled: jobId !== null,
     refetchInterval: query => isRunning(query.state.data?.status) ? 1500 : false,
   });
+  const { data: executionStatus, isError: executionLoadFailed,
+    error: executionLoadError } = useQuery({
+    queryKey: ['semanticMediaExecution', executionJobId],
+    queryFn: () => mediaOrganizerApi.getExecution(executionJobId!),
+    enabled: executionJobId !== null,
+    refetchInterval: query => isRunning(query.state.data?.status) ? 1500 : false,
+  });
   const busy = enqueue.isPending || isRunning(data?.status) ||
-    (jobId !== null && data == null);
+    isRunning(executionStatus?.status) || (jobId !== null && data == null);
+  const summary = data?.summary;
+  const readyUnit = data?.units.find(row => row.unit === selectedUnit &&
+    row.status === 'ready');
+  const expectedConfirmation = data?.confirmation_tokens?.[selectedUnit] || '';
+  const canExecute = Boolean(data?.execution_enabled && data?.status === 'completed' &&
+    summary && summary.blocked_count === 0 && readyUnit && expectedConfirmation &&
+    executionConfirmation === expectedConfirmation && !busy &&
+    !startExecution.isPending && executionJobId === null);
+  const recoveryToken = executionJobId === null ? '' :
+    `RECOVER_MEDIA_ORGANIZER_EXECUTION_${executionJobId}`;
+  const canRecover = Boolean(data?.execution_enabled && executionJobId !== null &&
+    executionStatus?.status === 'failed' &&
+    executionStatus.recovery_of_job_id == null &&
+    recoveryConfirmation === recoveryToken && !recoverExecution.isPending);
 
   const changeSelection = (next: string | string[]) => {
     if (busy) return;
     setSelection(Array.isArray(next) ? next[0] || '' : next);
     setJobId(null);
+    setSelectedUnit('');
+    setExecutionConfirmation('');
+    setExecutionJobId(null);
+    setRecoveryConfirmation('');
     setPage(1);
     setStatusFilter('all');
   };
@@ -67,6 +106,10 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
     }
     if (busy) return;
     setJobId(null);
+    setSelectedUnit('');
+    setExecutionConfirmation('');
+    setExecutionJobId(null);
+    setRecoveryConfirmation('');
     setPage(1);
     setStatusFilter('all');
     try {
@@ -88,12 +131,39 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
     }
   };
 
-  const summary = data?.summary;
+  const executeCurrentUnit = async () => {
+    if (!canExecute || jobId === null) return;
+    try {
+      const response = await startExecution.mutateAsync({
+        previewId: jobId, unit: selectedUnit,
+        confirmation: executionConfirmation,
+      });
+      setExecutionJobId(response.job_id);
+      setExecutionConfirmation('');
+      toast.success(`安全执行任务 #${response.job_id} 已提交 Worker`);
+    } catch (e: unknown) {
+      toast.error(getStructuredApiError(e).message || '执行请求被拒绝');
+    }
+  };
+
+  const recoverOriginal = async () => {
+    if (!canRecover || executionJobId === null) return;
+    try {
+      const response = await recoverExecution.mutateAsync({
+        executionId: executionJobId, confirmation: recoveryConfirmation,
+      });
+      setExecutionJobId(response.job_id);
+      setRecoveryConfirmation('');
+      toast.success(`恢复任务 #${response.job_id} 已提交 Worker`);
+    } catch (e: unknown) {
+      toast.error(getStructuredApiError(e).message || '恢复请求被拒绝');
+    }
+  };
 
   return (
     <>
       <DataPanel title="智能媒体整理 · 只读分析"
-        description="识别作者、合集和作品边界；纯媒体不超过 200 个时平铺并从 001 编号，混合或超出 200 时按 P/V 分组。当前只支持只读预览。"
+        description="识别作者、合集和作品边界；按 V1.6 规则预览平铺、编号和分组。默认只读；仅管理员启用独立安全开关后才可逐作品确认执行。"
         className="nfc-v2-batch-media-panel nfc-tool-workbench">
         <div className="nfc-v2-batch-form">
           <div className="nfc-v2-batch-field">
@@ -106,8 +176,8 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
           <div className="nfc-v2-batch-notice" role="note">
             <ConsoleIcon name="shield-check" size={19} />
             <div>
-              <strong>目前只支持只读预览</strong>
-              <p>不会移动、改名、删除 NAS 文件。只有完成独立的冻结清单、执行校验和恢复验收后，才会开放安全执行功能。</p>
+              <strong>先只读预览，执行必须单独授权</strong>
+              <p>扫描阶段绝不修改 NAS 文件。执行还需要管理员启用独立开关、确认指定作品，并通过冻结清单、身份校验和 Worker 租约。</p>
             </div>
           </div>
           <div className="nfc-file-tool-primary-actions">
@@ -151,7 +221,7 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
       {summary && data?.status === 'completed' && (
         <DataPanel title="目录整理分析报告" variant="dense"
           className="nfc-v2-batch-media-panel"
-          description="仅为建议目标路径；当前尚不能通过此页面执行实际整理。"
+          description="此处为只读分析。只有单独选择作品并输入对应确认码，才会提交执行任务。"
           action={<span className="nfc-panel-count">{summary.unit_count.toLocaleString()} 个整理单元</span>}>
           <div className="nfc-v2-batch-media-stats" role="status">
             <span>扫描 <strong>{summary.unit_count.toLocaleString()}</strong></span>
@@ -222,7 +292,116 @@ export const SemanticMediaOrganizerEditor: React.FC = () => {
           <ConsolePagination page={page} pageSize={pageSize} total={data.filtered_total}
             pageSizes={[10, 25, 50, 100]}
             onChange={(next, size) => { setPage(next); setPageSize(size); }} />
-          <p className="nfc-form-note">目前只支持只读预览；不提供执行、删除或绕过冲突的操作。</p>
+          <p className="nfc-form-note">预览不会移动文件。任何阻止项都必须先解决；不能跳过冲突强制执行。</p>
+        </DataPanel>
+      )}
+
+      {summary && data?.status === 'completed' && (
+        <DataPanel title="单个作品 · 安全确认执行" variant="dense"
+          className="nfc-v2-batch-media-panel"
+          description="每次仅处理一个已预览作品；重新校验和冻结后才允许 Worker 修改文件。">
+          {!data.execution_enabled ? (
+            <p className="nfc-form-note" role="status">
+              当前只读。执行功能默认关闭，需要管理员在部署端审核并同时开启独立开关和文件修改权限。
+            </p>
+          ) : summary.blocked_count > 0 ? (
+            <p className="nfc-v2-batch-error" role="alert">
+              预览中有 {summary.blocked_count} 个待检查目录，禁止绕过冲突执行。
+            </p>
+          ) : summary.ready_count === 0 ? (
+            <p className="nfc-form-note">没有需要执行的作品。</p>
+          ) : executionJobId !== null ? (
+            <p className="nfc-form-note">执行任务 #{executionJobId} 已提交。下方可查看进度或申请恢复。</p>
+          ) : (
+            <div className="nfc-v2-batch-form">
+              <div className="nfc-v2-batch-field">
+                <label htmlFor="semantic-execution-unit">选择当前页待整理作品</label>
+                <select id="semantic-execution-unit" value={selectedUnit}
+                  disabled={busy || startExecution.isPending}
+                  onChange={e => {
+                    setSelectedUnit(e.target.value);
+                    setExecutionConfirmation('');
+                  }}>
+                  <option value="">请选择一个作品目录</option>
+                  {data.units.filter(x => x.status === 'ready').map(item => (
+                    <option value={item.unit} key={item.unit}>{item.unit}</option>
+                  ))}
+                </select>
+              </div>
+              {readyUnit && expectedConfirmation && (
+                <div className="nfc-v2-batch-field">
+                  <label htmlFor="semantic-execution-confirmation">逐作品执行确认码</label>
+                  <code>{expectedConfirmation}</code>
+                  <input id="semantic-execution-confirmation"
+                    value={executionConfirmation} autoComplete="off" spellCheck={false}
+                    disabled={busy || startExecution.isPending}
+                    placeholder="输入完整确认码"
+                    onChange={e => setExecutionConfirmation(e.target.value)} />
+                </div>
+              )}
+              <ConsoleButton variant="danger" loading={startExecution.isPending}
+                disabled={!canExecute} onClick={() => { void executeCurrentUnit(); }}>
+                确认并执行当前作品
+              </ConsoleButton>
+            </div>
+          )}
+        </DataPanel>
+      )}
+
+      {executionJobId !== null && (
+        <DataPanel title="安全执行与恢复状态" variant="dense"
+          className="nfc-v2-batch-media-panel"
+          action={<span className="nfc-panel-count">任务 #{executionJobId}</span>}>
+          {executionStatus ? (
+            <>
+              <TaskProgress status={executionStatus.status} showDetails progress={{
+                current: executionStatus.progress.current,
+                total: executionStatus.progress.total,
+                percent: null,
+                message: executionStatus.progress.message,
+              }} />
+              <p className="nfc-form-note">
+                目标：<CodePath value={executionStatus.unit} />
+              </p>
+              {executionStatus.status === 'failed' && (
+                <p className="nfc-v2-batch-error" role="alert">
+                  执行中断：{executionStatus.error || '请检查任务记录'}。不得手动修改暂存目录。
+                </p>
+              )}
+              {executionStatus.status === 'completed' && (
+                <p className="nfc-form-note">
+                  本次执行已完成。请重新只读扫描，核对已整理状态和文件数量。
+                </p>
+              )}
+              {executionStatus.status === 'failed' &&
+                executionStatus.recovery_of_job_id == null && data?.execution_enabled && (
+                <div className="nfc-v2-batch-form">
+                  <div className="nfc-v2-batch-field">
+                    <label htmlFor="semantic-recovery-confirmation">人工恢复确认码</label>
+                    <code>{recoveryToken}</code>
+                    <input id="semantic-recovery-confirmation"
+                      value={recoveryConfirmation} autoComplete="off"
+                      spellCheck={false} disabled={recoverExecution.isPending}
+                      onChange={e => setRecoveryConfirmation(e.target.value)}
+                      placeholder="输入完整恢复确认码" />
+                  </div>
+                  <ConsoleButton variant="danger" disabled={!canRecover}
+                    loading={recoverExecution.isPending}
+                    onClick={() => { void recoverOriginal(); }}>
+                    使用原冻结清单申请安全恢复
+                  </ConsoleButton>
+                  <p className="nfc-form-note">
+                    仅在原始冻结清单和暂存身份可以核验时才会恢复；否则停止并要求人工检查。
+                  </p>
+                </div>
+              )}
+            </>
+          ) : (
+            <p className="nfc-form-note" role="status">
+              {executionLoadFailed ? getStructuredApiError(executionLoadError).message :
+                '正在查询 Worker 执行状态…'}
+            </p>
+          )}
         </DataPanel>
       )}
     </>
