@@ -95,3 +95,45 @@ def test_exact_excluded_subtree_is_never_scanned(tmp_path):
     rows = list(discover_semantic_units(root, allowed_roots=[root.parent], exclude_roots=[excluded]))
     assert any(r['unit']==str(root/'ordinary') and r['status']=='ready' for r in rows)
     assert all(not r['unit'].startswith(str(excluded)) for r in rows)
+
+
+def test_case_insensitive_excluded_directory_names_never_scan_descendants(tmp_path):
+    root = tmp_path / "Else"
+    file(root / "Author" / "PRIVATE_SOURCE" / "NO.001" / "hidden.jpg")
+    file(root / "Author" / "Collection" / "NO.002" / "private_source_cover.jpg")
+    rows = list(discover_semantic_units(
+        root, allowed_roots=[tmp_path],
+        exclude_dir_names=["private_source"],
+    ))
+    assert any(row["unit"].endswith("NO.002") and row["status"] == "ready"
+               for row in rows)
+    assert all("PRIVATE_SOURCE" not in row["unit"] for row in rows)
+    assert all("hidden.jpg" not in str(row) for row in rows)
+    assert any("private_source_cover.jpg" in str(row) for row in rows)
+
+
+def test_excluded_name_matches_directory_not_an_unrelated_filename(tmp_path):
+    root = tmp_path / "unit"
+    file(root / "source_bundle.jpg")
+    file(root / "a.mp4")
+    file(root / "Source_Bundle" / "private.jpg")
+    rows = list(discover_semantic_units(
+        root, allowed_roots=[tmp_path],
+        exclude_dir_names=["source_bundle"],
+    ))
+    assert all("Source_Bundle" not in row["unit"] for row in rows)
+    assert any(row["unit"] == str(root) and row["status"] == "ready"
+               and row["totals"] == {"P": 1, "V": 1, "Other": 0}
+               for row in rows)
+    assert not any("private.jpg" in str(row) for row in rows)
+
+
+def test_excluded_name_invalid_path_component_is_rejected(tmp_path):
+    root = tmp_path / "work"
+    file(root / "a.jpg")
+    rows = list(discover_semantic_units(
+        root, allowed_roots=[tmp_path],
+        exclude_dir_names=["../work"],
+    ))
+    assert rows and rows[0]["status"] == "blocked"
+    assert not any(row["status"] == "ready" for row in rows)
