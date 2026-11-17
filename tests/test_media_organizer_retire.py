@@ -284,3 +284,36 @@ def test_last_marker_gap_recovery_rejects_tampered_external_receipt(
         retire(tmp_path, manifest, frozen, resume=True)
     assert stage.is_dir()
     assert all(Path(row["final"]).is_file() for row in manifest["moves"])
+
+
+def test_retirement_rejects_replaced_public_group_with_cloned_marker_and_hardlinks(
+    tmp_path,
+):
+    """A foreign P/V directory must not be trusted even if contents look exact."""
+    unit, manifest, frozen = published(tmp_path)
+    group = unit / manifest["groups"][0]["name"]
+    saved = unit / "detached-published-group"
+    group.rename(saved)
+    group.mkdir()
+    for original in saved.iterdir():
+        if original.name.startswith(".nfc-"):
+            (group / original.name).write_bytes(original.read_bytes())
+        else:
+            (group / original.name).hardlink_to(original)
+    with pytest.raises(RetirementConflict, match="receipt|identity|replaced|foreign"):
+        retire(tmp_path, manifest, frozen)
+    assert all(Path(row["target"]).is_file() for row in manifest["moves"])
+    assert saved.is_dir()
+    assert group.is_dir()
+
+
+def test_retirement_rejects_modified_group_identity_receipt(tmp_path):
+    """Private proof must survive until the verified final publication retires."""
+    unit, manifest, frozen = published(tmp_path)
+    proof = frozen.with_name(frozen.name + ".group-000001.json")
+    assert proof.is_file()
+    proof.write_text("invalid identity receipt", encoding="utf-8")
+    with pytest.raises(RetirementConflict, match="receipt|identity|corrupted|unsafe"):
+        retire(tmp_path, manifest, frozen)
+    assert all(Path(row["target"]).is_file() for row in manifest["moves"])
+    assert all(Path(row["final"]).is_file() for row in manifest["moves"])
