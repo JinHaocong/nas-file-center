@@ -213,7 +213,7 @@ def _rmdir_bound_empty_stage(unit: Path, stage: Path, manifest: dict,
 
 def _retire_stage_directory(unit: Path, stage: Path, manifest: dict, rows: list[dict],
                             witness: bytes, fence: Callable[[], None],
-                            resume: bool) -> tuple[int, int]:
+                            resume: bool, receipt_path: Path) -> tuple[int, int]:
     stage_fd = _open_directory_nofollow(stage)
     try:
         if int(os.fstat(stage_fd).st_dev) != manifest["unit_dev"]:
@@ -221,8 +221,19 @@ def _retire_stage_directory(unit: Path, stage: Path, manifest: dict, rows: list[
         started = _read_marker(stage_fd, _RETIRE, witness)
         owner = _read_marker(stage_fd, _STAGE_OWNER, witness)
         complete = _read_marker(stage_fd, _STAGE_COMPLETE, witness)
-        if not started and (not owner or not complete):
-            raise RetirementConflict("staging ownership or completion witness missing")
+        stage_stat = os.fstat(stage_fd)
+        if not started and not owner and not complete:
+            # Last-marker → rmdir crash gap: the external private receipt
+            # must bind this exact stage inode and frozen manifest. If no
+            # receipt exists, preserve the directory for manual review.
+            if not resume:
+                raise RetirementConflict("staging ownership or completion witness missing")
+            _read_retirement_receipt(receipt_path, manifest, stage_stat)
+            with os.scandir(stage_fd) as entries:
+                if next(entries, None) is not None:
+                    raise RetirementConflict("unwitnessed stage contains foreign entries")
+            _rmdir_bound_empty_stage(unit, stage, manifest, stage_stat, fence)
+            return 0, len(rows)
         if started and not resume:
             raise RetirementConflict("retirement already started; explicit recovery required")
         if started and not owner and not resume:
@@ -244,6 +255,9 @@ def _retire_stage_directory(unit: Path, stage: Path, manifest: dict, rows: list[
         _stage_entries(stage_fd, stage, rows, witness, retirement_started=True)
         if any(_entry(stage_fd, Path(row["target"]).name) is not None for row in rows):
             raise RetirementConflict("some staged hardlinks remain")
+        # This independent private receipt is fsynced BEFORE the final
+        # in-stage ownership witness is removed.
+        _write_retirement_receipt(receipt_path, manifest, os.fstat(stage_fd))
         for name in (_STAGE_COMPLETE, _STAGE_OWNER, _RETIRE):
             _unlink_witness(stage_fd, name, witness, fence)
         with os.scandir(stage_fd) as entries:
@@ -252,18 +266,7 @@ def _retire_stage_directory(unit: Path, stage: Path, manifest: dict, rows: list[
         stage_stat = os.fstat(stage_fd)
     finally:
         os.close(stage_fd)
-    root_fd = _open_directory_nofollow(unit)
-    try:
-        binding = _entry(root_fd, stage.name)
-        if (binding is None or not stat.S_ISDIR(binding.st_mode)
-                or [int(binding.st_dev), int(binding.st_ino)]
-                != [int(stage_stat.st_dev), int(stage_stat.st_ino)]):
-            raise RetirementConflict("retired stage binding replaced")
-        _check_unit(unit, manifest, fence)
-        os.rmdir(stage.name, dir_fd=root_fd)
-        os.fsync(root_fd)
-    finally:
-        os.close(root_fd)
+    _rmdir_bound_empty_stage(unit, stage, manifest, stage_stat, fence)
     return retired, reconciled
 
 
@@ -317,6 +320,7 @@ def retire_published_stage(
         if has_stage:
             retired, reconciled = _retire_stage_directory(
                 unit, stage, manifest, rows, witness, lease_fence, resume,
+                _retirement_receipt_path(Path(frozen_manifest_path)),
             )
         else:
             if not resume:
