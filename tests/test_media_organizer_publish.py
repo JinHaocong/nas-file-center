@@ -209,3 +209,29 @@ def test_lease_loss_before_publication_preserves_all_staged_files(tmp_path):
         publish(tmp_path, manifest, frozen, lease_fence=deny)
     assert all(Path(row["target"]).is_file() for row in manifest["moves"])
     assert not any(Path(row["final"]).exists() for row in manifest["moves"])
+
+
+def test_replaced_empty_old_wrapper_is_never_deleted_as_if_owned(tmp_path):
+    root, manifest, frozen = prepared(
+        tmp_path, {"P/pic.jpg": b"image", "video.mp4": b"video"},
+    )
+    old = root / "P"
+    assert old.is_dir()
+    old.rename(tmp_path / "moved-aside-old-wrapper")
+    old.mkdir()
+    with pytest.raises(PublishingConflict, match="wrapper|identity|foreign"):
+        publish(tmp_path, manifest, frozen)
+    assert old.is_dir()
+    assert (tmp_path / "moved-aside-old-wrapper").is_dir()
+    assert all(Path(row["target"]).exists() for row in manifest["moves"])
+
+
+def test_nonempty_old_wrapper_blocks_cleanup_without_removing_foreign_file(tmp_path):
+    root, manifest, frozen = prepared(
+        tmp_path, {"P/pic.jpg": b"image", "video.mp4": b"video"},
+    )
+    (root / "P" / "foreign-sidecar.txt").write_bytes(b"unscanned")
+    with pytest.raises(PublishingConflict, match="empty|foreign|wrapper"):
+        publish(tmp_path, manifest, frozen)
+    assert (root / "P" / "foreign-sidecar.txt").read_bytes() == b"unscanned"
+    assert all(Path(row["target"]).exists() for row in manifest["moves"])
