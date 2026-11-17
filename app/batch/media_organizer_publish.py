@@ -10,6 +10,8 @@ No API/Worker execution route registers this module yet.
 from __future__ import annotations
 
 import errno
+import hashlib
+import json
 import os
 import stat
 from pathlib import Path
@@ -17,7 +19,7 @@ from typing import Callable
 
 from app.batch.file_rename import _open_directory_nofollow
 from app.batch.media_organizer_manifest import (
-    load_frozen_preview_manifest, FrozenPreviewError,
+    load_frozen_preview_manifest, FrozenPreviewError, _checksum,
 )
 from app.batch.media_organizer_stage import (
     _authority, _check_identity, _read_marker, _write_marker,
@@ -144,6 +146,97 @@ def _validate_shape(manifest: dict, unit: Path) -> tuple[list[dict], dict[str, l
                     not any(Path(row["source"]).is_relative_to(path) for row in rows)):
                 raise PublishingConflict("untrusted additional source bucket")
     return rows, group_rows
+
+
+
+def _group_receipt_path(frozen_manifest_path: Path, ordinal: int) -> Path:
+    path = Path(frozen_manifest_path)
+    return path.with_name(f"{path.name}.group-{ordinal:06d}.json")
+
+
+def _group_receipt_record(manifest: dict, name: str, ordinal: int,
+                          identity: tuple[int, int]) -> dict:
+    return {
+        "schema_version": 1, "job_id": manifest["job_id"],
+        "manifest_checksum": _checksum(manifest),
+        "name": name, "ordinal": ordinal,
+        "dev": identity[0], "ino": identity[1],
+    }
+
+
+def _group_receipt_digest(record: dict) -> str:
+    return hashlib.sha256(json.dumps(
+        record, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+
+
+def _read_group_receipt(path: Path, manifest: dict, name: str,
+                        ordinal: int) -> tuple[int, int]:
+    """Check the original group inode independently of a copyable owner marker."""
+    directory_fd = _open_directory_nofollow(Path(path).parent)
+    try:
+        try:
+            fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory_fd)
+        except OSError as exc:
+            raise PublishingConflict("private public-group identity receipt missing") from exc
+        with os.fdopen(fd, "rb") as stream:
+            info = os.fstat(stream.fileno())
+            if (not stat.S_ISREG(info.st_mode) or (info.st_mode & 0o077) != 0
+                    or not 0 < info.st_size <= 4096):
+                raise PublishingConflict("public-group identity receipt unsafe")
+            raw = stream.read(4097)
+    finally:
+        os.close(directory_fd)
+    try:
+        document = json.loads(raw)
+    except (ValueError, UnicodeError) as exc:
+        raise PublishingConflict("public-group identity receipt corrupted") from exc
+    if not isinstance(document, dict) or not isinstance(document.get("record"), dict):
+        raise PublishingConflict("public-group identity receipt malformed")
+    record = document["record"]
+    if (record.get("schema_version") != 1 or
+            record.get("manifest_checksum") != _checksum(manifest) or
+            record.get("job_id") != manifest["job_id"] or
+            record.get("name") != name or record.get("ordinal") != ordinal or
+            not all(isinstance(record.get(k), int) and not isinstance(record.get(k), bool)
+                    for k in ("dev", "ino")) or
+            document.get("sha256") != _group_receipt_digest(record)):
+        raise PublishingConflict("public-group identity receipt authority changed")
+    return int(record["dev"]), int(record["ino"])
+
+
+def _write_group_receipt(path: Path, manifest: dict, name: str,
+                         ordinal: int, identity: tuple[int, int]) -> None:
+    record = _group_receipt_record(manifest, name, ordinal, identity)
+    raw = json.dumps({"record": record, "sha256": _group_receipt_digest(record)},
+                     ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    directory_fd = _open_directory_nofollow(Path(path).parent)
+    try:
+        try:
+            fd = os.open(path.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+                         os.O_NOFOLLOW, 0o600, dir_fd=directory_fd)
+        except FileExistsError:
+            # Never overwrite a receipt, even if an old task still exists.
+            if _read_group_receipt(path, manifest, name, ordinal) != identity:
+                raise PublishingConflict("public-group directory identity changed")
+            return
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(raw)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+
+
+def _group_receipts(manifest: dict, frozen_manifest_path: Path) -> dict[str, tuple[int, int]]:
+    result = {}
+    for ordinal, group in enumerate(manifest["groups"], 1):
+        result[group["name"]] = _read_group_receipt(
+            _group_receipt_path(frozen_manifest_path, ordinal),
+            manifest, group["name"], ordinal,
+        )
+    return result
 
 
 def _owned_public(directory: Path, witness: bytes) -> bool:
