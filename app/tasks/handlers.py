@@ -156,3 +156,6 @@ from app.batch.media_package_execute_jobs import MediaPackageExecuteHandler as M
 
 # Read-only semantic media organization previews.
 from app.batch.media_organizer_jobs import MediaOrganizerPreviewHandler as MediaOrganizerPreviewHandler
+
+# Opt-in semantic execution Worker; disabled unless independent mutation gates are enabled.
+from app.batch.media_organizer_execute_jobs import MediaOrganizerExecuteHandler as MediaOrganizerExecuteHandler
