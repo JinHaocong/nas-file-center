@@ -7,6 +7,8 @@ This remains an isolated library function; no production execute route exists.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import stat
 from pathlib import Path
@@ -14,7 +16,7 @@ from typing import Callable
 
 from app.batch.file_rename import _open_directory_nofollow
 from app.batch.media_organizer_manifest import (
-    FrozenPreviewError, load_frozen_preview_manifest,
+    FrozenPreviewError, load_frozen_preview_manifest, _checksum,
 )
 from app.batch.media_organizer_planner import _check_scope, preview_semantic_unit
 from app.batch.media_organizer_stage import (
@@ -111,6 +113,102 @@ def _unlink_witness(fd: int, name: str, witness: bytes,
     os.unlink(name, dir_fd=fd)
     os.fsync(fd)
     return True
+
+
+
+def _retirement_receipt_path(manifest_path: Path) -> Path:
+    return Path(manifest_path).with_name(Path(manifest_path).name + ".retirement-receipt.json")
+
+
+def _receipt_data(manifest: dict, stage_stat: os.stat_result) -> dict:
+    return {
+        "schema_version": 1,
+        "job_id": manifest["job_id"],
+        "unit": manifest["unit"],
+        "stage_directory": manifest["stage_directory"],
+        "stage_dev": int(stage_stat.st_dev),
+        "stage_ino": int(stage_stat.st_ino),
+        "manifest_checksum": _checksum(manifest),
+        "files": len(manifest["moves"]),
+    }
+
+
+def _receipt_digest(data: dict) -> str:
+    content = json.dumps(data, ensure_ascii=False, sort_keys=True,
+                         separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(content).hexdigest()
+
+
+def _read_retirement_receipt(path: Path, manifest: dict,
+                             stage_stat: os.stat_result) -> None:
+    """An unwitnessed EMPTY stage requires independent durable private proof."""
+    expected = _receipt_data(manifest, stage_stat)
+    directory_fd = _open_directory_nofollow(path.parent)
+    try:
+        fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory_fd)
+        with os.fdopen(fd, "rb") as stream:
+            info = os.fstat(stream.fileno())
+            if (not stat.S_ISREG(info.st_mode) or
+                    (info.st_mode & 0o077) != 0 or
+                    info.st_size > 4096 or info.st_size == 0):
+                raise RetirementConflict("invalid private retirement receipt attributes")
+            raw = stream.read(4097)
+    except (OSError, ValueError) as exc:
+        raise RetirementConflict("retirement receipt missing or inaccessible") from exc
+    finally:
+        os.close(directory_fd)
+    try:
+        payload = json.loads(raw)
+    except (ValueError, UnicodeError) as exc:
+        raise RetirementConflict("retirement receipt data is invalid") from exc
+    if (not isinstance(payload, dict)
+            or payload.get("record") != expected
+            or payload.get("sha256") != _receipt_digest(expected)):
+        raise RetirementConflict("retirement receipt checksum or stage identity changed")
+
+
+def _write_retirement_receipt(path: Path, manifest: dict,
+                              stage_stat: os.stat_result) -> None:
+    """Durably commit outside the stage BEFORE its last internal marker goes."""
+    expected = _receipt_data(manifest, stage_stat)
+    encoded = json.dumps(
+        {"record": expected, "sha256": _receipt_digest(expected)},
+        ensure_ascii=False, separators=(",", ":"),
+    ).encode("utf-8")
+    fd = _open_directory_nofollow(path.parent)
+    try:
+        try:
+            target_fd = os.open(
+                path.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+                os.O_NOFOLLOW, 0o600, dir_fd=fd,
+            )
+        except FileExistsError:
+            _read_retirement_receipt(path, manifest, stage_stat)
+            return
+        with os.fdopen(target_fd, "wb") as stream:
+            stream.write(encoded)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _rmdir_bound_empty_stage(unit: Path, stage: Path, manifest: dict,
+                              stage_stat: os.stat_result,
+                              fence: Callable[[], None]) -> None:
+    root_fd = _open_directory_nofollow(unit)
+    try:
+        binding = _entry(root_fd, stage.name)
+        if (binding is None or not stat.S_ISDIR(binding.st_mode)
+                or [int(binding.st_dev), int(binding.st_ino)]
+                != [int(stage_stat.st_dev), int(stage_stat.st_ino)]):
+            raise RetirementConflict("retired stage binding replaced")
+        _check_unit(unit, manifest, fence)
+        os.rmdir(stage.name, dir_fd=root_fd)
+        os.fsync(root_fd)
+    finally:
+        os.close(root_fd)
 
 
 def _retire_stage_directory(unit: Path, stage: Path, manifest: dict, rows: list[dict],
