@@ -230,6 +230,7 @@ def retire_published_stage(
         status = preview_semantic_unit(
             unit, allowed_roots=[Path(p) for p in allowed_roots],
             quarantine_root=quarantine_root,
+            exclude_dir_names=manifest.get("excluded_dir_names", []),
         )
         if status.get("status") != "already_organized" or status.get("needed_moves") != 0:
             raise RetirementConflict("final canonical rescan did not produce zero changes")
