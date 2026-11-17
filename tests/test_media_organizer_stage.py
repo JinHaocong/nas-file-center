@@ -126,3 +126,58 @@ def test_stage_rejects_source_mutated_since_freeze(tmp_path):
     with pytest.raises(StagingConflict, match="changed|preview"):
         stage(manifest, frozen, tmp_path)
     assert not (unit / manifest["stage_directory"]).exists()
+
+
+def test_staging_rejects_workspace_swap_before_file_move_without_exposing_source(tmp_path, monkeypatch):
+    """An outsider cannot replace the stage with another empty directory after its witness."""
+    from app.batch import media_organizer_stage as staging
+    unit, manifest, frozen = fixture(tmp_path)
+    stage_path = unit / manifest["stage_directory"]
+    detached = unit / "detached-owned-stage"
+    original = staging._move_one
+    injected = []
+
+    def swap_before_move(*args, **kwargs):
+        if not injected:
+            stage_path.rename(detached)
+            stage_path.mkdir()
+            (stage_path / "foreign.txt").write_bytes(b"foreign-owner")
+            injected.append(True)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(staging, "_move_one", swap_before_move)
+    with pytest.raises(StagingConflict, match="stage|workspace|identity|owner|binding"):
+        stage(manifest, frozen, tmp_path)
+    assert injected
+    assert all(Path(row["source"]).read_bytes() in (b"image-a", b"image-b", b"movie-a")
+               for row in manifest["moves"])
+    assert all(not Path(row["target"]).exists() for row in manifest["moves"])
+    assert (stage_path / "foreign.txt").read_bytes() == b"foreign-owner"
+    assert (detached / ".nfc-stage-authority").is_file()
+    assert list(stage_path.iterdir()) == [stage_path / "foreign.txt"]
+
+
+def test_staging_rejects_empty_replacement_with_forged_owner_marker(tmp_path, monkeypatch):
+    """Even an exact copied witness cannot replace the original stage inode."""
+    from app.batch import media_organizer_stage as staging
+    unit, manifest, frozen = fixture(tmp_path)
+    stage_path = unit / manifest["stage_directory"]
+    detached = unit / "detached-private-stage"
+    original = staging._move_one
+    injected = []
+
+    def swap_empty_with_cloned_marker(*args, **kwargs):
+        if not injected:
+            stage_path.rename(detached)
+            stage_path.mkdir()
+            (stage_path / ".nfc-stage-authority").write_bytes(
+                (detached / ".nfc-stage-authority").read_bytes())
+            injected.append(True)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(staging, "_move_one", swap_empty_with_cloned_marker)
+    with pytest.raises(StagingConflict, match="stage|workspace|identity|binding"):
+        stage(manifest, frozen, tmp_path)
+    assert injected
+    assert all(Path(row["source"]).is_file() for row in manifest["moves"])
+    assert all(not Path(row["target"]).exists() for row in manifest["moves"])
