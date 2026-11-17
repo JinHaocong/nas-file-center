@@ -300,36 +300,27 @@ def test_preexisting_canonical_bucket_with_matching_final_label_is_rebuilt_witho
     assert any(g["name"] == old.name for g in manifest["groups"])
 
 
-def test_public_folder_swap_after_mkdir_never_marks_foreign_directory(tmp_path, monkeypatch):
-    """Race: a directory created by our job is swapped before owner witness."""
+def test_public_folder_name_is_never_directly_made_as_empty_directory(tmp_path, monkeypatch):
+    """An injected bare-public-mkdir swap must not be reachable."""
     from app.batch import media_organizer_publish as publishing
     root, manifest, frozen = prepared(
         tmp_path, {"a.jpg": b"image", "b.mp4": b"video"},
     )
-    name = manifest["groups"][0]["name"]
-    foreign = root / name
-    moved = root / "moved-aside-owned-directory"
-    old_mkdir = publishing.os.mkdir
-    replaced = False
+    actual_mkdir = publishing.os.mkdir
+    unsafe_public_mkdirs = []
+    names = {g["name"] for g in manifest["groups"]}
 
-    def swap_after_create(path, *args, **kwargs):
-        nonlocal replaced
-        result = old_mkdir(path, *args, **kwargs)
-        if path == name and kwargs.get("dir_fd") is not None and not replaced:
-            replaced = True
-            foreign.rename(moved)
-            old_mkdir(foreign)
-            (foreign / "foreign.txt").write_bytes(b"untouched")
-        return result
+    def watch_mkdir(name, *args, **kwargs):
+        if name in names and kwargs.get("dir_fd") is not None:
+            unsafe_public_mkdirs.append(name)
+        return actual_mkdir(name, *args, **kwargs)
 
-    monkeypatch.setattr(publishing.os, "mkdir", swap_after_create)
-    with pytest.raises(PublishingConflict, match="replaced|identity|foreign"):
-        publish(tmp_path, manifest, frozen)
-    assert replaced is True
-    assert (foreign / "foreign.txt").read_bytes() == b"untouched"
-    assert not (foreign / ".nfc-publish-owner").exists()
-    assert not (foreign / "001.jpg").exists()
-    assert all(Path(row["target"]).is_file() for row in manifest["moves"])
+    monkeypatch.setattr(publishing.os, "mkdir", watch_mkdir)
+    result = publish(tmp_path, manifest, frozen)
+    assert result["ready_for_retirement"]
+    assert unsafe_public_mkdirs == []
+    assert all(Path(row["final"]).exists() for row in manifest["moves"])
+
 
 
 def test_public_group_is_only_promoted_from_private_witnessed_directory(
@@ -411,3 +402,31 @@ def test_pending_group_with_valid_witness_resumes_after_promotion_crash(
     assert result["ready_for_retirement"]
     assert not pending.exists()
     assert all(Path(row["final"]).is_file() for row in manifest["moves"])
+
+
+
+def test_post_promotion_folder_replacement_never_gets_new_media(tmp_path, monkeypatch):
+    """Reject even an EMPTY foreign group placed after atomic promotion."""
+    from app.batch import media_organizer_publish as publishing
+    root, manifest, frozen = prepared(
+        tmp_path, {"a.jpg": b"image", "b.mp4": b"video"},
+    )
+    original = publishing._create_public_group
+    swapped = []
+
+    def swap_after_promote(*args, **kwargs):
+        result = original(*args, **kwargs)
+        unit, name = args[:2]
+        if not swapped:
+            owned = unit / name
+            owned.rename(unit / "moved-owned-after-publish")
+            owned.mkdir()
+            swapped.append(owned)
+        return result
+
+    monkeypatch.setattr(publishing, "_create_public_group", swap_after_promote)
+    with pytest.raises(PublishingConflict, match="owner|foreign|replaced|binding"):
+        publish(tmp_path, manifest, frozen)
+    assert swapped
+    assert list(swapped[0].iterdir()) == []
+    assert all(Path(row["target"]).exists() for row in manifest["moves"])
