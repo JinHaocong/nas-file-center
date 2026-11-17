@@ -59,8 +59,7 @@ def _validate_shape(manifest: dict, unit: Path) -> tuple[list[dict], dict[str, l
     bindings = manifest.get("wrapper_identities")
     if (not isinstance(rows, list) or not rows or not isinstance(groups, list)
             or not isinstance(cleanup, list) or not isinstance(bindings, dict)
-            or set(bindings) != set(cleanup)
-            or len(bindings) != len(cleanup)):
+            or not set(cleanup).issubset(set(bindings))):
         raise PublishingConflict("invalid frozen source wrapper or group metadata")
     group_rows: dict[str, list[dict]] = {}
     group_names: set[str] = set()
@@ -129,12 +128,20 @@ def _validate_shape(manifest: dict, unit: Path) -> tuple[list[dict], dict[str, l
                 or sum(row["identity"][2] for row in part) != group["bytes"]
                 or len({Path(row["final"]).name.casefold() for row in part}) != len(part)):
             raise PublishingConflict("frozen group file counts or sizes differ")
+    group_paths = {str(unit / group["name"]) for group in groups}
     for name, identity in bindings.items():
         path = Path(name)
         if (not path.is_relative_to(unit) or path == unit
                 or not isinstance(identity, list) or len(identity) != 2
                 or identity[0] != manifest["unit_dev"]):
             raise PublishingConflict("unsafe frozen wrapper binding")
+        if name not in cleanup:
+            # A correctly named old bucket can be a frozen source of this
+            # same job. Such additional input folders must correspond to an
+            # exact proposed group and contribute at least one frozen source.
+            if (name not in group_paths or
+                    not any(Path(row["source"]).is_relative_to(path) for row in rows)):
+                raise PublishingConflict("untrusted additional source bucket")
     return rows, group_rows
 
 
@@ -260,8 +267,13 @@ def _retire_one_wrapper(path: Path, *, unit: Path, manifest: dict,
 def _retire_wrappers(unit: Path, manifest: dict, witness: bytes,
                      fence: Callable[[], None], resume: bool) -> int:
     retired = 0
-    # Children go first; only frozen, still-identical and empty wrappers may go.
-    for i, literal in enumerate(manifest["wrapper_cleanup"]):
+    # Children go first. Include frozen old buckets with already-correct
+    # labels when they are also sources; never trust a matching name alone.
+    retired_paths = sorted(
+        manifest["wrapper_identities"],
+        key=lambda p: (-len(Path(p).parts), p),
+    )
+    for i, literal in enumerate(retired_paths):
         retired += _retire_one_wrapper(Path(literal), unit=unit, manifest=manifest,
                                        ordinal=i, witness=witness, fence=fence,
                                        resume=resume)
