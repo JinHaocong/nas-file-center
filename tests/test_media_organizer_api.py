@@ -46,15 +46,11 @@ def test_main_app_registers_protected_preview_routes(tmp_path):
         INITIAL_ADMIN_USERNAME="admin", INITIAL_ADMIN_PASSWORD="test-password-123",
     )
     app = create_app(settings)
-    # App-level registrations include non-route mounts without .path/.methods.
-    # Only inspect actual HTTP routes rather than assuming every entry has them.
-    assert any(getattr(r, "path", None) == "/api/media-organizer/previews"
-               and "POST" in (getattr(r, "methods", None) or ())
-               for r in app.routes)
-    assert any(getattr(r, "path", None) == "/api/media-organizer/previews/{job_id}"
-               and "GET" in (getattr(r, "methods", None) or ())
-               for r in app.routes)
+    # Exercise the actual HTTP boundary rather than inspecting internal
+    # FastAPI router wrappers, which need not have a .path attribute.
     with TestClient(app) as client:
         resp = client.post("/api/media-organizer/previews",
                            json={"selection": str(data)})
         assert resp.status_code == 401
+        query = client.get("/api/media-organizer/previews/17")
+        assert query.status_code == 401
