@@ -9,10 +9,11 @@ def test_dashboard_uses_explicit_page_and_page_size_params():
 
     content = dashboard_file.read_text(encoding="utf-8")
 
-    # Assert Dashboard passes (1, 5) instead of single argument (5)
-    assert "scansApi.listScans(1, 5)" in content, "Dashboard must call scansApi.listScans(1, 5)"
-    assert "tasksApi.listJobs(1, 5)" in content, "Dashboard must call tasksApi.listJobs(1, 5)"
+    # Both lists must request page 1 with size 5, using the Task Center's
+    # visibility-aware endpoint for recent jobs.
+    assert "scansApi.listScans(1, 5)" in content
+    assert "tasksApi.listTasks({ page: 1, pageSize: 5 })" in content
 
-    # Ensure incorrect listScans(5) or listJobs(5) is NOT present
+    # Old work-jobs bypasses dismissed failed-job visibility in earlier releases.
     assert "scansApi.listScans(5)" not in content
-    assert "tasksApi.listJobs(5)" not in content
+    assert "tasksApi.listJobs(" not in content
