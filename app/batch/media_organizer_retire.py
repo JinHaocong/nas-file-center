@@ -25,6 +25,7 @@ from app.batch.media_organizer_stage import (
 from app.batch.media_organizer_publish import (
     PublishingConflict, _PUBLIC_OWNER, _PUBLIC_COMPLETE,
     _check_unit, _entry, _inspect_existing_group, _validate_shape,
+    _group_receipts,
 )
 
 _RETIRE = ".nfc-retirement-authority"
@@ -36,13 +37,37 @@ class RetirementConflict(ValueError):
     """The published outputs or retained stage cannot safely be retired."""
 
 
+
+
+def _check_public_group_receipt_binding(
+    folder: Path, expected_identity: tuple[int, int],
+) -> None:
+    """Do not unlink any stage custody if the public DIRECTORY was replaced."""
+    fd = _open_directory_nofollow(folder)
+    try:
+        opened = os.fstat(fd)
+        parent = _open_directory_nofollow(folder.parent)
+        try:
+            named = _entry(parent, folder.name)
+            if (named is None or not stat.S_ISDIR(named.st_mode)
+                    or (int(opened.st_dev), int(opened.st_ino)) != expected_identity
+                    or (int(named.st_dev), int(named.st_ino)) != expected_identity):
+                raise RetirementConflict("public group directory identity replaced")
+        finally:
+            os.close(parent)
+    finally:
+        os.close(fd)
+
+
 def _verify_public(unit: Path, manifest: dict, rows: list[dict],
                    groups: dict[str, list[dict]], witness: bytes,
-                   *, require_witness: bool) -> None:
+                   *, require_witness: bool,
+                   group_bindings: dict[str, tuple[int, int]]) -> None:
     for name, group_rows in groups.items():
         directory = unit / name
         if not os.path.lexists(directory):
             raise RetirementConflict("missing public group")
+        _check_public_group_receipt_binding(directory, group_bindings[name])
         complete = _inspect_existing_group(
             directory, group_rows, witness, require_owner=require_witness,
         )
@@ -272,9 +297,11 @@ def _retire_stage_directory(unit: Path, stage: Path, manifest: dict, rows: list[
 
 def _remove_public_witnesses(unit: Path, manifest: dict,
                              groups: dict[str, list[dict]], witness: bytes,
-                             fence: Callable[[], None]) -> None:
+                             fence: Callable[[], None],
+                             group_bindings: dict[str, tuple[int, int]]) -> None:
     for name, rows in groups.items():
         folder = unit / name
+        _check_public_group_receipt_binding(folder, group_bindings[name])
         fd = _open_directory_nofollow(folder)
         try:
             for row in rows:
@@ -312,11 +339,13 @@ def retire_published_stage(
                      Path(quarantine_root) if quarantine_root is not None else None)
         _check_unit(unit, manifest, lease_fence)
         rows, groups = _validate_shape(manifest, unit)
+        group_bindings = _group_receipts(manifest, Path(frozen_manifest_path))
         stage = unit / manifest["stage_directory"]
         has_stage = os.path.lexists(stage)
         witness = _authority(manifest)
         _verify_public(unit, manifest, rows, groups, witness,
-                       require_witness=has_stage)
+                       require_witness=has_stage,
+                       group_bindings=group_bindings)
         if has_stage:
             retired, reconciled = _retire_stage_directory(
                 unit, stage, manifest, rows, witness, lease_fence, resume,
@@ -327,8 +356,10 @@ def retire_published_stage(
                 raise RetirementConflict("stage already retired; use explicit resume")
             retired, reconciled = 0, len(rows)
         _verify_public(unit, manifest, rows, groups, witness,
-                       require_witness=False)
-        _remove_public_witnesses(unit, manifest, groups, witness, lease_fence)
+                       require_witness=False,
+                       group_bindings=group_bindings)
+        _remove_public_witnesses(unit, manifest, groups, witness, lease_fence,
+                                 group_bindings)
         status = preview_semantic_unit(
             unit, allowed_roots=[Path(p) for p in allowed_roots],
             quarantine_root=quarantine_root,
