@@ -7,6 +7,8 @@
 > **版本权威**：当前产品 / Python package / Docker image 版本统一为 **1.4.5**。
 > **v1.4.5 修复**：已有 P/V 数量大小分组中的文件参与统一扫描和安全重组；仅在完整冻结校验与暂存成功后清理已证实为空的旧分组目录，保留 FUSE 安全发布、禁止覆盖和中断恢复保护。
 >
+> **MediaPackage 报告安全排查**：冻结清单失败原因细分、旧报告任务 ID 防撞、只读检查命令与保留策略见 [媒体包报告与恢复安全说明](docs/media-package-report-safety.md)。
+>
 > 当前开发顺序以 [`docs/roadmap-current.md`](docs/roadmap-current.md) 为准；旧 roadmap 仅作历史证据。
 
 核心原则：**fclones 负责高性能重复发现；NAS File Center 负责规则、Dry Run、SHA256 二次校验、安全执行、审计和可视化操作。** fclones 永远不会被调用 `remove/link/dedupe` 等破坏性子命令。
