@@ -34,11 +34,54 @@ The new code is now wired into dedicated execution and manual recovery WorkJobs 
 - An already-completed recovery confirmation is idempotent and returns its prior result without touching files.
 - A failed recovery does not recursively retry; an untrusted or unwitnessed stage needs manual review.
 
+## Private directory exclusion scope
+
+- Configure exact protected directory basenames outside the repository via
+  MEDIA_ORGANIZER_EXCLUDED_DIR_NAMES, using a comma-separated value.
+- The matcher is case-insensitive and checks **directory components only**.
+  A media filename containing the same text remains eligible under its
+  independently identified organizing unit.
+- The preview worker, per-unit planner, frozen manifest and final canonical
+  rescan all apply the same exclusion names. Direct selection of a protected
+  subtree is rejected.
+- No private source basename is committed to this repository. The flag
+  remains an explicit deployment setting, not a guessed classification.
+
+## Disposable filesystem capability test — not yet performed on the owner's NAS
+
+The current repository includes an opt-in synthetic probe which verifies
+directory no-replace rename against an existing **empty** directory, public
+hardlink no-clobber, fsync durability and exclusive scratch cleanup.
+
+Run **only after the owner approves an existing disposable parent directory on
+the target NAS filesystem**, not on a real media package:
+
+~~~sh
+python -m app.batch.media_organizer_capability_probe \
+  --parent "/path/to/owner-approved-scratch-parent" \
+  --ack-scratch-write
+~~~
+
+The command creates its own randomly named private child directories, checks
+their inode identities and only removes directories it created while still
+empty. Unknown or replaced scratch entries are **not automatically deleted**.
+The CLI deliberately refuses to start without --ack-scratch-write.
+
+Require all fields to be true: directory_noreplace,
+collision_preserved, directory_fsync, hardlink_noreplace,
+cross_directory_hardlink, original_probe_compatible, cleanup_complete, and
+compatible. Any false field, error, leftover scratch directory or an
+unsupported rename/no-replace operation blocks deployment.
+
+GitHub Actions tests exercise this probe on synthetic runner storage only.
+**Their success does not establish NAS mount compatibility**; no real NAS
+probe has been executed in this PR.
+
 ## Gates before live deployment / production NAS execution
 
 - [ ] Independent security review of path races, same-name old bucket replacement and marker/tombstone handling.
 - [x] Dedicated Worker ownership, exact unit-bound confirmation, freeze/validate before mutation, lease checkpoints, and explicit single-attempt recovery: verified in synthetic focused CI. Production security review still pending.
-- [ ] No-replace and directory fsync compatibility proved on a disposable copy on the actual NAS storage.
+- [ ] No-replace / hardlink / directory fsync capability proved on the owner-approved disposable parent on the actual NAS mount using the probe above. GitHub-runner tests alone are insufficient.
 - [ ] Additional concurrency and failure-injection tests at each mutation boundary, including directory creation before witness, tombstone rename, last-marker retirement, and live mount/device drift.
 - [ ] Final candidate full backend regression, frontend test/typecheck/build, focused V1.6 TDD, visual checks, and all relevant safety workflows green. Earlier focused TDD passed; final PR state still pending.
 - [ ] User approval before enabling mutation permissions, merging or deploying.
