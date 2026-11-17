@@ -211,17 +211,37 @@ def save_frozen_manifest(path: Path, manifest: dict) -> None:
 
 
 def load_frozen_manifest(path: Path, *, job_id: int, package: Path) -> dict:
+    """Validate stored authority without rewriting, repairing or trusting it."""
     if path.is_symlink() or not path.is_file():
         raise MediaPackageExecutionConflict("Frozen manifest is missing or unsafe")
-    with path.open("r", encoding="utf-8") as stream:
-        body = json.load(stream)
-    manifest = body.get("manifest")
-    if (not isinstance(manifest, dict)
-            or body.get("checksum") != _manifest_checksum(manifest)
-            or manifest.get("schema_version") != MANIFEST_VERSION
-            or manifest.get("job_id") != job_id
-            or manifest.get("package") != str(package)):
-        raise MediaPackageExecutionConflict("Frozen manifest integrity mismatch")
+    try:
+        with path.open("r", encoding="utf-8") as stream:
+            body = json.load(stream)
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise MediaPackageExecutionConflict(
+            "Frozen manifest integrity mismatch: unreadable or invalid JSON"
+        ) from exc
+    if not isinstance(body, dict) or not isinstance(body.get("manifest"), dict):
+        raise MediaPackageExecutionConflict(
+            "Frozen manifest integrity mismatch: invalid manifest envelope"
+        )
+    manifest = body["manifest"]
+    if body.get("checksum") != _manifest_checksum(manifest):
+        raise MediaPackageExecutionConflict(
+            "Frozen manifest integrity mismatch: SHA-256 checksum differs"
+        )
+    if manifest.get("schema_version") != MANIFEST_VERSION:
+        raise MediaPackageExecutionConflict(
+            "Frozen manifest integrity mismatch: schema version differs"
+        )
+    if manifest.get("job_id") != job_id:
+        raise MediaPackageExecutionConflict(
+            "Frozen manifest integrity mismatch: execution job ID differs"
+        )
+    if manifest.get("package") != str(package):
+        raise MediaPackageExecutionConflict(
+            "Frozen manifest integrity mismatch: package path differs from preview"
+        )
     return manifest
 
 
