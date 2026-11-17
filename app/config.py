@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     allowed_roots_raw: str = Field(default="/data", validation_alias="ALLOWED_ROOTS")
     allow_delete: bool = Field(default=False, validation_alias="ALLOW_DELETE")
     allow_mutation: bool = Field(default=False, validation_alias="ALLOW_MUTATION")
+    # Separate opt-in gate for the new semantic organizer execution Worker.
+    # Existing mutation permissions alone never enable this feature.
+    media_organizer_execution_enabled: bool = Field(
+        default=False, validation_alias="MEDIA_ORGANIZER_EXECUTION_ENABLED",
+    )
     quarantine_root: Path = Field(default=Path("/data/.nas-file-center-trash"), validation_alias="QUARANTINE_ROOT")
     protect_last_file: bool = Field(default=True, validation_alias="PROTECT_LAST_FILE")
     fclones_binary: str = Field(default="fclones", validation_alias="FCLONES_BINARY")
