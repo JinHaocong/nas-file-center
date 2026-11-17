@@ -363,6 +363,23 @@ def _create_public_group(unit: Path, name: str, manifest: dict, witness: bytes,
         os.close(stage_fd)
 
 
+def _assert_public_group_binding(unit: Path, group: Path, group_fd: int,
+                                 witness: bytes) -> None:
+    """Require our witness and current unit-child identity before public IO."""
+    if not _read_marker(group_fd, _PUBLIC_OWNER, witness):
+        raise PublishingConflict("foreign public group has no owner witness")
+    parent_fd = _open_directory_nofollow(unit)
+    try:
+        named = _entry(parent_fd, group.name)
+        opened = os.fstat(group_fd)
+        if (named is None or not stat.S_ISDIR(named.st_mode)
+                or (int(named.st_dev), int(named.st_ino)) !=
+                (int(opened.st_dev), int(opened.st_ino))):
+            raise PublishingConflict("public group directory binding replaced")
+    finally:
+        os.close(parent_fd)
+
+
 def _link_one(row: dict, *, stage: Path, unit: Path, witness: bytes,
               manifest: dict, fence: Callable[[], None], resume: bool) -> bool:
     source_name = Path(row["target"]).name
@@ -375,6 +392,8 @@ def _link_one(row: dict, *, stage: Path, unit: Path, witness: bytes,
             raise PublishingConflict("cross-device publication forbidden")
         if not _read_marker(stage_fd, ".nfc-stage-authority", witness):
             raise PublishingConflict("stage owner witness disappeared")
+        if dest.parent != unit:
+            _assert_public_group_binding(unit, dest.parent, target_fd, witness)
         source_stat = _entry(stage_fd, source_name)
         _check_identity(source_stat, row["identity"], stage / source_name)
         already = _entry(target_fd, dest.name)
@@ -384,6 +403,8 @@ def _link_one(row: dict, *, stage: Path, unit: Path, witness: bytes,
             _check_identity(already, row["identity"], dest)
             return False
         _check_unit(unit, manifest, fence)
+        if dest.parent != unit:
+            _assert_public_group_binding(unit, dest.parent, target_fd, witness)
         _check_identity(_entry(stage_fd, source_name), row["identity"], stage / source_name)
         try:
             os.link(source_name, dest.name,
@@ -391,6 +412,8 @@ def _link_one(row: dict, *, stage: Path, unit: Path, witness: bytes,
         except FileExistsError as exc:
             raise PublishingConflict("foreign public target raced with publication") from exc
         _check_identity(_entry(target_fd, dest.name), row["identity"], dest)
+        if dest.parent != unit:
+            _assert_public_group_binding(unit, dest.parent, target_fd, witness)
         os.fsync(target_fd)
         return True
     finally:
@@ -402,6 +425,7 @@ def _mark_completed(directory: Path, part: list[dict], witness: bytes,
                     fence: Callable[[], None]) -> None:
     fd = _open_directory_nofollow(directory)
     try:
+        _assert_public_group_binding(directory.parent, directory, fd, witness)
         for row in part:
             dest = Path(row["final"])
             _check_identity(_entry(fd, dest.name), row["identity"], dest)
