@@ -74,3 +74,14 @@ def test_unrelated_topic_root_is_supported(tmp_path):
     file(root/'Collection B'/'Set 01'/'one.jpg')
     rows=discover(root)
     assert [Path(x['unit']).name for x in rows if x['status']=='ready']==['Set 01']
+
+
+def test_work_subfolders_inside_legacy_media_wrapper_are_scanned_independently(tmp_path):
+    root = tmp_path / 'work'
+    file(root/'P'/'NO.001 Set One'/'a.jpg')
+    file(root/'P'/'NO.002 Set Two'/'b.mp4')
+    rows = discover(root)
+    assert any(r['unit'] == str(root) and r['status'] == 'blocked' for r in rows)
+    candidates = [r for r in rows if r['status'] == 'ready']
+    assert {Path(r['unit']).name for r in candidates} == {'NO.001 Set One', 'NO.002 Set Two'}
+    assert all(Path(r['items'][0]['target']).parent == Path(r['unit']) for r in candidates)
