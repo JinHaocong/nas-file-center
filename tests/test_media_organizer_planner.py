@@ -164,3 +164,17 @@ def test_nested_wrapper_cleanup_runs_from_child_to_parent(tmp_path):
     result = preview(root)
     assert result['status'] == 'ready'
     assert [Path(x).relative_to(root).as_posix() for x in result['wrapper_cleanup']] == ['P/P1', 'P']
+
+
+def test_excluded_historical_classification_wrapper_not_inspected_or_merged(tmp_path):
+    root = tmp_path / "synthetic-work"
+    put(root, ["a.jpg", "movie.mp4"])
+    put(root / "PHOTOS", ["protected.jpg"])
+    result = preview_semantic_unit(
+        root, allowed_roots=[tmp_path], exclude_dir_names=["photos"],
+    )
+    assert result["status"] == "ready"
+    assert result["totals"] == {"P": 1, "V": 1, "Other": 0}
+    assert all("protected.jpg" not in m["source"] for m in result["items"])
+    assert str(root / "PHOTOS") not in result.get("wrapper_cleanup", [])
+    assert (root / "PHOTOS" / "protected.jpg").exists()
