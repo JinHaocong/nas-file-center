@@ -280,7 +280,8 @@ def _inspect_existing_group(directory: Path, part: list[dict], witness: bytes,
 
 
 def _foreign_preflight(unit: Path, manifest: dict, group_rows: dict[str, list[dict]],
-                       rows: list[dict], witness: bytes, resume: bool) -> None:
+                       rows: list[dict], witness: bytes, resume: bool,
+                       frozen_manifest_path: Path) -> None:
     bindings = manifest["wrapper_identities"]
     if group_rows:
         for name, part in group_rows.items():
@@ -288,6 +289,18 @@ def _foreign_preflight(unit: Path, manifest: dict, group_rows: dict[str, list[di
             if not os.path.lexists(group):
                 continue
             if resume and _owned_public(group, witness):
+                ordinal = [g["name"] for g in manifest["groups"]].index(name) + 1
+                bound = _read_group_receipt(
+                    _group_receipt_path(frozen_manifest_path, ordinal),
+                    manifest, name, ordinal,
+                )
+                fd = _open_directory_nofollow(group)
+                try:
+                    opened = os.fstat(fd)
+                    if (int(opened.st_dev), int(opened.st_ino)) != bound:
+                        raise PublishingConflict("public group identity replaced after freezing")
+                finally:
+                    os.close(fd)
                 _inspect_existing_group(group, part, witness, require_owner=True)
                 continue
             if str(group) not in bindings:
@@ -375,7 +388,8 @@ def _retire_wrappers(unit: Path, manifest: dict, witness: bytes,
 
 
 def _create_public_group(unit: Path, name: str, manifest: dict, witness: bytes,
-                         fence: Callable[[], None], *, resume: bool = False) -> None:
+                         fence: Callable[[], None], *, resume: bool = False,
+                         frozen_manifest_path: Path) -> None:
     """Prepare group in private stage, then promote via atomic NOREPLACE.
 
     No public directory name is ever created as an unwitnessed empty folder.
@@ -427,6 +441,20 @@ def _create_public_group(unit: Path, name: str, manifest: dict, witness: bytes,
                     raise PublishingConflict("foreign entry in private publication workspace")
             os.fsync(pending_fd)
             os.fsync(stage_fd)
+            original_identity = (int(info.st_dev), int(info.st_ino))
+            receipt_path = _group_receipt_path(frozen_manifest_path, ordinal)
+            if existing is not None:
+                # An existing pending directory is never adopted solely
+                # because its marker matches. The private receipt must
+                # already prove this exact inode before this attempt.
+                if _read_group_receipt(
+                    receipt_path, manifest, name, ordinal,
+                ) != original_identity:
+                    raise PublishingConflict("private group directory identity replaced")
+            else:
+                _write_group_receipt(
+                    receipt_path, manifest, name, ordinal, original_identity,
+                )
             if _entry(unit_fd, name) is not None:
                 raise PublishingConflict("foreign public group occupied before promotion")
             _check_unit(unit, manifest, fence)
