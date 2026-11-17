@@ -9,7 +9,7 @@ from pathlib import Path
 from sqlalchemy import func, select, text
 
 from app.batch.media_package_report_lifecycle import next_media_package_job_id
-from app.batch.media_organizer_planner import _check_scope
+from app.batch.media_organizer_planner import _check_scope, _normalized_excluded_dir_names
 from app.batch.media_organizer_reports import read_preview_page
 from app.batch.media_organizer_scan import write_semantic_preview
 from app.config import Settings
@@ -27,10 +27,21 @@ def _excluded(settings: Settings) -> list[Path]:
     return [Path(configured)] if configured is not None else []
 
 
+def _excluded_names(settings: Settings) -> list[str]:
+    raw = getattr(settings, "media_organizer_excluded_dir_names_raw", "")
+    if not isinstance(raw, str):
+        raise ValueError("excluded directory names setting must be comma-separated text")
+    values = [name.strip() for name in raw.split(",") if name.strip()]
+    return sorted(_normalized_excluded_dir_names(values))
+
+
 def _validate_selection(selection: str, settings: Settings) -> Path:
     chosen = Path(selection).expanduser()
     _check_scope(chosen, [Path(x) for x in settings.allowed_roots],
                  Path(settings.quarantine_root) if settings.quarantine_root is not None else None)
+    excluded_names = set(_excluded_names(settings))
+    if any(part.casefold() in excluded_names for part in chosen.parts):
+        raise ValueError("selected unit is inside an excluded protected directory")
     raw = os.path.abspath(chosen)
     for root in _excluded(settings):
         excluded = os.path.abspath(root)
@@ -166,7 +177,8 @@ class MediaOrganizerPreviewHandler(TaskHandler):
             final_stats = write_semantic_preview(
                 chosen, allowed_roots=[Path(x) for x in settings.allowed_roots],
                 quarantine_root=settings.quarantine_root,
-                exclude_roots=_excluded(settings), out=out,
+                exclude_roots=_excluded(settings),
+                exclude_dir_names=_excluded_names(settings), out=out,
                 max_items=10, check_cancelled=check_cancelled, on_progress=progress,
             )
             out.flush()
