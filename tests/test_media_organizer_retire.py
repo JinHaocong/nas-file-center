@@ -178,3 +178,21 @@ def test_exact_two_hundred_boundary_end_to_end_is_idempotent(tmp_path, count, ex
     assert final_preview["status"] == "already_organized"
     assert final_preview["needed_moves"] == 0
     assert not (unit / manifest["stage_directory"]).exists()
+
+
+def test_final_private_marker_gap_blocks_without_deleting_unwitnessed_directory(tmp_path):
+    unit, manifest, frozen = published(tmp_path)
+    stage = unit / manifest["stage_directory"]
+    # Model power failure after all published identities are durable and
+    # staging links/markers were retired, but before empty-stage rmdir.
+    for row in manifest["moves"]:
+        Path(row["target"]).unlink()
+    for marker in (".nfc-stage-authority", ".nfc-stage-complete",
+                   ".nfc-retirement-authority"):
+        path = stage / marker
+        if path.exists():
+            path.unlink()
+    with pytest.raises(RetirementConflict, match="witness|ownership|stage"):
+        retire(tmp_path, manifest, frozen, resume=True)
+    assert stage.is_dir()
+    assert all(Path(row["final"]).is_file() for row in manifest["moves"])
