@@ -485,7 +485,8 @@ def _create_public_group(unit: Path, name: str, manifest: dict, witness: bytes,
 
 
 def _assert_public_group_binding(unit: Path, group: Path, group_fd: int,
-                                 witness: bytes) -> None:
+                                 witness: bytes,
+                                 expected_identity: tuple[int, int]) -> None:
     """Require our witness and current unit-child identity before public IO."""
     if not _read_marker(group_fd, _PUBLIC_OWNER, witness):
         raise PublishingConflict("foreign public group has no owner witness")
@@ -495,14 +496,16 @@ def _assert_public_group_binding(unit: Path, group: Path, group_fd: int,
         opened = os.fstat(group_fd)
         if (named is None or not stat.S_ISDIR(named.st_mode)
                 or (int(named.st_dev), int(named.st_ino)) !=
-                (int(opened.st_dev), int(opened.st_ino))):
-            raise PublishingConflict("public group directory binding replaced")
+                (int(opened.st_dev), int(opened.st_ino))
+                or (int(opened.st_dev), int(opened.st_ino)) != expected_identity):
+            raise PublishingConflict("public group directory identity or binding replaced")
     finally:
         os.close(parent_fd)
 
 
 def _link_one(row: dict, *, stage: Path, unit: Path, witness: bytes,
-              manifest: dict, fence: Callable[[], None], resume: bool) -> bool:
+              manifest: dict, fence: Callable[[], None], resume: bool,
+              group_bindings: dict[str, tuple[int, int]]) -> bool:
     source_name = Path(row["target"]).name
     dest = Path(row["final"])
     stage_fd = _open_directory_nofollow(stage)
@@ -514,7 +517,10 @@ def _link_one(row: dict, *, stage: Path, unit: Path, witness: bytes,
         if not _read_marker(stage_fd, ".nfc-stage-authority", witness):
             raise PublishingConflict("stage owner witness disappeared")
         if dest.parent != unit:
-            _assert_public_group_binding(unit, dest.parent, target_fd, witness)
+            _assert_public_group_binding(
+                unit, dest.parent, target_fd, witness,
+                group_bindings[dest.parent.name],
+            )
         source_stat = _entry(stage_fd, source_name)
         _check_identity(source_stat, row["identity"], stage / source_name)
         already = _entry(target_fd, dest.name)
@@ -525,7 +531,10 @@ def _link_one(row: dict, *, stage: Path, unit: Path, witness: bytes,
             return False
         _check_unit(unit, manifest, fence)
         if dest.parent != unit:
-            _assert_public_group_binding(unit, dest.parent, target_fd, witness)
+            _assert_public_group_binding(
+                unit, dest.parent, target_fd, witness,
+                group_bindings[dest.parent.name],
+            )
         _check_identity(_entry(stage_fd, source_name), row["identity"], stage / source_name)
         try:
             os.link(source_name, dest.name,
@@ -534,7 +543,10 @@ def _link_one(row: dict, *, stage: Path, unit: Path, witness: bytes,
             raise PublishingConflict("foreign public target raced with publication") from exc
         _check_identity(_entry(target_fd, dest.name), row["identity"], dest)
         if dest.parent != unit:
-            _assert_public_group_binding(unit, dest.parent, target_fd, witness)
+            _assert_public_group_binding(
+                unit, dest.parent, target_fd, witness,
+                group_bindings[dest.parent.name],
+            )
         os.fsync(target_fd)
         return True
     finally:
@@ -543,10 +555,12 @@ def _link_one(row: dict, *, stage: Path, unit: Path, witness: bytes,
 
 
 def _mark_completed(directory: Path, part: list[dict], witness: bytes,
-                    fence: Callable[[], None]) -> None:
+                    fence: Callable[[], None],
+                    expected_identity: tuple[int, int]) -> None:
     fd = _open_directory_nofollow(directory)
     try:
-        _assert_public_group_binding(directory.parent, directory, fd, witness)
+        _assert_public_group_binding(directory.parent, directory, fd, witness,
+                                     expected_identity)
         for row in part:
             dest = Path(row["final"])
             _check_identity(_entry(fd, dest.name), row["identity"], dest)
@@ -596,7 +610,10 @@ def publish_frozen_stage(
             resume=True,
         )
         witness = _authority(manifest)
-        _foreign_preflight(unit, manifest, group_rows, rows, witness, resume)
+        _foreign_preflight(
+            unit, manifest, group_rows, rows, witness, resume,
+            Path(frozen_manifest_path),
+        )
         retired = _retire_wrappers(unit, manifest, witness, lease_fence, resume)
         for name, part in group_rows.items():
             folder = unit / name
@@ -606,16 +623,20 @@ def publish_frozen_stage(
                 _inspect_existing_group(folder, part, witness, require_owner=True)
             else:
                 _create_public_group(unit, name, manifest, witness, lease_fence,
-                                     resume=resume)
+                                     resume=resume,
+                                     frozen_manifest_path=Path(frozen_manifest_path))
+        group_bindings = _group_receipts(manifest, Path(frozen_manifest_path))
         published = reconciled = 0
         for row in rows:
             if _link_one(row, stage=stage, unit=unit, witness=witness,
-                         manifest=manifest, fence=lease_fence, resume=resume):
+                         manifest=manifest, fence=lease_fence, resume=resume,
+                         group_bindings=group_bindings):
                 published += 1
             else:
                 reconciled += 1
         for name, part in group_rows.items():
-            _mark_completed(unit / name, part, witness, lease_fence)
+            _mark_completed(unit / name, part, witness, lease_fence,
+                            group_bindings[name])
             if not _inspect_existing_group(unit / name, part, witness, require_owner=True):
                 raise PublishingConflict("public completion witness is missing")
         for row in rows:
