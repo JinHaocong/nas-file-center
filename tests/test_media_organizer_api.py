@@ -46,10 +46,14 @@ def test_main_app_registers_protected_preview_routes(tmp_path):
         INITIAL_ADMIN_USERNAME="admin", INITIAL_ADMIN_PASSWORD="test-password-123",
     )
     app = create_app(settings)
-    assert any(r.path == "/api/media-organizer/previews"
-               and "POST" in r.methods for r in app.routes)
-    assert any(r.path == "/api/media-organizer/previews/{job_id}"
-               and "GET" in r.methods for r in app.routes)
+    # App-level registrations include non-route mounts without .path/.methods.
+    # Only inspect actual HTTP routes rather than assuming every entry has them.
+    assert any(getattr(r, "path", None) == "/api/media-organizer/previews"
+               and "POST" in (getattr(r, "methods", None) or ())
+               for r in app.routes)
+    assert any(getattr(r, "path", None) == "/api/media-organizer/previews/{job_id}"
+               and "GET" in (getattr(r, "methods", None) or ())
+               for r in app.routes)
     with TestClient(app) as client:
         resp = client.post("/api/media-organizer/previews",
                            json={"selection": str(data)})
