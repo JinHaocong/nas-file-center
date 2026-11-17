@@ -271,3 +271,70 @@ def test_preview_exposes_confirmation_only_to_enabled_admin_and_ready_unit(tmp_p
     }
     enabled.cookies.clear()
     assert enabled.get(f"/api/media-organizer/previews/{on_pid}").status_code == 401
+
+
+def test_execution_worker_rechecks_independent_permission_switch(tmp_path):
+    client, settings, work = setup(tmp_path, enabled=True)
+    pid = preview(client, settings, work)
+    queued = execute_request(client, pid, work)
+    assert queued.status_code == 200
+    settings.media_organizer_execution_enabled = False
+    assert worker(settings, queued.json()["job_id"], name="guarded-worker") is False
+    assert (work / "photo.jpg").read_bytes() == b"photo-1"
+    assert (work / "clip.mp4").read_bytes() == b"video-1"
+    assert not any(path.name.startswith(".nfc-") for path in work.iterdir())
+
+
+def test_recovery_request_rejects_tampered_stage_ownership_witness(tmp_path, monkeypatch):
+    from app.batch import media_organizer_execute_jobs as jobs
+    client, settings, work = setup(tmp_path, enabled=True)
+    pid = preview(client, settings, work)
+    queued = execute_request(client, pid, work)
+    assert queued.status_code == 200
+    original_job_id = queued.json()["job_id"]
+    real_stage = jobs.stage_frozen_sources
+
+    def interrupted_after_stage(*args, **kwargs):
+        real_stage(*args, **kwargs)
+        raise RuntimeError("synthetic interruption")
+
+    monkeypatch.setattr(jobs, "stage_frozen_sources", interrupted_after_stage)
+    assert worker(settings, original_job_id, name="trusted-worker") is False
+    monkeypatch.setattr(jobs, "stage_frozen_sources", real_stage)
+    private = next(path for path in work.iterdir()
+                   if path.name.startswith(".nfc-media-organizer-stage-"))
+    (private / ".nfc-stage-authority").write_bytes(b"foreign-witness")
+    response = client.post(
+        f"/api/media-organizer/executions/{original_job_id}/recover",
+        json={"confirmation": recovery_token(original_job_id)},
+    )
+    assert response.status_code == 409
+    assert (private / ".nfc-stage-authority").read_bytes() == b"foreign-witness"
+
+
+def test_assisted_recovery_confirmation_is_idempotent_after_success(tmp_path, monkeypatch):
+    from app.batch import media_organizer_execute_jobs as jobs
+    client, settings, work = setup(tmp_path, enabled=True)
+    pid = preview(client, settings, work)
+    first = execute_request(client, pid, work)
+    assert first.status_code == 200
+    original_job_id = first.json()["job_id"]
+    real_stage = jobs.stage_frozen_sources
+
+    def interrupted(*args, **kwargs):
+        real_stage(*args, **kwargs)
+        raise RuntimeError("synthetic stop")
+
+    monkeypatch.setattr(jobs, "stage_frozen_sources", interrupted)
+    assert worker(settings, original_job_id, name="same-owner") is False
+    monkeypatch.setattr(jobs, "stage_frozen_sources", real_stage)
+    path = f"/api/media-organizer/executions/{original_job_id}/recover"
+    request = {"confirmation": recovery_token(original_job_id)}
+    enqueued = client.post(path, json=request)
+    assert enqueued.status_code == 200
+    second_id = enqueued.json()["job_id"]
+    assert worker(settings, second_id, name="same-owner")
+    repeated = client.post(path, json=request)
+    assert repeated.status_code == 200, repeated.text
+    assert repeated.json()["job_id"] == second_id
+    assert repeated.json()["status"] == "completed"
