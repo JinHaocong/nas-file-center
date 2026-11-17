@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     media_organizer_execution_enabled: bool = Field(
         default=False, validation_alias="MEDIA_ORGANIZER_EXECUTION_ENABLED",
     )
+    # Private deployment value: exact comma-separated directory basenames.
+    # Not an exclusion for files with similar names.
+    media_organizer_excluded_dir_names_raw: str = Field(
+        default="", validation_alias="MEDIA_ORGANIZER_EXCLUDED_DIR_NAMES",
+    )
     quarantine_root: Path = Field(default=Path("/data/.nas-file-center-trash"), validation_alias="QUARANTINE_ROOT")
     protect_last_file: bool = Field(default=True, validation_alias="PROTECT_LAST_FILE")
     fclones_binary: str = Field(default="fclones", validation_alias="FCLONES_BINARY")
