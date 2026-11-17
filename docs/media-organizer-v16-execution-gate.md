@@ -9,8 +9,8 @@
 3. Use an administrator-only API to queue **one named organizing unit** from a completed, conflict-free preview, after typing the exact unit-bound confirmation token. Require MEDIA_ORGANIZER_EXECUTION_ENABLED, ALLOW_MUTATION and ALLOW_DELETE. The first flag defaults to false. The Worker independently rechecks all three and requires an active exclusive lease.
 4. **validate_execution_preflight:** re-check unit identity, source rows, target occupancy, classification grouping and frozen values.
 5. **stage_frozen_sources:** create an exclusive private staging directory with an owner witness and stage every frozen file through no-replace moves. Resume only with the same immutable manifest and lease; never adopt an unknown staged directory.
-6. **publish_frozen_stage:** verify all staged entries; retire only original empty classification wrappers by frozen device/inode identity. Publish public P/V/Other files by exclusive hardlinks from still-retained stage inodes, with group owner/completion witnesses. On interruption, prove already published identities and continue only missing entries.
-7. **retire_published_stage:** verify every public output, persist retirement intent, unlink only staged links proven to have exact published counterparts, remove owned witnesses and safely retire the empty staging directory. Re-scan to confirm already_organized and zero changes.
+6. **publish_frozen_stage:** verify all staged entries; retire only original empty classification wrappers by frozen device/inode identity. Prepare each new P/V/Other directory with its owner witness INSIDE the verified private stage, then use directory no-replace rename to atomically promote it. Publish media files by exclusive hardlinks from still-retained stage inodes, rechecking public ownership and parent binding. On interruption, prove already published identities and continue only missing entries.
+7. **retire_published_stage:** verify every public output, persist retirement intent, unlink only staged links proven to have exact published counterparts, and DURABLY save an independent private retirement receipt (manifest checksum plus stage device/inode) before removing the final in-stage witness. After safely retiring the empty staging directory, re-scan to confirm already_organized and zero changes.
 
 The new code is now wired into dedicated execution and manual recovery WorkJobs plus a gated Batch UI. Production NAS use remains prohibited until the release gates below are met. **No automatic batch-wide execution:** each request authorizes a single ready organizing unit, and any blocked unit in the original preview disallows execution. All tests use disposable synthetic directories.
 
@@ -22,14 +22,14 @@ The new code is now wired into dedicated execution and manual recovery WorkJobs 
 - A nonempty or replaced old classification wrapper must not be deleted. Unknown entries are preserved for review.
 - No-replace rename and directory fsync are required for wrapper retirement; filesystem refusal is a blocker, not permission to fall back to overwriting rename.
 - Interrupted publication retains the staged source link, and retirement never removes the last verified link.
-- **Known recoverability boundary:** interruption after unlinking the final private retirement marker but before removing the empty staging directory can leave an unwitnessed empty directory. The implementation must fail closed and preserve it for manual reconciliation, not claim automatic recovery across this last gap.
+- **Last-marker recovery:** an empty stage after the last internal witness is deleted may be reconciled ONLY when an independently fsynced private receipt proves the original frozen manifest and the exact stage device/inode, and all published file identities are intact. Missing, tampered, or mismatched receipts require manual review. Synthetic crash tests verify this restriction; real NAS durability has not been established.
 - A fully finished second scan must show zero planned moves and zero renamed media files.
 
 ## Assisted recovery semantics
 
 - Original failed execution remains terminal and preserves its checksum manifest, phase checkpoint, and immutable job identity.
 - Recovery requires the original job's exact confirmation token and a new WorkJob; no mutation runs on the HTTP request.
-- The API verifies the ORIGINAL staged ownership marker contents, not just its filename, before queuing a new recovery attempt.
+- The API verifies the ORIGINAL staged ownership marker contents, not just its filename, before queuing a new recovery attempt. Exception: a previously published, completely empty stage with no markers may be accepted only after verifying the durable external private receipt and stage identity.
 - The Worker resumes staging/publication if the original checkpoint ended in frozen/staged, and **only** resumes retirement if the original phase was published. Re-staging after stage retirement started is forbidden.
 - An already-completed recovery confirmation is idempotent and returns its prior result without touching files.
 - A failed recovery does not recursively retry; an untrusted or unwitnessed stage needs manual review.
@@ -79,10 +79,10 @@ probe has been executed in this PR.
 
 ## Gates before live deployment / production NAS execution
 
-- [ ] Independent security review of path races, same-name old bucket replacement and marker/tombstone handling.
+- [ ] Independent security review of private pending group promotion, directory rename races, destination binding checks, same-name old bucket replacement and receipt-backed stage retirement.
 - [x] Dedicated Worker ownership, exact unit-bound confirmation, freeze/validate before mutation, lease checkpoints, and explicit single-attempt recovery: verified in synthetic focused CI. Production security review still pending.
 - [ ] No-replace / hardlink / directory fsync capability proved on the owner-approved disposable parent on the actual NAS mount using the probe above. GitHub-runner tests alone are insufficient.
-- [ ] Additional concurrency and failure-injection tests at each mutation boundary, including directory creation before witness, tombstone rename, last-marker retirement, and live mount/device drift.
+- [ ] Additional concurrency and failure-injection tests at each mutation boundary, especially private stage namespace replacement, tombstone rename and live mount/device drift. Synthetic destination swap and last-marker receipt recovery tests have passed; real filesystem behavior remains unproven.
 - [ ] Final candidate full backend regression, frontend test/typecheck/build, focused V1.6 TDD, visual checks, and all relevant safety workflows green. Earlier focused TDD passed; final PR state still pending.
 - [ ] User approval before enabling mutation permissions, merging or deploying.
 
